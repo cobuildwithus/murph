@@ -232,7 +232,7 @@ describe("handleRunnerOutboundRequest", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const response = await handleRunnerOutboundRequest(
-      new Request("http://web-control.worker/api/internal/hosted-wake/status", {
+      new Request("http://web-control.worker/api/internal/hosted-ingress/status", {
         body: JSON.stringify({
           eventId: "evt_123",
         }),

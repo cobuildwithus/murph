@@ -2,11 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import {
   createHostedArtifactStore,
-  createHostedRunnerSecretsStore,
+  createHostedRunnerSecretsReader,
 } from "../src/bundle-store.js";
 import { buildHostedStorageAad } from "../src/crypto-context.js";
 import { writeEncryptedR2Json, writeEncryptedR2Payload } from "../src/crypto.js";
 import { readHostedEmailRawMessage, writeHostedEmailRawMessage } from "../src/hosted-email.js";
+import { hostedRunnerSecretsObjectKey } from "../src/storage-paths.js";
 
 import { MemoryEncryptedR2Bucket, createTestRootKey } from "./test-helpers.js";
 import { expectOpaqueStrings } from "./object-key-assertions.js";
@@ -34,16 +35,14 @@ describe("opaque storage path rotation", () => {
       scope: "runner-secrets",
     });
 
-    const store = createHostedRunnerSecretsStore({
+    const reader = createHostedRunnerSecretsReader({
       bucket,
       key: nextKey,
       keyId: "next",
       keysById: { next: nextKey, old: oldKey },
     });
 
-    expect(await store.readRunnerSecrets(userId)).toBeNull();
-    await store.clearRunnerSecrets(userId);
-    expectOpaqueStrings(bucket.deleted, [objectKey]);
+    expect(await reader.readRunnerSecrets(userId)).toBeNull();
   });
 
   it("requires a rewrite before runner secrets survive platform root-key rotation", async () => {
@@ -53,25 +52,23 @@ describe("opaque storage path rotation", () => {
     const userId = "user_live_rotate";
     const plaintext = new TextEncoder().encode(JSON.stringify({ OPENAI_API_KEY: "secret" }));
 
-    await createHostedRunnerSecretsStore({
+    await writeRunnerSecretsObject({
       bucket,
       key: oldKey,
       keyId: "old",
-      keysById: { old: oldKey },
-    }).writeRunnerSecrets(userId, plaintext);
+      plaintext,
+      userId,
+    });
 
-    const rotatedStore = createHostedRunnerSecretsStore({
+    const rotatedReader = createHostedRunnerSecretsReader({
       bucket,
       key: nextKey,
       keyId: "next",
       keysById: { next: nextKey, old: oldKey },
     });
 
-    expect(await rotatedStore.readRunnerSecrets(userId)).toBeNull();
-
-    await rotatedStore.clearRunnerSecrets(userId);
-    expect(bucket.deleted).toHaveLength(1);
-    expect(await createHostedRunnerSecretsStore({
+    expect(await rotatedReader.readRunnerSecrets(userId)).toBeNull();
+    expect(await createHostedRunnerSecretsReader({
       bucket,
       key: oldKey,
       keyId: "old",
@@ -200,3 +197,27 @@ describe("opaque storage path rotation", () => {
     })).toBeNull();
   });
 });
+
+async function writeRunnerSecretsObject(input: {
+  bucket: MemoryEncryptedR2Bucket;
+  key: Uint8Array;
+  keyId: string;
+  plaintext: Uint8Array;
+  userId: string;
+}): Promise<void> {
+  const objectKey = await hostedRunnerSecretsObjectKey(input.key, input.userId);
+
+  await writeEncryptedR2Payload({
+    aad: buildHostedStorageAad({
+      key: objectKey,
+      purpose: "runner-secrets",
+      userId: input.userId,
+    }),
+    bucket: input.bucket,
+    cryptoKey: input.key,
+    key: objectKey,
+    keyId: input.keyId,
+    plaintext: input.plaintext,
+    scope: "runner-secrets",
+  });
+}

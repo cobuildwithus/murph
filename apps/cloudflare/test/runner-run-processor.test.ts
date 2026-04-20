@@ -7,11 +7,11 @@ import type {
 import type { HostedAssistantDeliveryOutcome } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 
 import {
-  RunnerWakeProcessor,
+  RunnerRunProcessor,
   recordHostedRunBreadcrumbInWebBestEffort,
   recordHostedRunPhaseLogInWebBestEffort,
   summarizeHostedAssistantDeliveryOutcomes,
-} from "../src/user-runner/runner-wake-processor.ts";
+} from "../src/user-runner/runner-run-processor.ts";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -120,6 +120,7 @@ describe("recordHostedRunBreadcrumbInWebBestEffort", () => {
           runId: "run-456",
           startedAt: new Date(Date.now() - 500).toISOString(),
         },
+        runToken: "run-token-456",
         userId: "user-456",
         wakeEventId: "wake-456",
       }),
@@ -186,6 +187,7 @@ describe("recordHostedRunPhaseLogInWebBestEffort", () => {
         runId: "run-999",
         startedAt: new Date(Date.now() - 250).toISOString(),
       },
+      runToken: "run-token-999",
       userId: "user-999",
       wakeEventId: "wake-999",
     });
@@ -202,12 +204,12 @@ describe("recordHostedRunPhaseLogInWebBestEffort", () => {
   });
 });
 
-describe("RunnerWakeProcessor.executeRunDrain", () => {
-  it("always requires finalize for committed snapshots, even without delivery effects", async () => {
+describe("RunnerRunProcessor.executeRunDrain", () => {
+  it("always requires finalize for prepared snapshots, even without delivery effects", async () => {
     const beginWakeRun = vi.fn().mockResolvedValue(undefined);
     const completeWakeRun = vi.fn().mockResolvedValue(undefined);
 
-    const processor = new RunnerWakeProcessor({
+    const processor = new RunnerRunProcessor({
       applyHostedTransition: vi.fn(),
       bucket: {} as never,
       ensureRunnerStores: vi.fn(),
@@ -228,14 +230,14 @@ describe("RunnerWakeProcessor.executeRunDrain", () => {
         failWakeRun: vi.fn(),
         recordRunPhase: vi.fn().mockResolvedValue({}),
       },
-      wakeScheduler: {},
+      runtimeAlarmScheduler: {},
     } as never);
 
     (processor as any).advanceRunPhase = vi.fn().mockResolvedValue({});
     (processor as any).invokeRunner = vi.fn().mockResolvedValue({
       committedAssistantDeliveryEffects: [],
       committedGatewayProjectionSnapshot: null,
-      phase: "committed",
+      phase: "prepared",
       result: {
         bundle: "bundle-encoded",
         result: {
@@ -274,6 +276,7 @@ describe("RunnerWakeProcessor.executeRunDrain", () => {
     };
 
     const result = await processor.executeRunDrain({
+      currentBundleRef: null,
       events: [],
       primaryWake,
       run,

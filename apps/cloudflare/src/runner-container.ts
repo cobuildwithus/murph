@@ -1,6 +1,6 @@
 import { Container, type OutboundHandlerContext } from "@cloudflare/containers";
-import { computeHostedRunElapsedMs } from "@murphai/assistant-runtime";
 import {
+  computeHostedRunElapsedMs,
   parseHostedAssistantRuntimeJobInput,
   type HostedAssistantRuntimeJobInput,
   type HostedAssistantRuntimeJobResult,

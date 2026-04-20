@@ -1,5 +1,5 @@
 import {
-  createHostedRunnerSecretsStore,
+  createHostedRunnerSecretsReader,
   type R2BucketLike,
 } from "../bundle-store.js";
 import {
@@ -17,13 +17,13 @@ export class RunnerSecretsService {
 
   async readRunnerSecrets(userId: string): Promise<Record<string, string>> {
     return decodeHostedRunnerSecretsPayload(
-      await this.createRunnerSecretsStore().readRunnerSecrets(userId),
+      await this.createRunnerSecretsReader().readRunnerSecrets(userId),
       this.allowedRunnerSecretsSource,
     );
   }
 
-  private createRunnerSecretsStore() {
-    return createHostedRunnerSecretsStore({
+  private createRunnerSecretsReader() {
+    return createHostedRunnerSecretsReader({
       bucket: this.bucket,
       key: this.runnerSecretsEncryptionKey,
       keyId: this.runnerSecretsEncryptionKeyId,

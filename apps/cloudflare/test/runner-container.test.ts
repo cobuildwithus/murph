@@ -1,5 +1,5 @@
 import type { HostedAssistantRuntimeJobResult } from "@murphai/assistant-runtime";
-import { buildHostedExecutionAssistantCronTickWake } from "@murphai/hosted-execution";
+import { buildHostedExecutionMemberActivatedWake } from "@murphai/hosted-execution";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -1167,11 +1167,15 @@ function createRunnerRequest(
     };
   } = {},
 ) {
-  const wake = buildHostedExecutionAssistantCronTickWake({
+  const wake = buildHostedExecutionMemberActivatedWake({
     eventId,
+    memberChannels: {
+      email: false,
+      linq: false,
+      telegram: false,
+    },
+    memberId: "member_123",
     occurredAt: "2026-03-27T00:00:00.000Z",
-    reason: "manual",
-    userId: "member_123",
   });
   return {
     bundle: null,

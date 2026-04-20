@@ -1,7 +1,7 @@
 import { PassThrough } from "node:stream";
 import { EventEmitter } from "node:events";
 
-import { buildHostedExecutionAssistantCronTickWake } from "@murphai/hosted-execution";
+import { buildHostedExecutionMemberActivatedWake } from "@murphai/hosted-execution";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const spawnMock = vi.fn();
@@ -17,11 +17,15 @@ describe("runHostedExecutionJobIsolatedDetailed", () => {
   });
 
   function createCronJobRequest(eventId: string) {
-    const wake = buildHostedExecutionAssistantCronTickWake({
+    const wake = buildHostedExecutionMemberActivatedWake({
       eventId,
+      memberChannels: {
+        email: false,
+        linq: false,
+        telegram: false,
+      },
+      memberId: "member_123",
       occurredAt: "2026-04-08T00:00:00.000Z",
-      reason: "manual",
-      userId: "member_123",
     });
 
     return {

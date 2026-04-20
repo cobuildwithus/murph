@@ -50,15 +50,15 @@ import {
 } from "./web-control-plane.ts";
 import { RunnerBundleSync } from "./user-runner/runner-bundle-sync.js";
 import {
-  RunnerWakeProcessor,
+  RunnerRunProcessor,
   HostedExecutionObsoleteRunResultError,
   recordHostedRunBreadcrumbInWebBestEffort,
   type RunnerUserStores,
-} from "./user-runner/runner-wake-processor.js";
+} from "./user-runner/runner-run-processor.js";
 import type { RunnerLeaseOwnerInput } from "./user-runner/runner-state-store.js";
 import { RunnerSecretsService } from "./user-runner/runner-secrets.js";
 import { RunnerStateStore } from "./user-runner/runner-state-store.js";
-import { RunnerWakeScheduler } from "./user-runner/runner-wake-scheduler.js";
+import { RunnerRuntimeAlarmScheduler } from "./user-runner/runner-runtime-alarm-scheduler.js";
 import {
   toUserStatus,
   type DurableObjectStateLike,
@@ -93,11 +93,11 @@ function emitHostedUserKeyAuditLog(record: HostedUserKeyAuditRecord): void {
 }
 
 export class HostedUserRunner {
-  private readonly wakeProcessor: RunnerWakeProcessor;
+  private readonly runProcessor: RunnerRunProcessor;
   private readonly eventTransitionLocks = new Map<string, Promise<void>>();
   private readonly stateStore: RunnerStateStore;
   private readonly runnerContainerNamespace: HostedExecutionContainerNamespaceLike | null;
-  private readonly wakeScheduler: RunnerWakeScheduler;
+  private readonly runtimeAlarmScheduler: RunnerRuntimeAlarmScheduler;
   private readonly userKeyStore: ReturnType<typeof createHostedUserKeyStore>;
   private runnerStores: RunnerUserStores | null = null;
   private userKeyEnvelopeLock: Promise<void> | null = null;
@@ -132,8 +132,8 @@ export class HostedUserRunner {
     });
     this.userKeyStore = userKeyStore;
     this.stateStore = new RunnerStateStore(state);
-    this.wakeScheduler = new RunnerWakeScheduler(this.stateStore, state);
-    this.wakeProcessor = new RunnerWakeProcessor({
+    this.runtimeAlarmScheduler = new RunnerRuntimeAlarmScheduler(this.stateStore, state);
+    this.runProcessor = new RunnerRunProcessor({
       applyHostedTransition: <T>(input: {
         eventId: string;
         gatewayProjectionSnapshot?: GatewayProjectionSnapshot | null;
@@ -148,7 +148,7 @@ export class HostedUserRunner {
       readRunnerRuntimeConfigSource: () => this.readRunnerRuntimeConfigSource(),
       runnerContainerNamespace: this.runnerContainerNamespace,
       runnerRuntimeEnvSource: this.runnerRuntimeEnvSource,
-      wakeScheduler: this.wakeScheduler,
+      runtimeAlarmScheduler: this.runtimeAlarmScheduler,
     });
   }
 
@@ -187,7 +187,6 @@ export class HostedUserRunner {
         crypto.rootKey,
         crypto.rootKeyId,
         crypto.keysById,
-        this.stateStore,
       ),
       crypto,
       gatewayCache: new HostedGatewayProjectionCache(),
@@ -281,7 +280,7 @@ export class HostedUserRunner {
       };
     }
 
-    await this.wakeScheduler.syncNextWake({
+    await this.runtimeAlarmScheduler.syncNextWake({
       preferredWakeAt: new Date().toISOString(),
     });
 
@@ -330,7 +329,7 @@ export class HostedUserRunner {
 
       committedSeq = acquired.cursor.committedSeq;
       await this.syncRunnerBundleCacheToCursor(acquired.cursor.snapshotRef);
-      await this.wakeScheduler.syncNextWake({
+      await this.runtimeAlarmScheduler.syncNextWake({
         preferredWakeAt: acquired.cursor.nextRuntimeWakeAt ?? null,
       });
 
@@ -357,7 +356,7 @@ export class HostedUserRunner {
 
       committedSeq = outcome.cursor.committedSeq;
       await this.syncRunnerBundleCacheToCursor(outcome.cursor.snapshotRef);
-      await this.wakeScheduler.syncNextWake({
+      await this.runtimeAlarmScheduler.syncNextWake({
         preferredWakeAt: outcome.cursor.nextRuntimeWakeAt ?? null,
       });
 
@@ -501,7 +500,8 @@ export class HostedUserRunner {
     }
 
     await this.ensureManagedUserCryptoForActivationWakeIfNeeded(primaryWake);
-    const execution = await this.wakeProcessor.executeRunDrain({
+    const execution = await this.runProcessor.executeRunDrain({
+      currentBundleRef: this.resolveAcquiredRunInputSnapshotRef(input.acquired),
       events: resolved.events,
       primaryWake,
       run,
@@ -620,7 +620,7 @@ export class HostedUserRunner {
       if (event.wake.kind === "runtime.timer") {
         continue;
       }
-      await this.wakeProcessor.cleanupTransientWakeDataBestEffortForRunDrain(
+      await this.runProcessor.cleanupTransientWakeDataBestEffortForRunDrain(
         event.wake,
       );
     }
@@ -663,7 +663,8 @@ export class HostedUserRunner {
       runToken,
       userId: input.userId,
     });
-    const execution = await this.wakeProcessor.finalizeRunDrain({
+    const execution = await this.runProcessor.finalizeRunDrain({
+      currentBundleRef: this.resolveAcquiredRunPreparedSnapshotRef(input.acquired),
       primaryWake: createRuntimeTimerSyntheticWake({
         acquiredAt: run.acquiredAt,
         runId: run.id,
@@ -916,7 +917,7 @@ export class HostedUserRunner {
 
       let sharePack: HostedRuntimeDrainEvent["sharePack"] = null;
       try {
-        sharePack = await this.wakeProcessor.readRunDrainSharePack(hostedWake);
+        sharePack = await this.runProcessor.readRunDrainSharePack(hostedWake);
       } catch (error) {
         emitHostedExecutionStructuredLog({
           component: "hosted.runner",
@@ -1040,6 +1041,24 @@ export class HostedUserRunner {
       "Hosted run cursor snapshotRef",
     );
     await this.stateStore.syncBundleRefCache(nextBundleRef);
+  }
+
+  private resolveAcquiredRunInputSnapshotRef(
+    acquired: HostedRunAcquireResponse,
+  ): HostedExecutionCursorState["snapshotRef"] {
+    return parseHostedExecutionCursorSnapshotRef(
+      acquired.run?.inputSnapshotRef ?? acquired.cursor.snapshotRef,
+      "Hosted acquired run inputSnapshotRef",
+    );
+  }
+
+  private resolveAcquiredRunPreparedSnapshotRef(
+    acquired: HostedRunAcquireResponse,
+  ): HostedExecutionCursorState["snapshotRef"] {
+    return parseHostedExecutionCursorSnapshotRef(
+      acquired.cursor.snapshotRef,
+      "Hosted acquired run prepared snapshotRef",
+    );
   }
 
   private async composeUserStatus(record: RunnerStateRecord): Promise<HostedExecutionUserStatus> {
@@ -1252,7 +1271,7 @@ export class HostedUserRunner {
   }
 
   private async scheduleHostedWakeRetryAlarm(): Promise<void> {
-    await this.wakeScheduler.syncNextWake({
+    await this.runtimeAlarmScheduler.syncNextWake({
       preferredWakeAt: new Date(Date.now() + HOSTED_WAKE_NUDGE_RETRY_DELAY_MS).toISOString(),
     });
   }

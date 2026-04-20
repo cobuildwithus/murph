@@ -56,7 +56,7 @@ const ENCRYPTED_SECRET_PREFIX = "hbds";
 const AES_256_GCM = "aes-256-gcm";
 const GCM_IV_BYTES = 12;
 const HOSTED_WAKE_SCOPE_SALT = Buffer.from("murph.hosted.device-sync.secret.v1", "utf8");
-const HOSTED_WAKE_FETCH_PROOF_CONTEXT = "murph.hosted-wake.fetch-proof.v1:";
+const HOSTED_WAKE_FETCH_PROOF_CONTEXT = "murph.hosted-ingress.fetch-proof.v1:";
 const TEST_HOSTED_WAKE_FETCH_PROOF_NOW = new Date("2026-03-26T12:00:00.000Z");
 const TEST_HOSTED_WAKE_FETCH_PROOF_TTL_SECONDS = 5 * 60;
 
@@ -65,7 +65,7 @@ interface TestHostedWakeFetchProofClaims {
   fetchedCommittedSeq: string;
   fetchedCursorVersion: string;
   iat: number;
-  kind: "hosted-wake-fetch-proof";
+  kind: "hosted-ingress-fetch-proof";
   userId: string;
   wakeEventId: string;
   wakeId: string;
@@ -116,7 +116,7 @@ export function issueTestHostedWakeFetchProof(input: {
     fetchedCommittedSeq: input.cursor.committedSeq,
     fetchedCursorVersion: input.cursor.version,
     iat: nowSeconds,
-    kind: "hosted-wake-fetch-proof",
+    kind: "hosted-ingress-fetch-proof",
     userId: input.wake.userId,
     wakeEventId: input.wake.eventId,
     wakeId: input.wake.id,
@@ -168,7 +168,7 @@ export function verifyTestHostedWakeFetchProof(input: {
 
   const typedClaims = claims as Partial<TestHostedWakeFetchProofClaims>;
 
-  return typedClaims.kind === "hosted-wake-fetch-proof"
+  return typedClaims.kind === "hosted-ingress-fetch-proof"
     && typedClaims.userId === input.wake.userId
     && typedClaims.wakeEventId === input.wake.eventId
     && typedClaims.wakeId === input.wake.id
@@ -179,8 +179,8 @@ export function verifyTestHostedWakeFetchProof(input: {
     && typeof typedClaims.exp === "number";
 }
 
-export function encryptTestHostedWakePayload(input: {
-  field?: "hosted-wake-inline-payload" | "hosted-wake-ref-payload";
+export function encryptTestHostedIngressPayload(input: {
+  field?: "hosted-ingress-inline-payload" | "hosted-ingress-ref-payload";
   userId: string;
   value: unknown;
 }): { payloadBytes: number; payloadCiphertext: string } {
@@ -190,12 +190,12 @@ export function encryptTestHostedWakePayload(input: {
     AES_256_GCM,
     deriveHostedSecretScopeKey(
       TEST_HOSTED_WAKE_ENCRYPTION_KEY_BYTES,
-      `hosted-wake-payload:${input.field ?? "hosted-wake-ref-payload"}`,
+      `hosted-ingress-payload:${input.field ?? "hosted-ingress-ref-payload"}`,
     ),
     iv,
   );
   cipher.setAAD(buildHostedWakeFieldAad({
-    field: input.field ?? "hosted-wake-ref-payload",
+    field: input.field ?? "hosted-ingress-ref-payload",
     userId: input.userId,
   }));
   const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
@@ -220,7 +220,7 @@ function buildHostedWakeFieldAad(input: {
   return Buffer.from(JSON.stringify({
     field: input.field,
     memberId: input.userId,
-    purpose: "hosted-wake-payload",
+    purpose: "hosted-ingress-payload",
   }), "utf8");
 }
 

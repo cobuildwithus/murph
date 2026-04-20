@@ -6,14 +6,18 @@ import {
 } from "@murphai/assistant-runtime/hosted-assistant-env";
 
 import { buildHostedWorkerSecretsPayload } from "../scripts/deploy-automation/secrets.ts";
-import { buildHostedRunnerContainerEnv } from "../src/hosted-env-policy.ts";
+import {
+  buildHostedRunnerContainerEnv,
+  summarizeHostedRunnerForwardedEnvLogCategories,
+  summarizeHostedRunnerSecretLogCategories,
+} from "../src/hosted-env-policy.ts";
 
 const requiredWorkerSecrets = {
   HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK: "automation-private",
   HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK: "automation-public",
   HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "platform-envelope",
   HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK: "recovery-public",
-  HOSTED_WAKE_ENCRYPTION_KEY: "hosted-wake-encryption",
+  HOSTED_WAKE_ENCRYPTION_KEY: "hosted-ingress-encryption",
   HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "webhook-private",
 } satisfies Record<string, string>;
 
@@ -36,6 +40,32 @@ describe("buildHostedRunnerContainerEnv", () => {
     });
 
     expect(env.VERCEL_AI_API_KEY).toBe("vercel-secret");
+  });
+});
+
+describe("hosted runner log categories", () => {
+  it("preserves the forwarded env category summaries used by runner logging", () => {
+    expect(summarizeHostedRunnerForwardedEnvLogCategories({
+      MURPH_WEB_SEARCH_TIMEOUT_MS: "5000",
+      OPENAI_API_KEY: "openai-secret",
+      TELEGRAM_BOT_TOKEN: "telegram-secret",
+    })).toEqual({
+      assistantConfigured: true,
+      hostedEmailConfigured: false,
+      linqConfigured: false,
+      parserToolingConfigured: false,
+      telegramConfigured: true,
+      webSearchConfigured: false,
+    });
+  });
+
+  it("preserves the runner secret category summaries used by runner logging", () => {
+    expect(summarizeHostedRunnerSecretLogCategories({
+      CUSTOM_API_KEY: "custom-secret",
+      OPENAI_API_KEY: "openai-secret",
+    })).toEqual({
+      modelCredentialConfigured: true,
+    });
   });
 });
 

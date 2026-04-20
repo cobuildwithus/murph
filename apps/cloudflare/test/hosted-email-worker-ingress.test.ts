@@ -1,4 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+const hostedExecutionMocks = vi.hoisted(() => ({
+  emitHostedExecutionStructuredLog: vi.fn(),
+}));
+
+vi.mock("@murphai/hosted-execution", async () => {
+  const actual = await vi.importActual<typeof import("@murphai/hosted-execution")>(
+    "@murphai/hosted-execution",
+  );
+
+  return {
+    ...actual,
+    emitHostedExecutionStructuredLog: hostedExecutionMocks.emitHostedExecutionStructuredLog,
+  };
+});
+
 import { HOSTED_INGRESS_PAYLOAD_SCHEMA } from "@murphai/hosted-execution";
 
 const mocks = vi.hoisted(() => ({
@@ -157,6 +172,18 @@ describe("hosted email worker ingress", () => {
     expect(mocks.resolveUserRunnerStub).not.toHaveBeenCalled();
     expect(mocks.resolveHostedExecutionUserCryptoContext).not.toHaveBeenCalled();
     expect(listHostedEmailMessageKeys(bucket)).toEqual([]);
+    expect(hostedExecutionMocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "hosted.email",
+        details: {
+          hasEnvelopeFrom: true,
+          hasHeaderFrom: true,
+          hasRecipientAddress: true,
+          reason: "ingress-route-miss-rejected",
+        },
+        level: "warn",
+      }),
+    );
   });
 
   it("persists and dispatches alias ingress only after the web-owned verified-email authorization succeeds", async () => {
