@@ -8,14 +8,15 @@ export interface Expert {
 }
 
 export interface Study {
-  type: "OBS" | "RCT" | "MA";
+  type: "OBS" | "RCT" | "MA" | "SRC";
   title: string;
   authors: string;
   journal: string;
-  year: number;
-  participants: number;
-  duration: string;
+  year?: number;
+  participants?: number;
+  duration?: string;
   finding: string;
+  url?: string;
 }
 
 export interface TimelineEvent {
@@ -68,11 +69,9 @@ export interface Experiment {
   whyItWorks: string;
   experts: Expert[];
   researchStats: {
-    studies: number;
-    participants: number;
-    yearsFollowUp: number;
-    evidenceLevel: string;
-  };
+    label: string;
+    value: string | number;
+  }[];
   studies: Study[];
   podcastLinks?: { label: string; url: string }[];
   safety: {
@@ -91,6 +90,13 @@ export interface Experiment {
   }[];
   trends: TrendData[];
   timeline: TimelineEvent[];
+  commons?: {
+    catalogHash: string;
+    key: string;
+    pageRevisionId: string;
+    recipeHash: string | null;
+    runSpecRevisionId: string | null;
+  };
   nextStep?: {
     title: string;
     when: string;

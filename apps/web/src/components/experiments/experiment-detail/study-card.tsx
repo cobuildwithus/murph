@@ -13,6 +13,7 @@ export function StudyCard({
   year,
   participants,
   duration,
+  url,
   finding,
   last,
 }: StudyCardProps) {
@@ -29,10 +30,25 @@ export function StudyCard({
           {title}
         </span>
         <span className="text-xs/4 text-chart-5">
-          {authors} · {journal} · {year} · n={participants.toLocaleString()} ·{" "}
-          {duration}
+          {[
+            authors,
+            journal,
+            year,
+            participants ? `n=${participants.toLocaleString()}` : null,
+            duration,
+          ].filter(Boolean).join(" · ")}
         </span>
         <span className="mt-0.5 text-xs/4 text-muted-foreground/70">{finding}</span>
+        {url ? (
+          <a
+            href={url}
+            className="mt-1 text-xs/4 text-primary underline-offset-4 hover:underline"
+            rel="noreferrer"
+            target="_blank"
+          >
+            Source ↗
+          </a>
+        ) : null}
       </div>
     </div>
   );

@@ -14,8 +14,24 @@ export function ResultsTab({ experiment }: ResultsTabProps) {
   const isActive = experiment.status === "active";
   const isFinished = experiment.status === "finished";
 
+  const hasPersonalResultData =
+    experiment.signals.length > 0 ||
+    experiment.trends.length > 0 ||
+    experiment.timeline.length > 0;
+
   return (
     <div className="flex flex-col gap-10">
+      {!hasPersonalResultData && !isFinished && (
+        <div className="rounded-xl border border-border bg-card p-6">
+          <h3 className="font-serif text-xl font-semibold text-foreground">
+            No personal results yet
+          </h3>
+          <p className="mt-2 text-sm leading-5 text-muted-foreground">
+            This page is showing Health Commons protocol data. Once a private experiment run is started, baseline, session, and outcome summaries can bind to the exact protocol revision here.
+          </p>
+        </div>
+      )}
+
       {isActive && (
         <ExperimentProgress
           baselineDays={experiment.baselineDays}
@@ -47,29 +63,33 @@ export function ResultsTab({ experiment }: ResultsTabProps) {
         </div>
       )}
 
-      <div className="grid gap-4 md:grid-cols-3">
-        {experiment.signals.map((signal) => (
-          <MetricCard
-            key={signal.label}
-            label={signal.label}
-            value={signal.value}
-            unit={signal.unit}
-            delta={signal.delta}
-            direction={signal.direction}
-            baseline={signal.baseline}
-            expected={signal.expected}
-          />
-        ))}
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-[1fr_340px]">
-        <div className="flex flex-col gap-4">
-          {experiment.trends.map((trend) => (
-            <TrendChart key={trend.label} data={trend} />
+      {experiment.signals.length > 0 && (
+        <div className="grid gap-4 md:grid-cols-3">
+          {experiment.signals.map((signal) => (
+            <MetricCard
+              key={signal.label}
+              label={signal.label}
+              value={signal.value}
+              unit={signal.unit}
+              delta={signal.delta}
+              direction={signal.direction}
+              baseline={signal.baseline}
+              expected={signal.expected}
+            />
           ))}
         </div>
-        <ExperimentTimeline events={experiment.timeline} />
-      </div>
+      )}
+
+      {(experiment.trends.length > 0 || experiment.timeline.length > 0) && (
+        <div className="grid gap-4 md:grid-cols-[1fr_340px]">
+          <div className="flex flex-col gap-4">
+            {experiment.trends.map((trend) => (
+              <TrendChart key={trend.label} data={trend} />
+            ))}
+          </div>
+          {experiment.timeline.length > 0 ? <ExperimentTimeline events={experiment.timeline} /> : null}
+        </div>
+      )}
 
       {isActive && (
         <div className="flex flex-col gap-2">

@@ -34,6 +34,9 @@ describe("workspace source resolution", () => {
     expect(resolveAliasReplacement(aliases, "@murphai/runtime-state/node/assistant-usage")).toBe(
       path.join(repoRoot, "packages/runtime-state/src/node/assistant-usage.ts"),
     );
+    expect(resolveAliasReplacement(aliases, "@murphai/health-commons/generated/catalog.json")).toBe(
+      path.join(repoRoot, "packages/health-commons/generated/catalog.json"),
+    );
   });
 
   it("does not alias the root specifier for subpath-only workspace packages", () => {
@@ -77,5 +80,5 @@ function resolveAliasReplacement(
   specifier: string,
 ): string | null {
   const alias = aliases.find((candidate) => candidate.find.test(specifier));
-  return alias?.replacement ?? null;
+  return alias ? specifier.replace(alias.find, alias.replacement) : null;
 }

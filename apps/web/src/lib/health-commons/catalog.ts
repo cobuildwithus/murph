@@ -1,0 +1,119 @@
+import {
+  healthCommonsCatalogSchema,
+  type HealthCommonsCatalog,
+  type HealthCommonsCatalogEntity,
+  type HealthCommonsEntityType,
+  type HealthCommonsRelationType,
+} from "@murphai/contracts/health-commons";
+import healthCommonsCatalogJson from "@murphai/health-commons/generated/catalog.json";
+
+export type HealthCommonsEntity = HealthCommonsCatalogEntity;
+
+export interface HealthCommonsCatalogReader {
+  catalogHash: string;
+  findByKey(key: string): HealthCommonsEntity | null;
+  findByRouteId(input: {
+    entityType: HealthCommonsEntityType;
+    routeId: string;
+  }): HealthCommonsEntity | null;
+  findBySlug(slug: string): HealthCommonsEntity | null;
+  listRelated(input: {
+    entity: HealthCommonsEntity;
+    relationTypes?: readonly HealthCommonsRelationType[];
+    entityTypes?: readonly HealthCommonsEntityType[];
+  }): HealthCommonsEntity[];
+}
+
+export const healthCommonsCatalog = createHealthCommonsCatalogReader(
+  healthCommonsCatalogSchema.parse(healthCommonsCatalogJson),
+);
+
+export function createHealthCommonsCatalogReader(
+  catalog: HealthCommonsCatalog,
+): HealthCommonsCatalogReader {
+  const entitiesByKey = new Map(catalog.entities.map((entity) => [entity.key, entity]));
+  const entitiesBySlug = new Map(catalog.entities.map((entity) => [entity.slug, entity]));
+  const entitiesByTrailingSlug = new Map<string, HealthCommonsEntity[]>();
+  const redirectsBySource = new Map(catalog.redirects.map((redirect) => [redirect.from, redirect.to]));
+
+  for (const entity of catalog.entities) {
+    const trailingSlug = entity.slug.split("/").at(-1);
+    if (!trailingSlug) {
+      continue;
+    }
+
+    const existing = entitiesByTrailingSlug.get(trailingSlug) ?? [];
+    existing.push(entity);
+    entitiesByTrailingSlug.set(trailingSlug, existing);
+  }
+
+  const resolveKey = (key: string): string => {
+    let current = key;
+    const seen = new Set<string>();
+
+    while (redirectsBySource.has(current) && !seen.has(current)) {
+      seen.add(current);
+      current = redirectsBySource.get(current) ?? current;
+    }
+
+    return current;
+  };
+
+  const findByKey = (key: string): HealthCommonsEntity | null =>
+    entitiesByKey.get(resolveKey(key)) ?? null;
+
+  return {
+    catalogHash: catalog.catalogHash,
+    findByKey,
+    findByRouteId({ entityType, routeId }) {
+      const normalizedRouteId = normalizeRouteId(routeId);
+      const keyCandidate = `${entityType}:${normalizedRouteId}`;
+      const byKey = findByKey(keyCandidate);
+      if (byKey) {
+        return byKey;
+      }
+
+      const bySlug = this.findBySlug(normalizedRouteId);
+      if (bySlug) {
+        return bySlug;
+      }
+
+      const byTrailingSlug = (entitiesByTrailingSlug.get(normalizedRouteId) ?? []).filter(
+        (entity) => entity.entityType === entityType,
+      );
+
+      return byTrailingSlug.length === 1 ? byTrailingSlug[0] : null;
+    },
+    findBySlug(slug: string) {
+      const normalizedSlug = normalizeRouteId(slug);
+      return entitiesBySlug.get(normalizedSlug) ?? null;
+    },
+    listRelated({ entity, entityTypes, relationTypes }) {
+      const relationTypeSet: ReadonlySet<string> | null = relationTypes
+        ? new Set(relationTypes)
+        : null;
+      const entityTypeSet = entityTypes ? new Set(entityTypes) : null;
+
+      return (entity.relations ?? []).flatMap((relation) => {
+        if (relationTypeSet && !relationTypeSet.has(relation.type)) {
+          return [];
+        }
+
+        const target = findByKey(relation.target);
+        if (!target) {
+          return [];
+        }
+
+        if (entityTypeSet && !entityTypeSet.has(target.entityType)) {
+          return [];
+        }
+
+        return [target];
+      });
+    },
+  };
+}
+
+function normalizeRouteId(value: string): string {
+  return decodeURIComponent(value).trim().replace(/^\/+|\/+$/gu, "");
+}

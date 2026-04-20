@@ -48,7 +48,7 @@ export function ExpectedSignalCard({
           {arrows[direction]}
         </span>
         <span className="text-sm/4.5 font-semibold text-primary">
-          {expected} expected
+          {expected}
         </span>
       </div>
       <p className="text-[12px] leading-[150%] text-chart-5">
