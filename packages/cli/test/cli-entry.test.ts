@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { afterEach, test, vi } from "vitest";
 
@@ -48,7 +49,10 @@ function mockCliActionModules(input: {
     ),
     ...input.operatorConfigModule,
   }));
-  vi.doMock("@murphai/setup-cli/setup-cli", () => input.setupCliModule);
+  vi.doMock("@murphai/setup-cli/setup-cli", () => ({
+    createSetupServices: vi.fn(() => ({ setupHost: vi.fn(), setupMacos: vi.fn() })),
+    ...input.setupCliModule,
+  }));
   vi.doMock("@murphai/operator-config/setup-runtime-env", () => ({
     SETUP_RUNTIME_ENV_NOTICE: "Set the missing wearable environment variables.",
     ...input.setupRuntimeEnvModule,
@@ -476,6 +480,73 @@ test("runMurphCliAction reuses setup results for wearable launches and assistant
     ["\nOpening OURA connect flow in your browser.\n\n"],
     ["\nOpening Murph assistant chat. Type /exit to quit.\n\n"],
   ]);
+});
+
+test("runMurphCliAction passes the published CLI bin path into setup construction", async () => {
+  const serve = vi.fn(async () => undefined);
+  const setupCliServe = vi.fn(async () => undefined);
+  const createdServices = { setupHost: vi.fn(), setupMacos: vi.fn() };
+  const createSetupCli = vi.fn(() => ({
+    serve: setupCliServe,
+  }));
+  const createSetupServices = vi.fn(() => createdServices);
+  const expectedCliBinPath = path.resolve(
+    path.dirname(fileURLToPath(new URL("../src/cli-entry.ts", import.meta.url))),
+    "../dist/bin.js",
+  );
+
+  mockCliActionModules({
+    cli: { serve },
+    operatorConfigModule: {
+      applyDefaultVaultToArgs: vi.fn(),
+      expandConfiguredVaultPath: vi.fn(),
+      resolveDefaultVault: vi.fn(async () => null),
+      resolveOperatorHomeDirectory: vi.fn(() => "/operator-home"),
+    },
+    setupCliModule: {
+      createSetupCli,
+      createSetupServices,
+      detectSetupProgramName: vi.fn(() => "murph"),
+      formatSetupWearableLabel: vi.fn((value: string) => value),
+      isSetupInvocation: vi.fn(() => true),
+      listSetupPendingWearables: vi.fn(() => []),
+      listSetupReadyWearables: vi.fn(() => []),
+      resolveSetupPostLaunchAction: vi.fn(() => null),
+    },
+  });
+
+  await runMurphCliAction(["onboard", "--dryRun", "--vault", "./vault"], {
+    argv0: "murph",
+  });
+
+  assert.equal(createSetupServices.mock.calls.length, 1);
+  const createSetupServicesCalls = createSetupServices.mock.calls as unknown as unknown[][];
+  const createSetupServicesCall = createSetupServicesCalls[0];
+  assert.ok(createSetupServicesCall);
+  const resolveCliBinPath = (
+    createSetupServicesCall[0] as unknown as { resolveCliBinPath: () => string }
+  ).resolveCliBinPath;
+  assert.equal(typeof resolveCliBinPath, "function");
+  assert.equal(resolveCliBinPath?.(), expectedCliBinPath);
+  assert.equal(createSetupCli.mock.calls.length, 1);
+  const createSetupCliCalls = createSetupCli.mock.calls as unknown as unknown[][];
+  const createSetupCliCall = createSetupCliCalls[0];
+  assert.ok(createSetupCliCall);
+  const createSetupCliInput = createSetupCliCall[0] as unknown as {
+    commandName: string;
+    onSetupSuccess: unknown;
+    services: typeof createdServices;
+  };
+  assert.deepEqual(createSetupCliCall, [
+    {
+      commandName: "murph",
+      onSetupSuccess: createSetupCliInput.onSetupSuccess,
+      services: createdServices,
+    },
+  ]);
+  assert.equal(typeof createSetupCliInput.onSetupSuccess, "function");
+  assert.equal(setupCliServe.mock.calls.length, 1);
+  assert.equal(serve.mock.calls.length, 0);
 });
 
 test("runMurphCliAction starts assistant automation when setup requests assistant-run", async () => {

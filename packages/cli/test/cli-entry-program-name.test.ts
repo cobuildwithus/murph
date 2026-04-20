@@ -33,6 +33,7 @@ vi.mock('@murphai/operator-config/operator-config', () => ({
 
 vi.mock('@murphai/setup-cli/setup-cli', () => ({
   createSetupCli: vi.fn(() => ({ serve: vi.fn(async () => undefined) })),
+  createSetupServices: vi.fn(() => ({ setupHost: vi.fn(), setupMacos: vi.fn() })),
   detectSetupProgramName,
   formatSetupWearableLabel: vi.fn((wearable: string) => wearable),
   isSetupInvocation,

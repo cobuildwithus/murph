@@ -1,4 +1,5 @@
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import type { Cli } from 'incur'
 
 import { installSqliteExperimentalWarningFilterWithOptions } from '@murphai/runtime-state/node'
@@ -43,6 +44,7 @@ export async function runMurphCliAction(
   } = operatorConfigModule
   const {
     createSetupCli,
+    createSetupServices,
     detectSetupProgramName,
     formatSetupWearableLabel,
     isSetupInvocation,
@@ -66,6 +68,9 @@ export async function runMurphCliAction(
     }
     const setupCli = createSetupCli({
       commandName: programName,
+      services: createSetupServices({
+        resolveCliBinPath: resolvePublishedCliBinPath,
+      }),
       onSetupSuccess(context) {
         successfulSetup.current = context
       },
@@ -162,6 +167,15 @@ export function createCliServeOptions(
     env: process.env,
     ...(exit ? { exit: (code: number) => exit(code) } : {}),
   }
+}
+
+function resolvePublishedCliBinPath(): string {
+  const moduleDirectory = path.dirname(fileURLToPath(import.meta.url))
+  const moduleBaseName = path.basename(moduleDirectory)
+
+  return moduleBaseName === 'src'
+    ? path.resolve(moduleDirectory, '../dist/bin.js')
+    : path.resolve(moduleDirectory, 'bin.js')
 }
 
 function prepareProgramArgsForExecution(input: {
