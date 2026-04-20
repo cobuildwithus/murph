@@ -277,6 +277,11 @@ export interface HostedExecutionVaultShareAcceptedWake extends HostedExecutionBa
   share: HostedExecutionShareReference;
 }
 
+export interface HostedExecutionRuntimeTimerWake extends HostedExecutionBaseWake {
+  kind: "runtime.timer";
+  triggerKind: HostedRunTriggerKind;
+}
+
 export type HostedExecutionWake =
   | HostedExecutionConversationMessageWake
   | HostedExecutionMemberActivatedWake
@@ -285,6 +290,9 @@ export type HostedExecutionWake =
   | HostedExecutionDeviceSyncWake
   | HostedExecutionVaultShareAcceptedWake;
 
+export type HostedExecutionRunnerWake =
+  | HostedExecutionWake
+  | HostedExecutionRuntimeTimerWake;
 
 export type HostedExecutionSystemWake = Exclude<
   HostedExecutionWake,
@@ -297,7 +305,7 @@ export type HostedWakeSnapshotRef = HostedExecutionBundleRefState;
 export interface HostedExecutionRunnerRequest {
   bundle: HostedExecutionBundlePayload;
   runDrain?: HostedRuntimeDrainRequest | null;
-  wake: HostedExecutionWake;
+  wake: HostedExecutionRunnerWake;
   run?: HostedExecutionRunContext | null;
   sharePack?: HostedExecutionRunnerSharePack | null;
 }
@@ -419,10 +427,7 @@ export interface HostedWakeAppendResponse {
 
 export const HOSTED_RUN_STATUSES = [
   "acquired",
-  "running",
-  "prepared",
   "committed_needs_finalize",
-  "finalizing",
   "finalized",
   "failed",
   "superseded",
@@ -629,6 +634,12 @@ export function isHostedConversationMessageWake(
   wake: HostedExecutionWake,
 ): wake is HostedExecutionConversationMessageWake {
   return wake.kind === "conversation.message";
+}
+
+export function isHostedRuntimeTimerWake(
+  wake: HostedExecutionRunnerWake,
+): wake is HostedExecutionRuntimeTimerWake {
+  return wake.kind === "runtime.timer";
 }
 
 export function isHostedSystemWake(
