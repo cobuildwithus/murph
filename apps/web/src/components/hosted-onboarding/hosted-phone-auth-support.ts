@@ -4,6 +4,7 @@ import {
   maskPhoneNumber,
   normalizePhoneNumberForCountry,
 } from "@/src/lib/hosted-onboarding/phone";
+import type { HostedPrivyClientPendingAction } from "@/src/lib/hosted-onboarding/privy-client";
 import { isHostedOnboardingAccessibleStage } from "@/src/lib/hosted-onboarding/stage";
 import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 
@@ -29,6 +30,29 @@ export {
   runHostedPrivyFinalizationAttempt,
 };
 export { toErrorMessage } from "./hosted-auth-shared";
+
+export async function runHostedPhonePendingAction<TResult>(input: {
+  action: HostedPrivyClientPendingAction;
+  onBeforeAction?: () => void;
+  onError?: (error: unknown) => void;
+  run: () => Promise<TResult>;
+  setPendingAction: (action: HostedPrivyClientPendingAction) => void;
+  shouldClearPendingAction?: () => boolean;
+}): Promise<TResult | null> {
+  input.onBeforeAction?.();
+  input.setPendingAction(input.action);
+
+  try {
+    return await input.run();
+  } catch (error) {
+    input.onError?.(error);
+    return null;
+  } finally {
+    if (input.shouldClearPendingAction?.() ?? true) {
+      input.setPendingAction(null);
+    }
+  }
+}
 
 interface PendingInvitePhoneCodeMutation {
   inviteCode: string;
