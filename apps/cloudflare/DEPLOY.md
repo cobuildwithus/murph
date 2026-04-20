@@ -72,8 +72,8 @@ Core execution tuning:
 
 - `CF_PLATFORM_ENVELOPE_KEY_ID` defaults to `v1`
 - `CF_COMPATIBILITY_DATE` defaults to `2026-03-27`
-- `CF_CONTAINER_INSTANCE_TYPE` defaults to `standard-1`
-- `CF_CONTAINER_MAX_INSTANCES` defaults to `50`
+- `CF_CONTAINER_INSTANCE_TYPE` defaults to `{"vcpu":1,"memory_mib":3072,"disk_mb":6000}`
+- `CF_CONTAINER_MAX_INSTANCES` defaults to `1000`
 - `CF_MAX_EVENT_ATTEMPTS` defaults to `3`
 - `CF_RETRY_DELAY_MS` defaults to `30000`
 - `CF_RUNNER_TIMEOUT_MS` defaults to `120000`
@@ -116,6 +116,11 @@ Opt-in runtime integrations and tool overrides:
 - `FFMPEG_COMMAND`
 - `WHISPER_COMMAND`
 - `WHISPER_MODEL_PATH`
+
+If the selected GitHub environment already defines container sizing overrides, update these existing vars there as well:
+
+- `CF_CONTAINER_INSTANCE_TYPE={"vcpu":1,"memory_mib":3072,"disk_mb":6000}`
+- `CF_CONTAINER_MAX_INSTANCES=1000`
 
 When hosted email sender identity is configured, deploy automation renders one native `send_email` binding named `HOSTED_EMAIL` and constrains it with `allowed_sender_addresses` to that resolved sender address. Hosted email outbound send no longer requires a runtime Cloudflare account id or email-send API token inside the Worker.
 
