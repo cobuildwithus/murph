@@ -1,7 +1,7 @@
 /**
  * Pure thin-runner projection helpers extracted from RunnerStateStore. The
  * store still owns SQL-backed lease/runtime transitions; this module owns
- * normalization, bundle-ref versioning, and wake scheduling.
+ * normalization, projection, and wake scheduling.
  */
 
 import {
@@ -9,16 +9,10 @@ import {
   type HostedExecutionRunStatus,
   type HostedExecutionTimelineEntry,
 } from "@murphai/hosted-execution";
-import {
-  parseHostedExecutionBundleRef,
-  sameHostedBundlePayloadRef,
-  serializeHostedExecutionBundleRef,
-  type HostedExecutionBundleRef,
-} from "@murphai/runtime-state";
+import type { HostedExecutionBundleRef } from "@murphai/runtime-state";
 
 import type {
   DurableObjectSqlValue,
-  RunnerBundleVersion,
   RunnerStateRecord,
 } from "./types.js";
 
@@ -38,18 +32,6 @@ export interface RunnerMetaRow {
   user_id: string;
 }
 
-export interface RunnerBundleSlotRow {
-  [key: string]: DurableObjectSqlValue;
-  bundle_ref_json: string | null;
-  bundle_version: number;
-  slot: string;
-}
-
-export interface RunnerStoredBundleState {
-  bundleRefJson: string | null;
-  bundleVersion: RunnerBundleVersion;
-}
-
 export interface RunnerStateProjection {
   record: RunnerStateRecord;
 }
@@ -60,19 +42,6 @@ export function appendBoundedRunnerTimelineEntry(
   limit: number,
 ): HostedExecutionTimelineEntry[] {
   return [...entries, entry].slice(-limit);
-}
-
-export function assignRunnerBundleRefs(
-  bundleState: RunnerStoredBundleState,
-  nextBundleRef: RunnerStateRecord["bundleRef"],
-): void {
-  const currentRef = parseHostedBundleRefJson(bundleState.bundleRefJson);
-  if (sameHostedBundlePayloadRef(currentRef, nextBundleRef)) {
-    return;
-  }
-
-  bundleState.bundleRefJson = serializeHostedExecutionBundleRef(nextBundleRef);
-  bundleState.bundleVersion += 1;
 }
 
 export function createDefaultRunnerMetaRow(userId: string): RunnerMetaRow {
@@ -92,20 +61,12 @@ export function createDefaultRunnerMetaRow(userId: string): RunnerMetaRow {
   };
 }
 
-export function createDefaultRunnerBundleState(): RunnerStoredBundleState {
-  return {
-    bundleRefJson: null,
-    bundleVersion: 0,
-  };
-}
-
 export function projectRunnerStateRecord(input: {
-  bundleState: RunnerStoredBundleState;
+  bundleRef: HostedExecutionBundleRef | null;
   meta: RunnerMetaRow;
   run: HostedExecutionRunStatus | null;
   timeline: readonly HostedExecutionTimelineEntry[];
 }): RunnerStateProjection {
-  const bundleRef = parseHostedBundleRefJson(input.bundleState.bundleRefJson);
   const nextLastError = summarizeHostedExecutionErrorCode(input.meta.last_error_code);
   const hasPersistedRunLease = input.meta.active_run_event_id !== null
     && input.meta.active_run_id !== null
@@ -119,8 +80,7 @@ export function projectRunnerStateRecord(input: {
   return {
     record: {
       runtimeBootstrapped: input.meta.runtime_bootstrapped === 1,
-      bundleRef,
-      bundleVersion: input.bundleState.bundleVersion,
+      bundleRef: input.bundleRef,
       inFlight: input.meta.in_flight === 1 || hasPersistedRunLease,
       lastError: nextLastError,
       lastErrorAt: input.meta.last_error_at,
@@ -153,16 +113,4 @@ function normalizePreferredWakeAt(value: string | null): string | null {
   }
 
   return new Date(Math.max(parsedMs, Date.now())).toISOString();
-}
-
-function parseHostedBundleRefJson(value: string | null): HostedExecutionBundleRef | null {
-  if (!value) {
-    return null;
-  }
-
-  try {
-    return parseHostedExecutionBundleRef(JSON.parse(value) as unknown, "Hosted runner bundle ref");
-  } catch {
-    throw new Error("Hosted runner state is corrupt: runner_meta.bundle_ref_json is malformed.");
-  }
 }

@@ -38,12 +38,9 @@ export interface DurableObjectStateLike {
   storage: DurableObjectStorageLike;
 }
 
-export type RunnerBundleVersion = number;
-
 export interface RunnerStateRecord {
   runtimeBootstrapped: boolean;
   bundleRef: HostedExecutionBundleRef | null;
-  bundleVersion: RunnerBundleVersion;
   inFlight: boolean;
   lastError: string | null;
   lastErrorAt: string | null;

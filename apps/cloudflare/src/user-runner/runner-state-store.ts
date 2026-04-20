@@ -146,6 +146,18 @@ export class RunnerStateStore {
     return this.cachedBundleRef;
   }
 
+  async readBundleMetaState(): Promise<{
+    bundleRef: RunnerStateRecord["bundleRef"];
+    bundleVersion: 0;
+  }> {
+    // Compatibility shim for older wake-path callsites. The cache stays
+    // process-memory only and does not represent durable correctness state.
+    return {
+      bundleRef: this.cachedBundleRef,
+      bundleVersion: 0,
+    };
+  }
+
   async markRuntimeBootstrapped(): Promise<RunnerStateRecord> {
     const meta = this.requireMetaRowSync();
     if (meta.runtime_bootstrapped !== 1) {

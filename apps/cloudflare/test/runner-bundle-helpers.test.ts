@@ -17,8 +17,6 @@ import { encryptHostedStorageEnvelope } from "../src/crypto.js";
 import { hostedArtifactObjectKey } from "../src/storage-paths.js";
 import { HostedBundleGarbageCollector } from "../src/bundle-gc.js";
 import { RunnerBundleSync } from "../src/user-runner/runner-bundle-sync.js";
-import { RunnerStateStore } from "../src/user-runner/runner-state-store.js";
-import { createTestSqlStorage } from "./sql-storage.js";
 import { MemoryEncryptedR2Bucket, createTestRootKey } from "./test-helpers.js";
 
 describe("writeHostedBundleBytesIfChanged", () => {
@@ -132,30 +130,14 @@ describe("hosted bundle reads", () => {
 describe("RunnerBundleSync", () => {
   const bundleKey = Uint8Array.from({ length: 32 }, () => 9);
 
-  it("fails closed when durable bundle refs point at missing R2 objects", async () => {
+  it("fails closed when the acquired snapshot ref points at a missing R2 object", async () => {
     const bucket = createBucketStore();
-    const sql = createTestSqlStorage();
-    const state = {
-      storage: {
-        sql,
-      },
-    };
-    const stateStore = new RunnerStateStore(state as never);
-    await stateStore.bootstrapUser("member_123");
-
     const missingRef = {
       hash: "a".repeat(64),
       key: `bundles/vault/${"a".repeat(64)}.bundle.json`,
       size: 5,
       updatedAt: "2026-04-02T00:00:00.000Z",
     };
-    sql.exec(
-      `UPDATE runner_meta
-        SET bundle_ref_json = ?, bundle_version = ?
-        WHERE singleton = 1`,
-      JSON.stringify(missingRef),
-      1,
-    );
 
     const bundleSync = new RunnerBundleSync(
       bucket.api,
@@ -164,34 +146,15 @@ describe("RunnerBundleSync", () => {
       {
         v1: bundleKey,
       },
-      stateStore,
     );
 
-    await expect(bundleSync.readBundlesForRunner()).rejects.toThrow(
+    await expect(bundleSync.readBundlesForRunner(missingRef)).rejects.toThrow(
       `Hosted vault bundle ${missingRef.key} is missing from R2.`,
     );
   });
 
-  it("fails closed on malformed durable bundle refs without clearing them", async () => {
+  it("writes the next bundle from the web-owned current snapshot ref", async () => {
     const bucket = createBucketStore();
-    const sql = createTestSqlStorage();
-    const state = {
-      storage: {
-        sql,
-      },
-    };
-    const stateStore = new RunnerStateStore(state as never);
-    await stateStore.bootstrapUser("member_123");
-    const malformedBundleRefJson = JSON.stringify({ key: "missing-required-fields" });
-
-    sql.exec(
-      `UPDATE runner_meta
-        SET bundle_ref_json = ?, bundle_version = ?
-        WHERE singleton = 1`,
-      malformedBundleRefJson,
-      7,
-    );
-
     const bundleSync = new RunnerBundleSync(
       bucket.api,
       bundleKey,
@@ -199,68 +162,21 @@ describe("RunnerBundleSync", () => {
       {
         v1: bundleKey,
       },
-      stateStore,
     );
+    const firstBundle = Uint8Array.from(Buffer.from("bundle-one"));
+    const currentBundleRef = await createHostedBundleStore({
+      bucket: bucket.api,
+      key: bundleKey,
+      keyId: "v1",
+    }).writeBundle("vault", firstBundle);
 
-    await expect(bundleSync.readBundlesForRunner()).rejects.toThrow(
-      "Hosted runner state is corrupt: runner_meta.bundle_ref_json is malformed.",
-    );
-
-    expect(sql.exec<{ bundle_ref_json: string | null; bundle_version: number }>(
-      `SELECT bundle_ref_json, bundle_version
-         FROM runner_meta
-        WHERE singleton = 1`,
-    ).one()).toEqual({
-      bundle_ref_json: malformedBundleRefJson,
-      bundle_version: 7,
-    });
-  });
-
-  it("fails closed when applying runner result bundles against a malformed durable bundle ref", async () => {
-    const bucket = createBucketStore();
-    const sql = createTestSqlStorage();
-    const state = {
-      storage: {
-        sql,
-      },
-    };
-    const stateStore = new RunnerStateStore(state as never);
-    await stateStore.bootstrapUser("member_123");
-    const malformedBundleRefJson = JSON.stringify({ key: "missing-required-fields" });
-
-    sql.exec(
-      `UPDATE runner_meta
-        SET bundle_ref_json = ?, bundle_version = ?
-        WHERE singleton = 1`,
-      malformedBundleRefJson,
-      7,
-    );
-
-    const bundleSync = new RunnerBundleSync(
-      bucket.api,
-      bundleKey,
-      "v1",
-      {
-        v1: bundleKey,
-      },
-      stateStore,
-    );
-
-    await expect(bundleSync.applyRunnerResultBundles(
+    const nextBundle = await bundleSync.applyRunnerResultBundles(
       "member_123",
-      7,
-      null,
-    )).rejects.toThrow(
-      "Hosted runner state is corrupt: runner_meta.bundle_ref_json is malformed.",
+      currentBundleRef,
+      encodeHostedBundleBase64(Uint8Array.from(Buffer.from("bundle-two"))),
     );
-    expect(sql.exec<{ bundle_ref_json: string | null; bundle_version: number }>(
-      `SELECT bundle_ref_json, bundle_version
-         FROM runner_meta
-        WHERE singleton = 1`,
-    ).one()).toEqual({
-      bundle_ref_json: malformedBundleRefJson,
-      bundle_version: 7,
-    });
+
+    await expect(bundleSync.readBundlesForRunner(nextBundle.bundleRef)).resolves.not.toBeNull();
   });
 
   it("logs best-effort cleanup failures after a successful bundle swap", async () => {
@@ -270,14 +186,6 @@ describe("RunnerBundleSync", () => {
       "cleanupBundleTransition",
     ).mockRejectedValueOnce(new Error("cleanup failed"));
     const bucket = createBucketStore();
-    const sql = createTestSqlStorage();
-    const state = {
-      storage: {
-        sql,
-      },
-    };
-    const stateStore = new RunnerStateStore(state as never);
-    await stateStore.bootstrapUser("member_123");
     const bundleSync = new RunnerBundleSync(
       bucket.api,
       bundleKey,
@@ -285,15 +193,14 @@ describe("RunnerBundleSync", () => {
       {
         v1: bundleKey,
       },
-      stateStore,
     );
 
     await expect(bundleSync.applyRunnerResultBundles(
       "member_123",
-      0,
       null,
-    )).resolves.toMatchObject({
-      userId: "member_123",
+      null,
+    )).resolves.toEqual({
+      bundleRef: null,
     });
 
     expect(cleanupSpy).toHaveBeenCalledOnce();
