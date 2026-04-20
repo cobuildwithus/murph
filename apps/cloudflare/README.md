@@ -2,11 +2,11 @@
 
 Cloudflare-hosted execution plane for the hosted Murph path.
 
-`apps/web` is the canonical owner of onboarding, billing, auth, share facts, device-sync authority, usage reconciliation, and other hosted product facts. `apps/cloudflare` is the execution-only edge/runtime layer that accepts authenticated control wakes, restores encrypted runtime state, runs one hosted job, and commits the next encrypted snapshot.
+`apps/web` is the canonical owner of onboarding, billing, auth, share facts, device-sync authority, usage reconciliation, and other hosted product facts. `apps/cloudflare` is the execution-only edge/runtime layer that accepts authenticated run/control requests, restores encrypted runtime state, runs one hosted job, and commits the next encrypted snapshot.
 
 ## What This App Owns
 
-- Vercel OIDC-authenticated control wakes from `apps/web`
+- Vercel OIDC-authenticated run/control requests from `apps/web`
 - per-user execution coordination in `USER_RUNNER`
 - native runner-container lifecycle in `RUNNER_CONTAINER`
 - encrypted hosted workspace snapshots, externalized artifact blobs, encrypted runner-secrets blobs, and the execution-sidecar blobs needed to run and finalize hosted jobs in `BUNDLES`
@@ -39,7 +39,7 @@ When `HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL` is configured for local ho
 - The `vault` bundle slot stores one encrypted hosted workspace snapshot. That snapshot is still sensitive canonical vault material, not a second product database.
 - Large files are externalized into separately encrypted artifact blobs in the same bucket.
 - Separate encrypted objects hold runner-specific secret overrides and other execution-only sidecar blobs so those runtime artifacts do not force workspace rewrites.
-- Durable Object SQLite stores execution coordination only: lease and stale-result fencing, alarm hints, timestamps, and encrypted bundle references. Canonical wake ordering, cursor progress, and durable finalize recovery stay web-owned.
+- Durable Object SQLite stores execution coordination only: lease and stale-result fencing, alarm hints, timestamps, and encrypted bundle references. Canonical ingress ordering, cursor progress, and durable finalize recovery stay web-owned.
 - Hosted raw email payloads now live under a durable encrypted prefix and are deleted after terminal wake cleanup rather than bucket lifecycle expiry.
 - Other encrypted execution blobs remain owner-cleaned or durable by design, including workspace snapshots, artifact blobs, runner-secrets blobs, and queue-local execution sidecars. Hosted device-sync runtime authority stays in `apps/web` behind narrow signed callbacks.
 
