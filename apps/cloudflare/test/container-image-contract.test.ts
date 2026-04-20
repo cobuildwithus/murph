@@ -103,12 +103,19 @@ describe("hosted runner container image contract", () => {
       "await installPackedRunnerDependencies(",
     );
     expect(workspaceArtifactsScript).toContain(
-      'const recursiveBuildArgs = [',
+      "for (const packageName of await topologicallySortWorkspacePackageNames(",
     );
-    expect(workspaceArtifactsScript).toContain('"recursive",');
-    expect(workspaceArtifactsScript).toContain('"--workspace-concurrency=1",');
     expect(workspaceArtifactsScript).toContain(
-      '...packageNames.flatMap((packageName) => ["--filter", packageName]),',
+      'await runPnpmCommand(["build"], {',
+    );
+    expect(workspaceArtifactsScript).toContain(
+      "cwd: await resolveWorkspacePackageDirectory(input.repoRoot, packageName),",
+    );
+    expect(workspaceArtifactsScript).toContain(
+      "function listWorkspaceDependencyNames(",
+    );
+    expect(workspaceArtifactsScript).toContain(
+      "Detected a cycle while ordering runner bundle builds",
     );
     expect(bundleAssemblyScript).toContain("hostedRunnerBuildPackageNames");
     expect(bundleAssemblyScript).toContain("hostedRunnerWorkspacePackageNames,");
@@ -359,11 +366,11 @@ describe("hosted runner container image contract", () => {
     );
     expect(packageJson.scripts?.["runner:docker:smoke:prepare"]).toContain("pnpm --filter @murphai/cloudflare-runner... run build && pnpm runner:bundle:assemble-only &&");
     expect(packageJson.scripts?.["test:e2e:linq-delivery:local"]).toContain(
-      "pnpm runner:bundle:hosted-local &&",
+      "pnpm runner:bundle:assemble-only &&",
     );
     expect(packageJson.scripts?.["test:e2e:linq-delivery:local"]).toContain("MURPH_DEV_SKIP_RUNNER_BUNDLE=1");
     expect(packageJson.scripts?.["test:e2e:telegram:local"]).toContain(
-      "pnpm runner:bundle:hosted-local &&",
+      "pnpm runner:bundle:assemble-only &&",
     );
     expect(packageJson.scripts?.["test:e2e:telegram:local"]).toContain("MURPH_DEV_SKIP_RUNNER_BUNDLE=1");
     expect(container.image).toBe("../../../Dockerfile.cloudflare-hosted-runner");
