@@ -41,6 +41,22 @@ import /* keep */ {
     expect(failure).toContain('"@murphai/device-syncd/hosted-runtime"');
   });
 
+  it("rejects assistant-runtime imports from generic inbox connector normalizers", () => {
+    const filePath = path.join(
+      repoRoot,
+      "packages/assistant-runtime/src/hosted-runtime/events/conversation.ts",
+    );
+    const failure = verifyWorkspaceImportPolicy({
+      filePath,
+      source: 'import { normalizeHostedTelegramMessage } from "@murphai/inboxd/connectors/telegram/normalize";',
+      sourceMember: "packages/assistant-runtime",
+      specifier: "@murphai/inboxd/connectors/telegram/normalize",
+    });
+
+    expect(failure).toContain("@murphai/inboxd/connectors/hosted-conversation");
+    expect(failure).toContain("generic provider connector internals");
+  });
+
   it("allows empty imports from non-workspace packages", () => {
     const filePath = path.join(repoRoot, "packages/hosted-execution/src/parsers.ts");
     const failure = verifyWorkspaceImportPolicy({

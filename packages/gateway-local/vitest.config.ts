@@ -21,7 +21,7 @@ const WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
   "@murphai/gateway-core": "../gateway-core/src/index.ts",
   "@murphai/gateway-local": "./src/index.ts",
   "@murphai/inboxd": "../inboxd/src/index.ts",
-  "@murphai/messaging-ingress": "../messaging-ingress/src/index.ts",
+  "@murphai/messaging-ingress": "../messaging-ingress/package.json",
   "@murphai/parsers": "../parsers/src/index.ts",
   "@murphai/runtime-state": "../runtime-state/src/index.ts",
 } as const;

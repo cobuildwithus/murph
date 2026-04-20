@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -11,6 +12,14 @@ import {
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 describe("workspace source resolution", () => {
+  it("keeps configured package source anchors on files that exist", () => {
+    const entries = resolveHostedWebWorkspaceSourceEntries(path.join(repoRoot, "apps/web"));
+
+    for (const [specifier, replacement] of Object.entries(entries)) {
+      expect(fs.existsSync(replacement), `${specifier} -> ${replacement}`).toBe(true);
+    }
+  });
+
   it("maps public workspace package subpaths to explicit source entry files", () => {
     const aliases = createVitestWorkspaceRuntimeAliases(
       resolveHostedWebWorkspaceSourceEntries(path.join(repoRoot, "apps/web")),

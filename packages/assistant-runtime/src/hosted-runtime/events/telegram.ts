@@ -1,6 +1,6 @@
 import {
   type TelegramAttachmentDownloadDriver,
-} from "@murphai/inboxd/connectors/telegram/normalize";
+} from "@murphai/inboxd/connectors/hosted-conversation";
 import type { TelegramFile } from "@murphai/messaging-ingress/telegram-webhook";
 
 const DEFAULT_TELEGRAM_API_BASE_URL = "https://api.telegram.org";

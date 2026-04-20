@@ -419,6 +419,16 @@ export function verifyWorkspaceImportPolicy({
   }
 
   if (
+    sourceMember === "packages/assistant-runtime"
+    && filePath.includes(
+      `${path.sep}packages${path.sep}assistant-runtime${path.sep}src${path.sep}`,
+    )
+    && isGenericInboxConnectorNormalizerSpecifier(specifier)
+  ) {
+    return `${path.relative(repoRoot, filePath)} imports ${JSON.stringify(specifier)} directly; packages/assistant-runtime must use @murphai/inboxd/connectors/hosted-conversation so hosted wake ingestion stays behind a hosted-specific inbox adapter instead of generic provider connector internals.`;
+  }
+
+  if (
     sourceMember === "packages/inbox-services"
     && specifier === "@murphai/inboxd"
     && filePath.includes(`${path.sep}src${path.sep}`)
@@ -580,6 +590,15 @@ export function verifyWorkspaceImportPolicy({
   }
 
   return null;
+}
+
+function isGenericInboxConnectorNormalizerSpecifier(specifier) {
+  return (
+    specifier === "@murphai/inboxd/connectors/email/normalize-parsed"
+    || specifier === "@murphai/inboxd/connectors/email/parsed"
+    || specifier === "@murphai/inboxd/connectors/linq/normalize"
+    || specifier === "@murphai/inboxd/connectors/telegram/normalize"
+  );
 }
 
 function isTestOnlyInternalAssistantSpecifier({

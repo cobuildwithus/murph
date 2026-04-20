@@ -24,7 +24,7 @@ const WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
   '@murphai/importers': '../importers/src/index.ts',
   '@murphai/inbox-services': '../inbox-services/src/index.ts',
   '@murphai/inboxd': '../inboxd/src/index.ts',
-  '@murphai/messaging-ingress': '../messaging-ingress/src/index.ts',
+  '@murphai/messaging-ingress': '../messaging-ingress/package.json',
   '@murphai/operator-config': '../operator-config/src/index.ts',
   '@murphai/parsers': '../parsers/src/index.ts',
   '@murphai/query': '../query/src/index.ts',
