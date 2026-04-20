@@ -4,7 +4,7 @@ import {
   parseHostedExecutionCursorState,
   parseHostedExecutionConversationMessagePayload,
   parseHostedExecutionEvent,
-  parseHostedExecutionWake,
+  parseHostedIngressEnvelope,
   parseHostedRunAcquireRequest,
   parseHostedRunAcquireResponse,
   parseHostedRunCommitRequest,
@@ -15,21 +15,21 @@ import {
   parseHostedRunLogResponse,
   parseHostedRunStatusRequest,
   parseHostedRunStatusResponse,
-  parseHostedWakeAppendResponse,
-  parseHostedWakeExecutionPayload,
-  parseHostedWakeRecord,
+  parseHostedIngressAppendResponse,
+  parseHostedIngressPayload,
+  parseHostedIngressEvent,
 } from "../src/parsers.ts";
 
 import {
-  buildHostedExecutionAssistantCronTickWake,
   buildHostedExecutionEmailConversationMessageWake,
+  buildHostedExecutionDeviceSyncWake,
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionMemberChannelsUpdatedWake,
   buildHostedExecutionTelegramConversationMessageWake,
   buildHostedExecutionVaultShareAcceptedWake,
 } from "../src/builders.ts";
 import {
-  HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
+  HOSTED_INGRESS_PAYLOAD_SCHEMA,
 } from "../src/contracts.ts";
 
 const TEST_SNAPSHOT_REF = {
@@ -39,7 +39,7 @@ const TEST_SNAPSHOT_REF = {
   updatedAt: "2026-04-17T00:00:01.000Z",
 } as const;
 
-function createHostedRunRecord() {
+function createHostedRunRecord(status = "committed_needs_finalize") {
   return {
     acquiredAt: "2026-04-17T00:00:00.000Z",
     attempt: 1,
@@ -48,7 +48,7 @@ function createHostedRunRecord() {
     errorClass: null,
     errorCode: null,
     eventCount: 1,
-    eventKinds: ["assistant.cron.tick"],
+    eventKinds: ["device-sync.wake"],
     eventSeqs: ["24"],
     executorKind: "cloudflare-container",
     failedAt: null,
@@ -66,7 +66,7 @@ function createHostedRunRecord() {
     preparedSnapshotRef: TEST_SNAPSHOT_REF,
     redactedSummary: { stage: "prepared" },
     startedAt: "2026-04-17T00:00:00.500Z",
-    status: "committed_needs_finalize",
+    status,
     triggerKind: "runtime_timer",
     updatedAt: "2026-04-17T00:00:03.000Z",
     userId: "member-1",
@@ -126,7 +126,7 @@ describe("hosted wake parser contracts", () => {
   });
 
   it("parses hosted run acquire, commit, and finalize contracts", () => {
-    const run = createHostedRunRecord();
+    const run = createHostedRunRecord("finalizing");
 
     expect(parseHostedRunAcquireRequest({
       executorKind: "cloudflare-container",
@@ -446,8 +446,54 @@ describe("hosted wake parser contracts", () => {
     })).toThrow(/Unsupported hosted run status/i);
   });
 
+  it("covers null and invalid branches in extracted run-control parsers", () => {
+    expect(parseHostedRunAcquireRequest({
+      attestationRef: null,
+      executorCodeDigest: null,
+      executorKind: null,
+      limit: null,
+      now: null,
+      signedResultRef: null,
+      triggerKind: null,
+    })).toEqual({
+      attestationRef: null,
+      executorCodeDigest: null,
+      executorKind: null,
+      limit: null,
+      now: null,
+      signedResultRef: null,
+      triggerKind: null,
+    });
+
+    expect(parseHostedRunLogResponse({
+      log: null,
+      logged: false,
+    })).toEqual({
+      log: null,
+      logged: false,
+    });
+
+    expect(parseHostedRunStatusRequest({
+      includeLogs: null,
+      limit: null,
+      runId: null,
+    })).toEqual({
+      includeLogs: null,
+      limit: null,
+      runId: null,
+    });
+
+    expect(() => parseHostedRunLogRequest({
+      component: "runtime",
+      level: "verbose" as never,
+      message: "prepared snapshot",
+      phase: "prepare",
+      runId: "run-1",
+    })).toThrow(/Unsupported hosted run log level/i);
+  });
+
   it("rejects wake payloads that do not serialize the full wake contract", () => {
-    expect(() => parseHostedWakeExecutionPayload({
+    expect(() => parseHostedIngressPayload({
       decryptedPayload: {
         channel: "email",
         identityId: "assistant@example.com",
@@ -455,7 +501,7 @@ describe("hosted wake parser contracts", () => {
       },
       kind: "conversation.message",
       occurredAt: "2026-04-17T00:00:00.000Z",
-      payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
+      payloadSchema: HOSTED_INGRESS_PAYLOAD_SCHEMA,
       userId: "member-1",
     })).toThrow(/kind/i);
   });
@@ -470,11 +516,11 @@ describe("hosted wake parser contracts", () => {
       userId: "member-1",
     });
 
-    expect(parseHostedWakeExecutionPayload({
+    expect(parseHostedIngressPayload({
       decryptedPayload: wake,
       kind: wake.kind,
       occurredAt: wake.occurredAt,
-      payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
+      payloadSchema: HOSTED_INGRESS_PAYLOAD_SCHEMA,
       userId: wake.userId,
     })).toEqual(wake);
   });
@@ -482,7 +528,7 @@ describe("hosted wake parser contracts", () => {
   it("parses hosted execution wakes across the supported wake kinds", () => {
     const occurredAt = "2026-04-17T00:00:00.000Z";
 
-    expect(parseHostedExecutionWake({
+    expect(parseHostedIngressEnvelope({
       eventId: "wake_member",
       firstContact: null,
       kind: "member.activated",
@@ -505,7 +551,7 @@ describe("hosted wake parser contracts", () => {
       occurredAt,
     }));
 
-    expect(parseHostedExecutionWake({
+    expect(parseHostedIngressEnvelope({
       eventId: "wake_member_channels",
       kind: "member.channels.updated",
       memberChannels: {
@@ -526,20 +572,15 @@ describe("hosted wake parser contracts", () => {
       occurredAt,
     }));
 
-    expect(parseHostedExecutionWake({
+    expect(() => parseHostedIngressEnvelope({
       eventId: "wake_cron",
       kind: "assistant.cron.tick",
       occurredAt,
       reason: "device-sync",
       userId: "member-1",
-    })).toEqual(buildHostedExecutionAssistantCronTickWake({
-      eventId: "wake_cron",
-      occurredAt,
-      reason: "device-sync",
-      userId: "member-1",
-    }));
+    })).toThrow(/wake kind/i);
 
-    expect(parseHostedExecutionWake({
+    expect(parseHostedIngressEnvelope({
       eventId: "wake_share",
       kind: "vault.share.accepted",
       occurredAt,
@@ -559,7 +600,7 @@ describe("hosted wake parser contracts", () => {
       }));
 
     expect(() =>
-      parseHostedExecutionWake({
+      parseHostedIngressEnvelope({
         eventId: "wake_bad",
         kind: "unsupported.event",
         occurredAt,
@@ -684,23 +725,23 @@ describe("hosted wake parser contracts", () => {
       userId: "member-1",
     });
 
-    expect(parseHostedWakeExecutionPayload({
+    expect(parseHostedIngressPayload({
       decryptedPayload: telegramWake,
       kind: telegramWake.kind,
       occurredAt: telegramWake.occurredAt,
-      payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
+      payloadSchema: HOSTED_INGRESS_PAYLOAD_SCHEMA,
       userId: telegramWake.userId,
     })).toEqual(telegramWake);
 
     expect(() =>
-      parseHostedWakeRecord({
+      parseHostedIngressEvent({
         behavior: "unexpected",
         createdAt: "2026-04-17T00:00:00.000Z",
         dedupeKey: null,
         id: "wake_123",
         kind: "member.channels.updated",
         occurredAt: "2026-04-17T00:00:00.000Z",
-        payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
+        payloadSchema: HOSTED_INGRESS_PAYLOAD_SCHEMA,
         quarantineCode: null,
         quarantinedAt: null,
         seq: "1",
@@ -723,41 +764,41 @@ describe("hosted wake parser contracts", () => {
       occurredAt: "2026-04-17T00:00:00.000Z",
     });
 
-    expect(parseHostedWakeExecutionPayload({
+    expect(parseHostedIngressPayload({
       decryptedPayload: memberWake,
       kind: memberWake.kind,
       occurredAt: memberWake.occurredAt,
-      payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
+      payloadSchema: HOSTED_INGRESS_PAYLOAD_SCHEMA,
       userId: memberWake.userId,
     })).toEqual(memberWake);
 
-    expect(() => parseHostedWakeExecutionPayload({
+    expect(() => parseHostedIngressPayload({
       decryptedPayload: memberWake,
       kind: "member.channels.updated",
       occurredAt: memberWake.occurredAt,
-      payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
+      payloadSchema: HOSTED_INGRESS_PAYLOAD_SCHEMA,
       userId: memberWake.userId,
     })).toThrow(/payload kind must match/i);
 
-    expect(() => parseHostedWakeExecutionPayload({
+    expect(() => parseHostedIngressPayload({
       decryptedPayload: memberWake,
       kind: memberWake.kind,
       occurredAt: "2026-04-17T01:00:00.000Z",
-      payloadSchema: HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
+      payloadSchema: HOSTED_INGRESS_PAYLOAD_SCHEMA,
       userId: memberWake.userId,
     })).toThrow(/payload occurredAt must match/i);
 
-    expect(() => parseHostedWakeExecutionPayload({
+    expect(() => parseHostedIngressPayload({
       decryptedPayload: memberWake,
       kind: memberWake.kind,
       occurredAt: memberWake.occurredAt,
-      payloadSchema: "murph.hosted-wake-system.v1" as never,
+      payloadSchema: "murph.hosted-ingress-system.v1" as never,
       userId: memberWake.userId,
     })).toThrow(/execution payload schema/i);
   });
 
   it("rejects wake records whose payload schema is not the canonical execution schema", () => {
-    expect(() => parseHostedWakeRecord({
+    expect(() => parseHostedIngressEvent({
       behavior: "ordered",
       createdAt: "2026-04-17T00:00:00.000Z",
       id: "wake_bad_schema",
@@ -765,7 +806,7 @@ describe("hosted wake parser contracts", () => {
       occurredAt: "2026-04-17T00:00:00.000Z",
       payloadBytes: 32,
       payloadCiphertext: "ciphertext:member",
-      payloadSchema: "murph.hosted-wake-conversation-message.v1",
+      payloadSchema: "murph.hosted-ingress-conversation-message.v1",
       seq: "1",
       updatedAt: "2026-04-17T00:00:00.000Z",
       userId: "member-1",

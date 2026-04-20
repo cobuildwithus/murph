@@ -88,3 +88,23 @@ export function readOptionalStringArray(value: unknown, label: string): string[]
 
   return requireStringArray(value, label);
 }
+
+export function readNullableBigIntString(value: unknown, label: string): string | null {
+  if (value === null) {
+    return null;
+  }
+
+  return requireBigIntString(value, label);
+}
+
+export function requireBigIntString(value: unknown, label: string): string {
+  const text = requireString(value, label);
+
+  try {
+    BigInt(text);
+  } catch {
+    throw new TypeError(`${label} must be a base-10 integer string.`);
+  }
+
+  return text;
+}
