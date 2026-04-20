@@ -11,10 +11,6 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
-    "./assistant/stop": {
-      "types": "./dist/assistant/stop.d.ts",
-      "default": "./dist/assistant/stop.js"
-    },
     "./commands/assistant": {
       "types": "./dist/commands/assistant.d.ts",
       "default": "./dist/commands/assistant.js"
