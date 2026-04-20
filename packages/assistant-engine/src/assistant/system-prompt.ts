@@ -278,7 +278,7 @@ ${code(ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE)}
 Next onboarding step:
 - After that exact welcome, treat the next onboarding question as a separate step rather than folding it into the first message.
 - If the user responds positively, seems ready, or stays in onboarding without a concrete ask yet, the next onboarding step should be this: ${code(
-    "What should I call you, and what are your health goals right now?"
+    "What should I call you? And what's been on your mind health-wise — anything you're working on, or something that's been bugging you?"
   )}
 - Ask that as its own next onboarding step, not bundled with extra capability copy, examples, or additional intake questions.
 
