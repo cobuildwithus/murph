@@ -1,28 +1,27 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  createBrowserVaultSnapshot,
+  createBrowserVaultReplica,
   createVaultReadModel,
-  parseBrowserVaultSnapshot,
+  parseBrowserVaultReplica,
 } from "@murphai/query/browser";
 
 import {
-  createHostedBrowserVaultSnapshotStore,
-  resolveHostedBrowserVaultSnapshotStorageRef,
+  createBrowserVaultReplicaAadFields,
+  createHostedBrowserVaultReplicaStore,
 } from "../src/browser-vault-store.js";
 import { buildHostedStorageAad } from "../src/crypto-context.js";
 import { readEncryptedR2Payload } from "../src/crypto.js";
 import { expectOpaqueStrings, findStoredObjectKey } from "./object-key-assertions.js";
 import { MemoryEncryptedR2Bucket, createTestRootKey } from "./test-helpers.js";
 
-describe("hosted browser vault snapshot store", () => {
-  it("round-trips browser vault snapshots through the browser-vault-snapshot scope", async () => {
+describe("hosted browser vault replica store", () => {
+  it("round-trips browser vault replicas through the browser-vault-replica scope", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     const rootKey = createTestRootKey(29);
-    const store = createHostedBrowserVaultSnapshotStore({
+    const store = createHostedBrowserVaultReplicaStore({
       bucket,
-      key: rootKey,
-      keyId: "k-current",
+      rootKey,
     });
     type BrowserVaultEntity = Parameters<typeof createVaultReadModel>[0]["entities"][number];
     const entities: BrowserVaultEntity[] = [{
@@ -54,9 +53,9 @@ describe("hosted browser vault snapshot store", () => {
       },
       source: "browser",
     };
-    const snapshot = createBrowserVaultSnapshot({
+    const replica = await createBrowserVaultReplica({
       generatedAt: "2026-04-17T00:00:00.000Z",
-      sourceVersion: "a".repeat(64),
+      sourceBundleHash: "a".repeat(64),
       vault: createVaultReadModel({
         entities,
         metadata,
@@ -67,81 +66,111 @@ describe("hosted browser vault snapshot store", () => {
     entities[0]!.tags.push("mutated");
     metadata.nested.flag = false;
 
-    await store.writeBrowserVaultSnapshot("user_123", snapshot);
+    const replicaRef = await store.writeBrowserVaultReplica({
+      replica,
+      userId: "user_123",
+    });
 
     const storedKey = findStoredObjectKey(
       bucket,
-      (key) => key.startsWith("users/browser-vault-snapshots/"),
+      (key) => key.startsWith("users/browser-vault-replicas/"),
     );
-    expect(storedKey).toMatch(/^users\/browser-vault-snapshots\/[0-9a-f]{24}\.json$/u);
+    expect(storedKey).toMatch(
+      /^users\/browser-vault-replicas\/[0-9a-f]{24}\/[0-9a-f]{48}\.json$/u,
+    );
     expectOpaqueStrings([storedKey], ["user_123"]);
+    expect(replicaRef).toMatchObject({
+      byteLength: new TextEncoder().encode(JSON.stringify(replica)).byteLength,
+      dataVersion: replica.source.dataVersion,
+      generatedAt: replica.generatedAt,
+      objectKey: storedKey,
+      replicaSchema: replica.schema,
+      schema: "murph.hosted-browser-vault-replica-ref.v1",
+      sourceBundleHash: replica.source.sourceBundleHash,
+    });
+    expect(replicaRef.keyId).toBe(`browser-vault-replica:${replica.source.dataVersion.slice(0, 32)}`);
 
-    await expect(store.readBrowserVaultSnapshotEnvelope("user_123")).resolves.toMatchObject({
+    await expect(store.readBrowserVaultReplicaEnvelope(replicaRef)).resolves.toMatchObject({
       algorithm: "AES-GCM",
-      keyId: "k-current",
-      scope: "browser-vault-snapshot",
+      keyId: replicaRef.keyId,
+      scope: "browser-vault-replica",
     });
 
-    const storageRef = await resolveHostedBrowserVaultSnapshotStorageRef({
-      rootKey,
+    const aadFields = createBrowserVaultReplicaAadFields({
+      ref: replicaRef,
       userId: "user_123",
     });
     const loadedBytes = await readEncryptedR2Payload({
-      aad: buildHostedStorageAad(storageRef.aadFields),
+      aad: buildHostedStorageAad({
+        dataVersion: aadFields.dataVersion,
+        objectKey: aadFields.objectKey,
+        purpose: aadFields.purpose,
+        schema: aadFields.schema,
+        sourceBundleHash: aadFields.sourceBundleHash,
+        userId: aadFields.userId,
+      }),
       bucket,
-      cryptoKey: rootKey,
-      expectedKeyId: "k-current",
-      key: storageRef.objectKey,
-      scope: "browser-vault-snapshot",
+      cryptoKey: await store.deriveBrowserVaultReplicaKey(replicaRef),
+      expectedKeyId: replicaRef.keyId,
+      key: replicaRef.objectKey,
+      scope: "browser-vault-replica",
     });
     expect(loadedBytes).not.toBeNull();
     const loaded = JSON.parse(new TextDecoder().decode(loadedBytes ?? undefined)) as unknown;
-    expect(loaded).toEqual(snapshot);
-    expect(parseBrowserVaultSnapshot(loaded)).toEqual(snapshot);
-    expect(snapshot.history.timeline[0]?.tags).toEqual(["browser"]);
-    expect(snapshot.history.timeline[0]?.title).toBe("Browser vault journal");
+    expect(loaded).toEqual(replica);
+    expect(parseBrowserVaultReplica(loaded)).toEqual(replica);
+    expect(replica.entities[0]?.tags).toEqual(["browser"]);
+    expect(replica.entities[0]?.title).toBe("Browser vault journal");
     expect(() =>
-      parseBrowserVaultSnapshot(
+      parseBrowserVaultReplica(
         {
-          ...snapshot,
-          schema: "murph.browser-vault-dashboard-snapshot.wrong",
+          ...replica,
+          schema: "murph.browser-vault-replica.wrong",
         },
-        "Browser vault snapshot",
+        "Browser vault replica",
       ),
-    ).toThrow("Browser vault snapshot.schema must be murph.browser-vault-dashboard-snapshot.v2.");
+    ).toThrow("Browser vault replica.schema must be murph.browser-vault-replica.v1.");
   });
 
-  it("deletes stored browser vault snapshot sidecars", async () => {
+  it("stores immutable replica objects per data version instead of deleting prior copies", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     const rootKey = createTestRootKey(31);
-    const store = createHostedBrowserVaultSnapshotStore({
+    const store = createHostedBrowserVaultReplicaStore({
       bucket,
-      key: rootKey,
-      keyId: "k-current",
+      rootKey,
     });
 
-    await store.writeBrowserVaultSnapshot(
-      "user_123",
-      createBrowserVaultSnapshot({
+    const firstRef = await store.writeBrowserVaultReplica({
+      replica: await createBrowserVaultReplica({
         generatedAt: "2026-04-17T00:00:00.000Z",
-        sourceVersion: "b".repeat(64),
+        sourceBundleHash: "b".repeat(64),
         vault: createVaultReadModel({
           entities: [],
           metadata: null,
           vaultRoot: "browser://vault",
         }),
       }),
-    );
-    const storageRef = await resolveHostedBrowserVaultSnapshotStorageRef({
-      rootKey,
+      userId: "user_123",
+    });
+    const secondRef = await store.writeBrowserVaultReplica({
+      replica: await createBrowserVaultReplica({
+        generatedAt: "2026-04-18T00:00:00.000Z",
+        sourceBundleHash: "c".repeat(64),
+        vault: createVaultReadModel({
+          entities: [],
+          metadata: {
+            revision: 2,
+          },
+          vaultRoot: "browser://vault",
+        }),
+      }),
       userId: "user_123",
     });
 
-    expect(bucket.objects.has(storageRef.objectKey)).toBe(true);
-
-    await store.deleteBrowserVaultSnapshot("user_123");
-
-    expect(bucket.objects.has(storageRef.objectKey)).toBe(false);
-    expect(bucket.deleted).toContain(storageRef.objectKey);
+    expect(firstRef.objectKey).not.toBe(secondRef.objectKey);
+    expect(firstRef.dataVersion).not.toBe(secondRef.dataVersion);
+    expect(bucket.objects.has(firstRef.objectKey)).toBe(true);
+    expect(bucket.objects.has(secondRef.objectKey)).toBe(true);
+    expect(bucket.deleted).toEqual([]);
   });
 });
