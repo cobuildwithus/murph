@@ -115,11 +115,11 @@ export interface HostedAssistantDeliveryOutcome {
   targetKind: string | null;
 }
 
-export interface HostedAssistantRuntimeCommittedJobResult {
+export interface HostedAssistantRuntimePreparedJobResult {
   committedAssistantDeliveryEffects: HostedAssistantDeliveryEffect[];
   committedGatewayProjectionSnapshot: GatewayProjectionSnapshot | null;
   finalGatewayProjectionSnapshot?: null;
-  phase: "committed";
+  phase: "prepared";
   result: HostedExecutionRunnerResult;
 }
 
@@ -132,7 +132,7 @@ export interface HostedAssistantRuntimeCompletedJobResult {
 }
 
 export type HostedAssistantRuntimeJobResult =
-  | HostedAssistantRuntimeCommittedJobResult
+  | HostedAssistantRuntimePreparedJobResult
   | HostedAssistantRuntimeCompletedJobResult;
 
 export type HostedShareImportResult = Awaited<ReturnType<typeof importSharePackIntoVault>>;

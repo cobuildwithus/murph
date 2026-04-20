@@ -85,6 +85,15 @@ describe("hosted execution parsers coverage", () => {
       }));
     });
 
+    it("rejects the removed assistant cron runner-wake shape", () => {
+      expect(() => parseHostedRuntimeEvent({
+        eventId: "evt_removed_timer",
+        kind: "assistant.cron.tick",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        userId: "user_123",
+      })).toThrow(/wake kind/i);
+    });
+
     it("parses hydrated share packs on run-drain events", () => {
       expect(parseHostedExecutionRunnerRequest({
         bundle: null,
@@ -510,14 +519,6 @@ describe("hosted execution parsers coverage", () => {
     });
 
     it("rejects invalid event-level values", () => {
-      expect(() =>
-        parseHostedExecutionEvent({
-          kind: "assistant.cron.tick",
-          reason: "device-sync",
-          userId: "user_123",
-        }),
-      ).toThrow(/Unsupported hosted execution event kind/i);
-
       expect(() =>
         parseHostedExecutionEvent({
           kind: "unsupported.event",

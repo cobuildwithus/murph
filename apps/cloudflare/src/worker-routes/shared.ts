@@ -7,7 +7,7 @@ import type {
 import { readHostedExecutionEnvironment } from "../env.ts";
 import type { HostedExecutionContainerNamespaceLike } from "../runner-container.js";
 import {
-  createHostedUserKeyStore,
+  createHostedUserKeyStoreFromEnvironment,
 } from "../user-key-store.js";
 import type {
   WorkerEnvironmentContract,
@@ -51,19 +51,9 @@ export async function resolveHostedExecutionUserCryptoContext(input: {
   environment: WorkerRouteContext["environment"];
   userId: string;
 }) {
-  return createHostedUserKeyStore({
-    automationRecipientKeyId: input.environment.automationRecipientKeyId,
-    automationRecipientPrivateKey: input.environment.automationRecipientPrivateKey,
-    automationRecipientPrivateKeysById: input.environment.automationRecipientPrivateKeysById,
-    automationRecipientPublicKey: input.environment.automationRecipientPublicKey,
+  return createHostedUserKeyStoreFromEnvironment({
     bucket: input.bucket,
-    envelopeEncryptionKey: input.environment.platformEnvelopeKey,
-    envelopeEncryptionKeyId: input.environment.platformEnvelopeKeyId,
-    envelopeEncryptionKeysById: input.environment.platformEnvelopeKeysById,
-    recoveryRecipientKeyId: input.environment.recoveryRecipientKeyId,
-    recoveryRecipientPublicKey: input.environment.recoveryRecipientPublicKey,
-    teeAutomationRecipientKeyId: input.environment.teeAutomationRecipientKeyId,
-    teeAutomationRecipientPublicKey: input.environment.teeAutomationRecipientPublicKey,
+    environment: input.environment,
   }).requireUserCryptoContext(input.userId, {
     reason: "worker-route-access",
   });

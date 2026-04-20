@@ -106,15 +106,16 @@ function createDeviceSyncServiceForVault(vaultRoot: string) {
 function buildCronWake(occurredAt: string) {
   return {
     eventId: "evt_cron",
-    kind: "assistant.cron.tick" as const,
+    kind: "runtime.timer" as const,
     occurredAt,
-    reason: "manual" as const,
+    triggerKind: "runtime_timer" as const,
     userId: "member_123",
   };
 }
 
 function buildDeviceSyncWake(input: {
   connectionId: string;
+  eventId?: string;
   hint?: {
     jobs?: Array<{
       availableAt?: string;
@@ -131,7 +132,7 @@ function buildDeviceSyncWake(input: {
 }) {
   return {
     connectionId: input.connectionId,
-    eventId: "evt_device_sync_wake",
+    eventId: input.eventId ?? "evt_device_sync_wake",
     ...(input.hint ? { hint: input.hint } : {}),
     kind: "device-sync.wake" as const,
     occurredAt: input.occurredAt,
@@ -566,6 +567,100 @@ describe("hosted device-sync runtime", () => {
           priority: 7,
           status: "queued",
         },
+      );
+    } finally {
+      service.close();
+      await cleanup();
+    }
+  });
+
+  test("same-connection device-sync wake hints enqueue both distinct jobs", async () => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-",
+    );
+    await mkdir(vaultRoot, { recursive: true });
+
+    const service = createDeviceSyncServiceForVault(vaultRoot);
+
+    try {
+      const begin = await service.startConnection({
+        provider: "demo",
+      });
+      const connected = await service.handleOAuthCallback({
+        code: "double-wake",
+        provider: "demo",
+        state: begin.state,
+      });
+      const snapshot = buildRuntimeSnapshot({
+        connectionId: "hosted_conn_double_wake",
+        externalAccountId: connected.account.externalAccountId,
+      });
+
+      await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: createSnapshotOnlyDeviceSyncPort(snapshot),
+        wake: buildDeviceSyncWake({
+          connectionId: "hosted_conn_double_wake",
+          eventId: "evt_device_sync_wake_first",
+          hint: {
+            jobs: [
+              {
+                availableAt: "2026-04-04T10:05:00.000Z",
+                dedupeKey: "wake:resource-sync",
+                kind: "resource-sync",
+              },
+            ],
+          },
+          occurredAt: "2026-04-04T10:00:00.000Z",
+          reason: "webhook_hint",
+        }),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+
+      await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: createSnapshotOnlyDeviceSyncPort(snapshot),
+        wake: buildDeviceSyncWake({
+          connectionId: "hosted_conn_double_wake",
+          eventId: "evt_device_sync_wake_second",
+          hint: {
+            jobs: [
+              {
+                availableAt: "2026-04-04T10:06:00.000Z",
+                dedupeKey: "wake:sleep-sync",
+                kind: "sleep-sync",
+              },
+            ],
+          },
+          occurredAt: "2026-04-04T10:00:01.000Z",
+          reason: "webhook_hint",
+        }),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+
+      const jobs = readJobsForAccount(service, connected.account.id);
+      assert.equal(jobs.length, 2);
+      assert.deepEqual(
+        jobs.map((job) => ({
+          availableAt: job.availableAt,
+          dedupeKey: job.dedupeKey,
+          kind: job.kind,
+          status: job.status,
+        })),
+        [
+          {
+            availableAt: "2026-04-04T10:05:00.000Z",
+            dedupeKey: "wake:resource-sync",
+            kind: "resource-sync",
+            status: "queued",
+          },
+          {
+            availableAt: "2026-04-04T10:06:00.000Z",
+            dedupeKey: "wake:sleep-sync",
+            kind: "sleep-sync",
+            status: "queued",
+          },
+        ],
       );
     } finally {
       service.close();

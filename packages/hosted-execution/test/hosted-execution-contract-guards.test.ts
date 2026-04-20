@@ -19,7 +19,7 @@ describe("hosted execution wake guards", () => {
   it("accepts canonical wake kinds only", () => {
     expect(isHostedIngressKind("conversation.message")).toBe(true);
     expect(isHostedIngressKind("member.activated")).toBe(true);
-    expect(isHostedIngressKind("assistant.cron.tick")).toBe(false);
+    expect(isHostedIngressKind("unsupported.kind")).toBe(false);
     expect(isHostedIngressKind("linq.message.received")).toBe(false);
     expect(isHostedIngressKind("email.message.received")).toBe(false);
   });

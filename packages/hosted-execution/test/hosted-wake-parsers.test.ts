@@ -574,9 +574,8 @@ describe("hosted wake parser contracts", () => {
 
     expect(() => parseHostedIngressEnvelope({
       eventId: "wake_cron",
-      kind: "assistant.cron.tick",
+      kind: "unsupported.kind",
       occurredAt,
-      reason: "device-sync",
       userId: "member-1",
     })).toThrow(/wake kind/i);
 
