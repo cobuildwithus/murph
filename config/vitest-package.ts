@@ -1,0 +1,86 @@
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+import { defineConfig, type TestUserConfig } from "vitest/config";
+
+import {
+  createMurphVitestCoverage,
+  resolveMurphVitestCoverageProviderModule,
+} from "./vitest-coverage.js";
+import { resolveMurphVitestConcurrency } from "./vitest-parallelism.js";
+import { murphVitestNoTimeouts } from "./vitest-timeouts.js";
+import {
+  createVitestWorkspaceRuntimeAliases,
+  type WorkspaceSourceEntryRelativePaths,
+  resolveWorkspaceSourceEntries,
+} from "./workspace-source-resolution.js";
+
+type MurphVitestAlias = {
+  find: RegExp;
+  replacement: string;
+};
+
+type MurphVitestTestOptions = Omit<
+  TestUserConfig,
+  "name" | "environment" | "include" | "coverage"
+>;
+
+type MurphVitestExtraAliases =
+  | readonly MurphVitestAlias[]
+  | ((input: { packageDir: string }) => readonly MurphVitestAlias[]);
+
+export interface MurphPackageVitestConfigInput {
+  configUrl: string;
+  name: string;
+  workspaceSourceEntryRelativePaths?: WorkspaceSourceEntryRelativePaths;
+  extraAliases?: MurphVitestExtraAliases;
+  coverage?: ReturnType<typeof createMurphVitestCoverage>;
+  coverageInclude?: readonly string[];
+  coverageExclude?: readonly string[];
+  include?: readonly string[];
+  useDefaultConcurrency?: boolean;
+  useDefaultTimeouts?: boolean;
+  test?: MurphVitestTestOptions;
+}
+
+export function createMurphPackageVitestConfig(input: MurphPackageVitestConfigInput) {
+  const packageDir = path.dirname(fileURLToPath(input.configUrl));
+  const aliases = [
+    ...(input.workspaceSourceEntryRelativePaths
+      ? createVitestWorkspaceRuntimeAliases(
+          resolveWorkspaceSourceEntries(packageDir, input.workspaceSourceEntryRelativePaths),
+        )
+      : []),
+    ...resolveExtraAliases(packageDir, input.extraAliases),
+  ];
+
+  return defineConfig({
+    ...(aliases.length > 0 ? { resolve: { alias: aliases } } : {}),
+    test: {
+      ...(input.useDefaultTimeouts === false ? {} : murphVitestNoTimeouts),
+      name: input.name,
+      environment: "node",
+      ...(input.useDefaultConcurrency === false ? {} : resolveMurphVitestConcurrency()),
+      include: [...(input.include ?? ["test/**/*.test.ts"])],
+      ...(input.test ?? {}),
+      coverage:
+        input.coverage ??
+        createMurphVitestCoverage({
+          customProviderModule: resolveMurphVitestCoverageProviderModule(packageDir),
+          include: [...(input.coverageInclude ?? ["src/**/*.ts"])],
+          ...(input.coverageExclude ? { exclude: [...input.coverageExclude] } : {}),
+        }),
+    },
+  });
+}
+
+function resolveExtraAliases(
+  packageDir: string,
+  extraAliases: MurphVitestExtraAliases | undefined,
+): MurphVitestAlias[] {
+  if (!extraAliases) {
+    return [];
+  }
+
+  return [...(typeof extraAliases === "function" ? extraAliases({ packageDir }) : extraAliases)];
+}
