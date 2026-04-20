@@ -373,6 +373,8 @@ export interface HostedExecutionCursorState {
   committedSeq: string;
   createdAt: string;
   nextSeq: string;
+  nextRuntimeWakeAt?: string | null;
+  nextRuntimeWakeReason?: string | null;
   snapshotRef: HostedWakeSnapshotRef;
   updatedAt: string;
   userId: string;
@@ -430,6 +432,8 @@ export interface HostedWakeCommitRequest {
   assistantNextWakeAt?: string | null;
   committedSeq: string;
   expectedVersion: string;
+  nextRuntimeWakeAt?: string | null;
+  nextRuntimeWakeReason?: string | null;
   snapshotRef?: HostedWakeSnapshotRef;
 }
 
@@ -442,6 +446,8 @@ export interface HostedWakeCommitResponse {
 export interface HostedWakeFinalizeRequest {
   assistantNextWakeAt?: string | null;
   finalizeToken: string;
+  nextRuntimeWakeAt?: string | null;
+  nextRuntimeWakeReason?: string | null;
   snapshotRef: HostedWakeSnapshotRef;
 }
 
@@ -508,6 +514,179 @@ export interface HostedWakeStatusResponse {
   replacedByEventId?: string | null;
   wakeState?: HostedWakeLifecycleState | null;
   pendingWakeCount: number;
+}
+
+export const HOSTED_RUN_STATUSES = [
+  "acquired",
+  "running",
+  "prepared",
+  "committed_needs_finalize",
+  "finalizing",
+  "finalized",
+  "failed",
+  "superseded",
+] as const;
+
+export type HostedRunStatus = (typeof HOSTED_RUN_STATUSES)[number];
+
+export const HOSTED_RUN_TRIGGER_KINDS = [
+  "external_ingress",
+  "runtime_timer",
+  "manual_repair",
+  "retry_finalize",
+] as const;
+
+export type HostedRunTriggerKind = (typeof HOSTED_RUN_TRIGGER_KINDS)[number];
+
+export const HOSTED_RUN_EXECUTOR_KINDS = [
+  "cloudflare-container",
+  "tee",
+  "local-replay",
+] as const;
+
+export type HostedRunExecutorKind = (typeof HOSTED_RUN_EXECUTOR_KINDS)[number];
+
+export const HOSTED_RUN_LOG_LEVELS = [
+  "debug",
+  "info",
+  "warn",
+  "error",
+] as const;
+
+export type HostedRunLogLevel = (typeof HOSTED_RUN_LOG_LEVELS)[number];
+
+export interface HostedRunRecord {
+  acquiredAt: string;
+  attempt: number;
+  committedAt?: string | null;
+  createdAt: string;
+  errorClass?: string | null;
+  errorCode?: string | null;
+  eventCount: number;
+  eventKinds: string[];
+  eventSeqs: string[];
+  executorKind: HostedRunExecutorKind;
+  failedAt?: string | null;
+  finalSnapshotRef?: HostedWakeSnapshotRef;
+  finalizedAt?: string | null;
+  id: string;
+  inputCommittedSeq: string;
+  inputCursorVersion: string;
+  inputSnapshotRef?: HostedWakeSnapshotRef;
+  nextRuntimeWakeAt?: string | null;
+  nextRuntimeWakeReason?: string | null;
+  outputCommittedSeq?: string | null;
+  outputCursorVersion?: string | null;
+  preparedAt?: string | null;
+  preparedSnapshotRef?: HostedWakeSnapshotRef;
+  redactedSummary?: unknown | null;
+  startedAt?: string | null;
+  status: HostedRunStatus;
+  triggerKind: HostedRunTriggerKind;
+  updatedAt: string;
+  userId: string;
+  wakeIds: string[];
+}
+
+export interface HostedRunLogRecord {
+  at: string;
+  component: string;
+  createdAt: string;
+  id: string;
+  level: HostedRunLogLevel;
+  message: string;
+  phase: string;
+  redacted?: unknown | null;
+  runId: string;
+  userId: string;
+}
+
+export interface HostedRunAcquireRequest {
+  executorKind?: HostedRunExecutorKind | null;
+  limit?: number | null;
+  now?: string | null;
+  triggerKind?: HostedRunTriggerKind | null;
+}
+
+export interface HostedRunAcquireResponse {
+  acquired: boolean;
+  cursor: HostedExecutionCursorState;
+  events: HostedWakeRecord[];
+  pendingWakeCount: number;
+  resumeFinalize: boolean;
+  run: HostedRunRecord | null;
+  runToken?: string | null;
+}
+
+export interface HostedRunEventResult {
+  quarantineCode?: string | null;
+  state: "completed" | "quarantined";
+  wakeId: string;
+}
+
+export interface HostedRunCommitRequest {
+  eventResults?: HostedRunEventResult[];
+  expectedCursorVersion: string;
+  finalizeRequired?: boolean | null;
+  nextRuntimeWakeAt?: string | null;
+  nextRuntimeWakeReason?: string | null;
+  outputCommittedSeq: string;
+  preparedSnapshotRef?: HostedWakeSnapshotRef;
+  redactedSummary?: unknown | null;
+  runId: string;
+  runToken: string;
+}
+
+export interface HostedRunCommitResponse {
+  committed: boolean;
+  cursor: HostedExecutionCursorState;
+  needsFinalize: boolean;
+  run: HostedRunRecord | null;
+}
+
+export interface HostedRunFinalizeRequest {
+  finalSnapshotRef: HostedWakeSnapshotRef;
+  nextRuntimeWakeAt?: string | null;
+  nextRuntimeWakeReason?: string | null;
+  redactedSummary?: unknown | null;
+  runId: string;
+  runToken: string;
+}
+
+export interface HostedRunFinalizeResponse {
+  cursor: HostedExecutionCursorState;
+  finalized: boolean;
+  run: HostedRunRecord | null;
+}
+
+export interface HostedRunLogRequest {
+  at?: string | null;
+  component: string;
+  level: HostedRunLogLevel;
+  message: string;
+  phase: string;
+  redacted?: unknown | null;
+  runId: string;
+  runToken?: string | null;
+}
+
+export interface HostedRunLogResponse {
+  logged: boolean;
+  log: HostedRunLogRecord | null;
+}
+
+export interface HostedRunStatusRequest {
+  includeLogs?: boolean | null;
+  limit?: number | null;
+  runId?: string | null;
+}
+
+export interface HostedRunStatusResponse {
+  cursor: HostedExecutionCursorState;
+  logs?: HostedRunLogRecord[];
+  pendingWakeCount: number;
+  run: HostedRunRecord | null;
+  runs?: HostedRunRecord[];
 }
 
 export const HOSTED_EXECUTION_USER_ID_HEADER = "x-hosted-execution-user-id";

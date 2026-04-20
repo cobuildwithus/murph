@@ -18,18 +18,55 @@ vi.mock("@murphai/hosted-execution", async () => {
 import { HOSTED_EXECUTION_USER_ID_HEADER } from "@murphai/hosted-execution/contracts";
 
 import {
+  acquireHostedRunFromWeb,
+  commitHostedRunToWeb,
   HostedWakeTerminalStaleFetchProofError,
   commitHostedWakeCursorToWeb,
   fetchHostedWakeBatchFromWeb,
+  finalizeHostedRunInWeb,
   finalizeHostedWakeCursorInWeb,
   materializeHostedDueWakesInWeb,
   quarantineHostedWakeInWeb,
+  readHostedRunStatusFromWeb,
   readHostedWakeStatusFromWeb,
+  recordHostedRunLogInWeb,
   recordHostedWakeTerminalInWeb,
 } from "../src/web-control-plane.ts";
 import { appendHostedEmailIngressWakeInWeb } from "../src/web-control-plane-email-ingress.ts";
 
 type ObservedRequest = { init?: RequestInit; url: string };
+type HostedRunRecordFixture = {
+  acquiredAt: string;
+  attempt: number;
+  committedAt: string | null;
+  createdAt: string;
+  errorClass: string | null;
+  errorCode: string | null;
+  eventCount: number;
+  eventKinds: string[];
+  eventSeqs: string[];
+  executorKind: "cloudflare-container";
+  failedAt: string | null;
+  finalSnapshotRef: ReturnType<typeof createBundleRef> | null;
+  finalizedAt: string | null;
+  id: string;
+  inputCommittedSeq: string;
+  inputCursorVersion: string;
+  inputSnapshotRef: ReturnType<typeof createBundleRef> | null;
+  nextRuntimeWakeAt: string | null;
+  nextRuntimeWakeReason: string | null;
+  outputCommittedSeq: string | null;
+  outputCursorVersion: string | null;
+  preparedAt: string | null;
+  preparedSnapshotRef: ReturnType<typeof createBundleRef> | null;
+  redactedSummary: Record<string, unknown> | null;
+  startedAt: string | null;
+  status: string;
+  triggerKind: "runtime_timer";
+  updatedAt: string;
+  userId: string;
+  wakeIds: string[];
+};
 
 describe("cloudflare web control plane wake helpers", () => {
   beforeEach(() => {
@@ -529,6 +566,356 @@ describe("cloudflare web control plane wake helpers", () => {
       wakeSeq: "24",
     });
   });
+
+  it("acquires hosted runs through the web control plane", async () => {
+    let observedRequest: ObservedRequest | null = null;
+
+    await expect(
+      acquireHostedRunFromWeb({
+        baseUrl: "https://runner.example.test/root/",
+        body: {
+          executorKind: "cloudflare-container",
+          limit: 5,
+          triggerKind: "runtime_timer",
+        },
+        boundUserId: "user_123",
+        fetchImpl: vi.fn(async (url, init) => {
+          observedRequest = { init, url: String(url) };
+          return new Response(
+            JSON.stringify({
+              acquired: true,
+              cursor: {
+                committedSeq: "24",
+                createdAt: "2026-04-17T00:00:00.000Z",
+                nextRuntimeWakeAt: "2026-04-17T02:00:00.000Z",
+                nextRuntimeWakeReason: "assistant.run",
+                nextSeq: "25",
+                snapshotRef: null,
+                updatedAt: "2026-04-17T00:00:00.000Z",
+                userId: "user_123",
+                version: "4",
+              },
+              events: [],
+              pendingWakeCount: 0,
+              resumeFinalize: false,
+              run: createHostedRunRecord(),
+              runToken: "run_token_123",
+            }),
+            {
+              headers: { "content-type": "application/json; charset=utf-8" },
+              status: 200,
+            },
+          );
+        }) as typeof fetch,
+        timeoutMs: 2_500,
+      }),
+    ).resolves.toEqual({
+      acquired: true,
+      cursor: {
+        committedSeq: "24",
+        createdAt: "2026-04-17T00:00:00.000Z",
+        nextRuntimeWakeAt: "2026-04-17T02:00:00.000Z",
+        nextRuntimeWakeReason: "assistant.run",
+        nextSeq: "25",
+        snapshotRef: null,
+        updatedAt: "2026-04-17T00:00:00.000Z",
+        userId: "user_123",
+        version: "4",
+      },
+      events: [],
+      pendingWakeCount: 0,
+      resumeFinalize: false,
+      run: createHostedRunRecord(),
+      runToken: "run_token_123",
+    });
+
+    const request = requireObservedRequest(observedRequest);
+    expect(request.url).toBe(
+      "https://runner.example.test/api/internal/hosted-run/acquire",
+    );
+    expect(request.init?.method).toBe("POST");
+    expect(new Headers(request.init?.headers).get("content-type")).toBe("application/json");
+    expect(new Headers(request.init?.headers).get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe("user_123");
+    expect(JSON.parse(String(request.init?.body))).toEqual({
+      executorKind: "cloudflare-container",
+      limit: 5,
+      triggerKind: "runtime_timer",
+    });
+  });
+
+  it("commits and finalizes hosted runs through the web control plane", async () => {
+    let observedCommitRequest: ObservedRequest | null = null;
+    let observedFinalizeRequest: ObservedRequest | null = null;
+    const snapshotRef = createBundleRef("run_25");
+
+    await expect(
+      commitHostedRunToWeb({
+        baseUrl: "https://runner.example.test/root/",
+        body: {
+          eventResults: [
+            {
+              quarantineCode: null,
+              state: "completed",
+              wakeId: "wake_25",
+            },
+          ],
+          expectedCursorVersion: "4",
+          finalizeRequired: true,
+          nextRuntimeWakeAt: "2026-04-17T02:00:00.000Z",
+          nextRuntimeWakeReason: "assistant.run",
+          outputCommittedSeq: "25",
+          preparedSnapshotRef: snapshotRef,
+          redactedSummary: { stage: "prepared" },
+          runId: "run-1",
+          runToken: "run_token_123",
+        },
+        boundUserId: "user_123",
+        fetchImpl: vi.fn(async (url, init) => {
+          observedCommitRequest = { init, url: String(url) };
+          return new Response(
+            JSON.stringify({
+              committed: true,
+              cursor: {
+                committedSeq: "25",
+                createdAt: "2026-04-17T00:00:00.000Z",
+                nextSeq: "26",
+                snapshotRef,
+                updatedAt: "2026-04-17T00:00:01.000Z",
+                userId: "user_123",
+                version: "5",
+              },
+              needsFinalize: true,
+              run: createHostedRunRecord({
+                outputCommittedSeq: "25",
+                outputCursorVersion: "5",
+                preparedSnapshotRef: snapshotRef,
+              }),
+            }),
+            {
+              headers: { "content-type": "application/json; charset=utf-8" },
+              status: 200,
+            },
+          );
+        }) as typeof fetch,
+        timeoutMs: 2_500,
+      }),
+    ).resolves.toMatchObject({
+      committed: true,
+      needsFinalize: true,
+    });
+
+    await expect(
+      finalizeHostedRunInWeb({
+        baseUrl: "https://runner.example.test/root/",
+        body: {
+          finalSnapshotRef: snapshotRef,
+          nextRuntimeWakeAt: "2026-04-17T03:00:00.000Z",
+          nextRuntimeWakeReason: "assistant.run",
+          redactedSummary: { stage: "finalized" },
+          runId: "run-1",
+          runToken: "run_token_123",
+        },
+        boundUserId: "user_123",
+        fetchImpl: vi.fn(async (url, init) => {
+          observedFinalizeRequest = { init, url: String(url) };
+          return new Response(
+            JSON.stringify({
+              cursor: {
+                committedSeq: "25",
+                createdAt: "2026-04-17T00:00:00.000Z",
+                nextSeq: "26",
+                snapshotRef,
+                updatedAt: "2026-04-17T00:00:02.000Z",
+                userId: "user_123",
+                version: "6",
+              },
+              finalized: true,
+              run: createHostedRunRecord({
+                finalSnapshotRef: snapshotRef,
+                finalizedAt: "2026-04-17T00:00:02.000Z",
+                outputCommittedSeq: "25",
+                outputCursorVersion: "6",
+                preparedSnapshotRef: snapshotRef,
+                status: "finalized",
+              }),
+            }),
+            {
+              headers: { "content-type": "application/json; charset=utf-8" },
+              status: 200,
+            },
+          );
+        }) as typeof fetch,
+        timeoutMs: 2_500,
+      }),
+    ).resolves.toMatchObject({
+      finalized: true,
+    });
+
+    const commitRequest = requireObservedRequest(observedCommitRequest);
+    expect(commitRequest.url).toBe(
+      "https://runner.example.test/api/internal/hosted-run/commit",
+    );
+    expect(JSON.parse(String(commitRequest.init?.body))).toEqual({
+      eventResults: [
+        {
+          quarantineCode: null,
+          state: "completed",
+          wakeId: "wake_25",
+        },
+      ],
+      expectedCursorVersion: "4",
+      finalizeRequired: true,
+      nextRuntimeWakeAt: "2026-04-17T02:00:00.000Z",
+      nextRuntimeWakeReason: "assistant.run",
+      outputCommittedSeq: "25",
+      preparedSnapshotRef: snapshotRef,
+      redactedSummary: { stage: "prepared" },
+      runId: "run-1",
+      runToken: "run_token_123",
+    });
+
+    const finalizeRequest = requireObservedRequest(observedFinalizeRequest);
+    expect(finalizeRequest.url).toBe(
+      "https://runner.example.test/api/internal/hosted-run/finalize",
+    );
+    expect(JSON.parse(String(finalizeRequest.init?.body))).toEqual({
+      finalSnapshotRef: snapshotRef,
+      nextRuntimeWakeAt: "2026-04-17T03:00:00.000Z",
+      nextRuntimeWakeReason: "assistant.run",
+      redactedSummary: { stage: "finalized" },
+      runId: "run-1",
+      runToken: "run_token_123",
+    });
+  });
+
+  it("records hosted run logs and reads hosted run status through the web control plane", async () => {
+    let observedLogRequest: ObservedRequest | null = null;
+    let observedStatusRequest: ObservedRequest | null = null;
+
+    await expect(
+      recordHostedRunLogInWeb({
+        baseUrl: "https://runner.example.test/root/",
+        body: {
+          at: "2026-04-17T00:00:00.000Z",
+          component: "runtime",
+          level: "info",
+          message: "prepared snapshot",
+          phase: "prepare",
+          redacted: { stage: "prepared" },
+          runId: "run-1",
+          runToken: "run_token_123",
+        },
+        boundUserId: "user_123",
+        fetchImpl: vi.fn(async (url, init) => {
+          observedLogRequest = { init, url: String(url) };
+          return new Response(
+            JSON.stringify({
+              logged: true,
+              log: {
+                at: "2026-04-17T00:00:00.000Z",
+                component: "runtime",
+                createdAt: "2026-04-17T00:00:00.000Z",
+                id: "log-1",
+                level: "info",
+                message: "prepared snapshot",
+                phase: "prepare",
+                redacted: { stage: "prepared" },
+                runId: "run-1",
+                userId: "user_123",
+              },
+            }),
+            {
+              headers: { "content-type": "application/json; charset=utf-8" },
+              status: 200,
+            },
+          );
+        }) as typeof fetch,
+        timeoutMs: 2_500,
+      }),
+    ).resolves.toMatchObject({
+      logged: true,
+    });
+
+    await expect(
+      readHostedRunStatusFromWeb({
+        baseUrl: "https://runner.example.test/root/",
+        body: {
+          includeLogs: true,
+          limit: 3,
+          runId: "run-1",
+        },
+        boundUserId: "user_123",
+        fetchImpl: vi.fn(async (url, init) => {
+          observedStatusRequest = { init, url: String(url) };
+          return new Response(
+            JSON.stringify({
+              cursor: {
+                committedSeq: "25",
+                createdAt: "2026-04-17T00:00:00.000Z",
+                nextSeq: "26",
+                snapshotRef: null,
+                updatedAt: "2026-04-17T00:00:02.000Z",
+                userId: "user_123",
+                version: "6",
+              },
+              logs: [
+                {
+                  at: "2026-04-17T00:00:00.000Z",
+                  component: "runtime",
+                  createdAt: "2026-04-17T00:00:00.000Z",
+                  id: "log-1",
+                  level: "info",
+                  message: "prepared snapshot",
+                  phase: "prepare",
+                  redacted: { stage: "prepared" },
+                  runId: "run-1",
+                  userId: "user_123",
+                },
+              ],
+              pendingWakeCount: 0,
+              run: createHostedRunRecord({
+                outputCommittedSeq: "25",
+                outputCursorVersion: "6",
+              }),
+              runs: [createHostedRunRecord()],
+            }),
+            {
+              headers: { "content-type": "application/json; charset=utf-8" },
+              status: 200,
+            },
+          );
+        }) as typeof fetch,
+        timeoutMs: 2_500,
+      }),
+    ).resolves.toMatchObject({
+      pendingWakeCount: 0,
+    });
+
+    const logRequest = requireObservedRequest(observedLogRequest);
+    expect(logRequest.url).toBe(
+      "https://runner.example.test/api/internal/hosted-run/log",
+    );
+    expect(JSON.parse(String(logRequest.init?.body))).toEqual({
+      at: "2026-04-17T00:00:00.000Z",
+      component: "runtime",
+      level: "info",
+      message: "prepared snapshot",
+      phase: "prepare",
+      redacted: { stage: "prepared" },
+      runId: "run-1",
+      runToken: "run_token_123",
+    });
+
+    const statusRequest = requireObservedRequest(observedStatusRequest);
+    expect(statusRequest.url).toBe(
+      "https://runner.example.test/api/internal/hosted-run/status",
+    );
+    expect(JSON.parse(String(statusRequest.init?.body))).toEqual({
+      includeLogs: true,
+      limit: 3,
+      runId: "run-1",
+    });
+  });
 });
 
 function requireObservedRequest(request: ObservedRequest | null): ObservedRequest {
@@ -545,5 +932,49 @@ function createBundleRef(id: string) {
     key: `bundles/vault/${id}.bundle.json`,
     size: 128,
     updatedAt: "2026-04-17T00:00:00.000Z",
+  };
+}
+
+function createHostedRunRecord(
+  overrides: Partial<HostedRunRecordFixture> = {},
+) {
+  return {
+    ...createHostedRunRecordBase(),
+    ...overrides,
+  };
+}
+
+function createHostedRunRecordBase(): HostedRunRecordFixture {
+  return {
+    acquiredAt: "2026-04-17T00:00:00.000Z",
+    attempt: 1,
+    committedAt: "2026-04-17T00:00:02.000Z",
+    createdAt: "2026-04-17T00:00:00.000Z",
+    errorClass: null,
+    errorCode: null,
+    eventCount: 1,
+    eventKinds: ["assistant.cron.tick"],
+    eventSeqs: ["24"],
+    executorKind: "cloudflare-container",
+    failedAt: null,
+    finalSnapshotRef: null,
+    finalizedAt: null,
+    id: "run-1",
+    inputCommittedSeq: "24",
+    inputCursorVersion: "4",
+    inputSnapshotRef: null,
+    nextRuntimeWakeAt: "2026-04-17T02:00:00.000Z",
+    nextRuntimeWakeReason: "assistant.run",
+    outputCommittedSeq: null,
+    outputCursorVersion: null,
+    preparedAt: "2026-04-17T00:00:01.000Z",
+    preparedSnapshotRef: null,
+    redactedSummary: { stage: "prepared" },
+    startedAt: "2026-04-17T00:00:00.500Z",
+    status: "acquired",
+    triggerKind: "runtime_timer",
+    updatedAt: "2026-04-17T00:00:02.000Z",
+    userId: "user_123",
+    wakeIds: ["wake_25"],
   };
 }

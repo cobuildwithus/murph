@@ -10,6 +10,16 @@ import {
   type HostedWakeFetchResponse,
   type HostedWakeFinalizeRequest,
   type HostedWakeFinalizeResponse,
+  type HostedRunAcquireRequest,
+  type HostedRunAcquireResponse,
+  type HostedRunCommitRequest,
+  type HostedRunCommitResponse,
+  type HostedRunFinalizeRequest,
+  type HostedRunFinalizeResponse,
+  type HostedRunLogRequest,
+  type HostedRunLogResponse,
+  type HostedRunStatusRequest,
+  type HostedRunStatusResponse,
   type HostedWakeMaterializeResponse,
   type HostedWakeTerminalRequest,
   type HostedWakeTerminalResponse,
@@ -26,6 +36,11 @@ import {
   parseHostedWakeTerminalResponse,
   parseHostedWakeQuarantineResponse,
   parseHostedWakeStatusResponse,
+  parseHostedRunAcquireResponse,
+  parseHostedRunCommitResponse,
+  parseHostedRunFinalizeResponse,
+  parseHostedRunLogResponse,
+  parseHostedRunStatusResponse,
 } from "@murphai/hosted-execution/parsers";
 import {
   normalizeHostedExecutionBaseUrl,
@@ -124,6 +139,96 @@ const HOSTED_WEB_HOSTED_WAKE_TERMINAL_PATH = "/api/internal/hosted-wake/terminal
 const HOSTED_WEB_HOSTED_WAKE_QUARANTINE_PATH = "/api/internal/hosted-wake/quarantine";
 const HOSTED_WEB_HOSTED_WAKE_STATUS_PATH = "/api/internal/hosted-wake/status";
 const HOSTED_WEB_HOSTED_WAKE_UNSEEN_PATH = "/api/internal/hosted-wake/unseen";
+const HOSTED_WEB_HOSTED_RUN_ACQUIRE_PATH = "/api/internal/hosted-run/acquire";
+const HOSTED_WEB_HOSTED_RUN_COMMIT_PATH = "/api/internal/hosted-run/commit";
+const HOSTED_WEB_HOSTED_RUN_FINALIZE_PATH = "/api/internal/hosted-run/finalize";
+const HOSTED_WEB_HOSTED_RUN_LOG_PATH = "/api/internal/hosted-run/log";
+const HOSTED_WEB_HOSTED_RUN_STATUS_PATH = "/api/internal/hosted-run/status";
+
+export async function acquireHostedRunFromWeb(input: {
+  baseUrl: string;
+  body?: HostedRunAcquireRequest;
+  boundUserId: string;
+  callbackSigning?: HostedWebCallbackSigningEnvironment | null;
+  fetchImpl?: typeof fetch;
+  timeoutMs: number | null;
+}): Promise<HostedRunAcquireResponse> {
+  return requestHostedWebControlPlaneJson({
+    body: JSON.stringify(input.body ?? {}),
+    description: "Hosted run acquire",
+    input,
+    parse: parseHostedRunAcquireResponse,
+    path: HOSTED_WEB_HOSTED_RUN_ACQUIRE_PATH,
+  });
+}
+
+export async function commitHostedRunToWeb(input: {
+  baseUrl: string;
+  body: HostedRunCommitRequest;
+  boundUserId: string;
+  callbackSigning?: HostedWebCallbackSigningEnvironment | null;
+  fetchImpl?: typeof fetch;
+  timeoutMs: number | null;
+}): Promise<HostedRunCommitResponse> {
+  return requestHostedWebControlPlaneJson({
+    body: JSON.stringify(input.body),
+    description: "Hosted run commit",
+    input,
+    parse: parseHostedRunCommitResponse,
+    path: HOSTED_WEB_HOSTED_RUN_COMMIT_PATH,
+  });
+}
+
+export async function finalizeHostedRunInWeb(input: {
+  baseUrl: string;
+  body: HostedRunFinalizeRequest;
+  boundUserId: string;
+  callbackSigning?: HostedWebCallbackSigningEnvironment | null;
+  fetchImpl?: typeof fetch;
+  timeoutMs: number | null;
+}): Promise<HostedRunFinalizeResponse> {
+  return requestHostedWebControlPlaneJson({
+    body: JSON.stringify(input.body),
+    description: "Hosted run finalize",
+    input,
+    parse: parseHostedRunFinalizeResponse,
+    path: HOSTED_WEB_HOSTED_RUN_FINALIZE_PATH,
+  });
+}
+
+export async function recordHostedRunLogInWeb(input: {
+  baseUrl: string;
+  body: HostedRunLogRequest;
+  boundUserId: string;
+  callbackSigning?: HostedWebCallbackSigningEnvironment | null;
+  fetchImpl?: typeof fetch;
+  timeoutMs: number | null;
+}): Promise<HostedRunLogResponse> {
+  return requestHostedWebControlPlaneJson({
+    body: JSON.stringify(input.body),
+    description: "Hosted run log",
+    input,
+    parse: parseHostedRunLogResponse,
+    path: HOSTED_WEB_HOSTED_RUN_LOG_PATH,
+  });
+}
+
+export async function readHostedRunStatusFromWeb(input: {
+  baseUrl: string;
+  body?: HostedRunStatusRequest;
+  boundUserId: string;
+  callbackSigning?: HostedWebCallbackSigningEnvironment | null;
+  fetchImpl?: typeof fetch;
+  timeoutMs: number | null;
+}): Promise<HostedRunStatusResponse> {
+  return requestHostedWebControlPlaneJson({
+    body: JSON.stringify(input.body ?? {}),
+    description: "Hosted run status read",
+    input,
+    parse: parseHostedRunStatusResponse,
+    path: HOSTED_WEB_HOSTED_RUN_STATUS_PATH,
+  });
+}
 
 export async function fetchHostedWakeBatchFromWeb(input: {
   baseUrl: string;
@@ -465,6 +570,55 @@ export async function readHostedWakeStatusFromWeb(input: {
   }
 
   return parseHostedWakeStatusResponse(await response.json());
+}
+
+async function requestHostedWebControlPlaneJson<TResponse>(input: {
+  body: string;
+  description: string;
+  input: {
+    baseUrl: string;
+    boundUserId: string;
+    callbackSigning?: HostedWebCallbackSigningEnvironment | null;
+    fetchImpl?: typeof fetch;
+    timeoutMs: number | null;
+  };
+  parse: (value: unknown) => TResponse;
+  path: string;
+}): Promise<TResponse> {
+  let response: Response;
+  try {
+    response = await fetchHostedExecutionWebControlPlaneResponse({
+      baseUrl: input.input.baseUrl,
+      body: input.body,
+      boundUserId: input.input.boundUserId,
+      callbackSigning: input.input.callbackSigning,
+      fetchImpl: input.input.fetchImpl,
+      method: "POST",
+      path: input.path,
+      timeoutMs: input.input.timeoutMs,
+    });
+  } catch (error) {
+    emitHostedWebControlPlaneRequestFailure({
+      boundUserId: input.input.boundUserId,
+      description: input.description,
+      error,
+      path: input.path,
+    });
+    throw error;
+  }
+
+  if (!response.ok) {
+    const responseDetail = (await response.text()).trim();
+    throw emitHostedWebControlPlaneResponseFailure({
+      boundUserId: input.input.boundUserId,
+      description: input.description,
+      path: input.path,
+      responseDetail: responseDetail.length > 0 ? responseDetail : null,
+      response,
+    });
+  }
+
+  return input.parse(await response.json());
 }
 
 function requireHostedWebControlBaseUrl(value: string): string {

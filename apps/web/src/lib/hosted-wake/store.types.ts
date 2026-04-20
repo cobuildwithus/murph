@@ -14,6 +14,8 @@ export interface HostedExecutionCursorRow {
   committedSeq: bigint;
   createdAt: Date;
   nextSeq: bigint;
+  nextRuntimeWakeAt: Date | null;
+  nextRuntimeWakeReason: string | null;
   snapshotRef: Prisma.JsonValue | null;
   updatedAt: Date;
   userId: string;
@@ -22,6 +24,7 @@ export interface HostedExecutionCursorRow {
 
 export interface HostedWakeRow {
   behavior: HostedWakeBehavior;
+  completedAt: Date | null;
   coalescingKey: string | null;
   createdAt: Date;
   dedupeKey: string | null;
@@ -34,7 +37,9 @@ export interface HostedWakeRow {
   payloadSchema: string;
   quarantineCode: string | null;
   quarantinedAt: Date | null;
+  runId: string | null;
   seq: bigint;
+  state: string;
   updatedAt: Date;
   userId: string;
 }

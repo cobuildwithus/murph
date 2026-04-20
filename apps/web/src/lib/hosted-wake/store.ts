@@ -343,6 +343,8 @@ export async function commitHostedExecutionCursorTx(input: {
   assistantNextWakeAt?: string | null;
   committedSeq: bigint;
   expectedVersion: bigint;
+  nextRuntimeWakeAt?: string | null;
+  nextRuntimeWakeReason?: string | null;
   snapshotRef?: HostedWakeSnapshotRef;
   tx: HostedWakeMutationTx;
   userId: string;
@@ -381,6 +383,12 @@ export async function commitHostedExecutionCursorTx(input: {
   const nextAssistantNextWakeAt = input.assistantNextWakeAt === undefined
     ? cursor.assistantNextWakeAt
     : normalizeHostedCursorWakeAt(input.assistantNextWakeAt);
+  const nextRuntimeWakeAt = input.nextRuntimeWakeAt === undefined
+    ? cursor.nextRuntimeWakeAt
+    : normalizeHostedCursorWakeAt(input.nextRuntimeWakeAt);
+  const nextRuntimeWakeReason = input.nextRuntimeWakeReason === undefined
+    ? cursor.nextRuntimeWakeReason
+    : normalizeHostedCursorWakeReason(input.nextRuntimeWakeReason);
   const nextSnapshotJson = nextSnapshotRef === Prisma.DbNull ? null : nextSnapshotRef;
   const canAdvanceSingleWake = input.committedSeq === cursor.committedSeq + 1n
     && input.committedSeq < cursor.nextSeq;
@@ -453,6 +461,8 @@ export async function commitHostedExecutionCursorTx(input: {
     data: {
       assistantNextWakeAt: nextAssistantNextWakeAt,
       committedSeq: input.committedSeq,
+      nextRuntimeWakeAt,
+      nextRuntimeWakeReason,
       snapshotRef: nextSnapshotRef,
       version: {
         increment: 1,
@@ -487,6 +497,8 @@ export async function commitHostedExecutionCursorTx(input: {
 export async function finalizeHostedExecutionCursorTx(input: {
   assistantNextWakeAt?: string | null;
   finalizeToken: string;
+  nextRuntimeWakeAt?: string | null;
+  nextRuntimeWakeReason?: string | null;
   snapshotRef: HostedWakeSnapshotRef;
   tx: HostedWakeMutationTx;
   userId: string;
@@ -504,6 +516,12 @@ export async function finalizeHostedExecutionCursorTx(input: {
   const nextAssistantNextWakeAt = input.assistantNextWakeAt === undefined
     ? cursor.assistantNextWakeAt
     : normalizeHostedCursorWakeAt(input.assistantNextWakeAt);
+  const nextRuntimeWakeAt = input.nextRuntimeWakeAt === undefined
+    ? cursor.nextRuntimeWakeAt
+    : normalizeHostedCursorWakeAt(input.nextRuntimeWakeAt);
+  const nextRuntimeWakeReason = input.nextRuntimeWakeReason === undefined
+    ? cursor.nextRuntimeWakeReason
+    : normalizeHostedCursorWakeReason(input.nextRuntimeWakeReason);
 
   if (
     cursor.committedSeq !== committedSeq
@@ -541,8 +559,21 @@ export async function finalizeHostedExecutionCursorTx(input: {
     ) !== (
       nextAssistantNextWakeAt?.toISOString() ?? null
     );
+  const nextRuntimeWakeAtChanged = input.nextRuntimeWakeAt !== undefined
+    && (
+      cursor.nextRuntimeWakeAt?.toISOString() ?? null
+    ) !== (
+      nextRuntimeWakeAt?.toISOString() ?? null
+    );
+  const nextRuntimeWakeReasonChanged = input.nextRuntimeWakeReason !== undefined
+    && cursor.nextRuntimeWakeReason !== nextRuntimeWakeReason;
 
-  if (!snapshotRefChanged && !assistantNextWakeAtChanged) {
+  if (
+    !snapshotRefChanged
+    && !assistantNextWakeAtChanged
+    && !nextRuntimeWakeAtChanged
+    && !nextRuntimeWakeReasonChanged
+  ) {
     return {
       finalized: false,
       cursor: projectHostedExecutionCursorRecord(cursor),
@@ -575,6 +606,8 @@ export async function finalizeHostedExecutionCursorTx(input: {
     },
     data: {
       assistantNextWakeAt: nextAssistantNextWakeAt,
+      nextRuntimeWakeAt,
+      nextRuntimeWakeReason,
       snapshotRef: nextSnapshotRef,
       version: {
         increment: 1,
@@ -631,10 +664,19 @@ function normalizeHostedCursorWakeAt(value: string | null): Date | null {
 
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) {
-    throw new TypeError("assistantNextWakeAt must be a valid ISO-8601 timestamp or null.");
+    throw new TypeError("hosted runtime wake timestamp must be a valid ISO-8601 timestamp or null.");
   }
 
   return parsed;
+}
+
+function normalizeHostedCursorWakeReason(value: string | null): string | null {
+  if (value === null) {
+    return null;
+  }
+
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
 }
 
 function shouldRefreshTerminalFetchFence(

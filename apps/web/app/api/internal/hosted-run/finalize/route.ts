@@ -1,0 +1,24 @@
+import { parseHostedRunFinalizeRequest } from "@murphai/hosted-execution/parsers";
+
+import {
+  requireHostedCloudflareCallbackRequest,
+} from "@/src/lib/hosted-execution/cloudflare-callback-auth";
+import { readOptionalJsonObject } from "@/src/lib/http";
+import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
+import { finalizeHostedRun } from "@/src/lib/hosted-run/store";
+
+export const POST = withJsonError(async (request: Request) => {
+  const userId = await requireHostedCloudflareCallbackRequest(request);
+  const body = parseHostedRunFinalizeRequest(await readOptionalJsonObject(request));
+  const response = await finalizeHostedRun({
+    finalSnapshotRef: body.finalSnapshotRef,
+    nextRuntimeWakeAt: "nextRuntimeWakeAt" in body ? body.nextRuntimeWakeAt ?? null : undefined,
+    nextRuntimeWakeReason: "nextRuntimeWakeReason" in body ? body.nextRuntimeWakeReason ?? null : undefined,
+    redactedSummary: "redactedSummary" in body ? body.redactedSummary ?? null : undefined,
+    runId: body.runId,
+    runToken: body.runToken,
+    userId,
+  });
+
+  return jsonOk(response);
+});

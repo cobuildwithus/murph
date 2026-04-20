@@ -210,6 +210,8 @@ model HostedMember {
   hostedWakeEvents   HostedWakeEvent[]
   hostedWakePayloads HostedWakePayload[]
   hostedWakeTerminals HostedWakeTerminal[]
+  hostedRuns         HostedRun[]
+  hostedRunLogs      HostedRunLog[]
 
   @@index([billingStatus])
   @@map("hosted_member")
@@ -295,6 +297,10 @@ model HostedExecutionCursor {
   userId       String       @id @map("user_id")
   nextSeq      BigInt       @default(1) @map("next_seq")
   committedSeq BigInt       @default(0) @map("committed_seq")
+  nextRuntimeWakeAt DateTime? @map("next_runtime_wake_at")
+  nextRuntimeWakeReason String? @map("next_runtime_wake_reason")
+  /// Deprecated compatibility mirror for the wake-by-wake executor path.
+  /// New hosted-run orchestration uses nextRuntimeWakeAt/nextRuntimeWakeReason.
   assistantNextWakeAt DateTime? @map("assistant_next_wake_at")
   snapshotRef  Json?        @map("snapshot_ref")
   version      BigInt       @default(0) @map("version")
@@ -308,9 +314,11 @@ model HostedExecutionCursor {
 model HostedWake {
   id                    String             @id
   userId                String             @map("user_id")
+  runId                 String?            @map("run_id")
   seq                   BigInt             @map("seq")
   kind                  String
   behavior              HostedWakeBehavior
+  state                 String             @default("pending")
   dedupeKey             String?            @map("dedupe_key")
   coalescingKey         String?            @map("coalescing_key")
   occurredAt            DateTime           @map("occurred_at")
@@ -318,11 +326,13 @@ model HostedWake {
   payloadInlineCiphertext String?          @map("payload_inline_ciphertext")
   payloadRef            String?            @map("payload_ref")
   payloadBytes          Int?               @map("payload_bytes")
+  completedAt           DateTime?          @map("completed_at")
   quarantinedAt         DateTime?          @map("quarantined_at")
   quarantineCode        String?            @map("quarantine_code")
   createdAt             DateTime           @default(now()) @map("created_at")
   updatedAt             DateTime           @updatedAt @map("updated_at")
   member                HostedMember       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  run                   HostedRun?         @relation(fields: [runId], references: [id], onDelete: SetNull)
   events                HostedWakeEvent[]
   payload               HostedWakePayload?
   terminal              HostedWakeTerminal?
@@ -330,9 +340,74 @@ model HostedWake {
   @@unique([userId, seq])
   @@unique([userId, dedupeKey])
   @@index([userId, seq])
+  @@index([userId, state, seq])
+  @@index([runId])
   @@index([userId, coalescingKey, seq])
   @@index([userId, kind, seq])
   @@map("hosted_wake")
+}
+
+model HostedRun {
+  id                   String         @id
+  userId               String         @map("user_id")
+  executorKind         String         @default("cloudflare-container") @map("executor_kind")
+  status               String
+  triggerKind          String         @map("trigger_kind")
+  runTokenHash         String         @unique @map("run_token_hash")
+  inputCommittedSeq    BigInt         @map("input_committed_seq")
+  outputCommittedSeq   BigInt?        @map("output_committed_seq")
+  inputCursorVersion   BigInt         @map("input_cursor_version")
+  outputCursorVersion  BigInt?        @map("output_cursor_version")
+  inputSnapshotRef     Json?          @map("input_snapshot_ref")
+  preparedSnapshotRef  Json?          @map("prepared_snapshot_ref")
+  finalSnapshotRef     Json?          @map("final_snapshot_ref")
+  nextRuntimeWakeAt    DateTime?      @map("next_runtime_wake_at")
+  nextRuntimeWakeReason String?       @map("next_runtime_wake_reason")
+  eventCount           Int            @default(0) @map("event_count")
+  eventKindsJson       Json           @map("event_kinds_json")
+  eventSeqsJson        Json           @map("event_seqs_json")
+  wakeIdsJson          Json           @map("wake_ids_json")
+  redactedSummaryJson  Json?          @map("redacted_summary_json")
+  errorCode            String?        @map("error_code")
+  errorClass           String?        @map("error_class")
+  attempt              Int            @default(1)
+  acquiredAt           DateTime       @map("acquired_at")
+  startedAt            DateTime?      @map("started_at")
+  preparedAt           DateTime?      @map("prepared_at")
+  committedAt          DateTime?      @map("committed_at")
+  finalizedAt          DateTime?      @map("finalized_at")
+  failedAt             DateTime?      @map("failed_at")
+  createdAt            DateTime       @default(now()) @map("created_at")
+  updatedAt            DateTime       @updatedAt @map("updated_at")
+  member               HostedMember   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  wakes                HostedWake[]
+  logs                 HostedRunLog[]
+
+  @@index([userId, createdAt])
+  @@index([userId, status, createdAt])
+  @@index([status, createdAt])
+  @@index([triggerKind, createdAt])
+  @@map("hosted_run")
+}
+
+model HostedRunLog {
+  id             String       @id
+  runId          String       @map("run_id")
+  userId         String       @map("user_id")
+  at             DateTime
+  level          String
+  component      String
+  phase          String
+  message        String
+  redactedJson   Json?        @map("redacted_json")
+  createdAt      DateTime     @default(now()) @map("created_at")
+  member         HostedMember @relation(fields: [userId], references: [id], onDelete: Cascade)
+  run            HostedRun    @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([userId, at])
+  @@index([runId, at])
+  @@index([level, at])
+  @@map("hosted_run_log")
 }
 
 model HostedWakeEvent {

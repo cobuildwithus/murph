@@ -231,6 +231,8 @@ CREATE TABLE "hosted_execution_cursor" (
     "user_id" TEXT NOT NULL,
     "next_seq" BIGINT NOT NULL DEFAULT 1,
     "committed_seq" BIGINT NOT NULL DEFAULT 0,
+    "next_runtime_wake_at" TIMESTAMP(3),
+    "next_runtime_wake_reason" TEXT,
     "assistant_next_wake_at" TIMESTAMP(3),
     "snapshot_ref" JSONB,
     "version" BIGINT NOT NULL DEFAULT 0,
@@ -244,9 +246,11 @@ CREATE TABLE "hosted_execution_cursor" (
 CREATE TABLE "hosted_wake" (
     "id" TEXT NOT NULL,
     "user_id" TEXT NOT NULL,
+    "run_id" TEXT,
     "seq" BIGINT NOT NULL,
     "kind" TEXT NOT NULL,
     "behavior" "HostedWakeBehavior" NOT NULL,
+    "state" TEXT NOT NULL DEFAULT 'pending',
     "dedupe_key" TEXT,
     "coalescing_key" TEXT,
     "occurred_at" TIMESTAMP(3) NOT NULL,
@@ -254,12 +258,66 @@ CREATE TABLE "hosted_wake" (
     "payload_inline_ciphertext" TEXT,
     "payload_ref" TEXT,
     "payload_bytes" INTEGER,
+    "completed_at" TIMESTAMP(3),
     "quarantined_at" TIMESTAMP(3),
     "quarantine_code" TEXT,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "hosted_wake_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "hosted_run" (
+    "id" TEXT NOT NULL,
+    "user_id" TEXT NOT NULL,
+    "executor_kind" TEXT NOT NULL DEFAULT 'cloudflare-container',
+    "status" TEXT NOT NULL,
+    "trigger_kind" TEXT NOT NULL,
+    "run_token_hash" TEXT NOT NULL,
+    "input_committed_seq" BIGINT NOT NULL,
+    "output_committed_seq" BIGINT,
+    "input_cursor_version" BIGINT NOT NULL,
+    "output_cursor_version" BIGINT,
+    "input_snapshot_ref" JSONB,
+    "prepared_snapshot_ref" JSONB,
+    "final_snapshot_ref" JSONB,
+    "next_runtime_wake_at" TIMESTAMP(3),
+    "next_runtime_wake_reason" TEXT,
+    "event_count" INTEGER NOT NULL DEFAULT 0,
+    "event_kinds_json" JSONB NOT NULL,
+    "event_seqs_json" JSONB NOT NULL,
+    "wake_ids_json" JSONB NOT NULL,
+    "redacted_summary_json" JSONB,
+    "error_code" TEXT,
+    "error_class" TEXT,
+    "attempt" INTEGER NOT NULL DEFAULT 1,
+    "acquired_at" TIMESTAMP(3) NOT NULL,
+    "started_at" TIMESTAMP(3),
+    "prepared_at" TIMESTAMP(3),
+    "committed_at" TIMESTAMP(3),
+    "finalized_at" TIMESTAMP(3),
+    "failed_at" TIMESTAMP(3),
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "hosted_run_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "hosted_run_log" (
+    "id" TEXT NOT NULL,
+    "run_id" TEXT NOT NULL,
+    "user_id" TEXT NOT NULL,
+    "at" TIMESTAMP(3) NOT NULL,
+    "level" TEXT NOT NULL,
+    "component" TEXT NOT NULL,
+    "phase" TEXT NOT NULL,
+    "message" TEXT NOT NULL,
+    "redacted_json" JSONB,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "hosted_run_log_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -588,6 +646,12 @@ CREATE UNIQUE INDEX "hosted_member_email_authorization_direct_public_sender_look
 CREATE INDEX "hosted_wake_user_id_seq_idx" ON "hosted_wake"("user_id", "seq");
 
 -- CreateIndex
+CREATE INDEX "hosted_wake_user_id_state_seq_idx" ON "hosted_wake"("user_id", "state", "seq");
+
+-- CreateIndex
+CREATE INDEX "hosted_wake_run_id_idx" ON "hosted_wake"("run_id");
+
+-- CreateIndex
 CREATE INDEX "hosted_wake_user_id_coalescing_key_seq_idx" ON "hosted_wake"("user_id", "coalescing_key", "seq");
 
 -- CreateIndex
@@ -598,6 +662,30 @@ CREATE UNIQUE INDEX "hosted_wake_user_id_seq_key" ON "hosted_wake"("user_id", "s
 
 -- CreateIndex
 CREATE UNIQUE INDEX "hosted_wake_user_id_dedupe_key_key" ON "hosted_wake"("user_id", "dedupe_key");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "hosted_run_run_token_hash_key" ON "hosted_run"("run_token_hash");
+
+-- CreateIndex
+CREATE INDEX "hosted_run_user_id_created_at_idx" ON "hosted_run"("user_id", "created_at");
+
+-- CreateIndex
+CREATE INDEX "hosted_run_user_id_status_created_at_idx" ON "hosted_run"("user_id", "status", "created_at");
+
+-- CreateIndex
+CREATE INDEX "hosted_run_status_created_at_idx" ON "hosted_run"("status", "created_at");
+
+-- CreateIndex
+CREATE INDEX "hosted_run_trigger_kind_created_at_idx" ON "hosted_run"("trigger_kind", "created_at");
+
+-- CreateIndex
+CREATE INDEX "hosted_run_log_user_id_at_idx" ON "hosted_run_log"("user_id", "at");
+
+-- CreateIndex
+CREATE INDEX "hosted_run_log_run_id_at_idx" ON "hosted_run_log"("run_id", "at");
+
+-- CreateIndex
+CREATE INDEX "hosted_run_log_level_at_idx" ON "hosted_run_log"("level", "at");
 
 -- CreateIndex
 CREATE INDEX "hosted_wake_event_event_id_idx" ON "hosted_wake_event"("event_id");
@@ -745,6 +833,18 @@ ALTER TABLE "hosted_execution_cursor" ADD CONSTRAINT "hosted_execution_cursor_us
 
 -- AddForeignKey
 ALTER TABLE "hosted_wake" ADD CONSTRAINT "hosted_wake_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "hosted_member"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "hosted_wake" ADD CONSTRAINT "hosted_wake_run_id_fkey" FOREIGN KEY ("run_id") REFERENCES "hosted_run"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "hosted_run" ADD CONSTRAINT "hosted_run_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "hosted_member"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "hosted_run_log" ADD CONSTRAINT "hosted_run_log_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "hosted_member"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "hosted_run_log" ADD CONSTRAINT "hosted_run_log_run_id_fkey" FOREIGN KEY ("run_id") REFERENCES "hosted_run"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "hosted_wake_event" ADD CONSTRAINT "hosted_wake_event_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "hosted_member"("id") ON DELETE CASCADE ON UPDATE CASCADE;
