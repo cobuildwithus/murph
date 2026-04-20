@@ -14,6 +14,7 @@ import {
   ensureAssistantState,
   inspectAssistantSessionStorage,
   isAssistantSessionExpired,
+  pruneAssistantTranscriptRetention,
   readAssistantIndexStore,
   readAssistantSession,
   readAssistantTranscriptEntries,
@@ -224,6 +225,45 @@ describe('assistant store persistence seams', () => {
     expect(
       isAssistantSessionExpired(session, null, new Date('2026-04-08T01:00:00.000Z')),
     ).toBe(false)
+  })
+
+  it('trims persisted transcripts down to the replay window while preserving trailing non-conversation entries', async () => {
+    const paths = await createAssistantPaths('assistant-store-persistence-transcript-retention-')
+    const session = createSession({
+      sessionId: 'session-transcript-retention',
+    })
+    const transcriptEntries: AssistantTranscriptEntry[] = [
+      createTranscriptEntry('error', 'old error', '2026-04-08T00:00:00.000Z'),
+      ...Array.from({
+        length: 105,
+      }, (_, index) =>
+        createTranscriptEntry(
+          index % 2 === 0 ? 'user' : 'assistant',
+          `entry-${index}`,
+          new Date(Date.UTC(2026, 3, 8, 0, index + 1, 0)).toISOString(),
+        ),
+      ),
+      createTranscriptEntry('error', 'recent error', '2026-04-08T03:00:00.000Z'),
+    ]
+
+    await replaceTranscriptEntries(paths, session.sessionId, transcriptEntries)
+
+    await expect(pruneAssistantTranscriptRetention(paths)).resolves.toEqual({
+      entriesTrimmed: 6,
+      transcriptsTrimmed: 1,
+    })
+
+    const retained = await readAssistantTranscriptEntries(paths, session.sessionId)
+    expect(retained).toHaveLength(101)
+    expect(retained[0]).toMatchObject({
+      kind: 'assistant',
+      text: 'entry-5',
+    })
+    expect(retained.some((entry) => entry.text === 'old error')).toBe(false)
+    expect(retained.at(-1)).toMatchObject({
+      kind: 'error',
+      text: 'recent error',
+    })
   })
 
   it('initializes and synchronizes the session index store across alias and conversation-key changes', async () => {

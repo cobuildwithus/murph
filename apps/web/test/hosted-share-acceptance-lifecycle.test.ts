@@ -81,6 +81,9 @@ function createHostedSharePrisma() {
   };
 
   return {
+    hostedSharePayload: {
+      deleteMany: vi.fn(async () => ({ count: 1 })),
+    },
     hostedShareLink: {
       findUnique: vi.fn(async ({ where }: { where: { id: string } }) =>
         where.id === share.id ? share : null),

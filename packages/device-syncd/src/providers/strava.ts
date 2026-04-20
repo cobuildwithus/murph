@@ -14,6 +14,7 @@ import {
   sha256Text,
   subtractDays,
 } from "../shared.ts";
+import { formatDeviceSyncAccountLabel } from "../provider-label.ts";
 import {
   buildOAuthConnectUrl,
   buildProviderApiError,
@@ -202,47 +203,6 @@ function tokenResponseToAuthTokens(payload: StravaTokenResponse): ProviderAuthTo
   tokens.accessTokenExpiresAt = epochSecondsToIso(payload.expires_at) ?? isoFromExpiresIn(payload.expires_in);
 
   return tokens;
-}
-
-function buildAthleteDisplayName(athlete: Record<string, unknown>): string | null {
-  const fullName = [normalizeString(athlete.firstname), normalizeString(athlete.lastname)]
-    .filter((value): value is string => Boolean(value))
-    .join(" ");
-
-  if (fullName) {
-    return fullName;
-  }
-
-  const username = normalizeString(athlete.username);
-
-  if (username) {
-    return username;
-  }
-
-  const athleteId = normalizeIdentifier(athlete.id);
-  return athleteId ? `Strava ${athleteId}` : null;
-}
-
-function buildAthleteMetadata(athlete: Record<string, unknown>): Record<string, unknown> {
-  const athleteId = normalizeIdentifier(athlete.id);
-  const username = normalizeString(athlete.username);
-  const firstname = normalizeString(athlete.firstname);
-  const lastname = normalizeString(athlete.lastname);
-  const city = normalizeString(athlete.city);
-  const state = normalizeString(athlete.state);
-  const country = normalizeString(athlete.country);
-  const sex = normalizeString(athlete.sex);
-
-  return {
-    ...(athleteId ? { athleteId } : {}),
-    ...(username ? { username } : {}),
-    ...(firstname ? { firstname } : {}),
-    ...(lastname ? { lastname } : {}),
-    ...(city ? { city } : {}),
-    ...(state ? { state } : {}),
-    ...(country ? { country } : {}),
-    ...(sex ? { sex } : {}),
-  };
 }
 
 function buildWindowJobPayload(input: {
@@ -831,9 +791,8 @@ export function createStravaDeviceSyncProvider(
 
       return {
         externalAccountId,
-        displayName: buildAthleteDisplayName(athlete),
+        displayName: formatDeviceSyncAccountLabel(descriptor.provider, externalAccountId),
         scopes: grantedScopes,
-        metadata: buildAthleteMetadata(athlete),
         tokens,
         initialJobs: [
           {

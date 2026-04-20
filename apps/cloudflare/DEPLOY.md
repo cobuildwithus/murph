@@ -30,7 +30,7 @@ Before the first deploy:
 2. Apply `apps/cloudflare/r2-bundles-lifecycle.json` to the real bundles buckets.
 3. Decide the public Worker URL, either `*.workers.dev` or a custom domain.
 
-The checked-in lifecycle file is intentionally empty right now. Hosted raw email payloads are durable encrypted blobs deleted by runner cleanup after terminal completion or quarantine, and the rest of the encrypted objects in `BUNDLES` are intentionally owner-cleaned or durable by design.
+The checked-in lifecycle file now contains one narrow backstop rule for `hosted-email/messages/`: delete raw hosted-email blobs after 1 hour if eager cleanup missed them. Runner cleanup after terminal completion or quarantine remains the normal path, and the rest of the encrypted objects in `BUNDLES` remain owner-cleaned or durable by design.
 
 ## Required GitHub Environment Vars
 

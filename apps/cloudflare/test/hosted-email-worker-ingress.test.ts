@@ -66,6 +66,7 @@ vi.mock("../src/worker-routes/shared.ts", async () => {
 import {
   createHostedEmailUserAddress,
   readHostedEmailRawMessage,
+  writeHostedEmailRawMessage,
 } from "../src/hosted-email.ts";
 import { handleHostedEmailIngress } from "../src/hosted-email/worker-ingress.ts";
 import type { WorkerEnvironmentSource } from "../src/worker-routes/shared.ts";
@@ -337,6 +338,128 @@ describe("hosted email worker ingress", () => {
     expect(mocks.drainHostedRuns).toHaveBeenCalledWith();
     expect(nudgeHostedRun).toHaveBeenCalledTimes(1);
     expect(waitUntil).toHaveBeenCalledTimes(1);
+  });
+
+  it("deletes newly written raw email blobs when the canonical append fails with a permanent client HTTP response", async () => {
+    const bucket = new MemoryEncryptedR2Bucket();
+    const appendError = Object.assign(
+      new Error("Hosted email ingress wake append failed with HTTP 422."),
+      {
+        status: 422,
+        statusCode: 422,
+      },
+    );
+
+    mocks.appendHostedEmailIngressWakeInWeb.mockRejectedValueOnce(appendError);
+    mocks.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValue(new Response(
+      JSON.stringify({
+        userId: "user_456",
+      }),
+      {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      },
+    ));
+
+    await expect(handleHostedEmailIngress({
+      from: "owner@example.com",
+      raw: buildRawEmail({
+        from: "Owner <owner@example.com>",
+        to: "assistant@mail.example.test",
+      }),
+      to: "assistant@mail.example.test",
+    }, createWorkerEnv(bucket))).rejects.toThrow(/HTTP 422/u);
+
+    expect(mocks.drainHostedRuns).not.toHaveBeenCalled();
+    expect(listHostedEmailMessageKeys(bucket)).toEqual([]);
+  });
+
+  it("keeps newly written raw email blobs when the canonical append fails with a transient HTTP response", async () => {
+    const bucket = new MemoryEncryptedR2Bucket();
+    const appendError = Object.assign(
+      new Error("Hosted email ingress wake append failed with HTTP 503."),
+      {
+        status: 503,
+        statusCode: 503,
+      },
+    );
+
+    mocks.appendHostedEmailIngressWakeInWeb.mockRejectedValueOnce(appendError);
+    mocks.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValue(new Response(
+      JSON.stringify({
+        userId: "user_456",
+      }),
+      {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      },
+    ));
+
+    await expect(handleHostedEmailIngress({
+      from: "owner@example.com",
+      raw: buildRawEmail({
+        from: "Owner <owner@example.com>",
+        to: "assistant@mail.example.test",
+      }),
+      to: "assistant@mail.example.test",
+    }, createWorkerEnv(bucket))).rejects.toThrow(/HTTP 503/u);
+
+    expect(mocks.drainHostedRuns).not.toHaveBeenCalled();
+    expect(listHostedEmailMessageKeys(bucket)).toHaveLength(1);
+  });
+
+  it("keeps a preexisting raw email blob when a retry append fails for the same message", async () => {
+    const bucket = new MemoryEncryptedR2Bucket();
+    const raw = buildRawEmail({
+      from: "Owner <owner@example.com>",
+      to: "assistant@mail.example.test",
+    });
+    const existingRawMessageKey = await writeHostedEmailRawMessage({
+      bucket,
+      key: TEST_KEY,
+      keyId: "v1",
+      plaintext: new TextEncoder().encode(raw),
+      userId: "user_456",
+    });
+    const appendError = Object.assign(
+      new Error("Hosted email ingress wake append failed with HTTP 503."),
+      {
+        status: 503,
+        statusCode: 503,
+      },
+    );
+
+    mocks.appendHostedEmailIngressWakeInWeb.mockRejectedValueOnce(appendError);
+    mocks.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValue(new Response(
+      JSON.stringify({
+        userId: "user_456",
+      }),
+      {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      },
+    ));
+
+    await expect(handleHostedEmailIngress({
+      from: "owner@example.com",
+      raw,
+      to: "assistant@mail.example.test",
+    }, createWorkerEnv(bucket))).rejects.toThrow(/HTTP 503/u);
+
+    expect(listHostedEmailMessageKeys(bucket)).toHaveLength(1);
+    await expect(readHostedEmailRawMessage({
+      bucket,
+      key: TEST_KEY,
+      keyId: "v1",
+      rawMessageKey: existingRawMessageKey,
+      userId: "user_456",
+    })).resolves.toEqual(new TextEncoder().encode(raw));
   });
 
   it("keeps fixed public-sender misses as accept-and-drop without append, reject, or persistence", async () => {

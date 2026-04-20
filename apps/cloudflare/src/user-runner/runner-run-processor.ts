@@ -636,10 +636,6 @@ export class RunnerRunProcessor {
     userId: string,
     browserVaultSnapshot: unknown | null,
   ): Promise<void> {
-    if (!browserVaultSnapshot) {
-      return;
-    }
-
     try {
       const { crypto } = await this.dependencies.ensureRunnerStores(userId);
       const store = createHostedBrowserVaultSnapshotStore({
@@ -648,18 +644,27 @@ export class RunnerRunProcessor {
         keyId: crypto.rootKeyId,
       });
 
-      await store.writeBrowserVaultSnapshot(userId, browserVaultSnapshot);
+      if (browserVaultSnapshot) {
+        await store.writeBrowserVaultSnapshot(userId, browserVaultSnapshot);
+      } else {
+        await store.deleteBrowserVaultSnapshot(userId);
+      }
     } catch (error) {
       emitHostedExecutionStructuredLog({
         component: "runner",
         details: {
+          action: browserVaultSnapshot ? "write" : "delete",
           error: formatHostedExecutionLogMessage(
-            "Browser vault snapshot persistence failed.",
+            browserVaultSnapshot
+              ? "Browser vault snapshot persistence failed."
+              : "Browser vault snapshot deletion failed.",
             error,
           ),
         },
         eventId: "browser-vault-snapshot",
-        message: "Failed to persist browser vault snapshot sidecar.",
+        message: browserVaultSnapshot
+          ? "Failed to persist browser vault snapshot sidecar."
+          : "Failed to delete stale browser vault snapshot sidecar.",
         phase: "completed",
         run: null,
         userId,

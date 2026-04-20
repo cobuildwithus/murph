@@ -1,4 +1,4 @@
-import { readdir, readFile, rename } from 'node:fs/promises'
+import { readdir, readFile, rename, rm } from 'node:fs/promises'
 import path from 'node:path'
 import {
   assistantOutboxIntentSchema,
@@ -18,6 +18,10 @@ import {
   resolveAssistantOutboxQuarantineDirectory,
 } from './intents.js'
 import { normalizeAssistantDeliveryError } from './retry-policy.js'
+import type { AssistantStatePaths } from '../store/paths.js'
+
+const ASSISTANT_TERMINAL_OUTBOX_RETENTION_LIMIT = 100
+const ASSISTANT_TERMINAL_OUTBOX_RETENTION_MS = 14 * 24 * 60 * 60 * 1000
 
 export async function readAssistantOutboxIntent(
   vault: string,
@@ -72,6 +76,65 @@ export async function listAssistantOutboxIntentsLocal(
   }
 
   return intents.sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+}
+
+export async function pruneAssistantTerminalOutboxIntents(input: {
+  now: Date
+  paths: AssistantStatePaths
+  vault: string
+}): Promise<number> {
+  await ensureAssistantState(input.paths)
+  const entries = await readdir(input.paths.outboxDirectory, {
+    withFileTypes: true,
+  })
+  const cutoffMs = input.now.getTime() - ASSISTANT_TERMINAL_OUTBOX_RETENTION_MS
+  const terminalIntents: Array<{
+    intent: AssistantOutboxIntent
+    intentPath: string
+    terminalAtMs: number
+  }> = []
+
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith('.json')) {
+      continue
+    }
+
+    const intentPath = path.join(input.paths.outboxDirectory, entry.name)
+    const intent = await readAssistantOutboxIntentInventoryEntry(input.vault, intentPath)
+    if (!intent || !isTerminalAssistantOutboxIntent(intent)) {
+      continue
+    }
+
+    terminalIntents.push({
+      intent,
+      intentPath,
+      terminalAtMs: resolveAssistantOutboxTerminalTimestampMs(intent),
+    })
+  }
+
+  terminalIntents.sort((left, right) => {
+    const timeDelta = right.terminalAtMs - left.terminalAtMs
+    if (Number.isFinite(timeDelta) && timeDelta !== 0) {
+      return timeDelta
+    }
+    return right.intent.createdAt.localeCompare(left.intent.createdAt)
+  })
+
+  let pruned = 0
+  for (const [index, entry] of terminalIntents.entries()) {
+    const pruneByCount = index >= ASSISTANT_TERMINAL_OUTBOX_RETENTION_LIMIT
+    const pruneByAge =
+      Number.isFinite(entry.terminalAtMs) && entry.terminalAtMs < cutoffMs
+    if (!pruneByCount && !pruneByAge) {
+      continue
+    }
+    await rm(entry.intentPath, {
+      force: true,
+    })
+    pruned += 1
+  }
+
+  return pruned
 }
 
 export async function findAssistantOutboxIntentByDedupeKey(
@@ -159,4 +222,21 @@ export async function quarantineAssistantOutboxIntentFile(input: {
       message: normalizeAssistantDeliveryError(input.error).message,
     })
   } catch {}
+}
+
+function isTerminalAssistantOutboxIntent(intent: AssistantOutboxIntent): boolean {
+  return (
+    intent.status === 'sent' ||
+    intent.status === 'failed' ||
+    intent.status === 'abandoned'
+  )
+}
+
+function resolveAssistantOutboxTerminalTimestampMs(
+  intent: AssistantOutboxIntent,
+): number {
+  const timestamp =
+    intent.sentAt ?? intent.updatedAt ?? intent.lastAttemptAt ?? intent.createdAt
+  const resolved = Date.parse(timestamp)
+  return Number.isFinite(resolved) ? resolved : Number.NaN
 }

@@ -31,6 +31,7 @@ import {
   readAssistantOutboxIntent,
   saveAssistantOutboxIntent,
 } from '../src/assistant/outbox.ts'
+import { pruneAssistantTerminalOutboxIntents } from '../src/assistant/outbox/store.ts'
 import { ensureAssistantState } from '../src/assistant/store/persistence.ts'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
 import * as assistantStore from '../src/assistant/store.ts'
@@ -195,6 +196,69 @@ describe('assistant outbox runtime', () => {
     expect(quarantined[0]).toMatch(
       new RegExp(`^${seeded.intentId}\\.\\d+\\.invalid\\.json$`, 'u'),
     )
+  })
+
+  it('prunes terminal outbox intents by age and count without touching active retries', async () => {
+    const { paths, vaultRoot } = await createAssistantVault('assistant-outbox-retention-')
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-20T12:00:00.000Z'))
+
+    const oldTerminal = await createIntent(vaultRoot, {
+      createdAt: '2026-03-01T00:00:00.000Z',
+      message: 'old terminal intent',
+      sessionId: 'session-old-terminal',
+      turnId: 'turn-old-terminal',
+    })
+    await saveAssistantOutboxIntent(vaultRoot, {
+      ...oldTerminal,
+      status: 'sent',
+      sentAt: '2026-03-01T00:05:00.000Z',
+      updatedAt: '2026-03-01T00:05:00.000Z',
+    })
+
+    for (let index = 0; index < 101; index += 1) {
+      const createdAt = new Date(Date.UTC(2026, 3, 19, 0, index, 0)).toISOString()
+      const seeded = await createIntent(vaultRoot, {
+        createdAt,
+        message: `terminal-${index}`,
+        sessionId: `session-terminal-${index}`,
+        turnId: `turn-terminal-${index}`,
+      })
+      await saveAssistantOutboxIntent(vaultRoot, {
+        ...seeded,
+        status: index % 2 === 0 ? 'failed' : 'abandoned',
+        updatedAt: createdAt,
+      })
+    }
+
+    const activeRetryable = await createIntent(vaultRoot, {
+      createdAt: '2026-03-01T00:10:00.000Z',
+      message: 'active retryable intent',
+      sessionId: 'session-active-retryable',
+      turnId: 'turn-active-retryable',
+    })
+    await saveAssistantOutboxIntent(vaultRoot, {
+      ...activeRetryable,
+      nextAttemptAt: '2026-04-20T12:05:00.000Z',
+      status: 'retryable',
+      updatedAt: '2026-04-20T12:00:00.000Z',
+    })
+
+    await expect(
+      pruneAssistantTerminalOutboxIntents({
+        now: new Date('2026-04-20T12:00:00.000Z'),
+        paths,
+        vault: vaultRoot,
+      }),
+    ).resolves.toBe(2)
+
+    const retained = await listAssistantOutboxIntentsLocal(vaultRoot)
+    expect(retained).toHaveLength(101)
+    expect(retained.filter((intent) => intent.status === 'retryable')).toHaveLength(1)
+    expect(
+      retained.some((intent) => intent.message === 'old terminal intent'),
+    ).toBe(false)
+    expect(retained.filter((intent) => intent.status !== 'retryable')).toHaveLength(100)
   })
 
   it('reconciles stale persisted deliveries without resending them', async () => {

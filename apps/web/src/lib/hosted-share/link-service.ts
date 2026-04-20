@@ -16,6 +16,7 @@ import {
   buildHostedSharePreview,
   buildHostedShareUrl,
   createHostedShareMinimalPreview,
+  deleteHostedSharePayload,
   findHostedShareLinkByCode,
   generateHostedShareCode,
   generateHostedShareId,
@@ -142,6 +143,13 @@ export async function buildHostedSharePageData(input: {
   const preview = stage === "consumed" || stage === "expired"
     ? createHostedShareMinimalPreview()
     : readHostedSharePreview(record.previewJson);
+
+  if (stage === "expired") {
+    await deleteHostedSharePayload({
+      prisma,
+      shareId: record.id,
+    });
+  }
 
   return {
     inviteCode: normalizeOptionalString(input.inviteCode) ?? null,

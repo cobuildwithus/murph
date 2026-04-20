@@ -10,6 +10,7 @@ import {
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 
 import { hashHostedShareCode, normalizeOptionalString } from "./shared-identifiers";
+import { deleteHostedSharePayload } from "./shared-payload";
 import type { HostedSharePrismaClient } from "./types";
 
 export function findHostedShareLinkByCode(
@@ -98,6 +99,13 @@ export async function finalizeHostedShareAcceptance(input: {
     prisma: input.prisma,
     shareId: input.shareId,
   });
+
+  if (finalizationState.sharePackOwnerMemberId) {
+    await deleteHostedSharePayload({
+      prisma: input.prisma,
+      shareId: input.shareId,
+    });
+  }
 
   return {
     finalized,

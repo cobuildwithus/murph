@@ -16,6 +16,8 @@ afterEach(async () => {
   vi.doUnmock('node:fs/promises')
   vi.doUnmock('../src/assistant/automation/runtime-lock.js')
   vi.doUnmock('../src/assistant/diagnostics.js')
+  vi.doUnmock('../src/assistant/cron/store.js')
+  vi.doUnmock('../src/assistant/outbox/store.js')
   vi.doUnmock('../src/assistant/runtime-cache.js')
   vi.doUnmock('../src/assistant/runtime-events.js')
   vi.doUnmock('../src/assistant/runtime-write-lock.js')
@@ -271,6 +273,19 @@ describe('assistant runtime thresholds', () => {
     }))
     vi.doMock('../src/assistant/store/persistence.js', () => ({
       ensureAssistantState: vi.fn(async () => undefined),
+      pruneAssistantTranscriptRetention: vi.fn(async () => ({
+        entriesTrimmed: 0,
+        transcriptsTrimmed: 0,
+      })),
+    }))
+    vi.doMock('../src/assistant/outbox/store.js', () => ({
+      pruneAssistantTerminalOutboxIntents: vi.fn(async () => 0),
+    }))
+    vi.doMock('../src/assistant/cron/store.js', () => ({
+      pruneAssistantCronRunHistory: vi.fn(async () => ({
+        responsesRedacted: 0,
+        runsPruned: 0,
+      })),
     }))
     vi.doMock('../src/assistant/shared.js', async () => {
       const actual = await vi.importActual<typeof import('../src/assistant/shared.ts')>(
@@ -558,6 +573,19 @@ describe('assistant runtime thresholds', () => {
     }))
     vi.doMock('../src/assistant/store/persistence.js', () => ({
       ensureAssistantState: vi.fn(async () => undefined),
+      pruneAssistantTranscriptRetention: vi.fn(async () => ({
+        entriesTrimmed: 2,
+        transcriptsTrimmed: 1,
+      })),
+    }))
+    vi.doMock('../src/assistant/outbox/store.js', () => ({
+      pruneAssistantTerminalOutboxIntents: vi.fn(async () => 3),
+    }))
+    vi.doMock('../src/assistant/cron/store.js', () => ({
+      pruneAssistantCronRunHistory: vi.fn(async () => ({
+        responsesRedacted: 4,
+        runsPruned: 5,
+      })),
     }))
     vi.doMock('../src/assistant/shared.js', async () => {
       const actual = await vi.importActual<typeof import('../src/assistant/shared.ts')>(
@@ -581,6 +609,10 @@ describe('assistant runtime thresholds', () => {
         notes: [
           '1 expired runtime cache entry was pruned.',
           '1 expired quarantine artifact(s) were removed.',
+          '2 transcript entries were trimmed across 1 session transcript(s).',
+          '3 terminal outbox intent(s) were pruned.',
+          '4 older cron response(s) were redacted.',
+          '5 stale cron run record(s) were pruned.',
           '2 stale runtime lock(s) were cleared.',
         ],
         staleLocksCleared: 2,
@@ -760,6 +792,19 @@ function mockRuntimeBudgetDependencies(
   }))
   vi.doMock('../src/assistant/store/persistence.js', () => ({
     ensureAssistantState: vi.fn(async () => undefined),
+    pruneAssistantTranscriptRetention: vi.fn(async () => ({
+      entriesTrimmed: 0,
+      transcriptsTrimmed: 0,
+    })),
+  }))
+  vi.doMock('../src/assistant/outbox/store.js', () => ({
+    pruneAssistantTerminalOutboxIntents: vi.fn(async () => 0),
+  }))
+  vi.doMock('../src/assistant/cron/store.js', () => ({
+    pruneAssistantCronRunHistory: vi.fn(async () => ({
+      responsesRedacted: 0,
+      runsPruned: 0,
+    })),
   }))
   vi.doMock('../src/assistant/shared.js', async () => {
     const actual = await vi.importActual<typeof import('../src/assistant/shared.ts')>(

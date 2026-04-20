@@ -10,6 +10,10 @@ import { hostedBrowserVaultSnapshotObjectKey } from "./storage-paths.js";
 const utf8Decoder = new TextDecoder();
 const utf8Encoder = new TextEncoder();
 
+type HostedBrowserVaultSnapshotBucketLike = EncryptedR2BucketLike & {
+  delete?(key: string): Promise<void>;
+};
+
 export interface HostedBrowserVaultSnapshotStorageRef {
   aadFields: {
     key: string;
@@ -20,6 +24,7 @@ export interface HostedBrowserVaultSnapshotStorageRef {
 }
 
 export interface HostedBrowserVaultSnapshotStore {
+  deleteBrowserVaultSnapshot(userId: string): Promise<void>;
   readBrowserVaultSnapshotEnvelope(userId: string): Promise<HostedCipherEnvelope | null>;
   writeBrowserVaultSnapshot(userId: string, snapshot: unknown): Promise<void>;
 }
@@ -41,11 +46,23 @@ export async function resolveHostedBrowserVaultSnapshotStorageRef(input: {
 }
 
 export function createHostedBrowserVaultSnapshotStore(input: {
-  bucket: EncryptedR2BucketLike;
+  bucket: HostedBrowserVaultSnapshotBucketLike;
   key: Uint8Array;
   keyId: string;
 }): HostedBrowserVaultSnapshotStore {
   return {
+    async deleteBrowserVaultSnapshot(userId) {
+      if (!input.bucket.delete) {
+        return;
+      }
+
+      const storageRef = await resolveHostedBrowserVaultSnapshotStorageRef({
+        rootKey: input.key,
+        userId,
+      });
+      await input.bucket.delete(storageRef.objectKey);
+    },
+
     async readBrowserVaultSnapshotEnvelope(userId) {
       const storageRef = await resolveHostedBrowserVaultSnapshotStorageRef({
         rootKey: input.key,

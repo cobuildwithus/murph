@@ -21,7 +21,7 @@ function createAccount(scopes: string[], overrides: Partial<DeviceSyncAccount> =
     provider: "whoop",
     externalAccountId: "whoop-user-1",
     disconnectGeneration: 0,
-    displayName: "whoop@example.com",
+    displayName: "WHOOP whoop-user-1",
     status: "active",
     scopes,
     accessTokenExpiresAt: null,
@@ -162,7 +162,7 @@ test("WHOOP provider builds a connect URL and exchanges an auth code into a refr
   );
 
   assert.equal(connection.externalAccountId, "whoop-user-1");
-  assert.equal(connection.displayName, "Whoop User");
+  assert.equal(connection.displayName, "WHOOP whoop-user-1");
   assert.equal(connection.tokens.refreshToken, "refresh-token");
   assert.deepEqual(connection.scopes, ["offline", "read:profile", "read:workout"]);
   assert.equal(connection.initialJobs?.[0]?.kind, "backfill");

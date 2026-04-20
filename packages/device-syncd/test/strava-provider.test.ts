@@ -15,7 +15,7 @@ function buildStravaAccount(overrides: Partial<DeviceSyncAccount> = {}): DeviceS
     accessTokenExpiresAt: null,
     connectedAt: "2026-04-16T00:00:00.000Z",
     disconnectGeneration: 0,
-    displayName: "Runner",
+    displayName: "Strava 123456",
     metadata: {},
     lastWebhookAt: null,
     lastSyncStartedAt: null,
@@ -173,13 +173,14 @@ describe("Strava device-sync provider", () => {
     expect(tokenRequests[0]?.body).not.toContain("redirect_uri=");
     expect(result).toMatchObject({
       externalAccountId: "12345",
-      displayName: "Runner One",
+      displayName: "Strava 12345",
       scopes: ["activity:read", "read"],
       tokens: {
         accessToken: "access-token",
         refreshToken: "refresh-token",
       },
     });
+    expect(result.metadata).toBeUndefined();
   });
 
   it("fetches the athlete profile when the token response omits athlete details", async () => {
@@ -236,7 +237,7 @@ describe("Strava device-sync provider", () => {
       ),
     ).resolves.toMatchObject({
       externalAccountId: "54321",
-      displayName: "fallback-runner",
+      displayName: "Strava 54321",
       scopes: ["activity:read_all"],
     });
   });

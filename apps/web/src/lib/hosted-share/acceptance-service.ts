@@ -16,6 +16,7 @@ import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import {
   buildHostedShareAcceptanceEventId,
   buildHostedShareAcceptanceWake,
+  deleteHostedSharePayload,
   hashHostedShareCode,
   normalizeOptionalString,
   reconcileHostedShareAcceptanceLifecycle,
@@ -76,6 +77,10 @@ export async function acceptHostedShareLink(input: {
     let latest = await requireHostedShareLink(shareCode, tx);
 
     if (latest.expiresAt <= now) {
+      await deleteHostedSharePayload({
+        prisma: tx,
+        shareId: latest.id,
+      });
       throw hostedOnboardingError({
         code: "HOSTED_SHARE_EXPIRED",
         message: "That share link expired. Ask for a fresh link.",
