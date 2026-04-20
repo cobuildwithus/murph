@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 
-import { Prisma, type PrismaClient } from "@prisma/client";
+import { Prisma, type HostedRun, type PrismaClient } from "@prisma/client";
 import type {
   HostedRunAcquireResponse,
   HostedRunCommitResponse,
@@ -49,6 +49,7 @@ const DEFAULT_HOSTED_RUN_EXECUTOR_KIND: HostedRunExecutorKind = "cloudflare-cont
 
 export type HostedRunStoreClient = PrismaClient | Prisma.TransactionClient;
 export type HostedRunMutationTx = Prisma.TransactionClient;
+type HostedRunRow = HostedRun;
 
 export async function acquireHostedRun(input: {
   executorKind?: HostedRunExecutorKind | null;
