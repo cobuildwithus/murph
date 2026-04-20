@@ -101,7 +101,7 @@ describe("runSmokeHostedDeploy", () => {
           inFlight: false,
           lastError: null,
           lastRunAt: "2026-03-27T00:59:00.000Z",
-          pendingWakeCount: 0,
+          pendingIngressEventCount: 0,
           userId: "member_123",
         }), { status: 200 });
       }
@@ -271,7 +271,7 @@ describe("runSmokeHostedDeploy", () => {
           inFlight: false,
           lastError: null,
           lastRunAt: "2026-03-27T00:59:00.000Z",
-          pendingWakeCount: 0,
+          pendingIngressEventCount: 0,
           userId: "member_123",
         }), { status: 200 });
       }

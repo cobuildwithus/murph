@@ -19,7 +19,7 @@ export interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLik
   nudgeHostedRun(): Promise<HostedRunNudgeResult>;
   status(): Promise<HostedExecutionUserStatus>;
   drainHostedRuns(input?: {
-    targetSeqHint?: string | null;
+    targetCommittedSeqHint?: string | null;
   }): Promise<HostedRunDrainResult>;
 }
 

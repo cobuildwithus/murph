@@ -47,7 +47,7 @@ describe("parseHostedAssistantRuntimeJobInput", () => {
                 occurredAt: "2026-04-01T00:00:00.000Z",
                 userId: "member_123",
               },
-              wakeId: "wake_24",
+              ingressEventId: "wake_24",
             },
           ],
           inputCommittedSeq: "24",
@@ -65,7 +65,7 @@ describe("parseHostedAssistantRuntimeJobInput", () => {
       },
     });
 
-    expect(resolveHostedWake(parsed.request)).toEqual({
+    expect(resolveHostedWake(parsed.request.runDrain)).toEqual({
       eventId: "evt_123",
       firstContact: {
         channel: "linq",
@@ -112,7 +112,7 @@ describe("parseHostedAssistantRuntimeJobInput", () => {
                 occurredAt: "2026-04-01T00:00:00.000Z",
                 userId: "member_123",
               },
-              wakeId: "wake_24",
+              ingressEventId: "wake_24",
             },
           ],
           inputCommittedSeq: "24",
@@ -124,7 +124,7 @@ describe("parseHostedAssistantRuntimeJobInput", () => {
       },
     });
 
-    expect(resolveHostedWake(parsed.request)).toEqual({
+    expect(resolveHostedWake(parsed.request.runDrain)).toEqual({
       eventId: "evt_materialize_linq_home",
       firstContact: {
         channel: "linq",
@@ -161,7 +161,7 @@ describe("parseHostedAssistantRuntimeJobInput", () => {
                 occurredAt: "2026-04-01T00:00:00.000Z",
                 userId: "member_123",
               },
-              wakeId: "wake_24",
+              ingressEventId: "wake_24",
             },
           ],
           inputCommittedSeq: "24",
@@ -200,7 +200,7 @@ describe("parseHostedAssistantRuntimeJobInput", () => {
                 occurredAt: "2026-04-01T00:00:00.000Z",
                 userId: "member_123",
               },
-              wakeId: "wake_24",
+              ingressEventId: "wake_24",
             },
           ],
           inputCommittedSeq: "24",
@@ -240,7 +240,7 @@ describe("parseHostedAssistantRuntimeJobInput", () => {
       },
     });
 
-    expect(resolveHostedWake(parsed.request)).toEqual(buildHostedExecutionRuntimeTimerWake({
+    expect(resolveHostedWake(parsed.request.runDrain)).toEqual(buildHostedExecutionRuntimeTimerWake({
       eventId: "hosted-run:run_123",
       occurredAt: "2026-04-01T00:00:01.000Z",
       triggerKind: "runtime_timer",

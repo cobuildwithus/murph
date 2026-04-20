@@ -211,7 +211,7 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
   }
 
   async drainHostedRuns(input?: {
-    targetSeqHint?: string | null;
+    targetCommittedSeqHint?: string | null;
   }): Promise<HostedRunDrainResult> {
     return this.runner.drainHostedRuns(input);
   }

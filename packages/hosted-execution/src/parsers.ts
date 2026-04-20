@@ -419,8 +419,10 @@ export function parseHostedRuntimeDrainEvent(
   label = "Hosted runtime drain event",
 ): HostedRuntimeDrainEvent {
   const record = requireObject(value, label);
+  const ingressEventId = record.ingressEventId ?? record.wakeId;
 
   return {
+    ingressEventId: requireString(ingressEventId, `${label}.ingressEventId`),
     seq: requireBigIntString(record.seq, `${label}.seq`),
     ...(record.sharePack === undefined
       ? {}
@@ -430,7 +432,6 @@ export function parseHostedRuntimeDrainEvent(
             : parseHostedExecutionRunnerSharePack(record.sharePack),
         }),
     wake: parseHostedRuntimeEvent(record.wake),
-    wakeId: requireString(record.wakeId, `${label}.wakeId`),
   };
 }
 
@@ -456,6 +457,7 @@ export function parseHostedExecutionRunnerResult(value: unknown): HostedExecutio
 
 export function parseHostedExecutionUserStatus(value: unknown): HostedExecutionUserStatus {
   const record = requireObject(value, "Hosted execution user status");
+  const pendingIngressEventCount = record.pendingIngressEventCount ?? record.pendingWakeCount;
 
   return {
     bundleRef: parseHostedExecutionBundleRef(
@@ -476,9 +478,9 @@ export function parseHostedExecutionUserStatus(value: unknown): HostedExecutionU
     lastEventId: readNullableString(record.lastEventId, "Hosted execution user status lastEventId"),
     lastRunAt: readNullableString(record.lastRunAt, "Hosted execution user status lastRunAt"),
     nextWakeAt: readNullableString(record.nextWakeAt, "Hosted execution user status nextWakeAt"),
-    pendingWakeCount: requireNumber(
-      record.pendingWakeCount,
-      "Hosted execution user status pendingWakeCount",
+    pendingIngressEventCount: requireNumber(
+      pendingIngressEventCount,
+      "Hosted execution user status pendingIngressEventCount",
     ),
     ...(record.run === undefined ? {} : {
       run: record.run === null ? null : parseHostedExecutionRunStatus(record.run),

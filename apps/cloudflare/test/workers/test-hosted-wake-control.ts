@@ -644,7 +644,7 @@ export async function acquireTestHostedRun(input: {
   userId: string;
 }): Promise<HostedRunAcquireResponse> {
   const state = await readStoredHostedWakeControlState(input.bucket, input.userId);
-  const pendingWakeCount = countPendingWakes(state);
+  const pendingIngressEventCount = countPendingWakes(state);
   const activeRun = state.activeRun;
 
   if (input.body.triggerKind === "retry_finalize" && activeRun?.status === "finalizing") {
@@ -652,7 +652,7 @@ export async function acquireTestHostedRun(input: {
       acquired: true,
       cursor: state.cursor,
       events: [],
-      pendingWakeCount,
+      pendingIngressEventCount,
       resumeFinalize: true,
       run: toHostedRunRecord(activeRun),
       runToken: activeRun.runToken,
@@ -664,7 +664,7 @@ export async function acquireTestHostedRun(input: {
       acquired: false,
       cursor: state.cursor,
       events: [],
-      pendingWakeCount,
+      pendingIngressEventCount,
       resumeFinalize: activeRun.status === "finalizing",
       run: toHostedRunRecord(activeRun),
       runToken: activeRun.runToken,
@@ -680,7 +680,7 @@ export async function acquireTestHostedRun(input: {
       acquired: false,
       cursor: state.cursor,
       events: [],
-      pendingWakeCount,
+      pendingIngressEventCount,
       resumeFinalize: false,
       run: null,
       runToken: null,
@@ -714,7 +714,7 @@ export async function acquireTestHostedRun(input: {
     triggerKind,
     updatedAt: now,
     userId: input.userId,
-    wakeIds: wakes.map((wake) => wake.id),
+    ingressEventIds: wakes.map((wake) => wake.id),
   };
 
   if (dueRuntimeWake) {
@@ -736,11 +736,11 @@ export async function acquireTestHostedRun(input: {
       events: wakes
         .filter((wake): wake is StoredHostedWakeRecord & HostedIngressEvent => wake.kind !== "runtime.timer")
         .map((wake) => toHostedIngressWakeRecord(wake)),
-      pendingWakeCount,
+      pendingIngressEventCount,
       resumeFinalize: false,
       run: toHostedRunRecord(run),
-    runToken,
-  };
+      runToken,
+    };
 }
 
 export async function commitTestHostedRun(input: {
@@ -911,7 +911,7 @@ export async function readTestHostedRunStatus(input: {
 
   return {
     cursor: state.cursor,
-    pendingWakeCount: countPendingWakes(state),
+    pendingIngressEventCount: countPendingWakes(state),
     run: state.activeRun ? toHostedRunRecord(state.activeRun) : null,
   };
 }
@@ -1168,7 +1168,7 @@ async function applyCommitEventResults(input: {
   state: StoredHostedWakeControlState;
 }): Promise<void> {
   for (const eventResult of input.eventResults ?? []) {
-    const wake = input.state.wakes.find((candidate) => candidate.id === eventResult.wakeId);
+    const wake = input.state.wakes.find((candidate) => candidate.id === eventResult.ingressEventId);
     if (!wake) {
       continue;
     }

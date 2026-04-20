@@ -181,10 +181,7 @@ describe("RunnerStateStore bundle cache", () => {
 
     const cached = await store.syncBundleRefCache(currentVaultRef);
     expect(cached.bundleRef).toEqual(currentVaultRef);
-    await expect(store.readBundleMetaState()).resolves.toEqual({
-      bundleRef: currentVaultRef,
-      bundleVersion: 0,
-    });
+    await expect(store.readCachedBundleRef()).resolves.toEqual(currentVaultRef);
     expect(readRunnerMetaColumns(db)).not.toContain("bundle_ref_json");
     expect(readRunnerMetaColumns(db)).not.toContain("bundle_version");
 

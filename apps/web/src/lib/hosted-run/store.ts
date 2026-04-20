@@ -44,6 +44,7 @@ const MAX_HOSTED_RUN_EVENT_LIMIT = 256;
 const HOSTED_RUN_FINALIZING_STATUS: HostedRunStatus = "finalizing";
 const HOSTED_RUN_ACTIVE_STATUSES = new Set<HostedRunStatus>([
   "acquired",
+  "running",
   HOSTED_RUN_FINALIZING_STATUS,
 ]);
 const HOSTED_RUN_FINALIZE_RESUMABLE_STATUS: HostedRunStatus = "committed_needs_finalize";
@@ -305,7 +306,7 @@ export async function commitHostedRunTx(input: {
   await lockHostedExecutionCursorRowTx({ tx: input.tx, userId: input.userId });
   const cursor = await ensureHostedExecutionCursorRowTx({ tx: input.tx, userId: input.userId });
   const run = await readHostedRunForMutationTx({
-    allowedStatuses: ["acquired"],
+    allowedStatuses: ["acquired", "running"],
     runId: input.runId,
     runToken: input.runToken,
     tx: input.tx,
@@ -400,6 +401,9 @@ export async function commitHostedRunTx(input: {
     run.ingressEventIdsJson,
     "Hosted run ingressEventIdsJson",
   );
+  const committedIngressEventIds = acquiredIngressEventIds.filter((_, index) =>
+    index < acquiredSeqs.length && acquiredSeqs[index] <= input.outputCommittedSeq
+  );
   const highestAcquiredSeq = acquiredSeqs.length === 0
     ? run.inputCommittedSeq
     : acquiredSeqs[acquiredSeqs.length - 1];
@@ -422,27 +426,9 @@ export async function commitHostedRunTx(input: {
     };
   }
 
-  if (input.outputCommittedSeq !== highestAcquiredSeq) {
-    const failedRun = await closeHostedRunWithoutCommitTx({
-      cursor,
-      errorCode: "HOSTED_RUN_PARTIAL_COMMIT_UNSUPPORTED",
-      run,
-      status: "failed",
-      tx: input.tx,
-      userId: input.userId,
-    });
-
-    return {
-      committed: false,
-      cursor: projectHostedExecutionCursorRecord(cursor),
-      needsFinalize: false,
-      run: projectHostedRunRecord(failedRun),
-    };
-  }
-
   const eventResultsValidationError = validateHostedRunEventResults({
     eventResults: input.eventResults ?? [],
-    expectedIngressEventIds: acquiredIngressEventIds,
+    expectedIngressEventIds: committedIngressEventIds,
   });
 
   if (eventResultsValidationError) {
@@ -507,13 +493,13 @@ export async function commitHostedRunTx(input: {
   }
 
   if (acquiredIngressEventIds.length > 0) {
-    await markHostedRunWakesTerminalTx({
+    await markHostedRunIngressEventsTerminalTx({
       eventResults: input.eventResults ?? [],
       outputCommittedSeq: input.outputCommittedSeq,
       runId: run.id,
       tx: input.tx,
       userId: input.userId,
-      wakeIds: acquiredIngressEventIds,
+      ingressEventIds: acquiredIngressEventIds,
     });
   }
 
@@ -770,6 +756,12 @@ export async function recordHostedRunLog(input: {
       return { logged: false, log: null };
     }
 
+    await maybeMarkHostedRunStartedTx({
+      phase: input.phase,
+      run,
+      tx,
+    });
+
     const log = await tx.hostedRunLog.create({
       data: {
         at: input.at ?? new Date(),
@@ -824,10 +816,49 @@ export async function readHostedRunStatus(input: {
   return {
     cursor: projectHostedExecutionCursorRecord(cursor),
     ...(logs === undefined ? {} : { logs: logs.map(projectHostedRunLogRecord) }),
-    pendingWakeCount: await countPendingHostedIngressEvents({ prisma, userId: input.userId }),
+    pendingIngressEventCount: await countPendingHostedIngressEvents({ prisma, userId: input.userId }),
     run: run ? projectHostedRunRecord(run) : null,
     ...(input.runId ? {} : { runs: runs.map(projectHostedRunRecord) }),
   };
+}
+
+async function maybeMarkHostedRunStartedTx(input: {
+  phase: string;
+  run: HostedRunRow;
+  tx: HostedRunMutationTx;
+}): Promise<void> {
+  if (input.run.status !== "acquired" || !phaseMarksHostedRunStarted(input.phase)) {
+    return;
+  }
+
+  const now = new Date();
+  await input.tx.hostedRun.updateMany({
+    where: {
+      id: input.run.id,
+      status: "acquired",
+    },
+    data: {
+      startedAt: input.run.startedAt ?? now,
+      status: "running",
+      updatedAt: now,
+    },
+  });
+}
+
+function phaseMarksHostedRunStarted(phase: string): boolean {
+  return phase === "running"
+    || phase === "wake.running"
+    || phase === "runtime.starting"
+    || phase === "runner_invocation_started"
+    || phase === "side-effects.draining"
+    || phase === "prepare"
+    || phase === "prepared"
+    || phase === "commit.recorded"
+    || phase === "commit_attempted"
+    || phase === "runner_prepared_snapshot"
+    || phase === "finalize_started"
+    || phase === "finalize_finished"
+    || phase === "completed";
 }
 
 function isHostedRunActiveStale(
@@ -1075,7 +1106,7 @@ function validateHostedRunEventResults(input: {
   expectedIngressEventIds: string[];
 }): string | null {
   const expectedIngressEventIds = new Set(input.expectedIngressEventIds);
-  const seenWakeIds = new Set<string>();
+  const seenIngressEventIds = new Set<string>();
 
   if (input.expectedIngressEventIds.length === 0) {
     return input.eventResults.length === 0
@@ -1084,19 +1115,19 @@ function validateHostedRunEventResults(input: {
   }
 
   for (const result of input.eventResults) {
-    if (seenWakeIds.has(result.wakeId)) {
+    if (seenIngressEventIds.has(result.ingressEventId)) {
       return "HOSTED_RUN_EVENT_RESULTS_DUPLICATE";
     }
 
-    seenWakeIds.add(result.wakeId);
+    seenIngressEventIds.add(result.ingressEventId);
 
-    if (!expectedIngressEventIds.has(result.wakeId)) {
+    if (!expectedIngressEventIds.has(result.ingressEventId)) {
       return "HOSTED_RUN_EVENT_RESULTS_UNKNOWN";
     }
   }
 
   for (const ingressEventId of expectedIngressEventIds) {
-    if (!seenWakeIds.has(ingressEventId)) {
+    if (!seenIngressEventIds.has(ingressEventId)) {
       return "HOSTED_RUN_EVENT_RESULTS_MISSING";
     }
   }
@@ -1104,56 +1135,76 @@ function validateHostedRunEventResults(input: {
   return null;
 }
 
-async function markHostedRunWakesTerminalTx(input: {
+async function markHostedRunIngressEventsTerminalTx(input: {
   eventResults: HostedRunEventResult[];
   outputCommittedSeq: bigint;
   runId: string;
   tx: HostedIngressMutationTx;
   userId: string;
-  wakeIds: string[];
+  ingressEventIds: string[];
 }): Promise<void> {
-  const resultByWakeId = new Map(input.eventResults.map((result) => [result.wakeId, result]));
-  const wakes = await input.tx.hostedIngressEvent.findMany({
+  const resultByIngressEventId = new Map(
+    input.eventResults.map((result) => [result.ingressEventId, result]),
+  );
+  const ingressEvents = await input.tx.hostedIngressEvent.findMany({
     where: {
-      id: { in: input.wakeIds },
+      id: { in: input.ingressEventIds },
       userId: input.userId,
     },
   });
 
-  for (const wake of wakes) {
-    if (wake.seq > input.outputCommittedSeq) {
+  const releasedIngressEventIds: string[] = [];
+
+  for (const ingressEvent of ingressEvents) {
+    if (ingressEvent.seq > input.outputCommittedSeq) {
+      releasedIngressEventIds.push(ingressEvent.id);
       continue;
     }
 
-    const result = resultByWakeId.get(wake.id);
+    const result = resultByIngressEventId.get(ingressEvent.id);
     if (!result) {
-      throw new Error(`Hosted run result missing for acquired ingress event ${wake.id}.`);
+      throw new Error(`Hosted run result missing for acquired ingress event ${ingressEvent.id}.`);
     }
     const state = result.state;
 
     await input.tx.hostedIngressEvent.update({
-      where: { id: wake.id },
+      where: { id: ingressEvent.id },
       data: {
         completedAt: new Date(),
         payloadInlineCiphertext: null,
         payloadRef: null,
         quarantineCode: state === "quarantined"
-          ? normalizeHostedRunWakeQuarantineCode(result?.quarantineCode ?? wake.quarantineCode)
-          : wake.quarantineCode,
-        quarantinedAt: state === "quarantined" ? wake.quarantinedAt ?? new Date() : wake.quarantinedAt,
+          ? normalizeHostedRunWakeQuarantineCode(result.quarantineCode ?? ingressEvent.quarantineCode)
+          : ingressEvent.quarantineCode,
+        quarantinedAt: state === "quarantined"
+          ? ingressEvent.quarantinedAt ?? new Date()
+          : ingressEvent.quarantinedAt,
         runId: input.runId,
         state,
       },
     });
 
-    if (wake.payloadRef) {
+    if (ingressEvent.payloadRef) {
       await input.tx.hostedIngressPayload.deleteMany({
         where: {
-          ingressEventId: wake.payloadRef,
+          ingressEventId: ingressEvent.payloadRef,
           userId: input.userId,
         },
       });
     }
+  }
+
+  if (releasedIngressEventIds.length > 0) {
+    await input.tx.hostedIngressEvent.updateMany({
+      where: {
+        id: { in: releasedIngressEventIds },
+        userId: input.userId,
+      },
+      data: {
+        runId: null,
+        state: "pending",
+      },
+    });
   }
 }
 
@@ -1171,7 +1222,10 @@ async function buildHostedRunAcquireResponseTx(input: {
     acquired: input.acquired,
     cursor: projectHostedExecutionCursorRecord(input.cursor),
     events: input.events,
-    pendingWakeCount: await countPendingHostedIngressEvents({ prisma: input.tx, userId: input.userId }),
+    pendingIngressEventCount: await countPendingHostedIngressEvents({
+      prisma: input.tx,
+      userId: input.userId,
+    }),
     resumeFinalize: input.resumeFinalize,
     run: input.run ? projectHostedRunRecord(input.run) : null,
     ...(input.runToken === undefined ? {} : { runToken: input.runToken }),
@@ -1366,7 +1420,7 @@ function projectHostedRunRecord(record: {
     triggerKind: parseHostedRunTriggerKindForProjection(record.triggerKind),
     updatedAt: record.updatedAt.toISOString(),
     userId: record.userId,
-    wakeIds: readHostedRunStringArray(
+    ingressEventIds: readHostedRunStringArray(
       record.ingressEventIdsJson,
       "Hosted run ingressEventIdsJson",
     ),

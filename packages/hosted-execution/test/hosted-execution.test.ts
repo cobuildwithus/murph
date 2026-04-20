@@ -134,6 +134,7 @@ describe("hosted execution coverage gaps", () => {
     ]);
     expect(HOSTED_RUN_STATUSES).toEqual([
       "acquired",
+      "running",
       "finalizing",
       "committed_needs_finalize",
       "finalized",

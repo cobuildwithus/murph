@@ -88,7 +88,7 @@ describe("hosted local duplicate-commit worker-only e2e", () => {
         state: "completed",
       },
       status: {
-        pendingWakeCount: 0,
+        pendingIngressEventCount: 0,
         userId,
       },
     });
@@ -100,11 +100,11 @@ describe("hosted local duplicate-commit worker-only e2e", () => {
 
     const finalStatus = await worker.waitForUserStatus(
       userId,
-      (status) => status.pendingWakeCount === 0,
+      (status) => status.pendingIngressEventCount === 0,
     );
     expect(finalStatus).toMatchObject({
       lastEventId: expect.stringMatching(/^hosted-run:/),
-      pendingWakeCount: 0,
+      pendingIngressEventCount: 0,
       userId,
     });
 
@@ -141,7 +141,7 @@ describe("hosted local duplicate-commit worker-only e2e", () => {
         state: "completed",
       },
       status: {
-        pendingWakeCount: 0,
+        pendingIngressEventCount: 0,
         userId: stabilityUserId,
       },
     });
@@ -153,11 +153,11 @@ describe("hosted local duplicate-commit worker-only e2e", () => {
 
     const recoveredStatus = await worker.waitForUserStatus(
       stabilityUserId,
-      (status) => status.pendingWakeCount === 0,
+      (status) => status.pendingIngressEventCount === 0,
     );
     expect(recoveredStatus).toMatchObject({
       lastError: null,
-      pendingWakeCount: 0,
+      pendingIngressEventCount: 0,
       userId: stabilityUserId,
     });
 
@@ -167,11 +167,11 @@ describe("hosted local duplicate-commit worker-only e2e", () => {
 
     const stableStatus = await worker.waitForUserStatus(
       stabilityUserId,
-      (status) => status.pendingWakeCount === 0 && status.inFlight === false,
+      (status) => status.pendingIngressEventCount === 0 && status.inFlight === false,
     );
     expect(stableStatus).toMatchObject({
       lastError: null,
-      pendingWakeCount: 0,
+      pendingIngressEventCount: 0,
       userId: stabilityUserId,
     });
     expect(stableStatus.bundleRef).toEqual(recoveredStatus.bundleRef);
@@ -237,18 +237,18 @@ describe("hosted local duplicate-commit worker-only e2e", () => {
       },
       status: {
         lastError: null,
-        pendingWakeCount: 0,
+        pendingIngressEventCount: 0,
         userId: overlapUserId,
       },
     });
 
     const finalStatus = await worker.waitForUserStatus(
       overlapUserId,
-      (status) => status.pendingWakeCount === 0,
+      (status) => status.pendingIngressEventCount === 0,
     );
     expect(finalStatus).toMatchObject({
       lastError: null,
-      pendingWakeCount: 0,
+      pendingIngressEventCount: 0,
       userId: overlapUserId,
     });
 

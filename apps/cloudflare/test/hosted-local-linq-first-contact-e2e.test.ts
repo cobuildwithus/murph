@@ -78,7 +78,7 @@ describe("hosted local Linq first-contact e2e", () => {
     const finalStatus = await requireScenario().waitForHostedCompletion(userId);
     expect(finalStatus.bundleRef).not.toBeNull();
     expect(finalStatus.lastError).toBeNull();
-    expect(finalStatus.pendingWakeCount).toBe(0);
+    expect(finalStatus.pendingIngressEventCount).toBe(0);
 
     const sendRequest = await requireLinqStub().waitForSend({
       expectedPath: requireLinqStub().createChatPath,

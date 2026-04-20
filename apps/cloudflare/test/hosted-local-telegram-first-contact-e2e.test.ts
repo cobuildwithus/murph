@@ -84,7 +84,7 @@ describe("hosted local Telegram auto-reply e2e", () => {
     const finalStatus = await requireScenario().waitForHostedCompletion(userId);
     expect(finalStatus.bundleRef).not.toBeNull();
     expect(finalStatus.lastError).toBeNull();
-    expect(finalStatus.pendingWakeCount).toBe(0);
+    expect(finalStatus.pendingIngressEventCount).toBe(0);
 
     await requireTelegramStub().waitForRequest({
       expectedPath: `/bot${telegramBotToken}/sendChatAction`,

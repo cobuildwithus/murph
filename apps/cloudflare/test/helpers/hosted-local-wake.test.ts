@@ -36,11 +36,11 @@ it("targets the latest pending wake sequence when draining hosted wakes", async 
   readHostedWakeStatusFromWeb
     .mockResolvedValueOnce({
       cursor: buildCursorState("4"),
-      pendingWakeCount: 1,
+      pendingIngressEventCount: 1,
     } satisfies HostedWakeStatusResponse)
     .mockResolvedValueOnce({
       cursor: buildCursorState("4"),
-      pendingWakeCount: 0,
+      pendingIngressEventCount: 0,
     } satisfies HostedWakeStatusResponse);
   wakeUser.mockResolvedValue({
     committedSeq: "4",
@@ -67,7 +67,7 @@ it("targets the latest pending wake sequence when draining hosted wakes", async 
   expect(wakeUser).toHaveBeenCalledWith(
     "member_local_telegram_reply_123",
     {
-      targetSeqHint: "3",
+      targetCommittedSeqHint: "3",
     },
   );
 });

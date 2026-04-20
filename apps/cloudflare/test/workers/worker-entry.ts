@@ -141,7 +141,7 @@ async function wakeRunnerForTest(
 
   const append = await appendHostedWakeInWeb(runtimeEnv, wake);
   await runner.drainHostedRuns({
-    targetSeqHint: append.wake.seq,
+    targetCommittedSeqHint: append.wake.seq,
   });
   return runner.status();
 }
@@ -159,7 +159,7 @@ async function wakeRunnerWithOutcomeForTest(
   } else {
     const append = await appendHostedWakeInWeb(runtimeEnv, wake);
     await runner.drainHostedRuns({
-      targetSeqHint: append.wake.seq,
+      targetCommittedSeqHint: append.wake.seq,
     });
   }
   const status = await runner.status();
@@ -168,7 +168,7 @@ async function wakeRunnerWithOutcomeForTest(
     event: {
       eventId: wake.eventId,
       lastError: null,
-      state: status.pendingWakeCount === 0 ? "completed" : "queued",
+      state: status.pendingIngressEventCount === 0 ? "completed" : "queued",
       userId: wake.userId,
     },
     status,

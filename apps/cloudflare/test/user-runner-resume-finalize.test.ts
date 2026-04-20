@@ -292,7 +292,7 @@ function createRunRecord(): HostedRunRecord {
     triggerKind: "retry_finalize",
     updatedAt: "2026-04-20T00:00:00.000Z",
     userId: "user-resume-finalize",
-    wakeIds: [],
+    ingressEventIds: [],
   };
 }
 
@@ -375,7 +375,7 @@ describe("HostedUserRunner resumeFinalize drain", () => {
       acquired: true,
       cursor: acquiredCursor,
       events: [],
-      pendingWakeCount: 1,
+      pendingIngressEventCount: 1,
       resumeFinalize: true,
       run,
       runToken: "run-token",
@@ -384,7 +384,7 @@ describe("HostedUserRunner resumeFinalize drain", () => {
       acquired: false,
       cursor: drainedCursor,
       events: [],
-      pendingWakeCount: 0,
+      pendingIngressEventCount: 0,
       resumeFinalize: false,
       run: null,
       runToken: null,
@@ -465,7 +465,7 @@ describe("HostedUserRunner resumeFinalize drain", () => {
       acquired: true,
       cursor: acquiredCursor,
       events: [],
-      pendingWakeCount: 1,
+      pendingIngressEventCount: 1,
       resumeFinalize: false,
       run,
       runToken: "run-token",
@@ -564,7 +564,7 @@ describe("HostedUserRunner resumeFinalize drain", () => {
       acquired: true,
       cursor: acquiredCursor,
       events: [],
-      pendingWakeCount: 1,
+      pendingIngressEventCount: 1,
       resumeFinalize: false,
       run: acquiredRun,
       runToken: "prepare-token",
@@ -573,7 +573,7 @@ describe("HostedUserRunner resumeFinalize drain", () => {
       acquired: true,
       cursor: finalizeCursor,
       events: [],
-      pendingWakeCount: 1,
+      pendingIngressEventCount: 1,
       resumeFinalize: true,
       run: finalizingRun,
       runToken: "finalize-token",
@@ -667,7 +667,7 @@ describe("HostedUserRunner resumeFinalize drain", () => {
       acquired: true,
       cursor: finalizeCursor,
       events: [],
-      pendingWakeCount: 1,
+      pendingIngressEventCount: 1,
       resumeFinalize: true,
       run: finalizingRun,
       runToken: "finalize-token",
@@ -802,7 +802,7 @@ describe("HostedUserRunner resumeFinalize drain", () => {
           wake: missingRawWake,
         }),
       ],
-      pendingWakeCount: 2,
+      pendingIngressEventCount: 2,
       resumeFinalize: false,
       run,
       runToken: "run-token",
@@ -818,7 +818,7 @@ describe("HostedUserRunner resumeFinalize drain", () => {
           wake: laterWake,
         }),
       ],
-      pendingWakeCount: 1,
+      pendingIngressEventCount: 1,
       resumeFinalize: false,
       run,
       runToken: "run-token",
@@ -852,7 +852,7 @@ describe("HostedUserRunner resumeFinalize drain", () => {
     });
 
     const result = await runner.drainHostedRuns({
-      targetSeqHint: "12",
+      targetCommittedSeqHint: "12",
     });
 
     expect(webControlMocks.acquireHostedRunFromWeb).toHaveBeenCalledTimes(2);
@@ -863,7 +863,7 @@ describe("HostedUserRunner resumeFinalize drain", () => {
           {
             quarantineCode: "email-raw-message-missing",
             state: "quarantined",
-            wakeId: "wake-missing-raw",
+            ingressEventId: "wake-missing-raw",
           },
         ],
         outputCommittedSeq: "11",
@@ -875,7 +875,7 @@ describe("HostedUserRunner resumeFinalize drain", () => {
         {
           seq: "12",
           wake: laterWake,
-          wakeId: "wake-later",
+          ingressEventId: "wake-later",
         },
       ],
     });
@@ -927,7 +927,7 @@ describe("HostedUserRunner resumeFinalize drain", () => {
           userId: "user-resume-finalize",
         }),
       ],
-      pendingWakeCount: 1,
+      pendingIngressEventCount: 1,
       resumeFinalize: false,
       run,
       runToken: "run-token",
@@ -944,7 +944,7 @@ describe("HostedUserRunner resumeFinalize drain", () => {
     });
 
     const result = await runner.drainHostedRuns({
-      targetSeqHint: "11",
+      targetCommittedSeqHint: "11",
     });
 
     expect(webControlMocks.commitHostedRunToWeb).toHaveBeenCalledTimes(1);
@@ -954,7 +954,7 @@ describe("HostedUserRunner resumeFinalize drain", () => {
           {
             quarantineCode: "invalid-wake-payload",
             state: "quarantined",
-            wakeId: "wake-invalid-payload",
+            ingressEventId: "wake-invalid-payload",
           },
         ],
         outputCommittedSeq: "11",
@@ -1021,7 +1021,7 @@ describe("HostedUserRunner resumeFinalize drain", () => {
           wake: activationWake,
         }),
       ],
-      pendingWakeCount: 1,
+      pendingIngressEventCount: 1,
       resumeFinalize: false,
       run,
       runToken: "run-token",
@@ -1038,7 +1038,7 @@ describe("HostedUserRunner resumeFinalize drain", () => {
     });
 
     const result = await runner.drainHostedRuns({
-      targetSeqHint: "11",
+      targetCommittedSeqHint: "11",
     });
 
     expect(webControlMocks.commitHostedRunToWeb).toHaveBeenCalledTimes(1);
@@ -1048,7 +1048,7 @@ describe("HostedUserRunner resumeFinalize drain", () => {
           {
             quarantineCode: "share-pack-unavailable",
             state: "quarantined",
-            wakeId: "wake-share-pack-missing",
+            ingressEventId: "wake-share-pack-missing",
           },
         ],
         outputCommittedSeq: "11",
@@ -1105,7 +1105,7 @@ describe("HostedUserRunner resumeFinalize drain", () => {
           wake: emailWake,
         }),
       ],
-      pendingWakeCount: 1,
+      pendingIngressEventCount: 1,
       resumeFinalize: false,
       run,
       runToken: "run-token",
@@ -1118,7 +1118,7 @@ describe("HostedUserRunner resumeFinalize drain", () => {
     });
 
     await expect(runner.drainHostedRuns({
-      targetSeqHint: "11",
+      targetCommittedSeqHint: "11",
     })).rejects.toThrow(/missing envelope/u);
     await expect(stateStore.readState()).resolves.toMatchObject({
       nextWakeAt: expect.any(String),

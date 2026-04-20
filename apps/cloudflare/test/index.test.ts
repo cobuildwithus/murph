@@ -379,7 +379,7 @@ describe("cloudflare worker routes", () => {
         lastEventId: "evt_done",
         lastRunAt: "2026-04-16T10:05:00.000Z",
         nextWakeAt: null,
-        pendingWakeCount: 0,
+        pendingIngressEventCount: 0,
         userId: "member_123",
       })),
     });
@@ -960,7 +960,7 @@ function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
       lastEventId: null,
       lastRunAt: null,
       nextWakeAt: null,
-      pendingWakeCount: 0,
+      pendingIngressEventCount: 0,
       userId: "member_123",
     })),
     drainHostedRuns: vi.fn(async () => ({

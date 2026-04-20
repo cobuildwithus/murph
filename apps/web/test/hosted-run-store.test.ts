@@ -77,10 +77,10 @@ function hashRunToken(token: string): string {
 function buildRunRow(input: {
   eventSeqs: string[];
   runToken: string;
-  wakeIds: string[];
+  ingressEventIds: string[];
   inputCommittedSeq?: bigint;
   inputCursorVersion?: bigint;
-  status?: "acquired" | "committed_needs_finalize" | "finalizing" | "finalized" | "failed" | "superseded";
+  status?: "acquired" | "running" | "committed_needs_finalize" | "finalizing" | "finalized" | "failed" | "superseded";
   triggerKind?: "external_ingress" | "runtime_timer" | "manual_repair" | "retry_finalize";
 }) {
   const now = new Date("2026-04-20T00:00:00.000Z");
@@ -119,7 +119,7 @@ function buildRunRow(input: {
     triggerKind: input.triggerKind ?? "external_ingress",
     updatedAt: now,
     userId: "member_123",
-    ingressEventIdsJson: input.wakeIds,
+    ingressEventIdsJson: input.ingressEventIds,
   };
 }
 
@@ -147,7 +147,7 @@ describe("hosted run log handling", () => {
     const run = buildRunRow({
       eventSeqs: ["10"],
       runToken,
-      wakeIds: ["wake_10"],
+      ingressEventIds: ["wake_10"],
     });
     const hostedRunLogCreate = vi.fn(async ({ data }: {
       data: {
@@ -168,6 +168,7 @@ describe("hosted run log handling", () => {
     const tx = asHostedRunMutationTx({
       hostedRun: {
         findFirst: vi.fn(async () => run),
+        updateMany: vi.fn(async () => ({ count: 1 })),
       },
       hostedRunLog: {
         create: hostedRunLogCreate,
@@ -219,7 +220,7 @@ describe("hosted run log handling", () => {
     const run = buildRunRow({
       eventSeqs: ["10"],
       runToken,
-      wakeIds: ["wake_10"],
+      ingressEventIds: ["wake_10"],
       status: "committed_needs_finalize",
     });
     const prisma = asHostedRunStoreClient({
@@ -264,7 +265,7 @@ describe("hosted run log handling", () => {
     const run = buildRunRow({
       eventSeqs: ["10"],
       runToken,
-      wakeIds: ["wake_10"],
+      ingressEventIds: ["wake_10"],
     });
     const hostedRunLogCreate = vi.fn(async ({ data }: {
       data: {
@@ -290,6 +291,7 @@ describe("hosted run log handling", () => {
     const tx = asHostedRunMutationTx({
       hostedRun: {
         findFirst: vi.fn(async () => run),
+        updateMany: vi.fn(async () => ({ count: 1 })),
       },
       hostedRunLog: {
         create: hostedRunLogCreate,
@@ -343,33 +345,63 @@ describe("commitHostedRunTx", () => {
     mocks.lockHostedExecutionCursorRowTx.mockResolvedValue(undefined);
   });
 
-  it("fails closed and releases acquired wakes when commit stops short of the highest acquired seq", async () => {
-    const cursor = buildCursorRow();
+  it("commits a contiguous prefix and releases later acquired wakes when commit stops short", async () => {
+    const initialCursor = buildCursorRow();
+    const committedCursor = buildCursorRow({
+      committedSeq: 10n,
+      version: 4n,
+    });
     const runToken = "run-token.partial";
     const run = buildRunRow({
       eventSeqs: ["10", "11", "12"],
       runToken,
-      wakeIds: ["wake_10", "wake_11", "wake_12"],
+      ingressEventIds: ["wake_10", "wake_11", "wake_12"],
     });
-    const hostedExecutionCursorUpdateMany = vi.fn();
-    const hostedWakeUpdate = vi.fn();
-    const hostedWakeUpdateMany = vi.fn(async () => ({ count: 3 }));
+    const hostedExecutionCursorUpdateMany = vi.fn(async () => ({ count: 1 }));
+    const hostedIngressEventUpdate = vi.fn(async ({ where, data }: {
+      data: {
+        completedAt: Date;
+        payloadInlineCiphertext: null;
+        payloadRef: null;
+        quarantineCode: string | null;
+        quarantinedAt: Date | null;
+        runId: string;
+        state: "completed" | "quarantined";
+      };
+      where: { id: string };
+    }) => ({
+      id: where.id,
+      ...data,
+    }));
+    const hostedIngressEventUpdateMany = vi.fn(async () => ({ count: 2 }));
     const hostedRunUpdate = vi.fn(async ({ data }: {
       data: {
-        errorClass: string;
-        errorCode: string;
-        failedAt: Date;
-        status: "failed";
-        updatedAt: Date;
+        committedAt: Date;
+        finalSnapshotRef: unknown;
+        finalizedAt: Date;
+        nextRuntimeWakeAt: Date | null;
+        nextRuntimeWakeReason: string | null;
+        outputCommittedSeq: bigint;
+        outputCursorVersion: bigint;
+        preparedAt: Date;
+        preparedSnapshotRef: unknown;
+        redactedSummaryJson?: unknown;
+        status: "finalized";
       };
       where: { id: string };
     }) => ({
       ...run,
-      errorClass: data.errorClass,
-      errorCode: data.errorCode,
-      failedAt: data.failedAt,
+      committedAt: data.committedAt,
+      finalSnapshotRef: null,
+      finalizedAt: data.finalizedAt,
+      nextRuntimeWakeAt: data.nextRuntimeWakeAt,
+      nextRuntimeWakeReason: data.nextRuntimeWakeReason,
+      outputCommittedSeq: data.outputCommittedSeq,
+      outputCursorVersion: data.outputCursorVersion,
+      preparedAt: data.preparedAt,
+      preparedSnapshotRef: null,
+      redactedSummaryJson: data.redactedSummaryJson ?? null,
       status: data.status,
-      updatedAt: data.updatedAt,
     }));
     const tx = asHostedRunMutationTx({
       hostedExecutionCursor: {
@@ -380,14 +412,49 @@ describe("commitHostedRunTx", () => {
         update: hostedRunUpdate,
       },
       hostedIngressEvent: {
-        update: hostedWakeUpdate,
-        updateMany: hostedWakeUpdateMany,
+        findMany: vi.fn(async () => [
+          {
+            id: "wake_10",
+            payloadRef: null,
+            quarantineCode: null,
+            quarantinedAt: null,
+            seq: 10n,
+          },
+          {
+            id: "wake_11",
+            payloadRef: null,
+            quarantineCode: null,
+            quarantinedAt: null,
+            seq: 11n,
+          },
+          {
+            id: "wake_12",
+            payloadRef: null,
+            quarantineCode: null,
+            quarantinedAt: null,
+            seq: 12n,
+          },
+        ]),
+        update: hostedIngressEventUpdate,
+        updateMany: hostedIngressEventUpdateMany,
+      },
+      hostedIngressPayload: {
+        deleteMany: vi.fn(),
       },
     });
 
-    mocks.ensureHostedExecutionCursorRowTx.mockResolvedValue(cursor);
+    mocks.ensureHostedExecutionCursorRowTx
+      .mockResolvedValueOnce(initialCursor)
+      .mockResolvedValueOnce(initialCursor)
+      .mockResolvedValueOnce(committedCursor);
 
     const result = await commitHostedRunTx({
+      eventResults: [
+        {
+          ingressEventId: "wake_10",
+          state: "completed",
+        },
+      ],
       expectedCursorVersion: 3n,
       finalizeRequired: false,
       outputCommittedSeq: 10n,
@@ -397,30 +464,58 @@ describe("commitHostedRunTx", () => {
       userId: "member_123",
     });
 
-    expect(result.committed).toBe(false);
+    expect(result.committed).toBe(true);
     expect(result.needsFinalize).toBe(false);
     expect(result.run).toMatchObject({
-      errorCode: "HOSTED_RUN_PARTIAL_COMMIT_UNSUPPORTED",
-      inputCommittedSeq: "9",
-      status: "failed",
+      outputCommittedSeq: "10",
+      outputCursorVersion: "4",
+      status: "finalized",
     });
-    expect(hostedExecutionCursorUpdateMany).not.toHaveBeenCalled();
-    expect(hostedWakeUpdate).not.toHaveBeenCalled();
-    expect(hostedWakeUpdateMany).toHaveBeenCalledWith({
+    expect(result.cursor).toMatchObject({
+      committedSeq: "10",
+      version: "4",
+    });
+    expect(hostedExecutionCursorUpdateMany).toHaveBeenCalledWith({
+      data: {
+        committedSeq: 10n,
+        nextRuntimeWakeAt: null,
+        nextRuntimeWakeReason: null,
+        snapshotRef: expect.anything(),
+        version: { increment: 1 },
+      },
+      where: {
+        committedSeq: 9n,
+        userId: "member_123",
+        version: 3n,
+      },
+    });
+    expect(hostedIngressEventUpdate).toHaveBeenCalledWith({
+      data: {
+        completedAt: expect.any(Date),
+        payloadInlineCiphertext: null,
+        payloadRef: null,
+        quarantineCode: null,
+        quarantinedAt: null,
+        runId: run.id,
+        state: "completed",
+      },
+      where: { id: "wake_10" },
+    });
+    expect(hostedIngressEventUpdateMany).toHaveBeenCalledWith({
       data: {
         runId: null,
         state: "pending",
       },
       where: {
-        runId: run.id,
-        seq: { gt: 9n },
-        state: "running",
+        id: { in: ["wake_11", "wake_12"] },
         userId: "member_123",
       },
     });
     expect(hostedRunUpdate).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
-        errorCode: "HOSTED_RUN_PARTIAL_COMMIT_UNSUPPORTED",
+        outputCommittedSeq: 10n,
+        outputCursorVersion: 4n,
+        status: "finalized",
       }),
       where: { id: run.id },
     }));
@@ -437,7 +532,7 @@ describe("commitHostedRunTx", () => {
       eventSeqs: [],
       runToken,
       triggerKind: "runtime_timer",
-      wakeIds: [],
+      ingressEventIds: [],
     });
     const hostedExecutionCursorUpdateMany = vi.fn(async () => ({ count: 1 }));
     const hostedRunUpdate = vi.fn(async ({ data }: {
@@ -502,7 +597,6 @@ describe("commitHostedRunTx", () => {
     expect(result.needsFinalize).toBe(false);
     expect(result.cursor).toMatchObject({
       committedSeq: "9",
-      version: "4",
     });
     expect(result.run).toMatchObject({
       outputCommittedSeq: "9",
@@ -532,7 +626,7 @@ describe("commitHostedRunTx", () => {
     const run = buildRunRow({
       eventSeqs: ["10", "11"],
       runToken,
-      wakeIds: ["wake_10", "wake_11"],
+      ingressEventIds: ["wake_10", "wake_11"],
     });
     const hostedExecutionCursorUpdateMany = vi.fn();
     const hostedWakeUpdate = vi.fn();
@@ -574,7 +668,7 @@ describe("commitHostedRunTx", () => {
       eventResults: [
         {
           state: "completed",
-          wakeId: "wake_10",
+          ingressEventId: "wake_10",
         },
       ],
       expectedCursorVersion: 3n,
@@ -626,7 +720,7 @@ describe("commitHostedRunTx", () => {
       eventSeqs: [],
       runToken,
       triggerKind: "runtime_timer",
-      wakeIds: [],
+      ingressEventIds: [],
     });
     const hostedExecutionCursorUpdateMany = vi.fn(async () => ({ count: 1 }));
     const hostedRunUpdate = vi.fn(async ({ data }: {
@@ -727,7 +821,7 @@ describe("commitHostedRunTx", () => {
     const run = buildRunRow({
       eventSeqs: ["10", "11"],
       runToken,
-      wakeIds: ["wake_10", "wake_11"],
+      ingressEventIds: ["wake_10", "wake_11"],
     });
     const hostedExecutionCursorUpdateMany = vi.fn(async () => ({ count: 1 }));
     const hostedIngressEventFindMany = vi.fn(async () => [
@@ -822,12 +916,12 @@ describe("commitHostedRunTx", () => {
       eventResults: [
         {
           state: "completed",
-          wakeId: "wake_10",
+          ingressEventId: "wake_10",
         },
         {
           quarantineCode: "share_payload_rejected",
           state: "quarantined",
-          wakeId: "wake_11",
+          ingressEventId: "wake_11",
         },
       ],
       expectedCursorVersion: 3n,
@@ -893,7 +987,7 @@ describe("acquireHostedRunTx", () => {
       runToken: "stale-token",
       status: "committed_needs_finalize",
       triggerKind: "retry_finalize",
-      wakeIds: [],
+      ingressEventIds: [],
     });
     const claimedRun = {
       ...resumableRun,
@@ -928,7 +1022,7 @@ describe("acquireHostedRunTx", () => {
     expect(result.acquired).toBe(true);
     expect(result.resumeFinalize).toBe(true);
     expect(result.events).toEqual([]);
-    expect(result.pendingWakeCount).toBe(0);
+    expect(result.pendingIngressEventCount).toBe(0);
     expect(result.run).toMatchObject({
       id: resumableRun.id,
       status: "finalizing",
@@ -960,7 +1054,7 @@ describe("acquireHostedRunTx", () => {
       runToken: "stale-finalizing-token",
       status: "finalizing",
       triggerKind: "retry_finalize",
-      wakeIds: [],
+      ingressEventIds: [],
     });
     const resetRun = {
       ...staleFinalizingRun,
@@ -1102,7 +1196,7 @@ describe("releaseHostedRunFinalizeTx", () => {
       eventSeqs: ["10"],
       runToken,
       status: "finalizing",
-      wakeIds: ["wake_10"],
+      ingressEventIds: ["wake_10"],
     });
     const hostedRunUpdate = vi.fn(async ({ data }: {
       data: {

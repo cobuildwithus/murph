@@ -41,7 +41,7 @@ describe("hosted run drain parser coverage", () => {
               reason: "connected",
               userId: "user_123",
             }),
-            wakeId: "wake_24",
+            ingressEventId: "wake_24",
           },
         ],
         inputCommittedSeq: "24",
@@ -70,7 +70,7 @@ describe("hosted run drain parser coverage", () => {
               reason: "connected",
               userId: "user_123",
             }),
-            wakeId: "wake_24",
+            ingressEventId: "wake_24",
           },
         ],
         inputCommittedSeq: "24",
@@ -191,7 +191,7 @@ describe("hosted run drain parser coverage", () => {
           userId: "member-1",
         },
       ],
-      pendingWakeCount: 0,
+      pendingIngressEventCount: 0,
       resumeFinalize: true,
       run: null,
     })).toEqual({
@@ -222,7 +222,7 @@ describe("hosted run drain parser coverage", () => {
           userId: "member-1",
         },
       ],
-      pendingWakeCount: 0,
+      pendingIngressEventCount: 0,
       resumeFinalize: true,
       run: null,
     });
@@ -248,7 +248,7 @@ describe("hosted run drain parser coverage", () => {
         runId: "run-1",
         userId: "member-1",
       }],
-      pendingWakeCount: 0,
+      pendingIngressEventCount: 0,
       run: null,
       runs: [],
     })).toEqual({
@@ -272,7 +272,7 @@ describe("hosted run drain parser coverage", () => {
         runId: "run-1",
         userId: "member-1",
       }],
-      pendingWakeCount: 0,
+      pendingIngressEventCount: 0,
       run: null,
       runs: [],
     });

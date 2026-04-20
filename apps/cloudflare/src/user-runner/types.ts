@@ -48,7 +48,7 @@ export interface RunnerStateRecord {
   lastEventId: string | null;
   lastRunAt: string | null;
   nextWakeAt: string | null;
-  pendingWakeCount: number;
+  pendingIngressEventCount: number;
   run: HostedExecutionRunStatus | null;
   timeline: HostedExecutionTimelineEntry[];
   userId: string;
@@ -76,7 +76,7 @@ export function toUserStatus(record: RunnerStateRecord): HostedExecutionUserStat
     lastEventId: record.lastEventId,
     lastRunAt: record.lastRunAt,
     nextWakeAt: record.nextWakeAt,
-    pendingWakeCount: record.pendingWakeCount,
+    pendingIngressEventCount: record.pendingIngressEventCount,
     ...(record.run ? {
       run: record.run,
     } : {}),

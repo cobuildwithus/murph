@@ -90,8 +90,8 @@ export interface HostedIngressLifecycleRecord {
 export interface HostedIngressRepairCandidate {
   committedSeq: string;
   nextSeq: string;
-  pendingWakeCount: number;
-  targetSeqHint: string;
+  pendingIngressEventCount: number;
+  targetCommittedSeqHint: string;
   userId: string;
 }
 

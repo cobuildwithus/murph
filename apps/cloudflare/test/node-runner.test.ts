@@ -380,7 +380,7 @@ async function runHostedExecutionJob(
               ...(sharePack === undefined ? {} : { sharePack }),
               seq: "0",
               wake,
-              wakeId: `wake_${wake.eventId}`,
+              ingressEventId: `wake_${wake.eventId}`,
             },
           ],
           inputCommittedSeq: "0",

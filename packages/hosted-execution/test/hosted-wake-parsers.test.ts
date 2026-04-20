@@ -13,6 +13,8 @@ import {
   parseHostedRunFinalizeResponse,
   parseHostedRunLogRequest,
   parseHostedRunLogResponse,
+  parseHostedRunReleaseFinalizeRequest,
+  parseHostedRunReleaseFinalizeResponse,
   parseHostedRunStatusRequest,
   parseHostedRunStatusResponse,
   parseHostedIngressAppendResponse,
@@ -70,7 +72,7 @@ function createHostedRunRecord(status = "committed_needs_finalize") {
     triggerKind: "runtime_timer",
     updatedAt: "2026-04-17T00:00:03.000Z",
     userId: "member-1",
-    wakeIds: ["wake-1"],
+    ingressEventIds: ["wake-1"],
   } as const;
 }
 
@@ -162,7 +164,7 @@ describe("hosted wake parser contracts", () => {
         version: "4",
       },
       events: [],
-      pendingWakeCount: 0,
+      pendingIngressEventCount: 0,
       resumeFinalize: false,
       run,
       runToken: "run_token_123",
@@ -180,7 +182,7 @@ describe("hosted wake parser contracts", () => {
         version: "4",
       },
       events: [],
-      pendingWakeCount: 0,
+      pendingIngressEventCount: 0,
       resumeFinalize: false,
       run,
       runToken: "run_token_123",
@@ -191,7 +193,7 @@ describe("hosted wake parser contracts", () => {
         {
           quarantineCode: null,
           state: "completed",
-          wakeId: "wake-1",
+          ingressEventId: "wake-1",
         },
       ],
       expectedCursorVersion: "4",
@@ -208,7 +210,7 @@ describe("hosted wake parser contracts", () => {
         {
           quarantineCode: null,
           state: "completed",
-          wakeId: "wake-1",
+          ingressEventId: "wake-1",
         },
       ],
       expectedCursorVersion: "4",
@@ -227,7 +229,7 @@ describe("hosted wake parser contracts", () => {
       eventResults: [
         {
           state: "queued" as never,
-          wakeId: "wake-1",
+          ingressEventId: "wake-1",
         },
       ],
       outputCommittedSeq: "25",
@@ -305,6 +307,44 @@ describe("hosted wake parser contracts", () => {
         version: "6",
       },
       finalized: true,
+      run,
+    });
+
+    expect(parseHostedRunReleaseFinalizeRequest({
+      failureClass: "hosted_run_finalize_retryable",
+      failureCode: "HOSTED_RUN_FINALIZE_BACKPRESSURED",
+      runId: "run-1",
+      runToken: "run_token_123",
+    })).toEqual({
+      failureClass: "hosted_run_finalize_retryable",
+      failureCode: "HOSTED_RUN_FINALIZE_BACKPRESSURED",
+      runId: "run-1",
+      runToken: "run_token_123",
+    });
+
+    expect(parseHostedRunReleaseFinalizeResponse({
+      cursor: {
+        committedSeq: "25",
+        createdAt: "2026-04-17T00:00:00.000Z",
+        nextSeq: "26",
+        snapshotRef: TEST_SNAPSHOT_REF,
+        updatedAt: "2026-04-17T00:00:03.000Z",
+        userId: "member-1",
+        version: "6",
+      },
+      released: true,
+      run,
+    })).toEqual({
+      cursor: {
+        committedSeq: "25",
+        createdAt: "2026-04-17T00:00:00.000Z",
+        nextSeq: "26",
+        snapshotRef: TEST_SNAPSHOT_REF,
+        updatedAt: "2026-04-17T00:00:03.000Z",
+        userId: "member-1",
+        version: "6",
+      },
+      released: true,
       run,
     });
   });
@@ -404,7 +444,7 @@ describe("hosted wake parser contracts", () => {
           userId: "member-1",
         },
       ],
-      pendingWakeCount: 0,
+      pendingIngressEventCount: 0,
       run,
       runs: [run],
     })).toEqual({
@@ -431,7 +471,7 @@ describe("hosted wake parser contracts", () => {
           userId: "member-1",
         },
       ],
-      pendingWakeCount: 0,
+      pendingIngressEventCount: 0,
       run,
       runs: [run],
     });
@@ -446,7 +486,7 @@ describe("hosted wake parser contracts", () => {
         userId: "member-1",
         version: "6",
       },
-      pendingWakeCount: 0,
+      pendingIngressEventCount: 0,
       run: {
         ...run,
         status: "queued" as never,
