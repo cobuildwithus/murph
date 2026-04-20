@@ -5,9 +5,8 @@ import {
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
 import {
-  HOSTED_USER_ROOT_KEY_ENVELOPE_SCHEMA,
   parseHostedUserRecipientPublicKeyJwk,
-  wrapHostedUserRootKeyRecipient,
+  wrapHostedBrowserSessionKey,
 } from "@murphai/runtime-state";
 import {
   type HostedRunDrainResult,
@@ -17,7 +16,9 @@ import {
 import {
   HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER,
   HOSTED_EXECUTION_USER_ID_HEADER,
+  type HostedBrowserVaultReplicaRef,
 } from "@murphai/hosted-execution/contracts";
+import { parseHostedBrowserVaultReplicaRef } from "@murphai/hosted-execution/parsers";
 
 import {
   CLOUDFLARE_HOSTED_RUNTIME_INTERNAL_HOSTNAMES,
@@ -41,8 +42,8 @@ import type { HostedExecutionContainerNamespaceLike } from "./runner-container.t
 import type { HostedEmailWorkerRequest } from "./hosted-email.ts";
 import { handleHostedEmailIngress } from "./hosted-email/worker-ingress.ts";
 import {
-  createHostedBrowserVaultSnapshotStore,
-  resolveHostedBrowserVaultSnapshotStorageRef,
+  createBrowserVaultReplicaAadFields,
+  createHostedBrowserVaultReplicaStore,
 } from "./browser-vault-store.ts";
 import {
   HostedUserRunner,
@@ -435,63 +436,58 @@ async function handleBrowserVaultSessionRoute(
     environment: context.environment,
     userId,
   });
-  const snapshotStore = createHostedBrowserVaultSnapshotStore({
+  const replicaStore = createHostedBrowserVaultReplicaStore({
     bucket: context.env.BUNDLES,
-    key: crypto.rootKey,
-    keyId: crypto.rootKeyId,
+    rootKey: crypto.rootKey,
   });
-  const snapshotEnvelope = await snapshotStore.readBrowserVaultSnapshotEnvelope(userId);
+  const replicaEnvelope = await replicaStore.readBrowserVaultReplicaEnvelope(body.replicaRef);
 
-  if (!snapshotEnvelope) {
-    return json({
-      rootKeyEnvelope: null,
-      snapshotAad: null,
-      snapshotEnvelope: null,
-    });
+  if (!replicaEnvelope) {
+    return json({ error: "Browser vault replica was not found." }, 404);
   }
 
-  const nowIso = new Date().toISOString();
-  const snapshotStorageRef = await resolveHostedBrowserVaultSnapshotStorageRef({
-    rootKey: crypto.rootKey,
-    userId,
-  });
-  const recipient = await wrapHostedUserRootKeyRecipient({
-    recipient: {
-      keyId: `browser-session:${globalThis.crypto.randomUUID()}`,
-      kind: "user-unlock",
-      publicKeyJwk: body.browserPublicKeyJwk,
-    },
-    rootKey: crypto.rootKey,
-    rootKeyId: crypto.rootKeyId,
+  const replicaKey = await replicaStore.deriveBrowserVaultReplicaKey(body.replicaRef);
+  const replicaKeyEnvelope = await wrapHostedBrowserSessionKey({
+    keyBytes: replicaKey,
+    keyId: body.replicaRef.keyId,
+    publicKeyJwk: body.browserPublicKeyJwk,
+    purpose: "browser-vault-replica",
     userId,
   });
 
   return json({
-    rootKeyEnvelope: {
-      createdAt: nowIso,
-      recipients: [recipient],
-      rootKeyId: crypto.rootKeyId,
-      schema: HOSTED_USER_ROOT_KEY_ENVELOPE_SCHEMA,
-      updatedAt: nowIso,
+    encryptedReplica: replicaEnvelope,
+    replicaAad: createBrowserVaultReplicaAadFields({
+      ref: body.replicaRef,
       userId,
-    },
-    snapshotAad: {
-      ...snapshotStorageRef.aadFields,
-    },
-    snapshotEnvelope,
+    }),
+    replicaKeyEnvelope,
+    replicaRef: body.replicaRef,
+    state: "ready",
   });
 }
 
 function parseBrowserVaultSessionRequest(value: unknown): {
   browserPublicKeyJwk: ReturnType<typeof parseHostedUserRecipientPublicKeyJwk>;
+  replicaRef: HostedBrowserVaultReplicaRef;
 } {
   const record = requireJsonRecord(value, "Browser vault session request");
+
+  const replicaRef = parseHostedBrowserVaultReplicaRef(
+    record.replicaRef,
+    "Browser vault session request replicaRef",
+  );
+
+  if (!replicaRef) {
+    throw new TypeError("Browser vault session request replicaRef must not be null.");
+  }
 
   return {
     browserPublicKeyJwk: parseHostedUserRecipientPublicKeyJwk(
       record.browserPublicKeyJwk,
       "Browser vault session request browserPublicKeyJwk",
     ),
+    replicaRef,
   };
 }
 

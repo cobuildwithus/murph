@@ -41,7 +41,7 @@ test("exports a hosted browser vault replica from the tolerant vault read", asyn
   const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-hosted-browser-vault-"));
   tempRoots.push(vaultRoot);
 
-  await mkdir(path.join(vaultRoot, "history/journal"), { recursive: true });
+  await mkdir(path.join(vaultRoot, "journal/2026"), { recursive: true });
   await writeFile(
     path.join(vaultRoot, "vault.json"),
     JSON.stringify({
@@ -54,12 +54,14 @@ test("exports a hosted browser vault replica from the tolerant vault read", asyn
     "utf8",
   );
   await writeFile(
-    path.join(vaultRoot, "history/journal/2026-04-08.md"),
+    path.join(vaultRoot, "journal/2026/2026-04-08.md"),
     `---
-title: Travel recovery note
-tags:
-  - recovery
+schemaVersion: murph.frontmatter.journal-day.v1
+docType: journal_day
+dayKey: 2026-04-08
 ---
+
+# Travel recovery note
 
 Felt steadier after a full night of sleep.
 `,

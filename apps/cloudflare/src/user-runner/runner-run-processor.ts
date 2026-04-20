@@ -1,5 +1,6 @@
 import type {
   HostedExecutionBundleRef,
+  HostedBrowserVaultReplicaRef,
   HostedExecutionRunContext,
   HostedExecutionRunLevel,
   HostedExecutionRunPhase,
@@ -29,7 +30,7 @@ import type {
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import { computeHostedRunElapsedMs } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import type { R2BucketLike } from "../bundle-store.js";
-import { createHostedBrowserVaultSnapshotStore } from "../browser-vault-store.js";
+import { createHostedBrowserVaultReplicaStore } from "../browser-vault-store.js";
 import { deleteHostedEmailRawMessage } from "../hosted-email.ts";
 import type { HostedExecutionEnvironment } from "../env.js";
 import { type HostedUserCryptoContext } from "../user-key-store.js";
@@ -72,6 +73,7 @@ export interface RunnerUserStores {
 }
 
 export interface RunnerRunDrainExecutionResult {
+  browserVaultReplicaRef?: HostedBrowserVaultReplicaRef | null;
   cursorSnapshotRef: HostedExecutionBundleRef | null;
   finalizeRequired: boolean;
   nextRuntimeWakeAt?: string | null;
@@ -259,9 +261,9 @@ export class RunnerRunProcessor {
         result: runnerResult.result,
         run,
       });
-      await this.persistBrowserVaultSnapshotBestEffort(
+      const browserVaultReplicaRef = await this.persistBrowserVaultReplicaBestEffort(
         userId,
-        runnerResult.browserVaultSnapshot ?? null,
+        runnerResult.browserVaultReplica ?? null,
       );
       await this.dependencies.stateStore.completeRun({
         eventId: runEventId,
@@ -269,6 +271,7 @@ export class RunnerRunProcessor {
         leaseOwner,
       });
       return {
+        browserVaultReplicaRef,
         cursorSnapshotRef,
         finalizeRequired: false,
         nextRuntimeWakeAt: result.result.nextWakeAt ?? null,
@@ -377,9 +380,9 @@ export class RunnerRunProcessor {
         result: runnerResult.result,
         run,
       });
-      await this.persistBrowserVaultSnapshotBestEffort(
+      const browserVaultReplicaRef = await this.persistBrowserVaultReplicaBestEffort(
         userId,
-        runnerResult.browserVaultSnapshot ?? null,
+        runnerResult.browserVaultReplica ?? null,
       );
       await this.dependencies.stateStore.completeRun({
         eventId: runEventId,
@@ -396,6 +399,7 @@ export class RunnerRunProcessor {
       });
 
       return {
+        browserVaultReplicaRef,
         cursorSnapshotRef,
         finalizeRequired: false,
         nextRuntimeWakeAt: runnerResult.result.result.nextWakeAt,
@@ -632,43 +636,42 @@ export class RunnerRunProcessor {
     });
   }
 
-  private async persistBrowserVaultSnapshotBestEffort(
+  private async persistBrowserVaultReplicaBestEffort(
     userId: string,
-    browserVaultSnapshot: unknown | null,
-  ): Promise<void> {
+    browserVaultReplica: unknown | null,
+  ): Promise<HostedBrowserVaultReplicaRef | null> {
+    if (!browserVaultReplica) {
+      return null;
+    }
+
     try {
       const { crypto } = await this.dependencies.ensureRunnerStores(userId);
-      const store = createHostedBrowserVaultSnapshotStore({
+      const store = createHostedBrowserVaultReplicaStore({
         bucket: this.dependencies.bucket,
-        key: crypto.rootKey,
-        keyId: crypto.rootKeyId,
+        rootKey: crypto.rootKey,
       });
 
-      if (browserVaultSnapshot) {
-        await store.writeBrowserVaultSnapshot(userId, browserVaultSnapshot);
-      } else {
-        await store.deleteBrowserVaultSnapshot(userId);
-      }
+      return await store.writeBrowserVaultReplica({
+        replica: browserVaultReplica,
+        userId,
+      });
     } catch (error) {
       emitHostedExecutionStructuredLog({
         component: "runner",
         details: {
-          action: browserVaultSnapshot ? "write" : "delete",
+          action: "write",
           error: formatHostedExecutionLogMessage(
-            browserVaultSnapshot
-              ? "Browser vault snapshot persistence failed."
-              : "Browser vault snapshot deletion failed.",
+            "Browser vault replica persistence failed.",
             error,
           ),
         },
-        eventId: "browser-vault-snapshot",
-        message: browserVaultSnapshot
-          ? "Failed to persist browser vault snapshot sidecar."
-          : "Failed to delete stale browser vault snapshot sidecar.",
+        eventId: "browser-vault-replica",
+        message: "Failed to persist browser vault replica object.",
         phase: "completed",
         run: null,
         userId,
       });
+      return null;
     }
   }
 

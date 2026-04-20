@@ -19,6 +19,7 @@ export const POST = withJsonError(async (request: Request) => {
     nextRuntimeWakeAt: "nextRuntimeWakeAt" in body ? body.nextRuntimeWakeAt ?? null : undefined,
     nextRuntimeWakeReason: "nextRuntimeWakeReason" in body ? body.nextRuntimeWakeReason ?? null : undefined,
     outputCommittedSeq: BigInt(body.outputCommittedSeq),
+    browserVaultReplicaRef: "browserVaultReplicaRef" in body ? body.browserVaultReplicaRef ?? null : undefined,
     preparedSnapshotRef: "preparedSnapshotRef" in body ? body.preparedSnapshotRef ?? null : undefined,
     redactedSummary: "redactedSummary" in body ? body.redactedSummary ?? null : undefined,
     runId: body.runId,

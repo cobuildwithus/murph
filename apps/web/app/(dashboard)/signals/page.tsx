@@ -1,5 +1,8 @@
 "use client";
 
+import { useMemo } from "react";
+import { selectBrowserVaultSignals } from "@murphai/query/browser";
+
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Badge } from "@/src/components/ui/badge";
 import { Button } from "@/src/components/ui/button";
@@ -18,7 +21,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/src/components/ui/table";
-import { useBrowserVault } from "@/src/lib/browser-vault/context";
+import { BrowserVaultProvider, useBrowserVault } from "@/src/lib/browser-vault/context";
 import {
   formatConfidenceLabel,
   formatIsoDate,
@@ -27,16 +30,26 @@ import {
 } from "@/src/lib/browser-vault/display";
 
 export default function SignalsPage() {
-  const { error, refresh, snapshot, status } = useBrowserVault();
-  const assistantSummary = snapshot?.signals.assistantSummary ?? {
+  return (
+    <BrowserVaultProvider>
+      <SignalsPageContent />
+    </BrowserVaultProvider>
+  );
+}
+
+function SignalsPageContent() {
+  const { client, error, refresh, status } = useBrowserVault();
+  const signals = useMemo(() => client ? selectBrowserVaultSignals(client) : null, [client]);
+  const assistantSummary = signals?.assistantSummary ?? {
     highlights: [],
     latestDate: null,
   };
-  const sleep = snapshot?.signals.sleep ?? [];
-  const recovery = snapshot?.signals.recovery ?? [];
-  const activity = snapshot?.signals.activity ?? [];
-  const bodyState = snapshot?.signals.bodyState ?? [];
-  const sourceHealth = snapshot?.signals.sourceHealth ?? [];
+  const sleep = signals?.sleep ?? [];
+  const recovery = signals?.recovery ?? [];
+  const activity = signals?.activity ?? [];
+  const bodyState = signals?.bodyState ?? [];
+  const sourceHealth = signals?.sourceHealth ?? [];
+  const canRenderContent = status === "empty" || client !== null;
   const hasWearableData =
     sleep.length > 0 ||
     recovery.length > 0 ||
@@ -61,8 +74,8 @@ export default function SignalsPage() {
         <div className="text-sm text-muted-foreground">
           {assistantSummary.latestDate
             ? `Latest data ${formatIsoDate(assistantSummary.latestDate)}`
-            : snapshot
-              ? `Updated ${formatIsoDate(snapshot.generatedAt)}`
+            : client
+              ? `Updated ${formatIsoDate(client.replica.generatedAt)}`
               : "No signals available yet."}
         </div>
       </div>
@@ -92,7 +105,7 @@ export default function SignalsPage() {
         </Alert>
       ) : null}
 
-      {status === "ready" && !hasWearableData ? (
+      {canRenderContent && !hasWearableData ? (
         <Card>
           <CardHeader>
             <CardTitle>No wearable signals yet</CardTitle>
@@ -103,13 +116,13 @@ export default function SignalsPage() {
         </Card>
       ) : null}
 
-      {status === "ready" && hasWearableData ? (
+      {canRenderContent && hasWearableData ? (
         <>
           <div className="grid gap-4 xl:grid-cols-4">
             <SignalSummaryCard
               description="Latest cross-provider sleep summary"
-              extra={sleep[0]?.sleepScore.selection.value !== null
-                ? `Score ${formatMetricValue(sleep[0]?.sleepScore)}`
+              extra={sleep[0] && sleep[0].sleepScore.selection.value !== null
+                ? `Score ${formatMetricValue(sleep[0].sleepScore)}`
                 : null}
               title="Sleep"
               value={sleep[0] ? formatMetricValue(sleep[0].totalSleepMinutes) : "—"}
@@ -117,8 +130,8 @@ export default function SignalsPage() {
             />
             <SignalSummaryCard
               description="Latest recovery and readiness summary"
-              extra={recovery[0]?.hrv.selection.value !== null
-                ? `HRV ${formatMetricValue(recovery[0]?.hrv)}`
+              extra={recovery[0] && recovery[0].hrv.selection.value !== null
+                ? `HRV ${formatMetricValue(recovery[0].hrv)}`
                 : null}
               title="Recovery"
               value={recovery[0] ? formatMetricValue(recovery[0].readinessScore) : "—"}
@@ -126,8 +139,8 @@ export default function SignalsPage() {
             />
             <SignalSummaryCard
               description="Latest activity aggregate"
-              extra={activity[0]?.sessionMinutes.selection.value !== null
-                ? `${formatMetricValue(activity[0]?.sessionMinutes)} tracked`
+              extra={activity[0] && activity[0].sessionMinutes.selection.value !== null
+                ? `${formatMetricValue(activity[0].sessionMinutes)} tracked`
                 : null}
               title="Activity"
               value={activity[0] ? formatMetricValue(activity[0].steps) : "—"}
@@ -135,8 +148,8 @@ export default function SignalsPage() {
             />
             <SignalSummaryCard
               description="Latest body-state summary"
-              extra={bodyState[0]?.bodyFatPercentage.selection.value !== null
-                ? `Body fat ${formatMetricValue(bodyState[0]?.bodyFatPercentage)}`
+              extra={bodyState[0] && bodyState[0].bodyFatPercentage.selection.value !== null
+                ? `Body fat ${formatMetricValue(bodyState[0].bodyFatPercentage)}`
                 : null}
               title="Body state"
               value={bodyState[0] ? formatMetricValue(bodyState[0].weightKg) : "—"}

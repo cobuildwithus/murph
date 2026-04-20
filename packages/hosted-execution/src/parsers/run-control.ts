@@ -37,6 +37,7 @@ import {
   readNullableString,
 } from "./assertions.ts";
 import {
+  parseHostedBrowserVaultReplicaRef,
   parseHostedExecutionCursorSnapshotRef,
   parseHostedExecutionCursorState,
 } from "./cursor.ts";
@@ -321,6 +322,14 @@ export function parseHostedRunCommitRequest(value: unknown): HostedRunCommitRequ
       record.outputCommittedSeq,
       "Hosted run commit request outputCommittedSeq",
     ),
+    ...(record.browserVaultReplicaRef === undefined
+      ? {}
+      : {
+          browserVaultReplicaRef: parseHostedBrowserVaultReplicaRef(
+            record.browserVaultReplicaRef,
+            "Hosted run commit request browserVaultReplicaRef",
+          ),
+        }),
     ...(record.preparedSnapshotRef === undefined
       ? {}
       : {
@@ -352,6 +361,14 @@ export function parseHostedRunFinalizeRequest(value: unknown): HostedRunFinalize
   const record = requireObject(value, "Hosted run finalize request");
 
   return {
+    ...(record.browserVaultReplicaRef === undefined
+      ? {}
+      : {
+          browserVaultReplicaRef: parseHostedBrowserVaultReplicaRef(
+            record.browserVaultReplicaRef,
+            "Hosted run finalize request browserVaultReplicaRef",
+          ),
+        }),
     finalSnapshotRef: parseHostedExecutionCursorSnapshotRef(
       record.finalSnapshotRef,
       "Hosted run finalize request finalSnapshotRef",

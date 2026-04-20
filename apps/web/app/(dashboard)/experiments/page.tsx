@@ -1,7 +1,10 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { isActiveOverviewExperimentStatus } from "@murphai/query/browser";
+import {
+  isActiveOverviewExperimentStatus,
+  selectBrowserVaultTrackedExperiments,
+} from "@murphai/query/browser";
 
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Badge } from "@/src/components/ui/badge";
@@ -14,15 +17,23 @@ import {
   CardTitle,
 } from "@/src/components/ui/card";
 import { Input } from "@/src/components/ui/input";
-import { useBrowserVault } from "@/src/lib/browser-vault/context";
+import { BrowserVaultProvider, useBrowserVault } from "@/src/lib/browser-vault/context";
 import { formatIsoDate, formatStatusLabel } from "@/src/lib/browser-vault/display";
 
 export default function ExperimentsPage() {
+  return (
+    <BrowserVaultProvider>
+      <ExperimentsPageContent />
+    </BrowserVaultProvider>
+  );
+}
+
+function ExperimentsPageContent() {
   const [search, setSearch] = useState("");
-  const { error, refresh, snapshot, status } = useBrowserVault();
+  const { client, error, refresh, status } = useBrowserVault();
   const trackedExperiments = useMemo(
-    () => snapshot?.overview.trackedExperiments ?? [],
-    [snapshot],
+    () => client ? selectBrowserVaultTrackedExperiments(client) : [],
+    [client],
   );
   const filteredTrackedExperiments = useMemo(
     () => trackedExperiments.filter((entry) => matchesTrackedExperiment(entry, search)),
@@ -30,6 +41,7 @@ export default function ExperimentsPage() {
   );
   const activeCount = trackedExperiments.filter((entry) => isActiveOverviewExperimentStatus(entry.status)).length;
   const completedCount = trackedExperiments.length - activeCount;
+  const canRenderContent = status === "empty" || client !== null;
 
   return (
     <div className="flex flex-col gap-8">
@@ -79,7 +91,7 @@ export default function ExperimentsPage() {
           </Alert>
         ) : null}
 
-        {status === "ready" ? (
+        {canRenderContent ? (
           <>
             <div className="flex items-center justify-between">
               <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
@@ -122,7 +134,7 @@ export default function ExperimentsPage() {
           </>
         ) : null}
 
-        {status === "ready" && filteredTrackedExperiments.length === 0 ? (
+        {canRenderContent && filteredTrackedExperiments.length === 0 ? (
           <Card>
             <CardHeader>
               <CardTitle>No tracked experiments matched</CardTitle>
@@ -135,43 +147,55 @@ export default function ExperimentsPage() {
           </Card>
         ) : null}
 
-        {status === "ready" && filteredTrackedExperiments.length > 0 ? (
+        {canRenderContent && filteredTrackedExperiments.length > 0 ? (
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {filteredTrackedExperiments.map((entry) => (
-              <Card key={entry.id} size="sm">
-                <CardHeader>
-                  <CardTitle>{entry.title}</CardTitle>
-                  <CardDescription>
-                    {entry.startedOn ? `Started ${formatIsoDate(entry.startedOn)}` : "No recorded start date."}
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="flex flex-col gap-3">
-                  <div className="flex flex-wrap gap-2">
-                    <Badge variant={isActiveOverviewExperimentStatus(entry.status) ? "default" : "outline"}>
-                      {formatStatusLabel(entry.status)}
-                    </Badge>
-                    {entry.slug ? <Badge variant="secondary">{entry.slug}</Badge> : null}
-                  </div>
-                  <p className="text-sm text-muted-foreground">
-                    {entry.summary ?? "No summary text was available for this experiment."}
-                  </p>
-                  {entry.tags.length > 0 ? (
+            {filteredTrackedExperiments.map((entry) => {
+              const slugBadge = formatExperimentSlugBadge(entry.slug);
+
+              return (
+                <Card key={entry.id} size="sm">
+                  <CardHeader>
+                    <CardTitle>{entry.title}</CardTitle>
+                    <CardDescription>
+                      {entry.startedOn ? `Started ${formatIsoDate(entry.startedOn)}` : "No recorded start date."}
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="flex flex-col gap-3">
                     <div className="flex flex-wrap gap-2">
-                      {entry.tags.slice(0, 4).map((tag) => (
-                        <Badge key={`${entry.id}:${tag}`} variant="secondary">
-                          {tag}
-                        </Badge>
-                      ))}
+                      <Badge variant={isActiveOverviewExperimentStatus(entry.status) ? "default" : "outline"}>
+                        {formatStatusLabel(entry.status)}
+                      </Badge>
+                      {slugBadge ? <Badge variant="secondary">{slugBadge}</Badge> : null}
                     </div>
-                  ) : null}
-                </CardContent>
-              </Card>
-            ))}
+                    <p className="text-sm text-muted-foreground">
+                      {entry.summary ?? "No summary text was available for this experiment."}
+                    </p>
+                    {entry.tags.length > 0 ? (
+                      <div className="flex flex-wrap gap-2">
+                        {entry.tags.slice(0, 4).map((tag) => (
+                          <Badge key={`${entry.id}:${tag}`} variant="secondary">
+                            {tag}
+                          </Badge>
+                        ))}
+                      </div>
+                    ) : null}
+                  </CardContent>
+                </Card>
+              );
+            })}
           </div>
         ) : null}
       </section>
     </div>
   );
+}
+
+function formatExperimentSlugBadge(slug: string | null): string | null {
+  if (!slug) {
+    return null;
+  }
+
+  return /[:/]/u.test(slug) ? null : slug;
 }
 
 function matchesTrackedExperiment(

@@ -149,6 +149,26 @@ describe("createCloudflareHostedControlClient", () => {
     })).rejects.toThrow("Cloudflare browser vault session state must be ready.");
   });
 
+  it("maps missing browser vault replica objects to a dedicated not-found error", async () => {
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test/root/",
+      fetchImpl: vi.fn(async () => new Response("missing", { status: 404 })) as typeof fetch,
+      getBearerToken: async () => "token-123",
+      timeoutMs: 2_500,
+    });
+
+    await expect(client.createBrowserVaultSession({
+      browserPublicKeyJwk: {
+        crv: "P-256",
+        kty: "EC",
+        x: "x-value",
+        y: "y-value",
+      },
+      replicaRef: createReplicaRef(),
+      userId: "user_123",
+    })).rejects.toThrow("Hosted execution browser vault replica was not found.");
+  });
+
   it("rejects ready browser vault sessions without a replica ref", async () => {
     const client = createCloudflareHostedControlClient({
       baseUrl: "https://runner.example.test/root/",

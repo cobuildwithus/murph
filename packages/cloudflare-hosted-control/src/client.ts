@@ -1,14 +1,16 @@
 import {
   parseHostedCipherEnvelope,
   parseHostedUserRecipientPublicKeyJwk,
-  parseHostedUserRootKeyEnvelope,
+  parseHostedBrowserSessionKeyEnvelope,
+  type HostedBrowserSessionKeyEnvelope,
   type HostedCipherEnvelope,
   type HostedUserRecipientPublicKeyJwk,
-  type HostedUserRootKeyEnvelope,
 } from "@murphai/runtime-state";
 import {
   HOSTED_EXECUTION_USER_ID_HEADER,
+  parseHostedBrowserVaultReplicaRef,
   parseHostedRunNudgeResult,
+  type HostedBrowserVaultReplicaRef,
   type HostedRunNudgeResult,
   type HostedExecutionUserStatus,
 } from "@murphai/hosted-execution";
@@ -23,29 +25,29 @@ import {
   buildCloudflareHostedControlUserRunPath,
 } from "./routes.ts";
 
-export type CloudflareHostedControlBrowserVaultSession =
-  | {
-      rootKeyEnvelope: null;
-      snapshotAad: null;
-      snapshotEnvelope: null;
-    }
-  | {
-      rootKeyEnvelope: HostedUserRootKeyEnvelope;
-      snapshotAad: CloudflareHostedControlBrowserVaultSnapshotAad;
-      snapshotEnvelope: HostedCipherEnvelope;
-    };
+export interface CloudflareHostedControlBrowserVaultSession {
+  encryptedReplica: HostedCipherEnvelope;
+  replicaAad: CloudflareHostedControlBrowserVaultReplicaAad;
+  replicaKeyEnvelope: HostedBrowserSessionKeyEnvelope;
+  replicaRef: HostedBrowserVaultReplicaRef;
+  state: "ready";
+}
 
-export interface CloudflareHostedControlBrowserVaultSnapshotAad {
-  key: string;
-  purpose: "browser-vault-snapshot";
+export interface CloudflareHostedControlBrowserVaultReplicaAad {
+  dataVersion: string;
+  objectKey: string;
+  purpose: "browser-vault-replica";
+  schema: "murph.browser-vault-replica.v1";
+  sourceBundleHash: string;
   userId: string;
 }
 
 export interface CloudflareHostedControlClient {
-  createBrowserVaultSession(
-    userId: string,
-    browserPublicKeyJwk: HostedUserRecipientPublicKeyJwk,
-  ): Promise<CloudflareHostedControlBrowserVaultSession>;
+  createBrowserVaultSession(input: {
+    browserPublicKeyJwk: HostedUserRecipientPublicKeyJwk;
+    replicaRef: HostedBrowserVaultReplicaRef;
+    userId: string;
+  }): Promise<CloudflareHostedControlBrowserVaultSession>;
   getStatus(userId: string): Promise<HostedExecutionUserStatus>;
   nudgeUserRun(userId: string): Promise<HostedRunNudgeResult>;
 }
@@ -59,6 +61,8 @@ export interface CloudflareHostedControlClientOptions {
   timeoutMs?: number;
 }
 
+const BROWSER_VAULT_REPLICA_NOT_FOUND_ERROR_MESSAGE = "Hosted execution browser vault replica was not found.";
+
 export function createCloudflareHostedControlClient(
   options: CloudflareHostedControlClientOptions,
 ): CloudflareHostedControlClient {
@@ -69,10 +73,12 @@ export function createCloudflareHostedControlClient(
   );
 
   return {
-    createBrowserVaultSession(userId, browserPublicKeyJwk) {
+    createBrowserVaultSession(input) {
       const body = JSON.stringify({
-        browserPublicKeyJwk: parseHostedUserRecipientPublicKeyJwk(browserPublicKeyJwk),
+        browserPublicKeyJwk: parseHostedUserRecipientPublicKeyJwk(input.browserPublicKeyJwk),
+        replicaRef: input.replicaRef,
       });
+      const userId = input.userId;
 
       return requestHostedExecutionAuthorizedJson({
         baseUrl,
@@ -90,6 +96,12 @@ export function createCloudflareHostedControlClient(
           method: "POST",
         },
         timeoutMs: options.timeoutMs,
+      }).catch((error) => {
+        if (isHostedExecutionHttpError(error, 404)) {
+          throw new Error(BROWSER_VAULT_REPLICA_NOT_FOUND_ERROR_MESSAGE);
+        }
+
+        throw error;
       });
     },
     getStatus(userId) {
@@ -127,74 +139,69 @@ export function createCloudflareHostedControlClient(
   };
 }
 
+function isHostedExecutionHttpError(error: unknown, status: number): error is Error {
+  return error instanceof Error &&
+    error.message === `Hosted execution browser vault session failed with HTTP ${status}.`;
+}
+
 function parseCloudflareHostedControlBrowserVaultSession(
   value: unknown,
 ): CloudflareHostedControlBrowserVaultSession {
   const record = requireRecord(value, "Cloudflare browser vault session");
-  const hasRootKeyEnvelope = Object.hasOwn(record, "rootKeyEnvelope");
-  const hasSnapshotAad = Object.hasOwn(record, "snapshotAad");
-  const hasSnapshotEnvelope = Object.hasOwn(record, "snapshotEnvelope");
-  const rootKeyEnvelope = record.rootKeyEnvelope === null || record.rootKeyEnvelope === undefined
-    ? null
-    : parseHostedUserRootKeyEnvelope(
-      record.rootKeyEnvelope,
-      "Cloudflare browser vault session rootKeyEnvelope",
-    );
-  const snapshotAad = record.snapshotAad === null || record.snapshotAad === undefined
-    ? null
-    : parseCloudflareHostedControlBrowserVaultSnapshotAad(
-      record.snapshotAad,
-      "Cloudflare browser vault session snapshotAad",
-    );
-  const snapshotEnvelope = record.snapshotEnvelope === null || record.snapshotEnvelope === undefined
-    ? null
-    : parseHostedCipherEnvelope(
-      record.snapshotEnvelope,
-      "Cloudflare browser vault session snapshotEnvelope",
-    );
+  const state = requireString(record.state, "Cloudflare browser vault session state");
 
-  if (
-    hasRootKeyEnvelope &&
-    hasSnapshotAad &&
-    hasSnapshotEnvelope &&
-    rootKeyEnvelope === null &&
-    snapshotAad === null &&
-    snapshotEnvelope === null
-  ) {
-    return {
-      rootKeyEnvelope: null,
-      snapshotAad: null,
-      snapshotEnvelope: null,
-    };
+  if (state !== "ready") {
+    throw new TypeError("Cloudflare browser vault session state must be ready.");
   }
 
-  if (rootKeyEnvelope === null || snapshotAad === null || snapshotEnvelope === null) {
-    throw new TypeError(
-      "Cloudflare browser vault session must include rootKeyEnvelope, snapshotAad, and snapshotEnvelope together.",
-    );
+  const replicaRef = parseHostedBrowserVaultReplicaRef(
+    record.replicaRef,
+    "Cloudflare browser vault session replicaRef",
+  );
+
+  if (!replicaRef) {
+    throw new TypeError("Cloudflare browser vault session replicaRef must not be null.");
   }
 
   return {
-    rootKeyEnvelope,
-    snapshotAad,
-    snapshotEnvelope,
+    encryptedReplica: parseHostedCipherEnvelope(
+      record.encryptedReplica,
+      "Cloudflare browser vault session encryptedReplica",
+    ),
+    replicaAad: parseCloudflareHostedControlBrowserVaultReplicaAad(
+      record.replicaAad,
+      "Cloudflare browser vault session replicaAad",
+    ),
+    replicaKeyEnvelope: parseHostedBrowserSessionKeyEnvelope(
+      record.replicaKeyEnvelope,
+      "Cloudflare browser vault session replicaKeyEnvelope",
+    ),
+    replicaRef,
+    state,
   };
 }
 
-function parseCloudflareHostedControlBrowserVaultSnapshotAad(
+function parseCloudflareHostedControlBrowserVaultReplicaAad(
   value: unknown,
   label: string,
-): CloudflareHostedControlBrowserVaultSnapshotAad {
+): CloudflareHostedControlBrowserVaultReplicaAad {
   const record = requireRecord(value, label);
   const purpose = requireString(record.purpose, `${label}.purpose`);
+  const schema = requireString(record.schema, `${label}.schema`);
 
-  if (purpose !== "browser-vault-snapshot") {
-    throw new TypeError(`${label}.purpose must be browser-vault-snapshot.`);
+  if (purpose !== "browser-vault-replica") {
+    throw new TypeError(`${label}.purpose must be browser-vault-replica.`);
+  }
+  if (schema !== "murph.browser-vault-replica.v1") {
+    throw new TypeError(`${label}.schema must be murph.browser-vault-replica.v1.`);
   }
 
   return {
-    key: requireString(record.key, `${label}.key`),
+    dataVersion: requireString(record.dataVersion, `${label}.dataVersion`),
+    objectKey: requireString(record.objectKey, `${label}.objectKey`),
     purpose,
+    schema,
+    sourceBundleHash: requireString(record.sourceBundleHash, `${label}.sourceBundleHash`),
     userId: requireString(record.userId, `${label}.userId`),
   };
 }

@@ -15,6 +15,7 @@ export interface HostedExecutionCursorRow {
   nextRuntimeWakeAt: Date | null;
   nextRuntimeWakeReason: string | null;
   snapshotRef: Prisma.JsonValue | null;
+  browserVaultReplicaRef: Prisma.JsonValue | null;
   updatedAt: Date;
   userId: string;
   version: bigint;

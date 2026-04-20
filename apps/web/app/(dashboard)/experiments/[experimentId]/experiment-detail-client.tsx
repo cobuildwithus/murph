@@ -7,7 +7,7 @@ import { ExperimentHero } from "@/src/components/experiments/experiment-detail/e
 import { ExperimentHeader } from "@/src/components/experiments/experiment-detail/experiment-header";
 import { ProtocolTab } from "@/src/components/experiments/experiment-detail/protocol-tab";
 import { ResultsTab } from "@/src/components/experiments/experiment-detail/results-tab";
-import { useBrowserVault } from "@/src/lib/browser-vault/context";
+import { BrowserVaultProvider, useBrowserVault } from "@/src/lib/browser-vault/context";
 import { resolveBrowserVaultExperimentRun } from "@/src/lib/browser-vault/experiment-run";
 import { composeExperimentDetail } from "@/src/lib/experiments/experiment-detail";
 import type { ExperimentProtocol } from "@/src/types/experiments";
@@ -15,6 +15,18 @@ import type { ExperimentProtocol } from "@/src/types/experiments";
 type ExperimentDetailTab = "protocol" | "results";
 
 export function ExperimentDetailClient({
+  protocol,
+}: {
+  protocol: ExperimentProtocol;
+}) {
+  return (
+    <BrowserVaultProvider>
+      <ExperimentDetailClientContent protocol={protocol} />
+    </BrowserVaultProvider>
+  );
+}
+
+function ExperimentDetailClientContent({
   protocol,
 }: {
   protocol: ExperimentProtocol;
@@ -29,10 +41,10 @@ export function ExperimentDetailClient({
   });
   const privateRun = useMemo(
     () => resolveBrowserVaultExperimentRun({
+      client: browserVault.client,
       protocol,
-      snapshot: browserVault.snapshot,
     }),
-    [browserVault.snapshot, protocol],
+    [browserVault.client, protocol],
   );
   const experiment = useMemo(
     () => composeExperimentDetail({ protocol, privateRun }),

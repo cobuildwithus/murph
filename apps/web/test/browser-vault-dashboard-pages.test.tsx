@@ -3,14 +3,20 @@ import assert from "node:assert/strict";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, test, vi } from "vitest";
+import type { FrontmatterMap } from "@murphai/query";
 
-import { createBrowserVaultSnapshot, createVaultReadModel } from "@murphai/query/browser";
+import {
+  createBrowserVaultQueryClient,
+  createBrowserVaultReplica,
+  createVaultReadModel,
+} from "@murphai/query/browser";
 
 const mocks = vi.hoisted(() => ({
   useBrowserVault: vi.fn(),
 }));
 
 vi.mock("@/src/lib/browser-vault/context", () => ({
+  BrowserVaultProvider: ({ children }: { children: React.ReactNode }) => children,
   useBrowserVault: mocks.useBrowserVault,
 }));
 
@@ -21,60 +27,16 @@ import SignalsPage from "../app/(dashboard)/signals/page";
 
 type BrowserVaultEntity = Parameters<typeof createVaultReadModel>[0]["entities"][number];
 
-const snapshotFixture = createBrowserVaultSnapshot({
-  generatedAt: "2026-04-20T12:00:00.000Z",
-  sourceVersion: "snapshot-source",
-  vault: createVaultReadModel({
-    entities: [
-      createEntity("experiment", "exp_1", {
-        body: "# Trial\n\nShort walks are helping with afternoon energy.\n",
-        date: "2026-04-18",
-        experimentSlug: "light-morning-walk",
-        occurredAt: "2026-04-18T08:00:00.000Z",
-        status: "active",
-        tags: ["movement"],
-        title: "Morning walk",
-      }),
-      createEntity("journal", "journal_1", {
-        body: "# Note\n\nFelt steadier after a full night of sleep.\n",
-        date: "2026-04-20",
-        occurredAt: "2026-04-20T07:30:00.000Z",
-        tags: ["sleep", "travel"],
-        title: "Travel recovery note",
-      }),
-      createEntity("sample", "sample_1", {
-        attributes: {
-          unit: "min",
-          value: 430,
-        },
-        date: "2026-04-20",
-        occurredAt: "2026-04-20T08:30:00.000Z",
-        stream: "sleep_duration_minutes",
-        title: "Sleep duration",
-      }),
-      createEntity("sample", "sample_2", {
-        attributes: {
-          unit: "min",
-          value: 400,
-        },
-        date: "2026-04-13",
-        occurredAt: "2026-04-13T08:30:00.000Z",
-        stream: "sleep_duration_minutes",
-        title: "Sleep duration",
-      }),
-    ],
-    metadata: {
-      title: "Browser vault fixture",
-    },
-    vaultRoot: "browser://vault",
-  }),
-});
+let clientFixture: Awaited<ReturnType<typeof createFixtureClient>>;
 
-beforeEach(() => {
+beforeEach(async () => {
+  clientFixture = await createFixtureClient();
   mocks.useBrowserVault.mockReturnValue({
+    client: clientFixture,
+    dataVersion: clientFixture.replica.source.dataVersion,
     error: null,
+    ref: null,
     refresh: async () => {},
-    snapshot: snapshotFixture,
     status: "ready",
   });
 });
@@ -105,6 +67,43 @@ test("ExperimentsPage renders tracked experiments", () => {
   assert.match(markup, /Short walks are helping with afternoon energy\./);
 });
 
+test("ExperimentsPage hides protocol-shaped experiment slugs", async () => {
+  const protocolVariantClient = await createFixtureClient({
+    experimentSlug: "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+  });
+  mocks.useBrowserVault.mockReturnValue({
+    client: protocolVariantClient,
+    dataVersion: protocolVariantClient.replica.source.dataVersion,
+    error: null,
+    ref: null,
+    refresh: async () => {},
+    status: "ready",
+  });
+
+  const markup = renderToStaticMarkup(createElement(ExperimentsPage));
+
+  assert.match(markup, /Morning walk/);
+  assert.doesNotMatch(markup, /protocol_variant:dry-sauna\/murph-finnish-standard-3x-week/);
+});
+
+test("OverviewPage preserves stale data when a refresh fails", () => {
+  mocks.useBrowserVault.mockReturnValue({
+    client: clientFixture,
+    dataVersion: clientFixture.replica.source.dataVersion,
+    error: "The latest refresh failed.",
+    ref: null,
+    refresh: async () => {},
+    status: "error",
+  });
+
+  const markup = renderToStaticMarkup(createElement(OverviewPage));
+
+  assert.match(markup, /Could not load your overview/);
+  assert.match(markup, /The latest refresh failed\./);
+  assert.match(markup, /Morning walk/);
+  assert.match(markup, /Travel recovery note/);
+});
+
 test("SignalsPage renders the empty signals state", () => {
   const markup = renderToStaticMarkup(createElement(SignalsPage));
 
@@ -114,9 +113,11 @@ test("SignalsPage renders the empty signals state", () => {
 
 test("OverviewPage renders an error state instead of an empty state when the hosted snapshot is unavailable", () => {
   mocks.useBrowserVault.mockReturnValue({
+    client: null,
+    dataVersion: null,
     error: "Your dashboard data is not available right now.",
+    ref: null,
     refresh: async () => {},
-    snapshot: null,
     status: "error",
   });
 
@@ -158,6 +159,64 @@ function createEntity(
     tags: overrides.tags ?? [],
     title,
   };
+}
+
+async function createFixtureClient(input: {
+  experimentSlug?: string;
+} = {}) {
+  const replica = await createBrowserVaultReplica({
+    generatedAt: "2026-04-20T12:00:00.000Z",
+    sourceBundleHash: "fixture-source",
+    vault: createVaultReadModel({
+      entities: [
+        createEntity("experiment", "exp_1", {
+          body: "Short walks are helping with afternoon energy.\n",
+          frontmatter: {
+            summary: "Short walks are helping with afternoon energy.",
+          } satisfies FrontmatterMap,
+          date: "2026-04-18",
+          experimentSlug: input.experimentSlug ?? "light-morning-walk",
+          occurredAt: "2026-04-18T08:00:00.000Z",
+          status: "active",
+          tags: ["movement"],
+          title: "Morning walk",
+        }),
+        createEntity("journal", "journal_1", {
+          body: "# Note\n\nFelt steadier after a full night of sleep.\n",
+          date: "2026-04-20",
+          occurredAt: "2026-04-20T07:30:00.000Z",
+          tags: ["sleep", "travel"],
+          title: "Travel recovery note",
+        }),
+        createEntity("sample", "sample_1", {
+          attributes: {
+            unit: "min",
+            value: 430,
+          },
+          date: "2026-04-20",
+          occurredAt: "2026-04-20T08:30:00.000Z",
+          stream: "sleep_duration_minutes",
+          title: "Sleep duration",
+        }),
+        createEntity("sample", "sample_2", {
+          attributes: {
+            unit: "min",
+            value: 400,
+          },
+          date: "2026-04-13",
+          occurredAt: "2026-04-13T08:30:00.000Z",
+          stream: "sleep_duration_minutes",
+          title: "Sleep duration",
+        }),
+      ],
+      metadata: {
+        title: "Browser vault fixture",
+      },
+      vaultRoot: "browser://vault",
+    }),
+  });
+
+  return createBrowserVaultQueryClient(replica);
 }
 
 function resolveRecordClass(family: BrowserVaultEntity["family"]): BrowserVaultEntity["recordClass"] {

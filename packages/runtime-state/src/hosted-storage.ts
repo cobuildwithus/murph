@@ -8,7 +8,7 @@ export type HostedCipherEnvelopeSchema = typeof HOSTED_CIPHER_ENVELOPE_SCHEMA;
 
 export type HostedStorageScope =
   | "artifact"
-  | "browser-vault-snapshot"
+  | "browser-vault-replica"
   | "bundle"
   | "email-raw"
   | "root-key-envelope"
@@ -279,7 +279,7 @@ function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
 
 const HOSTED_STORAGE_SCOPES = new Set<HostedStorageScope>([
   "artifact",
-  "browser-vault-snapshot",
+  "browser-vault-replica",
   "bundle",
   "email-raw",
   "root-key-envelope",

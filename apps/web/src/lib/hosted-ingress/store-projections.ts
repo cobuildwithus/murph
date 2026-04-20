@@ -12,7 +12,10 @@ import {
   HOSTED_INGRESS_PAYLOAD_SCHEMAS,
   isHostedIngressKind,
 } from "@murphai/hosted-execution/contracts";
-import { parseHostedExecutionCursorSnapshotRef } from "@murphai/hosted-execution/parsers";
+import {
+  parseHostedBrowserVaultReplicaRef,
+  parseHostedExecutionCursorSnapshotRef,
+} from "@murphai/hosted-execution/parsers";
 
 import {
   ensureHostedExecutionCursorRowTx,
@@ -59,6 +62,7 @@ export function projectHostedExecutionCursorRecord(
     nextSeq: record.nextSeq.toString(),
     nextRuntimeWakeAt: record.nextRuntimeWakeAt?.toISOString() ?? null,
     nextRuntimeWakeReason: record.nextRuntimeWakeReason,
+    browserVaultReplicaRef: parseHostedBrowserVaultReplicaRef(record.browserVaultReplicaRef),
     snapshotRef: parseHostedIngressSnapshotRef(record.snapshotRef),
     updatedAt: record.updatedAt.toISOString(),
     userId: record.userId,

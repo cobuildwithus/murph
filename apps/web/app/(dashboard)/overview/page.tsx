@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import {
   buildOverviewWeeklyStatsFromDailySampleSummaries,
   isActiveOverviewExperimentStatus,
+  selectBrowserVaultOverview,
 } from "@murphai/query/browser";
 
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
@@ -24,7 +25,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/src/components/ui/table";
-import { useBrowserVault } from "@/src/lib/browser-vault/context";
+import { BrowserVaultProvider, useBrowserVault } from "@/src/lib/browser-vault/context";
 import {
   formatIsoDate,
   formatNumber,
@@ -34,26 +35,36 @@ import {
 } from "@/src/lib/browser-vault/display";
 
 export default function OverviewPage() {
-  const { error, refresh, snapshot, status } = useBrowserVault();
+  return (
+    <BrowserVaultProvider>
+      <OverviewPageContent />
+    </BrowserVaultProvider>
+  );
+}
+
+function OverviewPageContent() {
+  const { client, error, refresh, status } = useBrowserVault();
   const timeZone = useMemo(
     () => Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
     [],
   );
-  const metrics = snapshot?.overview.metrics ?? [];
-  const experiments = snapshot?.overview.trackedExperiments.slice(0, 8) ?? [];
-  const recentJournals = snapshot?.overview.recentJournals ?? [];
+  const overview = useMemo(() => client ? selectBrowserVaultOverview(client) : null, [client]);
+  const metrics = overview?.metrics ?? [];
+  const experiments = overview?.trackedExperiments.slice(0, 8) ?? [];
+  const recentJournals = overview?.recentJournals ?? [];
   const weeklyStats = useMemo(
     () => buildOverviewWeeklyStatsFromDailySampleSummaries(
-      snapshot?.overview.weeklySampleSummaries ?? [],
+      overview?.weeklySampleSummaries ?? [],
       timeZone,
-      snapshot?.generatedAt ?? new Date(),
+      client?.replica.generatedAt ?? new Date(),
     )
       .filter((entry) => entry.currentWeekAvg !== null || entry.previousWeekAvg !== null)
       .slice(0, 8),
-    [snapshot, timeZone],
+    [client, overview, timeZone],
   );
   const activeExperiments = experiments.filter((entry) => isActiveOverviewExperimentStatus(entry.status));
   const completedExperiments = experiments.filter((entry) => !isActiveOverviewExperimentStatus(entry.status));
+  const canRenderContent = status === "empty" || client !== null;
   const isEmpty =
     metrics.every((metric) => metric.value === 0) &&
     weeklyStats.length === 0 &&
@@ -75,8 +86,8 @@ export default function OverviewPage() {
           </p>
         </div>
         <div className="text-sm text-muted-foreground">
-          {snapshot
-            ? `Updated ${formatIsoDate(snapshot.generatedAt, {
+          {client
+            ? `Updated ${formatIsoDate(client.replica.generatedAt, {
               day: "numeric",
               hour: "numeric",
               minute: "2-digit",
@@ -112,7 +123,7 @@ export default function OverviewPage() {
         </Alert>
       ) : null}
 
-      {status === "ready" && isEmpty ? (
+      {canRenderContent && isEmpty ? (
         <Card>
           <CardHeader>
             <CardTitle>Your dashboard is ready for data</CardTitle>
@@ -123,7 +134,7 @@ export default function OverviewPage() {
         </Card>
       ) : null}
 
-      {status === "ready" && !isEmpty ? (
+      {canRenderContent && !isEmpty ? (
         <>
           <div className="grid gap-4 xl:grid-cols-[1.6fr_1fr]">
             <Card>

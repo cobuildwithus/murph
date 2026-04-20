@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 
+import { Prisma } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -477,10 +478,11 @@ describe("commitHostedRunTx", () => {
     });
     expect(hostedExecutionCursorUpdateMany).toHaveBeenCalledWith({
       data: {
+        browserVaultReplicaRef: Prisma.DbNull,
         committedSeq: 10n,
         nextRuntimeWakeAt: null,
         nextRuntimeWakeReason: null,
-        snapshotRef: expect.anything(),
+        snapshotRef: Prisma.DbNull,
         version: { increment: 1 },
       },
       where: {
@@ -606,10 +608,11 @@ describe("commitHostedRunTx", () => {
     });
     expect(hostedExecutionCursorUpdateMany).toHaveBeenCalledWith({
       data: {
+        browserVaultReplicaRef: Prisma.DbNull,
         committedSeq: 9n,
         nextRuntimeWakeAt: null,
         nextRuntimeWakeReason: null,
-        snapshotRef: expect.anything(),
+        snapshotRef: Prisma.DbNull,
         version: { increment: 1 },
       },
       where: {
@@ -797,10 +800,11 @@ describe("commitHostedRunTx", () => {
     }));
     expect(hostedExecutionCursorUpdateMany).toHaveBeenCalledWith({
       data: {
+        browserVaultReplicaRef: Prisma.DbNull,
         committedSeq: 9n,
         nextRuntimeWakeAt: null,
         nextRuntimeWakeReason: null,
-        snapshotRef: expect.anything(),
+        snapshotRef: Prisma.DbNull,
         version: { increment: 1 },
       },
       where: {

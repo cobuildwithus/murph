@@ -1,8 +1,10 @@
 import { renderToStaticMarkup } from "react-dom/server";
 
 import {
-  BROWSER_VAULT_SNAPSHOT_SCHEMA,
-  type BrowserVaultSnapshot,
+  createBrowserVaultQueryClient,
+  createBrowserVaultReplica,
+  createVaultReadModel,
+  type BrowserVaultQueryClient,
 } from "@murphai/query/browser";
 import { describe, expect, it } from "vitest";
 
@@ -11,46 +13,52 @@ import { resolveBrowserVaultExperimentRun } from "@/src/lib/browser-vault/experi
 import { composeExperimentDetail } from "@/src/lib/experiments/experiment-detail";
 import { resolveHealthCommonsExperimentProtocol } from "@/src/lib/health-commons/experiment-detail";
 
-function createSnapshot(input: {
+type BrowserVaultEntity = Parameters<typeof createVaultReadModel>[0]["entities"][number];
+
+async function createClient(input: {
   generatedAt: string;
-  trackedExperiments: BrowserVaultSnapshot["overview"]["trackedExperiments"];
-}): BrowserVaultSnapshot {
-  return {
+  trackedExperiments: Array<{
+    id: string;
+    slug: string | null;
+    startedOn: string | null;
+    status: string | null;
+    summary: string | null;
+    tags: string[];
+    title: string;
+  }>;
+}): Promise<BrowserVaultQueryClient> {
+  const replica = await createBrowserVaultReplica({
     generatedAt: input.generatedAt,
-    history: {
-      timeline: [],
-    },
-    overview: {
-      metrics: [],
-      recentJournals: [],
-      trackedExperiments: input.trackedExperiments,
-      weeklySampleSummaries: [],
-    },
-    schema: BROWSER_VAULT_SNAPSHOT_SCHEMA,
-    signals: {
-      activity: [],
-      assistantSummary: {
-        highlights: [],
-        latestDate: null,
-      },
-      bodyState: [],
-      recovery: [],
-      sleep: [],
-      sourceHealth: [],
-    },
-    sourceVersion: "a".repeat(64),
-  };
+    sourceBundleHash: "a".repeat(64),
+    vault: createVaultReadModel({
+      entities: input.trackedExperiments.map((entry) =>
+        createEntity("experiment", entry.id, {
+          body: entry.summary,
+          date: entry.startedOn ?? input.generatedAt.slice(0, 10),
+          experimentSlug: entry.slug,
+          lookupIds: [entry.id, ...(entry.slug ? [entry.slug] : [])],
+          occurredAt: `${entry.startedOn ?? input.generatedAt.slice(0, 10)}T08:00:00.000Z`,
+          status: entry.status,
+          tags: entry.tags,
+          title: entry.title,
+        })
+      ),
+      metadata: null,
+      vaultRoot: "browser://vault",
+    }),
+  });
+
+  return createBrowserVaultQueryClient(replica);
 }
 
 describe("experiment detail private-run composition", () => {
-  it("matches browser-vault tracked experiments against Health Commons protocol aliases", () => {
+  it("matches browser-vault tracked experiments against Health Commons protocol aliases", async () => {
     const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
 
     expect(protocol).not.toBeNull();
 
     const privateRun = resolveBrowserVaultExperimentRun({
-      protocol: protocol!,
-      snapshot: createSnapshot({
+      client: await createClient({
         generatedAt: "2026-04-12T08:00:00.000Z",
         trackedExperiments: [{
           id: "exp_sauna_01",
@@ -62,6 +70,7 @@ describe("experiment detail private-run composition", () => {
           title: "Sauna protocol",
         }],
       }),
+      protocol: protocol!,
     });
 
     expect(privateRun).toEqual(expect.objectContaining({
@@ -82,14 +91,13 @@ describe("experiment detail private-run composition", () => {
     ]));
   });
 
-  it("does not bind a private run on title-only collisions", () => {
+  it("does not bind a private run on title-only collisions", async () => {
     const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
 
     expect(protocol).not.toBeNull();
 
     const privateRun = resolveBrowserVaultExperimentRun({
-      protocol: protocol!,
-      snapshot: createSnapshot({
+      client: await createClient({
         generatedAt: "2026-04-12T08:00:00.000Z",
         trackedExperiments: [{
           id: "exp_other_protocol",
@@ -101,19 +109,19 @@ describe("experiment detail private-run composition", () => {
           title: protocol!.title,
         }],
       }),
+      protocol: protocol!,
     });
 
     expect(privateRun).toBeNull();
   });
 
-  it("renders honest baseline progress before the protocol window starts", () => {
+  it("renders honest baseline progress before the protocol window starts", async () => {
     const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
 
     expect(protocol).not.toBeNull();
 
     const activeBaselineRun = resolveBrowserVaultExperimentRun({
-      protocol: protocol!,
-      snapshot: createSnapshot({
+      client: await createClient({
         generatedAt: "2026-04-12T08:00:00.000Z",
         trackedExperiments: [{
           id: "exp_sauna_01",
@@ -125,6 +133,7 @@ describe("experiment detail private-run composition", () => {
           title: "Sauna protocol",
         }],
       }),
+      protocol: protocol!,
     });
 
     const baselineMarkup = renderToStaticMarkup(
@@ -141,7 +150,7 @@ describe("experiment detail private-run composition", () => {
     expect(baselineMarkup).not.toContain("Active · Day 1");
   });
 
-  it("renders honest result states without inventing personal outcomes", () => {
+  it("renders honest result states without inventing personal outcomes", async () => {
     const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
 
     expect(protocol).not.toBeNull();
@@ -157,9 +166,18 @@ describe("experiment detail private-run composition", () => {
     expect(loadingMarkup).toContain("Loading your private run");
     expect(loadingMarkup).not.toContain("No personal results yet");
 
+    const emptyMarkup = renderToStaticMarkup(
+      <ResultsTab
+        experiment={composeExperimentDetail({ protocol: protocol!, privateRun: null })}
+        privateRunError={null}
+        privateRunStatus="empty"
+      />,
+    );
+
+    expect(emptyMarkup).toContain("No private run yet");
+
     const finishedRun = resolveBrowserVaultExperimentRun({
-      protocol: protocol!,
-      snapshot: createSnapshot({
+      client: await createClient({
         generatedAt: "2026-04-29T08:00:00.000Z",
         trackedExperiments: [{
           id: "exp_sauna_02",
@@ -171,6 +189,7 @@ describe("experiment detail private-run composition", () => {
           title: "Murph Finnish Dry Sauna",
         }],
       }),
+      protocol: protocol!,
     });
 
     const finishedMarkup = renderToStaticMarkup(
@@ -184,16 +203,26 @@ describe("experiment detail private-run composition", () => {
     expect(finishedMarkup).toContain("No biomarker comparison exported yet");
     expect(finishedMarkup).toContain("Private run recorded");
     expect(finishedMarkup).toContain("Private run present; outcome export still pending.");
+
+    const staleMarkup = renderToStaticMarkup(
+      <ResultsTab
+        experiment={composeExperimentDetail({ protocol: protocol!, privateRun: finishedRun })}
+        privateRunError="The latest private refresh failed."
+        privateRunStatus="error"
+      />,
+    );
+
+    expect(staleMarkup).toContain("Private run loaded, refresh unavailable");
+    expect(staleMarkup).toContain("The latest private refresh failed.");
   });
 
-  it("keeps paused runs distinct from active runs", () => {
+  it("keeps paused runs distinct from active runs", async () => {
     const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
 
     expect(protocol).not.toBeNull();
 
     const pausedRun = resolveBrowserVaultExperimentRun({
-      protocol: protocol!,
-      snapshot: createSnapshot({
+      client: await createClient({
         generatedAt: "2026-04-20T08:00:00.000Z",
         trackedExperiments: [{
           id: "exp_sauna_paused",
@@ -205,6 +234,7 @@ describe("experiment detail private-run composition", () => {
           title: "Sauna protocol",
         }],
       }),
+      protocol: protocol!,
     });
 
     expect(pausedRun).toEqual(expect.objectContaining({
@@ -226,3 +256,45 @@ describe("experiment detail private-run composition", () => {
     expect(pausedMarkup).not.toContain("Continue the protocol");
   });
 });
+
+function createEntity(
+  family: BrowserVaultEntity["family"],
+  entityId: string,
+  overrides: Partial<BrowserVaultEntity> = {},
+): BrowserVaultEntity {
+  const title = overrides.title ?? entityId;
+  const kind = overrides.kind ?? `${family}_entry`;
+  const stream = overrides.stream ?? null;
+  const lookupId = overrides.primaryLookupId ?? entityId;
+
+  return {
+    attributes: overrides.attributes ?? {},
+    body: overrides.body ?? null,
+    date: overrides.date ?? "2026-04-20",
+    entityId,
+    experimentSlug: overrides.experimentSlug ?? null,
+    family,
+    frontmatter: overrides.frontmatter ?? null,
+    kind,
+    links: overrides.links ?? [],
+    lookupIds: overrides.lookupIds ?? [lookupId],
+    occurredAt: overrides.occurredAt ?? "2026-04-20T00:00:00.000Z",
+    path: overrides.path ?? `history/${family}/${entityId}.md`,
+    primaryLookupId: lookupId,
+    recordClass: overrides.recordClass ?? resolveRecordClass(family),
+    relatedIds: overrides.relatedIds ?? [],
+    status: overrides.status ?? null,
+    stream,
+    tags: overrides.tags ?? [],
+    title,
+  };
+}
+
+function resolveRecordClass(family: BrowserVaultEntity["family"]): BrowserVaultEntity["recordClass"] {
+  switch (family) {
+    case "experiment":
+      return "bank";
+    default:
+      throw new Error(`Unsupported browser-vault test family: ${family}`);
+  }
+}
