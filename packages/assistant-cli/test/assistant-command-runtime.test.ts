@@ -126,7 +126,7 @@ const TEST_CHAT_RESULT = {
   session: TEST_SESSION,
 } satisfies AssistantChatResult
 
-test('package manifest exposes the assistant command, explicit deep assistant subpaths, and runtime logging subpaths', async () => {
+test('package manifest exposes only the intentional assistant stop, command, and runtime logging subpaths', async () => {
   const packageManifest = JSON.parse(
     await readFile(new URL('../package.json', import.meta.url), 'utf8'),
   ) as {
@@ -143,6 +143,10 @@ test('package manifest exposes the assistant command, explicit deep assistant su
   assert.equal(packageManifest.type, 'module')
   assert.equal(packageManifest.main, './dist/index.js')
   assert.equal(packageManifest.types, './dist/index.d.ts')
+  assert.deepEqual(packageManifest.exports?.['./assistant/stop'], {
+    types: './dist/assistant/stop.d.ts',
+    default: './dist/assistant/stop.js',
+  })
   assert.deepEqual(packageManifest.exports?.['./commands/assistant'], {
     types: './dist/commands/assistant.d.ts',
     default: './dist/commands/assistant.js',
@@ -151,33 +155,26 @@ test('package manifest exposes the assistant command, explicit deep assistant su
     types: './dist/run-terminal-logging.d.ts',
     default: './dist/run-terminal-logging.js',
   })
-
-  const deepAssistantSubpaths = [
-    'cron',
-    'daemon-client',
-    'doctor',
-    'outbox',
-    'runtime',
-    'service',
-    'status',
-    'stop',
-    'store',
-    'ui/chat-controller-state',
-    'ui/composer-editor',
-    'ui/ink',
-    'ui/model-switcher',
-    'ui/theme',
-    'ui/view-model',
-  ] as const
-
-  for (const subpath of deepAssistantSubpaths) {
-    assert.deepEqual(packageManifest.exports?.[`./assistant/${subpath}`], {
-      types: `./dist/assistant/${subpath}.d.ts`,
-      default: `./dist/assistant/${subpath}.js`,
-    })
-  }
-
+  assert.deepEqual(Object.keys(packageManifest.exports ?? {}), [
+    './assistant/stop',
+    './commands/assistant',
+    './run-terminal-logging',
+  ])
   assert.equal(packageManifest.exports?.['./assistant/*'], undefined)
+  assert.equal(packageManifest.exports?.['./assistant/cron'], undefined)
+  assert.equal(packageManifest.exports?.['./assistant/daemon-client'], undefined)
+  assert.equal(packageManifest.exports?.['./assistant/doctor'], undefined)
+  assert.equal(packageManifest.exports?.['./assistant/outbox'], undefined)
+  assert.equal(packageManifest.exports?.['./assistant/runtime'], undefined)
+  assert.equal(packageManifest.exports?.['./assistant/service'], undefined)
+  assert.equal(packageManifest.exports?.['./assistant/status'], undefined)
+  assert.equal(packageManifest.exports?.['./assistant/store'], undefined)
+  assert.equal(packageManifest.exports?.['./assistant/ui/chat-controller-state'], undefined)
+  assert.equal(packageManifest.exports?.['./assistant/ui/composer-editor'], undefined)
+  assert.equal(packageManifest.exports?.['./assistant/ui/ink'], undefined)
+  assert.equal(packageManifest.exports?.['./assistant/ui/model-switcher'], undefined)
+  assert.equal(packageManifest.exports?.['./assistant/ui/theme'], undefined)
+  assert.equal(packageManifest.exports?.['./assistant/ui/view-model'], undefined)
 })
 
 test('runAssistantChat delegates to the Ink runner and returns its result', async () => {

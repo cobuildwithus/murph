@@ -11,65 +11,9 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
-    "./assistant/cron": {
-      "types": "./dist/assistant/cron.d.ts",
-      "default": "./dist/assistant/cron.js"
-    },
-    "./assistant/daemon-client": {
-      "types": "./dist/assistant/daemon-client.d.ts",
-      "default": "./dist/assistant/daemon-client.js"
-    },
-    "./assistant/doctor": {
-      "types": "./dist/assistant/doctor.d.ts",
-      "default": "./dist/assistant/doctor.js"
-    },
-    "./assistant/outbox": {
-      "types": "./dist/assistant/outbox.d.ts",
-      "default": "./dist/assistant/outbox.js"
-    },
-    "./assistant/runtime": {
-      "types": "./dist/assistant/runtime.d.ts",
-      "default": "./dist/assistant/runtime.js"
-    },
-    "./assistant/service": {
-      "types": "./dist/assistant/service.d.ts",
-      "default": "./dist/assistant/service.js"
-    },
-    "./assistant/status": {
-      "types": "./dist/assistant/status.d.ts",
-      "default": "./dist/assistant/status.js"
-    },
     "./assistant/stop": {
       "types": "./dist/assistant/stop.d.ts",
       "default": "./dist/assistant/stop.js"
-    },
-    "./assistant/store": {
-      "types": "./dist/assistant/store.d.ts",
-      "default": "./dist/assistant/store.js"
-    },
-    "./assistant/ui/chat-controller-state": {
-      "types": "./dist/assistant/ui/chat-controller-state.d.ts",
-      "default": "./dist/assistant/ui/chat-controller-state.js"
-    },
-    "./assistant/ui/composer-editor": {
-      "types": "./dist/assistant/ui/composer-editor.d.ts",
-      "default": "./dist/assistant/ui/composer-editor.js"
-    },
-    "./assistant/ui/ink": {
-      "types": "./dist/assistant/ui/ink.d.ts",
-      "default": "./dist/assistant/ui/ink.js"
-    },
-    "./assistant/ui/model-switcher": {
-      "types": "./dist/assistant/ui/model-switcher.d.ts",
-      "default": "./dist/assistant/ui/model-switcher.js"
-    },
-    "./assistant/ui/theme": {
-      "types": "./dist/assistant/ui/theme.d.ts",
-      "default": "./dist/assistant/ui/theme.js"
-    },
-    "./assistant/ui/view-model": {
-      "types": "./dist/assistant/ui/view-model.d.ts",
-      "default": "./dist/assistant/ui/view-model.js"
     },
     "./commands/assistant": {
       "types": "./dist/commands/assistant.d.ts",
