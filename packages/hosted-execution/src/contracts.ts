@@ -284,11 +284,7 @@ export type HostedRuntimeEvent =
   | HostedIngressEnvelope
   | HostedExecutionRuntimeTimerWake;
 
-export type HostedExecutionWakeKind = HostedIngressKind;
 export type HostedExecutionWake = HostedIngressEnvelope;
-export type HostedExecutionRunnerWake = HostedRuntimeEvent;
-export type HostedExecutionSystemWake = HostedIngressSystemEnvelope;
-
 export type HostedIngressSystemEnvelope = Exclude<
   HostedIngressEnvelope,
   HostedExecutionConversationMessageWake
@@ -589,7 +585,7 @@ export interface HostedRunLogRequest {
   phase: string;
   redacted?: unknown | null;
   runId: string;
-  runToken?: string | null;
+  runToken: string;
 }
 
 export interface HostedRunLogResponse {

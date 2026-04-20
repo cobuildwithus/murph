@@ -37,4 +37,7 @@ test("public entrypoints expose the expected symbols", () => {
   assert.equal(typeof workoutsModule.resolveWorkoutCapture, "function");
   assert.equal(typeof workoutsModule.buildStructuredWorkoutActivitySessionDraft, "function");
   assert.equal(typeof workoutsModule.workoutLookupSchema.parse, "function");
+  assert.equal(Object.hasOwn(workoutsModule, "showWorkoutMeasurementRecord"), false);
+  assert.equal(Object.hasOwn(workoutsModule, "listWorkoutMeasurementRecords"), false);
+  assert.equal(Object.hasOwn(workoutsModule, "showWorkoutMeasurementManifest"), false);
 });

@@ -611,10 +611,7 @@ function isTestOnlyInternalAssistantSpecifier({
   }
 
   return (
-    (packageName === "@murphai/assistant-cli"
-      && specifier.startsWith("@murphai/assistant-cli/assistant/"))
-    || (
-      packageName === "@murphai/assistant-engine"
+    (packageName === "@murphai/assistant-engine"
       && (
         specifier.startsWith("@murphai/assistant-engine/assistant/")
       )

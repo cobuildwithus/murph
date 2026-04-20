@@ -18,8 +18,11 @@ import {
   assistantGatewayLocalMessageSender,
   assistantGatewayLocalProjectionSourceReader,
 } from '@murphai/assistant-engine/gateway-local-adapter'
-import { listAssistantOutboxIntentsLocal, saveAssistantOutboxIntent } from '@murphai/assistant-cli/assistant/outbox'
-import { saveAssistantSession } from '@murphai/assistant-cli/assistant/store'
+import {
+  listAssistantOutboxIntentsLocal,
+  saveAssistantOutboxIntent,
+} from '@murphai/assistant-engine/assistant-outbox'
+import { saveAssistantSession } from '@murphai/assistant-engine/assistant-store'
 import {
   exportGatewayProjectionSnapshotLocal as exportGatewayProjectionSnapshotLocalRaw,
   fetchGatewayAttachmentsLocal as fetchGatewayAttachmentsLocalRaw,

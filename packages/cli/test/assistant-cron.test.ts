@@ -44,7 +44,7 @@ import {
   runAssistantCronJobNow,
   setAssistantCronJobTarget,
   setAssistantCronJobEnabled,
-} from '@murphai/assistant-cli/assistant/cron'
+} from '@murphai/assistant-engine/assistant-cron'
 import { saveAssistantSelfDeliveryTarget } from '@murphai/operator-config/operator-config'
 
 const cleanupPaths: string[] = []

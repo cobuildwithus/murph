@@ -15,16 +15,14 @@ import {
   resolveAssistantStatePaths,
   saveAssistantSession,
 } from '@murphai/assistant-engine/assistant-state'
-import {
-  getAssistantStatus,
-} from '@murphai/assistant-cli/assistant/status'
+import { getAssistantStatus } from '@murphai/assistant-engine/assistant-status'
 import { createAssistantBackendTarget } from '@murphai/operator-config/assistant-backend'
 import {
   readAssistantRuntimeBudgetStatus,
   runAssistantRuntimeMaintenance,
 } from '@murphai/assistant-engine/assistant/runtime-budgets'
 import { readAssistantCronRuns } from '@murphai/assistant-engine/assistant/cron/store'
-import { readAssistantOutboxIntent } from '@murphai/assistant-cli/assistant/outbox'
+import { readAssistantOutboxIntent } from '@murphai/assistant-engine/assistant-outbox'
 import { summarizeAssistantQuarantines } from '@murphai/assistant-engine/assistant/quarantine'
 import { withAssistantRuntimeWriteLock } from '@murphai/assistant-engine/assistant/runtime-write-lock'
 import { readAssistantSession } from '@murphai/assistant-engine/assistant/store/persistence'
