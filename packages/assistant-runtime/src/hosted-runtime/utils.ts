@@ -1,37 +1,48 @@
 import {
   createRuntimeTimerSyntheticWake,
-  type HostedRuntimeEvent,
   type HostedRuntimeDrainRequest,
+  type HostedRuntimeEvent,
 } from "@murphai/hosted-execution";
+import {
+  HOSTED_SHARED_FORWARDED_ENV_CATEGORY_KEYS,
+  HOSTED_SHARED_MODEL_CREDENTIAL_ENV_NAMES,
+} from "../hosted-assistant-env.ts";
 
-export interface HostedWakeEnvelope {
-  wake?: HostedRuntimeEvent;
-  runDrain?: HostedRuntimeDrainRequest | null;
-}
+export const HOSTED_RUNTIME_FORWARDED_ENV_CATEGORY_KEYS =
+  HOSTED_SHARED_FORWARDED_ENV_CATEGORY_KEYS;
 
-type HostedWakeSubject = HostedRuntimeEvent | HostedWakeEnvelope;
+export const HOSTED_RUNTIME_USER_ENV_CATEGORY_KEYS = {
+  modelCredentialConfigured: HOSTED_SHARED_MODEL_CREDENTIAL_ENV_NAMES,
+} as const satisfies Record<string, readonly string[]>;
 
 export function assertNever(value: never): never {
   throw new Error(`Unexpected hosted execution event: ${JSON.stringify(value)}`);
 }
 
 export function resolveHostedWake(
-  subject: HostedWakeSubject,
+  runDrain: HostedRuntimeDrainRequest,
 ): HostedRuntimeEvent {
-  if ("kind" in subject) {
-    return subject;
-  }
+  const [firstEvent] = runDrain.events;
+  return firstEvent?.wake ?? createRuntimeTimerSyntheticWake(runDrain);
+}
 
-  if (subject.wake) {
-    return subject.wake;
-  }
+export function classifyHostedRuntimeEnvCategories<T extends Record<string, readonly string[]>>(
+  source: Readonly<Record<string, string>>,
+  categories: T,
+): { [K in keyof T]: boolean } {
+  return Object.fromEntries(
+    Object.entries(categories).map(([category, keys]) => [
+      category,
+      hasAnyHostedRuntimeConfigKey(source, keys),
+    ]),
+  ) as { [K in keyof T]: boolean };
+}
 
-  if (subject.runDrain) {
-    const [firstEvent] = subject.runDrain.events;
-    return firstEvent?.wake ?? createRuntimeTimerSyntheticWake(subject.runDrain);
-  }
-
-  throw new TypeError("Hosted wake input must include wake or runDrain.");
+export function hasAnyHostedRuntimeConfigKey(
+  source: Readonly<Record<string, string>>,
+  keys: readonly string[],
+): boolean {
+  return keys.some((key) => typeof source[key] === "string" && source[key].length > 0);
 }
 
 export function computeHostedRunElapsedMs(

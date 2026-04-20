@@ -1,6 +1,8 @@
 import {
   HOSTED_ASSISTANT_ALLOWED_API_KEY_ENV_NAMES,
   HOSTED_ASSISTANT_CONFIG_ENV_NAMES,
+  HOSTED_SHARED_FORWARDED_ENV_CATEGORY_KEYS,
+  HOSTED_SHARED_MODEL_CREDENTIAL_ENV_NAMES,
 } from "@murphai/assistant-runtime/hosted-assistant-env";
 import {
   readHostedEmailCapabilities,
@@ -27,31 +29,7 @@ const RUNNER_SECRET_PROCESS_CONTROL_KEY_SET = new Set<string>(
   RUNNER_SECRET_PROCESS_CONTROL_KEYS,
 );
 
-const DEFAULT_ALLOWED_RUNNER_SECRET_KEYS = [
-  "ANTHROPIC_API_KEY",
-  "BRAVE_API_KEY",
-  "CEREBRAS_API_KEY",
-  "DEEPSEEK_API_KEY",
-  "FIREWORKS_API_KEY",
-  "GOOGLE_API_KEY",
-  "GOOGLE_GENERATIVE_AI_API_KEY",
-  "GROQ_API_KEY",
-  "HF_TOKEN",
-  "HUGGINGFACEHUB_API_TOKEN",
-  "HUGGINGFACE_API_KEY",
-  "HUGGING_FACE_HUB_TOKEN",
-  "LITELLM_PROXY_API_KEY",
-  "MISTRAL_API_KEY",
-  "NVIDIA_API_KEY",
-  "NGC_API_KEY",
-  "OPENAI_API_KEY",
-  "OPENROUTER_API_KEY",
-  "PERPLEXITY_API_KEY",
-  "TOGETHER_API_KEY",
-  "VERCEL_AI_API_KEY",
-  "VENICE_API_KEY",
-  "XAI_API_KEY",
-] as const;
+const DEFAULT_ALLOWED_RUNNER_SECRET_KEYS = HOSTED_SHARED_MODEL_CREDENTIAL_ENV_NAMES;
 
 const DISALLOWED_RUNNER_SECRET_KEYS = new Set([
   ...OPERATOR_ONLY_RUNNER_BINARY_ENV_KEYS,
@@ -98,30 +76,13 @@ const RUNNER_ENV_PROFILE_KEYS = {
     "NODE_ENV",
     ...HOSTED_ASSISTANT_CONFIG_ENV_NAMES,
   ],
-  "hosted-email": [
-    "HOSTED_EMAIL_DOMAIN",
-    "HOSTED_EMAIL_FROM_ADDRESS",
-    "HOSTED_EMAIL_LOCAL_PART",
-  ],
-  linq: [
-    "LINQ_API_BASE_URL",
-    "LINQ_API_TOKEN",
-    "LINQ_WEBHOOK_SECRET",
-  ],
+  "hosted-email": HOSTED_SHARED_FORWARDED_ENV_CATEGORY_KEYS.hostedEmailConfigured,
+  linq: HOSTED_SHARED_FORWARDED_ENV_CATEGORY_KEYS.linqConfigured,
   mapbox: [
     "MAPBOX_ACCESS_TOKEN",
   ],
-  parsers: [
-    "FFMPEG_COMMAND",
-    "WHISPER_COMMAND",
-    "WHISPER_MODEL_PATH",
-  ],
-  telegram: [
-    "TELEGRAM_API_BASE_URL",
-    "TELEGRAM_BOT_TOKEN",
-    "TELEGRAM_BOT_USERNAME",
-    "TELEGRAM_FILE_BASE_URL",
-  ],
+  parsers: HOSTED_SHARED_FORWARDED_ENV_CATEGORY_KEYS.parserToolingConfigured,
+  telegram: HOSTED_SHARED_FORWARDED_ENV_CATEGORY_KEYS.telegramConfigured,
   web: [
     "BRAVE_API_KEY",
     "MURPH_WEB_FETCH_ENABLED",
@@ -136,6 +97,13 @@ const DEFAULT_RUNNER_ENV_PROFILE_NAMES = [
   "parsers",
   "web",
 ] as const satisfies readonly RunnerEnvProfileName[];
+
+export const HOSTED_RUNNER_FORWARDED_ENV_LOG_CATEGORY_KEYS =
+  HOSTED_SHARED_FORWARDED_ENV_CATEGORY_KEYS;
+
+export const HOSTED_RUNNER_SECRET_LOG_CATEGORY_KEYS = {
+  modelCredentialConfigured: HOSTED_SHARED_MODEL_CREDENTIAL_ENV_NAMES,
+} as const;
 
 type RunnerEnvProfileName = keyof typeof RUNNER_ENV_PROFILE_KEYS;
 type UnknownEnvSource = Readonly<Record<string, unknown>>;
@@ -286,6 +254,18 @@ export function filterHostedRunnerSecrets(
   );
 }
 
+export function summarizeHostedRunnerForwardedEnvLogCategories(
+  source: Readonly<Record<string, string | undefined>>,
+): Record<keyof typeof HOSTED_RUNNER_FORWARDED_ENV_LOG_CATEGORY_KEYS, boolean> {
+  return summarizeHostedRunnerLogCategories(source, HOSTED_RUNNER_FORWARDED_ENV_LOG_CATEGORY_KEYS);
+}
+
+export function summarizeHostedRunnerSecretLogCategories(
+  source: Readonly<Record<string, string | undefined>>,
+): Record<keyof typeof HOSTED_RUNNER_SECRET_LOG_CATEGORY_KEYS, boolean> {
+  return summarizeHostedRunnerLogCategories(source, HOSTED_RUNNER_SECRET_LOG_CATEGORY_KEYS);
+}
+
 function resolveHostedRunnerEnvProfileNames(
   source: UnknownEnvSource,
 ): Set<RunnerEnvProfileName> {
@@ -306,6 +286,18 @@ function resolveHostedRunnerEnvProfileNames(
   }
 
   return enabledProfiles;
+}
+
+function summarizeHostedRunnerLogCategories<TCategoryMap extends Record<string, readonly string[]>>(
+  source: Readonly<Record<string, string | undefined>>,
+  categories: TCategoryMap,
+): Record<keyof TCategoryMap, boolean> {
+  return Object.fromEntries(
+    Object.entries(categories).map(([category, keys]) => [
+      category,
+      keys.some((key) => typeof source[key] === "string" && source[key]!.length > 0),
+    ]),
+  ) as Record<keyof TCategoryMap, boolean>;
 }
 
 function normalizeStringEnvValue(value: unknown): string | null {

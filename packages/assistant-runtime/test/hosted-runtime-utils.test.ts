@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { test } from "vitest";
 
 import {
-  buildHostedExecutionEmailConversationMessageWake,
+  buildHostedExecutionRuntimeTimerWake,
 } from "@murphai/hosted-execution";
 
 import {
@@ -18,20 +18,38 @@ test("assertNever throws with the unexpected hosted execution payload", () => {
   );
 });
 
-test("resolveHostedWake accepts wake and wake envelopes", () => {
-  const wake = buildHostedExecutionEmailConversationMessageWake({
-    eventId: "email-utils-1",
-    identityId: "assistant@example.com",
+test("resolveHostedWake returns the first wake from a run-drain request", () => {
+  const wake = buildHostedExecutionRuntimeTimerWake({
+    eventId: "hosted-run:run_utils_1",
     occurredAt: "2026-04-08T00:00:00.000Z",
-    rawMessageKey: "raw_utils_1",
-    selfAddress: null,
+    triggerKind: "runtime_timer",
     userId: "member_123",
   });
 
-  assert.deepEqual(resolveHostedWake(wake), wake);
-  assert.deepEqual(resolveHostedWake({ wake }), wake);
+  assert.deepEqual(resolveHostedWake({
+    acquiredAt: "2026-04-08T00:00:01.000Z",
+    events: [{ seq: "24", wake, wakeId: "wake_24" }],
+    inputCommittedSeq: "24",
+    inputCursorVersion: "4",
+    runId: "run_utils_1",
+    triggerKind: "external_ingress",
+    userId: "member_123",
+  }), wake);
 });
 
-test("resolveHostedWake fails closed without a wake subject", () => {
-  assert.throws(() => resolveHostedWake({} as never), /must include wake/u);
+test("resolveHostedWake falls back to a synthetic runtime-timer wake for empty run drains", () => {
+  assert.deepEqual(resolveHostedWake({
+    acquiredAt: "2026-04-08T00:00:01.000Z",
+    events: [],
+    inputCommittedSeq: "24",
+    inputCursorVersion: "4",
+    runId: "run_utils_timer",
+    triggerKind: "runtime_timer",
+    userId: "member_123",
+  }), buildHostedExecutionRuntimeTimerWake({
+    eventId: "hosted-run:run_utils_timer",
+    occurredAt: "2026-04-08T00:00:01.000Z",
+    triggerKind: "runtime_timer",
+    userId: "member_123",
+  }));
 });

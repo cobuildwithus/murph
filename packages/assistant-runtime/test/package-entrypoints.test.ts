@@ -21,6 +21,8 @@ import {
 } from "../src/hosted-runtime/parsers.ts";
 import {
   HOSTED_ASSISTANT_CONFIG_ENV_NAMES,
+  HOSTED_SHARED_FORWARDED_ENV_CATEGORY_KEYS,
+  HOSTED_SHARED_MODEL_CREDENTIAL_ENV_NAMES,
   HostedAssistantConfigurationError,
   readHostedAssistantApiKeyEnvName,
 } from "../src/hosted-assistant-env.ts";
@@ -60,6 +62,8 @@ test("package manifest declares the hosted assistant env, hosted runtime contrac
   assert.ok("./hosted-email" in manifest.exports);
   assert.ok(Array.isArray(HOSTED_ASSISTANT_CONFIG_ENV_NAMES));
   assert.ok(HOSTED_ASSISTANT_CONFIG_ENV_NAMES.length > 0);
+  assert.ok(Array.isArray(HOSTED_SHARED_FORWARDED_ENV_CATEGORY_KEYS.telegramConfigured));
+  assert.ok(HOSTED_SHARED_MODEL_CREDENTIAL_ENV_NAMES.includes("OPENAI_API_KEY"));
   assert.equal(typeof readHostedAssistantApiKeyEnvName, "function");
   assert.equal(typeof HostedAssistantConfigurationError, "function");
 });
