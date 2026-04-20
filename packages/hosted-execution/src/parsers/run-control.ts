@@ -17,6 +17,8 @@ import type {
   HostedRunLogRecord,
   HostedRunLogRequest,
   HostedRunLogResponse,
+  HostedRunReleaseFinalizeRequest,
+  HostedRunReleaseFinalizeResponse,
   HostedRunRecord,
   HostedRunStatus,
   HostedRunStatusRequest,
@@ -382,6 +384,45 @@ export function parseHostedRunFinalizeResponse(value: unknown): HostedRunFinaliz
   return {
     cursor: parseHostedExecutionCursorState(record.cursor),
     finalized: requireBoolean(record.finalized, "Hosted run finalize response finalized"),
+    run: record.run === null ? null : parseHostedRunRecord(record.run),
+  };
+}
+
+export function parseHostedRunReleaseFinalizeRequest(
+  value: unknown,
+): HostedRunReleaseFinalizeRequest {
+  const record = requireObject(value, "Hosted run release-finalize request");
+
+  return {
+    ...(record.failureClass === undefined
+      ? {}
+      : {
+          failureClass: readNullableString(
+            record.failureClass,
+            "Hosted run release-finalize request failureClass",
+          ),
+        }),
+    ...(record.failureCode === undefined
+      ? {}
+      : {
+          failureCode: readNullableString(
+            record.failureCode,
+            "Hosted run release-finalize request failureCode",
+          ),
+        }),
+    runId: requireString(record.runId, "Hosted run release-finalize request runId"),
+    runToken: requireString(record.runToken, "Hosted run release-finalize request runToken"),
+  };
+}
+
+export function parseHostedRunReleaseFinalizeResponse(
+  value: unknown,
+): HostedRunReleaseFinalizeResponse {
+  const record = requireObject(value, "Hosted run release-finalize response");
+
+  return {
+    cursor: parseHostedExecutionCursorState(record.cursor),
+    released: requireBoolean(record.released, "Hosted run release-finalize response released"),
     run: record.run === null ? null : parseHostedRunRecord(record.run),
   };
 }

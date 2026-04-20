@@ -10,11 +10,12 @@ import type {
   HostedRunLogLevel,
   HostedRunLogRecord,
   HostedRunLogResponse,
+  HostedRunReleaseFinalizeResponse,
   HostedRunRecord,
   HostedRunStatus,
   HostedRunStatusResponse,
   HostedRunTriggerKind,
-  HostedWakeSnapshotRef,
+  HostedIngressSnapshotRef,
 } from "@murphai/hosted-execution/contracts";
 import { parseHostedExecutionCursorSnapshotRef } from "@murphai/hosted-execution/parsers";
 
@@ -22,24 +23,26 @@ import { getPrisma } from "../prisma";
 import {
   ensureHostedExecutionCursorRowTx,
   lockHostedExecutionCursorRowTx,
-} from "../hosted-wake/store-data";
+} from "../hosted-ingress/store-data";
 import {
-  hydrateHostedWakeRecordsTx,
+  hydrateHostedIngressEventsTx,
   projectHostedExecutionCursorRecord,
-} from "../hosted-wake/store-projections";
-import { countPendingHostedWakes } from "../hosted-wake/store";
+} from "../hosted-ingress/store-projections";
+import { countPendingHostedIngressEvents } from "../hosted-ingress/store";
 import type {
   HostedExecutionCursorRow,
-  HostedWakeMutationTx,
-  HostedWakeRow,
-  HostedWakeStoreClient,
-} from "../hosted-wake/store.types";
+  HostedIngressMutationTx,
+  HostedIngressEventRow,
+  HostedIngressStoreClient,
+} from "../hosted-ingress/store.types";
 
 const DEFAULT_HOSTED_RUN_EVENT_LIMIT = 64;
 const HOSTED_RUN_ACTIVE_STALE_AFTER_MS = 15 * 60 * 1000;
 const MAX_HOSTED_RUN_EVENT_LIMIT = 256;
+const HOSTED_RUN_FINALIZING_STATUS: HostedRunStatus = "finalizing";
 const HOSTED_RUN_ACTIVE_STATUSES = new Set<HostedRunStatus>([
   "acquired",
+  HOSTED_RUN_FINALIZING_STATUS,
 ]);
 const HOSTED_RUN_FINALIZE_RESUMABLE_STATUS: HostedRunStatus = "committed_needs_finalize";
 const DEFAULT_HOSTED_RUN_EXECUTOR_KIND: HostedRunExecutorKind = "cloudflare-container";
@@ -89,30 +92,21 @@ export async function acquireHostedRunTx(input: {
   await ensureHostedExecutionCursorRowTx({ tx: input.tx, userId: input.userId });
   await lockHostedExecutionCursorRowTx({ tx: input.tx, userId: input.userId });
   const cursor = await ensureHostedExecutionCursorRowTx({ tx: input.tx, userId: input.userId });
-  const resumableFinalize = await findResumableFinalizeRunTx({
+  const resumableFinalize = await claimResumableFinalizeRunTx({
+    now,
     tx: input.tx,
     userId: input.userId,
   });
 
   if (resumableFinalize) {
-    const runToken = createHostedRunToken();
-    const updated = await input.tx.hostedRun.update({
-      where: { id: resumableFinalize.id },
-      data: {
-        attempt: { increment: 1 },
-        runTokenHash: hashHostedRunToken(runToken),
-        updatedAt: now,
-      },
-    });
-
     return {
       acquired: true,
       cursor: projectHostedExecutionCursorRecord(cursor),
       events: [],
-      pendingWakeCount: await countPendingHostedWakes({ prisma: input.tx, userId: input.userId }),
+      pendingWakeCount: await countPendingHostedIngressEvents({ prisma: input.tx, userId: input.userId }),
       resumeFinalize: true,
-      run: projectHostedRunRecord(updated),
-      runToken,
+      run: projectHostedRunRecord(resumableFinalize.run),
+      runToken: resumableFinalize.runToken,
     };
   }
 
@@ -123,25 +117,66 @@ export async function acquireHostedRunTx(input: {
 
   if (activeRun) {
     if (isHostedRunActiveStale(activeRun, now)) {
-      await closeHostedRunWithoutCommitTx({
-        cursor,
-        errorClass: "hosted_run_stale",
-        errorCode: "HOSTED_RUN_ACTIVE_STALE",
-        run: activeRun,
-        status: "failed",
-        tx: input.tx,
-        userId: input.userId,
-      });
+      if (activeRun.status === HOSTED_RUN_FINALIZING_STATUS) {
+        await resetHostedRunFinalizeForRetryTx({
+          run: activeRun,
+          tx: input.tx,
+        });
+
+        const resumedFinalize = await claimResumableFinalizeRunTx({
+          now,
+          tx: input.tx,
+          userId: input.userId,
+        });
+
+        if (resumedFinalize) {
+          return {
+            acquired: true,
+            cursor: projectHostedExecutionCursorRecord(cursor),
+            events: [],
+            pendingWakeCount: await countPendingHostedIngressEvents({ prisma: input.tx, userId: input.userId }),
+            resumeFinalize: true,
+            run: projectHostedRunRecord(resumedFinalize.run),
+            runToken: resumedFinalize.runToken,
+          };
+        }
+      } else {
+        await closeHostedRunWithoutCommitTx({
+          cursor,
+          errorClass: "hosted_run_stale",
+          errorCode: "HOSTED_RUN_ACTIVE_STALE",
+          run: activeRun,
+          status: "failed",
+          tx: input.tx,
+          userId: input.userId,
+        });
+      }
     } else {
       return {
         acquired: false,
         cursor: projectHostedExecutionCursorRecord(cursor),
         events: [],
-        pendingWakeCount: await countPendingHostedWakes({ prisma: input.tx, userId: input.userId }),
+        pendingWakeCount: await countPendingHostedIngressEvents({ prisma: input.tx, userId: input.userId }),
         resumeFinalize: false,
         run: projectHostedRunRecord(activeRun),
       };
     }
+  }
+
+  const activeRunAfterRecovery = await findActiveHostedRunTx({
+    tx: input.tx,
+    userId: input.userId,
+  });
+
+  if (activeRunAfterRecovery) {
+    return {
+      acquired: false,
+      cursor: projectHostedExecutionCursorRecord(cursor),
+      events: [],
+      pendingWakeCount: await countPendingHostedIngressEvents({ prisma: input.tx, userId: input.userId }),
+      resumeFinalize: false,
+      run: projectHostedRunRecord(activeRunAfterRecovery),
+    };
   }
 
   const wakeRows = await listContiguousHostedRunWakeRowsTx({
@@ -162,14 +197,14 @@ export async function acquireHostedRunTx(input: {
       acquired: false,
       cursor: projectHostedExecutionCursorRecord(cursor),
       events: [],
-      pendingWakeCount: await countPendingHostedWakes({ prisma: input.tx, userId: input.userId }),
+      pendingWakeCount: await countPendingHostedIngressEvents({ prisma: input.tx, userId: input.userId }),
       resumeFinalize: false,
       run: null,
     };
   }
 
   const runToken = createHostedRunToken();
-  const events = await hydrateHostedWakeRecordsTx({
+  const events = await hydrateHostedIngressEventsTx({
     records: wakeRows,
     tx: input.tx,
   });
@@ -196,7 +231,7 @@ export async function acquireHostedRunTx(input: {
   });
 
   if (wakeRows.length > 0) {
-    await input.tx.hostedWake.updateMany({
+    await input.tx.hostedIngressEvent.updateMany({
       where: {
         id: { in: wakeRows.map((wake) => wake.id) },
         userId: input.userId,
@@ -212,7 +247,7 @@ export async function acquireHostedRunTx(input: {
     acquired: true,
     cursor: projectHostedExecutionCursorRecord(cursor),
     events,
-    pendingWakeCount: await countPendingHostedWakes({ prisma: input.tx, userId: input.userId }),
+    pendingWakeCount: await countPendingHostedIngressEvents({ prisma: input.tx, userId: input.userId }),
     resumeFinalize: false,
     run: projectHostedRunRecord(run),
     runToken,
@@ -228,7 +263,7 @@ export async function commitHostedRun(input: {
   nextRuntimeWakeAt?: string | null;
   nextRuntimeWakeReason?: string | null;
   outputCommittedSeq: bigint;
-  preparedSnapshotRef?: HostedWakeSnapshotRef;
+  preparedSnapshotRef?: HostedIngressSnapshotRef;
   prisma?: PrismaClient;
   redactedSummary?: unknown | null;
   runId: string;
@@ -249,7 +284,7 @@ export async function commitHostedRunTx(input: {
   nextRuntimeWakeAt?: string | null;
   nextRuntimeWakeReason?: string | null;
   outputCommittedSeq: bigint;
-  preparedSnapshotRef?: HostedWakeSnapshotRef;
+  preparedSnapshotRef?: HostedIngressSnapshotRef;
   redactedSummary?: unknown | null;
   runId: string;
   runToken: string;
@@ -476,7 +511,7 @@ export async function commitHostedRunTx(input: {
 }
 
 export async function finalizeHostedRun(input: {
-  finalSnapshotRef: HostedWakeSnapshotRef;
+  finalSnapshotRef: HostedIngressSnapshotRef;
   nextRuntimeWakeAt?: string | null;
   nextRuntimeWakeReason?: string | null;
   prisma?: PrismaClient;
@@ -491,7 +526,7 @@ export async function finalizeHostedRun(input: {
 }
 
 export async function finalizeHostedRunTx(input: {
-  finalSnapshotRef: HostedWakeSnapshotRef;
+  finalSnapshotRef: HostedIngressSnapshotRef;
   nextRuntimeWakeAt?: string | null;
   nextRuntimeWakeReason?: string | null;
   redactedSummary?: unknown | null;
@@ -505,7 +540,7 @@ export async function finalizeHostedRunTx(input: {
   await lockHostedExecutionCursorRowTx({ tx: input.tx, userId: input.userId });
   const cursor = await ensureHostedExecutionCursorRowTx({ tx: input.tx, userId: input.userId });
   const run = await readHostedRunForMutationTx({
-    allowedStatuses: [HOSTED_RUN_FINALIZE_RESUMABLE_STATUS],
+    allowedStatuses: [HOSTED_RUN_FINALIZING_STATUS],
     runId: input.runId,
     runToken: input.runToken,
     tx: input.tx,
@@ -610,6 +645,64 @@ export async function finalizeHostedRunTx(input: {
   };
 }
 
+export async function releaseHostedRunFinalize(input: {
+  failureClass?: string | null;
+  failureCode?: string | null;
+  prisma?: PrismaClient;
+  runId: string;
+  runToken: string;
+  userId: string;
+}): Promise<HostedRunReleaseFinalizeResponse> {
+  const prisma = input.prisma ?? getPrisma();
+
+  return prisma.$transaction((tx) => releaseHostedRunFinalizeTx({ ...input, tx }));
+}
+
+export async function releaseHostedRunFinalizeTx(input: {
+  failureClass?: string | null;
+  failureCode?: string | null;
+  runId: string;
+  runToken: string;
+  tx: HostedRunMutationTx;
+  userId: string;
+}): Promise<HostedRunReleaseFinalizeResponse> {
+  const now = new Date();
+  await ensureHostedExecutionCursorRowTx({ tx: input.tx, userId: input.userId });
+  await lockHostedExecutionCursorRowTx({ tx: input.tx, userId: input.userId });
+  const cursor = await ensureHostedExecutionCursorRowTx({ tx: input.tx, userId: input.userId });
+  const run = await readHostedRunForMutationTx({
+    allowedStatuses: [HOSTED_RUN_FINALIZING_STATUS],
+    runId: input.runId,
+    runToken: input.runToken,
+    tx: input.tx,
+    userId: input.userId,
+  });
+
+  if (!run) {
+    return {
+      cursor: projectHostedExecutionCursorRecord(cursor),
+      released: false,
+      run: null,
+    };
+  }
+
+  const releasedRun = await input.tx.hostedRun.update({
+    where: { id: run.id },
+    data: {
+      errorClass: normalizeHostedRunFailureClass(input.failureClass) ?? "hosted_run_finalize_retryable",
+      errorCode: normalizeHostedRunFailureCode(input.failureCode) ?? "HOSTED_RUN_FINALIZE_RETRYABLE",
+      status: HOSTED_RUN_FINALIZE_RESUMABLE_STATUS,
+      updatedAt: now,
+    },
+  });
+
+  return {
+    cursor: projectHostedExecutionCursorRecord(cursor),
+    released: true,
+    run: projectHostedRunRecord(releasedRun),
+  };
+}
+
 export async function recordHostedRunLog(input: {
   at?: Date | null;
   component: string;
@@ -694,7 +787,7 @@ export async function readHostedRunStatus(input: {
   return {
     cursor: projectHostedExecutionCursorRecord(cursor),
     ...(logs === undefined ? {} : { logs: logs.map(projectHostedRunLogRecord) }),
-    pendingWakeCount: await countPendingHostedWakes({ prisma, userId: input.userId }),
+    pendingWakeCount: await countPendingHostedIngressEvents({ prisma, userId: input.userId }),
     run: run ? projectHostedRunRecord(run) : null,
     ...(input.runId ? {} : { runs: runs.map(projectHostedRunRecord) }),
   };
@@ -736,10 +829,10 @@ function normalizeHostedRunStatusLimit(value: number | null | undefined): number
 async function listContiguousHostedRunWakeRowsTx(input: {
   cursor: HostedExecutionCursorRow;
   limit: number;
-  tx: HostedWakeStoreClient;
+  tx: HostedIngressStoreClient;
   userId: string;
-}): Promise<HostedWakeRow[]> {
-  const rows = await input.tx.hostedWake.findMany({
+}): Promise<HostedIngressEventRow[]> {
+  const rows = await input.tx.hostedIngressEvent.findMany({
     where: {
       quarantinedAt: null,
       runId: null,
@@ -750,7 +843,7 @@ async function listContiguousHostedRunWakeRowsTx(input: {
     orderBy: { seq: "asc" },
     take: input.limit,
   });
-  const contiguous: HostedWakeRow[] = [];
+  const contiguous: HostedIngressEventRow[] = [];
   let expectedSeq = input.cursor.committedSeq + 1n;
 
   for (const row of rows) {
@@ -797,6 +890,59 @@ async function findResumableFinalizeRunTx(input: {
   return candidates[0] ?? null;
 }
 
+async function claimResumableFinalizeRunTx(input: {
+  now: Date;
+  tx: HostedRunMutationTx;
+  userId: string;
+}): Promise<{
+  run: Parameters<typeof projectHostedRunRecord>[0];
+  runToken: string;
+} | null> {
+  const candidate = await findResumableFinalizeRunTx({
+    tx: input.tx,
+    userId: input.userId,
+  });
+
+  if (!candidate) {
+    return null;
+  }
+
+  const runToken = createHostedRunToken();
+  const claimResult = await input.tx.hostedRun.updateMany({
+    where: {
+      id: candidate.id,
+      status: HOSTED_RUN_FINALIZE_RESUMABLE_STATUS,
+      userId: input.userId,
+    },
+    data: {
+      attempt: { increment: 1 },
+      runTokenHash: hashHostedRunToken(runToken),
+      status: HOSTED_RUN_FINALIZING_STATUS,
+      updatedAt: input.now,
+    },
+  });
+
+  if (claimResult.count !== 1) {
+    return null;
+  }
+
+  const run = await input.tx.hostedRun.findFirst({
+    where: {
+      id: candidate.id,
+      userId: input.userId,
+    },
+  });
+
+  if (!run) {
+    throw new Error(`Claimed hosted finalize run ${candidate.id} disappeared before it could be returned.`);
+  }
+
+  return {
+    run,
+    runToken,
+  };
+}
+
 async function readHostedRunForMutationTx(input: {
   allowedStatuses: HostedRunStatus[];
   runId: string;
@@ -839,6 +985,18 @@ async function closeHostedRunFinalizeConflictTx(input: {
   });
 }
 
+async function resetHostedRunFinalizeForRetryTx(input: {
+  run: Parameters<typeof projectHostedRunRecord>[0];
+  tx: HostedRunMutationTx;
+}): Promise<Parameters<typeof projectHostedRunRecord>[0]> {
+  return input.tx.hostedRun.update({
+    where: { id: input.run.id },
+    data: {
+      status: HOSTED_RUN_FINALIZE_RESUMABLE_STATUS,
+    },
+  });
+}
+
 async function closeHostedRunWithoutCommitTx(input: {
   cursor: HostedExecutionCursorRow;
   errorClass?: string | null;
@@ -850,7 +1008,7 @@ async function closeHostedRunWithoutCommitTx(input: {
 }): Promise<Parameters<typeof projectHostedRunRecord>[0]> {
   const now = new Date();
 
-  await input.tx.hostedWake.updateMany({
+  await input.tx.hostedIngressEvent.updateMany({
     where: {
       runId: input.run.id,
       seq: { gt: input.cursor.committedSeq },
@@ -879,12 +1037,12 @@ async function markHostedRunWakesTerminalTx(input: {
   eventResults: HostedRunEventResult[];
   outputCommittedSeq: bigint;
   runId: string;
-  tx: HostedWakeMutationTx;
+  tx: HostedIngressMutationTx;
   userId: string;
   wakeIds: string[];
 }): Promise<void> {
   const resultByWakeId = new Map(input.eventResults.map((result) => [result.wakeId, result]));
-  const wakes = await input.tx.hostedWake.findMany({
+  const wakes = await input.tx.hostedIngressEvent.findMany({
     where: {
       id: { in: input.wakeIds },
       userId: input.userId,
@@ -899,7 +1057,7 @@ async function markHostedRunWakesTerminalTx(input: {
     const result = resultByWakeId.get(wake.id);
     const state = result?.state ?? (wake.quarantinedAt ? "quarantined" : "completed");
 
-    await input.tx.hostedWake.update({
+    await input.tx.hostedIngressEvent.update({
       where: { id: wake.id },
       data: {
         completedAt: new Date(),
@@ -1132,7 +1290,7 @@ function projectHostedRunLogRecord(record: {
   };
 }
 
-function parseHostedRunSnapshotRef(value: unknown): HostedWakeSnapshotRef {
+function parseHostedRunSnapshotRef(value: unknown): HostedIngressSnapshotRef {
   return parseHostedExecutionCursorSnapshotRef(value === undefined ? null : value);
 }
 
@@ -1150,6 +1308,7 @@ function parseHostedRunExecutorKindForProjection(value: string): HostedRunExecut
 function parseHostedRunStatusForProjection(value: string): HostedRunStatus {
   switch (value) {
     case "acquired":
+    case "finalizing":
     case "committed_needs_finalize":
     case "finalized":
     case "failed":
