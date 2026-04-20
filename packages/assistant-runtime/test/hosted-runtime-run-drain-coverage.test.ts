@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionDeviceSyncWake,
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionRuntimeTimerWake,
@@ -29,7 +30,7 @@ const mocks = vi.hoisted(() => ({
   decodeHostedBundleBase64: vi.fn(),
   emitHostedExecutionStructuredLog: vi.fn(),
   encodeHostedBundleBase64: vi.fn(),
-  executeHostedIngressEventAlias: vi.fn(),
+  executeHostedIngressEvent: vi.fn(),
   exportGatewayProjectionSnapshotLocal: vi.fn(),
   hydrateHostedExecutionDefaultTarget: vi.fn(),
   listHostedBundleArtifacts: vi.fn(),
@@ -88,7 +89,7 @@ vi.mock("../src/hosted-runtime/context.ts", () => ({
 }));
 
 vi.mock("../src/hosted-runtime/events.ts", () => ({
-  executeHostedIngressEventAlias: mocks.executeHostedIngressEventAlias,
+  executeHostedIngressEvent: mocks.executeHostedIngressEvent,
 }));
 
 vi.mock("../src/hosted-runtime/maintenance.ts", () => ({
@@ -163,10 +164,10 @@ beforeEach(() => {
     permissions: [],
     schema: "murph.gateway-projection-snapshot.v1",
   });
-  mocks.executeHostedIngressEventAlias.mockResolvedValue({
+  mocks.executeHostedIngressEvent.mockResolvedValue({
     bootstrapResult: null,
     conversationMetrics: null,
-    followupExecution: "member-activated",
+    ingressLane: "member-activated",
     shareImportResult: null,
     shareImportTitle: null,
   });
@@ -198,140 +199,369 @@ beforeEach(() => {
 });
 
 describe("executeHostedRunDrainForCommit", () => {
-  it("fails closed when runDrain is missing", async () => {
-    await expect(
-      executeHostedRunDrainForCommit({
+  it("drains an empty run and schedules runtime maintenance", async () => {
+    vi.useFakeTimers();
+
+    try {
+      vi.setSystemTime(new Date("2026-04-08T00:00:00.000Z"));
+      const result = await executeHostedRunDrainForCommit({
         executionContext: createExecutionContext(),
         request: {
           bundle: "incoming-bundle",
           run: HOSTED_RUN_CONTEXT,
-          // Bypass the stricter runtime parser/type surface to prove the runtime helper fails closed too.
-          runDrain: undefined as never,
+          runDrain: {
+            acquiredAt: "2026-04-08T00:00:00.000Z",
+            events: [],
+            inputCommittedSeq: "24",
+            inputCursorVersion: "4",
+            runId: "run_123",
+            triggerKind: "runtime_timer",
+            userId: "member_123",
+          },
         },
         restored: createRestored(),
         runtime: createRuntime(),
         runtimeEnv: {},
-      }),
-    ).rejects.toThrow(
-      "Hosted runtime jobs must use runDrain; single-wake execution was removed.",
-    );
+      });
 
-    expect(mocks.executeHostedIngressEventAlias).not.toHaveBeenCalled();
-    expect(mocks.runHostedAssistantRuntimeTimerLane).not.toHaveBeenCalled();
-    expect(mocks.runHostedNoopSystemWakeLane).not.toHaveBeenCalled();
+      expect(mocks.executeHostedIngressEvent).not.toHaveBeenCalled();
+      expect(mocks.runHostedAssistantRuntimeTimerLane).toHaveBeenCalledTimes(1);
+      expect(mocks.runHostedDeviceSyncWakeLane).toHaveBeenCalledTimes(1);
+      expect(mocks.runHostedNoopSystemWakeLane).not.toHaveBeenCalled();
+      assert.equal(result.committedResult.result.eventsHandled, 0);
+      assert.equal(result.committedResult.result.nextWakeAt, "2026-04-08T00:30:00.000Z");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
-  it("drains an empty run and schedules runtime maintenance", async () => {
-    const result = await executeHostedRunDrainForCommit({
-      executionContext: createExecutionContext(),
-      request: {
-        bundle: "incoming-bundle",
-        run: HOSTED_RUN_CONTEXT,
-        runDrain: {
-          acquiredAt: "2026-04-08T00:00:00.000Z",
-          events: [],
-          inputCommittedSeq: "24",
-          inputCursorVersion: "4",
-          runId: "run_123",
-          triggerKind: "runtime_timer",
-          userId: "member_123",
-        },
-      },
-      restored: createRestored(),
-      runtime: createRuntime(),
-      runtimeEnv: {},
-    });
+  it("drains repeated immediate assistant follow-up work before snapshotting", async () => {
+    vi.useFakeTimers();
 
-    expect(mocks.executeHostedIngressEventAlias).not.toHaveBeenCalled();
-    expect(mocks.runHostedAssistantRuntimeTimerLane).toHaveBeenCalledTimes(1);
-    expect(mocks.runHostedDeviceSyncWakeLane).toHaveBeenCalledTimes(1);
-    expect(mocks.runHostedNoopSystemWakeLane).not.toHaveBeenCalled();
-    assert.equal(result.committedResult.result.eventsHandled, 0);
-    assert.equal(result.committedResult.result.nextWakeAt, "2026-04-08T00:30:00.000Z");
+    try {
+      vi.setSystemTime(new Date("2026-04-08T00:00:00.000Z"));
+      mocks.runHostedAssistantRuntimeTimerLane
+        .mockResolvedValueOnce({
+          deviceSyncProcessed: 0,
+          deviceSyncSkipped: true,
+          nextWakeAt: "2026-04-08T00:00:00.000Z",
+          parserProcessed: 0,
+        })
+        .mockResolvedValueOnce({
+          deviceSyncProcessed: 0,
+          deviceSyncSkipped: true,
+          nextWakeAt: "2026-04-08T00:05:00.000Z",
+          parserProcessed: 0,
+        });
+      mocks.runHostedDeviceSyncWakeLane.mockResolvedValueOnce({
+        deviceSyncProcessed: 1,
+        deviceSyncSkipped: false,
+        nextWakeAt: "2026-04-08T00:45:00.000Z",
+        parserProcessed: 0,
+      });
+
+      const result = await executeHostedRunDrainForCommit({
+        executionContext: createExecutionContext(),
+        request: {
+          bundle: "incoming-bundle",
+          run: HOSTED_RUN_CONTEXT,
+          runDrain: {
+            acquiredAt: "2026-04-08T00:00:00.000Z",
+            events: [],
+            inputCommittedSeq: "24",
+            inputCursorVersion: "4",
+            runId: "run_123",
+            triggerKind: "runtime_timer",
+            userId: "member_123",
+          },
+        },
+        restored: createRestored(),
+        runtime: createRuntime(),
+        runtimeEnv: {},
+      });
+
+      expect(mocks.runHostedAssistantRuntimeTimerLane).toHaveBeenCalledTimes(2);
+      expect(mocks.runHostedDeviceSyncWakeLane).toHaveBeenCalledTimes(1);
+      expect(mocks.snapshotHostedExecutionContext).toHaveBeenCalledTimes(1);
+      assert.equal(result.committedResult.result.nextWakeAt, "2026-04-08T00:05:00.000Z");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("drains repeated immediate device-sync follow-up work before snapshotting", async () => {
+    vi.useFakeTimers();
+
+    try {
+      vi.setSystemTime(new Date("2026-04-08T00:00:00.000Z"));
+      mocks.runHostedAssistantRuntimeTimerLane.mockResolvedValueOnce({
+        deviceSyncProcessed: 0,
+        deviceSyncSkipped: true,
+        nextWakeAt: "2026-04-08T01:00:00.000Z",
+        parserProcessed: 0,
+      });
+      mocks.runHostedDeviceSyncWakeLane
+        .mockResolvedValueOnce({
+          deviceSyncProcessed: 1,
+          deviceSyncSkipped: false,
+          nextWakeAt: "2026-04-08T00:00:00.000Z",
+          parserProcessed: 0,
+        })
+        .mockResolvedValueOnce({
+          deviceSyncProcessed: 1,
+          deviceSyncSkipped: false,
+          nextWakeAt: "2026-04-08T00:10:00.000Z",
+          parserProcessed: 0,
+        });
+
+      const result = await executeHostedRunDrainForCommit({
+        executionContext: createExecutionContext(),
+        request: {
+          bundle: "incoming-bundle",
+          run: HOSTED_RUN_CONTEXT,
+          runDrain: {
+            acquiredAt: "2026-04-08T00:00:00.000Z",
+            events: [],
+            inputCommittedSeq: "24",
+            inputCursorVersion: "4",
+            runId: "run_123",
+            triggerKind: "runtime_timer",
+            userId: "member_123",
+          },
+        },
+        restored: createRestored(),
+        runtime: createRuntime(),
+        runtimeEnv: {},
+      });
+
+      expect(mocks.runHostedAssistantRuntimeTimerLane).toHaveBeenCalledTimes(1);
+      expect(mocks.runHostedDeviceSyncWakeLane).toHaveBeenCalledTimes(2);
+      expect(mocks.snapshotHostedExecutionContext).toHaveBeenCalledTimes(1);
+      assert.equal(result.committedResult.result.nextWakeAt, "2026-04-08T00:10:00.000Z");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("merges run-drain follow-up metrics across conversation and system wakes", async () => {
-    mocks.executeHostedIngressEventAlias
-      .mockResolvedValueOnce({
-        bootstrapResult: {
-          assistantConfigStatus: "missing",
-          assistantConfigured: false,
-          assistantProvider: null,
-          assistantSeeded: false,
-          emailAutoReplyEnabled: false,
-          linqAutoReplyEnabled: false,
-          telegramAutoReplyEnabled: false,
-          vaultCreated: true,
+    vi.useFakeTimers();
+
+    try {
+      vi.setSystemTime(new Date("2026-04-08T00:00:00.000Z"));
+      mocks.executeHostedIngressEvent
+        .mockResolvedValueOnce({
+          bootstrapResult: {
+            assistantConfigStatus: "missing",
+            assistantConfigured: false,
+            assistantProvider: null,
+            assistantSeeded: false,
+            emailAutoReplyEnabled: false,
+            linqAutoReplyEnabled: false,
+            telegramAutoReplyEnabled: false,
+            vaultCreated: true,
+          },
+          conversationMetrics: {
+            nextWakeAt: "2026-04-08T00:12:00.000Z",
+            parserProcessed: 2,
+          },
+          ingressLane: "conversation-message",
+          shareImportResult: {
+            imported: 1,
+          },
+          shareImportTitle: "Shared note",
+        })
+        .mockResolvedValueOnce({
+          bootstrapResult: null,
+          conversationMetrics: null,
+          ingressLane: "member-activated",
+          shareImportResult: null,
+          shareImportTitle: null,
+        });
+
+      const result = await executeHostedRunDrainForCommit({
+        executionContext: createExecutionContext(),
+        request: {
+          bundle: "incoming-bundle",
+          run: HOSTED_RUN_CONTEXT,
+          runDrain: {
+            acquiredAt: "2026-04-08T00:00:00.000Z",
+            events: [
+              {
+                seq: "24",
+                wake: buildHostedExecutionDeviceSyncWake({
+                  eventId: "evt_device_sync_followup",
+                  occurredAt: "2026-04-08T00:00:00.000Z",
+                  reason: "connected",
+                  userId: "member_123",
+                }),
+                wakeId: "wake_24",
+              },
+              {
+                seq: "25",
+                wake: buildHostedExecutionMemberActivatedWake({
+                  eventId: "evt_member_followup",
+                  memberChannels: {
+                    email: false,
+                    linq: false,
+                    telegram: false,
+                  },
+                  memberId: "member_123",
+                  occurredAt: "2026-04-08T00:00:01.000Z",
+                }),
+                wakeId: "wake_25",
+              },
+            ],
+            inputCommittedSeq: "24",
+            inputCursorVersion: "4",
+            runId: "run_123",
+            triggerKind: "runtime_timer",
+            userId: "member_123",
+          },
         },
-        conversationMetrics: {
-          nextWakeAt: "2026-04-08T00:12:00.000Z",
-          parserProcessed: 2,
-        },
-        followupExecution: "conversation-message",
-        shareImportResult: {
-          imported: 1,
-        },
-        shareImportTitle: "Shared note",
-      })
-      .mockResolvedValueOnce({
+        restored: createRestored(),
+        runtime: createRuntime(),
+        runtimeEnv: {},
+      });
+
+      expect(mocks.executeHostedIngressEvent).toHaveBeenCalledTimes(2);
+      expect(mocks.runHostedAssistantRuntimeTimerLane).toHaveBeenCalledTimes(1);
+      expect(mocks.runHostedNoopSystemWakeLane).toHaveBeenCalledTimes(1);
+      expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
+      assert.equal(result.committedResult.result.eventsHandled, 2);
+      assert.equal(result.committedResult.result.nextWakeAt, "2026-04-08T00:12:00.000Z");
+      assert.match(result.committedResult.result.summary, /kinds=device-sync\.wake,member\.activated/u);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("falls back to nextWakeAt when immediate assistant work exceeds the local drain budget", async () => {
+    vi.useFakeTimers();
+
+    try {
+      vi.setSystemTime(new Date("2026-04-08T00:00:00.000Z"));
+      mocks.executeHostedIngressEvent.mockResolvedValueOnce({
         bootstrapResult: null,
-        conversationMetrics: null,
-        followupExecution: "member-activated",
+        conversationMetrics: {
+          nextWakeAt: null,
+          parserProcessed: 0,
+        },
+        ingressLane: "conversation-message",
         shareImportResult: null,
         shareImportTitle: null,
       });
+      mocks.runHostedAssistantRuntimeTimerLane.mockResolvedValue({
+        deviceSyncProcessed: 0,
+        deviceSyncSkipped: true,
+        nextWakeAt: "2026-04-08T00:00:00.000Z",
+        parserProcessed: 0,
+      });
 
-    const result = await executeHostedRunDrainForCommit({
-      executionContext: createExecutionContext(),
-      request: {
-        bundle: "incoming-bundle",
-        run: HOSTED_RUN_CONTEXT,
-        runDrain: {
-          acquiredAt: "2026-04-08T00:00:00.000Z",
-          events: [
-            {
-              seq: "24",
-              wake: buildHostedExecutionDeviceSyncWake({
-                eventId: "evt_device_sync_followup",
-                occurredAt: "2026-04-08T00:00:00.000Z",
-                reason: "connected",
-                userId: "member_123",
-              }),
-              wakeId: "wake_24",
-            },
-            {
-              seq: "25",
-              wake: buildHostedExecutionMemberActivatedWake({
-                eventId: "evt_member_followup",
-                memberChannels: {
-                  email: false,
-                  linq: false,
-                  telegram: false,
-                },
-                memberId: "member_123",
-                occurredAt: "2026-04-08T00:00:01.000Z",
-              }),
-              wakeId: "wake_25",
-            },
-          ],
-          inputCommittedSeq: "24",
-          inputCursorVersion: "4",
-          runId: "run_123",
-          triggerKind: "runtime_timer",
-          userId: "member_123",
+      const result = await executeHostedRunDrainForCommit({
+        executionContext: createExecutionContext(),
+        request: {
+          bundle: "incoming-bundle",
+          run: HOSTED_RUN_CONTEXT,
+          runDrain: {
+            acquiredAt: "2026-04-08T00:00:00.000Z",
+            events: [
+              {
+                seq: "24",
+                wake: buildHostedExecutionLinqConversationMessageWake({
+                  eventId: "evt_linq_budget",
+                  linqMessage: {
+                    chatId: "chat_123",
+                    from: "+15551234567",
+                    isFromMe: false,
+                    messageId: "msg_123",
+                    parts: [],
+                  },
+                  occurredAt: "2026-04-08T00:00:00.000Z",
+                  phoneLookupKey: "15551234567",
+                  userId: "member_123",
+                }),
+                wakeId: "wake_24",
+              },
+            ],
+            inputCommittedSeq: "24",
+            inputCursorVersion: "4",
+            runId: "run_123",
+            triggerKind: "external_ingress",
+            userId: "member_123",
+          },
         },
-      },
-      restored: createRestored(),
-      runtime: createRuntime(),
-      runtimeEnv: {},
-    });
+        restored: createRestored(),
+        runtime: createRuntime(),
+        runtimeEnv: {},
+      });
 
-    expect(mocks.executeHostedIngressEventAlias).toHaveBeenCalledTimes(2);
-    expect(mocks.runHostedAssistantRuntimeTimerLane).toHaveBeenCalledTimes(1);
-    expect(mocks.runHostedNoopSystemWakeLane).toHaveBeenCalledTimes(1);
-    expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
-    assert.equal(result.committedResult.result.eventsHandled, 2);
-    assert.equal(result.committedResult.result.nextWakeAt, "2026-04-08T00:12:00.000Z");
-    assert.match(result.committedResult.result.summary, /kinds=device-sync\.wake,member\.activated/u);
+      expect(mocks.runHostedAssistantRuntimeTimerLane).toHaveBeenCalledTimes(8);
+      expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
+      expect(mocks.snapshotHostedExecutionContext).toHaveBeenCalledTimes(1);
+      assert.equal(result.committedResult.result.nextWakeAt, "2026-04-08T00:00:00.000Z");
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          level: "warn",
+          message:
+            "Hosted runtime exhausted the immediate maintenance drain budget; leaving remaining internal work on nextWakeAt.",
+        }),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("shares the local drain budget across assistant and device-sync follow-up work", async () => {
+    vi.useFakeTimers();
+
+    try {
+      vi.setSystemTime(new Date("2026-04-08T00:00:00.000Z"));
+      mocks.runHostedAssistantRuntimeTimerLane.mockResolvedValue({
+        deviceSyncProcessed: 0,
+        deviceSyncSkipped: true,
+        nextWakeAt: "2026-04-08T00:00:00.000Z",
+        parserProcessed: 0,
+      });
+      mocks.runHostedDeviceSyncWakeLane.mockResolvedValue({
+        deviceSyncProcessed: 1,
+        deviceSyncSkipped: false,
+        nextWakeAt: "2026-04-08T00:00:00.000Z",
+        parserProcessed: 0,
+      });
+
+      const result = await executeHostedRunDrainForCommit({
+        executionContext: createExecutionContext(),
+        request: {
+          bundle: "incoming-bundle",
+          run: HOSTED_RUN_CONTEXT,
+          runDrain: {
+            acquiredAt: "2026-04-08T00:00:00.000Z",
+            events: [],
+            inputCommittedSeq: "24",
+            inputCursorVersion: "4",
+            runId: "run_123",
+            triggerKind: "runtime_timer",
+            userId: "member_123",
+          },
+        },
+        restored: createRestored(),
+        runtime: createRuntime(),
+        runtimeEnv: {},
+      });
+
+      expect(mocks.runHostedAssistantRuntimeTimerLane).toHaveBeenCalledTimes(4);
+      expect(mocks.runHostedDeviceSyncWakeLane).toHaveBeenCalledTimes(4);
+      expect(mocks.snapshotHostedExecutionContext).toHaveBeenCalledTimes(1);
+      assert.equal(result.committedResult.result.nextWakeAt, "2026-04-08T00:00:00.000Z");
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          level: "warn",
+          message:
+            "Hosted runtime exhausted the immediate maintenance drain budget; leaving remaining internal work on nextWakeAt.",
+        }),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

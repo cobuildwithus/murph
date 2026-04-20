@@ -35,7 +35,7 @@ import {
 import {
   hydrateHostedExecutionDefaultTarget,
 } from "./context.ts";
-import { executeHostedIngressEventAlias } from "./events.ts";
+import { executeHostedIngressEvent } from "./events.ts";
 import {
   runHostedAssistantRuntimeTimerLane,
   runHostedDeviceSyncWakeLane,
@@ -55,6 +55,15 @@ import { exportHostedPendingAssistantUsage } from "./usage.ts";
 import { exportHostedBrowserVaultSnapshot } from "./browser-vault.ts";
 import { computeHostedRunElapsedMs, resolveHostedWake } from "./utils.ts";
 
+const HOSTED_IMMEDIATE_MAINTENANCE_PASS_BUDGET = 8;
+
+interface HostedImmediateMaintenanceDrainState {
+  assistantNextWakeAt: string | null;
+  assistantPending: boolean;
+  deviceSyncNextWakeAt: string | null;
+  deviceSyncPending: boolean;
+}
+
 export async function executeHostedRunDrainForCommit(input: {
   artifactMaterializer?: HostedWorkspaceArtifactMaterializer | null;
   executionContext: AssistantExecutionContext;
@@ -68,13 +77,7 @@ export async function executeHostedRunDrainForCommit(input: {
   runtimeEnv: Readonly<Record<string, string>>;
 }): Promise<HostedCommittedExecutionState> {
   const { runDrain } = input.request;
-  if (!runDrain) {
-    throw new TypeError(
-      "Hosted runtime jobs must use runDrain; single-wake execution was removed.",
-    );
-  }
-
-  const primaryWake = resolveHostedWake(input.request);
+  const primaryWake = resolveHostedWake(runDrain);
   emitHostedExecutionStructuredLog({
     component: "runtime",
     wake: primaryWake,
@@ -88,21 +91,18 @@ export async function executeHostedRunDrainForCommit(input: {
     run: input.request.run ?? null,
   });
 
-  const wakeExecutionContext = await resolveHostedWakeExecutionContext(
+  const runExecutionContext = await resolveHostedRunExecutionContext(
     input.executionContext,
   );
   const metrics = createHostedRunDrainMetrics();
-  let shouldRunAssistantAutomation = runDrain.events.length === 0
-    && runDrain.triggerKind === "runtime_timer";
-  let shouldRunDeviceSyncScheduler = runDrain.events.length === 0
-    && runDrain.triggerKind === "runtime_timer";
+  const drainState = createHostedImmediateMaintenanceDrainState(runDrain);
 
   for (const event of runDrain.events) {
     const wakeHandlingStartedAtMs = Date.now();
     if (isHostedRuntimeTimerWake(event.wake)) {
       metrics.eventsHandled += 1;
-      shouldRunAssistantAutomation = true;
-      shouldRunDeviceSyncScheduler = true;
+      drainState.assistantPending = true;
+      drainState.deviceSyncPending = true;
       emitHostedExecutionStructuredLog({
         component: "runtime",
         wake: event.wake,
@@ -119,15 +119,15 @@ export async function executeHostedRunDrainForCommit(input: {
       continue;
     }
 
-    const wakeMetrics = await executeHostedIngressEventAlias({
+    const ingressMetrics = await executeHostedIngressEvent({
       wake: event.wake,
-      executionContext: wakeExecutionContext,
+      executionContext: runExecutionContext,
       runtime: input.runtime,
       runtimeEnv: input.runtimeEnv,
       sharePack: event.sharePack ?? null,
       vaultRoot: input.restored.vaultRoot,
     });
-    mergeHostedRunDrainWakeMetrics(metrics, wakeMetrics);
+    mergeHostedRunDrainWakeMetrics(metrics, ingressMetrics);
     emitHostedExecutionStructuredLog({
       component: "runtime",
       wake: event.wake,
@@ -142,8 +142,8 @@ export async function executeHostedRunDrainForCommit(input: {
       run: input.request.run ?? null,
     });
 
-    if (wakeMetrics.followupExecution === "conversation-message") {
-      shouldRunAssistantAutomation = true;
+    if (ingressMetrics.ingressLane === "conversation-message") {
+      drainState.assistantPending = true;
       const preservedMetrics = await resolveHostedConversationPreservedWakeMetrics({
         wake: event.wake,
         run: input.request.run ?? null,
@@ -151,11 +151,15 @@ export async function executeHostedRunDrainForCommit(input: {
         vaultRoot: input.restored.vaultRoot,
       });
       mergeHostedRunDrainMaintenanceMetrics(metrics, preservedMetrics);
+      drainState.deviceSyncNextWakeAt = earliestHostedWakeAt(
+        drainState.deviceSyncNextWakeAt,
+        preservedMetrics.nextWakeAt,
+      );
       continue;
     }
 
     const maintenanceMetrics = await runHostedSystemWakeFollowupExecution({
-      executionContext: wakeExecutionContext,
+      executionContext: runExecutionContext,
       requestId: event.wake.eventId,
       run: input.request.run ?? null,
       runtime: input.runtime,
@@ -163,28 +167,29 @@ export async function executeHostedRunDrainForCommit(input: {
       wake: event.wake,
     });
     mergeHostedRunDrainMaintenanceMetrics(metrics, maintenanceMetrics);
+    if (event.wake.kind === "device-sync.wake") {
+      drainState.deviceSyncNextWakeAt = earliestHostedWakeAt(
+        drainState.deviceSyncNextWakeAt,
+        maintenanceMetrics.nextWakeAt,
+      );
+    }
   }
 
-  if (shouldRunAssistantAutomation) {
-    const assistantMetrics = await runHostedAssistantRuntimeTimerLane({
-      executionContext: wakeExecutionContext,
-      requestId: `${runDrain.runId}:assistant`,
-      vaultRoot: input.restored.vaultRoot,
-      wake: primaryWake,
-    });
-    mergeHostedRunDrainMaintenanceMetrics(metrics, assistantMetrics);
-  }
-
-  if (shouldRunDeviceSyncScheduler) {
-    const deviceSyncMetrics = await runHostedDeviceSyncWakeLane({
-      deviceSyncPort: input.runtime.platform.deviceSyncPort,
-      resolvedConfig: input.runtime.resolvedConfig,
-      timeoutMs: input.runtime.commitTimeoutMs,
-      vaultRoot: input.restored.vaultRoot,
-      wake: primaryWake,
-    });
-    mergeHostedRunDrainMaintenanceMetrics(metrics, deviceSyncMetrics);
-  }
+  await drainHostedImmediateMaintenanceUntilIdleOrBudget({
+    drainState,
+    executionContext: runExecutionContext,
+    metrics,
+    run: input.request.run ?? null,
+    runDrain,
+    runtime: input.runtime,
+    vaultRoot: input.restored.vaultRoot,
+    wake: primaryWake,
+  });
+  metrics.nextWakeAt = earliestHostedWakeAt(
+    metrics.nextWakeAt,
+    drainState.assistantNextWakeAt,
+    drainState.deviceSyncNextWakeAt,
+  );
 
   const snapshotStartedAtMs = Date.now();
   const committedSnapshot = await snapshotHostedExecutionContext({
@@ -265,12 +270,6 @@ export async function completeHostedRunDrainAfterCommit(input: {
 }): Promise<HostedAssistantRuntimeCompletedJobResult> {
   const { runDrain } = input.request;
 
-  if (!runDrain) {
-    throw new TypeError(
-      "Hosted runtime jobs must use runDrain; single-wake execution was removed.",
-    );
-  }
-
   const committedAssistantDeliveryEffects = await collectHostedAssistantDeliverySideEffects(
     input.restored.vaultRoot,
   );
@@ -295,7 +294,7 @@ export async function completeHostedRunDrainAfterCommit(input: {
   });
 }
 
-async function resolveHostedWakeExecutionContext(
+async function resolveHostedRunExecutionContext(
   executionContext: AssistantExecutionContext,
 ): Promise<AssistantExecutionContext> {
   return hydrateHostedExecutionDefaultTarget(executionContext);
@@ -314,9 +313,23 @@ function createHostedRunDrainMetrics(): HostedRunDrainMetrics {
   };
 }
 
+function createHostedImmediateMaintenanceDrainState(
+  runDrain: HostedRuntimeDrainRequest,
+): HostedImmediateMaintenanceDrainState {
+  const pendingRuntimeTimerWork = runDrain.events.length === 0
+    && runDrain.triggerKind === "runtime_timer";
+
+  return {
+    assistantNextWakeAt: null,
+    assistantPending: pendingRuntimeTimerWork,
+    deviceSyncNextWakeAt: null,
+    deviceSyncPending: pendingRuntimeTimerWork,
+  };
+}
+
 function mergeHostedRunDrainWakeMetrics(
   target: HostedRunDrainMetrics,
-  metrics: Awaited<ReturnType<typeof executeHostedIngressEventAlias>>,
+  metrics: Awaited<ReturnType<typeof executeHostedIngressEvent>>,
 ): void {
   target.bootstrapResult ??= metrics.bootstrapResult;
   target.eventsHandled += 1;
@@ -338,8 +351,107 @@ function mergeHostedRunDrainMaintenanceMetrics(
 ): void {
   target.deviceSyncProcessed += metrics.deviceSyncProcessed;
   target.deviceSyncSkipped = target.deviceSyncSkipped && metrics.deviceSyncSkipped;
-  target.nextWakeAt = earliestHostedWakeAt(target.nextWakeAt, metrics.nextWakeAt);
   target.parserProcessed += metrics.parserProcessed;
+}
+
+async function drainHostedImmediateMaintenanceUntilIdleOrBudget(input: {
+  drainState: HostedImmediateMaintenanceDrainState;
+  executionContext: AssistantExecutionContext;
+  metrics: HostedRunDrainMetrics;
+  run?: HostedExecutionRunContext | null;
+  runDrain: HostedRuntimeDrainRequest;
+  runtime: Pick<
+    NormalizedHostedAssistantRuntimeConfig,
+    "commitTimeoutMs" | "platform" | "resolvedConfig"
+  >;
+  vaultRoot: string;
+  wake: HostedRuntimeEvent;
+}): Promise<void> {
+  let remainingPassBudget = HOSTED_IMMEDIATE_MAINTENANCE_PASS_BUDGET;
+
+  while (remainingPassBudget > 0) {
+    let ranPass = false;
+
+    if (
+      input.drainState.assistantPending
+      || isHostedWakeDueNow(input.drainState.assistantNextWakeAt)
+    ) {
+      ranPass = true;
+      remainingPassBudget -= 1;
+      input.drainState.assistantPending = false;
+      input.drainState.assistantNextWakeAt = null;
+
+      const assistantMetrics = await runHostedAssistantRuntimeTimerLane({
+        executionContext: input.executionContext,
+        requestId: `${input.runDrain.runId}:assistant`,
+        vaultRoot: input.vaultRoot,
+        wake: input.wake,
+      });
+      mergeHostedRunDrainMaintenanceMetrics(input.metrics, assistantMetrics);
+      input.drainState.assistantNextWakeAt = assistantMetrics.nextWakeAt;
+    }
+
+    if (
+      remainingPassBudget > 0
+      && (
+        input.drainState.deviceSyncPending
+        || isHostedWakeDueNow(input.drainState.deviceSyncNextWakeAt)
+      )
+    ) {
+      ranPass = true;
+      remainingPassBudget -= 1;
+      input.drainState.deviceSyncPending = false;
+      input.drainState.deviceSyncNextWakeAt = null;
+
+      const deviceSyncMetrics = await runHostedDeviceSyncWakeLane({
+        deviceSyncPort: input.runtime.platform.deviceSyncPort,
+        resolvedConfig: input.runtime.resolvedConfig,
+        timeoutMs: input.runtime.commitTimeoutMs,
+        vaultRoot: input.vaultRoot,
+        wake: input.wake,
+      });
+      mergeHostedRunDrainMaintenanceMetrics(input.metrics, deviceSyncMetrics);
+      input.drainState.deviceSyncNextWakeAt = deviceSyncMetrics.nextWakeAt;
+    }
+
+    if (!ranPass) {
+      return;
+    }
+  }
+
+  if (!hasHostedImmediateMaintenanceWork(input.drainState)) {
+    return;
+  }
+
+  emitHostedExecutionStructuredLog({
+    component: "runtime",
+    wake: input.wake,
+    level: "warn",
+    details: {
+      assistantNextWakeAt: input.drainState.assistantNextWakeAt,
+      assistantPending: input.drainState.assistantPending,
+      deviceSyncNextWakeAt: input.drainState.deviceSyncNextWakeAt,
+      deviceSyncPending: input.drainState.deviceSyncPending,
+      passBudget: HOSTED_IMMEDIATE_MAINTENANCE_PASS_BUDGET,
+      runElapsedMs: computeHostedRunElapsedMs(input.run ?? null),
+      runDrainRunId: input.runDrain.runId,
+    },
+    message:
+      "Hosted runtime exhausted the immediate maintenance drain budget; leaving remaining internal work on nextWakeAt.",
+    phase: "wake.running",
+    run: input.run ?? null,
+  });
+}
+
+function hasHostedImmediateMaintenanceWork(
+  drainState: HostedImmediateMaintenanceDrainState,
+): boolean {
+  return (
+    drainState.assistantPending ||
+    drainState.deviceSyncPending ||
+    isHostedWakeDueNow(drainState.assistantNextWakeAt) ||
+    isHostedWakeDueNow(drainState.deviceSyncNextWakeAt)
+  );
 }
 
 function summarizeHostedRunDrain(
@@ -367,9 +479,6 @@ async function runHostedSystemWakeFollowupExecution(input: {
   vaultRoot: string;
 }): Promise<HostedMaintenanceMetrics> {
   const maintenanceStartedAtMs = Date.now();
-  const wakeExecutionContext = await resolveHostedWakeExecutionContext(
-    input.executionContext,
-  );
   const maintenanceMetrics = await (() => {
     switch (input.wake.kind) {
       case "device-sync.wake":
@@ -516,6 +625,18 @@ function earliestHostedWakeAt(...values: Array<string | null | undefined>): stri
   return values
     .filter((value): value is string => typeof value === "string" && value.length > 0)
     .sort((left, right) => Date.parse(left) - Date.parse(right))[0] ?? null;
+}
+
+function isHostedWakeDueNow(
+  wakeAt: string | null | undefined,
+  referenceMs = Date.now(),
+): boolean {
+  if (!wakeAt) {
+    return false;
+  }
+
+  const wakeAtMs = Date.parse(wakeAt);
+  return Number.isFinite(wakeAtMs) && wakeAtMs <= referenceMs;
 }
 
 function normalizeHostedWakeAt(
