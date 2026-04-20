@@ -11,7 +11,7 @@
       "changeId": "chg_2026_04_20_health_commons_seed",
       "changeType": "seed",
       "editSummary": "Seeded the first Health Commons protocol-variant page shape.",
-      "entityKey": "protocol_variant:sauna/finnish-dry/murph-standard-3x-week",
+      "entityKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
       "minor": false,
       "rationale": "Lock the page, lineage, claim, test-plan, and artifact-manifest architecture before adding canonical sauna content.",
       "reviewStatus": "accepted",
@@ -19,6 +19,69 @@
       "sourceKeys": [
         "source_artifact:pmid-25705824"
       ]
+    },
+    {
+      "affectedFields": [
+        "sources/sauna",
+        "artifacts/sauna/research-artifacts.json"
+      ],
+      "changeId": "chg_2026_04_20_sauna_artifact_manifest_expansion",
+      "changeType": "artifact_change",
+      "editSummary": "Expanded sauna source pages and Cloudflare R2 artifact stubs for the canonical dry-sauna evidence set.",
+      "entityKey": "source_artifact:pmid-29849692",
+      "minor": false,
+      "rationale": "The commons can now represent legally gated PDFs and source artifacts for the canonical sauna pages without committing journal PDFs to Git.",
+      "reviewStatus": "accepted",
+      "schemaVersion": "murph.commons.change.v1",
+      "sourceKeys": [
+        "source_artifact:pmid-25705824",
+        "source_artifact:pmid-29849692",
+        "source_artifact:pmid-32814462",
+        "source_artifact:pmid-38577299"
+      ]
+    },
+    {
+      "affectedFields": [
+        "summary",
+        "relations",
+        "protocol",
+        "testPlans",
+        "claims",
+        "safety",
+        "body"
+      ],
+      "changeId": "chg_2026_04_20_sauna_canonical_protocol",
+      "changeType": "evidence_change",
+      "editSummary": "Replaced temporary sauna seed content with the canonical Murph Finnish dry-sauna field-test protocol.",
+      "entityKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+      "minor": false,
+      "rationale": "The protocol now includes the 21-day plan, dose guardrails, safety, claims, modality separation, and source-backed expectation setting.",
+      "reviewStatus": "accepted",
+      "schemaVersion": "murph.commons.change.v1",
+      "sourceKeys": [
+        "source_artifact:pmid-29849692",
+        "source_artifact:mayo-2018-sauna-review",
+        "source_artifact:pmid-32814462",
+        "source_artifact:pmid-38577299",
+        "source_artifact:pmid-40611569"
+      ]
+    },
+    {
+      "affectedFields": [
+        "key",
+        "slug",
+        "relations",
+        "redirects"
+      ],
+      "changeId": "chg_2026_04_20_sauna_dry_family_keys",
+      "changeType": "lineage_change",
+      "editSummary": "Renamed the Finnish dry sauna modality into the user-facing dry-sauna experiment family.",
+      "entityKey": "experiment_family:dry-sauna",
+      "minor": false,
+      "rationale": "Dry Sauna and Infrared Sauna are easier for users to differentiate than nested sauna/finnish-dry keys, while the parent sauna page still preserves the broad passive-heat family.",
+      "reviewStatus": "accepted",
+      "schemaVersion": "murph.commons.change.v1",
+      "sourceKeys": []
     }
   ]
 }

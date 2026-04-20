@@ -1,9 +1,34 @@
 {
   "redirects": [
     {
+      "from": "experiment_family:sauna/finnish-dry",
+      "reason": "Renamed to the user-facing dry-sauna family key.",
+      "to": "experiment_family:dry-sauna"
+    },
+    {
+      "from": "protocol_variant:sauna/finnish-dry/murph-standard-3x-week",
+      "reason": "Renamed after moving Finnish dry sauna under the dry-sauna experiment family.",
+      "to": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week"
+    },
+    {
+      "from": "protocol_variant:sauna/finnish-dry/bryan-johnson-blueprint",
+      "reason": "Renamed after moving external dry-sauna protocols under the dry-sauna experiment family.",
+      "to": "protocol_variant:dry-sauna/bryan-johnson-blueprint"
+    },
+    {
       "from": "protocol_variant:finnish-sauna",
-      "reason": "Renamed to hierarchical protocol key.",
-      "to": "protocol_variant:sauna/finnish-dry/murph-standard-3x-week"
+      "reason": "Legacy shorthand now resolves to the canonical Murph dry-sauna protocol.",
+      "to": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week"
+    },
+    {
+      "from": "protocol_variant:dry-sauna",
+      "reason": "Protocol shorthand now resolves to the canonical Murph dry-sauna protocol.",
+      "to": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week"
+    },
+    {
+      "from": "protocol_variant:finnish-dry-sauna",
+      "reason": "Legacy modality shorthand now resolves to the canonical Murph dry-sauna protocol.",
+      "to": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week"
     }
   ]
 }

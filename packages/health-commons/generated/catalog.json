@@ -16,7 +16,7 @@
           "storage": "cloudflare-r2"
         },
         {
-          "accessNotes": "Placeholder only. Upload is intentionally blocked until rights are cleared.",
+          "accessNotes": "Placeholder only. Upload is intentionally blocked until the PDF is legally cleared for storage and redistribution.",
           "artifactId": "art_pmid_29849692_pdf",
           "contentType": "application/pdf",
           "kind": "pdf",
@@ -25,6 +25,98 @@
           "redistributable": false,
           "rightsStatus": "permission_required",
           "sourceKey": "source_artifact:pmid-29849692",
+          "sourceUrl": "https://pubmed.ncbi.nlm.nih.gov/29849692/",
+          "storage": "cloudflare-r2"
+        },
+        {
+          "accessNotes": "Placeholder only. Upload is intentionally blocked until the PDF is legally cleared for storage and redistribution.",
+          "artifactId": "art_mayo_2018_sauna_review_pdf",
+          "contentType": "application/pdf",
+          "kind": "pdf",
+          "localPath": "research-artifacts/sauna/mayo-2018-sauna-review.pdf",
+          "objectKey": "commons/research/sauna/mayo-2018-sauna-review/source.pdf",
+          "redistributable": false,
+          "rightsStatus": "permission_required",
+          "sourceKey": "source_artifact:mayo-2018-sauna-review",
+          "sourceUrl": "https://www.mayoclinicproceedings.org/article/S0025-6196(18)30275-1/fulltext",
+          "storage": "cloudflare-r2"
+        },
+        {
+          "accessNotes": "Placeholder only. Upload is intentionally blocked until the PDF is legally cleared for storage and redistribution.",
+          "artifactId": "art_pmid_32814462_pdf",
+          "contentType": "application/pdf",
+          "kind": "pdf",
+          "localPath": "research-artifacts/sauna/pmid-32814462.pdf",
+          "objectKey": "commons/research/sauna/pmid-32814462/source.pdf",
+          "redistributable": false,
+          "rightsStatus": "permission_required",
+          "sourceKey": "source_artifact:pmid-32814462",
+          "sourceUrl": "https://pubmed.ncbi.nlm.nih.gov/32814462/",
+          "storage": "cloudflare-r2"
+        },
+        {
+          "accessNotes": "Placeholder only. Upload is intentionally blocked until the PDF is legally cleared for storage and redistribution.",
+          "artifactId": "art_pmid_38577299_pdf",
+          "contentType": "application/pdf",
+          "kind": "pdf",
+          "localPath": "research-artifacts/sauna/pmid-38577299.pdf",
+          "objectKey": "commons/research/sauna/pmid-38577299/source.pdf",
+          "redistributable": false,
+          "rightsStatus": "permission_required",
+          "sourceKey": "source_artifact:pmid-38577299",
+          "sourceUrl": "https://pubmed.ncbi.nlm.nih.gov/38577299/",
+          "storage": "cloudflare-r2"
+        },
+        {
+          "accessNotes": "Placeholder only. Upload is intentionally blocked until the PDF is legally cleared for storage and redistribution.",
+          "artifactId": "art_pmid_28633297_pdf",
+          "contentType": "application/pdf",
+          "kind": "pdf",
+          "localPath": "research-artifacts/sauna/pmid-28633297.pdf",
+          "objectKey": "commons/research/sauna/pmid-28633297/source.pdf",
+          "redistributable": false,
+          "rightsStatus": "permission_required",
+          "sourceKey": "source_artifact:pmid-28633297",
+          "sourceUrl": "https://pubmed.ncbi.nlm.nih.gov/28633297/",
+          "storage": "cloudflare-r2"
+        },
+        {
+          "accessNotes": "Placeholder only. Upload is intentionally blocked until the PDF is legally cleared for storage and redistribution.",
+          "artifactId": "art_pmid_35785965_pdf",
+          "contentType": "application/pdf",
+          "kind": "pdf",
+          "localPath": "research-artifacts/sauna/pmid-35785965.pdf",
+          "objectKey": "commons/research/sauna/pmid-35785965/source.pdf",
+          "redistributable": false,
+          "rightsStatus": "permission_required",
+          "sourceKey": "source_artifact:pmid-35785965",
+          "sourceUrl": "https://pubmed.ncbi.nlm.nih.gov/35785965/",
+          "storage": "cloudflare-r2"
+        },
+        {
+          "accessNotes": "Placeholder only. Upload is intentionally blocked until the PDF is legally cleared for storage and redistribution.",
+          "artifactId": "art_pmid_37650138_pdf",
+          "contentType": "application/pdf",
+          "kind": "pdf",
+          "localPath": "research-artifacts/sauna/pmid-37650138.pdf",
+          "objectKey": "commons/research/sauna/pmid-37650138/source.pdf",
+          "redistributable": false,
+          "rightsStatus": "permission_required",
+          "sourceKey": "source_artifact:pmid-37650138",
+          "sourceUrl": "https://pubmed.ncbi.nlm.nih.gov/37650138/",
+          "storage": "cloudflare-r2"
+        },
+        {
+          "accessNotes": "Placeholder only. Upload is intentionally blocked until the PDF is legally cleared for storage and redistribution.",
+          "artifactId": "art_pmid_40611569_pdf",
+          "contentType": "application/pdf",
+          "kind": "pdf",
+          "localPath": "research-artifacts/sauna/pmid-40611569.pdf",
+          "objectKey": "commons/research/sauna/pmid-40611569/source.pdf",
+          "redistributable": false,
+          "rightsStatus": "permission_required",
+          "sourceKey": "source_artifact:pmid-40611569",
+          "sourceUrl": "https://pubmed.ncbi.nlm.nih.gov/40611569/",
           "storage": "cloudflare-r2"
         }
       ],
@@ -33,7 +125,7 @@
       "schemaVersion": "murph.commons.artifact-manifest.v1"
     }
   ],
-  "catalogHash": "sha256:9379697a651418721925c8e4fe65a324dc5c6fad3f3c2882667be039b8faf0cc",
+  "catalogHash": "sha256:5811cf3a856a9c3d0c46031f7494930d3a3eb555ead916e123aa1244475fd0dd",
   "changes": [
     {
       "affectedFields": [
@@ -46,7 +138,7 @@
       "changeId": "chg_2026_04_20_health_commons_seed",
       "changeType": "seed",
       "editSummary": "Seeded the first Health Commons protocol-variant page shape.",
-      "entityKey": "protocol_variant:sauna/finnish-dry/murph-standard-3x-week",
+      "entityKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
       "minor": false,
       "rationale": "Lock the page, lineage, claim, test-plan, and artifact-manifest architecture before adding canonical sauna content.",
       "reviewStatus": "accepted",
@@ -54,22 +146,124 @@
       "sourceKeys": [
         "source_artifact:pmid-25705824"
       ]
+    },
+    {
+      "affectedFields": [
+        "sources/sauna",
+        "artifacts/sauna/research-artifacts.json"
+      ],
+      "changeId": "chg_2026_04_20_sauna_artifact_manifest_expansion",
+      "changeType": "artifact_change",
+      "editSummary": "Expanded sauna source pages and Cloudflare R2 artifact stubs for the canonical dry-sauna evidence set.",
+      "entityKey": "source_artifact:pmid-29849692",
+      "minor": false,
+      "rationale": "The commons can now represent legally gated PDFs and source artifacts for the canonical sauna pages without committing journal PDFs to Git.",
+      "reviewStatus": "accepted",
+      "schemaVersion": "murph.commons.change.v1",
+      "sourceKeys": [
+        "source_artifact:pmid-25705824",
+        "source_artifact:pmid-29849692",
+        "source_artifact:pmid-32814462",
+        "source_artifact:pmid-38577299"
+      ]
+    },
+    {
+      "affectedFields": [
+        "summary",
+        "relations",
+        "protocol",
+        "testPlans",
+        "claims",
+        "safety",
+        "body"
+      ],
+      "changeId": "chg_2026_04_20_sauna_canonical_protocol",
+      "changeType": "evidence_change",
+      "editSummary": "Replaced temporary sauna seed content with the canonical Murph Finnish dry-sauna field-test protocol.",
+      "entityKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+      "minor": false,
+      "rationale": "The protocol now includes the 21-day plan, dose guardrails, safety, claims, modality separation, and source-backed expectation setting.",
+      "reviewStatus": "accepted",
+      "schemaVersion": "murph.commons.change.v1",
+      "sourceKeys": [
+        "source_artifact:pmid-29849692",
+        "source_artifact:mayo-2018-sauna-review",
+        "source_artifact:pmid-32814462",
+        "source_artifact:pmid-38577299",
+        "source_artifact:pmid-40611569"
+      ]
+    },
+    {
+      "affectedFields": [
+        "key",
+        "slug",
+        "relations",
+        "redirects"
+      ],
+      "changeId": "chg_2026_04_20_sauna_dry_family_keys",
+      "changeType": "lineage_change",
+      "editSummary": "Renamed the Finnish dry sauna modality into the user-facing dry-sauna experiment family.",
+      "entityKey": "experiment_family:dry-sauna",
+      "minor": false,
+      "rationale": "Dry Sauna and Infrared Sauna are easier for users to differentiate than nested sauna/finnish-dry keys, while the parent sauna page still preserves the broad passive-heat family.",
+      "reviewStatus": "accepted",
+      "schemaVersion": "murph.commons.change.v1",
+      "sourceKeys": []
     }
   ],
   "entities": [
     {
       "aliases": [
-        "HRV",
-        "RMSSD"
+        "deep sleep"
       ],
-      "body": "HRV can be useful, but Murph protocol pages should avoid promising fixed HRV deltas unless supported by the exact experiment design.",
+      "body": "Deep sleep minutes can be shown as a secondary context marker, but Murph should not over-weight it when deciding whether a dry-sauna protocol worked for a person.",
       "categories": [
-        "recovery",
-        "autonomic"
+        "sleep",
+        "wearable-metric"
       ],
       "entityType": "biomarker",
       "interpretationFrame": {
-        "caveat": "HRV is sensitive to alcohol, illness, stress, measurement timing, and device algorithms.",
+        "caveat": "Consumer wearables infer sleep stages and can disagree with one another.",
+        "principle": "Treat stage estimates as directional context, not exact physiology."
+      },
+      "key": "biomarker:deep-sleep-minutes",
+      "measurementContexts": [
+        "overnight_wearable"
+      ],
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "type": "related_protocol"
+        }
+      ],
+      "relativePath": "biomarkers/deep-sleep-minutes.md",
+      "revision": {
+        "pageRevisionId": "sha256:78c6c3af6f45b9918e5e467652fc46d9ba43a2d273cc3d3b3f5e7bd0699d3a6f",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "biomarkers/deep-sleep-minutes",
+      "status": "draft",
+      "summary": "A wearable-estimated sleep-stage marker that can be interesting, but is less reliable than broad sleep duration or continuity trends.",
+      "title": "Deep Sleep Minutes",
+      "unit": "minutes"
+    },
+    {
+      "aliases": [
+        "HRV",
+        "RMSSD"
+      ],
+      "body": "HRV can be useful, but Murph protocol pages should avoid promising fixed HRV deltas unless supported by the exact experiment design.\n\nFor the dry-sauna v1 experiment, HRV is an exploratory secondary marker. It may move for some people, but the current page should set expectations that HRV can be noisy or unchanged even when a protocol is worth repeating.",
+      "categories": [
+        "recovery",
+        "autonomic",
+        "wearable-metric"
+      ],
+      "entityType": "biomarker",
+      "interpretationFrame": {
+        "caveat": "HRV is sensitive to alcohol, illness, stress, measurement timing, training load, and device algorithms.",
         "principle": "Personal baseline matters more than cross-person comparison."
       },
       "key": "biomarker:hrv-rmssd",
@@ -77,10 +271,16 @@
         "overnight_wearable",
         "morning_resting_manual"
       ],
-      "quality": "stub",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "type": "related_protocol"
+        }
+      ],
       "relativePath": "biomarkers/hrv-rmssd.md",
       "revision": {
-        "pageRevisionId": "sha256:7b61705b7e8e7659093c72896009e4b543ba0bc41dabe025c622bec112064deb",
+        "pageRevisionId": "sha256:624137fc49dfa822b45ce93bb5809135dc15376e0263a21e92d442d64874d17a",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -96,10 +296,11 @@
         "RHR",
         "resting pulse"
       ],
-      "body": "Resting heart rate is a useful Murph v1 outcome because it is common across wearable providers and usually easier to explain than noisier recovery scores.",
+      "body": "Resting heart rate is the primary Murph v1 endpoint for the dry-sauna experiment because it is widely available across wearable providers and usually easier to explain than noisier recovery scores.\n\nMurph should compare RHR against the user's own baseline, annotate confounders such as illness, alcohol, heavy training, travel, and poor sleep, and avoid treating a single morning value as a verdict.",
       "categories": [
         "cardiovascular",
-        "recovery"
+        "recovery",
+        "wearable-metric"
       ],
       "entityType": "biomarker",
       "interpretationFrame": {
@@ -111,10 +312,16 @@
         "overnight_wearable",
         "morning_resting_manual"
       ],
-      "quality": "stub",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "type": "related_protocol"
+        }
+      ],
       "relativePath": "biomarkers/resting-heart-rate.md",
       "revision": {
-        "pageRevisionId": "sha256:838005ba2d080c7a9d467422bffea56f43c211e76aa294a2430909269a39f2b7",
+        "pageRevisionId": "sha256:fcf6ec3511a73089b2cb2d60c189ab8a4d19182eb83c61bed67547fcc83d28c7",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -127,75 +334,151 @@
     },
     {
       "aliases": [
+        "sleep efficiency percentage"
+      ],
+      "body": "Sleep efficiency is a secondary Murph marker for protocols that may change relaxation, thermoregulation, or recovery. It should be interpreted with bedtime, wake time, and subjective sleep quality.",
+      "categories": [
+        "sleep",
+        "wearable-metric"
+      ],
+      "entityType": "biomarker",
+      "interpretationFrame": {
+        "caveat": "Device estimates can be affected by time in bed, awakenings, sensor placement, illness, alcohol, and travel.",
+        "principle": "Look for stable trend changes, not one-night perfection."
+      },
+      "key": "biomarker:sleep-efficiency",
+      "measurementContexts": [
+        "overnight_wearable"
+      ],
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "type": "related_protocol"
+        }
+      ],
+      "relativePath": "biomarkers/sleep-efficiency.md",
+      "revision": {
+        "pageRevisionId": "sha256:0ea76e45021623614578a22ca15d45561ad352d18b88ed47f40d4d30c635e083",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "biomarkers/sleep-efficiency",
+      "status": "draft",
+      "summary": "A sleep-continuity marker that estimates the percentage of time in bed spent asleep, with device and context caveats.",
+      "title": "Sleep Efficiency",
+      "unit": "percent"
+    },
+    {
+      "aliases": [
         "sauna protocol"
       ],
-      "body": "Use this page when a user says “sauna protocol” and the system needs to choose among multiple sauna variants.",
+      "body": "Use this page when a user says \"sauna protocol\" and the system needs to choose among multiple sauna families or named recipes.",
       "entityType": "disambiguation",
       "key": "disambiguation:sauna-protocol",
       "options": [
         {
-          "description": "Canonical Murph seed protocol for Finnish dry sauna.",
-          "key": "protocol_variant:sauna/finnish-dry/murph-standard-3x-week",
+          "description": "User-facing family for traditional high-temperature dry-sauna protocols, including Finnish dry sauna.",
+          "key": "experiment_family:dry-sauna",
+          "label": "Dry Sauna"
+        },
+        {
+          "description": "Canonical Murph field-test protocol for dry sauna.",
+          "key": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
           "label": "Murph Finnish Dry Sauna"
         },
         {
+          "description": "Separate sauna family for infrared heat exposure.",
+          "key": "experiment_family:infrared-sauna",
+          "label": "Infrared Sauna"
+        },
+        {
           "description": "External named protocol placeholder pending dose and evidence review.",
-          "key": "protocol_variant:sauna/finnish-dry/bryan-johnson-blueprint",
+          "key": "protocol_variant:dry-sauna/bryan-johnson-blueprint",
           "label": "Bryan Johnson Sauna Protocol"
         }
       ],
-      "quality": "stub",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "type": "related_protocol"
+        }
+      ],
       "relativePath": "protocols/sauna-protocol.md",
       "revision": {
-        "pageRevisionId": "sha256:e99546d434f37297457201bb5e57b0dbd112cd814336d5915f1cab99ae43ca70",
+        "pageRevisionId": "sha256:251c05b6a2211f0a177bda10816020d4aacb7cb73e262902d5967bbe78428143",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
       "schemaVersion": "murph.commons.page.v1",
       "slug": "protocols/sauna-protocol",
       "status": "draft",
-      "summary": "Disambiguation page for sauna protocol searches that might refer to Murph Finnish dry sauna, external named protocols, or future infrared/steam variants.",
+      "summary": "Disambiguation page for sauna protocol searches that could mean dry sauna, infrared sauna, Murph's Finnish dry-sauna experiment, or an external named protocol.",
       "title": "Sauna Protocol"
     },
     {
       "aliases": [
-        "heat exposure"
+        "Finnish sauna",
+        "Finnish dry sauna",
+        "traditional dry sauna"
       ],
-      "body": "The sauna family groups heat-exposure modalities while keeping Finnish dry sauna, infrared sauna, and steam room protocols distinct.",
+      "body": "Dry sauna is the user-facing family for high-temperature, low-humidity sauna exposure. Murph's first canonical protocol is specifically a Finnish dry-sauna version of this family.\n\nThis page deliberately separates dry sauna from infrared sauna. The distinction matters because heat source, temperature, humidity, session length, and evidence base can differ enough that the protocols should not be merged.",
+      "canonicalModality": "finnish_dry_sauna",
       "categories": [
         "passive-heat",
+        "sauna",
         "recovery"
       ],
       "entityType": "experiment_family",
-      "familyKind": "intervention",
-      "key": "experiment_family:sauna",
-      "quality": "stub",
-      "relativePath": "families/sauna.md",
+      "familyKind": "modality",
+      "key": "experiment_family:dry-sauna",
+      "parentFamilyKey": "experiment_family:sauna",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "experiment_family:sauna",
+          "type": "parent_family"
+        },
+        {
+          "target": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "type": "related_protocol"
+        },
+        {
+          "target": "source_artifact:mayo-2018-sauna-review",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-38577299",
+          "type": "cites"
+        }
+      ],
+      "relativePath": "families/dry-sauna.md",
       "revision": {
-        "pageRevisionId": "sha256:e0155f1898e5eda4a0de670bf701c420b06f8e4048a629de9ee20102d673aa98",
+        "pageRevisionId": "sha256:db0e346afc217434a99f295d004c06dca9a7e144f4a4b4cf71a155e6c360f2e3",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
       "schemaVersion": "murph.commons.page.v1",
-      "slug": "families/sauna",
-      "status": "draft",
-      "summary": "Passive heat exposure protocols, grouped separately from exercise, cold exposure, and sleep interventions.",
-      "title": "Sauna"
+      "slug": "families/dry-sauna",
+      "status": "field-testing",
+      "summary": "Traditional high-temperature dry-sauna exposure, including Finnish dry sauna protocols, separated from infrared sauna and steam room protocols.",
+      "title": "Dry Sauna"
     },
     {
       "aliases": [
-        "Finnish sauna",
-        "traditional dry sauna",
-        "dry sauna"
+        "infrared heat therapy"
       ],
-      "body": "This modality page lets Murph distinguish Finnish dry sauna protocols from infrared sauna and steam-room protocols before the protocol library grows.",
+      "body": "Infrared sauna belongs in Health Commons as its own experiment family, not as a variant of the Finnish dry-sauna protocol.\n\nThis page is intentionally a stub until Murph has an infrared-specific evidence map and protocol recipe.",
       "categories": [
         "passive-heat",
         "sauna"
       ],
       "entityType": "experiment_family",
       "familyKind": "modality",
-      "key": "experiment_family:sauna/finnish-dry",
+      "key": "experiment_family:infrared-sauna",
+      "parentFamilyKey": "experiment_family:sauna",
       "quality": "stub",
       "relations": [
         {
@@ -203,17 +486,53 @@
           "type": "parent_family"
         }
       ],
-      "relativePath": "families/sauna-finnish-dry.md",
+      "relativePath": "families/infrared-sauna.md",
       "revision": {
-        "pageRevisionId": "sha256:61c9ecccb9c81f535dab44f3301b7ebf722ba4432c9f6f4176b07bc436ccdf50",
+        "pageRevisionId": "sha256:aeed1fe300d7ccfc48d68cd1f57b50b248063d9ff1514f5d3c652f39f991b99a",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
       "schemaVersion": "murph.commons.page.v1",
-      "slug": "families/sauna/finnish-dry",
+      "slug": "families/infrared-sauna",
       "status": "draft",
-      "summary": "Traditional dry sauna exposure, typically hotter and drier than steam room or infrared sauna modalities.",
-      "title": "Finnish Dry Sauna"
+      "summary": "Infrared heat exposure protocols. Kept separate from dry sauna because dose, heat source, temperature, and evidence base can differ.",
+      "title": "Infrared Sauna"
+    },
+    {
+      "aliases": [
+        "passive heat",
+        "heat exposure"
+      ],
+      "body": "Sauna is the broad passive-heat family. It should not collapse dry sauna, infrared sauna, steam room, hot bath, and other heat modalities into one recipe.\n\nMurph should use this parent page for education and search, while protocol cards should usually attach to a more intuitive user-facing family such as Dry Sauna or Infrared Sauna.",
+      "categories": [
+        "passive-heat",
+        "recovery"
+      ],
+      "entityType": "experiment_family",
+      "familyKind": "intervention",
+      "key": "experiment_family:sauna",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "experiment_family:dry-sauna",
+          "type": "child_family"
+        },
+        {
+          "target": "experiment_family:infrared-sauna",
+          "type": "child_family"
+        }
+      ],
+      "relativePath": "families/sauna.md",
+      "revision": {
+        "pageRevisionId": "sha256:0241f1e42c6b6061a9d36d9739abb1215881110ba1fde9f48e2c6be27f3b724c",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "families/sauna",
+      "status": "draft",
+      "summary": "The broad passive-heat intervention family. User-facing experiment families such as dry sauna and infrared sauna are kept separate below this parent.",
+      "title": "Sauna / Passive Heat"
     },
     {
       "aliases": [
@@ -231,13 +550,13 @@
         "external-protocol"
       ],
       "entityType": "protocol_variant",
-      "key": "protocol_variant:sauna/finnish-dry/bryan-johnson-blueprint",
+      "key": "protocol_variant:dry-sauna/bryan-johnson-blueprint",
       "lineage": {
         "rationale": "External named protocol placeholder; replace temporary dose metadata after source review.",
         "relationship": "external_named_protocol"
       },
       "protocol": {
-        "doseSignature": "External named sauna protocol placeholder · dose pending review",
+        "doseSignature": "External named dry-sauna protocol placeholder - dose pending review",
         "durationMinutes": {
           "max": 20,
           "min": 10
@@ -254,19 +573,19 @@
       "quality": "stub",
       "relations": [
         {
-          "target": "experiment_family:sauna/finnish-dry",
+          "target": "experiment_family:dry-sauna",
           "type": "parent_family"
         },
         {
-          "target": "protocol_variant:sauna/finnish-dry/murph-standard-3x-week",
+          "target": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
           "type": "related_protocol"
         }
       ],
-      "relativePath": "protocols/sauna/finnish-dry/bryan-johnson-blueprint.md",
+      "relativePath": "protocols/dry-sauna/bryan-johnson-blueprint.md",
       "revision": {
-        "pageRevisionId": "sha256:44f98ea1923894d52ae40a953106816bd400db65547a2a0a8e46804042f36500",
-        "recipeHash": "sha256:8b560328dcbd6472de1e44ecf810c333ef932b62c44f63240c926fb0f82607cb",
-        "runSpecRevisionId": "sha256:ef9015e671f83be4a5954a183d2748c845580e9005a7efb8b6d488fba7bf5ecd"
+        "pageRevisionId": "sha256:54e776afda011f082f943b7215177469f87930641b8480fad8d924e6484bc93c",
+        "recipeHash": "sha256:6da57ddfc0030db9f0023d85c3dfb003dd5f62ef99eb09aae9408927be9fd8cb",
+        "runSpecRevisionId": "sha256:d0ad923b41e3e70aa7ebe13063aa14ba0776dc414d79b8b8f81bbcd66c197000"
       },
       "safety": {
         "cautionLevel": "moderate",
@@ -275,9 +594,9 @@
         ]
       },
       "schemaVersion": "murph.commons.page.v1",
-      "slug": "protocols/sauna/finnish-dry/bryan-johnson-blueprint",
+      "slug": "protocols/dry-sauna/bryan-johnson-blueprint",
       "status": "draft",
-      "summary": "Temporary external named protocol placeholder so the commons can distinguish attributed protocols from Murph canonical variants.",
+      "summary": "External named dry-sauna protocol placeholder. It is intentionally separated from the Murph canonical protocol until exact dose, source, and evidence claims are reviewed.",
       "testPlans": [
         {
           "baselineDays": 7,
@@ -291,41 +610,99 @@
     },
     {
       "aliases": [
-        "Finnish sauna protocol",
-        "dry sauna protocol",
-        "traditional sauna protocol"
+        "Murph dry sauna protocol",
+        "Murph Finnish sauna protocol",
+        "Finnish dry sauna experiment"
       ],
       "attribution": {
         "ownerType": "murph"
       },
-      "body": "This is temporary seed content. The important part is the structure: one protocol variant has lineage, attribution, a performable protocol block, test plans, safety, claims, and typed links to biomarkers and sources.",
+      "body": "## Purpose\n\nThis protocol asks a narrow question: after a stable baseline, does a short Finnish dry-sauna block move a user's near-term recovery or cardiovascular signals enough to be worth noticing?\n\n## Default recipe\n\nRun a 21-day experiment: seven baseline days, then fourteen intervention days. During the intervention, complete three dry-sauna sessions per week, ideally 15-20 minutes at about 80-100 C. The target is six sessions, and four completed sessions is the minimum for a useful first read.\n\n## What this can and cannot tell you\n\nThis experiment can look for near-term changes in resting heart rate, HRV, and sleep context. It cannot test long-term outcomes such as mortality, dementia, incident hypertension, or pneumonia. Those findings belong in the evidence-context section, not in the user's result claim.\n\n## Confounders to keep stable\n\nDo not add cold plunges, new supplements, new training blocks, major diet changes, intentional alcohol changes, or major bedtime changes during the experiment. Log illness, travel, unusually hard training, alcohol, and missed sessions so the result can be interpreted honestly.",
       "categories": [
         "passive-heat",
         "recovery",
-        "cardiovascular"
+        "cardiovascular",
+        "murph-canonical"
       ],
       "claims": [
         {
           "caveats": [
-            "Observational cohort evidence cannot prove an individual causal benefit.",
-            "A short self-experiment cannot test mortality outcomes."
+            "Sauna studies differ in temperature, duration, frequency, population, and endpoints.",
+            "Evidence for long-term outcomes should not be converted into a short-term personal guarantee."
           ],
-          "claimId": "mortality-context-not-endpoint",
+          "claimId": "repeated-dry-sauna-evidence-backbone",
           "sourceKeys": [
-            "source_artifact:pmid-25705824"
+            "source_artifact:pmid-29849692",
+            "source_artifact:mayo-2018-sauna-review",
+            "source_artifact:pmid-38577299"
+          ],
+          "strength": "moderate",
+          "text": "Regular dry-sauna bathing has a usable but heterogeneous evidence base; Murph should present this as a bounded self-experiment rather than as a guaranteed outcome.",
+          "type": "evidence_scope"
+        },
+        {
+          "caveats": [
+            "Wearable resting heart rate is a proxy outcome, not a clinical cardiovascular assessment.",
+            "Blood pressure and vascular markers require appropriate measurement devices and context."
+          ],
+          "claimId": "short-term-cardiovascular-markers",
+          "sourceKeys": [
+            "source_artifact:pmid-32814462",
+            "source_artifact:pmid-35785965"
+          ],
+          "strength": "moderate",
+          "text": "Acute and short-term sauna studies support tracking near-term cardiovascular markers, but Murph should phrase expected movement as possible rather than certain.",
+          "type": "intervention_result"
+        },
+        {
+          "caveats": [
+            "Observational cohort evidence cannot prove an individual causal benefit.",
+            "A 21-day self-experiment cannot test mortality, dementia, pneumonia, or long-term disease-incidence outcomes."
+          ],
+          "claimId": "long-term-associations-are-context",
+          "sourceKeys": [
+            "source_artifact:pmid-25705824",
+            "source_artifact:pmid-28633297"
           ],
           "strength": "high",
-          "text": "Long-term Finnish cohort findings are evidence context for sauna, not outcomes a 21-day personal experiment can test.",
-          "type": "evidence_scope"
+          "text": "Finnish cohort findings on sauna frequency and long-term outcomes are evidence context for protocol rationale, not endpoints a 21-day Murph experiment can test.",
+          "type": "association_not_causation"
+        },
+        {
+          "caveats": [
+            "HRV is noisy and sensitive to sleep, illness, alcohol, psychological stress, and training load.",
+            "A null HRV signal does not automatically mean the protocol was useless."
+          ],
+          "claimId": "hrv-response-uncertain",
+          "sourceKeys": [
+            "source_artifact:pmid-40611569"
+          ],
+          "strength": "moderate",
+          "text": "HRV should be treated as an exploratory secondary marker for this protocol because dry-sauna interventions may not reliably improve HRV.",
+          "type": "mixed_evidence"
+        },
+        {
+          "caveats": [
+            "Protocols can be related, but should not silently inherit one another's dose, safety, or claims."
+          ],
+          "claimId": "dry-sauna-not-infrared",
+          "sourceKeys": [
+            "source_artifact:pmid-29849692",
+            "source_artifact:pmid-38577299"
+          ],
+          "strength": "moderate",
+          "text": "Finnish dry sauna, infrared sauna, and steam-room protocols should stay separate in Murph because modality-specific dose and evidence can differ.",
+          "type": "design_guardrail"
         }
       ],
       "entityType": "protocol_variant",
-      "key": "protocol_variant:sauna/finnish-dry/murph-standard-3x-week",
+      "key": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
       "lineage": {
+        "rationale": "Murph canonical dry-sauna protocol for the first Health Commons field test.",
         "relationship": "root"
       },
       "protocol": {
-        "doseSignature": "3x/week · 15-20 min · 80-100°C",
+        "doseSignature": "3x/week - 15-20 min - 80-100 C - 21-day experiment",
         "durationMinutes": {
           "max": 20,
           "min": 15
@@ -336,22 +713,25 @@
         "interventionSessionsMinimum": 4,
         "interventionSessionsTarget": 6,
         "steps": [
-          "Complete each session in a traditional dry sauna.",
-          "Keep other new health interventions stable during the test window.",
-          "Log session completion and any notable symptoms or confounders."
+          "Keep your normal routine for a 7-day baseline before starting the intervention.",
+          "Complete three Finnish dry-sauna sessions per week for two weeks.",
+          "Use a traditional dry sauna when possible, aiming for 80-100 C and 15-20 minutes per session.",
+          "Treat cold plunges, new supplements, new training blocks, major diet changes, and alcohol changes as separate interventions; do not add them during this experiment.",
+          "Hydrate normally, cool down gently, and log duration, approximate temperature, time of day, whether the session followed exercise, symptoms, illness, alcohol, travel, and unusually hard training."
         ],
         "stopConditions": [
-          "Stop if chest pain, faintness, severe dizziness, confusion, or unusual shortness of breath occurs."
+          "Stop the session if chest pain, faintness, severe dizziness, confusion, palpitations, or unusual shortness of breath occurs.",
+          "End the experiment and seek appropriate care if severe or repeated symptoms occur."
         ],
         "temperatureC": {
           "max": 100,
           "min": 80
         }
       },
-      "quality": "stub",
+      "quality": "usable",
       "relations": [
         {
-          "target": "experiment_family:sauna/finnish-dry",
+          "target": "experiment_family:dry-sauna",
           "type": "parent_family"
         },
         {
@@ -363,46 +743,100 @@
           "type": "secondary_biomarker"
         },
         {
+          "target": "biomarker:sleep-efficiency",
+          "type": "secondary_biomarker"
+        },
+        {
+          "target": "biomarker:deep-sleep-minutes",
+          "type": "secondary_biomarker"
+        },
+        {
+          "target": "source_artifact:pmid-29849692",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:mayo-2018-sauna-review",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-32814462",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-38577299",
+          "type": "cites"
+        },
+        {
           "target": "source_artifact:pmid-25705824",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-28633297",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-35785965",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-40611569",
           "type": "cites"
         }
       ],
-      "relativePath": "protocols/sauna/finnish-dry/murph-standard-3x-week.md",
+      "relativePath": "protocols/dry-sauna/murph-finnish-standard-3x-week.md",
       "revision": {
-        "pageRevisionId": "sha256:853dc1ab0c382afffa5cc9cb5497351a00603b5c904a0a6243107ce7928ad008",
-        "recipeHash": "sha256:cea0537774717f1065a790fc4f220d64011798b8798c11897293e376cdf5940c",
-        "runSpecRevisionId": "sha256:78cf763c7055b690821bccaee10f25a46bd3e7ef793a321531af1d732a557f1b"
+        "pageRevisionId": "sha256:821f92ba71f905e069ad86832aef8c47df848d02448f1b9a868760611a21a8c2",
+        "recipeHash": "sha256:1dfc6d425f81b335c493a4ce23ef6f0b2753be56401bbca085a5ca68e33785a7",
+        "runSpecRevisionId": "sha256:d80fe247ca53a9cd6c1dbffa9e8cf10653d0a29ccc578b537b707b23be0103d6"
       },
       "safety": {
         "avoidOrGetClinicianGuidance": [
           "unstable_angina",
-          "recent_myocardial_infarction",
+          "recent_myocardial_infarction_or_stroke",
           "uncontrolled_hypertension",
+          "symptomatic_arrhythmia",
+          "decompensated_heart_failure",
+          "severe_aortic_stenosis",
           "pregnancy",
-          "acute_illness_or_fever"
+          "acute_illness_or_fever",
+          "dehydration_or_recent_fainting",
+          "heat_intolerance_or_another_condition_where_heat_exposure_is_risky"
         ],
         "cautionLevel": "moderate",
+        "notes": [
+          "Avoid alcohol before sauna sessions.",
+          "This is a wellness self-experiment, not a treatment plan for cardiovascular disease.",
+          "People with known cardiovascular disease or major medical conditions should use clinician guidance before starting."
+        ],
         "stopIf": [
           "chest_pain",
           "faintness",
           "severe_dizziness",
-          "confusion"
+          "confusion",
+          "palpitations",
+          "unusual_shortness_of_breath"
         ]
       },
       "schemaVersion": "murph.commons.page.v1",
-      "slug": "protocols/sauna/finnish-dry/murph-standard-3x-week",
-      "status": "draft",
-      "summary": "Temporary seed protocol for three 15-20 minute Finnish dry sauna sessions per week, evaluated with a 21-day resting-heart-rate test plan.",
+      "slug": "protocols/dry-sauna/murph-finnish-standard-3x-week",
+      "status": "field-testing",
+      "summary": "A 21-day Murph self-experiment: seven days of baseline, then two weeks of three Finnish dry-sauna sessions per week, using resting heart rate as the primary marker.",
       "testPlans": [
         {
           "baselineDays": 7,
           "durationDays": 21,
           "interventionDays": 14,
           "minimumAdherenceSessions": 4,
+          "notes": [
+            "Compare intervention-window RHR against the user's own 7-day baseline.",
+            "Label HRV and sleep-stage markers as exploratory unless the personal signal is strong and repeatable."
+          ],
           "planId": "rhr-21d",
           "primaryBiomarkerKey": "biomarker:resting-heart-rate",
           "secondaryBiomarkerKeys": [
-            "biomarker:hrv-rmssd"
+            "biomarker:hrv-rmssd",
+            "biomarker:sleep-efficiency",
+            "biomarker:deep-sleep-minutes"
           ],
           "targetAdherenceSessions": 6
         }
@@ -411,26 +845,62 @@
     },
     {
       "aliases": [
+        "Laukkanen 2018 Mayo sauna review"
+      ],
+      "body": "This source is useful for rationale and mechanism sections. It should not replace protocol-specific intervention evidence.",
+      "categories": [
+        "sauna",
+        "review"
+      ],
+      "entityType": "source_artifact",
+      "key": "source_artifact:mayo-2018-sauna-review",
+      "quality": "usable",
+      "relativePath": "sources/sauna/mayo-2018-sauna-review.md",
+      "revision": {
+        "pageRevisionId": "sha256:e51ea4a4a8c9455f9ce4e7f1f7295445b692a8616453c7be299f95b92e648a45",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/sauna/mayo-2018-sauna-review",
+      "source": {
+        "authors": "Laukkanen JA, Laukkanen T, Kunutsor SK",
+        "citation": "Laukkanen JA, Laukkanen T, Kunutsor SK. Cardiovascular and other health benefits of sauna bathing: a review of the evidence. Mayo Clinic Proceedings. 2018.",
+        "journal": "Mayo Clinic Proceedings",
+        "kind": "review",
+        "title": "Cardiovascular and other health benefits of sauna bathing: a review of the evidence",
+        "url": "https://www.mayoclinicproceedings.org/article/S0025-6196(18)30275-1/fulltext",
+        "year": 2018
+      },
+      "status": "draft",
+      "summary": "Narrative review focused on cardiovascular mechanisms and outcomes for sauna bathing.",
+      "title": "Cardiovascular and other health benefits of sauna bathing: a review of the evidence"
+    },
+    {
+      "aliases": [
         "Laukkanen 2015 sauna mortality"
       ],
-      "body": "Source metadata stub. Keep full PDFs and extracted text in artifact storage when rights permit, not in Git.",
+      "body": "This source supports long-term Finnish sauna context. It should not be rendered as a claim that a short Murph experiment can test mortality outcomes.",
       "categories": [
         "sauna",
         "observational-cohort"
       ],
       "entityType": "source_artifact",
       "key": "source_artifact:pmid-25705824",
-      "quality": "stub",
+      "quality": "usable",
       "relativePath": "sources/sauna/pmid-25705824.md",
       "revision": {
-        "pageRevisionId": "sha256:1514c26bf7eaa0f9b1086a2fa20e63292885e733457f88d26149c65173b9f3b5",
+        "pageRevisionId": "sha256:257e9ca0f65522274cc0e5d187cf285a7207536f4a9767063ce3b541011579d0",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
       "schemaVersion": "murph.commons.page.v1",
       "slug": "sources/sauna/pmid-25705824",
       "source": {
+        "authors": "Laukkanen T, Khan H, Zaccardi F, Laukkanen JA",
+        "citation": "Laukkanen T, Khan H, Zaccardi F, Laukkanen JA. Association between sauna bathing and fatal cardiovascular and all-cause mortality events. JAMA Internal Medicine. 2015;175(4):542-548.",
         "doi": "10.1001/jamainternmed.2014.8187",
+        "journal": "JAMA Internal Medicine",
         "kind": "journal_article",
         "pmid": "25705824",
         "title": "Association between sauna bathing and fatal cardiovascular and all-cause mortality events",
@@ -438,45 +908,278 @@
         "year": 2015
       },
       "status": "draft",
-      "summary": "Temporary source page for a Finnish sauna cohort paper used as evidence context, not as a 21-day self-experiment endpoint.",
+      "summary": "Landmark Finnish cohort paper used as long-term evidence context, not as a 21-day self-experiment endpoint.",
       "title": "Association between sauna bathing and fatal cardiovascular and all-cause mortality events"
     },
     {
       "aliases": [
-        "sauna systemic health review"
+        "Zaccardi 2017 sauna hypertension"
       ],
-      "body": "Temporary source metadata stub for architecture validation.",
+      "body": "This source can inform future blood-pressure-focused protocols, but it should not be used as a short-term claim without direct measurement.",
+      "categories": [
+        "sauna",
+        "observational-cohort"
+      ],
+      "entityType": "source_artifact",
+      "key": "source_artifact:pmid-28633297",
+      "quality": "usable",
+      "relativePath": "sources/sauna/pmid-28633297.md",
+      "revision": {
+        "pageRevisionId": "sha256:201c3b9665e4e83de8ac774c39a76baf4a19d71b247f1c9ab5d2d5dca311a616",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/sauna/pmid-28633297",
+      "source": {
+        "authors": "Zaccardi F, et al.",
+        "citation": "Zaccardi F, et al. Sauna Bathing and Incident Hypertension: A Prospective Cohort Study. American Journal of Hypertension. 2017.",
+        "journal": "American Journal of Hypertension",
+        "kind": "journal_article",
+        "pmid": "28633297",
+        "title": "Sauna Bathing and Incident Hypertension: A Prospective Cohort Study",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/28633297/",
+        "year": 2017
+      },
+      "status": "draft",
+      "summary": "Prospective cohort source used as long-term blood-pressure context, not as a short-term protocol guarantee.",
+      "title": "Sauna Bathing and Incident Hypertension"
+    },
+    {
+      "aliases": [
+        "Hussain 2018 sauna review"
+      ],
+      "body": "This review is useful for regular dry-sauna framing, but Murph should still preserve study-design caveats and avoid fixed expected deltas.",
       "categories": [
         "sauna",
         "review"
       ],
       "entityType": "source_artifact",
       "key": "source_artifact:pmid-29849692",
-      "quality": "stub",
+      "quality": "usable",
       "relativePath": "sources/sauna/pmid-29849692.md",
       "revision": {
-        "pageRevisionId": "sha256:93318b7f1cde2b6ba9ad847e21602dac79000bbffcb026c4a34f16ffb6c6583a",
+        "pageRevisionId": "sha256:23c76580145f75fd3f2a05edb34d60ee78e71f8d308158a75ea3684468a5c8b3",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
       "schemaVersion": "murph.commons.page.v1",
       "slug": "sources/sauna/pmid-29849692",
       "source": {
+        "authors": "Hussain J, Cohen M",
+        "citation": "Hussain J, Cohen M. Clinical Effects of Regular Dry Sauna Bathing. Evidence-Based Complementary and Alternative Medicine. 2018.",
+        "journal": "Evidence-Based Complementary and Alternative Medicine",
         "kind": "review",
         "pmid": "29849692",
-        "title": "Sauna bathing and systemic health review source stub",
+        "title": "Clinical Effects of Regular Dry Sauna Bathing",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/29849692/",
         "year": 2018
       },
       "status": "draft",
-      "summary": "Temporary source page for sauna-systemic-health review evidence; replace with reviewed citation metadata before production use.",
-      "title": "Sauna bathing and systemic health review source stub"
+      "summary": "Systematic review used as the backbone source for repeated dry-sauna protocol design and safety caveats.",
+      "title": "Clinical Effects of Regular Dry Sauna Bathing"
+    },
+    {
+      "aliases": [
+        "Li 2020 sauna cardiovascular meta-analysis"
+      ],
+      "body": "This source supports tracking near-term cardiovascular markers while preserving uncertainty about individual wearable outcomes.",
+      "categories": [
+        "sauna",
+        "meta-analysis"
+      ],
+      "entityType": "source_artifact",
+      "key": "source_artifact:pmid-32814462",
+      "quality": "usable",
+      "relativePath": "sources/sauna/pmid-32814462.md",
+      "revision": {
+        "pageRevisionId": "sha256:c1136ee82f3b0bbfc613adef9b1073b59e1ad61b7011b3138de9798087a22b32",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/sauna/pmid-32814462",
+      "source": {
+        "authors": "Li Z, et al.",
+        "citation": "Li Z, et al. Acute and short-term efficacy of sauna treatment on cardiovascular function: A meta-analysis. European Journal of Cardiovascular Nursing. 2020.",
+        "journal": "European Journal of Cardiovascular Nursing",
+        "kind": "review",
+        "pmid": "32814462",
+        "title": "Acute and short-term efficacy of sauna treatment on cardiovascular function: A meta-analysis",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/32814462/",
+        "year": 2020
+      },
+      "status": "draft",
+      "summary": "Meta-analysis source for acute and short-term cardiovascular effects of sauna treatment.",
+      "title": "Acute and short-term efficacy of sauna treatment on cardiovascular function"
+    },
+    {
+      "aliases": [
+        "Lee 2022 exercise sauna RCT"
+      ],
+      "body": "This source is relevant for future exercise-plus-sauna variants. Murph's v1 dry-sauna protocol should still avoid adding a new training block during the experiment.",
+      "categories": [
+        "sauna",
+        "randomized-trial"
+      ],
+      "entityType": "source_artifact",
+      "key": "source_artifact:pmid-35785965",
+      "quality": "usable",
+      "relativePath": "sources/sauna/pmid-35785965.md",
+      "revision": {
+        "pageRevisionId": "sha256:72a88481c9ddd2fdb7f8bbd9f43c62be990771ff96103a40d0a99290ecac0274",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/sauna/pmid-35785965",
+      "source": {
+        "authors": "Lee E, et al.",
+        "citation": "Lee E, et al. Effects of regular sauna bathing in conjunction with exercise on cardiovascular function: a multi-arm, randomized controlled trial. American Journal of Physiology-Regulatory, Integrative and Comparative Physiology. 2022.",
+        "journal": "American Journal of Physiology-Regulatory, Integrative and Comparative Physiology",
+        "kind": "journal_article",
+        "pmid": "35785965",
+        "title": "Effects of regular sauna bathing in conjunction with exercise on cardiovascular function: a multi-arm, randomized controlled trial",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/35785965/",
+        "year": 2022
+      },
+      "status": "draft",
+      "summary": "Multi-arm randomized trial source relevant to exercise plus sauna variants and near-term cardiovascular endpoints.",
+      "title": "Effects of regular sauna bathing in conjunction with exercise on cardiovascular function"
+    },
+    {
+      "aliases": [
+        "Debray 2023 Finnish sauna RCT"
+      ],
+      "body": "This source helps keep Murph claims humble: not every structured Finnish dry-sauna intervention moves every vascular marker.",
+      "categories": [
+        "sauna",
+        "randomized-trial"
+      ],
+      "entityType": "source_artifact",
+      "key": "source_artifact:pmid-37650138",
+      "quality": "usable",
+      "relativePath": "sources/sauna/pmid-37650138.md",
+      "revision": {
+        "pageRevisionId": "sha256:ecfcdd63208d2372ffc59ce67100c017fc230f1252cf7d61afd52837d15ea92f",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/sauna/pmid-37650138",
+      "source": {
+        "authors": "Debray A, et al.",
+        "citation": "Debray A, et al. Finnish sauna bathing and vascular health of adults with coronary artery disease: a randomized controlled trial. Journal of Applied Physiology. 2023.",
+        "journal": "Journal of Applied Physiology",
+        "kind": "journal_article",
+        "pmid": "37650138",
+        "title": "Finnish sauna bathing and vascular health of adults with coronary artery disease: a randomized controlled trial",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/37650138/",
+        "year": 2023
+      },
+      "status": "draft",
+      "summary": "Finnish dry-sauna randomized trial in adults with coronary artery disease; useful as a reality check and safety-context source.",
+      "title": "Finnish sauna bathing and vascular health of adults with coronary artery disease"
+    },
+    {
+      "aliases": [
+        "Laukkanen 2024 Finnish sauna review"
+      ],
+      "body": "This source is useful for Finnish-sauna-specific framing and for separating passive-heat modalities.",
+      "categories": [
+        "sauna",
+        "review"
+      ],
+      "entityType": "source_artifact",
+      "key": "source_artifact:pmid-38577299",
+      "quality": "usable",
+      "relativePath": "sources/sauna/pmid-38577299.md",
+      "revision": {
+        "pageRevisionId": "sha256:723e1338519d8079d5a7be9c40e39fcdf9a5b6d94da74431a03ef07be7995f2c",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/sauna/pmid-38577299",
+      "source": {
+        "authors": "Laukkanen JA, Kunutsor SK",
+        "citation": "Laukkanen JA, Kunutsor SK. The multifaceted benefits of passive heat therapies for extending the healthspan: A comprehensive review with a focus on Finnish sauna. Temperature (Austin). 2024.",
+        "journal": "Temperature (Austin)",
+        "kind": "review",
+        "pmid": "38577299",
+        "title": "The multifaceted benefits of passive heat therapies for extending the healthspan: A comprehensive review with a focus on Finnish sauna",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/38577299/",
+        "year": 2024
+      },
+      "status": "draft",
+      "summary": "Current high-level review with a focus on Finnish sauna, used for modality context and mechanism mapping.",
+      "title": "The multifaceted benefits of passive heat therapies for extending the healthspan"
+    },
+    {
+      "aliases": [
+        "Lee 2025 sauna HRV RCT"
+      ],
+      "body": "This source supports treating HRV as exploratory in Murph's first dry-sauna protocol.",
+      "categories": [
+        "sauna",
+        "randomized-trial"
+      ],
+      "entityType": "source_artifact",
+      "key": "source_artifact:pmid-40611569",
+      "quality": "usable",
+      "relativePath": "sources/sauna/pmid-40611569.md",
+      "revision": {
+        "pageRevisionId": "sha256:edcab9fcf17fe3c9e96877e111bd105492a39af9bf0ee0e9a26b7515db982ed6",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/sauna/pmid-40611569",
+      "source": {
+        "authors": "Lee E, et al.",
+        "citation": "Lee E, et al. Regular postexercise sauna bathing does not improve heart rate variability: A multi-arm randomized controlled trial. Physiological Reports. 2025.",
+        "journal": "Physiological Reports",
+        "kind": "journal_article",
+        "pmid": "40611569",
+        "title": "Regular postexercise sauna bathing does not improve heart rate variability: A multi-arm randomized controlled trial",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/40611569/",
+        "year": 2025
+      },
+      "status": "draft",
+      "summary": "Recent multi-arm randomized trial source used to keep HRV expectations conservative.",
+      "title": "Regular postexercise sauna bathing does not improve heart rate variability"
     }
   ],
   "redirects": [
     {
+      "from": "experiment_family:sauna/finnish-dry",
+      "reason": "Renamed to the user-facing dry-sauna family key.",
+      "to": "experiment_family:dry-sauna"
+    },
+    {
+      "from": "protocol_variant:sauna/finnish-dry/murph-standard-3x-week",
+      "reason": "Renamed after moving Finnish dry sauna under the dry-sauna experiment family.",
+      "to": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week"
+    },
+    {
+      "from": "protocol_variant:sauna/finnish-dry/bryan-johnson-blueprint",
+      "reason": "Renamed after moving external dry-sauna protocols under the dry-sauna experiment family.",
+      "to": "protocol_variant:dry-sauna/bryan-johnson-blueprint"
+    },
+    {
       "from": "protocol_variant:finnish-sauna",
-      "reason": "Renamed to hierarchical protocol key.",
-      "to": "protocol_variant:sauna/finnish-dry/murph-standard-3x-week"
+      "reason": "Legacy shorthand now resolves to the canonical Murph dry-sauna protocol.",
+      "to": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week"
+    },
+    {
+      "from": "protocol_variant:dry-sauna",
+      "reason": "Protocol shorthand now resolves to the canonical Murph dry-sauna protocol.",
+      "to": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week"
+    },
+    {
+      "from": "protocol_variant:finnish-dry-sauna",
+      "reason": "Legacy modality shorthand now resolves to the canonical Murph dry-sauna protocol.",
+      "to": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week"
     }
   ],
   "schemaVersion": "murph.commons.catalog.v1"
