@@ -28,7 +28,7 @@ test("resolveHostedWake returns the first wake from a run-drain request", () => 
 
   assert.deepEqual(resolveHostedWake({
     acquiredAt: "2026-04-08T00:00:01.000Z",
-    events: [{ seq: "24", wake, wakeId: "wake_24" }],
+    events: [{ seq: "24", wake, ingressEventId: "wake_24" }],
     inputCommittedSeq: "24",
     inputCursorVersion: "4",
     runId: "run_utils_1",

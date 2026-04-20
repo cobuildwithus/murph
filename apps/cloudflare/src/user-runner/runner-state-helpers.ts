@@ -88,7 +88,7 @@ export function projectRunnerStateRecord(input: {
       lastEventId,
       lastRunAt: input.meta.last_run_at,
       nextWakeAt: input.meta.next_wake_at,
-      pendingWakeCount: 0,
+      pendingIngressEventCount: 0,
       run: input.run,
       timeline: [...input.timeline],
       userId: input.meta.user_id,

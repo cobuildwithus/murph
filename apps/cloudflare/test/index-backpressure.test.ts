@@ -77,7 +77,7 @@ describe("cloudflare worker queue backpressure routes", () => {
         lastEventId: null,
         lastRunAt: null,
         nextWakeAt: null,
-        pendingWakeCount: 0,
+        pendingIngressEventCount: 0,
         userId: "member_123",
       })),
     };

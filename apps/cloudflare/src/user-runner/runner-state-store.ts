@@ -79,7 +79,7 @@ export class RunnerStateStore {
     return this.readStateFromMetaSync(meta);
   }
 
-  async beginWakeRun(input: {
+  async beginRun(input: {
     eventId: string;
     run: HostedExecutionRunContext;
     userId: string;
@@ -104,7 +104,7 @@ export class RunnerStateStore {
     return this.readStateFromMetaSync(meta);
   }
 
-  async completeWakeRun(input: {
+  async completeRun(input: {
     eventId: string;
     finishedAt?: string | null;
     leaseOwner: RunnerLeaseOwnerInput;
@@ -119,7 +119,7 @@ export class RunnerStateStore {
     return this.readStateFromMetaSync(meta);
   }
 
-  async failWakeRun(input: {
+  async failRun(input: {
     error: unknown;
     eventId: string;
     finishedAt?: string | null;
@@ -144,18 +144,6 @@ export class RunnerStateStore {
 
   async readCachedBundleRef(): Promise<RunnerStateRecord["bundleRef"]> {
     return this.cachedBundleRef;
-  }
-
-  async readBundleMetaState(): Promise<{
-    bundleRef: RunnerStateRecord["bundleRef"];
-    bundleVersion: 0;
-  }> {
-    // Compatibility shim for older wake-path callsites. The cache stays
-    // process-memory only and does not represent durable correctness state.
-    return {
-      bundleRef: this.cachedBundleRef,
-      bundleVersion: 0,
-    };
   }
 
   async markRuntimeBootstrapped(): Promise<RunnerStateRecord> {

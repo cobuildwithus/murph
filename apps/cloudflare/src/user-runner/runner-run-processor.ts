@@ -173,7 +173,7 @@ export class RunnerRunProcessor {
       };
     }
 
-    await this.dependencies.stateStore.beginWakeRun({
+    await this.dependencies.stateStore.beginRun({
       eventId: runEventId,
       run,
       userId,
@@ -233,7 +233,7 @@ export class RunnerRunProcessor {
           run,
           runToken: input.runToken,
         });
-        await this.dependencies.stateStore.completeWakeRun({
+        await this.dependencies.stateStore.completeRun({
           eventId: runEventId,
           finishedAt: new Date().toISOString(),
           leaseOwner,
@@ -263,7 +263,7 @@ export class RunnerRunProcessor {
         userId,
         runnerResult.browserVaultSnapshot ?? null,
       );
-      await this.dependencies.stateStore.completeWakeRun({
+      await this.dependencies.stateStore.completeRun({
         eventId: runEventId,
         finishedAt: new Date().toISOString(),
         leaseOwner,
@@ -280,7 +280,7 @@ export class RunnerRunProcessor {
         state: "completed",
       };
     } catch (error) {
-      await this.dependencies.stateStore.failWakeRun({
+      await this.dependencies.stateStore.failRun({
         error,
         eventId: runEventId,
         leaseOwner,
@@ -338,7 +338,7 @@ export class RunnerRunProcessor {
       run,
     };
 
-    await this.dependencies.stateStore.beginWakeRun({
+    await this.dependencies.stateStore.beginRun({
       eventId: runEventId,
       run,
       userId,
@@ -381,7 +381,7 @@ export class RunnerRunProcessor {
         userId,
         runnerResult.browserVaultSnapshot ?? null,
       );
-      await this.dependencies.stateStore.completeWakeRun({
+      await this.dependencies.stateStore.completeRun({
         eventId: runEventId,
         finishedAt: new Date().toISOString(),
         leaseOwner,
@@ -408,7 +408,7 @@ export class RunnerRunProcessor {
         state: "completed",
       };
     } catch (error) {
-      await this.dependencies.stateStore.failWakeRun({
+      await this.dependencies.stateStore.failRun({
         error,
         eventId: runEventId,
         leaseOwner,

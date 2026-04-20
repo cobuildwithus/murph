@@ -151,10 +151,10 @@ export interface HostedExecutionRunnerSharePack {
 }
 
 export interface HostedRuntimeDrainEvent {
+  ingressEventId: string;
   seq: string;
   sharePack?: HostedExecutionRunnerSharePack | null;
   wake: HostedRuntimeEvent;
-  wakeId: string;
 }
 
 export interface HostedRuntimeDrainRequest {
@@ -320,7 +320,7 @@ export interface HostedExecutionUserStatus {
   lastEventId: string | null;
   lastRunAt: string | null;
   nextWakeAt: string | null;
-  pendingWakeCount: number;
+  pendingIngressEventCount: number;
   run?: HostedExecutionRunStatus | null;
   timeline?: HostedExecutionTimelineEntry[];
   userId: string;
@@ -417,6 +417,7 @@ export interface HostedIngressAppendResponse {
 
 export const HOSTED_RUN_STATUSES = [
   "acquired",
+  "running",
   "finalizing",
   "committed_needs_finalize",
   "finalized",
@@ -485,7 +486,7 @@ export interface HostedRunRecord {
   triggerKind: HostedRunTriggerKind;
   updatedAt: string;
   userId: string;
-  wakeIds: string[];
+  ingressEventIds: string[];
 }
 
 export interface HostedRunLogRecord {
@@ -515,16 +516,16 @@ export interface HostedRunAcquireResponse {
   acquired: boolean;
   cursor: HostedExecutionCursorState;
   events: HostedIngressEvent[];
-  pendingWakeCount: number;
+  pendingIngressEventCount: number;
   resumeFinalize: boolean;
   run: HostedRunRecord | null;
   runToken?: string | null;
 }
 
 export interface HostedRunEventResult {
+  ingressEventId: string;
   quarantineCode?: string | null;
   state: "completed" | "quarantined";
-  wakeId: string;
 }
 
 export interface HostedRunCommitRequest {
@@ -602,7 +603,7 @@ export interface HostedRunStatusRequest {
 export interface HostedRunStatusResponse {
   cursor: HostedExecutionCursorState;
   logs?: HostedRunLogRecord[];
-  pendingWakeCount: number;
+  pendingIngressEventCount: number;
   run: HostedRunRecord | null;
   runs?: HostedRunRecord[];
 }

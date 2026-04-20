@@ -311,7 +311,7 @@ function createUserStatus(
     lastEventId: string | null;
     lastRunAt: string | null;
     nextWakeAt: string | null;
-    pendingWakeCount: number;
+    pendingIngressEventCount: number;
     userId: string;
   }> = {},
 ) {
@@ -322,7 +322,7 @@ function createUserStatus(
     lastEventId: input.lastEventId ?? null,
     lastRunAt: input.lastRunAt ?? null,
     nextWakeAt: input.nextWakeAt ?? null,
-    pendingWakeCount: input.pendingWakeCount ?? 0,
+    pendingIngressEventCount: input.pendingIngressEventCount ?? 0,
     userId: input.userId ?? "user_123",
   };
 }

@@ -283,7 +283,7 @@ export class HostedUserRunner {
   }
 
   async drainHostedRuns(input: {
-    targetSeqHint?: string | null;
+    targetCommittedSeqHint?: string | null;
   } = {}): Promise<HostedRunDrainResult> {
     try {
       const result = await this.withRunDrainLock(async () => this.drainHostedRunsInternal(input));
@@ -298,11 +298,11 @@ export class HostedUserRunner {
   }
 
   private async drainHostedRunsInternal(input: {
-    targetSeqHint?: string | null;
+    targetCommittedSeqHint?: string | null;
   } = {}): Promise<HostedRunDrainLoopResult> {
     const userId = await this.requireBoundUserId();
     await this.bootstrapUser(userId);
-    let targetSeqHint = parseOptionalHostedWakeSeq(input.targetSeqHint);
+    let targetCommittedSeqHint = parseOptionalHostedCommittedSeq(input.targetCommittedSeqHint);
     let committedSeq: string | null = null;
     let exitState: HostedRunDrainState | null = null;
 
@@ -359,19 +359,20 @@ export class HostedUserRunner {
       if (
         !acquired.resumeFinalize
         && acquired.events.length < DEFAULT_HOSTED_WAKE_BATCH_LIMIT
-        && (!targetSeqHint || BigInt(committedSeq) >= targetSeqHint)
-        && !hostedWakeHintDueNow(outcome.cursor.nextRuntimeWakeAt)
+        && (!targetCommittedSeqHint || BigInt(committedSeq) >= targetCommittedSeqHint)
+        && !hostedRuntimeWakeHintDueNow(outcome.cursor.nextRuntimeWakeAt)
       ) {
         break;
       }
     }
 
-    const finalCommittedSeq = committedSeq ?? await this.readCommittedWakeSeqFromWeb(userId);
+    const finalCommittedSeq = committedSeq ?? await this.readCommittedSeqFromWeb(userId);
     return {
       committedSeq: finalCommittedSeq,
       exitState,
-      requestedTargetSeq: targetSeqHint?.toString() ?? null,
-      targetReached: targetSeqHint === null || BigInt(finalCommittedSeq) >= targetSeqHint,
+      requestedTargetSeq: targetCommittedSeqHint?.toString() ?? null,
+      targetReached: targetCommittedSeqHint === null
+        || BigInt(finalCommittedSeq) >= targetCommittedSeqHint,
     };
   }
 
@@ -844,7 +845,8 @@ export class HostedUserRunner {
     let primaryWake: HostedRuntimeEvent | null = null;
 
     for (const wake of input.acquired.events) {
-      outputCommittedSeq = maxHostedWakeSeqHint(outputCommittedSeq, BigInt(wake.seq)) ?? outputCommittedSeq;
+      outputCommittedSeq = maxHostedCommittedSeqHint(outputCommittedSeq, BigInt(wake.seq))
+        ?? outputCommittedSeq;
       let hostedWake: HostedIngressEnvelope;
 
       try {
@@ -926,14 +928,14 @@ export class HostedUserRunner {
       }
 
       events.push({
+        ingressEventId: wake.id,
         seq: wake.seq,
         ...(sharePack ? { sharePack } : {}),
         wake: hostedWake,
-        wakeId: wake.id,
       });
       eventResults.push({
+        ingressEventId: wake.id,
         state: "completed",
-        wakeId: wake.id,
       });
       primaryWake ??= hostedWake;
     }
@@ -1031,9 +1033,9 @@ export class HostedUserRunner {
         ...baseStatus,
         bundleRef: runStatus.cursor.snapshotRef,
         nextWakeAt: runStatus.cursor.nextRuntimeWakeAt ?? baseStatus.nextWakeAt,
-        pendingWakeCount: runStatus.pendingWakeCount > 0
-          ? runStatus.pendingWakeCount
-          : baseStatus.pendingWakeCount,
+        pendingIngressEventCount: runStatus.pendingIngressEventCount > 0
+          ? runStatus.pendingIngressEventCount
+          : baseStatus.pendingIngressEventCount,
       };
     } catch (error) {
       emitHostedExecutionStructuredLog({
@@ -1048,7 +1050,7 @@ export class HostedUserRunner {
     }
   }
 
-  private async readCommittedWakeSeqFromWeb(userId: string): Promise<string> {
+  private async readCommittedSeqFromWeb(userId: string): Promise<string> {
     const runStatus = await readHostedRunStatusFromWeb({
       baseUrl: this.readHostedWebControlBaseUrl(),
       boundUserId: userId,
@@ -1226,7 +1228,7 @@ export class HostedUserRunner {
       details: {
         hostedRunId: input.runId,
         quarantineCode: input.quarantineCode,
-        wakeId: input.wake.id,
+        ingressEventId: input.wake.id,
         wakeSeq: input.wake.seq,
         ...(input.details ?? {}),
       },
@@ -1237,9 +1239,9 @@ export class HostedUserRunner {
       userId: input.userId,
     });
     input.eventResults.push({
+      ingressEventId: input.wake.id,
       quarantineCode: input.quarantineCode,
       state: "quarantined",
-      wakeId: input.wake.id,
     });
   }
 }
@@ -1260,7 +1262,7 @@ function shouldScheduleHostedWakeRetryAlarm(
   return input.exitState === "backpressured";
 }
 
-function hostedWakeHintDueNow(value: string | null | undefined): boolean {
+function hostedRuntimeWakeHintDueNow(value: string | null | undefined): boolean {
   if (!value) {
     return false;
   }
@@ -1269,7 +1271,7 @@ function hostedWakeHintDueNow(value: string | null | undefined): boolean {
   return Number.isFinite(parsedMs) && parsedMs <= Date.now();
 }
 
-function parseOptionalHostedWakeSeq(value: string | null | undefined): bigint | null {
+function parseOptionalHostedCommittedSeq(value: string | null | undefined): bigint | null {
   if (!value) {
     return null;
   }
@@ -1281,7 +1283,7 @@ function parseOptionalHostedWakeSeq(value: string | null | undefined): bigint | 
   }
 }
 
-function maxHostedWakeSeqHint(left: bigint | null, right: bigint | null): bigint | null {
+function maxHostedCommittedSeqHint(left: bigint | null, right: bigint | null): bigint | null {
   if (left === null) {
     return right;
   }

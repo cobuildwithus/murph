@@ -41,7 +41,7 @@ describe("runHostedExecutionJobIsolatedDetailed", () => {
           {
             seq: "1",
             wake,
-            wakeId: `wake_${eventId}`,
+            ingressEventId: `wake_${eventId}`,
           },
         ],
         inputCommittedSeq: "1",

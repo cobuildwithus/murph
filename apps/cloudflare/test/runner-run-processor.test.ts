@@ -209,8 +209,8 @@ describe("recordHostedRunPhaseLogInWebBestEffort", () => {
 
 describe("RunnerRunProcessor.executeRunDrain", () => {
   it("always requires finalize for prepared snapshots, even without delivery effects", async () => {
-    const beginWakeRun = vi.fn().mockResolvedValue(undefined);
-    const completeWakeRun = vi.fn().mockResolvedValue(undefined);
+    const beginRun = vi.fn().mockResolvedValue(undefined);
+    const completeRun = vi.fn().mockResolvedValue(undefined);
 
     const processor = new RunnerRunProcessor({
       applyHostedTransition: vi.fn(),
@@ -228,9 +228,9 @@ describe("RunnerRunProcessor.executeRunDrain", () => {
       runnerContainerNamespace: null,
       runnerRuntimeEnvSource: {},
       stateStore: {
-        beginWakeRun,
-        completeWakeRun,
-        failWakeRun: vi.fn(),
+        beginRun,
+        completeRun,
+        failRun: vi.fn(),
         recordRunPhase: vi.fn().mockResolvedValue({}),
       },
       runtimeAlarmScheduler: {},
@@ -268,7 +268,7 @@ describe("RunnerRunProcessor.executeRunDrain", () => {
       triggerKind: "runtime_timer",
       updatedAt: "2026-04-20T09:00:00.000Z",
       userId: "user_123",
-      wakeIds: [],
+      ingressEventIds: [],
     };
     const primaryWake: HostedExecutionRuntimeTimerWake = {
       eventId: "runtime-timer",
@@ -298,8 +298,8 @@ describe("RunnerRunProcessor.executeRunDrain", () => {
       },
       state: "completed",
     });
-    expect(beginWakeRun).toHaveBeenCalledTimes(1);
-    expect(completeWakeRun).toHaveBeenCalledTimes(1);
+    expect(beginRun).toHaveBeenCalledTimes(1);
+    expect(completeRun).toHaveBeenCalledTimes(1);
   });
 
   it("deletes stale browser-vault snapshot sidecars when a completed run returns no snapshot", async () => {
@@ -358,9 +358,9 @@ describe("RunnerRunProcessor.executeRunDrain", () => {
       runnerContainerNamespace: null,
       runnerRuntimeEnvSource: {},
       stateStore: {
-        beginWakeRun: vi.fn().mockResolvedValue(undefined),
-        completeWakeRun: vi.fn().mockResolvedValue(undefined),
-        failWakeRun: vi.fn(),
+        beginRun: vi.fn().mockResolvedValue(undefined),
+        completeRun: vi.fn().mockResolvedValue(undefined),
+        failRun: vi.fn(),
         recordRunPhase: vi.fn().mockResolvedValue({}),
       },
       runtimeAlarmScheduler: {},
@@ -399,7 +399,7 @@ describe("RunnerRunProcessor.executeRunDrain", () => {
       triggerKind: "runtime_timer",
       updatedAt: "2026-04-20T09:00:00.000Z",
       userId: "user_123",
-      wakeIds: [],
+      ingressEventIds: [],
     };
     const primaryWake: HostedExecutionRuntimeTimerWake = {
       eventId: "runtime-timer",

@@ -659,8 +659,8 @@ function isHostedExecutionUserStatus(value: unknown): value is HostedExecutionUs
     && typeof value === "object"
     && "userId" in value
     && typeof value.userId === "string"
-    && "pendingWakeCount" in value
-    && typeof value.pendingWakeCount === "number"
+    && "pendingIngressEventCount" in value
+    && typeof value.pendingIngressEventCount === "number"
     && "inFlight" in value
     && typeof value.inFlight === "boolean",
   );

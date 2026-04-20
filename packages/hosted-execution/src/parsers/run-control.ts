@@ -101,15 +101,16 @@ export function parseHostedRunAcquireRequest(value: unknown): HostedRunAcquireRe
 
 export function parseHostedRunAcquireResponse(value: unknown): HostedRunAcquireResponse {
   const record = requireObject(value, "Hosted run acquire response");
+  const pendingIngressEventCount = record.pendingIngressEventCount ?? record.pendingWakeCount;
 
   return {
     acquired: requireBoolean(record.acquired, "Hosted run acquire response acquired"),
     cursor: parseHostedExecutionCursorState(record.cursor),
     events: requireArray(record.events, "Hosted run acquire response events")
       .map((entry) => parseHostedIngressEvent(entry)),
-    pendingWakeCount: requireNumber(
-      record.pendingWakeCount,
-      "Hosted run acquire response pendingWakeCount",
+    pendingIngressEventCount: requireNumber(
+      pendingIngressEventCount,
+      "Hosted run acquire response pendingIngressEventCount",
     ),
     resumeFinalize: requireBoolean(
       record.resumeFinalize,
@@ -126,6 +127,7 @@ export function parseHostedRunAcquireResponse(value: unknown): HostedRunAcquireR
 
 export function parseHostedRunRecord(value: unknown): HostedRunRecord {
   const record = requireObject(value, "Hosted run record");
+  const ingressEventIds = record.ingressEventIds ?? record.wakeIds;
 
   return {
     acquiredAt: requireString(record.acquiredAt, "Hosted run record acquiredAt"),
@@ -253,7 +255,10 @@ export function parseHostedRunRecord(value: unknown): HostedRunRecord {
     triggerKind: parseHostedRunTriggerKind(record.triggerKind),
     updatedAt: requireString(record.updatedAt, "Hosted run record updatedAt"),
     userId: requireString(record.userId, "Hosted run record userId"),
-    wakeIds: requireStringArray(record.wakeIds, "Hosted run record wakeIds"),
+    ingressEventIds: requireStringArray(
+      ingressEventIds,
+      "Hosted run record ingressEventIds",
+    ),
   };
 }
 
@@ -437,9 +442,7 @@ export function parseHostedRunLogRequest(value: unknown): HostedRunLogRequest {
     phase: requireString(record.phase, "Hosted run log request phase"),
     ...(record.redacted === undefined ? {} : { redacted: record.redacted ?? null }),
     runId: requireString(record.runId, "Hosted run log request runId"),
-    ...(record.runToken === undefined
-      ? {}
-      : { runToken: readNullableString(record.runToken, "Hosted run log request runToken") }),
+    runToken: requireString(record.runToken, "Hosted run log request runToken"),
   };
 }
 
@@ -495,6 +498,7 @@ export function parseHostedRunStatusRequest(value: unknown): HostedRunStatusRequ
 
 export function parseHostedRunStatusResponse(value: unknown): HostedRunStatusResponse {
   const record = requireObject(value, "Hosted run status response");
+  const pendingIngressEventCount = record.pendingIngressEventCount ?? record.pendingWakeCount;
 
   return {
     cursor: parseHostedExecutionCursorState(record.cursor),
@@ -504,9 +508,9 @@ export function parseHostedRunStatusResponse(value: unknown): HostedRunStatusRes
           logs: requireArray(record.logs, "Hosted run status response logs")
             .map((entry) => parseHostedRunLogRecord(entry)),
         }),
-    pendingWakeCount: requireNumber(
-      record.pendingWakeCount,
-      "Hosted run status response pendingWakeCount",
+    pendingIngressEventCount: requireNumber(
+      pendingIngressEventCount,
+      "Hosted run status response pendingIngressEventCount",
     ),
     run: record.run === null ? null : parseHostedRunRecord(record.run),
     ...(record.runs === undefined
@@ -564,18 +568,19 @@ function parseHostedRunEventResult(
 ): HostedRunEventResult {
   const record = requireObject(value, label);
   const state = requireString(record.state, `${label}.state`);
+  const ingressEventId = record.ingressEventId ?? record.wakeId;
 
   if (state !== "completed" && state !== "quarantined") {
     throw new TypeError(`${label}.state must be completed or quarantined.`);
   }
 
   return {
+    ingressEventId: requireString(ingressEventId, `${label}.ingressEventId`),
     ...(record.quarantineCode === undefined
       ? {}
       : {
           quarantineCode: readNullableString(record.quarantineCode, `${label}.quarantineCode`),
         }),
     state,
-    wakeId: requireString(record.wakeId, `${label}.wakeId`),
   };
 }

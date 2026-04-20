@@ -66,7 +66,7 @@ describe("vault.share.accepted wake contract", () => {
               },
               userId: "member_123",
             },
-            wakeId: "wake_24",
+            ingressEventId: "wake_24",
           },
         ],
         inputCommittedSeq: "24",

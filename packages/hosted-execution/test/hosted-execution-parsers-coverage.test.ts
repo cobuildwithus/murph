@@ -122,7 +122,7 @@ describe("hosted execution parsers coverage", () => {
                 },
                 userId: "user_123",
               },
-              wakeId: "wake_24",
+              ingressEventId: "wake_24",
             },
           ],
           inputCommittedSeq: "24",
@@ -158,7 +158,7 @@ describe("hosted execution parsers coverage", () => {
                 },
                 userId: "user_123",
               },
-              wakeId: "wake_24",
+              ingressEventId: "wake_24",
             },
           ],
           inputCommittedSeq: "24",
@@ -324,7 +324,7 @@ describe("hosted execution parsers coverage", () => {
         lastEventId: "evt_123",
         lastRunAt: "2026-04-08T00:01:00.000Z",
         nextWakeAt: "2026-04-08T00:05:00.000Z",
-        pendingWakeCount: 2,
+        pendingIngressEventCount: 2,
         run: {
           attempt: 3,
           eventId: "evt_123",
@@ -359,7 +359,7 @@ describe("hosted execution parsers coverage", () => {
         lastEventId: null,
         lastRunAt: null,
         nextWakeAt: null,
-        pendingWakeCount: 0,
+        pendingIngressEventCount: 0,
         userId: "user_123",
       })).toEqual({
         bundleRef: null,
@@ -368,7 +368,7 @@ describe("hosted execution parsers coverage", () => {
         lastEventId: null,
         lastRunAt: null,
         nextWakeAt: null,
-        pendingWakeCount: 0,
+        pendingIngressEventCount: 0,
         userId: "user_123",
       });
     });
@@ -406,7 +406,7 @@ describe("hosted execution parsers coverage", () => {
           lastEventId: null,
           lastRunAt: null,
           nextWakeAt: null,
-          pendingWakeCount: 1,
+          pendingIngressEventCount: 1,
           run: {
             attempt: 1,
             eventId: "evt_123",

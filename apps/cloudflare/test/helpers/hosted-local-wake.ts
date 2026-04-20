@@ -32,7 +32,7 @@ export async function appendHostedWakeAndWakeWorker(input: {
   const append = await appendHostedWake(input);
   const wakeResult = await wakeHostedWorker({
     harness: input.harness,
-    targetSeqHint: append.wake.seq,
+    targetCommittedSeqHint: append.wake.seq,
     userId: input.userId,
   });
 
@@ -105,10 +105,10 @@ function createHostedLocalCloudflareControlClient(
 
 export async function wakeHostedWorker(input: {
   harness: HostedLocalDevHarness;
-  targetSeqHint?: string | null;
+  targetCommittedSeqHint?: string | null;
   userId: string;
 }): Promise<HostedRunNudgeResult> {
-  void input.targetSeqHint;
+  void input.targetCommittedSeqHint;
   return await createHostedLocalCloudflareControlClient(input.harness).nudgeUserRun(input.userId);
 }
 
@@ -133,10 +133,10 @@ export async function wakeHostedWorkerForLatestPendingWake(input: {
       };
     }
 
-    if (status.pendingWakeCount > 0) {
+    if (status.pendingIngressEventCount > 0) {
       return await wakeHostedWorker({
         harness: input.harness,
-        targetSeqHint: deriveLatestPendingWakeSeq(status),
+        targetCommittedSeqHint: deriveLatestPendingWakeSeq(status),
         userId: input.userId,
       });
     }

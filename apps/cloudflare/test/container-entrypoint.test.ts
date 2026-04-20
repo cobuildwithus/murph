@@ -135,7 +135,7 @@ function buildJobBody(input: {
             {
               seq: "1",
               wake,
-              wakeId: `wake_${input.wake.eventId}`,
+              ingressEventId: `wake_${input.wake.eventId}`,
             },
           ],
           inputCommittedSeq: "0",

@@ -85,7 +85,7 @@ function createSingleWakeRunDrain(
       {
         seq: "24",
         wake,
-        wakeId: `wake_${wake.eventId}`,
+        ingressEventId: `wake_${wake.eventId}`,
       },
     ],
     inputCommittedSeq: "24",

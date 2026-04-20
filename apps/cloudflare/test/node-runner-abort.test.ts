@@ -63,7 +63,7 @@ describe("runHostedExecutionJob abort forwarding", () => {
                 memberId: "member_abort_forwarding",
                 occurredAt: "2026-03-29T10:45:00.000Z",
               }),
-              wakeId: "wake_evt_abort_forwarding",
+              ingressEventId: "wake_evt_abort_forwarding",
             },
           ],
           inputCommittedSeq: "1",
