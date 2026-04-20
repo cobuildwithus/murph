@@ -153,23 +153,43 @@ export async function handleHostedEmailIngress(
 
   try {
     const stub = await resolveUserRunnerStub(env, route.userId);
-    const nudgeResult = await stub.nudgeHostedRun();
-    const drainPromise = stub.drainHostedRuns().catch((error) => {
+    const drainPromise = stub.drainHostedRuns().catch(async (error) => {
       emitHostedExecutionStructuredLog({
         component: "hosted.email",
         details: buildHostedEmailIngressLogDetails({
           eventId,
           identityId: route.identityId,
-          reason: "run-drain-after-nudge-failed",
+          reason: "run-background-drain-failed",
           routeAddress: route.routeAddress,
           to: message.to,
         }),
         error,
         level: "warn",
-        message: "Hosted email run drain failed after the canonical ingress nudge was accepted.",
+        message: "Hosted email background drain failed after appending the canonical ingress event.",
         phase: "wake.running",
         userId: route.userId,
       });
+
+      try {
+        await stub.nudgeHostedRun();
+      } catch (fallbackError) {
+        emitHostedExecutionStructuredLog({
+          component: "hosted.email",
+          details: buildHostedEmailIngressLogDetails({
+            eventId,
+            identityId: route.identityId,
+            reason: "run-retry-arm-fallback-failed",
+            routeAddress: route.routeAddress,
+            to: message.to,
+          }),
+          error: fallbackError,
+          level: "error",
+          message: "Hosted email retry-arm fallback failed after the direct drain call failed.",
+          phase: "wake.running",
+          userId: route.userId,
+        });
+        throw fallbackError;
+      }
     });
 
     if (runtime.waitUntil) {
@@ -177,38 +197,19 @@ export async function handleHostedEmailIngress(
     } else {
       await drainPromise;
     }
-
-    if (!nudgeResult.accepted) {
-      emitHostedExecutionStructuredLog({
-        component: "hosted.email",
-        details: buildHostedEmailIngressLogDetails({
-          alreadyRunning: String(nudgeResult.alreadyRunning),
-          alarmScheduled: String(nudgeResult.alarmScheduled),
-          eventId,
-          identityId: route.identityId,
-          reason: "run-nudge-not-accepted",
-          routeAddress: route.routeAddress,
-          to: message.to,
-        }),
-        level: "warn",
-        message: "Hosted email run nudge was not accepted after appending the canonical ingress event.",
-        phase: "wake.running",
-        userId: route.userId,
-      });
-    }
   } catch (error) {
     emitHostedExecutionStructuredLog({
       component: "hosted.email",
       details: buildHostedEmailIngressLogDetails({
         eventId,
         identityId: route.identityId,
-        reason: "run-nudge-failed",
+        reason: "run-background-drain-setup-failed",
         routeAddress: route.routeAddress,
         to: message.to,
       }),
       error,
       level: "warn",
-      message: "Hosted email run nudge failed after appending the canonical ingress event.",
+      message: "Hosted email background drain setup failed after appending the canonical ingress event.",
       phase: "wake.running",
       userId: route.userId,
     });
@@ -216,8 +217,6 @@ export async function handleHostedEmailIngress(
 }
 
 function buildHostedEmailIngressLogDetails(input: {
-  alreadyRunning?: string | null;
-  alarmScheduled?: string | null;
   eventId?: string | null;
   from?: string | null;
   headerFrom?: string | null;
@@ -229,8 +228,6 @@ function buildHostedEmailIngressLogDetails(input: {
   to: string;
 }): Record<string, string> {
   return {
-    ...(input.alreadyRunning ? { alreadyRunning: input.alreadyRunning } : {}),
-    ...(input.alarmScheduled ? { alarmScheduled: input.alarmScheduled } : {}),
     ...(input.eventId ? { eventId: input.eventId } : {}),
     ...(input.from ? { envelopeFrom: input.from } : {}),
     ...(input.headerFrom ? { headerFrom: input.headerFrom } : {}),

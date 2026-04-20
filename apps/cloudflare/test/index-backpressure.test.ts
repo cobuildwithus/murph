@@ -58,8 +58,40 @@ describe("cloudflare worker queue backpressure routes", () => {
     const harness = createUserRunnerDurableObject({
       HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
     });
-    await harness.durableObject.bootstrapUser("member_123");
-    await provisionManagedUserCryptoAtActivationForTest(harness.env as never, "member_123");
+    const stub = {
+      bootstrapUser: vi.fn(async (userId: string) => ({ userId })),
+      drainHostedRuns: vi.fn(async () => ({
+        committedSeq: "0",
+        requestedTargetSeq: null,
+        targetReached: true,
+      })),
+      nudgeHostedRun: vi.fn(async () => ({
+        accepted: true,
+        alarmScheduled: false,
+        alreadyRunning: false,
+      })),
+      status: vi.fn(async () => ({
+        bundleRef: null,
+        inFlight: false,
+        lastError: null,
+        lastEventId: null,
+        lastRunAt: null,
+        nextWakeAt: null,
+        pendingWakeCount: 0,
+        userId: "member_123",
+      })),
+    };
+    const env = {
+      ...harness.env,
+      USER_RUNNER: {
+        getByName() {
+          return stub;
+        },
+      },
+    };
+    const waitUntil = vi.fn((promise: Promise<unknown>) => {
+      void promise;
+    });
 
     const runResponse = await worker.fetch(
       await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/run", {
@@ -68,15 +100,19 @@ describe("cloudflare worker queue backpressure routes", () => {
         },
         method: "POST",
       })),
-      harness.env as never,
+      env as never,
+      { waitUntil } as never,
     );
 
     expect(runResponse.status).toBe(202);
     await expect(runResponse.json()).resolves.toEqual({
       accepted: true,
-      alarmScheduled: true,
+      alarmScheduled: false,
       alreadyRunning: false,
     });
+    expect(stub.bootstrapUser).toHaveBeenCalledWith("member_123");
+    expect(stub.drainHostedRuns).toHaveBeenCalledTimes(1);
+    expect(waitUntil).toHaveBeenCalledTimes(1);
   });
 });
 
