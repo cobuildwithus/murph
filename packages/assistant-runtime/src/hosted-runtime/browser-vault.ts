@@ -1,9 +1,12 @@
 import {
   createBrowserVaultSnapshot,
+  createVaultReadModel,
+  type BrowserVaultSnapshot,
+} from "@murphai/query/browser";
+import {
   readVaultTolerant,
   type CanonicalEntity,
   type CanonicalEntityFamily,
-  type BrowserVaultSnapshot,
 } from "@murphai/query";
 
 const HOSTED_BROWSER_VAULT_ENTITY_FAMILIES = new Set<CanonicalEntityFamily>([
@@ -26,11 +29,15 @@ export async function exportHostedBrowserVaultSnapshot(input: {
   vaultRoot: string;
 }): Promise<BrowserVaultSnapshot> {
   const vault = await readVaultTolerant(input.vaultRoot);
-
-  return createBrowserVaultSnapshot({
+  const projectedVault = createVaultReadModel({
     entities: projectHostedBrowserVaultEntities(vault.entities),
     metadata: vault.metadata,
+    vaultRoot: vault.vaultRoot,
+  });
+
+  return createBrowserVaultSnapshot({
     sourceVersion: input.sourceVersion,
+    vault: projectedVault,
   });
 }
 

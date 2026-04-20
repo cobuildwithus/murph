@@ -1,5 +1,5 @@
 export * from "./catalog.ts";
 export * from "./load.ts";
 export * from "./normalize.ts";
-export * from "./sync-cloudflare-r2.ts";
-export * from "./hash-artifact.ts";
+export { syncHealthCommonsArtifactsToCloudflareR2 } from "./sync-cloudflare-r2.ts";
+export { printArtifactMetadata } from "./hash-artifact.ts";

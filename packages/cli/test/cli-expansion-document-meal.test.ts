@@ -2,7 +2,13 @@ import assert from 'node:assert/strict'
 import { access, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
+import { Cli } from 'incur'
 import { test } from 'vitest'
+import { createIntegratedVaultServices } from '@murphai/vault-usecases'
+import { registerDocumentCommands } from '../src/commands/document.js'
+import { registerMealCommands } from '../src/commands/meal.js'
+import { registerVaultCommands } from '../src/commands/vault.js'
+import { incurErrorBridge } from '../src/incur-error-bridge.js'
 import {
   repoRoot,
   requireData,
@@ -189,6 +195,42 @@ const runSourceCli = runCli
 const runRawSourceCli = runRawCli
 const DOCUMENT_MEAL_SCHEMA_TIMEOUT_MS = 45_000
 
+function createDocumentMealSchemaCli(): Cli.Cli {
+  const cli = Cli.create('vault-cli', {
+    description: 'document and meal schema expansion cli',
+    version: '0.0.0-test',
+  })
+  cli.use(incurErrorBridge)
+
+  const services = createIntegratedVaultServices()
+  registerVaultCommands(cli, services)
+  registerDocumentCommands(cli, services)
+  registerMealCommands(cli, services)
+
+  return cli
+}
+
+async function readCommandSchema(
+  cli: Cli.Cli,
+  args: string[],
+): Promise<SchemaEnvelope> {
+  const output: string[] = []
+  let exitCode: number | null = null
+
+  await cli.serve([...args, '--schema', '--format', 'json'], {
+    env: process.env,
+    exit(code) {
+      exitCode = code
+    },
+    stdout(chunk) {
+      output.push(chunk)
+    },
+  })
+
+  assert.equal(exitCode, null)
+  return JSON.parse(output.join('').trim()) as SchemaEnvelope
+}
+
 async function createVault(): Promise<string> {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-doc-meal-'))
   const initResult = await runSourceCli<{ created: boolean }>(['init', '--vault', vaultRoot])
@@ -200,33 +242,20 @@ async function createVault(): Promise<string> {
 test(
   'document and meal command schemas expose the expansion and mutation surfaces',
   async () => {
+    const cli = createDocumentMealSchemaCli()
     const documentImportSchema = JSON.parse(
       await runRawSourceCli(['document', 'import', '--schema', '--format', 'json']),
     ) as SchemaEnvelope
-    const documentEditSchema = JSON.parse(
-      await runRawSourceCli(['document', 'edit', '--schema', '--format', 'json']),
-    ) as SchemaEnvelope
-    const documentDeleteSchema = JSON.parse(
-      await runRawSourceCli(['document', 'delete', '--schema', '--format', 'json']),
-    ) as SchemaEnvelope
-    const documentListSchema = JSON.parse(
-      await runRawSourceCli(['document', 'list', '--schema', '--format', 'json']),
-    ) as SchemaEnvelope
+    const documentEditSchema = await readCommandSchema(cli, ['document', 'edit'])
+    const documentDeleteSchema = await readCommandSchema(cli, ['document', 'delete'])
+    const documentListSchema = await readCommandSchema(cli, ['document', 'list'])
     const mealAddSchema = JSON.parse(
       await runRawSourceCli(['meal', 'add', '--schema', '--format', 'json']),
     ) as SchemaEnvelope
-    const mealEditSchema = JSON.parse(
-      await runRawSourceCli(['meal', 'edit', '--schema', '--format', 'json']),
-    ) as SchemaEnvelope
-    const mealDeleteSchema = JSON.parse(
-      await runRawSourceCli(['meal', 'delete', '--schema', '--format', 'json']),
-    ) as SchemaEnvelope
-    const mealListSchema = JSON.parse(
-      await runRawSourceCli(['meal', 'list', '--schema', '--format', 'json']),
-    ) as SchemaEnvelope
-    const mealTotalsSchema = JSON.parse(
-      await runRawSourceCli(['meal', 'totals', '--schema', '--format', 'json']),
-    ) as SchemaEnvelope
+    const mealEditSchema = await readCommandSchema(cli, ['meal', 'edit'])
+    const mealDeleteSchema = await readCommandSchema(cli, ['meal', 'delete'])
+    const mealListSchema = await readCommandSchema(cli, ['meal', 'list'])
+    const mealTotalsSchema = await readCommandSchema(cli, ['meal', 'totals'])
 
     assert.equal('title' in documentImportSchema.options.properties, true)
     assert.equal('occurredAt' in documentImportSchema.options.properties, true)

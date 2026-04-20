@@ -12,6 +12,7 @@ import {
 import type {
   HostedExecutionRunnerResult,
   HostedExecutionStructuredLogDetails,
+  HostedRuntimeEvent,
 } from "@murphai/hosted-execution";
 import {
   emitHostedExecutionStructuredLog,
@@ -112,10 +113,15 @@ export async function runHostedAssistantRuntimeJobInProcessDetailed(
   },
 ): Promise<HostedAssistantRuntimeJobResult> {
   let workspaceRoot: string | null = null;
+  let wakeForLog: HostedRuntimeEvent | null = null;
 
   try {
     const { runDrain } = input.request;
+    if (runDrain === undefined || runDrain === null) {
+      throw new TypeError("Hosted assistant runtime job request.runDrain is required.");
+    }
     const wake = resolveHostedWake(runDrain);
+    wakeForLog = wake;
     const runtime = normalizeHostedAssistantRuntimeConfig(input.runtime, options.platform);
     emitHostedExecutionStructuredLog({
       component: "runtime",
@@ -245,7 +251,7 @@ export async function runHostedAssistantRuntimeJobInProcessDetailed(
       message: "Hosted runtime failed.",
       phase: "failed",
       run: input.request.run ?? null,
-      wake: resolveHostedWake(input.request.runDrain),
+      wake: wakeForLog,
     });
     throw error;
   } finally {

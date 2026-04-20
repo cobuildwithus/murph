@@ -17,6 +17,7 @@ import {
   parseBrowserVaultSnapshot,
 } from "../src/browser-snapshot.ts";
 import { createVaultReadModel } from "../src/model.ts";
+import { buildOverviewWeeklyStatsFromDailySampleSummaries } from "../src/overview.ts";
 import { readVaultTolerant } from "../src/vault-reader.ts";
 
 const tempRoots: string[] = [];
@@ -95,7 +96,38 @@ test("browser vault snapshots clone dashboard projections before serialization",
   });
   assert.equal(snapshot.history.timeline[0]?.id, "sample-summary:2026-04-17:hrv:ms");
   assert.deepEqual(snapshot.history.timeline[0]?.tags, ["sample_summary", "hrv"]);
-  assert.equal(snapshot.overview.weeklySampleSummaries[0]?.averageValue, 48);
+  assert.equal(snapshot.overview.weeklySampleSummaries[0]?.sumValue, 48);
+});
+
+test("browser vault weekly stats anchor to the snapshot timestamp", () => {
+  const stats = buildOverviewWeeklyStatsFromDailySampleSummaries([
+    {
+      date: "2026-04-14",
+      numericSampleCount: 2,
+      sampleCount: 2,
+      stream: "sleep_duration_minutes",
+      sumValue: 840,
+      unit: "min",
+    },
+    {
+      date: "2026-04-07",
+      numericSampleCount: 2,
+      sampleCount: 2,
+      stream: "sleep_duration_minutes",
+      sumValue: 720,
+      unit: "min",
+    },
+  ], "UTC", "2026-04-14T12:00:00.000Z");
+
+  assert.deepEqual(stats, [
+    {
+      currentWeekAvg: 420,
+      deltaPercent: 16.666666666666664,
+      previousWeekAvg: 360,
+      stream: "sleep_duration_minutes",
+      unit: "min",
+    },
+  ]);
 });
 
 test("browser vault snapshots parse dashboard projections and validate schema", () => {
@@ -129,10 +161,19 @@ test("browser vault snapshots parse dashboard projections and validate schema", 
     () =>
       parseBrowserVaultSnapshot({
         ...snapshot,
+        generatedAt: "2026-04-17T08:05:00Z",
+      }),
+    /Browser vault snapshot\.generatedAt must be a valid ISO datetime\./,
+  );
+
+  assert.throws(
+    () =>
+      parseBrowserVaultSnapshot({
+        ...snapshot,
         generatedAt: "2026-04-17T08:05:00.000Z",
         schema: "murph.browser-vault-dashboard-snapshot.wrong",
       }),
-    /Browser vault snapshot\.schema must be murph\.browser-vault-dashboard-snapshot\.v1\./,
+    /Browser vault snapshot\.schema must be murph\.browser-vault-dashboard-snapshot\.v2\./,
   );
 
   assert.throws(
@@ -167,6 +208,49 @@ test("browser vault snapshots parse dashboard projections and validate schema", 
         sourceVersion: "",
       }),
     /Browser vault snapshot\.sourceVersion must be a non-empty string\./,
+  );
+
+  assert.throws(
+    () =>
+      parseBrowserVaultSnapshot({
+        ...snapshot,
+        history: {
+          timeline: [
+            {
+              date: "2026-04-17",
+              entryType: "event",
+              id: "legacy_history_entry",
+              kind: "event",
+              occurredAt: "2026-04-17T08:00:00.000Z",
+              path: "history/journal/legacy.md",
+              tags: ["legacy"],
+              title: "Legacy history row",
+            },
+          ],
+        },
+      }),
+    /Browser vault snapshot\.history\.timeline\[0\] contains unexpected field\(s\): path\./,
+  );
+
+  assert.throws(
+    () =>
+      parseBrowserVaultSnapshot({
+        ...snapshot,
+        history: {
+          timeline: [
+            {
+              date: "2026-04-17",
+              entryType: "unknown",
+              id: "invalid_entry_type",
+              kind: "event",
+              occurredAt: "2026-04-17T08:00:00.000Z",
+              tags: ["legacy"],
+              title: "Invalid entry type",
+            },
+          ],
+        },
+      }),
+    /Browser vault snapshot\.history\.timeline\[0\]\.entryType must be assessment, event, journal, or sample_summary\./,
   );
 });
 
@@ -338,7 +422,6 @@ test("browser vault snapshots parse nested wearable projections", () => {
           id: "sample-summary:2026-04-17:hrv:ms",
           kind: "sample_summary",
           occurredAt: "2026-04-17T08:05:00.000Z",
-          path: "history/samples/2026-04-17.md",
           stream: "hrv",
           tags: ["sample_summary", "hrv"],
           title: "HRV",
@@ -375,19 +458,12 @@ test("browser vault snapshots parse nested wearable projections", () => {
       ],
       weeklySampleSummaries: [
         {
-          averageValue: 47,
           date: "2026-04-17",
-          firstSampleAt: "2026-04-17T06:00:00.000Z",
-          lastSampleAt: "2026-04-17T06:05:00.000Z",
-          maxValue: 49,
-          minValue: 45,
+          numericSampleCount: 3,
           sampleCount: 3,
-          sampleIds: ["sample_nested_1", "sample_nested_2", "sample_nested_3"],
-          sourcePaths: ["samples/hrv/2026-04-17.ndjson"],
           stream: "hrv",
           sumValue: 141,
           unit: "ms",
-          units: ["ms"],
         },
       ],
     },
@@ -410,81 +486,8 @@ test("browser vault snapshots parse nested wearable projections", () => {
         }),
       ],
       assistantSummary: {
-        activity: createWearableSummary({
-          date: "2026-04-17",
-          metrics: {
-            activityScore: createResolvedMetric("activity_score", 82, "event"),
-            activeCalories: createResolvedMetric("active_calories", 540, "sample"),
-            dayStrain: createResolvedMetric("day_strain", 12.4, "derived"),
-            distanceKm: createResolvedMetric("distance_km", 8.1, "sample"),
-            sessionCount: createResolvedMetric("session_count", 2, "event"),
-            sessionMinutes: createResolvedMetric("session_minutes", 61, "sample"),
-            steps: createResolvedMetric("steps", 10234, "sample"),
-          },
-          notes: ["Assistant activity summary"],
-          summaryConfidence: createSummaryConfidence("high"),
-        }),
-        bodyState: {
-          bmi: createResolvedMetric("bmi", 22.1, "derived"),
-          bodyFatPercentage: createResolvedMetric("body_fat_percentage", 18.2, "sample"),
-          date: "2026-04-17",
-          notes: ["Body-state summary"],
-          summaryConfidence: createSummaryConfidence("medium"),
-          temperature: createResolvedMetric("temperature", 36.5, "sample"),
-          weightKg: createResolvedMetric("weight_kg", 73.2, "sample"),
-        },
-        date: "2026-04-17",
-        from: "2026-04-10",
         highlights: ["Recovery is trending up."],
         latestDate: "2026-04-17",
-        providers: ["oura", "whoop"],
-        recovery: {
-          bodyBattery: createResolvedMetric("body_battery", 71, "derived"),
-          date: "2026-04-17",
-          hrv: createResolvedMetric("hrv", 47, "sample"),
-          notes: ["Recovery summary"],
-          readinessScore: createResolvedMetric("readiness_score", 84, "sample"),
-          recoveryScore: createResolvedMetric("recovery_score", 79, "sample"),
-          respiratoryRate: createResolvedMetric("respiratory_rate", 13.4, "sample"),
-          restingHeartRate: createResolvedMetric("resting_heart_rate", 49, "sample"),
-          spo2: createResolvedMetric("spo2", 98, "sample"),
-          stressLevel: createResolvedMetric("stress_level", 22, "derived"),
-          summaryConfidence: createSummaryConfidence("medium"),
-          temperature: createResolvedMetric("temperature", 36.6, "sample"),
-          temperatureDeviation: createResolvedMetric("temperature_deviation", 0.2, "derived"),
-        },
-        sleep: {
-          averageHeartRate: createResolvedMetric("average_heart_rate", 53, "sample"),
-          awakeMinutes: createResolvedMetric("awake_minutes", 24, "sample"),
-          date: "2026-04-17",
-          deepMinutes: createResolvedMetric("deep_minutes", 92, "sample"),
-          hrv: createResolvedMetric("hrv", 47, "sample"),
-          lightMinutes: createResolvedMetric("light_minutes", 244, "sample"),
-          lowestHeartRate: createResolvedMetric("lowest_heart_rate", 44, "sample"),
-          notes: ["Sleep summary"],
-          remMinutes: createResolvedMetric("rem_minutes", 86, "sample"),
-          respiratoryRate: createResolvedMetric("respiratory_rate", 13.1, "sample"),
-          sessionMinutes: createResolvedMetric("session_minutes", 422, "sample"),
-          sleepConsistency: createResolvedMetric("sleep_consistency", 88, "derived"),
-          sleepEfficiency: createResolvedMetric("sleep_efficiency", 94, "derived"),
-          sleepEndAt: "2026-04-17T06:35:00.000Z",
-          sleepPerformance: createResolvedMetric("sleep_performance", 89, "derived"),
-          sleepScore: createResolvedMetric("sleep_score", 91, "sample"),
-          sleepStartAt: "2026-04-16T23:33:00.000Z",
-          sleepWindowProvider: "oura",
-          spo2: createResolvedMetric("spo2", 98, "sample"),
-          summaryConfidence: createSummaryConfidence("high"),
-          timeInBedMinutes: createResolvedMetric("time_in_bed_minutes", 442, "sample"),
-          totalSleepMinutes: createResolvedMetric("total_sleep_minutes", 422, "sample"),
-        },
-        sourceHealth: [
-          createSourceHealthSummary({
-            provider: "oura",
-            providerDisplayName: "Oura",
-            stalenessVsNewestDays: 0,
-          }),
-        ],
-        to: "2026-04-17",
       },
       bodyState: [
         {
@@ -551,12 +554,11 @@ test("browser vault snapshots parse nested wearable projections", () => {
     sourceVersion: "f".repeat(64),
   });
 
-  assert.equal(parsed.signals.activity[0]?.activityScore.selection.sourceFamily, "event");
-  assert.equal(parsed.signals.activity[0]?.activityScore.candidates[0]?.externalRef?.system, "oura");
-  assert.equal(parsed.signals.assistantSummary.activity?.activityScore.selection.sourceFamily, "event");
-  assert.equal(parsed.signals.assistantSummary.sourceHealth[0]?.stalenessVsNewestDays, 0);
+  assert.equal(parsed.signals.activity[0]?.activityScore.selection.value, 82);
+  assert.equal(parsed.signals.assistantSummary.latestDate, "2026-04-17");
+  assert.equal(parsed.signals.sourceHealth[0]?.stalenessVsNewestDays, 0);
   assert.equal(parsed.signals.sleep[0]?.sleepWindowProvider, "oura");
-  assert.equal(parsed.signals.recovery[0]?.temperatureDeviation.selection.resolution, "direct");
+  assert.equal(parsed.signals.recovery[0]?.temperatureDeviation.selection.value, 0.2);
   assert.equal(parsed.overview.weeklySampleSummaries[0]?.sampleCount, 3);
 });
 
@@ -592,9 +594,7 @@ test("browser vault snapshots reject invalid wearable enum values", () => {
             createWearableSummary({
               date: "2026-04-17",
               metrics: {
-                activityScore: createResolvedMetric("activity_score", 82, "sample", {
-                  confidenceLevel: "impossible",
-                }),
+                activityScore: createResolvedMetric("activity_score", 82, "sample"),
                 activeCalories: createResolvedMetric("active_calories", 540, "sample"),
                 dayStrain: createResolvedMetric("day_strain", 12.4, "derived"),
                 distanceKm: createResolvedMetric("distance_km", 8.1, "sample"),
@@ -602,12 +602,12 @@ test("browser vault snapshots reject invalid wearable enum values", () => {
                 sessionMinutes: createResolvedMetric("session_minutes", 61, "sample"),
                 steps: createResolvedMetric("steps", 10234, "sample"),
               },
-              summaryConfidence: createSummaryConfidence("high"),
+              summaryConfidence: createSummaryConfidence("impossible"),
             }),
           ],
         },
       }),
-    /Browser vault snapshot\.signals\.activity\[0\]\.activityScore\.confidence\.level must be none, low, medium, or high\./,
+    /Browser vault snapshot\.signals\.activity\[0\]\.summaryConfidence\.level must be none, low, medium, or high\./,
   );
 
   assert.throws(
@@ -620,7 +620,13 @@ test("browser vault snapshots reject invalid wearable enum values", () => {
             createWearableSummary({
               date: "2026-04-17",
               metrics: {
-                activityScore: createResolvedMetric("activity_score", 82, "unknown"),
+                activityScore: {
+                  selection: {
+                    ...{ sourceFamily: "unknown" },
+                    unit: "score",
+                    value: 82,
+                  },
+                },
                 activeCalories: createResolvedMetric("active_calories", 540, "sample"),
                 dayStrain: createResolvedMetric("day_strain", 12.4, "derived"),
                 distanceKm: createResolvedMetric("distance_km", 8.1, "sample"),
@@ -633,7 +639,7 @@ test("browser vault snapshots reject invalid wearable enum values", () => {
           ],
         },
       }),
-    /Browser vault snapshot\.signals\.activity\[0\]\.activityScore\.candidates\[0\]\.sourceFamily must be event, sample, or derived\./,
+    /Browser vault snapshot\.signals\.activity\[0\]\.activityScore\.selection contains unexpected field\(s\): sourceFamily\./,
   );
 
   assert.throws(
@@ -646,9 +652,13 @@ test("browser vault snapshots reject invalid wearable enum values", () => {
             createWearableSummary({
               date: "2026-04-17",
               metrics: {
-                activityScore: createResolvedMetric("activity_score", 82, "sample", {
-                  resolution: "mystery",
-                }),
+                activityScore: {
+                  selection: {
+                    ...{ resolution: "mystery" },
+                    unit: "score",
+                    value: 82,
+                  },
+                },
                 activeCalories: createResolvedMetric("active_calories", 540, "sample"),
                 dayStrain: createResolvedMetric("day_strain", 12.4, "derived"),
                 distanceKm: createResolvedMetric("distance_km", 8.1, "sample"),
@@ -661,7 +671,7 @@ test("browser vault snapshots reject invalid wearable enum values", () => {
           ],
         },
       }),
-    /Browser vault snapshot\.signals\.activity\[0\]\.activityScore\.selection\.resolution must be direct, fallback, or none\./,
+    /Browser vault snapshot\.signals\.activity\[0\]\.activityScore\.selection contains unexpected field\(s\): resolution\./,
   );
 });
 
@@ -763,59 +773,14 @@ function createWearableSummary(input: {
 function createResolvedMetric(
   metric: string,
   value: number,
-  sourceFamily: string,
-  overrides: {
+  _sourceFamily: string,
+  _overrides: {
     confidenceLevel?: string;
     resolution?: string;
   } = {},
 ) {
   return {
-    candidates: [
-      {
-        candidateId: `${metric}_candidate`,
-        date: "2026-04-17",
-        externalRef: {
-          facet: "summary",
-          resourceId: `${metric}_resource`,
-          resourceType: "session",
-          system: "oura",
-          version: "v1",
-        },
-        metric,
-        occurredAt: "2026-04-17T06:30:00.000Z",
-        paths: [`wearables/${metric}.json`],
-        provider: "oura",
-        recordedAt: "2026-04-17T06:31:00.000Z",
-        recordIds: [`${metric}_record`],
-        sourceFamily,
-        sourceKind: "summary",
-        title: `${metric} title`,
-        unit: "score",
-        value,
-      },
-    ],
-    confidence: {
-      candidateCount: 1,
-      conflictingProviders: [],
-      exactDuplicateCount: 0,
-      level: overrides.confidenceLevel ?? "high",
-      reasons: ["selected"],
-    },
-    metric,
     selection: {
-      fallbackFromMetric: null,
-      fallbackReason: overrides.resolution === "fallback" ? "fallback enabled" : null,
-      occurredAt: "2026-04-17T06:30:00.000Z",
-      paths: [`wearables/${metric}.json`],
-      provider: "oura",
-      recordedAt: "2026-04-17T06:31:00.000Z",
-      recordIds: [`${metric}_record`],
-      resolution: overrides.resolution ?? "direct",
-      sourceFamily: sourceFamily === "event" || sourceFamily === "sample" || sourceFamily === "derived"
-        ? sourceFamily
-        : "sample",
-      sourceKind: "summary",
-      title: `${metric} title`,
       unit: "score",
       value,
     },
@@ -824,11 +789,7 @@ function createResolvedMetric(
 
 function createSummaryConfidence(level: string) {
   return {
-    conflictingMetrics: [],
     level,
-    lowConfidenceMetrics: [],
-    notes: ["stable"],
-    selectedProviders: ["oura"],
   };
 }
 
@@ -840,14 +801,8 @@ function createSourceHealthSummary(input: {
   return {
     activityDays: 7,
     bodyStateDays: 5,
-    candidateMetrics: 12,
     conflictCount: 1,
-    exactDuplicatesSuppressed: 0,
-    firstDate: "2026-04-10",
     lastDate: "2026-04-17",
-    latestRecordedAt: "2026-04-17T06:31:00.000Z",
-    metricsContributed: ["activity_score", "sleep_score"],
-    notes: ["Fresh data"],
     provider: input.provider,
     providerDisplayName: input.providerDisplayName,
     recoveryDays: 7,

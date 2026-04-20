@@ -37,6 +37,7 @@ export const cloudflareVitestAliases = [
       "@murphai/parsers": "packages/parsers/src/index.ts",
       "@murphai/query": "packages/query/src/index.ts",
       "@murphai/runtime-state": "packages/runtime-state/src/index.ts",
+      "@murphai/vault-usecases": "packages/vault-usecases/src/index.ts",
     }),
   ),
 ];
