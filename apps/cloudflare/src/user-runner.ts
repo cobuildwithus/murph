@@ -248,7 +248,7 @@ export class HostedUserRunner {
     }
 
     try {
-      const drainResult = await this.withWakeDrainLock(async () => this.drainHostedRunsInternal());
+      const drainResult = await this.withRunDrainLock(async () => this.drainHostedRunsInternal());
       if (shouldScheduleHostedWakeRetryAlarm(drainResult)) {
         await this.scheduleHostedWakeRetryAlarm();
       }
@@ -293,7 +293,7 @@ export class HostedUserRunner {
   async drainHostedRuns(input: {
     targetSeqHint?: string | null;
   } = {}): Promise<HostedRunDrainResult> {
-    const result = await this.withWakeDrainLock(async () => this.drainHostedRunsInternal(input));
+    const result = await this.withRunDrainLock(async () => this.drainHostedRunsInternal(input));
     return toHostedRunDrainResult(result);
   }
 
@@ -623,7 +623,7 @@ export class HostedUserRunner {
     userId: string;
   }): Promise<{
     cursor: HostedExecutionCursorState;
-    state: HostedWakeDrainState;
+    state: HostedRunDrainState;
   }> {
     const run = input.acquired.run;
     const runToken = input.acquired.runToken;
@@ -639,7 +639,7 @@ export class HostedUserRunner {
       };
     }
 
-    await this.syncHostedWakeBundleCacheToCursor(input.acquired.cursor.snapshotRef);
+    await this.syncRunnerBundleCacheToCursor(input.acquired.cursor.snapshotRef);
     this.recordHostedRunBreadcrumb({
       message: "Cloudflare started hosted run finalization from the prepared snapshot.",
       phase: "finalize_started",
@@ -706,15 +706,6 @@ export class HostedUserRunner {
     };
   }
 
-  private async cleanupCommittedHostedWakesLocally<
-    TCursor extends HostedExecutionCursorState,
-  >(input: {
-    cursor: TCursor;
-    wake: HostedIngressEnvelope | null;
-  }): Promise<TCursor> {
-    return input.cursor;
-  }
-
   private async failAcquiredHostedRun(input: {
     acquired: HostedRunAcquireResponse;
     failureCode: string;
@@ -723,7 +714,7 @@ export class HostedUserRunner {
     userId: string;
   }): Promise<{
     cursor: HostedExecutionCursorState;
-    state: HostedWakeDrainState;
+    state: HostedRunDrainState;
   }> {
     this.recordHostedRunBreadcrumb({
       message: "Cloudflare attempted to commit the acquired hosted run.",
@@ -970,12 +961,12 @@ export class HostedUserRunner {
     });
   }
 
-  private async syncHostedWakeBundleCacheToCursor(
+  private async syncRunnerBundleCacheToCursor(
     snapshotRef: HostedExecutionCursorState["snapshotRef"] | undefined,
   ): Promise<void> {
     const nextBundleRef = parseHostedExecutionCursorSnapshotRef(
       snapshotRef,
-      "Hosted wake cursor snapshotRef",
+      "Hosted run cursor snapshotRef",
     );
     await this.stateStore.syncBundleRefCache(nextBundleRef);
   }
@@ -1169,22 +1160,22 @@ export class HostedUserRunner {
     }
   }
 
-  private async withWakeDrainLock<T>(run: () => Promise<T>): Promise<T> {
-    const previous = this.wakeDrainLock ?? Promise.resolve();
+  private async withRunDrainLock<T>(run: () => Promise<T>): Promise<T> {
+    const previous = this.runDrainLock ?? Promise.resolve();
     let release!: () => void;
     const current = new Promise<void>((resolve) => {
       release = resolve;
     });
     const chain = previous.catch(() => {}).then(() => current);
-    this.wakeDrainLock = chain;
+    this.runDrainLock = chain;
     await previous.catch(() => {});
 
     try {
       return await run();
     } finally {
       release();
-      if (this.wakeDrainLock === chain) {
-        this.wakeDrainLock = null;
+      if (this.runDrainLock === chain) {
+        this.runDrainLock = null;
       }
     }
   }
@@ -1197,7 +1188,7 @@ export class HostedUserRunner {
 }
 
 function toHostedRunDrainResult(
-  input: HostedWakeDrainInternalResult,
+  input: HostedRunDrainLoopResult,
 ): HostedRunDrainResult {
   return {
     committedSeq: input.committedSeq,
@@ -1207,7 +1198,7 @@ function toHostedRunDrainResult(
 }
 
 function shouldScheduleHostedWakeRetryAlarm(
-  input: HostedWakeDrainInternalResult,
+  input: HostedRunDrainLoopResult,
 ): boolean {
   return input.exitState === "backpressured";
 }
