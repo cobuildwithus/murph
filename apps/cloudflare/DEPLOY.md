@@ -20,7 +20,7 @@ That rendered surface is then used by:
 - `pnpm --dir apps/cloudflare deploy:smoke`
 
 The rendered deploy helper path is the canonical rollout contract. The lower-level version helper still exists for recovery work, and the checked-in Wrangler scaffold remains useful for local development, but production deploys should use the rendered config so hosted email send bindings stay environment-specific and sender-restricted.
-Hosted assistant delivery recovery now relies on the shared outbox mirror inside the encrypted vault plus pending-commit Durable Object coordination; the removed runner-side journal seam is no longer part of the deploy surface.
+Hosted assistant delivery recovery now relies on the shared outbox mirror inside the encrypted vault plus web-owned hosted-run recovery state; the removed runner-side journal seam is no longer part of the deploy surface.
 
 ## One-Time Cloudflare Setup
 

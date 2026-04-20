@@ -31,7 +31,7 @@ Internal control routes:
 - `GET /internal/users/:userId/status`
 
 The supported worker HTTP surface stops at those three control routes plus the public banner and health checks.
-Hosted assistant post-commit delivery recovery now comes from the shared outbox mirror inside the encrypted vault plus pending-commit Durable Object state, not a separate assistant-delivery journal route.
+Hosted assistant post-commit delivery recovery now comes from the shared outbox mirror inside the encrypted vault plus web-owned hosted-run recovery state, not a separate assistant-delivery journal route or Durable Object pending-commit seam.
 When `HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL` is configured for local hosted development, the worker also accepts a loopback-only transport shim under `__murph/local-internal-proxy/users/:userId/:host/...`; that seam is not a supported product API and exists only to bridge local child-runtime requests back onto the same per-run opaque internal-worker proxy token contract used by direct `http://*.worker` requests.
 
 ## Storage Contract
@@ -39,7 +39,7 @@ When `HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL` is configured for local ho
 - The `vault` bundle slot stores one encrypted hosted workspace snapshot. That snapshot is still sensitive canonical vault material, not a second product database.
 - Large files are externalized into separately encrypted artifact blobs in the same bucket.
 - Separate encrypted objects hold runner-specific secret overrides and other execution-only sidecar blobs so those runtime artifacts do not force workspace rewrites.
-- Durable Object SQLite stores execution coordination only: lease and stale-result fencing, finalize-retry state, alarm hints, timestamps, and encrypted bundle references. Canonical wake ordering and cursor progress stay web-owned.
+- Durable Object SQLite stores execution coordination only: lease and stale-result fencing, alarm hints, timestamps, and encrypted bundle references. Canonical wake ordering, cursor progress, and durable finalize recovery stay web-owned.
 - The checked-in lifecycle rules backstop the short-lived production prefix `transient/hosted-email/messages/`.
 - Other encrypted execution blobs remain owner-cleaned or durable by design, including workspace snapshots, artifact blobs, runner-secrets blobs, and queue-local execution sidecars. Hosted device-sync runtime authority stays in `apps/web` behind narrow signed callbacks.
 
