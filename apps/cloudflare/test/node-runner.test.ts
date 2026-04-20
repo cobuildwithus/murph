@@ -420,7 +420,7 @@ async function runHostedExecutionJob(
     ...options,
   });
 
-  if (result.phase === "committed" && normalizedRequest.runDrain?.resumeFinalize !== true) {
+  if (result.phase === "prepared" && normalizedRequest.runDrain?.resumeFinalize !== true) {
     result = await runHostedExecutionJobInternal({
       request: {
         ...normalizedRequest,
@@ -443,7 +443,7 @@ async function runHostedExecutionJob(
     });
   }
 
-  if (result.phase === "committed") {
+  if (result.phase === "prepared") {
     throw new Error("Expected the node-runner test helper to resolve a completed hosted result.");
   }
 
@@ -2065,7 +2065,7 @@ describe("runHostedExecutionJob", () => {
         return {
           committedAssistantDeliveryEffects: [],
           committedGatewayProjectionSnapshot: null,
-          phase: "committed",
+          phase: "prepared",
           result: {
             bundle: null,
             result: {

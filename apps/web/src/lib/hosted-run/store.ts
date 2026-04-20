@@ -226,7 +226,7 @@ export async function acquireHostedRunTx(input: {
       status: "acquired",
       triggerKind,
       userId: input.userId,
-      wakeIdsJson: toPrismaJsonArray(wakeRows.map((wake) => wake.id)),
+      ingressEventIdsJson: toPrismaJsonArray(wakeRows.map((wake) => wake.id)),
     },
   });
 
@@ -387,7 +387,10 @@ export async function commitHostedRunTx(input: {
   }
 
   const acquiredSeqs = readHostedRunBigIntArray(run.eventSeqsJson, "Hosted run eventSeqsJson");
-  const acquiredWakeIds = readHostedRunStringArray(run.wakeIdsJson, "Hosted run wakeIdsJson");
+  const acquiredIngressEventIds = readHostedRunStringArray(
+    run.ingressEventIdsJson,
+    "Hosted run ingressEventIdsJson",
+  );
   const highestAcquiredSeq = acquiredSeqs.length === 0
     ? run.inputCommittedSeq
     : acquiredSeqs[acquiredSeqs.length - 1];
@@ -471,14 +474,14 @@ export async function commitHostedRunTx(input: {
     };
   }
 
-  if (acquiredWakeIds.length > 0) {
+  if (acquiredIngressEventIds.length > 0) {
     await markHostedRunWakesTerminalTx({
       eventResults: input.eventResults ?? [],
       outputCommittedSeq: input.outputCommittedSeq,
       runId: run.id,
       tx: input.tx,
       userId: input.userId,
-      wakeIds: acquiredWakeIds,
+      wakeIds: acquiredIngressEventIds,
     });
   }
 
@@ -1225,7 +1228,7 @@ function projectHostedRunRecord(record: {
   triggerKind: string;
   updatedAt: Date;
   userId: string;
-  wakeIdsJson: unknown;
+  ingressEventIdsJson: unknown;
 }): HostedRunRecord {
   return {
     acquiredAt: record.acquiredAt.toISOString(),
@@ -1260,7 +1263,10 @@ function projectHostedRunRecord(record: {
     triggerKind: parseHostedRunTriggerKindForProjection(record.triggerKind),
     updatedAt: record.updatedAt.toISOString(),
     userId: record.userId,
-    wakeIds: readHostedRunStringArray(record.wakeIdsJson, "Hosted run wakeIdsJson"),
+    wakeIds: readHostedRunStringArray(
+      record.ingressEventIdsJson,
+      "Hosted run ingressEventIdsJson",
+    ),
   };
 }
 

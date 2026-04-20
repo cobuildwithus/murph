@@ -3,7 +3,7 @@ export type {
   HostedAssistantRuntimeChannelCapabilities,
   HostedAssistantRuntimeConfig,
   HostedAssistantRuntimeCompletedJobResult,
-  HostedAssistantRuntimeCommittedJobResult,
+  HostedAssistantRuntimePreparedJobResult,
   HostedAssistantRuntimeDeviceSyncConfig,
   HostedAssistantRuntimeJobInput,
   HostedAssistantRuntimeJobRequest,
