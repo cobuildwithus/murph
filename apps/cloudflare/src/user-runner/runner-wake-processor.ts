@@ -13,6 +13,7 @@ import type {
 } from "@murphai/hosted-execution";
 import type { GatewayProjectionSnapshot } from "@murphai/gateway-core";
 import {
+  deriveHostedExecutionErrorCode,
   emitHostedExecutionStructuredLog,
   formatHostedExecutionLogMessage,
 } from "@murphai/hosted-execution";
@@ -50,6 +51,7 @@ import { RunnerWakeScheduler } from "./runner-wake-scheduler.js";
 import { RunnerSecretsService } from "./runner-secrets.js";
 import {
   fetchHostedExecutionWebControlPlaneResponse,
+  recordHostedRunLogInWeb,
 } from "../web-control-plane.ts";
 
 export type HostedExecutionWakeProgressRecord =
@@ -70,6 +72,8 @@ export interface RunnerRunDrainExecutionResult {
   redactedSummary?: Record<string, unknown>;
   state: HostedWakeLifecycleState;
 }
+
+const HOSTED_RUN_PHASE_LOG_TIMEOUT_MS = 2_000;
 
 interface RunnerWakeTransitionInput<T> {
   eventId: string;
@@ -718,6 +722,18 @@ export class RunnerWakeProcessor {
       userId: input.wake.userId,
     });
 
+    void recordHostedRunPhaseLogInWebBestEffort({
+      baseUrl: this.dependencies.hostedWebBaseUrl,
+      callbackSigning: this.dependencies.env.webCallbackSigning,
+      error: input.error,
+      level: input.level,
+      message,
+      phase: input.phase,
+      run: input.run,
+      userId: input.wake.userId,
+      wakeEventId: input.wake.eventId,
+    });
+
     return record;
   }
 
@@ -794,6 +810,64 @@ export function summarizeHostedAssistantDeliveryOutcomes(
       assistantDeliveryFirstNonSentStatus: nonSent.deliveryStatus,
     } : {}),
   };
+}
+
+export async function recordHostedRunPhaseLogInWebBestEffort(input: {
+  baseUrl: string | null;
+  callbackSigning: HostedExecutionEnvironment["webCallbackSigning"];
+  error?: unknown;
+  level?: HostedExecutionRunLevel;
+  message: string;
+  phase: HostedExecutionRunPhase;
+  recordLog?: typeof recordHostedRunLogInWeb;
+  run: HostedExecutionRunContext;
+  runToken?: string | null;
+  userId: string;
+  wakeEventId: string;
+}): Promise<void> {
+  if (!input.baseUrl) {
+    return;
+  }
+
+  const recordLog = input.recordLog ?? recordHostedRunLogInWeb;
+
+  try {
+    await recordLog({
+      baseUrl: input.baseUrl,
+      body: {
+        at: new Date().toISOString(),
+        component: "cloudflare-runner",
+        level: input.level ?? (input.error === undefined ? "info" : "error"),
+        message: input.message,
+        phase: input.phase,
+        redacted: {
+          errorCode: input.error === undefined ? null : deriveHostedExecutionErrorCode(input.error),
+          eventId: input.wakeEventId,
+          runElapsedMs: computeHostedRunElapsedMs(input.run),
+        },
+        runId: input.run.runId,
+        ...(input.runToken === undefined ? {} : { runToken: input.runToken }),
+      },
+      boundUserId: input.userId,
+      callbackSigning: input.callbackSigning,
+      timeoutMs: HOSTED_RUN_PHASE_LOG_TIMEOUT_MS,
+    });
+  } catch (error) {
+    emitHostedExecutionStructuredLog({
+      component: "cloudflare-runner",
+      details: {
+        runElapsedMs: computeHostedRunElapsedMs(input.run),
+        runLogWakeEventId: input.wakeEventId,
+      },
+      error,
+      eventId: input.wakeEventId,
+      level: "warn",
+      message: "Hosted run phase log write to web failed; continuing with runner-local observability only.",
+      phase: input.phase,
+      run: input.run,
+      userId: input.userId,
+    });
+  }
 }
 
 function computeHostedRunElapsedMs(
