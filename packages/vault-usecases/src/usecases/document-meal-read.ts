@@ -1,11 +1,8 @@
-import { readFile } from 'node:fs/promises'
 import path from 'node:path'
-import { rawImportManifestSchema, type RawImportManifest } from '@murphai/contracts'
-import { parseRawImportManifest } from '@murphai/core'
+import { rawImportManifestSchema } from '@murphai/contracts'
 import { z } from 'zod'
 import {
   firstString,
-  isJsonObject,
   loadQueryRuntime,
   toOwnedEventCommandShowEntity,
   type QueryRecord,
@@ -16,13 +13,12 @@ import {
   normalizeOptionalRelativePath,
   relativePathEntries,
   relativePathStrings,
-  resolveVaultRelativePath,
 } from './vault-usecase-helpers.js'
 import {
   deleteEventRecord,
   editEventRecord,
 } from './event-record-mutations.js'
-import { asListEnvelope, toListEntity } from './shared.js'
+import { asListEnvelope, readRawImportManifest, toListEntity } from './shared.js'
 
 type DocumentMealKind = 'document' | 'meal'
 
@@ -121,59 +117,6 @@ async function loadOwnedRecord(
   return record
 }
 
-async function readImportManifest(
-  vault: string,
-  manifestFile: string,
-): Promise<RawImportManifest> {
-  const manifestPath = await resolveVaultRelativePath(vault, manifestFile)
-  let manifestText: string
-
-  try {
-    manifestText = await readFile(manifestPath, 'utf8')
-  } catch (error) {
-    throw new VaultCliError(
-      'manifest_missing',
-      `Manifest file "${manifestFile}" is missing from the vault.`,
-      {
-        cause: error instanceof Error ? error.message : String(error),
-      },
-    )
-  }
-
-  let manifest: unknown
-
-  try {
-    manifest = JSON.parse(manifestText)
-  } catch (error) {
-    throw new VaultCliError(
-      'manifest_invalid',
-      `Manifest file "${manifestFile}" is not valid JSON.`,
-      {
-        cause: error instanceof Error ? error.message : String(error),
-      },
-    )
-  }
-
-  if (!isJsonObject(manifest)) {
-    throw new VaultCliError(
-      'manifest_invalid',
-      `Manifest file "${manifestFile}" must contain a JSON object.`,
-    )
-  }
-
-  try {
-    return parseRawImportManifest(manifest)
-  } catch (error) {
-    throw new VaultCliError(
-      'manifest_invalid',
-      `Manifest file "${manifestFile}" does not match the raw import manifest contract.`,
-      {
-        cause: error instanceof Error ? error.message : String(error),
-      },
-    )
-  }
-}
-
 async function showOwnedRecord(
   vault: string,
   lookup: string,
@@ -225,7 +168,7 @@ async function showOwnedManifest(
 ) {
   const record = await loadOwnedRecord(vault, lookup, expectedKind)
   const manifestFile = resolveManifestFile(record, expectedKind)
-  const manifest = await readImportManifest(vault, manifestFile)
+  const manifest = await readRawImportManifest(vault, manifestFile)
 
   return {
     vault,

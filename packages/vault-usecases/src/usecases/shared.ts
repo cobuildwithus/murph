@@ -6,8 +6,10 @@ import {
   BLOOD_TEST_SPECIMEN_TYPES,
   VAULT_LAYOUT,
   healthEntityDefinitions,
+  type RawImportManifest,
   type JsonObject,
 } from "@murphai/contracts"
+import { parseRawImportManifest } from "@murphai/core"
 
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors"
 import {
@@ -15,6 +17,7 @@ import {
   isHealthQueryableRecordId,
 } from "../health-cli-descriptors.js"
 import { loadJsonInputObject } from "../json-input.js"
+import { isJsonObject } from "../commands/query-record-command-helpers.js"
 import {
   describeQueryLookupConstraint,
   inferQueryIdEntityKind,
@@ -139,6 +142,60 @@ export async function readJsonPayload(
   label = "payload",
 ): Promise<JsonObject> {
   return loadJsonInputFile(filePath, label)
+}
+
+export async function readRawImportManifest(
+  vault: string,
+  manifestFile: string,
+): Promise<RawImportManifest> {
+  const { resolveVaultRelativePath } = await import("./vault-usecase-helpers.js")
+  const manifestPath = await resolveVaultRelativePath(vault, manifestFile)
+  let manifestText: string
+
+  try {
+    manifestText = await readFile(manifestPath, "utf8")
+  } catch (error) {
+    throw new VaultCliError(
+      "manifest_missing",
+      `Manifest file "${manifestFile}" is missing from the vault.`,
+      {
+        cause: error instanceof Error ? error.message : String(error),
+      },
+    )
+  }
+
+  let manifest: unknown
+
+  try {
+    manifest = JSON.parse(manifestText)
+  } catch (error) {
+    throw new VaultCliError(
+      "manifest_invalid",
+      `Manifest file "${manifestFile}" is not valid JSON.`,
+      {
+        cause: error instanceof Error ? error.message : String(error),
+      },
+    )
+  }
+
+  if (!isJsonObject(manifest)) {
+    throw new VaultCliError(
+      "manifest_invalid",
+      `Manifest file "${manifestFile}" must contain a JSON object.`,
+    )
+  }
+
+  try {
+    return parseRawImportManifest(manifest)
+  } catch (error) {
+    throw new VaultCliError(
+      "manifest_invalid",
+      `Manifest file "${manifestFile}" does not match the raw import manifest contract.`,
+      {
+        cause: error instanceof Error ? error.message : String(error),
+      },
+    )
+  }
 }
 
 export async function loadJsonInputFile(
