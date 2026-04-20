@@ -44,6 +44,7 @@ const webControlMocks = vi.hoisted(() => ({
   commitHostedRunToWeb: vi.fn(),
   finalizeHostedRunInWeb: vi.fn(),
   recordHostedRunLogInWeb: vi.fn(),
+  releaseHostedRunFinalizeInWeb: vi.fn(),
   readHostedRunStatusFromWeb: vi.fn(),
 }));
 
@@ -76,6 +77,7 @@ vi.mock("../src/web-control-plane.ts", async () => {
     commitHostedRunToWeb: webControlMocks.commitHostedRunToWeb,
     finalizeHostedRunInWeb: webControlMocks.finalizeHostedRunInWeb,
     recordHostedRunLogInWeb: webControlMocks.recordHostedRunLogInWeb,
+    releaseHostedRunFinalizeInWeb: webControlMocks.releaseHostedRunFinalizeInWeb,
     readHostedRunStatusFromWeb: webControlMocks.readHostedRunStatusFromWeb,
   };
 });
@@ -295,6 +297,24 @@ function createRunRecord(): HostedRunRecord {
 }
 
 describe("HostedUserRunner resumeFinalize drain", () => {
+  it("marks bootstrap state as runtime-ready so later alarms can drain", async () => {
+    envMocks.readHostedExecutionEnvironment.mockReturnValue(createTestRuntimeEnvironment());
+    const state = createDurableObjectStateHarness();
+    const stateStore = new RunnerStateStore(state);
+    const runner = new HostedUserRunner(
+      state,
+      envMocks.readHostedExecutionEnvironment(createHostedExecutionTestEnv()),
+      new MemoryEncryptedR2Bucket(),
+    );
+
+    await runner.bootstrapUser("user-resume-finalize");
+
+    await expect(stateStore.readState()).resolves.toMatchObject({
+      runtimeBootstrapped: true,
+      userId: "user-resume-finalize",
+    });
+  });
+
   it("nudges by scheduling an immediate alarm when a run is not already draining", async () => {
     envMocks.readHostedExecutionEnvironment.mockReturnValue(createTestRuntimeEnvironment());
     const state = createDurableObjectStateHarness();
@@ -346,7 +366,10 @@ describe("HostedUserRunner resumeFinalize drain", () => {
       snapshotKey: "snapshot/drained",
       version: "cursor-v3",
     });
-    const run = createRunRecord();
+    const run = {
+      ...createRunRecord(),
+      status: "finalizing" as const,
+    };
 
     const resumeFinalizeAcquire: HostedRunAcquireResponse = {
       acquired: true,
@@ -447,15 +470,6 @@ describe("HostedUserRunner resumeFinalize drain", () => {
       run,
       runToken: "run-token",
     };
-    const noWorkAcquire: HostedRunAcquireResponse = {
-      acquired: false,
-      cursor: drainedCursor,
-      events: [],
-      pendingWakeCount: 0,
-      resumeFinalize: false,
-      run: null,
-      runToken: null,
-    };
     const commitResponse: HostedRunCommitResponse = {
       committed: true,
       cursor: committedCursor,
@@ -464,8 +478,7 @@ describe("HostedUserRunner resumeFinalize drain", () => {
     };
 
     webControlMocks.acquireHostedRunFromWeb
-      .mockResolvedValueOnce(prepareAcquire)
-      .mockResolvedValueOnce(noWorkAcquire);
+      .mockResolvedValueOnce(prepareAcquire);
     webControlMocks.commitHostedRunToWeb.mockResolvedValue(commitResponse);
     webControlMocks.recordHostedRunLogInWeb.mockResolvedValue({
       log: null,
@@ -482,8 +495,9 @@ describe("HostedUserRunner resumeFinalize drain", () => {
     const result = await runner.drainHostedRuns();
 
     expect(webControlMocks.commitHostedRunToWeb).toHaveBeenCalledTimes(1);
+    expect(webControlMocks.acquireHostedRunFromWeb).toHaveBeenCalledTimes(1);
     expect(result).toEqual({
-      committedSeq: drainedCursor.committedSeq,
+      committedSeq: committedCursor.committedSeq,
       requestedTargetSeq: null,
       targetReached: true,
     });
@@ -531,12 +545,6 @@ describe("HostedUserRunner resumeFinalize drain", () => {
       snapshotKey: "snapshot/finalized",
       version: "cursor-v4",
     });
-    const drainedCursor = createCursorState({
-      committedSeq: "11",
-      nextSeq: "12",
-      snapshotKey: "snapshot/drained",
-      version: "cursor-v5",
-    });
     const acquiredRun = {
       ...createRunRecord(),
       status: "acquired" as const,
@@ -570,15 +578,6 @@ describe("HostedUserRunner resumeFinalize drain", () => {
       run: finalizingRun,
       runToken: "finalize-token",
     };
-    const noWorkAcquire: HostedRunAcquireResponse = {
-      acquired: false,
-      cursor: drainedCursor,
-      events: [],
-      pendingWakeCount: 0,
-      resumeFinalize: false,
-      run: null,
-      runToken: null,
-    };
     const commitResponse: HostedRunCommitResponse = {
       committed: true,
       cursor: committedCursor,
@@ -593,8 +592,7 @@ describe("HostedUserRunner resumeFinalize drain", () => {
 
     webControlMocks.acquireHostedRunFromWeb
       .mockResolvedValueOnce(prepareAcquire)
-      .mockResolvedValueOnce(resumeFinalizeAcquire)
-      .mockResolvedValueOnce(noWorkAcquire);
+      .mockResolvedValueOnce(resumeFinalizeAcquire);
     webControlMocks.commitHostedRunToWeb.mockResolvedValue(commitResponse);
     webControlMocks.finalizeHostedRunInWeb.mockResolvedValue(finalizedResponse);
     webControlMocks.recordHostedRunLogInWeb.mockResolvedValue({
@@ -617,7 +615,7 @@ describe("HostedUserRunner resumeFinalize drain", () => {
 
     const result = await runner.drainHostedRuns();
 
-    expect(webControlMocks.acquireHostedRunFromWeb).toHaveBeenCalledTimes(3);
+    expect(webControlMocks.acquireHostedRunFromWeb).toHaveBeenCalledTimes(2);
     expect(webControlMocks.commitHostedRunToWeb).toHaveBeenCalledTimes(1);
     expect(webControlMocks.finalizeHostedRunInWeb).toHaveBeenCalledTimes(1);
     expect(wakeProcessorMocks.finalizeRunDrain).toHaveBeenCalledTimes(1);
@@ -628,7 +626,7 @@ describe("HostedUserRunner resumeFinalize drain", () => {
       }),
     }));
     expect(result).toEqual({
-      committedSeq: drainedCursor.committedSeq,
+      committedSeq: finalizedCursor.committedSeq,
       requestedTargetSeq: null,
       targetReached: true,
     });
@@ -638,9 +636,91 @@ describe("HostedUserRunner resumeFinalize drain", () => {
       "acquired",
       "commit_attempted",
       "commit_won",
-      "acquired",
       "finalize_started",
       "finalize_finished",
+    ]);
+  });
+
+  it("releases claimed finalizing runs for retry when finalize side effects backpressure", async () => {
+    envMocks.readHostedExecutionEnvironment.mockReturnValue(createTestRuntimeEnvironment());
+    const state = createDurableObjectStateHarness();
+    const stateStore = new RunnerStateStore(state);
+    await stateStore.bootstrapUser("user-resume-finalize");
+    const runner = new HostedUserRunner(
+      state,
+      envMocks.readHostedExecutionEnvironment(createHostedExecutionTestEnv()),
+      new MemoryEncryptedR2Bucket(),
+    );
+
+    const finalizeCursor = createCursorState({
+      committedSeq: "10",
+      nextSeq: "11",
+      snapshotKey: "snapshot/finalize",
+      version: "cursor-v3",
+    });
+    const finalizingRun = {
+      ...createRunRecord(),
+      status: "finalizing" as const,
+      triggerKind: "retry_finalize" as const,
+    };
+    const resumeFinalizeAcquire: HostedRunAcquireResponse = {
+      acquired: true,
+      cursor: finalizeCursor,
+      events: [],
+      pendingWakeCount: 1,
+      resumeFinalize: true,
+      run: finalizingRun,
+      runToken: "finalize-token",
+    };
+
+    webControlMocks.acquireHostedRunFromWeb.mockResolvedValueOnce(resumeFinalizeAcquire);
+    webControlMocks.recordHostedRunLogInWeb.mockResolvedValue({
+      log: null,
+      logged: true,
+    });
+    webControlMocks.releaseHostedRunFinalizeInWeb.mockResolvedValue({
+      cursor: finalizeCursor,
+      released: true,
+      run: {
+        ...finalizingRun,
+        errorClass: "hosted_run_finalize_retryable",
+        errorCode: "HOSTED_RUN_FINALIZE_BACKPRESSURED",
+        status: "committed_needs_finalize",
+      },
+    });
+    wakeProcessorMocks.finalizeRunDrain.mockResolvedValue({
+      cursorSnapshotRef: finalizeCursor.snapshotRef,
+      nextRuntimeWakeAt: null,
+      redactedSummary: null,
+      state: "backpressured",
+    });
+
+    const result = await runner.drainHostedRuns();
+
+    expect(wakeProcessorMocks.finalizeRunDrain).toHaveBeenCalledTimes(1);
+    expect(webControlMocks.finalizeHostedRunInWeb).not.toHaveBeenCalled();
+    expect(webControlMocks.releaseHostedRunFinalizeInWeb).toHaveBeenCalledWith(expect.objectContaining({
+      body: expect.objectContaining({
+        failureClass: "hosted_run_finalize_retryable",
+        failureCode: "HOSTED_RUN_FINALIZE_BACKPRESSURED",
+        runId: finalizingRun.id,
+        runToken: "finalize-token",
+      }),
+    }));
+    expect(result).toEqual({
+      committedSeq: finalizeCursor.committedSeq,
+      requestedTargetSeq: null,
+      targetReached: true,
+    });
+    await expect(stateStore.readState()).resolves.toMatchObject({
+      nextWakeAt: expect.any(String),
+    });
+    expect(
+      webControlMocks.recordHostedRunLogInWeb.mock.calls.map(([input]) => input.body.phase),
+    ).toEqual([
+      "acquired",
+      "finalize_started",
+      "finalize_released",
     ]);
   });
 
@@ -861,6 +941,9 @@ describe("HostedUserRunner resumeFinalize drain", () => {
     await expect(runner.drainHostedRuns({
       targetSeqHint: "11",
     })).rejects.toThrow(/missing envelope/u);
+    await expect(stateStore.readState()).resolves.toMatchObject({
+      nextWakeAt: expect.any(String),
+    });
     expect(webControlMocks.acquireHostedRunFromWeb).toHaveBeenCalledTimes(1);
     expect(webControlMocks.commitHostedRunToWeb).not.toHaveBeenCalled();
     expect(wakeProcessorMocks.executeRunDrain).not.toHaveBeenCalled();

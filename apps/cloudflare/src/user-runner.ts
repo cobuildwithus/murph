@@ -201,6 +201,7 @@ export class HostedUserRunner {
 
   async bootstrapUser(userId: string): Promise<{ userId: string }> {
     await this.stateStore.bootstrapUser(userId);
+    await this.stateStore.markRuntimeBootstrapped();
     return { userId };
   }
 
@@ -294,15 +295,23 @@ export class HostedUserRunner {
   async drainHostedRuns(input: {
     targetSeqHint?: string | null;
   } = {}): Promise<HostedRunDrainResult> {
-    const result = await this.withRunDrainLock(async () => this.drainHostedRunsInternal(input));
-    return toHostedRunDrainResult(result);
+    try {
+      const result = await this.withRunDrainLock(async () => this.drainHostedRunsInternal(input));
+      if (shouldScheduleHostedWakeRetryAlarm(result)) {
+        await this.scheduleHostedWakeRetryAlarm();
+      }
+      return toHostedRunDrainResult(result);
+    } catch (error) {
+      await this.scheduleHostedWakeRetryAlarm();
+      throw error;
+    }
   }
 
   private async drainHostedRunsInternal(input: {
     targetSeqHint?: string | null;
   } = {}): Promise<HostedRunDrainLoopResult> {
     const userId = await this.requireBoundUserId();
-    await this.stateStore.bootstrapUser(userId);
+    await this.bootstrapUser(userId);
     let targetSeqHint = parseOptionalHostedWakeSeq(input.targetSeqHint);
     let committedSeq: string | null = null;
     let exitState: HostedRunDrainState | null = null;

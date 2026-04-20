@@ -359,25 +359,50 @@ async function handleRunRoute(
     throw error;
   }
   const stub = await resolveUserRunnerStub(context.env, userId);
-  const nudgeResult = await stub.nudgeHostedRun();
-  const drainPromise = stub.drainHostedRuns().catch((error) => {
+  const acceptedResponse = {
+    accepted: true,
+    alarmScheduled: false,
+    alreadyRunning: false,
+  } satisfies HostedRunNudgeResult;
+  const drainPromise = stub.drainHostedRuns().then(() => acceptedResponse).catch(async (error) => {
     emitHostedExecutionStructuredLog({
       component: "hosted.runner",
+      details: buildWorkerRouteLogDetails({
+        reason: "run-background-drain-failed",
+        routeName: "user-run",
+      }, context.request, userId),
       error,
       level: "warn",
-      message: "Hosted run nudge background drain failed after the nudge was accepted.",
+      message: "Hosted run background drain failed after the run request was accepted.",
       phase: "wake.running",
       userId,
     });
+
+    try {
+      return await stub.nudgeHostedRun();
+    } catch (fallbackError) {
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: buildWorkerRouteLogDetails({
+          reason: "run-retry-arm-fallback-failed",
+          routeName: "user-run",
+        }, context.request, userId),
+        error: fallbackError,
+        level: "error",
+        message: "Hosted run retry-arm fallback failed after the direct drain call failed.",
+        phase: "wake.running",
+        userId,
+      });
+      throw fallbackError;
+    }
   });
 
   if (context.waitUntil) {
     context.waitUntil(drainPromise);
-  } else {
-    await drainPromise;
+    return json(acceptedResponse, 202);
   }
 
-  return json(nudgeResult, 202);
+  return json(await drainPromise, 202);
 }
 
 async function handleBrowserVaultSessionRoute(

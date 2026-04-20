@@ -19,7 +19,6 @@ import type {
 } from "../src/worker-routes/shared.ts";
 import { handleRunnerOutboundRequest } from "../src/runner-outbound.ts";
 import {
-  buildHostedExecutionAssistantCronTickWake,
   type HostedIngressEnvelope,
 } from "@murphai/hosted-execution";
 import {
@@ -412,22 +411,16 @@ describe("cloudflare worker routes", () => {
     });
   });
 
-  it("accepts run nudges immediately and drains in waitUntil", async () => {
+  it("accepts run requests by starting a direct background drain", async () => {
     const stub = createUserRunnerStub({
-      nudgeHostedRun: vi.fn(async () => ({
-        accepted: true,
-        alarmScheduled: false,
-        alreadyRunning: true,
-      })),
       drainHostedRuns: vi.fn(async () => ({
-        committedSeq: "0",
+        committedSeq: "24",
         requestedTargetSeq: null,
         targetReached: true,
       })),
     });
-    const backgroundTasks: Promise<unknown>[] = [];
     const waitUntil = vi.fn((promise: Promise<unknown>) => {
-      backgroundTasks.push(promise);
+      void promise;
     });
 
     const response = await worker.fetch(
@@ -446,12 +439,44 @@ describe("cloudflare worker routes", () => {
     await expect(response.json()).resolves.toEqual({
       accepted: true,
       alarmScheduled: false,
-      alreadyRunning: true,
+      alreadyRunning: false,
     });
-    expect(stub.nudgeHostedRun).toHaveBeenCalledTimes(1);
+    expect(stub.nudgeHostedRun).not.toHaveBeenCalled();
     expect(stub.drainHostedRuns).toHaveBeenCalledTimes(1);
     expect(waitUntil).toHaveBeenCalledTimes(1);
-    await Promise.all(backgroundTasks);
+  });
+
+  it("falls back to the retry-arm nudge when the direct drain call fails", async () => {
+    const stub = createUserRunnerStub({
+      drainHostedRuns: vi.fn(async () => {
+        throw new Error("drain failed");
+      }),
+      nudgeHostedRun: vi.fn(async () => ({
+        accepted: true,
+        alarmScheduled: true,
+        alreadyRunning: false,
+      })),
+    });
+
+    const response = await worker.fetch(
+      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/run", {
+        body: JSON.stringify({ ignored: true }),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      })),
+      createWorkerEnv(stub),
+    );
+
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toEqual({
+      accepted: true,
+      alarmScheduled: true,
+      alreadyRunning: false,
+    });
+    expect(stub.drainHostedRuns).toHaveBeenCalledTimes(1);
+    expect(stub.nudgeHostedRun).toHaveBeenCalledTimes(1);
   });
 
   it("stores and reads encrypted hosted artifact objects through the outbound artifacts.worker handler", async () => {
@@ -859,12 +884,17 @@ function createBucketStore() {
 }
 
 function createWake(eventId: string): HostedIngressEnvelope {
-  return buildHostedExecutionAssistantCronTickWake({
+  return {
     eventId,
+    kind: "member.activated",
+    memberChannels: {
+      email: false,
+      linq: false,
+      telegram: false,
+    },
     occurredAt: "2026-04-16T10:00:00.000Z",
-    reason: "manual",
     userId: "member_123",
-  });
+  };
 }
 
 async function hostedArtifactObjectKeyForTest(
