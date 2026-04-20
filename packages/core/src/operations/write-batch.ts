@@ -991,43 +991,59 @@ export class WriteBatch {
     const lock = await acquireCanonicalWriteLock(this.vaultRoot);
 
     try {
-      this.record.status = "committing";
-      this.record.updatedAt = nowIso();
-      this.record.error = undefined;
-      await this.persist();
+      try {
+        this.record.status = "committing";
+        this.record.updatedAt = nowIso();
+        this.record.error = undefined;
+        await this.persist();
 
-      for (const [index, action] of this.record.actions.entries()) {
-        if (action.state === "applied" || action.state === "reused") {
-          continue;
+        for (const [index, action] of this.record.actions.entries()) {
+          if (action.state === "applied" || action.state === "reused") {
+            continue;
+          }
+
+          await this.applyAction(index, action);
         }
 
-        await this.applyAction(index, action);
-      }
+        await this.persistGuardReceiptIfConfigured();
+        this.record.status = "committed";
+        this.record.updatedAt = nowIso();
+        this.record.error = undefined;
+        await this.persist();
+      } catch (error) {
+        this.record.error = toStoredOperationError(error);
+        this.record.updatedAt = nowIso();
+        await this.persist();
 
-      this.record.status = "committed";
-      this.record.updatedAt = nowIso();
-      await this.persist();
-      await this.persistGuardReceiptIfConfigured();
-      await this.cleanupStageArtifacts();
-    } catch (error) {
-      this.record.error = toStoredOperationError(error);
-      this.record.updatedAt = nowIso();
-      await this.persist();
+        try {
+          await this.rollbackAppliedActions();
+          await this.cleanupGuardReceiptIfConfigured();
+          this.record.status = "rolled_back";
+          this.record.updatedAt = nowIso();
+          await this.persist();
+          await this.cleanupStageArtifacts();
+        } catch (rollbackError) {
+          this.record.status = "failed";
+          this.record.error = toStoredOperationError(rollbackError);
+          this.record.updatedAt = nowIso();
+          await this.persist();
+        }
+
+        throw error;
+      }
 
       try {
-        await this.rollbackAppliedActions();
-        this.record.status = "rolled_back";
-        this.record.updatedAt = nowIso();
-        await this.persist();
         await this.cleanupStageArtifacts();
-      } catch (rollbackError) {
-        this.record.status = "failed";
-        this.record.error = toStoredOperationError(rollbackError);
+      } catch (error) {
+        this.record.error = toStoredOperationError(error);
         this.record.updatedAt = nowIso();
-        await this.persist();
-      }
 
-      throw error;
+        try {
+          await this.persist();
+        } catch {
+          // Leaving the stage artifacts in place is the primary diagnostic fallback.
+        }
+      }
     } finally {
       await lock?.release();
     }
@@ -1064,6 +1080,16 @@ export class WriteBatch {
 
   private async cleanupStageArtifacts(): Promise<void> {
     await fs.rm(this.stageRootAbsolutePath, { recursive: true, force: true });
+  }
+
+  private async cleanupGuardReceiptIfConfigured(): Promise<void> {
+    const receiptRoot = resolveGuardReceiptDirectoryFromEnv();
+    if (!receiptRoot) {
+      return;
+    }
+
+    await fs.rm(path.join(receiptRoot, `${this.operationId}.json`), { force: true });
+    await fs.rm(path.join(receiptRoot, this.operationId), { recursive: true, force: true });
   }
 
   private async persistGuardReceiptIfConfigured(): Promise<void> {
