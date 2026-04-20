@@ -1411,6 +1411,83 @@ test("device sync service fences in-flight jobs after disconnect", async () => {
   service.close();
 });
 
+test("device sync service does not fail jobs reclaimed by another worker after the original lease expires", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-stale-worker-failure");
+  let providerStartedResolve: (() => void) | null = null;
+  let releaseProviderResolve: (() => void) | null = null;
+  const providerStarted = new Promise<void>((resolve) => {
+    providerStartedResolve = resolve;
+  });
+  const releaseProvider = new Promise<void>((resolve) => {
+    releaseProviderResolve = resolve;
+  });
+  const service = createDeviceSyncService({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [
+      createFakeProvider({
+        async executeJob() {
+          providerStartedResolve?.();
+          await releaseProvider;
+          throw new Error("provider exploded");
+        },
+      }),
+    ],
+  });
+
+  const begin = await service.startConnection({
+    provider: "demo",
+  });
+  const connected = await service.handleOAuthCallback({
+    provider: "demo",
+    state: begin.state,
+    code: "stale-worker",
+  });
+
+  const workerPromise = service.runWorkerOnce();
+  await providerStarted;
+
+  const initialJob = service.store.database.prepare(`
+    select id
+    from device_job
+    where account_id = ?
+    order by created_at asc, id asc
+    limit 1
+  `).get(connected.account.id) as { id?: string } | undefined;
+
+  assert.ok(initialJob?.id);
+
+  const expiredLeaseAt = new Date(Date.now() - 1_000).toISOString();
+  const reclaimAt = new Date().toISOString();
+  service.store.database.prepare(`
+    update device_job
+    set lease_expires_at = ?
+    where id = ?
+  `).run(expiredLeaseAt, initialJob.id);
+
+  const reclaimedJob = service.store.claimDueJob("worker-b", reclaimAt, 60_000);
+  assert.equal(reclaimedJob?.id, initialJob.id);
+  assert.equal(reclaimedJob?.status, "running");
+  assert.equal(reclaimedJob?.leaseOwner, "worker-b");
+
+  requireCallback(releaseProviderResolve, "provider release callback was not initialized")();
+  await workerPromise;
+
+  const persistedJob = service.store.getJobById(initialJob.id);
+  assert.equal(persistedJob?.status, "running");
+  assert.equal(persistedJob?.leaseOwner, "worker-b");
+  assert.equal(persistedJob?.lastErrorCode, null);
+  assert.equal(persistedJob?.lastErrorMessage, null);
+  assert.equal(service.summarize().jobsRunning, 1);
+  assert.equal(service.summarize().jobsDead, 0);
+
+  service.close();
+});
+
 test("device sync service next wake tracks scheduled reconciles and queued jobs", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-next-wake");
   const service = createDeviceSyncService({

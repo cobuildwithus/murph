@@ -20,6 +20,7 @@ import {
   completeDeviceSyncJobIfOwned,
   enqueueDeviceSyncJobInTransaction,
   failDeviceSyncJob,
+  failDeviceSyncJobIfOwned,
   getDeviceSyncJobById,
   markPendingDeviceSyncJobsDeadForAccount,
   readNextDeviceSyncJobWakeAt,
@@ -965,6 +966,26 @@ export class SqliteDeviceSyncStore {
       now,
       retryAt,
       retryable,
+    });
+  }
+
+  failJobIfOwned(
+    jobId: string,
+    workerId: string,
+    now: string,
+    code: string,
+    message: string,
+    retryAt: string | null,
+    retryable: boolean,
+  ): boolean {
+    return failDeviceSyncJobIfOwned(this.database, {
+      code,
+      jobId,
+      message,
+      now,
+      retryAt,
+      retryable,
+      workerId,
     });
   }
 

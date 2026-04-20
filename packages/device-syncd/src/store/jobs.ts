@@ -231,6 +231,70 @@ export function failDeviceSyncJob(
   `).run(input.code, input.message, input.now, input.now, input.jobId);
 }
 
+export function failDeviceSyncJobIfOwned(
+  database: DatabaseSync,
+  input: {
+    code: string;
+    jobId: string;
+    message: string;
+    now: string;
+    retryAt: string | null;
+    retryable: boolean;
+    workerId: string;
+  },
+): boolean {
+  if (input.retryable) {
+    const retryResult = database.prepare(`
+      update device_job
+      set status = 'queued',
+          available_at = ?,
+          lease_owner = null,
+          lease_expires_at = null,
+          last_error_code = ?,
+          last_error_message = ?,
+          updated_at = ?
+      where id = ?
+        and status = 'running'
+        and lease_owner = ?
+        and attempts < max_attempts
+    `).run(
+      input.retryAt ?? input.now,
+      input.code,
+      input.message,
+      input.now,
+      input.jobId,
+      input.workerId,
+    ) as { changes: number };
+
+    if ((retryResult.changes ?? 0) > 0) {
+      return true;
+    }
+  }
+
+  const deadResult = database.prepare(`
+    update device_job
+    set status = 'dead',
+        lease_owner = null,
+        lease_expires_at = null,
+        last_error_code = ?,
+        last_error_message = ?,
+        finished_at = ?,
+        updated_at = ?
+    where id = ?
+      and status = 'running'
+      and lease_owner = ?
+  `).run(
+    input.code,
+    input.message,
+    input.now,
+    input.now,
+    input.jobId,
+    input.workerId,
+  ) as { changes: number };
+
+  return (deadResult.changes ?? 0) > 0;
+}
+
 export function markPendingDeviceSyncJobsDeadForAccount(
   database: DatabaseSync,
   input: {
