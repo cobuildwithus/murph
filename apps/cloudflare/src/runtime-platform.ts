@@ -1,4 +1,5 @@
 import {
+  parseHostedRuntimeIssueRecordResponse,
   parseHostedRuntimeUsageRecordResponse,
   readHostedRunnerCommitTimeoutMs,
   type HostedRuntimePlatform,
@@ -33,6 +34,7 @@ import { fetchHostedExecutionWebControlPlaneResponse } from "./web-control-plane
 import type { HostedWebCallbackSigningEnvironment } from "./web-callback-auth.ts";
 
 const HOSTED_WEB_USAGE_RECORD_PATH = "/api/internal/hosted-execution/usage/record";
+const HOSTED_WEB_ISSUE_RECORD_PATH = "/api/internal/hosted-execution/issues/record";
 
 type HostedWebControlTransport =
   | {
@@ -145,6 +147,29 @@ export function buildHostedExecutionRuntimePlatform(input: {
     },
     ...(hostedWebControlTransport
       ? {
+          issueExportPort: {
+            async recordIssues(issues) {
+              const payload = await fetchHostedWebControlPlaneJson({
+                body: {
+                  issues,
+                },
+                boundUserId: input.boundUserId,
+                description: "Hosted assistant runtime issue export",
+                fetchImpl,
+                path: HOSTED_WEB_ISSUE_RECORD_PATH,
+                timeoutMs,
+                transport: hostedWebControlTransport,
+              });
+
+              try {
+                return parseHostedRuntimeIssueRecordResponse(payload);
+              } catch (error) {
+                throw new Error("Hosted assistant runtime issue export returned invalid JSON.", {
+                  cause: error,
+                });
+              }
+            },
+          },
           usageExportPort: {
             async recordUsage(usage) {
               const payload = await fetchHostedWebControlPlaneJson({

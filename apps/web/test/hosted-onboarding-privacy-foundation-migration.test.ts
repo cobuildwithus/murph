@@ -78,6 +78,7 @@ const HOSTED_INGRESS_RUNTIME_SCHEMA_GUARD = {
     'nextRuntimeWakeAt DateTime? @map("next_runtime_wake_at")',
     'nextRuntimeWakeReason String? @map("next_runtime_wake_reason")',
     'snapshotRef Json? @map("snapshot_ref")',
+    'browserVaultReplicaRef Json? @map("browser_vault_replica_ref")',
     'version BigInt @default(0) @map("version")',
     'createdAt DateTime @default(now()) @map("created_at")',
     'updatedAt DateTime @updatedAt @map("updated_at")',
@@ -132,6 +133,7 @@ const HOSTED_INGRESS_RUNTIME_MIGRATION_GUARD = {
       '"next_runtime_wake_at" TIMESTAMP(3)',
       '"next_runtime_wake_reason" TEXT',
       '"snapshot_ref" JSONB',
+      '"browser_vault_replica_ref" JSONB',
       '"version" BIGINT NOT NULL DEFAULT 0',
       '"created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP',
       '"updated_at" TIMESTAMP(3) NOT NULL',
@@ -258,6 +260,13 @@ describe("hosted Prisma baseline migration", () => {
       "2026040600_init",
       "migration_lock.toml",
     ]);
+    expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_assistant_runtime_issue"');
+    expect(baselineMigrationSql).toContain(
+      'CREATE INDEX "hosted_assistant_runtime_issue_fingerprint_occurred_at_idx"',
+    );
+    expect(baselineMigrationSql).not.toContain(
+      'ALTER TABLE "hosted_assistant_runtime_issue" ADD CONSTRAINT',
+    );
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_member_identity"');
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_member_routing"');
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_member_billing_ref"');

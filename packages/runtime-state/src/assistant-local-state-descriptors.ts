@@ -150,6 +150,14 @@ export const assistantLocalStateDescriptors: readonly VaultLocalStatePathDescrip
     ".runtime/operations/assistant/journals",
     "Assistant journals and runtime event logs are machine-local operational residue.",
   ),
+  definePortableAssistantDirectory(
+    ".runtime/operations/assistant/issues",
+    "Assistant anonymized runtime issue container for portable hosted issue export descendants.",
+  ),
+  definePortableAssistantSubtree(
+    ".runtime/operations/assistant/issues/pending",
+    "Assistant anonymized pending runtime issue records that must move with hosted issue export continuity.",
+  ),
   defineMachineLocalAssistantSubtree(
     ".runtime/operations/assistant/provider-route-recovery",
     "Assistant provider-route recovery state is machine-local operational residue.",

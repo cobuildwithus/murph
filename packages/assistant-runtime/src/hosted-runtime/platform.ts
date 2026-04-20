@@ -54,10 +54,15 @@ export interface HostedRuntimeUsageExportPort {
   recordUsage(usage: readonly object[]): Promise<HostedRuntimeUsageRecordResponse>;
 }
 
+export interface HostedRuntimeIssueExportPort {
+  recordIssues(issues: readonly object[]): Promise<HostedRuntimeIssueRecordResponse>;
+}
+
 export interface HostedRuntimePlatform {
   artifactStore: HostedRuntimeArtifactStore;
   deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
   effectsPort: HostedRuntimeEffectsPort;
+  issueExportPort?: HostedRuntimeIssueExportPort | null;
   usageExportPort?: HostedRuntimeUsageExportPort | null;
 }
 
@@ -66,38 +71,65 @@ export interface HostedRuntimeUsageRecordResponse {
   usageIds: string[];
 }
 
+export interface HostedRuntimeIssueRecordResponse {
+  issueIds: string[];
+  recorded: number;
+}
+
 export function parseHostedRuntimeUsageRecordResponse(
   value: unknown,
 ): HostedRuntimeUsageRecordResponse {
+  const response = parseHostedRuntimeRecordResponse(value, "usageIds")
+  return {
+    recorded: response.recorded,
+    usageIds: response.ids,
+  };
+}
+
+function parseHostedRuntimeRecordResponse(
+  value: unknown,
+  idsFieldName: "issueIds" | "usageIds",
+): { ids: string[]; recorded: number } {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError("Hosted runtime usage response must be an object.");
+    throw new TypeError("Hosted runtime record response must be an object.");
   }
 
   const recorded = (value as { recorded?: unknown }).recorded;
-  const usageIds = (value as { usageIds?: unknown }).usageIds;
+  const ids = (value as Record<string, unknown>)[idsFieldName];
 
   if (typeof recorded !== "number" || !Number.isSafeInteger(recorded) || recorded < 0) {
-    throw new TypeError("Hosted runtime usage response.recorded must be a non-negative integer.");
+    throw new TypeError("Hosted runtime record response.recorded must be a non-negative integer.");
   }
 
-  if (!Array.isArray(usageIds)) {
-    throw new TypeError("Hosted runtime usage response.usageIds must be a string array of non-empty values.");
+  if (!Array.isArray(ids)) {
+    throw new TypeError(`Hosted runtime record response.${idsFieldName} must be a string array of non-empty values.`);
   }
 
-  const normalizedUsageIds: string[] = []
-  for (const entry of usageIds) {
+  const normalizedIds: string[] = []
+  for (const entry of ids) {
     if (typeof entry !== "string") {
-      throw new TypeError("Hosted runtime usage response.usageIds must be a string array of non-empty values.");
+      throw new TypeError(`Hosted runtime record response.${idsFieldName} must be a string array of non-empty values.`);
     }
     const trimmedEntry = entry.trim()
     if (trimmedEntry.length === 0) {
-      throw new TypeError("Hosted runtime usage response.usageIds must be a string array of non-empty values.");
+      throw new TypeError(`Hosted runtime record response.${idsFieldName} must be a string array of non-empty values.`);
     }
-    normalizedUsageIds.push(trimmedEntry)
+    normalizedIds.push(trimmedEntry)
   }
 
   return {
+    ids: normalizedIds,
     recorded,
-    usageIds: normalizedUsageIds,
   };
+}
+
+
+export function parseHostedRuntimeIssueRecordResponse(
+  value: unknown,
+): HostedRuntimeIssueRecordResponse {
+  const response = parseHostedRuntimeRecordResponse(value, "issueIds")
+  return {
+    issueIds: response.ids,
+    recorded: response.recorded,
+  }
 }

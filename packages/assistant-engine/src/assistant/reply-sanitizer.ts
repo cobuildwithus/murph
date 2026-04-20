@@ -1,8 +1,77 @@
 import { isAssistantUserFacingChannel } from './channel-presentation.js'
+import {
+  type AssistantDiagnosticsPolicy,
+  type AssistantStrippedDevNote,
+} from './issue-reporting.js'
 
 const ASSISTANT_MARKDOWN_LINK_PATTERN = /\[([^\]\n]+)\]\(([^)\n]+)\)/gu
 const ASSISTANT_INLINE_SOURCE_REFERENCE_PATTERN =
   /(`[^`\n]+`|file:\/\/[^\s)]+|(?<![:/A-Za-z0-9])\/(?:[^/\s)]+\/)+[^\s)]*|(?:assistant-state|derived|experiments|journal|ledger|raw|research|vault)\/[^\s),;:]+)/giu
+const ASSISTANT_DEV_NOTE_LINE_PATTERN =
+  /^\s*(?:#{1,6}\s*)?(?:[-*]\s*)?(?:\*\*)?\[(?:dev|developer)\](?:\*\*)?\s*:?\s*/iu
+const ASSISTANT_DEV_NOTE_INLINE_PATTERN =
+  /\s*(?:\*\*)?\[(?:dev|developer)\](?:\*\*)?\s*:?\s*/iu
+const ASSISTANT_EMPTY_AFTER_DEV_NOTE_FALLBACK =
+  'I ran into an internal issue while preparing that reply.'
+
+
+export interface AssistantDevNoteStripResult {
+  devNotes: AssistantStrippedDevNote[]
+  stripped: boolean
+  text: string
+}
+
+export function sanitizeAssistantProviderResponseForVisibility(input: {
+  channel: string | null
+  diagnosticsPolicy: AssistantDiagnosticsPolicy
+  response: string
+}): AssistantDevNoteStripResult {
+  const devNoteResult = input.diagnosticsPolicy.devNotesVisibleToUser
+    ? { devNotes: [], stripped: false, text: input.response }
+    : stripAssistantDevNoteBlocks(input.response)
+  const text = sanitizeAssistantOutboundReplyText(devNoteResult.text, input.channel)
+
+  return {
+    devNotes: devNoteResult.devNotes,
+    stripped: devNoteResult.stripped,
+    text: text.length > 0 ? text : ASSISTANT_EMPTY_AFTER_DEV_NOTE_FALLBACK,
+  }
+}
+
+export function stripAssistantDevNoteBlocks(response: string): AssistantDevNoteStripResult {
+  const lines = response.split(/\r?\n/u)
+  const firstDevNoteLineIndex = lines.findIndex((line) =>
+    ASSISTANT_DEV_NOTE_LINE_PATTERN.test(line),
+  )
+
+  if (firstDevNoteLineIndex >= 0) {
+    const keptLines = removeTrailingDevNoteSeparator(lines.slice(0, firstDevNoteLineIndex))
+    const strippedText = lines.slice(firstDevNoteLineIndex).join('\n')
+
+    return {
+      devNotes: [summarizeStrippedAssistantDevNote(strippedText)],
+      stripped: true,
+      text: compactAssistantReplyAfterDevNoteStrip(keptLines.join('\n')),
+    }
+  }
+
+  const inlineMarker = ASSISTANT_DEV_NOTE_INLINE_PATTERN.exec(response)
+  if (!inlineMarker) {
+    return {
+      devNotes: [],
+      stripped: false,
+      text: response,
+    }
+  }
+
+  const markerStart = inlineMarker.index
+  const strippedText = response.slice(markerStart)
+  return {
+    devNotes: [summarizeStrippedAssistantDevNote(strippedText)],
+    stripped: true,
+    text: compactAssistantReplyAfterDevNoteStrip(response.slice(0, markerStart)),
+  }
+}
 
 export function sanitizeAssistantOutboundReply(
   response: string,
@@ -10,6 +79,17 @@ export function sanitizeAssistantOutboundReply(
 ): string {
   if (!isAssistantOutboundReplyChannel(channel)) {
     return response
+  }
+
+  return sanitizeAssistantOutboundReplyText(stripAssistantDevNoteBlocks(response).text, channel)
+}
+
+function sanitizeAssistantOutboundReplyText(
+  response: string,
+  channel: string | null,
+): string {
+  if (!isAssistantOutboundReplyChannel(channel)) {
+    return response.trim()
   }
 
   const withoutLocalMarkdownLinks = response.replace(
@@ -132,4 +212,23 @@ export function isAssistantSourceReference(value: string): boolean {
     return true
   }
   return /#l\d+(?:c\d+)?$/iu.test(normalized)
+}
+
+
+function removeTrailingDevNoteSeparator(lines: string[]): string[] {
+  const kept = [...lines]
+  while (kept.length > 0 && /^\s*(?:---+|___+|\*\*\*+)\s*$/u.test(kept[kept.length - 1] ?? '')) {
+    kept.pop()
+  }
+  return kept
+}
+
+function compactAssistantReplyAfterDevNoteStrip(value: string): string {
+  return value.replace(/\n{3,}/gu, '\n\n').trim()
+}
+
+function summarizeStrippedAssistantDevNote(noteText: string): AssistantStrippedDevNote {
+  return {
+    noteCharCount: noteText.length,
+  }
 }

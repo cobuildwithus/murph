@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest'
 
+import type { AssistantDiagnosticsPolicy } from '../src/assistant/issue-reporting.js'
 import { buildAssistantSystemPrompt } from '../src/assistant/system-prompt.js'
+
+const TEST_DIAGNOSTICS_POLICY: AssistantDiagnosticsPolicy = {
+  devNotesVisibleToUser: false,
+  environment: 'local',
+  issueReportingMode: 'hosted-private',
+  privateIssueCaptureEnabled: true,
+  surface: null,
+}
 
 function buildPrompt(
   assistantCommandAccessMode: 'bound-tools' | 'direct-cli' | 'none',
@@ -22,6 +31,7 @@ function buildPrompt(
     },
     currentLocalDate: '2026-04-10',
     currentTimeZone: 'Australia/Sydney',
+    diagnosticsPolicy: TEST_DIAGNOSTICS_POLICY,
     firstTurnCheckIn: options?.firstTurnCheckIn ?? false,
     modelBehaviorProfile: 'default',
     turnTrigger,

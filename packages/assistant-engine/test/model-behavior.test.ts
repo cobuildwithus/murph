@@ -1,10 +1,19 @@
 import { describe, expect, it } from 'vitest'
 
+import type { AssistantDiagnosticsPolicy } from '../src/assistant/issue-reporting.js'
 import {
   buildAssistantExecutionBehaviorText,
   resolveAssistantModelBehaviorProfile,
 } from '../src/assistant/model-behavior.js'
 import { buildAssistantSystemPrompt } from '../src/assistant/system-prompt.js'
+
+const TEST_DIAGNOSTICS_POLICY: AssistantDiagnosticsPolicy = {
+  devNotesVisibleToUser: false,
+  environment: 'local',
+  issueReportingMode: 'hosted-private',
+  privateIssueCaptureEnabled: true,
+  surface: null,
+}
 
 describe('resolveAssistantModelBehaviorProfile', () => {
   it('uses the GPT-5 agentic profile for GPT-5 OpenAI-compatible targets', () => {
@@ -58,6 +67,7 @@ describe('assistant GPT-5 execution prompt overlay', () => {
       },
       currentLocalDate: '2026-04-15',
       currentTimeZone: 'Asia/Kuala_Lumpur',
+      diagnosticsPolicy: TEST_DIAGNOSTICS_POLICY,
       firstTurnCheckIn: false,
       modelBehaviorProfile: 'gpt5-agentic',
       turnTrigger: null,

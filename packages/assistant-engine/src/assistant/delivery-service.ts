@@ -2,8 +2,9 @@ import type {
   AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { markAssistantFirstContactSeen } from './first-contact.js'
+import { resolveAssistantDiagnosticsPolicy } from './issue-reporting.js'
 import { normalizeAssistantDeliveryError } from './outbox.js'
-import { sanitizeAssistantOutboundReply } from './reply-sanitizer.js'
+import { sanitizeAssistantProviderResponseForVisibility } from './reply-sanitizer.js'
 import { createAssistantRuntimeStateService } from './runtime-state-service.js'
 import type {
   AssistantDeliveryOutcome,
@@ -28,14 +29,20 @@ export async function deliverAssistantReply(input: {
 
   const state = createAssistantRuntimeStateService(input.input.vault)
   const audience = input.sharedPlan.conversationPolicy.audience
+  const deliveryChannel = audience?.channel ?? input.session.binding.channel
+  const diagnosticsPolicy = resolveAssistantDiagnosticsPolicy({
+    channel: deliveryChannel,
+    executionContext: input.input.executionContext,
+  })
   const outcome = await state.outbox.deliverMessage({
     turnId: input.turnId,
     sessionId: input.session.sessionId,
-    message: sanitizeAssistantOutboundReply(
-      input.response,
-      input.session.binding.channel,
-    ),
-    channel: audience?.channel ?? input.session.binding.channel,
+    message: sanitizeAssistantProviderResponseForVisibility({
+      channel: deliveryChannel,
+      diagnosticsPolicy,
+      response: input.response,
+    }).text,
+    channel: deliveryChannel,
     identityId: audience?.identityId ?? input.session.binding.identityId,
     actorId: audience?.actorId ?? input.session.binding.actorId,
     threadId: audience?.threadId ?? input.session.binding.threadId,

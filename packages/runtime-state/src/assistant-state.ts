@@ -16,6 +16,8 @@ export interface AssistantStatePaths {
   failoverStatePath: string;
   indexesPath: string;
   journalsDirectory: string;
+  issuesDirectory: string;
+  issuesPendingDirectory: string;
   outboxDirectory: string;
   outboxQuarantineDirectory: string;
   providerRouteRecoveryDirectory: string;
@@ -40,6 +42,7 @@ export function resolveAssistantStatePaths(vaultRoot: string): AssistantStatePat
   const cronDirectory = path.join(rootPath, "cron");
   const diagnosticsDirectory = path.join(rootPath, "diagnostics");
   const journalsDirectory = path.join(rootPath, "journals");
+  const issuesDirectory = path.join(rootPath, "issues");
   const outboxDirectory = path.join(rootPath, "outbox");
   const turnsDirectory = path.join(rootPath, "receipts");
   const secretsDirectory = path.join(rootPath, "secrets");
@@ -64,6 +67,8 @@ export function resolveAssistantStatePaths(vaultRoot: string): AssistantStatePat
     failoverStatePath: path.join(rootPath, "failover.json"),
     indexesPath: path.join(rootPath, "indexes.json"),
     journalsDirectory,
+    issuesDirectory,
+    issuesPendingDirectory: path.join(issuesDirectory, "pending"),
     outboxDirectory,
     outboxQuarantineDirectory: path.join(outboxDirectory, ".quarantine"),
     providerRouteRecoveryDirectory: path.join(rootPath, "provider-route-recovery"),

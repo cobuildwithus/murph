@@ -13,12 +13,13 @@ import {
   executeProviderTurnWithRecovery,
   type AssistantProviderTurnExecutionProfile,
 } from './provider-turn-runner.js'
+import { resolveAssistantDiagnosticsPolicy } from './issue-reporting.js'
 import { persistPendingAssistantUsageEvent } from './service-usage.js'
 import { persistAssistantTurnAndSession } from './turn-finalizer.js'
 import { resolveAssistantTurnRoutes } from './service-turn-routes.js'
 import { prioritizeAssistantRoutesForRichUserMessageContent } from './rich-content-routing.js'
 import { createAssistantTurnId } from './turns.js'
-import { sanitizeAssistantOutboundReply } from './reply-sanitizer.js'
+import { sanitizeAssistantProviderResponseForVisibility } from './reply-sanitizer.js'
 import {
   normalizeAssistantDeliverySubject,
 } from './channel-adapters.js'
@@ -149,11 +150,17 @@ export async function sendAssistantNotificationLocal(
         }
       }
 
+      const responseChannel = providerResult.session.binding.channel ?? input.channel ?? null
+      const diagnosticsPolicy = resolveAssistantDiagnosticsPolicy({
+        channel: responseChannel,
+        executionContext,
+      })
       const sanitizedResponse = normalizeRequiredText(
-        sanitizeAssistantOutboundReply(
-          decision.text,
-          providerResult.session.binding.channel ?? input.channel ?? null,
-        ),
+        sanitizeAssistantProviderResponseForVisibility({
+          channel: responseChannel,
+          diagnosticsPolicy,
+          response: decision.text,
+        }).text,
         'notification response',
       )
       const savedSession = await persistAssistantTurnAndSession({
