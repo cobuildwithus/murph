@@ -300,13 +300,13 @@ The seam stays healthy only if the lookup result remains nested and privacy-mini
 
 ### 17. Keep hosted execution status centered on the web-owned run/cursor lifecycle
 
-**Seam:** `apps/web/src/lib/hosted-wake/store.ts`, `apps/web/src/lib/hosted-wake/dispatch.ts`, `packages/hosted-execution/src/contracts.ts`, `apps/cloudflare/src/user-runner.ts`
+**Seam:** `apps/web/src/lib/hosted-run/store.ts`, `apps/web/src/lib/hosted-ingress/queue.ts`, `packages/hosted-execution/src/contracts.ts`, `apps/cloudflare/src/user-runner.ts`
 
 Hosted execution used to translate across overlapping outbox, queue-presence,
-and dispatch-state models. The current tree is simpler: web-owned external
-ingress ordering plus `HostedExecutionCursor` and `HostedRun` are the
-canonical ordering/fence/recovery truth, while Cloudflare status is a
-consumer-facing projection over that lifecycle plus local execution residue.
+and dispatch-state models. The current tree is simpler: web-owned hosted
+ingress ordering plus `HostedExecutionCursor` and `HostedRun` are the canonical
+ordering/fence/recovery truth, while Cloudflare status is a consumer-facing
+projection over that lifecycle plus local execution residue.
 
 **Why this is simpler:** ordering, committed high-water, and snapshot fences now
 live with the cursor owner and finalize recovery lives with the hosted-run
@@ -458,7 +458,7 @@ It already does the thing the higher-leverage findings above still need to do.
 
 #### B. Keep hosted ingress payload ownership split between shared ingress contracts and the web-owned storage helper
 
-**Seam:** `packages/hosted-execution/src/{contracts,builders,parsers}.ts`, `apps/web/src/lib/hosted-wake/payload.ts`
+**Seam:** `packages/hosted-execution/src/{contracts,builders,parsers}.ts`, `apps/web/src/lib/hosted-ingress/payload.ts`
 
 This seam is already simple and composable enough.
 `@murphai/hosted-execution` owns the shared external-ingress kinds, payload
