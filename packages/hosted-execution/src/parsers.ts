@@ -43,7 +43,6 @@ import {
   isHostedExecutionRunPhase,
 } from "./observability.ts";
 import {
-  buildHostedExecutionAssistantCronTickWake,
   buildHostedExecutionEmailConversationMessageWake,
   buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionMemberActivatedWake,
@@ -72,7 +71,6 @@ import {
   parseHostedExecutionCursorSnapshotRef,
 } from "./parsers/cursor.ts";
 import {
-  parseHostedExecutionCronReason,
   parseHostedExecutionDeviceSyncReason,
   parseHostedExecutionDeviceSyncWakeHint,
 } from "./parsers/device-sync.ts";
@@ -104,6 +102,8 @@ export {
   parseHostedRunLogRecord,
   parseHostedRunLogRequest,
   parseHostedRunLogResponse,
+  parseHostedRunReleaseFinalizeRequest,
+  parseHostedRunReleaseFinalizeResponse,
   parseHostedRunRecord,
   parseHostedRunStatusRequest,
   parseHostedRunStatusResponse,
@@ -376,13 +376,9 @@ export function parseHostedRuntimeEvent(value: unknown): HostedRuntimeEvent {
   }
 
   if (kind === "assistant.cron.tick") {
-    // Legacy runtime-only compatibility. Persisted ingress must not use this kind.
-    return buildHostedExecutionAssistantCronTickWake({
-      eventId: requireString(record.eventId, "Hosted execution runner wake eventId"),
-      occurredAt: requireString(record.occurredAt, "Hosted execution runner wake occurredAt"),
-      reason: parseHostedExecutionCronReason(record.reason),
-      userId: requireString(record.userId, "Hosted execution runner wake userId"),
-    });
+    throw new TypeError(
+      "Hosted execution runner wake assistant.cron.tick is no longer supported; use runtime.timer.",
+    );
   }
 
   return parseHostedIngressEnvelope(record);

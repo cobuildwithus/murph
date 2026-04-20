@@ -45,7 +45,6 @@ export type HostedIngressKind =
   (typeof HOSTED_EXECUTION_WAKE_KINDS)[number];
 export type HostedExecutionBaseWakeKind =
   | HostedIngressKind
-  | "assistant.cron.tick"
   | "runtime.timer";
 
 export const HOSTED_EXECUTION_CONVERSATION_MESSAGE_CHANNELS = [
@@ -121,8 +120,6 @@ export interface HostedExecutionTelegramMessage {
   text?: string | null;
   threadId: string;
 }
-
-export type HostedExecutionLegacyCronReason = "alarm" | "manual" | "device-sync";
 
 export interface HostedExecutionDeviceSyncWakeEvent extends HostedExecutionBaseEvent {
   connectionId?: string | null;
@@ -258,12 +255,6 @@ export interface HostedExecutionMemberChannelsUpdatedWake extends HostedExecutio
   memberChannels: HostedExecutionMemberChannels;
 }
 
-// Legacy runtime-only compatibility wake. Do not persist or append this as hosted ingress.
-export interface HostedExecutionAssistantCronTickWake extends HostedExecutionBaseWake {
-  kind: "assistant.cron.tick";
-  reason: HostedExecutionLegacyCronReason;
-}
-
 export interface HostedExecutionDeviceSyncWake extends HostedExecutionBaseWake {
   connectionId?: string | null;
   hint?: HostedExecutionDeviceSyncWakeHint | null;
@@ -291,7 +282,6 @@ export type HostedIngressEnvelope =
 
 export type HostedRuntimeEvent =
   | HostedIngressEnvelope
-  | HostedExecutionAssistantCronTickWake
   | HostedExecutionRuntimeTimerWake;
 
 export type HostedExecutionWakeKind = HostedIngressKind;
@@ -575,6 +565,19 @@ export interface HostedRunFinalizeRequest {
 export interface HostedRunFinalizeResponse {
   cursor: HostedExecutionCursorState;
   finalized: boolean;
+  run: HostedRunRecord | null;
+}
+
+export interface HostedRunReleaseFinalizeRequest {
+  failureClass?: string | null;
+  failureCode?: string | null;
+  runId: string;
+  runToken: string;
+}
+
+export interface HostedRunReleaseFinalizeResponse {
+  cursor: HostedExecutionCursorState;
+  released: boolean;
   run: HostedRunRecord | null;
 }
 
