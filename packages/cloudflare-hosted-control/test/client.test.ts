@@ -76,12 +76,14 @@ describe("createCloudflareHostedControlClient", () => {
     await expect(promise).rejects.not.toThrow(/provider_token/u);
   });
 
-  it("fetches browser vault sessions with the expected request and parses snapshotAad", async () => {
+  it("fetches browser vault sessions with the expected request and parses ready replica responses", async () => {
     let observedRequest: ObservedRequest | null = null;
     const responseBody = createBrowserVaultSession({
-      rootKeyEnvelope: createRootKeyEnvelope(),
-      snapshotAad: createSnapshotAad(),
-      snapshotEnvelope: createSnapshotEnvelope(),
+      encryptedReplica: createReplicaEnvelope(),
+      replicaAad: createReplicaAad(),
+      replicaKeyEnvelope: createReplicaKeyEnvelope(),
+      replicaRef: createReplicaRef(),
+      state: "ready",
     });
     const client = createCloudflareHostedControlClient({
       baseUrl: "https://runner.example.test/root/",
@@ -93,11 +95,15 @@ describe("createCloudflareHostedControlClient", () => {
       timeoutMs: 2_500,
     });
 
-    await expect(client.createBrowserVaultSession("user_123", {
-      crv: "P-256",
-      kty: "EC",
-      x: "x-value",
-      y: "y-value",
+    await expect(client.createBrowserVaultSession({
+      browserPublicKeyJwk: {
+        crv: "P-256",
+        kty: "EC",
+        x: "x-value",
+        y: "y-value",
+      },
+      replicaRef: createReplicaRef(),
+      userId: "user_123",
     })).resolves.toEqual(responseBody);
 
     const request = requireObservedRequest(observedRequest);
@@ -112,14 +118,17 @@ describe("createCloudflareHostedControlClient", () => {
         x: "x-value",
         y: "y-value",
       },
+      replicaRef: createReplicaRef(),
     }));
   });
 
-  it("accepts an all-null browser vault session response", async () => {
+  it("rejects browser vault sessions that are not ready", async () => {
     const responseBody = createBrowserVaultSession({
-      rootKeyEnvelope: null,
-      snapshotAad: null,
-      snapshotEnvelope: null,
+      encryptedReplica: null,
+      replicaAad: null,
+      replicaKeyEnvelope: null,
+      replicaRef: null,
+      state: "empty",
     });
     const client = createCloudflareHostedControlClient({
       baseUrl: "https://runner.example.test/root/",
@@ -128,52 +137,68 @@ describe("createCloudflareHostedControlClient", () => {
       timeoutMs: 2_500,
     });
 
-    await expect(client.createBrowserVaultSession("user_123", {
-      crv: "P-256",
-      kty: "EC",
-      x: "x-value",
-      y: "y-value",
-    })).resolves.toEqual(responseBody);
+    await expect(client.createBrowserVaultSession({
+      browserPublicKeyJwk: {
+        crv: "P-256",
+        kty: "EC",
+        x: "x-value",
+        y: "y-value",
+      },
+      replicaRef: createReplicaRef(),
+      userId: "user_123",
+    })).rejects.toThrow("Cloudflare browser vault session state must be ready.");
   });
 
-  it("rejects browser vault sessions that omit all triad fields entirely", async () => {
-    const client = createCloudflareHostedControlClient({
-      baseUrl: "https://runner.example.test/root/",
-      fetchImpl: vi.fn(async () => createJsonResponse({})) as typeof fetch,
-      getBearerToken: async () => "token-123",
-      timeoutMs: 2_500,
-    });
-
-    await expect(client.createBrowserVaultSession("user_123", {
-      crv: "P-256",
-      kty: "EC",
-      x: "x-value",
-      y: "y-value",
-    })).rejects.toThrow(
-      "Cloudflare browser vault session must include rootKeyEnvelope, snapshotAad, and snapshotEnvelope together.",
-    );
-  });
-
-  it("rejects partial browser vault sessions that omit either envelope or snapshotAad", async () => {
+  it("rejects ready browser vault sessions without a replica ref", async () => {
     const client = createCloudflareHostedControlClient({
       baseUrl: "https://runner.example.test/root/",
       fetchImpl: vi.fn(async () => createJsonResponse({
-        rootKeyEnvelope: null,
-        snapshotAad: createSnapshotAad(),
-        snapshotEnvelope: null,
+        encryptedReplica: createReplicaEnvelope(),
+        replicaAad: createReplicaAad(),
+        replicaKeyEnvelope: createReplicaKeyEnvelope(),
+        replicaRef: null,
+        state: "ready",
       })) as typeof fetch,
       getBearerToken: async () => "token-123",
       timeoutMs: 2_500,
     });
 
-    await expect(client.createBrowserVaultSession("user_123", {
-      crv: "P-256",
-      kty: "EC",
-      x: "x-value",
-      y: "y-value",
-    })).rejects.toThrow(
-      "Cloudflare browser vault session must include rootKeyEnvelope, snapshotAad, and snapshotEnvelope together.",
-    );
+    await expect(client.createBrowserVaultSession({
+      browserPublicKeyJwk: {
+        crv: "P-256",
+        kty: "EC",
+        x: "x-value",
+        y: "y-value",
+      },
+      replicaRef: createReplicaRef(),
+      userId: "user_123",
+    })).rejects.toThrow("Cloudflare browser vault session replicaRef must not be null.");
+  });
+
+  it("rejects ready browser vault sessions that omit replica payload fields", async () => {
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test/root/",
+      fetchImpl: vi.fn(async () => createJsonResponse({
+        encryptedReplica: null,
+        replicaAad: createReplicaAad(),
+        replicaKeyEnvelope: createReplicaKeyEnvelope(),
+        replicaRef: createReplicaRef(),
+        state: "ready",
+      })) as typeof fetch,
+      getBearerToken: async () => "token-123",
+      timeoutMs: 2_500,
+    });
+
+    await expect(client.createBrowserVaultSession({
+      browserPublicKeyJwk: {
+        crv: "P-256",
+        kty: "EC",
+        x: "x-value",
+        y: "y-value",
+      },
+      replicaRef: createReplicaRef(),
+      userId: "user_123",
+    })).rejects.toThrow("Cloudflare browser vault session encryptedReplica must be an object.");
   });
 
   it("fetches user status with the expected request shape", async () => {
@@ -249,20 +274,61 @@ function requireObservedRequest(request: ObservedRequest | null): ObservedReques
 }
 
 function createBrowserVaultSession(input: {
-  rootKeyEnvelope: unknown;
-  snapshotAad: unknown;
-  snapshotEnvelope: unknown;
+  encryptedReplica: unknown;
+  replicaAad: unknown;
+  replicaKeyEnvelope: unknown;
+  replicaRef: unknown;
+  state: unknown;
 }) {
   return {
-    rootKeyEnvelope: input.rootKeyEnvelope,
-    snapshotAad: input.snapshotAad,
-    snapshotEnvelope: input.snapshotEnvelope,
+    encryptedReplica: input.encryptedReplica,
+    replicaAad: input.replicaAad,
+    replicaKeyEnvelope: input.replicaKeyEnvelope,
+    replicaRef: input.replicaRef,
+    state: input.state,
   };
 }
 
-function createRootKeyEnvelope() {
+function createReplicaRef() {
   return {
-    createdAt: "2026-04-17T08:10:36.000Z",
+    byteLength: 128,
+    dataVersion: "d".repeat(64),
+    generatedAt: "2026-04-20T08:00:00.000Z",
+    keyId: "browser-vault-replica:d",
+    objectKey: "users/browser-vault-replicas/opaque/replica.json",
+    replicaSchema: "murph.browser-vault-replica.v1" as const,
+    schema: "murph.hosted-browser-vault-replica-ref.v1" as const,
+    sourceBundleHash: "a".repeat(64),
+  };
+}
+
+function createReplicaAad() {
+  return {
+    dataVersion: "d".repeat(64),
+    objectKey: "users/browser-vault-replicas/opaque/replica.json",
+    purpose: "browser-vault-replica" as const,
+    schema: "murph.browser-vault-replica.v1" as const,
+    sourceBundleHash: "a".repeat(64),
+    userId: "user_123",
+  };
+}
+
+function createReplicaEnvelope() {
+  return {
+    algorithm: "AES-GCM" as const,
+    ciphertext: "ciphertext",
+    iv: "iv",
+    keyId: "browser-vault-replica:d",
+    schema: "murph.hosted-cipher.v1",
+    scope: "browser-vault-replica" as const,
+  };
+}
+
+function createReplicaKeyEnvelope() {
+  return {
+    createdAt: "2026-04-20T08:00:00.000Z",
+    keyId: "browser-vault-replica:d",
+    purpose: "browser-vault-replica" as const,
     recipients: [
       {
         ciphertext: "ciphertext",
@@ -273,33 +339,12 @@ function createRootKeyEnvelope() {
           y: "ephemeral-y",
         },
         iv: "iv",
-        keyId: "browser-session:test",
-        kind: "user-unlock",
+        keyId: "browser-vault-replica:d",
+        kind: "browser-session" as const,
       },
     ],
-    rootKeyId: "urk:test",
-    schema: "murph.hosted-user-root-key-envelope.v1",
-    updatedAt: "2026-04-17T08:10:36.000Z",
+    schema: "murph.hosted-browser-session-key-envelope.v1" as const,
     userId: "user_123",
-  };
-}
-
-function createSnapshotAad() {
-  return {
-    key: "users/browser-vault-snapshots/opaque.json",
-    purpose: "browser-vault-snapshot" as const,
-    userId: "user_123",
-  };
-}
-
-function createSnapshotEnvelope() {
-  return {
-    algorithm: "AES-GCM" as const,
-    ciphertext: "ciphertext",
-    iv: "iv",
-    keyId: "urk:test",
-    schema: "murph.hosted-cipher.v1",
-    scope: "browser-vault-snapshot" as const,
   };
 }
 
