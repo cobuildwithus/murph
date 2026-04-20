@@ -51,8 +51,9 @@ import type {
   NormalizedHostedAssistantRuntimeConfig,
   HostedWorkspaceArtifactMaterializer,
 } from "./models.ts";
+import { exportHostedPendingAssistantRuntimeIssues } from "./issues.ts";
 import { exportHostedPendingAssistantUsage } from "./usage.ts";
-import { exportHostedBrowserVaultSnapshot } from "./browser-vault.ts";
+import { exportHostedBrowserVaultReplica } from "./browser-vault.ts";
 import { computeHostedRunElapsedMs, resolveHostedWake } from "./utils.ts";
 
 const HOSTED_IMMEDIATE_MAINTENANCE_PASS_BUDGET = 8;
@@ -704,6 +705,24 @@ async function finalizeHostedCommittedRunAfterCommit(input: {
       run: input.run ?? null,
     });
   });
+  await exportHostedPendingAssistantRuntimeIssues({
+    issueExportPort: input.runtime.platform.issueExportPort,
+    vaultRoot: input.restored.vaultRoot,
+  }).catch((error) => {
+    emitHostedExecutionStructuredLog({
+      component: "runtime",
+      wake: input.wake,
+      error,
+      level: "warn",
+      details: {
+        runElapsedMs: computeHostedRunElapsedMs(input.run ?? null),
+      },
+      message:
+        "Hosted runtime could not export pending assistant runtime issues after draining side effects; leaving the pending issue records in the final bundle.",
+      phase: "side-effects.draining",
+      run: input.run ?? null,
+    });
+  });
   await refreshAssistantStatusSnapshot(input.restored.vaultRoot).catch((error) => {
     emitHostedExecutionStructuredLog({
       component: "runtime",
@@ -785,8 +804,8 @@ async function finalizeHostedCommittedRunAfterCommit(input: {
     bundle: encodeHostedBundleBase64(finalSnapshot.bundle),
     result: input.committedExecution.committedResult.result,
   };
-  const browserVaultSnapshot = await exportHostedBrowserVaultSnapshot({
-    sourceVersion: sha256HostedBundleHex(finalSnapshot.bundle),
+  const browserVaultReplica = await exportHostedBrowserVaultReplica({
+    sourceBundleHash: sha256HostedBundleHex(finalSnapshot.bundle),
     vaultRoot: input.restored.vaultRoot,
   }).catch((error) => {
     emitHostedExecutionStructuredLog({
@@ -798,7 +817,7 @@ async function finalizeHostedCommittedRunAfterCommit(input: {
         runElapsedMs: computeHostedRunElapsedMs(input.run ?? null),
       },
       message:
-        "Hosted runtime could not export the browser vault snapshot; returning the final bundle without it.",
+        "Hosted runtime could not export the browser vault replica; returning the final bundle without it.",
       phase: "completed",
       run: input.run ?? null,
     });
@@ -807,7 +826,7 @@ async function finalizeHostedCommittedRunAfterCommit(input: {
 
   return {
     assistantDeliveryOutcomes,
-    browserVaultSnapshot,
+    browserVaultReplica,
     finalGatewayProjectionSnapshot,
     phase: "completed",
     result: finalResult,

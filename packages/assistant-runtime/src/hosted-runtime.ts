@@ -309,6 +309,7 @@ function buildHostedRuntimeStartDetails(
     platformBindings: {
       artifactStoreBound: Boolean(runtime.platform.artifactStore),
       effectsPortBound: Boolean(runtime.platform.effectsPort),
+      issueExportBound: Boolean(runtime.platform.issueExportPort),
       usageExportBound: Boolean(runtime.platform.usageExportPort),
     },
     runElapsedMs: computeHostedRunElapsedMs(input.request.run ?? null),

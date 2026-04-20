@@ -14,6 +14,8 @@ export type {
   HostedRuntimeArtifactStore,
   HostedRuntimeDeviceSyncPort,
   HostedRuntimeEffectsPort,
+  HostedRuntimeIssueExportPort,
+  HostedRuntimeIssueRecordResponse,
   HostedRuntimePlatform,
   HostedRuntimeUsageExportPort,
   HostedRuntimeUsageRecordResponse,
@@ -24,6 +26,7 @@ export {
   parseHostedAssistantRuntimeJobRequest,
 } from "./hosted-runtime/parsers.ts";
 export {
+  parseHostedRuntimeIssueRecordResponse,
   parseHostedRuntimeUsageRecordResponse,
 } from "./hosted-runtime/platform.ts";
 export {

@@ -35,6 +35,7 @@ const seamMocks = vi.hoisted(() => ({
   resolveAssistantExecutionPlan: vi.fn(),
   resolveAssistantSession: vi.fn(),
   resolveAssistantUsageCredentialSource: vi.fn(),
+  sanitizeAssistantProviderResponseForVisibility: vi.fn(),
   sanitizeAssistantOutboundReply: vi.fn(),
   writePendingAssistantUsageRecord: vi.fn(),
 }));
@@ -103,6 +104,8 @@ vi.mock("../src/assistant/outbox.js", async () => {
 });
 
 vi.mock("../src/assistant/reply-sanitizer.js", () => ({
+  sanitizeAssistantProviderResponseForVisibility:
+    seamMocks.sanitizeAssistantProviderResponseForVisibility,
   sanitizeAssistantOutboundReply: seamMocks.sanitizeAssistantOutboundReply,
 }));
 
@@ -187,6 +190,13 @@ beforeEach(() => {
   seamMocks.resolveAssistantUsageCredentialSource
     .mockReset()
     .mockReturnValue("hosted-user-env");
+  seamMocks.sanitizeAssistantProviderResponseForVisibility
+    .mockReset()
+    .mockImplementation(({ response }: { response: string }) => ({
+      devNotes: [],
+      stripped: false,
+      text: `sanitized:${response}`,
+    }));
   seamMocks.sanitizeAssistantOutboundReply
     .mockReset()
     .mockImplementation((response: string) => `sanitized:${response}`);
@@ -806,10 +816,17 @@ describe("assistant delivery orchestration seam", () => {
       session,
     });
 
-    expect(seamMocks.sanitizeAssistantOutboundReply).toHaveBeenCalledWith(
-      "reply body",
-      "local"
-    );
+    expect(
+      seamMocks.sanitizeAssistantProviderResponseForVisibility
+    ).toHaveBeenCalledWith({
+      channel: "telegram",
+      diagnosticsPolicy: expect.objectContaining({
+        devNotesVisibleToUser: false,
+        environment: "local",
+        issueReportingMode: "hosted-private",
+      }),
+      response: "reply body",
+    });
     expect(runtimeState.outbox.deliverMessage).toHaveBeenCalledWith({
       actorId: "audience-actor",
       bindingDelivery: {
@@ -829,6 +846,97 @@ describe("assistant delivery orchestration seam", () => {
       threadIsDirect: false,
       turnId: "turn-2",
     });
+  });
+
+  it("preserves explicitly enabled local dev notes in delivered outbound messages", async () => {
+    const originalEnv = process.env.MURPH_ASSISTANT_DEV_NOTES_VISIBLE;
+    process.env.MURPH_ASSISTANT_DEV_NOTES_VISIBLE = "1";
+    seamMocks.sanitizeAssistantProviderResponseForVisibility.mockImplementation(
+      ({
+        diagnosticsPolicy,
+        response,
+      }: {
+        diagnosticsPolicy: { devNotesVisibleToUser: boolean };
+        response: string;
+      }) => ({
+        devNotes: [],
+        stripped: !diagnosticsPolicy.devNotesVisibleToUser,
+        text: diagnosticsPolicy.devNotesVisibleToUser ? response : "stripped",
+      }),
+    );
+    runtimeState.outbox.deliverMessage.mockResolvedValue({
+      delivery: {
+        channel: "email",
+        idempotencyKey: "idem-visible-dev",
+        messageLength: 32,
+        providerMessageId: "provider-visible-dev",
+        providerThreadId: null,
+        sentAt: "2026-04-08T11:05:00.000Z",
+        target: "person@example.com",
+        targetKind: "explicit",
+      },
+      intent: {
+        intentId: "intent-visible-dev",
+      },
+      kind: "sent",
+      session: null,
+    });
+
+    try {
+      await deliverAssistantReply({
+        input: {
+          deliverResponse: true,
+          prompt: "hello",
+          vault: "/vault",
+        },
+        response: "Visible reply\n\n[DEV] local note",
+        session: createAssistantSession({
+          binding: {
+            actorId: "binding-actor",
+            channel: "email",
+            conversationKey: "binding-key",
+            delivery: {
+              kind: "participant",
+              target: "binding-delivery",
+            },
+            identityId: "binding-identity",
+            threadId: "binding-thread",
+            threadIsDirect: true,
+          },
+        }),
+        sharedPlan: createSharedPlan({
+          conversationPolicy: {
+            audience: {
+              channel: "email",
+            },
+          },
+        }),
+        turnId: "turn-visible-dev",
+      });
+    } finally {
+      if (originalEnv === undefined) {
+        delete process.env.MURPH_ASSISTANT_DEV_NOTES_VISIBLE;
+      } else {
+        process.env.MURPH_ASSISTANT_DEV_NOTES_VISIBLE = originalEnv;
+      }
+    }
+
+    expect(
+      seamMocks.sanitizeAssistantProviderResponseForVisibility,
+    ).toHaveBeenCalledWith({
+      channel: "email",
+      diagnosticsPolicy: expect.objectContaining({
+        devNotesVisibleToUser: true,
+        environment: "local",
+        issueReportingMode: "local-visible",
+      }),
+      response: "Visible reply\n\n[DEV] local note",
+    });
+    expect(runtimeState.outbox.deliverMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: "Visible reply\n\n[DEV] local note",
+      }),
+    );
   });
 
   it("maps queued, failed, and unknown delivery results into public outcomes", async () => {

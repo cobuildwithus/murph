@@ -20,6 +20,10 @@ import {
   shouldExposeSensitiveHealthContext,
 } from '../src/assistant/conversation-policy.ts'
 import {
+  recordAssistantStrippedDevNoteRuntimeIssue,
+  resolveAssistantDiagnosticsPolicy,
+} from '../src/assistant/issue-reporting.ts'
+import {
   hasAssistantSeenFirstContact,
   markAssistantFirstContactSeen,
   resolveAssistantFirstContactStateDocIds,
@@ -46,6 +50,7 @@ import {
   isAssistantOutboundReplyChannel,
   isAssistantSourceReference,
   looksLikeAssistantSourceReferenceClause,
+  sanitizeAssistantProviderResponseForVisibility,
   sanitizeAssistantOutboundReply,
   stripAssistantSourceCalloutPrefix,
   stripInlineAssistantSourceReferences,
@@ -76,6 +81,19 @@ import {
 } from '../src/assistant/store/paths.ts'
 import { createTempVaultContext } from './test-helpers.js'
 
+const runtimeStateMocks = vi.hoisted(() => ({
+  writePendingAssistantRuntimeIssueRecord: vi.fn(),
+}))
+
+vi.mock('@murphai/runtime-state/node', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@murphai/runtime-state/node')>()
+  return {
+    ...actual,
+    writePendingAssistantRuntimeIssueRecord:
+      runtimeStateMocks.writePendingAssistantRuntimeIssueRecord,
+  }
+})
+
 const tempRoots: string[] = []
 
 afterEach(async () => {
@@ -88,6 +106,7 @@ afterEach(async () => {
   vi.doUnmock('../src/assistant/runtime-state-service.js')
   vi.doUnmock('../src/assistant/runtime-events.js')
   vi.doUnmock('../src/assistant/session-resolution.js')
+  vi.doUnmock('@murphai/runtime-state/node')
   vi.doUnmock('../src/assistant/first-contact.js')
   vi.doUnmock('../src/assistant/quarantine.js')
   vi.doUnmock('../src/assistant/cron.js')
@@ -627,6 +646,86 @@ describe('assistant product small seams', () => {
         'telegram',
       ),
     ).toBe(['Keep [docs](https://example.com/docs).', 'hello'].join('\n'))
+  })
+
+  it('strips accidental [DEV] notes on user-facing channels and records a sanitized pending issue', async () => {
+    runtimeStateMocks.writePendingAssistantRuntimeIssueRecord.mockResolvedValueOnce(undefined)
+
+    const hostedPolicy = resolveAssistantDiagnosticsPolicy({
+      channel: 'telegram',
+      env: {},
+      executionContext: {
+        hosted: {
+          memberId: 'member-1',
+          userEnvKeys: [],
+        },
+      },
+    })
+    expect(hostedPolicy.environment).toBe('hosted')
+    expect(hostedPolicy.devNotesVisibleToUser).toBe(false)
+    expect(hostedPolicy.issueReportingMode).toBe('hosted-private')
+
+    const localUserFacingPolicy = resolveAssistantDiagnosticsPolicy({
+      channel: 'email',
+      env: {},
+      executionContext: null,
+    })
+    expect(localUserFacingPolicy.environment).toBe('local')
+    expect(localUserFacingPolicy.devNotesVisibleToUser).toBe(false)
+    expect(localUserFacingPolicy.issueReportingMode).toBe('hosted-private')
+
+    const visibleReply = sanitizeAssistantProviderResponseForVisibility({
+      channel: 'email',
+      diagnosticsPolicy: localUserFacingPolicy,
+      response: [
+        'Thanks for the report.',
+        '',
+        '[DEV] internal note with token abc123 and /tmp/private-path',
+      ].join('\n'),
+    })
+
+    expect(visibleReply.stripped).toBe(true)
+    expect(visibleReply.text).toBe('Thanks for the report.')
+    expect(visibleReply.devNotes).toHaveLength(1)
+
+    const strippedDevNote = visibleReply.devNotes[0]
+    expect(strippedDevNote?.noteCharCount).toBeGreaterThan(0)
+
+    await recordAssistantStrippedDevNoteRuntimeIssue({
+      devNote: strippedDevNote!,
+      policy: localUserFacingPolicy,
+      vault: '/vaults/test',
+    })
+
+    expect(
+      runtimeStateMocks.writePendingAssistantRuntimeIssueRecord,
+    ).toHaveBeenCalledTimes(1)
+    expect(
+      runtimeStateMocks.writePendingAssistantRuntimeIssueRecord,
+    ).toHaveBeenCalledWith({
+      vault: '/vaults/test',
+      record: expect.objectContaining({
+        component: 'assistant.reply-finalizer',
+        details: {
+          noteCharCount: strippedDevNote?.noteCharCount,
+        },
+        environment: 'local',
+        errorCode: null,
+        issueKind: 'dev_note_stripped',
+        operation: null,
+        phase: 'final_response',
+        severity: 'warning',
+        summary:
+          'Assistant produced a visible developer note on a surface where developer notes are hidden.',
+      }),
+    })
+
+    const writtenRecord =
+      runtimeStateMocks.writePendingAssistantRuntimeIssueRecord.mock.calls[0]?.[0]
+        ?.record as { details?: Record<string, unknown>; summary?: string } | undefined
+    expect(JSON.stringify(writtenRecord)).not.toContain('[DEV]')
+    expect(JSON.stringify(writtenRecord)).not.toContain('token abc123')
+    expect(JSON.stringify(writtenRecord)).not.toContain('/tmp/private-path')
   })
 
   it('builds execution plans from explicit targets and rejects missing targets', async () => {

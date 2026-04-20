@@ -299,6 +299,7 @@ model HostedExecutionCursor {
   nextRuntimeWakeAt DateTime? @map("next_runtime_wake_at")
   nextRuntimeWakeReason String? @map("next_runtime_wake_reason")
   snapshotRef  Json?        @map("snapshot_ref")
+  browserVaultReplicaRef Json? @map("browser_vault_replica_ref")
   version      BigInt       @default(0) @map("version")
   createdAt    DateTime     @default(now()) @map("created_at")
   updatedAt    DateTime     @updatedAt @map("updated_at")
@@ -579,6 +580,33 @@ model HostedAiUsage {
   @@index([stripeMeterStatus, occurredAt])
   @@index([turnId, attemptCount])
   @@map("hosted_ai_usage")
+}
+
+model HostedAssistantRuntimeIssue {
+  id          String   @id
+  occurredAt  DateTime @map("occurred_at")
+  expiresAt   DateTime @map("expires_at")
+  environment String
+  surface     String?
+  phase       String
+  severity    String
+  issueKind   String   @map("issue_kind")
+  component   String
+  operation   String?
+  errorCode   String?  @map("error_code")
+  summary     String
+  fingerprint String
+  detailsJson Json     @map("details_json")
+  releaseSha  String?  @map("release_sha")
+  runtimeName String?  @map("runtime_name")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@index([fingerprint, occurredAt])
+  @@index([severity, occurredAt])
+  @@index([issueKind, occurredAt])
+  @@index([expiresAt])
+  @@map("hosted_assistant_runtime_issue")
 }
 
 model HostedLinqDailyState {

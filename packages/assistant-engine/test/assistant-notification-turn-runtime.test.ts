@@ -141,7 +141,11 @@ test('sendAssistantNotificationLocal persists the turn before outbound delivery 
     })),
     resolveAssistantTurnRoutes: vi.fn(() => [providerResult.route]),
     resolveAssistantTurnSharedPlan: vi.fn(async () => sharedPlan),
-    sanitizeAssistantOutboundReply: vi.fn(() => 'Sanitized notification text'),
+    sanitizeAssistantProviderResponseForVisibility: vi.fn((input) => ({
+      devNotes: [],
+      stripped: false,
+      text: input.response === '' ? '' : 'Sanitized notification text',
+    })),
     withAssistantTurnLock: vi.fn(async (input: { run(): Promise<unknown> }) => await input.run()),
   }
 
@@ -190,7 +194,8 @@ test('sendAssistantNotificationLocal persists the turn before outbound delivery 
     createAssistantTurnId: () => 'turn-notification',
   }))
   vi.doMock('../src/assistant/reply-sanitizer.js', () => ({
-    sanitizeAssistantOutboundReply: mocks.sanitizeAssistantOutboundReply,
+    sanitizeAssistantProviderResponseForVisibility:
+      mocks.sanitizeAssistantProviderResponseForVisibility,
   }))
   vi.doMock('../src/assistant/turn-lock.js', () => ({
     withAssistantTurnLock: mocks.withAssistantTurnLock,
@@ -292,6 +297,175 @@ test('sendAssistantNotificationLocal persists the turn before outbound delivery 
   })
 })
 
+test('sendAssistantNotificationLocal preserves explicit local dev-note visibility on outbound delivery', async () => {
+  const originalEnv = process.env.MURPH_ASSISTANT_DEV_NOTES_VISIBLE
+  process.env.MURPH_ASSISTANT_DEV_NOTES_VISIBLE = '1'
+  const providerSession = createAssistantSession({
+    binding: {
+      actorId: 'actor-local-visible',
+      channel: 'email',
+      conversationKey: null,
+      delivery: {
+        kind: 'participant',
+        target: 'local-visible@example.com',
+      },
+      identityId: 'identity-local-visible',
+      threadId: 'thread-local-visible',
+      threadIsDirect: true,
+    },
+  })
+  const sharedPlan = createSharedPlan()
+  sharedPlan.conversationPolicy.audience.channel = 'email'
+  const providerResult = createProviderResult({
+    response: JSON.stringify({
+      kind: 'send_message',
+      text: 'Visible notification text\n\n[DEV] local note',
+      privateSummary: 'summary',
+    }),
+    session: providerSession,
+  })
+  const deliverMessage = vi.fn(async () => ({
+    delivery: null,
+    intent: {
+      intentId: 'intent-local-visible',
+    },
+    kind: 'sent',
+    session: null,
+  }))
+  const mocks = {
+    createAssistantRuntimeStateService: vi.fn(() => ({
+      outbox: {
+        deliverMessage,
+      },
+    })),
+    executeProviderTurnWithRecovery: vi.fn(async () => ({
+      kind: 'succeeded',
+      providerTurn: providerResult,
+    })),
+    normalizeAssistantExecutionContext: vi.fn((value) => value),
+    resolveAssistantExecutionDefaultTarget: vi.fn((input) =>
+      input.executionContext?.hosted?.defaultTarget ?? input.fallbackTarget,
+    ),
+    resolveAssistantExecutionOperatorDefaults: vi.fn((input) =>
+      input.executionContext?.hosted?.defaultTarget
+        ? {
+            ...(input.defaults ?? {}),
+            backend: input.executionContext.hosted.defaultTarget,
+          }
+        : (input.defaults ?? null),
+    ),
+    persistAssistantTurnAndSession: vi.fn(async () => providerSession),
+    persistPendingAssistantUsageEvent: vi.fn(async () => undefined),
+    prioritizeAssistantRoutesForRichUserMessageContent: vi.fn((input) => input.routes),
+    resolveAssistantOperatorDefaults: vi.fn(async () => ({
+      timezone: 'Australia/Sydney',
+    })),
+    resolveAssistantSessionForMessage: vi.fn(async () => ({
+      session: providerSession,
+    })),
+    resolveAssistantTurnRoutes: vi.fn(() => [providerResult.route]),
+    resolveAssistantTurnSharedPlan: vi.fn(async () => sharedPlan),
+    sanitizeAssistantProviderResponseForVisibility: vi.fn((input) => ({
+      devNotes: [],
+      stripped: !input.diagnosticsPolicy.devNotesVisibleToUser,
+      text: input.diagnosticsPolicy.devNotesVisibleToUser
+        ? input.response
+        : 'stripped',
+    })),
+    withAssistantTurnLock: vi.fn(async (input: { run(): Promise<unknown> }) => await input.run()),
+  }
+
+  vi.doMock('@murphai/operator-config/operator-config', () => ({
+    resolveAssistantOperatorDefaults: mocks.resolveAssistantOperatorDefaults,
+  }))
+  vi.doMock('@murphai/operator-config/assistant-backend', () => ({
+    createDefaultLocalAssistantModelTarget: () => ({
+      adapter: 'openai-compatible',
+      model: 'gpt-5.4',
+    }),
+  }))
+  vi.doMock('../src/assistant/runtime-state-service.js', () => ({
+    createAssistantRuntimeStateService: mocks.createAssistantRuntimeStateService,
+  }))
+  vi.doMock('../src/assistant/execution-context.js', () => ({
+    normalizeAssistantExecutionContext: mocks.normalizeAssistantExecutionContext,
+    resolveAssistantExecutionDefaultTarget:
+      mocks.resolveAssistantExecutionDefaultTarget,
+    resolveAssistantExecutionOperatorDefaults:
+      mocks.resolveAssistantExecutionOperatorDefaults,
+  }))
+  vi.doMock('../src/assistant/session-resolution.js', () => ({
+    resolveAssistantSessionForMessage: mocks.resolveAssistantSessionForMessage,
+  }))
+  vi.doMock('../src/assistant/turn-plan.js', () => ({
+    resolveAssistantTurnSharedPlan: mocks.resolveAssistantTurnSharedPlan,
+  }))
+  vi.doMock('../src/assistant/provider-turn-runner.js', () => ({
+    executeProviderTurnWithRecovery: mocks.executeProviderTurnWithRecovery,
+  }))
+  vi.doMock('../src/assistant/service-usage.js', () => ({
+    persistPendingAssistantUsageEvent: mocks.persistPendingAssistantUsageEvent,
+  }))
+  vi.doMock('../src/assistant/turn-finalizer.js', () => ({
+    persistAssistantTurnAndSession: mocks.persistAssistantTurnAndSession,
+  }))
+  vi.doMock('../src/assistant/service-turn-routes.js', () => ({
+    resolveAssistantTurnRoutes: mocks.resolveAssistantTurnRoutes,
+  }))
+  vi.doMock('../src/assistant/rich-content-routing.js', () => ({
+    prioritizeAssistantRoutesForRichUserMessageContent:
+      mocks.prioritizeAssistantRoutesForRichUserMessageContent,
+  }))
+  vi.doMock('../src/assistant/turns.js', () => ({
+    createAssistantTurnId: () => 'turn-notification-local-visible',
+  }))
+  vi.doMock('../src/assistant/reply-sanitizer.js', () => ({
+    sanitizeAssistantProviderResponseForVisibility:
+      mocks.sanitizeAssistantProviderResponseForVisibility,
+  }))
+  vi.doMock('../src/assistant/turn-lock.js', () => ({
+    withAssistantTurnLock: mocks.withAssistantTurnLock,
+  }))
+
+  try {
+    const { sendAssistantNotificationLocal } = await import(
+      '../src/assistant/notification-turn.ts'
+    )
+
+    const result = await sendAssistantNotificationLocal({
+      executionContext: {
+        hosted: null,
+      },
+      instructions: 'Deliver this',
+      vault: '/vaults/local-visible',
+    })
+
+    expect(result.response).toBe('Visible notification text\n\n[DEV] local note')
+    expect(
+      mocks.sanitizeAssistantProviderResponseForVisibility,
+    ).toHaveBeenCalledWith({
+      channel: 'email',
+      diagnosticsPolicy: expect.objectContaining({
+        devNotesVisibleToUser: true,
+        environment: 'local',
+        issueReportingMode: 'local-visible',
+      }),
+      response: 'Visible notification text\n\n[DEV] local note',
+    })
+    expect(deliverMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: 'Visible notification text\n\n[DEV] local note',
+      }),
+    )
+  } finally {
+    if (originalEnv === undefined) {
+      delete process.env.MURPH_ASSISTANT_DEV_NOTES_VISIBLE
+    } else {
+      process.env.MURPH_ASSISTANT_DEV_NOTES_VISIBLE = originalEnv
+    }
+  }
+})
+
 test('sendAssistantNotificationLocal returns skip decisions without persisting or delivering', async () => {
   const providerSession = createAssistantSession({
     binding: {
@@ -350,7 +524,11 @@ test('sendAssistantNotificationLocal returns skip decisions without persisting o
     })),
     resolveAssistantTurnRoutes: vi.fn(() => [providerResult.route]),
     resolveAssistantTurnSharedPlan: vi.fn(async () => sharedPlan),
-    sanitizeAssistantOutboundReply: vi.fn(() => 'unused'),
+    sanitizeAssistantProviderResponseForVisibility: vi.fn(() => ({
+      devNotes: [],
+      stripped: false,
+      text: 'unused',
+    })),
     withAssistantTurnLock: vi.fn(async (input: { run(): Promise<unknown> }) => await input.run()),
   }
 
@@ -399,7 +577,8 @@ test('sendAssistantNotificationLocal returns skip decisions without persisting o
     createAssistantTurnId: () => 'turn-notification-skip',
   }))
   vi.doMock('../src/assistant/reply-sanitizer.js', () => ({
-    sanitizeAssistantOutboundReply: mocks.sanitizeAssistantOutboundReply,
+    sanitizeAssistantProviderResponseForVisibility:
+      mocks.sanitizeAssistantProviderResponseForVisibility,
   }))
   vi.doMock('../src/assistant/turn-lock.js', () => ({
     withAssistantTurnLock: mocks.withAssistantTurnLock,
@@ -478,7 +657,11 @@ test('sendAssistantNotificationLocal surfaces failed delivery results', async ()
     })),
     resolveAssistantTurnRoutes: vi.fn(() => [providerResult.route]),
     resolveAssistantTurnSharedPlan: vi.fn(async () => sharedPlan),
-    sanitizeAssistantOutboundReply: vi.fn(() => 'sanitized'),
+    sanitizeAssistantProviderResponseForVisibility: vi.fn(() => ({
+      devNotes: [],
+      stripped: false,
+      text: 'sanitized',
+    })),
     withAssistantTurnLock: vi.fn(async (input: { run(): Promise<unknown> }) => await input.run()),
   }
 
@@ -527,7 +710,8 @@ test('sendAssistantNotificationLocal surfaces failed delivery results', async ()
     createAssistantTurnId: () => 'turn-notification-delivery-error',
   }))
   vi.doMock('../src/assistant/reply-sanitizer.js', () => ({
-    sanitizeAssistantOutboundReply: mocks.sanitizeAssistantOutboundReply,
+    sanitizeAssistantProviderResponseForVisibility:
+      mocks.sanitizeAssistantProviderResponseForVisibility,
   }))
   vi.doMock('../src/assistant/turn-lock.js', () => ({
     withAssistantTurnLock: mocks.withAssistantTurnLock,
@@ -607,7 +791,11 @@ test('sendAssistantNotificationLocal rejects email thread subject overrides befo
     })),
     resolveAssistantTurnRoutes: vi.fn(() => [providerResult.route]),
     resolveAssistantTurnSharedPlan: vi.fn(async () => sharedPlan),
-    sanitizeAssistantOutboundReply: vi.fn(() => 'sanitized'),
+    sanitizeAssistantProviderResponseForVisibility: vi.fn(() => ({
+      devNotes: [],
+      stripped: false,
+      text: 'sanitized',
+    })),
     withAssistantTurnLock: vi.fn(async (input: { run(): Promise<unknown> }) => await input.run()),
   }
 
@@ -656,7 +844,8 @@ test('sendAssistantNotificationLocal rejects email thread subject overrides befo
     createAssistantTurnId: () => 'turn-notification-thread-subject',
   }))
   vi.doMock('../src/assistant/reply-sanitizer.js', () => ({
-    sanitizeAssistantOutboundReply: mocks.sanitizeAssistantOutboundReply,
+    sanitizeAssistantProviderResponseForVisibility:
+      mocks.sanitizeAssistantProviderResponseForVisibility,
   }))
   vi.doMock('../src/assistant/turn-lock.js', () => ({
     withAssistantTurnLock: mocks.withAssistantTurnLock,

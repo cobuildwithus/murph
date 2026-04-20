@@ -234,6 +234,7 @@ CREATE TABLE "hosted_execution_cursor" (
     "next_runtime_wake_at" TIMESTAMP(3),
     "next_runtime_wake_reason" TEXT,
     "snapshot_ref" JSONB,
+    "browser_vault_replica_ref" JSONB,
     "version" BIGINT NOT NULL DEFAULT 0,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMP(3) NOT NULL,
@@ -467,6 +468,30 @@ CREATE TABLE "hosted_ai_usage" (
     "updated_at" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "hosted_ai_usage_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "hosted_assistant_runtime_issue" (
+    "id" TEXT NOT NULL,
+    "occurred_at" TIMESTAMP(3) NOT NULL,
+    "expires_at" TIMESTAMP(3) NOT NULL,
+    "environment" TEXT NOT NULL,
+    "surface" TEXT,
+    "phase" TEXT NOT NULL,
+    "severity" TEXT NOT NULL,
+    "issue_kind" TEXT NOT NULL,
+    "component" TEXT NOT NULL,
+    "operation" TEXT,
+    "error_code" TEXT,
+    "summary" TEXT NOT NULL,
+    "fingerprint" TEXT NOT NULL,
+    "details_json" JSONB NOT NULL,
+    "release_sha" TEXT,
+    "runtime_name" TEXT,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "hosted_assistant_runtime_issue_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -758,6 +783,18 @@ CREATE INDEX "hosted_ai_usage_stripe_meter_status_occurred_at_idx" ON "hosted_ai
 
 -- CreateIndex
 CREATE INDEX "hosted_ai_usage_turn_id_attempt_count_idx" ON "hosted_ai_usage"("turn_id", "attempt_count");
+
+-- CreateIndex
+CREATE INDEX "hosted_assistant_runtime_issue_fingerprint_occurred_at_idx" ON "hosted_assistant_runtime_issue"("fingerprint", "occurred_at");
+
+-- CreateIndex
+CREATE INDEX "hosted_assistant_runtime_issue_severity_occurred_at_idx" ON "hosted_assistant_runtime_issue"("severity", "occurred_at");
+
+-- CreateIndex
+CREATE INDEX "hosted_assistant_runtime_issue_issue_kind_occurred_at_idx" ON "hosted_assistant_runtime_issue"("issue_kind", "occurred_at");
+
+-- CreateIndex
+CREATE INDEX "hosted_assistant_runtime_issue_expires_at_idx" ON "hosted_assistant_runtime_issue"("expires_at");
 
 -- CreateIndex
 CREATE INDEX "hosted_linq_daily_state_day_utc_idx" ON "hosted_linq_daily_state"("day_utc");

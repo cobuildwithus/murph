@@ -10,6 +10,7 @@ import {
   buildAssistantExecutionBehaviorText,
   type AssistantModelBehaviorProfile,
 } from "./model-behavior.js";
+import type { AssistantDiagnosticsPolicy } from "./issue-reporting.js";
 
 export interface AssistantSystemPromptInput {
   assistantCliContract: string | null;
@@ -21,6 +22,7 @@ export interface AssistantSystemPromptInput {
   cliAccess: Pick<AssistantCliAccessContext, "rawCommand" | "setupCommand">;
   currentLocalDate: string;
   currentTimeZone: string;
+  diagnosticsPolicy: AssistantDiagnosticsPolicy;
   firstTurnCheckIn: boolean;
   modelBehaviorProfile: AssistantModelBehaviorProfile;
   turnTrigger?: AssistantTurnTrigger | null;
@@ -32,6 +34,7 @@ export interface AssistantNotificationDecisionSystemPromptInput {
   channel: string | null;
   currentLocalDate: string;
   currentTimeZone: string;
+  diagnosticsPolicy: AssistantDiagnosticsPolicy;
   vaultOverview?: string | null;
 }
 
@@ -67,7 +70,10 @@ export function buildAssistantSystemPrompt(
       profile: input.modelBehaviorProfile,
     }),
     input.vaultOverview ?? null,
-    buildAssistantAudienceSafetyText(input.allowSensitiveHealthContext),
+    buildAssistantAudienceSafetyText({
+      allowSensitiveHealthContext: input.allowSensitiveHealthContext,
+      diagnosticsPolicy: input.diagnosticsPolicy,
+    }),
     buildAssistantToolTruthfulnessText(),
     buildAssistantEvidenceAndReplyStyleText(input.channel),
     buildAssistantExecutionContextText({
@@ -99,7 +105,10 @@ export function buildAssistantNotificationDecisionSystemPrompt(
     buildAssistantProductPrinciplesText(),
     buildAssistantHealthReasoningText(),
     input.vaultOverview ?? null,
-    buildAssistantAudienceSafetyText(input.allowSensitiveHealthContext),
+    buildAssistantAudienceSafetyText({
+      allowSensitiveHealthContext: input.allowSensitiveHealthContext,
+      diagnosticsPolicy: input.diagnosticsPolicy,
+    }),
     buildAssistantToolTruthfulnessText(),
     buildAssistantNotificationDecisionGuidanceText(input.channel)
   );
@@ -178,18 +187,29 @@ ${routeEstimateLine}
 - Use the matching write surface directly for straightforward captures and memory updates. Shared health data like meals, journals, blood tests, medications, supplements, and symptoms counts as permission to use the matching write surface. Treat a successful save receipt as confirmation the requested write completed. If the result says nothing changed, do not claim that something new was saved. Slow down only when the target record or command is unclear.`;
 }
 
-function buildAssistantAudienceSafetyText(
-  allowSensitiveHealthContext: boolean
-): string {
-  if (allowSensitiveHealthContext) {
-    return `This conversation is private enough for full health context when needed, but still surface only the details that are relevant to the current task.
-    Do not save personally identifiable information to the vault, such as addresses, phone numbers, SSNs, or card numbers, unless you are editing a delivery method such as assistant replies like email or Telegram.
-    Important: We are currently in developer mode and I want to be able to make your job easier as an assistant. So if you get hung up on any commands, if anything fails, if anything is hard to use, or you have any sort of trouble operating over the vault or reasoning over your instructions, please at the end of your message to the user, if applicable, add "[DEV]" and then detail what was difficult for you or went wrong in your tool calls/reasoning. `;
+function buildAssistantAudienceSafetyText(input: {
+  allowSensitiveHealthContext: boolean;
+  diagnosticsPolicy: AssistantDiagnosticsPolicy;
+}): string {
+  if (input.allowSensitiveHealthContext) {
+    return joinPromptSections(
+      `This conversation is private enough for full health context when needed, but still surface only the details that are relevant to the current task.
+Do not save personally identifiable information to the vault, such as addresses, phone numbers, SSNs, or card numbers, unless you are editing a delivery method such as assistant replies like email or Telegram.`,
+      input.diagnosticsPolicy.devNotesVisibleToUser
+        ? buildAssistantVisibleDevNoteGuidanceText()
+        : null,
+    );
   }
 
   return `This conversation is not private enough for broad sensitive health context.
 Do not volunteer, quote back, or store sensitive health details unless the user just raised them and they are necessary to answer the current request.
 Prefer higher-level wording for sensitive topics, and suggest a more private follow-up when detailed sensitive discussion or durable sensitive memory would be more appropriate.`;
+}
+
+function buildAssistantVisibleDevNoteGuidanceText(): string {
+  return `Local developer note mode is enabled for this non-hosted assistant surface.
+If you get hung up on commands, command schemas, tool results, or runtime instructions in a way that would help the local operator improve Murph, you may append a final section starting with "[DEV]" and briefly describe the tooling issue.
+Do not include secrets, raw credentials, bearer tokens, private file contents, environment values, full local paths, raw tool output, or unrelated user data in a [DEV] note.`;
 }
 
 function buildAssistantToolTruthfulnessText(): string {

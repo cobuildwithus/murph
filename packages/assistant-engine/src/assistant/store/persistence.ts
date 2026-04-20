@@ -82,6 +82,8 @@ export async function ensureAssistantState(
     ensureAssistantStateDirectory(paths.turnsDirectory),
     ensureAssistantStateDirectory(paths.diagnosticsDirectory),
     ensureAssistantStateDirectory(paths.journalsDirectory),
+    ensureAssistantStateDirectory(paths.issuesDirectory),
+    ensureAssistantStateDirectory(paths.issuesPendingDirectory),
     ensureAssistantStateDirectory(paths.quarantineDirectory),
     ensureAssistantStateDirectory(paths.stateDirectory),
     ensureAssistantStateDirectory(paths.secretsDirectory),

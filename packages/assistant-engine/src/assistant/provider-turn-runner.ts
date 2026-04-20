@@ -33,6 +33,11 @@ import {
 } from './system-prompt.js'
 import { resolveAssistantModelBehaviorProfile } from './model-behavior.js'
 import { errorMessage } from './shared.js'
+import {
+  recordAssistantToolFailureRuntimeIssues,
+  resolveAssistantDiagnosticsPolicy,
+  type AssistantDiagnosticsPolicy,
+} from './issue-reporting.js'
 import { resolveAssistantCliSurfaceBootstrapContext } from './cli-surface-bootstrap.js'
 import { buildAssistantVaultOverviewBlock } from './vault-overview.js'
 import {
@@ -83,6 +88,7 @@ interface AssistantRouteTurnPlan {
     role: 'assistant' | 'user'
   }>
   continuityContext: string | null
+  diagnosticsPolicy: AssistantDiagnosticsPolicy
   firstTurnCheckInInjected: boolean
   resumeProviderSessionId: string | null
   sessionContext?: {
@@ -394,6 +400,10 @@ async function resolveAssistantRouteTurnPlan(input: {
       : null
   const shouldInjectBootstrapContext = resumeProviderSessionId === null
   const resolvedChannel = input.input.channel ?? input.session.binding.channel
+  const diagnosticsPolicy = resolveAssistantDiagnosticsPolicy({
+    channel: resolvedChannel,
+    executionContext: input.input.executionContext,
+  })
   const shouldInjectFirstTurnCheckIn =
     input.profile.promptProfile === 'conversation' &&
     input.sharedPlan.firstTurnCheckInEligible &&
@@ -440,6 +450,7 @@ async function resolveAssistantRouteTurnPlan(input: {
     cliEnv: input.sharedPlan.cliAccess.env,
     conversationMessages,
     continuityContext: null,
+    diagnosticsPolicy,
     firstTurnCheckInInjected: shouldInjectFirstTurnCheckIn,
     resumeProviderSessionId,
     sessionContext: shouldInjectBootstrapContext
@@ -455,6 +466,7 @@ async function resolveAssistantRouteTurnPlan(input: {
             channel: resolvedChannel,
             currentLocalDate: input.promptTimeContext.currentLocalDate,
             currentTimeZone: input.promptTimeContext.currentTimeZone,
+            diagnosticsPolicy,
             vaultOverview,
           })
         : buildAssistantSystemPrompt({
@@ -470,6 +482,7 @@ async function resolveAssistantRouteTurnPlan(input: {
             channel: resolvedChannel,
             currentLocalDate: input.promptTimeContext.currentLocalDate,
             currentTimeZone: input.promptTimeContext.currentTimeZone,
+            diagnosticsPolicy,
             firstTurnCheckIn: shouldInjectFirstTurnCheckIn,
             modelBehaviorProfile: resolveAssistantModelBehaviorProfile(
               input.route.providerOptions,
@@ -665,6 +678,11 @@ async function executeAssistantProviderAttempt(input: {
       showThinkingTraces: executionPlan.input.showThinkingTraces ?? false,
     })
     attemptMetadata = attemptResult.metadata
+    await recordAssistantToolFailureRuntimeIssues({
+      policy: attemptPlan.routePlan.diagnosticsPolicy,
+      rawToolEvents: attemptMetadata.rawToolEvents,
+      vault: executionPlan.input.vault,
+    }).catch(() => undefined)
     if (!attemptResult.ok) {
       throw attemptResult.error
     }
