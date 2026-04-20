@@ -27,31 +27,33 @@ import {
 
 const productionNextConfig = buildHostedWebNextConfig(PHASE_PRODUCTION_BUILD);
 const require = createRequire(import.meta.url);
+const repoRoot = process.cwd();
+const hostedWebWorkspaceEntries = resolveHostedWebWorkspaceSourceEntries(path.join(repoRoot, "apps/web"));
 
 test("resolveHostedWebWorkspaceSourceEntries points at hosted source package entries", () => {
   assert.equal(
-    resolveHostedWebWorkspaceSourceEntries("/repo/apps/web")["@murphai/cloudflare-hosted-control"],
-    path.resolve("/repo/packages/cloudflare-hosted-control/src/index.ts"),
+    hostedWebWorkspaceEntries["@murphai/cloudflare-hosted-control"],
+    path.join(repoRoot, "packages/cloudflare-hosted-control/package.json"),
   );
   assert.equal(
-    resolveHostedWebWorkspaceSourceEntries("/repo/apps/web")["@murphai/device-syncd"],
-    path.resolve("/repo/packages/device-syncd/src/index.ts"),
+    hostedWebWorkspaceEntries["@murphai/device-syncd"],
+    path.join(repoRoot, "packages/device-syncd/src/index.ts"),
   );
   assert.equal(
-    resolveHostedWebWorkspaceSourceEntries("/repo/apps/web")["@murphai/gateway-core"],
-    path.resolve("/repo/packages/gateway-core/src/index.ts"),
+    hostedWebWorkspaceEntries["@murphai/gateway-core"],
+    path.join(repoRoot, "packages/gateway-core/src/index.ts"),
   );
   assert.equal(
-    resolveHostedWebWorkspaceSourceEntries("/repo/apps/web")["@murphai/parsers"],
-    path.resolve("/repo/packages/parsers/src/index.ts"),
+    hostedWebWorkspaceEntries["@murphai/parsers"],
+    path.join(repoRoot, "packages/parsers/src/index.ts"),
   );
   assert.equal(
-    resolveHostedWebWorkspaceSourceEntries("/repo/apps/web")["@murphai/core"],
-    path.resolve("/repo/packages/core/src/index.ts"),
+    hostedWebWorkspaceEntries["@murphai/core"],
+    path.join(repoRoot, "packages/core/src/index.ts"),
   );
   assert.equal(
-    resolveHostedWebWorkspaceSourceEntries("/repo/apps/web")["@murphai/hosted-execution"],
-    path.resolve("/repo/packages/hosted-execution/src/index.ts"),
+    hostedWebWorkspaceEntries["@murphai/hosted-execution"],
+    path.join(repoRoot, "packages/hosted-execution/src/index.ts"),
   );
 });
 
