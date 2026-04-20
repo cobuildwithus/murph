@@ -31,7 +31,7 @@ import {
 } from "./hosted-email.js";
 import { toStringEnvSource } from "./string-env.js";
 import {
-  createHostedUserKeyStore,
+  createHostedUserKeyStoreFromEnvironment,
   type HostedUserCryptoContext,
   type HostedUserKeyAuditRecord,
 } from "./user-key-store.js";
@@ -41,6 +41,7 @@ import {
 import {
   type HostedExecutionContainerNamespaceLike,
 } from "./runner-container.js";
+import { withSerializedLock } from "./serialized-lock.js";
 import {
   acquireHostedRunFromWeb,
   commitHostedRunToWeb,
@@ -98,7 +99,7 @@ export class HostedUserRunner {
   private readonly stateStore: RunnerStateStore;
   private readonly runnerContainerNamespace: HostedExecutionContainerNamespaceLike | null;
   private readonly runtimeAlarmScheduler: RunnerRuntimeAlarmScheduler;
-  private readonly userKeyStore: ReturnType<typeof createHostedUserKeyStore>;
+  private readonly userKeyStore: ReturnType<typeof createHostedUserKeyStoreFromEnvironment>;
   private runnerStores: RunnerUserStores | null = null;
   private userKeyEnvelopeLock: Promise<void> | null = null;
   private runDrainLock: Promise<void> | null = null;
@@ -115,20 +116,10 @@ export class HostedUserRunner {
     ).runnerContainerNamespace ?? null,
   ) {
     this.runnerContainerNamespace = runnerContainerNamespace;
-    const userKeyStore = createHostedUserKeyStore({
+    const userKeyStore = createHostedUserKeyStoreFromEnvironment({
       auditLog: emitHostedUserKeyAuditLog,
-      automationRecipientKeyId: env.automationRecipientKeyId,
-      automationRecipientPrivateKey: env.automationRecipientPrivateKey,
-      automationRecipientPrivateKeysById: env.automationRecipientPrivateKeysById,
-      automationRecipientPublicKey: env.automationRecipientPublicKey,
       bucket,
-      envelopeEncryptionKey: env.platformEnvelopeKey,
-      envelopeEncryptionKeyId: env.platformEnvelopeKeyId,
-      envelopeEncryptionKeysById: env.platformEnvelopeKeysById,
-      recoveryRecipientKeyId: env.recoveryRecipientKeyId,
-      recoveryRecipientPublicKey: env.recoveryRecipientPublicKey,
-      teeAutomationRecipientKeyId: env.teeAutomationRecipientKeyId,
-      teeAutomationRecipientPublicKey: env.teeAutomationRecipientPublicKey,
+      environment: env,
     });
     this.userKeyStore = userKeyStore;
     this.stateStore = new RunnerStateStore(state);
@@ -866,49 +857,33 @@ export class HostedUserRunner {
           userId: input.userId,
         });
       } catch (error) {
-        emitHostedExecutionStructuredLog({
-          component: "hosted.runner",
+        this.quarantineHostedRunWake({
           details: {
-            hostedRunId: input.run.id,
-            quarantineCode: HOSTED_WAKE_QUARANTINE_INVALID_PAYLOAD,
-            wakeId: wake.id,
             wakeKind: wake.kind,
             wakePayloadSchema: wake.payloadSchema,
-            wakeSeq: wake.seq,
           },
           error,
-          level: "warn",
+          eventResults,
           message: `Hosted run event seq ${wake.seq} has an invalid payload and will be quarantined at run commit.`,
-          phase: "wake.running",
-          userId: input.userId,
-        });
-        eventResults.push({
           quarantineCode: HOSTED_WAKE_QUARANTINE_INVALID_PAYLOAD,
-          state: "quarantined",
-          wakeId: wake.id,
+          runId: input.run.id,
+          userId: input.userId,
+          wake,
         });
         continue;
       }
 
       if (hostedWake.userId !== input.userId) {
-        emitHostedExecutionStructuredLog({
-          component: "hosted.runner",
+        this.quarantineHostedRunWake({
           details: {
-            hostedRunId: input.run.id,
-            quarantineCode: HOSTED_WAKE_QUARANTINE_USER_MISMATCH,
-            wakeId: wake.id,
-            wakeSeq: wake.seq,
             wakeUserId: hostedWake.userId,
           },
-          level: "warn",
+          eventResults,
           message: `Hosted run event seq ${wake.seq} is bound to ${hostedWake.userId}, not ${input.userId}.`,
-          phase: "wake.running",
-          userId: input.userId,
-        });
-        eventResults.push({
           quarantineCode: HOSTED_WAKE_QUARANTINE_USER_MISMATCH,
-          state: "quarantined",
-          wakeId: wake.id,
+          runId: input.run.id,
+          userId: input.userId,
+          wake,
         });
         continue;
       }
@@ -919,24 +894,14 @@ export class HostedUserRunner {
       try {
         sharePack = await this.runProcessor.readRunDrainSharePack(hostedWake);
       } catch (error) {
-        emitHostedExecutionStructuredLog({
-          component: "hosted.runner",
-          details: {
-            hostedRunId: input.run.id,
-            quarantineCode: "share-pack-unavailable",
-            wakeId: wake.id,
-            wakeSeq: wake.seq,
-          },
+        this.quarantineHostedRunWake({
           error,
-          level: "warn",
+          eventResults,
           message: `Hosted run event seq ${wake.seq} could not hydrate its share payload and will be quarantined at run commit.`,
-          phase: "wake.running",
-          userId: input.userId,
-        });
-        eventResults.push({
           quarantineCode: "share-pack-unavailable",
-          state: "quarantined",
-          wakeId: wake.id,
+          runId: input.run.id,
+          userId: input.userId,
+          wake,
         });
         continue;
       }
@@ -948,24 +913,14 @@ export class HostedUserRunner {
           throw error;
         }
 
-        emitHostedExecutionStructuredLog({
-          component: "hosted.runner",
-          details: {
-            hostedRunId: input.run.id,
-            quarantineCode: HOSTED_WAKE_QUARANTINE_EMAIL_RAW_MESSAGE_MISSING,
-            wakeId: wake.id,
-            wakeSeq: wake.seq,
-          },
+        this.quarantineHostedRunWake({
           error,
-          level: "warn",
+          eventResults,
           message: `Hosted run event seq ${wake.seq} is missing its raw email payload and will be quarantined at run commit.`,
-          phase: "wake.running",
-          userId: input.userId,
-        });
-        eventResults.push({
           quarantineCode: HOSTED_WAKE_QUARANTINE_EMAIL_RAW_MESSAGE_MISSING,
-          state: "quarantined",
-          wakeId: wake.id,
+          runId: input.run.id,
+          userId: input.userId,
+          wake,
         });
         continue;
       }
@@ -1211,68 +1166,80 @@ export class HostedUserRunner {
   }
 
   private async withEventTransitionLock<T>(eventId: string, run: () => Promise<T>): Promise<T> {
-    const previous = this.eventTransitionLocks.get(eventId) ?? Promise.resolve();
-    let release!: () => void;
-    const current = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    const chain = previous.catch(() => {}).then(() => current);
-    this.eventTransitionLocks.set(eventId, chain);
-    await previous.catch(() => {});
-
-    try {
-      return await run();
-    } finally {
-      release();
-      if (this.eventTransitionLocks.get(eventId) === chain) {
-        this.eventTransitionLocks.delete(eventId);
-      }
-    }
+    return withSerializedLock(
+      {
+        get: () => this.eventTransitionLocks.get(eventId) ?? null,
+        set: (value) => {
+          if (value === null) {
+            this.eventTransitionLocks.delete(eventId);
+            return;
+          }
+          this.eventTransitionLocks.set(eventId, value);
+        },
+      },
+      run,
+    );
   }
 
   private async withUserKeyEnvelopeLock<T>(run: () => Promise<T>): Promise<T> {
-    const previous = this.userKeyEnvelopeLock ?? Promise.resolve();
-    let release!: () => void;
-    const current = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    const chain = previous.catch(() => {}).then(() => current);
-    this.userKeyEnvelopeLock = chain;
-    await previous.catch(() => {});
-
-    try {
-      return await run();
-    } finally {
-      release();
-      if (this.userKeyEnvelopeLock === chain) {
-        this.userKeyEnvelopeLock = null;
-      }
-    }
+    return withSerializedLock(
+      {
+        get: () => this.userKeyEnvelopeLock,
+        set: (value) => {
+          this.userKeyEnvelopeLock = value;
+        },
+      },
+      run,
+    );
   }
 
   private async withRunDrainLock<T>(run: () => Promise<T>): Promise<T> {
-    const previous = this.runDrainLock ?? Promise.resolve();
-    let release!: () => void;
-    const current = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    const chain = previous.catch(() => {}).then(() => current);
-    this.runDrainLock = chain;
-    await previous.catch(() => {});
-
-    try {
-      return await run();
-    } finally {
-      release();
-      if (this.runDrainLock === chain) {
-        this.runDrainLock = null;
-      }
-    }
+    return withSerializedLock(
+      {
+        get: () => this.runDrainLock,
+        set: (value) => {
+          this.runDrainLock = value;
+        },
+      },
+      run,
+    );
   }
 
   private async scheduleHostedWakeRetryAlarm(): Promise<void> {
     await this.runtimeAlarmScheduler.syncNextWake({
       preferredWakeAt: new Date(Date.now() + HOSTED_WAKE_NUDGE_RETRY_DELAY_MS).toISOString(),
+    });
+  }
+
+  private quarantineHostedRunWake(input: {
+    details?: Record<string, unknown>;
+    error?: unknown;
+    eventResults: HostedRunEventResult[];
+    message: string;
+    quarantineCode: string;
+    runId: string;
+    userId: string;
+    wake: HostedRunAcquireResponse["events"][number];
+  }): void {
+    emitHostedExecutionStructuredLog({
+      component: "hosted.runner",
+      details: {
+        hostedRunId: input.runId,
+        quarantineCode: input.quarantineCode,
+        wakeId: input.wake.id,
+        wakeSeq: input.wake.seq,
+        ...(input.details ?? {}),
+      },
+      ...(input.error === undefined ? {} : { error: input.error }),
+      level: "warn",
+      message: input.message,
+      phase: "wake.running",
+      userId: input.userId,
+    });
+    input.eventResults.push({
+      quarantineCode: input.quarantineCode,
+      state: "quarantined",
+      wakeId: input.wake.id,
     });
   }
 }
