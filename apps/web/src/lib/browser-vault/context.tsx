@@ -20,10 +20,8 @@ import {
   type HostedUserRootKeyEnvelope,
 } from "@murphai/runtime-state";
 import {
-  createVaultReadModel,
   parseBrowserVaultSnapshot,
   type BrowserVaultSnapshot,
-  type VaultReadModel,
 } from "@murphai/query/browser";
 
 export type BrowserVaultStatus = "loading" | "ready" | "error";
@@ -33,7 +31,6 @@ export interface BrowserVaultContextValue {
   refresh(): Promise<void>;
   snapshot: BrowserVaultSnapshot | null;
   status: BrowserVaultStatus;
-  vault: VaultReadModel;
 }
 
 const BrowserVaultContext = createContext<BrowserVaultContextValue | null>(null);
@@ -43,7 +40,6 @@ export function BrowserVaultProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<BrowserVaultStatus>("loading");
   const [error, setError] = useState<string | null>(null);
   const [snapshot, setSnapshot] = useState<BrowserVaultSnapshot | null>(null);
-  const [vault, setVault] = useState<VaultReadModel>(() => createEmptyBrowserVaultReadModel());
 
   const load = useCallback(async () => {
     setStatus("loading");
@@ -51,12 +47,10 @@ export function BrowserVaultProvider({ children }: { children: ReactNode }) {
 
     try {
       const next = await loadBrowserVaultSnapshot();
-      setSnapshot(next.snapshot);
-      setVault(next.vault);
+      setSnapshot(next);
       setStatus("ready");
     } catch (loadError) {
       setSnapshot(null);
-      setVault(createEmptyBrowserVaultReadModel());
       setStatus("error");
       setError(loadError instanceof Error ? loadError.message : "Failed to load browser vault snapshot.");
     }
@@ -73,8 +67,7 @@ export function BrowserVaultProvider({ children }: { children: ReactNode }) {
           return;
         }
 
-        setSnapshot(next.snapshot);
-        setVault(next.vault);
+        setSnapshot(next);
         setStatus("ready");
         setError(null);
       } catch (loadError) {
@@ -83,7 +76,6 @@ export function BrowserVaultProvider({ children }: { children: ReactNode }) {
         }
 
         setSnapshot(null);
-        setVault(createEmptyBrowserVaultReadModel());
         setStatus("error");
         setError(loadError instanceof Error ? loadError.message : "Failed to load browser vault snapshot.");
       }
@@ -99,8 +91,7 @@ export function BrowserVaultProvider({ children }: { children: ReactNode }) {
     refresh: load,
     snapshot,
     status,
-    vault,
-  }), [error, load, snapshot, status, vault]);
+  }), [error, load, snapshot, status]);
 
   return (
     <BrowserVaultContext.Provider value={value}>
@@ -119,10 +110,7 @@ export function useBrowserVault(): BrowserVaultContextValue {
   return value;
 }
 
-async function loadBrowserVaultSnapshot(): Promise<{
-  snapshot: BrowserVaultSnapshot | null;
-  vault: VaultReadModel;
-}> {
+async function loadBrowserVaultSnapshot(): Promise<BrowserVaultSnapshot | null> {
   const { privateKeyJwk, publicKeyJwk } = await generateHostedUserRecipientKeyPair();
   const response = await fetch("/api/browser-vault/session", {
     body: JSON.stringify({
@@ -145,10 +133,7 @@ async function loadBrowserVaultSnapshot(): Promise<{
   const snapshotEnvelope = session.snapshotEnvelope;
 
   if (rootKeyEnvelope === null && snapshotEnvelope === null && snapshotAad === null) {
-    return {
-      snapshot: null,
-      vault: createEmptyBrowserVaultReadModel(),
-    };
+    return null;
   }
 
   if (rootKeyEnvelope === null || snapshotEnvelope === null || snapshotAad === null) {
@@ -173,26 +158,9 @@ async function loadBrowserVaultSnapshot(): Promise<{
     key: rootKey,
     scope: "browser-vault-snapshot",
   });
-  const snapshot = parseBrowserVaultSnapshot(
+  return parseBrowserVaultSnapshot(
     JSON.parse(textDecoder.decode(plaintext)) as unknown,
   );
-
-  return {
-    snapshot,
-    vault: createVaultReadModel({
-      entities: snapshot.entities,
-      metadata: snapshot.metadata,
-      vaultRoot: "browser://vault",
-    }),
-  };
-}
-
-function createEmptyBrowserVaultReadModel(): VaultReadModel {
-  return createVaultReadModel({
-    entities: [],
-    metadata: null,
-    vaultRoot: "browser://vault",
-  });
 }
 
 function parseBrowserVaultSessionResponse(value: unknown): {
