@@ -25,8 +25,7 @@ const seamMocks = vi.hoisted(() => ({
   isAssistantSessionNotFoundError: vi.fn(),
   local: {
     openAssistantConversationLocal: vi.fn(),
-    queueAssistantFirstContactWelcomeLocal: vi.fn(),
-    sendAssistantFirstContactWelcomeLocal: vi.fn(),
+    sendAssistantNotificationLocal: vi.fn(),
     sendAssistantMessageLocal: vi.fn(),
     updateAssistantSessionOptionsLocal: vi.fn(),
   },
@@ -43,13 +42,12 @@ const seamMocks = vi.hoisted(() => ({
 vi.mock("../src/assistant/local-service.js", () => ({
   openAssistantConversationLocal:
     seamMocks.local.openAssistantConversationLocal,
-  queueAssistantFirstContactWelcomeLocal:
-    seamMocks.local.queueAssistantFirstContactWelcomeLocal,
-  sendAssistantFirstContactWelcomeLocal:
-    seamMocks.local.sendAssistantFirstContactWelcomeLocal,
   sendAssistantMessageLocal: seamMocks.local.sendAssistantMessageLocal,
   updateAssistantSessionOptionsLocal:
     seamMocks.local.updateAssistantSessionOptionsLocal,
+}));
+vi.mock("../src/assistant/notification-turn.js", () => ({
+  sendAssistantNotificationLocal: seamMocks.local.sendAssistantNotificationLocal,
 }));
 
 vi.mock("../src/assistant/store.js", () => ({
@@ -136,7 +134,6 @@ import {
 } from "../src/assistant/service-turn-routes.ts";
 import { persistPendingAssistantUsageEvent } from "../src/assistant/service-usage.ts";
 import { persistAssistantTurnAndSession } from "../src/assistant/turn-finalizer.ts";
-import { ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE } from "../src/assistant/first-contact-welcome.ts";
 
 type RuntimeStateStub = ReturnType<typeof createRuntimeStateStub>;
 
@@ -170,8 +167,7 @@ beforeEach(() => {
       )
     );
   seamMocks.local.openAssistantConversationLocal.mockReset();
-  seamMocks.local.queueAssistantFirstContactWelcomeLocal.mockReset();
-  seamMocks.local.sendAssistantFirstContactWelcomeLocal.mockReset();
+  seamMocks.local.sendAssistantNotificationLocal.mockReset();
   seamMocks.local.sendAssistantMessageLocal.mockReset();
   seamMocks.local.updateAssistantSessionOptionsLocal.mockReset();
   seamMocks.markAssistantFirstContactSeen
@@ -253,39 +249,37 @@ describe("assistant service wrapper seam", () => {
     });
   });
 
-  it("delegates first-contact flows and session option updates to the local service", async () => {
-    const welcomeInput = {
+  it("delegates notification and session option updates to the local service", async () => {
+    const notificationInput = {
       channel: "telegram",
       identityId: "identity-1",
+      instructions: "Send the Murph signup welcome.",
       vault: "/vault",
     };
-    const queued = {
-      kind: "queued",
-    };
-    const sent = {
-      kind: "sent",
+    const notificationResult = {
+      decision: {
+        kind: "send_message",
+        privateSummary: "sent",
+        text: "Welcome to Murph.",
+      },
+      response: "Welcome to Murph.",
+      session: createAssistantSession(),
     };
     const updatedSession = createAssistantSession({
       providerOptions: createProviderOptions({
         model: "gpt-5-mini",
       }),
     });
-    seamMocks.local.queueAssistantFirstContactWelcomeLocal.mockResolvedValue(
-      queued
-    );
-    seamMocks.local.sendAssistantFirstContactWelcomeLocal.mockResolvedValue(
-      sent
+    seamMocks.local.sendAssistantNotificationLocal.mockResolvedValue(
+      notificationResult
     );
     seamMocks.local.updateAssistantSessionOptionsLocal.mockResolvedValue(
       updatedSession
     );
 
     await expect(
-      assistantService.queueAssistantFirstContactWelcome(welcomeInput)
-    ).resolves.toBe(queued);
-    await expect(
-      assistantService.sendAssistantFirstContactWelcome(welcomeInput)
-    ).resolves.toBe(sent);
+      assistantService.sendAssistantNotification(notificationInput)
+    ).resolves.toBe(notificationResult);
     await expect(
       assistantService.updateAssistantSessionOptions({
         providerOptions: {
@@ -298,11 +292,8 @@ describe("assistant service wrapper seam", () => {
     ).resolves.toBe(updatedSession);
 
     expect(
-      seamMocks.local.queueAssistantFirstContactWelcomeLocal
-    ).toHaveBeenCalledWith(welcomeInput);
-    expect(
-      seamMocks.local.sendAssistantFirstContactWelcomeLocal
-    ).toHaveBeenCalledWith(welcomeInput);
+      seamMocks.local.sendAssistantNotificationLocal
+    ).toHaveBeenCalledWith(notificationInput);
     expect(
       seamMocks.local.updateAssistantSessionOptionsLocal
     ).toHaveBeenCalledWith({
@@ -834,6 +825,8 @@ describe("assistant delivery orchestration seam", () => {
         target: "audience-delivery",
       },
       channel: "telegram",
+      deliveryIdempotencyKey: null,
+      deliverySource: null,
       dependencies: undefined,
       dispatchMode: "immediate",
       explicitTarget: "explicit-audience-target",

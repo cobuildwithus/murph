@@ -94,21 +94,32 @@ test('sendAssistantNotificationLocal persists the turn before outbound delivery 
     }),
     session: initialSession,
   })
+  const deliverMessage = vi.fn(async (input) => {
+    persistedBeforeDelivery.push('deliver')
+    assert.equal(input.dedupeToken, 'cron-slot-token')
+    return {
+      delivery: null,
+      intent: {
+        intentId: 'intent-notification',
+      },
+      kind: 'sent',
+      session: deliveredSession,
+    }
+  })
   const mocks = {
     createAssistantRuntimeStateService: vi.fn(() => ({
       outbox: {
-        deliverMessage: vi.fn(async (input) => {
-          persistedBeforeDelivery.push('deliver')
-          assert.equal(input.dedupeToken, 'cron-slot-token')
-          return {
-            delivery: null,
-            intent: {
-              intentId: 'intent-notification',
-            },
-            kind: 'sent',
-            session: deliveredSession,
-          }
-        }),
+        deliverMessage,
+      },
+      status: {
+        refreshSnapshot: vi.fn(async () => undefined),
+      },
+      turns: {
+        createReceipt: vi.fn(async () => undefined),
+        finalizeReceipt: vi.fn(async () => undefined),
+      },
+      diagnostics: {
+        recordEvent: vi.fn(async () => undefined),
       },
     })),
     executeProviderTurnWithRecovery: vi.fn(async () => ({
@@ -239,17 +250,15 @@ test('sendAssistantNotificationLocal persists the turn before outbound delivery 
     'Sanitized notification text',
   )
   assert.equal(
-    mocks.createAssistantRuntimeStateService.mock.results[0]?.value.outbox.deliverMessage
-      .mock.calls[0]?.[0]?.channel,
+    deliverMessage.mock.calls[0]?.[0]?.channel,
     'signal',
   )
   assert.equal(
-    mocks.createAssistantRuntimeStateService.mock.results[0]?.value.outbox.deliverMessage
-      .mock.calls[0]?.[0]?.identityId,
+    deliverMessage.mock.calls[0]?.[0]?.identityId,
     'identity-saved',
   )
   assert.equal(result.response, 'Sanitized notification text')
-  assert.equal(result.session, savedSession)
+  assert.deepEqual(result.session, deliveredSession)
   const firstResolvedNotificationSessionCall = (
     mocks.resolveAssistantSessionForMessage.mock.calls as Array<
       Array<{ boundaryDefaultTarget?: unknown; defaults?: unknown }>
@@ -336,6 +345,16 @@ test('sendAssistantNotificationLocal preserves explicit local dev-note visibilit
     createAssistantRuntimeStateService: vi.fn(() => ({
       outbox: {
         deliverMessage,
+      },
+      status: {
+        refreshSnapshot: vi.fn(async () => undefined),
+      },
+      turns: {
+        createReceipt: vi.fn(async () => undefined),
+        finalizeReceipt: vi.fn(async () => undefined),
+      },
+      diagnostics: {
+        recordEvent: vi.fn(async () => undefined),
       },
     })),
     executeProviderTurnWithRecovery: vi.fn(async () => ({
@@ -492,6 +511,16 @@ test('sendAssistantNotificationLocal returns skip decisions without persisting o
       outbox: {
         deliverMessage,
       },
+      status: {
+        refreshSnapshot: vi.fn(async () => undefined),
+      },
+      turns: {
+        createReceipt: vi.fn(async () => undefined),
+        finalizeReceipt: vi.fn(async () => undefined),
+      },
+      diagnostics: {
+        recordEvent: vi.fn(async () => undefined),
+      },
     })),
     executeProviderTurnWithRecovery: vi.fn(async (input) => {
       assert.equal(input.input.turnTrigger, 'automation-cron')
@@ -626,8 +655,21 @@ test('sendAssistantNotificationLocal surfaces failed delivery results', async ()
       outbox: {
         deliverMessage: vi.fn(async () => ({
           deliveryError,
+          intent: {
+            intentId: 'intent-delivery-error',
+          },
           kind: 'failed',
         })),
+      },
+      status: {
+        refreshSnapshot: vi.fn(async () => undefined),
+      },
+      turns: {
+        createReceipt: vi.fn(async () => undefined),
+        finalizeReceipt: vi.fn(async () => undefined),
+      },
+      diagnostics: {
+        recordEvent: vi.fn(async () => undefined),
       },
     })),
     executeProviderTurnWithRecovery: vi.fn(async () => ({
@@ -762,6 +804,16 @@ test('sendAssistantNotificationLocal rejects email thread subject overrides befo
     createAssistantRuntimeStateService: vi.fn(() => ({
       outbox: {
         deliverMessage,
+      },
+      status: {
+        refreshSnapshot: vi.fn(async () => undefined),
+      },
+      turns: {
+        createReceipt: vi.fn(async () => undefined),
+        finalizeReceipt: vi.fn(async () => undefined),
+      },
+      diagnostics: {
+        recordEvent: vi.fn(async () => undefined),
       },
     })),
     executeProviderTurnWithRecovery: vi.fn(async () => ({
