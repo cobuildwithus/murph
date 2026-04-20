@@ -21,6 +21,7 @@ const linqCreateChatPath = "/chats";
 
 export interface HostedLocalLinqStub {
   baseUrl: string;
+  countObservedRequests(expectedPath: string, matchRequest?: ObservedLinqRequestMatcher): number;
   countObservedSends(expectedPath: string, matchRequest?: ObservedLinqRequestMatcher): number;
   createChatPath: string;
   createCreateChatRequestMatcher(userId: string): ObservedLinqRequestMatcher;
@@ -35,6 +36,23 @@ export interface HostedLocalLinqStub {
     scenario: HostedLocalFullStackScenario;
     userId: string;
   }): Promise<ObservedLinqRequest>;
+  waitForRequest(input: {
+    expectedPath: string;
+    matchRequest?: ObservedLinqRequestMatcher;
+    scenario: HostedLocalFullStackScenario;
+    userId: string;
+  }): Promise<ObservedLinqRequest>;
+  waitForRequestCount(input: {
+    expectedCount: number;
+    expectedPath: string;
+    matchRequest?: ObservedLinqRequestMatcher;
+    scenario: HostedLocalFullStackScenario;
+    userId: string;
+  }): Promise<ObservedLinqRequest[]>;
+  waitForRequestsToSettle(input?: {
+    quietMs?: number;
+    timeoutMs?: number;
+  }): Promise<void>;
   waitForMatchingSendCount(input: {
     expectedCount: number;
     expectedPath: string;
@@ -81,6 +99,16 @@ export async function startHostedLocalLinqStub(): Promise<HostedLocalLinqStub> {
     }
 
     if (
+      (request.method === "POST" || request.method === "DELETE")
+      && request.url
+      && /^\/chats\/[^/]+\/typing$/u.test(request.url)
+    ) {
+      response.statusCode = 204;
+      response.end();
+      return;
+    }
+
+    if (
       request.method === "POST"
       && request.url
       && /^\/chats\/[^/]+\/messages$/u.test(request.url)
@@ -117,7 +145,7 @@ export async function startHostedLocalLinqStub(): Promise<HostedLocalLinqStub> {
 
     while ((Date.now() - startedAt) < 60_000) {
       const matchingRequests = observedRequests.filter((request) =>
-        isMatchingObservedLinqSend(request, input.expectedPath, input.matchRequest)
+        isMatchingObservedLinqRequest(request, input.expectedPath, input.matchRequest)
       );
 
       if (matchingRequests.length >= input.expectedCount) {
@@ -139,6 +167,10 @@ export async function startHostedLocalLinqStub(): Promise<HostedLocalLinqStub> {
 
   return {
     baseUrl: `http://127.0.0.1:${requireBoundTcpPort(activeServer, "Linq stub")}`,
+    countObservedRequests: (expectedPath, matchRequest) =>
+      observedRequests.filter((request) =>
+        isMatchingObservedLinqRequest(request, expectedPath, matchRequest)
+      ).length,
     countObservedSends: (expectedPath, matchRequest) =>
       observedRequests.filter((request) =>
         isMatchingObservedLinqSend(request, expectedPath, matchRequest)
@@ -177,7 +209,45 @@ export async function startHostedLocalLinqStub(): Promise<HostedLocalLinqStub> {
         scenario: input.scenario,
         userId: input.userId,
       });
-      return matchingRequests.at(-1)!;
+      return matchingRequests[input.baselineCount]!;
+    },
+    waitForRequest: async (input) =>
+      (
+        await waitForObservedRequests({
+          expectedCount: 1,
+          expectedPath: input.expectedPath,
+          matchRequest: input.matchRequest,
+          scenario: input.scenario,
+          userId: input.userId,
+        })
+      )[0]!,
+    waitForRequestCount: async (input) =>
+      await waitForObservedRequests(input),
+    waitForRequestsToSettle: async (input = {}) => {
+      const timeoutMs = input.timeoutMs ?? 10_000;
+      const quietMs = input.quietMs ?? 750;
+      const startedAt = Date.now();
+      let lastCount = observedRequests.length;
+      let stableSince = Date.now();
+
+      while ((Date.now() - startedAt) < timeoutMs) {
+        const nextCount = observedRequests.length;
+
+        if (nextCount !== lastCount) {
+          lastCount = nextCount;
+          stableSince = Date.now();
+        }
+
+        if ((Date.now() - stableSince) >= quietMs) {
+          return;
+        }
+
+        await sleep(100);
+      }
+
+      throw new Error(
+        `Timed out waiting for Linq requests to settle. observed requests: ${JSON.stringify(observedRequests)}`,
+      );
     },
     waitForMatchingSendCount: async (input) =>
       await waitForObservedRequests({
@@ -307,9 +377,16 @@ function isMatchingObservedLinqSend(
 ): boolean {
   return (
     request.method === "POST"
-    && request.url === expectedPath
-    && (matchRequest ? matchRequest(request) : true)
+    && isMatchingObservedLinqRequest(request, expectedPath, matchRequest)
   );
+}
+
+function isMatchingObservedLinqRequest(
+  request: ObservedLinqRequest,
+  expectedPath: string,
+  matchRequest?: ObservedLinqRequestMatcher,
+): boolean {
+  return request.url === expectedPath && (matchRequest ? matchRequest(request) : true);
 }
 
 function parseObservedLinqJson(body: string): Record<string, unknown> | null {

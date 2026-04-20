@@ -31,6 +31,13 @@ export interface HostedLocalDevHarness {
       timeoutMs?: number;
     },
   ): Promise<HostedExecutionUserStatus>;
+  waitForHostedIdle(
+    userId: string,
+    input?: {
+      pollIntervalMs?: number;
+      timeoutMs?: number;
+    },
+  ): Promise<HostedExecutionUserStatus>;
   webBaseUrl: string;
   workerBaseUrl: string;
 }
@@ -167,6 +174,36 @@ export async function startHostedLocalDevHarness(input: {
 
         throw new Error(formatFailure([
           `Timed out waiting for hosted completion for ${userId}.`,
+        ], stack?.stdoutTail() ?? "", stack?.stderrTail() ?? ""));
+      },
+      waitForHostedIdle: async (
+        userId: string,
+        pollInput: {
+          pollIntervalMs?: number;
+          timeoutMs?: number;
+        } = {},
+      ): Promise<HostedExecutionUserStatus> => {
+        const timeoutMs = pollInput.timeoutMs ?? 180_000;
+        const pollIntervalMs = pollInput.pollIntervalMs ?? 1_000;
+        const startedAt = Date.now();
+
+        while ((Date.now() - startedAt) < timeoutMs) {
+          const status = await readHostedUserStatus({
+            requestJson: requestJsonForRuntime,
+            statusHeaders,
+            statusPath,
+            userId,
+          });
+
+          if (status.pendingWakeCount === 0 && !status.inFlight) {
+            return status;
+          }
+
+          await sleep(pollIntervalMs);
+        }
+
+        throw new Error(formatFailure([
+          `Timed out waiting for hosted idle state for ${userId}.`,
         ], stack?.stdoutTail() ?? "", stack?.stderrTail() ?? ""));
       },
       webBaseUrl,

@@ -1071,6 +1071,11 @@ export class HostedUserRunner {
       return;
     }
 
+    const activeLease = await this.stateStore.readActiveRunLease();
+    if (activeLease?.eventId === pendingCommit.eventId) {
+      return;
+    }
+
     const reconciliation = await this.reconcilePendingCommitCurrency(pendingCommit, "resume");
     if (!reconciliation.pendingCommit) {
       return;
