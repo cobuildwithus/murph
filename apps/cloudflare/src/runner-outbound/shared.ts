@@ -1,9 +1,6 @@
 import {
   HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER,
 } from "@murphai/hosted-execution/contracts";
-import {
-  normalizeHostedExecutionBaseUrl,
-} from "@murphai/hosted-execution/env";
 
 import { readHostedExecutionEnvironment } from "../env.ts";
 import { CLOUDFLARE_HOSTED_RUNTIME_HOSTS } from "../internal-hosts.ts";
@@ -72,22 +69,6 @@ export function requireRunnerOutboundUserStubMethod<TKey extends keyof RunnerOut
   }
 
   return method as Exclude<RunnerOutboundUserRunnerStubLike[TKey], undefined>;
-}
-
-export function requireRunnerOutboundHostedWebControlConfig(
-  env: RunnerOutboundEnvironmentSource,
-): { baseUrl: string } {
-  const baseUrl = normalizeHostedExecutionBaseUrl(
-    typeof env.HOSTED_WEB_BASE_URL === "string" ? env.HOSTED_WEB_BASE_URL : null,
-  );
-
-  if (!baseUrl) {
-    throw new TypeError("HOSTED_WEB_BASE_URL must be configured for hosted device connect-link proxying.");
-  }
-
-  return {
-    baseUrl,
-  };
 }
 
 export function decodeRouteParam(value: string): string {

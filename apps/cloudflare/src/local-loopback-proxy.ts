@@ -64,14 +64,14 @@ export async function proxyLocalLoopbackRequest(input: {
   });
 
   return new Response(response.body, {
-    headers: buildLocalLoopbackProxyResponseHeaders(response.headers),
+    headers: copyLocalLoopbackProxyHeaders(response.headers),
     status: response.status,
   });
 }
 
 function createLocalLoopbackProxyRequest(upstreamUrl: URL, request: Request): Request {
   const init: LocalLoopbackProxyRequestInit = {
-    headers: buildLocalLoopbackProxyRequestHeaders(request.headers, upstreamUrl),
+    headers: copyLocalLoopbackProxyHeaders(request.headers),
     method: request.method,
     signal: request.signal,
   };
@@ -84,20 +84,7 @@ function createLocalLoopbackProxyRequest(upstreamUrl: URL, request: Request): Re
   return new Request(upstreamUrl, init);
 }
 
-function buildLocalLoopbackProxyRequestHeaders(headers: Headers, upstreamUrl: URL): Headers {
-  const nextHeaders = new Headers();
-
-  headers.forEach((value, key) => {
-    if (shouldStripLocalLoopbackProxyHeader(key)) {
-      return;
-    }
-    nextHeaders.set(key, value);
-  });
-
-  return nextHeaders;
-}
-
-function buildLocalLoopbackProxyResponseHeaders(headers: Headers): Headers {
+function copyLocalLoopbackProxyHeaders(headers: Headers): Headers {
   const nextHeaders = new Headers();
 
   headers.forEach((value, key) => {
