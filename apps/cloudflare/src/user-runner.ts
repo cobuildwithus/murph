@@ -45,6 +45,7 @@ import {
   acquireHostedRunFromWeb,
   commitHostedRunToWeb,
   finalizeHostedRunInWeb,
+  releaseHostedRunFinalizeInWeb,
   readHostedRunStatusFromWeb,
 } from "./web-control-plane.ts";
 import { RunnerBundleSync } from "./user-runner/runner-bundle-sync.js";
@@ -607,6 +608,9 @@ export class HostedUserRunner {
     }
 
     for (const event of resolved.events) {
+      if (event.wake.kind === "runtime.timer") {
+        continue;
+      }
       await this.wakeProcessor.cleanupTransientWakeDataBestEffortForRunDrain(
         event.wake,
       );
@@ -662,6 +666,14 @@ export class HostedUserRunner {
     });
 
     if (execution.state !== "completed") {
+      await this.releaseHostedRunFinalizeForRetry({
+        failureCode: execution.state === "backpressured"
+          ? "HOSTED_RUN_FINALIZE_BACKPRESSURED"
+          : "HOSTED_RUN_FINALIZE_RETRYABLE",
+        run,
+        runToken,
+        userId: input.userId,
+      });
       return {
         cursor: input.acquired.cursor,
         state: execution.state,
@@ -704,6 +716,56 @@ export class HostedUserRunner {
       cursor: finalized.cursor,
       state: finalized.finalized ? "completed" : "backpressured",
     };
+  }
+
+  private async releaseHostedRunFinalizeForRetry(input: {
+    failureCode: string;
+    run: HostedRunRecord;
+    runToken: string;
+    userId: string;
+  }): Promise<void> {
+    try {
+      const released = await releaseHostedRunFinalizeInWeb({
+        baseUrl: this.readHostedWebControlBaseUrl(),
+        body: {
+          failureClass: "hosted_run_finalize_retryable",
+          failureCode: input.failureCode,
+          runId: input.run.id,
+          runToken: input.runToken,
+        },
+        boundUserId: input.userId,
+        callbackSigning: this.env.webCallbackSigning,
+        timeoutMs: this.env.runnerTimeoutMs,
+      });
+
+      this.recordHostedRunBreadcrumb({
+        level: released.released ? "warn" : "error",
+        message: released.released
+          ? "Cloudflare released hosted run finalization for retry."
+          : "Cloudflare could not release hosted run finalization for retry.",
+        phase: released.released ? "finalize_released" : "finalize_release_failed",
+        redacted: {
+          failureCode: input.failureCode,
+          released: released.released,
+        },
+        run: input.run,
+        runToken: input.runToken,
+        userId: input.userId,
+      });
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "cloudflare.user-runner",
+        details: {
+          failureCode: input.failureCode,
+          runId: input.run.id,
+        },
+        error,
+        level: "error",
+        message: "Hosted run finalize release request failed; stale-run recovery is now the fallback.",
+        phase: "wake.running",
+        userId: input.userId,
+      });
+    }
   }
 
   private async failAcquiredHostedRun(input: {

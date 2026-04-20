@@ -15,6 +15,7 @@ import type {
 } from "@murphai/hosted-execution";
 import {
   emitHostedExecutionStructuredLog,
+  isHostedRuntimeTimerWake,
 } from "@murphai/hosted-execution";
 import {
   refreshAssistantStatusSnapshot,
@@ -98,6 +99,26 @@ export async function executeHostedRunDrainForCommit(input: {
 
   for (const event of runDrain.events) {
     const wakeHandlingStartedAtMs = Date.now();
+    if (isHostedRuntimeTimerWake(event.wake)) {
+      metrics.eventsHandled += 1;
+      shouldRunAssistantAutomation = true;
+      shouldRunDeviceSyncScheduler = true;
+      emitHostedExecutionStructuredLog({
+        component: "runtime",
+        wake: event.wake,
+        details: {
+          runDrainRunId: runDrain.runId,
+          runElapsedMs: computeHostedRunElapsedMs(input.request.run ?? null),
+          wakeHandlerLatencyMs: Date.now() - wakeHandlingStartedAtMs,
+          wakeSeq: event.seq,
+        },
+        message: "Hosted runtime consumed an internal runtime-timer wake.",
+        phase: "wake.running",
+        run: input.request.run ?? null,
+      });
+      continue;
+    }
+
     const wakeMetrics = await executeHostedIngressEventAlias({
       wake: event.wake,
       executionContext: wakeExecutionContext,

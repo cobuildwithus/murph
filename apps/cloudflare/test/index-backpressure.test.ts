@@ -3,8 +3,7 @@ import { createPublicKey, generateKeyPairSync, sign } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
-  buildHostedExecutionAssistantCronTickWake,
-  type HostedExecutionWake,
+  type HostedIngressEnvelope,
 } from "@murphai/hosted-execution";
 import { HOSTED_EXECUTION_USER_ID_HEADER } from "@murphai/hosted-execution/contracts";
 import worker, { UserRunnerDurableObject } from "../src/index.ts";
@@ -55,7 +54,7 @@ describe("cloudflare worker queue backpressure routes", () => {
     });
   });
 
-  it("keeps the removed manual-run route unavailable without relying on legacy local queue state", async () => {
+  it("accepts the run nudge route without relying on legacy local queue state", async () => {
     const harness = createUserRunnerDurableObject({
       HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
     });
@@ -72,9 +71,11 @@ describe("cloudflare worker queue backpressure routes", () => {
       harness.env as never,
     );
 
-    expect(runResponse.status).toBe(404);
+    expect(runResponse.status).toBe(202);
     await expect(runResponse.json()).resolves.toEqual({
-      error: "Not found",
+      accepted: true,
+      alarmScheduled: true,
+      alreadyRunning: false,
     });
   });
 });
@@ -194,18 +195,23 @@ function createStorage() {
   };
 }
 
-function createWake(eventId: string): HostedExecutionWake {
-  return buildHostedExecutionAssistantCronTickWake({
+function createWake(eventId: string): HostedIngressEnvelope {
+  return {
     eventId,
+    kind: "member.activated",
+    memberChannels: {
+      email: false,
+      linq: false,
+      telegram: false,
+    },
     occurredAt: "2026-03-26T12:00:00.000Z",
-    reason: "manual",
     userId: "member_123",
-  });
+  };
 }
 
 async function createSignedWakeRequest(
   path: string,
-  wake: HostedExecutionWake,
+  wake: HostedIngressEnvelope,
   input: {
     aud?: string;
     boundUserId?: string | null;
