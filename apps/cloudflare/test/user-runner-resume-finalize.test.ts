@@ -886,6 +886,185 @@ describe("HostedUserRunner resumeFinalize drain", () => {
     });
   });
 
+  it("quarantines invalid wake payloads before commit", async () => {
+    envMocks.readHostedExecutionEnvironment.mockReturnValue(createTestRuntimeEnvironment());
+    const state = createDurableObjectStateHarness();
+    const stateStore = new RunnerStateStore(state);
+    await stateStore.bootstrapUser("user-resume-finalize");
+    const runner = new HostedUserRunner(
+      state,
+      envMocks.readHostedExecutionEnvironment(createHostedExecutionTestEnv()),
+      new MemoryEncryptedR2Bucket(),
+    );
+
+    const acquiredCursor = createCursorState({
+      committedSeq: "10",
+      nextSeq: "11",
+      snapshotKey: "snapshot/invalid-payload",
+      version: "cursor-v1",
+    });
+    const committedCursor = createCursorState({
+      committedSeq: "11",
+      nextSeq: "12",
+      snapshotKey: "snapshot/after-invalid-payload",
+      version: "cursor-v2",
+    });
+    const run = createRunRecord();
+    run.status = "acquired";
+
+    webControlMocks.acquireHostedRunFromWeb.mockResolvedValueOnce({
+      acquired: true,
+      cursor: acquiredCursor,
+      events: [
+        createEncryptedAcquireEvent({
+          decryptedPayload: {
+            nope: true,
+          },
+          id: "wake-invalid-payload",
+          kind: "member.activated",
+          occurredAt: "2026-04-20T00:00:00.000Z",
+          seq: "11",
+          userId: "user-resume-finalize",
+        }),
+      ],
+      pendingWakeCount: 1,
+      resumeFinalize: false,
+      run,
+      runToken: "run-token",
+    });
+    webControlMocks.commitHostedRunToWeb.mockResolvedValueOnce({
+      committed: true,
+      cursor: committedCursor,
+      needsFinalize: false,
+      run,
+    });
+    webControlMocks.recordHostedRunLogInWeb.mockResolvedValue({
+      log: null,
+      logged: true,
+    });
+
+    const result = await runner.drainHostedRuns({
+      targetSeqHint: "11",
+    });
+
+    expect(webControlMocks.commitHostedRunToWeb).toHaveBeenCalledTimes(1);
+    expect(webControlMocks.commitHostedRunToWeb.mock.calls[0]?.[0]).toMatchObject({
+      body: {
+        eventResults: [
+          {
+            quarantineCode: "invalid-wake-payload",
+            state: "quarantined",
+            wakeId: "wake-invalid-payload",
+          },
+        ],
+        outputCommittedSeq: "11",
+      },
+    });
+    expect(wakeProcessorMocks.executeRunDrain).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      committedSeq: committedCursor.committedSeq,
+      requestedTargetSeq: "11",
+      targetReached: true,
+    });
+    await expect(stateStore.readState()).resolves.toMatchObject({
+      userId: "user-resume-finalize",
+    });
+  });
+
+  it("quarantines wakes when the share pack cannot be hydrated", async () => {
+    envMocks.readHostedExecutionEnvironment.mockReturnValue(createTestRuntimeEnvironment());
+    const state = createDurableObjectStateHarness();
+    const stateStore = new RunnerStateStore(state);
+    await stateStore.bootstrapUser("user-resume-finalize");
+    const runner = new HostedUserRunner(
+      state,
+      envMocks.readHostedExecutionEnvironment(createHostedExecutionTestEnv()),
+      new MemoryEncryptedR2Bucket(),
+    );
+
+    const activationWake = buildHostedExecutionMemberActivatedWake({
+      eventId: "evt_share_pack_missing",
+      memberChannels: {
+        email: true,
+        linq: false,
+        telegram: false,
+      },
+      memberId: "user-resume-finalize",
+      occurredAt: "2026-04-20T00:00:00.000Z",
+    });
+    const acquiredCursor = createCursorState({
+      committedSeq: "10",
+      nextSeq: "11",
+      snapshotKey: "snapshot/share-pack-missing",
+      version: "cursor-v1",
+    });
+    const committedCursor = createCursorState({
+      committedSeq: "11",
+      nextSeq: "12",
+      snapshotKey: "snapshot/after-share-pack-missing",
+      version: "cursor-v2",
+    });
+    const run = createRunRecord();
+    run.status = "acquired";
+
+    wakeProcessorMocks.readRunDrainSharePack.mockRejectedValueOnce(
+      new Error("share pack unavailable"),
+    );
+    webControlMocks.acquireHostedRunFromWeb.mockResolvedValueOnce({
+      acquired: true,
+      cursor: acquiredCursor,
+      events: [
+        createAcquireEvent({
+          id: "wake-share-pack-missing",
+          seq: "11",
+          userId: "user-resume-finalize",
+          wake: activationWake,
+        }),
+      ],
+      pendingWakeCount: 1,
+      resumeFinalize: false,
+      run,
+      runToken: "run-token",
+    });
+    webControlMocks.commitHostedRunToWeb.mockResolvedValueOnce({
+      committed: true,
+      cursor: committedCursor,
+      needsFinalize: false,
+      run,
+    });
+    webControlMocks.recordHostedRunLogInWeb.mockResolvedValue({
+      log: null,
+      logged: true,
+    });
+
+    const result = await runner.drainHostedRuns({
+      targetSeqHint: "11",
+    });
+
+    expect(webControlMocks.commitHostedRunToWeb).toHaveBeenCalledTimes(1);
+    expect(webControlMocks.commitHostedRunToWeb.mock.calls[0]?.[0]).toMatchObject({
+      body: {
+        eventResults: [
+          {
+            quarantineCode: "share-pack-unavailable",
+            state: "quarantined",
+            wakeId: "wake-share-pack-missing",
+          },
+        ],
+        outputCommittedSeq: "11",
+      },
+    });
+    expect(wakeProcessorMocks.executeRunDrain).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      committedSeq: committedCursor.committedSeq,
+      requestedTargetSeq: "11",
+      targetReached: true,
+    });
+    await expect(stateStore.readState()).resolves.toMatchObject({
+      userId: "user-resume-finalize",
+    });
+  });
+
   it("retries when raw email validation fails for reasons other than a missing payload", async () => {
     envMocks.readHostedExecutionEnvironment.mockReturnValue(createTestRuntimeEnvironment());
     const state = createDurableObjectStateHarness();
@@ -956,9 +1135,28 @@ function createAcquireEvent(input: {
   userId: string;
   wake: HostedIngressEnvelope;
 }): HostedRunAcquireResponse["events"][number] {
+  return createEncryptedAcquireEvent({
+    decryptedPayload: input.wake,
+    id: input.id,
+    kind: input.wake.kind,
+    occurredAt: input.wake.occurredAt,
+    seq: input.seq,
+    userId: input.userId,
+  });
+}
+
+function createEncryptedAcquireEvent(input: {
+  decryptedPayload: unknown;
+  id: string;
+  kind: HostedRunAcquireResponse["events"][number]["kind"];
+  occurredAt: string;
+  payloadSchema?: HostedRunAcquireResponse["events"][number]["payloadSchema"];
+  seq: string;
+  userId: string;
+}): HostedRunAcquireResponse["events"][number] {
   const encrypted = encryptTestHostedIngressPayload({
     userId: input.userId,
-    value: input.wake,
+    value: input.decryptedPayload,
   });
 
   return {
@@ -966,11 +1164,11 @@ function createAcquireEvent(input: {
     createdAt: "2026-04-20T00:00:00.000Z",
     dedupeKey: null,
     id: input.id,
-    kind: input.wake.kind,
-    occurredAt: input.wake.occurredAt,
+    kind: input.kind,
+    occurredAt: input.occurredAt,
     payloadBytes: encrypted.payloadBytes,
     payloadCiphertext: encrypted.payloadCiphertext,
-    payloadSchema: HOSTED_INGRESS_PAYLOAD_SCHEMA,
+    payloadSchema: input.payloadSchema ?? HOSTED_INGRESS_PAYLOAD_SCHEMA,
     quarantineCode: null,
     quarantinedAt: null,
     seq: input.seq,
