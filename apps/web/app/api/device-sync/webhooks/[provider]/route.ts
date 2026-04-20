@@ -3,8 +3,8 @@ import {
 } from "@murphai/device-syncd/public-ingress";
 import type { DeviceSyncWebhookPreflightResponse } from "@murphai/device-syncd/types";
 
-import { createHostedDeviceSyncControlPlane } from "../../../../../src/lib/device-sync/control-plane";
-import { jsonOk, resolveDecodedRouteParam, withJsonError } from "../../../../../src/lib/device-sync/http";
+import { createHostedDeviceSyncControlPlane } from "@/src/lib/device-sync/control-plane";
+import { jsonOk, resolveDecodedRouteParam, withJsonError } from "@/src/lib/device-sync/http";
 
 export const GET = withJsonError(async (
   request: Request,

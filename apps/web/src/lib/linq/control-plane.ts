@@ -9,10 +9,10 @@ import {
   createHostedDeviceSyncControlPlaneContext,
   type HostedDeviceSyncControlPlaneContext,
 } from "../device-sync/control-plane-context";
-import { normalizeNullableString, parseInteger, toIsoTimestamp } from "../device-sync/shared";
 import { normalizePhoneNumber } from "../hosted-onboarding/phone";
 import { readHostedPhoneHint } from "../hosted-onboarding/contact-privacy";
 import { readRawBodyBuffer } from "../http";
+import { normalizeNullableString, parseInteger, toIsoTimestamp } from "../primitives";
 import { hostedLinqError } from "./errors";
 import { fetchLinqApi, LinqApiTimeoutError } from "./api";
 import { readHostedLinqEnvironment } from "./env";

@@ -1,6 +1,10 @@
-import { createHostedDeviceSyncControlPlane } from "../../../../../../../src/lib/device-sync/control-plane";
-import { parseHostedLocalHeartbeatPatch } from "../../../../../../../src/lib/device-sync/local-heartbeat";
-import { jsonOk, readOptionalJsonObject, resolveDecodedRouteParam, withJsonError } from "../../../../../../../src/lib/device-sync/http";
+import { createHostedDeviceSyncControlPlane } from "@/src/lib/device-sync/control-plane";
+import { jsonOk, postOnlyJson, readOptionalJsonObject, resolveDecodedRouteParam, withJsonError } from "@/src/lib/device-sync/http";
+import { parseHostedLocalHeartbeatPatch } from "@/src/lib/device-sync/local-heartbeat";
+
+export function GET() {
+  return postOnlyJson("Hosted device-sync local heartbeat routes only allow POST.");
+}
 
 export const POST = withJsonError(async (
   request: Request,

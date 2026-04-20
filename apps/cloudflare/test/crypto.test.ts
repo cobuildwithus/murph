@@ -7,7 +7,7 @@ import {
 } from "../src/bundle-store.js";
 import { writeHostedEmailRawMessage } from "../src/hosted-email.js";
 import {
-  encryptHostedBundle,
+  encryptHostedStorageEnvelope,
   readEncryptedR2Payload,
 } from "../src/crypto.js";
 import { MemoryEncryptedR2Bucket, createTestRootKey } from "./test-helpers.js";
@@ -18,7 +18,7 @@ describe("readEncryptedR2Payload", () => {
     const previousKey = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
     const nextKey = Uint8Array.from({ length: 32 }, () => 7);
     const plaintext = new TextEncoder().encode("{\"ok\":true}");
-    const envelope = await encryptHostedBundle({
+    const envelope = await encryptHostedStorageEnvelope({
       key: previousKey,
       keyId: "v1",
       plaintext,
@@ -60,7 +60,7 @@ describe("readEncryptedR2Payload", () => {
 
   it("fails closed when an envelope omits its storage scope", async () => {
     const key = createTestRootKey(13);
-    const envelope = await encryptHostedBundle({
+    const envelope = await encryptHostedStorageEnvelope({
       key,
       keyId: "k-current",
       plaintext: new TextEncoder().encode("{\"ok\":true}"),
@@ -87,6 +87,7 @@ describe("readEncryptedR2Payload", () => {
           throw new Error("unexpected rewrite");
         },
       },
+      callerLabel: "Hosted bundle envelope",
       cryptoKey: key,
       expectedKeyId: "k-current",
       key: "bundles/vault/test.bundle.json",
@@ -97,7 +98,7 @@ describe("readEncryptedR2Payload", () => {
   it("fails closed when a stored payload is rebound without the expected AAD", async () => {
     const key = createTestRootKey(17);
     const aad = new TextEncoder().encode("expected-aad");
-    const envelope = await encryptHostedBundle({
+    const envelope = await encryptHostedStorageEnvelope({
       aad,
       key,
       keyId: "k-current",
@@ -193,7 +194,7 @@ describe("hosted storage object keys", () => {
       userId: "user_email_123",
     });
     const storedEmailKey = findStoredObjectKey(bucket, (key) =>
-      key.startsWith("transient/hosted-email/messages/"),
+      key.startsWith("hosted-email/messages/"),
     );
     expectOpaqueStrings([storedEmailKey], ["user_email_123", rawMessageKey]);
   });

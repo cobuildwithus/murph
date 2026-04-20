@@ -4,7 +4,7 @@ import {
   normalizeHostedExecutionString,
 } from "@murphai/hosted-execution/env";
 
-import { normalizeNullableString } from "../device-sync/shared";
+import { normalizeNullableString } from "../primitives";
 
 type EnvSource = Readonly<Record<string, string | undefined>>;
 

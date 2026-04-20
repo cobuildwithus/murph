@@ -7,7 +7,7 @@ import {
   decodeHostedEncryptionKeyring,
   type HostedSecretCodec,
 } from "../device-sync/crypto";
-import { normalizeNullableString } from "../device-sync/shared";
+import { normalizeNullableString } from "../primitives";
 
 const HOSTED_WAKE_ENCRYPTION_KEY_ENV_KEYS = [
   "HOSTED_WAKE_ENCRYPTION_KEY",

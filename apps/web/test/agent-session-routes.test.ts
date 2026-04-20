@@ -68,11 +68,11 @@ describe("hosted device-sync agent token routes", () => {
         exportedAt: "2026-03-25T00:05:00.000Z",
       },
       agentSession: {
-        id: "dsa_rotated",
+        id: "dsa_active",
         label: "Mac mini",
-        createdAt: "2026-03-25T00:05:00.000Z",
+        createdAt: "2026-03-25T00:00:00.000Z",
         expiresAt: "2026-03-26T00:05:00.000Z",
-        bearerToken: "hbds_agent_rotated",
+        bearerToken: "hbds_agent_active",
       },
     });
     mocks.refreshTokenBundle.mockResolvedValue({
@@ -92,11 +92,11 @@ describe("hosted device-sync agent token routes", () => {
       refreshed: true,
       tokenVersionChanged: false,
       agentSession: {
-        id: "dsa_rotated",
+        id: "dsa_active",
         label: "Mac mini",
-        createdAt: "2026-03-25T01:00:00.000Z",
+        createdAt: "2026-03-25T00:00:00.000Z",
         expiresAt: "2026-03-26T01:00:00.000Z",
-        bearerToken: "hbds_agent_rotated",
+        bearerToken: "hbds_agent_active",
       },
     });
     mocks.revokeAgentSession.mockResolvedValue({
@@ -175,7 +175,7 @@ describe("hosted device-sync agent token routes", () => {
     expect(mocks.refreshTokenBundle).not.toHaveBeenCalled();
   });
 
-  it("passes the authenticated session into export-token-bundle so the handler can rotate it", async () => {
+  it("passes the authenticated session into export-token-bundle", async () => {
     const response = await exportRoute.POST(
       createBearerRequest(
         "https://example.test/api/device-sync/agent/connections/dsc_123/export-token-bundle",
@@ -193,8 +193,8 @@ describe("hosted device-sync agent token routes", () => {
         id: "dsc_123",
       },
       agentSession: {
-        id: "dsa_rotated",
-        bearerToken: "hbds_agent_rotated",
+        id: "dsa_active",
+        bearerToken: "hbds_agent_active",
       },
     });
   });
@@ -228,8 +228,8 @@ describe("hosted device-sync agent token routes", () => {
       },
       refreshed: true,
       agentSession: {
-        id: "dsa_rotated",
-        bearerToken: "hbds_agent_rotated",
+        id: "dsa_active",
+        bearerToken: "hbds_agent_active",
       },
     });
   });

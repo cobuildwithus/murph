@@ -88,8 +88,7 @@ describe("hosted device-sync agent and webhook routes", () => {
     mocks.requireAgentSession.mockRejectedValue(
       deviceSyncError({
         code: "AGENT_AUTH_EXPIRED",
-        message:
-          "Hosted device-sync agent bearer token expired. Pair again or keep using the latest bearer returned by export-token-bundle or refresh-token-bundle.",
+        message: "Hosted device-sync agent bearer token expired. Pair again to create a new bearer token.",
         httpStatus: 401,
       }),
     );
@@ -107,8 +106,7 @@ describe("hosted device-sync agent and webhook routes", () => {
     await expect(response.json()).resolves.toMatchObject({
       error: {
         code: "AGENT_AUTH_EXPIRED",
-        message:
-          "Hosted device-sync agent bearer token expired. Pair again or keep using the latest bearer returned by export-token-bundle or refresh-token-bundle.",
+        message: "Hosted device-sync agent bearer token expired. Pair again to create a new bearer token.",
         retryable: false,
       },
     });
@@ -119,8 +117,7 @@ describe("hosted device-sync agent and webhook routes", () => {
     mocks.requireAgentSession.mockRejectedValue(
       deviceSyncError({
         code: "AGENT_AUTH_EXPIRED",
-        message:
-          "Hosted device-sync agent bearer token expired. Pair again or keep using the latest bearer returned by export-token-bundle or refresh-token-bundle.",
+        message: "Hosted device-sync agent bearer token expired. Pair again to create a new bearer token.",
         httpStatus: 401,
       }),
     );
@@ -145,8 +142,7 @@ describe("hosted device-sync agent and webhook routes", () => {
     await expect(response.json()).resolves.toMatchObject({
       error: {
         code: "AGENT_AUTH_EXPIRED",
-        message:
-          "Hosted device-sync agent bearer token expired. Pair again or keep using the latest bearer returned by export-token-bundle or refresh-token-bundle.",
+        message: "Hosted device-sync agent bearer token expired. Pair again to create a new bearer token.",
         retryable: false,
       },
     });

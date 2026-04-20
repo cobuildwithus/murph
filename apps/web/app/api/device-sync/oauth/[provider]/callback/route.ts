@@ -1,13 +1,13 @@
 import { isDeviceSyncError } from "@murphai/device-syncd/public-ingress";
 
-import { createHostedDeviceSyncControlPlane } from "../../../../../../src/lib/device-sync/control-plane";
 import {
   InvalidRouteParamEncodingError,
   callbackHtml,
   errorToCallbackRedirect,
   providerCallbackRedirect,
   resolveDecodedRouteParam,
-} from "../../../../../../src/lib/device-sync/http";
+} from "@/src/lib/device-sync/http";
+import { createHostedDeviceSyncControlPlane } from "@/src/lib/device-sync/control-plane";
 
 export async function GET(
   request: Request,

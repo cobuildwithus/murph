@@ -1,6 +1,7 @@
 import { createHostedDeviceSyncControlPlane } from "@/src/lib/device-sync/control-plane";
 import {
   jsonOk,
+  postOnlyJson,
   readOptionalJsonObject,
   resolveDecodedRouteParam,
   withJsonError,
@@ -18,19 +19,8 @@ export async function hostedDeviceSyncConnectStartGet(
   _request: Request,
   _context: HostedDeviceSyncProviderRouteContext,
 ) {
-  return Response.json(
-    {
-      error: {
-        code: "METHOD_NOT_ALLOWED",
-        message: "Hosted device-sync connect/start routes only allow POST because starting a connection mutates server state.",
-      },
-    },
-    {
-      status: 405,
-      headers: {
-        allow: "POST",
-      },
-    },
+  return postOnlyJson(
+    "Hosted device-sync connect/start routes only allow POST because starting a connection mutates server state.",
   );
 }
 

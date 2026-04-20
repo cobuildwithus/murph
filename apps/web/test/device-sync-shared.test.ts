@@ -17,9 +17,9 @@ import {
   generateHostedRandomPrefixedId,
   normalizeNullableString,
   toIsoTimestamp,
-} from "@/src/lib/device-sync/shared";
+} from "@/src/lib/primitives";
 
-describe("device-sync shared helpers", () => {
+describe("hosted primitive helpers", () => {
   it("keeps hosted timestamp validation local while preserving the shared behavior", () => {
     assert.equal(toIsoTimestamp("2026-03-26T12:00:00Z"), "2026-03-26T12:00:00.000Z");
     expect(() => toIsoTimestamp("not-a-date")).toThrowError(new TypeError("Invalid timestamp: not-a-date"));
