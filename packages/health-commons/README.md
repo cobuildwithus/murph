@@ -29,7 +29,7 @@ Place the PDF in the repo-local staging directory:
 research-artifacts/sauna/<slug>.pdf
 ```
 
-That directory is gitignored on purpose.
+That directory is gitignored on purpose. Source-page HTML/text snapshots can use the sibling `source-artifacts/**` staging directory, which is also gitignored.
 
 ### 2. Generate the hash + manifest stub
 
@@ -39,6 +39,7 @@ pnpm --filter @murphai/health-commons artifacts:hash -- --file research-artifact
 
 The helper prints a manifest-ready JSON object including:
 
+- `artifactId` using the same stable-id character set as the Health Commons schema
 - `sha256`
 - `byteSize`
 - `localPath`
@@ -46,7 +47,7 @@ The helper prints a manifest-ready JSON object including:
 - a safe default `rightsStatus`
 - `redistributable: false`
 
-Copy those fields into `content/artifacts/sauna/research-artifacts.json`.
+Copy those fields into `content/artifacts/sauna/research-artifacts.json`, or place small source-page snapshot pointers directly in a `source_artifact` page's `artifacts` block. Both locations are included in the generated artifact manifest.
 
 ### 3. Review rights before upload
 

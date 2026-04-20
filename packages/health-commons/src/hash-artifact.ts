@@ -31,18 +31,17 @@ export async function printArtifactMetadata(options: CliOptions): Promise<void> 
   const fileStat = await stat(absoluteFile);
 
   const parsed = path.parse(absoluteFile);
-  const stem = parsed.name;
-  const relativeLocalPath = normalizePath(path.relative(repoRoot, absoluteFile));
+  const stem = toStableIdSegment(parsed.name);
+  const extension = parsed.ext || ".bin";
+  const localPath = options.localPath ?? defaultLocalPath(absoluteFile);
 
   const artifact = {
-    artifactId:
-      options.artifactId ??
-      `art_${stem.replace(/[^A-Za-z0-9._:-]/gu, "_")}_${(parsed.ext || ".bin").replace(/[^A-Za-z0-9]/gu, "")}`,
+    artifactId: options.artifactId ?? `art_${stem}_${toStableIdSegment(extension.replace(/^\./u, "") || "bin")}`,
     sourceKey: options.sourceKey ?? undefined,
     kind: options.kind,
     storage: options.storage,
-    objectKey: options.objectKey ?? `commons/research/sauna/${stem}/source${parsed.ext || ".bin"}`,
-    localPath: options.localPath ?? relativeLocalPath,
+    objectKey: options.objectKey ?? `commons/research/sauna/${stem}/source${extension}`,
+    localPath,
     contentType: options.contentType,
     sha256: sha256Buffer(raw),
     byteSize: fileStat.size,
@@ -54,11 +53,23 @@ export async function printArtifactMetadata(options: CliOptions): Promise<void> 
   console.log(JSON.stringify(artifact, null, 2));
 }
 
+function defaultLocalPath(absoluteFile: string): string {
+  const relativeLocalPath = normalizePath(path.relative(repoRoot, absoluteFile));
+  if (relativeLocalPath.startsWith("../") || relativeLocalPath === "..") {
+    throw new Error("Default localPath only works for files inside the repo. Pass --local-path for external files.");
+  }
+  return relativeLocalPath;
+}
+
+function toStableIdSegment(value: string): string {
+  return value.replace(/[^A-Za-z0-9._:]/gu, "_").replace(/_+/gu, "_").replace(/^_+|_+$/gu, "") || "artifact";
+}
+
 function normalizePath(value: string): string {
   return value.split(path.sep).join(path.posix.sep);
 }
 
-function parseCliOptions(argv: readonly string[]): CliOptions {
+export function parseCliOptions(argv: readonly string[]): CliOptions {
   const options: CliOptions = {
     artifactId: null,
     contentType: "application/pdf",

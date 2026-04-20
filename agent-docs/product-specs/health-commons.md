@@ -50,7 +50,7 @@ Private experiments should store commons references by key and revision instead 
 
 ## Artifact Storage
 
-Research artifacts are represented by `murph.commons.artifact-manifest.v1` JSON manifests. A manifest entry can point to a Cloudflare R2 object key, local staging path, content type, byte size, hash, rights status, and redistributability flag.
+Research artifacts are represented by `murph.commons.artifact-manifest.v1` JSON manifests. A manifest entry can point to a Cloudflare R2 object key, local staging path, content type, byte size, hash, rights status, and redistributability flag. Source pages may also declare small snapshot pointers in their own `artifacts` block; generated catalogs must collect those into a synthetic artifact manifest so Cloudflare/R2 sync sees every declared artifact.
 
 The upload script must refuse unknown, permission-required, or non-redistributable artifacts by default. Operators may only override that after legal review. Journal PDFs should not be committed directly to Git.
 
