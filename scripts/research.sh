@@ -17,11 +17,12 @@ Options:
   --turns <4|5>        Number of research passes. Defaults to 4.
   --chat-url <url>     Resume an existing ChatGPT thread instead of starting a new one.
   --out-dir <dir>      Output directory. Defaults to output-packages/research/<slug>-<timestamp>.
+  --smoke-test         Use trivial artifact-return prompts for end-to-end workflow validation.
   -h, --help           Show this help text.
 
 Environment:
   RESEARCH_MODEL           Defaults to gpt-5.4-pro
-  RESEARCH_THINKING        Defaults to extended
+  RESEARCH_THINKING        Defaults to current
   RESEARCH_WAIT_TIMEOUT    Defaults to 45m
   RESEARCH_TIMEOUT         Defaults to 60m
   RESEARCH_ARTIFACT_LIMIT  Defaults to 6 downloaded artifacts per pass
@@ -41,27 +42,46 @@ slugify() {
   ' "$1"
 }
 
-json_field() {
-  node - "$1" "$2" <<'NODE'
+extract_chat_url() {
+  local result_file="$1"
+  local chat_url_line=""
+
+  chat_url_line="$(
+    grep -E 'ChatGPT (thread|conversation) URL: https://chatgpt\.com/c/' "$result_file" \
+      | tail -n 1 \
+      | sed -E 's/^.*URL: (https:\/\/chatgpt\.com\/c\/[^[:space:]]+).*$/\1/'
+  )"
+
+  if [[ -n "$chat_url_line" ]]; then
+    printf '%s' "$chat_url_line"
+    return 0
+  fi
+
+  node - "$result_file" <<'NODE'
 const fs = require("node:fs");
 
-const [filePath, fieldName] = process.argv.slice(2);
+const [filePath] = process.argv.slice(2);
 const raw = fs.readFileSync(filePath, "utf8");
-const start = raw.indexOf("{");
-const end = raw.lastIndexOf("}");
+const matches = [...raw.matchAll(/https:\/\/chatgpt\.com\/c\/[^\s"'`]+/g)];
 
-if (start < 0 || end < start) {
+if (matches.length === 0) {
   process.exit(1);
 }
 
-const data = JSON.parse(raw.slice(start, end + 1));
-const value = data[fieldName];
-
-if (value === undefined || value === null) {
-  process.exit(0);
+process.stdout.write(matches[matches.length - 1][0]);
+NODE
 }
 
-process.stdout.write(String(value));
+export_attachment_count() {
+  node - "$1" <<'NODE'
+const fs = require("node:fs");
+
+const [filePath] = process.argv.slice(2);
+const raw = fs.readFileSync(filePath, "utf8");
+const data = JSON.parse(raw);
+const buttons = Array.isArray(data.attachmentButtons) ? data.attachmentButtons : [];
+
+process.stdout.write(String(buttons.length));
 NODE
 }
 
@@ -71,9 +91,10 @@ slug=""
 turns="4"
 chat_url=""
 out_dir=""
+smoke_test=0
 
 model="${RESEARCH_MODEL:-gpt-5.4-pro}"
-thinking="${RESEARCH_THINKING:-extended}"
+thinking="${RESEARCH_THINKING:-current}"
 wait_timeout="${RESEARCH_WAIT_TIMEOUT:-45m}"
 timeout="${RESEARCH_TIMEOUT:-60m}"
 artifact_limit="${RESEARCH_ARTIFACT_LIMIT:-6}"
@@ -103,6 +124,10 @@ while [[ $# -gt 0 ]]; do
     --out-dir)
       out_dir="${2:-}"
       shift 2
+      ;;
+    --smoke-test)
+      smoke_test=1
+      shift
       ;;
     -h|--help)
       usage 0
@@ -156,7 +181,35 @@ download_script_path="${out_dir}/download-open-access-pdfs.sh"
 example_protocol_path="packages/health-commons/content/protocols/dry-sauna/murph-finnish-standard-3x-week.md"
 example_artifact_manifest_path="packages/health-commons/content/artifacts/sauna/research-artifacts.json"
 
+write_smoke_prompt() {
+  local turn="$1"
+  local label="$2"
+  local prompt_path="$out_dir/prompts/${turn}-${label}.md"
+  local artifact_name="smoke-${turn}-${label}.md"
+  local artifact_body="smoke ${turn} ok"
+
+  cat > "$prompt_path" <<EOF
+This is a workflow smoke test for a multi-turn ChatGPT thread controller.
+
+Return as fast as possible.
+
+Required outputs:
+1. Attach exactly one small markdown file named ${artifact_name}
+2. The full contents of that file must be exactly:
+${artifact_body}
+3. In the chat response, write exactly:
+attached ${artifact_name}
+
+Do not do research. Do not add any extra explanation. Keep this turn minimal.
+EOF
+}
+
 write_prompt_1() {
+  if [[ "$smoke_test" == "1" ]]; then
+    write_smoke_prompt "01" "discovery"
+    return
+  fi
+
   cat > "$out_dir/prompts/01-discovery.md" <<EOF
 You are doing pass 1 of a Murph Health Commons research workflow.
 
@@ -243,6 +296,11 @@ EOF
 }
 
 write_prompt_2() {
+  if [[ "$smoke_test" == "1" ]]; then
+    write_smoke_prompt "02" "gap-fill"
+    return
+  fi
+
   cat > "$out_dir/prompts/02-gap-fill.md" <<EOF
 You are doing pass 2 of the same Murph Health Commons research workflow.
 
@@ -294,6 +352,11 @@ EOF
 }
 
 write_prompt_3() {
+  if [[ "$smoke_test" == "1" ]]; then
+    write_smoke_prompt "03" "synthesis"
+    return
+  fi
+
   cat > "$out_dir/prompts/03-synthesis.md" <<EOF
 You are doing pass 3 of the Murph Health Commons research workflow.
 
@@ -358,6 +421,11 @@ EOF
 }
 
 write_prompt_4() {
+  if [[ "$smoke_test" == "1" ]]; then
+    write_smoke_prompt "04" "landing"
+    return
+  fi
+
   cat > "$out_dir/prompts/04-landing.md" <<EOF
 You are doing pass 4, the landing pass, for the Murph Health Commons research workflow.
 
@@ -401,6 +469,11 @@ EOF
 }
 
 write_prompt_5() {
+  if [[ "$smoke_test" == "1" ]]; then
+    write_smoke_prompt "05" "final-audit"
+    return
+  fi
+
   cat > "$out_dir/prompts/05-final-audit.md" <<EOF
 You are doing optional pass 5, a skeptical final audit.
 
@@ -437,6 +510,7 @@ download_turn_artifacts() {
   local export_output="$out_dir/exports/${turn}.thread.json"
   local export_log="$out_dir/logs/${turn}.thread-export.log"
   local turn_download_dir="$out_dir/downloads/${turn}"
+  local attachment_count="0"
 
   mkdir -p "$turn_download_dir"
 
@@ -450,6 +524,14 @@ download_turn_artifacts() {
   set -e
 
   if [[ "$export_status" -ne 0 ]]; then
+    return 0
+  fi
+
+  attachment_count="$(export_attachment_count "$export_output" 2>/dev/null || printf '0')"
+
+  if [[ "$attachment_count" == "0" ]]; then
+    printf 'No downloadable attachment buttons found in thread export for pass %s.\n' "$turn" \
+      >"$out_dir/logs/${turn}.download-skip.log"
     return 0
   fi
 
@@ -492,11 +574,14 @@ run_turn() {
     --prompt-file "$prompt_file"
     --response-file "$response_file"
     --model "$model"
-    --thinking "$thinking"
     --wait
     --wait-timeout "$wait_timeout"
     --timeout "$timeout"
   )
+
+  if [[ -n "$thinking" && "$thinking" != "current" ]]; then
+    args+=(--thinking "$thinking")
+  fi
 
   if [[ -n "$chat_url" ]]; then
     args+=(--chat-url "$chat_url")
@@ -517,7 +602,7 @@ run_turn() {
   fi
 
   local next_chat_url
-  next_chat_url="$(json_field "$result_file" chatUrl || true)"
+  next_chat_url="$(extract_chat_url "$result_file" || true)"
 
   if [[ -n "$next_chat_url" ]]; then
     chat_url="$next_chat_url"

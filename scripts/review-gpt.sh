@@ -138,12 +138,15 @@ if [[ "$list_presets" == "1" ]]; then
   exit 0
 fi
 
-tmp_log_path="$(mktemp "${TMPDIR:-/tmp}/review-gpt.XXXXXX.log")"
+tmp_log_path="$(mktemp "${TMPDIR:-/tmp}/review-gpt.XXXXXX")"
 declare -a review_gpt_args=()
 
 if [[ "${#forward_args[@]}" -gt 0 ]]; then
   case "${forward_args[0]}" in
-    delay|thread)
+    thread)
+      review_gpt_args=("${forward_args[@]}")
+      ;;
+    delay)
       review_gpt_args=("${forward_args[0]}" --config "$config_path" "${forward_args[@]:1}")
       ;;
     *)
