@@ -311,10 +311,37 @@ describe("RunnerRunProcessor.executeRunDrain", () => {
     });
 
     await snapshotStore.writeBrowserVaultSnapshot("user_123", {
-      entities: [],
       generatedAt: "2026-04-20T09:00:00.000Z",
-      metadata: null,
-      schema: "murph.browser-vault-snapshot.v1",
+      history: {
+        timeline: [],
+      },
+      overview: {
+        metrics: [],
+        recentJournals: [],
+        trackedExperiments: [],
+        weeklySampleSummaries: [],
+      },
+      schema: "murph.browser-vault-dashboard-snapshot.v1",
+      signals: {
+        activity: [],
+        assistantSummary: {
+          activity: null,
+          bodyState: null,
+          date: null,
+          from: null,
+          highlights: [],
+          latestDate: null,
+          providers: [],
+          recovery: null,
+          sleep: null,
+          sourceHealth: [],
+          to: null,
+        },
+        bodyState: [],
+        recovery: [],
+        sleep: [],
+        sourceHealth: [],
+      },
       sourceVersion: "c".repeat(64),
     });
 
