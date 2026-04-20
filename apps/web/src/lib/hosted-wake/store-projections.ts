@@ -6,7 +6,6 @@ import type {
   HostedWakePayloadSchema,
   HostedWakeRecord,
   HostedWakeSnapshotRef,
-  HostedWakeTerminalState,
 } from "@murphai/hosted-execution/contracts";
 import {
   HOSTED_WAKE_EXECUTION_PAYLOAD_SCHEMA,
@@ -25,71 +24,30 @@ import type {
   HostedExecutionCursorRow,
   HostedWakeRow,
   HostedWakeStoreClient,
-  HostedWakeTerminalRow,
 } from "./store.types";
 
 export async function resolveHostedWakeLifecycleStateTx(input: {
   record: HostedWakeRow;
   tx: HostedWakeStoreClient;
 }): Promise<HostedWakeLifecycleState> {
-  if (input.record.quarantinedAt) {
+  if (input.record.quarantinedAt || input.record.state === "quarantined") {
     return "quarantined";
+  }
+
+  if (input.record.state === "replaced") {
+    return "replaced";
+  }
+
+  if (input.record.completedAt || input.record.state === "completed") {
+    return "completed";
   }
 
   const cursor = await ensureHostedExecutionCursorRowTx({
     tx: input.tx,
     userId: input.record.userId,
   });
-  const terminal = await input.tx.hostedWakeTerminal.findUnique({
-    where: {
-      wakeId: input.record.id,
-    },
-  });
-
-  const receipt = terminal === null ? null : {
-    ...terminal,
-    state: parseHostedWakeTerminalState(terminal.state),
-  };
-  if (
-    receipt
-    && isCurrentHostedWakeTerminalReceipt({
-      cursor,
-      receipt,
-      wake: input.record,
-    })
-    && receipt.state === "completed"
-  ) {
-    return receipt.state;
-  }
 
   return input.record.seq > cursor.committedSeq ? "queued" : "completed";
-}
-
-export function isCurrentHostedWakeTerminalReceipt(input: {
-  cursor: Pick<HostedExecutionCursorRow, "committedSeq" | "version">;
-  receipt: Pick<
-    HostedWakeTerminalRow,
-    "fetchedCommittedSeq" | "fetchedCursorVersion" | "state" | "userId" | "wakeId" | "wakeSeq"
-  > | null;
-  wake: Pick<HostedWakeRow, "id" | "seq" | "userId">;
-}): input is {
-  cursor: Pick<HostedExecutionCursorRow, "committedSeq" | "version">;
-  receipt: Pick<
-    HostedWakeTerminalRow,
-    "fetchedCommittedSeq" | "fetchedCursorVersion" | "state" | "userId" | "wakeId" | "wakeSeq"
-  >;
-  wake: Pick<HostedWakeRow, "id" | "seq" | "userId">;
-} {
-  const { receipt, wake } = input;
-
-  return Boolean(
-    receipt
-      && receipt.userId === wake.userId
-      && receipt.wakeId === wake.id
-      && receipt.wakeSeq === wake.seq
-      && receipt.fetchedCommittedSeq === input.cursor.committedSeq
-      && receipt.fetchedCursorVersion === input.cursor.version,
-  );
 }
 
 export function projectHostedExecutionCursorRecord(
@@ -99,7 +57,7 @@ export function projectHostedExecutionCursorRecord(
     committedSeq: record.committedSeq.toString(),
     createdAt: record.createdAt.toISOString(),
     nextSeq: record.nextSeq.toString(),
-    nextRuntimeWakeAt: (record.nextRuntimeWakeAt ?? record.assistantNextWakeAt)?.toISOString() ?? null,
+    nextRuntimeWakeAt: record.nextRuntimeWakeAt?.toISOString() ?? null,
     nextRuntimeWakeReason: record.nextRuntimeWakeReason,
     snapshotRef: parseHostedWakeSnapshotRef(record.snapshotRef),
     updatedAt: record.updatedAt.toISOString(),
@@ -218,14 +176,4 @@ export async function hydrateHostedWakeRecordsTx(input: {
 
 function parseHostedWakeSnapshotRef(value: HostedExecutionCursorRow["snapshotRef"]): HostedWakeSnapshotRef {
   return value === null ? null : parseHostedExecutionCursorSnapshotRef(value);
-}
-
-function parseHostedWakeTerminalState(value: string): HostedWakeTerminalState {
-  switch (value) {
-    case "completed":
-    case "quarantined":
-      return value;
-    default:
-      throw new TypeError(`Hosted wake terminal state is invalid: ${value}`);
-  }
 }

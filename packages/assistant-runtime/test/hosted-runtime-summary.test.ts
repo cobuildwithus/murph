@@ -39,7 +39,6 @@ describe("summarizeWake", () => {
         parserProcessed: 2,
         shareImportResult: null,
         shareImportTitle: null,
-        wakeMaterializationHints: null,
       }),
       "Processed member activation (bootstrap state unavailable).",
     );
@@ -77,7 +76,6 @@ describe("summarizeWake", () => {
         parserProcessed: 0,
         shareImportResult: null,
         shareImportTitle: null,
-        wakeMaterializationHints: null,
       }),
       "Processed member activation (created the canonical vault; seeded explicit hosted assistant config (openai-compatible); hosted email auto-reply ready; hosted Linq auto-reply ready; hosted Telegram auto-reply unavailable).",
     );
@@ -115,7 +113,6 @@ describe("summarizeWake", () => {
         parserProcessed: 0,
         shareImportResult: null,
         shareImportTitle: null,
-        wakeMaterializationHints: null,
       }),
       "Processed member activation (reused the canonical vault; hosted assistant config missing; hosted email auto-reply unavailable; hosted Linq auto-reply unavailable; hosted Telegram auto-reply ready).",
     );
@@ -169,7 +166,6 @@ describe("summarizeWake", () => {
           parserProcessed: 0,
           shareImportResult: null,
           shareImportTitle: null,
-          wakeMaterializationHints: null,
         }),
         entry.expected,
       );
@@ -199,7 +195,6 @@ describe("summarizeWake", () => {
         parserProcessed: 0,
         shareImportResult: null,
         shareImportTitle: null,
-        wakeMaterializationHints: null,
       }),
       "Processed member channel sync.",
     );
@@ -238,7 +233,6 @@ describe("summarizeWake", () => {
           recipes: [],
         },
         shareImportTitle: null,
-        wakeMaterializationHints: null,
       }),
       "Imported share pack \"share_123\" (0 foods, 0 protocols, 0 recipes).",
     );
@@ -327,7 +321,6 @@ describe("summarizeWake", () => {
           parserProcessed: 1,
           shareImportResult: null,
           shareImportTitle: null,
-          wakeMaterializationHints: null,
         }),
         entry.expected,
       );

@@ -1,53 +1,29 @@
-import { Prisma } from "@prisma/client";
-import { HOSTED_WAKE_FETCH_PROOF_STALE_ERROR_CODE } from "@murphai/hosted-execution/contracts";
 import type {
-  HostedExecutionBundleRef,
   HostedExecutionCursorState,
-  HostedWakeCommitResponse,
-  HostedWakeFetchResponse,
-  HostedWakeFinalizeResponse,
-  HostedWakeSnapshotRef,
-  HostedWakeTerminalState,
 } from "@murphai/hosted-execution/contracts";
-import { parseHostedExecutionCursorSnapshotRef } from "@murphai/hosted-execution/parsers";
 
 import { getPrisma } from "../prisma";
 import {
   ensureHostedExecutionCursorRowTx,
   findCurrentHostedWakeEventByWakeIdTx,
   findHostedWakeEventByEventIdTx,
-  lockHostedExecutionCursorRowTx,
   resolveHostedWakeEventId,
 } from "./store-data";
 import {
-  hydrateHostedWakeRecordsTx,
-  isCurrentHostedWakeTerminalReceipt,
   projectHostedExecutionCursorRecord,
   resolveHostedWakeLifecycleStateTx,
 } from "./store-projections";
-import {
-  issueHostedWakeFetchProof,
-  issueHostedWakeFinalizeProof,
-  verifyHostedWakeFinalizeProof,
-  verifyHostedWakeFetchProof,
-} from "./fetch-proof";
 import type {
   HostedWakeEventRow,
   HostedWakeLifecycleRecord,
-  HostedWakeMutationTx,
-  HostedWakeRepairCandidate,
   HostedWakeRow,
   HostedWakeStoreClient,
-  HostedWakeTerminalRow,
-  ListHostedExecutableWakesInput,
 } from "./store.types";
 
 export type {
   AppendHostedWakeInput,
   AppendHostedWakeResult,
   HostedWakeLifecycleRecord,
-  HostedWakeRepairCandidate,
-  ListHostedExecutableWakesInput,
 } from "./store.types";
 export {
   appendHostedCoalescingWakeTx,
@@ -60,13 +36,14 @@ export {
   projectHostedWakeRecord,
 } from "./store-projections";
 
-export class HostedWakeFetchProofStaleError extends TypeError {
-  readonly code = HOSTED_WAKE_FETCH_PROOF_STALE_ERROR_CODE;
 
-  constructor(message: string) {
-    super(message);
-    this.name = "HostedWakeFetchProofStaleError";
-  }
+export async function findHostedWakeEventIdByEventIdTx(input: {
+  eventId: string;
+  tx: HostedWakeStoreClient;
+  userId: string;
+}): Promise<string | null> {
+  const event = await findHostedWakeEventByEventIdTx(input);
+  return event?.wakeId ?? null;
 }
 
 export async function readHostedExecutionCursor(input: {
@@ -91,707 +68,20 @@ export async function countPendingHostedWakes(input: {
     tx: prisma,
     userId: input.userId,
   });
-  const wakes = await prisma.hostedWake.findMany({
+
+  return prisma.hostedWake.count({
     where: {
-      seq: {
-        gt: cursor.committedSeq,
-      },
-      userId: input.userId,
-    },
-    select: {
-      id: true,
-      quarantinedAt: true,
-      seq: true,
-      userId: true,
-    },
-  });
-
-  if (wakes.length === 0) {
-    return 0;
-  }
-
-  const terminals = await prisma.hostedWakeTerminal.findMany({
-    where: {
-      userId: input.userId,
-      wakeId: {
-        in: wakes.map((wake) => wake.id),
-      },
-    },
-    select: {
-      fetchedCommittedSeq: true,
-      fetchedCursorVersion: true,
-      state: true,
-      userId: true,
-      wakeId: true,
-      wakeSeq: true,
-    },
-  });
-  const wakesById = new Map(wakes.map((wake) => [wake.id, wake] as const));
-  const terminalWakeIds = new Set(
-    terminals
-      .filter((terminal) => {
-        const wake = wakesById.get(terminal.wakeId);
-        const receipt = {
-          ...terminal,
-          state: parseHostedWakeTerminalState(terminal.state),
-        };
-        return Boolean(
-          wake
-            && receipt.state === "completed"
-            && isCurrentHostedWakeTerminalReceipt({
-              cursor,
-              receipt,
-              wake,
-            }),
-        );
-      })
-      .map((terminal) => terminal.wakeId),
-  );
-
-  return wakes.filter((wake) => !wake.quarantinedAt && !terminalWakeIds.has(wake.id)).length;
-}
-
-export async function listHostedExecutableWakes(
-  input: ListHostedExecutableWakesInput,
-): Promise<HostedWakeFetchResponse> {
-  const prisma = input.prisma ?? getPrisma();
-  const cursor = await ensureHostedExecutionCursorRowTx({
-    tx: prisma,
-    userId: input.userId,
-  });
-  const projectedCursor = projectHostedExecutionCursorRecord(cursor);
-  const wakes = await prisma.hostedWake.findMany({
-    where: {
-      seq: {
-        gt: cursor.committedSeq,
-      },
-      userId: input.userId,
-    },
-    orderBy: {
-      seq: "asc",
-    },
-    take: Math.max(1, input.limit ?? 64),
-  });
-
-  return {
-    cursor: projectedCursor,
-    wakes: await Promise.all((await hydrateHostedWakeRecordsTx({
-      records: wakes,
-      tx: prisma,
-    })).map(async (wake) => ({
-      ...wake,
-      fetchProof: issueHostedWakeFetchProof({
-        fetchedCommittedSeq: cursor.committedSeq,
-        fetchedCursorVersion: cursor.version,
-        userId: wake.userId,
-        wakeEventId: await resolveHostedWakeCurrentEventIdTx({
-          tx: prisma,
-          wake: {
-            dedupeKey: wake.dedupeKey ?? null,
-            id: wake.id,
-            seq: BigInt(wake.seq),
-            userId: wake.userId,
-          },
-        }),
-        wakeId: wake.id,
-        wakeSeq: BigInt(wake.seq),
-      }),
-    }))),
-  };
-}
-
-export async function validateHostedWakeFetchProofCurrent(input: {
-  fetchProof: string;
-  prisma?: HostedWakeStoreClient;
-  userId: string;
-  wakeEventId: string;
-  wakeId: string;
-  wakeSeq: bigint;
-}): Promise<{
-  cursor: HostedExecutionCursorState;
-  fetchProofCurrent: boolean;
-}> {
-  const prisma = input.prisma ?? getPrisma();
-
-  const runValidation = async (tx: HostedWakeMutationTx | HostedWakeStoreClient) => {
-    await ensureHostedExecutionCursorRowTx({
-      tx,
-      userId: input.userId,
-    });
-    await lockHostedExecutionCursorRowTx({
-      tx,
-      userId: input.userId,
-    });
-    const cursor = await ensureHostedExecutionCursorRowTx({
-      tx,
-      userId: input.userId,
-    });
-    const projectedCursor = projectHostedExecutionCursorRecord(cursor);
-
-    try {
-      const claims = verifyHostedWakeFetchProof({
-        proof: input.fetchProof,
-        userId: input.userId,
-        wakeId: input.wakeId,
-        wakeSeq: input.wakeSeq,
-      });
-      if (claims.wakeEventId !== input.wakeEventId) {
-        throw new TypeError(
-          "Hosted wake fetch proof wakeEventId does not match the requested event.",
-        );
-      }
-      const fetchFence = parseHostedWakeFetchFence(claims);
-      assertCurrentHostedWakeFetchFence(cursor, fetchFence);
-      const wake = await readCurrentHostedWakeTerminalTargetTx({
-        tx,
-        userId: input.userId,
-        wakeId: input.wakeId,
-        wakeSeq: input.wakeSeq,
-      });
-
-      if (!wake) {
-        return {
-          cursor: projectedCursor,
-          fetchProofCurrent: false,
-        };
-      }
-
-      assertCurrentHostedWakeFetchIdentity(claims, wake.currentEventId);
-      return {
-        cursor: projectedCursor,
-        fetchProofCurrent: true,
-      };
-    } catch (error) {
-      if (error instanceof HostedWakeFetchProofStaleError) {
-        return {
-          cursor: projectedCursor,
-          fetchProofCurrent: false,
-        };
-      }
-
-      throw error;
-    }
-  };
-
-  if ("$transaction" in prisma && typeof prisma.$transaction === "function") {
-    return prisma.$transaction(async (tx) => runValidation(tx));
-  }
-
-  return runValidation(prisma);
-}
-
-export async function recordHostedWakeTerminalTx(input: {
-  fetchProof: string;
-  state: "completed" | "quarantined";
-  tx: HostedWakeMutationTx;
-  userId: string;
-  wakeId: string;
-  wakeSeq: bigint;
-}): Promise<boolean> {
-  const claims = verifyHostedWakeFetchProof({
-    proof: input.fetchProof,
-    userId: input.userId,
-    wakeId: input.wakeId,
-    wakeSeq: input.wakeSeq,
-  });
-  await ensureHostedExecutionCursorRowTx({
-    tx: input.tx,
-    userId: input.userId,
-  });
-  await lockHostedExecutionCursorRowTx({
-    tx: input.tx,
-    userId: input.userId,
-  });
-  const cursor = await ensureHostedExecutionCursorRowTx({
-    tx: input.tx,
-    userId: input.userId,
-  });
-  const fetchFence = parseHostedWakeFetchFence(claims);
-
-  assertCurrentHostedWakeFetchFence(cursor, fetchFence);
-  const wake = await readCurrentHostedWakeTerminalTargetTx({
-    tx: input.tx,
-    userId: input.userId,
-    wakeId: input.wakeId,
-    wakeSeq: input.wakeSeq,
-  });
-
-  if (!wake) {
-    return false;
-  }
-
-  assertCurrentHostedWakeFetchIdentity(claims, wake.currentEventId);
-
-  if (input.state === "quarantined" && wake.quarantinedAt === null) {
-    return false;
-  }
-
-  await upsertHostedWakeTerminalTx({
-    fetchedCommittedSeq: fetchFence.fetchedCommittedSeq,
-    fetchedCursorVersion: fetchFence.fetchedCursorVersion,
-    state: input.state,
-    tx: input.tx,
-    userId: input.userId,
-    wakeId: input.wakeId,
-    wakeSeq: input.wakeSeq,
-  });
-
-  return true;
-}
-
-export async function commitHostedExecutionCursorTx(input: {
-  assistantNextWakeAt?: string | null;
-  committedSeq: bigint;
-  expectedVersion: bigint;
-  nextRuntimeWakeAt?: string | null;
-  nextRuntimeWakeReason?: string | null;
-  snapshotRef?: HostedWakeSnapshotRef;
-  tx: HostedWakeMutationTx;
-  userId: string;
-}): Promise<HostedWakeCommitResponse> {
-  const cursor = await ensureHostedExecutionCursorRowTx({
-    tx: input.tx,
-    userId: input.userId,
-  });
-
-  if (input.committedSeq <= cursor.committedSeq) {
-    return {
-      committed: false,
-      cursor: projectHostedExecutionCursorRecord(cursor),
-    };
-  }
-
-  let nextSnapshotRef: Prisma.InputJsonObject | typeof Prisma.DbNull;
-  if (input.snapshotRef === undefined) {
-    if (cursor.snapshotRef === null) {
-      nextSnapshotRef = Prisma.DbNull;
-    } else {
-      const currentSnapshotRef = parseHostedExecutionCursorSnapshotRef(
-        cursor.snapshotRef,
-        "Hosted execution cursor snapshotRef",
-      );
-      if (currentSnapshotRef === null) {
-        throw new Error("Hosted execution cursor snapshotRef must be present when stored.");
-      }
-      nextSnapshotRef = serializeHostedWakeSnapshotRef(currentSnapshotRef);
-    }
-  } else if (input.snapshotRef === null) {
-    nextSnapshotRef = Prisma.DbNull;
-  } else {
-    nextSnapshotRef = serializeHostedWakeSnapshotRef(input.snapshotRef);
-  }
-  const nextAssistantNextWakeAt = input.assistantNextWakeAt === undefined
-    ? cursor.assistantNextWakeAt
-    : normalizeHostedCursorWakeAt(input.assistantNextWakeAt);
-  const nextRuntimeWakeAt = input.nextRuntimeWakeAt === undefined
-    ? cursor.nextRuntimeWakeAt
-    : normalizeHostedCursorWakeAt(input.nextRuntimeWakeAt);
-  const nextRuntimeWakeReason = input.nextRuntimeWakeReason === undefined
-    ? cursor.nextRuntimeWakeReason
-    : normalizeHostedCursorWakeReason(input.nextRuntimeWakeReason);
-  const nextSnapshotJson = nextSnapshotRef === Prisma.DbNull ? null : nextSnapshotRef;
-  const canAdvanceSingleWake = input.committedSeq === cursor.committedSeq + 1n
-    && input.committedSeq < cursor.nextSeq;
-
-  if (!canAdvanceSingleWake) {
-    return {
-      committed: false,
-      cursor: projectHostedExecutionCursorRecord(cursor),
-    };
-  }
-
-  const wake = await input.tx.hostedWake.findFirst({
-    where: {
-      seq: input.committedSeq,
-      userId: input.userId,
-    },
-    select: {
-      id: true,
-    },
-  });
-
-  if (!wake) {
-    return {
-      committed: false,
-      cursor: projectHostedExecutionCursorRecord(cursor),
-    };
-  }
-
-  const receipt = await input.tx.hostedWakeTerminal.findUnique({
-    where: {
-      wakeId: wake.id,
-    },
-  });
-  const currentReceipt = {
-    cursor,
-    receipt: receipt === null ? null : {
-      ...receipt,
-      state: parseHostedWakeTerminalState(receipt.state),
-    },
-    wake: {
-      id: wake.id,
-      seq: input.committedSeq,
-      userId: input.userId,
-    },
-  };
-
-  if (!isCurrentHostedWakeTerminalReceipt(currentReceipt)) {
-    return {
-      committed: false,
-      cursor: projectHostedExecutionCursorRecord(cursor),
-    };
-  }
-
-  if (
-    currentReceipt.receipt.state !== "completed"
-    && currentReceipt.receipt.state !== "quarantined"
-  ) {
-    return {
-      committed: false,
-      cursor: projectHostedExecutionCursorRecord(cursor),
-    };
-  }
-
-  const updated = await input.tx.hostedExecutionCursor.updateMany({
-    where: {
-      userId: input.userId,
-      version: input.expectedVersion,
-      committedSeq: cursor.committedSeq,
-    },
-    data: {
-      assistantNextWakeAt: nextAssistantNextWakeAt,
-      committedSeq: input.committedSeq,
-      nextRuntimeWakeAt,
-      nextRuntimeWakeReason,
-      snapshotRef: nextSnapshotRef,
-      version: {
-        increment: 1,
-      },
-    },
-  });
-  const current = await ensureHostedExecutionCursorRowTx({
-    tx: input.tx,
-    userId: input.userId,
-  });
-  const committed = updated.count === 1;
-  const projectedCursor = projectHostedExecutionCursorRecord(current);
-
-  return {
-    committed,
-    cursor: projectedCursor,
-    ...(committed
-      ? {
-          finalizeToken: issueHostedWakeFinalizeProof({
-            committedCursorVersion: current.version,
-            committedSeq: input.committedSeq,
-            previousSnapshotRef: nextSnapshotJson,
-            userId: input.userId,
-            wakeId: wake.id,
-            wakeSeq: input.committedSeq,
-          }),
-        }
-      : {}),
-  };
-}
-
-export async function finalizeHostedExecutionCursorTx(input: {
-  assistantNextWakeAt?: string | null;
-  finalizeToken: string;
-  nextRuntimeWakeAt?: string | null;
-  nextRuntimeWakeReason?: string | null;
-  snapshotRef: HostedWakeSnapshotRef;
-  tx: HostedWakeMutationTx;
-  userId: string;
-}): Promise<HostedWakeFinalizeResponse> {
-  const claims = verifyHostedWakeFinalizeProof({
-    proof: input.finalizeToken,
-    userId: input.userId,
-  });
-  const committedSeq = BigInt(claims.committedSeq);
-  const committedCursorVersion = BigInt(claims.committedCursorVersion);
-  const cursor = await ensureHostedExecutionCursorRowTx({
-    tx: input.tx,
-    userId: input.userId,
-  });
-  const nextAssistantNextWakeAt = input.assistantNextWakeAt === undefined
-    ? cursor.assistantNextWakeAt
-    : normalizeHostedCursorWakeAt(input.assistantNextWakeAt);
-  const nextRuntimeWakeAt = input.nextRuntimeWakeAt === undefined
-    ? cursor.nextRuntimeWakeAt
-    : normalizeHostedCursorWakeAt(input.nextRuntimeWakeAt);
-  const nextRuntimeWakeReason = input.nextRuntimeWakeReason === undefined
-    ? cursor.nextRuntimeWakeReason
-    : normalizeHostedCursorWakeReason(input.nextRuntimeWakeReason);
-
-  if (
-    cursor.committedSeq !== committedSeq
-    || cursor.version !== committedCursorVersion
-    || !sameHostedWakeSnapshotRefValue(
-      cursor.snapshotRef,
-      claims.previousSnapshotRef ?? null,
-      {
-        leftLabel: "Hosted execution cursor snapshotRef",
-        rightLabel: "Hosted wake finalize proof previousSnapshotRef",
-      },
-    )
-  ) {
-    return {
-      finalized: false,
-      cursor: projectHostedExecutionCursorRecord(cursor),
-    };
-  }
-
-  const nextSnapshotRef = input.snapshotRef === null
-    ? Prisma.DbNull
-    : serializeHostedWakeSnapshotRef(input.snapshotRef);
-  const nextSnapshotJson = nextSnapshotRef === Prisma.DbNull ? null : nextSnapshotRef;
-  const snapshotRefChanged = !sameHostedWakeSnapshotRefValue(
-    cursor.snapshotRef,
-    nextSnapshotJson,
-    {
-      leftLabel: "Hosted execution cursor snapshotRef",
-      rightLabel: "Hosted wake finalize next snapshotRef",
-    },
-  );
-  const assistantNextWakeAtChanged = input.assistantNextWakeAt !== undefined
-    && (
-      cursor.assistantNextWakeAt?.toISOString() ?? null
-    ) !== (
-      nextAssistantNextWakeAt?.toISOString() ?? null
-    );
-  const nextRuntimeWakeAtChanged = input.nextRuntimeWakeAt !== undefined
-    && (
-      cursor.nextRuntimeWakeAt?.toISOString() ?? null
-    ) !== (
-      nextRuntimeWakeAt?.toISOString() ?? null
-    );
-  const nextRuntimeWakeReasonChanged = input.nextRuntimeWakeReason !== undefined
-    && cursor.nextRuntimeWakeReason !== nextRuntimeWakeReason;
-
-  if (
-    !snapshotRefChanged
-    && !assistantNextWakeAtChanged
-    && !nextRuntimeWakeAtChanged
-    && !nextRuntimeWakeReasonChanged
-  ) {
-    return {
-      finalized: false,
-      cursor: projectHostedExecutionCursorRecord(cursor),
-    };
-  }
-
-  const wake = await input.tx.hostedWake.findFirst({
-    where: {
-      id: claims.wakeId,
-      seq: committedSeq,
-      userId: input.userId,
-    },
-    select: {
-      id: true,
-    },
-  });
-
-  if (!wake) {
-    return {
-      finalized: false,
-      cursor: projectHostedExecutionCursorRecord(cursor),
-    };
-  }
-
-  const updated = await input.tx.hostedExecutionCursor.updateMany({
-    where: {
-      userId: input.userId,
-      version: committedCursorVersion,
-      committedSeq,
-    },
-    data: {
-      assistantNextWakeAt: nextAssistantNextWakeAt,
-      nextRuntimeWakeAt,
-      nextRuntimeWakeReason,
-      snapshotRef: nextSnapshotRef,
-      version: {
-        increment: 1,
-      },
-    },
-  });
-  const current = await ensureHostedExecutionCursorRowTx({
-    tx: input.tx,
-    userId: input.userId,
-  });
-
-  return {
-    finalized: updated.count === 1,
-    cursor: projectHostedExecutionCursorRecord(current),
-  };
-}
-
-function serializeHostedWakeSnapshotRef(
-  snapshotRef: HostedExecutionBundleRef,
-): Prisma.InputJsonObject {
-  return {
-    hash: snapshotRef.hash,
-    key: snapshotRef.key,
-    size: snapshotRef.size,
-    updatedAt: snapshotRef.updatedAt,
-  };
-}
-
-function sameHostedWakeSnapshotRefValue(
-  left: unknown,
-  right: unknown,
-  labels: {
-    leftLabel: string;
-    rightLabel: string;
-  },
-): boolean {
-  const leftRef = parseHostedExecutionCursorSnapshotRef(left ?? null, labels.leftLabel);
-  const rightRef = parseHostedExecutionCursorSnapshotRef(right ?? null, labels.rightLabel);
-
-  if (leftRef === null || rightRef === null) {
-    return leftRef === rightRef;
-  }
-
-  return leftRef.hash === rightRef.hash
-    && leftRef.key === rightRef.key
-    && leftRef.size === rightRef.size
-    && leftRef.updatedAt === rightRef.updatedAt;
-}
-
-function normalizeHostedCursorWakeAt(value: string | null): Date | null {
-  if (value === null) {
-    return null;
-  }
-
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    throw new TypeError("hosted runtime wake timestamp must be a valid ISO-8601 timestamp or null.");
-  }
-
-  return parsed;
-}
-
-function normalizeHostedCursorWakeReason(value: string | null): string | null {
-  if (value === null) {
-    return null;
-  }
-
-  const normalized = value.trim();
-  return normalized.length > 0 ? normalized : null;
-}
-
-function shouldRefreshTerminalFetchFence(
-  receipt: HostedWakeTerminalRow,
-  input: {
-    fetchedCommittedSeq: bigint;
-    fetchedCursorVersion: bigint;
-  },
-): boolean {
-  return receipt.fetchedCursorVersion < input.fetchedCursorVersion
-    || (
-      receipt.fetchedCursorVersion === input.fetchedCursorVersion
-      && receipt.fetchedCommittedSeq < input.fetchedCommittedSeq
-    );
-}
-
-export async function quarantineHostedWakeTx(input: {
-  fetchProof: string;
-  quarantineCode: string;
-  tx: HostedWakeMutationTx;
-  userId: string;
-  wakeId: string;
-  wakeSeq: bigint;
-}): Promise<boolean> {
-  if (!input.quarantineCode.trim()) {
-    throw new TypeError("quarantineCode must not be blank.");
-  }
-
-  const claims = verifyHostedWakeFetchProof({
-    proof: input.fetchProof,
-    userId: input.userId,
-    wakeId: input.wakeId,
-    wakeSeq: input.wakeSeq,
-  });
-  await ensureHostedExecutionCursorRowTx({
-    tx: input.tx,
-    userId: input.userId,
-  });
-  await lockHostedExecutionCursorRowTx({
-    tx: input.tx,
-    userId: input.userId,
-  });
-  const cursor = await ensureHostedExecutionCursorRowTx({
-    tx: input.tx,
-    userId: input.userId,
-  });
-  const fetchFence = parseHostedWakeFetchFence(claims);
-
-  assertCurrentHostedWakeFetchFence(cursor, fetchFence);
-  const wake = await readCurrentHostedWakeTerminalTargetTx({
-    tx: input.tx,
-    userId: input.userId,
-    wakeId: input.wakeId,
-    wakeSeq: input.wakeSeq,
-  });
-
-  if (!wake) {
-    return false;
-  }
-
-  assertCurrentHostedWakeFetchIdentity(claims, wake.currentEventId);
-
-  const updated = await input.tx.hostedWake.updateMany({
-    where: {
-      id: input.wakeId,
-      seq: input.wakeSeq,
+      completedAt: null,
       quarantinedAt: null,
-      userId: input.userId,
-    },
-    data: {
-      quarantineCode: input.quarantineCode.trim(),
-      quarantinedAt: new Date(),
-    },
-  });
-
-  if (updated.count !== 1) {
-    return false;
-  }
-
-  await input.tx.hostedExecutionCursor.update({
-    where: {
-      userId: input.userId,
-    },
-    data: {
-      version: {
-        increment: 1,
+      seq: {
+        gt: cursor.committedSeq,
       },
+      state: {
+        in: ["pending", "running"],
+      },
+      userId: input.userId,
     },
   });
-
-  await upsertHostedWakeTerminalTx({
-    fetchedCommittedSeq: fetchFence.fetchedCommittedSeq,
-    fetchedCursorVersion: fetchFence.fetchedCursorVersion,
-    state: "quarantined",
-    tx: input.tx,
-    userId: input.userId,
-    wakeId: input.wakeId,
-    wakeSeq: input.wakeSeq,
-  });
-
-  return true;
-}
-
-export async function findHostedWakeEventIdByEventIdTx(input: {
-  eventId: string;
-  tx: HostedWakeStoreClient;
-  userId: string;
-}): Promise<string | null> {
-  const event = await findHostedWakeEventByEventIdTx(input);
-
-  if (!event) {
-    return null;
-  }
-
-  return event.eventId;
 }
 
 export async function readHostedWakeLifecycleByEventIdTx(input: {
@@ -805,20 +95,15 @@ export async function readHostedWakeLifecycleByEventIdTx(input: {
     return null;
   }
 
-  if (resolved.event.replacedByEventId) {
-    return {
-      eventId: resolved.event.eventId,
-      replacedByEventId: resolved.event.replacedByEventId,
-      state: "replaced",
-    };
-  }
-
   return {
-    eventId: resolved.activeEvent.eventId,
-    state: await resolveHostedWakeLifecycleStateTx({
-      record: resolved.wake,
-      tx: input.tx,
-    }),
+    eventId: resolved.event.eventId,
+    replacedByEventId: resolved.event.replacedByEventId,
+    state: resolved.event.replacedByEventId
+      ? "replaced"
+      : await resolveHostedWakeLifecycleStateTx({
+        record: resolved.wake,
+        tx: input.tx,
+      }),
   };
 }
 
@@ -840,7 +125,9 @@ export async function readHostedWakeScheduleByEventIdTx(input: {
   userId: string;
 }): Promise<{
   eventId: string;
+  occurredAt: string;
   seq: string;
+  state: HostedWakeLifecycleRecord["state"];
   userId: string;
 } | null> {
   const resolved = await resolveHostedWakeEventResolutionTx(input);
@@ -849,13 +136,16 @@ export async function readHostedWakeScheduleByEventIdTx(input: {
     return null;
   }
 
-  if (resolved.event.replacedByEventId) {
-    return null;
-  }
-
   return {
-    eventId: resolved.activeEvent.eventId,
+    eventId: resolved.event.eventId,
+    occurredAt: resolved.wake.occurredAt.toISOString(),
     seq: resolved.wake.seq.toString(),
+    state: resolved.event.replacedByEventId
+      ? "replaced"
+      : await resolveHostedWakeLifecycleStateTx({
+        record: resolved.wake,
+        tx: input.tx,
+      }),
     userId: resolved.wake.userId,
   };
 }
@@ -880,50 +170,22 @@ export async function readLatestHostedWakeLifecycleByKind(input: {
     return null;
   }
 
+  const event = await findCurrentHostedWakeEventByWakeIdTx({
+    tx: prisma,
+    userId: input.userId,
+    wakeId: wake.id,
+  });
+
   return {
-    eventId: await resolveHostedWakeCurrentEventIdTx({
-      tx: prisma,
-      wake,
-    }),
-    state: await resolveHostedWakeLifecycleStateTx({
-      record: wake,
-      tx: prisma,
-    }),
+    eventId: event?.eventId ?? resolveHostedWakeEventId(wake),
+    replacedByEventId: event?.replacedByEventId ?? null,
+    state: event?.replacedByEventId
+      ? "replaced"
+      : await resolveHostedWakeLifecycleStateTx({
+        record: wake,
+        tx: prisma,
+      }),
   };
-}
-
-export async function listHostedWakeRepairCandidates(input: {
-  limit?: number;
-  olderThan: Date;
-  prisma?: HostedWakeStoreClient;
-}): Promise<HostedWakeRepairCandidate[]> {
-  const prisma = input.prisma ?? getPrisma();
-  const rows = await prisma.$queryRaw<Array<{
-    committed_seq: bigint;
-    next_seq: bigint;
-    pending_wake_count: bigint;
-    target_seq_hint: bigint;
-    user_id: string;
-  }>>`
-    SELECT committed_seq,
-           next_seq,
-           GREATEST(next_seq - committed_seq - 1, 0) AS pending_wake_count,
-           next_seq - 1 AS target_seq_hint,
-           user_id
-    FROM hosted_execution_cursor
-    WHERE next_seq > committed_seq + 1
-      AND updated_at < ${input.olderThan}
-    ORDER BY updated_at ASC
-    LIMIT ${Math.max(1, input.limit ?? 128)}
-  `;
-
-  return rows.map((row) => ({
-    committedSeq: row.committed_seq.toString(),
-    nextSeq: row.next_seq.toString(),
-    pendingWakeCount: Number(row.pending_wake_count),
-    targetSeqHint: row.target_seq_hint.toString(),
-    userId: row.user_id,
-  }));
 }
 
 async function resolveHostedWakeEventResolutionTx(input: {
@@ -931,220 +193,28 @@ async function resolveHostedWakeEventResolutionTx(input: {
   tx: HostedWakeStoreClient;
   userId: string;
 }): Promise<{
-  activeEvent: HostedWakeEventRow;
   event: HostedWakeEventRow;
   wake: HostedWakeRow;
 } | null> {
-  const event = await findHostedWakeEventByEventIdTx(input);
+  const event = await findHostedWakeEventByEventIdTx({
+    eventId: input.eventId,
+    tx: input.tx,
+    userId: input.userId,
+  });
 
   if (!event) {
     return null;
   }
 
-  const activeEvent = await resolveHostedWakeActiveEventTx({
-    event,
-    tx: input.tx,
-    userId: input.userId,
-  });
   const wake = await input.tx.hostedWake.findUnique({
     where: {
-      id: activeEvent.wakeId,
+      id: event.wakeId,
     },
   });
 
-  if (!wake) {
-    throw new Error(`Hosted wake ${activeEvent.wakeId} missing for event ${activeEvent.eventId}.`);
-  }
-
-  if (wake.userId !== input.userId) {
+  if (!wake || wake.userId !== input.userId) {
     return null;
   }
 
-  return {
-    activeEvent,
-    event,
-    wake,
-  };
-}
-
-async function resolveHostedWakeActiveEventTx(input: {
-  event: HostedWakeEventRow;
-  tx: HostedWakeStoreClient;
-  userId: string;
-}): Promise<HostedWakeEventRow> {
-  const seen = new Set<string>();
-  let current = input.event;
-
-  while (current.replacedByEventId) {
-    if (seen.has(current.eventId)) {
-      throw new Error(`Hosted wake event replacement loop detected for ${current.eventId}.`);
-    }
-    seen.add(current.eventId);
-
-    const replacement = await findHostedWakeEventByEventIdTx({
-      eventId: current.replacedByEventId,
-      tx: input.tx,
-      userId: input.userId,
-    });
-
-    if (!replacement) {
-      throw new Error(
-        `Hosted wake replacement event ${current.replacedByEventId} missing for ${current.eventId}.`,
-      );
-    }
-
-    current = replacement;
-  }
-
-  return current;
-}
-
-async function resolveHostedWakeCurrentEventIdTx(input: {
-  tx: HostedWakeStoreClient;
-  wake: Pick<HostedWakeRow, "dedupeKey" | "id" | "seq" | "userId">;
-}): Promise<string> {
-  const currentEvent = await findCurrentHostedWakeEventByWakeIdTx({
-    tx: input.tx,
-    userId: input.wake.userId,
-    wakeId: input.wake.id,
-  });
-
-  return currentEvent?.eventId ?? resolveHostedWakeEventId(input.wake);
-}
-
-function parseHostedWakeFetchFence(
-  claims: ReturnType<typeof verifyHostedWakeFetchProof>,
-): {
-  fetchedCommittedSeq: bigint;
-  fetchedCursorVersion: bigint;
-} {
-  return {
-    fetchedCommittedSeq: BigInt(claims.fetchedCommittedSeq),
-    fetchedCursorVersion: BigInt(claims.fetchedCursorVersion),
-  };
-}
-
-function assertCurrentHostedWakeFetchFence(
-  cursor: {
-    committedSeq: bigint;
-    version: bigint;
-  },
-  input: {
-    fetchedCommittedSeq: bigint;
-    fetchedCursorVersion: bigint;
-  },
-): void {
-  if (
-    cursor.committedSeq !== input.fetchedCommittedSeq
-    || cursor.version !== input.fetchedCursorVersion
-  ) {
-    throw new HostedWakeFetchProofStaleError(
-      "Hosted wake fetch proof is stale for the current cursor.",
-    );
-  }
-}
-
-async function upsertHostedWakeTerminalTx(input: {
-  fetchedCommittedSeq: bigint;
-  fetchedCursorVersion: bigint;
-  state: "completed" | "quarantined";
-  tx: HostedWakeMutationTx;
-  userId: string;
-  wakeId: string;
-  wakeSeq: bigint;
-}): Promise<void> {
-  const existing = await input.tx.hostedWakeTerminal.findUnique({
-    where: {
-      wakeId: input.wakeId,
-    },
-  });
-  const typedExisting = existing === null ? null : {
-    ...existing,
-    state: parseHostedWakeTerminalState(existing.state),
-  };
-
-  if (!typedExisting) {
-    await input.tx.hostedWakeTerminal.create({
-      data: {
-        fetchedCommittedSeq: input.fetchedCommittedSeq,
-        fetchedCursorVersion: input.fetchedCursorVersion,
-        state: input.state,
-        userId: input.userId,
-        wakeId: input.wakeId,
-        wakeSeq: input.wakeSeq,
-      },
-    });
-    return;
-  }
-
-  if (
-    typedExisting.userId !== input.userId
-    || typedExisting.wakeSeq !== input.wakeSeq
-    || typedExisting.state !== input.state
-  ) {
-    throw new TypeError("Hosted wake terminal receipt conflicts with the existing canonical record.");
-  }
-
-  if (shouldRefreshTerminalFetchFence(typedExisting, input)) {
-    await input.tx.hostedWakeTerminal.update({
-      where: {
-        wakeId: input.wakeId,
-      },
-      data: {
-        fetchedCommittedSeq: input.fetchedCommittedSeq,
-        fetchedCursorVersion: input.fetchedCursorVersion,
-      },
-    });
-  }
-}
-
-async function readCurrentHostedWakeTerminalTargetTx(input: {
-  tx: HostedWakeMutationTx;
-  userId: string;
-  wakeId: string;
-  wakeSeq: bigint;
-}): Promise<{
-  currentEventId: string;
-  quarantinedAt: Date | null;
-} | null> {
-  const wake = await input.tx.hostedWake.findFirst({
-    where: {
-      id: input.wakeId,
-      seq: input.wakeSeq,
-      userId: input.userId,
-    },
-  });
-
-  if (!wake) {
-    return null;
-  }
-
-  return {
-    currentEventId: await resolveHostedWakeCurrentEventIdTx({
-      tx: input.tx,
-      wake,
-    }),
-    quarantinedAt: wake.quarantinedAt,
-  };
-}
-
-function assertCurrentHostedWakeFetchIdentity(
-  claims: ReturnType<typeof verifyHostedWakeFetchProof>,
-  currentEventId: string,
-): void {
-  if (claims.wakeEventId !== currentEventId) {
-    throw new HostedWakeFetchProofStaleError(
-      "Hosted wake fetch proof is stale for the current wake identity.",
-    );
-  }
-}
-
-function parseHostedWakeTerminalState(value: string): HostedWakeTerminalState {
-  switch (value) {
-    case "completed":
-    case "quarantined":
-      return value;
-    default:
-      throw new TypeError(`Hosted wake terminal state is invalid: ${value}`);
-  }
+  return { event, wake };
 }

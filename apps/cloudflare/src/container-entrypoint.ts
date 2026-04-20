@@ -186,7 +186,6 @@ export async function startHostedContainerEntrypoint(input: {
         component: "container",
         details: {
           forwardedEnvKeyCount: Object.keys(job.runtime?.forwardedEnv ?? {}).length,
-          resumeFromCommit: Boolean(job.request.resume?.committedResult),
           runnerSecretKeyCount: Object.keys(job.runtime?.userEnv ?? {}).length,
         },
         wake: job.request.wake,

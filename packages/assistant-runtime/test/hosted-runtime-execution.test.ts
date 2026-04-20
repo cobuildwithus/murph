@@ -219,21 +219,18 @@ beforeEach(() => {
     deviceSyncSkipped: false,
     nextWakeAt: "2026-04-08T00:30:00.000Z",
     parserProcessed: 3,
-    wakeMaterializationHints: null,
   });
   mocks.runHostedDeviceSyncWakeLane.mockResolvedValue({
     deviceSyncProcessed: 2,
     deviceSyncSkipped: false,
     nextWakeAt: "2026-04-08T00:30:00.000Z",
     parserProcessed: 0,
-    wakeMaterializationHints: null,
   });
   mocks.runHostedNoopSystemWakeLane.mockReturnValue({
     deviceSyncProcessed: 0,
     deviceSyncSkipped: true,
     nextWakeAt: null,
     parserProcessed: 0,
-    wakeMaterializationHints: null,
   });
   mocks.drainHostedCommittedAssistantDeliveriesAfterCommit.mockResolvedValue([
     {
@@ -932,10 +929,6 @@ describe("executeHostedWakeForCommit", () => {
     expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
     expect(mocks.runHostedNoopSystemWakeLane).not.toHaveBeenCalled();
     expect(result.committedResult.result.nextWakeAt).toEqual(expect.any(String));
-    expect(result.committedResult.result.wakeMaterializationHints).toEqual({
-      assistantWakeAt: result.committedResult.result.nextWakeAt,
-      deviceSyncWakeAt: null,
-    });
     assert.equal(
       result.committedResult.result.summary,
       "Persisted Linq capture on the hosted conversation lane.",
@@ -1013,10 +1006,6 @@ describe("executeHostedWakeForCommit", () => {
     });
 
     expect(result.committedResult.result.nextWakeAt).toBe("2026-04-08T00:00:00.000Z");
-    expect(result.committedResult.result.wakeMaterializationHints).toEqual({
-      assistantWakeAt: expect.any(String),
-      deviceSyncWakeAt: null,
-    });
     expect(result.committedResult.result.summary).toBe(
       "Persisted Telegram capture on the hosted conversation lane.",
     );
@@ -1110,10 +1099,6 @@ describe("executeHostedWakeForCommit", () => {
       expect(mocks.runHostedNoopSystemWakeLane).not.toHaveBeenCalled();
       expect(mocks.getAssistantStatus).not.toHaveBeenCalled();
       assert.equal(result.committedResult.result.nextWakeAt, "2026-04-08T00:10:00.000Z");
-      expect(result.committedResult.result.wakeMaterializationHints).toEqual({
-        assistantWakeAt: "2026-04-08T00:10:00.000Z",
-        deviceSyncWakeAt: null,
-      });
       assert.equal(
         result.committedResult.result.summary,
         "Persisted Telegram capture on the hosted conversation lane.",
@@ -1237,10 +1222,6 @@ describe("executeHostedWakeForCommit", () => {
 
       expect(mocks.getAssistantStatus).not.toHaveBeenCalled();
       assert.equal(result.committedResult.result.nextWakeAt, "2026-04-08T00:10:00.000Z");
-      expect(result.committedResult.result.wakeMaterializationHints).toEqual({
-        assistantWakeAt: "2026-04-08T00:10:00.000Z",
-        deviceSyncWakeAt: null,
-      });
       assert.equal(
         result.committedResult.result.summary,
         "Persisted hosted email capture on the hosted conversation lane.",
@@ -1360,10 +1341,6 @@ describe("executeHostedWakeForCommit", () => {
       expect(mocks.createConfiguredDeviceSyncProvidersFromConfigs).toHaveBeenCalledWith({});
       expect(close).toHaveBeenCalledTimes(1);
       assert.equal(result.committedResult.result.nextWakeAt, "2026-04-08T00:10:00.000Z");
-      expect(result.committedResult.result.wakeMaterializationHints).toEqual({
-        assistantWakeAt: "2026-04-08T00:10:00.000Z",
-        deviceSyncWakeAt: "2026-04-08T00:25:00.000Z",
-      });
     } finally {
       vi.useRealTimers();
     }
@@ -1456,10 +1433,6 @@ describe("executeHostedWakeForCommit", () => {
     });
 
     expect(result.committedResult.result.nextWakeAt).toEqual(expect.any(String));
-    expect(result.committedResult.result.wakeMaterializationHints).toEqual({
-      assistantWakeAt: result.committedResult.result.nextWakeAt,
-      deviceSyncWakeAt: null,
-    });
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         level: "warn",
@@ -1570,10 +1543,6 @@ describe("executeHostedWakeForCommit", () => {
     });
 
     expect(close).toHaveBeenCalledTimes(1);
-    expect(result.committedResult.result.wakeMaterializationHints).toEqual({
-      assistantWakeAt: result.committedResult.result.nextWakeAt,
-      deviceSyncWakeAt: null,
-    });
   });
 
   it("reports null run elapsed time when the run timestamp is invalid", async () => {

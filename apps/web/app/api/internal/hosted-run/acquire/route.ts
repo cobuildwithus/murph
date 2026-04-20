@@ -18,6 +18,9 @@ export const POST = withJsonError(async (request: Request) => {
 
   const response = await acquireHostedRun({
     executorKind: body.executorKind,
+    executorCodeDigest: body.executorCodeDigest,
+    attestationRef: body.attestationRef,
+    signedResultRef: body.signedResultRef,
     limit: body.limit,
     now,
     triggerKind: body.triggerKind,

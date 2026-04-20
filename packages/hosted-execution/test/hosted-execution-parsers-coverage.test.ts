@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import { TEST_HOSTED_SHARE_PACK } from "./test-fixtures.ts";
 import {
   parseHostedExecutionEvent,
-  parseHostedWakeExecutionResult,
   parseHostedExecutionWakeDrainResult,
   parseHostedExecutionWakeNudgeResult,
   parseHostedExecutionRunnerRequest,
@@ -11,7 +10,8 @@ import {
   parseHostedExecutionSharePack,
   parseHostedExecutionTimelineEntries,
   parseHostedExecutionUserStatus,
-  parseHostedWakeMaterializeResponse,
+  parseHostedRunAcquireRequest,
+  parseHostedRunFinalizeRequest,
 } from "../src/parsers.ts";
 
 const TEST_BUNDLE_REF = {
@@ -80,6 +80,26 @@ describe("hosted execution parsers coverage", () => {
       ).toThrow(/sharePack is only supported/i);
     });
 
+    it("rejects runner requests that omit wake and parses nullable acquire fields", () => {
+      expect(() =>
+        parseHostedExecutionRunnerRequest({
+          bundle: null,
+        }),
+      ).toThrow(/must include wake/i);
+
+      expect(parseHostedRunAcquireRequest({
+        executorKind: null,
+        limit: null,
+        now: null,
+        triggerKind: null,
+      })).toEqual({
+        executorKind: null,
+        limit: null,
+        now: null,
+        triggerKind: null,
+      });
+    });
+
     it("rejects mismatched share-pack owner and share ids", () => {
       const baseRequest = {
         bundle: null,
@@ -134,19 +154,25 @@ describe("hosted execution parsers coverage", () => {
       });
     });
 
-    it("parses hosted wake materialize responses", () => {
-      expect(parseHostedWakeMaterializeResponse({
-        targetSeqHint: "24",
-        wakeMaterializationHints: {
-          assistantWakeAt: null,
-          deviceSyncWakeAt: "2026-04-08T01:00:00.000Z",
+    it("parses hosted run finalize requests", () => {
+      expect(parseHostedRunFinalizeRequest({
+        finalSnapshotRef: TEST_BUNDLE_REF,
+        nextRuntimeWakeAt: "2026-04-08T01:00:00.000Z",
+        nextRuntimeWakeReason: "assistant.run",
+        redactedSummary: {
+          stage: "finalized",
         },
+        runId: "run_123",
+        runToken: "run_token_123",
       })).toEqual({
-        targetSeqHint: "24",
-        wakeMaterializationHints: {
-          assistantWakeAt: null,
-          deviceSyncWakeAt: "2026-04-08T01:00:00.000Z",
+        finalSnapshotRef: TEST_BUNDLE_REF,
+        nextRuntimeWakeAt: "2026-04-08T01:00:00.000Z",
+        nextRuntimeWakeReason: "assistant.run",
+        redactedSummary: {
+          stage: "finalized",
         },
+        runId: "run_123",
+        runToken: "run_token_123",
       });
     });
 
@@ -156,50 +182,41 @@ describe("hosted execution parsers coverage", () => {
   });
 
   describe("status and timeline parsing", () => {
-    it("parses wake execution results with run status and timeline", () => {
-      const parsed = parseHostedWakeExecutionResult({
-        event: {
+    it("parses hosted execution user status with run status and timeline", () => {
+      const parsed = parseHostedExecutionUserStatus({
+        bundleRef: TEST_BUNDLE_REF,
+        inFlight: true,
+        lastError: "Waiting for runner slot.",
+        lastErrorAt: "2026-04-08T00:02:00.000Z",
+        lastErrorCode: "runner_busy",
+        lastEventId: "evt_123",
+        lastRunAt: "2026-04-08T00:01:00.000Z",
+        nextWakeAt: "2026-04-08T00:05:00.000Z",
+        pendingWakeCount: 2,
+        run: {
+          attempt: 3,
           eventId: "evt_123",
-          lastError: null,
-          state: "backpressured",
-          userId: "user_123",
+          phase: "wake.running",
+          runId: "run_123",
+          startedAt: "2026-04-08T00:00:00.000Z",
+          updatedAt: "2026-04-08T00:02:00.000Z",
         },
-        status: {
-          bundleRef: TEST_BUNDLE_REF,
-          inFlight: true,
-          lastError: "Waiting for runner slot.",
-          lastErrorAt: "2026-04-08T00:02:00.000Z",
-          lastErrorCode: "runner_busy",
-          lastEventId: "evt_123",
-          lastRunAt: "2026-04-08T00:01:00.000Z",
-          nextWakeAt: "2026-04-08T00:05:00.000Z",
-          pendingWakeCount: 2,
-          run: {
-            attempt: 3,
-            eventId: "evt_123",
-            phase: "wake.running",
-            runId: "run_123",
-            startedAt: "2026-04-08T00:00:00.000Z",
-            updatedAt: "2026-04-08T00:02:00.000Z",
-          },
-          timeline: [{
-            at: "2026-04-08T00:01:30.000Z",
-            attempt: 3,
-            component: "runner",
-            errorCode: null,
-            eventId: "evt_123",
-            level: "info",
-            message: "Runner resumed processing.",
-            phase: "wake.running",
-            runId: "run_123",
-          }],
-          userId: "user_123",
-        },
+        timeline: [{
+          at: "2026-04-08T00:01:30.000Z",
+          attempt: 3,
+          component: "runner",
+          errorCode: null,
+          eventId: "evt_123",
+          level: "info",
+          message: "Runner resumed processing.",
+          phase: "wake.running",
+          runId: "run_123",
+        }],
+        userId: "user_123",
       });
 
-      expect(parsed.event.state).toBe("backpressured");
-      expect(parsed.status.run?.phase).toBe("wake.running");
-      expect(parsed.status.timeline?.[0]?.message).toBe("Runner resumed processing.");
+      expect(parsed.run?.phase).toBe("wake.running");
+      expect(parsed.timeline?.[0]?.message).toBe("Runner resumed processing.");
     });
 
     it("parses minimal user status without optional fields", () => {
@@ -284,25 +301,17 @@ describe("hosted execution parsers coverage", () => {
       ).toThrow(/timeline entries\[0\]\.level is invalid/i);
 
       expect(() =>
-        parseHostedWakeExecutionResult({
-          event: {
-            eventId: "evt_123",
-            lastError: null,
-            state: "unknown",
-            userId: "user_123",
-          },
-          status: {
-            bundleRef: null,
-            inFlight: false,
-            lastError: null,
-            lastEventId: null,
-            lastRunAt: null,
-            nextWakeAt: null,
-            pendingWakeCount: 0,
-            userId: "user_123",
-          },
-        }),
-      ).toThrow(/Unsupported hosted wake lifecycle state/i);
+        parseHostedExecutionTimelineEntries([{
+          at: "2026-04-08T00:01:30.000Z",
+          attempt: 1,
+          component: "runner",
+          eventId: "evt_123",
+          level: "info",
+          message: "bad phase",
+          phase: "wake.queued",
+          runId: "run_123",
+        }]),
+      ).toThrow(/timeline entries\[0\]\.phase is invalid/i);
     });
   });
 

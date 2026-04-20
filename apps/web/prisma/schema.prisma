@@ -209,7 +209,6 @@ model HostedMember {
   hostedWakes        HostedWake[]
   hostedWakeEvents   HostedWakeEvent[]
   hostedWakePayloads HostedWakePayload[]
-  hostedWakeTerminals HostedWakeTerminal[]
   hostedRuns         HostedRun[]
   hostedRunLogs      HostedRunLog[]
 
@@ -299,9 +298,6 @@ model HostedExecutionCursor {
   committedSeq BigInt       @default(0) @map("committed_seq")
   nextRuntimeWakeAt DateTime? @map("next_runtime_wake_at")
   nextRuntimeWakeReason String? @map("next_runtime_wake_reason")
-  /// Deprecated compatibility mirror for the wake-by-wake executor path.
-  /// New hosted-run orchestration uses nextRuntimeWakeAt/nextRuntimeWakeReason.
-  assistantNextWakeAt DateTime? @map("assistant_next_wake_at")
   snapshotRef  Json?        @map("snapshot_ref")
   version      BigInt       @default(0) @map("version")
   createdAt    DateTime     @default(now()) @map("created_at")
@@ -335,7 +331,6 @@ model HostedWake {
   run                   HostedRun?         @relation(fields: [runId], references: [id], onDelete: SetNull)
   events                HostedWakeEvent[]
   payload               HostedWakePayload?
-  terminal              HostedWakeTerminal?
 
   @@unique([userId, seq])
   @@unique([userId, dedupeKey])
@@ -351,6 +346,9 @@ model HostedRun {
   id                   String         @id
   userId               String         @map("user_id")
   executorKind         String         @default("cloudflare-container") @map("executor_kind")
+  executorCodeDigest   String?        @map("executor_code_digest")
+  attestationRef       String?        @map("attestation_ref")
+  signedResultRef      String?        @map("signed_result_ref")
   status               String
   triggerKind          String         @map("trigger_kind")
   runTokenHash         String         @unique @map("run_token_hash")
@@ -441,24 +439,6 @@ model HostedWakePayload {
 
   @@index([userId])
   @@map("hosted_wake_payload")
-}
-
-model HostedWakeTerminal {
-  wakeId              String       @id @map("wake_id")
-  userId              String       @map("user_id")
-  wakeSeq             BigInt       @map("wake_seq")
-  state               String
-  fetchedCommittedSeq BigInt       @map("fetched_committed_seq")
-  fetchedCursorVersion BigInt      @map("fetched_cursor_version")
-  createdAt           DateTime     @default(now()) @map("created_at")
-  updatedAt           DateTime     @updatedAt @map("updated_at")
-  member              HostedMember @relation(fields: [userId], references: [id], onDelete: Cascade)
-  wake                HostedWake   @relation(fields: [wakeId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, wakeSeq])
-  @@index([userId])
-  @@index([userId, wakeSeq])
-  @@map("hosted_wake_terminal")
 }
 
 model HostedInvite {

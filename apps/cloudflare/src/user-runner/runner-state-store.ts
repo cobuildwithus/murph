@@ -1,10 +1,6 @@
 import {
-  HOSTED_WAKE_PAYLOAD_SCHEMAS,
   emitHostedExecutionStructuredLog,
-  isHostedExecutionWakeKind,
-  type HostedWakeMaterializationHints,
   type HostedExecutionRunContext,
-  type HostedExecutionRunnerResult,
   deriveHostedExecutionErrorCode,
   normalizeHostedExecutionOperatorMessage,
   type HostedExecutionRunLevel,
@@ -13,14 +9,12 @@ import {
   type HostedExecutionTimelineEntry,
 } from "@murphai/hosted-execution";
 import { parseHostedExecutionBundleRef } from "@murphai/hosted-execution/parsers";
-import { parseHostedAssistantDeliveryEffects } from "@murphai/hosted-execution/side-effects";
 import { ensureRunnerStateSchema } from "./runner-state-schema.js";
 import {
   appendBoundedRunnerTimelineEntry,
   assignRunnerBundleRefs,
   createDefaultRunnerBundleState,
   createDefaultRunnerMetaRow,
-  hasDroppedWakeMaterializationHintPayload,
   projectRunnerStateRecord,
   resolveRunnerNextWakeAt,
   type RunnerMetaRow,
@@ -29,7 +23,6 @@ import {
 import {
   MAX_RUN_TIMELINE_ENTRIES,
   type DurableObjectStateLike,
-  type RunnerPendingCommitRecord,
   type RunnerBundleVersion,
   type RunnerStateRecord,
 } from "./types.js";
@@ -42,15 +35,6 @@ interface BundleRefSwapInput {
 interface RunnerMetaBundleRow extends RunnerMetaRow {
   bundle_ref_json: string | null;
   bundle_version: number;
-  pending_commit_json: string | null;
-  wake_materialization_hints_json: string | null;
-}
-
-export class RunnerPendingCommitCorruptionError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "RunnerPendingCommitCorruptionError";
-  }
 }
 
 export interface RunnerLeaseOwnerInput {
@@ -326,135 +310,13 @@ export class RunnerStateStore {
 
   async syncNextWake(input: {
     preferredWakeAt?: string | null;
-    wakeMaterializationHints?: HostedWakeMaterializationHints | null;
   }): Promise<RunnerStateRecord> {
     const meta = this.requireMetaRowSync();
-    const wakeMaterializationHints = input.wakeMaterializationHints === undefined
-      ? parseWakeMaterializationHints(meta.wake_materialization_hints_json)
-      : normalizeWakeMaterializationHints(input.wakeMaterializationHints);
-    if (
-      input.wakeMaterializationHints !== undefined
-      && input.wakeMaterializationHints !== null
-      && hasDroppedWakeMaterializationHintPayload(input.wakeMaterializationHints)
-    ) {
-      emitHostedExecutionStructuredLog({
-        component: "runner",
-        details: {
-          assistantWakeAt: input.wakeMaterializationHints.assistantWakeAt ?? null,
-          deviceSyncWakeAt: input.wakeMaterializationHints.deviceSyncWakeAt ?? null,
-          wakeMaterializationHintKeyCount: Object.keys(input.wakeMaterializationHints).length,
-          wakeMaterializationHintKeys: Object.keys(input.wakeMaterializationHints).sort(),
-        },
-        level: "warn",
-        message:
-          "Hosted wake materialization hints were dropped after normalization because they were malformed or empty.",
-        phase: "wake.running",
-        userId: meta.user_id,
-      });
-    }
     meta.next_wake_at = resolveRunnerNextWakeAt({
       preferredWakeAt: input.preferredWakeAt ?? null,
-      wakeMaterializationHints,
-    });
-    meta.wake_materialization_hints_json = serializeWakeMaterializationHints(
-      wakeMaterializationHints,
-    );
-    this.writeMetaRowSync(meta);
-
-    return this.readStateFromMetaSync(meta);
-  }
-
-  async readWakeMaterializationHints(): Promise<HostedWakeMaterializationHints | null> {
-    const meta = this.requireMetaRowSync();
-    const wakeMaterializationHints = parseWakeMaterializationHints(meta.wake_materialization_hints_json);
-    if (meta.wake_materialization_hints_json !== null && wakeMaterializationHints === null) {
-      emitHostedExecutionStructuredLog({
-        component: "runner",
-        details: {
-          storedWakeMaterializationHintsLength: meta.wake_materialization_hints_json.length,
-        },
-        level: "warn",
-        message: "Hosted wake materialization hints were dropped while reading runner state.",
-        phase: "wake.running",
-        userId: meta.user_id,
-      });
-    }
-
-    return wakeMaterializationHints;
-  }
-
-  async readPendingCommit(eventId?: string): Promise<RunnerPendingCommitRecord | null> {
-    const pendingCommit = parsePendingCommitRecord(
-      this.requireMetaRowSync(),
-      this.tryResolveUserIdSync(),
-    );
-    if (!pendingCommit) {
-      return null;
-    }
-
-    if (eventId && pendingCommit.eventId !== eventId) {
-      return null;
-    }
-
-    return pendingCommit;
-  }
-
-  async writePendingCommit(input: RunnerPendingCommitRecord): Promise<RunnerStateRecord> {
-    await this.bootstrapUser(input.userId);
-
-    const meta = this.requireMetaRowSync();
-    const existing = parsePendingCommitRecord(meta, input.userId);
-    if (existing && existing.eventId !== input.eventId) {
-      throw new Error(
-        `Hosted runner pending commit ${existing.eventId} must be cleared before ${input.eventId}.`,
-      );
-    }
-
-    // This JSON is only valid for the exact fetched wake/cursor fence captured in `input.wake`.
-    // Once that fence is stale, recovery must clear it and rebuild from the canonical web cursor.
-    meta.pending_commit_json = JSON.stringify(input);
-    this.rememberLastEventMetaSync(meta, input.eventId);
-    this.writeMetaRowSync(meta);
-    return this.readStateFromMetaSync(meta);
-  }
-
-  async clearPendingCommit(eventId?: string): Promise<RunnerStateRecord> {
-    const meta = this.requireMetaRowSync();
-    if (!meta.pending_commit_json) {
-      return this.readStateFromMetaSync(meta);
-    }
-
-    if (!eventId) {
-      meta.pending_commit_json = null;
-      this.writeMetaRowSync(meta);
-      return this.readStateFromMetaSync(meta);
-    }
-
-    const existing = parsePendingCommitRecord(meta, meta.user_id);
-    if (existing?.eventId === eventId) {
-      meta.pending_commit_json = null;
-      this.writeMetaRowSync(meta);
-    }
-
-    return this.readStateFromMetaSync(meta);
-  }
-
-  async discardPendingCommitRecoveryState(eventId: string): Promise<RunnerStateRecord> {
-    const meta = this.requireMetaRowSync();
-    const existing = parsePendingCommitRecord(meta, meta.user_id);
-
-    if (existing?.eventId === eventId) {
-      meta.pending_commit_json = null;
-      meta.next_wake_at = null;
-      meta.wake_materialization_hints_json = null;
-    }
-
-    this.clearActiveRunLeaseSync(meta, {
-      eventId,
-      policy: "same-event",
-      run: null,
     });
     this.writeMetaRowSync(meta);
+
     return this.readStateFromMetaSync(meta);
   }
 
@@ -517,9 +379,7 @@ export class RunnerStateStore {
         last_error_code,
         last_event_id,
         last_run_at,
-        next_wake_at,
-        pending_commit_json,
-        wake_materialization_hints_json
+        next_wake_at
       FROM runner_meta
       WHERE singleton = 1`,
     ).toArray()[0] ?? null;
@@ -548,10 +408,8 @@ export class RunnerStateStore {
         last_error_code,
         last_event_id,
         last_run_at,
-        next_wake_at,
-        pending_commit_json,
-        wake_materialization_hints_json
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        next_wake_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       1,
       meta.user_id,
       meta.bundle_ref_json ?? null,
@@ -567,8 +425,6 @@ export class RunnerStateStore {
       meta.last_event_id,
       meta.last_run_at,
       meta.next_wake_at,
-      meta.pending_commit_json,
-      meta.wake_materialization_hints_json,
     );
   }
 
@@ -702,8 +558,6 @@ function createDefaultRunnerMetaBundleRow(userId: string): RunnerMetaBundleRow {
     ...createDefaultRunnerMetaRow(userId),
     bundle_ref_json: null,
     bundle_version: 0,
-    pending_commit_json: null,
-    wake_materialization_hints_json: null,
   };
 }
 
@@ -748,273 +602,4 @@ function sameHostedExecutionRun(
   return left.attempt === right.attempt
     && left.runId === right.runId
     && left.startedAt === right.startedAt;
-}
-
-function parsePendingCommitRecord(
-  meta: Pick<RunnerMetaBundleRow, "pending_commit_json">,
-  userId: string | null,
-): RunnerPendingCommitRecord | null {
-  if (!meta.pending_commit_json) {
-    return null;
-  }
-
-  if (!userId) {
-    throw createPendingCommitCorruptionError(
-      null,
-      "record exists before the runner is bound to a user",
-    );
-  }
-
-  let value: {
-    assistantDeliveryEffects?: unknown;
-    bundleRef?: unknown;
-    committedAt?: unknown;
-    eventId?: unknown;
-    finalizeToken?: unknown;
-    finalizedAt?: unknown;
-    result?: unknown;
-    schemaVersion?: unknown;
-    userId?: unknown;
-    wake?: unknown;
-  };
-
-  try {
-    value = JSON.parse(meta.pending_commit_json) as typeof value;
-  } catch {
-    throw createPendingCommitCorruptionError(userId, "record is not valid JSON");
-  }
-
-  if (value.schemaVersion !== 1) {
-    throw createPendingCommitCorruptionError(userId, "schemaVersion must be 1");
-  }
-
-  if (typeof value.userId !== "string") {
-    throw createPendingCommitCorruptionError(userId, "record is missing userId");
-  }
-
-  if (value.userId !== userId) {
-    throw createPendingCommitCorruptionError(
-      userId,
-      `record is bound to ${value.userId}, not ${userId}`,
-    );
-  }
-
-  if (typeof value.eventId !== "string" || value.eventId.length === 0) {
-    throw createPendingCommitCorruptionError(userId, "record is missing eventId");
-  }
-
-  if (typeof value.committedAt !== "string" || value.committedAt.length === 0) {
-    throw createPendingCommitCorruptionError(userId, "record is missing committedAt");
-  }
-
-  if (
-    value.finalizeToken !== undefined
-    && value.finalizeToken !== null
-    && typeof value.finalizeToken !== "string"
-  ) {
-    throw createPendingCommitCorruptionError(userId, "finalizeToken must be a string or null");
-  }
-
-  if (
-    value.finalizedAt !== undefined
-    && value.finalizedAt !== null
-    && typeof value.finalizedAt !== "string"
-  ) {
-    throw createPendingCommitCorruptionError(userId, "finalizedAt must be a string or null");
-  }
-
-  const result = parsePendingCommitResult(value.result);
-  if (!result) {
-    throw createPendingCommitCorruptionError(userId, "result payload is invalid");
-  }
-
-  const wake = parsePendingCommitWake(value.wake, userId);
-  if (!wake) {
-    throw createPendingCommitCorruptionError(userId, "wake payload is invalid");
-  }
-
-  try {
-    return {
-      assistantDeliveryEffects: parseHostedAssistantDeliveryEffects(
-        value.assistantDeliveryEffects ?? [],
-      ),
-      bundleRef: parseHostedExecutionBundleRef(
-        value.bundleRef === undefined ? null : value.bundleRef,
-        "Hosted runner pending commit bundleRef",
-      ),
-      committedAt: value.committedAt,
-      eventId: value.eventId,
-      finalizeToken: value.finalizeToken === undefined ? null : value.finalizeToken,
-      finalizedAt: value.finalizedAt === undefined ? null : value.finalizedAt,
-      result,
-      schemaVersion: 1,
-      userId,
-      wake,
-    };
-  } catch (error) {
-    throw createPendingCommitCorruptionError(
-      userId,
-      error instanceof Error && error.message
-        ? error.message
-        : "record has an invalid nested payload",
-    );
-  }
-}
-
-function createPendingCommitCorruptionError(
-  userId: string | null,
-  reason: string,
-): RunnerPendingCommitCorruptionError {
-  return new RunnerPendingCommitCorruptionError(
-    `Hosted runner pending_commit_json is corrupted${userId ? ` for ${userId}` : ""}: ${reason}.`,
-  );
-}
-
-function parsePendingCommitWake(
-  value: unknown,
-  userId: string,
-): RunnerPendingCommitRecord["wake"] | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return null;
-  }
-
-  const record = value as Record<string, unknown>;
-  if (
-    record.userId !== userId
-    || typeof record.eventId !== "string"
-    || typeof record.kind !== "string"
-    || !isHostedExecutionWakeKind(record.kind)
-    || typeof record.occurredAt !== "string"
-    || typeof record.payloadCiphertext !== "string"
-    || typeof record.payloadSchema !== "string"
-    || !HOSTED_WAKE_PAYLOAD_SCHEMAS.includes(
-      record.payloadSchema as RunnerPendingCommitRecord["wake"]["payloadSchema"],
-    )
-    || typeof record.seq !== "string"
-    || (
-      record.fetchProof !== undefined
-      && record.fetchProof !== null
-      && typeof record.fetchProof !== "string"
-    )
-    || (
-      record.wakeId !== undefined
-      && record.wakeId !== null
-      && typeof record.wakeId !== "string"
-    )
-  ) {
-    return null;
-  }
-
-  return {
-    eventId: record.eventId,
-    fetchProof: typeof record.fetchProof === "string" ? record.fetchProof : null,
-    kind: record.kind,
-    occurredAt: record.occurredAt,
-    payloadCiphertext: record.payloadCiphertext,
-    payloadSchema: record.payloadSchema as RunnerPendingCommitRecord["wake"]["payloadSchema"],
-    seq: record.seq,
-    userId,
-    wakeId: typeof record.wakeId === "string" ? record.wakeId : null,
-  };
-}
-
-function parsePendingCommitResult(
-  value: unknown,
-): HostedExecutionRunnerResult["result"] | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return null;
-  }
-
-  const record = value as {
-    eventsHandled?: unknown;
-    nextWakeAt?: unknown;
-    summary?: unknown;
-    wakeMaterializationHints?: unknown;
-  };
-  if (
-    typeof record.summary !== "string"
-    || typeof record.eventsHandled !== "number"
-    || !Number.isSafeInteger(record.eventsHandled)
-    || record.eventsHandled < 0
-    || (
-      record.nextWakeAt !== undefined
-      && record.nextWakeAt !== null
-      && typeof record.nextWakeAt !== "string"
-    )
-    || (
-      record.wakeMaterializationHints !== undefined
-      && record.wakeMaterializationHints !== null
-      && (
-        typeof record.wakeMaterializationHints !== "object"
-        || Array.isArray(record.wakeMaterializationHints)
-      )
-    )
-  ) {
-    return null;
-  }
-
-  const wakeMaterializationHints = record.wakeMaterializationHints === undefined
-    ? undefined
-    : normalizeWakeMaterializationHints(record.wakeMaterializationHints as HostedWakeMaterializationHints | null);
-
-  return {
-    eventsHandled: record.eventsHandled,
-    ...(record.nextWakeAt !== undefined ? { nextWakeAt: record.nextWakeAt ?? null } : {}),
-    ...(wakeMaterializationHints !== undefined ? { wakeMaterializationHints } : {}),
-    summary: record.summary,
-  };
-}
-
-function normalizeWakeMaterializationHints(
-  value: HostedWakeMaterializationHints | null,
-): HostedWakeMaterializationHints | null {
-  if (!value) {
-    return null;
-  }
-
-  const hints: HostedWakeMaterializationHints = {
-    ...(value.assistantWakeAt === undefined
-      ? {}
-      : { assistantWakeAt: normalizeWakeHintTimestamp(value.assistantWakeAt) }),
-    ...(value.deviceSyncWakeAt === undefined
-      ? {}
-      : { deviceSyncWakeAt: normalizeWakeHintTimestamp(value.deviceSyncWakeAt) }),
-  };
-
-  return Object.keys(hints).length > 0 ? hints : null;
-}
-
-function normalizeWakeHintTimestamp(value: string | null | undefined): string | null {
-  if (value === undefined || value === null) {
-    return value ?? null;
-  }
-
-  const parsedMs = Date.parse(value);
-  if (!Number.isFinite(parsedMs)) {
-    return null;
-  }
-
-  return new Date(parsedMs).toISOString();
-}
-
-function parseWakeMaterializationHints(
-  value: string | null,
-): HostedWakeMaterializationHints | null {
-  if (!value) {
-    return null;
-  }
-
-  try {
-    const parsed = JSON.parse(value) as HostedWakeMaterializationHints | null;
-    return normalizeWakeMaterializationHints(parsed);
-  } catch {
-    return null;
-  }
-}
-
-function serializeWakeMaterializationHints(
-  value: HostedWakeMaterializationHints | null,
-): string | null {
-  const normalized = normalizeWakeMaterializationHints(value);
-  return normalized ? JSON.stringify(normalized) : null;
 }

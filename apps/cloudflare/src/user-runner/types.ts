@@ -1,14 +1,9 @@
 import type {
-  HostedExecutionRunnerResult,
-  HostedExecutionWakeKind,
   HostedExecutionBundleRef,
   HostedExecutionRunStatus,
   HostedExecutionTimelineEntry,
   HostedExecutionUserStatus,
-  HostedWakePayloadSchema,
 } from "@murphai/hosted-execution";
-import type { HostedAssistantDeliveryEffect } from "@murphai/hosted-execution/side-effects";
-
 export type DurableObjectSqlValue = ArrayBuffer | string | number | null;
 
 export interface DurableObjectSqlCursorLike<
@@ -60,32 +55,6 @@ export interface RunnerStateRecord {
   run: HostedExecutionRunStatus | null;
   timeline: HostedExecutionTimelineEntry[];
   userId: string;
-}
-
-export interface RunnerPendingCommitRecord {
-  assistantDeliveryEffects: HostedAssistantDeliveryEffect[];
-  bundleRef: HostedExecutionBundleRef | null;
-  committedAt: string;
-  eventId: string;
-  finalizeToken: string | null;
-  finalizedAt: string | null;
-  result: HostedExecutionRunnerResult["result"];
-  schemaVersion: 1;
-  userId: string;
-  // Crash-recovery seam for one exact fetched wake and cursor fence. If that wake can no longer
-  // record terminal or participate in cursor CAS, the pending commit must be discarded and rebuilt
-  // from the canonical web cursor snapshot before the replacement wake runs.
-  wake: {
-    eventId: string;
-    fetchProof: string | null;
-    kind: HostedExecutionWakeKind;
-    occurredAt: string;
-    payloadCiphertext: string;
-    payloadSchema: HostedWakePayloadSchema;
-    seq: string;
-    userId: string;
-    wakeId: string | null;
-  };
 }
 
 export const COMMITTED_RESULT_FRESH_WINDOW_MS = 7 * 24 * 60 * 60_000;

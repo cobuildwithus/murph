@@ -549,9 +549,6 @@ describe("runHostedAssistantCronWakeLane", () => {
       deviceSyncSkipped: true,
       nextWakeAt: "2026-04-08T01:00:00.000Z",
       parserProcessed: 0,
-      wakeMaterializationHints: {
-        assistantWakeAt: "2026-04-08T01:00:00.000Z",
-      },
     });
     expect(mocks.runAssistantAutomationPass).toHaveBeenCalledWith({
       deliveryDispatchMode: "queue-only",
@@ -606,9 +603,6 @@ describe("runHostedAssistantCronWakeLane", () => {
         deviceSyncSkipped: true,
         nextWakeAt: "2026-04-08T00:00:00.000Z",
         parserProcessed: 0,
-        wakeMaterializationHints: {
-          assistantWakeAt: "2026-04-08T00:00:00.000Z",
-        },
       });
       expect(mocks.runAssistantAutomationPass).toHaveBeenCalledTimes(1);
     } finally {
@@ -642,7 +636,6 @@ describe("runHostedAssistantCronWakeLane", () => {
       deviceSyncSkipped: true,
       nextWakeAt: null,
       parserProcessed: 0,
-      wakeMaterializationHints: null,
     });
     expect(mocks.runAssistantAutomationPass).not.toHaveBeenCalled();
     expect(mocks.emitHostedExecutionStructuredLog).not.toHaveBeenCalled();
@@ -679,7 +672,6 @@ describe("runHostedAssistantCronWakeLane", () => {
       deviceSyncSkipped: true,
       nextWakeAt: null,
       parserProcessed: 0,
-      wakeMaterializationHints: null,
     });
     expect(mocks.runAssistantAutomationPass).not.toHaveBeenCalled();
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
@@ -806,9 +798,6 @@ describe("runHostedDeviceSyncWakeLane", () => {
       deviceSyncSkipped: false,
       nextWakeAt: "2026-04-08T00:30:00.000Z",
       parserProcessed: 0,
-      wakeMaterializationHints: {
-        deviceSyncWakeAt: "2026-04-08T00:30:00.000Z",
-      },
     });
     expect(mocks.runAssistantAutomationPass).not.toHaveBeenCalled();
   });
@@ -821,7 +810,6 @@ describe("runHostedNoopSystemWakeLane", () => {
       deviceSyncSkipped: true,
       nextWakeAt: null,
       parserProcessed: 0,
-      wakeMaterializationHints: null,
     });
   });
 });

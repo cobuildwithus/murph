@@ -24,6 +24,19 @@ record redacted run logs/status
 
 The old wake-by-wake protocol remains a compatibility lane while callers migrate, but it should not be extended with new runtime-internal work kinds.
 
+## Current migration state
+
+The Cloudflare runner should prefer the run adapter path:
+
+```text
+acquire hosted run
+execute run-drain runtime entrypoint
+commit prepared snapshot through web CAS
+finalize side effects from web-visible HostedRun recovery state
+```
+
+The legacy materialize/fetch/terminal/commit/finalize wake loop is retained only as a fallback compatibility lane. New runtime-internal follow-ups should be expressed as local runtime work plus `nextRuntimeWakeAt`, not as web-materialized assistant/parser wakes.
+
 ## Why
 
 Cloudflare is intentionally hard to treat as the primary support/debug surface. Run state that operators need to answer “what happened?” must be visible in web/Postgres as redacted coordination metadata instead of being hidden in Durable Object state, encrypted snapshots, or container logs.
@@ -60,7 +73,7 @@ The run protocol preserves the existing correctness spine from the canonical hos
 
 `nextRuntimeWakeAt` is a cursor projection from private runtime state. It is not an instruction for web to create an `assistant.cron.tick` row. When `nextRuntimeWakeAt` is due and there are no external events, `acquire hosted run` may return a zero-event `runtime_timer` run and let the runtime decide what is due.
 
-The deprecated `assistantNextWakeAt` field exists only for the old wake-by-wake executor path.
+`nextRuntimeWakeAt` is the only hosted cursor wake projection. Internal assistant/parser/device-sync follow-ups stay runtime-local and surface only as this redacted due-time hint.
 
 ## Finalize recovery
 
@@ -73,7 +86,7 @@ HostedRun.outputCommittedSeq = ...
 HostedRun.outputCursorVersion = ...
 ```
 
-A later executor can acquire/resume that run and finalize it from web-visible recovery state. Durable Object `pending_commit_json`-style state should be treated as compatibility scaffolding, not the target recovery database.
+A later executor can acquire/resume that run and finalize it from web-visible recovery state. Durable Objects do not persist pending-commit or wake-materialization recovery truth; they keep only short-lived active-run and alarm/addressing state.
 
 ## Observability
 

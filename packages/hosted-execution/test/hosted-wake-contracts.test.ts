@@ -11,7 +11,6 @@ import {
   parseHostedExecutionEvent,
   parseHostedWakeExecutionPayload,
   parseHostedWakeAppendResponse,
-  parseHostedWakeQuarantineResponse,
 } from "../src/parsers.js";
 
 describe("hosted wake contract parsers", () => {
@@ -58,9 +57,6 @@ describe("hosted wake contract parsers", () => {
       }),
     });
 
-    expect(parseHostedWakeQuarantineResponse({ quarantined: true })).toEqual({
-      quarantined: true,
-    });
   });
 
   it("parses hosted wake payloads using the canonical full-wake schema", () => {

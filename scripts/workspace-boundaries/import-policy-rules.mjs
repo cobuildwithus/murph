@@ -353,19 +353,8 @@ export function verifyWorkspaceImportPolicy({
       "parseHostedExecutionRunnerResult",
       "parseHostedWakeAppendRequest",
       "parseHostedWakeAppendResponse",
-      "parseHostedWakeCommitRequest",
-      "parseHostedWakeCommitResponse",
       "parseHostedWakeExecutionPayload",
-      "parseHostedWakeExecutionResult",
-      "parseHostedWakeFetchResponse",
-      "parseHostedWakeFinalizeRequest",
-      "parseHostedWakeFinalizeResponse",
-      "parseHostedWakeMaterializeResponse",
-      "parseHostedWakeQuarantineRequest",
-      "parseHostedWakeQuarantineResponse",
       "parseHostedWakeRecord",
-      "parseHostedWakeStatusResponse",
-      "parseHostedWakeTerminalResponse",
     ])
   ) {
     return `${path.relative(repoRoot, filePath)} imports hosted execution parsers from ${JSON.stringify(specifier)}; use @murphai/hosted-execution/parsers so parse helpers stay on the dedicated parser surface instead of the hosted-execution root barrel.`;

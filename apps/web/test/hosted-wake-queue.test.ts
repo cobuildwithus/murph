@@ -19,10 +19,6 @@ vi.mock("@/src/lib/hosted-wake/store", () => ({
 }));
 
 import { materializeHostedExecutionWakeTx } from "@/src/lib/hosted-wake/lifecycle";
-import {
-  buildHostedAssistantCronWakeEventId,
-  materializeHostedAssistantCronWakeTx,
-} from "@/src/lib/hosted-wake/queue";
 
 describe("materializeHostedExecutionWakeTx", () => {
   beforeEach(() => {
@@ -155,32 +151,6 @@ describe("materializeHostedExecutionWakeTx", () => {
       payload: expect.objectContaining({
         event: expect.anything(),
       }),
-    }));
-  });
-
-  it("derives stable per-minute assistant cron wake ids when web materializes cron wakes", async () => {
-    const occurredAt = "2026-04-18T00:00:59.500Z";
-
-    expect(buildHostedAssistantCronWakeEventId({
-      occurredAt,
-      reason: "alarm",
-      userId: "member_123",
-    })).toBe("assistant.cron.tick:member_123:alarm:2026-04-18T00:00:00.000Z");
-
-    await materializeHostedAssistantCronWakeTx({
-      occurredAt,
-      reason: "alarm",
-      tx: {} as never,
-      userId: "member_123",
-    });
-
-    expect(mocks.appendHostedCoalescingWakeTx).toHaveBeenCalledWith(expect.objectContaining({
-      coalescingKey: "assistant.cron.tick:member_123",
-      dedupeKey: "assistant.cron.tick:member_123:alarm:2026-04-18T00:00:00.000Z",
-      eventId: "assistant.cron.tick:member_123:alarm:2026-04-18T00:00:00.000Z",
-      kind: "assistant.cron.tick",
-      occurredAt,
-      userId: "member_123",
     }));
   });
 });

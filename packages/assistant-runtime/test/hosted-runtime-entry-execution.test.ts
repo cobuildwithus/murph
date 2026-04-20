@@ -22,7 +22,6 @@ const mocks = vi.hoisted(() => ({
   normalizeHostedAssistantRuntimeConfig: vi.fn(),
   refreshAssistantStatusSnapshot: vi.fn(),
   restoreHostedExecutionContext: vi.fn(),
-  resumeHostedCommittedExecution: vi.fn(),
   runHostedAssistantCronWakeLane: vi.fn(),
   runHostedDeviceSyncWakeLane: vi.fn(),
   runHostedNoopSystemWakeLane: vi.fn(),
@@ -81,7 +80,6 @@ vi.mock("../src/hosted-runtime/callbacks.ts", () => ({
     mocks.collectHostedAssistantDeliverySideEffects,
   drainHostedCommittedAssistantDeliveriesAfterCommit:
     mocks.drainHostedCommittedAssistantDeliveriesAfterCommit,
-  resumeHostedCommittedExecution: mocks.resumeHostedCommittedExecution,
 }));
 
 vi.mock("../src/hosted-runtime/environment.ts", () => ({
@@ -145,21 +143,18 @@ beforeEach(() => {
     deviceSyncSkipped: false,
     nextWakeAt: "2026-04-08T00:30:00.000Z",
     parserProcessed: 0,
-    wakeMaterializationHints: null,
   });
   mocks.runHostedDeviceSyncWakeLane.mockResolvedValue({
     deviceSyncProcessed: 0,
     deviceSyncSkipped: false,
     nextWakeAt: null,
     parserProcessed: 0,
-    wakeMaterializationHints: null,
   });
   mocks.runHostedNoopSystemWakeLane.mockReturnValue({
     deviceSyncProcessed: 0,
     deviceSyncSkipped: true,
     nextWakeAt: null,
     parserProcessed: 0,
-    wakeMaterializationHints: null,
   });
   mocks.snapshotHostedExecutionContext.mockResolvedValue({
     bundle: Uint8Array.from([9, 9, 9]),

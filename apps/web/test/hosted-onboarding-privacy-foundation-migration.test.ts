@@ -6,6 +6,8 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
   HostedMember: [
     "id String @id",
     'billingStatus HostedBillingStatus @default(not_started) @map("billing_status")',
+    "hostedRunLogs HostedRunLog[]",
+    "hostedRuns HostedRun[]",
     'suspendedAt DateTime? @map("suspended_at")',
     'createdAt DateTime @default(now()) @map("created_at")',
     'updatedAt DateTime @updatedAt @map("updated_at")',
@@ -73,7 +75,8 @@ const HOSTED_WAKE_RUNTIME_SCHEMA_GUARD = {
     'userId String @id @map("user_id")',
     'nextSeq BigInt @default(1) @map("next_seq")',
     'committedSeq BigInt @default(0) @map("committed_seq")',
-    'assistantNextWakeAt DateTime? @map("assistant_next_wake_at")',
+    'nextRuntimeWakeAt DateTime? @map("next_runtime_wake_at")',
+    'nextRuntimeWakeReason String? @map("next_runtime_wake_reason")',
     'snapshotRef Json? @map("snapshot_ref")',
     'version BigInt @default(0) @map("version")',
     'createdAt DateTime @default(now()) @map("created_at")',
@@ -82,9 +85,11 @@ const HOSTED_WAKE_RUNTIME_SCHEMA_GUARD = {
   HostedWake: [
     "id String @id",
     'userId String @map("user_id")',
+    'runId String? @map("run_id")',
     'seq BigInt @map("seq")',
     "kind String",
     "behavior HostedWakeBehavior",
+    'state String @default("pending")',
     'dedupeKey String? @map("dedupe_key")',
     'coalescingKey String? @map("coalescing_key")',
     'occurredAt DateTime @map("occurred_at")',
@@ -92,10 +97,12 @@ const HOSTED_WAKE_RUNTIME_SCHEMA_GUARD = {
     'payloadInlineCiphertext String? @map("payload_inline_ciphertext")',
     'payloadRef String? @map("payload_ref")',
     'payloadBytes Int? @map("payload_bytes")',
+    'completedAt DateTime? @map("completed_at")',
     'quarantinedAt DateTime? @map("quarantined_at")',
     'quarantineCode String? @map("quarantine_code")',
     'createdAt DateTime @default(now()) @map("created_at")',
     'updatedAt DateTime @updatedAt @map("updated_at")',
+    'run HostedRun? @relation(fields: [runId], references: [id], onDelete: SetNull)',
   ],
   HostedWakeEvent: [
     'eventId String @map("event_id")',
@@ -114,16 +121,6 @@ const HOSTED_WAKE_RUNTIME_SCHEMA_GUARD = {
     'createdAt DateTime @default(now()) @map("created_at")',
     'updatedAt DateTime @updatedAt @map("updated_at")',
   ],
-  HostedWakeTerminal: [
-    'wakeId String @id @map("wake_id")',
-    'userId String @map("user_id")',
-    'wakeSeq BigInt @map("wake_seq")',
-    "state String",
-    'fetchedCommittedSeq BigInt @map("fetched_committed_seq")',
-    'fetchedCursorVersion BigInt @map("fetched_cursor_version")',
-    'createdAt DateTime @default(now()) @map("created_at")',
-    'updatedAt DateTime @updatedAt @map("updated_at")',
-  ],
 } as const;
 
 const HOSTED_WAKE_RUNTIME_MIGRATION_GUARD = {
@@ -132,7 +129,8 @@ const HOSTED_WAKE_RUNTIME_MIGRATION_GUARD = {
       '"user_id" TEXT NOT NULL',
       '"next_seq" BIGINT NOT NULL DEFAULT 1',
       '"committed_seq" BIGINT NOT NULL DEFAULT 0',
-      '"assistant_next_wake_at" TIMESTAMP(3)',
+      '"next_runtime_wake_at" TIMESTAMP(3)',
+      '"next_runtime_wake_reason" TEXT',
       '"snapshot_ref" JSONB',
       '"version" BIGINT NOT NULL DEFAULT 0',
       '"created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP',
@@ -150,9 +148,11 @@ const HOSTED_WAKE_RUNTIME_MIGRATION_GUARD = {
     columns: [
       '"id" TEXT NOT NULL',
       '"user_id" TEXT NOT NULL',
+      '"run_id" TEXT',
       '"seq" BIGINT NOT NULL',
       '"kind" TEXT NOT NULL',
       '"behavior" "HostedWakeBehavior" NOT NULL',
+      '"state" TEXT NOT NULL DEFAULT \'pending\'',
       '"dedupe_key" TEXT',
       '"coalescing_key" TEXT',
       '"occurred_at" TIMESTAMP(3) NOT NULL',
@@ -160,6 +160,7 @@ const HOSTED_WAKE_RUNTIME_MIGRATION_GUARD = {
       '"payload_inline_ciphertext" TEXT',
       '"payload_ref" TEXT',
       '"payload_bytes" INTEGER',
+      '"completed_at" TIMESTAMP(3)',
       '"quarantined_at" TIMESTAMP(3)',
       '"quarantine_code" TEXT',
       '"created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP',
@@ -170,9 +171,12 @@ const HOSTED_WAKE_RUNTIME_MIGRATION_GUARD = {
     ],
     foreignKeys: [
       'ALTER TABLE "hosted_wake" ADD CONSTRAINT "hosted_wake_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "hosted_member"("id") ON DELETE CASCADE ON UPDATE CASCADE',
+      'ALTER TABLE "hosted_wake" ADD CONSTRAINT "hosted_wake_run_id_fkey" FOREIGN KEY ("run_id") REFERENCES "hosted_run"("id") ON DELETE SET NULL ON UPDATE CASCADE',
     ],
     indexes: [
       'CREATE INDEX "hosted_wake_user_id_seq_idx" ON "hosted_wake"("user_id", "seq")',
+      'CREATE INDEX "hosted_wake_user_id_state_seq_idx" ON "hosted_wake"("user_id", "state", "seq")',
+      'CREATE INDEX "hosted_wake_run_id_idx" ON "hosted_wake"("run_id")',
       'CREATE INDEX "hosted_wake_user_id_coalescing_key_seq_idx" ON "hosted_wake"("user_id", "coalescing_key", "seq")',
       'CREATE INDEX "hosted_wake_user_id_kind_seq_idx" ON "hosted_wake"("user_id", "kind", "seq")',
       'CREATE UNIQUE INDEX "hosted_wake_user_id_seq_key" ON "hosted_wake"("user_id", "seq")',
@@ -223,30 +227,6 @@ const HOSTED_WAKE_RUNTIME_MIGRATION_GUARD = {
       'CREATE INDEX "hosted_wake_payload_user_id_idx" ON "hosted_wake_payload"("user_id")',
     ],
   },
-  hosted_wake_terminal: {
-    columns: [
-      '"wake_id" TEXT NOT NULL',
-      '"user_id" TEXT NOT NULL',
-      '"wake_seq" BIGINT NOT NULL',
-      '"state" TEXT NOT NULL',
-      '"fetched_committed_seq" BIGINT NOT NULL',
-      '"fetched_cursor_version" BIGINT NOT NULL',
-      '"created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP',
-      '"updated_at" TIMESTAMP(3) NOT NULL',
-    ],
-    constraints: [
-      'CONSTRAINT "hosted_wake_terminal_pkey" PRIMARY KEY ("wake_id")',
-    ],
-    foreignKeys: [
-      'ALTER TABLE "hosted_wake_terminal" ADD CONSTRAINT "hosted_wake_terminal_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "hosted_member"("id") ON DELETE CASCADE ON UPDATE CASCADE',
-      'ALTER TABLE "hosted_wake_terminal" ADD CONSTRAINT "hosted_wake_terminal_wake_id_fkey" FOREIGN KEY ("wake_id") REFERENCES "hosted_wake"("id") ON DELETE CASCADE ON UPDATE CASCADE',
-    ],
-    indexes: [
-      'CREATE INDEX "hosted_wake_terminal_user_id_idx" ON "hosted_wake_terminal"("user_id")',
-      'CREATE INDEX "hosted_wake_terminal_user_id_wake_seq_idx" ON "hosted_wake_terminal"("user_id", "wake_seq")',
-      'CREATE UNIQUE INDEX "hosted_wake_terminal_user_id_wake_seq_key" ON "hosted_wake_terminal"("user_id", "wake_seq")',
-    ],
-  },
 } as const;
 
 const HOSTED_MEMBER_RELATION_TYPES = new Set([
@@ -263,7 +243,6 @@ const HOSTED_MEMBER_RELATION_TYPES = new Set([
   "HostedWake",
   "HostedWakeEvent",
   "HostedWakePayload",
-  "HostedWakeTerminal",
 ]);
 
 describe("hosted Prisma baseline migration", () => {
@@ -286,7 +265,6 @@ describe("hosted Prisma baseline migration", () => {
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_share_payload"');
     expect(baselineMigrationSql).toContain('CREATE UNIQUE INDEX "hosted_member_routing_linq_chat_lookup_key_key"');
     expect(baselineMigrationSql).toContain('CREATE UNIQUE INDEX "hosted_member_routing_reply_alias_lookup_key_key"');
-    expect(baselineMigrationSql).toContain('"assistant_next_wake_at" TIMESTAMP(3)');
     expect(baselineMigrationSql).toContain('"masked_phone_number_hint" TEXT');
     expect(baselineMigrationSql).toContain('"phone_lookup_key" TEXT');
     expect(baselineMigrationSql).not.toContain('"masked_phone_number_hint" TEXT NOT NULL');
@@ -321,12 +299,6 @@ describe("hosted Prisma baseline migration", () => {
       'CREATE INDEX "hosted_wake_event_event_id_idx" ON "hosted_wake_event"("event_id")',
     );
     expect(baselineMigrationSql).toContain(
-      'CREATE TABLE "hosted_wake_terminal"',
-    );
-    expect(baselineMigrationSql).toContain(
-      '"fetched_cursor_version" BIGINT NOT NULL',
-    );
-    expect(baselineMigrationSql).toContain(
       'FOREIGN KEY ("wake_id") REFERENCES "hosted_wake"("id")',
     );
     expect(baselineMigrationSql).toContain(
@@ -340,6 +312,9 @@ describe("hosted Prisma baseline migration", () => {
     expect(baselineMigrationSql).not.toContain('"webauthn_user_id" TEXT');
     expect(baselineMigrationSql).not.toContain('"email" TEXT');
     expect(baselineMigrationSql).not.toContain('"dispatch_payload_json" JSONB');
+    expect(baselineMigrationSql).not.toContain('"assistant_next_wake_at" TIMESTAMP(3)');
+    expect(baselineMigrationSql).not.toContain('CREATE TABLE "hosted_wake_terminal"');
+    expect(baselineMigrationSql).not.toContain('"fetched_cursor_version" BIGINT NOT NULL');
     expect(baselineMigrationSql).not.toContain('"linq_chat_id" TEXT');
     expect(baselineMigrationSql).not.toContain('"revnet_amount_paid" INTEGER');
     expect(baselineMigrationSql).not.toContain('CREATE TABLE "execution_outbox"');

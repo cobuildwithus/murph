@@ -6,6 +6,9 @@ import type {
   HostedExecutionRunnerResult,
   HostedExecutionRunnerSharePack,
   HostedExecutionWake,
+  HostedRunRecord,
+  HostedRuntimeDrainEvent,
+  HostedRuntimeDrainRequest,
   HostedWakeLifecycleState,
 } from "@murphai/hosted-execution";
 import type { GatewayProjectionSnapshot } from "@murphai/gateway-core";
@@ -15,20 +18,17 @@ import {
 } from "@murphai/hosted-execution";
 import {
   parseHostedExecutionRunnerSharePack,
-  parseHostedExecutionBundleRef,
-  parseHostedWakeExecutionPayload,
 } from "@murphai/hosted-execution/parsers";
 import type {
-  HostedAssistantRuntimeCompletedJobResult,
   HostedAssistantDeliveryOutcome,
+  HostedAssistantRuntimeCompletedJobResult,
   HostedAssistantRuntimeJobInput,
   HostedAssistantRuntimeJobResult,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import type { R2BucketLike } from "../bundle-store.js";
 import { createHostedBrowserVaultSnapshotStore } from "../browser-vault-store.js";
+import { deleteHostedEmailRawMessage } from "../hosted-email.ts";
 import type { HostedExecutionEnvironment } from "../env.js";
-import { deleteHostedEmailRawMessage } from "../hosted-email.js";
-import { decryptHostedWakePayloadCiphertext } from "../hosted-wake-encryption.ts";
 import { type HostedUserCryptoContext } from "../user-key-store.js";
 import { HostedGatewayProjectionCache } from "../gateway-projection-cache.js";
 import {
@@ -41,7 +41,6 @@ import {
   buildHostedRunnerJobRuntimeConfig,
 } from "../runner-env.ts";
 import {
-  type RunnerPendingCommitRecord,
   type RunnerStateRecord,
 } from "./types.js";
 import { RunnerBundleSync } from "./runner-bundle-sync.js";
@@ -51,7 +50,6 @@ import { RunnerWakeScheduler } from "./runner-wake-scheduler.js";
 import { RunnerSecretsService } from "./runner-secrets.js";
 import {
   fetchHostedExecutionWebControlPlaneResponse,
-  readHostedWakeStatusFromWeb,
 } from "../web-control-plane.ts";
 
 export type HostedExecutionWakeProgressRecord =
@@ -65,10 +63,11 @@ export interface RunnerUserStores {
   userId: string;
 }
 
-export interface RunnerWakeExecutionResult {
-  assistantNextWakeAt?: string | null;
+export interface RunnerRunDrainExecutionResult {
   cursorSnapshotRef: HostedExecutionBundleRef | null;
-  postCursorAction: "cleanup-only" | "finalize-after-commit";
+  finalizeRequired: boolean;
+  nextRuntimeWakeAt?: string | null;
+  redactedSummary?: Record<string, unknown>;
   state: HostedWakeLifecycleState;
 }
 
@@ -92,574 +91,313 @@ interface RunnerWakeProcessorDependencies {
   wakeScheduler: RunnerWakeScheduler;
 }
 
-async function reconcilePendingCommitAfterCursorCommit(input: {
-  cursor: {
-    committedSeq: string;
-    snapshotRef: unknown;
-    version: string;
-  };
-  dependencies: RunnerWakeProcessorDependencies;
-  pendingCommit: RunnerPendingCommitRecord;
-  restorePendingCommitState: (pendingCommit: RunnerPendingCommitRecord) => Promise<void>;
-}): Promise<void> {
-  if (BigInt(input.cursor.committedSeq) > BigInt(input.pendingCommit.wake.seq)) {
-    await input.dependencies.stateStore.syncBundleRefCache(
-      parseHostedExecutionBundleRef(
-        input.cursor.snapshotRef === undefined ? null : input.cursor.snapshotRef,
-        "Hosted wake stale cleanup cursor snapshotRef",
-      ),
-    );
-    emitHostedExecutionStructuredLog({
-      component: "runner",
-      details: {
-        committedSeq: input.cursor.committedSeq,
-        pendingWakeSeq: input.pendingCommit.wake.seq,
-        version: input.cursor.version,
-      },
-      eventId: input.pendingCommit.eventId,
-      level: "info",
-      message: "Hosted wake cleanup discarded a stale DO-local pending commit after the web cursor advanced beyond its seq.",
-      phase: "completed",
-      run: null,
-      userId: input.pendingCommit.userId,
-    });
-    return;
-  }
-
-  if (!input.pendingCommit.finalizedAt) {
-    throw new Error(
-      `Hosted wake cleanup found a non-finalized pending commit after cursor seq ${input.cursor.committedSeq} was committed.`,
-    );
-  }
-
-  await input.restorePendingCommitState(input.pendingCommit);
-}
-
-type RunnerWakeStartMode =
-  | {
-    kind: "alreadyFinalized";
-    pendingCommit: RunnerPendingCommitRecord;
-  }
-  | {
-    kind: "resumePendingCommit";
-    pendingCommit: RunnerPendingCommitRecord;
-  }
-  | {
-    kind: "directRun";
-  };
-
 export class RunnerWakeProcessor {
   constructor(
     private readonly dependencies: RunnerWakeProcessorDependencies,
   ) {}
 
-  async executeWake(
+  async readRunDrainSharePack(
     wake: HostedExecutionWake,
-    options: {
-      holdLeaseUntilCleanup?: boolean;
-      wakeRecord: RunnerPendingCommitRecord["wake"];
-    },
-  ): Promise<RunnerWakeExecutionResult> {
-    const userId = wake.userId;
-    const holdLeaseUntilCleanup = options.holdLeaseUntilCleanup === true;
-    const startMode = await this.resolveWakeStartMode({
-      eventId: wake.eventId,
-      wakeSeq: options.wakeRecord.seq,
+  ): Promise<HostedExecutionRunnerSharePack | null> {
+    if (wake.kind !== "vault.share.accepted") {
+      return null;
+    }
+
+    return this.readRunnerSharePack({
+      ownerUserId: wake.share.ownerUserId,
+      shareId: wake.share.shareId,
     });
-    if (startMode.kind === "alreadyFinalized") {
-      await this.restorePendingCommitState(startMode.pendingCommit);
-      emitHostedExecutionStructuredLog({
-        component: "runner",
-        details: {
-          existingCommittedAt: startMode.pendingCommit.committedAt,
-          existingFinalizedAt: startMode.pendingCommit.finalizedAt,
-        },
-        eventId: wake.eventId,
-        message: "Hosted wake execution reused an already-finalized DO-local pending commit.",
-        phase: "completed",
-        run: null,
-        userId,
-      });
-      return {
-        assistantNextWakeAt: startMode.pendingCommit.result.wakeMaterializationHints?.assistantWakeAt,
-        cursorSnapshotRef: startMode.pendingCommit.bundleRef,
-        postCursorAction: "cleanup-only",
-        state: "completed",
-      };
-    }
+  }
 
-    if (startMode.kind === "resumePendingCommit") {
-      try {
-        await this.restorePendingCommitState(startMode.pendingCommit);
-        return {
-          assistantNextWakeAt: startMode.pendingCommit.result.wakeMaterializationHints?.assistantWakeAt,
-          cursorSnapshotRef: startMode.pendingCommit.bundleRef,
-          postCursorAction: "finalize-after-commit",
-          state: "completed",
-        };
-      } catch (error) {
-        return await this.recoverWakeExecutionFailure({
-          error,
-          holdLeaseUntilCleanup,
-          leaseOwner: {
-            eventId: wake.eventId,
-            policy: "same-event",
-            run: null,
-          },
-          run: await this.resolvePendingCommitCleanupRun({
-            pendingCommit: startMode.pendingCommit,
-            wake,
-          }),
-          wake,
-        });
-      }
-    }
-
+  async executeRunDrain(input: {
+    events: HostedRuntimeDrainEvent[];
+    primaryWake: HostedExecutionWake;
+    run: HostedRunRecord;
+  }): Promise<RunnerRunDrainExecutionResult> {
+    const userId = input.primaryWake.userId;
+    const run = hostedRunRecordToExecutionRunContext(input.run);
+    const runEventId = hostedRunEventId(input.run.id);
+    const leaseOwner: RunnerLeaseOwnerInput = {
+      eventId: runEventId,
+      run,
+    };
     const activeLease = await this.readRecentActiveRunLease();
-    if (activeLease) {
+
+    if (activeLease && activeLease.eventId !== runEventId) {
       emitHostedExecutionStructuredLog({
         component: "runner",
         details: {
           activeRunEventId: activeLease.eventId,
           activeRunId: activeLease.run.runId,
+          hostedRunId: input.run.id,
         },
-        eventId: wake.eventId,
+        eventId: runEventId,
         level: "info",
-        message: "Hosted wake execution deferred because another active run still owns the user lease.",
+        message: "Hosted run-drain execution deferred because another active run still owns the user lease.",
         phase: "wake.running",
         run: null,
         userId,
       });
       return {
-        assistantNextWakeAt: null,
         cursorSnapshotRef: null,
-        postCursorAction: "cleanup-only",
+        finalizeRequired: false,
         state: "backpressured",
       };
     }
 
-    const run = this.resolveRunContext(
-      await this.dependencies.stateStore.readState(),
-      {
-        eventId: wake.eventId,
-        startedAt: new Date().toISOString(),
-      },
-    );
-    const leaseOwner: RunnerLeaseOwnerInput = {
-      eventId: wake.eventId,
-      run,
-    };
-
     await this.dependencies.stateStore.beginWakeRun({
-      eventId: wake.eventId,
+      eventId: runEventId,
       run,
       userId,
     });
     await this.advanceRunPhase({
       clearError: true,
-      wake,
-      message: "Invoking direct hosted wake execution.",
-      phase: "claimed",
+      wake: { eventId: runEventId, userId },
+      message: "Running hosted run drain from the web-owned run ledger.",
+      phase: "wake.running",
       run,
     });
 
     try {
-      await this.advanceRunPhase({
-        clearError: true,
-        wake,
-        message: "Running hosted wake directly from the canonical wake queue.",
-        phase: "wake.running",
-        run,
-      });
-      let finalRunnerResult: HostedAssistantRuntimeCompletedJobResult | null = null;
-      let cursorSnapshotRef: HostedExecutionBundleRef | null = null;
-
       const runnerResult = await this.invokeRunner(
         userId,
-        wake,
+        input.primaryWake,
         run,
-        null,
+        buildHostedRuntimeDrainRequest({
+          events: input.events,
+          resumeFinalize: false,
+          run: input.run,
+        }),
       );
+      const result = runnerResult.result;
 
       if (runnerResult.phase === "committed") {
-        const pendingCommit = await this.persistPendingCommit({
-          assistantDeliveryEffects: runnerResult.committedAssistantDeliveryEffects,
-          gatewayProjectionSnapshot: runnerResult.committedGatewayProjectionSnapshot,
+        const cursorSnapshotRef = await this.persistCompletedRunnerResult({
+          eventId: runEventId,
+          finalGatewayProjectionSnapshot: runnerResult.committedGatewayProjectionSnapshot,
           result: runnerResult.result,
           run,
-          wake,
-          wakeRecord: options.wakeRecord,
         });
-        cursorSnapshotRef = pendingCommit.bundleRef;
-
         await this.advanceRunPhase({
           clearError: true,
-          wake,
-          message: "Hosted wake execution recorded a DO-local pending commit.",
+          wake: { eventId: runEventId, userId },
+          message: "Hosted run drain prepared a committed snapshot and is awaiting web commit.",
           phase: "commit.recorded",
           run,
         });
-      } else {
-        finalRunnerResult = runnerResult;
-        cursorSnapshotRef = await this.persistCompletedRunnerResult({
-          eventId: wake.eventId,
-          finalGatewayProjectionSnapshot: runnerResult.finalGatewayProjectionSnapshot,
-          result: runnerResult.result,
-          run,
-        });
-      }
-
-      if (finalRunnerResult) {
-        await this.persistBrowserVaultSnapshotBestEffort(
-          userId,
-          finalRunnerResult.browserVaultSnapshot ?? null,
-        );
-      }
-      await this.advanceRunPhase({
-        clearError: true,
-        wake,
-        message: "Hosted wake execution produced a final runtime result and is awaiting cursor commit cleanup.",
-        phase: "completed",
-        run,
-      });
-      if (!holdLeaseUntilCleanup) {
         await this.dependencies.stateStore.completeWakeRun({
-          eventId: wake.eventId,
+          eventId: runEventId,
           finishedAt: new Date().toISOString(),
           leaseOwner,
         });
-      }
-      return {
-        assistantNextWakeAt: runnerResult.result.result.wakeMaterializationHints?.assistantWakeAt,
-        cursorSnapshotRef,
-        postCursorAction: runnerResult.phase === "committed"
-          ? "finalize-after-commit"
-          : "cleanup-only",
-        state: "completed",
-      };
-    } catch (error) {
-      return await this.recoverWakeExecutionFailure({
-        error,
-        holdLeaseUntilCleanup,
-        leaseOwner,
-        run,
-        wake,
-      });
-    }
-  }
-
-  async cleanupWakeAfterCursorCommit<
-    TCursor extends {
-      committedSeq: string;
-      snapshotRef: unknown;
-      version: string;
-    },
-  >(input: {
-    cursor: TCursor;
-    wake: HostedExecutionWake | null;
-  }): Promise<TCursor> {
-    await this.dependencies.stateStore.markRuntimeBootstrapped();
-    const pendingCommit = input.wake
-      ? await this.dependencies.stateStore.readPendingCommit(input.wake.eventId)
-      : await this.dependencies.stateStore.readPendingCommit();
-
-    if (pendingCommit) {
-      await reconcilePendingCommitAfterCursorCommit({
-        cursor: input.cursor,
-        dependencies: this.dependencies,
-        pendingCommit,
-        restorePendingCommitState: this.restorePendingCommitState.bind(this),
-      });
-    }
-
-    const cleanupWake = input.wake ?? (pendingCommit
-      ? await this.restoreWakeFromPendingCommit(pendingCommit)
-      : null);
-    await this.rememberCommittedEventAndCleanup(
-      pendingCommit?.userId
-        ?? cleanupWake?.userId
-        ?? (await this.dependencies.stateStore.readState()).userId,
-      pendingCommit?.eventId ?? cleanupWake?.eventId ?? "unknown",
-      cleanupWake,
-    );
-    return input.cursor;
-  }
-
-  async finalizePendingCommitAfterCursorCommit(input: {
-    wake: HostedExecutionWake | null;
-  }): Promise<{
-    pendingCommit: RunnerPendingCommitRecord | null;
-    state: HostedWakeLifecycleState;
-  }> {
-    const pendingCommit = input.wake
-      ? await this.dependencies.stateStore.readPendingCommit(input.wake.eventId)
-      : await this.dependencies.stateStore.readPendingCommit();
-
-    if (!pendingCommit) {
-      return {
-        pendingCommit: null,
-        state: "completed",
-      };
-    }
-
-    const wake = input.wake ?? await this.restoreWakeFromPendingCommit(pendingCommit);
-    const run = await this.resolvePendingCommitCleanupRun({
-      pendingCommit,
-      wake,
-    });
-
-    try {
-      if (pendingCommit.finalizedAt) {
-        await this.restorePendingCommitState(pendingCommit);
         return {
-          pendingCommit,
+          cursorSnapshotRef,
+          finalizeRequired: runnerResult.committedAssistantDeliveryEffects.length > 0,
+          nextRuntimeWakeAt: result.result.nextWakeAt ?? null,
+          redactedSummary: {
+            assistantDeliveryEffectCount: runnerResult.committedAssistantDeliveryEffects.length,
+            eventsHandled: result.result.eventsHandled,
+            phase: "prepared",
+            summary: result.result.summary,
+          },
           state: "completed",
         };
       }
 
-      const { finalRunnerResult, finalizedPendingCommit } = await this.resumePendingCommitToFinalResult({
-        pendingCommit,
+      const cursorSnapshotRef = await this.persistCompletedRunnerResult({
+        eventId: runEventId,
+        finalGatewayProjectionSnapshot: runnerResult.finalGatewayProjectionSnapshot,
+        result: runnerResult.result,
         run,
-        userId: pendingCommit.userId,
-        wake,
       });
       await this.persistBrowserVaultSnapshotBestEffort(
-        pendingCommit.userId,
-        finalRunnerResult.browserVaultSnapshot ?? null,
+        userId,
+        runnerResult.browserVaultSnapshot ?? null,
       );
-      await this.advanceRunPhase({
-        clearError: true,
-        wake,
-        message:
-          "Hosted wake execution finalized a DO-local pending commit after the web cursor commit succeeded.",
-        phase: "completed",
-        run,
+      await this.dependencies.stateStore.completeWakeRun({
+        eventId: runEventId,
+        finishedAt: new Date().toISOString(),
+        leaseOwner,
       });
       return {
-        pendingCommit: finalizedPendingCommit,
+        cursorSnapshotRef,
+        finalizeRequired: false,
+        nextRuntimeWakeAt: result.result.nextWakeAt ?? null,
+        redactedSummary: {
+          eventsHandled: result.result.eventsHandled,
+          phase: "finalized",
+          summary: result.result.summary,
+        },
         state: "completed",
       };
     } catch (error) {
-      const recovery = await this.recoverWakeExecutionFailure({
-        error,
-        holdLeaseUntilCleanup: true,
-        leaseOwner: {
-          eventId: wake.eventId,
-          policy: "same-event",
-          run: null,
-        },
-        run,
-        wake,
-      });
-      return {
-        pendingCommit: await this.dependencies.stateStore.readPendingCommit(wake.eventId),
-        state: recovery.state,
-      };
-    }
-  }
-
-  async discardWakeAfterLostCursorRace(input: {
-    wake: HostedExecutionWake;
-  }): Promise<void> {
-    await this.dependencies.stateStore.clearPendingCommit(input.wake.eventId);
-    await this.dependencies.stateStore.completeWakeRun({
-      eventId: input.wake.eventId,
-      finishedAt: new Date().toISOString(),
-      leaseOwner: {
-        eventId: input.wake.eventId,
-        policy: "same-event",
-        run: null,
-      },
-    });
-  }
-
-  private async restorePendingCommitState(
-    pendingCommit: RunnerPendingCommitRecord,
-  ): Promise<void> {
-    await this.dependencies.stateStore.syncBundleRefCache(pendingCommit.bundleRef);
-    await this.dependencies.wakeScheduler.syncNextWake({
-      preferredWakeAt: pendingCommit.result.nextWakeAt ?? null,
-      ...(pendingCommit.result.wakeMaterializationHints === undefined
-        ? {}
-        : { wakeMaterializationHints: pendingCommit.result.wakeMaterializationHints }),
-    });
-  }
-
-  private async recoverWakeExecutionFailure(input: {
-    error: unknown;
-    holdLeaseUntilCleanup: boolean;
-    leaseOwner: RunnerLeaseOwnerInput;
-    run: HostedExecutionRunContext;
-    wake: HostedExecutionWake;
-  }): Promise<RunnerWakeExecutionResult> {
-    if (input.error instanceof HostedExecutionObsoleteRunResultError) {
-      emitHostedExecutionStructuredLog({
-        component: "runner",
-        details: {
-          obsoleteRunId: input.error.runId,
-          runElapsedMs: computeHostedRunElapsedMs(input.run),
-        },
-        error: input.error,
-        eventId: input.wake.eventId,
-        level: "warn",
-        message: "Hosted wake execution returned a stale result for an obsolete run lease.",
-        phase: "wake.running",
-        run: input.run,
-        userId: input.wake.userId,
-      });
       await this.dependencies.stateStore.failWakeRun({
-        error: input.error,
-        eventId: input.wake.eventId,
-        leaseOwner: input.leaseOwner,
+        error,
+        eventId: runEventId,
+        leaseOwner,
+      });
+      await this.advanceRunPhase({
+        wake: { eventId: runEventId, userId },
+        error,
+        level: error instanceof HostedExecutionConfigurationError ? "warn" : "error",
+        message: error instanceof HostedExecutionConfigurationError
+          ? "Hosted run drain deferred because the runtime is not configured yet."
+          : "Hosted run drain failed after invoking the runtime.",
+        phase: "retry.scheduled",
+        run,
       });
       return {
-        assistantNextWakeAt: null,
         cursorSnapshotRef: null,
-        postCursorAction: "cleanup-only",
+        finalizeRequired: false,
         state: "backpressured",
       };
     }
+  }
 
-    const recoveredPendingCommit = await this.dependencies.stateStore.readPendingCommit(
-      input.wake.eventId,
-    );
-    if (recoveredPendingCommit?.finalizedAt) {
-      await this.restorePendingCommitState(recoveredPendingCommit);
-      if (!input.holdLeaseUntilCleanup) {
-        await this.dependencies.stateStore.completeWakeRun({
-          eventId: input.wake.eventId,
-          finishedAt: recoveredPendingCommit.finalizedAt ?? recoveredPendingCommit.committedAt,
-          leaseOwner: input.leaseOwner,
-        });
-      }
-      await this.advanceRunPhase({
-        clearError: true,
-        wake: input.wake,
-        message: "Hosted wake execution recovered a finalized DO-local pending commit after a transient failure.",
-        phase: "completed",
-        run: input.run,
-      });
-      return {
-        assistantNextWakeAt: recoveredPendingCommit.result.wakeMaterializationHints?.assistantWakeAt,
-        cursorSnapshotRef: recoveredPendingCommit.bundleRef,
-        postCursorAction: "cleanup-only",
-        state: "completed",
-      };
-    }
+  async finalizeRunDrain(input: {
+    primaryWake: HostedExecutionWake;
+    run: HostedRunRecord;
+  }): Promise<RunnerRunDrainExecutionResult> {
+    const userId = input.primaryWake.userId;
+    const run = hostedRunRecordToExecutionRunContext(input.run);
+    const runEventId = hostedRunEventId(input.run.id);
+    const leaseOwner: RunnerLeaseOwnerInput = {
+      eventId: runEventId,
+      run,
+    };
 
-    await this.dependencies.stateStore.failWakeRun({
-      error: input.error,
-      eventId: input.wake.eventId,
-      leaseOwner: input.leaseOwner,
-    });
-    await this.dependencies.wakeScheduler.syncNextWake({
-      preferredWakeAt: recoveredPendingCommit?.result.nextWakeAt ?? null,
-      ...(recoveredPendingCommit?.result.wakeMaterializationHints === undefined
-        ? {}
-        : { wakeMaterializationHints: recoveredPendingCommit.result.wakeMaterializationHints }),
+    await this.dependencies.stateStore.beginWakeRun({
+      eventId: runEventId,
+      run,
+      userId,
     });
     await this.advanceRunPhase({
-      wake: input.wake,
-      error: input.error,
-      level: input.error instanceof HostedExecutionConfigurationError ? "warn" : "error",
-      message: recoveredPendingCommit
-        ? "Hosted wake execution preserved a DO-local pending commit for a later finalize retry."
-        : input.error instanceof HostedExecutionConfigurationError
-        ? "Hosted wake execution deferred because the runtime is not configured yet."
-        : "Hosted wake execution deferred after a direct runner failure.",
-      phase: "retry.scheduled",
-      run: input.run,
+      clearError: true,
+      wake: { eventId: runEventId, userId },
+      message: "Finalizing hosted run-drain side effects from the web-visible prepared snapshot.",
+      phase: "side-effects.draining",
+      run,
     });
-    return {
-      assistantNextWakeAt: recoveredPendingCommit?.result.wakeMaterializationHints?.assistantWakeAt,
-      cursorSnapshotRef: null,
-      postCursorAction: "cleanup-only",
-      state: "backpressured",
-    };
-  }
 
-  private async resumePendingCommitToFinalResult(input: {
-    pendingCommit: RunnerPendingCommitRecord;
-    run: HostedExecutionRunContext;
-    userId: string;
-    wake: HostedExecutionWake;
-  }): Promise<{
-    finalRunnerResult: HostedAssistantRuntimeCompletedJobResult;
-    finalizedPendingCommit: RunnerPendingCommitRecord;
-  }> {
-    await this.restorePendingCommitState(input.pendingCommit);
-    const finalRunnerResult = await this.invokeRunner(
-      input.userId,
-      input.wake,
-      input.run,
-      {
-        committedResult: {
-          assistantDeliveryEffects: input.pendingCommit.assistantDeliveryEffects,
-          result: input.pendingCommit.result,
+    try {
+      const runnerResult = await this.invokeRunner(
+        userId,
+        input.primaryWake,
+        run,
+        buildHostedRuntimeDrainRequest({
+          events: [],
+          resumeFinalize: true,
+          run: input.run,
+        }),
+      );
+
+      if (!isCompletedRunnerResult(runnerResult)) {
+        throw new Error("Hosted run-drain finalization returned a duplicate committed result.");
+      }
+
+      const cursorSnapshotRef = await this.persistCompletedRunnerResult({
+        eventId: runEventId,
+        finalGatewayProjectionSnapshot: runnerResult.finalGatewayProjectionSnapshot,
+        result: runnerResult.result,
+        run,
+      });
+      await this.persistBrowserVaultSnapshotBestEffort(
+        userId,
+        runnerResult.browserVaultSnapshot ?? null,
+      );
+      await this.dependencies.stateStore.completeWakeRun({
+        eventId: runEventId,
+        finishedAt: new Date().toISOString(),
+        leaseOwner,
+      });
+      await this.advanceRunPhase({
+        clearError: true,
+        wake: { eventId: runEventId, userId },
+        message: "Hosted run drain finalized committed side effects.",
+        phase: "completed",
+        run,
+      });
+
+      return {
+        cursorSnapshotRef,
+        finalizeRequired: false,
+        nextRuntimeWakeAt: runnerResult.result.result.nextWakeAt,
+        redactedSummary: {
+          ...summarizeHostedAssistantDeliveryOutcomes(runnerResult.assistantDeliveryOutcomes),
+          eventsHandled: runnerResult.result.result.eventsHandled,
+          phase: "finalized",
+          summary: runnerResult.result.result.summary,
         },
-      },
-    );
-
-    if (!isCompletedRunnerResult(finalRunnerResult)) {
-      throw new Error("Hosted wake execution returned a duplicate committed result during finalize.");
+        state: "completed",
+      };
+    } catch (error) {
+      await this.dependencies.stateStore.failWakeRun({
+        error,
+        eventId: runEventId,
+        leaseOwner,
+      });
+      await this.advanceRunPhase({
+        wake: { eventId: runEventId, userId },
+        error,
+        level: error instanceof HostedExecutionConfigurationError ? "warn" : "error",
+        message: error instanceof HostedExecutionConfigurationError
+          ? "Hosted run-drain finalization deferred because the runtime is not configured yet."
+          : "Hosted run-drain finalization failed after invoking the runtime.",
+        phase: "retry.scheduled",
+        run,
+      });
+      return {
+        cursorSnapshotRef: null,
+        finalizeRequired: false,
+        state: "backpressured",
+      };
     }
-
-    const finalizedPendingCommit = await this.finalizePendingCommitResult({
-      eventId: input.wake.eventId,
-      finalGatewayProjectionSnapshot: finalRunnerResult.finalGatewayProjectionSnapshot,
-      pendingCommit: input.pendingCommit,
-      result: finalRunnerResult.result,
-      run: input.run,
-    });
-    return {
-      finalRunnerResult,
-      finalizedPendingCommit,
-    };
   }
 
-  private async resolvePendingCommitCleanupRun(input: {
-    pendingCommit: RunnerPendingCommitRecord;
-    wake: HostedExecutionWake;
-  }): Promise<HostedExecutionRunContext> {
-    const activeLease = await this.dependencies.stateStore.readActiveRunLease();
-    if (activeLease && activeLease.eventId === input.pendingCommit.eventId) {
-      return activeLease.run;
-    }
-
-    return this.resolveRunContext(await this.dependencies.stateStore.readState(), {
-      eventId: input.pendingCommit.eventId,
-      startedAt: input.pendingCommit.committedAt,
-    });
+  async cleanupTransientWakeDataBestEffortForRunDrain(
+    wake: HostedExecutionWake,
+  ): Promise<void> {
+    await this.deleteTransientWakeDataBestEffort(wake);
   }
 
-  private async restoreWakeFromPendingCommit(
-    pendingCommit: RunnerPendingCommitRecord,
-  ): Promise<HostedExecutionWake> {
-    const decryptedPayload = await decryptHostedWakePayloadCiphertext({
-      ciphertext: pendingCommit.wake.payloadCiphertext,
-      environment: this.dependencies.env.hostedWakeEncryption,
-      userId: pendingCommit.userId,
-    });
+  private async deleteTransientWakeDataBestEffort(wake: HostedExecutionWake): Promise<void> {
+    if (wake.kind !== "conversation.message" || wake.message.channel !== "email") {
+      return;
+    }
 
-    return parseHostedWakeExecutionPayload({
-      decryptedPayload,
-      kind: pendingCommit.wake.kind,
-      occurredAt: pendingCommit.wake.occurredAt,
-      payloadSchema: pendingCommit.wake.payloadSchema,
-      userId: pendingCommit.userId,
-    });
+    try {
+      const { crypto } = await this.dependencies.ensureRunnerStores(wake.userId);
+      await deleteHostedEmailRawMessage({
+        bucket: this.dependencies.bucket,
+        key: crypto.rootKey,
+        keysById: crypto.keysById,
+        rawMessageKey: wake.message.rawMessageKey,
+        userId: wake.userId,
+      });
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "runner",
+        details: {
+          rawMessageKey: wake.message.rawMessageKey,
+          wakeChannel: wake.message.channel,
+          wakeKind: wake.kind,
+        },
+        error,
+        eventId: wake.eventId,
+        level: "warn",
+        message: "Hosted wake best-effort raw email cleanup failed; lifecycle TTL will still backstop deletion.",
+        phase: "completed",
+        run: null,
+        userId: wake.userId,
+      });
+    }
   }
 
   private async invokeRunner(
     userId: string,
     wake: HostedExecutionWake,
     run: HostedExecutionRunContext,
-    resume: {
-      committedResult: {
-        assistantDeliveryEffects: RunnerPendingCommitRecord["assistantDeliveryEffects"];
-        result: RunnerPendingCommitRecord["result"];
-      };
-    } | null = null,
+    runDrain: HostedRuntimeDrainRequest | null = null,
   ): Promise<HostedAssistantRuntimeJobResult> {
     if (!this.dependencies.runnerContainerNamespace) {
       throw new Error("Native hosted execution requires a RunnerContainer binding.");
@@ -668,14 +406,19 @@ export class RunnerWakeProcessor {
     const { bundleSync, runnerSecrets: runnerSecretsService } = await this.dependencies.ensureRunnerStores(
       userId,
     );
+    const runDrainPrimarySharePack = runDrain?.events.find((event) => {
+      return event.wake.eventId === wake.eventId && event.sharePack;
+    })?.sharePack ?? null;
     const [bundleState, runnerSecrets, sharePack] = await Promise.all([
       this.dependencies.stateStore.readBundleMetaState(),
       runnerSecretsService.readRunnerSecrets(userId),
       wake.kind === "vault.share.accepted"
-        ? this.readRunnerSharePack({
-            ownerUserId: wake.share.ownerUserId,
-            shareId: wake.share.shareId,
-          })
+        ? runDrainPrimarySharePack
+          ? Promise.resolve(runDrainPrimarySharePack)
+          : this.readRunnerSharePack({
+              ownerUserId: wake.share.ownerUserId,
+              shareId: wake.share.shareId,
+            })
         : Promise.resolve(null),
     ]);
     const forwardedEnv = buildHostedRunnerContainerEnv(
@@ -688,7 +431,7 @@ export class RunnerWakeProcessor {
         wake,
         ...(sharePack ? { sharePack } : {}),
         run,
-        ...(resume ? { resume } : {}),
+        ...(runDrain ? { runDrain } : {}),
       },
       runtime: buildHostedRunnerJobRuntimeConfig({
         configSource: this.dependencies.readRunnerRuntimeConfigSource(),
@@ -749,7 +492,9 @@ export class RunnerWakeProcessor {
         },
         forwardedEnvKeyCount: Object.keys(forwardedEnv).length,
         runElapsedMs: computeHostedRunElapsedMs(run),
-        resumeFromCommit: Boolean(resume),
+        runDrainEventCount: runDrain?.events.length ?? null,
+        runDrainResumeFinalize: runDrain?.resumeFinalize === true,
+        runDrainRunId: runDrain?.runId ?? null,
         sharePackAttached: Boolean(sharePack),
         runnerSecretsCategories: {
           modelCredentialConfigured: hasAnyRunnerConfigKey(runnerSecrets, [
@@ -792,92 +537,6 @@ export class RunnerWakeProcessor {
       runnerContainerNamespace: this.dependencies.runnerContainerNamespace,
       timeoutMs: this.dependencies.env.runnerTimeoutMs,
       userId,
-    });
-  }
-
-  private async persistPendingCommit(input: {
-    assistantDeliveryEffects: RunnerPendingCommitRecord["assistantDeliveryEffects"];
-    gatewayProjectionSnapshot: GatewayProjectionSnapshot | null;
-    result: HostedExecutionRunnerResult;
-    run: HostedExecutionRunContext;
-    wake: HostedExecutionWake;
-    wakeRecord: RunnerPendingCommitRecord["wake"];
-  }): Promise<RunnerPendingCommitRecord> {
-    return this.dependencies.applyHostedTransition({
-      eventId: input.wake.eventId,
-      gatewayProjectionSnapshot: input.gatewayProjectionSnapshot ?? null,
-      leaseOwner: {
-        eventId: input.wake.eventId,
-        run: input.run,
-      },
-      run: async (userId, stores) => {
-        const bundleState = await this.dependencies.stateStore.readBundleMetaState();
-        const record = await stores.bundleSync.applyRunnerResultBundles(
-          userId,
-          bundleState.bundleVersion,
-          input.result.bundle,
-        );
-        const pendingCommit: RunnerPendingCommitRecord = {
-          assistantDeliveryEffects: [...input.assistantDeliveryEffects],
-          bundleRef: record.bundleRef,
-          committedAt: new Date().toISOString(),
-          eventId: input.wake.eventId,
-          finalizeToken: null,
-          finalizedAt: null,
-          result: input.result.result,
-          schemaVersion: 1,
-          userId,
-          wake: input.wakeRecord,
-        };
-        await this.dependencies.stateStore.writePendingCommit(pendingCommit);
-        await this.dependencies.wakeScheduler.syncNextWake({
-          preferredWakeAt: input.result.result.nextWakeAt ?? null,
-          ...(input.result.result.wakeMaterializationHints === undefined
-            ? {}
-            : { wakeMaterializationHints: input.result.result.wakeMaterializationHints }),
-        });
-        return pendingCommit;
-      },
-    });
-  }
-
-  private async finalizePendingCommitResult(input: {
-    eventId: string;
-    finalGatewayProjectionSnapshot: GatewayProjectionSnapshot | null;
-    pendingCommit: RunnerPendingCommitRecord;
-    result: HostedExecutionRunnerResult;
-    run: HostedExecutionRunContext;
-  }): Promise<RunnerPendingCommitRecord> {
-    return this.dependencies.applyHostedTransition({
-      eventId: input.eventId,
-      gatewayProjectionSnapshot: input.finalGatewayProjectionSnapshot ?? null,
-      leaseOwner: {
-        eventId: input.eventId,
-        run: input.run,
-      },
-      run: async (userId, stores) => {
-        const bundleState = await this.dependencies.stateStore.readBundleMetaState();
-        const record = await stores.bundleSync.applyRunnerResultBundles(
-          userId,
-          bundleState.bundleVersion,
-          input.result.bundle,
-        );
-        const finalizedPendingCommit: RunnerPendingCommitRecord = {
-          ...input.pendingCommit,
-          assistantDeliveryEffects: [],
-          bundleRef: record.bundleRef,
-          finalizedAt: new Date().toISOString(),
-          result: input.result.result,
-        };
-        await this.dependencies.stateStore.writePendingCommit(finalizedPendingCommit);
-        await this.dependencies.wakeScheduler.syncNextWake({
-          preferredWakeAt: input.result.result.nextWakeAt ?? null,
-          ...(input.result.result.wakeMaterializationHints === undefined
-            ? {}
-            : { wakeMaterializationHints: input.result.result.wakeMaterializationHints }),
-        });
-        return finalizedPendingCommit;
-      },
     });
   }
 
@@ -939,9 +598,6 @@ export class RunnerWakeProcessor {
         );
         await this.dependencies.wakeScheduler.syncNextWake({
           preferredWakeAt: input.result.result.nextWakeAt ?? null,
-          ...(input.result.result.wakeMaterializationHints === undefined
-            ? {}
-            : { wakeMaterializationHints: input.result.result.wakeMaterializationHints }),
         });
         return record.bundleRef;
       },
@@ -981,91 +637,6 @@ export class RunnerWakeProcessor {
         userId,
       });
     }
-  }
-
-  private async resolveWakeStartMode(input: {
-    eventId: string;
-    wakeSeq: string;
-  }): Promise<RunnerWakeStartMode> {
-    const eventId = input.eventId;
-    const pendingCommit = await this.dependencies.stateStore.readPendingCommit(eventId);
-    if (!pendingCommit) {
-      await this.discardReplacedPendingCommitIfStale({
-        nextEventId: eventId,
-        nextWakeSeq: input.wakeSeq,
-      });
-      return {
-        kind: "directRun",
-      };
-    }
-
-    return pendingCommit.finalizedAt
-      ? {
-        kind: "alreadyFinalized",
-        pendingCommit,
-      }
-      : {
-        kind: "resumePendingCommit",
-        pendingCommit,
-      };
-  }
-
-  private async discardReplacedPendingCommitIfStale(input: {
-    nextEventId: string;
-    nextWakeSeq: string;
-  }): Promise<void> {
-    const pendingCommit = await this.dependencies.stateStore.readPendingCommit();
-    if (!pendingCommit || pendingCommit.eventId === input.nextEventId) {
-      return;
-    }
-
-    if (pendingCommit.wake.seq !== input.nextWakeSeq) {
-      return;
-    }
-
-    const status = await readHostedWakeStatusFromWeb({
-      baseUrl: this.dependencies.env.hostedWebBaseUrl,
-      body: {
-        eventId: pendingCommit.eventId,
-      },
-      boundUserId: pendingCommit.userId,
-      callbackSigning: this.dependencies.env.webCallbackSigning,
-      timeoutMs: this.dependencies.env.runnerTimeoutMs,
-    });
-
-    await this.dependencies.stateStore.syncBundleRefCache(
-      parseHostedExecutionBundleRef(
-        status.cursor.snapshotRef === undefined ? null : status.cursor.snapshotRef,
-        "Hosted wake replacement cursor snapshotRef",
-      ),
-    );
-
-    if (status.wakeState !== "replaced" && !status.replacedByEventId) {
-      return;
-    }
-
-    await this.dependencies.stateStore.discardPendingCommitRecoveryState(pendingCommit.eventId);
-    await this.dependencies.wakeScheduler.syncNextWake({
-      preferredWakeAt: null,
-      wakeMaterializationHints: null,
-    });
-    emitHostedExecutionStructuredLog({
-      component: "runner",
-      details: {
-        nextEventId: input.nextEventId,
-        pendingEventId: pendingCommit.eventId,
-        replacedByEventId: status.replacedByEventId ?? null,
-        version: status.cursor.version,
-        wakeSeq: pendingCommit.wake.seq,
-        wakeState: status.wakeState ?? null,
-      },
-      eventId: pendingCommit.eventId,
-      level: "info",
-      message:
-        "Hosted wake execution discarded a stale DO-local pending commit after web replaced that wake before terminal cleanup.",
-      phase: "wake.running",
-      userId: pendingCommit.userId,
-    });
   }
 
   private resolveRunContext(
@@ -1150,61 +721,6 @@ export class RunnerWakeProcessor {
     return record;
   }
 
-  private async rememberCommittedEventAndCleanup(
-    userId: string,
-    eventId: string,
-    wake: HostedExecutionWake | null = null,
-  ): Promise<RunnerStateRecord> {
-    const record = await this.dependencies.stateStore.completeWakeRun({
-      eventId,
-      finishedAt: new Date().toISOString(),
-      leaseOwner: {
-        eventId,
-        policy: "same-event",
-        run: null,
-      },
-    });
-    await this.dependencies.stateStore.clearPendingCommit(eventId);
-    if (wake) {
-      await this.deleteTransientWakeDataBestEffort(wake);
-    }
-    return record;
-  }
-
-  private async deleteTransientWakeDataBestEffort(
-    wake: HostedExecutionWake,
-  ): Promise<void> {
-    if (wake.kind !== "conversation.message" || wake.message.channel !== "email") {
-      return;
-    }
-
-    try {
-      const { crypto } = await this.dependencies.ensureRunnerStores(wake.userId);
-      await deleteHostedEmailRawMessage({
-        bucket: this.dependencies.bucket,
-        key: crypto.rootKey,
-        keysById: crypto.keysById,
-        rawMessageKey: wake.message.rawMessageKey,
-        userId: wake.userId,
-      });
-    } catch (error) {
-      emitHostedExecutionStructuredLog({
-        component: "runner",
-        details: {
-          rawMessageKey: wake.message.rawMessageKey,
-          wakeChannel: wake.message.channel,
-          wakeKind: wake.kind,
-        },
-        error,
-        eventId: wake.eventId,
-        level: "warn",
-        message: "Hosted wake best-effort raw email cleanup failed; lifecycle TTL will still backstop deletion.",
-        phase: "completed",
-        run: null,
-        userId: wake.userId,
-      });
-    }
-  }
 }
 
 export class HostedExecutionObsoleteRunResultError extends Error {
@@ -1219,6 +735,34 @@ export class HostedExecutionObsoleteRunResultError extends Error {
     );
     this.name = "HostedExecutionObsoleteRunResultError";
   }
+}
+
+function hostedRunEventId(runId: string): string {
+  return `hosted-run:${runId}`;
+}
+
+function hostedRunRecordToExecutionRunContext(run: HostedRunRecord): HostedExecutionRunContext {
+  return {
+    attempt: run.attempt,
+    runId: run.id,
+    startedAt: run.acquiredAt,
+  };
+}
+
+function buildHostedRuntimeDrainRequest(input: {
+  events: HostedRuntimeDrainEvent[];
+  resumeFinalize: boolean;
+  run: HostedRunRecord;
+}): HostedRuntimeDrainRequest {
+  return {
+    acquiredAt: input.run.acquiredAt,
+    events: input.resumeFinalize ? [] : input.events,
+    inputCommittedSeq: input.run.inputCommittedSeq,
+    inputCursorVersion: input.run.inputCursorVersion,
+    ...(input.resumeFinalize ? { resumeFinalize: true } : {}),
+    runId: input.run.id,
+    triggerKind: input.run.triggerKind,
+  };
 }
 
 function isCompletedRunnerResult(

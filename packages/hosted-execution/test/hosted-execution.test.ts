@@ -11,11 +11,11 @@ import {
   HOSTED_EXECUTION_EVENT_KINDS,
   HOSTED_EXECUTION_NONCE_HEADER,
   HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER,
+  HOSTED_RUN_STATUSES,
   HOSTED_EXECUTION_SIGNATURE_HEADER,
   HOSTED_EXECUTION_SIGNING_KEY_ID_HEADER,
   HOSTED_EXECUTION_TIMESTAMP_HEADER,
   HOSTED_WAKE_LIFECYCLE_STATES,
-  HOSTED_WAKE_TERMINAL_STATES,
   HOSTED_EXECUTION_WAKE_NOT_CONFIGURED_ERROR,
   HOSTED_EXECUTION_USER_ID_HEADER,
 } from "../src/contracts.ts";
@@ -133,9 +133,15 @@ describe("hosted execution coverage gaps", () => {
       "replaced",
       "quarantined",
     ]);
-    expect(HOSTED_WAKE_TERMINAL_STATES).toEqual([
-      "completed",
-      "quarantined",
+    expect(HOSTED_RUN_STATUSES).toEqual([
+      "acquired",
+      "running",
+      "prepared",
+      "committed_needs_finalize",
+      "finalizing",
+      "finalized",
+      "failed",
+      "superseded",
     ]);
     expect(HOSTED_EXECUTION_WAKE_NOT_CONFIGURED_ERROR).toBe(
       "Hosted execution wake handling is not configured.",

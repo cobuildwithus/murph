@@ -43,29 +43,6 @@ const HOSTED_NON_IDEMPOTENT_CONFIRMATION_GRACE_MS = 2 * 60 * 1000;
 
 type HostedAssistantDeliveryDetails = Record<string, boolean | null | string>;
 
-export function resumeHostedCommittedExecution(
-  request: HostedAssistantRuntimeJobRequest,
-): HostedCommittedExecutionState {
-  const committedAssistantDeliveryEffects = parseHostedAssistantDeliveryEffects(
-    request.resume!.committedResult.assistantDeliveryEffects,
-  );
-
-  return {
-    committedGatewayProjectionSnapshot: {
-      schema: "murph.gateway-projection-snapshot.v1",
-      generatedAt: new Date().toISOString(),
-      conversations: [],
-      messages: [],
-      permissions: [],
-    },
-    committedResult: {
-      bundle: request.bundle,
-      result: request.resume!.committedResult.result,
-    },
-    committedAssistantDeliveryEffects,
-  };
-}
-
 export async function collectHostedAssistantDeliverySideEffects(
   vaultRoot: string,
 ): Promise<HostedAssistantDeliveryEffect[]> {

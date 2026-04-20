@@ -9,7 +9,7 @@ import {
 import type {
   HostedExecutionRunContext,
   HostedExecutionRunnerResult,
-  HostedWakeMaterializationHints,
+  HostedRuntimeDrainRequest,
   HostedExecutionWake,
 } from "@murphai/hosted-execution";
 import {
@@ -46,6 +46,7 @@ import type {
   HostedRestoredExecutionContext,
   HostedWakeFollowupExecution,
   HostedMaintenanceMetrics,
+  HostedRunDrainMetrics,
   NormalizedHostedAssistantRuntimeConfig,
   HostedWorkspaceArtifactMaterializer,
 } from "./models.ts";
@@ -181,9 +182,6 @@ export async function executeHostedWakeForCommit(input: {
       result: {
         eventsHandled: 1,
         nextWakeAt: maintenanceMetrics.nextWakeAt,
-        ...(maintenanceMetrics.wakeMaterializationHints
-          ? { wakeMaterializationHints: maintenanceMetrics.wakeMaterializationHints }
-          : {}),
         summary: summarizeWake(wake, {
           ...wakeMetrics,
           ...maintenanceMetrics,
@@ -192,6 +190,217 @@ export async function executeHostedWakeForCommit(input: {
     },
     committedAssistantDeliveryEffects,
   };
+}
+
+export async function executeHostedRunDrainForCommit(input: {
+  artifactMaterializer?: HostedWorkspaceArtifactMaterializer | null;
+  executionContext: AssistantExecutionContext;
+  materializedArtifactPaths?: ReadonlySet<string>;
+  request: HostedAssistantRuntimeJobRequest;
+  restored: HostedRestoredExecutionContext;
+  runtime: Pick<
+    NormalizedHostedAssistantRuntimeConfig,
+    "commitTimeoutMs" | "platform" | "resolvedConfig" | "userEnv"
+  >;
+  runtimeEnv: Readonly<Record<string, string>>;
+}): Promise<HostedCommittedExecutionState> {
+  const runDrain = input.request.runDrain;
+
+  if (!runDrain) {
+    return executeHostedWakeForCommit(input);
+  }
+
+  const primaryWake = resolveHostedWake(input.request);
+  emitHostedExecutionStructuredLog({
+    component: "runtime",
+    wake: primaryWake,
+    details: {
+      eventCount: runDrain.events.length,
+      runElapsedMs: computeHostedRunElapsedMs(input.request.run ?? null),
+      runTriggerKind: runDrain.triggerKind,
+    },
+    message: "Hosted runtime executing run drain.",
+    phase: "wake.running",
+    run: input.request.run ?? null,
+  });
+
+  const wakeExecutionContext = await resolveHostedWakeExecutionContext(
+    input.executionContext,
+  );
+  const metrics = createHostedRunDrainMetrics();
+  let shouldRunAssistantAutomation = runDrain.events.length === 0
+    && runDrain.triggerKind === "runtime_timer";
+  let shouldRunDeviceSyncScheduler = runDrain.events.length === 0
+    && runDrain.triggerKind === "runtime_timer";
+
+  for (const event of runDrain.events) {
+    const wakeHandlingStartedAtMs = Date.now();
+    const wakeMetrics = await executeHostedWakeEvent({
+      wake: event.wake,
+      executionContext: wakeExecutionContext,
+      runtime: input.runtime,
+      runtimeEnv: input.runtimeEnv,
+      sharePack: event.sharePack ?? input.request.sharePack ?? null,
+      vaultRoot: input.restored.vaultRoot,
+    });
+    mergeHostedRunDrainWakeMetrics(metrics, wakeMetrics);
+    emitHostedExecutionStructuredLog({
+      component: "runtime",
+      wake: event.wake,
+      details: {
+        runDrainRunId: runDrain.runId,
+        runElapsedMs: computeHostedRunElapsedMs(input.request.run ?? null),
+        wakeHandlerLatencyMs: Date.now() - wakeHandlingStartedAtMs,
+        wakeSeq: event.seq,
+      },
+      message: "Hosted runtime finished run-drain wake handlers.",
+      phase: "wake.running",
+      run: input.request.run ?? null,
+    });
+
+    if (wakeMetrics.followupExecution === "conversation-message") {
+      shouldRunAssistantAutomation = true;
+      const preservedMetrics = await resolveHostedConversationPreservedWakeMetrics({
+        wake: event.wake,
+        run: input.request.run ?? null,
+        runtime: input.runtime,
+        vaultRoot: input.restored.vaultRoot,
+      });
+      mergeHostedRunDrainMaintenanceMetrics(metrics, preservedMetrics);
+      continue;
+    }
+
+    const maintenanceMetrics = await runHostedSystemWakeFollowupExecution({
+      executionContext: wakeExecutionContext,
+      requestId: event.wake.eventId,
+      run: input.request.run ?? null,
+      runtime: input.runtime,
+      vaultRoot: input.restored.vaultRoot,
+      wake: event.wake,
+    });
+    mergeHostedRunDrainMaintenanceMetrics(metrics, maintenanceMetrics);
+  }
+
+  if (shouldRunAssistantAutomation) {
+    const assistantMetrics = await runHostedAssistantCronWakeLane({
+      executionContext: wakeExecutionContext,
+      requestId: `${runDrain.runId}:assistant`,
+      vaultRoot: input.restored.vaultRoot,
+      wake: primaryWake,
+    });
+    mergeHostedRunDrainMaintenanceMetrics(metrics, assistantMetrics);
+  }
+
+  if (shouldRunDeviceSyncScheduler) {
+    const deviceSyncMetrics = await runHostedDeviceSyncWakeLane({
+      deviceSyncPort: input.runtime.platform.deviceSyncPort,
+      resolvedConfig: input.runtime.resolvedConfig,
+      timeoutMs: input.runtime.commitTimeoutMs,
+      vaultRoot: input.restored.vaultRoot,
+      wake: primaryWake,
+    });
+    mergeHostedRunDrainMaintenanceMetrics(metrics, deviceSyncMetrics);
+  }
+
+  const snapshotStartedAtMs = Date.now();
+  const committedSnapshot = await snapshotHostedExecutionContext({
+    artifactSink: createHostedArtifactUploadSink({
+      artifactStore: input.runtime.platform.artifactStore,
+      knownArtifactHashes: collectHostedBundleArtifactHashes(
+        decodeHostedBundleBase64(input.request.bundle),
+      ),
+    }),
+    operatorHomeRoot: input.restored.operatorHomeRoot,
+    preservedArtifacts: collectPreservedHostedArtifacts({
+      bytes: decodeHostedBundleBase64(input.request.bundle),
+      materializedArtifactPaths: input.materializedArtifactPaths ?? new Set(),
+    }),
+    vaultRoot: input.restored.vaultRoot,
+  });
+  emitHostedExecutionStructuredLog({
+    component: "runtime",
+    wake: primaryWake,
+    details: {
+      eventsHandled: metrics.eventsHandled,
+      runElapsedMs: computeHostedRunElapsedMs(input.request.run ?? null),
+      snapshotLatencyMs: Date.now() - snapshotStartedAtMs,
+    },
+    message: "Hosted runtime snapshotted run-drain execution context.",
+    phase: "commit.recorded",
+    run: input.request.run ?? null,
+  });
+  const committedAssistantDeliveryEffects = await collectHostedAssistantDeliverySideEffects(
+    input.restored.vaultRoot,
+  );
+  const committedGatewayProjectionSnapshot = await exportGatewayProjectionSnapshotLocal(
+    input.restored.vaultRoot,
+    {
+      sourceReader: assistantGatewayLocalProjectionSourceReader,
+    },
+  ).catch((error: unknown) => {
+    emitHostedExecutionStructuredLog({
+      component: "runtime",
+      wake: primaryWake,
+      error,
+      level: "warn",
+      details: {
+        runElapsedMs: computeHostedRunElapsedMs(input.request.run ?? null),
+      },
+      message:
+        "Hosted runtime could not export the committed gateway projection snapshot for a run drain; continuing without it.",
+      phase: "commit.recorded",
+      run: input.request.run ?? null,
+    });
+    return null;
+  });
+
+  return {
+    committedGatewayProjectionSnapshot,
+    committedResult: {
+      bundle: encodeHostedBundleBase64(committedSnapshot.bundle),
+      result: {
+        eventsHandled: metrics.eventsHandled,
+        nextWakeAt: metrics.nextWakeAt,
+        summary: summarizeHostedRunDrain(runDrain, metrics),
+      },
+    },
+    committedAssistantDeliveryEffects,
+  };
+}
+
+export async function completeHostedRunDrainAfterCommit(input: {
+  materializedArtifactPaths?: ReadonlySet<string>;
+  run?: HostedExecutionRunContext | null;
+  runtime: Pick<
+    NormalizedHostedAssistantRuntimeConfig,
+    "commitTimeoutMs" | "platform" | "resolvedConfig" | "userEnv"
+  >;
+  restored: HostedRestoredExecutionContext;
+  request: HostedAssistantRuntimeJobRequest;
+  wake: HostedExecutionWake;
+}): Promise<HostedAssistantRuntimeCompletedJobResult> {
+  const committedAssistantDeliveryEffects = await collectHostedAssistantDeliverySideEffects(
+    input.restored.vaultRoot,
+  );
+
+  return completeHostedExecutionAfterCommit({
+    materializedArtifactPaths: input.materializedArtifactPaths,
+    run: input.run ?? null,
+    runtime: input.runtime,
+    restored: input.restored,
+    committedExecution: {
+      committedAssistantDeliveryEffects,
+      committedGatewayProjectionSnapshot: null,
+      committedResult: {
+        bundle: input.request.bundle,
+        result: {
+          eventsHandled: input.request.runDrain?.events.length ?? 0,
+          summary: "Finalized committed hosted run side effects.",
+        },
+      },
+    },
+    wake: input.wake,
+  });
 }
 
 async function resolveHostedWakeExecutionContext(
@@ -238,6 +447,60 @@ async function runHostedWakeFollowupExecution(input: {
         wake: input.wake,
       });
   }
+}
+
+function createHostedRunDrainMetrics(): HostedRunDrainMetrics {
+  return {
+    bootstrapResult: null,
+    deviceSyncProcessed: 0,
+    deviceSyncSkipped: true,
+    eventsHandled: 0,
+    nextWakeAt: null,
+    parserProcessed: 0,
+    shareImportResult: null,
+    shareImportTitle: null,
+  };
+}
+
+function mergeHostedRunDrainWakeMetrics(
+  target: HostedRunDrainMetrics,
+  metrics: Awaited<ReturnType<typeof executeHostedWakeEvent>>,
+): void {
+  target.bootstrapResult ??= metrics.bootstrapResult;
+  target.eventsHandled += 1;
+  target.parserProcessed += metrics.conversationMetrics?.parserProcessed ?? 0;
+  target.nextWakeAt = earliestHostedWakeAt(
+    target.nextWakeAt,
+    metrics.conversationMetrics?.nextWakeAt ?? null,
+  );
+
+  if (metrics.shareImportResult) {
+    target.shareImportResult = metrics.shareImportResult;
+    target.shareImportTitle = metrics.shareImportTitle;
+  }
+}
+
+function mergeHostedRunDrainMaintenanceMetrics(
+  target: HostedRunDrainMetrics,
+  metrics: HostedMaintenanceMetrics,
+): void {
+  target.deviceSyncProcessed += metrics.deviceSyncProcessed;
+  target.deviceSyncSkipped = target.deviceSyncSkipped && metrics.deviceSyncSkipped;
+  target.nextWakeAt = earliestHostedWakeAt(target.nextWakeAt, metrics.nextWakeAt);
+  target.parserProcessed += metrics.parserProcessed;
+}
+
+function summarizeHostedRunDrain(
+  runDrain: HostedRuntimeDrainRequest,
+  metrics: HostedRunDrainMetrics,
+): string {
+  const eventKinds = Array.from(
+    new Set(runDrain.events.map((event) => event.wake.kind)),
+  ).sort();
+  const eventKindsSummary = eventKinds.length > 0 ? eventKinds.join(",") : "none";
+  const nextWakeAtSummary = metrics.nextWakeAt ? ` Next wake: ${metrics.nextWakeAt}.` : "";
+
+  return `Processed hosted run ${runDrain.runId} (${runDrain.triggerKind}; events=${metrics.eventsHandled}; kinds=${eventKindsSummary}; parserJobs=${metrics.parserProcessed}; deviceSyncJobs=${metrics.deviceSyncProcessed}).${nextWakeAtSummary}`;
 }
 
 async function runHostedSystemWakeFollowupExecution(input: {
@@ -320,9 +583,6 @@ async function resolveHostedPreservedWakeMetrics(input: {
     deviceSyncSkipped: input.includeDeviceSync === false,
     nextWakeAt: deviceSyncWakeAt,
     parserProcessed: 0,
-    wakeMaterializationHints: createHostedWakeMaterializationHints({
-      deviceSyncWakeAt,
-    }),
   };
 }
 
@@ -381,12 +641,6 @@ async function runHostedConversationWakeFollowupExecution(input: {
       preservedMetrics.nextWakeAt,
     ),
     parserProcessed: input.conversationMetrics?.parserProcessed ?? 0,
-    wakeMaterializationHints: createHostedWakeMaterializationHints({
-      assistantWakeAt,
-      deviceSyncWakeAt:
-        preservedMetrics.wakeMaterializationHints?.deviceSyncWakeAt
-        ?? preservedMetrics.nextWakeAt,
-    }),
   };
 }
 
@@ -439,18 +693,6 @@ async function resolveHostedDeviceSyncWakeAt(input: {
       });
     return null;
   }
-}
-
-function createHostedWakeMaterializationHints(input: {
-  assistantWakeAt?: string | null;
-  deviceSyncWakeAt?: string | null;
-}): HostedWakeMaterializationHints | null {
-  const hints: HostedWakeMaterializationHints = {
-    ...(input.assistantWakeAt === undefined ? {} : { assistantWakeAt: input.assistantWakeAt }),
-    ...(input.deviceSyncWakeAt === undefined ? {} : { deviceSyncWakeAt: input.deviceSyncWakeAt }),
-  };
-
-  return Object.keys(hints).length > 0 ? hints : null;
 }
 
 function earliestHostedWakeAt(...values: Array<string | null | undefined>): string | null {
