@@ -7,11 +7,13 @@ import {
   type HostedAssistantRuntimeJobInput,
 } from "@murphai/assistant-runtime";
 import {
+  createRuntimeTimerSyntheticWake,
   buildHostedExecutionSafeErrorDetails,
   deriveHostedExecutionErrorCode,
   emitHostedExecutionStructuredLog,
   readHostedExecutionSafeErrorName,
   summarizeHostedExecutionError,
+  type HostedRuntimeEvent,
 } from "@murphai/hosted-execution";
 import {
   HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER,
@@ -70,6 +72,18 @@ interface HostedContainerRuntimeDependencies {
 interface HostedExecutionLocalBridgeConfig {
   localInternalProxyBaseUrl: string | null;
 }
+
+type HostedAbortEventListener = (...args: unknown[]) => void;
+
+interface HostedAbortEmitterLike {
+  off(eventName: string | symbol, listener: HostedAbortEventListener): unknown;
+  once(eventName: string | symbol, listener: HostedAbortEventListener): unknown;
+}
+
+type HostedAbortRequestLike = HostedAbortEmitterLike;
+type HostedAbortResponseLike = HostedAbortEmitterLike & {
+  writableEnded: boolean;
+};
 
 class HostedRunnerShellIsolationError extends Error {
   constructor(message: string) {
@@ -188,7 +202,7 @@ export async function startHostedContainerEntrypoint(input: {
           forwardedEnvKeyCount: Object.keys(job.runtime?.forwardedEnv ?? {}).length,
           runnerSecretKeyCount: Object.keys(job.runtime?.userEnv ?? {}).length,
         },
-        wake: job.request.wake,
+        wake: resolveHostedContainerJobWake(job),
         message: "Hosted container entrypoint accepted runner job.",
         phase: "wake.running",
         run: job.request.run ?? null,
@@ -212,7 +226,7 @@ export async function startHostedContainerEntrypoint(input: {
         details: {
           resultPhase: result.phase ?? null,
         },
-        wake: job.request.wake,
+        wake: resolveHostedContainerJobWake(job),
         message: "Hosted container entrypoint completed runner job.",
         phase: "wake.running",
         run: job.request.run ?? null,
@@ -227,7 +241,7 @@ export async function startHostedContainerEntrypoint(input: {
 
       emitHostedExecutionStructuredLog({
         component: "container",
-        wake: typeof job === "object" && job ? job.request.wake : null,
+        wake: typeof job === "object" && job ? resolveHostedContainerJobWake(job) : null,
         error,
         message: "Hosted container entrypoint failed a runner job.",
         phase: "failed",
@@ -280,6 +294,11 @@ export async function startHostedContainerEntrypoint(input: {
   }
 
   return server;
+}
+
+function resolveHostedContainerJobWake(job: HostedAssistantRuntimeJobInput): HostedRuntimeEvent {
+  const [firstEvent] = job.request.runDrain.events;
+  return firstEvent?.wake ?? createRuntimeTimerSyntheticWake(job.request.runDrain);
 }
 
 async function parseHostedExecutionContainerRunRequest(value: unknown): Promise<{
@@ -536,9 +555,9 @@ async function readHostedContainerProcessState(
   }
 }
 
-function createRequestAbortController(
-  request: IncomingMessage,
-  response: ServerResponse,
+export function createRequestAbortController(
+  request: HostedAbortRequestLike,
+  response: HostedAbortResponseLike,
 ): {
   cleanup: () => void;
   signal: AbortSignal;

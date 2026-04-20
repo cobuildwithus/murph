@@ -153,7 +153,7 @@ export interface HostedExecutionRunnerSharePack {
 export interface HostedRuntimeDrainEvent {
   seq: string;
   sharePack?: HostedExecutionRunnerSharePack | null;
-  wake: HostedIngressEnvelope;
+  wake: HostedRuntimeEvent;
   wakeId: string;
 }
 

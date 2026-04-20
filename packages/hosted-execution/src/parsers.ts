@@ -435,7 +435,7 @@ export function parseHostedRuntimeDrainEvent(
             ? null
             : parseHostedExecutionRunnerSharePack(record.sharePack),
         }),
-    wake: parseHostedIngressEnvelope(record.wake),
+    wake: parseHostedRuntimeEvent(record.wake),
     wakeId: requireString(record.wakeId, `${label}.wakeId`),
   };
 }

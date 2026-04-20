@@ -29,7 +29,6 @@ import type {
   HostedAssistantRuntimeJobResult,
 } from "@murphai/assistant-runtime";
 import {
-  buildHostedExecutionAssistantCronTickWake,
   buildHostedExecutionEmailConversationMessageWake,
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionMemberChannelsUpdatedWake,
@@ -132,8 +131,13 @@ function createCronWake(input: {
   occurredAt: string;
   reason: "alarm" | "manual" | "device-sync";
   userId: string;
-}): HostedIngressEnvelope {
-  return buildHostedExecutionAssistantCronTickWake(input);
+}): HostedRuntimeEvent {
+  return buildHostedExecutionRuntimeTimerWake({
+    eventId: input.eventId,
+    occurredAt: input.occurredAt,
+    triggerKind: "runtime_timer",
+    userId: input.userId,
+  });
 }
 
 function createRuntimeTimerWake(input: {
@@ -359,14 +363,14 @@ async function runHostedExecutionJob(
     ...(userEnv === undefined ? {} : { userEnv }),
   };
   const runDrain = request.runDrain ?? (
-    wake.kind === "runtime.timer" || wake.kind === "assistant.cron.tick"
+    wake.kind === "runtime.timer"
       ? {
           acquiredAt: "2026-03-26T12:00:00.000Z",
           events: [],
           inputCommittedSeq: "0",
           inputCursorVersion: "0",
           runId: request.run?.runId ?? "run_test",
-          triggerKind: wake.kind === "runtime.timer" ? wake.triggerKind : "runtime_timer",
+          triggerKind: wake.triggerKind,
           userId: wake.userId,
         }
       : {
@@ -1349,9 +1353,14 @@ describe("runHostedExecutionJob", () => {
         agentState: null,
         vault: null,
       },
-      wake: createCronWake({ eventId: "evt_tick_without_bootstrap", occurredAt: "2026-03-26T12:00:00.000Z", reason: "manual", userId: "member_123" }),
+      wake: createChannelsUpdatedWake({
+        eventId: "evt_channels_without_bootstrap",
+        memberChannels: MEMBER_CHANNELS_NONE,
+        occurredAt: "2026-03-26T12:00:00.000Z",
+        userId: "member_123",
+      }),
     })).rejects.toThrow(
-      "Hosted execution for assistant.cron.tick requires member.activated bootstrap first.",
+      "Hosted execution for member.channels.updated requires member.activated bootstrap first.",
     );
   });
 

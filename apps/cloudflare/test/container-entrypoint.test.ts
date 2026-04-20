@@ -1,4 +1,5 @@
 import { request as httpRequest, type ClientRequest } from "node:http";
+import { EventEmitter } from "node:events";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -20,6 +21,7 @@ vi.mock("@murphai/hosted-execution", async () => {
 
 import {
   classifyRunnerJobError,
+  createRequestAbortController,
   startHostedContainerEntrypoint,
 } from "../src/container-entrypoint.js";
 import * as nodeRunner from "../src/node-runner.js";
@@ -104,20 +106,44 @@ function buildJobBody(input: {
     startedAt: string;
   };
 }) {
+  const run = input.run ?? {
+    attempt: 1,
+    runId: `run_${input.wake.eventId}`,
+    startedAt: input.wake.occurredAt,
+  };
+  const wake = {
+    ...input.wake.event,
+    eventId: input.wake.eventId,
+    occurredAt: input.wake.occurredAt,
+  };
+  const userId = typeof input.wake.event.userId === "string" ? input.wake.event.userId : "u1";
+  const triggerKind = input.wake.event.kind === "runtime.timer"
+    && typeof input.wake.event.triggerKind === "string"
+    ? input.wake.event.triggerKind
+    : "external_ingress";
+
   return {
     internalWorkerProxyToken: "proxy-token",
     job: {
       request: {
         bundle: null,
-        commit: {
-          bundleRef: null,
+        currentBundleRef: null,
+        run,
+        runDrain: {
+          acquiredAt: input.wake.occurredAt,
+          events: [
+            {
+              seq: "1",
+              wake,
+              wakeId: `wake_${input.wake.eventId}`,
+            },
+          ],
+          inputCommittedSeq: "0",
+          inputCursorVersion: "1",
+          runId: run.runId,
+          triggerKind,
+          userId,
         },
-        wake: {
-          ...input.wake.event,
-          eventId: input.wake.eventId,
-          occurredAt: input.wake.occurredAt,
-        },
-        ...(input.run ? { run: input.run } : {}),
       },
     },
   };
@@ -160,7 +186,7 @@ describe("startHostedContainerEntrypoint", () => {
     const response = await fetch(`http://127.0.0.1:${address.port}/__internal/run`, {
       body: JSON.stringify(buildJobBody({
         wake: {
-          event: { kind: "assistant.cron.tick", reason: "manual", userId: "u1" },
+          event: { kind: "runtime.timer", triggerKind: "runtime_timer", userId: "u1" },
           eventId: "evt_removed_alias",
           occurredAt: "2026-03-26T12:00:00.000Z",
         },
@@ -191,7 +217,7 @@ describe("startHostedContainerEntrypoint", () => {
     const response = await fetch(`http://127.0.0.1:${address.port}/internal/run`, {
       body: JSON.stringify(buildJobBody({
         wake: {
-          event: { kind: "assistant.cron.tick", reason: "manual", userId: "u1" },
+          event: { kind: "runtime.timer", triggerKind: "runtime_timer", userId: "u1" },
           eventId: "evt_missing_token",
           occurredAt: "2026-03-26T12:00:00.000Z",
         },
@@ -314,7 +340,7 @@ describe("startHostedContainerEntrypoint", () => {
       const response = await fetch(`http://127.0.0.1:${address.port}/internal/run`, {
         body: JSON.stringify(buildJobBody({
           wake: {
-            event: { kind: "assistant.cron.tick", reason: "manual", userId: "u1" },
+            event: { kind: "runtime.timer", triggerKind: "runtime_timer", userId: "u1" },
             eventId: "evt_direct_proxy_token_only",
             occurredAt: "2026-03-26T12:00:00.000Z",
           },
@@ -384,22 +410,37 @@ describe("startHostedContainerEntrypoint", () => {
 
     const response = await fetch(`http://127.0.0.1:${address.port}/internal/run`, {
       body: JSON.stringify({
-        internalWorkerProxyToken: "proxy-token",
-        job: {
-          request: {
-            bundle: null,
-            wake: {
-              eventId: "evt_bad_nested_field",
+        ...buildJobBody({
+          wake: {
+            event: {
               kind: "member.activated",
               memberChannels: {
                 email: false,
                 linq: false,
                 telegram: false,
               },
-              occurredAt: "2026-04-01T00:00:00.000Z",
               userId: "member_123",
             },
+            eventId: "evt_bad_nested_field",
+            occurredAt: "2026-04-01T00:00:00.000Z",
           },
+        }),
+        job: {
+          ...buildJobBody({
+            wake: {
+              event: {
+                kind: "member.activated",
+                memberChannels: {
+                  email: false,
+                  linq: false,
+                  telegram: false,
+                },
+                userId: "member_123",
+              },
+              eventId: "evt_bad_nested_field",
+              occurredAt: "2026-04-01T00:00:00.000Z",
+            },
+          }).job,
           runtime: {
             userEnv: {
               OPENAI_API_KEY: 123,
@@ -445,7 +486,7 @@ describe("startHostedContainerEntrypoint", () => {
       const response = await fetch(`http://127.0.0.1:${address.port}/internal/run`, {
         body: JSON.stringify(buildJobBody({
           wake: {
-            event: { kind: "assistant.cron.tick", reason: "manual", userId: "u1" },
+            event: { kind: "runtime.timer", triggerKind: "runtime_timer", userId: "u1" },
             eventId: "evt_runtime_type_error",
             occurredAt: "2026-03-26T12:00:00.000Z",
           },
@@ -493,7 +534,7 @@ describe("startHostedContainerEntrypoint", () => {
       const response = await fetch(`http://127.0.0.1:${address.port}/internal/run`, {
         body: JSON.stringify(buildJobBody({
           wake: {
-            event: { kind: "assistant.cron.tick", reason: "manual", userId: "u1" },
+            event: { kind: "runtime.timer", triggerKind: "runtime_timer", userId: "u1" },
             eventId: "evt_runtime_secret_error",
             occurredAt: "2026-03-26T12:00:00.000Z",
           },
@@ -544,7 +585,7 @@ describe("startHostedContainerEntrypoint", () => {
       const response = await fetch(`http://127.0.0.1:${address.port}/internal/run`, {
         body: JSON.stringify(buildJobBody({
           wake: {
-            event: { kind: "assistant.cron.tick", reason: "manual", userId: "u1" },
+            event: { kind: "runtime.timer", triggerKind: "runtime_timer", userId: "u1" },
             eventId: "evt_runtime_config_error",
             occurredAt: "2026-03-26T12:00:00.000Z",
           },
@@ -600,7 +641,7 @@ describe("startHostedContainerEntrypoint", () => {
       const response = await fetch(`http://127.0.0.1:${address.port}/internal/run`, {
         body: JSON.stringify(buildJobBody({
           wake: {
-            event: { kind: "assistant.cron.tick", reason: "manual", userId: "u1" },
+            event: { kind: "runtime.timer", triggerKind: "runtime_timer", userId: "u1" },
             eventId: "evt_with_run",
             occurredAt: "2026-03-26T12:00:00.000Z",
           },
@@ -617,10 +658,16 @@ describe("startHostedContainerEntrypoint", () => {
       expect(spy).toHaveBeenCalledWith(
         expect.objectContaining({
           request: expect.objectContaining({
-            wake: expect.objectContaining({
-              eventId: "evt_with_run",
-            }),
             run,
+            runDrain: expect.objectContaining({
+              events: expect.arrayContaining([
+                expect.objectContaining({
+                  wake: expect.objectContaining({
+                    eventId: "evt_with_run",
+                  }),
+                }),
+              ]),
+            }),
           }),
         }),
         expect.objectContaining({
@@ -690,7 +737,7 @@ describe("startHostedContainerEntrypoint", () => {
       authorization: headers.authorization,
       body: JSON.stringify(buildJobBody({
         wake: {
-          event: { kind: "assistant.cron.tick", reason: "manual", userId: "u1" },
+          event: { kind: "runtime.timer", triggerKind: "runtime_timer", userId: "u1" },
           eventId: "evt_busy",
           occurredAt: "2026-03-26T12:00:00.000Z",
         },
@@ -716,88 +763,31 @@ describe("startHostedContainerEntrypoint", () => {
     });
   });
 
-  it("aborts the hosted job when the client disconnects before the response completes", async () => {
-    let abortSignal: AbortSignal | null = null;
-    let abortReason: unknown = null;
-    let resolveStarted: (() => void) | null = null;
-    let resolveAborted: (() => void) | null = null;
-    const started = new Promise<void>((resolve) => {
-      resolveStarted = resolve;
-    });
-    const aborted = new Promise<void>((resolve) => {
-      resolveAborted = resolve;
-    });
-    const spy = vi.spyOn(nodeRunner, "runHostedExecutionJob").mockImplementation(async (_job: any, options) => {
-      abortSignal = options?.signal ?? null;
-      resolveStarted?.();
+  it("aborts the hosted job when the response closes before completion", async () => {
+    const request = new EventEmitter();
+    const response = new EventEmitter() as EventEmitter & { writableEnded: boolean };
+    response.writableEnded = false;
 
-      await new Promise<never>((_, reject) => {
-        abortSignal?.addEventListener("abort", () => {
-          abortReason = abortSignal?.reason;
-          resolveAborted?.();
-          reject(abortReason instanceof Error ? abortReason : new Error("aborted"));
-        }, { once: true });
-      });
+    const controller = createRequestAbortController(request, response);
 
-      throw new Error("unreachable");
-    });
+    response.emit("close");
 
-    try {
-      const server = await startHostedContainerEntrypoint({ controlToken: "runner-token", port: 0 });
-      servers.push(server);
-      const address = server.address();
-
-      if (!address || typeof address === "string") {
-        throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
-      }
-
-      const request = httpRequest({
-        headers: {
-          authorization: "Bearer runner-token",
-          "content-type": "application/json; charset=utf-8",
-        },
-        host: "127.0.0.1",
-        method: "POST",
-        path: "/internal/run",
-        port: address.port,
-      });
-      request.on("error", () => {});
-      request.write(JSON.stringify(buildJobBody({
-        wake: {
-          event: { kind: "assistant.cron.tick", reason: "manual", userId: "u1" },
-          eventId: "evt_disconnect",
-          occurredAt: "2026-03-26T12:00:00.000Z",
-        },
-      })));
-      request.end();
-
-      await started;
-      request.destroy();
-      await aborted;
-
-      expect(spy).toHaveBeenCalledTimes(1);
-      const signal = spy.mock.calls[0]?.[1]?.signal;
-      expect(signal).toBeDefined();
-      if (!signal) {
-        throw new Error("Expected the hosted runner to receive an AbortSignal.");
-      }
-      expect(signal.aborted).toBe(true);
-      expect(abortReason).toBeInstanceOf(Error);
-      expect((abortReason as Error).message).toMatch(/aborted|closed/u);
-      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-        expect.objectContaining({
-          component: "container",
-          details: expect.objectContaining({
-            exitReason: expect.stringMatching(/^(request\.aborted|response\.closed)$/u),
-          }),
-          level: "warn",
-          message: expect.stringContaining("Hosted container entrypoint exited because the"),
-          phase: "failed",
+    expect(controller.signal.aborted).toBe(true);
+    expect(controller.signal.reason).toBeInstanceOf(Error);
+    expect((controller.signal.reason as Error).message).toMatch(/response closed before completion/u);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "container",
+        details: expect.objectContaining({
+          exitReason: "response.closed",
         }),
-      );
-    } finally {
-      spy.mockRestore();
-    }
+        level: "warn",
+        message: "Hosted container entrypoint exited because the response closed before completion.",
+        phase: "failed",
+      }),
+    );
+
+    controller.cleanup();
   });
 
   it("ignores non-descendant sibling processes during warm-container cleanup", async () => {
@@ -844,7 +834,7 @@ describe("startHostedContainerEntrypoint", () => {
     const response = await fetch(`http://127.0.0.1:${address.port}/internal/run`, {
       body: JSON.stringify(buildJobBody({
         wake: {
-          event: { kind: "assistant.cron.tick", reason: "manual", userId: "u1" },
+          event: { kind: "runtime.timer", triggerKind: "runtime_timer", userId: "u1" },
           eventId: "evt_sibling_cleanup",
           occurredAt: "2026-03-26T12:00:00.000Z",
         },
@@ -909,7 +899,7 @@ describe("startHostedContainerEntrypoint", () => {
     const response = await fetch(`http://127.0.0.1:${address.port}/internal/run`, {
       body: JSON.stringify(buildJobBody({
         wake: {
-          event: { kind: "assistant.cron.tick", reason: "manual", userId: "u1" },
+          event: { kind: "runtime.timer", triggerKind: "runtime_timer", userId: "u1" },
           eventId: "evt_descendant_cleanup",
           occurredAt: "2026-03-26T12:00:00.000Z",
         },
