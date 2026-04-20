@@ -59,8 +59,8 @@ Set these in the selected GitHub environment as secrets:
 - `HOSTED_WAKE_ENCRYPTION_KEY`
 - `HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK`
 
-The callback-signing key remains part of the required worker secret surface because every canonical hosted wake append/fetch/commit call now goes through the signed hosted-web boundary. It is no longer documented as a broad lifecycle or correctness callback seam.
-The wake encryption key is execution-only and should decrypt hosted wake payloads only. Do not reuse the broader web-owned `HOSTED_WEB_ENCRYPTION_*` private-field lane in Cloudflare.
+The callback-signing key remains part of the required worker secret surface because the canonical hosted ingress append and hosted-run acquire/commit/finalize flow now goes through the signed hosted-web boundary. It is no longer documented as a broad lifecycle or correctness callback seam.
+The wake encryption key is execution-only and should decrypt hosted execution ingress payloads only. Do not reuse the broader web-owned `HOSTED_WEB_ENCRYPTION_*` private-field lane in Cloudflare.
 
 ## Optional Vars
 
