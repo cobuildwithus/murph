@@ -2,8 +2,8 @@ import type {
   HostedExecutionConversationMessageWake,
   HostedExecutionFirstContactTarget,
   HostedExecutionRunnerSharePack,
-  HostedExecutionSystemWake,
-  HostedExecutionWake,
+  HostedIngressSystemEnvelope,
+  HostedIngressEnvelope,
 } from "@murphai/hosted-execution";
 import { queueAssistantFirstContactWelcome } from "@murphai/assistant-engine";
 import {
@@ -16,21 +16,21 @@ import {
 import { ingestHostedConversationMessageWake } from "./events/conversation.ts";
 import { handleHostedShareAcceptedWake } from "./events/share.ts";
 import type {
-  HostedWakeEffect,
-  HostedWakeFollowupExecution,
-  HostedWakeExecutionMetrics,
+  HostedIngressEffect,
+  HostedIngressLane,
+  HostedIngressExecutionMetrics,
   HostedConversationWakeMetrics,
   NormalizedHostedAssistantRuntimeConfig,
 } from "./models.ts";
 import type { AssistantExecutionContext } from "@murphai/assistant-engine";
 import { assertNever } from "./utils.ts";
 
-type HostedWakeOutcome = HostedWakeEffect & {
-  followupExecution: HostedWakeFollowupExecution;
+type HostedIngressOutcome = HostedIngressEffect & {
+  ingressLane: HostedIngressLane;
 };
 
-export async function executeHostedWakeEvent(input: {
-  wake: HostedExecutionWake;
+export async function executeHostedIngressEvent(input: {
+  wake: HostedIngressEnvelope;
   executionContext: AssistantExecutionContext;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
@@ -39,7 +39,7 @@ export async function executeHostedWakeEvent(input: {
   runtimeEnv: Readonly<Record<string, string>>;
   sharePack?: HostedExecutionRunnerSharePack | null;
   vaultRoot: string;
-}): Promise<HostedWakeExecutionMetrics> {
+}): Promise<HostedIngressExecutionMetrics> {
   const bootstrapResult = await prepareHostedWakeContext(
     input.vaultRoot,
     input.wake,
@@ -49,7 +49,7 @@ export async function executeHostedWakeEvent(input: {
   const bootstrappedExecutionContext = await hydrateHostedExecutionDefaultTarget(
     input.executionContext,
   );
-  const wakeEffect = await handleHostedWakeEvent({
+  const ingressEffect = await handleHostedIngressEvent({
     wake: input.wake,
     executionContext: bootstrappedExecutionContext,
     runtime: input.runtime,
@@ -59,15 +59,15 @@ export async function executeHostedWakeEvent(input: {
 
   return {
     bootstrapResult,
-    conversationMetrics: wakeEffect.conversationMetrics,
-    followupExecution: wakeEffect.followupExecution,
-    shareImportResult: wakeEffect.shareImportResult,
-    shareImportTitle: wakeEffect.shareImportTitle,
+    conversationMetrics: ingressEffect.conversationMetrics,
+    ingressLane: ingressEffect.ingressLane,
+    shareImportResult: ingressEffect.shareImportResult,
+    shareImportTitle: ingressEffect.shareImportTitle,
   };
 }
 
-async function handleHostedWakeEvent(input: {
-  wake: HostedExecutionWake;
+async function handleHostedIngressEvent(input: {
+  wake: HostedIngressEnvelope;
   executionContext: AssistantExecutionContext;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
@@ -75,7 +75,7 @@ async function handleHostedWakeEvent(input: {
   >;
   sharePack?: HostedExecutionRunnerSharePack | null;
   vaultRoot: string;
-}): Promise<HostedWakeOutcome> {
+}): Promise<HostedIngressOutcome> {
   if (isHostedConversationMessageWake(input.wake)) {
     return executeHostedConversationWake({
       wake: input.wake,
@@ -99,21 +99,21 @@ async function executeHostedConversationWake(input: {
     "platform"
   >;
   vaultRoot: string;
-}): Promise<HostedWakeOutcome> {
+}): Promise<HostedIngressOutcome> {
   const conversationMetrics = await ingestHostedConversationMessageWake(input);
 
-  return createNoopWakeEffect({
+  return createNoopIngressEffect({
     conversationMetrics,
-    followupExecution: "conversation-message",
+    ingressLane: "conversation-message",
   });
 }
 
 async function executeHostedSystemWake(input: {
-  wake: HostedExecutionSystemWake;
+  wake: HostedIngressSystemEnvelope;
   executionContext: AssistantExecutionContext;
   sharePack?: HostedExecutionRunnerSharePack | null;
   vaultRoot: string;
-}): Promise<HostedWakeOutcome> {
+}): Promise<HostedIngressOutcome> {
   switch (input.wake.kind) {
     case "member.activated":
       if (input.wake.firstContact) {
@@ -125,24 +125,19 @@ async function executeHostedSystemWake(input: {
           ),
         );
       }
-      return createNoopWakeEffect({
+      return createNoopIngressEffect({
         conversationMetrics: null,
-        followupExecution: "member-activated",
+        ingressLane: "member-activated",
       });
     case "member.channels.updated":
-      return createNoopWakeEffect({
+      return createNoopIngressEffect({
         conversationMetrics: null,
-        followupExecution: "member-channels-updated",
-      });
-    case "assistant.cron.tick":
-      return createNoopWakeEffect({
-        conversationMetrics: null,
-        followupExecution: "assistant-cron",
+        ingressLane: "member-channels-updated",
       });
     case "device-sync.wake":
-      return createNoopWakeEffect({
+      return createNoopIngressEffect({
         conversationMetrics: null,
-        followupExecution: "device-sync",
+        ingressLane: "device-sync",
       });
     case "vault.share.accepted":
       if (!input.sharePack) {
@@ -155,20 +150,20 @@ async function executeHostedSystemWake(input: {
           vaultRoot: input.vaultRoot,
         })),
         conversationMetrics: null,
-        followupExecution: "vault-share-accepted",
+        ingressLane: "vault-share-accepted",
       };
   }
 
   return assertNever(input.wake);
 }
 
-function createNoopWakeEffect(input: {
+function createNoopIngressEffect(input: {
   conversationMetrics: HostedConversationWakeMetrics | null;
-  followupExecution: HostedWakeFollowupExecution;
-}): HostedWakeOutcome {
+  ingressLane: HostedIngressLane;
+}): HostedIngressOutcome {
   return {
     conversationMetrics: input.conversationMetrics,
-    followupExecution: input.followupExecution,
+    ingressLane: input.ingressLane,
     shareImportResult: null,
     shareImportTitle: null,
   };

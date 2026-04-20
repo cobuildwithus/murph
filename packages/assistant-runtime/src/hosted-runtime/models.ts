@@ -137,7 +137,7 @@ export type HostedAssistantRuntimeJobResult =
 
 export type HostedShareImportResult = Awaited<ReturnType<typeof importSharePackIntoVault>>;
 
-export interface HostedWakeEffect {
+export interface HostedIngressEffect {
   conversationMetrics: HostedConversationWakeMetrics | null;
   shareImportResult: HostedShareImportResult | null;
   shareImportTitle: string | null;
@@ -148,17 +148,16 @@ export interface HostedConversationWakeMetrics {
   parserProcessed: number;
 }
 
-export type HostedWakeFollowupExecution =
+export type HostedIngressLane =
   | "conversation-message"
-  | "assistant-cron"
   | "device-sync"
   | "member-activated"
   | "member-channels-updated"
   | "vault-share-accepted";
 
-export interface HostedWakeExecutionMetrics extends HostedWakeEffect {
+export interface HostedIngressExecutionMetrics extends HostedIngressEffect {
   bootstrapResult: HostedBootstrapResult | null;
-  followupExecution: HostedWakeFollowupExecution;
+  ingressLane: HostedIngressLane;
 }
 
 export interface HostedMaintenanceMetrics {
@@ -172,7 +171,6 @@ export type HostedWorkspaceArtifactMaterializer = (
   relativePaths: readonly string[],
 ) => Promise<void>;
 
-export type HostedIngressEventAlias = HostedIngressEnvelope;
 export interface HostedRestoredExecutionContext {
   assistantStateRoot: string;
   operatorHomeRoot: string;

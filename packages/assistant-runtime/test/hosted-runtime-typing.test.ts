@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
-  buildHostedExecutionAssistantCronTickWake,
   buildHostedExecutionLinqConversationMessageWake,
+  buildHostedExecutionRuntimeTimerWake,
   buildHostedExecutionTelegramConversationMessageWake,
 } from "@murphai/hosted-execution";
 
@@ -35,8 +35,8 @@ vi.mock("@murphai/operator-config/telegram-runtime", () => ({
 }));
 
 import {
-  startHostedWakeTypingIndicator,
-  stopHostedWakeTypingIndicator,
+  startHostedRunTypingIndicator,
+  stopHostedRunTypingIndicator,
 } from "../src/hosted-runtime/typing.ts";
 
 function createLinqWake() {
@@ -92,11 +92,11 @@ beforeEach(() => {
 
 describe("hosted runtime typing helpers", () => {
   it("returns null for wakes that do not support typing indicators", () => {
-    const indicator = startHostedWakeTypingIndicator({
-      wake: buildHostedExecutionAssistantCronTickWake({
+    const indicator = startHostedRunTypingIndicator({
+      wake: buildHostedExecutionRuntimeTimerWake({
         eventId: "evt_cron",
         occurredAt: "2026-04-08T00:00:00.000Z",
-        reason: "manual",
+        triggerKind: "runtime_timer",
         userId: "member_123",
       }),
       run: null,
@@ -110,7 +110,7 @@ describe("hosted runtime typing helpers", () => {
 
   it("treats a missing typing indicator as a no-op when stopping", async () => {
     await expect(
-      stopHostedWakeTypingIndicator({
+      stopHostedRunTypingIndicator({
         wake: createTelegramWake(),
         run: null,
         typingIndicator: null,
@@ -121,7 +121,7 @@ describe("hosted runtime typing helpers", () => {
   });
 
   it("fails closed when a Linq payload is missing a stable chat id", () => {
-    const indicator = startHostedWakeTypingIndicator({
+    const indicator = startHostedRunTypingIndicator({
       wake: buildHostedExecutionLinqConversationMessageWake({
         eventId: "evt_linq_typing_invalid",
         linqMessage: {
@@ -157,7 +157,7 @@ describe("hosted runtime typing helpers", () => {
   });
 
   it("starts and stops Linq typing with the parsed chat id and runtime env", async () => {
-    const indicator = startHostedWakeTypingIndicator({
+    const indicator = startHostedRunTypingIndicator({
       wake: createLinqWake(),
       run: {
         attempt: 1,
@@ -216,7 +216,7 @@ describe("hosted runtime typing helpers", () => {
   });
 
   it("logs a null elapsed time when the hosted run startedAt is invalid", async () => {
-    const indicator = startHostedWakeTypingIndicator({
+    const indicator = startHostedRunTypingIndicator({
       wake: createLinqWake(),
       run: {
         attempt: 1,
@@ -260,7 +260,7 @@ describe("hosted runtime typing helpers", () => {
       }),
     );
 
-    const indicator = startHostedWakeTypingIndicator({
+    const indicator = startHostedRunTypingIndicator({
       wake: createTelegramWake(),
       run: null,
       runtimeEnv: {
@@ -312,7 +312,7 @@ describe("hosted runtime typing helpers", () => {
     }
     wake.message.telegramMessage.threadId = "123:business::dm-topic:9";
 
-    const indicator = startHostedWakeTypingIndicator({
+    const indicator = startHostedRunTypingIndicator({
       wake,
       run: null,
       runtimeEnv: {
@@ -357,7 +357,7 @@ describe("hosted runtime typing helpers", () => {
   });
 
   it("logs canonical Telegram target details for business direct-message topics", async () => {
-    const indicator = startHostedWakeTypingIndicator({
+    const indicator = startHostedRunTypingIndicator({
       wake: createTelegramWakeWithTarget("-1001234567890:business:biz-42:dm-topic:9"),
       run: null,
       runtimeEnv: {
@@ -392,7 +392,7 @@ describe("hosted runtime typing helpers", () => {
     const startError = new Error("telegram typing rejected");
     mocks.startTelegramTypingSession.mockRejectedValue(startError);
 
-    const indicator = startHostedWakeTypingIndicator({
+    const indicator = startHostedRunTypingIndicator({
       wake: createTelegramWakeWithTarget("123:topic:abc"),
       run: null,
       runtimeEnv: {
@@ -431,7 +431,7 @@ describe("hosted runtime typing helpers", () => {
       }),
     });
 
-    const indicator = startHostedWakeTypingIndicator({
+    const indicator = startHostedRunTypingIndicator({
       wake: createTelegramWake(),
       run: null,
       runtimeEnv: {
@@ -457,7 +457,7 @@ describe("hosted runtime typing helpers", () => {
     const stopError = new Error("wrapper stop failed");
 
     await expect(
-      stopHostedWakeTypingIndicator({
+      stopHostedRunTypingIndicator({
         wake: createLinqWake(),
         run: null,
         typingIndicator: {
