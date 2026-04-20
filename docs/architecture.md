@@ -116,20 +116,22 @@ repo/
   - `apps/cloudflare`
   - `packages/assistant-runtime`
 
-## Hosted Hard Cut
+## Hosted Ownership
 
 - `apps/web` and hosted Postgres own hosted control-plane truth: hosted member
   identity, routing, billing, email authorization, hosted share payloads,
-  device-sync authority, hosted AI usage reconciliation, and the canonical
-  `HostedWake` / `HostedExecutionCursor` wake and cursor lifecycle.
-- `apps/cloudflare` owns execution coordination only: authenticated control wakes,
-  per-user lease and stale-result fencing, encrypted hosted workspace snapshots,
-  encrypted artifact blobs, encrypted runner-secret blobs, and other opaque
-  runtime blobs needed to execute one hosted job safely. Durable Objects keep
-  only short-lived active-run and alarm/addressing coordination state; web-owned
-  hosted runs are the only durable finalize recovery truth.
+  device-sync authority, hosted AI usage reconciliation, external ingress
+  ordering, and the canonical `HostedRun` / `HostedExecutionCursor` run and
+  cursor lifecycle.
+- `apps/cloudflare` owns execution coordination only: authenticated run/control
+  requests, per-user lease and stale-result fencing, encrypted hosted workspace
+  snapshots, encrypted artifact blobs, encrypted runner-secret blobs, and other
+  opaque runtime blobs needed to execute one hosted run safely. Durable Objects
+  keep only short-lived active-run, alarm, and bundle/addressing coordination
+  state; web-owned `HostedRun` recovery is the only durable finalize truth.
 - Cloudflare is not the canonical owner of hosted share payloads, device-sync
-  control-plane state, pending usage, or gateway product truth.
+  control-plane state, hosted usage ledgers, gateway product truth, or any
+  second ingress/recovery queue.
 - The broad Cloudflare control seam is intentionally gone. There is no generic
   worker user-env CRUD route surface, no staged dispatch payload control plane
   or CRUD seam, and no Cloudflare-owned share-pack or pending-usage durable
