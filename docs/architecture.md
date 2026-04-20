@@ -124,9 +124,10 @@ repo/
   `HostedWake` / `HostedExecutionCursor` wake and cursor lifecycle.
 - `apps/cloudflare` owns execution coordination only: authenticated control wakes,
   per-user lease and stale-result fencing, encrypted hosted workspace snapshots,
-  encrypted artifact blobs, encrypted runner-secret blobs, DO-local
-  pending-commit state,
-  and other opaque runtime blobs needed to execute one hosted job safely.
+  encrypted artifact blobs, encrypted runner-secret blobs, and other opaque
+  runtime blobs needed to execute one hosted job safely. Durable Objects keep
+  only short-lived active-run and alarm/addressing coordination state; web-owned
+  hosted runs are the only durable finalize recovery truth.
 - Cloudflare is not the canonical owner of hosted share payloads, device-sync
   control-plane state, pending usage, or gateway product truth.
 - The broad Cloudflare control seam is intentionally gone. There is no generic
