@@ -465,6 +465,97 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
     ).toBe(false);
   });
 
+  it("preserves null committed projections and logs minimal start details when device sync is absent", async () => {
+    mocks.executeHostedRunDrainForCommit.mockResolvedValueOnce({
+      ...committedExecution,
+      committedGatewayProjectionSnapshot: null,
+    });
+    mocks.normalizeHostedAssistantRuntimeConfig.mockReturnValueOnce({
+      commitTimeoutMs: null,
+      forwardedEnv: {},
+      platform: {
+        artifactStore: null as never,
+        effectsPort: null as never,
+        usageExportPort: null,
+      },
+      resolvedConfig: createHostedRuntimeResolvedConfig({
+        channelCapabilities: {
+          emailSendReady: false,
+          telegramBotConfigured: false,
+        },
+        deviceSync: null,
+      }),
+      userEnv: {},
+    });
+
+    const result = await runHostedAssistantRuntimeJobInProcessDetailed(
+      {
+        request: {
+          bundle: "incoming-bundle",
+          run: HOSTED_RUN_CONTEXT,
+          runDrain: createSingleWakeRunDrain(buildSystemIngressWake("evt_minimal_start")),
+        },
+      },
+      {
+        platform: {
+          artifactStore: {
+            async get() {
+              return null;
+            },
+            async put() {},
+          },
+          effectsPort: createHostedRuntimeEffectsPortStub(),
+        },
+      },
+    );
+
+    assert.deepEqual(result, {
+      committedAssistantDeliveryEffects: deliveryEffects,
+      committedGatewayProjectionSnapshot: null,
+      phase: "prepared",
+      result: committedExecution.committedResult,
+    });
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "runtime",
+        details: expect.objectContaining({
+          channelCapabilities: {
+            emailSendReady: false,
+            telegramBotConfigured: false,
+          },
+          commitTimeoutMs: null,
+          currentBundleRefPresent: false,
+          deviceSync: expect.objectContaining({
+            configured: false,
+            providerNames: [],
+            publicBaseUrlConfigured: false,
+            secretConfigured: false,
+          }),
+          forwardedEnvCategories: expect.objectContaining({
+            assistantConfigured: false,
+            hostedEmailConfigured: false,
+            linqConfigured: false,
+            parserToolingConfigured: false,
+            telegramConfigured: false,
+            webSearchConfigured: false,
+          }),
+          forwardedEnvKeyCount: 0,
+          platformBindings: expect.objectContaining({
+            artifactStoreBound: false,
+            effectsPortBound: false,
+            usageExportBound: false,
+          }),
+          userEnvCategories: {
+            modelCredentialConfigured: false,
+          },
+          userEnvKeyCount: 0,
+        }),
+        message: "Hosted runtime starting.",
+        phase: "runtime.starting",
+      }),
+    );
+  });
+
   it("still emits a failure log when runtime normalization fails before startup telemetry can be recorded", async () => {
     mocks.normalizeHostedAssistantRuntimeConfig.mockImplementationOnce(() => {
       throw new Error("missing hosted runtime config");
@@ -509,14 +600,136 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
     );
   });
 
-  it("fails closed when a caller bypasses the parser and omits runDrain", async () => {
+  it("logs configured device-sync details and finalizes correctly for run-drain requests", async () => {
+    mocks.normalizeHostedAssistantRuntimeConfig.mockReturnValueOnce({
+      commitTimeoutMs: 45_000,
+      forwardedEnv: {},
+      platform: {
+        artifactStore: null as never,
+        deviceSyncPort: {
+          applyUpdates: vi.fn(),
+          createConnectLink: vi.fn(),
+          fetchSnapshot: vi.fn(),
+        },
+        effectsPort: null as never,
+        usageExportPort: null,
+      },
+      resolvedConfig: createHostedRuntimeResolvedConfig({
+        deviceSync: {
+          providerConfigs: {
+            oura: {
+              clientId: "oura-client",
+              clientSecret: "oura-secret",
+              scopes: ["daily", "sleep"],
+            } as never,
+          },
+          publicBaseUrl: "https://device-sync.example.test",
+          secret: "secret_123",
+        },
+      }),
+      userEnv: {},
+    });
+
+    const result = await runHostedAssistantRuntimeJobInProcessDetailed(
+      {
+        request: {
+          bundle: "incoming-bundle",
+          run: {
+            attempt: 1,
+            runId: "run_123",
+            startedAt: "2026-04-08T00:00:00.000Z",
+          },
+          runDrain: {
+            acquiredAt: "2026-04-08T00:00:00.000Z",
+            events: [],
+            inputCommittedSeq: "24",
+            inputCursorVersion: "4",
+            resumeFinalize: true,
+            runId: "run_123",
+            triggerKind: "runtime_timer",
+            userId: "member_123",
+          },
+        },
+      },
+      {
+        platform: {
+          artifactStore: {
+            async get() {
+              return null;
+            },
+            async put() {},
+          },
+          effectsPort: createHostedRuntimeEffectsPortStub(),
+        },
+      },
+    );
+
+    assert.deepEqual(result, finalResult);
+    expect(mocks.completeHostedRunDrainAfterCommit).toHaveBeenCalledTimes(1);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "runtime",
+        details: expect.objectContaining({
+          deviceSync: {
+            configured: true,
+            controlPortBound: true,
+            providerNames: ["oura"],
+            publicBaseUrlConfigured: true,
+            secretConfigured: true,
+          },
+          runElapsedMs: expect.any(Number),
+        }),
+        message: "Hosted runtime starting.",
+        phase: "runtime.starting",
+        run: expect.objectContaining({
+          attempt: 1,
+          runId: "run_123",
+          startedAt: "2026-04-08T00:00:00.000Z",
+        }),
+      }),
+    );
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "runtime",
+        details: expect.objectContaining({
+          runElapsedMs: expect.any(Number),
+        }),
+        message: "Hosted runtime completed run-drain finalization.",
+        phase: "completed",
+        run: expect.objectContaining({
+          attempt: 1,
+          runId: "run_123",
+          startedAt: "2026-04-08T00:00:00.000Z",
+        }),
+      }),
+    );
+    expect(mocks.stopLinqChatTypingIndicator).not.toHaveBeenCalled();
+  });
+
+  it("emits a failure log with run context when finalize-time normalization fails", async () => {
+    mocks.normalizeHostedAssistantRuntimeConfig.mockImplementationOnce(() => {
+      throw new Error("missing hosted runtime config");
+    });
+
     await expect(
       runHostedAssistantRuntimeJobInProcessDetailed(
         {
           request: {
             bundle: "incoming-bundle",
-            run: HOSTED_RUN_CONTEXT,
-            runDrain: undefined as never,
+            run: {
+              attempt: 1,
+              runId: "run_123",
+              startedAt: "2026-04-08T00:00:00.000Z",
+            },
+            runDrain: {
+              acquiredAt: "2026-04-08T00:00:00.000Z",
+              events: [],
+              inputCommittedSeq: "24",
+              inputCursorVersion: "4",
+              runId: "run_123",
+              triggerKind: "runtime_timer",
+              userId: "member_123",
+            },
           },
         },
         {
@@ -531,12 +744,44 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
           },
         },
       ),
-    ).rejects.toThrow(
-      "Hosted runtime jobs must use runDrain; single-wake execution was removed.",
-    );
+    ).rejects.toThrow(/missing hosted runtime config/u);
 
-    expect(mocks.executeHostedRunDrainForCommit).not.toHaveBeenCalled();
-    expect(mocks.completeHostedRunDrainAfterCommit).not.toHaveBeenCalled();
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "runtime",
+        message: "Hosted runtime failed.",
+        phase: "failed",
+        run: expect.objectContaining({
+          attempt: 1,
+          runId: "run_123",
+          startedAt: "2026-04-08T00:00:00.000Z",
+        }),
+      }),
+    );
+  });
+
+  it("fails closed when runDrain is missing at the runtime entrypoint", async () => {
+    await expect(
+      Reflect.apply(runHostedAssistantRuntimeJobInProcessDetailed, undefined, [
+        {
+          request: {
+            bundle: "incoming-bundle",
+            run: HOSTED_RUN_CONTEXT,
+          },
+        },
+        {
+          platform: {
+            artifactStore: {
+              async get() {
+                return null;
+              },
+              async put() {},
+            },
+            effectsPort: createHostedRuntimeEffectsPortStub(),
+          },
+        },
+      ]),
+    ).rejects.toThrow(/Hosted assistant runtime job request\.runDrain is required\./u);
   });
 
   it("skips rematerialization when every requested artifact path is already materialized", async () => {

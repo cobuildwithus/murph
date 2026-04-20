@@ -26,12 +26,6 @@ export type {
   VaultEntitiesByFamily,
   VaultReadModel,
 } from "./model.ts";
-export {
-  BROWSER_VAULT_SNAPSHOT_SCHEMA,
-  createBrowserVaultSnapshot,
-  parseBrowserVaultSnapshot,
-} from "./browser-snapshot.ts";
-export type { BrowserVaultSnapshot } from "./browser-snapshot.ts";
 export type {
   CanonicalEntity,
   CanonicalEntityFamily,
@@ -39,6 +33,15 @@ export type {
   CanonicalEntityLinkType,
   CanonicalRecordClass,
 } from "./canonical-entities.ts";
+export {
+  listAutomations,
+  readAutomation,
+  showAutomation,
+} from "./automation.ts";
+export type {
+  AutomationListOptions,
+  AutomationQueryRecord,
+} from "./automation.ts";
 export {
   describeLookupConstraint,
   ID_FAMILY_REGISTRY,
@@ -58,6 +61,8 @@ export type {
   OverviewMetric,
   OverviewWeeklyStat,
 } from "./overview.ts";
+export type { DailySampleSummary } from "./summaries.ts";
+export { summarizeDailySamples } from "./summaries.ts";
 export {
   readMealNutritionTotals,
   summarizeMealNutritionTotals,
@@ -84,7 +89,6 @@ export {
   type QueryProjectionStatus,
   type RebuildQueryProjectionResult,
 } from "./query-projection-types.ts";
-export { summarizeDailySamples } from "./summaries.ts";
 export {
   buildWearableAssistantSummary,
   listWearableActivityDays,

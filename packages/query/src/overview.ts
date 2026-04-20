@@ -1,4 +1,5 @@
 import type { VaultReadModel } from "./read-model.ts";
+import { summarizeDailySamples, type DailySampleSummary } from "./summaries.ts";
 
 export interface OverviewMetric {
   label: string;
@@ -29,6 +30,15 @@ export interface OverviewWeeklyStat {
   deltaPercent: number | null;
   previousWeekAvg: number | null;
   stream: string;
+  unit: string | null;
+}
+
+export interface OverviewWeeklySampleSummary {
+  date: string;
+  numericSampleCount: number;
+  sampleCount: number;
+  stream: string;
+  sumValue: number | null;
   unit: string | null;
 }
 
@@ -106,28 +116,53 @@ export function summarizeRecentOverviewJournals(
 export function buildOverviewWeeklyStats(
   vault: VaultReadModel,
   timeZone: string,
+  referenceDate: Date | string = new Date(),
 ): OverviewWeeklyStat[] {
-  const today = formatOverviewDateTimeParts(new Date(), timeZone);
+  return buildOverviewWeeklyStatsFromDailySampleSummaries(
+    summarizeDailySamples(vault),
+    timeZone,
+    referenceDate,
+  );
+}
+
+export function buildOverviewWeeklyStatsFromDailySampleSummaries(
+  summaries: readonly OverviewWeeklySampleSummary[],
+  timeZone: string,
+  referenceDate: Date | string = new Date(),
+): OverviewWeeklyStat[] {
+  const today = formatOverviewDateTimeParts(resolveOverviewReferenceDate(referenceDate), timeZone);
   const mondayOffset = today.dayOfWeek === 0 ? 6 : today.dayOfWeek - 1;
   const thisWeekStart = addDaysToIsoDate(today.dayKey, -mondayOffset);
   const lastWeekStart = addDaysToIsoDate(thisWeekStart, -7);
 
-  const thisWeekSamples = new Map<string, { stream: string; unit: string | null; values: number[] }>();
-  const lastWeekSamples = new Map<string, { stream: string; unit: string | null; values: number[] }>();
+  const thisWeekSamples = new Map<string, {
+    numericSampleCount: number;
+    stream: string;
+    sumValue: number;
+    unit: string | null;
+  }>();
+  const lastWeekSamples = new Map<string, {
+    numericSampleCount: number;
+    stream: string;
+    sumValue: number;
+    unit: string | null;
+  }>();
 
-  for (const sample of vault.samples) {
-    const sampleDate = sample.date ?? extractDate(sample.occurredAt);
-    const numericValue = getNumericSampleValue(sample.attributes?.value);
-    if (!sample.stream || numericValue === null) {
+  for (const summary of summaries) {
+    if (summary.sumValue === null || summary.numericSampleCount <= 0) {
       continue;
     }
 
-    const unit = normalizeString(sample.attributes?.unit);
-    let bucket: Map<string, { stream: string; unit: string | null; values: number[] }> | null = null;
+    let bucket: Map<string, {
+      numericSampleCount: number;
+      stream: string;
+      sumValue: number;
+      unit: string | null;
+    }> | null = null;
 
-    if (sampleDate >= thisWeekStart && sampleDate <= today.dayKey) {
+    if (summary.date >= thisWeekStart && summary.date <= today.dayKey) {
       bucket = thisWeekSamples;
-    } else if (sampleDate >= lastWeekStart && sampleDate < thisWeekStart) {
+    } else if (summary.date >= lastWeekStart && summary.date < thisWeekStart) {
       bucket = lastWeekSamples;
     }
 
@@ -135,17 +170,19 @@ export function buildOverviewWeeklyStats(
       continue;
     }
 
-    const key = buildWeeklyStatKey(sample.stream, unit);
+    const key = buildWeeklyStatKey(summary.stream, summary.unit);
     const existing = bucket.get(key);
     if (existing) {
-      existing.values.push(numericValue);
+      existing.numericSampleCount += summary.numericSampleCount;
+      existing.sumValue += summary.sumValue;
       continue;
     }
 
     bucket.set(key, {
-      stream: sample.stream,
-      unit,
-      values: [numericValue],
+      numericSampleCount: summary.numericSampleCount,
+      stream: summary.stream,
+      sumValue: summary.sumValue,
+      unit: summary.unit,
     });
   }
 
@@ -161,8 +198,8 @@ export function buildOverviewWeeklyStats(
       continue;
     }
 
-    const currentWeekAvg = averageValues(currentWeek?.values ?? null);
-    const previousWeekAvg = averageValues(previousWeek?.values ?? null);
+    const currentWeekAvg = averageValues(currentWeek ?? null);
+    const previousWeekAvg = averageValues(previousWeek ?? null);
     let deltaPercent: number | null = null;
 
     if (
@@ -187,6 +224,20 @@ export function buildOverviewWeeklyStats(
       ? (left.unit ?? "").localeCompare(right.unit ?? "")
       : left.stream.localeCompare(right.stream),
   );
+}
+
+function resolveOverviewReferenceDate(referenceDate: Date | string): Date {
+  if (referenceDate instanceof Date) {
+    return referenceDate;
+  }
+
+  const parsed = new Date(referenceDate);
+
+  if (Number.isNaN(parsed.valueOf())) {
+    throw new TypeError("Overview weekly stats referenceDate must be a valid datetime.");
+  }
+
+  return parsed;
 }
 
 export function summarizeOverviewExperiments(
@@ -251,20 +302,14 @@ function buildWeeklyStatKey(stream: string, unit: string | null): string {
   return `${stream}:${unit ?? ""}`;
 }
 
-function normalizeString(value: unknown): string | null {
-  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
-}
-
-function getNumericSampleValue(value: unknown): number | null {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
-function averageValues(values: readonly number[] | null): number | null {
-  if (!values || values.length === 0) {
+function averageValues(
+  value: { numericSampleCount: number; sumValue: number } | null,
+): number | null {
+  if (!value || value.numericSampleCount <= 0) {
     return null;
   }
 
-  return values.reduce((sum, value) => sum + value, 0) / values.length;
+  return value.sumValue / value.numericSampleCount;
 }
 
 function normalizeLimit(value: number, fallback: number): number {
