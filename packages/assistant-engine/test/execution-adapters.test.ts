@@ -353,6 +353,42 @@ describe('executeAssistantCliCommand', () => {
     }
   })
 
+  it('skips stale setup shims and uses the next healthy vault-cli candidate on PATH', async () => {
+    const vaultRoot = await createVaultRoot()
+    const homeRoot = await createPathRoot()
+    const stalePathRoot = await createPathRoot()
+    const healthyPathRoot = await createPathRoot()
+    await writeExecutable(
+      path.join(stalePathRoot, 'vault-cli'),
+      '#!/usr/bin/env bash\ncli_bin_path=/tmp/repo/packages/setup-cli/dist/bin.js\n',
+    )
+    await writeExecutable(
+      path.join(healthyPathRoot, 'vault-cli'),
+      [
+        '#!/bin/sh',
+        'printf \'{"launcher":"healthy"}\\n\'',
+      ].join('\n'),
+    )
+
+    await expect(
+      executeAssistantCliCommand({
+        args: ['audit', 'list'],
+        input: {
+          cliEnv: {
+            HOME: homeRoot,
+            PATH: `${stalePathRoot}${path.delimiter}${healthyPathRoot}`,
+          },
+          vault: vaultRoot,
+        },
+      }),
+    ).resolves.toMatchObject({
+      json: {
+        launcher: 'healthy',
+      },
+      stdout: '{"launcher":"healthy"}',
+    })
+  })
+
   it('filters hosted vault-cli subprocess env to the explicit allowlist', async () => {
     const vaultRoot = await createVaultRoot()
     const homeRoot = await createPathRoot()

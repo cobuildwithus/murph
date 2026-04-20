@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
 import { constants } from 'node:fs'
-import { access, mkdir, mkdtemp, open, rm, writeFile } from 'node:fs/promises'
+import { access, mkdir, mkdtemp, open, readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { prepareAssistantDirectCliEnv } from '../assistant-cli-access.js'
@@ -442,15 +442,32 @@ async function createAssistantPayloadFile(
 async function resolveAssistantCliLauncher(
   cliProcessEnv: NodeJS.ProcessEnv,
 ): Promise<AssistantCliLauncher> {
-  const vaultCliBinary = await resolveExecutableOnPath(
+  const localWorkspaceCliSourceLauncher =
+    await resolveLocalWorkspaceCliSourceLauncher(cliProcessEnv)
+  if (
+    localWorkspaceCliSourceLauncher &&
+    shouldPreferLocalWorkspaceCliSource(cliProcessEnv)
+  ) {
+    return localWorkspaceCliSourceLauncher
+  }
+
+  const vaultCliBinaries = await resolveExecutablesOnPath(
     'vault-cli',
     cliProcessEnv,
   )
-  if (vaultCliBinary) {
+  for (const vaultCliBinary of vaultCliBinaries) {
+    if (await isKnownStaleSetupCliShim(vaultCliBinary)) {
+      continue
+    }
+
     return {
       argvPrefix: [],
       command: vaultCliBinary,
     }
+  }
+
+  if (localWorkspaceCliSourceLauncher) {
+    return localWorkspaceCliSourceLauncher
   }
 
   const localBuiltCliBinPath = resolveLocalBuiltWorkspaceCliBinPath()
@@ -478,12 +495,58 @@ function resolveLocalBuiltWorkspaceCliBinPath(): string | null {
   }
 }
 
+function shouldPreferLocalWorkspaceCliSource(
+  cliProcessEnv: NodeJS.ProcessEnv,
+): boolean {
+  const ambientHome = normalizeNullableString(process.env.HOME)
+  const cliHome = normalizeNullableString(cliProcessEnv.HOME)
+  return ambientHome !== null && cliHome === ambientHome
+}
+
+function resolveLocalWorkspaceCliSourceEntryPath(): string | null {
+  try {
+    return path.resolve(
+      path.dirname(fileURLToPath(import.meta.url)),
+      '../../../cli/src/bin.ts',
+    )
+  } catch {
+    return null
+  }
+}
+
+async function resolveLocalWorkspaceCliSourceLauncher(
+  cliProcessEnv: NodeJS.ProcessEnv,
+): Promise<AssistantCliLauncher | null> {
+  const sourceEntryPath = resolveLocalWorkspaceCliSourceEntryPath()
+  if (!sourceEntryPath || !(await pathExists(sourceEntryPath))) {
+    return null
+  }
+
+  const tsxBinary = await resolveExecutableOnPath('tsx', cliProcessEnv)
+  if (!tsxBinary) {
+    return null
+  }
+
+  return {
+    argvPrefix: [sourceEntryPath],
+    command: tsxBinary,
+  }
+}
+
 async function resolveExecutableOnPath(
   command: string,
   env: NodeJS.ProcessEnv,
 ): Promise<string | null> {
+  const candidates = await resolveExecutablesOnPath(command, env)
+  return candidates[0] ?? null
+}
+
+async function resolveExecutablesOnPath(
+  command: string,
+  env: NodeJS.ProcessEnv,
+): Promise<string[]> {
   if (path.isAbsolute(command)) {
-    return (await isExecutable(command)) ? command : null
+    return (await isExecutable(command)) ? [command] : []
   }
 
   const pathValue = env.PATH ?? env.Path ?? ''
@@ -494,17 +557,18 @@ async function resolveExecutableOnPath(
   const candidates = process.platform === 'win32'
     ? [command, `${command}.cmd`, `${command}.exe`, `${command}.bat`]
     : [command]
+  const resolvedCandidates: string[] = []
 
   for (const entry of entries) {
     for (const candidate of candidates) {
       const candidatePath = path.join(entry, candidate)
       if (await isExecutable(candidatePath)) {
-        return candidatePath
+        resolvedCandidates.push(candidatePath)
       }
     }
   }
 
-  return null
+  return resolvedCandidates
 }
 
 async function isExecutable(candidatePath: string): Promise<boolean> {
@@ -520,6 +584,18 @@ async function pathExists(candidatePath: string): Promise<boolean> {
   try {
     await access(candidatePath, constants.F_OK)
     return true
+  } catch {
+    return false
+  }
+}
+
+async function isKnownStaleSetupCliShim(candidatePath: string): Promise<boolean> {
+  try {
+    const contents = await readFile(candidatePath, 'utf8')
+    return (
+      contents.includes('packages/setup-cli/dist/bin.js') ||
+      contents.includes('packages\\setup-cli\\dist\\bin.js')
+    )
   } catch {
     return false
   }

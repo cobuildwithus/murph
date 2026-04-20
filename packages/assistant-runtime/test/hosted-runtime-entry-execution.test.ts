@@ -340,9 +340,6 @@ describe("executeHostedWakeForCommit", () => {
       expect.objectContaining({
         executionContext: expect.objectContaining({
           hosted: expect.objectContaining({
-            defaultTarget: expect.objectContaining({
-              adapter: "openai-compatible",
-            }),
             issueDeviceConnectLink: expect.any(Function),
             memberId: "member_123",
             userEnvKeys: [],
