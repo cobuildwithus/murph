@@ -29,7 +29,7 @@ export async function appendHostedOrderedIngressEnvelopeTx(input: {
     kind: wake.kind,
     occurredAt: wake.occurredAt,
     payload: buildHostedIngressPayloadValue(wake),
-    payloadSchema: resolveHostedIngressPayloadSchema(wake),
+    payloadSchema: resolveHostedIngressPayloadSchema(),
     tx: input.tx,
     userId: wake.userId,
   });
@@ -73,7 +73,7 @@ async function appendHostedCoalescingIngressEnvelopeTx(input: {
     kind: input.wake.kind,
     occurredAt: input.wake.occurredAt,
     payload: buildHostedIngressPayloadValue(input.wake),
-    payloadSchema: resolveHostedIngressPayloadSchema(input.wake),
+    payloadSchema: resolveHostedIngressPayloadSchema(),
     tx: input.tx,
     userId: input.wake.userId,
   });
@@ -125,19 +125,11 @@ export function buildHostedIngressEnvelopeDedupeKey(wake: HostedIngressEnvelope)
   return buildHostedIngressDedupeKey(wake);
 }
 
-export function buildHostedIngressEnvelopeCoalescingKey(wake: HostedIngressEnvelope): string {
-  return buildHostedIngressCoalescingKey(wake);
-}
-
 function buildHostedIngressDedupeKey(wake: HostedIngressEnvelope): string {
   return buildHostedIngressDedupeKeyFromEventId(wake.eventId);
 }
 
 function buildHostedIngressCoalescingKey(wake: HostedIngressEnvelope): string {
-  if (wake.kind === "device-sync.wake") {
-    return `${wake.kind}:${wake.userId}:${wake.connectionId ?? wake.provider ?? "global"}`;
-  }
-
   return `${wake.kind}:${wake.userId}`;
 }
 
@@ -147,7 +139,7 @@ function buildHostedIngressDedupeKeyFromEventId(
   return eventId;
 }
 
-function resolveHostedIngressPayloadSchema(_wake: HostedIngressEnvelope): HostedIngressPayloadSchema {
+function resolveHostedIngressPayloadSchema(): HostedIngressPayloadSchema {
   return HOSTED_INGRESS_PAYLOAD_SCHEMA;
 }
 
