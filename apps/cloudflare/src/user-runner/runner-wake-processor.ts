@@ -21,6 +21,7 @@ import {
 import {
   parseHostedExecutionRunnerSharePack,
 } from "@murphai/hosted-execution/parsers";
+import { computeHostedRunElapsedMs } from "@murphai/assistant-runtime";
 import type {
   HostedAssistantDeliveryOutcome,
   HostedAssistantRuntimeCompletedJobResult,
@@ -470,7 +471,7 @@ export class RunnerWakeProcessor {
         error,
         eventId: wake.eventId,
         level: "warn",
-        message: "Hosted wake best-effort raw email cleanup failed; lifecycle TTL will still backstop deletion.",
+        message: "Hosted wake best-effort raw email cleanup failed; the durable raw message object may need manual cleanup.",
         phase: "completed",
         run: null,
         userId: wake.userId,
@@ -978,21 +979,6 @@ export async function recordHostedRunBreadcrumbInWebBestEffort(input: {
       userId: input.userId,
     });
   }
-}
-
-function computeHostedRunElapsedMs(
-  run: HostedExecutionRunContext | null | undefined,
-): number | null {
-  if (!run?.startedAt) {
-    return null;
-  }
-
-  const startedAtMs = Date.parse(run.startedAt);
-  if (!Number.isFinite(startedAtMs)) {
-    return null;
-  }
-
-  return Math.max(0, Date.now() - startedAtMs);
 }
 
 function createMissingHostedSharePackError(input: {

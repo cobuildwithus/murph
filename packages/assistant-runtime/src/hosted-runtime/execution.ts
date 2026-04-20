@@ -52,7 +52,7 @@ import type {
 } from "./models.ts";
 import { exportHostedPendingAssistantUsage } from "./usage.ts";
 import { exportHostedBrowserVaultSnapshot } from "./browser-vault.ts";
-import { resolveHostedWake } from "./utils.ts";
+import { computeHostedRunElapsedMs, resolveHostedWake } from "./utils.ts";
 
 export async function executeHostedRunDrainForCommit(input: {
   artifactMaterializer?: HostedWorkspaceArtifactMaterializer | null;
@@ -705,21 +705,6 @@ function collectPreservedHostedArtifacts(input: {
   } catch {
     return [];
   }
-}
-
-function computeHostedRunElapsedMs(
-  run: HostedAssistantRuntimeJobRequest["run"] | null | undefined,
-): number | null {
-  if (!run?.startedAt) {
-    return null;
-  }
-
-  const startedAtMs = Date.parse(run.startedAt);
-  if (!Number.isFinite(startedAtMs)) {
-    return null;
-  }
-
-  return Math.max(0, Date.now() - startedAtMs);
 }
 
 function summarizeHostedAssistantDeliveryOutcomes(

@@ -45,6 +45,7 @@ import type {
   HostedRuntimePlatform,
 } from "./hosted-runtime/platform.ts";
 import {
+  computeHostedRunElapsedMs,
   resolveHostedWake,
 } from "./hosted-runtime/utils.ts";
 export {
@@ -80,6 +81,9 @@ export {
 export {
   parseHostedRuntimeUsageRecordResponse,
 } from "./hosted-runtime/platform.ts";
+export {
+  computeHostedRunElapsedMs,
+} from "./hosted-runtime/utils.ts";
 export {
   readHostedRunnerCommitTimeoutMs,
 } from "./hosted-runtime/timeouts.ts";
@@ -377,21 +381,6 @@ function buildHostedRuntimeStartDetails(
     },
     userEnvKeyCount: Object.keys(runtime.userEnv).length,
   };
-}
-
-function computeHostedRunElapsedMs(
-  run: HostedAssistantRuntimeJobInput["request"]["run"] | null,
-): number | null {
-  if (!run?.startedAt) {
-    return null;
-  }
-
-  const startedAtMs = Date.parse(run.startedAt);
-  if (!Number.isFinite(startedAtMs)) {
-    return null;
-  }
-
-  return Math.max(0, Date.now() - startedAtMs);
 }
 
 function hasAnyHostedRuntimeConfigKey(
