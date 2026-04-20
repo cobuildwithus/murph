@@ -4,16 +4,25 @@ Status snapshot: 2026-04-18
 
 ## Final state
 
-The hosted cutover is now wake-first end to end.
+This migration guide is historical context only.
+The current hosted source of truth is the run-centric protocol in
+`agent-docs/references/hosted-run-protocol.md`.
+Live docs/process artifacts should frame the system in hosted-run and
+hosted-ingress terms; any remaining `hosted-wake` names are grandfathered path
+or test residue only until the final naming cleanup lands.
 
-- Web owns `HostedWake` ordering, payload storage, lifecycle, and
+The hosted cutover is now run-centric end to end.
+
+- Web owns external ingress ordering, `HostedRun` recovery state, and
   `HostedExecutionCursor` compare-and-swap state.
-- Producers append canonical wakes directly.
-- Cloudflare fetches wakes from web, executes them, and commits cursor state
-  back to web instead of owning queue truth.
-- Conversation wakes stay on the conversation lane without forcing the generic
-  maintenance sweep.
-- Wake status is canonical `wakeState` end to end.
+- Producers append canonical ingress events directly.
+- Cloudflare acquires hosted runs from web, executes `runDrain`, commits the
+  prepared snapshot, and finalizes side effects only through the web-owned run
+  ledger.
+- `conversation.message` stays on the conversation lane without forcing the
+  generic maintenance sweep.
+- Runtime timers surface as `nextRuntimeWakeAt` / `runtime_timer`, not as
+  persisted timer ingress.
 
 The repo no longer treats dispatch envelopes, Cloudflare queue tables, or
 dispatch-named status surfaces as the production hosted execution model.
@@ -24,26 +33,27 @@ dispatch-named status surfaces as the production hosted execution model.
 
 Canonical owner of:
 
-- wake ordering
-- wake lifecycle state
-- terminal and quarantine truth
+- external ingress ordering
+- hosted-run lifecycle and recovery state
 - committed high-water
 - snapshot pointer truth
-- payload spillover and encrypted wake storage
+- payload spillover and encrypted ingress storage
 
 Primary files:
 
-- `apps/web/src/lib/hosted-wake/store.ts`
-- `apps/web/app/api/internal/hosted-wake/{append,commit,quarantine,repair,status,unseen}/route.ts`
+- `apps/web/src/lib/hosted-run/store.ts`
+- `apps/web/src/lib/hosted-ingress/queue.ts`
+- `apps/web/app/api/internal/hosted-run/{acquire,commit,finalize,log,status}/route.ts`
 
 ### Cloudflare
 
 Runtime shim only:
 
-- fetch unseen wakes from web
-- execute wakes
+- acquire hosted runs from web
+- execute `runDrain`
 - manage active run / lease state
 - commit cursor state back to web
+- finalize side effects only after the run is reclaimed as `finalizing`
 - keep warm bundle/runtime coordination local to the Durable Object
 
 Primary files:
@@ -53,10 +63,10 @@ Primary files:
 
 ### Assistant runtime
 
-Wake-native execution boundary:
+Run-drain execution boundary:
 
 - `conversation.message` executes the conversation lane only
-- system wakes own maintenance follow-up explicitly
+- system follow-up stays explicit inside runtime state
 - post-commit assistant delivery is logged and tracked as delivery work, not as
   dispatch work
 
@@ -66,21 +76,25 @@ Primary files:
 - `packages/assistant-runtime/src/hosted-runtime/execution.ts`
 - `packages/assistant-runtime/src/hosted-runtime/callbacks.ts`
 
-## Canonical wake contract
+## Canonical hosted contract
 
-The production hosted path should only treat these wake kinds as canonical:
+The production hosted path should treat these ingress kinds as canonical:
 
 - `conversation.message`
 - `member.activated`
 - `member.channels.updated`
 - `vault.share.accepted`
 - `device-sync.wake`
-- `assistant.cron.tick`
 
-Top-level wake kinds model execution lanes and wake behavior, not transport
+No timer-shaped ingress kind remains in the live hosted contract.
+Runtime timers use `nextRuntimeWakeAt` and zero-event `runtime_timer` runs, and
+any future explicit external/manual/admin trigger must use a separate ingress
+kind instead of reviving timer ingress.
+
+Top-level ingress kinds model product/control-plane events, not transport
 brands.
 
-Hosted wake behavior classes in the hard-cut shape are:
+Hosted ingress behavior classes in the hard-cut shape are:
 
 - `ordered`
 - `coalescing`
@@ -90,21 +104,21 @@ shipped hosted contract. Hosted parser work remains inline on
 `conversation.message` ingestion rather than materializing a separate hosted
 drain wake.
 
-Inbound conversation traffic uses one canonical persisted message wake kind:
+Inbound conversation traffic uses one canonical persisted message ingress kind:
 `conversation.message`.
 
 Channel-specific detail for Linq, Telegram, and email belongs inside the
 `conversation.message` payload via `message.channel`, not in top-level
-provider-specific wake kinds.
+provider-specific ingress kinds.
 
 Provider-specific normalization happens at ingress and runtime edges. The
-canonical queue contract should stay transport-agnostic as long as email, Linq,
-and Telegram all share the same ordering, session-binding, retry, and
+canonical ingress contract should stay transport-agnostic as long as email,
+Linq, and Telegram all share the same ordering, session-binding, retry, and
 quarantine semantics on the conversation lane.
 
 ## Producer status
 
-These producers already append canonical wakes directly:
+These producers already append canonical ingress events directly:
 
 - active-member Linq webhook
 - active-member Telegram webhook
@@ -116,21 +130,21 @@ These producers already append canonical wakes directly:
 
 Active-member message ingress no longer depends on receipt-managed dispatch
 wrappers on the hot path. Receipt state only remains where web still owns local
-invite/quota side effects outside the hosted runtime wake lane.
+invite/quota side effects outside the hosted runtime run lane.
 
 ## Runtime status
 
 The runtime hard cut is landed:
 
-- `executeHostedWakeEvent(...)` is the wake-native entrypoint
-- conversation wakes do not force `runHostedMaintenanceLoop(...)`
-- system wakes keep explicit maintenance ownership
-- wake summaries and wake logs are wake-native
+- hosted execution enters through `runDrain`
+- conversation ingress does not force the generic maintenance loop
+- system follow-up keeps explicit runtime ownership
+- run summaries and run logs are run-centric
 - parser follow-up remains inline on `conversation.message`; there is no hosted
-  `parser.drain` wake lane
+  `parser.drain` ingress lane
 
 Provider-specific helpers that remain in the conversation lane are now just
-message normalization helpers from canonical wake payloads into inbox runtime
+message normalization helpers from canonical ingress payloads into inbox runtime
 captures. They are no longer a dispatch-era ownership seam.
 
 ## Cloudflare status
@@ -141,7 +155,7 @@ The production Durable Object is a thin runner:
 - no legacy queue-truth tables such as `pending_events`,
   `consumed_events`, or `backpressured_events`
 - no staged dispatch-payload control plane in the live hosted path
-- canonical status reads come from web-owned wake state
+- canonical status reads come from web-owned run/cursor state
 
 Any remaining local helper residue should stay test-only and should not be used
 to infer production ownership.
@@ -150,12 +164,12 @@ to infer production ownership.
 
 This repo now satisfies the intended hard-cut criteria:
 
-- Web/Postgres is the only owner of hosted wake ordering, lifecycle, cursor
-  state, and snapshot pointer truth.
-- Producers append canonical wake contracts directly.
+- Web/Postgres is the only owner of external ingress ordering, hosted-run
+  lifecycle/recovery state, cursor state, and snapshot pointer truth.
+- Producers append canonical ingress contracts directly.
 - Active-member message ingress does not route through receipt-managed dispatch
   wrappers.
-- Conversation wakes do not trigger the generic maintenance loop.
+- Conversation ingress does not trigger the generic maintenance loop.
 - Cloudflare Durable Objects no longer persist their own queue truth.
 - The repo does not treat dispatch-era envelopes as the canonical production
   hosted execution model.
