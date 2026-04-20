@@ -29,15 +29,14 @@ export async function buildHostedRunnerWorkspaceArtifacts(
     repoRoot: string;
   },
 ): Promise<void> {
-  const recursiveBuildArgs = [
-    "recursive",
-    "--workspace-concurrency=1",
-    ...packageNames.flatMap((packageName) => ["--filter", packageName]),
-    "run",
-    "build",
-  ];
-
-  await runPnpmCommand(recursiveBuildArgs, { cwd: input.repoRoot });
+  for (const packageName of await topologicallySortWorkspacePackageNames(
+    packageNames,
+    input,
+  )) {
+    await runPnpmCommand(["build"], {
+      cwd: await resolveWorkspacePackageDirectory(input.repoRoot, packageName),
+    });
+  }
 }
 
 export async function stageHostedRunnerRuntimeArtifact(
@@ -166,6 +165,74 @@ async function resolveWorkspacePackageDirectory(
   }
 
   throw new Error(`Could not resolve workspace package directory for ${packageName}.`);
+}
+
+async function topologicallySortWorkspacePackageNames(
+  packageNames: readonly string[],
+  input: {
+    repoRoot: string;
+  },
+): Promise<readonly string[]> {
+  const packageSet = new Set(packageNames);
+  const manifests = new Map<string, WorkspacePackageManifest>();
+
+  for (const packageName of packageSet) {
+    const packageDir = await resolveWorkspacePackageDirectory(input.repoRoot, packageName);
+    manifests.set(
+      packageName,
+      JSON.parse(
+        await readFile(path.join(packageDir, "package.json"), "utf8"),
+      ) as WorkspacePackageManifest,
+    );
+  }
+
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+  const ordered: string[] = [];
+
+  function visit(packageName: string): void {
+    if (visited.has(packageName)) {
+      return;
+    }
+
+    if (visiting.has(packageName)) {
+      throw new Error(
+        `Detected a cycle while ordering runner bundle builds at ${packageName}.`,
+      );
+    }
+
+    visiting.add(packageName);
+
+    for (const dependencyName of listWorkspaceDependencyNames(
+      manifests.get(packageName),
+    )) {
+      if (packageSet.has(dependencyName)) {
+        visit(dependencyName);
+      }
+    }
+
+    visiting.delete(packageName);
+    visited.add(packageName);
+    ordered.push(packageName);
+  }
+
+  for (const packageName of packageNames) {
+    visit(packageName);
+  }
+
+  return ordered;
+}
+
+function listWorkspaceDependencyNames(
+  packageJson: WorkspacePackageManifest | undefined,
+): readonly string[] {
+  return Object.entries({
+    ...(packageJson?.dependencies ?? {}),
+    ...(packageJson?.optionalDependencies ?? {}),
+  })
+    .filter((entry): entry is [string, string] => entry[1].startsWith("workspace:"))
+    .map(([dependencyName]) => dependencyName)
+    .sort();
 }
 
 function createBundleOnlyWorkspaceDependencySpecs<
