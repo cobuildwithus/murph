@@ -7,7 +7,6 @@ import {
   buildHostedExecutionRuntimeTimerWake,
 } from "@murphai/hosted-execution";
 import { buildHostedAssistantDeliveryEffect } from "@murphai/hosted-execution/side-effects";
-import type { BrowserVaultSnapshot } from "@murphai/query/browser";
 
 import {
   createHostedRuntimeArtifactStoreStub,
@@ -33,7 +32,7 @@ const mocks = vi.hoisted(() => ({
   encodeHostedBundleBase64: vi.fn(),
   executeHostedIngressEvent: vi.fn(),
   exportGatewayProjectionSnapshotLocal: vi.fn(),
-  exportHostedBrowserVaultSnapshot: vi.fn(),
+  exportHostedBrowserVaultReplica: vi.fn(),
   exportHostedPendingAssistantUsage: vi.fn(),
   hydrateHostedExecutionDefaultTarget: vi.fn(),
   listHostedBundleArtifacts: vi.fn(),
@@ -125,7 +124,7 @@ vi.mock("../src/hosted-runtime/usage.ts", () => ({
 }));
 
 vi.mock("../src/hosted-runtime/browser-vault.ts", () => ({
-  exportHostedBrowserVaultSnapshot: mocks.exportHostedBrowserVaultSnapshot,
+  exportHostedBrowserVaultReplica: mocks.exportHostedBrowserVaultReplica,
 }));
 
 import {
@@ -257,31 +256,32 @@ beforeEach(() => {
     permissions: [],
     schema: "murph.gateway-projection-snapshot.v1",
   });
-  mocks.exportHostedBrowserVaultSnapshot.mockResolvedValue({
+  mocks.exportHostedBrowserVaultReplica.mockResolvedValue({
+    assistantSummary: {
+      highlights: [],
+      latestDate: null,
+    },
+    entities: [],
     generatedAt: "2026-04-08T00:10:00.000Z",
-    history: {
-      timeline: [],
+    metricDayRows: [],
+    metricRows: [],
+    policy: {
+      bodyPreviewChars: 280,
+      excludedFamilies: [],
+      id: "health-vault-browser-v1",
+      includedFamilies: [],
+      metricLookbackDays: 365,
     },
-    overview: {
-      metrics: [],
-      recentJournals: [],
-      trackedExperiments: [],
-      weeklySampleSummaries: [],
+    schema: "murph.browser-vault-replica.v1",
+    searchRows: [],
+    source: {
+      dataVersion: "b".repeat(64),
+      sourceBundleHash: "a".repeat(64),
     },
-    schema: "murph.browser-vault-dashboard-snapshot.v2",
-    signals: {
-      activity: [],
-      assistantSummary: {
-        highlights: [],
-        latestDate: null,
-      },
-      bodyState: [],
-      recovery: [],
-      sleep: [],
-      sourceHealth: [],
-    },
-    sourceVersion: "a".repeat(64),
-  } satisfies BrowserVaultSnapshot);
+    sourceHealthRows: [],
+    timelineRows: [],
+    weeklySampleSummaries: [],
+  });
   mocks.exportHostedPendingAssistantUsage.mockResolvedValue({
     exported: 1,
     failed: 0,
@@ -560,8 +560,8 @@ describe("assistant-runtime execution coverage", () => {
       vaultRoot: "/tmp/vault-root",
     });
     expect(mocks.refreshAssistantStatusSnapshot).toHaveBeenCalledWith("/tmp/vault-root");
-    expect(mocks.exportHostedBrowserVaultSnapshot).toHaveBeenCalledWith({
-      sourceVersion: expect.stringMatching(/^[a-f0-9]{64}$/u),
+    expect(mocks.exportHostedBrowserVaultReplica).toHaveBeenCalledWith({
+      sourceBundleHash: expect.stringMatching(/^[a-f0-9]{64}$/u),
       vaultRoot: "/tmp/vault-root",
     });
     assert.equal(result.phase, "completed");
@@ -593,7 +593,7 @@ describe("assistant-runtime execution coverage", () => {
     mocks.exportGatewayProjectionSnapshotLocal.mockRejectedValueOnce(
       new Error("gateway export unavailable"),
     );
-    mocks.exportHostedBrowserVaultSnapshot.mockRejectedValueOnce(
+    mocks.exportHostedBrowserVaultReplica.mockRejectedValueOnce(
       new Error("browser vault export unavailable"),
     );
 
@@ -624,7 +624,7 @@ describe("assistant-runtime execution coverage", () => {
 
     assert.equal(result.phase, "completed");
     assert.equal(result.finalGatewayProjectionSnapshot, null);
-    assert.equal(result.browserVaultSnapshot, null);
+    assert.equal(result.browserVaultReplica, null);
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         level: "warn",
@@ -650,7 +650,7 @@ describe("assistant-runtime execution coverage", () => {
       expect.objectContaining({
         level: "warn",
         message:
-          "Hosted runtime could not export the browser vault snapshot; returning the final bundle without it.",
+          "Hosted runtime could not export the browser vault replica; returning the final bundle without it.",
       }),
     );
   });
