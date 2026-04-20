@@ -57,7 +57,7 @@ if [[ "$has_send_override" == "0" ]]; then
   forward_args=(--send "${forward_args[@]}")
 fi
 
-tmp_log_path="$(mktemp "${TMPDIR:-/tmp}/review-gpt-data.XXXXXX.log")"
+tmp_log_path="$(mktemp "${TMPDIR:-/tmp}/review-gpt-data.XXXXXX")"
 
 set +e
 bash scripts/review-gpt-cli.sh --config scripts/review-gpt.data.config.sh "${forward_args[@]}" 2>&1 | tee "$tmp_log_path"
