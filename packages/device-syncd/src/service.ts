@@ -358,17 +358,41 @@ export class DeviceSyncService {
       return null;
     }
 
+    const failClaimedJob = (
+      code: string,
+      message: string,
+      retryAt: string | null,
+      retryable: boolean,
+    ): boolean => {
+      const failed = this.store.failJobIfOwned(job.id, this.workerId, now, code, message, retryAt, retryable);
+
+      if (!failed) {
+        this.logger.debug?.("Device sync job side effects skipped because execution was cancelled.", {
+          provider: job.provider,
+          accountId: job.accountId,
+          jobId: job.id,
+        });
+      }
+
+      return failed;
+    };
+
     const provider = this.registry.get(job.provider);
 
     if (!provider) {
-      this.store.failJob(job.id, now, "PROVIDER_NOT_REGISTERED", `No device sync provider registered for ${job.provider}.`, null, false);
+      failClaimedJob(
+        "PROVIDER_NOT_REGISTERED",
+        `No device sync provider registered for ${job.provider}.`,
+        null,
+        false,
+      );
       return job;
     }
 
     const storedAccount = this.store.getAccountById(job.accountId);
 
     if (!storedAccount) {
-      this.store.failJob(job.id, now, "ACCOUNT_NOT_FOUND", `Device sync account ${job.accountId} does not exist.`, null, false);
+      failClaimedJob("ACCOUNT_NOT_FOUND", `Device sync account ${job.accountId} does not exist.`, null, false);
       return job;
     }
 
@@ -378,9 +402,7 @@ export class DeviceSyncService {
     }
 
     if (storedAccount.status === "reauthorization_required") {
-      this.store.failJob(
-        job.id,
-        now,
+      failClaimedJob(
         "ACCOUNT_REAUTHORIZATION_REQUIRED",
         "Device sync account requires reconnection before queued jobs can run.",
         null,
@@ -504,7 +526,12 @@ export class DeviceSyncService {
 
       const failure = normalizeExecutionError(error);
       const retryAt = failure.retryable ? addMilliseconds(now, computeRetryDelayMs(job.attempts)) : null;
-      this.store.failJob(job.id, now, failure.code, failure.message, retryAt, failure.retryable);
+      const failed = failClaimedJob(failure.code, failure.message, retryAt, failure.retryable);
+
+      if (!failed) {
+        return job;
+      }
+
       this.store.markSyncFailed(storedAccount.id, now, failure.code, failure.message, failure.accountStatus);
       this.logger.warn?.("Device sync job failed.", {
         provider: provider.provider,
