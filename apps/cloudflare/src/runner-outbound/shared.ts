@@ -5,7 +5,7 @@ import {
 import { readHostedExecutionEnvironment } from "../env.ts";
 import { CLOUDFLARE_HOSTED_RUNTIME_HOSTS } from "../internal-hosts.ts";
 import { json } from "../json.ts";
-import { createHostedUserKeyStoreFromEnvironment } from "../user-key-store.js";
+import { requireHostedUserCryptoContextFromEnvironment } from "../user-key-store.js";
 import type {
   WorkerBootstrapUserRunnerStubLike,
   WorkerEnvironmentContract,
@@ -30,11 +30,11 @@ export async function resolveRunnerOutboundUserCryptoContext(input: {
 }) {
   await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
 
-  return createHostedUserKeyStoreFromEnvironment({
+  return requireHostedUserCryptoContextFromEnvironment({
     bucket: input.bucket,
     environment: input.environment,
-  }).requireUserCryptoContext(input.userId, {
     reason: "runner-outbound-access",
+    userId: input.userId,
   });
 }
 
