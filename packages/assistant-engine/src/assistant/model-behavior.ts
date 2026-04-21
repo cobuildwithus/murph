@@ -17,18 +17,18 @@ export function resolveAssistantModelBehaviorProfile(
 ): AssistantModelBehaviorProfile {
   const normalized = normalizeAssistantProviderConfig(input)
 
-  if (normalized.provider === 'codex-cli' && normalized.oss) {
+  if (normalized.target.kind === 'codex-cli' && normalized.target.oss) {
     return 'default'
   }
 
-  if (isAssistantGpt5FamilyModel(normalized.model)) {
+  if (isAssistantGpt5FamilyModel(normalized.target.model)) {
     return 'gpt5-agentic'
   }
 
   if (
-    normalized.provider === 'codex-cli' &&
-    !normalized.oss &&
-    !normalized.model
+    normalized.target.kind === 'codex-cli' &&
+    !normalized.target.oss &&
+    !normalized.target.model
   ) {
     return 'gpt5-agentic'
   }

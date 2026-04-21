@@ -27,6 +27,8 @@ import {
   createAssistantProviderToolProgressEvent,
 } from '../provider-progress.js'
 import {
+  isAssistantOpenAICompatibleTargetConfig,
+  resolveAssistantChatProviderFromConfig,
   type AssistantProviderConfig,
   resolveAssistantProviderRuntimeTarget,
   shouldAssistantProviderUseGatewayWebSearch,
@@ -64,7 +66,7 @@ export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
   },
   async discoverModels(input) {
     const providerConfig = input.config
-    if (providerConfig.provider !== 'openai-compatible') {
+    if (!isAssistantOpenAICompatibleTargetConfig(providerConfig)) {
       return {
         models: [],
         status: 'unsupported',
@@ -72,7 +74,7 @@ export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
       }
     }
 
-    const normalizedBaseUrl = normalizeNullableString(providerConfig.baseUrl)
+    const normalizedBaseUrl = normalizeNullableString(providerConfig.target.baseUrl)
     if (!normalizedBaseUrl) {
       return {
         models: [],
@@ -145,7 +147,7 @@ export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
   },
   async executeTurn(input) {
     const providerConfig = input.providerConfig
-    if (providerConfig.provider !== 'openai-compatible') {
+    if (!isAssistantOpenAICompatibleTargetConfig(providerConfig)) {
       throw new VaultCliError(
         'ASSISTANT_PROVIDER_UNSUPPORTED',
         'OpenAI-compatible execution requires an OpenAI-compatible provider config.',
@@ -160,7 +162,7 @@ export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
       },
     )
     if (!languageModelSpec) {
-      if (!providerConfig.baseUrl) {
+      if (!providerConfig.target.baseUrl) {
         throw new VaultCliError(
           'ASSISTANT_BASE_URL_REQUIRED',
           'The openai-compatible assistant provider requires a base URL.',
@@ -248,7 +250,7 @@ export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
         },
         ok: true,
         result: {
-          provider: providerConfig.provider,
+          provider: resolveAssistantChatProviderFromConfig(providerConfig),
           providerSessionId:
             resolvedRuntimeTarget.supportsNativeResume
               ? (
@@ -393,7 +395,7 @@ function resolveOpenAiCompatibleProviderOptions(input: {
   usesResponsesApi: boolean
 }): Record<string, Record<string, boolean | string>> | undefined {
   const reasoningEffort = supportsAssistantReasoningEffort(input.providerConfig)
-    ? normalizeNullableString(input.providerConfig.reasoningEffort)
+    ? normalizeNullableString(input.providerConfig.policy.reasoningEffort)
     : null
   const normalizedResumeProviderSessionId = normalizeNullableString(
     input.resumeProviderSessionId,
@@ -421,7 +423,11 @@ function resolveOpenAiCompatibleProviderOptions(input: {
   }
 
   return {
-    [normalizeAssistantProviderOptionKey(input.providerConfig.providerName)]: {
+    [normalizeAssistantProviderOptionKey(
+      isAssistantOpenAICompatibleTargetConfig(input.providerConfig)
+        ? input.providerConfig.target.providerName
+        : null,
+    )]: {
       reasoningEffort,
     },
   }

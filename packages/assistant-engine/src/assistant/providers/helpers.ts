@@ -6,6 +6,8 @@ import {
   readAssistantEnvString,
 } from '../shared.js'
 import {
+  isAssistantCodexTargetConfig,
+  isAssistantOpenAICompatibleTargetConfig,
   normalizeAssistantHeaders,
   type AssistantProviderConfig,
 } from '@murphai/operator-config/assistant/provider-config'
@@ -24,7 +26,9 @@ export function buildOpenAICompatibleDiscoveryHeaders(input: {
   const headers =
     normalizeAssistantHeaders({
       Accept: 'application/json',
-      ...(input.config.headers ?? {}),
+      ...(isAssistantOpenAICompatibleTargetConfig(input.config)
+        ? (input.config.target.headers ?? {})
+        : {}),
     }) ?? {
       Accept: 'application/json',
     }
@@ -32,7 +36,12 @@ export function buildOpenAICompatibleDiscoveryHeaders(input: {
     ...process.env,
     ...(input.env ?? {}),
   }
-  const apiKeyValue = readAssistantEnvString(env, input.config.apiKeyEnv)
+  const apiKeyValue = readAssistantEnvString(
+    env,
+    isAssistantOpenAICompatibleTargetConfig(input.config)
+      ? input.config.target.apiKeyEnv
+      : null,
+  )
 
   if (apiKeyValue && !('Authorization' in headers)) {
     headers.Authorization = `Bearer ${apiKeyValue}`
@@ -42,7 +51,11 @@ export function buildOpenAICompatibleDiscoveryHeaders(input: {
 }
 
 export function buildAssistantProviderLabel(config: AssistantProviderConfig): string {
-  const explicitProviderName = normalizeNullableString(config.providerName)
+  const explicitProviderName = normalizeNullableString(
+    isAssistantOpenAICompatibleTargetConfig(config)
+      ? config.target.providerName
+      : null,
+  )
   if (explicitProviderName) {
     return (
       resolveOpenAICompatibleProviderTitle({
@@ -51,11 +64,14 @@ export function buildAssistantProviderLabel(config: AssistantProviderConfig): st
     )
   }
 
-  if (config.provider === 'codex-cli') {
-    return config.oss ? 'Codex OSS' : 'Codex CLI'
+  if (isAssistantCodexTargetConfig(config)) {
+    return config.target.oss ? 'Codex OSS' : 'Codex CLI'
+  }
+  if (!isAssistantOpenAICompatibleTargetConfig(config)) {
+    return 'OpenAI-compatible endpoint'
   }
 
-  const normalizedBaseUrl = normalizeNullableString(config.baseUrl)
+  const normalizedBaseUrl = normalizeNullableString(config.target.baseUrl)
   const presetTitle = resolveOpenAICompatibleProviderTitle({
     baseUrl: normalizedBaseUrl,
   })
@@ -353,8 +369,14 @@ export function extractOpenAICompatibleAssistantProviderUsage(input: {
     readAssistantProviderInteger(rawRecord, 'outputTokens', 'completionTokens')
 
   return {
-    apiKeyEnv: input.providerConfig.apiKeyEnv,
-    baseUrl: input.providerConfig.baseUrl,
+    apiKeyEnv:
+      isAssistantOpenAICompatibleTargetConfig(input.providerConfig)
+        ? input.providerConfig.target.apiKeyEnv
+        : null,
+    baseUrl:
+      isAssistantOpenAICompatibleTargetConfig(input.providerConfig)
+        ? input.providerConfig.target.baseUrl
+        : null,
     cacheWriteTokens: readAssistantProviderInteger(
       usageRecord,
       'cacheWriteTokens',
@@ -368,7 +390,10 @@ export function extractOpenAICompatibleAssistantProviderUsage(input: {
     inputTokens,
     outputTokens,
     providerMetadataJson: providerMetadata ?? null,
-    providerName: input.providerConfig.providerName,
+    providerName:
+      isAssistantOpenAICompatibleTargetConfig(input.providerConfig)
+        ? input.providerConfig.target.providerName
+        : null,
     providerRequestId: readAssistantProviderString(
       openAiProviderMetadata?.responseId,
       responseRecord?.requestId,
@@ -386,13 +411,13 @@ export function extractOpenAICompatibleAssistantProviderUsage(input: {
       'reasoningTokens',
       'reasoning_tokens',
     ),
-    requestedModel: input.providerConfig.model,
+    requestedModel: input.providerConfig.target.model,
     servedModel: readAssistantProviderString(
       responseRecord?.modelId,
       responseRecord?.model,
       rawRecord?.model,
       providerMetadata?.model,
-    ) ?? input.providerConfig.model,
+    ) ?? input.providerConfig.target.model,
     totalTokens:
       readAssistantProviderInteger(usageRecord, 'totalTokens', 'total_tokens')
       ?? resolveAssistantProviderTotalTokens({
@@ -440,8 +465,8 @@ export function extractCodexAssistantProviderUsage(input: {
   )
 
   return {
-    apiKeyEnv: input.providerConfig.apiKeyEnv,
-    baseUrl: input.providerConfig.baseUrl,
+    apiKeyEnv: null,
+    baseUrl: null,
     cacheWriteTokens: readAssistantProviderInteger(
       usageRecord ?? completionRecord,
       'cacheWriteTokens',
@@ -455,7 +480,7 @@ export function extractCodexAssistantProviderUsage(input: {
     inputTokens,
     outputTokens,
     providerMetadataJson: completionRecord ?? null,
-    providerName: input.providerConfig.providerName,
+    providerName: null,
     providerRequestId: readAssistantProviderString(
       completionRecord?.request_id,
       completionRecord?.requestId,
@@ -467,12 +492,12 @@ export function extractCodexAssistantProviderUsage(input: {
       'reasoningTokens',
       'reasoning_tokens',
     ),
-    requestedModel: input.providerConfig.model,
+    requestedModel: input.providerConfig.target.model,
     servedModel: readAssistantProviderString(
       completionRecord?.model,
       completionRecord?.model_id,
       completionRecord?.modelId,
-    ) ?? input.providerConfig.model,
+    ) ?? input.providerConfig.target.model,
     totalTokens:
       readAssistantProviderInteger(usageRecord ?? completionRecord, 'totalTokens', 'total_tokens')
       ?? resolveAssistantProviderTotalTokens({

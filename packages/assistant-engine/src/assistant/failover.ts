@@ -19,7 +19,9 @@ import { withAssistantRuntimeWriteLock } from './runtime-write-lock.js'
 import { ensureAssistantState } from './store/persistence.js'
 import { resolveAssistantStatePaths, type AssistantStatePaths } from './store/paths.js'
 import {
+  isAssistantCodexTargetConfig,
   mergeAssistantProviderConfigsForProvider,
+  resolveAssistantChatProviderFromConfig,
   serializeAssistantProviderSessionOptions,
 } from '@murphai/operator-config/assistant/provider-config'
 import { resolveAssistantProviderLabel } from './provider-registry.js'
@@ -270,8 +272,11 @@ function createResolvedAssistantFailoverRoute(input: {
     providerConfig: input.providerConfig,
   })
   const routeId = hashAssistantFailoverRoute({
-    codexCommand: input.providerConfig.codexCommand,
-    provider: input.provider,
+    codexCommand:
+      isAssistantCodexTargetConfig(input.providerConfig)
+        ? input.providerConfig.target.codexCommand
+        : null,
+    provider: resolveAssistantChatProviderFromConfig(input.providerConfig),
     providerOptions,
   })
 
@@ -280,7 +285,10 @@ function createResolvedAssistantFailoverRoute(input: {
     label,
     provider: input.provider,
     providerOptions,
-    codexCommand: input.providerConfig.codexCommand,
+    codexCommand:
+      isAssistantCodexTargetConfig(input.providerConfig)
+        ? input.providerConfig.target.codexCommand
+        : null,
     cooldownMs:
       normalizePositiveInt(input.cooldownMs) ?? DEFAULT_FAILOVER_COOLDOWN_MS,
   }
@@ -361,11 +369,15 @@ function buildAssistantFailoverRouteLabel(input: {
   const parts = [
     explicitName,
     providerLabel,
-    normalizeNullableString(input.providerConfig.model),
-    normalizeNullableString(input.providerConfig.profile),
+    normalizeNullableString(input.providerConfig.target.model),
+    normalizeNullableString(
+      isAssistantCodexTargetConfig(input.providerConfig)
+        ? input.providerConfig.target.profile
+        : null,
+    ),
   ].filter((value): value is string => value !== null)
 
-  return parts.join(':') || input.providerConfig.provider
+  return parts.join(':') || resolveAssistantChatProviderFromConfig(input.providerConfig)
 }
 
 function resolveAssistantFailoverRouteProviderConfig(input: {

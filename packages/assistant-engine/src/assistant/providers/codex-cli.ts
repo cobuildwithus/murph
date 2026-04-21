@@ -4,6 +4,10 @@ import {
 import {
   executeCodexPrompt,
 } from '../../assistant-codex.js'
+import {
+  isAssistantCodexTargetConfig,
+  resolveAssistantChatProviderFromConfig,
+} from '@murphai/operator-config/assistant/provider-config'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   DEFAULT_CODEX_MODELS,
@@ -48,7 +52,7 @@ export const codexCliProviderDefinition: AssistantProviderDefinition = {
   },
   async executeTurn(input) {
     const providerConfig = input.providerConfig
-    if (providerConfig.provider !== 'codex-cli') {
+    if (!isAssistantCodexTargetConfig(providerConfig)) {
       throw new VaultCliError(
         'ASSISTANT_PROVIDER_UNSUPPORTED',
         'Codex CLI execution requires a Codex provider config.',
@@ -57,22 +61,22 @@ export const codexCliProviderDefinition: AssistantProviderDefinition = {
 
     const baseExecInput = {
       abortSignal: input.abortSignal,
-      approvalPolicy: providerConfig.approvalPolicy ?? undefined,
-      codexCommand: providerConfig.codexCommand ?? undefined,
-      codexHome: providerConfig.codexHome ?? undefined,
+      approvalPolicy: providerConfig.policy.approvalPolicy ?? undefined,
+      codexCommand: providerConfig.target.codexCommand ?? undefined,
+      codexHome: providerConfig.target.codexHome ?? undefined,
       configOverrides: mergeCodexConfigOverrides({
         showThinkingTraces: input.showThinkingTraces ?? false,
       }),
       env: prepareAssistantDirectCliEnv(input.env),
-      model: providerConfig.model ?? undefined,
+      model: providerConfig.target.model ?? undefined,
       onProgress: input.onEvent ?? undefined,
       onTraceEvent: input.onTraceEvent,
-      oss: providerConfig.oss,
-      profile: providerConfig.profile ?? undefined,
+      oss: providerConfig.target.oss,
+      profile: providerConfig.target.profile ?? undefined,
       prompt: resolveAssistantProviderPrompt(input),
       images: extractCodexUserMessageImages(input.userMessageContent),
-      reasoningEffort: providerConfig.reasoningEffort ?? undefined,
-      sandbox: providerConfig.sandbox ?? undefined,
+      reasoningEffort: providerConfig.policy.reasoningEffort ?? undefined,
+      sandbox: providerConfig.policy.sandbox ?? undefined,
       workingDirectory: input.workingDirectory,
     } as const
 
@@ -105,7 +109,7 @@ export const codexCliProviderDefinition: AssistantProviderDefinition = {
       },
       ok: true,
       result: {
-        provider: providerConfig.provider,
+        provider: resolveAssistantChatProviderFromConfig(providerConfig),
         providerSessionId: result.sessionId,
         response: result.finalMessage,
         stderr: result.stderr,
@@ -119,7 +123,9 @@ export const codexCliProviderDefinition: AssistantProviderDefinition = {
     }
   },
   resolveLabel(config) {
-    return config.oss ? 'Codex OSS' : 'Codex CLI'
+    return config.target.kind === 'codex-cli' && config.target.oss
+      ? 'Codex OSS'
+      : 'Codex CLI'
   },
   resolveStaticModels() {
     return DEFAULT_CODEX_MODELS
