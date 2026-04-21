@@ -201,7 +201,7 @@ export function ProtocolTab({ experiment }: ProtocolTabProps) {
         <span className="font-mono text-[11px]/3.5 tracking-[0.12em] text-chart-5">
           RESEARCH
         </span>
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
           {researchStats.map((stat) => (
             <div
               key={stat.label}
@@ -218,6 +218,16 @@ export function ProtocolTab({ experiment }: ProtocolTabProps) {
             </div>
           ))}
         </div>
+        {researchStats.some((stat) =>
+          stat.label === "PEOPLE INCLUDED" && stat.value !== "—"
+        ) ? (
+          <p className="text-xs/4 text-muted-foreground/70">
+            Sources checked is the full set used for this page. Research papers
+            test people directly; review papers summarize other papers. People
+            included counts only direct human research with participant totals,
+            avoiding duplicate cohorts where possible.
+          </p>
+        ) : null}
 
         {/* Study cards - unified container */}
         {studies.length > 0 && (
