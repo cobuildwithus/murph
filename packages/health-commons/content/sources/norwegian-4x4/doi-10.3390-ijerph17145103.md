@@ -27,6 +27,15 @@ source:
   citation: "J J Acala, D Roche-Willis, T A Astorino. Characterizing the heart rate response to the 4 × 4 interval exercise protocol. International Journal of Environmental Research and Public Health. 2020. doi:10.3390/ijerph17145103"
   doi: "10.3390/ijerph17145103"
   url: https://www.mdpi.com/1660-4601/17/14/5103
+researchEvidence:
+  designKind: "acute_mechanistic"
+  designLabel: "Acute implementation physiology study"
+  participantCount: 39
+  participantCountKind: "reported"
+  populationLabel: "Healthy active adults"
+  durationLabel: "Single 4x4 cycling session"
+  aggregateRole: "primary"
+  cohortKey: "acala-2020-4x4-hr-response"
 evidenceBucket: "Wearable or testable signals"
 whyItMatters: "Acute implementation source showing how heart rate behaves during a 4x4 session and why target-zone fidelity needs to be logged."
 potentialMurphEndpoints:

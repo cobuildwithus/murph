@@ -257,6 +257,7 @@ function createProtocol(
     durationDays: 21,
     baselineDays: 7,
     studyCount: 81,
+    researchSummaryLabel: "81 studies",
     evidenceLevel: 3,
     evidenceLabel: "Field testing · Usable",
     description: "Simple heat exposure experiment.",

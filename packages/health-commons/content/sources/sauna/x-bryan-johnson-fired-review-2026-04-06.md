@@ -20,6 +20,16 @@ source:
   authors: Bryan Johnson
   year: 2026
   url: https://x.com/bryan_johnson/status/2041202370672288028
+researchEvidence:
+  designKind: single_person_report
+  designLabel: Single-person report
+  participantCount: 1
+  participantCountKind: reported
+  populationLabel: Bryan Johnson
+  aggregateRole: duplicate
+  cohortKey: bryan-johnson-sauna-self-report
+  notes:
+    - Same single-person source family as the Bryan Johnson sauna protocol report.
 artifacts:
   -
     artifactId: art_x_bryan_johnson_fired_review_2026_04_06_html_snapshot

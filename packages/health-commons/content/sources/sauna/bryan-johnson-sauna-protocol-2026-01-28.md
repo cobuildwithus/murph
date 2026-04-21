@@ -20,6 +20,16 @@ source:
   authors: Bryan Johnson
   year: 2026
   url: https://blueprint.bryanjohnson.com/blogs/news/sauna-protocol
+researchEvidence:
+  designKind: single_person_report
+  designLabel: Single-person report
+  participantCount: 1
+  participantCountKind: reported
+  populationLabel: Bryan Johnson
+  aggregateRole: primary
+  cohortKey: bryan-johnson-sauna-self-report
+  notes:
+    - Source-attributed personal protocol and outcome report; do not treat as population-level evidence.
 artifacts:
   -
     artifactId: art_bryan_johnson_sauna_protocol_2026_01_28_html_snapshot

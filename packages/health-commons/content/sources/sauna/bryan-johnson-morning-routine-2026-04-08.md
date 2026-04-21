@@ -19,6 +19,16 @@ source:
   authors: Bryan Johnson
   year: 2026
   url: https://blueprint.bryanjohnson.com/blogs/news/morning-routine
+researchEvidence:
+  designKind: single_person_report
+  designLabel: Single-person report
+  participantCount: 1
+  participantCountKind: reported
+  populationLabel: Bryan Johnson
+  aggregateRole: duplicate
+  cohortKey: bryan-johnson-sauna-self-report
+  notes:
+    - Same single-person source family as the Bryan Johnson sauna protocol report.
 artifacts:
   -
     artifactId: art_bryan_johnson_morning_routine_2026_04_08_html_snapshot

@@ -1,24 +1,29 @@
 import { ImageResponse } from "next/og";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { dmSans400FontPath, fraunces400FontPath, fraunces600FontPath } from "./font-files";
+import {
+  dmSans400FontPath,
+  fraunces400FontPath,
+  fraunces600FontPath,
+} from "./font-files";
 
 export const alt = "Murph — Wearable data, made useful.";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
-const HEADLINE = "Wearable data,\nmade useful.";
+const HEADLINE = "Your personal,\nhealth assistant.";
 const SUBTEXT = "Expert-backed experiments, measured by your wearable.";
 
 export default async function OGImage() {
-  const [heroData, fraunces400Data, fraunces600Data, dmSans400Data] = await Promise.all([
-    readFile(join(process.cwd(), "public", "hero.jpg")).then(
-      (buf) => `data:image/jpeg;base64,${buf.toString("base64")}`
-    ),
-    readFile(fraunces400FontPath).then(toArrayBuffer),
-    readFile(fraunces600FontPath).then(toArrayBuffer),
-    readFile(dmSans400FontPath).then(toArrayBuffer),
-  ]);
+  const [heroData, fraunces400Data, fraunces600Data, dmSans400Data] =
+    await Promise.all([
+      readFile(join(process.cwd(), "public", "hero.jpg")).then(
+        (buf) => `data:image/jpeg;base64,${buf.toString("base64")}`
+      ),
+      readFile(fraunces400FontPath).then(toArrayBuffer),
+      readFile(fraunces600FontPath).then(toArrayBuffer),
+      readFile(dmSans400FontPath).then(toArrayBuffer),
+    ]);
 
   const fonts: { name: string; data: ArrayBuffer; weight: 400 | 600 }[] = [];
   fonts.push({ name: "Fraunces", data: fraunces400Data, weight: 400 });

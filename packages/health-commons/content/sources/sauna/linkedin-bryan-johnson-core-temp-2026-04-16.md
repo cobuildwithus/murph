@@ -23,6 +23,16 @@ source:
   authors: Bryan Johnson
   year: 2026
   url: https://www.linkedin.com/posts/bryanrjohnson_most-people-might-miss-the-biggest-benefit-activity-7451007192889024512-UFlX
+researchEvidence:
+  designKind: single_person_report
+  designLabel: Single-person report
+  participantCount: 1
+  participantCountKind: reported
+  populationLabel: Bryan Johnson
+  aggregateRole: duplicate
+  cohortKey: bryan-johnson-sauna-self-report
+  notes:
+    - Same single-person source family as the Bryan Johnson sauna protocol report.
 artifacts:
   -
     artifactId: art_linkedin_bryan_johnson_core_temp_2026_04_16_html_snapshot

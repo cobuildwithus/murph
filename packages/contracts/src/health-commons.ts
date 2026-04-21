@@ -65,6 +65,41 @@ export const HEALTH_COMMONS_ARTIFACT_RIGHTS_STATUSES = [
   "not_redistributable",
 ] as const;
 
+export const HEALTH_COMMONS_RESEARCH_EVIDENCE_DESIGN_KINDS = [
+  "randomized_controlled_trial",
+  "controlled_trial",
+  "crossover_trial",
+  "single_arm_trial",
+  "single_person_report",
+  "pilot_intervention",
+  "prospective_cohort",
+  "retrospective_registry",
+  "cross_sectional",
+  "case_control",
+  "acute_mechanistic",
+  "systematic_review",
+  "meta_analysis",
+  "narrative_review",
+  "guideline",
+  "expert_protocol",
+  "bibliography",
+  "other",
+] as const;
+
+export const HEALTH_COMMONS_RESEARCH_EVIDENCE_AGGREGATE_ROLES = [
+  "primary",
+  "synthesis",
+  "duplicate",
+  "context",
+  "unknown",
+] as const;
+
+export const HEALTH_COMMONS_RESEARCH_EVIDENCE_PARTICIPANT_COUNT_KINDS = [
+  "reported",
+  "approximate",
+  "range",
+] as const;
+
 const KEY_PATTERN = "^[a-z_]+:[a-z0-9][a-z0-9._/-]*(?:@[A-Za-z0-9._:-]+)?$";
 const STABLE_ID_PATTERN = "^[a-zA-Z0-9][a-zA-Z0-9._:-]*$";
 const PATH_SEGMENT_PATTERN = "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]+$";
@@ -223,6 +258,28 @@ export const healthCommonsSafetySchema = z
 
 export type HealthCommonsSafety = z.infer<typeof healthCommonsSafetySchema>;
 
+export const healthCommonsResearchEvidenceSchema = z
+  .object({
+    designKind: z.enum(HEALTH_COMMONS_RESEARCH_EVIDENCE_DESIGN_KINDS),
+    designLabel: shortStringSchema.optional(),
+    participantCount: z.number().int().positive().optional(),
+    participantCountKind: z
+      .enum(HEALTH_COMMONS_RESEARCH_EVIDENCE_PARTICIPANT_COUNT_KINDS)
+      .optional(),
+    includedStudyCount: z.number().int().positive().optional(),
+    populationLabel: shortStringSchema.optional(),
+    durationLabel: shortStringSchema.optional(),
+    aggregateRole: z.enum(HEALTH_COMMONS_RESEARCH_EVIDENCE_AGGREGATE_ROLES).optional(),
+    aggregationNote: longStringSchema.optional(),
+    cohortKey: shortStringSchema.optional(),
+    notes: z.array(longStringSchema).optional(),
+  })
+  .strict();
+
+export type HealthCommonsResearchEvidence = z.infer<
+  typeof healthCommonsResearchEvidenceSchema
+>;
+
 export const healthCommonsSourceSchema = z
   .object({
     kind: z.enum([
@@ -325,6 +382,7 @@ export const healthCommonsPageFrontmatterSchema = z
     claims: z.array(healthCommonsClaimSchema).optional(),
     safety: healthCommonsSafetySchema.optional(),
     source: healthCommonsSourceSchema.optional(),
+    researchEvidence: healthCommonsResearchEvidenceSchema.optional(),
     artifacts: z.array(healthCommonsArtifactPointerSchema).optional(),
     options: z.array(healthCommonsDisambiguationOptionSchema).optional(),
   })
