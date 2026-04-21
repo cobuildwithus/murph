@@ -400,9 +400,10 @@ async function readStoredHostedUserRootKeyEnvelope(input: {
       continue;
     }
 
+    const envelopeValue: unknown = JSON.parse(new TextDecoder().decode(plaintext));
     return {
       envelope: parseStoredHostedUserRootKeyEnvelope(
-        JSON.parse(new TextDecoder().decode(plaintext)) as unknown,
+        envelopeValue,
         input.userId,
       ),
       objectKey,

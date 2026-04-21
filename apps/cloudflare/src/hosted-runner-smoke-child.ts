@@ -26,7 +26,7 @@ import {
 const execFileAsync = promisify(execFile);
 
 async function main(): Promise<void> {
-  const input = parseHostedRunnerSmokeInput(JSON.parse(await readStandardInput()) as unknown);
+  const input = parseHostedRunnerSmokeInput(parseJsonValue(await readStandardInput()));
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-smoke-workspace-"));
 
   try {
@@ -238,6 +238,10 @@ function transcriptMatchesExpectedSnippet(transcript: string, expectedSnippet: s
 
 function sha256Hex(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
+}
+
+function parseJsonValue(value: string): unknown {
+  return JSON.parse(value);
 }
 
 async function assertPathExists(filePath: string): Promise<void> {

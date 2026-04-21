@@ -41,9 +41,7 @@ export async function runHostedExecutionChild(
 
   let input: HostedExecutionChildInput;
   try {
-    input = parseHostedExecutionChildInput(
-      JSON.parse(await readInput()) as unknown,
-    );
+    input = parseHostedExecutionChildInput(parseJsonValue(await readInput()));
   } catch (error) {
     const safeErrorDetails = buildHostedExecutionSafeErrorDetails(error);
     emitLog({
@@ -108,6 +106,10 @@ async function readStandardInput(): Promise<string> {
   }
 
   return Buffer.concat(chunks).toString("utf8");
+}
+
+function parseJsonValue(value: string): unknown {
+  return JSON.parse(value);
 }
 
 function parseHostedExecutionChildInput(value: unknown): HostedExecutionChildInput {

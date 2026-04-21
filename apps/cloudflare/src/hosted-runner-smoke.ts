@@ -68,7 +68,7 @@ export async function runHostedRunnerSmokeDetailed(input: unknown): Promise<Host
         );
       }
 
-      return parseHostedRunnerSmokeResult(JSON.parse(stdoutChunks.join("")));
+      return parseHostedRunnerSmokeResult(parseJsonValue(stdoutChunks.join("")));
     } finally {
       terminateChildProcess(child.pid);
     }
@@ -95,8 +95,12 @@ function readHostedNativeToolEnv(): Record<string, string> {
 }
 
 async function main(): Promise<void> {
-  const result = await runHostedRunnerSmokeDetailed(JSON.parse(await readStandardInput()) as unknown);
+  const result = await runHostedRunnerSmokeDetailed(parseJsonValue(await readStandardInput()));
   process.stdout.write(`${JSON.stringify(result)}\n`);
+}
+
+function parseJsonValue(value: string): unknown {
+  return JSON.parse(value);
 }
 
 function resolveHostedRunnerSmokeChildEntry(): string {

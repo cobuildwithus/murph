@@ -204,16 +204,16 @@ function parseRequiredJsonObject(value: string, label: string): Record<string, u
   let parsed: unknown;
 
   try {
-    parsed = JSON.parse(value) as unknown;
+    parsed = JSON.parse(value);
   } catch (error) {
     throw new TypeError(`${label} must be valid JSON: ${error instanceof Error ? error.message : String(error)}`);
   }
 
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+  if (!isRecord(parsed)) {
     throw new TypeError(`${label} must be a JSON object.`);
   }
 
-  return parsed as Record<string, unknown>;
+  return parsed;
 }
 
 function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
@@ -228,4 +228,8 @@ function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
   }
 
   return true;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

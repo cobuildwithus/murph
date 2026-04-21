@@ -177,8 +177,9 @@ export async function startHostedContainerEntrypoint(input: {
       }
 
       try {
+        const requestBody: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
         const parsed = await parseHostedExecutionContainerRunRequest(
-          JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown,
+          requestBody,
         );
         job = parsed.job;
         internalWorkerProxyToken = parsed.internalWorkerProxyToken;

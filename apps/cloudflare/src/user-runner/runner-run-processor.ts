@@ -599,7 +599,8 @@ export class RunnerRunProcessor {
     }
 
     try {
-      return parseHostedExecutionRunnerSharePack(JSON.parse(await response.text()) as unknown);
+      const payload: unknown = JSON.parse(await response.text());
+      return parseHostedExecutionRunnerSharePack(payload);
     } catch (error) {
       throw new Error("Hosted share payload read returned invalid JSON.", {
         cause: error,

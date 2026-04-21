@@ -25,6 +25,18 @@ import {
 } from "../src/runner-container.ts";
 import { CLOUDFLARE_HOSTED_RUNTIME_HOSTS } from "../src/internal-hosts.ts";
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function requireObject(value: unknown, label: string): Record<string, unknown> {
+  if (!isRecord(value)) {
+    throw new Error(`${label} must be an object.`);
+  }
+
+  return value;
+}
+
 describe("RunnerContainer", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -921,7 +933,7 @@ describe("RunnerContainer", () => {
     if (!firstCall) {
       throw new Error("Expected the runner container stub to be invoked.");
     }
-    const [body] = firstCall as unknown as [Record<string, unknown>];
+    const body = requireObject(firstCall.at(0), "Runner container invoke payload");
     expect(body).toMatchObject({
       job: {
         request: createRunnerRequest("evt_namespace"),

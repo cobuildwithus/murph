@@ -508,7 +508,7 @@ async function fetchHostedWebControlPlaneJson(input: {
   }
 
   try {
-    return JSON.parse(text) as unknown;
+    return JSON.parse(text);
   } catch (error) {
     throw new Error(`${input.description} returned invalid JSON.`, { cause: error });
   }
@@ -588,7 +588,7 @@ async function fetchHostedJson(input: {
   }
 
   try {
-    return JSON.parse(text) as unknown;
+    return JSON.parse(text);
   } catch (error) {
     throw new Error(`${input.description} returned invalid JSON.`, { cause: error });
   }

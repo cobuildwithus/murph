@@ -89,8 +89,9 @@ export async function readEncryptedR2Payload(input: {
     return null;
   }
 
+  const envelopeValue: unknown = JSON.parse(utf8Decoder.decode(await object.arrayBuffer()));
   const envelope = parseHostedCipherEnvelope(
-    JSON.parse(utf8Decoder.decode(await object.arrayBuffer())) as unknown,
+    envelopeValue,
     input.callerLabel ?? describeHostedStorageEnvelopeLabel(input.scope),
   );
 
@@ -149,7 +150,8 @@ export async function readEncryptedR2Json<T>(input: {
     return null;
   }
 
-  return input.parse(JSON.parse(utf8Decoder.decode(plaintext)) as unknown);
+  const parsed: unknown = JSON.parse(utf8Decoder.decode(plaintext));
+  return input.parse(parsed);
 }
 
 export async function writeEncryptedR2Json(input: {

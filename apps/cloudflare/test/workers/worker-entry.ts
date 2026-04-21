@@ -16,8 +16,12 @@ import type { HostedExecutionContainerNamespaceLike } from "../../src/runner-con
 import { createHostedUserKeyStore } from "../../src/user-key-store.js";
 import { RunnerBundleSync } from "../../src/user-runner/runner-bundle-sync.js";
 import { RunnerStateStore } from "../../src/user-runner/runner-state-store.js";
-import { HostedUserRunner } from "../../src/user-runner.ts";
+import {
+  HostedUserRunner,
+  type DurableObjectStateLike,
+} from "../../src/user-runner.ts";
 import type { WorkerEnvironmentSource } from "../../src/worker-routes/shared.ts";
+import { asWorkerStringEnvironment } from "../../src/worker-contracts.ts";
 import {
   armRunnerCommitPause,
   buildSeededDuplicateCommitPayload,
@@ -53,6 +57,16 @@ interface TestWakeExecutionResult {
   status: HostedExecutionUserStatus;
 }
 
+function toDurableObjectStateLike(ctx: DurableObjectState): DurableObjectStateLike {
+  return {
+    storage: ctx.storage as DurableObjectStateLike["storage"],
+  };
+}
+
+function readWorkerEnvironmentSource(): WorkerEnvironmentSource {
+  return env as WorkerEnvironmentSource;
+}
+
 export class VitestUserRunnerDurableObject extends DurableObject {
   private readonly bucket: R2BucketLike;
   private readonly runtimeEnv: HostedExecutionEnvironment;
@@ -62,14 +76,11 @@ export class VitestUserRunnerDurableObject extends DurableObject {
   constructor(ctx: DurableObjectState, env: TestWorkerEnvironment) {
     super(ctx, env);
     this.bucket = createTestControlledBucket(env.BUNDLES);
-    this.stateStore = new RunnerStateStore(
-      ctx as unknown as import("../../src/user-runner.ts").DurableObjectStateLike,
-    );
-    this.runtimeEnv = readHostedExecutionEnvironment(
-      env as unknown as Readonly<Record<string, string | undefined>>,
-    );
+    const state = toDurableObjectStateLike(ctx);
+    this.stateStore = new RunnerStateStore(state);
+    this.runtimeEnv = readHostedExecutionEnvironment(asWorkerStringEnvironment(env));
     this.runner = new HostedUserRunner(
-      ctx as unknown as import("../../src/user-runner.ts").DurableObjectStateLike,
+      state,
       this.runtimeEnv,
       this.bucket,
       env,
@@ -241,7 +252,8 @@ async function handleTestRoute(request: Request): Promise<Response | null> {
   const url = new URL(request.url);
 
   if (url.pathname === "/__test/wake-with-outcome" && request.method === "POST") {
-    const wake = readTestWake(await request.json() as unknown);
+    const wakePayload: unknown = await request.json();
+    const wake = readTestWake(wakePayload);
     const runner = getUserRunnerStub(wake.userId);
     await runner.bootstrapUser(wake.userId);
     return Response.json(await runner.wakeWithOutcome(wake));
@@ -444,7 +456,7 @@ function resolvePrimaryWake(
 
 async function resolveHostedUserCryptoContext(userId: string) {
   const environment = readHostedExecutionEnvironment(
-    env as unknown as Readonly<Record<string, string | undefined>>,
+    asWorkerStringEnvironment(readWorkerEnvironmentSource()),
   );
 
   const store = createHostedUserKeyStore({

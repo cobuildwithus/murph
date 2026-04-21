@@ -132,16 +132,16 @@ function parseJsonObject(value: string, label: string): Record<string, unknown> 
   let parsed: unknown;
 
   try {
-    parsed = JSON.parse(value) as unknown;
+    parsed = JSON.parse(value);
   } catch (error) {
     throw new TypeError(`${label} must be valid JSON: ${error instanceof Error ? error.message : String(error)}`);
   }
 
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+  if (!isRecord(parsed)) {
     throw new TypeError(`${label} must be a JSON object.`);
   }
 
-  return parsed as Record<string, unknown>;
+  return parsed;
 }
 
 function parseEcP256PrivateJwk(value: unknown, label: string): JsonWebKey {
@@ -197,6 +197,10 @@ function requireConfiguredString(value: string | undefined, label: string): stri
   }
 
   return normalized;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function createNonce(): string {
