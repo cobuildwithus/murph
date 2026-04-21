@@ -10,6 +10,7 @@ import {
   normalizeAssistantPersistedHeaders,
   normalizeAssistantProviderConfig,
   type AssistantProviderConfig,
+  type AssistantProviderConfigLike,
   type AssistantProviderConfigInput,
 } from './assistant/provider-config.js'
 import { normalizeNullableString } from './assistant/shared.js'
@@ -33,7 +34,7 @@ export function createDefaultLocalAssistantModelTarget(): AssistantModelTarget {
 }
 
 export function createAssistantModelTarget(
-  input: AssistantProviderConfigInput | null | undefined,
+  input: AssistantProviderConfigLike | null | undefined,
 ): AssistantModelTarget | null {
   if (!input) {
     return null
@@ -136,38 +137,39 @@ export const sanitizeAssistantBackendTargetForPersistence =
 function convertAssistantProviderConfigToModelTarget(
   config: AssistantProviderConfig,
 ): AssistantModelTarget {
-  switch (config.provider) {
+  switch (config.target.kind) {
+    case 'responses':
     case 'openai-compatible':
       return {
         adapter: 'openai-compatible',
-        apiKeyEnv: config.apiKeyEnv,
-        endpoint: config.baseUrl,
-        headers: config.headers,
-        model: config.model,
-        presetId: config.presetId,
-        providerName: config.providerName,
+        apiKeyEnv: config.target.apiKeyEnv,
+        endpoint: config.target.baseUrl,
+        headers: config.target.headers,
+        model: config.target.model,
+        presetId: config.target.presetId,
+        providerName: config.target.providerName,
         reasoningEffort: normalizeNullableEnumValue(
-          config.reasoningEffort,
+          config.policy.reasoningEffort,
           assistantReasoningEffortValues,
         ),
-        webSearch: config.webSearch,
-        ...(config.zeroDataRetention ? { zeroDataRetention: true } : {}),
+        webSearch: config.policy.webSearch,
+        ...(config.policy.zeroDataRetention ? { zeroDataRetention: true } : {}),
       }
     case 'codex-cli':
     default:
       return {
         adapter: 'codex-cli',
-        approvalPolicy: config.approvalPolicy,
-        codexCommand: config.codexCommand,
-        ...(config.codexHome ? { codexHome: config.codexHome } : {}),
-        model: config.model,
-        oss: config.oss,
-        profile: config.profile,
+        approvalPolicy: config.policy.approvalPolicy,
+        codexCommand: config.target.codexCommand,
+        ...(config.target.codexHome ? { codexHome: config.target.codexHome } : {}),
+        model: config.target.model,
+        oss: config.target.oss,
+        profile: config.target.profile,
         reasoningEffort: normalizeNullableEnumValue(
-          config.reasoningEffort,
+          config.policy.reasoningEffort,
           assistantReasoningEffortValues,
         ),
-        sandbox: config.sandbox,
+        sandbox: config.policy.sandbox,
       }
   }
 }

@@ -136,7 +136,7 @@ test('setup assistant defaults round-trip between saved operator defaults and se
       endpoint: 'https://openrouter.ai/api/v1',
       headers: null,
       model: 'openrouter/auto',
-      presetId: null,
+      presetId: 'openrouter',
       providerName: 'openrouter',
       reasoningEffort: 'high',
       webSearch: null,
@@ -164,7 +164,7 @@ test('setup assistant defaults round-trip between saved operator defaults and se
   })
   assert.deepEqual(buildSetupAssistantOptionsFromDefaults(openAiDefaults), {
     assistantPreset: 'openai-compatible',
-    assistantProviderPreset: undefined,
+    assistantProviderPreset: 'openrouter',
     assistantModel: 'openrouter/auto',
     assistantBaseUrl: 'https://openrouter.ai/api/v1',
     assistantApiKeyEnv: 'OPENROUTER_API_KEY',
@@ -505,7 +505,7 @@ test('setup assistant selection normalizes chosen assistant values into operator
       endpoint: 'https://openrouter.ai/api/v1',
       headers: null,
       model: 'gpt-4o-mini',
-      presetId: null,
+      presetId: 'openrouter',
       providerName: 'openrouter',
       reasoningEffort: 'high',
       webSearch: null,

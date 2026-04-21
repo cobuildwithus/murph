@@ -5,7 +5,7 @@ import {
   supportsAssistantNativeResume,
   supportsAssistantReasoningEffort,
   supportsAssistantZeroDataRetention,
-  type AssistantProviderConfigInput,
+  type AssistantProviderConfigLike,
 } from '@murphai/operator-config/assistant/provider-config'
 import {
   mergeAssistantProviderActivityLabels,
@@ -77,7 +77,7 @@ export function resolveAssistantProviderExecutionCapabilities(
 }
 
 export function resolveAssistantProviderTargetCapabilities(
-  input: AssistantProviderConfigInput | null | undefined,
+  input: AssistantProviderConfigLike | null | undefined,
 ): AssistantProviderCapabilities {
   const normalized = normalizeAssistantProviderConfig(input)
   return stripAssistantProviderExecutionCapabilities({
@@ -91,7 +91,7 @@ export function resolveAssistantProviderTargetCapabilities(
 }
 
 export function resolveAssistantProviderTargetExecutionCapabilities(
-  input: AssistantProviderConfigInput | null | undefined,
+  input: AssistantProviderConfigLike | null | undefined,
 ): AssistantProviderExecutionCapabilities {
   const normalized = normalizeAssistantProviderConfig(input)
   return {
@@ -105,7 +105,7 @@ export function resolveAssistantProviderTargetExecutionCapabilities(
 }
 
 export function resolveAssistantProviderLabel(
-  input: AssistantProviderConfigInput | null | undefined,
+  input: AssistantProviderConfigLike | null | undefined,
 ): string {
   const normalized = normalizeAssistantProviderConfig(input)
   const definition = resolveAssistantProviderDefinition(
@@ -132,7 +132,7 @@ export async function discoverAssistantProviderModels(input: {
 }
 
 export function resolveAssistantProviderStaticModels(
-  input: AssistantProviderConfigInput | null | undefined,
+  input: AssistantProviderConfigLike | null | undefined,
 ): readonly AssistantCatalogModel[] {
   const normalized = normalizeAssistantProviderConfig(input)
   return resolveAssistantProviderDefinition(

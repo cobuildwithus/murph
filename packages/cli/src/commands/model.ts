@@ -493,6 +493,13 @@ function createModelSetupOptions(input: {
   )
   if (input.wizardSelection) {
     delete savedAssistantOptions.assistantModel
+    if (
+      'assistantBaseUrl' in input.wizardSelection ||
+      'assistantApiKeyEnv' in input.wizardSelection ||
+      'assistantProviderName' in input.wizardSelection
+    ) {
+      delete savedAssistantOptions.assistantProviderPreset
+    }
     if (input.wizardSelection.assistantBaseUrl === null) {
       delete savedAssistantOptions.assistantBaseUrl
     }

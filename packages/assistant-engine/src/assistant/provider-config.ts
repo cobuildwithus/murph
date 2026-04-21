@@ -3,31 +3,31 @@ import { readAssistantEnvString } from '@murphai/operator-config/assistant/share
 import {
   normalizeAssistantProviderConfig,
   resolveAssistantProviderRuntimeTarget,
-  type AssistantProviderConfigInput,
+  type AssistantProviderConfigLike,
 } from '@murphai/operator-config/assistant/provider-config'
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 
 export function resolveAssistantModelSpecFromProviderConfig(
-  input: AssistantProviderConfigInput | null | undefined,
+  input: AssistantProviderConfigLike | null | undefined,
   env: NodeJS.ProcessEnv = process.env,
 ): AssistantModelSpec | null {
   const normalized = normalizeAssistantProviderConfig(input)
-  if (normalized.provider !== 'openai-compatible') {
+  if (normalized.target.kind === 'codex-cli') {
     return null
   }
 
   const resolvedRuntimeTarget = resolveAssistantProviderRuntimeTarget(normalized)
-  const model = normalizeNullableString(normalized.model)
+  const model = normalizeNullableString(normalized.target.model)
   if (!model) {
     return null
   }
 
-  const baseUrl = normalizeNullableString(normalized.baseUrl)
+  const baseUrl = normalizeNullableString(normalized.target.baseUrl)
   if (!baseUrl && resolvedRuntimeTarget.executionDriver !== 'responses') {
     return null
   }
 
-  const apiKeyEnv = normalizeNullableString(normalized.apiKeyEnv)
+  const apiKeyEnv = normalizeNullableString(normalized.target.apiKeyEnv)
   const apiKeyValue = readAssistantEnvString(env, apiKeyEnv) ?? undefined
   const responsesRequestPolicy = resolveAssistantResponsesRequestPolicy(normalized)
 
@@ -37,8 +37,10 @@ export function resolveAssistantModelSpecFromProviderConfig(
     model,
     ...(apiKeyValue ? { apiKey: apiKeyValue } : {}),
     ...(apiKeyEnv ? { apiKeyEnv } : {}),
-    ...(normalized.headers ? { headers: normalized.headers } : {}),
-    ...(normalized.providerName ? { providerName: normalized.providerName } : {}),
+    ...(normalized.target.headers ? { headers: normalized.target.headers } : {}),
+    ...(normalized.target.providerName
+      ? { providerName: normalized.target.providerName }
+      : {}),
     ...(responsesRequestPolicy ? { responsesRequestPolicy } : {}),
   }
 }
@@ -46,7 +48,11 @@ export function resolveAssistantModelSpecFromProviderConfig(
 function resolveAssistantResponsesRequestPolicy(
   input: ReturnType<typeof normalizeAssistantProviderConfig>,
 ): AssistantModelSpec['responsesRequestPolicy'] {
-  return input.presetId === 'vercel-ai-gateway' && input.zeroDataRetention === true
+  return (
+    input.target.kind === 'responses' &&
+    input.target.via === 'vercel-ai-gateway' &&
+    input.policy.zeroDataRetention === true
+  )
     ? {
         gatewayZeroDataRetention: true,
       }

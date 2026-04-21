@@ -23,6 +23,7 @@ import {
   normalizeAssistantHeaders,
   normalizeAssistantPersistedHeaders,
   normalizeAssistantProviderConfig,
+  resolveAssistantChatProviderFromConfig,
   resolveAssistantProviderRuntimeTarget,
   serializeAssistantProviderOperatorDefaults,
   serializeAssistantProviderSessionOptions,
@@ -139,7 +140,6 @@ test('assistant provider config helpers infer, merge, compact, and serialize by 
   assert.deepEqual(
     {
       policy: mergedOpenAi.policy,
-      provider: mergedOpenAi.provider,
       target: mergedOpenAi.target,
     },
     {
@@ -150,7 +150,6 @@ test('assistant provider config helpers infer, merge, compact, and serialize by 
         webSearch: null,
         zeroDataRetention: null,
       },
-      provider: 'openai-compatible',
       target: {
         kind: 'responses',
         via: 'openai',
@@ -166,6 +165,7 @@ test('assistant provider config helpers infer, merge, compact, and serialize by 
       },
     },
   )
+  assert.equal(resolveAssistantChatProviderFromConfig(mergedOpenAi), 'openai-compatible')
   const mergedOpenAiRuntime = resolveAssistantProviderRuntimeTarget(mergedOpenAi)
   assert.deepEqual(serializeAssistantProviderSessionOptions(mergedOpenAiInput), {
     apiKeyEnv: 'OPENAI_API_KEY',
@@ -242,7 +242,6 @@ test('assistant provider config helpers infer, merge, compact, and serialize by 
   assert.deepEqual(
     {
       policy: mergedCodex.policy,
-      provider: mergedCodex.provider,
       target: mergedCodex.target,
     },
     {
@@ -253,7 +252,6 @@ test('assistant provider config helpers infer, merge, compact, and serialize by 
         webSearch: null,
         zeroDataRetention: null,
       },
-      provider: 'codex-cli',
       target: {
         kind: 'codex-cli',
         codexCommand: 'codex',
@@ -264,6 +262,7 @@ test('assistant provider config helpers infer, merge, compact, and serialize by 
       },
     },
   )
+  assert.equal(resolveAssistantChatProviderFromConfig(mergedCodex), 'codex-cli')
   assert.equal(
     normalizeAssistantProviderConfig({ provider: 'codex-cli' }).policy.reasoningEffort,
     DEFAULT_MURPH_CODEX_REASONING_EFFORT,
@@ -310,6 +309,17 @@ test('assistant provider config helpers infer, merge, compact, and serialize by 
     }),
     true,
   )
+  const normalizedStaleCompatiblePreset = normalizeAssistantProviderConfig({
+    provider: 'openai-compatible',
+    baseUrl: 'http://127.0.0.1:11434/v1',
+    providerName: 'ollama',
+    presetId: 'openrouter',
+  })
+  assert.notEqual(normalizedStaleCompatiblePreset.target.kind, 'codex-cli')
+  if (normalizedStaleCompatiblePreset.target.kind === 'codex-cli') {
+    throw new Error('Expected an OpenAI-compatible normalized provider target.')
+  }
+  assert.equal(normalizedStaleCompatiblePreset.target.presetId, 'ollama')
 })
 
 test('hosted assistant helpers normalize equality, labels, and active-profile fallback', () => {
