@@ -19,6 +19,7 @@ import type {
 const localConfig: HostedLocalDevConfig = {
   skipWeb: false,
   skipPrismaMigrate: false,
+  skipStripeListen: false,
   skipVercelPull: false,
   webHost: "127.0.0.1",
   webPort: 3000,
