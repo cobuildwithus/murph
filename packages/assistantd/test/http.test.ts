@@ -10,6 +10,7 @@ import {
   type AssistantHttpRequestHandler,
 } from '../src/http.js'
 import type { AssistantLocalService } from '../src/service.js'
+import { createUnusedAssistantService } from './service-test-helpers.js'
 
 const TEST_PROVIDER_OPTIONS = {
   continuityFingerprint: 'fingerprint-http-test',
@@ -82,12 +83,18 @@ const TEST_OUTBOX_INTENT = {
     kind: 'participant',
     target: 'chat-123',
   },
+  deliverySource: null,
   explicitTarget: null,
   delivery: null,
   deliveryConfirmationPending: false,
   deliveryIdempotencyKey: null,
   deliveryTransportIdempotent: false,
   lastError: null,
+} as const
+
+const TEST_THREAD_BINDING_DELIVERY = {
+  kind: 'thread',
+  target: 'chat-123',
 } as const
 
 const TEST_CRON_JOB = {
@@ -217,7 +224,7 @@ function createGatewayServiceMock(
       live: true,
     }),
     ...overrides,
-  } as AssistantLocalService['gateway']
+  }
 }
 
 function createAssistantdTestFetch(
@@ -451,7 +458,7 @@ test('assistantd http server rejects non-loopback listener hosts', async () => {
         controlToken: 'control-secret',
         host: '0.0.0.0',
         port: 0,
-        service: {} as AssistantLocalService,
+        service: createUnusedAssistantService(),
       }),
     /Assistant daemon listener host must be a loopback hostname or address\./u,
   )
@@ -460,7 +467,7 @@ test('assistantd http server rejects non-loopback listener hosts', async () => {
 test('assistantd http server enforces bearer auth, validates requests, and routes calls to the local assistant service', async () => {
   const sendMessage = vi.fn(async (input: any) => ({
     vault: input.vault ?? '/tmp/vault',
-    status: 'completed',
+    status: 'completed' as const,
     prompt: input.prompt,
     response: 'daemon response',
     session: TEST_SESSION,
@@ -482,10 +489,7 @@ test('assistantd http server enforces bearer auth, validates requests, and route
     jobId: input.job,
     jobName: TEST_CRON_JOB.name,
     target: TEST_CRON_JOB.target,
-    bindingDelivery: {
-      kind: 'thread',
-      target: 'chat-123',
-    },
+    bindingDelivery: TEST_THREAD_BINDING_DELIVERY,
   }))
   const setCronTarget = vi.fn(async (input: {
     channel?: string | null
@@ -513,10 +517,7 @@ test('assistantd http server enforces bearer auth, validates requests, and route
       jobId: input.job,
       jobName: TEST_CRON_JOB.name,
       target: TEST_CRON_JOB.target,
-      bindingDelivery: {
-        kind: 'thread',
-        target: 'chat-123',
-      },
+      bindingDelivery: TEST_THREAD_BINDING_DELIVERY,
     },
     afterTarget: {
       jobId: input.job,
@@ -664,7 +665,7 @@ test('assistantd http server enforces bearer auth, validates requests, and route
   const drainOutbox = vi.fn(async () => ({ attempted: 0, sent: 0, failed: 0, queued: 0 }))
   const processDueCron = vi.fn(async () => ({ failed: 0, processed: 0, succeeded: 0 } as any))
   const updateSessionOptions = vi.fn(async () => TEST_SESSION as any)
-  const service = {
+  const service: AssistantLocalService = {
     drainOutbox,
     getCronJob,
     getCronTarget,
@@ -719,7 +720,7 @@ test('assistantd http server enforces bearer auth, validates requests, and route
     sendMessage,
     updateSessionOptions,
     vault: '/tmp/vault',
-  } as AssistantLocalService
+  }
 
   const baseUrl = 'http://127.0.0.1:50241'
   const fetch = createAssistantdTestFetch(
@@ -1620,7 +1621,7 @@ test('assistantd http server enforces bearer auth, validates requests, and route
 })
 
 test('assistant http handler rejects continuous automation without the inbox daemon', async () => {
-  const service = {
+  const service: AssistantLocalService = {
     drainOutbox: async () => ({ attempted: 0, sent: 0, failed: 0, queued: 0 }),
     getSession: async () => TEST_SESSION as any,
     health: async () => ({
@@ -1724,7 +1725,7 @@ test('assistant http handler rejects continuous automation without the inbox dae
     gateway: createGatewayServiceMock(),
     updateSessionOptions: async () => TEST_SESSION as any,
     vault: '/tmp/vault',
-  } as AssistantLocalService
+  }
 
   const baseUrl = 'http://127.0.0.1:50241'
   const fetch = createAssistantdTestFetch(
@@ -1766,7 +1767,7 @@ test('assistant http handler rejects continuous automation without the inbox dae
 
 test('assistantd http server preserves typed assistant error codes for invalid ids and missing cron jobs', async () => {
   const getOutboxIntent = vi.fn(async () => TEST_OUTBOX_INTENT as any)
-  const service = {
+  const service: AssistantLocalService = {
     drainOutbox: async () => ({ attempted: 0, sent: 0, failed: 0, queued: 0 }),
     getCronJob: async () => {
       throw Object.assign(new Error('Assistant cron job "missing-job" was not found.'), {
@@ -1935,7 +1936,7 @@ test('assistantd http server preserves typed assistant error codes for invalid i
     gateway: createGatewayServiceMock(),
     updateSessionOptions: async () => TEST_SESSION as any,
     vault: '/tmp/vault',
-  } as AssistantLocalService
+  }
 
   const baseUrl = 'http://127.0.0.1:50241'
   const fetch = createAssistantdTestFetch(
@@ -1985,7 +1986,7 @@ test('assistantd http server preserves typed assistant error codes for invalid i
 })
 
 test('assistantd http server does not reflect raw internal errors back to the client', async () => {
-  const service = {
+  const service: AssistantLocalService = {
     drainOutbox: async () => ({ attempted: 0, sent: 0, failed: 0, queued: 0 }),
     getSession: async () => TEST_SESSION as any,
     health: async () => ({
@@ -2072,7 +2073,7 @@ test('assistantd http server does not reflect raw internal errors back to the cl
     gateway: createGatewayServiceMock(),
     updateSessionOptions: async () => TEST_SESSION as any,
     vault: '/tmp/vault',
-  } as AssistantLocalService
+  }
 
   const baseUrl = 'http://127.0.0.1:50241'
   const fetch = createAssistantdTestFetch(
