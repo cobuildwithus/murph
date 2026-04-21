@@ -159,9 +159,19 @@ function requireAssistantProviderUserPrompt(
   )
 }
 
+function hasAssistantProviderNativeResume(
+  input: AssistantProviderTurnExecutionInput,
+): boolean {
+  return normalizeNullableString(input.resumeProviderSessionId) !== null
+}
+
 function resolveAssistantProviderContextSections(
   input: AssistantProviderTurnExecutionInput,
 ): string[] {
+  if (hasAssistantProviderNativeResume(input)) {
+    return []
+  }
+
   const contextLines =
     input.sessionContext?.binding
       ? getAssistantBindingContextLines(input.sessionContext.binding)
@@ -206,6 +216,30 @@ function sanitizeAssistantModelContentParts(
 
     return [part]
   })
+}
+
+function resolveAssistantProviderFlatPromptTranscriptSection(
+  input: AssistantProviderTurnExecutionInput,
+): string | null {
+  if (hasAssistantProviderNativeResume(input)) {
+    return null
+  }
+
+  const transcriptLines = (input.conversationMessages ?? []).flatMap((message) => {
+    const content = Array.isArray(message.content)
+      ? serializeAssistantConversationContent(message.content)
+      : message.content.trim()
+    if (content.length === 0) {
+      return []
+    }
+
+    const label = message.role === 'assistant' ? 'Assistant' : 'User'
+    return [`${label}:\n${content}`]
+  })
+
+  return transcriptLines.length > 0
+    ? `Conversation so far:\n${transcriptLines.join('\n\n')}`
+    : null
 }
 
 function serializeAssistantConversationContent(
@@ -258,12 +292,13 @@ export function resolveAssistantProviderPrompt(
     return explicitPrompt
   }
 
-  const systemPrompt = input.resumeProviderSessionId
+  const systemPrompt = hasAssistantProviderNativeResume(input)
     ? null
     : normalizeNullableString(input.systemPrompt)
 
   return [
     systemPrompt,
+    resolveAssistantProviderFlatPromptTranscriptSection(input),
     resolveAssistantProviderComposedUserContent(input, {
       labelUserPrompt: true,
     }),

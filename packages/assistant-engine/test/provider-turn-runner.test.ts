@@ -642,6 +642,7 @@ describe('executeProviderTurnWithRecovery', () => {
 
     runnerMocks.resolveAssistantProviderTargetExecutionCapabilities.mockReturnValue({
       murphCommandSurface: 'direct-cli',
+      requestFormat: 'messages',
       supportsNativeResume: true,
       supportsToolRuntime: false,
     })
@@ -708,7 +709,7 @@ describe('executeProviderTurnWithRecovery', () => {
     )
   })
 
-  it('keeps a small transcript tail for codex-session resume so stale-session fallback can bootstrap', async () => {
+  it('keeps bootstrap context and transcript available for flat-prompt resume fallback', async () => {
     const session = createAssistantSession({
       providerSessionId: 'provider-session-primary',
       resumeRouteId: 'route-primary',
@@ -723,6 +724,7 @@ describe('executeProviderTurnWithRecovery', () => {
 
     runnerMocks.resolveAssistantProviderTargetExecutionCapabilities.mockReturnValue({
       murphCommandSurface: 'direct-cli',
+      requestFormat: 'flat-prompt',
       supportsNativeResume: true,
       supportsToolRuntime: false,
     })
@@ -762,6 +764,10 @@ describe('executeProviderTurnWithRecovery', () => {
       '/tmp/test-vault',
       session.sessionId,
     )
+    expect(runnerMocks.resolveAssistantCliSurfaceBootstrapContext).toHaveBeenCalled()
+    expect(runnerMocks.buildAssistantVaultOverviewBlock).toHaveBeenCalledWith(
+      '/tmp/test-vault',
+    )
     expect(runnerMocks.executeAssistantProviderTurnAttempt).toHaveBeenCalledWith(
       expect.objectContaining({
         conversationMessages: expect.arrayContaining([
@@ -775,12 +781,17 @@ describe('executeProviderTurnWithRecovery', () => {
           },
         ]),
         resumeProviderSessionId: 'provider-session-primary',
+        sessionContext: {
+          binding: session.binding,
+        },
+        systemPrompt:
+          'prompt:none:later:cli-bootstrap:Vault overview for navigation only:\n- Canonical coverage includes 1 meal event.',
       }),
     )
     expect(
       runnerMocks.executeAssistantProviderTurnAttempt.mock.calls.at(-1)?.[0]
         ?.conversationMessages,
-    ).toHaveLength(20)
+    ).toHaveLength(25)
   })
 
   it('preserves native resume and skips bootstrap overlays when onboarding stays eligible', async () => {
@@ -798,6 +809,7 @@ describe('executeProviderTurnWithRecovery', () => {
 
     runnerMocks.resolveAssistantProviderTargetExecutionCapabilities.mockReturnValue({
       murphCommandSurface: 'direct-cli',
+      requestFormat: 'messages',
       supportsNativeResume: true,
       supportsToolRuntime: false,
     })

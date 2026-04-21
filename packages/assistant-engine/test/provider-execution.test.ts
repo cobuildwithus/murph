@@ -443,7 +443,7 @@ describe('openAiCompatibleProviderDefinition.executeTurn', () => {
         openai: {
           previousResponseId: 'resume-session-123',
           reasoningEffort: 'medium',
-          store: false,
+          store: true,
         },
       },
       stopWhen: {
@@ -698,7 +698,7 @@ describe('openAiCompatibleProviderDefinition.executeTurn', () => {
       providerOptions: {
         openai: {
           reasoningEffort: 'medium',
-          store: false,
+          store: true,
         },
       },
       stopWhen: {
@@ -1077,14 +1077,40 @@ describe('codexCliProviderDefinition', () => {
 
     await expect(
       codexCliProviderDefinition.executeTurn({
+        continuityContext: 'Fresh bootstrap context.',
+        conversationMessages: [
+          {
+            content: 'Earlier user turn',
+            role: 'user',
+          },
+          {
+            content: 'Earlier assistant turn',
+            role: 'assistant',
+          },
+        ],
         env: {},
-        prompt: '  retry stale resume  ',
         providerConfig: normalizeAssistantProviderConfig({
           provider: 'codex-cli',
           model: 'codex-mini',
           oss: false,
         }),
         resumeProviderSessionId: 'stale-session',
+        sessionContext: {
+          binding: {
+            actorId: 'contact:alice',
+            channel: 'telegram',
+            conversationKey: 'channel:telegram|thread:chat-55',
+            delivery: {
+              kind: 'thread',
+              target: 'chat-55',
+            },
+            identityId: null,
+            threadId: 'chat-55',
+            threadIsDirect: true,
+          },
+        },
+        systemPrompt: 'System/bootstrap instructions.',
+        userPrompt: 'Current user turn',
         workingDirectory: WORKING_DIRECTORY,
       }),
     ).resolves.toMatchObject({
@@ -1099,14 +1125,25 @@ describe('codexCliProviderDefinition', () => {
     expect(providerMocks.executeCodexPrompt).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
+        prompt: 'User message:\nCurrent user turn',
         resumeSessionId: 'stale-session',
       }),
     )
     expect(providerMocks.executeCodexPrompt).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({
+        prompt: expect.stringContaining('System/bootstrap instructions.'),
         resumeSessionId: undefined,
       }),
+    )
+    expect(providerMocks.executeCodexPrompt.mock.calls[1]?.[0]?.prompt).toContain(
+      'Conversation so far:\nUser:\nEarlier user turn\n\nAssistant:\nEarlier assistant turn',
+    )
+    expect(providerMocks.executeCodexPrompt.mock.calls[1]?.[0]?.prompt).toContain(
+      'Fresh bootstrap context.',
+    )
+    expect(providerMocks.executeCodexPrompt.mock.calls[1]?.[0]?.prompt).toContain(
+      'User message:\nCurrent user turn',
     )
   })
 
