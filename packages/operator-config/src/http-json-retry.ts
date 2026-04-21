@@ -101,7 +101,7 @@ function tryParseJsonText(rawText: string):
   try {
     return {
       ok: true,
-      value: JSON.parse(rawText) as unknown,
+      value: JSON.parse(rawText),
     }
   } catch {
     return { ok: false }

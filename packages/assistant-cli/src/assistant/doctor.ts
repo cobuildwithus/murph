@@ -452,7 +452,7 @@ async function scanJsonFile<T>(
 }> {
   try {
     const raw = await readFile(filePath, 'utf8')
-    const parsed = JSON.parse(raw) as unknown
+    const parsed = JSON.parse(raw)
 
     if (versionedState) {
       parseVersionedJsonStateEnvelope(parsed, {
@@ -505,7 +505,7 @@ async function scanJsonDirectory<T>(
     fileCount += 1
     try {
       const raw = await readFile(path.join(directory, file), 'utf8')
-      schema.parse(JSON.parse(raw) as unknown)
+      schema.parse(JSON.parse(raw))
     } catch {
       parseErrors += 1
     }
@@ -532,7 +532,7 @@ async function scanSessionFiles(directory: string): Promise<{
     const filePath = path.join(directory, entry)
     try {
       const raw = await readFile(filePath, 'utf8')
-      const session = assistantSessionSchema.parse(JSON.parse(raw) as unknown)
+      const session = assistantSessionSchema.parse(JSON.parse(raw))
       sessions.push({ sessionId: session.sessionId })
     } catch {
       parseErrors += 1
@@ -640,7 +640,7 @@ async function scanTurnReceiptFiles(directory: string): Promise<{
     fileCount += 1
     try {
       const raw = await readFile(path.join(directory, file), 'utf8')
-      receipts.push(assistantTurnReceiptSchema.parse(JSON.parse(raw) as unknown))
+      receipts.push(assistantTurnReceiptSchema.parse(JSON.parse(raw)))
     } catch {
       parseErrors += 1
     }
@@ -672,7 +672,7 @@ async function scanOutboxFiles(directory: string): Promise<{
     }
     try {
       const raw = await readFile(path.join(directory, file), 'utf8')
-      intents.push(assistantOutboxIntentSchema.parse(JSON.parse(raw) as unknown))
+      intents.push(assistantOutboxIntentSchema.parse(JSON.parse(raw)))
     } catch {
       parseErrors += 1
     }

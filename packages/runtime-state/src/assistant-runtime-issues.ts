@@ -120,7 +120,7 @@ export async function listPendingAssistantRuntimeIssueRecords(input: {
         .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
         .map(async (entry) => {
           const raw = await readFile(path.join(paths.issuesPendingDirectory, entry.name), "utf8");
-          return parseAssistantRuntimeIssueRecord(JSON.parse(raw) as unknown);
+          return parseAssistantRuntimeIssueRecord(JSON.parse(raw));
         }),
     );
 

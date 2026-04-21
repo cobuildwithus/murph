@@ -101,7 +101,7 @@ export async function listPendingAssistantUsageRecords(input: {
         .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
         .map(async (entry) => {
           const raw = await readFile(path.join(paths.usagePendingDirectory, entry.name), "utf8");
-          return parseAssistantUsageRecord(JSON.parse(raw) as unknown);
+          return parseAssistantUsageRecord(JSON.parse(raw));
         }),
     );
 

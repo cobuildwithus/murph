@@ -460,7 +460,7 @@ async function readInitialSetupWizardAutomationState(vault: string) {
 
   try {
     const raw = await readFile(automationPath, 'utf8')
-    return assistantAutomationStateSchema.parse(JSON.parse(raw) as unknown)
+    return assistantAutomationStateSchema.parse(JSON.parse(raw))
   } catch (error) {
     if (
       typeof error === 'object' &&
@@ -514,7 +514,7 @@ function resolveInitialSetupWizardInboxConfigPath(vault: string): string {
 
 function parseInitialSetupWizardInboxConfig(raw: string) {
   return initialSetupWizardInboxConfigEnvelopeSchema.parse(
-    JSON.parse(raw) as unknown,
+    JSON.parse(raw),
   ).value
 }
 

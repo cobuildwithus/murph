@@ -33,7 +33,7 @@ export async function readVersionedJsonStateFile<T>(
 
   return {
     filePath: input.currentPath,
-    value: parseVersionedJsonStateEnvelope(JSON.parse(raw) as unknown, input),
+    value: parseVersionedJsonStateEnvelope(JSON.parse(raw), input),
   };
 }
 

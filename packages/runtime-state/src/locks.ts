@@ -302,7 +302,7 @@ async function readOptionalJson(filePath: string): Promise<
     const text = await readFile(filePath, "utf8");
     return {
       state: "present",
-      value: JSON.parse(text) as unknown,
+      value: JSON.parse(text),
       identity: await readRequiredPathIdentity(filePath),
       text,
     };

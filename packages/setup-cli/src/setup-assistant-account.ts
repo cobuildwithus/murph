@@ -130,7 +130,7 @@ export function detectCodexAccountFromAuthJson(
 ): SetupAssistantAccount | null {
   let parsed: unknown
   try {
-    parsed = JSON.parse(rawAuthJson) as unknown
+    parsed = JSON.parse(rawAuthJson)
   } catch {
     return null
   }
@@ -195,7 +195,7 @@ export function parseJwtPayload(token: string): Record<string, unknown> | null {
 
   try {
     const decoded = Buffer.from(payload, 'base64').toString('utf8')
-    const parsed = JSON.parse(decoded) as unknown
+    const parsed = JSON.parse(decoded)
     return asRecord(parsed)
   } catch {
     return null
@@ -472,7 +472,7 @@ async function readCodexRpcResult(
 
     let parsed: unknown
     try {
-      parsed = JSON.parse(trimmed) as unknown
+      parsed = JSON.parse(trimmed)
     } catch {
       continue
     }

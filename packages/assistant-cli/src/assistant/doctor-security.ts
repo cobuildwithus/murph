@@ -77,7 +77,7 @@ async function scanAssistantSessionInlineSecrets(
 
     try {
       const raw = await readFile(path.join(paths.sessionsDirectory, fileName), 'utf8')
-      const session = parseAssistantSessionRecord(JSON.parse(raw) as unknown)
+      const session = parseAssistantSessionRecord(JSON.parse(raw))
       const extracted = extractAssistantSessionSecretsForPersistence(session)
       filesScanned += 1
 
@@ -117,7 +117,7 @@ async function auditAssistantSessionSecretSidecars(
     const secretPath = path.join(paths.sessionSecretsDirectory, fileName)
     try {
       const raw = await readFile(secretPath, 'utf8')
-      const sidecar = assistantSessionSecretsSchema.parse(JSON.parse(raw) as unknown)
+      const sidecar = assistantSessionSecretsSchema.parse(JSON.parse(raw))
       const expectedSessionId = fileName.replace(/\.json$/u, '')
       if (sidecar.sessionId !== expectedSessionId) {
         malformedSidecars += 1

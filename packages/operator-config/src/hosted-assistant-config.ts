@@ -169,7 +169,7 @@ export function tryParseHostedAssistantConfig(value: unknown): HostedAssistantCo
 }
 
 export function parseHostedAssistantConfigJson(value: string): HostedAssistantConfig {
-  return parseHostedAssistantConfig(JSON.parse(value) as unknown)
+  return parseHostedAssistantConfig(JSON.parse(value))
 }
 
 export function prepareHostedAssistantConfigForWrite(
