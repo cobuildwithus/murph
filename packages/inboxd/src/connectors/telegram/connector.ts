@@ -4,10 +4,21 @@ import { fileURLToPath } from "node:url";
 import { Api, type ApiClientOptions, type RawApi } from "grammy";
 import { relayAbort } from "../../shared-runtime.ts";
 import type {
+  TelegramChat,
+  TelegramContact,
   TelegramFile,
+  TelegramFileBase,
+  TelegramLocation,
+  TelegramMessageLike,
+  TelegramPhotoSize,
+  TelegramPoll,
+  TelegramPollOption,
+  TelegramTextQuote,
   TelegramUpdateLike,
   TelegramUser,
+  TelegramVenue,
   TelegramWebhookInfo,
+  TelegramDirectMessagesTopic,
 } from "@murphai/messaging-ingress/telegram-webhook";
 import {
   createNormalizedChatPollConnector,
@@ -30,11 +41,122 @@ export type TelegramApiClient = Api<RawApi>;
 export type TelegramPollTransportMode =
   (typeof TELEGRAM_POLL_TRANSPORT_MODES)[number];
 type TelegramApiSignal = Parameters<TelegramApiClient["getMe"]>[0];
+type TelegramApiUpdate = Awaited<ReturnType<TelegramApiClient["getUpdates"]>>[number];
 type TelegramAllowedUpdate =
   NonNullable<Parameters<TelegramApiClient["getUpdates"]>[0]>["allowed_updates"] extends
     | ReadonlyArray<infer T>
     | undefined ? T
     : never;
+
+interface TelegramApiUserLike {
+  id: number;
+  is_bot?: boolean;
+  first_name?: string;
+  last_name?: string;
+  username?: string;
+}
+
+interface TelegramApiChatLike {
+  id: number | string;
+  type?: string;
+  title?: string | null;
+  username?: string | null;
+  first_name?: string | null;
+  last_name?: string | null;
+  is_direct_messages?: boolean | null;
+}
+
+interface TelegramApiFileBaseLike {
+  file_id: string;
+  file_unique_id?: string;
+  file_size?: number;
+  file_name?: string;
+  mime_type?: string;
+}
+
+interface TelegramApiPhotoSizeLike extends TelegramApiFileBaseLike {
+  width?: number;
+  height?: number;
+}
+
+interface TelegramApiDirectMessagesTopicLike {
+  topic_id?: number | null;
+  title?: string | null;
+}
+
+interface TelegramApiContactLike {
+  first_name?: string | null;
+  last_name?: string | null;
+  phone_number?: string | null;
+  user_id?: number | null;
+  vcard?: string | null;
+}
+
+interface TelegramApiLocationLike {
+  latitude?: number | null;
+  longitude?: number | null;
+}
+
+interface TelegramApiVenueLike {
+  title?: string | null;
+  address?: string | null;
+  location?: TelegramApiLocationLike | null;
+}
+
+interface TelegramApiPollOptionLike {
+  text?: string | null;
+}
+
+interface TelegramApiPollLike {
+  question?: string | null;
+  options?: TelegramApiPollOptionLike[] | null;
+}
+
+interface TelegramApiTextQuoteLike {
+  text?: string | null;
+}
+
+interface TelegramApiMessageLikeInput {
+  message_id: number;
+  date?: number | null;
+  edit_date?: number | null;
+  business_connection_id?: string | null;
+  direct_messages_topic?: TelegramApiDirectMessagesTopicLike | null;
+  media_group_id?: string | null;
+  message_thread_id?: number | null;
+  text?: string | null;
+  caption?: string | null;
+  chat: TelegramApiChatLike;
+  from?: TelegramApiUserLike | null;
+  sender_chat?: TelegramApiChatLike | null;
+  sender_business_bot?: TelegramApiUserLike | null;
+  reply_to_message?: TelegramApiMessageLikeInput | null;
+  quote?: TelegramApiTextQuoteLike | null;
+  photo?: TelegramApiPhotoSizeLike[] | null;
+  document?: TelegramApiFileBaseLike | null;
+  audio?: TelegramApiFileBaseLike | null;
+  voice?: TelegramApiFileBaseLike | null;
+  video?: TelegramApiFileBaseLike | null;
+  video_note?: TelegramApiFileBaseLike | null;
+  animation?: TelegramApiFileBaseLike | null;
+  sticker?: TelegramApiFileBaseLike | null;
+  contact?: TelegramApiContactLike | null;
+  location?: TelegramApiLocationLike | null;
+  venue?: TelegramApiVenueLike | null;
+  poll?: TelegramApiPollLike | null;
+}
+
+interface TelegramApiFileLike {
+  file_id: string;
+  file_unique_id?: string;
+  file_size?: number;
+  file_path?: string;
+}
+
+interface TelegramApiWebhookInfoLike {
+  url?: string;
+  pending_update_count?: number;
+}
 
 export interface TelegramPollDriver
   extends ChatPollDriver<TelegramUpdateLike>,
@@ -169,7 +291,7 @@ export function createTelegramApiPollDriver({
 
   return {
     async getMe(signal) {
-      return api.getMe(asTelegramApiSignal(signal)) as unknown as Promise<TelegramUser>;
+      return getTelegramBotUser(api, signal);
     },
     async getMessages({ cursor, limit = normalizedBatchSize, signal }) {
       const batch = await getUpdates(api, {
@@ -258,7 +380,7 @@ export function createTelegramApiPollDriver({
       };
     },
     async getFile(fileId, signal) {
-      return api.getFile(fileId, asTelegramApiSignal(signal)) as Promise<TelegramFile>;
+      return getTelegramFile(api, fileId, signal);
     },
     async downloadFile(filePath, signal) {
       return resolveDownload(filePath, signal);
@@ -278,7 +400,7 @@ export function createTelegramApiPollDriver({
         return null;
       }
 
-      return api.getWebhookInfo(asTelegramApiSignal(signal)) as unknown as Promise<TelegramWebhookInfo | null>;
+      return getTelegramWebhookInfo(api, signal);
     },
   };
 }
@@ -391,10 +513,133 @@ async function getUpdates(
   signal?: AbortSignal,
 ): Promise<TelegramUpdateLike[]> {
   try {
-    return await api.getUpdates(input, asTelegramApiSignal(signal)) as TelegramUpdateLike[];
+    return (await api.getUpdates(input, asTelegramApiSignal(signal))).map(normalizeTelegramApiUpdate);
   } catch (error) {
     throw rewritePollingConflict(error);
   }
+}
+
+async function getTelegramBotUser(
+  api: TelegramApiClient,
+  signal?: AbortSignal,
+): Promise<TelegramUser> {
+  return normalizeTelegramApiUser(await api.getMe(asTelegramApiSignal(signal)));
+}
+
+async function getTelegramFile(
+  api: TelegramApiClient,
+  fileId: string,
+  signal?: AbortSignal,
+): Promise<TelegramFile> {
+  return normalizeTelegramApiFile(await api.getFile(fileId, asTelegramApiSignal(signal)));
+}
+
+async function getTelegramWebhookInfo(
+  api: TelegramApiClient & { getWebhookInfo: NonNullable<TelegramApiClient["getWebhookInfo"]> },
+  signal?: AbortSignal,
+): Promise<TelegramWebhookInfo> {
+  return normalizeTelegramApiWebhookInfo(await api.getWebhookInfo(asTelegramApiSignal(signal)));
+}
+
+function normalizeTelegramApiUpdate(update: TelegramApiUpdate): TelegramUpdateLike {
+  return {
+    ...update,
+    message: update.message ? normalizeTelegramApiMessage(update.message) : update.message,
+    business_message: update.business_message
+      ? normalizeTelegramApiMessage(update.business_message)
+      : update.business_message,
+  };
+}
+
+function normalizeTelegramApiMessage(message: TelegramApiMessageLikeInput): TelegramMessageLike {
+  return {
+    ...message,
+    chat: normalizeTelegramApiChat(message.chat),
+    from: message.from ? normalizeTelegramApiUser(message.from) : message.from,
+    sender_chat: message.sender_chat ? normalizeTelegramApiChat(message.sender_chat) : message.sender_chat,
+    sender_business_bot: message.sender_business_bot
+      ? normalizeTelegramApiUser(message.sender_business_bot)
+      : message.sender_business_bot,
+    reply_to_message: message.reply_to_message
+      ? normalizeTelegramApiMessage(message.reply_to_message)
+      : message.reply_to_message,
+    quote: message.quote ? normalizeTelegramApiTextQuote(message.quote) : message.quote,
+    direct_messages_topic: message.direct_messages_topic
+      ? normalizeTelegramApiDirectMessagesTopic(message.direct_messages_topic)
+      : message.direct_messages_topic,
+    photo: message.photo?.map(normalizeTelegramApiPhotoSize),
+    document: message.document ? normalizeTelegramApiFileBase(message.document) : message.document,
+    audio: message.audio ? normalizeTelegramApiFileBase(message.audio) : message.audio,
+    voice: message.voice ? normalizeTelegramApiFileBase(message.voice) : message.voice,
+    video: message.video ? normalizeTelegramApiFileBase(message.video) : message.video,
+    video_note: message.video_note ? normalizeTelegramApiFileBase(message.video_note) : message.video_note,
+    animation: message.animation ? normalizeTelegramApiFileBase(message.animation) : message.animation,
+    sticker: message.sticker ? normalizeTelegramApiFileBase(message.sticker) : message.sticker,
+    contact: message.contact ? normalizeTelegramApiContact(message.contact) : message.contact,
+    location: message.location ? normalizeTelegramApiLocation(message.location) : message.location,
+    venue: message.venue ? normalizeTelegramApiVenue(message.venue) : message.venue,
+    poll: message.poll ? normalizeTelegramApiPoll(message.poll) : message.poll,
+  };
+}
+
+function normalizeTelegramApiUser(user: TelegramApiUserLike): TelegramUser {
+  return { ...user };
+}
+
+function normalizeTelegramApiChat(chat: TelegramApiChatLike): TelegramChat {
+  return { ...chat };
+}
+
+function normalizeTelegramApiDirectMessagesTopic(
+  topic: TelegramApiDirectMessagesTopicLike,
+): TelegramDirectMessagesTopic {
+  return { ...topic };
+}
+
+function normalizeTelegramApiPhotoSize(photo: TelegramApiPhotoSizeLike): TelegramPhotoSize {
+  return { ...photo };
+}
+
+function normalizeTelegramApiFileBase(file: TelegramApiFileBaseLike): TelegramFileBase {
+  return { ...file };
+}
+
+function normalizeTelegramApiContact(contact: TelegramApiContactLike): TelegramContact {
+  return { ...contact };
+}
+
+function normalizeTelegramApiLocation(location: TelegramApiLocationLike): TelegramLocation {
+  return { ...location };
+}
+
+function normalizeTelegramApiVenue(venue: TelegramApiVenueLike): TelegramVenue {
+  return {
+    ...venue,
+    location: venue.location ? normalizeTelegramApiLocation(venue.location) : venue.location,
+  };
+}
+
+function normalizeTelegramApiPoll(poll: TelegramApiPollLike): TelegramPoll {
+  return {
+    ...poll,
+    options: poll.options?.map(normalizeTelegramApiPollOption),
+  };
+}
+
+function normalizeTelegramApiPollOption(option: TelegramApiPollOptionLike): TelegramPollOption {
+  return { ...option };
+}
+
+function normalizeTelegramApiTextQuote(quote: TelegramApiTextQuoteLike): TelegramTextQuote {
+  return { ...quote };
+}
+
+function normalizeTelegramApiFile(file: TelegramApiFileLike): TelegramFile {
+  return { ...file };
+}
+
+function normalizeTelegramApiWebhookInfo(webhookInfo: TelegramApiWebhookInfoLike): TelegramWebhookInfo {
+  return { ...webhookInfo };
 }
 
 function rewritePollingConflict(error: unknown): unknown {
