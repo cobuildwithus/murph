@@ -16,4 +16,11 @@ describe("Health Commons experiment protocol metadata", () => {
     expect(protocol).not.toBeNull();
     expect(protocol?.image).toBe("/design-assets/hero-norwegian-4x4.jpeg");
   });
+
+  it("uses the dedicated red-light glasses artwork", () => {
+    const protocol = resolveHealthCommonsExperimentProtocol("red-light-glasses-before-bed");
+
+    expect(protocol).not.toBeNull();
+    expect(protocol?.image).toBe("/design-assets/hero-red-light-glasses-before-bed.jpeg");
+  });
 });
