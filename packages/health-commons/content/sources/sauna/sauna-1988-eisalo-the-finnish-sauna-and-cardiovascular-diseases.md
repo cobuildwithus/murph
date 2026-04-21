@@ -29,6 +29,20 @@ researchEvidence:
   designKind: "narrative_review"
   designLabel: "Narrative review"
   aggregateRole: "synthesis"
+protocolEvidence:
+  -
+    protocolKey: protocol_variant:dry-sauna/murph-finnish-standard-3x-week
+    groupId: safety-special-populations-and-confounders
+    stance: safety_boundary
+    scope: clinical_supervised
+    result: not_efficacy_evidence
+    endpointKeys:
+      - biomarker:resting-heart-rate
+      - biomarker:morning-blood-pressure
+    headline: "This review focuses on Finnish sauna use in people with cardiovascular disease. The main finding is that sauna exposure has real cardiovascular effects, so benefits and risks must be interpreted by baseline health status and medication context."
+    implication: "This source anchors cardiovascular safety guardrails and BP/RHR framing."
+    caveat: "Safety and special-population records support screening, stopping rules, and logging; they are not efficacy proof."
+    displayPriority: 10
 evidenceBucket: Finnish dry-sauna corpus
 whyItMatters: "Expands the audited Finnish dry-sauna evidence corpus with a cardiovascular record marked high priority for Murph v1 interpretation."
 potentialMurphEndpoints:

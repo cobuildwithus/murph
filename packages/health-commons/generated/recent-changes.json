@@ -327,6 +327,29 @@
     },
     {
       "affectedFields": [
+        "researchLandscape",
+        "sources/sauna.protocolEvidence",
+        "generated.catalog"
+      ],
+      "changeId": "chg_2026_04_21_finnish_sauna_research_landscape_tranche1",
+      "changeType": "evidence_change",
+      "editSummary": "Added research-landscape groups and protocol-specific appraisal metadata for the first 47 Finnish dry-sauna source reports.",
+      "entityKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+      "minor": false,
+      "rationale": "The sauna page should explain which sources support the self-test rationale, which are acute physiology, which are long-term context, and which mainly set safety or confounder boundaries without making users infer that from titles alone.",
+      "reviewStatus": "proposed",
+      "schemaVersion": "murph.commons.change.v1",
+      "sourceKeys": [
+        "source_artifact:pmid-29849692",
+        "source_artifact:pmid-29269746",
+        "source_artifact:pmid-25432420",
+        "source_artifact:pmid-25705824",
+        "source_artifact:sauna-1988-eisalo-the-finnish-sauna-and-cardiovascular-diseases",
+        "source_artifact:pmid-445022"
+      ]
+    },
+    {
+      "affectedFields": [
         "relations",
         "claims",
         "researchCoverage.supplementalReview",

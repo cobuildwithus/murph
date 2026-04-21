@@ -516,6 +516,130 @@ claims:
     caveats:
       - HRV is noisy and highly confounded by sleep, illness, alcohol, psychological stress, and training load.
       - A null HRV signal does not automatically mean the protocol was not personally useful.
+researchLandscape:
+  bottomLine: "Best read as a bounded heat-exposure self-test: the strongest near-term support is acute cardiovascular and thermoregulatory physiology, while long-term Finnish cohort findings stay as context rather than 21-day endpoints."
+  confidenceLabel: mixed
+  primaryClaim: "The most defensible v1 claim is to track repeatability, symptoms, resting heart rate, optional morning blood pressure, and exploratory HRV around a simple Finnish dry-sauna routine."
+  mainCaveat: "The first annotated tranche is heavy on reviews, acute physiology, cohorts, and special-population safety records, so it should not become a disease-treatment or longevity promise."
+  groups:
+    -
+      id: evidence-backbone-and-scope
+      label: "Evidence backbone and scope guards"
+      stance: mixed
+      summary: "Review and synthesis sources make the dry-sauna rationale legible: heat exposure has cardiovascular, thermoregulatory, endocrine, and safety effects. They are best used to set scope and guardrails, not to promise that a short self-experiment will move every wearable signal."
+      sourceKeys:
+        - source_artifact:pmid-29849692
+        - source_artifact:mayo-2018-sauna-review
+        - source_artifact:pmid-16871826
+        - source_artifact:pmid-11165553
+        - source_artifact:sauna-1997-kauppinen-facts-and-fables-about-sauna
+        - source_artifact:pmid-29351426
+        - source_artifact:pmid-31102597
+        - source_artifact:sauna-1986-kauppinen-man-in-the-sauna-review-article
+      defaultOpen: true
+    -
+      id: acute-dose-physiology
+      label: "Acute dose physiology"
+      stance: supports
+      summary: "Acute and short repeated-exposure physiology papers show that Finnish sauna is a real heat load: heart rate, blood pressure, circulation, body temperature, fluid balance, and autonomic signals can change during or shortly after a session. This supports logging heat dose, cooldown, hydration, symptoms, and near-term cardiovascular proxies."
+      sourceKeys:
+        - source_artifact:pmid-29269746
+        - source_artifact:pmid-31126559
+        - source_artifact:sauna-1989-kukkonen-harjula-haemodynamic-and-hormonal-responses-to-heat-exposure-in-a
+        - source_artifact:sauna-1989-kauppinen-sauna-shower-and-ice-water-immersion-physiological-respons-2
+        - source_artifact:sauna-1989-kauppinen-sauna-shower-and-ice-water-immersion-physiological-respons-3
+        - source_artifact:pmid-3766176
+        - source_artifact:pmid-3174262
+    -
+      id: repeated-exposure-and-intervention-signals
+      label: "Repeated-exposure and intervention signals"
+      stance: mixed
+      summary: "Small repeated-sauna and intervention studies give the best reason to run a bounded 2-3 week self-test: some outcomes can shift when sauna is repeated. The evidence is still heterogeneous by population, dose, and endpoint, so it supports testing rather than guaranteeing improvement."
+      sourceKeys:
+        - source_artifact:pmid-25432420
+        - source_artifact:sauna-2014-gryka-the-effect-of-sauna-bathing-on-lipid-profile-in-young-phys
+        - source_artifact:sauna-2015-kanji-efficacy-of-regular-sauna-bathing-for-chronic-tension-type
+        - source_artifact:sauna-1990-ernst-regular-sauna-bathing-and-the-incidence-of-common-colds
+    -
+      id: long-term-finnish-cohort-context
+      label: "Long-term Finnish cohort context"
+      stance: context_only
+      summary: "The KIHD and related Finnish cohort papers are important background for why sauna is interesting, especially for cardiovascular, respiratory, neurologic, and vascular outcomes. They should stay in the long-horizon rationale bucket because a 21-day personal experiment cannot test mortality, dementia, pneumonia, stroke, or thromboembolism."
+      sourceKeys:
+        - source_artifact:pmid-25705824
+        - source_artifact:pmid-30486813
+        - source_artifact:pmid-28633297
+        - source_artifact:pmid-29720543
+        - source_artifact:pmid-28972808
+        - source_artifact:pmid-29897261
+        - source_artifact:pmid-29229091
+        - source_artifact:pmid-28905164
+        - source_artifact:pmid-27932366
+        - source_artifact:pmid-30173212
+        - source_artifact:pmid-31372865
+    -
+      id: safety-special-populations-and-confounders
+      label: "Safety, special populations, and confounders"
+      stance: safety_boundary
+      summary: "Pregnancy, children, cardiovascular disease, heart failure, alcohol, medication, endocrine, respiratory, and fluid-balance sources define the practical boundaries for a dry-sauna self-test. They support screening, conservative dosing, stop conditions, and confounder logging more than they support efficacy claims."
+      sourceKeys:
+        - source_artifact:sauna-1988-eisalo-the-finnish-sauna-and-cardiovascular-diseases
+        - source_artifact:sauna-2000-keast-the-finnish-sauna-bath-and-its-use-in-patients-with-cardio
+        - source_artifact:pmid-19154844
+        - source_artifact:sauna-2005-miyamoto-safety-and-efficacy-of-repeated-sauna-bathing-in-patients
+        - source_artifact:pmid-26152773
+        - source_artifact:sauna-1992-roine-alcohol-and-sauna-bathing-effects-on-cardiac-rhythm-blood
+        - source_artifact:sauna-1994-kukkonen-harjula-cardiovascular-effects-of-atenolol-scopolamine-and-their-c
+        - source_artifact:sauna-1996-vanakoski-effects-of-heat-exposure-in-a-finnish-sauna-on-the-pharmac
+        - source_artifact:pmid-445022
+        - source_artifact:sauna-1989-markkola-sauna-habits-and-related-symptoms-in-finnish-children
+        - source_artifact:sauna-1990-jokinen-children-in-sauna-cardiovascular-adjustment
+        - source_artifact:sauna-1991-jokinen-children-in-sauna-electrocardiographic-abnormalities
+        - source_artifact:pmid-3788622
+        - source_artifact:sauna-1988-kukkonen-harjula-how-the-sauna-affects-the-endocrine-system
+        - source_artifact:sauna-1988-laitinen-lungs-and-ventilation-in-the-sauna
+        - source_artifact:sauna-1989-kauppinen-sauna-shower-and-ice-water-immersion-physiological-respons
+        - source_artifact:sauna-1989-kauppinen-some-endocrine-responses-to-sauna-shower-and-ice-water-imm
+    -
+      id: remaining-corpus-pending-appraisal
+      label: "Remaining corpus pending appraisal"
+      stance: context_only
+      summary: "These later sauna sources remain visible for completeness while the first 47 Finnish dry-sauna reports receive protocol-specific appraisal metadata. Treat this group as source inventory until each paper gets its own stance, scope, implication, and caveat."
+      sourceKeys:
+        - source_artifact:pmid-31331560
+        - source_artifact:pmid-32951736
+        - source_artifact:pmid-31950931
+        - source_artifact:pmid-31490429
+        - source_artifact:pmid-31869820
+        - source_artifact:pmid-33513711
+        - source_artifact:pmid-33211153
+        - source_artifact:pmid-34297227
+        - source_artifact:pmid-34622026
+        - source_artifact:pmid-34199101
+        - source_artifact:pmid-36078656
+        - source_artifact:pmid-35710395
+        - source_artifact:pmid-35908583
+        - source_artifact:pmid-36255556
+        - source_artifact:pmid-35785965
+        - source_artifact:pmid-34727008
+        - source_artifact:pmid-38011189
+        - source_artifact:pmid-37650138
+        - source_artifact:pmid-37270272
+        - source_artifact:pmid-37029766
+        - source_artifact:pmid-36813265
+        - source_artifact:pmid-39446139
+        - source_artifact:pmid-38410962
+        - source_artifact:pmid-38577299
+        - source_artifact:doi-10.3390-app151910762
+        - source_artifact:pmid-40202605
+        - source_artifact:pmid-41426898
+        - source_artifact:doi-10-1016-j-aimed-2024-09-009
+        - source_artifact:pmid-40611569
+        - source_artifact:pmid-41340471
+        - source_artifact:doi-10-3389-fcvm-2025-1537194
+        - source_artifact:pmid-41461792
+        - source_artifact:pmid-41831305
+        - source_artifact:doi-10.1080-23328940.2026.2645467
 safety:
   cautionLevel: moderate
   avoidOrGetClinicianGuidance:

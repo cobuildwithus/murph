@@ -31,6 +31,21 @@ researchEvidence:
   designKind: "narrative_review"
   designLabel: "Evidence review"
   aggregateRole: "synthesis"
+protocolEvidence:
+  -
+    protocolKey: protocol_variant:dry-sauna/murph-finnish-standard-3x-week
+    groupId: evidence-backbone-and-scope
+    stance: mixed
+    scope: same_mechanism
+    result: mixed
+    endpointKeys:
+      - biomarker:resting-heart-rate
+      - biomarker:morning-blood-pressure
+      - biomarker:hrv-rmssd
+    headline: "This narrative review synthesizes cardiovascular, inflammatory, and mortality evidence for sauna bathing. The main finding is a coherent mechanism-and-outcomes story, especially around cardiovascular stress, vascular function, and long-term associations."
+    implication: "This source is rationale and mechanism context, not a substitute for protocol-specific intervention data."
+    caveat: "Review evidence should calibrate rationale and claims; it does not prove this exact 21-day self-experiment will move wearable signals."
+    displayPriority: 20
 evidenceBucket: Evidence backbone
 whyItMatters: Strong narrative synthesis focused on cardiovascular mechanisms and outcomes
 potentialMurphEndpoints:

@@ -31,6 +31,17 @@ researchEvidence:
   designKind: "narrative_review"
   designLabel: "Narrative physiology review"
   aggregateRole: "synthesis"
+protocolEvidence:
+  -
+    protocolKey: protocol_variant:dry-sauna/murph-finnish-standard-3x-week
+    groupId: safety-special-populations-and-confounders
+    stance: safety_boundary
+    scope: same_mechanism
+    result: not_efficacy_evidence
+    headline: "This narrative physiology review summarizes how sauna bathing affects endocrine regulation. The main finding is that heat exposure can activate hormonal stress and recovery pathways, with context-dependent effects."
+    implication: "This source is a mechanism and safety source rather than a result-card endpoint."
+    caveat: "Safety and special-population records support screening, stopping rules, and logging; they are not efficacy proof."
+    displayPriority: 140
 evidenceBucket: Finnish dry-sauna corpus
 whyItMatters: "Expands the audited Finnish dry-sauna evidence corpus with a safety / physiology record marked lower priority for Murph v1 interpretation."
 potentialMurphEndpoints:
