@@ -12,7 +12,6 @@ export function StudyCard({
   journal,
   year,
   participants,
-  participantCountKind,
   includedStudyCount,
   population,
   duration,
@@ -23,7 +22,6 @@ export function StudyCard({
 }: StudyCardProps) {
   const yearLabel = typeof year === "number" ? year.toString() : null;
   const participantLabel = formatParticipantLabel({
-    participantCountKind,
     participants,
   });
   const includedStudiesLabel = formatIncludedStudiesLabel(includedStudyCount);
@@ -80,14 +78,10 @@ export function StudyCard({
 }
 
 function formatParticipantLabel({
-  participantCountKind,
   participants,
-}: Pick<Study, "participantCountKind" | "participants">): string | null {
-  const participantPrefix =
-    participantCountKind === "approximate" || participantCountKind === "range" ? "n≈" : "n=";
-
+}: Pick<Study, "participants">): string | null {
   return typeof participants === "number"
-    ? `${participantPrefix}${participants.toLocaleString()}`
+    ? `n=${participants.toLocaleString()}`
     : null;
 }
 

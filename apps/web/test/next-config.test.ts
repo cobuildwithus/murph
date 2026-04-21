@@ -96,8 +96,8 @@ test("hosted web dev smoke can isolate concurrent runs with a dist-dir suffix", 
   );
 });
 
-test("hosted web dev filesystem cache stays opt-in", () => {
-  assert.equal(isHostedWebDevFileSystemCacheEnabled(), false);
+test("hosted web dev filesystem cache defaults on and allows explicit opt-out", () => {
+  assert.equal(isHostedWebDevFileSystemCacheEnabled(), true);
   assert.equal(
     isHostedWebDevFileSystemCacheEnabled(
       createProcessEnv({
@@ -114,6 +114,22 @@ test("hosted web dev filesystem cache stays opt-in", () => {
     ),
     true,
   );
+  assert.equal(
+    isHostedWebDevFileSystemCacheEnabled(
+      createProcessEnv({
+        MURPH_NEXT_DEV_FILESYSTEM_CACHE: "0",
+      }),
+    ),
+    false,
+  );
+  assert.equal(
+    isHostedWebDevFileSystemCacheEnabled(
+      createProcessEnv({
+        MURPH_NEXT_DEV_FILESYSTEM_CACHE: "no",
+      }),
+    ),
+    false,
+  );
 });
 
 test("next.config keeps Turbopack focused on the repo root without custom workspace rewrite rules", () => {
@@ -122,7 +138,7 @@ test("next.config keeps Turbopack focused on the repo root without custom worksp
   assert.equal(productionNextConfig.typescript, undefined);
 });
 
-test("next.config disables the Turbopack dev filesystem cache unless explicitly enabled", () => {
+test("next.config enables the Turbopack dev filesystem cache by default and honors explicit opt-out", () => {
   const previousValue = process.env.MURPH_NEXT_DEV_FILESYSTEM_CACHE;
 
   try {
@@ -130,14 +146,14 @@ test("next.config disables the Turbopack dev filesystem cache unless explicitly 
     assert.equal(
       buildHostedWebNextConfig(PHASE_DEVELOPMENT_SERVER).experimental
         ?.turbopackFileSystemCacheForDev,
-      false,
+      true,
     );
 
-    process.env.MURPH_NEXT_DEV_FILESYSTEM_CACHE = "1";
+    process.env.MURPH_NEXT_DEV_FILESYSTEM_CACHE = "0";
     assert.equal(
       buildHostedWebNextConfig(PHASE_DEVELOPMENT_SERVER).experimental
         ?.turbopackFileSystemCacheForDev,
-      true,
+      false,
     );
   } finally {
     if (previousValue === undefined) {

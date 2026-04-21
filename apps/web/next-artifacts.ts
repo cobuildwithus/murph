@@ -46,7 +46,12 @@ export function isHostedWebDevFileSystemCacheEnabled(
   environment: NodeJS.ProcessEnv = process.env,
 ): boolean {
   const normalized = environment[hostedWebDevFileSystemCacheEnvVarName]?.trim().toLowerCase();
-  return normalized === "1" || normalized === "true" || normalized === "yes";
+
+  if (!normalized) {
+    return true;
+  }
+
+  return normalized !== "0" && normalized !== "false" && normalized !== "no";
 }
 
 export function resolveHostedWebDistDir(

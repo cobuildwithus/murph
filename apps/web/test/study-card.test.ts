@@ -46,6 +46,24 @@ describe("StudyCard", () => {
     expect(markup).not.toContain("Medicine and Science in Sports and Exercise · 2007");
     expect(markup).not.toContain("23 studies · n=40");
   });
+
+  it("uses n= for approximate participant counts", () => {
+    const markup = renderToStaticMarkup(
+      createElement(StudyCard, {
+        type: "MA",
+        title: "Meta-analysis placeholder",
+        authors: "A Researcher",
+        journal: "Example Journal",
+        participants: 2138,
+        participantCountKind: "approximate",
+        finding: "Approximate participant totals should still use the standard n= badge.",
+        last: true,
+      }),
+    );
+
+    expect(markup).toContain("n=2,138");
+    expect(markup).not.toContain("n≈2,138");
+  });
 });
 
 function countOccurrences(haystack: string, needle: string): number {
