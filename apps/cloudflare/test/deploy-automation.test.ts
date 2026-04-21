@@ -119,6 +119,9 @@ describe("hosted deploy automation helpers", () => {
           persist: boolean;
         };
       };
+      placement: {
+        mode: string;
+      };
       send_email?: Array<{
         allowed_sender_addresses?: string[];
         name: string;
@@ -159,6 +162,7 @@ describe("hosted deploy automation helpers", () => {
       },
     ]);
     expect(config.compatibility_flags).toEqual(["nodejs_compat"]);
+    expect(config.placement).toEqual({ mode: "smart" });
     expect(config.observability).toEqual({
       enabled: true,
       head_sampling_rate: 1,
@@ -226,6 +230,9 @@ describe("hosted deploy automation helpers", () => {
         new_sqlite_classes: string[];
         tag: string;
       }>;
+      placement: {
+        mode: string;
+      };
     };
     const checkedInConfig = parseJsoncObject(
       await readFile(new URL("../wrangler.jsonc", import.meta.url), "utf8"),
@@ -249,6 +256,9 @@ describe("hosted deploy automation helpers", () => {
         new_sqlite_classes: string[];
         tag: string;
       }>;
+      placement: {
+        mode: string;
+      };
     };
 
     expect(checkedInConfig.containers).toHaveLength(1);
@@ -259,6 +269,7 @@ describe("hosted deploy automation helpers", () => {
     });
     expect(checkedInConfig.durable_objects.bindings).toEqual(generatedConfig.durable_objects.bindings);
     expect(checkedInConfig.migrations).toEqual(generatedConfig.migrations);
+    expect(checkedInConfig.placement).toEqual(generatedConfig.placement);
   });
 
   it("keeps the hosted deploy workflow fallback container defaults and summary aligned", async () => {
