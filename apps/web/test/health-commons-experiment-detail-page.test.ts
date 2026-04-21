@@ -2,6 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
+import { CURRENT_EXPERIMENT_PROTOCOL_CONTRACT_VERSION } from "@/src/lib/experiments/experiment-detail";
 import type { ExperimentProtocol } from "@/src/types/experiments";
 
 const mocks = vi.hoisted(() => ({
@@ -55,7 +56,23 @@ describe("ExperimentDetailPage", () => {
         routeId: "finnish-sauna",
       }),
       id: "finnish-sauna",
+      protocolContractVersion: CURRENT_EXPERIMENT_PROTOCOL_CONTRACT_VERSION,
+      protocolFacts: expect.arrayContaining([
+        expect.objectContaining({ label: "Baseline", value: "7 days" }),
+        expect.objectContaining({ label: "Intervention", value: "14 days" }),
+      ]),
+      protocolKeepInMind: expect.arrayContaining([
+        expect.stringContaining("short-term recovery"),
+      ]),
+      protocolLogFields: expect.arrayContaining([
+        "duration",
+        "time of day",
+      ]),
+      protocolTips: expect.arrayContaining([
+        expect.stringContaining("similar time of day"),
+      ]),
       title: "Finnish Dry Sauna",
+      whyItWorks: expect.stringContaining("heat stressor"),
     }));
     expect(clientExperiment.researchStats).toEqual(expect.arrayContaining([
       expect.objectContaining({ label: "STUDIES", value: 81 }),

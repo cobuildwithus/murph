@@ -4,9 +4,17 @@ import type {
   ExperimentRunProjection,
 } from "@/src/types/experiments";
 
+export const CURRENT_EXPERIMENT_PROTOCOL_CONTRACT_VERSION = 2;
+
 export interface ComposeExperimentDetailInput {
   protocol: ExperimentProtocol;
   privateRun: ExperimentRunProjection | null;
+}
+
+export function hasCurrentExperimentProtocolContract(value: {
+  protocolContractVersion?: number;
+}): boolean {
+  return value.protocolContractVersion === CURRENT_EXPERIMENT_PROTOCOL_CONTRACT_VERSION;
 }
 
 export function composeExperimentDetail({

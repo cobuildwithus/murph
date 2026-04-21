@@ -62,6 +62,12 @@ export interface ExperimentProtocolStep {
   detail: string;
 }
 
+export interface ExperimentProtocolFact {
+  label: string;
+  value: string;
+  detail?: string;
+}
+
 export interface ExperimentResearchStat {
   label: string;
   value: string | number;
@@ -93,6 +99,7 @@ export interface ExperimentConclusionSection {
 }
 
 export interface ExperimentProtocol {
+  protocolContractVersion: number;
   id: string;
   title: string;
   category: string;
@@ -105,7 +112,11 @@ export interface ExperimentProtocol {
   evidenceLabel: string;
   description: string;
   expectedSignals: ExperimentSignal[];
+  protocolFacts: ExperimentProtocolFact[];
   protocol: ExperimentProtocolStep[];
+  protocolTips: string[];
+  protocolKeepInMind: string[];
+  protocolLogFields: string[];
   whyItWorks: string;
   experts: Expert[];
   researchStats: ExperimentResearchStat[];

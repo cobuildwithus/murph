@@ -1225,7 +1225,7 @@
       "schemaVersion": "murph.commons.artifact-manifest.v1"
     }
   ],
-  "catalogHash": "sha256:f3fcd46a024d586fe37d1743d8245ec3f92b993650546ea7cedae3722640fb87",
+  "catalogHash": "sha256:c8d8be67d1bcaa5947e9d7297c17d5f2e8e27f00df727d8d258d5cdd4fb2ea36",
   "changes": [
     {
       "affectedFields": [
@@ -1443,6 +1443,50 @@
     },
     {
       "affectedFields": [
+        "protocol.target",
+        "protocol.steps",
+        "protocol.tips",
+        "protocol.keepInMind",
+        "protocol.logFields",
+        "whyItWorks",
+        "apps/web.protocol_ui"
+      ],
+      "changeId": "chg_2026_04_21_bryan_sauna_protocol_ui_clarity",
+      "changeType": "copy_edit",
+      "editSummary": "Separated the Bryan Johnson sauna routine into source-attributed steps, tips, logging fields, and interpretation notes, with a clearer why-it-works section.",
+      "entityKey": "protocol_variant:dry-sauna/bryan-johnson-blueprint",
+      "minor": false,
+      "rationale": "The page needs to make the exact external routine legible without turning source-specific tactics or self-reported outcomes into general recommendations.",
+      "reviewStatus": "accepted",
+      "schemaVersion": "murph.commons.change.v1",
+      "sourceKeys": [
+        "source_artifact:bryan-johnson-sauna-protocol-2026-01-28"
+      ]
+    },
+    {
+      "affectedFields": [
+        "protocol.target",
+        "protocol.steps",
+        "protocol.tips",
+        "protocol.keepInMind",
+        "protocol.logFields",
+        "whyItWorks",
+        "apps/web.protocol_ui"
+      ],
+      "changeId": "chg_2026_04_21_finnish_sauna_protocol_ui_clarity",
+      "changeType": "copy_edit",
+      "editSummary": "Separated Finnish dry-sauna steps from tips, logging fields, and interpretation notes, and rewrote the mechanism-focused why-it-works copy.",
+      "entityKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+      "minor": false,
+      "rationale": "The experiment detail page should show a short how-to protocol first, then practical context and evidence caveats separately so users are not forced to parse setup facts, tips, and disclaimers as numbered steps.",
+      "reviewStatus": "accepted",
+      "schemaVersion": "murph.commons.change.v1",
+      "sourceKeys": [
+        "source_artifact:sauna-bibliography-2026-04-18"
+      ]
+    },
+    {
+      "affectedFields": [
         "protocol",
         "testPlans",
         "claims",
@@ -1471,6 +1515,28 @@
     },
     {
       "affectedFields": [
+        "protocol.target",
+        "protocol.steps",
+        "protocol.tips",
+        "protocol.keepInMind",
+        "protocol.logFields",
+        "whyItWorks",
+        "apps/web.protocol_ui"
+      ],
+      "changeId": "chg_2026_04_21_norwegian_4x4_protocol_ui_clarity",
+      "changeType": "copy_edit",
+      "editSummary": "Separated Norwegian 4x4 execution steps from tips, logging fields, and interpretation notes, and rewrote why-it-works around aerobic interval mechanism.",
+      "entityKey": "protocol_variant:norwegian-4x4/norwegian-4x4",
+      "minor": false,
+      "rationale": "The protocol should read as a concise workout recipe with separate context for HR targeting, proxy VO2max interpretation, recovery stress, and adjacent interval variants.",
+      "reviewStatus": "accepted",
+      "schemaVersion": "murph.commons.change.v1",
+      "sourceKeys": [
+        "source_artifact:ntnu-cerg-norwegian-4x4"
+      ]
+    },
+    {
+      "affectedFields": [
         "relations",
         "sources/red-light-glasses-before-bed",
         "artifacts/red-light-glasses-before-bed/research-artifacts.json"
@@ -1493,6 +1559,28 @@
         "source_artifact:pmid-15713707",
         "source_artifact:pmid-27226262",
         "source_artifact:pmid-26414986"
+      ]
+    },
+    {
+      "affectedFields": [
+        "protocol.target",
+        "protocol.steps",
+        "protocol.tips",
+        "protocol.keepInMind",
+        "protocol.logFields",
+        "whyItWorks",
+        "apps/web.protocol_ui"
+      ],
+      "changeId": "chg_2026_04_21_red_light_glasses_protocol_ui_clarity",
+      "changeType": "copy_edit",
+      "editSummary": "Separated red-light-glasses steps from tips, logging fields, and interpretation notes, and rewrote why-it-works around evening melanopic-light reduction.",
+      "entityKey": "protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed",
+      "minor": false,
+      "rationale": "The page should make the nightly test easy to follow while preserving the compiled evidence caveats around mixed objective sleep outcomes, lens quality, daytime light, and safety-critical tasks.",
+      "reviewStatus": "accepted",
+      "schemaVersion": "murph.commons.change.v1",
+      "sourceKeys": [
+        "source_artifact:red-light-glasses-before-bed-bibliography"
       ]
     },
     {
@@ -2362,7 +2450,7 @@
         "relationship": "external_named_protocol"
       },
       "protocol": {
-        "doseSignature": "Daily dry sauna - 20 min - 93 C - morning after workout - groin cooling for male fertility protection",
+        "doseSignature": "Daily dry sauna · 20 min · 93 °C / 200 °F · morning after workout · source-attributed external routine",
         "durationMinutes": {
           "max": 20,
           "min": 20
@@ -2372,22 +2460,41 @@
         },
         "interventionSessionsMinimum": 7,
         "interventionSessionsTarget": 14,
+        "keepInMind": [
+          "This is a higher-burden daily routine layered after workouts, so exercise load and dehydration can easily confound the result.",
+          "Groin cooling, face or neck cooling, and post-sauna no-cold-exposure guidance are source-specific tactics rather than general sauna rules.",
+          "Bryan Johnson’s reported toxin, fertility, vascular, and resting-heart-rate changes are personal observations, not expected causal outcomes for users."
+        ],
+        "logFields": [
+          "duration",
+          "temperature",
+          "workout timing and load",
+          "hydration or electrolytes",
+          "cooling tactics used",
+          "symptoms",
+          "sleep or recovery disruption"
+        ],
         "steps": [
           "Treat this as a source-attributed external routine, not a default recommendation.",
-          "The public Blueprint routine is a dry sauna at 200 F / 93 C for 20 minutes, daily, usually in the morning after a workout.",
-          "Keep humidity low, use the exact source routine only if the setup is appropriate, and track session duration, approximate temperature, symptoms, hydration, and whether face or neck cooling was used.",
-          "The source routine uses groin cooling for male fertility protection; do not generalize that self-experiment finding into population-level safety.",
-          "Rehydrate after the session; Bryan Johnson's public routine mentions roughly 36 oz of mineral-supplemented water or electrolytes.",
-          "Treat the April 2026 core-temperature-threshold work as a higher-burden experimental variant, not as the default entry version of the protocol."
+          "Keep a 7-day baseline, then run the routine for up to 14 intervention days.",
+          "Use a low-humidity dry sauna at about 93 °C / 200 °F for 20 minutes, usually in the morning after a workout if copying the source routine.",
+          "Rehydrate after the session; the public Blueprint routine mentions mineral-supplemented water or electrolytes.",
+          "Log the session, workout timing, cooling tactics, hydration, symptoms, and whether the dose felt sustainable."
         ],
         "stopConditions": [
           "Stop the session if chest pain, faintness, severe dizziness, confusion, palpitations, shortness of breath, or intolerable heat distress occurs.",
           "End the protocol and seek appropriate care if severe or repeated symptoms occur."
         ],
+        "target": "93 °C / 200 °F low-humidity dry sauna",
         "temperatureC": {
           "max": 93,
           "min": 93
-        }
+        },
+        "tips": [
+          "If you are not already heat-adapted, the Blueprint public beginner guidance points toward a more conservative 15–20 minutes, 3–5 times per week, and 80–100 °C.",
+          "Keep humidity low if trying to mirror the source routine.",
+          "Treat the April 2026 core-temperature-threshold experiments as a higher-burden variant, not the default entry version."
+        ]
       },
       "quality": "usable",
       "relations": [
@@ -2462,9 +2569,9 @@
       ],
       "relativePath": "protocols/dry-sauna/bryan-johnson-blueprint.md",
       "revision": {
-        "pageRevisionId": "sha256:30a3fe92cc8fd73343b54f81d0741be911e2e573e96882fa1f82235a53f39bd7",
-        "recipeHash": "sha256:6b3f9af8870bcb64670d10de4f8c981eab4032575e4331978fd64755c0adf126",
-        "runSpecRevisionId": "sha256:d93cd97fc0b09232c0c924e950dbc7dcf6a23034ccd59177f348c97143fa82b9"
+        "pageRevisionId": "sha256:8330ffdd385849516490e12d6042b46913aa770bf58b5d17604532e09c5773bd",
+        "recipeHash": "sha256:803d0c96b5fbe2f18f55166069b03011789de0862c2857b84eef38dc98de746d",
+        "runSpecRevisionId": "sha256:1f10f3b8a9b18d9b302b68e98ada8a9a707ed1b94e9b6057d5716385436630f1"
       },
       "safety": {
         "avoidOrGetClinicianGuidance": [
@@ -2518,7 +2625,12 @@
           "targetAdherenceSessions": 14
         }
       ],
-      "title": "Bryan Johnson Blueprint Sauna"
+      "title": "Bryan Johnson Blueprint Sauna",
+      "whyItWorks": [
+        "This routine uses the same basic dry-sauna physiology as the simpler sauna experiment, but at a higher weekly dose and usually after training. Heat exposure raises cardiovascular and thermoregulatory load; post-workout timing can add recovery, hydration, and fatigue context.",
+        "The page is source-attributed because the detailed tactics come from Bryan Johnson’s public routine and self-experiments, not from a single validated clinical protocol. That makes it useful to try only if you want to test this exact routine and can handle the burden.",
+        "The honest readout is whether your resting heart rate, HRV, symptoms, and felt recovery tolerate this daily post-workout heat dose. It should not promise Bryan Johnson’s reported toxin, fertility, or vascular outcomes."
+      ]
     },
     {
       "aliases": [
@@ -2710,23 +2822,42 @@
         },
         "interventionSessionsMinimum": 4,
         "interventionSessionsTarget": 6,
+        "keepInMind": [
+          "This experiment is designed to read short-term recovery and cardiovascular proxies, not long-term disease or longevity claims.",
+          "HRV and sleep-stage changes are exploratory and can be moved by illness, stress, alcohol, travel, and training load.",
+          "Infrared sauna and other heat modalities are related, but they should not be treated as the same protocol."
+        ],
+        "logFields": [
+          "duration",
+          "approximate temperature",
+          "time of day",
+          "stand-alone or post-exercise",
+          "symptoms",
+          "alcohol",
+          "illness or travel",
+          "unusually hard training"
+        ],
         "steps": [
-          "Keep your normal routine for a 7-day baseline before starting the intervention.",
-          "During the intervention, complete three stand-alone Finnish dry-sauna sessions per week for two weeks.",
-          "Use a traditional dry sauna when possible, aiming for about 80–100 °C and 15–20 minutes per session.",
-          "Prefer a similar time of day and similar pre-sauna routine across sessions if you want cleaner comparison.",
-          "Treat cold plunges, new supplements, new training blocks, major diet changes, and intentional alcohol changes as separate interventions; do not add them during this experiment.",
-          "If you choose to sauna after exercise, log the workout timing and load explicitly; that context can change how the result should be read.",
-          "Hydrate normally, cool down gently, and log duration, approximate temperature, time of day, whether the session followed exercise, symptoms, illness, alcohol, travel, and unusually hard training."
+          "Keep your normal routine stable for a 7-day baseline before starting.",
+          "For the next two weeks, complete three stand-alone Finnish dry-sauna sessions per week.",
+          "Sit for 15–20 minutes per session at about 80–100 °C, using a traditional dry sauna when possible.",
+          "Hydrate normally before and after, then cool down gently before returning to normal activity.",
+          "Log the session and any context that could change recovery or sleep."
         ],
         "stopConditions": [
           "Stop the session if chest pain, faintness, severe dizziness, confusion, palpitations, or unusual shortness of breath occurs.",
           "End the experiment and seek appropriate care if severe or repeated symptoms occur."
         ],
+        "target": "80–100 °C traditional dry sauna",
         "temperatureC": {
           "max": 100,
           "min": 80
-        }
+        },
+        "tips": [
+          "Use a similar time of day and similar pre-sauna routine when practical.",
+          "Keep cold plunges, new supplements, new training blocks, major diet changes, and intentional alcohol changes out of this test window.",
+          "If a session follows exercise, log the workout because post-exercise sauna is a different context than stand-alone sauna."
+        ]
       },
       "quality": "usable",
       "relations": [
@@ -3199,9 +3330,9 @@
         }
       },
       "revision": {
-        "pageRevisionId": "sha256:4e716b115bf50eb6950a22ef2cf440b65789888f95b884164845307390f6a03a",
-        "recipeHash": "sha256:2552fbe52dff36111741eb274e02cc14a60c47a5acd36780dfe8904de2e8ee61",
-        "runSpecRevisionId": "sha256:a690efa7572b98010b31c09135c19f10313f4200ba99fe37bc7442fc1d78f1d6"
+        "pageRevisionId": "sha256:21c4be679acc2bbe675dd0685fe1f2140eaa466235b788d50416b7351c42d033",
+        "recipeHash": "sha256:b4022f25d73e79f3cf740127c52434e8d63375435efaddfe230fb615e6a3b711",
+        "runSpecRevisionId": "sha256:7fed449280fcf73cb99b5595b7e744e5452cc6320824a81ea965bf4f2530f517"
       },
       "safety": {
         "avoidOrGetClinicianGuidance": [
@@ -3273,7 +3404,12 @@
           "targetAdherenceSessions": 6
         }
       ],
-      "title": "Finnish Dry Sauna"
+      "title": "Finnish Dry Sauna",
+      "whyItWorks": [
+        "Finnish dry sauna works as a short, repeatable heat stressor. Skin and core temperature rise, blood vessels widen, heart rate and cardiac output increase, and the body has to cool itself back down afterward.",
+        "Repeated exposures may train thermoregulation and vascular response over a few weeks, which is why resting heart rate, optional morning blood pressure, HRV, sleep efficiency, and deep sleep are practical signals to watch.",
+        "The research base includes acute physiology studies, repeated-exposure work, and long-term Finnish cohort findings. For this 21-day self-test, the cohort findings are background context only; the honest question is whether your near-term recovery and cardiovascular proxies move in a way that feels worth repeating."
+      ]
     },
     {
       "aliases": [
@@ -3485,7 +3621,7 @@
         "relationship": "root"
       },
       "protocol": {
-        "doseSignature": "2x/week · 4 x 4 min intervals · 85-95% HRmax · 7-day baseline + 6-week intervention",
+        "doseSignature": "2x/week · 4 x 4 min intervals · 85–95% HRmax · 7-day baseline + 6-week intervention",
         "durationMinutes": {
           "max": 45,
           "min": 35
@@ -3495,21 +3631,39 @@
         },
         "interventionSessionsMinimum": 8,
         "interventionSessionsTarget": 12,
+        "keepInMind": [
+          "Wearable VO2max is a proxy, not lab gas-exchange testing, and may update slowly or not at all during the experiment.",
+          "The 6-week window is intentional because the main target is cardiorespiratory fitness, not a next-day recovery score.",
+          "A third weekly session, low-volume 1x4, sprint intervals, and supervised cardiac rehab are separate variants."
+        ],
+        "logFields": [
+          "modality",
+          "interval heart-rate peaks",
+          "perceived exertion",
+          "symptoms",
+          "recovery after 24 to 48 hours",
+          "sleep disruption",
+          "other hard training"
+        ],
         "steps": [
-          "Keep your normal routine for a 7-day baseline before starting the intervention.",
-          "During the 6-week intervention, complete two Norwegian-style 4x4 sessions per week, separated by at least 48 hours when possible.",
-          "Use a bike, rower, elliptical, incline treadmill, hill walk, or run. Prefer low-impact modes if you are new to intervals or have joint concerns.",
-          "Warm up for about 10 minutes at easy-to-moderate effort, roughly 60-70% of estimated HRmax.",
-          "Complete four 4-minute hard intervals. Aim for 85-95% of estimated HRmax by the later part of each interval, not necessarily in the first minute.",
-          "Recover actively for 3 minutes between intervals at easy effort, roughly 60-70% of estimated HRmax.",
+          "Keep your normal routine stable for a 7-day baseline before starting.",
+          "During the 6-week intervention, complete two 4x4 sessions per week, separated by at least 48 hours when possible.",
+          "Warm up for about 10 minutes at easy-to-moderate effort, roughly 60–70% of estimated HRmax.",
+          "Complete four 4-minute hard intervals, aiming to reach 85–95% of estimated HRmax by the later part of each interval.",
+          "Recover actively for 3 minutes between intervals at easy effort, roughly 60–70% of estimated HRmax.",
           "Cool down for about 5 minutes.",
-          "Use heart rate plus perceived exertion and symptoms. Do not sprint from the start just to chase a heart-rate number.",
-          "Keep other training, caffeine timing, alcohol, new supplements, diet changes, and sleep schedule as stable as reasonably possible.",
-          "Treat a third weekly session, low-volume 1 x 4, sprint intervals, and disease-treatment cardiac rehab as separate variants."
+          "Log the modality, interval heart-rate response, effort, symptoms, and next-day recovery."
         ],
         "stopConditions": [
           "Stop the session immediately if chest pain or pressure, faintness, severe dizziness, confusion, palpitations, unusual shortness of breath, neurologic symptoms, or unsafe pain occurs.",
-          "End the experiment and seek appropriate care if severe symptoms occur, symptoms repeat across sessions, or recovery feels unusually impaired for more than 24-48 hours."
+          "End the experiment and seek appropriate care if severe symptoms occur, symptoms repeat across sessions, or recovery feels unusually impaired for more than 24–48 hours."
+        ],
+        "target": "85–95% estimated HRmax by the later part of each interval",
+        "tips": [
+          "Use a bike, rower, elliptical, incline treadmill, hill walk, or run; choose low-impact modes if joint load or running injury risk is a concern.",
+          "Use heart rate, perceived exertion, and symptoms together instead of sprinting from the start to chase a number.",
+          "Keep other training, caffeine timing, alcohol, new supplements, diet changes, and sleep schedule as stable as reasonably possible.",
+          "Make the first session conservative; repeatable hard aerobic work matters more than maximal suffering."
         ]
       },
       "quality": "usable",
@@ -3635,9 +3789,9 @@
         }
       },
       "revision": {
-        "pageRevisionId": "sha256:e93558e00dae77318a4d3c456a48bbc9afeeccbd526d9aa04a59ca3a4c1a03d3",
-        "recipeHash": "sha256:cea7c91ea7038436bcc840ce74f9c12e2fabd1ed43fc0eb9a3d980a9a06cf227",
-        "runSpecRevisionId": "sha256:47b2a4962e2377d77e990b57f4187759bd11a0b8ad1dad7ac7f9f7d4b9306501"
+        "pageRevisionId": "sha256:fef56942300f3995ab96f227de2c4e615450406b89193117e346c77281b3457f",
+        "recipeHash": "sha256:19419f681bb8a67ca146703f7632dce00ee15120239acae3b94b4cb3d5997af5",
+        "runSpecRevisionId": "sha256:e44f0595dca6b06f4de20fa713df9004b7929cb8bf1090085f784f79bc0220fd"
       },
       "safety": {
         "avoidOrGetClinicianGuidance": [
@@ -3724,7 +3878,12 @@
           "targetAdherenceSessions": 12
         }
       ],
-      "title": "Norwegian 4x4 Intervals"
+      "title": "Norwegian 4x4 Intervals",
+      "whyItWorks": [
+        "Norwegian 4x4 intervals repeatedly push the aerobic system near a high but repeatable intensity. Four-minute work blocks are long enough to stress oxygen delivery and use, while three-minute active recoveries let you repeat the stimulus without turning it into an all-out sprint session.",
+        "The research base includes direct human intervention evidence for improving lab-measured VO2max in small healthy-adult trials, plus broader HIIT evidence. That supports a six-week fitness experiment, but it does not guarantee that a wearable cardio-fitness estimate will move for every person.",
+        "Because high-intensity work can improve fitness while adding recovery stress, resting heart rate, HRV, sleep, symptoms, and next-day recovery are context signals rather than promised wins."
+      ]
     },
     {
       "aliases": [
@@ -3913,7 +4072,7 @@
         "mood_change"
       ],
       "protocol": {
-        "doseSignature": "nightly · 90–120 min before intended bedtime · high-filtering amber/red/brown glasses · 14-night intervention after 7-day baseline",
+        "doseSignature": "Nightly · 90–120 min before intended bedtime · high-filtering amber/red/brown glasses · 14-night intervention after 7-day baseline",
         "durationMinutes": {
           "max": 120,
           "min": 90
@@ -3923,20 +4082,40 @@
         },
         "interventionSessionsMinimum": 10,
         "interventionSessionsTarget": 12,
+        "keepInMind": [
+          "Direct human evidence for evening blue-blocking glasses is small and mixed, especially for objective actigraphy or wearable sleep outcomes.",
+          "The clearest personal signal may be feeling less wired or falling asleep more easily, not a dramatic sleep-stage change.",
+          "Mood-disorder, delayed-sleep-phase, pregnancy, pediatric, shift-work, and clinical lighting protocols are separate clinician-guided variants."
+        ],
+        "logFields": [
+          "glasses on time",
+          "intended bedtime",
+          "actual bedtime",
+          "screen use",
+          "room-light brightness",
+          "caffeine timing",
+          "alcohol",
+          "mood or symptoms"
+        ],
         "steps": [
-          "Keep the normal evening routine stable for a 7-day baseline before starting the intervention.",
+          "Keep the normal evening routine stable for a 7-day baseline before starting.",
           "For 14 intervention nights, put the glasses on 90–120 minutes before intended bedtime.",
-          "Wear them only indoors during the pre-bed window; do not wear them during the day.",
-          "Keep room lighting, screen time, caffeine, alcohol, bedtime target, sleep supplements, melatonin, and exercise timing as stable as practical.",
-          "Do not add a new screen curfew, new sleep supplement, new bedtime, new light-therapy device, or major room-light redesign during this test.",
+          "Wear them indoors only during the pre-bed window, then remove them before sleep.",
           "Remove the glasses before driving, cycling, cooking with visual hazards, navigating stairs or unfamiliar low-light spaces, or doing color-critical work.",
-          "Log whether glasses were worn, approximate start time, bedtime target, actual bedtime, screen use, room-light brightness, alcohol, caffeine timing, late exercise, travel, illness, stress, medication or supplement changes, and any symptoms."
+          "Log wear time, bedtime target, actual bedtime, screens, room light, caffeine or alcohol, stress, and any symptoms."
         ],
         "stopConditions": [
           "Stop the night’s session if the glasses cause headache, dizziness, nausea, eye discomfort, unsafe low-light navigation, or clumsiness.",
           "End the experiment if mood becomes unusually elevated, unusually low, agitated, or unstable.",
           "End the experiment if sleep feels meaningfully worse for three consecutive nights and no obvious outside cause explains it.",
           "End the experiment if the protocol creates anxiety, fixation, or friction that outweighs any benefit."
+        ],
+        "target": "high-filtering amber, red, or brown evening glasses",
+        "tips": [
+          "Use high-filtering amber, red, or brown lenses with good fit; lens color alone is not proof of useful filtering.",
+          "Keep room lighting, screen brightness, bedtime target, caffeine, alcohol, exercise timing, sleep supplements, and melatonin as stable as practical.",
+          "Do not add a new screen curfew, sleep supplement, bedtime, light-therapy device, or major room-light redesign during this test.",
+          "Do not wear strong filtering lenses during the day; daytime light is a different signal."
         ]
       },
       "quality": "usable",
@@ -4099,9 +4278,9 @@
         }
       },
       "revision": {
-        "pageRevisionId": "sha256:0eb43de007e2f15757e6b5c07a33f3bc7ab704bb57fa019bbb7814fb73db3709",
-        "recipeHash": "sha256:ee137c9273b8472bc85172302fa11f44d31779ccfc119938f0312e840551d3b0",
-        "runSpecRevisionId": "sha256:54523023567d4c25e2100416dff53a9d091d93bc0ca76280305255c022797e48"
+        "pageRevisionId": "sha256:3e043b90108e658cba308cff2a62fcda8974d1eb798b790a161673a2ebef4d54",
+        "recipeHash": "sha256:2ad3e5253cced78d8b6be45280b37fb26ce3cd8d62d57a7361a980ae61b62f51",
+        "runSpecRevisionId": "sha256:5ec17f4eceb709c8940b2e2bd14c7836b9aac4f5620ec57272af7e3434c08627"
       },
       "safety": {
         "avoidOrGetClinicianGuidance": [
@@ -4163,7 +4342,12 @@
           "targetAdherenceSessions": 12
         }
       ],
-      "title": "Red-Light Glasses Before Bed"
+      "title": "Red-Light Glasses Before Bed",
+      "whyItWorks": [
+        "Evening melanopic and short-wavelength light can tell the circadian system that it is still daytime, increasing alerting and potentially delaying the body’s night signal. High-filtering glasses are one low-friction way to reduce that input during the pre-bed window.",
+        "The intervention is useful as a self-test because it changes light exposure without requiring a full evening routine overhaul. If it helps, the earliest signal is likely less pre-bed wiredness or shorter perceived sleep onset.",
+        "The research is mixed for objective sleep metrics, so wearable sleep stages, HRV, and resting heart rate should stay exploratory. A quiet subjective improvement can still be worth noticing, but this protocol should not claim eye protection, insomnia treatment, or guaranteed sleep-score gains."
+      ]
     },
     {
       "aliases": [

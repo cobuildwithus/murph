@@ -216,6 +216,50 @@
     },
     {
       "affectedFields": [
+        "protocol.target",
+        "protocol.steps",
+        "protocol.tips",
+        "protocol.keepInMind",
+        "protocol.logFields",
+        "whyItWorks",
+        "apps/web.protocol_ui"
+      ],
+      "changeId": "chg_2026_04_21_bryan_sauna_protocol_ui_clarity",
+      "changeType": "copy_edit",
+      "editSummary": "Separated the Bryan Johnson sauna routine into source-attributed steps, tips, logging fields, and interpretation notes, with a clearer why-it-works section.",
+      "entityKey": "protocol_variant:dry-sauna/bryan-johnson-blueprint",
+      "minor": false,
+      "rationale": "The page needs to make the exact external routine legible without turning source-specific tactics or self-reported outcomes into general recommendations.",
+      "reviewStatus": "accepted",
+      "schemaVersion": "murph.commons.change.v1",
+      "sourceKeys": [
+        "source_artifact:bryan-johnson-sauna-protocol-2026-01-28"
+      ]
+    },
+    {
+      "affectedFields": [
+        "protocol.target",
+        "protocol.steps",
+        "protocol.tips",
+        "protocol.keepInMind",
+        "protocol.logFields",
+        "whyItWorks",
+        "apps/web.protocol_ui"
+      ],
+      "changeId": "chg_2026_04_21_finnish_sauna_protocol_ui_clarity",
+      "changeType": "copy_edit",
+      "editSummary": "Separated Finnish dry-sauna steps from tips, logging fields, and interpretation notes, and rewrote the mechanism-focused why-it-works copy.",
+      "entityKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+      "minor": false,
+      "rationale": "The experiment detail page should show a short how-to protocol first, then practical context and evidence caveats separately so users are not forced to parse setup facts, tips, and disclaimers as numbered steps.",
+      "reviewStatus": "accepted",
+      "schemaVersion": "murph.commons.change.v1",
+      "sourceKeys": [
+        "source_artifact:sauna-bibliography-2026-04-18"
+      ]
+    },
+    {
+      "affectedFields": [
         "protocol",
         "testPlans",
         "claims",
@@ -244,6 +288,28 @@
     },
     {
       "affectedFields": [
+        "protocol.target",
+        "protocol.steps",
+        "protocol.tips",
+        "protocol.keepInMind",
+        "protocol.logFields",
+        "whyItWorks",
+        "apps/web.protocol_ui"
+      ],
+      "changeId": "chg_2026_04_21_norwegian_4x4_protocol_ui_clarity",
+      "changeType": "copy_edit",
+      "editSummary": "Separated Norwegian 4x4 execution steps from tips, logging fields, and interpretation notes, and rewrote why-it-works around aerobic interval mechanism.",
+      "entityKey": "protocol_variant:norwegian-4x4/norwegian-4x4",
+      "minor": false,
+      "rationale": "The protocol should read as a concise workout recipe with separate context for HR targeting, proxy VO2max interpretation, recovery stress, and adjacent interval variants.",
+      "reviewStatus": "accepted",
+      "schemaVersion": "murph.commons.change.v1",
+      "sourceKeys": [
+        "source_artifact:ntnu-cerg-norwegian-4x4"
+      ]
+    },
+    {
+      "affectedFields": [
         "relations",
         "sources/red-light-glasses-before-bed",
         "artifacts/red-light-glasses-before-bed/research-artifacts.json"
@@ -266,6 +332,28 @@
         "source_artifact:pmid-15713707",
         "source_artifact:pmid-27226262",
         "source_artifact:pmid-26414986"
+      ]
+    },
+    {
+      "affectedFields": [
+        "protocol.target",
+        "protocol.steps",
+        "protocol.tips",
+        "protocol.keepInMind",
+        "protocol.logFields",
+        "whyItWorks",
+        "apps/web.protocol_ui"
+      ],
+      "changeId": "chg_2026_04_21_red_light_glasses_protocol_ui_clarity",
+      "changeType": "copy_edit",
+      "editSummary": "Separated red-light-glasses steps from tips, logging fields, and interpretation notes, and rewrote why-it-works around evening melanopic-light reduction.",
+      "entityKey": "protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed",
+      "minor": false,
+      "rationale": "The page should make the nightly test easy to follow while preserving the compiled evidence caveats around mixed objective sleep outcomes, lens quality, daytime light, and safety-critical tasks.",
+      "reviewStatus": "accepted",
+      "schemaVersion": "murph.commons.change.v1",
+      "sourceKeys": [
+        "source_artifact:red-light-glasses-before-bed-bibliography"
       ]
     },
     {

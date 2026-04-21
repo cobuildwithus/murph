@@ -15,5 +15,10 @@ export default async function ExperimentDetailPage({
     notFound();
   }
 
-  return <ExperimentDetailClient protocol={protocol} />;
+  return (
+    <ExperimentDetailClient
+      key={protocol.commons?.pageRevisionId ?? protocol.id}
+      protocol={protocol}
+    />
+  );
 }

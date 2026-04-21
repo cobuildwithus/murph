@@ -3,9 +3,13 @@ import type {
   HealthCommonsClaim,
   HealthCommonsProtocolSpec,
   HealthCommonsSafety,
+  HealthCommonsTestPlan,
   HealthCommonsSource,
 } from "@murphai/contracts/health-commons";
 
+import {
+  CURRENT_EXPERIMENT_PROTOCOL_CONTRACT_VERSION,
+} from "@/src/lib/experiments/experiment-detail";
 import type { ExperimentProtocol, Expert, Study } from "@/src/types/experiments";
 import { healthCommonsCatalog, type HealthCommonsCatalogReader, type HealthCommonsEntity } from "./catalog";
 
@@ -149,6 +153,7 @@ function toExperimentDetail(
   const claims = protocol.claims ?? [];
 
   return {
+    protocolContractVersion: CURRENT_EXPERIMENT_PROTOCOL_CONTRACT_VERSION,
     id: routeId,
     title: protocol.title,
     category: formatProtocolCategory(protocol),
@@ -160,7 +165,11 @@ function toExperimentDetail(
     evidenceLabel: formatEvidenceLabel(protocol),
     description: protocol.summary ?? summarizeBody(protocol.body),
     expectedSignals: biomarkerEntities.map((biomarker) => toExpectedSignal(biomarker)),
+    protocolFacts: toProtocolFacts(protocolSpec, testPlan),
     protocol: toProtocolSteps(protocolSpec),
+    protocolTips: protocolSpec?.tips ?? [],
+    protocolKeepInMind: protocolSpec?.keepInMind ?? [],
+    protocolLogFields: protocolSpec?.logFields ?? [],
     whyItWorks: toWhyItWorks(protocol, claims),
     experts: sourcePeople.map(toExpert),
     researchStats: toResearchStats(citedStudySources),
@@ -283,22 +292,41 @@ function toExpectedSignal(biomarker: HealthCommonsEntity): ExperimentProtocol["e
   };
 }
 
-function toProtocolSteps(protocol: HealthCommonsProtocolSpec | undefined): ExperimentProtocol["protocol"] {
+function toProtocolFacts(
+  protocol: HealthCommonsProtocolSpec | undefined,
+  testPlan: HealthCommonsTestPlan | null,
+): ExperimentProtocol["protocolFacts"] {
   if (!protocol) {
     return [];
   }
 
-  const setupSteps = [
-    protocol.doseSignature,
-    formatFrequency(protocol),
-    formatDuration(protocol),
-    formatTemperature(protocol),
-  ].filter((step): step is string => step !== null);
-  const steps = [...setupSteps, ...(protocol.steps ?? [])];
+  return [
+    testPlan
+      ? {
+          label: "Baseline",
+          value: formatDays(testPlan.baselineDays),
+          detail: "Keep the usual routine stable before the change.",
+        }
+      : null,
+    testPlan
+      ? {
+          label: "Intervention",
+          value: formatDays(testPlan.interventionDays),
+          detail: formatAdherenceTarget(testPlan, protocol),
+        }
+      : null,
+    formatProtocolFrequencyFact(protocol),
+    formatProtocolDurationFact(protocol),
+    formatProtocolTargetFact(protocol),
+  ].filter((fact): fact is ExperimentProtocol["protocolFacts"][number] => fact !== null);
+}
+
+function toProtocolSteps(protocol: HealthCommonsProtocolSpec | undefined): ExperimentProtocol["protocol"] {
+  const steps = protocol?.steps ?? [];
 
   return steps.map((step, index) => ({
     number: index + 1,
-    title: index === 0 ? "Dose" : `Step ${index + 1}`,
+    title: `Step ${index + 1}`,
     detail: step,
   }));
 }
@@ -307,16 +335,118 @@ function toWhyItWorks(
   protocol: HealthCommonsCatalogEntity,
   claims: readonly HealthCommonsClaim[],
 ): string {
+  if (protocol.whyItWorks && protocol.whyItWorks.length > 0) {
+    return protocol.whyItWorks.join("\n\n");
+  }
+
   const selectedClaims = claims
     .filter((claim) => claim.type !== "safety")
+    .map((claim, index) => ({ claim, index }))
+    .sort((left, right) => {
+      const rankDelta = claimWhyItWorksRank(left.claim) - claimWhyItWorksRank(right.claim);
+      return rankDelta !== 0 ? rankDelta : left.index - right.index;
+    })
     .slice(0, 4)
-    .map((claim) => claim.text);
+    .map(({ claim }) => claim.text);
 
   if (selectedClaims.length > 0) {
     return selectedClaims.join("\n\n");
   }
 
   return summarizeBody(protocol.body);
+}
+
+function claimWhyItWorksRank(claim: HealthCommonsClaim): number {
+  switch (claim.type) {
+    case "mechanistic":
+      return 0;
+    case "intervention_result":
+      return 1;
+    case "mixed_evidence":
+      return 2;
+    case "design_guardrail":
+      return 3;
+    case "evidence_scope":
+      return 4;
+    case "association_not_causation":
+      return 5;
+    case "community_outcome":
+      return 6;
+    case "safety":
+      return 7;
+  }
+}
+
+function formatProtocolFrequencyFact(
+  protocol: HealthCommonsProtocolSpec,
+): ExperimentProtocol["protocolFacts"][number] | null {
+  const value = formatFrequency(protocol);
+
+  return value
+    ? {
+        label: "Frequency",
+        value: stripTrailingPeriod(value),
+      }
+    : null;
+}
+
+function formatProtocolDurationFact(
+  protocol: HealthCommonsProtocolSpec,
+): ExperimentProtocol["protocolFacts"][number] | null {
+  const value = formatDuration(protocol);
+
+  return value
+    ? {
+        label: "Session",
+        value: stripTrailingPeriod(value),
+      }
+    : null;
+}
+
+function formatProtocolTargetFact(
+  protocol: HealthCommonsProtocolSpec,
+): ExperimentProtocol["protocolFacts"][number] | null {
+  const target = protocol.target ?? formatTemperature(protocol);
+
+  return target
+    ? {
+        label: protocol.temperatureC ? "Target" : "Dose",
+        value: stripTrailingPeriod(target),
+      }
+    : {
+        label: "Dose",
+        value: protocol.doseSignature,
+      };
+}
+
+function formatAdherenceTarget(
+  testPlan: HealthCommonsTestPlan,
+  protocol: HealthCommonsProtocolSpec,
+): string | undefined {
+  const target = testPlan.targetAdherenceSessions ?? protocol.interventionSessionsTarget;
+  const minimum = testPlan.minimumAdherenceSessions ?? protocol.interventionSessionsMinimum;
+
+  if (typeof target === "number" && typeof minimum === "number" && target !== minimum) {
+    return `${minimum} session minimum; ${target} session target.`;
+  }
+
+  if (typeof target === "number") {
+    return `${target} session target.`;
+  }
+
+  if (typeof minimum === "number") {
+    return `${minimum} session minimum.`;
+  }
+
+  return undefined;
+}
+
+function formatDays(days: number): string {
+  return days === 1 ? "1 day" : `${days} days`;
+}
+
+function stripTrailingPeriod(value: string): string {
+  return value.replace(/\.$/u, "");
 }
 
 function toExpert(entity: HealthCommonsEntity): Expert {

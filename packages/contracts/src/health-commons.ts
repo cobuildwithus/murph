@@ -178,6 +178,7 @@ export type HealthCommonsTestPlan = z.infer<typeof healthCommonsTestPlanSchema>;
 export const healthCommonsProtocolSpecSchema = z
   .object({
     doseSignature: shortStringSchema,
+    target: shortStringSchema.optional(),
     frequency: z
       .object({
         sessionsPerWeek: z.number().positive().optional(),
@@ -202,6 +203,9 @@ export const healthCommonsProtocolSpecSchema = z
     interventionSessionsMinimum: z.number().int().nonnegative().optional(),
     interventionSessionsTarget: z.number().int().nonnegative().optional(),
     steps: z.array(longStringSchema).optional(),
+    tips: z.array(longStringSchema).optional(),
+    keepInMind: z.array(longStringSchema).optional(),
+    logFields: z.array(shortStringSchema).optional(),
     stopConditions: z.array(longStringSchema).optional(),
   })
   .strict();
@@ -317,6 +321,7 @@ export const healthCommonsPageFrontmatterSchema = z
     attribution: healthCommonsAttributionSchema.optional(),
     protocol: healthCommonsProtocolSpecSchema.optional(),
     testPlans: z.array(healthCommonsTestPlanSchema).optional(),
+    whyItWorks: z.array(longStringSchema).optional(),
     claims: z.array(healthCommonsClaimSchema).optional(),
     safety: healthCommonsSafetySchema.optional(),
     source: healthCommonsSourceSchema.optional(),

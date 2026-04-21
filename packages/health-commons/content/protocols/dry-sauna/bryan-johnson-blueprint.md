@@ -81,7 +81,8 @@ attribution:
   sourceUrl: https://blueprint.bryanjohnson.com/blogs/news/sauna-protocol
   note: Source-attributed from Bryan Johnson / Blueprint public pages plus public X, LinkedIn, and Substack posts. This is an external named routine, not a default recommendation.
 protocol:
-  doseSignature: Daily dry sauna - 20 min - 93 C - morning after workout - groin cooling for male fertility protection
+  doseSignature: Daily dry sauna · 20 min · 93 °C / 200 °F · morning after workout · source-attributed external routine
+  target: 93 °C / 200 °F low-humidity dry sauna
   frequency:
     sessionsPerWeek: 7
   durationMinutes:
@@ -94,11 +95,26 @@ protocol:
   interventionSessionsTarget: 14
   steps:
     - Treat this as a source-attributed external routine, not a default recommendation.
-    - The public Blueprint routine is a dry sauna at 200 F / 93 C for 20 minutes, daily, usually in the morning after a workout.
-    - Keep humidity low, use the exact source routine only if the setup is appropriate, and track session duration, approximate temperature, symptoms, hydration, and whether face or neck cooling was used.
-    - The source routine uses groin cooling for male fertility protection; do not generalize that self-experiment finding into population-level safety.
-    - Rehydrate after the session; Bryan Johnson's public routine mentions roughly 36 oz of mineral-supplemented water or electrolytes.
-    - Treat the April 2026 core-temperature-threshold work as a higher-burden experimental variant, not as the default entry version of the protocol.
+    - Keep a 7-day baseline, then run the routine for up to 14 intervention days.
+    - Use a low-humidity dry sauna at about 93 °C / 200 °F for 20 minutes, usually in the morning after a workout if copying the source routine.
+    - Rehydrate after the session; the public Blueprint routine mentions mineral-supplemented water or electrolytes.
+    - Log the session, workout timing, cooling tactics, hydration, symptoms, and whether the dose felt sustainable.
+  tips:
+    - If you are not already heat-adapted, the Blueprint public beginner guidance points toward a more conservative 15–20 minutes, 3–5 times per week, and 80–100 °C.
+    - Keep humidity low if trying to mirror the source routine.
+    - Treat the April 2026 core-temperature-threshold experiments as a higher-burden variant, not the default entry version.
+  keepInMind:
+    - This is a higher-burden daily routine layered after workouts, so exercise load and dehydration can easily confound the result.
+    - Groin cooling, face or neck cooling, and post-sauna no-cold-exposure guidance are source-specific tactics rather than general sauna rules.
+    - Bryan Johnson’s reported toxin, fertility, vascular, and resting-heart-rate changes are personal observations, not expected causal outcomes for users.
+  logFields:
+    - duration
+    - temperature
+    - workout timing and load
+    - hydration or electrolytes
+    - cooling tactics used
+    - symptoms
+    - sleep or recovery disruption
   stopConditions:
     - Stop the session if chest pain, faintness, severe dizziness, confusion, palpitations, shortness of breath, or intolerable heat distress occurs.
     - End the protocol and seek appropriate care if severe or repeated symptoms occur.
@@ -116,6 +132,10 @@ testPlans:
     notes:
       - This test plan is an observation wrapper around an external named routine, not proof that the source routine is broadly advisable.
       - If copied at all, compare the intervention window against the user's own baseline and log heat burden, hydration, symptoms, illness, alcohol, and post-workout timing.
+whyItWorks:
+  - This routine uses the same basic dry-sauna physiology as the simpler sauna experiment, but at a higher weekly dose and usually after training. Heat exposure raises cardiovascular and thermoregulatory load; post-workout timing can add recovery, hydration, and fatigue context.
+  - The page is source-attributed because the detailed tactics come from Bryan Johnson’s public routine and self-experiments, not from a single validated clinical protocol. That makes it useful to try only if you want to test this exact routine and can handle the burden.
+  - The honest readout is whether your resting heart rate, HRV, symptoms, and felt recovery tolerate this daily post-workout heat dose. It should not promise Bryan Johnson’s reported toxin, fertility, or vascular outcomes.
 claims:
   -
     claimId: source-routine-spec

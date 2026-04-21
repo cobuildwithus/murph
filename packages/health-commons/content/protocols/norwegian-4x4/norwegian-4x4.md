@@ -103,7 +103,8 @@ lineage:
 attribution:
   ownerType: murph
 protocol:
-  doseSignature: 2x/week · 4 x 4 min intervals · 85-95% HRmax · 7-day baseline + 6-week intervention
+  doseSignature: 2x/week · 4 x 4 min intervals · 85–95% HRmax · 7-day baseline + 6-week intervention
+  target: 85–95% estimated HRmax by the later part of each interval
   frequency:
     sessionsPerWeek: 2
   durationMinutes:
@@ -112,19 +113,33 @@ protocol:
   interventionSessionsMinimum: 8
   interventionSessionsTarget: 12
   steps:
-    - Keep your normal routine for a 7-day baseline before starting the intervention.
-    - During the 6-week intervention, complete two Norwegian-style 4x4 sessions per week, separated by at least 48 hours when possible.
-    - Use a bike, rower, elliptical, incline treadmill, hill walk, or run. Prefer low-impact modes if you are new to intervals or have joint concerns.
-    - Warm up for about 10 minutes at easy-to-moderate effort, roughly 60-70% of estimated HRmax.
-    - Complete four 4-minute hard intervals. Aim for 85-95% of estimated HRmax by the later part of each interval, not necessarily in the first minute.
-    - Recover actively for 3 minutes between intervals at easy effort, roughly 60-70% of estimated HRmax.
+    - Keep your normal routine stable for a 7-day baseline before starting.
+    - During the 6-week intervention, complete two 4x4 sessions per week, separated by at least 48 hours when possible.
+    - Warm up for about 10 minutes at easy-to-moderate effort, roughly 60–70% of estimated HRmax.
+    - Complete four 4-minute hard intervals, aiming to reach 85–95% of estimated HRmax by the later part of each interval.
+    - Recover actively for 3 minutes between intervals at easy effort, roughly 60–70% of estimated HRmax.
     - Cool down for about 5 minutes.
-    - Use heart rate plus perceived exertion and symptoms. Do not sprint from the start just to chase a heart-rate number.
+    - Log the modality, interval heart-rate response, effort, symptoms, and next-day recovery.
+  tips:
+    - Use a bike, rower, elliptical, incline treadmill, hill walk, or run; choose low-impact modes if joint load or running injury risk is a concern.
+    - Use heart rate, perceived exertion, and symptoms together instead of sprinting from the start to chase a number.
     - Keep other training, caffeine timing, alcohol, new supplements, diet changes, and sleep schedule as stable as reasonably possible.
-    - Treat a third weekly session, low-volume 1 x 4, sprint intervals, and disease-treatment cardiac rehab as separate variants.
+    - Make the first session conservative; repeatable hard aerobic work matters more than maximal suffering.
+  keepInMind:
+    - Wearable VO2max is a proxy, not lab gas-exchange testing, and may update slowly or not at all during the experiment.
+    - The 6-week window is intentional because the main target is cardiorespiratory fitness, not a next-day recovery score.
+    - A third weekly session, low-volume 1x4, sprint intervals, and supervised cardiac rehab are separate variants.
+  logFields:
+    - modality
+    - interval heart-rate peaks
+    - perceived exertion
+    - symptoms
+    - recovery after 24 to 48 hours
+    - sleep disruption
+    - other hard training
   stopConditions:
     - Stop the session immediately if chest pain or pressure, faintness, severe dizziness, confusion, palpitations, unusual shortness of breath, neurologic symptoms, or unsafe pain occurs.
-    - End the experiment and seek appropriate care if severe symptoms occur, symptoms repeat across sessions, or recovery feels unusually impaired for more than 24-48 hours.
+    - End the experiment and seek appropriate care if severe symptoms occur, symptoms repeat across sessions, or recovery feels unusually impaired for more than 24–48 hours.
 testPlans:
   -
     planId: wearable-cardio-fitness-49d
@@ -144,6 +159,10 @@ testPlans:
       - Session fidelity is part of the outcome; record whether each interval reached the intended heart-rate zone without unsafe symptoms.
       - Resting heart rate and heart-rate recovery may be useful secondary signals, but sleep, illness, stress, alcohol, heat, and training load can confound them.
       - HRV is exploratory. Sleep efficiency is recovery context and a confounder; neither is a promised outcome.
+whyItWorks:
+  - Norwegian 4x4 intervals repeatedly push the aerobic system near a high but repeatable intensity. Four-minute work blocks are long enough to stress oxygen delivery and use, while three-minute active recoveries let you repeat the stimulus without turning it into an all-out sprint session.
+  - The research base includes direct human intervention evidence for improving lab-measured VO2max in small healthy-adult trials, plus broader HIIT evidence. That supports a six-week fitness experiment, but it does not guarantee that a wearable cardio-fitness estimate will move for every person.
+  - Because high-intensity work can improve fitness while adding recovery stress, resting heart rate, HRV, sleep, symptoms, and next-day recovery are context signals rather than promised wins.
 claims:
   -
     claimId: canonical-4x4-has-direct-human-intervention-support

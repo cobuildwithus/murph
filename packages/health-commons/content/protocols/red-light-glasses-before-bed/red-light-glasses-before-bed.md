@@ -113,7 +113,8 @@ lineage:
 attribution:
   ownerType: murph
 protocol:
-  doseSignature: nightly · 90–120 min before intended bedtime · high-filtering amber/red/brown glasses · 14-night intervention after 7-day baseline
+  doseSignature: Nightly · 90–120 min before intended bedtime · high-filtering amber/red/brown glasses · 14-night intervention after 7-day baseline
+  target: high-filtering amber, red, or brown evening glasses
   frequency:
     sessionsPerWeek: 7
   durationMinutes:
@@ -122,13 +123,29 @@ protocol:
   interventionSessionsMinimum: 10
   interventionSessionsTarget: 12
   steps:
-    - Keep the normal evening routine stable for a 7-day baseline before starting the intervention.
+    - Keep the normal evening routine stable for a 7-day baseline before starting.
     - For 14 intervention nights, put the glasses on 90–120 minutes before intended bedtime.
-    - Wear them only indoors during the pre-bed window; do not wear them during the day.
-    - Keep room lighting, screen time, caffeine, alcohol, bedtime target, sleep supplements, melatonin, and exercise timing as stable as practical.
-    - Do not add a new screen curfew, new sleep supplement, new bedtime, new light-therapy device, or major room-light redesign during this test.
+    - Wear them indoors only during the pre-bed window, then remove them before sleep.
     - Remove the glasses before driving, cycling, cooking with visual hazards, navigating stairs or unfamiliar low-light spaces, or doing color-critical work.
-    - Log whether glasses were worn, approximate start time, bedtime target, actual bedtime, screen use, room-light brightness, alcohol, caffeine timing, late exercise, travel, illness, stress, medication or supplement changes, and any symptoms.
+    - Log wear time, bedtime target, actual bedtime, screens, room light, caffeine or alcohol, stress, and any symptoms.
+  tips:
+    - Use high-filtering amber, red, or brown lenses with good fit; lens color alone is not proof of useful filtering.
+    - Keep room lighting, screen brightness, bedtime target, caffeine, alcohol, exercise timing, sleep supplements, and melatonin as stable as practical.
+    - Do not add a new screen curfew, sleep supplement, bedtime, light-therapy device, or major room-light redesign during this test.
+    - Do not wear strong filtering lenses during the day; daytime light is a different signal.
+  keepInMind:
+    - Direct human evidence for evening blue-blocking glasses is small and mixed, especially for objective actigraphy or wearable sleep outcomes.
+    - The clearest personal signal may be feeling less wired or falling asleep more easily, not a dramatic sleep-stage change.
+    - Mood-disorder, delayed-sleep-phase, pregnancy, pediatric, shift-work, and clinical lighting protocols are separate clinician-guided variants.
+  logFields:
+    - glasses on time
+    - intended bedtime
+    - actual bedtime
+    - screen use
+    - room-light brightness
+    - caffeine timing
+    - alcohol
+    - mood or symptoms
   stopConditions:
     - Stop the night’s session if the glasses cause headache, dizziness, nausea, eye discomfort, unsafe low-light navigation, or clumsiness.
     - End the experiment if mood becomes unusually elevated, unusually low, agitated, or unstable.
@@ -153,6 +170,10 @@ testPlans:
       - Compare intervention-window averages against the user’s own 7-day baseline rather than highlighting single-night changes.
       - Treat HRV, resting heart rate, sleep stages, and total sleep time as exploratory unless the personal signal is repeated and not obviously confounded.
       - The primary practical question is whether evenings feel less wired and sleep onset appears earlier, not whether every sleep metric improves.
+whyItWorks:
+  - Evening melanopic and short-wavelength light can tell the circadian system that it is still daytime, increasing alerting and potentially delaying the body’s night signal. High-filtering glasses are one low-friction way to reduce that input during the pre-bed window.
+  - The intervention is useful as a self-test because it changes light exposure without requiring a full evening routine overhaul. If it helps, the earliest signal is likely less pre-bed wiredness or shorter perceived sleep onset.
+  - The research is mixed for objective sleep metrics, so wearable sleep stages, HRV, and resting heart rate should stay exploratory. A quiet subjective improvement can still be worth noticing, but this protocol should not claim eye protection, insomnia treatment, or guaranteed sleep-score gains.
 claims:
   -
     claimId: evening-melanopic-light-reduction-is-plausible
