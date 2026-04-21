@@ -25,6 +25,10 @@ source:
   year: 1986
   journal: "Ann Clin Res"
   citation: "Kauppinen K, Vuori I. Man in the sauna. Review article. Ann Clin Res 1986;18:173-185."
+researchEvidence:
+  designKind: "narrative_review"
+  designLabel: "Narrative review"
+  aggregateRole: "synthesis"
 evidenceBucket: Finnish dry-sauna corpus
 whyItMatters: "Expands the audited Finnish dry-sauna evidence corpus with a general / mixed record marked medium priority for Murph v1 interpretation."
 potentialMurphEndpoints:

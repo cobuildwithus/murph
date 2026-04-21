@@ -25,6 +25,10 @@ source:
   year: 1988
   journal: "Ann Clin Res"
   citation: "Kukkonen-Harjula K, Kauppinen K. How the sauna affects the endocrine system. Ann Clin Res 1988;20:262-266."
+researchEvidence:
+  designKind: "narrative_review"
+  designLabel: "Narrative physiology review"
+  aggregateRole: "synthesis"
 evidenceBucket: Finnish dry-sauna corpus
 whyItMatters: "Expands the audited Finnish dry-sauna evidence corpus with a safety / physiology record marked lower priority for Murph v1 interpretation."
 potentialMurphEndpoints:

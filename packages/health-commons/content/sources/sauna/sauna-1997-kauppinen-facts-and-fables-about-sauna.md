@@ -25,6 +25,10 @@ source:
   year: 1997
   journal: "Ann N Y Acad Sci"
   citation: "Kauppinen K. Facts and fables about sauna. Ann N Y Acad Sci 1997;813:654-662."
+researchEvidence:
+  designKind: "narrative_review"
+  designLabel: "Narrative review"
+  aggregateRole: "synthesis"
 evidenceBucket: Finnish dry-sauna corpus
 whyItMatters: "Expands the audited Finnish dry-sauna evidence corpus with a general / mixed record marked medium priority for Murph v1 interpretation."
 potentialMurphEndpoints:

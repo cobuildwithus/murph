@@ -27,6 +27,10 @@ source:
   pmid: "30077204"
   doi: 10.1016/j.mayocp.2018.04.008
   url: https://www.mayoclinicproceedings.org/article/S0025-6196(18)30275-1/fulltext
+researchEvidence:
+  designKind: "narrative_review"
+  designLabel: "Evidence review"
+  aggregateRole: "synthesis"
 evidenceBucket: Evidence backbone
 whyItMatters: Strong narrative synthesis focused on cardiovascular mechanisms and outcomes
 potentialMurphEndpoints:

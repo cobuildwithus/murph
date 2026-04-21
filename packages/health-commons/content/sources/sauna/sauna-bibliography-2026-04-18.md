@@ -41,6 +41,11 @@ source:
   year: 2026
   journal: Health Commons research curation
   citation: Health Commons Research. Sauna research bibliography. Prepared 2026-04-18.
+researchEvidence:
+  designKind: "bibliography"
+  designLabel: "Bibliography"
+  aggregateRole: "context"
+  aggregationNote: "Curation artifact; excluded from participant aggregation."
 evidenceBucket: Research curation
 whyItMatters: This is the structured source map behind the first dry-sauna experiment and evidence review.
 potentialMurphEndpoints:

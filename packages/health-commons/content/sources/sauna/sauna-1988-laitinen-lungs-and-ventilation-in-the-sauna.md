@@ -25,6 +25,10 @@ source:
   year: 1988
   journal: "Ann Clin Res"
   citation: "Laitinen LA, Lindqvist A, Heino M. Lungs and ventilation in the sauna. Ann Clin Res 1988;20:244-248."
+researchEvidence:
+  designKind: "narrative_review"
+  designLabel: "Narrative physiology review"
+  aggregateRole: "synthesis"
 evidenceBucket: Finnish dry-sauna corpus
 whyItMatters: "Expands the audited Finnish dry-sauna evidence corpus with a respiratory / ent record marked lower priority for Murph v1 interpretation."
 potentialMurphEndpoints:

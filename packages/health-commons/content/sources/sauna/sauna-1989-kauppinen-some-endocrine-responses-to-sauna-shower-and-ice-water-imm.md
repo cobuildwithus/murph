@@ -25,6 +25,16 @@ source:
   year: 1989
   journal: "Arctic Med Res"
   citation: "Kauppinen K, Pajari-Backas M, Volin P, Vakkuri O. Some endocrine responses to sauna, shower and ice water immersion. Arctic Med Res 1989;48:131-139."
+researchEvidence:
+  designKind: "acute_mechanistic"
+  designLabel: "Thermal-sequence endocrine study"
+  participantCount: 8
+  participantCountKind: "approximate"
+  populationLabel: "Healthy adult volunteers"
+  durationLabel: "Brief sauna/shower/ice-water exposures"
+  aggregateRole: "primary"
+  aggregationNote: "Approximate count; same volunteer series as companion 1989 Kauppinen papers."
+  cohortKey: "kauppinen-1989-sauna-shower-ice-water-volunteers"
 evidenceBucket: Finnish dry-sauna corpus
 whyItMatters: "Expands the audited Finnish dry-sauna evidence corpus with a safety / physiology record marked lower priority for Murph v1 interpretation."
 potentialMurphEndpoints:

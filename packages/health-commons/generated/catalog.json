@@ -1225,7 +1225,7 @@
       "schemaVersion": "murph.commons.artifact-manifest.v1"
     }
   ],
-  "catalogHash": "sha256:ceecddd2bd0d7d914452c16cc008ad5bc08b59730608568e6495fd0f0edbed68",
+  "catalogHash": "sha256:a32929632e982f6dcfe9803d28c970c3c790d78d414592657d459ff17314baac",
   "changes": [
     {
       "affectedFields": [
@@ -4632,8 +4632,17 @@
         }
       ],
       "relativePath": "sources/sauna/doi-10-1016-j-aimed-2024-09-009.md",
+      "researchEvidence": {
+        "aggregateRole": "synthesis",
+        "designKind": "meta_analysis",
+        "designLabel": "Blood-pressure meta-analysis",
+        "includedStudyCount": 6,
+        "participantCount": 76,
+        "participantCountKind": "reported",
+        "populationLabel": "Healthy adult volunteers"
+      },
       "revision": {
-        "pageRevisionId": "sha256:dbe2b3b3cc26c7722a7923953b10dc4c1516e8acf60bd0c419598625a99bf1ba",
+        "pageRevisionId": "sha256:777bc1140d77a0153b998878e031294e141f83992d798ca30c53686b7c249f62",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -4685,8 +4694,13 @@
         }
       ],
       "relativePath": "sources/sauna/doi-10-3389-fcvm-2025-1537194.md",
+      "researchEvidence": {
+        "aggregateRole": "synthesis",
+        "designKind": "narrative_review",
+        "designLabel": "Cardiovascular/PAD narrative review"
+      },
       "revision": {
-        "pageRevisionId": "sha256:5f7144dd5e2fb7e65cf69bd44f687301135f2084cae077e0c8ddef0fc5bded37",
+        "pageRevisionId": "sha256:406515284c369262d06198570c0e71a4f38ad5588039c6dd3b6bf2d53003c0b3",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -4736,8 +4750,18 @@
         }
       ],
       "relativePath": "sources/sauna/doi-10.1080-23328940.2026.2645467.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "heinonen-2026-acute-immune-sauna",
+        "designKind": "acute_mechanistic",
+        "designLabel": "Acute immune/cytokine study",
+        "durationLabel": "Single acute sauna exposure",
+        "participantCount": 61,
+        "participantCountKind": "reported",
+        "populationLabel": "Adults in acute Finnish-sauna heat exposure study"
+      },
       "revision": {
-        "pageRevisionId": "sha256:4d473db56a348861e8a2935e66a95afbd6448b76486745e7f828a70cbd3bafaf",
+        "pageRevisionId": "sha256:344f7edb3ad0a9dafeca3de031f414dc5360f6621553eb29f3fd4d408d238868",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -4907,8 +4931,18 @@
         }
       ],
       "relativePath": "sources/sauna/doi-10.3390-app151910762.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "vojta-2025-extreme-heat-resistance-rct",
+        "designKind": "randomized_controlled_trial",
+        "designLabel": "Blinded heat-plus-resistance RCT",
+        "durationLabel": "4-week sauna-plus-resistance intervention",
+        "participantCount": 29,
+        "participantCountKind": "approximate",
+        "populationLabel": "Resistance-trained adults"
+      },
       "revision": {
-        "pageRevisionId": "sha256:bc398b20b3201aff154069b01fffd32d5be48598a98559a5ee5408372ad6f0e6",
+        "pageRevisionId": "sha256:c9d82cae46baa0f11c109c4c158960917d69e945157627372430b27de4895ec3",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -5223,8 +5257,13 @@
         }
       ],
       "relativePath": "sources/sauna/mayo-2018-sauna-review.md",
+      "researchEvidence": {
+        "aggregateRole": "synthesis",
+        "designKind": "narrative_review",
+        "designLabel": "Evidence review"
+      },
       "revision": {
-        "pageRevisionId": "sha256:e16c50d163fc9670a97be0309b89e2345b00dae4a8b5a966f2ea837da18e1c1b",
+        "pageRevisionId": "sha256:4bbb8f3e42c4142fc2f9d32c8d5ab3b27e0f3d093d4fdf7a2fb8aeb7039259c4",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -5489,8 +5528,13 @@
         }
       ],
       "relativePath": "sources/sauna/pmid-11165553.md",
+      "researchEvidence": {
+        "aggregateRole": "synthesis",
+        "designKind": "narrative_review",
+        "designLabel": "Clinical narrative review"
+      },
       "revision": {
-        "pageRevisionId": "sha256:d8d52ff68a4533e4701f67ba3e5e25ea29d1afdb3d1f203b1c76cc4d4849bb8e",
+        "pageRevisionId": "sha256:b5671dba94398383df0c06a0f8d43bf38ad41f222b04e2a28e32cd43cd2d17d1",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -5614,8 +5658,13 @@
         }
       ],
       "relativePath": "sources/sauna/pmid-16871826.md",
+      "researchEvidence": {
+        "aggregateRole": "synthesis",
+        "designKind": "narrative_review",
+        "designLabel": "Safety narrative review"
+      },
       "revision": {
-        "pageRevisionId": "sha256:4270cb044d4f21f1f9827fd1172eba064ccc8b118b6f807812ee0dc284953132",
+        "pageRevisionId": "sha256:9572e87261f9b0b2b87bc1bdb3292a81418d52d0976ad31721b14e6a8e054058",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -5738,8 +5787,18 @@
         }
       ],
       "relativePath": "sources/sauna/pmid-19154844.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "basford-2009-chf-crossover-pilot",
+        "designKind": "crossover_trial",
+        "designLabel": "Heart-failure crossover pilot",
+        "durationLabel": "Supervised sauna pilot sessions",
+        "participantCount": 9,
+        "participantCountKind": "reported",
+        "populationLabel": "Chronic heart failure patients"
+      },
       "revision": {
-        "pageRevisionId": "sha256:915aa532ff927eb4c4e353fd17f5ced10981bedc777405019941707995f23afc",
+        "pageRevisionId": "sha256:700047364250beae26410d45c3c692241e6e3a42cb35b6c66df4b99f604d4468",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -6069,8 +6128,18 @@
         }
       ],
       "relativePath": "sources/sauna/pmid-25432420.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "stanley-2015-heat-acclimation-cyclists",
+        "designKind": "single_arm_trial",
+        "designLabel": "Heat-acclimation pilot",
+        "durationLabel": "10-day post-exercise sauna acclimation",
+        "participantCount": 7,
+        "participantCountKind": "reported",
+        "populationLabel": "Well-trained male cyclists"
+      },
       "revision": {
-        "pageRevisionId": "sha256:61a66439a18b8c302bdf50ea7ee3d5c000bc4b71a8c6688294b6f912a9915c32",
+        "pageRevisionId": "sha256:fbdc4d9bc1cf7323e5827556682b9a376a67d1b1c1aa2a509484b8dfea686b5a",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -6194,8 +6263,18 @@
         }
       ],
       "relativePath": "sources/sauna/pmid-25705824.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "kihd-men",
+        "designKind": "prospective_cohort",
+        "designLabel": "Prospective cohort",
+        "durationLabel": "20.7-year follow-up",
+        "participantCount": 2315,
+        "participantCountKind": "reported",
+        "populationLabel": "KIHD Finnish men"
+      },
       "revision": {
-        "pageRevisionId": "sha256:623c0c2c760b1ac9c36715fa23ecd8f22ceadb7bd84b620f688cc0511a06ad2c",
+        "pageRevisionId": "sha256:73682ae83aa45a03ff72a877b09d18af1e923f54668f048558a093da4201bb50",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -6248,8 +6327,18 @@
         }
       ],
       "relativePath": "sources/sauna/pmid-26152773.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "radtke-2016-hf-cad-controls",
+        "designKind": "acute_mechanistic",
+        "designLabel": "Acute clinical physiology study",
+        "durationLabel": "Single sauna plus cold-water session",
+        "participantCount": 37,
+        "participantCountKind": "reported",
+        "populationLabel": "Heart failure, CAD, and control participants"
+      },
       "revision": {
-        "pageRevisionId": "sha256:8abf9d59348ece4b99d370dfb21d7d69cd6ffedb6f9431a18c1ebaa24a9e47af",
+        "pageRevisionId": "sha256:fa04b8aef305bbab42d8525375a7f455b77730c36940c8a24b1cf291a8a34bcf",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -6504,8 +6593,18 @@
         }
       ],
       "relativePath": "sources/sauna/pmid-27932366.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "kihd-men",
+        "designKind": "prospective_cohort",
+        "designLabel": "Prospective cohort",
+        "durationLabel": "Long-term dementia follow-up",
+        "participantCount": 2315,
+        "participantCountKind": "reported",
+        "populationLabel": "KIHD Finnish men"
+      },
       "revision": {
-        "pageRevisionId": "sha256:0cfa9a62fbde4b16702216c839f585cef842eda2fcd10d740cd36f5af1dbefbf",
+        "pageRevisionId": "sha256:b83654f825a8a8a474c566ef4e700a9b9701c1a536ead9b462abce47d88155ae",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -6630,8 +6729,18 @@
         }
       ],
       "relativePath": "sources/sauna/pmid-28633297.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "kihd-men",
+        "designKind": "prospective_cohort",
+        "designLabel": "Prospective cohort",
+        "durationLabel": "Median 24.7-year hypertension follow-up",
+        "participantCount": 1621,
+        "participantCountKind": "reported",
+        "populationLabel": "KIHD Finnish men"
+      },
       "revision": {
-        "pageRevisionId": "sha256:7deae419483bf50c3ca21cb1d76d751829118843ae3804548d458121b38d578c",
+        "pageRevisionId": "sha256:05b852ba36c500e8c546cf12e296137047a118032df071896c85ad3627d560e5",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -6753,8 +6862,18 @@
         }
       ],
       "relativePath": "sources/sauna/pmid-28905164.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "kihd-men",
+        "designKind": "prospective_cohort",
+        "designLabel": "Prospective cohort",
+        "durationLabel": "Long-term respiratory-disease follow-up",
+        "participantCount": 1935,
+        "participantCountKind": "reported",
+        "populationLabel": "KIHD Finnish men"
+      },
       "revision": {
-        "pageRevisionId": "sha256:aec97dca63c6bdc5fcad572070804c93628ef539eab434a159b93c5ecb72ba19",
+        "pageRevisionId": "sha256:c61930a20d9da0c7bdc7cbd357daadb11ae177db7242f11cc19f9a114ee680ca",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -6804,8 +6923,18 @@
         }
       ],
       "relativePath": "sources/sauna/pmid-28972808.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "kihd-men",
+        "designKind": "prospective_cohort",
+        "designLabel": "Prospective cohort",
+        "durationLabel": "Long-term fitness and sauna follow-up",
+        "participantCount": 2277,
+        "participantCountKind": "approximate",
+        "populationLabel": "KIHD Finnish men"
+      },
       "revision": {
-        "pageRevisionId": "sha256:abb3dd97fef7aa1cd95e768910f4a006b94aaebff9caae7fcc572a99d4212344",
+        "pageRevisionId": "sha256:f36d973a155f6ca0bb7d6224f9b77fdbd451fba3fcb3a97c813ffb14333f14d9",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -6919,8 +7048,18 @@
         }
       ],
       "relativePath": "sources/sauna/pmid-29229091.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "kihd-men",
+        "designKind": "prospective_cohort",
+        "designLabel": "Prospective cohort",
+        "durationLabel": "Long-term pneumonia follow-up",
+        "participantCount": 2210,
+        "participantCountKind": "approximate",
+        "populationLabel": "KIHD Finnish men"
+      },
       "revision": {
-        "pageRevisionId": "sha256:aeffe412d14ae21fe38cd0906c230b42f5c3999cdcd7f6e4210022ae1925faea",
+        "pageRevisionId": "sha256:ce149bff30c4a093eaf17d37da1a5794adc47046420effa4cc81d8dde6cbbc97",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -6973,8 +7112,18 @@
         }
       ],
       "relativePath": "sources/sauna/pmid-29269746.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "laukkanen-2018-acute-cv-102",
+        "designKind": "acute_mechanistic",
+        "designLabel": "Acute cardiovascular physiology study",
+        "durationLabel": "Single 30-minute sauna session",
+        "participantCount": 102,
+        "participantCountKind": "reported",
+        "populationLabel": "Adults with cardiovascular risk factors"
+      },
       "revision": {
-        "pageRevisionId": "sha256:f58007bfcc559a1a5148afb52b41bc9f6f7e5a9978c348d999068aeb63bb2ae3",
+        "pageRevisionId": "sha256:0dffddbf5187378d7a707df7a02557dc4878d6a48c6a38a536c8114112d9e242",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -7025,8 +7174,13 @@
         }
       ],
       "relativePath": "sources/sauna/pmid-29351426.md",
+      "researchEvidence": {
+        "aggregateRole": "synthesis",
+        "designKind": "narrative_review",
+        "designLabel": "Narrative physiology review"
+      },
       "revision": {
-        "pageRevisionId": "sha256:795cba7a3742a8135b12a966cf20dead23af9017f1466ed83a7e151a3ca71a4f",
+        "pageRevisionId": "sha256:8e9548232ca3e3caf3886404d1b61c48e79c839764f1bf4a1f041389c0725132",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -7151,8 +7305,17 @@
         }
       ],
       "relativePath": "sources/sauna/pmid-29849692.md",
+      "researchEvidence": {
+        "aggregateRole": "synthesis",
+        "designKind": "systematic_review",
+        "designLabel": "Systematic review",
+        "includedStudyCount": 40,
+        "participantCount": 3855,
+        "participantCountKind": "reported",
+        "populationLabel": "Dry-sauna clinical studies"
+      },
       "revision": {
-        "pageRevisionId": "sha256:15aa82b6600f229260b1f58ee5e5032570731d52de5b04d3bc2f72b1f4bb4d54",
+        "pageRevisionId": "sha256:012cf858161bc6f667ded66021b010a957c972aeecdfe8c5443c2cb36350d8be",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -7203,8 +7366,18 @@
         }
       ],
       "relativePath": "sources/sauna/pmid-29897261.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "kihd-men",
+        "designKind": "prospective_cohort",
+        "designLabel": "Prospective cohort",
+        "durationLabel": "Longitudinal biomarker follow-up",
+        "participantCount": 2269,
+        "participantCountKind": "reported",
+        "populationLabel": "KIHD Finnish men"
+      },
       "revision": {
-        "pageRevisionId": "sha256:32c8152e81f51a54071a1135c5d6d5782dff4550ae6426be5d00bfc895cb2bdd",
+        "pageRevisionId": "sha256:a8d9207784eba69d95582252606c37c956f17f4dc18887eb6af520ef90bfba9c",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -7317,8 +7490,18 @@
         }
       ],
       "relativePath": "sources/sauna/pmid-30173212.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "kihd-men",
+        "designKind": "prospective_cohort",
+        "designLabel": "Prospective cohort",
+        "durationLabel": "Long-term psychotic-disorder follow-up",
+        "participantCount": 2138,
+        "participantCountKind": "reported",
+        "populationLabel": "KIHD Finnish men"
+      },
       "revision": {
-        "pageRevisionId": "sha256:1195bacac2374fc164a2984915eb102b4390991c5780844f54473c68b73427a3",
+        "pageRevisionId": "sha256:8706599d279f4015d6eab464d39e147de5ded93593477e9f8ffb630a016d0654",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -7575,8 +7758,18 @@
         }
       ],
       "relativePath": "sources/sauna/pmid-30486813.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "finnish-men-women-cvd-1688",
+        "designKind": "prospective_cohort",
+        "designLabel": "Prospective cohort",
+        "durationLabel": "Long-term cardiovascular-mortality follow-up",
+        "participantCount": 1688,
+        "participantCountKind": "reported",
+        "populationLabel": "Finnish men and women"
+      },
       "revision": {
-        "pageRevisionId": "sha256:35fbca22dcb70229bdf099d928f8fce73525dfcc014d88c473b36f6e1f77fd7f",
+        "pageRevisionId": "sha256:09b083527c0377971477b04fad86550486721124e6c4d72900fc6979865867a7",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -7626,8 +7819,18 @@
         }
       ],
       "relativePath": "sources/sauna/pmid-30665914.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "finnish-men-women-cvd-1688",
+        "designKind": "prospective_cohort",
+        "designLabel": "Prospective cohort",
+        "durationLabel": "Long-term stroke follow-up",
+        "participantCount": 1628,
+        "participantCountKind": "reported",
+        "populationLabel": "Finnish men and women"
+      },
       "revision": {
-        "pageRevisionId": "sha256:39f097a2219604b9f0158d2bee1e640523cccbc1499be2d3758095528e26de19",
+        "pageRevisionId": "sha256:41d573031f9e655ea5be392ae559cd499d7d690006fc7a8511b44673d90ca9ed",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -7748,8 +7951,13 @@
         }
       ],
       "relativePath": "sources/sauna/pmid-31102597.md",
+      "researchEvidence": {
+        "aggregateRole": "synthesis",
+        "designKind": "narrative_review",
+        "designLabel": "Sudden-cardiac-death review"
+      },
       "revision": {
-        "pageRevisionId": "sha256:ffc942cdb78b88f630a4c39da65e1498444d6864dfcd51aff540f2934fd246dd",
+        "pageRevisionId": "sha256:b624a3ade6872fe6be9b124a4513150351821f834cded1f88c1e4e537e297839",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -7802,8 +8010,18 @@
         }
       ],
       "relativePath": "sources/sauna/pmid-31126559.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "ketelhut-2019-bp-hr-volunteers",
+        "designKind": "acute_mechanistic",
+        "designLabel": "Acute BP/HR physiology study",
+        "durationLabel": "Single sauna bath",
+        "participantCount": 19,
+        "participantCountKind": "reported",
+        "populationLabel": "Healthy adult volunteers"
+      },
       "revision": {
-        "pageRevisionId": "sha256:7bf2080fbea63af849b058a8a59dffec8a836a1eddf923c6b300171167530634",
+        "pageRevisionId": "sha256:0467cbbe12848e43f1c5b36b3565f66eb6de65fcae86f3887abf6ee27b7a40ce",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -7855,8 +8073,18 @@
         }
       ],
       "relativePath": "sources/sauna/pmid-31331560.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "laukkanen-2019-autonomic-93",
+        "designKind": "acute_mechanistic",
+        "designLabel": "Acute recovery/HRV study",
+        "durationLabel": "Single sauna and recovery window",
+        "participantCount": 93,
+        "participantCountKind": "reported",
+        "populationLabel": "Adults after sauna bathing"
+      },
       "revision": {
-        "pageRevisionId": "sha256:fa0e27ba34168921461985d58afd3893dfe9a383ce312a05ec70ba6396e73886",
+        "pageRevisionId": "sha256:db5350cf266c872ac4dfdf94ab4d705a178932c97ff0f39bb41604cf85562073",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -7906,8 +8134,18 @@
         }
       ],
       "relativePath": "sources/sauna/pmid-31372865.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "kihd-men",
+        "designKind": "prospective_cohort",
+        "designLabel": "Prospective cohort",
+        "durationLabel": "Long-term VTE follow-up",
+        "participantCount": 2138,
+        "participantCountKind": "approximate",
+        "populationLabel": "KIHD Finnish men"
+      },
       "revision": {
-        "pageRevisionId": "sha256:70736d0582804479e9ddd94a2bc7096f71017411c705911a6c71383cd209149c",
+        "pageRevisionId": "sha256:126997c409cd2ad4467356bad23419b03e1207de974d56228bd0288dc510ca36",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -7961,8 +8199,18 @@
         }
       ],
       "relativePath": "sources/sauna/pmid-31490429.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "laukkarinen-2020-exercise-loading-sauna",
+        "designKind": "crossover_trial",
+        "designLabel": "Exercise-plus-sauna crossover study",
+        "durationLabel": "Acute exercise loadings followed by sauna",
+        "participantCount": 10,
+        "participantCountKind": "approximate",
+        "populationLabel": "Healthy trained men"
+      },
       "revision": {
-        "pageRevisionId": "sha256:75d4935c56802b28332ced2ebc47cfdf60c09fe2f6fcc73f83f2def3ead3f31a",
+        "pageRevisionId": "sha256:8edd61a87f7253273cac12ba5d44d32f37410ff4512391230303e0f08c54f229",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -8016,8 +8264,19 @@
         }
       ],
       "relativePath": "sources/sauna/pmid-3174262.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "aggregationNote": "Approximate count from older physiology-source metadata.",
+        "cohortKey": "hasan-1988-heating-procedures-volunteers",
+        "designKind": "acute_mechanistic",
+        "designLabel": "Thermal-procedure physiology study",
+        "durationLabel": "Single heat-procedure comparison",
+        "participantCount": 8,
+        "participantCountKind": "approximate",
+        "populationLabel": "Healthy adult volunteers"
+      },
       "revision": {
-        "pageRevisionId": "sha256:e0874e5e574aa60717f4ca1cd06161a8effd85edf06eb0225124ddef61867dad",
+        "pageRevisionId": "sha256:d9112d4853519657fa01cacaca259a088221cdaf586def83bec638184356cd46",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -8072,8 +8331,18 @@
         }
       ],
       "relativePath": "sources/sauna/pmid-31869820.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "tikkanen-2020-swim-recovery-sauna",
+        "designKind": "crossover_trial",
+        "designLabel": "Swim-recovery crossover study",
+        "durationLabel": "Post-exercise sauna recovery sessions",
+        "participantCount": 20,
+        "participantCountKind": "approximate",
+        "populationLabel": "Competitive swimmers"
+      },
       "revision": {
-        "pageRevisionId": "sha256:d0b97b126f403bb8b0de59679107cc650afc8a9add06b9a0ce47d149fb72035b",
+        "pageRevisionId": "sha256:f04d240298d7b5eb6eabf3eff1ee4b4ef902cb968e2fba5f7587daeb1f7dbf04",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -8125,8 +8394,18 @@
         }
       ],
       "relativePath": "sources/sauna/pmid-31950931.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "pilch-2020-oxidative-status-men",
+        "designKind": "acute_mechanistic",
+        "designLabel": "Repeated-session oxidative-status study",
+        "durationLabel": "Repeated sauna exposures",
+        "participantCount": 23,
+        "participantCountKind": "approximate",
+        "populationLabel": "Training and non-training men"
+      },
       "revision": {
-        "pageRevisionId": "sha256:99ceab0f9ed9eab4bd2a739d0dc21eca3c468cc0954dff9e160e3cda03f975d8",
+        "pageRevisionId": "sha256:ba2793a76c4478261ff646d20ea70611ae90cee57d2ecccccb1b59cea42a5e92",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -8366,8 +8645,18 @@
         }
       ],
       "relativePath": "sources/sauna/pmid-32951736.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "hussain-2020-crossover-inflammation",
+        "designKind": "crossover_trial",
+        "designLabel": "Randomized crossover physiology study",
+        "durationLabel": "Crossover sauna exposures",
+        "participantCount": 20,
+        "participantCountKind": "reported",
+        "populationLabel": "Healthy middle-aged and older adults"
+      },
       "revision": {
-        "pageRevisionId": "sha256:ed5069f52532b4ff5e0811f8c841692ece4ffad5a73ab1b897419e557f483615",
+        "pageRevisionId": "sha256:da389fce81f8dffba5b05797958c577b34b7af38fb14ebf78a85ee0f4ebad65e",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -8419,8 +8708,18 @@
         }
       ],
       "relativePath": "sources/sauna/pmid-33211153.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "kirby-postexercise-sauna-runners",
+        "designKind": "controlled_trial",
+        "designLabel": "Post-exercise sauna training study",
+        "durationLabel": "3-week post-exercise sauna intervention",
+        "participantCount": 20,
+        "participantCountKind": "reported",
+        "populationLabel": "Trained middle-distance runners"
+      },
       "revision": {
-        "pageRevisionId": "sha256:1d6c6534f3dffa9fc9b13bdb9377e87c70696d043c8044c882b4ffaf82553767",
+        "pageRevisionId": "sha256:58e83e40b446e2888ed8ffef9f07338b4faacc85697512126a38cd7201483164",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -8540,8 +8839,13 @@
         }
       ],
       "relativePath": "sources/sauna/pmid-33513711.md",
+      "researchEvidence": {
+        "aggregateRole": "synthesis",
+        "designKind": "narrative_review",
+        "designLabel": "Occupational-stress narrative review"
+      },
       "revision": {
-        "pageRevisionId": "sha256:1cb5cb396b3acb82100b0756ac871a7d84ec2df82c081372f760807efd7f3ce3",
+        "pageRevisionId": "sha256:6d3fefe5359f3252a3b873aec340d42f0cd6337263666a7ae9039c2e7d46e0fc",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -8866,8 +9170,18 @@
         }
       ],
       "relativePath": "sources/sauna/pmid-34199101.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "scoon-2021-elite-skiers-mpha",
+        "designKind": "single_arm_trial",
+        "designLabel": "Elite-skier heat-acclimation study",
+        "durationLabel": "Repeated sauna exposures",
+        "participantCount": 14,
+        "participantCountKind": "reported",
+        "populationLabel": "Elite cross-country skiers"
+      },
       "revision": {
-        "pageRevisionId": "sha256:723db7e0633fed2e5cc1f1363e83b74420c5ed35f1295cf652f8b3b1b6e39150",
+        "pageRevisionId": "sha256:23638444e996dfe8b76cc822f3622e8cda679004edb6d224616cecfce063d25e",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -8917,8 +9231,18 @@
         }
       ],
       "relativePath": "sources/sauna/pmid-34297227.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "kirby-2021-sex-differences-runners",
+        "designKind": "controlled_trial",
+        "designLabel": "Sex-comparison sauna training study",
+        "durationLabel": "3-week post-exercise sauna intervention",
+        "participantCount": 41,
+        "participantCountKind": "reported",
+        "populationLabel": "Trained runners completing post-intervention trials"
+      },
       "revision": {
-        "pageRevisionId": "sha256:6a665bb1413b757cbaa93f64b103b7d5c45515ca280034b5140d43e0f2f4ebde",
+        "pageRevisionId": "sha256:70c9a3aae82eff8440663b4e152aad751ef2098298019dd65f24b8b3e7810025",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -8973,8 +9297,18 @@
         }
       ],
       "relativePath": "sources/sauna/pmid-34622026.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "lee-2021-standalone-sauna-crossover",
+        "designKind": "crossover_trial",
+        "designLabel": "Acute sauna/exercise crossover study",
+        "durationLabel": "Two acute sauna/exercise conditions",
+        "participantCount": 72,
+        "participantCountKind": "reported",
+        "populationLabel": "Middle-aged adults with cardiovascular risk factors"
+      },
       "revision": {
-        "pageRevisionId": "sha256:1adfcd2fb4950175cc4a393d1795e1619de44aa7d10c433f854b2761bf430060",
+        "pageRevisionId": "sha256:d7e6644f0efa4af01607eea535796a40367bad896414a006425242c8bd5b9600",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -9027,8 +9361,18 @@
         }
       ],
       "relativePath": "sources/sauna/pmid-34727008.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "pilch-2022-hematological-crossover",
+        "designKind": "crossover_trial",
+        "designLabel": "Hematological crossover study",
+        "durationLabel": "Repeated sauna/hot-water crossover conditions",
+        "participantCount": 10,
+        "participantCountKind": "reported",
+        "populationLabel": "Young men"
+      },
       "revision": {
-        "pageRevisionId": "sha256:a3a7798c92d04d46c5a835be08216404c7773614556b4155d58b8fe3748120b1",
+        "pageRevisionId": "sha256:e62b25818620788bc2994c2143ab6bbc41adf0065004f06193fce7fef3a9afe7",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -9275,8 +9619,18 @@
         }
       ],
       "relativePath": "sources/sauna/pmid-35710395.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "lee-2022-gut-microbiota-rct",
+        "designKind": "randomized_controlled_trial",
+        "designLabel": "Post-exercise sauna microbiota RCT",
+        "durationLabel": "4-week post-exercise sauna intervention",
+        "participantCount": 15,
+        "participantCountKind": "reported",
+        "populationLabel": "Healthy young men"
+      },
       "revision": {
-        "pageRevisionId": "sha256:a00631e755152e765c7cefc082ba065f73ba760f00c18f9a07258822491aca1f",
+        "pageRevisionId": "sha256:b68f72847617955dbd1fb22ef9b7323759029e47d208b949600357aabaa3e18a",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -9331,8 +9685,18 @@
         }
       ],
       "relativePath": "sources/sauna/pmid-35785965.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "lee-2022-exercise-sauna-rct",
+        "designKind": "randomized_controlled_trial",
+        "designLabel": "Multi-arm exercise-plus-sauna RCT",
+        "durationLabel": "8-week intervention",
+        "participantCount": 47,
+        "participantCountKind": "reported",
+        "populationLabel": "Sedentary adults with cardiovascular risk factors"
+      },
       "revision": {
-        "pageRevisionId": "sha256:ff40f2be85f7d5b810eeec9cae63befec0098d5b5d72a6bf6cccfa38297dac8d",
+        "pageRevisionId": "sha256:34e90c8ed9c77c4a4d377ec36f83f522245fbb31efe93818b57a526e867f820e",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -9383,8 +9747,18 @@
         }
       ],
       "relativePath": "sources/sauna/pmid-35908583.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "kihd-men",
+        "designKind": "prospective_cohort",
+        "designLabel": "Prospective cohort",
+        "durationLabel": "Long-term socioeconomic-status follow-up",
+        "participantCount": 2575,
+        "participantCountKind": "approximate",
+        "populationLabel": "KIHD Finnish men"
+      },
       "revision": {
-        "pageRevisionId": "sha256:08ac5bf2eb8af1804b1a8ad97cfbbb9c220a0c503b40c564ccc602b920eb5fe1",
+        "pageRevisionId": "sha256:64172b1e226df51f3904b8485c0af477c8bd12af627b01925f2ee1701c2e8bba",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -9504,8 +9878,18 @@
         }
       ],
       "relativePath": "sources/sauna/pmid-36078656.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "vojta-2022-extreme-heat-resistance",
+        "designKind": "controlled_trial",
+        "designLabel": "Resistance-training heat study",
+        "durationLabel": "Repeated extreme-heat sauna exposures",
+        "participantCount": 29,
+        "participantCountKind": "reported",
+        "populationLabel": "Resistance-trained adults"
+      },
       "revision": {
-        "pageRevisionId": "sha256:004c5b663df465e0ee66e1258f2f80774eafbeb45d302837113a57410ae34e00",
+        "pageRevisionId": "sha256:6fabe41a8a9d27a5819536b8aa01d6a36b6a31539d3d369dde7a7bccec7c026d",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -9559,8 +9943,18 @@
         }
       ],
       "relativePath": "sources/sauna/pmid-36255556.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "kihd-men",
+        "designKind": "prospective_cohort",
+        "designLabel": "Prospective cohort",
+        "durationLabel": "Long-term inflammation/mortality follow-up",
+        "participantCount": 2575,
+        "participantCountKind": "reported",
+        "populationLabel": "KIHD Finnish men"
+      },
       "revision": {
-        "pageRevisionId": "sha256:5b71bcdb77013e1549931e215f9e134c90941df1cb0ad274cd97eba8fb210f21",
+        "pageRevisionId": "sha256:b92bba362504cd01f5cf7431ebf6f3cfb06763008d09fdd9897abdb253626f7a",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -9683,8 +10077,18 @@
         }
       ],
       "relativePath": "sources/sauna/pmid-36813265.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "konarski-2023-hsp70-men",
+        "designKind": "acute_mechanistic",
+        "designLabel": "Immune/HSP physiology study",
+        "durationLabel": "Acute sauna exposure",
+        "participantCount": 20,
+        "participantCountKind": "approximate",
+        "populationLabel": "Trained and untrained men"
+      },
       "revision": {
-        "pageRevisionId": "sha256:c72398a0ebba51f39401c3572ad167357758c2d057e44cfd18144965091935c9",
+        "pageRevisionId": "sha256:8d9eece500c8b876dbf9c3d30750bd41db494801db8796b9683ba3ce0c1a56fc",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -9735,8 +10139,18 @@
         }
       ],
       "relativePath": "sources/sauna/pmid-37029766.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "kihd-men",
+        "designKind": "prospective_cohort",
+        "designLabel": "Prospective cohort",
+        "durationLabel": "Long-term renal-function follow-up",
+        "participantCount": 2071,
+        "participantCountKind": "approximate",
+        "populationLabel": "KIHD Finnish men"
+      },
       "revision": {
-        "pageRevisionId": "sha256:8787b82026fc7f8e85d51a361f06bdd7f13ee9c67c600d61fb6e44e9fb050403",
+        "pageRevisionId": "sha256:82254606bd25e6a37b5ba62ac60186a84cbbf66d80bc5214bc0ffecf063bd6ef",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -9853,8 +10267,13 @@
         }
       ],
       "relativePath": "sources/sauna/pmid-37270272.md",
+      "researchEvidence": {
+        "aggregateRole": "synthesis",
+        "designKind": "narrative_review",
+        "designLabel": "Lifestyle-evidence review"
+      },
       "revision": {
-        "pageRevisionId": "sha256:7a0ecf91adf36b75fb2fcf2b88f618b7d3ca43a4161e23431eb23689414e2536",
+        "pageRevisionId": "sha256:dceb48f80be30acfad7243fcc83e663e1d825e0498fa236d6ba94c9b93d6a5fa",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -10044,8 +10463,18 @@
         }
       ],
       "relativePath": "sources/sauna/pmid-37650138.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "debray-2023-cad-sauna-rct",
+        "designKind": "randomized_controlled_trial",
+        "designLabel": "CAD vascular-health RCT",
+        "durationLabel": "8-week sauna intervention",
+        "participantCount": 20,
+        "participantCountKind": "reported",
+        "populationLabel": "Adults with coronary artery disease"
+      },
       "revision": {
-        "pageRevisionId": "sha256:bd8dea2db0198e6cf342d066f43692863d679b2400d80ad8dba197e07b4d8a13",
+        "pageRevisionId": "sha256:b8e5463c90d0d69e2dbec1e3c02574795e04c8d70d358379ee252f962db792fc",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -10098,8 +10527,18 @@
         }
       ],
       "relativePath": "sources/sauna/pmid-3766176.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "leppaluoto-1986-repeated-sauna-volunteers",
+        "designKind": "acute_mechanistic",
+        "designLabel": "Repeated-exposure physiology study",
+        "durationLabel": "7-day repeated sauna exposure",
+        "participantCount": 17,
+        "participantCountKind": "reported",
+        "populationLabel": "Healthy volunteers"
+      },
       "revision": {
-        "pageRevisionId": "sha256:07082535b2a9bf4528e50b275d3910f65af62d29b7fa6838dba45f064a652ff1",
+        "pageRevisionId": "sha256:9777b6ec883ad52223d1ce78010c46062ae5a0246bf2765cf30f9a35c600790d",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -10152,8 +10591,18 @@
         }
       ],
       "relativePath": "sources/sauna/pmid-3788622.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "leppaluoto-1986-repeated-sauna-volunteers",
+        "designKind": "acute_mechanistic",
+        "designLabel": "Repeated-exposure endocrine study",
+        "durationLabel": "7-day repeated sauna exposure",
+        "participantCount": 17,
+        "participantCountKind": "reported",
+        "populationLabel": "Healthy volunteers"
+      },
       "revision": {
-        "pageRevisionId": "sha256:fb88c28c9f95f1408a8f9d13e6e1228a4a7cf42cdc5f59d788b9e2a05f62d4fb",
+        "pageRevisionId": "sha256:f4e2695e7c1e9bcdfecdafe4ff76fd12206a3a52bfd75785cb4309a8a9d4da31",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -10206,8 +10655,18 @@
         }
       ],
       "relativePath": "sources/sauna/pmid-38011189.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "chang-2023-totonou-neural-study",
+        "designKind": "acute_mechanistic",
+        "designLabel": "Acute sauna/cold neural study",
+        "durationLabel": "Single sauna/cold/rest protocol",
+        "participantCount": 20,
+        "participantCountKind": "reported",
+        "populationLabel": "Healthy adults"
+      },
       "revision": {
-        "pageRevisionId": "sha256:be1a8987cf38c13b347e1e7f0226a660dd23c97fa7fd055bed0074c298e6e776",
+        "pageRevisionId": "sha256:c722564404c452c8fa4bb3de65fb9e5cc507bf6eceef00ed7dc2b852b06d859d",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -10261,8 +10720,18 @@
         }
       ],
       "relativePath": "sources/sauna/pmid-38410962.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "kihd-men",
+        "designKind": "prospective_cohort",
+        "designLabel": "Prospective cohort",
+        "durationLabel": "Long-term blood-pressure/mortality follow-up",
+        "participantCount": 2575,
+        "participantCountKind": "approximate",
+        "populationLabel": "KIHD Finnish men"
+      },
       "revision": {
-        "pageRevisionId": "sha256:9f485be0722fd428f3cf4199b99c5fff3b47544c37cfeb21d4cc64e788e84913",
+        "pageRevisionId": "sha256:f12ee7d8c6b8186fcfbfe67b97039ec3255f9a0906bfe49955b629449c2e052a",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -10318,8 +10787,13 @@
         }
       ],
       "relativePath": "sources/sauna/pmid-38577299.md",
+      "researchEvidence": {
+        "aggregateRole": "synthesis",
+        "designKind": "narrative_review",
+        "designLabel": "Comprehensive passive-heat review"
+      },
       "revision": {
-        "pageRevisionId": "sha256:e9156ae5c1576c3590c8fc2175729c0d4bf46ce80d99cc8e4f7e3442ae7a96d4",
+        "pageRevisionId": "sha256:ca6aba54a268f6ba36cc101da94b96f414196c2a44c9d0a97dfee57c3aaaaf48",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -10440,8 +10914,18 @@
         }
       ],
       "relativePath": "sources/sauna/pmid-39446139.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "monica-northern-sweden-2022-sauna-respondents",
+        "designKind": "cross_sectional",
+        "designLabel": "Population cross-sectional study",
+        "durationLabel": "2022 population survey",
+        "participantCount": 971,
+        "participantCountKind": "reported",
+        "populationLabel": "Northern Sweden MONICA respondents with sauna-use data"
+      },
       "revision": {
-        "pageRevisionId": "sha256:5037f978e4ae1aed5fa2743b7e2f74b90308fafdd694d4fa5fc9377aa6031d48",
+        "pageRevisionId": "sha256:2174c85608e21d6b4d4ba23315b59add9b50a9c7e8fc7c92850fd2f0e7231f59",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -10493,8 +10977,13 @@
         }
       ],
       "relativePath": "sources/sauna/pmid-40202605.md",
+      "researchEvidence": {
+        "aggregateRole": "synthesis",
+        "designKind": "narrative_review",
+        "designLabel": "Rheumatic-disease narrative review"
+      },
       "revision": {
-        "pageRevisionId": "sha256:922b954ddf79259a708b04c116765d87969ce1f7858d8168655ac0bf94f9eab9",
+        "pageRevisionId": "sha256:47f9739379334bd5dd1fc71e77ec446a341d084876e83ee218bd5cda634b984f",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -10548,8 +11037,18 @@
         }
       ],
       "relativePath": "sources/sauna/pmid-40611569.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "lee-2025-hrv-rct",
+        "designKind": "randomized_controlled_trial",
+        "designLabel": "HRV randomized trial",
+        "durationLabel": "8-week sauna/exercise intervention",
+        "participantCount": 38,
+        "participantCountKind": "reported",
+        "populationLabel": "Sedentary adults"
+      },
       "revision": {
-        "pageRevisionId": "sha256:c79f076d8135269521e14dcadf68149ac80d7f8467956fec96547aaaacbbf155",
+        "pageRevisionId": "sha256:74a431a209872b3f3e5c075f9cab5a5c8d0e763283fe0a48d2c14be288d4bf5e",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -10789,8 +11288,18 @@
         }
       ],
       "relativePath": "sources/sauna/pmid-41340471.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "lennkvist-2025-women-sauna-survey",
+        "designKind": "cross_sectional",
+        "designLabel": "Women sauna-user survey",
+        "durationLabel": "Cross-sectional survey",
+        "participantCount": 384,
+        "participantCountKind": "reported",
+        "populationLabel": "Women who use sauna"
+      },
       "revision": {
-        "pageRevisionId": "sha256:a429380291df1a9fe13a70efa7adb0b1e9860447e90711aeb35d862c8a92259b",
+        "pageRevisionId": "sha256:81c2ac7287ca7fbe16a4e3d96ff5e3e53b1b301dc7afbd831eea170d0dca5f0c",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -10972,8 +11481,13 @@
         }
       ],
       "relativePath": "sources/sauna/pmid-41426898.md",
+      "researchEvidence": {
+        "aggregateRole": "synthesis",
+        "designKind": "narrative_review",
+        "designLabel": "Ischemic-heart-disease narrative review"
+      },
       "revision": {
-        "pageRevisionId": "sha256:010ab28da847ba6d0d7bec7312a25e45c8757c3408577f4a2910c8205eba6b03",
+        "pageRevisionId": "sha256:2f1eadf17e8b2660c0bc4f6b4c53837e4029e006a2a0f45d0acb3d81db6f63bf",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -11027,8 +11541,18 @@
         }
       ],
       "relativePath": "sources/sauna/pmid-41461792.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "okoniewska-2025-women-sauna-cold",
+        "designKind": "acute_mechanistic",
+        "designLabel": "Acute women physiology study",
+        "durationLabel": "Single sauna and cold-water immersion session",
+        "participantCount": 28,
+        "participantCountKind": "reported",
+        "populationLabel": "Healthy normotensive women"
+      },
       "revision": {
-        "pageRevisionId": "sha256:7c28390b4a378d16b98ab231b1b26cd6049486773572a3d4c92ebed9e012a245",
+        "pageRevisionId": "sha256:76b6403d9bb087dab49d3d8de2fb4e1086ae5777685f2ee73c90d31a4cf2f0e2",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -11147,8 +11671,18 @@
         }
       ],
       "relativePath": "sources/sauna/pmid-41831305.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "bekfani-2026-sauna-hfpef-pilot",
+        "designKind": "single_arm_trial",
+        "designLabel": "HFpEF pilot intervention",
+        "durationLabel": "10-week supervised sauna intervention",
+        "participantCount": 18,
+        "participantCountKind": "reported",
+        "populationLabel": "Stable HFpEF outpatients"
+      },
       "revision": {
-        "pageRevisionId": "sha256:9d09a6a0b93ada669b9dde1b5105cb2a57312b8db9f35a36bda802add3fa8221",
+        "pageRevisionId": "sha256:dcc364d0648b846303c32d07c84c92f4156899df1c151ae3490f32252f15e48c",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -11201,8 +11735,15 @@
         }
       ],
       "relativePath": "sources/sauna/pmid-445022.md",
+      "researchEvidence": {
+        "aggregateRole": "unknown",
+        "aggregationNote": "Older survey source; sample size not reliably exposed in available metadata.",
+        "designKind": "cross_sectional",
+        "designLabel": "Cross-sectional survey",
+        "populationLabel": "Finnish pregnant women"
+      },
       "revision": {
-        "pageRevisionId": "sha256:b5a760aae2b952fa72b7e6278a8ad6033bccc2b86f1c638731ad5312b4b4d61e",
+        "pageRevisionId": "sha256:ddfb8ce9cc5621ba3cb3218187167db1d5c2f2ed5481f5b0de25dd81d6a665c4",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -11455,8 +11996,13 @@
         }
       ],
       "relativePath": "sources/sauna/sauna-1986-kauppinen-man-in-the-sauna-review-article.md",
+      "researchEvidence": {
+        "aggregateRole": "synthesis",
+        "designKind": "narrative_review",
+        "designLabel": "Narrative review"
+      },
       "revision": {
-        "pageRevisionId": "sha256:5e78607bee1611dafb1800ad775f6353416273e8878f3eb0545c05ea02d5bef2",
+        "pageRevisionId": "sha256:7887b0e373bba490ad0ab3d86f27bed50d218c5332ea75d342ceac592c8d04d8",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -11507,8 +12053,13 @@
         }
       ],
       "relativePath": "sources/sauna/sauna-1988-eisalo-the-finnish-sauna-and-cardiovascular-diseases.md",
+      "researchEvidence": {
+        "aggregateRole": "synthesis",
+        "designKind": "narrative_review",
+        "designLabel": "Narrative review"
+      },
       "revision": {
-        "pageRevisionId": "sha256:ceff7d2911d5f70536af169eaa4cdf435114ec271f0295cbadcd8a2f3ed4ec8b",
+        "pageRevisionId": "sha256:88d567162b1fc53c4eed381647aa240c1a57bab537a3e9ceea36d5b5cdfe32ef",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -11559,8 +12110,13 @@
         }
       ],
       "relativePath": "sources/sauna/sauna-1988-kukkonen-harjula-how-the-sauna-affects-the-endocrine-system.md",
+      "researchEvidence": {
+        "aggregateRole": "synthesis",
+        "designKind": "narrative_review",
+        "designLabel": "Narrative physiology review"
+      },
       "revision": {
-        "pageRevisionId": "sha256:492c9bde86c33529c38a1ca60c3efec9d17aa338e45c5af4a029890c76e0a4e4",
+        "pageRevisionId": "sha256:54d8862d6d00e155f62269c203008e9493f65a113aca81cba977a8d3590b4e45",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -11610,8 +12166,13 @@
         }
       ],
       "relativePath": "sources/sauna/sauna-1988-laitinen-lungs-and-ventilation-in-the-sauna.md",
+      "researchEvidence": {
+        "aggregateRole": "synthesis",
+        "designKind": "narrative_review",
+        "designLabel": "Narrative physiology review"
+      },
       "revision": {
-        "pageRevisionId": "sha256:ae1f23b6a30bbe052d45740d16c799865da76e7886f2636f042ac421dc054cf9",
+        "pageRevisionId": "sha256:0e05a47445d1470f2ac3ab5f27d16935f4fb0a15ae5fc30ffd64fabbc44db7e4",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -11663,8 +12224,19 @@
         }
       ],
       "relativePath": "sources/sauna/sauna-1989-kauppinen-sauna-shower-and-ice-water-immersion-physiological-respons.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "aggregationNote": "Approximate count; same volunteer series as companion 1989 Kauppinen papers.",
+        "cohortKey": "kauppinen-1989-sauna-shower-ice-water-volunteers",
+        "designKind": "acute_mechanistic",
+        "designLabel": "Thermal-sequence physiology study",
+        "durationLabel": "Brief sauna/shower/ice-water exposures",
+        "participantCount": 8,
+        "participantCountKind": "approximate",
+        "populationLabel": "Healthy adult volunteers"
+      },
       "revision": {
-        "pageRevisionId": "sha256:deff16f8a09d713c68be36128594749c02805a7a3e13b02d0eb0af67ca15e40d",
+        "pageRevisionId": "sha256:cef344e593eb480c7be03231b21512086d330c87db603f9d8c416d704b2058ed",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -11716,8 +12288,19 @@
         }
       ],
       "relativePath": "sources/sauna/sauna-1989-kauppinen-sauna-shower-and-ice-water-immersion-physiological-respons-2.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "aggregationNote": "Approximate count; same volunteer series as companion 1989 Kauppinen papers.",
+        "cohortKey": "kauppinen-1989-sauna-shower-ice-water-volunteers",
+        "designKind": "acute_mechanistic",
+        "designLabel": "Thermal-sequence circulation study",
+        "durationLabel": "Brief sauna/shower/ice-water exposures",
+        "participantCount": 8,
+        "participantCountKind": "approximate",
+        "populationLabel": "Healthy adult volunteers"
+      },
       "revision": {
-        "pageRevisionId": "sha256:32cda1b293cd5de9cb810fb2b4c13704888fadc87dc6e1a2a2f1fda2dda42854",
+        "pageRevisionId": "sha256:5e7a0b94b77f096269f01125405d06dda809e201ba3076745e97d1fe998c0ac3",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -11769,8 +12352,19 @@
         }
       ],
       "relativePath": "sources/sauna/sauna-1989-kauppinen-sauna-shower-and-ice-water-immersion-physiological-respons-3.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "aggregationNote": "Approximate count; same volunteer series as companion 1989 Kauppinen papers.",
+        "cohortKey": "kauppinen-1989-sauna-shower-ice-water-volunteers",
+        "designKind": "acute_mechanistic",
+        "designLabel": "Thermal-sequence body-temperature study",
+        "durationLabel": "Brief sauna/shower/ice-water exposures",
+        "participantCount": 8,
+        "participantCountKind": "approximate",
+        "populationLabel": "Healthy adult volunteers"
+      },
       "revision": {
-        "pageRevisionId": "sha256:8111bd97bc0ee1433d7ef986287436a3a4f1637c560824c665c7cde43a66bd1d",
+        "pageRevisionId": "sha256:79dceb41a57077d466d56688c7f7eb0695dd6d2fbdfbfd9e0f883b5831780331",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -11822,8 +12416,19 @@
         }
       ],
       "relativePath": "sources/sauna/sauna-1989-kauppinen-some-endocrine-responses-to-sauna-shower-and-ice-water-imm.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "aggregationNote": "Approximate count; same volunteer series as companion 1989 Kauppinen papers.",
+        "cohortKey": "kauppinen-1989-sauna-shower-ice-water-volunteers",
+        "designKind": "acute_mechanistic",
+        "designLabel": "Thermal-sequence endocrine study",
+        "durationLabel": "Brief sauna/shower/ice-water exposures",
+        "participantCount": 8,
+        "participantCountKind": "approximate",
+        "populationLabel": "Healthy adult volunteers"
+      },
       "revision": {
-        "pageRevisionId": "sha256:9425d55ef92d35d12887eb1d411187191beaadba892c5ece4112f61add45daed",
+        "pageRevisionId": "sha256:a32c93a88aaf6f6c04942b327f6028616d76b9e67d2c427933cd4f527291ccf2",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -11875,8 +12480,18 @@
         }
       ],
       "relativePath": "sources/sauna/sauna-1989-kukkonen-harjula-haemodynamic-and-hormonal-responses-to-heat-exposure-in-a.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "kukkonen-harjula-1989-heat-exposure-volunteers",
+        "designKind": "acute_mechanistic",
+        "designLabel": "Hemodynamic/hormonal physiology study",
+        "durationLabel": "Acute sauna heat exposure",
+        "participantCount": 10,
+        "participantCountKind": "approximate",
+        "populationLabel": "Healthy adult volunteers"
+      },
       "revision": {
-        "pageRevisionId": "sha256:3dadd16f062d0fcf13be145d50475a8217d3006b3dc4c8f6882de8af23dfeac1",
+        "pageRevisionId": "sha256:a8d4662dff5a44ca7c9dc536f1a1925cab1d1ae23542b7abd0ed59824fe58da3",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -11927,8 +12542,19 @@
         }
       ],
       "relativePath": "sources/sauna/sauna-1989-markkola-sauna-habits-and-related-symptoms-in-finnish-children.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "aggregationNote": "Fifteen hundred children were sampled; 1,247 families responded.",
+        "cohortKey": "markkola-1989-finnish-children-survey",
+        "designKind": "cross_sectional",
+        "designLabel": "Cross-sectional child survey",
+        "durationLabel": "Sauna-habits questionnaire",
+        "participantCount": 1247,
+        "participantCountKind": "reported",
+        "populationLabel": "Finnish children/families answering questionnaire"
+      },
       "revision": {
-        "pageRevisionId": "sha256:7a10edc98fd9b6a653979c0332711eb334e7e444d7dda85462918eb4178f377e",
+        "pageRevisionId": "sha256:e89d2f47f74958c2dd3a149b3e0401238baee9015a9d12b6db96ed3b6c8563fa",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -11978,8 +12604,18 @@
         }
       ],
       "relativePath": "sources/sauna/sauna-1990-ernst-regular-sauna-bathing-and-the-incidence-of-common-colds.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "ernst-1990-common-colds-volunteers",
+        "designKind": "controlled_trial",
+        "designLabel": "Controlled cold-incidence trial",
+        "durationLabel": "6-month follow-up",
+        "participantCount": 50,
+        "participantCountKind": "reported",
+        "populationLabel": "Adult volunteers"
+      },
       "revision": {
-        "pageRevisionId": "sha256:daaab84bacfbc2673cd55b645dad8ea0a80a173eb39a29fbdc1656314ea9c206",
+        "pageRevisionId": "sha256:c5efa2af98816075e6995f705a74977a913948809e1611671e2cdbdac41812d9",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -12030,8 +12666,19 @@
         }
       ],
       "relativePath": "sources/sauna/sauna-1990-jokinen-children-in-sauna-cardiovascular-adjustment.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "aggregationNote": "Approximate count from older pediatric physiology metadata; deduped with companion ECG paper.",
+        "cohortKey": "jokinen-children-sauna-cohort",
+        "designKind": "acute_mechanistic",
+        "designLabel": "Pediatric physiology study",
+        "durationLabel": "Acute sauna exposure",
+        "participantCount": 25,
+        "participantCountKind": "approximate",
+        "populationLabel": "Children"
+      },
       "revision": {
-        "pageRevisionId": "sha256:f76820ce24b30fde419562c9697d6dfaff4022b302448bf669f4dc8778c8a9c3",
+        "pageRevisionId": "sha256:a27405aacd95dc0e5e779a2386235e4e4d5a9d8a5c1c35b96e6a7ac8ad0e94f0",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -12082,8 +12729,19 @@
         }
       ],
       "relativePath": "sources/sauna/sauna-1991-jokinen-children-in-sauna-electrocardiographic-abnormalities.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "aggregationNote": "Approximate count from older pediatric physiology metadata; deduped with companion cardiovascular paper.",
+        "cohortKey": "jokinen-children-sauna-cohort",
+        "designKind": "acute_mechanistic",
+        "designLabel": "Pediatric ECG physiology study",
+        "durationLabel": "Acute sauna exposure",
+        "participantCount": 25,
+        "participantCountKind": "approximate",
+        "populationLabel": "Children"
+      },
       "revision": {
-        "pageRevisionId": "sha256:464b354679980cc75b979f7a4b1d7987f9ec8827398fddf5b0120b2893890619",
+        "pageRevisionId": "sha256:b77be4dfddc7163b893068d2f1580c99a38714c18a76098a2bbe7383a2acb6fd",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -12134,8 +12792,18 @@
         }
       ],
       "relativePath": "sources/sauna/sauna-1992-roine-alcohol-and-sauna-bathing-effects-on-cardiac-rhythm-blood.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "roine-1992-alcohol-sauna-volunteers",
+        "designKind": "crossover_trial",
+        "designLabel": "Alcohol/sauna crossover study",
+        "durationLabel": "Acute alcohol plus sauna exposure",
+        "participantCount": 10,
+        "participantCountKind": "approximate",
+        "populationLabel": "Healthy adult volunteers"
+      },
       "revision": {
-        "pageRevisionId": "sha256:91c1155e99f0279943b98efc7c3ce54fcbcd0c459322353b09cb7357a7779d13",
+        "pageRevisionId": "sha256:25d36632a25203b6bd909b3790734beaa35cb1427ce0b7ba873c0ee7a9c6b9d0",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -12187,8 +12855,18 @@
         }
       ],
       "relativePath": "sources/sauna/sauna-1994-kukkonen-harjula-cardiovascular-effects-of-atenolol-scopolamine-and-their-c.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "kukkonen-harjula-1994-drug-sauna-volunteers",
+        "designKind": "crossover_trial",
+        "designLabel": "Medication/sauna crossover study",
+        "durationLabel": "Acute sauna exposure under drug conditions",
+        "participantCount": 12,
+        "participantCountKind": "approximate",
+        "populationLabel": "Healthy adult volunteers"
+      },
       "revision": {
-        "pageRevisionId": "sha256:9205ebcd06e1e7935096c1df98c77114086e6ff429abd9c873d3c6a01bce83d8",
+        "pageRevisionId": "sha256:1ba1cc650aabb55d11099e90f12429f302a9c75e5abbcd02cd7fde14415c46a0",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -12240,8 +12918,18 @@
         }
       ],
       "relativePath": "sources/sauna/sauna-1996-vanakoski-effects-of-heat-exposure-in-a-finnish-sauna-on-the-pharmac.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "vanakoski-1996-midazolam-sauna-volunteers",
+        "designKind": "crossover_trial",
+        "designLabel": "Pharmacokinetic crossover study",
+        "durationLabel": "Acute sauna plus midazolam exposure",
+        "participantCount": 10,
+        "participantCountKind": "approximate",
+        "populationLabel": "Healthy adult volunteers"
+      },
       "revision": {
-        "pageRevisionId": "sha256:f02bd5147d33d3cd64007e516bd156ae7a4505e9a8cf7e4f4e0668eae65e8a95",
+        "pageRevisionId": "sha256:6dd3eccb484b4116aa92ff6ca8c545965be039889f914d946c9dec06c03f057f",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -12291,8 +12979,13 @@
         }
       ],
       "relativePath": "sources/sauna/sauna-1997-kauppinen-facts-and-fables-about-sauna.md",
+      "researchEvidence": {
+        "aggregateRole": "synthesis",
+        "designKind": "narrative_review",
+        "designLabel": "Narrative review"
+      },
       "revision": {
-        "pageRevisionId": "sha256:152a137297aa97d5b5c82cb82f02543be936667405856a82fd0f55127c2bb93d",
+        "pageRevisionId": "sha256:4d1599ca474ad5c26e6fae82201718103c9e7fa0b4bb98d812a97be1c1ab516a",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -12343,8 +13036,13 @@
         }
       ],
       "relativePath": "sources/sauna/sauna-2000-keast-the-finnish-sauna-bath-and-its-use-in-patients-with-cardio.md",
+      "researchEvidence": {
+        "aggregateRole": "synthesis",
+        "designKind": "narrative_review",
+        "designLabel": "Clinical narrative review"
+      },
       "revision": {
-        "pageRevisionId": "sha256:39c43dc05666dc356723a830fa28f6467f04c96eccd3f7a3f5c467157284d972",
+        "pageRevisionId": "sha256:54811e1930a718ae29ab1b44b101bb96b33e475adcb31a1236826b2ed763a18d",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -12396,8 +13094,18 @@
         }
       ],
       "relativePath": "sources/sauna/sauna-2005-miyamoto-safety-and-efficacy-of-repeated-sauna-bathing-in-patients.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "miyamoto-2005-chf-pilot",
+        "designKind": "pilot_intervention",
+        "designLabel": "Heart-failure pilot intervention",
+        "durationLabel": "4-week repeated sauna intervention",
+        "participantCount": 15,
+        "participantCountKind": "reported",
+        "populationLabel": "Chronic systolic heart failure patients"
+      },
       "revision": {
-        "pageRevisionId": "sha256:f74fdd51584924a7336c8d1e86dff42820fbae6ebad2ce05f24d7a5b131cf20d",
+        "pageRevisionId": "sha256:dd996d8e494179b168f5349883d520aeeae3fa6d30ed7ef49fca43a55d806d26",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -12449,8 +13157,18 @@
         }
       ],
       "relativePath": "sources/sauna/sauna-2014-gryka-the-effect-of-sauna-bathing-on-lipid-profile-in-young-phys.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "gryka-2014-young-active-men",
+        "designKind": "single_arm_trial",
+        "designLabel": "Young-men lipid intervention",
+        "durationLabel": "Repeated sauna sessions",
+        "participantCount": 16,
+        "participantCountKind": "approximate",
+        "populationLabel": "Young physically active men"
+      },
       "revision": {
-        "pageRevisionId": "sha256:f1b0592902266d6eee02a0771b61339ebc8df57eedf1646065d126080d760f73",
+        "pageRevisionId": "sha256:4be09163d3c7f9fe7e2cfb8b3da7630b7b5af0858800eb92624a3adadcbffe72",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -12501,8 +13219,18 @@
         }
       ],
       "relativePath": "sources/sauna/sauna-2015-kanji-efficacy-of-regular-sauna-bathing-for-chronic-tension-type.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "kanji-2015-ctth-rct",
+        "designKind": "randomized_controlled_trial",
+        "designLabel": "Headache randomized trial",
+        "durationLabel": "8-week sauna intervention",
+        "participantCount": 37,
+        "participantCountKind": "reported",
+        "populationLabel": "Chronic tension-type headache patients"
+      },
       "revision": {
-        "pageRevisionId": "sha256:f21c45db2d7bbf8032479aa14d09bcee95512dd4f96ed74ed7d3fa1f8bff5fd4",
+        "pageRevisionId": "sha256:7619f58e0b3cd66d53033b446903c3e03169499e18b9c00c24405b0379b1ff55",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -12730,8 +13458,14 @@
         }
       ],
       "relativePath": "sources/sauna/sauna-bibliography-2026-04-18.md",
+      "researchEvidence": {
+        "aggregateRole": "context",
+        "aggregationNote": "Curation artifact; excluded from participant aggregation.",
+        "designKind": "bibliography",
+        "designLabel": "Bibliography"
+      },
       "revision": {
-        "pageRevisionId": "sha256:ae9274374b90daa875ddc0a05edaac94953f57971c02496f7a9936ee33a59598",
+        "pageRevisionId": "sha256:7809fb7865b88b1eee1bf0f1f0272282a51fbcaed709df50d2599d51dab76b60",
         "recipeHash": null,
         "runSpecRevisionId": null
       },

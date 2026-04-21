@@ -25,6 +25,15 @@ source:
   year: 1990
   journal: "Ann Med"
   citation: "Ernst E, Pecho E, Wirz P, Saradeth T. Regular sauna bathing and the incidence of common colds. Ann Med 1990;22:225-227."
+researchEvidence:
+  designKind: "controlled_trial"
+  designLabel: "Controlled cold-incidence trial"
+  participantCount: 50
+  participantCountKind: "reported"
+  populationLabel: "Adult volunteers"
+  durationLabel: "6-month follow-up"
+  aggregateRole: "primary"
+  cohortKey: "ernst-1990-common-colds-volunteers"
 evidenceBucket: Finnish dry-sauna corpus
 whyItMatters: "Expands the audited Finnish dry-sauna evidence corpus with a respiratory / ent record marked lower priority for Murph v1 interpretation."
 potentialMurphEndpoints:

@@ -25,6 +25,16 @@ source:
   year: 1989
   journal: "Eur J Pediatr"
   citation: "Markkola L, Mattila KJ, Koivikko MJ. Sauna habits and related symptoms in Finnish children. Eur J Pediatr 1989;149:221-222."
+researchEvidence:
+  designKind: "cross_sectional"
+  designLabel: "Cross-sectional child survey"
+  participantCount: 1247
+  participantCountKind: "reported"
+  populationLabel: "Finnish children/families answering questionnaire"
+  durationLabel: "Sauna-habits questionnaire"
+  aggregateRole: "primary"
+  aggregationNote: "Fifteen hundred children were sampled; 1,247 families responded."
+  cohortKey: "markkola-1989-finnish-children-survey"
 evidenceBucket: Finnish dry-sauna corpus
 whyItMatters: "Expands the audited Finnish dry-sauna evidence corpus with a safety / physiology record marked lower priority for Murph v1 interpretation."
 potentialMurphEndpoints:

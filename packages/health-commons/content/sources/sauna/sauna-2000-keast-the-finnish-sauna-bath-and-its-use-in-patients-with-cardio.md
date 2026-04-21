@@ -25,6 +25,10 @@ source:
   year: 2000
   journal: "J Cardiopulmonary Rehabil"
   citation: "Keast ML, Adamo KB. The Finnish sauna bath and its use in patients with cardiovascular disease. J Cardiopulmonary Rehabil 2000;20:225-230."
+researchEvidence:
+  designKind: "narrative_review"
+  designLabel: "Clinical narrative review"
+  aggregateRole: "synthesis"
 evidenceBucket: Finnish dry-sauna corpus
 whyItMatters: "Expands the audited Finnish dry-sauna evidence corpus with a cardiovascular record marked high priority for Murph v1 interpretation."
 potentialMurphEndpoints:

@@ -25,6 +25,15 @@ source:
   year: 2015
   journal: "The Journal of Evidence-Based Complementary and Alternative Medicine Alternative and Complementary Medicine"
   citation: "G. Kanji, M. Weatherall, R. Peter, G. Purdie, and R. Page, “Efficacy of regular sauna bathing for chronic tension-type headache: a randomized controlled study,” The Journal of Evidence-Based Complementary and Alternative Medicine Alternative and Complementary Medicine, vol. 21, no. 2, pp. 103– 109, 2015."
+researchEvidence:
+  designKind: "randomized_controlled_trial"
+  designLabel: "Headache randomized trial"
+  participantCount: 37
+  participantCountKind: "reported"
+  populationLabel: "Chronic tension-type headache patients"
+  durationLabel: "8-week sauna intervention"
+  aggregateRole: "primary"
+  cohortKey: "kanji-2015-ctth-rct"
 evidenceBucket: Finnish dry-sauna corpus
 whyItMatters: "Expands the audited Finnish dry-sauna evidence corpus with a symptoms / musculoskeletal record marked medium priority for Murph v1 interpretation."
 potentialMurphEndpoints:
