@@ -312,6 +312,122 @@ describe("startHostedContainerEntrypoint", () => {
     });
   });
 
+  it("preloads the node runner after listen while parsing requests through hosted runtime contracts", async () => {
+    const requestBody = buildJobBody({
+      wake: {
+        event: { kind: "runtime.timer", triggerKind: "runtime_timer", userId: "u_loader_split" },
+        eventId: "evt_loader_split",
+        occurredAt: "2026-04-21T12:00:00.000Z",
+      },
+    });
+    const actualContractsModule =
+      await vi.importActual<typeof import("@murphai/assistant-runtime/hosted-runtime-contracts")>(
+        "@murphai/assistant-runtime/hosted-runtime-contracts",
+      );
+    const parsedJob = actualContractsModule.parseHostedAssistantRuntimeJobInput(requestBody.job);
+    const parseHostedAssistantRuntimeJobInput = vi.fn(() => parsedJob);
+    const contractsModule = {
+      ...actualContractsModule,
+      parseHostedAssistantRuntimeJobInput,
+    };
+    const runHostedExecutionJob = vi.fn().mockResolvedValue({
+      finalGatewayProjectionSnapshot: null,
+      result: {
+        bundle: null,
+        result: {
+          eventsHandled: 1,
+          nextWakeAt: null,
+          summary: "ok",
+        },
+      },
+    });
+    const nodeRunnerModule = {
+      ...await vi.importActual<typeof import("../src/node-runner.js")>("../src/node-runner.js"),
+      runHostedExecutionJob,
+    };
+    const loadRuntimeContracts = vi.fn(async () => contractsModule);
+    const loadNodeRunner = vi.fn(async () => nodeRunnerModule);
+
+    const server = await startHostedContainerEntrypoint({
+      controlToken: "runner-token",
+      port: 0,
+      runtime: {
+        loadNodeRunner,
+        loadRuntimeContracts,
+      },
+    });
+    servers.push(server);
+
+    expect(loadNodeRunner).toHaveBeenCalledTimes(1);
+    expect(loadRuntimeContracts).not.toHaveBeenCalled();
+
+    const address = server.address();
+
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+    }
+
+    const response = await fetch(`http://127.0.0.1:${address.port}/internal/run`, {
+      body: JSON.stringify(requestBody),
+      headers: {
+        authorization: "Bearer runner-token",
+        "content-type": "application/json; charset=utf-8",
+      },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(200);
+    expect(loadRuntimeContracts).toHaveBeenCalledTimes(1);
+    expect(loadNodeRunner).toHaveBeenCalledTimes(1);
+    expect(parseHostedAssistantRuntimeJobInput).toHaveBeenCalledWith(requestBody.job);
+    expect(runHostedExecutionJob).toHaveBeenCalledWith(
+      parsedJob,
+      expect.objectContaining({
+        internalWorkerProxyToken: "proxy-token",
+      }),
+    );
+  });
+
+  it("keeps startup healthy when the background node-runner preload fails", async () => {
+    const loadNodeRunner = vi.fn(async () => {
+      throw new Error("preload failed");
+    });
+
+    const server = await startHostedContainerEntrypoint({
+      controlToken: "runner-token",
+      port: 0,
+      runtime: {
+        loadNodeRunner,
+      },
+    });
+    servers.push(server);
+    const address = server.address();
+
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+    }
+
+    await vi.waitFor(() => {
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          component: "container",
+          level: "error",
+          message: "Hosted runner runtime preload failed.",
+          phase: "failed",
+        }),
+      );
+    });
+
+    const response = await fetch(`http://127.0.0.1:${address.port}/health`);
+
+    expect(loadNodeRunner).toHaveBeenCalledTimes(1);
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      service: "cloudflare-hosted-runner-node",
+    });
+  });
+
   it("forwards the per-run proxy token and local bridge config into the node runner", async () => {
     const runnerSpy = vi.spyOn(nodeRunner, "runHostedExecutionJob").mockResolvedValue({
       finalGatewayProjectionSnapshot: null,
