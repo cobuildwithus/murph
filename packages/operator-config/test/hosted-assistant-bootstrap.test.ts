@@ -129,7 +129,7 @@ test('hosted assistant config parsing and readiness helpers normalize expected s
     baseUrl: 'https://api.openai.com/v1',
     headers: null,
     model: 'gpt-5',
-    presetId: null,
+    presetId: 'openai',
     provider: 'openai-compatible',
     providerName: null,
     reasoningEffort: null,
@@ -141,7 +141,7 @@ test('hosted assistant config parsing and readiness helpers normalize expected s
     baseUrl: 'https://api.openai.com/v1',
     headers: null,
     model: 'gpt-5',
-    presetId: null,
+    presetId: 'openai',
     provider: 'openai-compatible',
     providerName: null,
     reasoningEffort: null,
@@ -463,10 +463,10 @@ test('hosted assistant bootstrap seeds or updates platform profiles from hosted 
   assert.deepEqual(unchanged, {
     configured: true,
     provider: 'openai-compatible',
-    seeded: true,
-    source: 'hosted-env',
+    seeded: false,
+    source: 'saved',
   })
-  assert.equal(unchangedModule.saveHostedAssistantConfig.mock.calls.length, 1)
+  assert.equal(unchangedModule.saveHostedAssistantConfig.mock.calls.length, 0)
 })
 
 test('hosted assistant bootstrap normalizes container-rewritten local bridge base urls before persisting platform profiles', async () => {
