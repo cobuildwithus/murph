@@ -18,7 +18,6 @@ import { drainHostedRevnetIssuanceSubmissionQueue } from "./stripe-revnet-issuan
 import type { HostedStripeWebhookResponse } from "./webhook-service-types";
 
 export async function handleHostedStripeWebhook(input: {
-  defer?: (drain: () => Promise<void>) => Promise<void> | void;
   rawBody: string;
   signature: string | null;
   prisma?: PrismaClient;
@@ -55,17 +54,10 @@ export async function handleHostedStripeWebhook(input: {
   });
 
   if (!recorded.duplicate) {
-    if (input.defer) {
-      await input.defer(() => reconcileHostedStripeWebhookEventBestEffort({
-        eventId: event.id,
-        prisma,
-      }));
-    } else {
-      await reconcileHostedStripeWebhookEvent({
-        eventId: event.id,
-        prisma,
-      });
-    }
+    await reconcileHostedStripeWebhookEvent({
+      eventId: event.id,
+      prisma,
+    });
   }
 
   return {
@@ -99,22 +91,6 @@ async function reconcileHostedStripeWebhookEvent(input: {
     context: "stripe.webhook",
     userId: hostedExecutionMemberId,
   });
-}
-
-async function reconcileHostedStripeWebhookEventBestEffort(input: {
-  eventId: string;
-  prisma: PrismaClient;
-}): Promise<void> {
-  try {
-    await reconcileHostedStripeWebhookEvent(input);
-  } catch (error) {
-    console.error(
-      "Hosted Stripe webhook deferred reconciliation failed.",
-      sanitizeHostedOnboardingLogString(
-        error instanceof Error ? error.message : String(error),
-      ) ?? "Unknown error.",
-    );
-  }
 }
 
 function constructStripeWebhookEvent(input: {

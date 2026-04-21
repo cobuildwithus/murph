@@ -1,18 +1,8 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  after: vi.fn(),
   handleHostedStripeWebhook: vi.fn(),
 }));
-
-vi.mock("next/server", async () => {
-  const actual = await vi.importActual<typeof import("next/server")>("next/server");
-
-  return {
-    ...actual,
-    after: mocks.after,
-  };
-});
 
 vi.mock("@/src/lib/hosted-onboarding/webhook-service", () => ({
   handleHostedStripeWebhook: mocks.handleHostedStripeWebhook,
@@ -29,14 +19,13 @@ describe("hosted onboarding Stripe webhook route", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.after.mockImplementation((callback: () => void) => callback());
     mocks.handleHostedStripeWebhook.mockResolvedValue({
       ok: true,
       type: "invoice.paid",
     });
   });
 
-  it("passes a deferred best-effort scheduler into the Stripe webhook service", async () => {
+  it("passes the verified payload into the Stripe webhook service inline", async () => {
     const request = new Request("https://join.example.test/api/hosted-onboarding/stripe/webhook", {
       method: "POST",
       body: JSON.stringify({
@@ -51,11 +40,47 @@ describe("hosted onboarding Stripe webhook route", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.handleHostedStripeWebhook).toHaveBeenCalledWith({
-      defer: expect.any(Function),
       rawBody: JSON.stringify({
         id: "evt_123",
       }),
       signature: "sig_123",
+    });
+  });
+
+  it("waits for the Stripe webhook service before returning the response", async () => {
+    let resolveWebhook!: (value: { ok: true; type: string }) => void;
+    const webhookResult = new Promise<{ ok: true; type: string }>((resolve) => {
+      resolveWebhook = resolve;
+    });
+
+    mocks.handleHostedStripeWebhook.mockReturnValueOnce(webhookResult);
+
+    const request = new Request("https://join.example.test/api/hosted-onboarding/stripe/webhook", {
+      method: "POST",
+      body: JSON.stringify({
+        id: "evt_123",
+      }),
+      headers: {
+        "stripe-signature": "sig_123",
+      },
+    });
+
+    let settled = false;
+    const responsePromise = hostedOnboardingStripeRoute.POST(request).then((response) => {
+      settled = true;
+      return response;
+    });
+
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    resolveWebhook({
+      ok: true,
+      type: "invoice.paid",
+    });
+
+    await expect(responsePromise).resolves.toMatchObject({
+      status: 200,
     });
   });
 });
