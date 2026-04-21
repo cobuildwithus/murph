@@ -111,7 +111,7 @@ export async function listAssistantQuarantineEntriesAtPaths(
     for (const filePath of await collectQuarantineMetadataPaths(directory)) {
       try {
         const raw = await readFile(filePath, 'utf8')
-        const entry = assistantQuarantineEntrySchema.parse(JSON.parse(raw) as unknown)
+        const entry = assistantQuarantineEntrySchema.parse(JSON.parse(raw))
         if (input?.artifactKind && entry.artifactKind !== input.artifactKind) {
           continue
         }

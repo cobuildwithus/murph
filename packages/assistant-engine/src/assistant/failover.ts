@@ -292,7 +292,7 @@ async function readAssistantFailoverStateAtPath(
 ): Promise<AssistantFailoverState> {
   try {
     const raw = await readFile(failoverStatePath, 'utf8')
-    return assistantFailoverStateSchema.parse(JSON.parse(raw) as unknown)
+    return assistantFailoverStateSchema.parse(JSON.parse(raw))
   } catch (error) {
     if (!isMissingFileError(error)) {
       await quarantineAssistantStateFile({

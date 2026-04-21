@@ -93,7 +93,7 @@ export async function readAssistantSessionSecrets(input: {
 
   try {
     const raw = await readFile(secretsPath, 'utf8')
-    return assistantSessionSecretsSchema.parse(JSON.parse(raw) as unknown)
+    return assistantSessionSecretsSchema.parse(JSON.parse(raw))
   } catch (error) {
     if (isMissingFileError(error)) {
       return null

@@ -69,7 +69,7 @@ export async function readAssistantCronStore(
   try {
     const raw = await readFile(paths.cronJobsPath, 'utf8')
     return normalizeAssistantCronStore(
-      assistantCronStoreSchema.parse(JSON.parse(raw) as unknown),
+      assistantCronStoreSchema.parse(JSON.parse(raw)),
     )
   } catch (error) {
     if (isMissingFileError(error)) {

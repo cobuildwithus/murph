@@ -91,7 +91,7 @@ export async function readAssistantJsonFile<T>(input: {
     return {
       present: true,
       recoveredFromParseError: false,
-      value: input.parse(JSON.parse(raw) as unknown),
+      value: input.parse(JSON.parse(raw)),
     }
   } catch (error) {
     if (isMissingFileError(error)) {
@@ -144,7 +144,7 @@ export function parseAssistantJsonLinesWithTailSalvage<T>(
     }
 
     try {
-      values.push(parse(JSON.parse(line) as unknown))
+      values.push(parse(JSON.parse(line)))
     } catch (error) {
       const isRecoverableTail =
         index === lastNonEmptyLineIndex &&

@@ -303,7 +303,7 @@ async function readAssistantTurnReceiptAtPath(
 ): Promise<AssistantTurnReceipt | null> {
   try {
     const raw = await readFile(receiptPath, 'utf8')
-    return assistantTurnReceiptSchema.parse(JSON.parse(raw) as unknown)
+    return assistantTurnReceiptSchema.parse(JSON.parse(raw))
   } catch (error) {
     if (isMissingFileError(error)) {
       return null

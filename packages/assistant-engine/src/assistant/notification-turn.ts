@@ -478,7 +478,7 @@ export function parseAssistantNotificationDecision(
 
   try {
     return assistantNotificationDecisionSchema.parse(
-      JSON.parse(normalized) as unknown,
+      JSON.parse(normalized),
     )
   } catch (error) {
     const extracted = tryExtractAssistantNotificationDecisionObject(normalized)
@@ -491,7 +491,7 @@ export function parseAssistantNotificationDecision(
 
     try {
       return assistantNotificationDecisionSchema.parse(
-        JSON.parse(extracted) as unknown,
+        JSON.parse(extracted),
       )
     } catch {
       throw new VaultCliError(
