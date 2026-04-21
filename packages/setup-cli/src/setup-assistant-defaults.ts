@@ -45,8 +45,8 @@ export function assistantSelectionToOperatorDefaults(
         apiKeyEnv: assistant.apiKeyEnv,
         presetId: assistant.presetId ?? null,
         providerName: assistant.providerName,
-        ...(assistant.zeroDataRetention === true
-          ? { zeroDataRetention: true }
+        ...(assistant.zeroDataRetention !== undefined
+          ? { zeroDataRetention: assistant.zeroDataRetention }
           : {}),
       },
     }),
