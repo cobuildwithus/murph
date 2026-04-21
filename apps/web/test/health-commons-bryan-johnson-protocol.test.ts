@@ -10,6 +10,13 @@ describe("Health Commons experiment protocol metadata", () => {
     expect(protocol?.title).toBe("Bryan Johnson Sauna");
   });
 
+  it("uses the dedicated Bryan Johnson sauna artwork", () => {
+    const protocol = resolveHealthCommonsExperimentProtocol("bryan-johnson-blueprint");
+
+    expect(protocol).not.toBeNull();
+    expect(protocol?.image).toBe("/design-assets/hero-bryan-johnson-sauna.jpg");
+  });
+
   it("uses the dedicated Norwegian 4x4 artwork", () => {
     const protocol = resolveHealthCommonsExperimentProtocol("norwegian-4x4");
 

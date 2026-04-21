@@ -17,9 +17,11 @@ import { healthCommonsCatalog, type HealthCommonsCatalogReader, type HealthCommo
 const FINNISH_SAUNA_ROUTE_ID = "finnish-sauna";
 const NORWEGIAN_4X4_ROUTE_ID = "norwegian-4x4";
 const RED_LIGHT_GLASSES_ROUTE_ID = "red-light-glasses-before-bed";
+const BRYAN_JOHNSON_SAUNA_ROUTE_ID = "bryan-johnson-blueprint";
 const FINNISH_SAUNA_IMAGE = "/design-assets/hero-sauna.png";
 const NORWEGIAN_4X4_IMAGE = "/design-assets/hero-norwegian-4x4.jpeg";
 const RED_LIGHT_GLASSES_IMAGE = "/design-assets/hero-red-light-glasses-before-bed.jpeg";
+const BRYAN_JOHNSON_SAUNA_IMAGE = "/design-assets/hero-bryan-johnson-sauna.jpg";
 const SLEEP_EXPERIMENT_IMAGE = "/design-assets/hero-02.png";
 const EXERCISE_EXPERIMENT_IMAGE = "/design-assets/hero-03.png";
 
@@ -49,7 +51,7 @@ const PROTOCOL_LIBRARY_ORDER = [
   FINNISH_SAUNA_ROUTE_ID,
   NORWEGIAN_4X4_ROUTE_ID,
   RED_LIGHT_GLASSES_ROUTE_ID,
-  "bryan-johnson-blueprint",
+  BRYAN_JOHNSON_SAUNA_ROUTE_ID,
 ] as const;
 
 type BiomarkerSignalDirection =
@@ -356,6 +358,10 @@ function resolveProtocolImage(protocol: HealthCommonsCatalogEntity): string {
 
   if (toExperimentId(protocol) === RED_LIGHT_GLASSES_ROUTE_ID) {
     return RED_LIGHT_GLASSES_IMAGE;
+  }
+
+  if (toExperimentId(protocol) === BRYAN_JOHNSON_SAUNA_ROUTE_ID) {
+    return BRYAN_JOHNSON_SAUNA_IMAGE;
   }
 
   const lookupText = [
