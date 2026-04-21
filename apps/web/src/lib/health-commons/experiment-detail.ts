@@ -742,7 +742,7 @@ function toStudy(entity: HealthCommonsEntity): Study {
     designLabel: evidence?.designLabel ?? (evidence
       ? formatResearchDesignLabel(evidence.designKind)
       : undefined),
-    finding: entity.summary,
+    finding: extractStudyFinding(entity.body),
     url: source?.url,
   };
 }
@@ -1076,6 +1076,40 @@ function summarizeBody(body: string): string {
     .join(" ");
 
   return normalized.length <= 360 ? normalized : `${normalized.slice(0, 357)}...`;
+}
+
+function extractStudyFinding(body: string): string | undefined {
+  const lines = body.split("\n");
+  const findingsLabel = /^\*\*Findings:\*\*\s*/u;
+  const labeledSection = /^\*\*[A-Z][^*]+:\*\*/u;
+  const startIndex = lines.findIndex((line) => findingsLabel.test(line.trim()));
+
+  if (startIndex === -1) {
+    return undefined;
+  }
+
+  const findingLines: string[] = [];
+
+  for (let index = startIndex; index < lines.length; index += 1) {
+    const rawLine = lines[index]?.trim() ?? "";
+    const line = index === startIndex ? rawLine.replace(findingsLabel, "").trim() : rawLine;
+
+    if (!line) {
+      if (findingLines.length > 0) {
+        break;
+      }
+      continue;
+    }
+
+    if (index > startIndex && labeledSection.test(line)) {
+      break;
+    }
+
+    findingLines.push(line);
+  }
+
+  const finding = findingLines.join(" ").replace(/\s+/gu, " ").trim();
+  return finding || undefined;
 }
 
 function uniqueStrings(values: readonly (string | null | undefined)[]): string[] {
