@@ -46,7 +46,7 @@ const BASE_USAGE_RECORD = {
 
 describe("importHostedAiUsageRecords", () => {
   it("never persists provider debug fields", async () => {
-    const hostedAiUsageUpsert = vi.fn(async (..._args: unknown[]) => ({}));
+    const hostedAiUsageUpsert = vi.fn(async (args: { create: Record<string, unknown> }) => args.create);
     const prisma = {
       hostedAiUsage: {
         upsert: hostedAiUsageUpsert,
@@ -69,6 +69,7 @@ describe("importHostedAiUsageRecords", () => {
         memberId: "member_123",
         totalTokens: 165,
       }),
+      select: expect.any(Object),
       update: {},
     });
     const upsertCall = hostedAiUsageUpsert.mock.calls[0]?.[0] as { create?: Record<string, unknown> } | undefined;
@@ -77,6 +78,69 @@ describe("importHostedAiUsageRecords", () => {
     expect(upsertCall?.create).not.toHaveProperty("providerRequestId");
     expect(upsertCall?.create).not.toHaveProperty("providerMetadataJson");
     expect(upsertCall?.create).not.toHaveProperty("rawUsageJson");
+  });
+
+  it("dedupes identical usage rows by usageId before persisting them", async () => {
+    const hostedAiUsageUpsert = vi.fn(async (args: { create: Record<string, unknown> }) => args.create);
+    const prisma = {
+      hostedAiUsage: {
+        upsert: hostedAiUsageUpsert,
+      },
+    };
+
+    const result = await importHostedAiUsageRecords({
+      prisma: prisma as never,
+      trustedUserId: "member_123",
+      usage: [BASE_USAGE_RECORD, BASE_USAGE_RECORD],
+    });
+
+    expect(result.recordedIds).toEqual(["turn_123.attempt-1"]);
+    expect(hostedAiUsageUpsert).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects conflicting duplicate usage ids in one import batch", async () => {
+    const prisma = {
+      hostedAiUsage: {
+        upsert: vi.fn(async (args: { create: Record<string, unknown> }) => args.create),
+      },
+    };
+
+    await expect(
+      importHostedAiUsageRecords({
+        prisma: prisma as never,
+        trustedUserId: "member_123",
+        usage: [
+          BASE_USAGE_RECORD,
+          {
+            ...BASE_USAGE_RECORD,
+            totalTokens: 166,
+          },
+        ],
+      }),
+    ).rejects.toThrow(
+      "Hosted AI usage import contains conflicting records for usage id turn_123.attempt-1.",
+    );
+  });
+
+  it("rejects an existing usage row when immutable fields do not match", async () => {
+    const prisma = {
+      hostedAiUsage: {
+        upsert: vi.fn(async (args: { create: Record<string, unknown> }) => ({
+          ...args.create,
+          totalTokens: 999,
+        })),
+      },
+    };
+
+    await expect(
+      importHostedAiUsageRecords({
+        prisma: prisma as never,
+        trustedUserId: "member_123",
+        usage: [BASE_USAGE_RECORD],
+      }),
+    ).rejects.toThrow(
+      "Hosted AI usage id turn_123.attempt-1 already exists with different immutable fields: totalTokens.",
+    );
   });
 
   it("rejects usage rows whose memberId does not match the trusted hosted execution user", async () => {
@@ -113,7 +177,7 @@ describe("importHostedAiUsageRecords", () => {
 });
 
 describe("listHostedAiUsagePendingStripeMetering", () => {
-  it("queries pending metering candidates in occurred order", async () => {
+  it("queries pending metering candidates in due order", async () => {
     const findMany = vi.fn(async () => [{
       apiKeyEnv: null,
       credentialSource: "platform",
@@ -135,6 +199,7 @@ describe("listHostedAiUsagePendingStripeMetering", () => {
       outputTokens: 5,
       provider: "openai-compatible",
       requestedModel: "gpt-5.4-mini",
+      stripeMeterAttemptCount: 2,
       stripeMeterStatus: "pending",
       totalTokens: 15,
     }]);
@@ -146,6 +211,7 @@ describe("listHostedAiUsagePendingStripeMetering", () => {
 
     await listHostedAiUsagePendingStripeMetering({
       limit: 16,
+      now: "2026-03-29T12:05:00.000Z",
       prisma: prisma as never,
     });
 
@@ -154,6 +220,16 @@ describe("listHostedAiUsagePendingStripeMetering", () => {
         credentialSource: {
           not: null,
         },
+        OR: [
+          {
+            stripeMeterNextAttemptAt: null,
+          },
+          {
+            stripeMeterNextAttemptAt: {
+              lte: new Date("2026-03-29T12:05:00.000Z"),
+            },
+          },
+        ],
         stripeMeterStatus: "pending",
         member: {
           billingRef: {
@@ -166,6 +242,9 @@ describe("listHostedAiUsagePendingStripeMetering", () => {
         },
       },
       orderBy: [
+        {
+          stripeMeterNextAttemptAt: "asc",
+        },
         {
           occurredAt: "asc",
         },
@@ -195,6 +274,7 @@ describe("listHostedAiUsagePendingStripeMetering", () => {
         outputTokens: true,
         provider: true,
         requestedModel: true,
+        stripeMeterAttemptCount: true,
         stripeMeterStatus: true,
         totalTokens: true,
       },
@@ -202,6 +282,7 @@ describe("listHostedAiUsagePendingStripeMetering", () => {
     expect(
       await listHostedAiUsagePendingStripeMetering({
         limit: 16,
+        now: "2026-03-29T12:05:00.000Z",
         prisma: prisma as never,
       }),
     ).toEqual([{
@@ -215,6 +296,7 @@ describe("listHostedAiUsagePendingStripeMetering", () => {
       provider: "openai-compatible",
       requestedModel: "gpt-5.4-mini",
       stripeCustomerId: "cus_123",
+      stripeMeterAttemptCount: 2,
       stripeMeterStatus: "pending",
       totalTokens: 15,
     }]);

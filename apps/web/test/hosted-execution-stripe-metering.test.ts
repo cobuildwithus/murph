@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe as baseDescribe, expect, it, vi } from "vitest";
+import { beforeEach, describe as baseDescribe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   markHostedAiUsageStripeFailed: vi.fn(),
@@ -24,32 +24,18 @@ import {
 const describe = baseDescribe.sequential;
 
 describe("drainHostedAiUsageStripeMetering", () => {
-  const originalFetch = global.fetch;
-  const originalEnv = { ...process.env };
-
   beforeEach(() => {
     vi.clearAllMocks();
-    process.env.HOSTED_AI_USAGE_STRIPE_METER_EVENT_NAME = "ai_total_tokens";
-    process.env.STRIPE_SECRET_KEY = "sk_test_123";
-    global.fetch = vi.fn(async () =>
-      new Response(JSON.stringify({ id: "mtr_evt_123" }), {
-        status: 200,
-        headers: {
-          "content-type": "application/json",
-        },
-      })) as typeof fetch;
-  });
-
-  afterEach(() => {
-    process.env = { ...originalEnv };
-    global.fetch = originalFetch;
   });
 
   it("returns unconfigured when Stripe metering env is absent", async () => {
-    delete process.env.HOSTED_AI_USAGE_STRIPE_METER_EVENT_NAME;
-    delete process.env.STRIPE_SECRET_KEY;
-
-    const result = await drainHostedAiUsageStripeMetering();
+    const result = await drainHostedAiUsageStripeMetering({
+      environment: {
+        batchLimit: 32,
+        meterEventName: null,
+        stripeSecretKey: null,
+      },
+    });
 
     expect(result).toEqual({
       configured: false,
@@ -60,11 +46,11 @@ describe("drainHostedAiUsageStripeMetering", () => {
     expect(mocks.listHostedAiUsagePendingStripeMetering).not.toHaveBeenCalled();
   });
 
-  it("skips non-platform-funded usage instead of sending a Stripe meter event", async () => {
+  it("skips member-funded usage instead of sending a Stripe meter event", async () => {
     mocks.listHostedAiUsagePendingStripeMetering.mockResolvedValue([
       {
         apiKeyEnv: "OPENAI_API_KEY",
-        credentialSource: "unknown",
+        credentialSource: "member",
         id: "usage_123",
         inputTokens: 10,
         memberId: "member_123",
@@ -73,12 +59,29 @@ describe("drainHostedAiUsageStripeMetering", () => {
         provider: "openai-compatible",
         requestedModel: "gpt-5.4-mini",
         stripeCustomerId: "cus_123",
+        stripeMeterAttemptCount: 0,
         stripeMeterStatus: "pending",
         totalTokens: 15,
       },
     ]);
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({ id: "mtr_evt_123" }), {
+        status: 200,
+        headers: {
+          "content-type": "application/json",
+        },
+      }));
+    const attemptedAt = "2026-03-29T12:05:00.000Z";
 
-    const result = await drainHostedAiUsageStripeMetering();
+    const result = await drainHostedAiUsageStripeMetering({
+      environment: {
+        batchLimit: 32,
+        meterEventName: "ai_total_tokens",
+        stripeSecretKey: "sk_test_123",
+      },
+      fetchImpl: fetchMock as typeof fetch,
+      now: attemptedAt,
+    });
 
     expect(result).toEqual({
       configured: true,
@@ -86,10 +89,12 @@ describe("drainHostedAiUsageStripeMetering", () => {
       metered: 0,
       skipped: 1,
     });
-    expect(global.fetch).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
     expect(mocks.markHostedAiUsageStripeSkipped).toHaveBeenCalledWith({
+      attemptedAt: new Date(attemptedAt),
       id: "usage_123",
-      message: "Skipped Stripe AI metering because the run did not use platform credentials.",
+      message: "Skipped Stripe AI metering because the run used member-supplied credentials.",
+      prisma: undefined,
     });
   });
 
@@ -106,12 +111,32 @@ describe("drainHostedAiUsageStripeMetering", () => {
         provider: "openai-compatible",
         requestedModel: "venice/deepseek-r1-671b",
         stripeCustomerId: "cus_123",
+        stripeMeterAttemptCount: 0,
         stripeMeterStatus: "pending",
         totalTokens: 165,
       },
     ]);
+    const fetchCalls: Array<[string, RequestInit | undefined]> = [];
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      fetchCalls.push([String(input), init]);
+      return new Response(JSON.stringify({ id: "mtr_evt_123" }), {
+        status: 200,
+        headers: {
+          "content-type": "application/json",
+        },
+      });
+    });
+    const attemptedAt = "2026-03-29T12:40:00.000Z";
 
-    const result = await drainHostedAiUsageStripeMetering();
+    const result = await drainHostedAiUsageStripeMetering({
+      environment: {
+        batchLimit: 32,
+        meterEventName: "ai_total_tokens",
+        stripeSecretKey: "sk_test_123",
+      },
+      fetchImpl: fetchMock as typeof fetch,
+      now: attemptedAt,
+    });
 
     expect(result).toEqual({
       configured: true,
@@ -119,8 +144,10 @@ describe("drainHostedAiUsageStripeMetering", () => {
       metered: 1,
       skipped: 0,
     });
-    expect(global.fetch).toHaveBeenCalledTimes(1);
-    const [url, requestInit] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0] ?? [];
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const requestCall = fetchCalls.at(0);
+    expect(requestCall).toBeDefined();
+    const [url, requestInit] = requestCall as [string, RequestInit | undefined];
     expect(url).toBe("https://api.stripe.com/v1/billing/meter_events");
     const headers = new Headers(requestInit?.headers);
     expect(headers.get("authorization")).toBe("Bearer sk_test_123");
@@ -132,20 +159,22 @@ describe("drainHostedAiUsageStripeMetering", () => {
     expect(body).toContain("payload%5Bvalue%5D=165");
     expect(body).toContain("timestamp=1774787696");
     expect(mocks.markHostedAiUsageStripeMetered).toHaveBeenCalledWith({
+      attemptedAt: new Date(attemptedAt),
       id: "usage_abc",
       identifier: "usage_abc",
+      prisma: undefined,
     });
   });
 
-  it("keeps Stripe failures retryable by leaving rows pending", async () => {
-    global.fetch = vi.fn(async () =>
+  it("keeps Stripe failures retryable with exponential backoff", async () => {
+    const fetchMock = vi.fn(async () =>
       new Response(JSON.stringify({
         error: {
           message: "temporary failure",
         },
       }), {
         status: 500,
-      })) as typeof fetch;
+      }));
     mocks.listHostedAiUsagePendingStripeMetering.mockResolvedValue([
       {
         apiKeyEnv: null,
@@ -158,12 +187,22 @@ describe("drainHostedAiUsageStripeMetering", () => {
         provider: "openai-compatible",
         requestedModel: "gpt-5.4-mini",
         stripeCustomerId: "cus_123",
+        stripeMeterAttemptCount: 2,
         stripeMeterStatus: "pending",
         totalTokens: 15,
       },
     ]);
+    const attemptedAt = "2026-03-29T12:05:00.000Z";
 
-    const result = await drainHostedAiUsageStripeMetering();
+    const result = await drainHostedAiUsageStripeMetering({
+      environment: {
+        batchLimit: 32,
+        meterEventName: "ai_total_tokens",
+        stripeSecretKey: "sk_test_123",
+      },
+      fetchImpl: fetchMock as typeof fetch,
+      now: attemptedAt,
+    });
 
     expect(result).toEqual({
       configured: true,
@@ -172,8 +211,11 @@ describe("drainHostedAiUsageStripeMetering", () => {
       skipped: 0,
     });
     expect(mocks.markHostedAiUsageStripeRetryableFailure).toHaveBeenCalledWith({
+      attemptedAt: new Date(attemptedAt),
       id: "usage_retry",
       message: "Stripe meter event usage_retry failed with HTTP 500.",
+      nextAttemptAt: new Date("2026-03-29T12:25:00.000Z"),
+      prisma: undefined,
     });
     expect(mocks.markHostedAiUsageStripeRetryableFailure).not.toHaveBeenCalledWith(expect.objectContaining({
       message: expect.stringContaining("temporary failure"),
@@ -181,14 +223,14 @@ describe("drainHostedAiUsageStripeMetering", () => {
   });
 
   it("marks permanent Stripe client failures as terminal", async () => {
-    global.fetch = vi.fn(async () =>
+    const fetchMock = vi.fn(async () =>
       new Response(JSON.stringify({
         error: {
           message: "bad request",
         },
       }), {
         status: 400,
-      })) as typeof fetch;
+      }));
     mocks.listHostedAiUsagePendingStripeMetering.mockResolvedValue([
       {
         apiKeyEnv: null,
@@ -201,12 +243,22 @@ describe("drainHostedAiUsageStripeMetering", () => {
         provider: "openai-compatible",
         requestedModel: "gpt-5.4-mini",
         stripeCustomerId: "cus_123",
+        stripeMeterAttemptCount: 0,
         stripeMeterStatus: "pending",
         totalTokens: 15,
       },
     ]);
+    const attemptedAt = "2026-03-29T12:05:00.000Z";
 
-    const result = await drainHostedAiUsageStripeMetering();
+    const result = await drainHostedAiUsageStripeMetering({
+      environment: {
+        batchLimit: 32,
+        meterEventName: "ai_total_tokens",
+        stripeSecretKey: "sk_test_123",
+      },
+      fetchImpl: fetchMock as typeof fetch,
+      now: attemptedAt,
+    });
 
     expect(result).toEqual({
       configured: true,
@@ -215,18 +267,20 @@ describe("drainHostedAiUsageStripeMetering", () => {
       skipped: 0,
     });
     expect(mocks.markHostedAiUsageStripeFailed).toHaveBeenCalledWith({
+      attemptedAt: new Date(attemptedAt),
       id: "usage_bad_request",
       message: "Stripe meter event usage_bad_request failed with HTTP 400.",
+      prisma: undefined,
     });
     expect(mocks.markHostedAiUsageStripeRetryableFailure).not.toHaveBeenCalled();
   });
 
-  it("skips usage without an explicit total token count", async () => {
+  it("falls back to input and output token totals when totalTokens is absent", async () => {
     mocks.listHostedAiUsagePendingStripeMetering.mockResolvedValue([
       {
         apiKeyEnv: null,
         credentialSource: "platform",
-        id: "usage_missing_total",
+        id: "usage_fallback_total",
         inputTokens: 120,
         memberId: "member_123",
         occurredAt: new Date("2026-03-29T12:34:56.000Z"),
@@ -234,12 +288,76 @@ describe("drainHostedAiUsageStripeMetering", () => {
         provider: "openai-compatible",
         requestedModel: "gpt-5.4-mini",
         stripeCustomerId: "cus_123",
+        stripeMeterAttemptCount: 0,
         stripeMeterStatus: "pending",
         totalTokens: null,
       },
     ]);
+    const fetchCalls: Array<[string, RequestInit | undefined]> = [];
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      fetchCalls.push([String(input), init]);
+      return new Response(JSON.stringify({ id: "mtr_evt_123" }), {
+        status: 200,
+        headers: {
+          "content-type": "application/json",
+        },
+      });
+    });
+    const attemptedAt = "2026-03-29T12:40:00.000Z";
 
-    const result = await drainHostedAiUsageStripeMetering();
+    const result = await drainHostedAiUsageStripeMetering({
+      environment: {
+        batchLimit: 32,
+        meterEventName: "ai_total_tokens",
+        stripeSecretKey: "sk_test_123",
+      },
+      fetchImpl: fetchMock as typeof fetch,
+      now: attemptedAt,
+    });
+
+    expect(result).toEqual({
+      configured: true,
+      failed: 0,
+      metered: 1,
+      skipped: 0,
+    });
+    const requestCall = fetchCalls.at(0);
+    expect(requestCall).toBeDefined();
+    const requestInit = requestCall?.[1];
+    const body = String(requestInit?.body ?? "");
+    expect(body).toContain("payload%5Bvalue%5D=165");
+  });
+
+  it("skips usage when no positive token count can be proven", async () => {
+    mocks.listHostedAiUsagePendingStripeMetering.mockResolvedValue([
+      {
+        apiKeyEnv: null,
+        credentialSource: "platform",
+        id: "usage_missing_total",
+        inputTokens: null,
+        memberId: "member_123",
+        occurredAt: new Date("2026-03-29T12:34:56.000Z"),
+        outputTokens: 0,
+        provider: "openai-compatible",
+        requestedModel: "gpt-5.4-mini",
+        stripeCustomerId: "cus_123",
+        stripeMeterAttemptCount: 0,
+        stripeMeterStatus: "pending",
+        totalTokens: null,
+      },
+    ]);
+    const fetchMock = vi.fn();
+    const attemptedAt = "2026-03-29T12:40:00.000Z";
+
+    const result = await drainHostedAiUsageStripeMetering({
+      environment: {
+        batchLimit: 32,
+        meterEventName: "ai_total_tokens",
+        stripeSecretKey: "sk_test_123",
+      },
+      fetchImpl: fetchMock as typeof fetch,
+      now: attemptedAt,
+    });
 
     expect(result).toEqual({
       configured: true,
@@ -247,10 +365,12 @@ describe("drainHostedAiUsageStripeMetering", () => {
       metered: 0,
       skipped: 1,
     });
-    expect(global.fetch).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
     expect(mocks.markHostedAiUsageStripeSkipped).toHaveBeenCalledWith({
+      attemptedAt: new Date(attemptedAt),
       id: "usage_missing_total",
-      message: "Skipped Stripe AI metering because no total token count was available.",
+      message: "Skipped Stripe AI metering because no positive token count was available.",
+      prisma: undefined,
     });
   });
 });

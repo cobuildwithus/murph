@@ -72,7 +72,10 @@ export function resolvePendingAssistantUsagePath(
   paths: AssistantStatePaths,
   usageId: string,
 ): string {
-  return path.join(paths.usagePendingDirectory, `${normalizeRequiredString(usageId, "usageId")}.json`);
+  return path.join(
+    paths.usagePendingDirectory,
+    encodePendingAssistantUsageFileName(normalizeRequiredString(usageId, "usageId")),
+  );
 }
 
 export async function writePendingAssistantUsageRecord(input: {
@@ -84,6 +87,7 @@ export async function writePendingAssistantUsageRecord(input: {
   const record = parseAssistantUsageRecord(input.record);
   await ensureAssistantStateDirectory(paths.usagePendingDirectory);
   await writeJsonFileAtomic(resolvePendingAssistantUsagePath(paths, record.usageId), record);
+  await deleteLegacyPendingAssistantUsagePathIfSafe(paths, record.usageId);
 }
 
 export async function listPendingAssistantUsageRecords(input: {
@@ -133,6 +137,7 @@ export async function deletePendingAssistantUsageRecord(input: {
   await rm(resolvePendingAssistantUsagePath(paths, input.usageId), {
     force: true,
   });
+  await deleteLegacyPendingAssistantUsagePathIfSafe(paths, input.usageId);
 }
 
 export function parseAssistantUsageRecord(value: unknown): AssistantUsageRecord {
@@ -198,6 +203,43 @@ function resolveAssistantUsagePaths(
   }
 
   return resolveAssistantStatePaths(vault);
+}
+
+function encodePendingAssistantUsageFileName(usageId: string): string {
+  return `${Buffer.from(usageId, "utf8").toString("base64url")}.json`;
+}
+
+async function deleteLegacyPendingAssistantUsagePathIfSafe(
+  paths: AssistantStatePaths,
+  usageId: string,
+): Promise<void> {
+  const legacyPath = resolveLegacyPendingAssistantUsagePathIfSafe(paths, usageId);
+
+  if (!legacyPath || legacyPath === resolvePendingAssistantUsagePath(paths, usageId)) {
+    return;
+  }
+
+  await rm(legacyPath, { force: true });
+}
+
+function resolveLegacyPendingAssistantUsagePathIfSafe(
+  paths: AssistantStatePaths,
+  usageId: string,
+): string | null {
+  const normalized = normalizeRequiredString(usageId, "usageId");
+
+  if (
+    normalized === "."
+    || normalized === ".."
+    || normalized.includes("/")
+    || normalized.includes("\\")
+    || normalized.includes(path.sep)
+    || (process.platform === "win32" && /[<>:"|?*]/u.test(normalized))
+  ) {
+    return null;
+  }
+
+  return path.join(paths.usagePendingDirectory, `${normalized}.json`);
 }
 
 function requireRecord(value: unknown, label: string): Record<string, unknown> {
