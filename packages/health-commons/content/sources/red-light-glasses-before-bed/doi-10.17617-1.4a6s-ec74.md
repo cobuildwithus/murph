@@ -48,6 +48,8 @@ murphV1Priority: High
 
 This source is included for **Public-health light guidance**.
 
+**Findings:** This consensus statement does not test glasses directly. It says light timing and spectrum matter for circadian rhythms, sleep, mood, and cognition. Its practical message is bright daytime light, low evening light, and darkness during sleep. For this protocol, it supports dim-evening framing rather than blanket blue-light avoidance.
+
 **Why it matters:** Prevents the copy from implying that blue light is universally harmful; timing and context are the point.
 
 **Potential experiment signals:** circadian phase, melatonin suppression, sleep latency, alertness

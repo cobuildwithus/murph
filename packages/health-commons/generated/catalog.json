@@ -1342,7 +1342,7 @@
       "schemaVersion": "murph.commons.artifact-manifest.v1"
     }
   ],
-  "catalogHash": "sha256:f8aacb9c4a4ccdbeaa937f0831db71320d7b37f8215f2195530674d5ea82c096",
+  "catalogHash": "sha256:3e662122b611d98cc387c58d8e7b739e19f8653696af922b54493af714b7a3b9",
   "changes": [
     {
       "affectedFields": [
@@ -5079,7 +5079,7 @@
       "whyItMatters": "Helps prevent bad inference from hot-water immersion papers to sauna protocols by showing modality-specific physiological differences."
     },
     {
-      "body": "This source is included for **Public-health light guidance**.\n\n**Why it matters:** Prevents the copy from implying that blue light is universally harmful; timing and context are the point.\n\n**Potential experiment signals:** circadian phase, melatonin suppression, sleep latency, alertness\n\n**Protocol takeaway:** Keep the intervention in the evening window and preserve daytime light.",
+      "body": "This source is included for **Public-health light guidance**.\n\n**Findings:** This consensus statement does not test glasses directly. It says light timing and spectrum matter for circadian rhythms, sleep, mood, and cognition. Its practical message is bright daytime light, low evening light, and darkness during sleep. For this protocol, it supports dim-evening framing rather than blanket blue-light avoidance.\n\n**Why it matters:** Prevents the copy from implying that blue light is universally harmful; timing and context are the point.\n\n**Potential experiment signals:** circadian phase, melatonin suppression, sleep latency, alertness\n\n**Protocol takeaway:** Keep the intervention in the evening window and preserve daytime light.",
       "categories": [
         "red-light-glasses-before-bed",
         "evening-light"
@@ -5117,7 +5117,7 @@
         "populationLabel": "Expert consensus on healthy indoor-light exposure"
       },
       "revision": {
-        "pageRevisionId": "sha256:8fbcb09c036cdae9554738bb88f0132a6ae208ba56319a1aab82e26d669fee59",
+        "pageRevisionId": "sha256:476165b219f01f806ed88f38a63087f4a35bb8c7343747de1af12af597b882af",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -5910,7 +5910,7 @@
     },
     {
       "artifactNeeded": false,
-      "body": "This source is included for **Shift-work adjacent variant**.\n\n**Why it matters:** Supports the short-wavelength mechanism under shift-work conditions without turning shift-work findings into a general bedtime protocol claim.\n\n**Potential experiment signals:** melatonin suppression, alertness, performance, sleepiness\n\n**Protocol takeaway:** Keep shift-work lighting questions separate from the ordinary pre-bed eyewear protocol.\n\n**Claim use:** `context-only`. Keep this classification when wiring claims so adjacent mechanism papers do not become direct support for the consumer bedtime protocol.",
+      "body": "This source is included for **Shift-work adjacent variant**.\n\n**Findings:** In simulated overnight shift work, lenses blocking wavelengths below 530 nm prevented bright-light suppression of melatonin. They did not meaningfully impair the performance measures used in the study. This supports the short-wavelength mechanism, but the setting was night-shift work, not ordinary bedtime sleep.\n\n**Why it matters:** Supports the short-wavelength mechanism under shift-work conditions without turning shift-work findings into a general bedtime protocol claim.\n\n**Potential experiment signals:** melatonin suppression, alertness, performance, sleepiness\n\n**Protocol takeaway:** Keep shift-work lighting questions separate from the ordinary pre-bed eyewear protocol.\n\n**Claim use:** `context-only`. Keep this classification when wiring claims so adjacent mechanism papers do not become direct support for the consumer bedtime protocol.",
       "categories": [
         "red-light-glasses-before-bed",
         "evening-light"
@@ -5953,7 +5953,7 @@
         "populationLabel": "Healthy young adults"
       },
       "revision": {
-        "pageRevisionId": "sha256:9b4546d760de964020c9797667d81210e6a2f10ae5536a7ac4590a4839b0f7da",
+        "pageRevisionId": "sha256:697a3cfc6cbf3f766aa711806a3051201d815301f2a10afaf537f1f3f31e9034",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -6465,7 +6465,7 @@
       "whyItMatters": "Shows another supervised cardiac-rehab setting in the 4x4 lineage and sharpens why cardiac-rehab evidence should stay separate from home self-experiments."
     },
     {
-      "body": "This source is included for **Early human RCT**.\n\n**Why it matters:** Useful historical positive anchor for subjective sleep and affect signals.\n\n**Potential experiment signals:** sleep quality, sleep diary, positive affect, negative affect\n\n**Protocol takeaway:** Supports a bounded evening test but does not overcome the small-study and subjective-outcome limitations.",
+      "body": "This source is included for **Early human RCT**.\n\n**Findings:** In this small randomized trial, adults wearing amber lenses before bed reported better sleep quality than controls after two weeks. Positive affect also improved in the amber-lens group. The outcomes were subjective and the groups were imbalanced at baseline, so this is a useful early signal rather than a definitive result.\n\n**Why it matters:** Useful historical positive anchor for subjective sleep and affect signals.\n\n**Potential experiment signals:** sleep quality, sleep diary, positive affect, negative affect\n\n**Protocol takeaway:** Supports a bounded evening test but does not overcome the small-study and subjective-outcome limitations.",
       "categories": [
         "red-light-glasses-before-bed",
         "evening-light"
@@ -6506,7 +6506,7 @@
         "populationLabel": "Adults with poor sleep quality"
       },
       "revision": {
-        "pageRevisionId": "sha256:f784ec1d446496d044a914762833400dcfe0050e370495fc14ba19e35767ddf5",
+        "pageRevisionId": "sha256:1963cb33847b8935276736ef8c41606d232618dedd7746c878538f8d1fe4eb7d",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -7079,7 +7079,7 @@
     },
     {
       "artifactNeeded": false,
-      "body": "This source is included for **Clinical circadian split**.\n\n**Why it matters:** Supports separating clinician-guided circadian-disorder protocols from a general bedtime eyewear self-experiment.\n\n**Potential experiment signals:** circadian phase, sleep timing, guideline framing\n\n**Protocol takeaway:** Disorder-specific timed light and darkness protocols belong on separate pages with clinical framing.\n\n**Claim use:** `safety-only`. Keep this classification when wiring claims so clinical guidelines do not become direct evidence for the ordinary consumer protocol.",
+      "body": "This source is included for **Clinical circadian split**.\n\n**Findings:** This guideline treats circadian rhythm sleep-wake disorders as clinical timing problems, not generic sleep-hygiene issues. It supports targeted tools such as timed light, melatonin, and behavioral scheduling when matched to the disorder. For Murph, it separates clinician-guided circadian treatment from a general evening-glasses experiment.\n\n**Why it matters:** Supports separating clinician-guided circadian-disorder protocols from a general bedtime eyewear self-experiment.\n\n**Potential experiment signals:** circadian phase, sleep timing, guideline framing\n\n**Protocol takeaway:** Disorder-specific timed light and darkness protocols belong on separate pages with clinical framing.\n\n**Claim use:** `safety-only`. Keep this classification when wiring claims so clinical guidelines do not become direct evidence for the ordinary consumer protocol.",
       "categories": [
         "red-light-glasses-before-bed",
         "evening-light"
@@ -7118,7 +7118,7 @@
         "populationLabel": "Adults with circadian rhythm sleep-wake disorders"
       },
       "revision": {
-        "pageRevisionId": "sha256:809ab2de57b95829e538ff68dea102f4eff23cd8a5ebbcd153d504d38c8a26c7",
+        "pageRevisionId": "sha256:b32c42b8818bfe9b9df4a2710c6f2ac0617151bb9e74406529aa045d2c51d8ad",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -7216,7 +7216,7 @@
     },
     {
       "artifactNeeded": false,
-      "body": "This source is included for **Psychiatric virtual-darkness variant**.\n\n**Why it matters:** Shows why mania treatment protocols and ordinary evening eyewear should remain separate.\n\n**Potential experiment signals:** mania rating scales, actigraphy motor activity, adverse events\n\n**Protocol takeaway:** Keep psychiatric virtual-darkness use clinician-guided and outside the ordinary bedtime self-experiment.\n\n**Claim use:** `safety-only`. Keep this classification when wiring claims so psychiatric-adjacent trials do not become general support for the bedtime protocol.",
+      "body": "This source is included for **Psychiatric virtual-darkness variant**.\n\n**Findings:** Hospitalized patients with bipolar mania improved faster when blue-blocking glasses were added to usual treatment compared with placebo glasses. The study framed the intervention as virtual darkness under inpatient supervision. It supports the psychiatric mechanism, but it should not be generalized to wellness use.\n\n**Why it matters:** Shows why mania treatment protocols and ordinary evening eyewear should remain separate.\n\n**Potential experiment signals:** mania rating scales, actigraphy motor activity, adverse events\n\n**Protocol takeaway:** Keep psychiatric virtual-darkness use clinician-guided and outside the ordinary bedtime self-experiment.\n\n**Claim use:** `safety-only`. Keep this classification when wiring claims so psychiatric-adjacent trials do not become general support for the bedtime protocol.",
       "categories": [
         "red-light-glasses-before-bed",
         "evening-light"
@@ -7261,7 +7261,7 @@
         "populationLabel": "Hospitalized adults with bipolar mania"
       },
       "revision": {
-        "pageRevisionId": "sha256:2db7d8615cb96f648187ee2313e75d6058bf130af845d4f9f0ae52e7520ba4c8",
+        "pageRevisionId": "sha256:6ad6409405bd2397f4eadeb37ca7ea5fa16506df1d69ff128283a3cf1c4626a6",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -7286,7 +7286,7 @@
     },
     {
       "artifactNeeded": false,
-      "body": "This source is included for **Clinical circadian disorder variant**.\n\n**Why it matters:** Reinforces that delayed-sleep-phase protocols need their own framing and should not be merged into a general bedtime eyewear experiment.\n\n**Potential experiment signals:** sleep timing, actigraphy sleep onset, circadian phase\n\n**Protocol takeaway:** Use as an adjacent variant, not as direct proof for the ordinary bedtime eyewear page.\n\n**Claim use:** `context-only`. Keep this classification when wiring claims so circadian-disorder studies do not become direct support for the ordinary consumer protocol.",
+      "body": "This source is included for **Clinical circadian disorder variant**.\n\n**Findings:** In a small open-label delayed-sleep-phase study, evening amber glasses advanced sleep timing and actigraphic sleep onset. Dim-light melatonin onset also shifted earlier but did not reach statistical significance. This suggests a circadian-timing effect in a clinical disorder, not direct proof for healthy sleepers.\n\n**Why it matters:** Reinforces that delayed-sleep-phase protocols need their own framing and should not be merged into a general bedtime eyewear experiment.\n\n**Potential experiment signals:** sleep timing, actigraphy sleep onset, circadian phase\n\n**Protocol takeaway:** Use as an adjacent variant, not as direct proof for the ordinary bedtime eyewear page.\n\n**Claim use:** `context-only`. Keep this classification when wiring claims so circadian-disorder studies do not become direct support for the ordinary consumer protocol.",
       "categories": [
         "red-light-glasses-before-bed",
         "evening-light"
@@ -7331,7 +7331,7 @@
         "populationLabel": "Adults with delayed sleep phase disorder"
       },
       "revision": {
-        "pageRevisionId": "sha256:50bf3f288a2542e24cdcd86598c49bbc1e2550f2b6073c7de791722d07574e65",
+        "pageRevisionId": "sha256:54bca61511e8c3f1351885616fdfdd2dcb4ecbb22e6fc44528e5b5742907429e",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -7816,7 +7816,7 @@
       "whyItMatters": "Important for interaction with exercise"
     },
     {
-      "body": "This source is included for **Ordinary bedtime glasses insomnia**.\n\n**Why it matters:** Directly informs the 2-hour pre-bed design, while remaining a small pilot with imperfect blinding.\n\n**Potential experiment signals:** insomnia symptoms, sleep diary, actigraphy total sleep time, sleep quality\n\n**Protocol takeaway:** Use as a practical dose anchor, not as definitive treatment evidence.",
+      "body": "This source is included for **Ordinary bedtime glasses insomnia**.\n\n**Findings:** Adults with insomnia symptoms wore amber lenses for two hours before bed in a randomized crossover trial. Compared with clear lenses, the amber condition improved several sleep and insomnia measures. The trial is a practical dose anchor, but it was small and short.\n\n**Why it matters:** Directly informs the 2-hour pre-bed design, while remaining a small pilot with imperfect blinding.\n\n**Potential experiment signals:** insomnia symptoms, sleep diary, actigraphy total sleep time, sleep quality\n\n**Protocol takeaway:** Use as a practical dose anchor, not as definitive treatment evidence.",
       "categories": [
         "red-light-glasses-before-bed",
         "evening-light"
@@ -7857,7 +7857,7 @@
         "populationLabel": "Adults with insomnia symptoms"
       },
       "revision": {
-        "pageRevisionId": "sha256:4c6ecefd460eb5c6d96ffbc76e29d901e99e4a51d779770e762b44dfdc259573",
+        "pageRevisionId": "sha256:32a6de70dcfabf4c6839a10e25127506d0fe7708117ca65b6fd64ae468dae26b",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -8328,7 +8328,7 @@
       "whyItMatters": "Mechanistic bridge between epidemiology and biomarker changes"
     },
     {
-      "body": "This source is included for **Wearable sleep-estimate context**.\n\n**Why it matters:** Keeps the evidence story honest about actigraphy and wearable sleep estimates.\n\n**Potential experiment signals:** actigraphy sleep parameters, insomnia, circadian rhythm sleep-wake disorders\n\n**Protocol takeaway:** Use wearable estimates as trend proxies and pair them with subjective sleep-onset logging.",
+      "body": "This source is included for **Wearable sleep-estimate context**.\n\n**Findings:** The guideline supports actigraphy as a useful clinical tool for estimating sleep-wake patterns and circadian timing. It also emphasizes that actigraphy is a proxy and should be interpreted alongside sleep logs and clinical context. For Murph, wearable sleep data should be treated as trend evidence, not ground truth.\n\n**Why it matters:** Keeps the evidence story honest about actigraphy and wearable sleep estimates.\n\n**Potential experiment signals:** actigraphy sleep parameters, insomnia, circadian rhythm sleep-wake disorders\n\n**Protocol takeaway:** Use wearable estimates as trend proxies and pair them with subjective sleep-onset logging.",
       "categories": [
         "red-light-glasses-before-bed",
         "evening-light"
@@ -8365,7 +8365,7 @@
         "populationLabel": "Patients evaluated for sleep and circadian-rhythm disorders"
       },
       "revision": {
-        "pageRevisionId": "sha256:3e40475c5bae32fe18f5ca8a6533569b8429154dcd9ecb597fd326a21a051abb",
+        "pageRevisionId": "sha256:775343d3b2624bd04e72afc534ea4130cdde33e2812c19cc44cc201288b6deed",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -8592,7 +8592,7 @@
     },
     {
       "artifactNeeded": false,
-      "body": "This source is included for **Athlete pilot**.\n\n**Why it matters:** Useful supporting trial for the common pattern where subjective sleep changes are clearer than objective actigraphy shifts.\n\n**Potential experiment signals:** subjective sleep onset latency, actigraphy, sleep diary, morning alertness\n\n**Protocol takeaway:** Helps treat subjective improvement as signal while keeping objective expectations modest.\n\n**Claim use:** `supports-protocol`. Use this as supporting context for signal selection, not as a stand-alone reason to overclaim objective benefit.",
+      "body": "This source is included for **Athlete pilot**.\n\n**Findings:** Recreational athletes reported shorter sleep-onset latency, better sleep quality, and higher morning alertness with evening amber lenses. Actigraphy did not show significant differences between lens conditions. This makes subjective sleep a valid signal while keeping objective expectations modest.\n\n**Why it matters:** Useful supporting trial for the common pattern where subjective sleep changes are clearer than objective actigraphy shifts.\n\n**Potential experiment signals:** subjective sleep onset latency, actigraphy, sleep diary, morning alertness\n\n**Protocol takeaway:** Helps treat subjective improvement as signal while keeping objective expectations modest.\n\n**Claim use:** `supports-protocol`. Use this as supporting context for signal selection, not as a stand-alone reason to overclaim objective benefit.",
       "categories": [
         "red-light-glasses-before-bed",
         "evening-light"
@@ -8635,7 +8635,7 @@
         "populationLabel": "Recreational athletes aged 18-32"
       },
       "revision": {
-        "pageRevisionId": "sha256:9fa5ad8560ad3983e23e50769dc5ac0cc9e62ff73b581e304b79c48465b32b8b",
+        "pageRevisionId": "sha256:68147d614a5c82918a66aeea868e963b5c484cf35ab5f47ef585da6e3524a2f1",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -9869,7 +9869,7 @@
     },
     {
       "artifactNeeded": false,
-      "body": "This source is included for **Eye-strain claim calibration**.\n\n**Why it matters:** Directly useful for blocking eye-strain, headache, and visual-performance overclaims on the bedtime sleep page.\n\n**Potential experiment signals:** eye strain symptoms, headache, light sensitivity, visual performance\n\n**Protocol takeaway:** Keep eye-care and visual-comfort claims out of the sleep experiment unless a separate page earns them.\n\n**Claim use:** `safety-only`. Keep this classification when wiring claims so non-sleep spectacle claims do not drift onto the bedtime protocol.",
+      "body": "This source is included for **Eye-strain claim calibration**.\n\n**Findings:** In symptomatic computer users, blue-blocking lenses did not improve signs or symptoms of digital eye strain compared with clear lenses. The trial also reported no adverse events. This is mainly an overclaim guardrail for visual-comfort claims, not evidence for bedtime sleep effects.\n\n**Why it matters:** Directly useful for blocking eye-strain, headache, and visual-performance overclaims on the bedtime sleep page.\n\n**Potential experiment signals:** eye strain symptoms, headache, light sensitivity, visual performance\n\n**Protocol takeaway:** Keep eye-care and visual-comfort claims out of the sleep experiment unless a separate page earns them.\n\n**Claim use:** `safety-only`. Keep this classification when wiring claims so non-sleep spectacle claims do not drift onto the bedtime protocol.",
       "categories": [
         "red-light-glasses-before-bed",
         "evening-light"
@@ -9913,7 +9913,7 @@
         "populationLabel": "Symptomatic adult computer users"
       },
       "revision": {
-        "pageRevisionId": "sha256:9d9344089c0996fc377ac89f06d2bb9160301310e2badb5edf9617d51914563d",
+        "pageRevisionId": "sha256:af2695e923839fd18907570a05acd233772a1f44154101c9042ab37fff6cb85b",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -9937,7 +9937,7 @@
       "whyItMatters": "Directly useful for blocking eye-strain, headache, and visual-performance overclaims on the bedtime sleep page."
     },
     {
-      "body": "This source is included for **Healthy-adult mixed/null trial**.\n\n**Why it matters:** Important check against overpromising benefits in already-healthy sleepers.\n\n**Potential experiment signals:** actigraphy sleep duration, actigraphy sleep quality, subjective sleep, sleep diary\n\n**Protocol takeaway:** Low-symptom users may see little or no objective signal.",
+      "body": "This source is included for **Healthy-adult mixed/null trial**.\n\n**Findings:** Healthy adults wearing blue-blocking glasses in the evening did not show clear objective sleep improvements. Some subjective signals were modest, but sleep duration and quality were not reliably better. This is the main reminder that low-symptom users may not see a measurable effect.\n\n**Why it matters:** Important check against overpromising benefits in already-healthy sleepers.\n\n**Potential experiment signals:** actigraphy sleep duration, actigraphy sleep quality, subjective sleep, sleep diary\n\n**Protocol takeaway:** Low-symptom users may see little or no objective signal.",
       "categories": [
         "red-light-glasses-before-bed",
         "evening-light"
@@ -9978,7 +9978,7 @@
         "populationLabel": "Healthy adults"
       },
       "revision": {
-        "pageRevisionId": "sha256:f10dab857ee4fa079135e8a5e18d3f5707644257d5be8e386abccbb4c507ecc6",
+        "pageRevisionId": "sha256:2eb0ecdbf640c2501f57418deb8b619cc89b97ef3ba3df217dffde093642ff8f",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -10002,7 +10002,7 @@
       "whyItMatters": "Important check against overpromising benefits in already-healthy sleepers."
     },
     {
-      "body": "This source is included for **Broad BBG clinical review**.\n\n**Why it matters:** Maps the clinical landscape while warning against treating all blue-blocking glasses protocols as one thing.\n\n**Potential experiment signals:** sleep onset latency, insomnia symptoms, mood symptoms, circadian phase\n\n**Protocol takeaway:** Use as context-only evidence; split mood-disorder and circadian-disorder variants.",
+      "body": "This source is included for **Broad BBG clinical review**.\n\n**Findings:** This systematic review found promising signals for blue-blocking glasses in insomnia, delayed sleep phase, jet lag, shift work, depression, and mania. It also showed the literature mixes very different populations and dosing strategies. The review is useful as a map, not as a single pooled claim for bedtime eyewear.\n\n**Why it matters:** Maps the clinical landscape while warning against treating all blue-blocking glasses protocols as one thing.\n\n**Potential experiment signals:** sleep onset latency, insomnia symptoms, mood symptoms, circadian phase\n\n**Protocol takeaway:** Use as context-only evidence; split mood-disorder and circadian-disorder variants.",
       "categories": [
         "red-light-glasses-before-bed",
         "evening-light"
@@ -10043,7 +10043,7 @@
         "populationLabel": "Patients in mental-disorder blue-blocking-glasses studies"
       },
       "revision": {
-        "pageRevisionId": "sha256:eb28c9d2355f800788f5d1b512f8ca05ead3ff57f7a54645bcc13e59f51769b0",
+        "pageRevisionId": "sha256:0f46049cd168098ec00f52aef076245700ca1bae43c1fb2864b7ff04aa8ffac6",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -10323,7 +10323,7 @@
       "whyItMatters": "Shows hydration status matters"
     },
     {
-      "body": "This source is included for **Adjacent pregnancy melatonin RCT**.\n\n**Why it matters:** Shows melatonin timing can move even when sleep outcomes are not the main practical win.\n\n**Potential experiment signals:** salivary melatonin onset, melatonin level, phase angle, subjective sleep\n\n**Protocol takeaway:** Do not equate melatonin movement with reliable sleep improvement.",
+      "body": "This source is included for **Adjacent pregnancy melatonin RCT**.\n\n**Findings:** In third-trimester pregnancy, full blue-blocking glasses shifted the melatonin profile earlier compared with partial blockers. Melatonin onset and rise were the main signals. The study supports a circadian effect, but it does not establish that sleep will improve.\n\n**Why it matters:** Shows melatonin timing can move even when sleep outcomes are not the main practical win.\n\n**Potential experiment signals:** salivary melatonin onset, melatonin level, phase angle, subjective sleep\n\n**Protocol takeaway:** Do not equate melatonin movement with reliable sleep improvement.",
       "categories": [
         "red-light-glasses-before-bed",
         "evening-light"
@@ -10368,7 +10368,7 @@
         "populationLabel": "Healthy nulliparous pregnant women in the third trimester"
       },
       "revision": {
-        "pageRevisionId": "sha256:5c8d7f415b5e658512730a9cc06c25c996d25dffdf646494104823a0565cb5bb",
+        "pageRevisionId": "sha256:5e6d24abc194b1aee31edd0687f4a60e63f7d7963f5f78497d6fefe1bb2a3183",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -10392,7 +10392,7 @@
       "whyItMatters": "Shows melatonin timing can move even when sleep outcomes are not the main practical win."
     },
     {
-      "body": "This source is included for **Adjacent pregnancy sleep RCT**.\n\n**Why it matters:** Useful contradiction: a pregnancy sleep trial did not show statistically significant effects on primary sleep outcomes.\n\n**Potential experiment signals:** total sleep time, sleep efficiency, mid-point of sleep, pregnancy sleep outcomes\n\n**Protocol takeaway:** Pregnancy is an adjacent supervised variant; do not use this as a general adult protocol proof.",
+      "body": "This source is included for **Adjacent pregnancy sleep RCT**.\n\n**Findings:** In a related third-trimester pregnancy trial, full blue-blocking glasses did not significantly improve primary sleep outcomes versus partial blue blockers. The control lenses also blocked some blue light, which may have reduced contrast between groups. This is an adjacent null/mixed sleep result, not a general adult protocol proof.\n\n**Why it matters:** Useful contradiction: a pregnancy sleep trial did not show statistically significant effects on primary sleep outcomes.\n\n**Potential experiment signals:** total sleep time, sleep efficiency, mid-point of sleep, pregnancy sleep outcomes\n\n**Protocol takeaway:** Pregnancy is an adjacent supervised variant; do not use this as a general adult protocol proof.",
       "categories": [
         "red-light-glasses-before-bed",
         "evening-light"
@@ -10434,7 +10434,7 @@
         "populationLabel": "Healthy nulliparous pregnant women in the third trimester"
       },
       "revision": {
-        "pageRevisionId": "sha256:b76674c149ddd660d8988902981754645b020a0e02bb99c74a2be7e7b6a34c8f",
+        "pageRevisionId": "sha256:3fccea1d4184b111aa0d9f8f703aaa998c5323af0f89255e11113c6257185cd2",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -10458,7 +10458,7 @@
       "whyItMatters": "Useful contradiction: a pregnancy sleep trial did not show statistically significant effects on primary sleep outcomes."
     },
     {
-      "body": "This source is included for **Light-dose guideline**.\n\n**Why it matters:** Defines the broader practical target: adequate daytime light, low evening melanopic light, and very low light during sleep.\n\n**Potential experiment signals:** melanopic equivalent daylight illuminance, daytime light, evening light, sleep-period light\n\n**Protocol takeaway:** Use glasses as one possible evening-light tool, not an all-day blue-light avoidance rule.",
+      "body": "This source is included for **Light-dose guideline**.\n\n**Findings:** This expert consensus recommends strong melanopic light exposure during the day, much lower melanopic exposure in the evening, and minimal light during sleep. It expresses these targets using melanopic equivalent daylight illuminance. The finding for this protocol is timing-specific: reduce evening light without avoiding daytime light.\n\n**Why it matters:** Defines the broader practical target: adequate daytime light, low evening melanopic light, and very low light during sleep.\n\n**Potential experiment signals:** melanopic equivalent daylight illuminance, daytime light, evening light, sleep-period light\n\n**Protocol takeaway:** Use glasses as one possible evening-light tool, not an all-day blue-light avoidance rule.",
       "categories": [
         "red-light-glasses-before-bed",
         "evening-light"
@@ -10496,7 +10496,7 @@
         "populationLabel": "Expert consensus on daytime, evening, and nighttime indoor light"
       },
       "revision": {
-        "pageRevisionId": "sha256:4c00291e4ba76d111695b9980217a73bd7b7ec1caf90e0581e920f2802163b55",
+        "pageRevisionId": "sha256:0233209ead7e7bfa63ce18d21d1a2138d1042df08f8f8f870aed8ba99dd862f1",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -10711,7 +10711,7 @@
     },
     {
       "artifactNeeded": false,
-      "body": "This source is included for **Daytime/evening timing tradeoff**.\n\n**Why it matters:** Helps avoid collapsing daytime light benefits into a blanket anti-blue-light message.\n\n**Potential experiment signals:** sleep timing, performance, alertness, wellbeing\n\n**Protocol takeaway:** Preserve the distinction between healthy daytime light exposure and the evening reduction experiment.\n\n**Claim use:** `context-only`. Keep this classification when wiring claims so timing-context reviews do not become direct support for the bedtime protocol.",
+      "body": "This source is included for **Daytime/evening timing tradeoff**.\n\n**Findings:** This systematic review found that blue light can improve alertness, reaction time, and cognitive performance in young adults. It also found that some studies reported worse sleep quality, shorter sleep duration, lower sleep efficiency, or longer sleep latency. The useful takeaway is not anti-blue-light; it is that daytime and evening exposure have different tradeoffs.\n\n**Why it matters:** Helps avoid collapsing daytime light benefits into a blanket anti-blue-light message.\n\n**Potential experiment signals:** sleep timing, performance, alertness, wellbeing\n\n**Protocol takeaway:** Preserve the distinction between healthy daytime light exposure and the evening reduction experiment.\n\n**Claim use:** `context-only`. Keep this classification when wiring claims so timing-context reviews do not become direct support for the bedtime protocol.",
       "categories": [
         "red-light-glasses-before-bed",
         "evening-light"
@@ -10752,7 +10752,7 @@
         "populationLabel": "Healthy humans in blue-light exposure studies"
       },
       "revision": {
-        "pageRevisionId": "sha256:8ec02ac4e47add33b3805533b7561b38ce76f06f3da6c4ed796afc736f232911",
+        "pageRevisionId": "sha256:87f4fa8e3970887c4b05a5a119f6d728e16d38217beaea5b40ba8995796f5663",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -11101,7 +11101,7 @@
       "whyItMatters": "Adds renal dimension and hydration/contraindication context"
     },
     {
-      "body": "This source is included for **Broad systematic review**.\n\n**Why it matters:** Useful umbrella context: subjective sleep signals are often more consistent than objective signals across heterogeneous interventions.\n\n**Potential experiment signals:** sleep efficiency, total sleep time, Pittsburgh Sleep Quality Index, sleep onset latency\n\n**Protocol takeaway:** Do not merge glasses, screen filters, and room-light dimming into one causal claim.",
+      "body": "This source is included for **Broad systematic review**.\n\n**Findings:** This review and meta-analysis found that reducing short-wavelength light before bed may improve sleep, especially in studies using blue-blocking glasses. The evidence was heterogeneous and not strong enough for broad routine clinical use. It supports a cautious self-experiment, not a guaranteed sleep treatment.\n\n**Why it matters:** Useful umbrella context: subjective sleep signals are often more consistent than objective signals across heterogeneous interventions.\n\n**Potential experiment signals:** sleep efficiency, total sleep time, Pittsburgh Sleep Quality Index, sleep onset latency\n\n**Protocol takeaway:** Do not merge glasses, screen filters, and room-light dimming into one causal claim.",
       "categories": [
         "red-light-glasses-before-bed",
         "evening-light"
@@ -11143,7 +11143,7 @@
         "populationLabel": "Participants in blue-blocking spectacle sleep studies"
       },
       "revision": {
-        "pageRevisionId": "sha256:41f5fc1509feab361a74c3c521a525503f17962f356e24c84f71126effbc3424",
+        "pageRevisionId": "sha256:b9da69820b82718a9c4e48d0acdfa93d43f1cdf216c9d1e7604180fb24eace66",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -11224,7 +11224,7 @@
       "whyItMatters": "Expands the audited Finnish dry-sauna evidence corpus with a general / mixed record marked medium priority for Murph v1 interpretation."
     },
     {
-      "body": "This source is included for **Claim calibration**.\n\n**Why it matters:** Main overclaim guardrail for eye-strain, macular-health, and broad sleep claims.\n\n**Potential experiment signals:** visual fatigue, sleep quality, macular health\n\n**Protocol takeaway:** Do not present this protocol as eye care or retinal protection.",
+      "body": "This source is included for **Claim calibration**.\n\n**Findings:** The Cochrane review found little or no short-term benefit of blue-light filtering lenses for digital eye strain. Sleep-quality evidence was very uncertain and mixed across small trials. It found no trial evidence for several visual performance or macular-health outcomes. This prevents using the bedtime protocol as an eye-health claim.\n\n**Why it matters:** Main overclaim guardrail for eye-strain, macular-health, and broad sleep claims.\n\n**Potential experiment signals:** visual fatigue, sleep quality, macular health\n\n**Protocol takeaway:** Do not present this protocol as eye care or retinal protection.",
       "categories": [
         "red-light-glasses-before-bed",
         "evening-light"
@@ -11264,7 +11264,7 @@
         "populationLabel": "Participants in randomized trials of blue-light-filtering spectacle lenses"
       },
       "revision": {
-        "pageRevisionId": "sha256:85cf86c6deb52ac47fc54d42a00de1d953e6475eadf8bbc8e130ffe6cb44d888",
+        "pageRevisionId": "sha256:df9118082071e0d4e663f5573d130257aa6452a79c033426301ff6284da2b153",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -11999,7 +11999,7 @@
       "whyItMatters": "Newest null HRV trial"
     },
     {
-      "body": "This source is included for **Product characterization and implementation**.\n\n**Why it matters:** Shows why lens color and marketing labels are not enough; spectral filtering, fit, timing, and usage determine whether melanopic input is actually reduced.\n\n**Potential experiment signals:** melanopic daylight filtering density, spectral transmittance, implementation timing\n\n**Protocol takeaway:** Use as the product-quality guardrail and avoid brand recommendations unless spectral data is available.",
+      "body": "This source is included for **Product characterization and implementation**.\n\n**Findings:** This review found that commercial blue-blocking products vary widely in melanopic filtering strength. Only lenses with sufficient melanopic daylight filtering density justified strong blue-blocking claims. It also emphasized that timing, fit, and use matter as much as lens labeling. This makes spectral adequacy a protocol guardrail.\n\n**Why it matters:** Shows why lens color and marketing labels are not enough; spectral filtering, fit, timing, and usage determine whether melanopic input is actually reduced.\n\n**Potential experiment signals:** melanopic daylight filtering density, spectral transmittance, implementation timing\n\n**Protocol takeaway:** Use as the product-quality guardrail and avoid brand recommendations unless spectral data is available.",
       "categories": [
         "red-light-glasses-before-bed",
         "evening-light"
@@ -12036,7 +12036,7 @@
         "populationLabel": "Blue-blocking spectacle lens literature and commercial-lens spectral profiles"
       },
       "revision": {
-        "pageRevisionId": "sha256:359e607c9bd8c7373a41a35d86485af4801b8e903b671f4fa5418f4fcff154ab",
+        "pageRevisionId": "sha256:89184c8f7af9c16f7bb7d76fd3f16bcfc1aae4fafa5166eb562f64e59d8e3190",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -12118,7 +12118,7 @@
     },
     {
       "artifactNeeded": true,
-      "body": "This source is included for **Pediatric adjacent variant**.\n\n**Why it matters:** Useful adjacent evidence for separating pediatric sleep-phase questions from the ordinary adult bedtime protocol.\n\n**Potential experiment signals:** bedtime, sleep onset, behavior, melatonin\n\n**Protocol takeaway:** Keep pediatric sleep-phase use on a separate page even when the underlying light mechanism overlaps.\n\n**Claim use:** `context-only`. Keep this classification when wiring claims so pediatric trials do not become direct support for the ordinary adult bedtime protocol.",
+      "body": "This source is included for **Pediatric adjacent variant**.\n\n**Findings:** In Japanese schoolchildren with myopia, partial blue-blocking lenses worn before bed advanced bedtime and sleep onset. Irritability and disruptive daytime behavior improved, but salivary melatonin did not change. This supports a pediatric sleep-phase variant, not a direct adult wellness claim.\n\n**Why it matters:** Useful adjacent evidence for separating pediatric sleep-phase questions from the ordinary adult bedtime protocol.\n\n**Potential experiment signals:** bedtime, sleep onset, behavior, melatonin\n\n**Protocol takeaway:** Keep pediatric sleep-phase use on a separate page even when the underlying light mechanism overlaps.\n\n**Claim use:** `context-only`. Keep this classification when wiring claims so pediatric trials do not become direct support for the ordinary adult bedtime protocol.",
       "categories": [
         "red-light-glasses-before-bed",
         "evening-light"
@@ -12164,7 +12164,7 @@
         "populationLabel": "Japanese male schoolchildren aged 10-12 with myopia"
       },
       "revision": {
-        "pageRevisionId": "sha256:23964a557520f4379eddbfac9d48efbfc7e0a9f91810767f383db40918712519",
+        "pageRevisionId": "sha256:0197a0c76d841e5e01d33c530d4bf6e6f932e1b812c21f5793d0ec75b6e2d16a",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -12251,7 +12251,7 @@
       "whyItMatters": "Expands the audited Finnish dry-sauna evidence corpus with a general / mixed record marked lower priority for Murph v1 interpretation."
     },
     {
-      "body": "This source is included for **Objective sleep meta-analysis**.\n\n**Why it matters:** Best current null/objective counterweight: small adult crossover RCT synthesis with no statistically significant pooled actigraphy improvement.\n\n**Potential experiment signals:** actigraphy sleep onset latency, total sleep time, sleep efficiency, wake after sleep onset\n\n**Protocol takeaway:** Use to keep the protocol framed as a bounded self-experiment, not a reliable insomnia treatment.",
+      "body": "This source is included for **Objective sleep meta-analysis**.\n\n**Findings:** This meta-analysis pooled three small randomized crossover trials using actigraphy. Blue-light blocking glasses produced small, non-significant changes in sleep-onset latency, total sleep time, sleep efficiency, and awakenings. It is the strongest objective counterweight in this corpus and keeps claims modest.\n\n**Why it matters:** Best current null/objective counterweight: small adult crossover RCT synthesis with no statistically significant pooled actigraphy improvement.\n\n**Potential experiment signals:** actigraphy sleep onset latency, total sleep time, sleep efficiency, wake after sleep onset\n\n**Protocol takeaway:** Use to keep the protocol framed as a bounded self-experiment, not a reliable insomnia treatment.",
       "categories": [
         "red-light-glasses-before-bed",
         "evening-light"
@@ -12292,7 +12292,7 @@
         "populationLabel": "Adults in double-blind crossover trials with actigraphy sleep outcomes"
       },
       "revision": {
-        "pageRevisionId": "sha256:c59809fd3a980882f45c1114bd8976fffdc2560f56fdb35c770a950e66d2e21d",
+        "pageRevisionId": "sha256:6816203bd6103920b6eb302a172d27b47c96bc77133d486979cbdd6b784a7f18",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -12316,7 +12316,7 @@
       "whyItMatters": "Best current null/objective counterweight: small adult crossover RCT synthesis with no statistically significant pooled actigraphy improvement."
     },
     {
-      "body": "This source is included for **Safety-only psychiatric adjacent variant**.\n\n**Why it matters:** Strong reason to keep mania and mood-disorder protocols out of the general bedtime-glasses recipe.\n\n**Potential experiment signals:** mania symptoms, psychiatric inpatient outcomes, safety\n\n**Protocol takeaway:** Mood-disorder use needs clinician oversight and should not be folded into a general wellness protocol.",
+      "body": "This source is included for **Safety-only psychiatric adjacent variant**.\n\n**Findings:** In this newer inpatient mania RCT, blue-blocking glasses did not significantly improve Young Mania Rating Scale scores versus control lenses. The result contrasts with earlier enthusiasm for psychiatric virtual darkness. It reinforces that mood-disorder use needs clinician oversight and should not be folded into a general sleep experiment.\n\n**Why it matters:** Strong reason to keep mania and mood-disorder protocols out of the general bedtime-glasses recipe.\n\n**Potential experiment signals:** mania symptoms, psychiatric inpatient outcomes, safety\n\n**Protocol takeaway:** Mood-disorder use needs clinician oversight and should not be folded into a general wellness protocol.",
       "categories": [
         "red-light-glasses-before-bed",
         "evening-light"
@@ -12356,7 +12356,7 @@
         "populationLabel": "Adults hospitalized with mania"
       },
       "revision": {
-        "pageRevisionId": "sha256:4c3b769f1c29640a69e54cc38a3a7953b4d91bf059479170de605f86a6156f10",
+        "pageRevisionId": "sha256:2d8ef69849f171321d01b95b7a0838f6b2daeb48bb344585d5a86a332cf7a238",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -12504,7 +12504,7 @@
     },
     {
       "artifactNeeded": true,
-      "body": "This source is included for **Product and home-lighting context**.\n\n**Why it matters:** Shows why room-light brightness and lens spectra can matter as much as the fact that a lens is amber or red.\n\n**Potential experiment signals:** estimated melatonin suppression, spectral transmittance, home-lighting conditions\n\n**Protocol takeaway:** Supports logging room-light brightness and treating room-light redesign as a separate intervention from eyewear.\n\n**Claim use:** `context-only`. Keep this classification when wiring claims so home-lighting modeling work does not get mistaken for direct bedtime sleep efficacy evidence.",
+      "body": "This source is included for **Product and home-lighting context**.\n\n**Findings:** This modeling study showed that household lamp spectra and brightness can change estimated melatonin suppression. Cool LED and CFL lighting produced higher modeled suppression than warmer or incandescent sources, and tunable warm settings reduced disruption. It supports logging room lighting and treating lighting changes as distinct from eyewear.\n\n**Why it matters:** Shows why room-light brightness and lens spectra can matter as much as the fact that a lens is amber or red.\n\n**Potential experiment signals:** estimated melatonin suppression, spectral transmittance, home-lighting conditions\n\n**Protocol takeaway:** Supports logging room-light brightness and treating room-light redesign as a separate intervention from eyewear.\n\n**Claim use:** `context-only`. Keep this classification when wiring claims so home-lighting modeling work does not get mistaken for direct bedtime sleep efficacy evidence.",
       "categories": [
         "red-light-glasses-before-bed",
         "evening-light"
@@ -12543,7 +12543,7 @@
         "populationLabel": "Modeled melanopic exposure from home-lighting scenarios"
       },
       "revision": {
-        "pageRevisionId": "sha256:b350f8a6a05a0df6c4b9257c53a16f257267c1778ae05885afee661ca1388363",
+        "pageRevisionId": "sha256:0fdfa0e9ae3501597aed8fa3982f3823f46fda573eb3c13c48b4321fe512b4c8",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
