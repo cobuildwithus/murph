@@ -4,6 +4,9 @@ import {
 import type { AssistantOperatorDefaults } from '@murphai/operator-config/operator-config'
 import {
   compactAssistantProviderConfigInput,
+  isAssistantCodexTargetConfig,
+  isAssistantOpenAICompatibleTargetConfig,
+  resolveAssistantChatProviderFromConfig,
 } from '@murphai/operator-config/assistant/provider-config'
 import { resolveAssistantSession, type ResolveAssistantSessionInput } from './store.js'
 import type {
@@ -64,14 +67,12 @@ export function buildResolveAssistantSessionInput(
           : undefined
   const deliveryKind = input.deliveryKind ?? undefined
 
-  const defaultSandbox =
-    providerConfig.provider === 'codex-cli'
-      ? (providerConfig.sandbox ?? 'danger-full-access')
-      : providerConfig.sandbox
-  const defaultApprovalPolicy =
-    providerConfig.provider === 'codex-cli'
-      ? (providerConfig.approvalPolicy ?? 'never')
-      : providerConfig.approvalPolicy
+  const defaultSandbox = isAssistantCodexTargetConfig(providerConfig)
+    ? (providerConfig.policy.sandbox ?? 'danger-full-access')
+    : providerConfig.policy.sandbox
+  const defaultApprovalPolicy = isAssistantCodexTargetConfig(providerConfig)
+    ? (providerConfig.policy.approvalPolicy ?? 'never')
+    : providerConfig.policy.approvalPolicy
 
   return {
     vault: input.vault,
@@ -85,26 +86,42 @@ export function buildResolveAssistantSessionInput(
     ...(threadIsDirect !== undefined ? { threadIsDirect } : {}),
     ...(deliveryKind !== undefined ? { deliveryKind } : {}),
     target,
-    provider: providerConfig.provider,
-    model: providerConfig.model,
+    provider: resolveAssistantChatProviderFromConfig(providerConfig),
+    model: providerConfig.target.model,
     sandbox: defaultSandbox,
     approvalPolicy: defaultApprovalPolicy,
-    oss: providerConfig.oss ?? false,
-    profile: providerConfig.profile,
-    ...(providerConfig.codexHome ? { codexHome: providerConfig.codexHome } : {}),
-    baseUrl: providerConfig.baseUrl,
-    apiKeyEnv: providerConfig.apiKeyEnv,
-    providerName: providerConfig.providerName,
-    ...(providerConfig.provider === 'openai-compatible'
+    oss: isAssistantCodexTargetConfig(providerConfig) ? providerConfig.target.oss : false,
+    profile:
+      isAssistantCodexTargetConfig(providerConfig)
+        ? providerConfig.target.profile
+        : null,
+    ...(isAssistantCodexTargetConfig(providerConfig) && providerConfig.target.codexHome
+      ? { codexHome: providerConfig.target.codexHome }
+      : {}),
+    baseUrl:
+      isAssistantOpenAICompatibleTargetConfig(providerConfig)
+        ? providerConfig.target.baseUrl
+        : null,
+    apiKeyEnv:
+      isAssistantOpenAICompatibleTargetConfig(providerConfig)
+        ? providerConfig.target.apiKeyEnv
+        : null,
+    providerName:
+      isAssistantOpenAICompatibleTargetConfig(providerConfig)
+        ? providerConfig.target.providerName
+        : null,
+    ...(isAssistantOpenAICompatibleTargetConfig(providerConfig)
       ? {
-          presetId: providerConfig.presetId,
-          webSearch: providerConfig.webSearch,
-          zeroDataRetention: providerConfig.zeroDataRetention ?? null,
+          presetId: providerConfig.target.presetId,
+          webSearch: providerConfig.policy.webSearch,
+          zeroDataRetention: providerConfig.policy.zeroDataRetention ?? null,
         }
       : {}),
     headers:
-      providerConfig.provider === 'openai-compatible' ? providerConfig.headers : null,
-    reasoningEffort: providerConfig.reasoningEffort,
+      isAssistantOpenAICompatibleTargetConfig(providerConfig)
+        ? providerConfig.target.headers
+        : null,
+    reasoningEffort: providerConfig.policy.reasoningEffort,
     maxSessionAgeMs: input.maxSessionAgeMs ?? null,
   }
 }

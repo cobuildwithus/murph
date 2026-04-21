@@ -1,6 +1,7 @@
 import type { AssistantChatProvider } from '@murphai/operator-config/assistant-cli-contracts'
 import {
   normalizeAssistantProviderConfig,
+  resolveAssistantChatProviderFromConfig,
   type AssistantProviderConfig,
   type AssistantProviderConfigInput,
 } from '@murphai/operator-config/assistant/provider-config'
@@ -161,7 +162,7 @@ export function resolveAssistantModelCatalog(input: {
       description: model.description,
     })),
     models,
-    provider: profile.provider,
+    provider: resolveAssistantChatProviderFromConfig(profile),
     providerLabel: profile.providerLabel,
     reasoningOptions: resolveAssistantCatalogReasoningOptions(selectedModel),
     selectedModel,
@@ -294,11 +295,12 @@ function buildAssistantCatalogModels(input: {
 }
 
 function buildCurrentModelDescription(profile: AssistantProviderProfile): string {
-  switch (profile.provider) {
+  switch (profile.target.kind) {
+    case 'responses':
     case 'openai-compatible':
       return `Current model from ${profile.providerLabel}.`
     case 'codex-cli':
-      return profile.oss ? 'Current Codex OSS model.' : 'Current Codex model.'
+      return profile.target.oss ? 'Current Codex OSS model.' : 'Current Codex model.'
     default:
       return 'Current model.'
   }
@@ -313,7 +315,7 @@ function normalizeAssistantModelDiscoveryResult(input: {
     return null
   }
 
-  if (input.profile.provider === 'codex-cli') {
+  if (input.profile.target.kind === 'codex-cli') {
     return input.discovery
   }
 
@@ -335,7 +337,7 @@ function resolveAssistantCatalogModelCapabilities(
 ): AssistantCatalogModel['capabilities'] {
   const supportedContentTypes = new Set(capabilities.supportedUserMessageContentTypes)
 
-  if (profile.provider === 'codex-cli') {
+  if (profile.target.kind === 'codex-cli') {
     return {
       images: supportedContentTypes.has('image'),
       pdf: supportedContentTypes.has('file'),

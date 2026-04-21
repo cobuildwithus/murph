@@ -1,6 +1,7 @@
 import type { AssistantChatProvider } from '@murphai/operator-config/assistant-cli-contracts'
 import {
   normalizeAssistantProviderConfig,
+  resolveAssistantChatProviderFromConfig,
   supportsAssistantNativeResume,
   supportsAssistantReasoningEffort,
   supportsAssistantZeroDataRetention,
@@ -80,7 +81,9 @@ export function resolveAssistantProviderTargetCapabilities(
 ): AssistantProviderCapabilities {
   const normalized = normalizeAssistantProviderConfig(input)
   return stripAssistantProviderExecutionCapabilities({
-    ...resolveAssistantProviderDefinition(normalized.provider).capabilities,
+    ...resolveAssistantProviderDefinition(
+      resolveAssistantChatProviderFromConfig(normalized),
+    ).capabilities,
     supportsNativeResume: supportsAssistantNativeResume(normalized),
     supportsReasoningEffort: supportsAssistantReasoningEffort(normalized),
     supportsZeroDataRetention: supportsAssistantZeroDataRetention(normalized),
@@ -92,7 +95,9 @@ export function resolveAssistantProviderTargetExecutionCapabilities(
 ): AssistantProviderExecutionCapabilities {
   const normalized = normalizeAssistantProviderConfig(input)
   return {
-    ...resolveAssistantProviderDefinition(normalized.provider).capabilities,
+    ...resolveAssistantProviderDefinition(
+      resolveAssistantChatProviderFromConfig(normalized),
+    ).capabilities,
     supportsNativeResume: supportsAssistantNativeResume(normalized),
     supportsReasoningEffort: supportsAssistantReasoningEffort(normalized),
     supportsZeroDataRetention: supportsAssistantZeroDataRetention(normalized),
@@ -103,7 +108,9 @@ export function resolveAssistantProviderLabel(
   input: AssistantProviderConfigInput | null | undefined,
 ): string {
   const normalized = normalizeAssistantProviderConfig(input)
-  const definition = resolveAssistantProviderDefinition(normalized.provider)
+  const definition = resolveAssistantProviderDefinition(
+    resolveAssistantChatProviderFromConfig(normalized),
+  )
   return definition.resolveLabel(normalized)
 }
 
@@ -116,7 +123,9 @@ export async function discoverAssistantProviderModels(input: {
   providerName?: string | null
 }): Promise<AssistantModelDiscoveryResult> {
   const normalized = normalizeAssistantProviderConfig(input)
-  return resolveAssistantProviderDefinition(normalized.provider).discoverModels({
+  return resolveAssistantProviderDefinition(
+    resolveAssistantChatProviderFromConfig(normalized),
+  ).discoverModels({
     config: normalized,
     env: input.env,
   })
@@ -126,9 +135,9 @@ export function resolveAssistantProviderStaticModels(
   input: AssistantProviderConfigInput | null | undefined,
 ): readonly AssistantCatalogModel[] {
   const normalized = normalizeAssistantProviderConfig(input)
-  return resolveAssistantProviderDefinition(normalized.provider).resolveStaticModels(
-    normalized,
-  )
+  return resolveAssistantProviderDefinition(
+    resolveAssistantChatProviderFromConfig(normalized),
+  ).resolveStaticModels(normalized)
 }
 
 export async function executeAssistantProviderTurnWithDefinition(
@@ -156,7 +165,7 @@ export async function executeAssistantProviderTurnAttemptWithDefinition(
 
   try {
     const result = await resolveAssistantProviderDefinition(
-      input.providerConfig.provider,
+      resolveAssistantChatProviderFromConfig(input.providerConfig),
     ).executeTurn(executionInput)
     return finalizeAssistantProviderAttemptResult(result, progressEvents)
   } catch (error) {

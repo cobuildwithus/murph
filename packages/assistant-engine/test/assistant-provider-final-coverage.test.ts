@@ -12,10 +12,12 @@ const providerMocks = vi.hoisted(() => ({
   resolveAssistantProviderRegistryCapabilities: vi.fn(),
   resolveAssistantProviderRegistryTargetCapabilities: vi.fn(),
   resolveAssistantProviderLabel: vi.fn((profile) =>
-    profile.provider === 'codex-cli' ? 'Codex CLI' : 'OpenAI Compatible',
+    (profile.target?.kind ?? profile.provider) === 'codex-cli'
+      ? 'Codex CLI'
+      : 'OpenAI Compatible',
   ),
   resolveAssistantProviderStaticModels: vi.fn((profile) =>
-    profile.provider === 'codex-cli'
+    (profile.target?.kind ?? profile.provider) === 'codex-cli'
       ? [
           {
             id: 'gpt-5.4',
@@ -97,14 +99,16 @@ describe('assistant provider catalog', () => {
 
   it('normalizes provider profiles and builds model catalogs with current, static, and discovered models', () => {
     providerMocks.resolveAssistantProviderLabel.mockImplementation((profile) =>
-      profile.provider === 'codex-cli' ? 'Codex CLI' : 'OpenAI Compatible',
+      (profile.target?.kind ?? profile.provider) === 'codex-cli'
+        ? 'Codex CLI'
+        : 'OpenAI Compatible',
     )
     providerMocks.resolveAssistantProviderRegistryTargetCapabilities.mockReturnValue({
       supportedUserMessageContentTypes: ['text', 'image'],
       supportsReasoningEffort: true,
     })
     providerMocks.resolveAssistantProviderStaticModels.mockImplementation((profile) =>
-      profile.provider === 'codex-cli'
+      (profile.target?.kind ?? profile.provider) === 'codex-cli'
         ? [
             {
               id: 'gpt-5.4',
@@ -141,7 +145,9 @@ describe('assistant provider catalog', () => {
       provider: 'codex-cli',
     })
     expect(profile).toMatchObject({
-      provider: 'codex-cli',
+      target: {
+        kind: 'codex-cli',
+      },
       providerLabel: 'Codex CLI',
     })
 
