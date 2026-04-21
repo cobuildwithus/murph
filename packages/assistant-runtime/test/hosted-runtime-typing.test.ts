@@ -3,16 +3,19 @@ import assert from "node:assert/strict";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  buildHostedExecutionEmailConversationMessageWake,
   buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionRuntimeTimerWake,
   buildHostedExecutionTelegramConversationMessageWake,
+  type HostedRuntimeDrainEvent,
+  type HostedRuntimeEvent,
 } from "@murphai/hosted-execution";
 
 const mocks = vi.hoisted(() => ({
   emitHostedExecutionStructuredLog: vi.fn(),
-  startLinqChatTypingIndicator: vi.fn(),
-  startTelegramTypingSession: vi.fn(),
-  stopLinqChatTypingIndicator: vi.fn(),
+  getAssistantChannelAdapter: vi.fn(),
+  startLinqTypingIndicator: vi.fn(),
+  startTelegramTypingIndicator: vi.fn(),
 }));
 
 vi.mock("@murphai/hosted-execution", async () => {
@@ -25,19 +28,28 @@ vi.mock("@murphai/hosted-execution", async () => {
   };
 });
 
-vi.mock("@murphai/operator-config/linq-runtime", () => ({
-  startLinqChatTypingIndicator: mocks.startLinqChatTypingIndicator,
-  stopLinqChatTypingIndicator: mocks.stopLinqChatTypingIndicator,
-}));
-
-vi.mock("@murphai/operator-config/telegram-runtime", () => ({
-  startTelegramTypingSession: mocks.startTelegramTypingSession,
+vi.mock("@murphai/assistant-engine/assistant-runtime", () => ({
+  getAssistantChannelAdapter: mocks.getAssistantChannelAdapter,
+  startLinqTypingIndicator: mocks.startLinqTypingIndicator,
+  startTelegramTypingIndicator: mocks.startTelegramTypingIndicator,
 }));
 
 import {
-  startHostedRunTypingIndicator,
-  stopHostedRunTypingIndicator,
+  HOSTED_RUN_MESSAGING_ACTIVITY_OWNER_ENV,
+  HOSTED_RUN_MESSAGING_ACTIVITY_OWNER_EXECUTOR,
+  selectHostedRunMessagingActivityTarget,
+  shouldStartRuntimeHostedRunMessagingActivity,
+  startHostedRunMessagingActivity,
+  stopHostedRunMessagingActivity,
 } from "../src/hosted-runtime/typing.ts";
+
+function createDrainEvent(wake: HostedRuntimeEvent, seq: string): HostedRuntimeDrainEvent {
+  return {
+    ingressEventId: `ingress_${seq}`,
+    seq,
+    wake,
+  };
+}
 
 function createLinqWake() {
   return buildHostedExecutionLinqConversationMessageWake({
@@ -81,84 +93,185 @@ function createTelegramWakeWithTarget(threadId: string) {
   });
 }
 
+function createEmailWake() {
+  return buildHostedExecutionEmailConversationMessageWake({
+    eventId: "evt_email_typing",
+    identityId: "identity_123",
+    occurredAt: "2026-04-08T00:00:00.000Z",
+    rawMessageKey: "raw/message.eml",
+    userId: "member_123",
+  });
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.startLinqChatTypingIndicator.mockResolvedValue(undefined);
-  mocks.stopLinqChatTypingIndicator.mockResolvedValue(undefined);
-  mocks.startTelegramTypingSession.mockResolvedValue({
+
+  const createHandle = () => ({
     stop: vi.fn(async () => {}),
+  });
+
+  mocks.startLinqTypingIndicator.mockResolvedValue(createHandle());
+  mocks.startTelegramTypingIndicator.mockResolvedValue(createHandle());
+  mocks.getAssistantChannelAdapter.mockImplementation((channel: string | null | undefined) => {
+    if (channel === "linq") {
+      return {
+        channel: "linq",
+        async startTypingIndicator(
+          input: { explicitTarget: string | null },
+          dependencies: { startLinqTyping?: (input: { target: string }) => Promise<unknown> },
+        ) {
+          if (!input.explicitTarget) {
+            return null;
+          }
+          return (await dependencies.startLinqTyping?.({
+            target: input.explicitTarget,
+          })) ?? null;
+        },
+      };
+    }
+
+    if (channel === "telegram") {
+      return {
+        channel: "telegram",
+        async startTypingIndicator(
+          input: { explicitTarget: string | null },
+          dependencies: { startTelegramTyping?: (input: { target: string }) => Promise<unknown> },
+        ) {
+          if (!input.explicitTarget) {
+            return null;
+          }
+          return (await dependencies.startTelegramTyping?.({
+            target: input.explicitTarget,
+          })) ?? null;
+        },
+      };
+    }
+
+    if (channel === "email") {
+      return {
+        channel: "email",
+      };
+    }
+
+    return null;
   });
 });
 
-describe("hosted runtime typing helpers", () => {
-  it("returns null for wakes that do not support typing indicators", () => {
-    const indicator = startHostedRunTypingIndicator({
-      wake: buildHostedExecutionRuntimeTimerWake({
-        eventId: "evt_cron",
-        occurredAt: "2026-04-08T00:00:00.000Z",
-        triggerKind: "runtime_timer",
-        userId: "member_123",
-      }),
-      run: null,
-      runtimeEnv: {},
-    });
+describe("hosted runtime messaging activity helpers", () => {
+  it("selects the newest supported conversation.message event from the whole run batch", () => {
+    const target = selectHostedRunMessagingActivityTarget([
+      createDrainEvent(createTelegramWakeWithTarget("thread_old"), "001"),
+      createDrainEvent(createEmailWake(), "002"),
+      createDrainEvent(
+        buildHostedExecutionRuntimeTimerWake({
+          eventId: "evt_timer",
+          occurredAt: "2026-04-08T00:00:00.000Z",
+          triggerKind: "runtime_timer",
+          userId: "member_123",
+        }),
+        "003",
+      ),
+      createDrainEvent(createLinqWake(), "004"),
+    ]);
 
-    assert.equal(indicator, null);
-    expect(mocks.startLinqChatTypingIndicator).not.toHaveBeenCalled();
-    expect(mocks.startTelegramTypingSession).not.toHaveBeenCalled();
+    expect(target).toEqual(
+      expect.objectContaining({
+        channel: "linq",
+        explicitTarget: "chat_123",
+        sourceSeq: "004",
+      }),
+    );
   });
 
-  it("treats a missing typing indicator as a no-op when stopping", async () => {
+  it("returns null when no supported messaging activity target exists", () => {
+    const target = selectHostedRunMessagingActivityTarget([
+      createDrainEvent(createEmailWake(), "001"),
+      createDrainEvent(
+        buildHostedExecutionRuntimeTimerWake({
+          eventId: "evt_timer",
+          occurredAt: "2026-04-08T00:00:00.000Z",
+          triggerKind: "runtime_timer",
+          userId: "member_123",
+        }),
+        "002",
+      ),
+    ]);
+
+    assert.equal(target, null);
+  });
+
+  it("suppresses runtime-owned messaging activity when the executor claims ownership", () => {
+    assert.equal(shouldStartRuntimeHostedRunMessagingActivity({}), true);
+    assert.equal(
+      shouldStartRuntimeHostedRunMessagingActivity({
+        [HOSTED_RUN_MESSAGING_ACTIVITY_OWNER_ENV]:
+          HOSTED_RUN_MESSAGING_ACTIVITY_OWNER_EXECUTOR,
+      }),
+      false,
+    );
+  });
+
+  it("treats a missing messaging activity handle as a no-op when stopping", async () => {
     await expect(
-      stopHostedRunTypingIndicator({
-        wake: createTelegramWake(),
-        run: null,
-        typingIndicator: null,
+      stopHostedRunMessagingActivity({
+        activity: null,
       }),
     ).resolves.toBeUndefined();
 
     expect(mocks.emitHostedExecutionStructuredLog).not.toHaveBeenCalled();
   });
 
-  it("fails closed when a Linq payload is missing a stable chat id", () => {
-    const indicator = startHostedRunTypingIndicator({
-      wake: buildHostedExecutionLinqConversationMessageWake({
-        eventId: "evt_linq_typing_invalid",
-        linqMessage: {
-          chatId: "   ",
-          from: "+15551234567",
-          isFromMe: false,
-          messageId: "msg_123",
-          parts: [],
-        },
-        occurredAt: "2026-04-08T00:00:00.000Z",
-        phoneLookupKey: "15551234567",
-        userId: "member_123",
-      }),
+  it("fails closed when a Linq payload is missing a stable chat id", async () => {
+    const activity = await startHostedRunMessagingActivity({
+      events: [
+        createDrainEvent(
+          buildHostedExecutionLinqConversationMessageWake({
+            eventId: "evt_linq_typing_invalid",
+            linqMessage: {
+              chatId: "   ",
+              from: "+15551234567",
+              isFromMe: false,
+              messageId: "msg_123",
+              parts: [],
+            },
+            occurredAt: "2026-04-08T00:00:00.000Z",
+            phoneLookupKey: "15551234567",
+            userId: "member_123",
+          }),
+          "001",
+        ),
+      ],
       run: null,
       runtimeEnv: {
         LINQ_API_TOKEN: "linq-token",
       },
     });
 
-    assert.equal(indicator, null);
-    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-      expect.objectContaining({
-        details: {
-          chatIdPresent: false,
-          operation: "typing_start",
-          provider: "linq",
-        },
-        level: "warn",
-        message: "Hosted Linq typing indicator could not be started.",
-        phase: "wake.running",
-      }),
-    );
+    assert.equal(activity, null);
+    expect(mocks.getAssistantChannelAdapter).not.toHaveBeenCalled();
+    expect(mocks.emitHostedExecutionStructuredLog).not.toHaveBeenCalled();
+  });
+
+  it("returns null when the selected adapter for a supported channel does not expose typing activity", async () => {
+    mocks.getAssistantChannelAdapter.mockReturnValueOnce({
+      channel: "telegram",
+    });
+
+    const activity = await startHostedRunMessagingActivity({
+      events: [createDrainEvent(createTelegramWake(), "006")],
+      run: null,
+      runtimeEnv: {},
+    });
+
+    assert.equal(activity, null);
+    expect(mocks.getAssistantChannelAdapter).toHaveBeenCalledWith("telegram");
+    expect(mocks.startLinqTypingIndicator).not.toHaveBeenCalled();
+    expect(mocks.startTelegramTypingIndicator).not.toHaveBeenCalled();
   });
 
   it("starts and stops Linq typing with the parsed chat id and runtime env", async () => {
-    const indicator = startHostedRunTypingIndicator({
-      wake: createLinqWake(),
+    const activity = await startHostedRunMessagingActivity({
+      events: [createDrainEvent(createLinqWake(), "007")],
       run: {
         attempt: 1,
         runId: "run_123",
@@ -168,31 +281,30 @@ describe("hosted runtime typing helpers", () => {
         LINQ_API_TOKEN: "linq-token",
       },
     });
-    if (!indicator) {
-      throw new Error("Expected a Linq typing indicator.");
+    if (!activity) {
+      throw new Error("Expected a Linq messaging activity handle.");
     }
 
-    await vi.waitFor(() => {
-      expect(mocks.startLinqChatTypingIndicator).toHaveBeenCalledWith(
-        {
-          chatId: "chat_123",
+    expect(mocks.getAssistantChannelAdapter).toHaveBeenCalledWith("linq");
+    expect(mocks.startLinqTypingIndicator).toHaveBeenCalledWith(
+      {
+        target: "chat_123",
+      },
+      {
+        env: {
+          LINQ_API_TOKEN: "linq-token",
         },
-        {
-          env: {
-            LINQ_API_TOKEN: "linq-token",
-          },
-        },
-      );
-    });
+      },
+    );
     await vi.waitFor(() => {
       expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
         expect.objectContaining({
           component: "runtime",
           details: expect.objectContaining({
             chatIdPresent: true,
-            operation: "typing_start",
             provider: "linq",
             runElapsedMs: expect.any(Number),
+            sourceSeq: "007",
             startLatencyMs: expect.any(Number),
           }),
           message: "Hosted Linq typing indicator started.",
@@ -201,23 +313,15 @@ describe("hosted runtime typing helpers", () => {
       );
     });
 
-    await indicator.stop();
+    await activity.stop();
 
-    expect(mocks.stopLinqChatTypingIndicator).toHaveBeenCalledWith(
-      {
-        chatId: "chat_123",
-      },
-      {
-        env: {
-          LINQ_API_TOKEN: "linq-token",
-        },
-      },
-    );
+    const stopHandle = await mocks.startLinqTypingIndicator.mock.results[0]?.value;
+    expect(stopHandle.stop).toHaveBeenCalledTimes(1);
   });
 
   it("logs a null elapsed time when the hosted run startedAt is invalid", async () => {
-    const indicator = startHostedRunTypingIndicator({
-      wake: createLinqWake(),
+    const activity = await startHostedRunMessagingActivity({
+      events: [createDrainEvent(createLinqWake(), "008")],
       run: {
         attempt: 1,
         runId: "run_invalid_started_at",
@@ -227,8 +331,8 @@ describe("hosted runtime typing helpers", () => {
         LINQ_API_TOKEN: "linq-token",
       },
     });
-    if (!indicator) {
-      throw new Error("Expected a Linq typing indicator.");
+    if (!activity) {
+      throw new Error("Expected a Linq messaging activity handle.");
     }
 
     await vi.waitFor(() => {
@@ -237,9 +341,9 @@ describe("hosted runtime typing helpers", () => {
           component: "runtime",
           details: expect.objectContaining({
             chatIdPresent: true,
-            operation: "typing_start",
             provider: "linq",
             runElapsedMs: null,
+            sourceSeq: "008",
             startLatencyMs: expect.any(Number),
           }),
           message: "Hosted Linq typing indicator started.",
@@ -248,39 +352,29 @@ describe("hosted runtime typing helpers", () => {
       );
     });
 
-    await indicator.stop();
+    await activity.stop();
   });
 
-  it("stops an in-flight Telegram typing indicator once even when stop is requested twice", async () => {
-    const stopHandle = vi.fn(async () => {});
-    let resolveHandle!: (value: { stop(): Promise<void> }) => void;
-    mocks.startTelegramTypingSession.mockReturnValue(
-      new Promise<{ stop(): Promise<void> }>((resolve) => {
-        resolveHandle = resolve;
-      }),
-    );
-
-    const indicator = startHostedRunTypingIndicator({
-      wake: createTelegramWake(),
+  it("logs fallback target details when the Telegram thread target is not parseable", async () => {
+    const activity = await startHostedRunMessagingActivity({
+      events: [
+        createDrainEvent(
+          createTelegramWakeWithTarget("123:business::dm-topic:9"),
+          "009",
+        ),
+      ],
       run: null,
       runtimeEnv: {
         TELEGRAM_BOT_TOKEN: "telegram-token",
       },
     });
-    if (!indicator) {
-      throw new Error("Expected a Telegram typing indicator.");
+    if (!activity) {
+      throw new Error("Expected a Telegram messaging activity handle.");
     }
 
-    const firstStop = indicator.stop();
-    const secondStop = indicator.stop();
-    resolveHandle({
-      stop: stopHandle,
-    });
-    await Promise.all([firstStop, secondStop]);
-
-    expect(mocks.startTelegramTypingSession).toHaveBeenCalledWith(
+    expect(mocks.startTelegramTypingIndicator).toHaveBeenCalledWith(
       {
-        target: "thread_123",
+        target: "123:business::dm-topic:9",
       },
       {
         env: {
@@ -288,128 +382,55 @@ describe("hosted runtime typing helpers", () => {
         },
       },
     );
-    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-      expect.objectContaining({
-        component: "runtime",
-        details: expect.objectContaining({
-          provider: "telegram",
-          targetBusinessConnectionPresent: false,
-          targetDirectMessagesTopicPresent: false,
-          targetMessageThreadPresent: false,
-          targetParseable: true,
-        }),
-        message: "Hosted Telegram typing indicator requested.",
-        phase: "wake.running",
-      }),
-    );
-    expect(stopHandle).toHaveBeenCalledTimes(1);
-  });
-
-  it("logs fallback target details when the Telegram thread target is not parseable", async () => {
-    const wake = createTelegramWake();
-    if (wake.kind !== "conversation.message" || wake.message.channel !== "telegram") {
-      throw new Error("Expected a Telegram message wake.");
-    }
-    wake.message.telegramMessage.threadId = "123:business::dm-topic:9";
-
-    const indicator = startHostedRunTypingIndicator({
-      wake,
-      run: null,
-      runtimeEnv: {
-        TELEGRAM_BOT_TOKEN: "telegram-token",
-      },
-    });
-    if (!indicator) {
-      throw new Error("Expected a Telegram typing indicator.");
-    }
-
-    await vi.waitFor(() => {
-      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-        expect.objectContaining({
-          component: "runtime",
-          details: {
-            provider: "telegram",
-            targetBusinessConnectionPresent: true,
-            targetDirectMessagesTopicPresent: true,
-            targetMessageThreadPresent: false,
-            targetParseable: false,
-          },
-          message: "Hosted Telegram typing indicator requested.",
-          phase: "wake.running",
-        }),
-      );
-    });
-
-    await vi.waitFor(() => {
-      expect(mocks.startTelegramTypingSession).toHaveBeenCalledWith(
-        {
-          target: "123:business::dm-topic:9",
-        },
-        {
-          env: {
-            TELEGRAM_BOT_TOKEN: "telegram-token",
-          },
-        },
-      );
-    });
-
-    await indicator.stop();
-  });
-
-  it("logs canonical Telegram target details for business direct-message topics", async () => {
-    const indicator = startHostedRunTypingIndicator({
-      wake: createTelegramWakeWithTarget("-1001234567890:business:biz-42:dm-topic:9"),
-      run: null,
-      runtimeEnv: {
-        TELEGRAM_BOT_TOKEN: "telegram-token",
-      },
-    });
-    if (!indicator) {
-      throw new Error("Expected a Telegram typing indicator.");
-    }
-
     await vi.waitFor(() => {
       expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
         expect.objectContaining({
           component: "runtime",
           details: expect.objectContaining({
             provider: "telegram",
+            sourceSeq: "009",
             targetBusinessConnectionPresent: true,
             targetDirectMessagesTopicPresent: true,
             targetMessageThreadPresent: false,
-            targetParseable: true,
+            targetParseable: false,
           }),
-          message: "Hosted Telegram typing indicator requested.",
+          message: "Hosted Telegram typing indicator started.",
           phase: "wake.running",
         }),
       );
     });
 
-    await indicator.stop();
+    await activity.stop();
   });
 
-  it("carries Telegram target parse diagnostics into start failures", async () => {
+  it("carries Telegram target parse diagnostics into start failures without blocking stop", async () => {
     const startError = new Error("telegram typing rejected");
-    mocks.startTelegramTypingSession.mockRejectedValue(startError);
+    mocks.startTelegramTypingIndicator.mockRejectedValue(startError);
 
-    const indicator = startHostedRunTypingIndicator({
-      wake: createTelegramWakeWithTarget("123:topic:abc"),
+    const activity = await startHostedRunMessagingActivity({
+      events: [
+        createDrainEvent(
+          createTelegramWakeWithTarget("123:topic:abc"),
+          "010",
+        ),
+      ],
       run: null,
       runtimeEnv: {
         TELEGRAM_BOT_TOKEN: "telegram-token",
       },
     });
-    if (!indicator) {
-      throw new Error("Expected a Telegram typing indicator.");
+
+    if (!activity) {
+      throw new Error("Expected a Telegram messaging activity handle.");
     }
 
-    await indicator.stop();
-
+    await expect(activity.stop()).resolves.toBeUndefined();
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         component: "runtime",
         details: expect.objectContaining({
           provider: "telegram",
+          sourceSeq: "010",
           targetBusinessConnectionPresent: false,
           targetDirectMessagesTopicPresent: false,
           targetMessageThreadPresent: true,
@@ -423,59 +444,43 @@ describe("hosted runtime typing helpers", () => {
     );
   });
 
-  it("swallows async typing stop failures and logs a warning", async () => {
+  it("swallows async typing stop failures and logs a warning once", async () => {
     const stopError = new Error("telegram stop failed");
-    mocks.startTelegramTypingSession.mockResolvedValue({
+    mocks.startTelegramTypingIndicator.mockResolvedValue({
       stop: vi.fn(async () => {
         throw stopError;
       }),
     });
 
-    const indicator = startHostedRunTypingIndicator({
-      wake: createTelegramWake(),
+    const activity = await startHostedRunMessagingActivity({
+      component: "runner",
+      events: [createDrainEvent(createTelegramWake(), "011")],
       run: null,
       runtimeEnv: {
         TELEGRAM_BOT_TOKEN: "telegram-token",
       },
     });
-    if (!indicator) {
-      throw new Error("Expected a Telegram typing indicator.");
+    if (!activity) {
+      throw new Error("Expected a Telegram messaging activity handle.");
     }
 
-    await expect(indicator.stop()).resolves.toBeUndefined();
+    await expect(activity.stop()).resolves.toBeUndefined();
+    await expect(activity.stop()).resolves.toBeUndefined();
+
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
+        component: "runner",
+        details: expect.objectContaining({
+          provider: "telegram",
+          sourceSeq: "011",
+        }),
         error: stopError,
         level: "warn",
         message: "Hosted Telegram typing indicator could not be stopped.",
         phase: "side-effects.draining",
       }),
     );
-  });
-
-  it("logs and swallows stop failures from an externally provided typing indicator", async () => {
-    const stopError = new Error("wrapper stop failed");
-
-    await expect(
-      stopHostedRunTypingIndicator({
-        wake: createLinqWake(),
-        run: null,
-        typingIndicator: {
-          channelLabel: "Linq",
-          stop: vi.fn(async () => {
-            throw stopError;
-          }),
-        },
-      }),
-    ).resolves.toBeUndefined();
-
-    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-      expect.objectContaining({
-        error: stopError,
-        level: "warn",
-        message: "Hosted Linq typing indicator could not be stopped.",
-        phase: "side-effects.draining",
-      }),
-    );
+    const stopHandle = await mocks.startTelegramTypingIndicator.mock.results[0]?.value;
+    expect(stopHandle.stop).toHaveBeenCalledTimes(1);
   });
 });

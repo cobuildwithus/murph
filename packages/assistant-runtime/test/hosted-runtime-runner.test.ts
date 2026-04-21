@@ -105,10 +105,13 @@ const mocks = vi.hoisted(() => ({
   decodeHostedBundleBase64: vi.fn(),
   emitHostedExecutionStructuredLog: vi.fn(),
   executeHostedRunDrainForCommit: vi.fn(),
+  getAssistantChannelAdapter: vi.fn(),
   materializeHostedExecutionArtifacts: vi.fn(),
   normalizeHostedAssistantRuntimeConfig: vi.fn(),
   restoreHostedExecutionContext: vi.fn(),
   startLinqChatTypingIndicator: vi.fn(),
+  startLinqTypingIndicator: vi.fn(),
+  startTelegramTypingIndicator: vi.fn(),
   stopLinqChatTypingIndicator: vi.fn(),
   withHostedProcessEnvironment: vi.fn(),
 }));
@@ -138,6 +141,12 @@ vi.mock("@murphai/hosted-execution", async () => {
 vi.mock("@murphai/operator-config/linq-runtime", () => ({
   startLinqChatTypingIndicator: mocks.startLinqChatTypingIndicator,
   stopLinqChatTypingIndicator: mocks.stopLinqChatTypingIndicator,
+}));
+
+vi.mock("@murphai/assistant-engine/assistant-runtime", () => ({
+  getAssistantChannelAdapter: mocks.getAssistantChannelAdapter,
+  startLinqTypingIndicator: mocks.startLinqTypingIndicator,
+  startTelegramTypingIndicator: mocks.startTelegramTypingIndicator,
 }));
 
 vi.mock("../src/hosted-runtime/artifacts.ts", async () => {
@@ -284,7 +293,56 @@ beforeEach(() => {
   mocks.completeHostedRunDrainAfterCommit.mockResolvedValue(finalResult);
   mocks.materializeHostedExecutionArtifacts.mockResolvedValue(undefined);
   mocks.startLinqChatTypingIndicator.mockResolvedValue(undefined);
+  mocks.startLinqTypingIndicator.mockResolvedValue({
+    stop: vi.fn(async () => {}),
+  });
+  mocks.startTelegramTypingIndicator.mockResolvedValue({
+    stop: vi.fn(async () => {}),
+  });
   mocks.stopLinqChatTypingIndicator.mockResolvedValue(undefined);
+  mocks.getAssistantChannelAdapter.mockImplementation((channel: string | null | undefined) => {
+    if (channel === "linq") {
+      return {
+        channel: "linq",
+        async startTypingIndicator(
+          input: { explicitTarget: string | null },
+          dependencies: { startLinqTyping?: (input: { target: string }) => Promise<unknown> },
+        ) {
+          if (!input.explicitTarget) {
+            return null;
+          }
+          return (await dependencies.startLinqTyping?.({
+            target: input.explicitTarget,
+          })) ?? null;
+        },
+      };
+    }
+
+    if (channel === "telegram") {
+      return {
+        channel: "telegram",
+        async startTypingIndicator(
+          input: { explicitTarget: string | null },
+          dependencies: { startTelegramTyping?: (input: { target: string }) => Promise<unknown> },
+        ) {
+          if (!input.explicitTarget) {
+            return null;
+          }
+          return (await dependencies.startTelegramTyping?.({
+            target: input.explicitTarget,
+          })) ?? null;
+        },
+      };
+    }
+
+    if (channel === "email") {
+      return {
+        channel: "email",
+      };
+    }
+
+    return null;
+  });
   restoreFetch();
 });
 
@@ -817,19 +875,19 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
 
   it("does not block hosted execution while Linq typing startup is in flight and stops after the committed first pass", async () => {
     const steps: string[] = [];
-    let resolveTypingStart!: () => void;
-    mocks.startLinqChatTypingIndicator.mockImplementation(() => {
+    const stopHandle = vi.fn(async () => {
+      steps.push("stop");
+    });
+    let resolveTypingStart!: (value: { stop(): Promise<void> }) => void;
+    mocks.startLinqTypingIndicator.mockImplementation(() => {
       steps.push("start");
-      return new Promise<void>((resolve) => {
+      return new Promise<{ stop(): Promise<void> }>((resolve) => {
         resolveTypingStart = resolve;
       });
     });
     mocks.executeHostedRunDrainForCommit.mockImplementation(async () => {
       steps.push("execute");
       return committedExecution;
-    });
-    mocks.stopLinqChatTypingIndicator.mockImplementation(async () => {
-      steps.push("stop");
     });
 
     const runPromise = runHostedAssistantRuntimeJobInProcessDetailed(
@@ -861,14 +919,18 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
     await vi.waitFor(() => {
       expect(mocks.executeHostedRunDrainForCommit).toHaveBeenCalledTimes(1);
     });
-    expect(mocks.stopLinqChatTypingIndicator).not.toHaveBeenCalled();
+    await vi.waitFor(() => {
+      expect(mocks.startLinqTypingIndicator).toHaveBeenCalledTimes(1);
+    });
 
-    resolveTypingStart();
+    resolveTypingStart({
+      stop: stopHandle,
+    });
     await runPromise;
 
-    expect(mocks.startLinqChatTypingIndicator).toHaveBeenCalledWith(
+    expect(mocks.startLinqTypingIndicator).toHaveBeenCalledWith(
       {
-        chatId: "chat_123",
+        target: "chat_123",
       },
       {
         env: {
@@ -876,16 +938,7 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
         },
       },
     );
-    expect(mocks.stopLinqChatTypingIndicator).toHaveBeenCalledWith(
-      {
-        chatId: "chat_123",
-      },
-      {
-        env: {
-          LINQ_API_TOKEN: "linq-token",
-        },
-      },
-    );
+    expect(stopHandle).toHaveBeenCalledTimes(1);
     expect(steps).toEqual(["start", "execute", "stop"]);
   });
 
@@ -963,7 +1016,7 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
   });
 
   it("swallows Linq typing startup failures and still completes the hosted run", async () => {
-    mocks.startLinqChatTypingIndicator.mockRejectedValueOnce(
+    mocks.startLinqTypingIndicator.mockRejectedValueOnce(
       new Error("typing start failed"),
     );
 
@@ -995,7 +1048,6 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
 
     assert.deepEqual(result, committedFirstPassResult);
     expect(mocks.executeHostedRunDrainForCommit).toHaveBeenCalledTimes(1);
-    expect(mocks.stopLinqChatTypingIndicator).not.toHaveBeenCalled();
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         level: "warn",
@@ -1007,30 +1059,15 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
 
   it("does not block hosted execution while Telegram typing startup is in flight and stops after the committed first pass", async () => {
     const steps: string[] = [];
-    let resolveTypingStart!: () => void;
-    let typingSignal!: AbortSignal;
-    Object.defineProperty(globalThis, "fetch", {
-      configurable: true,
-      value: vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
-        steps.push("start");
-        const signal = init?.signal;
-        if (!(signal instanceof AbortSignal)) {
-          throw new Error("expected Telegram typing fetch to receive an abort signal");
-        }
-        typingSignal = signal;
-        await new Promise<void>((resolve) => {
-          resolveTypingStart = resolve;
-        });
-        return new Response(JSON.stringify({
-          ok: true,
-        }), {
-          headers: {
-            "content-type": "application/json",
-          },
-          status: 200,
-        });
-      }),
-      writable: true,
+    const stopHandle = vi.fn(async () => {
+      steps.push("stop");
+    });
+    let resolveTypingStart!: (value: { stop(): Promise<void> }) => void;
+    mocks.startTelegramTypingIndicator.mockImplementation(() => {
+      steps.push("start");
+      return new Promise<{ stop(): Promise<void> }>((resolve) => {
+        resolveTypingStart = resolve;
+      });
     });
     mocks.executeHostedRunDrainForCommit.mockImplementation(async () => {
       steps.push("execute");
@@ -1075,30 +1112,33 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
     await vi.waitFor(() => {
       expect(mocks.executeHostedRunDrainForCommit).toHaveBeenCalledTimes(1);
     });
-    expect(typingSignal.aborted).toBe(false);
-    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => {
+      expect(mocks.startTelegramTypingIndicator).toHaveBeenCalledTimes(1);
+    });
 
-    resolveTypingStart();
+    resolveTypingStart({
+      stop: stopHandle,
+    });
     await runPromise;
 
-    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
-    expect(steps).toEqual(["start", "execute"]);
+    expect(mocks.startTelegramTypingIndicator).toHaveBeenCalledWith(
+      {
+        target: "123456",
+      },
+      {
+        env: {
+          TELEGRAM_BOT_TOKEN: "telegram-token",
+        },
+      },
+    );
+    expect(stopHandle).toHaveBeenCalledTimes(1);
+    expect(steps).toEqual(["start", "execute", "stop"]);
   });
 
   it("swallows Telegram typing startup failures and still completes the hosted run", async () => {
-    Object.defineProperty(globalThis, "fetch", {
-      configurable: true,
-      value: vi.fn(async () => new Response(JSON.stringify({
-        description: "telegram typing start failed",
-        ok: false,
-      }), {
-        headers: {
-          "content-type": "application/json",
-        },
-        status: 200,
-      })),
-      writable: true,
-    });
+    mocks.startTelegramTypingIndicator.mockRejectedValueOnce(
+      new Error("telegram typing start failed"),
+    );
 
     const result = await runHostedAssistantRuntimeJobInProcessDetailed(
       {
