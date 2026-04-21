@@ -594,10 +594,19 @@ describe('model harness runtime helpers', () => {
         ],
       ),
     ).resolves.toEqual({
+      errorCode: null,
+      errorMessage: null,
       input: {
         value: 'hello',
       },
-      preview: true,
+      result: {
+        input: {
+          value: 'hello',
+        },
+        preview: true,
+        tool: 'vault.cli.run',
+      },
+      status: 'previewed',
       tool: 'vault.cli.run',
     })
 
@@ -655,7 +664,16 @@ describe('model harness runtime helpers', () => {
           {},
         ],
       ),
-    ).rejects.toThrow('tool exploded')
+    ).resolves.toEqual({
+      errorCode: 'ASSISTANT_TOOL_EXECUTION_FAILED',
+      errorMessage: 'tool exploded',
+      input: {
+        value: 'boom',
+      },
+      result: null,
+      status: 'failed',
+      tool: 'assistant.note.fail',
+    })
 
     await expect(
       applyCatalog.executeCalls({

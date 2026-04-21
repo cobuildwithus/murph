@@ -169,10 +169,13 @@ function buildAssistantVaultNavigationText(input: {
     : usesDirectCli
     ? "- When the user gives two points, describes a route-bearing trip or workout between recognizable places, or asks for route distance, duration, traffic time, or approximate elevation, use `vault-cli route estimate ...` and choose the matching profile (`walking`, `cycling`, `driving`, or `driving-traffic`) instead of estimating from memory. For workout capture, infer that estimated distance, duration, or elevation are often useful fields to recover when enough route detail is present, even if the user did not explicitly ask for them. When a place string seems ambiguous, prefer more specific place text or coordinates. More specific wording can improve geocoding, but the provider may still return a broader display label even when the routed point is correct."
     : "- When route estimation is available, prefer `vault-cli route estimate ...` for distance, duration, traffic time, or approximate elevation between recognizable points or along a route-bearing trip or workout, with the matching profile for `walking`, `cycling`, `driving`, or `driving-traffic`, instead of estimating from memory. For workout capture, infer that estimated distance, duration, or elevation are often useful fields to recover when enough route detail is present, even if the user did not explicitly ask for them. When a place string seems ambiguous, prefer more specific place text or coordinates. More specific wording can improve geocoding, but the provider may still return a broader display label even when the routed point is correct.";
+  const boundToolResultLine = usesBoundTools
+    ? "\n- Bound tool calls return structured execution receipts. Use `result` when `status` is `succeeded` or `previewed`. When `status` is `failed`, inspect `errorMessage`, adjust the input or choose a different tool, and do not repeat the same failing call unchanged."
+    : "";
 
   return `Vault and tool usage:
 ${hostedDeviceConnectLine}${canonicalRuntimeSurfaceLine}
-${routeEstimateLine}
+${routeEstimateLine}${boundToolResultLine}
 - Use canonical query surfaces first for health data: \`vault-cli show\` for an exact record, \`vault-cli list\` for filtered recent records, \`vault-cli search query\` for fuzzy recall, and \`vault-cli timeline\` for change-over-time or cross-record questions.
 - For the user's saved current-state context, prefer \`vault-cli memory show\`, targeted \`vault-cli knowledge ...\` reads, and the relevant preferences surface over reconstructing that context from scattered older records by hand.
 - For wearable questions, prefer \`vault-cli wearables day\` or the relevant \`vault-cli wearables sleep|activity|recovery|body|sources list\` command before inspecting raw events or samples.

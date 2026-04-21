@@ -533,28 +533,32 @@ function createBoundAssistantToolCatalog(
               tool: definition.name,
             })
 
-            try {
-              const result = await executeDefinition(definition, toolInput, mode)
-              const normalizedResult = normalizeJsonRecord(result)
+            const executionResult = await executeKnownToolCall({
+              definition,
+              input: toolInput,
+              mode,
+            })
+
+            if (executionResult.status === 'failed') {
               options.onToolEvent?.({
-                input: normalizedInput,
-                kind: mode === 'preview' ? 'previewed' : 'succeeded',
-                mode,
-                result: normalizedResult,
-                tool: definition.name,
-              })
-              return result
-            } catch (error) {
-              options.onToolEvent?.({
-                errorCode: inferAssistantErrorCode(error),
-                errorMessage: errorMessage(error),
+                errorCode: executionResult.errorCode,
+                errorMessage: executionResult.errorMessage,
                 input: normalizedInput,
                 kind: 'failed',
                 mode,
                 tool: definition.name,
               })
-              throw error
+              return executionResult
             }
+
+            options.onToolEvent?.({
+              input: normalizedInput,
+              kind: mode === 'preview' ? 'previewed' : 'succeeded',
+              mode,
+              result: executionResult.result,
+              tool: definition.name,
+            })
+            return executionResult
           },
         })
       }
@@ -723,13 +727,31 @@ async function executeCall<TDefinition extends AnyAssistantBoundToolDefinition>(
     })
   }
 
+  return executeKnownToolCall({
+    definition,
+    input: call.input,
+    mode,
+  })
+}
+
+async function executeKnownToolCall<
+  TDefinition extends AnyAssistantBoundToolDefinition,
+>(input: {
+  definition: TDefinition
+  input: unknown
+  mode: AssistantToolExecutionMode
+}): Promise<AssistantToolExecutionResult> {
   try {
-    const parsedInput = definition.inputSchema.parse(call.input)
-    const result = await executeDefinition(definition, parsedInput, mode)
-    const status = mode === 'preview' ? 'previewed' : 'succeeded'
+    const parsedInput = input.definition.inputSchema.parse(input.input)
+    const result = await executeDefinition(
+      input.definition,
+      parsedInput,
+      input.mode,
+    )
+    const status = input.mode === 'preview' ? 'previewed' : 'succeeded'
 
     return assistantToolExecutionResultSchema.parse({
-      tool: definition.name,
+      tool: input.definition.name,
       input: normalizeJsonRecord(parsedInput),
       status,
       result: normalizeJsonRecord(result),
@@ -737,15 +759,27 @@ async function executeCall<TDefinition extends AnyAssistantBoundToolDefinition>(
       errorMessage: null,
     })
   } catch (error) {
-    return assistantToolExecutionResultSchema.parse({
-      tool: definition.name,
-      input: normalizeJsonRecord(call.input),
-      status: 'failed',
-      result: null,
-      errorCode: inferAssistantErrorCode(error),
-      errorMessage: errorMessage(error),
-    })
+    return buildAssistantToolFailureResult(
+      input.definition.name,
+      normalizeJsonRecord(input.input),
+      error,
+    )
   }
+}
+
+function buildAssistantToolFailureResult(
+  toolName: string,
+  input: JsonRecord,
+  error: unknown,
+): AssistantToolExecutionResult {
+  return assistantToolExecutionResultSchema.parse({
+    tool: toolName,
+    input,
+    status: 'failed',
+    result: null,
+    errorCode: inferAssistantErrorCode(error),
+    errorMessage: errorMessage(error),
+  })
 }
 
 async function executeDefinition<
