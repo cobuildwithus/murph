@@ -947,37 +947,68 @@ async function loadLocalServiceModule(input?: {
       codexHome?: string | null
       model?: string | null
       oss?: boolean
+      policy?: {
+        approvalPolicy?: string | null
+        reasoningEffort?: string | null
+        sandbox?: string | null
+        webSearch?: string | null
+      } | null
       profile?: string | null
       provider?: 'codex-cli' | 'openai-compatible' | null
       providerName?: string | null
       reasoningEffort?: string | null
       sandbox?: string | null
-    }) =>
-      input.provider === 'openai-compatible'
+      target?: {
+        kind: 'codex-cli' | 'openai-compatible' | 'responses'
+        apiKeyEnv?: string | null
+        baseUrl?: string | null
+        codexCommand?: string | null
+        codexHome?: string | null
+        headers?: Record<string, string> | null
+        model?: string | null
+        oss?: boolean
+        presetId?: string | null
+        profile?: string | null
+        providerName?: string | null
+      } | null
+    }) => {
+      const provider =
+        input.target?.kind === 'codex-cli'
+          ? 'codex-cli'
+          : input.target
+            ? 'openai-compatible'
+            : input.provider
+
+      if (provider === 'openai-compatible') {
+        return {
+          adapter: 'openai-compatible',
+          apiKeyEnv: input.target?.apiKeyEnv ?? input.apiKeyEnv ?? null,
+          endpoint: input.target?.baseUrl ?? null,
+          headers: input.target?.headers ?? null,
+          model: input.target?.model ?? input.model ?? null,
+          presetId: input.target?.presetId ?? null,
+          providerName: input.target?.providerName ?? input.providerName ?? null,
+          reasoningEffort: null,
+          webSearch: input.policy?.webSearch ?? null,
+        }
+      }
+
+      return provider === 'codex-cli'
         ? {
-            adapter: 'openai-compatible',
-            apiKeyEnv: input.apiKeyEnv ?? null,
-            endpoint: null,
-            headers: null,
-            model: input.model ?? null,
-            presetId: null,
-            providerName: input.providerName ?? null,
-            reasoningEffort: null,
-            webSearch: null,
+            adapter: 'codex-cli',
+            approvalPolicy:
+              input.policy?.approvalPolicy ?? input.approvalPolicy ?? null,
+            codexCommand: input.target?.codexCommand ?? input.codexCommand ?? null,
+            codexHome: input.target?.codexHome ?? input.codexHome ?? null,
+            model: input.target?.model ?? input.model ?? null,
+            oss: input.target?.oss ?? input.oss === true,
+            profile: input.target?.profile ?? input.profile ?? null,
+            reasoningEffort:
+              input.policy?.reasoningEffort ?? input.reasoningEffort ?? null,
+            sandbox: input.policy?.sandbox ?? input.sandbox ?? null,
           }
-        : input.provider === 'codex-cli'
-          ? {
-              adapter: 'codex-cli',
-              approvalPolicy: input.approvalPolicy ?? null,
-              codexCommand: input.codexCommand ?? null,
-              codexHome: input.codexHome ?? null,
-              model: input.model ?? null,
-              oss: input.oss === true,
-              profile: input.profile ?? null,
-              reasoningEffort: input.reasoningEffort ?? null,
-              sandbox: input.sandbox ?? null,
-            }
-          : null,
+        : null
+    },
     createDefaultLocalAssistantModelTarget: () => ({
       adapter: 'openai-compatible',
       model: 'gpt-5.4',

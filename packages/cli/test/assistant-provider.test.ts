@@ -133,7 +133,7 @@ test('serializeAssistantProviderSessionOptions sanitizes settings for the select
   if (typeof continuityFingerprint !== 'string') {
     throw new Error('Expected continuity fingerprint for OpenAI-compatible provider options.')
   }
-  assert.match(continuityFingerprint, /"presetId":null/u)
+  assert.match(continuityFingerprint, /"presetId":"ollama"/u)
   assert.deepEqual(rest, {
     model: 'gpt-oss:20b',
     reasoningEffort: null,
@@ -145,6 +145,7 @@ test('serializeAssistantProviderSessionOptions sanitizes settings for the select
     baseUrl: 'http://127.0.0.1:11434/v1',
     apiKeyEnv: 'OLLAMA_API_KEY',
     providerName: 'ollama',
+    presetId: 'ollama',
     headers: {
       'X-Bar': 'baz',
       'X-Foo': 'bar',
@@ -203,7 +204,7 @@ test('buildAssistantProviderDefaultsPatch keeps OpenAI-compatible public headers
             Authorization: 'Bearer override-token',
             'X-Foo': 'bar',
           },
-          presetId: null,
+          presetId: 'ollama',
           reasoningEffort: null,
           webSearch: null,
         },
@@ -239,7 +240,7 @@ test('buildAssistantProviderDefaultsPatch keeps OpenAI-compatible public headers
         headers: {
           'X-Foo': 'bar',
         },
-        presetId: null,
+        presetId: 'ollama',
         reasoningEffort: null,
         webSearch: null,
       },

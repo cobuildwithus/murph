@@ -3,6 +3,7 @@ import {
   normalizeAssistantProviderConfig,
   resolveAssistantChatProviderFromConfig,
   type AssistantProviderConfig,
+  type AssistantProviderConfigLike,
   type AssistantProviderConfigInput,
 } from '@murphai/operator-config/assistant/provider-config'
 import {
@@ -87,13 +88,13 @@ export function resolveAssistantProviderCapabilities(
 }
 
 export function resolveAssistantTargetCapabilities(
-  input: AssistantProviderConfigInput | null | undefined,
+  input: AssistantProviderConfigLike | null | undefined,
 ): AssistantProviderCapabilities {
   return resolveAssistantProviderRegistryTargetCapabilities(input)
 }
 
 export function resolveAssistantProviderProfile(
-  input: AssistantProviderConfigInput | null | undefined,
+  input: AssistantProviderConfigLike | null | undefined,
 ): AssistantProviderProfile {
   const normalized = normalizeAssistantProviderConfig(input)
 

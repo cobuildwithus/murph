@@ -15,6 +15,7 @@ import {
 import { readEnvValue } from './env-values.js'
 import {
   type AssistantProviderConfig,
+  type AssistantProviderDefaultsConfig,
   type AssistantProviderConfigInput,
   serializeAssistantProviderOperatorDefaults,
 } from './assistant/provider-config.js'
@@ -128,7 +129,7 @@ export interface OperatorConfig extends Omit<RawOperatorConfig, 'assistant' | 'h
 export type AssistantOperatorDefaults = z.infer<
   typeof assistantOperatorDefaultsSchema
 >
-export type AssistantProviderDefaultsEntry = Omit<AssistantProviderConfig, 'provider'>
+export type AssistantProviderDefaultsEntry = AssistantProviderDefaultsConfig
 type AssistantChatProviderValue = 'codex-cli' | 'openai-compatible'
 
 const assistantSelfDeliveryTargetDependencies = {

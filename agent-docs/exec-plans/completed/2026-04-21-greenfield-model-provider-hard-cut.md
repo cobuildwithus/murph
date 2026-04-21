@@ -1,46 +1,44 @@
-# Greenfield model-provider hard cut
+# Greenfield Model Provider Hard Cut
 
+## Goal (incl. success criteria):
+- Remove the mirrored top-level `AssistantProviderConfig` fields so normalized provider state is owned by `target + policy` only.
+- Hard-cut the remaining codebase and tests to the canonical normalized shape without reintroducing compatibility reads.
+- Finish with repo-required verification green for the touched owner packages and reverse dependents.
+
+## Constraints/Assumptions:
+- Preserve unrelated worktree edits, including the pre-existing `apps/web/next-env.d.ts` modification.
+- Keep `AssistantProviderConfigInput` as the flat compatibility/write-input surface where callers still need to supply unnormalized config.
+- Do not expose personal identifiers in plan/commit/handoff text.
+
+## Key decisions:
+- Treat normalized `AssistantProviderConfig` as the canonical runtime/read shape and widen helper signatures to accept normalized configs directly.
+- Keep provider identity derivation explicit through `resolveAssistantChatProviderFromConfig(...)` instead of mirrored top-level `provider`.
+- Update downstream tests/mocks to assert or emulate `target + policy` rather than the removed mirrored fields.
+
+## State:
+- ready_to_close
+
+## Done:
+- Removed mirrored top-level fields from normalized `AssistantProviderConfig`.
+- Updated operator-config and assistant-engine helpers to consume/read `target + policy`.
+- Patched operator-config and downstream assistant-engine/assistant-runtime test fallout discovered by truthful verification.
+- Fixed canonical preset normalization so stronger endpoint/provider identity overrides stale explicit preset ids.
+- Fixed CLI model wizard/setup flows to clear stale saved provider presets when endpoint identity changes.
+- Completed required `coverage-write` and `task-finish-review` audits, then reran the full scoped `test:diff` lane green.
+
+## Now:
+- Create the scoped completion commit and hand off the verification evidence.
+
+## Next:
+- None after commit/handoff.
+
+## Open questions (UNCONFIRMED if needed):
+- None currently.
+
+## Working set (files/ids/commands):
+- Files: `packages/operator-config/src/assistant/{provider-config.ts,target-runtime.ts}`, `packages/operator-config/src/{assistant-backend.ts,operator-config.ts}`, `packages/operator-config/test/{assistant-config-helpers.test.ts,assistant-seam-coverage.test.ts}`, `packages/assistant-engine/src/assistant/{provider-catalog.ts,provider-config.ts}`, `packages/assistant-engine/src/assistant/providers/registry.ts`, `packages/assistant-engine/test/assistant-local-service-runtime.test.ts`, `packages/assistant-runtime/test/hosted-assistant-bootstrap.test.ts`
+- Verification: `pnpm typecheck`, `bash scripts/workspace-verify.sh test:diff ...`, focused Vitest reruns for assistant-engine and assistant-runtime fallout
+- Audit: required `coverage-write` and `task-finish-review` subagent passes after verification stabilizes
 Status: completed
-Created: 2026-04-21
 Updated: 2026-04-21
-
-## Goal
-
-- Finish the model-provider hard cut so `target + policy` is the only `AssistantProviderConfig` owner shape across the repo and the mirrored top-level compatibility fields are removed.
-
-## Success criteria
-
-- `packages/operator-config/src/assistant/provider-config.ts` normalizes around explicit `target` and `policy` objects with no mirrored top-level compatibility fields remaining on `AssistantProviderConfig`.
-- `packages/operator-config/src/assistant/target-runtime.ts` resolves explicit target kinds and `via` semantics for Responses-compatible routes.
-- `packages/operator-config/src/assistant-backend.ts` converts backend model targets from the new normalized primitive rather than inferring shape later.
-- The remaining `operator-config`, `assistant-engine`, `assistant-cli`, `setup-cli`, CLI/runtime, and directly coupled test surfaces read from `target` and `policy` instead of mirrored fields.
-- Required verification passes for the touched packages succeed or any unrelated blocker is named precisely.
-
-## Scope
-
-- `packages/operator-config/src/assistant/provider-config.ts`
-- `packages/operator-config/src/assistant/target-runtime.ts`
-- `packages/operator-config/src/assistant-backend.ts`
-- remaining repo callers and directly coupled tests that still depend on mirrored `AssistantProviderConfig` fields
-
-## Constraints
-
-- Treat the supplied patch as intent, not overwrite authority.
-- Preserve unrelated worktree edits, including the generated `apps/web/next-env.d.ts` stub.
-- Keep the migration scoped to hard-cutting `AssistantProviderConfig` mirror usage; do not mix in unrelated provider/runtime refactors.
-- Run the repo-required verification and completion workflow before handoff.
-
-## Verification
-
-- planned: `pnpm typecheck`
-- planned: `bash scripts/workspace-verify.sh test:diff <touched hard-cut paths ...>`
-- planned: `git diff --check`
-
-## Notes
-
-- The supplied patch was reported unverified upstream due to missing `pnpm`; verification needs to happen locally after landing.
-- The patch landing is already in progress; this follow-up turn expands it into the explicit repo-wide hard cut requested by the user.
-- Current follow-up slice updates `packages/operator-config/src/assistant/hosted-config.ts` plus directly coupled `packages/operator-config/test/**` expectations so owned callers/tests no longer rely on mirrored normalized provider fields.
-- Verified locally with `pnpm --dir packages/operator-config typecheck`, `pnpm --dir packages/operator-config test:coverage`, and `git diff --check` on the touched slice.
-- Repo-wide `pnpm typecheck` and `bash scripts/workspace-verify.sh test:diff ...` are currently blocked by the overlapping pre-existing `packages/assistant-engine/src/assistant/providers/helpers.ts` compile error (`Property 'baseUrl' does not exist on type 'AssistantProviderTargetConfig'`), outside this turn's allowed edit scope.
 Completed: 2026-04-21

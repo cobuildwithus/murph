@@ -42,9 +42,48 @@ export interface AssistantRuntimeResolutionInput {
   providerName?: string | null
   reasoningEffort?: string | null
   sandbox?: string | null
+  target?:
+    | {
+        kind?: 'codex-cli'
+        model?: string | null
+        codexHome?: string | null
+        oss?: boolean
+        profile?: string | null
+        baseUrl?: never
+        apiKeyEnv?: never
+        providerName?: never
+        presetId?: never
+        headers?: never
+      }
+    | {
+        kind?: 'responses' | 'openai-compatible'
+        model?: string | null
+        baseUrl?: string | null
+        apiKeyEnv?: string | null
+        providerName?: string | null
+        presetId?: string | null
+        headers?: Record<string, string> | null
+        codexHome?: never
+        oss?: never
+        profile?: never
+      }
+  policy?: {
+    approvalPolicy?: string | null
+    reasoningEffort?: string | null
+    sandbox?: string | null
+    webSearch?: string | null
+    zeroDataRetention?: boolean | null
+  }
   webSearch?: string | null
   zeroDataRetention?: boolean | null
 }
+
+export type AssistantTargetVia = 'openai' | 'vercel-ai-gateway'
+
+export type AssistantResolvedTargetKind =
+  | { kind: 'codex-cli' }
+  | { kind: 'responses'; via: AssistantTargetVia }
+  | { kind: 'openai-compatible' }
 
 export interface AssistantResolvedRuntimeTarget {
   continuityFingerprint: string
@@ -56,6 +95,7 @@ export interface AssistantResolvedRuntimeTarget {
   supportsProviderWebSearch: boolean
   supportsReasoningEffort: boolean
   supportsZeroDataRetention: boolean
+  target: AssistantResolvedTargetKind
   webSearch: AssistantWebSearchMode | null
 }
 
@@ -98,19 +138,25 @@ export function resolveAssistantTargetPresetId(
 export function resolveAssistantRuntimeTarget(
   input: AssistantRuntimeResolutionInput | null | undefined,
 ): AssistantResolvedRuntimeTarget {
-  const provider = input?.provider ?? 'codex-cli'
-  const webSearch = normalizeAssistantWebSearchMode(input?.webSearch)
+  const provider = resolveAssistantRuntimeResolutionProvider(input)
+  const webSearch = normalizeAssistantWebSearchMode(
+    input?.policy?.webSearch ?? input?.webSearch,
+  )
 
   if (provider === 'codex-cli') {
     const continuityFingerprint = buildAssistantContinuityFingerprint({
-      approvalPolicy: input?.approvalPolicy,
-      codexHome: input?.codexHome,
-      model: input?.model,
-      oss: input?.oss,
-      profile: input?.profile,
+      approvalPolicy: input?.policy?.approvalPolicy ?? input?.approvalPolicy,
+      codexHome:
+        input?.target?.kind === 'codex-cli'
+          ? input.target.codexHome
+          : input?.codexHome,
+      model: input?.target?.model ?? input?.model,
+      oss: input?.target?.kind === 'codex-cli' ? input.target.oss : input?.oss,
+      profile:
+        input?.target?.kind === 'codex-cli' ? input.target.profile : input?.profile,
       provider: 'codex-cli',
-      reasoningEffort: input?.reasoningEffort,
-      sandbox: input?.sandbox,
+      reasoningEffort: input?.policy?.reasoningEffort ?? input?.reasoningEffort,
+      sandbox: input?.policy?.sandbox ?? input?.sandbox,
       webSearch: null,
     })
 
@@ -124,29 +170,46 @@ export function resolveAssistantRuntimeTarget(
       supportsProviderWebSearch: false,
       supportsReasoningEffort: true,
       supportsZeroDataRetention: false,
+      target: { kind: 'codex-cli' },
       webSearch: null,
     }
   }
 
   const presetId = resolveAssistantTargetPresetId({
-    presetId: input?.presetId,
+    presetId:
+      input?.target && input.target.kind !== 'codex-cli'
+        ? input.target.presetId
+        : input?.presetId,
   })
   const runtimeBehavior = resolveAssistantOpenAICompatibleRuntimeBehavior({
-    model: input?.model,
+    model: input?.target?.model ?? input?.model,
     presetId,
   })
   const continuityFingerprint = buildAssistantContinuityFingerprint({
-    apiKeyEnv: input?.apiKeyEnv,
-    baseUrl: input?.baseUrl,
-    headers: input?.headers,
-    model: input?.model,
+    apiKeyEnv:
+      input?.target && input.target.kind !== 'codex-cli'
+        ? input.target.apiKeyEnv
+        : input?.apiKeyEnv,
+    baseUrl:
+      input?.target && input.target.kind !== 'codex-cli'
+        ? input.target.baseUrl
+        : input?.baseUrl,
+    headers:
+      input?.target && input.target.kind !== 'codex-cli'
+        ? input.target.headers
+        : input?.headers,
+    model: input?.target?.model ?? input?.model,
     presetId,
     provider: 'openai-compatible',
-    providerName: input?.providerName,
-    reasoningEffort: input?.reasoningEffort,
+    providerName:
+      input?.target && input.target.kind !== 'codex-cli'
+        ? input.target.providerName
+        : input?.providerName,
+    reasoningEffort: input?.policy?.reasoningEffort ?? input?.reasoningEffort,
     webSearch,
     zeroDataRetention:
-      runtimeBehavior.supportsZeroDataRetention && input?.zeroDataRetention === true,
+      runtimeBehavior.supportsZeroDataRetention &&
+      (input?.policy?.zeroDataRetention ?? input?.zeroDataRetention) === true,
   })
 
   return {
@@ -159,6 +222,13 @@ export function resolveAssistantRuntimeTarget(
     supportsProviderWebSearch: runtimeBehavior.supportsProviderWebSearch,
     supportsReasoningEffort: runtimeBehavior.supportsReasoningEffort,
     supportsZeroDataRetention: runtimeBehavior.supportsZeroDataRetention,
+    target:
+      runtimeBehavior.executionDriver === 'responses'
+        ? {
+            kind: 'responses',
+            via: presetId === 'vercel-ai-gateway' ? 'vercel-ai-gateway' : 'openai',
+          }
+        : { kind: 'openai-compatible' },
     webSearch,
   }
 }
@@ -313,4 +383,18 @@ function serializeHeaders(
   }
 
   return Object.entries(value).sort(([left], [right]) => left.localeCompare(right))
+}
+
+function resolveAssistantRuntimeResolutionProvider(
+  input: AssistantRuntimeResolutionInput | null | undefined,
+): 'codex-cli' | 'openai-compatible' {
+  if (input?.target?.kind === 'codex-cli') {
+    return 'codex-cli'
+  }
+
+  if (input?.target) {
+    return 'openai-compatible'
+  }
+
+  return input?.provider ?? 'codex-cli'
 }

@@ -41,6 +41,7 @@ import {
   normalizeAssistantHeaders,
   normalizeAssistantPersistedHeaders,
   normalizeAssistantProviderConfig,
+  resolveAssistantChatProviderFromConfig,
   resolveAssistantProviderRuntimeTarget,
   resolveAssistantProvider,
   serializeAssistantProviderOperatorDefaults,
@@ -274,7 +275,6 @@ test('assistant provider helpers cover null inference and empty header canonical
   assert.deepEqual(
     {
       policy: normalizedCompatible.policy,
-      provider: normalizedCompatible.provider,
       target: normalizedCompatible.target,
     },
     {
@@ -285,7 +285,6 @@ test('assistant provider helpers cover null inference and empty header canonical
         webSearch: null,
         zeroDataRetention: null,
       },
-      provider: 'openai-compatible',
       target: {
         kind: 'openai-compatible',
         apiKeyEnv: null,
@@ -299,6 +298,10 @@ test('assistant provider helpers cover null inference and empty header canonical
       },
     },
   )
+  assert.equal(
+    resolveAssistantChatProviderFromConfig(normalizedCompatible),
+    'openai-compatible',
+  )
   const mergedCodex = mergeAssistantProviderConfigs(null, {
     provider: 'codex-cli',
     model: ' gpt-5 ',
@@ -306,7 +309,6 @@ test('assistant provider helpers cover null inference and empty header canonical
   assert.deepEqual(
     {
       policy: mergedCodex.policy,
-      provider: mergedCodex.provider,
       target: mergedCodex.target,
     },
     {
@@ -317,7 +319,6 @@ test('assistant provider helpers cover null inference and empty header canonical
         webSearch: null,
         zeroDataRetention: null,
       },
-      provider: 'codex-cli',
       target: {
         kind: 'codex-cli',
         codexCommand: null,
@@ -328,6 +329,7 @@ test('assistant provider helpers cover null inference and empty header canonical
       },
     },
   )
+  assert.equal(resolveAssistantChatProviderFromConfig(mergedCodex), 'codex-cli')
   const mergedCompatible = mergeAssistantProviderConfigsForProvider(
     'openai-compatible',
     null,
@@ -338,7 +340,6 @@ test('assistant provider helpers cover null inference and empty header canonical
   assert.deepEqual(
     {
       policy: mergedCompatible.policy,
-      provider: mergedCompatible.provider,
       target: mergedCompatible.target,
     },
     {
@@ -349,7 +350,6 @@ test('assistant provider helpers cover null inference and empty header canonical
         webSearch: null,
         zeroDataRetention: null,
       },
-      provider: 'openai-compatible',
       target: {
         kind: 'openai-compatible',
         apiKeyEnv: null,
@@ -360,6 +360,10 @@ test('assistant provider helpers cover null inference and empty header canonical
         providerName: 'Example',
       },
     },
+  )
+  assert.equal(
+    resolveAssistantChatProviderFromConfig(mergedCompatible),
+    'openai-compatible',
   )
   assert.deepEqual(
     serializeAssistantProviderSessionOptions({ provider: 'codex-cli', model: 'gpt-5' }),
