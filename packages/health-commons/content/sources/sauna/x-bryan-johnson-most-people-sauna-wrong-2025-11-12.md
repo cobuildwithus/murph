@@ -16,7 +16,7 @@ categories:
   - x-post
 source:
   kind: web_page
-  title: Bryan Johnson X post 1988653016963219693
+  title: Most people are doing sauna wrong
   authors: Bryan Johnson
   year: 2025
   url: https://x.com/bryan_johnson/status/1988653016963219693

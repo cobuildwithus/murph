@@ -19,7 +19,7 @@ relations:
     target: source_artifact:linkedin-bryan-johnson-core-temp-2026-04-16
 source:
   kind: web_page
-  title: Bryan Johnson X post 2044876107263234186
+  title: Core-temperature sauna update
   authors: Bryan Johnson
   year: 2026
   url: https://x.com/bryan_johnson/status/2044876107263234186

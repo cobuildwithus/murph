@@ -20,7 +20,7 @@ relations:
     target: source_artifact:linkedin-bryan-johnson-core-temp-prototype-2026-04-03
 source:
   kind: web_page
-  title: Bryan Johnson X post 2040127999954313485
+  title: April 3 core-temperature sauna experiment
   authors: Bryan Johnson
   year: 2026
   url: https://x.com/bryan_johnson/status/2040127999954313485

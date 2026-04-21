@@ -16,7 +16,7 @@ categories:
   - x-post
 source:
   kind: web_page
-  title: Bryan Johnson X post 2042360189958107190
+  title: Groin icing fertility update
   authors: Bryan Johnson
   year: 2026
   url: https://x.com/bryan_johnson/status/2042360189958107190
