@@ -23,6 +23,7 @@ coverage/
 assistant-state/
 audit-packages/
 output-packages/
+review-stage/
 vault/
 .env
 .env.*
