@@ -4,7 +4,7 @@ entityType: source_artifact
 key: source_artifact:x-bryan-johnson-most-people-sauna-wrong-2025-11-12
 slug: sources/sauna/x-bryan-johnson-most-people-sauna-wrong-2025-11-12
 title: X post - Bryan Johnson most people sauna wrong
-summary: User-supplied X source for the November 12 2025 video thread describing the correct longevity sauna protocol and reported vascular, blood, fertility, toxin, and microplastic outcomes.
+summary: X source for the November 12, 2025 video thread describing Bryan Johnson’s sauna routine and reported vascular, blood, fertility, toxin, and microplastic outcomes.
 status: draft
 quality: usable
 aliases:
@@ -33,4 +33,4 @@ artifacts:
     accessNotes: X content may require special access and rights review before snapshotting; current corroboration depends on secondary snippets unless a readable mirror is captured.
 ---
 
-Source page retained for provenance and optional internal snapshotting after rights review.
+Source retained for provenance and future review.

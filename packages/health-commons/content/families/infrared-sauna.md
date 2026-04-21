@@ -26,6 +26,6 @@ relations:
     target: source_artifact:pmid-38577299
 ---
 
-Infrared sauna belongs in Health Commons as its own experiment family, not as a variant of the Finnish dry-sauna protocol.
+Infrared sauna belongs as its own experiment family, not as a variant of the Finnish dry-sauna protocol.
 
-Murph already has enough modality-comparison evidence to justify that split. Infrared pages can still inherit high-level passive-heat education from the parent sauna page, but they should not silently reuse the Finnish dry-sauna dose, safety, or efficacy language.
+The modality split matters because infrared heat exposure can differ in heat source, temperature, session length, safety framing, and evidence base. Infrared pages can share broad passive-heat context without reusing the Finnish dry-sauna dose or expected-result language.

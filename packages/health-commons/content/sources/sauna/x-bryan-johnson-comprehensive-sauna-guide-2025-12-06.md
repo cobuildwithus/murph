@@ -37,4 +37,4 @@ artifacts:
     accessNotes: X content may require special access and rights review before snapshotting; readable LinkedIn mirror is included separately.
 ---
 
-Source page retained for provenance and optional internal snapshotting after rights review.
+Source retained for provenance and future review.

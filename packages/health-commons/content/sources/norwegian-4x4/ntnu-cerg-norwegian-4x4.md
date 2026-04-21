@@ -44,7 +44,7 @@ aliases:
   - "ntnu-cerg-norwegian-4x4"
 ---
 
-This source sits in the Murph shortlist bucket **Protocol dose and design**.
+This source is included for **Protocol dose and design**.
 
 **Why it matters:** Public-facing source for the commonly cited Norwegian 4x4 session structure.
 

@@ -42,7 +42,7 @@ interpretationFrame:
   caveat: Single post-sauna readings are not the same as stable morning home blood-pressure trends.
 ---
 
-Morning blood pressure is optional for Murph's first dry-sauna experiment, but it is worth collecting if you already have a validated home cuff and can measure it the same way each time.
+Morning blood pressure is optional for this dry-sauna experiment, but it is worth collecting if you already have a validated home cuff and can measure it the same way each time.
 
 A good home protocol is simple:
 
@@ -52,4 +52,4 @@ A good home protocol is simple:
 - avoid comparing rushed readings against calm readings,
 - look at baseline-average versus intervention-average movement rather than one dramatic single day.
 
-Murph should treat morning blood pressure as a **valuable optional secondary endpoint**, not as a requirement for every user.
+Treat morning blood pressure as a **valuable optional secondary signal**, not as a requirement for every user.

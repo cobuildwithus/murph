@@ -38,6 +38,6 @@ researchCoverage:
   auditCutoff: 2026-04-20
 ---
 
-Evening light reduction is the broader family for Murph protocols that reduce melanopic or short-wavelength light exposure near bedtime.
+Evening light reduction is the broader family for experiments that reduce melanopic or short-wavelength light exposure near bedtime.
 
 This family should not teach “blue light is bad.” The intended pattern is brighter, well-timed daytime light and lower evening/night light. Strong daytime blue-blocking, screen software, room-light redesign, light therapy, shift-work protocols, and psychiatric virtual-darkness protocols should remain separate variants.

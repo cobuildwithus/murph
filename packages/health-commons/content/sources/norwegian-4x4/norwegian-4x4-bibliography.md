@@ -3,8 +3,8 @@ schemaVersion: murph.commons.page.v1
 entityType: source_artifact
 key: source_artifact:norwegian-4x4-bibliography
 slug: sources/norwegian-4x4/norwegian-4x4-bibliography
-title: Murph Norwegian 4x4 research bibliography
-summary: Structured Murph research corpus and evidence map for the canonical Norwegian 4x4 self-experiment, separating protocol support, mixed clinical evidence, safety guidance, wearable endpoints, and adjacent variants.
+title: Norwegian 4x4 research bibliography
+summary: Research map for the Norwegian 4x4 experiment, separating practical protocol support, mixed clinical evidence, safety guidance, wearable signals, and adjacent variants.
 status: field-testing
 quality: usable
 categories:
@@ -81,13 +81,13 @@ relations:
     target: source_artifact:pmid-37608507
 source:
   kind: other
-  title: Murph Norwegian 4x4 research bibliography
-  authors: Murph Research
+  title: Norwegian 4x4 research bibliography
+  authors: Health Commons Research
   year: 2026
-  journal: Murph internal research curation
-  citation: Murph Research. Murph Norwegian 4x4 research bibliography. Prepared 2026-04-20.
+  journal: Health Commons research curation
+  citation: Health Commons Research. Norwegian 4x4 research bibliography. Prepared 2026-04-20.
 evidenceBucket: Research curation
-whyItMatters: Structured curation artifact used to build the canonical Norwegian 4x4 protocol and avoid merging adjacent HIIT variants.
+whyItMatters: Structured curation artifact used to build the standard Norwegian 4x4 protocol and avoid merging adjacent HIIT variants.
 potentialMurphEndpoints:
   - estimated VO2max / cardio-fitness proxy
   - session HR target fidelity
@@ -115,7 +115,7 @@ corpusStats:
 
 ## What this is
 
-This page represents Murph's structured Norwegian 4x4 research corpus used to design the canonical protocol page. It is a curation artifact, not a primary study.
+This page represents the structured Norwegian 4x4 research corpus behind the bounded interval experiment. It is a curation artifact, not a primary study.
 
 ## Corpus at a glance
 
@@ -128,7 +128,7 @@ This page represents Murph's structured Norwegian 4x4 research corpus used to de
 
 ## Evidence backbone
 
-- `source_artifact:pmid-17414804` — direct canonical healthy-adult 4x4 RCT.
+- `source_artifact:pmid-17414804` — direct healthy-adult 4x4 RCT.
 - `source_artifact:pmid-30733142` — HIIT protocol/VO2max meta-analysis supporting long-interval programming.
 - `source_artifact:pmid-24066036` — VO2max trainability and response-variability context.
 - `source_artifact:ntnu-cerg-norwegian-4x4` — public protocol-dose description.
@@ -145,16 +145,16 @@ The protocol must visibly include `source_artifact:pmid-25464446`, `source_artif
 
 ## Adjacent variants to split
 
-Low-volume 1 x 4 HIIT, sprint-interval training, athlete-performance 4x4, disease-treatment cardiac rehabilitation, and metabolic-syndrome/diabetes HIIT should not be collapsed into the canonical page.
+Low-volume 1 x 4 HIIT, sprint-interval training, athlete-performance 4x4, disease-treatment cardiac rehabilitation, and metabolic-syndrome/diabetes HIIT should not be collapsed into this interval experiment.
 
-## Landing shortlist
+## Selected sources
 
 - `source_artifact:pmid-17414804` — Evidence backbone; claimUse `supports-protocol`; Canonical small RCT supporting the Norwegian 4x4 dose as a VO2max-oriented aerobic interval protocol.
 - `source_artifact:ntnu-cerg-norwegian-4x4` — Protocol dose and design; claimUse `supports-protocol`; Public-facing source for the commonly cited Norwegian 4x4 session structure.
 - `source_artifact:pmid-30733142` — Protocol dose and design; claimUse `supports-protocol`; Meta-analysis used to justify long-interval HIIT as a plausible VO2max-oriented design class.
 - `source_artifact:pmid-24066036` — Context-only rationale; claimUse `context-only`; Open-access meta-analysis supporting the general concept of VO2max trainability from HIIT while showing response variability.
-- `source_artifact:doi-10.3390-ijerph17145103` — Wearable or testable endpoints; claimUse `supports-protocol`; Acute implementation source showing how heart rate behaves during a 4x4 session and why target-zone fidelity needs to be logged.
-- `source_artifact:pmid-23988787` — Wearable or testable endpoints; claimUse `supports-protocol`; Implementation caution source: RPE-only guidance can miss the intended HR target during interval training.
+- `source_artifact:doi-10.3390-ijerph17145103` — Wearable or testable signals; claimUse `supports-protocol`; Acute implementation source showing how heart rate behaves during a 4x4 session and why target-zone fidelity needs to be logged.
+- `source_artifact:pmid-23988787` — Wearable or testable signals; claimUse `supports-protocol`; Implementation caution source: RPE-only guidance can miss the intended HR target during interval training.
 - `source_artifact:pmid-25464446` — Mixed and null clinical evidence; claimUse `context-only`; Larger CAD trial that prevents overclaiming HIIT superiority over moderate continuous training.
 - `source_artifact:pmid-28082387` — Mixed and null clinical evidence; claimUse `context-only`; Larger HFrEF trial that did not confirm clear HIIT superiority and highlighted intensity-fidelity issues.
 - `source_artifact:pmid-33560320` — Mixed and null clinical evidence; claimUse `context-only`; HFpEF clinical trial showing no significant primary peak-VO2 advantage for HIIT over comparators.
@@ -164,12 +164,12 @@ Low-volume 1 x 4 HIIT, sprint-interval training, athlete-performance 4x4, diseas
 - `source_artifact:pmid-32860412` — Safety and contraindications; claimUse `safety-only`; Backbone guideline for cardiovascular disease, exercise eligibility, and clinician-clearance boundaries.
 - `source_artifact:pmid-32100573` — Safety and contraindications; claimUse `safety-only`; AHA scientific statement for acute cardiovascular event risk and progression language.
 - `source_artifact:pmid-33239350` — Public health context; claimUse `context-only`; Public-health context showing vigorous aerobic exercise as one option within weekly activity guidance.
-- `source_artifact:pmid-30293954` — Wearable or testable endpoints; claimUse `context-only`; HRV/autonomic-control synthesis; useful for exploratory HRV endpoint framing.
-- `source_artifact:pmid-28846513` — Adjacent variants to split; claimUse `context-only`; Low-volume 1x4 HIIT evidence that should not be merged into canonical 4x4.
-- `source_artifact:pmid-39256000` — Adjacent variants to split; claimUse `context-only`; Recent metabolic-syndrome HIIT synthesis; useful to separate metabolic HIIT and low-volume variants from canonical 4x4.
+- `source_artifact:pmid-30293954` — Wearable or testable signals; claimUse `context-only`; HRV/autonomic-control synthesis; useful for setting cautious expectations around HRV.
+- `source_artifact:pmid-28846513` — Adjacent variants to split; claimUse `context-only`; Low-volume 1x4 HIIT evidence that should not be treated as the same as standard 4x4.
+- `source_artifact:pmid-39256000` — Adjacent variants to split; claimUse `context-only`; Recent metabolic-syndrome HIIT synthesis; useful to separate metabolic HIIT and low-volume variants from standard 4x4.
 - `source_artifact:pmid-36314990` — Adjacent variants to split; claimUse `context-only`; Athlete trial comparing 4x4-style intervals with sprint-interval training; supports not merging SIT with Norwegian 4x4.
 - `source_artifact:pmid-37608507` — Adjacent variants to split; claimUse `context-only`; Female athlete comparison source supporting separation of 4x4 from supramaximal sprint-interval training.
 
 ## Use rule
 
-Use this page to understand why the canonical Murph version is a **2x/week, 6-week, wearable-guided self-experiment** rather than a maximal training prescription. Do not cite this bibliography in place of primary intervention evidence, safety guidance, or variant-specific source pages.
+Use this page to understand why the practical version is a **2x/week, 6-week, wearable-guided experiment** rather than a maximal training prescription. Do not cite this bibliography in place of primary intervention evidence, safety guidance, or variant-specific source pages.

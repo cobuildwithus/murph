@@ -4,7 +4,7 @@ entityType: source_artifact
 key: source_artifact:doi-10.1152-ajpregu.00012.2025
 slug: sources/sauna/doi-10.1152-ajpregu.00012.2025
 title: Comparison of thermoregulatory, cardiovascular, and immune responses to different passive heat therapy modalities
-summary: Acute or mechanistic source used to guide measurable near-term endpoints and session-standardization choices.
+summary: Acute or mechanistic source used to guide measurable near-term signals and session-standardization choices.
 status: draft
 quality: usable
 categories:
@@ -34,17 +34,17 @@ potentialMurphEndpoints:
   - HR
   - perceived strain
   - recovery time
-protocolTakeaway: Keep Murph claims sauna-specific; do not automatically port hot-water immersion effects into Finnish dry-sauna recommendations.
+protocolTakeaway: Keep sauna claims sauna-specific; do not automatically port hot-water immersion effects into Finnish dry-sauna recommendations.
 studyDesign: Experimental physiology
 modality: Heat therapy adjacent
 finnishDrySaunaFocus: No
 murphV1Priority: Medium
 ---
 
-This source sits in the Murph shortlist bucket **Acute and mechanistic**.
+This source is included for **Acute and mechanistic**.
 
 **Why it matters:** Helps prevent bad inference from hot-water immersion papers to sauna protocols by showing modality-specific physiological differences.
 
-**Potential Murph endpoints:** Session temperature, minutes, HR, perceived strain, recovery time
+**Potential experiment signals:** Session temperature, minutes, HR, perceived strain, recovery time
 
-**Protocol takeaway:** Keep Murph claims sauna-specific; do not automatically port hot-water immersion effects into Finnish dry-sauna recommendations.
+**Protocol takeaway:** Keep sauna claims sauna-specific; do not automatically port hot-water immersion effects into Finnish dry-sauna recommendations.

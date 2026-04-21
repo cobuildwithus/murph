@@ -63,7 +63,7 @@ test("ExperimentsPage renders the public library with private browser-vault over
 
   assert.match(markup, /Library · 4 experiments/);
   assert.match(markup, /Browse public experiments, with your private run state layered in when Murph has browser-vault data\./);
-  assert.match(markup, /Murph Finnish Dry Sauna/);
+  assert.match(markup, /Finnish Dry Sauna/);
   assert.match(markup, /Morning walk/);
   assert.match(markup, /Private only run/);
   assert.match(markup, /2 with data/);
@@ -83,7 +83,7 @@ test("ExperimentsPage keeps the public library visible when browser-vault is una
   const markup = renderToStaticMarkup(createElement(ExperimentsPage));
 
   assert.match(markup, /Library · 4 experiments/);
-  assert.match(markup, /Murph Finnish Dry Sauna/);
+  assert.match(markup, /Finnish Dry Sauna/);
   assert.match(markup, /Red-Light Glasses Before Bed/);
   assert.doesNotMatch(markup, /Could not load your experiment data/);
 });
@@ -103,7 +103,7 @@ test("ExperimentsPage merges protocol-shaped private runs into the matching publ
 
   const markup = renderToStaticMarkup(createElement(ExperimentsPage));
 
-  assert.match(markup, /Murph Finnish Dry Sauna/);
+  assert.match(markup, /Finnish Dry Sauna/);
   assert.match(markup, /Started Apr 18, 2026 · 21 days · 7 studies/);
   assert.doesNotMatch(markup, /protocol_variant:dry-sauna\/murph-finnish-standard-3x-week/);
   assert.doesNotMatch(markup, /Morning walk/);
@@ -142,7 +142,7 @@ test("ExperimentsPage keeps the public library visible when browser-vault loadin
   assert.match(markup, /Private overlays could not be refreshed/);
   assert.match(markup, /The latest refresh failed\./);
   assert.match(markup, /The public experiment library is still available below\./);
-  assert.match(markup, /Murph Finnish Dry Sauna/);
+  assert.match(markup, /Finnish Dry Sauna/);
   assert.match(markup, /Red-Light Glasses Before Bed/);
 });
 

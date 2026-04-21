@@ -4,7 +4,7 @@ entityType: source_artifact
 key: source_artifact:x-bryan-johnson-fired-review-2026-04-06
 slug: sources/sauna/x-bryan-johnson-fired-review-2026-04-06
 title: X post - Bryan Johnson 232-session sauna review
-summary: User-supplied X source for the April 6 2026 review thread saying the older 20-minute 200 F protocol did not hit the core-temperature threshold.
+summary: X source for the April 6, 2026 review thread saying the older 20-minute 200 F routine did not hit the core-temperature threshold.
 status: draft
 quality: usable
 aliases:
@@ -33,4 +33,4 @@ artifacts:
     accessNotes: X content may require special access and rights review before snapshotting; corroboration is limited to secondary snippets unless a full readable mirror is captured.
 ---
 
-Source page retained for provenance and optional internal snapshotting after rights review.
+Source retained for provenance and future review.

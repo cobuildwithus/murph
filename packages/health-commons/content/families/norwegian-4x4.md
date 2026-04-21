@@ -55,6 +55,6 @@ researchCoverage:
     auditCutoff: 2026-04-20
 ---
 
-Norwegian 4x4 is the user-facing family for aerobic high-intensity interval sessions built around four 4-minute hard efforts.
+Norwegian 4x4 is the family for aerobic high-intensity interval sessions built around four 4-minute hard efforts.
 
-Murph keeps this family separate from sprint-interval training, low-volume 1 x 4 HIIT, athletic performance protocols, and cardiac-rehabilitation disease-treatment protocols because those variants differ in dose, risk, population, and interpretation.
+This stays separate from sprint-interval training, low-volume 1 x 4 HIIT, athletic performance protocols, and cardiac-rehabilitation disease-treatment protocols because those variants differ in dose, risk, population, and interpretation.

@@ -186,7 +186,7 @@ describe("experiment detail private-run composition", () => {
           status: "finished",
           summary: "Private run present; outcome export still pending.",
           tags: ["sauna"],
-          title: "Murph Finnish Dry Sauna",
+          title: "Finnish Dry Sauna",
         }],
       }),
       protocol: protocol!,

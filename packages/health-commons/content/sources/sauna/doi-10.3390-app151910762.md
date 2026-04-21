@@ -4,7 +4,7 @@ entityType: source_artifact
 key: source_artifact:doi-10.3390-app151910762
 slug: sources/sauna/doi-10.3390-app151910762
 title: "Effect of a Four-Week Extreme Heat (100 ± 2 °C) Sauna Baths Program in Combination with Resistance Training on Lower Limb Strength and Body Composition: A Blinded, Randomized Study"
-summary: Intervention-design source used to shape dose, context, hydration, ramping, and expectation-setting for Murph variants.
+summary: Intervention-design evidence that helps keep sauna dose, context, hydration, and expectations realistic.
 status: draft
 quality: usable
 categories:
@@ -34,17 +34,17 @@ potentialMurphEndpoints:
   - training logs
   - soreness
   - recovery ratings
-protocolTakeaway: Use it as a boundary case for heat dose, not as a default Murph recipe; consumer protocols should likely be milder and more adherable.
+protocolTakeaway: Use it as a boundary case for heat dose, not as a default consumer protocol; most first tests should be milder and more adherable.
 studyDesign: RCT
 modality: Sauna (likely dry)
 finnishDrySaunaFocus: Likely
 murphV1Priority: Medium
 ---
 
-This source sits in the Murph shortlist bucket **Intervention design / reality checks**.
+This source is included for **Intervention design / reality checks**.
 
 **Why it matters:** Adds a newer randomized dry-sauna training study and defines an upper-bound intensity that is far more aggressive than most consumer protocols.
 
-**Potential Murph endpoints:** Strength performance, body mass, training logs, soreness, recovery ratings
+**Potential experiment signals:** Strength performance, body mass, training logs, soreness, recovery ratings
 
-**Protocol takeaway:** Use it as a boundary case for heat dose, not as a default Murph recipe; consumer protocols should likely be milder and more adherable.
+**Protocol takeaway:** Use it as a boundary case for heat dose, not as a default consumer protocol; most first tests should be milder and more adherable.
