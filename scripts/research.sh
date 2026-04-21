@@ -291,9 +291,9 @@ write_smoke_prompt() {
   local artifact_body="smoke ${turn} ok"
 
   cat > "$prompt_path" <<EOF
-This is a workflow smoke test for a multi-turn ChatGPT thread controller.
+This is a workflow smoke test.
 
-Return as fast as possible.
+Return immediately.
 
 Required outputs:
 1. Attach exactly one small markdown file named ${artifact_name}
@@ -301,8 +301,10 @@ Required outputs:
 ${artifact_body}
 3. In the chat response, write exactly:
 attached ${artifact_name}
+4. The file must be a real downloadable assistant attachment or behavior-button artifact.
+5. A plain-text claim that a file is attached does not count.
 
-Do not do research. Do not add any extra explanation. Keep this turn minimal.
+Do not browse, search, think aloud, or add anything else.
 EOF
 }
 
@@ -614,6 +616,8 @@ download_turn_artifacts() {
   local turn_download_dir="$out_dir/downloads/${turn}"
   local download_target_count="0"
 
+  last_download_target_count="0"
+
   mkdir -p "$turn_download_dir"
 
   set +e
@@ -630,6 +634,7 @@ download_turn_artifacts() {
   fi
 
   download_target_count="$(export_download_target_count "$export_output" 2>/dev/null || printf '0')"
+  last_download_target_count="$download_target_count"
 
   if [[ "$download_target_count" == "0" ]]; then
     printf 'No latest-turn assistant download targets found in thread export for pass %s.\n' "$turn" \
@@ -720,6 +725,11 @@ run_turn() {
   fi
 
   download_turn_artifacts "$turn"
+
+  if [[ "$smoke_test" == "1" && "$last_download_target_count" == "0" ]]; then
+    echo "Smoke-test pass ${turn} did not produce a downloadable assistant artifact." >&2
+    exit 1
+  fi
 }
 
 if (( start_turn <= 1 )); then
