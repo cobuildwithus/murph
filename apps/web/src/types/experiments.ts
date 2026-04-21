@@ -4,6 +4,7 @@ export interface Expert {
   initials: string;
   name: string;
   field: string;
+  profileImageUrl?: string;
   quote: string;
 }
 
