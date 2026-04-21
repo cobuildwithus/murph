@@ -171,9 +171,10 @@ testPlans:
       - Treat HRV, resting heart rate, sleep stages, and total sleep time as exploratory unless the personal signal is repeated and not obviously confounded.
       - The primary practical question is whether evenings feel less wired and sleep onset appears earlier, not whether every sleep metric improves.
 whyItWorks:
-  - Evening melanopic and short-wavelength light can tell the circadian system that it is still daytime, increasing alerting and potentially delaying the body’s night signal. High-filtering glasses are one low-friction way to reduce that input during the pre-bed window.
-  - The intervention is useful as a self-test because it changes light exposure without requiring a full evening routine overhaul. If it helps, the earliest signal is likely less pre-bed wiredness or shorter perceived sleep onset.
-  - The research is mixed for objective sleep metrics, so wearable sleep stages, HRV, and resting heart rate should stay exploratory. A quiet subjective improvement can still be worth noticing, but this protocol should not claim eye protection, insomnia treatment, or guaranteed sleep-score gains.
+  - The mechanism starts in the retina. Short-wavelength, melanopic evening light activates melanopsin-containing retinal ganglion cells that signal the brain’s circadian clock, which can suppress or delay melatonin and keep the body in a more daytime-like alerting state.
+  - High-filtering amber, red, or brown glasses try to lower that melanopic signal during the last 90–120 minutes before bed. If the signal is reduced enough, the theory is that circadian night can unfold more normally: melatonin rises, alerting eases, core temperature trends downward, and sleep onset feels less effortful.
+  - The glasses only work mechanistically if they materially reduce light reaching the retina. Spectral filtering, lens darkness, wraparound fit, edge leakage, screen brightness, and room-light intensity all change the actual melanopic dose, which is why lens color by itself is not enough information.
+  - Any HRV, resting-heart-rate, deep-sleep, or sleep-efficiency change is downstream of that circadian and arousal shift. The cleanest first signal is usually less pre-bed wiredness or a shorter sleep-onset window; broader wearable changes would be a secondary ripple, not the primary mechanism.
 claims:
   -
     claimId: evening-melanopic-light-reduction-is-plausible

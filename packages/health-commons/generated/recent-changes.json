@@ -216,6 +216,25 @@
     },
     {
       "affectedFields": [
+        "whyItWorks"
+      ],
+      "changeId": "chg_2026_04_21_bryan_sauna_mechanism_copy",
+      "changeType": "copy_edit",
+      "editSummary": "Rewrote Bryan Johnson sauna why-it-works copy around high-dose dry heat, core-temperature targeting, heat-acclimation, workout stacking, and groin-cooling mechanics.",
+      "entityKey": "protocol_variant:dry-sauna/bryan-johnson-blueprint",
+      "minor": true,
+      "rationale": "The source-attributed routine needs a mechanism explanation for the exact high-burden thermal design instead of general evidence caveats.",
+      "reviewStatus": "accepted",
+      "schemaVersion": "murph.commons.change.v1",
+      "sourceKeys": [
+        "source_artifact:bryan-johnson-sauna-protocol-2026-01-28",
+        "source_artifact:bryan-johnson-saunamaxx-2026-04-14",
+        "source_artifact:linkedin-bryan-johnson-core-temp-2026-04-16",
+        "source_artifact:pmid-25432420"
+      ]
+    },
+    {
+      "affectedFields": [
         "protocol.target",
         "protocol.steps",
         "protocol.tips",
@@ -238,6 +257,26 @@
     },
     {
       "affectedFields": [
+        "whyItWorks"
+      ],
+      "changeId": "chg_2026_04_21_finnish_sauna_mechanism_copy",
+      "changeType": "copy_edit",
+      "editSummary": "Rewrote Finnish dry-sauna why-it-works copy around acute heat load, heat-acclimation, vascular, and autonomic rebound mechanisms.",
+      "entityKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+      "minor": true,
+      "rationale": "The section should answer why a short dry-sauna self-test might change near-term signals, not restate evidence posture or protocol caveats.",
+      "reviewStatus": "accepted",
+      "schemaVersion": "murph.commons.change.v1",
+      "sourceKeys": [
+        "source_artifact:pmid-29269746",
+        "source_artifact:pmid-31126559",
+        "source_artifact:pmid-36813265",
+        "source_artifact:pmid-25432420",
+        "source_artifact:pmid-31331560"
+      ]
+    },
+    {
+      "affectedFields": [
         "protocol.target",
         "protocol.steps",
         "protocol.tips",
@@ -256,6 +295,25 @@
       "schemaVersion": "murph.commons.change.v1",
       "sourceKeys": [
         "source_artifact:sauna-bibliography-2026-04-18"
+      ]
+    },
+    {
+      "affectedFields": [
+        "whyItWorks"
+      ],
+      "changeId": "chg_2026_04_21_norwegian_4x4_mechanism_copy",
+      "changeType": "copy_edit",
+      "editSummary": "Rewrote Norwegian 4x4 why-it-works copy around sustained high oxygen demand, active-recovery dose design, central and peripheral VO2max adaptations, and recovery-stress signals.",
+      "entityKey": "protocol_variant:norwegian-4x4/norwegian-4x4",
+      "minor": true,
+      "rationale": "The section should explain the training physiology behind four-minute aerobic intervals rather than mainly summarizing the evidence base.",
+      "reviewStatus": "accepted",
+      "schemaVersion": "murph.commons.change.v1",
+      "sourceKeys": [
+        "source_artifact:pmid-17414804",
+        "source_artifact:pmid-30733142",
+        "source_artifact:doi-10.3390-ijerph17145103",
+        "source_artifact:pmid-30293954"
       ]
     },
     {
@@ -306,6 +364,25 @@
       "schemaVersion": "murph.commons.change.v1",
       "sourceKeys": [
         "source_artifact:ntnu-cerg-norwegian-4x4"
+      ]
+    },
+    {
+      "affectedFields": [
+        "whyItWorks"
+      ],
+      "changeId": "chg_2026_04_21_red_light_glasses_mechanism_copy",
+      "changeType": "copy_edit",
+      "editSummary": "Rewrote red-light-glasses why-it-works copy around melanopsin retinal signaling, circadian-clock input, melatonin and alerting physiology, spectral filtering quality, and downstream wearable effects.",
+      "entityKey": "protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed",
+      "minor": true,
+      "rationale": "The section should explain the proposed light-to-circadian mechanism directly without foregrounding broad evidence caveats.",
+      "reviewStatus": "accepted",
+      "schemaVersion": "murph.commons.change.v1",
+      "sourceKeys": [
+        "source_artifact:pmid-35298459",
+        "source_artifact:doi-10.17617-1.4a6s-ec74",
+        "source_artifact:pmid-40728371",
+        "source_artifact:pmid-29101797"
       ]
     },
     {

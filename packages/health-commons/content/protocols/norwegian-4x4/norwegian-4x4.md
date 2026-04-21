@@ -160,9 +160,10 @@ testPlans:
       - Resting heart rate and heart-rate recovery may be useful secondary signals, but sleep, illness, stress, alcohol, heat, and training load can confound them.
       - HRV is exploratory. Sleep efficiency is recovery context and a confounder; neither is a promised outcome.
 whyItWorks:
-  - Norwegian 4x4 intervals repeatedly push the aerobic system near a high but repeatable intensity. Four-minute work blocks are long enough to stress oxygen delivery and use, while three-minute active recoveries let you repeat the stimulus without turning it into an all-out sprint session.
-  - The research base includes direct human intervention evidence for improving lab-measured VO2max in small healthy-adult trials, plus broader HIIT evidence. That supports a six-week fitness experiment, but it does not guarantee that a wearable cardio-fitness estimate will move for every person.
-  - Because high-intensity work can improve fitness while adding recovery stress, resting heart rate, HRV, sleep, symptoms, and next-day recovery are context signals rather than promised wins.
+  - Norwegian 4x4 works by spending repeated minutes near the top of your aerobic system. A four-minute interval is long enough for oxygen demand, heart rate, ventilation, stroke volume, and cardiac output to climb toward a high steady load rather than peaking for only a few sprint seconds.
+  - The three-minute active recoveries are part of the mechanism. They lower effort enough to repeat the next interval, but keep the aerobic system warm, so the session accumulates more total time near high oxygen uptake than one unsustainably hard continuous effort.
+  - Across weeks, the expected adaptation is both central and peripheral: the heart may pump more blood per beat, muscles may improve capillary delivery and mitochondrial oxygen use, and lactate handling may become less limiting. Those changes are the physiology behind lab-measured VO2max improvements in the 4x4 evidence base.
+  - Wearable cardio-fitness estimates, heart-rate recovery, and resting heart rate are only proxies for that physiology. HRV, sleep, and next-day recovery can move in either direction early because the same sympathetic and metabolic stress that drives adaptation can temporarily tax recovery.
 claims:
   -
     claimId: canonical-4x4-has-direct-human-intervention-support

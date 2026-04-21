@@ -72,7 +72,7 @@ describe("ExperimentDetailPage", () => {
         expect.stringContaining("similar time of day"),
       ]),
       title: "Finnish Dry Sauna",
-      whyItWorks: expect.stringContaining("heat stressor"),
+      whyItWorks: expect.stringContaining("controlled whole-body heat load"),
     }));
     expect(clientExperiment.researchStats).toEqual(expect.arrayContaining([
       expect.objectContaining({ label: "SOURCES CHECKED", value: 81 }),

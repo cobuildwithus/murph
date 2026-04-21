@@ -1225,7 +1225,7 @@
       "schemaVersion": "murph.commons.artifact-manifest.v1"
     }
   ],
-  "catalogHash": "sha256:af79f55d691db2a2530f47f2fa17ab319e294478052f4fa6d8f00a40afabb9c1",
+  "catalogHash": "sha256:e8f351b891a605f55630434db2041552ce24d8f2b2cd5cdf7f92c541842288ec",
   "changes": [
     {
       "affectedFields": [
@@ -1443,6 +1443,25 @@
     },
     {
       "affectedFields": [
+        "whyItWorks"
+      ],
+      "changeId": "chg_2026_04_21_bryan_sauna_mechanism_copy",
+      "changeType": "copy_edit",
+      "editSummary": "Rewrote Bryan Johnson sauna why-it-works copy around high-dose dry heat, core-temperature targeting, heat-acclimation, workout stacking, and groin-cooling mechanics.",
+      "entityKey": "protocol_variant:dry-sauna/bryan-johnson-blueprint",
+      "minor": true,
+      "rationale": "The source-attributed routine needs a mechanism explanation for the exact high-burden thermal design instead of general evidence caveats.",
+      "reviewStatus": "accepted",
+      "schemaVersion": "murph.commons.change.v1",
+      "sourceKeys": [
+        "source_artifact:bryan-johnson-sauna-protocol-2026-01-28",
+        "source_artifact:bryan-johnson-saunamaxx-2026-04-14",
+        "source_artifact:linkedin-bryan-johnson-core-temp-2026-04-16",
+        "source_artifact:pmid-25432420"
+      ]
+    },
+    {
+      "affectedFields": [
         "protocol.target",
         "protocol.steps",
         "protocol.tips",
@@ -1465,6 +1484,26 @@
     },
     {
       "affectedFields": [
+        "whyItWorks"
+      ],
+      "changeId": "chg_2026_04_21_finnish_sauna_mechanism_copy",
+      "changeType": "copy_edit",
+      "editSummary": "Rewrote Finnish dry-sauna why-it-works copy around acute heat load, heat-acclimation, vascular, and autonomic rebound mechanisms.",
+      "entityKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+      "minor": true,
+      "rationale": "The section should answer why a short dry-sauna self-test might change near-term signals, not restate evidence posture or protocol caveats.",
+      "reviewStatus": "accepted",
+      "schemaVersion": "murph.commons.change.v1",
+      "sourceKeys": [
+        "source_artifact:pmid-29269746",
+        "source_artifact:pmid-31126559",
+        "source_artifact:pmid-36813265",
+        "source_artifact:pmid-25432420",
+        "source_artifact:pmid-31331560"
+      ]
+    },
+    {
+      "affectedFields": [
         "protocol.target",
         "protocol.steps",
         "protocol.tips",
@@ -1483,6 +1522,25 @@
       "schemaVersion": "murph.commons.change.v1",
       "sourceKeys": [
         "source_artifact:sauna-bibliography-2026-04-18"
+      ]
+    },
+    {
+      "affectedFields": [
+        "whyItWorks"
+      ],
+      "changeId": "chg_2026_04_21_norwegian_4x4_mechanism_copy",
+      "changeType": "copy_edit",
+      "editSummary": "Rewrote Norwegian 4x4 why-it-works copy around sustained high oxygen demand, active-recovery dose design, central and peripheral VO2max adaptations, and recovery-stress signals.",
+      "entityKey": "protocol_variant:norwegian-4x4/norwegian-4x4",
+      "minor": true,
+      "rationale": "The section should explain the training physiology behind four-minute aerobic intervals rather than mainly summarizing the evidence base.",
+      "reviewStatus": "accepted",
+      "schemaVersion": "murph.commons.change.v1",
+      "sourceKeys": [
+        "source_artifact:pmid-17414804",
+        "source_artifact:pmid-30733142",
+        "source_artifact:doi-10.3390-ijerph17145103",
+        "source_artifact:pmid-30293954"
       ]
     },
     {
@@ -1533,6 +1591,25 @@
       "schemaVersion": "murph.commons.change.v1",
       "sourceKeys": [
         "source_artifact:ntnu-cerg-norwegian-4x4"
+      ]
+    },
+    {
+      "affectedFields": [
+        "whyItWorks"
+      ],
+      "changeId": "chg_2026_04_21_red_light_glasses_mechanism_copy",
+      "changeType": "copy_edit",
+      "editSummary": "Rewrote red-light-glasses why-it-works copy around melanopsin retinal signaling, circadian-clock input, melatonin and alerting physiology, spectral filtering quality, and downstream wearable effects.",
+      "entityKey": "protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed",
+      "minor": true,
+      "rationale": "The section should explain the proposed light-to-circadian mechanism directly without foregrounding broad evidence caveats.",
+      "reviewStatus": "accepted",
+      "schemaVersion": "murph.commons.change.v1",
+      "sourceKeys": [
+        "source_artifact:pmid-35298459",
+        "source_artifact:doi-10.17617-1.4a6s-ec74",
+        "source_artifact:pmid-40728371",
+        "source_artifact:pmid-29101797"
       ]
     },
     {
@@ -2569,7 +2646,7 @@
       ],
       "relativePath": "protocols/dry-sauna/bryan-johnson-blueprint.md",
       "revision": {
-        "pageRevisionId": "sha256:0507495920ec519a63853dd2363d3ff2f2ab789bebcd7f08884b434a6ef3842d",
+        "pageRevisionId": "sha256:89763e32dfe96576c552c91a0ce6b5a46b5c38c9385adf4a3ce3b38fd0e22040",
         "recipeHash": "sha256:bdfb7d37710373f065c1d512a50ae003e0a7e316d02fe250fb097b22939a02c9",
         "runSpecRevisionId": "sha256:553f2bbdcdce2305effa1996c61c7504bb938731be1c7f0f45b033cfce9e02ff"
       },
@@ -2627,9 +2704,10 @@
       ],
       "title": "Bryan Johnson Sauna",
       "whyItWorks": [
-        "This routine uses the same basic dry-sauna physiology as the simpler sauna experiment, but at a higher weekly dose and usually after training. Heat exposure raises cardiovascular and thermoregulatory load; post-workout timing can add recovery, hydration, and fatigue context.",
-        "The page is source-attributed because the detailed tactics come from Bryan Johnson’s public routine and self-experiments, not from a single validated clinical protocol. That makes it useful to try only if you want to test this exact routine and can handle the burden.",
-        "The honest readout is whether your resting heart rate, HRV, symptoms, and felt recovery tolerate this daily post-workout heat dose. It should not promise Bryan Johnson’s reported toxin, fertility, or vascular outcomes."
+        "This routine uses the same dry-sauna engine as Finnish sauna, but with a stronger dose: 93 °C / 200 °F, daily exposure, and usually post-workout timing. Skin blood vessels open, sweating accelerates, heart rate rises, and the cardiovascular system has to support cooling while exercise residue may already be raising heat, catecholamines, and fluid loss.",
+        "Johnson’s newer core-temperature framing treats air temperature and minutes as rough proxies; the proposed biological dose is how high core temperature rises and how long it stays elevated. Face or neck cooling can make the session more tolerable and change thermal feedback, but it also changes the core-temperature curve you are trying to interpret.",
+        "With daily repetition, the plausible adaptation target is heat acclimation: earlier sweating, larger plasma volume, better tolerance of skin blood-flow shifts, and less heart-rate strain at the same heat exposure. The same dose can also become too much if workout load, dehydration, or poor sleep keeps the recovery side from catching up.",
+        "The groin-cooling tactic is a separate local-temperature mechanism. Testicular heat can impair sperm-production physiology, so the source routine tries to protect that tissue while the rest of the body receives a high heat load; that is why this page reads the routine as a thermal-engineering experiment, not just a generic sauna habit."
       ]
     },
     {
@@ -3329,7 +3407,7 @@
         }
       },
       "revision": {
-        "pageRevisionId": "sha256:557f1e857aaf56f24224e56c9bbc5daefbedb69303830f7b8b5d20d50f67ad62",
+        "pageRevisionId": "sha256:694b2e18324af42518f43ec967ca0757f6e5098481c72686ef7ccde05bb47c4f",
         "recipeHash": "sha256:cfad1eb2de5ac764a416c35fda6ff951b32ed2c29551dca37ba81174830858ff",
         "runSpecRevisionId": "sha256:9936dc455885c9c481e01f5c2652813ee91af79914b91042b91259ef141382ab"
       },
@@ -3405,9 +3483,10 @@
       ],
       "title": "Finnish Dry Sauna",
       "whyItWorks": [
-        "Finnish dry sauna works as a short, repeatable heat stressor. Skin and core temperature rise, blood vessels widen, heart rate and cardiac output increase, and the body has to cool itself back down afterward.",
-        "Repeated exposures may train thermoregulation and vascular response over a few weeks, which is why resting heart rate, optional morning blood pressure, HRV, sleep efficiency, and deep sleep are practical signals to watch.",
-        "The research base includes acute physiology studies, repeated-exposure work, and long-term Finnish cohort findings. For this 21-day self-test, the cohort findings are background context only; the honest question is whether your near-term recovery and cardiovascular proxies move in a way that feels worth repeating."
+        "Finnish dry sauna is a controlled whole-body heat load. Hot, low-humidity air warms the skin and gradually raises core temperature, so the body opens skin blood vessels, sweats, and raises heart rate and cardiac output to keep blood pressure and cooling stable.",
+        "The main theory is hormesis: a short, tolerable heat stress followed by recovery can train the thermoregulatory system. Repeated exposures may make sweating start earlier, expand plasma volume, lower cardiovascular strain at the same heat dose, and activate cellular stress-response pathways such as HSP-70.",
+        "The vascular theory is that repeated heat-driven blood-flow shear helps endothelial function and arterial tone. That is why near-term resting heart rate and optional morning blood pressure are plausible signals, even though the long-term Finnish cohort outcomes are not something a 21-day test can directly prove.",
+        "The sleep-and-recovery theory is about the rebound after heat: as you cool down, sympathetic drive may ease and parasympathetic activity may rise. If sauna helps a person sleep or recover, the early pattern is likely a calmer post-sauna downshift, lower resting heart rate, or steadier overnight autonomic signal rather than a guaranteed sleep-stage change."
       ]
     },
     {
@@ -3788,7 +3867,7 @@
         }
       },
       "revision": {
-        "pageRevisionId": "sha256:77706faba6605b9b53ee23db044ac7a12fb149dd1eb8f0196b371955afcff390",
+        "pageRevisionId": "sha256:38df2d98174b3aa78965ebcb9491857575120a249e2c6c31ceb9a6315e505fc9",
         "recipeHash": "sha256:a36ee9d7c6cf5d9c816817cb9366d0a7d815922f2135ecd739884d1afd7a38d1",
         "runSpecRevisionId": "sha256:80e12ca616f3426cfe7a4f2c60696a066a55fdbf5a1fce79c95901d7ba3fff2b"
       },
@@ -3879,9 +3958,10 @@
       ],
       "title": "Norwegian 4x4 Intervals",
       "whyItWorks": [
-        "Norwegian 4x4 intervals repeatedly push the aerobic system near a high but repeatable intensity. Four-minute work blocks are long enough to stress oxygen delivery and use, while three-minute active recoveries let you repeat the stimulus without turning it into an all-out sprint session.",
-        "The research base includes direct human intervention evidence for improving lab-measured VO2max in small healthy-adult trials, plus broader HIIT evidence. That supports a six-week fitness experiment, but it does not guarantee that a wearable cardio-fitness estimate will move for every person.",
-        "Because high-intensity work can improve fitness while adding recovery stress, resting heart rate, HRV, sleep, symptoms, and next-day recovery are context signals rather than promised wins."
+        "Norwegian 4x4 works by spending repeated minutes near the top of your aerobic system. A four-minute interval is long enough for oxygen demand, heart rate, ventilation, stroke volume, and cardiac output to climb toward a high steady load rather than peaking for only a few sprint seconds.",
+        "The three-minute active recoveries are part of the mechanism. They lower effort enough to repeat the next interval, but keep the aerobic system warm, so the session accumulates more total time near high oxygen uptake than one unsustainably hard continuous effort.",
+        "Across weeks, the expected adaptation is both central and peripheral: the heart may pump more blood per beat, muscles may improve capillary delivery and mitochondrial oxygen use, and lactate handling may become less limiting. Those changes are the physiology behind lab-measured VO2max improvements in the 4x4 evidence base.",
+        "Wearable cardio-fitness estimates, heart-rate recovery, and resting heart rate are only proxies for that physiology. HRV, sleep, and next-day recovery can move in either direction early because the same sympathetic and metabolic stress that drives adaptation can temporarily tax recovery."
       ]
     },
     {
@@ -4277,7 +4357,7 @@
         }
       },
       "revision": {
-        "pageRevisionId": "sha256:83028bc953993bb1a148d521223f01246622ad6c214ccc9a1a88345b998c23bd",
+        "pageRevisionId": "sha256:9480ec4511b4f67abefb20aabdc10a66aad01a9ba15e04feff137c1968929382",
         "recipeHash": "sha256:d00da6997c366d5a8c8d9a2b46fc25395adb257a5ef0c60507873cc2ddb192e6",
         "runSpecRevisionId": "sha256:7ed5f1fb13d305ec23b75167515715f9616807f17700a75c3400215d8486e5b8"
       },
@@ -4343,9 +4423,10 @@
       ],
       "title": "Red-Light Glasses Before Bed",
       "whyItWorks": [
-        "Evening melanopic and short-wavelength light can tell the circadian system that it is still daytime, increasing alerting and potentially delaying the body’s night signal. High-filtering glasses are one low-friction way to reduce that input during the pre-bed window.",
-        "The intervention is useful as a self-test because it changes light exposure without requiring a full evening routine overhaul. If it helps, the earliest signal is likely less pre-bed wiredness or shorter perceived sleep onset.",
-        "The research is mixed for objective sleep metrics, so wearable sleep stages, HRV, and resting heart rate should stay exploratory. A quiet subjective improvement can still be worth noticing, but this protocol should not claim eye protection, insomnia treatment, or guaranteed sleep-score gains."
+        "The mechanism starts in the retina. Short-wavelength, melanopic evening light activates melanopsin-containing retinal ganglion cells that signal the brain’s circadian clock, which can suppress or delay melatonin and keep the body in a more daytime-like alerting state.",
+        "High-filtering amber, red, or brown glasses try to lower that melanopic signal during the last 90–120 minutes before bed. If the signal is reduced enough, the theory is that circadian night can unfold more normally: melatonin rises, alerting eases, core temperature trends downward, and sleep onset feels less effortful.",
+        "The glasses only work mechanistically if they materially reduce light reaching the retina. Spectral filtering, lens darkness, wraparound fit, edge leakage, screen brightness, and room-light intensity all change the actual melanopic dose, which is why lens color by itself is not enough information.",
+        "Any HRV, resting-heart-rate, deep-sleep, or sleep-efficiency change is downstream of that circadian and arousal shift. The cleanest first signal is usually less pre-bed wiredness or a shorter sleep-onset window; broader wearable changes would be a secondary ripple, not the primary mechanism."
       ]
     },
     {
@@ -4375,8 +4456,20 @@
       "key": "source_artifact:bryan-johnson-morning-routine-2026-04-08",
       "quality": "usable",
       "relativePath": "sources/sauna/bryan-johnson-morning-routine-2026-04-08.md",
+      "researchEvidence": {
+        "aggregateRole": "duplicate",
+        "cohortKey": "bryan-johnson-sauna-self-report",
+        "designKind": "single_person_report",
+        "designLabel": "Single-person report",
+        "notes": [
+          "Same single-person source family as the Bryan Johnson sauna protocol report."
+        ],
+        "participantCount": 1,
+        "participantCountKind": "reported",
+        "populationLabel": "Bryan Johnson"
+      },
       "revision": {
-        "pageRevisionId": "sha256:805530fedd51cea46337b0797215afab64a277e2fea272c71ac67ffb9ade375e",
+        "pageRevisionId": "sha256:01f5b341ffeec6e7083194ad0b719780907f02677ef1994747b81ef13983c65f",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -4421,8 +4514,20 @@
       "key": "source_artifact:bryan-johnson-sauna-protocol-2026-01-28",
       "quality": "usable",
       "relativePath": "sources/sauna/bryan-johnson-sauna-protocol-2026-01-28.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "bryan-johnson-sauna-self-report",
+        "designKind": "single_person_report",
+        "designLabel": "Single-person report",
+        "notes": [
+          "Source-attributed personal protocol and outcome report; do not treat as population-level evidence."
+        ],
+        "participantCount": 1,
+        "participantCountKind": "reported",
+        "populationLabel": "Bryan Johnson"
+      },
       "revision": {
-        "pageRevisionId": "sha256:e38e34620cd127855edddd1dfd888f359dfa3490266ddcf8dbf6e16225d43807",
+        "pageRevisionId": "sha256:e7f731fe309268b1c7cdffe747b695ed1868e71952cc87f62a7f371515285eeb",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -4467,8 +4572,20 @@
       "key": "source_artifact:bryan-johnson-saunamaxx-2026-04-14",
       "quality": "usable",
       "relativePath": "sources/sauna/bryan-johnson-saunamaxx-2026-04-14.md",
+      "researchEvidence": {
+        "aggregateRole": "duplicate",
+        "cohortKey": "bryan-johnson-sauna-self-report",
+        "designKind": "single_person_report",
+        "designLabel": "Single-person report",
+        "notes": [
+          "Same single-person source family as the Bryan Johnson sauna protocol report."
+        ],
+        "participantCount": 1,
+        "participantCountKind": "reported",
+        "populationLabel": "Bryan Johnson"
+      },
       "revision": {
-        "pageRevisionId": "sha256:62b62276c26a1ac619cb33210b8f7f8a9ddea5bb1b14d07ed1ecbe3ac99625c9",
+        "pageRevisionId": "sha256:97048ec4b1cd8ebad8f53b78293abcf412f593b907ba9ad662bc4a1271256069",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -4843,8 +4960,18 @@
         }
       ],
       "relativePath": "sources/norwegian-4x4/doi-10.3390-ijerph17145103.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "acala-2020-4x4-hr-response",
+        "designKind": "acute_mechanistic",
+        "designLabel": "Acute implementation physiology study",
+        "durationLabel": "Single 4x4 cycling session",
+        "participantCount": 39,
+        "participantCountKind": "reported",
+        "populationLabel": "Healthy active adults"
+      },
       "revision": {
-        "pageRevisionId": "sha256:4b64784efe06b4bc91100c360d222723cc8f45d530e881fd6b3cfd87ede7be38",
+        "pageRevisionId": "sha256:5e64a61ab45c8b99ac11d18fd1483340fd955eb7b779ccded94818ccfb190a8a",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -4899,8 +5026,20 @@
         }
       ],
       "relativePath": "sources/sauna/linkedin-bryan-johnson-core-temp-2026-04-16.md",
+      "researchEvidence": {
+        "aggregateRole": "duplicate",
+        "cohortKey": "bryan-johnson-sauna-self-report",
+        "designKind": "single_person_report",
+        "designLabel": "Single-person report",
+        "notes": [
+          "Same single-person source family as the Bryan Johnson sauna protocol report."
+        ],
+        "participantCount": 1,
+        "participantCountKind": "reported",
+        "populationLabel": "Bryan Johnson"
+      },
       "revision": {
-        "pageRevisionId": "sha256:2835326fafce9ae4fa88f7da31621cc9c91c20700c93f4f1c7d7bc012e7ec2dc",
+        "pageRevisionId": "sha256:e3c692432b27ef682c9b54018c91d1289a442488a01ce2423ec54c1efc6fe682",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -4950,8 +5089,20 @@
         }
       ],
       "relativePath": "sources/sauna/linkedin-bryan-johnson-core-temp-prototype-2026-04-03.md",
+      "researchEvidence": {
+        "aggregateRole": "duplicate",
+        "cohortKey": "bryan-johnson-sauna-self-report",
+        "designKind": "single_person_report",
+        "designLabel": "Single-person report",
+        "notes": [
+          "Same single-person source family as the Bryan Johnson sauna protocol report."
+        ],
+        "participantCount": 1,
+        "participantCountKind": "reported",
+        "populationLabel": "Bryan Johnson"
+      },
       "revision": {
-        "pageRevisionId": "sha256:9fe5621169bc29ec4e01ff6c180929c494ba812031a927fa6c44a093f143f12d",
+        "pageRevisionId": "sha256:68ac94286eea9b3b5ebdfd3884931b27c7d6d56c4facf61e4add38395c1b2f86",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -5001,8 +5152,20 @@
         }
       ],
       "relativePath": "sources/sauna/linkedin-bryan-johnson-sauna-guide-2025-12-06.md",
+      "researchEvidence": {
+        "aggregateRole": "duplicate",
+        "cohortKey": "bryan-johnson-sauna-self-report",
+        "designKind": "single_person_report",
+        "designLabel": "Single-person report",
+        "notes": [
+          "Same single-person source family as the Bryan Johnson sauna protocol report."
+        ],
+        "participantCount": 1,
+        "participantCountKind": "reported",
+        "populationLabel": "Bryan Johnson"
+      },
       "revision": {
-        "pageRevisionId": "sha256:6a60509c25f005a857bc7d929b493af82cca46d426c9011832c0cb2437211c69",
+        "pageRevisionId": "sha256:6c58f60747a9d759223dda48e7c5a4d4332725ece2b19d03b0e98fe7ff18e9c0",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -5262,8 +5425,14 @@
         }
       ],
       "relativePath": "sources/norwegian-4x4/ntnu-cerg-norwegian-4x4.md",
+      "researchEvidence": {
+        "aggregateRole": "context",
+        "designKind": "expert_protocol",
+        "designLabel": "Public protocol guidance",
+        "populationLabel": "Public-facing exercise guidance"
+      },
       "revision": {
-        "pageRevisionId": "sha256:b7ecedf39af93b47a17f2e513444265d28aa145e3593dbac0d9c91a7110d536d",
+        "pageRevisionId": "sha256:96e8cfa7868f9c8eab0dd560864a75be03301cf884b0a389e230aa6e6ec8884f",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -5487,8 +5656,18 @@
         }
       ],
       "relativePath": "sources/norwegian-4x4/pmid-17414804.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "helgerud-2007-4x4-healthy-men",
+        "designKind": "randomized_controlled_trial",
+        "designLabel": "Four-arm randomized training trial",
+        "durationLabel": "8-week training intervention",
+        "participantCount": 40,
+        "participantCountKind": "reported",
+        "populationLabel": "Moderately trained men"
+      },
       "revision": {
-        "pageRevisionId": "sha256:1c5c03b295cf090db3ad8c5faafb0adf89ad10acb8ff397aa56e9624d9724c7d",
+        "pageRevisionId": "sha256:14be224bd917d18ecb19a28008ab1318e73ba0420525da61eb45089276931a5a",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -5657,8 +5836,18 @@
         }
       ],
       "relativePath": "sources/norwegian-4x4/pmid-22879367.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "rognmo-2012-cardiac-rehab-safety",
+        "designKind": "retrospective_registry",
+        "designLabel": "Supervised cardiac-rehabilitation safety registry",
+        "durationLabel": "175,820 supervised exercise-training hours",
+        "participantCount": 4846,
+        "participantCountKind": "reported",
+        "populationLabel": "Coronary heart disease cardiac-rehabilitation patients"
+      },
       "revision": {
-        "pageRevisionId": "sha256:332430c314476b77c836f1327ebbe9acb0b4fe352dcebee9d3ca8646b8c5ce09",
+        "pageRevisionId": "sha256:eb3b944f4ee9ede8d25f2152f96a83b2c087ccdc4c53e810e06c70d0d25349b5",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -5718,8 +5907,18 @@
         }
       ],
       "relativePath": "sources/norwegian-4x4/pmid-23988787.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "aamot-2014-rpe-heart-rate-monitor",
+        "designKind": "crossover_trial",
+        "designLabel": "Single-group crossover implementation study",
+        "durationLabel": "8 supervised interval-training sessions",
+        "participantCount": 10,
+        "participantCountKind": "reported",
+        "populationLabel": "Cardiac-rehabilitation participants"
+      },
       "revision": {
-        "pageRevisionId": "sha256:21621857040c38f040b0687b0afcda614abfae3f6340d50148369791e61114a3",
+        "pageRevisionId": "sha256:29a0304922fef6dfbd3da41900d432eb2dac40b939c5c148c05adf166bc41d87",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -5779,8 +5978,18 @@
         }
       ],
       "relativePath": "sources/norwegian-4x4/pmid-24066036.md",
+      "researchEvidence": {
+        "aggregateRole": "synthesis",
+        "designKind": "meta_analysis",
+        "designLabel": "Meta-analysis of HIIT and VO2max trainability",
+        "durationLabel": "6–13 week interventions",
+        "includedStudyCount": 37,
+        "participantCount": 334,
+        "participantCountKind": "reported",
+        "populationLabel": "Healthy sedentary or recreationally active adults under 45"
+      },
       "revision": {
-        "pageRevisionId": "sha256:d7be038f5e726f029fbcc3bb2d436577e441df35573791b3bd07603c1f0db278",
+        "pageRevisionId": "sha256:923d1b43f80f2ade0731f53a67f693e71b9c1c63726c5ab8a52ecdf19b90955b",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -5893,8 +6102,18 @@
         }
       ],
       "relativePath": "sources/norwegian-4x4/pmid-25464446.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "saintex-cad",
+        "designKind": "randomized_controlled_trial",
+        "designLabel": "Multicenter randomized cardiac-rehabilitation trial",
+        "durationLabel": "12-week supervised training program",
+        "participantCount": 200,
+        "participantCountKind": "reported",
+        "populationLabel": "Stable coronary artery disease patients"
+      },
       "revision": {
-        "pageRevisionId": "sha256:70df2d50bc262bff89b5fbcdbcfa20b304918436ea70656122fe20acde6bc418",
+        "pageRevisionId": "sha256:97ecedefcf7ea963088ec6b606608e6aa4b8148246d09af1edab71d16670d37b",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -6285,8 +6504,18 @@
         }
       ],
       "relativePath": "sources/norwegian-4x4/pmid-28082387.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "smartex-hf",
+        "designKind": "randomized_controlled_trial",
+        "designLabel": "Multicenter randomized heart-failure trial",
+        "durationLabel": "12-week intervention with 52-week follow-up",
+        "participantCount": 261,
+        "participantCountKind": "reported",
+        "populationLabel": "Heart failure patients with reduced ejection fraction"
+      },
       "revision": {
-        "pageRevisionId": "sha256:82280bc7a1f4d789c53c65307bfccc74ee9e02d0f3582d67fe3d9b1ba11251af",
+        "pageRevisionId": "sha256:e57d76c46561faac07c103b872f8a3f20df824e5208d774c993d46bc8b11f0a6",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -6401,8 +6630,19 @@
         }
       ],
       "relativePath": "sources/norwegian-4x4/pmid-28846513.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "aggregationNote": "99 adults were randomized at the Brisbane EX-MET site; this is primary human data, but it is a low-volume HIIT variant rather than standard 4x4.",
+        "cohortKey": "ex-met-brisbane",
+        "designKind": "randomized_controlled_trial",
+        "designLabel": "Randomized metabolic-syndrome training-volume substudy",
+        "durationLabel": "16-week exercise intervention",
+        "participantCount": 99,
+        "participantCountKind": "reported",
+        "populationLabel": "Adults with metabolic syndrome"
+      },
       "revision": {
-        "pageRevisionId": "sha256:f1088c31e6e6935c408451449bf7bc3d095109be966b17d849eb7d36e5b7f9ec",
+        "pageRevisionId": "sha256:05b8f974d6b512e2fc3a2a0cc4e7541e07c54f77b33cb1bb762f92c11e67db3c",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -6775,8 +7015,17 @@
         }
       ],
       "relativePath": "sources/norwegian-4x4/pmid-29416382.md",
+      "researchEvidence": {
+        "aggregateRole": "synthesis",
+        "designKind": "meta_analysis",
+        "designLabel": "Cardiac-rehabilitation systematic review and meta-analysis",
+        "includedStudyCount": 17,
+        "participantCount": 953,
+        "participantCountKind": "reported",
+        "populationLabel": "Cardiac-rehabilitation participants"
+      },
       "revision": {
-        "pageRevisionId": "sha256:ca759309f8502d789bb5bee12a3e66764deeed0a78e4e979b4cad4be3a287094",
+        "pageRevisionId": "sha256:7ee159489b40ca7a3d2b045174c0a6351b34742d77d828966aba002cc313f128",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -7051,8 +7300,15 @@
         }
       ],
       "relativePath": "sources/norwegian-4x4/pmid-30293954.md",
+      "researchEvidence": {
+        "aggregateRole": "synthesis",
+        "designKind": "systematic_review",
+        "designLabel": "Systematic review of cardiac autonomic-control outcomes",
+        "includedStudyCount": 6,
+        "populationLabel": "Healthy adults and cardiometabolic-risk participants"
+      },
       "revision": {
-        "pageRevisionId": "sha256:7ff19795c86f9cadbd589b64d2178e5b40770c8385323e7837dd68bbdc43ca4c",
+        "pageRevisionId": "sha256:3933f563f2132ccb03a3949f18308cb3f929e87163bf31cd424b5b402e08c170",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -7112,8 +7368,18 @@
         }
       ],
       "relativePath": "sources/norwegian-4x4/pmid-30376749.md",
+      "researchEvidence": {
+        "aggregateRole": "synthesis",
+        "designKind": "systematic_review",
+        "designLabel": "Cardiovascular-disease HIIT safety systematic review",
+        "durationLabel": "17,083 HIIT sessions / 11,333 HIIT training hours",
+        "includedStudyCount": 23,
+        "participantCount": 1117,
+        "participantCountKind": "reported",
+        "populationLabel": "Cardiovascular-disease rehabilitation patients"
+      },
       "revision": {
-        "pageRevisionId": "sha256:6a084eb700948b88edfbc330e41da5a08a8cdf1d45c7d5b3fa73ae89f32e750c",
+        "pageRevisionId": "sha256:8481733efd8f0aa48dd61effae0b9c2580f958797cd26ef3c9bfb89d33799e94",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -7333,8 +7599,17 @@
         }
       ],
       "relativePath": "sources/norwegian-4x4/pmid-30733142.md",
+      "researchEvidence": {
+        "aggregateRole": "synthesis",
+        "designKind": "meta_analysis",
+        "designLabel": "Meta-analysis of randomized HIIT protocol trials",
+        "includedStudyCount": 53,
+        "participantCount": 1514,
+        "participantCountKind": "reported",
+        "populationLabel": "Healthy, overweight/obese, and athletic adults"
+      },
       "revision": {
-        "pageRevisionId": "sha256:3e0a330e87acb270d417599aa8a35f22abc516aa2df63eb75cba145eae4d7ea2",
+        "pageRevisionId": "sha256:8f1373a6ea7e706228fe0713106873f2872322c0214b5382a34a720e9d31e73f",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -7823,8 +8098,14 @@
         }
       ],
       "relativePath": "sources/norwegian-4x4/pmid-32100573.md",
+      "researchEvidence": {
+        "aggregateRole": "context",
+        "designKind": "guideline",
+        "designLabel": "American Heart Association scientific statement",
+        "populationLabel": "Adults considering moderate-to-vigorous or high-volume exercise"
+      },
       "revision": {
-        "pageRevisionId": "sha256:8987fd4ae02ff6d4947ba6bda51fdc1ec8da0d36a407340684b63c715ec3a1d3",
+        "pageRevisionId": "sha256:80ca3343f8ba02d9c67df988b5264acb686bdb5c515484af6460f6282438b993",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -7941,8 +8222,14 @@
         }
       ],
       "relativePath": "sources/norwegian-4x4/pmid-32860412.md",
+      "researchEvidence": {
+        "aggregateRole": "context",
+        "designKind": "guideline",
+        "designLabel": "European Society of Cardiology guideline",
+        "populationLabel": "People with cardiovascular disease considering exercise or sport"
+      },
       "revision": {
-        "pageRevisionId": "sha256:2954b390785ee0c025971c27d52b2cde32b51b1a66fa0bc7936b7dd08b6faace",
+        "pageRevisionId": "sha256:0b1db9a304d0b4e40a49376f2051bb03ff77128beb751d76ade50e4c66e55bd0",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -8106,8 +8393,14 @@
         }
       ],
       "relativePath": "sources/norwegian-4x4/pmid-33239350.md",
+      "researchEvidence": {
+        "aggregateRole": "context",
+        "designKind": "guideline",
+        "designLabel": "World Health Organization physical-activity guideline",
+        "populationLabel": "Children, adolescents, adults, older adults, pregnant/postpartum people, and people living with chronic conditions or disability"
+      },
       "revision": {
-        "pageRevisionId": "sha256:ca0c5d299062cc532fef4cdcb0bd17ce865efb52f2a36c7b3b6d52f075b5a468",
+        "pageRevisionId": "sha256:3b809ea337ed1ad11b89f7b98d2c674231b3251d8112bf9a34397ca123720cf7",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -8221,8 +8514,18 @@
         }
       ],
       "relativePath": "sources/norwegian-4x4/pmid-33560320.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "optimex-hfpef",
+        "designKind": "randomized_controlled_trial",
+        "designLabel": "Randomized HFpEF exercise-mode trial",
+        "durationLabel": "3-month intervention with 12-month follow-up",
+        "participantCount": 180,
+        "participantCountKind": "reported",
+        "populationLabel": "Heart failure patients with preserved ejection fraction"
+      },
       "revision": {
-        "pageRevisionId": "sha256:e75f6f061fde15ee4f140f26fcdfa3be649435d01601f2b788f6913fff0abd52",
+        "pageRevisionId": "sha256:f9954a0ff435b332ed54cca5efab41f035fb0b4fdfd714c9eb2c1e68d166282b",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -9159,8 +9462,19 @@
         }
       ],
       "relativePath": "sources/norwegian-4x4/pmid-36314990.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "aggregationNote": "Primary human data, but this compares interval formats in well-trained men.",
+        "cohortKey": "hov-2023-male-athlete-hiit-sit",
+        "designKind": "randomized_controlled_trial",
+        "designLabel": "Three-arm randomized athlete interval-protocol trial",
+        "durationLabel": "8-week training intervention",
+        "participantCount": 48,
+        "participantCountKind": "reported",
+        "populationLabel": "Aerobically well-trained men"
+      },
       "revision": {
-        "pageRevisionId": "sha256:98709f524bcf1a60d5bf07dac638fc08639d55df1da492d37646ac300c92074f",
+        "pageRevisionId": "sha256:6527e01c1427d1e9bb64f265214201d1b365d033d675015a53cd964c0229a2b2",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -9484,8 +9798,19 @@
         }
       ],
       "relativePath": "sources/norwegian-4x4/pmid-37608507.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "aggregationNote": "Primary human data, but this compares interval formats in well-trained females.",
+        "cohortKey": "helgerud-2023-female-athlete-hiit-sit",
+        "designKind": "randomized_controlled_trial",
+        "designLabel": "Three-arm randomized female athlete interval-protocol trial",
+        "durationLabel": "8-week training intervention",
+        "participantCount": 81,
+        "participantCountKind": "reported",
+        "populationLabel": "Aerobically well-trained females"
+      },
       "revision": {
-        "pageRevisionId": "sha256:190578c6d212c14ad0451646ee707d3036259bffbbc7b2537bf64cf7f5f331f9",
+        "pageRevisionId": "sha256:364f3490a2521358d892e31e861b765f74f4700f4fe0e5d0efc6bd655eaeb958",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -9874,8 +10199,17 @@
         }
       ],
       "relativePath": "sources/norwegian-4x4/pmid-39256000.md",
+      "researchEvidence": {
+        "aggregateRole": "synthesis",
+        "designKind": "meta_analysis",
+        "designLabel": "Metabolic-syndrome RCT systematic review and meta-analysis",
+        "includedStudyCount": 23,
+        "participantCount": 1374,
+        "participantCountKind": "reported",
+        "populationLabel": "Adults with metabolic syndrome"
+      },
       "revision": {
-        "pageRevisionId": "sha256:a28f1ef98c0dfb2f078141f74689a4a99c80634b5e4a9325f7a5e60a9be31fb8",
+        "pageRevisionId": "sha256:5098c874b0b1fe88d0c7d7ebdda07832a90345a48251ab11c03b8c0c95ab36c5",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -12267,8 +12601,20 @@
         }
       ],
       "relativePath": "sources/sauna/x-bryan-johnson-comprehensive-sauna-guide-2025-12-06.md",
+      "researchEvidence": {
+        "aggregateRole": "duplicate",
+        "cohortKey": "bryan-johnson-sauna-self-report",
+        "designKind": "single_person_report",
+        "designLabel": "Single-person report",
+        "notes": [
+          "Same single-person source family as the Bryan Johnson sauna protocol report."
+        ],
+        "participantCount": 1,
+        "participantCountKind": "reported",
+        "populationLabel": "Bryan Johnson"
+      },
       "revision": {
-        "pageRevisionId": "sha256:3cbc46bebf2a07f2cd20298cbac3df8a8b6a6b386fed347d663a68ae6a9921df",
+        "pageRevisionId": "sha256:1ebfa1330146ea8d1bdf21327dc558735ba942860f672156f151f0bb0c625213",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -12318,8 +12664,20 @@
         }
       ],
       "relativePath": "sources/sauna/x-bryan-johnson-core-temp-2026-04-16.md",
+      "researchEvidence": {
+        "aggregateRole": "duplicate",
+        "cohortKey": "bryan-johnson-sauna-self-report",
+        "designKind": "single_person_report",
+        "designLabel": "Single-person report",
+        "notes": [
+          "Same single-person source family as the Bryan Johnson sauna protocol report."
+        ],
+        "participantCount": 1,
+        "participantCountKind": "reported",
+        "populationLabel": "Bryan Johnson"
+      },
       "revision": {
-        "pageRevisionId": "sha256:21e3ca936ce662abc79ce85687a8e2bc54b487e2173ad6b5acd46d4d45373fd4",
+        "pageRevisionId": "sha256:0ac202253a0f154063b5a782542f4aae39fa31baed5eb8633382014f92c274e4",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -12370,8 +12728,20 @@
         }
       ],
       "relativePath": "sources/sauna/x-bryan-johnson-core-temp-update-2026-04-03.md",
+      "researchEvidence": {
+        "aggregateRole": "duplicate",
+        "cohortKey": "bryan-johnson-sauna-self-report",
+        "designKind": "single_person_report",
+        "designLabel": "Single-person report",
+        "notes": [
+          "Same single-person source family as the Bryan Johnson sauna protocol report."
+        ],
+        "participantCount": 1,
+        "participantCountKind": "reported",
+        "populationLabel": "Bryan Johnson"
+      },
       "revision": {
-        "pageRevisionId": "sha256:76bad6034b554219f47b0538e8fd52ff45453ae8ae584d963379defd1aa991a7",
+        "pageRevisionId": "sha256:f1799fa6be4342121abf2313e9af5827d5f1562159dd6d2029f053934cb1d913",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -12416,8 +12786,20 @@
       "key": "source_artifact:x-bryan-johnson-fired-review-2026-04-06",
       "quality": "usable",
       "relativePath": "sources/sauna/x-bryan-johnson-fired-review-2026-04-06.md",
+      "researchEvidence": {
+        "aggregateRole": "duplicate",
+        "cohortKey": "bryan-johnson-sauna-self-report",
+        "designKind": "single_person_report",
+        "designLabel": "Single-person report",
+        "notes": [
+          "Same single-person source family as the Bryan Johnson sauna protocol report."
+        ],
+        "participantCount": 1,
+        "participantCountKind": "reported",
+        "populationLabel": "Bryan Johnson"
+      },
       "revision": {
-        "pageRevisionId": "sha256:d81421014fcc49edd221208f25d868e25b2b6004ec0b6980c89936da16deb5e3",
+        "pageRevisionId": "sha256:01514cff5e0f2c409125d339c2d573ca3e6fe353415e797bb0ae2e134e79d1ac",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -12462,8 +12844,20 @@
       "key": "source_artifact:x-bryan-johnson-ice-balls-2026-04-09",
       "quality": "usable",
       "relativePath": "sources/sauna/x-bryan-johnson-ice-balls-2026-04-09.md",
+      "researchEvidence": {
+        "aggregateRole": "duplicate",
+        "cohortKey": "bryan-johnson-sauna-self-report",
+        "designKind": "single_person_report",
+        "designLabel": "Single-person report",
+        "notes": [
+          "Same single-person source family as the Bryan Johnson sauna protocol report."
+        ],
+        "participantCount": 1,
+        "participantCountKind": "reported",
+        "populationLabel": "Bryan Johnson"
+      },
       "revision": {
-        "pageRevisionId": "sha256:6e21b6ec4f0b896a63cec17b96ff30aac9109f8f05189f6c24e2280ee1cd46c8",
+        "pageRevisionId": "sha256:72276f147618cf958c234c41aaeb3eeea829244acaf2abbb3629587a5459628d",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -12508,8 +12902,20 @@
       "key": "source_artifact:x-bryan-johnson-most-people-sauna-wrong-2025-11-12",
       "quality": "usable",
       "relativePath": "sources/sauna/x-bryan-johnson-most-people-sauna-wrong-2025-11-12.md",
+      "researchEvidence": {
+        "aggregateRole": "duplicate",
+        "cohortKey": "bryan-johnson-sauna-self-report",
+        "designKind": "single_person_report",
+        "designLabel": "Single-person report",
+        "notes": [
+          "Same single-person source family as the Bryan Johnson sauna protocol report."
+        ],
+        "participantCount": 1,
+        "participantCountKind": "reported",
+        "populationLabel": "Bryan Johnson"
+      },
       "revision": {
-        "pageRevisionId": "sha256:3d32f58f2375c46b26c9c6a3b611407f992ba3e469ba1bee469c1d22ba82968d",
+        "pageRevisionId": "sha256:72983fc1b99f353639a2661ebe2952e7bdf015908c44042235b563765df9d851",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
