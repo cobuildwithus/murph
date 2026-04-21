@@ -124,7 +124,9 @@ readonly package_coverage_concurrency_default="$([[ -n "${CI:-}" ]] && echo 1 ||
 readonly package_coverage_concurrency_limit="$(normalize_positive_integer "${MURPH_PACKAGE_COVERAGE_CONCURRENCY:-$package_coverage_concurrency_default}" "$package_coverage_concurrency_default")"
 readonly package_coverage_vitest_max_workers_default="$([[ -n "${CI:-}" ]] && echo 50% || echo 100%)"
 readonly package_coverage_vitest_max_workers="${MURPH_PACKAGE_COVERAGE_VITEST_MAX_WORKERS:-$package_coverage_vitest_max_workers_default}"
-readonly typecheck_workspace_concurrency_default="2"
+readonly typecheck_workspace_concurrency_default="$([[ -n "${CI:-}" ]] && echo 2 || echo 4)"
+readonly typecheck_preflight_parallel_default="1"
+readonly typecheck_preflight_parallel="${MURPH_TYPECHECK_PREFLIGHT_PARALLEL:-$typecheck_preflight_parallel_default}"
 readonly typecheck_workspace_concurrency="$(normalize_positive_integer "${MURPH_TYPECHECK_WORKSPACE_CONCURRENCY:-$typecheck_workspace_concurrency_default}" "$typecheck_workspace_concurrency_default")"
 readonly verify_retry_count="$(normalize_non_negative_integer "${MURPH_VERIFY_RETRY_COUNT:-0}" "0")"
 readonly sqlite_warning_filter_option="--require=$repo_root/config/sqlite-warning-filter.cjs"
@@ -644,14 +646,60 @@ run_all_package_coverage() {
   return 0
 }
 
+run_typecheck_preflight() {
+  if [[ "$typecheck_preflight_parallel" != "1" ]]; then
+    run_timed_step "Shell syntax" check_shell_syntax
+    run_timed_step "Node syntax" check_node_syntax
+    run_timed_step "Dependency policy" run_dependency_policy_check
+    run_timed_step "Workspace boundary checks" run_workspace_boundary_check
+    run_timed_step "Hosted run stale-name guard" pnpm exec tsx "scripts/check-hosted-run-stale-residue.ts"
+    run_timed_step "Repo TS tools typecheck" pnpm exec tsc -p "tsconfig.tools.json" --pretty false
+    run_timed_step "Contracts build" pnpm --dir "packages/contracts" build
+    return 0
+  fi
+
+  local pids=()
+
+  run_timed_step "Shell syntax" check_shell_syntax &
+  local shell_syntax_pid="$!"
+  pids+=("$shell_syntax_pid")
+  register_background_pid "$shell_syntax_pid"
+
+  run_timed_step "Node syntax" check_node_syntax &
+  local node_syntax_pid="$!"
+  pids+=("$node_syntax_pid")
+  register_background_pid "$node_syntax_pid"
+
+  run_timed_step "Dependency policy" run_dependency_policy_check &
+  local dependency_policy_pid="$!"
+  pids+=("$dependency_policy_pid")
+  register_background_pid "$dependency_policy_pid"
+
+  run_timed_step "Workspace boundary checks" run_workspace_boundary_check &
+  local workspace_boundary_pid="$!"
+  pids+=("$workspace_boundary_pid")
+  register_background_pid "$workspace_boundary_pid"
+
+  run_timed_step "Hosted run stale-name guard" pnpm exec tsx "scripts/check-hosted-run-stale-residue.ts" &
+  local hosted_run_guard_pid="$!"
+  pids+=("$hosted_run_guard_pid")
+  register_background_pid "$hosted_run_guard_pid"
+
+  run_timed_step "Repo TS tools typecheck" pnpm exec tsc -p "tsconfig.tools.json" --pretty false &
+  local repo_tools_typecheck_pid="$!"
+  pids+=("$repo_tools_typecheck_pid")
+  register_background_pid "$repo_tools_typecheck_pid"
+
+  run_timed_step "Contracts build" pnpm --dir "packages/contracts" build &
+  local contracts_build_pid="$!"
+  pids+=("$contracts_build_pid")
+  register_background_pid "$contracts_build_pid"
+
+  wait_for_background_jobs "${pids[@]}"
+}
+
 run_typecheck() {
-  run_timed_step "Shell syntax" check_shell_syntax
-  run_timed_step "Node syntax" check_node_syntax
-  run_timed_step "Dependency policy" run_dependency_policy_check
-  run_timed_step "Workspace boundary checks" run_workspace_boundary_check
-  run_timed_step "Hosted run stale-name guard" pnpm exec tsx "scripts/check-hosted-run-stale-residue.ts"
-  run_timed_step "Repo TS tools typecheck" pnpm exec tsc -p "tsconfig.tools.json" --pretty false
-  run_timed_step "Contracts build" pnpm --dir "packages/contracts" build
+  run_typecheck_preflight
   run_timed_step "Workspace package/app typecheck" run_typecheck_packages
 }
 
