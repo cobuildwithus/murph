@@ -34,6 +34,33 @@ relations:
     target: source_artifact:ntnu-cerg-norwegian-4x4
   -
     type: cites
+    target: source_artifact:pmid-15179103
+  -
+    type: cites
+    target: source_artifact:pmid-17548726
+  -
+    type: cites
+    target: source_artifact:pmid-18606913
+  -
+    type: cites
+    target: source_artifact:pmid-18673303
+  -
+    type: cites
+    target: source_artifact:pmid-19958872
+  -
+    type: cites
+    target: source_artifact:pmid-21450580
+  -
+    type: cites
+    target: source_artifact:pmid-26440134
+  -
+    type: cites
+    target: source_artifact:pmid-28385556
+  -
+    type: cites
+    target: source_artifact:pmid-29502328
+  -
+    type: cites
     target: source_artifact:pmid-30733142
   -
     type: cites
@@ -44,17 +71,19 @@ relations:
 researchCoverage:
   bibliographyKey: source_artifact:norwegian-4x4-bibliography
   corpusStats:
-    refinedPass2Records: 42
-    landingCorpusRecords: 20
-    canonicalProtocolSupportRecords: 5
+    refinedPass2Records: 51
+    landingCorpusRecords: 29
+    canonicalProtocolSupportRecords: 6
+    clinicalLineageRecords: 6
+    clinicalSynthesisRecords: 2
     safetyAndContraindicationRecords: 9
     mixedOrNullClinicalRecords: 3
     adjacentVariantRecords: 4
-    earliestYear: 2007
+    earliestYear: 2004
     latestYear: 2024
-    auditCutoff: 2026-04-20
+    auditCutoff: 2026-04-21
 ---
 
 Norwegian 4x4 is the family for aerobic high-intensity interval sessions built around four 4-minute hard efforts.
 
-This stays separate from sprint-interval training, low-volume 1 x 4 HIIT, athletic performance protocols, and cardiac-rehabilitation disease-treatment protocols because those variants differ in dose, risk, population, and interpretation.
+The source graph now includes the healthy-adult protocol backbone, direct 4HIIT-vs-1HIIT variant evidence, early supervised cardiometabolic and cardiac-rehabilitation lineage trials, later mixed/null clinical trials, and safety guidance. This family stays separate from sprint-interval training, low-volume 1 x 4 HIIT, adolescent or disease-treatment protocols, athletic performance protocols, hypertension treatment, and cardiac-rehabilitation protocols because those variants differ in dose, risk, population, supervision, and interpretation.

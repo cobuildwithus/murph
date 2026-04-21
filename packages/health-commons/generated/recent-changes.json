@@ -368,6 +368,36 @@
     },
     {
       "affectedFields": [
+        "relations",
+        "claims",
+        "expectedSignal.primary.sourceKeys",
+        "researchCoverage",
+        "sources/norwegian-4x4",
+        "artifacts/norwegian-4x4/research-artifacts.json",
+        "generated.catalog"
+      ],
+      "changeId": "chg_2026_04_21_norwegian_4x4_research_source_gap_fill",
+      "changeType": "evidence_change",
+      "editSummary": "Expanded the Norwegian 4x4 research section with missing 4x4-lineage clinical trials, direct 4HIIT-vs-1HIIT evidence, and clinical synthesis sources.",
+      "entityKey": "protocol_variant:norwegian-4x4/norwegian-4x4",
+      "minor": false,
+      "rationale": "The prior corpus had the canonical healthy-adult trial, public protocol page, safety context, and later mixed clinical trials, but underrepresented the early CAD, HFrEF, metabolic-syndrome, adolescent, CABG, hypertension, and 4HIIT-vs-1HIIT papers that explain why Norwegian 4x4 needs explicit population-mismatch and variant-separation guardrails.",
+      "reviewStatus": "proposed",
+      "schemaVersion": "murph.commons.change.v1",
+      "sourceKeys": [
+        "source_artifact:pmid-15179103",
+        "source_artifact:pmid-17548726",
+        "source_artifact:pmid-18606913",
+        "source_artifact:pmid-18673303",
+        "source_artifact:pmid-19958872",
+        "source_artifact:pmid-21450580",
+        "source_artifact:pmid-26440134",
+        "source_artifact:pmid-28385556",
+        "source_artifact:pmid-29502328"
+      ]
+    },
+    {
+      "affectedFields": [
         "whyItWorks"
       ],
       "changeId": "chg_2026_04_21_red_light_glasses_mechanism_copy",
