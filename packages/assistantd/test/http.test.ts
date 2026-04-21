@@ -2,6 +2,26 @@ import assert from 'node:assert/strict'
 import type { IncomingHttpHeaders, IncomingMessage, ServerResponse } from 'node:http'
 import { Readable } from 'node:stream'
 import { afterEach, test, vi } from 'vitest'
+import type {
+  GatewayAttachment,
+  GatewayConversation,
+  GatewayFetchAttachmentsInput,
+  GatewayGetConversationInput,
+  GatewayListConversationsInput,
+  GatewayListConversationsResult,
+  GatewayListOpenPermissionsInput,
+  GatewayMessage,
+  GatewayPermissionRequest,
+  GatewayPollEventsInput,
+  GatewayPollEventsResult,
+  GatewayReadMessagesInput,
+  GatewayReadMessagesResult,
+  GatewayRespondToPermissionInput,
+  GatewaySendMessageInput,
+  GatewaySendMessageResult,
+  GatewayService,
+  GatewayWaitForEventsInput,
+} from '@murphai/gateway-core'
 import { AssistantHttpRequestError } from '../src/http-protocol.js'
 import {
   assertAssistantControlRequest,
@@ -11,6 +31,32 @@ import {
 } from '../src/http.js'
 import type { AssistantLocalService } from '../src/service.js'
 import { createUnusedAssistantService } from './service-test-helpers.js'
+
+type AssistantSession = Awaited<ReturnType<AssistantLocalService['getSession']>>
+type AssistantOutboxIntent = NonNullable<
+  Awaited<ReturnType<AssistantLocalService['getOutboxIntent']>>
+>
+type AssistantCronJob = Awaited<ReturnType<AssistantLocalService['getCronJob']>>
+type AssistantCronTarget = Awaited<ReturnType<AssistantLocalService['getCronTarget']>>
+type AssistantCronStatus = Awaited<ReturnType<AssistantLocalService['getCronStatus']>>
+type AssistantCronRuns = Awaited<ReturnType<AssistantLocalService['listCronRuns']>>
+type AssistantStatus = Awaited<ReturnType<AssistantLocalService['getStatus']>>
+type AssistantProcessDueCronResult = Awaited<
+  ReturnType<AssistantLocalService['processDueCron']>
+>
+type AssistantOpenConversationResult = Awaited<
+  ReturnType<AssistantLocalService['openConversation']>
+>
+type AssistantRunAutomationResult = Awaited<
+  ReturnType<AssistantLocalService['runAutomationOnce']>
+>
+type AssistantSendMessageResult = Awaited<ReturnType<AssistantLocalService['sendMessage']>>
+type AssistantSetCronTargetResult = Awaited<
+  ReturnType<AssistantLocalService['setCronTarget']>
+>
+type AssistantSessionOptionsResult = Awaited<
+  ReturnType<AssistantLocalService['updateSessionOptions']>
+>
 
 const TEST_PROVIDER_OPTIONS = {
   continuityFingerprint: 'fingerprint-http-test',
@@ -23,9 +69,9 @@ const TEST_PROVIDER_OPTIONS = {
   reasoningEffort: null,
   resumeKind: 'codex-session',
   sandbox: null,
-} as const
+} satisfies AssistantSession['providerOptions']
 
-const TEST_SESSION = {
+const TEST_SESSION: AssistantSession = {
   schema: 'murph.assistant-session.v1',
   sessionId: 'session_http_test',
   target: {
@@ -55,9 +101,9 @@ const TEST_SESSION = {
   updatedAt: '2026-03-28T00:00:00.000Z',
   lastTurnAt: null,
   turnCount: 0,
-} as const
+}
 
-const TEST_OUTBOX_INTENT = {
+const TEST_OUTBOX_INTENT: AssistantOutboxIntent = {
   schema: 'murph.assistant-outbox-intent.v1',
   intentId: 'outbox_http_test',
   sessionId: TEST_SESSION.sessionId,
@@ -90,14 +136,14 @@ const TEST_OUTBOX_INTENT = {
   deliveryIdempotencyKey: null,
   deliveryTransportIdempotent: false,
   lastError: null,
-} as const
+}
 
 const TEST_THREAD_BINDING_DELIVERY = {
   kind: 'thread',
   target: 'chat-123',
-} as const
+} satisfies NonNullable<AssistantCronTarget['bindingDelivery']>
 
-const TEST_CRON_JOB = {
+const TEST_CRON_JOB: AssistantCronJob = {
   schema: 'murph.assistant-cron-job.v1',
   jobId: 'cron_http_test',
   name: 'daily-checkin',
@@ -116,7 +162,6 @@ const TEST_CRON_JOB = {
     participantId: 'chat-123',
     threadId: 'chat-123',
     deliveryTarget: null,
-    deliverResponse: true,
   },
   createdAt: '2026-03-28T00:00:00.000Z',
   updatedAt: '2026-03-28T00:00:00.000Z',
@@ -130,7 +175,7 @@ const TEST_CRON_JOB = {
     runningAt: null,
     runningPid: null,
   },
-} as const
+}
 
 const TEST_CRON_RUN = {
   schema: 'murph.assistant-cron-run.v1',
@@ -144,12 +189,13 @@ const TEST_CRON_RUN = {
   response: 'done',
   responseLength: 4,
   error: null,
-} as const
+} satisfies AssistantCronRuns['runs'][number]
 
-const TEST_GATEWAY_CONVERSATION = {
+const TEST_GATEWAY_CONVERSATION: GatewayConversation = {
   schema: 'murph.gateway-conversation.v1',
   sessionKey: 'gwcs_http_test',
   title: 'Lab thread',
+  titleSource: 'thread-title',
   lastMessagePreview: 'Please send the latest PDF.',
   lastActivityAt: '2026-03-28T00:00:00.000Z',
   messageCount: 2,
@@ -165,9 +211,9 @@ const TEST_GATEWAY_CONVERSATION = {
       target: 'thread-labs',
     },
   },
-} as const
+}
 
-const TEST_GATEWAY_ATTACHMENT = {
+const TEST_GATEWAY_ATTACHMENT: GatewayAttachment = {
   schema: 'murph.gateway-attachment.v1',
   attachmentId: 'gwca_http_test',
   messageId: 'gwcm_http_test',
@@ -178,9 +224,9 @@ const TEST_GATEWAY_ATTACHMENT = {
   parseState: 'pending',
   extractedText: null,
   transcriptText: null,
-} as const
+}
 
-const TEST_GATEWAY_MESSAGE = {
+const TEST_GATEWAY_MESSAGE: GatewayMessage = {
   schema: 'murph.gateway-message.v1',
   messageId: TEST_GATEWAY_ATTACHMENT.messageId,
   sessionKey: TEST_GATEWAY_CONVERSATION.sessionKey,
@@ -189,36 +235,260 @@ const TEST_GATEWAY_MESSAGE = {
   actorDisplayName: 'Alex',
   text: 'Here is the latest lab PDF.',
   attachments: [TEST_GATEWAY_ATTACHMENT],
-} as const
+}
+
+const TEST_CRON_STATUS: AssistantCronStatus = {
+  totalJobs: 1,
+  enabledJobs: 1,
+  dueJobs: 0,
+  runningJobs: 0,
+  nextRunAt: TEST_CRON_JOB.state.nextRunAt,
+}
+
+const EMPTY_CRON_STATUS: AssistantCronStatus = {
+  totalJobs: 0,
+  enabledJobs: 0,
+  dueJobs: 0,
+  runningJobs: 0,
+  nextRunAt: null,
+}
+
+const TEST_ASSISTANT_STATUS: AssistantStatus = {
+  vault: '/tmp/vault',
+  stateRoot: '/tmp/vault/.runtime/operations/assistant',
+  statusPath: '/tmp/vault/.runtime/operations/assistant/status.json',
+  outboxRoot: '/tmp/vault/.runtime/operations/assistant/outbox',
+  diagnosticsPath: '/tmp/vault/.runtime/operations/assistant/diagnostics.snapshot.json',
+  failoverStatePath: '/tmp/vault/.runtime/operations/assistant/failover.json',
+  turnsRoot: '/tmp/vault/.runtime/operations/assistant/turns',
+  generatedAt: '2026-03-28T00:00:00.000Z',
+  runLock: {
+    state: 'unlocked',
+    pid: null,
+    startedAt: null,
+    mode: null,
+    command: null,
+    reason: null,
+  },
+  automation: {
+    inboxScanCursor: null,
+    autoReply: [],
+    updatedAt: '2026-03-28T00:00:00.000Z',
+  },
+  outbox: {
+    total: 0,
+    pending: 0,
+    sending: 0,
+    retryable: 0,
+    sent: 0,
+    failed: 0,
+    abandoned: 0,
+    oldestPendingAt: null,
+    nextAttemptAt: null,
+  },
+  diagnostics: {
+    schema: 'murph.assistant-diagnostics.v1',
+    updatedAt: '2026-03-28T00:00:00.000Z',
+    lastEventAt: null,
+    lastErrorAt: null,
+    counters: {
+      turnsStarted: 0,
+      turnsCompleted: 0,
+      turnsDeferred: 0,
+      turnsFailed: 0,
+      providerAttempts: 0,
+      providerFailures: 0,
+      providerFailovers: 0,
+      deliveriesQueued: 0,
+      deliveriesSent: 0,
+      deliveriesFailed: 0,
+      deliveriesRetryable: 0,
+      outboxDrains: 0,
+      outboxRetries: 0,
+      automationScans: 0,
+    },
+    recentWarnings: [],
+  },
+  failover: {
+    schema: 'murph.assistant-failover-state.v1',
+    updatedAt: '2026-03-28T00:00:00.000Z',
+    routes: [],
+  },
+  quarantine: {
+    total: 0,
+    byKind: {},
+    recent: [],
+  },
+  runtimeBudget: {
+    schema: 'murph.assistant-runtime-budget.v1',
+    updatedAt: '2026-03-28T00:00:00.000Z',
+    caches: [],
+    maintenance: {
+      lastRunAt: null,
+      staleQuarantinePruned: 0,
+      staleLocksCleared: 0,
+      notes: [],
+    },
+  },
+  recentTurns: [],
+  warnings: [],
+}
+
+const EMPTY_PROCESS_DUE_CRON_RESULT: AssistantProcessDueCronResult = {
+  failed: 0,
+  processed: 0,
+  succeeded: 0,
+}
+
+function createAssistantCronTarget(
+  jobId: string,
+  bindingDelivery: AssistantCronTarget['bindingDelivery'],
+  target: AssistantCronTarget['target'] = TEST_CRON_JOB.target,
+): AssistantCronTarget {
+  return {
+    jobId,
+    jobName: TEST_CRON_JOB.name,
+    target,
+    bindingDelivery,
+  }
+}
+
+function createAssistantOpenConversationResult(
+  created: boolean,
+  session: AssistantSession = TEST_SESSION,
+): AssistantOpenConversationResult {
+  return {
+    created,
+    session,
+  }
+}
+
+function createAssistantRunAutomationResult(
+  scans: number,
+): AssistantRunAutomationResult {
+  return {
+    vault: '/tmp/vault',
+    startedAt: '2026-03-28T00:00:00.000Z',
+    stoppedAt: '2026-03-28T00:00:00.000Z',
+    reason: 'completed',
+    daemonStarted: false,
+    scans,
+    considered: 0,
+    routed: 0,
+    noAction: 0,
+    skipped: 0,
+    failed: 0,
+    replyConsidered: 0,
+    replied: 0,
+    replySkipped: 0,
+    replyFailed: 0,
+    lastError: null,
+  }
+}
+
+function createAssistantSendMessageResult(
+  prompt: string,
+  response: string,
+): AssistantSendMessageResult {
+  return {
+    vault: '/tmp/vault',
+    status: 'completed',
+    prompt,
+    response,
+    session: TEST_SESSION,
+    delivery: null,
+    deliveryDeferred: false,
+    deliveryIntentId: null,
+    deliveryError: null,
+  }
+}
+
+function createSetCronTargetResult(input: {
+  bindingDelivery?: AssistantSetCronTargetResult['beforeTarget']['bindingDelivery']
+  changed?: boolean
+  continuityReset?: boolean
+  deliveryTarget?: string | null
+  dryRun?: boolean
+  identityId?: string | null
+  jobId?: string
+  resetContinuity?: boolean
+  channel?: AssistantSetCronTargetResult['afterTarget']['target']['channel']
+} = {}): AssistantSetCronTargetResult {
+  const jobId = input.jobId ?? TEST_CRON_JOB.jobId
+  const target = {
+    ...TEST_CRON_JOB.target,
+    sessionId: input.resetContinuity ? null : TEST_CRON_JOB.target.sessionId,
+    alias: input.resetContinuity ? null : TEST_CRON_JOB.target.alias,
+    channel: input.channel ?? TEST_CRON_JOB.target.channel,
+    identityId: input.identityId ?? null,
+    participantId: null,
+    threadId: null,
+    deliveryTarget: input.deliveryTarget ?? null,
+  }
+
+  return {
+    job: {
+      ...TEST_CRON_JOB,
+      jobId,
+      target,
+    },
+    beforeTarget: createAssistantCronTarget(
+      jobId,
+      input.bindingDelivery ?? TEST_THREAD_BINDING_DELIVERY,
+    ),
+    afterTarget: createAssistantCronTarget(jobId, null, target),
+    changed: input.changed ?? true,
+    continuityReset: input.continuityReset ?? false,
+    dryRun: input.dryRun ?? false,
+  }
+}
 
 function createGatewayServiceMock(
-  overrides: Partial<AssistantLocalService['gateway']> = {},
-): AssistantLocalService['gateway'] {
+  overrides: Partial<GatewayService> = {},
+): GatewayService {
   return {
-    fetchAttachments: async () => [TEST_GATEWAY_ATTACHMENT as any],
-    getConversation: async () => TEST_GATEWAY_CONVERSATION as any,
-    listConversations: async () => ({
-      conversations: [TEST_GATEWAY_CONVERSATION as any],
+    fetchAttachments: async (
+      _input: GatewayFetchAttachmentsInput,
+    ): Promise<GatewayAttachment[]> => [TEST_GATEWAY_ATTACHMENT],
+    getConversation: async (
+      _input: GatewayGetConversationInput,
+    ): Promise<GatewayConversation | null> => TEST_GATEWAY_CONVERSATION,
+    listConversations: async (
+      _input?: GatewayListConversationsInput,
+    ): Promise<GatewayListConversationsResult> => ({
+      conversations: [TEST_GATEWAY_CONVERSATION],
       nextCursor: null,
     }),
-    listOpenPermissions: async () => [],
-    pollEvents: async (input?: any) => ({
+    listOpenPermissions: async (
+      _input?: GatewayListOpenPermissionsInput,
+    ): Promise<GatewayPermissionRequest[]> => [],
+    pollEvents: async (
+      input?: GatewayPollEventsInput,
+    ): Promise<GatewayPollEventsResult> => ({
       events: [],
       nextCursor: input?.cursor ?? 0,
       live: true,
     }),
-    readMessages: async () => ({
-      messages: [TEST_GATEWAY_MESSAGE as any],
+    readMessages: async (
+      _input: GatewayReadMessagesInput,
+    ): Promise<GatewayReadMessagesResult> => ({
+      messages: [TEST_GATEWAY_MESSAGE],
       nextCursor: null,
     }),
-    respondToPermission: async () => null,
-    sendMessage: async (input: any) => ({
+    respondToPermission: async (
+      _input: GatewayRespondToPermissionInput,
+    ): Promise<GatewayPermissionRequest | null> => null,
+    sendMessage: async (
+      input: GatewaySendMessageInput,
+    ): Promise<GatewaySendMessageResult> => ({
       sessionKey: input.sessionKey,
       messageId: 'gwcm_sent_http_test',
       queued: false,
       delivery: null,
     }),
-    waitForEvents: async (input?: any) => ({
+    waitForEvents: async (
+      input?: GatewayWaitForEventsInput,
+    ): Promise<GatewayPollEventsResult> => ({
       events: [],
       nextCursor: input?.cursor ?? 0,
       live: true,
@@ -325,14 +595,16 @@ function readAssistantdTestRequestBody(body: RequestInit['body']): string | unde
 function requireFirstCallArg<T>(
   mock: {
     mock: {
-      calls: ReadonlyArray<readonly unknown[]>
+      calls: ReadonlyArray<readonly [T?, ...unknown[]]>
     }
   },
   label: string,
 ): T {
   const firstArg = mock.mock.calls[0]?.[0]
-  assert.notEqual(firstArg, undefined, `${label} should be called with an argument`)
-  return firstArg as T
+  if (firstArg === undefined) {
+    throw new Error(`${label} should be called with an argument`)
+  }
+  return firstArg
 }
 
 function withIncomingHeader(name: string, value: string | string[]): IncomingHttpHeaders {
@@ -465,192 +737,101 @@ test('assistantd http server rejects non-loopback listener hosts', async () => {
 })
 
 test('assistantd http server enforces bearer auth, validates requests, and routes calls to the local assistant service', async () => {
-  const sendMessage = vi.fn(async (input: any) => ({
-    vault: input.vault ?? '/tmp/vault',
-    status: 'completed' as const,
-    prompt: input.prompt,
-    response: 'daemon response',
-    session: TEST_SESSION,
-    delivery: null,
-    deliveryDeferred: false,
-    deliveryIntentId: null,
-    deliveryError: null,
-    blocked: null,
-  }))
-  const getSession = vi.fn(async (input: { sessionId: string }) => ({
+  const sendMessage = vi.fn(
+    async (
+      input: Parameters<AssistantLocalService['sendMessage']>[0],
+    ): Promise<AssistantSendMessageResult> => ({
+      ...createAssistantSendMessageResult(input.prompt, 'daemon response'),
+      vault: input.vault ?? '/tmp/vault',
+    }),
+  )
+  const getSession = vi.fn(async (input: { sessionId: string }): Promise<AssistantSession> => ({
     ...TEST_SESSION,
     sessionId: input.sessionId,
   }))
-  const getCronJob = vi.fn(async (input: { job: string }) => ({
+  const getCronJob = vi.fn(async (input: { job: string }): Promise<AssistantCronJob> => ({
     ...TEST_CRON_JOB,
     jobId: input.job,
   }))
-  const getCronTarget = vi.fn(async (input: { job: string }) => ({
-    jobId: input.job,
-    jobName: TEST_CRON_JOB.name,
-    target: TEST_CRON_JOB.target,
-    bindingDelivery: TEST_THREAD_BINDING_DELIVERY,
-  }))
-  const setCronTarget = vi.fn(async (input: {
-    channel?: string | null
-    deliveryTarget?: string | null
-    dryRun?: boolean
-    identityId?: string | null
-    job: string
-    resetContinuity?: boolean
-  }) => ({
-    job: {
-      ...TEST_CRON_JOB,
-      jobId: input.job,
-      target: {
-        ...TEST_CRON_JOB.target,
-        sessionId: input.resetContinuity ? null : TEST_CRON_JOB.target.sessionId,
-        alias: input.resetContinuity ? null : TEST_CRON_JOB.target.alias,
-        channel: input.channel ?? TEST_CRON_JOB.target.channel,
-        identityId: input.identityId ?? null,
-        participantId: null,
-        threadId: null,
-        deliveryTarget: input.deliveryTarget ?? null,
-      },
-    },
-    beforeTarget: {
-      jobId: input.job,
-      jobName: TEST_CRON_JOB.name,
-      target: TEST_CRON_JOB.target,
-      bindingDelivery: TEST_THREAD_BINDING_DELIVERY,
-    },
-    afterTarget: {
-      jobId: input.job,
-      jobName: TEST_CRON_JOB.name,
-      target: {
-        ...TEST_CRON_JOB.target,
-        sessionId: input.resetContinuity ? null : TEST_CRON_JOB.target.sessionId,
-        alias: input.resetContinuity ? null : TEST_CRON_JOB.target.alias,
-        channel: input.channel ?? TEST_CRON_JOB.target.channel,
-        identityId: input.identityId ?? null,
-        participantId: null,
-        threadId: null,
-        deliveryTarget: input.deliveryTarget ?? null,
-      },
-      bindingDelivery: null,
-    },
-    changed: true,
-    continuityReset: input.resetContinuity ?? false,
-    dryRun: input.dryRun ?? false,
-  }))
-  const getOutboxIntent = vi.fn(async (input: { intentId: string }) => ({
+  const getCronTarget = vi.fn(
+    async (input: { job: string }): Promise<AssistantCronTarget> =>
+      createAssistantCronTarget(input.job, TEST_THREAD_BINDING_DELIVERY),
+  )
+  const setCronTarget = vi.fn(
+    async (
+      input: Parameters<AssistantLocalService['setCronTarget']>[0],
+    ): Promise<AssistantSetCronTargetResult> =>
+      createSetCronTargetResult({
+        channel: input.channel,
+        deliveryTarget: input.deliveryTarget,
+        dryRun: input.dryRun,
+        identityId: input.identityId,
+        jobId: input.job,
+        resetContinuity: input.resetContinuity,
+        continuityReset: input.resetContinuity ?? false,
+      }),
+  )
+  const getOutboxIntent = vi.fn(async (input: { intentId: string }): Promise<AssistantOutboxIntent> => ({
     ...TEST_OUTBOX_INTENT,
     intentId: input.intentId,
   }))
-  const getStatus = vi.fn(async () => ({
-    vault: '/tmp/vault',
-    stateRoot: '/tmp/vault/.runtime/operations/assistant',
-    statusPath: '/tmp/vault/.runtime/operations/assistant/status.json',
-    outboxRoot: '/tmp/vault/.runtime/operations/assistant/outbox',
-    diagnosticsPath: '/tmp/vault/.runtime/operations/assistant/diagnostics.snapshot.json',
-    failoverStatePath: '/tmp/vault/.runtime/operations/assistant/failover.json',
-    turnsRoot: '/tmp/vault/.runtime/operations/assistant/turns',
-    generatedAt: '2026-03-28T00:00:00.000Z',
-    runLock: {
-      state: 'unlocked',
-      pid: null,
-      startedAt: null,
-      mode: null,
-      command: null,
-      reason: null,
-    },
-    automation: {
-      inboxScanCursor: null,
-      autoReply: [],
-      updatedAt: '2026-03-28T00:00:00.000Z',
-    },
-    outbox: {
-      total: 0,
-      pending: 0,
-      sending: 0,
-      retryable: 0,
-      sent: 0,
-      failed: 0,
-      abandoned: 0,
-      oldestPendingAt: null,
-      nextAttemptAt: null,
-    },
-    diagnostics: {
-      schema: 'murph.assistant-diagnostics.v1',
-      updatedAt: '2026-03-28T00:00:00.000Z',
-      lastEventAt: null,
-      lastErrorAt: null,
-      counters: {
-        turnsStarted: 0,
-        turnsCompleted: 0,
-        turnsDeferred: 0,
-        turnsFailed: 0,
-        providerAttempts: 0,
-        providerFailures: 0,
-        providerFailovers: 0,
-        deliveriesQueued: 0,
-        deliveriesSent: 0,
-        deliveriesFailed: 0,
-        deliveriesRetryable: 0,
-        outboxDrains: 0,
-        outboxRetries: 0,
-        automationScans: 0,
-      },
-      recentWarnings: [],
-    },
-    failover: {
-      schema: 'murph.assistant-failover-state.v1',
-      updatedAt: '2026-03-28T00:00:00.000Z',
-      routes: [],
-    },
-    quarantine: {
-      total: 0,
-      byKind: {},
-      recent: [],
-    },
-    runtimeBudget: {
-      schema: 'murph.assistant-runtime-budget.v1',
-      updatedAt: '2026-03-28T00:00:00.000Z',
-      caches: [],
-      maintenance: {
-        lastRunAt: null,
-        staleProviderRecoveryPruned: 0,
-        staleQuarantinePruned: 0,
-        staleLocksCleared: 0,
-        notes: [],
-      },
-    },
-    recentTurns: [],
-    warnings: [],
-  } as any))
-  const listGatewayConversations = vi.fn(async () => ({
-    conversations: [TEST_GATEWAY_CONVERSATION as any],
-    nextCursor: null,
-  }))
-  const getGatewayConversation = vi.fn(async () => TEST_GATEWAY_CONVERSATION as any)
-  const readGatewayMessages = vi.fn(async () => ({
-    messages: [TEST_GATEWAY_MESSAGE as any],
-    nextCursor: null,
-  }))
-  const fetchGatewayAttachments = vi.fn(async () => [TEST_GATEWAY_ATTACHMENT as any])
-  const gatewaySendMessage = vi.fn(async (input: any) => ({
+  const getStatus = vi.fn(
+    async (
+      _input?: Parameters<AssistantLocalService['getStatus']>[0],
+    ): Promise<AssistantStatus> => TEST_ASSISTANT_STATUS,
+  )
+  const listGatewayConversations = vi.fn(
+    async (
+      _input?: GatewayListConversationsInput,
+    ): Promise<GatewayListConversationsResult> => ({
+      conversations: [TEST_GATEWAY_CONVERSATION],
+      nextCursor: null,
+    }),
+  )
+  const getGatewayConversation = vi.fn(
+    async (
+      _input: GatewayGetConversationInput,
+    ): Promise<GatewayConversation | null> => TEST_GATEWAY_CONVERSATION,
+  )
+  const readGatewayMessages = vi.fn(
+    async (_input: GatewayReadMessagesInput): Promise<GatewayReadMessagesResult> => ({
+      messages: [TEST_GATEWAY_MESSAGE],
+      nextCursor: null,
+    }),
+  )
+  const fetchGatewayAttachments = vi.fn(
+    async (_input: GatewayFetchAttachmentsInput): Promise<GatewayAttachment[]> => [
+      TEST_GATEWAY_ATTACHMENT,
+    ],
+  )
+  const gatewaySendMessage = vi.fn(async (input: GatewaySendMessageInput): Promise<GatewaySendMessageResult> => ({
     sessionKey: input.sessionKey,
     messageId: 'gwcm_sent_http_test',
     queued: true,
     delivery: null,
   }))
-  const gatewayPollEvents = vi.fn(async (input?: any) => ({
+  const gatewayPollEvents = vi.fn(async (input?: GatewayPollEventsInput): Promise<GatewayPollEventsResult> => ({
     events: [],
     nextCursor: input?.cursor ?? 0,
     live: true,
   }))
-  const gatewayWaitForEvents = vi.fn(async (input?: any) => ({
-    events: [],
-    nextCursor: input?.cursor ?? 0,
-    live: true,
-  }))
-  const gatewayListOpenPermissions = vi.fn(async () => [])
-  const gatewayRespondToPermission = vi.fn(async () => null)
+  const gatewayWaitForEvents = vi.fn(
+    async (input?: GatewayWaitForEventsInput): Promise<GatewayPollEventsResult> => ({
+      events: [],
+      nextCursor: input?.cursor ?? 0,
+      live: true,
+    }),
+  )
+  const gatewayListOpenPermissions = vi.fn(
+    async (
+      _input?: GatewayListOpenPermissionsInput,
+    ): Promise<GatewayPermissionRequest[]> => [],
+  )
+  const gatewayRespondToPermission = vi.fn(
+    async (
+      _input: GatewayRespondToPermissionInput,
+    ): Promise<GatewayPermissionRequest | null> => null,
+  )
   const gateway = createGatewayServiceMock({
     fetchAttachments: fetchGatewayAttachments,
     getConversation: getGatewayConversation,
@@ -662,20 +843,26 @@ test('assistantd http server enforces bearer auth, validates requests, and route
     sendMessage: gatewaySendMessage,
     waitForEvents: gatewayWaitForEvents,
   })
-  const drainOutbox = vi.fn(async () => ({ attempted: 0, sent: 0, failed: 0, queued: 0 }))
-  const processDueCron = vi.fn(async () => ({ failed: 0, processed: 0, succeeded: 0 } as any))
-  const updateSessionOptions = vi.fn(async () => TEST_SESSION as any)
+  const drainOutbox = vi.fn(
+    async (
+      _input?: Parameters<AssistantLocalService['drainOutbox']>[0],
+    ) => ({ attempted: 0, sent: 0, failed: 0, queued: 0 }),
+  )
+  const processDueCron = vi.fn(
+    async (
+      _input?: Parameters<AssistantLocalService['processDueCron']>[0],
+    ): Promise<AssistantProcessDueCronResult> => EMPTY_PROCESS_DUE_CRON_RESULT,
+  )
+  const updateSessionOptions = vi.fn(
+    async (
+      _input: Parameters<AssistantLocalService['updateSessionOptions']>[0],
+    ): Promise<AssistantSessionOptionsResult> => TEST_SESSION,
+  )
   const service: AssistantLocalService = {
     drainOutbox,
     getCronJob,
     getCronTarget,
-    getCronStatus: async () => ({
-      totalJobs: 1,
-      enabledJobs: 1,
-      dueJobs: 0,
-      runningJobs: 0,
-      nextRunAt: TEST_CRON_JOB.state.nextRunAt,
-    } as any),
+    getCronStatus: async () => TEST_CRON_STATUS,
     getOutboxIntent,
     getSession,
     health: async () => ({
@@ -686,37 +873,17 @@ test('assistantd http server enforces bearer auth, validates requests, and route
     }),
     getStatus,
     gateway,
-    listCronJobs: async () => [TEST_CRON_JOB as any],
+    listCronJobs: async () => [TEST_CRON_JOB],
     listCronRuns: async () => ({
       jobId: TEST_CRON_JOB.jobId,
       runs: [TEST_CRON_RUN],
     }),
-    listOutbox: async () => [TEST_OUTBOX_INTENT as any],
-    listSessions: async () => [TEST_SESSION as any],
-    openConversation: async () => ({
-      created: true,
-      session: TEST_SESSION as any,
-    }),
+    listOutbox: async () => [TEST_OUTBOX_INTENT],
+    listSessions: async () => [TEST_SESSION],
+    openConversation: async () => createAssistantOpenConversationResult(true),
     processDueCron,
     setCronTarget,
-    runAutomationOnce: async () => ({
-      vault: '/tmp/vault',
-      startedAt: '2026-03-28T00:00:00.000Z',
-      stoppedAt: '2026-03-28T00:00:00.000Z',
-      reason: 'completed',
-      daemonStarted: false,
-      scans: 1,
-      considered: 0,
-      routed: 0,
-      noAction: 0,
-      skipped: 0,
-      failed: 0,
-      replyConsidered: 0,
-      replied: 0,
-      replySkipped: 0,
-      replyFailed: 0,
-      lastError: null,
-    } as any),
+    runAutomationOnce: async () => createAssistantRunAutomationResult(1),
     sendMessage,
     updateSessionOptions,
     vault: '/tmp/vault',
@@ -1017,7 +1184,7 @@ test('assistantd http server enforces bearer auth, validates requests, and route
       TEST_GATEWAY_ATTACHMENT.attachmentId,
     )
     assert.equal(
-      requireFirstCallArg<{ messageId: string }>(
+      requireFirstCallArg<GatewayFetchAttachmentsInput>(
         fetchGatewayAttachments,
         'fetchGatewayAttachments',
       ).messageId,
@@ -1102,7 +1269,7 @@ test('assistantd http server enforces bearer auth, validates requests, and route
     )
     assert.equal(gatewayPermissions.status, 200)
     assert.equal(
-      requireFirstCallArg<{ sessionKey: string }>(
+      requireFirstCallArg<GatewayListOpenPermissionsInput>(
         gatewayListOpenPermissions,
         'gatewayListOpenPermissions',
       ).sessionKey,
@@ -1623,107 +1790,33 @@ test('assistantd http server enforces bearer auth, validates requests, and route
 test('assistant http handler rejects continuous automation without the inbox daemon', async () => {
   const service: AssistantLocalService = {
     drainOutbox: async () => ({ attempted: 0, sent: 0, failed: 0, queued: 0 }),
-    getSession: async () => TEST_SESSION as any,
+    getSession: async () => TEST_SESSION,
     health: async () => ({
       generatedAt: '2026-03-28T00:00:00.000Z',
       ok: true,
       pid: 1234,
       vaultBound: true,
     }),
-    getStatus: async () => ({
-      vault: '/tmp/vault',
-      stateRoot: '/tmp/vault/.runtime/operations/assistant',
-      statusPath: '/tmp/vault/.runtime/operations/assistant/status.json',
-      outboxRoot: '/tmp/vault/.runtime/operations/assistant/outbox',
-      diagnosticsPath: '/tmp/vault/.runtime/operations/assistant/diagnostics.snapshot.json',
-      failoverStatePath: '/tmp/vault/.runtime/operations/assistant/failover.json',
-      turnsRoot: '/tmp/vault/.runtime/operations/assistant/turns',
-      generatedAt: '2026-03-28T00:00:00.000Z',
-      runLock: {
-        state: 'unlocked',
-        pid: null,
-        startedAt: null,
-        mode: null,
-        command: null,
-        reason: null,
-      },
-      automation: {
-        inboxScanCursor: null,
-        autoReply: [],
-        updatedAt: '2026-03-28T00:00:00.000Z',
-      },
-      sessions: [],
-      diagnostics: {
-        automationScans: 0,
-        automationFailures: 0,
-      },
-      outbox: {
-        queued: 0,
-        sent: 0,
-        failed: 0,
-      },
-    } as any),
+    getStatus: async () => TEST_ASSISTANT_STATUS,
     listSessions: async () => [],
     listCronJobs: async () => [],
-    listCronRuns: async () => ({
-      jobId: TEST_CRON_JOB.jobId,
-      runs: [],
-    }),
+    listCronRuns: async (): Promise<AssistantCronRuns> => ({ jobId: TEST_CRON_JOB.jobId, runs: [] }),
     listOutbox: async () => [],
     getOutboxIntent: async () => null,
-    getCronJob: async () => TEST_CRON_JOB as any,
-    getCronTarget: async () => ({
-      jobId: TEST_CRON_JOB.jobId,
-      jobName: TEST_CRON_JOB.name,
-      target: TEST_CRON_JOB.target,
-      bindingDelivery: null,
-    }),
-    getCronStatus: async () => ({
-      totalJobs: 0,
-      enabledJobs: 0,
-      dueJobs: 0,
-      runningJobs: 0,
-      nextRunAt: null,
-    }),
-    openConversation: async () => ({ created: true, session: TEST_SESSION as any }),
-    processDueCron: async () => ({ failed: 0, processed: 0, succeeded: 0 } as any),
-    setCronTarget: async () => ({
-      job: TEST_CRON_JOB as any,
-      beforeTarget: {
-        jobId: TEST_CRON_JOB.jobId,
-        jobName: TEST_CRON_JOB.name,
-        target: TEST_CRON_JOB.target,
-        bindingDelivery: null,
-      },
-      afterTarget: {
-        jobId: TEST_CRON_JOB.jobId,
-        jobName: TEST_CRON_JOB.name,
-        target: TEST_CRON_JOB.target,
-        bindingDelivery: null,
-      },
-      changed: false,
-      continuityReset: false,
-      dryRun: false,
-    }),
+    getCronJob: async () => TEST_CRON_JOB,
+    getCronTarget: async () => createAssistantCronTarget(TEST_CRON_JOB.jobId, null),
+    getCronStatus: async () => EMPTY_CRON_STATUS,
+    openConversation: async () => createAssistantOpenConversationResult(true),
+    processDueCron: async () => EMPTY_PROCESS_DUE_CRON_RESULT,
+    setCronTarget: async () => createSetCronTargetResult({ changed: false, jobId: TEST_CRON_JOB.jobId }),
     runAutomationOnce: async () => {
       throw new Error(
         'Continuous assistant automation now requires the inbox daemon. Rerun in continuous mode with the daemon enabled, or use once=true for a one-shot pass.',
       )
     },
-    sendMessage: async () => ({
-      vault: '/tmp/vault',
-      status: 'completed',
-      prompt: 'hello',
-      response: 'daemon response',
-      session: TEST_SESSION,
-      delivery: null,
-      deliveryDeferred: false,
-      deliveryIntentId: null,
-      deliveryError: null,
-      blocked: null,
-    }),
+    sendMessage: async () => createAssistantSendMessageResult('hello', 'daemon response'),
     gateway: createGatewayServiceMock(),
-    updateSessionOptions: async () => TEST_SESSION as any,
+    updateSessionOptions: async () => TEST_SESSION,
     vault: '/tmp/vault',
   }
 
@@ -1766,7 +1859,7 @@ test('assistant http handler rejects continuous automation without the inbox dae
 })
 
 test('assistantd http server preserves typed assistant error codes for invalid ids and missing cron jobs', async () => {
-  const getOutboxIntent = vi.fn(async () => TEST_OUTBOX_INTENT as any)
+  const getOutboxIntent = vi.fn(async (): Promise<AssistantOutboxIntent> => TEST_OUTBOX_INTENT)
   const service: AssistantLocalService = {
     drainOutbox: async () => ({ attempted: 0, sent: 0, failed: 0, queued: 0 }),
     getCronJob: async () => {
@@ -1774,167 +1867,29 @@ test('assistantd http server preserves typed assistant error codes for invalid i
         code: 'ASSISTANT_CRON_JOB_NOT_FOUND',
       })
     },
-    getCronTarget: async () => ({
-      jobId: TEST_CRON_JOB.jobId,
-      jobName: TEST_CRON_JOB.name,
-      target: TEST_CRON_JOB.target,
-      bindingDelivery: {
-        kind: 'thread',
-        target: 'chat-123',
-      },
-    }),
-    getCronStatus: async () => ({
-      totalJobs: 0,
-      enabledJobs: 0,
-      dueJobs: 0,
-      runningJobs: 0,
-      nextRunAt: null,
-    } as any),
+    getCronTarget: async () =>
+      createAssistantCronTarget(TEST_CRON_JOB.jobId, TEST_THREAD_BINDING_DELIVERY),
+    getCronStatus: async () => EMPTY_CRON_STATUS,
     getOutboxIntent,
-    getSession: async () => TEST_SESSION as any,
+    getSession: async () => TEST_SESSION,
     health: async () => ({
       generatedAt: '2026-03-28T00:00:00.000Z',
       ok: true,
       pid: 1234,
       vaultBound: true,
     }),
-    getStatus: async () => ({
-      vault: '/tmp/vault',
-      stateRoot: '/tmp/vault/.runtime/operations/assistant',
-      statusPath: '/tmp/vault/.runtime/operations/assistant/status.json',
-      outboxRoot: '/tmp/vault/.runtime/operations/assistant/outbox',
-      diagnosticsPath: '/tmp/vault/.runtime/operations/assistant/diagnostics.snapshot.json',
-      failoverStatePath: '/tmp/vault/.runtime/operations/assistant/failover.json',
-      turnsRoot: '/tmp/vault/.runtime/operations/assistant/turns',
-      generatedAt: '2026-03-28T00:00:00.000Z',
-      runLock: {
-        state: 'unlocked',
-        pid: null,
-        startedAt: null,
-        mode: null,
-        command: null,
-        reason: null,
-      },
-      automation: {
-        inboxScanCursor: null,
-        autoReply: [],
-        updatedAt: '2026-03-28T00:00:00.000Z',
-      },
-      outbox: {
-        total: 0,
-        pending: 0,
-        sending: 0,
-        retryable: 0,
-        sent: 0,
-        failed: 0,
-        abandoned: 0,
-        oldestPendingAt: null,
-        nextAttemptAt: null,
-      },
-      diagnostics: {
-        schema: 'murph.assistant-diagnostics.v1',
-        updatedAt: '2026-03-28T00:00:00.000Z',
-        lastEventAt: null,
-        lastErrorAt: null,
-        counters: {
-          turnsStarted: 0,
-          turnsCompleted: 0,
-          turnsDeferred: 0,
-          turnsFailed: 0,
-          providerAttempts: 0,
-          providerFailures: 0,
-          providerFailovers: 0,
-          deliveriesQueued: 0,
-          deliveriesSent: 0,
-          deliveriesFailed: 0,
-          deliveriesRetryable: 0,
-          outboxDrains: 0,
-          outboxRetries: 0,
-          automationScans: 0,
-        },
-        recentWarnings: [],
-      },
-      failover: {
-        schema: 'murph.assistant-failover-state.v1',
-        updatedAt: '2026-03-28T00:00:00.000Z',
-        routes: [],
-      },
-      quarantine: {
-        total: 0,
-        byKind: {},
-        recent: [],
-      },
-      runtimeBudget: {
-        schema: 'murph.assistant-runtime-budget.v1',
-        updatedAt: '2026-03-28T00:00:00.000Z',
-        caches: [],
-        maintenance: {
-          lastRunAt: null,
-          staleProviderRecoveryPruned: 0,
-          staleQuarantinePruned: 0,
-          staleLocksCleared: 0,
-          notes: [],
-        },
-      },
-      recentTurns: [],
-      warnings: [],
-    } as any),
+    getStatus: async () => TEST_ASSISTANT_STATUS,
     listCronJobs: async () => [],
     listCronRuns: async () => ({ jobId: TEST_CRON_JOB.jobId, runs: [] }),
     listOutbox: async () => [],
-    listSessions: async () => [TEST_SESSION as any],
-    openConversation: async () => ({ created: true, session: TEST_SESSION as any }),
-    processDueCron: async () => ({ failed: 0, processed: 0, succeeded: 0 } as any),
-    setCronTarget: async () => ({
-      job: TEST_CRON_JOB as any,
-      beforeTarget: {
-        jobId: TEST_CRON_JOB.jobId,
-        jobName: TEST_CRON_JOB.name,
-        target: TEST_CRON_JOB.target,
-        bindingDelivery: null,
-      },
-      afterTarget: {
-        jobId: TEST_CRON_JOB.jobId,
-        jobName: TEST_CRON_JOB.name,
-        target: TEST_CRON_JOB.target,
-        bindingDelivery: null,
-      },
-      changed: false,
-      continuityReset: false,
-      dryRun: false,
-    }),
-    runAutomationOnce: async () => ({
-      vault: '/tmp/vault',
-      startedAt: '2026-03-28T00:00:00.000Z',
-      stoppedAt: '2026-03-28T00:00:00.000Z',
-      reason: 'completed',
-      daemonStarted: false,
-      scans: 0,
-      considered: 0,
-      routed: 0,
-      noAction: 0,
-      skipped: 0,
-      failed: 0,
-      replyConsidered: 0,
-      replied: 0,
-      replySkipped: 0,
-      replyFailed: 0,
-      lastError: null,
-    } as any),
-    sendMessage: async () => ({
-      vault: '/tmp/vault',
-      status: 'completed',
-      prompt: 'noop',
-      response: 'noop',
-      session: TEST_SESSION,
-      delivery: null,
-      deliveryDeferred: false,
-      deliveryIntentId: null,
-      deliveryError: null,
-      blocked: null,
-    } as any),
+    listSessions: async () => [TEST_SESSION],
+    openConversation: async () => createAssistantOpenConversationResult(true),
+    processDueCron: async () => EMPTY_PROCESS_DUE_CRON_RESULT,
+    setCronTarget: async () => createSetCronTargetResult({ changed: false, jobId: TEST_CRON_JOB.jobId }),
+    runAutomationOnce: async () => createAssistantRunAutomationResult(0),
+    sendMessage: async () => createAssistantSendMessageResult('noop', 'noop'),
     gateway: createGatewayServiceMock(),
-    updateSessionOptions: async () => TEST_SESSION as any,
+    updateSessionOptions: async () => TEST_SESSION,
     vault: '/tmp/vault',
   }
 
@@ -1988,7 +1943,7 @@ test('assistantd http server preserves typed assistant error codes for invalid i
 test('assistantd http server does not reflect raw internal errors back to the client', async () => {
   const service: AssistantLocalService = {
     drainOutbox: async () => ({ attempted: 0, sent: 0, failed: 0, queued: 0 }),
-    getSession: async () => TEST_SESSION as any,
+    getSession: async () => TEST_SESSION,
     health: async () => ({
       generatedAt: '2026-03-28T00:00:00.000Z',
       ok: true,
@@ -2006,72 +1961,16 @@ test('assistantd http server does not reflect raw internal errors back to the cl
     }),
     listOutbox: async () => [],
     getOutboxIntent: async () => null,
-    getCronJob: async () => TEST_CRON_JOB as any,
-    getCronTarget: async () => ({
-      jobId: TEST_CRON_JOB.jobId,
-      jobName: TEST_CRON_JOB.name,
-      target: TEST_CRON_JOB.target,
-      bindingDelivery: null,
-    }),
-    getCronStatus: async () => ({
-      totalJobs: 0,
-      enabledJobs: 0,
-      dueJobs: 0,
-      runningJobs: 0,
-      nextRunAt: null,
-    }),
-    openConversation: async () => ({ created: true, session: TEST_SESSION as any }),
-    processDueCron: async () => ({ failed: 0, processed: 0, succeeded: 0 } as any),
-    setCronTarget: async () => ({
-      job: TEST_CRON_JOB as any,
-      beforeTarget: {
-        jobId: TEST_CRON_JOB.jobId,
-        jobName: TEST_CRON_JOB.name,
-        target: TEST_CRON_JOB.target,
-        bindingDelivery: null,
-      },
-      afterTarget: {
-        jobId: TEST_CRON_JOB.jobId,
-        jobName: TEST_CRON_JOB.name,
-        target: TEST_CRON_JOB.target,
-        bindingDelivery: null,
-      },
-      changed: false,
-      continuityReset: false,
-      dryRun: false,
-    }),
-    runAutomationOnce: async () => ({
-      vault: '/tmp/vault',
-      startedAt: '2026-03-28T00:00:00.000Z',
-      stoppedAt: '2026-03-28T00:00:00.000Z',
-      reason: 'completed',
-      daemonStarted: false,
-      scans: 0,
-      considered: 0,
-      routed: 0,
-      noAction: 0,
-      skipped: 0,
-      failed: 0,
-      replyConsidered: 0,
-      replied: 0,
-      replySkipped: 0,
-      replyFailed: 0,
-      lastError: null,
-    } as any),
-    sendMessage: async () => ({
-      vault: '/tmp/vault',
-      status: 'completed',
-      prompt: 'hello',
-      response: 'daemon response',
-      session: TEST_SESSION,
-      delivery: null,
-      deliveryDeferred: false,
-      deliveryIntentId: null,
-      deliveryError: null,
-      blocked: null,
-    }),
+    getCronJob: async () => TEST_CRON_JOB,
+    getCronTarget: async () => createAssistantCronTarget(TEST_CRON_JOB.jobId, null),
+    getCronStatus: async () => EMPTY_CRON_STATUS,
+    openConversation: async () => createAssistantOpenConversationResult(true),
+    processDueCron: async () => EMPTY_PROCESS_DUE_CRON_RESULT,
+    setCronTarget: async () => createSetCronTargetResult({ changed: false, jobId: TEST_CRON_JOB.jobId }),
+    runAutomationOnce: async () => createAssistantRunAutomationResult(0),
+    sendMessage: async () => createAssistantSendMessageResult('hello', 'daemon response'),
     gateway: createGatewayServiceMock(),
-    updateSessionOptions: async () => TEST_SESSION as any,
+    updateSessionOptions: async () => TEST_SESSION,
     vault: '/tmp/vault',
   }
 

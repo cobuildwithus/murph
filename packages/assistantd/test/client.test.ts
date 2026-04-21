@@ -100,7 +100,7 @@ const assistantdFetchMock = vi.fn(
 let nextAssistantdFetchId = 1
 
 beforeAll(() => {
-  vi.stubGlobal('fetch', assistantdFetchMock as unknown as typeof fetch)
+  vi.stubGlobal('fetch', assistantdFetchMock)
 })
 
 afterAll(() => {
@@ -298,16 +298,17 @@ test('remaining gateway daemon helpers short-circuit before fetch when config is
 
 test('gateway daemon client posts parsed gateway requests to assistantd', async () => {
   const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const requestHeaders = new Headers(init?.headers)
       assert.equal(
         String(input),
         `${env.MURPH_ASSISTANTD_BASE_URL}/gateway/conversations/list`,
       )
       assert.equal(init?.method, 'POST')
       assert.equal(
-        (init?.headers as Headers).get('authorization'),
+        requestHeaders.get('authorization'),
         `Bearer ${env.MURPH_ASSISTANTD_CONTROL_TOKEN}`,
       )
-      assert.equal((init?.headers as Headers).get('content-type'), 'application/json')
+      assert.equal(requestHeaders.get('content-type'), 'application/json')
       assert.deepEqual(JSON.parse(String(init?.body)), {
         channel: 'email',
         includeDerivedTitles: true,
@@ -597,15 +598,14 @@ test('gateway daemon client surfaces transport, HTTP, and payload errors cleanly
       ),
       (error: unknown) => {
         assert.equal(error instanceof Error, true)
-        assert.equal(
-          (error as Error & { code?: string; status?: number }).code,
-          'ASSISTANT_GATEWAY_FAILED',
-        )
-        assert.equal(
-          (error as Error & { code?: string; status?: number }).status,
-          502,
-        )
-        assert.match((error as Error).message, /Gateway send failed/u)
+        if (!(error instanceof Error)) {
+          return false
+        }
+        const code = 'code' in error ? error.code : undefined
+        const status = 'status' in error ? error.status : undefined
+        assert.equal(code, 'ASSISTANT_GATEWAY_FAILED')
+        assert.equal(status, 502)
+        assert.match(error.message, /Gateway send failed/u)
         return true
       },
     )
