@@ -262,8 +262,8 @@ export async function sendAssistantMessageLocal(
         })
 
         await finalizeDeliveredAssistantTurn({
-          firstTurnCheckInInjected: visibleProviderResult.firstTurnCheckInInjected,
-          firstTurnCheckInStateDocIds: sharedPlan.firstTurnCheckInStateDocIds,
+          earlySessionOnboardingInjected: visibleProviderResult.earlySessionOnboardingInjected,
+          firstContactStateDocIds: sharedPlan.firstContactStateDocIds,
           outcome: deliveryOutcome,
           response: visibleProviderResult.response,
           turnId: userTurn.turnId,

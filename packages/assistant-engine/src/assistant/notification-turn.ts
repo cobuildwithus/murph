@@ -312,7 +312,7 @@ function buildAssistantNotificationMessageInput(
     deliveryTarget: input.deliveryTarget ?? null,
     executionContext: input.executionContext,
     failoverRoutes: input.failoverRoutes,
-    includeFirstTurnCheckIn: false,
+    includeEarlySessionOnboarding: false,
     onProviderEvent: input.onProviderEvent ?? null,
     onTraceEvent: input.onTraceEvent,
     operatorAuthority: input.operatorAuthority,

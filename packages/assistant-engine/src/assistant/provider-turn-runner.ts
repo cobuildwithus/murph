@@ -76,7 +76,7 @@ import type { AssistantMessageInput } from './service-contracts.js'
 interface AssistantTurnSharedPlan {
   allowSensitiveHealthContext: boolean
   cliAccess: ReturnType<typeof resolveAssistantCliAccessContext>
-  firstTurnCheckInEligible: boolean
+  earlySessionOnboardingEligible: boolean
   requestedWorkingDirectory: string
 }
 
@@ -89,7 +89,7 @@ interface AssistantRouteTurnPlan {
   }>
   continuityContext: string | null
   diagnosticsPolicy: AssistantDiagnosticsPolicy
-  firstTurnCheckInInjected: boolean
+  earlySessionOnboardingInjected: boolean
   resumeProviderSessionId: string | null
   sessionContext?: {
     binding: AssistantSession['binding']
@@ -128,24 +128,24 @@ export interface AssistantProviderTurnExecutionProfile {
 }
 
 export interface AssistantOnboardingInjectionPlan {
-  firstTurnCheckInInjected: boolean
+  earlySessionOnboardingInjected: boolean
   resumeProviderSessionId: string | null
   shouldInjectBootstrapContext: boolean
 }
 
 export function resolveAssistantOnboardingInjectionPlan(input: {
   candidateResumeProviderSessionId: string | null
-  firstTurnCheckInEligible: boolean
+  earlySessionOnboardingEligible: boolean
   promptProfile: AssistantProviderTurnPromptProfile
 }): AssistantOnboardingInjectionPlan {
-  const firstTurnCheckInInjected =
-    input.promptProfile === 'conversation' && input.firstTurnCheckInEligible
-  const resumeProviderSessionId = firstTurnCheckInInjected
+  const earlySessionOnboardingInjected =
+    input.promptProfile === 'conversation' && input.earlySessionOnboardingEligible
+  const resumeProviderSessionId = earlySessionOnboardingInjected
     ? null
     : input.candidateResumeProviderSessionId
 
   return {
-    firstTurnCheckInInjected,
+    earlySessionOnboardingInjected,
     resumeProviderSessionId,
     shouldInjectBootstrapContext: resumeProviderSessionId === null,
   }
@@ -167,7 +167,7 @@ function resolveAssistantProviderTurnExecutionProfile(
 export interface ExecutedAssistantProviderTurnResult
   extends AssistantProviderTurnExecutionResult {
   attemptCount: number
-  firstTurnCheckInInjected?: boolean
+  earlySessionOnboardingInjected?: boolean
   providerOptions: AssistantProviderSessionOptions
   route: ResolvedAssistantFailoverRoute
   session: AssistantSession
@@ -424,7 +424,7 @@ async function resolveAssistantRouteTurnPlan(input: {
       : null
   const onboardingInjectionPlan = resolveAssistantOnboardingInjectionPlan({
     candidateResumeProviderSessionId,
-    firstTurnCheckInEligible: input.sharedPlan.firstTurnCheckInEligible,
+    earlySessionOnboardingEligible: input.sharedPlan.earlySessionOnboardingEligible,
     promptProfile: input.profile.promptProfile,
   })
   const resumeProviderSessionId = onboardingInjectionPlan.resumeProviderSessionId
@@ -434,7 +434,8 @@ async function resolveAssistantRouteTurnPlan(input: {
     channel: resolvedChannel,
     executionContext: input.input.executionContext,
   })
-  const shouldInjectFirstTurnCheckIn = onboardingInjectionPlan.firstTurnCheckInInjected
+  const shouldInjectEarlySessionOnboarding =
+    onboardingInjectionPlan.earlySessionOnboardingInjected
   const providerCapabilities = routeProviderCapabilities
   const transcriptReplayLimit = shouldInjectBootstrapContext
     ? ASSISTANT_BOOTSTRAP_TRANSCRIPT_REPLAY_MESSAGE_LIMIT
@@ -477,7 +478,7 @@ async function resolveAssistantRouteTurnPlan(input: {
     conversationMessages,
     continuityContext: null,
     diagnosticsPolicy,
-    firstTurnCheckInInjected: shouldInjectFirstTurnCheckIn,
+    earlySessionOnboardingInjected: shouldInjectEarlySessionOnboarding,
     resumeProviderSessionId,
     sessionContext: shouldInjectBootstrapContext
       ? {
@@ -507,7 +508,7 @@ async function resolveAssistantRouteTurnPlan(input: {
             channel: resolvedChannel,
             currentLocalDate: input.promptTimeContext.currentLocalDate,
             currentTimeZone: input.promptTimeContext.currentTimeZone,
-            firstTurnCheckIn: shouldInjectFirstTurnCheckIn,
+            earlySessionOnboarding: shouldInjectEarlySessionOnboarding,
             modelBehaviorProfile: resolveAssistantModelBehaviorProfile(
               input.route.providerOptions,
             ),
@@ -730,7 +731,7 @@ async function executeAssistantProviderAttempt(input: {
       result: {
         ...result,
         attemptCount: attemptPlan.attemptCount,
-        firstTurnCheckInInjected: attemptPlan.routePlan.firstTurnCheckInInjected,
+        earlySessionOnboardingInjected: attemptPlan.routePlan.earlySessionOnboardingInjected,
         providerOptions: attemptPlan.route.providerOptions,
         route: attemptPlan.route,
         session: attemptPlan.session,

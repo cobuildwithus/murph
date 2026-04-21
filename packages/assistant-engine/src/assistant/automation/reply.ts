@@ -815,7 +815,7 @@ async function executeAssistantAutoReply(input: {
       persistUserPromptOnFailure: false,
       prompt: input.prompt,
       userMessageContent: input.userMessageContent,
-      includeFirstTurnCheckIn: true,
+      includeEarlySessionOnboarding: true,
       deliverResponse: true,
       deliveryDispatchMode: input.deliveryDispatchMode,
       deliveryReplyToMessageId: input.deliveryReplyToMessageId,

@@ -743,7 +743,7 @@ async function loadLocalServiceModule(input?: {
     | {
         kind: 'succeeded'
         providerTurn: {
-          firstTurnCheckInInjected: boolean
+          earlySessionOnboardingInjected: boolean
           response: string
           session: AssistantSession
         }
@@ -782,7 +782,7 @@ async function loadLocalServiceModule(input?: {
     input?.providerOutcome ?? {
       kind: 'succeeded' as const,
       providerTurn: {
-        firstTurnCheckInInjected: true,
+        earlySessionOnboardingInjected: true,
         response: 'assistant response',
         session,
       },
@@ -1143,8 +1143,8 @@ function createSharedPlan(): AssistantTurnSharedPlan {
       allowSensitiveHealthContext: false,
       operatorAuthority: 'direct-operator',
     },
-    firstTurnCheckInEligible: false,
-    firstTurnCheckInStateDocIds: ['doc-1'],
+    earlySessionOnboardingEligible: false,
+    firstContactStateDocIds: ['doc-1'],
     operatorAuthority: 'direct-operator',
     persistUserPromptOnFailure: true,
     requestedWorkingDirectory: '/workspace',

@@ -94,8 +94,8 @@ export async function deliverAssistantReply(input: {
 }
 
 export async function finalizeAssistantTurnFromDeliveryOutcome(input: {
-  firstTurnCheckInInjected?: boolean
-  firstTurnCheckInStateDocIds?: readonly string[]
+  earlySessionOnboardingInjected?: boolean
+  firstContactStateDocIds?: readonly string[]
   outcome: AssistantDeliveryOutcome
   response: string
   turnId: string
@@ -111,9 +111,9 @@ export async function finalizeAssistantTurnFromDeliveryOutcome(input: {
   const state = createAssistantRuntimeStateService(input.vault)
   await state.turns.finalizeReceipt(plan.receipt)
   await state.diagnostics.recordEvent(plan.diagnostic)
-  if (input.firstTurnCheckInInjected === true && input.outcome.kind === 'sent') {
+  if (input.earlySessionOnboardingInjected === true && input.outcome.kind === 'sent') {
     await markAssistantFirstContactSeen({
-      docIds: input.firstTurnCheckInStateDocIds ?? [],
+      docIds: input.firstContactStateDocIds ?? [],
       seenAt: completedAt,
       vault: input.vault,
     })

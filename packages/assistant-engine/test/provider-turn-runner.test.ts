@@ -172,11 +172,11 @@ describe('executeProviderTurnWithRecovery', () => {
       .mockReset()
       .mockImplementation((input: {
         channel: string | null
-        firstTurnCheckIn: boolean
+        earlySessionOnboarding: boolean
         assistantCliContract: string | null
         vaultOverview?: string | null
       }) =>
-        `prompt:${input.channel ?? 'none'}:${input.firstTurnCheckIn ? 'first' : 'later'}:${input.assistantCliContract ?? 'no-bootstrap'}:${input.vaultOverview ?? 'no-overview'}`,
+        `prompt:${input.channel ?? 'none'}:${input.earlySessionOnboarding ? 'first' : 'later'}:${input.assistantCliContract ?? 'no-bootstrap'}:${input.vaultOverview ?? 'no-overview'}`,
       )
     runnerMocks.buildAssistantVaultOverviewBlock
       .mockReset()
@@ -314,7 +314,7 @@ describe('executeProviderTurnWithRecovery', () => {
       }),
       plan: createTurnPlan({
         allowSensitiveHealthContext: true,
-        firstTurnCheckInEligible: true,
+        earlySessionOnboardingEligible: true,
       }),
       resolvedSession: session,
       routes: [primaryRoute, backupRoute],
@@ -326,7 +326,7 @@ describe('executeProviderTurnWithRecovery', () => {
       kind: 'succeeded',
       providerTurn: {
         attemptCount: 1,
-        firstTurnCheckInInjected: true,
+        earlySessionOnboardingInjected: true,
         route: backupRoute,
         session,
         workingDirectory: '/tmp/provider-turn-runner-tests',
@@ -361,7 +361,7 @@ describe('executeProviderTurnWithRecovery', () => {
         channel: 'chat',
         currentLocalDate: '2026-04-08',
         currentTimeZone: 'America/Los_Angeles',
-        firstTurnCheckIn: true,
+        earlySessionOnboarding: true,
         modelBehaviorProfile: 'default',
         turnTrigger: null,
         vaultOverview:
@@ -429,7 +429,7 @@ describe('executeProviderTurnWithRecovery', () => {
       }),
       plan: createTurnPlan({
         allowSensitiveHealthContext: true,
-        firstTurnCheckInEligible: false,
+        earlySessionOnboardingEligible: false,
       }),
       resolvedSession: createAssistantSession(),
       routes: [route],
@@ -483,7 +483,7 @@ describe('executeProviderTurnWithRecovery', () => {
       }),
       plan: createTurnPlan({
         allowSensitiveHealthContext: true,
-        firstTurnCheckInEligible: true,
+        earlySessionOnboardingEligible: true,
       }),
       profile: {
         nativeResumePolicy: 'disabled',
@@ -499,7 +499,7 @@ describe('executeProviderTurnWithRecovery', () => {
     expect(outcome).toMatchObject({
       kind: 'succeeded',
       providerTurn: {
-        firstTurnCheckInInjected: false,
+        earlySessionOnboardingInjected: false,
         route,
       },
     })
@@ -599,7 +599,7 @@ describe('executeProviderTurnWithRecovery', () => {
         prompt: 'Newest prompt',
       }),
       plan: createTurnPlan({
-        firstTurnCheckInEligible: true,
+        earlySessionOnboardingEligible: true,
       }),
       resolvedSession: session,
       routes: [route],
@@ -664,7 +664,7 @@ describe('executeProviderTurnWithRecovery', () => {
         prompt: 'Current prompt',
       }),
       plan: createTurnPlan({
-        firstTurnCheckInEligible: false,
+        earlySessionOnboardingEligible: false,
       }),
       resolvedSession: session,
       routes: [route],
@@ -676,7 +676,7 @@ describe('executeProviderTurnWithRecovery', () => {
       kind: 'succeeded',
       providerTurn: {
         attemptCount: 1,
-        firstTurnCheckInInjected: false,
+        earlySessionOnboardingInjected: false,
       },
     })
     expect(runnerMocks.resolveAssistantCliSurfaceBootstrapContext).not.toHaveBeenCalled()
@@ -691,7 +691,7 @@ describe('executeProviderTurnWithRecovery', () => {
         assistantKnowledgeToolsAvailable: false,
         currentLocalDate: '2026-04-08',
         currentTimeZone: 'America/Los_Angeles',
-        firstTurnCheckIn: false,
+        earlySessionOnboarding: false,
         vaultOverview: null,
       }),
     )
@@ -750,7 +750,7 @@ describe('executeProviderTurnWithRecovery', () => {
         prompt: 'Current prompt',
       }),
       plan: createTurnPlan({
-        firstTurnCheckInEligible: false,
+        earlySessionOnboardingEligible: false,
       }),
       resolvedSession: session,
       routes: [route],
@@ -819,7 +819,7 @@ describe('executeProviderTurnWithRecovery', () => {
         prompt: 'Yea!',
       }),
       plan: createTurnPlan({
-        firstTurnCheckInEligible: true,
+        earlySessionOnboardingEligible: true,
       }),
       resolvedSession: session,
       routes: [route],
@@ -864,7 +864,7 @@ describe('executeProviderTurnWithRecovery', () => {
       }),
       plan: createTurnPlan({
         allowSensitiveHealthContext: true,
-        firstTurnCheckInEligible: false,
+        earlySessionOnboardingEligible: false,
       }),
       resolvedSession: session,
       routes: [route],
@@ -904,7 +904,7 @@ describe('executeProviderTurnWithRecovery', () => {
         prompt: 'What is already in here?',
       }),
       plan: createTurnPlan({
-        firstTurnCheckInEligible: true,
+        earlySessionOnboardingEligible: true,
       }),
       resolvedSession: session,
       routes: [route],
@@ -1289,7 +1289,7 @@ function createMessageInput(
 
 function createTurnPlan(input: {
   allowSensitiveHealthContext?: boolean
-  firstTurnCheckInEligible?: boolean
+  earlySessionOnboardingEligible?: boolean
   cliAccessEnv?: Record<string, string>
 }) {
   return {
@@ -1301,7 +1301,8 @@ function createTurnPlan(input: {
       rawCommand: 'vault-cli' as const,
       setupCommand: 'murph' as const,
     },
-    firstTurnCheckInEligible: input.firstTurnCheckInEligible ?? false,
+    earlySessionOnboardingEligible: input.earlySessionOnboardingEligible ?? false,
+    firstContactStateDocIds: [],
     requestedWorkingDirectory: '/tmp/provider-turn-runner-tests',
   }
 }

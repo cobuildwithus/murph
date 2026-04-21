@@ -6,7 +6,7 @@ function buildPrompt(
   assistantCommandAccessMode: 'bound-tools' | 'direct-cli' | 'none',
   turnTrigger: 'automation-cron' | 'manual-ask' | null = null,
   options?: {
-    firstTurnCheckIn?: boolean
+    earlySessionOnboarding?: boolean
   },
 ) {
   return buildAssistantSystemPrompt({
@@ -22,7 +22,7 @@ function buildPrompt(
     },
     currentLocalDate: '2026-04-10',
     currentTimeZone: 'Australia/Sydney',
-    firstTurnCheckIn: options?.firstTurnCheckIn ?? false,
+    earlySessionOnboarding: options?.earlySessionOnboarding ?? false,
     modelBehaviorProfile: 'default',
     turnTrigger,
     vaultOverview: null,
@@ -140,7 +140,7 @@ describe('buildAssistantSystemPrompt', () => {
   })
 
   it('uses the gradual early-session onboarding guidance when the first-contact flow is enabled', () => {
-    const prompt = buildPrompt('bound-tools', null, { firstTurnCheckIn: true })
+    const prompt = buildPrompt('bound-tools', null, { earlySessionOnboarding: true })
 
     expect(prompt).toContain('Early-session onboarding guidance:')
     expect(prompt).toContain(`Hey, I'm Murph — your personal health assistant.
