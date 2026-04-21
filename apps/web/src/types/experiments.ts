@@ -20,7 +20,7 @@ export interface Study {
   population?: string;
   duration?: string;
   designLabel?: string;
-  finding: string;
+  finding?: string;
   url?: string;
 }
 

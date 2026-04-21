@@ -60,7 +60,9 @@ export function StudyCard({
             </span>
           ) : null}
         </div>
-        <span className="text-[13px]/5 text-foreground/85">{finding}</span>
+        {finding ? (
+          <span className="text-[13px]/5 text-foreground/85">{finding}</span>
+        ) : null}
         <span className="mt-0.5 text-[11px]/4 text-muted-foreground/70">{metadata}</span>
         {url ? (
           <a
