@@ -664,7 +664,7 @@ describe('executeProviderTurnWithRecovery', () => {
         prompt: 'Current prompt',
       }),
       plan: createTurnPlan({
-        firstTurnCheckInEligible: true,
+        firstTurnCheckInEligible: false,
       }),
       resolvedSession: session,
       routes: [route],
@@ -750,7 +750,7 @@ describe('executeProviderTurnWithRecovery', () => {
         prompt: 'Current prompt',
       }),
       plan: createTurnPlan({
-        firstTurnCheckInEligible: true,
+        firstTurnCheckInEligible: false,
       }),
       resolvedSession: session,
       routes: [route],
@@ -781,6 +781,65 @@ describe('executeProviderTurnWithRecovery', () => {
       runnerMocks.executeAssistantProviderTurnAttempt.mock.calls.at(-1)?.[0]
         ?.conversationMessages,
     ).toHaveLength(20)
+  })
+
+  it('clears native resume and injects bootstrap context when onboarding stays eligible', async () => {
+    const session = createAssistantSession({
+      providerSessionId: 'provider-session-primary',
+      resumeRouteId: 'route-primary',
+      turnCount: 1,
+    })
+    const route = createRoute({
+      providerOptions: {
+        resumeKind: 'openai-response-id',
+      },
+      routeId: 'route-primary',
+    })
+
+    runnerMocks.resolveAssistantProviderTargetExecutionCapabilities.mockReturnValue({
+      murphCommandSurface: 'direct-cli',
+      supportsNativeResume: true,
+      supportsToolRuntime: false,
+    })
+    runnerMocks.resolveAssistantRouteResumeBinding.mockReturnValue(
+      session.resumeState,
+    )
+    runnerMocks.resolveAssistantProviderResumeKey.mockReturnValue(
+      'provider-session-primary',
+    )
+    runnerMocks.executeAssistantProviderTurnAttempt.mockResolvedValue(
+      createSuccessfulAttemptResult({
+        providerSessionId: 'provider-session-primary',
+        response: 'Onboarding answer',
+      }),
+    )
+
+    await executeProviderTurnWithRecovery({
+      input: createMessageInput({
+        prompt: 'Yea!',
+      }),
+      plan: createTurnPlan({
+        firstTurnCheckInEligible: true,
+      }),
+      resolvedSession: session,
+      routes: [route],
+      turnCreatedAt: '2026-04-08T00:00:00.000Z',
+      turnId: 'turn-onboarding-overrides-native-resume',
+    })
+
+    expect(runnerMocks.resolveAssistantCliSurfaceBootstrapContext).toHaveBeenCalled()
+    expect(runnerMocks.buildAssistantVaultOverviewBlock).toHaveBeenCalledWith(
+      '/tmp/test-vault',
+    )
+    expect(runnerMocks.executeAssistantProviderTurnAttempt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        resumeProviderSessionId: null,
+        sessionContext: {
+          binding: session.binding,
+        },
+        systemPrompt: 'prompt:none:first:cli-bootstrap:Vault overview for navigation only:\n- Canonical coverage includes 1 meal event.',
+      }),
+    )
   })
 
   it('passes automation-cron turn trigger into the system prompt builder', async () => {

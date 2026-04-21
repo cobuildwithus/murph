@@ -10,7 +10,6 @@ import {
   buildAssistantExecutionBehaviorText,
   type AssistantModelBehaviorProfile,
 } from "./model-behavior.js";
-import type { AssistantDiagnosticsPolicy } from "./issue-reporting.js";
 
 export interface AssistantSystemPromptInput {
   assistantCliContract: string | null;
@@ -22,7 +21,6 @@ export interface AssistantSystemPromptInput {
   cliAccess: Pick<AssistantCliAccessContext, "rawCommand" | "setupCommand">;
   currentLocalDate: string;
   currentTimeZone: string;
-  diagnosticsPolicy: AssistantDiagnosticsPolicy;
   firstTurnCheckIn: boolean;
   modelBehaviorProfile: AssistantModelBehaviorProfile;
   turnTrigger?: AssistantTurnTrigger | null;
@@ -34,7 +32,6 @@ export interface AssistantNotificationDecisionSystemPromptInput {
   channel: string | null;
   currentLocalDate: string;
   currentTimeZone: string;
-  diagnosticsPolicy: AssistantDiagnosticsPolicy;
   vaultOverview?: string | null;
 }
 
@@ -70,10 +67,7 @@ export function buildAssistantSystemPrompt(
       profile: input.modelBehaviorProfile,
     }),
     input.vaultOverview ?? null,
-    buildAssistantAudienceSafetyText({
-      allowSensitiveHealthContext: input.allowSensitiveHealthContext,
-      diagnosticsPolicy: input.diagnosticsPolicy,
-    }),
+    buildAssistantAudienceSafetyText(input.allowSensitiveHealthContext),
     buildAssistantToolTruthfulnessText(),
     buildAssistantEvidenceAndReplyStyleText(input.channel),
     buildAssistantExecutionContextText({
@@ -105,10 +99,7 @@ export function buildAssistantNotificationDecisionSystemPrompt(
     buildAssistantProductPrinciplesText(),
     buildAssistantHealthReasoningText(),
     input.vaultOverview ?? null,
-    buildAssistantAudienceSafetyText({
-      allowSensitiveHealthContext: input.allowSensitiveHealthContext,
-      diagnosticsPolicy: input.diagnosticsPolicy,
-    }),
+    buildAssistantAudienceSafetyText(input.allowSensitiveHealthContext),
     buildAssistantToolTruthfulnessText(),
     buildAssistantNotificationDecisionGuidanceText(input.channel)
   );
@@ -187,29 +178,17 @@ ${routeEstimateLine}
 - Use the matching write surface directly for straightforward captures and memory updates. Shared health data like meals, journals, blood tests, medications, supplements, and symptoms counts as permission to use the matching write surface. Treat a successful save receipt as confirmation the requested write completed. If the result says nothing changed, do not claim that something new was saved. Slow down only when the target record or command is unclear.`;
 }
 
-function buildAssistantAudienceSafetyText(input: {
-  allowSensitiveHealthContext: boolean;
-  diagnosticsPolicy: AssistantDiagnosticsPolicy;
-}): string {
-  if (input.allowSensitiveHealthContext) {
-    return joinPromptSections(
-      `This conversation is private enough for full health context when needed, but still surface only the details that are relevant to the current task.
-Do not save personally identifiable information to the vault, such as addresses, phone numbers, SSNs, or card numbers, unless you are editing a delivery method such as assistant replies like email or Telegram.`,
-      input.diagnosticsPolicy.devNotesVisibleToUser
-        ? buildAssistantVisibleDevNoteGuidanceText()
-        : null,
-    );
+function buildAssistantAudienceSafetyText(
+  allowSensitiveHealthContext: boolean
+): string {
+  if (allowSensitiveHealthContext) {
+    return `This conversation is private enough for full health context when needed, but still surface only the details that are relevant to the current task.
+Do not save personally identifiable information to the vault, such as addresses, phone numbers, SSNs, or card numbers, unless you are editing a delivery method such as assistant replies like email or Telegram.`;
   }
 
   return `This conversation is not private enough for broad sensitive health context.
 Do not volunteer, quote back, or store sensitive health details unless the user just raised them and they are necessary to answer the current request.
 Prefer higher-level wording for sensitive topics, and suggest a more private follow-up when detailed sensitive discussion or durable sensitive memory would be more appropriate.`;
-}
-
-function buildAssistantVisibleDevNoteGuidanceText(): string {
-  return `Local developer note mode is enabled for this non-hosted assistant surface.
-If you get hung up on commands, command schemas, tool results, or runtime instructions in a way that would help the local operator improve Murph, you may append a final section starting with "[DEV]" and briefly describe the tooling issue.
-Do not include secrets, raw credentials, bearer tokens, private file contents, environment values, full local paths, raw tool output, or unrelated user data in a [DEV] note.`;
 }
 
 function buildAssistantToolTruthfulnessText(): string {
@@ -281,7 +260,7 @@ function buildAssistantFirstTurnCheckInGuidanceText(
     return null;
   }
 
-  return `First-turn onboarding guidance:
+  return `Early-session onboarding guidance:
 
 Intent:
 - Use onboarding to make a brand-new user feel oriented, not interviewed.
@@ -289,22 +268,24 @@ Intent:
 - Prefer one small next step per message. Do not front-load capabilities, examples, or health intake questions.
 
 When to use onboarding:
-- Use this only for Murph's first-ever reply to the user, and only when the opener is a greeting, brief hello, or vague request for general help.
-- Do not use it in later sessions or once this welcome has already been sent.
-- Do not send this welcome if the user's name, broad context, or concrete request is already clear.
+- Use this only during a brand-new user's first Murph session, while the exchange is still onboarding-like or open-ended.
+- Choose the right next step from the visible transcript rather than assuming this is literally turn zero.
+- Do not use onboarding in later sessions, and do not force onboarding if the user has already moved into a concrete request.
 - If the user asks for something specific, answer that request directly instead of onboarding them.
 
 First message:
-- Send exactly this message, by itself:
+- If the exact welcome has not already been sent and the user's opener is a greeting, brief hello, or vague request for general help, send exactly this message, by itself:
 ${code(ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE)}
 - Do not append a capability paragraph, examples, or intake questions to it.
+- If the welcome is already visible in the transcript, do not send it again.
 
 Second step:
-- If the user responds positively, asks how to get started, or remains open-ended without a concrete request, ask one gentle context question:
+- If the exact welcome was just sent and the user responds positively, asks how to get started, or remains open-ended without a concrete request, ask one gentle context question:
 ${code(
     "What should I call you? And is there anything health-wise you've been curious about, working on, or dealing with lately?"
   )}
 - Ask this as its own message. Do not add extra examples unless the user seems unsure what to say.
+- If the user already gave their name, useful context, or a concrete request, do not repeat this question mechanically.
 
 How to handle replies:
 - Treat names, goals, preferences, wearables, meds or supplements, labs, and broad symptom mentions as context.

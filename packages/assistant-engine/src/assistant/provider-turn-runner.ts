@@ -127,6 +127,30 @@ export interface AssistantProviderTurnExecutionProfile {
   toolProfile?: AssistantProviderTurnToolProfile
 }
 
+export interface AssistantOnboardingInjectionPlan {
+  firstTurnCheckInInjected: boolean
+  resumeProviderSessionId: string | null
+  shouldInjectBootstrapContext: boolean
+}
+
+export function resolveAssistantOnboardingInjectionPlan(input: {
+  candidateResumeProviderSessionId: string | null
+  firstTurnCheckInEligible: boolean
+  promptProfile: AssistantProviderTurnPromptProfile
+}): AssistantOnboardingInjectionPlan {
+  const firstTurnCheckInInjected =
+    input.promptProfile === 'conversation' && input.firstTurnCheckInEligible
+  const resumeProviderSessionId = firstTurnCheckInInjected
+    ? null
+    : input.candidateResumeProviderSessionId
+
+  return {
+    firstTurnCheckInInjected,
+    resumeProviderSessionId,
+    shouldInjectBootstrapContext: resumeProviderSessionId === null,
+  }
+}
+
 const ASSISTANT_BOOTSTRAP_TRANSCRIPT_REPLAY_MESSAGE_LIMIT = 100
 const ASSISTANT_NATIVE_RESUME_TRANSCRIPT_REPLAY_MESSAGE_LIMIT = 20
 
@@ -389,7 +413,7 @@ async function resolveAssistantRouteTurnPlan(input: {
     ...input.route.providerOptions,
   })
   const nativeResumeEnabled = input.profile.nativeResumePolicy !== 'disabled'
-  const resumeProviderSessionId =
+  const candidateResumeProviderSessionId =
     nativeResumeEnabled &&
     routeProviderCapabilities.supportsNativeResume &&
     resumeBinding !== null
@@ -398,17 +422,19 @@ async function resolveAssistantRouteTurnPlan(input: {
           provider: input.route.provider,
         })
       : null
-  const shouldInjectBootstrapContext = resumeProviderSessionId === null
+  const onboardingInjectionPlan = resolveAssistantOnboardingInjectionPlan({
+    candidateResumeProviderSessionId,
+    firstTurnCheckInEligible: input.sharedPlan.firstTurnCheckInEligible,
+    promptProfile: input.profile.promptProfile,
+  })
+  const resumeProviderSessionId = onboardingInjectionPlan.resumeProviderSessionId
+  const shouldInjectBootstrapContext = onboardingInjectionPlan.shouldInjectBootstrapContext
   const resolvedChannel = input.input.channel ?? input.session.binding.channel
   const diagnosticsPolicy = resolveAssistantDiagnosticsPolicy({
     channel: resolvedChannel,
     executionContext: input.input.executionContext,
   })
-  const shouldInjectFirstTurnCheckIn =
-    input.profile.promptProfile === 'conversation' &&
-    input.sharedPlan.firstTurnCheckInEligible &&
-    shouldInjectBootstrapContext &&
-    input.session.turnCount === 0
+  const shouldInjectFirstTurnCheckIn = onboardingInjectionPlan.firstTurnCheckInInjected
   const providerCapabilities = routeProviderCapabilities
   const transcriptReplayLimit = shouldInjectBootstrapContext
     ? ASSISTANT_BOOTSTRAP_TRANSCRIPT_REPLAY_MESSAGE_LIMIT
@@ -466,7 +492,6 @@ async function resolveAssistantRouteTurnPlan(input: {
             channel: resolvedChannel,
             currentLocalDate: input.promptTimeContext.currentLocalDate,
             currentTimeZone: input.promptTimeContext.currentTimeZone,
-            diagnosticsPolicy,
             vaultOverview,
           })
         : buildAssistantSystemPrompt({
@@ -482,7 +507,6 @@ async function resolveAssistantRouteTurnPlan(input: {
             channel: resolvedChannel,
             currentLocalDate: input.promptTimeContext.currentLocalDate,
             currentTimeZone: input.promptTimeContext.currentTimeZone,
-            diagnosticsPolicy,
             firstTurnCheckIn: shouldInjectFirstTurnCheckIn,
             modelBehaviorProfile: resolveAssistantModelBehaviorProfile(
               input.route.providerOptions,
