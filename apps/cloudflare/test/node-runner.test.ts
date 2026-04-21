@@ -1268,6 +1268,23 @@ describe("runHostedExecutionJob", () => {
         });
       }
 
+      if (url === "https://telegram-api.example.test/bottelegram-token/sendChatAction") {
+        expect(request.method).toBe("POST");
+        await expect(request.json()).resolves.toEqual({
+          action: "typing",
+          chat_id: "456",
+        });
+        return new Response(JSON.stringify({
+          ok: true,
+          result: true,
+        }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+
       if (url === "https://telegram-files.example.test/bottelegram-token/photos/file_123.jpg") {
         expect(request.method).toBe("GET");
         return new Response(attachmentBytes, {
