@@ -8,7 +8,6 @@ import {
   type AssistantRuntimeIssueSeverity,
 } from '@murphai/runtime-state/node'
 
-import { isAssistantUserFacingChannel } from './channel-presentation.js'
 import type { AssistantExecutionContext } from './execution-context.js'
 import { normalizeAssistantExecutionContext } from './execution-context.js'
 import {
@@ -17,12 +16,8 @@ import {
 } from './redaction.js'
 import { normalizeNullableString } from './shared.js'
 
-export type AssistantIssueReportingMode = 'off' | 'local-visible' | 'hosted-private'
-
 export interface AssistantDiagnosticsPolicy {
-  devNotesVisibleToUser: boolean
   environment: 'hosted' | 'local'
-  issueReportingMode: AssistantIssueReportingMode
   privateIssueCaptureEnabled: boolean
   surface: string | null
 }
@@ -38,11 +33,6 @@ export interface AssistantRuntimeIssueInput {
   summary: string
 }
 
-export interface AssistantStrippedDevNote {
-  noteCharCount: number
-}
-
-const DEV_NOTES_VISIBLE_ENV = 'MURPH_ASSISTANT_DEV_NOTES_VISIBLE'
 const ISSUE_CAPTURE_ENV = 'MURPH_ASSISTANT_PRIVATE_ISSUES'
 const STRING_MAX_LENGTH = 180
 const SUMMARY_MAX_LENGTH = 240
@@ -58,30 +48,12 @@ export function resolveAssistantDiagnosticsPolicy(input: {
   const env = input.env ?? process.env
   const executionContext = normalizeAssistantExecutionContext(input.executionContext)
   const environment = executionContext?.hosted ? 'hosted' : 'local'
-  const explicitDevNotes = readBooleanEnv(env[DEV_NOTES_VISIBLE_ENV])
   const explicitIssueCapture = readBooleanEnv(env[ISSUE_CAPTURE_ENV])
   const surface = normalizeAssistantIssueSurface(input.channel)
-  const userFacingChannel = isAssistantUserFacingChannel(input.channel)
-  const devNotesVisibleToUser = environment === 'hosted'
-    ? false
-    : explicitDevNotes ?? !userFacingChannel
-  const privateIssueCaptureEnabled = explicitIssueCapture ?? true
-
-  if (!privateIssueCaptureEnabled && !devNotesVisibleToUser) {
-    return {
-      devNotesVisibleToUser: false,
-      environment,
-      issueReportingMode: 'off',
-      privateIssueCaptureEnabled: false,
-      surface,
-    }
-  }
 
   return {
-    devNotesVisibleToUser,
     environment,
-    issueReportingMode: devNotesVisibleToUser ? 'local-visible' : 'hosted-private',
-    privateIssueCaptureEnabled,
+    privateIssueCaptureEnabled: explicitIssueCapture ?? true,
     surface,
   }
 }
@@ -124,28 +96,6 @@ export async function recordAssistantToolFailureRuntimeIssues(input: {
     })
   }
 }
-
-export async function recordAssistantStrippedDevNoteRuntimeIssue(input: {
-  devNote: AssistantStrippedDevNote
-  policy: AssistantDiagnosticsPolicy
-  vault: string
-}): Promise<void> {
-  await recordAssistantRuntimeIssue({
-    issue: {
-      component: 'assistant.reply-finalizer',
-      details: {
-        noteCharCount: input.devNote.noteCharCount,
-      },
-      issueKind: 'dev_note_stripped',
-      phase: 'final_response',
-      severity: 'warning',
-      summary: 'Assistant produced a visible developer note on a surface where developer notes are hidden.',
-    },
-    policy: input.policy,
-    vault: input.vault,
-  })
-}
-
 
 function createAssistantRuntimeIssueRecord(input: {
   issue: AssistantRuntimeIssueInput

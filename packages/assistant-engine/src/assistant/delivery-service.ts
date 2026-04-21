@@ -2,9 +2,7 @@ import type {
   AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { markAssistantFirstContactSeen } from './first-contact.js'
-import { resolveAssistantDiagnosticsPolicy } from './issue-reporting.js'
 import { normalizeAssistantDeliveryError } from './outbox.js'
-import { sanitizeAssistantProviderResponseForVisibility } from './reply-sanitizer.js'
 import { createAssistantRuntimeStateService } from './runtime-state-service.js'
 import type {
   AssistantDeliveryOutcome,
@@ -30,18 +28,10 @@ export async function deliverAssistantReply(input: {
   const state = createAssistantRuntimeStateService(input.input.vault)
   const audience = input.sharedPlan.conversationPolicy.audience
   const deliveryChannel = audience?.channel ?? input.session.binding.channel
-  const diagnosticsPolicy = resolveAssistantDiagnosticsPolicy({
-    channel: deliveryChannel,
-    executionContext: input.input.executionContext,
-  })
   const outcome = await state.outbox.deliverMessage({
     turnId: input.turnId,
     sessionId: input.session.sessionId,
-    message: sanitizeAssistantProviderResponseForVisibility({
-      channel: deliveryChannel,
-      diagnosticsPolicy,
-      response: input.response,
-    }).text,
+    message: input.response,
     channel: deliveryChannel,
     deliveryIdempotencyKey: input.input.deliveryIdempotencyKey ?? null,
     deliverySource: input.input.deliverySource ?? null,
