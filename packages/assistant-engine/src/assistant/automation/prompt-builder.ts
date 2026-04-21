@@ -158,7 +158,7 @@ export async function loadTelegramAutoReplyMetadata(
       : path.join(vaultRoot, normalizedEnvelopePath)
     const parsed = JSON.parse(
       await readFile(absoluteEnvelopePath, 'utf8'),
-    ) as unknown
+    )
     const envelope = asRecord(parsed)
     const input = asRecord(envelope?.input)
     const raw = asRecord(input?.raw)

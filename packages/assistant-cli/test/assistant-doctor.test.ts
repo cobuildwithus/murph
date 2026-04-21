@@ -56,7 +56,7 @@ vi.mock('@murphai/assistant-engine/assistant-runtime', () => {
         }
 
         try {
-          values.push(parseValue(JSON.parse(line) as unknown))
+          values.push(parseValue(JSON.parse(line)))
         } catch {
           const hasRemainingNonEmptyLine = lines
             .slice(index + 1)

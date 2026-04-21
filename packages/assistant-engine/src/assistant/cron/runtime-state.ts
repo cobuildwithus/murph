@@ -65,7 +65,7 @@ export async function readAssistantCronCanonicalRuntimeStore(
 
   try {
     const raw = await readFile(paths.cronAutomationStatePath, 'utf8')
-    return normalizeAssistantCronCanonicalRuntimeStore(JSON.parse(raw) as unknown)
+    return normalizeAssistantCronCanonicalRuntimeStore(JSON.parse(raw))
   } catch (error) {
     if (isMissingFileError(error)) {
       return createEmptyAssistantCronCanonicalRuntimeStore()

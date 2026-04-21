@@ -555,8 +555,8 @@ export function createGarminDeviceSyncProvider(config: GarminDeviceSyncProviderC
     await populateGarminSnapshotCollections(api, snapshot, window, requestedSnapshotKeys);
 
     const hasCollections = requestedSnapshotKeys.length > 0
-      ? requestedSnapshotKeys.some((snapshotKey) => Array.isArray(snapshot[snapshotKey]) && (snapshot[snapshotKey] as unknown[]).length > 0)
-      : GARMIN_SNAPSHOT_KEYS.some((snapshotKey) => Array.isArray(snapshot[snapshotKey]) && (snapshot[snapshotKey] as unknown[]).length > 0);
+      ? requestedSnapshotKeys.some((snapshotKey) => hasGarminSnapshotEntries(snapshot[snapshotKey]))
+      : GARMIN_SNAPSHOT_KEYS.some((snapshotKey) => hasGarminSnapshotEntries(snapshot[snapshotKey]));
 
     if (includeProfile || hasCollections) {
       await context.importSnapshot(snapshot);
@@ -696,4 +696,8 @@ export function createGarminDeviceSyncProvider(config: GarminDeviceSyncProviderC
       });
     },
   };
+}
+
+function hasGarminSnapshotEntries(value: unknown): boolean {
+  return Array.isArray(value) && value.length > 0;
 }

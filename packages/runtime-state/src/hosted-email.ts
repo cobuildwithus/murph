@@ -10,6 +10,15 @@ export interface HostedEmailThreadTarget {
   to: string[];
 }
 
+interface HostedEmailThreadTargetPayload {
+  cc?: unknown;
+  lastMessageId?: unknown;
+  references?: unknown;
+  schema?: unknown;
+  subject?: unknown;
+  to?: unknown;
+}
+
 export function createHostedEmailThreadTarget(input: {
   cc?: ReadonlyArray<string> | null;
   lastMessageId?: string | null;
@@ -54,21 +63,50 @@ export function parseHostedEmailThreadTarget(
       decodeHostedEmailTargetPayload(
         normalized.slice(HOSTED_EMAIL_THREAD_TARGET_PREFIX.length),
       ),
-    ) as unknown;
-
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    );
+    const record = readHostedEmailThreadTargetPayload(parsed);
+    if (!record || record.schema !== HOSTED_EMAIL_THREAD_TARGET_SCHEMA) {
       return null;
     }
 
-    const record = parsed as Partial<HostedEmailThreadTarget>;
-    if (record.schema !== HOSTED_EMAIL_THREAD_TARGET_SCHEMA) {
-      return null;
-    }
-
-    return createHostedEmailThreadTarget(record);
+    return createHostedEmailThreadTarget({
+      cc: readHostedEmailThreadTargetList(record.cc),
+      lastMessageId: readHostedEmailThreadTargetString(record.lastMessageId),
+      references: readHostedEmailThreadTargetList(record.references),
+      subject: readHostedEmailThreadTargetString(record.subject),
+      to: readHostedEmailThreadTargetList(record.to),
+    });
   } catch {
     return null;
   }
+}
+
+function readHostedEmailThreadTargetPayload(value: unknown): HostedEmailThreadTargetPayload | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value
+    : null;
+}
+
+function readHostedEmailThreadTargetList(value: unknown): string[] | null | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value === null) {
+    return null;
+  }
+  if (!Array.isArray(value)) {
+    throw new TypeError("Hosted email thread target lists must be arrays.");
+  }
+
+  return value.filter((entry): entry is string => typeof entry === "string");
+}
+
+function readHostedEmailThreadTargetString(value: unknown): string | null | undefined {
+  if (value === undefined || value === null || typeof value === "string") {
+    return value;
+  }
+
+  return undefined;
 }
 
 export function appendHostedEmailReferenceChain(input: {

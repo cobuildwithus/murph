@@ -362,11 +362,10 @@ test("assessment projectors and queries cover filtering, lookup, and sorting", a
     assessmentRecordFromEntity(createEntity("goal", "goal_sleep")),
     null,
   );
+  const missingAttributesEntity = createEntity("assessment", "asmt_missing_attributes");
+  Reflect.set(missingAttributesEntity, "attributes", null);
   assert.equal(
-    assessmentRecordFromEntity({
-      ...createEntity("assessment", "asmt_missing_attributes"),
-      attributes: null as unknown as Record<string, unknown>,
-    }),
+    assessmentRecordFromEntity(missingAttributesEntity),
     null,
   );
 
