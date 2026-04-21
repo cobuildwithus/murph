@@ -40,6 +40,8 @@ export function ExperimentHeader({
   const isFinished = status === "finished";
   const isStopped = status === "stopped";
   const inBaseline = baselineDays > 0 && day != null && day <= baselineDays;
+  const protocolDays = formatProtocolDays(durationDays, baselineDays);
+  const protocolDay = day == null ? null : Math.max(1, day - baselineDays);
 
   return (
     <div className="flex flex-col gap-7">
@@ -62,7 +64,7 @@ export function ExperimentHeader({
             </span>
             <span className="shrink-0 text-[11px]/3.5 text-secondary">·</span>
             <span className="shrink-0 font-mono text-[11px]/3.5 text-chart-5">
-              {durationDays} DAYS
+              {protocolDays} DAYS
             </span>
             <span className="shrink-0 text-[11px]/3.5 text-secondary">·</span>
             <div className="flex gap-[3px]">
@@ -89,7 +91,7 @@ export function ExperimentHeader({
                   {day
                     ? inBaseline
                       ? `Baseline day ${day} of ${baselineDays}`
-                      : `Day ${day} of ${durationDays}`
+                      : `Day ${protocolDay} of ${protocolDays}`
                     : "Active run"}
                 </span>
               </>
@@ -102,7 +104,7 @@ export function ExperimentHeader({
                   {day
                     ? inBaseline
                       ? `Paused during baseline day ${day} of ${baselineDays}`
-                      : `Paused on day ${day} of ${durationDays}`
+                      : `Paused on day ${protocolDay} of ${protocolDays}`
                     : "Paused"}
                 </span>
               </>
@@ -150,7 +152,7 @@ export function ExperimentHeader({
               Start Experiment →
             </Button>
             <span className="text-[11px]/3.5 text-muted-foreground/70">
-              {baselineDays}-day baseline · {durationDays - baselineDays}-day protocol
+              {baselineDays}-day baseline · {protocolDays}-day protocol
             </span>
           </div>
         )}
@@ -183,6 +185,10 @@ export function ExperimentHeader({
       </div>
     </div>
   );
+}
+
+function formatProtocolDays(durationDays: number, baselineDays: number): number {
+  return Math.max(1, durationDays - baselineDays);
 }
 
 function sanitizeExperimentDescription(description: string | undefined): string | undefined {

@@ -219,9 +219,10 @@ function protocolToCard(
 ): ExperimentLibraryCard {
   const statusLabel = privateRun?.statusLabel;
   const startedOn = privateRun?.startedOn;
+  const protocolDays = formatProtocolDays(protocol);
   const metadata = [
     startedOn ? `Started ${formatIsoDate(startedOn)}` : null,
-    `${protocol.durationDays} days`,
+    `${protocolDays} days`,
     `${protocol.studyCount} studies`,
   ].filter((part): part is string => part !== null).join(" · ");
   const description = privateRun?.summaryDetail ?? privateRun?.summary ?? protocol.description;
@@ -233,7 +234,7 @@ function protocolToCard(
     image: protocol.image,
     href: `/experiments/${protocol.id}`,
     matchPercent: protocol.matchPercent,
-    durationDays: protocol.durationDays,
+    durationDays: protocolDays,
     studyCount: protocol.studyCount,
     metadata,
     privateBadgeLabel: privateRun ? "Private data" : undefined,
@@ -254,6 +255,10 @@ function protocolToCard(
       ...(privateRun?.tags ?? []),
     ].filter((value): value is string => typeof value === "string").join(" "),
   };
+}
+
+function formatProtocolDays(protocol: ExperimentProtocol): number {
+  return Math.max(1, protocol.durationDays - protocol.baselineDays);
 }
 
 function trackedExperimentToCard(entry: OverviewExperiment): ExperimentLibraryCard {
