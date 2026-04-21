@@ -64,6 +64,30 @@ describe("StudyCard", () => {
     expect(markup).toContain("n=2,138");
     expect(markup).not.toContain("n≈2,138");
   });
+
+  it("dedupes repeated metadata labels such as a single-person author's name matching the population", () => {
+    const markup = renderToStaticMarkup(
+      createElement(StudyCard, {
+        type: "N1",
+        title: "31 brutal minutes to saunamaxx",
+        authors: " Bryan Johnson ",
+        journal: "Substack Post",
+        participants: 1,
+        population: "bryan johnson",
+        duration: "14-day intervention window",
+        finding: "Single-person Substack report backing the protocol update.",
+        last: true,
+      }),
+    );
+
+    expect(markup).toContain(
+      "Bryan Johnson · Substack Post · 14-day intervention window",
+    );
+    expect(markup).not.toContain(
+      "Bryan Johnson · Substack Post · Bryan Johnson",
+    );
+    expect(countOccurrences(markup, "Bryan Johnson")).toBe(1);
+  });
 });
 
 function countOccurrences(haystack: string, needle: string): number {

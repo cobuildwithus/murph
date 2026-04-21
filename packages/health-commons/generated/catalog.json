@@ -1225,7 +1225,7 @@
       "schemaVersion": "murph.commons.artifact-manifest.v1"
     }
   ],
-  "catalogHash": "sha256:6db430abb8b1210e9f17648dc39adb372565d686bd75ba3cfc7c481233dee34c",
+  "catalogHash": "sha256:b66ceb923735f40ff37a13993ad31507e40fc396860f8a74dbfab185dfaf92ea",
   "changes": [
     {
       "affectedFields": [
@@ -2553,7 +2553,7 @@
         ],
         "steps": [
           "Use a low-humidity dry sauna at about 93 °C / 200 °F.",
-          "If you are copying the source routine, do the sauna in the morning after your workout.",
+          "Do the sauna in the morning after your workout.",
           "Set a 20-minute timer and leave early if heat distress or safety symptoms show up.",
           "Rehydrate after the session with water or electrolytes.",
           "Log the session, workout timing, cooling tactics, hydration, symptoms, and whether the dose felt sustainable."
@@ -2569,7 +2569,7 @@
         },
         "tips": [
           "If you are not already heat-adapted, the Blueprint public beginner guidance points toward a more conservative 15–20 minutes, 3–5 times per week, and 80–100 °C.",
-          "Keep humidity low if trying to mirror the source routine.",
+          "Keep humidity low.",
           "Treat the April 2026 core-temperature-threshold experiments as a higher-burden variant, not the default entry version."
         ]
       },
@@ -2646,9 +2646,9 @@
       ],
       "relativePath": "protocols/dry-sauna/bryan-johnson-blueprint.md",
       "revision": {
-        "pageRevisionId": "sha256:89763e32dfe96576c552c91a0ce6b5a46b5c38c9385adf4a3ce3b38fd0e22040",
-        "recipeHash": "sha256:bdfb7d37710373f065c1d512a50ae003e0a7e316d02fe250fb097b22939a02c9",
-        "runSpecRevisionId": "sha256:553f2bbdcdce2305effa1996c61c7504bb938731be1c7f0f45b033cfce9e02ff"
+        "pageRevisionId": "sha256:d5e287f550db37656b0106d72e5cc372fa2bd090ec6b8b4f6432e836e1743b8c",
+        "recipeHash": "sha256:c9241b4c188976066f03edeaea46bc000a7510a71f2387993402ecdef31aea66",
+        "runSpecRevisionId": "sha256:63ecddcefdf0db387a228b1720d0768cef60f7d4fcc892d1e4bf910e4b54771d"
       },
       "safety": {
         "avoidOrGetClinicianGuidance": [
@@ -2692,7 +2692,7 @@
           "minimumAdherenceSessions": 7,
           "notes": [
             "This test plan is an observation wrapper around an external named routine, not proof that the source routine is broadly advisable.",
-            "If copied at all, compare the intervention window against the user's own baseline and log heat burden, hydration, symptoms, illness, alcohol, and post-workout timing."
+            "Compare the intervention window against your own baseline and log heat burden, hydration, symptoms, illness, alcohol, and post-workout timing."
           ],
           "planId": "source-attributed-rhr-hrv-21d",
           "primaryBiomarkerKey": "biomarker:resting-heart-rate",

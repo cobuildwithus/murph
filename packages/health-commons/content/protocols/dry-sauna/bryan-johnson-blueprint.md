@@ -95,13 +95,13 @@ protocol:
   interventionSessionsTarget: 14
   steps:
     - Use a low-humidity dry sauna at about 93 °C / 200 °F.
-    - If you are copying the source routine, do the sauna in the morning after your workout.
+    - Do the sauna in the morning after your workout.
     - Set a 20-minute timer and leave early if heat distress or safety symptoms show up.
     - Rehydrate after the session with water or electrolytes.
     - Log the session, workout timing, cooling tactics, hydration, symptoms, and whether the dose felt sustainable.
   tips:
     - If you are not already heat-adapted, the Blueprint public beginner guidance points toward a more conservative 15–20 minutes, 3–5 times per week, and 80–100 °C.
-    - Keep humidity low if trying to mirror the source routine.
+    - Keep humidity low.
     - Treat the April 2026 core-temperature-threshold experiments as a higher-burden variant, not the default entry version.
   keepInMind:
     - This is a higher-burden daily routine layered after workouts, so exercise load and dehydration can easily confound the result.
@@ -131,7 +131,7 @@ testPlans:
     targetAdherenceSessions: 14
     notes:
       - This test plan is an observation wrapper around an external named routine, not proof that the source routine is broadly advisable.
-      - If copied at all, compare the intervention window against the user's own baseline and log heat burden, hydration, symptoms, illness, alcohol, and post-workout timing.
+      - Compare the intervention window against your own baseline and log heat burden, hydration, symptoms, illness, alcohol, and post-workout timing.
 whyItWorks:
   - This routine uses the same dry-sauna engine as Finnish sauna, but with a stronger dose: 93 °C / 200 °F, daily exposure, and usually post-workout timing. Skin blood vessels open, sweating accelerates, heart rate rises, and the cardiovascular system has to support cooling while exercise residue may already be raising heat, catecholamines, and fluid loss.
   - Johnson’s newer core-temperature framing treats air temperature and minutes as rough proxies; the proposed biological dose is how high core temperature rises and how long it stays elevated. Face or neck cooling can make the session more tolerable and change thermal feedback, but it also changes the core-temperature curve you are trying to interpret.
