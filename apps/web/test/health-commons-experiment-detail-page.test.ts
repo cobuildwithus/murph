@@ -75,12 +75,12 @@ describe("ExperimentDetailPage", () => {
       whyItWorks: expect.stringContaining("controlled whole-body heat load"),
     }));
     expect(clientExperiment.researchStats).toEqual(expect.arrayContaining([
-      expect.objectContaining({ label: "SOURCES CHECKED", value: 81 }),
-      expect.objectContaining({ label: "REVIEW PAPERS", value: 17 }),
-      expect.objectContaining({ label: "RESEARCH PAPERS", value: 64 }),
+      expect.objectContaining({ label: "SOURCES CHECKED", value: 93 }),
+      expect.objectContaining({ label: "REVIEW PAPERS", value: 22 }),
+      expect.objectContaining({ label: "RESEARCH PAPERS", value: 71 }),
       expect.objectContaining({ label: "YEARS COVERED", value: "1979–2026" }),
     ]));
-    expect(clientExperiment.studies).toHaveLength(81);
+    expect(clientExperiment.studies).toHaveLength(93);
     const highestParticipantCount = Math.max(
       ...clientExperiment.studies.map((study) => study.participants ?? -1),
     );
@@ -218,6 +218,18 @@ describe("ExperimentDetailPage", () => {
       clientExperiment.studies.findIndex((study) => study.participants === 1374),
     ).toBeLessThan(
       clientExperiment.studies.findIndex((study) => study.participants === 40),
+    );
+
+    const safetyRegistryStudy = clientExperiment.studies.find((study) =>
+      study.title === "Cardiovascular risk of high- versus moderate-intensity aerobic exercise in coronary heart disease patients"
+    );
+
+    expect(safetyRegistryStudy).toEqual(expect.objectContaining({
+      finding:
+        "The registry compared adverse events during supervised high-intensity and moderate-intensity exercise in coronary heart disease rehabilitation. Serious events were rare across many training hours, but they were not zero. The finding supports a low-risk-with-supervision frame, not a blanket claim that high intensity is safe for everyone.",
+    }));
+    expect(safetyRegistryStudy?.finding).not.toBe(
+      "Quantified supervised cardiac-rehabilitation safety registry; key low-but-not-zero risk framing.",
     );
   });
 
