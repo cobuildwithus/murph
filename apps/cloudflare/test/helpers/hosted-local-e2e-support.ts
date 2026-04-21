@@ -10,13 +10,14 @@ const defaultHostedRunnerEnvProfiles = [
   "web",
 ] as const;
 
+export type HostedLocalAssistantProviderMode = "stub" | "live";
+
 export async function startAssistantProviderStubServer(input: {
-  messageText?: string;
+  fallbackResponseText?: string | null;
   modelId?: string;
   onRequestBody?: (body: string) => void;
-  resolveMessageText?: (body: string) => string;
+  queuedResponseTexts?: string[];
 } = {}): Promise<ReturnType<typeof createServer>> {
-  const messageText = input.messageText ?? "Got it - I saw your message and I'm here.";
   const modelId = input.modelId ?? "stub-openrouter-model";
 
   const server = createServer(async (request, response) => {
@@ -35,7 +36,25 @@ export async function startAssistantProviderStubServer(input: {
     }
 
     if (request.method === "POST" && request.url === "/v1/chat/completions") {
-      const responseText = input.resolveMessageText?.(body) ?? messageText;
+      const bodyJson = parseJsonObject(body);
+      if (!bodyJson || !Array.isArray(bodyJson.messages)) {
+        writeJsonResponse(response, 400, {
+          error: "Assistant provider stub requires a chat completion request with a messages array.",
+        });
+        return;
+      }
+
+      const responseText =
+        input.queuedResponseTexts?.shift()
+        ?? input.fallbackResponseText
+        ?? null;
+      if (!responseText) {
+        writeJsonResponse(response, 500, {
+          error: "Assistant provider stub received a completion request without a queued response.",
+        });
+        return;
+      }
+
       writeJsonResponse(response, 200, {
         id: "chatcmpl_stub_hosted_local_e2e",
         object: "chat.completion",
@@ -103,10 +122,20 @@ export function writeJsonResponse(
 
 export function resolveHostedAssistantLocalDevEnv(
   source: NodeJS.ProcessEnv,
+  assistantProviderMode: HostedLocalAssistantProviderMode,
   assistantProviderStubBaseUrl: string | null,
   scenarioLabel: string,
 ): NodeJS.ProcessEnv {
-  if (assistantProviderStubBaseUrl) {
+  const hostedExecutionRunnerTimeoutMs =
+    source.HOSTED_EXECUTION_RUNNER_TIMEOUT_MS?.trim() || hostedLocalE2eRunnerTimeoutMs;
+
+  if (assistantProviderMode === "stub") {
+    if (!assistantProviderStubBaseUrl) {
+      throw new Error(
+        `${scenarioLabel} requires a stub assistant provider base URL in stub mode.`,
+      );
+    }
+
     return {
       HOSTED_ASSISTANT_API_KEY_ENV: "OPENAI_API_KEY",
       HOSTED_ASSISTANT_BASE_URL: assistantProviderStubBaseUrl,
@@ -114,9 +143,7 @@ export function resolveHostedAssistantLocalDevEnv(
       HOSTED_ASSISTANT_PROVIDER: "openrouter",
       HOSTED_ASSISTANT_PROVIDER_NAME: "local-openrouter-stub",
       HOSTED_ASSISTANT_REASONING_EFFORT: "medium",
-      HOSTED_EXECUTION_RUNNER_TIMEOUT_MS:
-        source.HOSTED_EXECUTION_RUNNER_TIMEOUT_MS?.trim()
-        || hostedLocalE2eRunnerTimeoutMs,
+      HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: hostedExecutionRunnerTimeoutMs,
       OPENAI_API_KEY: "stub-local-openrouter-key",
     };
   }
@@ -124,27 +151,18 @@ export function resolveHostedAssistantLocalDevEnv(
   const provider = source.HOSTED_ASSISTANT_PROVIDER?.trim();
   const model = source.HOSTED_ASSISTANT_MODEL?.trim();
 
-  if (provider && model) {
-    return {};
+  if (!provider || !model) {
+    throw new Error(
+      [
+        `${scenarioLabel} requires explicit hosted assistant config in live mode.`,
+        "Set HOSTED_ASSISTANT_PROVIDER and HOSTED_ASSISTANT_MODEL before enabling live mode.",
+      ].join(" "),
+    );
   }
 
-  if (source.OPENAI_API_KEY?.trim()) {
-    return {
-      HOSTED_ASSISTANT_MODEL: "gpt-4.1-mini",
-      HOSTED_ASSISTANT_PROVIDER: "openai",
-      HOSTED_ASSISTANT_REASONING_EFFORT: "medium",
-      HOSTED_EXECUTION_RUNNER_TIMEOUT_MS:
-        source.HOSTED_EXECUTION_RUNNER_TIMEOUT_MS?.trim()
-        || hostedLocalE2eRunnerTimeoutMs,
-    };
-  }
-
-  throw new Error(
-    [
-      `${scenarioLabel} requires explicit hosted assistant config.`,
-      "Set HOSTED_ASSISTANT_PROVIDER and HOSTED_ASSISTANT_MODEL, or provide OPENAI_API_KEY for the local fallback profile.",
-    ].join(" "),
-  );
+  return {
+    HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: hostedExecutionRunnerTimeoutMs,
+  };
 }
 
 export function resolveHostedLocalSmokeWebEnv(
@@ -172,16 +190,26 @@ export function resolveHostedLocalSmokeWebEnv(
   };
 }
 
-export function shouldUseAssistantProviderStub(source: NodeJS.ProcessEnv): boolean {
-  const explicit = source.MURPH_E2E_STUB_ASSISTANT_PROVIDER?.trim();
-  if (explicit) {
-    return explicit !== "0";
+export function resolveHostedAssistantProviderMode(
+  source: NodeJS.ProcessEnv,
+): HostedLocalAssistantProviderMode {
+  const explicitMode = source.MURPH_E2E_ASSISTANT_PROVIDER_MODE?.trim().toLowerCase();
+  if (explicitMode === "stub" || explicitMode === "live") {
+    return explicitMode;
   }
 
-  return !(
-    source.HOSTED_ASSISTANT_PROVIDER?.trim()
-    && source.HOSTED_ASSISTANT_MODEL?.trim()
-  );
+  if (explicitMode) {
+    throw new Error(
+      `Unsupported hosted local assistant provider mode: ${source.MURPH_E2E_ASSISTANT_PROVIDER_MODE}`,
+    );
+  }
+
+  const legacyStub = source.MURPH_E2E_STUB_ASSISTANT_PROVIDER?.trim();
+  if (legacyStub) {
+    return legacyStub === "0" ? "live" : "stub";
+  }
+
+  return "stub";
 }
 
 export function buildStableNumericSuffix(value: string, length: number): string {
@@ -263,4 +291,21 @@ async function listenStubServer(server: ReturnType<typeof createServer>): Promis
       resolve();
     });
   });
+}
+
+function parseJsonObject(body: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(body);
+    if (isRecord(parsed)) {
+      return parsed;
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
