@@ -154,6 +154,234 @@
     {
       "artifacts": [
         {
+          "accessNotes": "MDPI open-access article. Stage and hash locally before upload.",
+          "artifactId": "art_doi_10.3390_ijerph17145103_pdf",
+          "contentType": "application/pdf",
+          "kind": "pdf",
+          "localPath": "research-artifacts/norwegian-4x4/doi-10.3390-ijerph17145103.pdf",
+          "objectKey": "commons/research/norwegian-4x4/doi-10.3390-ijerph17145103/source.pdf",
+          "redistributable": true,
+          "rightsStatus": "open_access",
+          "sourceKey": "source_artifact:doi-10.3390-ijerph17145103",
+          "sourceUrl": "https://www.mdpi.com/1660-4601/17/14/5103/pdf",
+          "storage": "cloudflare-r2"
+        },
+        {
+          "accessNotes": "PLOS open-access article. Stage and hash locally before upload.",
+          "artifactId": "art_pmid_24066036_pdf",
+          "contentType": "application/pdf",
+          "kind": "pdf",
+          "localPath": "research-artifacts/norwegian-4x4/pmid-24066036.pdf",
+          "objectKey": "commons/research/norwegian-4x4/pmid-24066036/source.pdf",
+          "redistributable": true,
+          "rightsStatus": "open_access",
+          "sourceKey": "source_artifact:pmid-24066036",
+          "sourceUrl": "https://journals.plos.org/plosone/article/file?id=10.1371/journal.pone.0073182&type=printable",
+          "storage": "cloudflare-r2"
+        },
+        {
+          "accessNotes": "WHO guideline is licensed CC BY-NC-SA 3.0 IGO; keep metadata/link only until project-specific noncommercial/share-alike rights review approves redistribution.",
+          "artifactId": "art_pmid_33239350_who_guideline_pdf",
+          "contentType": "application/pdf",
+          "kind": "pdf",
+          "localPath": "research-artifacts/norwegian-4x4/pmid-33239350.pdf",
+          "objectKey": "commons/research/norwegian-4x4/pmid-33239350/source.pdf",
+          "redistributable": false,
+          "rightsStatus": "permission_required",
+          "sourceKey": "source_artifact:pmid-33239350",
+          "sourceUrl": "https://iris.who.int/server/api/core/bitstreams/faa83413-d89e-4be9-bb01-b24671aef7ca/content",
+          "storage": "cloudflare-r2"
+        },
+        {
+          "accessNotes": "Placeholder only. Upload is intentionally blocked until the file is legally cleared for storage and redistribution.",
+          "artifactId": "art_pmid_17414804_pdf",
+          "contentType": "application/pdf",
+          "kind": "pdf",
+          "localPath": "research-artifacts/norwegian-4x4/pmid-17414804.pdf",
+          "objectKey": "commons/research/norwegian-4x4/pmid-17414804/source.pdf",
+          "redistributable": false,
+          "rightsStatus": "permission_required",
+          "sourceKey": "source_artifact:pmid-17414804",
+          "sourceUrl": "https://pubmed.ncbi.nlm.nih.gov/17414804/",
+          "storage": "cloudflare-r2"
+        },
+        {
+          "accessNotes": "Placeholder only. Upload is intentionally blocked until the file is legally cleared for storage and redistribution.",
+          "artifactId": "art_ntnu_cerg_norwegian_4x4_pdf",
+          "contentType": "application/pdf",
+          "kind": "pdf",
+          "localPath": "research-artifacts/norwegian-4x4/ntnu-cerg-norwegian-4x4.pdf",
+          "objectKey": "commons/research/norwegian-4x4/ntnu-cerg-norwegian-4x4/source.pdf",
+          "redistributable": false,
+          "rightsStatus": "unknown",
+          "sourceKey": "source_artifact:ntnu-cerg-norwegian-4x4",
+          "sourceUrl": "https://www.ntnu.edu/cerg/advice",
+          "storage": "cloudflare-r2"
+        },
+        {
+          "accessNotes": "Placeholder only. Upload is intentionally blocked until the file is legally cleared for storage and redistribution.",
+          "artifactId": "art_pmid_30733142_pdf",
+          "contentType": "application/pdf",
+          "kind": "pdf",
+          "localPath": "research-artifacts/norwegian-4x4/pmid-30733142.pdf",
+          "objectKey": "commons/research/norwegian-4x4/pmid-30733142/source.pdf",
+          "redistributable": false,
+          "rightsStatus": "not_redistributable",
+          "sourceKey": "source_artifact:pmid-30733142",
+          "sourceUrl": "https://pubmed.ncbi.nlm.nih.gov/30733142/",
+          "storage": "cloudflare-r2"
+        },
+        {
+          "accessNotes": "Placeholder only. Upload is intentionally blocked until the file is legally cleared for storage and redistribution.",
+          "artifactId": "art_pmid_23988787_pdf",
+          "contentType": "application/pdf",
+          "kind": "pdf",
+          "localPath": "research-artifacts/norwegian-4x4/pmid-23988787.pdf",
+          "objectKey": "commons/research/norwegian-4x4/pmid-23988787/source.pdf",
+          "redistributable": false,
+          "rightsStatus": "permission_required",
+          "sourceKey": "source_artifact:pmid-23988787",
+          "sourceUrl": "https://pubmed.ncbi.nlm.nih.gov/23988787/",
+          "storage": "cloudflare-r2"
+        },
+        {
+          "accessNotes": "Placeholder only. Upload is intentionally blocked until the file is legally cleared for storage and redistribution.",
+          "artifactId": "art_pmid_25464446_pdf",
+          "contentType": "application/pdf",
+          "kind": "pdf",
+          "localPath": "research-artifacts/norwegian-4x4/pmid-25464446.pdf",
+          "objectKey": "commons/research/norwegian-4x4/pmid-25464446/source.pdf",
+          "redistributable": false,
+          "rightsStatus": "not_redistributable",
+          "sourceKey": "source_artifact:pmid-25464446",
+          "sourceUrl": "https://pubmed.ncbi.nlm.nih.gov/25464446/",
+          "storage": "cloudflare-r2"
+        },
+        {
+          "accessNotes": "Placeholder only. Upload is intentionally blocked until the file is legally cleared for storage and redistribution.",
+          "artifactId": "art_pmid_28082387_pdf",
+          "contentType": "application/pdf",
+          "kind": "pdf",
+          "localPath": "research-artifacts/norwegian-4x4/pmid-28082387.pdf",
+          "objectKey": "commons/research/norwegian-4x4/pmid-28082387/source.pdf",
+          "redistributable": false,
+          "rightsStatus": "permission_required",
+          "sourceKey": "source_artifact:pmid-28082387",
+          "sourceUrl": "https://pubmed.ncbi.nlm.nih.gov/28082387/",
+          "storage": "cloudflare-r2"
+        },
+        {
+          "accessNotes": "Placeholder only. Upload is intentionally blocked until the file is legally cleared for storage and redistribution.",
+          "artifactId": "art_pmid_33560320_pdf",
+          "contentType": "application/pdf",
+          "kind": "pdf",
+          "localPath": "research-artifacts/norwegian-4x4/pmid-33560320.pdf",
+          "objectKey": "commons/research/norwegian-4x4/pmid-33560320/source.pdf",
+          "redistributable": false,
+          "rightsStatus": "permission_required",
+          "sourceKey": "source_artifact:pmid-33560320",
+          "sourceUrl": "https://pubmed.ncbi.nlm.nih.gov/33560320/",
+          "storage": "cloudflare-r2"
+        },
+        {
+          "accessNotes": "Placeholder only. Upload is intentionally blocked until the file is legally cleared for storage and redistribution.",
+          "artifactId": "art_pmid_22879367_pdf",
+          "contentType": "application/pdf",
+          "kind": "pdf",
+          "localPath": "research-artifacts/norwegian-4x4/pmid-22879367.pdf",
+          "objectKey": "commons/research/norwegian-4x4/pmid-22879367/source.pdf",
+          "redistributable": false,
+          "rightsStatus": "permission_required",
+          "sourceKey": "source_artifact:pmid-22879367",
+          "sourceUrl": "https://pubmed.ncbi.nlm.nih.gov/22879367/",
+          "storage": "cloudflare-r2"
+        },
+        {
+          "accessNotes": "Placeholder only. Upload is intentionally blocked until the file is legally cleared for storage and redistribution.",
+          "artifactId": "art_pmid_30376749_pdf",
+          "contentType": "application/pdf",
+          "kind": "pdf",
+          "localPath": "research-artifacts/norwegian-4x4/pmid-30376749.pdf",
+          "objectKey": "commons/research/norwegian-4x4/pmid-30376749/source.pdf",
+          "redistributable": false,
+          "rightsStatus": "permission_required",
+          "sourceKey": "source_artifact:pmid-30376749",
+          "sourceUrl": "https://pubmed.ncbi.nlm.nih.gov/30376749/",
+          "storage": "cloudflare-r2"
+        },
+        {
+          "accessNotes": "Placeholder only. Upload is intentionally blocked until the file is legally cleared for storage and redistribution.",
+          "artifactId": "art_pmid_32860412_pdf",
+          "contentType": "application/pdf",
+          "kind": "pdf",
+          "localPath": "research-artifacts/norwegian-4x4/pmid-32860412.pdf",
+          "objectKey": "commons/research/norwegian-4x4/pmid-32860412/source.pdf",
+          "redistributable": false,
+          "rightsStatus": "not_redistributable",
+          "sourceKey": "source_artifact:pmid-32860412",
+          "sourceUrl": "https://pubmed.ncbi.nlm.nih.gov/32860412/",
+          "storage": "cloudflare-r2"
+        },
+        {
+          "accessNotes": "Placeholder only. Upload is intentionally blocked until the file is legally cleared for storage and redistribution.",
+          "artifactId": "art_pmid_32100573_pdf",
+          "contentType": "application/pdf",
+          "kind": "pdf",
+          "localPath": "research-artifacts/norwegian-4x4/pmid-32100573.pdf",
+          "objectKey": "commons/research/norwegian-4x4/pmid-32100573/source.pdf",
+          "redistributable": false,
+          "rightsStatus": "not_redistributable",
+          "sourceKey": "source_artifact:pmid-32100573",
+          "sourceUrl": "https://pubmed.ncbi.nlm.nih.gov/32100573/",
+          "storage": "cloudflare-r2"
+        },
+        {
+          "accessNotes": "Placeholder only. Upload is intentionally blocked until the file is legally cleared for storage and redistribution.",
+          "artifactId": "art_pmid_28846513_pdf",
+          "contentType": "application/pdf",
+          "kind": "pdf",
+          "localPath": "research-artifacts/norwegian-4x4/pmid-28846513.pdf",
+          "objectKey": "commons/research/norwegian-4x4/pmid-28846513/source.pdf",
+          "redistributable": false,
+          "rightsStatus": "permission_required",
+          "sourceKey": "source_artifact:pmid-28846513",
+          "sourceUrl": "https://pubmed.ncbi.nlm.nih.gov/28846513/",
+          "storage": "cloudflare-r2"
+        },
+        {
+          "accessNotes": "Placeholder only. Upload is intentionally blocked until the file is legally cleared for storage and redistribution.",
+          "artifactId": "art_pmid_39256000_pdf",
+          "contentType": "application/pdf",
+          "kind": "pdf",
+          "localPath": "research-artifacts/norwegian-4x4/pmid-39256000.pdf",
+          "objectKey": "commons/research/norwegian-4x4/pmid-39256000/source.pdf",
+          "redistributable": false,
+          "rightsStatus": "not_redistributable",
+          "sourceKey": "source_artifact:pmid-39256000",
+          "sourceUrl": "https://pubmed.ncbi.nlm.nih.gov/39256000/",
+          "storage": "cloudflare-r2"
+        },
+        {
+          "accessNotes": "Placeholder only. Upload is intentionally blocked until the file is legally cleared for storage and redistribution.",
+          "artifactId": "art_pmid_37608507_pdf",
+          "contentType": "application/pdf",
+          "kind": "pdf",
+          "localPath": "research-artifacts/norwegian-4x4/pmid-37608507.pdf",
+          "objectKey": "commons/research/norwegian-4x4/pmid-37608507/source.pdf",
+          "redistributable": false,
+          "rightsStatus": "not_redistributable",
+          "sourceKey": "source_artifact:pmid-37608507",
+          "sourceUrl": "https://pubmed.ncbi.nlm.nih.gov/37608507/",
+          "storage": "cloudflare-r2"
+        }
+      ],
+      "description": "Manifest stubs for Norwegian 4x4 research artifacts and article PDFs. Keep files out of Git, stage them under research-artifacts/norwegian-4x4/, hash locally, then upload to Cloudflare R2 only after rights review.",
+      "manifestKey": "source_artifact:norwegian-4x4/research-artifacts",
+      "schemaVersion": "murph.commons.artifact-manifest.v1"
+    },
+    {
+      "artifacts": [
+        {
           "accessNotes": "Open-access Frontiers PDF URL from the refined corpus; re-hash locally before upload.",
           "artifactId": "art_pmid_41341515_pdf",
           "contentType": "application/pdf",
@@ -284,16 +512,16 @@
           "storage": "cloudflare-r2"
         },
         {
-          "accessNotes": "Placeholder only. Upload is intentionally blocked until a direct PDF URL and redistribution rights are confirmed.",
+          "accessNotes": "Open-access PLOS printable PDF URL from the pass-4 research package; re-hash locally before upload.",
           "artifactId": "art_pmid_35089982_pdf",
           "contentType": "application/pdf",
           "kind": "pdf",
           "localPath": "research-artifacts/red-light-glasses-before-bed/pmid-35089982.pdf",
           "objectKey": "commons/research/red-light-glasses-before-bed/pmid-35089982/source.pdf",
-          "redistributable": false,
+          "redistributable": true,
           "rightsStatus": "open_access",
           "sourceKey": "source_artifact:pmid-35089982",
-          "sourceUrl": "https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0262799",
+          "sourceUrl": "https://journals.plos.org/plosone/article/file?id=10.1371/journal.pone.0262799&type=printable",
           "storage": "cloudflare-r2"
         },
         {
@@ -306,7 +534,7 @@
           "redistributable": false,
           "rightsStatus": "open_access",
           "sourceKey": "source_artifact:pmid-35024497",
-          "sourceUrl": "https://www.sciencedirect.com/science/article/pii/S245199442100027X",
+          "sourceUrl": "https://www.sciencedirect.com/science/article/pii/S2451994421000158",
           "storage": "cloudflare-r2"
         },
         {
@@ -324,6 +552,123 @@
         },
         {
           "accessNotes": "Placeholder only. Upload is intentionally blocked until a direct PDF URL and redistribution rights are confirmed.",
+          "artifactId": "art_pmid_30427265_pdf",
+          "contentType": "application/pdf",
+          "kind": "pdf",
+          "localPath": "research-artifacts/red-light-glasses-before-bed/pmid-30427265.pdf",
+          "objectKey": "commons/research/red-light-glasses-before-bed/pmid-30427265/source.pdf",
+          "redistributable": false,
+          "rightsStatus": "permission_required",
+          "sourceKey": "source_artifact:pmid-30427265",
+          "sourceUrl": "https://pubmed.ncbi.nlm.nih.gov/30427265/",
+          "storage": "cloudflare-r2"
+        },
+        {
+          "accessNotes": "Placeholder only. Upload is intentionally blocked until a direct PDF URL and redistribution rights are confirmed.",
+          "artifactId": "art_pmid_33587901_pdf",
+          "contentType": "application/pdf",
+          "kind": "pdf",
+          "localPath": "research-artifacts/red-light-glasses-before-bed/pmid-33587901.pdf",
+          "objectKey": "commons/research/red-light-glasses-before-bed/pmid-33587901/source.pdf",
+          "redistributable": false,
+          "rightsStatus": "permission_required",
+          "sourceKey": "source_artifact:pmid-33587901",
+          "sourceUrl": "https://pubmed.ncbi.nlm.nih.gov/33587901/",
+          "storage": "cloudflare-r2"
+        },
+        {
+          "accessNotes": "Metadata/source-page link only unless rights review explicitly clears PDF storage and redistribution.",
+          "artifactId": "art_pmid_36051910_pdf",
+          "contentType": "application/pdf",
+          "kind": "pdf",
+          "localPath": "research-artifacts/red-light-glasses-before-bed/pmid-36051910.pdf",
+          "objectKey": "commons/research/red-light-glasses-before-bed/pmid-36051910/source.pdf",
+          "redistributable": false,
+          "rightsStatus": "open_access",
+          "sourceKey": "source_artifact:pmid-36051910",
+          "sourceUrl": "https://www.frontiersin.org/journals/physiology/articles/10.3389/fphys.2022.943108/full",
+          "storage": "cloudflare-r2"
+        },
+        {
+          "accessNotes": "Open-access PLOS printable PDF URL from the pass-4 research package; re-hash locally before upload.",
+          "artifactId": "art_pmid_41166315_pdf",
+          "contentType": "application/pdf",
+          "kind": "pdf",
+          "localPath": "research-artifacts/red-light-glasses-before-bed/pmid-41166315.pdf",
+          "objectKey": "commons/research/red-light-glasses-before-bed/pmid-41166315/source.pdf",
+          "redistributable": true,
+          "rightsStatus": "open_access",
+          "sourceKey": "source_artifact:pmid-41166315",
+          "sourceUrl": "https://journals.plos.org/plosone/article/file?id=10.1371/journal.pone.0332877&type=printable",
+          "storage": "cloudflare-r2"
+        },
+        {
+          "accessNotes": "Open-access Nature PDF URL from the pass-4 research package; re-hash locally before upload.",
+          "artifactId": "art_pmid_41565717_pdf",
+          "contentType": "application/pdf",
+          "kind": "pdf",
+          "localPath": "research-artifacts/red-light-glasses-before-bed/pmid-41565717.pdf",
+          "objectKey": "commons/research/red-light-glasses-before-bed/pmid-41565717/source.pdf",
+          "redistributable": true,
+          "rightsStatus": "open_access",
+          "sourceKey": "source_artifact:pmid-41565717",
+          "sourceUrl": "https://www.nature.com/articles/s41598-025-29882-7.pdf",
+          "storage": "cloudflare-r2"
+        },
+        {
+          "accessNotes": "Placeholder only. Upload is intentionally blocked until a direct PDF URL and redistribution rights are confirmed.",
+          "artifactId": "art_pmid_27322730_pdf",
+          "contentType": "application/pdf",
+          "kind": "pdf",
+          "localPath": "research-artifacts/red-light-glasses-before-bed/pmid-27322730.pdf",
+          "objectKey": "commons/research/red-light-glasses-before-bed/pmid-27322730/source.pdf",
+          "redistributable": false,
+          "rightsStatus": "permission_required",
+          "sourceKey": "source_artifact:pmid-27322730",
+          "sourceUrl": "https://pubmed.ncbi.nlm.nih.gov/27322730/",
+          "storage": "cloudflare-r2"
+        },
+        {
+          "accessNotes": "Placeholder only. Upload is intentionally blocked until a direct PDF URL and redistribution rights are confirmed.",
+          "artifactId": "art_pmid_15713707_pdf",
+          "contentType": "application/pdf",
+          "kind": "pdf",
+          "localPath": "research-artifacts/red-light-glasses-before-bed/pmid-15713707.pdf",
+          "objectKey": "commons/research/red-light-glasses-before-bed/pmid-15713707/source.pdf",
+          "redistributable": false,
+          "rightsStatus": "permission_required",
+          "sourceKey": "source_artifact:pmid-15713707",
+          "sourceUrl": "https://pubmed.ncbi.nlm.nih.gov/15713707/",
+          "storage": "cloudflare-r2"
+        },
+        {
+          "accessNotes": "Readable PMCID page exists, but upload remains blocked until redistribution rights are reviewed explicitly.",
+          "artifactId": "art_pmid_27226262_pdf",
+          "contentType": "application/pdf",
+          "kind": "pdf",
+          "localPath": "research-artifacts/red-light-glasses-before-bed/pmid-27226262.pdf",
+          "objectKey": "commons/research/red-light-glasses-before-bed/pmid-27226262/source.pdf",
+          "redistributable": false,
+          "rightsStatus": "not_redistributable",
+          "sourceKey": "source_artifact:pmid-27226262",
+          "sourceUrl": "https://pmc.ncbi.nlm.nih.gov/articles/PMC5089565/",
+          "storage": "cloudflare-r2"
+        },
+        {
+          "accessNotes": "Readable guideline text exists, but upload remains blocked until redistribution rights are reviewed explicitly.",
+          "artifactId": "art_pmid_26414986_pdf",
+          "contentType": "application/pdf",
+          "kind": "pdf",
+          "localPath": "research-artifacts/red-light-glasses-before-bed/pmid-26414986.pdf",
+          "objectKey": "commons/research/red-light-glasses-before-bed/pmid-26414986/source.pdf",
+          "redistributable": false,
+          "rightsStatus": "not_redistributable",
+          "sourceKey": "source_artifact:pmid-26414986",
+          "sourceUrl": "https://jcsm.aasm.org/doi/10.5664/jcsm.5100",
+          "storage": "cloudflare-r2"
+        },
+        {
+          "accessNotes": "Placeholder only. Upload is intentionally blocked until a direct PDF URL and redistribution rights are confirmed.",
           "artifactId": "art_pmid_41421618_pdf",
           "contentType": "application/pdf",
           "kind": "pdf",
@@ -332,7 +677,7 @@
           "redistributable": false,
           "rightsStatus": "permission_required",
           "sourceKey": "source_artifact:pmid-41421618",
-          "sourceUrl": "https://pubmed.ncbi.nlm.nih.gov/41421618/",
+          "sourceUrl": "https://www.sciencedirect.com/science/article/pii/S0165032725013156",
           "storage": "cloudflare-r2"
         }
       ],
@@ -880,7 +1225,7 @@
       "schemaVersion": "murph.commons.artifact-manifest.v1"
     }
   ],
-  "catalogHash": "sha256:3f0b8a15d102c48557a68b67b7336f49f77fbe21a5d382dd07e185d23bb05baf",
+  "catalogHash": "sha256:2d05056311304c894faa878e7f0060e9e7251ee07fafaa0296503bb86445095c",
   "changes": [
     {
       "affectedFields": [
@@ -1095,6 +1440,60 @@
         "source_artifact:pmid-41032138",
         "source_artifact:pmid-40611569"
       ]
+    },
+    {
+      "affectedFields": [
+        "protocol",
+        "testPlans",
+        "claims",
+        "safety",
+        "biomarkers/estimated-vo2max.md",
+        "families/norwegian-4x4.md",
+        "sources/norwegian-4x4",
+        "artifacts/norwegian-4x4/research-artifacts.json",
+        "packages/health-commons/scripts/download-norwegian-4x4-artifacts.sh"
+      ],
+      "changeId": "chg_2026_04_21_norwegian_4x4_protocol",
+      "changeType": "evidence_change",
+      "editSummary": "Added the Norwegian 4x4 bounded self-experiment protocol, source pages, bibliography, artifact manifest, and open-access artifact downloader helper.",
+      "entityKey": "protocol_variant:norwegian-4x4/norwegian-4x4",
+      "minor": false,
+      "rationale": "Convert the prepared Norwegian 4x4 research landing into Health Commons pages with strict overclaim guardrails, variant separation, and a repo-native PDF workflow that downloads only manifest-approved open-access artifacts.",
+      "reviewStatus": "proposed",
+      "schemaVersion": "murph.commons.change.v1",
+      "sourceKeys": [
+        "source_artifact:pmid-17414804",
+        "source_artifact:ntnu-cerg-norwegian-4x4",
+        "source_artifact:pmid-30733142",
+        "source_artifact:pmid-24066036",
+        "source_artifact:doi-10.3390-ijerph17145103"
+      ]
+    },
+    {
+      "affectedFields": [
+        "relations",
+        "sources/red-light-glasses-before-bed",
+        "artifacts/red-light-glasses-before-bed/research-artifacts.json"
+      ],
+      "changeId": "chg_2026_04_21_red_light_glasses_pass4_dedupe",
+      "changeType": "evidence_change",
+      "editSummary": "Deduped the pass-4 red-light-glasses package into the existing landing by adding adjacent source pages and expanding artifact coverage without replaying the full reland.",
+      "entityKey": "protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed",
+      "minor": true,
+      "rationale": "The pass-4 package carried additional adjacent-variant, home-lighting, and claim-calibration sources plus clearer open-access artifact targets, but most page bodies had already landed in the earlier patch.",
+      "reviewStatus": "proposed",
+      "schemaVersion": "murph.commons.change.v1",
+      "sourceKeys": [
+        "source_artifact:pmid-30427265",
+        "source_artifact:pmid-33587901",
+        "source_artifact:pmid-36051910",
+        "source_artifact:pmid-41166315",
+        "source_artifact:pmid-41565717",
+        "source_artifact:pmid-27322730",
+        "source_artifact:pmid-15713707",
+        "source_artifact:pmid-27226262",
+        "source_artifact:pmid-26414986"
+      ]
     }
   ],
   "entities": [
@@ -1135,6 +1534,60 @@
       "summary": "A wearable-estimated sleep-stage marker that can be interesting, but is less reliable than broad sleep duration or continuity trends.",
       "title": "Deep Sleep Minutes",
       "unit": "minutes"
+    },
+    {
+      "aliases": [
+        "wearable VO2max",
+        "cardio fitness estimate",
+        "estimated cardio fitness"
+      ],
+      "body": "Estimated VO2max is Murph's practical primary endpoint for Norwegian 4x4 because the intervention literature targets cardiorespiratory fitness, but most users have consumer wearable estimates rather than lab testing.\n\nInterpret this marker as a noisy proxy. A useful result should combine this estimate with session fidelity, heart-rate recovery, symptoms, and adherence.",
+      "categories": [
+        "cardiovascular",
+        "fitness",
+        "wearable-metric"
+      ],
+      "entityType": "biomarker",
+      "interpretationFrame": {
+        "caveat": "Consumer estimates are not laboratory gas-exchange VO2max measurements and may update slowly or noisily.",
+        "principle": "Trend direction and repeated signal are more useful than a single absolute value."
+      },
+      "key": "biomarker:estimated-vo2max",
+      "measurementContexts": [
+        "wearable_cardio_fitness",
+        "field_test_proxy"
+      ],
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "type": "related_protocol"
+        },
+        {
+          "target": "source_artifact:pmid-17414804",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-30733142",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-24066036",
+          "type": "cites"
+        }
+      ],
+      "relativePath": "biomarkers/estimated-vo2max.md",
+      "revision": {
+        "pageRevisionId": "sha256:32e67dba4f4a2d0500a1f2f46c3bc4261553501905c5ce56795348bd51740816",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "biomarkers/estimated-vo2max",
+      "status": "field-testing",
+      "summary": "A consumer-device cardio-fitness estimate used as a practical proxy for cardiorespiratory fitness in bounded Murph experiments.",
+      "title": "Estimated VO2max",
+      "unit": "ml/kg/min estimate"
     },
     {
       "aliases": [
@@ -1619,6 +2072,81 @@
       "status": "draft",
       "summary": "Infrared heat exposure protocols. Kept separate from dry sauna because heat source, temperature, session shape, and evidence base can differ.",
       "title": "Infrared Sauna"
+    },
+    {
+      "aliases": [
+        "4x4 interval training",
+        "4 by 4 intervals",
+        "Norwegian intervals",
+        "CERG 4x4"
+      ],
+      "body": "Norwegian 4x4 is the user-facing family for aerobic high-intensity interval sessions built around four 4-minute hard efforts.\n\nMurph keeps this family separate from sprint-interval training, low-volume 1 x 4 HIIT, athletic performance protocols, and cardiac-rehabilitation disease-treatment protocols because those variants differ in dose, risk, population, and interpretation.",
+      "canonicalModality": "aerobic_4x4_intervals",
+      "categories": [
+        "cardiovascular",
+        "exercise",
+        "hiit",
+        "vo2max"
+      ],
+      "entityType": "experiment_family",
+      "familyKind": "modality",
+      "key": "experiment_family:norwegian-4x4",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "type": "related_protocol"
+        },
+        {
+          "target": "source_artifact:norwegian-4x4-bibliography",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-17414804",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:ntnu-cerg-norwegian-4x4",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-30733142",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-22879367",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-30376749",
+          "type": "cites"
+        }
+      ],
+      "relativePath": "families/norwegian-4x4.md",
+      "researchCoverage": {
+        "bibliographyKey": "source_artifact:norwegian-4x4-bibliography",
+        "corpusStats": {
+          "adjacentVariantRecords": 4,
+          "auditCutoff": "2026-04-20",
+          "canonicalProtocolSupportRecords": 6,
+          "earliestYear": 2007,
+          "landingCorpusRecords": 20,
+          "latestYear": 2024,
+          "mixedOrNullClinicalRecords": 3,
+          "refinedPass2Records": 42,
+          "safetyAndContraindicationRecords": 9
+        }
+      },
+      "revision": {
+        "pageRevisionId": "sha256:935847539876fa37c7ed80f1c08c6b78203f1cbf39e4aaef50a44868145a5a29",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "families/norwegian-4x4",
+      "status": "field-testing",
+      "summary": "Aerobic high-intensity interval training built around four 4-minute hard intervals, kept separate from sprint intervals, low-volume 1 x 4 HIIT, athlete variants, and cardiac-rehabilitation disease-treatment protocols.",
+      "title": "Norwegian 4x4"
     },
     {
       "aliases": [
@@ -2346,6 +2874,457 @@
     },
     {
       "aliases": [
+        "Norwegian 4x4",
+        "Norwegian 4x4 intervals",
+        "4 by 4 HIIT",
+        "aerobic high-intensity intervals"
+      ],
+      "attribution": {
+        "ownerType": "murph"
+      },
+      "body": "## Canonical question\n\nAfter a stable baseline, does a short block of **Norwegian-style 4x4 aerobic intervals** move your cardio-fitness signal or recovery context enough to be worth repeating?\n\n## Canonical Murph recipe\n\nRun a 49-day experiment:\n\n- **7 baseline days**\n- **42 intervention days**\n- **2 interval sessions per week**\n- **12 target sessions**, with **8 sessions** as the minimum for a useful first read\n- each session: warm-up, **4 x 4 minutes hard**, 3-minute active recoveries, cooldown\n- target: reach about **85-95% of estimated HRmax** by the later part of each hard interval\n\nThat heart-rate target is not a sprint-start instruction. The goal is repeatable hard aerobic work that rises into the zone by the later part of each interval, not an all-out first minute.\n\nThis is not a permanent lifestyle prescription. It is a bounded test of whether this interval dose fits your body and life.\n\n## What to measure first\n\nPrimary: **wearable cardio-fitness / estimated VO2max**.\n\nSecondary: resting heart rate, heart-rate recovery, and session fidelity. Exploratory: HRV/RMSSD, sleep efficiency, morning blood pressure if already measured consistently, subjective energy, soreness, symptoms, and whether the protocol is too annoying for real life.\n\n## What to log every session\n\nAt minimum log modality, completed intervals, interval peak HRs, rough time in the target HR zone, RPE for each interval, 1- and 2-minute HR recovery, symptoms, sleep disruption, alcohol, illness, travel, unusually hard training, and major stress.\n\n## Stop conditions\n\nStop the session if chest pain or pressure, faintness, severe dizziness, confusion, palpitations, unusual shortness of breath, neurologic symptoms, or unsafe pain occurs.\n\nEnd the experiment and seek appropriate care if severe symptoms occur, symptoms repeat across sessions, or recovery feels unusually impaired for more than 24-48 hours.\n\n## Ask a clinician first\n\nAsk a clinician before trying this if you have known cardiovascular disease, exertional chest symptoms, unexplained shortness of breath, fainting or near-fainting, known significant arrhythmia, heart failure, recent myocardial infarction or stroke, uncontrolled hypertension, possible myocarditis or pericarditis, pregnancy or early postpartum status, diabetes medication with hypoglycemia risk, severe asthma/COPD symptoms, long-COVID-like post-exertional malaise, or an injury that vigorous exercise could worsen.\n\nPeople taking beta blockers or other heart-rate-limiting medicines should not rely on generic HRmax zones.\n\n## What this protocol deliberately does not test\n\nThis page does not test mortality, longevity, heart-failure treatment, coronary disease treatment, diabetes treatment, hypertension treatment, or superiority over every form of moderate continuous training.\n\nThis page also does not promise HRV improvement, sleep improvement, fat loss, or a wearable VO2max increase. A useful signal, if it appears, is a practical pattern: sessions become more repeatable, heart-rate recovery or resting heart rate moves in a useful direction, and the wearable cardio-fitness estimate trends favorably. SourceKeys: `source_artifact:pmid-17414804`, `source_artifact:pmid-30733142`, `source_artifact:doi-10.3390-ijerph17145103`, `source_artifact:pmid-30293954`.\n\n## Evidence shape\n\n### Causal intervention evidence\n\nUse direct 4x4 trials and VO2max meta-analyses for the core fitness rationale. Keep the claim bounded because many trials are small, clinical, or heterogeneous. SourceKeys: `source_artifact:pmid-17414804`, `source_artifact:pmid-30733142`, `source_artifact:pmid-24066036`.\n\n### Protocol dose and design\n\nUse the NTNU/CERG public recipe, HR-response implementation work, and RPE-vs-HR-monitor evidence to define the practical session shape. SourceKeys: `source_artifact:ntnu-cerg-norwegian-4x4`, `source_artifact:doi-10.3390-ijerph17145103`, `source_artifact:pmid-23988787`.\n\n### Safety and contraindications\n\nUse cardiac-rehabilitation safety reviews, the Rognmo safety registry, ESC sports-cardiology guidance, and the AHA acute cardiovascular events statement for guardrails. Do not use supervised cardiac-rehab safety evidence to imply that unscreened home HIIT is risk-free. SourceKeys: `source_artifact:pmid-22879367`, `source_artifact:pmid-30376749`, `source_artifact:pmid-29416382`, `source_artifact:pmid-32860412`, `source_artifact:pmid-32100573`.\n\n### Mixed and null evidence\n\nKeep SAINTEX-CAD, SMARTEX-HF, and OptimEx-Clin visible. They prevent the page from turning early small positive trials into a universal claim. SourceKeys: `source_artifact:pmid-25464446`, `source_artifact:pmid-28082387`, `source_artifact:pmid-33560320`.\n\n### Adjacent variants\n\nLow-volume 1 x 4 HIIT, sprint-interval training, athlete-performance 4x4, disease-treatment cardiac rehab, and metabolic-syndrome/diabetes HIIT should become separate Murph pages or context pages. SourceKeys: `source_artifact:pmid-28846513`, `source_artifact:pmid-39256000`, `source_artifact:pmid-36314990`, `source_artifact:pmid-37608507`.",
+      "categories": [
+        "cardiovascular",
+        "exercise",
+        "hiit",
+        "vo2max",
+        "murph-canonical"
+      ],
+      "claims": [
+        {
+          "caveats": [
+            "Helgerud 2007 was small and controlled.",
+            "Meta-analyses combine many HIIT protocols, not only Norwegian 4x4.",
+            "Wearable VO2max estimates are proxies, not laboratory gas-exchange measurements."
+          ],
+          "claimId": "canonical-4x4-has-direct-human-intervention-support",
+          "sourceKeys": [
+            "source_artifact:pmid-17414804",
+            "source_artifact:pmid-30733142",
+            "source_artifact:pmid-24066036"
+          ],
+          "strength": "moderate",
+          "text": "Canonical 4 x 4 aerobic interval training has direct human intervention evidence for improving lab-measured VO2max in small healthy-adult trials, but the evidence does not prove that every consumer wearable cardio-fitness estimate will improve.",
+          "type": "intervention_result"
+        },
+        {
+          "caveats": [
+            "Heart rate lags behind effort, so users should not sprint at the start just to hit the target immediately.",
+            "Estimated HRmax can be wrong, especially in older users or users on heart-rate-limiting medication."
+          ],
+          "claimId": "public-dose-shape-is-warmup-4x4-active-recovery-cooldown",
+          "sourceKeys": [
+            "source_artifact:ntnu-cerg-norwegian-4x4",
+            "source_artifact:doi-10.3390-ijerph17145103"
+          ],
+          "strength": "moderate",
+          "text": "The public Norwegian 4x4 recipe is best represented as a warm-up, four 4-minute hard intervals near 85-95% HRmax, 3-minute active recoveries, and a cooldown.",
+          "type": "design_guardrail"
+        },
+        {
+          "caveats": [
+            "Wrist optical heart-rate sensors can be wrong during intense arm movement.",
+            "Murph should combine heart rate, RPE, and symptom checks rather than reducing the session to one number."
+          ],
+          "claimId": "heart-rate-guidance-matters-for-dose-fidelity",
+          "sourceKeys": [
+            "source_artifact:pmid-23988787",
+            "source_artifact:doi-10.3390-ijerph17145103"
+          ],
+          "strength": "moderate",
+          "text": "Heart-rate monitoring should be preferred over perceived exertion alone when the goal is to test a 4x4 dose, because RPE-only guidance can miss the intended intensity.",
+          "type": "design_guardrail"
+        },
+        {
+          "caveats": [
+            "Some users may notice session-level heart-rate recovery changes earlier.",
+            "A wearable cardio-fitness estimate may update slowly or not at all during the experiment."
+          ],
+          "claimId": "six-week-window-is-more-honest-than-two-weeks",
+          "sourceKeys": [
+            "source_artifact:pmid-17414804",
+            "source_artifact:pmid-30733142"
+          ],
+          "strength": "moderate",
+          "text": "A 6-week intervention window is a better first Murph test than a 2-week window because the main evidence target is cardiorespiratory fitness, which often needs several weeks to show a measurable signal.",
+          "type": "design_guardrail"
+        },
+        {
+          "caveats": [
+            "These were clinical populations, not general wearable users.",
+            "They remain important because they prevent overclaiming from small early positive trials."
+          ],
+          "claimId": "superiority-over-moderate-continuous-training-is-not-settled",
+          "sourceKeys": [
+            "source_artifact:pmid-25464446",
+            "source_artifact:pmid-28082387",
+            "source_artifact:pmid-33560320"
+          ],
+          "strength": "high",
+          "text": "Murph should not claim that Norwegian 4x4 is always superior to moderate continuous training, because larger clinical trials in coronary artery disease and heart failure found similar or mixed results compared with moderate continuous training or guideline advice.",
+          "type": "mixed_evidence"
+        },
+        {
+          "caveats": [
+            "Supervised cardiac rehabilitation is not the same as a home self-experiment.",
+            "Users with known cardiovascular disease, exertional symptoms, or high-risk conditions need clinician guidance."
+          ],
+          "claimId": "clinical-disease-trials-are-not-self-treatment-evidence",
+          "sourceKeys": [
+            "source_artifact:pmid-25464446",
+            "source_artifact:pmid-28082387",
+            "source_artifact:pmid-33560320",
+            "source_artifact:pmid-22879367",
+            "source_artifact:pmid-30376749",
+            "source_artifact:pmid-32860412",
+            "source_artifact:pmid-32100573"
+          ],
+          "strength": "high",
+          "text": "Cardiac and heart-failure studies should be treated as safety and population-mismatch context, not as evidence that unscreened users should self-treat disease with 4x4 intervals.",
+          "type": "safety"
+        },
+        {
+          "caveats": [
+            "Safety studies often involve screened, supervised participants.",
+            "Murph should make stopping early normal, not a failure."
+          ],
+          "claimId": "high-intensity-risk-is-low-but-not-zero-in-screened-settings",
+          "sourceKeys": [
+            "source_artifact:pmid-22879367",
+            "source_artifact:pmid-30376749",
+            "source_artifact:pmid-29416382",
+            "source_artifact:pmid-32100573"
+          ],
+          "strength": "moderate",
+          "text": "Serious events during supervised HIIT and cardiac rehabilitation appear uncommon in the published safety literature, but that does not make unsupervised vigorous intervals risk-free.",
+          "type": "safety"
+        },
+        {
+          "caveats": [
+            "These variants may be useful, but they have different burden, intensity, injury risk, and interpretation."
+          ],
+          "claimId": "low-volume-1x4-and-sprint-intervals-should-be-split",
+          "sourceKeys": [
+            "source_artifact:pmid-28846513",
+            "source_artifact:pmid-39256000",
+            "source_artifact:pmid-36314990",
+            "source_artifact:pmid-37608507"
+          ],
+          "strength": "high",
+          "text": "Low-volume 1 x 4 HIIT and sprint-interval training should be represented as adjacent variants, not merged into the canonical Norwegian 4x4 page.",
+          "type": "design_guardrail"
+        },
+        {
+          "caveats": [
+            "HRV is highly sensitive to sleep, illness, alcohol, psychological stress, and training load.",
+            "Sleep should be tracked as recovery context and a confounder, not as a promised outcome.",
+            "A flat or worse HRV signal does not automatically mean the protocol failed."
+          ],
+          "claimId": "hrv-and-recovery-context-are-exploratory-not-promised",
+          "sourceKeys": [
+            "source_artifact:pmid-30293954",
+            "source_artifact:pmid-30733142"
+          ],
+          "strength": "moderate",
+          "text": "HRV and recovery-context measures should stay exploratory endpoints because high-intensity intervals can improve fitness while also adding recovery stress, especially during the first weeks.",
+          "type": "mixed_evidence"
+        }
+      ],
+      "confoundersToTrack": [
+        "illness_or_fever",
+        "acute_infection_recovery",
+        "alcohol_last_24h",
+        "hard_training_last_24h",
+        "unusual_heat_or_dehydration",
+        "major_bedtime_change",
+        "major_diet_change",
+        "new_supplement_or_medication_change",
+        "caffeine_timing_change",
+        "travel_or_timezone_shift",
+        "unusually_high_work_or_life_stress",
+        "other_new_exercise_protocol"
+      ],
+      "entityType": "protocol_variant",
+      "expectedSignal": {
+        "primary": {
+          "biomarkerKey": "biomarker:estimated-vo2max",
+          "confidence": "low_to_moderate",
+          "direction": "increase_or_no_clear_change",
+          "latency": "4-6 weeks, with wearable update lag possible",
+          "sourceKeys": [
+            "source_artifact:pmid-17414804",
+            "source_artifact:pmid-30733142",
+            "source_artifact:pmid-24066036"
+          ]
+        },
+        "secondary": [
+          {
+            "biomarkerKey": "biomarker:resting-heart-rate",
+            "confidence": "low_to_moderate",
+            "direction": "decrease_or_no_clear_change",
+            "latency": "2-6 weeks"
+          },
+          {
+            "biomarkerKey": "biomarker:hrv-rmssd",
+            "confidence": "low",
+            "direction": "mixed",
+            "latency": "2-6 weeks"
+          },
+          {
+            "biomarkerKey": "biomarker:sleep-efficiency",
+            "confidence": "low",
+            "direction": "mixed",
+            "latency": "1-6 weeks"
+          }
+        ]
+      },
+      "key": "protocol_variant:norwegian-4x4/norwegian-4x4",
+      "lineage": {
+        "rationale": "Murph canonical Norwegian 4x4 protocol for a bounded self-experiment, kept separate from sprint intervals, low-volume 1 x 4 HIIT, athlete variants, and disease-treatment cardiac rehabilitation.",
+        "relationship": "root"
+      },
+      "protocol": {
+        "doseSignature": "2x/week · 4 x 4 min intervals · 85-95% HRmax · 7-day baseline + 6-week intervention",
+        "durationMinutes": {
+          "max": 45,
+          "min": 35
+        },
+        "frequency": {
+          "sessionsPerWeek": 2
+        },
+        "interventionSessionsMinimum": 8,
+        "interventionSessionsTarget": 12,
+        "steps": [
+          "Keep your normal routine for a 7-day baseline before starting the intervention.",
+          "During the 6-week intervention, complete two Norwegian-style 4x4 sessions per week, separated by at least 48 hours when possible.",
+          "Use a bike, rower, elliptical, incline treadmill, hill walk, or run. Prefer low-impact modes if you are new to intervals or have joint concerns.",
+          "Warm up for about 10 minutes at easy-to-moderate effort, roughly 60-70% of estimated HRmax.",
+          "Complete four 4-minute hard intervals. Aim for 85-95% of estimated HRmax by the later part of each interval, not necessarily in the first minute.",
+          "Recover actively for 3 minutes between intervals at easy effort, roughly 60-70% of estimated HRmax.",
+          "Cool down for about 5 minutes.",
+          "Use heart rate plus perceived exertion and symptoms. Do not sprint from the start just to chase a heart-rate number.",
+          "Keep other training, caffeine timing, alcohol, new supplements, diet changes, and sleep schedule as stable as reasonably possible.",
+          "Treat a third weekly session, low-volume 1 x 4, sprint intervals, and disease-treatment cardiac rehab as separate variants."
+        ],
+        "stopConditions": [
+          "Stop the session immediately if chest pain or pressure, faintness, severe dizziness, confusion, palpitations, unusual shortness of breath, neurologic symptoms, or unsafe pain occurs.",
+          "End the experiment and seek appropriate care if severe symptoms occur, symptoms repeat across sessions, or recovery feels unusually impaired for more than 24-48 hours."
+        ]
+      },
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "experiment_family:norwegian-4x4",
+          "type": "parent_family"
+        },
+        {
+          "target": "biomarker:estimated-vo2max",
+          "type": "primary_biomarker"
+        },
+        {
+          "target": "biomarker:resting-heart-rate",
+          "type": "secondary_biomarker"
+        },
+        {
+          "target": "biomarker:hrv-rmssd",
+          "type": "secondary_biomarker"
+        },
+        {
+          "target": "biomarker:sleep-efficiency",
+          "type": "secondary_biomarker"
+        },
+        {
+          "target": "biomarker:morning-blood-pressure",
+          "type": "secondary_biomarker"
+        },
+        {
+          "target": "source_artifact:norwegian-4x4-bibliography",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-17414804",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:ntnu-cerg-norwegian-4x4",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-30733142",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-24066036",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:doi-10.3390-ijerph17145103",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-23988787",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-25464446",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-28082387",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-33560320",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-22879367",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-30376749",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-29416382",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-32860412",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-32100573",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-30293954",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-28846513",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-39256000",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-36314990",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-37608507",
+          "type": "cites"
+        }
+      ],
+      "relativePath": "protocols/norwegian-4x4/norwegian-4x4.md",
+      "researchCoverage": {
+        "bibliographyKey": "source_artifact:norwegian-4x4-bibliography",
+        "corpusStats": {
+          "adjacentVariantRecords": 4,
+          "auditCutoff": "2026-04-20",
+          "canonicalProtocolSupportRecords": 6,
+          "earliestYear": 2007,
+          "landingCorpusRecords": 20,
+          "latestYear": 2024,
+          "mixedOrNullClinicalRecords": 3,
+          "refinedPass2Records": 42,
+          "safetyAndContraindicationRecords": 9
+        }
+      },
+      "revision": {
+        "pageRevisionId": "sha256:ffc547991d71a8edb14ab9d77f0916ddb145678431dac2bf7711e2ba0fd26609",
+        "recipeHash": "sha256:cea7c91ea7038436bcc840ce74f9c12e2fabd1ed43fc0eb9a3d980a9a06cf227",
+        "runSpecRevisionId": "sha256:47b2a4962e2377d77e990b57f4187759bd11a0b8ad1dad7ac7f9f7d4b9306501"
+      },
+      "safety": {
+        "avoidOrGetClinicianGuidance": [
+          "known_cardiovascular_disease",
+          "exertional_chest_pain_or_pressure",
+          "unexplained_shortness_of_breath",
+          "syncope_or_near_syncope",
+          "known_significant_arrhythmia",
+          "heart_failure",
+          "recent_myocardial_infarction_or_stroke",
+          "uncontrolled_hypertension",
+          "myocarditis_or_pericarditis_history_or_recent_concern",
+          "pregnancy_or_early_postpartum",
+          "diabetes_with_hypoglycemia_risk_or_insulin_secretagogue_use",
+          "beta_blocker_or_heart_rate_limiting_medication_use",
+          "severe_asthma_or_copd_symptoms",
+          "acute_illness_fever_or_recent_significant_infection",
+          "orthopedic_injury_or_pain_that_worsens_with_vigorous_exercise",
+          "long_covid_or_post_exertional_malaise_pattern"
+        ],
+        "cautionLevel": "high",
+        "notes": [
+          "This is a bounded wellness self-experiment, not a treatment plan.",
+          "Use a low-impact modality if injury risk or running load is a concern.",
+          "Keep the first session conservative; the target is repeatable hard aerobic work, not maximal sprinting.",
+          "Do not run this protocol while acutely ill, febrile, or recovering from a significant infection.",
+          "People on heart-rate-limiting medication may need clinician-guided intensity targets because HR zones can be misleading."
+        ],
+        "stopIf": [
+          "chest_pain_or_pressure",
+          "faintness",
+          "severe_dizziness",
+          "confusion",
+          "palpitations",
+          "unusual_shortness_of_breath",
+          "neurologic_symptoms",
+          "severe_or_worsening_joint_or_muscle_pain",
+          "abnormal_recovery_for_more_than_24_to_48_hours"
+        ]
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "sessionLoggingFields": [
+        "session_date",
+        "modality",
+        "interval_peak_hrs",
+        "time_in_85_to_95_percent_hrmax",
+        "active_recovery_hr_range",
+        "rpe_each_interval",
+        "one_minute_hr_recovery",
+        "two_minute_hr_recovery",
+        "symptoms_during_or_after",
+        "caffeine_last_6h",
+        "alcohol_last_24h",
+        "hard_training_last_24h",
+        "sleep_disruption_last_night",
+        "illness_or_fever",
+        "travel_or_timezone_shift"
+      ],
+      "slug": "protocols/norwegian-4x4/norwegian-4x4",
+      "status": "field-testing",
+      "summary": "A 49-day Murph self-experiment using wearable-guided 4 x 4 minute aerobic intervals to test cardio-fitness signal, heart-rate recovery, resting heart rate, and recovery context without claiming disease treatment or long-term outcomes.",
+      "testPlans": [
+        {
+          "baselineDays": 7,
+          "durationDays": 49,
+          "interventionDays": 42,
+          "minimumAdherenceSessions": 8,
+          "notes": [
+            "Use the wearable cardio-fitness or VO2max estimate as a noisy proxy, not as a laboratory VO2max measurement.",
+            "Session fidelity is part of the outcome; record whether each interval reached the intended heart-rate zone without unsafe symptoms.",
+            "Resting heart rate and heart-rate recovery may be useful secondary signals, but sleep, illness, stress, alcohol, heat, and training load can confound them.",
+            "HRV is exploratory. Sleep efficiency is recovery context and a confounder; neither is a promised outcome."
+          ],
+          "planId": "wearable-cardio-fitness-49d",
+          "primaryBiomarkerKey": "biomarker:estimated-vo2max",
+          "secondaryBiomarkerKeys": [
+            "biomarker:resting-heart-rate",
+            "biomarker:hrv-rmssd",
+            "biomarker:sleep-efficiency",
+            "biomarker:morning-blood-pressure"
+          ],
+          "targetAdherenceSessions": 12
+        }
+      ],
+      "title": "Murph Norwegian 4x4"
+    },
+    {
+      "aliases": [
         "red light glasses before bed",
         "amber glasses before bed",
         "blue-blocking glasses before bed",
@@ -2616,7 +3595,15 @@
           "type": "cites"
         },
         {
+          "target": "source_artifact:pmid-20030543",
+          "type": "cites"
+        },
+        {
           "target": "source_artifact:pmid-33707105",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-30427265",
           "type": "cites"
         },
         {
@@ -2629,6 +3616,42 @@
         },
         {
           "target": "source_artifact:pmid-29991437",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-33587901",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-36051910",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-41166315",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-41565717",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-27322730",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-15713707",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-27226262",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-26414986",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-41421618",
           "type": "cites"
         }
       ],
@@ -2673,7 +3696,7 @@
         }
       },
       "revision": {
-        "pageRevisionId": "sha256:9ec8f6231e63d379657b315cd5a636d324b29eae7650c019c8ad4391575e6b0c",
+        "pageRevisionId": "sha256:d0dacad5a2145daf78ef64b207350c7bc897a7e66d01a7e1d43776eba5f8ee1f",
         "recipeHash": "sha256:ee137c9273b8472bc85172302fa11f44d31779ccfc119938f0312e840551d3b0",
         "runSpecRevisionId": "sha256:54523023567d4c25e2100416dff53a9d091d93bc0ca76280305255c022797e48"
       },
@@ -3093,6 +4116,66 @@
     },
     {
       "aliases": [
+        "doi-10.3390-ijerph17145103"
+      ],
+      "body": "This source sits in the Murph shortlist bucket **Wearable or testable endpoints**.\n\n**Why it matters:** Acute implementation source showing how heart rate behaves during a 4x4 session and why target-zone fidelity needs to be logged.\n\n**Protocol takeaway:** Use this source only within its `claimUse: supports-protocol` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
+      "categories": [
+        "norwegian-4x4",
+        "hiit",
+        "exercise"
+      ],
+      "claimUse": "supports-protocol",
+      "entityType": "source_artifact",
+      "evidenceBucket": "Wearable or testable endpoints",
+      "key": "source_artifact:doi-10.3390-ijerph17145103",
+      "modality": "Aerobic high-intensity interval training / Norwegian 4x4 context",
+      "murphV1Priority": "High",
+      "norwegian4x4Focus": "Direct support",
+      "pdfRightsStatus": "open_access",
+      "potentialMurphEndpoints": [
+        "estimated VO2max / cardio-fitness proxy",
+        "session heart-rate fidelity",
+        "heart-rate recovery",
+        "symptoms and adherence"
+      ],
+      "protocolTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:norwegian-4x4",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/norwegian-4x4/doi-10.3390-ijerph17145103.md",
+      "revision": {
+        "pageRevisionId": "sha256:13fcab68c9d0ff3f09e946283a1e9bb9ddab779eab224f1f8ff8c1cc49569413",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/norwegian-4x4/doi-10.3390-ijerph17145103",
+      "source": {
+        "authors": "J J Acala, D Roche-Willis, T A Astorino",
+        "citation": "J J Acala, D Roche-Willis, T A Astorino. Characterizing the heart rate response to the 4 × 4 interval exercise protocol. International Journal of Environmental Research and Public Health. 2020. doi:10.3390/ijerph17145103",
+        "doi": "10.3390/ijerph17145103",
+        "journal": "International Journal of Environmental Research and Public Health",
+        "kind": "journal_article",
+        "title": "Characterizing the heart rate response to the 4 × 4 interval exercise protocol",
+        "url": "https://www.mdpi.com/1660-4601/17/14/5103",
+        "year": 2020
+      },
+      "status": "draft",
+      "studyDesign": "See source metadata and bibliography for exact design.",
+      "summary": "Acute implementation source showing how heart rate behaves during a 4x4 session and why target-zone fidelity needs to be logged.",
+      "title": "Characterizing the heart rate response to the 4 × 4 interval exercise protocol",
+      "whyItMatters": "Acute implementation source showing how heart rate behaves during a 4x4 session and why target-zone fidelity needs to be logged."
+    },
+    {
+      "aliases": [
         "linkedin bryan johnson core body temp sauna april 2026"
       ],
       "artifacts": [
@@ -3303,6 +4386,271 @@
       "whyItMatters": "Strong narrative synthesis focused on cardiovascular mechanisms and outcomes"
     },
     {
+      "body": "## What this is\n\nThis page represents Murph's structured Norwegian 4x4 research corpus used to design the canonical protocol page. It is a curation artifact, not a primary study.\n\n## Corpus at a glance\n\n- 42 refined pass-2 records\n- 20 records landed into the local machine-readable corpus draft\n- 6 records marked as directly supporting the protocol recipe\n- 9 records primarily used for safety and contraindication language\n- 3 larger clinical mixed/null records that prevent overclaiming superiority\n- 4 adjacent-variant records that should probably become separate pages\n\n## Evidence backbone\n\n- `source_artifact:pmid-17414804` — direct canonical healthy-adult 4x4 RCT.\n- `source_artifact:pmid-30733142` — HIIT protocol/VO2max meta-analysis supporting long-interval programming.\n- `source_artifact:pmid-24066036` — VO2max trainability and response-variability context.\n- `source_artifact:ntnu-cerg-norwegian-4x4` — public protocol-dose description.\n- `source_artifact:doi-10.3390-ijerph17145103` — heart-rate response and target-zone fidelity.\n- `source_artifact:pmid-23988787` — RPE-only guidance can miss the intended target intensity.\n\n## Safety and contraindications\n\nSafety claims should use `source_artifact:pmid-22879367`, `source_artifact:pmid-30376749`, `source_artifact:pmid-29416382`, `source_artifact:pmid-32860412`, and `source_artifact:pmid-32100573`. These are safety-only or guideline/context sources and should not be used to imply that unscreened home HIIT is risk-free.\n\n## Mixed and null evidence\n\nThe protocol must visibly include `source_artifact:pmid-25464446`, `source_artifact:pmid-28082387`, and `source_artifact:pmid-33560320` because they prevent overclaiming from earlier small positive trials.\n\n## Adjacent variants to split\n\nLow-volume 1 x 4 HIIT, sprint-interval training, athlete-performance 4x4, disease-treatment cardiac rehabilitation, and metabolic-syndrome/diabetes HIIT should not be collapsed into the canonical page.\n\n## Landing shortlist\n\n- `source_artifact:pmid-17414804` — Evidence backbone; claimUse `supports-protocol`; Canonical small RCT supporting the Norwegian 4x4 dose as a VO2max-oriented aerobic interval protocol.\n- `source_artifact:ntnu-cerg-norwegian-4x4` — Protocol dose and design; claimUse `supports-protocol`; Public-facing source for the commonly cited Norwegian 4x4 session structure.\n- `source_artifact:pmid-30733142` — Protocol dose and design; claimUse `supports-protocol`; Meta-analysis used to justify long-interval HIIT as a plausible VO2max-oriented design class.\n- `source_artifact:pmid-24066036` — Context-only rationale; claimUse `context-only`; Open-access meta-analysis supporting the general concept of VO2max trainability from HIIT while showing response variability.\n- `source_artifact:doi-10.3390-ijerph17145103` — Wearable or testable endpoints; claimUse `supports-protocol`; Acute implementation source showing how heart rate behaves during a 4x4 session and why target-zone fidelity needs to be logged.\n- `source_artifact:pmid-23988787` — Wearable or testable endpoints; claimUse `supports-protocol`; Implementation caution source: RPE-only guidance can miss the intended HR target during interval training.\n- `source_artifact:pmid-25464446` — Mixed and null clinical evidence; claimUse `context-only`; Larger CAD trial that prevents overclaiming HIIT superiority over moderate continuous training.\n- `source_artifact:pmid-28082387` — Mixed and null clinical evidence; claimUse `context-only`; Larger HFrEF trial that did not confirm clear HIIT superiority and highlighted intensity-fidelity issues.\n- `source_artifact:pmid-33560320` — Mixed and null clinical evidence; claimUse `context-only`; HFpEF clinical trial showing no significant primary peak-VO2 advantage for HIIT over comparators.\n- `source_artifact:pmid-22879367` — Safety and contraindications; claimUse `safety-only`; Quantified supervised cardiac-rehabilitation safety registry; key low-but-not-zero risk framing.\n- `source_artifact:pmid-30376749` — Safety and contraindications; claimUse `safety-only`; Systematic review of HIIT safety in cardiovascular disease populations.\n- `source_artifact:pmid-29416382` — Safety and contraindications; claimUse `safety-only`; Cardiac-rehabilitation meta-analysis supporting efficacy and safety context under supervision.\n- `source_artifact:pmid-32860412` — Safety and contraindications; claimUse `safety-only`; Backbone guideline for cardiovascular disease, exercise eligibility, and clinician-clearance boundaries.\n- `source_artifact:pmid-32100573` — Safety and contraindications; claimUse `safety-only`; AHA scientific statement for acute cardiovascular event risk and progression language.\n- `source_artifact:pmid-33239350` — Public health context; claimUse `context-only`; Public-health context showing vigorous aerobic exercise as one option within weekly activity guidance.\n- `source_artifact:pmid-30293954` — Wearable or testable endpoints; claimUse `context-only`; HRV/autonomic-control synthesis; useful for exploratory HRV endpoint framing.\n- `source_artifact:pmid-28846513` — Adjacent variants to split; claimUse `context-only`; Low-volume 1x4 HIIT evidence that should not be merged into canonical 4x4.\n- `source_artifact:pmid-39256000` — Adjacent variants to split; claimUse `context-only`; Recent metabolic-syndrome HIIT synthesis; useful to separate metabolic HIIT and low-volume variants from canonical 4x4.\n- `source_artifact:pmid-36314990` — Adjacent variants to split; claimUse `context-only`; Athlete trial comparing 4x4-style intervals with sprint-interval training; supports not merging SIT with Norwegian 4x4.\n- `source_artifact:pmid-37608507` — Adjacent variants to split; claimUse `context-only`; Female athlete comparison source supporting separation of 4x4 from supramaximal sprint-interval training.\n\n## Use rule\n\nUse this page to understand why the canonical Murph version is a **2x/week, 6-week, wearable-guided self-experiment** rather than a maximal training prescription. Do not cite this bibliography in place of primary intervention evidence, safety guidance, or variant-specific source pages.",
+      "categories": [
+        "norwegian-4x4",
+        "hiit",
+        "cardiovascular",
+        "exercise"
+      ],
+      "corpusStats": {
+        "adjacentVariantRecords": 4,
+        "auditCutoff": "2026-04-20",
+        "canonicalProtocolSupportRecords": 6,
+        "earliestYear": 2007,
+        "landingCorpusRecords": 20,
+        "latestYear": 2024,
+        "mixedOrNullClinicalRecords": 3,
+        "refinedPass2Records": 42,
+        "safetyAndContraindicationRecords": 9
+      },
+      "entityType": "source_artifact",
+      "evidenceBucket": "Research curation",
+      "key": "source_artifact:norwegian-4x4-bibliography",
+      "modality": "Norwegian-style 4 x 4 aerobic intervals and adjacent HIIT literature",
+      "murphV1Priority": "High",
+      "norwegian4x4Focus": "Yes",
+      "potentialMurphEndpoints": [
+        "estimated VO2max / cardio-fitness proxy",
+        "session HR target fidelity",
+        "resting heart rate",
+        "heart-rate recovery",
+        "HRV RMSSD",
+        "sleep efficiency",
+        "symptoms and adherence"
+      ],
+      "protocolTakeaway": "Treat this as a research map and curation artifact, not as primary evidence.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:norwegian-4x4",
+          "type": "related_protocol"
+        },
+        {
+          "target": "source_artifact:pmid-17414804",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:ntnu-cerg-norwegian-4x4",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-30733142",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-24066036",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:doi-10.3390-ijerph17145103",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-23988787",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-25464446",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-28082387",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-33560320",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-22879367",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-30376749",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-29416382",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-32860412",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-32100573",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-33239350",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-30293954",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-28846513",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-39256000",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-36314990",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-37608507",
+          "type": "cites"
+        }
+      ],
+      "relativePath": "sources/norwegian-4x4/norwegian-4x4-bibliography.md",
+      "revision": {
+        "pageRevisionId": "sha256:1bda0a5b1c51179f6c216d09e3f6187b1daf2915dad8a627514b9345cba4dc25",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/norwegian-4x4/norwegian-4x4-bibliography",
+      "source": {
+        "authors": "Murph Research",
+        "citation": "Murph Research. Murph Norwegian 4x4 research bibliography. Prepared 2026-04-20.",
+        "journal": "Murph internal research curation",
+        "kind": "other",
+        "title": "Murph Norwegian 4x4 research bibliography",
+        "year": 2026
+      },
+      "status": "field-testing",
+      "studyDesign": "Research bibliography / curation artifact",
+      "summary": "Structured Murph research corpus and evidence map for the canonical Norwegian 4x4 self-experiment, separating protocol support, mixed clinical evidence, safety guidance, wearable endpoints, and adjacent variants.",
+      "title": "Murph Norwegian 4x4 research bibliography",
+      "whyItMatters": "Structured curation artifact used to build the canonical Norwegian 4x4 protocol and avoid merging adjacent HIIT variants."
+    },
+    {
+      "aliases": [
+        "ntnu-cerg-norwegian-4x4"
+      ],
+      "body": "This source sits in the Murph shortlist bucket **Protocol dose and design**.\n\n**Why it matters:** Public-facing source for the commonly cited Norwegian 4x4 session structure.\n\n**Protocol takeaway:** Use this source only within its `claimUse: supports-protocol` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
+      "categories": [
+        "norwegian-4x4",
+        "hiit",
+        "exercise"
+      ],
+      "claimUse": "supports-protocol",
+      "entityType": "source_artifact",
+      "evidenceBucket": "Protocol dose and design",
+      "key": "source_artifact:ntnu-cerg-norwegian-4x4",
+      "modality": "Aerobic high-intensity interval training / Norwegian 4x4 context",
+      "murphV1Priority": "High",
+      "norwegian4x4Focus": "Direct support",
+      "pdfRightsStatus": "unknown",
+      "potentialMurphEndpoints": [
+        "estimated VO2max / cardio-fitness proxy",
+        "session heart-rate fidelity",
+        "heart-rate recovery",
+        "symptoms and adherence"
+      ],
+      "protocolTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:norwegian-4x4",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/norwegian-4x4/ntnu-cerg-norwegian-4x4.md",
+      "revision": {
+        "pageRevisionId": "sha256:65a6ef9250c174f7de69abd6168757f108cd5398928ee0cefcaf1e234246ed58",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/norwegian-4x4/ntnu-cerg-norwegian-4x4",
+      "source": {
+        "authors": "Cardiac Exercise Research Group, NTNU",
+        "citation": "Cardiac Exercise Research Group, NTNU. CERG's 4x4 interval training advice. NTNU public protocol page. 2024.",
+        "journal": "NTNU public protocol page",
+        "kind": "external_protocol",
+        "title": "CERG's 4x4 interval training advice",
+        "url": "https://www.ntnu.edu/cerg/advice",
+        "year": 2024
+      },
+      "status": "draft",
+      "studyDesign": "See source metadata and bibliography for exact design.",
+      "summary": "Public-facing source for the commonly cited Norwegian 4x4 session structure.",
+      "title": "CERG's 4x4 interval training advice",
+      "whyItMatters": "Public-facing source for the commonly cited Norwegian 4x4 session structure."
+    },
+    {
+      "artifactNeeded": false,
+      "body": "This source sits in the Murph shortlist bucket **Shift-work adjacent variant**.\n\n**Why it matters:** Supports the short-wavelength mechanism under shift-work conditions without turning shift-work findings into a general bedtime protocol claim.\n\n**Potential Murph endpoints:** melatonin suppression, alertness, performance, sleepiness\n\n**Protocol takeaway:** Keep shift-work lighting questions separate from the ordinary pre-bed eyewear protocol.\n\n**Claim use:** `context-only`. Keep this classification when wiring claims so adjacent mechanism papers do not become direct support for the consumer bedtime protocol.",
+      "categories": [
+        "red-light-glasses-before-bed",
+        "evening-light"
+      ],
+      "claimUse": "context-only",
+      "entityType": "source_artifact",
+      "evidenceBucket": "Shift-work adjacent variant",
+      "key": "source_artifact:pmid-15713707",
+      "modality": "evening short-wavelength or melanopic light reduction",
+      "murphV1Priority": "Low",
+      "pdfRightsStatus": "permission_required",
+      "potentialMurphEndpoints": [
+        "melatonin suppression",
+        "alertness",
+        "performance",
+        "sleepiness"
+      ],
+      "protocolTakeaway": "Keep shift-work lighting questions separate from the ordinary pre-bed eyewear protocol.",
+      "quality": "usable",
+      "redLightGlassesFocus": "Adjacent",
+      "relations": [
+        {
+          "target": "protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:evening-light-reduction",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/red-light-glasses-before-bed/pmid-15713707.md",
+      "revision": {
+        "pageRevisionId": "sha256:a6f308c7aec56769473f9f463e9af2c603ccbea29a2ee985aad12b88851d34c6",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/red-light-glasses-before-bed/pmid-15713707",
+      "source": {
+        "authors": "Kayumov L, Brown G, Jindal R, Buttoo K, Shapiro CM",
+        "citation": "Kayumov L, et al. Blocking low-wavelength light prevents nocturnal melatonin suppression with no adverse effect on performance during simulated shift work. J Clin Endocrinol Metab. 2005;90(5):2755-2761. doi:10.1210/jc.2004-2062.",
+        "doi": "10.1210/jc.2004-2062",
+        "journal": "Journal of Clinical Endocrinology & Metabolism",
+        "kind": "journal_article",
+        "pmid": "15713707",
+        "title": "Blocking low-wavelength light prevents nocturnal melatonin suppression with no adverse effect on performance during simulated shift work",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/15713707/",
+        "year": 2005
+      },
+      "status": "draft",
+      "studyDesign": "Simulated shift-work physiology study",
+      "summary": "Shift-work physiology paper used only as adjacent mechanism context, not as bedtime wind-down proof.",
+      "title": "Blocking low-wavelength light prevents nocturnal melatonin suppression with no adverse effect on performance during simulated shift work",
+      "whyItMatters": "Supports the short-wavelength mechanism under shift-work conditions without turning shift-work findings into a general bedtime protocol claim."
+    },
+    {
       "aliases": [
         "Kukkonen-Harjula 2006 sauna review"
       ],
@@ -3357,6 +4705,67 @@
       "summary": "Anchor review used for older safety and physiology context in the Murph sauna research base.",
       "title": "Health effects and risks of sauna bathing",
       "whyItMatters": "Anchor review that framed many later sauna health discussions and remains useful for older safety and physiology context."
+    },
+    {
+      "aliases": [
+        "pmid-17414804"
+      ],
+      "body": "This source sits in the Murph shortlist bucket **Evidence backbone**.\n\n**Why it matters:** Canonical small RCT supporting the Norwegian 4x4 dose as a VO2max-oriented aerobic interval protocol.\n\n**Protocol takeaway:** Use this source only within its `claimUse: supports-protocol` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
+      "categories": [
+        "norwegian-4x4",
+        "hiit",
+        "exercise"
+      ],
+      "claimUse": "supports-protocol",
+      "entityType": "source_artifact",
+      "evidenceBucket": "Evidence backbone",
+      "key": "source_artifact:pmid-17414804",
+      "modality": "Aerobic high-intensity interval training / Norwegian 4x4 context",
+      "murphV1Priority": "High",
+      "norwegian4x4Focus": "Direct support",
+      "pdfRightsStatus": "permission_required",
+      "potentialMurphEndpoints": [
+        "estimated VO2max / cardio-fitness proxy",
+        "session heart-rate fidelity",
+        "heart-rate recovery",
+        "symptoms and adherence"
+      ],
+      "protocolTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:norwegian-4x4",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/norwegian-4x4/pmid-17414804.md",
+      "revision": {
+        "pageRevisionId": "sha256:a8581755555b9a47da107b19a28e0e4a1d6e8d563943397dfa7c01ef412b224c",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/norwegian-4x4/pmid-17414804",
+      "source": {
+        "authors": "J Helgerud, K Hoydal, E Wang, T Karlsen, P Berg, M Bjerkaas, T Simonsen, C Helgesen, N Hjorth, R Bach, J Hoff",
+        "citation": "J Helgerud, K Hoydal, E Wang, T Karlsen, P Berg, M Bjerkaas, T Simonsen, C Helgesen, N Hjorth, R Bach, J Hoff. Aerobic high-intensity intervals improve VO2max more than moderate training. Medicine and Science in Sports and Exercise. 2007. doi:10.1249/mss.0b013e3180304570",
+        "doi": "10.1249/mss.0b013e3180304570",
+        "journal": "Medicine and Science in Sports and Exercise",
+        "kind": "journal_article",
+        "pmid": "17414804",
+        "title": "Aerobic high-intensity intervals improve VO2max more than moderate training",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/17414804/",
+        "year": 2007
+      },
+      "status": "draft",
+      "studyDesign": "See source metadata and bibliography for exact design.",
+      "summary": "Canonical small RCT supporting the Norwegian 4x4 dose as a VO2max-oriented aerobic interval protocol.",
+      "title": "Aerobic high-intensity intervals improve VO2max more than moderate training",
+      "whyItMatters": "Canonical small RCT supporting the Norwegian 4x4 dose as a VO2max-oriented aerobic interval protocol."
     },
     {
       "body": "This source sits in the Murph shortlist bucket **Early human RCT**.\n\n**Why it matters:** Useful historical positive anchor for subjective sleep and affect signals.\n\n**Potential Murph endpoints:** sleep quality, sleep diary, positive affect, negative affect\n\n**Protocol takeaway:** Supports a bounded evening test but does not overcome the small-study and subjective-outcome limitations.",
@@ -3414,6 +4823,189 @@
       "whyItMatters": "Useful historical positive anchor for subjective sleep and affect signals."
     },
     {
+      "aliases": [
+        "pmid-22879367"
+      ],
+      "body": "This source sits in the Murph shortlist bucket **Safety and contraindications**.\n\n**Why it matters:** Quantified supervised cardiac-rehabilitation safety registry; key low-but-not-zero risk framing.\n\n**Protocol takeaway:** Use this source only within its `claimUse: safety-only` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
+      "categories": [
+        "norwegian-4x4",
+        "hiit",
+        "exercise"
+      ],
+      "claimUse": "safety-only",
+      "entityType": "source_artifact",
+      "evidenceBucket": "Safety and contraindications",
+      "key": "source_artifact:pmid-22879367",
+      "modality": "Aerobic high-intensity interval training / Norwegian 4x4 context",
+      "murphV1Priority": "High",
+      "norwegian4x4Focus": "Context, safety, or adjacent variant",
+      "pdfRightsStatus": "permission_required",
+      "potentialMurphEndpoints": [
+        "estimated VO2max / cardio-fitness proxy",
+        "session heart-rate fidelity",
+        "heart-rate recovery",
+        "symptoms and adherence"
+      ],
+      "protocolTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:norwegian-4x4",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/norwegian-4x4/pmid-22879367.md",
+      "revision": {
+        "pageRevisionId": "sha256:bcd8de53f9d53d0b2c827597b1d9ffc379d97ee83233713d12f6f0d2485b4672",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/norwegian-4x4/pmid-22879367",
+      "source": {
+        "authors": "O Rognmo, T Moholdt, H Bakken, T Hole, P Molstad, N E Myhr, J Grimsmo, U Wisloff",
+        "citation": "O Rognmo, T Moholdt, H Bakken, T Hole, P Molstad, N E Myhr, J Grimsmo, U Wisloff. Cardiovascular risk of high- versus moderate-intensity aerobic exercise in coronary heart disease patients. Circulation. 2012. doi:10.1161/CIRCULATIONAHA.112.123117",
+        "doi": "10.1161/CIRCULATIONAHA.112.123117",
+        "journal": "Circulation",
+        "kind": "journal_article",
+        "pmid": "22879367",
+        "title": "Cardiovascular risk of high- versus moderate-intensity aerobic exercise in coronary heart disease patients",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/22879367/",
+        "year": 2012
+      },
+      "status": "draft",
+      "studyDesign": "See source metadata and bibliography for exact design.",
+      "summary": "Quantified supervised cardiac-rehabilitation safety registry; key low-but-not-zero risk framing.",
+      "title": "Cardiovascular risk of high- versus moderate-intensity aerobic exercise in coronary heart disease patients",
+      "whyItMatters": "Quantified supervised cardiac-rehabilitation safety registry; key low-but-not-zero risk framing."
+    },
+    {
+      "aliases": [
+        "pmid-23988787"
+      ],
+      "body": "This source sits in the Murph shortlist bucket **Wearable or testable endpoints**.\n\n**Why it matters:** Implementation caution source: RPE-only guidance can miss the intended HR target during interval training.\n\n**Protocol takeaway:** Use this source only within its `claimUse: supports-protocol` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
+      "categories": [
+        "norwegian-4x4",
+        "hiit",
+        "exercise"
+      ],
+      "claimUse": "supports-protocol",
+      "entityType": "source_artifact",
+      "evidenceBucket": "Wearable or testable endpoints",
+      "key": "source_artifact:pmid-23988787",
+      "modality": "Aerobic high-intensity interval training / Norwegian 4x4 context",
+      "murphV1Priority": "High",
+      "norwegian4x4Focus": "Direct support",
+      "pdfRightsStatus": "permission_required",
+      "potentialMurphEndpoints": [
+        "estimated VO2max / cardio-fitness proxy",
+        "session heart-rate fidelity",
+        "heart-rate recovery",
+        "symptoms and adherence"
+      ],
+      "protocolTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:norwegian-4x4",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/norwegian-4x4/pmid-23988787.md",
+      "revision": {
+        "pageRevisionId": "sha256:1043de6d897df63509d90f66f613d0624c274968775433367a01a5758b61a4ea",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/norwegian-4x4/pmid-23988787",
+      "source": {
+        "authors": "I L Aamot, S H Forbord, T Karlsen, A Stoylen",
+        "citation": "I L Aamot, S H Forbord, T Karlsen, A Stoylen. Does rating of perceived exertion result in target exercise intensity during interval training in cardiac rehabilitation? A study of the Borg scale versus a heart rate monitor. Journal of Science and Medicine in Sport. 2014. doi:10.1016/j.jsams.2013.07.019",
+        "doi": "10.1016/j.jsams.2013.07.019",
+        "journal": "Journal of Science and Medicine in Sport",
+        "kind": "journal_article",
+        "pmid": "23988787",
+        "title": "Does rating of perceived exertion result in target exercise intensity during interval training in cardiac rehabilitation? A study of the Borg scale versus a heart rate monitor",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/23988787/",
+        "year": 2014
+      },
+      "status": "draft",
+      "studyDesign": "See source metadata and bibliography for exact design.",
+      "summary": "Implementation caution source: RPE-only guidance can miss the intended HR target during interval training.",
+      "title": "Does rating of perceived exertion result in target exercise intensity during interval training in cardiac rehabilitation? A study of the Borg scale versus a heart rate monitor",
+      "whyItMatters": "Implementation caution source: RPE-only guidance can miss the intended HR target during interval training."
+    },
+    {
+      "aliases": [
+        "pmid-24066036"
+      ],
+      "body": "This source sits in the Murph shortlist bucket **Context-only rationale**.\n\n**Why it matters:** Open-access meta-analysis supporting the general concept of VO2max trainability from HIIT while showing response variability.\n\n**Protocol takeaway:** Use this source only within its `claimUse: context-only` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
+      "categories": [
+        "norwegian-4x4",
+        "hiit",
+        "exercise"
+      ],
+      "claimUse": "context-only",
+      "entityType": "source_artifact",
+      "evidenceBucket": "Context-only rationale",
+      "key": "source_artifact:pmid-24066036",
+      "modality": "Aerobic high-intensity interval training / Norwegian 4x4 context",
+      "murphV1Priority": "Medium",
+      "norwegian4x4Focus": "Context, safety, or adjacent variant",
+      "pdfRightsStatus": "open_access",
+      "potentialMurphEndpoints": [
+        "estimated VO2max / cardio-fitness proxy",
+        "session heart-rate fidelity",
+        "heart-rate recovery",
+        "symptoms and adherence"
+      ],
+      "protocolTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:norwegian-4x4",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/norwegian-4x4/pmid-24066036.md",
+      "revision": {
+        "pageRevisionId": "sha256:c0ee5d18d59cc66d322e874d43d026b2e5b4febb079b18a5a073be5481bb622a",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/norwegian-4x4/pmid-24066036",
+      "source": {
+        "authors": "A P Bacon, R E Carter, E A Ogle, M J Joyner",
+        "citation": "A P Bacon, R E Carter, E A Ogle, M J Joyner. VO2max trainability and high intensity interval training in humans: a meta-analysis. PLOS ONE. 2013. doi:10.1371/journal.pone.0073182",
+        "doi": "10.1371/journal.pone.0073182",
+        "journal": "PLOS ONE",
+        "kind": "review",
+        "pmid": "24066036",
+        "title": "VO2max trainability and high intensity interval training in humans: a meta-analysis",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/24066036/",
+        "year": 2013
+      },
+      "status": "draft",
+      "studyDesign": "See source metadata and bibliography for exact design.",
+      "summary": "Open-access meta-analysis supporting the general concept of VO2max trainability from HIIT while showing response variability.",
+      "title": "VO2max trainability and high intensity interval training in humans: a meta-analysis",
+      "whyItMatters": "Open-access meta-analysis supporting the general concept of VO2max trainability from HIIT while showing response variability."
+    },
+    {
       "body": "This source sits in the Murph shortlist bucket **Intervention design / reality checks**.\n\n**Why it matters:** Classic exercise-adjacent repeated sauna paper\n\n**Potential Murph endpoints:** HRV, plasma volume proxies, performance\n\n**Protocol takeaway:** Shows adaptation may accrue over repeated post-exercise sessions.",
       "categories": [
         "sauna",
@@ -3465,6 +5057,67 @@
       "summary": "Intervention-design source used to shape dose, context, hydration, ramping, and expectation-setting for Murph variants.",
       "title": "Effect of sauna-based heat acclimation on plasma volume and heart rate variability",
       "whyItMatters": "Classic exercise-adjacent repeated sauna paper"
+    },
+    {
+      "aliases": [
+        "pmid-25464446"
+      ],
+      "body": "This source sits in the Murph shortlist bucket **Mixed and null clinical evidence**.\n\n**Why it matters:** Larger CAD trial that prevents overclaiming HIIT superiority over moderate continuous training.\n\n**Protocol takeaway:** Use this source only within its `claimUse: context-only` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
+      "categories": [
+        "norwegian-4x4",
+        "hiit",
+        "exercise"
+      ],
+      "claimUse": "context-only",
+      "entityType": "source_artifact",
+      "evidenceBucket": "Mixed and null clinical evidence",
+      "key": "source_artifact:pmid-25464446",
+      "modality": "Aerobic high-intensity interval training / Norwegian 4x4 context",
+      "murphV1Priority": "High",
+      "norwegian4x4Focus": "Context, safety, or adjacent variant",
+      "pdfRightsStatus": "not_redistributable",
+      "potentialMurphEndpoints": [
+        "estimated VO2max / cardio-fitness proxy",
+        "session heart-rate fidelity",
+        "heart-rate recovery",
+        "symptoms and adherence"
+      ],
+      "protocolTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:norwegian-4x4",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/norwegian-4x4/pmid-25464446.md",
+      "revision": {
+        "pageRevisionId": "sha256:aebc3443b0e0fad11bd1ccaeba61475d1a70469e8b7c85d967811a6bebcb225c",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/norwegian-4x4/pmid-25464446",
+      "source": {
+        "authors": "V M Conraads, N Pattyn, C De Maeyer, P J Beckers, E Coeckelberghs, V A Cornelissen, J Denollet, G Frederix, K Goetschalckx, V Y Hoymans, N Possemiers, D Schepers, D Vissers, C J Vrints, E M Van Craenenbroeck",
+        "citation": "V M Conraads, N Pattyn, C De Maeyer, P J Beckers, E Coeckelberghs, V A Cornelissen, J Denollet, G Frederix, K Goetschalckx, V Y Hoymans, N Possemiers, D Schepers, D Vissers, C J Vrints, E M Van Craenenbroeck. Aerobic interval training and continuous training equally improve aerobic exercise capacity in patients with coronary artery disease: the SAINTEX-CAD study. International Journal of Cardiology. 2015. doi:10.1016/j.ijcard.2014.10.155",
+        "doi": "10.1016/j.ijcard.2014.10.155",
+        "journal": "International Journal of Cardiology",
+        "kind": "journal_article",
+        "pmid": "25464446",
+        "title": "Aerobic interval training and continuous training equally improve aerobic exercise capacity in patients with coronary artery disease: the SAINTEX-CAD study",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/25464446/",
+        "year": 2015
+      },
+      "status": "draft",
+      "studyDesign": "See source metadata and bibliography for exact design.",
+      "summary": "Larger CAD trial that prevents overclaiming HIIT superiority over moderate continuous training.",
+      "title": "Aerobic interval training and continuous training equally improve aerobic exercise capacity in patients with coronary artery disease: the SAINTEX-CAD study",
+      "whyItMatters": "Larger CAD trial that prevents overclaiming HIIT superiority over moderate continuous training."
     },
     {
       "aliases": [
@@ -3521,6 +5174,177 @@
       "whyItMatters": "Landmark Kuopio cohort paper"
     },
     {
+      "artifactNeeded": false,
+      "body": "This source sits in the Murph shortlist bucket **Clinical circadian split**.\n\n**Why it matters:** Supports separating clinician-guided circadian-disorder protocols from a general bedtime eyewear self-experiment.\n\n**Potential Murph endpoints:** circadian phase, sleep timing, guideline framing\n\n**Protocol takeaway:** Disorder-specific timed light and darkness protocols belong on separate pages with clinical framing.\n\n**Claim use:** `safety-only`. Keep this classification when wiring claims so clinical guidelines do not become direct evidence for the ordinary consumer protocol.",
+      "categories": [
+        "red-light-glasses-before-bed",
+        "evening-light"
+      ],
+      "claimUse": "safety-only",
+      "entityType": "source_artifact",
+      "evidenceBucket": "Clinical circadian split",
+      "key": "source_artifact:pmid-26414986",
+      "modality": "evening short-wavelength or melanopic light reduction",
+      "murphV1Priority": "Medium",
+      "pdfRightsStatus": "not_redistributable",
+      "potentialMurphEndpoints": [
+        "circadian phase",
+        "sleep timing",
+        "guideline framing"
+      ],
+      "protocolTakeaway": "Disorder-specific timed light and darkness protocols belong on separate pages with clinical framing.",
+      "quality": "usable",
+      "redLightGlassesFocus": "Adjacent",
+      "relations": [
+        {
+          "target": "protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:evening-light-reduction",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/red-light-glasses-before-bed/pmid-26414986.md",
+      "revision": {
+        "pageRevisionId": "sha256:aa56928e9313f31db9cca2b885406297fa2be70f0e063468c8a07ade892c29ba",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/red-light-glasses-before-bed/pmid-26414986",
+      "source": {
+        "authors": "Auger RR, Burgess HJ, Emens JS, Deriy LV, Thomas SM, Sharkey KM",
+        "citation": "Auger RR, et al. Clinical Practice Guideline for the Treatment of Intrinsic Circadian Rhythm Sleep-Wake Disorders: An Update for 2015. J Clin Sleep Med. 2015;11(10):1199-1236. doi:10.5664/jcsm.5100.",
+        "doi": "10.5664/jcsm.5100",
+        "journal": "Journal of Clinical Sleep Medicine",
+        "kind": "guideline",
+        "pmid": "26414986",
+        "title": "Clinical Practice Guideline for the Treatment of Intrinsic Circadian Rhythm Sleep-Wake Disorders: An Update for 2015",
+        "url": "https://jcsm.aasm.org/doi/10.5664/jcsm.5100",
+        "year": 2015
+      },
+      "status": "draft",
+      "studyDesign": "Clinical practice guideline",
+      "summary": "Clinical circadian guideline used to keep disorder-specific timing protocols separate from Murph's wellness eyewear test.",
+      "title": "Clinical Practice Guideline for the Treatment of Intrinsic Circadian Rhythm Sleep-Wake Disorders: An Update for 2015",
+      "whyItMatters": "Supports separating clinician-guided circadian-disorder protocols from a general bedtime eyewear self-experiment."
+    },
+    {
+      "artifactNeeded": false,
+      "body": "This source sits in the Murph shortlist bucket **Psychiatric virtual-darkness variant**.\n\n**Why it matters:** Shows why mania treatment protocols and ordinary evening eyewear should remain separate in Murph.\n\n**Potential Murph endpoints:** mania rating scales, actigraphy motor activity, adverse events\n\n**Protocol takeaway:** Keep psychiatric virtual-darkness use clinician-guided and outside the ordinary bedtime self-experiment.\n\n**Claim use:** `safety-only`. Keep this classification when wiring claims so psychiatric-adjacent trials do not become general support for the bedtime protocol.",
+      "categories": [
+        "red-light-glasses-before-bed",
+        "evening-light"
+      ],
+      "claimUse": "safety-only",
+      "entityType": "source_artifact",
+      "evidenceBucket": "Psychiatric virtual-darkness variant",
+      "key": "source_artifact:pmid-27226262",
+      "modality": "evening short-wavelength or melanopic light reduction",
+      "murphV1Priority": "Low",
+      "pdfRightsStatus": "not_redistributable",
+      "potentialMurphEndpoints": [
+        "mania rating scales",
+        "actigraphy motor activity",
+        "adverse events"
+      ],
+      "protocolTakeaway": "Keep psychiatric virtual-darkness use clinician-guided and outside the ordinary bedtime self-experiment.",
+      "quality": "usable",
+      "redLightGlassesFocus": "Adjacent",
+      "relations": [
+        {
+          "target": "protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:evening-light-reduction",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/red-light-glasses-before-bed/pmid-27226262.md",
+      "revision": {
+        "pageRevisionId": "sha256:b42869052d3879255ddb6b7fda647daf72ccd116f2474a4e7f5fcd34004f359a",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/red-light-glasses-before-bed/pmid-27226262",
+      "source": {
+        "authors": "Henriksen TEG, Skrede S, Fasmer OB, Schoeyen H, Leskauskaite I, Bjorke-Bertheussen J, et al.",
+        "citation": "Henriksen TEG, et al. Blue-blocking glasses as additive treatment for mania: a randomized placebo-controlled trial. Bipolar Disord. 2016;18(3):221-232. doi:10.1111/bdi.12390.",
+        "doi": "10.1111/bdi.12390",
+        "journal": "Bipolar Disorders",
+        "kind": "journal_article",
+        "pmid": "27226262",
+        "title": "Blue-blocking glasses as additive treatment for mania: a randomized placebo-controlled trial",
+        "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC5089565/",
+        "year": 2016
+      },
+      "status": "draft",
+      "studyDesign": "Randomized placebo-controlled trial",
+      "summary": "Psychiatric virtual-darkness trial used to keep mania treatment separate from the bedtime wellness protocol.",
+      "title": "Blue-blocking glasses as additive treatment for mania: a randomized placebo-controlled trial",
+      "whyItMatters": "Shows why mania treatment protocols and ordinary evening eyewear should remain separate in Murph."
+    },
+    {
+      "artifactNeeded": false,
+      "body": "This source sits in the Murph shortlist bucket **Clinical circadian disorder variant**.\n\n**Why it matters:** Reinforces that delayed-sleep-phase protocols need their own framing and should not be merged into Murph's general bedtime experiment.\n\n**Potential Murph endpoints:** sleep timing, actigraphy sleep onset, circadian phase\n\n**Protocol takeaway:** Use as an adjacent variant, not as direct proof for the ordinary bedtime eyewear page.\n\n**Claim use:** `context-only`. Keep this classification when wiring claims so circadian-disorder studies do not become direct support for the ordinary consumer protocol.",
+      "categories": [
+        "red-light-glasses-before-bed",
+        "evening-light"
+      ],
+      "claimUse": "context-only",
+      "entityType": "source_artifact",
+      "evidenceBucket": "Clinical circadian disorder variant",
+      "key": "source_artifact:pmid-27322730",
+      "modality": "evening short-wavelength or melanopic light reduction",
+      "murphV1Priority": "Medium",
+      "pdfRightsStatus": "permission_required",
+      "potentialMurphEndpoints": [
+        "sleep timing",
+        "actigraphy sleep onset",
+        "circadian phase"
+      ],
+      "protocolTakeaway": "Use as an adjacent variant, not as direct proof for the ordinary bedtime eyewear page.",
+      "quality": "usable",
+      "redLightGlassesFocus": "Adjacent",
+      "relations": [
+        {
+          "target": "protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:evening-light-reduction",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/red-light-glasses-before-bed/pmid-27322730.md",
+      "revision": {
+        "pageRevisionId": "sha256:7403ffaaceb57c23f23a15b7871cef58ff1dfeeb1e8b05ab5d987656a9d05282",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/red-light-glasses-before-bed/pmid-27322730",
+      "source": {
+        "authors": "Esaki Y, Kitajima T, Takeuchi N, Tsuboi Y, Furukawa O, Moriwaki A, et al.",
+        "citation": "Esaki Y, et al. Wearing blue light-blocking glasses in the evening advances circadian rhythms in patients with delayed sleep phase disorder. Chronobiol Int. 2016;33(8):1037-1044. doi:10.1080/07420528.2016.1194289.",
+        "doi": "10.1080/07420528.2016.1194289",
+        "journal": "Chronobiology International",
+        "kind": "journal_article",
+        "pmid": "27322730",
+        "title": "Wearing blue light-blocking glasses in the evening advances circadian rhythms in patients with delayed sleep phase disorder",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/27322730/",
+        "year": 2016
+      },
+      "status": "draft",
+      "studyDesign": "Clinical intervention study",
+      "summary": "Delayed-sleep-phase study used to keep clinical circadian-disorder pages separate from the ordinary bedtime protocol.",
+      "title": "Wearing blue light-blocking glasses in the evening advances circadian rhythms in patients with delayed sleep phase disorder",
+      "whyItMatters": "Reinforces that delayed-sleep-phase protocols need their own framing and should not be merged into Murph's general bedtime experiment."
+    },
+    {
       "body": "This source sits in the Murph shortlist bucket **Long-term Finnish cohort evidence**.\n\n**Why it matters:** Supports brain-health narrative, not immediate wearable outcomes\n\n**Potential Murph endpoints:** subjective cognition, sleep, long-horizon education\n\n**Protocol takeaway:** Use cautiously; not a short-term endpoint paper.",
       "categories": [
         "sauna"
@@ -3571,6 +5395,67 @@
       "summary": "Prospective cohort source used as long-term context for rationale and screening, not as a short-term personal endpoint.",
       "title": "Sauna bathing is inversely associated with dementia and Alzheimer's disease in middle-aged Finnish men",
       "whyItMatters": "Supports brain-health narrative, not immediate wearable outcomes"
+    },
+    {
+      "aliases": [
+        "pmid-28082387"
+      ],
+      "body": "This source sits in the Murph shortlist bucket **Mixed and null clinical evidence**.\n\n**Why it matters:** Larger HFrEF trial that did not confirm clear HIIT superiority and highlighted intensity-fidelity issues.\n\n**Protocol takeaway:** Use this source only within its `claimUse: context-only` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
+      "categories": [
+        "norwegian-4x4",
+        "hiit",
+        "exercise"
+      ],
+      "claimUse": "context-only",
+      "entityType": "source_artifact",
+      "evidenceBucket": "Mixed and null clinical evidence",
+      "key": "source_artifact:pmid-28082387",
+      "modality": "Aerobic high-intensity interval training / Norwegian 4x4 context",
+      "murphV1Priority": "High",
+      "norwegian4x4Focus": "Context, safety, or adjacent variant",
+      "pdfRightsStatus": "permission_required",
+      "potentialMurphEndpoints": [
+        "estimated VO2max / cardio-fitness proxy",
+        "session heart-rate fidelity",
+        "heart-rate recovery",
+        "symptoms and adherence"
+      ],
+      "protocolTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:norwegian-4x4",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/norwegian-4x4/pmid-28082387.md",
+      "revision": {
+        "pageRevisionId": "sha256:1d6eaf6faa7d6ed91beea71e30f73847c1a4aaf717661840776d40b3f26bb33c",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/norwegian-4x4/pmid-28082387",
+      "source": {
+        "authors": "O Ellingsen, M Halle, V Conraads, A Stoylen, H Dalen, C Delagardelle, A I Larsen, T Hole, A Mezzani, E M Van Craenenbroeck, and SMARTEX-HF collaborators",
+        "citation": "O Ellingsen, M Halle, V Conraads, A Stoylen, H Dalen, C Delagardelle, A I Larsen, T Hole, A Mezzani, E M Van Craenenbroeck, and SMARTEX-HF collaborators. High-intensity interval training in patients with heart failure with reduced ejection fraction. Circulation. 2017. doi:10.1161/CIRCULATIONAHA.116.022924",
+        "doi": "10.1161/CIRCULATIONAHA.116.022924",
+        "journal": "Circulation",
+        "kind": "journal_article",
+        "pmid": "28082387",
+        "title": "High-intensity interval training in patients with heart failure with reduced ejection fraction",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/28082387/",
+        "year": 2017
+      },
+      "status": "draft",
+      "studyDesign": "See source metadata and bibliography for exact design.",
+      "summary": "Larger HFrEF trial that did not confirm clear HIIT superiority and highlighted intensity-fidelity issues.",
+      "title": "High-intensity interval training in patients with heart failure with reduced ejection fraction",
+      "whyItMatters": "Larger HFrEF trial that did not confirm clear HIIT superiority and highlighted intensity-fidelity issues."
     },
     {
       "aliases": [
@@ -3626,6 +5511,67 @@
       "summary": "Prospective cohort source used as long-term context for rationale and screening, not as a short-term personal endpoint.",
       "title": "Sauna Bathing and Incident Hypertension: A Prospective Cohort Study",
       "whyItMatters": "Directly relevant to BP-focused protocol claims"
+    },
+    {
+      "aliases": [
+        "pmid-28846513"
+      ],
+      "body": "This source sits in the Murph shortlist bucket **Adjacent variants to split**.\n\n**Why it matters:** Low-volume 1x4 HIIT evidence that should not be merged into canonical 4x4.\n\n**Protocol takeaway:** Use this source only within its `claimUse: context-only` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
+      "categories": [
+        "norwegian-4x4",
+        "hiit",
+        "exercise"
+      ],
+      "claimUse": "context-only",
+      "entityType": "source_artifact",
+      "evidenceBucket": "Adjacent variants to split",
+      "key": "source_artifact:pmid-28846513",
+      "modality": "Aerobic high-intensity interval training / Norwegian 4x4 context",
+      "murphV1Priority": "Medium",
+      "norwegian4x4Focus": "Context, safety, or adjacent variant",
+      "pdfRightsStatus": "permission_required",
+      "potentialMurphEndpoints": [
+        "estimated VO2max / cardio-fitness proxy",
+        "session heart-rate fidelity",
+        "heart-rate recovery",
+        "symptoms and adherence"
+      ],
+      "protocolTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:norwegian-4x4",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/norwegian-4x4/pmid-28846513.md",
+      "revision": {
+        "pageRevisionId": "sha256:fc9e6735e7cf00d5cce53f84576c2252aa5f71a9d9dfc055f5bb671c473099c4",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/norwegian-4x4/pmid-28846513",
+      "source": {
+        "authors": "J S Ramos, L C Dalleck, A E Tjonna, K S Beetham, J S Coombes",
+        "citation": "J S Ramos, L C Dalleck, A E Tjonna, K S Beetham, J S Coombes. Low-volume high-intensity interval training is sufficient to ameliorate the severity of metabolic syndrome. Metabolic Syndrome and Related Disorders. 2017. doi:10.1089/met.2017.0042",
+        "doi": "10.1089/met.2017.0042",
+        "journal": "Metabolic Syndrome and Related Disorders",
+        "kind": "journal_article",
+        "pmid": "28846513",
+        "title": "Low-volume high-intensity interval training is sufficient to ameliorate the severity of metabolic syndrome",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/28846513/",
+        "year": 2017
+      },
+      "status": "draft",
+      "studyDesign": "See source metadata and bibliography for exact design.",
+      "summary": "Low-volume 1x4 HIIT evidence that should not be merged into canonical 4x4.",
+      "title": "Low-volume high-intensity interval training is sufficient to ameliorate the severity of metabolic syndrome",
+      "whyItMatters": "Low-volume 1x4 HIIT evidence that should not be merged into canonical 4x4."
     },
     {
       "body": "This source sits in the Murph shortlist bucket **Long-term Finnish cohort evidence**.\n\n**Why it matters:** Useful for respiratory/illness narrative\n\n**Potential Murph endpoints:** illness logs, symptom days\n\n**Protocol takeaway:** More useful for education than first wearable protocol.",
@@ -3890,6 +5836,67 @@
     },
     {
       "aliases": [
+        "pmid-29416382"
+      ],
+      "body": "This source sits in the Murph shortlist bucket **Safety and contraindications**.\n\n**Why it matters:** Cardiac-rehabilitation meta-analysis supporting efficacy and safety context under supervision.\n\n**Protocol takeaway:** Use this source only within its `claimUse: safety-only` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
+      "categories": [
+        "norwegian-4x4",
+        "hiit",
+        "exercise"
+      ],
+      "claimUse": "safety-only",
+      "entityType": "source_artifact",
+      "evidenceBucket": "Safety and contraindications",
+      "key": "source_artifact:pmid-29416382",
+      "modality": "Aerobic high-intensity interval training / Norwegian 4x4 context",
+      "murphV1Priority": "High",
+      "norwegian4x4Focus": "Context, safety, or adjacent variant",
+      "pdfRightsStatus": "open_access",
+      "potentialMurphEndpoints": [
+        "estimated VO2max / cardio-fitness proxy",
+        "session heart-rate fidelity",
+        "heart-rate recovery",
+        "symptoms and adherence"
+      ],
+      "protocolTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:norwegian-4x4",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/norwegian-4x4/pmid-29416382.md",
+      "revision": {
+        "pageRevisionId": "sha256:2d3920523ad94a117ee6eff5a162043155506538e0b2fcbb08aaefac6070bf7c",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/norwegian-4x4/pmid-29416382",
+      "source": {
+        "authors": "A L Hannan, W Hing, V Simas, M Climstein, J S Coombes, R Jayasinghe, J Byrnes, J Furness",
+        "citation": "A L Hannan, W Hing, V Simas, M Climstein, J S Coombes, R Jayasinghe, J Byrnes, J Furness. High-intensity interval training versus moderate-intensity continuous training within cardiac rehabilitation: a systematic review and meta-analysis. Open Access Journal of Sports Medicine. 2018. doi:10.2147/OAJSM.S150596",
+        "doi": "10.2147/OAJSM.S150596",
+        "journal": "Open Access Journal of Sports Medicine",
+        "kind": "review",
+        "pmid": "29416382",
+        "title": "High-intensity interval training versus moderate-intensity continuous training within cardiac rehabilitation: a systematic review and meta-analysis",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/29416382/",
+        "year": 2018
+      },
+      "status": "draft",
+      "studyDesign": "See source metadata and bibliography for exact design.",
+      "summary": "Cardiac-rehabilitation meta-analysis supporting efficacy and safety context under supervision.",
+      "title": "High-intensity interval training versus moderate-intensity continuous training within cardiac rehabilitation: a systematic review and meta-analysis",
+      "whyItMatters": "Cardiac-rehabilitation meta-analysis supporting efficacy and safety context under supervision."
+    },
+    {
+      "aliases": [
         "Hussain 2018 sauna review"
       ],
       "body": "This source sits in the Murph shortlist bucket **Evidence backbone**.\n\n**Why it matters:** Best starting review for repeated dry-sauna interventions\n\n**Potential Murph endpoints:** session frequency, duration, adverse events\n\n**Protocol takeaway:** Use as evidence backbone; heterogeneous but practical.",
@@ -4051,6 +6058,186 @@
       "whyItMatters": "Keeps Murph honest about actigraphy and wearable sleep estimates."
     },
     {
+      "aliases": [
+        "pmid-30293954"
+      ],
+      "body": "This source sits in the Murph shortlist bucket **Wearable or testable endpoints**.\n\n**Why it matters:** HRV/autonomic-control synthesis; useful for exploratory HRV endpoint framing.\n\n**Protocol takeaway:** Use this source only within its `claimUse: context-only` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
+      "categories": [
+        "norwegian-4x4",
+        "hiit",
+        "exercise"
+      ],
+      "claimUse": "context-only",
+      "entityType": "source_artifact",
+      "evidenceBucket": "Wearable or testable endpoints",
+      "key": "source_artifact:pmid-30293954",
+      "modality": "Aerobic high-intensity interval training / Norwegian 4x4 context",
+      "murphV1Priority": "Medium",
+      "norwegian4x4Focus": "Context, safety, or adjacent variant",
+      "pdfRightsStatus": "open_access",
+      "potentialMurphEndpoints": [
+        "estimated VO2max / cardio-fitness proxy",
+        "session heart-rate fidelity",
+        "heart-rate recovery",
+        "symptoms and adherence"
+      ],
+      "protocolTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:norwegian-4x4",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/norwegian-4x4/pmid-30293954.md",
+      "revision": {
+        "pageRevisionId": "sha256:0abd5c1acb94646458c60cd42503e8b341b4485b47d36ad5baa98e51e42562f5",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/norwegian-4x4/pmid-30293954",
+      "source": {
+        "authors": "R M de Abreu, P Rehder-Santos, V Minatel, G L dos Santos, A M Catai",
+        "citation": "R M de Abreu, P Rehder-Santos, V Minatel, G L dos Santos, A M Catai. Can high-intensity interval training change cardiac autonomic control? A systematic review. Brazilian Journal of Physical Therapy. 2019. doi:10.1016/j.bjpt.2018.09.010",
+        "doi": "10.1016/j.bjpt.2018.09.010",
+        "journal": "Brazilian Journal of Physical Therapy",
+        "kind": "review",
+        "pmid": "30293954",
+        "title": "Can high-intensity interval training change cardiac autonomic control? A systematic review",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/30293954/",
+        "year": 2019
+      },
+      "status": "draft",
+      "studyDesign": "See source metadata and bibliography for exact design.",
+      "summary": "HRV/autonomic-control synthesis; useful for exploratory HRV endpoint framing.",
+      "title": "Can high-intensity interval training change cardiac autonomic control? A systematic review",
+      "whyItMatters": "HRV/autonomic-control synthesis; useful for exploratory HRV endpoint framing."
+    },
+    {
+      "aliases": [
+        "pmid-30376749"
+      ],
+      "body": "This source sits in the Murph shortlist bucket **Safety and contraindications**.\n\n**Why it matters:** Systematic review of HIIT safety in cardiovascular disease populations.\n\n**Protocol takeaway:** Use this source only within its `claimUse: safety-only` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
+      "categories": [
+        "norwegian-4x4",
+        "hiit",
+        "exercise"
+      ],
+      "claimUse": "safety-only",
+      "entityType": "source_artifact",
+      "evidenceBucket": "Safety and contraindications",
+      "key": "source_artifact:pmid-30376749",
+      "modality": "Aerobic high-intensity interval training / Norwegian 4x4 context",
+      "murphV1Priority": "High",
+      "norwegian4x4Focus": "Context, safety, or adjacent variant",
+      "pdfRightsStatus": "permission_required",
+      "potentialMurphEndpoints": [
+        "estimated VO2max / cardio-fitness proxy",
+        "session heart-rate fidelity",
+        "heart-rate recovery",
+        "symptoms and adherence"
+      ],
+      "protocolTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:norwegian-4x4",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/norwegian-4x4/pmid-30376749.md",
+      "revision": {
+        "pageRevisionId": "sha256:e72b8127811ace223b806a340ada4780f4ce0ebdb23e0cfa7e6920fad997a455",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/norwegian-4x4/pmid-30376749",
+      "source": {
+        "authors": "M A Wewege, D Ahn, J Yu, K Liou, A Keech",
+        "citation": "M A Wewege, D Ahn, J Yu, K Liou, A Keech. High-intensity interval training for patients with cardiovascular disease-is it safe? A systematic review. Journal of the American Heart Association. 2018. doi:10.1161/JAHA.118.009305",
+        "doi": "10.1161/JAHA.118.009305",
+        "journal": "Journal of the American Heart Association",
+        "kind": "review",
+        "pmid": "30376749",
+        "title": "High-intensity interval training for patients with cardiovascular disease-is it safe? A systematic review",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/30376749/",
+        "year": 2018
+      },
+      "status": "draft",
+      "studyDesign": "See source metadata and bibliography for exact design.",
+      "summary": "Systematic review of HIIT safety in cardiovascular disease populations.",
+      "title": "High-intensity interval training for patients with cardiovascular disease-is it safe? A systematic review",
+      "whyItMatters": "Systematic review of HIIT safety in cardiovascular disease populations."
+    },
+    {
+      "artifactNeeded": false,
+      "body": "This source sits in the Murph shortlist bucket **Athlete pilot**.\n\n**Why it matters:** Useful supporting trial for the common pattern where subjective sleep changes are clearer than objective actigraphy shifts.\n\n**Potential Murph endpoints:** subjective sleep onset latency, actigraphy, sleep diary, morning alertness\n\n**Protocol takeaway:** Helps Murph treat subjective improvement as signal while keeping objective expectations modest.\n\n**Claim use:** `supports-protocol`. Use this as supporting context for endpoint selection, not as a stand-alone reason to overclaim objective benefit.",
+      "categories": [
+        "red-light-glasses-before-bed",
+        "evening-light"
+      ],
+      "claimUse": "supports-protocol",
+      "entityType": "source_artifact",
+      "evidenceBucket": "Athlete pilot",
+      "key": "source_artifact:pmid-30427265",
+      "modality": "evening short-wavelength or melanopic light reduction",
+      "murphV1Priority": "Medium",
+      "pdfRightsStatus": "permission_required",
+      "potentialMurphEndpoints": [
+        "subjective sleep onset latency",
+        "actigraphy",
+        "sleep diary",
+        "morning alertness"
+      ],
+      "protocolTakeaway": "Helps Murph treat subjective improvement as signal while keeping objective expectations modest.",
+      "quality": "usable",
+      "redLightGlassesFocus": "Yes",
+      "relations": [
+        {
+          "target": "protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:evening-light-reduction",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/red-light-glasses-before-bed/pmid-30427265.md",
+      "revision": {
+        "pageRevisionId": "sha256:538f1feb3b629e633412a81584fafc0f2073d1b61521bbe4084fe4f2bd4dd35d",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/red-light-glasses-before-bed/pmid-30427265",
+      "source": {
+        "authors": "Knufinke M, Nieuwenhuys A, Geurts SAE, Coenen AML, Kompier MAJ",
+        "citation": "Knufinke M, et al. Restricting short-wavelength light in the evening to improve sleep in recreational athletes: A pilot study. Eur J Sport Sci. 2019;19(6):728-735. doi:10.1080/17461391.2018.1544278.",
+        "doi": "10.1080/17461391.2018.1544278",
+        "journal": "European Journal of Sport Science",
+        "kind": "journal_article",
+        "pmid": "30427265",
+        "title": "Restricting short-wavelength light in the evening to improve sleep in recreational athletes: A pilot study",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/30427265/",
+        "year": 2019
+      },
+      "status": "draft",
+      "studyDesign": "Pilot crossover trial",
+      "summary": "Athlete pilot that is useful mainly for subjective-versus-objective mismatch and endpoint selection.",
+      "title": "Restricting short-wavelength light in the evening to improve sleep in recreational athletes: A pilot study",
+      "whyItMatters": "Useful supporting trial for the common pattern where subjective sleep changes are clearer than objective actigraphy shifts."
+    },
+    {
       "body": "This source sits in the Murph shortlist bucket **Long-term Finnish cohort evidence**.\n\n**Why it matters:** Extends mortality signal beyond men-only analyses\n\n**Potential Murph endpoints:** frequency framing\n\n**Protocol takeaway:** Supports external validity of long-term claims.",
       "categories": [
         "sauna",
@@ -4151,6 +6338,67 @@
       "summary": "Prospective cohort source used as long-term context for rationale and screening, not as a short-term personal endpoint.",
       "title": "Sauna bathing reduces the risk of stroke in Finnish men and women: A prospective cohort study",
       "whyItMatters": "Adds cerebrovascular long-term signal"
+    },
+    {
+      "aliases": [
+        "pmid-30733142"
+      ],
+      "body": "This source sits in the Murph shortlist bucket **Protocol dose and design**.\n\n**Why it matters:** Meta-analysis used to justify long-interval HIIT as a plausible VO2max-oriented design class.\n\n**Protocol takeaway:** Use this source only within its `claimUse: supports-protocol` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
+      "categories": [
+        "norwegian-4x4",
+        "hiit",
+        "exercise"
+      ],
+      "claimUse": "supports-protocol",
+      "entityType": "source_artifact",
+      "evidenceBucket": "Protocol dose and design",
+      "key": "source_artifact:pmid-30733142",
+      "modality": "Aerobic high-intensity interval training / Norwegian 4x4 context",
+      "murphV1Priority": "High",
+      "norwegian4x4Focus": "Direct support",
+      "pdfRightsStatus": "not_redistributable",
+      "potentialMurphEndpoints": [
+        "estimated VO2max / cardio-fitness proxy",
+        "session heart-rate fidelity",
+        "heart-rate recovery",
+        "symptoms and adherence"
+      ],
+      "protocolTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:norwegian-4x4",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/norwegian-4x4/pmid-30733142.md",
+      "revision": {
+        "pageRevisionId": "sha256:6ddfde8c0e80b1d9ccda608eba1e81de4f370d4a7bc4878523c234de07fbc93f",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/norwegian-4x4/pmid-30733142",
+      "source": {
+        "authors": "D Wen, T Utesch, J Wu, S Robertson, J Liu, G Hu, H Chen",
+        "citation": "D Wen, T Utesch, J Wu, S Robertson, J Liu, G Hu, H Chen. Effects of different protocols of high intensity interval training for VO2max improvements in adults: a meta-analysis of randomised controlled trials. Journal of Science and Medicine in Sport. 2019. doi:10.1016/j.jsams.2019.01.013",
+        "doi": "10.1016/j.jsams.2019.01.013",
+        "journal": "Journal of Science and Medicine in Sport",
+        "kind": "review",
+        "pmid": "30733142",
+        "title": "Effects of different protocols of high intensity interval training for VO2max improvements in adults: a meta-analysis of randomised controlled trials",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/30733142/",
+        "year": 2019
+      },
+      "status": "draft",
+      "studyDesign": "See source metadata and bibliography for exact design.",
+      "summary": "Meta-analysis used to justify long-interval HIIT as a plausible VO2max-oriented design class.",
+      "title": "Effects of different protocols of high intensity interval training for VO2max improvements in adults: a meta-analysis of randomised controlled trials",
+      "whyItMatters": "Meta-analysis used to justify long-interval HIIT as a plausible VO2max-oriented design class."
     },
     {
       "body": "This source sits in the Murph shortlist bucket **Acute and mechanistic**.\n\n**Why it matters:** Clarifies the immediate cardiovascular load of a sauna session and helps frame sauna as a measurable physiological stressor, not just a relaxation ritual.\n\n**Potential Murph endpoints:** Session HR, pre/post BP, cooldown HR decay, perceived heat strain\n\n**Protocol takeaway:** Treat a sauna session like a light-to-moderate cardiovascular stimulus and standardize cooldown if you want comparable pre/post data.",
@@ -4425,6 +6673,67 @@
     },
     {
       "aliases": [
+        "pmid-32100573"
+      ],
+      "body": "This source sits in the Murph shortlist bucket **Safety and contraindications**.\n\n**Why it matters:** AHA scientific statement for acute cardiovascular event risk and progression language.\n\n**Protocol takeaway:** Use this source only within its `claimUse: safety-only` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
+      "categories": [
+        "norwegian-4x4",
+        "hiit",
+        "exercise"
+      ],
+      "claimUse": "safety-only",
+      "entityType": "source_artifact",
+      "evidenceBucket": "Safety and contraindications",
+      "key": "source_artifact:pmid-32100573",
+      "modality": "Aerobic high-intensity interval training / Norwegian 4x4 context",
+      "murphV1Priority": "High",
+      "norwegian4x4Focus": "Context, safety, or adjacent variant",
+      "pdfRightsStatus": "not_redistributable",
+      "potentialMurphEndpoints": [
+        "estimated VO2max / cardio-fitness proxy",
+        "session heart-rate fidelity",
+        "heart-rate recovery",
+        "symptoms and adherence"
+      ],
+      "protocolTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:norwegian-4x4",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/norwegian-4x4/pmid-32100573.md",
+      "revision": {
+        "pageRevisionId": "sha256:5c54e5581ad28945576f01c17d1ba871bcede570c3bd84aa7d4c37f482bdd97c",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/norwegian-4x4/pmid-32100573",
+      "source": {
+        "authors": "B A Franklin, P D Thompson, S S Al-Zaiti, C M Albert, M F Hivert, B D Levine, F Lobelo, K Madan, A Z Sharrief, T M H Eijsvogels, M J Haykowsky",
+        "citation": "B A Franklin, P D Thompson, S S Al-Zaiti, C M Albert, M F Hivert, B D Levine, F Lobelo, K Madan, A Z Sharrief, T M H Eijsvogels, M J Haykowsky. Exercise-related acute cardiovascular events and potential deleterious adaptations following long-term exercise training: placing the risks into perspective. Circulation. 2020. doi:10.1161/CIR.0000000000000749",
+        "doi": "10.1161/CIR.0000000000000749",
+        "journal": "Circulation",
+        "kind": "guideline",
+        "pmid": "32100573",
+        "title": "Exercise-related acute cardiovascular events and potential deleterious adaptations following long-term exercise training: placing the risks into perspective",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/32100573/",
+        "year": 2020
+      },
+      "status": "draft",
+      "studyDesign": "See source metadata and bibliography for exact design.",
+      "summary": "AHA scientific statement for acute cardiovascular event risk and progression language.",
+      "title": "Exercise-related acute cardiovascular events and potential deleterious adaptations following long-term exercise training: placing the risks into perspective",
+      "whyItMatters": "AHA scientific statement for acute cardiovascular event risk and progression language."
+    },
+    {
+      "aliases": [
         "Li 2020 sauna cardiovascular meta-analysis"
       ],
       "body": "This source sits in the Murph shortlist bucket **Evidence backbone**.\n\n**Why it matters:** Summarizes acute/short-term cardiovascular effects across studies\n\n**Potential Murph endpoints:** SBP/DBP, arterial stiffness, acute hemodynamics\n\n**Protocol takeaway:** Supports near-term measurable outcomes.",
@@ -4479,6 +6788,67 @@
       "summary": "Backbone source used to scope the dry-sauna evidence base and protocol-design decisions.",
       "title": "Acute and short-term efficacy of sauna treatment on cardiovascular function: A meta-analysis",
       "whyItMatters": "Summarizes acute/short-term cardiovascular effects across studies"
+    },
+    {
+      "aliases": [
+        "pmid-32860412"
+      ],
+      "body": "This source sits in the Murph shortlist bucket **Safety and contraindications**.\n\n**Why it matters:** Backbone guideline for cardiovascular disease, exercise eligibility, and clinician-clearance boundaries.\n\n**Protocol takeaway:** Use this source only within its `claimUse: safety-only` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
+      "categories": [
+        "norwegian-4x4",
+        "hiit",
+        "exercise"
+      ],
+      "claimUse": "safety-only",
+      "entityType": "source_artifact",
+      "evidenceBucket": "Safety and contraindications",
+      "key": "source_artifact:pmid-32860412",
+      "modality": "Aerobic high-intensity interval training / Norwegian 4x4 context",
+      "murphV1Priority": "High",
+      "norwegian4x4Focus": "Context, safety, or adjacent variant",
+      "pdfRightsStatus": "not_redistributable",
+      "potentialMurphEndpoints": [
+        "estimated VO2max / cardio-fitness proxy",
+        "session heart-rate fidelity",
+        "heart-rate recovery",
+        "symptoms and adherence"
+      ],
+      "protocolTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:norwegian-4x4",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/norwegian-4x4/pmid-32860412.md",
+      "revision": {
+        "pageRevisionId": "sha256:82a92bcf04e6010f94d7d8ec5c142c36ff39fdffe3802761c00d079b2d8a706c",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/norwegian-4x4/pmid-32860412",
+      "source": {
+        "authors": "A Pelliccia, S Sharma, S Gati, M Back, M Borjesson, S Caselli, J P Collet, D Corrado, J A Drezner, M Halle, D Hansen, H Heidbuchel, J Myers, J Niebauer, A Papadakis, M F Piepoli, E Prescott, J W Roos-Hesselink, A G Stuart, R S Taylor, P D Thompson, M Tiberi, M Vanhees, M Wilhelm",
+        "citation": "A Pelliccia, S Sharma, S Gati, M Back, M Borjesson, S Caselli, J P Collet, D Corrado, J A Drezner, M Halle, D Hansen, H Heidbuchel, J Myers, J Niebauer, A Papadakis, M F Piepoli, E Prescott, J W Roos-Hesselink, A G Stuart, R S Taylor, P D Thompson, M Tiberi, M Vanhees, M Wilhelm. 2020 ESC Guidelines on sports cardiology and exercise in patients with cardiovascular disease. European Heart Journal. 2021. doi:10.1093/eurheartj/ehaa605",
+        "doi": "10.1093/eurheartj/ehaa605",
+        "journal": "European Heart Journal",
+        "kind": "guideline",
+        "pmid": "32860412",
+        "title": "2020 ESC Guidelines on sports cardiology and exercise in patients with cardiovascular disease",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/32860412/",
+        "year": 2021
+      },
+      "status": "draft",
+      "studyDesign": "See source metadata and bibliography for exact design.",
+      "summary": "Backbone guideline for cardiovascular disease, exercise eligibility, and clinician-clearance boundaries.",
+      "title": "2020 ESC Guidelines on sports cardiology and exercise in patients with cardiovascular disease",
+      "whyItMatters": "Backbone guideline for cardiovascular disease, exercise eligibility, and clinician-clearance boundaries."
     },
     {
       "body": "This source sits in the Murph shortlist bucket **Acute and mechanistic**.\n\n**Why it matters:** Acute biomarker evidence in a Finnish-sauna context\n\n**Potential Murph endpoints:** inflammation biomarkers if lab-enabled\n\n**Protocol takeaway:** More useful for mechanism than consumer MVP.",
@@ -4583,6 +6953,186 @@
       "summary": "Intervention-design source used to shape dose, context, hydration, ramping, and expectation-setting for Murph variants.",
       "title": "Intermittent post-exercise sauna bathing improves markers of exercise capacity in hot and temperate conditions in trained middle-distance runners",
       "whyItMatters": "Performance-oriented repeated sauna intervention"
+    },
+    {
+      "aliases": [
+        "pmid-33239350"
+      ],
+      "body": "This source sits in the Murph shortlist bucket **Public health context**.\n\n**Why it matters:** Public-health context showing vigorous aerobic exercise as one option within weekly activity guidance.\n\n**Protocol takeaway:** Use this source only within its `claimUse: context-only` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
+      "categories": [
+        "norwegian-4x4",
+        "hiit",
+        "exercise"
+      ],
+      "claimUse": "context-only",
+      "entityType": "source_artifact",
+      "evidenceBucket": "Public health context",
+      "key": "source_artifact:pmid-33239350",
+      "modality": "Aerobic high-intensity interval training / Norwegian 4x4 context",
+      "murphV1Priority": "Medium",
+      "norwegian4x4Focus": "Context, safety, or adjacent variant",
+      "pdfRightsStatus": "permission_required",
+      "potentialMurphEndpoints": [
+        "estimated VO2max / cardio-fitness proxy",
+        "session heart-rate fidelity",
+        "heart-rate recovery",
+        "symptoms and adherence"
+      ],
+      "protocolTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:norwegian-4x4",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/norwegian-4x4/pmid-33239350.md",
+      "revision": {
+        "pageRevisionId": "sha256:db1782cdaf9d8daf85dd8ea35debdbcdb06693e391eb406f951677de0cb67497",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/norwegian-4x4/pmid-33239350",
+      "source": {
+        "authors": "F C Bull, S S Al-Ansari, S Biddle, K Borodulin, M P Buman, G Cardon, G Carty, J P Chaput, S Chastin, R Chou, and guideline collaborators",
+        "citation": "F C Bull, S S Al-Ansari, S Biddle, K Borodulin, M P Buman, G Cardon, G Carty, J P Chaput, S Chastin, R Chou, and guideline collaborators. World Health Organization 2020 guidelines on physical activity and sedentary behaviour. British Journal of Sports Medicine. 2020. doi:10.1136/bjsports-2020-102955",
+        "doi": "10.1136/bjsports-2020-102955",
+        "journal": "British Journal of Sports Medicine",
+        "kind": "guideline",
+        "pmid": "33239350",
+        "title": "World Health Organization 2020 guidelines on physical activity and sedentary behaviour",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/33239350/",
+        "year": 2020
+      },
+      "status": "draft",
+      "studyDesign": "See source metadata and bibliography for exact design.",
+      "summary": "Public-health context showing vigorous aerobic exercise as one option within weekly activity guidance.",
+      "title": "World Health Organization 2020 guidelines on physical activity and sedentary behaviour",
+      "whyItMatters": "Public-health context showing vigorous aerobic exercise as one option within weekly activity guidance."
+    },
+    {
+      "aliases": [
+        "pmid-33560320"
+      ],
+      "body": "This source sits in the Murph shortlist bucket **Mixed and null clinical evidence**.\n\n**Why it matters:** HFpEF clinical trial showing no significant primary peak-VO2 advantage for HIIT over comparators.\n\n**Protocol takeaway:** Use this source only within its `claimUse: context-only` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
+      "categories": [
+        "norwegian-4x4",
+        "hiit",
+        "exercise"
+      ],
+      "claimUse": "context-only",
+      "entityType": "source_artifact",
+      "evidenceBucket": "Mixed and null clinical evidence",
+      "key": "source_artifact:pmid-33560320",
+      "modality": "Aerobic high-intensity interval training / Norwegian 4x4 context",
+      "murphV1Priority": "High",
+      "norwegian4x4Focus": "Context, safety, or adjacent variant",
+      "pdfRightsStatus": "permission_required",
+      "potentialMurphEndpoints": [
+        "estimated VO2max / cardio-fitness proxy",
+        "session heart-rate fidelity",
+        "heart-rate recovery",
+        "symptoms and adherence"
+      ],
+      "protocolTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:norwegian-4x4",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/norwegian-4x4/pmid-33560320.md",
+      "revision": {
+        "pageRevisionId": "sha256:26e2ecbf7b9168e36da286a285c6a36b6c81569730caab195dec7f82f76f1812",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/norwegian-4x4/pmid-33560320",
+      "source": {
+        "authors": "S Mueller, E B Winzer, A Duvinage, A B Gevaert, F Edelmann, B Haller, E Pieske-Kraigher, P Beckers, A Bobenko, J Hommel, M Mertens, B Pieske, A Linke, V Adams, M Halle, U Wisloff, O Ellingsen, N Mangner",
+        "citation": "S Mueller, E B Winzer, A Duvinage, A B Gevaert, F Edelmann, B Haller, E Pieske-Kraigher, P Beckers, A Bobenko, J Hommel, M Mertens, B Pieske, A Linke, V Adams, M Halle, U Wisloff, O Ellingsen, N Mangner. Effect of high-intensity interval training, moderate continuous training, or guideline-based physical activity advice on peak oxygen consumption in patients with heart failure with preserved ejection fraction: a randomized clinical trial. JAMA. 2021. doi:10.1001/jama.2020.26812",
+        "doi": "10.1001/jama.2020.26812",
+        "journal": "JAMA",
+        "kind": "journal_article",
+        "pmid": "33560320",
+        "title": "Effect of high-intensity interval training, moderate continuous training, or guideline-based physical activity advice on peak oxygen consumption in patients with heart failure with preserved ejection fraction: a randomized clinical trial",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/33560320/",
+        "year": 2021
+      },
+      "status": "draft",
+      "studyDesign": "See source metadata and bibliography for exact design.",
+      "summary": "HFpEF clinical trial showing no significant primary peak-VO2 advantage for HIIT over comparators.",
+      "title": "Effect of high-intensity interval training, moderate continuous training, or guideline-based physical activity advice on peak oxygen consumption in patients with heart failure with preserved ejection fraction: a randomized clinical trial",
+      "whyItMatters": "HFpEF clinical trial showing no significant primary peak-VO2 advantage for HIIT over comparators."
+    },
+    {
+      "artifactNeeded": false,
+      "body": "This source sits in the Murph shortlist bucket **Eye-strain claim calibration**.\n\n**Why it matters:** Directly useful for blocking eye-strain, headache, and visual-performance overclaims on the bedtime sleep page.\n\n**Potential Murph endpoints:** eye strain symptoms, headache, light sensitivity, visual performance\n\n**Protocol takeaway:** Keep eye-care and visual-comfort claims out of Murph's sleep experiment unless a separate page earns them.\n\n**Claim use:** `safety-only`. Keep this classification when wiring claims so non-sleep spectacle claims do not drift onto the bedtime protocol.",
+      "categories": [
+        "red-light-glasses-before-bed",
+        "evening-light"
+      ],
+      "claimUse": "safety-only",
+      "entityType": "source_artifact",
+      "evidenceBucket": "Eye-strain claim calibration",
+      "key": "source_artifact:pmid-33587901",
+      "modality": "evening short-wavelength or melanopic light reduction",
+      "murphV1Priority": "Medium",
+      "pdfRightsStatus": "permission_required",
+      "potentialMurphEndpoints": [
+        "eye strain symptoms",
+        "headache",
+        "light sensitivity",
+        "visual performance"
+      ],
+      "protocolTakeaway": "Keep eye-care and visual-comfort claims out of Murph's sleep experiment unless a separate page earns them.",
+      "quality": "usable",
+      "redLightGlassesFocus": "Yes",
+      "relations": [
+        {
+          "target": "protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:evening-light-reduction",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/red-light-glasses-before-bed/pmid-33587901.md",
+      "revision": {
+        "pageRevisionId": "sha256:cb1a333c2eaf9f1518371b63aada91e09d373f8c491c1f5a8d3db24c90508894",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/red-light-glasses-before-bed/pmid-33587901",
+      "source": {
+        "authors": "Singh S, Downie LE, Anderson AJ",
+        "citation": "Singh S, Downie LE, Anderson AJ. Blue-Blocking Lenses: Reducing Eye Strain, Light Sensitivity and Headaches? A Double-Masked Randomized Controlled Trial. Am J Ophthalmol. 2021;226:243-251. doi:10.1016/j.ajo.2021.02.010.",
+        "doi": "10.1016/j.ajo.2021.02.010",
+        "journal": "American Journal of Ophthalmology",
+        "kind": "journal_article",
+        "pmid": "33587901",
+        "title": "Blue-Blocking Lenses: Reducing Eye Strain, Light Sensitivity and Headaches? A Double-Masked Randomized Controlled Trial",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/33587901/",
+        "year": 2021
+      },
+      "status": "draft",
+      "studyDesign": "Double-masked randomized controlled trial",
+      "summary": "Eye-strain RCT used to block non-sleep claims from leaking into the bedtime protocol.",
+      "title": "Blue-Blocking Lenses: Reducing Eye Strain, Light Sensitivity and Headaches? A Double-Masked Randomized Controlled Trial",
+      "whyItMatters": "Directly useful for blocking eye-strain, headache, and visual-performance overclaims on the bedtime sleep page."
     },
     {
       "body": "This source sits in the Murph shortlist bucket **Healthy-adult mixed/null trial**.\n\n**Why it matters:** Important check against overpromising benefits in already-healthy sleepers.\n\n**Potential Murph endpoints:** actigraphy sleep duration, actigraphy sleep quality, subjective sleep, sleep diary\n\n**Protocol takeaway:** Low-symptom users may see little or no objective signal.",
@@ -5236,6 +7786,64 @@
       "whyItMatters": "Shows that sauna associations may interact with broader baseline risk and context rather than acting as an isolated magic bullet."
     },
     {
+      "artifactNeeded": false,
+      "body": "This source sits in the Murph shortlist bucket **Daytime/evening timing tradeoff**.\n\n**Why it matters:** Helps Murph avoid collapsing daytime light benefits into a blanket anti-blue-light message.\n\n**Potential Murph endpoints:** sleep timing, performance, alertness, wellbeing\n\n**Protocol takeaway:** Preserve the distinction between healthy daytime light exposure and the evening reduction experiment.\n\n**Claim use:** `context-only`. Keep this classification when wiring claims so timing-context reviews do not become direct support for the bedtime protocol.",
+      "categories": [
+        "red-light-glasses-before-bed",
+        "evening-light"
+      ],
+      "claimUse": "context-only",
+      "entityType": "source_artifact",
+      "evidenceBucket": "Daytime/evening timing tradeoff",
+      "key": "source_artifact:pmid-36051910",
+      "modality": "evening short-wavelength or melanopic light reduction",
+      "murphV1Priority": "Medium",
+      "pdfRightsStatus": "open_access",
+      "potentialMurphEndpoints": [
+        "sleep timing",
+        "performance",
+        "alertness",
+        "wellbeing"
+      ],
+      "protocolTakeaway": "Preserve the distinction between healthy daytime light exposure and the evening reduction experiment.",
+      "quality": "usable",
+      "redLightGlassesFocus": "Adjacent",
+      "relations": [
+        {
+          "target": "protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:evening-light-reduction",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/red-light-glasses-before-bed/pmid-36051910.md",
+      "revision": {
+        "pageRevisionId": "sha256:887201f2572939de33cbf4a2d59d4da9b5404565adb926da38a6a77c53ac83a0",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/red-light-glasses-before-bed/pmid-36051910",
+      "source": {
+        "authors": "Silvani MI, Werder K, Perret C",
+        "citation": "Silvani MI, Werder K, Perret C. The influence of blue light on sleep, performance and wellbeing in young adults: A systematic review. Front Physiol. 2022;13:943108. doi:10.3389/fphys.2022.943108.",
+        "doi": "10.3389/fphys.2022.943108",
+        "journal": "Frontiers in Physiology",
+        "kind": "review",
+        "pmid": "36051910",
+        "title": "The influence of blue light on sleep, performance and wellbeing in young adults: A systematic review",
+        "url": "https://www.frontiersin.org/journals/physiology/articles/10.3389/fphys.2022.943108/full",
+        "year": 2022
+      },
+      "status": "draft",
+      "studyDesign": "Systematic review",
+      "summary": "Context review used to keep daytime blue-rich light benefits separate from evening reduction advice.",
+      "title": "The influence of blue light on sleep, performance and wellbeing in young adults: A systematic review",
+      "whyItMatters": "Helps Murph avoid collapsing daytime light benefits into a blanket anti-blue-light message."
+    },
+    {
       "body": "This source sits in the Murph shortlist bucket **Long-term Finnish cohort evidence**.\n\n**Why it matters:** Suggests inflammatory state may partly shape the long-run relationship between sauna exposure and health outcomes.\n\n**Potential Murph endpoints:** Resting HR, HRV, illness/soreness logs, optional CRP or hs-CRP if Murph adds labs later\n\n**Protocol takeaway:** If Murph expands beyond wearables, inflammation markers are a sensible add-on for more mechanistic sauna experiments.",
       "categories": [
         "sauna",
@@ -5289,6 +7897,67 @@
       "summary": "Prospective cohort source used as long-term context for rationale and screening, not as a short-term personal endpoint.",
       "title": "Inflammation, sauna bathing, and all-cause mortality in middle-aged and older Finnish men: a cohort study",
       "whyItMatters": "Suggests inflammatory state may partly shape the long-run relationship between sauna exposure and health outcomes."
+    },
+    {
+      "aliases": [
+        "pmid-36314990"
+      ],
+      "body": "This source sits in the Murph shortlist bucket **Adjacent variants to split**.\n\n**Why it matters:** Athlete trial comparing 4x4-style intervals with sprint-interval training; supports not merging SIT with Norwegian 4x4.\n\n**Protocol takeaway:** Use this source only within its `claimUse: context-only` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
+      "categories": [
+        "norwegian-4x4",
+        "hiit",
+        "exercise"
+      ],
+      "claimUse": "context-only",
+      "entityType": "source_artifact",
+      "evidenceBucket": "Adjacent variants to split",
+      "key": "source_artifact:pmid-36314990",
+      "modality": "Aerobic high-intensity interval training / Norwegian 4x4 context",
+      "murphV1Priority": "Medium",
+      "norwegian4x4Focus": "Context, safety, or adjacent variant",
+      "pdfRightsStatus": "open_access",
+      "potentialMurphEndpoints": [
+        "estimated VO2max / cardio-fitness proxy",
+        "session heart-rate fidelity",
+        "heart-rate recovery",
+        "symptoms and adherence"
+      ],
+      "protocolTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:norwegian-4x4",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/norwegian-4x4/pmid-36314990.md",
+      "revision": {
+        "pageRevisionId": "sha256:a7974ee987edf0106aa51bbb08b1d9ebaec2f593c643f224bc4b5d282786711a",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/norwegian-4x4/pmid-36314990",
+      "source": {
+        "authors": "H Hov, E Wang, Y R Lim, G Trane, M Hemmingsen, J Hoff, J Helgerud",
+        "citation": "H Hov, E Wang, Y R Lim, G Trane, M Hemmingsen, J Hoff, J Helgerud. Aerobic high-intensity intervals are superior to improve VO2max compared with sprint intervals in well-trained men. Scandinavian Journal of Medicine & Science in Sports. 2023. doi:10.1111/sms.14251",
+        "doi": "10.1111/sms.14251",
+        "journal": "Scandinavian Journal of Medicine & Science in Sports",
+        "kind": "journal_article",
+        "pmid": "36314990",
+        "title": "Aerobic high-intensity intervals are superior to improve VO2max compared with sprint intervals in well-trained men",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/36314990/",
+        "year": 2023
+      },
+      "status": "draft",
+      "studyDesign": "See source metadata and bibliography for exact design.",
+      "summary": "Athlete trial comparing 4x4-style intervals with sprint-interval training; supports not merging SIT with Norwegian 4x4.",
+      "title": "Aerobic high-intensity intervals are superior to improve VO2max compared with sprint intervals in well-trained men",
+      "whyItMatters": "Athlete trial comparing 4x4-style intervals with sprint-interval training; supports not merging SIT with Norwegian 4x4."
     },
     {
       "body": "This source sits in the Murph shortlist bucket **Acute and mechanistic**.\n\n**Why it matters:** Shows repeated exposure may matter more than one-off sessions\n\n**Potential Murph endpoints:** series vs single-session design\n\n**Protocol takeaway:** Supports multi-week protocol instead of one-off.",
@@ -5504,6 +8173,67 @@
     },
     {
       "aliases": [
+        "pmid-37608507"
+      ],
+      "body": "This source sits in the Murph shortlist bucket **Adjacent variants to split**.\n\n**Why it matters:** Female athlete comparison source supporting separation of 4x4 from supramaximal sprint-interval training.\n\n**Protocol takeaway:** Use this source only within its `claimUse: context-only` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
+      "categories": [
+        "norwegian-4x4",
+        "hiit",
+        "exercise"
+      ],
+      "claimUse": "context-only",
+      "entityType": "source_artifact",
+      "evidenceBucket": "Adjacent variants to split",
+      "key": "source_artifact:pmid-37608507",
+      "modality": "Aerobic high-intensity interval training / Norwegian 4x4 context",
+      "murphV1Priority": "Medium",
+      "norwegian4x4Focus": "Context, safety, or adjacent variant",
+      "pdfRightsStatus": "not_redistributable",
+      "potentialMurphEndpoints": [
+        "estimated VO2max / cardio-fitness proxy",
+        "session heart-rate fidelity",
+        "heart-rate recovery",
+        "symptoms and adherence"
+      ],
+      "protocolTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:norwegian-4x4",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/norwegian-4x4/pmid-37608507.md",
+      "revision": {
+        "pageRevisionId": "sha256:d24043baeab7d71241cb3cfec120679d741d65cb5043c5cbcc36049662a1d2df",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/norwegian-4x4/pmid-37608507",
+      "source": {
+        "authors": "J Helgerud, H Hov, E Wang, Y R Lim, G Trane, M Hemmingsen, J Hoff",
+        "citation": "J Helgerud, H Hov, E Wang, Y R Lim, G Trane, M Hemmingsen, J Hoff. Aerobic high-intensity intervals improve VO2max more than supramaximal sprint intervals in females, similar to males. Scandinavian Journal of Medicine & Science in Sports. 2023. doi:10.1111/sms.14470",
+        "doi": "10.1111/sms.14470",
+        "journal": "Scandinavian Journal of Medicine & Science in Sports",
+        "kind": "journal_article",
+        "pmid": "37608507",
+        "title": "Aerobic high-intensity intervals improve VO2max more than supramaximal sprint intervals in females, similar to males",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/37608507/",
+        "year": 2023
+      },
+      "status": "draft",
+      "studyDesign": "See source metadata and bibliography for exact design.",
+      "summary": "Female athlete comparison source supporting separation of 4x4 from supramaximal sprint-interval training.",
+      "title": "Aerobic high-intensity intervals improve VO2max more than supramaximal sprint intervals in females, similar to males",
+      "whyItMatters": "Female athlete comparison source supporting separation of 4x4 from supramaximal sprint-interval training."
+    },
+    {
+      "aliases": [
         "Debray 2023 Finnish sauna RCT"
       ],
       "body": "This source sits in the Murph shortlist bucket **Intervention design / reality checks**.\n\n**Why it matters:** Important negative Finnish-sauna RCT\n\n**Potential Murph endpoints:** vascular markers, BP\n\n**Protocol takeaway:** Reality check: not every 8-week protocol moves vascular markers.",
@@ -5667,6 +8397,67 @@
       "summary": "Backbone source used to scope the dry-sauna evidence base and protocol-design decisions.",
       "title": "The multifaceted benefits of passive heat therapies for extending the healthspan: A comprehensive review with a focus on Finnish sauna",
       "whyItMatters": "Best current high-level Finnish-sauna review"
+    },
+    {
+      "aliases": [
+        "pmid-39256000"
+      ],
+      "body": "This source sits in the Murph shortlist bucket **Adjacent variants to split**.\n\n**Why it matters:** Recent metabolic-syndrome HIIT synthesis; useful to separate metabolic HIIT and low-volume variants from canonical 4x4.\n\n**Protocol takeaway:** Use this source only within its `claimUse: context-only` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
+      "categories": [
+        "norwegian-4x4",
+        "hiit",
+        "exercise"
+      ],
+      "claimUse": "context-only",
+      "entityType": "source_artifact",
+      "evidenceBucket": "Adjacent variants to split",
+      "key": "source_artifact:pmid-39256000",
+      "modality": "Aerobic high-intensity interval training / Norwegian 4x4 context",
+      "murphV1Priority": "Medium",
+      "norwegian4x4Focus": "Context, safety, or adjacent variant",
+      "pdfRightsStatus": "not_redistributable",
+      "potentialMurphEndpoints": [
+        "estimated VO2max / cardio-fitness proxy",
+        "session heart-rate fidelity",
+        "heart-rate recovery",
+        "symptoms and adherence"
+      ],
+      "protocolTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:norwegian-4x4",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/norwegian-4x4/pmid-39256000.md",
+      "revision": {
+        "pageRevisionId": "sha256:acff0918bda0a67d316f720fcf3e67309082c91795bb13904dc9ea91c24cd07c",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/norwegian-4x4/pmid-39256000",
+      "source": {
+        "authors": "E T C Poon, W Wongpipit, H Y Li, S H S Wong, P M Siu, A P S Kong",
+        "citation": "E T C Poon, W Wongpipit, H Y Li, S H S Wong, P M Siu, A P S Kong. High-intensity interval training for cardiometabolic health in adults with metabolic syndrome: a systematic review and meta-analysis of randomised controlled trials. British Journal of Sports Medicine. 2024. doi:10.1136/bjsports-2024-108481",
+        "doi": "10.1136/bjsports-2024-108481",
+        "journal": "British Journal of Sports Medicine",
+        "kind": "review",
+        "pmid": "39256000",
+        "title": "High-intensity interval training for cardiometabolic health in adults with metabolic syndrome: a systematic review and meta-analysis of randomised controlled trials",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/39256000/",
+        "year": 2024
+      },
+      "status": "draft",
+      "studyDesign": "See source metadata and bibliography for exact design.",
+      "summary": "Recent metabolic-syndrome HIIT synthesis; useful to separate metabolic HIIT and low-volume variants from canonical 4x4.",
+      "title": "High-intensity interval training for cardiometabolic health in adults with metabolic syndrome: a systematic review and meta-analysis of randomised controlled trials",
+      "whyItMatters": "Recent metabolic-syndrome HIIT synthesis; useful to separate metabolic HIIT and low-volume variants from canonical 4x4."
     },
     {
       "aliases": [
@@ -5834,6 +8625,64 @@
       "whyItMatters": "Best recent top-down read on post-exercise heating; it puts the mixed acute recovery literature next to the more promising longer adaptation signal."
     },
     {
+      "artifactNeeded": true,
+      "body": "This source sits in the Murph shortlist bucket **Pediatric adjacent variant**.\n\n**Why it matters:** Useful adjacent evidence for separating pediatric sleep-phase questions from the ordinary adult bedtime protocol.\n\n**Potential Murph endpoints:** bedtime, sleep onset, behavior, melatonin\n\n**Protocol takeaway:** Keep pediatric sleep-phase use on a separate page even when the underlying light mechanism overlaps.\n\n**Claim use:** `context-only`. Keep this classification when wiring claims so pediatric trials do not become direct support for the ordinary adult bedtime protocol.",
+      "categories": [
+        "red-light-glasses-before-bed",
+        "evening-light"
+      ],
+      "claimUse": "context-only",
+      "entityType": "source_artifact",
+      "evidenceBucket": "Pediatric adjacent variant",
+      "key": "source_artifact:pmid-41166315",
+      "modality": "evening short-wavelength or melanopic light reduction",
+      "murphV1Priority": "Medium",
+      "pdfRightsStatus": "open_access",
+      "potentialMurphEndpoints": [
+        "bedtime",
+        "sleep onset",
+        "behavior",
+        "melatonin"
+      ],
+      "protocolTakeaway": "Keep pediatric sleep-phase use on a separate page even when the underlying light mechanism overlaps.",
+      "quality": "usable",
+      "redLightGlassesFocus": "Adjacent",
+      "relations": [
+        {
+          "target": "protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:evening-light-reduction",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/red-light-glasses-before-bed/pmid-41166315.md",
+      "revision": {
+        "pageRevisionId": "sha256:48605d4d9373c441d7ac17a0671c20d311e7072ee6b79fd652a6abe9feff77cb",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/red-light-glasses-before-bed/pmid-41166315",
+      "source": {
+        "authors": "Maeda-Nishino NJ, Yamazaki M, Katada Y, Morita Y, Esaki Y, Kitajima T, et al.",
+        "citation": "Maeda-Nishino NJ, et al. Partial blue light blocking glasses at night advanced sleep phase and improved behavioral problems in schoolchildren without altering melatonin secretion. PLoS One. 2025;20(10):e0332877. doi:10.1371/journal.pone.0332877.",
+        "doi": "10.1371/journal.pone.0332877",
+        "journal": "PLOS ONE",
+        "kind": "journal_article",
+        "pmid": "41166315",
+        "title": "Partial blue light blocking glasses at night advanced sleep phase and improved behavioral problems in schoolchildren without altering melatonin secretion",
+        "url": "https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0332877",
+        "year": 2025
+      },
+      "status": "draft",
+      "studyDesign": "Crossover study",
+      "summary": "Pediatric crossover study kept as an adjacent variant, not as direct adult bedtime-protocol evidence.",
+      "title": "Partial blue light blocking glasses at night advanced sleep phase and improved behavioral problems in schoolchildren without altering melatonin secretion",
+      "whyItMatters": "Useful adjacent evidence for separating pediatric sleep-phase questions from the ordinary adult bedtime protocol."
+    },
+    {
       "body": "This source sits in the Murph shortlist bucket **Objective sleep meta-analysis**.\n\n**Why it matters:** Best current null/objective counterweight: small adult crossover RCT synthesis with no statistically significant pooled actigraphy improvement.\n\n**Potential Murph endpoints:** actigraphy sleep onset latency, total sleep time, sleep efficiency, wake after sleep onset\n\n**Protocol takeaway:** Use to keep the protocol framed as a bounded self-experiment, not a reliable insomnia treatment.",
       "categories": [
         "red-light-glasses-before-bed",
@@ -5943,6 +8792,63 @@
       "whyItMatters": "Strong reason to keep mania and mood-disorder protocols out of the general bedtime-glasses recipe."
     },
     {
+      "artifactNeeded": true,
+      "body": "This source sits in the Murph shortlist bucket **Product and home-lighting context**.\n\n**Why it matters:** Shows why room-light brightness and lens spectra can matter as much as the fact that a lens is amber or red.\n\n**Potential Murph endpoints:** estimated melatonin suppression, spectral transmittance, home-lighting conditions\n\n**Protocol takeaway:** Supports logging room-light brightness and treating room-light redesign as a separate intervention from eyewear.\n\n**Claim use:** `context-only`. Keep this classification when wiring claims so home-lighting modeling work does not get mistaken for direct bedtime sleep efficacy evidence.",
+      "categories": [
+        "red-light-glasses-before-bed",
+        "evening-light"
+      ],
+      "claimUse": "context-only",
+      "entityType": "source_artifact",
+      "evidenceBucket": "Product and home-lighting context",
+      "key": "source_artifact:pmid-41565717",
+      "modality": "evening short-wavelength or melanopic light reduction",
+      "murphV1Priority": "Medium",
+      "pdfRightsStatus": "open_access",
+      "potentialMurphEndpoints": [
+        "estimated melatonin suppression",
+        "spectral transmittance",
+        "home-lighting conditions"
+      ],
+      "protocolTakeaway": "Supports logging room-light brightness and treating room-light redesign as a separate intervention from eyewear.",
+      "quality": "usable",
+      "redLightGlassesFocus": "Contextual",
+      "relations": [
+        {
+          "target": "protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:evening-light-reduction",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/red-light-glasses-before-bed/pmid-41565717.md",
+      "revision": {
+        "pageRevisionId": "sha256:027e0ba618f01f82876d0a7cda79620f1dc80a51af14511b0496e78148297b8f",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/red-light-glasses-before-bed/pmid-41565717",
+      "source": {
+        "authors": "Teran E, de la Iglesia H, Sliney D, Robinson J, Rea M",
+        "citation": "Teran E, et al. Home lighting, blue-light filtering, and their effects on melatonin suppression. Sci Rep. 2026;16:2850. doi:10.1038/s41598-025-29882-7.",
+        "doi": "10.1038/s41598-025-29882-7",
+        "journal": "Scientific Reports",
+        "kind": "journal_article",
+        "pmid": "41565717",
+        "title": "Home lighting, blue-light filtering, and their effects on melatonin suppression",
+        "url": "https://www.nature.com/articles/s41598-025-29882-7",
+        "year": 2026
+      },
+      "status": "draft",
+      "studyDesign": "Mechanistic modeling paper",
+      "summary": "Home-lighting modeling paper used to keep lens marketing, room-light conditions, and melanopic dose in the same frame.",
+      "title": "Home lighting, blue-light filtering, and their effects on melatonin suppression",
+      "whyItMatters": "Shows why room-light brightness and lens spectra can matter as much as the fact that a lens is amber or red."
+    },
+    {
       "body": "This source sits in the Murph shortlist bucket **Intervention design / reality checks**.\n\n**Why it matters:** Provides a concrete progressive dosing model and shows that repeated sauna exposure can move functional outcomes over weeks, even in a clinical group.\n\n**Potential Murph endpoints:** Resting HR, BP, activity tolerance, step count, subjective exertion, functional capacity proxies\n\n**Protocol takeaway:** A ramped protocol matters; start short, monitor tolerance, and increase minutes across weeks rather than jumping to maximal heat exposure.",
       "categories": [
         "sauna",
@@ -6010,7 +8916,7 @@
         "source_artifact:doi-10.17617-1.4a6s-ec74",
         "source_artifact:pmid-29101797"
       ],
-      "body": "## What this is\n\nThis page represents Murph’s structured research corpus for the **red light glasses before bed** protocol. It is a curation artifact, not a primary study.\n\nThe consumer phrase “red light glasses before bed” is treated here as evening amber/orange/red **short-wavelength or melanopic-light filtering eyewear**, not red-light therapy or photobiomodulation.\n\n## Corpus at a glance\n\n- 42 refined records in the pass-2 corpus\n- 18 highest-priority protocol records for the landing page\n- 3 adult randomized crossover trials in the actigraphy meta-analysis\n- 49 adults in that objective-sleep meta-analysis\n- audit cutoff 2026-04-20\n\n## Evidence posture\n\nThe strongest rationale is mechanistic and guideline-level: evening melanopic light can affect circadian and sleep physiology, and public-health guidance supports bright daytime light plus lower evening/night light.\n\nThe direct glasses evidence is mixed. Small trials sometimes report subjective sleep improvements, but the adult actigraphy synthesis did not find statistically significant pooled improvements for sleep onset latency, total sleep time, sleep efficiency, or wake after sleep onset.\n\n## How Murph should use this page\n\nUse this bibliography to keep the protocol bounded:\n\n- The **guideline and mechanistic** sources justify the evening-light hypothesis.\n- The **direct trial** sources set the 90–120 minute pre-bed timing and stop the page from becoming all-evening or overnight virtual darkness.\n- The **Cochrane and actigraphy** sources prevent sleep, eye-strain, and eye-protection overclaims.\n- The **pregnancy and mania** sources are adjacent variants that should not be merged into a general wellness recipe.\n\n## Important caution\n\nThis bibliography does not show that every user should wear tinted glasses. It supports a reversible, low-burden test when the user’s evening environment is likely bright enough to matter.",
+      "body": "## What this is\n\nThis page represents Murph’s structured research corpus for the **red light glasses before bed** protocol. It is a curation artifact, not a primary study.\n\nThe consumer phrase “red light glasses before bed” is treated here as evening amber/orange/red **short-wavelength or melanopic-light filtering eyewear**, not red-light therapy or photobiomodulation.\n\n## Corpus at a glance\n\n- 42 refined records in the pass-2 corpus\n- 18 highest-priority protocol records for the landing page\n- 3 adult randomized crossover trials in the actigraphy meta-analysis\n- 49 adults in that objective-sleep meta-analysis\n- audit cutoff 2026-04-20\n\n## Evidence posture\n\nThe strongest rationale is mechanistic and guideline-level: evening melanopic light can affect circadian and sleep physiology, and public-health guidance supports bright daytime light plus lower evening/night light.\n\nThe direct glasses evidence is mixed. Small trials sometimes report subjective sleep improvements, but the adult actigraphy synthesis did not find statistically significant pooled improvements for sleep onset latency, total sleep time, sleep efficiency, or wake after sleep onset.\n\n## How Murph should use this page\n\nUse this bibliography to keep the protocol bounded:\n\n- The **guideline and mechanistic** sources justify the evening-light hypothesis.\n- The **direct trial** sources set the 90–120 minute pre-bed timing and stop the page from becoming all-evening or overnight virtual darkness.\n- The **Cochrane and actigraphy** sources prevent sleep, eye-strain, and eye-protection overclaims.\n- The **product-quality and home-lighting** sources keep Murph from treating lens color alone as the intervention.\n- The **pregnancy, pediatric, delayed-sleep-phase, shift-work, and mania** sources are adjacent variants that should not be merged into a general wellness recipe.\n\n## Important caution\n\nThis bibliography does not show that every user should wear tinted glasses. It supports a reversible, low-burden test when the user’s evening environment is likely bright enough to matter.",
       "categories": [
         "red-light-glasses-before-bed",
         "sleep",
@@ -6101,6 +9007,10 @@
           "type": "cites"
         },
         {
+          "target": "source_artifact:pmid-30427265",
+          "type": "cites"
+        },
+        {
           "target": "source_artifact:pmid-35089982",
           "type": "cites"
         },
@@ -6115,11 +9025,43 @@
         {
           "target": "source_artifact:pmid-41421618",
           "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-33587901",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-36051910",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-41166315",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-41565717",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-27322730",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-15713707",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-27226262",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-26414986",
+          "type": "cites"
         }
       ],
       "relativePath": "sources/red-light-glasses-before-bed/red-light-glasses-before-bed-bibliography.md",
       "revision": {
-        "pageRevisionId": "sha256:ab1018a409643d362b5b9e55745d6aff68e1e18fd6b79cec308f67c685c68cf0",
+        "pageRevisionId": "sha256:16b9cdaa4c429d6569913462b71dbb29547bd56a0079422f4ee596a321701419",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -6138,7 +9080,16 @@
         "source_artifact:pmid-35089982",
         "source_artifact:pmid-35024497",
         "source_artifact:pmid-29991437",
-        "source_artifact:pmid-41421618"
+        "source_artifact:pmid-41421618",
+        "source_artifact:pmid-30427265",
+        "source_artifact:pmid-33587901",
+        "source_artifact:pmid-36051910",
+        "source_artifact:pmid-41166315",
+        "source_artifact:pmid-41565717",
+        "source_artifact:pmid-27322730",
+        "source_artifact:pmid-15713707",
+        "source_artifact:pmid-27226262",
+        "source_artifact:pmid-26414986"
       ],
       "slug": "sources/red-light-glasses-before-bed/red-light-glasses-before-bed-bibliography",
       "source": {

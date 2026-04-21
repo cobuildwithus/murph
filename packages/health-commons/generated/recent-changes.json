@@ -213,6 +213,60 @@
         "source_artifact:pmid-41032138",
         "source_artifact:pmid-40611569"
       ]
+    },
+    {
+      "affectedFields": [
+        "protocol",
+        "testPlans",
+        "claims",
+        "safety",
+        "biomarkers/estimated-vo2max.md",
+        "families/norwegian-4x4.md",
+        "sources/norwegian-4x4",
+        "artifacts/norwegian-4x4/research-artifacts.json",
+        "packages/health-commons/scripts/download-norwegian-4x4-artifacts.sh"
+      ],
+      "changeId": "chg_2026_04_21_norwegian_4x4_protocol",
+      "changeType": "evidence_change",
+      "editSummary": "Added the Norwegian 4x4 bounded self-experiment protocol, source pages, bibliography, artifact manifest, and open-access artifact downloader helper.",
+      "entityKey": "protocol_variant:norwegian-4x4/norwegian-4x4",
+      "minor": false,
+      "rationale": "Convert the prepared Norwegian 4x4 research landing into Health Commons pages with strict overclaim guardrails, variant separation, and a repo-native PDF workflow that downloads only manifest-approved open-access artifacts.",
+      "reviewStatus": "proposed",
+      "schemaVersion": "murph.commons.change.v1",
+      "sourceKeys": [
+        "source_artifact:pmid-17414804",
+        "source_artifact:ntnu-cerg-norwegian-4x4",
+        "source_artifact:pmid-30733142",
+        "source_artifact:pmid-24066036",
+        "source_artifact:doi-10.3390-ijerph17145103"
+      ]
+    },
+    {
+      "affectedFields": [
+        "relations",
+        "sources/red-light-glasses-before-bed",
+        "artifacts/red-light-glasses-before-bed/research-artifacts.json"
+      ],
+      "changeId": "chg_2026_04_21_red_light_glasses_pass4_dedupe",
+      "changeType": "evidence_change",
+      "editSummary": "Deduped the pass-4 red-light-glasses package into the existing landing by adding adjacent source pages and expanding artifact coverage without replaying the full reland.",
+      "entityKey": "protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed",
+      "minor": true,
+      "rationale": "The pass-4 package carried additional adjacent-variant, home-lighting, and claim-calibration sources plus clearer open-access artifact targets, but most page bodies had already landed in the earlier patch.",
+      "reviewStatus": "proposed",
+      "schemaVersion": "murph.commons.change.v1",
+      "sourceKeys": [
+        "source_artifact:pmid-30427265",
+        "source_artifact:pmid-33587901",
+        "source_artifact:pmid-36051910",
+        "source_artifact:pmid-41166315",
+        "source_artifact:pmid-41565717",
+        "source_artifact:pmid-27322730",
+        "source_artifact:pmid-15713707",
+        "source_artifact:pmid-27226262",
+        "source_artifact:pmid-26414986"
+      ]
     }
   ]
 }
