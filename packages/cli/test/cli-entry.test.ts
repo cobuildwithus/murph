@@ -486,10 +486,18 @@ test("runMurphCliAction passes the published CLI bin path into setup constructio
   const serve = vi.fn(async () => undefined);
   const setupCliServe = vi.fn(async () => undefined);
   const createdServices = { setupHost: vi.fn(), setupMacos: vi.fn() };
-  const createSetupCli = vi.fn(() => ({
+  type CreateSetupServicesInput = {
+    resolveCliBinPath: () => string;
+  };
+  type CreateSetupCliInput = {
+    commandName: string;
+    onSetupSuccess: unknown;
+    services: typeof createdServices;
+  };
+  const createSetupCli = vi.fn((input: CreateSetupCliInput) => ({
     serve: setupCliServe,
   }));
-  const createSetupServices = vi.fn(() => createdServices);
+  const createSetupServices = vi.fn((input: CreateSetupServicesInput) => createdServices);
   const expectedCliBinPath = path.resolve(
     path.dirname(fileURLToPath(new URL("../src/cli-entry.ts", import.meta.url))),
     "../dist/bin.js",
@@ -520,23 +528,16 @@ test("runMurphCliAction passes the published CLI bin path into setup constructio
   });
 
   assert.equal(createSetupServices.mock.calls.length, 1);
-  const createSetupServicesCalls = createSetupServices.mock.calls as unknown as unknown[][];
-  const createSetupServicesCall = createSetupServicesCalls[0];
+  const createSetupServicesCall = createSetupServices.mock.calls[0];
   assert.ok(createSetupServicesCall);
-  const resolveCliBinPath = (
-    createSetupServicesCall[0] as unknown as { resolveCliBinPath: () => string }
-  ).resolveCliBinPath;
+  const [createSetupServicesInput] = createSetupServicesCall;
+  const { resolveCliBinPath } = createSetupServicesInput;
   assert.equal(typeof resolveCliBinPath, "function");
   assert.equal(resolveCliBinPath?.(), expectedCliBinPath);
   assert.equal(createSetupCli.mock.calls.length, 1);
-  const createSetupCliCalls = createSetupCli.mock.calls as unknown as unknown[][];
-  const createSetupCliCall = createSetupCliCalls[0];
+  const createSetupCliCall = createSetupCli.mock.calls[0];
   assert.ok(createSetupCliCall);
-  const createSetupCliInput = createSetupCliCall[0] as unknown as {
-    commandName: string;
-    onSetupSuccess: unknown;
-    services: typeof createdServices;
-  };
+  const [createSetupCliInput] = createSetupCliCall;
   assert.deepEqual(createSetupCliCall, [
     {
       commandName: "murph",

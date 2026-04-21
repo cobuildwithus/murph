@@ -2110,8 +2110,8 @@ test.sequential('setup service configures Telegram and enables assistant auto-re
   const whisperCommand = path.join(formulaPrefixes['whisper-cpp'], 'bin', 'whisper-cli')
   const cliBinPath = path.join(tempRoot, 'packages', 'cli', 'dist', 'bin.js')
   const installedFormulas = new Set(['ffmpeg', 'whisper-cpp'])
-  const sourceAddCalls: Array<Record<string, unknown>> = []
-  const doctorCalls: Array<Record<string, unknown>> = []
+  const sourceAddCalls: InboxSourceAddInput[] = []
+  const doctorCalls: InboxDoctorInput[] = []
 
   await mkdir(vaultRoot, { recursive: true })
   await writeFile(path.join(vaultRoot, 'vault.json'), '{}\n', 'utf8')
@@ -2135,7 +2135,7 @@ test.sequential('setup service configures Telegram and enables assistant auto-re
         return makeBootstrapResult(vaultRoot)
       },
       async doctor(input: InboxDoctorInput) {
-        doctorCalls.push(input as unknown as Record<string, unknown>)
+        doctorCalls.push(input)
         return {
           vault: input.vault,
           configPath: '.runtime/inboxd/config.json',
@@ -2162,7 +2162,7 @@ test.sequential('setup service configures Telegram and enables assistant auto-re
         return createEmptyInboxListResult(input)
       },
       async sourceAdd(input: InboxSourceAddInput) {
-        sourceAddCalls.push(input as unknown as Record<string, unknown>)
+        sourceAddCalls.push(input)
         return {
           configPath: '.runtime/inboxd/config.json',
           connector: {
@@ -2504,7 +2504,7 @@ test.sequential('setup service provisions formulas, downloads the model, and boo
   const installedFormulas = new Set<string>()
   const runCalls: Array<{ file: string; args: string[] }> = []
   const initCalls: Array<{ requestId: string | null; vault: string }> = []
-  const bootstrapCalls: Array<Record<string, unknown>> = []
+  const bootstrapCalls: InboxBootstrapInput[] = []
 
   await writeExecutable(brewCommand)
   await writeExecutable(ffmpegCommand)
@@ -2519,7 +2519,7 @@ test.sequential('setup service provisions formulas, downloads the model, and boo
     getHomeDirectory: () => homeRoot,
     inboxServices: {
       async bootstrap(input: InboxBootstrapInput) {
-        bootstrapCalls.push(input as unknown as Record<string, unknown>)
+        bootstrapCalls.push(input)
         return makeBootstrapResult(vaultRoot)
       },
     },
@@ -3203,7 +3203,7 @@ test.sequential('setup service reuses an existing vault and still bootstraps inb
   const whisperCommand = path.join(formulaPrefixes['whisper-cpp'], 'bin', 'whisper-cli')
   const installedFormulas = new Set(['ffmpeg', 'whisper-cpp'])
   const initCalls: Array<{ requestId: string | null; vault: string }> = []
-  const bootstrapCalls: Array<Record<string, unknown>> = []
+  const bootstrapCalls: InboxBootstrapInput[] = []
 
   await mkdir(vaultRoot, { recursive: true })
   await writeFile(path.join(vaultRoot, 'vault.json'), '{}\n', 'utf8')
@@ -3221,7 +3221,7 @@ test.sequential('setup service reuses an existing vault and still bootstraps inb
     getHomeDirectory: () => homeRoot,
     inboxServices: {
       async bootstrap(input: InboxBootstrapInput) {
-        bootstrapCalls.push(input as unknown as Record<string, unknown>)
+        bootstrapCalls.push(input)
         return makeBootstrapResult(vaultRoot)
       },
     },
@@ -3864,7 +3864,7 @@ test.sequential('Linux setup reuses one apt update across declarative tool insta
   )
   const cliBinPath = path.join(tempRoot, 'packages', 'cli', 'dist', 'bin.js')
   const runCalls: Array<{ file: string; args: string[] }> = []
-  const bootstrapCalls: Array<Record<string, unknown>> = []
+  const bootstrapCalls: InboxBootstrapInput[] = []
 
   await writeExecutable(aptGetCommand)
   await writeExecutable(sudoCommand)
@@ -3879,7 +3879,7 @@ test.sequential('Linux setup reuses one apt update across declarative tool insta
     getHomeDirectory: () => homeRoot,
     inboxServices: {
       async bootstrap(input: InboxBootstrapInput) {
-        bootstrapCalls.push(input as unknown as Record<string, unknown>)
+        bootstrapCalls.push(input)
         return makeBootstrapResult(vaultRoot, {
           whisperCommand,
           whisperModelPath: expectedWhisperModelPath,

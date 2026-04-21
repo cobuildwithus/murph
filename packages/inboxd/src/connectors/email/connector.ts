@@ -363,7 +363,7 @@ async function createAgentmailHttpError(
 
   if (rawText) {
     try {
-      payload = JSON.parse(rawText) as unknown;
+      payload = JSON.parse(rawText);
     } catch {}
   }
 

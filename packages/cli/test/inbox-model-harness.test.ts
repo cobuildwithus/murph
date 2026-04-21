@@ -48,13 +48,21 @@ const assistantWebFetchEnvKeys = [
   'MURPH_WEB_FETCH_MAX_REDIRECTS',
 ] as const
 
-function createStubVaultServices(overrides: Partial<VaultServices> = {}): VaultServices {
+interface StubVaultServicesOverrides {
+  core?: Partial<VaultServices['core']>
+  importers?: Partial<VaultServices['importers']>
+  query?: Partial<VaultServices['query']>
+  devices?: Partial<VaultServices['devices']>
+}
+
+function createStubVaultServices(
+  overrides: StubVaultServicesOverrides = {},
+): VaultServices {
   return {
-    core: {} as VaultServices['core'],
-    importers: {} as VaultServices['importers'],
-    query: {} as VaultServices['query'],
-    devices: {} as VaultServices['devices'],
-    ...overrides,
+    core: { ...(overrides.core ?? {}) } as VaultServices['core'],
+    importers: { ...(overrides.importers ?? {}) } as VaultServices['importers'],
+    query: { ...(overrides.query ?? {}) } as VaultServices['query'],
+    devices: { ...(overrides.devices ?? {}) } as VaultServices['devices'],
   }
 }
 
@@ -732,13 +740,15 @@ test('createInboxRoutingAssistantToolCatalog excludes assistant runtime tools an
     vault: vaultRoot,
     lookupId: 'doc_1',
     documentId: 'doc_1',
-    created: true,
-    path: 'raw/documents/doc_1.pdf',
+    sourceFile: 'outside.pdf',
+    rawFile: 'raw/documents/doc_1.pdf',
+    manifestFile: 'raw/documents/doc_1.json',
+    eventId: 'evt_doc_1',
   }))
   const vaultServices = createStubVaultServices({
     importers: {
       importDocument,
-    } as unknown as VaultServices['importers'],
+    },
   })
 
   try {

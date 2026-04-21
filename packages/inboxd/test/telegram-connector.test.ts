@@ -21,6 +21,139 @@ import type { TelegramUpdateLike } from "@murphai/messaging-ingress/telegram-web
 
 const test = baseTest.sequential;
 
+interface MockTelegramApiClientInput {
+  token?: string;
+  deleteWebhook?: TelegramApiClient["deleteWebhook"];
+  getFile?: (fileId: string) => Promise<{ file_id: string; file_path?: string }>;
+  getMe?: () => Promise<{ id: number; username: string }>;
+  getUpdates?: (
+    input?: Parameters<TelegramApiClient["getUpdates"]>[0],
+  ) => Promise<TelegramUpdateLike[]>;
+  getWebhookInfo?: () => Promise<{ url?: string }>;
+}
+
+type TelegramGetFileResult = Awaited<ReturnType<TelegramApiClient["getFile"]>>;
+type TelegramGetMeResult = Awaited<ReturnType<TelegramApiClient["getMe"]>>;
+type TelegramGetUpdatesResult = Awaited<
+  ReturnType<TelegramApiClient["getUpdates"]>
+>;
+type TelegramWebhookInfoResult = Awaited<
+  ReturnType<NonNullable<TelegramApiClient["getWebhookInfo"]>>
+>;
+type TelegramSender = Record<string, unknown> & { is_bot?: boolean };
+type TelegramSenderMessage = Record<string, unknown> & { from?: TelegramSender };
+
+function createMockTelegramBotUser(input: {
+  id: number;
+  username: string;
+}): TelegramGetMeResult {
+  return {
+    id: input.id,
+    is_bot: true,
+    first_name: "Murph",
+    username: input.username,
+    can_join_groups: true,
+    can_read_all_group_messages: false,
+    supports_inline_queries: false,
+    can_connect_to_business: false,
+    has_main_web_app: false,
+    has_topics_enabled: false,
+    allows_users_to_create_topics: false,
+  };
+}
+
+function createMockTelegramFile(input: {
+  file_id: string;
+  file_path?: string;
+}): TelegramGetFileResult {
+  return {
+    file_id: input.file_id,
+    file_unique_id: `unique-${input.file_id}`,
+    file_path: input.file_path,
+  };
+}
+
+function createMockTelegramWebhookInfo(
+  input: { url?: string },
+): TelegramWebhookInfoResult {
+  return {
+    url: input.url,
+    has_custom_certificate: false,
+    pending_update_count: 0,
+  };
+}
+
+function createMockTelegramUpdate(
+  update: TelegramUpdateLike,
+): TelegramGetUpdatesResult[number] {
+  return {
+    ...update,
+    business_message: withDefaultTelegramSenderFlag(update.business_message),
+    edited_business_message: withDefaultTelegramSenderFlag(update.edited_business_message),
+    edited_message: withDefaultTelegramSenderFlag(update.edited_message),
+    message: withDefaultTelegramSenderFlag(update.message),
+  } as TelegramGetUpdatesResult[number];
+}
+
+function withDefaultTelegramSenderFlag<T>(
+  message: T,
+): T {
+  if (
+    !message ||
+    typeof message !== "object" ||
+    !isTelegramSenderMessage(message) ||
+    !message.from
+  ) {
+    return message;
+  }
+  return {
+    ...message,
+    from: {
+      ...message.from,
+      is_bot: message.from.is_bot ?? false,
+    },
+  } as T;
+}
+
+function isTelegramSenderMessage(value: object): value is TelegramSenderMessage {
+  return !("from" in value) || value.from === undefined || isTelegramSender(value.from);
+}
+
+function isTelegramSender(value: unknown): value is TelegramSender {
+  return typeof value === "object" && value !== null;
+}
+
+function createMockTelegramApiClient({
+  token = "",
+  deleteWebhook,
+  getFile,
+  getMe,
+  getUpdates,
+  getWebhookInfo,
+}: MockTelegramApiClientInput): TelegramApiClient {
+  const api: Partial<TelegramApiClient> & Pick<TelegramApiClient, "token"> = { token };
+  if (deleteWebhook) {
+    api.deleteWebhook = deleteWebhook;
+  }
+  if (getFile) {
+    api.getFile = async (fileId) =>
+      createMockTelegramFile(await getFile(fileId));
+  }
+  if (getMe) {
+    api.getMe = async () =>
+      createMockTelegramBotUser(await getMe());
+  }
+  if (getUpdates) {
+    api.getUpdates = async (input) =>
+      (await getUpdates(input)).map(createMockTelegramUpdate) as TelegramGetUpdatesResult;
+  }
+  if (getWebhookInfo) {
+    api.getWebhookInfo = async () =>
+      createMockTelegramWebhookInfo(await getWebhookInfo());
+  }
+  return api as TelegramApiClient;
+}
+
 function createPersistedCapture(capture: InboundCapture): PersistedCapture {
   return {
     captureId: `cap-${capture.externalId}`,
@@ -589,7 +722,7 @@ test("createTelegramApiPollDriver delegates Bot API calls through the grammY Api
   const downloadRequests: string[] = [];
 
   const driver = createTelegramApiPollDriver({
-    api: {
+    api: createMockTelegramApiClient({
       token: "bot-token",
       async getMe() {
         getMeCalls += 1;
@@ -638,7 +771,7 @@ test("createTelegramApiPollDriver delegates Bot API calls through the grammY Api
           url: "https://example.invalid/webhook",
         };
       },
-    } as unknown as TelegramApiClient,
+    }),
     batchSize: 5,
     downloadFile: async (filePath) => {
       downloadRequests.push(filePath);
@@ -687,7 +820,7 @@ test("createTelegramApiPollDriver retries transient polling failures before resu
   let attempts = 0;
   const deliveredUpdateIds: number[] = [];
   const driver = createTelegramApiPollDriver({
-    api: {
+    api: createMockTelegramApiClient({
       token: "bot-token",
       async getMe() {
         return {
@@ -724,7 +857,7 @@ test("createTelegramApiPollDriver retries transient polling failures before resu
       async getFile() {
         throw new Error("getFile should not be called in this test");
       },
-    } as unknown as TelegramApiClient,
+    }),
   });
 
   const controller = new AbortController();
@@ -752,7 +885,7 @@ test("createTelegramApiPollDriver retries transient polling failures before resu
 test("createTelegramApiPollDriver stops retrying fatal 4xx polling failures", async () => {
   let attempts = 0;
   const driver = createTelegramApiPollDriver({
-    api: {
+    api: createMockTelegramApiClient({
       token: "bot-token",
       async getMe() {
         return {
@@ -767,7 +900,7 @@ test("createTelegramApiPollDriver stops retrying fatal 4xx polling failures", as
       async getFile() {
         throw new Error("getFile should not be called in this test");
       },
-    } as unknown as TelegramApiClient,
+    }),
   });
 
   const watcher = await driver.startWatching({
@@ -1066,7 +1199,7 @@ test("createTelegramApiPollDriver reads local Bot API file paths directly", asyn
 
   try {
     const driver = createTelegramApiPollDriver({
-      api: {
+      api: createMockTelegramApiClient({
         token: "bot-token",
         async getMe() {
           return {
@@ -1084,7 +1217,7 @@ test("createTelegramApiPollDriver reads local Bot API file paths directly", asyn
             file_path: filePath,
           };
         },
-      } as unknown as TelegramApiClient,
+      }),
       fileBaseUrl: "http://127.0.0.1:8081/file",
     });
 
@@ -1107,7 +1240,7 @@ test("createTelegramApiPollDriver rejects local Bot API file paths from untruste
 
   try {
     const driver = createTelegramApiPollDriver({
-      api: {
+      api: createMockTelegramApiClient({
         token: "bot-token",
         async getMe() {
           return {
@@ -1125,7 +1258,7 @@ test("createTelegramApiPollDriver rejects local Bot API file paths from untruste
             file_path: "/tmp/telegram/file.txt",
           };
         },
-      } as unknown as TelegramApiClient,
+      }),
       fileBaseUrl: "https://files.example.test/file",
     });
 

@@ -24,6 +24,12 @@ interface SpawnProcessInput {
   stderrPath: string
 }
 
+interface PersistedLauncherState {
+  pid: number
+  baseUrl: string
+  controlToken?: string
+}
+
 function readAuthorizationHeader(headers?: HeadersInit): string | null {
   return headers ? new Headers(headers).get('Authorization') : null
 }
@@ -36,6 +42,45 @@ function readRequestUrl(input: RequestInfo | URL): string {
     return input.toString()
   }
   return input.url
+}
+
+function parsePersistedLauncherState(
+  value: unknown,
+): PersistedLauncherState {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new TypeError('Device sync daemon launcher state must be an object.')
+  }
+  if (!('pid' in value) || !('baseUrl' in value)) {
+    throw new TypeError('Device sync daemon launcher state is missing required fields.')
+  }
+  const pid = value.pid
+  const baseUrl = value.baseUrl
+  const controlToken = 'controlToken' in value ? value.controlToken : undefined
+  if (typeof pid !== 'number' || !Number.isInteger(pid)) {
+    throw new TypeError('Device sync daemon launcher state pid must be an integer.')
+  }
+  if (typeof baseUrl !== 'string') {
+    throw new TypeError('Device sync daemon launcher state baseUrl must be a string.')
+  }
+  if (controlToken !== undefined && typeof controlToken !== 'string') {
+    throw new TypeError(
+      'Device sync daemon launcher state controlToken must be a string when present.',
+    )
+  }
+
+  return controlToken === undefined
+    ? { pid, baseUrl }
+    : { pid, baseUrl, controlToken }
+}
+
+function requireSpawnedProcess(
+  value: SpawnProcessInput | null,
+): SpawnProcessInput {
+  if (value === null) {
+    throw new Error('expected spawnProcess to be called')
+  }
+
+  return value
 }
 
 test.sequential(
@@ -90,10 +135,7 @@ test.sequential(
       assert.equal(result.running, true)
       assert.equal(result.healthy, true)
       assert.equal(result.pid, 4242)
-      if (spawned === null) {
-        throw new Error('expected spawnProcess to be called')
-      }
-      const spawnedProcess = spawned as unknown as SpawnProcessInput
+      const spawnedProcess = requireSpawnedProcess(spawned)
       assert.equal(spawnedProcess.command, process.execPath)
       assert.deepEqual(spawnedProcess.args, ['/virtual/device-syncd/dist/bin.js'])
       assert.equal(
@@ -119,19 +161,10 @@ test.sequential(
           path.join(vaultRoot, '.runtime/operations/device-sync/launcher.json'),
           'utf8',
         ),
-      ) as unknown
+      )
       const persistedLauncherState = parseVersionedJsonStateEnvelope(launcherState, {
         label: 'Device sync daemon launcher state',
-        parseValue(value) {
-          if (!value || typeof value !== 'object' || Array.isArray(value)) {
-            throw new TypeError('Device sync daemon launcher state must be an object.')
-          }
-          return value as {
-            pid: number
-            baseUrl: string
-            controlToken?: string
-          }
-        },
+        parseValue: parsePersistedLauncherState,
         schema: DEVICE_DAEMON_STATE_SCHEMA,
         schemaVersion: DEVICE_DAEMON_STATE_SCHEMA_VERSION,
       })
@@ -322,10 +355,7 @@ test.sequential(
         },
       })
 
-      if (spawned === null) {
-        throw new Error('expected spawnProcess to be called')
-      }
-      const spawnedProcess = spawned as unknown as SpawnProcessInput
+      const spawnedProcess = requireSpawnedProcess(spawned)
       assert.equal(
         spawnedProcess.env.DEVICE_SYNC_CONTROL_TOKEN,
         'control-token-for-tests',
