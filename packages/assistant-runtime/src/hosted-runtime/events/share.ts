@@ -28,5 +28,6 @@ export async function handleHostedShareAcceptedWake(input: {
       vaultRoot: input.vaultRoot,
     }),
     shareImportTitle: pack.title,
+    vaultSyncImportResult: null,
   };
 }

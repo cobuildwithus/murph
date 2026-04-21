@@ -7,6 +7,7 @@ import { HostedDeviceSyncSettings } from "@/src/components/settings/hosted-devic
 import { HostedEmailSettings } from "@/src/components/settings/hosted-email-settings";
 import { HostedPhoneSettings } from "@/src/components/settings/hosted-phone-settings";
 import { HostedTelegramSettings } from "@/src/components/settings/hosted-telegram-settings";
+import { HostedVaultSyncSettings } from "@/src/components/settings/hosted-vault-sync-settings";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 
 export const metadata: Metadata = {
@@ -32,7 +33,7 @@ export default async function SettingsPage() {
             Your account
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Subscription, connected accounts, and wearables.
+            Subscription, connected accounts, vault sync, and wearables.
           </p>
         </div>
 
@@ -52,6 +53,16 @@ export default async function SettingsPage() {
             <HostedTelegramSettings authenticated={authenticated} initialLinkedAccounts={linkedAccounts} />
             <HostedEmailSettings authenticated={authenticated} initialLinkedAccounts={linkedAccounts} />
           </div>
+        </section>
+
+        <section className="flex flex-col gap-4">
+          <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+            Vault
+          </div>
+          <HostedVaultSyncSettings
+            authenticated={authenticated}
+            member={authenticatedMember}
+          />
         </section>
 
         <section className="flex flex-col gap-4">

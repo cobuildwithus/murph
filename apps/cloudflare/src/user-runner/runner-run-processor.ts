@@ -7,6 +7,7 @@ import type {
   HostedRuntimeEvent,
   HostedExecutionRunnerResult,
   HostedExecutionRunnerSharePack,
+  HostedExecutionRunnerVaultSyncImport,
   HostedIngressEnvelope,
   HostedRunRecord,
   HostedRuntimeDrainEvent,
@@ -21,6 +22,7 @@ import {
 } from "@murphai/hosted-execution";
 import {
   parseHostedExecutionRunnerSharePack,
+  parseHostedExecutionRunnerVaultSyncImport,
 } from "@murphai/hosted-execution/parsers";
 import type {
   HostedAssistantDeliveryOutcome,
@@ -127,6 +129,19 @@ export class RunnerRunProcessor {
     return this.readRunnerSharePack({
       ownerUserId: wake.share.ownerUserId,
       shareId: wake.share.shareId,
+    });
+  }
+
+  async readRunDrainVaultSyncImport(
+    wake: HostedIngressEnvelope,
+  ): Promise<HostedExecutionRunnerVaultSyncImport | null> {
+    if (wake.kind !== "vault.sync.import") {
+      return null;
+    }
+
+    return this.readRunnerVaultSyncImport({
+      sessionId: wake.vaultSync.sessionId,
+      userId: wake.userId,
     });
   }
 
@@ -256,12 +271,13 @@ export class RunnerRunProcessor {
           cursorSnapshotRef,
           finalizeRequired: true,
           nextRuntimeWakeAt: result.result.nextWakeAt ?? null,
-          redactedSummary: {
+          redactedSummary: buildRunnerRedactedSummary({
             assistantDeliveryEffectCount: runnerResult.committedAssistantDeliveryEffects.length,
             eventsHandled: result.result.eventsHandled,
             phase: "prepared",
+            redactedDetails: result.result.redactedDetails ?? null,
             summary: result.result.summary,
-          },
+          }),
           state: "completed",
         };
       }
@@ -287,11 +303,12 @@ export class RunnerRunProcessor {
         cursorSnapshotRef,
         finalizeRequired: false,
         nextRuntimeWakeAt: result.result.nextWakeAt ?? null,
-        redactedSummary: {
+        redactedSummary: buildRunnerRedactedSummary({
           eventsHandled: result.result.eventsHandled,
           phase: "finalized",
+          redactedDetails: result.result.redactedDetails ?? null,
           summary: result.result.summary,
-        },
+        }),
         state: "completed",
       };
     } catch (error) {
@@ -457,12 +474,13 @@ export class RunnerRunProcessor {
         cursorSnapshotRef,
         finalizeRequired: false,
         nextRuntimeWakeAt: runnerResult.result.result.nextWakeAt,
-        redactedSummary: {
+        redactedSummary: buildRunnerRedactedSummary({
           ...summarizeHostedAssistantDeliveryOutcomes(runnerResult.assistantDeliveryOutcomes),
           eventsHandled: runnerResult.result.result.eventsHandled,
           phase: "finalized",
+          redactedDetails: runnerResult.result.result.redactedDetails ?? null,
           summary: runnerResult.result.result.summary,
-        },
+        }),
         state: "completed",
       };
     } catch (error) {
@@ -685,6 +703,44 @@ export class RunnerRunProcessor {
       return parseHostedExecutionRunnerSharePack(payload);
     } catch (error) {
       throw new Error("Hosted share payload read returned invalid JSON.", {
+        cause: error,
+      });
+    }
+  }
+
+
+  private async readRunnerVaultSyncImport(input: {
+    sessionId: string;
+    userId: string;
+  }): Promise<HostedExecutionRunnerVaultSyncImport> {
+    const hostedWebBaseUrl = this.dependencies.hostedWebBaseUrl;
+
+    if (!hostedWebBaseUrl) {
+      throw new Error("HOSTED_WEB_BASE_URL must be configured for hosted vault sync import hydration.");
+    }
+
+    const response = await fetchHostedExecutionWebControlPlaneResponse({
+      baseUrl: hostedWebBaseUrl,
+      boundUserId: input.userId,
+      callbackSigning: this.dependencies.env.webCallbackSigning,
+      method: "GET",
+      path: `/api/internal/hosted-execution/vault-sync/${encodeURIComponent(input.sessionId)}/payload`,
+      timeoutMs: this.dependencies.env.runnerTimeoutMs,
+    });
+
+    if (response.status === 404) {
+      throw createMissingHostedVaultSyncImportError(input);
+    }
+
+    if (!response.ok) {
+      throw new Error(`Hosted vault sync import payload read failed with HTTP ${response.status}.`);
+    }
+
+    try {
+      const payload: unknown = JSON.parse(await response.text());
+      return parseHostedExecutionRunnerVaultSyncImport(payload);
+    } catch (error) {
+      throw new Error("Hosted vault sync import payload read returned invalid JSON.", {
         cause: error,
       });
     }
@@ -918,6 +974,17 @@ function isCompletedRunnerResult(
   return result.phase === undefined || result.phase === "completed";
 }
 
+
+function buildRunnerRedactedSummary(
+  input: Record<string, unknown> & { redactedDetails?: Record<string, unknown> | null },
+): Record<string, unknown> {
+  const { redactedDetails, ...summary } = input;
+  return {
+    ...summary,
+    ...(redactedDetails ? { details: redactedDetails } : {}),
+  };
+}
+
 export function summarizeHostedAssistantDeliveryOutcomes(
   outcomes: readonly HostedAssistantDeliveryOutcome[] | undefined,
 ): Record<string, number | string> {
@@ -1027,6 +1094,16 @@ export async function recordHostedRunBreadcrumbInWebBestEffort(input: {
       userId: input.userId,
     });
   }
+}
+
+
+function createMissingHostedVaultSyncImportError(input: {
+  sessionId: string;
+  userId: string;
+}): Error {
+  return new Error(
+    `Hosted vault sync import ${input.userId}/${input.sessionId} is missing from the canonical web payload route.`,
+  );
 }
 
 function createMissingHostedSharePackError(input: {

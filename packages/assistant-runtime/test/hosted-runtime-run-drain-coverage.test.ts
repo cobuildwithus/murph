@@ -8,6 +8,7 @@ import {
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionMemberChannelsUpdatedWake,
   buildHostedExecutionRuntimeTimerWake,
+  buildHostedExecutionVaultSyncImportWake,
 } from "@murphai/hosted-execution";
 
 import {
@@ -431,6 +432,129 @@ describe("executeHostedRunDrainForCommit", () => {
       assert.equal(result.committedResult.result.eventsHandled, 2);
       assert.equal(result.committedResult.result.nextWakeAt, "2026-04-08T00:12:00.000Z");
       assert.match(result.committedResult.result.summary, /kinds=device-sync\.wake,member\.activated/u);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("preserves redacted details for each vault-sync import handled in one run", async () => {
+    vi.useFakeTimers();
+
+    try {
+      vi.setSystemTime(new Date("2026-04-08T00:00:00.000Z"));
+      mocks.executeHostedIngressEvent
+        .mockResolvedValueOnce({
+          bootstrapResult: null,
+          conversationMetrics: null,
+          ingressLane: "vault-sync-import",
+          shareImportResult: null,
+          shareImportTitle: null,
+          vaultSyncImportResult: {
+            conflictManifestPath: null,
+            conflicts: [],
+            imported: {
+              jsonlRecords: 1,
+              rawFiles: 0,
+              textFiles: 2,
+            },
+            sessionId: "vsi_first",
+            skipped: {
+              duplicates: 0,
+              excludedFiles: 1,
+            },
+          },
+        })
+        .mockResolvedValueOnce({
+          bootstrapResult: null,
+          conversationMetrics: null,
+          ingressLane: "vault-sync-import",
+          shareImportResult: null,
+          shareImportTitle: null,
+          vaultSyncImportResult: {
+            conflictManifestPath: "raw/sync-imports/vsi_second/conflicts.json",
+            conflicts: [
+              {
+                existingPath: "daily/2026-04-08.md",
+                importPath: "daily/2026-04-08.md",
+                preservedPath: "raw/sync-imports/vsi_second/daily/2026-04-08.md",
+                reason: "different-content",
+              },
+            ],
+            imported: {
+              jsonlRecords: 0,
+              rawFiles: 1,
+              textFiles: 0,
+            },
+            sessionId: "vsi_second",
+            skipped: {
+              duplicates: 3,
+              excludedFiles: 0,
+            },
+          },
+        });
+
+      const result = await executeHostedRunDrainForCommit({
+        executionContext: createExecutionContext(),
+        request: {
+          bundle: "incoming-bundle",
+          run: HOSTED_RUN_CONTEXT,
+          runDrain: {
+            acquiredAt: "2026-04-08T00:00:00.000Z",
+            events: [
+              {
+                seq: "24",
+                wake: buildHostedExecutionVaultSyncImportWake({
+                  eventId: "evt_vault_sync_first",
+                  memberId: "member_123",
+                  occurredAt: "2026-04-08T00:00:00.000Z",
+                  vaultSync: {
+                    localManifestHash: "sha256:first",
+                    sessionId: "vsi_first",
+                  },
+                }),
+                ingressEventId: "wake_24",
+              },
+              {
+                seq: "25",
+                wake: buildHostedExecutionVaultSyncImportWake({
+                  eventId: "evt_vault_sync_second",
+                  memberId: "member_123",
+                  occurredAt: "2026-04-08T00:00:01.000Z",
+                  vaultSync: {
+                    localManifestHash: "sha256:second",
+                    sessionId: "vsi_second",
+                  },
+                }),
+                ingressEventId: "wake_25",
+              },
+            ],
+            inputCommittedSeq: "24",
+            inputCursorVersion: "4",
+            runId: "run_123",
+            triggerKind: "external_ingress",
+            userId: "member_123",
+          },
+        },
+        restored: createRestored(),
+        runtime: createRuntime(),
+        runtimeEnv: {},
+      });
+
+      expect(result.committedResult.result.redactedDetails).toEqual({
+        vaultSyncImport: expect.objectContaining({
+          sessionId: "vsi_first",
+        }),
+        vaultSyncImports: [
+          expect.objectContaining({
+            conflictCount: 0,
+            sessionId: "vsi_first",
+          }),
+          expect.objectContaining({
+            conflictCount: 1,
+            sessionId: "vsi_second",
+          }),
+        ],
+      });
     } finally {
       vi.useRealTimers();
     }

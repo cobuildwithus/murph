@@ -13,6 +13,7 @@ import { HOSTED_INGRESS_PAYLOAD_SCHEMA } from "@murphai/hosted-execution/contrac
 import {
   buildHostedExecutionEmailConversationMessageWake,
   buildHostedExecutionMemberActivatedWake,
+  buildHostedExecutionVaultSyncImportWake,
 } from "@murphai/hosted-execution";
 import { HostedUserRunner } from "../src/user-runner.ts";
 import { createHostedUserKeyStore } from "../src/user-key-store.ts";
@@ -53,6 +54,7 @@ const wakeProcessorMocks = vi.hoisted(() => ({
   executeRunDrain: vi.fn(),
   finalizeRunDrain: vi.fn(),
   readRunDrainSharePack: vi.fn(),
+  readRunDrainVaultSyncImport: vi.fn(),
   startRunMessagingActivity: vi.fn(),
 }));
 
@@ -97,6 +99,8 @@ vi.mock("../src/user-runner/runner-run-processor.js", async () => {
     finalizeRunDrain = wakeProcessorMocks.finalizeRunDrain;
 
     readRunDrainSharePack = wakeProcessorMocks.readRunDrainSharePack;
+
+    readRunDrainVaultSyncImport = wakeProcessorMocks.readRunDrainVaultSyncImport;
 
     startRunMessagingActivity = wakeProcessorMocks.startRunMessagingActivity;
 
@@ -1214,7 +1218,7 @@ describe("HostedUserRunner resumeFinalize drain", () => {
       body: {
         eventResults: [
           {
-            quarantineCode: "share-pack-unavailable",
+            quarantineCode: "hosted-side-input-unavailable",
             state: "quarantined",
             ingressEventId: "wake-share-pack-missing",
           },
@@ -1230,6 +1234,112 @@ describe("HostedUserRunner resumeFinalize drain", () => {
     });
     await expect(stateStore.readState()).resolves.toMatchObject({
       userId: "user-resume-finalize",
+    });
+  });
+
+  it("hydrates vault sync imports before draining and commits the hydrated side input", async () => {
+    envMocks.readHostedExecutionEnvironment.mockReturnValue(createTestRuntimeEnvironment());
+    const state = createDurableObjectStateHarness();
+    const stateStore = new RunnerStateStore(state);
+    await stateStore.bootstrapUser("user-resume-finalize");
+    const runner = new HostedUserRunner(
+      state,
+      envMocks.readHostedExecutionEnvironment(createHostedExecutionTestEnv()),
+      new MemoryEncryptedR2Bucket(),
+    );
+
+    const vaultSyncWake = buildHostedExecutionVaultSyncImportWake({
+      eventId: "evt_vault_sync",
+      memberId: "user-resume-finalize",
+      occurredAt: "2026-04-20T00:00:00.000Z",
+      vaultSync: {
+        localManifestHash: "sha256:manifest",
+        sessionId: "vsi_runtime",
+        sourceVaultId: "vault_local",
+        sourceVaultTitle: "Local Vault",
+      },
+    });
+    const acquiredCursor = createCursorState({
+      committedSeq: "10",
+      nextSeq: "11",
+      snapshotKey: "snapshot/vault-sync",
+      version: "cursor-v1",
+    });
+    const committedCursor = createCursorState({
+      committedSeq: "11",
+      nextSeq: "12",
+      snapshotKey: "snapshot/vault-sync-committed",
+      version: "cursor-v2",
+    });
+    const run = createRunRecord();
+    run.status = "acquired";
+
+    wakeProcessorMocks.readRunDrainVaultSyncImport.mockResolvedValueOnce({
+      bundleBase64: "AQID",
+      localManifestHash: "sha256:manifest",
+      sessionId: "vsi_runtime",
+      sourceVaultId: "vault_local",
+      sourceVaultTitle: "Local Vault",
+    });
+    webControlMocks.acquireHostedRunFromWeb.mockResolvedValueOnce({
+      acquired: true,
+      cursor: acquiredCursor,
+      events: [
+        createAcquireEvent({
+          id: "wake-vault-sync",
+          seq: "11",
+          userId: "user-resume-finalize",
+          wake: vaultSyncWake,
+        }),
+      ],
+      pendingIngressEventCount: 1,
+      resumeFinalize: false,
+      run,
+      runToken: "run-token",
+    });
+    webControlMocks.commitHostedRunToWeb.mockResolvedValueOnce({
+      committed: true,
+      cursor: committedCursor,
+      needsFinalize: false,
+      run,
+    });
+    webControlMocks.recordHostedRunLogInWeb.mockResolvedValue({
+      log: null,
+      logged: true,
+    });
+    wakeProcessorMocks.executeRunDrain.mockResolvedValue({
+      cursorSnapshotRef: committedCursor.snapshotRef,
+      finalizeRequired: false,
+      nextRuntimeWakeAt: null,
+      redactedSummary: null,
+      state: "completed",
+    });
+
+    const result = await runner.drainHostedRuns({
+      targetCommittedSeqHint: "11",
+    });
+
+    expect(wakeProcessorMocks.readRunDrainVaultSyncImport).toHaveBeenCalledWith(vaultSyncWake);
+    expect(wakeProcessorMocks.executeRunDrain).toHaveBeenCalledWith(expect.objectContaining({
+      events: [
+        expect.objectContaining({
+          ingressEventId: "wake-vault-sync",
+          seq: "11",
+          vaultSyncImport: {
+            bundleBase64: "AQID",
+            localManifestHash: "sha256:manifest",
+            sessionId: "vsi_runtime",
+            sourceVaultId: "vault_local",
+            sourceVaultTitle: "Local Vault",
+          },
+          wake: vaultSyncWake,
+        }),
+      ],
+    }));
+    expect(result).toEqual({
+      committedSeq: committedCursor.committedSeq,
+      requestedTargetSeq: "11",
+      targetReached: true,
     });
   });
 

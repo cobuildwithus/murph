@@ -27,12 +27,14 @@ import type {
   HostedExecutionLinqConversationMessagePayload,
   HostedExecutionRunnerRequest,
   HostedExecutionRunnerSharePack,
+  HostedExecutionRunnerVaultSyncImport,
   HostedExecutionRunnerResult,
   HostedExecutionShareReference,
   HostedExecutionUserStatus,
   HostedRunDrainResult,
   HostedRunNudgeResult,
   HostedExecutionVaultShareAcceptedEvent,
+  HostedExecutionVaultSyncImportEvent,
   HostedIngressLifecycleState,
   HostedIngressPayloadSchema,
   HostedRuntimeDrainEvent,
@@ -58,6 +60,7 @@ import {
   buildHostedExecutionRuntimeTimerWake,
   buildHostedExecutionTelegramConversationMessageWake,
   buildHostedExecutionVaultShareAcceptedWake,
+  buildHostedExecutionVaultSyncImportWake,
 } from "./builders.ts";
 import {
   requireArray,
@@ -194,6 +197,13 @@ export function parseHostedIngressEnvelope(value: unknown): HostedIngressEnvelop
         memberId: userId,
         occurredAt,
         share: parseHostedExecutionShareReference(record.share),
+      });
+    case "vault.sync.import":
+      return buildHostedExecutionVaultSyncImportWake({
+        eventId,
+        memberId: userId,
+        occurredAt,
+        vaultSync: parseHostedExecutionVaultSyncImportReference(record.vaultSync),
       });
     default:
       throw new TypeError(`Unsupported hosted execution wake kind: ${kind}`);
@@ -442,6 +452,13 @@ export function parseHostedRuntimeDrainEvent(
             ? null
             : parseHostedExecutionRunnerSharePack(record.sharePack),
         }),
+    ...(record.vaultSyncImport === undefined
+      ? {}
+      : {
+          vaultSyncImport: record.vaultSyncImport === null
+            ? null
+            : parseHostedExecutionRunnerVaultSyncImport(record.vaultSyncImport),
+        }),
     wake: parseHostedRuntimeEvent(record.wake),
   };
 }
@@ -461,6 +478,16 @@ export function parseHostedExecutionRunnerResult(value: unknown): HostedExecutio
         result.nextWakeAt,
         "Hosted execution runner result nextWakeAt",
       ),
+      ...(result.redactedDetails === undefined
+        ? {}
+        : {
+            redactedDetails: result.redactedDetails === null
+              ? null
+              : requireObject(
+                  result.redactedDetails,
+                  "Hosted execution runner result redactedDetails",
+                ),
+          }),
       summary: requireString(result.summary, "Hosted execution runner result summary"),
     },
   };
@@ -675,6 +702,12 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
         share: parseHostedExecutionShareReference(record.share),
         userId,
       } satisfies HostedExecutionVaultShareAcceptedEvent;
+    case "vault.sync.import":
+      return {
+        kind,
+        userId,
+        vaultSync: parseHostedExecutionVaultSyncImportReference(record.vaultSync),
+      } satisfies HostedExecutionVaultSyncImportEvent;
     default:
       throw new TypeError(`Unsupported hosted execution event kind: ${kind}`);
   }
@@ -877,6 +910,44 @@ export function parseHostedExecutionShareReference(value: unknown): HostedExecut
   };
 }
 
+
+export function parseHostedExecutionVaultSyncImportReference(
+  value: unknown,
+): HostedExecutionVaultSyncImportEvent["vaultSync"] {
+  const record = requireObject(value, "Hosted execution vault sync import reference");
+
+  return {
+    ...(record.localManifestHash === undefined
+      ? {}
+      : {
+          localManifestHash: readOptionalNullableString(
+            record.localManifestHash,
+            "Hosted execution vault sync import reference localManifestHash",
+          ),
+        }),
+    sessionId: requireString(
+      record.sessionId,
+      "Hosted execution vault sync import reference sessionId",
+    ),
+    ...(record.sourceVaultId === undefined
+      ? {}
+      : {
+          sourceVaultId: readOptionalNullableString(
+            record.sourceVaultId,
+            "Hosted execution vault sync import reference sourceVaultId",
+          ),
+        }),
+    ...(record.sourceVaultTitle === undefined
+      ? {}
+      : {
+          sourceVaultTitle: readOptionalNullableString(
+            record.sourceVaultTitle,
+            "Hosted execution vault sync import reference sourceVaultTitle",
+          ),
+        }),
+  };
+}
+
 export function parseHostedExecutionRunnerSharePack(value: unknown): HostedExecutionRunnerSharePack {
   const record = requireObject(value, "Hosted execution runner share pack");
 
@@ -887,6 +958,48 @@ export function parseHostedExecutionRunnerSharePack(value: unknown): HostedExecu
     ),
     pack: assertContract(sharePackSchema, record.pack, "share pack"),
     shareId: requireString(record.shareId, "Hosted execution runner share pack shareId"),
+  };
+}
+
+
+export function parseHostedExecutionRunnerVaultSyncImport(
+  value: unknown,
+): HostedExecutionRunnerVaultSyncImport {
+  const record = requireObject(value, "Hosted execution runner vault sync import");
+
+  return {
+    bundleBase64: requireString(
+      record.bundleBase64,
+      "Hosted execution runner vault sync import bundleBase64",
+    ),
+    ...(record.localManifestHash === undefined
+      ? {}
+      : {
+          localManifestHash: readOptionalNullableString(
+            record.localManifestHash,
+            "Hosted execution runner vault sync import localManifestHash",
+          ),
+        }),
+    sessionId: requireString(
+      record.sessionId,
+      "Hosted execution runner vault sync import sessionId",
+    ),
+    ...(record.sourceVaultId === undefined
+      ? {}
+      : {
+          sourceVaultId: readOptionalNullableString(
+            record.sourceVaultId,
+            "Hosted execution runner vault sync import sourceVaultId",
+          ),
+        }),
+    ...(record.sourceVaultTitle === undefined
+      ? {}
+      : {
+          sourceVaultTitle: readOptionalNullableString(
+            record.sourceVaultTitle,
+            "Hosted execution runner vault sync import sourceVaultTitle",
+          ),
+        }),
   };
 }
 

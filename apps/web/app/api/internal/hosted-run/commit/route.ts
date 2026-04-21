@@ -6,6 +6,7 @@ import {
 import { readOptionalJsonObject } from "@/src/lib/http";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { commitHostedRun } from "@/src/lib/hosted-run/store";
+import { markHostedVaultSyncSessionCommittedFromRunSummary } from "@/src/lib/vault-sync/session-service";
 
 export const POST = withJsonError(async (request: Request) => {
   const userId = await requireHostedCloudflareCallbackRequest(request);
@@ -26,6 +27,17 @@ export const POST = withJsonError(async (request: Request) => {
     runToken: body.runToken,
     userId,
   });
+
+  if (response.committed && response.run) {
+    try {
+      await markHostedVaultSyncSessionCommittedFromRunSummary({
+        memberId: userId,
+        redactedSummary: response.run.redactedSummary,
+      });
+    } catch (error) {
+      console.warn("Failed to update hosted vault sync session status after run commit.", error);
+    }
+  }
 
   return jsonOk(response);
 });

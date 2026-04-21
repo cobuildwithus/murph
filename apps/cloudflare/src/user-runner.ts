@@ -923,14 +923,16 @@ export class HostedUserRunner {
       await this.ensureManagedUserCryptoForActivationWakeIfNeeded(hostedWake);
 
       let sharePack: HostedRuntimeDrainEvent["sharePack"] = null;
+      let vaultSyncImport: HostedRuntimeDrainEvent["vaultSyncImport"] = null;
       try {
         sharePack = await this.runProcessor.readRunDrainSharePack(hostedWake);
+        vaultSyncImport = await this.runProcessor.readRunDrainVaultSyncImport(hostedWake);
       } catch (error) {
         this.quarantineHostedRunWake({
           error,
           eventResults,
-          message: `Hosted run event seq ${wake.seq} could not hydrate its share payload and will be quarantined at run commit.`,
-          quarantineCode: "share-pack-unavailable",
+          message: `Hosted run event seq ${wake.seq} could not hydrate its side input payload and will be quarantined at run commit.`,
+          quarantineCode: "hosted-side-input-unavailable",
           runId: input.run.id,
           userId: input.userId,
           wake,
@@ -961,6 +963,7 @@ export class HostedUserRunner {
         ingressEventId: wake.id,
         seq: wake.seq,
         ...(sharePack ? { sharePack } : {}),
+        ...(vaultSyncImport ? { vaultSyncImport } : {}),
         wake: hostedWake,
       });
       eventResults.push({

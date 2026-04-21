@@ -18,6 +18,8 @@ import type {
   HostedRunTriggerKind,
   HostedExecutionVaultShareAcceptedEvent,
   HostedExecutionVaultShareAcceptedWake,
+  HostedExecutionVaultSyncImportEvent,
+  HostedExecutionVaultSyncImportWake,
 } from "./contracts.ts";
 
 function cloneLinqMessagePart(
@@ -285,5 +287,31 @@ export function buildHostedExecutionVaultShareAcceptedWake(input: {
     occurredAt: input.occurredAt,
     share: input.share,
     userId: input.memberId,
+  };
+}
+
+export function buildHostedExecutionVaultSyncImportWake(input: {
+  eventId: string;
+  memberId: string;
+  occurredAt: string;
+  vaultSync: HostedExecutionVaultSyncImportEvent["vaultSync"];
+}): HostedExecutionVaultSyncImportWake {
+  return {
+    eventId: input.eventId,
+    kind: "vault.sync.import",
+    occurredAt: input.occurredAt,
+    userId: input.memberId,
+    vaultSync: {
+      ...(input.vaultSync.localManifestHash === undefined
+        ? {}
+        : { localManifestHash: input.vaultSync.localManifestHash }),
+      sessionId: input.vaultSync.sessionId,
+      ...(input.vaultSync.sourceVaultId === undefined
+        ? {}
+        : { sourceVaultId: input.vaultSync.sourceVaultId }),
+      ...(input.vaultSync.sourceVaultTitle === undefined
+        ? {}
+        : { sourceVaultTitle: input.vaultSync.sourceVaultTitle }),
+    },
   };
 }

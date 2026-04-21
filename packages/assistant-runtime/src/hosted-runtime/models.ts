@@ -1,4 +1,5 @@
 import { importSharePackIntoVault } from "@murphai/core";
+import type { VaultSyncImportMergeResult } from "@murphai/core";
 import type { GatewayProjectionSnapshot } from "@murphai/gateway-core";
 import type {
   ConfiguredDeviceSyncRuntimeConfig,
@@ -86,6 +87,8 @@ export interface HostedRunDrainMetrics {
   parserProcessed: number;
   shareImportResult: HostedShareImportResult | null;
   shareImportTitle: string | null;
+  vaultSyncImportResult: HostedVaultSyncImportResult | null;
+  vaultSyncImportResults: HostedVaultSyncImportResult[];
 }
 
 export type HostedAssistantDeliveryOutcomeStatus =
@@ -136,11 +139,13 @@ export type HostedAssistantRuntimeJobResult =
   | HostedAssistantRuntimeCompletedJobResult;
 
 export type HostedShareImportResult = Awaited<ReturnType<typeof importSharePackIntoVault>>;
+export type HostedVaultSyncImportResult = VaultSyncImportMergeResult;
 
 export interface HostedIngressEffect {
   conversationMetrics: HostedConversationWakeMetrics | null;
   shareImportResult: HostedShareImportResult | null;
   shareImportTitle: string | null;
+  vaultSyncImportResult: HostedVaultSyncImportResult | null;
 }
 
 export interface HostedConversationWakeMetrics {
@@ -154,7 +159,8 @@ export type HostedIngressLane =
   | "device-sync"
   | "member-activated"
   | "member-channels-updated"
-  | "vault-share-accepted";
+  | "vault-share-accepted"
+  | "vault-sync-import";
 
 export interface HostedIngressExecutionMetrics extends HostedIngressEffect {
   bootstrapResult: HostedBootstrapResult | null;

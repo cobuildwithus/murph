@@ -127,6 +127,7 @@ export async function executeHostedRunDrainForCommit(input: {
       runtimeEnv: input.runtimeEnv,
       sharePack: event.sharePack ?? null,
       vaultRoot: input.restored.vaultRoot,
+      vaultSyncImport: event.vaultSyncImport ?? null,
     });
     mergeHostedRunDrainWakeMetrics(metrics, ingressMetrics);
     emitHostedExecutionStructuredLog({
@@ -258,6 +259,7 @@ export async function executeHostedRunDrainForCommit(input: {
       result: {
         eventsHandled: metrics.eventsHandled,
         nextWakeAt: metrics.nextWakeAt,
+        redactedDetails: buildHostedRunDrainRedactedDetails(metrics),
         summary: summarizeHostedRunDrain(runDrain, metrics),
       },
     },
@@ -318,6 +320,8 @@ function createHostedRunDrainMetrics(): HostedRunDrainMetrics {
     parserProcessed: 0,
     shareImportResult: null,
     shareImportTitle: null,
+    vaultSyncImportResult: null,
+    vaultSyncImportResults: [],
   };
 }
 
@@ -350,6 +354,11 @@ function mergeHostedRunDrainWakeMetrics(
   if (metrics.shareImportResult) {
     target.shareImportResult = metrics.shareImportResult;
     target.shareImportTitle = metrics.shareImportTitle;
+  }
+
+  if (metrics.vaultSyncImportResult) {
+    target.vaultSyncImportResult = metrics.vaultSyncImportResult;
+    target.vaultSyncImportResults.push(metrics.vaultSyncImportResult);
   }
 }
 
@@ -462,6 +471,27 @@ function hasHostedImmediateMaintenanceWork(
   );
 }
 
+
+function buildHostedRunDrainRedactedDetails(
+  metrics: HostedRunDrainMetrics,
+): Record<string, unknown> | null {
+  const details: Record<string, unknown> = {};
+
+  if (metrics.vaultSyncImportResults.length > 0) {
+    const vaultSyncImports = metrics.vaultSyncImportResults.map((result) => ({
+      conflictCount: result.conflicts.length,
+      conflictManifestPath: result.conflictManifestPath,
+      imported: result.imported,
+      sessionId: result.sessionId,
+      skipped: result.skipped,
+    }));
+    details.vaultSyncImports = vaultSyncImports;
+    details.vaultSyncImport = vaultSyncImports[0] ?? null;
+  }
+
+  return Object.keys(details).length > 0 ? details : null;
+}
+
 function summarizeHostedRunDrain(
   runDrain: HostedRuntimeDrainRequest,
   metrics: HostedRunDrainMetrics,
@@ -501,6 +531,7 @@ async function runHostedSystemWakeFollowupExecution(input: {
       case "member.activated":
       case "member.channels.updated":
       case "vault.share.accepted":
+      case "vault.sync.import":
         return Promise.resolve(runHostedNoopSystemWakeLane());
       case "conversation.message":
         throw new TypeError("Hosted system wake follow-up does not support conversation wakes.");
