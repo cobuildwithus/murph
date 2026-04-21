@@ -38,6 +38,9 @@ export function buildHostedWranglerDeployConfig(
     main: "../src/index.ts",
     compatibility_date: environment.compatibilityDate,
     compatibility_flags: ["nodejs_compat"],
+    placement: {
+      mode: "smart",
+    },
     containers: [
       {
         class_name: "RunnerContainer",
