@@ -133,9 +133,10 @@ testPlans:
       - This test plan is an observation wrapper around an external named routine, not proof that the source routine is broadly advisable.
       - If copied at all, compare the intervention window against the user's own baseline and log heat burden, hydration, symptoms, illness, alcohol, and post-workout timing.
 whyItWorks:
-  - This routine uses the same basic dry-sauna physiology as the simpler sauna experiment, but at a higher weekly dose and usually after training. Heat exposure raises cardiovascular and thermoregulatory load; post-workout timing can add recovery, hydration, and fatigue context.
-  - The page is source-attributed because the detailed tactics come from Bryan Johnson’s public routine and self-experiments, not from a single validated clinical protocol. That makes it useful to try only if you want to test this exact routine and can handle the burden.
-  - The honest readout is whether your resting heart rate, HRV, symptoms, and felt recovery tolerate this daily post-workout heat dose. It should not promise Bryan Johnson’s reported toxin, fertility, or vascular outcomes.
+  - This routine uses the same dry-sauna engine as Finnish sauna, but with a stronger dose: 93 °C / 200 °F, daily exposure, and usually post-workout timing. Skin blood vessels open, sweating accelerates, heart rate rises, and the cardiovascular system has to support cooling while exercise residue may already be raising heat, catecholamines, and fluid loss.
+  - Johnson’s newer core-temperature framing treats air temperature and minutes as rough proxies; the proposed biological dose is how high core temperature rises and how long it stays elevated. Face or neck cooling can make the session more tolerable and change thermal feedback, but it also changes the core-temperature curve you are trying to interpret.
+  - With daily repetition, the plausible adaptation target is heat acclimation: earlier sweating, larger plasma volume, better tolerance of skin blood-flow shifts, and less heart-rate strain at the same heat exposure. The same dose can also become too much if workout load, dehydration, or poor sleep keeps the recovery side from catching up.
+  - The groin-cooling tactic is a separate local-temperature mechanism. Testicular heat can impair sperm-production physiology, so the source routine tries to protect that tissue while the rest of the body receives a high heat load; that is why this page reads the routine as a thermal-engineering experiment, not just a generic sauna habit.
 claims:
   -
     claimId: source-routine-spec

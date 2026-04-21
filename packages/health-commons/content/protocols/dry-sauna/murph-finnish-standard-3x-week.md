@@ -345,9 +345,10 @@ testPlans:
       - Keep HRV and sleep-stage markers exploratory unless the personal signal is strong, repeated, and not obviously confounded.
       - Keep stand-alone sauna and post-exercise sauna interpretations separate whenever the workout context is materially different.
 whyItWorks:
-  - Finnish dry sauna works as a short, repeatable heat stressor. Skin and core temperature rise, blood vessels widen, heart rate and cardiac output increase, and the body has to cool itself back down afterward.
-  - Repeated exposures may train thermoregulation and vascular response over a few weeks, which is why resting heart rate, optional morning blood pressure, HRV, sleep efficiency, and deep sleep are practical signals to watch.
-  - The research base includes acute physiology studies, repeated-exposure work, and long-term Finnish cohort findings. For this 21-day self-test, the cohort findings are background context only; the honest question is whether your near-term recovery and cardiovascular proxies move in a way that feels worth repeating.
+  - Finnish dry sauna is a controlled whole-body heat load. Hot, low-humidity air warms the skin and gradually raises core temperature, so the body opens skin blood vessels, sweats, and raises heart rate and cardiac output to keep blood pressure and cooling stable.
+  - The main theory is hormesis: a short, tolerable heat stress followed by recovery can train the thermoregulatory system. Repeated exposures may make sweating start earlier, expand plasma volume, lower cardiovascular strain at the same heat dose, and activate cellular stress-response pathways such as HSP-70.
+  - The vascular theory is that repeated heat-driven blood-flow shear helps endothelial function and arterial tone. That is why near-term resting heart rate and optional morning blood pressure are plausible signals, even though the long-term Finnish cohort outcomes are not something a 21-day test can directly prove.
+  - The sleep-and-recovery theory is about the rebound after heat: as you cool down, sympathetic drive may ease and parasympathetic activity may rise. If sauna helps a person sleep or recover, the early pattern is likely a calmer post-sauna downshift, lower resting heart rate, or steadier overnight autonomic signal rather than a guaranteed sleep-stage change.
 claims:
   -
     claimId: research-base-is-broad-but-mixed
