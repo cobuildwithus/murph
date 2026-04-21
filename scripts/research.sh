@@ -27,6 +27,10 @@ Environment:
   RESEARCH_WAIT_TIMEOUT    Defaults to 45m
   RESEARCH_TIMEOUT         Defaults to 60m
   RESEARCH_ARTIFACT_LIMIT  Defaults to 6 downloaded artifacts per pass
+
+Notes:
+  The final landing-producing pass uses `thread wake` when CODEX_THREAD_ID is available.
+  That means 4-turn runs wake after pass 4, and 5-turn runs wake after pass 5.
 USAGE
   exit "${1:-2}"
 }
@@ -77,6 +81,21 @@ count_downloaded_files() {
   local search_dir="$1"
 
   find "$search_dir" -type f ! -name '.gitkeep' 2>/dev/null | wc -l | tr -d '[:space:]'
+}
+
+is_final_landing_pass() {
+  local turn="$1"
+
+  if [[ "$smoke_test" == "1" ]]; then
+    return 1
+  fi
+
+  if [[ "$turns" == "5" ]]; then
+    [[ "$turn" == "05" ]]
+    return
+  fi
+
+  [[ "$turn" == "04" ]]
 }
 
 topic=""
@@ -593,6 +612,41 @@ download_turn_artifacts() {
   fi
 }
 
+wake_final_turn() {
+  local turn="$1"
+  local label="$2"
+  local wake_dir="$out_dir/wake/${turn}-${label}"
+  local wake_result="$out_dir/logs/${turn}-${label}.wake.json"
+  local wake_stderr="$out_dir/logs/${turn}-${label}.wake.stderr.log"
+  local resume_prompt="This wake came from research pass ${turn} (${label}) for topic: ${topic}. If a returned patch or diff was downloaded, inspect it, apply it locally if valid, run the repo-required verification for the touched slice, and land the patch. If no returned patch exists, report that clearly and stop. Watched thread: {{chat_url}}."
+
+  if [[ -z "${CODEX_THREAD_ID:-}" ]]; then
+    echo "Final pass ${turn} completed, but CODEX_THREAD_ID is not set. Falling back to download-only artifact capture." >&2
+    download_turn_artifacts "$turn"
+    return
+  fi
+
+  mkdir -p "$wake_dir"
+
+  set +e
+  pnpm chatgpt:thread:wake \
+    --delay 0s \
+    --chat-url "$chat_url" \
+    --session-id "$CODEX_THREAD_ID" \
+    --repo-dir "$ROOT_DIR" \
+    --output-dir "$wake_dir" \
+    --resume-prompt "$resume_prompt" \
+    >"$wake_result" 2>"$wake_stderr"
+  local wake_status=$?
+  set -e
+
+  if [[ "$wake_status" -ne 0 ]]; then
+    cat "$wake_stderr" >&2
+    echo "Final-pass thread wake failed for pass ${turn}. See ${wake_stderr}" >&2
+    exit "$wake_status"
+  fi
+}
+
 run_turn() {
   local turn="$1"
   local label="$2"
@@ -648,6 +702,11 @@ run_turn() {
   if [[ -z "$chat_url" ]]; then
     echo "Failed to capture a ChatGPT thread URL for pass ${turn}." >&2
     exit 1
+  fi
+
+  if is_final_landing_pass "$turn"; then
+    wake_final_turn "$turn" "$label"
+    return
   fi
 
   download_turn_artifacts "$turn"
