@@ -301,7 +301,6 @@ protocol:
   interventionSessionsMinimum: 4
   interventionSessionsTarget: 6
   steps:
-    - Keep your normal routine stable for a 7-day baseline before starting.
     - For the next two weeks, complete three stand-alone Finnish dry-sauna sessions per week.
     - Sit for 15–20 minutes per session at about 80–100 °C, using a traditional dry sauna when possible.
     - Hydrate normally before and after, then cool down gently before returning to normal activity.
