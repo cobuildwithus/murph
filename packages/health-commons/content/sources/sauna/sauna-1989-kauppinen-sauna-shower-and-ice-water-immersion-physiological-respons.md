@@ -42,6 +42,7 @@ potentialMurphEndpoints:
   - session tolerance
   - illness and respiratory context
 protocolTakeaway: "Use for safety screening and session-context interpretation rather than efficacy claims."
+murphTakeaway: "This source supports hydration logging and safety cautions."
 studyDesign: "Experimental physiology"
 modality: "Sauna (unspecified / likely dry)"
 finnishDrySaunaFocus: "Likely"
@@ -50,6 +51,8 @@ sourceUrlCurationNote: Workbook source URL points to a bibliography or review ba
 ---
 
 This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.
+
+**Findings:** This thermal-sequence study measured body-fluid responses to sauna, shower, and ice-water exposure. The main finding is that brief heat and cold sequences can alter fluid balance enough that hydration status matters.
 
 **Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a safety / physiology record marked lower priority for Murph v1 interpretation.
 

@@ -41,6 +41,7 @@ potentialMurphEndpoints:
   - resting heart rate context
   - illness and respiratory context
 protocolTakeaway: "Use as cardiovascular context around heat exposure, not as a guaranteed 21-day result-card endpoint."
+murphTakeaway: "This source supports ramping and safety monitoring, not unsupervised clinical advice."
 studyDesign: "Intervention study"
 modality: "Sauna (likely dry)"
 finnishDrySaunaFocus: "Likely"
@@ -49,6 +50,8 @@ sourceUrlCurationNote: Workbook source URL points to a bibliography or review ba
 ---
 
 This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.
+
+**Findings:** This pilot intervention tested repeated sauna bathing in chronic systolic heart failure patients. The main finding is that supervised repeated sauna may be feasible and physiologically meaningful in a clinical group, but the evidence is preliminary.
 
 **Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a cardiovascular record marked medium priority for Murph v1 interpretation.
 

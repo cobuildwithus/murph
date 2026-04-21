@@ -41,6 +41,7 @@ potentialMurphEndpoints:
   - safety screening
   - session tolerance
 protocolTakeaway: "Use for safety screening and session-context interpretation rather than efficacy claims."
+murphTakeaway: "This source supports family and pediatric caution rather than adult efficacy claims."
 studyDesign: "Primary study / unclear"
 modality: "Finnish dry sauna"
 finnishDrySaunaFocus: "Yes"
@@ -49,6 +50,8 @@ sourceUrlCurationNote: Workbook source URL points to a bibliography or review ba
 ---
 
 This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.
+
+**Findings:** This cross-sectional study describes sauna habits and symptoms in Finnish children. The main finding is observational: sauna use was common enough to study, but symptoms and age context matter.
 
 **Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a safety / physiology record marked lower priority for Murph v1 interpretation.
 

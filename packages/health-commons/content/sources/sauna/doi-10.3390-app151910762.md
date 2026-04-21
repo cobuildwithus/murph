@@ -44,6 +44,7 @@ potentialMurphEndpoints:
   - soreness
   - recovery ratings
 protocolTakeaway: Use it as a boundary case for heat dose, not as a default consumer protocol; most first tests should be milder and more adherable.
+murphTakeaway: "This source sets an upper-bound dose case rather than a default consumer protocol."
 studyDesign: RCT
 modality: Sauna (likely dry)
 finnishDrySaunaFocus: Likely
@@ -51,6 +52,8 @@ murphV1Priority: Medium
 ---
 
 This source is included for **Intervention design / reality checks**.
+
+**Findings:** This blinded randomized study tested a four-week 100 °C sauna program combined with resistance training. The main finding is that very high heat plus training is a distinct, higher-burden intervention that may affect strength or body-composition context.
 
 **Why it matters:** Adds a newer randomized dry-sauna training study and defines an upper-bound intensity that is far more aggressive than most consumer protocols.
 

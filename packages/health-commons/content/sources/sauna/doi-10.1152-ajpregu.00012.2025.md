@@ -36,6 +36,7 @@ potentialMurphEndpoints:
   - perceived strain
   - recovery time
 protocolTakeaway: Keep sauna claims sauna-specific; do not automatically port hot-water immersion effects into Finnish dry-sauna recommendations.
+murphTakeaway: "Keep sauna claims sauna-specific; do not automatically port hot-water immersion effects into Finnish dry-sauna recommendations. It should shape dose, tolerance, endpoint choice, or safety context without promising a short-term wearable benefit."
 studyDesign: Experimental physiology
 modality: Heat therapy adjacent
 finnishDrySaunaFocus: No
@@ -43,6 +44,8 @@ murphV1Priority: Medium
 ---
 
 This source is included for **Acute and mechanistic**.
+
+**Findings:** Acute or mechanistic source used to guide measurable near-term signals and session-standardization choices. Helps prevent bad inference from hot-water immersion papers to sauna protocols by showing modality-specific physiological differences.
 
 **Why it matters:** Helps prevent bad inference from hot-water immersion papers to sauna protocols by showing modality-specific physiological differences.
 

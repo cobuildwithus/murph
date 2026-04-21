@@ -40,6 +40,7 @@ potentialMurphEndpoints:
   - illness and respiratory context
   - symptom context
 protocolTakeaway: "Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes."
+murphTakeaway: "This source supports symptom-context notes, not a generic recovery claim."
 studyDesign: "Controlled intervention"
 modality: "Sauna (likely dry)"
 finnishDrySaunaFocus: "Likely"
@@ -48,6 +49,8 @@ sourceUrlCurationNote: Workbook source URL points to a bibliography or review ba
 ---
 
 This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.
+
+**Findings:** This randomized study tested regular sauna bathing for chronic tension-type headache. The main finding is that symptom outcomes can be studied with repeated sauna exposure, but the endpoint is condition-specific.
 
 **Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a symptoms / musculoskeletal record marked medium priority for Murph v1 interpretation.
 
