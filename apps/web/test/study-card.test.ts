@@ -27,12 +27,22 @@ describe("StudyCard", () => {
     expect(markup).toContain(">2007<");
     expect(markup).toContain("n=40");
     expect(markup).toContain("23 studies");
+    expect(markup).toContain("Canonical small RCT supporting the Norwegian 4x4 dose.");
+    expect(markup).toContain('class="text-[13px]/5 text-foreground/85"');
+    expect(markup).toContain('class="mt-0.5 text-[11px]/4 text-muted-foreground/70"');
     expect(markup).toContain(
       "J Helgerud · Medicine and Science in Sports and Exercise · Moderately trained men · 8-week training intervention",
     );
     expect(countOccurrences(markup, "2007")).toBe(1);
     expect(markup.indexOf("n=40")).toBeLessThan(markup.indexOf("2007"));
     expect(markup.indexOf("23 studies")).toBeGreaterThan(markup.indexOf("n=40"));
+    expect(
+      markup.indexOf("Canonical small RCT supporting the Norwegian 4x4 dose."),
+    ).toBeLessThan(
+      markup.indexOf(
+        "J Helgerud · Medicine and Science in Sports and Exercise · Moderately trained men · 8-week training intervention",
+      ),
+    );
     expect(markup).not.toContain("Medicine and Science in Sports and Exercise · 2007");
     expect(markup).not.toContain("23 studies · n=40");
   });
