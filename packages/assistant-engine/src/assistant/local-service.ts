@@ -68,13 +68,6 @@ import { persistFailedAssistantPromptAttempt } from './prompt-attempts.js'
 import { resolveAssistantTurnRoutes } from './service-turn-routes.js'
 import { persistPendingAssistantUsageEvent } from './service-usage.js'
 import {
-  recordAssistantStrippedDevNoteRuntimeIssue,
-  resolveAssistantDiagnosticsPolicy,
-} from './issue-reporting.js'
-import {
-  sanitizeAssistantProviderResponseForVisibility,
-} from './reply-sanitizer.js'
-import {
   getAssistantChannelAdapter,
   type AssistantChannelActivityHandle,
 } from './channel-adapters.js'
@@ -212,33 +205,7 @@ export async function sendAssistantMessageLocal(
         }
 
         const providerResult = providerOutcome.providerTurn
-        const responseChannel = sharedPlan.conversationPolicy.audience?.channel
-          ?? providerResult.session.binding.channel
-          ?? input.channel
-          ?? null
-        const diagnosticsPolicy = resolveAssistantDiagnosticsPolicy({
-          channel: responseChannel,
-          executionContext,
-        })
-        const visibleResponse = sanitizeAssistantProviderResponseForVisibility({
-          channel: responseChannel,
-          diagnosticsPolicy,
-          response: providerResult.response,
-        })
-        const visibleProviderResult = {
-          ...providerResult,
-          response: visibleResponse.text,
-        }
-        responseText = visibleResponse.text
-        for (const devNote of visibleResponse.devNotes) {
-          await runAssistantTurnBestEffort(() =>
-            recordAssistantStrippedDevNoteRuntimeIssue({
-              devNote,
-              policy: diagnosticsPolicy,
-              vault: input.vault,
-            }),
-          )
-        }
+        responseText = providerResult.response
         await persistPendingAssistantUsageEvent({
           executionContext,
           providerResult,
@@ -248,24 +215,25 @@ export async function sendAssistantMessageLocal(
         const session = await finalizeAssistantTurnArtifacts({
           input,
           plan: sharedPlan,
-          providerResult: visibleProviderResult,
-          session: visibleProviderResult.session,
+          providerResult,
+          session: providerResult.session,
           turnCreatedAt: userTurn.turnCreatedAt,
           turnId: userTurn.turnId,
         })
         const deliveryOutcome = await dispatchAssistantReply({
           input,
-          response: visibleProviderResult.response,
+          response: providerResult.response,
           session,
           sharedPlan,
           turnId: userTurn.turnId,
         })
 
         await finalizeDeliveredAssistantTurn({
-          earlySessionOnboardingInjected: visibleProviderResult.earlySessionOnboardingInjected,
+          earlySessionOnboardingInjected:
+            providerResult.earlySessionOnboardingInjected,
           firstContactStateDocIds: sharedPlan.firstContactStateDocIds,
           outcome: deliveryOutcome,
-          response: visibleProviderResult.response,
+          response: providerResult.response,
           turnId: userTurn.turnId,
           vault: input.vault,
         })
@@ -274,7 +242,7 @@ export async function sendAssistantMessageLocal(
           vault: redactAssistantDisplayPath(input.vault),
           status: 'completed',
           prompt: input.prompt,
-          response: visibleProviderResult.response,
+          response: providerResult.response,
           session: deliveryOutcome.session,
           delivery: deliveryOutcome.kind === 'sent' ? deliveryOutcome.delivery : null,
           deliveryDeferred: deliveryOutcome.kind === 'queued',

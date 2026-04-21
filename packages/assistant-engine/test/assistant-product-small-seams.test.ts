@@ -22,7 +22,6 @@ import {
 import {
   recordAssistantRuntimeIssue,
   recordAssistantToolFailureRuntimeIssues,
-  recordAssistantStrippedDevNoteRuntimeIssue,
   resolveAssistantDiagnosticsPolicy,
 } from '../src/assistant/issue-reporting.ts'
 import {
@@ -46,16 +45,6 @@ import {
   buildFailedAssistantPromptAttemptText,
   extractAssistantAutoReplyFailedPromptText,
 } from '../src/assistant/prompt-attempts.ts'
-import {
-  buildOutboundReplyFormattingGuidance,
-  isAssistantOutboundReplyChannel,
-  isAssistantSourceReference,
-  looksLikeAssistantSourceReferenceClause,
-  sanitizeAssistantProviderResponseForVisibility,
-  sanitizeAssistantOutboundReply,
-  stripAssistantSourceCalloutPrefix,
-  stripInlineAssistantSourceReferences,
-} from '../src/assistant/reply-sanitizer.ts'
 import {
   maybeRunAssistantRuntimeMaintenance,
   readAssistantRuntimeBudgetStatus,
@@ -588,69 +577,43 @@ describe('assistant product small seams', () => {
     )
   })
 
-  it('sanitizes user-facing replies while preserving non-source content', () => {
-    expect(isAssistantOutboundReplyChannel('email')).toBe(true)
-    expect(isAssistantOutboundReplyChannel('local')).toBe(false)
-    expect(buildOutboundReplyFormattingGuidance('local')).toBeNull()
-    expect(buildOutboundReplyFormattingGuidance('telegram')).toContain(
-      'do not include internal source callouts',
-    )
+  it('resolves diagnostics policy environment and private issue capture overrides', () => {
+    const localPolicy = resolveAssistantDiagnosticsPolicy({
+      channel: 'email',
+      env: {},
+      executionContext: null,
+    })
+    expect(localPolicy).toMatchObject({
+      environment: 'local',
+      privateIssueCaptureEnabled: true,
+      surface: 'email',
+    })
 
-    expect(stripAssistantSourceCalloutPrefix('From vault/notes.md: hello')).toBe(
-      'hello',
-    )
-    expect(stripAssistantSourceCalloutPrefix('From teammate: hello')).toBe(
-      'From teammate: hello',
-    )
-    expect(stripInlineAssistantSourceReferences('See /tmp/test.json and vault/notes.md')).toBe(
-      'See that note and that note',
-    )
-    expect(
-      looksLikeAssistantSourceReferenceClause('Sources: vault/notes.md, raw/input.json'),
-    ).toBe(true)
-    expect(isAssistantSourceReference('https://example.com/docs')).toBe(false)
-    expect(isAssistantSourceReference('vault/notes.md')).toBe(true)
+    const disabledPolicy = resolveAssistantDiagnosticsPolicy({
+      channel: 'email',
+      env: {
+        MURPH_ASSISTANT_PRIVATE_ISSUES: 'false',
+      },
+      executionContext: null,
+    })
+    expect(disabledPolicy).toMatchObject({
+      environment: 'local',
+      privateIssueCaptureEnabled: false,
+      surface: 'email',
+    })
 
-    expect(
-      sanitizeAssistantOutboundReply(
-        [
-          'See [plan](vault/notes.md).',
-          'From vault/notes.md: hello',
-          'Reference /tmp/test.json',
-        ].join('\n'),
-        'email',
-      ),
-    ).toBe(['See plan.', 'hello'].join('\n'))
-    expect(
-      sanitizeAssistantOutboundReply('Leave [vault](vault/notes.md) alone', 'local'),
-    ).toBe('Leave [vault](vault/notes.md) alone')
-
-    expect(
-      stripAssistantSourceCalloutPrefix('- From `vault/notes.md`: hello'),
-    ).toBe('- hello')
-    expect(
-      stripInlineAssistantSourceReferences(
-        'See file://vault/notes.md, derived/index.md, and https://example.com/docs.',
-      ),
-    ).toBe('See that note, and https://example.com/docs.')
-    expect(looksLikeAssistantSourceReferenceClause('Sources: teammate summary')).toBe(false)
-    expect(isAssistantSourceReference('notes.md#L12')).toBe(true)
-    expect(isAssistantSourceReference('[Source: vault/notes.md]')).toBe(true)
-
-    expect(
-      sanitizeAssistantOutboundReply(
-        [
-          'Keep [docs](https://example.com/docs).',
-          '[Sources: vault/notes.md] hello',
-          'See file://vault/notes.md and research/plan.md',
-        ].join('\n'),
-        'telegram',
-      ),
-    ).toBe(['Keep [docs](https://example.com/docs).', 'hello'].join('\n'))
-  })
-
-  it('strips accidental [DEV] notes on user-facing channels and records a sanitized pending issue', async () => {
-    runtimeStateMocks.writePendingAssistantRuntimeIssueRecord.mockResolvedValueOnce(undefined)
+    const invalidEnvPolicy = resolveAssistantDiagnosticsPolicy({
+      channel: 'local',
+      env: {
+        MURPH_ASSISTANT_PRIVATE_ISSUES: 'sometimes',
+      },
+      executionContext: null,
+    })
+    expect(invalidEnvPolicy).toMatchObject({
+      environment: 'local',
+      privateIssueCaptureEnabled: true,
+      surface: 'local',
+    })
 
     const hostedPolicy = resolveAssistantDiagnosticsPolicy({
       channel: 'telegram',
@@ -662,119 +625,10 @@ describe('assistant product small seams', () => {
         },
       },
     })
-    expect(hostedPolicy.environment).toBe('hosted')
-    expect(hostedPolicy.devNotesVisibleToUser).toBe(false)
-    expect(hostedPolicy.issueReportingMode).toBe('hosted-private')
-
-    const localUserFacingPolicy = resolveAssistantDiagnosticsPolicy({
-      channel: 'email',
-      env: {},
-      executionContext: null,
-    })
-    expect(localUserFacingPolicy.environment).toBe('local')
-    expect(localUserFacingPolicy.devNotesVisibleToUser).toBe(false)
-    expect(localUserFacingPolicy.issueReportingMode).toBe('hosted-private')
-
-    const visibleReply = sanitizeAssistantProviderResponseForVisibility({
-      channel: 'email',
-      diagnosticsPolicy: localUserFacingPolicy,
-      response: [
-        'Thanks for the report.',
-        '',
-        '[DEV] internal note with token abc123 and /tmp/private-path',
-      ].join('\n'),
-    })
-
-    expect(visibleReply.stripped).toBe(true)
-    expect(visibleReply.text).toBe('Thanks for the report.')
-    expect(visibleReply.devNotes).toHaveLength(1)
-
-    const strippedDevNote = visibleReply.devNotes[0]
-    expect(strippedDevNote?.noteCharCount).toBeGreaterThan(0)
-
-    await recordAssistantStrippedDevNoteRuntimeIssue({
-      devNote: strippedDevNote!,
-      policy: localUserFacingPolicy,
-      vault: '/vaults/test',
-    })
-
-    expect(
-      runtimeStateMocks.writePendingAssistantRuntimeIssueRecord,
-    ).toHaveBeenCalledTimes(1)
-    expect(
-      runtimeStateMocks.writePendingAssistantRuntimeIssueRecord,
-    ).toHaveBeenCalledWith({
-      vault: '/vaults/test',
-      record: expect.objectContaining({
-        component: 'assistant.reply-finalizer',
-        details: {
-          noteCharCount: strippedDevNote?.noteCharCount,
-        },
-        environment: 'local',
-        errorCode: null,
-        issueKind: 'dev_note_stripped',
-        operation: null,
-        phase: 'final_response',
-        severity: 'warning',
-        summary:
-          'Assistant produced a visible developer note on a surface where developer notes are hidden.',
-      }),
-    })
-
-    const writtenRecord =
-      runtimeStateMocks.writePendingAssistantRuntimeIssueRecord.mock.calls[0]?.[0]
-        ?.record as { details?: Record<string, unknown>; summary?: string } | undefined
-    expect(JSON.stringify(writtenRecord)).not.toContain('[DEV]')
-    expect(JSON.stringify(writtenRecord)).not.toContain('token abc123')
-    expect(JSON.stringify(writtenRecord)).not.toContain('/tmp/private-path')
-  })
-
-  it('resolves diagnostics policy overrides and fully disabled issue reporting', () => {
-    const visiblePolicy = resolveAssistantDiagnosticsPolicy({
-      channel: 'email',
-      env: {
-        MURPH_ASSISTANT_DEV_NOTES_VISIBLE: 'true',
-      },
-      executionContext: null,
-    })
-    expect(visiblePolicy).toMatchObject({
-      devNotesVisibleToUser: true,
-      environment: 'local',
-      issueReportingMode: 'local-visible',
+    expect(hostedPolicy).toMatchObject({
+      environment: 'hosted',
       privateIssueCaptureEnabled: true,
-      surface: 'email',
-    })
-
-    const disabledPolicy = resolveAssistantDiagnosticsPolicy({
-      channel: 'email',
-      env: {
-        MURPH_ASSISTANT_DEV_NOTES_VISIBLE: 'off',
-        MURPH_ASSISTANT_PRIVATE_ISSUES: 'false',
-      },
-      executionContext: null,
-    })
-    expect(disabledPolicy).toMatchObject({
-      devNotesVisibleToUser: false,
-      environment: 'local',
-      issueReportingMode: 'off',
-      privateIssueCaptureEnabled: false,
-      surface: 'email',
-    })
-
-    const invalidEnvPolicy = resolveAssistantDiagnosticsPolicy({
-      channel: 'local',
-      env: {
-        MURPH_ASSISTANT_DEV_NOTES_VISIBLE: 'maybe',
-        MURPH_ASSISTANT_PRIVATE_ISSUES: 'sometimes',
-      },
-      executionContext: null,
-    })
-    expect(invalidEnvPolicy).toMatchObject({
-      devNotesVisibleToUser: true,
-      environment: 'local',
-      issueReportingMode: 'local-visible',
-      privateIssueCaptureEnabled: true,
-      surface: 'local',
+      surface: 'telegram',
     })
   })
 
@@ -782,7 +636,6 @@ describe('assistant product small seams', () => {
     const disabledPolicy = resolveAssistantDiagnosticsPolicy({
       channel: 'email',
       env: {
-        MURPH_ASSISTANT_DEV_NOTES_VISIBLE: 'false',
         MURPH_ASSISTANT_PRIVATE_ISSUES: 'no',
       },
       executionContext: null,

@@ -34,8 +34,6 @@ const seamMocks = vi.hoisted(() => ({
   resolveAssistantExecutionPlan: vi.fn(),
   resolveAssistantSession: vi.fn(),
   resolveAssistantUsageCredentialSource: vi.fn(),
-  sanitizeAssistantProviderResponseForVisibility: vi.fn(),
-  sanitizeAssistantOutboundReply: vi.fn(),
   writePendingAssistantUsageRecord: vi.fn(),
 }));
 
@@ -100,12 +98,6 @@ vi.mock("../src/assistant/outbox.js", async () => {
     normalizeAssistantDeliveryError: seamMocks.normalizeAssistantDeliveryError,
   };
 });
-
-vi.mock("../src/assistant/reply-sanitizer.js", () => ({
-  sanitizeAssistantProviderResponseForVisibility:
-    seamMocks.sanitizeAssistantProviderResponseForVisibility,
-  sanitizeAssistantOutboundReply: seamMocks.sanitizeAssistantOutboundReply,
-}));
 
 vi.mock("../src/assistant/runtime-state-service.js", () => ({
   createAssistantRuntimeStateService:
@@ -186,16 +178,6 @@ beforeEach(() => {
   seamMocks.resolveAssistantUsageCredentialSource
     .mockReset()
     .mockReturnValue("hosted-user-env");
-  seamMocks.sanitizeAssistantProviderResponseForVisibility
-    .mockReset()
-    .mockImplementation(({ response }: { response: string }) => ({
-      devNotes: [],
-      stripped: false,
-      text: `sanitized:${response}`,
-    }));
-  seamMocks.sanitizeAssistantOutboundReply
-    .mockReset()
-    .mockImplementation((response: string) => `sanitized:${response}`);
   seamMocks.writePendingAssistantUsageRecord
     .mockReset()
     .mockResolvedValue(undefined);
@@ -727,7 +709,7 @@ describe("assistant delivery orchestration seam", () => {
     expect(runtimeState.outbox.deliverMessage).not.toHaveBeenCalled();
   });
 
-  it("delivers via the outbox with audience overrides and sanitized content", async () => {
+  it("delivers via the outbox with audience overrides and raw content", async () => {
     const session = createAssistantSession({
       binding: {
         actorId: "binding-actor",
@@ -807,17 +789,6 @@ describe("assistant delivery orchestration seam", () => {
       session,
     });
 
-    expect(
-      seamMocks.sanitizeAssistantProviderResponseForVisibility
-    ).toHaveBeenCalledWith({
-      channel: "telegram",
-      diagnosticsPolicy: expect.objectContaining({
-        devNotesVisibleToUser: false,
-        environment: "local",
-        issueReportingMode: "hosted-private",
-      }),
-      response: "reply body",
-    });
     expect(runtimeState.outbox.deliverMessage).toHaveBeenCalledWith({
       actorId: "audience-actor",
       bindingDelivery: {
@@ -831,7 +802,7 @@ describe("assistant delivery orchestration seam", () => {
       dispatchMode: "immediate",
       explicitTarget: "explicit-audience-target",
       identityId: "audience-identity",
-      message: "sanitized:reply body",
+      message: "reply body",
       replyToMessageId: "reply-audience",
       sessionId: session.sessionId,
       subject: null,
@@ -841,22 +812,7 @@ describe("assistant delivery orchestration seam", () => {
     });
   });
 
-  it("preserves explicitly enabled local dev notes in delivered outbound messages", async () => {
-    const originalEnv = process.env.MURPH_ASSISTANT_DEV_NOTES_VISIBLE;
-    process.env.MURPH_ASSISTANT_DEV_NOTES_VISIBLE = "1";
-    seamMocks.sanitizeAssistantProviderResponseForVisibility.mockImplementation(
-      ({
-        diagnosticsPolicy,
-        response,
-      }: {
-        diagnosticsPolicy: { devNotesVisibleToUser: boolean };
-        response: string;
-      }) => ({
-        devNotes: [],
-        stripped: !diagnosticsPolicy.devNotesVisibleToUser,
-        text: diagnosticsPolicy.devNotesVisibleToUser ? response : "stripped",
-      }),
-    );
+  it("passes outbound delivery text through unchanged for user-facing channels", async () => {
     runtimeState.outbox.deliverMessage.mockResolvedValue({
       delivery: {
         channel: "email",
@@ -875,56 +831,37 @@ describe("assistant delivery orchestration seam", () => {
       session: null,
     });
 
-    try {
-      await deliverAssistantReply({
-        input: {
-          deliverResponse: true,
-          prompt: "hello",
-          vault: "/vault",
-        },
-        response: "Visible reply\n\n[DEV] local note",
-        session: createAssistantSession({
-          binding: {
-            actorId: "binding-actor",
-            channel: "email",
-            conversationKey: "binding-key",
-            delivery: {
-              kind: "participant",
-              target: "binding-delivery",
-            },
-            identityId: "binding-identity",
-            threadId: "binding-thread",
-            threadIsDirect: true,
-          },
-        }),
-        sharedPlan: createSharedPlan({
-          conversationPolicy: {
-            audience: {
-              channel: "email",
-            },
-          },
-        }),
-        turnId: "turn-visible-dev",
-      });
-    } finally {
-      if (originalEnv === undefined) {
-        delete process.env.MURPH_ASSISTANT_DEV_NOTES_VISIBLE;
-      } else {
-        process.env.MURPH_ASSISTANT_DEV_NOTES_VISIBLE = originalEnv;
-      }
-    }
-
-    expect(
-      seamMocks.sanitizeAssistantProviderResponseForVisibility,
-    ).toHaveBeenCalledWith({
-      channel: "email",
-      diagnosticsPolicy: expect.objectContaining({
-        devNotesVisibleToUser: true,
-        environment: "local",
-        issueReportingMode: "local-visible",
-      }),
+    await deliverAssistantReply({
+      input: {
+        deliverResponse: true,
+        prompt: "hello",
+        vault: "/vault",
+      },
       response: "Visible reply\n\n[DEV] local note",
+      session: createAssistantSession({
+        binding: {
+          actorId: "binding-actor",
+          channel: "email",
+          conversationKey: "binding-key",
+          delivery: {
+            kind: "participant",
+            target: "binding-delivery",
+          },
+          identityId: "binding-identity",
+          threadId: "binding-thread",
+          threadIsDirect: true,
+        },
+      }),
+      sharedPlan: createSharedPlan({
+        conversationPolicy: {
+          audience: {
+            channel: "email",
+          },
+        },
+      }),
+      turnId: "turn-visible-dev",
     });
+
     expect(runtimeState.outbox.deliverMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         message: "Visible reply\n\n[DEV] local note",

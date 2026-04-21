@@ -13,13 +13,11 @@ import {
   executeProviderTurnWithRecovery,
   type AssistantProviderTurnExecutionProfile,
 } from './provider-turn-runner.js'
-import { resolveAssistantDiagnosticsPolicy } from './issue-reporting.js'
 import { persistPendingAssistantUsageEvent } from './service-usage.js'
 import { persistAssistantTurnAndSession } from './turn-finalizer.js'
 import { resolveAssistantTurnRoutes } from './service-turn-routes.js'
 import { prioritizeAssistantRoutesForRichUserMessageContent } from './rich-content-routing.js'
 import { createAssistantTurnId } from './turns.js'
-import { sanitizeAssistantProviderResponseForVisibility } from './reply-sanitizer.js'
 import {
   normalizeAssistantDeliverySubject,
 } from './channel-adapters.js'
@@ -198,22 +196,10 @@ export async function sendAssistantNotificationLocal(
         }
       }
 
-      const responseChannel = providerResult.session.binding.channel ?? input.channel ?? null
-      const diagnosticsPolicy = resolveAssistantDiagnosticsPolicy({
-        channel: responseChannel,
-        executionContext,
-      })
-      const sanitizedResponse = normalizeRequiredText(
-        sanitizeAssistantProviderResponseForVisibility({
-          channel: responseChannel,
-          diagnosticsPolicy,
-          response: decision.text,
-        }).text,
-        'notification response',
-      )
+      const responseText = normalizeRequiredText(decision.text, 'notification response')
       assertAssistantNotificationSendAllowed({
         policy: responsePolicy,
-        text: sanitizedResponse,
+        text: responseText,
       })
 
       const primaryRoute = routes[0] ?? null
@@ -231,7 +217,7 @@ export async function sendAssistantNotificationLocal(
       })
 
       const savedSession = await persistAssistantTurnAndSession({
-        assistantTranscriptText: sanitizedResponse,
+        assistantTranscriptText: responseText,
         input: messageInput,
         plan: sharedPlan,
         persistUserPromptToTranscript: false,
@@ -245,14 +231,14 @@ export async function sendAssistantNotificationLocal(
         dedupeToken: input.deliveryDedupeToken ?? null,
         decisionSubject: decision.subject ?? null,
         input: messageInput,
-        message: sanitizedResponse,
+        message: responseText,
         session: savedSession,
         sharedPlan,
         turnId,
       })
       await finalizeAssistantTurnFromDeliveryOutcome({
         outcome: deliveryOutcome,
-        response: sanitizedResponse,
+        response: responseText,
         turnId,
         vault: input.vault,
       })
@@ -279,9 +265,9 @@ export async function sendAssistantNotificationLocal(
       return {
         decision: {
           ...decision,
-          text: sanitizedResponse,
+          text: responseText,
         },
-        response: sanitizedResponse,
+        response: responseText,
         session: deliveryOutcome.session,
       }
     },
