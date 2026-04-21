@@ -73,8 +73,8 @@ describe('assistant onboarding prompt injection', () => {
       },
     )
 
-    expect(plan.firstTurnCheckInStateDocIds).toEqual(stateDocIds)
-    expect(plan.firstTurnCheckInEligible).toBe(true)
+    expect(plan.firstContactStateDocIds).toEqual(stateDocIds)
+    expect(plan.earlySessionOnboardingEligible).toBe(true)
   })
 
   it('does not inject onboarding for a later session in the same vault', async () => {
@@ -108,30 +108,30 @@ describe('assistant onboarding prompt injection', () => {
       laterSession,
     )
 
-    expect(plan.firstTurnCheckInStateDocIds.length).toBeGreaterThan(0)
-    expect(plan.firstTurnCheckInEligible).toBe(false)
+    expect(plan.firstContactStateDocIds.length).toBeGreaterThan(0)
+    expect(plan.earlySessionOnboardingEligible).toBe(false)
   })
 
   it('forces a bootstrap prompt instead of native resume whenever first-session onboarding is eligible', () => {
     expect(
       resolveAssistantOnboardingInjectionPlan({
         candidateResumeProviderSessionId: 'provider-session-1',
-        firstTurnCheckInEligible: true,
+        earlySessionOnboardingEligible: true,
         promptProfile: 'conversation',
       }),
     ).toEqual({
-      firstTurnCheckInInjected: true,
+      earlySessionOnboardingInjected: true,
       resumeProviderSessionId: null,
       shouldInjectBootstrapContext: true,
     })
     expect(
       resolveAssistantOnboardingInjectionPlan({
         candidateResumeProviderSessionId: 'provider-session-1',
-        firstTurnCheckInEligible: true,
+        earlySessionOnboardingEligible: true,
         promptProfile: 'notification-decision',
       }),
     ).toEqual({
-      firstTurnCheckInInjected: false,
+      earlySessionOnboardingInjected: false,
       resumeProviderSessionId: 'provider-session-1',
       shouldInjectBootstrapContext: false,
     })
@@ -158,7 +158,7 @@ function createMessageInput(
   return {
     vault,
     ...route,
-    includeFirstTurnCheckIn: true,
+    includeEarlySessionOnboarding: true,
     prompt,
   }
 }

@@ -77,7 +77,7 @@ export interface AssistantMessageInput extends AssistantSessionResolutionFields 
   deliveryTarget?: string | null
   executionContext?: AssistantExecutionContext | null
   failoverRoutes?: readonly AssistantProviderFailoverRoute[] | null
-  includeFirstTurnCheckIn?: boolean
+  includeEarlySessionOnboarding?: boolean
   onProviderEvent?: ((event: AssistantProviderProgressEvent) => void) | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   operatorAuthority?: AssistantOperatorAuthority
@@ -99,8 +99,8 @@ export interface AssistantTurnSharedPlan {
   allowSensitiveHealthContext: boolean
   cliAccess: AssistantCliAccessContext
   conversationPolicy: import('./conversation-policy.js').AssistantConversationPolicy
-  firstTurnCheckInEligible: boolean
-  firstTurnCheckInStateDocIds: string[]
+  earlySessionOnboardingEligible: boolean
+  firstContactStateDocIds: string[]
   operatorAuthority: AssistantOperatorAuthority
   persistUserPromptOnFailure: boolean
   requestedWorkingDirectory: string
@@ -131,7 +131,7 @@ export interface PersistedUserTurn {
 
 export interface ExecutedAssistantProviderTurnResult extends AssistantProviderTurnExecutionResult {
   attemptCount: number
-  firstTurnCheckInInjected?: boolean
+  earlySessionOnboardingInjected?: boolean
   providerOptions: AssistantProviderSessionOptions
   route: ResolvedAssistantFailoverRoute
   session: AssistantSession

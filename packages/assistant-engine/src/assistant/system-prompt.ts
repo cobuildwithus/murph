@@ -21,7 +21,7 @@ export interface AssistantSystemPromptInput {
   cliAccess: Pick<AssistantCliAccessContext, "rawCommand" | "setupCommand">;
   currentLocalDate: string;
   currentTimeZone: string;
-  firstTurnCheckIn: boolean;
+  earlySessionOnboarding: boolean;
   modelBehaviorProfile: AssistantModelBehaviorProfile;
   turnTrigger?: AssistantTurnTrigger | null;
   vaultOverview?: string | null;
@@ -73,7 +73,9 @@ export function buildAssistantSystemPrompt(
     buildAssistantExecutionContextText({
       turnTrigger: input.turnTrigger ?? null,
     }),
-    buildAssistantFirstTurnCheckInGuidanceText(input.firstTurnCheckIn),
+    buildAssistantEarlySessionOnboardingGuidanceText(
+      input.earlySessionOnboarding
+    ),
     buildAssistantKnowledgeGuidanceText({
       assistantCommandAccessMode: input.assistantCommandAccessMode,
       assistantKnowledgeToolsAvailable:
@@ -253,7 +255,7 @@ function buildAssistantExecutionContextText(input: {
 - Treat the user prompt as the execution instructions for this scheduled run.`;
 }
 
-function buildAssistantFirstTurnCheckInGuidanceText(
+function buildAssistantEarlySessionOnboardingGuidanceText(
   enabled: boolean
 ): string | null {
   if (!enabled) {

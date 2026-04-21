@@ -30,8 +30,8 @@ export async function resolveAssistantTurnSharedPlan(
     },
     session: resolved.session,
   })
-  const firstTurnCheckInStateDocIds =
-    input.includeFirstTurnCheckIn === true
+  const firstContactStateDocIds =
+    input.includeEarlySessionOnboarding === true
       ? resolveAssistantFirstContactStateDocIds({
           actorId: conversationPolicy.audience.actorId ?? resolved.session.binding.actorId,
           channel: conversationPolicy.audience.channel ?? resolved.session.binding.channel,
@@ -41,8 +41,8 @@ export async function resolveAssistantTurnSharedPlan(
             conversationPolicy.audience.threadIsDirect ?? resolved.session.binding.threadIsDirect,
         })
       : []
-  const firstTurnCheckInEligible =
-    input.includeFirstTurnCheckIn === true &&
+  const earlySessionOnboardingEligible =
+    input.includeEarlySessionOnboarding === true &&
     (await isAssistantFirstSessionForOnboarding({
       session: resolved.session,
       vault: input.vault,
@@ -51,8 +51,8 @@ export async function resolveAssistantTurnSharedPlan(
     allowSensitiveHealthContext: conversationPolicy.allowSensitiveHealthContext,
     cliAccess,
     conversationPolicy,
-    firstTurnCheckInEligible,
-    firstTurnCheckInStateDocIds,
+    earlySessionOnboardingEligible,
+    firstContactStateDocIds,
     operatorAuthority: resolveAssistantOperatorAuthority(input.operatorAuthority),
     persistUserPromptOnFailure: input.persistUserPromptOnFailure ?? true,
     requestedWorkingDirectory,
@@ -68,6 +68,8 @@ export async function isAssistantFirstSessionForOnboarding(input: {
     return true
   }
 
+  // Equal timestamps stay onboarding-eligible so imported/bootstrap-created sessions do not
+  // lose onboarding based on an arbitrary secondary tie-break.
   return sessions.every((session) =>
     session.sessionId === input.session.sessionId ||
     compareAssistantSessionCreationOrder(session, input.session) >= 0,

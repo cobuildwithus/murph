@@ -1152,8 +1152,8 @@ describe("assistant delivery orchestration seam", () => {
     vi.setSystemTime(new Date("2026-04-08T12:30:00.000Z"));
 
     await finalizeAssistantTurnFromDeliveryOutcome({
-      firstTurnCheckInInjected: true,
-      firstTurnCheckInStateDocIds: ["doc-1", "doc-2"],
+      earlySessionOnboardingInjected: true,
+      firstContactStateDocIds: ["doc-1", "doc-2"],
       outcome: {
         delivery: {
           channel: "telegram",
@@ -1202,8 +1202,8 @@ describe("assistant delivery orchestration seam", () => {
     seamMocks.markAssistantFirstContactSeen.mockClear();
 
     await finalizeAssistantTurnFromDeliveryOutcome({
-      firstTurnCheckInInjected: true,
-      firstTurnCheckInStateDocIds: ["doc-1"],
+      earlySessionOnboardingInjected: true,
+      firstContactStateDocIds: ["doc-1"],
       outcome: {
         error: null,
         intentId: "intent-queued",
@@ -1798,8 +1798,8 @@ function createSharedPlan(input?: {
         },
       operatorAuthority: "direct-operator",
     },
-    firstTurnCheckInEligible: false,
-    firstTurnCheckInStateDocIds: [],
+    earlySessionOnboardingEligible: false,
+    firstContactStateDocIds: [],
     operatorAuthority: "direct-operator",
     persistUserPromptOnFailure: input?.persistUserPromptOnFailure ?? false,
     requestedWorkingDirectory: "/tmp/assistant-service-runtime",
