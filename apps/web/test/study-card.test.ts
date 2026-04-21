@@ -28,7 +28,10 @@ describe("StudyCard", () => {
     expect(markup).toContain("n=40");
     expect(markup).toContain("23 studies");
     expect(markup).toContain("Canonical small RCT supporting the Norwegian 4x4 dose.");
-    expect(markup).toContain('class="text-[13px]/5 text-foreground/85"');
+    expect(markup).toContain('class="max-w-[34ch] line-clamp-1 pt-1 text-[11px]/4 text-muted-foreground/85"');
+    expect(markup).toContain('data-slot="collapsible"');
+    expect(markup).toContain('data-slot="collapsible-trigger"');
+    expect(markup).toContain('aria-expanded="false"');
     expect(markup).toContain('class="mt-0.5 text-[11px]/4 text-muted-foreground/70"');
     expect(markup).toContain(
       "J Helgerud · Medicine and Science in Sports and Exercise · Moderately trained men · 8-week training intervention",
@@ -104,7 +107,8 @@ describe("StudyCard", () => {
       }),
     );
 
-    expect(markup).not.toContain('class="text-[13px]/5 text-foreground/85"');
+    expect(markup).not.toContain("line-clamp-1");
+    expect(markup).not.toContain('data-slot="collapsible-content"');
     expect(markup).toContain(
       "A Cohort Team · Example Journal · Adults · Long-term follow-up",
     );

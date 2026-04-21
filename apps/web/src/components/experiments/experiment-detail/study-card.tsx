@@ -1,3 +1,8 @@
+"use client";
+
+import { useState } from "react";
+
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/src/components/ui/collapsible";
 import { cn } from "@/src/lib/utils";
 import type { Study } from "@/src/types/experiments";
 
@@ -20,6 +25,7 @@ export function StudyCard({
   finding,
   last,
 }: StudyCardProps) {
+  const [open, setOpen] = useState(false);
   const yearLabel = typeof year === "number" ? year.toString() : null;
   const participantLabel = formatParticipantLabel({
     participants,
@@ -33,7 +39,12 @@ export function StudyCard({
   ]);
 
   return (
-    <div className={cn("flex gap-4 px-6 py-5", !last && "border-b border-border")}>
+    <Collapsible
+      open={open}
+      onOpenChange={setOpen}
+      className={cn(!last && "border-b border-border")}
+    >
+      <div className="flex gap-4 px-6 py-5">
       <div className="flex w-[74px] shrink-0 flex-col items-start gap-1">
         <div
           className="h-fit rounded-md bg-primary/8 px-2.5 py-1.5"
@@ -50,18 +61,35 @@ export function StudyCard({
         ) : null}
       </div>
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <div className="flex items-start justify-between gap-4">
-          <span className="min-w-0 text-sm/4.5 font-semibold text-foreground">
-            {title}
-          </span>
-          {yearLabel ? (
-            <span className="shrink-0 rounded-md border border-border bg-background px-2 py-1 font-mono text-[10px]/3.5 text-muted-foreground">
-              {yearLabel}
+        <CollapsibleTrigger
+          className={cn(
+            "-mx-2 flex w-[calc(100%+1rem)] flex-col rounded-lg px-2 py-1.5 text-left transition-colors outline-none hover:bg-secondary/8 focus-visible:bg-secondary/8",
+            finding ? "cursor-pointer" : "cursor-default",
+          )}
+          disabled={!finding}
+        >
+          <div className="flex items-start justify-between gap-4">
+            <span className="min-w-0 text-sm/4.5 font-semibold text-foreground">
+              {title}
+            </span>
+            {yearLabel ? (
+              <span className="shrink-0 rounded-md border border-border bg-background px-2 py-1 font-mono text-[10px]/3.5 text-muted-foreground">
+                {yearLabel}
+              </span>
+            ) : null}
+          </div>
+          {finding && !open ? (
+            <span className="max-w-[34ch] line-clamp-1 pt-1 text-[11px]/4 text-muted-foreground/85">
+              {finding}
             </span>
           ) : null}
-        </div>
+        </CollapsibleTrigger>
         {finding ? (
-          <span className="text-[13px]/5 text-foreground/85">{finding}</span>
+          <CollapsibleContent className="pt-2">
+            <p className="max-w-[52ch] text-[15px]/6 text-foreground/90">
+              {finding}
+            </p>
+          </CollapsibleContent>
         ) : null}
         <span className="mt-0.5 text-[11px]/4 text-muted-foreground/70">{metadata}</span>
         {url ? (
@@ -75,7 +103,8 @@ export function StudyCard({
           </a>
         ) : null}
       </div>
-    </div>
+      </div>
+    </Collapsible>
   );
 }
 
