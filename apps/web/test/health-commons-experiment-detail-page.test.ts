@@ -81,10 +81,22 @@ describe("ExperimentDetailPage", () => {
       expect.objectContaining({ label: "YEARS COVERED", value: "1979–2026" }),
     ]));
     expect(clientExperiment.studies).toHaveLength(81);
+    const highestParticipantCount = Math.max(
+      ...clientExperiment.studies.map((study) => study.participants ?? -1),
+    );
+    const highestParticipantCountYears = clientExperiment.studies
+      .filter((study) => study.participants === highestParticipantCount)
+      .map((study) => study.year)
+      .filter((year): year is number => typeof year === "number");
     expect(clientExperiment.studies[0]).toEqual(expect.objectContaining({
-      title: "Health effects and risks of sauna bathing",
+      participants: highestParticipantCount,
       type: expect.any(String),
     }));
+    if (highestParticipantCountYears.length > 0) {
+      expect(clientExperiment.studies[0]?.year).toBe(
+        Math.max(...highestParticipantCountYears),
+      );
+    }
     expect(markup).toContain('data-experiment-id="finnish-sauna"');
     expect(markup).toContain(
       'data-experiment-key="protocol_variant:dry-sauna/murph-finnish-standard-3x-week"',
@@ -149,6 +161,26 @@ describe("ExperimentDetailPage", () => {
     expect(markup).toContain('data-experiment-id="bryan-johnson-blueprint"');
     expect(markup).toContain(
       'data-experiment-key="protocol_variant:dry-sauna/bryan-johnson-blueprint"',
+    );
+  });
+
+  it("prefers newer years when participant counts tie in the research list", async () => {
+    const element = await ExperimentDetailPage({
+      params: Promise.resolve({
+        experimentId: "bryan-johnson-blueprint",
+      }),
+    });
+    renderToStaticMarkup(element);
+
+    const clientExperiment = mocks.experimentDetailClient.mock.calls.at(-1)?.[0]
+      ?.protocol as ExperimentProtocol;
+    const yearsForSingleParticipantSources = clientExperiment.studies
+      .filter((study) => study.participants === 1 && typeof study.year === "number")
+      .map((study) => study.year as number);
+
+    expect(yearsForSingleParticipantSources.length).toBeGreaterThan(1);
+    expect(yearsForSingleParticipantSources).toEqual(
+      [...yearsForSingleParticipantSources].sort((left, right) => right - left),
     );
   });
 

@@ -629,6 +629,11 @@ function sortStudySourcesForDisplay(
       return participantDelta;
     }
 
+    const yearDelta = studyYearSortValue(right) - studyYearSortValue(left);
+    if (yearDelta !== 0) {
+      return yearDelta;
+    }
+
     const includedStudyDelta =
       studyIncludedStudySortValue(right) - studyIncludedStudySortValue(left);
     if (includedStudyDelta !== 0) {
@@ -640,18 +645,16 @@ function sortStudySourcesForDisplay(
       return rankDelta;
     }
 
-    const leftYear = left.source?.year ?? Number.MAX_SAFE_INTEGER;
-    const rightYear = right.source?.year ?? Number.MAX_SAFE_INTEGER;
-    if (leftYear !== rightYear) {
-      return leftYear - rightYear;
-    }
-
     return left.title.localeCompare(right.title);
   });
 }
 
 function studyParticipantSortValue(entity: HealthCommonsEntity): number {
   return entity.researchEvidence?.participantCount ?? -1;
+}
+
+function studyYearSortValue(entity: HealthCommonsEntity): number {
+  return entity.source?.year ?? -1;
 }
 
 function studyIncludedStudySortValue(entity: HealthCommonsEntity): number {
