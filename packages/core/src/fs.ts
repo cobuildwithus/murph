@@ -87,7 +87,7 @@ export async function readJsonFile(vaultRoot: string, relativePath: string): Pro
   const content = await readUtf8File(vaultRoot, resolved.relativePath);
 
   try {
-    return JSON.parse(content) as unknown;
+    return JSON.parse(content);
   } catch (error) {
     throw new VaultError("VAULT_INVALID_JSON", `Invalid JSON in "${resolved.relativePath}".`, {
       relativePath: resolved.relativePath,

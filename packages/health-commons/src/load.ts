@@ -93,7 +93,7 @@ export async function readHealthCommonsRedirects(contentRoot: string): Promise<H
 
   try {
     const raw = await readFile(absolutePath, "utf8");
-    return healthCommonsRedirectsFileSchema.parse(JSON.parse(raw) as unknown).redirects;
+    return healthCommonsRedirectsFileSchema.parse(JSON.parse(raw)).redirects;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
       return [];
@@ -117,7 +117,7 @@ export async function readHealthCommonsChanges(contentRoot: string): Promise<Hea
         continue;
       }
       try {
-        changes.push(healthCommonsChangeRecordSchema.parse(JSON.parse(line) as unknown));
+        changes.push(healthCommonsChangeRecordSchema.parse(JSON.parse(line)));
       } catch (error) {
         throw new Error(
           `Failed to parse health commons change at ${relativePath}:${index + 1}: ${error instanceof Error ? error.message : String(error)}`,
@@ -139,7 +139,7 @@ export async function readHealthCommonsArtifactManifests(contentRoot: string): P
   for (const relativePath of manifestPaths) {
     const absolutePath = path.join(contentRoot, relativePath);
     const raw = await readFile(absolutePath, "utf8");
-    manifests.push(healthCommonsArtifactManifestSchema.parse(JSON.parse(raw) as unknown));
+    manifests.push(healthCommonsArtifactManifestSchema.parse(JSON.parse(raw)));
   }
 
   manifests.sort((left, right) => left.manifestKey.localeCompare(right.manifestKey));

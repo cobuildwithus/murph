@@ -281,7 +281,7 @@ export function parseJsonPayload(text: string): unknown {
   }
 
   try {
-    return JSON.parse(text) as unknown;
+    return JSON.parse(text);
   } catch {
     return null;
   }
