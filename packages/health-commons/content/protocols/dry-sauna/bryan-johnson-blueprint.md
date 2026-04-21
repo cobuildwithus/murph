@@ -107,6 +107,7 @@ protocol:
     - This is a higher-burden daily routine layered after workouts, so exercise load and dehydration can easily confound the result.
     - Groin cooling, face or neck cooling, and post-sauna no-cold-exposure guidance are source-specific tactics rather than general sauna rules.
     - Bryan Johnson’s reported toxin, fertility, vascular, and resting-heart-rate changes are personal observations, not expected causal outcomes for users.
+    - Broader sauna physiology and safety sources live on the Dry Sauna family and bibliography, not in this source-attributed protocol's own citation set.
   logFields:
     - duration
     - temperature
@@ -136,7 +137,7 @@ whyItWorks:
   - This routine uses the same dry-sauna engine as Finnish sauna, but with a stronger dose: 93 °C / 200 °F, daily exposure, and usually post-workout timing. Skin blood vessels open, sweating accelerates, heart rate rises, and the cardiovascular system has to support cooling while exercise residue may already be raising heat, catecholamines, and fluid loss.
   - Johnson’s newer core-temperature framing treats air temperature and minutes as rough proxies; the proposed biological dose is how high core temperature rises and how long it stays elevated. Face or neck cooling can make the session more tolerable and change thermal feedback, but it also changes the core-temperature curve you are trying to interpret.
   - With daily repetition, the plausible adaptation target is heat acclimation: earlier sweating, larger plasma volume, better tolerance of skin blood-flow shifts, and less heart-rate strain at the same heat exposure. The same dose can also become too much if workout load, dehydration, or poor sleep keeps the recovery side from catching up.
-  - The groin-cooling tactic is a separate local-temperature mechanism. Testicular heat can impair sperm-production physiology, so the source routine tries to protect that tissue while the rest of the body receives a high heat load; that is why this page reads the routine as a thermal-engineering experiment, not just a generic sauna habit.
+  - The groin-cooling tactic is a source-specific local-temperature guardrail. Bryan Johnson reports fertility-marker problems without groin cooling and describes groin ice as part of his routine, so this page treats the tactic as part of his external thermal-engineering setup rather than as a proven general sauna rule.
 claims:
   -
     claimId: source-routine-spec
@@ -266,5 +267,7 @@ That makes this a higher-burden experimental variant, not a beginner-friendly de
 ## How to read this page
 
 Use this as a source-attributed example of a more aggressive dry-sauna routine. The reported personal results are interesting context, but they should not be treated as expected outcomes for other users.
+
+This page intentionally keeps the protocol-specific source graph limited to Bryan Johnson / Blueprint posts and mirrors. Independent sauna physiology, safety, fertility, sweat, and passive-heat syntheses are attached to the broader Dry Sauna and Sauna family pages instead.
 
 For most people, a simpler Finnish dry-sauna experiment is the cleaner first test. This one is best reserved for people who specifically want to compare against Bryan Johnson's public routine and are comfortable with the extra burden and safety caveats.

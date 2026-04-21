@@ -4,7 +4,7 @@ entityType: source_artifact
 key: source_artifact:sauna-1989-kauppinen-some-endocrine-responses-to-sauna-shower-and-ice-water-imm
 slug: sources/sauna/sauna-1989-kauppinen-some-endocrine-responses-to-sauna-shower-and-ice-water-imm
 title: "Some endocrine responses to sauna, shower and ice water immersion"
-summary: "Finnish dry-sauna bibliography record (likely focus) used as supporting safety / physiology evidence for protocol context and guardrails."
+summary: "This acute physiology study measured endocrine responses to sauna, shower, and ice-water immersion. The main finding is that heat and cold sequences can activate stress-hormone responses. For Murph, it supports caution around stacking sauna with cold exposure rather than treating the combination as a default protocol."
 status: draft
 quality: usable
 categories:

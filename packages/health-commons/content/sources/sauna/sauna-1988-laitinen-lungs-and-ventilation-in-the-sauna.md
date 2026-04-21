@@ -4,7 +4,7 @@ entityType: source_artifact
 key: source_artifact:sauna-1988-laitinen-lungs-and-ventilation-in-the-sauna
 slug: sources/sauna/sauna-1988-laitinen-lungs-and-ventilation-in-the-sauna
 title: "Lungs and ventilation in the sauna"
-summary: "Finnish dry-sauna bibliography record (likely focus) used as supporting respiratory / ent evidence for protocol context and guardrails."
+summary: "This narrative physiology review covers lung and ventilation responses in the sauna. The main finding is that respiratory effects are part of the sauna response, especially for heat tolerance and symptom context. For Murph, it supports respiratory cautions and illness-context logging rather than a performance claim."
 status: draft
 quality: usable
 categories:

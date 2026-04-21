@@ -4,7 +4,7 @@ entityType: source_artifact
 key: source_artifact:sauna-2005-miyamoto-safety-and-efficacy-of-repeated-sauna-bathing-in-patients
 slug: sources/sauna/sauna-2005-miyamoto-safety-and-efficacy-of-repeated-sauna-bathing-in-patients
 title: "Safety and efficacy of repeated sauna bathing in patients with chronic systolic heart failure: a preliminary report"
-summary: "Finnish dry-sauna bibliography record (likely focus) used as supporting cardiovascular evidence for protocol context and guardrails."
+summary: "This pilot intervention tested repeated sauna bathing in chronic systolic heart failure patients. The main finding is that supervised repeated sauna may be feasible and physiologically meaningful in a clinical group, but the evidence is preliminary. For Murph, it supports ramping and safety monitoring, not unsupervised clinical advice."
 status: draft
 quality: usable
 categories:

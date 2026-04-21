@@ -4,7 +4,7 @@ entityType: source_artifact
 key: source_artifact:sauna-1986-kauppinen-man-in-the-sauna-review-article
 slug: sources/sauna/sauna-1986-kauppinen-man-in-the-sauna-review-article
 title: "Man in the sauna. Review article"
-summary: "Finnish dry-sauna bibliography record (likely focus) used as supporting general / mixed evidence for protocol context and guardrails."
+summary: "This narrative review synthesizes classic Finnish sauna physiology, risks, and practical claims. The main finding is a broad context map: sauna produces meaningful heat stress, cardiovascular, thermal, fluid, and endocrine responses, but the evidence is mixed by outcome. For Murph, it is background for rationale and guardrails, not a short-term wearable endpoint."
 status: draft
 quality: usable
 categories:

@@ -43,4 +43,4 @@ artifacts:
     accessNotes: X content may require special access and rights review before snapshotting; current corroboration depends on secondary snippets unless a readable mirror is captured.
 ---
 
-Source retained for provenance and future review.
+This X video thread is an earlier public statement of Johnson's sauna rationale. It describes the same broad claim set: dry sauna plus hydration and heat-protection tactics, with reported changes in vascular, blood, fertility, toxin, and microplastic markers. It helps trace the evolution of the Bryan Johnson sauna protocol before the later Blueprint and core-temperature updates. It should be read as background provenance.

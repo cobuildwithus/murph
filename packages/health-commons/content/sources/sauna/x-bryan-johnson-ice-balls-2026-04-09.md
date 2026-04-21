@@ -43,4 +43,4 @@ artifacts:
     accessNotes: X content may require special access and rights review before snapshotting; corroboration is limited to secondary snippets unless a fuller readable copy is captured.
 ---
 
-Source retained for provenance and future review.
+This X post records Johnson's groin-cooling fertility update. He reports using groin ice during sauna and describes a 57 percent change in motile-count markers. The finding explains why the protocol page treats groin cooling as source-specific fertility protection. It is a self-experiment claim, not clinical proof that the tactic protects fertility.

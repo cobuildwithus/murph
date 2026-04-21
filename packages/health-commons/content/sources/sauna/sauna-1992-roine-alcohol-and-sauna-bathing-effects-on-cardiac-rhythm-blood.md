@@ -4,7 +4,7 @@ entityType: source_artifact
 key: source_artifact:sauna-1992-roine-alcohol-and-sauna-bathing-effects-on-cardiac-rhythm-blood
 slug: sources/sauna/sauna-1992-roine-alcohol-and-sauna-bathing-effects-on-cardiac-rhythm-blood
 title: "Alcohol and sauna bathing: Effects on cardiac rhythm, blood pressure, and serum electrolyte and cortisol concentrations"
-summary: "Finnish dry-sauna bibliography record (likely focus) used as supporting cardiovascular evidence for protocol context and guardrails."
+summary: "This crossover study tested sauna exposure with alcohol in healthy adults. The main finding is that alcohol can change the cardiac, blood-pressure, electrolyte, and cortisol context of sauna bathing. For Murph, it supports logging alcohol and avoiding alcohol as a confounder during the experiment."
 status: draft
 quality: usable
 categories:

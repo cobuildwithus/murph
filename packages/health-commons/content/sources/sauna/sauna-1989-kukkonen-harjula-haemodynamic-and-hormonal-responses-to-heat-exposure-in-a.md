@@ -4,7 +4,7 @@ entityType: source_artifact
 key: source_artifact:sauna-1989-kukkonen-harjula-haemodynamic-and-hormonal-responses-to-heat-exposure-in-a
 slug: sources/sauna/sauna-1989-kukkonen-harjula-haemodynamic-and-hormonal-responses-to-heat-exposure-in-a
 title: "Haemodynamic and hormonal responses to heat exposure in a Finnish sauna bath"
-summary: "Finnish dry-sauna bibliography record (yes focus) used as supporting general / mixed evidence for protocol context and guardrails."
+summary: "This acute Finnish-sauna study measured haemodynamic and hormonal responses in healthy adults. The main finding is that a sauna bath creates measurable cardiovascular and hormonal stress, even in healthy volunteers. For Murph, it supports symptom screening, BP/RHR context, and conservative dose design."
 status: draft
 quality: usable
 categories:

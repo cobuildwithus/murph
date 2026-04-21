@@ -4,7 +4,7 @@ entityType: source_artifact
 key: source_artifact:sauna-1989-kauppinen-sauna-shower-and-ice-water-immersion-physiological-respons-2
 slug: sources/sauna/sauna-1989-kauppinen-sauna-shower-and-ice-water-immersion-physiological-respons-2
 title: "Sauna, shower, and ice water immersion. Physiological responses to brief exposures to heat, cool, and cold. Part II. Circulation"
-summary: "Finnish dry-sauna bibliography record (likely focus) used as supporting general / mixed evidence for protocol context and guardrails."
+summary: "This companion physiology study measured circulation during sauna, shower, and ice-water exposure. The main finding is that hot and cold exposures can rapidly shift cardiovascular load and circulation. For Murph, it supports blood-pressure and heart-rate guardrails, especially when cold exposure is added."
 status: draft
 quality: usable
 categories:

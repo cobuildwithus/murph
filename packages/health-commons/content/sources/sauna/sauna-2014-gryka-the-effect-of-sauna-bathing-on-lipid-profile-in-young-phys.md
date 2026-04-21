@@ -4,7 +4,7 @@ entityType: source_artifact
 key: source_artifact:sauna-2014-gryka-the-effect-of-sauna-bathing-on-lipid-profile-in-young-phys
 slug: sources/sauna/sauna-2014-gryka-the-effect-of-sauna-bathing-on-lipid-profile-in-young-phys
 title: "The effect of sauna bathing on lipid profile in young, physically active, male subjects"
-summary: "Finnish dry-sauna bibliography record (likely focus) used as supporting cardiometabolic evidence for protocol context and guardrails."
+summary: "This single-arm study tested repeated sauna bathing in young physically active men and lipid markers. The main finding is that lipid and cardiometabolic markers were explored over repeated sessions, but without a strong control design. For Murph, it is secondary cardiometabolic context rather than an MVP wearable endpoint."
 status: draft
 quality: usable
 categories:

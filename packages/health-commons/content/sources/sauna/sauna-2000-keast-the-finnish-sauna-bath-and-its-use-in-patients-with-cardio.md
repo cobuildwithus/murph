@@ -4,7 +4,7 @@ entityType: source_artifact
 key: source_artifact:sauna-2000-keast-the-finnish-sauna-bath-and-its-use-in-patients-with-cardio
 slug: sources/sauna/sauna-2000-keast-the-finnish-sauna-bath-and-its-use-in-patients-with-cardio
 title: "The Finnish sauna bath and its use in patients with cardiovascular disease"
-summary: "Finnish dry-sauna bibliography record (yes focus) used as supporting cardiovascular evidence for protocol context and guardrails."
+summary: "This review evaluates Finnish sauna use in patients with cardiovascular disease. The main finding is that clinical context determines whether sauna is likely tolerable or risky. For Murph, it supports cardiovascular screening and measured, conservative dose advice."
 status: draft
 quality: usable
 categories:

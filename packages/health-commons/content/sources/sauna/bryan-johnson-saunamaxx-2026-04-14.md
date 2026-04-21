@@ -43,4 +43,4 @@ artifacts:
     accessNotes: Optional HTML snapshot for provenance; review rights before storing or redistributing.
 ---
 
-Source retained for provenance and future review.
+This Substack update changes how the 20-minute routine should be interpreted. Johnson reports using an ingestible temperature sensor and finding that his previous 20-minute sessions likely missed his 102.4 F / 39 C target. He says the threshold was reached at about 31 minutes without face or neck cooling and about 40 minutes with cooling. That makes the core-temperature version a more aggressive variant, not a default protocol.

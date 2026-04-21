@@ -4,7 +4,7 @@ entityType: source_artifact
 key: source_artifact:sauna-1989-kauppinen-sauna-shower-and-ice-water-immersion-physiological-respons-3
 slug: sources/sauna/sauna-1989-kauppinen-sauna-shower-and-ice-water-immersion-physiological-respons-3
 title: "Sauna, shower, and ice water immersion. Physiological responses to brief exposures to heat, cool, and cold. Part III. Body temperatures"
-summary: "Finnish dry-sauna bibliography record (likely focus) used as supporting general / mixed evidence for protocol context and guardrails."
+summary: "This companion physiology study measured body-temperature responses across sauna, shower, and ice-water exposure. The main finding is that heat and cold sequencing changes thermal load, not just subjective comfort. For Murph, it supports tracking temperature, duration, cooldown, and symptoms."
 status: draft
 quality: usable
 categories:

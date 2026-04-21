@@ -47,4 +47,4 @@ artifacts:
     accessNotes: X content may require special access and rights review before snapshotting; readable LinkedIn mirror is included separately.
 ---
 
-Source retained for provenance and future review.
+This X guide is Johnson's primary December 2025 sauna source. It lays out the dry-sauna protocol and reported changes in toxin, microplastic, vascular, blood, and fertility markers. It also documents groin icing and hydration as part of his version. The findings belong in the source-attributed routine, not in general expected-outcome copy.

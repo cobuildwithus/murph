@@ -4,7 +4,7 @@ entityType: source_artifact
 key: source_artifact:sauna-1996-vanakoski-effects-of-heat-exposure-in-a-finnish-sauna-on-the-pharmac
 slug: sources/sauna/sauna-1996-vanakoski-effects-of-heat-exposure-in-a-finnish-sauna-on-the-pharmac
 title: "Effects of heat exposure in a Finnish sauna on the pharmacokinetics and metabolism of midazolam"
-summary: "Finnish dry-sauna bibliography record (yes focus) used as supporting safety / physiology evidence for protocol context and guardrails."
+summary: "This pharmacokinetic crossover study tested whether Finnish sauna heat changed midazolam handling. The main finding is a safety-context result: heat exposure can be relevant when interpreting medication metabolism and tolerance. For Murph, it supports medication cautions rather than any sauna benefit claim."
 status: draft
 quality: usable
 categories:
