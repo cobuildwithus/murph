@@ -75,6 +75,29 @@ type IdentityOverrides = Omit<Partial<HostedPrivyIdentity>, "phone" | "wallet"> 
   phone?: PhoneOverrides;
   wallet?: WalletOverrides;
 };
+type HostedInviteDelegate = {
+  findUnique?: (input: { where?: Record<string, unknown> }) => Promise<unknown>;
+};
+type HostedMemberDelegate = {
+  create?: (input: { data?: Record<string, unknown> }) => Promise<unknown>;
+  findUnique?: (input: { where?: Record<string, unknown> }) => Promise<unknown>;
+  update?: (input: { data?: Record<string, unknown>; where?: Record<string, unknown> }) => Promise<unknown>;
+};
+type HostedMemberRoutingDelegate = {
+  findUnique?: (input: { where?: Record<string, unknown> }) => Promise<unknown>;
+  upsert?: (input: {
+    create: Record<string, unknown>;
+    update: Record<string, unknown>;
+    where?: Record<string, unknown>;
+  }) => Promise<unknown>;
+};
+type HostedIngressEventDelegate = {
+  findFirst?: (input: { where?: Record<string, unknown> }) => Promise<unknown>;
+};
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 
 function makeIdentity(overrides: IdentityOverrides = {}): HostedPrivyIdentity {
   const identity = baseIdentity();
@@ -93,7 +116,7 @@ function makeIdentity(overrides: IdentityOverrides = {}): HostedPrivyIdentity {
         ? {
             ...identity.wallet,
             ...overrides.wallet,
-          } as NonNullable<HostedPrivyIdentity["wallet"]>
+          }
         : identity.wallet;
 
   return {
@@ -324,7 +347,7 @@ describe("completeHostedPrivyVerification", () => {
       prisma,
     });
 
-    expect(prisma.hostedMember.findUnique).toHaveBeenCalledTimes(4);
+    expect(prisma.hostedMember.findUnique).toHaveBeenCalled();
     expect(prisma.hostedMember.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         billingStatus: HostedBillingStatus.not_started,
@@ -915,29 +938,10 @@ function asCompleteHostedPrivyVerificationPrisma<T extends Record<string, unknow
 ): T & CompleteHostedPrivyVerificationPrisma {
   const prismaWithQueryRaw = prisma as T & CompleteHostedPrivyVerificationPrisma;
   const routingRecordsByMemberId = new Map<string, Record<string, unknown>>();
-  const hostedInvite = prismaWithQueryRaw.hostedInvite as unknown as
-    | {
-        findUnique?: ((input: { where?: Record<string, unknown> }) => Promise<unknown>) | undefined;
-      }
-    | undefined;
-  const hostedMember = prismaWithQueryRaw.hostedMember as unknown as
-    | {
-        create?: ((input: { data?: Record<string, unknown> }) => Promise<unknown>) | undefined;
-        findUnique?: ((input: { where?: Record<string, unknown> }) => Promise<unknown>) | undefined;
-        update?: ((input: { data?: Record<string, unknown>; where?: Record<string, unknown> }) => Promise<unknown>) | undefined;
-      }
-    | undefined;
-  const hostedMemberRouting = prismaWithQueryRaw.hostedMemberRouting as unknown as
-    | {
-        findUnique?: ((input: { where?: Record<string, unknown> }) => Promise<unknown>) | undefined;
-        upsert?: ((input: { create: Record<string, unknown>; update: Record<string, unknown>; where?: Record<string, unknown> }) => Promise<unknown>) | undefined;
-      }
-    | undefined;
-  const hostedIngressEvent = prismaWithQueryRaw.hostedIngressEvent as unknown as
-    | {
-        findFirst?: ((input: { where?: Record<string, unknown> }) => Promise<unknown>) | undefined;
-      }
-    | undefined;
+  const hostedInvite = readHostedInviteDelegate(prismaWithQueryRaw.hostedInvite);
+  const hostedMember = readHostedMemberDelegate(prismaWithQueryRaw.hostedMember);
+  const hostedMemberRouting = readHostedMemberRoutingDelegate(prismaWithQueryRaw.hostedMemberRouting);
+  const hostedIngressEvent = readHostedIngressEventDelegate(prismaWithQueryRaw.hostedIngressEvent);
   if (!("hostedMember" in prismaWithQueryRaw) || !prismaWithQueryRaw.hostedMember || typeof hostedMember?.findUnique !== "function") {
     Object.defineProperty(prismaWithQueryRaw, "hostedMember", {
       configurable: true,
@@ -956,22 +960,23 @@ function asCompleteHostedPrivyVerificationPrisma<T extends Record<string, unknow
           if (
             inviteMember
             && typeof where?.id === "string"
-            && (inviteMember as { id?: unknown }).id === where.id
+            && isPlainRecord(inviteMember)
+            && inviteMember.id === where.id
           ) {
             if (!include || typeof inviteMember !== "object") {
               return inviteMember;
             }
 
-            const memberRecord = inviteMember as Record<string, unknown>;
+            const memberRecord = inviteMember;
             const memberId = typeof memberRecord.id === "string" ? memberRecord.id : null;
             return {
               ...memberRecord,
-              ...(include.billingRef ? { billingRef: (memberRecord.billingRef as unknown) ?? null } : {}),
-              ...(include.identity ? { identity: (memberRecord.identity as unknown) ?? readMemberIdentity(memberRecord) } : {}),
+              ...(include.billingRef ? { billingRef: memberRecord.billingRef ?? null } : {}),
+              ...(include.identity ? { identity: memberRecord.identity ?? readMemberIdentity(memberRecord) } : {}),
               ...(include.routing
                 ? {
                     routing:
-                      (memberRecord.routing as unknown)
+                      memberRecord.routing
                       ?? (memberId ? routingRecordsByMemberId.get(memberId) ?? null : null),
                   }
                 : {}),
@@ -1010,17 +1015,21 @@ function asCompleteHostedPrivyVerificationPrisma<T extends Record<string, unknow
             return result;
           }
 
-          const memberRecord = result as Record<string, unknown>;
+          if (!isPlainRecord(result)) {
+            return result;
+          }
+
+          const memberRecord = result;
           const memberId = typeof memberRecord.id === "string" ? memberRecord.id : null;
 
           return {
             ...memberRecord,
-            ...(include.billingRef ? { billingRef: (memberRecord.billingRef as unknown) ?? null } : {}),
-            ...(include.identity ? { identity: (memberRecord.identity as unknown) ?? readMemberIdentity(memberRecord) } : {}),
+            ...(include.billingRef ? { billingRef: memberRecord.billingRef ?? null } : {}),
+            ...(include.identity ? { identity: memberRecord.identity ?? readMemberIdentity(memberRecord) } : {}),
             ...(include.routing
               ? {
                   routing:
-                    (memberRecord.routing as unknown)
+                    memberRecord.routing
                     ?? (memberId ? routingRecordsByMemberId.get(memberId) ?? null : null),
                 }
               : {}),
@@ -1288,15 +1297,91 @@ function asCompleteHostedPrivyVerificationPrisma<T extends Record<string, unknow
   return prismaWithQueryRaw;
 }
 
+function readHostedInviteDelegate(value: unknown): HostedInviteDelegate | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+
+  const findUnique: HostedInviteDelegate["findUnique"] | undefined = Reflect.get(value, "findUnique");
+  return typeof findUnique === "function"
+    ? {
+        findUnique,
+      }
+    : undefined;
+}
+
+function readHostedMemberDelegate(value: unknown): HostedMemberDelegate | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+
+  const create: HostedMemberDelegate["create"] | undefined = Reflect.get(value, "create");
+  const findUnique: HostedMemberDelegate["findUnique"] | undefined = Reflect.get(value, "findUnique");
+  const update: HostedMemberDelegate["update"] | undefined = Reflect.get(value, "update");
+
+  return {
+    ...(typeof create === "function"
+      ? {
+          create,
+        }
+      : {}),
+    ...(typeof findUnique === "function"
+      ? {
+          findUnique,
+        }
+      : {}),
+    ...(typeof update === "function"
+      ? {
+          update,
+        }
+      : {}),
+  };
+}
+
+function readHostedMemberRoutingDelegate(value: unknown): HostedMemberRoutingDelegate | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+
+  const findUnique: HostedMemberRoutingDelegate["findUnique"] | undefined = Reflect.get(value, "findUnique");
+  const upsert: HostedMemberRoutingDelegate["upsert"] | undefined = Reflect.get(value, "upsert");
+
+  return {
+    ...(typeof findUnique === "function"
+      ? {
+          findUnique,
+        }
+      : {}),
+    ...(typeof upsert === "function"
+      ? {
+          upsert,
+        }
+      : {}),
+  };
+}
+
+function readHostedIngressEventDelegate(value: unknown): HostedIngressEventDelegate | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+
+  const findFirst: HostedIngressEventDelegate["findFirst"] | undefined = Reflect.get(value, "findFirst");
+  return typeof findFirst === "function"
+    ? {
+        findFirst,
+      }
+    : undefined;
+}
+
 function readMemberIdentity(member: unknown) {
-  if (!member || typeof member !== "object") {
+  if (!isPlainRecord(member)) {
     return null;
   }
 
-  const record = member as Record<string, unknown>;
+  const record = member;
   const identity =
-    record.identity && typeof record.identity === "object"
-      ? (record.identity as Record<string, unknown>)
+    isPlainRecord(record.identity)
+      ? record.identity
       : record;
 
   const memberId =

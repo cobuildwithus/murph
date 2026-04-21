@@ -71,14 +71,14 @@ test("hosted web dev smoke uses its own Next artifact directory", () => {
   assert.equal(
     resolveHostedWebDistDir(
       PHASE_DEVELOPMENT_SERVER,
-      createHostedWebSmokeEnvironment({ NODE_ENV: "test" } as NodeJS.ProcessEnv),
+      createHostedWebSmokeEnvironment(createProcessEnv({})),
     ),
     HOSTED_WEB_SMOKE_DIST_DIR,
   );
   assert.equal(
     resolveHostedWebDistDir(
       PHASE_PRODUCTION_BUILD,
-      createHostedWebSmokeEnvironment({ NODE_ENV: "test" } as NodeJS.ProcessEnv),
+      createHostedWebSmokeEnvironment(createProcessEnv({})),
     ),
     HOSTED_WEB_BUILD_DIST_DIR,
   );
@@ -88,10 +88,9 @@ test("hosted web dev smoke can isolate concurrent runs with a dist-dir suffix", 
   assert.equal(
     resolveHostedWebDistDir(
       PHASE_DEVELOPMENT_SERVER,
-      createHostedWebSmokeEnvironment({
+      createHostedWebSmokeEnvironment(createProcessEnv({
         NEXT_DIST_DIR_SUFFIX: "e2e-run",
-        NODE_ENV: "test",
-      } as NodeJS.ProcessEnv),
+      })),
     ),
     `${HOSTED_WEB_SMOKE_DIST_DIR}-e2e-run`,
   );
@@ -100,15 +99,19 @@ test("hosted web dev smoke can isolate concurrent runs with a dist-dir suffix", 
 test("hosted web dev filesystem cache stays opt-in", () => {
   assert.equal(isHostedWebDevFileSystemCacheEnabled(), false);
   assert.equal(
-    isHostedWebDevFileSystemCacheEnabled({
-      MURPH_NEXT_DEV_FILESYSTEM_CACHE: "1",
-    } as unknown as NodeJS.ProcessEnv),
+    isHostedWebDevFileSystemCacheEnabled(
+      createProcessEnv({
+        MURPH_NEXT_DEV_FILESYSTEM_CACHE: "1",
+      }),
+    ),
     true,
   );
   assert.equal(
-    isHostedWebDevFileSystemCacheEnabled({
-      MURPH_NEXT_DEV_FILESYSTEM_CACHE: "yes",
-    } as unknown as NodeJS.ProcessEnv),
+    isHostedWebDevFileSystemCacheEnabled(
+      createProcessEnv({
+        MURPH_NEXT_DEV_FILESYSTEM_CACHE: "yes",
+      }),
+    ),
     true,
   );
 });
@@ -218,10 +221,10 @@ test("resolveHostedPrivyOrigins prefers PRIVY_BASE_DOMAIN over hosted public sub
 });
 
 test("buildHostedWebContentSecurityPolicy includes Privy, WalletConnect, and hosted browser protections", () => {
-  const csp = buildHostedWebContentSecurityPolicy({
+  const csp = buildHostedWebContentSecurityPolicy(createProcessEnv({
     NODE_ENV: "production",
     PRIVY_CUSTOM_AUTH_DOMAIN: "https://privy.custom.example.com",
-  } as NodeJS.ProcessEnv);
+  }));
 
   assert.match(csp, /default-src 'self'/);
   assert.match(csp, /script-src [^;]*https:\/\/auth\.privy\.io/);
@@ -260,9 +263,9 @@ test("buildHostedWebContentSecurityPolicy includes the base-domain Privy fallbac
 });
 
 test("buildHostedWebContentSecurityPolicy keeps Next development relaxations scoped to development", () => {
-  const csp = buildHostedWebContentSecurityPolicy({
+  const csp = buildHostedWebContentSecurityPolicy(createProcessEnv({
     NODE_ENV: "development",
-  } as NodeJS.ProcessEnv);
+  }));
 
   assert.match(csp, /script-src [^;]*'unsafe-eval'/);
   assert.match(csp, /connect-src [^;]*ws:/);
@@ -270,9 +273,9 @@ test("buildHostedWebContentSecurityPolicy keeps Next development relaxations sco
 });
 
 test("buildHostedWebSecurityHeaders adds production-only HSTS alongside the CSP bundle", () => {
-  const productionHeaders = buildHostedWebSecurityHeaders({
+  const productionHeaders = buildHostedWebSecurityHeaders(createProcessEnv({
     NODE_ENV: "production",
-  } as NodeJS.ProcessEnv);
+  }));
   const productionHeaderKeys = productionHeaders.map((header) => header.key);
 
   assert.deepEqual(productionHeaderKeys, [
@@ -284,9 +287,9 @@ test("buildHostedWebSecurityHeaders adds production-only HSTS alongside the CSP 
     "Strict-Transport-Security",
   ]);
 
-  const testHeaders = buildHostedWebSecurityHeaders({
+  const testHeaders = buildHostedWebSecurityHeaders(createProcessEnv({
     NODE_ENV: "test",
-  } as NodeJS.ProcessEnv);
+  }));
   const testHeaderKeys = testHeaders.map((header) => header.key);
 
   assert.deepEqual(testHeaderKeys, [
