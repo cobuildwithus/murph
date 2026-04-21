@@ -64,7 +64,13 @@ relations:
     target: source_artifact:pmid-29101797
   -
     type: cites
+    target: source_artifact:pmid-20030543
+  -
+    type: cites
     target: source_artifact:pmid-33707105
+  -
+    type: cites
+    target: source_artifact:pmid-30427265
   -
     type: cites
     target: source_artifact:pmid-35089982
@@ -74,6 +80,33 @@ relations:
   -
     type: cites
     target: source_artifact:pmid-29991437
+  -
+    type: cites
+    target: source_artifact:pmid-33587901
+  -
+    type: cites
+    target: source_artifact:pmid-36051910
+  -
+    type: cites
+    target: source_artifact:pmid-41166315
+  -
+    type: cites
+    target: source_artifact:pmid-41565717
+  -
+    type: cites
+    target: source_artifact:pmid-27322730
+  -
+    type: cites
+    target: source_artifact:pmid-15713707
+  -
+    type: cites
+    target: source_artifact:pmid-27226262
+  -
+    type: cites
+    target: source_artifact:pmid-26414986
+  -
+    type: cites
+    target: source_artifact:pmid-41421618
 lineage:
   relationship: root
   rationale: Murph canonical evening eyewear protocol for a low-burden, measurable sleep-onset self-experiment.

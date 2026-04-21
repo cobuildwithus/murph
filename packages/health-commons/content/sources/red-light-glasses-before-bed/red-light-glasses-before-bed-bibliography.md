@@ -50,6 +50,9 @@ relations:
     target: source_artifact:pmid-33707105
   -
     type: cites
+    target: source_artifact:pmid-30427265
+  -
+    type: cites
     target: source_artifact:pmid-35089982
   -
     type: cites
@@ -60,6 +63,30 @@ relations:
   -
     type: cites
     target: source_artifact:pmid-41421618
+  -
+    type: cites
+    target: source_artifact:pmid-33587901
+  -
+    type: cites
+    target: source_artifact:pmid-36051910
+  -
+    type: cites
+    target: source_artifact:pmid-41166315
+  -
+    type: cites
+    target: source_artifact:pmid-41565717
+  -
+    type: cites
+    target: source_artifact:pmid-27322730
+  -
+    type: cites
+    target: source_artifact:pmid-15713707
+  -
+    type: cites
+    target: source_artifact:pmid-27226262
+  -
+    type: cites
+    target: source_artifact:pmid-26414986
 source:
   kind: other
   title: Red-light glasses before bed research bibliography
@@ -121,6 +148,15 @@ shortlistSourceKeys:
   - source_artifact:pmid-35024497
   - source_artifact:pmid-29991437
   - source_artifact:pmid-41421618
+  - source_artifact:pmid-30427265
+  - source_artifact:pmid-33587901
+  - source_artifact:pmid-36051910
+  - source_artifact:pmid-41166315
+  - source_artifact:pmid-41565717
+  - source_artifact:pmid-27322730
+  - source_artifact:pmid-15713707
+  - source_artifact:pmid-27226262
+  - source_artifact:pmid-26414986
 ---
 
 ## What this is
@@ -150,7 +186,8 @@ Use this bibliography to keep the protocol bounded:
 - The **guideline and mechanistic** sources justify the evening-light hypothesis.
 - The **direct trial** sources set the 90–120 minute pre-bed timing and stop the page from becoming all-evening or overnight virtual darkness.
 - The **Cochrane and actigraphy** sources prevent sleep, eye-strain, and eye-protection overclaims.
-- The **pregnancy and mania** sources are adjacent variants that should not be merged into a general wellness recipe.
+- The **product-quality and home-lighting** sources keep Murph from treating lens color alone as the intervention.
+- The **pregnancy, pediatric, delayed-sleep-phase, shift-work, and mania** sources are adjacent variants that should not be merged into a general wellness recipe.
 
 ## Important caution
 
