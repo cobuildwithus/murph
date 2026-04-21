@@ -113,14 +113,15 @@ protocol:
   interventionSessionsMinimum: 8
   interventionSessionsTarget: 12
   steps:
-    - During the 6-week intervention, complete two 4x4 sessions per week, separated by at least 48 hours when possible.
-    - Warm up for about 10 minutes at easy-to-moderate effort, roughly 60–70% of estimated HRmax.
-    - Complete four 4-minute hard intervals, aiming to reach 85–95% of estimated HRmax by the later part of each interval.
-    - Recover actively for 3 minutes between intervals at easy effort, roughly 60–70% of estimated HRmax.
+    - Choose a bike, rower, elliptical, incline treadmill, hill, or flat route where you can work hard without dodging traffic or obstacles.
+    - Wear a heart-rate monitor if you have one, and start the session at an easy pace.
+    - Warm up for about 10 minutes at easy-to-moderate effort.
+    - Complete four 4-minute hard intervals, building effort instead of sprinting from the first minute.
+    - Move easily for 3 minutes between hard intervals.
     - Cool down for about 5 minutes.
-    - Log the modality, interval heart-rate response, effort, symptoms, and next-day recovery.
+    - Log the modality, completed intervals, peak heart rates, effort, symptoms, and next-day recovery.
   tips:
-    - Use a bike, rower, elliptical, incline treadmill, hill walk, or run; choose low-impact modes if joint load or running injury risk is a concern.
+    - Leave at least 48 hours between hard interval sessions when possible.
     - Use heart rate, perceived exertion, and symptoms together instead of sprinting from the start to chase a number.
     - Keep other training, caffeine timing, alcohol, new supplements, diet changes, and sleep schedule as stable as reasonably possible.
     - Make the first session conservative; repeatable hard aerobic work matters more than maximal suffering.
