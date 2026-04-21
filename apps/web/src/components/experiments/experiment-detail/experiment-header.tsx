@@ -152,7 +152,7 @@ export function ExperimentHeader({
               Start Experiment →
             </Button>
             <span className="text-[11px]/3.5 text-muted-foreground/70">
-              {baselineDays}-day baseline · {protocolDays}-day protocol
+                      {protocolDays}-day protocol
             </span>
           </div>
         )}
