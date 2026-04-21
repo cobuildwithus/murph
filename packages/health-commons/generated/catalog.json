@@ -1225,7 +1225,7 @@
       "schemaVersion": "murph.commons.artifact-manifest.v1"
     }
   ],
-  "catalogHash": "sha256:f513ab066356382bfe0bcdc51e9e6f9e420b9707adb01b5d55ecc7f00134a402",
+  "catalogHash": "sha256:653e9df741f2ef090ae595320caa81ec5fbe16d75635f866f24845a77a1eeef8",
   "changes": [
     {
       "affectedFields": [
@@ -3645,12 +3645,13 @@
           "other hard training"
         ],
         "steps": [
-          "During the 6-week intervention, complete two 4x4 sessions per week, separated by at least 48 hours when possible.",
-          "Warm up for about 10 minutes at easy-to-moderate effort, roughly 60–70% of estimated HRmax.",
-          "Complete four 4-minute hard intervals, aiming to reach 85–95% of estimated HRmax by the later part of each interval.",
-          "Recover actively for 3 minutes between intervals at easy effort, roughly 60–70% of estimated HRmax.",
+          "Choose a bike, rower, elliptical, incline treadmill, hill, or flat route where you can work hard without dodging traffic or obstacles.",
+          "Wear a heart-rate monitor if you have one, and start the session at an easy pace.",
+          "Warm up for about 10 minutes at easy-to-moderate effort.",
+          "Complete four 4-minute hard intervals, building effort instead of sprinting from the first minute.",
+          "Move easily for 3 minutes between hard intervals.",
           "Cool down for about 5 minutes.",
-          "Log the modality, interval heart-rate response, effort, symptoms, and next-day recovery."
+          "Log the modality, completed intervals, peak heart rates, effort, symptoms, and next-day recovery."
         ],
         "stopConditions": [
           "Stop the session immediately if chest pain or pressure, faintness, severe dizziness, confusion, palpitations, unusual shortness of breath, neurologic symptoms, or unsafe pain occurs.",
@@ -3658,7 +3659,7 @@
         ],
         "target": "85–95% estimated HRmax by the later part of each interval",
         "tips": [
-          "Use a bike, rower, elliptical, incline treadmill, hill walk, or run; choose low-impact modes if joint load or running injury risk is a concern.",
+          "Leave at least 48 hours between hard interval sessions when possible.",
           "Use heart rate, perceived exertion, and symptoms together instead of sprinting from the start to chase a number.",
           "Keep other training, caffeine timing, alcohol, new supplements, diet changes, and sleep schedule as stable as reasonably possible.",
           "Make the first session conservative; repeatable hard aerobic work matters more than maximal suffering."
@@ -3787,9 +3788,9 @@
         }
       },
       "revision": {
-        "pageRevisionId": "sha256:4051ebd6538cb17379dbad92436deeac565707b7adc5cfcfce6f84ddb054e0ed",
-        "recipeHash": "sha256:6d254cc5a60c28dfddc58ec7ae85e19908f29279e18eb42fdd5dc8051789da03",
-        "runSpecRevisionId": "sha256:12f27aeba31a6e68ebdd8645b91616b84a836431b8ed07f5382d790bd6828561"
+        "pageRevisionId": "sha256:38a8f69709ac5a2edb5f87b3d91e6bc59beae04f7a6a7e1b9bd63d37a453bc0c",
+        "recipeHash": "sha256:a36ee9d7c6cf5d9c816817cb9366d0a7d815922f2135ecd739884d1afd7a38d1",
+        "runSpecRevisionId": "sha256:80e12ca616f3426cfe7a4f2c60696a066a55fdbf5a1fce79c95901d7ba3fff2b"
       },
       "safety": {
         "avoidOrGetClinicianGuidance": [
