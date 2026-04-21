@@ -26,6 +26,12 @@ source:
   citation: "Light for Public Health Consortium. Light for Public Health Consensus Statements. doi:10.17617/1.4a6s-ec74."
   doi: 10.17617/1.4a6s-ec74
   url: https://lightforpublichealth.org/consensus-statements_en.html
+researchEvidence:
+  designKind: guideline
+  designLabel: Public-health consensus statement
+  populationLabel: Expert consensus on healthy indoor-light exposure
+  aggregateRole: context
+  aggregationNote: Consensus statement; no participant count is added to the protocol rollup.
 evidenceBucket: Public-health light guidance
 whyItMatters: Prevents the copy from implying that blue light is universally harmful; timing and context are the point.
 potentialMurphEndpoints:

@@ -1225,7 +1225,7 @@
       "schemaVersion": "murph.commons.artifact-manifest.v1"
     }
   ],
-  "catalogHash": "sha256:e8f351b891a605f55630434db2041552ce24d8f2b2cd5cdf7f92c541842288ec",
+  "catalogHash": "sha256:ceecddd2bd0d7d914452c16cc008ad5bc08b59730608568e6495fd0f0edbed68",
   "changes": [
     {
       "affectedFields": [
@@ -4845,8 +4845,15 @@
         }
       ],
       "relativePath": "sources/red-light-glasses-before-bed/doi-10.17617-1.4a6s-ec74.md",
+      "researchEvidence": {
+        "aggregateRole": "context",
+        "aggregationNote": "Consensus statement; no participant count is added to the protocol rollup.",
+        "designKind": "guideline",
+        "designLabel": "Public-health consensus statement",
+        "populationLabel": "Expert consensus on healthy indoor-light exposure"
+      },
       "revision": {
-        "pageRevisionId": "sha256:d4dd444e4f05def4ed047e0a12711c57863bfc67b6d9cb1a9b6c78614976d727",
+        "pageRevisionId": "sha256:8fbcb09c036cdae9554738bb88f0132a6ae208ba56319a1aab82e26d669fee59",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -5539,8 +5546,18 @@
         }
       ],
       "relativePath": "sources/red-light-glasses-before-bed/pmid-15713707.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "kayumov-2005-shift-work",
+        "designKind": "acute_mechanistic",
+        "designLabel": "Simulated shift-work physiology study",
+        "durationLabel": "Three overnight laboratory sessions",
+        "participantCount": 19,
+        "participantCountKind": "reported",
+        "populationLabel": "Healthy young adults"
+      },
       "revision": {
-        "pageRevisionId": "sha256:ac3fb2f52de5c810220c354dc2c01116019b2d572def9041f783f068cb715d15",
+        "pageRevisionId": "sha256:9b4546d760de964020c9797667d81210e6a2f10ae5536a7ac4590a4839b0f7da",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -5775,8 +5792,18 @@
         }
       ],
       "relativePath": "sources/red-light-glasses-before-bed/pmid-20030543.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "burkhart-phelps-2009-amber-lenses",
+        "designKind": "randomized_controlled_trial",
+        "designLabel": "Randomized parallel trial",
+        "durationLabel": "1-week baseline plus 2-week lens period",
+        "participantCount": 20,
+        "participantCountKind": "reported",
+        "populationLabel": "Adults with poor sleep quality"
+      },
       "revision": {
-        "pageRevisionId": "sha256:446e4512c38a28fd7472145b0f777d8e366d044d51389dde00fc288555dd3016",
+        "pageRevisionId": "sha256:f784ec1d446496d044a914762833400dcfe0050e370495fc14ba19e35767ddf5",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -6277,8 +6304,15 @@
         }
       ],
       "relativePath": "sources/red-light-glasses-before-bed/pmid-26414986.md",
+      "researchEvidence": {
+        "aggregateRole": "context",
+        "aggregationNote": "Guideline source used for clinical-safety boundaries; not included in participant totals.",
+        "designKind": "guideline",
+        "designLabel": "Clinical practice guideline",
+        "populationLabel": "Adults with circadian rhythm sleep-wake disorders"
+      },
       "revision": {
-        "pageRevisionId": "sha256:e7612d1446e899d329aae877d68b1d645c04aeeead9dadd19c213226bab5b6c8",
+        "pageRevisionId": "sha256:809ab2de57b95829e538ff68dea102f4eff23cd8a5ebbcd153d504d38c8a26c7",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -6334,8 +6368,21 @@
         }
       ],
       "relativePath": "sources/red-light-glasses-before-bed/pmid-27226262.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "henriksen-2016-mania",
+        "designKind": "randomized_controlled_trial",
+        "designLabel": "Randomized placebo-controlled trial",
+        "durationLabel": "7-night inpatient intervention",
+        "notes": [
+          "Thirty-two participants were randomized; later summaries often describe 12 blue-blocking and 11 placebo participants in the analysis set."
+        ],
+        "participantCount": 32,
+        "participantCountKind": "reported",
+        "populationLabel": "Hospitalized adults with bipolar mania"
+      },
       "revision": {
-        "pageRevisionId": "sha256:1cf505ec77014812dcad6743fca1ecc60cf5bbfc4d8aefcc637e945e8f1900be",
+        "pageRevisionId": "sha256:2db7d8615cb96f648187ee2313e75d6058bf130af845d4f9f0ae52e7520ba4c8",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -6391,8 +6438,21 @@
         }
       ],
       "relativePath": "sources/red-light-glasses-before-bed/pmid-27322730.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "esaki-2016-dspd",
+        "designKind": "single_arm_trial",
+        "designLabel": "Clinical intervention study",
+        "durationLabel": "2-week amber-lens intervention inside a 4-week trial",
+        "notes": [
+          "Nine patients participated and eight completed the protocol."
+        ],
+        "participantCount": 9,
+        "participantCountKind": "reported",
+        "populationLabel": "Adults with delayed sleep phase disorder"
+      },
       "revision": {
-        "pageRevisionId": "sha256:63fdf37a90d3ba4054388148958b16cd0558a3fb3aa789bcdd1ea4d53b10dcfa",
+        "pageRevisionId": "sha256:50bf3f288a2542e24cdcd86598c49bbc1e2550f2b6073c7de791722d07574e65",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -6798,8 +6858,18 @@
         }
       ],
       "relativePath": "sources/red-light-glasses-before-bed/pmid-29101797.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "shechter-2018-insomnia",
+        "designKind": "crossover_trial",
+        "designLabel": "Randomized crossover trial",
+        "durationLabel": "Two 7-night lens periods with 4-week washout",
+        "participantCount": 14,
+        "participantCountKind": "reported",
+        "populationLabel": "Adults with insomnia symptoms"
+      },
       "revision": {
-        "pageRevisionId": "sha256:95983e5c33bbb93e6fac67ea56d7d994e8ea571d6948b75a2c0d6f945ca659a6",
+        "pageRevisionId": "sha256:4c6ecefd460eb5c6d96ffbc76e29d901e99e4a51d779770e762b44dfdc259573",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -7186,8 +7256,15 @@
         }
       ],
       "relativePath": "sources/red-light-glasses-before-bed/pmid-29991437.md",
+      "researchEvidence": {
+        "aggregateRole": "context",
+        "aggregationNote": "Measurement guideline; not included in participant totals.",
+        "designKind": "guideline",
+        "designLabel": "Actigraphy clinical practice guideline",
+        "populationLabel": "Patients evaluated for sleep and circadian-rhythm disorders"
+      },
       "revision": {
-        "pageRevisionId": "sha256:895a6677056f7cbe8d90eba372d83da051eaa79e0dbabffbebaf70fcb7b2951b",
+        "pageRevisionId": "sha256:3e40475c5bae32fe18f5ca8a6533569b8429154dcd9ecb597fd326a21a051abb",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -7436,8 +7513,18 @@
         }
       ],
       "relativePath": "sources/red-light-glasses-before-bed/pmid-30427265.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "knufinke-2019-athletes",
+        "designKind": "crossover_trial",
+        "designLabel": "Pilot randomized crossover trial",
+        "durationLabel": "Four consecutive nights per lens condition",
+        "participantCount": 15,
+        "participantCountKind": "reported",
+        "populationLabel": "Recreational athletes aged 18-32"
+      },
       "revision": {
-        "pageRevisionId": "sha256:15ba2f5d56f0575206f2c6616ef3e7b84a002667f4783829a5f86d467bdf72d7",
+        "pageRevisionId": "sha256:9fa5ad8560ad3983e23e50769dc5ac0cc9e62ff73b581e304b79c48465b32b8b",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -8582,8 +8669,19 @@
         }
       ],
       "relativePath": "sources/red-light-glasses-before-bed/pmid-33587901.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "aggregationNote": "Direct human blue-light-filtering lens trial, but used here as safety and claim-boundary evidence rather than sleep-protocol efficacy evidence.",
+        "cohortKey": "singh-2021-computer-users",
+        "designKind": "randomized_controlled_trial",
+        "designLabel": "Double-masked randomized controlled trial",
+        "durationLabel": "Single-session computer-task exposure",
+        "participantCount": 120,
+        "participantCountKind": "reported",
+        "populationLabel": "Symptomatic adult computer users"
+      },
       "revision": {
-        "pageRevisionId": "sha256:78d64ada575d4f3fa56a50a5c2d307f7d16d0728696c16cba2f041e3ba426885",
+        "pageRevisionId": "sha256:9d9344089c0996fc377ac89f06d2bb9160301310e2badb5edf9617d51914563d",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -8637,8 +8735,18 @@
         }
       ],
       "relativePath": "sources/red-light-glasses-before-bed/pmid-33707105.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "bigalke-2021-healthy-adults",
+        "designKind": "crossover_trial",
+        "designLabel": "Randomized controlled crossover trial",
+        "durationLabel": "1-week run-in plus two 1-week lens conditions",
+        "participantCount": 20,
+        "participantCountKind": "reported",
+        "populationLabel": "Healthy adults"
+      },
       "revision": {
-        "pageRevisionId": "sha256:f00670f319d8b2ad3a0c2a6933e35fb7f3e38153fa1fd62adf756b581644a8b6",
+        "pageRevisionId": "sha256:f10dab857ee4fa079135e8a5e18d3f5707644257d5be8e386abccbb4c507ecc6",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -8692,8 +8800,18 @@
         }
       ],
       "relativePath": "sources/red-light-glasses-before-bed/pmid-34030534.md",
+      "researchEvidence": {
+        "aggregateRole": "synthesis",
+        "aggregationNote": "Review reports 16 journal RCTs with 453 patients; abstracts, uncontrolled trials, case series, and case reports are not added to this participant count.",
+        "designKind": "systematic_review",
+        "designLabel": "Systematic review of blue-blocking glasses for mental disorders",
+        "includedStudyCount": 29,
+        "participantCount": 453,
+        "participantCountKind": "reported",
+        "populationLabel": "Patients in mental-disorder blue-blocking-glasses studies"
+      },
       "revision": {
-        "pageRevisionId": "sha256:d1d9c7ef83891f9d2681a9292eed70baa7b9f10df3fc322e2cca39e7d8609588",
+        "pageRevisionId": "sha256:eb28c9d2355f800788f5d1b512f8ca05ead3ff57f7a54645bcc13e59f51769b0",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -8963,8 +9081,22 @@
         }
       ],
       "relativePath": "sources/red-light-glasses-before-bed/pmid-35024497.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "aggregationNote": "Same pregnancy trial cohort as pmid-35089982; the protocol rollup deduplicates by cohortKey.",
+        "cohortKey": "liset-pregnancy-blue-blocking-glasses",
+        "designKind": "randomized_controlled_trial",
+        "designLabel": "Randomized controlled trial",
+        "durationLabel": "1-week baseline plus 2-week lens period",
+        "notes": [
+          "Dim-light melatonin onset was estimated for 47 participants with complete profiles."
+        ],
+        "participantCount": 60,
+        "participantCountKind": "reported",
+        "populationLabel": "Healthy nulliparous pregnant women in the third trimester"
+      },
       "revision": {
-        "pageRevisionId": "sha256:89c5a5f9d44d6caed70a6cb38d9cee9b89bf0caad99eae723581b179cf5cf314",
+        "pageRevisionId": "sha256:5c8d7f415b5e658512730a9cc06c25c996d25dffdf646494104823a0565cb5bb",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -9018,8 +9150,19 @@
         }
       ],
       "relativePath": "sources/red-light-glasses-before-bed/pmid-35089982.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "aggregationNote": "Same pregnancy trial cohort as pmid-35024497; the protocol rollup deduplicates by cohortKey.",
+        "cohortKey": "liset-pregnancy-blue-blocking-glasses",
+        "designKind": "randomized_controlled_trial",
+        "designLabel": "Randomized controlled trial",
+        "durationLabel": "1-week baseline plus 2-week lens period",
+        "participantCount": 60,
+        "participantCountKind": "reported",
+        "populationLabel": "Healthy nulliparous pregnant women in the third trimester"
+      },
       "revision": {
-        "pageRevisionId": "sha256:f3b5b29645936ed485983948476f8b5ea9c4ad551f71012f685a12e78df39685",
+        "pageRevisionId": "sha256:b76674c149ddd660d8988902981754645b020a0e02bb99c74a2be7e7b6a34c8f",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -9073,8 +9216,15 @@
         }
       ],
       "relativePath": "sources/red-light-glasses-before-bed/pmid-35298459.md",
+      "researchEvidence": {
+        "aggregateRole": "context",
+        "aggregationNote": "Consensus recommendations; no participant count is added to the protocol rollup.",
+        "designKind": "guideline",
+        "designLabel": "Indoor-light consensus recommendations",
+        "populationLabel": "Expert consensus on daytime, evening, and nighttime indoor light"
+      },
       "revision": {
-        "pageRevisionId": "sha256:42c8967ae624458a86033bd1415e8328e1669dc23348298e89200ce29fde5b4a",
+        "pageRevisionId": "sha256:4c00291e4ba76d111695b9980217a73bd7b7ec1caf90e0581e920f2802163b55",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -9291,8 +9441,16 @@
         }
       ],
       "relativePath": "sources/red-light-glasses-before-bed/pmid-36051910.md",
+      "researchEvidence": {
+        "aggregateRole": "synthesis",
+        "aggregationNote": "The review reports study counts by outcome domain with overlapping studies; no single deduplicated participant total is coded.",
+        "designKind": "systematic_review",
+        "designLabel": "Systematic review of blue-light exposure in healthy young adults",
+        "includedStudyCount": 36,
+        "populationLabel": "Healthy humans in blue-light exposure studies"
+      },
       "revision": {
-        "pageRevisionId": "sha256:d6c81fd69bd6277280f88ddaea9f6c7e0b20948e37e1efbdf7a7c2569945a2c8",
+        "pageRevisionId": "sha256:8ec02ac4e47add33b3805533b7561b38ce76f06f3da6c4ed796afc736f232911",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -9631,8 +9789,19 @@
         }
       ],
       "relativePath": "sources/red-light-glasses-before-bed/pmid-37192881.md",
+      "researchEvidence": {
+        "aggregateRole": "synthesis",
+        "aggregationNote": "Synthesis row; excluded from the direct primary participant rollup to avoid double-counting included trials.",
+        "designKind": "meta_analysis",
+        "designLabel": "Systematic review and meta-analysis",
+        "durationLabel": "Intervention durations from 2 days to 1 month",
+        "includedStudyCount": 12,
+        "participantCount": 171,
+        "participantCountKind": "reported",
+        "populationLabel": "Participants in blue-blocking spectacle sleep studies"
+      },
       "revision": {
-        "pageRevisionId": "sha256:9f9c23c701de861c17efef01856a20b07003caf748d03e98763b870a5e005c3c",
+        "pageRevisionId": "sha256:41f5fc1509feab361a74c3c521a525503f17962f356e24c84f71126effbc3424",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -9737,8 +9906,18 @@
         }
       ],
       "relativePath": "sources/red-light-glasses-before-bed/pmid-37593770.md",
+      "researchEvidence": {
+        "aggregateRole": "synthesis",
+        "aggregationNote": "Synthesis row; excluded from the direct primary participant rollup. The sleep subset included 6 trials and 148 participants.",
+        "designKind": "systematic_review",
+        "designLabel": "Cochrane systematic review",
+        "includedStudyCount": 17,
+        "participantCount": 619,
+        "participantCountKind": "reported",
+        "populationLabel": "Participants in randomized trials of blue-light-filtering spectacle lenses"
+      },
       "revision": {
-        "pageRevisionId": "sha256:562d23ac09f7a71dee89bbeda4cd78b556aa6796dc8ba21cd5055641317f4483",
+        "pageRevisionId": "sha256:85cf86c6deb52ac47fc54d42a00de1d953e6475eadf8bbc8e130ffe6cb44d888",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -10422,8 +10601,15 @@
         }
       ],
       "relativePath": "sources/red-light-glasses-before-bed/pmid-40728371.md",
+      "researchEvidence": {
+        "aggregateRole": "context",
+        "aggregationNote": "Review and lens-characterization source; no deduplicated human participant total is coded.",
+        "designKind": "narrative_review",
+        "designLabel": "Narrative review and product characterization",
+        "populationLabel": "Blue-blocking spectacle lens literature and commercial-lens spectral profiles"
+      },
       "revision": {
-        "pageRevisionId": "sha256:375e7422bdf7081febf473c3b1c48d51295c2539cca85c4f7f011798fc5654a7",
+        "pageRevisionId": "sha256:359e607c9bd8c7373a41a35d86485af4801b8e903b671f4fa5418f4fcff154ab",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -10537,8 +10723,21 @@
         }
       ],
       "relativePath": "sources/red-light-glasses-before-bed/pmid-41166315.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "maeda-nishino-2025-schoolchildren",
+        "designKind": "crossover_trial",
+        "designLabel": "Pediatric crossover trial",
+        "durationLabel": "Two 2-week lens sessions with 1-week washout",
+        "notes": [
+          "Forty children were recruited and thirty-nine were included after one withdrawal."
+        ],
+        "participantCount": 39,
+        "participantCountKind": "reported",
+        "populationLabel": "Japanese male schoolchildren aged 10-12 with myopia"
+      },
       "revision": {
-        "pageRevisionId": "sha256:5d2c80d49ff44e20a12443c12ed96b2ed9648d6ce737756933da2b71d0a58464",
+        "pageRevisionId": "sha256:23964a557520f4379eddbfac9d48efbfc7e0a9f91810767f383db40918712519",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -10645,8 +10844,18 @@
         }
       ],
       "relativePath": "sources/red-light-glasses-before-bed/pmid-41341515.md",
+      "researchEvidence": {
+        "aggregateRole": "synthesis",
+        "aggregationNote": "Synthesis row; excluded from the direct primary participant rollup to avoid double-counting included trials.",
+        "designKind": "meta_analysis",
+        "designLabel": "Systematic review and meta-analysis of objective sleep outcomes",
+        "includedStudyCount": 3,
+        "participantCount": 49,
+        "participantCountKind": "reported",
+        "populationLabel": "Adults in double-blind crossover trials with actigraphy sleep outcomes"
+      },
       "revision": {
-        "pageRevisionId": "sha256:e4e2bbef97ce61a1b257a2fad7a7c6c470533d8f13b15bb8c5d989753dc23dff",
+        "pageRevisionId": "sha256:c59809fd3a980882f45c1114bd8976fffdc2560f56fdb35c770a950e66d2e21d",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -10699,8 +10908,18 @@
         }
       ],
       "relativePath": "sources/red-light-glasses-before-bed/pmid-41421618.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "fiedorowicz-2026-ottawa-mania",
+        "designKind": "randomized_controlled_trial",
+        "designLabel": "Randomized placebo-controlled trial",
+        "durationLabel": "Up to 2 weeks or until hospital discharge",
+        "participantCount": 42,
+        "participantCountKind": "reported",
+        "populationLabel": "Adults hospitalized with mania"
+      },
       "revision": {
-        "pageRevisionId": "sha256:f1a3431ac289076710d73f0269c59eea9b70d1fb74beedb4e7115cef300f7f87",
+        "pageRevisionId": "sha256:4c3b769f1c29640a69e54cc38a3a7953b4d91bf059479170de605f86a6156f10",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -10864,8 +11083,15 @@
         }
       ],
       "relativePath": "sources/red-light-glasses-before-bed/pmid-41565717.md",
+      "researchEvidence": {
+        "aggregateRole": "context",
+        "aggregationNote": "Mechanistic/modeling source; no human participant count is added to the protocol rollup.",
+        "designKind": "acute_mechanistic",
+        "designLabel": "Home-lighting spectral modeling study",
+        "populationLabel": "Modeled melanopic exposure from home-lighting scenarios"
+      },
       "revision": {
-        "pageRevisionId": "sha256:c9dae5738746b7b3a7f0bf5000ef0d7341273b7aca67eb0418c04ece275952ee",
+        "pageRevisionId": "sha256:b350f8a6a05a0df6c4b9257c53a16f257267c1778ae05885afee661ca1388363",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
