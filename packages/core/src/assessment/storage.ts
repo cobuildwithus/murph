@@ -39,7 +39,7 @@ function parseAssessmentResponse(content: string): UnknownRecord {
   let parsed: unknown;
 
   try {
-    parsed = JSON.parse(content) as unknown;
+    parsed = JSON.parse(content);
   } catch (error) {
     throw new VaultError("ASSESSMENT_INVALID_JSON", "Assessment response must be valid JSON.", {
       cause: error instanceof Error ? error.message : String(error),

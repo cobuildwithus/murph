@@ -644,7 +644,7 @@ export async function readStoredWriteOperation(
   relativePath: string,
 ): Promise<StoredWriteOperation> {
   const resolved = resolveVaultPath(vaultRoot, relativePath);
-  const raw = JSON.parse(await readText(resolved.absolutePath)) as unknown;
+  const raw = JSON.parse(await readText(resolved.absolutePath));
 
   if (!isPlainRecord(raw)) {
     throw new VaultError("OPERATION_INVALID", "Write operation metadata must be a JSON object.", {
@@ -652,7 +652,7 @@ export async function readStoredWriteOperation(
     });
   }
 
-  const operation = parseStrictStoredWriteOperation(raw as Record<string, unknown>);
+  const operation = parseStrictStoredWriteOperation(raw);
   if (!operation) {
     throw new VaultError("OPERATION_INVALID", "Write operation metadata has an unexpected shape.", {
       relativePath,
@@ -678,8 +678,8 @@ export async function readRecoverableStoredWriteOperation(
 ): Promise<RecoverableStoredWriteOperation | null> {
   try {
     const resolved = resolveVaultPath(vaultRoot, relativePath);
-    const raw = JSON.parse(await readText(resolved.absolutePath)) as unknown;
-    return isPlainRecord(raw) ? parseRecoverableStoredWriteOperationRecord(raw as Record<string, unknown>) : null;
+    const raw = JSON.parse(await readText(resolved.absolutePath));
+    return isPlainRecord(raw) ? parseRecoverableStoredWriteOperationRecord(raw) : null;
   } catch {
     return null;
   }
