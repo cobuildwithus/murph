@@ -27,7 +27,7 @@ source:
   citation: "J J Acala, D Roche-Willis, T A Astorino. Characterizing the heart rate response to the 4 × 4 interval exercise protocol. International Journal of Environmental Research and Public Health. 2020. doi:10.3390/ijerph17145103"
   doi: "10.3390/ijerph17145103"
   url: https://www.mdpi.com/1660-4601/17/14/5103
-evidenceBucket: "Wearable or testable endpoints"
+evidenceBucket: "Wearable or testable signals"
 whyItMatters: "Acute implementation source showing how heart rate behaves during a 4x4 session and why target-zone fidelity needs to be logged."
 potentialMurphEndpoints:
   - estimated VO2max / cardio-fitness proxy
@@ -45,7 +45,7 @@ aliases:
   - "doi-10.3390-ijerph17145103"
 ---
 
-This source sits in the Murph shortlist bucket **Wearable or testable endpoints**.
+This source is included for **Wearable or testable signals**.
 
 **Why it matters:** Acute implementation source showing how heart rate behaves during a 4x4 session and why target-zone fidelity needs to be logged.
 

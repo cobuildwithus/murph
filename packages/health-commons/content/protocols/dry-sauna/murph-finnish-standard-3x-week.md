@@ -3,15 +3,15 @@ schemaVersion: murph.commons.page.v1
 entityType: protocol_variant
 key: protocol_variant:dry-sauna/murph-finnish-standard-3x-week
 slug: protocols/dry-sauna/murph-finnish-standard-3x-week
-title: Murph Finnish Dry Sauna
-summary: "Canonical Murph dry-sauna protocol: a 21-day self-experiment using a stable Finnish dry-sauna recipe, with resting heart rate primary and optional morning blood pressure plus exploratory HRV and sleep context."
+title: Finnish Dry Sauna
+summary: "A simple 21-day heat-exposure experiment: keep a baseline, then try three short Finnish dry-sauna sessions per week and see whether recovery, sleep, and cardiovascular signals move in a way that feels worth repeating."
 status: field-testing
 quality: usable
 aliases:
-  - Murph dry sauna protocol
-  - Murph Finnish sauna protocol
+  - dry sauna protocol
+  - Finnish sauna protocol
   - Finnish dry sauna experiment
-  - canonical Murph sauna protocol
+  - 3x weekly dry sauna experiment
 categories:
   - passive-heat
   - recovery
@@ -59,7 +59,7 @@ relations:
     target: source_artifact:pmid-40611569
 lineage:
   relationship: root
-  rationale: Murph canonical dry-sauna protocol for the first Health Commons field test.
+  rationale: Default dry-sauna experiment designed to be simple enough to try and clear enough to interpret.
 attribution:
   ownerType: murph
 protocol:
@@ -80,7 +80,7 @@ protocol:
     - Use a traditional dry sauna when possible, aiming for about 80–100 °C and 15–20 minutes per session.
     - Prefer a similar time of day and similar pre-sauna routine across sessions if you want cleaner comparison.
     - Treat cold plunges, new supplements, new training blocks, major diet changes, and intentional alcohol changes as separate interventions; do not add them during this experiment.
-    - If you choose to sauna after exercise, log the workout timing and load explicitly; Murph should interpret that as a potentially different variant rather than silently folding it into the stand-alone protocol.
+    - If you choose to sauna after exercise, log the workout timing and load explicitly; that context can change how the result should be read.
     - Hydrate normally, cool down gently, and log duration, approximate temperature, time of day, whether the session followed exercise, symptoms, illness, alcohol, travel, and unusually hard training.
   stopConditions:
     - Stop the session if chest pain, faintness, severe dizziness, confusion, palpitations, or unusual shortness of breath occurs.
@@ -103,12 +103,12 @@ testPlans:
       - Compare intervention-window averages against the user’s own 7-day baseline rather than highlighting single-session spikes.
       - Treat morning blood pressure as optional but valuable when a validated home cuff and consistent routine are available.
       - Keep HRV and sleep-stage markers exploratory unless the personal signal is strong, repeated, and not obviously confounded.
-      - Murph should keep stand-alone sauna and post-exercise sauna interpretations separate whenever the workout context is materially different.
+      - Keep stand-alone sauna and post-exercise sauna interpretations separate whenever the workout context is materially different.
 claims:
   -
     claimId: research-base-is-broad-but-mixed
     type: evidence_scope
-    text: The dry-sauna research base is now broad enough for a canonical Murph page, but it remains heterogeneous in modality, temperature, duration, session context, population, and endpoints.
+    text: Dry-sauna research is broad enough to support a simple self-test, but the studies vary by heat type, temperature, duration, session context, population, and outcome.
     strength: moderate
     sourceKeys:
       - source_artifact:sauna-bibliography-2026-04-18
@@ -117,12 +117,12 @@ claims:
       - source_artifact:mayo-2018-sauna-review
       - source_artifact:pmid-38577299
     caveats:
-      - A large literature does not automatically mean that one exact wearable endpoint will move in every user.
-      - Murph should surface study-design and modality caveats instead of collapsing everything into one confidence score.
+      - A large literature does not automatically mean that one exact wearable signal will move in every user.
+      - Study-design and modality caveats matter more than a single confidence score.
   -
     claimId: near-term-cardiovascular-markers-are-the-right-v1-target
     type: intervention_result
-    text: Acute and short-term sauna papers justify tracking near-term cardiovascular markers such as resting heart rate and optional morning blood pressure in a first Murph self-experiment.
+    text: Acute and short-term sauna papers support watching practical near-term cardiovascular signals over a few weeks, while keeping medical claims off the table.
     strength: moderate
     sourceKeys:
       - source_artifact:pmid-32814462
@@ -135,7 +135,7 @@ claims:
   -
     claimId: repeated-exposure-matters-more-than-a-single-session
     type: intervention_result
-    text: Repeated sauna exposure over weeks is a better Murph recipe than a one-off session because several physiology and training-adaptation papers suggest meaningful responses accrue across repeated exposures.
+    text: Repeated sauna exposure over weeks is more informative than a single session because several physiology and training-adaptation papers suggest responses can build across repeated exposures.
     strength: moderate
     sourceKeys:
       - source_artifact:pmid-36813265
@@ -148,7 +148,7 @@ claims:
   -
     claimId: standalone-and-postexercise-variants-should-be-separated
     type: design_guardrail
-    text: Standalone dry sauna and post-exercise dry sauna should be represented as separate Murph variants because the workout context changes physiology, hydration, and likely outcome interpretation.
+    text: A standalone dry-sauna session and a post-exercise sauna session should be read separately because workout context can change physiology, hydration, and recovery.
     strength: high
     sourceKeys:
       - source_artifact:pmid-34622026
@@ -156,11 +156,11 @@ claims:
       - source_artifact:pmid-41032138
       - source_artifact:pmid-31490429
     caveats:
-      - The same user may benefit from both designs, but Murph should not pretend they are the same experiment.
+      - The same person may benefit from both patterns, but they are not the same experiment.
   -
     claimId: hydration-and-session-context-matter
     type: design_guardrail
-    text: Hydration status, recent exercise load, and session context can materially change sauna responses, so Murph should require those to be logged rather than hand-waving them away as noise.
+    text: Hydration status, recent exercise load, and session context can materially change sauna responses, so they are worth logging before interpreting the result.
     strength: moderate
     sourceKeys:
       - source_artifact:pmid-34727008
@@ -171,7 +171,7 @@ claims:
   -
     claimId: long-term-cohort-findings-are-context-not-endpoints
     type: association_not_causation
-    text: Long-term Finnish cohort findings on mortality, hypertension, dementia, pneumonia, stroke, kidney outcomes, and other disease endpoints are rationale and personalization context, not outcomes a 21-day Murph experiment can test.
+    text: Long-term Finnish cohort findings on mortality, hypertension, dementia, pneumonia, stroke, kidney outcomes, and other disease signals are background context, not outcomes a 21-day personal experiment can test.
     strength: high
     sourceKeys:
       - source_artifact:pmid-25705824
@@ -186,34 +186,34 @@ claims:
       - source_artifact:pmid-38410962
     caveats:
       - Observational cohort evidence cannot prove an individual causal benefit.
-      - Murph should not convert these into guaranteed result-card language.
+      - These findings should not become guaranteed result language.
   -
     claimId: null-evidence-belongs-on-the-page
     type: mixed_evidence
-    text: The dry-sauna page should visibly include null or mixed intervention findings so Murph does not imply that every vascular, inflammatory, gut, or HRV marker reliably improves.
+    text: Null and mixed intervention findings belong alongside positive findings, so users do not get the impression that every vascular, inflammatory, gut, or HRV marker reliably improves.
     strength: high
     sourceKeys:
       - source_artifact:pmid-35710395
       - source_artifact:pmid-37650138
       - source_artifact:pmid-40611569
     caveats:
-      - A null result in one endpoint does not mean the protocol is useless for every user.
-      - Murph still needs to distinguish between disease populations, athletes, and general-wellness users.
+      - A null result in one signal does not mean the protocol is useless for every user.
+      - Disease populations, athletes, and general-wellness users should not be blended into one expected result.
   -
     claimId: dry-sauna-is-not-infrared
     type: design_guardrail
-    text: Finnish dry sauna, infrared sauna, and other passive-heat modalities should stay separate in Murph because heat source, temperature profile, humidity, and evidence base differ enough to change dose and interpretation.
+    text: Finnish dry sauna, infrared sauna, and other passive-heat approaches should stay separate because heat source, temperature profile, humidity, and evidence base can change dose and interpretation.
     strength: high
     sourceKeys:
       - source_artifact:pmid-38577299
       - source_artifact:doi-10.1152-ajpregu.00012.2025
       - source_artifact:mayo-2018-sauna-review
     caveats:
-      - Related modalities can still inform each other, but Murph should not silently merge their protocol claims.
+      - Related heat modalities can inform each other, but their claims should not be silently merged.
   -
     claimId: hrv-is-exploratory-not-promised
     type: mixed_evidence
-    text: HRV should stay exploratory in Murph’s first dry-sauna protocol because the literature contains both promising autonomic signals and a modern randomized null result.
+    text: HRV is best treated as exploratory here because the literature contains both promising autonomic signals and a modern randomized null result.
     strength: moderate
     sourceKeys:
       - source_artifact:pmid-31331560
@@ -246,7 +246,7 @@ safety:
     - Avoid alcohol before sauna sessions.
     - This is a bounded wellness self-experiment, not a treatment plan for cardiovascular disease.
     - People with known cardiovascular disease or major medical conditions should use clinician guidance before starting.
-    - Murph should encourage users to exit early rather than “push through” heat discomfort.
+    - Exiting early is normal if heat discomfort starts to feel concerning.
 researchCoverage:
   bibliographyKey: source_artifact:sauna-bibliography-2026-04-18
   corpusStats:
@@ -298,11 +298,11 @@ confoundersToTrack:
   - cold_plunge_or_other_new_heat_or_cold_intervention
 ---
 
-## Canonical question
+## Question this experiment answers
 
-After a stable baseline, does a short block of **stand-alone Finnish dry sauna** move a user's near-term recovery or cardiovascular signals enough to be worth repeating?
+After a stable baseline, does a short block of **stand-alone Finnish dry sauna** make recovery, sleep, or cardiovascular signals move enough to be worth repeating?
 
-## Canonical Murph recipe
+## Simple version
 
 Run a 21-day experiment:
 
@@ -313,83 +313,30 @@ Run a 21-day experiment:
 - roughly **80–100 °C**
 - **6 target sessions**, with **4 sessions** as the minimum for a useful first read
 
-This is intentionally a practical consumer protocol, not an extreme heat-adaptation block and not a disease-treatment protocol.
+This is intentionally practical: a repeatable dry-sauna routine, not an extreme heat-adaptation block and not a treatment plan.
 
-## Why this exact version comes first
+## Why this version
 
-Murph starts with a stand-alone dry-sauna recipe because the research base says several things at once:
+Sauna research is broad, but not all sauna studies are testing the same thing. Heat source, temperature, humidity, timing, workout context, hydration, and study population can all change the story.
 
-1. the overall literature is broad enough to justify a canonical page,
-2. long-term cohort evidence is useful for context but not for short-term result cards,
-3. acute and mechanistic papers support near-term cardiovascular tracking,
-4. intervention-design papers show that **exercise context, hydration, and repeated exposure** matter enough that Murph should keep variants separate.
+This version starts with a clean, low-drama question: what happens when you add a few stand-alone Finnish dry-sauna sessions without adding cold plunges, new supplements, new training blocks, or major diet changes at the same time?
 
-That is why this page is **not** “all sauna research in one protocol.”
+## What to watch
 
-## What to measure first
+The main read is whether baseline-vs-intervention averages move in a useful direction and whether the routine felt repeatable. Resting heart rate is the most practical wearable signal; morning blood pressure can help if you already measure it consistently; HRV and sleep-stage changes are context, not promises.
 
-### Primary
+## What to log
 
-- **Resting heart rate**
+At minimum, log session duration, approximate temperature, time of day, whether the session followed exercise, illness, alcohol, travel, unusually hard training, and any symptoms during or after the session.
 
-### Valuable optional secondary
+If those details are missing, the experiment can still count, but the result should be read more cautiously.
 
-- **Morning blood pressure**, if the user has a validated home cuff and can measure the same way each time
+## What this does not test
 
-### Exploratory secondary
+This experiment does not test mortality, dementia, stroke, kidney outcomes, pneumonia, or long-term disease incidence. Those findings are background context, not results a 21-day experiment can prove.
 
-- **HRV / RMSSD**
-- **Sleep efficiency**
-- **Deep sleep minutes**
+It also does not promise HRV improvement, gut benefits, vascular improvements, or a perfect wearable score. A useful result is usually modest: the averages move, the person completed enough sessions, no obvious confounder explains everything, and the routine felt worth repeating.
 
-Murph should make it obvious that exploratory does not mean useless; it means “interesting, but not a promised signal.”
+## Evidence snapshot
 
-## What to log every session
-
-At minimum log:
-
-- session duration
-- approximate temperature
-- time of day
-- whether the session was stand-alone or followed exercise
-- illness, alcohol, travel, and unusually hard training
-- any symptoms during or after the session
-
-If these are not tracked, the experiment is still allowed, but interpretation should become more conservative.
-
-## What this protocol deliberately does not test
-
-This page **does not** test mortality, dementia, stroke, kidney outcomes, pneumonia, or long-term disease incidence. Those findings belong to the evidence-context layer.
-
-This page also does **not** automatically claim HRV improvement, gut benefits, or vascular improvements. The research base contains mixed and null results, and Murph should keep those visible.
-
-## How to read a useful result
-
-A useful v1 result is modest and honest:
-
-- intervention-window averages move relative to baseline,
-- the user hit at least four sessions,
-- no major confounder obviously explains everything,
-- the burden felt acceptable,
-- the user would plausibly repeat the protocol.
-
-Murph should reward honest interpretation more than dramatic charts.
-
-## Research base behind this page
-
-This canonical protocol is backed by Murph's structured sauna bibliography:
-
-- 180 master records
-- 81 Finnish dry-sauna yes/likely records
-- 32 review/meta records
-- 40 curated shortlist papers
-- 24 high-priority Murph v1 records
-
-The shortlist itself breaks into four buckets:
-
-- **Evidence backbone** papers for overall framing
-- **Long-term Finnish cohort** papers for rationale and personalization context
-- **Acute and mechanistic** papers for near-term measurable endpoints
-- **Intervention design / reality check** papers for dose, context, and expectation-setting
-
-That is the shape Murph should keep as the protocol library grows.
+The sauna research map includes reviews, long-term Finnish cohort papers, acute physiology work, and intervention-design papers. That mix is enough to make the experiment worth trying, while also keeping the claims careful.

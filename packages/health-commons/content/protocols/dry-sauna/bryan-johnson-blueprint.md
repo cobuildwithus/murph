@@ -4,7 +4,7 @@ entityType: protocol_variant
 key: protocol_variant:dry-sauna/bryan-johnson-blueprint
 slug: protocols/dry-sauna/bryan-johnson-blueprint
 title: Bryan Johnson Blueprint Sauna
-summary: "Source-attributed dry-sauna routine from Bryan Johnson / Blueprint: daily dry sauna at 200 F for 20 minutes, morning after workout, with groin cooling for male fertility protection; April 2026 posts add a higher-burden core-temperature-threshold experiment."
+summary: "A higher-burden daily sauna routine publicly described by Bryan Johnson, including post-workout timing, heat-protection tactics, and self-reported results best read as personal context rather than expected outcomes."
 status: draft
 quality: usable
 aliases:
@@ -73,13 +73,13 @@ relations:
     target: source_artifact:x-bryan-johnson-most-people-sauna-wrong-2025-11-12
 lineage:
   relationship: external_named_protocol
-  rationale: External named dry-sauna routine under the same modality as Murph's canonical protocol; keep it separate from Murph guidance and treat April 2026 threshold work as an experimental update rather than a default dose.
+  rationale: External named dry-sauna routine in the same dry-sauna family; keep it separate from the simpler Finnish dry-sauna experiment and treat April 2026 threshold work as an experimental update rather than a default dose.
 attribution:
   ownerType: external
   sourcePersonKeys:
     - source_person:bryan-johnson
   sourceUrl: https://blueprint.bryanjohnson.com/blogs/news/sauna-protocol
-  note: Source-attributed from Bryan Johnson / Blueprint public pages plus public X, LinkedIn, and Substack posts. This remains an external protocol page, not Murph canonical guidance.
+  note: Source-attributed from Bryan Johnson / Blueprint public pages plus public X, LinkedIn, and Substack posts. This is an external named routine, not a default recommendation.
 protocol:
   doseSignature: Daily dry sauna - 20 min - 93 C - morning after workout - groin cooling for male fertility protection
   frequency:
@@ -93,7 +93,7 @@ protocol:
   interventionSessionsMinimum: 7
   interventionSessionsTarget: 14
   steps:
-    - Treat this as a source-attributed external routine, not a Murph default recommendation.
+    - Treat this as a source-attributed external routine, not a default recommendation.
     - The public Blueprint routine is a dry sauna at 200 F / 93 C for 20 minutes, daily, usually in the morning after a workout.
     - Keep humidity low, use the exact source routine only if the setup is appropriate, and track session duration, approximate temperature, symptoms, hydration, and whether face or neck cooling was used.
     - The source routine uses groin cooling for male fertility protection; do not generalize that self-experiment finding into population-level safety.
@@ -114,7 +114,7 @@ testPlans:
     minimumAdherenceSessions: 7
     targetAdherenceSessions: 14
     notes:
-      - This test plan is a Murph observation wrapper around an external named routine, not proof that the source routine is broadly advisable.
+      - This test plan is an observation wrapper around an external named routine, not proof that the source routine is broadly advisable.
       - If copied at all, compare the intervention window against the user's own baseline and log heat burden, hydration, symptoms, illness, alcohol, and post-workout timing.
 claims:
   -
@@ -126,8 +126,8 @@ claims:
       - source_artifact:bryan-johnson-sauna-protocol-2026-01-28
       - source_artifact:bryan-johnson-morning-routine-2026-04-08
     caveats:
-      - This is a source-attributed routine, not Murph canonical guidance.
-      - April 2026 core-temperature testing should be treated as an experimental update rather than as the default beginner-facing dose.
+      - This is a source-attributed routine, not a general recommendation.
+      - April 2026 core-temperature testing is a higher-burden update, not the default beginner-facing dose.
   -
     claimId: source-beginner-adaptation
     type: design_guardrail
@@ -152,7 +152,7 @@ claims:
   -
     claimId: reported-personal-results-are-not-causal-evidence
     type: evidence_scope
-    text: Bryan Johnson reports large changes in toxins, microplastics, fertility markers, vascular measures, and resting heart rate around his sauna experiments, but these are source-attributed personal results and should not be rendered as expected causal outcomes for Murph users.
+    text: Bryan Johnson reports large changes in toxins, microplastics, fertility markers, vascular measures, and resting heart rate around his sauna experiments, but those are personal observations rather than expected causal outcomes for other people.
     strength: low
     sourceKeys:
       - source_artifact:bryan-johnson-sauna-protocol-2026-01-28
@@ -160,7 +160,7 @@ claims:
       - source_artifact:linkedin-bryan-johnson-sauna-guide-2025-12-06
     caveats:
       - Single-person self-experiment data is useful context but not population-level causal evidence.
-      - Murph should show these as Bryan Johnson's reported observations, not as expected user outcomes.
+      - Treat these as Bryan Johnson's reported observations, not as expected user outcomes.
   -
     claimId: core-temperature-update-changes-duration-interpretation
     type: design_guardrail
@@ -170,7 +170,7 @@ claims:
       - source_artifact:bryan-johnson-saunamaxx-2026-04-14
       - source_artifact:linkedin-bryan-johnson-core-temp-2026-04-16
     caveats:
-      - This is a higher-burden experimental variant, not an appropriate default Murph beginner protocol.
+      - This is a higher-burden experimental variant, not an appropriate default beginner protocol.
       - Individual heat tolerance, humidity, hydration, cardiovascular status, and sensor method can materially change the threshold timing.
       - The same source set says the earlier 20-minute routine still coincided with reported benefits.
   -
@@ -182,7 +182,7 @@ claims:
       - source_artifact:linkedin-bryan-johnson-core-temp-prototype-2026-04-03
     caveats:
       - This was a preliminary social-post experiment later superseded by the April 14-16 saunamaxx writeups.
-      - Do not use this as a Murph default protocol.
+      - Do not use this as a default protocol.
   -
     claimId: post-sauna-cooling-may-confound-threshold-goal
     type: design_guardrail
@@ -216,15 +216,15 @@ safety:
     - palpitations
     - new_neurologic_symptoms
   notes:
-    - This page is source-attributed and should be handled more cautiously than Murph's canonical dry-sauna protocol.
-    - Groin cooling, face and neck cooling, and post-sauna no-cold-exposure guidance are source-specific tactics, not general Murph rules.
+    - This is source-attributed and higher-burden, so interpret it more cautiously than the simpler dry-sauna experiment.
+    - Groin cooling, face and neck cooling, and post-sauna no-cold-exposure guidance are source-specific tactics, not general rules.
 ---
 
-This is a source-attributed external protocol page, not a Murph canonical recommendation.
+This is a higher-burden sauna routine publicly described by Bryan Johnson / Blueprint. It is included as an external comparison, not as the easiest place to start.
 
-## Source-attributed default routine
+## Source-attributed routine
 
-Bryan Johnson's public Blueprint sauna routine is:
+The public Blueprint sauna routine describes:
 
 - dry sauna
 - 200 F / 93 C
@@ -238,10 +238,12 @@ Bryan Johnson's public Blueprint sauna routine is:
 
 ## What changed in April 2026
 
-The April 2026 source set materially changes how this page should be interpreted. Bryan Johnson reports using ingestible core-temperature monitoring and finding that the older 20-minute 200 F routine likely did not cross his 102.4 F / 39 C core-temperature threshold. His reported threshold-crossing sessions were about 31 minutes at 200 F without face or neck cooling and about 40 minutes with face or neck cooling, both with groin cooling.
+The April 2026 source set adds an important caveat. Bryan Johnson reported using ingestible core-temperature monitoring and finding that the older 20-minute 200 F routine likely did not cross his 102.4 F / 39 C core-temperature threshold. His reported threshold-crossing sessions were about 31 minutes at 200 F without face or neck cooling and about 40 minutes with face or neck cooling, both with groin cooling.
 
-Murph should show this as a higher-burden experimental variant. It should not replace the beginner adaptation or Murph's canonical dry-sauna protocol.
+That makes this a higher-burden experimental variant, not a beginner-friendly default.
 
-## How Murph should render it
+## How to read this page
 
-Render this page as an external named protocol in the same dry-sauna modality as Murph's Finnish dry-sauna protocol, but with clearly source-attributed self-experiment claims, a higher burden profile, and a more conservative recommendation posture.
+Use this as a source-attributed example of a more aggressive dry-sauna routine. The reported personal results are interesting context, but they should not be treated as expected outcomes for other users.
+
+For most people, a simpler Finnish dry-sauna experiment is the cleaner first test. This one is best reserved for people who specifically want to compare against Bryan Johnson's public routine and are comfortable with the extra burden and safety caveats.

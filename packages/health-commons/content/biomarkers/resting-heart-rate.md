@@ -4,7 +4,7 @@ entityType: biomarker
 key: biomarker:resting-heart-rate
 slug: biomarkers/resting-heart-rate
 title: Resting Heart Rate
-summary: A resting pulse marker that gives Murph a widely available, legible primary endpoint for the first dry-sauna experiment.
+summary: A widely available resting pulse trend that can make short experiments easier to interpret, especially when compared against your own baseline.
 status: field-testing
 quality: usable
 aliases:
@@ -39,9 +39,9 @@ interpretationFrame:
   caveat: Device windows, smoothing, illness, alcohol, travel, and hard training can all move resting heart rate.
 ---
 
-Resting heart rate is Murph's primary v1 dry-sauna endpoint because it is available on most consumer wearables and easier to explain than composite recovery scores.
+Resting heart rate is a useful dry-sauna signal because it is available on most consumer wearables and easier to explain than composite recovery scores.
 
-A useful Murph read usually looks like this:
+A useful read usually looks like this:
 
 - compare a stable **7-day baseline average** against the **14-day intervention average**,
 - keep exercise load, bedtime, alcohol, and illness notes visible,

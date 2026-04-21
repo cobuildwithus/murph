@@ -27,7 +27,7 @@ source:
   doi: 10.17617/1.4a6s-ec74
   url: https://lightforpublichealth.org/consensus-statements_en.html
 evidenceBucket: Public-health light guidance
-whyItMatters: Prevents Murph from implying that blue light is universally harmful; timing and context are the point.
+whyItMatters: Prevents the copy from implying that blue light is universally harmful; timing and context are the point.
 potentialMurphEndpoints:
   - circadian phase
   - melatonin suppression
@@ -40,10 +40,10 @@ redLightGlassesFocus: Yes
 murphV1Priority: High
 ---
 
-This source sits in the Murph shortlist bucket **Public-health light guidance**.
+This source is included for **Public-health light guidance**.
 
-**Why it matters:** Prevents Murph from implying that blue light is universally harmful; timing and context are the point.
+**Why it matters:** Prevents the copy from implying that blue light is universally harmful; timing and context are the point.
 
-**Potential Murph endpoints:** circadian phase, melatonin suppression, sleep latency, alertness
+**Potential experiment signals:** circadian phase, melatonin suppression, sleep latency, alertness
 
 **Protocol takeaway:** Keep the intervention in the evening window and preserve daytime light.

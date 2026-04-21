@@ -29,7 +29,7 @@ artifacts:
     sourceUrl: https://blueprint.bryanjohnson.com/blogs/news/morning-routine
     rightsStatus: unknown
     redistributable: false
-    accessNotes: Optional HTML snapshot for internal provenance only; review rights before storing or redistributing.
+    accessNotes: Optional HTML snapshot for provenance; review rights before storing or redistributing.
 ---
 
-Source page retained for provenance and optional internal snapshotting after rights review.
+Source retained for provenance and future review.

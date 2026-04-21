@@ -33,4 +33,4 @@ artifacts:
     accessNotes: X content may require special access and rights review before snapshotting; corroboration is limited to secondary snippets unless a fuller readable copy is captured.
 ---
 
-Source page retained for provenance and optional internal snapshotting after rights review.
+Source retained for provenance and future review.

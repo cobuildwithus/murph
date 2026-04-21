@@ -190,7 +190,7 @@
       "year": 2018,
       "journal": "Journal of Clinical Sleep Medicine",
       "studyDesign": "Clinical practice guideline",
-      "evidenceBucket": "Wearable endpoint method",
+      "evidenceBucket": "Wearable sleep-estimate context",
       "priority": "backbone",
       "claimUse": "supports-protocol",
       "pmid": "29991437",
@@ -212,7 +212,7 @@
       "doi": "10.1016/j.jad.2025.120910",
       "url": "https://pubmed.ncbi.nlm.nih.gov/41421618/",
       "citation": "Fiedorowicz JG, et al. The Ottawa sunglasses at night study: A randomized controlled trial of blue-blocking glasses for mania. J Affect Disord. 2026;398:120910. doi:10.1016/j.jad.2025.120910.",
-      "protocolTakeaway": "Mood-disorder use needs clinician oversight and should not be folded into Murph’s general wellness protocol."
+      "protocolTakeaway": "Mood-disorder use needs clinician oversight and should stay separate from a general wellness experiment."
     },
     {
       "sourceKey": "source_artifact:pmid-30427265",

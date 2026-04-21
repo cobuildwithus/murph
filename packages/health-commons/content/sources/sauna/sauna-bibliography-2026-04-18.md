@@ -3,8 +3,8 @@ schemaVersion: murph.commons.page.v1
 entityType: source_artifact
 key: source_artifact:sauna-bibliography-2026-04-18
 slug: sources/sauna/sauna-bibliography-2026-04-18
-title: Murph sauna research master bibliography (audited final)
-summary: Murph research corpus and evidence map for the first canonical dry-sauna protocol, summarizing 180 records and a 40-paper shortlist.
+title: Sauna research bibliography
+summary: Research map for the Finnish dry-sauna experiment, summarizing the sauna literature review, long-term context, short-term physiology, and dose-design caveats.
 status: field-testing
 quality: usable
 categories:
@@ -36,13 +36,13 @@ relations:
     target: source_artifact:pmid-38577299
 source:
   kind: other
-  title: Murph sauna research master bibliography (audited final)
-  authors: Murph Research
+  title: Sauna research bibliography
+  authors: Health Commons Research
   year: 2026
-  journal: Murph internal research curation
-  citation: Murph Research. Murph sauna research master bibliography (audited final). Prepared 2026-04-18.
+  journal: Health Commons research curation
+  citation: Health Commons Research. Sauna research bibliography. Prepared 2026-04-18.
 evidenceBucket: Research curation
-whyItMatters: This is the structured curation artifact Murph used to build the first canonical dry-sauna protocol and shortlist.
+whyItMatters: This is the structured source map behind the first dry-sauna experiment and evidence review.
 potentialMurphEndpoints:
   - Protocol design
   - source discovery
@@ -54,8 +54,8 @@ modality: Mixed sauna and passive heat literature with Finnish dry-sauna emphasi
 finnishDrySaunaFocus: Yes or Likely subset included
 murphV1Priority: High
 aliases:
-  - Murph sauna bibliography 2026
-  - Murph sauna research corpus
+  - sauna bibliography 2026
+  - sauna research corpus
 corpusStats:
   masterRecords: 180
   finnishDrySaunaSubsetRecords: 81
@@ -158,34 +158,34 @@ shortlistSourceKeys:
 
 ## What this is
 
-This page represents Murph's structured sauna research corpus used to design the first canonical dry-sauna protocol. It is a curation artifact, not a primary study.
+This page represents the structured sauna research corpus behind the Finnish dry-sauna experiment. It is a curation artifact, not a primary study.
 
 ## Corpus at a glance
 
 - 180 master bibliography records
 - 81 records in the Finnish dry-sauna yes/likely subset
 - 32 review or meta-analysis records
-- 40 papers on the curated Murph shortlist
-- 24 high-priority records for Murph v1
+- 40 papers on the curated source list
+- 24 high-priority records for the first dry-sauna experiment
 - publication window 1978–2026
 - audit cutoff 2026-04-18
 
-## Shortlist buckets
+## Source groups
 
 - Evidence backbone: 5
 - Long-term Finnish cohort evidence: 14
 - Acute and mechanistic: 8
 - Intervention design / reality checks: 13
 
-## How Murph should use this page
+## How to use this evidence
 
-Use this page to understand how deep the sauna research base is, which buckets are strongest for protocol design, and why the canonical Murph dry-sauna page separates evidence context from short-term measurable endpoints.
+Use this page to understand how deep the sauna research base is, which evidence buckets are strongest for protocol design, and why the Finnish dry-sauna experiment separates long-term context from short-term measurable signals.
 
 - The **evidence backbone** papers help define the overall research base and safety framing.
-- The **long-term Finnish cohort** papers are rationale and screening context, not 21-day endpoints.
-- The **acute and mechanistic** papers help pick measurable session and near-term endpoints.
-- The **intervention design / reality checks** papers stop Murph from overclaiming and help define how to standardize timing, hydration, exercise context, and expected latency.
+- The **long-term Finnish cohort** papers are rationale and screening context, not 21-day signals.
+- The **acute and mechanistic** papers help pick measurable session and near-term signals.
+- The **intervention design / reality checks** papers stop the protocol from overclaiming and help define how to standardize timing, hydration, exercise context, and expected latency.
 
 ## Important caution
 
-This page is not itself evidence that a sauna protocol works. It is the map Murph used to build a bounded, user-readable protocol from the underlying literature.
+This page is not itself evidence that a sauna protocol works. It is the map used to build a bounded, user-readable protocol from the underlying literature.

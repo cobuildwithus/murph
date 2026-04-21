@@ -3,7 +3,7 @@
     {
       "artifacts": [
         {
-          "accessNotes": "Optional HTML snapshot for internal provenance only; review rights before storing or redistributing.",
+          "accessNotes": "Optional HTML snapshot for provenance; review rights before storing or redistributing.",
           "artifactId": "art_bryan_johnson_morning_routine_2026_04_08_html_snapshot",
           "kind": "html",
           "localPath": "source-artifacts/sauna/bryan-johnson-morning-routine-2026-04-08.html",
@@ -15,7 +15,7 @@
           "storage": "cloudflare-r2"
         },
         {
-          "accessNotes": "Optional HTML snapshot for internal provenance only; review rights before storing or redistributing.",
+          "accessNotes": "Optional HTML snapshot for provenance; review rights before storing or redistributing.",
           "artifactId": "art_bryan_johnson_sauna_protocol_2026_01_28_html_snapshot",
           "kind": "html",
           "localPath": "source-artifacts/sauna/bryan-johnson-sauna-protocol-2026-01-28.html",
@@ -27,7 +27,7 @@
           "storage": "cloudflare-r2"
         },
         {
-          "accessNotes": "Optional HTML snapshot for internal provenance only; review rights before storing or redistributing.",
+          "accessNotes": "Optional HTML snapshot for provenance; review rights before storing or redistributing.",
           "artifactId": "art_bryan_johnson_saunamaxx_2026_04_14_html_snapshot",
           "kind": "html",
           "localPath": "source-artifacts/sauna/bryan-johnson-saunamaxx-2026-04-14.html",
@@ -39,7 +39,7 @@
           "storage": "cloudflare-r2"
         },
         {
-          "accessNotes": "Optional mirror snapshot for internal provenance only; review rights before storing or redistributing.",
+          "accessNotes": "Optional mirror snapshot for provenance; review rights before storing or redistributing.",
           "artifactId": "art_linkedin_bryan_johnson_core_temp_2026_04_16_html_snapshot",
           "kind": "html",
           "localPath": "source-artifacts/sauna/linkedin-bryan-johnson-core-temp-2026-04-16.html",
@@ -51,7 +51,7 @@
           "storage": "cloudflare-r2"
         },
         {
-          "accessNotes": "Optional mirror snapshot for internal provenance only; review rights before storing or redistributing.",
+          "accessNotes": "Optional mirror snapshot for provenance; review rights before storing or redistributing.",
           "artifactId": "art_linkedin_bryan_johnson_core_temp_prototype_2026_04_03_html_snapshot",
           "kind": "html",
           "localPath": "source-artifacts/sauna/linkedin-bryan-johnson-core-temp-prototype-2026-04-03.html",
@@ -63,7 +63,7 @@
           "storage": "cloudflare-r2"
         },
         {
-          "accessNotes": "Optional mirror snapshot for internal provenance only; review rights before storing or redistributing.",
+          "accessNotes": "Optional mirror snapshot for provenance; review rights before storing or redistributing.",
           "artifactId": "art_linkedin_bryan_johnson_sauna_guide_2025_12_06_html_snapshot",
           "kind": "html",
           "localPath": "source-artifacts/sauna/linkedin-bryan-johnson-sauna-guide-2025-12-06.html",

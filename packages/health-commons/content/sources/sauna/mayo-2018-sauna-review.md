@@ -43,11 +43,11 @@ aliases:
   - Laukkanen 2018 Mayo sauna review
 ---
 
-This source sits in the Murph shortlist bucket **Evidence backbone**.
+This source is included for **Evidence backbone**.
 
 **Why it matters:** Strong narrative synthesis focused on cardiovascular mechanisms and outcomes
 
-**Potential Murph endpoints:** BP, arterial stiffness, inflammation, mortality context
+**Potential experiment signals:** BP, arterial stiffness, inflammation, mortality context
 
 **Protocol takeaway:** Useful overview for rationale and mechanism section.
 

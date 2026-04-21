@@ -33,7 +33,7 @@ artifacts:
     sourceUrl: https://www.linkedin.com/posts/bryanrjohnson_most-people-might-miss-the-biggest-benefit-activity-7451007192889024512-UFlX
     rightsStatus: unknown
     redistributable: false
-    accessNotes: Optional mirror snapshot for internal provenance only; review rights before storing or redistributing.
+    accessNotes: Optional mirror snapshot for provenance; review rights before storing or redistributing.
 ---
 
-Source page retained for provenance and optional internal snapshotting after rights review.
+Source retained for provenance and future review.

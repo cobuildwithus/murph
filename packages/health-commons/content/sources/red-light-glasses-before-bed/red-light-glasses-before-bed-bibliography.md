@@ -4,7 +4,7 @@ entityType: source_artifact
 key: source_artifact:red-light-glasses-before-bed-bibliography
 slug: sources/red-light-glasses-before-bed/red-light-glasses-before-bed-bibliography
 title: Red-light glasses before bed research bibliography
-summary: Murph research corpus and evidence map for the red-light glasses before bed bounded self-experiment, summarizing the refined pass-2 corpus and protocol-ready shortlist.
+summary: Research map for the red-light glasses before bed experiment, summarizing the source list behind the protocol, safety notes, mixed sleep evidence, and adjacent variants.
 status: draft
 quality: usable
 categories:
@@ -90,12 +90,12 @@ relations:
 source:
   kind: other
   title: Red-light glasses before bed research bibliography
-  authors: Murph Research
+  authors: Health Commons Research
   year: 2026
-  journal: Murph internal research curation
-  citation: Murph Research. Red-light glasses before bed research bibliography. Prepared 2026-04-20.
+  journal: Health Commons research curation
+  citation: Health Commons Research. Red-light glasses before bed research bibliography. Prepared 2026-04-20.
 evidenceBucket: Research curation
-whyItMatters: Structured curation artifact used to turn the discovery and gap-fill passes into a bounded Murph protocol.
+whyItMatters: Structured curation artifact used to turn discovery and gap-fill passes into a bounded protocol.
 potentialMurphEndpoints:
   - sleep-onset latency
   - sleep efficiency
@@ -161,7 +161,7 @@ shortlistSourceKeys:
 
 ## What this is
 
-This page represents Murph’s structured research corpus for the **red light glasses before bed** protocol. It is a curation artifact, not a primary study.
+This page represents the structured research corpus for the **red light glasses before bed** protocol. It is a curation artifact, not a primary study.
 
 The consumer phrase “red light glasses before bed” is treated here as evening amber/orange/red **short-wavelength or melanopic-light filtering eyewear**, not red-light therapy or photobiomodulation.
 
@@ -179,14 +179,14 @@ The strongest rationale is mechanistic and guideline-level: evening melanopic li
 
 The direct glasses evidence is mixed. Small trials sometimes report subjective sleep improvements, but the adult actigraphy synthesis did not find statistically significant pooled improvements for sleep onset latency, total sleep time, sleep efficiency, or wake after sleep onset.
 
-## How Murph should use this page
+## How to use this evidence
 
 Use this bibliography to keep the protocol bounded:
 
 - The **guideline and mechanistic** sources justify the evening-light hypothesis.
 - The **direct trial** sources set the 90–120 minute pre-bed timing and stop the page from becoming all-evening or overnight virtual darkness.
 - The **Cochrane and actigraphy** sources prevent sleep, eye-strain, and eye-protection overclaims.
-- The **product-quality and home-lighting** sources keep Murph from treating lens color alone as the intervention.
+- The **product-quality and home-lighting** sources keep the protocol from treating lens color alone as the intervention.
 - The **pregnancy, pediatric, delayed-sleep-phase, shift-work, and mania** sources are adjacent variants that should not be merged into a general wellness recipe.
 
 ## Important caution

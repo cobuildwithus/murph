@@ -19,17 +19,17 @@
     {
       "from": "protocol_variant:finnish-sauna",
       "to": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
-      "reason": "Legacy shorthand now resolves to the canonical Murph dry-sauna protocol."
+      "reason": "Legacy shorthand now resolves to the Finnish dry-sauna experiment."
     },
     {
       "from": "protocol_variant:dry-sauna",
       "to": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
-      "reason": "Protocol shorthand now resolves to the canonical Murph dry-sauna protocol."
+      "reason": "Protocol shorthand now resolves to the Finnish dry-sauna experiment."
     },
     {
       "from": "protocol_variant:finnish-dry-sauna",
       "to": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
-      "reason": "Legacy modality shorthand now resolves to the canonical Murph dry-sauna protocol."
+      "reason": "Legacy modality shorthand now resolves to the Finnish dry-sauna experiment."
     }
   ]
 }

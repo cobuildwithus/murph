@@ -33,7 +33,7 @@ artifacts:
     sourceUrl: https://www.linkedin.com/posts/bryanrjohnson_felt-like-i-was-going-to-die-in-the-sauna-activity-7445948233736138752-YU_1
     rightsStatus: unknown
     redistributable: false
-    accessNotes: Optional mirror snapshot for internal provenance only; review rights before storing or redistributing.
+    accessNotes: Optional mirror snapshot for provenance; review rights before storing or redistributing.
 ---
 
-Source page retained for provenance and optional internal snapshotting after rights review.
+Source retained for provenance and future review.

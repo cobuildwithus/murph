@@ -24,6 +24,6 @@ interpretationFrame:
   caveat: Consumer wearables infer sleep stages and can disagree with one another.
 ---
 
-Deep sleep minutes can be shown as a secondary context marker, but Murph should not over-weight it when deciding whether a dry-sauna protocol worked for a person.
+Deep sleep minutes can be useful context, but they should not carry the whole verdict on whether a dry-sauna experiment worked.
 
-If a user sees a strong, repeated deep-sleep signal alongside other markers, it can be worth noting. But Murph should still anchor interpretation in broader sleep continuity and cardiovascular signals first.
+If a strong deep-sleep signal repeats alongside other useful changes, it is worth noting. Broader sleep continuity and cardiovascular signals should still carry more weight.

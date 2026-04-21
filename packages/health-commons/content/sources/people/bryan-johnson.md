@@ -4,7 +4,7 @@ entityType: source_person
 key: source_person:bryan-johnson
 slug: sources/people/bryan-johnson
 title: Bryan Johnson
-summary: Public source person for Blueprint and Dont Die protocol pages and social posts.
+summary: Founder of Blueprint whose public sauna routine is included as an external, higher-burden comparison.
 status: draft
 quality: usable
 aliases:
@@ -20,4 +20,4 @@ source:
   url: https://blueprint.bryanjohnson.com/blogs/news/bryan-johnsons-protocol
 ---
 
-Bryan Johnson is modeled as a source person so external named protocols can cite him without becoming Murph canonical protocols.
+Bryan Johnson is included as the public source for the Blueprint sauna routine. His page helps separate his named routine from simpler sauna experiments.

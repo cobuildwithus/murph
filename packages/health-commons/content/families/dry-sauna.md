@@ -65,12 +65,12 @@ researchCoverage:
     evidence-backbone: 5
 ---
 
-Dry sauna is the user-facing family for high-temperature, low-humidity sauna exposure. Murph's first canonical protocol is specifically a **Finnish dry-sauna** version of this family.
+Dry sauna is the family for high-temperature, low-humidity sauna exposure. The first practical version here is a **Finnish dry-sauna** experiment.
 
-This family page stays separate from infrared sauna for three reasons:
+Dry sauna stays separate from infrared sauna for three reasons:
 
-1. **Dose is different.** Temperature, humidity, and session duration differ enough that the recipe should not silently transfer.
-2. **Evidence is different.** A large fraction of Murph's best supporting literature is Finnish dry-sauna or likely-dry-sauna work, not generic passive-heat evidence.
+1. **Dose is different.** Temperature, humidity, and session duration differ enough that instructions should not silently transfer.
+2. **Evidence is different.** Much of the strongest supporting literature is Finnish dry-sauna or likely-dry-sauna work, not generic passive-heat evidence.
 3. **Interpretation is different.** Standalone dry sauna, post-exercise dry sauna, and other heat modalities can produce different physiological stories.
 
-Murph's current research base for this family is no longer just a few review papers. The dry-sauna corpus includes backbone reviews, 14 long-term Finnish cohort papers on outcomes and risk modifiers, 8 acute/mechanistic papers, and 13 intervention-design or reality-check papers from the curated shortlist.
+The dry-sauna research base is no longer just a few review papers. The corpus includes backbone reviews, long-term Finnish cohort papers, acute and mechanistic papers, and intervention-design or reality-check papers.

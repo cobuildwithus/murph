@@ -4,7 +4,7 @@ entityType: biomarker
 key: biomarker:hrv-rmssd
 slug: biomarkers/hrv-rmssd
 title: HRV / RMSSD
-summary: A heart-rate-variability marker used as a recovery and autonomic signal, but noisy enough that Murph keeps it exploratory for the first dry-sauna protocol.
+summary: A recovery and autonomic signal that can be interesting when it repeats, but is noisy enough to treat as context rather than proof.
 status: field-testing
 quality: usable
 aliases:
@@ -39,7 +39,7 @@ interpretationFrame:
   caveat: HRV is sensitive to sleep, illness, alcohol, stress, measurement timing, training load, and device algorithms.
 ---
 
-HRV can be interesting for dry sauna, but Murph treats it as an **exploratory secondary marker** in v1.
+HRV can be interesting for dry sauna, but it works better as an **exploratory secondary marker** than as the main verdict.
 
 Why the caution:
 

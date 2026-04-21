@@ -4,7 +4,7 @@ entityType: protocol_variant
 key: protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed
 slug: protocols/red-light-glasses-before-bed/red-light-glasses-before-bed
 title: Red-Light Glasses Before Bed
-summary: "A 21-day bounded evening-light self-experiment: 7 baseline days, then 14 nights wearing high-filtering amber/red/brown glasses for 90–120 minutes before intended bedtime, with sleep-onset latency proxy as primary and wearable sleep markers as exploratory."
+summary: "A low-burden evening experiment: wear high-filtering amber/red/brown glasses before bed for two weeks and see whether the last hour of the night feels calmer and sleep comes more easily."
 status: draft
 quality: usable
 aliases:
@@ -109,7 +109,7 @@ relations:
     target: source_artifact:pmid-41421618
 lineage:
   relationship: root
-  rationale: Murph canonical evening eyewear protocol for a low-burden, measurable sleep-onset self-experiment.
+  rationale: Default evening-eyewear experiment designed to be easy to try and easy to stop if it does not help.
 attribution:
   ownerType: murph
 protocol:
@@ -181,7 +181,7 @@ claims:
   -
     claimId: two-hour-evening-window-is-a-practical-first-test
     type: design_guardrail
-    text: A 90–120 minute pre-bed window is the smallest practical Murph recipe because it matches the most directly relevant small trials better than all-evening or overnight protocols.
+    text: A 90–120 minute pre-bed window is a practical first test because it matches the most directly relevant small trials better than all-evening or overnight protocols.
     strength: moderate
     sourceKeys:
       - source_artifact:pmid-29101797
@@ -214,19 +214,19 @@ claims:
       - source_artifact:pmid-40728371
       - source_artifact:pmid-35298459
     caveats:
-      - Murph should carry a product-quality note rather than a brand recommendation.
+      - Focus on lens quality and fit rather than recommending a specific brand.
       - Weak clear blue-light lenses should not be treated as equivalent to high-filtering evening lenses.
   -
     claimId: adjacent-clinical-variants-should-not-be-merged
     type: design_guardrail
-    text: Delayed sleep phase disorder, pregnancy, pediatric use, shift work, bipolar or mania virtual-darkness protocols, and psychiatric ward lighting are adjacent variants, not evidence that a general adult bedtime-glasses self-experiment will work.
+    text: Delayed sleep phase disorder, pregnancy, pediatric use, shift work, bipolar or mania virtual-darkness protocols, and psychiatric ward lighting are adjacent variants, not evidence that a general adult bedtime-glasses experiment will work.
     strength: high
     sourceKeys:
       - source_artifact:pmid-35089982
       - source_artifact:pmid-35024497
       - source_artifact:pmid-41421618
     caveats:
-      - Those populations may need different timing, supervision, endpoints, and safety framing.
+      - Those populations may need different timing, supervision, signals, and safety framing.
       - Mood-disorder and circadian-disorder protocols should be clinician-guided.
   -
     claimId: eye-strain-and-eye-protection-claims-are-not-this-protocol
@@ -240,7 +240,7 @@ claims:
   -
     claimId: daytime-light-is-not-the-enemy
     type: design_guardrail
-    text: Murph should not encourage all-day blue-light avoidance; the intervention is specifically about lowering evening melanopic exposure while preserving healthy daytime light exposure.
+    text: This experiment should not encourage all-day blue-light avoidance; the intervention is specifically about lowering evening melanopic exposure while preserving healthy daytime light exposure.
     strength: high
     sourceKeys:
       - source_artifact:pmid-35298459
@@ -350,11 +350,11 @@ confoundersToTrack:
   - partner_child_pet_sleep_disruption
 ---
 
-## Canonical question
+## Question this experiment answers
 
-After a stable baseline, does wearing high-filtering amber/red/brown glasses for the last **90–120 minutes before bed** make sleep onset feel easier or show up as an earlier sleep-onset signal?
+After a stable baseline, does wearing high-filtering amber/red/brown glasses for the last **90–120 minutes before bed** make the evening feel less wired or sleep come more easily?
 
-## Canonical Murph recipe
+## Simple version
 
 Run a 21-day experiment:
 
@@ -365,19 +365,19 @@ Run a 21-day experiment:
 - no daytime use
 - no new melatonin, sleep supplements, screen curfew, bedtime target, or room-light redesign during the same test
 
-Use the simplest version first. The intervention is not “avoid blue light forever.” It is a short test of whether lowering evening melanopic light helps this user wind down.
+Use the simplest version first. This is not “avoid blue light forever.” It is a short test of whether lowering evening melanopic light helps you wind down.
 
-## Why this exact version comes first
+## Why this version
 
-Murph should treat this as a **low-burden self-experiment** rather than a treatment protocol. The evidence base points in two directions at once: evening melanopic-light reduction is biologically plausible, but direct glasses trials are small, mixed, and often stronger on subjective sleep than objective actigraphy.
+The evidence points in two directions at once. Lowering evening melanopic light is biologically plausible, but direct glasses trials are small, mixed, and often stronger on subjective sleep than objective actigraphy.
 
-The practical version is therefore deliberately narrow. It asks whether one user’s evenings feel less wired and whether their sleep-onset proxy improves enough to repeat. It does not promise better HRV, deeper sleep, total sleep time, eye-strain relief, or retinal protection.
+That makes this a good low-burden experiment, not a promise. The practical question is whether your evenings feel calmer and whether sleep onset looks easier often enough to repeat.
 
 ## What counts as a signal
 
 Primary signal:
 
-- shorter subjective or wearable-estimated sleep-onset latency compared with the user’s own 7-day baseline
+- shorter subjective or wearable-estimated sleep-onset latency compared with your own 7-day baseline
 
 Useful subjective check:
 
@@ -391,17 +391,17 @@ Exploratory signals:
 - HRV RMSSD
 - resting heart rate
 
-Murph should interpret a result as interesting only when it is repeated across multiple adherent nights and not obviously explained by bedtime shifts, alcohol, caffeine, travel, illness, stress, hard training, or a simultaneous routine change.
+A result is interesting only when it repeats across multiple adherent nights and is not obviously explained by bedtime shifts, alcohol, caffeine, travel, illness, stress, hard training, or another routine change.
 
-## Product and implementation notes
+## Product and safety notes
 
-Product quality matters. A clear office lens with weak filtering is not the same intervention as high-filtering amber/red/brown evening eyewear. When spectral transmittance or melanopic daylight filtering density is available, prefer that over marketing labels.
+Lens quality matters. A clear office lens with weak filtering is not the same intervention as high-filtering amber/red/brown evening eyewear. When spectral transmittance or melanopic daylight filtering density is available, prefer that over marketing labels.
 
-This protocol should remain separate from delayed sleep phase disorder, shift-work, pregnancy, pediatric, depression, bipolar/mania, inpatient psychiatric ward lighting, and screen-software variants. Those adjacent protocols may use similar mechanisms but need different supervision, endpoints, and safety language.
+Keep this separate from delayed sleep phase disorder, shift work, pregnancy, pediatric use, depression, bipolar/mania, inpatient psychiatric ward lighting, and screen-software variants. Those may use similar mechanisms but need different supervision, signals, and safety language.
 
 ## Off-ramp
 
-At the end of 21 days, Murph should offer one of three conclusions:
+At the end of 21 days, choose the plainest conclusion:
 
 1. **Worth repeating** if sleep onset or pre-bed wiredness clearly improved with low burden.
 2. **Probably noise** if only one or two nights moved or the signal was confounded.

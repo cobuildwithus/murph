@@ -33,7 +33,7 @@ artifacts:
     sourceUrl: https://www.linkedin.com/posts/bryanrjohnson_sauna-is-one-of-the-most-effective-health-activity-7404655111576223744-tIrx
     rightsStatus: unknown
     redistributable: false
-    accessNotes: Optional mirror snapshot for internal provenance only; review rights before storing or redistributing.
+    accessNotes: Optional mirror snapshot for provenance; review rights before storing or redistributing.
 ---
 
-Source page retained for provenance and optional internal snapshotting after rights review.
+Source retained for provenance and future review.

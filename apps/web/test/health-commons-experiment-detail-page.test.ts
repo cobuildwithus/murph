@@ -55,7 +55,7 @@ describe("ExperimentDetailPage", () => {
         routeId: "finnish-sauna",
       }),
       id: "finnish-sauna",
-      title: "Murph Finnish Dry Sauna",
+      title: "Finnish Dry Sauna",
     }));
     expect(clientExperiment.researchStats).toEqual(expect.arrayContaining([
       expect.objectContaining({ label: "CITED SOURCES" }),
@@ -71,7 +71,7 @@ describe("ExperimentDetailPage", () => {
     expect(markup).toContain(
       'data-experiment-key="protocol_variant:dry-sauna/murph-finnish-standard-3x-week"',
     );
-    expect(markup).toContain("Murph Finnish Dry Sauna");
+    expect(markup).toContain("Finnish Dry Sauna");
   });
 
   it("resolves a unique trailing slug segment for non-Finnish protocol variants", async () => {

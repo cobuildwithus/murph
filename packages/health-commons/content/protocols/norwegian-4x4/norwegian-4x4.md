@@ -3,8 +3,8 @@ schemaVersion: murph.commons.page.v1
 entityType: protocol_variant
 key: protocol_variant:norwegian-4x4/norwegian-4x4
 slug: protocols/norwegian-4x4/norwegian-4x4
-title: Norwegian 4x4 Protocol
-summary: "A 49-day Murph self-experiment using wearable-guided 4 x 4 minute aerobic intervals to test cardio-fitness signal, heart-rate recovery, resting heart rate, and recovery context without claiming disease treatment or long-term outcomes."
+title: Norwegian 4x4 Intervals
+summary: "A structured six-week cardio experiment: two repeatable 4x4 interval sessions per week, guided by heart rate and symptoms, to see whether this dose improves fitness without overwhelming recovery."
 status: field-testing
 quality: usable
 aliases:
@@ -99,7 +99,7 @@ relations:
     target: source_artifact:pmid-37608507
 lineage:
   relationship: root
-  rationale: Murph canonical Norwegian 4x4 protocol for a bounded self-experiment, kept separate from sprint intervals, low-volume 1 x 4 HIIT, athlete variants, and disease-treatment cardiac rehabilitation.
+  rationale: Default Norwegian 4x4 experiment for general fitness, kept separate from sprint intervals, low-volume HIIT variants, athlete protocols, and clinical rehabilitation programs.
 attribution:
   ownerType: murph
 protocol:
@@ -148,7 +148,7 @@ claims:
   -
     claimId: canonical-4x4-has-direct-human-intervention-support
     type: intervention_result
-    text: Canonical 4 x 4 aerobic interval training has direct human intervention evidence for improving lab-measured VO2max in small healthy-adult trials, but the evidence does not prove that every consumer wearable cardio-fitness estimate will improve.
+    text: Four-by-four aerobic interval training has direct human intervention evidence for improving lab-measured VO2max in small healthy-adult trials, but that does not mean every wearable cardio-fitness estimate will move.
     strength: moderate
     sourceKeys:
       - source_artifact:pmid-17414804
@@ -160,7 +160,7 @@ claims:
   -
     claimId: public-dose-shape-is-warmup-4x4-active-recovery-cooldown
     type: design_guardrail
-    text: The public Norwegian 4x4 recipe is best represented as a warm-up, four 4-minute hard intervals near 85-95% HRmax, 3-minute active recoveries, and a cooldown.
+    text: The public Norwegian 4x4 session is best represented as a warm-up, four 4-minute hard intervals near 85-95% HRmax, 3-minute active recoveries, and a cooldown.
     strength: moderate
     sourceKeys:
       - source_artifact:ntnu-cerg-norwegian-4x4
@@ -178,11 +178,11 @@ claims:
       - source_artifact:doi-10.3390-ijerph17145103
     caveats:
       - Wrist optical heart-rate sensors can be wrong during intense arm movement.
-      - Murph should combine heart rate, RPE, and symptom checks rather than reducing the session to one number.
+      - Heart rate, perceived exertion, and symptoms should be interpreted together rather than reducing the session to one number.
   -
     claimId: six-week-window-is-more-honest-than-two-weeks
     type: design_guardrail
-    text: A 6-week intervention window is a better first Murph test than a 2-week window because the main evidence target is cardiorespiratory fitness, which often needs several weeks to show a measurable signal.
+    text: A 6-week intervention window is more honest than a 2-week test because the main evidence target is cardiorespiratory fitness, which often needs several weeks to show a measurable signal.
     strength: moderate
     sourceKeys:
       - source_artifact:pmid-17414804
@@ -193,7 +193,7 @@ claims:
   -
     claimId: superiority-over-moderate-continuous-training-is-not-settled
     type: mixed_evidence
-    text: Murph should not claim that Norwegian 4x4 is always superior to moderate continuous training, because larger clinical trials in coronary artery disease and heart failure found similar or mixed results compared with moderate continuous training or guideline advice.
+    text: Norwegian 4x4 should not be presented as always superior to moderate continuous training; larger clinical trials in coronary artery disease and heart failure found similar or mixed results compared with moderate continuous training or guideline advice.
     strength: high
     sourceKeys:
       - source_artifact:pmid-25464446
@@ -230,11 +230,11 @@ claims:
       - source_artifact:pmid-32100573
     caveats:
       - Safety studies often involve screened, supervised participants.
-      - Murph should make stopping early normal, not a failure.
+      - Stopping early should feel normal, not like failure.
   -
     claimId: low-volume-1x4-and-sprint-intervals-should-be-split
     type: design_guardrail
-    text: Low-volume 1 x 4 HIIT and sprint-interval training should be represented as adjacent variants, not merged into the canonical Norwegian 4x4 page.
+    text: Low-volume 1 x 4 HIIT and sprint-interval training are adjacent variants with different burden and interpretation, not the same as this 4x4 experiment.
     strength: high
     sourceKeys:
       - source_artifact:pmid-28846513
@@ -246,7 +246,7 @@ claims:
   -
     claimId: hrv-and-recovery-context-are-exploratory-not-promised
     type: mixed_evidence
-    text: HRV and recovery-context measures should stay exploratory endpoints because high-intensity intervals can improve fitness while also adding recovery stress, especially during the first weeks.
+    text: HRV and recovery-context measures should stay exploratory signals because high-intensity intervals can improve fitness while also adding recovery stress, especially during the first weeks.
     strength: moderate
     sourceKeys:
       - source_artifact:pmid-30293954
@@ -360,11 +360,11 @@ expectedSignal:
       confidence: low
 ---
 
-## Canonical question
+## Question this experiment answers
 
-After a stable baseline, does a short block of **Norwegian-style 4x4 aerobic intervals** move your cardio-fitness signal or recovery context enough to be worth repeating?
+After a stable baseline, does a short block of **Norwegian-style 4x4 aerobic intervals** make your fitness signal or recovery pattern improve enough to be worth repeating?
 
-## Canonical Murph recipe
+## Simple version
 
 Run a 49-day experiment:
 
@@ -373,58 +373,40 @@ Run a 49-day experiment:
 - **2 interval sessions per week**
 - **12 target sessions**, with **8 sessions** as the minimum for a useful first read
 - each session: warm-up, **4 x 4 minutes hard**, 3-minute active recoveries, cooldown
-- target: reach about **85-95% of estimated HRmax** by the later part of each hard interval
+- target: reach about **85–95% of estimated HRmax** by the later part of each hard interval
 
 That heart-rate target is not a sprint-start instruction. The goal is repeatable hard aerobic work that rises into the zone by the later part of each interval, not an all-out first minute.
 
-This is not a permanent lifestyle prescription. It is a bounded test of whether this interval dose fits your body and life.
+This is not a permanent training identity. It is a bounded test of whether this interval dose fits your body and life.
 
-## What to measure first
+## What to watch
 
-Primary: **wearable cardio-fitness / estimated VO2max**.
+The main read is whether cardio fitness trends in a useful direction without making recovery worse. Session fidelity matters too: did the intervals reach the intended zone, did recovery stay reasonable, and did the protocol remain repeatable?
 
-Secondary: resting heart rate, heart-rate recovery, and session fidelity. Exploratory: HRV/RMSSD, sleep efficiency, morning blood pressure if already measured consistently, subjective energy, soreness, symptoms, and whether the protocol is too annoying for real life.
+HRV, sleep, soreness, symptoms, and morning blood pressure are context. They help explain the result, but they are not promised wins.
 
 ## What to log every session
 
-At minimum log modality, completed intervals, interval peak HRs, rough time in the target HR zone, RPE for each interval, 1- and 2-minute HR recovery, symptoms, sleep disruption, alcohol, illness, travel, unusually hard training, and major stress.
+At minimum, log modality, completed intervals, interval peak heart rates, rough time in the target zone, perceived exertion for each interval, 1- and 2-minute heart-rate recovery, symptoms, sleep disruption, alcohol, illness, travel, unusually hard training, and major stress.
 
 ## Stop conditions
 
 Stop the session if chest pain or pressure, faintness, severe dizziness, confusion, palpitations, unusual shortness of breath, neurologic symptoms, or unsafe pain occurs.
 
-End the experiment and seek appropriate care if severe symptoms occur, symptoms repeat across sessions, or recovery feels unusually impaired for more than 24-48 hours.
+End the experiment and seek appropriate care if severe symptoms occur, symptoms repeat across sessions, or recovery feels unusually impaired for more than 24–48 hours.
 
 ## Ask a clinician first
 
-Ask a clinician before trying this if you have known cardiovascular disease, exertional chest symptoms, unexplained shortness of breath, fainting or near-fainting, known significant arrhythmia, heart failure, recent myocardial infarction or stroke, uncontrolled hypertension, possible myocarditis or pericarditis, pregnancy or early postpartum status, diabetes medication with hypoglycemia risk, severe asthma/COPD symptoms, long-COVID-like post-exertional malaise, or an injury that vigorous exercise could worsen.
+Ask a clinician before trying this if you have known cardiovascular disease, exertional chest symptoms, unexplained shortness of breath, fainting or near-fainting, significant arrhythmia, heart failure, recent myocardial infarction or stroke, uncontrolled hypertension, possible myocarditis or pericarditis, pregnancy or early postpartum status, diabetes medication with hypoglycemia risk, severe asthma/COPD symptoms, long-COVID-like post-exertional malaise, or an injury that vigorous exercise could worsen.
 
 People taking beta blockers or other heart-rate-limiting medicines should not rely on generic HRmax zones.
 
-## What this protocol deliberately does not test
+## What this does not test
 
-This page does not test mortality, longevity, heart-failure treatment, coronary disease treatment, diabetes treatment, hypertension treatment, or superiority over every form of moderate continuous training.
+This experiment does not test longevity, heart-failure treatment, coronary disease treatment, diabetes treatment, hypertension treatment, or superiority over every form of moderate continuous training.
 
-This page also does not promise HRV improvement, sleep improvement, fat loss, or a wearable VO2max increase. A useful signal, if it appears, is a practical pattern: sessions become more repeatable, heart-rate recovery or resting heart rate moves in a useful direction, and the wearable cardio-fitness estimate trends favorably. SourceKeys: `source_artifact:pmid-17414804`, `source_artifact:pmid-30733142`, `source_artifact:doi-10.3390-ijerph17145103`, `source_artifact:pmid-30293954`.
+It also does not promise HRV improvement, sleep improvement, fat loss, or a wearable VO2max increase. A useful signal, if it appears, is practical: sessions become more repeatable, heart-rate recovery or resting heart rate moves in a helpful direction, and the wearable cardio-fitness estimate trends favorably.
 
-## Evidence shape
+## Evidence snapshot
 
-### Causal intervention evidence
-
-Use direct 4x4 trials and VO2max meta-analyses for the core fitness rationale. Keep the claim bounded because many trials are small, clinical, or heterogeneous. SourceKeys: `source_artifact:pmid-17414804`, `source_artifact:pmid-30733142`.
-
-### Protocol dose and design
-
-Use the NTNU/CERG public recipe, HR-response implementation work, and RPE-vs-HR-monitor evidence to define the practical session shape. SourceKeys: `source_artifact:ntnu-cerg-norwegian-4x4`, `source_artifact:doi-10.3390-ijerph17145103`, `source_artifact:pmid-23988787`.
-
-### Safety and contraindications
-
-Use cardiac-rehabilitation safety reviews, the Rognmo safety registry, ESC sports-cardiology guidance, and the AHA acute cardiovascular events statement for guardrails. Do not use supervised cardiac-rehab safety evidence to imply that unscreened home HIIT is risk-free. SourceKeys: `source_artifact:pmid-22879367`, `source_artifact:pmid-30376749`, `source_artifact:pmid-29416382`, `source_artifact:pmid-32860412`, `source_artifact:pmid-32100573`.
-
-### Mixed and null evidence
-
-Keep SAINTEX-CAD, SMARTEX-HF, and OptimEx-Clin visible. They prevent the page from turning early small positive trials into a universal claim. SourceKeys: `source_artifact:pmid-25464446`, `source_artifact:pmid-28082387`, `source_artifact:pmid-33560320`.
-
-### Adjacent variants
-
-Low-volume 1 x 4 HIIT, sprint-interval training, athlete-performance 4x4, disease-treatment cardiac rehab, and metabolic-syndrome/diabetes HIIT should become separate Murph pages or context pages. SourceKeys: `source_artifact:pmid-28846513`, `source_artifact:pmid-39256000`, `source_artifact:pmid-36314990`, `source_artifact:pmid-37608507`.
+The evidence supports 4x4 intervals as a plausible VO2max-oriented training dose, but it also includes small trials, mixed clinical comparisons, and safety caveats. Low-volume 1 x 4 HIIT, sprint intervals, athlete-performance plans, and supervised cardiac-rehabilitation protocols belong nearby, not inside this exact experiment.

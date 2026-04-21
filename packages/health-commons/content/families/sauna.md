@@ -49,11 +49,11 @@ researchCoverage:
 
 Sauna is the broad passive-heat family. It should not collapse dry sauna, infrared sauna, steam room, hot-water immersion, and other heat modalities into one recipe.
 
-Murph's current sauna research base is large enough to justify separate public pages:
+The sauna research base is large enough to keep the main heat modalities separate:
 
 - 180 records in the master bibliography,
 - 81 records in the Finnish dry-sauna yes/likely subset,
-- 40 curated shortlist papers,
+- 40 curated source papers,
 - and distinct evidence buckets for long-term cohorts, acute physiology, and intervention design.
 
-The parent sauna page is useful for education and search. Actual protocol cards should usually attach to a clearer user-facing family such as **Dry Sauna** or **Infrared Sauna**.
+Use this parent page for broad education and search. Protocol cards should attach to clearer families such as **Dry Sauna** or **Infrared Sauna**.
