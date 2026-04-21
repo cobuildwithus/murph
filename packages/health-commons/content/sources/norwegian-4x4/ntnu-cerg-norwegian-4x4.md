@@ -26,6 +26,11 @@ source:
   journal: "NTNU public protocol page"
   citation: "Cardiac Exercise Research Group, NTNU. CERG's 4x4 interval training advice. NTNU public protocol page. 2024."
   url: https://www.ntnu.edu/cerg/advice
+researchEvidence:
+  designKind: "expert_protocol"
+  designLabel: "Public protocol guidance"
+  populationLabel: "Public-facing exercise guidance"
+  aggregateRole: "context"
 evidenceBucket: "Protocol dose and design"
 whyItMatters: "Public-facing source for the commonly cited Norwegian 4x4 session structure."
 potentialMurphEndpoints:

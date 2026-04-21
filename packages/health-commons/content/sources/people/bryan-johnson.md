@@ -4,7 +4,7 @@ entityType: source_person
 key: source_person:bryan-johnson
 slug: sources/people/bryan-johnson
 title: Bryan Johnson
-summary: Founder of Blueprint whose public sauna routine is included as an external, higher-burden comparison.
+summary: Founder of Blueprint and Don't Die. Trying to live forever.
 status: draft
 quality: usable
 aliases:

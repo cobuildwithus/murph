@@ -228,7 +228,7 @@ function protocolToCard(
   const metadata = [
     startedOn ? `Started ${formatIsoDate(startedOn)}` : null,
     `${protocolDays} days`,
-    `${protocol.studyCount} studies`,
+    protocol.researchSummaryLabel,
   ].filter((part): part is string => part !== null).join(" · ");
   const description = privateRun?.summaryDetail ?? privateRun?.summary ?? protocol.description;
 

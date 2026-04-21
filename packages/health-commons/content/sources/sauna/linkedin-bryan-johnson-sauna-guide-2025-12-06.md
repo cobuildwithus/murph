@@ -23,6 +23,16 @@ source:
   authors: Bryan Johnson
   year: 2025
   url: https://www.linkedin.com/posts/bryanrjohnson_sauna-is-one-of-the-most-effective-health-activity-7404655111576223744-tIrx
+researchEvidence:
+  designKind: single_person_report
+  designLabel: Single-person report
+  participantCount: 1
+  participantCountKind: reported
+  populationLabel: Bryan Johnson
+  aggregateRole: duplicate
+  cohortKey: bryan-johnson-sauna-self-report
+  notes:
+    - Same single-person source family as the Bryan Johnson sauna protocol report.
 artifacts:
   -
     artifactId: art_linkedin_bryan_johnson_sauna_guide_2025_12_06_html_snapshot

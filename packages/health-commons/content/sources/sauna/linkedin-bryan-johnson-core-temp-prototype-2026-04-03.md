@@ -23,6 +23,16 @@ source:
   authors: Bryan Johnson
   year: 2026
   url: https://www.linkedin.com/posts/bryanrjohnson_felt-like-i-was-going-to-die-in-the-sauna-activity-7445948233736138752-YU_1
+researchEvidence:
+  designKind: single_person_report
+  designLabel: Single-person report
+  participantCount: 1
+  participantCountKind: reported
+  populationLabel: Bryan Johnson
+  aggregateRole: duplicate
+  cohortKey: bryan-johnson-sauna-self-report
+  notes:
+    - Same single-person source family as the Bryan Johnson sauna protocol report.
 artifacts:
   -
     artifactId: art_linkedin_bryan_johnson_core_temp_prototype_2026_04_03_html_snapshot

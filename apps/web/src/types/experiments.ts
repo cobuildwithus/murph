@@ -8,7 +8,7 @@ export interface Expert {
 }
 
 export interface Study {
-  type: "OBS" | "RCT" | "INT" | "MECH" | "MA" | "REV" | "GUIDE" | "SRC";
+  type: "OBS" | "RCT" | "INT" | "N1" | "MECH" | "MA" | "REV" | "GUIDE" | "SRC";
   title: string;
   authors: string;
   journal: string;
@@ -115,6 +115,7 @@ export interface ExperimentProtocol {
   durationDays: number;
   baselineDays: number;
   studyCount: number;
+  researchSummaryLabel: string;
   evidenceLevel: number;
   evidenceLabel: string;
   description: string;
