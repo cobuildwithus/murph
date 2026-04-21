@@ -9,6 +9,8 @@ The source of truth is intentionally small and forkable:
 - `content/changes/*.jsonl` — semantic change summaries for product history UIs.
 - `content/artifacts/**/*.json` — manifests for PDFs, extracted text, screenshots, and other large artifacts stored outside Git.
 
+For broad content-only sweeps, treat the generated catalog artifacts as landing-time outputs rather than branch-by-branch truth. Prefer committing the authored source files first (`content/**/*.md`, `content/**/*.json`, `content/**/*.jsonl`) and regenerate/commit `generated/*` at the final shared landing, or earlier only when a schema, loader, test fixture, or runtime consumer change specifically depends on those derived files changing in the same diff.
+
 Large PDFs and copyrighted journal files do **not** belong in Git. Add a manifest entry with source, rights, hash, local path, and Cloudflare R2 object key, then upload only when the rights status allows it.
 
 ## Useful commands
