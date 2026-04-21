@@ -64,6 +64,33 @@ relations:
   -
     type: cites
     target: source_artifact:pmid-22505948
+  -
+    type: cites
+    target: source_artifact:pmid-29720543
+  -
+    type: cites
+    target: source_artifact:pmid-31293098
+  -
+    type: cites
+    target: source_artifact:pmid-38836690
+  -
+    type: cites
+    target: source_artifact:pmid-24304490
+  -
+    type: cites
+    target: source_artifact:pmid-30800676
+  -
+    type: cites
+    target: source_artifact:pmid-24899780
+  -
+    type: cites
+    target: source_artifact:pmid-3218892
+  -
+    type: cites
+    target: source_artifact:pmid-3218894
+  -
+    type: cites
+    target: source_artifact:pmid-3218897
 source:
   kind: other
   title: Sauna research bibliography
@@ -106,8 +133,8 @@ corpusStats:
   auditCutoff: 2026-04-18
 supplementalReview:
   reviewedAt: 2026-04-21
-  addedSourceCount: 10
-  scopeNote: Broader sauna literature additions are held on the sauna and dry-sauna evidence graph; the Bryan Johnson protocol page remains source-attributed to Bryan Johnson / Blueprint posts and mirrors.
+  addedSourceCount: 19
+  scopeNote: Broader sauna literature additions and corrected Finnish dry-sauna citation records are held on the sauna and dry-sauna evidence graph; the Bryan Johnson protocol page remains source-attributed to Bryan Johnson / Blueprint posts and mirrors.
   sourceKeys:
     - source_artifact:pmid-23411620
     - source_artifact:pmid-9972494
@@ -119,6 +146,15 @@ supplementalReview:
     - source_artifact:pmid-34363927
     - source_artifact:pmid-11874249
     - source_artifact:pmid-22505948
+    - source_artifact:pmid-29720543
+    - source_artifact:pmid-31293098
+    - source_artifact:pmid-38836690
+    - source_artifact:pmid-24304490
+    - source_artifact:pmid-30800676
+    - source_artifact:pmid-24899780
+    - source_artifact:pmid-3218892
+    - source_artifact:pmid-3218894
+    - source_artifact:pmid-3218897
   finnishDrySaunaOrLikelySourceKeys:
     - source_artifact:pmid-23411620
     - source_artifact:pmid-9972494
@@ -127,13 +163,26 @@ supplementalReview:
     - source_artifact:pmid-32615263
     - source_artifact:pmid-34363927
     - source_artifact:pmid-11874249
+    - source_artifact:pmid-29720543
+    - source_artifact:pmid-31293098
+    - source_artifact:pmid-38836690
+    - source_artifact:pmid-24304490
+    - source_artifact:pmid-30800676
+    - source_artifact:pmid-24899780
+    - source_artifact:pmid-3218892
+    - source_artifact:pmid-3218894
+    - source_artifact:pmid-3218897
   bucketCounts:
     fertilityAndMaleHeatSafety: 2
     acuteThermalDoseAndSafety: 2
-    acuteVascularPhysiology: 1
+    acuteVascularPhysiology: 2
     passiveHeatSynthesis: 2
     explanatoryBackboneReview: 1
     sweatAndDetoxClaimCaveats: 2
+    strokeAndFitnessCohortContext: 2
+    classicFinnishPhysiologyAndFluidBalance: 3
+    postExerciseAndBodyCompositionContext: 2
+    dryVsSteamModalityContext: 1
 evidenceMap:
   recordTypeCounts:
     reviewMeta: 32
@@ -192,7 +241,7 @@ shortlistSourceKeys:
   - source_artifact:pmid-28972808
   - source_artifact:pmid-29897261
   - source_artifact:pmid-30486813
-  - source_artifact:pmid-30665914
+  - source_artifact:pmid-29720543
   - source_artifact:pmid-31372865
   - source_artifact:pmid-35908583
   - source_artifact:pmid-36255556
@@ -264,7 +313,7 @@ finnishDrySaunaSourceKeys:
   - source_artifact:pmid-30173212
   - source_artifact:pmid-30486813
   - source_artifact:pmid-31126559
-  - source_artifact:pmid-30665914
+  - source_artifact:pmid-29720543
   - source_artifact:pmid-31372865
   - source_artifact:pmid-31102597
   - source_artifact:pmid-31331560
@@ -320,16 +369,19 @@ This page represents the structured sauna research corpus behind the Finnish dry
 
 ## Supplemental 2026-04-21 review
 
-A follow-up source pass added ten targeted records for gaps that matter when comparing high-burden sauna routines against the broader evidence graph:
+A follow-up source pass added nineteen targeted records for gaps that matter when comparing high-burden sauna routines against the broader evidence graph:
 
 - male fertility and heat-safety guardrails: Garolla 2013 and Saikhun 1998
 - acute dose, core-temperature, and extreme-heat safety context: Zalewski 2014 and Podstawski 2024
-- acute vascular context: Gravel 2021
+- acute vascular context: Gravel 2019 and Gravel 2021
 - mixed or cautious passive-heat syntheses: Hamaya 2025 and Solomon 2025
 - public mechanism synthesis: Patrick and Johnson 2021
 - sweat, minerals, and detox-claim calibration: Hoshi 2001 and Sears 2012
+- corrected Finnish stroke and cardiorespiratory-fitness cohort context: Kunutsor 2018 and Kunutsor 2024
+- post-exercise, repeated-dose, and dry-vs-steam context: Sutkowy 2014, Podstawski 2019, and Pilch 2014
+- classic Finnish löyly, thermoregulation, and body-fluid-balance context: Helamaa 1988, Leppäluoto 1988, and Ahonen 1988
 
-The 2026-04-18 corpus counts above are preserved as the original audit snapshot. These supplemental records are tracked separately so the data does not pretend that the whole 180-record workbook was re-audited.
+The 2026-04-18 corpus counts above are preserved as the original audit snapshot. These supplemental records are tracked separately so the data does not pretend that the whole workbook was re-audited.
 
 The Bryan Johnson protocol page intentionally remains source-attributed to Bryan Johnson / Blueprint posts and mirrors. These broader papers belong to the dry-sauna and parent sauna evidence graph, not to Bryan Johnson's protocol-specific research cards.
 
@@ -345,7 +397,7 @@ The Bryan Johnson protocol page intentionally remains source-attributed to Bryan
 Use this page to understand how deep the sauna research base is, which evidence buckets are strongest for protocol design, and why the Finnish dry-sauna experiment separates long-term context from short-term measurable signals.
 
 - The **evidence backbone** papers help define the overall research base and safety framing.
-- The **long-term Finnish cohort** papers are rationale and screening context, not 21-day signals.
+- The **long-term Finnish cohort** papers are rationale and screening context, not 21-day signals; the stroke cohort should now point to PMID 29720543 rather than the reader-response PMID 30665914.
 - The **acute and mechanistic** papers help pick measurable session and near-term signals.
 - The **intervention design / reality checks** papers stop the protocol from overclaiming and help define how to standardize timing, hydration, exercise context, and expected latency.
 

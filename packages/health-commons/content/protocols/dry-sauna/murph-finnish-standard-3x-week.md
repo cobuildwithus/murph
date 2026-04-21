@@ -173,7 +173,7 @@ relations:
     target: source_artifact:pmid-31126559
   -
     type: cites
-    target: source_artifact:pmid-30665914
+    target: source_artifact:pmid-29720543
   -
     type: cites
     target: source_artifact:pmid-31372865
@@ -282,6 +282,42 @@ relations:
   -
     type: cites
     target: source_artifact:doi-10.1080-23328940.2026.2645467
+  -
+    type: cites
+    target: source_artifact:pmid-31293098
+  -
+    type: cites
+    target: source_artifact:pmid-32615263
+  -
+    type: cites
+    target: source_artifact:pmid-38836690
+  -
+    type: cites
+    target: source_artifact:pmid-41049507
+  -
+    type: cites
+    target: source_artifact:pmid-34363927
+  -
+    type: cites
+    target: source_artifact:pmid-24304490
+  -
+    type: cites
+    target: source_artifact:pmid-30800676
+  -
+    type: cites
+    target: source_artifact:pmid-38344040
+  -
+    type: cites
+    target: source_artifact:pmid-24899780
+  -
+    type: cites
+    target: source_artifact:pmid-3218892
+  -
+    type: cites
+    target: source_artifact:pmid-3218894
+  -
+    type: cites
+    target: source_artifact:pmid-3218897
 lineage:
   relationship: root
   rationale: Default dry-sauna experiment designed to be simple enough to try and clear enough to interpret.
@@ -361,6 +397,8 @@ claims:
       - source_artifact:pmid-29849692
       - source_artifact:mayo-2018-sauna-review
       - source_artifact:pmid-38577299
+      - source_artifact:pmid-34363927
+      - source_artifact:pmid-41049507
     caveats:
       - A large literature does not automatically mean that one exact wearable signal will move in every user.
       - Study-design and modality caveats matter more than a single confidence score.
@@ -374,6 +412,9 @@ claims:
       - source_artifact:pmid-29269746
       - source_artifact:pmid-31126559
       - source_artifact:pmid-31331560
+      - source_artifact:pmid-31293098
+      - source_artifact:pmid-32615263
+      - source_artifact:pmid-41049507
     caveats:
       - Wearable resting heart rate is a proxy marker, not a clinical cardiovascular assessment.
       - Blood-pressure interpretation requires consistent home measurement technique rather than opportunistic readings.
@@ -400,6 +441,7 @@ claims:
       - source_artifact:pmid-35785965
       - source_artifact:pmid-41032138
       - source_artifact:pmid-31490429
+      - source_artifact:pmid-24304490
     caveats:
       - The same person may benefit from both patterns, but they are not the same experiment.
   -
@@ -411,6 +453,8 @@ claims:
       - source_artifact:pmid-34727008
       - source_artifact:pmid-31490429
       - source_artifact:pmid-31126559
+      - source_artifact:pmid-3218897
+      - source_artifact:pmid-30800676
     caveats:
       - A user can still run the protocol without perfect control, but the interpretation should become more cautious.
   -
@@ -424,11 +468,12 @@ claims:
       - source_artifact:pmid-27932366
       - source_artifact:pmid-29229091
       - source_artifact:pmid-28905164
-      - source_artifact:pmid-30665914
+      - source_artifact:pmid-29720543
       - source_artifact:pmid-35908583
       - source_artifact:pmid-36255556
       - source_artifact:pmid-37029766
       - source_artifact:pmid-38410962
+      - source_artifact:pmid-38836690
     caveats:
       - Observational cohort evidence cannot prove an individual causal benefit.
       - These findings should not become guaranteed result language.
@@ -441,6 +486,8 @@ claims:
       - source_artifact:pmid-35710395
       - source_artifact:pmid-37650138
       - source_artifact:pmid-40611569
+      - source_artifact:pmid-41049507
+      - source_artifact:pmid-31293098
     caveats:
       - A null result in one signal does not mean the protocol is useless for every user.
       - Disease populations, athletes, and general-wellness users should not be blended into one expected result.
@@ -453,6 +500,8 @@ claims:
       - source_artifact:pmid-38577299
       - source_artifact:doi-10.1152-ajpregu.00012.2025
       - source_artifact:mayo-2018-sauna-review
+      - source_artifact:pmid-24899780
+      - source_artifact:pmid-3218892
     caveats:
       - Related heat modalities can inform each other, but their claims should not be silently merged.
   -
@@ -492,6 +541,7 @@ safety:
     - This is a bounded wellness self-experiment, not a treatment plan for cardiovascular disease.
     - People with known cardiovascular disease or major medical conditions should use clinician guidance before starting.
     - Exiting early is normal if heat discomfort starts to feel concerning.
+    - Avoid extreme-temperature sessions; this protocol is not a 120 °C heat-stress test.
 researchCoverage:
   bibliographyKey: source_artifact:sauna-bibliography-2026-04-18
   corpusStats:
@@ -512,6 +562,23 @@ researchCoverage:
     intervention-design-reality-checks: 13
     acute-and-mechanistic: 8
     evidence-backbone: 5
+  supplementalReview:
+    reviewedAt: 2026-04-21
+    scopeNote: Added missing Finnish dry-sauna source pages and corrected the stroke-cohort PMID while preserving the earlier corpus-count snapshot because broader sauna source work was already in flight in the current tree.
+    sourceKeys:
+      - source_artifact:pmid-29720543
+      - source_artifact:pmid-31293098
+      - source_artifact:pmid-32615263
+      - source_artifact:pmid-38836690
+      - source_artifact:pmid-41049507
+      - source_artifact:pmid-34363927
+      - source_artifact:pmid-24304490
+      - source_artifact:pmid-30800676
+      - source_artifact:pmid-38344040
+      - source_artifact:pmid-24899780
+      - source_artifact:pmid-3218892
+      - source_artifact:pmid-3218894
+      - source_artifact:pmid-3218897
   backboneSourceKeys:
     - source_artifact:pmid-16871826
     - source_artifact:pmid-29849692
@@ -564,7 +631,7 @@ researchCoverage:
     - source_artifact:pmid-30173212
     - source_artifact:pmid-30486813
     - source_artifact:pmid-31126559
-    - source_artifact:pmid-30665914
+    - source_artifact:pmid-29720543
     - source_artifact:pmid-31372865
     - source_artifact:pmid-31102597
     - source_artifact:pmid-31331560
@@ -666,4 +733,4 @@ It also does not promise HRV improvement, gut benefits, vascular improvements, o
 
 ## Evidence snapshot
 
-The sauna research map includes reviews, long-term Finnish cohort papers, acute physiology work, and intervention-design papers. That mix is enough to make the experiment worth trying, while also keeping the claims careful.
+The sauna research map includes reviews, corrected long-term Finnish cohort papers, acute physiology work, post-exercise context, classic thermoregulation and fluid-balance sources, dry-vs-steam modality comparisons, and intervention-design papers. That mix is enough to make the experiment worth trying, while also keeping the claims careful.
