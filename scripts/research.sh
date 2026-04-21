@@ -619,18 +619,21 @@ run_turn() {
   local status=$?
   set -e
 
-  if [[ "$status" -ne 0 ]]; then
-    cat "$stderr_file" >&2
-    echo "Pass ${turn} failed. See ${stderr_file}" >&2
-    exit "$status"
-  fi
-
   local next_chat_url
   next_chat_url="$(extract_chat_url "$result_file" || true)"
 
   if [[ -n "$next_chat_url" ]]; then
     chat_url="$next_chat_url"
     printf '%s\n' "$chat_url" > "$out_dir/chat-url.txt"
+  fi
+
+  if [[ "$status" -ne 0 ]]; then
+    if [[ -n "$chat_url" ]]; then
+      download_turn_artifacts "$turn"
+    fi
+    cat "$stderr_file" >&2
+    echo "Pass ${turn} failed. See ${stderr_file}" >&2
+    exit "$status"
   fi
 
   if [[ -z "$chat_url" ]]; then
