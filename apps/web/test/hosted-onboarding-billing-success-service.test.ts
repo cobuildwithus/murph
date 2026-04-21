@@ -22,21 +22,9 @@ const mocks = vi.hoisted(() => {
 
   const state = {
     activateHostedMemberForPositiveSourceTx: vi.fn(),
-    drainHostedExecutionOutboxBestEffort: vi.fn(),
     findMemberForStripeObject: vi.fn(),
     getHostedInviteStatus: vi.fn(),
-    nudgeHostedRunBestEffort: vi.fn(async (input: {
-      eventId: string;
-      prisma?: unknown;
-      userId: string;
-    }) => {
-      await state.drainHostedExecutionOutboxBestEffort({
-        eventIds: [input.eventId],
-        limit: 1,
-        prisma: input.prisma,
-      });
-      return "outbox";
-    }),
+    nudgeHostedRunBestEffort: vi.fn(),
     readHostedMemberCoreState: vi.fn(),
     requireHostedInviteForAuthentication: vi.fn(),
     requireHostedStripeApi: vi.fn(),
@@ -48,9 +36,6 @@ const mocks = vi.hoisted(() => {
   return state;
 });
 
-vi.mock("@/src/lib/hosted-execution/outbox", () => ({
-  drainHostedExecutionOutboxBestEffort: mocks.drainHostedExecutionOutboxBestEffort,
-}));
 vi.mock("@/src/lib/hosted-ingress/control", () => ({
   nudgeHostedRunBestEffort: mocks.nudgeHostedRunBestEffort,
 }));
@@ -188,10 +173,9 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
       skipIfBillingAlreadyActive: false,
     }));
     expect(activationInput).not.toHaveProperty("emailLinked");
-    expect(mocks.drainHostedExecutionOutboxBestEffort).toHaveBeenCalledWith({
-      eventIds: ["member.activated:stripe.checkout.session.success_redirect:member_123:cs_123"],
-      limit: 1,
-      prisma,
+    expect(mocks.nudgeHostedRunBestEffort).toHaveBeenCalledWith({
+      context: "billing-success.redirect",
+      userId: "member_123",
     });
   });
 
@@ -264,7 +248,7 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
     });
     expect(mocks.updateHostedMemberStripeBillingIfFresh).not.toHaveBeenCalled();
     expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
-    expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
+    expect(mocks.nudgeHostedRunBestEffort).not.toHaveBeenCalled();
   });
 
   it("trusts the explicit checkout member identifiers before any Stripe-object lookup", async () => {

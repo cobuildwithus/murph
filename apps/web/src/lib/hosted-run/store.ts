@@ -1543,6 +1543,7 @@ function parseHostedRunExecutorKindForProjection(value: string): HostedRunExecut
 function parseHostedRunStatusForProjection(value: string): HostedRunStatus {
   switch (value) {
     case "acquired":
+    case "running":
     case "finalizing":
     case "committed_needs_finalize":
     case "finalized":

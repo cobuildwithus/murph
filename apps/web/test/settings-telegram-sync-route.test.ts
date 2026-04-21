@@ -129,7 +129,6 @@ describe("settings telegram sync route", () => {
     });
     expect(mocks.nudgeHostedRunBestEffort).toHaveBeenCalledWith({
       context: "settings.telegram.sync",
-      eventId: "member.channels.updated:settings.telegram.sync:member_123:evt_123",
       userId: "member_123",
     });
     expect(mocks.buildHostedTelegramBotLink).toHaveBeenCalledWith("connect");

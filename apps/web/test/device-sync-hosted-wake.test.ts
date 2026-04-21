@@ -6,7 +6,6 @@ const mocks = vi.hoisted(() => {
     completeWebhookTrace: vi.fn(),
     createDeviceSyncPublicIngress: vi.fn(),
     createSignal: vi.fn(),
-    drainHostedExecutionOutboxBestEffort: vi.fn(),
     ensureWebhookSubscriptions: vi.fn(),
     enqueueHostedExecutionOutbox: vi.fn(),
     getConnectionForUser: vi.fn(),
@@ -27,18 +26,7 @@ const mocks = vi.hoisted(() => {
     prisma: {
       $transaction: vi.fn(),
     },
-    nudgeHostedRunBestEffort: vi.fn(async (input: {
-      eventId: string;
-      prisma?: unknown;
-      userId: string;
-    }) => {
-      await state.drainHostedExecutionOutboxBestEffort({
-        eventIds: [input.eventId],
-        limit: 1,
-        prisma: input.prisma,
-      });
-      return "outbox";
-    }),
+    nudgeHostedRunBestEffort: vi.fn(),
     materializeHostedIngressEnvelopeTx: vi.fn(async (input: {
       wake: { eventId: string };
     }) => {
@@ -331,7 +319,7 @@ describe("appendHostedDeviceSyncWake", () => {
     mocks.createSignal.mockResolvedValue({ id: 8 });
     mocks.prismaTx.deviceSyncSignal.create.mockResolvedValue({ id: 8 });
     mocks.completeWebhookTrace.mockResolvedValue(undefined);
-    mocks.drainHostedExecutionOutboxBestEffort.mockResolvedValue(undefined);
+    mocks.nudgeHostedRunBestEffort.mockResolvedValue(undefined);
     mocks.enqueueHostedExecutionOutbox.mockResolvedValue(undefined);
     mocks.getConnectionForUser.mockResolvedValue(buildHostedConnection());
     mocks.getConnectionOwnerId.mockResolvedValue("user-123");
@@ -425,12 +413,9 @@ describe("appendHostedDeviceSyncWake", () => {
         tx: mocks.prismaTx,
       }),
     );
-    expect(mocks.drainHostedExecutionOutboxBestEffort).toHaveBeenCalledWith({
-      eventIds: [
-        "device-sync:connection-established:user-123:oura:dsc_123:2026-03-26T12:00:00.000Z",
-      ],
-      limit: 1,
-      prisma: mocks.prisma,
+    expect(mocks.nudgeHostedRunBestEffort).toHaveBeenCalledWith({
+      context: "device-sync.wake",
+      userId: "user-123",
     });
   });
 
@@ -479,8 +464,8 @@ describe("appendHostedDeviceSyncWake", () => {
     );
   });
 
-  it("does not wait for the best-effort outbox drain before returning a wake dispatch", async () => {
-    mocks.drainHostedExecutionOutboxBestEffort.mockReturnValue(new Promise(() => {}));
+  it("does not wait for the best-effort hosted run nudge before returning a wake dispatch", async () => {
+    mocks.nudgeHostedRunBestEffort.mockReturnValue(new Promise(() => {}));
 
     await expect(appendHostedDeviceSyncWake({
       connectionId: "dsc_123",
@@ -492,7 +477,7 @@ describe("appendHostedDeviceSyncWake", () => {
       wakeAppended: true,
     });
 
-    expect(mocks.drainHostedExecutionOutboxBestEffort).toHaveBeenCalledTimes(1);
+    expect(mocks.nudgeHostedRunBestEffort).toHaveBeenCalledTimes(1);
   });
 
   it("uses the dedicated device-sync wake path for disconnect events", async () => {
@@ -536,12 +521,9 @@ describe("appendHostedDeviceSyncWake", () => {
         tx: mocks.prismaTx,
       }),
     );
-    expect(mocks.drainHostedExecutionOutboxBestEffort).toHaveBeenCalledWith({
-      eventIds: [
-        "device-sync:disconnect:user-123:oura:dsc_123:2026-03-26T12:00:00.000Z",
-      ],
-      limit: 1,
-      prisma: mocks.prisma,
+    expect(mocks.nudgeHostedRunBestEffort).toHaveBeenCalledWith({
+      context: "device-sync.wake",
+      userId: "user-123",
     });
   });
 
@@ -943,7 +925,7 @@ describe("appendHostedDeviceSyncWake", () => {
 
     expect(mocks.createSignal).toHaveBeenCalledTimes(1);
     expect(mocks.completeWebhookTrace).not.toHaveBeenCalled();
-    expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
+    expect(mocks.nudgeHostedRunBestEffort).not.toHaveBeenCalled();
   });
 
   it("shapes hosted webhook hints by provider and job allowlists instead of key redaction", async () => {
@@ -1196,7 +1178,7 @@ describe("appendHostedDeviceSyncWake", () => {
     expect(mocks.completeWebhookTrace).not.toHaveBeenCalled();
     expect(mocks.createSignal).not.toHaveBeenCalled();
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
-    expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
+    expect(mocks.nudgeHostedRunBestEffort).not.toHaveBeenCalled();
   });
 
   it("keeps delete webhook hints narrow across the hosted handoff", async () => {

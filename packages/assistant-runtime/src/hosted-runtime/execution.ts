@@ -159,6 +159,13 @@ export async function executeHostedRunDrainForCommit(input: {
       continue;
     }
 
+    if (
+      ingressMetrics.ingressLane === "member-activated"
+      || ingressMetrics.ingressLane === "member-channels-updated"
+    ) {
+      drainState.assistantPending = true;
+    }
+
     const maintenanceMetrics = await runHostedSystemWakeFollowupExecution({
       executionContext: runExecutionContext,
       requestId: event.wake.eventId,

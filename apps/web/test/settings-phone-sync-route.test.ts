@@ -119,7 +119,6 @@ describe("settings phone sync route", () => {
     });
     expect(mocks.nudgeHostedRunBestEffort).toHaveBeenCalledWith({
       context: "settings.phone.sync",
-      eventId: "member.channels.updated:settings.phone.sync:member_123:evt_123",
       userId: "member_123",
     });
     expect(mocks.readHostedPhoneHint).toHaveBeenCalledWith("+14155552671");

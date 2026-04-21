@@ -6,6 +6,7 @@ import {
   buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionDeviceSyncWake,
   buildHostedExecutionMemberActivatedWake,
+  buildHostedExecutionMemberChannelsUpdatedWake,
   buildHostedExecutionRuntimeTimerWake,
 } from "@murphai/hosted-execution";
 
@@ -430,6 +431,131 @@ describe("executeHostedRunDrainForCommit", () => {
       assert.equal(result.committedResult.result.eventsHandled, 2);
       assert.equal(result.committedResult.result.nextWakeAt, "2026-04-08T00:12:00.000Z");
       assert.match(result.committedResult.result.summary, /kinds=device-sync\.wake,member\.activated/u);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("runs the assistant maintenance lane after member activation enables managed channels", async () => {
+    vi.useFakeTimers();
+
+    try {
+      vi.setSystemTime(new Date("2026-04-08T00:00:00.000Z"));
+      mocks.executeHostedIngressEvent.mockResolvedValueOnce({
+        bootstrapResult: {
+          assistantConfigStatus: "hosted-env",
+          assistantConfigured: true,
+          assistantProvider: "openai-compatible",
+          assistantSeeded: true,
+          emailAutoReplyEnabled: false,
+          linqAutoReplyEnabled: true,
+          telegramAutoReplyEnabled: false,
+          vaultCreated: true,
+        },
+        conversationMetrics: null,
+        ingressLane: "member-activated",
+        shareImportResult: null,
+        shareImportTitle: null,
+      });
+
+      const result = await executeHostedRunDrainForCommit({
+        executionContext: createExecutionContext(),
+        request: {
+          bundle: "incoming-bundle",
+          run: HOSTED_RUN_CONTEXT,
+          runDrain: {
+            acquiredAt: "2026-04-08T00:00:00.000Z",
+            events: [
+              {
+                seq: "24",
+                wake: buildHostedExecutionMemberActivatedWake({
+                  eventId: "evt_member_activation_followup",
+                  memberChannels: {
+                    email: false,
+                    linq: true,
+                    telegram: false,
+                  },
+                  memberId: "member_123",
+                  occurredAt: "2026-04-08T00:00:01.000Z",
+                }),
+                ingressEventId: "wake_24",
+              },
+            ],
+            inputCommittedSeq: "24",
+            inputCursorVersion: "4",
+            runId: "run_123",
+            triggerKind: "external_ingress",
+            userId: "member_123",
+          },
+        },
+        restored: createRestored(),
+        runtime: createRuntime(),
+        runtimeEnv: {},
+      });
+
+      expect(mocks.runHostedAssistantRuntimeTimerLane).toHaveBeenCalledTimes(1);
+      expect(mocks.runHostedNoopSystemWakeLane).toHaveBeenCalledTimes(1);
+      expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
+      assert.equal(result.committedResult.result.eventsHandled, 1);
+      assert.equal(result.committedResult.result.nextWakeAt, "2026-04-08T00:30:00.000Z");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("runs the assistant maintenance lane after member channel updates enable managed channels", async () => {
+    vi.useFakeTimers();
+
+    try {
+      vi.setSystemTime(new Date("2026-04-08T00:00:00.000Z"));
+      mocks.executeHostedIngressEvent.mockResolvedValueOnce({
+        bootstrapResult: null,
+        conversationMetrics: null,
+        ingressLane: "member-channels-updated",
+        shareImportResult: null,
+        shareImportTitle: null,
+      });
+
+      const result = await executeHostedRunDrainForCommit({
+        executionContext: createExecutionContext(),
+        request: {
+          bundle: "incoming-bundle",
+          run: HOSTED_RUN_CONTEXT,
+          runDrain: {
+            acquiredAt: "2026-04-08T00:00:00.000Z",
+            events: [
+              {
+                seq: "24",
+                wake: buildHostedExecutionMemberChannelsUpdatedWake({
+                  eventId: "evt_member_channels_updated_followup",
+                  memberChannels: {
+                    email: false,
+                    linq: true,
+                    telegram: false,
+                  },
+                  memberId: "member_123",
+                  occurredAt: "2026-04-08T00:00:01.000Z",
+                }),
+                ingressEventId: "wake_24",
+              },
+            ],
+            inputCommittedSeq: "24",
+            inputCursorVersion: "4",
+            runId: "run_123",
+            triggerKind: "external_ingress",
+            userId: "member_123",
+          },
+        },
+        restored: createRestored(),
+        runtime: createRuntime(),
+        runtimeEnv: {},
+      });
+
+      expect(mocks.runHostedAssistantRuntimeTimerLane).toHaveBeenCalledTimes(1);
+      expect(mocks.runHostedNoopSystemWakeLane).toHaveBeenCalledTimes(1);
+      expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
+      assert.equal(result.committedResult.result.eventsHandled, 1);
+      assert.equal(result.committedResult.result.nextWakeAt, "2026-04-08T00:30:00.000Z");
     } finally {
       vi.useRealTimers();
     }
