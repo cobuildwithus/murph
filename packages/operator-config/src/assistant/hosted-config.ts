@@ -9,7 +9,6 @@ import {
   sanitizeAssistantBackendTargetForPersistence,
 } from '../assistant-backend.js'
 import {
-  normalizeAssistantProviderConfig,
   type AssistantProviderConfigInput,
 } from './provider-config.js'
 import {
@@ -84,9 +83,8 @@ export function createHostedAssistantProfile(input: {
   managedBy?: HostedAssistantProfileManagedBy | null
   providerConfig: AssistantProviderConfigInput | null | undefined
 }): HostedAssistantProfile {
-  const normalizedConfig = normalizeAssistantProviderConfig(input.providerConfig)
   const target = sanitizeAssistantBackendTargetForPersistence(
-    createAssistantModelTarget(normalizedConfig),
+    createAssistantModelTarget(input.providerConfig),
   )
 
   if (!target || target.adapter !== 'openai-compatible') {

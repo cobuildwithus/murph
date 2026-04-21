@@ -160,7 +160,7 @@ test('assistant backend helpers cover null, codex, and openai-compatible persist
       'X-Trace-Id': 'trace-123',
     },
     model: 'gpt-5',
-    presetId: null,
+    presetId: 'openai',
     providerName: 'OpenAI',
     reasoningEffort: 'high',
     webSearch: null,
@@ -266,78 +266,99 @@ test('assistant provider helpers cover null inference and empty header canonical
     persistedHeaders: { 'X-Trace-Id': 'trace-123' },
     secretHeaders: null,
   })
+  const normalizedCompatible = normalizeAssistantProviderConfig({
+    provider: 'openai-compatible',
+    baseUrl: ' https://example.test/v1 ',
+    headers: { ' --- ': 'value' },
+  })
   assert.deepEqual(
-    normalizeAssistantProviderConfig({
-      provider: 'openai-compatible',
-      baseUrl: ' https://example.test/v1 ',
-      headers: { ' --- ': 'value' },
-    }),
     {
-      approvalPolicy: null,
-      apiKeyEnv: null,
-      baseUrl: 'https://example.test/v1',
-      codexCommand: null,
-      codexHome: null,
-      headers: {
-        '': 'value',
+      policy: normalizedCompatible.policy,
+      provider: normalizedCompatible.provider,
+      target: normalizedCompatible.target,
+    },
+    {
+      policy: {
+        approvalPolicy: null,
+        reasoningEffort: null,
+        sandbox: null,
+        webSearch: null,
+        zeroDataRetention: null,
       },
-      model: null,
-      oss: false,
-      presetId: null,
-      profile: null,
       provider: 'openai-compatible',
-      providerName: null,
-      reasoningEffort: null,
-      sandbox: null,
-      webSearch: null,
-      zeroDataRetention: null,
+      target: {
+        kind: 'openai-compatible',
+        apiKeyEnv: null,
+        baseUrl: 'https://example.test/v1',
+        headers: {
+          '': 'value',
+        },
+        model: null,
+        presetId: null,
+        providerName: null,
+      },
     },
   )
+  const mergedCodex = mergeAssistantProviderConfigs(null, {
+    provider: 'codex-cli',
+    model: ' gpt-5 ',
+  })
   assert.deepEqual(
-    mergeAssistantProviderConfigs(null, {
-      provider: 'codex-cli',
-      model: ' gpt-5 ',
-    }),
     {
-      approvalPolicy: null,
-      apiKeyEnv: null,
-      baseUrl: null,
-      codexCommand: null,
-      codexHome: null,
-      headers: null,
-      model: 'gpt-5',
-      oss: false,
-      presetId: null,
-      profile: null,
+      policy: mergedCodex.policy,
+      provider: mergedCodex.provider,
+      target: mergedCodex.target,
+    },
+    {
+      policy: {
+        approvalPolicy: null,
+        reasoningEffort: 'medium',
+        sandbox: null,
+        webSearch: null,
+        zeroDataRetention: null,
+      },
       provider: 'codex-cli',
-      providerName: null,
-      reasoningEffort: 'medium',
-      sandbox: null,
-      webSearch: null,
-      zeroDataRetention: null,
+      target: {
+        kind: 'codex-cli',
+        codexCommand: null,
+        codexHome: null,
+        model: 'gpt-5',
+        oss: false,
+        profile: null,
+      },
     },
   )
-  assert.deepEqual(
-    mergeAssistantProviderConfigsForProvider('openai-compatible', null, {
+  const mergedCompatible = mergeAssistantProviderConfigsForProvider(
+    'openai-compatible',
+    null,
+    {
       providerName: ' Example ',
-    }),
+    },
+  )
+  assert.deepEqual(
     {
-      approvalPolicy: null,
-      apiKeyEnv: null,
-      baseUrl: null,
-      codexCommand: null,
-      codexHome: null,
-      headers: null,
-      model: null,
-      oss: false,
-      presetId: null,
-      profile: null,
+      policy: mergedCompatible.policy,
+      provider: mergedCompatible.provider,
+      target: mergedCompatible.target,
+    },
+    {
+      policy: {
+        approvalPolicy: null,
+        reasoningEffort: null,
+        sandbox: null,
+        webSearch: null,
+        zeroDataRetention: null,
+      },
       provider: 'openai-compatible',
-      providerName: 'Example',
-      reasoningEffort: null,
-      sandbox: null,
-      webSearch: null,
-      zeroDataRetention: null,
+      target: {
+        kind: 'openai-compatible',
+        apiKeyEnv: null,
+        baseUrl: null,
+        headers: null,
+        model: null,
+        presetId: null,
+        providerName: 'Example',
+      },
     },
   )
   assert.deepEqual(
