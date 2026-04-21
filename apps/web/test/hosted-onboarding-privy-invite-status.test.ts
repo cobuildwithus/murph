@@ -37,6 +37,11 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
       launch_monthly: "price_monthly_123",
     },
     stripeSecretKey: "sk_test_123",
+    stripeUsageMeterEventName: "murph_ai_tokens",
+    stripeUsagePriceIdsByPlan: {
+      launch_annual: "price_usage_annual_123",
+      launch_monthly: "price_usage_monthly_123",
+    },
     stripeWebhookSecret: "whsec_123",
     telegramBotUsername: null,
     telegramWebhookSecret: null,

@@ -136,6 +136,8 @@ Hosted onboarding extras:
 - `HOSTED_ONBOARDING_LINQ_MAX_ACTIVE_MEMBERS_PER_PHONE_NUMBER`
 - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY`
 - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_ANNUAL`
+- `HOSTED_ONBOARDING_STRIPE_USAGE_PRICE_ID_LAUNCH_MONTHLY`
+- `HOSTED_ONBOARDING_STRIPE_USAGE_PRICE_ID_LAUNCH_ANNUAL`
 - `STRIPE_SECRET_KEY`
 - `STRIPE_WEBHOOK_SECRET`
 - `LINQ_API_TOKEN`
@@ -143,10 +145,16 @@ Hosted onboarding extras:
 - `HOSTED_EXECUTION_CONTROL_URL`
 - `HOSTED_EXECUTION_CONTROL_TIMEOUT_MS`
 
-Optional hosted AI usage metering:
+Hosted AI usage metering:
 
-- `HOSTED_AI_USAGE_STRIPE_METER_EVENT_NAME`
-- `HOSTED_AI_USAGE_STRIPE_BATCH_LIMIT`
+- `HOSTED_AI_USAGE_STRIPE_METER_EVENT_NAME` must match the Stripe Billing meter attached to the configured `HOSTED_ONBOARDING_STRIPE_USAGE_PRICE_ID_*` prices.
+- `HOSTED_AI_USAGE_STRIPE_BATCH_LIMIT` controls how many pending usage rows each cron drain attempts.
+
+`apps/web` records every hosted assistant usage row by member in `HostedAiUsage`.
+Stripe pricing should own the included allowance and overage rate: configure the
+metered AI-usage prices with the same cadence as their launch plan and a free
+tier for the usage included in the flat subscription, then bill overage through
+Stripe's graduated metered price rather than subtracting allowance in app code.
 
 Hosted pages assume the hosted Privy phone-auth setup is present and fail fast
 when it is missing instead of carrying fallback branches in page code.

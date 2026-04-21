@@ -33,6 +33,8 @@ export interface HostedOnboardingEnvironment {
   publicBaseUrl: string | null;
   stripePriceIdsByPlan: Readonly<Record<HostedBillingPlanCode, string | null>>;
   stripeSecretKey: string | null;
+  stripeUsageMeterEventName: string | null;
+  stripeUsagePriceIdsByPlan: Readonly<Record<HostedBillingPlanCode, string | null>>;
   stripeWebhookSecret: string | null;
   telegramBotUsername: string | null;
   telegramWebhookSecret: string | null;
@@ -70,6 +72,8 @@ export function readHostedOnboardingEnvironment(
     publicBaseUrl,
     stripePriceIdsByPlan: readHostedStripePriceIdsByPlan(source),
     stripeSecretKey: readEnv(source, "STRIPE_SECRET_KEY"),
+    stripeUsageMeterEventName: readEnv(source, "HOSTED_AI_USAGE_STRIPE_METER_EVENT_NAME"),
+    stripeUsagePriceIdsByPlan: readHostedStripeUsagePriceIdsByPlan(source),
     stripeWebhookSecret: readEnv(source, "STRIPE_WEBHOOK_SECRET"),
     telegramBotUsername: readEnv(source, "TELEGRAM_BOT_USERNAME"),
     telegramWebhookSecret: readEnv(source, "TELEGRAM_WEBHOOK_SECRET"),
@@ -191,10 +195,23 @@ function readEnv(source: HostedOnboardingEnvSource, key: string): string | null 
 function readHostedStripePriceIdsByPlan(
   source: HostedOnboardingEnvSource,
 ): Record<HostedBillingPlanCode, string | null> {
+  return readHostedStripePriceIdsByEnvKey(source, (definition) => definition.priceIdEnvKey);
+}
+
+function readHostedStripeUsagePriceIdsByPlan(
+  source: HostedOnboardingEnvSource,
+): Record<HostedBillingPlanCode, string | null> {
+  return readHostedStripePriceIdsByEnvKey(source, (definition) => definition.usagePriceIdEnvKey);
+}
+
+function readHostedStripePriceIdsByEnvKey(
+  source: HostedOnboardingEnvSource,
+  selectEnvKey: (definition: ReturnType<typeof getHostedBillingPlanDefinition>) => string,
+): Record<HostedBillingPlanCode, string | null> {
   return Object.fromEntries(
     HOSTED_BILLING_PLAN_CODES.map((code) => {
       const definition = getHostedBillingPlanDefinition(code);
-      return [code, readEnv(source, definition.priceIdEnvKey)];
+      return [code, readEnv(source, selectEnvKey(definition))];
     }),
   ) as Record<HostedBillingPlanCode, string | null>;
 }
