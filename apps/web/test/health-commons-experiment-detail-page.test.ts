@@ -58,13 +58,14 @@ describe("ExperimentDetailPage", () => {
       title: "Finnish Dry Sauna",
     }));
     expect(clientExperiment.researchStats).toEqual(expect.arrayContaining([
-      expect.objectContaining({ label: "CITED SOURCES" }),
-      expect.objectContaining({ label: "JOURNAL ARTICLES" }),
-      expect.objectContaining({ label: "RESEARCH YEARS" }),
+      expect.objectContaining({ label: "STUDIES", value: 81 }),
+      expect.objectContaining({ label: "REVIEWS", value: 17 }),
+      expect.objectContaining({ label: "JOURNAL ARTICLES", value: 64 }),
+      expect.objectContaining({ label: "RESEARCH YEARS", value: "1979–2026" }),
     ]));
-    expect(clientExperiment.studies.length).toBeGreaterThan(0);
+    expect(clientExperiment.studies).toHaveLength(81);
     expect(clientExperiment.studies[0]).toEqual(expect.objectContaining({
-      title: expect.any(String),
+      title: "Health effects and risks of sauna bathing",
       type: expect.any(String),
     }));
     expect(markup).toContain('data-experiment-id="finnish-sauna"');

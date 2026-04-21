@@ -139,6 +139,7 @@ function toExperimentDetail(
     entityTypes: ["source_artifact"],
     relationTypes: ["cites"],
   });
+  const citedStudySources = citedSources.filter(isStudySource);
   const biomarkerEntities = listProtocolBiomarkers(protocol, catalog);
   const sourcePeople = catalog.listRelated({
     entity: protocol,
@@ -154,7 +155,7 @@ function toExperimentDetail(
     image: resolveProtocolImage(protocol),
     durationDays: testPlan?.durationDays ?? protocolSpecDurationDays(protocolSpec),
     baselineDays: testPlan?.baselineDays ?? 0,
-    studyCount: citedSources.length,
+    studyCount: citedStudySources.length,
     evidenceLevel: QUALITY_TO_EVIDENCE_LEVEL[protocol.quality ?? ""] ?? 2,
     evidenceLabel: formatEvidenceLabel(protocol),
     description: protocol.summary ?? summarizeBody(protocol.body),
@@ -162,11 +163,8 @@ function toExperimentDetail(
     protocol: toProtocolSteps(protocolSpec),
     whyItWorks: toWhyItWorks(protocol, claims),
     experts: sourcePeople.map(toExpert),
-    researchStats: toResearchStats(citedSources),
-    studies: citedSources
-      .filter((entity) => entity.source?.kind !== "other")
-      .slice(0, 6)
-      .map(toStudy),
+    researchStats: toResearchStats(citedStudySources),
+    studies: sortStudySourcesForDisplay(citedStudySources).map(toStudy),
     safety: toSafety(safety),
     commons: {
       aliases: buildProtocolRouteAliases(protocol),
@@ -337,6 +335,64 @@ function toExpert(entity: HealthCommonsEntity): Expert {
   };
 }
 
+function sortStudySourcesForDisplay(
+  sources: readonly HealthCommonsEntity[],
+): HealthCommonsEntity[] {
+  return [...sources].sort((left, right) => {
+    const rankDelta = studyDisplayRank(left) - studyDisplayRank(right);
+    if (rankDelta !== 0) {
+      return rankDelta;
+    }
+
+    const leftYear = left.source?.year ?? Number.MAX_SAFE_INTEGER;
+    const rightYear = right.source?.year ?? Number.MAX_SAFE_INTEGER;
+    if (leftYear !== rightYear) {
+      return leftYear - rightYear;
+    }
+
+    return left.title.localeCompare(right.title);
+  });
+}
+
+function studyDisplayRank(entity: HealthCommonsEntity): number {
+  const bucket = typeof entity.evidenceBucket === "string"
+    ? entity.evidenceBucket.toLowerCase()
+    : "";
+  const priority = typeof entity.murphV1Priority === "string"
+    ? entity.murphV1Priority.toLowerCase()
+    : "";
+
+  if (bucket.includes("evidence backbone")) {
+    return 0;
+  }
+
+  if (priority === "high") {
+    return 1;
+  }
+
+  if (bucket.includes("long-term finnish cohort")) {
+    return 2;
+  }
+
+  if (bucket.includes("acute") || bucket.includes("mechanistic")) {
+    return 3;
+  }
+
+  if (bucket.includes("intervention") || bucket.includes("reality")) {
+    return 4;
+  }
+
+  if (priority === "medium") {
+    return 5;
+  }
+
+  return 6;
+}
+
+function isStudySource(entity: HealthCommonsEntity): boolean {
+  return entity.source?.kind !== undefined && entity.source.kind !== "other";
+}
+
 function toStudy(entity: HealthCommonsEntity): Study {
   const source = entity.source;
 
@@ -407,7 +463,7 @@ function toResearchStats(
         : `${years[0]}–${years[years.length - 1]}`;
 
   return [
-    { label: "CITED SOURCES", value: citedSources.length },
+    { label: "STUDIES", value: citedSources.length },
     { label: "REVIEWS", value: reviewCount },
     { label: "JOURNAL ARTICLES", value: journalArticleCount },
     { label: "RESEARCH YEARS", value: researchYears },

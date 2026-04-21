@@ -1,0 +1,48 @@
+---
+schemaVersion: murph.commons.page.v1
+entityType: source_artifact
+key: source_artifact:sauna-1986-kauppinen-man-in-the-sauna-review-article
+slug: sources/sauna/sauna-1986-kauppinen-man-in-the-sauna-review-article
+title: "Man in the sauna. Review article"
+summary: "Finnish dry-sauna bibliography record (likely focus) used as supporting general / mixed evidence for protocol context and guardrails."
+status: draft
+quality: usable
+categories:
+  - sauna
+  - review
+  - general-mixed
+relations:
+  -
+    type: related_protocol
+    target: protocol_variant:dry-sauna/murph-finnish-standard-3x-week
+  -
+    type: parent_family
+    target: experiment_family:dry-sauna
+source:
+  kind: review
+  title: "Man in the sauna. Review article"
+  authors: "Kauppinen K, Vuori I"
+  year: 1986
+  journal: "Ann Clin Res"
+  citation: "Kauppinen K, Vuori I. Man in the sauna. Review article. Ann Clin Res 1986;18:173-185."
+evidenceBucket: Finnish dry-sauna corpus
+whyItMatters: "Expands the audited Finnish dry-sauna evidence corpus with a general / mixed record marked medium priority for Murph v1 interpretation."
+potentialMurphEndpoints:
+  - supporting corpus context
+protocolTakeaway: "Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes."
+studyDesign: "Review / meta"
+modality: "Sauna (unspecified / likely dry)"
+finnishDrySaunaFocus: "Likely"
+murphV1Priority: "Medium"
+sourceUrlCurationNote: Workbook source URL points to a bibliography or review backbone rather than a direct article landing page, so the public source link is intentionally omitted from the app card.
+---
+
+This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.
+
+**Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a general / mixed record marked medium priority for Murph v1 interpretation.
+
+**Potential Murph endpoints/context:** supporting corpus context
+
+**Protocol takeaway:** Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes.
+
+The workbook linked this record through a review or bibliography backbone rather than a direct article page. Keep it in the corpus, but do not show a potentially misleading outbound source link in the product UI.
