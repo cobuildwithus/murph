@@ -110,6 +110,43 @@ function expectRecord<T>(value: unknown): T {
   return value as T;
 }
 
+function invalidTestValue<T>(value: unknown): T {
+  return value as T;
+}
+
+type WriteBatchPrototypeMethodMap = {
+  applyDelete: (this: WriteBatch, index: number, action: unknown) => Promise<void>;
+  applyJsonlAppend: (this: WriteBatch, action: unknown) => Promise<void>;
+  applyTextWrite: (this: WriteBatch, index: number, action: unknown) => Promise<void>;
+};
+
+function assertWriteBatchPrototypeMethod<T extends (...args: never[]) => Promise<void>>(
+  value: unknown,
+  methodName: string,
+): asserts value is T {
+  if (typeof value !== "function") {
+    throw new TypeError(`Expected WriteBatch.prototype.${methodName} to be a function.`);
+  }
+}
+
+function getWriteBatchPrototypeMethod<TName extends keyof WriteBatchPrototypeMethodMap>(
+  methodName: TName,
+): WriteBatchPrototypeMethodMap[TName] {
+  const method = Reflect.get(WriteBatch.prototype, methodName);
+  assertWriteBatchPrototypeMethod<WriteBatchPrototypeMethodMap[TName]>(
+    method,
+    methodName,
+  );
+  return method;
+}
+
+function setWriteBatchPrototypeMethod<TName extends keyof WriteBatchPrototypeMethodMap>(
+  methodName: TName,
+  method: WriteBatchPrototypeMethodMap[TName],
+): void {
+  Reflect.set(WriteBatch.prototype, methodName, method);
+}
+
 function asAuditLikeRecord(value: unknown): {
   action?: string;
   commandName?: string;
@@ -1260,8 +1297,8 @@ test("importSamples normalizes uppercase unit aliases and falls back invalid sou
     vaultRoot,
     stream: "glucose",
     unit: "MG/DL",
-    source: 42 as unknown as string,
-    quality: { invalid: true } as unknown as string,
+    source: invalidTestValue<string>(42),
+    quality: invalidTestValue<string>({ invalid: true }),
     samples: [
       {
         recordedAt: "2026-01-15T10:00:00.000Z",
@@ -1309,7 +1346,7 @@ test("importSamples rejects invalid sample objects and unsupported units", async
         vaultRoot,
         stream: "heart_rate",
         unit: "bpm",
-        samples: [null] as unknown as Array<Record<string, unknown>>,
+        samples: invalidTestValue<Array<Record<string, unknown>>>([null]),
       }),
     (error: unknown) => error instanceof VaultError && error.code === "VAULT_INVALID_SAMPLE",
   );
@@ -1990,7 +2027,7 @@ test("jsonl helpers reject non-object writes and surface invalid JSON line numbe
       appendJsonlRecord({
         vaultRoot,
         relativePath: "audit/2026/invalid.jsonl",
-        record: ["not", "an", "object"] as unknown as Record<string, unknown>,
+        record: invalidTestValue<Record<string, unknown>>(["not", "an", "object"]),
       }),
     (error: unknown) =>
       error instanceof VaultError && error.code === "VAULT_INVALID_RECORD",
@@ -3422,18 +3459,10 @@ test("applyCanonicalWriteBatch rolls back vault summary writes when a later text
     },
     body: parsedCore.body.replace(/^# .*$/mu, `# ${nextTitle}`),
   });
-  const originalApplyTextWrite = (
-    WriteBatch.prototype as unknown as {
-      applyTextWrite: (index: number, action: unknown) => Promise<void>;
-    }
-  ).applyTextWrite;
+  const originalApplyTextWrite = getWriteBatchPrototypeMethod("applyTextWrite");
   let textWriteCalls = 0;
 
-  (
-    WriteBatch.prototype as unknown as {
-      applyTextWrite: (index: number, action: unknown) => Promise<void>;
-    }
-  ).applyTextWrite = async function applyTextWriteWithFailure(index: number, action: unknown) {
+  setWriteBatchPrototypeMethod("applyTextWrite", async function applyTextWriteWithFailure(index: number, action: unknown) {
     textWriteCalls += 1;
 
     if (textWriteCalls === 2) {
@@ -3441,7 +3470,7 @@ test("applyCanonicalWriteBatch rolls back vault summary writes when a later text
     }
 
     return originalApplyTextWrite.call(this, index, action);
-  };
+  });
 
   try {
     await assert.rejects(
@@ -3480,11 +3509,7 @@ test("applyCanonicalWriteBatch rolls back vault summary writes when a later text
       /injected text write failure/u,
     );
   } finally {
-    (
-      WriteBatch.prototype as unknown as {
-        applyTextWrite: (index: number, action: unknown) => Promise<void>;
-      }
-    ).applyTextWrite = originalApplyTextWrite;
+    setWriteBatchPrototypeMethod("applyTextWrite", originalApplyTextWrite);
   }
 
   assert.equal(await fs.readFile(metadataAbsolutePath, "utf8"), originalMetadata);
@@ -3511,19 +3536,11 @@ test("applyCanonicalWriteBatch rolls back experiment markdown when the lifecycle
     vaultRoot,
     relativePath: ledgerRelativePath,
   });
-  const originalApplyJsonlAppend = (
-    WriteBatch.prototype as unknown as {
-      applyJsonlAppend: (index: number, action: unknown) => Promise<void>;
-    }
-  ).applyJsonlAppend;
+  const originalApplyJsonlAppend = getWriteBatchPrototypeMethod("applyJsonlAppend");
 
-  (
-    WriteBatch.prototype as unknown as {
-      applyJsonlAppend: (index: number, action: unknown) => Promise<void>;
-    }
-  ).applyJsonlAppend = async function applyJsonlAppendWithFailure() {
+  setWriteBatchPrototypeMethod("applyJsonlAppend", async function applyJsonlAppendWithFailure() {
     throw new Error("injected jsonl append failure");
-  };
+  });
 
   try {
     await assert.rejects(
@@ -3567,11 +3584,7 @@ test("applyCanonicalWriteBatch rolls back experiment markdown when the lifecycle
       /injected jsonl append failure/u,
     );
   } finally {
-    (
-      WriteBatch.prototype as unknown as {
-        applyJsonlAppend: (index: number, action: unknown) => Promise<void>;
-      }
-    ).applyJsonlAppend = originalApplyJsonlAppend;
+    setWriteBatchPrototypeMethod("applyJsonlAppend", originalApplyJsonlAppend);
   }
 
   assert.equal(await fs.readFile(experimentAbsolutePath, "utf8"), originalExperimentMarkdown);
@@ -3595,21 +3608,13 @@ test("applyCanonicalWriteBatch rolls back provider slug renames when deleting th
   const alphaAbsolutePath = path.join(vaultRoot, alphaRelativePath);
   const betaAbsolutePath = path.join(vaultRoot, betaRelativePath);
   const alphaMarkdown = "---\nproviderId: prov_alpha\nslug: alpha\ntitle: Alpha Clinic\n---\n# Alpha Clinic\n";
-  const originalApplyDelete = (
-    WriteBatch.prototype as unknown as {
-      applyDelete: (index: number, action: unknown) => Promise<void>;
-    }
-  ).applyDelete;
+  const originalApplyDelete = getWriteBatchPrototypeMethod("applyDelete");
 
   await fs.mkdir(path.dirname(alphaAbsolutePath), { recursive: true });
   await fs.writeFile(alphaAbsolutePath, alphaMarkdown, "utf8");
-  (
-    WriteBatch.prototype as unknown as {
-      applyDelete: (index: number, action: unknown) => Promise<void>;
-    }
-  ).applyDelete = async function applyDeleteWithFailure() {
+  setWriteBatchPrototypeMethod("applyDelete", async function applyDeleteWithFailure() {
     throw new Error("injected delete failure");
-  };
+  });
 
   try {
     await assert.rejects(
@@ -3640,11 +3645,7 @@ test("applyCanonicalWriteBatch rolls back provider slug renames when deleting th
       /injected delete failure/u,
     );
   } finally {
-    (
-      WriteBatch.prototype as unknown as {
-        applyDelete: (index: number, action: unknown) => Promise<void>;
-      }
-    ).applyDelete = originalApplyDelete;
+    setWriteBatchPrototypeMethod("applyDelete", originalApplyDelete);
   }
 
   assert.equal(await fs.readFile(alphaAbsolutePath, "utf8"), alphaMarkdown);
@@ -4029,7 +4030,7 @@ test("mutation helpers reject empty meal imports and invalid sample batches", as
         vaultRoot,
         stream: "heart_rate",
         unit: "bpm",
-        samples: null as unknown as Array<Record<string, unknown>>,
+        samples: invalidTestValue<Array<Record<string, unknown>>>(null),
       }),
     (error: unknown) =>
       error instanceof VaultError && error.code === "VAULT_INVALID_SAMPLES",
@@ -4107,7 +4108,7 @@ test("importSamples validates the full batch before copying raw artifacts or app
         stream: "heart_rate",
         unit: "bpm",
         sourcePath: csvPath,
-        samples: [
+        samples: invalidTestValue<Array<Record<string, unknown>>>([
           {
             recordedAt: "2026-03-12T08:00:00.000Z",
             value: 61,
@@ -4116,7 +4117,7 @@ test("importSamples validates the full batch before copying raw artifacts or app
             recordedAt: "2026-03-12T08:01:00.000Z",
             value: "not-a-number",
           },
-        ] as unknown as Array<Record<string, unknown>>,
+        ]),
       }),
     (error: unknown) =>
       error instanceof VaultError && error.code === "VAULT_INVALID_SAMPLE",

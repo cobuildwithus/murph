@@ -39,6 +39,10 @@ const VALID_DEVICE_RAW_ARTIFACT = {
   },
 };
 
+function invalidTestValue<T>(value: unknown): T {
+  return value as T;
+}
+
 async function createTestVaultRoot(): Promise<string> {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-core-device-batch-"));
   createdVaultRoots.push(vaultRoot);
@@ -60,7 +64,7 @@ describe("importDeviceBatch", () => {
       importDeviceBatch({
         vaultRoot,
         provider: "oura",
-        events: { kind: "observation" } as unknown as typeof VALID_DEVICE_EVENT[],
+        events: invalidTestValue<typeof VALID_DEVICE_EVENT[]>({ kind: "observation" }),
         samples: [VALID_DEVICE_SAMPLE],
       }),
     ).rejects.toMatchObject({
@@ -76,7 +80,7 @@ describe("importDeviceBatch", () => {
         vaultRoot,
         provider: "oura",
         events: [VALID_DEVICE_EVENT],
-        samples: { stream: "heart_rate" } as unknown as typeof VALID_DEVICE_SAMPLE[],
+        samples: invalidTestValue<typeof VALID_DEVICE_SAMPLE[]>({ stream: "heart_rate" }),
       }),
     ).rejects.toMatchObject({
       code: "VAULT_INVALID_DEVICE_SAMPLES",
@@ -91,7 +95,7 @@ describe("importDeviceBatch", () => {
         vaultRoot,
         provider: "oura",
         events: [VALID_DEVICE_EVENT],
-        rawArtifacts: { role: "provider-snapshot" } as unknown as typeof VALID_DEVICE_RAW_ARTIFACT[],
+        rawArtifacts: invalidTestValue<typeof VALID_DEVICE_RAW_ARTIFACT[]>({ role: "provider-snapshot" }),
       }),
     ).rejects.toMatchObject({
       code: "VAULT_INVALID_DEVICE_RAW_ARTIFACTS",
