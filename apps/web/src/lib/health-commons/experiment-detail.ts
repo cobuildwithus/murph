@@ -98,11 +98,11 @@ const PROTOCOL_BIOMARKER_DISPLAY_HINT_OVERRIDES: Record<
 > = {
   "protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed": {
     "biomarker:deep-sleep-minutes": {
-      expected: "Uncertain maybe",
+      expected: "Uncertain",
       protocolProminence: "context",
     },
     "biomarker:hrv-rmssd": {
-      expected: "Uncertain maybe",
+      expected: "Uncertain",
       protocolProminence: "context",
     },
     "biomarker:resting-heart-rate": {

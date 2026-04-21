@@ -101,7 +101,7 @@ describe("ProtocolTab", () => {
     expect(markup).toContain("Deep Sleep Minutes");
     expect(markup).toContain("HRV / RMSSD");
     expect(markup).toContain("Sleep Onset Latency");
-    expect(markup).toContain("Uncertain maybe");
+    expect(countOccurrences(markup, "Uncertain")).toBe(2);
     expect(markup).toContain("May fall asleep sooner");
   });
 
