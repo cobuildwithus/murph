@@ -19,6 +19,7 @@ describe("StudyCard", () => {
         population: "Moderately trained men",
         duration: "8-week training intervention",
         designLabel: "Four-arm randomized training trial",
+        url: "https://example.com/study",
         finding: "Canonical small RCT supporting the Norwegian 4x4 dose.",
         last: true,
       }),
@@ -27,27 +28,33 @@ describe("StudyCard", () => {
     expect(markup).toContain(">2007<");
     expect(markup).toContain("n=40");
     expect(markup).toContain("23 studies");
-    expect(markup).toContain("Canonical small RCT supporting the Norwegian 4x4 dose.");
-    expect(markup).toContain('class="max-w-[34ch] line-clamp-1 pt-1 text-[11px]/4 text-muted-foreground/85"');
     expect(markup).toContain('data-slot="collapsible"');
-    expect(markup).toContain('data-slot="collapsible-trigger"');
+    expect(markup).toContain('data-slot="study-card-trigger"');
     expect(markup).toContain('aria-expanded="false"');
-    expect(markup).toContain('class="mt-0.5 text-[11px]/4 text-muted-foreground/70"');
-    expect(markup).toContain(
-      "J Helgerud · Medicine and Science in Sports and Exercise · Moderately trained men · 8-week training intervention",
-    );
+    expect(markup).toContain('class="mt-1 text-[11px]/4 text-muted-foreground/70"');
+    expect(markup).toContain(">J Helgerud<");
+    expect(markup).toContain('href="https://example.com/study"');
+    expect(markup).toContain(">Source ↗<");
     expect(countOccurrences(markup, "2007")).toBe(1);
     expect(markup.indexOf("n=40")).toBeLessThan(markup.indexOf("2007"));
     expect(markup.indexOf("23 studies")).toBeGreaterThan(markup.indexOf("n=40"));
     expect(
-      markup.indexOf("Canonical small RCT supporting the Norwegian 4x4 dose."),
+      markup.indexOf("J Helgerud"),
     ).toBeLessThan(
       markup.indexOf(
-        "J Helgerud · Medicine and Science in Sports and Exercise · Moderately trained men · 8-week training intervention",
+        "Source ↗",
       ),
     );
-    expect(markup).not.toContain("Medicine and Science in Sports and Exercise · 2007");
-    expect(markup).not.toContain("23 studies · n=40");
+    expect(
+      markup.indexOf("Source ↗"),
+    ).toBeGreaterThan(
+      markup.indexOf("J Helgerud"),
+    );
+    expect(markup).not.toContain("line-clamp-1");
+    expect(markup).not.toContain("Canonical small RCT supporting the Norwegian 4x4 dose.");
+    expect(markup).not.toContain("Medicine and Science in Sports and Exercise");
+    expect(markup).not.toContain("Moderately trained men");
+    expect(markup).not.toContain("8-week training intervention");
   });
 
   it("uses n= for approximate participant counts", () => {
@@ -68,7 +75,7 @@ describe("StudyCard", () => {
     expect(markup).not.toContain("n≈2,138");
   });
 
-  it("dedupes repeated metadata labels such as a single-person author's name matching the population", () => {
+  it("renders the author label without the removed metadata strip", () => {
     const markup = renderToStaticMarkup(
       createElement(StudyCard, {
         type: "N1",
@@ -83,12 +90,9 @@ describe("StudyCard", () => {
       }),
     );
 
-    expect(markup).toContain(
-      "Bryan Johnson · Substack Post · 14-day intervention window",
-    );
-    expect(markup).not.toContain(
-      "Bryan Johnson · Substack Post · Bryan Johnson",
-    );
+    expect(markup).toContain("> Bryan Johnson <");
+    expect(markup).not.toContain("Substack Post");
+    expect(markup).not.toContain("14-day intervention window");
     expect(countOccurrences(markup, "Bryan Johnson")).toBe(1);
   });
 
@@ -109,9 +113,10 @@ describe("StudyCard", () => {
 
     expect(markup).not.toContain("line-clamp-1");
     expect(markup).not.toContain('data-slot="collapsible-content"');
-    expect(markup).toContain(
-      "A Cohort Team · Example Journal · Adults · Long-term follow-up",
-    );
+    expect(markup).toContain(">A Cohort Team<");
+    expect(markup).not.toContain("Example Journal");
+    expect(markup).not.toContain("Adults");
+    expect(markup).not.toContain("Long-term follow-up");
   });
 });
 
