@@ -62,11 +62,12 @@ test("ExperimentsPage renders the public library with private browser-vault over
   const markup = renderToStaticMarkup(createElement(ExperimentsPage));
 
   assert.match(markup, /Library · 4 experiments/);
-  assert.match(markup, /Browse public experiments, with your private run state layered in when Murph has browser-vault data\./);
+  assert.match(markup, /Browse the public library\. When Murph has browser-vault data, your private run state appears on the matching cards\./);
   assert.match(markup, /Finnish Dry Sauna/);
   assert.match(markup, /Morning walk/);
   assert.match(markup, /Private only run/);
-  assert.match(markup, /2 with data/);
+  assert.doesNotMatch(markup, /with data/);
+  assert.doesNotMatch(markup, /shown/);
   assert.match(markup, /Short walks are helping with afternoon energy\./);
 });
 
