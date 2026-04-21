@@ -94,11 +94,11 @@ export function hasExplicitSetupAssistantOptions(
       options.assistantBaseUrl ||
       options.assistantApiKeyEnv ||
       options.assistantProviderName ||
+      options.assistantZeroDataRetention !== undefined ||
       options.assistantCodexCommand ||
       options.assistantCodexHome ||
       options.assistantProfile ||
       options.assistantReasoningEffort ||
-      options.assistantZeroDataRetention ||
       options.assistantOss,
   )
 }
@@ -129,7 +129,7 @@ export function inferSetupAssistantPresetFromOptions(
     options.assistantBaseUrl ||
     options.assistantApiKeyEnv ||
     options.assistantProviderName ||
-    options.assistantZeroDataRetention
+    options.assistantZeroDataRetention !== undefined
   ) {
     return 'openai-compatible'
   }
@@ -288,7 +288,7 @@ export function createSetupAssistantResolver(
             resolutionInput.options.assistantReasoningEffort,
           )
           const explicitZeroDataRetention =
-            resolutionInput.options.assistantZeroDataRetention === true
+            resolutionInput.options.assistantZeroDataRetention
 
           const explicitProviderPreset = resolveOpenAICompatibleProviderPresetFromId(
             normalizeNullableString(resolutionInput.options.assistantProviderPreset),
@@ -372,7 +372,7 @@ export function createSetupAssistantResolver(
             )
           }
           if (
-            explicitZeroDataRetention &&
+            explicitZeroDataRetention === true &&
             !targetCapabilities.supportsZeroDataRetention
           ) {
             throw new Error(
@@ -395,7 +395,9 @@ export function createSetupAssistantResolver(
             sandbox: null,
             approvalPolicy: null,
             oss: false,
-            ...(explicitZeroDataRetention ? { zeroDataRetention: true } : {}),
+            ...(explicitZeroDataRetention !== undefined
+              ? { zeroDataRetention: explicitZeroDataRetention }
+              : {}),
             account: null,
             detail: buildOpenAICompatibleAssistantDetail({
               apiKeyEnv,

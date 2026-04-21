@@ -147,13 +147,15 @@ export function inferAssistantProviderFromConfigInput(
 export function normalizeAssistantProviderConfig(
   input: AssistantProviderConfigLike | null | undefined,
 ): AssistantProviderConfig {
-  if (isAssistantProviderConfig(input)) {
-    return input
-  }
+  const providerConfigInput = isAssistantProviderConfig(input)
+    ? assistantProviderConfigToInput(input)
+    : input
 
   return sanitizeAssistantProviderConfig(
-    resolveAssistantProvider(resolveAssistantProviderForNormalization(input)),
-    input,
+    resolveAssistantProvider(
+      resolveAssistantProviderForNormalization(providerConfigInput),
+    ),
+    providerConfigInput,
   )
 }
 
@@ -539,6 +541,40 @@ function normalizeAssistantPresetId(
   value: SetupAssistantProviderPreset | string | null | undefined,
 ): SetupAssistantProviderPreset | null {
   return resolveOpenAICompatibleProviderPresetFromId(value)?.id ?? null
+}
+
+function assistantProviderConfigToInput(
+  config: AssistantProviderConfig,
+): AssistantProviderConfigInput {
+  switch (config.target.kind) {
+    case 'codex-cli':
+      return {
+        provider: 'codex-cli',
+        approvalPolicy: config.policy.approvalPolicy,
+        codexCommand: config.target.codexCommand,
+        codexHome: config.target.codexHome,
+        model: config.target.model,
+        oss: config.target.oss,
+        profile: config.target.profile,
+        reasoningEffort: config.policy.reasoningEffort,
+        sandbox: config.policy.sandbox,
+      }
+    case 'responses':
+    case 'openai-compatible':
+    default:
+      return {
+        provider: 'openai-compatible',
+        apiKeyEnv: config.target.apiKeyEnv,
+        baseUrl: config.target.baseUrl,
+        headers: config.target.headers,
+        model: config.target.model,
+        presetId: config.target.presetId,
+        providerName: config.target.providerName,
+        reasoningEffort: config.policy.reasoningEffort,
+        webSearch: config.policy.webSearch,
+        zeroDataRetention: config.policy.zeroDataRetention === true ? true : null,
+      }
+  }
 }
 
 function isAssistantProviderConfig(
