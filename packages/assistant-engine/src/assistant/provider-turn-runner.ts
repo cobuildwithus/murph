@@ -127,17 +127,17 @@ export interface AssistantProviderTurnExecutionProfile {
   toolProfile?: AssistantProviderTurnToolProfile
 }
 
-export interface AssistantOnboardingInjectionPlan {
+export interface AssistantProviderTurnContinuityPlan {
   earlySessionOnboardingInjected: boolean
   resumeProviderSessionId: string | null
   shouldInjectBootstrapContext: boolean
 }
 
-export function resolveAssistantOnboardingInjectionPlan(input: {
+export function resolveAssistantProviderTurnContinuityPlan(input: {
   candidateResumeProviderSessionId: string | null
   earlySessionOnboardingEligible: boolean
   promptProfile: AssistantProviderTurnPromptProfile
-}): AssistantOnboardingInjectionPlan {
+}): AssistantProviderTurnContinuityPlan {
   const resumeProviderSessionId = input.candidateResumeProviderSessionId
   const shouldInjectBootstrapContext = resumeProviderSessionId === null
   const earlySessionOnboardingInjected =
@@ -153,7 +153,6 @@ export function resolveAssistantOnboardingInjectionPlan(input: {
 }
 
 const ASSISTANT_BOOTSTRAP_TRANSCRIPT_REPLAY_MESSAGE_LIMIT = 100
-const ASSISTANT_NATIVE_RESUME_TRANSCRIPT_REPLAY_MESSAGE_LIMIT = 20
 
 function resolveAssistantProviderTurnExecutionProfile(
   profile: AssistantProviderTurnExecutionProfile | null | undefined,
@@ -423,28 +422,28 @@ async function resolveAssistantRouteTurnPlan(input: {
           provider: input.route.provider,
         })
       : null
-  const onboardingInjectionPlan = resolveAssistantOnboardingInjectionPlan({
+  const continuityPlan = resolveAssistantProviderTurnContinuityPlan({
     candidateResumeProviderSessionId,
     earlySessionOnboardingEligible: input.sharedPlan.earlySessionOnboardingEligible,
     promptProfile: input.profile.promptProfile,
   })
-  const resumeProviderSessionId = onboardingInjectionPlan.resumeProviderSessionId
-  const shouldInjectBootstrapContext = onboardingInjectionPlan.shouldInjectBootstrapContext
+  const resumeProviderSessionId = continuityPlan.resumeProviderSessionId
+  const shouldInjectBootstrapContext = continuityPlan.shouldInjectBootstrapContext
+  const shouldPrepareBootstrapContext =
+    shouldInjectBootstrapContext ||
+    (resumeProviderSessionId !== null &&
+      providerUsesFlatPrompt(routeProviderCapabilities))
   const resolvedChannel = input.input.channel ?? input.session.binding.channel
   const diagnosticsPolicy = resolveAssistantDiagnosticsPolicy({
     channel: resolvedChannel,
     executionContext: input.input.executionContext,
   })
   const shouldInjectEarlySessionOnboarding =
-    onboardingInjectionPlan.earlySessionOnboardingInjected
+    continuityPlan.earlySessionOnboardingInjected
   const providerCapabilities = routeProviderCapabilities
-  const transcriptReplayLimit = shouldInjectBootstrapContext
+  const transcriptReplayLimit = shouldPrepareBootstrapContext
     ? ASSISTANT_BOOTSTRAP_TRANSCRIPT_REPLAY_MESSAGE_LIMIT
-    : shouldReplayAssistantTranscriptOnNativeResume(
-          input.route.providerOptions.resumeKind,
-        )
-      ? ASSISTANT_NATIVE_RESUME_TRANSCRIPT_REPLAY_MESSAGE_LIMIT
-      : null
+    : null
   const conversationMessages = transcriptReplayLimit
     ? removeTrailingCurrentUserPrompt(
         await loadAssistantConversationMessages({
@@ -460,7 +459,7 @@ async function resolveAssistantRouteTurnPlan(input: {
     toolCatalog: input.toolCatalog,
   })
   const assistantCliContract =
-    shouldInjectBootstrapContext && input.profile.promptProfile === 'conversation'
+    shouldPrepareBootstrapContext && input.profile.promptProfile === 'conversation'
       ? await resolveAssistantCliSurfaceBootstrapContext({
           cliEnv: input.sharedPlan.cliAccess.env,
           executionContext: input.input.executionContext,
@@ -469,7 +468,7 @@ async function resolveAssistantRouteTurnPlan(input: {
           workingDirectory,
         })
       : null
-  const vaultOverview = shouldInjectBootstrapContext
+  const vaultOverview = shouldPrepareBootstrapContext
     ? await resolveAssistantVaultOverviewBlock(input.input.vault)
     : null
 
@@ -481,7 +480,7 @@ async function resolveAssistantRouteTurnPlan(input: {
     diagnosticsPolicy,
     earlySessionOnboardingInjected: shouldInjectEarlySessionOnboarding,
     resumeProviderSessionId,
-    sessionContext: shouldInjectBootstrapContext
+    sessionContext: shouldPrepareBootstrapContext
       ? {
           binding: input.session.binding,
         }
@@ -1132,10 +1131,10 @@ function truncateAssistantContinuityText(text: string): string {
   return `${normalized.slice(0, 397)}...`
 }
 
-function shouldReplayAssistantTranscriptOnNativeResume(
-  resumeKind: AssistantProviderSessionOptions['resumeKind'],
+function providerUsesFlatPrompt(
+  capabilities: ReturnType<typeof resolveAssistantProviderTargetExecutionCapabilities>,
 ): boolean {
-  return resumeKind === 'codex-session'
+  return capabilities.requestFormat === 'flat-prompt'
 }
 
 async function loadAssistantConversationMessages(input: {

@@ -14,7 +14,7 @@ import {
   saveAssistantSession,
 } from '../src/assistant/store.js'
 import {
-  resolveAssistantOnboardingInjectionPlan,
+  resolveAssistantProviderTurnContinuityPlan,
 } from '../src/assistant/provider-turn-runner.js'
 import {
   isAssistantSessionFreshForOnboarding,
@@ -115,7 +115,7 @@ describe('assistant onboarding prompt injection', () => {
 
   it('preserves native resume even when the first-session onboarding gate is otherwise eligible', () => {
     expect(
-      resolveAssistantOnboardingInjectionPlan({
+      resolveAssistantProviderTurnContinuityPlan({
         candidateResumeProviderSessionId: 'provider-session-1',
         earlySessionOnboardingEligible: true,
         promptProfile: 'conversation',
@@ -126,7 +126,7 @@ describe('assistant onboarding prompt injection', () => {
       shouldInjectBootstrapContext: false,
     })
     expect(
-      resolveAssistantOnboardingInjectionPlan({
+      resolveAssistantProviderTurnContinuityPlan({
         candidateResumeProviderSessionId: 'provider-session-1',
         earlySessionOnboardingEligible: true,
         promptProfile: 'notification-decision',

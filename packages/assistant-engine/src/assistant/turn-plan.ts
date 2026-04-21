@@ -43,12 +43,12 @@ export async function resolveAssistantTurnSharedPlan(
         })
       : []
   const earlySessionOnboardingEligible =
-    input.includeEarlySessionOnboarding === true &&
-    (await isAssistantEarlySessionOnboardingEligible({
+    await resolveAssistantEarlySessionOnboardingEligible({
       firstContactStateDocIds,
+      includeEarlySessionOnboarding: input.includeEarlySessionOnboarding === true,
       session: resolved.session,
       vault: input.vault,
-    }))
+    })
   return {
     allowSensitiveHealthContext: conversationPolicy.allowSensitiveHealthContext,
     cliAccess,
@@ -61,30 +61,50 @@ export async function resolveAssistantTurnSharedPlan(
   }
 }
 
-export async function isAssistantEarlySessionOnboardingEligible(input: {
-  firstContactStateDocIds?: readonly string[]
+export async function resolveAssistantEarlySessionOnboardingEligible(input: {
+  firstContactStateDocIds: readonly string[]
+  includeEarlySessionOnboarding: boolean
   session: AssistantSession
   vault: string
 }): Promise<boolean> {
-  if (!isAssistantSessionFreshForOnboarding(input.session)) {
+  if (!input.includeEarlySessionOnboarding || input.session.turnCount !== 0) {
     return false
   }
 
-  const firstContactStateDocIds = input.firstContactStateDocIds ?? []
-  if (
-    firstContactStateDocIds.length > 0 &&
-    (await hasAssistantSeenFirstContact({
-      docIds: firstContactStateDocIds,
-      vault: input.vault,
-    }))
-  ) {
-    return false
-  }
+  const firstContactAlreadySeen =
+    input.firstContactStateDocIds.length > 0
+      ? await hasAssistantSeenFirstContact({
+          docIds: input.firstContactStateDocIds,
+          vault: input.vault,
+        })
+      : false
+  const isFirstSessionForOnboarding = firstContactAlreadySeen
+    ? false
+    : await isAssistantFirstSessionForOnboarding({
+        session: input.session,
+        vault: input.vault,
+      })
 
-  return await isAssistantFirstSessionForOnboarding({
-    session: input.session,
-    vault: input.vault,
+  return resolveAssistantEarlySessionOnboardingEligibility({
+    firstContactAlreadySeen,
+    includeEarlySessionOnboarding: input.includeEarlySessionOnboarding,
+    isFirstSessionForOnboarding,
+    sessionTurnCount: input.session.turnCount,
   })
+}
+
+export function resolveAssistantEarlySessionOnboardingEligibility(input: {
+  firstContactAlreadySeen: boolean
+  includeEarlySessionOnboarding: boolean
+  isFirstSessionForOnboarding: boolean
+  sessionTurnCount: number
+}): boolean {
+  return (
+    input.includeEarlySessionOnboarding &&
+    input.sessionTurnCount === 0 &&
+    !input.firstContactAlreadySeen &&
+    input.isFirstSessionForOnboarding
+  )
 }
 
 export function isAssistantSessionFreshForOnboarding(

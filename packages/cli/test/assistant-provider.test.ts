@@ -648,10 +648,10 @@ test('executeAssistantProviderTurn dispatches to the Codex adapter and preserves
   assert.equal(call?.profile, 'primary')
   assert.equal(call?.oss, true)
   assert.doesNotMatch(call?.prompt ?? '', /system prompt/u)
-  assert.match(call?.prompt ?? '', /channel: telegram/u)
-  assert.match(call?.prompt ?? '', /thread: chat-123/u)
-  assert.match(call?.prompt ?? '', /Recent local conversation transcript/u)
-  assert.match(call?.prompt ?? '', /User message:\nhello/u)
+  assert.doesNotMatch(call?.prompt ?? '', /channel: telegram/u)
+  assert.doesNotMatch(call?.prompt ?? '', /thread: chat-123/u)
+  assert.doesNotMatch(call?.prompt ?? '', /Recent local conversation transcript/u)
+  assert.equal(call?.prompt, 'User message:\nhello')
   assert.deepEqual(result, {
     provider: 'codex-cli',
     providerSessionId: 'thread-123',
@@ -981,7 +981,7 @@ test('executeAssistantProviderTurn chains official OpenAI responses and stores t
   const generateCall = providerMocks.generateText.mock.calls[0]?.[0]
   assert.deepEqual(generateCall?.providerOptions, {
     openai: {
-      store: false,
+      store: true,
       previousResponseId: 'resp_prev',
     },
   })
@@ -1013,7 +1013,7 @@ test('executeAssistantProviderTurn forwards reasoning effort to official OpenAI 
   assert.deepEqual(generateCall?.providerOptions, {
     openai: {
       reasoningEffort: 'medium',
-      store: false,
+      store: true,
     },
   })
 })

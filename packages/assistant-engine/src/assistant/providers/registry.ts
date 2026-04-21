@@ -5,6 +5,7 @@ import {
   supportsAssistantNativeResume,
   supportsAssistantReasoningEffort,
   supportsAssistantZeroDataRetention,
+  type AssistantProviderConfig,
   type AssistantProviderConfigLike,
 } from '@murphai/operator-config/assistant/provider-config'
 import {
@@ -84,7 +85,7 @@ export function resolveAssistantProviderTargetCapabilities(
     ...resolveAssistantProviderDefinition(
       resolveAssistantChatProviderFromConfig(normalized),
     ).capabilities,
-    supportsNativeResume: supportsAssistantNativeResume(normalized),
+    supportsNativeResume: shouldAssistantProviderUseNativeResume(normalized),
     supportsReasoningEffort: supportsAssistantReasoningEffort(normalized),
     supportsZeroDataRetention: supportsAssistantZeroDataRetention(normalized),
   })
@@ -98,10 +99,19 @@ export function resolveAssistantProviderTargetExecutionCapabilities(
     ...resolveAssistantProviderDefinition(
       resolveAssistantChatProviderFromConfig(normalized),
     ).capabilities,
-    supportsNativeResume: supportsAssistantNativeResume(normalized),
+    supportsNativeResume: shouldAssistantProviderUseNativeResume(normalized),
     supportsReasoningEffort: supportsAssistantReasoningEffort(normalized),
     supportsZeroDataRetention: supportsAssistantZeroDataRetention(normalized),
   }
+}
+
+function shouldAssistantProviderUseNativeResume(
+  config: AssistantProviderConfig,
+): boolean {
+  return (
+    supportsAssistantNativeResume(config) &&
+    config.policy.zeroDataRetention !== true
+  )
 }
 
 export function resolveAssistantProviderLabel(

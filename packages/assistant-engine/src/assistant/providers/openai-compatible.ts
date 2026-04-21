@@ -29,12 +29,12 @@ import {
 import {
   isAssistantOpenAICompatibleTargetConfig,
   resolveAssistantChatProviderFromConfig,
-  type AssistantProviderConfig,
-  resolveAssistantProviderRuntimeTarget,
   shouldAssistantProviderUseGatewayWebSearch,
   shouldAssistantProviderUseMurphWebSearch,
   shouldAssistantProviderUseProviderWebSearch,
+  supportsAssistantNativeResume,
   supportsAssistantReasoningEffort,
+  type AssistantProviderConfig,
 } from '@murphai/operator-config/assistant/provider-config'
 import { resolveAssistantModelSpecFromProviderConfig } from '../provider-config.js'
 import {
@@ -174,7 +174,6 @@ export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
       )
     }
 
-    const resolvedRuntimeTarget = resolveAssistantProviderRuntimeTarget(providerConfig)
     const toolEvents: unknown[] = []
     let executedToolCount = 0
     const tools = resolveOpenAiCompatibleAiSdkTools({
@@ -252,7 +251,7 @@ export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
         result: {
           provider: resolveAssistantChatProviderFromConfig(providerConfig),
           providerSessionId:
-            resolvedRuntimeTarget.supportsNativeResume
+            shouldUseOpenAiCompatibleProviderState(providerConfig)
               ? (
                   extractOpenAICompatibleProviderSessionId(result) ??
                   normalizeNullableString(input.resumeProviderSessionId)
@@ -389,7 +388,16 @@ function sanitizeOpenAiCompatibleToolName(name: string): string {
   return sanitized.length > 0 ? sanitized : 'tool'
 }
 
-function resolveOpenAiCompatibleProviderOptions(input: {
+export function shouldUseOpenAiCompatibleProviderState(
+  providerConfig: AssistantProviderConfig,
+): boolean {
+  return (
+    providerConfig.policy.zeroDataRetention !== true &&
+    supportsAssistantNativeResume(providerConfig)
+  )
+}
+
+export function resolveOpenAiCompatibleProviderOptions(input: {
   providerConfig: AssistantProviderConfig
   resumeProviderSessionId: string | null | undefined
   usesResponsesApi: boolean
@@ -401,15 +409,18 @@ function resolveOpenAiCompatibleProviderOptions(input: {
     input.resumeProviderSessionId,
   )
   if (input.usesResponsesApi) {
+    const providerStateEnabled = shouldUseOpenAiCompatibleProviderState(
+      input.providerConfig,
+    )
     const openAiOptions: Record<string, boolean | string> = {
-      store: false,
+      store: providerStateEnabled,
     }
 
     if (reasoningEffort) {
       openAiOptions.reasoningEffort = reasoningEffort
     }
 
-    if (normalizedResumeProviderSessionId) {
+    if (providerStateEnabled && normalizedResumeProviderSessionId) {
       openAiOptions.previousResponseId = normalizedResumeProviderSessionId
     }
 
