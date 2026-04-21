@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 
-import type { Experiment } from "@/src/types/experiments";
+import type { Experiment, ExperimentSignal } from "@/src/types/experiments";
 import { ExpectedSignalCard } from "./expected-signal-card";
 import { ExpertCard } from "./expert-card";
 import { StudyCard } from "./study-card";
@@ -31,28 +31,25 @@ export function ProtocolTab({ experiment }: ProtocolTabProps) {
     const label = normalizeFactLabel(fact.label);
     return label !== "baseline" && label !== "intervention";
   });
-  const protocolLead = buildProtocolLead({
-    baselineFact,
-    interventionFact,
-    supportingFacts,
-  });
   const whyItWorksParagraphs = whyItWorks
     .split("\n\n")
     .map((paragraph) => paragraph.trim())
     .filter(Boolean);
+  const { contextSignals, focusSignals } = groupExpectedSignals(expectedSignals);
 
   return (
     <div className="flex flex-col gap-10">
-      {expectedSignals.length > 0 && (
+      {focusSignals.length > 0 && (
         <section className="flex flex-col gap-4 pt-2">
-          <div className="flex flex-col gap-2">
-            <SectionLabel>Expected signals</SectionLabel>
-            <p className="max-w-2xl text-sm/6 text-muted-foreground">
-              What you&apos;d expect to shift if the protocol is working.
+          <div className="flex max-w-2xl flex-col gap-1.5">
+            <SectionLabel>What could change</SectionLabel>
+            <p className="text-[13px]/5 text-muted-foreground">
+              Start with the clearest signals for this experiment. Smaller,
+              noisier measures stay visible below as useful background.
             </p>
           </div>
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {expectedSignals.map((signal) => (
+          <div className={getFocusSignalGridClassName(focusSignals.length)}>
+            {focusSignals.map((signal) => (
               <ExpectedSignalCard
                 key={signal.label}
                 label={signal.label}
@@ -62,19 +59,13 @@ export function ProtocolTab({ experiment }: ProtocolTabProps) {
               />
             ))}
           </div>
+          <ExpectedSignalContextPills signals={contextSignals} />
         </section>
       )}
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1.3fr)_minmax(320px,0.9fr)]">
         <section className="flex flex-col gap-6 rounded-xl border border-secondary/25 bg-card/90 p-7">
-          <div className="flex flex-col gap-2">
-            <SectionLabel>Run the protocol</SectionLabel>
-            {protocolLead ? (
-              <p className="max-w-3xl text-[16px]/7 text-foreground">
-                {protocolLead}
-              </p>
-            ) : null}
-          </div>
+          <SectionLabel>Run the protocol</SectionLabel>
           {protocol.length > 0 && (
             <div className="flex flex-col gap-3.5">
               <ol className="flex flex-col gap-3.5">
@@ -83,14 +74,9 @@ export function ProtocolTab({ experiment }: ProtocolTabProps) {
                     key={step.number}
                     className="grid gap-3.5 rounded-lg border border-border/70 bg-background/35 p-4 sm:grid-cols-[auto_1fr]"
                   >
-                    <div className="flex items-center gap-3 sm:flex-col sm:items-start sm:gap-2">
-                      <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-secondary/15">
-                        <span className="font-mono text-[11px]/3.5 text-chart-5">
-                          {step.number}
-                        </span>
-                      </div>
-                      <span className="font-mono text-[10px]/3 uppercase tracking-[0.08em] text-chart-5">
-                        Step {step.number}
+                    <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-secondary/15">
+                      <span className="font-mono text-[11px]/3.5 text-chart-5">
+                        {step.number}
                       </span>
                     </div>
                     <div className="space-y-1">
@@ -183,12 +169,7 @@ export function ProtocolTab({ experiment }: ProtocolTabProps) {
       </div>
 
       <section className="flex flex-col gap-4 rounded-xl border border-secondary/25 bg-card/90 p-7">
-        <div className="flex max-w-3xl flex-col gap-2">
-          <SectionLabel>Why it works</SectionLabel>
-          <p className="text-sm/6 text-muted-foreground">
-            The mechanism and evidence behind the protocol.
-          </p>
-        </div>
+        <SectionLabel>Why it works</SectionLabel>
         <div
           className={`grid gap-4 ${
             whyItWorksParagraphs.length > 1 ? "lg:grid-cols-2" : ""
@@ -281,6 +262,91 @@ export function ProtocolTab({ experiment }: ProtocolTabProps) {
   );
 }
 
+const MAX_FOCUS_SIGNAL_CARDS = 3;
+
+const signalDirectionArrows: Record<ExperimentSignal["direction"], string> = {
+  down: "↓",
+  neutral: "→",
+  up: "↑",
+};
+
+function groupExpectedSignals(signals: readonly ExperimentSignal[]): {
+  contextSignals: ExperimentSignal[];
+  focusSignals: ExperimentSignal[];
+} {
+  const explicitFocusSignals = signals.filter(
+    (signal) => signal.protocolProminence === "focus",
+  );
+  const undecidedSignals = signals.filter(
+    (signal) => signal.protocolProminence === undefined,
+  );
+  const preferredFocusSignals = [
+    ...explicitFocusSignals,
+    ...undecidedSignals,
+  ].slice(0, MAX_FOCUS_SIGNAL_CARDS);
+  const focusSignals = preferredFocusSignals.length > 0
+    ? preferredFocusSignals
+    : signals.slice(0, MAX_FOCUS_SIGNAL_CARDS);
+  const focusSignalSet = new Set(focusSignals);
+
+  return {
+    contextSignals: signals.filter((signal) => !focusSignalSet.has(signal)),
+    focusSignals,
+  };
+}
+
+function getFocusSignalGridClassName(count: number): string {
+  if (count <= 1) {
+    return "grid gap-4 md:max-w-xl";
+  }
+
+  if (count === 2) {
+    return "grid gap-4 md:grid-cols-2";
+  }
+
+  return "grid gap-4 md:grid-cols-2 xl:grid-cols-3";
+}
+
+function ExpectedSignalContextPills({
+  signals,
+}: {
+  signals: readonly ExperimentSignal[];
+}) {
+  if (signals.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="flex flex-col gap-3 rounded-xl border border-secondary/25 bg-card/70 p-4">
+      <div className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between sm:gap-4">
+        <SectionLabel>Also worth watching</SectionLabel>
+        <span className="text-[12px]/4 text-muted-foreground">
+          Helpful background, not promised signals.
+        </span>
+      </div>
+      <div className="flex flex-wrap gap-2.5">
+        {signals.map((signal) => (
+          <span
+            key={signal.label}
+            className="inline-flex items-center gap-2 rounded-full border border-border/70 bg-background/35 px-3 py-2 text-[12px]/4"
+          >
+            <span
+              aria-hidden="true"
+              className="font-serif text-base/4 text-primary"
+            >
+              {signalDirectionArrows[signal.direction]}
+            </span>
+            <span className="font-medium text-foreground/85">
+              {signal.label}
+            </span>
+            <span className="text-muted-foreground">{signal.expected}</span>
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function findProtocolFact(
   facts: Experiment["protocolFacts"],
   label: string,
@@ -290,39 +356,6 @@ function findProtocolFact(
 
 function normalizeFactLabel(label: string): string {
   return label.trim().toLowerCase();
-}
-
-function buildProtocolLead({
-  baselineFact,
-  interventionFact,
-  supportingFacts,
-}: {
-  baselineFact?: Experiment["protocolFacts"][number];
-  interventionFact?: Experiment["protocolFacts"][number];
-  supportingFacts: Experiment["protocolFacts"];
-}): string | null {
-  const sentences: string[] = [];
-
-  if (baselineFact && interventionFact) {
-    sentences.push(
-      `Keep your routine stable for ${baselineFact.value}, then run the protocol for ${interventionFact.value}.`,
-    );
-  } else if (baselineFact) {
-    sentences.push(`Keep your routine stable for ${baselineFact.value} before you start.`);
-  } else if (interventionFact) {
-    sentences.push(`Run the protocol for ${interventionFact.value}.`);
-  }
-
-  const supportingSummary = supportingFacts
-    .slice(0, 3)
-    .map((fact) => `${fact.label}: ${fact.value}`)
-    .join("; ");
-
-  if (supportingSummary) {
-    sentences.push(supportingSummary);
-  }
-
-  return sentences.length > 0 ? sentences.join(" ") : null;
 }
 
 function hasSpecificStepTitle(step: Experiment["protocol"][number]): boolean {

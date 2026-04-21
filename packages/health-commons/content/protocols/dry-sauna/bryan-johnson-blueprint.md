@@ -3,7 +3,7 @@ schemaVersion: murph.commons.page.v1
 entityType: protocol_variant
 key: protocol_variant:dry-sauna/bryan-johnson-blueprint
 slug: protocols/dry-sauna/bryan-johnson-blueprint
-title: Bryan Johnson Blueprint Sauna
+title: Bryan Johnson Sauna
 summary: "A higher-burden daily sauna routine publicly described by Bryan Johnson, including post-workout timing, heat-protection tactics, and self-reported results best read as personal context rather than expected outcomes."
 status: draft
 quality: usable

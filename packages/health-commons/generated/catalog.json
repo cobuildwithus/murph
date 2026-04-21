@@ -1225,7 +1225,7 @@
       "schemaVersion": "murph.commons.artifact-manifest.v1"
     }
   ],
-  "catalogHash": "sha256:c8d8be67d1bcaa5947e9d7297c17d5f2e8e27f00df727d8d258d5cdd4fb2ea36",
+  "catalogHash": "sha256:f513ab066356382bfe0bcdc51e9e6f9e420b9707adb01b5d55ecc7f00134a402",
   "changes": [
     {
       "affectedFields": [
@@ -1977,7 +1977,7 @@
         {
           "description": "A higher-burden daily dry-sauna routine attributed to Bryan Johnson, including special cooling tactics and later core-temperature-threshold updates.",
           "key": "protocol_variant:dry-sauna/bryan-johnson-blueprint",
-          "label": "Bryan Johnson Blueprint Sauna"
+          "label": "Bryan Johnson Sauna"
         }
       ],
       "quality": "usable",
@@ -1989,7 +1989,7 @@
       ],
       "relativePath": "protocols/sauna-protocol.md",
       "revision": {
-        "pageRevisionId": "sha256:59fa3cd68ea1b5d64abd4d415bd1f44c3c43297b967cad1fd0b8ca3446f6a56c",
+        "pageRevisionId": "sha256:d7d3f7ffb00ca08ce3e2f95c626502d5508060b74e846065c5f72a9fccd842c3",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -2569,7 +2569,7 @@
       ],
       "relativePath": "protocols/dry-sauna/bryan-johnson-blueprint.md",
       "revision": {
-        "pageRevisionId": "sha256:8330ffdd385849516490e12d6042b46913aa770bf58b5d17604532e09c5773bd",
+        "pageRevisionId": "sha256:afde28ce313700d07f686d8538cd4b8ffc9cec7600ceb498af6988320c90e373",
         "recipeHash": "sha256:803d0c96b5fbe2f18f55166069b03011789de0862c2857b84eef38dc98de746d",
         "runSpecRevisionId": "sha256:1f10f3b8a9b18d9b302b68e98ada8a9a707ed1b94e9b6057d5716385436630f1"
       },
@@ -2625,7 +2625,7 @@
           "targetAdherenceSessions": 14
         }
       ],
-      "title": "Bryan Johnson Blueprint Sauna",
+      "title": "Bryan Johnson Sauna",
       "whyItWorks": [
         "This routine uses the same basic dry-sauna physiology as the simpler sauna experiment, but at a higher weekly dose and usually after training. Heat exposure raises cardiovascular and thermoregulatory load; post-workout timing can add recovery, hydration, and fatigue context.",
         "The page is source-attributed because the detailed tactics come from Bryan Johnson’s public routine and self-experiments, not from a single validated clinical protocol. That makes it useful to try only if you want to test this exact routine and can handle the burden.",
@@ -2838,7 +2838,6 @@
           "unusually hard training"
         ],
         "steps": [
-          "Keep your normal routine stable for a 7-day baseline before starting.",
           "For the next two weeks, complete three stand-alone Finnish dry-sauna sessions per week.",
           "Sit for 15–20 minutes per session at about 80–100 °C, using a traditional dry sauna when possible.",
           "Hydrate normally before and after, then cool down gently before returning to normal activity.",
@@ -3330,9 +3329,9 @@
         }
       },
       "revision": {
-        "pageRevisionId": "sha256:21c4be679acc2bbe675dd0685fe1f2140eaa466235b788d50416b7351c42d033",
-        "recipeHash": "sha256:b4022f25d73e79f3cf740127c52434e8d63375435efaddfe230fb615e6a3b711",
-        "runSpecRevisionId": "sha256:7fed449280fcf73cb99b5595b7e744e5452cc6320824a81ea965bf4f2530f517"
+        "pageRevisionId": "sha256:d7eb8281811830e8246fcc557e3d630812db04874a45c3fd1186330cbe42ea42",
+        "recipeHash": "sha256:d5a697329147feed9aa5e50de7389b390a6f491c15a0862ffb27b55d4892ed6b",
+        "runSpecRevisionId": "sha256:4af908c2d693af1148d2fe53943f0a9e9e156c64cc2f80814ef7b3972dd96ece"
       },
       "safety": {
         "avoidOrGetClinicianGuidance": [
@@ -3646,7 +3645,6 @@
           "other hard training"
         ],
         "steps": [
-          "Keep your normal routine stable for a 7-day baseline before starting.",
           "During the 6-week intervention, complete two 4x4 sessions per week, separated by at least 48 hours when possible.",
           "Warm up for about 10 minutes at easy-to-moderate effort, roughly 60–70% of estimated HRmax.",
           "Complete four 4-minute hard intervals, aiming to reach 85–95% of estimated HRmax by the later part of each interval.",
@@ -3789,9 +3787,9 @@
         }
       },
       "revision": {
-        "pageRevisionId": "sha256:fef56942300f3995ab96f227de2c4e615450406b89193117e346c77281b3457f",
-        "recipeHash": "sha256:19419f681bb8a67ca146703f7632dce00ee15120239acae3b94b4cb3d5997af5",
-        "runSpecRevisionId": "sha256:e44f0595dca6b06f4de20fa713df9004b7929cb8bf1090085f784f79bc0220fd"
+        "pageRevisionId": "sha256:4051ebd6538cb17379dbad92436deeac565707b7adc5cfcfce6f84ddb054e0ed",
+        "recipeHash": "sha256:6d254cc5a60c28dfddc58ec7ae85e19908f29279e18eb42fdd5dc8051789da03",
+        "runSpecRevisionId": "sha256:12f27aeba31a6e68ebdd8645b91616b84a836431b8ed07f5382d790bd6828561"
       },
       "safety": {
         "avoidOrGetClinicianGuidance": [
@@ -4098,7 +4096,6 @@
           "mood or symptoms"
         ],
         "steps": [
-          "Keep the normal evening routine stable for a 7-day baseline before starting.",
           "For 14 intervention nights, put the glasses on 90–120 minutes before intended bedtime.",
           "Wear them indoors only during the pre-bed window, then remove them before sleep.",
           "Remove the glasses before driving, cycling, cooking with visual hazards, navigating stairs or unfamiliar low-light spaces, or doing color-critical work.",
@@ -4278,9 +4275,9 @@
         }
       },
       "revision": {
-        "pageRevisionId": "sha256:3e043b90108e658cba308cff2a62fcda8974d1eb798b790a161673a2ebef4d54",
-        "recipeHash": "sha256:2ad3e5253cced78d8b6be45280b37fb26ce3cd8d62d57a7361a980ae61b62f51",
-        "runSpecRevisionId": "sha256:5ec17f4eceb709c8940b2e2bd14c7836b9aac4f5620ec57272af7e3434c08627"
+        "pageRevisionId": "sha256:19f01d0b0798fac2eafb1ad3bbd6a204fbbd09ec267182e9b9f45a21bee997d6",
+        "recipeHash": "sha256:af244c3decba775ca1340002dc5db878acdaca3aa25e7a73481efbb2d4f92f90",
+        "runSpecRevisionId": "sha256:fa776085de87699cb86180a6999fee4e0413887ec09902e2f649cecefdf64382"
       },
       "safety": {
         "avoidOrGetClinicianGuidance": [
@@ -12269,7 +12266,7 @@
       ],
       "relativePath": "sources/sauna/x-bryan-johnson-comprehensive-sauna-guide-2025-12-06.md",
       "revision": {
-        "pageRevisionId": "sha256:2f8c1f82c99a765b2504b4e07a89f20fc8c1ea10f872bbead53bb099ed0bcfdc",
+        "pageRevisionId": "sha256:3cbc46bebf2a07f2cd20298cbac3df8a8b6a6b386fed347d663a68ae6a9921df",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -12278,7 +12275,7 @@
       "source": {
         "authors": "Bryan Johnson",
         "kind": "web_page",
-        "title": "Bryan Johnson X post 1997403290171330638",
+        "title": "Comprehensive sauna guide",
         "url": "https://x.com/bryan_johnson/status/1997403290171330638",
         "year": 2025
       },
@@ -12320,7 +12317,7 @@
       ],
       "relativePath": "sources/sauna/x-bryan-johnson-core-temp-2026-04-16.md",
       "revision": {
-        "pageRevisionId": "sha256:0a57bd193f97e66bc448dce132634c12d8cbc6baa54bcba4ebbe27b9fa99bec8",
+        "pageRevisionId": "sha256:21e3ca936ce662abc79ce85687a8e2bc54b487e2173ad6b5acd46d4d45373fd4",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -12329,7 +12326,7 @@
       "source": {
         "authors": "Bryan Johnson",
         "kind": "web_page",
-        "title": "Bryan Johnson X post 2044876107263234186",
+        "title": "Core-temperature sauna update",
         "url": "https://x.com/bryan_johnson/status/2044876107263234186",
         "year": 2026
       },
@@ -12372,7 +12369,7 @@
       ],
       "relativePath": "sources/sauna/x-bryan-johnson-core-temp-update-2026-04-03.md",
       "revision": {
-        "pageRevisionId": "sha256:137c1c11df890a708405bacb052d67b1dce3873438a564db044195e5e534d180",
+        "pageRevisionId": "sha256:76bad6034b554219f47b0538e8fd52ff45453ae8ae584d963379defd1aa991a7",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -12381,7 +12378,7 @@
       "source": {
         "authors": "Bryan Johnson",
         "kind": "web_page",
-        "title": "Bryan Johnson X post 2040127999954313485",
+        "title": "April 3 core-temperature sauna experiment",
         "url": "https://x.com/bryan_johnson/status/2040127999954313485",
         "year": 2026
       },
@@ -12418,7 +12415,7 @@
       "quality": "usable",
       "relativePath": "sources/sauna/x-bryan-johnson-fired-review-2026-04-06.md",
       "revision": {
-        "pageRevisionId": "sha256:52f982163ce4a70bdddecd6dd5d900c45c856060403034590319f87a38a2f045",
+        "pageRevisionId": "sha256:d81421014fcc49edd221208f25d868e25b2b6004ec0b6980c89936da16deb5e3",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -12427,7 +12424,7 @@
       "source": {
         "authors": "Bryan Johnson",
         "kind": "web_page",
-        "title": "Bryan Johnson X post 2041202370672288028",
+        "title": "232-session sauna review",
         "url": "https://x.com/bryan_johnson/status/2041202370672288028",
         "year": 2026
       },
@@ -12464,7 +12461,7 @@
       "quality": "usable",
       "relativePath": "sources/sauna/x-bryan-johnson-ice-balls-2026-04-09.md",
       "revision": {
-        "pageRevisionId": "sha256:f693d88b0ac24475b620d21abd752dc3a497aa494f71430333012e8a9da4373e",
+        "pageRevisionId": "sha256:6e21b6ec4f0b896a63cec17b96ff30aac9109f8f05189f6c24e2280ee1cd46c8",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -12473,7 +12470,7 @@
       "source": {
         "authors": "Bryan Johnson",
         "kind": "web_page",
-        "title": "Bryan Johnson X post 2042360189958107190",
+        "title": "Groin icing fertility update",
         "url": "https://x.com/bryan_johnson/status/2042360189958107190",
         "year": 2026
       },
@@ -12510,7 +12507,7 @@
       "quality": "usable",
       "relativePath": "sources/sauna/x-bryan-johnson-most-people-sauna-wrong-2025-11-12.md",
       "revision": {
-        "pageRevisionId": "sha256:b841122abe510870f3067a1f8c7d1b75890f18f66141549176d2b6eee0188a09",
+        "pageRevisionId": "sha256:3d32f58f2375c46b26c9c6a3b611407f992ba3e469ba1bee469c1d22ba82968d",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -12519,7 +12516,7 @@
       "source": {
         "authors": "Bryan Johnson",
         "kind": "web_page",
-        "title": "Bryan Johnson X post 1988653016963219693",
+        "title": "Most people are doing sauna wrong",
         "url": "https://x.com/bryan_johnson/status/1988653016963219693",
         "year": 2025
       },
@@ -12543,7 +12540,7 @@
       "quality": "usable",
       "relativePath": "sources/people/bryan-johnson.md",
       "revision": {
-        "pageRevisionId": "sha256:e021baf58ab57c908502a9e62dde6b81366d5271a687ea1ac4d10c339abc0d86",
+        "pageRevisionId": "sha256:ff8af6ad2e62266456a31397c98ac026cfc3a968cd0323a51a7c7f12302a6ad6",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -12555,7 +12552,7 @@
         "url": "https://blueprint.bryanjohnson.com/blogs/news/bryan-johnsons-protocol"
       },
       "status": "draft",
-      "summary": "Founder of Blueprint whose public sauna routine is included as an external, higher-burden comparison.",
+      "summary": "Founder of Blueprint and Don't Die. Trying to live forever.",
       "title": "Bryan Johnson"
     }
   ],

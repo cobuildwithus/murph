@@ -24,7 +24,7 @@ options:
     description: A separate sauna family for lower-temperature infrared heat exposure.
   -
     key: protocol_variant:dry-sauna/bryan-johnson-blueprint
-    label: Bryan Johnson Blueprint Sauna
+    label: Bryan Johnson Sauna
     description: A higher-burden daily dry-sauna routine attributed to Bryan Johnson, including special cooling tactics and later core-temperature-threshold updates.
 relations:
   -
