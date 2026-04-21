@@ -57,6 +57,7 @@ import { registerReadCommands } from './commands/read.js'
 import { registerProtocolCommands } from './commands/protocol.js'
 import { registerSamplesCommands } from './commands/samples.js'
 import { registerSearchCommands } from './commands/search.js'
+import { registerSyncCommands, syncPushResultSchema } from './commands/sync.js'
 import { registerSupplementCommands } from './commands/supplement.js'
 import { registerVaultCommands } from './commands/vault.js'
 import {
@@ -281,6 +282,21 @@ export const vaultCliCommandDescriptors = [
     rootCommandNames: ['assistant', 'chat', 'run', 'status', 'doctor', 'stop'],
     register({ cli, services, inboxServices }) {
       registerAssistantCommands(cli, inboxServices, services)
+    },
+  },
+  {
+    id: 'sync',
+    bindingMode: 'none',
+    rootCommandNames: ['sync'],
+    leafCommands: [
+      {
+        path: ['sync', 'push'],
+        description: 'Upload a canonical-only local vault import pack into a hosted vault-sync session.',
+        output: syncPushResultSchema,
+      },
+    ],
+    register({ cli }) {
+      registerSyncCommands(cli)
     },
   },
   {

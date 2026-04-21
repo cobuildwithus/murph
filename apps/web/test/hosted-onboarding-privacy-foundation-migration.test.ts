@@ -242,9 +242,11 @@ const HOSTED_MEMBER_RELATION_TYPES = new Set([
   "HostedMemberIdentity",
   "HostedMemberRouting",
   "HostedRevnetIssuance",
-  "HostedIngressEvent",
-  "HostedIngressEventAlias",
-  "HostedIngressPayload",
+    "HostedIngressEvent",
+    "HostedIngressEventAlias",
+    "HostedIngressPayload",
+    "HostedVaultSyncPayload",
+    "HostedVaultSyncSession",
 ]);
 
 describe("hosted Prisma baseline migration", () => {
@@ -258,6 +260,7 @@ describe("hosted Prisma baseline migration", () => {
     );
     expect(migrationEntries).toEqual([
       "2026040600_init",
+      "2026042100_hosted_vault_sync",
       "migration_lock.toml",
     ]);
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_assistant_runtime_issue"');

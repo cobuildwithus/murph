@@ -2,6 +2,7 @@ import type {
   HostedExecutionAssistantNotificationRequestedWake,
   HostedExecutionConversationMessageWake,
   HostedExecutionRunnerSharePack,
+  HostedExecutionRunnerVaultSyncImport,
   HostedIngressSystemEnvelope,
   HostedIngressEnvelope,
 } from "@murphai/hosted-execution";
@@ -15,6 +16,7 @@ import {
 } from "./context.ts";
 import { ingestHostedConversationMessageWake } from "./events/conversation.ts";
 import { handleHostedShareAcceptedWake } from "./events/share.ts";
+import { handleHostedVaultSyncImportWake } from "./events/vault-sync.ts";
 import type {
   HostedIngressEffect,
   HostedIngressLane,
@@ -38,6 +40,7 @@ export async function executeHostedIngressEvent(input: {
   runtimeEnv: Readonly<Record<string, string>>;
   sharePack?: HostedExecutionRunnerSharePack | null;
   vaultRoot: string;
+  vaultSyncImport?: HostedExecutionRunnerVaultSyncImport | null;
 }): Promise<HostedIngressExecutionMetrics> {
   const bootstrapResult = await prepareHostedWakeContext(
     input.vaultRoot,
@@ -54,6 +57,7 @@ export async function executeHostedIngressEvent(input: {
     runtime: input.runtime,
     sharePack: input.sharePack ?? null,
     vaultRoot: input.vaultRoot,
+    vaultSyncImport: input.vaultSyncImport ?? null,
   });
 
   return {
@@ -62,6 +66,7 @@ export async function executeHostedIngressEvent(input: {
     ingressLane: ingressEffect.ingressLane,
     shareImportResult: ingressEffect.shareImportResult,
     shareImportTitle: ingressEffect.shareImportTitle,
+    vaultSyncImportResult: ingressEffect.vaultSyncImportResult,
   };
 }
 
@@ -74,6 +79,7 @@ async function handleHostedIngressEvent(input: {
   >;
   sharePack?: HostedExecutionRunnerSharePack | null;
   vaultRoot: string;
+  vaultSyncImport?: HostedExecutionRunnerVaultSyncImport | null;
 }): Promise<HostedIngressOutcome> {
   if (isHostedConversationMessageWake(input.wake)) {
     return executeHostedConversationWake({
@@ -88,6 +94,7 @@ async function handleHostedIngressEvent(input: {
     executionContext: input.executionContext,
     sharePack: input.sharePack ?? null,
     vaultRoot: input.vaultRoot,
+    vaultSyncImport: input.vaultSyncImport ?? null,
   });
 }
 
@@ -112,6 +119,7 @@ async function executeHostedSystemWake(input: {
   executionContext: AssistantExecutionContext;
   sharePack?: HostedExecutionRunnerSharePack | null;
   vaultRoot: string;
+  vaultSyncImport?: HostedExecutionRunnerVaultSyncImport | null;
 }): Promise<HostedIngressOutcome> {
   switch (input.wake.kind) {
     case "member.activated":
@@ -148,7 +156,20 @@ async function executeHostedSystemWake(input: {
           vaultRoot: input.vaultRoot,
         })),
         conversationMetrics: null,
+        vaultSyncImportResult: null,
         ingressLane: "vault-share-accepted",
+      };
+    case "vault.sync.import":
+      if (!input.vaultSyncImport) {
+        throw new TypeError("Hosted vault sync import wake requires a hydrated runner vaultSyncImport.");
+      }
+      return {
+        ...(await handleHostedVaultSyncImportWake({
+          wake: input.wake,
+          vaultRoot: input.vaultRoot,
+          vaultSyncImport: input.vaultSyncImport,
+        })),
+        ingressLane: "vault-sync-import",
       };
   }
 
@@ -166,6 +187,7 @@ function createNoopIngressEffect(input: {
     ingressLane: input.ingressLane,
     shareImportResult: null,
     shareImportTitle: null,
+    vaultSyncImportResult: null,
   };
 }
 

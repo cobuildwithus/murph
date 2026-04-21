@@ -212,7 +212,7 @@ export function parseHostedBundleArchive(bytes: Uint8Array | ArrayBuffer): Hoste
     throw new Error("Hosted bundle archive is invalid.");
   }
 
-  if (parsed.kind !== "vault") {
+  if (!isHostedExecutionBundleKind(parsed.kind)) {
     throw new Error("Hosted bundle archive kind is invalid.");
   }
 
@@ -404,6 +404,10 @@ export function assertHostedBundleArtifactIntegrity(input: {
 
 export function toHostedBundleBytes(value: Uint8Array | ArrayBuffer): Uint8Array {
   return value instanceof Uint8Array ? value : new Uint8Array(value);
+}
+
+function isHostedExecutionBundleKind(value: unknown): value is HostedExecutionBundleKind {
+  return value === "vault" || value === "vault-sync-import";
 }
 
 function normalizeHostedBundleRoot(value: string): string {

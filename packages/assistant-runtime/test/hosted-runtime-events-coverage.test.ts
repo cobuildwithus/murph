@@ -122,6 +122,7 @@ describe("hosted runtime event coverage", () => {
       ingressLane: "member-activated",
       shareImportResult: null,
       shareImportTitle: null,
+      vaultSyncImportResult: null,
     });
   });
 
@@ -148,6 +149,7 @@ describe("hosted runtime event coverage", () => {
       ingressLane: "device-sync",
       shareImportResult: null,
       shareImportTitle: null,
+      vaultSyncImportResult: null,
     });
   });
 
@@ -196,6 +198,7 @@ describe("hosted runtime event coverage", () => {
       ingressLane: "vault-share-accepted",
       shareImportResult: "imported",
       shareImportTitle: "Shared export",
+      vaultSyncImportResult: null,
     });
   });
 

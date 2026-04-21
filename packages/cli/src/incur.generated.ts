@@ -199,6 +199,7 @@ declare module 'incur' {
       'supplement show': { args: { id: string }; options: { vault: string; requestId?: string } }
       'supplement stop': { args: { id: string }; options: { vault: string; requestId?: string; stoppedOn?: string } }
       'supplement upsert': { args: {}; options: { vault: string; requestId?: string; input: string } }
+      'sync push': { args: {}; options: { vault: string; requestId?: string; session: string; host: string; dryRun: boolean } }
       'timeline': { args: {}; options: { vault: string; requestId?: string; from?: string; to?: string; experiment?: string; kind?: string[]; stream?: string[]; entryType?: string[]; limit: number } }
       'validate': { args: {}; options: { vault: string; requestId?: string } }
       'vault repair': { args: {}; options: { vault: string; requestId?: string } }

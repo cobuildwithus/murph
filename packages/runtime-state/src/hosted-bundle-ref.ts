@@ -1,4 +1,4 @@
-export type HostedExecutionBundleKind = "vault";
+export type HostedExecutionBundleKind = "vault" | "vault-sync-import";
 
 export interface HostedExecutionBundleRef {
   hash: string;

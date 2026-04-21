@@ -29,6 +29,7 @@ export const HOSTED_EXECUTION_EVENT_KINDS = [
   "assistant.notification.requested",
   "device-sync.wake",
   "vault.share.accepted",
+  "vault.sync.import",
 ] as const;
 
 export type HostedExecutionEventKind =
@@ -41,6 +42,7 @@ export const HOSTED_EXECUTION_WAKE_KINDS = [
   "assistant.notification.requested",
   "device-sync.wake",
   "vault.share.accepted",
+  "vault.sync.import",
 ] as const;
 
 export type HostedIngressKind =
@@ -174,16 +176,37 @@ export interface HostedExecutionVaultShareAcceptedEvent extends HostedExecutionB
   share: HostedExecutionShareReference;
 }
 
+export interface HostedExecutionVaultSyncImportReference {
+  localManifestHash?: string | null;
+  sessionId: string;
+  sourceVaultId?: string | null;
+  sourceVaultTitle?: string | null;
+}
+
+export interface HostedExecutionVaultSyncImportEvent extends HostedExecutionBaseEvent {
+  kind: "vault.sync.import";
+  vaultSync: HostedExecutionVaultSyncImportReference;
+}
+
 export interface HostedExecutionRunnerSharePack {
   ownerUserId: string;
   pack: SharePack;
   shareId: string;
 }
 
+export interface HostedExecutionRunnerVaultSyncImport {
+  bundleBase64: string;
+  localManifestHash?: string | null;
+  sessionId: string;
+  sourceVaultId?: string | null;
+  sourceVaultTitle?: string | null;
+}
+
 export interface HostedRuntimeDrainEvent {
   ingressEventId: string;
   seq: string;
   sharePack?: HostedExecutionRunnerSharePack | null;
+  vaultSyncImport?: HostedExecutionRunnerVaultSyncImport | null;
   wake: HostedRuntimeEvent;
 }
 
@@ -203,7 +226,8 @@ export type HostedExecutionEvent =
   | HostedExecutionMemberChannelsUpdatedEvent
   | HostedExecutionAssistantNotificationRequestedEvent
   | HostedExecutionDeviceSyncWakeEvent
-  | HostedExecutionVaultShareAcceptedEvent;
+  | HostedExecutionVaultShareAcceptedEvent
+  | HostedExecutionVaultSyncImportEvent;
 
 export interface HostedExecutionBaseWake {
   eventId: string;
@@ -304,6 +328,11 @@ export interface HostedExecutionVaultShareAcceptedWake extends HostedExecutionBa
   share: HostedExecutionShareReference;
 }
 
+export interface HostedExecutionVaultSyncImportWake extends HostedExecutionBaseWake {
+  kind: "vault.sync.import";
+  vaultSync: HostedExecutionVaultSyncImportReference;
+}
+
 export interface HostedExecutionRuntimeTimerWake extends HostedExecutionBaseWake {
   kind: "runtime.timer";
   triggerKind: HostedRunTriggerKind;
@@ -315,7 +344,8 @@ export type HostedIngressEnvelope =
   | HostedExecutionMemberChannelsUpdatedWake
   | HostedExecutionAssistantNotificationRequestedWake
   | HostedExecutionDeviceSyncWake
-  | HostedExecutionVaultShareAcceptedWake;
+  | HostedExecutionVaultShareAcceptedWake
+  | HostedExecutionVaultSyncImportWake;
 
 export type HostedRuntimeEvent =
   | HostedIngressEnvelope
@@ -342,6 +372,7 @@ export interface HostedExecutionRunnerResult {
   result: {
     eventsHandled: number;
     nextWakeAt?: string | null;
+    redactedDetails?: Record<string, unknown> | null;
     summary: string;
   };
 }

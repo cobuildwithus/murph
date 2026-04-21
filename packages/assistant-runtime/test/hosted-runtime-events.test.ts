@@ -176,6 +176,7 @@ describe("executeHostedIngressEvent", () => {
       ingressLane: "assistant-notification",
       shareImportResult: null,
       shareImportTitle: null,
+      vaultSyncImportResult: null,
     });
   });
 
@@ -397,6 +398,7 @@ describe("executeHostedIngressEvent", () => {
       ingressLane: "conversation-message",
       shareImportResult: null,
       shareImportTitle: null,
+      vaultSyncImportResult: null,
     });
   });
 
@@ -427,6 +429,7 @@ describe("executeHostedIngressEvent", () => {
       ingressLane: "member-channels-updated",
       shareImportResult: null,
       shareImportTitle: null,
+      vaultSyncImportResult: null,
     });
   });
 

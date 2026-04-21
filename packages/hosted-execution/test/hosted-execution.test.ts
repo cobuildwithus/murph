@@ -8,6 +8,9 @@ import {
   readHostedExecutionSignatureHeaders,
 } from "../src/auth.ts";
 import {
+  buildHostedExecutionVaultSyncImportWake,
+} from "../src/builders.ts";
+import {
   HOSTED_EXECUTION_EVENT_KINDS,
   HOSTED_EXECUTION_NONCE_HEADER,
   HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER,
@@ -23,6 +26,11 @@ import {
   normalizeHostedExecutionBaseUrl,
   normalizeHostedExecutionString,
 } from "../src/env.ts";
+import {
+  parseHostedExecutionRunnerVaultSyncImport,
+  parseHostedIngressEnvelope,
+  parseHostedRuntimeDrainEvent,
+} from "../src/parsers.ts";
 
 function decodeUtf8(buffer: ArrayBuffer): string {
   return new TextDecoder().decode(buffer);
@@ -125,6 +133,7 @@ describe("hosted execution coverage gaps", () => {
       "assistant.notification.requested",
       "device-sync.wake",
       "vault.share.accepted",
+      "vault.sync.import",
     ]);
     expect(HOSTED_INGRESS_LIFECYCLE_STATES).toEqual([
       "queued",
@@ -183,5 +192,59 @@ describe("hosted execution coverage gaps", () => {
     expect(Object.keys(routeModule).sort()).toEqual([
       "HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH",
     ]);
+  });
+
+  it("builds and parses hosted vault sync import side-input contracts", () => {
+    const wake = buildHostedExecutionVaultSyncImportWake({
+      eventId: "evt_vault_sync",
+      memberId: "member_vault_sync",
+      occurredAt: "2026-04-21T00:00:00.000Z",
+      vaultSync: {
+        localManifestHash: "sha256:local",
+        sessionId: "vsi_contract",
+        sourceVaultId: "vault_local",
+        sourceVaultTitle: "Local Vault",
+      },
+    });
+
+    expect(parseHostedIngressEnvelope(wake)).toEqual(wake);
+    expect(
+      buildHostedExecutionVaultSyncImportWake({
+        eventId: "evt_vault_sync_minimal",
+        memberId: "member_vault_sync",
+        occurredAt: "2026-04-21T00:00:00.000Z",
+        vaultSync: {
+          sessionId: "vsi_minimal",
+        },
+      }),
+    ).toEqual({
+      eventId: "evt_vault_sync_minimal",
+      kind: "vault.sync.import",
+      occurredAt: "2026-04-21T00:00:00.000Z",
+      userId: "member_vault_sync",
+      vaultSync: {
+        sessionId: "vsi_minimal",
+      },
+    });
+
+    const runnerPayload = {
+      bundleBase64: "AAAA",
+      localManifestHash: null,
+      sessionId: "vsi_contract",
+      sourceVaultId: "vault_local",
+      sourceVaultTitle: "Local Vault",
+    };
+    expect(parseHostedExecutionRunnerVaultSyncImport(runnerPayload)).toEqual(runnerPayload);
+    expect(parseHostedRuntimeDrainEvent({
+      ingressEventId: "ingress_vault_sync",
+      seq: "12",
+      vaultSyncImport: runnerPayload,
+      wake,
+    })).toEqual({
+      ingressEventId: "ingress_vault_sync",
+      seq: "12",
+      vaultSyncImport: runnerPayload,
+      wake,
+    });
   });
 });
