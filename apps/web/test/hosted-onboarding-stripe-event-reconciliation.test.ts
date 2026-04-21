@@ -18,6 +18,9 @@ const mocks = vi.hoisted(() => ({
     events: {
       retrieve: vi.fn(),
     },
+    subscriptions: {
+      retrieve: vi.fn(),
+    },
   },
 }));
 
@@ -69,6 +72,27 @@ import {
   recordHostedStripeEvent,
 } from "@/src/lib/hosted-onboarding/stripe-event-reconciliation";
 
+type HostedStripeEventRecordPrisma = Parameters<typeof recordHostedStripeEvent>[0]["prisma"];
+type HostedStripeEventReconcilePrisma = Parameters<typeof reconcileHostedStripeEventById>[0]["prisma"];
+type StripeEventPrismaHarnessClient = HostedStripeEventRecordPrisma & HostedStripeEventReconcilePrisma;
+
+type StripeTestEvent<TType extends Stripe.Event.Type, TObject extends Record<string, unknown>> = {
+  api_version: string;
+  created: number;
+  data: {
+    object: TObject;
+  };
+  id: string;
+  livemode: boolean;
+  object: "event";
+  pending_webhooks: number;
+  request: {
+    id: string | null;
+    idempotency_key: string | null;
+  };
+  type: TType;
+};
+
 describe("hosted Stripe event reconciliation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -90,6 +114,9 @@ describe("hosted Stripe event reconciliation", () => {
     mocks.resolveStripeCustomerContext.mockResolvedValue({
       customerId: null,
     });
+    mocks.stripe.subscriptions.retrieve.mockResolvedValue({
+      status: "active",
+    });
     mocks.drainHostedRevnetIssuanceSubmissionQueue.mockResolvedValue([]);
   });
 
@@ -99,7 +126,7 @@ describe("hosted Stripe event reconciliation", () => {
     await expect(
       recordHostedStripeEvent({
         event: makeInvoicePaidEvent(),
-        prisma: prisma.client as never,
+        prisma: prisma.client,
       }),
     ).resolves.toEqual({
       duplicate: false,
@@ -125,13 +152,13 @@ describe("hosted Stripe event reconciliation", () => {
 
     await recordHostedStripeEvent({
       event,
-      prisma: prisma.client as never,
+      prisma: prisma.client,
     });
 
     await expect(
       reconcileHostedStripeEventById({
         eventId: event.id,
-        prisma: prisma.client as never,
+        prisma: prisma.client,
       }),
     ).resolves.toEqual({
       activatedMemberId: "member_123",
@@ -144,11 +171,14 @@ describe("hosted Stripe event reconciliation", () => {
     expect(mocks.stripe.events.retrieve).toHaveBeenCalledWith("evt_invoice_paid_123");
     expect(mocks.applyStripeInvoicePaid).toHaveBeenCalledWith(
       event.data.object,
-      expect.objectContaining({
+      {
+        eventCreatedAt: new Date("2026-03-28T14:40:00.000Z"),
+        occurredAt: "2026-03-28T14:40:00.000Z",
         sourceEventId: "evt_invoice_paid_123",
         sourceType: "stripe.invoice.paid",
-      }),
-      expect.anything(),
+      },
+      prisma.client,
+      "active",
     );
     expect(prisma.client.$transaction).toHaveBeenCalledWith(
       expect.any(Function),
@@ -170,13 +200,13 @@ describe("hosted Stripe event reconciliation", () => {
 
     await recordHostedStripeEvent({
       event,
-      prisma: prisma.client as never,
+      prisma: prisma.client,
     });
 
     await expect(
       reconcileHostedStripeEventById({
         eventId: event.id,
-        prisma: prisma.client as never,
+        prisma: prisma.client,
       }),
     ).resolves.toEqual({
       activatedMemberId: null,
@@ -203,13 +233,13 @@ describe("hosted Stripe event reconciliation", () => {
 
     await recordHostedStripeEvent({
       event,
-      prisma: prisma.client as never,
+      prisma: prisma.client,
     });
 
     await expect(
       reconcileHostedStripeEventById({
         eventId: event.id,
-        prisma: prisma.client as never,
+        prisma: prisma.client,
       }),
     ).resolves.toEqual({
       activatedMemberId: null,
@@ -239,13 +269,13 @@ describe("hosted Stripe event reconciliation", () => {
 
     await recordHostedStripeEvent({
       event,
-      prisma: prisma.client as never,
+      prisma: prisma.client,
     });
 
     await expect(
       reconcileHostedStripeEventById({
         eventId: event.id,
-        prisma: prisma.client as never,
+        prisma: prisma.client,
       }),
     ).resolves.toEqual({
       activatedMemberId: null,
@@ -277,13 +307,13 @@ describe("hosted Stripe event reconciliation", () => {
 
     await recordHostedStripeEvent({
       event,
-      prisma: prisma.client as never,
+      prisma: prisma.client,
     });
 
     await expect(
       reconcileHostedStripeEventById({
         eventId: event.id,
-        prisma: prisma.client as never,
+        prisma: prisma.client,
       }),
     ).resolves.toEqual({
       activatedMemberId: null,
@@ -304,7 +334,8 @@ describe("hosted Stripe event reconciliation", () => {
 });
 
 function makeInvoicePaidEvent(): Stripe.Event {
-  return {
+  return makeStripeEvent({
+    api_version: "2025-03-31.basil",
     created: 1774708800,
     data: {
       object: {
@@ -318,12 +349,20 @@ function makeInvoicePaidEvent(): Stripe.Event {
       },
     },
     id: "evt_invoice_paid_123",
+    livemode: false,
+    object: "event",
+    pending_webhooks: 0,
+    request: {
+      id: null,
+      idempotency_key: null,
+    },
     type: "invoice.paid",
-  } as unknown as Stripe.Event;
+  });
 }
 
 function makeCheckoutCompletedEvent(): Stripe.Event {
-  return {
+  return makeStripeEvent({
+    api_version: "2025-03-31.basil",
     created: 1774708801,
     data: {
       object: {
@@ -337,12 +376,20 @@ function makeCheckoutCompletedEvent(): Stripe.Event {
       },
     },
     id: "evt_checkout_completed_123",
+    livemode: false,
+    object: "event",
+    pending_webhooks: 0,
+    request: {
+      id: null,
+      idempotency_key: null,
+    },
     type: "checkout.session.completed",
-  } as unknown as Stripe.Event;
+  });
 }
 
 function makeSubscriptionUpdatedEvent(): Stripe.Event {
-  return {
+  return makeStripeEvent({
+    api_version: "2025-03-31.basil",
     created: 1774708802,
     data: {
       object: {
@@ -355,12 +402,20 @@ function makeSubscriptionUpdatedEvent(): Stripe.Event {
       },
     },
     id: "evt_subscription_updated_123",
+    livemode: false,
+    object: "event",
+    pending_webhooks: 0,
+    request: {
+      id: null,
+      idempotency_key: null,
+    },
     type: "customer.subscription.updated",
-  } as unknown as Stripe.Event;
+  });
 }
 
 function makeRefundCreatedEvent(): Stripe.Event {
-  return {
+  return makeStripeEvent({
+    api_version: "2025-03-31.basil",
     created: 1774708803,
     data: {
       object: {
@@ -370,8 +425,25 @@ function makeRefundCreatedEvent(): Stripe.Event {
       },
     },
     id: "evt_refund_created_123",
+    livemode: false,
+    object: "event",
+    pending_webhooks: 0,
+    request: {
+      id: null,
+      idempotency_key: null,
+    },
     type: "refund.created",
-  } as unknown as Stripe.Event;
+  });
+}
+
+function makeStripeEvent<
+  TType extends Stripe.Event.Type,
+  TObject extends Record<string, unknown>,
+>(event: StripeTestEvent<TType, TObject>): Stripe.Event {
+  // The synthetic fixtures are intentionally narrower than Stripe's generated event union.
+  // Keep the boundary explicit instead of widening the test data shape.
+  // @ts-expect-error - synthetic Stripe event fixtures are narrower than Stripe.Event.
+  return event as Stripe.Event;
 }
 
 function createStripeEventPrismaHarness() {
@@ -511,15 +583,4 @@ type StripeEventWhere = {
           | "failed";
       }
   >;
-};
-
-type StripeEventPrismaHarnessClient = {
-  $transaction: ReturnType<typeof vi.fn>;
-  hostedStripeEvent: {
-    create: ReturnType<typeof vi.fn>;
-    findMany: ReturnType<typeof vi.fn>;
-    findUnique: ReturnType<typeof vi.fn>;
-    update: ReturnType<typeof vi.fn>;
-    updateMany: ReturnType<typeof vi.fn>;
-  };
 };

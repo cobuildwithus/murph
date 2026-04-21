@@ -16,6 +16,37 @@ import {
 const originalFetch = globalThis.fetch;
 const describe = baseDescribe.sequential;
 
+function createJsonResponse(body: unknown, status: number): Response {
+  return new Response(JSON.stringify(body), {
+    headers: {
+      "content-type": "application/json",
+    },
+    status,
+  });
+}
+
+function expectRequestInit(init: RequestInit | undefined): RequestInit {
+  if (!init) {
+    throw new Error("Expected fetch init");
+  }
+
+  return init;
+}
+
+function readRequestSignal(init: RequestInit | undefined): AbortSignal | undefined {
+  const signal = init?.signal;
+  return signal instanceof AbortSignal ? signal : undefined;
+}
+
+function readJsonRequestBody(init: RequestInit | undefined): unknown {
+  const body = expectRequestInit(init).body;
+  if (typeof body !== "string") {
+    throw new Error("Expected string request body");
+  }
+
+  return JSON.parse(body);
+}
+
 describe("sendHostedLinqChatMessage", () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -34,7 +65,7 @@ describe("sendHostedLinqChatMessage", () => {
   it("fails with the hosted retryable error when the Linq API request hangs past the timeout", async () => {
     const fetchMock = vi.fn((_url: unknown, init?: RequestInit) =>
       new Promise((_resolve, reject) => {
-        const signal = init?.signal as AbortSignal | undefined;
+        const signal = readRequestSignal(init);
         signal?.addEventListener(
           "abort",
           () => reject(signal.reason ?? new Error("aborted")),
@@ -68,12 +99,11 @@ describe("sendHostedLinqChatMessage", () => {
   });
 
   it("marks 5xx Linq API failures as retryable", async () => {
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => ({
-      ok: false,
-      status: 503,
-      json: async () => ({}),
-      text: async () => "",
-    }) as unknown as Response);
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
+      void _input;
+      void _init;
+      return createJsonResponse({}, 503);
+    });
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(sendHostedLinqChatMessage({
@@ -88,12 +118,11 @@ describe("sendHostedLinqChatMessage", () => {
   });
 
   it("treats Linq 429 responses as retryable", async () => {
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => ({
-      ok: false,
-      status: 429,
-      json: async () => ({}),
-      text: async () => "",
-    }) as unknown as Response);
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
+      void _input;
+      void _init;
+      return createJsonResponse({}, 429);
+    });
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(sendHostedLinqChatMessage({
@@ -108,17 +137,16 @@ describe("sendHostedLinqChatMessage", () => {
   });
 
   it("sends Linq idempotency keys on existing-chat replies", async () => {
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => ({
-      ok: true,
-      status: 200,
-      json: async () => ({
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
+      void _input;
+      void _init;
+      return createJsonResponse({
         chat_id: "chat_123",
         message: {
           id: "msg_123",
         },
-      }),
-      text: async () => "",
-    }) as unknown as Response);
+      }, 200);
+    });
     vi.stubGlobal("fetch", fetchMock);
 
     await sendHostedLinqChatMessage({
@@ -132,9 +160,9 @@ describe("sendHostedLinqChatMessage", () => {
     if (!firstCall) {
       throw new Error("Expected fetch to be called");
     }
-    const [url, init] = firstCall;
+    const [url, init] = firstCall as [RequestInfo | URL, RequestInit?];
     expect(url).toEqual(new URL("chats/chat_123/messages", "https://linq.example.test/api/partner/v3/"));
-    expect(JSON.parse((init as RequestInit).body as string)).toEqual({
+    expect(readJsonRequestBody(init)).toEqual({
       message: {
         idempotency_key: "linq-message:evt_123",
         parts: [
@@ -148,9 +176,11 @@ describe("sendHostedLinqChatMessage", () => {
   });
 
   it("treats an empty success body as a successful send", async () => {
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
-      new Response(null, { status: 200 }),
-    );
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
+      void _input;
+      void _init;
+      return new Response(null, { status: 200 });
+    });
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(sendHostedLinqChatMessage({
@@ -173,19 +203,18 @@ describe("createHostedLinqChat", () => {
   });
 
   it("posts first-contact chat creation payloads to the v3 chats endpoint", async () => {
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => ({
-      ok: true,
-      status: 201,
-      json: async () => ({
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
+      void _input;
+      void _init;
+      return createJsonResponse({
         chat: {
           id: "chat_123",
           message: {
             id: "msg_123",
           },
         },
-      }),
-      text: async () => "",
-    }) as unknown as Response);
+      }, 201);
+    });
     vi.stubGlobal("fetch", fetchMock);
 
     const result = await createHostedLinqChat({
@@ -204,10 +233,10 @@ describe("createHostedLinqChat", () => {
     if (!firstCall) {
       throw new Error("Expected fetch to be called");
     }
-    const [url, init] = firstCall;
+    const [url, init] = firstCall as [RequestInfo | URL, RequestInit?];
     expect(url).toEqual(new URL("chats", "https://linq.example.test/api/partner/v3/"));
-    expect((init as RequestInit).method).toBe("POST");
-    expect(JSON.parse((init as RequestInit).body as string)).toEqual({
+    expect(expectRequestInit(init).method).toBe("POST");
+    expect(readJsonRequestBody(init)).toEqual({
       from: "+15550000000",
       message: {
         idempotency_key: "chat-create:evt_123",
@@ -234,10 +263,10 @@ describe("createHostedLinqWebhookSubscription", () => {
   });
 
   it("posts webhook subscriptions to the v3 webhook-subscriptions endpoint", async () => {
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => ({
-      ok: true,
-      status: 201,
-      json: async () => ({
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
+      void _input;
+      void _init;
+      return createJsonResponse({
         created_at: "2026-04-04T00:00:00.000Z",
         id: "whsub_123",
         is_active: true,
@@ -246,9 +275,8 @@ describe("createHostedLinqWebhookSubscription", () => {
         subscribed_events: ["message.received"],
         target_url: "https://www.withmurph.ai/api/hosted-onboarding/linq/webhook?version=2026-02-03",
         updated_at: "2026-04-04T00:00:00.000Z",
-      }),
-      text: async () => "",
-    }) as unknown as Response);
+      }, 201);
+    });
     vi.stubGlobal("fetch", fetchMock);
 
     const result = await createHostedLinqWebhookSubscription({

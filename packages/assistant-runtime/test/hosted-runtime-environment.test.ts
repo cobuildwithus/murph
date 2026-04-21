@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { access } from "node:fs/promises";
+import { createRequire } from "node:module";
 import path from "node:path";
 
 import { test } from "vitest";
@@ -86,8 +87,7 @@ test("hosted runtime config deep-clones resolved device-sync provider config", (
           clientId: "oura-client",
           clientSecret: "oura-secret",
           scopes: ouraScopes,
-          webhookVerificationToken: "control-plane-only",
-        } as never,
+        },
         whoop: {
           clientId: "whoop-client",
           clientSecret: "whoop-secret",
@@ -98,6 +98,15 @@ test("hosted runtime config deep-clones resolved device-sync provider config", (
       secret: "secret_123",
     },
   });
+  Object.defineProperty(
+    resolvedConfig.deviceSync?.providerConfigs.oura ?? {},
+    "webhookVerificationToken",
+    {
+      configurable: true,
+      enumerable: true,
+      value: "control-plane-only",
+    },
+  );
 
   const normalized = normalizeHostedAssistantRuntimeConfig(
     {
@@ -231,11 +240,11 @@ test("hosted runtime environment resolves stable tsx loader and tsconfig paths",
 });
 
 test("hosted runtime environment falls back to the bare tsx specifier when resolution fails", () => {
-  const unresolvedRequire = {
+  const unresolvedRequire = Object.assign(createRequire(import.meta.url), {
     resolve() {
       throw new Error("tsx not installed");
     },
-  } as unknown as NodeJS.Require;
+  });
 
   assert.equal(resolveHostedRuntimeTsxImportSpecifier(unresolvedRequire), "tsx");
 });

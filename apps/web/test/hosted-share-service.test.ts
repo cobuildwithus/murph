@@ -84,6 +84,15 @@ import {
   releaseHostedShareAcceptance,
 } from "@/src/lib/hosted-share/shared";
 
+type HostedSharePrisma = Parameters<typeof createHostedShareLink>[0]["prisma"]
+  & Parameters<typeof acceptHostedShareLink>[0]["prisma"]
+  & Parameters<typeof buildHostedSharePageData>[0]["prisma"]
+  & Parameters<typeof finalizeHostedShareAcceptance>[0]["prisma"]
+  & Parameters<typeof releaseHostedShareAcceptance>[0]["prisma"];
+type HostedShareActiveMember = NonNullable<Parameters<typeof acceptHostedShareLink>[0]["member"]>;
+type HostedShareAuthenticatedMember =
+  NonNullable<Parameters<typeof buildHostedSharePageData>[0]["authenticatedMember"]>;
+
 let originalHostedOnboardingPublicBaseUrl: string | undefined;
 let originalHostedContactPrivacyCurrentKeyVersion: string | undefined;
 let originalHostedContactPrivacyKeys: string | undefined;
@@ -210,7 +219,7 @@ describe("hosted share service", () => {
     const prisma = createHostedSharePrisma();
     const startedAt = Date.now();
     const result = await createHostedShareLink({
-      prisma: prisma as never,
+      prisma,
       pack: buildPack(),
       inviteCode: "invite_123",
       senderMemberId: "member_sender",
@@ -245,7 +254,7 @@ describe("hosted share service", () => {
     });
 
     const result = await createHostedShareLink({
-      prisma: prisma as never,
+      prisma,
       pack: buildPack(),
       recipientPhoneNumber: "+15551234567",
       senderMemberId: "member_sender",
@@ -266,7 +275,7 @@ describe("hosted share service", () => {
     const startedAt = Date.now();
 
     await createHostedShareLink({
-      prisma: prisma as never,
+      prisma,
       pack: buildPack(),
       expiresInHours: 24 * 30,
       senderMemberId: "member_sender",
@@ -281,27 +290,19 @@ describe("hosted share service", () => {
   it("imports a hosted share link for an active hosted member", async () => {
     const prisma = createHostedSharePrisma();
     const created = await createHostedShareLink({
-      prisma: prisma as never,
+      prisma,
       pack: buildPack(),
       senderMemberId: "member_sender",
     });
 
     const result = await acceptHostedShareLink({
-      member: {
-        billingStatus: HostedBillingStatus.active,
-        id: "member_123",
-        suspendedAt: null,
-      } as never,
-      prisma: prisma as never,
+      member: createHostedShareMember(),
+      prisma,
       shareCode: created.shareCode,
     });
     const pageData = await buildHostedSharePageData({
-      authenticatedMember: {
-        billingStatus: HostedBillingStatus.active,
-        id: "member_123",
-        suspendedAt: null,
-      } as never,
-      prisma: prisma as never,
+      authenticatedMember: createHostedShareMember(),
+      prisma,
       shareCode: created.shareCode,
     });
 
@@ -322,16 +323,12 @@ describe("hosted share service", () => {
     await finalizeHostedShareAcceptance({
       eventId: prisma.rows[0]?.lastEventId ?? "",
       memberId: "member_123",
-      prisma: prisma as never,
+      prisma,
       shareId: prisma.rows[0]?.id ?? "",
     });
     const finalizedPageData = await buildHostedSharePageData({
-      authenticatedMember: {
-        billingStatus: HostedBillingStatus.active,
-        id: "member_123",
-        suspendedAt: null,
-      } as never,
-      prisma: prisma as never,
+      authenticatedMember: createHostedShareMember(),
+      prisma,
       shareCode: created.shareCode,
     });
 
@@ -341,12 +338,8 @@ describe("hosted share service", () => {
     expect(prisma.hostedSharePayloadRows).toHaveLength(0);
 
     const consumedWithoutPackPageData = await buildHostedSharePageData({
-      authenticatedMember: {
-        billingStatus: HostedBillingStatus.active,
-        id: "member_123",
-        suspendedAt: null,
-      } as never,
-      prisma: prisma as never,
+      authenticatedMember: createHostedShareMember(),
+      prisma,
       shareCode: created.shareCode,
     });
 
@@ -366,13 +359,13 @@ describe("hosted share service", () => {
   it("builds hosted share page preview metadata from Postgres without any Cloudflare share-pack dependency", async () => {
     const prisma = createHostedSharePrisma();
     const created = await createHostedShareLink({
-      prisma: prisma as never,
+      prisma,
       pack: buildPack(),
       senderMemberId: "member_sender",
     });
 
     const pageData = await buildHostedSharePageData({
-      prisma: prisma as never,
+      prisma,
       shareCode: created.shareCode,
     });
 
@@ -392,19 +385,15 @@ describe("hosted share service", () => {
   it("does not wait for the best-effort outbox drain before returning the share claim", async () => {
     const prisma = createHostedSharePrisma();
     const created = await createHostedShareLink({
-      prisma: prisma as never,
+      prisma,
       pack: buildPack(),
       senderMemberId: "member_sender",
     });
     shareHarness.drainHostedExecutionOutboxBestEffort.mockReturnValue(new Promise(() => {}));
 
     await expect(acceptHostedShareLink({
-      member: {
-        billingStatus: HostedBillingStatus.active,
-        id: "member_123",
-        suspendedAt: null,
-      } as never,
-      prisma: prisma as never,
+      member: createHostedShareMember(),
+      prisma,
       shareCode: created.shareCode,
     })).resolves.toMatchObject({
       imported: false,
@@ -417,18 +406,14 @@ describe("hosted share service", () => {
   it("accepts the share from the web-owned payload without a Cloudflare pack seam", async () => {
     const prisma = createHostedSharePrisma();
     const created = await createHostedShareLink({
-      prisma: prisma as never,
+      prisma,
       pack: buildPack(),
       senderMemberId: "member_sender",
     });
 
     await expect(acceptHostedShareLink({
-      member: {
-        billingStatus: HostedBillingStatus.active,
-        id: "member_123",
-        suspendedAt: null,
-      } as never,
-      prisma: prisma as never,
+      member: createHostedShareMember(),
+      prisma,
       shareCode: created.shareCode,
     })).resolves.toMatchObject({
       imported: false,
@@ -448,18 +433,14 @@ describe("hosted share service", () => {
   it("keeps the hosted share claim and reuses the same event id across retries before finalization", async () => {
     const prisma = createHostedSharePrisma();
     const created = await createHostedShareLink({
-      prisma: prisma as never,
+      prisma,
       pack: buildPack(),
       senderMemberId: "member_sender",
     });
 
     await expect(acceptHostedShareLink({
-      member: {
-        billingStatus: HostedBillingStatus.active,
-        id: "member_123",
-        suspendedAt: null,
-      } as never,
-      prisma: prisma as never,
+      member: createHostedShareMember(),
+      prisma,
       shareCode: created.shareCode,
     })).resolves.toMatchObject({
       imported: false,
@@ -470,12 +451,8 @@ describe("hosted share service", () => {
     expect(prisma.outboxRows).toHaveLength(1);
 
     const retried = await acceptHostedShareLink({
-      member: {
-        billingStatus: HostedBillingStatus.active,
-        id: "member_123",
-        suspendedAt: null,
-      } as never,
-      prisma: prisma as never,
+      member: createHostedShareMember(),
+      prisma,
       shareCode: created.shareCode,
     });
 
@@ -488,17 +465,13 @@ describe("hosted share service", () => {
     await finalizeHostedShareAcceptance({
       eventId: prisma.rows[0]?.lastEventId ?? "",
       memberId: "member_123",
-      prisma: prisma as never,
+      prisma,
       shareId: prisma.rows[0]?.id ?? "",
     });
 
     const finalized = await acceptHostedShareLink({
-      member: {
-        billingStatus: HostedBillingStatus.active,
-        id: "member_123",
-        suspendedAt: null,
-      } as never,
-      prisma: prisma as never,
+      member: createHostedShareMember(),
+      prisma,
       shareCode: created.shareCode,
     });
 
@@ -510,18 +483,14 @@ describe("hosted share service", () => {
   it("reconciles a processing share from Cloudflare event status when the local outbox row is still queued", async () => {
     const prisma = createHostedSharePrisma();
     const created = await createHostedShareLink({
-      prisma: prisma as never,
+      prisma,
       pack: buildPack(),
       senderMemberId: "member_sender",
     });
 
     await acceptHostedShareLink({
-      member: {
-        billingStatus: HostedBillingStatus.active,
-        id: "member_123",
-        suspendedAt: null,
-      } as never,
-      prisma: prisma as never,
+      member: createHostedShareMember(),
+      prisma,
       shareCode: created.shareCode,
     });
 
@@ -529,12 +498,8 @@ describe("hosted share service", () => {
     prisma.outboxRows[0]!.wakeState = "completed";
 
     await expect(acceptHostedShareLink({
-      member: {
-        billingStatus: HostedBillingStatus.active,
-        id: "member_123",
-        suspendedAt: null,
-      } as never,
-      prisma: prisma as never,
+      member: createHostedShareMember(),
+      prisma,
       shareCode: created.shareCode,
     })).resolves.toMatchObject({
       alreadyImported: true,
@@ -543,12 +508,8 @@ describe("hosted share service", () => {
     });
 
     await expect(buildHostedSharePageData({
-      authenticatedMember: {
-        billingStatus: HostedBillingStatus.active,
-        id: "member_123",
-        suspendedAt: null,
-      } as never,
-      prisma: prisma as never,
+      authenticatedMember: createHostedShareMember(),
+      prisma,
       shareCode: created.shareCode,
     })).resolves.toMatchObject({
       stage: "consumed",
@@ -559,18 +520,14 @@ describe("hosted share service", () => {
   it("releases a processing share when the wake lifecycle is quarantined before local reconciliation catches up", async () => {
     const prisma = createHostedSharePrisma();
     const created = await createHostedShareLink({
-      prisma: prisma as never,
+      prisma,
       pack: buildPack(),
       senderMemberId: "member_sender",
     });
 
     await acceptHostedShareLink({
-      member: {
-        billingStatus: HostedBillingStatus.active,
-        id: "member_123",
-        suspendedAt: null,
-      } as never,
-      prisma: prisma as never,
+      member: createHostedShareMember(),
+      prisma,
       shareCode: created.shareCode,
     });
 
@@ -578,12 +535,8 @@ describe("hosted share service", () => {
     prisma.outboxRows[0]!.wakeState = "quarantined";
 
     await expect(buildHostedSharePageData({
-      authenticatedMember: {
-        billingStatus: HostedBillingStatus.active,
-        id: "member_123",
-        suspendedAt: null,
-      } as never,
-      prisma: prisma as never,
+      authenticatedMember: createHostedShareMember(),
+      prisma,
       shareCode: created.shareCode,
     })).resolves.toMatchObject({
       share: {
@@ -603,7 +556,7 @@ describe("hosted share service", () => {
   it("prunes expired hosted share payloads when the share page is read", async () => {
     const prisma = createHostedSharePrisma();
     const created = await createHostedShareLink({
-      prisma: prisma as never,
+      prisma,
       pack: buildPack(),
       senderMemberId: "member_sender",
     });
@@ -611,7 +564,7 @@ describe("hosted share service", () => {
     prisma.rows[0]!.expiresAt = new Date("2026-03-01T00:00:00.000Z");
 
     await expect(buildHostedSharePageData({
-      prisma: prisma as never,
+      prisma,
       shareCode: created.shareCode,
     })).resolves.toMatchObject({
       stage: "expired",
@@ -622,7 +575,7 @@ describe("hosted share service", () => {
   it("prunes expired hosted share payloads when a claim arrives after expiry", async () => {
     const prisma = createHostedSharePrisma();
     const created = await createHostedShareLink({
-      prisma: prisma as never,
+      prisma,
       pack: buildPack(),
       senderMemberId: "member_sender",
     });
@@ -630,12 +583,8 @@ describe("hosted share service", () => {
     prisma.rows[0]!.expiresAt = new Date("2026-03-01T00:00:00.000Z");
 
     await expect(acceptHostedShareLink({
-      member: {
-        billingStatus: HostedBillingStatus.active,
-        id: "member_123",
-        suspendedAt: null,
-      } as never,
-      prisma: prisma as never,
+      member: createHostedShareMember(),
+      prisma,
       shareCode: created.shareCode,
     })).rejects.toMatchObject({
       code: "HOSTED_SHARE_EXPIRED",
@@ -647,30 +596,22 @@ describe("hosted share service", () => {
   it("releases a processing share when the wake lifecycle is replaced before local reconciliation catches up", async () => {
     const prisma = createHostedSharePrisma();
     const created = await createHostedShareLink({
-      prisma: prisma as never,
+      prisma,
       pack: buildPack(),
       senderMemberId: "member_sender",
     });
 
     await acceptHostedShareLink({
-      member: {
-        billingStatus: HostedBillingStatus.active,
-        id: "member_123",
-        suspendedAt: null,
-      } as never,
-      prisma: prisma as never,
+      member: createHostedShareMember(),
+      prisma,
       shareCode: created.shareCode,
     });
 
     prisma.outboxRows[0]!.wakeState = "replaced";
 
     await expect(buildHostedSharePageData({
-      authenticatedMember: {
-        billingStatus: HostedBillingStatus.active,
-        id: "member_123",
-        suspendedAt: null,
-      } as never,
-      prisma: prisma as never,
+      authenticatedMember: createHostedShareMember(),
+      prisma,
       shareCode: created.shareCode,
     })).resolves.toMatchObject({
       share: {
@@ -690,30 +631,22 @@ describe("hosted share service", () => {
   it("releases a processing share when the canonical wake row is absent", async () => {
     const prisma = createHostedSharePrisma();
     const created = await createHostedShareLink({
-      prisma: prisma as never,
+      prisma,
       pack: buildPack(),
       senderMemberId: "member_sender",
     });
 
     await acceptHostedShareLink({
-      member: {
-        billingStatus: HostedBillingStatus.active,
-        id: "member_123",
-        suspendedAt: null,
-      } as never,
-      prisma: prisma as never,
+      member: createHostedShareMember(),
+      prisma,
       shareCode: created.shareCode,
     });
 
     prisma.outboxRows.length = 0;
 
     await expect(buildHostedSharePageData({
-      authenticatedMember: {
-        billingStatus: HostedBillingStatus.active,
-        id: "member_123",
-        suspendedAt: null,
-      } as never,
-      prisma: prisma as never,
+      authenticatedMember: createHostedShareMember(),
+      prisma,
       shareCode: created.shareCode,
     })).resolves.toMatchObject({
       share: {
@@ -736,18 +669,14 @@ describe("hosted share service", () => {
       vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
       const prisma = createHostedSharePrisma();
       const created = await createHostedShareLink({
-        prisma: prisma as never,
+        prisma,
         pack: buildPack(),
         senderMemberId: "member_sender",
       });
 
       await acceptHostedShareLink({
-        member: {
-          billingStatus: HostedBillingStatus.active,
-          id: "member_123",
-          suspendedAt: null,
-        } as never,
-        prisma: prisma as never,
+        member: createHostedShareMember(),
+        prisma,
         shareCode: created.shareCode,
       });
       const firstEventId = prisma.rows[0]?.lastEventId;
@@ -756,18 +685,14 @@ describe("hosted share service", () => {
       expect(await releaseHostedShareAcceptance({
         eventId: firstEventId ?? "",
         memberId: "member_123",
-        prisma: prisma as never,
+        prisma,
         shareId: prisma.rows[0]?.id ?? "",
       })).toBe(true);
 
       vi.setSystemTime(new Date("2026-03-26T12:05:00.000Z"));
       await acceptHostedShareLink({
-        member: {
-          billingStatus: HostedBillingStatus.active,
-          id: "member_123",
-          suspendedAt: null,
-        } as never,
-        prisma: prisma as never,
+        member: createHostedShareMember(),
+        prisma,
         shareCode: created.shareCode,
       });
       const secondEventId = prisma.rows[0]?.lastEventId;
@@ -778,13 +703,13 @@ describe("hosted share service", () => {
       expect(await releaseHostedShareAcceptance({
         eventId: firstEventId ?? "",
         memberId: "member_123",
-        prisma: prisma as never,
+        prisma,
         shareId: prisma.rows[0]?.id ?? "",
       })).toBe(false);
       expect(await finalizeHostedShareAcceptance({
         eventId: firstEventId ?? "",
         memberId: "member_123",
-        prisma: prisma as never,
+        prisma,
         shareId: prisma.rows[0]?.id ?? "",
       })).toEqual({
         finalized: false,
@@ -805,18 +730,16 @@ describe("hosted share service", () => {
   it("treats suspended members as inactive for share page access and share acceptance", async () => {
     const prisma = createHostedSharePrisma();
     const created = await createHostedShareLink({
-      prisma: prisma as never,
+      prisma,
       pack: buildPack(),
       senderMemberId: "member_sender",
     });
 
     await expect(buildHostedSharePageData({
-      authenticatedMember: {
-        billingStatus: HostedBillingStatus.active,
-        id: "member_123",
+      authenticatedMember: createHostedShareMember({
         suspendedAt: new Date("2026-03-26T12:00:00.000Z"),
-      } as never,
-      prisma: prisma as never,
+      }),
+      prisma,
       shareCode: created.shareCode,
     })).resolves.toMatchObject({
       session: {
@@ -827,12 +750,10 @@ describe("hosted share service", () => {
     });
 
     await expect(acceptHostedShareLink({
-      member: {
-        billingStatus: HostedBillingStatus.active,
-        id: "member_123",
+      member: createHostedShareMember({
         suspendedAt: new Date("2026-03-26T12:00:00.000Z"),
-      } as never,
-      prisma: prisma as never,
+      }),
+      prisma,
       shareCode: created.shareCode,
     })).rejects.toMatchObject({
       code: "HOSTED_MEMBER_SUSPENDED",
@@ -844,7 +765,7 @@ describe("hosted share service", () => {
     const prisma = createHostedSharePrisma({ hostedMembers: [] });
 
     await expect(createHostedShareLink({
-      prisma: prisma as never,
+      prisma,
       pack: buildPack(),
       senderMemberId: "member_sender",
     })).rejects.toMatchObject({
@@ -868,7 +789,7 @@ describe("hosted share service", () => {
     });
 
     await expect(createHostedShareLink({
-      prisma: prisma as never,
+      prisma,
       pack: buildPack(),
       senderMemberId: "member_sender",
     })).rejects.toMatchObject({
@@ -911,9 +832,27 @@ type HostedShareMemberRow = {
   suspendedAt: Date | null;
 };
 
+type HostedSharePrismaHandle = HostedSharePrisma & {
+  hostedMembers: HostedShareMemberRow[];
+  hostedSharePayloadRows: HostedSharePayloadRow[];
+  rows: HostedShareRow[];
+  outboxRows: WakeDispatchRecord[];
+};
+
+function createHostedShareMember(
+  overrides: Partial<HostedShareMemberRow> = {},
+): HostedShareActiveMember & HostedShareAuthenticatedMember {
+  return {
+    billingStatus: HostedBillingStatus.active,
+    id: "member_123",
+    suspendedAt: null,
+    ...overrides,
+  };
+}
+
 function createHostedSharePrisma(input?: {
   hostedMembers?: HostedShareMemberRow[];
-}) {
+}): HostedSharePrismaHandle {
   const rows: HostedShareRow[] = [];
   const hostedSharePayloadRows: HostedSharePayloadRow[] = [];
   const outboxRows: WakeDispatchRecord[] = [];
@@ -1068,6 +1007,7 @@ function createHostedSharePrisma(input?: {
 
   return {
     ...transactionalPrisma,
-    $transaction: async (callback: (tx: unknown) => Promise<unknown>) => callback(transactionalPrisma as unknown),
+    $transaction: async <TResult>(callback: (tx: typeof transactionalPrisma) => Promise<TResult>) =>
+      callback(transactionalPrisma),
   };
 }
