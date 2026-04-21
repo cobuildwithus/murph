@@ -1,4 +1,4 @@
-import { assertListenerPort } from "@murphai/runtime-state";
+import { assertListenerPort } from "@murphai/runtime-state/loopback-control-plane";
 
 import {
   GARMIN_API_BASE_URL_ENV_KEYS,
@@ -41,8 +41,6 @@ import {
   WHOOP_SCOPES_ENV_KEYS,
   WHOOP_WEBHOOK_TIMESTAMP_TOLERANCE_MS_ENV_KEYS,
 } from "./env-keys.ts";
-
-import { normalizeString } from "../shared.ts";
 
 import type { GarminDeviceSyncProviderConfig } from "../providers/garmin.ts";
 import type { OuraDeviceSyncProviderConfig } from "../providers/oura.ts";
@@ -241,6 +239,10 @@ export function optionalEnv(env: DeviceSyncEnvSource, keys: readonly string[]): 
   }
 
   return undefined;
+}
+
+function normalizeString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
 export function parseIntegerEnv(env: DeviceSyncEnvSource, keys: readonly string[]): number | undefined {

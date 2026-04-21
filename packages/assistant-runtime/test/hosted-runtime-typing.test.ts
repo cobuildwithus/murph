@@ -28,7 +28,7 @@ vi.mock("@murphai/hosted-execution", async () => {
   };
 });
 
-vi.mock("@murphai/assistant-engine/assistant-runtime", () => ({
+vi.mock("@murphai/assistant-engine/assistant-channel-adapters", () => ({
   getAssistantChannelAdapter: mocks.getAssistantChannelAdapter,
   startLinqTypingIndicator: mocks.startLinqTypingIndicator,
   startTelegramTypingIndicator: mocks.startTelegramTypingIndicator,

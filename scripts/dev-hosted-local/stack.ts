@@ -354,7 +354,14 @@ export async function startHostedLocalDevStack(input: {
             }),
           );
         }
-        await Promise.all(healthChecks);
+        await Promise.race([
+          Promise.all(healthChecks).then(() => undefined),
+          waitForFirstChildExit(children).then((child) => {
+            throw new Error(
+              `${child.name} dev process exited before the hosted local stack became healthy.`,
+            );
+          }),
+        ]);
         ensurePreparedRunnerContainerImageAlias(combineChildOutput(children));
       } catch (error) {
         if (!stopped) {

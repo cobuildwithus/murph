@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises'
 import { describe, expect, it } from 'vitest'
 
 import * as assistantAutomation from '../src/assistant-automation.ts'
+import * as assistantChannelAdapters from '../src/assistant-channel-adapters.ts'
 import * as assistantCliTools from '../src/assistant-cli-tools.ts'
 import * as assistantCron from '../src/assistant-cron.ts'
 import * as assistantEngineIndex from '../src/index.ts'
@@ -23,6 +24,15 @@ const wrapperCases = [
       'runAssistantAutomation',
       'scanAssistantAutomationOnce',
       'clearAssistantAutomationRunLock',
+    ],
+  ],
+  [
+    'assistant-channel-adapters',
+    assistantChannelAdapters,
+    [
+      'getAssistantChannelAdapter',
+      'startLinqTypingIndicator',
+      'startTelegramTypingIndicator',
     ],
   ],
   [

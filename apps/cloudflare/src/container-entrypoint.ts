@@ -349,7 +349,29 @@ async function parseHostedExecutionContainerRunRequest(
   };
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isHostedContainerCliEntrypoint()) {
+  void startHostedContainerEntrypointCli().catch((error) => {
+    emitHostedExecutionStructuredLog({
+      component: "container",
+      error,
+      level: "error",
+      message: "Hosted container entrypoint failed to start.",
+      phase: "failed",
+    });
+    process.exitCode = 1;
+    setImmediate(() => {
+      process.exit(1);
+    });
+  });
+}
+
+function isHostedContainerCliEntrypoint(): boolean {
+  return Boolean(process.argv[1])
+    && import.meta.url === pathToFileURL(process.argv[1]).href
+    && Boolean(process.env.HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN?.trim());
+}
+
+async function startHostedContainerEntrypointCli(): Promise<void> {
   const port = Number.parseInt(process.env.PORT ?? "8080", 10) || 8080;
 
   await startHostedContainerEntrypoint({
@@ -359,8 +381,6 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       processIsolation: true,
     },
   });
-
-  await new Promise(() => {});
 }
 
 function readControlTokenFromEnv(source: NodeJS.ProcessEnv): string | null {
