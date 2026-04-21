@@ -196,8 +196,9 @@ describe("ExperimentDetailPage", () => {
       ?.protocol as ExperimentProtocol;
 
     expect(clientExperiment.researchStats).toEqual(expect.arrayContaining([
-      expect.objectContaining({ label: "TOTAL PARTICIPANTS", value: "5,804+" }),
-      expect.objectContaining({ label: "SOURCES CHECKED", value: 19 }),
+      expect.objectContaining({ label: "TOTAL PARTICIPANTS", value: "6,115+" }),
+      expect.objectContaining({ label: "SOURCES CHECKED", value: 28 }),
+      expect.objectContaining({ label: "YEARS COVERED", value: "2004–2024" }),
     ]));
     expect(clientExperiment.studies).toEqual(expect.arrayContaining([
       expect.objectContaining({

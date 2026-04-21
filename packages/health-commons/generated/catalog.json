@@ -373,6 +373,123 @@
           "sourceKey": "source_artifact:pmid-37608507",
           "sourceUrl": "https://pubmed.ncbi.nlm.nih.gov/37608507/",
           "storage": "cloudflare-r2"
+        },
+        {
+          "accessNotes": "Placeholder only. Upload is intentionally blocked until the file is legally cleared for storage and redistribution.",
+          "artifactId": "art_pmid_15179103_pdf",
+          "contentType": "application/pdf",
+          "kind": "pdf",
+          "localPath": "research-artifacts/norwegian-4x4/pmid-15179103.pdf",
+          "objectKey": "commons/research/norwegian-4x4/pmid-15179103/source.pdf",
+          "redistributable": false,
+          "rightsStatus": "permission_required",
+          "sourceKey": "source_artifact:pmid-15179103",
+          "sourceUrl": "https://pubmed.ncbi.nlm.nih.gov/15179103/",
+          "storage": "cloudflare-r2"
+        },
+        {
+          "accessNotes": "Placeholder only. Upload is intentionally blocked until the file is legally cleared for storage and redistribution.",
+          "artifactId": "art_pmid_17548726_pdf",
+          "contentType": "application/pdf",
+          "kind": "pdf",
+          "localPath": "research-artifacts/norwegian-4x4/pmid-17548726.pdf",
+          "objectKey": "commons/research/norwegian-4x4/pmid-17548726/source.pdf",
+          "redistributable": false,
+          "rightsStatus": "permission_required",
+          "sourceKey": "source_artifact:pmid-17548726",
+          "sourceUrl": "https://pubmed.ncbi.nlm.nih.gov/17548726/",
+          "storage": "cloudflare-r2"
+        },
+        {
+          "accessNotes": "Placeholder only. Upload is intentionally blocked until the file is legally cleared for storage and redistribution.",
+          "artifactId": "art_pmid_18606913_pdf",
+          "contentType": "application/pdf",
+          "kind": "pdf",
+          "localPath": "research-artifacts/norwegian-4x4/pmid-18606913.pdf",
+          "objectKey": "commons/research/norwegian-4x4/pmid-18606913/source.pdf",
+          "redistributable": false,
+          "rightsStatus": "permission_required",
+          "sourceKey": "source_artifact:pmid-18606913",
+          "sourceUrl": "https://pubmed.ncbi.nlm.nih.gov/18606913/",
+          "storage": "cloudflare-r2"
+        },
+        {
+          "accessNotes": "Placeholder only. Upload is intentionally blocked until the file is legally cleared for storage and redistribution.",
+          "artifactId": "art_pmid_18673303_pdf",
+          "contentType": "application/pdf",
+          "kind": "pdf",
+          "localPath": "research-artifacts/norwegian-4x4/pmid-18673303.pdf",
+          "objectKey": "commons/research/norwegian-4x4/pmid-18673303/source.pdf",
+          "redistributable": false,
+          "rightsStatus": "permission_required",
+          "sourceKey": "source_artifact:pmid-18673303",
+          "sourceUrl": "https://pubmed.ncbi.nlm.nih.gov/18673303/",
+          "storage": "cloudflare-r2"
+        },
+        {
+          "accessNotes": "Placeholder only. Upload is intentionally blocked until the file is legally cleared for storage and redistribution.",
+          "artifactId": "art_pmid_19958872_pdf",
+          "contentType": "application/pdf",
+          "kind": "pdf",
+          "localPath": "research-artifacts/norwegian-4x4/pmid-19958872.pdf",
+          "objectKey": "commons/research/norwegian-4x4/pmid-19958872/source.pdf",
+          "redistributable": false,
+          "rightsStatus": "permission_required",
+          "sourceKey": "source_artifact:pmid-19958872",
+          "sourceUrl": "https://pubmed.ncbi.nlm.nih.gov/19958872/",
+          "storage": "cloudflare-r2"
+        },
+        {
+          "accessNotes": "Placeholder only. Upload is intentionally blocked until the file is legally cleared for storage and redistribution.",
+          "artifactId": "art_pmid_21450580_pdf",
+          "contentType": "application/pdf",
+          "kind": "pdf",
+          "localPath": "research-artifacts/norwegian-4x4/pmid-21450580.pdf",
+          "objectKey": "commons/research/norwegian-4x4/pmid-21450580/source.pdf",
+          "redistributable": false,
+          "rightsStatus": "permission_required",
+          "sourceKey": "source_artifact:pmid-21450580",
+          "sourceUrl": "https://pubmed.ncbi.nlm.nih.gov/21450580/",
+          "storage": "cloudflare-r2"
+        },
+        {
+          "accessNotes": "Placeholder only. Upload is intentionally blocked until the file is legally cleared for storage and redistribution.",
+          "artifactId": "art_pmid_26440134_pdf",
+          "contentType": "application/pdf",
+          "kind": "pdf",
+          "localPath": "research-artifacts/norwegian-4x4/pmid-26440134.pdf",
+          "objectKey": "commons/research/norwegian-4x4/pmid-26440134/source.pdf",
+          "redistributable": false,
+          "rightsStatus": "permission_required",
+          "sourceKey": "source_artifact:pmid-26440134",
+          "sourceUrl": "https://pubmed.ncbi.nlm.nih.gov/26440134/",
+          "storage": "cloudflare-r2"
+        },
+        {
+          "accessNotes": "Placeholder only. Upload is intentionally blocked until the file is legally cleared for storage and redistribution.",
+          "artifactId": "art_pmid_28385556_pdf",
+          "contentType": "application/pdf",
+          "kind": "pdf",
+          "localPath": "research-artifacts/norwegian-4x4/pmid-28385556.pdf",
+          "objectKey": "commons/research/norwegian-4x4/pmid-28385556/source.pdf",
+          "redistributable": false,
+          "rightsStatus": "not_redistributable",
+          "sourceKey": "source_artifact:pmid-28385556",
+          "sourceUrl": "https://pubmed.ncbi.nlm.nih.gov/28385556/",
+          "storage": "cloudflare-r2"
+        },
+        {
+          "accessNotes": "Placeholder only. Upload is intentionally blocked until the file is legally cleared for storage and redistribution.",
+          "artifactId": "art_pmid_29502328_pdf",
+          "contentType": "application/pdf",
+          "kind": "pdf",
+          "localPath": "research-artifacts/norwegian-4x4/pmid-29502328.pdf",
+          "objectKey": "commons/research/norwegian-4x4/pmid-29502328/source.pdf",
+          "redistributable": false,
+          "rightsStatus": "not_redistributable",
+          "sourceKey": "source_artifact:pmid-29502328",
+          "sourceUrl": "https://pubmed.ncbi.nlm.nih.gov/29502328/",
+          "storage": "cloudflare-r2"
         }
       ],
       "description": "Manifest stubs for Norwegian 4x4 research artifacts and article PDFs. Keep files out of Git, stage them under research-artifacts/norwegian-4x4/, hash locally, then upload to Cloudflare R2 only after rights review.",
@@ -1225,7 +1342,7 @@
       "schemaVersion": "murph.commons.artifact-manifest.v1"
     }
   ],
-  "catalogHash": "sha256:b66ceb923735f40ff37a13993ad31507e40fc396860f8a74dbfab185dfaf92ea",
+  "catalogHash": "sha256:f8aacb9c4a4ccdbeaa937f0831db71320d7b37f8215f2195530674d5ea82c096",
   "changes": [
     {
       "affectedFields": [
@@ -1591,6 +1708,36 @@
       "schemaVersion": "murph.commons.change.v1",
       "sourceKeys": [
         "source_artifact:ntnu-cerg-norwegian-4x4"
+      ]
+    },
+    {
+      "affectedFields": [
+        "relations",
+        "claims",
+        "expectedSignal.primary.sourceKeys",
+        "researchCoverage",
+        "sources/norwegian-4x4",
+        "artifacts/norwegian-4x4/research-artifacts.json",
+        "generated.catalog"
+      ],
+      "changeId": "chg_2026_04_21_norwegian_4x4_research_source_gap_fill",
+      "changeType": "evidence_change",
+      "editSummary": "Expanded the Norwegian 4x4 research section with missing 4x4-lineage clinical trials, direct 4HIIT-vs-1HIIT evidence, and clinical synthesis sources.",
+      "entityKey": "protocol_variant:norwegian-4x4/norwegian-4x4",
+      "minor": false,
+      "rationale": "The prior corpus had the canonical healthy-adult trial, public protocol page, safety context, and later mixed clinical trials, but underrepresented the early CAD, HFrEF, metabolic-syndrome, adolescent, CABG, hypertension, and 4HIIT-vs-1HIIT papers that explain why Norwegian 4x4 needs explicit population-mismatch and variant-separation guardrails.",
+      "reviewStatus": "proposed",
+      "schemaVersion": "murph.commons.change.v1",
+      "sourceKeys": [
+        "source_artifact:pmid-15179103",
+        "source_artifact:pmid-17548726",
+        "source_artifact:pmid-18606913",
+        "source_artifact:pmid-18673303",
+        "source_artifact:pmid-19958872",
+        "source_artifact:pmid-21450580",
+        "source_artifact:pmid-26440134",
+        "source_artifact:pmid-28385556",
+        "source_artifact:pmid-29502328"
       ]
     },
     {
@@ -2265,7 +2412,7 @@
         "Norwegian intervals",
         "CERG 4x4"
       ],
-      "body": "Norwegian 4x4 is the family for aerobic high-intensity interval sessions built around four 4-minute hard efforts.\n\nThis stays separate from sprint-interval training, low-volume 1 x 4 HIIT, athletic performance protocols, and cardiac-rehabilitation disease-treatment protocols because those variants differ in dose, risk, population, and interpretation.",
+      "body": "Norwegian 4x4 is the family for aerobic high-intensity interval sessions built around four 4-minute hard efforts.\n\nThe source graph now includes the healthy-adult protocol backbone, direct 4HIIT-vs-1HIIT variant evidence, early supervised cardiometabolic and cardiac-rehabilitation lineage trials, later mixed/null clinical trials, and safety guidance. This family stays separate from sprint-interval training, low-volume 1 x 4 HIIT, adolescent or disease-treatment protocols, athletic performance protocols, hypertension treatment, and cardiac-rehabilitation protocols because those variants differ in dose, risk, population, supervision, and interpretation.",
       "canonicalModality": "aerobic_4x4_intervals",
       "categories": [
         "cardiovascular",
@@ -2295,6 +2442,42 @@
           "type": "cites"
         },
         {
+          "target": "source_artifact:pmid-15179103",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-17548726",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-18606913",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-18673303",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-19958872",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-21450580",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-26440134",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-28385556",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-29502328",
+          "type": "cites"
+        },
+        {
           "target": "source_artifact:pmid-30733142",
           "type": "cites"
         },
@@ -2312,18 +2495,20 @@
         "bibliographyKey": "source_artifact:norwegian-4x4-bibliography",
         "corpusStats": {
           "adjacentVariantRecords": 4,
-          "auditCutoff": "2026-04-20",
-          "canonicalProtocolSupportRecords": 5,
-          "earliestYear": 2007,
-          "landingCorpusRecords": 20,
+          "auditCutoff": "2026-04-21",
+          "canonicalProtocolSupportRecords": 6,
+          "clinicalLineageRecords": 6,
+          "clinicalSynthesisRecords": 2,
+          "earliestYear": 2004,
+          "landingCorpusRecords": 29,
           "latestYear": 2024,
           "mixedOrNullClinicalRecords": 3,
-          "refinedPass2Records": 42,
+          "refinedPass2Records": 51,
           "safetyAndContraindicationRecords": 9
         }
       },
       "revision": {
-        "pageRevisionId": "sha256:eee344b6301c6fc3391b5815d41788b55e2aa7eaae621eebcf7a3af62c0fa204",
+        "pageRevisionId": "sha256:85440c5af9c8f416d36adf51eb905da01bc32bc9f88a6ff7f8fe2d54bb1310a9",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -3499,7 +3684,7 @@
       "attribution": {
         "ownerType": "murph"
       },
-      "body": "## Question this experiment answers\n\nAfter a stable baseline, does a short block of **Norwegian-style 4x4 aerobic intervals** make your fitness signal or recovery pattern improve enough to be worth repeating?\n\n## Simple version\n\nRun a 49-day experiment:\n\n- **7 baseline days**\n- **42 intervention days**\n- **2 interval sessions per week**\n- **12 target sessions**, with **8 sessions** as the minimum for a useful first read\n- each session: warm-up, **4 x 4 minutes hard**, 3-minute active recoveries, cooldown\n- target: reach about **85–95% of estimated HRmax** by the later part of each hard interval\n\nThat heart-rate target is not a sprint-start instruction. The goal is repeatable hard aerobic work that rises into the zone by the later part of each interval, not an all-out first minute.\n\nThis is not a permanent training identity. It is a bounded test of whether this interval dose fits your body and life.\n\n## What to watch\n\nThe main read is whether cardio fitness trends in a useful direction without making recovery worse. Session fidelity matters too: did the intervals reach the intended zone, did recovery stay reasonable, and did the protocol remain repeatable?\n\nHRV, sleep, soreness, symptoms, and morning blood pressure are context. They help explain the result, but they are not promised wins.\n\n## What to log every session\n\nAt minimum, log modality, completed intervals, interval peak heart rates, rough time in the target zone, perceived exertion for each interval, 1- and 2-minute heart-rate recovery, symptoms, sleep disruption, alcohol, illness, travel, unusually hard training, and major stress.\n\n## Stop conditions\n\nStop the session if chest pain or pressure, faintness, severe dizziness, confusion, palpitations, unusual shortness of breath, neurologic symptoms, or unsafe pain occurs.\n\nEnd the experiment and seek appropriate care if severe symptoms occur, symptoms repeat across sessions, or recovery feels unusually impaired for more than 24–48 hours.\n\n## Ask a clinician first\n\nAsk a clinician before trying this if you have known cardiovascular disease, exertional chest symptoms, unexplained shortness of breath, fainting or near-fainting, significant arrhythmia, heart failure, recent myocardial infarction or stroke, uncontrolled hypertension, possible myocarditis or pericarditis, pregnancy or early postpartum status, diabetes medication with hypoglycemia risk, severe asthma/COPD symptoms, long-COVID-like post-exertional malaise, or an injury that vigorous exercise could worsen.\n\nPeople taking beta blockers or other heart-rate-limiting medicines should not rely on generic HRmax zones.\n\n## What this does not test\n\nThis experiment does not test longevity, heart-failure treatment, coronary disease treatment, diabetes treatment, hypertension treatment, or superiority over every form of moderate continuous training.\n\nIt also does not promise HRV improvement, sleep improvement, fat loss, or a wearable VO2max increase. A useful signal, if it appears, is practical: sessions become more repeatable, heart-rate recovery or resting heart rate moves in a helpful direction, and the wearable cardio-fitness estimate trends favorably.\n\n## Evidence snapshot\n\nThe evidence supports 4x4 intervals as a plausible VO2max-oriented training dose, but it also includes small trials, mixed clinical comparisons, and safety caveats. Low-volume 1 x 4 HIIT, sprint intervals, athlete-performance plans, and supervised cardiac-rehabilitation protocols belong nearby, not inside this exact experiment.",
+      "body": "## Question this experiment answers\n\nAfter a stable baseline, does a short block of **Norwegian-style 4x4 aerobic intervals** make your fitness signal or recovery pattern improve enough to be worth repeating?\n\n## Simple version\n\nRun a 49-day experiment:\n\n- **7 baseline days**\n- **42 intervention days**\n- **2 interval sessions per week**\n- **12 target sessions**, with **8 sessions** as the minimum for a useful first read\n- each session: warm-up, **4 x 4 minutes hard**, 3-minute active recoveries, cooldown\n- target: reach about **85–95% of estimated HRmax** by the later part of each hard interval\n\nThat heart-rate target is not a sprint-start instruction. The goal is repeatable hard aerobic work that rises into the zone by the later part of each interval, not an all-out first minute.\n\nThis is not a permanent training identity. It is a bounded test of whether this interval dose fits your body and life.\n\n## What to watch\n\nThe main read is whether cardio fitness trends in a useful direction without making recovery worse. Session fidelity matters too: did the intervals reach the intended zone, did recovery stay reasonable, and did the protocol remain repeatable?\n\nHRV, sleep, soreness, symptoms, and morning blood pressure are context. They help explain the result, but they are not promised wins.\n\n## What to log every session\n\nAt minimum, log modality, completed intervals, interval peak heart rates, rough time in the target zone, perceived exertion for each interval, 1- and 2-minute heart-rate recovery, symptoms, sleep disruption, alcohol, illness, travel, unusually hard training, and major stress.\n\n## Stop conditions\n\nStop the session if chest pain or pressure, faintness, severe dizziness, confusion, palpitations, unusual shortness of breath, neurologic symptoms, or unsafe pain occurs.\n\nEnd the experiment and seek appropriate care if severe symptoms occur, symptoms repeat across sessions, or recovery feels unusually impaired for more than 24–48 hours.\n\n## Ask a clinician first\n\nAsk a clinician before trying this if you have known cardiovascular disease, exertional chest symptoms, unexplained shortness of breath, fainting or near-fainting, significant arrhythmia, heart failure, recent myocardial infarction or stroke, uncontrolled hypertension, possible myocarditis or pericarditis, pregnancy or early postpartum status, diabetes medication with hypoglycemia risk, severe asthma/COPD symptoms, long-COVID-like post-exertional malaise, or an injury that vigorous exercise could worsen.\n\nPeople taking beta blockers or other heart-rate-limiting medicines should not rely on generic HRmax zones.\n\n## What this does not test\n\nThis experiment does not test longevity, heart-failure treatment, coronary disease treatment, diabetes treatment, hypertension treatment, or superiority over every form of moderate continuous training.\n\nIt also does not promise HRV improvement, sleep improvement, fat loss, or a wearable VO2max increase. A useful signal, if it appears, is practical: sessions become more repeatable, heart-rate recovery or resting heart rate moves in a helpful direction, and the wearable cardio-fitness estimate trends favorably.\n\n## Evidence snapshot\n\nThe evidence supports 4x4 intervals as a plausible VO2max-oriented training dose, but it also includes small direct trials, early supervised clinical-lineage studies, larger mixed clinical comparisons, and safety caveats. Low-volume 1 x 4 HIIT, sprint intervals, athlete-performance plans, pediatric/adolescent cardiometabolic trials, hypertension treatment, and supervised cardiac-rehabilitation protocols belong nearby, not inside this exact experiment.",
       "categories": [
         "cardiovascular",
         "exercise",
@@ -3510,17 +3695,18 @@
       "claims": [
         {
           "caveats": [
-            "Helgerud 2007 was small and controlled.",
+            "The direct 4x4 trials are small and controlled.",
             "Meta-analyses combine many HIIT protocols, not only Norwegian 4x4.",
             "Wearable VO2max estimates are proxies, not laboratory gas-exchange measurements."
           ],
           "claimId": "canonical-4x4-has-direct-human-intervention-support",
           "sourceKeys": [
             "source_artifact:pmid-17414804",
+            "source_artifact:pmid-26440134",
             "source_artifact:pmid-30733142"
           ],
           "strength": "moderate",
-          "text": "Four-by-four aerobic interval training has direct human intervention evidence for improving lab-measured VO2max in small healthy-adult trials, but that does not mean every wearable cardio-fitness estimate will move.",
+          "text": "Four-by-four aerobic interval training has direct human intervention evidence for improving lab-measured VO2max in small healthy-adult and overweight/obese adult trials, plus broader HIIT synthesis support, but that does not mean every wearable cardio-fitness estimate will move.",
           "type": "intervention_result"
         },
         {
@@ -3559,6 +3745,7 @@
           "claimId": "six-week-window-is-more-honest-than-two-weeks",
           "sourceKeys": [
             "source_artifact:pmid-17414804",
+            "source_artifact:pmid-26440134",
             "source_artifact:pmid-30733142"
           ],
           "strength": "moderate",
@@ -3568,16 +3755,23 @@
         {
           "caveats": [
             "These were clinical populations, not general wearable users.",
-            "They remain important because they prevent overclaiming from small early positive trials."
+            "Supervision, medication status, comorbidities, and intensity fidelity differ materially from a home self-experiment.",
+            "The mixed clinical record prevents overclaiming from small early positive trials."
           ],
           "claimId": "superiority-over-moderate-continuous-training-is-not-settled",
           "sourceKeys": [
+            "source_artifact:pmid-15179103",
+            "source_artifact:pmid-17548726",
+            "source_artifact:pmid-18606913",
+            "source_artifact:pmid-19958872",
+            "source_artifact:pmid-21450580",
             "source_artifact:pmid-25464446",
             "source_artifact:pmid-28082387",
-            "source_artifact:pmid-33560320"
+            "source_artifact:pmid-33560320",
+            "source_artifact:pmid-29502328"
           ],
           "strength": "high",
-          "text": "Norwegian 4x4 should not be presented as always superior to moderate continuous training; larger clinical trials in coronary artery disease and heart failure found similar or mixed results compared with moderate continuous training or guideline advice.",
+          "text": "Norwegian 4x4 should not be presented as always superior to moderate continuous training; early small supervised clinical trials often favored interval training, but larger and later clinical trials in coronary artery disease and heart failure found similar or mixed results compared with moderate continuous training or guideline advice.",
           "type": "mixed_evidence"
         },
         {
@@ -3587,6 +3781,12 @@
           ],
           "claimId": "clinical-disease-trials-are-not-self-treatment-evidence",
           "sourceKeys": [
+            "source_artifact:pmid-15179103",
+            "source_artifact:pmid-17548726",
+            "source_artifact:pmid-18606913",
+            "source_artifact:pmid-18673303",
+            "source_artifact:pmid-19958872",
+            "source_artifact:pmid-21450580",
             "source_artifact:pmid-25464446",
             "source_artifact:pmid-28082387",
             "source_artifact:pmid-33560320",
@@ -3596,7 +3796,7 @@
             "source_artifact:pmid-32100573"
           ],
           "strength": "high",
-          "text": "Cardiac and heart-failure studies should be treated as safety and population-mismatch context, not as evidence that unscreened users should self-treat disease with 4x4 intervals.",
+          "text": "Cardiac, hypertension, metabolic-syndrome, and adolescent overweight studies should be treated as safety and population-mismatch context, not as evidence that unscreened users should self-treat disease or cardiometabolic risk with 4x4 intervals.",
           "type": "safety"
         },
         {
@@ -3621,6 +3821,7 @@
           ],
           "claimId": "low-volume-1x4-and-sprint-intervals-should-be-split",
           "sourceKeys": [
+            "source_artifact:pmid-26440134",
             "source_artifact:pmid-28846513",
             "source_artifact:pmid-39256000",
             "source_artifact:pmid-36314990",
@@ -3669,6 +3870,7 @@
           "latency": "4-6 weeks, with wearable update lag possible",
           "sourceKeys": [
             "source_artifact:pmid-17414804",
+            "source_artifact:pmid-26440134",
             "source_artifact:pmid-30733142"
           ]
         },
@@ -3783,6 +3985,42 @@
           "type": "cites"
         },
         {
+          "target": "source_artifact:pmid-15179103",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-17548726",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-18606913",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-18673303",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-19958872",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-21450580",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-26440134",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-28385556",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-29502328",
+          "type": "cites"
+        },
+        {
           "target": "source_artifact:pmid-30733142",
           "type": "cites"
         },
@@ -3856,18 +4094,20 @@
         "bibliographyKey": "source_artifact:norwegian-4x4-bibliography",
         "corpusStats": {
           "adjacentVariantRecords": 4,
-          "auditCutoff": "2026-04-20",
-          "canonicalProtocolSupportRecords": 5,
-          "earliestYear": 2007,
-          "landingCorpusRecords": 20,
+          "auditCutoff": "2026-04-21",
+          "canonicalProtocolSupportRecords": 6,
+          "clinicalLineageRecords": 6,
+          "clinicalSynthesisRecords": 2,
+          "earliestYear": 2004,
+          "landingCorpusRecords": 29,
           "latestYear": 2024,
           "mixedOrNullClinicalRecords": 3,
-          "refinedPass2Records": 42,
+          "refinedPass2Records": 51,
           "safetyAndContraindicationRecords": 9
         }
       },
       "revision": {
-        "pageRevisionId": "sha256:38df2d98174b3aa78965ebcb9491857575120a249e2c6c31ceb9a6315e505fc9",
+        "pageRevisionId": "sha256:a8c60049c9eecd70914e4784507cb0c2b8e427b400348c8a017c02a751f4c56f",
         "recipeHash": "sha256:a36ee9d7c6cf5d9c816817cb9366d0a7d815922f2135ecd739884d1afd7a38d1",
         "runSpecRevisionId": "sha256:80e12ca616f3426cfe7a4f2c60696a066a55fdbf5a1fce79c95901d7ba3fff2b"
       },
@@ -5287,7 +5527,7 @@
       "whyItMatters": "Strong narrative synthesis focused on cardiovascular mechanisms and outcomes"
     },
     {
-      "body": "## What this is\n\nThis page represents the structured Norwegian 4x4 research corpus behind the bounded interval experiment. It is a curation artifact, not a primary study.\n\n## Corpus at a glance\n\n- 42 refined pass-2 records\n- 20 records landed into the local machine-readable corpus draft\n- 5 records marked as directly supporting the protocol recipe\n- 9 records primarily used for safety and contraindication language\n- 3 larger clinical mixed/null records that prevent overclaiming superiority\n- 4 adjacent-variant records that should probably become separate pages\n\n## Evidence backbone\n\n- `source_artifact:pmid-17414804` — direct healthy-adult 4x4 RCT.\n- `source_artifact:pmid-30733142` — HIIT protocol/VO2max meta-analysis supporting long-interval programming.\n- `source_artifact:pmid-24066036` — VO2max trainability and response-variability context.\n- `source_artifact:ntnu-cerg-norwegian-4x4` — public protocol-dose description.\n- `source_artifact:doi-10.3390-ijerph17145103` — heart-rate response and target-zone fidelity.\n- `source_artifact:pmid-23988787` — RPE-only guidance can miss the intended target intensity.\n\n## Safety and contraindications\n\nSafety claims should use `source_artifact:pmid-22879367`, `source_artifact:pmid-30376749`, `source_artifact:pmid-29416382`, `source_artifact:pmid-32860412`, and `source_artifact:pmid-32100573`. These are safety-only or guideline/context sources and should not be used to imply that unscreened home HIIT is risk-free.\n\n## Mixed and null evidence\n\nThe protocol must visibly include `source_artifact:pmid-25464446`, `source_artifact:pmid-28082387`, and `source_artifact:pmid-33560320` because they prevent overclaiming from earlier small positive trials.\n\n## Adjacent variants to split\n\nLow-volume 1 x 4 HIIT, sprint-interval training, athlete-performance 4x4, disease-treatment cardiac rehabilitation, and metabolic-syndrome/diabetes HIIT should not be collapsed into this interval experiment.\n\n## Selected sources\n\n- `source_artifact:pmid-17414804` — Evidence backbone; claimUse `supports-protocol`; Canonical small RCT supporting the Norwegian 4x4 dose as a VO2max-oriented aerobic interval protocol.\n- `source_artifact:ntnu-cerg-norwegian-4x4` — Protocol dose and design; claimUse `supports-protocol`; Public-facing source for the commonly cited Norwegian 4x4 session structure.\n- `source_artifact:pmid-30733142` — Protocol dose and design; claimUse `supports-protocol`; Meta-analysis used to justify long-interval HIIT as a plausible VO2max-oriented design class.\n- `source_artifact:pmid-24066036` — Context-only rationale; claimUse `context-only`; Open-access meta-analysis supporting the general concept of VO2max trainability from HIIT while showing response variability.\n- `source_artifact:doi-10.3390-ijerph17145103` — Wearable or testable signals; claimUse `supports-protocol`; Acute implementation source showing how heart rate behaves during a 4x4 session and why target-zone fidelity needs to be logged.\n- `source_artifact:pmid-23988787` — Wearable or testable signals; claimUse `supports-protocol`; Implementation caution source: RPE-only guidance can miss the intended HR target during interval training.\n- `source_artifact:pmid-25464446` — Mixed and null clinical evidence; claimUse `context-only`; Larger CAD trial that prevents overclaiming HIIT superiority over moderate continuous training.\n- `source_artifact:pmid-28082387` — Mixed and null clinical evidence; claimUse `context-only`; Larger HFrEF trial that did not confirm clear HIIT superiority and highlighted intensity-fidelity issues.\n- `source_artifact:pmid-33560320` — Mixed and null clinical evidence; claimUse `context-only`; HFpEF clinical trial showing no significant primary peak-VO2 advantage for HIIT over comparators.\n- `source_artifact:pmid-22879367` — Safety and contraindications; claimUse `safety-only`; Quantified supervised cardiac-rehabilitation safety registry; key low-but-not-zero risk framing.\n- `source_artifact:pmid-30376749` — Safety and contraindications; claimUse `safety-only`; Systematic review of HIIT safety in cardiovascular disease populations.\n- `source_artifact:pmid-29416382` — Safety and contraindications; claimUse `safety-only`; Cardiac-rehabilitation meta-analysis supporting efficacy and safety context under supervision.\n- `source_artifact:pmid-32860412` — Safety and contraindications; claimUse `safety-only`; Backbone guideline for cardiovascular disease, exercise eligibility, and clinician-clearance boundaries.\n- `source_artifact:pmid-32100573` — Safety and contraindications; claimUse `safety-only`; AHA scientific statement for acute cardiovascular event risk and progression language.\n- `source_artifact:pmid-33239350` — Public health context; claimUse `context-only`; Public-health context showing vigorous aerobic exercise as one option within weekly activity guidance.\n- `source_artifact:pmid-30293954` — Wearable or testable signals; claimUse `context-only`; HRV/autonomic-control synthesis; useful for setting cautious expectations around HRV.\n- `source_artifact:pmid-28846513` — Adjacent variants to split; claimUse `context-only`; Low-volume 1x4 HIIT evidence that should not be treated as the same as standard 4x4.\n- `source_artifact:pmid-39256000` — Adjacent variants to split; claimUse `context-only`; Recent metabolic-syndrome HIIT synthesis; useful to separate metabolic HIIT and low-volume variants from standard 4x4.\n- `source_artifact:pmid-36314990` — Adjacent variants to split; claimUse `context-only`; Athlete trial comparing 4x4-style intervals with sprint-interval training; supports not merging SIT with Norwegian 4x4.\n- `source_artifact:pmid-37608507` — Adjacent variants to split; claimUse `context-only`; Female athlete comparison source supporting separation of 4x4 from supramaximal sprint-interval training.\n\n## Use rule\n\nUse this page to understand why the practical version is a **2x/week, 6-week, wearable-guided experiment** rather than a maximal training prescription. Do not cite this bibliography in place of primary intervention evidence, safety guidance, or variant-specific source pages.",
+      "body": "## What this is\n\nThis page represents the structured Norwegian 4x4 research corpus behind the bounded interval experiment. It is a curation artifact, not a primary study.\n\n## Corpus at a glance\n\n- 51 refined pass-2 records\n- 29 records landed into the local machine-readable corpus draft\n- 6 records marked as directly supporting the practical protocol recipe or variant-separation decision\n- 6 clinical-lineage records that explain the CERG/Norwegian 4x4 disease-population evidence base without becoming unscreened self-treatment evidence\n- 2 clinical synthesis/review records used as overclaim guardrails\n- 9 records primarily used for safety and contraindication language\n- 3 larger clinical mixed/null records that prevent overclaiming superiority\n- 4 adjacent-variant records that should probably become separate pages\n\n## Evidence backbone\n\n- `source_artifact:pmid-17414804` — direct healthy-adult 4x4 RCT.\n- `source_artifact:pmid-26440134` — direct 4HIIT versus 1HIIT versus MICT comparison supporting 4x4/1x4 separation and the 6-week window.\n- `source_artifact:pmid-30733142` — HIIT protocol/VO2max meta-analysis supporting long-interval programming.\n- `source_artifact:pmid-24066036` — VO2max trainability and response-variability context.\n- `source_artifact:ntnu-cerg-norwegian-4x4` — public protocol-dose description.\n- `source_artifact:doi-10.3390-ijerph17145103` — heart-rate response and target-zone fidelity.\n- `source_artifact:pmid-23988787` — RPE-only guidance can miss the intended target intensity.\n\n## Clinical lineage and population mismatch\n\nThese sources explain why Norwegian 4x4 is heavily represented in cardiometabolic and cardiac-rehabilitation literature, but they should not be used as direct evidence for unscreened self-treatment:\n\n- `source_artifact:pmid-15179103` — stable coronary artery disease trial.\n- `source_artifact:pmid-17548726` — stable post-infarction heart-failure trial.\n- `source_artifact:pmid-18606913` — metabolic-syndrome pilot trial.\n- `source_artifact:pmid-18673303` — overweight-adolescent trial.\n- `source_artifact:pmid-19958872` — post-CABG rehabilitation trial.\n- `source_artifact:pmid-21450580` — essential-hypertension trial.\n\n## Safety and contraindications\n\nSafety claims should use `source_artifact:pmid-22879367`, `source_artifact:pmid-30376749`, `source_artifact:pmid-29416382`, `source_artifact:pmid-32860412`, and `source_artifact:pmid-32100573`. These are safety-only or guideline/context sources and should not be used to imply that unscreened home HIIT is risk-free.\n\n## Mixed, null, and clinical synthesis evidence\n\nThe protocol must visibly include `source_artifact:pmid-25464446`, `source_artifact:pmid-28082387`, and `source_artifact:pmid-33560320` because they prevent overclaiming from earlier small positive trials. Use `source_artifact:pmid-29502328` and `source_artifact:pmid-28385556` as synthesis and implementation context, not as replacements for primary trial evidence.\n\n## Adjacent variants to split\n\nLow-volume 1 x 4 HIIT, sprint-interval training, athlete-performance 4x4, disease-treatment cardiac rehabilitation, metabolic-syndrome/diabetes HIIT, and pediatric/adolescent cardiometabolic-risk protocols should not be collapsed into this interval experiment.\n\n## Selected sources\n\n- `source_artifact:pmid-17414804` — Evidence backbone; claimUse `supports-protocol`; Canonical small RCT supporting the Norwegian 4x4 dose as a VO2max-oriented aerobic interval protocol.\n- `source_artifact:pmid-26440134` — Protocol dose and variant separation; claimUse `supports-protocol`; Direct 6-week comparison showing the standard 4x4 dose should not be collapsed into 1x4 HIIT or moderate continuous training.\n- `source_artifact:ntnu-cerg-norwegian-4x4` — Protocol dose and design; claimUse `supports-protocol`; Public-facing source for the commonly cited Norwegian 4x4 session structure.\n- `source_artifact:pmid-30733142` — Protocol dose and design; claimUse `supports-protocol`; Meta-analysis used to justify long-interval HIIT as a plausible VO2max-oriented design class.\n- `source_artifact:pmid-24066036` — Context-only rationale; claimUse `context-only`; Open-access meta-analysis supporting the general concept of VO2max trainability from HIIT while showing response variability.\n- `source_artifact:doi-10.3390-ijerph17145103` — Wearable or testable signals; claimUse `supports-protocol`; Acute implementation source showing how heart rate behaves during a 4x4 session and why target-zone fidelity needs to be logged.\n- `source_artifact:pmid-23988787` — Wearable or testable signals; claimUse `supports-protocol`; Implementation caution source: RPE-only guidance can miss the intended HR target during interval training.\n- `source_artifact:pmid-15179103` — Clinical lineage and population mismatch; claimUse `context-only`; Early supervised CAD trial that belongs in the clinical lineage, not the unsupervised wellness claim base.\n- `source_artifact:pmid-17548726` — Clinical lineage and population mismatch; claimUse `context-only`; Classic supervised heart-failure 4x4-lineage trial.\n- `source_artifact:pmid-18606913` — Clinical lineage and population mismatch; claimUse `context-only`; Metabolic-syndrome pilot trial from the CERG/Norwegian 4x4 lineage.\n- `source_artifact:pmid-18673303` — Clinical lineage and population mismatch; claimUse `context-only`; Overweight-adolescent 4x4-style trial that should stay population-bounded.\n- `source_artifact:pmid-19958872` — Clinical lineage and population mismatch; claimUse `context-only`; Post-CABG supervised rehabilitation trial.\n- `source_artifact:pmid-21450580` — Clinical lineage and population mismatch; claimUse `context-only`; Hypertension trial used for blood-pressure context and clinician-boundary language.\n- `source_artifact:pmid-25464446` — Mixed and null clinical evidence; claimUse `context-only`; Larger CAD trial that prevents overclaiming HIIT superiority over moderate continuous training.\n- `source_artifact:pmid-28082387` — Mixed and null clinical evidence; claimUse `context-only`; Larger HFrEF trial that did not confirm clear HIIT superiority and highlighted intensity-fidelity issues.\n- `source_artifact:pmid-33560320` — Mixed and null clinical evidence; claimUse `context-only`; HFpEF clinical trial showing no significant primary peak-VO2 advantage for HIIT over comparators.\n- `source_artifact:pmid-28385556` — Clinical synthesis and implementation context; claimUse `context-only`; CERG-lineage narrative review for health-outcome and home/clinical HIIT framing.\n- `source_artifact:pmid-29502328` — Clinical synthesis and overclaim guardrails; claimUse `context-only`; Updated CAD/HF meta-analysis that keeps clinical claims population-bounded.\n- `source_artifact:pmid-22879367` — Safety and contraindications; claimUse `safety-only`; Quantified supervised cardiac-rehabilitation safety registry; key low-but-not-zero risk framing.\n- `source_artifact:pmid-30376749` — Safety and contraindications; claimUse `safety-only`; Systematic review of HIIT safety in cardiovascular disease populations.\n- `source_artifact:pmid-29416382` — Safety and contraindications; claimUse `safety-only`; Cardiac-rehabilitation meta-analysis supporting efficacy and safety context under supervision.\n- `source_artifact:pmid-32860412` — Safety and contraindications; claimUse `safety-only`; Backbone guideline for cardiovascular disease, exercise eligibility, and clinician-clearance boundaries.\n- `source_artifact:pmid-32100573` — Safety and contraindications; claimUse `safety-only`; AHA scientific statement for acute cardiovascular event risk and progression language.\n- `source_artifact:pmid-33239350` — Public health context; claimUse `context-only`; Public-health context showing vigorous aerobic exercise as one option within weekly activity guidance.\n- `source_artifact:pmid-30293954` — Wearable or testable signals; claimUse `context-only`; HRV/autonomic-control synthesis; useful for setting cautious expectations around HRV.\n- `source_artifact:pmid-28846513` — Adjacent variants to split; claimUse `context-only`; Low-volume 1x4 HIIT evidence that should not be treated as the same as standard 4x4.\n- `source_artifact:pmid-39256000` — Adjacent variants to split; claimUse `context-only`; Recent metabolic-syndrome HIIT synthesis; useful to separate metabolic HIIT and low-volume variants from standard 4x4.\n- `source_artifact:pmid-36314990` — Adjacent variants to split; claimUse `context-only`; Athlete trial comparing 4x4-style intervals with sprint-interval training; supports not merging SIT with Norwegian 4x4.\n- `source_artifact:pmid-37608507` — Adjacent variants to split; claimUse `context-only`; Female athlete comparison source supporting separation of 4x4 from supramaximal sprint-interval training.\n\n## Use rule\n\nUse this page to understand why the practical version is a **2x/week, 6-week, wearable-guided experiment** rather than a maximal training prescription. Do not cite this bibliography in place of primary intervention evidence, safety guidance, or variant-specific source pages.",
       "categories": [
         "norwegian-4x4",
         "hiit",
@@ -5296,13 +5536,15 @@
       ],
       "corpusStats": {
         "adjacentVariantRecords": 4,
-        "auditCutoff": "2026-04-20",
-        "canonicalProtocolSupportRecords": 5,
-        "earliestYear": 2007,
-        "landingCorpusRecords": 20,
+        "auditCutoff": "2026-04-21",
+        "canonicalProtocolSupportRecords": 6,
+        "clinicalLineageRecords": 6,
+        "clinicalSynthesisRecords": 2,
+        "earliestYear": 2004,
+        "landingCorpusRecords": 29,
         "latestYear": 2024,
         "mixedOrNullClinicalRecords": 3,
-        "refinedPass2Records": 42,
+        "refinedPass2Records": 51,
         "safetyAndContraindicationRecords": 9
       },
       "entityType": "source_artifact",
@@ -5318,6 +5560,7 @@
         "heart-rate recovery",
         "HRV RMSSD",
         "sleep efficiency",
+        "morning blood pressure context",
         "symptoms and adherence"
       ],
       "protocolTakeaway": "Treat this as a research map and curation artifact, not as primary evidence.",
@@ -5340,7 +5583,43 @@
           "type": "cites"
         },
         {
+          "target": "source_artifact:pmid-15179103",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-17548726",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-18606913",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-18673303",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-19958872",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-21450580",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-26440134",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-28385556",
+          "type": "cites"
+        },
+        {
           "target": "source_artifact:pmid-30733142",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-29502328",
           "type": "cites"
         },
         {
@@ -5414,7 +5693,7 @@
       ],
       "relativePath": "sources/norwegian-4x4/norwegian-4x4-bibliography.md",
       "revision": {
-        "pageRevisionId": "sha256:ff0a5fe124f4b61fc116019788f12162b9b765ce6989ef2d25d1f28f812ed802",
+        "pageRevisionId": "sha256:4d4296eab9abdbd365923c4f7e6f7d9dd5a6ee4cd5ec1eed356281e82c47c9eb",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -5422,7 +5701,7 @@
       "slug": "sources/norwegian-4x4/norwegian-4x4-bibliography",
       "source": {
         "authors": "Health Commons Research",
-        "citation": "Health Commons Research. Norwegian 4x4 research bibliography. Prepared 2026-04-20.",
+        "citation": "Health Commons Research. Norwegian 4x4 research bibliography. Prepared 2026-04-21.",
         "journal": "Health Commons research curation",
         "kind": "other",
         "title": "Norwegian 4x4 research bibliography",
@@ -5430,9 +5709,9 @@
       },
       "status": "field-testing",
       "studyDesign": "Research bibliography / curation artifact",
-      "summary": "Research map for the Norwegian 4x4 experiment, separating practical protocol support, mixed clinical evidence, safety guidance, wearable signals, and adjacent variants.",
+      "summary": "Research map for the Norwegian 4x4 experiment, separating practical protocol support, clinical-lineage evidence, mixed clinical evidence, safety guidance, wearable signals, and adjacent variants.",
       "title": "Norwegian 4x4 research bibliography",
-      "whyItMatters": "Structured curation artifact used to build the standard Norwegian 4x4 protocol and avoid merging adjacent HIIT variants."
+      "whyItMatters": "Structured curation artifact used to build the standard Norwegian 4x4 protocol and avoid merging adjacent clinical, low-volume, sprint, and athlete HIIT variants."
     },
     {
       "aliases": [
@@ -5555,6 +5834,79 @@
       "summary": "Finnish dry-sauna bibliography record (likely focus) used as supporting general / mixed evidence for protocol context and guardrails.",
       "title": "Benefits and risks of sauna bathing",
       "whyItMatters": "Expands the audited Finnish dry-sauna evidence corpus with a general / mixed record marked medium priority for Murph v1 interpretation."
+    },
+    {
+      "aliases": [
+        "pmid-15179103"
+      ],
+      "body": "This source is included for **Clinical lineage and population mismatch**.\n\n**Why it matters:** Adds the early CAD 4x4-lineage trial so positive disease-treatment data is visible without being mistaken for unscreened self-experiment evidence.\n\n**Protocol takeaway:** Use as clinical lineage and population-mismatch context only; do not use it as direct support for unscreened users self-treating coronary disease.",
+      "categories": [
+        "norwegian-4x4",
+        "hiit",
+        "exercise"
+      ],
+      "claimUse": "context-only",
+      "entityType": "source_artifact",
+      "evidenceBucket": "Clinical lineage and population mismatch",
+      "key": "source_artifact:pmid-15179103",
+      "modality": "Aerobic high-intensity interval training / Norwegian 4x4 context",
+      "murphV1Priority": "High",
+      "norwegian4x4Focus": "Context, safety, or adjacent variant",
+      "pdfRightsStatus": "permission_required",
+      "potentialMurphEndpoints": [
+        "estimated VO2max / cardio-fitness proxy",
+        "clinician-supervised intensity fidelity",
+        "symptoms and adverse events"
+      ],
+      "protocolTakeaway": "Use as clinical lineage and population-mismatch context only; do not use it as direct support for unscreened users self-treating coronary disease.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:norwegian-4x4",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/norwegian-4x4/pmid-15179103.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "rognmo-2004-cad-interval-training",
+        "designKind": "randomized_controlled_trial",
+        "designLabel": "Small supervised coronary artery disease intensity-comparison trial",
+        "durationLabel": "10-week supervised training intervention",
+        "notes": [
+          "The high-intensity arm used supervised clinical exercise in stable CAD, so it should temper claims rather than broaden the wellness protocol."
+        ],
+        "participantCount": 21,
+        "participantCountKind": "reported",
+        "populationLabel": "Stable coronary artery disease patients"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:f2c362d326ee721231a6ddb9be754c549ac594430a82540e399992d4908a286f",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/norwegian-4x4/pmid-15179103",
+      "source": {
+        "authors": "O Rognmo, E Hetland, J Helgerud, J Hoff, S A Slørdahl",
+        "citation": "O Rognmo, E Hetland, J Helgerud, J Hoff, S A Slørdahl. High intensity aerobic interval exercise is superior to moderate intensity exercise for increasing aerobic capacity in patients with coronary artery disease. European Journal of Cardiovascular Prevention and Rehabilitation. 2004. doi:10.1097/01.hjr.0000131677.96762.0c",
+        "doi": "10.1097/01.hjr.0000131677.96762.0c",
+        "journal": "European Journal of Cardiovascular Prevention and Rehabilitation",
+        "kind": "journal_article",
+        "pmid": "15179103",
+        "title": "High intensity aerobic interval exercise is superior to moderate intensity exercise for increasing aerobic capacity in patients with coronary artery disease",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/15179103/",
+        "year": 2004
+      },
+      "status": "draft",
+      "studyDesign": "See source metadata and bibliography for exact design.",
+      "summary": "Early supervised coronary-artery-disease interval-training RCT that belongs in the clinical lineage, not the unsupervised wellness claim base.",
+      "title": "High intensity aerobic interval exercise is superior to moderate intensity exercise for increasing aerobic capacity in patients with coronary artery disease",
+      "whyItMatters": "Adds the early CAD 4x4-lineage trial so positive disease-treatment data is visible without being mistaken for unscreened self-experiment evidence."
     },
     {
       "artifactNeeded": false,
@@ -5757,6 +6109,225 @@
       "whyItMatters": "Canonical small RCT supporting the Norwegian 4x4 dose as a VO2max-oriented aerobic interval protocol."
     },
     {
+      "aliases": [
+        "pmid-17548726"
+      ],
+      "body": "This source is included for **Clinical lineage and population mismatch**.\n\n**Why it matters:** Important early positive 4x4-lineage RCT, but its heart-failure population and supervision level make it inappropriate as direct wellness evidence.\n\n**Protocol takeaway:** Use as clinical lineage and overclaim guardrail; do not treat heart-failure rehabilitation evidence as permission for unsupervised vigorous intervals.",
+      "categories": [
+        "norwegian-4x4",
+        "hiit",
+        "exercise"
+      ],
+      "claimUse": "context-only",
+      "entityType": "source_artifact",
+      "evidenceBucket": "Clinical lineage and population mismatch",
+      "key": "source_artifact:pmid-17548726",
+      "modality": "Aerobic high-intensity interval training / Norwegian 4x4 context",
+      "murphV1Priority": "High",
+      "norwegian4x4Focus": "Context, safety, or adjacent variant",
+      "pdfRightsStatus": "permission_required",
+      "potentialMurphEndpoints": [
+        "estimated VO2max / cardio-fitness proxy",
+        "left-ventricular function context",
+        "clinician-supervised symptoms and adherence"
+      ],
+      "protocolTakeaway": "Use as clinical lineage and overclaim guardrail; do not treat heart-failure rehabilitation evidence as permission for unsupervised vigorous intervals.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:norwegian-4x4",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/norwegian-4x4/pmid-17548726.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "wisloff-2007-hf-interval-training",
+        "designKind": "randomized_controlled_trial",
+        "designLabel": "Small supervised heart-failure interval-training trial",
+        "durationLabel": "12-week supervised training intervention",
+        "notes": [
+          "The trial is central to the CERG 4x4 lineage, but it belongs under supervised disease-treatment context for Murph."
+        ],
+        "participantCount": 27,
+        "participantCountKind": "reported",
+        "populationLabel": "Stable post-infarction heart failure patients"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:ad67d743c1e4db5ba29ee2f9065fa72fd671a50bfe27613ed0949b97133b0147",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/norwegian-4x4/pmid-17548726",
+      "source": {
+        "authors": "U Wisløff, A Støylen, J P Loennechen, M Bruvold, Ø Rognmo, P M Haram, A E Tjønna, J Helgerud, S A Slørdahl, S J Lee, V Videm, A Bye, G L Smith, S M Najjar, O Ellingsen, T Skjærpe",
+        "citation": "U Wisløff, A Støylen, J P Loennechen, M Bruvold, Ø Rognmo, P M Haram, A E Tjønna, J Helgerud, S A Slørdahl, S J Lee, V Videm, A Bye, G L Smith, S M Najjar, O Ellingsen, T Skjærpe. Superior cardiovascular effect of aerobic interval training versus moderate continuous training in heart failure patients: a randomized study. Circulation. 2007. doi:10.1161/CIRCULATIONAHA.106.675041",
+        "doi": "10.1161/CIRCULATIONAHA.106.675041",
+        "journal": "Circulation",
+        "kind": "journal_article",
+        "pmid": "17548726",
+        "title": "Superior cardiovascular effect of aerobic interval training versus moderate continuous training in heart failure patients: a randomized study",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/17548726/",
+        "year": 2007
+      },
+      "status": "draft",
+      "studyDesign": "See source metadata and bibliography for exact design.",
+      "summary": "Classic supervised heart-failure 4x4-lineage RCT showing strong physiologic effects in a disease population.",
+      "title": "Superior cardiovascular effect of aerobic interval training versus moderate continuous training in heart failure patients: a randomized study",
+      "whyItMatters": "Important early positive 4x4-lineage RCT, but its heart-failure population and supervision level make it inappropriate as direct wellness evidence."
+    },
+    {
+      "aliases": [
+        "pmid-18606913"
+      ],
+      "body": "This source is included for **Clinical lineage and population mismatch**.\n\n**Why it matters:** Shows why the 4x4 literature often discusses cardiometabolic risk, while also making clear that disease-risk trials are not generic wellness proof.\n\n**Protocol takeaway:** Use as clinical lineage and population-mismatch context only; keep metabolic-syndrome treatment claims separate from this wearable self-experiment.",
+      "categories": [
+        "norwegian-4x4",
+        "hiit",
+        "exercise"
+      ],
+      "claimUse": "context-only",
+      "entityType": "source_artifact",
+      "evidenceBucket": "Clinical lineage and population mismatch",
+      "key": "source_artifact:pmid-18606913",
+      "modality": "Aerobic high-intensity interval training / Norwegian 4x4 context",
+      "murphV1Priority": "High",
+      "norwegian4x4Focus": "Context, safety, or adjacent variant",
+      "pdfRightsStatus": "permission_required",
+      "potentialMurphEndpoints": [
+        "estimated VO2max / cardio-fitness proxy",
+        "resting blood pressure context",
+        "cardiometabolic risk context"
+      ],
+      "protocolTakeaway": "Use as clinical lineage and population-mismatch context only; keep metabolic-syndrome treatment claims separate from this wearable self-experiment.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:norwegian-4x4",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/norwegian-4x4/pmid-18606913.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "tjonna-2008-metabolic-syndrome-4x4",
+        "designKind": "randomized_controlled_trial",
+        "designLabel": "Small supervised metabolic-syndrome interval-training trial",
+        "durationLabel": "16-week supervised training intervention",
+        "notes": [
+          "Useful for mechanism and cardiometabolic context, not for claiming a general user will reverse metabolic syndrome."
+        ],
+        "participantCount": 32,
+        "participantCountKind": "reported",
+        "populationLabel": "Adults with metabolic syndrome"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:b0b062386d0d98ef8395c9911e33e1e7cf2e6e44e79f0017a8d014befe11a679",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/norwegian-4x4/pmid-18606913",
+      "source": {
+        "authors": "A E Tjønna, S J Lee, Ø Rognmo, T O Stølen, A Bye, P M Haram, J P Loennechen, Q Y Al-Share, E Skogvoll, S A Slørdahl, O J Kemi, S M Najjar, U Wisløff",
+        "citation": "A E Tjønna, S J Lee, Ø Rognmo, T O Stølen, A Bye, P M Haram, J P Loennechen, Q Y Al-Share, E Skogvoll, S A Slørdahl, O J Kemi, S M Najjar, U Wisløff. Aerobic interval training versus continuous moderate exercise as a treatment for the metabolic syndrome: a pilot study. Circulation. 2008. doi:10.1161/CIRCULATIONAHA.108.772822",
+        "doi": "10.1161/CIRCULATIONAHA.108.772822",
+        "journal": "Circulation",
+        "kind": "journal_article",
+        "pmid": "18606913",
+        "title": "Aerobic interval training versus continuous moderate exercise as a treatment for the metabolic syndrome: a pilot study",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/18606913/",
+        "year": 2008
+      },
+      "status": "draft",
+      "studyDesign": "See source metadata and bibliography for exact design.",
+      "summary": "Small supervised metabolic-syndrome RCT from the 4x4 lineage, useful for clinical context and population boundaries.",
+      "title": "Aerobic interval training versus continuous moderate exercise as a treatment for the metabolic syndrome: a pilot study",
+      "whyItMatters": "Shows why the 4x4 literature often discusses cardiometabolic risk, while also making clear that disease-risk trials are not generic wellness proof."
+    },
+    {
+      "aliases": [
+        "pmid-18673303"
+      ],
+      "body": "This source is included for **Clinical lineage and population mismatch**.\n\n**Why it matters:** Adds pediatric/adolescent lineage evidence so the bibliography does not silently generalize adolescent clinical-risk findings to adult self-experiments.\n\n**Protocol takeaway:** Use as adjacent clinical context only; adolescent overweight trials should not directly set adult unsupervised protocol claims.",
+      "categories": [
+        "norwegian-4x4",
+        "hiit",
+        "exercise"
+      ],
+      "claimUse": "context-only",
+      "entityType": "source_artifact",
+      "evidenceBucket": "Clinical lineage and population mismatch",
+      "key": "source_artifact:pmid-18673303",
+      "modality": "Aerobic high-intensity interval training / Norwegian 4x4 context",
+      "murphV1Priority": "Medium",
+      "norwegian4x4Focus": "Context, safety, or adjacent variant",
+      "pdfRightsStatus": "permission_required",
+      "potentialMurphEndpoints": [
+        "estimated VO2max / cardio-fitness proxy",
+        "cardiovascular risk-factor context",
+        "adherence and supervision context"
+      ],
+      "protocolTakeaway": "Use as adjacent clinical context only; adolescent overweight trials should not directly set adult unsupervised protocol claims.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:norwegian-4x4",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/norwegian-4x4/pmid-18673303.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "tjonna-2009-overweight-adolescents-4x4",
+        "designKind": "randomized_controlled_trial",
+        "designLabel": "Overweight adolescent interval-training trial",
+        "durationLabel": "3-month twice-weekly intervention",
+        "notes": [
+          "The population, age, and intervention setting are materially different from Murph's adult wearable-guided experiment."
+        ],
+        "participantCount": 54,
+        "participantCountKind": "reported",
+        "populationLabel": "Overweight adolescents"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:0e34be9dfac1f9d645427dfd38576cb648c8878369ad1c5553059e51b1cf62b4",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/norwegian-4x4/pmid-18673303",
+      "source": {
+        "authors": "A E Tjønna, T O Stølen, A Bye, M Volden, S A Slørdahl, R Ødegård, E Skogvoll, U Wisløff",
+        "citation": "A E Tjønna, T O Stølen, A Bye, M Volden, S A Slørdahl, R Ødegård, E Skogvoll, U Wisløff. Aerobic interval training reduces cardiovascular risk factors more than a multitreatment approach in overweight adolescents. Clinical Science. 2009. doi:10.1042/CS20080249",
+        "doi": "10.1042/CS20080249",
+        "journal": "Clinical Science",
+        "kind": "journal_article",
+        "pmid": "18673303",
+        "title": "Aerobic interval training reduces cardiovascular risk factors more than a multitreatment approach in overweight adolescents",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/18673303/",
+        "year": 2009
+      },
+      "status": "draft",
+      "studyDesign": "See source metadata and bibliography for exact design.",
+      "summary": "Adolescent overweight/obesity 4x4-style trial that should be kept as adjacent clinical context rather than folded into the adult wellness recipe.",
+      "title": "Aerobic interval training reduces cardiovascular risk factors more than a multitreatment approach in overweight adolescents",
+      "whyItMatters": "Adds pediatric/adolescent lineage evidence so the bibliography does not silently generalize adolescent clinical-risk findings to adult self-experiments."
+    },
+    {
       "body": "This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.\n\n**Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a cardiovascular record marked medium priority for Murph v1 interpretation.\n\n**Potential Murph endpoints/context:** blood pressure context, resting heart rate context, illness and respiratory context\n\n**Protocol takeaway:** Use as cardiovascular context around heat exposure, not as a guaranteed 21-day result-card endpoint.",
       "categories": [
         "sauna",
@@ -5819,6 +6390,79 @@
       "summary": "Finnish dry-sauna bibliography record (likely focus) used as supporting cardiovascular evidence for protocol context and guardrails.",
       "title": "Safety, acceptance, and physiologic effects of sauna bathing in people with chronic heart failure: a pilot report",
       "whyItMatters": "Expands the audited Finnish dry-sauna evidence corpus with a cardiovascular record marked medium priority for Murph v1 interpretation."
+    },
+    {
+      "aliases": [
+        "pmid-19958872"
+      ],
+      "body": "This source is included for **Clinical lineage and population mismatch**.\n\n**Why it matters:** Shows another supervised cardiac-rehab setting in the 4x4 lineage and sharpens why cardiac-rehab evidence should stay separate from home self-experiments.\n\n**Protocol takeaway:** Use as cardiac-rehabilitation context and safety-boundary support only; do not use it to recommend unsupervised 4x4 after cardiac surgery.",
+      "categories": [
+        "norwegian-4x4",
+        "hiit",
+        "exercise"
+      ],
+      "claimUse": "context-only",
+      "entityType": "source_artifact",
+      "evidenceBucket": "Clinical lineage and population mismatch",
+      "key": "source_artifact:pmid-19958872",
+      "modality": "Aerobic high-intensity interval training / Norwegian 4x4 context",
+      "murphV1Priority": "High",
+      "norwegian4x4Focus": "Context, safety, or adjacent variant",
+      "pdfRightsStatus": "permission_required",
+      "potentialMurphEndpoints": [
+        "estimated VO2max / cardio-fitness proxy",
+        "quality-of-life context",
+        "clinician-supervised symptoms and adverse events"
+      ],
+      "protocolTakeaway": "Use as cardiac-rehabilitation context and safety-boundary support only; do not use it to recommend unsupervised 4x4 after cardiac surgery.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:norwegian-4x4",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/norwegian-4x4/pmid-19958872.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "moholdt-2009-cabg-interval-training",
+        "designKind": "randomized_controlled_trial",
+        "designLabel": "Supervised post-CABG cardiac-rehabilitation trial",
+        "durationLabel": "4-week rehabilitation-center intervention with follow-up",
+        "notes": [
+          "This is a supervised disease-treatment rehabilitation trial, not a general fitness self-experiment."
+        ],
+        "participantCount": 59,
+        "participantCountKind": "reported",
+        "populationLabel": "Coronary artery bypass surgery patients"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:867e0ca7df3632082f9b51fa4fb893e958935c06d50bae9047ea8275277b5473",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/norwegian-4x4/pmid-19958872",
+      "source": {
+        "authors": "T T Moholdt, B H Amundsen, L A Rustad, A Wahba, K T Løvø, L R Gullikstad, A Bye, E Skogvoll, U Wisløff, S A Slørdahl",
+        "citation": "T T Moholdt, B H Amundsen, L A Rustad, A Wahba, K T Løvø, L R Gullikstad, A Bye, E Skogvoll, U Wisløff, S A Slørdahl. Aerobic interval training versus continuous moderate exercise after coronary artery bypass surgery: a randomized study of cardiovascular effects and quality of life. American Heart Journal. 2009. doi:10.1016/j.ahj.2009.10.003",
+        "doi": "10.1016/j.ahj.2009.10.003",
+        "journal": "American Heart Journal",
+        "kind": "journal_article",
+        "pmid": "19958872",
+        "title": "Aerobic interval training versus continuous moderate exercise after coronary artery bypass surgery: a randomized study of cardiovascular effects and quality of life",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/19958872/",
+        "year": 2009
+      },
+      "status": "draft",
+      "studyDesign": "See source metadata and bibliography for exact design.",
+      "summary": "Post-CABG supervised cardiac-rehabilitation trial supporting clinical-lineage context and safety-boundary language.",
+      "title": "Aerobic interval training versus continuous moderate exercise after coronary artery bypass surgery: a randomized study of cardiovascular effects and quality of life",
+      "whyItMatters": "Shows another supervised cardiac-rehab setting in the 4x4 lineage and sharpens why cardiac-rehab evidence should stay separate from home self-experiments."
     },
     {
       "body": "This source is included for **Early human RCT**.\n\n**Why it matters:** Useful historical positive anchor for subjective sleep and affect signals.\n\n**Potential experiment signals:** sleep quality, sleep diary, positive affect, negative affect\n\n**Protocol takeaway:** Supports a bounded evening test but does not overcome the small-study and subjective-outcome limitations.",
@@ -5884,6 +6528,79 @@
       "summary": "Early small RCT supporting the common three-hour pre-sleep amber-lens variant.",
       "title": "Amber lenses to block blue light and improve sleep: a randomized trial",
       "whyItMatters": "Useful historical positive anchor for subjective sleep and affect signals."
+    },
+    {
+      "aliases": [
+        "pmid-21450580"
+      ],
+      "body": "This source is included for **Clinical lineage and population mismatch**.\n\n**Why it matters:** Supports why morning blood pressure can be tracked as context, but also why hypertension treatment claims need clinician-supervised framing.\n\n**Protocol takeaway:** Use for blood-pressure context and hypertension guardrails only; the Murph protocol is not a hypertension treatment plan.",
+      "categories": [
+        "norwegian-4x4",
+        "hiit",
+        "exercise"
+      ],
+      "claimUse": "context-only",
+      "entityType": "source_artifact",
+      "evidenceBucket": "Clinical lineage and population mismatch",
+      "key": "source_artifact:pmid-21450580",
+      "modality": "Aerobic high-intensity interval training / Norwegian 4x4 context",
+      "murphV1Priority": "Medium",
+      "norwegian4x4Focus": "Context, safety, or adjacent variant",
+      "pdfRightsStatus": "permission_required",
+      "potentialMurphEndpoints": [
+        "morning blood pressure context",
+        "estimated VO2max / cardio-fitness proxy",
+        "clinician-supervised symptoms and adherence"
+      ],
+      "protocolTakeaway": "Use for blood-pressure context and hypertension guardrails only; the Murph protocol is not a hypertension treatment plan.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:norwegian-4x4",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/norwegian-4x4/pmid-21450580.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "molmen-hansen-2012-hypertension-interval-training",
+        "designKind": "randomized_controlled_trial",
+        "designLabel": "Essential-hypertension interval-training trial",
+        "durationLabel": "12-week supervised training intervention",
+        "notes": [
+          "The study used essential-hypertension patients and clinical endpoints, so it should not be used as direct support for unscreened vigorous exercise."
+        ],
+        "participantCount": 88,
+        "participantCountKind": "reported",
+        "populationLabel": "Adults with essential hypertension"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:d9602e48efe9a0f3c81ac12275737d1121684e6574951a90617511211ee4fb34",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/norwegian-4x4/pmid-21450580",
+      "source": {
+        "authors": "H E Mølmen-Hansen, T O Stølen, A E Tjønna, I L Aamot, I S Ekeberg, G A Tyldum, U Wisløff, C B Ingul, A Støylen",
+        "citation": "H E Mølmen-Hansen, T O Stølen, A E Tjønna, I L Aamot, I S Ekeberg, G A Tyldum, U Wisløff, C B Ingul, A Støylen. Aerobic interval training reduces blood pressure and improves myocardial function in hypertensive patients. European Journal of Preventive Cardiology. 2012. doi:10.1177/1741826711400512",
+        "doi": "10.1177/1741826711400512",
+        "journal": "European Journal of Preventive Cardiology",
+        "kind": "journal_article",
+        "pmid": "21450580",
+        "title": "Aerobic interval training reduces blood pressure and improves myocardial function in hypertensive patients",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/21450580/",
+        "year": 2012
+      },
+      "status": "draft",
+      "studyDesign": "See source metadata and bibliography for exact design.",
+      "summary": "Essential-hypertension RCT useful for blood-pressure context while reinforcing clinician-guidance boundaries for hypertension.",
+      "title": "Aerobic interval training reduces blood pressure and improves myocardial function in hypertensive patients",
+      "whyItMatters": "Supports why morning blood pressure can be tracked as context, but also why hypertension treatment claims need clinician-supervised framing."
     },
     {
       "aliases": [
@@ -6425,6 +7142,79 @@
       "whyItMatters": "Supports separating clinician-guided circadian-disorder protocols from a general bedtime eyewear self-experiment."
     },
     {
+      "aliases": [
+        "pmid-26440134"
+      ],
+      "body": "This source is included for **Protocol dose and variant separation**.\n\n**Why it matters:** Directly supports keeping 4x4 separate from low-volume 1x4 and helps justify the 6-week wearable test window.\n\n**Protocol takeaway:** Use for 4x4 dose support and variant separation, while preserving the overweight/obese adult population caveat.",
+      "categories": [
+        "norwegian-4x4",
+        "hiit",
+        "exercise"
+      ],
+      "claimUse": "supports-protocol",
+      "entityType": "source_artifact",
+      "evidenceBucket": "Protocol dose and variant separation",
+      "key": "source_artifact:pmid-26440134",
+      "modality": "Aerobic high-intensity interval training / Norwegian 4x4 context",
+      "murphV1Priority": "High",
+      "norwegian4x4Focus": "Direct support",
+      "pdfRightsStatus": "permission_required",
+      "potentialMurphEndpoints": [
+        "estimated VO2max / cardio-fitness proxy",
+        "session heart-rate fidelity",
+        "variant separation"
+      ],
+      "protocolTakeaway": "Use for 4x4 dose support and variant separation, while preserving the overweight/obese adult population caveat.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:norwegian-4x4",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/norwegian-4x4/pmid-26440134.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "baekkerud-2016-overweight-obese-4hiit-1hiit-mict",
+        "designKind": "randomized_controlled_trial",
+        "designLabel": "Three-arm 4x4 versus 1x4 versus moderate-continuous trial",
+        "durationLabel": "6-week training intervention",
+        "notes": [
+          "This is direct 4HIIT evidence but still small and population-specific."
+        ],
+        "participantCount": 30,
+        "participantCountKind": "reported",
+        "populationLabel": "Overweight and obese adults"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:4d2c4c4ca23066b24805da9c085caac7c274371a01ab6225f498eb028530f345",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/norwegian-4x4/pmid-26440134",
+      "source": {
+        "authors": "F H Bækkerud, F Solberg, I M Leinan, U Wisløff, T Karlsen, Ø Rognmo",
+        "citation": "F H Bækkerud, F Solberg, I M Leinan, U Wisløff, T Karlsen, Ø Rognmo. Comparison of three popular exercise modalities on VO2max in overweight and obese. Medicine and Science in Sports and Exercise. 2016. doi:10.1249/MSS.0000000000000777",
+        "doi": "10.1249/MSS.0000000000000777",
+        "journal": "Medicine and Science in Sports and Exercise",
+        "kind": "journal_article",
+        "pmid": "26440134",
+        "title": "Comparison of three popular exercise modalities on VO2max in overweight and obese",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/26440134/",
+        "year": 2016
+      },
+      "status": "draft",
+      "studyDesign": "See source metadata and bibliography for exact design.",
+      "summary": "Direct 6-week comparison showing the standard 4x4 dose should not be collapsed into 1x4 HIIT or moderate continuous training.",
+      "title": "Comparison of three popular exercise modalities on VO2max in overweight and obese",
+      "whyItMatters": "Directly supports keeping 4x4 separate from low-volume 1x4 and helps justify the 6-week wearable test window."
+    },
+    {
       "artifactNeeded": false,
       "body": "This source is included for **Psychiatric virtual-darkness variant**.\n\n**Why it matters:** Shows why mania treatment protocols and ordinary evening eyewear should remain separate.\n\n**Potential experiment signals:** mania rating scales, actigraphy motor activity, adverse events\n\n**Protocol takeaway:** Keep psychiatric virtual-darkness use clinician-guided and outside the ordinary bedtime self-experiment.\n\n**Claim use:** `safety-only`. Keep this classification when wiring claims so psychiatric-adjacent trials do not become general support for the bedtime protocol.",
       "categories": [
@@ -6696,6 +7486,75 @@
       "summary": "Larger HFrEF trial that did not confirm clear HIIT superiority and highlighted intensity-fidelity issues.",
       "title": "High-intensity interval training in patients with heart failure with reduced ejection fraction",
       "whyItMatters": "Larger HFrEF trial that did not confirm clear HIIT superiority and highlighted intensity-fidelity issues."
+    },
+    {
+      "aliases": [
+        "pmid-28385556"
+      ],
+      "body": "This source is included for **Clinical synthesis and implementation context**.\n\n**Why it matters:** Gives a review-level explanation of HIIT health-outcome framing from the Norwegian/CERG lineage without replacing primary trial evidence.\n\n**Protocol takeaway:** Use as implementation and review context only; primary trial claims should cite the underlying trials or meta-analyses.",
+      "categories": [
+        "norwegian-4x4",
+        "hiit",
+        "exercise"
+      ],
+      "claimUse": "context-only",
+      "entityType": "source_artifact",
+      "evidenceBucket": "Clinical synthesis and implementation context",
+      "key": "source_artifact:pmid-28385556",
+      "modality": "Aerobic high-intensity interval training / Norwegian 4x4 context",
+      "murphV1Priority": "Medium",
+      "norwegian4x4Focus": "Context, safety, or adjacent variant",
+      "pdfRightsStatus": "not_redistributable",
+      "potentialMurphEndpoints": [
+        "estimated VO2max / cardio-fitness proxy",
+        "implementation context",
+        "symptoms and adherence"
+      ],
+      "protocolTakeaway": "Use as implementation and review context only; primary trial claims should cite the underlying trials or meta-analyses.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:norwegian-4x4",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/norwegian-4x4/pmid-28385556.md",
+      "researchEvidence": {
+        "aggregateRole": "synthesis",
+        "designKind": "narrative_review",
+        "designLabel": "Narrative review and practical HIIT guidance",
+        "notes": [
+          "Helpful for narrative context, but not a substitute for direct evidence rows."
+        ],
+        "populationLabel": "Clinical and general aerobic HIIT literature"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:0699bcbc581a9eb2deece43db42242b6108455c3210f189418024b25b80a10ad",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/norwegian-4x4/pmid-28385556",
+      "source": {
+        "authors": "T Karlsen, I L Aamot, M Haykowsky, Ø Rognmo",
+        "citation": "T Karlsen, I L Aamot, M Haykowsky, Ø Rognmo. High Intensity Interval Training for Maximizing Health Outcomes. Progress in Cardiovascular Diseases. 2017. doi:10.1016/j.pcad.2017.03.006",
+        "doi": "10.1016/j.pcad.2017.03.006",
+        "journal": "Progress in Cardiovascular Diseases",
+        "kind": "review",
+        "pmid": "28385556",
+        "title": "High Intensity Interval Training for Maximizing Health Outcomes",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/28385556/",
+        "year": 2017
+      },
+      "status": "draft",
+      "studyDesign": "See source metadata and bibliography for exact design.",
+      "summary": "CERG-lineage narrative review that explains clinical and home-based HIIT framing, useful as context rather than primary trial evidence.",
+      "title": "High Intensity Interval Training for Maximizing Health Outcomes",
+      "whyItMatters": "Gives a review-level explanation of HIIT health-outcome framing from the Norwegian/CERG lineage without replacing primary trial evidence."
     },
     {
       "aliases": [
@@ -7271,6 +8130,75 @@
       "summary": "Cardiac-rehabilitation meta-analysis supporting efficacy and safety context under supervision.",
       "title": "High-intensity interval training versus moderate-intensity continuous training within cardiac rehabilitation: a systematic review and meta-analysis",
       "whyItMatters": "Cardiac-rehabilitation meta-analysis supporting efficacy and safety context under supervision."
+    },
+    {
+      "aliases": [
+        "pmid-29502328"
+      ],
+      "body": "This source is included for **Clinical synthesis and overclaim guardrails**.\n\n**Why it matters:** Adds a clinical synthesis around CAD/HF trials so early positive disease-population studies do not dominate the practical claim set.\n\n**Protocol takeaway:** Use as clinical synthesis and overclaim guardrail; do not cite it as direct proof for unscreened home 4x4.",
+      "categories": [
+        "norwegian-4x4",
+        "hiit",
+        "exercise"
+      ],
+      "claimUse": "context-only",
+      "entityType": "source_artifact",
+      "evidenceBucket": "Clinical synthesis and overclaim guardrails",
+      "key": "source_artifact:pmid-29502328",
+      "modality": "Aerobic high-intensity interval training / Norwegian 4x4 context",
+      "murphV1Priority": "Medium",
+      "norwegian4x4Focus": "Context, safety, or adjacent variant",
+      "pdfRightsStatus": "not_redistributable",
+      "potentialMurphEndpoints": [
+        "estimated VO2max / cardio-fitness proxy",
+        "clinical secondary outcomes",
+        "safety and supervision context"
+      ],
+      "protocolTakeaway": "Use as clinical synthesis and overclaim guardrail; do not cite it as direct proof for unscreened home 4x4.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:norwegian-4x4",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/norwegian-4x4/pmid-29502328.md",
+      "researchEvidence": {
+        "aggregateRole": "synthesis",
+        "designKind": "meta_analysis",
+        "designLabel": "Updated CAD and heart-failure aerobic-interval meta-analysis",
+        "notes": [
+          "The review is clinically useful but population-limited for Murph's general wearable experiment."
+        ],
+        "populationLabel": "Patients with coronary artery disease or heart failure"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:594ad9442b2a7b9e6ee3aefdd1a99cfffa31fa480820c01fce777cc09f7adae7",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/norwegian-4x4/pmid-29502328",
+      "source": {
+        "authors": "N Pattyn, R Beulque, V A Cornelissen",
+        "citation": "N Pattyn, R Beulque, V A Cornelissen. Aerobic interval vs. continuous training in patients with coronary artery disease or heart failure: an updated systematic review and meta-analysis with a focus on secondary outcomes. Sports Medicine. 2018. doi:10.1007/s40279-018-0885-5",
+        "doi": "10.1007/s40279-018-0885-5",
+        "journal": "Sports Medicine",
+        "kind": "review",
+        "pmid": "29502328",
+        "title": "Aerobic interval vs. continuous training in patients with coronary artery disease or heart failure: an updated systematic review and meta-analysis with a focus on secondary outcomes",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/29502328/",
+        "year": 2018
+      },
+      "status": "draft",
+      "studyDesign": "See source metadata and bibliography for exact design.",
+      "summary": "Updated CAD/HF synthesis that keeps clinical effect claims separated from the general self-experiment protocol.",
+      "title": "Aerobic interval vs. continuous training in patients with coronary artery disease or heart failure: an updated systematic review and meta-analysis with a focus on secondary outcomes",
+      "whyItMatters": "Adds a clinical synthesis around CAD/HF trials so early positive disease-population studies do not dominate the practical claim set."
     },
     {
       "aliases": [

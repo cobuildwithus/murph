@@ -48,6 +48,33 @@ relations:
     target: source_artifact:ntnu-cerg-norwegian-4x4
   -
     type: cites
+    target: source_artifact:pmid-15179103
+  -
+    type: cites
+    target: source_artifact:pmid-17548726
+  -
+    type: cites
+    target: source_artifact:pmid-18606913
+  -
+    type: cites
+    target: source_artifact:pmid-18673303
+  -
+    type: cites
+    target: source_artifact:pmid-19958872
+  -
+    type: cites
+    target: source_artifact:pmid-21450580
+  -
+    type: cites
+    target: source_artifact:pmid-26440134
+  -
+    type: cites
+    target: source_artifact:pmid-28385556
+  -
+    type: cites
+    target: source_artifact:pmid-29502328
+  -
+    type: cites
     target: source_artifact:pmid-30733142
   -
     type: cites
@@ -168,13 +195,14 @@ claims:
   -
     claimId: canonical-4x4-has-direct-human-intervention-support
     type: intervention_result
-    text: Four-by-four aerobic interval training has direct human intervention evidence for improving lab-measured VO2max in small healthy-adult trials, but that does not mean every wearable cardio-fitness estimate will move.
+    text: Four-by-four aerobic interval training has direct human intervention evidence for improving lab-measured VO2max in small healthy-adult and overweight/obese adult trials, plus broader HIIT synthesis support, but that does not mean every wearable cardio-fitness estimate will move.
     strength: moderate
     sourceKeys:
       - source_artifact:pmid-17414804
+      - source_artifact:pmid-26440134
       - source_artifact:pmid-30733142
     caveats:
-      - Helgerud 2007 was small and controlled.
+      - The direct 4x4 trials are small and controlled.
       - Meta-analyses combine many HIIT protocols, not only Norwegian 4x4.
       - Wearable VO2max estimates are proxies, not laboratory gas-exchange measurements.
   -
@@ -206,6 +234,7 @@ claims:
     strength: moderate
     sourceKeys:
       - source_artifact:pmid-17414804
+      - source_artifact:pmid-26440134
       - source_artifact:pmid-30733142
     caveats:
       - Some users may notice session-level heart-rate recovery changes earlier.
@@ -213,21 +242,34 @@ claims:
   -
     claimId: superiority-over-moderate-continuous-training-is-not-settled
     type: mixed_evidence
-    text: Norwegian 4x4 should not be presented as always superior to moderate continuous training; larger clinical trials in coronary artery disease and heart failure found similar or mixed results compared with moderate continuous training or guideline advice.
+    text: Norwegian 4x4 should not be presented as always superior to moderate continuous training; early small supervised clinical trials often favored interval training, but larger and later clinical trials in coronary artery disease and heart failure found similar or mixed results compared with moderate continuous training or guideline advice.
     strength: high
     sourceKeys:
+      - source_artifact:pmid-15179103
+      - source_artifact:pmid-17548726
+      - source_artifact:pmid-18606913
+      - source_artifact:pmid-19958872
+      - source_artifact:pmid-21450580
       - source_artifact:pmid-25464446
       - source_artifact:pmid-28082387
       - source_artifact:pmid-33560320
+      - source_artifact:pmid-29502328
     caveats:
       - These were clinical populations, not general wearable users.
-      - They remain important because they prevent overclaiming from small early positive trials.
+      - Supervision, medication status, comorbidities, and intensity fidelity differ materially from a home self-experiment.
+      - The mixed clinical record prevents overclaiming from small early positive trials.
   -
     claimId: clinical-disease-trials-are-not-self-treatment-evidence
     type: safety
-    text: Cardiac and heart-failure studies should be treated as safety and population-mismatch context, not as evidence that unscreened users should self-treat disease with 4x4 intervals.
+    text: Cardiac, hypertension, metabolic-syndrome, and adolescent overweight studies should be treated as safety and population-mismatch context, not as evidence that unscreened users should self-treat disease or cardiometabolic risk with 4x4 intervals.
     strength: high
     sourceKeys:
+      - source_artifact:pmid-15179103
+      - source_artifact:pmid-17548726
+      - source_artifact:pmid-18606913
+      - source_artifact:pmid-18673303
+      - source_artifact:pmid-19958872
+      - source_artifact:pmid-21450580
       - source_artifact:pmid-25464446
       - source_artifact:pmid-28082387
       - source_artifact:pmid-33560320
@@ -257,6 +299,7 @@ claims:
     text: Low-volume 1 x 4 HIIT and sprint-interval training are adjacent variants with different burden and interpretation, not the same as this 4x4 experiment.
     strength: high
     sourceKeys:
+      - source_artifact:pmid-26440134
       - source_artifact:pmid-28846513
       - source_artifact:pmid-39256000
       - source_artifact:pmid-36314990
@@ -313,15 +356,17 @@ safety:
 researchCoverage:
   bibliographyKey: source_artifact:norwegian-4x4-bibliography
   corpusStats:
-    refinedPass2Records: 42
-    landingCorpusRecords: 20
-    canonicalProtocolSupportRecords: 5
+    refinedPass2Records: 51
+    landingCorpusRecords: 29
+    canonicalProtocolSupportRecords: 6
+    clinicalLineageRecords: 6
+    clinicalSynthesisRecords: 2
     safetyAndContraindicationRecords: 9
     mixedOrNullClinicalRecords: 3
     adjacentVariantRecords: 4
-    earliestYear: 2007
+    earliestYear: 2004
     latestYear: 2024
-    auditCutoff: 2026-04-20
+    auditCutoff: 2026-04-21
 sessionLoggingFields:
   - session_date
   - modality
@@ -361,6 +406,7 @@ expectedSignal:
     confidence: low_to_moderate
     sourceKeys:
       - source_artifact:pmid-17414804
+      - source_artifact:pmid-26440134
       - source_artifact:pmid-30733142
   secondary:
     -
@@ -429,4 +475,4 @@ It also does not promise HRV improvement, sleep improvement, fat loss, or a wear
 
 ## Evidence snapshot
 
-The evidence supports 4x4 intervals as a plausible VO2max-oriented training dose, but it also includes small trials, mixed clinical comparisons, and safety caveats. Low-volume 1 x 4 HIIT, sprint intervals, athlete-performance plans, and supervised cardiac-rehabilitation protocols belong nearby, not inside this exact experiment.
+The evidence supports 4x4 intervals as a plausible VO2max-oriented training dose, but it also includes small direct trials, early supervised clinical-lineage studies, larger mixed clinical comparisons, and safety caveats. Low-volume 1 x 4 HIIT, sprint intervals, athlete-performance plans, pediatric/adolescent cardiometabolic trials, hypertension treatment, and supervised cardiac-rehabilitation protocols belong nearby, not inside this exact experiment.
