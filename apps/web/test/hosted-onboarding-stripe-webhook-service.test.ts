@@ -54,16 +54,12 @@ describe("hosted Stripe webhook service", () => {
     });
   });
 
-  it("records the event first and defers reconciliation when defer is available", async () => {
+  it("records the event first and reconciles inline", async () => {
     const prisma = {
       __tag: "prisma",
     };
-    const deferred: Array<() => Promise<void>> = [];
 
     await expect(handleHostedStripeWebhook({
-      defer: vi.fn(async (drain) => {
-        deferred.push(drain);
-      }),
       prisma: prisma as never,
       rawBody: "{}",
       signature: "sig_test_123",
@@ -76,11 +72,6 @@ describe("hosted Stripe webhook service", () => {
       event: makeStripeEvent(),
       prisma,
     });
-    expect(deferred).toHaveLength(1);
-    expect(mocks.reconcileHostedStripeEventById).not.toHaveBeenCalled();
-    expect(mocks.nudgeHostedRunBestEffort).not.toHaveBeenCalled();
-
-    await deferred[0]!();
 
     expect(mocks.reconcileHostedStripeEventById).toHaveBeenCalledWith({
       eventId: "evt_123",
@@ -92,28 +83,31 @@ describe("hosted Stripe webhook service", () => {
     });
   });
 
-  it("reconciles inline when defer is unavailable", async () => {
+  it("skips reconciliation for duplicate Stripe events", async () => {
     const prisma = {
       __tag: "prisma",
     };
+    mocks.recordHostedStripeEvent.mockResolvedValueOnce({
+      duplicate: true,
+      type: "invoice.paid",
+    });
 
     await expect(handleHostedStripeWebhook({
       prisma: prisma as never,
       rawBody: "{}",
       signature: "sig_test_123",
     })).resolves.toEqual({
+      duplicate: true,
       ok: true,
       type: "invoice.paid",
     });
 
-    expect(mocks.reconcileHostedStripeEventById).toHaveBeenCalledWith({
-      eventId: "evt_123",
+    expect(mocks.recordHostedStripeEvent).toHaveBeenCalledWith({
+      event: makeStripeEvent(),
       prisma,
     });
-    expect(mocks.nudgeHostedRunBestEffort).toHaveBeenCalledWith({
-      context: "stripe.webhook",
-      userId: "member_123",
-    });
+    expect(mocks.reconcileHostedStripeEventById).not.toHaveBeenCalled();
+    expect(mocks.nudgeHostedRunBestEffort).not.toHaveBeenCalled();
   });
 });
 
