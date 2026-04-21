@@ -302,9 +302,7 @@ export function buildHostedExecutionVaultSyncImportWake(input: {
     occurredAt: input.occurredAt,
     userId: input.memberId,
     vaultSync: {
-      ...(input.vaultSync.localManifestHash === undefined
-        ? {}
-        : { localManifestHash: input.vaultSync.localManifestHash }),
+      localManifestHash: input.vaultSync.localManifestHash,
       sessionId: input.vaultSync.sessionId,
       ...(input.vaultSync.sourceVaultId === undefined
         ? {}

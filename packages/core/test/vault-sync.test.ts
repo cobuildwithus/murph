@@ -10,6 +10,7 @@ import {
   initializeVault,
   isVaultError,
   mergeVaultSyncImportIntoVault,
+  readVaultSyncImportManifest,
   restoreVaultSyncImportPack,
   VAULT_LAYOUT,
 } from "../src/index.ts";
@@ -72,10 +73,38 @@ describe("vault sync import packs", () => {
     expect(pack.manifest.files.some((file) => file.path === eventLedger)).toBe(true);
     expect(pack.manifest.excluded.some((file) => file.path.startsWith(".runtime/"))).toBe(true);
   });
+
+  it("reads a verified import manifest from a restored import pack", async () => {
+    const source = await createTempVault("Local source");
+
+    const pack = await buildVaultSyncImportPack({ vaultRoot: source });
+    const restored = await restoreVaultSyncImportPack({ bundle: pack.bundle });
+    tempRoots.push(restored.workspaceRoot);
+
+    const manifest = await readVaultSyncImportManifest(restored.metaRoot);
+    expect(manifest.manifestHash).toBe(pack.manifestHash);
+    expect(manifest.sourceVault.vaultId).toBe(pack.sourceVaultId);
+  });
+
+  it("rejects an import manifest whose hash does not match its contents", async () => {
+    const source = await createTempVault("Local source");
+
+    const pack = await buildVaultSyncImportPack({ vaultRoot: source });
+    const restored = await restoreVaultSyncImportPack({ bundle: pack.bundle });
+    tempRoots.push(restored.workspaceRoot);
+    const manifestPath = path.join(restored.metaRoot, "manifest.json");
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as Record<string, unknown>;
+    manifest.manifestHash = "sha256:tampered";
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+
+    await expect(readVaultSyncImportManifest(restored.metaRoot)).rejects.toSatisfy((error: unknown) =>
+      isVaultError(error) && error.code === "VAULT_SYNC_IMPORT_MANIFEST_HASH_MISMATCH"
+    );
+  });
 });
 
 describe("vault sync merge", () => {
-  it("treats missing import manifests as an empty additive merge", async () => {
+  it("fails closed when the import manifest is missing or invalid", async () => {
     const hosted = await createTempVault("Hosted vault");
     const importWorkspace = await mkdtemp(path.join(tmpdir(), "murph-vault-sync-empty-import-"));
     tempRoots.push(importWorkspace);
@@ -84,23 +113,14 @@ describe("vault sync merge", () => {
     await mkdir(importVaultRoot, { recursive: true });
     await mkdir(importMetaRoot, { recursive: true });
 
-    const result = await mergeVaultSyncImportIntoVault({
+    await expect(mergeVaultSyncImportIntoVault({
       importMetaRoot,
       importVaultRoot,
       sessionId: "vsi_empty_manifest",
       targetVaultRoot: hosted,
-    });
-
-    expect(result.conflicts).toEqual([]);
-    expect(result.imported).toEqual({
-      jsonlRecords: 0,
-      rawFiles: 0,
-      textFiles: 0,
-    });
-    expect(result.skipped).toEqual({
-      duplicates: 0,
-      excludedFiles: 0,
-    });
+    })).rejects.toSatisfy((error: unknown) =>
+      isVaultError(error) && error.code === "VAULT_SYNC_IMPORT_MANIFEST_INVALID"
+    );
   });
 
   it("adds missing records and raw files without overwriting hosted text conflicts", async () => {

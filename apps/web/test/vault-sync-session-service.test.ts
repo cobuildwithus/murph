@@ -78,10 +78,7 @@ describe("vault sync shared projections", () => {
   it("projects encrypted vault sync payloads back into the upload shape", () => {
     mocks.decryptHostedWebNullableString.mockReturnValue(JSON.stringify({
       bundleBase64: "AQID",
-      localManifestHash: "sha256:manifest",
       sessionId: "vsi_123",
-      sourceVaultId: "vault_local",
-      sourceVaultTitle: "Local Vault",
     }));
 
     expect(projectHostedVaultSyncPayload({
@@ -91,10 +88,7 @@ describe("vault sync shared projections", () => {
       sessionId: "vsi_123",
     })).toEqual({
       bundleBase64: "AQID",
-      localManifestHash: "sha256:manifest",
       sessionId: "vsi_123",
-      sourceVaultId: "vault_local",
-      sourceVaultTitle: "Local Vault",
     });
   });
 });

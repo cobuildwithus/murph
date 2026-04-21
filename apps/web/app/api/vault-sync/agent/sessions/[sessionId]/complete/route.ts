@@ -25,9 +25,17 @@ export const POST = withJsonError(async (
       message: "That vault sync bundle is too large for the first sync path. Try a smaller vault or wait for direct artifact upload support.",
     });
   }
+  const localManifestHash = readOptionalString(body.localManifestHash);
+  if (!localManifestHash) {
+    throw hostedOnboardingError({
+      code: "HOSTED_VAULT_SYNC_MANIFEST_HASH_REQUIRED",
+      httpStatus: 400,
+      message: "A vault sync import manifest hash is required.",
+    });
+  }
   const session = await completeHostedVaultSyncAgentUpload({
     bundleBase64,
-    localManifestHash: readOptionalString(body.localManifestHash),
+    localManifestHash,
     request,
     sessionId,
     sourceSchemaVersion: readOptionalString(body.sourceSchemaVersion),

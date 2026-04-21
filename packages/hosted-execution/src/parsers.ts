@@ -917,14 +917,10 @@ export function parseHostedExecutionVaultSyncImportReference(
   const record = requireObject(value, "Hosted execution vault sync import reference");
 
   return {
-    ...(record.localManifestHash === undefined
-      ? {}
-      : {
-          localManifestHash: readOptionalNullableString(
-            record.localManifestHash,
-            "Hosted execution vault sync import reference localManifestHash",
-          ),
-        }),
+    localManifestHash: requireString(
+      record.localManifestHash,
+      "Hosted execution vault sync import reference localManifestHash",
+    ),
     sessionId: requireString(
       record.sessionId,
       "Hosted execution vault sync import reference sessionId",
@@ -972,34 +968,10 @@ export function parseHostedExecutionRunnerVaultSyncImport(
       record.bundleBase64,
       "Hosted execution runner vault sync import bundleBase64",
     ),
-    ...(record.localManifestHash === undefined
-      ? {}
-      : {
-          localManifestHash: readOptionalNullableString(
-            record.localManifestHash,
-            "Hosted execution runner vault sync import localManifestHash",
-          ),
-        }),
     sessionId: requireString(
       record.sessionId,
       "Hosted execution runner vault sync import sessionId",
     ),
-    ...(record.sourceVaultId === undefined
-      ? {}
-      : {
-          sourceVaultId: readOptionalNullableString(
-            record.sourceVaultId,
-            "Hosted execution runner vault sync import sourceVaultId",
-          ),
-        }),
-    ...(record.sourceVaultTitle === undefined
-      ? {}
-      : {
-          sourceVaultTitle: readOptionalNullableString(
-            record.sourceVaultTitle,
-            "Hosted execution runner vault sync import sourceVaultTitle",
-          ),
-        }),
   };
 }
 

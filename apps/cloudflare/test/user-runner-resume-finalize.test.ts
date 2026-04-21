@@ -1276,10 +1276,7 @@ describe("HostedUserRunner resumeFinalize drain", () => {
 
     wakeProcessorMocks.readRunDrainVaultSyncImport.mockResolvedValueOnce({
       bundleBase64: "AQID",
-      localManifestHash: "sha256:manifest",
       sessionId: "vsi_runtime",
-      sourceVaultId: "vault_local",
-      sourceVaultTitle: "Local Vault",
     });
     webControlMocks.acquireHostedRunFromWeb.mockResolvedValueOnce({
       acquired: true,
@@ -1327,10 +1324,7 @@ describe("HostedUserRunner resumeFinalize drain", () => {
           seq: "11",
           vaultSyncImport: {
             bundleBase64: "AQID",
-            localManifestHash: "sha256:manifest",
             sessionId: "vsi_runtime",
-            sourceVaultId: "vault_local",
-            sourceVaultTitle: "Local Vault",
           },
           wake: vaultSyncWake,
         }),

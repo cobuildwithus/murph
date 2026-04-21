@@ -33,6 +33,7 @@ export {
   VAULT_SYNC_IMPORT_MANIFEST_SCHEMA,
   buildVaultSyncImportPack,
   mergeVaultSyncImportIntoVault,
+  readVaultSyncImportManifest,
   restoreVaultSyncImportPack,
 } from "./vault-sync.ts";
 export type {
