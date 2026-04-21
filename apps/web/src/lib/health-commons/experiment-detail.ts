@@ -198,7 +198,7 @@ const PROTOCOL_BIOMARKER_DISPLAY_HINT_OVERRIDES: Record<
 
 const SOURCE_PERSON_EXPERT_QUOTES: Partial<Record<string, string>> = {
   "source_person:bryan-johnson":
-    "Blueprint founder whose public sauna routine offers a higher-burden comparison to simpler dry-sauna experiments and highlights aggressive implementation choices.",
+    "Founder of Blueprint and Don't Die. Trying to live forever.",
 };
 
 export function listHealthCommonsExperimentProtocols(
@@ -612,11 +612,35 @@ function toExpert(entity: HealthCommonsEntity): Expert {
     field: entity.entityType === "source_person"
       ? ""
       : formatCategory(entity.categories?.[0] ?? "source"),
+    profileImageUrl: readOptionalProfileImageUrl(entity),
     quote:
       SOURCE_PERSON_EXPERT_QUOTES[entity.key]
       ?? entity.summary
       ?? summarizeBody(entity.body),
   };
+}
+
+export function readOptionalProfileImageUrl(
+  entity: HealthCommonsEntity,
+): string | undefined {
+  const rawValue = Reflect.get(entity, "profileImageUrl");
+  if (typeof rawValue !== "string") {
+    return undefined;
+  }
+
+  const normalized = rawValue.trim();
+  if (!normalized) {
+    return undefined;
+  }
+
+  if (
+    (normalized.startsWith("/") && !normalized.startsWith("//"))
+    || /^https?:\/\//u.test(normalized)
+  ) {
+    return normalized;
+  }
+
+  return undefined;
 }
 
 function sortStudySourcesForDisplay(

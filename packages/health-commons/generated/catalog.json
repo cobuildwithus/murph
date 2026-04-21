@@ -1225,7 +1225,7 @@
       "schemaVersion": "murph.commons.artifact-manifest.v1"
     }
   ],
-  "catalogHash": "sha256:a32929632e982f6dcfe9803d28c970c3c790d78d414592657d459ff17314baac",
+  "catalogHash": "sha256:6db430abb8b1210e9f17648dc39adb372565d686bd75ba3cfc7c481233dee34c",
   "changes": [
     {
       "affectedFields": [
@@ -13905,10 +13905,11 @@
       ],
       "entityType": "source_person",
       "key": "source_person:bryan-johnson",
+      "profileImageUrl": "/source-people/bryan-johnson/twitter-avatar.jpg",
       "quality": "usable",
       "relativePath": "sources/people/bryan-johnson.md",
       "revision": {
-        "pageRevisionId": "sha256:ff8af6ad2e62266456a31397c98ac026cfc3a968cd0323a51a7c7f12302a6ad6",
+        "pageRevisionId": "sha256:4c273c4f6dddcd6c95d07af152967c546c1eed8f38b11c5d527179faeae99685",
         "recipeHash": null,
         "runSpecRevisionId": null
       },

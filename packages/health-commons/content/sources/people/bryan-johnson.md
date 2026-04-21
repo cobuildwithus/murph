@@ -18,6 +18,7 @@ source:
   kind: web_page
   title: Bryan Johnson / Blueprint
   url: https://blueprint.bryanjohnson.com/blogs/news/bryan-johnsons-protocol
+profileImageUrl: /source-people/bryan-johnson/twitter-avatar.jpg
 ---
 
 Bryan Johnson is included as the public source for the Blueprint sauna routine. His page helps separate his named routine from simpler sauna experiments.
