@@ -1022,12 +1022,17 @@ function createUnwiredServiceGroup<
   groupName: string,
   integratedServices: TServiceGroup,
 ): TServiceGroup {
-  return Object.fromEntries(
-    Object.keys(integratedServices).map((methodName) => [
-      methodName,
-      createUnwiredMethod(`${groupName}.${methodName}`),
-    ]),
-  ) as unknown as TServiceGroup
+  const unwiredServices = {} as {
+    [TKey in keyof TServiceGroup]: TServiceGroup[TKey]
+  }
+
+  for (const methodName of Object.keys(integratedServices) as Array<keyof TServiceGroup & string>) {
+    unwiredServices[methodName] = createUnwiredMethod(
+      `${groupName}.${methodName}`,
+    ) as TServiceGroup[typeof methodName]
+  }
+
+  return unwiredServices
 }
 
 export function createIntegratedVaultServices(

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { EventEmitter } from "node:events";
+import { Server } from "node:http";
 
 import { afterEach, test, vi } from "vitest";
 
@@ -80,33 +80,24 @@ type MockHttpRequestHandler = (
   response: ServerResponseLike,
 ) => Promise<void>;
 
-class MockListeningServer extends EventEmitter {
-  private readonly host: string;
-  private readonly port: number;
+function createMockListeningServer(port: number, host: string): Server {
+  const server = new Server();
 
-  constructor(port: number, host: string) {
-    super();
-    this.port = port;
-    this.host = host;
-  }
-
-  listen(_port: number, _host: string, callback: () => void) {
+  server.listen = ((_: number, __: string, callback: () => void) => {
     callback();
-    return this;
-  }
+    return server;
+  }) as Server["listen"];
+  server.address = (() => ({
+    address: host,
+    family: "IPv4",
+    port,
+  })) as Server["address"];
+  server.close = ((callback?: (error?: Error) => void) => {
+    callback?.();
+    return server;
+  }) as Server["close"];
 
-  address() {
-    return {
-      address: this.host,
-      family: "IPv4",
-      port: this.port,
-    };
-  }
-
-  close(callback: (error?: Error | null) => void) {
-    callback(null);
-    return this;
-  }
+  return server;
 }
 
 function createMockHttpRequest(input: {
@@ -185,9 +176,13 @@ async function createHandlerHarness(input: {
   close(): Promise<void>;
 }> {
   const servers: MockHttpRequestHandler[] = [];
-  nodeHttpMocks.createServer.mockImplementation((handler) => {
+  nodeHttpMocks.createServer.mockImplementation((first, second) => {
+    const handler = typeof first === "function" ? first : second;
+    if (!handler) {
+      throw new Error("Mock HTTP server expected a request handler.");
+    }
     servers.push(handler as MockHttpRequestHandler);
-    return new MockListeningServer(43100 + servers.length, "127.0.0.1") as unknown as import("node:http").Server;
+    return createMockListeningServer(43100 + servers.length, "127.0.0.1");
   });
   const controlToken = input.controlToken ?? input.config?.controlToken ?? CONTROL_TOKEN;
   const config =
@@ -1031,11 +1026,11 @@ test("device sync http server requires both public listener fields together", as
 });
 
 test("device sync http server can start without a public listener and rejects missing control tokens", async () => {
-  const servers: MockListeningServer[] = [];
+  const servers: Server[] = [];
   nodeHttpMocks.createServer.mockImplementation(() => {
-    const server = new MockListeningServer(43110, "127.0.0.1");
+    const server = createMockListeningServer(43110, "127.0.0.1");
     servers.push(server);
-    return server as unknown as import("node:http").Server;
+    return server;
   });
   const handle = await startDeviceSyncHttpServer({
     service: createStubService(),
@@ -1073,17 +1068,21 @@ test("device sync http server can start without a public listener and rejects mi
 test("device sync http server wires control and public listeners to the correct handler surfaces", async () => {
   const servers: Array<{
     handler: (request: IncomingMessageLike, response: ServerResponseLike) => Promise<void>;
-    server: MockListeningServer;
+    server: Server;
   }> = [];
 
   let nextPort = 43100;
-  nodeHttpMocks.createServer.mockImplementation((handler) => {
+  nodeHttpMocks.createServer.mockImplementation((first, second) => {
+    const handler = typeof first === "function" ? first : second;
+    if (!handler) {
+      throw new Error("Mock HTTP server expected a request handler.");
+    }
     servers.push({
       handler: handler as (request: IncomingMessageLike, response: ServerResponseLike) => Promise<void>,
-      server: new MockListeningServer(nextPort, "127.0.0.1"),
+      server: createMockListeningServer(nextPort, "127.0.0.1"),
     });
     nextPort += 1;
-    return servers.at(-1)!.server as unknown as import("node:http").Server;
+    return servers.at(-1)!.server;
   });
   const service = createStubService();
   const handle = await startDeviceSyncHttpServer({

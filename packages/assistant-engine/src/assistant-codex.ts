@@ -720,7 +720,7 @@ function tryParseJsonLine(
   try {
     return {
       ok: true,
-      value: JSON.parse(line) as unknown,
+      value: JSON.parse(line),
     }
   } catch {
     return {

@@ -345,7 +345,7 @@ function renderMemoryFrontmatterValue(value: string): string {
 
 function parseMemoryRecordMetadata(value: string): MemoryRecordMetadata | null {
   try {
-    return memoryRecordMetadataSchema.parse(JSON.parse(value) as unknown);
+    return memoryRecordMetadataSchema.parse(JSON.parse(value));
   } catch {
     return null;
   }

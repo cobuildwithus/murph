@@ -151,7 +151,7 @@ function parseJsonlRecordOutcomes(
         ok: true,
         relativePath,
         lineNumber: index + 1,
-        value: JSON.parse(line) as unknown,
+        value: JSON.parse(line),
       });
     } catch (error) {
       records.push(buildJsonParseFailure(relativePath, index + 1, error));

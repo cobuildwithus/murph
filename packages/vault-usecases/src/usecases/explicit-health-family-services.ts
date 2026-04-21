@@ -940,7 +940,7 @@ export function createExplicitHealthQueryServices(
         items,
       );
     },
-  } as unknown as Pick<
+  } as Pick<
     QueryServices,
     | "showAssessment"
     | "listAssessments"

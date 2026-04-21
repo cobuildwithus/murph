@@ -58,7 +58,7 @@ export async function requestAssistantWebSearchJson(input: {
       }),
     isRetryableError: isRetryableAssistantWebSearchError,
     maxAttempts: ASSISTANT_WEB_SEARCH_HTTP_MAX_ATTEMPTS,
-    parseResponse: async (response) => (await response.json()) as unknown,
+    parseResponse: async (response): Promise<unknown> => await response.json(),
     signal: input.signal,
     waitForRetryDelay: waitForAssistantWebSearchRetryDelay,
   })

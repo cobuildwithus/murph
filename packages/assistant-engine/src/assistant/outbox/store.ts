@@ -161,7 +161,7 @@ export async function readAssistantOutboxIntentAtPath(
 ): Promise<AssistantOutboxIntent | null> {
   try {
     return assistantOutboxIntentSchema.parse(
-      JSON.parse(await readFile(intentPath, 'utf8')) as unknown,
+      JSON.parse(await readFile(intentPath, 'utf8')),
     )
   } catch (error) {
     if (isMissingFileError(error)) {
