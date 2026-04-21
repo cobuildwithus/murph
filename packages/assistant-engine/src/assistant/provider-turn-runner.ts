@@ -138,16 +138,17 @@ export function resolveAssistantOnboardingInjectionPlan(input: {
   earlySessionOnboardingEligible: boolean
   promptProfile: AssistantProviderTurnPromptProfile
 }): AssistantOnboardingInjectionPlan {
+  const resumeProviderSessionId = input.candidateResumeProviderSessionId
+  const shouldInjectBootstrapContext = resumeProviderSessionId === null
   const earlySessionOnboardingInjected =
-    input.promptProfile === 'conversation' && input.earlySessionOnboardingEligible
-  const resumeProviderSessionId = earlySessionOnboardingInjected
-    ? null
-    : input.candidateResumeProviderSessionId
+    input.promptProfile === 'conversation' &&
+    input.earlySessionOnboardingEligible &&
+    shouldInjectBootstrapContext
 
   return {
     earlySessionOnboardingInjected,
     resumeProviderSessionId,
-    shouldInjectBootstrapContext: resumeProviderSessionId === null,
+    shouldInjectBootstrapContext,
   }
 }
 

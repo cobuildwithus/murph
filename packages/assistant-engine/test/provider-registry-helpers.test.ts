@@ -228,6 +228,18 @@ describe('assistant provider registry helpers', () => {
       ].join('\n'),
     )
 
+    expect(
+      resolveAssistantProviderPrompt({
+        providerConfig: normalizeAssistantProviderConfig({
+          provider: 'codex-cli',
+        }),
+        resumeProviderSessionId: 'codex-session-1',
+        systemPrompt: 'You are Murph.',
+        userPrompt: '  What changed today?  ',
+        workingDirectory: '/tmp/provider-tests',
+      }),
+    ).toBe('User message:\nWhat changed today?')
+
     expect(() =>
       resolveAssistantProviderPrompt({
         providerConfig: normalizeAssistantProviderConfig({

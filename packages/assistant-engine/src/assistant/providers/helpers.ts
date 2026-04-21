@@ -258,7 +258,9 @@ export function resolveAssistantProviderPrompt(
     return explicitPrompt
   }
 
-  const systemPrompt = normalizeNullableString(input.systemPrompt)
+  const systemPrompt = input.resumeProviderSessionId
+    ? null
+    : normalizeNullableString(input.systemPrompt)
 
   return [
     systemPrompt,
