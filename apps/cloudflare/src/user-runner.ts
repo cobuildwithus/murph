@@ -491,141 +491,164 @@ export class HostedUserRunner {
       };
     }
 
-    await this.ensureManagedUserCryptoForActivationWakeIfNeeded(primaryWake);
-    const execution = await this.runProcessor.executeRunDrain({
-      currentBundleRef: this.resolveAcquiredRunInputSnapshotRef(input.acquired),
+    const messagingActivity = await this.runProcessor.startRunMessagingActivity({
       events: resolved.events,
-      primaryWake,
       run,
-      runToken,
     });
+    let messagingActivityStopped = false;
+    const stopMessagingActivity = async () => {
+      if (messagingActivityStopped || !messagingActivity) {
+        return;
+      }
 
-    if (execution.state !== "completed") {
-      return this.failAcquiredHostedRun({
-        acquired: input.acquired,
-        failureCode: "HOSTED_RUN_RUNTIME_BACKPRESSURED",
+      messagingActivityStopped = true;
+      await messagingActivity.stop();
+    };
+
+    try {
+      await this.ensureManagedUserCryptoForActivationWakeIfNeeded(primaryWake);
+      const execution = await this.runProcessor.executeRunDrain({
+        currentBundleRef: this.resolveAcquiredRunInputSnapshotRef(input.acquired),
+        events: resolved.events,
+        primaryWake,
+        messagingActivityOwnedByExecutor: messagingActivity !== null,
+        run,
+        runToken,
+      });
+
+      if (execution.state !== "completed") {
+        return this.failAcquiredHostedRun({
+          acquired: input.acquired,
+          failureCode: "HOSTED_RUN_RUNTIME_BACKPRESSURED",
+          run,
+          runToken,
+          userId: input.userId,
+        });
+      }
+
+      this.recordHostedRunBreadcrumb({
+        message: "Cloudflare attempted to commit the acquired hosted run.",
+        phase: "commit_attempted",
+        redacted: {
+          commitKind: execution.finalizeRequired ? "prepared_snapshot_finalize" : "prepared_snapshot",
+          eventCount: resolved.events.length,
+          preparedSnapshotPresent: execution.cursorSnapshotRef !== null,
+        },
         run,
         runToken,
         userId: input.userId,
       });
-    }
-
-    this.recordHostedRunBreadcrumb({
-      message: "Cloudflare attempted to commit the acquired hosted run.",
-      phase: "commit_attempted",
-      redacted: {
-        commitKind: execution.finalizeRequired ? "prepared_snapshot_finalize" : "prepared_snapshot",
-        eventCount: resolved.events.length,
-        preparedSnapshotPresent: execution.cursorSnapshotRef !== null,
-      },
-      run,
-      runToken,
-      userId: input.userId,
-    });
-    const commit = await commitHostedRunToWeb({
-      baseUrl: this.readHostedWebControlBaseUrl(),
-      body: {
-        eventResults: resolved.eventResults,
-        expectedCursorVersion: input.acquired.cursor.version,
-        finalizeRequired: execution.finalizeRequired,
-        ...(execution.nextRuntimeWakeAt === undefined
-          ? {}
-          : {
-              nextRuntimeWakeAt: execution.nextRuntimeWakeAt ?? null,
-              nextRuntimeWakeReason: execution.nextRuntimeWakeAt ? "runtime" : null,
-            }),
-        outputCommittedSeq: resolved.outputCommittedSeq,
-        browserVaultReplicaRef: execution.finalizeRequired ? undefined : execution.browserVaultReplicaRef ?? null,
-        preparedSnapshotRef: execution.cursorSnapshotRef,
-        redactedSummary: execution.redactedSummary ?? null,
-        runId: run.id,
-        runToken,
-      },
-      boundUserId: input.userId,
-      callbackSigning: this.env.webCallbackSigning,
-      timeoutMs: this.env.runnerTimeoutMs,
-    });
-
-    this.recordHostedRunBreadcrumb({
-      level: commit.committed ? "info" : "warn",
-      message: commit.committed
-        ? "Cloudflare won the hosted run commit."
-        : "Cloudflare lost the hosted run commit.",
-      phase: commit.committed ? "commit_won" : "commit_lost",
-      redacted: {
-        commitKind: execution.finalizeRequired ? "prepared_snapshot_finalize" : "prepared_snapshot",
-        eventCount: resolved.events.length,
-        needsFinalize: commit.needsFinalize,
-      },
-      run,
-      runToken,
-      userId: input.userId,
-    });
-
-    if (!commit.committed || !commit.run) {
-      if (execution.cursorSnapshotRef) {
-        await this.syncRunnerBundleCacheToCursor(commit.cursor.snapshotRef);
-      }
-      return {
-        cursor: commit.cursor,
-        state: "backpressured",
-      };
-    }
-
-    let cursor = commit.cursor;
-
-    if (commit.needsFinalize) {
-      await this.syncRunnerBundleCacheToCursor(cursor.snapshotRef);
-      const resumeFinalizeAcquire = await acquireHostedRunFromWeb({
+      const commit = await commitHostedRunToWeb({
         baseUrl: this.readHostedWebControlBaseUrl(),
         body: {
-          executorKind: "cloudflare-container",
-          triggerKind: "retry_finalize",
+          eventResults: resolved.eventResults,
+          expectedCursorVersion: input.acquired.cursor.version,
+          finalizeRequired: execution.finalizeRequired,
+          ...(execution.nextRuntimeWakeAt === undefined
+            ? {}
+            : {
+                nextRuntimeWakeAt: execution.nextRuntimeWakeAt ?? null,
+                nextRuntimeWakeReason: execution.nextRuntimeWakeAt ? "runtime" : null,
+              }),
+          outputCommittedSeq: resolved.outputCommittedSeq,
+          browserVaultReplicaRef: execution.finalizeRequired ? undefined : execution.browserVaultReplicaRef ?? null,
+          preparedSnapshotRef: execution.cursorSnapshotRef,
+          redactedSummary: execution.redactedSummary ?? null,
+          runId: run.id,
+          runToken,
         },
         boundUserId: input.userId,
         callbackSigning: this.env.webCallbackSigning,
         timeoutMs: this.env.runnerTimeoutMs,
       });
-      if (
-        !resumeFinalizeAcquire.acquired
-        || resumeFinalizeAcquire.resumeFinalize !== true
-        || !resumeFinalizeAcquire.run
-        || !resumeFinalizeAcquire.runToken
-        || resumeFinalizeAcquire.run.id !== commit.run.id
-        || resumeFinalizeAcquire.run.status !== "finalizing"
-      ) {
+
+      this.recordHostedRunBreadcrumb({
+        level: commit.committed ? "info" : "warn",
+        message: commit.committed
+          ? "Cloudflare won the hosted run commit."
+          : "Cloudflare lost the hosted run commit.",
+        phase: commit.committed ? "commit_won" : "commit_lost",
+        redacted: {
+          commitKind: execution.finalizeRequired ? "prepared_snapshot_finalize" : "prepared_snapshot",
+          eventCount: resolved.events.length,
+          needsFinalize: commit.needsFinalize,
+        },
+        run,
+        runToken,
+        userId: input.userId,
+      });
+
+      if (!commit.committed || !commit.run) {
+        if (execution.cursorSnapshotRef) {
+          await this.syncRunnerBundleCacheToCursor(commit.cursor.snapshotRef);
+        }
         return {
-          cursor: resumeFinalizeAcquire.cursor,
+          cursor: commit.cursor,
           state: "backpressured",
         };
       }
-      const finalized = await this.finalizeAcquiredHostedRun({
-        acquired: resumeFinalizeAcquire,
-        userId: input.userId,
-      });
-      cursor = finalized.cursor;
-      if (finalized.state !== "completed") {
-        return finalized;
-      }
-    }
 
-    for (const event of resolved.events) {
-      if (event.wake.kind === "runtime.timer") {
-        continue;
-      }
-      await this.runProcessor.cleanupTransientWakeDataBestEffortForRunDrain(
-        event.wake,
-      );
-    }
+      let cursor = commit.cursor;
 
-    return {
-      cursor,
-      state: "completed",
-    };
+      if (commit.needsFinalize) {
+        await this.syncRunnerBundleCacheToCursor(cursor.snapshotRef);
+        const resumeFinalizeAcquire = await acquireHostedRunFromWeb({
+          baseUrl: this.readHostedWebControlBaseUrl(),
+          body: {
+            executorKind: "cloudflare-container",
+            triggerKind: "retry_finalize",
+          },
+          boundUserId: input.userId,
+          callbackSigning: this.env.webCallbackSigning,
+          timeoutMs: this.env.runnerTimeoutMs,
+        });
+        if (
+          !resumeFinalizeAcquire.acquired
+          || resumeFinalizeAcquire.resumeFinalize !== true
+          || !resumeFinalizeAcquire.run
+          || !resumeFinalizeAcquire.runToken
+          || resumeFinalizeAcquire.run.id !== commit.run.id
+          || resumeFinalizeAcquire.run.status !== "finalizing"
+        ) {
+          return {
+            cursor: resumeFinalizeAcquire.cursor,
+            state: "backpressured",
+          };
+        }
+        const finalized = await this.finalizeAcquiredHostedRun({
+          acquired: resumeFinalizeAcquire,
+          messagingActivityOwnedByExecutor: messagingActivity !== null,
+          onRuntimeDeliveryFinished: stopMessagingActivity,
+          userId: input.userId,
+        });
+        cursor = finalized.cursor;
+        if (finalized.state !== "completed") {
+          return finalized;
+        }
+      }
+
+      for (const event of resolved.events) {
+        if (event.wake.kind === "runtime.timer") {
+          continue;
+        }
+        await this.runProcessor.cleanupTransientWakeDataBestEffortForRunDrain(
+          event.wake,
+        );
+      }
+
+      return {
+        cursor,
+        state: "completed",
+      };
+    } finally {
+      await stopMessagingActivity();
+    }
   }
 
   private async finalizeAcquiredHostedRun(input: {
     acquired: HostedRunAcquireResponse;
+    messagingActivityOwnedByExecutor?: boolean;
+    onRuntimeDeliveryFinished?: () => Promise<void>;
     userId: string;
   }): Promise<{
     cursor: HostedExecutionCursorState;
@@ -664,9 +687,14 @@ export class HostedUserRunner {
         triggerKind: run.triggerKind,
         userId: input.userId,
       }),
+      messagingActivityOwnedByExecutor: input.messagingActivityOwnedByExecutor === true,
       run,
       runToken,
     });
+
+    if (execution.state === "completed") {
+      await input.onRuntimeDeliveryFinished?.();
+    }
 
     if (execution.state !== "completed") {
       await this.releaseHostedRunFinalizeForRetry({

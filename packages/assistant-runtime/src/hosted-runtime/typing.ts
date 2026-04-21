@@ -1,222 +1,194 @@
 import {
+  getAssistantChannelAdapter,
+  startLinqTypingIndicator,
+  startTelegramTypingIndicator,
+  type AssistantChannelActivityHandle,
+  type AssistantChannelDependencies,
+} from "@murphai/assistant-engine/assistant-runtime";
+import {
   emitHostedExecutionStructuredLog,
   isHostedLinqConversationMessageWake,
   isHostedTelegramConversationMessageWake,
   type HostedExecutionConversationMessageWake,
-  type HostedRuntimeEvent,
+  type HostedRuntimeDrainEvent,
 } from "@murphai/hosted-execution";
 import {
   parseTelegramThreadTarget,
 } from "@murphai/messaging-ingress/telegram-webhook";
-import {
-  startLinqChatTypingIndicator,
-  stopLinqChatTypingIndicator,
-} from "@murphai/operator-config/linq-runtime";
-import {
-  startTelegramTypingSession,
-} from "@murphai/operator-config/telegram-runtime";
 
 import type {
   HostedAssistantRuntimeJobInput,
 } from "./models.ts";
 import { computeHostedRunElapsedMs } from "./utils.ts";
 
-type HostedTypingHandle = {
+export const HOSTED_RUN_MESSAGING_ACTIVITY_OWNER_ENV =
+  "HOSTED_RUN_MESSAGING_ACTIVITY_OWNER";
+export const HOSTED_RUN_MESSAGING_ACTIVITY_OWNER_EXECUTOR = "executor";
+
+export type HostedMessagingActivityComponent = "runtime" | "runner";
+
+export type HostedRunMessagingActivityHandle = {
   stop(): Promise<void>;
 };
 
-type HostedLinqTypingOperation = "typing_start" | "typing_stop";
+type HostedMessagingActivityChannel = "linq" | "telegram" | "email";
 
-type HostedRunTypingIndicator = {
-  channelLabel: "Linq" | "Telegram";
-  startLogDetails?: Record<string, boolean | string>;
-  stopLogDetails?: Record<string, boolean | string>;
-  stop(): Promise<void>;
-};
+export interface HostedRunMessagingActivityTarget {
+  channel: HostedMessagingActivityChannel;
+  explicitTarget: string;
+  identityId: string | null;
+  logDetails: Record<string, boolean | string>;
+  sourceSeq: string;
+  wake: HostedExecutionConversationMessageWake;
+}
 
-export function startHostedRunTypingIndicator(input: {
-  wake: HostedRuntimeEvent;
+export function shouldStartRuntimeHostedRunMessagingActivity(
+  runtimeEnv: Readonly<Record<string, string>>,
+): boolean {
+  return runtimeEnv[HOSTED_RUN_MESSAGING_ACTIVITY_OWNER_ENV]
+    !== HOSTED_RUN_MESSAGING_ACTIVITY_OWNER_EXECUTOR;
+}
+
+export async function startHostedRunMessagingActivity(input: {
+  component?: HostedMessagingActivityComponent;
+  events: readonly HostedRuntimeDrainEvent[];
   runtimeEnv: Readonly<Record<string, string>>;
   run: HostedAssistantRuntimeJobInput["request"]["run"] | null;
-}): HostedRunTypingIndicator | null {
-  const wake = input.wake;
-
-  if (wake.kind !== "conversation.message") {
+}): Promise<HostedRunMessagingActivityHandle | null> {
+  const target = selectHostedRunMessagingActivityTarget(input.events);
+  if (!target) {
     return null;
   }
 
-  if (isHostedLinqConversationMessageWake(wake)) {
-    return startHostedLinqRunTypingIndicator({
-      ...input,
-      wake,
-    });
+  const component = input.component ?? "runtime";
+  const adapter = getAssistantChannelAdapter(target.channel);
+  if (!adapter?.startTypingIndicator) {
+    return null;
   }
 
-  if (isHostedTelegramConversationMessageWake(wake)) {
-    return startHostedTelegramRunTypingIndicator({
-      ...input,
-      wake,
-    });
+  return createAsyncHostedRunMessagingActivityHandle({
+    component,
+    run: input.run,
+    start: () => adapter.startTypingIndicator!(
+      {
+        bindingDelivery: null,
+        explicitTarget: target.explicitTarget,
+        identityId: target.identityId,
+      },
+      buildHostedMessagingActivityDependencies(input.runtimeEnv),
+    ),
+    target,
+  });
+}
+
+export async function stopHostedRunMessagingActivity(input: {
+  activity: HostedRunMessagingActivityHandle | null;
+}): Promise<void> {
+  await input.activity?.stop();
+}
+
+export function selectHostedRunMessagingActivityTarget(
+  events: readonly HostedRuntimeDrainEvent[],
+): HostedRunMessagingActivityTarget | null {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (!event) {
+      continue;
+    }
+
+    const target = resolveHostedMessagingActivityTarget(event.wake, event.seq);
+    if (target) {
+      return target;
+    }
   }
 
   return null;
 }
 
-export async function stopHostedRunTypingIndicator(input: {
-  wake: HostedRuntimeEvent;
-  typingIndicator: HostedRunTypingIndicator | null;
-  run: HostedAssistantRuntimeJobInput["request"]["run"] | null;
-}): Promise<void> {
-  if (!input.typingIndicator) {
-    return;
-  }
-
-  try {
-    await input.typingIndicator.stop();
-  } catch (error) {
-    emitHostedExecutionStructuredLog({
-      component: "runtime",
-      details: input.typingIndicator.stopLogDetails,
-      wake: input.wake,
-      error,
-      level: "warn",
-      message: `Hosted ${input.typingIndicator.channelLabel} typing indicator could not be stopped.`,
-      phase: "side-effects.draining",
-      run: input.run,
-    });
-  }
-}
-
-function startHostedLinqRunTypingIndicator(input: {
-  runtimeEnv: Readonly<Record<string, string>>;
-  run: HostedAssistantRuntimeJobInput["request"]["run"] | null;
-  wake: HostedExecutionConversationMessageWake & {
-    message: {
-      channel: "linq";
-      linqMessage: {
-        chatId: string;
-      };
-    };
-  };
-}): HostedRunTypingIndicator | null {
-  const env = input.runtimeEnv as NodeJS.ProcessEnv;
-  const chatId = input.wake.message.linqMessage.chatId.trim();
-  if (chatId.length === 0) {
-    emitHostedExecutionStructuredLog({
-      component: "runtime",
-      details: buildHostedLinqTypingLogDetails("typing_start", false),
-      wake: input.wake,
-      error: new TypeError("Hosted Linq typing indicator wake is missing a stable chat id."),
-      level: "warn",
-      message: "Hosted Linq typing indicator could not be started.",
-      phase: "wake.running",
-      run: input.run,
-    });
+function resolveHostedMessagingActivityTarget(
+  wake: HostedRuntimeDrainEvent["wake"],
+  sourceSeq: string,
+): HostedRunMessagingActivityTarget | null {
+  if (wake.kind !== "conversation.message") {
     return null;
   }
 
-  return createAsyncHostedTypingIndicator({
-    channelLabel: "Linq",
-    wake: input.wake,
-    run: input.run,
-    startLogDetails: buildHostedLinqTypingLogDetails("typing_start", true),
-    stopLogDetails: buildHostedLinqTypingLogDetails("typing_stop", true),
-    start: async () => {
-      await startLinqChatTypingIndicator(
-        {
-          chatId,
-        },
-        {
-          env,
-        },
-      );
+  if (isHostedLinqConversationMessageWake(wake)) {
+    const chatId = wake.message.linqMessage.chatId.trim();
+    if (chatId.length === 0) {
+      return null;
+    }
 
-      return {
-        async stop() {
-          await stopLinqChatTypingIndicator(
-            {
-              chatId,
-            },
-            {
-              env,
-            },
-          );
-        },
-      };
-    },
-  });
+    return {
+      channel: "linq",
+      explicitTarget: chatId,
+      identityId: null,
+      logDetails: {
+        chatIdPresent: true,
+        provider: "linq",
+        sourceSeq,
+      },
+      sourceSeq,
+      wake,
+    };
+  }
+
+  if (isHostedTelegramConversationMessageWake(wake)) {
+    const target = wake.message.telegramMessage.threadId.trim();
+    if (target.length === 0) {
+      return null;
+    }
+
+    return {
+      channel: "telegram",
+      explicitTarget: target,
+      identityId: null,
+      logDetails: {
+        ...buildHostedTelegramTypingLogDetails(target),
+        sourceSeq,
+      },
+      sourceSeq,
+      wake,
+    };
+  }
+
+  return null;
 }
 
-function startHostedTelegramRunTypingIndicator(input: {
-  runtimeEnv: Readonly<Record<string, string>>;
-  run: HostedAssistantRuntimeJobInput["request"]["run"] | null;
-  wake: HostedExecutionConversationMessageWake & {
-    message: { channel: "telegram"; telegramMessage: { threadId: string } };
-  };
-}): HostedRunTypingIndicator | null {
-  const target = input.wake.message.telegramMessage.threadId;
-  const startLogDetails = buildHostedTelegramTypingLogDetails(target);
-  emitHostedExecutionStructuredLog({
-    component: "runtime",
-    details: startLogDetails,
-    wake: input.wake,
-    message: "Hosted Telegram typing indicator requested.",
-    phase: "wake.running",
-    run: input.run,
-  });
+function buildHostedMessagingActivityDependencies(
+  runtimeEnv: Readonly<Record<string, string>>,
+): AssistantChannelDependencies {
+  const env = runtimeEnv as NodeJS.ProcessEnv;
 
-  return createAsyncHostedTypingIndicator({
-    channelLabel: "Telegram",
-    wake: input.wake,
-    run: input.run,
-    startLogDetails,
-    start: () => startTelegramTypingSession(
-      {
-        target,
-      },
-      {
-        env: input.runtimeEnv as NodeJS.ProcessEnv,
-      },
-    ),
-  });
-}
-
-function buildHostedLinqTypingLogDetails(
-  operation: HostedLinqTypingOperation,
-  chatIdPresent: boolean,
-): Record<string, boolean | string> {
   return {
-    chatIdPresent,
-    operation,
-    provider: "linq",
+    startLinqTyping: (input) => startLinqTypingIndicator(input, { env }),
+    startTelegramTyping: (input) => startTelegramTypingIndicator(input, { env }),
   };
 }
 
-function createAsyncHostedTypingIndicator(input: {
-  channelLabel: HostedRunTypingIndicator["channelLabel"];
-  wake: HostedRuntimeEvent;
+function createAsyncHostedRunMessagingActivityHandle(input: {
+  component: HostedMessagingActivityComponent;
   run: HostedAssistantRuntimeJobInput["request"]["run"] | null;
-  startLogDetails?: Record<string, boolean | string>;
-  stopLogDetails?: Record<string, boolean | string>;
-  start(): Promise<HostedTypingHandle>;
-}): HostedRunTypingIndicator {
-  let activeIndicator: HostedTypingHandle | null = null;
+  start(): Promise<AssistantChannelActivityHandle | null>;
+  target: HostedRunMessagingActivityTarget;
+}): HostedRunMessagingActivityHandle {
+  let activeIndicator: AssistantChannelActivityHandle | null = null;
   let stopRequested = false;
   let stopPromise: Promise<void> | null = null;
-  const typingStartRequestedAtMs = Date.now();
+  const startRequestedAtMs = Date.now();
 
-  const stopActiveIndicator = (indicator: HostedTypingHandle) => {
+  const stopActiveIndicator = (indicator: AssistantChannelActivityHandle) => {
     if (!stopPromise) {
       stopPromise = indicator.stop().catch((error) => {
         emitHostedExecutionStructuredLog({
-          component: "runtime",
-          details: input.stopLogDetails,
-          wake: input.wake,
+          component: input.component,
+          details: input.target.logDetails,
           error,
           level: "warn",
-          message: `Hosted ${input.channelLabel} typing indicator could not be stopped.`,
+          message: `Hosted ${formatHostedMessagingActivityChannelLabel(input.target.channel)} typing indicator could not be stopped.`,
           phase: "side-effects.draining",
           run: input.run,
+          wake: input.target.wake,
         });
       });
     }
@@ -226,16 +198,20 @@ function createAsyncHostedTypingIndicator(input: {
 
   const startPromise = input.start()
     .then(async (indicator) => {
+      if (!indicator) {
+        return;
+      }
+
       activeIndicator = indicator;
       emitHostedExecutionStructuredLog({
-        component: "runtime",
+        component: input.component,
         details: {
-          ...(input.startLogDetails ?? {}),
+          ...input.target.logDetails,
           runElapsedMs: computeHostedRunElapsedMs(input.run),
-          startLatencyMs: Date.now() - typingStartRequestedAtMs,
+          startLatencyMs: Date.now() - startRequestedAtMs,
         },
-        wake: input.wake,
-        message: `Hosted ${input.channelLabel} typing indicator started.`,
+        wake: input.target.wake,
+        message: `Hosted ${formatHostedMessagingActivityChannelLabel(input.target.channel)} typing indicator started.`,
         phase: "wake.running",
         run: input.run,
       });
@@ -243,30 +219,30 @@ function createAsyncHostedTypingIndicator(input: {
         await stopActiveIndicator(indicator);
       }
     })
-    .catch((error: unknown) => {
+    .catch((error) => {
       emitHostedExecutionStructuredLog({
-        component: "runtime",
-        details: input.startLogDetails,
-        wake: input.wake,
+        component: input.component,
+        details: input.target.logDetails,
         error,
         level: "warn",
-        message: `Hosted ${input.channelLabel} typing indicator could not be started.`,
+        message: `Hosted ${formatHostedMessagingActivityChannelLabel(input.target.channel)} typing indicator could not be started.`,
         phase: "wake.running",
         run: input.run,
+        wake: input.target.wake,
       });
     });
 
+  let stopped = false;
+
   return {
-    channelLabel: input.channelLabel,
-    startLogDetails: input.startLogDetails,
-    stopLogDetails: input.stopLogDetails,
     async stop() {
-      if (stopRequested) {
+      if (stopped) {
         await (stopPromise ?? startPromise);
         return;
       }
 
-      stopRequested = true;
+      stopped = true;
+
       if (activeIndicator) {
         const indicator = activeIndicator;
         activeIndicator = null;
@@ -274,6 +250,7 @@ function createAsyncHostedTypingIndicator(input: {
         return;
       }
 
+      stopRequested = true;
       await startPromise;
       if (activeIndicator) {
         const indicator = activeIndicator;
@@ -282,6 +259,19 @@ function createAsyncHostedTypingIndicator(input: {
       }
     },
   };
+}
+
+function formatHostedMessagingActivityChannelLabel(channel: HostedMessagingActivityChannel): string {
+  switch (channel) {
+    case "linq":
+      return "Linq";
+    case "telegram":
+      return "Telegram";
+    case "email":
+      return "Email";
+  }
+
+  return channel;
 }
 
 function buildHostedTelegramTypingLogDetails(target: string): Record<string, boolean | string> {

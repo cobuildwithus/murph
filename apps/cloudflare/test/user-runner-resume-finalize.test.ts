@@ -53,6 +53,7 @@ const wakeProcessorMocks = vi.hoisted(() => ({
   executeRunDrain: vi.fn(),
   finalizeRunDrain: vi.fn(),
   readRunDrainSharePack: vi.fn(),
+  startRunMessagingActivity: vi.fn(),
 }));
 
 vi.mock("../src/env.ts", async () => {
@@ -96,6 +97,8 @@ vi.mock("../src/user-runner/runner-run-processor.js", async () => {
     finalizeRunDrain = wakeProcessorMocks.finalizeRunDrain;
 
     readRunDrainSharePack = wakeProcessorMocks.readRunDrainSharePack;
+
+    startRunMessagingActivity = wakeProcessorMocks.startRunMessagingActivity;
 
     constructor(..._args: unknown[]) {}
   }
@@ -403,6 +406,7 @@ describe("HostedUserRunner resumeFinalize drain", () => {
       log: null,
       logged: true,
     });
+    wakeProcessorMocks.startRunMessagingActivity.mockResolvedValue(null);
     wakeProcessorMocks.finalizeRunDrain.mockResolvedValue({
       cursorSnapshotRef: finalizedCursor.snapshotRef,
       nextRuntimeWakeAt: null,
@@ -433,10 +437,27 @@ describe("HostedUserRunner resumeFinalize drain", () => {
     const state = createDurableObjectStateHarness();
     const stateStore = new RunnerStateStore(state);
     await stateStore.bootstrapUser("user-resume-finalize");
+    const environment = envMocks.readHostedExecutionEnvironment(createHostedExecutionTestEnv());
+    const bucket = new MemoryEncryptedR2Bucket();
+    const userKeyStore = createHostedUserKeyStore({
+      automationRecipientKeyId: environment.automationRecipientKeyId,
+      automationRecipientPrivateKey: environment.automationRecipientPrivateKey,
+      automationRecipientPrivateKeysById: environment.automationRecipientPrivateKeysById,
+      automationRecipientPublicKey: environment.automationRecipientPublicKey,
+      bucket,
+      envelopeEncryptionKey: environment.platformEnvelopeKey,
+      envelopeEncryptionKeyId: environment.platformEnvelopeKeyId,
+      envelopeEncryptionKeysById: environment.platformEnvelopeKeysById,
+      recoveryRecipientKeyId: environment.recoveryRecipientKeyId,
+      recoveryRecipientPublicKey: environment.recoveryRecipientPublicKey,
+      teeAutomationRecipientKeyId: environment.teeAutomationRecipientKeyId,
+      teeAutomationRecipientPublicKey: environment.teeAutomationRecipientPublicKey,
+    });
+    await userKeyStore.provisionManagedUserCryptoAtActivation("user-resume-finalize");
     const runner = new HostedUserRunner(
       state,
-      envMocks.readHostedExecutionEnvironment(createHostedExecutionTestEnv()),
-      new MemoryEncryptedR2Bucket(),
+      environment,
+      bucket,
     );
 
     const acquiredCursor = createCursorState({
@@ -638,6 +659,153 @@ describe("HostedUserRunner resumeFinalize drain", () => {
       "commit_won",
       "finalize_started",
       "finalize_finished",
+    ]);
+  });
+
+  it("keeps messaging activity alive through finalize and stops it before finalize delivery completes", async () => {
+    envMocks.readHostedExecutionEnvironment.mockReturnValue(createTestRuntimeEnvironment());
+    const state = createDurableObjectStateHarness();
+    const stateStore = new RunnerStateStore(state);
+    await stateStore.bootstrapUser("user-resume-finalize");
+    const runner = new HostedUserRunner(
+      state,
+      envMocks.readHostedExecutionEnvironment(createHostedExecutionTestEnv()),
+      new MemoryEncryptedR2Bucket(),
+    );
+
+    const acquiredCursor = createCursorState({
+      committedSeq: "10",
+      nextSeq: "11",
+      snapshotKey: "snapshot/acquired",
+      version: "cursor-v1",
+    });
+    const committedCursor = createCursorState({
+      committedSeq: "10",
+      nextSeq: "11",
+      snapshotKey: "snapshot/committed",
+      version: "cursor-v2",
+    });
+    const finalizeCursor = createCursorState({
+      committedSeq: "10",
+      nextSeq: "11",
+      snapshotKey: "snapshot/finalize",
+      version: "cursor-v3",
+    });
+    const finalizedCursor = createCursorState({
+      committedSeq: "11",
+      nextSeq: "12",
+      snapshotKey: "snapshot/finalized",
+      version: "cursor-v4",
+    });
+    const acquiredRun = {
+      ...createRunRecord(),
+      status: "acquired" as const,
+      triggerKind: "external_ingress" as const,
+    };
+    const committedRun = {
+      ...acquiredRun,
+      status: "committed_needs_finalize" as const,
+    };
+    const finalizingRun = {
+      ...acquiredRun,
+      status: "finalizing" as const,
+      triggerKind: "retry_finalize" as const,
+    };
+    const steps: string[] = [];
+    const stopHandle = vi.fn(async () => {
+      steps.push("activity.stop");
+    });
+
+    const prepareAcquire: HostedRunAcquireResponse = {
+      acquired: true,
+      cursor: acquiredCursor,
+      events: [],
+      pendingIngressEventCount: 1,
+      resumeFinalize: false,
+      run: acquiredRun,
+      runToken: "prepare-token",
+    };
+    const resumeFinalizeAcquire: HostedRunAcquireResponse = {
+      acquired: true,
+      cursor: finalizeCursor,
+      events: [],
+      pendingIngressEventCount: 1,
+      resumeFinalize: true,
+      run: finalizingRun,
+      runToken: "finalize-token",
+    };
+    const commitResponse: HostedRunCommitResponse = {
+      committed: true,
+      cursor: committedCursor,
+      needsFinalize: true,
+      run: committedRun,
+    };
+    const finalizedResponse: HostedRunFinalizeResponse = {
+      cursor: finalizedCursor,
+      finalized: true,
+      run: finalizingRun,
+    };
+
+    webControlMocks.acquireHostedRunFromWeb
+      .mockResolvedValueOnce(prepareAcquire)
+      .mockResolvedValueOnce(resumeFinalizeAcquire);
+    webControlMocks.commitHostedRunToWeb.mockResolvedValue(commitResponse);
+    webControlMocks.finalizeHostedRunInWeb.mockImplementation(async () => {
+      expect(steps).toEqual(expect.arrayContaining([
+        "activity.start",
+        "prepare.runtime",
+        "finalize.runtime",
+        "activity.stop",
+      ]));
+      expect(steps.indexOf("activity.start")).toBeLessThan(steps.indexOf("prepare.runtime"));
+      expect(steps.indexOf("prepare.runtime")).toBeLessThan(steps.indexOf("finalize.runtime"));
+      expect(steps.indexOf("finalize.runtime")).toBeLessThan(steps.indexOf("activity.stop"));
+      return finalizedResponse;
+    });
+    webControlMocks.recordHostedRunLogInWeb.mockResolvedValue({
+      log: null,
+      logged: true,
+    });
+    wakeProcessorMocks.startRunMessagingActivity.mockImplementation(async () => {
+      steps.push("activity.start");
+      return {
+        stop: stopHandle,
+      };
+    });
+    wakeProcessorMocks.executeRunDrain.mockImplementation(async () => {
+      steps.push("prepare.runtime");
+      return {
+        cursorSnapshotRef: committedCursor.snapshotRef,
+        finalizeRequired: true,
+        nextRuntimeWakeAt: null,
+        redactedSummary: null,
+        state: "completed",
+      };
+    });
+    wakeProcessorMocks.finalizeRunDrain.mockImplementation(async () => {
+      steps.push("finalize.runtime");
+      return {
+        cursorSnapshotRef: finalizedCursor.snapshotRef,
+        nextRuntimeWakeAt: null,
+        redactedSummary: null,
+        state: "completed",
+      };
+    });
+
+    const result = await runner.drainHostedRuns();
+
+    expect(result).toEqual({
+      committedSeq: finalizedCursor.committedSeq,
+      requestedTargetSeq: null,
+      targetReached: true,
+    });
+    expect(wakeProcessorMocks.startRunMessagingActivity).toHaveBeenCalledTimes(1);
+    expect(stopHandle).toHaveBeenCalledTimes(1);
+    expect(steps).toEqual([
+      "activity.start",
+      "prepare.runtime",
+      "finalize.runtime",
+      "activity.stop",
     ]);
   });
 
@@ -1071,11 +1239,30 @@ describe("HostedUserRunner resumeFinalize drain", () => {
     const stateStore = new RunnerStateStore(state);
     await stateStore.bootstrapUser("user-resume-finalize");
     const environment = envMocks.readHostedExecutionEnvironment(createHostedExecutionTestEnv());
+    const bucket = new MemoryEncryptedR2Bucket();
+    const userKeyStore = createHostedUserKeyStore({
+      automationRecipientKeyId: environment.automationRecipientKeyId,
+      automationRecipientPrivateKey: environment.automationRecipientPrivateKey,
+      automationRecipientPrivateKeysById: environment.automationRecipientPrivateKeysById,
+      automationRecipientPublicKey: environment.automationRecipientPublicKey,
+      bucket,
+      envelopeEncryptionKey: environment.platformEnvelopeKey,
+      envelopeEncryptionKeyId: environment.platformEnvelopeKeyId,
+      envelopeEncryptionKeysById: environment.platformEnvelopeKeysById,
+      recoveryRecipientKeyId: environment.recoveryRecipientKeyId,
+      recoveryRecipientPublicKey: environment.recoveryRecipientPublicKey,
+      teeAutomationRecipientKeyId: environment.teeAutomationRecipientKeyId,
+      teeAutomationRecipientPublicKey: environment.teeAutomationRecipientPublicKey,
+    });
+    await userKeyStore.provisionManagedUserCryptoAtActivation("user-resume-finalize");
     const runner = new HostedUserRunner(
       state,
       environment,
-      new MemoryEncryptedR2Bucket(),
+      bucket,
     );
+    bucket.get = vi.fn(async () => {
+      throw new Error("raw read failed");
+    });
 
     const emailWake = buildHostedExecutionEmailConversationMessageWake({
       eventId: "evt_retry_raw_error",
@@ -1119,7 +1306,7 @@ describe("HostedUserRunner resumeFinalize drain", () => {
 
     await expect(runner.drainHostedRuns({
       targetCommittedSeqHint: "11",
-    })).rejects.toThrow(/missing envelope/u);
+    })).rejects.toThrow(/raw read failed/u);
     await expect(stateStore.readState()).resolves.toMatchObject({
       nextWakeAt: expect.any(String),
     });

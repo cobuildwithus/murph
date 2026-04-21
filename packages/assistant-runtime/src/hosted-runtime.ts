@@ -35,8 +35,9 @@ import {
   executeHostedRunDrainForCommit,
 } from "./hosted-runtime/execution.ts";
 import {
-  startHostedRunTypingIndicator,
-  stopHostedRunTypingIndicator,
+  shouldStartRuntimeHostedRunMessagingActivity,
+  startHostedRunMessagingActivity,
+  stopHostedRunMessagingActivity,
 } from "./hosted-runtime/typing.ts";
 import type {
   HostedAssistantRuntimeJobResult,
@@ -88,6 +89,19 @@ export {
 export {
   computeHostedRunElapsedMs,
 } from "./hosted-runtime/utils.ts";
+export {
+  HOSTED_RUN_MESSAGING_ACTIVITY_OWNER_ENV,
+  HOSTED_RUN_MESSAGING_ACTIVITY_OWNER_EXECUTOR,
+  selectHostedRunMessagingActivityTarget,
+  shouldStartRuntimeHostedRunMessagingActivity,
+  startHostedRunMessagingActivity,
+  stopHostedRunMessagingActivity,
+} from "./hosted-runtime/typing.ts";
+export type {
+  HostedMessagingActivityComponent,
+  HostedRunMessagingActivityHandle,
+  HostedRunMessagingActivityTarget,
+} from "./hosted-runtime/typing.ts";
 export {
   readHostedRunnerCommitTimeoutMs,
 } from "./hosted-runtime/timeouts.ts";
@@ -179,11 +193,14 @@ export async function runHostedAssistantRuntimeJobInProcessDetailed(
         vaultRoot: restored.vaultRoot,
       },
       async () => {
-        const typingIndicator = startHostedRunTypingIndicator({
-          wake,
-          runtimeEnv,
-          run: input.request.run ?? null,
-        });
+        const messagingActivity = shouldStartRuntimeHostedRunMessagingActivity(runtimeEnv)
+          ? await startHostedRunMessagingActivity({
+              component: "runtime",
+              events: runDrain.events,
+              runtimeEnv,
+              run: input.request.run ?? null,
+            })
+          : null;
 
         try {
           if (runDrain.resumeFinalize) {
@@ -236,10 +253,8 @@ export async function runHostedAssistantRuntimeJobInProcessDetailed(
             result: committedExecution.committedResult,
           };
         } finally {
-          await stopHostedRunTypingIndicator({
-            wake,
-            typingIndicator,
-            run: input.request.run ?? null,
+          await stopHostedRunMessagingActivity({
+            activity: messagingActivity,
           });
         }
       },

@@ -2,12 +2,18 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
   HostedExecutionRuntimeTimerWake,
+  HostedRuntimeDrainRequest,
   HostedRunRecord,
 } from "@murphai/hosted-execution/contracts";
-import type { HostedAssistantDeliveryOutcome } from "@murphai/assistant-runtime/hosted-runtime-contracts";
+import {
+  HOSTED_RUN_MESSAGING_ACTIVITY_OWNER_ENV,
+  HOSTED_RUN_MESSAGING_ACTIVITY_OWNER_EXECUTOR,
+  type HostedAssistantDeliveryOutcome,
+} from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import { createBrowserVaultReplica, createVaultReadModel } from "@murphai/query/browser";
 
 import { createHostedBrowserVaultReplicaStore } from "../src/browser-vault-store.ts";
+import * as runnerContainerModule from "../src/runner-container.ts";
 import {
   RunnerRunProcessor,
   recordHostedRunBreadcrumbInWebBestEffort,
@@ -86,6 +92,89 @@ function createReplicaPersistenceProcessor(input: {
     },
     runtimeAlarmScheduler: {},
   } as never);
+}
+
+function createInvokeRunnerProcessor(input: {
+  configSource?: Readonly<Record<string, string | undefined>>;
+  forwardedEnvSource?: Readonly<Record<string, unknown>>;
+  runnerSecrets?: Readonly<Record<string, string>>;
+} = {}) {
+  const readBundlesForRunner = vi.fn().mockResolvedValue(null);
+  const readRunnerSecrets = vi.fn().mockResolvedValue(input.runnerSecrets ?? {});
+  const ensureRunnerStores = vi.fn().mockResolvedValue({
+    bundleSync: {
+      readBundlesForRunner,
+    },
+    crypto: {
+      keysById: {
+        "k-current": createTestRootKey(41),
+      },
+      rootKey: createTestRootKey(41),
+      rootKeyId: "k-current",
+    },
+    gatewayCache: {},
+    runnerSecrets: {
+      readRunnerSecrets,
+    },
+    userId: "user_123",
+  });
+
+  const processor = new RunnerRunProcessor({
+    applyHostedTransition: vi.fn(),
+    bucket: {} as never,
+    ensureRunnerStores,
+    env: {
+      runnerTimeoutMs: 60_000,
+      webCallbackSigning: {
+        keyId: "v1",
+        privateKeyJwkJson: "{\"kty\":\"EC\"}",
+      },
+    },
+    hostedWebBaseUrl: null,
+    readRunnerRuntimeConfigSource: () => input.configSource ?? {},
+    runnerContainerNamespace: {
+      getByName: vi.fn(),
+    },
+    runnerRuntimeEnvSource: input.forwardedEnvSource ?? {},
+    stateStore: {
+      beginRun: vi.fn().mockResolvedValue(undefined),
+      completeRun: vi.fn().mockResolvedValue(undefined),
+      failRun: vi.fn(),
+      recordRunPhase: vi.fn().mockResolvedValue({}),
+    },
+    runtimeAlarmScheduler: {},
+  } as never);
+
+  return {
+    ensureRunnerStores,
+    processor,
+    readBundlesForRunner,
+    readRunnerSecrets,
+  };
+}
+
+function createRunContext(runId: string): {
+  attempt: number;
+  runId: string;
+  startedAt: string;
+} {
+  return {
+    attempt: 1,
+    runId,
+    startedAt: "2026-04-20T09:00:00.000Z",
+  };
+}
+
+function createRunDrainRequest(runId: string): HostedRuntimeDrainRequest {
+  return {
+    acquiredAt: "2026-04-20T09:00:00.000Z",
+    events: [],
+    inputCommittedSeq: "10",
+    inputCursorVersion: "cursor-v1",
+    runId,
+    triggerKind: "runtime_timer",
+    userId: "user_123",
+  };
 }
 
 describe("runner wake processor delivery summaries", () => {
@@ -276,6 +365,26 @@ describe("recordHostedRunPhaseLogInWebBestEffort", () => {
 });
 
 describe("RunnerRunProcessor.executeRunDrain", () => {
+  it("skips runner env resolution for batches without supported messaging activity targets", async () => {
+    const { ensureRunnerStores, processor } = createInvokeRunnerProcessor();
+
+    const activity = await processor.startRunMessagingActivity({
+      events: [
+        {
+          ingressEventId: "ingress-runtime-timer",
+          seq: "11",
+          wake: createRuntimeTimerWake(),
+        },
+      ],
+      run: createHostedRunRecord({
+        runId: "run-no-messaging-target",
+      }),
+    });
+
+    expect(activity).toBeNull();
+    expect(ensureRunnerStores).not.toHaveBeenCalled();
+  });
+
   it("always requires finalize for prepared snapshots, even without delivery effects", async () => {
     const beginRun = vi.fn().mockResolvedValue(undefined);
     const completeRun = vi.fn().mockResolvedValue(undefined);
@@ -414,6 +523,83 @@ describe("RunnerRunProcessor.executeRunDrain", () => {
     });
     await expect(replicaStore.readBrowserVaultReplicaEnvelope(existingReplicaRef)).resolves.not.toBeNull();
     expect(bucket.deleted).toEqual([]);
+  });
+
+  it("marks outbound runtime jobs with executor-owned messaging activity only when requested", async () => {
+    const { processor } = createInvokeRunnerProcessor();
+    const invokeRunner = Reflect.get(processor, "invokeRunner").bind(processor) as (
+      userId: string,
+      currentBundleRef: null,
+      wake: HostedExecutionRuntimeTimerWake,
+      run: ReturnType<typeof createRunContext>,
+      runDrain: HostedRuntimeDrainRequest,
+      runToken?: string | null,
+      options?: {
+        messagingActivityOwnedByExecutor?: boolean;
+      },
+    ) => Promise<unknown>;
+    const invokeHostedExecutionContainerRunner = vi.spyOn(
+      runnerContainerModule,
+      "invokeHostedExecutionContainerRunner",
+    ).mockResolvedValue({
+      assistantDeliveryOutcomes: [],
+      browserVaultReplica: null,
+      finalGatewayProjectionSnapshot: null,
+      phase: "completed",
+      result: {
+        bundle: null,
+        result: {
+          eventsHandled: 0,
+          nextWakeAt: null,
+          summary: "Completed hosted run.",
+        },
+      },
+    });
+
+    await invokeRunner(
+      "user_123",
+      null,
+      createRuntimeTimerWake(),
+      createRunContext("run-owned"),
+      createRunDrainRequest("run-owned"),
+      "run-token",
+      {
+        messagingActivityOwnedByExecutor: true,
+      },
+    );
+    await invokeRunner(
+      "user_123",
+      null,
+      createRuntimeTimerWake(),
+      createRunContext("run-runtime"),
+      createRunDrainRequest("run-runtime"),
+      "run-token",
+      {
+        messagingActivityOwnedByExecutor: false,
+      },
+    );
+
+    expect(invokeHostedExecutionContainerRunner).toHaveBeenCalledTimes(2);
+    expect(invokeHostedExecutionContainerRunner.mock.calls[0]?.[0]).toEqual(expect.objectContaining({
+      job: expect.objectContaining({
+        runtime: expect.objectContaining({
+          forwardedEnv: expect.objectContaining({
+            [HOSTED_RUN_MESSAGING_ACTIVITY_OWNER_ENV]:
+              HOSTED_RUN_MESSAGING_ACTIVITY_OWNER_EXECUTOR,
+          }),
+        }),
+      }),
+    }));
+    expect(invokeHostedExecutionContainerRunner.mock.calls[1]?.[0]).toEqual(expect.objectContaining({
+      job: expect.objectContaining({
+        runtime: expect.objectContaining({
+          forwardedEnv: expect.not.objectContaining({
+            [HOSTED_RUN_MESSAGING_ACTIVITY_OWNER_ENV]:
+              HOSTED_RUN_MESSAGING_ACTIVITY_OWNER_EXECUTOR,
+          }),
+        }),
+      }),
+    }));
   });
 });
 
