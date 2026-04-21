@@ -2,6 +2,9 @@ import Link from "next/link";
 import { Button } from "@/src/components/ui/button";
 import type { ExperimentStatus } from "@/src/types/experiments";
 
+const UNWANTED_BRYAN_JOHNSON_DESCRIPTION_PHRASE =
+  " best read as personal context rather than expected outcomes.";
+
 interface ExperimentHeaderProps {
   title: string;
   category: string;
@@ -31,6 +34,7 @@ export function ExperimentHeader({
   completionPercent,
   description,
 }: ExperimentHeaderProps) {
+  const sanitizedDescription = sanitizeExperimentDescription(description);
   const isActive = status === "active";
   const isPaused = status === "paused";
   const isFinished = status === "finished";
@@ -129,9 +133,9 @@ export function ExperimentHeader({
           </h1>
 
           {/* Description */}
-          {description && (
+          {sanitizedDescription && (
             <p className="text-[16px] leading-[160%] text-muted-foreground">
-              {description}
+              {sanitizedDescription}
             </p>
           )}
         </div>
@@ -179,4 +183,12 @@ export function ExperimentHeader({
       </div>
     </div>
   );
+}
+
+function sanitizeExperimentDescription(description: string | undefined): string | undefined {
+  if (!description) {
+    return description;
+  }
+
+  return description.replace(UNWANTED_BRYAN_JOHNSON_DESCRIPTION_PHRASE, ".");
 }
