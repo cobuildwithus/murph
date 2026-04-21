@@ -3359,6 +3359,35 @@ test("searchVaultRuntime rebuilds the projection automatically and only returns 
   }
 });
 
+test("searchVaultRuntime fails closed on malformed stored record types", async () => {
+  const vaultRoot = await createFixtureVault();
+  const runtimeDatabasePath = path.join(vaultRoot, QUERY_DB_RELATIVE_PATH);
+
+  try {
+    await rebuildQueryProjection(vaultRoot);
+
+    const database = openSqliteRuntimeDatabase(runtimeDatabasePath, { create: false });
+    try {
+      database
+        .prepare(`
+          UPDATE query_search_document
+             SET record_type = ?
+           WHERE record_id = ?
+        `)
+        .run("unknown-record-type", "doc_01JNV4DOC0000000000000001");
+    } finally {
+      database.close();
+    }
+
+    await assert.rejects(
+      () => searchVaultRuntime(vaultRoot, "lab report"),
+      /query_search_document\.record_type/u,
+    );
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
 test("query projection ignores inbox runtime state and leaves inbox sqlite untouched", async () => {
   const vaultRoot = await createFixtureVault();
   const inboxDatabasePath = path.join(vaultRoot, INBOX_DB_RELATIVE_PATH);

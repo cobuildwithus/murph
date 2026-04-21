@@ -1,6 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite'
 
 import {
+  gatewayPermissionStatusValues,
   gatewayPermissionRequestSchema,
   type GatewayPermissionRequest,
   type GatewayRespondToPermissionInput,
@@ -20,6 +21,51 @@ export interface GatewayPermissionRow {
   status: GatewayPermissionRequest['status']
 }
 
+type SqliteRow = Record<string, unknown>
+
+function expectString(value: unknown, field: string): string {
+  if (typeof value !== 'string') {
+    throw new TypeError(`Expected ${field} to be a string.`)
+  }
+  return value
+}
+
+function expectNullableString(value: unknown, field: string): string | null {
+  if (value === null) {
+    return null
+  }
+  return expectString(value, field)
+}
+
+function expectEnumString<TValue extends string>(
+  value: unknown,
+  field: string,
+  allowedValues: readonly TValue[],
+): TValue {
+  const parsed = expectString(value, field)
+  if (!allowedValues.includes(parsed as TValue)) {
+    throw new TypeError(`Expected ${field} to be one of: ${allowedValues.join(', ')}.`)
+  }
+  return parsed as TValue
+}
+
+function decodePermissionRow(row: SqliteRow): GatewayPermissionRow {
+  return {
+    requestId: expectString(row.requestId, 'gateway_permissions.requestId'),
+    sessionKey: expectNullableString(row.sessionKey, 'gateway_permissions.sessionKey'),
+    action: expectString(row.action, 'gateway_permissions.action'),
+    description: expectNullableString(row.description, 'gateway_permissions.description'),
+    status: expectEnumString(
+      row.status,
+      'gateway_permissions.status',
+      gatewayPermissionStatusValues,
+    ),
+    requestedAt: expectString(row.requestedAt, 'gateway_permissions.requestedAt'),
+    resolvedAt: expectNullableString(row.resolvedAt, 'gateway_permissions.resolvedAt'),
+    note: expectNullableString(row.note, 'gateway_permissions.note'),
+  }
+}
+
 export function readPermissionRows(database: DatabaseSync): GatewayPermissionRow[] {
   return database.prepare(`
     SELECT
@@ -33,7 +79,7 @@ export function readPermissionRows(database: DatabaseSync): GatewayPermissionRow
       note
     FROM gateway_permissions
     ORDER BY requested_at ASC, request_id ASC
-  `).all() as unknown as GatewayPermissionRow[]
+  `).all().map((row) => decodePermissionRow(row))
 }
 
 export function listOpenPermissionsFromDatabase(
@@ -86,11 +132,13 @@ export function respondToPermissionInDatabase(
       FROM gateway_permissions
       WHERE request_id = ?
     `)
-    .get(input.requestId) as GatewayPermissionRow | undefined
+    .get(input.requestId)
 
   if (!existing) {
     return null
   }
+
+  const decodedExisting = decodePermissionRow(existing)
 
   const resolvedAt = new Date().toISOString()
   const status = input.decision === 'approve' ? 'approved' : 'denied'
@@ -107,12 +155,12 @@ export function respondToPermissionInDatabase(
 
   return gatewayPermissionRequestSchema.parse({
     schema: 'murph.gateway-permission-request.v1',
-    requestId: existing.requestId,
-    sessionKey: existing.sessionKey,
-    action: existing.action,
-    description: existing.description,
+    requestId: decodedExisting.requestId,
+    sessionKey: decodedExisting.sessionKey,
+    action: decodedExisting.action,
+    description: decodedExisting.description,
     status,
-    requestedAt: existing.requestedAt,
+    requestedAt: decodedExisting.requestedAt,
     resolvedAt,
     note: normalizeNullableString(input.note),
   })

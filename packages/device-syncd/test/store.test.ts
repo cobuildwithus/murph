@@ -500,6 +500,43 @@ test("device sync store rejects pre-cutover sqlite user_version values", async (
   }
 });
 
+test("device sync store fails closed when stored scopes_json is malformed", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-store-bad-scopes");
+  const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
+
+  try {
+    const account = store.upsertAccount({
+      provider: "oura",
+      externalAccountId: "oura-user-bad-scopes",
+      displayName: "Broken Scopes",
+      scopes: ["daily"],
+      tokens: {
+        accessToken: "access-token",
+        accessTokenEncrypted: "enc:access-token",
+        refreshToken: "refresh-token",
+        refreshTokenEncrypted: "enc:refresh-token",
+      },
+      metadata: {},
+      connectedAt: "2026-04-07T00:00:00.000Z",
+    });
+
+    store.database
+      .prepare("update device_connection set scopes_json = ? where id = ?")
+      .run("{not-json", account.id);
+
+    assert.throws(
+      () => store.getAccountById(account.id),
+      /device_connection\.scopes_json/u,
+    );
+  } finally {
+    store.close();
+    await rm(tempDir, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
 test("device sync store filters listed accounts by provider and returns unexpired OAuth state once", async () => {
   const tempDir = await makeTempDirectory("murph-device-syncd-store-listing");
   const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
