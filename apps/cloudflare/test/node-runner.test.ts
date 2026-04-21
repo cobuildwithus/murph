@@ -543,6 +543,7 @@ function installHostedFetchBaseUrlProxy(input: {
 describe("runHostedExecutionJob", () => {
   const FINALIZED_RUN_DRAIN_SUMMARY = "Finalized committed hosted run side effects.";
   const cleanupPaths: string[] = [];
+  let previousHostedAssistantEnv: Record<string, string | undefined> = {};
   let previousHostedDeviceSyncEnv: Record<string, string | undefined> = {};
   let previousHostedExecutionWorkerEnv: Record<string, string | undefined> = {};
 
@@ -556,6 +557,12 @@ describe("runHostedExecutionJob", () => {
     ) as Record<string, string>;
     previousHostedExecutionWorkerEnv = captureEnvVars(Object.keys(requiredWorkerEnv));
     restoreEnvVars(requiredWorkerEnv);
+    previousHostedAssistantEnv = captureEnvVars(HOSTED_ASSISTANT_CONFIG_ENV_NAMES);
+    restoreEnvVars(
+      Object.fromEntries(
+        HOSTED_ASSISTANT_CONFIG_ENV_NAMES.map((key) => [key, undefined]),
+      ),
+    );
     previousHostedDeviceSyncEnv = captureEnvVarsWithPrefixes(HOSTED_DEVICE_SYNC_ENV_PREFIXES);
     for (const key of Object.keys(previousHostedDeviceSyncEnv)) {
       restoreEnvVar(key, undefined);
@@ -594,6 +601,7 @@ describe("runHostedExecutionJob", () => {
   });
 
   afterEach(async () => {
+    restoreEnvVars(previousHostedAssistantEnv);
     restoreEnvVars(previousHostedDeviceSyncEnv);
     restoreEnvVars(previousHostedExecutionWorkerEnv);
     if (initialGlobalFetch) {
