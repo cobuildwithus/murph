@@ -378,7 +378,7 @@ async function requestJson(input: {
   }
 
   try {
-    return JSON.parse(body) as unknown;
+    return parseJsonValue(body);
   } catch (error) {
     throw new Error(formatFailure([
       `${input.method} ${input.pathname} returned non-JSON output.`,
@@ -408,7 +408,7 @@ async function startHostedWakeControlServer(): Promise<{
           return Buffer.from(value, "utf8");
         },
         async json() {
-          return JSON.parse(value) as unknown;
+          return parseJsonValue(value);
         },
         async text() {
           return value;
@@ -611,7 +611,11 @@ async function readJsonBody(request: IncomingMessage): Promise<unknown> {
   }
 
   const body = Buffer.concat(chunks).toString("utf8");
-  return body ? JSON.parse(body) as unknown : null;
+  return body ? parseJsonValue(body) : null;
+}
+
+function parseJsonValue(text: string): unknown {
+  return JSON.parse(text);
 }
 
 function writeJson(response: ServerResponse, statusCode: number, value: unknown): void {

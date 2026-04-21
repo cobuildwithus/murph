@@ -68,13 +68,23 @@ vi.mock("@/src/lib/hosted-onboarding/stripe-revnet-issuance", async () => {
 });
 
 import {
-  reconcileHostedStripeEventById,
-  recordHostedStripeEvent,
+  reconcileHostedStripeEventById as reconcileHostedStripeEventByIdImpl,
+  recordHostedStripeEvent as recordHostedStripeEventImpl,
 } from "@/src/lib/hosted-onboarding/stripe-event-reconciliation";
 
-type HostedStripeEventRecordPrisma = Parameters<typeof recordHostedStripeEvent>[0]["prisma"];
-type HostedStripeEventReconcilePrisma = Parameters<typeof reconcileHostedStripeEventById>[0]["prisma"];
-type StripeEventPrismaHarnessClient = HostedStripeEventRecordPrisma & HostedStripeEventReconcilePrisma;
+type HostedStripeEventRecordInput = Parameters<typeof recordHostedStripeEventImpl>[0];
+type HostedStripeEventReconcileInput = Parameters<typeof reconcileHostedStripeEventByIdImpl>[0];
+
+type StripeEventPrismaHarnessClient = {
+  $transaction: <T>(callback: (tx: StripeEventPrismaHarnessClient) => Promise<T>) => Promise<T>;
+  hostedStripeEvent: {
+    create: ({ data }: { data: Record<string, unknown> }) => Promise<MutableStripeEventRow>;
+    findMany: () => Promise<MutableStripeEventRow[]>;
+    findUnique: ({ where }: { where: { eventId: string } }) => Promise<MutableStripeEventRow | null>;
+    update: ({ data, where }: { data: Record<string, unknown>; where: { eventId: string } }) => Promise<MutableStripeEventRow>;
+    updateMany: ({ data, where }: { data: Record<string, unknown>; where: StripeEventWhere }) => Promise<{ count: number }>;
+  };
+};
 
 type StripeTestEvent<TType extends Stripe.Event.Type, TObject extends Record<string, unknown>> = {
   api_version: string;
@@ -92,6 +102,20 @@ type StripeTestEvent<TType extends Stripe.Event.Type, TObject extends Record<str
   };
   type: TType;
 };
+
+async function recordHostedStripeEvent(
+  input: Omit<HostedStripeEventRecordInput, "prisma"> & { prisma: StripeEventPrismaHarnessClient },
+) {
+  // @ts-expect-error - the Prisma harness only implements the delegate methods this test exercises.
+  return recordHostedStripeEventImpl(input);
+}
+
+async function reconcileHostedStripeEventById(
+  input: Omit<HostedStripeEventReconcileInput, "prisma"> & { prisma: StripeEventPrismaHarnessClient },
+) {
+  // @ts-expect-error - the Prisma harness only implements the delegate methods this test exercises.
+  return reconcileHostedStripeEventByIdImpl(input);
+}
 
 describe("hosted Stripe event reconciliation", () => {
   beforeEach(() => {
@@ -448,11 +472,12 @@ function makeStripeEvent<
 
 function createStripeEventPrismaHarness() {
   const rows: MutableStripeEventRow[] = [];
+  const transaction = vi.fn(
+    async <T>(callback: (tx: StripeEventPrismaHarnessClient) => Promise<T>) => callback(client),
+  ) as StripeEventPrismaHarnessClient["$transaction"];
 
   const client: StripeEventPrismaHarnessClient = {
-    $transaction: vi.fn(
-      async <T>(callback: (tx: StripeEventPrismaHarnessClient) => Promise<T>) => callback(client),
-    ),
+    $transaction: transaction,
     hostedStripeEvent: {
       create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
         const row: MutableStripeEventRow = {

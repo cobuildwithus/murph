@@ -36,19 +36,29 @@ describe("HostedDeviceSyncAgentSessionService.refreshTokenBundle", () => {
   });
 
   it("persists provider-directed status changes before surfacing refresh errors", async () => {
+    type DeviceSyncSignalCreate = (payload: {
+      data: Record<string, unknown>;
+    }) => Promise<unknown>;
+    type DeviceConnectionUpdate = (input: {
+      data: Record<string, unknown>;
+      where: { id: string };
+    }) => Promise<unknown>;
+
+    const createSignalRecord = vi.fn<DeviceSyncSignalCreate>(async () => ({ id: 1 }));
+    const updateConnectionRecord = vi.fn<DeviceConnectionUpdate>(async () => ({
+      ...createConnectionRecord(),
+      status: "reauthorization_required",
+      lastSyncErrorAt: new Date("2026-04-01T00:10:00.000Z"),
+      lastErrorCode: "WHOOP_REFRESH_TOKEN_MISSING",
+      lastErrorMessage: "WHOOP refresh token is missing.",
+    }));
     const tx = {
       deviceConnection: {
         findFirst: vi.fn(async () => createConnectionRecord()),
-        update: vi.fn(async () => ({
-          ...createConnectionRecord(),
-          status: "reauthorization_required",
-          lastSyncErrorAt: new Date("2026-04-01T00:10:00.000Z"),
-          lastErrorCode: "WHOOP_REFRESH_TOKEN_MISSING",
-          lastErrorMessage: "WHOOP refresh token is missing.",
-        })),
+        update: updateConnectionRecord,
       },
       deviceSyncSignal: {
-        create: vi.fn(async () => ({ id: 1 })),
+        create: createSignalRecord,
       },
     };
     const touchAgentSession = vi.fn(async () => {
@@ -72,9 +82,7 @@ describe("HostedDeviceSyncAgentSessionService.refreshTokenBundle", () => {
           tx?: typeof tx;
           userId: string;
         }) {
-          return ((input.tx ?? tx).deviceSyncSignal.create as unknown as (payload: {
-            data: Record<string, unknown>;
-          }) => Promise<unknown>)({
+          return (input.tx ?? tx).deviceSyncSignal.create({
             data: {
               connectionId: input.connectionId ?? null,
               createdAt: new Date(input.createdAt ?? "2026-04-01T00:10:00.000Z"),
@@ -103,10 +111,7 @@ describe("HostedDeviceSyncAgentSessionService.refreshTokenBundle", () => {
           nextReconcileAt: string | null;
           status: string;
         }, txArg: typeof tx) {
-          await (txArg.deviceConnection.update as unknown as (input: {
-            data: Record<string, unknown>;
-            where: { id: string };
-          }) => Promise<unknown>)({
+          await txArg.deviceConnection.update({
             where: {
               id: account.id,
             },

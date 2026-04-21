@@ -844,8 +844,10 @@ function createHostedShareMember(
 ): HostedShareActiveMember & HostedShareAuthenticatedMember {
   return {
     billingStatus: HostedBillingStatus.active,
+    createdAt: new Date("2026-03-26T12:00:00.000Z"),
     id: "member_123",
     suspendedAt: null,
+    updatedAt: new Date("2026-03-26T12:00:00.000Z"),
     ...overrides,
   };
 }
@@ -1004,10 +1006,13 @@ function createHostedSharePrisma(input?: {
     ...prismaLike,
     $queryRaw: async () => [],
   };
+  // @ts-expect-error - the share test harness only uses Prisma's callback transaction form.
+  const transaction = (async <TResult>(callback: (tx: typeof transactionalPrisma) => Promise<TResult>) =>
+    callback(transactionalPrisma)) as HostedSharePrisma["$transaction"];
 
+  // @ts-expect-error - the harness provides only the Prisma surface exercised by this suite.
   return {
     ...transactionalPrisma,
-    $transaction: async <TResult>(callback: (tx: typeof transactionalPrisma) => Promise<TResult>) =>
-      callback(transactionalPrisma),
+    $transaction: transaction,
   };
 }

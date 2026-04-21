@@ -19,13 +19,21 @@ import { assertAssessmentImportPort } from "../src/assessment/core-port.ts";
 import { assertCanonicalWritePort } from "../src/core-port.ts";
 import { createCorePortSpy, createTempFile } from "./test-helpers.ts";
 
-const coreModuleCalls = vi.hoisted(() => ({
-  importDocument: [] as unknown[],
-  addMeal: [] as unknown[],
-  importSamples: [] as unknown[],
-  importDeviceBatch: [] as unknown[],
-  importAssessmentResponse: [] as unknown[],
-}));
+const coreModuleCalls = vi.hoisted(
+  (): {
+    importDocument: unknown[];
+    addMeal: unknown[];
+    importSamples: unknown[];
+    importDeviceBatch: unknown[];
+    importAssessmentResponse: unknown[];
+  } => ({
+    importDocument: [],
+    addMeal: [],
+    importSamples: [],
+    importDeviceBatch: [],
+    importAssessmentResponse: [],
+  }),
+);
 
 vi.mock("@murphai/core", () => ({
   DEFAULT_TIMEZONE: "UTC",
