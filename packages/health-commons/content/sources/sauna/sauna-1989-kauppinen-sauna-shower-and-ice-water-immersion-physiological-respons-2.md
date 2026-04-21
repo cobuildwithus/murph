@@ -1,0 +1,50 @@
+---
+schemaVersion: murph.commons.page.v1
+entityType: source_artifact
+key: source_artifact:sauna-1989-kauppinen-sauna-shower-and-ice-water-immersion-physiological-respons-2
+slug: sources/sauna/sauna-1989-kauppinen-sauna-shower-and-ice-water-immersion-physiological-respons-2
+title: "Sauna, shower, and ice water immersion. Physiological responses to brief exposures to heat, cool, and cold. Part II. Circulation"
+summary: "Finnish dry-sauna bibliography record (likely focus) used as supporting general / mixed evidence for protocol context and guardrails."
+status: draft
+quality: usable
+categories:
+  - sauna
+  - study
+  - general-mixed
+relations:
+  -
+    type: related_protocol
+    target: protocol_variant:dry-sauna/murph-finnish-standard-3x-week
+  -
+    type: parent_family
+    target: experiment_family:dry-sauna
+source:
+  kind: journal_article
+  title: "Sauna, shower, and ice water immersion. Physiological responses to brief exposures to heat, cool, and cold. Part II. Circulation"
+  authors: "Kauppinen K"
+  year: 1989
+  journal: "Arctic Med Res"
+  citation: "Kauppinen K. Sauna, shower, and ice water immersion. Physiological responses to brief exposures to heat, cool, and cold. Part II. Circulation. Arctic Med Res 1989;48:64-74."
+evidenceBucket: Finnish dry-sauna corpus
+whyItMatters: "Expands the audited Finnish dry-sauna evidence corpus with a general / mixed record marked lower priority for Murph v1 interpretation."
+potentialMurphEndpoints:
+  - safety screening
+  - session tolerance
+  - illness and respiratory context
+protocolTakeaway: "Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes."
+studyDesign: "Experimental physiology"
+modality: "Sauna (unspecified / likely dry)"
+finnishDrySaunaFocus: "Likely"
+murphV1Priority: "Lower"
+sourceUrlCurationNote: Workbook source URL points to a bibliography or review backbone rather than a direct article landing page, so the public source link is intentionally omitted from the app card.
+---
+
+This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.
+
+**Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a general / mixed record marked lower priority for Murph v1 interpretation.
+
+**Potential Murph endpoints/context:** safety screening, session tolerance, illness and respiratory context
+
+**Protocol takeaway:** Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes.
+
+The workbook linked this record through a review or bibliography backbone rather than a direct article page. Keep it in the corpus, but do not show a potentially misleading outbound source link in the product UI.

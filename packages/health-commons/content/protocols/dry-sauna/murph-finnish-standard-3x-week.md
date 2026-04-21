@@ -41,22 +41,247 @@ relations:
     target: source_artifact:sauna-bibliography-2026-04-18
   -
     type: cites
-    target: source_artifact:pmid-29849692
+    target: source_artifact:pmid-445022
   -
     type: cites
-    target: source_artifact:mayo-2018-sauna-review
+    target: source_artifact:sauna-1986-kauppinen-man-in-the-sauna-review-article
   -
     type: cites
-    target: source_artifact:pmid-32814462
+    target: source_artifact:pmid-3766176
   -
     type: cites
-    target: source_artifact:pmid-38577299
+    target: source_artifact:pmid-3788622
+  -
+    type: cites
+    target: source_artifact:sauna-1988-eisalo-the-finnish-sauna-and-cardiovascular-diseases
+  -
+    type: cites
+    target: source_artifact:sauna-1988-kukkonen-harjula-how-the-sauna-affects-the-endocrine-system
+  -
+    type: cites
+    target: source_artifact:sauna-1988-laitinen-lungs-and-ventilation-in-the-sauna
+  -
+    type: cites
+    target: source_artifact:pmid-3174262
+  -
+    type: cites
+    target: source_artifact:sauna-1989-kauppinen-sauna-shower-and-ice-water-immersion-physiological-respons
+  -
+    type: cites
+    target: source_artifact:sauna-1989-kauppinen-sauna-shower-and-ice-water-immersion-physiological-respons-2
+  -
+    type: cites
+    target: source_artifact:sauna-1989-kauppinen-sauna-shower-and-ice-water-immersion-physiological-respons-3
+  -
+    type: cites
+    target: source_artifact:sauna-1989-kauppinen-some-endocrine-responses-to-sauna-shower-and-ice-water-imm
+  -
+    type: cites
+    target: source_artifact:sauna-1989-kukkonen-harjula-haemodynamic-and-hormonal-responses-to-heat-exposure-in-a
+  -
+    type: cites
+    target: source_artifact:sauna-1989-markkola-sauna-habits-and-related-symptoms-in-finnish-children
+  -
+    type: cites
+    target: source_artifact:sauna-1990-ernst-regular-sauna-bathing-and-the-incidence-of-common-colds
+  -
+    type: cites
+    target: source_artifact:sauna-1990-jokinen-children-in-sauna-cardiovascular-adjustment
+  -
+    type: cites
+    target: source_artifact:sauna-1991-jokinen-children-in-sauna-electrocardiographic-abnormalities
+  -
+    type: cites
+    target: source_artifact:sauna-1992-roine-alcohol-and-sauna-bathing-effects-on-cardiac-rhythm-blood
+  -
+    type: cites
+    target: source_artifact:sauna-1994-kukkonen-harjula-cardiovascular-effects-of-atenolol-scopolamine-and-their-c
+  -
+    type: cites
+    target: source_artifact:sauna-1996-vanakoski-effects-of-heat-exposure-in-a-finnish-sauna-on-the-pharmac
+  -
+    type: cites
+    target: source_artifact:sauna-1997-kauppinen-facts-and-fables-about-sauna
+  -
+    type: cites
+    target: source_artifact:sauna-2000-keast-the-finnish-sauna-bath-and-its-use-in-patients-with-cardio
+  -
+    type: cites
+    target: source_artifact:pmid-11165553
+  -
+    type: cites
+    target: source_artifact:sauna-2005-miyamoto-safety-and-efficacy-of-repeated-sauna-bathing-in-patients
+  -
+    type: cites
+    target: source_artifact:pmid-16871826
+  -
+    type: cites
+    target: source_artifact:pmid-19154844
+  -
+    type: cites
+    target: source_artifact:sauna-2014-gryka-the-effect-of-sauna-bathing-on-lipid-profile-in-young-phys
+  -
+    type: cites
+    target: source_artifact:sauna-2015-kanji-efficacy-of-regular-sauna-bathing-for-chronic-tension-type
   -
     type: cites
     target: source_artifact:pmid-25705824
   -
     type: cites
+    target: source_artifact:pmid-25432420
+  -
+    type: cites
+    target: source_artifact:pmid-26152773
+  -
+    type: cites
+    target: source_artifact:pmid-29229091
+  -
+    type: cites
+    target: source_artifact:pmid-28905164
+  -
+    type: cites
+    target: source_artifact:pmid-27932366
+  -
+    type: cites
+    target: source_artifact:pmid-28633297
+  -
+    type: cites
+    target: source_artifact:pmid-29351426
+  -
+    type: cites
+    target: source_artifact:pmid-29849692
+  -
+    type: cites
+    target: source_artifact:pmid-28972808
+  -
+    type: cites
+    target: source_artifact:pmid-29897261
+  -
+    type: cites
+    target: source_artifact:pmid-29269746
+  -
+    type: cites
+    target: source_artifact:mayo-2018-sauna-review
+  -
+    type: cites
+    target: source_artifact:pmid-30173212
+  -
+    type: cites
+    target: source_artifact:pmid-30486813
+  -
+    type: cites
+    target: source_artifact:pmid-31126559
+  -
+    type: cites
+    target: source_artifact:pmid-30665914
+  -
+    type: cites
+    target: source_artifact:pmid-31372865
+  -
+    type: cites
+    target: source_artifact:pmid-31102597
+  -
+    type: cites
+    target: source_artifact:pmid-31331560
+  -
+    type: cites
+    target: source_artifact:pmid-32951736
+  -
+    type: cites
+    target: source_artifact:pmid-31950931
+  -
+    type: cites
+    target: source_artifact:pmid-31490429
+  -
+    type: cites
+    target: source_artifact:pmid-31869820
+  -
+    type: cites
+    target: source_artifact:pmid-33513711
+  -
+    type: cites
+    target: source_artifact:pmid-33211153
+  -
+    type: cites
+    target: source_artifact:pmid-34297227
+  -
+    type: cites
+    target: source_artifact:pmid-34622026
+  -
+    type: cites
+    target: source_artifact:pmid-34199101
+  -
+    type: cites
+    target: source_artifact:pmid-36078656
+  -
+    type: cites
+    target: source_artifact:pmid-35710395
+  -
+    type: cites
+    target: source_artifact:pmid-35908583
+  -
+    type: cites
+    target: source_artifact:pmid-36255556
+  -
+    type: cites
+    target: source_artifact:pmid-35785965
+  -
+    type: cites
+    target: source_artifact:pmid-34727008
+  -
+    type: cites
+    target: source_artifact:pmid-38011189
+  -
+    type: cites
+    target: source_artifact:pmid-37650138
+  -
+    type: cites
+    target: source_artifact:pmid-37270272
+  -
+    type: cites
+    target: source_artifact:pmid-37029766
+  -
+    type: cites
+    target: source_artifact:pmid-36813265
+  -
+    type: cites
+    target: source_artifact:pmid-39446139
+  -
+    type: cites
+    target: source_artifact:pmid-38410962
+  -
+    type: cites
+    target: source_artifact:pmid-38577299
+  -
+    type: cites
+    target: source_artifact:doi-10.3390-app151910762
+  -
+    type: cites
+    target: source_artifact:pmid-40202605
+  -
+    type: cites
+    target: source_artifact:pmid-41426898
+  -
+    type: cites
+    target: source_artifact:doi-10-1016-j-aimed-2024-09-009
+  -
+    type: cites
     target: source_artifact:pmid-40611569
+  -
+    type: cites
+    target: source_artifact:pmid-41340471
+  -
+    type: cites
+    target: source_artifact:doi-10-3389-fcvm-2025-1537194
+  -
+    type: cites
+    target: source_artifact:pmid-41461792
+  -
+    type: cites
+    target: source_artifact:pmid-41831305
+  -
+    type: cites
+    target: source_artifact:doi-10.1080-23328940.2026.2645467
 lineage:
   relationship: root
   rationale: Default dry-sauna experiment designed to be simple enough to try and clear enough to interpret.
@@ -274,6 +499,88 @@ researchCoverage:
     - source_artifact:pmid-32814462
     - source_artifact:pmid-38577299
     - source_artifact:pmid-41032138
+  finnishDrySaunaSourceKeys:
+    - source_artifact:pmid-445022
+    - source_artifact:sauna-1986-kauppinen-man-in-the-sauna-review-article
+    - source_artifact:pmid-3766176
+    - source_artifact:pmid-3788622
+    - source_artifact:sauna-1988-eisalo-the-finnish-sauna-and-cardiovascular-diseases
+    - source_artifact:sauna-1988-kukkonen-harjula-how-the-sauna-affects-the-endocrine-system
+    - source_artifact:sauna-1988-laitinen-lungs-and-ventilation-in-the-sauna
+    - source_artifact:pmid-3174262
+    - source_artifact:sauna-1989-kauppinen-sauna-shower-and-ice-water-immersion-physiological-respons
+    - source_artifact:sauna-1989-kauppinen-sauna-shower-and-ice-water-immersion-physiological-respons-2
+    - source_artifact:sauna-1989-kauppinen-sauna-shower-and-ice-water-immersion-physiological-respons-3
+    - source_artifact:sauna-1989-kauppinen-some-endocrine-responses-to-sauna-shower-and-ice-water-imm
+    - source_artifact:sauna-1989-kukkonen-harjula-haemodynamic-and-hormonal-responses-to-heat-exposure-in-a
+    - source_artifact:sauna-1989-markkola-sauna-habits-and-related-symptoms-in-finnish-children
+    - source_artifact:sauna-1990-ernst-regular-sauna-bathing-and-the-incidence-of-common-colds
+    - source_artifact:sauna-1990-jokinen-children-in-sauna-cardiovascular-adjustment
+    - source_artifact:sauna-1991-jokinen-children-in-sauna-electrocardiographic-abnormalities
+    - source_artifact:sauna-1992-roine-alcohol-and-sauna-bathing-effects-on-cardiac-rhythm-blood
+    - source_artifact:sauna-1994-kukkonen-harjula-cardiovascular-effects-of-atenolol-scopolamine-and-their-c
+    - source_artifact:sauna-1996-vanakoski-effects-of-heat-exposure-in-a-finnish-sauna-on-the-pharmac
+    - source_artifact:sauna-1997-kauppinen-facts-and-fables-about-sauna
+    - source_artifact:sauna-2000-keast-the-finnish-sauna-bath-and-its-use-in-patients-with-cardio
+    - source_artifact:pmid-11165553
+    - source_artifact:sauna-2005-miyamoto-safety-and-efficacy-of-repeated-sauna-bathing-in-patients
+    - source_artifact:pmid-16871826
+    - source_artifact:pmid-19154844
+    - source_artifact:sauna-2014-gryka-the-effect-of-sauna-bathing-on-lipid-profile-in-young-phys
+    - source_artifact:sauna-2015-kanji-efficacy-of-regular-sauna-bathing-for-chronic-tension-type
+    - source_artifact:pmid-25705824
+    - source_artifact:pmid-25432420
+    - source_artifact:pmid-26152773
+    - source_artifact:pmid-29229091
+    - source_artifact:pmid-28905164
+    - source_artifact:pmid-27932366
+    - source_artifact:pmid-28633297
+    - source_artifact:pmid-29351426
+    - source_artifact:pmid-29849692
+    - source_artifact:pmid-28972808
+    - source_artifact:pmid-29897261
+    - source_artifact:pmid-29269746
+    - source_artifact:mayo-2018-sauna-review
+    - source_artifact:pmid-30173212
+    - source_artifact:pmid-30486813
+    - source_artifact:pmid-31126559
+    - source_artifact:pmid-30665914
+    - source_artifact:pmid-31372865
+    - source_artifact:pmid-31102597
+    - source_artifact:pmid-31331560
+    - source_artifact:pmid-32951736
+    - source_artifact:pmid-31950931
+    - source_artifact:pmid-31490429
+    - source_artifact:pmid-31869820
+    - source_artifact:pmid-33513711
+    - source_artifact:pmid-33211153
+    - source_artifact:pmid-34297227
+    - source_artifact:pmid-34622026
+    - source_artifact:pmid-34199101
+    - source_artifact:pmid-36078656
+    - source_artifact:pmid-35710395
+    - source_artifact:pmid-35908583
+    - source_artifact:pmid-36255556
+    - source_artifact:pmid-35785965
+    - source_artifact:pmid-34727008
+    - source_artifact:pmid-38011189
+    - source_artifact:pmid-37650138
+    - source_artifact:pmid-37270272
+    - source_artifact:pmid-37029766
+    - source_artifact:pmid-36813265
+    - source_artifact:pmid-39446139
+    - source_artifact:pmid-38410962
+    - source_artifact:pmid-38577299
+    - source_artifact:doi-10.3390-app151910762
+    - source_artifact:pmid-40202605
+    - source_artifact:pmid-41426898
+    - source_artifact:doi-10-1016-j-aimed-2024-09-009
+    - source_artifact:pmid-40611569
+    - source_artifact:pmid-41340471
+    - source_artifact:doi-10-3389-fcvm-2025-1537194
+    - source_artifact:pmid-41461792
+    - source_artifact:pmid-41831305
+    - source_artifact:doi-10.1080-23328940.2026.2645467
 sessionLoggingFields:
   - session_date
   - session_start_time

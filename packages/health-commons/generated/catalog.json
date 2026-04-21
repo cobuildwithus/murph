@@ -1225,7 +1225,7 @@
       "schemaVersion": "murph.commons.artifact-manifest.v1"
     }
   ],
-  "catalogHash": "sha256:4413d67f255500f0315c80c796520de0ca22dc383920b77830bbb60792b15aa3",
+  "catalogHash": "sha256:f3fcd46a024d586fe37d1743d8245ec3f92b993650546ea7cedae3722640fb87",
   "changes": [
     {
       "affectedFields": [
@@ -1493,6 +1493,26 @@
         "source_artifact:pmid-15713707",
         "source_artifact:pmid-27226262",
         "source_artifact:pmid-26414986"
+      ]
+    },
+    {
+      "affectedFields": [
+        "relations",
+        "researchCoverage.finnishDrySaunaSourceKeys",
+        "sources/sauna",
+        "apps/web/src/lib/health-commons/experiment-detail.ts",
+        "generated.catalog"
+      ],
+      "changeId": "chg_2026_04_21_sauna_finnish_corpus_source_pages",
+      "changeType": "evidence_change",
+      "editSummary": "Materialized the full 81-record Finnish dry-sauna yes/likely bibliography subset into source pages and linked it to the canonical Finnish dry-sauna protocol.",
+      "entityKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+      "minor": false,
+      "rationale": "The product page should not look like a 6-paper sauna page when the audited workbook already supports a larger Finnish dry-sauna corpus; the detail transformer now counts and renders direct study source pages instead of clipping the list to six cards.",
+      "reviewStatus": "proposed",
+      "schemaVersion": "murph.commons.change.v1",
+      "sourceKeys": [
+        "source_artifact:sauna-bibliography-2026-04-18"
       ]
     }
   ],
@@ -2739,19 +2759,115 @@
           "type": "cites"
         },
         {
-          "target": "source_artifact:pmid-29849692",
+          "target": "source_artifact:pmid-445022",
           "type": "cites"
         },
         {
-          "target": "source_artifact:mayo-2018-sauna-review",
+          "target": "source_artifact:sauna-1986-kauppinen-man-in-the-sauna-review-article",
           "type": "cites"
         },
         {
-          "target": "source_artifact:pmid-32814462",
+          "target": "source_artifact:pmid-3766176",
           "type": "cites"
         },
         {
-          "target": "source_artifact:pmid-38577299",
+          "target": "source_artifact:pmid-3788622",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:sauna-1988-eisalo-the-finnish-sauna-and-cardiovascular-diseases",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:sauna-1988-kukkonen-harjula-how-the-sauna-affects-the-endocrine-system",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:sauna-1988-laitinen-lungs-and-ventilation-in-the-sauna",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-3174262",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:sauna-1989-kauppinen-sauna-shower-and-ice-water-immersion-physiological-respons",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:sauna-1989-kauppinen-sauna-shower-and-ice-water-immersion-physiological-respons-2",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:sauna-1989-kauppinen-sauna-shower-and-ice-water-immersion-physiological-respons-3",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:sauna-1989-kauppinen-some-endocrine-responses-to-sauna-shower-and-ice-water-imm",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:sauna-1989-kukkonen-harjula-haemodynamic-and-hormonal-responses-to-heat-exposure-in-a",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:sauna-1989-markkola-sauna-habits-and-related-symptoms-in-finnish-children",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:sauna-1990-ernst-regular-sauna-bathing-and-the-incidence-of-common-colds",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:sauna-1990-jokinen-children-in-sauna-cardiovascular-adjustment",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:sauna-1991-jokinen-children-in-sauna-electrocardiographic-abnormalities",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:sauna-1992-roine-alcohol-and-sauna-bathing-effects-on-cardiac-rhythm-blood",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:sauna-1994-kukkonen-harjula-cardiovascular-effects-of-atenolol-scopolamine-and-their-c",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:sauna-1996-vanakoski-effects-of-heat-exposure-in-a-finnish-sauna-on-the-pharmac",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:sauna-1997-kauppinen-facts-and-fables-about-sauna",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:sauna-2000-keast-the-finnish-sauna-bath-and-its-use-in-patients-with-cardio",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-11165553",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:sauna-2005-miyamoto-safety-and-efficacy-of-repeated-sauna-bathing-in-patients",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-16871826",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-19154844",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:sauna-2014-gryka-the-effect-of-sauna-bathing-on-lipid-profile-in-young-phys",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:sauna-2015-kanji-efficacy-of-regular-sauna-bathing-for-chronic-tension-type",
           "type": "cites"
         },
         {
@@ -2759,7 +2875,211 @@
           "type": "cites"
         },
         {
+          "target": "source_artifact:pmid-25432420",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-26152773",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-29229091",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-28905164",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-27932366",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-28633297",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-29351426",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-29849692",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-28972808",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-29897261",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-29269746",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:mayo-2018-sauna-review",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-30173212",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-30486813",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-31126559",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-30665914",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-31372865",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-31102597",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-31331560",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-32951736",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-31950931",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-31490429",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-31869820",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-33513711",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-33211153",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-34297227",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-34622026",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-34199101",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-36078656",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-35710395",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-35908583",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-36255556",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-35785965",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-34727008",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-38011189",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-37650138",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-37270272",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-37029766",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-36813265",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-39446139",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-38410962",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-38577299",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:doi-10.3390-app151910762",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-40202605",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-41426898",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:doi-10-1016-j-aimed-2024-09-009",
+          "type": "cites"
+        },
+        {
           "target": "source_artifact:pmid-40611569",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-41340471",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:doi-10-3389-fcvm-2025-1537194",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-41461792",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-41831305",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:doi-10.1080-23328940.2026.2645467",
           "type": "cites"
         }
       ],
@@ -2788,6 +3108,89 @@
           "mediumPriorityRecords": 65,
           "reviewMetaRecords": 32
         },
+        "finnishDrySaunaSourceKeys": [
+          "source_artifact:pmid-445022",
+          "source_artifact:sauna-1986-kauppinen-man-in-the-sauna-review-article",
+          "source_artifact:pmid-3766176",
+          "source_artifact:pmid-3788622",
+          "source_artifact:sauna-1988-eisalo-the-finnish-sauna-and-cardiovascular-diseases",
+          "source_artifact:sauna-1988-kukkonen-harjula-how-the-sauna-affects-the-endocrine-system",
+          "source_artifact:sauna-1988-laitinen-lungs-and-ventilation-in-the-sauna",
+          "source_artifact:pmid-3174262",
+          "source_artifact:sauna-1989-kauppinen-sauna-shower-and-ice-water-immersion-physiological-respons",
+          "source_artifact:sauna-1989-kauppinen-sauna-shower-and-ice-water-immersion-physiological-respons-2",
+          "source_artifact:sauna-1989-kauppinen-sauna-shower-and-ice-water-immersion-physiological-respons-3",
+          "source_artifact:sauna-1989-kauppinen-some-endocrine-responses-to-sauna-shower-and-ice-water-imm",
+          "source_artifact:sauna-1989-kukkonen-harjula-haemodynamic-and-hormonal-responses-to-heat-exposure-in-a",
+          "source_artifact:sauna-1989-markkola-sauna-habits-and-related-symptoms-in-finnish-children",
+          "source_artifact:sauna-1990-ernst-regular-sauna-bathing-and-the-incidence-of-common-colds",
+          "source_artifact:sauna-1990-jokinen-children-in-sauna-cardiovascular-adjustment",
+          "source_artifact:sauna-1991-jokinen-children-in-sauna-electrocardiographic-abnormalities",
+          "source_artifact:sauna-1992-roine-alcohol-and-sauna-bathing-effects-on-cardiac-rhythm-blood",
+          "source_artifact:sauna-1994-kukkonen-harjula-cardiovascular-effects-of-atenolol-scopolamine-and-their-c",
+          "source_artifact:sauna-1996-vanakoski-effects-of-heat-exposure-in-a-finnish-sauna-on-the-pharmac",
+          "source_artifact:sauna-1997-kauppinen-facts-and-fables-about-sauna",
+          "source_artifact:sauna-2000-keast-the-finnish-sauna-bath-and-its-use-in-patients-with-cardio",
+          "source_artifact:pmid-11165553",
+          "source_artifact:sauna-2005-miyamoto-safety-and-efficacy-of-repeated-sauna-bathing-in-patients",
+          "source_artifact:pmid-16871826",
+          "source_artifact:pmid-19154844",
+          "source_artifact:sauna-2014-gryka-the-effect-of-sauna-bathing-on-lipid-profile-in-young-phys",
+          "source_artifact:sauna-2015-kanji-efficacy-of-regular-sauna-bathing-for-chronic-tension-type",
+          "source_artifact:pmid-25705824",
+          "source_artifact:pmid-25432420",
+          "source_artifact:pmid-26152773",
+          "source_artifact:pmid-29229091",
+          "source_artifact:pmid-28905164",
+          "source_artifact:pmid-27932366",
+          "source_artifact:pmid-28633297",
+          "source_artifact:pmid-29351426",
+          "source_artifact:pmid-29849692",
+          "source_artifact:pmid-28972808",
+          "source_artifact:pmid-29897261",
+          "source_artifact:pmid-29269746",
+          "source_artifact:mayo-2018-sauna-review",
+          "source_artifact:pmid-30173212",
+          "source_artifact:pmid-30486813",
+          "source_artifact:pmid-31126559",
+          "source_artifact:pmid-30665914",
+          "source_artifact:pmid-31372865",
+          "source_artifact:pmid-31102597",
+          "source_artifact:pmid-31331560",
+          "source_artifact:pmid-32951736",
+          "source_artifact:pmid-31950931",
+          "source_artifact:pmid-31490429",
+          "source_artifact:pmid-31869820",
+          "source_artifact:pmid-33513711",
+          "source_artifact:pmid-33211153",
+          "source_artifact:pmid-34297227",
+          "source_artifact:pmid-34622026",
+          "source_artifact:pmid-34199101",
+          "source_artifact:pmid-36078656",
+          "source_artifact:pmid-35710395",
+          "source_artifact:pmid-35908583",
+          "source_artifact:pmid-36255556",
+          "source_artifact:pmid-35785965",
+          "source_artifact:pmid-34727008",
+          "source_artifact:pmid-38011189",
+          "source_artifact:pmid-37650138",
+          "source_artifact:pmid-37270272",
+          "source_artifact:pmid-37029766",
+          "source_artifact:pmid-36813265",
+          "source_artifact:pmid-39446139",
+          "source_artifact:pmid-38410962",
+          "source_artifact:pmid-38577299",
+          "source_artifact:doi-10.3390-app151910762",
+          "source_artifact:pmid-40202605",
+          "source_artifact:pmid-41426898",
+          "source_artifact:doi-10-1016-j-aimed-2024-09-009",
+          "source_artifact:pmid-40611569",
+          "source_artifact:pmid-41340471",
+          "source_artifact:doi-10-3389-fcvm-2025-1537194",
+          "source_artifact:pmid-41461792",
+          "source_artifact:pmid-41831305",
+          "source_artifact:doi-10.1080-23328940.2026.2645467"
+        ],
         "shortlistBucketCounts": {
           "acute-and-mechanistic": 8,
           "evidence-backbone": 5,
@@ -2796,7 +3199,7 @@
         }
       },
       "revision": {
-        "pageRevisionId": "sha256:a33551e4af9e9c3543b56c4df450e747207eb066ab51a7925bfdd469b7dd80ec",
+        "pageRevisionId": "sha256:4e716b115bf50eb6950a22ef2cf440b65789888f95b884164845307390f6a03a",
         "recipeHash": "sha256:2552fbe52dff36111741eb274e02cc14a60c47a5acd36780dfe8904de2e8ee61",
         "runSpecRevisionId": "sha256:a690efa7572b98010b31c09135c19f10313f4200ba99fe37bc7442fc1d78f1d6"
       },
@@ -3900,6 +4303,112 @@
       "title": "Bryan Johnson - 31 brutal minutes to saunamaxx"
     },
     {
+      "body": "This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.\n\n**Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a cardiovascular record marked lower priority for Murph v1 interpretation.\n\n**Potential Murph endpoints/context:** blood pressure context, resting heart rate context\n\n**Protocol takeaway:** Use as cardiovascular context around heat exposure, not as a guaranteed 21-day result-card endpoint.",
+      "categories": [
+        "sauna",
+        "review",
+        "cardiovascular"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Finnish dry-sauna corpus",
+      "finnishDrySaunaFocus": "Likely",
+      "key": "source_artifact:doi-10-1016-j-aimed-2024-09-009",
+      "modality": "Sauna (unspecified / likely dry)",
+      "murphV1Priority": "Lower",
+      "potentialMurphEndpoints": [
+        "blood pressure context",
+        "resting heart rate context"
+      ],
+      "protocolTakeaway": "Use as cardiovascular context around heat exposure, not as a guaranteed 21-day result-card endpoint.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:dry-sauna",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/sauna/doi-10-1016-j-aimed-2024-09-009.md",
+      "revision": {
+        "pageRevisionId": "sha256:dbe2b3b3cc26c7722a7923953b10dc4c1516e8acf60bd0c419598625a99bf1ba",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/sauna/doi-10-1016-j-aimed-2024-09-009",
+      "source": {
+        "authors": "KK Kanimozhi, P Ravi, V Vijayakumar, M Kuppusamy",
+        "citation": "Kanimozhi KK, Ravi P, Vijayakumar V, Kuppusamy M. Sauna bath reduces blood pressure in healthy adult volunteers: A meta-analysis of RCTs and quasi-experimental studies. Advances in Integrative Medicine. 2025;12(1):2-6. doi:10.1016/j.aimed.2024.09.009.",
+        "doi": "10.1016/j.aimed.2024.09.009",
+        "journal": "Advances in Integrative Medicine",
+        "kind": "review",
+        "title": "Sauna bath reduces blood pressure in healthy adult volunteers: A meta-analysis of RCTs and quasi-experimental studies",
+        "url": "https://www.sciencedirect.com/science/article/pii/S2212958824001253",
+        "year": 2025
+      },
+      "status": "draft",
+      "studyDesign": "Review / meta",
+      "summary": "Finnish dry-sauna bibliography record (likely focus) used as supporting cardiovascular evidence for protocol context and guardrails.",
+      "title": "Sauna bath reduces blood pressure in healthy adult volunteers: A meta-analysis of RCTs and quasi-experimental studies",
+      "whyItMatters": "Expands the audited Finnish dry-sauna evidence corpus with a cardiovascular record marked lower priority for Murph v1 interpretation."
+    },
+    {
+      "body": "This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.\n\n**Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a cardiovascular record marked lower priority for Murph v1 interpretation.\n\n**Potential Murph endpoints/context:** blood pressure context, resting heart rate context\n\n**Protocol takeaway:** Use as cardiovascular context around heat exposure, not as a guaranteed 21-day result-card endpoint.",
+      "categories": [
+        "sauna",
+        "review",
+        "cardiovascular"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Finnish dry-sauna corpus",
+      "finnishDrySaunaFocus": "Likely",
+      "key": "source_artifact:doi-10-3389-fcvm-2025-1537194",
+      "modality": "Sauna (likely dry)",
+      "murphV1Priority": "Lower",
+      "potentialMurphEndpoints": [
+        "blood pressure context",
+        "resting heart rate context"
+      ],
+      "protocolTakeaway": "Use as cardiovascular context around heat exposure, not as a guaranteed 21-day result-card endpoint.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:dry-sauna",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/sauna/doi-10-3389-fcvm-2025-1537194.md",
+      "revision": {
+        "pageRevisionId": "sha256:5f7144dd5e2fb7e65cf69bd44f687301135f2084cae077e0c8ddef0fc5bded37",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/sauna/doi-10-3389-fcvm-2025-1537194",
+      "source": {
+        "authors": "S Sastriques-Dunlop, S Elizondo-Benedetto, MA Zayed",
+        "citation": "Sastriques-Dunlop S, Elizondo-Benedetto S, Zayed MA. Sauna use as a novel management approach for cardiovascular health and peripheral arterial disease. Frontiers in Cardiovascular Medicine. 2025;12:1537194. doi:10.3389/fcvm.2025.1537194.",
+        "doi": "10.3389/fcvm.2025.1537194",
+        "journal": "Frontiers in Cardiovascular Medicine",
+        "kind": "review",
+        "title": "Sauna use as a novel management approach for cardiovascular health and peripheral arterial disease",
+        "url": "https://www.frontiersin.org/journals/cardiovascular-medicine/articles/10.3389/fcvm.2025.1537194/full",
+        "year": 2025
+      },
+      "status": "draft",
+      "studyDesign": "Review",
+      "summary": "Finnish dry-sauna bibliography record (likely focus) used as supporting cardiovascular evidence for protocol context and guardrails.",
+      "title": "Sauna use as a novel management approach for cardiovascular health and peripheral arterial disease",
+      "whyItMatters": "Expands the audited Finnish dry-sauna evidence corpus with a cardiovascular record marked lower priority for Murph v1 interpretation."
+    },
+    {
       "body": "This source is included for **Acute and mechanistic**.\n\n**Why it matters:** Newest mechanistic Finnish-sauna paper\n\n**Potential experiment signals:** optional exploratory lab signals\n\n**Protocol takeaway:** Good for forward-looking mechanism section.",
       "categories": [
         "sauna",
@@ -4593,6 +5102,58 @@
       "whyItMatters": "Public-facing source for the commonly cited Norwegian 4x4 session structure."
     },
     {
+      "body": "This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.\n\n**Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a general / mixed record marked medium priority for Murph v1 interpretation.\n\n**Potential Murph endpoints/context:** supporting corpus context\n\n**Protocol takeaway:** Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes.",
+      "categories": [
+        "sauna",
+        "review",
+        "general-mixed"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Finnish dry-sauna corpus",
+      "finnishDrySaunaFocus": "Likely",
+      "key": "source_artifact:pmid-11165553",
+      "modality": "Sauna (likely dry)",
+      "murphV1Priority": "Medium",
+      "potentialMurphEndpoints": [
+        "supporting corpus context"
+      ],
+      "protocolTakeaway": "Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:dry-sauna",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/sauna/pmid-11165553.md",
+      "revision": {
+        "pageRevisionId": "sha256:d8d52ff68a4533e4701f67ba3e5e25ea29d1afdb3d1f203b1c76cc4d4849bb8e",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/sauna/pmid-11165553",
+      "source": {
+        "authors": "ML Hannuksela, S Ellahham",
+        "citation": "ML Hannuksela, S Ellahham. Benefits and risks of sauna bathing. Am J Med 2001.",
+        "journal": "Am J Med",
+        "kind": "review",
+        "pmid": "11165553",
+        "title": "Benefits and risks of sauna bathing",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/11165553/",
+        "year": 2001
+      },
+      "status": "draft",
+      "studyDesign": "Review / meta",
+      "summary": "Finnish dry-sauna bibliography record (likely focus) used as supporting general / mixed evidence for protocol context and guardrails.",
+      "title": "Benefits and risks of sauna bathing",
+      "whyItMatters": "Expands the audited Finnish dry-sauna evidence corpus with a general / mixed record marked medium priority for Murph v1 interpretation."
+    },
+    {
       "artifactNeeded": false,
       "body": "This source is included for **Shift-work adjacent variant**.\n\n**Why it matters:** Supports the short-wavelength mechanism under shift-work conditions without turning shift-work findings into a general bedtime protocol claim.\n\n**Potential experiment signals:** melatonin suppression, alertness, performance, sleepiness\n\n**Protocol takeaway:** Keep shift-work lighting questions separate from the ordinary pre-bed eyewear protocol.\n\n**Claim use:** `context-only`. Keep this classification when wiring claims so adjacent mechanism papers do not become direct support for the consumer bedtime protocol.",
       "categories": [
@@ -4766,6 +5327,60 @@
       "summary": "Canonical small RCT supporting the Norwegian 4x4 dose as a VO2max-oriented aerobic interval protocol.",
       "title": "Aerobic high-intensity intervals improve VO2max more than moderate training",
       "whyItMatters": "Canonical small RCT supporting the Norwegian 4x4 dose as a VO2max-oriented aerobic interval protocol."
+    },
+    {
+      "body": "This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.\n\n**Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a cardiovascular record marked medium priority for Murph v1 interpretation.\n\n**Potential Murph endpoints/context:** blood pressure context, resting heart rate context, illness and respiratory context\n\n**Protocol takeaway:** Use as cardiovascular context around heat exposure, not as a guaranteed 21-day result-card endpoint.",
+      "categories": [
+        "sauna",
+        "study",
+        "cardiovascular"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Finnish dry-sauna corpus",
+      "finnishDrySaunaFocus": "Likely",
+      "key": "source_artifact:pmid-19154844",
+      "modality": "Sauna (likely dry)",
+      "murphV1Priority": "Medium",
+      "potentialMurphEndpoints": [
+        "blood pressure context",
+        "resting heart rate context",
+        "illness and respiratory context"
+      ],
+      "protocolTakeaway": "Use as cardiovascular context around heat exposure, not as a guaranteed 21-day result-card endpoint.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:dry-sauna",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/sauna/pmid-19154844.md",
+      "revision": {
+        "pageRevisionId": "sha256:915aa532ff927eb4c4e353fd17f5ced10981bedc777405019941707995f23afc",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/sauna/pmid-19154844",
+      "source": {
+        "authors": "JR Basford, et al.",
+        "citation": "JR Basford, et al. Safety, acceptance, and physiologic effects of sauna bathing in people with chronic heart failure: a pilot report. Arch Phys Med Rehabil 2009.",
+        "journal": "Arch Phys Med Rehabil",
+        "kind": "journal_article",
+        "pmid": "19154844",
+        "title": "Safety, acceptance, and physiologic effects of sauna bathing in people with chronic heart failure: a pilot report",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/19154844/",
+        "year": 2009
+      },
+      "status": "draft",
+      "studyDesign": "Pilot intervention",
+      "summary": "Finnish dry-sauna bibliography record (likely focus) used as supporting cardiovascular evidence for protocol context and guardrails.",
+      "title": "Safety, acceptance, and physiologic effects of sauna bathing in people with chronic heart failure: a pilot report",
+      "whyItMatters": "Expands the audited Finnish dry-sauna evidence corpus with a cardiovascular record marked medium priority for Murph v1 interpretation."
     },
     {
       "body": "This source is included for **Early human RCT**.\n\n**Why it matters:** Useful historical positive anchor for subjective sleep and affect signals.\n\n**Potential experiment signals:** sleep quality, sleep diary, positive affect, negative affect\n\n**Protocol takeaway:** Supports a bounded evening test but does not overcome the small-study and subjective-outcome limitations.",
@@ -5172,6 +5787,60 @@
       "summary": "Landmark Finnish cohort paper used as long-term evidence context, not as a 21-day self-experiment signal.",
       "title": "Association between sauna bathing and fatal cardiovascular and all-cause mortality events",
       "whyItMatters": "Landmark Kuopio cohort paper"
+    },
+    {
+      "body": "This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.\n\n**Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a cardiovascular record marked high priority for Murph v1 interpretation.\n\n**Potential Murph endpoints/context:** blood pressure context, resting heart rate context, safety screening\n\n**Protocol takeaway:** Use directly for safety, cardiovascular-context, or protocol-design guardrails; still avoid promising a short-term wearable outcome from this record alone.",
+      "categories": [
+        "sauna",
+        "study",
+        "cardiovascular"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Finnish dry-sauna corpus",
+      "finnishDrySaunaFocus": "Yes",
+      "key": "source_artifact:pmid-26152773",
+      "modality": "Finnish dry sauna",
+      "murphV1Priority": "High",
+      "potentialMurphEndpoints": [
+        "blood pressure context",
+        "resting heart rate context",
+        "safety screening"
+      ],
+      "protocolTakeaway": "Use directly for safety, cardiovascular-context, or protocol-design guardrails; still avoid promising a short-term wearable outcome from this record alone.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:dry-sauna",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/sauna/pmid-26152773.md",
+      "revision": {
+        "pageRevisionId": "sha256:8abf9d59348ece4b99d370dfb21d7d69cd6ffedb6f9431a18c1ebaa24a9e47af",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/sauna/pmid-26152773",
+      "source": {
+        "authors": "T Radtke, et al.",
+        "citation": "T Radtke, et al. Acute effects of Finnish sauna and cold-water immersion on haemodynamic variables and autonomic nervous system activity in patients with heart failure. Eur J Prev Cardiol 2016.",
+        "journal": "Eur J Prev Cardiol",
+        "kind": "journal_article",
+        "pmid": "26152773",
+        "title": "Acute effects of Finnish sauna and cold-water immersion on haemodynamic variables and autonomic nervous system activity in patients with heart failure",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/26152773/",
+        "year": 2016
+      },
+      "status": "draft",
+      "studyDesign": "Experimental physiology",
+      "summary": "Finnish dry-sauna bibliography record (yes focus) used as supporting cardiovascular evidence for protocol context and guardrails.",
+      "title": "Acute effects of Finnish sauna and cold-water immersion on haemodynamic variables and autonomic nervous system activity in patients with heart failure",
+      "whyItMatters": "Expands the audited Finnish dry-sauna evidence corpus with a cardiovascular record marked high priority for Murph v1 interpretation."
     },
     {
       "artifactNeeded": false,
@@ -5835,6 +6504,58 @@
       "whyItMatters": "One of the best acute Finnish-sauna physiology studies"
     },
     {
+      "body": "This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.\n\n**Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a general / mixed record marked medium priority for Murph v1 interpretation.\n\n**Potential Murph endpoints/context:** supporting corpus context\n\n**Protocol takeaway:** Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes.",
+      "categories": [
+        "sauna",
+        "review",
+        "general-mixed"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Finnish dry-sauna corpus",
+      "finnishDrySaunaFocus": "Yes",
+      "key": "source_artifact:pmid-29351426",
+      "modality": "Finnish dry sauna",
+      "murphV1Priority": "Medium",
+      "potentialMurphEndpoints": [
+        "supporting corpus context"
+      ],
+      "protocolTakeaway": "Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:dry-sauna",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/sauna/pmid-29351426.md",
+      "revision": {
+        "pageRevisionId": "sha256:795cba7a3742a8135b12a966cf20dead23af9017f1466ed83a7e151a3ca71a4f",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/sauna/pmid-29351426",
+      "source": {
+        "authors": "I Heinonen, et al.",
+        "citation": "I Heinonen, et al. Effects of heat and cold on health, with special reference to Finnish sauna bathing. Am J Physiol Regul Integr Comp Physiol 2018.",
+        "journal": "Am J Physiol Regul Integr Comp Physiol",
+        "kind": "review",
+        "pmid": "29351426",
+        "title": "Effects of heat and cold on health, with special reference to Finnish sauna bathing",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/29351426/",
+        "year": 2018
+      },
+      "status": "draft",
+      "studyDesign": "Review / meta",
+      "summary": "Finnish dry-sauna bibliography record (yes focus) used as supporting general / mixed evidence for protocol context and guardrails.",
+      "title": "Effects of heat and cold on health, with special reference to Finnish sauna bathing",
+      "whyItMatters": "Expands the audited Finnish dry-sauna evidence corpus with a general / mixed record marked medium priority for Murph v1 interpretation."
+    },
+    {
       "aliases": [
         "pmid-29416382"
       ],
@@ -6056,6 +6777,59 @@
       "summary": "Endpoint-method source used to calibrate actigraphy and wearable sleep-onset interpretation.",
       "title": "Use of Actigraphy for the Evaluation of Sleep Disorders and Circadian Rhythm Sleep-Wake Disorders: An American Academy of Sleep Medicine Clinical Practice Guideline",
       "whyItMatters": "Keeps the evidence story honest about actigraphy and wearable sleep estimates."
+    },
+    {
+      "body": "This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.\n\n**Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a neuro / mental record marked medium priority for Murph v1 interpretation.\n\n**Potential Murph endpoints/context:** illness and respiratory context, long-horizon neuro/mental context\n\n**Protocol takeaway:** Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes.",
+      "categories": [
+        "sauna",
+        "study",
+        "neuro-mental"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Finnish dry-sauna corpus",
+      "finnishDrySaunaFocus": "Yes",
+      "key": "source_artifact:pmid-30173212",
+      "modality": "Finnish dry sauna",
+      "murphV1Priority": "Medium",
+      "potentialMurphEndpoints": [
+        "illness and respiratory context",
+        "long-horizon neuro/mental context"
+      ],
+      "protocolTakeaway": "Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:dry-sauna",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/sauna/pmid-30173212.md",
+      "revision": {
+        "pageRevisionId": "sha256:1195bacac2374fc164a2984915eb102b4390991c5780844f54473c68b73427a3",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/sauna/pmid-30173212",
+      "source": {
+        "authors": "T Laukkanen, JA Laukkanen, SK Kunutsor",
+        "citation": "T Laukkanen, JA Laukkanen, SK Kunutsor. Sauna Bathing and Risk of Psychotic Disorders. Med Princ Pract 2018.",
+        "journal": "Med Princ Pract",
+        "kind": "journal_article",
+        "pmid": "30173212",
+        "title": "Sauna Bathing and Risk of Psychotic Disorders",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/30173212/",
+        "year": 2018
+      },
+      "status": "draft",
+      "studyDesign": "Primary study / unclear",
+      "summary": "Finnish dry-sauna bibliography record (yes focus) used as supporting neuro / mental evidence for protocol context and guardrails.",
+      "title": "Sauna Bathing and Risk of Psychotic Disorders",
+      "whyItMatters": "Expands the audited Finnish dry-sauna evidence corpus with a neuro / mental record marked medium priority for Murph v1 interpretation."
     },
     {
       "aliases": [
@@ -6401,6 +7175,58 @@
       "whyItMatters": "Meta-analysis used to justify long-interval HIIT as a plausible VO2max-oriented design class."
     },
     {
+      "body": "This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.\n\n**Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a general / mixed record marked medium priority for Murph v1 interpretation.\n\n**Potential Murph endpoints/context:** supporting corpus context\n\n**Protocol takeaway:** Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes.",
+      "categories": [
+        "sauna",
+        "review",
+        "general-mixed"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Finnish dry-sauna corpus",
+      "finnishDrySaunaFocus": "Yes",
+      "key": "source_artifact:pmid-31102597",
+      "modality": "Finnish dry sauna",
+      "murphV1Priority": "Medium",
+      "potentialMurphEndpoints": [
+        "supporting corpus context"
+      ],
+      "protocolTakeaway": "Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:dry-sauna",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/sauna/pmid-31102597.md",
+      "revision": {
+        "pageRevisionId": "sha256:ffc942cdb78b88f630a4c39da65e1498444d6864dfcd51aff540f2934fd246dd",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/sauna/pmid-31102597",
+      "source": {
+        "authors": "JA Laukkanen, SK Kunutsor",
+        "citation": "JA Laukkanen, SK Kunutsor. Is sauna bathing protective of sudden cardiac death? A review of the evidence. Prog Cardiovasc Dis 2019.",
+        "journal": "Prog Cardiovasc Dis",
+        "kind": "review",
+        "pmid": "31102597",
+        "title": "Is sauna bathing protective of sudden cardiac death? A review of the evidence",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/31102597/",
+        "year": 2019
+      },
+      "status": "draft",
+      "studyDesign": "Review / meta",
+      "summary": "Finnish dry-sauna bibliography record (yes focus) used as supporting general / mixed evidence for protocol context and guardrails.",
+      "title": "Is sauna bathing protective of sudden cardiac death? A review of the evidence",
+      "whyItMatters": "Expands the audited Finnish dry-sauna evidence corpus with a general / mixed record marked medium priority for Murph v1 interpretation."
+    },
+    {
       "body": "This source is included for **Acute and mechanistic**.\n\n**Why it matters:** Clarifies the immediate cardiovascular load of a sauna session and helps frame sauna as a measurable physiological stressor, not just a relaxation ritual.\n\n**Potential experiment signals:** Session HR, pre/post BP, cooldown HR decay, perceived heat strain\n\n**Protocol takeaway:** Treat a sauna session like a light-to-moderate cardiovascular stimulus and standardize cooldown if you want comparable pre/post data.",
       "categories": [
         "sauna",
@@ -6615,6 +7441,60 @@
       "whyItMatters": "Shows that what happens before the sauna session changes the response, which matters for protocol standardization."
     },
     {
+      "body": "This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.\n\n**Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a general / mixed record marked medium priority for Murph v1 interpretation.\n\n**Potential Murph endpoints/context:** safety screening, session tolerance, illness and respiratory context\n\n**Protocol takeaway:** Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes.",
+      "categories": [
+        "sauna",
+        "study",
+        "general-mixed"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Finnish dry-sauna corpus",
+      "finnishDrySaunaFocus": "Yes",
+      "key": "source_artifact:pmid-3174262",
+      "modality": "Finnish dry sauna",
+      "murphV1Priority": "Medium",
+      "potentialMurphEndpoints": [
+        "safety screening",
+        "session tolerance",
+        "illness and respiratory context"
+      ],
+      "protocolTakeaway": "Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:dry-sauna",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/sauna/pmid-3174262.md",
+      "revision": {
+        "pageRevisionId": "sha256:e0874e5e574aa60717f4ca1cd06161a8effd85edf06eb0225124ddef61867dad",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/sauna/pmid-3174262",
+      "source": {
+        "authors": "KV Sudakov, et al.",
+        "citation": "KV Sudakov, et al. Systemic responses in man exposed to different heating procedures (Finnish sauna, Russian bath, Turkish bath). Human Physiology 1988.",
+        "journal": "Human Physiology",
+        "kind": "journal_article",
+        "pmid": "3174262",
+        "title": "Systemic responses in man exposed to different heating procedures (Finnish sauna, Russian bath, Turkish bath)",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/3174262/",
+        "year": 1988
+      },
+      "status": "draft",
+      "studyDesign": "Experimental physiology",
+      "summary": "Finnish dry-sauna bibliography record (yes focus) used as supporting general / mixed evidence for protocol context and guardrails.",
+      "title": "Systemic responses in man exposed to different heating procedures (Finnish sauna, Russian bath, Turkish bath)",
+      "whyItMatters": "Expands the audited Finnish dry-sauna evidence corpus with a general / mixed record marked medium priority for Murph v1 interpretation."
+    },
+    {
       "body": "This source is included for **Intervention design / reality checks**.\n\n**Why it matters:** Useful for sauna-around-training experiments because it pushes outcome selection toward next-session performance rather than only morning recovery scores.\n\n**Potential experiment signals:** Overnight HRV, RHR, sleep, soreness, next-session performance, training load\n\n**Protocol takeaway:** When sauna is paired with training, measure the next workout outcome as well as wearable recovery markers.",
       "categories": [
         "sauna",
@@ -6670,6 +7550,58 @@
       "summary": "Intervention-design evidence that helps keep sauna dose, context, hydration, and expectations realistic.",
       "title": "Effects of Postexercise Sauna Bathing on Recovery of Swim Performance",
       "whyItMatters": "Useful for sauna-around-training experiments because it pushes outcome selection toward next-session performance rather than only morning recovery scores."
+    },
+    {
+      "body": "This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.\n\n**Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a exercise / recovery record marked medium priority for Murph v1 interpretation.\n\n**Potential Murph endpoints/context:** exercise-context logging\n\n**Protocol takeaway:** Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes.",
+      "categories": [
+        "sauna",
+        "study",
+        "exercise-recovery"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Finnish dry-sauna corpus",
+      "finnishDrySaunaFocus": "Yes",
+      "key": "source_artifact:pmid-31950931",
+      "modality": "Finnish dry sauna",
+      "murphV1Priority": "Medium",
+      "potentialMurphEndpoints": [
+        "exercise-context logging"
+      ],
+      "protocolTakeaway": "Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:dry-sauna",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/sauna/pmid-31950931.md",
+      "revision": {
+        "pageRevisionId": "sha256:99ceab0f9ed9eab4bd2a739d0dc21eca3c468cc0954dff9e160e3cda03f975d8",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/sauna/pmid-31950931",
+      "source": {
+        "authors": "D Gryka, et al.",
+        "citation": "D Gryka, et al. The influence of Finnish sauna treatments on the concentrations of nitric oxide, 3-nitrotyrosine and selected markers of oxidative status in training and non-training men. Int J Occup Med Environ Health 2020.",
+        "journal": "Int J Occup Med Environ Health",
+        "kind": "journal_article",
+        "pmid": "31950931",
+        "title": "The influence of Finnish sauna treatments on the concentrations of nitric oxide, 3-nitrotyrosine and selected markers of oxidative status in training and non-training men",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/31950931/",
+        "year": 2020
+      },
+      "status": "draft",
+      "studyDesign": "Primary study / unclear",
+      "summary": "Finnish dry-sauna bibliography record (yes focus) used as supporting exercise / recovery evidence for protocol context and guardrails.",
+      "title": "The influence of Finnish sauna treatments on the concentrations of nitric oxide, 3-nitrotyrosine and selected markers of oxidative status in training and non-training men",
+      "whyItMatters": "Expands the audited Finnish dry-sauna evidence corpus with a exercise / recovery record marked medium priority for Murph v1 interpretation."
     },
     {
       "aliases": [
@@ -7014,6 +7946,60 @@
       "summary": "Public-health context showing vigorous aerobic exercise as one option within weekly activity guidance.",
       "title": "World Health Organization 2020 guidelines on physical activity and sedentary behaviour",
       "whyItMatters": "Public-health context showing vigorous aerobic exercise as one option within weekly activity guidance."
+    },
+    {
+      "body": "This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.\n\n**Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a cardiometabolic record marked medium priority for Murph v1 interpretation.\n\n**Potential Murph endpoints/context:** blood pressure context, resting heart rate context\n\n**Protocol takeaway:** Use as cardiovascular context around heat exposure, not as a guaranteed 21-day result-card endpoint.",
+      "categories": [
+        "sauna",
+        "review",
+        "cardiometabolic"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Finnish dry-sauna corpus",
+      "finnishDrySaunaFocus": "Likely",
+      "key": "source_artifact:pmid-33513711",
+      "modality": "Sauna (likely dry)",
+      "murphV1Priority": "Medium",
+      "potentialMurphEndpoints": [
+        "blood pressure context",
+        "resting heart rate context"
+      ],
+      "protocolTakeaway": "Use as cardiovascular context around heat exposure, not as a guaranteed 21-day result-card endpoint.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:dry-sauna",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/sauna/pmid-33513711.md",
+      "revision": {
+        "pageRevisionId": "sha256:1cb5cb396b3acb82100b0756ac871a7d84ec2df82c081372f760807efd7f3ce3",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/sauna/pmid-33513711",
+      "source": {
+        "authors": "KN Henderson, et al.",
+        "citation": "Henderson KN, et al. The Cardiometabolic Health Benefits of Sauna Exposure in Individuals with High-Stress Occupations. A Mechanistic Review. International Journal of Environmental Research and Public Health. 2021;18(3):1105. doi:10.3390/ijerph18031105.",
+        "doi": "10.3390/ijerph18031105",
+        "journal": "International Journal of Environmental Research and Public Health",
+        "kind": "review",
+        "pmid": "33513711",
+        "title": "The Cardiometabolic Health Benefits of Sauna Exposure in Individuals with High-Stress Occupations. A Mechanistic Review",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/33513711/",
+        "year": 2021
+      },
+      "status": "draft",
+      "studyDesign": "Review",
+      "summary": "Finnish dry-sauna bibliography record (likely focus) used as supporting cardiometabolic evidence for protocol context and guardrails.",
+      "title": "The Cardiometabolic Health Benefits of Sauna Exposure in Individuals with High-Stress Occupations. A Mechanistic Review",
+      "whyItMatters": "Expands the audited Finnish dry-sauna evidence corpus with a cardiometabolic record marked medium priority for Murph v1 interpretation."
     },
     {
       "aliases": [
@@ -7844,6 +8830,61 @@
       "whyItMatters": "Helps avoid collapsing daytime light benefits into a blanket anti-blue-light message."
     },
     {
+      "body": "This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.\n\n**Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a exercise / recovery record marked medium priority for Murph v1 interpretation.\n\n**Potential Murph endpoints/context:** safety screening, session tolerance, illness and respiratory context\n\n**Protocol takeaway:** Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes.",
+      "categories": [
+        "sauna",
+        "study",
+        "exercise-recovery"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Finnish dry-sauna corpus",
+      "finnishDrySaunaFocus": "Likely",
+      "key": "source_artifact:pmid-36078656",
+      "modality": "Sauna (likely dry)",
+      "murphV1Priority": "Medium",
+      "potentialMurphEndpoints": [
+        "safety screening",
+        "session tolerance",
+        "illness and respiratory context"
+      ],
+      "protocolTakeaway": "Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:dry-sauna",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/sauna/pmid-36078656.md",
+      "revision": {
+        "pageRevisionId": "sha256:004c5b663df465e0ee66e1258f2f80774eafbeb45d302837113a57410ae34e00",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/sauna/pmid-36078656",
+      "source": {
+        "authors": "I Bartolomé, et al.",
+        "citation": "Bartolomé I, et al. Acute Effect of Exposure to Extreme Heat (100 ± 3 °C) on Lower Limb Maximal Resistance Strength. International Journal of Environmental Research and Public Health. 2022;19(17):10934. doi:10.3390/ijerph191710934.",
+        "doi": "10.3390/ijerph191710934",
+        "journal": "International Journal of Environmental Research and Public Health",
+        "kind": "journal_article",
+        "pmid": "36078656",
+        "title": "Acute Effect of Exposure to Extreme Heat (100 ± 3 °C) on Lower Limb Maximal Resistance Strength",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/36078656/",
+        "year": 2022
+      },
+      "status": "draft",
+      "studyDesign": "Experimental physiology",
+      "summary": "Finnish dry-sauna bibliography record (likely focus) used as supporting exercise / recovery evidence for protocol context and guardrails.",
+      "title": "Acute Effect of Exposure to Extreme Heat (100 ± 3 °C) on Lower Limb Maximal Resistance Strength",
+      "whyItMatters": "Expands the audited Finnish dry-sauna evidence corpus with a exercise / recovery record marked medium priority for Murph v1 interpretation."
+    },
+    {
       "body": "This source is included for **Long-term Finnish cohort evidence**.\n\n**Why it matters:** Suggests inflammatory state may partly shape the long-run relationship between sauna exposure and health outcomes.\n\n**Potential experiment signals:** Resting HR, HRV, illness/soreness logs, optional CRP or hs-CRP if lab-enabled experiments are added later\n\n**Protocol takeaway:** If future experiments expand beyond wearables, inflammation markers are a sensible add-on for more mechanistic sauna experiments.",
       "categories": [
         "sauna",
@@ -8118,6 +9159,58 @@
       "whyItMatters": "Useful umbrella context: subjective sleep signals are often more consistent than objective signals across heterogeneous interventions."
     },
     {
+      "body": "This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.\n\n**Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a general / mixed record marked medium priority for Murph v1 interpretation.\n\n**Potential Murph endpoints/context:** supporting corpus context\n\n**Protocol takeaway:** Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes.",
+      "categories": [
+        "sauna",
+        "review",
+        "general-mixed"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Finnish dry-sauna corpus",
+      "finnishDrySaunaFocus": "Yes",
+      "key": "source_artifact:pmid-37270272",
+      "modality": "Finnish dry sauna",
+      "murphV1Priority": "Medium",
+      "potentialMurphEndpoints": [
+        "supporting corpus context"
+      ],
+      "protocolTakeaway": "Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:dry-sauna",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/sauna/pmid-37270272.md",
+      "revision": {
+        "pageRevisionId": "sha256:7a0ecf91adf36b75fb2fcf2b88f618b7d3ca43a4161e23431eb23689414e2536",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/sauna/pmid-37270272",
+      "source": {
+        "authors": "SK Kunutsor, JA Laukkanen",
+        "citation": "SK Kunutsor, JA Laukkanen. Does the Combination of Finnish Sauna Bathing and Other Lifestyle Factors Confer Additional Health Benefits? A Review of the Evidence. Mayo Clin Proc 2023.",
+        "journal": "Mayo Clin Proc",
+        "kind": "review",
+        "pmid": "37270272",
+        "title": "Does the Combination of Finnish Sauna Bathing and Other Lifestyle Factors Confer Additional Health Benefits? A Review of the Evidence",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/37270272/",
+        "year": 2023
+      },
+      "status": "draft",
+      "studyDesign": "Review / meta",
+      "summary": "Finnish dry-sauna bibliography record (yes focus) used as supporting general / mixed evidence for protocol context and guardrails.",
+      "title": "Does the Combination of Finnish Sauna Bathing and Other Lifestyle Factors Confer Additional Health Benefits? A Review of the Evidence",
+      "whyItMatters": "Expands the audited Finnish dry-sauna evidence corpus with a general / mixed record marked medium priority for Murph v1 interpretation."
+    },
+    {
       "body": "This source is included for **Claim calibration**.\n\n**Why it matters:** Main overclaim guardrail for eye-strain, macular-health, and broad sleep claims.\n\n**Potential experiment signals:** visual fatigue, sleep quality, macular health\n\n**Protocol takeaway:** Do not present this protocol as eye care or retinal protection.",
       "categories": [
         "red-light-glasses-before-bed",
@@ -8286,6 +9379,169 @@
       "summary": "Intervention-design evidence that helps keep sauna dose, context, hydration, and expectations realistic.",
       "title": "Finnish sauna bathing and vascular health of adults with coronary artery disease: a randomized controlled trial",
       "whyItMatters": "Important negative Finnish-sauna RCT"
+    },
+    {
+      "body": "This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.\n\n**Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a cardiovascular record marked medium priority for Murph v1 interpretation.\n\n**Potential Murph endpoints/context:** blood pressure context, resting heart rate context, safety screening\n\n**Protocol takeaway:** Use as cardiovascular context around heat exposure, not as a guaranteed 21-day result-card endpoint.",
+      "categories": [
+        "sauna",
+        "study",
+        "cardiovascular"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Finnish dry-sauna corpus",
+      "finnishDrySaunaFocus": "Likely",
+      "key": "source_artifact:pmid-3766176",
+      "modality": "Sauna (likely dry)",
+      "murphV1Priority": "Medium",
+      "potentialMurphEndpoints": [
+        "blood pressure context",
+        "resting heart rate context",
+        "safety screening"
+      ],
+      "protocolTakeaway": "Use as cardiovascular context around heat exposure, not as a guaranteed 21-day result-card endpoint.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:dry-sauna",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/sauna/pmid-3766176.md",
+      "revision": {
+        "pageRevisionId": "sha256:07082535b2a9bf4528e50b275d3910f65af62d29b7fa6838dba45f064a652ff1",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/sauna/pmid-3766176",
+      "source": {
+        "authors": "K Kauppinen, et al.",
+        "citation": "K Kauppinen, et al. Some cardiovascular and metabolic effects of repeated sauna bathing. Acta Physiol Scand 1986.",
+        "journal": "Acta Physiol Scand",
+        "kind": "journal_article",
+        "pmid": "3766176",
+        "title": "Some cardiovascular and metabolic effects of repeated sauna bathing",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/3766176/",
+        "year": 1986
+      },
+      "status": "draft",
+      "studyDesign": "Experimental physiology",
+      "summary": "Finnish dry-sauna bibliography record (likely focus) used as supporting cardiovascular evidence for protocol context and guardrails.",
+      "title": "Some cardiovascular and metabolic effects of repeated sauna bathing",
+      "whyItMatters": "Expands the audited Finnish dry-sauna evidence corpus with a cardiovascular record marked medium priority for Murph v1 interpretation."
+    },
+    {
+      "body": "This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.\n\n**Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a safety / physiology record marked lower priority for Murph v1 interpretation.\n\n**Potential Murph endpoints/context:** safety screening, session tolerance, illness and respiratory context\n\n**Protocol takeaway:** Use for safety screening and session-context interpretation rather than efficacy claims.",
+      "categories": [
+        "sauna",
+        "study",
+        "safety-physiology"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Finnish dry-sauna corpus",
+      "finnishDrySaunaFocus": "Likely",
+      "key": "source_artifact:pmid-3788622",
+      "modality": "Sauna (likely dry)",
+      "murphV1Priority": "Lower",
+      "potentialMurphEndpoints": [
+        "safety screening",
+        "session tolerance",
+        "illness and respiratory context"
+      ],
+      "protocolTakeaway": "Use for safety screening and session-context interpretation rather than efficacy claims.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:dry-sauna",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/sauna/pmid-3788622.md",
+      "revision": {
+        "pageRevisionId": "sha256:fb88c28c9f95f1408a8f9d13e6e1228a4a7cf42cdc5f59d788b9e2a05f62d4fb",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/sauna/pmid-3788622",
+      "source": {
+        "authors": "J Leppäluoto, P Tuominen, P Väänänen, et al.",
+        "citation": "J Leppäluoto, P Tuominen, P Väänänen, et al. Endocrine effects of repeated sauna bathing. Acta Physiol Scand 1986.",
+        "journal": "Acta Physiol Scand",
+        "kind": "journal_article",
+        "pmid": "3788622",
+        "title": "Endocrine effects of repeated sauna bathing",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/3788622/",
+        "year": 1986
+      },
+      "status": "draft",
+      "studyDesign": "Experimental physiology",
+      "summary": "Finnish dry-sauna bibliography record (likely focus) used as supporting safety / physiology evidence for protocol context and guardrails.",
+      "title": "Endocrine effects of repeated sauna bathing",
+      "whyItMatters": "Expands the audited Finnish dry-sauna evidence corpus with a safety / physiology record marked lower priority for Murph v1 interpretation."
+    },
+    {
+      "body": "This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.\n\n**Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a neuro / mental record marked lower priority for Murph v1 interpretation.\n\n**Potential Murph endpoints/context:** safety screening, session tolerance, illness and respiratory context\n\n**Protocol takeaway:** Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes.",
+      "categories": [
+        "sauna",
+        "study",
+        "neuro-mental"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Finnish dry-sauna corpus",
+      "finnishDrySaunaFocus": "Likely",
+      "key": "source_artifact:pmid-38011189",
+      "modality": "Sauna (likely dry)",
+      "murphV1Priority": "Lower",
+      "potentialMurphEndpoints": [
+        "safety screening",
+        "session tolerance",
+        "illness and respiratory context"
+      ],
+      "protocolTakeaway": "Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:dry-sauna",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/sauna/pmid-38011189.md",
+      "revision": {
+        "pageRevisionId": "sha256:be1a8987cf38c13b347e1e7f0226a660dd23c97fa7fd055bed0074c298e6e776",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/sauna/pmid-38011189",
+      "source": {
+        "authors": "M Chang, et al.",
+        "citation": "Chang M, et al. A study on neural changes induced by sauna bathing: Neural basis of the \\\"totonou\\\" state. PLOS ONE. 2023;18(11):e0294137. doi:10.1371/journal.pone.0294137.",
+        "doi": "10.1371/journal.pone.0294137",
+        "journal": "PLOS ONE",
+        "kind": "journal_article",
+        "pmid": "38011189",
+        "title": "A study on neural changes induced by sauna bathing: Neural basis of the \\\"totonou\\\" state",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/38011189/",
+        "year": 2023
+      },
+      "status": "draft",
+      "studyDesign": "Experimental physiology",
+      "summary": "Finnish dry-sauna bibliography record (likely focus) used as supporting neuro / mental evidence for protocol context and guardrails.",
+      "title": "A study on neural changes induced by sauna bathing: Neural basis of the \\\"totonou\\\" state",
+      "whyItMatters": "Expands the audited Finnish dry-sauna evidence corpus with a neuro / mental record marked lower priority for Murph v1 interpretation."
     },
     {
       "body": "This source is included for **Long-term Finnish cohort evidence**.\n\n**Why it matters:** Highlights baseline blood pressure as a possible effect modifier, which is directly relevant to screening and personalization.\n\n**Potential experiment signals:** Baseline BP, post-sauna BP, morning BP trend, resting HR\n\n**Protocol takeaway:** Capture baseline BP before recommending higher-frequency sauna protocols and stratify interpretation by starting BP where possible.",
@@ -8458,6 +9714,112 @@
       "summary": "Recent metabolic-syndrome HIIT synthesis; useful to separate metabolic HIIT and low-volume variants from standard 4x4.",
       "title": "High-intensity interval training for cardiometabolic health in adults with metabolic syndrome: a systematic review and meta-analysis of randomised controlled trials",
       "whyItMatters": "Recent metabolic-syndrome HIIT synthesis; useful to separate metabolic HIIT and low-volume variants from standard 4x4."
+    },
+    {
+      "body": "This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.\n\n**Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a general / mixed record marked lower priority for Murph v1 interpretation.\n\n**Potential Murph endpoints/context:** supporting corpus context\n\n**Protocol takeaway:** Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes.",
+      "categories": [
+        "sauna",
+        "study",
+        "general-mixed"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Finnish dry-sauna corpus",
+      "finnishDrySaunaFocus": "Likely",
+      "key": "source_artifact:pmid-39446139",
+      "modality": "Sauna (unspecified / likely dry)",
+      "murphV1Priority": "Lower",
+      "potentialMurphEndpoints": [
+        "supporting corpus context"
+      ],
+      "protocolTakeaway": "Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:dry-sauna",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/sauna/pmid-39446139.md",
+      "revision": {
+        "pageRevisionId": "sha256:5037f978e4ae1aed5fa2743b7e2f74b90308fafdd694d4fa5fc9377aa6031d48",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/sauna/pmid-39446139",
+      "source": {
+        "authors": "Å Engström, et al.",
+        "citation": "Engström Å, et al. Sauna bathing in northern Sweden: results from the MONICA study 2022. International Journal of Circumpolar Health. 2024;83(1):2419698. doi:10.1080/22423982.2024.2419698.",
+        "doi": "10.1080/22423982.2024.2419698",
+        "journal": "International Journal of Circumpolar Health",
+        "kind": "journal_article",
+        "pmid": "39446139",
+        "title": "Sauna bathing in northern Sweden: results from the MONICA study 2022",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/39446139/",
+        "year": 2024
+      },
+      "status": "draft",
+      "studyDesign": "Primary study / unclear",
+      "summary": "Finnish dry-sauna bibliography record (likely focus) used as supporting general / mixed evidence for protocol context and guardrails.",
+      "title": "Sauna bathing in northern Sweden: results from the MONICA study 2022",
+      "whyItMatters": "Expands the audited Finnish dry-sauna evidence corpus with a general / mixed record marked lower priority for Murph v1 interpretation."
+    },
+    {
+      "body": "This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.\n\n**Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a symptoms / musculoskeletal record marked lower priority for Murph v1 interpretation.\n\n**Potential Murph endpoints/context:** symptom context\n\n**Protocol takeaway:** Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes.",
+      "categories": [
+        "sauna",
+        "review",
+        "symptoms-musculoskeletal"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Finnish dry-sauna corpus",
+      "finnishDrySaunaFocus": "Likely",
+      "key": "source_artifact:pmid-40202605",
+      "modality": "Sauna (likely dry)",
+      "murphV1Priority": "Lower",
+      "potentialMurphEndpoints": [
+        "symptom context"
+      ],
+      "protocolTakeaway": "Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:dry-sauna",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/sauna/pmid-40202605.md",
+      "revision": {
+        "pageRevisionId": "sha256:922b954ddf79259a708b04c116765d87969ce1f7858d8168655ac0bf94f9eab9",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/sauna/pmid-40202605",
+      "source": {
+        "authors": "Y Fedorchenko, et al.",
+        "citation": "Fedorchenko Y, et al. Sauna therapy in rheumatic diseases: mechanisms, potential benefits, and cautions. Rheumatology International. 2025;45(5):94. doi:10.1007/s00296-025-05852-0.",
+        "doi": "10.1007/s00296-025-05852-0",
+        "journal": "Rheumatology International",
+        "kind": "review",
+        "pmid": "40202605",
+        "title": "Sauna therapy in rheumatic diseases: mechanisms, potential benefits, and cautions",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/40202605/",
+        "year": 2025
+      },
+      "status": "draft",
+      "studyDesign": "Review",
+      "summary": "Finnish dry-sauna bibliography record (likely focus) used as supporting symptoms / musculoskeletal evidence for protocol context and guardrails.",
+      "title": "Sauna therapy in rheumatic diseases: mechanisms, potential benefits, and cautions",
+      "whyItMatters": "Expands the audited Finnish dry-sauna evidence corpus with a symptoms / musculoskeletal record marked lower priority for Murph v1 interpretation."
     },
     {
       "aliases": [
@@ -8683,6 +10045,59 @@
       "whyItMatters": "Useful adjacent evidence for separating pediatric sleep-phase questions from the ordinary adult bedtime protocol."
     },
     {
+      "body": "This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.\n\n**Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a general / mixed record marked lower priority for Murph v1 interpretation.\n\n**Potential Murph endpoints/context:** supporting corpus context\n\n**Protocol takeaway:** Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes.",
+      "categories": [
+        "sauna",
+        "study",
+        "general-mixed"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Finnish dry-sauna corpus",
+      "finnishDrySaunaFocus": "Likely",
+      "key": "source_artifact:pmid-41340471",
+      "modality": "Sauna (unspecified / likely dry)",
+      "murphV1Priority": "Lower",
+      "potentialMurphEndpoints": [
+        "supporting corpus context"
+      ],
+      "protocolTakeaway": "Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:dry-sauna",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/sauna/pmid-41340471.md",
+      "revision": {
+        "pageRevisionId": "sha256:a429380291df1a9fe13a70efa7adb0b1e9860447e90711aeb35d862c8a92259b",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/sauna/pmid-41340471",
+      "source": {
+        "authors": "M Lennkvist, H Hägglund, Å Engström",
+        "citation": "Lennkvist M, Hägglund H, Engström Å. Women's perceptions of sauna bathing and its impact on health and well-being: insights from a cross-sectional study. International Journal of Circumpolar Health. 2025;84(1):2595806. doi:10.1080/22423982.2025.2595806.",
+        "doi": "10.1080/22423982.2025.2595806",
+        "journal": "International Journal of Circumpolar Health",
+        "kind": "journal_article",
+        "pmid": "41340471",
+        "title": "Women's perceptions of sauna bathing and its impact on health and well-being: insights from a cross-sectional study",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/41340471/",
+        "year": 2025
+      },
+      "status": "draft",
+      "studyDesign": "Primary study / unclear",
+      "summary": "Finnish dry-sauna bibliography record (likely focus) used as supporting general / mixed evidence for protocol context and guardrails.",
+      "title": "Women's perceptions of sauna bathing and its impact on health and well-being: insights from a cross-sectional study",
+      "whyItMatters": "Expands the audited Finnish dry-sauna evidence corpus with a general / mixed record marked lower priority for Murph v1 interpretation."
+    },
+    {
       "body": "This source is included for **Objective sleep meta-analysis**.\n\n**Why it matters:** Best current null/objective counterweight: small adult crossover RCT synthesis with no statistically significant pooled actigraphy improvement.\n\n**Potential experiment signals:** actigraphy sleep onset latency, total sleep time, sleep efficiency, wake after sleep onset\n\n**Protocol takeaway:** Use to keep the protocol framed as a bounded self-experiment, not a reliable insomnia treatment.",
       "categories": [
         "red-light-glasses-before-bed",
@@ -8790,6 +10205,114 @@
       "summary": "Safety and adjacent-variant source: a newer acute-mania trial did not reproduce the earlier enthusiasm and should downgrade psychiatric virtual-darkness claims.",
       "title": "The Ottawa sunglasses at night study: A randomized controlled trial of blue-blocking glasses for mania",
       "whyItMatters": "Strong reason to keep mania and mood-disorder protocols out of the general bedtime-glasses recipe."
+    },
+    {
+      "body": "This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.\n\n**Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a cardiovascular record marked lower priority for Murph v1 interpretation.\n\n**Potential Murph endpoints/context:** blood pressure context, resting heart rate context\n\n**Protocol takeaway:** Use as cardiovascular context around heat exposure, not as a guaranteed 21-day result-card endpoint.",
+      "categories": [
+        "sauna",
+        "review",
+        "cardiovascular"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Finnish dry-sauna corpus",
+      "finnishDrySaunaFocus": "Likely",
+      "key": "source_artifact:pmid-41426898",
+      "modality": "Sauna (likely dry)",
+      "murphV1Priority": "Lower",
+      "potentialMurphEndpoints": [
+        "blood pressure context",
+        "resting heart rate context"
+      ],
+      "protocolTakeaway": "Use as cardiovascular context around heat exposure, not as a guaranteed 21-day result-card endpoint.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:dry-sauna",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/sauna/pmid-41426898.md",
+      "revision": {
+        "pageRevisionId": "sha256:010ab28da847ba6d0d7bec7312a25e45c8757c3408577f4a2910c8205eba6b03",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/sauna/pmid-41426898",
+      "source": {
+        "authors": "G Hachem, et al.",
+        "citation": "Hachem G, et al. The Role of Sauna Bathing in Ischemic Heart Disease: A Narrative Review of Therapeutic Potential, Physiological Mechanisms, and Emerging Clinical Applications. Cureus. 2025;17(11):e98162. doi:10.7759/cureus.98162.",
+        "doi": "10.7759/cureus.98162",
+        "journal": "Cureus",
+        "kind": "review",
+        "pmid": "41426898",
+        "title": "The Role of Sauna Bathing in Ischemic Heart Disease: A Narrative Review of Therapeutic Potential, Physiological Mechanisms, and Emerging Clinical Applications",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/41426898/",
+        "year": 2025
+      },
+      "status": "draft",
+      "studyDesign": "Review",
+      "summary": "Finnish dry-sauna bibliography record (likely focus) used as supporting cardiovascular evidence for protocol context and guardrails.",
+      "title": "The Role of Sauna Bathing in Ischemic Heart Disease: A Narrative Review of Therapeutic Potential, Physiological Mechanisms, and Emerging Clinical Applications",
+      "whyItMatters": "Expands the audited Finnish dry-sauna evidence corpus with a cardiovascular record marked lower priority for Murph v1 interpretation."
+    },
+    {
+      "body": "This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.\n\n**Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a cardiovascular record marked high priority for Murph v1 interpretation.\n\n**Potential Murph endpoints/context:** blood pressure context, resting heart rate context, safety screening\n\n**Protocol takeaway:** Use directly for safety, cardiovascular-context, or protocol-design guardrails; still avoid promising a short-term wearable outcome from this record alone.",
+      "categories": [
+        "sauna",
+        "study",
+        "cardiovascular"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Finnish dry-sauna corpus",
+      "finnishDrySaunaFocus": "Yes",
+      "key": "source_artifact:pmid-41461792",
+      "modality": "Finnish dry sauna",
+      "murphV1Priority": "High",
+      "potentialMurphEndpoints": [
+        "blood pressure context",
+        "resting heart rate context",
+        "safety screening"
+      ],
+      "protocolTakeaway": "Use directly for safety, cardiovascular-context, or protocol-design guardrails; still avoid promising a short-term wearable outcome from this record alone.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:dry-sauna",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/sauna/pmid-41461792.md",
+      "revision": {
+        "pageRevisionId": "sha256:7c28390b4a378d16b98ab231b1b26cd6049486773572a3d4c92ebed9e012a245",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/sauna/pmid-41461792",
+      "source": {
+        "authors": "R Szafraniec, et al.",
+        "citation": "R Szafraniec, et al. Acute Finnish sauna heating and cold water immersion effects on cardiovascular dynamic response in normotensive women. Sci Rep 2025.",
+        "journal": "Sci Rep",
+        "kind": "journal_article",
+        "pmid": "41461792",
+        "title": "Acute Finnish sauna heating and cold water immersion effects on cardiovascular dynamic response in normotensive women",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/41461792/",
+        "year": 2025
+      },
+      "status": "draft",
+      "studyDesign": "Experimental physiology",
+      "summary": "Finnish dry-sauna bibliography record (yes focus) used as supporting cardiovascular evidence for protocol context and guardrails.",
+      "title": "Acute Finnish sauna heating and cold water immersion effects on cardiovascular dynamic response in normotensive women",
+      "whyItMatters": "Expands the audited Finnish dry-sauna evidence corpus with a cardiovascular record marked high priority for Murph v1 interpretation."
     },
     {
       "artifactNeeded": true,
@@ -8904,6 +10427,60 @@
       "summary": "Intervention-design evidence that helps keep sauna dose, context, hydration, and expectations realistic.",
       "title": "Effects of sauna bathing on exercise capacity and muscle function in HFpEF (SAUNA-HFpEF): A mechanistic, prospective, translational, single-arm, and single-centre pilot study",
       "whyItMatters": "Provides a concrete progressive dosing model and shows that repeated sauna exposure can move functional outcomes over weeks, even in a clinical group."
+    },
+    {
+      "body": "This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.\n\n**Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a safety / physiology record marked lower priority for Murph v1 interpretation.\n\n**Potential Murph endpoints/context:** safety screening, session tolerance\n\n**Protocol takeaway:** Use for safety screening and session-context interpretation rather than efficacy claims.",
+      "categories": [
+        "sauna",
+        "study",
+        "safety-physiology"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Finnish dry-sauna corpus",
+      "finnishDrySaunaFocus": "Yes",
+      "key": "source_artifact:pmid-445022",
+      "modality": "Finnish dry sauna",
+      "murphV1Priority": "Lower",
+      "potentialMurphEndpoints": [
+        "safety screening",
+        "session tolerance"
+      ],
+      "protocolTakeaway": "Use for safety screening and session-context interpretation rather than efficacy claims.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:dry-sauna",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/sauna/pmid-445022.md",
+      "revision": {
+        "pageRevisionId": "sha256:b5a760aae2b952fa72b7e6278a8ad6033bccc2b86f1c638731ad5312b4b4d61e",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/sauna/pmid-445022",
+      "source": {
+        "authors": "M Uhari, A Mustonen, K Kouvalainen",
+        "citation": "Uhari M, Mustonen A, Kouvalainen K. Sauna habits of Finnish women during pregnancy. British Medical Journal. 1979;1(6172):1216. doi:10.1136/bmj.1.6172.1216.",
+        "doi": "10.1136/bmj.1.6172.1216",
+        "journal": "British Medical Journal",
+        "kind": "journal_article",
+        "pmid": "445022",
+        "title": "Sauna habits of Finnish women during pregnancy",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/445022/",
+        "year": 1979
+      },
+      "status": "draft",
+      "studyDesign": "Primary study / unclear",
+      "summary": "Finnish dry-sauna bibliography record (yes focus) used as supporting safety / physiology evidence for protocol context and guardrails.",
+      "title": "Sauna habits of Finnish women during pregnancy",
+      "whyItMatters": "Expands the audited Finnish dry-sauna evidence corpus with a safety / physiology record marked lower priority for Murph v1 interpretation."
     },
     {
       "backboneSourceKeys": [
@@ -9107,6 +10684,1103 @@
       "whyItMatters": "Structured curation artifact used to turn discovery and gap-fill passes into a bounded protocol."
     },
     {
+      "body": "This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.\n\n**Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a general / mixed record marked medium priority for Murph v1 interpretation.\n\n**Potential Murph endpoints/context:** supporting corpus context\n\n**Protocol takeaway:** Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes.\n\nThe workbook linked this record through a review or bibliography backbone rather than a direct article page. Keep it in the corpus, but do not show a potentially misleading outbound source link in the product UI.",
+      "categories": [
+        "sauna",
+        "review",
+        "general-mixed"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Finnish dry-sauna corpus",
+      "finnishDrySaunaFocus": "Likely",
+      "key": "source_artifact:sauna-1986-kauppinen-man-in-the-sauna-review-article",
+      "modality": "Sauna (unspecified / likely dry)",
+      "murphV1Priority": "Medium",
+      "potentialMurphEndpoints": [
+        "supporting corpus context"
+      ],
+      "protocolTakeaway": "Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:dry-sauna",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/sauna/sauna-1986-kauppinen-man-in-the-sauna-review-article.md",
+      "revision": {
+        "pageRevisionId": "sha256:5e78607bee1611dafb1800ad775f6353416273e8878f3eb0545c05ea02d5bef2",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/sauna/sauna-1986-kauppinen-man-in-the-sauna-review-article",
+      "source": {
+        "authors": "Kauppinen K, Vuori I",
+        "citation": "Kauppinen K, Vuori I. Man in the sauna. Review article. Ann Clin Res 1986;18:173-185.",
+        "journal": "Ann Clin Res",
+        "kind": "review",
+        "title": "Man in the sauna. Review article",
+        "year": 1986
+      },
+      "sourceUrlCurationNote": "Workbook source URL points to a bibliography or review backbone rather than a direct article landing page, so the public source link is intentionally omitted from the app card.",
+      "status": "draft",
+      "studyDesign": "Review / meta",
+      "summary": "Finnish dry-sauna bibliography record (likely focus) used as supporting general / mixed evidence for protocol context and guardrails.",
+      "title": "Man in the sauna. Review article",
+      "whyItMatters": "Expands the audited Finnish dry-sauna evidence corpus with a general / mixed record marked medium priority for Murph v1 interpretation."
+    },
+    {
+      "body": "This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.\n\n**Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a cardiovascular record marked high priority for Murph v1 interpretation.\n\n**Potential Murph endpoints/context:** blood pressure context, resting heart rate context\n\n**Protocol takeaway:** Use directly for safety, cardiovascular-context, or protocol-design guardrails; still avoid promising a short-term wearable outcome from this record alone.\n\nThe workbook linked this record through a review or bibliography backbone rather than a direct article page. Keep it in the corpus, but do not show a potentially misleading outbound source link in the product UI.",
+      "categories": [
+        "sauna",
+        "review",
+        "cardiovascular"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Finnish dry-sauna corpus",
+      "finnishDrySaunaFocus": "Yes",
+      "key": "source_artifact:sauna-1988-eisalo-the-finnish-sauna-and-cardiovascular-diseases",
+      "modality": "Finnish dry sauna",
+      "murphV1Priority": "High",
+      "potentialMurphEndpoints": [
+        "blood pressure context",
+        "resting heart rate context"
+      ],
+      "protocolTakeaway": "Use directly for safety, cardiovascular-context, or protocol-design guardrails; still avoid promising a short-term wearable outcome from this record alone.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:dry-sauna",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/sauna/sauna-1988-eisalo-the-finnish-sauna-and-cardiovascular-diseases.md",
+      "revision": {
+        "pageRevisionId": "sha256:ceff7d2911d5f70536af169eaa4cdf435114ec271f0295cbadcd8a2f3ed4ec8b",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/sauna/sauna-1988-eisalo-the-finnish-sauna-and-cardiovascular-diseases",
+      "source": {
+        "authors": "Eisalo A, Luurila OJ",
+        "citation": "Eisalo A, Luurila OJ. The Finnish sauna and cardiovascular diseases. Ann Clin Res 1988;20:267-270.",
+        "journal": "Ann Clin Res",
+        "kind": "review",
+        "title": "The Finnish sauna and cardiovascular diseases",
+        "year": 1988
+      },
+      "sourceUrlCurationNote": "Workbook source URL points to a bibliography or review backbone rather than a direct article landing page, so the public source link is intentionally omitted from the app card.",
+      "status": "draft",
+      "studyDesign": "Review / meta",
+      "summary": "Finnish dry-sauna bibliography record (yes focus) used as supporting cardiovascular evidence for protocol context and guardrails.",
+      "title": "The Finnish sauna and cardiovascular diseases",
+      "whyItMatters": "Expands the audited Finnish dry-sauna evidence corpus with a cardiovascular record marked high priority for Murph v1 interpretation."
+    },
+    {
+      "body": "This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.\n\n**Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a safety / physiology record marked lower priority for Murph v1 interpretation.\n\n**Potential Murph endpoints/context:** safety screening, session tolerance\n\n**Protocol takeaway:** Use for safety screening and session-context interpretation rather than efficacy claims.\n\nThe workbook linked this record through a review or bibliography backbone rather than a direct article page. Keep it in the corpus, but do not show a potentially misleading outbound source link in the product UI.",
+      "categories": [
+        "sauna",
+        "study",
+        "safety-physiology"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Finnish dry-sauna corpus",
+      "finnishDrySaunaFocus": "Likely",
+      "key": "source_artifact:sauna-1988-kukkonen-harjula-how-the-sauna-affects-the-endocrine-system",
+      "modality": "Sauna (unspecified / likely dry)",
+      "murphV1Priority": "Lower",
+      "potentialMurphEndpoints": [
+        "safety screening",
+        "session tolerance"
+      ],
+      "protocolTakeaway": "Use for safety screening and session-context interpretation rather than efficacy claims.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:dry-sauna",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/sauna/sauna-1988-kukkonen-harjula-how-the-sauna-affects-the-endocrine-system.md",
+      "revision": {
+        "pageRevisionId": "sha256:492c9bde86c33529c38a1ca60c3efec9d17aa338e45c5af4a029890c76e0a4e4",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/sauna/sauna-1988-kukkonen-harjula-how-the-sauna-affects-the-endocrine-system",
+      "source": {
+        "authors": "Kukkonen-Harjula K, Kauppinen K",
+        "citation": "Kukkonen-Harjula K, Kauppinen K. How the sauna affects the endocrine system. Ann Clin Res 1988;20:262-266.",
+        "journal": "Ann Clin Res",
+        "kind": "journal_article",
+        "title": "How the sauna affects the endocrine system",
+        "year": 1988
+      },
+      "sourceUrlCurationNote": "Workbook source URL points to a bibliography or review backbone rather than a direct article landing page, so the public source link is intentionally omitted from the app card.",
+      "status": "draft",
+      "studyDesign": "Primary study / unclear",
+      "summary": "Finnish dry-sauna bibliography record (likely focus) used as supporting safety / physiology evidence for protocol context and guardrails.",
+      "title": "How the sauna affects the endocrine system",
+      "whyItMatters": "Expands the audited Finnish dry-sauna evidence corpus with a safety / physiology record marked lower priority for Murph v1 interpretation."
+    },
+    {
+      "body": "This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.\n\n**Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a respiratory / ent record marked lower priority for Murph v1 interpretation.\n\n**Potential Murph endpoints/context:** illness and respiratory context\n\n**Protocol takeaway:** Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes.\n\nThe workbook linked this record through a review or bibliography backbone rather than a direct article page. Keep it in the corpus, but do not show a potentially misleading outbound source link in the product UI.",
+      "categories": [
+        "sauna",
+        "study",
+        "respiratory-ent"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Finnish dry-sauna corpus",
+      "finnishDrySaunaFocus": "Likely",
+      "key": "source_artifact:sauna-1988-laitinen-lungs-and-ventilation-in-the-sauna",
+      "modality": "Sauna (unspecified / likely dry)",
+      "murphV1Priority": "Lower",
+      "potentialMurphEndpoints": [
+        "illness and respiratory context"
+      ],
+      "protocolTakeaway": "Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:dry-sauna",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/sauna/sauna-1988-laitinen-lungs-and-ventilation-in-the-sauna.md",
+      "revision": {
+        "pageRevisionId": "sha256:ae1f23b6a30bbe052d45740d16c799865da76e7886f2636f042ac421dc054cf9",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/sauna/sauna-1988-laitinen-lungs-and-ventilation-in-the-sauna",
+      "source": {
+        "authors": "Laitinen LA, Lindqvist A, Heino M",
+        "citation": "Laitinen LA, Lindqvist A, Heino M. Lungs and ventilation in the sauna. Ann Clin Res 1988;20:244-248.",
+        "journal": "Ann Clin Res",
+        "kind": "journal_article",
+        "title": "Lungs and ventilation in the sauna",
+        "year": 1988
+      },
+      "sourceUrlCurationNote": "Workbook source URL points to a bibliography or review backbone rather than a direct article landing page, so the public source link is intentionally omitted from the app card.",
+      "status": "draft",
+      "studyDesign": "Primary study / unclear",
+      "summary": "Finnish dry-sauna bibliography record (likely focus) used as supporting respiratory / ent evidence for protocol context and guardrails.",
+      "title": "Lungs and ventilation in the sauna",
+      "whyItMatters": "Expands the audited Finnish dry-sauna evidence corpus with a respiratory / ent record marked lower priority for Murph v1 interpretation."
+    },
+    {
+      "body": "This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.\n\n**Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a safety / physiology record marked lower priority for Murph v1 interpretation.\n\n**Potential Murph endpoints/context:** safety screening, session tolerance, illness and respiratory context\n\n**Protocol takeaway:** Use for safety screening and session-context interpretation rather than efficacy claims.\n\nThe workbook linked this record through a review or bibliography backbone rather than a direct article page. Keep it in the corpus, but do not show a potentially misleading outbound source link in the product UI.",
+      "categories": [
+        "sauna",
+        "study",
+        "safety-physiology"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Finnish dry-sauna corpus",
+      "finnishDrySaunaFocus": "Likely",
+      "key": "source_artifact:sauna-1989-kauppinen-sauna-shower-and-ice-water-immersion-physiological-respons",
+      "modality": "Sauna (unspecified / likely dry)",
+      "murphV1Priority": "Lower",
+      "potentialMurphEndpoints": [
+        "safety screening",
+        "session tolerance",
+        "illness and respiratory context"
+      ],
+      "protocolTakeaway": "Use for safety screening and session-context interpretation rather than efficacy claims.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:dry-sauna",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/sauna/sauna-1989-kauppinen-sauna-shower-and-ice-water-immersion-physiological-respons.md",
+      "revision": {
+        "pageRevisionId": "sha256:deff16f8a09d713c68be36128594749c02805a7a3e13b02d0eb0af67ca15e40d",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/sauna/sauna-1989-kauppinen-sauna-shower-and-ice-water-immersion-physiological-respons",
+      "source": {
+        "authors": "Kauppinen K",
+        "citation": "Kauppinen K. Sauna, shower, and ice water immersion. Physiological responses to brief exposures to heat, cool, and cold. Part I. Body fluid balance. Arctic Med Res 1989;48:55-63.",
+        "journal": "Arctic Med Res",
+        "kind": "journal_article",
+        "title": "Sauna, shower, and ice water immersion. Physiological responses to brief exposures to heat, cool, and cold. Part I. Body fluid balance",
+        "year": 1989
+      },
+      "sourceUrlCurationNote": "Workbook source URL points to a bibliography or review backbone rather than a direct article landing page, so the public source link is intentionally omitted from the app card.",
+      "status": "draft",
+      "studyDesign": "Experimental physiology",
+      "summary": "Finnish dry-sauna bibliography record (likely focus) used as supporting safety / physiology evidence for protocol context and guardrails.",
+      "title": "Sauna, shower, and ice water immersion. Physiological responses to brief exposures to heat, cool, and cold. Part I. Body fluid balance",
+      "whyItMatters": "Expands the audited Finnish dry-sauna evidence corpus with a safety / physiology record marked lower priority for Murph v1 interpretation."
+    },
+    {
+      "body": "This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.\n\n**Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a general / mixed record marked lower priority for Murph v1 interpretation.\n\n**Potential Murph endpoints/context:** safety screening, session tolerance, illness and respiratory context\n\n**Protocol takeaway:** Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes.\n\nThe workbook linked this record through a review or bibliography backbone rather than a direct article page. Keep it in the corpus, but do not show a potentially misleading outbound source link in the product UI.",
+      "categories": [
+        "sauna",
+        "study",
+        "general-mixed"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Finnish dry-sauna corpus",
+      "finnishDrySaunaFocus": "Likely",
+      "key": "source_artifact:sauna-1989-kauppinen-sauna-shower-and-ice-water-immersion-physiological-respons-2",
+      "modality": "Sauna (unspecified / likely dry)",
+      "murphV1Priority": "Lower",
+      "potentialMurphEndpoints": [
+        "safety screening",
+        "session tolerance",
+        "illness and respiratory context"
+      ],
+      "protocolTakeaway": "Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:dry-sauna",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/sauna/sauna-1989-kauppinen-sauna-shower-and-ice-water-immersion-physiological-respons-2.md",
+      "revision": {
+        "pageRevisionId": "sha256:32cda1b293cd5de9cb810fb2b4c13704888fadc87dc6e1a2a2f1fda2dda42854",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/sauna/sauna-1989-kauppinen-sauna-shower-and-ice-water-immersion-physiological-respons-2",
+      "source": {
+        "authors": "Kauppinen K",
+        "citation": "Kauppinen K. Sauna, shower, and ice water immersion. Physiological responses to brief exposures to heat, cool, and cold. Part II. Circulation. Arctic Med Res 1989;48:64-74.",
+        "journal": "Arctic Med Res",
+        "kind": "journal_article",
+        "title": "Sauna, shower, and ice water immersion. Physiological responses to brief exposures to heat, cool, and cold. Part II. Circulation",
+        "year": 1989
+      },
+      "sourceUrlCurationNote": "Workbook source URL points to a bibliography or review backbone rather than a direct article landing page, so the public source link is intentionally omitted from the app card.",
+      "status": "draft",
+      "studyDesign": "Experimental physiology",
+      "summary": "Finnish dry-sauna bibliography record (likely focus) used as supporting general / mixed evidence for protocol context and guardrails.",
+      "title": "Sauna, shower, and ice water immersion. Physiological responses to brief exposures to heat, cool, and cold. Part II. Circulation",
+      "whyItMatters": "Expands the audited Finnish dry-sauna evidence corpus with a general / mixed record marked lower priority for Murph v1 interpretation."
+    },
+    {
+      "body": "This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.\n\n**Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a general / mixed record marked lower priority for Murph v1 interpretation.\n\n**Potential Murph endpoints/context:** safety screening, session tolerance, illness and respiratory context\n\n**Protocol takeaway:** Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes.\n\nThe workbook linked this record through a review or bibliography backbone rather than a direct article page. Keep it in the corpus, but do not show a potentially misleading outbound source link in the product UI.",
+      "categories": [
+        "sauna",
+        "study",
+        "general-mixed"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Finnish dry-sauna corpus",
+      "finnishDrySaunaFocus": "Likely",
+      "key": "source_artifact:sauna-1989-kauppinen-sauna-shower-and-ice-water-immersion-physiological-respons-3",
+      "modality": "Sauna (unspecified / likely dry)",
+      "murphV1Priority": "Lower",
+      "potentialMurphEndpoints": [
+        "safety screening",
+        "session tolerance",
+        "illness and respiratory context"
+      ],
+      "protocolTakeaway": "Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:dry-sauna",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/sauna/sauna-1989-kauppinen-sauna-shower-and-ice-water-immersion-physiological-respons-3.md",
+      "revision": {
+        "pageRevisionId": "sha256:8111bd97bc0ee1433d7ef986287436a3a4f1637c560824c665c7cde43a66bd1d",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/sauna/sauna-1989-kauppinen-sauna-shower-and-ice-water-immersion-physiological-respons-3",
+      "source": {
+        "authors": "Kauppinen K",
+        "citation": "Kauppinen K. Sauna, shower, and ice water immersion. Physiological responses to brief exposures to heat, cool, and cold. Part III. Body temperatures. Arctic Med Res 1989;48:75-86.",
+        "journal": "Arctic Med Res",
+        "kind": "journal_article",
+        "title": "Sauna, shower, and ice water immersion. Physiological responses to brief exposures to heat, cool, and cold. Part III. Body temperatures",
+        "year": 1989
+      },
+      "sourceUrlCurationNote": "Workbook source URL points to a bibliography or review backbone rather than a direct article landing page, so the public source link is intentionally omitted from the app card.",
+      "status": "draft",
+      "studyDesign": "Experimental physiology",
+      "summary": "Finnish dry-sauna bibliography record (likely focus) used as supporting general / mixed evidence for protocol context and guardrails.",
+      "title": "Sauna, shower, and ice water immersion. Physiological responses to brief exposures to heat, cool, and cold. Part III. Body temperatures",
+      "whyItMatters": "Expands the audited Finnish dry-sauna evidence corpus with a general / mixed record marked lower priority for Murph v1 interpretation."
+    },
+    {
+      "body": "This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.\n\n**Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a safety / physiology record marked lower priority for Murph v1 interpretation.\n\n**Potential Murph endpoints/context:** safety screening, session tolerance, illness and respiratory context\n\n**Protocol takeaway:** Use for safety screening and session-context interpretation rather than efficacy claims.\n\nThe workbook linked this record through a review or bibliography backbone rather than a direct article page. Keep it in the corpus, but do not show a potentially misleading outbound source link in the product UI.",
+      "categories": [
+        "sauna",
+        "study",
+        "safety-physiology"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Finnish dry-sauna corpus",
+      "finnishDrySaunaFocus": "Likely",
+      "key": "source_artifact:sauna-1989-kauppinen-some-endocrine-responses-to-sauna-shower-and-ice-water-imm",
+      "modality": "Sauna (unspecified / likely dry)",
+      "murphV1Priority": "Lower",
+      "potentialMurphEndpoints": [
+        "safety screening",
+        "session tolerance",
+        "illness and respiratory context"
+      ],
+      "protocolTakeaway": "Use for safety screening and session-context interpretation rather than efficacy claims.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:dry-sauna",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/sauna/sauna-1989-kauppinen-some-endocrine-responses-to-sauna-shower-and-ice-water-imm.md",
+      "revision": {
+        "pageRevisionId": "sha256:9425d55ef92d35d12887eb1d411187191beaadba892c5ece4112f61add45daed",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/sauna/sauna-1989-kauppinen-some-endocrine-responses-to-sauna-shower-and-ice-water-imm",
+      "source": {
+        "authors": "Kauppinen K, Pajari-Backas M, Volin P, Vakkuri O",
+        "citation": "Kauppinen K, Pajari-Backas M, Volin P, Vakkuri O. Some endocrine responses to sauna, shower and ice water immersion. Arctic Med Res 1989;48:131-139.",
+        "journal": "Arctic Med Res",
+        "kind": "journal_article",
+        "title": "Some endocrine responses to sauna, shower and ice water immersion",
+        "year": 1989
+      },
+      "sourceUrlCurationNote": "Workbook source URL points to a bibliography or review backbone rather than a direct article landing page, so the public source link is intentionally omitted from the app card.",
+      "status": "draft",
+      "studyDesign": "Experimental physiology",
+      "summary": "Finnish dry-sauna bibliography record (likely focus) used as supporting safety / physiology evidence for protocol context and guardrails.",
+      "title": "Some endocrine responses to sauna, shower and ice water immersion",
+      "whyItMatters": "Expands the audited Finnish dry-sauna evidence corpus with a safety / physiology record marked lower priority for Murph v1 interpretation."
+    },
+    {
+      "body": "This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.\n\n**Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a general / mixed record marked medium priority for Murph v1 interpretation.\n\n**Potential Murph endpoints/context:** safety screening, session tolerance, illness and respiratory context\n\n**Protocol takeaway:** Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes.\n\nThe workbook linked this record through a review or bibliography backbone rather than a direct article page. Keep it in the corpus, but do not show a potentially misleading outbound source link in the product UI.",
+      "categories": [
+        "sauna",
+        "study",
+        "general-mixed"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Finnish dry-sauna corpus",
+      "finnishDrySaunaFocus": "Yes",
+      "key": "source_artifact:sauna-1989-kukkonen-harjula-haemodynamic-and-hormonal-responses-to-heat-exposure-in-a",
+      "modality": "Finnish dry sauna",
+      "murphV1Priority": "Medium",
+      "potentialMurphEndpoints": [
+        "safety screening",
+        "session tolerance",
+        "illness and respiratory context"
+      ],
+      "protocolTakeaway": "Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:dry-sauna",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/sauna/sauna-1989-kukkonen-harjula-haemodynamic-and-hormonal-responses-to-heat-exposure-in-a.md",
+      "revision": {
+        "pageRevisionId": "sha256:3dadd16f062d0fcf13be145d50475a8217d3006b3dc4c8f6882de8af23dfeac1",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/sauna/sauna-1989-kukkonen-harjula-haemodynamic-and-hormonal-responses-to-heat-exposure-in-a",
+      "source": {
+        "authors": "Kukkonen-Harjula K, Oja P, Laustiola K et al",
+        "citation": "Kukkonen-Harjula K, Oja P, Laustiola K et al. Haemodynamic and hormonal responses to heat exposure in a Finnish sauna bath. Eur J Appl Physiol 1989;58:543-550.",
+        "journal": "Eur J Appl Physiol",
+        "kind": "journal_article",
+        "title": "Haemodynamic and hormonal responses to heat exposure in a Finnish sauna bath",
+        "year": 1989
+      },
+      "sourceUrlCurationNote": "Workbook source URL points to a bibliography or review backbone rather than a direct article landing page, so the public source link is intentionally omitted from the app card.",
+      "status": "draft",
+      "studyDesign": "Experimental physiology",
+      "summary": "Finnish dry-sauna bibliography record (yes focus) used as supporting general / mixed evidence for protocol context and guardrails.",
+      "title": "Haemodynamic and hormonal responses to heat exposure in a Finnish sauna bath",
+      "whyItMatters": "Expands the audited Finnish dry-sauna evidence corpus with a general / mixed record marked medium priority for Murph v1 interpretation."
+    },
+    {
+      "body": "This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.\n\n**Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a safety / physiology record marked lower priority for Murph v1 interpretation.\n\n**Potential Murph endpoints/context:** safety screening, session tolerance\n\n**Protocol takeaway:** Use for safety screening and session-context interpretation rather than efficacy claims.\n\nThe workbook linked this record through a review or bibliography backbone rather than a direct article page. Keep it in the corpus, but do not show a potentially misleading outbound source link in the product UI.",
+      "categories": [
+        "sauna",
+        "study",
+        "safety-physiology"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Finnish dry-sauna corpus",
+      "finnishDrySaunaFocus": "Yes",
+      "key": "source_artifact:sauna-1989-markkola-sauna-habits-and-related-symptoms-in-finnish-children",
+      "modality": "Finnish dry sauna",
+      "murphV1Priority": "Lower",
+      "potentialMurphEndpoints": [
+        "safety screening",
+        "session tolerance"
+      ],
+      "protocolTakeaway": "Use for safety screening and session-context interpretation rather than efficacy claims.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:dry-sauna",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/sauna/sauna-1989-markkola-sauna-habits-and-related-symptoms-in-finnish-children.md",
+      "revision": {
+        "pageRevisionId": "sha256:7a10edc98fd9b6a653979c0332711eb334e7e444d7dda85462918eb4178f377e",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/sauna/sauna-1989-markkola-sauna-habits-and-related-symptoms-in-finnish-children",
+      "source": {
+        "authors": "Markkola L, Mattila KJ, Koivikko MJ",
+        "citation": "Markkola L, Mattila KJ, Koivikko MJ. Sauna habits and related symptoms in Finnish children. Eur J Pediatr 1989;149:221-222.",
+        "journal": "Eur J Pediatr",
+        "kind": "journal_article",
+        "title": "Sauna habits and related symptoms in Finnish children",
+        "year": 1989
+      },
+      "sourceUrlCurationNote": "Workbook source URL points to a bibliography or review backbone rather than a direct article landing page, so the public source link is intentionally omitted from the app card.",
+      "status": "draft",
+      "studyDesign": "Primary study / unclear",
+      "summary": "Finnish dry-sauna bibliography record (yes focus) used as supporting safety / physiology evidence for protocol context and guardrails.",
+      "title": "Sauna habits and related symptoms in Finnish children",
+      "whyItMatters": "Expands the audited Finnish dry-sauna evidence corpus with a safety / physiology record marked lower priority for Murph v1 interpretation."
+    },
+    {
+      "body": "This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.\n\n**Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a respiratory / ent record marked lower priority for Murph v1 interpretation.\n\n**Potential Murph endpoints/context:** illness and respiratory context\n\n**Protocol takeaway:** Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes.\n\nThe workbook linked this record through a review or bibliography backbone rather than a direct article page. Keep it in the corpus, but do not show a potentially misleading outbound source link in the product UI.",
+      "categories": [
+        "sauna",
+        "study",
+        "respiratory-ent"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Finnish dry-sauna corpus",
+      "finnishDrySaunaFocus": "Likely",
+      "key": "source_artifact:sauna-1990-ernst-regular-sauna-bathing-and-the-incidence-of-common-colds",
+      "modality": "Sauna (likely dry)",
+      "murphV1Priority": "Lower",
+      "potentialMurphEndpoints": [
+        "illness and respiratory context"
+      ],
+      "protocolTakeaway": "Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:dry-sauna",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/sauna/sauna-1990-ernst-regular-sauna-bathing-and-the-incidence-of-common-colds.md",
+      "revision": {
+        "pageRevisionId": "sha256:daaab84bacfbc2673cd55b645dad8ea0a80a173eb39a29fbdc1656314ea9c206",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/sauna/sauna-1990-ernst-regular-sauna-bathing-and-the-incidence-of-common-colds",
+      "source": {
+        "authors": "Ernst E, Pecho E, Wirz P, Saradeth T",
+        "citation": "Ernst E, Pecho E, Wirz P, Saradeth T. Regular sauna bathing and the incidence of common colds. Ann Med 1990;22:225-227.",
+        "journal": "Ann Med",
+        "kind": "journal_article",
+        "title": "Regular sauna bathing and the incidence of common colds",
+        "year": 1990
+      },
+      "sourceUrlCurationNote": "Workbook source URL points to a bibliography or review backbone rather than a direct article landing page, so the public source link is intentionally omitted from the app card.",
+      "status": "draft",
+      "studyDesign": "Primary study / unclear",
+      "summary": "Finnish dry-sauna bibliography record (likely focus) used as supporting respiratory / ent evidence for protocol context and guardrails.",
+      "title": "Regular sauna bathing and the incidence of common colds",
+      "whyItMatters": "Expands the audited Finnish dry-sauna evidence corpus with a respiratory / ent record marked lower priority for Murph v1 interpretation."
+    },
+    {
+      "body": "This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.\n\n**Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a cardiovascular record marked medium priority for Murph v1 interpretation.\n\n**Potential Murph endpoints/context:** blood pressure context, resting heart rate context\n\n**Protocol takeaway:** Use as cardiovascular context around heat exposure, not as a guaranteed 21-day result-card endpoint.\n\nThe workbook linked this record through a review or bibliography backbone rather than a direct article page. Keep it in the corpus, but do not show a potentially misleading outbound source link in the product UI.",
+      "categories": [
+        "sauna",
+        "study",
+        "cardiovascular"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Finnish dry-sauna corpus",
+      "finnishDrySaunaFocus": "Likely",
+      "key": "source_artifact:sauna-1990-jokinen-children-in-sauna-cardiovascular-adjustment",
+      "modality": "Sauna (unspecified / likely dry)",
+      "murphV1Priority": "Medium",
+      "potentialMurphEndpoints": [
+        "blood pressure context",
+        "resting heart rate context"
+      ],
+      "protocolTakeaway": "Use as cardiovascular context around heat exposure, not as a guaranteed 21-day result-card endpoint.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:dry-sauna",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/sauna/sauna-1990-jokinen-children-in-sauna-cardiovascular-adjustment.md",
+      "revision": {
+        "pageRevisionId": "sha256:f76820ce24b30fde419562c9697d6dfaff4022b302448bf669f4dc8778c8a9c3",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/sauna/sauna-1990-jokinen-children-in-sauna-cardiovascular-adjustment",
+      "source": {
+        "authors": "Jokinen E, Välimäki I, Antila K, Seppänen A, Tuominen J",
+        "citation": "Jokinen E, Välimäki I, Antila K, Seppänen A, Tuominen J. Children in sauna: Cardiovascular adjustment. Pediatrics 1990;86:282-288.",
+        "journal": "Pediatrics",
+        "kind": "journal_article",
+        "title": "Children in sauna: Cardiovascular adjustment",
+        "year": 1990
+      },
+      "sourceUrlCurationNote": "Workbook source URL points to a bibliography or review backbone rather than a direct article landing page, so the public source link is intentionally omitted from the app card.",
+      "status": "draft",
+      "studyDesign": "Primary study / unclear",
+      "summary": "Finnish dry-sauna bibliography record (likely focus) used as supporting cardiovascular evidence for protocol context and guardrails.",
+      "title": "Children in sauna: Cardiovascular adjustment",
+      "whyItMatters": "Expands the audited Finnish dry-sauna evidence corpus with a cardiovascular record marked medium priority for Murph v1 interpretation."
+    },
+    {
+      "body": "This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.\n\n**Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a safety / physiology record marked lower priority for Murph v1 interpretation.\n\n**Potential Murph endpoints/context:** safety screening, session tolerance\n\n**Protocol takeaway:** Use for safety screening and session-context interpretation rather than efficacy claims.\n\nThe workbook linked this record through a review or bibliography backbone rather than a direct article page. Keep it in the corpus, but do not show a potentially misleading outbound source link in the product UI.",
+      "categories": [
+        "sauna",
+        "study",
+        "safety-physiology"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Finnish dry-sauna corpus",
+      "finnishDrySaunaFocus": "Likely",
+      "key": "source_artifact:sauna-1991-jokinen-children-in-sauna-electrocardiographic-abnormalities",
+      "modality": "Sauna (unspecified / likely dry)",
+      "murphV1Priority": "Lower",
+      "potentialMurphEndpoints": [
+        "safety screening",
+        "session tolerance"
+      ],
+      "protocolTakeaway": "Use for safety screening and session-context interpretation rather than efficacy claims.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:dry-sauna",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/sauna/sauna-1991-jokinen-children-in-sauna-electrocardiographic-abnormalities.md",
+      "revision": {
+        "pageRevisionId": "sha256:464b354679980cc75b979f7a4b1d7987f9ec8827398fddf5b0120b2893890619",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/sauna/sauna-1991-jokinen-children-in-sauna-electrocardiographic-abnormalities",
+      "source": {
+        "authors": "Jokinen E, Välimäki I",
+        "citation": "Jokinen E, Välimäki I. Children in sauna: Electrocardiographic abnormalities. Acta Paediatr Scand 1991;80:370-374.",
+        "journal": "Acta Paediatr Scand",
+        "kind": "journal_article",
+        "title": "Children in sauna: Electrocardiographic abnormalities",
+        "year": 1991
+      },
+      "sourceUrlCurationNote": "Workbook source URL points to a bibliography or review backbone rather than a direct article landing page, so the public source link is intentionally omitted from the app card.",
+      "status": "draft",
+      "studyDesign": "Primary study / unclear",
+      "summary": "Finnish dry-sauna bibliography record (likely focus) used as supporting safety / physiology evidence for protocol context and guardrails.",
+      "title": "Children in sauna: Electrocardiographic abnormalities",
+      "whyItMatters": "Expands the audited Finnish dry-sauna evidence corpus with a safety / physiology record marked lower priority for Murph v1 interpretation."
+    },
+    {
+      "body": "This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.\n\n**Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a cardiovascular record marked medium priority for Murph v1 interpretation.\n\n**Potential Murph endpoints/context:** blood pressure context, resting heart rate context\n\n**Protocol takeaway:** Use as cardiovascular context around heat exposure, not as a guaranteed 21-day result-card endpoint.\n\nThe workbook linked this record through a review or bibliography backbone rather than a direct article page. Keep it in the corpus, but do not show a potentially misleading outbound source link in the product UI.",
+      "categories": [
+        "sauna",
+        "study",
+        "cardiovascular"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Finnish dry-sauna corpus",
+      "finnishDrySaunaFocus": "Likely",
+      "key": "source_artifact:sauna-1992-roine-alcohol-and-sauna-bathing-effects-on-cardiac-rhythm-blood",
+      "modality": "Sauna (likely dry)",
+      "murphV1Priority": "Medium",
+      "potentialMurphEndpoints": [
+        "blood pressure context",
+        "resting heart rate context"
+      ],
+      "protocolTakeaway": "Use as cardiovascular context around heat exposure, not as a guaranteed 21-day result-card endpoint.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:dry-sauna",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/sauna/sauna-1992-roine-alcohol-and-sauna-bathing-effects-on-cardiac-rhythm-blood.md",
+      "revision": {
+        "pageRevisionId": "sha256:91c1155e99f0279943b98efc7c3ce54fcbcd0c459322353b09cb7357a7779d13",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/sauna/sauna-1992-roine-alcohol-and-sauna-bathing-effects-on-cardiac-rhythm-blood",
+      "source": {
+        "authors": "Roine R, Luurila OJ, Suokas A et al",
+        "citation": "Roine R, Luurila OJ, Suokas A et al. Alcohol and sauna bathing: Effects on cardiac rhythm, blood pressure, and serum electrolyte and cortisol concentrations. J Intern Med 1992;231:333-338.",
+        "journal": "J Intern Med",
+        "kind": "journal_article",
+        "title": "Alcohol and sauna bathing: Effects on cardiac rhythm, blood pressure, and serum electrolyte and cortisol concentrations",
+        "year": 1992
+      },
+      "sourceUrlCurationNote": "Workbook source URL points to a bibliography or review backbone rather than a direct article landing page, so the public source link is intentionally omitted from the app card.",
+      "status": "draft",
+      "studyDesign": "Primary study / unclear",
+      "summary": "Finnish dry-sauna bibliography record (likely focus) used as supporting cardiovascular evidence for protocol context and guardrails.",
+      "title": "Alcohol and sauna bathing: Effects on cardiac rhythm, blood pressure, and serum electrolyte and cortisol concentrations",
+      "whyItMatters": "Expands the audited Finnish dry-sauna evidence corpus with a cardiovascular record marked medium priority for Murph v1 interpretation."
+    },
+    {
+      "body": "This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.\n\n**Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a cardiovascular record marked high priority for Murph v1 interpretation.\n\n**Potential Murph endpoints/context:** blood pressure context, resting heart rate context, safety screening\n\n**Protocol takeaway:** Use directly for safety, cardiovascular-context, or protocol-design guardrails; still avoid promising a short-term wearable outcome from this record alone.\n\nThe workbook linked this record through a review or bibliography backbone rather than a direct article page. Keep it in the corpus, but do not show a potentially misleading outbound source link in the product UI.",
+      "categories": [
+        "sauna",
+        "study",
+        "cardiovascular"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Finnish dry-sauna corpus",
+      "finnishDrySaunaFocus": "Yes",
+      "key": "source_artifact:sauna-1994-kukkonen-harjula-cardiovascular-effects-of-atenolol-scopolamine-and-their-c",
+      "modality": "Finnish dry sauna",
+      "murphV1Priority": "High",
+      "potentialMurphEndpoints": [
+        "blood pressure context",
+        "resting heart rate context",
+        "safety screening"
+      ],
+      "protocolTakeaway": "Use directly for safety, cardiovascular-context, or protocol-design guardrails; still avoid promising a short-term wearable outcome from this record alone.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:dry-sauna",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/sauna/sauna-1994-kukkonen-harjula-cardiovascular-effects-of-atenolol-scopolamine-and-their-c.md",
+      "revision": {
+        "pageRevisionId": "sha256:9205ebcd06e1e7935096c1df98c77114086e6ff429abd9c873d3c6a01bce83d8",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/sauna/sauna-1994-kukkonen-harjula-cardiovascular-effects-of-atenolol-scopolamine-and-their-c",
+      "source": {
+        "authors": "Kukkonen-Harjula K, Oja P, Vuori I et al",
+        "citation": "Kukkonen-Harjula K, Oja P, Vuori I et al. Cardiovascular effects of atenolol, scopolamine and their combination on healthy men in Finnish sauna baths. Eur J Appl Physiol 1994;69:10-15.",
+        "journal": "Eur J Appl Physiol",
+        "kind": "journal_article",
+        "title": "Cardiovascular effects of atenolol, scopolamine and their combination on healthy men in Finnish sauna baths",
+        "year": 1994
+      },
+      "sourceUrlCurationNote": "Workbook source URL points to a bibliography or review backbone rather than a direct article landing page, so the public source link is intentionally omitted from the app card.",
+      "status": "draft",
+      "studyDesign": "Experimental physiology",
+      "summary": "Finnish dry-sauna bibliography record (yes focus) used as supporting cardiovascular evidence for protocol context and guardrails.",
+      "title": "Cardiovascular effects of atenolol, scopolamine and their combination on healthy men in Finnish sauna baths",
+      "whyItMatters": "Expands the audited Finnish dry-sauna evidence corpus with a cardiovascular record marked high priority for Murph v1 interpretation."
+    },
+    {
+      "body": "This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.\n\n**Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a safety / physiology record marked medium priority for Murph v1 interpretation.\n\n**Potential Murph endpoints/context:** safety screening, session tolerance, illness and respiratory context\n\n**Protocol takeaway:** Use for safety screening and session-context interpretation rather than efficacy claims.\n\nThe workbook linked this record through a review or bibliography backbone rather than a direct article page. Keep it in the corpus, but do not show a potentially misleading outbound source link in the product UI.",
+      "categories": [
+        "sauna",
+        "study",
+        "safety-physiology"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Finnish dry-sauna corpus",
+      "finnishDrySaunaFocus": "Yes",
+      "key": "source_artifact:sauna-1996-vanakoski-effects-of-heat-exposure-in-a-finnish-sauna-on-the-pharmac",
+      "modality": "Finnish dry sauna",
+      "murphV1Priority": "Medium",
+      "potentialMurphEndpoints": [
+        "safety screening",
+        "session tolerance",
+        "illness and respiratory context"
+      ],
+      "protocolTakeaway": "Use for safety screening and session-context interpretation rather than efficacy claims.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:dry-sauna",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/sauna/sauna-1996-vanakoski-effects-of-heat-exposure-in-a-finnish-sauna-on-the-pharmac.md",
+      "revision": {
+        "pageRevisionId": "sha256:f02bd5147d33d3cd64007e516bd156ae7a4505e9a8cf7e4f4e0668eae65e8a95",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/sauna/sauna-1996-vanakoski-effects-of-heat-exposure-in-a-finnish-sauna-on-the-pharmac",
+      "source": {
+        "authors": "Vanakoski J, Idänpää Heikkilä JJ, Olkkola KT, Seppälä T",
+        "citation": "Vanakoski J, Idänpää Heikkilä JJ, Olkkola KT, Seppälä T. Effects of heat exposure in a Finnish sauna on the pharmacokinetics and metabolism of midazolam. Eur J Clin Pharmacol 1996;51:335-338.",
+        "journal": "Eur J Clin Pharmacol",
+        "kind": "journal_article",
+        "title": "Effects of heat exposure in a Finnish sauna on the pharmacokinetics and metabolism of midazolam",
+        "year": 1996
+      },
+      "sourceUrlCurationNote": "Workbook source URL points to a bibliography or review backbone rather than a direct article landing page, so the public source link is intentionally omitted from the app card.",
+      "status": "draft",
+      "studyDesign": "Experimental physiology",
+      "summary": "Finnish dry-sauna bibliography record (yes focus) used as supporting safety / physiology evidence for protocol context and guardrails.",
+      "title": "Effects of heat exposure in a Finnish sauna on the pharmacokinetics and metabolism of midazolam",
+      "whyItMatters": "Expands the audited Finnish dry-sauna evidence corpus with a safety / physiology record marked medium priority for Murph v1 interpretation."
+    },
+    {
+      "body": "This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.\n\n**Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a general / mixed record marked medium priority for Murph v1 interpretation.\n\n**Potential Murph endpoints/context:** supporting corpus context\n\n**Protocol takeaway:** Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes.\n\nThe workbook linked this record through a review or bibliography backbone rather than a direct article page. Keep it in the corpus, but do not show a potentially misleading outbound source link in the product UI.",
+      "categories": [
+        "sauna",
+        "review",
+        "general-mixed"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Finnish dry-sauna corpus",
+      "finnishDrySaunaFocus": "Likely",
+      "key": "source_artifact:sauna-1997-kauppinen-facts-and-fables-about-sauna",
+      "modality": "Sauna (unspecified / likely dry)",
+      "murphV1Priority": "Medium",
+      "potentialMurphEndpoints": [
+        "supporting corpus context"
+      ],
+      "protocolTakeaway": "Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:dry-sauna",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/sauna/sauna-1997-kauppinen-facts-and-fables-about-sauna.md",
+      "revision": {
+        "pageRevisionId": "sha256:152a137297aa97d5b5c82cb82f02543be936667405856a82fd0f55127c2bb93d",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/sauna/sauna-1997-kauppinen-facts-and-fables-about-sauna",
+      "source": {
+        "authors": "Kauppinen K",
+        "citation": "Kauppinen K. Facts and fables about sauna. Ann N Y Acad Sci 1997;813:654-662.",
+        "journal": "Ann N Y Acad Sci",
+        "kind": "review",
+        "title": "Facts and fables about sauna",
+        "year": 1997
+      },
+      "sourceUrlCurationNote": "Workbook source URL points to a bibliography or review backbone rather than a direct article landing page, so the public source link is intentionally omitted from the app card.",
+      "status": "draft",
+      "studyDesign": "Review / meta",
+      "summary": "Finnish dry-sauna bibliography record (likely focus) used as supporting general / mixed evidence for protocol context and guardrails.",
+      "title": "Facts and fables about sauna",
+      "whyItMatters": "Expands the audited Finnish dry-sauna evidence corpus with a general / mixed record marked medium priority for Murph v1 interpretation."
+    },
+    {
+      "body": "This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.\n\n**Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a cardiovascular record marked high priority for Murph v1 interpretation.\n\n**Potential Murph endpoints/context:** blood pressure context, resting heart rate context\n\n**Protocol takeaway:** Use directly for safety, cardiovascular-context, or protocol-design guardrails; still avoid promising a short-term wearable outcome from this record alone.\n\nThe workbook linked this record through a review or bibliography backbone rather than a direct article page. Keep it in the corpus, but do not show a potentially misleading outbound source link in the product UI.",
+      "categories": [
+        "sauna",
+        "review",
+        "cardiovascular"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Finnish dry-sauna corpus",
+      "finnishDrySaunaFocus": "Yes",
+      "key": "source_artifact:sauna-2000-keast-the-finnish-sauna-bath-and-its-use-in-patients-with-cardio",
+      "modality": "Finnish dry sauna",
+      "murphV1Priority": "High",
+      "potentialMurphEndpoints": [
+        "blood pressure context",
+        "resting heart rate context"
+      ],
+      "protocolTakeaway": "Use directly for safety, cardiovascular-context, or protocol-design guardrails; still avoid promising a short-term wearable outcome from this record alone.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:dry-sauna",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/sauna/sauna-2000-keast-the-finnish-sauna-bath-and-its-use-in-patients-with-cardio.md",
+      "revision": {
+        "pageRevisionId": "sha256:39c43dc05666dc356723a830fa28f6467f04c96eccd3f7a3f5c467157284d972",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/sauna/sauna-2000-keast-the-finnish-sauna-bath-and-its-use-in-patients-with-cardio",
+      "source": {
+        "authors": "Keast ML, Adamo KB",
+        "citation": "Keast ML, Adamo KB. The Finnish sauna bath and its use in patients with cardiovascular disease. J Cardiopulmonary Rehabil 2000;20:225-230.",
+        "journal": "J Cardiopulmonary Rehabil",
+        "kind": "review",
+        "title": "The Finnish sauna bath and its use in patients with cardiovascular disease",
+        "year": 2000
+      },
+      "sourceUrlCurationNote": "Workbook source URL points to a bibliography or review backbone rather than a direct article landing page, so the public source link is intentionally omitted from the app card.",
+      "status": "draft",
+      "studyDesign": "Review / meta",
+      "summary": "Finnish dry-sauna bibliography record (yes focus) used as supporting cardiovascular evidence for protocol context and guardrails.",
+      "title": "The Finnish sauna bath and its use in patients with cardiovascular disease",
+      "whyItMatters": "Expands the audited Finnish dry-sauna evidence corpus with a cardiovascular record marked high priority for Murph v1 interpretation."
+    },
+    {
+      "body": "This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.\n\n**Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a cardiovascular record marked medium priority for Murph v1 interpretation.\n\n**Potential Murph endpoints/context:** blood pressure context, resting heart rate context, illness and respiratory context\n\n**Protocol takeaway:** Use as cardiovascular context around heat exposure, not as a guaranteed 21-day result-card endpoint.\n\nThe workbook linked this record through a review or bibliography backbone rather than a direct article page. Keep it in the corpus, but do not show a potentially misleading outbound source link in the product UI.",
+      "categories": [
+        "sauna",
+        "study",
+        "cardiovascular"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Finnish dry-sauna corpus",
+      "finnishDrySaunaFocus": "Likely",
+      "key": "source_artifact:sauna-2005-miyamoto-safety-and-efficacy-of-repeated-sauna-bathing-in-patients",
+      "modality": "Sauna (likely dry)",
+      "murphV1Priority": "Medium",
+      "potentialMurphEndpoints": [
+        "blood pressure context",
+        "resting heart rate context",
+        "illness and respiratory context"
+      ],
+      "protocolTakeaway": "Use as cardiovascular context around heat exposure, not as a guaranteed 21-day result-card endpoint.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:dry-sauna",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/sauna/sauna-2005-miyamoto-safety-and-efficacy-of-repeated-sauna-bathing-in-patients.md",
+      "revision": {
+        "pageRevisionId": "sha256:f74fdd51584924a7336c8d1e86dff42820fbae6ebad2ce05f24d7a5b131cf20d",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/sauna/sauna-2005-miyamoto-safety-and-efficacy-of-repeated-sauna-bathing-in-patients",
+      "source": {
+        "authors": "H. Miyamoto, H. Kai, H. Nakaura et al.",
+        "citation": "H. Miyamoto, H. Kai, H. Nakaura et al., “Safety and efficacy of repeated sauna bathing in patients with chronic systolic heart failure: a preliminary report,” Journal of Cardiac Failure, vol. 11, no. 6, pp. 432–436, 2005.",
+        "journal": "Journal of Cardiac Failure",
+        "kind": "journal_article",
+        "title": "Safety and efficacy of repeated sauna bathing in patients with chronic systolic heart failure: a preliminary report",
+        "year": 2005
+      },
+      "sourceUrlCurationNote": "Workbook source URL points to a bibliography or review backbone rather than a direct article landing page, so the public source link is intentionally omitted from the app card.",
+      "status": "draft",
+      "studyDesign": "Intervention study",
+      "summary": "Finnish dry-sauna bibliography record (likely focus) used as supporting cardiovascular evidence for protocol context and guardrails.",
+      "title": "Safety and efficacy of repeated sauna bathing in patients with chronic systolic heart failure: a preliminary report",
+      "whyItMatters": "Expands the audited Finnish dry-sauna evidence corpus with a cardiovascular record marked medium priority for Murph v1 interpretation."
+    },
+    {
+      "body": "This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.\n\n**Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a cardiometabolic record marked medium priority for Murph v1 interpretation.\n\n**Potential Murph endpoints/context:** blood pressure context, resting heart rate context, safety screening\n\n**Protocol takeaway:** Use as cardiovascular context around heat exposure, not as a guaranteed 21-day result-card endpoint.\n\nThe workbook linked this record through a review or bibliography backbone rather than a direct article page. Keep it in the corpus, but do not show a potentially misleading outbound source link in the product UI.",
+      "categories": [
+        "sauna",
+        "study",
+        "cardiometabolic"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Finnish dry-sauna corpus",
+      "finnishDrySaunaFocus": "Likely",
+      "key": "source_artifact:sauna-2014-gryka-the-effect-of-sauna-bathing-on-lipid-profile-in-young-phys",
+      "modality": "Sauna (likely dry)",
+      "murphV1Priority": "Medium",
+      "potentialMurphEndpoints": [
+        "blood pressure context",
+        "resting heart rate context",
+        "safety screening"
+      ],
+      "protocolTakeaway": "Use as cardiovascular context around heat exposure, not as a guaranteed 21-day result-card endpoint.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:dry-sauna",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/sauna/sauna-2014-gryka-the-effect-of-sauna-bathing-on-lipid-profile-in-young-phys.md",
+      "revision": {
+        "pageRevisionId": "sha256:f1b0592902266d6eee02a0771b61339ebc8df57eedf1646065d126080d760f73",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/sauna/sauna-2014-gryka-the-effect-of-sauna-bathing-on-lipid-profile-in-young-phys",
+      "source": {
+        "authors": "D. Gryka, W. Pilch, M. Szarek, Z. Szygula, and Ł. Tota",
+        "citation": "D. Gryka, W. Pilch, M. Szarek, Z. Szygula, and Ł. Tota, “The effect of sauna bathing on lipid profile in young, physically active, male subjects,” International Journal of Occupational Medicine and Environmental Health, vol. 27, no. 4, pp. 608–618, 2014.",
+        "journal": "International Journal of Occupational Medicine and Environmental Health",
+        "kind": "journal_article",
+        "title": "The effect of sauna bathing on lipid profile in young, physically active, male subjects",
+        "year": 2014
+      },
+      "sourceUrlCurationNote": "Workbook source URL points to a bibliography or review backbone rather than a direct article landing page, so the public source link is intentionally omitted from the app card.",
+      "status": "draft",
+      "studyDesign": "Experimental physiology",
+      "summary": "Finnish dry-sauna bibliography record (likely focus) used as supporting cardiometabolic evidence for protocol context and guardrails.",
+      "title": "The effect of sauna bathing on lipid profile in young, physically active, male subjects",
+      "whyItMatters": "Expands the audited Finnish dry-sauna evidence corpus with a cardiometabolic record marked medium priority for Murph v1 interpretation."
+    },
+    {
+      "body": "This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.\n\n**Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a symptoms / musculoskeletal record marked medium priority for Murph v1 interpretation.\n\n**Potential Murph endpoints/context:** illness and respiratory context, symptom context\n\n**Protocol takeaway:** Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes.\n\nThe workbook linked this record through a review or bibliography backbone rather than a direct article page. Keep it in the corpus, but do not show a potentially misleading outbound source link in the product UI.",
+      "categories": [
+        "sauna",
+        "study",
+        "symptoms-musculoskeletal"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Finnish dry-sauna corpus",
+      "finnishDrySaunaFocus": "Likely",
+      "key": "source_artifact:sauna-2015-kanji-efficacy-of-regular-sauna-bathing-for-chronic-tension-type",
+      "modality": "Sauna (likely dry)",
+      "murphV1Priority": "Medium",
+      "potentialMurphEndpoints": [
+        "illness and respiratory context",
+        "symptom context"
+      ],
+      "protocolTakeaway": "Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:dry-sauna",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/sauna/sauna-2015-kanji-efficacy-of-regular-sauna-bathing-for-chronic-tension-type.md",
+      "revision": {
+        "pageRevisionId": "sha256:f21c45db2d7bbf8032479aa14d09bcee95512dd4f96ed74ed7d3fa1f8bff5fd4",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/sauna/sauna-2015-kanji-efficacy-of-regular-sauna-bathing-for-chronic-tension-type",
+      "source": {
+        "authors": "G. Kanji, M. Weatherall, R. Peter, G. Purdie, and R. Page",
+        "citation": "G. Kanji, M. Weatherall, R. Peter, G. Purdie, and R. Page, “Efficacy of regular sauna bathing for chronic tension-type headache: a randomized controlled study,” The Journal of Evidence-Based Complementary and Alternative Medicine Alternative and Complementary Medicine, vol. 21, no. 2, pp. 103– 109, 2015.",
+        "journal": "The Journal of Evidence-Based Complementary and Alternative Medicine Alternative and Complementary Medicine",
+        "kind": "journal_article",
+        "title": "Efficacy of regular sauna bathing for chronic tension-type headache: a randomized controlled study",
+        "year": 2015
+      },
+      "sourceUrlCurationNote": "Workbook source URL points to a bibliography or review backbone rather than a direct article landing page, so the public source link is intentionally omitted from the app card.",
+      "status": "draft",
+      "studyDesign": "Controlled intervention",
+      "summary": "Finnish dry-sauna bibliography record (likely focus) used as supporting symptoms / musculoskeletal evidence for protocol context and guardrails.",
+      "title": "Efficacy of regular sauna bathing for chronic tension-type headache: a randomized controlled study",
+      "whyItMatters": "Expands the audited Finnish dry-sauna evidence corpus with a symptoms / musculoskeletal record marked medium priority for Murph v1 interpretation."
+    },
+    {
       "aliases": [
         "sauna bibliography 2026",
         "sauna research corpus"
@@ -9118,7 +11792,7 @@
         "source_artifact:pmid-32814462",
         "source_artifact:pmid-38577299"
       ],
-      "body": "## What this is\n\nThis page represents the structured sauna research corpus behind the Finnish dry-sauna experiment. It is a curation artifact, not a primary study.\n\n## Corpus at a glance\n\n- 180 master bibliography records\n- 81 records in the Finnish dry-sauna yes/likely subset\n- 32 review or meta-analysis records\n- 40 papers on the curated source list\n- 24 high-priority records for the first dry-sauna experiment\n- publication window 1978–2026\n- audit cutoff 2026-04-18\n\n## Source groups\n\n- Evidence backbone: 5\n- Long-term Finnish cohort evidence: 14\n- Acute and mechanistic: 8\n- Intervention design / reality checks: 13\n\n## How to use this evidence\n\nUse this page to understand how deep the sauna research base is, which evidence buckets are strongest for protocol design, and why the Finnish dry-sauna experiment separates long-term context from short-term measurable signals.\n\n- The **evidence backbone** papers help define the overall research base and safety framing.\n- The **long-term Finnish cohort** papers are rationale and screening context, not 21-day signals.\n- The **acute and mechanistic** papers help pick measurable session and near-term signals.\n- The **intervention design / reality checks** papers stop the protocol from overclaiming and help define how to standardize timing, hydration, exercise context, and expected latency.\n\n## Important caution\n\nThis page is not itself evidence that a sauna protocol works. It is the map used to build a bounded, user-readable protocol from the underlying literature.",
+      "body": "## What this is\n\nThis page represents the structured sauna research corpus behind the Finnish dry-sauna experiment. It is a curation artifact, not a primary study.\n\n## Corpus at a glance\n\n- 180 master bibliography records\n- 81 records in the Finnish dry-sauna yes/likely subset\n- 32 review or meta-analysis records\n- 40 papers on the curated source list\n- 24 high-priority records for the first dry-sauna experiment\n- publication window 1978–2026\n- audit cutoff 2026-04-18\n- 81 Finnish dry-sauna yes/likely records now materialized as source pages and linked to the canonical protocol\n\n## Source groups\n\n- Evidence backbone: 5\n- Long-term Finnish cohort evidence: 14\n- Acute and mechanistic: 8\n- Intervention design / reality checks: 13\n\n## How to use this evidence\n\nUse this page to understand how deep the sauna research base is, which evidence buckets are strongest for protocol design, and why the Finnish dry-sauna experiment separates long-term context from short-term measurable signals.\n\n- The **evidence backbone** papers help define the overall research base and safety framing.\n- The **long-term Finnish cohort** papers are rationale and screening context, not 21-day signals.\n- The **acute and mechanistic** papers help pick measurable session and near-term signals.\n- The **intervention design / reality checks** papers stop the protocol from overclaiming and help define how to standardize timing, hydration, exercise context, and expected latency.\n\n## Important caution\n\nThis page is not itself evidence that a sauna protocol works. It is the map used to build a bounded, user-readable protocol from the underlying literature.",
       "categories": [
         "sauna"
       ],
@@ -9184,6 +11858,89 @@
         }
       },
       "finnishDrySaunaFocus": "Yes or Likely subset included",
+      "finnishDrySaunaSourceKeys": [
+        "source_artifact:pmid-445022",
+        "source_artifact:sauna-1986-kauppinen-man-in-the-sauna-review-article",
+        "source_artifact:pmid-3766176",
+        "source_artifact:pmid-3788622",
+        "source_artifact:sauna-1988-eisalo-the-finnish-sauna-and-cardiovascular-diseases",
+        "source_artifact:sauna-1988-kukkonen-harjula-how-the-sauna-affects-the-endocrine-system",
+        "source_artifact:sauna-1988-laitinen-lungs-and-ventilation-in-the-sauna",
+        "source_artifact:pmid-3174262",
+        "source_artifact:sauna-1989-kauppinen-sauna-shower-and-ice-water-immersion-physiological-respons",
+        "source_artifact:sauna-1989-kauppinen-sauna-shower-and-ice-water-immersion-physiological-respons-2",
+        "source_artifact:sauna-1989-kauppinen-sauna-shower-and-ice-water-immersion-physiological-respons-3",
+        "source_artifact:sauna-1989-kauppinen-some-endocrine-responses-to-sauna-shower-and-ice-water-imm",
+        "source_artifact:sauna-1989-kukkonen-harjula-haemodynamic-and-hormonal-responses-to-heat-exposure-in-a",
+        "source_artifact:sauna-1989-markkola-sauna-habits-and-related-symptoms-in-finnish-children",
+        "source_artifact:sauna-1990-ernst-regular-sauna-bathing-and-the-incidence-of-common-colds",
+        "source_artifact:sauna-1990-jokinen-children-in-sauna-cardiovascular-adjustment",
+        "source_artifact:sauna-1991-jokinen-children-in-sauna-electrocardiographic-abnormalities",
+        "source_artifact:sauna-1992-roine-alcohol-and-sauna-bathing-effects-on-cardiac-rhythm-blood",
+        "source_artifact:sauna-1994-kukkonen-harjula-cardiovascular-effects-of-atenolol-scopolamine-and-their-c",
+        "source_artifact:sauna-1996-vanakoski-effects-of-heat-exposure-in-a-finnish-sauna-on-the-pharmac",
+        "source_artifact:sauna-1997-kauppinen-facts-and-fables-about-sauna",
+        "source_artifact:sauna-2000-keast-the-finnish-sauna-bath-and-its-use-in-patients-with-cardio",
+        "source_artifact:pmid-11165553",
+        "source_artifact:sauna-2005-miyamoto-safety-and-efficacy-of-repeated-sauna-bathing-in-patients",
+        "source_artifact:pmid-16871826",
+        "source_artifact:pmid-19154844",
+        "source_artifact:sauna-2014-gryka-the-effect-of-sauna-bathing-on-lipid-profile-in-young-phys",
+        "source_artifact:sauna-2015-kanji-efficacy-of-regular-sauna-bathing-for-chronic-tension-type",
+        "source_artifact:pmid-25705824",
+        "source_artifact:pmid-25432420",
+        "source_artifact:pmid-26152773",
+        "source_artifact:pmid-29229091",
+        "source_artifact:pmid-28905164",
+        "source_artifact:pmid-27932366",
+        "source_artifact:pmid-28633297",
+        "source_artifact:pmid-29351426",
+        "source_artifact:pmid-29849692",
+        "source_artifact:pmid-28972808",
+        "source_artifact:pmid-29897261",
+        "source_artifact:pmid-29269746",
+        "source_artifact:mayo-2018-sauna-review",
+        "source_artifact:pmid-30173212",
+        "source_artifact:pmid-30486813",
+        "source_artifact:pmid-31126559",
+        "source_artifact:pmid-30665914",
+        "source_artifact:pmid-31372865",
+        "source_artifact:pmid-31102597",
+        "source_artifact:pmid-31331560",
+        "source_artifact:pmid-32951736",
+        "source_artifact:pmid-31950931",
+        "source_artifact:pmid-31490429",
+        "source_artifact:pmid-31869820",
+        "source_artifact:pmid-33513711",
+        "source_artifact:pmid-33211153",
+        "source_artifact:pmid-34297227",
+        "source_artifact:pmid-34622026",
+        "source_artifact:pmid-34199101",
+        "source_artifact:pmid-36078656",
+        "source_artifact:pmid-35710395",
+        "source_artifact:pmid-35908583",
+        "source_artifact:pmid-36255556",
+        "source_artifact:pmid-35785965",
+        "source_artifact:pmid-34727008",
+        "source_artifact:pmid-38011189",
+        "source_artifact:pmid-37650138",
+        "source_artifact:pmid-37270272",
+        "source_artifact:pmid-37029766",
+        "source_artifact:pmid-36813265",
+        "source_artifact:pmid-39446139",
+        "source_artifact:pmid-38410962",
+        "source_artifact:pmid-38577299",
+        "source_artifact:doi-10.3390-app151910762",
+        "source_artifact:pmid-40202605",
+        "source_artifact:pmid-41426898",
+        "source_artifact:doi-10-1016-j-aimed-2024-09-009",
+        "source_artifact:pmid-40611569",
+        "source_artifact:pmid-41340471",
+        "source_artifact:doi-10-3389-fcvm-2025-1537194",
+        "source_artifact:pmid-41461792",
+        "source_artifact:pmid-41831305",
+        "source_artifact:doi-10.1080-23328940.2026.2645467"
+      ],
       "key": "source_artifact:sauna-bibliography-2026-04-18",
       "modality": "Mixed sauna and passive heat literature with Finnish dry-sauna emphasis",
       "murphV1Priority": "High",
@@ -9231,7 +11988,7 @@
       ],
       "relativePath": "sources/sauna/sauna-bibliography-2026-04-18.md",
       "revision": {
-        "pageRevisionId": "sha256:8b75020f30338a6aba9e586cbc8de1036a33a87409adceb201b13caea29f579c",
+        "pageRevisionId": "sha256:ae9274374b90daa875ddc0a05edaac94953f57971c02496f7a9936ee33a59598",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
