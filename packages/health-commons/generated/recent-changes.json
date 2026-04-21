@@ -58,6 +58,31 @@
     },
     {
       "affectedFields": [
+        "protocol",
+        "testPlans",
+        "claims",
+        "safety",
+        "sources/red-light-glasses-before-bed",
+        "artifacts/red-light-glasses-before-bed/research-artifacts.json"
+      ],
+      "changeId": "chg_2026_04_20_red_light_glasses_before_bed_protocol",
+      "changeType": "evidence_change",
+      "editSummary": "Added the red-light glasses before bed bounded self-experiment protocol, source pages, bibliography, and rights-gated artifact manifest.",
+      "entityKey": "protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed",
+      "minor": false,
+      "rationale": "Convert the completed discovery, gap-fill, and synthesis passes into Health Commons pages with strict overclaim guardrails and a PDF workflow that downloads only clearly open-access redistributable files.",
+      "reviewStatus": "proposed",
+      "schemaVersion": "murph.commons.change.v1",
+      "sourceKeys": [
+        "source_artifact:pmid-41341515",
+        "source_artifact:pmid-40728371",
+        "source_artifact:pmid-37192881",
+        "source_artifact:pmid-37593770",
+        "source_artifact:pmid-35298459"
+      ]
+    },
+    {
+      "affectedFields": [
         "sources/sauna",
         "artifacts/sauna/research-artifacts.json"
       ],

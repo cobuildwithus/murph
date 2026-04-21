@@ -1,0 +1,421 @@
+{
+  "schemaVersion": "murph.research.corpus.v1",
+  "topic": "red light glasses before bed",
+  "generatedAt": "2026-04-20T20:45:00+08:00",
+  "scope": "Evening short-wavelength/melanopic-light filtering eyewear; excludes red-light therapy and photobiomodulation.",
+  "records": [
+    {
+      "sourceKey": "source_artifact:pmid-41341515",
+      "title": "Efficacy of blue-light blocking glasses on actigraphic sleep outcomes: a systematic review and meta-analysis of randomized controlled crossover trials",
+      "year": 2025,
+      "journal": "Frontiers in Neurology",
+      "studyDesign": "Systematic review and meta-analysis",
+      "evidenceBucket": "Objective sleep meta-analysis",
+      "priority": "backbone",
+      "claimUse": "supports-protocol",
+      "pmid": "41341515",
+      "doi": "10.3389/fneur.2025.1699303",
+      "url": "https://www.frontiersin.org/journals/neurology/articles/10.3389/fneur.2025.1699303/full",
+      "citation": "Luna-Rangel FA, et al. Efficacy of blue-light blocking glasses on actigraphic sleep outcomes. Front Neurol. 2025;16:1699303. doi:10.3389/fneur.2025.1699303.",
+      "protocolTakeaway": "Use to keep the protocol framed as a bounded self-experiment, not a reliable insomnia treatment."
+    },
+    {
+      "sourceKey": "source_artifact:pmid-40728371",
+      "title": "Optimizing the Potential Utility of Blue-Blocking Glasses for Sleep and Circadian Health",
+      "year": 2025,
+      "journal": "Translational Vision Science & Technology",
+      "studyDesign": "Narrative review / product characterization",
+      "evidenceBucket": "Product characterization and implementation",
+      "priority": "backbone",
+      "claimUse": "supports-protocol",
+      "pmid": "40728371",
+      "doi": "10.1167/tvst.14.7.25",
+      "url": "https://tvst.arvojournals.org/article.aspx?articleid=2810600",
+      "citation": "Glickman GL, et al. Optimizing the Potential Utility of Blue-Blocking Glasses for Sleep and Circadian Health. Transl Vis Sci Technol. 2025;14(7):25. doi:10.1167/tvst.14.7.25.",
+      "protocolTakeaway": "Use as the product-quality guardrail and avoid brand recommendations unless spectral data is available."
+    },
+    {
+      "sourceKey": "source_artifact:pmid-37192881",
+      "title": "Interventions to reduce short-wavelength (“blue”) light exposure at night and their effects on sleep: a systematic review and meta-analysis",
+      "year": 2020,
+      "journal": "Sleep Advances",
+      "studyDesign": "Systematic review and meta-analysis",
+      "evidenceBucket": "Broad systematic review",
+      "priority": "backbone",
+      "claimUse": "supports-protocol",
+      "pmid": "37192881",
+      "doi": "10.1093/sleepadvances/zpaa002",
+      "url": "https://academic.oup.com/sleepadvances/article/1/1/zpaa002/5851240",
+      "citation": "Shechter A, et al. Interventions to reduce short-wavelength (“blue”) light exposure at night and their effects on sleep. Sleep Adv. 2020;1(1):zpaa002. doi:10.1093/sleepadvances/zpaa002.",
+      "protocolTakeaway": "Do not merge glasses, screen filters, and room-light dimming into one causal claim."
+    },
+    {
+      "sourceKey": "source_artifact:pmid-34030534",
+      "title": "Evening wear of blue-blocking glasses for sleep and mood disorders: a systematic review",
+      "year": 2021,
+      "journal": "Chronobiology International",
+      "studyDesign": "Systematic review",
+      "evidenceBucket": "Broad BBG clinical review",
+      "priority": "backbone",
+      "claimUse": "supports-protocol",
+      "pmid": "34030534",
+      "doi": "10.1080/07420528.2021.1930029",
+      "url": "https://pubmed.ncbi.nlm.nih.gov/34030534/",
+      "citation": "Hester L, et al. Evening wear of blue-blocking glasses for sleep and mood disorders: a systematic review. Chronobiol Int. 2021;38(10):1375-1383. doi:10.1080/07420528.2021.1930029.",
+      "protocolTakeaway": "Use as context-only evidence; split mood-disorder and circadian-disorder variants."
+    },
+    {
+      "sourceKey": "source_artifact:pmid-37593770",
+      "title": "Blue-light filtering spectacle lenses for visual performance, sleep, and macular health in adults",
+      "year": 2023,
+      "journal": "Cochrane Database of Systematic Reviews",
+      "studyDesign": "Cochrane systematic review",
+      "evidenceBucket": "Claim calibration",
+      "priority": "backbone",
+      "claimUse": "supports-protocol",
+      "pmid": "37593770",
+      "doi": "10.1002/14651858.CD013244.pub2",
+      "url": "https://www.cochranelibrary.com/cdsr/doi/10.1002/14651858.CD013244.pub2/full",
+      "citation": "Singh S, et al. Blue-light filtering spectacle lenses for visual performance, sleep, and macular health in adults. Cochrane Database Syst Rev. 2023;8:CD013244. doi:10.1002/14651858.CD013244.pub2.",
+      "protocolTakeaway": "Do not present this protocol as eye care or retinal protection."
+    },
+    {
+      "sourceKey": "source_artifact:pmid-35298459",
+      "title": "Recommendations for daytime, evening, and nighttime indoor light exposure to best support physiology, sleep, and wakefulness in healthy adults",
+      "year": 2022,
+      "journal": "PLOS Biology",
+      "studyDesign": "Consensus recommendations",
+      "evidenceBucket": "Light-dose guideline",
+      "priority": "backbone",
+      "claimUse": "supports-protocol",
+      "pmid": "35298459",
+      "doi": "10.1371/journal.pbio.3001571",
+      "url": "https://journals.plos.org/plosbiology/article?id=10.1371/journal.pbio.3001571",
+      "citation": "Brown TM, et al. Recommendations for daytime, evening, and nighttime indoor light exposure to best support physiology, sleep, and wakefulness in healthy adults. PLoS Biol. 2022;20(3):e3001571. doi:10.1371/journal.pbio.3001571.",
+      "protocolTakeaway": "Use glasses as one possible evening-light tool, not an all-day blue-light avoidance rule."
+    },
+    {
+      "sourceKey": "source_artifact:doi-10.17617-1.4a6s-ec74",
+      "title": "Light for Public Health Consensus Statements",
+      "year": 2025,
+      "journal": "Light for Public Health",
+      "studyDesign": "Consensus statement",
+      "evidenceBucket": "Public-health light guidance",
+      "priority": "backbone",
+      "claimUse": "supports-protocol",
+      "pmid": null,
+      "doi": "10.17617/1.4a6s-ec74",
+      "url": "https://lightforpublichealth.org/consensus-statements_en.html",
+      "citation": "Light for Public Health Consortium. Light for Public Health Consensus Statements. doi:10.17617/1.4a6s-ec74.",
+      "protocolTakeaway": "Keep the intervention in the evening window and preserve daytime light."
+    },
+    {
+      "sourceKey": "source_artifact:pmid-29101797",
+      "title": "Blocking nocturnal blue light for insomnia: A randomized controlled trial",
+      "year": 2018,
+      "journal": "Journal of Psychiatric Research",
+      "studyDesign": "Randomized crossover trial",
+      "evidenceBucket": "Ordinary bedtime glasses insomnia",
+      "priority": "backbone",
+      "claimUse": "supports-protocol",
+      "pmid": "29101797",
+      "doi": "10.1016/j.jpsychires.2017.10.015",
+      "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC5703049/",
+      "citation": "Shechter A, et al. Blocking nocturnal blue light for insomnia: A randomized controlled trial. J Psychiatr Res. 2018;96:196-202. doi:10.1016/j.jpsychires.2017.10.015.",
+      "protocolTakeaway": "Use as a practical dose anchor, not as definitive treatment evidence."
+    },
+    {
+      "sourceKey": "source_artifact:pmid-20030543",
+      "title": "Amber lenses to block blue light and improve sleep: a randomized trial",
+      "year": 2009,
+      "journal": "Chronobiology International",
+      "studyDesign": "Randomized trial",
+      "evidenceBucket": "Early human RCT",
+      "priority": "supporting",
+      "claimUse": "context-or-adjacent",
+      "pmid": "20030543",
+      "doi": "10.3109/07420520903523719",
+      "url": "https://pubmed.ncbi.nlm.nih.gov/20030543/",
+      "citation": "Burkhart K, Phelps JR. Amber lenses to block blue light and improve sleep: a randomized trial. Chronobiol Int. 2009;26(8):1602-1612. doi:10.3109/07420520903523719.",
+      "protocolTakeaway": "Supports a bounded evening test but does not overcome the small-study and subjective-outcome limitations."
+    },
+    {
+      "sourceKey": "source_artifact:pmid-33707105",
+      "title": "Effect of evening blue light blocking glasses on subjective and objective sleep in healthy adults: a randomized control trial",
+      "year": 2021,
+      "journal": "Sleep Health",
+      "studyDesign": "Randomized crossover trial",
+      "evidenceBucket": "Healthy-adult mixed/null trial",
+      "priority": "backbone",
+      "claimUse": "supports-protocol",
+      "pmid": "33707105",
+      "doi": "10.1016/j.sleh.2021.02.004",
+      "url": "https://pubmed.ncbi.nlm.nih.gov/33707105/",
+      "citation": "Bigalke JA, et al. Effect of evening blue light blocking glasses on subjective and objective sleep in healthy adults: a randomized control trial. Sleep Health. 2021;7(4):485-490. doi:10.1016/j.sleh.2021.02.004.",
+      "protocolTakeaway": "Low-symptom users may see little or no objective signal."
+    },
+    {
+      "sourceKey": "source_artifact:pmid-35089982",
+      "title": "A randomized controlled trial on the effects of blue-blocking glasses compared to partial blue-blockers on sleep outcomes in the third trimester of pregnancy",
+      "year": 2022,
+      "journal": "PLOS ONE",
+      "studyDesign": "Randomized controlled trial",
+      "evidenceBucket": "Adjacent pregnancy sleep RCT",
+      "priority": "supporting",
+      "claimUse": "context-or-adjacent",
+      "pmid": "35089982",
+      "doi": "10.1371/journal.pone.0262799",
+      "url": "https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0262799",
+      "citation": "Liset R, et al. A randomized controlled trial on the effects of blue-blocking glasses compared to partial blue-blockers on sleep outcomes in the third trimester of pregnancy. PLoS One. 2022;17(1):e0262799. doi:10.1371/journal.pone.0262799.",
+      "protocolTakeaway": "Pregnancy is an adjacent supervised variant; do not use this as a general adult protocol proof."
+    },
+    {
+      "sourceKey": "source_artifact:pmid-35024497",
+      "title": "A randomized controlled trial on the effect of blue-blocking glasses compared to partial blue-blockers on melatonin profile among nulliparous women in third trimester of the pregnancy",
+      "year": 2021,
+      "journal": "Neurobiology of Sleep and Circadian Rhythms",
+      "studyDesign": "Randomized controlled trial",
+      "evidenceBucket": "Adjacent pregnancy melatonin RCT",
+      "priority": "supporting",
+      "claimUse": "context-or-adjacent",
+      "pmid": "35024497",
+      "doi": "10.1016/j.nbscr.2021.100074",
+      "url": "https://www.sciencedirect.com/science/article/pii/S245199442100027X",
+      "citation": "Liset R, et al. A randomized controlled trial on the effect of blue-blocking glasses compared to partial blue-blockers on melatonin profile among nulliparous women in third trimester of the pregnancy. Neurobiol Sleep Circadian Rhythms. 2021;12:100074. doi:10.1016/j.nbscr.2021.100074.",
+      "protocolTakeaway": "Do not equate melatonin movement with reliable sleep improvement."
+    },
+    {
+      "sourceKey": "source_artifact:pmid-29991437",
+      "title": "Use of Actigraphy for the Evaluation of Sleep Disorders and Circadian Rhythm Sleep-Wake Disorders: An American Academy of Sleep Medicine Clinical Practice Guideline",
+      "year": 2018,
+      "journal": "Journal of Clinical Sleep Medicine",
+      "studyDesign": "Clinical practice guideline",
+      "evidenceBucket": "Wearable endpoint method",
+      "priority": "backbone",
+      "claimUse": "supports-protocol",
+      "pmid": "29991437",
+      "doi": "10.5664/jcsm.7230",
+      "url": "https://pubmed.ncbi.nlm.nih.gov/29991437/",
+      "citation": "Smith MT, et al. Use of Actigraphy for the Evaluation of Sleep Disorders and Circadian Rhythm Sleep-Wake Disorders: An American Academy of Sleep Medicine Clinical Practice Guideline. J Clin Sleep Med. 2018;14(7):1231-1237. doi:10.5664/jcsm.7230.",
+      "protocolTakeaway": "Use wearable estimates as trend proxies and pair them with subjective sleep-onset logging."
+    },
+    {
+      "sourceKey": "source_artifact:pmid-41421618",
+      "title": "The Ottawa sunglasses at night study: A randomized controlled trial of blue-blocking glasses for mania",
+      "year": 2026,
+      "journal": "Journal of Affective Disorders",
+      "studyDesign": "Randomized controlled trial",
+      "evidenceBucket": "Safety-only psychiatric adjacent variant",
+      "priority": "backbone",
+      "claimUse": "supports-protocol",
+      "pmid": "41421618",
+      "doi": "10.1016/j.jad.2025.120910",
+      "url": "https://pubmed.ncbi.nlm.nih.gov/41421618/",
+      "citation": "Fiedorowicz JG, et al. The Ottawa sunglasses at night study: A randomized controlled trial of blue-blocking glasses for mania. J Affect Disord. 2026;398:120910. doi:10.1016/j.jad.2025.120910.",
+      "protocolTakeaway": "Mood-disorder use needs clinician oversight and should not be folded into Murph’s general wellness protocol."
+    },
+    {
+      "sourceKey": "source_artifact:pmid-30427265",
+      "metadataStatus": "pass2-inventory-only",
+      "priority": "supporting-or-adjacent",
+      "claimUse": "do-not-cite-in-protocol-claims-until-source-page-is-created",
+      "notes": "Identified in the supplied discovery/gap-fill synthesis as supporting, mechanistic, safety, or adjacent-variant evidence. Create a source page before using in claim sourceKeys."
+    },
+    {
+      "sourceKey": "source_artifact:pmid-31752544",
+      "metadataStatus": "pass2-inventory-only",
+      "priority": "supporting-or-adjacent",
+      "claimUse": "do-not-cite-in-protocol-claims-until-source-page-is-created",
+      "notes": "Identified in the supplied discovery/gap-fill synthesis as supporting, mechanistic, safety, or adjacent-variant evidence. Create a source page before using in claim sourceKeys."
+    },
+    {
+      "sourceKey": "source_artifact:pmid-26730983",
+      "metadataStatus": "pass2-inventory-only",
+      "priority": "supporting-or-adjacent",
+      "claimUse": "do-not-cite-in-protocol-claims-until-source-page-is-created",
+      "notes": "Identified in the supplied discovery/gap-fill synthesis as supporting, mechanistic, safety, or adjacent-variant evidence. Create a source page before using in claim sourceKeys."
+    },
+    {
+      "sourceKey": "source_artifact:pmid-27322730",
+      "metadataStatus": "pass2-inventory-only",
+      "priority": "supporting-or-adjacent",
+      "claimUse": "do-not-cite-in-protocol-claims-until-source-page-is-created",
+      "notes": "Identified in the supplied discovery/gap-fill synthesis as supporting, mechanistic, safety, or adjacent-variant evidence. Create a source page before using in claim sourceKeys."
+    },
+    {
+      "sourceKey": "source_artifact:pmid-15713707",
+      "metadataStatus": "pass2-inventory-only",
+      "priority": "supporting-or-adjacent",
+      "claimUse": "do-not-cite-in-protocol-claims-until-source-page-is-created",
+      "notes": "Identified in the supplied discovery/gap-fill synthesis as supporting, mechanistic, safety, or adjacent-variant evidence. Create a source page before using in claim sourceKeys."
+    },
+    {
+      "sourceKey": "source_artifact:pmid-16842544",
+      "metadataStatus": "pass2-inventory-only",
+      "priority": "supporting-or-adjacent",
+      "claimUse": "do-not-cite-in-protocol-claims-until-source-page-is-created",
+      "notes": "Identified in the supplied discovery/gap-fill synthesis as supporting, mechanistic, safety, or adjacent-variant evidence. Create a source page before using in claim sourceKeys."
+    },
+    {
+      "sourceKey": "source_artifact:pmid-21193540",
+      "metadataStatus": "pass2-inventory-only",
+      "priority": "supporting-or-adjacent",
+      "claimUse": "do-not-cite-in-protocol-claims-until-source-page-is-created",
+      "notes": "Identified in the supplied discovery/gap-fill synthesis as supporting, mechanistic, safety, or adjacent-variant evidence. Create a source page before using in claim sourceKeys."
+    },
+    {
+      "sourceKey": "source_artifact:pmid-25535358",
+      "metadataStatus": "pass2-inventory-only",
+      "priority": "supporting-or-adjacent",
+      "claimUse": "do-not-cite-in-protocol-claims-until-source-page-is-created",
+      "notes": "Identified in the supplied discovery/gap-fill synthesis as supporting, mechanistic, safety, or adjacent-variant evidence. Create a source page before using in claim sourceKeys."
+    },
+    {
+      "sourceKey": "source_artifact:pmid-36854795",
+      "metadataStatus": "pass2-inventory-only",
+      "priority": "supporting-or-adjacent",
+      "claimUse": "do-not-cite-in-protocol-claims-until-source-page-is-created",
+      "notes": "Identified in the supplied discovery/gap-fill synthesis as supporting, mechanistic, safety, or adjacent-variant evidence. Create a source page before using in claim sourceKeys."
+    },
+    {
+      "sourceKey": "source_artifact:pmid-32168244",
+      "metadataStatus": "pass2-inventory-only",
+      "priority": "supporting-or-adjacent",
+      "claimUse": "do-not-cite-in-protocol-claims-until-source-page-is-created",
+      "notes": "Identified in the supplied discovery/gap-fill synthesis as supporting, mechanistic, safety, or adjacent-variant evidence. Create a source page before using in claim sourceKeys."
+    },
+    {
+      "sourceKey": "source_artifact:pmid-41565717",
+      "metadataStatus": "pass2-inventory-only",
+      "priority": "supporting-or-adjacent",
+      "claimUse": "do-not-cite-in-protocol-claims-until-source-page-is-created",
+      "notes": "Identified in the supplied discovery/gap-fill synthesis as supporting, mechanistic, safety, or adjacent-variant evidence. Create a source page before using in claim sourceKeys."
+    },
+    {
+      "sourceKey": "source_artifact:doi-10.1371-journal.pmed.1004380",
+      "metadataStatus": "pass2-inventory-only",
+      "priority": "supporting-or-adjacent",
+      "claimUse": "do-not-cite-in-protocol-claims-until-source-page-is-created",
+      "notes": "Identified in the supplied discovery/gap-fill synthesis as supporting, mechanistic, safety, or adjacent-variant evidence. Create a source page before using in claim sourceKeys."
+    },
+    {
+      "sourceKey": "source_artifact:pmid-41166315",
+      "metadataStatus": "pass2-inventory-only",
+      "priority": "supporting-or-adjacent",
+      "claimUse": "do-not-cite-in-protocol-claims-until-source-page-is-created",
+      "notes": "Identified in the supplied discovery/gap-fill synthesis as supporting, mechanistic, safety, or adjacent-variant evidence. Create a source page before using in claim sourceKeys."
+    },
+    {
+      "sourceKey": "source_artifact:pmid-27226262",
+      "metadataStatus": "pass2-inventory-only",
+      "priority": "supporting-or-adjacent",
+      "claimUse": "do-not-cite-in-protocol-claims-until-source-page-is-created",
+      "notes": "Identified in the supplied discovery/gap-fill synthesis as supporting, mechanistic, safety, or adjacent-variant evidence. Create a source page before using in claim sourceKeys."
+    },
+    {
+      "sourceKey": "source_artifact:pmid-31967375",
+      "metadataStatus": "pass2-inventory-only",
+      "priority": "supporting-or-adjacent",
+      "claimUse": "do-not-cite-in-protocol-claims-until-source-page-is-created",
+      "notes": "Identified in the supplied discovery/gap-fill synthesis as supporting, mechanistic, safety, or adjacent-variant evidence. Create a source page before using in claim sourceKeys."
+    },
+    {
+      "sourceKey": "source_artifact:pmid-32276301",
+      "metadataStatus": "pass2-inventory-only",
+      "priority": "supporting-or-adjacent",
+      "claimUse": "do-not-cite-in-protocol-claims-until-source-page-is-created",
+      "notes": "Identified in the supplied discovery/gap-fill synthesis as supporting, mechanistic, safety, or adjacent-variant evidence. Create a source page before using in claim sourceKeys."
+    },
+    {
+      "sourceKey": "source_artifact:pmid-33587901",
+      "metadataStatus": "pass2-inventory-only",
+      "priority": "supporting-or-adjacent",
+      "claimUse": "do-not-cite-in-protocol-claims-until-source-page-is-created",
+      "notes": "Identified in the supplied discovery/gap-fill synthesis as supporting, mechanistic, safety, or adjacent-variant evidence. Create a source page before using in claim sourceKeys."
+    },
+    {
+      "sourceKey": "source_artifact:pmid-36051910",
+      "metadataStatus": "pass2-inventory-only",
+      "priority": "supporting-or-adjacent",
+      "claimUse": "do-not-cite-in-protocol-claims-until-source-page-is-created",
+      "notes": "Identified in the supplied discovery/gap-fill synthesis as supporting, mechanistic, safety, or adjacent-variant evidence. Create a source page before using in claim sourceKeys."
+    },
+    {
+      "sourceKey": "source_artifact:doi-10.1111-opo.12406",
+      "metadataStatus": "pass2-inventory-only",
+      "priority": "supporting-or-adjacent",
+      "claimUse": "do-not-cite-in-protocol-claims-until-source-page-is-created",
+      "notes": "Identified in the supplied discovery/gap-fill synthesis as supporting, mechanistic, safety, or adjacent-variant evidence. Create a source page before using in claim sourceKeys."
+    },
+    {
+      "sourceKey": "source_artifact:perez-algorta-2018-students",
+      "metadataStatus": "pass2-inventory-only",
+      "priority": "supporting-or-adjacent",
+      "claimUse": "do-not-cite-in-protocol-claims-until-source-page-is-created",
+      "notes": "Identified in the supplied discovery/gap-fill synthesis as supporting, mechanistic, safety, or adjacent-variant evidence. Create a source page before using in claim sourceKeys."
+    },
+    {
+      "sourceKey": "source_artifact:guarana-2021-occupational-field-studies",
+      "metadataStatus": "pass2-inventory-only",
+      "priority": "supporting-or-adjacent",
+      "claimUse": "do-not-cite-in-protocol-claims-until-source-page-is-created",
+      "notes": "Identified in the supplied discovery/gap-fill synthesis as supporting, mechanistic, safety, or adjacent-variant evidence. Create a source page before using in claim sourceKeys."
+    },
+    {
+      "sourceKey": "source_artifact:kayumov-2005-blue-blocker-melatonin",
+      "metadataStatus": "pass2-inventory-only",
+      "priority": "supporting-or-adjacent",
+      "claimUse": "do-not-cite-in-protocol-claims-until-source-page-is-created",
+      "notes": "Identified in the supplied discovery/gap-fill synthesis as supporting, mechanistic, safety, or adjacent-variant evidence. Create a source page before using in claim sourceKeys."
+    },
+    {
+      "sourceKey": "source_artifact:sasseville-2006-blue-blocker-melatonin",
+      "metadataStatus": "pass2-inventory-only",
+      "priority": "supporting-or-adjacent",
+      "claimUse": "do-not-cite-in-protocol-claims-until-source-page-is-created",
+      "notes": "Identified in the supplied discovery/gap-fill synthesis as supporting, mechanistic, safety, or adjacent-variant evidence. Create a source page before using in claim sourceKeys."
+    },
+    {
+      "sourceKey": "source_artifact:teran-2020-smartphone-night-mode",
+      "metadataStatus": "pass2-inventory-only",
+      "priority": "supporting-or-adjacent",
+      "claimUse": "do-not-cite-in-protocol-claims-until-source-page-is-created",
+      "notes": "Identified in the supplied discovery/gap-fill synthesis as supporting, mechanistic, safety, or adjacent-variant evidence. Create a source page before using in claim sourceKeys."
+    },
+    {
+      "sourceKey": "source_artifact:teran-2026-home-lighting-lens-modeling",
+      "metadataStatus": "pass2-inventory-only",
+      "priority": "supporting-or-adjacent",
+      "claimUse": "do-not-cite-in-protocol-claims-until-source-page-is-created",
+      "notes": "Identified in the supplied discovery/gap-fill synthesis as supporting, mechanistic, safety, or adjacent-variant evidence. Create a source page before using in claim sourceKeys."
+    },
+    {
+      "sourceKey": "source_artifact:esaki-2017-depression-sleep-onset-insomnia",
+      "metadataStatus": "pass2-inventory-only",
+      "priority": "supporting-or-adjacent",
+      "claimUse": "do-not-cite-in-protocol-claims-until-source-page-is-created",
+      "notes": "Identified in the supplied discovery/gap-fill synthesis as supporting, mechanistic, safety, or adjacent-variant evidence. Create a source page before using in claim sourceKeys."
+    },
+    {
+      "sourceKey": "source_artifact:kallestad-2024-blue-depleted-psychiatric-ward",
+      "metadataStatus": "pass2-inventory-only",
+      "priority": "supporting-or-adjacent",
+      "claimUse": "do-not-cite-in-protocol-claims-until-source-page-is-created",
+      "notes": "Identified in the supplied discovery/gap-fill synthesis as supporting, mechanistic, safety, or adjacent-variant evidence. Create a source page before using in claim sourceKeys."
+    },
+    {
+      "sourceKey": "source_artifact:mylona-2022-blue-blocking-bipolar-review",
+      "metadataStatus": "pass2-inventory-only",
+      "priority": "supporting-or-adjacent",
+      "claimUse": "do-not-cite-in-protocol-claims-until-source-page-is-created",
+      "notes": "Identified in the supplied discovery/gap-fill synthesis as supporting, mechanistic, safety, or adjacent-variant evidence. Create a source page before using in claim sourceKeys."
+    }
+  ],
+  "landingDecisions": {
+    "protocolWindow": "7 baseline days + 14 intervention nights",
+    "dose": "90–120 minutes before intended bedtime",
+    "primaryEndpoint": "biomarker:sleep-onset-latency",
+    "evidencePosture": "mechanistically plausible; direct glasses evidence small and mixed; objective actigraphy synthesis null/non-significant",
+    "rightsPosture": "only clearly open-access PDFs are marked redistributable; all others are placeholders or blocked until rights review"
+  }
+}

@@ -154,6 +154,195 @@
     {
       "artifacts": [
         {
+          "accessNotes": "Open-access Frontiers PDF URL from the refined corpus; re-hash locally before upload.",
+          "artifactId": "art_pmid_41341515_pdf",
+          "contentType": "application/pdf",
+          "kind": "pdf",
+          "localPath": "research-artifacts/red-light-glasses-before-bed/pmid-41341515.pdf",
+          "objectKey": "commons/research/red-light-glasses-before-bed/pmid-41341515/source.pdf",
+          "redistributable": true,
+          "rightsStatus": "open_access",
+          "sourceKey": "source_artifact:pmid-41341515",
+          "sourceUrl": "https://www.frontiersin.org/articles/10.3389/fneur.2025.1699303/pdf",
+          "storage": "cloudflare-r2"
+        },
+        {
+          "accessNotes": "Open-access PLOS printable PDF URL from the refined corpus; re-hash locally before upload.",
+          "artifactId": "art_pmid_35298459_pdf",
+          "contentType": "application/pdf",
+          "kind": "pdf",
+          "localPath": "research-artifacts/red-light-glasses-before-bed/pmid-35298459.pdf",
+          "objectKey": "commons/research/red-light-glasses-before-bed/pmid-35298459/source.pdf",
+          "redistributable": true,
+          "rightsStatus": "open_access",
+          "sourceKey": "source_artifact:pmid-35298459",
+          "sourceUrl": "https://journals.plos.org/plosbiology/article/file?id=10.1371/journal.pbio.3001571&type=printable",
+          "storage": "cloudflare-r2"
+        },
+        {
+          "accessNotes": "Placeholder only. Upload is intentionally blocked until a direct PDF URL and redistribution rights are confirmed.",
+          "artifactId": "art_pmid_40728371_pdf",
+          "contentType": "application/pdf",
+          "kind": "pdf",
+          "localPath": "research-artifacts/red-light-glasses-before-bed/pmid-40728371.pdf",
+          "objectKey": "commons/research/red-light-glasses-before-bed/pmid-40728371/source.pdf",
+          "redistributable": false,
+          "rightsStatus": "open_access",
+          "sourceKey": "source_artifact:pmid-40728371",
+          "sourceUrl": "https://tvst.arvojournals.org/article.aspx?articleid=2810600",
+          "storage": "cloudflare-r2"
+        },
+        {
+          "accessNotes": "Placeholder only. Upload is intentionally blocked until a direct PDF URL and redistribution rights are confirmed.",
+          "artifactId": "art_pmid_37192881_pdf",
+          "contentType": "application/pdf",
+          "kind": "pdf",
+          "localPath": "research-artifacts/red-light-glasses-before-bed/pmid-37192881.pdf",
+          "objectKey": "commons/research/red-light-glasses-before-bed/pmid-37192881/source.pdf",
+          "redistributable": false,
+          "rightsStatus": "open_access",
+          "sourceKey": "source_artifact:pmid-37192881",
+          "sourceUrl": "https://academic.oup.com/sleepadvances/article/1/1/zpaa002/5851240",
+          "storage": "cloudflare-r2"
+        },
+        {
+          "accessNotes": "Placeholder only. Upload is intentionally blocked until a direct PDF URL and redistribution rights are confirmed.",
+          "artifactId": "art_pmid_34030534_pdf",
+          "contentType": "application/pdf",
+          "kind": "pdf",
+          "localPath": "research-artifacts/red-light-glasses-before-bed/pmid-34030534.pdf",
+          "objectKey": "commons/research/red-light-glasses-before-bed/pmid-34030534/source.pdf",
+          "redistributable": false,
+          "rightsStatus": "permission_required",
+          "sourceKey": "source_artifact:pmid-34030534",
+          "sourceUrl": "https://pubmed.ncbi.nlm.nih.gov/34030534/",
+          "storage": "cloudflare-r2"
+        },
+        {
+          "accessNotes": "Placeholder only. Upload is intentionally blocked until a direct PDF URL and redistribution rights are confirmed.",
+          "artifactId": "art_pmid_37593770_pdf",
+          "contentType": "application/pdf",
+          "kind": "pdf",
+          "localPath": "research-artifacts/red-light-glasses-before-bed/pmid-37593770.pdf",
+          "objectKey": "commons/research/red-light-glasses-before-bed/pmid-37593770/source.pdf",
+          "redistributable": false,
+          "rightsStatus": "not_redistributable",
+          "sourceKey": "source_artifact:pmid-37593770",
+          "sourceUrl": "https://www.cochranelibrary.com/cdsr/doi/10.1002/14651858.CD013244.pub2/full",
+          "storage": "cloudflare-r2"
+        },
+        {
+          "accessNotes": "Placeholder only. Upload is intentionally blocked until a direct PDF URL and redistribution rights are confirmed.",
+          "artifactId": "art_doi_10_17617_1_4a6s_ec74_pdf",
+          "contentType": "application/pdf",
+          "kind": "pdf",
+          "localPath": "research-artifacts/red-light-glasses-before-bed/doi-10.17617-1.4a6s-ec74.pdf",
+          "objectKey": "commons/research/red-light-glasses-before-bed/doi-10.17617-1.4a6s-ec74/source.pdf",
+          "redistributable": false,
+          "rightsStatus": "open_access",
+          "sourceKey": "source_artifact:doi-10.17617-1.4a6s-ec74",
+          "sourceUrl": "https://lightforpublichealth.org/consensus-statements_en.html",
+          "storage": "cloudflare-r2"
+        },
+        {
+          "accessNotes": "Placeholder only. Upload is intentionally blocked until a direct PDF URL and redistribution rights are confirmed.",
+          "artifactId": "art_pmid_29101797_pdf",
+          "contentType": "application/pdf",
+          "kind": "pdf",
+          "localPath": "research-artifacts/red-light-glasses-before-bed/pmid-29101797.pdf",
+          "objectKey": "commons/research/red-light-glasses-before-bed/pmid-29101797/source.pdf",
+          "redistributable": false,
+          "rightsStatus": "not_redistributable",
+          "sourceKey": "source_artifact:pmid-29101797",
+          "sourceUrl": "https://pmc.ncbi.nlm.nih.gov/articles/PMC5703049/",
+          "storage": "cloudflare-r2"
+        },
+        {
+          "accessNotes": "Placeholder only. Upload is intentionally blocked until a direct PDF URL and redistribution rights are confirmed.",
+          "artifactId": "art_pmid_20030543_pdf",
+          "contentType": "application/pdf",
+          "kind": "pdf",
+          "localPath": "research-artifacts/red-light-glasses-before-bed/pmid-20030543.pdf",
+          "objectKey": "commons/research/red-light-glasses-before-bed/pmid-20030543/source.pdf",
+          "redistributable": false,
+          "rightsStatus": "permission_required",
+          "sourceKey": "source_artifact:pmid-20030543",
+          "sourceUrl": "https://pubmed.ncbi.nlm.nih.gov/20030543/",
+          "storage": "cloudflare-r2"
+        },
+        {
+          "accessNotes": "Placeholder only. Upload is intentionally blocked until a direct PDF URL and redistribution rights are confirmed.",
+          "artifactId": "art_pmid_33707105_pdf",
+          "contentType": "application/pdf",
+          "kind": "pdf",
+          "localPath": "research-artifacts/red-light-glasses-before-bed/pmid-33707105.pdf",
+          "objectKey": "commons/research/red-light-glasses-before-bed/pmid-33707105/source.pdf",
+          "redistributable": false,
+          "rightsStatus": "permission_required",
+          "sourceKey": "source_artifact:pmid-33707105",
+          "sourceUrl": "https://pubmed.ncbi.nlm.nih.gov/33707105/",
+          "storage": "cloudflare-r2"
+        },
+        {
+          "accessNotes": "Placeholder only. Upload is intentionally blocked until a direct PDF URL and redistribution rights are confirmed.",
+          "artifactId": "art_pmid_35089982_pdf",
+          "contentType": "application/pdf",
+          "kind": "pdf",
+          "localPath": "research-artifacts/red-light-glasses-before-bed/pmid-35089982.pdf",
+          "objectKey": "commons/research/red-light-glasses-before-bed/pmid-35089982/source.pdf",
+          "redistributable": false,
+          "rightsStatus": "open_access",
+          "sourceKey": "source_artifact:pmid-35089982",
+          "sourceUrl": "https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0262799",
+          "storage": "cloudflare-r2"
+        },
+        {
+          "accessNotes": "Placeholder only. Upload is intentionally blocked until a direct PDF URL and redistribution rights are confirmed.",
+          "artifactId": "art_pmid_35024497_pdf",
+          "contentType": "application/pdf",
+          "kind": "pdf",
+          "localPath": "research-artifacts/red-light-glasses-before-bed/pmid-35024497.pdf",
+          "objectKey": "commons/research/red-light-glasses-before-bed/pmid-35024497/source.pdf",
+          "redistributable": false,
+          "rightsStatus": "open_access",
+          "sourceKey": "source_artifact:pmid-35024497",
+          "sourceUrl": "https://www.sciencedirect.com/science/article/pii/S245199442100027X",
+          "storage": "cloudflare-r2"
+        },
+        {
+          "accessNotes": "Placeholder only. Upload is intentionally blocked until a direct PDF URL and redistribution rights are confirmed.",
+          "artifactId": "art_pmid_29991437_pdf",
+          "contentType": "application/pdf",
+          "kind": "pdf",
+          "localPath": "research-artifacts/red-light-glasses-before-bed/pmid-29991437.pdf",
+          "objectKey": "commons/research/red-light-glasses-before-bed/pmid-29991437/source.pdf",
+          "redistributable": false,
+          "rightsStatus": "not_redistributable",
+          "sourceKey": "source_artifact:pmid-29991437",
+          "sourceUrl": "https://pubmed.ncbi.nlm.nih.gov/29991437/",
+          "storage": "cloudflare-r2"
+        },
+        {
+          "accessNotes": "Placeholder only. Upload is intentionally blocked until a direct PDF URL and redistribution rights are confirmed.",
+          "artifactId": "art_pmid_41421618_pdf",
+          "contentType": "application/pdf",
+          "kind": "pdf",
+          "localPath": "research-artifacts/red-light-glasses-before-bed/pmid-41421618.pdf",
+          "objectKey": "commons/research/red-light-glasses-before-bed/pmid-41421618/source.pdf",
+          "redistributable": false,
+          "rightsStatus": "permission_required",
+          "sourceKey": "source_artifact:pmid-41421618",
+          "sourceUrl": "https://pubmed.ncbi.nlm.nih.gov/41421618/",
+          "storage": "cloudflare-r2"
+        }
+      ],
+      "description": "Manifest stubs for red-light glasses before bed research artifacts and article PDFs. Keep files out of Git, stage them under research-artifacts/, hash them locally, then upload to Cloudflare R2 only after rights review. Only the clearly open-access direct PDF URLs below are redistributable by default.",
+      "manifestKey": "source_artifact:red-light-glasses-before-bed/research-artifacts",
+      "schemaVersion": "murph.commons.artifact-manifest.v1"
+    },
+    {
+      "artifacts": [
+        {
           "accessNotes": "Placeholder only. Upload is intentionally blocked until the file is legally cleared for storage and redistribution.",
           "artifactId": "art_doi_10.1080_23328940.2026.2645467_pdf",
           "contentType": "application/pdf",
@@ -691,7 +880,7 @@
       "schemaVersion": "murph.commons.artifact-manifest.v1"
     }
   ],
-  "catalogHash": "sha256:3d287ad66eb3cc5e55898eb82fee7f3b30fd6d89f5e27977ab590a1e8131a48a",
+  "catalogHash": "sha256:3f0b8a15d102c48557a68b67b7336f49f77fbe21a5d382dd07e185d23bb05baf",
   "changes": [
     {
       "affectedFields": [
@@ -747,6 +936,31 @@
       "schemaVersion": "murph.commons.change.v1",
       "sourceKeys": [
         "source_artifact:pmid-25705824"
+      ]
+    },
+    {
+      "affectedFields": [
+        "protocol",
+        "testPlans",
+        "claims",
+        "safety",
+        "sources/red-light-glasses-before-bed",
+        "artifacts/red-light-glasses-before-bed/research-artifacts.json"
+      ],
+      "changeId": "chg_2026_04_20_red_light_glasses_before_bed_protocol",
+      "changeType": "evidence_change",
+      "editSummary": "Added the red-light glasses before bed bounded self-experiment protocol, source pages, bibliography, and rights-gated artifact manifest.",
+      "entityKey": "protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed",
+      "minor": false,
+      "rationale": "Convert the completed discovery, gap-fill, and synthesis passes into Health Commons pages with strict overclaim guardrails and a PDF workflow that downloads only clearly open-access redistributable files.",
+      "reviewStatus": "proposed",
+      "schemaVersion": "murph.commons.change.v1",
+      "sourceKeys": [
+        "source_artifact:pmid-41341515",
+        "source_artifact:pmid-40728371",
+        "source_artifact:pmid-37192881",
+        "source_artifact:pmid-37593770",
+        "source_artifact:pmid-35298459"
       ]
     },
     {
@@ -1137,6 +1351,47 @@
     },
     {
       "aliases": [
+        "SOL",
+        "time to fall asleep",
+        "sleep latency"
+      ],
+      "body": "Sleep onset latency is Murph’s primary practical marker for the red-light glasses before bed protocol because the intervention is meant to change the last part of the evening, not the entire sleep architecture.\n\nFor personal experiments, pair any wearable estimate with a one-tap subjective estimate. The useful question is whether falling asleep felt easier often enough to be worth repeating.",
+      "categories": [
+        "sleep",
+        "wearable-metric"
+      ],
+      "entityType": "biomarker",
+      "interpretationFrame": {
+        "caveat": "Wearables and actigraphy can misclassify quiet wakefulness, reading in bed, meditation, alcohol-related sleep fragmentation, and irregular bedtimes.",
+        "principle": "Compare repeated baseline and intervention windows rather than one-night changes."
+      },
+      "key": "biomarker:sleep-onset-latency",
+      "measurementContexts": [
+        "overnight_wearable",
+        "sleep_diary"
+      ],
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed",
+          "type": "related_protocol"
+        }
+      ],
+      "relativePath": "biomarkers/sleep-onset-latency.md",
+      "revision": {
+        "pageRevisionId": "sha256:fc6c6e95336d8a224c4e7328fbdce060da91a2a0e0d95dfc10545e2982e10d11",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "biomarkers/sleep-onset-latency",
+      "status": "draft",
+      "summary": "A sleep-onset marker estimating how long it takes to fall asleep after attempting sleep, best interpreted as a trend with diary context rather than a perfect wearable truth.",
+      "title": "Sleep Onset Latency",
+      "unit": "minutes"
+    },
+    {
+      "aliases": [
         "sauna protocol"
       ],
       "body": "Use this page when a user says \"sauna protocol\" and the system needs to choose among multiple sauna families or named recipes.",
@@ -1269,6 +1524,61 @@
       "status": "field-testing",
       "summary": "Traditional high-temperature dry-sauna exposure, including Finnish dry sauna protocols, separated from infrared sauna and steam-room protocols.",
       "title": "Dry Sauna"
+    },
+    {
+      "aliases": [
+        "dim evening light",
+        "short-wavelength light reduction",
+        "melanopic light reduction before bed"
+      ],
+      "body": "Evening light reduction is the broader family for Murph protocols that reduce melanopic or short-wavelength light exposure near bedtime.\n\nThis family should not teach “blue light is bad.” The intended pattern is brighter, well-timed daytime light and lower evening/night light. Strong daytime blue-blocking, screen software, room-light redesign, light therapy, shift-work protocols, and psychiatric virtual-darkness protocols should remain separate variants.",
+      "canonicalMechanism": "lower_evening_melanopic_light",
+      "categories": [
+        "sleep",
+        "circadian",
+        "evening-light"
+      ],
+      "entityType": "experiment_family",
+      "familyKind": "mechanism",
+      "key": "experiment_family:evening-light-reduction",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed",
+          "type": "related_protocol"
+        },
+        {
+          "target": "source_artifact:pmid-35298459",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:doi-10.17617-1.4a6s-ec74",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-40728371",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-41341515",
+          "type": "cites"
+        }
+      ],
+      "relativePath": "families/evening-light-reduction.md",
+      "researchCoverage": {
+        "auditCutoff": "2026-04-20",
+        "bibliographyKey": "source_artifact:red-light-glasses-before-bed-bibliography"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:1333cfa66a1c51b71df3e724b1b7f53f0787ba06254cd4aa61010b932746f6ad",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "families/evening-light-reduction",
+      "status": "draft",
+      "summary": "Protocols that lower melanopic or short-wavelength light exposure in the pre-bed window, separated from daytime light exposure, light therapy, and psychiatric virtual-darkness protocols.",
+      "title": "Evening Light Reduction"
     },
     {
       "aliases": [
@@ -2036,6 +2346,401 @@
     },
     {
       "aliases": [
+        "red light glasses before bed",
+        "amber glasses before bed",
+        "blue-blocking glasses before bed",
+        "blue light blocking glasses for sleep",
+        "evening red glasses sleep experiment"
+      ],
+      "attribution": {
+        "ownerType": "murph"
+      },
+      "body": "## Canonical question\n\nAfter a stable baseline, does wearing high-filtering amber/red/brown glasses for the last **90–120 minutes before bed** make sleep onset feel easier or show up as an earlier sleep-onset signal?\n\n## Canonical Murph recipe\n\nRun a 21-day experiment:\n\n- **7 baseline days**\n- **14 intervention nights**\n- glasses on **90–120 minutes before intended bedtime**\n- **12 target nights**, with **10 nights** as the minimum for a useful first read\n- no daytime use\n- no new melatonin, sleep supplements, screen curfew, bedtime target, or room-light redesign during the same test\n\nUse the simplest version first. The intervention is not “avoid blue light forever.” It is a short test of whether lowering evening melanopic light helps this user wind down.\n\n## Why this exact version comes first\n\nMurph should treat this as a **low-burden self-experiment** rather than a treatment protocol. The evidence base points in two directions at once: evening melanopic-light reduction is biologically plausible, but direct glasses trials are small, mixed, and often stronger on subjective sleep than objective actigraphy.\n\nThe practical version is therefore deliberately narrow. It asks whether one user’s evenings feel less wired and whether their sleep-onset proxy improves enough to repeat. It does not promise better HRV, deeper sleep, total sleep time, eye-strain relief, or retinal protection.\n\n## What counts as a signal\n\nPrimary signal:\n\n- shorter subjective or wearable-estimated sleep-onset latency compared with the user’s own 7-day baseline\n\nUseful subjective check:\n\n- “Did I feel less wired in the last hour before bed?”\n\nExploratory signals:\n\n- sleep efficiency\n- total sleep time\n- deep-sleep minutes\n- HRV RMSSD\n- resting heart rate\n\nMurph should interpret a result as interesting only when it is repeated across multiple adherent nights and not obviously explained by bedtime shifts, alcohol, caffeine, travel, illness, stress, hard training, or a simultaneous routine change.\n\n## Product and implementation notes\n\nProduct quality matters. A clear office lens with weak filtering is not the same intervention as high-filtering amber/red/brown evening eyewear. When spectral transmittance or melanopic daylight filtering density is available, prefer that over marketing labels.\n\nThis protocol should remain separate from delayed sleep phase disorder, shift-work, pregnancy, pediatric, depression, bipolar/mania, inpatient psychiatric ward lighting, and screen-software variants. Those adjacent protocols may use similar mechanisms but need different supervision, endpoints, and safety language.\n\n## Off-ramp\n\nAt the end of 21 days, Murph should offer one of three conclusions:\n\n1. **Worth repeating** if sleep onset or pre-bed wiredness clearly improved with low burden.\n2. **Probably noise** if only one or two nights moved or the signal was confounded.\n3. **Not worth it** if the tint was annoying, unsafe, mood-disrupting, or made sleep worse.",
+      "categories": [
+        "sleep",
+        "circadian",
+        "evening-light",
+        "wearable-measured",
+        "murph-canonical"
+      ],
+      "claims": [
+        {
+          "caveats": [
+            "Plausible mechanism is not the same as reliable wearable improvement.",
+            "Ambient room light and screen brightness may matter as much as the glasses."
+          ],
+          "claimId": "evening-melanopic-light-reduction-is-plausible",
+          "sourceKeys": [
+            "source_artifact:pmid-35298459",
+            "source_artifact:doi-10.17617-1.4a6s-ec74"
+          ],
+          "strength": "moderate",
+          "text": "Reducing evening melanopic or short-wavelength light is a plausible way to reduce pre-bed alerting and protect circadian timing, but glasses are only one implementation of that broader light-management idea.",
+          "type": "mechanistic"
+        },
+        {
+          "caveats": [
+            "Some individual studies report subjective sleep benefits.",
+            "Lack of statistically significant pooled actigraphy effects does not rule out personal benefit in a specific user."
+          ],
+          "claimId": "direct-glasses-evidence-is-small-and-mixed",
+          "sourceKeys": [
+            "source_artifact:pmid-41341515",
+            "source_artifact:pmid-37192881",
+            "source_artifact:pmid-34030534",
+            "source_artifact:pmid-37593770"
+          ],
+          "strength": "high",
+          "text": "Human intervention evidence for evening blue-blocking glasses is small and mixed; recent adult actigraphy synthesis did not find statistically significant pooled improvements in sleep onset latency, total sleep time, sleep efficiency, or wake after sleep onset.",
+          "type": "mixed_evidence"
+        },
+        {
+          "caveats": [
+            "The evidence does not establish one exact best timing window.",
+            "Longer evening use may increase burden without clearly improving objective signal."
+          ],
+          "claimId": "two-hour-evening-window-is-a-practical-first-test",
+          "sourceKeys": [
+            "source_artifact:pmid-29101797",
+            "source_artifact:pmid-20030543",
+            "source_artifact:pmid-33707105",
+            "source_artifact:pmid-40728371",
+            "source_artifact:pmid-35298459"
+          ],
+          "strength": "moderate",
+          "text": "A 90–120 minute pre-bed window is the smallest practical Murph recipe because it matches the most directly relevant small trials better than all-evening or overnight protocols.",
+          "type": "design_guardrail"
+        },
+        {
+          "caveats": [
+            "Subjective benefit can reflect expectation, routine stability, or reduced screen use.",
+            "Actigraphy and consumer wearables may miss quiet wakefulness."
+          ],
+          "claimId": "subjective-sleep-onset-may-move-before-wearables",
+          "sourceKeys": [
+            "source_artifact:pmid-29101797",
+            "source_artifact:pmid-20030543",
+            "source_artifact:pmid-33707105",
+            "source_artifact:pmid-41341515"
+          ],
+          "strength": "moderate",
+          "text": "If the protocol works for a user, the clearest early signal is likely shorter perceived sleep onset or less pre-bed wiredness; wearable sleep-stage and HRV changes are exploratory.",
+          "type": "intervention_result"
+        },
+        {
+          "caveats": [
+            "Murph should carry a product-quality note rather than a brand recommendation.",
+            "Weak clear blue-light lenses should not be treated as equivalent to high-filtering evening lenses."
+          ],
+          "claimId": "product-spectral-quality-matters",
+          "sourceKeys": [
+            "source_artifact:pmid-40728371",
+            "source_artifact:pmid-35298459"
+          ],
+          "strength": "high",
+          "text": "Lens color and marketing language are not enough; product spectral filtering, fit, leakage, ambient light, and screen brightness can change whether the intervention actually reduces melanopic input.",
+          "type": "design_guardrail"
+        },
+        {
+          "caveats": [
+            "Those populations may need different timing, supervision, endpoints, and safety framing.",
+            "Mood-disorder and circadian-disorder protocols should be clinician-guided."
+          ],
+          "claimId": "adjacent-clinical-variants-should-not-be-merged",
+          "sourceKeys": [
+            "source_artifact:pmid-35089982",
+            "source_artifact:pmid-35024497",
+            "source_artifact:pmid-41421618"
+          ],
+          "strength": "high",
+          "text": "Delayed sleep phase disorder, pregnancy, pediatric use, shift work, bipolar or mania virtual-darkness protocols, and psychiatric ward lighting are adjacent variants, not evidence that a general adult bedtime-glasses self-experiment will work.",
+          "type": "design_guardrail"
+        },
+        {
+          "caveats": [
+            "Users with persistent eye symptoms should consider an eye exam rather than using this protocol as eye care."
+          ],
+          "claimId": "eye-strain-and-eye-protection-claims-are-not-this-protocol",
+          "sourceKeys": [
+            "source_artifact:pmid-37593770"
+          ],
+          "strength": "high",
+          "text": "This protocol should not claim eye-strain relief, retinal protection, or macular-health benefit from blue-light glasses.",
+          "type": "design_guardrail"
+        },
+        {
+          "caveats": [
+            "Morning and daytime light can be beneficial for circadian stability.",
+            "Daytime use of strong filtering lenses is a different intervention."
+          ],
+          "claimId": "daytime-light-is-not-the-enemy",
+          "sourceKeys": [
+            "source_artifact:pmid-35298459",
+            "source_artifact:doi-10.17617-1.4a6s-ec74"
+          ],
+          "strength": "high",
+          "text": "Murph should not encourage all-day blue-light avoidance; the intervention is specifically about lowering evening melanopic exposure while preserving healthy daytime light exposure.",
+          "type": "design_guardrail"
+        }
+      ],
+      "confoundersToTrack": [
+        "major_bedtime_change",
+        "major_wake_time_change",
+        "alcohol_last_24h",
+        "caffeine_after_noon",
+        "hard_training_last_24h",
+        "late_exercise",
+        "illness_or_fever",
+        "travel_or_timezone_shift",
+        "unusual_stress",
+        "new_supplement_or_medication_change",
+        "melatonin_or_light_therapy_change",
+        "new_screen_curfew_or_room_lighting_change",
+        "partner_child_pet_sleep_disruption"
+      ],
+      "entityType": "protocol_variant",
+      "key": "protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed",
+      "lensSpec": {
+        "avoidAsPrimaryIntervention": "Clear office/computer lenses with weak blue-light filtering and no spectral data.",
+        "practicalFallback": "Wraparound amber/red/brown glasses marketed for evening blue-light blocking, used only during the pre-bed window.",
+        "preferred": "Published spectral transmittance or melanopic daylight filtering density data; if available, prefer lenses that substantially reduce melanopic or short-wavelength input rather than weak clear office lenses."
+      },
+      "lineage": {
+        "rationale": "Murph canonical evening eyewear protocol for a low-burden, measurable sleep-onset self-experiment.",
+        "relationship": "root"
+      },
+      "nightlyLoggingFields": [
+        "glasses_worn",
+        "glasses_on_time",
+        "glasses_off_time",
+        "intended_bedtime",
+        "actual_bedtime",
+        "estimated_time_to_fall_asleep_minutes",
+        "felt_less_wired_before_bed",
+        "screen_use_last_2h",
+        "room_light_brightness_last_2h",
+        "caffeine_after_noon",
+        "alcohol_last_24h",
+        "hard_training_last_24h",
+        "late_exercise",
+        "travel_or_timezone_shift",
+        "illness_or_fever",
+        "unusual_stress",
+        "new_supplement_or_medication_change",
+        "headache_or_visual_discomfort",
+        "mood_change"
+      ],
+      "protocol": {
+        "doseSignature": "nightly · 90–120 min before intended bedtime · high-filtering amber/red/brown glasses · 14-night intervention after 7-day baseline",
+        "durationMinutes": {
+          "max": 120,
+          "min": 90
+        },
+        "frequency": {
+          "sessionsPerWeek": 7
+        },
+        "interventionSessionsMinimum": 10,
+        "interventionSessionsTarget": 12,
+        "steps": [
+          "Keep the normal evening routine stable for a 7-day baseline before starting the intervention.",
+          "For 14 intervention nights, put the glasses on 90–120 minutes before intended bedtime.",
+          "Wear them only indoors during the pre-bed window; do not wear them during the day.",
+          "Keep room lighting, screen time, caffeine, alcohol, bedtime target, sleep supplements, melatonin, and exercise timing as stable as practical.",
+          "Do not add a new screen curfew, new sleep supplement, new bedtime, new light-therapy device, or major room-light redesign during this test.",
+          "Remove the glasses before driving, cycling, cooking with visual hazards, navigating stairs or unfamiliar low-light spaces, or doing color-critical work.",
+          "Log whether glasses were worn, approximate start time, bedtime target, actual bedtime, screen use, room-light brightness, alcohol, caffeine timing, late exercise, travel, illness, stress, medication or supplement changes, and any symptoms."
+        ],
+        "stopConditions": [
+          "Stop the night’s session if the glasses cause headache, dizziness, nausea, eye discomfort, unsafe low-light navigation, or clumsiness.",
+          "End the experiment if mood becomes unusually elevated, unusually low, agitated, or unstable.",
+          "End the experiment if sleep feels meaningfully worse for three consecutive nights and no obvious outside cause explains it.",
+          "End the experiment if the protocol creates anxiety, fixation, or friction that outweighs any benefit."
+        ]
+      },
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "experiment_family:evening-light-reduction",
+          "type": "parent_family"
+        },
+        {
+          "target": "biomarker:sleep-onset-latency",
+          "type": "primary_biomarker"
+        },
+        {
+          "target": "biomarker:sleep-efficiency",
+          "type": "secondary_biomarker"
+        },
+        {
+          "target": "biomarker:deep-sleep-minutes",
+          "type": "secondary_biomarker"
+        },
+        {
+          "target": "biomarker:hrv-rmssd",
+          "type": "secondary_biomarker"
+        },
+        {
+          "target": "biomarker:resting-heart-rate",
+          "type": "secondary_biomarker"
+        },
+        {
+          "target": "source_artifact:red-light-glasses-before-bed-bibliography",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-41341515",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-40728371",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-37192881",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-37593770",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-35298459",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:doi-10.17617-1.4a6s-ec74",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-29101797",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-33707105",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-35089982",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-35024497",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-29991437",
+          "type": "cites"
+        }
+      ],
+      "relativePath": "protocols/red-light-glasses-before-bed/red-light-glasses-before-bed.md",
+      "researchCoverage": {
+        "backboneSourceKeys": [
+          "source_artifact:pmid-40728371",
+          "source_artifact:pmid-41341515",
+          "source_artifact:pmid-37192881",
+          "source_artifact:pmid-34030534",
+          "source_artifact:pmid-37593770",
+          "source_artifact:pmid-35298459",
+          "source_artifact:doi-10.17617-1.4a6s-ec74",
+          "source_artifact:pmid-29991437"
+        ],
+        "bibliographyKey": "source_artifact:red-light-glasses-before-bed-bibliography",
+        "causalInterventionSourceKeys": [
+          "source_artifact:pmid-29101797",
+          "source_artifact:pmid-20030543",
+          "source_artifact:pmid-33707105",
+          "source_artifact:pmid-35089982",
+          "source_artifact:pmid-35024497"
+        ],
+        "corpusStats": {
+          "auditCutoff": "2026-04-20",
+          "directAdultCrossoverRCTsInActigraphyMetaAnalysis": 3,
+          "highestPriorityProtocolRecords": 18,
+          "participantsInActigraphyMetaAnalysis": 49,
+          "refinedRecords": 42
+        },
+        "safetySourceKeys": [
+          "source_artifact:pmid-37593770",
+          "source_artifact:pmid-41421618"
+        ],
+        "shortlistBucketCounts": {
+          "adjacent-variants-to-split": 9,
+          "context-only-rationale": 7,
+          "evidence-backbone": 8,
+          "protocol-dose-and-design": 7,
+          "safety-and-contraindications": 10,
+          "wearable-or-testable-endpoints": 5
+        }
+      },
+      "revision": {
+        "pageRevisionId": "sha256:9ec8f6231e63d379657b315cd5a636d324b29eae7650c019c8ad4391575e6b0c",
+        "recipeHash": "sha256:ee137c9273b8472bc85172302fa11f44d31779ccfc119938f0312e840551d3b0",
+        "runSpecRevisionId": "sha256:54523023567d4c25e2100416dff53a9d091d93bc0ca76280305255c022797e48"
+      },
+      "safety": {
+        "avoidOrGetClinicianGuidance": [
+          "bipolar_disorder_or_history_of_mania_or_hypomania",
+          "active_severe_depression_or_recent_mood_instability",
+          "delayed_sleep_phase_disorder_or_other_circadian_rhythm_sleep_wake_disorder",
+          "pregnancy",
+          "children_or_adolescents",
+          "shift_work_or_planned_overnight_wakefulness",
+          "current_timed_light_therapy",
+          "current_melatonin_timing_protocol",
+          "significant_fall_risk_or_low_light_navigation_risk",
+          "color_critical_work_or_safety_critical_evening_tasks",
+          "eye_disease_or_new_visual_symptoms"
+        ],
+        "cautionLevel": "moderate",
+        "notes": [
+          "This is a bounded wellness self-experiment, not treatment for insomnia, circadian rhythm disorder, depression, mania, or eye disease.",
+          "Do not combine with new melatonin, sleep supplements, light therapy, or a new screen curfew during the same test window.",
+          "Do not wear the glasses during driving, cycling, cooking with visual hazards, stair navigation if visibility is reduced, color-critical tasks, or unfamiliar low-light environments.",
+          "If evening light is already dim and screen use is already low, the expected signal may be small or absent."
+        ],
+        "stopIf": [
+          "headache",
+          "dizziness",
+          "nausea",
+          "eye_pain_or_visual_discomfort",
+          "unsafe_clumsiness_or_trip_risk",
+          "unusually_elevated_mood_or_agitation",
+          "unusually_low_mood",
+          "sleep_worsens_for_three_consecutive_nights",
+          "experiment_creates_tracking_anxiety_or_rumination"
+        ]
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "protocols/red-light-glasses-before-bed/red-light-glasses-before-bed",
+      "status": "draft",
+      "summary": "A 21-day bounded evening-light self-experiment: 7 baseline days, then 14 nights wearing high-filtering amber/red/brown glasses for 90–120 minutes before intended bedtime, with sleep-onset latency proxy as primary and wearable sleep markers as exploratory.",
+      "testPlans": [
+        {
+          "baselineDays": 7,
+          "durationDays": 21,
+          "interventionDays": 14,
+          "minimumAdherenceSessions": 10,
+          "notes": [
+            "Use a wearable sleep-onset estimate when available, but pair it with a one-tap subjective estimate because consumer wearables and actigraphy can misclassify quiet wakefulness.",
+            "Compare intervention-window averages against the user’s own 7-day baseline rather than highlighting single-night changes.",
+            "Treat HRV, resting heart rate, sleep stages, and total sleep time as exploratory unless the personal signal is repeated and not obviously confounded.",
+            "The primary practical question is whether evenings feel less wired and sleep onset appears earlier, not whether every sleep metric improves."
+          ],
+          "planId": "sol-proxy-21d",
+          "primaryBiomarkerKey": "biomarker:sleep-onset-latency",
+          "secondaryBiomarkerKeys": [
+            "biomarker:sleep-efficiency",
+            "biomarker:deep-sleep-minutes",
+            "biomarker:hrv-rmssd",
+            "biomarker:resting-heart-rate"
+          ],
+          "targetAdherenceSessions": 12
+        }
+      ],
+      "title": "Red-Light Glasses Before Bed"
+    },
+    {
+      "aliases": [
         "bryan johnson morning routine 2026 sauna"
       ],
       "artifacts": [
@@ -2276,6 +2981,60 @@
       "summary": "Acute or mechanistic source used to guide measurable near-term endpoints and session-standardization choices.",
       "title": "Comparison of thermoregulatory, cardiovascular, and immune responses to different passive heat therapy modalities",
       "whyItMatters": "Helps prevent bad inference from hot-water immersion papers to sauna protocols by showing modality-specific physiological differences."
+    },
+    {
+      "body": "This source sits in the Murph shortlist bucket **Public-health light guidance**.\n\n**Why it matters:** Prevents Murph from implying that blue light is universally harmful; timing and context are the point.\n\n**Potential Murph endpoints:** circadian phase, melatonin suppression, sleep latency, alertness\n\n**Protocol takeaway:** Keep the intervention in the evening window and preserve daytime light.",
+      "categories": [
+        "red-light-glasses-before-bed",
+        "evening-light"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Public-health light guidance",
+      "key": "source_artifact:doi-10.17617-1.4a6s-ec74",
+      "modality": "evening short-wavelength or melanopic light reduction",
+      "murphV1Priority": "High",
+      "potentialMurphEndpoints": [
+        "circadian phase",
+        "melatonin suppression",
+        "sleep latency",
+        "alertness"
+      ],
+      "protocolTakeaway": "Keep the intervention in the evening window and preserve daytime light.",
+      "quality": "usable",
+      "redLightGlassesFocus": "Yes",
+      "relations": [
+        {
+          "target": "protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:evening-light-reduction",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/red-light-glasses-before-bed/doi-10.17617-1.4a6s-ec74.md",
+      "revision": {
+        "pageRevisionId": "sha256:53c1eef00652b4b56d64541ee36be55f44e400f1be9428e86d5920bb1965911b",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/red-light-glasses-before-bed/doi-10.17617-1.4a6s-ec74",
+      "source": {
+        "authors": "Light for Public Health Consortium",
+        "citation": "Light for Public Health Consortium. Light for Public Health Consensus Statements. doi:10.17617/1.4a6s-ec74.",
+        "doi": "10.17617/1.4a6s-ec74",
+        "journal": "Light for Public Health",
+        "kind": "guideline",
+        "title": "Light for Public Health Consensus Statements",
+        "url": "https://lightforpublichealth.org/consensus-statements_en.html",
+        "year": 2025
+      },
+      "status": "draft",
+      "studyDesign": "Consensus statement",
+      "summary": "Public-health light consensus source used to reinforce the bright-day and dim-evening framing.",
+      "title": "Light for Public Health Consensus Statements",
+      "whyItMatters": "Prevents Murph from implying that blue light is universally harmful; timing and context are the point."
     },
     {
       "body": "This source sits in the Murph shortlist bucket **Intervention design / reality checks**.\n\n**Why it matters:** Adds a newer randomized dry-sauna training study and defines an upper-bound intensity that is far more aggressive than most consumer protocols.\n\n**Potential Murph endpoints:** Strength performance, body mass, training logs, soreness, recovery ratings\n\n**Protocol takeaway:** Use it as a boundary case for heat dose, not as a default Murph recipe; consumer protocols should likely be milder and more adherable.",
@@ -2600,6 +3359,61 @@
       "whyItMatters": "Anchor review that framed many later sauna health discussions and remains useful for older safety and physiology context."
     },
     {
+      "body": "This source sits in the Murph shortlist bucket **Early human RCT**.\n\n**Why it matters:** Useful historical positive anchor for subjective sleep and affect signals.\n\n**Potential Murph endpoints:** sleep quality, sleep diary, positive affect, negative affect\n\n**Protocol takeaway:** Supports a bounded evening test but does not overcome the small-study and subjective-outcome limitations.",
+      "categories": [
+        "red-light-glasses-before-bed",
+        "evening-light"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Early human RCT",
+      "key": "source_artifact:pmid-20030543",
+      "modality": "evening short-wavelength or melanopic light reduction",
+      "murphV1Priority": "Medium",
+      "potentialMurphEndpoints": [
+        "sleep quality",
+        "sleep diary",
+        "positive affect",
+        "negative affect"
+      ],
+      "protocolTakeaway": "Supports a bounded evening test but does not overcome the small-study and subjective-outcome limitations.",
+      "quality": "usable",
+      "redLightGlassesFocus": "Adjacent",
+      "relations": [
+        {
+          "target": "protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:evening-light-reduction",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/red-light-glasses-before-bed/pmid-20030543.md",
+      "revision": {
+        "pageRevisionId": "sha256:9546414ebf8d12ffeb41bc90b871213d2fb15aef35470dedd70aa86312e9ec77",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/red-light-glasses-before-bed/pmid-20030543",
+      "source": {
+        "authors": "Burkhart K, Phelps JR",
+        "citation": "Burkhart K, Phelps JR. Amber lenses to block blue light and improve sleep: a randomized trial. Chronobiol Int. 2009;26(8):1602-1612. doi:10.3109/07420520903523719.",
+        "doi": "10.3109/07420520903523719",
+        "journal": "Chronobiology International",
+        "kind": "journal_article",
+        "pmid": "20030543",
+        "title": "Amber lenses to block blue light and improve sleep: a randomized trial",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/20030543/",
+        "year": 2009
+      },
+      "status": "draft",
+      "studyDesign": "Randomized trial",
+      "summary": "Early small RCT supporting the common three-hour pre-sleep amber-lens variant.",
+      "title": "Amber lenses to block blue light and improve sleep: a randomized trial",
+      "whyItMatters": "Useful historical positive anchor for subjective sleep and affect signals."
+    },
+    {
       "body": "This source sits in the Murph shortlist bucket **Intervention design / reality checks**.\n\n**Why it matters:** Classic exercise-adjacent repeated sauna paper\n\n**Potential Murph endpoints:** HRV, plasma volume proxies, performance\n\n**Protocol takeaway:** Shows adaptation may accrue over repeated post-exercise sessions.",
       "categories": [
         "sauna",
@@ -2916,6 +3730,61 @@
       "whyItMatters": "Important for interaction with exercise"
     },
     {
+      "body": "This source sits in the Murph shortlist bucket **Ordinary bedtime glasses insomnia**.\n\n**Why it matters:** Directly informs the 2-hour pre-bed design, while remaining a small pilot with imperfect blinding.\n\n**Potential Murph endpoints:** insomnia symptoms, sleep diary, actigraphy total sleep time, sleep quality\n\n**Protocol takeaway:** Use as a practical dose anchor, not as definitive treatment evidence.",
+      "categories": [
+        "red-light-glasses-before-bed",
+        "evening-light"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Ordinary bedtime glasses insomnia",
+      "key": "source_artifact:pmid-29101797",
+      "modality": "evening short-wavelength or melanopic light reduction",
+      "murphV1Priority": "High",
+      "potentialMurphEndpoints": [
+        "insomnia symptoms",
+        "sleep diary",
+        "actigraphy total sleep time",
+        "sleep quality"
+      ],
+      "protocolTakeaway": "Use as a practical dose anchor, not as definitive treatment evidence.",
+      "quality": "usable",
+      "redLightGlassesFocus": "Yes",
+      "relations": [
+        {
+          "target": "protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:evening-light-reduction",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/red-light-glasses-before-bed/pmid-29101797.md",
+      "revision": {
+        "pageRevisionId": "sha256:7c04ea6c362704392236e16da7749d3d23ccb815d402cf84eb2091ce613f409d",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/red-light-glasses-before-bed/pmid-29101797",
+      "source": {
+        "authors": "Shechter A, Kim EW, St-Onge MP, Westwood AJ",
+        "citation": "Shechter A, et al. Blocking nocturnal blue light for insomnia: A randomized controlled trial. J Psychiatr Res. 2018;96:196-202. doi:10.1016/j.jpsychires.2017.10.015.",
+        "doi": "10.1016/j.jpsychires.2017.10.015",
+        "journal": "Journal of Psychiatric Research",
+        "kind": "journal_article",
+        "pmid": "29101797",
+        "title": "Blocking nocturnal blue light for insomnia: A randomized controlled trial",
+        "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC5703049/",
+        "year": 2018
+      },
+      "status": "draft",
+      "studyDesign": "Randomized crossover trial",
+      "summary": "Most Murph-like small insomnia crossover trial using amber wraparound lenses for two hours before bedtime.",
+      "title": "Blocking nocturnal blue light for insomnia: A randomized controlled trial",
+      "whyItMatters": "Directly informs the 2-hour pre-bed design, while remaining a small pilot with imperfect blinding."
+    },
+    {
       "body": "This source sits in the Murph shortlist bucket **Long-term Finnish cohort evidence**.\n\n**Why it matters:** Respiratory-risk signal from Finnish cohort\n\n**Potential Murph endpoints:** illness incidence/logs\n\n**Protocol takeaway:** Again long-horizon, not first wearable endpoint.",
       "categories": [
         "sauna"
@@ -3126,6 +3995,60 @@
       "summary": "Prospective cohort source used as long-term context for rationale and screening, not as a short-term personal endpoint.",
       "title": "Longitudinal associations of sauna bathing with inflammation and oxidative stress: the KIHD prospective cohort study",
       "whyItMatters": "Mechanistic bridge between epidemiology and biomarker changes"
+    },
+    {
+      "body": "This source sits in the Murph shortlist bucket **Wearable endpoint method**.\n\n**Why it matters:** Keeps Murph honest about actigraphy and wearable sleep estimates.\n\n**Potential Murph endpoints:** actigraphy sleep parameters, insomnia, circadian rhythm sleep-wake disorders\n\n**Protocol takeaway:** Use wearable estimates as trend proxies and pair them with subjective sleep-onset logging.",
+      "categories": [
+        "red-light-glasses-before-bed",
+        "evening-light"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Wearable endpoint method",
+      "key": "source_artifact:pmid-29991437",
+      "modality": "evening short-wavelength or melanopic light reduction",
+      "murphV1Priority": "High",
+      "potentialMurphEndpoints": [
+        "actigraphy sleep parameters",
+        "insomnia",
+        "circadian rhythm sleep-wake disorders"
+      ],
+      "protocolTakeaway": "Use wearable estimates as trend proxies and pair them with subjective sleep-onset logging.",
+      "quality": "usable",
+      "redLightGlassesFocus": "Yes",
+      "relations": [
+        {
+          "target": "protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:evening-light-reduction",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/red-light-glasses-before-bed/pmid-29991437.md",
+      "revision": {
+        "pageRevisionId": "sha256:d91f0f08a1d0533d650ec844dad4bc74f95f6d49de37e631fca4a20c671f32f4",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/red-light-glasses-before-bed/pmid-29991437",
+      "source": {
+        "authors": "Smith MT, McCrae CS, Cheung J, Martin JL, Harrod CG, Heald JL, Carden KA",
+        "citation": "Smith MT, et al. Use of Actigraphy for the Evaluation of Sleep Disorders and Circadian Rhythm Sleep-Wake Disorders: An American Academy of Sleep Medicine Clinical Practice Guideline. J Clin Sleep Med. 2018;14(7):1231-1237. doi:10.5664/jcsm.7230.",
+        "doi": "10.5664/jcsm.7230",
+        "journal": "Journal of Clinical Sleep Medicine",
+        "kind": "guideline",
+        "pmid": "29991437",
+        "title": "Use of Actigraphy for the Evaluation of Sleep Disorders and Circadian Rhythm Sleep-Wake Disorders: An American Academy of Sleep Medicine Clinical Practice Guideline",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/29991437/",
+        "year": 2018
+      },
+      "status": "draft",
+      "studyDesign": "Clinical practice guideline",
+      "summary": "Endpoint-method source used to calibrate actigraphy and wearable sleep-onset interpretation.",
+      "title": "Use of Actigraphy for the Evaluation of Sleep Disorders and Circadian Rhythm Sleep-Wake Disorders: An American Academy of Sleep Medicine Clinical Practice Guideline",
+      "whyItMatters": "Keeps Murph honest about actigraphy and wearable sleep estimates."
     },
     {
       "body": "This source sits in the Murph shortlist bucket **Long-term Finnish cohort evidence**.\n\n**Why it matters:** Extends mortality signal beyond men-only analyses\n\n**Potential Murph endpoints:** frequency framing\n\n**Protocol takeaway:** Supports external validity of long-term claims.",
@@ -3662,6 +4585,116 @@
       "whyItMatters": "Performance-oriented repeated sauna intervention"
     },
     {
+      "body": "This source sits in the Murph shortlist bucket **Healthy-adult mixed/null trial**.\n\n**Why it matters:** Important check against overpromising benefits in already-healthy sleepers.\n\n**Potential Murph endpoints:** actigraphy sleep duration, actigraphy sleep quality, subjective sleep, sleep diary\n\n**Protocol takeaway:** Low-symptom users may see little or no objective signal.",
+      "categories": [
+        "red-light-glasses-before-bed",
+        "evening-light"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Healthy-adult mixed/null trial",
+      "key": "source_artifact:pmid-33707105",
+      "modality": "evening short-wavelength or melanopic light reduction",
+      "murphV1Priority": "High",
+      "potentialMurphEndpoints": [
+        "actigraphy sleep duration",
+        "actigraphy sleep quality",
+        "subjective sleep",
+        "sleep diary"
+      ],
+      "protocolTakeaway": "Low-symptom users may see little or no objective signal.",
+      "quality": "usable",
+      "redLightGlassesFocus": "Yes",
+      "relations": [
+        {
+          "target": "protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:evening-light-reduction",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/red-light-glasses-before-bed/pmid-33707105.md",
+      "revision": {
+        "pageRevisionId": "sha256:ab0350bbe735ae2a111cf9665ca24f1770b698af65aa73f38da4804b6d5e23d2",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/red-light-glasses-before-bed/pmid-33707105",
+      "source": {
+        "authors": "Bigalke JA, Greenlund IM, Nicevski JR, Carter JR",
+        "citation": "Bigalke JA, et al. Effect of evening blue light blocking glasses on subjective and objective sleep in healthy adults: a randomized control trial. Sleep Health. 2021;7(4):485-490. doi:10.1016/j.sleh.2021.02.004.",
+        "doi": "10.1016/j.sleh.2021.02.004",
+        "journal": "Sleep Health",
+        "kind": "journal_article",
+        "pmid": "33707105",
+        "title": "Effect of evening blue light blocking glasses on subjective and objective sleep in healthy adults: a randomized control trial",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/33707105/",
+        "year": 2021
+      },
+      "status": "draft",
+      "studyDesign": "Randomized crossover trial",
+      "summary": "Healthy-adult crossover trial used as a key mixed/null record for low-symptom users.",
+      "title": "Effect of evening blue light blocking glasses on subjective and objective sleep in healthy adults: a randomized control trial",
+      "whyItMatters": "Important check against overpromising benefits in already-healthy sleepers."
+    },
+    {
+      "body": "This source sits in the Murph shortlist bucket **Broad BBG clinical review**.\n\n**Why it matters:** Maps the clinical landscape while warning Murph not to treat all blue-blocking glasses protocols as one thing.\n\n**Potential Murph endpoints:** sleep onset latency, insomnia symptoms, mood symptoms, circadian phase\n\n**Protocol takeaway:** Use as context-only evidence; split mood-disorder and circadian-disorder variants.",
+      "categories": [
+        "red-light-glasses-before-bed",
+        "evening-light"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Broad BBG clinical review",
+      "key": "source_artifact:pmid-34030534",
+      "modality": "evening short-wavelength or melanopic light reduction",
+      "murphV1Priority": "High",
+      "potentialMurphEndpoints": [
+        "sleep onset latency",
+        "insomnia symptoms",
+        "mood symptoms",
+        "circadian phase"
+      ],
+      "protocolTakeaway": "Use as context-only evidence; split mood-disorder and circadian-disorder variants.",
+      "quality": "usable",
+      "redLightGlassesFocus": "Yes",
+      "relations": [
+        {
+          "target": "protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:evening-light-reduction",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/red-light-glasses-before-bed/pmid-34030534.md",
+      "revision": {
+        "pageRevisionId": "sha256:e8f8cbdba103f11b77ffedaf72077a716b171b6ef565722b6bfc287da228bb6d",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/red-light-glasses-before-bed/pmid-34030534",
+      "source": {
+        "authors": "Hester L, Dang D, Barker CJ, Heath M, Mesiya S, Tienabeso T, Watson K",
+        "citation": "Hester L, et al. Evening wear of blue-blocking glasses for sleep and mood disorders: a systematic review. Chronobiol Int. 2021;38(10):1375-1383. doi:10.1080/07420528.2021.1930029.",
+        "doi": "10.1080/07420528.2021.1930029",
+        "journal": "Chronobiology International",
+        "kind": "review",
+        "pmid": "34030534",
+        "title": "Evening wear of blue-blocking glasses for sleep and mood disorders: a systematic review",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/34030534/",
+        "year": 2021
+      },
+      "status": "draft",
+      "studyDesign": "Systematic review",
+      "summary": "Broad clinical review used as context only because it mixes ordinary bedtime eyewear with circadian, shift-work, jet-lag, depression, and mania protocols.",
+      "title": "Evening wear of blue-blocking glasses for sleep and mood disorders: a systematic review",
+      "whyItMatters": "Maps the clinical landscape while warning Murph not to treat all blue-blocking glasses protocols as one thing."
+    },
+    {
       "body": "This source sits in the Murph shortlist bucket **Intervention design / reality checks**.\n\n**Why it matters:** Shows that repeated sauna exposure can drive acclimation-style endurance adaptations, not just relaxation or acute recovery effects.\n\n**Potential Murph endpoints:** Exercise HR, pace at fixed effort, HRV, resting HR, heat tolerance notes\n\n**Protocol takeaway:** Expect some sauna effects to appear through repeated adaptation over weeks rather than through single-session recovery changes.",
       "categories": [
         "sauna",
@@ -3876,6 +4909,171 @@
       "summary": "Intervention-design source used to shape dose, context, hydration, ramping, and expectation-setting for Murph variants.",
       "title": "Hematological Adaptations to Post-Exercise Sauna Bathing with No Fluid Intake: A Randomized Cross-Over Study",
       "whyItMatters": "Shows hydration status matters"
+    },
+    {
+      "body": "This source sits in the Murph shortlist bucket **Adjacent pregnancy melatonin RCT**.\n\n**Why it matters:** Shows melatonin timing can move even when sleep outcomes are not the main practical win.\n\n**Potential Murph endpoints:** salivary melatonin onset, melatonin level, phase angle, subjective sleep\n\n**Protocol takeaway:** Do not equate melatonin movement with reliable sleep improvement.",
+      "categories": [
+        "red-light-glasses-before-bed",
+        "evening-light"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Adjacent pregnancy melatonin RCT",
+      "key": "source_artifact:pmid-35024497",
+      "modality": "evening short-wavelength or melanopic light reduction",
+      "murphV1Priority": "Medium",
+      "potentialMurphEndpoints": [
+        "salivary melatonin onset",
+        "melatonin level",
+        "phase angle",
+        "subjective sleep"
+      ],
+      "protocolTakeaway": "Do not equate melatonin movement with reliable sleep improvement.",
+      "quality": "usable",
+      "redLightGlassesFocus": "Adjacent",
+      "relations": [
+        {
+          "target": "protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:evening-light-reduction",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/red-light-glasses-before-bed/pmid-35024497.md",
+      "revision": {
+        "pageRevisionId": "sha256:cd4b67f519373deb0b5560f4495ba82c727d90895f15b4f110cbbffe3eb95829",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/red-light-glasses-before-bed/pmid-35024497",
+      "source": {
+        "authors": "Liset R, Grønli J, Henriksen RE, Henriksen TEG, Nilsen RM, Pallesen S",
+        "citation": "Liset R, et al. A randomized controlled trial on the effect of blue-blocking glasses compared to partial blue-blockers on melatonin profile among nulliparous women in third trimester of the pregnancy. Neurobiol Sleep Circadian Rhythms. 2021;12:100074. doi:10.1016/j.nbscr.2021.100074.",
+        "doi": "10.1016/j.nbscr.2021.100074",
+        "journal": "Neurobiology of Sleep and Circadian Rhythms",
+        "kind": "journal_article",
+        "pmid": "35024497",
+        "title": "A randomized controlled trial on the effect of blue-blocking glasses compared to partial blue-blockers on melatonin profile among nulliparous women in third trimester of the pregnancy",
+        "url": "https://www.sciencedirect.com/science/article/pii/S245199442100027X",
+        "year": 2021
+      },
+      "status": "draft",
+      "studyDesign": "Randomized controlled trial",
+      "summary": "Pregnancy melatonin RCT used to show that a biomarker phase signal does not automatically imply a sleep-outcome benefit.",
+      "title": "A randomized controlled trial on the effect of blue-blocking glasses compared to partial blue-blockers on melatonin profile among nulliparous women in third trimester of the pregnancy",
+      "whyItMatters": "Shows melatonin timing can move even when sleep outcomes are not the main practical win."
+    },
+    {
+      "body": "This source sits in the Murph shortlist bucket **Adjacent pregnancy sleep RCT**.\n\n**Why it matters:** Useful contradiction: a pregnancy sleep trial did not show statistically significant effects on primary sleep outcomes.\n\n**Potential Murph endpoints:** total sleep time, sleep efficiency, mid-point of sleep, pregnancy sleep outcomes\n\n**Protocol takeaway:** Pregnancy is an adjacent supervised variant; do not use this as a general adult protocol proof.",
+      "categories": [
+        "red-light-glasses-before-bed",
+        "evening-light"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Adjacent pregnancy sleep RCT",
+      "key": "source_artifact:pmid-35089982",
+      "modality": "evening short-wavelength or melanopic light reduction",
+      "murphV1Priority": "Medium",
+      "potentialMurphEndpoints": [
+        "total sleep time",
+        "sleep efficiency",
+        "mid-point of sleep",
+        "pregnancy sleep outcomes"
+      ],
+      "protocolTakeaway": "Pregnancy is an adjacent supervised variant; do not use this as a general adult protocol proof.",
+      "quality": "usable",
+      "redLightGlassesFocus": "Adjacent",
+      "relations": [
+        {
+          "target": "protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:evening-light-reduction",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/red-light-glasses-before-bed/pmid-35089982.md",
+      "revision": {
+        "pageRevisionId": "sha256:7bd538fb12b7f3061697b2d6dbf3356187c2229b088cba3e2c3fb2b0b82e3133",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/red-light-glasses-before-bed/pmid-35089982",
+      "source": {
+        "authors": "Liset R, Grønli J, Henriksen RE, Henriksen TEG, Nilsen RM, Pallesen S",
+        "citation": "Liset R, et al. A randomized controlled trial on the effects of blue-blocking glasses compared to partial blue-blockers on sleep outcomes in the third trimester of pregnancy. PLoS One. 2022;17(1):e0262799. doi:10.1371/journal.pone.0262799.",
+        "doi": "10.1371/journal.pone.0262799",
+        "journal": "PLOS ONE",
+        "kind": "journal_article",
+        "pmid": "35089982",
+        "title": "A randomized controlled trial on the effects of blue-blocking glasses compared to partial blue-blockers on sleep outcomes in the third trimester of pregnancy",
+        "url": "https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0262799",
+        "year": 2022
+      },
+      "status": "draft",
+      "studyDesign": "Randomized controlled trial",
+      "summary": "Pregnancy sleep-outcome RCT used adversarially: sleep outcomes were not reliably improved despite the plausible light mechanism.",
+      "title": "A randomized controlled trial on the effects of blue-blocking glasses compared to partial blue-blockers on sleep outcomes in the third trimester of pregnancy",
+      "whyItMatters": "Useful contradiction: a pregnancy sleep trial did not show statistically significant effects on primary sleep outcomes."
+    },
+    {
+      "body": "This source sits in the Murph shortlist bucket **Light-dose guideline**.\n\n**Why it matters:** Defines the broader practical target: adequate daytime light, low evening melanopic light, and very low light during sleep.\n\n**Potential Murph endpoints:** melanopic equivalent daylight illuminance, daytime light, evening light, sleep-period light\n\n**Protocol takeaway:** Use glasses as one possible evening-light tool, not an all-day blue-light avoidance rule.",
+      "categories": [
+        "red-light-glasses-before-bed",
+        "evening-light"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Light-dose guideline",
+      "key": "source_artifact:pmid-35298459",
+      "modality": "evening short-wavelength or melanopic light reduction",
+      "murphV1Priority": "High",
+      "potentialMurphEndpoints": [
+        "melanopic equivalent daylight illuminance",
+        "daytime light",
+        "evening light",
+        "sleep-period light"
+      ],
+      "protocolTakeaway": "Use glasses as one possible evening-light tool, not an all-day blue-light avoidance rule.",
+      "quality": "usable",
+      "redLightGlassesFocus": "Yes",
+      "relations": [
+        {
+          "target": "protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:evening-light-reduction",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/red-light-glasses-before-bed/pmid-35298459.md",
+      "revision": {
+        "pageRevisionId": "sha256:b32fea5eff18dcf59b3fe410d91f87b1c1d4cc92781f65c166596b112d437208",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/red-light-glasses-before-bed/pmid-35298459",
+      "source": {
+        "authors": "Brown TM, Brainard GC, Cajochen C, Czeisler CA, Hanifin JP, Lockley SW, Lucas RJ, Münch M, O’Hagan JB, Peirson SN, Price LLA, Roenneberg T, Schlangen LJM, Skene DJ, Spitschan M, Vetter C, Zee PC, Wright KP Jr",
+        "citation": "Brown TM, et al. Recommendations for daytime, evening, and nighttime indoor light exposure to best support physiology, sleep, and wakefulness in healthy adults. PLoS Biol. 2022;20(3):e3001571. doi:10.1371/journal.pbio.3001571.",
+        "doi": "10.1371/journal.pbio.3001571",
+        "journal": "PLOS Biology",
+        "kind": "guideline",
+        "pmid": "35298459",
+        "title": "Recommendations for daytime, evening, and nighttime indoor light exposure to best support physiology, sleep, and wakefulness in healthy adults",
+        "url": "https://journals.plos.org/plosbiology/article?id=10.1371/journal.pbio.3001571",
+        "year": 2022
+      },
+      "status": "draft",
+      "studyDesign": "Consensus recommendations",
+      "summary": "Indoor-light consensus source used to ground the broader light-dose rationale behind the protocol.",
+      "title": "Recommendations for daytime, evening, and nighttime indoor light exposure to best support physiology, sleep, and wakefulness in healthy adults",
+      "whyItMatters": "Defines the broader practical target: adequate daytime light, low evening melanopic light, and very low light during sleep."
     },
     {
       "body": "This source sits in the Murph shortlist bucket **Intervention design / reality checks**.\n\n**Why it matters:** Useful negative study\n\n**Potential Murph endpoints:** avoid overclaiming gut effects\n\n**Protocol takeaway:** Include null evidence in protocol notes.",
@@ -4196,6 +5394,115 @@
       "whyItMatters": "Adds renal dimension and hydration/contraindication context"
     },
     {
+      "body": "This source sits in the Murph shortlist bucket **Broad systematic review**.\n\n**Why it matters:** Useful umbrella context: subjective sleep signals are often more consistent than objective signals across heterogeneous interventions.\n\n**Potential Murph endpoints:** sleep efficiency, total sleep time, Pittsburgh Sleep Quality Index, sleep onset latency\n\n**Protocol takeaway:** Do not merge glasses, screen filters, and room-light dimming into one causal claim.",
+      "categories": [
+        "red-light-glasses-before-bed",
+        "evening-light"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Broad systematic review",
+      "key": "source_artifact:pmid-37192881",
+      "modality": "evening short-wavelength or melanopic light reduction",
+      "murphV1Priority": "High",
+      "potentialMurphEndpoints": [
+        "sleep efficiency",
+        "total sleep time",
+        "Pittsburgh Sleep Quality Index",
+        "sleep onset latency"
+      ],
+      "protocolTakeaway": "Do not merge glasses, screen filters, and room-light dimming into one causal claim.",
+      "quality": "usable",
+      "redLightGlassesFocus": "Yes",
+      "relations": [
+        {
+          "target": "protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:evening-light-reduction",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/red-light-glasses-before-bed/pmid-37192881.md",
+      "revision": {
+        "pageRevisionId": "sha256:a7323b193355f37cbbeefcdfd42a9202ef061c13d942dc9de36d722796a19efc",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/red-light-glasses-before-bed/pmid-37192881",
+      "source": {
+        "authors": "Shechter A, St-Onge MP, Westwood AJ",
+        "citation": "Shechter A, et al. Interventions to reduce short-wavelength (“blue”) light exposure at night and their effects on sleep. Sleep Adv. 2020;1(1):zpaa002. doi:10.1093/sleepadvances/zpaa002.",
+        "doi": "10.1093/sleepadvances/zpaa002",
+        "journal": "Sleep Advances",
+        "kind": "review",
+        "pmid": "37192881",
+        "title": "Interventions to reduce short-wavelength (“blue”) light exposure at night and their effects on sleep: a systematic review and meta-analysis",
+        "url": "https://academic.oup.com/sleepadvances/article/1/1/zpaa002/5851240",
+        "year": 2020
+      },
+      "status": "draft",
+      "studyDesign": "Systematic review and meta-analysis",
+      "summary": "Broad short-wavelength light-reduction meta-analysis used to separate plausible mechanism from mixed sleep outcomes.",
+      "title": "Interventions to reduce short-wavelength (“blue”) light exposure at night and their effects on sleep: a systematic review and meta-analysis",
+      "whyItMatters": "Useful umbrella context: subjective sleep signals are often more consistent than objective signals across heterogeneous interventions."
+    },
+    {
+      "body": "This source sits in the Murph shortlist bucket **Claim calibration**.\n\n**Why it matters:** Main overclaim guardrail for eye-strain, macular-health, and broad sleep claims.\n\n**Potential Murph endpoints:** visual fatigue, sleep quality, macular health\n\n**Protocol takeaway:** Do not present this protocol as eye care or retinal protection.",
+      "categories": [
+        "red-light-glasses-before-bed",
+        "evening-light"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Claim calibration",
+      "key": "source_artifact:pmid-37593770",
+      "modality": "evening short-wavelength or melanopic light reduction",
+      "murphV1Priority": "High",
+      "potentialMurphEndpoints": [
+        "visual fatigue",
+        "sleep quality",
+        "macular health"
+      ],
+      "protocolTakeaway": "Do not present this protocol as eye care or retinal protection.",
+      "quality": "usable",
+      "redLightGlassesFocus": "Yes",
+      "relations": [
+        {
+          "target": "protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:evening-light-reduction",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/red-light-glasses-before-bed/pmid-37593770.md",
+      "revision": {
+        "pageRevisionId": "sha256:c4f0723d962cca03d05db469a5c8eb91a3eb7582665b6d77d7add1ef83698e06",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/red-light-glasses-before-bed/pmid-37593770",
+      "source": {
+        "authors": "Singh S, Keller PR, Busija L, McMillan P, Makrai E, Lawrenson JG",
+        "citation": "Singh S, et al. Blue-light filtering spectacle lenses for visual performance, sleep, and macular health in adults. Cochrane Database Syst Rev. 2023;8:CD013244. doi:10.1002/14651858.CD013244.pub2.",
+        "doi": "10.1002/14651858.CD013244.pub2",
+        "journal": "Cochrane Database of Systematic Reviews",
+        "kind": "review",
+        "pmid": "37593770",
+        "title": "Blue-light filtering spectacle lenses for visual performance, sleep, and macular health in adults",
+        "url": "https://www.cochranelibrary.com/cdsr/doi/10.1002/14651858.CD013244.pub2/full",
+        "year": 2023
+      },
+      "status": "draft",
+      "studyDesign": "Cochrane systematic review",
+      "summary": "Cochrane claim-calibration source for uncertain sleep evidence and weak eye-strain or eye-protection claims.",
+      "title": "Blue-light filtering spectacle lenses for visual performance, sleep, and macular health in adults",
+      "whyItMatters": "Main overclaim guardrail for eye-strain, macular-health, and broad sleep claims."
+    },
+    {
       "aliases": [
         "Debray 2023 Finnish sauna RCT"
       ],
@@ -4416,6 +5723,60 @@
       "whyItMatters": "Newest null HRV trial"
     },
     {
+      "body": "This source sits in the Murph shortlist bucket **Product characterization and implementation**.\n\n**Why it matters:** Shows why Murph should not trust lens color or marketing labels alone; spectral filtering, fit, timing, and usage determine whether melanopic input is actually reduced.\n\n**Potential Murph endpoints:** melanopic daylight filtering density, spectral transmittance, implementation timing\n\n**Protocol takeaway:** Use as the product-quality guardrail and avoid brand recommendations unless spectral data is available.",
+      "categories": [
+        "red-light-glasses-before-bed",
+        "evening-light"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Product characterization and implementation",
+      "key": "source_artifact:pmid-40728371",
+      "modality": "evening short-wavelength or melanopic light reduction",
+      "murphV1Priority": "High",
+      "potentialMurphEndpoints": [
+        "melanopic daylight filtering density",
+        "spectral transmittance",
+        "implementation timing"
+      ],
+      "protocolTakeaway": "Use as the product-quality guardrail and avoid brand recommendations unless spectral data is available.",
+      "quality": "usable",
+      "redLightGlassesFocus": "Yes",
+      "relations": [
+        {
+          "target": "protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:evening-light-reduction",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/red-light-glasses-before-bed/pmid-40728371.md",
+      "revision": {
+        "pageRevisionId": "sha256:248203f25cce37aeb3c9d2ebe463955ae95bbd948c99ecdca2d47aa418352cce",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/red-light-glasses-before-bed/pmid-40728371",
+      "source": {
+        "authors": "Glickman GL, Harrison EM, Herf M, Herf L, Brown TM",
+        "citation": "Glickman GL, et al. Optimizing the Potential Utility of Blue-Blocking Glasses for Sleep and Circadian Health. Transl Vis Sci Technol. 2025;14(7):25. doi:10.1167/tvst.14.7.25.",
+        "doi": "10.1167/tvst.14.7.25",
+        "journal": "Translational Vision Science & Technology",
+        "kind": "review",
+        "pmid": "40728371",
+        "title": "Optimizing the Potential Utility of Blue-Blocking Glasses for Sleep and Circadian Health",
+        "url": "https://tvst.arvojournals.org/article.aspx?articleid=2810600",
+        "year": 2025
+      },
+      "status": "draft",
+      "studyDesign": "Narrative review / product characterization",
+      "summary": "Product spectral adequacy and implementation source for lens-quality guardrails, including melanopic daylight filtering density.",
+      "title": "Optimizing the Potential Utility of Blue-Blocking Glasses for Sleep and Circadian Health",
+      "whyItMatters": "Shows why Murph should not trust lens color or marketing labels alone; spectral filtering, fit, timing, and usage determine whether melanopic input is actually reduced."
+    },
+    {
       "body": "This source sits in the Murph shortlist bucket **Evidence backbone**.\n\n**Why it matters:** Best recent top-down read on post-exercise heating; it puts the mixed acute recovery literature next to the more promising longer adaptation signal.\n\n**Potential Murph endpoints:** HRV, RHR, sleep, performance, soreness, training load\n\n**Protocol takeaway:** Position post-exercise sauna as uncertain for immediate recovery but plausible for longer endurance adaptation, and design endpoints accordingly.\n\nThis review is particularly relevant when Murph later expands into exercise-plus-sauna variants, because it synthesizes post-exercise heat exposure rather than standalone sauna only.",
       "categories": [
         "sauna",
@@ -4473,6 +5834,115 @@
       "whyItMatters": "Best recent top-down read on post-exercise heating; it puts the mixed acute recovery literature next to the more promising longer adaptation signal."
     },
     {
+      "body": "This source sits in the Murph shortlist bucket **Objective sleep meta-analysis**.\n\n**Why it matters:** Best current null/objective counterweight: small adult crossover RCT synthesis with no statistically significant pooled actigraphy improvement.\n\n**Potential Murph endpoints:** actigraphy sleep onset latency, total sleep time, sleep efficiency, wake after sleep onset\n\n**Protocol takeaway:** Use to keep the protocol framed as a bounded self-experiment, not a reliable insomnia treatment.",
+      "categories": [
+        "red-light-glasses-before-bed",
+        "evening-light"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Objective sleep meta-analysis",
+      "key": "source_artifact:pmid-41341515",
+      "modality": "evening short-wavelength or melanopic light reduction",
+      "murphV1Priority": "High",
+      "potentialMurphEndpoints": [
+        "actigraphy sleep onset latency",
+        "total sleep time",
+        "sleep efficiency",
+        "wake after sleep onset"
+      ],
+      "protocolTakeaway": "Use to keep the protocol framed as a bounded self-experiment, not a reliable insomnia treatment.",
+      "quality": "usable",
+      "redLightGlassesFocus": "Yes",
+      "relations": [
+        {
+          "target": "protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:evening-light-reduction",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/red-light-glasses-before-bed/pmid-41341515.md",
+      "revision": {
+        "pageRevisionId": "sha256:c7a4bb3598c6609e40c7132790a99564711187b3c1b31061d0b39407d5285f7b",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/red-light-glasses-before-bed/pmid-41341515",
+      "source": {
+        "authors": "Luna-Rangel FA, González-Bedolla B, Salazar-Ortega MJ, Torres-Mancilla XM, Martínez-Cadena S",
+        "citation": "Luna-Rangel FA, et al. Efficacy of blue-light blocking glasses on actigraphic sleep outcomes. Front Neurol. 2025;16:1699303. doi:10.3389/fneur.2025.1699303.",
+        "doi": "10.3389/fneur.2025.1699303",
+        "journal": "Frontiers in Neurology",
+        "kind": "review",
+        "pmid": "41341515",
+        "title": "Efficacy of blue-light blocking glasses on actigraphic sleep outcomes: a systematic review and meta-analysis of randomized controlled crossover trials",
+        "url": "https://www.frontiersin.org/journals/neurology/articles/10.3389/fneur.2025.1699303/full",
+        "year": 2025
+      },
+      "status": "draft",
+      "studyDesign": "Systematic review and meta-analysis",
+      "summary": "Adult crossover RCT meta-analysis used as the main objective-sleep counterweight for the protocol.",
+      "title": "Efficacy of blue-light blocking glasses on actigraphic sleep outcomes: a systematic review and meta-analysis of randomized controlled crossover trials",
+      "whyItMatters": "Best current null/objective counterweight: small adult crossover RCT synthesis with no statistically significant pooled actigraphy improvement."
+    },
+    {
+      "body": "This source sits in the Murph shortlist bucket **Safety-only psychiatric adjacent variant**.\n\n**Why it matters:** Strong reason to keep mania and mood-disorder protocols out of the general bedtime-glasses recipe.\n\n**Potential Murph endpoints:** mania symptoms, psychiatric inpatient outcomes, safety\n\n**Protocol takeaway:** Mood-disorder use needs clinician oversight and should not be folded into Murph’s general wellness protocol.",
+      "categories": [
+        "red-light-glasses-before-bed",
+        "evening-light"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Safety-only psychiatric adjacent variant",
+      "key": "source_artifact:pmid-41421618",
+      "modality": "evening short-wavelength or melanopic light reduction",
+      "murphV1Priority": "High",
+      "potentialMurphEndpoints": [
+        "mania symptoms",
+        "psychiatric inpatient outcomes",
+        "safety"
+      ],
+      "protocolTakeaway": "Mood-disorder use needs clinician oversight and should not be folded into Murph’s general wellness protocol.",
+      "quality": "usable",
+      "redLightGlassesFocus": "Yes",
+      "relations": [
+        {
+          "target": "protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:evening-light-reduction",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/red-light-glasses-before-bed/pmid-41421618.md",
+      "revision": {
+        "pageRevisionId": "sha256:05b2c424e73aa2d656025d2d533ad38deb98bb39507afd97d995857626484daf",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/red-light-glasses-before-bed/pmid-41421618",
+      "source": {
+        "authors": "Fiedorowicz JG, Mikhail E, Solmi M, Burns JK, et al",
+        "citation": "Fiedorowicz JG, et al. The Ottawa sunglasses at night study: A randomized controlled trial of blue-blocking glasses for mania. J Affect Disord. 2026;398:120910. doi:10.1016/j.jad.2025.120910.",
+        "doi": "10.1016/j.jad.2025.120910",
+        "journal": "Journal of Affective Disorders",
+        "kind": "journal_article",
+        "pmid": "41421618",
+        "title": "The Ottawa sunglasses at night study: A randomized controlled trial of blue-blocking glasses for mania",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/41421618/",
+        "year": 2026
+      },
+      "status": "draft",
+      "studyDesign": "Randomized controlled trial",
+      "summary": "Safety and adjacent-variant source: a newer acute-mania trial did not reproduce the earlier enthusiasm and should downgrade psychiatric virtual-darkness claims.",
+      "title": "The Ottawa sunglasses at night study: A randomized controlled trial of blue-blocking glasses for mania",
+      "whyItMatters": "Strong reason to keep mania and mood-disorder protocols out of the general bedtime-glasses recipe."
+    },
+    {
       "body": "This source sits in the Murph shortlist bucket **Intervention design / reality checks**.\n\n**Why it matters:** Provides a concrete progressive dosing model and shows that repeated sauna exposure can move functional outcomes over weeks, even in a clinical group.\n\n**Potential Murph endpoints:** Resting HR, BP, activity tolerance, step count, subjective exertion, functional capacity proxies\n\n**Protocol takeaway:** A ramped protocol matters; start short, monitor tolerance, and increase minutes across weeks rather than jumping to maximal heat exposure.",
       "categories": [
         "sauna",
@@ -4528,6 +5998,162 @@
       "summary": "Intervention-design source used to shape dose, context, hydration, ramping, and expectation-setting for Murph variants.",
       "title": "Effects of sauna bathing on exercise capacity and muscle function in HFpEF (SAUNA-HFpEF): A mechanistic, prospective, translational, single-arm, and single-centre pilot study",
       "whyItMatters": "Provides a concrete progressive dosing model and shows that repeated sauna exposure can move functional outcomes over weeks, even in a clinical group."
+    },
+    {
+      "backboneSourceKeys": [
+        "source_artifact:pmid-41341515",
+        "source_artifact:pmid-40728371",
+        "source_artifact:pmid-37192881",
+        "source_artifact:pmid-34030534",
+        "source_artifact:pmid-37593770",
+        "source_artifact:pmid-35298459",
+        "source_artifact:doi-10.17617-1.4a6s-ec74",
+        "source_artifact:pmid-29101797"
+      ],
+      "body": "## What this is\n\nThis page represents Murph’s structured research corpus for the **red light glasses before bed** protocol. It is a curation artifact, not a primary study.\n\nThe consumer phrase “red light glasses before bed” is treated here as evening amber/orange/red **short-wavelength or melanopic-light filtering eyewear**, not red-light therapy or photobiomodulation.\n\n## Corpus at a glance\n\n- 42 refined records in the pass-2 corpus\n- 18 highest-priority protocol records for the landing page\n- 3 adult randomized crossover trials in the actigraphy meta-analysis\n- 49 adults in that objective-sleep meta-analysis\n- audit cutoff 2026-04-20\n\n## Evidence posture\n\nThe strongest rationale is mechanistic and guideline-level: evening melanopic light can affect circadian and sleep physiology, and public-health guidance supports bright daytime light plus lower evening/night light.\n\nThe direct glasses evidence is mixed. Small trials sometimes report subjective sleep improvements, but the adult actigraphy synthesis did not find statistically significant pooled improvements for sleep onset latency, total sleep time, sleep efficiency, or wake after sleep onset.\n\n## How Murph should use this page\n\nUse this bibliography to keep the protocol bounded:\n\n- The **guideline and mechanistic** sources justify the evening-light hypothesis.\n- The **direct trial** sources set the 90–120 minute pre-bed timing and stop the page from becoming all-evening or overnight virtual darkness.\n- The **Cochrane and actigraphy** sources prevent sleep, eye-strain, and eye-protection overclaims.\n- The **pregnancy and mania** sources are adjacent variants that should not be merged into a general wellness recipe.\n\n## Important caution\n\nThis bibliography does not show that every user should wear tinted glasses. It supports a reversible, low-burden test when the user’s evening environment is likely bright enough to matter.",
+      "categories": [
+        "red-light-glasses-before-bed",
+        "sleep",
+        "circadian"
+      ],
+      "corpusStats": {
+        "auditCutoff": "2026-04-20",
+        "directAdultCrossoverRCTsInActigraphyMetaAnalysis": 3,
+        "highestPriorityProtocolRecords": 18,
+        "participantsInActigraphyMetaAnalysis": 49,
+        "refinedRecords": 42
+      },
+      "entityType": "source_artifact",
+      "evidenceBucket": "Research curation",
+      "evidenceMap": {
+        "directEvidencePosture": "small_mixed_subjective_stronger_than_objective",
+        "rightsPosture": "only_clearly_open_access_pdfs_marked_redistributable",
+        "shortlistBucketCounts": {
+          "adjacent-variants-to-split": 9,
+          "context-only-rationale": 7,
+          "evidence-backbone": 8,
+          "protocol-dose-and-design": 7,
+          "safety-and-contraindications": 10,
+          "wearable-or-testable-endpoints": 5
+        }
+      },
+      "key": "source_artifact:red-light-glasses-before-bed-bibliography",
+      "modality": "Evening short-wavelength or melanopic light reduction using glasses, plus adjacent light-management variants",
+      "murphV1Priority": "High",
+      "potentialMurphEndpoints": [
+        "sleep-onset latency",
+        "sleep efficiency",
+        "total sleep time",
+        "pre-bed wiredness",
+        "source discovery",
+        "evidence map"
+      ],
+      "protocolTakeaway": "Treat this as a research map and curation artifact, not as primary evidence.",
+      "quality": "usable",
+      "redLightGlassesFocus": "Yes",
+      "relations": [
+        {
+          "target": "protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:evening-light-reduction",
+          "type": "parent_family"
+        },
+        {
+          "target": "source_artifact:pmid-41341515",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-40728371",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-37192881",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-34030534",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-37593770",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-35298459",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:doi-10.17617-1.4a6s-ec74",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-29101797",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-20030543",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-33707105",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-35089982",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-35024497",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-29991437",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-41421618",
+          "type": "cites"
+        }
+      ],
+      "relativePath": "sources/red-light-glasses-before-bed/red-light-glasses-before-bed-bibliography.md",
+      "revision": {
+        "pageRevisionId": "sha256:ab1018a409643d362b5b9e55745d6aff68e1e18fd6b79cec308f67c685c68cf0",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "shortlistSourceKeys": [
+        "source_artifact:pmid-41341515",
+        "source_artifact:pmid-40728371",
+        "source_artifact:pmid-37192881",
+        "source_artifact:pmid-34030534",
+        "source_artifact:pmid-37593770",
+        "source_artifact:pmid-35298459",
+        "source_artifact:doi-10.17617-1.4a6s-ec74",
+        "source_artifact:pmid-29101797",
+        "source_artifact:pmid-20030543",
+        "source_artifact:pmid-33707105",
+        "source_artifact:pmid-35089982",
+        "source_artifact:pmid-35024497",
+        "source_artifact:pmid-29991437",
+        "source_artifact:pmid-41421618"
+      ],
+      "slug": "sources/red-light-glasses-before-bed/red-light-glasses-before-bed-bibliography",
+      "source": {
+        "authors": "Murph Research",
+        "citation": "Murph Research. Red-light glasses before bed research bibliography. Prepared 2026-04-20.",
+        "journal": "Murph internal research curation",
+        "kind": "other",
+        "title": "Red-light glasses before bed research bibliography",
+        "year": 2026
+      },
+      "status": "draft",
+      "studyDesign": "Research bibliography / curation artifact",
+      "summary": "Murph research corpus and evidence map for the red-light glasses before bed bounded self-experiment, summarizing the refined pass-2 corpus and protocol-ready shortlist.",
+      "title": "Red-light glasses before bed research bibliography",
+      "whyItMatters": "Structured curation artifact used to turn the discovery and gap-fill passes into a bounded Murph protocol."
     },
     {
       "aliases": [
