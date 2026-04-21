@@ -246,7 +246,7 @@ export async function exchangeHostedVaultSyncPairingCode(input: {
 
 export async function completeHostedVaultSyncAgentUpload(input: {
   bundleBase64: string;
-  localManifestHash?: string | null;
+  localManifestHash: string;
   prisma?: PrismaClient;
   request: Request;
   sessionId: string;
@@ -278,10 +278,7 @@ export async function completeHostedVaultSyncAgentUpload(input: {
       memberId: session.memberId,
       payload: {
         bundleBase64: input.bundleBase64,
-        localManifestHash: input.localManifestHash ?? null,
         sessionId: input.sessionId,
-        sourceVaultId: input.sourceVaultId ?? null,
-        sourceVaultTitle: input.sourceVaultTitle ?? null,
       },
       prisma: tx,
       sessionId: input.sessionId,
@@ -294,7 +291,7 @@ export async function completeHostedVaultSyncAgentUpload(input: {
         memberId: session.memberId,
         occurredAt: now.toISOString(),
         vaultSync: {
-          localManifestHash: input.localManifestHash ?? null,
+          localManifestHash: input.localManifestHash,
           sessionId: input.sessionId,
           sourceVaultId: input.sourceVaultId ?? null,
           sourceVaultTitle: input.sourceVaultTitle ?? null,
@@ -305,7 +302,7 @@ export async function completeHostedVaultSyncAgentUpload(input: {
     return await tx.hostedVaultSyncSession.update({
       where: { id: input.sessionId },
       data: {
-        localManifestHash: input.localManifestHash ?? null,
+        localManifestHash: input.localManifestHash,
         queuedAt: now,
         queuedIngressEventId: eventId,
         sourceSchemaVersion: input.sourceSchemaVersion ?? null,

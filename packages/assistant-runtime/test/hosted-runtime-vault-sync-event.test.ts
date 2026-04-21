@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   buildHostedExecutionVaultSyncImportWake,
@@ -9,11 +9,13 @@ import {
 const mocks = vi.hoisted(() => ({
   decodeHostedBundleBase64: vi.fn(),
   mergeVaultSyncImportIntoVault: vi.fn(),
+  readVaultSyncImportManifest: vi.fn(),
   restoreVaultSyncImportPack: vi.fn(),
 }));
 
 vi.mock("@murphai/core", () => ({
   mergeVaultSyncImportIntoVault: mocks.mergeVaultSyncImportIntoVault,
+  readVaultSyncImportManifest: mocks.readVaultSyncImportManifest,
   restoreVaultSyncImportPack: mocks.restoreVaultSyncImportPack,
 }));
 
@@ -24,6 +26,10 @@ vi.mock("@murphai/runtime-state/node", () => ({
 import { handleHostedVaultSyncImportWake } from "../src/hosted-runtime/events/vault-sync.ts";
 
 describe("handleHostedVaultSyncImportWake", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("restores the hydrated import pack and returns redacted merge metrics", async () => {
     const wake = buildHostedExecutionVaultSyncImportWake({
       eventId: "evt_vault_sync",
@@ -57,16 +63,21 @@ describe("handleHostedVaultSyncImportWake", () => {
       vaultRoot: "/tmp/import/vault",
       workspaceRoot: "/tmp/import",
     });
+    mocks.readVaultSyncImportManifest.mockResolvedValue({
+      manifestHash: "sha256:manifest",
+      sourceVault: {
+        schemaVersion: "test",
+        title: "Local Vault",
+        vaultId: "vault_local",
+      },
+    });
     mocks.mergeVaultSyncImportIntoVault.mockResolvedValue(mergeResult);
 
     const result = await handleHostedVaultSyncImportWake({
       vaultRoot: "/tmp/target-vault",
       vaultSyncImport: {
         bundleBase64: "AQID",
-        localManifestHash: "sha256:manifest",
         sessionId: "vsi_runtime",
-        sourceVaultId: "vault_local",
-        sourceVaultTitle: "Local Vault",
       },
       wake,
     });
@@ -75,6 +86,7 @@ describe("handleHostedVaultSyncImportWake", () => {
       bundle,
       workspaceRoot: expect.stringContaining("murph-hosted-vault-sync-import-"),
     });
+    expect(mocks.readVaultSyncImportManifest).toHaveBeenCalledWith("/tmp/import/meta");
     expect(mocks.mergeVaultSyncImportIntoVault).toHaveBeenCalledWith({
       importMetaRoot: "/tmp/import/meta",
       importVaultRoot: "/tmp/import/vault",
@@ -101,13 +113,30 @@ describe("handleHostedVaultSyncImportWake", () => {
         memberId: "member_123",
         occurredAt: "2026-04-21T00:00:00.000Z",
         vaultSync: {
+          localManifestHash: "sha256:manifest",
           sessionId: "vsi_wake",
         },
       }),
     })).rejects.toThrow(/sessionId must match/u);
   });
 
-  it("rejects missing or mismatched side-input metadata and empty bundles", async () => {
+  it("rejects mismatched bundle-derived metadata and empty bundles", async () => {
+    const bundle = new Uint8Array([1, 2, 3]);
+    mocks.decodeHostedBundleBase64.mockReturnValue(bundle);
+    mocks.restoreVaultSyncImportPack.mockResolvedValue({
+      metaRoot: "/tmp/import/meta",
+      vaultRoot: "/tmp/import/vault",
+      workspaceRoot: "/tmp/import",
+    });
+    mocks.readVaultSyncImportManifest.mockResolvedValueOnce({
+      manifestHash: "sha256:payload",
+      sourceVault: {
+        schemaVersion: "test",
+        title: null,
+        vaultId: null,
+      },
+    });
+
     await expect(handleHostedVaultSyncImportWake({
       vaultRoot: "/tmp/target-vault",
       vaultSyncImport: {
@@ -125,31 +154,19 @@ describe("handleHostedVaultSyncImportWake", () => {
       }),
     })).rejects.toThrow(/manifest hash must match/u);
 
-    await expect(handleHostedVaultSyncImportWake({
-      vaultRoot: "/tmp/target-vault",
-      vaultSyncImport: {
-        bundleBase64: "AQID",
-        localManifestHash: "sha256:payload",
-        sessionId: "vsi_runtime",
+    mocks.readVaultSyncImportManifest.mockResolvedValueOnce({
+      manifestHash: "sha256:manifest",
+      sourceVault: {
+        schemaVersion: "test",
+        title: null,
+        vaultId: "vault_payload",
       },
-      wake: buildHostedExecutionVaultSyncImportWake({
-        eventId: "evt_vault_sync",
-        memberId: "member_123",
-        occurredAt: "2026-04-21T00:00:00.000Z",
-        vaultSync: {
-          localManifestHash: "sha256:wake",
-          sessionId: "vsi_runtime",
-        },
-      }),
-    })).rejects.toThrow(/manifest hash must match/u);
-
+    });
     await expect(handleHostedVaultSyncImportWake({
       vaultRoot: "/tmp/target-vault",
       vaultSyncImport: {
         bundleBase64: "AQID",
-        localManifestHash: "sha256:manifest",
         sessionId: "vsi_runtime",
-        sourceVaultId: "vault_payload",
       },
       wake: buildHostedExecutionVaultSyncImportWake({
         eventId: "evt_vault_sync",
@@ -168,7 +185,6 @@ describe("handleHostedVaultSyncImportWake", () => {
       vaultRoot: "/tmp/target-vault",
       vaultSyncImport: {
         bundleBase64: "",
-        localManifestHash: "sha256:manifest",
         sessionId: "vsi_runtime",
       },
       wake: buildHostedExecutionVaultSyncImportWake({

@@ -214,6 +214,7 @@ describe("hosted execution coverage gaps", () => {
         memberId: "member_vault_sync",
         occurredAt: "2026-04-21T00:00:00.000Z",
         vaultSync: {
+          localManifestHash: "sha256:minimal",
           sessionId: "vsi_minimal",
         },
       }),
@@ -223,16 +224,14 @@ describe("hosted execution coverage gaps", () => {
       occurredAt: "2026-04-21T00:00:00.000Z",
       userId: "member_vault_sync",
       vaultSync: {
+        localManifestHash: "sha256:minimal",
         sessionId: "vsi_minimal",
       },
     });
 
     const runnerPayload = {
       bundleBase64: "AAAA",
-      localManifestHash: null,
       sessionId: "vsi_contract",
-      sourceVaultId: "vault_local",
-      sourceVaultTitle: "Local Vault",
     };
     expect(parseHostedExecutionRunnerVaultSyncImport(runnerPayload)).toEqual(runnerPayload);
     expect(parseHostedRuntimeDrainEvent({

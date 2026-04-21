@@ -4,6 +4,7 @@ import path from "node:path";
 
 import {
   mergeVaultSyncImportIntoVault,
+  readVaultSyncImportManifest,
   restoreVaultSyncImportPack,
 } from "@murphai/core";
 import { decodeHostedBundleBase64 } from "@murphai/runtime-state/node";
@@ -26,18 +27,6 @@ export async function handleHostedVaultSyncImportWake(input: {
     throw new TypeError("Hosted vault sync import sessionId must match the canonical wake reference.");
   }
 
-  if (!importRef.localManifestHash || !pack.localManifestHash || pack.localManifestHash !== importRef.localManifestHash) {
-    throw new TypeError("Hosted vault sync import manifest hash must match the canonical wake reference.");
-  }
-
-  if ((pack.sourceVaultId ?? null) !== (importRef.sourceVaultId ?? null)) {
-    throw new TypeError("Hosted vault sync import source vault id must match the canonical wake reference.");
-  }
-
-  if ((pack.sourceVaultTitle ?? null) !== (importRef.sourceVaultTitle ?? null)) {
-    throw new TypeError("Hosted vault sync import source vault title must match the canonical wake reference.");
-  }
-
   const bytes = decodeHostedBundleBase64(pack.bundleBase64);
   if (!bytes || bytes.byteLength === 0) {
     throw new TypeError("Hosted vault sync import requires a non-empty import bundle.");
@@ -49,6 +38,20 @@ export async function handleHostedVaultSyncImportWake(input: {
       bundle: bytes,
       workspaceRoot: restoreRoot,
     });
+    const manifest = await readVaultSyncImportManifest(restored.metaRoot);
+
+    if (manifest.manifestHash !== importRef.localManifestHash) {
+      throw new TypeError("Hosted vault sync import manifest hash must match the canonical wake reference.");
+    }
+
+    if ((manifest.sourceVault.vaultId ?? null) !== (importRef.sourceVaultId ?? null)) {
+      throw new TypeError("Hosted vault sync import source vault id must match the canonical wake reference.");
+    }
+
+    if ((manifest.sourceVault.title ?? null) !== (importRef.sourceVaultTitle ?? null)) {
+      throw new TypeError("Hosted vault sync import source vault title must match the canonical wake reference.");
+    }
+
     const vaultSyncImportResult = await mergeVaultSyncImportIntoVault({
       importMetaRoot: restored.metaRoot,
       importVaultRoot: restored.vaultRoot,

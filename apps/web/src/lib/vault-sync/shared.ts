@@ -215,10 +215,7 @@ export function projectHostedVaultSyncPayload(
   const payload = value as Record<string, unknown>;
   return {
     bundleBase64: requireString(payload.bundleBase64, "bundleBase64"),
-    localManifestHash: readNullableString(payload.localManifestHash),
     sessionId: requireString(payload.sessionId, "sessionId"),
-    sourceVaultId: readNullableString(payload.sourceVaultId),
-    sourceVaultTitle: readNullableString(payload.sourceVaultTitle),
   };
 }
 
@@ -240,10 +237,6 @@ function requireString(value: unknown, label: string): string {
     throw new TypeError(`Hosted vault sync payload ${label} must be a non-empty string.`);
   }
   return value;
-}
-
-function readNullableString(value: unknown): string | null {
-  return typeof value === "string" && value.length > 0 ? value : null;
 }
 
 function shellQuote(value: string): string {

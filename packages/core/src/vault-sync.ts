@@ -546,10 +546,10 @@ function isVaultSyncImportFileKind(value: string): value is VaultSyncImportFileK
   return value === "jsonl_ledger" || value === "raw" || value === "text" || value === "metadata";
 }
 
-async function readImportManifest(importMetaRoot: string): Promise<VaultSyncImportManifest | null> {
+export async function readVaultSyncImportManifest(importMetaRoot: string): Promise<VaultSyncImportManifest> {
   const parsed = await readJsonObjectIfExists(path.join(importMetaRoot, IMPORT_PACK_MANIFEST_PATH));
   if (!parsed || parsed.schema !== VAULT_SYNC_IMPORT_MANIFEST_SCHEMA) {
-    return null;
+    throw new VaultError("VAULT_SYNC_IMPORT_MANIFEST_INVALID", "Vault sync import pack is missing a valid manifest.");
   }
 
   const filesValue = parsed.files;
@@ -557,7 +557,7 @@ async function readImportManifest(importMetaRoot: string): Promise<VaultSyncImpo
   const sourceVaultValue = parsed.sourceVault;
 
   if (!Array.isArray(filesValue) || !Array.isArray(excludedValue) || !isPlainObject(sourceVaultValue)) {
-    return null;
+    throw new VaultError("VAULT_SYNC_IMPORT_MANIFEST_INVALID", "Vault sync import manifest has an invalid shape.");
   }
 
   const files: VaultSyncImportManifestFile[] = [];
@@ -594,7 +594,7 @@ async function readImportManifest(importMetaRoot: string): Promise<VaultSyncImpo
     }
   }
 
-  return {
+  const manifest: VaultSyncImportManifest = {
     createdAt: typeof parsed.createdAt === "string" ? parsed.createdAt : new Date(0).toISOString(),
     excluded,
     files,
@@ -606,6 +606,14 @@ async function readImportManifest(importMetaRoot: string): Promise<VaultSyncImpo
       vaultId: stringField(sourceVaultValue, ["vaultId"]),
     },
   };
+
+  const { manifestHash, ...manifestBase } = manifest;
+  const expectedHash = sha256Prefixed(buildManifestHashInput(manifestBase));
+  if (manifestHash !== expectedHash) {
+    throw new VaultError("VAULT_SYNC_IMPORT_MANIFEST_HASH_MISMATCH", "Vault sync import manifest hash does not match its contents.");
+  }
+
+  return manifest;
 }
 
 function recordIdValue(record: Record<string, unknown>): string | null {
@@ -859,8 +867,8 @@ export async function mergeVaultSyncImportIntoVault(
 ): Promise<MergeVaultSyncImportResult> {
   const sessionId = normalizeOpaquePathSegment(input.sessionId, "Vault sync session id");
   const importedAt = input.importedAt ?? new Date();
-  const manifest = await readImportManifest(input.importMetaRoot);
-  const importFiles = manifest?.files ?? [];
+  const manifest = await readVaultSyncImportManifest(input.importMetaRoot);
+  const importFiles = manifest.files;
   const plan: MergePlan = {
     conflicts: [],
     duplicates: 0,
@@ -870,7 +878,7 @@ export async function mergeVaultSyncImportIntoVault(
     textWrites: [],
   };
 
-  const excludedFiles = manifest?.excluded.length ?? 0;
+  const excludedFiles = manifest.excluded.length;
 
   for (const file of importFiles) {
     const relativePath = normalizeRelativeVaultPath(file.path);
@@ -918,7 +926,7 @@ export async function mergeVaultSyncImportIntoVault(
       createdAt: importedAt.toISOString(),
       schema: VAULT_SYNC_CONFLICT_MANIFEST_SCHEMA,
       sessionId,
-      sourceVaultId: manifest?.sourceVault.vaultId ?? null,
+      sourceVaultId: manifest.sourceVault.vaultId ?? null,
       summary: {
         conflictCount: plan.conflicts.length,
         importedJsonlRecords: plan.jsonlAppends.length,
