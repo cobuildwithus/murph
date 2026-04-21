@@ -5,6 +5,7 @@ import { test } from "vitest";
 import {
   buildHostedWebDevArgv,
   resolveHostedWebDevCacheLimitBytes,
+  resolveHostedWebDevOwnerPid,
   resolveHostedWebDevRuntimePaths,
 } from "../scripts/dev-local";
 
@@ -68,6 +69,19 @@ test("hosted web dev cache limit defaults to four GiB and accepts an env overrid
     })),
     512 * 1024 * 1024,
   );
+});
+
+test("hosted web dev owner pid is optional and accepts only positive integers", () => {
+  assert.equal(resolveHostedWebDevOwnerPid(createEnv({})), null);
+  assert.equal(resolveHostedWebDevOwnerPid(createEnv({
+    MURPH_HOSTED_WEB_DEV_OWNER_PID: "1234",
+  })), 1234);
+  assert.equal(resolveHostedWebDevOwnerPid(createEnv({
+    MURPH_HOSTED_WEB_DEV_OWNER_PID: "0",
+  })), null);
+  assert.equal(resolveHostedWebDevOwnerPid(createEnv({
+    MURPH_HOSTED_WEB_DEV_OWNER_PID: "not-a-pid",
+  })), null);
 });
 
 test("hosted web dev lock paths stay isolated between interactive and smoke artifact modes", () => {

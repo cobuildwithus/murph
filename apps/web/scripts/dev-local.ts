@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { rmSync } from "node:fs";
 import { lstat, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -12,7 +13,9 @@ const hostedWebDevBundlerEnvVarName = "MURPH_NEXT_DEV_BUNDLER";
 const hostedWebDevCacheLimitEnvVarName = "MURPH_NEXT_DEV_CACHE_LIMIT_MB";
 const hostedWebDevLockDirectoryName = ".dev-server.lock";
 const hostedWebDevLockMetadataFileName = "owner.json";
+const hostedWebDevOwnerPidEnvVarName = "MURPH_HOSTED_WEB_DEV_OWNER_PID";
 const hostedWebDevSourceMapsEnvVarName = "MURPH_NEXT_DEV_SOURCE_MAPS";
+const ownerWatchdogPollIntervalMs = 2_000;
 
 interface HostedWebDevServerLockMetadata {
   command: string;
@@ -64,6 +67,19 @@ export function resolveHostedWebDevCacheLimitBytes(
   return configuredLimitMegabytes * 1024 * 1024;
 }
 
+export function resolveHostedWebDevOwnerPid(
+  environment: NodeJS.ProcessEnv = process.env,
+): number | null {
+  const rawOwnerPid = environment[hostedWebDevOwnerPidEnvVarName]?.trim();
+
+  if (!rawOwnerPid) {
+    return null;
+  }
+
+  const ownerPid = Number.parseInt(rawOwnerPid, 10);
+  return Number.isInteger(ownerPid) && ownerPid > 0 ? ownerPid : null;
+}
+
 export function resolveHostedWebDevRuntimePaths(
   packageDir: string,
   environment: NodeJS.ProcessEnv = process.env,
@@ -92,6 +108,7 @@ async function main(): Promise<void> {
     process.argv.slice(2),
     process.env,
   );
+  const releaseOwnerWatchdog = installHostedWebDevOwnerWatchdog(process.env);
   process.argv = [
     process.execPath,
     nextBinPath,
@@ -102,6 +119,7 @@ async function main(): Promise<void> {
     await pruneOversizedHostedWebDevArtifacts(runtimePaths, process.env);
     await import(pathToFileURL(nextBinPath).href);
   } finally {
+    releaseOwnerWatchdog();
     await releaseLock();
   }
 }
@@ -174,6 +192,42 @@ function createHostedWebDevServerLockMetadata(
     port: resolveHostedWebDevPort(argv, environment),
     startedAt: new Date().toISOString(),
   };
+}
+
+function installHostedWebDevOwnerWatchdog(
+  environment: NodeJS.ProcessEnv,
+): () => void {
+  const ownerPid = resolveHostedWebDevOwnerPid(environment);
+
+  if (ownerPid === null) {
+    return () => {};
+  }
+
+  let shuttingDown = false;
+  const interval = setInterval(() => {
+    if (shuttingDown || isProcessRunning(ownerPid)) {
+      return;
+    }
+
+    shuttingDown = true;
+    terminateCurrentProcessDescendants("SIGKILL");
+    process.exit(0);
+  }, ownerWatchdogPollIntervalMs);
+  interval.unref?.();
+
+  return () => {
+    clearInterval(interval);
+  };
+}
+
+function terminateCurrentProcessDescendants(signal: NodeJS.Signals): void {
+  for (const pid of listDescendantProcessIds(process.pid).reverse()) {
+    try {
+      process.kill(pid, signal);
+    } catch {
+      // Best-effort cleanup only.
+    }
+  }
 }
 
 async function inspectHostedWebDevServerLock(
@@ -377,6 +431,52 @@ function isProcessRunning(pid: number): boolean {
     }
 
     return true;
+  }
+}
+
+function listDescendantProcessIds(rootPid: number): number[] {
+  try {
+    const output = execFileSync("ps", ["-axo", "pid=,ppid="], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    const childrenByParent = new Map<number, number[]>();
+
+    for (const line of output.split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed) {
+        continue;
+      }
+
+      const [pidText, parentPidText] = trimmed.split(/\s+/, 2);
+      const pid = Number.parseInt(pidText ?? "", 10);
+      const parentPid = Number.parseInt(parentPidText ?? "", 10);
+
+      if (!Number.isInteger(pid) || !Number.isInteger(parentPid)) {
+        continue;
+      }
+
+      const siblings = childrenByParent.get(parentPid) ?? [];
+      siblings.push(pid);
+      childrenByParent.set(parentPid, siblings);
+    }
+
+    const descendants: number[] = [];
+    const queue = [...(childrenByParent.get(rootPid) ?? [])];
+
+    while (queue.length > 0) {
+      const pid = queue.shift();
+      if (pid === undefined) {
+        continue;
+      }
+
+      descendants.push(pid);
+      queue.push(...(childrenByParent.get(pid) ?? []));
+    }
+
+    return descendants;
+  } catch {
+    return [];
   }
 }
 
