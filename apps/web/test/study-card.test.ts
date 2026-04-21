@@ -88,6 +88,27 @@ describe("StudyCard", () => {
     );
     expect(countOccurrences(markup, "Bryan Johnson")).toBe(1);
   });
+
+  it("renders no summary line when a study has no summary", () => {
+    const markup = renderToStaticMarkup(
+      createElement(StudyCard, {
+        type: "OBS",
+        title: "Prospective cohort placeholder",
+        authors: "A Cohort Team",
+        journal: "Example Journal",
+        year: 2024,
+        participants: 1688,
+        population: "Adults",
+        duration: "Long-term follow-up",
+        last: true,
+      }),
+    );
+
+    expect(markup).not.toContain('class="text-[13px]/5 text-foreground/85"');
+    expect(markup).toContain(
+      "A Cohort Team · Example Journal · Adults · Long-term follow-up",
+    );
+  });
 });
 
 function countOccurrences(haystack: string, needle: string): number {

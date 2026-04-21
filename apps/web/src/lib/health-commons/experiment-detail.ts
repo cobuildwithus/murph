@@ -742,7 +742,7 @@ function toStudy(entity: HealthCommonsEntity): Study {
     designLabel: evidence?.designLabel ?? (evidence
       ? formatResearchDesignLabel(evidence.designKind)
       : undefined),
-    finding: entity.summary ?? summarizeBody(entity.body),
+    finding: entity.summary,
     url: source?.url,
   };
 }
