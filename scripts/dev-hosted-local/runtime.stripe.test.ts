@@ -146,6 +146,37 @@ describe("spawnStripeListenerWithSecretCapture", () => {
     expect(stderrTarget.text()).not.toContain("whsec_test_secret_value_abc");
   });
 
+  it("captures the whsec when the Stripe CLI prints the startup banner to stderr", async () => {
+    // Current Stripe CLI (1.34+) prints the "Ready! ... whsec_..." banner on
+    // stderr, not stdout. The capture helper must scan both streams so this
+    // release keeps working.
+    const { runtime } = await loadRuntimeWithStripeChild({
+      stdoutFirstLine: "",
+      stderrBeforeCapture:
+        "Getting ready...\nReady! You are using Stripe API Version [2023-10-16]. Your webhook signing secret is whsec_only_on_stderr_0123456789abcdef (^C to quit)\n",
+    });
+
+    const stdoutTarget = new CapturingWritable();
+    const stderrTarget = new CapturingWritable();
+
+    const result = await runtime.spawnStripeListenerWithSecretCapture({
+      args: ["listen"],
+      command: "stripe",
+      env: {},
+      pipeOutput: true,
+      stderrTarget,
+      stdoutTarget,
+      timeoutMs: 2_000,
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(result.secret).toBe("whsec_only_on_stderr_0123456789abcdef");
+    expect(stderrTarget.text()).not.toContain("whsec_only_on_stderr");
+    expect(stderrTarget.text()).toContain("[redacted whsec]");
+    expect(result.child.stderrText()).not.toContain("whsec_only_on_stderr");
+  });
+
   it("rejects with StripeCliMissingError when stripe is not on PATH", async () => {
     const { runtime } = await loadRuntimeWithStripeChild({ __enoent: true });
 

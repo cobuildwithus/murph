@@ -212,6 +212,10 @@ export async function spawnStripeListenerWithSecretCapture(input: {
         );
       }, input.timeoutMs);
 
+      // Stripe CLI versions differ on which stream carries the startup
+      // "Ready!" banner that contains `whsec_...`: older builds print it to
+      // stdout, current builds print it to stderr. Scan both so the capture
+      // keeps working as the CLI evolves.
       const onStdout = (chunk: string | Buffer): void => {
         stdoutCapture.append(chunk);
         const match = /whsec_[A-Za-z0-9_]+/.exec(stdoutCapture.read());
@@ -223,6 +227,11 @@ export async function spawnStripeListenerWithSecretCapture(input: {
 
       const onStderr = (chunk: string | Buffer): void => {
         stderrCapture.append(chunk);
+        const match = /whsec_[A-Za-z0-9_]+/.exec(stderrCapture.read());
+        if (match) {
+          cleanup();
+          resolve(match[0]);
+        }
       };
 
       const onExit = (code: number | null): void => {
