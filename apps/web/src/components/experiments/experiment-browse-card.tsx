@@ -27,6 +27,9 @@ interface ExperimentBrowseCardProps {
   className?: string;
 }
 
+const BROWSE_CARD_IMAGE_SIZES =
+  "(min-width: 1280px) 25vw, (min-width: 1024px) 33vw, (min-width: 640px) 50vw, 100vw";
+
 export function ExperimentBrowseCard({
   id,
   title,
@@ -52,6 +55,7 @@ export function ExperimentBrowseCard({
           src={image}
           alt=""
           fill
+          sizes={BROWSE_CARD_IMAGE_SIZES}
           className={cn(
             "object-cover",
             isInteractive
