@@ -175,8 +175,6 @@ export async function acceptHostedShareLink(input: {
 
   void nudgeHostedRunBestEffort({
     context: "hosted-share.acceptance",
-    eventId: claim.eventId,
-    prisma,
     userId: memberId,
   });
 

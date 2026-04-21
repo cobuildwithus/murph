@@ -97,8 +97,6 @@ async function reconcileHostedStripeWebhookEvent(input: {
 
   await nudgeHostedRunBestEffort({
     context: "stripe.webhook",
-    eventId: hostedExecutionEventId,
-    prisma: input.prisma,
     userId: hostedExecutionMemberId,
   });
 }

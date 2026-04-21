@@ -92,8 +92,6 @@ export async function reconcileSubmittedHostedRevnetIssuances(input: {
     if (activationEventId) {
       await nudgeHostedRunBestEffort({
         context: "stripe-revnet-reconciliation",
-        eventId: activationEventId,
-        prisma: input.prisma,
         userId: issuance.memberId,
       });
     }

@@ -72,8 +72,6 @@ export async function reconcileHostedBillingCheckoutSuccess(input: {
   if (hostedExecutionEventId) {
     await nudgeHostedRunBestEffort({
       context: "billing-success.redirect",
-      eventId: hostedExecutionEventId,
-      prisma,
       userId: invite.memberId,
     });
   }

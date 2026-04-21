@@ -84,7 +84,6 @@ export const POST = withJsonError(async (request: Request) => {
   if (channelSyncDispatch) {
     await nudgeHostedRunBestEffort({
       context: "settings.telegram.sync",
-      eventId: channelSyncDispatch.eventId,
       userId: auth.member.id,
     });
   }
