@@ -289,6 +289,7 @@ attribution:
   ownerType: murph
 protocol:
   doseSignature: 3x/week · 15–20 min · 80–100 °C · 21-day stand-alone dry-sauna experiment
+  target: 80–100 °C traditional dry sauna
   frequency:
     sessionsPerWeek: 3
   durationMinutes:
@@ -300,13 +301,28 @@ protocol:
   interventionSessionsMinimum: 4
   interventionSessionsTarget: 6
   steps:
-    - Keep your normal routine for a 7-day baseline before starting the intervention.
-    - During the intervention, complete three stand-alone Finnish dry-sauna sessions per week for two weeks.
-    - Use a traditional dry sauna when possible, aiming for about 80–100 °C and 15–20 minutes per session.
-    - Prefer a similar time of day and similar pre-sauna routine across sessions if you want cleaner comparison.
-    - Treat cold plunges, new supplements, new training blocks, major diet changes, and intentional alcohol changes as separate interventions; do not add them during this experiment.
-    - If you choose to sauna after exercise, log the workout timing and load explicitly; that context can change how the result should be read.
-    - Hydrate normally, cool down gently, and log duration, approximate temperature, time of day, whether the session followed exercise, symptoms, illness, alcohol, travel, and unusually hard training.
+    - Keep your normal routine stable for a 7-day baseline before starting.
+    - For the next two weeks, complete three stand-alone Finnish dry-sauna sessions per week.
+    - Sit for 15–20 minutes per session at about 80–100 °C, using a traditional dry sauna when possible.
+    - Hydrate normally before and after, then cool down gently before returning to normal activity.
+    - Log the session and any context that could change recovery or sleep.
+  tips:
+    - Use a similar time of day and similar pre-sauna routine when practical.
+    - Keep cold plunges, new supplements, new training blocks, major diet changes, and intentional alcohol changes out of this test window.
+    - If a session follows exercise, log the workout because post-exercise sauna is a different context than stand-alone sauna.
+  keepInMind:
+    - This experiment is designed to read short-term recovery and cardiovascular proxies, not long-term disease or longevity claims.
+    - HRV and sleep-stage changes are exploratory and can be moved by illness, stress, alcohol, travel, and training load.
+    - Infrared sauna and other heat modalities are related, but they should not be treated as the same protocol.
+  logFields:
+    - duration
+    - approximate temperature
+    - time of day
+    - stand-alone or post-exercise
+    - symptoms
+    - alcohol
+    - illness or travel
+    - unusually hard training
   stopConditions:
     - Stop the session if chest pain, faintness, severe dizziness, confusion, palpitations, or unusual shortness of breath occurs.
     - End the experiment and seek appropriate care if severe or repeated symptoms occur.
@@ -329,6 +345,10 @@ testPlans:
       - Treat morning blood pressure as optional but valuable when a validated home cuff and consistent routine are available.
       - Keep HRV and sleep-stage markers exploratory unless the personal signal is strong, repeated, and not obviously confounded.
       - Keep stand-alone sauna and post-exercise sauna interpretations separate whenever the workout context is materially different.
+whyItWorks:
+  - Finnish dry sauna works as a short, repeatable heat stressor. Skin and core temperature rise, blood vessels widen, heart rate and cardiac output increase, and the body has to cool itself back down afterward.
+  - Repeated exposures may train thermoregulation and vascular response over a few weeks, which is why resting heart rate, optional morning blood pressure, HRV, sleep efficiency, and deep sleep are practical signals to watch.
+  - The research base includes acute physiology studies, repeated-exposure work, and long-term Finnish cohort findings. For this 21-day self-test, the cohort findings are background context only; the honest question is whether your near-term recovery and cardiovascular proxies move in a way that feels worth repeating.
 claims:
   -
     claimId: research-base-is-broad-but-mixed

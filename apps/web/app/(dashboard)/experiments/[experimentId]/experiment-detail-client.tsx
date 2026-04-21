@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { startTransition, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/src/components/ui/tabs";
 import { ExperimentHero } from "@/src/components/experiments/experiment-detail/experiment-hero";
@@ -9,7 +10,10 @@ import { ProtocolTab } from "@/src/components/experiments/experiment-detail/prot
 import { ResultsTab } from "@/src/components/experiments/experiment-detail/results-tab";
 import { BrowserVaultProvider, useBrowserVault } from "@/src/lib/browser-vault/context";
 import { resolveBrowserVaultExperimentRun } from "@/src/lib/browser-vault/experiment-run";
-import { composeExperimentDetail } from "@/src/lib/experiments/experiment-detail";
+import {
+  composeExperimentDetail,
+  hasCurrentExperimentProtocolContract,
+} from "@/src/lib/experiments/experiment-detail";
 import type { ExperimentProtocol } from "@/src/types/experiments";
 
 type ExperimentDetailTab = "protocol" | "results";
@@ -31,6 +35,7 @@ function ExperimentDetailClientContent({
 }: {
   protocol: ExperimentProtocol;
 }) {
+  const router = useRouter();
   const browserVault = useBrowserVault();
   const [selectedTabState, setSelectedTabState] = useState<{
     protocolId: string;
@@ -39,6 +44,15 @@ function ExperimentDetailClientContent({
     protocolId: protocol.id,
     value: "protocol",
   });
+  const hasCurrentProtocolContract = hasCurrentExperimentProtocolContract(protocol);
+
+  useEffect(() => {
+    if (!hasCurrentProtocolContract) {
+      startTransition(() => {
+        router.refresh();
+      });
+    }
+  }, [hasCurrentProtocolContract, router]);
   const privateRun = useMemo(
     () => resolveBrowserVaultExperimentRun({
       client: browserVault.client,
@@ -53,6 +67,14 @@ function ExperimentDetailClientContent({
   const selectedTab = selectedTabState.protocolId === protocol.id
     ? selectedTabState.value
     : "protocol";
+
+  if (!hasCurrentProtocolContract) {
+    return (
+      <div className="flex min-h-40 items-center justify-center rounded-xl border border-secondary/25 bg-card/90 px-6 py-8 text-sm text-muted-foreground">
+        Refreshing experiment…
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-8">

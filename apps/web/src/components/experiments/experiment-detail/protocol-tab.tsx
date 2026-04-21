@@ -1,3 +1,5 @@
+import type { ReactNode } from "react";
+
 import type { Experiment } from "@/src/types/experiments";
 import { ExpectedSignalCard } from "./expected-signal-card";
 import { ExpertCard } from "./expert-card";
@@ -11,7 +13,11 @@ interface ProtocolTabProps {
 export function ProtocolTab({ experiment }: ProtocolTabProps) {
   const {
     expectedSignals,
+    protocolFacts,
     protocol,
+    protocolTips,
+    protocolKeepInMind,
+    protocolLogFields,
     whyItWorks,
     experts,
     researchStats,
@@ -19,52 +25,176 @@ export function ProtocolTab({ experiment }: ProtocolTabProps) {
     podcastLinks,
     safety,
   } = experiment;
+  const baselineFact = findProtocolFact(protocolFacts, "baseline");
+  const interventionFact = findProtocolFact(protocolFacts, "intervention");
+  const supportingFacts = protocolFacts.filter((fact) => {
+    const label = normalizeFactLabel(fact.label);
+    return label !== "baseline" && label !== "intervention";
+  });
+  const protocolLead = buildProtocolLead({
+    baselineFact,
+    interventionFact,
+    supportingFacts,
+  });
+  const whyItWorksParagraphs = whyItWorks
+    .split("\n\n")
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean);
 
   return (
     <div className="flex flex-col gap-10">
+      {expectedSignals.length > 0 && (
+        <section className="flex flex-col gap-4 pt-2">
+          <div className="flex flex-col gap-2">
+            <SectionLabel>Expected signals</SectionLabel>
+            <p className="max-w-2xl text-sm/6 text-muted-foreground">
+              What you&apos;d expect to shift if the protocol is working.
+            </p>
+          </div>
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {expectedSignals.map((signal) => (
+              <ExpectedSignalCard
+                key={signal.label}
+                label={signal.label}
+                expected={signal.expected}
+                direction={signal.direction}
+                description={signal.description ?? ""}
+              />
+            ))}
+          </div>
+        </section>
+      )}
 
-      <div className="grid gap-4 pt-2 md:grid-cols-2 xl:grid-cols-3">
-        {expectedSignals.map((signal) => (
-          <ExpectedSignalCard
-            key={signal.label}
-            label={signal.label}
-            expected={signal.expected}
-            direction={signal.direction}
-            description={signal.description ?? ""}
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1.3fr)_minmax(320px,0.9fr)]">
+        <section className="flex flex-col gap-6 rounded-xl border border-secondary/25 bg-card/90 p-7">
+          <div className="flex flex-col gap-2">
+            <SectionLabel>Run the protocol</SectionLabel>
+            {protocolLead ? (
+              <p className="max-w-3xl text-[16px]/7 text-foreground">
+                {protocolLead}
+              </p>
+            ) : null}
+          </div>
+          {protocol.length > 0 && (
+            <div className="flex flex-col gap-3.5">
+              <ol className="flex flex-col gap-3.5">
+                {protocol.map((step) => (
+                  <li
+                    key={step.number}
+                    className="grid gap-3.5 rounded-lg border border-border/70 bg-background/35 p-4 sm:grid-cols-[auto_1fr]"
+                  >
+                    <div className="flex items-center gap-3 sm:flex-col sm:items-start sm:gap-2">
+                      <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-secondary/15">
+                        <span className="font-mono text-[11px]/3.5 text-chart-5">
+                          {step.number}
+                        </span>
+                      </div>
+                      <span className="font-mono text-[10px]/3 uppercase tracking-[0.08em] text-chart-5">
+                        Step {step.number}
+                      </span>
+                    </div>
+                    <div className="space-y-1">
+                      {hasSpecificStepTitle(step) ? (
+                        <p className="text-sm/5 font-semibold text-foreground">
+                          {step.title}
+                        </p>
+                      ) : null}
+                      <p className="text-[13px]/5 text-foreground/85">
+                        {step.detail}
+                      </p>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          )}
+
+          <ProtocolTextList
+            title="For a cleaner read"
+            items={protocolTips}
           />
-        ))}
-      </div>
+        </section>
 
-      {/* Protocol steps + Why It Works */}
-      <div className="flex flex-col gap-10 xl:flex-row">
-        <div className="flex grow shrink basis-0 flex-col gap-5">
-          <span className="font-mono text-[11px]/3.5 tracking-[0.12em] text-chart-5">
-            PROTOCOL
-          </span>
-          {protocol.map((step) => (
-            <div key={step.number} className="flex gap-3.5">
-              <div className="flex size-6 shrink-0 items-center justify-center rounded-full bg-secondary/15">
-                <span className="font-mono text-[11px]/3.5 text-chart-5">
-                  {step.number}
-                </span>
-              </div>
-              <div className="flex flex-col gap-0.5">
-                <span className="text-sm/4.5 font-semibold text-foreground">
-                  {step.title}
-                </span>
-                <span className="text-[13px]/4 text-chart-5">
-                  {step.detail}
-                </span>
+        <section className="flex flex-col gap-5 rounded-xl border border-secondary/25 bg-card/90 p-7">
+          <SectionLabel>At a glance</SectionLabel>
+
+          {(baselineFact || interventionFact) && (
+            <div className="flex flex-col gap-3">
+              {baselineFact ? (
+                <ProtocolPhaseCard
+                  badge="Before change"
+                  fact={baselineFact}
+                />
+              ) : null}
+              {interventionFact ? (
+                <ProtocolPhaseCard
+                  badge="Protocol window"
+                  fact={interventionFact}
+                />
+              ) : null}
+            </div>
+          )}
+
+          {supportingFacts.length > 0 && (
+            <dl className="overflow-hidden rounded-lg border border-border/70 bg-background/20">
+              {supportingFacts.map((fact, index) => (
+                <div
+                  key={`${fact.label}-${fact.value}`}
+                  className={`grid gap-1 px-4 py-3.5 sm:grid-cols-[88px_1fr] sm:gap-4 ${
+                    index > 0 ? "border-t border-border/60" : ""
+                  }`}
+                >
+                  <dt className="font-mono text-[10px]/3 uppercase tracking-[0.08em] text-chart-5">
+                    {fact.label}
+                  </dt>
+                  <div>
+                    <dd className="text-sm/5 font-semibold text-foreground">
+                      {fact.value}
+                    </dd>
+                    {fact.detail ? (
+                      <p className="mt-1 text-xs/4 text-muted-foreground">
+                        {fact.detail}
+                      </p>
+                    ) : null}
+                  </div>
+                </div>
+              ))}
+            </dl>
+          )}
+
+          {protocolLogFields.length > 0 && (
+            <div className="flex flex-col gap-3">
+              <SectionLabel>Log each session</SectionLabel>
+              <div className="flex flex-wrap gap-2">
+                {protocolLogFields.map((field) => (
+                  <span
+                    key={field}
+                    className="rounded-full border border-border/70 bg-background/35 px-3 py-1.5 text-xs/4 text-muted-foreground"
+                  >
+                    {field}
+                  </span>
+                ))}
               </div>
             </div>
-          ))}
-        </div>
+          )}
 
-        <div className="flex grow shrink basis-0 flex-col gap-4 rounded-xl border border-secondary/25 bg-card/90 p-7">
-          <span className="font-mono text-[11px]/3.5 tracking-[0.12em] text-chart-5">
-            WHY IT WORKS
-          </span>
-          {whyItWorks.split("\n\n").map((paragraph, i) => (
+          <ProtocolTextList title="Keep in mind" items={protocolKeepInMind} />
+        </section>
+      </div>
+
+      <section className="flex flex-col gap-4 rounded-xl border border-secondary/25 bg-card/90 p-7">
+        <div className="flex max-w-3xl flex-col gap-2">
+          <SectionLabel>Why it works</SectionLabel>
+          <p className="text-sm/6 text-muted-foreground">
+            The mechanism and evidence behind the protocol.
+          </p>
+        </div>
+        <div
+          className={`grid gap-4 ${
+            whyItWorksParagraphs.length > 1 ? "lg:grid-cols-2" : ""
+          }`}
+        >
+          {whyItWorksParagraphs.map((paragraph, i) => (
             <p
               key={i}
               className="text-[14px] leading-[170%] text-foreground/80"
@@ -73,7 +203,7 @@ export function ProtocolTab({ experiment }: ProtocolTabProps) {
             </p>
           ))}
         </div>
-      </div>
+      </section>
 
       {/* Recommended by */}
       {experts.length > 0 && (
@@ -101,7 +231,9 @@ export function ProtocolTab({ experiment }: ProtocolTabProps) {
               className="flex grow shrink basis-0 flex-col items-center gap-1 rounded-xl border border-secondary/25 bg-card/90 p-5"
             >
               <span className="font-serif text-[32px]/10 font-semibold text-foreground">
-                {typeof stat.value === "number" ? stat.value.toLocaleString() : stat.value}
+                {typeof stat.value === "number"
+                  ? stat.value.toLocaleString()
+                  : stat.value}
               </span>
               <span className="font-mono text-[10px]/3 tracking-[0.08em] text-chart-5">
                 {stat.label}
@@ -135,7 +267,9 @@ export function ProtocolTab({ experiment }: ProtocolTabProps) {
               <span className="font-mono text-[11px]/3.5 text-muted-foreground">
                 ▶
               </span>
-              <span className="text-xs/4 text-muted-foreground">{link.label}</span>
+              <span className="text-xs/4 text-muted-foreground">
+                {link.label}
+              </span>
             </div>
           ))}
         </div>
@@ -143,6 +277,125 @@ export function ProtocolTab({ experiment }: ProtocolTabProps) {
 
       {/* Safety */}
       <SafetySection {...safety} />
+    </div>
+  );
+}
+
+function findProtocolFact(
+  facts: Experiment["protocolFacts"],
+  label: string,
+) {
+  return facts.find((fact) => normalizeFactLabel(fact.label) === label);
+}
+
+function normalizeFactLabel(label: string): string {
+  return label.trim().toLowerCase();
+}
+
+function buildProtocolLead({
+  baselineFact,
+  interventionFact,
+  supportingFacts,
+}: {
+  baselineFact?: Experiment["protocolFacts"][number];
+  interventionFact?: Experiment["protocolFacts"][number];
+  supportingFacts: Experiment["protocolFacts"];
+}): string | null {
+  const sentences: string[] = [];
+
+  if (baselineFact && interventionFact) {
+    sentences.push(
+      `Keep your routine stable for ${baselineFact.value}, then run the protocol for ${interventionFact.value}.`,
+    );
+  } else if (baselineFact) {
+    sentences.push(`Keep your routine stable for ${baselineFact.value} before you start.`);
+  } else if (interventionFact) {
+    sentences.push(`Run the protocol for ${interventionFact.value}.`);
+  }
+
+  const supportingSummary = supportingFacts
+    .slice(0, 3)
+    .map((fact) => `${fact.label}: ${fact.value}`)
+    .join("; ");
+
+  if (supportingSummary) {
+    sentences.push(supportingSummary);
+  }
+
+  return sentences.length > 0 ? sentences.join(" ") : null;
+}
+
+function hasSpecificStepTitle(step: Experiment["protocol"][number]): boolean {
+  return step.title.trim() !== `Step ${step.number}`;
+}
+
+function ProtocolPhaseCard({
+  fact,
+  badge,
+}: {
+  fact: Experiment["protocolFacts"][number];
+  badge: string;
+}) {
+  return (
+    <div className="rounded-lg border border-border/70 bg-background/35 p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="font-mono text-[10px]/3 uppercase tracking-[0.08em] text-chart-5">
+            {fact.label}
+          </div>
+          <div className="mt-1 text-lg/7 font-semibold text-foreground">
+            {fact.value}
+          </div>
+        </div>
+        <span className="rounded-full bg-secondary/12 px-2.5 py-1 font-mono text-[10px]/3 uppercase tracking-[0.08em] text-chart-5">
+          {badge}
+        </span>
+      </div>
+      {fact.detail ? (
+        <p className="mt-3 text-sm/6 text-muted-foreground">
+          {fact.detail}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function SectionLabel({ children }: { children: ReactNode }) {
+  return (
+    <span className="font-mono text-[11px]/3.5 uppercase tracking-[0.12em] text-chart-5">
+      {children}
+    </span>
+  );
+}
+
+function ProtocolTextList({
+  title,
+  items,
+}: {
+  title: string;
+  items: readonly string[];
+}) {
+  if (items.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      <SectionLabel>{title}</SectionLabel>
+      <ul className="flex flex-col gap-2.5">
+        {items.map((item) => (
+          <li
+            key={item}
+            className="flex gap-2.5 text-[13px]/5 text-muted-foreground"
+          >
+            <span
+              aria-hidden="true"
+              className="mt-2 size-1.5 shrink-0 rounded-full bg-secondary"
+            />
+            <span>{item}</span>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
