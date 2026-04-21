@@ -120,7 +120,7 @@ async function readAssistantFirstContactStateRecord(
   const documentPath = resolveAssistantStateDocumentPath({ stateDirectory }, docId)
   try {
     const raw = await readFile(documentPath, 'utf8')
-    const parsed = JSON.parse(raw) as unknown
+    const parsed: unknown = JSON.parse(raw)
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
       return null
     }

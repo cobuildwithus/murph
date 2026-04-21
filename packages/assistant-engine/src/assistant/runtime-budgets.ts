@@ -187,7 +187,7 @@ async function readAssistantRuntimeBudgetSnapshotAtPaths(input: {
   }
 
   try {
-    return assistantRuntimeBudgetSnapshotSchema.parse(JSON.parse(raw) as unknown)
+    return assistantRuntimeBudgetSnapshotSchema.parse(JSON.parse(raw))
   } catch (error) {
     const recoveredAt = new Date().toISOString()
     const recoveredSnapshot =
@@ -329,7 +329,7 @@ async function readAssistantQuarantineMetadata(
 ): Promise<AssistantQuarantineEntry | null> {
   try {
     const raw = await readFile(metadataPath, 'utf8')
-    return assistantQuarantineEntrySchema.parse(JSON.parse(raw) as unknown)
+    return assistantQuarantineEntrySchema.parse(JSON.parse(raw))
   } catch {
     return null
   }

@@ -140,7 +140,7 @@ async function readAssistantDiagnosticsSnapshotAtPath(
 ): Promise<AssistantDiagnosticsSnapshot> {
   try {
     const raw = await readFile(snapshotPath, 'utf8')
-    return assistantDiagnosticsSnapshotSchema.parse(JSON.parse(raw) as unknown)
+    return assistantDiagnosticsSnapshotSchema.parse(JSON.parse(raw))
   } catch (error) {
     if (!isMissingFileError(error)) {
       await quarantineAssistantStateFile({

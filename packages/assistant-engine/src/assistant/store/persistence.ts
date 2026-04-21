@@ -113,7 +113,7 @@ export async function readAssistantSession(input: {
   let persistedSession: AssistantSession
   try {
     persistedSession = normalizeAssistantSessionSnapshot(
-      parseAssistantSessionRecord(JSON.parse(raw) as unknown),
+      parseAssistantSessionRecord(JSON.parse(raw)),
     )
   } catch (error) {
     assistantSessionCache.delete(sessionPath)
@@ -555,7 +555,7 @@ export async function readAssistantIndexStore(
   }
 
   try {
-    const parsed = assistantAliasStoreSchema.parse(JSON.parse(raw) as unknown)
+    const parsed = assistantAliasStoreSchema.parse(JSON.parse(raw))
     assistantIndexStoreCache.set(paths.indexesPath, parsed)
     return parsed
   } catch (error) {
@@ -641,7 +641,7 @@ export async function readAutomationState(
   }
 
   try {
-    const parsed = assistantAutomationStateSchema.parse(JSON.parse(raw) as unknown)
+    const parsed = assistantAutomationStateSchema.parse(JSON.parse(raw))
     assistantAutomationStateCache.set(paths.automationStatePath, parsed)
     return parsed
   } catch (error) {
