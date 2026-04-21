@@ -12,11 +12,37 @@ const defaultHostedRunnerEnvProfiles = [
 
 export type HostedLocalAssistantProviderMode = "stub" | "live";
 
+export interface HostedLocalAssistantProviderStubState {
+  currentResponseText: string | null;
+  queuedResponseTexts: string[];
+}
+
+export function buildHostedAssistantNotificationDecisionResponse(input: {
+  privateSummary?: string;
+  subject?: string | null;
+  text: string;
+}): string {
+  const text = input.text.trim();
+  if (!text) {
+    throw new Error("Hosted assistant notification decision text must be non-empty.");
+  }
+
+  const privateSummary = input.privateSummary?.trim() || "deliver";
+  const subject = input.subject?.trim() || null;
+
+  return JSON.stringify({
+    kind: "send_message",
+    privateSummary,
+    text,
+    ...(subject ? { subject } : {}),
+  });
+}
+
 export async function startAssistantProviderStubServer(input: {
   fallbackResponseText?: string | null;
   modelId?: string;
   onRequestBody?: (body: string) => void;
-  queuedResponseTexts?: string[];
+  responseState?: HostedLocalAssistantProviderStubState;
 } = {}): Promise<ReturnType<typeof createServer>> {
   const modelId = input.modelId ?? "stub-openrouter-model";
 
@@ -45,7 +71,8 @@ export async function startAssistantProviderStubServer(input: {
       }
 
       const responseText =
-        input.queuedResponseTexts?.shift()
+        input.responseState?.queuedResponseTexts.shift()
+        ?? input.responseState?.currentResponseText
         ?? input.fallbackResponseText
         ?? null;
       if (!responseText) {

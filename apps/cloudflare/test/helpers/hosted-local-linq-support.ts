@@ -1,5 +1,10 @@
 import { createServer, type Server as HttpServer } from "node:http";
 
+import { MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE } from "@murphai/contracts";
+import {
+  buildHostedExecutionAssistantNotificationRequestedWake,
+} from "@murphai/hosted-execution";
+
 import { createHostedPhoneLookupKey } from "./hosted-contact-privacy.js";
 import {
   buildStableNumericSuffix,
@@ -50,6 +55,13 @@ export interface HostedLocalLinqStub {
   }): Promise<ObservedLinqRequest>;
 }
 
+export const HOSTED_LINQ_DEFAULT_ASSISTANT_REPLY_TEXT =
+  "Got it - I saw your message and I'm here.";
+export const HOSTED_LINQ_ROCKET_MAN_ASSISTANT_REPLY_TEXT =
+  "Got it — I’ll call you Rocket Man.\n\nWhat are your health goals right now?";
+export const HOSTED_LINQ_GROUPED_ASSISTANT_REPLY_TEXT =
+  "What should I call you? And out of those, which ones matter most to you right now?";
+
 export async function startHostedLocalLinqStub(): Promise<HostedLocalLinqStub> {
   const observedRequests: ObservedLinqRequest[] = [];
   const observedChatIdsByRecipient = new Map<string, string>();
@@ -66,6 +78,13 @@ export async function startHostedLocalLinqStub(): Promise<HostedLocalLinqStub> {
 
     if (request.method === "POST" && request.url === linqCreateChatPath) {
       const parsedBody = parseObservedLinqJson(body);
+      if (!isObservedLinqCreateChatPayload(parsedBody)) {
+        writeJsonResponse(response, 400, {
+          error: "Expected a Linq create-chat payload with from, to, and a text message.",
+        });
+        return;
+      }
+
       const recipient = Array.isArray(parsedBody?.to) ? parsedBody.to[0] : "unknown";
       const chatId = `chat_local_${++nextObservedChatSequence}`;
       observedChatIdsByRecipient.set(String(recipient ?? "unknown"), chatId);
@@ -85,6 +104,13 @@ export async function startHostedLocalLinqStub(): Promise<HostedLocalLinqStub> {
       && request.url
       && /^\/chats\/[^/]+\/messages$/u.test(request.url)
     ) {
+      if (!isObservedLinqMessagePayload(parseObservedLinqJson(body))) {
+        writeJsonResponse(response, 400, {
+          error: "Expected a Linq send-message payload with a text message.",
+        });
+        return;
+      }
+
       writeJsonResponse(response, 200, {
         data: {
           chat_id: request.url.split("/")[2],
@@ -94,7 +120,26 @@ export async function startHostedLocalLinqStub(): Promise<HostedLocalLinqStub> {
       return;
     }
 
-    writeJsonResponse(response, 200, { ok: true });
+    if (
+      request.url
+      && /^\/chats\/[^/]+\/typing$/u.test(request.url)
+      && (request.method === "POST" || request.method === "DELETE")
+    ) {
+      response.statusCode = 204;
+      response.end();
+      return;
+    }
+
+    if (request.method === "GET" && request.url === "/phone_numbers") {
+      writeJsonResponse(response, 200, {
+        phone_numbers: [],
+      });
+      return;
+    }
+
+    writeJsonResponse(response, 404, {
+      error: `Unhandled Linq stub route: ${request.method ?? "GET"} ${request.url ?? "/"}`,
+    });
   });
 
   const activeServer = server;
@@ -127,14 +172,13 @@ export async function startHostedLocalLinqStub(): Promise<HostedLocalLinqStub> {
       await sleep(250);
     }
 
-    throw new Error(
-      await input.scenario.buildFailureMessage(input.userId, [
-        `Timed out waiting for ${input.expectedCount} Linq send(s) for ${input.userId}.`,
-        `expected path: ${input.expectedPath}`,
-        `observed requests: ${JSON.stringify(observedRequests)}`,
-        `assistant provider bodies: ${JSON.stringify(input.scenario.assistantProviderBodies)}`,
-      ]),
-    );
+      throw new Error(
+        await input.scenario.buildFailureMessage(input.userId, [
+          `Timed out waiting for ${input.expectedCount} Linq send(s) for ${input.userId}.`,
+          `expected path: ${input.expectedPath}`,
+          `observed requests: ${JSON.stringify(observedRequests)}`,
+        ]),
+      );
   };
 
   return {
@@ -263,6 +307,50 @@ export function buildHostedLinqInboundEvent(
   };
 }
 
+export function buildHostedLinqSignupWelcomeWake(input: {
+  eventId: string;
+  occurredAt?: string;
+  userId: string;
+}) {
+  return buildHostedExecutionAssistantNotificationRequestedWake({
+    eventId: input.eventId,
+    memberId: input.userId,
+    notification: {
+      deliveryDedupeToken: `signup-welcome:${input.userId}`,
+      deliveryDispatchMode: "queue-only",
+      deliveryIdempotencyKey: `signup-welcome:${input.userId}`,
+      firstContact: {
+        markSeenOnDeliveryAccepted: true,
+      },
+      instructions: [
+        "A new user has completed signup for Murph.",
+        "Send exactly this message and nothing else:",
+        MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
+      ].join("\n\n"),
+      responsePolicy: {
+        kind: "require_send_exact_text",
+        text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
+      },
+      route: {
+        actorId: buildLinqRecipientPhoneNumber(input.userId),
+        channel: "linq",
+        delivery: {
+          kind: "participant",
+          source: {
+            fromPhoneNumber: buildLinqHomePhoneNumber(input.userId),
+            kind: "linq",
+          },
+          target: buildLinqRecipientPhoneNumber(input.userId),
+        },
+        identityId: requireLinqPhoneLookupKey(input.userId),
+        threadId: null,
+        threadIsDirect: true,
+      },
+    },
+    occurredAt: input.occurredAt ?? new Date().toISOString(),
+  });
+}
+
 export function buildLinqHomePhoneNumber(userId: string): string {
   return buildStableTestPhoneNumber(userId, "598");
 }
@@ -278,22 +366,6 @@ export function requireLinqPhoneLookupKey(userId: string): string {
   }
 
   return lookupKey;
-}
-
-export function resolveHostedLinqAssistantReplyText(body: string): string {
-  if (body.includes("Rocket Man") && body.includes("build more strength")) {
-    if (body.includes("I’ll call you Rocket Man") || body.includes("I'll call you Rocket Man")) {
-      return "Got you — stronger, fitter, faster, and more endurance.";
-    }
-
-    return "What should I call you? And out of those, which ones matter most to you right now?";
-  }
-
-  if (body.includes("Rocket Man")) {
-    return "Got it — I’ll call you Rocket Man.\n\nWhat are your health goals right now?";
-  }
-
-  return "Got it - I saw your message and I'm here.";
 }
 
 function buildStableTestPhoneNumber(userId: string, prefix: string): string {
@@ -318,6 +390,42 @@ function parseObservedLinqJson(body: string): Record<string, unknown> | null {
   } catch {
     return null;
   }
+}
+
+function isObservedLinqCreateChatPayload(payload: Record<string, unknown> | null): boolean {
+  return Boolean(
+    payload
+    && typeof payload.from === "string"
+    && Array.isArray(payload.to)
+    && payload.to.every((recipient) => typeof recipient === "string" && recipient.length > 0)
+    && isObservedLinqMessagePayload(payload),
+  );
+}
+
+function isObservedLinqMessagePayload(payload: Record<string, unknown> | null): boolean {
+  if (!payload || typeof payload.message !== "object" || payload.message === null) {
+    return false;
+  }
+
+  const parts =
+    "parts" in payload.message
+      ? (payload.message as { parts?: unknown }).parts
+      : null;
+  if (!Array.isArray(parts) || parts.length === 0) {
+    return false;
+  }
+
+  return parts.some((part) =>
+    Boolean(
+      part
+      && typeof part === "object"
+      && "type" in part
+      && "value" in part
+      && part.type === "text"
+      && typeof part.value === "string"
+      && part.value.trim().length > 0,
+    )
+  );
 }
 
 function readObservedLinqMessageText(request: ObservedLinqRequest): string | null {

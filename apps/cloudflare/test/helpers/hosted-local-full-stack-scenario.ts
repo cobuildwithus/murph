@@ -25,10 +25,12 @@ import {
   mergeRequiredEnvProfile,
   reserveLocalTcpPort,
   resolveHostedAssistantLocalDevEnv,
+  resolveHostedAssistantProviderMode,
   resolveHostedLocalSmokeWebEnv,
-  shouldUseAssistantProviderStub,
   startAssistantProviderStubServer,
   stopHttpStubServer,
+  type HostedLocalAssistantProviderMode,
+  type HostedLocalAssistantProviderStubState,
 } from "./hosted-local-e2e-support.js";
 import {
   appendHostedWake,
@@ -62,6 +64,7 @@ export interface HostedLocalFullStackScenario {
     memberId: string;
     recipientPhone: string;
   }): Promise<void>;
+  queueAssistantResponses(responseTexts: readonly string[]): void;
   runWake(
     wake: HostedExecutionWake,
     userId: string,
@@ -87,20 +90,30 @@ export interface HostedLocalFullStackScenario {
 
 export async function startHostedLocalFullStackScenario(input: {
   additionalEnv?: NodeJS.ProcessEnv;
+  assistantProviderMode?: HostedLocalAssistantProviderMode;
+  assistantProviderResponses?: readonly string[];
   localDatabaseUrl?: string;
   persistDirOverride?: string | null;
   persistDirPrefix: string;
   requiredRunnerEnvProfile: string;
-  resolveAssistantReplyText?: (body: string) => string;
   scenarioLabel: string;
   seedEnvironment?: NodeJS.ProcessEnv;
   streamLogs?: boolean;
 }): Promise<HostedLocalFullStackScenario> {
   const assistantProviderBodies: string[] = [];
+  const assistantProviderStubState: HostedLocalAssistantProviderStubState = {
+    currentResponseText: null,
+    queuedResponseTexts: [...(input.assistantProviderResponses ?? [])],
+  };
+  if (assistantProviderStubState.queuedResponseTexts.length > 0) {
+    assistantProviderStubState.currentResponseText =
+      assistantProviderStubState.queuedResponseTexts.at(-1) ?? null;
+  }
   const localDatabaseUrl = input.localDatabaseUrl?.trim() || DEFAULT_DATABASE_URL;
   const baseEnvironment = await loadHostedLocalBaseEnvironment();
   const seedEnvironment = input.seedEnvironment ?? baseEnvironment;
-  const useAssistantProviderStub = shouldUseAssistantProviderStub(baseEnvironment);
+  const assistantProviderMode =
+    input.assistantProviderMode ?? resolveHostedAssistantProviderMode(baseEnvironment);
 
   let assistantProviderServer: HttpServer | null = null;
   let assistantProviderBaseUrl: string | null = null;
@@ -108,12 +121,13 @@ export async function startHostedLocalFullStackScenario(input: {
   let harness: HostedLocalDevHarness | null = null;
 
   try {
-    if (useAssistantProviderStub) {
+    if (assistantProviderMode === "stub") {
       assistantProviderServer = await startAssistantProviderStubServer({
+        fallbackResponseText: null,
         onRequestBody: (body) => {
           assistantProviderBodies.push(body);
         },
-        resolveMessageText: input.resolveAssistantReplyText,
+        responseState: assistantProviderStubState,
       });
       assistantProviderBaseUrl =
         `${buildHostLoopbackStubBaseUrl(assistantProviderServer, "assistant provider stub")}/v1`;
@@ -122,6 +136,7 @@ export async function startHostedLocalFullStackScenario(input: {
     oidcFixture = await startHostedLocalOidcFixture();
     const hostedAssistantDevEnv = resolveHostedAssistantLocalDevEnv(
       baseEnvironment,
+      assistantProviderMode,
       assistantProviderBaseUrl,
       input.scenarioLabel,
     );
@@ -186,6 +201,22 @@ export async function startHostedLocalFullStackScenario(input: {
           `stdout tail: ${scenarioHarness.stdoutTail()}`,
           `stderr tail: ${scenarioHarness.stderrTail()}`,
         ].join("\n");
+      },
+      queueAssistantResponses: (responseTexts) => {
+        let latestResponseText: string | null = null;
+        for (const responseText of responseTexts) {
+          const trimmed = responseText.trim();
+          if (!trimmed) {
+            throw new Error("Hosted local assistant stub responses must be non-empty.");
+          }
+
+          assistantProviderStubState.queuedResponseTexts.push(trimmed);
+          latestResponseText = trimmed;
+        }
+
+        if (latestResponseText) {
+          assistantProviderStubState.currentResponseText = latestResponseText;
+        }
       },
       runWake: async (wake, userId) =>
         await appendHostedWakeAndWakeWorker({
