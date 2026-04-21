@@ -12,7 +12,7 @@ fi
 
 command_requires_workspace_artifact_lock() {
   case "${1:-}" in
-    "typecheck" | "typecheck:packages" | "test:packages:coverage" | "test:coverage" | "verify:cli")
+    "typecheck" | "typecheck:packages" | "test:packages:coverage" | "test:coverage" | "verify:acceptance" | "verify:cli")
       return 0
       ;;
     *)
@@ -365,6 +365,20 @@ run_package_command_without_node_v8_coverage_with_retry() {
     env -u NODE_V8_COVERAGE pnpm --dir "$package_dir" "$command"
 }
 
+run_app_verify_command_with_retry() {
+  local app_dir="$1"
+  local skip_cloudflare_typecheck="${2:-0}"
+  local env_args=(env -u NODE_V8_COVERAGE)
+
+  if [[ "$app_dir" == "apps/cloudflare" && "$skip_cloudflare_typecheck" == "1" ]]; then
+    env_args+=(MURPH_CLOUDFLARE_VERIFY_SKIP_TYPECHECK=1)
+  fi
+
+  run_command_with_retry \
+    "Package command for ${app_dir} (verify)" \
+    "${env_args[@]}" pnpm --dir "$app_dir" verify
+}
+
 wait_for_background_jobs() {
   local failed=0
   local pid
@@ -435,15 +449,17 @@ run_test_packages_common() {
 }
 
 run_test_apps() {
+  local skip_cloudflare_typecheck="${1:-0}"
+
   if [[ "$app_verify_parallel" == "1" ]]; then
     local pids=()
 
     # App verification should not emit V8 coverage into the repo coverage workspace.
-    run_package_command_without_node_v8_coverage_with_retry "apps/web" verify &
+    run_app_verify_command_with_retry "apps/web" "$skip_cloudflare_typecheck" &
     local hosted_web_verify_pid="$!"
     pids+=("$hosted_web_verify_pid")
     register_background_pid "$hosted_web_verify_pid"
-    run_package_command_without_node_v8_coverage_with_retry "apps/cloudflare" verify &
+    run_app_verify_command_with_retry "apps/cloudflare" "$skip_cloudflare_typecheck" &
     local cloudflare_verify_pid="$!"
     pids+=("$cloudflare_verify_pid")
     register_background_pid "$cloudflare_verify_pid"
@@ -455,8 +471,8 @@ run_test_apps() {
     return 0
   fi
 
-  run_package_command_without_node_v8_coverage_with_retry "apps/web" verify
-  run_package_command_without_node_v8_coverage_with_retry "apps/cloudflare" verify
+  run_app_verify_command_with_retry "apps/web" "$skip_cloudflare_typecheck"
+  run_app_verify_command_with_retry "apps/cloudflare" "$skip_cloudflare_typecheck"
 }
 
 prepare_repo_vitest_runtime_artifacts() {
@@ -483,11 +499,20 @@ run_repo_vitest() {
 run_workspace_package_coverage() {
   local package_dir="$1"
   local label="$2"
+  local contracts_artifacts_prepared="${3:-0}"
 
   if [[ "$package_dir" == "packages/cli" ]]; then
     run_timed_step \
       "$label" \
       env MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 MURPH_VITEST_MAX_WORKERS="$package_coverage_vitest_max_workers" pnpm exec vitest run --config "packages/cli/vitest.workspace.ts" --coverage
+    return $?
+  fi
+
+  if [[ "$package_dir" == "packages/contracts" && "$contracts_artifacts_prepared" == "1" ]]; then
+    run_timed_step \
+      "$label" \
+      env MURPH_VITEST_MAX_WORKERS="$package_coverage_vitest_max_workers" \
+        bash -c 'pnpm --dir packages/contracts test:coverage:vitest && node packages/contracts/dist/scripts/verify.js'
     return $?
   fi
 
@@ -497,6 +522,7 @@ run_workspace_package_coverage() {
 }
 
 run_all_package_coverage() {
+  local contracts_artifacts_prepared="${1:-0}"
   local package_coverage_dirs=(
     "packages/assistant-cli"
     "packages/assistant-engine"
@@ -589,7 +615,8 @@ run_all_package_coverage() {
     while [[ "$package_index" -lt "$package_count" ]]; do
       if ! run_workspace_package_coverage \
         "${package_coverage_dirs[$package_index]}" \
-        "${package_coverage_labels[$package_index]}"; then
+        "${package_coverage_labels[$package_index]}" \
+        "$contracts_artifacts_prepared"; then
         record_failed_package_coverage "${package_coverage_labels[$package_index]}"
       fi
       package_index=$((package_index + 1))
@@ -610,7 +637,8 @@ run_all_package_coverage() {
       (
         if ! run_workspace_package_coverage \
           "${package_coverage_dirs[$package_index]}" \
-          "${package_coverage_labels[$package_index]}"; then
+          "${package_coverage_labels[$package_index]}" \
+          "$contracts_artifacts_prepared"; then
           printf '%s\n' "${package_coverage_labels[$package_index]}" >"$failure_file"
           exit 1
         fi
@@ -731,6 +759,7 @@ run_test_packages() {
 
 run_test_packages_coverage() {
   local artifacts_prepared="${1:-0}"
+  local contracts_artifacts_prepared="${2:-0}"
 
   run_timed_step \
     "Coverage cleanup" \
@@ -739,11 +768,17 @@ run_test_packages_coverage() {
   if [[ "$artifacts_prepared" != "1" ]]; then
     run_timed_step "Prepared runtime artifacts" prepare_repo_vitest_runtime_artifacts
   fi
-  run_timed_step "All package coverage" run_all_package_coverage
+  run_timed_step "All package coverage" run_all_package_coverage "$contracts_artifacts_prepared"
 }
 
 run_test_coverage() {
-  run_repo_acceptance_guards
+  local acceptance_typechecked="${1:-0}"
+
+  if [[ "$acceptance_typechecked" == "1" ]]; then
+    verify_log "skip repo acceptance guards already covered by typecheck"
+  else
+    run_repo_acceptance_guards
+  fi
   run_timed_step "Doc gardening" bash "scripts/doc-gardening.sh" --fail-on-issues
 
   if [[ "$test_lane_parallel" == "1" ]]; then
@@ -755,7 +790,7 @@ run_test_coverage() {
     # verify until the package-coverage suite has released shared app-test
     # resources such as Prisma/client generation.
     run_timed_step "Prepared runtime artifacts" prepare_repo_vitest_runtime_artifacts
-    run_timed_step "Package coverage suite" run_test_packages_coverage 1 &
+    run_timed_step "Package coverage suite" run_test_packages_coverage 1 "$acceptance_typechecked" &
     coverage_pid="$!"
     register_background_pid "$coverage_pid"
     run_timed_step "Fixture smoke coverage" run_fixture_smoke_verification --coverage &
@@ -763,12 +798,17 @@ run_test_coverage() {
     register_background_pid "$smoke_pid"
 
     wait_for_background_jobs "$coverage_pid" "$smoke_pid"
-    run_timed_step "App verification" run_test_apps
+    run_timed_step "App verification" run_test_apps "$acceptance_typechecked"
   else
-    run_timed_step "Package coverage suite" run_test_packages_coverage
-    run_timed_step "App verification" run_test_apps
+    run_timed_step "Package coverage suite" run_test_packages_coverage 0 "$acceptance_typechecked"
+    run_timed_step "App verification" run_test_apps "$acceptance_typechecked"
     run_timed_step "Fixture smoke coverage" run_fixture_smoke_verification --coverage
   fi
+}
+
+run_verify_acceptance() {
+  run_typecheck
+  run_test_coverage 1
 }
 
 run_diff_repo_internal_fast_path() {
@@ -898,6 +938,9 @@ main() {
     "test:coverage")
       run_test_coverage
       ;;
+    "verify:acceptance")
+      run_verify_acceptance
+      ;;
     "test:diff")
       shift
       run_test_diff "$@"
@@ -906,7 +949,7 @@ main() {
       run_verify_cli
       ;;
     *)
-      echo "Usage: bash scripts/workspace-verify.sh {typecheck|typecheck:packages|test|test:packages|test:apps|test:packages:coverage|test:coverage|test:diff [path ...]|verify:cli}" >&2
+      echo "Usage: bash scripts/workspace-verify.sh {typecheck|typecheck:packages|test|test:packages|test:apps|test:packages:coverage|test:coverage|verify:acceptance|test:diff [path ...]|verify:cli}" >&2
       exit 1
       ;;
   esac

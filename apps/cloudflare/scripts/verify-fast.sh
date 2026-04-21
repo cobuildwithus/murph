@@ -10,6 +10,7 @@ if [[ "${MURPH_WORKSPACE_ARTIFACT_LOCK_HELD:-0}" != "1" ]]; then
 fi
 
 verify_step_parallel="${MURPH_VERIFY_STEP_PARALLEL:-0}"
+skip_typecheck="${MURPH_CLOUDFLARE_VERIFY_SKIP_TYPECHECK:-0}"
 tracked_background_pids=()
 
 register_background_pid() {
@@ -101,7 +102,11 @@ wait_for_background_jobs() {
   [[ "$failed" -eq 0 ]]
 }
 
-pnpm typecheck
+if [[ "$skip_typecheck" == "1" ]]; then
+  echo "[apps/cloudflare verify] skipping typecheck; root acceptance typecheck already covered this app." >&2
+else
+  pnpm typecheck
+fi
 
 if [[ "$verify_step_parallel" != "1" ]]; then
   pnpm test:node
