@@ -113,7 +113,6 @@ protocol:
   interventionSessionsMinimum: 8
   interventionSessionsTarget: 12
   steps:
-    - Keep your normal routine stable for a 7-day baseline before starting.
     - During the 6-week intervention, complete two 4x4 sessions per week, separated by at least 48 hours when possible.
     - Warm up for about 10 minutes at easy-to-moderate effort, roughly 60–70% of estimated HRmax.
     - Complete four 4-minute hard intervals, aiming to reach 85–95% of estimated HRmax by the later part of each interval.

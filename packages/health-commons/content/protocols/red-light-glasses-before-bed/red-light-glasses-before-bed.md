@@ -123,7 +123,6 @@ protocol:
   interventionSessionsMinimum: 10
   interventionSessionsTarget: 12
   steps:
-    - Keep the normal evening routine stable for a 7-day baseline before starting.
     - For 14 intervention nights, put the glasses on 90–120 minutes before intended bedtime.
     - Wear them indoors only during the pre-bed window, then remove them before sleep.
     - Remove the glasses before driving, cycling, cooking with visual hazards, navigating stairs or unfamiliar low-light spaces, or doing color-critical work.
