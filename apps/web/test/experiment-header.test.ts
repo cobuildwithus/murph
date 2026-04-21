@@ -1,0 +1,35 @@
+import assert from "node:assert/strict";
+
+import { createElement, type ReactNode } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { test, vi } from "vitest";
+
+vi.mock("next/link", () => ({
+  default(props: { children?: ReactNode; href: string }) {
+    return createElement("a", { href: props.href }, props.children);
+  },
+}));
+
+import { ExperimentHeader } from "@/src/components/experiments/experiment-detail/experiment-header";
+
+test("removes the unwanted Bryan Johnson description qualifier from the rendered header copy", () => {
+  const markup = renderToStaticMarkup(
+    createElement(ExperimentHeader, {
+      title: "Bryan Johnson Sauna",
+      category: "Recovery",
+      durationDays: 21,
+      evidenceLevel: 3,
+      evidenceLabel: "Field testing · Usable",
+      status: "upcoming",
+      baselineDays: 7,
+      description:
+        "A higher-burden daily sauna routine publicly described by Bryan Johnson, including post-workout timing, heat-protection tactics, and self-reported results best read as personal context rather than expected outcomes.",
+    }),
+  );
+
+  assert.match(
+    markup,
+    /A higher-burden daily sauna routine publicly described by Bryan Johnson, including post-workout timing, heat-protection tactics, and self-reported results\./,
+  );
+  assert.doesNotMatch(markup, /best read as personal context rather than expected outcomes\./);
+});
