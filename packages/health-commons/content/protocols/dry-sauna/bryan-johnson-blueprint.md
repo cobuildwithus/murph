@@ -4,7 +4,7 @@ entityType: protocol_variant
 key: protocol_variant:dry-sauna/bryan-johnson-blueprint
 slug: protocols/dry-sauna/bryan-johnson-blueprint
 title: Bryan Johnson Sauna
-summary: "A higher-burden daily sauna routine publicly described by Bryan Johnson, including post-workout timing, heat-protection tactics, and self-reported results best read as personal context rather than expected outcomes."
+summary: "Use a very hot, low-humidity dry sauna after workouts, with careful hydration and symptom checks, to see whether your resting heart rate, HRV, and recovery tolerate this higher-burden routine."
 status: draft
 quality: usable
 aliases:
@@ -94,10 +94,10 @@ protocol:
   interventionSessionsMinimum: 7
   interventionSessionsTarget: 14
   steps:
-    - Treat this as a source-attributed external routine, not a default recommendation.
-    - Keep a 7-day baseline, then run the routine for up to 14 intervention days.
-    - Use a low-humidity dry sauna at about 93 °C / 200 °F for 20 minutes, usually in the morning after a workout if copying the source routine.
-    - Rehydrate after the session; the public Blueprint routine mentions mineral-supplemented water or electrolytes.
+    - Use a low-humidity dry sauna at about 93 °C / 200 °F.
+    - If you are copying the source routine, do the sauna in the morning after your workout.
+    - Set a 20-minute timer and leave early if heat distress or safety symptoms show up.
+    - Rehydrate after the session with water or electrolytes.
     - Log the session, workout timing, cooling tactics, hydration, symptoms, and whether the dose felt sustainable.
   tips:
     - If you are not already heat-adapted, the Blueprint public beginner guidance points toward a more conservative 15–20 minutes, 3–5 times per week, and 80–100 °C.

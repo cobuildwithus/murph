@@ -1225,7 +1225,7 @@
       "schemaVersion": "murph.commons.artifact-manifest.v1"
     }
   ],
-  "catalogHash": "sha256:653e9df741f2ef090ae595320caa81ec5fbe16d75635f866f24845a77a1eeef8",
+  "catalogHash": "sha256:af79f55d691db2a2530f47f2fa17ab319e294478052f4fa6d8f00a40afabb9c1",
   "changes": [
     {
       "affectedFields": [
@@ -1955,27 +1955,27 @@
       "aliases": [
         "sauna protocol"
       ],
-      "body": "Use this chooser when “sauna protocol” could mean more than one heat-exposure experiment.",
+      "body": "Use this page when \"sauna protocol\" could mean more than one heat-exposure option.",
       "entityType": "disambiguation",
       "key": "disambiguation:sauna-protocol",
       "options": [
         {
-          "description": "Traditional high-temperature dry-sauna protocols, including Finnish dry sauna.",
+          "description": "Use a hot, low-humidity sauna and track whether heat exposure changes recovery, sleep, or cardiovascular signals.",
           "key": "experiment_family:dry-sauna",
           "label": "Dry Sauna"
         },
         {
-          "description": "A simple 3-times-a-week Finnish dry-sauna experiment for comparing baseline and intervention weeks.",
+          "description": "Sit in a traditional dry sauna for short, repeatable sessions and watch recovery, sleep, resting heart rate, or morning blood pressure.",
           "key": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
           "label": "Finnish Dry Sauna"
         },
         {
-          "description": "A separate sauna family for lower-temperature infrared heat exposure.",
+          "description": "Use lower-temperature infrared heat exposure instead of a traditional high-temperature dry sauna.",
           "key": "experiment_family:infrared-sauna",
           "label": "Infrared Sauna"
         },
         {
-          "description": "A higher-burden daily dry-sauna routine attributed to Bryan Johnson, including special cooling tactics and later core-temperature-threshold updates.",
+          "description": "Use a very hot, low-humidity dry sauna after workouts and track whether the added heat load is tolerable.",
           "key": "protocol_variant:dry-sauna/bryan-johnson-blueprint",
           "label": "Bryan Johnson Sauna"
         }
@@ -1989,14 +1989,14 @@
       ],
       "relativePath": "protocols/sauna-protocol.md",
       "revision": {
-        "pageRevisionId": "sha256:d7d3f7ffb00ca08ce3e2f95c626502d5508060b74e846065c5f72a9fccd842c3",
+        "pageRevisionId": "sha256:62f78a8555ac38af4d7b4364d9342ae66438db236ab895e9dd80707669d54534",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
       "schemaVersion": "murph.commons.page.v1",
       "slug": "protocols/sauna-protocol",
       "status": "draft",
-      "summary": "A chooser for sauna searches that could mean dry sauna, infrared sauna, a simple Finnish dry-sauna experiment, or a higher-burden routine attributed to Bryan Johnson.",
+      "summary": "Pick the sauna option that matches what you can actually do: traditional dry sauna, infrared sauna, a simple Finnish-style routine, or the higher-burden Bryan Johnson version.",
       "title": "Sauna Protocol"
     },
     {
@@ -2475,10 +2475,10 @@
           "sleep or recovery disruption"
         ],
         "steps": [
-          "Treat this as a source-attributed external routine, not a default recommendation.",
-          "Keep a 7-day baseline, then run the routine for up to 14 intervention days.",
-          "Use a low-humidity dry sauna at about 93 °C / 200 °F for 20 minutes, usually in the morning after a workout if copying the source routine.",
-          "Rehydrate after the session; the public Blueprint routine mentions mineral-supplemented water or electrolytes.",
+          "Use a low-humidity dry sauna at about 93 °C / 200 °F.",
+          "If you are copying the source routine, do the sauna in the morning after your workout.",
+          "Set a 20-minute timer and leave early if heat distress or safety symptoms show up.",
+          "Rehydrate after the session with water or electrolytes.",
           "Log the session, workout timing, cooling tactics, hydration, symptoms, and whether the dose felt sustainable."
         ],
         "stopConditions": [
@@ -2569,9 +2569,9 @@
       ],
       "relativePath": "protocols/dry-sauna/bryan-johnson-blueprint.md",
       "revision": {
-        "pageRevisionId": "sha256:afde28ce313700d07f686d8538cd4b8ffc9cec7600ceb498af6988320c90e373",
-        "recipeHash": "sha256:803d0c96b5fbe2f18f55166069b03011789de0862c2857b84eef38dc98de746d",
-        "runSpecRevisionId": "sha256:1f10f3b8a9b18d9b302b68e98ada8a9a707ed1b94e9b6057d5716385436630f1"
+        "pageRevisionId": "sha256:0507495920ec519a63853dd2363d3ff2f2ab789bebcd7f08884b434a6ef3842d",
+        "recipeHash": "sha256:bdfb7d37710373f065c1d512a50ae003e0a7e316d02fe250fb097b22939a02c9",
+        "runSpecRevisionId": "sha256:553f2bbdcdce2305effa1996c61c7504bb938731be1c7f0f45b033cfce9e02ff"
       },
       "safety": {
         "avoidOrGetClinicianGuidance": [
@@ -2606,7 +2606,7 @@
       "schemaVersion": "murph.commons.page.v1",
       "slug": "protocols/dry-sauna/bryan-johnson-blueprint",
       "status": "draft",
-      "summary": "A higher-burden daily sauna routine publicly described by Bryan Johnson, including post-workout timing, heat-protection tactics, and self-reported results best read as personal context rather than expected outcomes.",
+      "summary": "Use a very hot, low-humidity dry sauna after workouts, with careful hydration and symptom checks, to see whether your resting heart rate, HRV, and recovery tolerate this higher-burden routine.",
       "testPlans": [
         {
           "baselineDays": 7,
@@ -2838,8 +2838,8 @@
           "unusually hard training"
         ],
         "steps": [
-          "For the next two weeks, complete three stand-alone Finnish dry-sauna sessions per week.",
-          "Sit for 15–20 minutes per session at about 80–100 °C, using a traditional dry sauna when possible.",
+          "Choose a traditional dry sauna and a time when you can cool down afterward without rushing.",
+          "Sit for 15–20 minutes at about 80–100 °C.",
           "Hydrate normally before and after, then cool down gently before returning to normal activity.",
           "Log the session and any context that could change recovery or sleep."
         ],
@@ -3329,9 +3329,9 @@
         }
       },
       "revision": {
-        "pageRevisionId": "sha256:d7eb8281811830e8246fcc557e3d630812db04874a45c3fd1186330cbe42ea42",
-        "recipeHash": "sha256:d5a697329147feed9aa5e50de7389b390a6f491c15a0862ffb27b55d4892ed6b",
-        "runSpecRevisionId": "sha256:4af908c2d693af1148d2fe53943f0a9e9e156c64cc2f80814ef7b3972dd96ece"
+        "pageRevisionId": "sha256:557f1e857aaf56f24224e56c9bbc5daefbedb69303830f7b8b5d20d50f67ad62",
+        "recipeHash": "sha256:cfad1eb2de5ac764a416c35fda6ff951b32ed2c29551dca37ba81174830858ff",
+        "runSpecRevisionId": "sha256:9936dc455885c9c481e01f5c2652813ee91af79914b91042b91259ef141382ab"
       },
       "safety": {
         "avoidOrGetClinicianGuidance": [
@@ -3379,7 +3379,7 @@
       ],
       "slug": "protocols/dry-sauna/murph-finnish-standard-3x-week",
       "status": "field-testing",
-      "summary": "A simple 21-day heat-exposure experiment: keep a baseline, then try three short Finnish dry-sauna sessions per week and see whether recovery, sleep, and cardiovascular signals move in a way that feels worth repeating.",
+      "summary": "Sit in a traditional dry sauna for short, repeatable sessions to see whether heat exposure helps recovery, sleep, resting heart rate, or morning blood pressure enough to be worth repeating.",
       "testPlans": [
         {
           "baselineDays": 7,
@@ -3788,7 +3788,7 @@
         }
       },
       "revision": {
-        "pageRevisionId": "sha256:38a8f69709ac5a2edb5f87b3d91e6bc59beae04f7a6a7e1b9bd63d37a453bc0c",
+        "pageRevisionId": "sha256:77706faba6605b9b53ee23db044ac7a12fb149dd1eb8f0196b371955afcff390",
         "recipeHash": "sha256:a36ee9d7c6cf5d9c816817cb9366d0a7d815922f2135ecd739884d1afd7a38d1",
         "runSpecRevisionId": "sha256:80e12ca616f3426cfe7a4f2c60696a066a55fdbf5a1fce79c95901d7ba3fff2b"
       },
@@ -3853,7 +3853,7 @@
       ],
       "slug": "protocols/norwegian-4x4/norwegian-4x4",
       "status": "field-testing",
-      "summary": "A structured six-week cardio experiment: two repeatable 4x4 interval sessions per week, guided by heart rate and symptoms, to see whether this dose improves fitness without overwhelming recovery.",
+      "summary": "Do repeatable hard cardio intervals on a bike, rower, treadmill, hill, or safe route to see whether your fitness signal improves without creating too much recovery strain.",
       "testPlans": [
         {
           "baselineDays": 7,
@@ -4097,7 +4097,8 @@
           "mood or symptoms"
         ],
         "steps": [
-          "For 14 intervention nights, put the glasses on 90–120 minutes before intended bedtime.",
+          "Choose high-filtering amber, red, or brown glasses that fit closely enough to limit light leakage.",
+          "Put the glasses on 90–120 minutes before intended bedtime.",
           "Wear them indoors only during the pre-bed window, then remove them before sleep.",
           "Remove the glasses before driving, cycling, cooking with visual hazards, navigating stairs or unfamiliar low-light spaces, or doing color-critical work.",
           "Log wear time, bedtime target, actual bedtime, screens, room light, caffeine or alcohol, stress, and any symptoms."
@@ -4110,7 +4111,7 @@
         ],
         "target": "high-filtering amber, red, or brown evening glasses",
         "tips": [
-          "Use high-filtering amber, red, or brown lenses with good fit; lens color alone is not proof of useful filtering.",
+          "Lens color alone is not proof of useful filtering; product spectral data is better when available.",
           "Keep room lighting, screen brightness, bedtime target, caffeine, alcohol, exercise timing, sleep supplements, and melatonin as stable as practical.",
           "Do not add a new screen curfew, sleep supplement, bedtime, light-therapy device, or major room-light redesign during this test.",
           "Do not wear strong filtering lenses during the day; daytime light is a different signal."
@@ -4276,9 +4277,9 @@
         }
       },
       "revision": {
-        "pageRevisionId": "sha256:19f01d0b0798fac2eafb1ad3bbd6a204fbbd09ec267182e9b9f45a21bee997d6",
-        "recipeHash": "sha256:af244c3decba775ca1340002dc5db878acdaca3aa25e7a73481efbb2d4f92f90",
-        "runSpecRevisionId": "sha256:fa776085de87699cb86180a6999fee4e0413887ec09902e2f649cecefdf64382"
+        "pageRevisionId": "sha256:83028bc953993bb1a148d521223f01246622ad6c214ccc9a1a88345b998c23bd",
+        "recipeHash": "sha256:d00da6997c366d5a8c8d9a2b46fc25395adb257a5ef0c60507873cc2ddb192e6",
+        "runSpecRevisionId": "sha256:7ed5f1fb13d305ec23b75167515715f9616807f17700a75c3400215d8486e5b8"
       },
       "safety": {
         "avoidOrGetClinicianGuidance": [
@@ -4316,7 +4317,7 @@
       "schemaVersion": "murph.commons.page.v1",
       "slug": "protocols/red-light-glasses-before-bed/red-light-glasses-before-bed",
       "status": "draft",
-      "summary": "A low-burden evening experiment: wear high-filtering amber/red/brown glasses before bed for two weeks and see whether the last hour of the night feels calmer and sleep comes more easily.",
+      "summary": "Wear high-filtering amber, red, or brown glasses before bed to reduce evening light exposure and see whether you feel less wired or fall asleep more easily.",
       "testPlans": [
         {
           "baselineDays": 7,

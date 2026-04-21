@@ -4,7 +4,7 @@ entityType: protocol_variant
 key: protocol_variant:dry-sauna/murph-finnish-standard-3x-week
 slug: protocols/dry-sauna/murph-finnish-standard-3x-week
 title: Finnish Dry Sauna
-summary: "A simple 21-day heat-exposure experiment: keep a baseline, then try three short Finnish dry-sauna sessions per week and see whether recovery, sleep, and cardiovascular signals move in a way that feels worth repeating."
+summary: "Sit in a traditional dry sauna for short, repeatable sessions to see whether heat exposure helps recovery, sleep, resting heart rate, or morning blood pressure enough to be worth repeating."
 status: field-testing
 quality: usable
 aliases:
@@ -301,8 +301,8 @@ protocol:
   interventionSessionsMinimum: 4
   interventionSessionsTarget: 6
   steps:
-    - For the next two weeks, complete three stand-alone Finnish dry-sauna sessions per week.
-    - Sit for 15–20 minutes per session at about 80–100 °C, using a traditional dry sauna when possible.
+    - Choose a traditional dry sauna and a time when you can cool down afterward without rushing.
+    - Sit for 15–20 minutes at about 80–100 °C.
     - Hydrate normally before and after, then cool down gently before returning to normal activity.
     - Log the session and any context that could change recovery or sleep.
   tips:

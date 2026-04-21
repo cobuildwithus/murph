@@ -4,7 +4,7 @@ entityType: disambiguation
 key: disambiguation:sauna-protocol
 slug: protocols/sauna-protocol
 title: Sauna Protocol
-summary: A chooser for sauna searches that could mean dry sauna, infrared sauna, a simple Finnish dry-sauna experiment, or a higher-burden routine attributed to Bryan Johnson.
+summary: Pick the sauna option that matches what you can actually do: traditional dry sauna, infrared sauna, a simple Finnish-style routine, or the higher-burden Bryan Johnson version.
 status: draft
 quality: usable
 aliases:
@@ -13,23 +13,23 @@ options:
   -
     key: experiment_family:dry-sauna
     label: Dry Sauna
-    description: Traditional high-temperature dry-sauna protocols, including Finnish dry sauna.
+    description: Use a hot, low-humidity sauna and track whether heat exposure changes recovery, sleep, or cardiovascular signals.
   -
     key: protocol_variant:dry-sauna/murph-finnish-standard-3x-week
     label: Finnish Dry Sauna
-    description: A simple 3-times-a-week Finnish dry-sauna experiment for comparing baseline and intervention weeks.
+    description: Sit in a traditional dry sauna for short, repeatable sessions and watch recovery, sleep, resting heart rate, or morning blood pressure.
   -
     key: experiment_family:infrared-sauna
     label: Infrared Sauna
-    description: A separate sauna family for lower-temperature infrared heat exposure.
+    description: Use lower-temperature infrared heat exposure instead of a traditional high-temperature dry sauna.
   -
     key: protocol_variant:dry-sauna/bryan-johnson-blueprint
     label: Bryan Johnson Sauna
-    description: A higher-burden daily dry-sauna routine attributed to Bryan Johnson, including special cooling tactics and later core-temperature-threshold updates.
+    description: Use a very hot, low-humidity dry sauna after workouts and track whether the added heat load is tolerable.
 relations:
   -
     type: related_protocol
     target: protocol_variant:dry-sauna/murph-finnish-standard-3x-week
 ---
 
-Use this chooser when “sauna protocol” could mean more than one heat-exposure experiment.
+Use this page when "sauna protocol" could mean more than one heat-exposure option.
