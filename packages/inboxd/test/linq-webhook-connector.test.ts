@@ -32,7 +32,7 @@ test("createLinqWebhookConnector fails closed before starting when the webhook s
         host: "127.0.0.1",
         path: "/hooks/linq",
         port: 9911,
-        webhookSecret: null as unknown as string,
+        webhookSecret: "",
       }),
     /Linq webhook secret is required/u,
   );

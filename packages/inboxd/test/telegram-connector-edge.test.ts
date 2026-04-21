@@ -11,6 +11,115 @@ import {
 } from "../src/index.ts";
 import type { TelegramUpdateLike } from "@murphai/messaging-ingress/telegram-webhook";
 
+interface MockTelegramApiClientInput {
+  token?: string;
+  getFile?: (fileId: string) => Promise<{ file_id: string; file_path?: string }>;
+  getMe?: () => Promise<{ id: number; username: string }>;
+  getUpdates?: (
+    input?: Parameters<TelegramApiClient["getUpdates"]>[0],
+  ) => Promise<TelegramUpdateLike[]>;
+}
+
+type TelegramGetFileResult = Awaited<ReturnType<TelegramApiClient["getFile"]>>;
+type TelegramGetMeResult = Awaited<ReturnType<TelegramApiClient["getMe"]>>;
+type TelegramGetUpdatesResult = Awaited<
+  ReturnType<TelegramApiClient["getUpdates"]>
+>;
+type TelegramSender = Record<string, unknown> & { is_bot?: boolean };
+type TelegramSenderMessage = Record<string, unknown> & { from?: TelegramSender };
+
+function createMockTelegramBotUser(input: {
+  id: number;
+  username: string;
+}): TelegramGetMeResult {
+  return {
+    id: input.id,
+    is_bot: true,
+    first_name: "Murph",
+    username: input.username,
+    can_join_groups: true,
+    can_read_all_group_messages: false,
+    supports_inline_queries: false,
+    can_connect_to_business: false,
+    has_main_web_app: false,
+    has_topics_enabled: false,
+    allows_users_to_create_topics: false,
+  };
+}
+
+function createMockTelegramFile(input: {
+  file_id: string;
+  file_path?: string;
+}): TelegramGetFileResult {
+  return {
+    file_id: input.file_id,
+    file_unique_id: `unique-${input.file_id}`,
+    file_path: input.file_path,
+  };
+}
+
+function createMockTelegramUpdate(
+  update: TelegramUpdateLike,
+): TelegramGetUpdatesResult[number] {
+  return {
+    ...update,
+    business_message: withDefaultTelegramSenderFlag(update.business_message),
+    edited_business_message: withDefaultTelegramSenderFlag(update.edited_business_message),
+    edited_message: withDefaultTelegramSenderFlag(update.edited_message),
+    message: withDefaultTelegramSenderFlag(update.message),
+  } as TelegramGetUpdatesResult[number];
+}
+
+function withDefaultTelegramSenderFlag<T>(
+  message: T,
+): T {
+  if (
+    !message ||
+    typeof message !== "object" ||
+    !isTelegramSenderMessage(message) ||
+    !message.from
+  ) {
+    return message;
+  }
+  return {
+    ...message,
+    from: {
+      ...message.from,
+      is_bot: message.from.is_bot ?? false,
+    },
+  } as T;
+}
+
+function isTelegramSenderMessage(value: object): value is TelegramSenderMessage {
+  return !("from" in value) || value.from === undefined || isTelegramSender(value.from);
+}
+
+function isTelegramSender(value: unknown): value is TelegramSender {
+  return typeof value === "object" && value !== null;
+}
+
+function createMockTelegramApiClient({
+  token = "",
+  getFile,
+  getMe,
+  getUpdates,
+}: MockTelegramApiClientInput): TelegramApiClient {
+  const api: Partial<TelegramApiClient> & Pick<TelegramApiClient, "token"> = { token };
+  if (getFile) {
+    api.getFile = async (fileId) =>
+      createMockTelegramFile(await getFile(fileId));
+  }
+  if (getMe) {
+    api.getMe = async () =>
+      createMockTelegramBotUser(await getMe());
+  }
+  if (getUpdates) {
+    api.getUpdates = async (input) =>
+      (await getUpdates(input)).map(createMockTelegramUpdate) as TelegramGetUpdatesResult;
+  }
+  return api as TelegramApiClient;
+}
+
 function assertWatcherHandle(
   watcher: Awaited<ReturnType<TelegramPollDriver["startWatching"]>>,
 ): asserts watcher is { done: Promise<void>; close: () => Promise<void> | void } {
@@ -35,7 +144,7 @@ function readNextCursor(
 
 test("createTelegramApiPollDriver handles absent webhook helpers and missing download tokens", async () => {
   const driver = createTelegramApiPollDriver({
-    api: {
+    api: createMockTelegramApiClient({
       token: "",
       async getMe() {
         return {
@@ -53,7 +162,7 @@ test("createTelegramApiPollDriver handles absent webhook helpers and missing dow
           file_path: "docs/file.txt",
         };
       },
-    } as unknown as TelegramApiClient,
+    }),
   });
 
   await driver.deleteWebhook?.({ dropPendingUpdates: true });
@@ -67,7 +176,7 @@ test("createTelegramApiPollDriver handles absent webhook helpers and missing dow
 test("createTelegramApiPollDriver rewrites webhook conflicts before failing the watch loop", async () => {
   let attempts = 0;
   const driver = createTelegramApiPollDriver({
-    api: {
+    api: createMockTelegramApiClient({
       token: "bot-token",
       async getMe() {
         return {
@@ -82,7 +191,7 @@ test("createTelegramApiPollDriver rewrites webhook conflicts before failing the 
       async getFile() {
         throw new Error("getFile should not be called in this test");
       },
-    } as unknown as TelegramApiClient,
+    }),
   });
 
   const watcher = await driver.startWatching({
@@ -150,7 +259,7 @@ test("createTelegramPollConnector normalizes blank account ids to the default co
 test("createTelegramApiPollDriver sorts message updates, filters non-message updates, and clamps invalid cursors", async () => {
   const requests: Array<Record<string, unknown>> = [];
   const driver = createTelegramApiPollDriver({
-    api: {
+    api: createMockTelegramApiClient({
       token: "bot-token",
       async getMe() {
         return {
@@ -213,7 +322,7 @@ test("createTelegramApiPollDriver sorts message updates, filters non-message upd
       async getFile() {
         throw new Error("getFile should not be called in this test");
       },
-    } as unknown as TelegramApiClient,
+    }),
     batchSize: 0,
     allowedUpdates: null,
   });
@@ -241,7 +350,7 @@ test("createTelegramApiPollDriver closes retry backoff cleanly for non-Error pol
 
   let attempts = 0;
   const driver = createTelegramApiPollDriver({
-    api: {
+    api: createMockTelegramApiClient({
       token: "bot-token",
       async getMe() {
         return {
@@ -256,7 +365,7 @@ test("createTelegramApiPollDriver closes retry backoff cleanly for non-Error pol
       async getFile() {
         throw new Error("getFile should not be called in this test");
       },
-    } as unknown as TelegramApiClient,
+    }),
   });
 
   try {
@@ -284,7 +393,7 @@ test("createTelegramApiPollDriver falls back to the default retry delay when ret
     let attempts = 0;
     const controller = new AbortController();
     const driver = createTelegramApiPollDriver({
-      api: {
+      api: createMockTelegramApiClient({
         token: "bot-token",
         async getMe() {
           return {
@@ -304,7 +413,7 @@ test("createTelegramApiPollDriver falls back to the default retry delay when ret
         async getFile() {
           throw new Error("getFile should not be called in this test");
         },
-      } as unknown as TelegramApiClient,
+      }),
     });
 
     const watcher = await driver.startWatching({
@@ -357,7 +466,7 @@ test("createTelegramApiPollDriver downloads remote files and surfaces HTTP failu
 
   try {
     const driver = createTelegramApiPollDriver({
-      api: {
+      api: createMockTelegramApiClient({
         token: "bot-token",
         async getMe() {
           return {
@@ -374,7 +483,7 @@ test("createTelegramApiPollDriver downloads remote files and surfaces HTTP failu
             file_path: fileId === "bad" ? "docs/bad.txt" : "docs/good.txt",
           };
         },
-      } as unknown as TelegramApiClient,
+      }),
       fileBaseUrl: "https://files.example.test/file/",
     });
 
@@ -409,7 +518,7 @@ test("createTelegramApiPollDriver treats invalid file base URLs as untrusted for
 
   try {
     const driver = createTelegramApiPollDriver({
-      api: {
+      api: createMockTelegramApiClient({
         token: "bot-token",
         async getMe() {
           return {
@@ -427,7 +536,7 @@ test("createTelegramApiPollDriver treats invalid file base URLs as untrusted for
             file_path: "/tmp/telegram/file.txt",
           };
         },
-      } as unknown as TelegramApiClient,
+      }),
       fileBaseUrl: "::not-a-valid-url::",
     });
 

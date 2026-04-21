@@ -8,10 +8,12 @@ import { initializeVault } from "@murphai/core";
 import { createVersionedJsonStateEnvelope } from "@murphai/runtime-state/node";
 import {
   type Cursor,
+  type AttachmentParseJobRecord,
   createParsedInboxPipeline,
   createInboxPipeline,
   type EmitCapture,
   type FailAttachmentParseJobInput,
+  type InboxCaptureRecord,
   openInboxRuntime,
   type PollConnector,
   rebuildRuntimeFromVault,
@@ -1003,7 +1005,8 @@ test("writeParserArtifacts rejects unsafe or malformed artifact IDs before publi
           providerId: "fake-provider",
           artifact: {
             captureId: "cap_publish_type",
-            attachmentId: 123 as unknown as string,
+            // @ts-expect-error Intentional malformed runtime payload for normalization coverage.
+            attachmentId: 123,
             kind: "image",
             fileName: "scan.png",
             mime: "image/png",
@@ -1113,6 +1116,7 @@ test("attachment parse worker fails closed on malformed attachment IDs", async (
 
   const attachment = {
     attachmentId: "../escape",
+    ordinal: 0,
     kind: "image" as const,
     mime: "image/png",
     fileName: "malformed-id.png",
@@ -1122,23 +1126,45 @@ test("attachment parse worker fails closed on malformed attachment IDs", async (
     extractedText: null,
     transcriptText: null,
   };
-  const capture = {
+  const capture: InboxCaptureRecord = {
     captureId: "cap_worker_malformed_id",
+    source: "telegram",
+    accountId: "bot",
+    externalId: "message-worker-malformed-id",
+    thread: {
+      id: "thread_worker_malformed_id",
+      title: null,
+      isDirect: true,
+    },
+    actor: {
+      id: null,
+      displayName: null,
+      isSelf: false,
+    },
+    occurredAt: "2026-03-13T12:00:00.000Z",
+    receivedAt: "2026-03-13T12:00:01.000Z",
+    text: null,
+    raw: {},
+    envelopePath: "raw/inbox/captures/cap_worker_malformed_id/envelope.json",
+    eventId: "evt_worker_malformed_id",
+    createdAt: "2026-03-13T12:00:01.000Z",
     attachments: [attachment],
   };
-  let job = {
+  let job: AttachmentParseJobRecord = {
     jobId: "job_worker_malformed_id",
     captureId: capture.captureId,
     attachmentId: attachment.attachmentId,
+    pipeline: "attachment_text",
     state: "pending" as "failed" | "pending" | "running",
     attempts: 0,
     errorCode: null as string | null,
     errorMessage: null as string | null,
     providerId: null as string | null,
     resultPath: null as string | null,
+    createdAt: "2026-03-13T12:00:01.000Z",
   };
 
-  const runtime = {
+  const runtime: InboxRuntimeStore = {
     databasePath: path.join(vaultRoot, ".runtime", "inboxd.sqlite"),
     close() {},
     getCursor() {
@@ -1190,15 +1216,15 @@ test("attachment parse worker fails closed on malformed attachment IDs", async (
       };
     },
     listCaptures() {
-      return [capture] as unknown[];
+      return [capture];
     },
     searchCaptures() {
       return [];
     },
     getCapture(captureId: string) {
-      return captureId === capture.captureId ? (capture as unknown) : null;
+      return captureId === capture.captureId ? capture : null;
     },
-  } as unknown as InboxRuntimeStore;
+  };
 
   const results = await runAttachmentParseWorker({
     vaultRoot,

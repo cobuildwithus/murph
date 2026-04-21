@@ -291,7 +291,7 @@ test('configureSetupChannels adds a Linq connector and persists auto-reply when 
 
   try {
     const doctorCalls: string[] = []
-    const sourceAddCalls: Array<Record<string, unknown>> = []
+    const sourceAddCalls: InboxSourceAddInput[] = []
     const configured = await configureSetupChannels({
       channels: ['linq'],
       dryRun: false,
@@ -326,7 +326,7 @@ test('configureSetupChannels adds a Linq connector and persists auto-reply when 
           return createEmptyInboxListResult(input)
         },
         async sourceAdd(input: InboxSourceAddInput) {
-          sourceAddCalls.push(input as unknown as Record<string, unknown>)
+          sourceAddCalls.push(input)
           return {
             vault,
             configPath: '.runtime/inboxd/config.json',
@@ -817,7 +817,7 @@ test('configureSetupChannels reuses a discovered AgentMail inbox during onboardi
   const vault = await mkdtemp(path.join(tmpdir(), 'murph-setup-email-discovered-'))
 
   try {
-    const sourceAddCalls: Array<Record<string, unknown>> = []
+    const sourceAddCalls: InboxSourceAddInput[] = []
     const configured = await configureSetupChannels({
       allowPrompt: true,
       channels: ['email'],
@@ -856,7 +856,7 @@ test('configureSetupChannels reuses a discovered AgentMail inbox during onboardi
           return createEmptyInboxListResult(input)
         },
         async sourceAdd(input: InboxSourceAddInput) {
-          sourceAddCalls.push(input as unknown as Record<string, unknown>)
+          sourceAddCalls.push(input)
           return {
             vault,
             configPath: '.runtime/inboxd/config.json',

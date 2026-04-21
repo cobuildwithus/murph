@@ -21,7 +21,7 @@ function createSingleUseResponse(
 
   return {
     async json() {
-      return JSON.parse(consume()) as unknown
+      return JSON.parse(consume())
     },
     async text() {
       return consume()
