@@ -85,6 +85,10 @@ test("ExperimentsPage keeps the public library visible when browser-vault is una
   assert.match(markup, /Library · 4 experiments/);
   assert.match(markup, /Finnish Dry Sauna/);
   assert.match(markup, /Red-Light Glasses Before Bed/);
+  const featuredMarkup = markup.split("Browse all").at(0) ?? markup;
+  assert.match(featuredMarkup, /Finnish Dry Sauna/);
+  assert.match(featuredMarkup, /Norwegian 4x4/);
+  assert.doesNotMatch(featuredMarkup, /Bryan Johnson Sauna/);
   assert.doesNotMatch(markup, /Could not load your experiment data/);
 });
 

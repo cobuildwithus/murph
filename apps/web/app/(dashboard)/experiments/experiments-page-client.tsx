@@ -22,6 +22,11 @@ import type { ExperimentProtocol, ExperimentRunProjection } from "@/src/types/ex
 
 type ExperimentCardStatusVariant = "default" | "secondary" | "outline" | "destructive";
 
+const FEATURED_EXPERIMENT_IDS = ["finnish-sauna", "norwegian-4x4"] as const;
+const FEATURED_EXPERIMENT_EXCLUDED_IDS = new Set<string>([
+  "bryan-johnson-blueprint",
+]);
+
 interface ExperimentsPageClientProps {
   protocols: ExperimentProtocol[];
 }
@@ -139,8 +144,8 @@ function ExperimentsPageContent({ protocols }: ExperimentsPageClientProps) {
             </span>
             <p className="text-xs text-muted-foreground">
               {privateDataCount > 0
-                ? "Experiments with your data are shown first."
-                : "A few protocols from the public experiment library."}
+                ? "Dry sauna and 4x4 stay pinned; your private overlays appear on matching cards."
+                : "Dry sauna and Norwegian 4x4 are pinned from the public experiment library."}
             </p>
           </div>
           <span className="text-xs text-muted-foreground">
@@ -298,10 +303,17 @@ function compareExperimentCards(left: ExperimentLibraryCard, right: ExperimentLi
 }
 
 function selectFeaturedCards(cards: ExperimentLibraryCard[]): ExperimentLibraryCard[] {
-  const privateCards = cards.filter((card) => card.hasPrivateData);
-  const publicCards = cards.filter((card) => !card.hasPrivateData);
+  const cardsById = new Map(cards.map((card) => [card.id, card]));
+  const pinnedCards = FEATURED_EXPERIMENT_IDS.flatMap((id) => {
+    const card = cardsById.get(id);
+    return card ? [card] : [];
+  });
+  const pinnedIds = new Set(pinnedCards.map((card) => card.id));
+  const fallbackCards = cards.filter((card) =>
+    !pinnedIds.has(card.id) && !FEATURED_EXPERIMENT_EXCLUDED_IDS.has(card.id)
+  );
 
-  return [...privateCards, ...publicCards].slice(0, 2);
+  return [...pinnedCards, ...fallbackCards].slice(0, 2);
 }
 
 function listCategories(cards: ExperimentLibraryCard[]): string[] {
