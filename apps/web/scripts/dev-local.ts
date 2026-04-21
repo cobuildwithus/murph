@@ -197,7 +197,7 @@ async function inspectHostedWebDevServerLock(
   let metadata: unknown;
 
   try {
-    metadata = JSON.parse(rawMetadata) as unknown;
+    metadata = JSON.parse(rawMetadata);
   } catch {
     return { state: "stale" };
   }

@@ -11,7 +11,7 @@ export async function readOptionalJsonObject(response: Response): Promise<Record
   }
 
   try {
-    const payload = JSON.parse(text) as unknown;
+    const payload = JSON.parse(text);
     return isRecord(payload) ? payload : null;
   } catch {
     return null;

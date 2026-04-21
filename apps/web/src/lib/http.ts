@@ -90,7 +90,7 @@ export class InvalidRouteParamEncodingError extends TypeError {
 }
 
 export async function readJsonObject(request: Request): Promise<Record<string, unknown>> {
-  return requireJsonObject((await request.json()) as unknown);
+  return requireJsonObject(await request.json());
 }
 
 export async function readOptionalJsonObject(request: Request): Promise<Record<string, unknown>> {
@@ -100,7 +100,7 @@ export async function readOptionalJsonObject(request: Request): Promise<Record<s
     return {};
   }
 
-  return requireJsonObject(JSON.parse(text) as unknown);
+  return requireJsonObject(JSON.parse(text));
 }
 
 export async function readRawBodyBuffer(

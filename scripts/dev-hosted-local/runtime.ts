@@ -56,7 +56,7 @@ export async function assertHostedWebDevServerAvailable(env: NodeJS.ProcessEnv):
   let metadata: unknown;
 
   try {
-    metadata = JSON.parse(rawMetadata) as unknown;
+    metadata = JSON.parse(rawMetadata);
   } catch {
     await rm(lockPaths.lockPath, { force: true, recursive: true });
     return;

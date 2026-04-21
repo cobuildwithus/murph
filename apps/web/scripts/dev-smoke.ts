@@ -268,7 +268,7 @@ async function readHostedWebSmokeLockDescriptor(
   let parsed: unknown;
 
   try {
-    parsed = JSON.parse(rawLock) as unknown;
+    parsed = JSON.parse(rawLock);
   } catch {
     return null;
   }

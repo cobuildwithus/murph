@@ -59,7 +59,7 @@ export function decodeHostedEncryptionKeyring(input: {
     let parsed: unknown;
 
     try {
-      parsed = JSON.parse(input.keyringJson) as unknown;
+      parsed = JSON.parse(input.keyringJson);
     } catch (error) {
       throw new TypeError(
         `${input.label} must be valid JSON: ${error instanceof Error ? error.message : String(error)}`,
