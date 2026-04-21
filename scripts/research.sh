@@ -73,95 +73,10 @@ process.stdout.write(matches[matches.length - 1][0]);
 NODE
 }
 
-export_download_target_count() {
-  node - "$1" <<'NODE'
-const fs = require("node:fs");
+count_downloaded_files() {
+  local search_dir="$1"
 
-const [filePath] = process.argv.slice(2);
-const raw = fs.readFileSync(filePath, "utf8");
-const data = JSON.parse(raw);
-const buttons = Array.isArray(data.attachmentButtons) ? data.attachmentButtons : [];
-
-function normalizeValue(value) {
-  return String(value ?? "").trim();
-}
-
-function deriveHrefLabel(href) {
-  const normalizedHref = normalizeValue(href);
-  if (!normalizedHref) {
-    return "";
-  }
-
-  try {
-    const pathname = new URL(normalizedHref, "https://chatgpt.com").pathname;
-    return decodeURIComponent(pathname.split("/").filter(Boolean).at(-1) ?? "");
-  } catch {
-    return decodeURIComponent(normalizedHref.split("/").filter(Boolean).at(-1) ?? "");
-  }
-}
-
-function hasDownloadableHref(href) {
-  const normalizedHref = normalizeValue(href);
-  if (!normalizedHref) {
-    return false;
-  }
-  if (normalizedHref.startsWith("sandbox:/mnt/data/")) {
-    return true;
-  }
-
-  try {
-    const url = new URL(normalizedHref, "https://chatgpt.com");
-    return url.protocol === "blob:" || url.protocol === "data:";
-  } catch {
-    return false;
-  }
-}
-
-function isDownloadControl(button) {
-  const text = normalizeValue(button?.text);
-  const href = normalizeValue(button?.href);
-  const hrefLabel = deriveHrefLabel(href);
-
-  if (button?.download || hasDownloadableHref(href)) {
-    return true;
-  }
-
-  if (!button?.behaviorButton) {
-    return false;
-  }
-
-  return (
-    /\.(patch|diff|zip|txt|json|md|patched)\b/iu.test(text) ||
-    /\.(patch|diff|zip|txt|json|md|patched)\b/iu.test(href) ||
-    /\.(patch|diff|zip|txt|json|md|patched)\b/iu.test(hrefLabel) ||
-    /\bdownload\b/iu.test(text)
-  );
-}
-
-function scopeItemsToLatestUser(items) {
-  if (!items.some((item) => typeof item?.afterLastUserMessage === "boolean")) {
-    return items;
-  }
-
-  return items.filter((item) => item?.afterLastUserMessage === true);
-}
-
-const latestUserButtons = scopeItemsToLatestUser(buttons);
-const hasAssistantOwnershipMetadata = buttons.some(
-  (button) =>
-    typeof button?.insideAssistantMessage === "boolean" ||
-    typeof button?.insideFinalAssistantMessage === "boolean",
-);
-const assistantOwnedButtons = latestUserButtons.filter((button) => Boolean(button?.insideAssistantMessage));
-const finalAssistantButtons = assistantOwnedButtons.filter((button) => Boolean(button?.insideFinalAssistantMessage));
-const downloadTargets = hasAssistantOwnershipMetadata
-  ? finalAssistantButtons.length > 0
-    ? finalAssistantButtons.filter((button) => Boolean(button?.behaviorButton) || isDownloadControl(button))
-    : assistantOwnedButtons.filter((button) => isDownloadControl(button))
-  : latestUserButtons.filter((button) => isDownloadControl(button));
-
-process.stdout.write(String(downloadTargets.length));
-NODE
+  find "$search_dir" -type f ! -name '.gitkeep' 2>/dev/null | wc -l | tr -d '[:space:]'
 }
 
 topic=""
@@ -287,22 +202,34 @@ write_smoke_prompt() {
   local turn="$1"
   local label="$2"
   local prompt_path="$out_dir/prompts/${turn}-${label}.md"
-  local artifact_name="smoke-${turn}-${label}.md"
-  local artifact_body="smoke ${turn} ok"
+  local artifact_name="smoke-${turn}-${label}.patch"
+  local target_file="smoke-${turn}-${label}.txt"
+  local artifact_body
+  artifact_body="$(cat <<EOF
+diff --git a/${target_file} b/${target_file}
+new file mode 100644
+index 0000000..1111111
+--- /dev/null
++++ b/${target_file}
+@@ -0,0 +1 @@
++smoke ${turn} ok
+EOF
+)"
 
   cat > "$prompt_path" <<EOF
-This is a workflow smoke test.
+This is a workflow smoke test running on ChatGPT Pro at chatgpt.com.
 
 Return immediately.
 
 Required outputs:
-1. Attach exactly one small markdown file named ${artifact_name}
-2. The full contents of that file must be exactly:
+1. Attach exactly one small patch file named ${artifact_name}
+2. The full contents of that file must be exactly this unified diff:
 ${artifact_body}
 3. In the chat response, write exactly:
 attached ${artifact_name}
 4. The file must be a real downloadable assistant attachment or behavior-button artifact.
 5. A plain-text claim that a file is attached does not count.
+6. Do not inline the patch in the chat body instead of attaching it.
 
 Do not browse, search, think aloud, or add anything else.
 EOF
@@ -614,7 +541,7 @@ download_turn_artifacts() {
   local export_output="$out_dir/exports/${turn}.thread.json"
   local export_log="$out_dir/logs/${turn}.thread-export.log"
   local turn_download_dir="$out_dir/downloads/${turn}"
-  local download_target_count="0"
+  local downloaded_file_count="0"
 
   last_download_target_count="0"
 
@@ -630,15 +557,6 @@ download_turn_artifacts() {
   set -e
 
   if [[ "$export_status" -ne 0 ]]; then
-    return 0
-  fi
-
-  download_target_count="$(export_download_target_count "$export_output" 2>/dev/null || printf '0')"
-  last_download_target_count="$download_target_count"
-
-  if [[ "$download_target_count" == "0" ]]; then
-    printf 'No latest-turn assistant download targets found in thread export for pass %s.\n' "$turn" \
-      >"$out_dir/logs/${turn}.download-skip.log"
     return 0
   fi
 
@@ -665,6 +583,14 @@ download_turn_artifacts() {
 
     idx=$((idx + 1))
   done
+
+  downloaded_file_count="$(count_downloaded_files "$turn_download_dir")"
+  last_download_target_count="$downloaded_file_count"
+
+  if [[ "$downloaded_file_count" == "0" ]]; then
+    printf 'No downloadable assistant artifacts were captured for pass %s.\n' "$turn" \
+      >"$out_dir/logs/${turn}.download-skip.log"
+  fi
 }
 
 run_turn() {
