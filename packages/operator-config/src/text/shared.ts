@@ -37,7 +37,7 @@ export function formatStructuredErrorMessage(error: unknown): string {
 function readStructuredErrorDetails(error: unknown): {
   errors: string[]
 } {
-  const detailRecords = [] as Array<Record<string, unknown>>
+  const detailRecords: Array<Record<string, unknown>> = []
 
   if (error && typeof error === 'object') {
     if ('details' in error && isPlainRecord(error.details)) {

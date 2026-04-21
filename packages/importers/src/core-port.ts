@@ -154,7 +154,7 @@ export function assertCanonicalWritePort<T extends CanonicalWriteMethod>(
   }
 
   const candidatePort = port as PortLike;
-  const resolvedPort = {} as Partial<CanonicalWritePort>;
+  const resolvedPort: Partial<CanonicalWritePort> = {};
 
   for (const method of requiredMethods) {
     const handler = candidatePort[method];

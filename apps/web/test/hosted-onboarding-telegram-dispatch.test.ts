@@ -107,7 +107,26 @@ vi.mock("@/src/lib/hosted-ingress/control", () => ({
   nudgeHostedRunUserBestEffort: mocks.nudgeHostedRunUserBestEffort,
 }));
 
-import { handleHostedOnboardingTelegramWebhook } from "@/src/lib/hosted-onboarding/webhook-service";
+import { handleHostedOnboardingTelegramWebhook as handleHostedOnboardingTelegramWebhookImpl } from "@/src/lib/hosted-onboarding/webhook-service";
+
+type HostedOnboardingTelegramWebhookInput = Parameters<typeof handleHostedOnboardingTelegramWebhookImpl>[0];
+type TelegramWebhookPrismaHarness = {
+  $queryRaw: () => Promise<unknown>;
+  $transaction: (callback: (tx: TelegramWebhookPrismaHarness) => Promise<unknown>) => Promise<unknown>;
+  hostedMemberRouting?: {
+    findFirst?: ReturnType<typeof vi.fn>;
+    findUnique?: ReturnType<typeof vi.fn>;
+  };
+  hostedWebhookReceipt?: {
+    create?: ReturnType<typeof vi.fn>;
+    findUnique?: ReturnType<typeof vi.fn>;
+    updateMany?: ReturnType<typeof vi.fn>;
+  };
+  hostedWebhookReceiptSideEffect?: {
+    deleteMany?: ReturnType<typeof vi.fn>;
+    upsert?: ReturnType<typeof vi.fn>;
+  };
+};
 
 describe("handleHostedOnboardingTelegramWebhook", () => {
   beforeEach(() => {
@@ -151,7 +170,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
           },
         }),
       },
-    }) as unknown as Parameters<typeof handleHostedOnboardingTelegramWebhook>[0]["prisma"];
+    });
 
     const response = await handleHostedOnboardingTelegramWebhook({
       prisma,
@@ -227,7 +246,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
           },
         }),
       },
-    }) as unknown as Parameters<typeof handleHostedOnboardingTelegramWebhook>[0]["prisma"];
+    });
     const deferred: Array<() => Promise<void>> = [];
 
     await expect(handleHostedOnboardingTelegramWebhook({
@@ -295,7 +314,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
           },
         }),
       },
-    }) as unknown as Parameters<typeof handleHostedOnboardingTelegramWebhook>[0]["prisma"];
+    });
     const deferred: Array<() => Promise<void>> = [];
 
     await expect(handleHostedOnboardingTelegramWebhook({
@@ -368,7 +387,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       hostedMemberRouting: {
         findUnique: hostedMemberRoutingFindUnique,
       },
-    }) as unknown as Parameters<typeof handleHostedOnboardingTelegramWebhook>[0]["prisma"];
+    });
 
     const response = await handleHostedOnboardingTelegramWebhook({
       prisma,
@@ -408,7 +427,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       hostedMemberRouting: {
         findUnique: hostedMemberRoutingFindUnique,
       },
-    }) as unknown as Parameters<typeof handleHostedOnboardingTelegramWebhook>[0]["prisma"];
+    });
 
     await expect(
       handleHostedOnboardingTelegramWebhook({
@@ -469,7 +488,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
           },
         }),
       },
-    }) as unknown as Parameters<typeof handleHostedOnboardingTelegramWebhook>[0]["prisma"];
+    });
 
     const response = await handleHostedOnboardingTelegramWebhook({
       prisma,
@@ -525,7 +544,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       hostedMemberRouting: {
         findUnique: hostedMemberRoutingFindUnique,
       },
-    }) as unknown as Parameters<typeof handleHostedOnboardingTelegramWebhook>[0]["prisma"];
+    });
 
     const response = await handleHostedOnboardingTelegramWebhook({
       prisma,
@@ -586,7 +605,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       hostedMemberRouting: {
         findUnique: hostedMemberRoutingFindUnique,
       },
-    }) as unknown as Parameters<typeof handleHostedOnboardingTelegramWebhook>[0]["prisma"];
+    });
 
     const response = await handleHostedOnboardingTelegramWebhook({
       prisma,
@@ -647,7 +666,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
           },
         }),
       },
-    }) as unknown as Parameters<typeof handleHostedOnboardingTelegramWebhook>[0]["prisma"];
+    });
 
     const response = await handleHostedOnboardingTelegramWebhook({
       prisma,
@@ -728,7 +747,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       hostedMemberRouting: {
         findUnique: hostedMemberRoutingFindUnique,
       },
-    }) as unknown as Parameters<typeof handleHostedOnboardingTelegramWebhook>[0]["prisma"];
+    });
 
     const cases = [
       {
@@ -882,7 +901,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       hostedMemberRouting: {
         findUnique: hostedMemberRoutingFindUnique,
       },
-    }) as unknown as Parameters<typeof handleHostedOnboardingTelegramWebhook>[0]["prisma"];
+    });
 
     await expect(
       handleHostedOnboardingTelegramWebhook({
@@ -922,7 +941,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       hostedMemberRouting: {
         findUnique: hostedMemberRoutingFindUnique,
       },
-    }) as unknown as Parameters<typeof handleHostedOnboardingTelegramWebhook>[0]["prisma"];
+    });
 
     await expect(
       handleHostedOnboardingTelegramWebhook({
@@ -957,21 +976,14 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
   });
 });
 
-function withPrismaTransaction<T extends Record<string, unknown>>(prisma: T): T {
-  const prismaWithTransaction = prisma as T & {
-    $queryRaw: () => Promise<unknown>;
-    $transaction: (callback: (tx: T) => Promise<unknown>) => Promise<unknown>;
-    hostedMemberRouting?: {
-      findFirst?: ReturnType<typeof vi.fn>;
-      findUnique?: ReturnType<typeof vi.fn>;
-    };
-    hostedWebhookReceiptSideEffect?: {
-      deleteMany?: ReturnType<typeof vi.fn>;
-      upsert?: ReturnType<typeof vi.fn>;
-    };
-  };
+function withPrismaTransaction<T extends Record<string, unknown>>(
+  prisma: T,
+): T & TelegramWebhookPrismaHarness {
+  const prismaWithTransaction = prisma as T & TelegramWebhookPrismaHarness;
   prismaWithTransaction.$queryRaw = async () => [];
-  prismaWithTransaction.$transaction = async (callback) => callback(prismaWithTransaction);
+  prismaWithTransaction.$transaction = async (
+    callback: (tx: TelegramWebhookPrismaHarness) => Promise<unknown>,
+  ) => callback(prismaWithTransaction);
   if (
     prismaWithTransaction.hostedMemberRouting?.findFirst === undefined &&
     prismaWithTransaction.hostedMemberRouting?.findUnique
@@ -986,6 +998,16 @@ function withPrismaTransaction<T extends Record<string, unknown>>(prisma: T): T 
     };
   }
   return prismaWithTransaction;
+}
+
+type HostedOnboardingTelegramWebhookTestInput = Omit<HostedOnboardingTelegramWebhookInput, "prisma"> & {
+  prisma?: TelegramWebhookPrismaHarness;
+};
+
+async function handleHostedOnboardingTelegramWebhook(
+  input: HostedOnboardingTelegramWebhookTestInput,
+) {
+  return handleHostedOnboardingTelegramWebhookImpl(input as HostedOnboardingTelegramWebhookInput);
 }
 
 function readHostedWebhookSideEffectUpsertCalls(prisma: object | null | undefined): Record<string, unknown>[] {

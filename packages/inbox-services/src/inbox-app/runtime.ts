@@ -404,7 +404,7 @@ export function createInboxRuntimeOps(
       const configured = await parsers.createConfiguredParserRegistry({
         vaultRoot: paths.absoluteVaultRoot,
       })
-      const instrumentedConnectors = [] as PollConnector[]
+      const instrumentedConnectors: PollConnector[] = []
       const linqWebhookSecret = resolveLinqWebhookSecret(env.getEnvironment())
 
       for (const connector of activeConnectorConfigs) {
