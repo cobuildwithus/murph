@@ -22,11 +22,14 @@ import {
   isHostedAccessBlockedBillingStatus,
 } from "./entitlement";
 import {
-  type HostedMemberBillingSnapshot,
+  composeHostedMemberSnapshot,
   type HostedMemberSnapshot,
-  readHostedMemberSnapshot,
+  readHostedMemberCoreState,
+  readHostedMemberEmailAuthorization,
   updateHostedMemberCoreState,
 } from "./hosted-member-store";
+import { readHostedMemberIdentity } from "./hosted-member-identity-store";
+import { readHostedMemberRoutingState } from "./hosted-member-routing-store";
 import { resolveHostedMemberActivationLinqRoute } from "./linq-home-routing";
 import {
   resolveHostedMemberAssistantNotificationRoute,
@@ -50,8 +53,7 @@ export type HostedMemberActivationResult = {
 };
 
 export async function activateHostedMemberFromConfirmedRevnetIssuanceTx(input: {
-  emailLinked?: boolean;
-  member: HostedMemberSnapshot;
+  memberId: string;
   occurredAt: string;
   prisma: Prisma.TransactionClient;
   sourceEventId: string;
@@ -65,31 +67,33 @@ export async function activateHostedMemberFromConfirmedRevnetIssuanceTx(input: {
   );
 
   try {
-    const activated = await tryActivateHostedMemberIfStillAllowedTx({
-      member: input.member,
+    const currentMember = await readActivationReadyHostedMemberTx({
+      memberId: input.memberId,
       prisma: input.prisma,
       revnetIssuanceStatus: HostedRevnetIssuanceStatus.confirmed,
       revnetRequired: true,
     });
 
-    if (!activated) {
+    if (!currentMember) {
       finishHostedOnboardingTiming(timing, "completed", {
         activated: false,
       });
-      return {
-        activated: false,
-        hostedExecutionEventId: null,
-        memberId: input.member.core.id,
-      };
+      return buildHostedInactiveMemberActivationResult(input.memberId);
     }
 
+    await updateHostedMemberCoreState({
+      billingStatus: HostedBillingStatus.active,
+      memberId: currentMember.core.id,
+      prisma: input.prisma,
+    });
+
     const linqRoute = await resolveHostedMemberActivationWelcomeLinqRoute({
-      member: input.member,
+      member: currentMember,
       prisma: input.prisma,
     });
     const activationWake = buildHostedMemberActivationWakeForMember({
-      emailLinked: input.emailLinked ?? false,
-      member: input.member,
+      emailLinked: resolveHostedMemberActivationEmailLinked(currentMember),
+      member: currentMember,
       occurredAt: input.occurredAt,
       sourceEventId: input.sourceEventId,
       sourceType: input.sourceType,
@@ -113,7 +117,7 @@ export async function activateHostedMemberFromConfirmedRevnetIssuanceTx(input: {
     return {
       activated: true,
       hostedExecutionEventId: appendedWake.eventId,
-      memberId: input.member.core.id,
+      memberId: currentMember.core.id,
     };
   } catch (error) {
     finishHostedOnboardingTiming(timing, "failed", {
@@ -126,7 +130,7 @@ export async function activateHostedMemberFromConfirmedRevnetIssuanceTx(input: {
 export async function activateHostedMemberForPositiveSourceTx(input: {
   dispatchContext: HostedStripeDispatchContext;
   emailLinked?: boolean;
-  member: Pick<HostedMemberBillingSnapshot, "core">;
+  memberId: string;
   prisma: Prisma.TransactionClient;
   skipIfBillingAlreadyActive?: boolean;
 }): Promise<HostedMemberActivationResult> {
@@ -157,19 +161,17 @@ export async function activateHostedMemberForPositiveSourceTx(input: {
 async function activateHostedMemberForPositiveSourceTxInner(input: {
   dispatchContext: HostedStripeDispatchContext;
   emailLinked?: boolean;
-  member: Pick<HostedMemberBillingSnapshot, "core">;
+  memberId: string;
   prisma: Prisma.TransactionClient;
   skipIfBillingAlreadyActive?: boolean;
 }): Promise<HostedMemberActivationResult> {
-  await lockHostedMemberRow(input.prisma, input.member.core.id);
-
-  const currentMember = await readHostedMemberSnapshot({
-    memberId: input.member.core.id,
+  const currentMember = await readActivationReadyHostedMemberTx({
+    memberId: input.memberId,
     prisma: input.prisma,
   });
 
-  if (!currentMember || isHostedAccessBlockedBillingStatus(currentMember.core.billingStatus)) {
-    return buildHostedInactiveMemberActivationResult(input.member.core.id);
+  if (!currentMember) {
+    return buildHostedInactiveMemberActivationResult(input.memberId);
   }
 
   const activationEventId = buildHostedMemberActivationEventId({
@@ -196,15 +198,6 @@ async function activateHostedMemberForPositiveSourceTxInner(input: {
     }
   }
 
-  const entitlement = deriveHostedEntitlement({
-    billingStatus: HostedBillingStatus.active,
-    suspendedAt: currentMember.core.suspendedAt,
-  });
-
-  if (!entitlement.activationReady) {
-    return buildHostedInactiveMemberActivationResult(currentMember.core.id);
-  }
-
   if (currentMember.core.billingStatus !== HostedBillingStatus.active) {
     await updateHostedMemberCoreState({
       billingStatus: HostedBillingStatus.active,
@@ -218,7 +211,7 @@ async function activateHostedMemberForPositiveSourceTxInner(input: {
     prisma: input.prisma,
   });
   const activationWake = buildHostedMemberActivationWakeForMember({
-    emailLinked: input.emailLinked ?? false,
+    emailLinked: input.emailLinked ?? resolveHostedMemberActivationEmailLinked(currentMember),
     member: currentMember,
     occurredAt: input.dispatchContext.occurredAt,
     sourceEventId: input.dispatchContext.sourceEventId,
@@ -283,21 +276,21 @@ async function resolveHostedMemberActivationWelcomeLinqRoute(input: {
   return resolveHostedMemberActivationLinqRoute(input);
 }
 
-async function tryActivateHostedMemberIfStillAllowedTx(input: {
-  member: HostedMemberSnapshot;
+async function readActivationReadyHostedMemberTx(input: {
+  memberId: string;
   prisma: Prisma.TransactionClient;
   revnetIssuanceStatus?: HostedRevnetIssuanceStatus | null;
   revnetRequired?: boolean;
-}): Promise<boolean> {
-  await lockHostedMemberRow(input.prisma, input.member.core.id);
+}): Promise<HostedMemberSnapshot | null> {
+  await lockHostedMemberRow(input.prisma, input.memberId);
 
-  const currentMember = await readHostedMemberSnapshot({
-    memberId: input.member.core.id,
+  const currentMember = await readHostedMemberActivationSnapshotTx({
+    memberId: input.memberId,
     prisma: input.prisma,
   });
 
   if (!currentMember || isHostedAccessBlockedBillingStatus(currentMember.core.billingStatus)) {
-    return false;
+    return null;
   }
 
   const entitlement = deriveHostedEntitlement({
@@ -307,17 +300,47 @@ async function tryActivateHostedMemberIfStillAllowedTx(input: {
     suspendedAt: currentMember.core.suspendedAt,
   });
 
-  if (!entitlement.activationReady) {
-    return false;
-  }
+  return entitlement.activationReady ? currentMember : null;
+}
 
-  await updateHostedMemberCoreState({
-    billingStatus: HostedBillingStatus.active,
-    memberId: currentMember.core.id,
+async function readHostedMemberActivationSnapshotTx(input: {
+  memberId: string;
+  prisma: Prisma.TransactionClient;
+}): Promise<HostedMemberSnapshot | null> {
+  const core = await readHostedMemberCoreState({
+    memberId: input.memberId,
     prisma: input.prisma,
   });
 
-  return true;
+  if (!core) {
+    return null;
+  }
+
+  const identity = await readHostedMemberIdentity({
+    memberId: core.id,
+    prisma: input.prisma,
+  });
+  const routing = await readHostedMemberRoutingState({
+    memberId: core.id,
+    prisma: input.prisma,
+  });
+  const emailAuthorization = await readHostedMemberEmailAuthorization({
+    memberId: core.id,
+    prisma: input.prisma,
+  });
+
+  return composeHostedMemberSnapshot(core, {
+    billingRef: null,
+    emailAuthorization,
+    identity,
+    routing,
+  });
+}
+
+function resolveHostedMemberActivationEmailLinked(
+  member: Pick<HostedMemberSnapshot, "emailAuthorization">,
+): boolean {
+  return Boolean(member.emailAuthorization?.verifiedEmail);
 }
 
 function buildHostedInactiveMemberActivationResult(

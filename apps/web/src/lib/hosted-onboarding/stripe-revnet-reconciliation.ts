@@ -7,8 +7,6 @@ import {
   activateHostedMemberFromConfirmedRevnetIssuanceTx,
 } from "./member-activation";
 import { nudgeHostedRunBestEffort } from "../hosted-ingress/control";
-import { resolveHostedMemberEmailLinked } from "./member-channel-sync";
-import { readHostedMemberSnapshot } from "./hosted-member-store";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "./shared";
 import {
   isHostedOnboardingRevnetEnabled,
@@ -80,20 +78,8 @@ export async function reconcileSubmittedHostedRevnetIssuances(input: {
         },
       });
 
-      const member = await readHostedMemberSnapshot({
-        memberId: issuance.memberId,
-        prisma: transaction,
-      });
-
-      if (!member) {
-        return;
-      }
-
       const activation = await activateHostedMemberFromConfirmedRevnetIssuanceTx({
-        emailLinked: await resolveHostedMemberEmailLinked({
-          memberId: issuance.memberId,
-        }),
-        member,
+        memberId: issuance.memberId,
         occurredAt: new Date().toISOString(),
         prisma: transaction,
         sourceEventId: issuance.id,

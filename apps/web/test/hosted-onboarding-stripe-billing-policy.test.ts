@@ -1,13 +1,12 @@
 import { HostedBillingStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { HostedMemberSnapshot } from "@/src/lib/hosted-onboarding/hosted-member-store";
+import type { HostedMemberBillingSnapshot } from "@/src/lib/hosted-onboarding/hosted-member-store";
 
 const mocks = vi.hoisted(() => ({
   lockHostedMemberRow: vi.fn(),
   readHostedMemberBillingSnapshot: vi.fn(),
   readHostedMemberCoreState: vi.fn(),
-  retrieveStripeSubscription: vi.fn(),
   updateHostedMemberCoreState: vi.fn(),
   writeHostedMemberStripeBillingRef: vi.fn(),
 }));
@@ -29,14 +28,6 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", async () => {
   };
 });
 
-vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
-  requireHostedStripeApi: () => ({
-    subscriptions: {
-      retrieve: mocks.retrieveStripeSubscription,
-    },
-  }),
-}));
-
 vi.mock("@/src/lib/hosted-onboarding/shared", async () => {
   const actual = await vi.importActual<
     typeof import("@/src/lib/hosted-onboarding/shared")
@@ -57,13 +48,11 @@ describe("hosted onboarding stripe billing policy", () => {
   beforeEach(() => {
     vi.clearAllMocks();
 
+    const member = makeMemberSnapshot();
     mocks.lockHostedMemberRow.mockResolvedValue(undefined);
-    mocks.readHostedMemberBillingSnapshot.mockResolvedValue(makeMemberSnapshot());
-    mocks.readHostedMemberCoreState.mockResolvedValue(makeMemberSnapshot().core);
-    mocks.retrieveStripeSubscription.mockResolvedValue({
-      status: "active",
-    });
-    mocks.updateHostedMemberCoreState.mockResolvedValue(undefined);
+    mocks.readHostedMemberBillingSnapshot.mockResolvedValue(member);
+    mocks.readHostedMemberCoreState.mockResolvedValue(member.core);
+    mocks.updateHostedMemberCoreState.mockResolvedValue(member.core);
     mocks.writeHostedMemberStripeBillingRef.mockResolvedValue({
       memberId: "member_123",
       stripeCustomerId: "cus_123",
@@ -71,96 +60,85 @@ describe("hosted onboarding stripe billing policy", () => {
     });
   });
 
-  it("reads the canonical Stripe subscription before acquiring the hosted member lock", async () => {
-    const trace: string[] = [];
-    const rootPrisma = {
-      __tag: "root",
-    };
-    const tx = {
-      __tag: "tx",
-    };
-
-    mocks.readHostedMemberBillingSnapshot.mockImplementation(async ({ prisma }) => {
-      trace.push(prisma === tx ? "locked-billing-read" : "pre-lock-read");
-      return makeMemberSnapshot({
-        billingRef: {
-          memberId: "member_123",
-          stripeCustomerId: "cus_123",
-          stripeSubscriptionId: "sub_123",
-        },
-      });
-    });
-    mocks.readHostedMemberCoreState.mockImplementation(async () => {
-      trace.push("locked-core-read");
-      return makeMemberSnapshot().core;
-    });
-    mocks.retrieveStripeSubscription.mockImplementation(async () => {
-      trace.push("stripe-read");
-      return {
-        status: "active",
-      };
-    });
-    mocks.lockHostedMemberRow.mockImplementation(async () => {
-      trace.push("lock-row");
-    });
-    const prepared = await prepareHostedMemberStripeBillingWrite({
-      dispatchContext: {
-        eventCreatedAt: new Date("2026-04-12T00:00:00.000Z"),
-        occurredAt: "2026-04-12T00:00:00.000Z",
-        sourceEventId: "evt_123",
-        sourceType: "stripe.customer.subscription.updated",
+  it("passes through the pre-resolved canonical Stripe status before the transaction write", async () => {
+    const member = makeMemberSnapshot({
+      billingRef: {
+        memberId: "member_123",
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: "sub_123",
       },
-      member: makeMemberSnapshot(),
-      prisma: rootPrisma as never,
-      stripeSubscriptionId: "sub_123",
     });
 
     await expect(
-      updateHostedMemberStripeBillingIfFreshTx({
-        billingStatus: HostedBillingStatus.past_due,
-        canonicalBillingStatus: prepared.canonicalBillingStatus,
+      prepareHostedMemberStripeBillingWrite({
+        canonicalBillingStatus: HostedBillingStatus.active,
         dispatchContext: {
           eventCreatedAt: new Date("2026-04-12T00:00:00.000Z"),
           occurredAt: "2026-04-12T00:00:00.000Z",
           sourceEventId: "evt_123",
           sourceType: "stripe.customer.subscription.updated",
         },
-        member: prepared.member,
-        stripeCustomerId: "cus_123",
-        stripeSubscriptionId: "sub_123",
-        tx: tx as never,
+        member,
       }),
-    ).resolves.toEqual(
-      makeMemberSnapshot({
-        billingRef: {
-          memberId: "member_123",
-          stripeCustomerId: "cus_123",
-          stripeSubscriptionId: "sub_123",
-        },
-      }),
-    );
-
-    expect(trace).toEqual([
-      "stripe-read",
-      "lock-row",
-      "locked-core-read",
-      "locked-billing-read",
-    ]);
+    ).resolves.toEqual({
+      canonicalBillingStatus: HostedBillingStatus.active,
+      member,
+    });
   });
 
-  it("refreshes the member snapshot before canonical lookup when invoice events need the stored subscription id", async () => {
+  it("requires callers to resolve canonical Stripe status before subscription-backed billing writes", async () => {
+    await expect(
+      prepareHostedMemberStripeBillingWrite({
+        dispatchContext: {
+          eventCreatedAt: new Date("2026-04-12T00:00:00.000Z"),
+          occurredAt: "2026-04-12T00:00:00.000Z",
+          sourceEventId: "evt_456",
+          sourceType: "stripe.invoice.payment_failed",
+        },
+        member: makeMemberSnapshot(),
+      }),
+    ).rejects.toThrow(
+      "Canonical Stripe subscription state must be resolved before stripe.invoice.payment_failed billing writes.",
+    );
+  });
+
+  it("updates billing using only transaction-local reads and writes", async () => {
     const trace: string[] = [];
-    const rootPrisma = {
-      __tag: "root",
-    };
     const tx = {
       __tag: "tx",
     };
 
     let currentBillingStatus = HostedBillingStatus.active;
+    mocks.lockHostedMemberRow.mockImplementation(async () => {
+      trace.push("lock-row");
+    });
+    mocks.readHostedMemberCoreState.mockImplementation(async () => {
+      trace.push("locked-core-read");
+      return makeMemberSnapshot({
+        core: {
+          billingStatus: currentBillingStatus,
+        },
+      }).core;
+    });
+    mocks.updateHostedMemberCoreState.mockImplementation(async ({ billingStatus }) => {
+      trace.push(`write-core:${billingStatus}`);
+      currentBillingStatus = billingStatus;
+      return makeMemberSnapshot({
+        core: {
+          billingStatus,
+        },
+      }).core;
+    });
+    mocks.writeHostedMemberStripeBillingRef.mockImplementation(async () => {
+      trace.push("write-billing-ref");
+      return {
+        memberId: "member_123",
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: "sub_456",
+      };
+    });
     mocks.readHostedMemberBillingSnapshot.mockImplementation(async ({ prisma }) => {
-      trace.push(prisma === rootPrisma ? "pre-lock-read" : "locked-billing-read");
-
+      trace.push(prisma === tx ? "locked-billing-read" : "unexpected-pre-lock-read");
       return makeMemberSnapshot({
         billingRef: {
           memberId: "member_123",
@@ -172,54 +150,26 @@ describe("hosted onboarding stripe billing policy", () => {
         },
       });
     });
-    mocks.readHostedMemberCoreState.mockImplementation(async () => {
-      trace.push("locked-core-read");
-      return makeMemberSnapshot({
-        core: {
-          billingStatus: currentBillingStatus,
-        },
-      }).core;
-    });
-    mocks.updateHostedMemberCoreState.mockImplementation(async ({ billingStatus }) => {
-      currentBillingStatus = billingStatus;
-      return makeMemberSnapshot({
-        core: {
-          billingStatus,
-        },
-      }).core;
-    });
-    mocks.retrieveStripeSubscription.mockImplementation(async (subscriptionId: string) => {
-      trace.push(`stripe-read:${subscriptionId}`);
-      return {
-        status: "past_due",
-      };
-    });
-    mocks.lockHostedMemberRow.mockImplementation(async () => {
-      trace.push("lock-row");
-    });
-    const prepared = await prepareHostedMemberStripeBillingWrite({
-      dispatchContext: {
-        eventCreatedAt: new Date("2026-04-12T00:00:00.000Z"),
-        occurredAt: "2026-04-12T00:00:00.000Z",
-        sourceEventId: "evt_456",
-        sourceType: "stripe.invoice.payment_failed",
-      },
-      member: makeMemberSnapshot(),
-      prisma: rootPrisma as never,
-    });
 
     await expect(
       updateHostedMemberStripeBillingIfFreshTx({
         billingStatus: HostedBillingStatus.past_due,
-        canonicalBillingStatus: prepared.canonicalBillingStatus,
+        canonicalBillingStatus: HostedBillingStatus.past_due,
         dispatchContext: {
           eventCreatedAt: new Date("2026-04-12T00:00:00.000Z"),
           occurredAt: "2026-04-12T00:00:00.000Z",
           sourceEventId: "evt_456",
           sourceType: "stripe.invoice.payment_failed",
         },
-        member: prepared.member,
+        member: makeMemberSnapshot({
+          billingRef: {
+            memberId: "member_123",
+            stripeCustomerId: "cus_123",
+            stripeSubscriptionId: "sub_456",
+          },
+        }),
         stripeCustomerId: "cus_123",
+        stripeSubscriptionId: "sub_456",
         tx: tx as never,
       }),
     ).resolves.toEqual(
@@ -236,19 +186,19 @@ describe("hosted onboarding stripe billing policy", () => {
     );
 
     expect(trace).toEqual([
-      "pre-lock-read",
-      "stripe-read:sub_456",
       "lock-row",
       "locked-core-read",
+      "write-core:past_due",
+      "write-billing-ref",
       "locked-billing-read",
     ]);
   });
 });
 
 function makeMemberSnapshot(overrides?: {
-  billingRef?: HostedMemberSnapshot["billingRef"];
-  core?: Partial<HostedMemberSnapshot["core"]>;
-}): HostedMemberSnapshot {
+  billingRef?: HostedMemberBillingSnapshot["billingRef"];
+  core?: Partial<HostedMemberBillingSnapshot["core"]>;
+}): HostedMemberBillingSnapshot {
   const core = overrides?.core ?? {};
 
   return {
@@ -260,7 +210,5 @@ function makeMemberSnapshot(overrides?: {
       suspendedAt: core.suspendedAt ?? null,
       updatedAt: core.updatedAt ?? new Date("2026-04-12T00:00:00.000Z"),
     },
-    identity: null,
-    routing: null,
   };
 }

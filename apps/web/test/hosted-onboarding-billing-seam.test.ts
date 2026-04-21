@@ -7,9 +7,9 @@ import {
   type HostedMemberCoreState,
 } from "@/src/lib/hosted-onboarding/hosted-member-store";
 
-type PositiveSourceMemberInput = Parameters<
+type PositiveSourceMemberIdInput = Parameters<
   typeof import("@/src/lib/hosted-onboarding/member-activation").activateHostedMemberForPositiveSourceTx
->[0]["member"];
+>[0]["memberId"];
 
 type StripeLookupResult = Awaited<
   ReturnType<
@@ -65,9 +65,7 @@ describe("hosted onboarding billing seam", () => {
     >();
   });
 
-  it("lets positive activation depend on the billing view instead of the full snapshot", () => {
-    expectTypeOf<PositiveSourceMemberInput>().toEqualTypeOf<
-      Pick<HostedMemberBillingSnapshot, "core">
-    >();
+  it("lets positive activation depend on the member id instead of a billing snapshot", () => {
+    expectTypeOf<PositiveSourceMemberIdInput>().toEqualTypeOf<string>();
   });
 });
