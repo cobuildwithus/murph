@@ -1,15 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import type { AssistantDiagnosticsPolicy } from '../src/assistant/issue-reporting.js'
 import { buildAssistantSystemPrompt } from '../src/assistant/system-prompt.js'
-
-const TEST_DIAGNOSTICS_POLICY: AssistantDiagnosticsPolicy = {
-  devNotesVisibleToUser: false,
-  environment: 'local',
-  issueReportingMode: 'hosted-private',
-  privateIssueCaptureEnabled: true,
-  surface: null,
-}
 
 function buildPrompt(
   assistantCommandAccessMode: 'bound-tools' | 'direct-cli' | 'none',
@@ -31,7 +22,6 @@ function buildPrompt(
     },
     currentLocalDate: '2026-04-10',
     currentTimeZone: 'Australia/Sydney',
-    diagnosticsPolicy: TEST_DIAGNOSTICS_POLICY,
     firstTurnCheckIn: options?.firstTurnCheckIn ?? false,
     modelBehaviorProfile: 'default',
     turnTrigger,
@@ -149,10 +139,10 @@ describe('buildAssistantSystemPrompt', () => {
     )
   })
 
-  it('uses the gradual first-turn onboarding guidance when the first-contact flow is enabled', () => {
+  it('uses the gradual early-session onboarding guidance when the first-contact flow is enabled', () => {
     const prompt = buildPrompt('bound-tools', null, { firstTurnCheckIn: true })
 
-    expect(prompt).toContain('First-turn onboarding guidance:')
+    expect(prompt).toContain('Early-session onboarding guidance:')
     expect(prompt).toContain(`Hey, I'm Murph — your personal health assistant.
 
 Send me things as they happen: meals, workouts, supplements, labs, symptoms, whatever. I'll keep track of it all and help you spot patterns, answer questions, and stay on top of your goals.

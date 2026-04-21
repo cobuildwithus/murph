@@ -795,6 +795,7 @@ describe('assistant turn shared plan', () => {
     })
     expect(turnPlanMocks.resolveAssistantFirstContactStateDocIds).not.toHaveBeenCalled()
     expect(turnPlanMocks.hasAssistantSeenFirstContact).not.toHaveBeenCalled()
+    expect(runtimeStateMocks.listAssistantSessions).not.toHaveBeenCalled()
   })
 
   it('derives first-turn check-in doc ids from the conversation policy audience and session binding fallbacks', async () => {
@@ -825,8 +826,17 @@ describe('assistant turn shared plan', () => {
     turnPlanMocks.resolveAssistantOperatorAuthority.mockReturnValue(
       'accepted-inbound-message',
     )
-    turnPlanMocks.hasAssistantSeenFirstContact.mockResolvedValueOnce(false)
-    turnPlanMocks.hasAssistantSeenFirstContact.mockResolvedValueOnce(true)
+    runtimeStateMocks.listAssistantSessions.mockResolvedValue([
+      createSession({
+        actorId: 'bound-actor',
+        alias: 'turn-plan',
+        channel: 'telegram',
+        identityId: 'bound-identity',
+        sessionId: 'asst_turn_plan_binding',
+        threadId: 'bound-thread',
+        threadIsDirect: true,
+      }),
+    ])
 
     const resolved = {
       created: false,
@@ -853,15 +863,6 @@ describe('assistant turn shared plan', () => {
       },
       resolved,
     )
-    const repeatPlan = await resolveAssistantTurnSharedPlan(
-      {
-        includeFirstTurnCheckIn: true,
-        prompt: 'hello again',
-        vault: '/tmp/turn-plan-vault',
-      },
-      resolved,
-    )
-
     expect(turnPlanMocks.resolveAssistantFirstContactStateDocIds).toHaveBeenNthCalledWith(1, {
       actorId: 'bound-actor',
       channel: 'telegram',
@@ -869,10 +870,10 @@ describe('assistant turn shared plan', () => {
       threadId: 'bound-thread',
       threadIsDirect: true,
     })
-    expect(turnPlanMocks.hasAssistantSeenFirstContact).toHaveBeenNthCalledWith(1, {
-      docIds: ['onboarding/first-contact/doc-1'],
-      vault: '/tmp/turn-plan-vault',
-    })
+    expect(runtimeStateMocks.listAssistantSessions).toHaveBeenCalledWith(
+      '/tmp/turn-plan-vault',
+    )
+    expect(turnPlanMocks.hasAssistantSeenFirstContact).not.toHaveBeenCalled()
     expect(eligiblePlan.firstTurnCheckInEligible).toBe(true)
     expect(eligiblePlan.firstTurnCheckInStateDocIds).toEqual([
       'onboarding/first-contact/doc-1',
@@ -880,10 +881,9 @@ describe('assistant turn shared plan', () => {
     expect(eligiblePlan.operatorAuthority).toBe('accepted-inbound-message')
     expect(eligiblePlan.persistUserPromptOnFailure).toBe(false)
     expect(eligiblePlan.requestedWorkingDirectory).toBe('/tmp/turn-plan-workdir')
-    expect(repeatPlan.firstTurnCheckInEligible).toBe(false)
   })
 
-  it('treats first-turn check-ins as ineligible when no first-contact doc ids can be derived', async () => {
+  it('keeps first-turn check-ins eligible during the first session even when no first-contact doc ids can be derived', async () => {
     turnPlanMocks.resolveAssistantCliAccessContext.mockReturnValue({
       env: {},
       rawCommand: 'vault-cli',
@@ -907,6 +907,28 @@ describe('assistant turn shared plan', () => {
     })
     turnPlanMocks.resolveAssistantFirstContactStateDocIds.mockReturnValue([])
     turnPlanMocks.resolveAssistantOperatorAuthority.mockReturnValue('direct-operator')
+    runtimeStateMocks.listAssistantSessions.mockResolvedValue([
+      parseAssistantSessionRecord({
+        alias: 'local',
+        binding: {
+          actorId: null,
+          channel: null,
+          conversationKey: null,
+          delivery: null,
+          identityId: null,
+          threadId: null,
+          threadIsDirect: null,
+        },
+        createdAt: '2026-04-08T00:00:00.000Z',
+        lastTurnAt: null,
+        resumeState: null,
+        schema: 'murph.assistant-session.v1',
+        sessionId: 'asst_turn_plan_local',
+        target: createTarget(),
+        turnCount: 0,
+        updatedAt: '2026-04-08T00:00:00.000Z',
+      }),
+    ])
 
     const plan = await resolveAssistantTurnSharedPlan(
       {
@@ -948,8 +970,70 @@ describe('assistant turn shared plan', () => {
       threadIsDirect: null,
     })
     expect(turnPlanMocks.hasAssistantSeenFirstContact).not.toHaveBeenCalled()
-    expect(plan.firstTurnCheckInEligible).toBe(false)
+    expect(runtimeStateMocks.listAssistantSessions).toHaveBeenCalledWith(
+      '/tmp/turn-plan-vault',
+    )
+    expect(plan.firstTurnCheckInEligible).toBe(true)
     expect(plan.firstTurnCheckInStateDocIds).toEqual([])
+  })
+
+  it('treats equal createdAt values as ambiguous and keeps onboarding eligible', async () => {
+    turnPlanMocks.resolveAssistantCliAccessContext.mockReturnValue({
+      env: {},
+      rawCommand: 'vault-cli',
+      setupCommand: 'murph',
+    })
+    turnPlanMocks.resolveAssistantConversationPolicy.mockReturnValue({
+      allowSensitiveHealthContext: false,
+      audience: {
+        actorId: 'bound-actor',
+        bindingDelivery: null,
+        channel: 'telegram',
+        deliveryPolicy: 'binding-target-only',
+        effectiveThreadIsDirect: true,
+        explicitTarget: null,
+        identityId: 'bound-identity',
+        replyToMessageId: null,
+        threadId: 'bound-thread',
+        threadIsDirect: true,
+      },
+      operatorAuthority: 'direct-operator',
+    })
+    turnPlanMocks.resolveAssistantFirstContactStateDocIds.mockReturnValue([
+      'onboarding/first-contact/doc-1',
+    ])
+    turnPlanMocks.resolveAssistantOperatorAuthority.mockReturnValue('direct-operator')
+    runtimeStateMocks.listAssistantSessions.mockResolvedValue([
+      createSession({
+        createdAt: '2026-04-08T00:00:00.000Z',
+        sessionId: 'asst_same_timestamp_later',
+      }),
+      createSession({
+        createdAt: '2026-04-08T00:00:00.000Z',
+        sessionId: 'asst_same_timestamp_first',
+      }),
+    ])
+
+    const plan = await resolveAssistantTurnSharedPlan(
+      {
+        includeFirstTurnCheckIn: true,
+        prompt: 'hello',
+        vault: '/tmp/turn-plan-vault',
+      },
+      {
+        created: false,
+        paths: resolveAssistantStatePaths('/tmp/turn-plan-vault'),
+        session: createSession({
+          createdAt: '2026-04-08T00:00:00.000Z',
+          sessionId: 'asst_same_timestamp_first',
+        }),
+      },
+    )
+
+    expect(runtimeStateMocks.listAssistantSessions).toHaveBeenCalledWith(
+      '/tmp/turn-plan-vault',
+    )
+    expect(plan.firstTurnCheckInEligible).toBe(true)
   })
 })
 
