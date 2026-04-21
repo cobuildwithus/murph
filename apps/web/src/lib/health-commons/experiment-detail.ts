@@ -98,11 +98,11 @@ const PROTOCOL_BIOMARKER_DISPLAY_HINT_OVERRIDES: Record<
 > = {
   "protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed": {
     "biomarker:deep-sleep-minutes": {
-      expected: "Can be noisy",
+      expected: "Uncertain maybe",
       protocolProminence: "context",
     },
     "biomarker:hrv-rmssd": {
-      expected: "Can be noisy",
+      expected: "Uncertain maybe",
       protocolProminence: "context",
     },
     "biomarker:resting-heart-rate": {
@@ -219,6 +219,7 @@ function toExperimentDetail(
     durationDays: testPlan?.durationDays ?? protocolSpecDurationDays(protocolSpec),
     baselineDays: testPlan?.baselineDays ?? 0,
     studyCount: citedStudySources.length,
+    researchSummaryLabel: formatResearchSummaryLabel(citedStudySources),
     evidenceLevel: QUALITY_TO_EVIDENCE_LEVEL[protocol.quality ?? ""] ?? 2,
     evidenceLabel: formatEvidenceLabel(protocol),
     description: protocol.summary ?? summarizeBody(protocol.body),
@@ -636,6 +637,8 @@ function researchEvidenceToStudyType(
   switch (evidence?.designKind) {
     case "randomized_controlled_trial":
       return "RCT";
+    case "single_person_report":
+      return "N1";
     case "controlled_trial":
     case "crossover_trial":
     case "single_arm_trial":
@@ -750,6 +753,22 @@ function sourceKindToStudyType(source: HealthCommonsSource | undefined): Study["
   return "SRC";
 }
 
+function formatResearchSummaryLabel(
+  citedSources: readonly HealthCommonsEntity[],
+): string {
+  const primaryParticipantCount = sumPrimaryParticipantCount(citedSources);
+  if (
+    primaryParticipantCount === 1 &&
+    citedSources.some((entity) => entity.researchEvidence?.designKind === "single_person_report")
+  ) {
+    return "n=1 report";
+  }
+
+  return `${citedSources.length.toLocaleString()} ${
+    citedSources.length === 1 ? "study" : "studies"
+  }`;
+}
+
 function formatResearchDesignLabel(
   designKind: HealthCommonsResearchEvidence["designKind"],
 ): string {
@@ -771,8 +790,10 @@ function toResearchStats(
   const codedParticipantStats = codedParticipantCount > 0
     ? [
         {
-          label: "CODED PARTICIPANTS",
-          value: `${codedParticipantCount.toLocaleString()}+`,
+          label: "PEOPLE INCLUDED",
+          value: codedParticipantCount === 1
+            ? "1"
+            : `${codedParticipantCount.toLocaleString()}+`,
         },
       ]
     : [];
@@ -788,11 +809,11 @@ function toResearchStats(
         : `${years[0]}–${years[years.length - 1]}`;
 
   return [
-    { label: "STUDIES", value: citedSources.length },
+    { label: "SOURCES CHECKED", value: citedSources.length },
     ...codedParticipantStats,
-    { label: "REVIEWS", value: reviewCount },
-    { label: "JOURNAL ARTICLES", value: journalArticleCount },
-    { label: "RESEARCH YEARS", value: researchYears },
+    { label: "REVIEW PAPERS", value: reviewCount },
+    { label: "RESEARCH PAPERS", value: journalArticleCount },
+    { label: "YEARS COVERED", value: researchYears },
   ];
 }
 
