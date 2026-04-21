@@ -12,7 +12,6 @@ import { CategoryFilter } from "@/src/components/experiments/category-filter";
 import { ExperimentBrowseCard } from "@/src/components/experiments/experiment-browse-card";
 import { ExperimentHeroCard } from "@/src/components/experiments/experiment-hero-card";
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
-import { Badge } from "@/src/components/ui/badge";
 import { Button } from "@/src/components/ui/button";
 import { Input } from "@/src/components/ui/input";
 import { BrowserVaultProvider, useBrowserVault } from "@/src/lib/browser-vault/context";
@@ -82,9 +81,6 @@ function ExperimentsPageContent({ protocols }: ExperimentsPageClientProps) {
     () => selectFeaturedCards(filteredCards),
     [filteredCards],
   );
-  const activeCount = trackedExperiments.filter((entry) =>
-    isActiveOverviewExperimentStatus(entry.status)
-  ).length;
   const privateDataCount = libraryCards.filter((card) => card.hasPrivateData).length;
   const nonAuthError = status === "error" && !isAuthRequiredBrowserVaultError(error);
 
@@ -99,7 +95,7 @@ function ExperimentsPageContent({ protocols }: ExperimentsPageClientProps) {
             Experiments
           </h1>
           <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            Browse public experiments, with your private run state layered in when Murph has browser-vault data.
+            Browse the public library. When Murph has browser-vault data, your private run state appears on the matching cards.
           </p>
         </div>
         <div className="flex w-full flex-col gap-3 sm:flex-row lg:w-auto lg:items-center">
@@ -109,12 +105,6 @@ function ExperimentsPageContent({ protocols }: ExperimentsPageClientProps) {
             placeholder="Search experiments"
             className="w-full sm:w-64"
           />
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <Badge variant={privateDataCount > 0 ? "default" : "outline"}>
-              {privateDataCount} with data
-            </Badge>
-            <span>{activeCount} active</span>
-          </div>
         </div>
       </div>
 
@@ -148,9 +138,6 @@ function ExperimentsPageContent({ protocols }: ExperimentsPageClientProps) {
                 : "Dry sauna and Norwegian 4x4 are pinned from the public experiment library."}
             </p>
           </div>
-          <span className="text-xs text-muted-foreground">
-            {featuredCards.length} shown
-          </span>
         </div>
         <div className="grid gap-4 md:grid-cols-2">
           {featuredCards.map((card) => (
