@@ -52,7 +52,7 @@
     "task:finish": "bash scripts/finish-task",
     "review:gpt": "bash scripts/review-gpt.sh",
     "review:gpt:full": "bash scripts/review-gpt-cli.sh --config scripts/review-gpt-full.config.sh",
-    "review:gpt:diagnose": "node scripts/review-gpt-diagnostics.mjs",
+    "review:gpt:diagnose": "bash scripts/review-gpt-cli.sh thread diagnose",
     "review:gpt:delay": "bash scripts/review-gpt.sh delay",
     "review:gpt:schedule": "bash scripts/review-gpt.sh delay",
     "review:gpt:data": "bash scripts/review-gpt-data.sh",

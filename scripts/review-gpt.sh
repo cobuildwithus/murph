@@ -165,7 +165,7 @@ set -e
 if [[ "$command_status" -ne 0 && -n "$chat_url" ]]; then
   set +e
   diagnostics_dir="$(
-    node scripts/review-gpt-diagnostics.mjs \
+    bash scripts/review-gpt-cli.sh thread diagnose \
       --chat-url "$chat_url" \
       --command-label review:gpt \
       --exit-code "$command_status" \
