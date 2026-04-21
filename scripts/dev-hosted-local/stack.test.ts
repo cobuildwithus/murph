@@ -42,6 +42,9 @@ const spawnChildProcess = vi.fn<
 >();
 const terminateChildProcessAndWait = vi.fn(async () => {});
 const waitForHealthyHttpEndpoint = vi.fn(async () => {});
+const waitForFirstChildExit = vi.fn<(
+  children: readonly BufferedNamedChildProcess[],
+) => Promise<BufferedNamedChildProcess>>(() => new Promise(() => {}));
 const cleanupHostedRunnerContainers = vi.fn(async () => {});
 const collectDockerDevDiagnostics = vi.fn(async () => "Docker diagnostics:\n- docker version: ok");
 const spawnSync = vi.fn(() => ({
@@ -98,7 +101,7 @@ vi.mock("./runtime.ts", () => ({
   runCommand,
   spawnChildProcess,
   terminateChildProcessAndWait,
-  waitForFirstChildExit: vi.fn(),
+  waitForFirstChildExit,
   waitForHealthyHttpEndpoint,
 }));
 
@@ -331,6 +334,35 @@ describe("hosted local dev stack", () => {
     expect(waitForHealthyHttpEndpoint).toHaveBeenCalledTimes(1);
     expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(1);
     expect(stack.webBaseUrl).toBeNull();
+  });
+
+  it("fails fast and cleans up when a dev child exits before readiness", async () => {
+    const cloudflareChild = createBufferedChild({
+      exitCode: 1,
+      name: "cloudflare",
+      pid: 501,
+    });
+    spawnChildProcess
+      .mockReturnValueOnce(cloudflareChild)
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 502 }));
+    waitForHealthyHttpEndpoint.mockImplementationOnce(() => new Promise(() => {}));
+    waitForFirstChildExit.mockResolvedValueOnce(cloudflareChild);
+
+    const { startHostedLocalDevStack } = await import("./stack.ts");
+
+    const stack = await startHostedLocalDevStack({
+      env: process.env,
+    });
+
+    await expect(stack.ready).rejects.toThrow(
+      "cloudflare dev process exited before the hosted local stack became healthy.",
+    );
+    expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(2);
+    expect(cleanupHostedRunnerContainers).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ignoreErrors: true,
+      }),
+    );
   });
 
   it("skips Vercel link and env pull when the caller already provides a Vercel OIDC token", async () => {

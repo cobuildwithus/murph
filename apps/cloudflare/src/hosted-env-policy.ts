@@ -3,7 +3,7 @@ import {
   HOSTED_ASSISTANT_CONFIG_ENV_NAMES,
   HOSTED_SHARED_FORWARDED_ENV_CATEGORY_KEYS,
   HOSTED_SHARED_MODEL_CREDENTIAL_ENV_NAMES,
-} from "@murphai/assistant-runtime/hosted-assistant-env";
+} from "@murphai/assistant-runtime/hosted-assistant-env-constants";
 import {
   readHostedEmailCapabilities,
 } from "@murphai/hosted-execution/hosted-email";

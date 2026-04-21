@@ -6,7 +6,7 @@ import {
 import {
   HOSTED_SHARED_FORWARDED_ENV_CATEGORY_KEYS,
   HOSTED_SHARED_MODEL_CREDENTIAL_ENV_NAMES,
-} from "../hosted-assistant-env.ts";
+} from "../hosted-assistant-env-constants.ts";
 
 export const HOSTED_RUNTIME_FORWARDED_ENV_CATEGORY_KEYS =
   HOSTED_SHARED_FORWARDED_ENV_CATEGORY_KEYS;

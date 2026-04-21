@@ -1,9 +1,11 @@
-import { importSharePackIntoVault } from "@murphai/core";
-import type { VaultSyncImportMergeResult } from "@murphai/core";
+import type {
+  ImportSharePackIntoVaultResult,
+  VaultSyncImportMergeResult,
+} from "@murphai/core";
 import type { GatewayProjectionSnapshot } from "@murphai/gateway-core";
 import type {
   ConfiguredDeviceSyncRuntimeConfig,
-} from "@murphai/device-syncd/config";
+} from "@murphai/device-syncd/runtime-config";
 import type {
   HostedIngressEnvelope,
   HostedExecutionRunnerRequest,
@@ -138,7 +140,7 @@ export type HostedAssistantRuntimeJobResult =
   | HostedAssistantRuntimePreparedJobResult
   | HostedAssistantRuntimeCompletedJobResult;
 
-export type HostedShareImportResult = Awaited<ReturnType<typeof importSharePackIntoVault>>;
+export type HostedShareImportResult = ImportSharePackIntoVaultResult;
 export type HostedVaultSyncImportResult = VaultSyncImportMergeResult;
 
 export interface HostedIngressEffect {

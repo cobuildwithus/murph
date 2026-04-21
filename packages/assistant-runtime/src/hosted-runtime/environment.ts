@@ -3,7 +3,7 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { cloneConfiguredDeviceSyncRuntimeConfig } from "@murphai/device-syncd/config";
+import { cloneConfiguredDeviceSyncRuntimeConfig } from "@murphai/device-syncd/runtime-config";
 
 import type {
   HostedAssistantRuntimeResolvedConfig,

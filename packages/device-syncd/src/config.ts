@@ -1,7 +1,7 @@
 import {
   assertLoopbackListenerHost,
   assertUnbracketedListenerHost,
-} from "@murphai/runtime-state";
+} from "@murphai/runtime-state/loopback-control-plane";
 
 import {
   DEVICE_SYNC_ALLOWED_RETURN_ORIGINS_ENV_KEYS,

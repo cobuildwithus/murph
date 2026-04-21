@@ -23,6 +23,10 @@
       "types": "./dist/assistant-codex.d.ts",
       "default": "./dist/assistant-codex.js"
     },
+    "./assistant-channel-adapters": {
+      "types": "./dist/assistant-channel-adapters.d.ts",
+      "default": "./dist/assistant-channel-adapters.js"
+    },
     "./assistant-cron": {
       "types": "./dist/assistant-cron.d.ts",
       "default": "./dist/assistant-cron.js"

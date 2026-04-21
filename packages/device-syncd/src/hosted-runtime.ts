@@ -1,4 +1,4 @@
-import { sanitizeStoredDeviceSyncMetadata } from "./shared.ts";
+import { sanitizeStoredDeviceSyncMetadata } from "./metadata.ts";
 
 export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH =
   "/api/internal/device-sync/runtime/snapshot";

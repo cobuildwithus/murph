@@ -4,7 +4,7 @@ import {
   startTelegramTypingIndicator,
   type AssistantChannelActivityHandle,
   type AssistantChannelDependencies,
-} from "@murphai/assistant-engine/assistant-runtime";
+} from "@murphai/assistant-engine/assistant-channel-adapters";
 import {
   emitHostedExecutionStructuredLog,
   isHostedLinqConversationMessageWake,

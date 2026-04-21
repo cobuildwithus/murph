@@ -46,6 +46,10 @@
       "types": "./dist/provider-label.d.ts",
       "default": "./dist/provider-label.js"
     },
+    "./runtime-config": {
+      "types": "./dist/runtime-config.d.ts",
+      "default": "./dist/runtime-config.js"
+    },
     "./hosted-hints": {
       "types": "./dist/hosted-hints.d.ts",
       "default": "./dist/hosted-hints.js"

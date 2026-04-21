@@ -58,6 +58,7 @@ test("package manifest declares the hosted assistant env, hosted runtime contrac
 
   assert.ok(manifest.exports);
   assert.ok("./hosted-assistant-env" in manifest.exports);
+  assert.ok("./hosted-assistant-env-constants" in manifest.exports);
   assert.ok("./hosted-runtime-contracts" in manifest.exports);
   assert.ok("./hosted-email" in manifest.exports);
   assert.ok(Array.isArray(HOSTED_ASSISTANT_CONFIG_ENV_NAMES));

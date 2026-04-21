@@ -86,6 +86,11 @@
       "import": "./dist/hosted-assistant-config.js",
       "default": "./dist/hosted-assistant-config.js"
     },
+    "./hosted-assistant-config-constants": {
+      "types": "./dist/hosted-assistant-config-constants.d.ts",
+      "import": "./dist/hosted-assistant-config-constants.js",
+      "default": "./dist/hosted-assistant-config-constants.js"
+    },
     "./inbox-cli-contracts": {
       "types": "./dist/inbox-cli-contracts.d.ts",
       "import": "./dist/inbox-cli-contracts.js",

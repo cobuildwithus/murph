@@ -143,7 +143,7 @@ vi.mock("@murphai/operator-config/linq-runtime", () => ({
   stopLinqChatTypingIndicator: mocks.stopLinqChatTypingIndicator,
 }));
 
-vi.mock("@murphai/assistant-engine/assistant-runtime", () => ({
+vi.mock("@murphai/assistant-engine/assistant-channel-adapters", () => ({
   getAssistantChannelAdapter: mocks.getAssistantChannelAdapter,
   startLinqTypingIndicator: mocks.startLinqTypingIndicator,
   startTelegramTypingIndicator: mocks.startTelegramTypingIndicator,

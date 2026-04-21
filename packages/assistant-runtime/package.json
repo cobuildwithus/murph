@@ -21,6 +21,11 @@
       "import": "./dist/hosted-assistant-env.js",
       "default": "./dist/hosted-assistant-env.js"
     },
+    "./hosted-assistant-env-constants": {
+      "types": "./dist/hosted-assistant-env-constants.d.ts",
+      "import": "./dist/hosted-assistant-env-constants.js",
+      "default": "./dist/hosted-assistant-env-constants.js"
+    },
     "./hosted-runtime-contracts": {
       "types": "./dist/hosted-runtime-contracts.d.ts",
       "import": "./dist/hosted-runtime-contracts.js",

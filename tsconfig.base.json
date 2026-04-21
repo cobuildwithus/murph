@@ -70,6 +70,9 @@
       "@murphai/runtime-state/node/loopback-control-plane-auth": [
         "packages/runtime-state/src/node/loopback-control-plane-auth.ts"
       ],
+      "@murphai/runtime-state/loopback-control-plane": [
+        "packages/runtime-state/src/loopback-control-plane.ts"
+      ],
       "@murphai/runtime-state/node/runtime-paths": [
         "packages/runtime-state/src/node/runtime-paths.ts"
       ],
@@ -163,6 +166,9 @@
       "@murphai/operator-config": [
         "packages/operator-config/src/index.ts"
       ],
+      "@murphai/operator-config/hosted-assistant-config-constants": [
+        "packages/operator-config/src/hosted-assistant-config-constants.ts"
+      ],
       "@murphai/operator-config/*": [
         "packages/operator-config/src/*"
       ],
@@ -174,6 +180,9 @@
       ],
       "@murphai/assistant-engine/assistant-cli-tools": [
         "packages/assistant-engine/src/assistant-cli-tools.ts"
+      ],
+      "@murphai/assistant-engine/assistant-channel-adapters": [
+        "packages/assistant-engine/src/assistant-channel-adapters.ts"
       ],
       "@murphai/assistant-engine/assistant/*": [
         "packages/assistant-engine/src/assistant/*.ts"
@@ -216,6 +225,9 @@
       ],
       "@murphai/device-syncd/hosted-runtime": [
         "packages/device-syncd/src/hosted-runtime.ts"
+      ],
+      "@murphai/device-syncd/runtime-config": [
+        "packages/device-syncd/src/runtime-config.ts"
       ],
       "@murphai/device-syncd/*": [
         "packages/device-syncd/src/*.ts"

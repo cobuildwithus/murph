@@ -5,7 +5,7 @@ import type {
 import { readHostedRunnerCommitTimeoutMs } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
   readConfiguredDeviceSyncRuntimeConfig,
-} from "@murphai/device-syncd/config";
+} from "@murphai/device-syncd/runtime-config";
 import {
   readHostedEmailCapabilities,
 } from "@murphai/hosted-execution/hosted-email";

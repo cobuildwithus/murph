@@ -1,6 +1,6 @@
 import {
   parseConfiguredDeviceSyncRuntimeConfig,
-} from "@murphai/device-syncd/config";
+} from "@murphai/device-syncd/runtime-config";
 import {
   parseHostedRuntimeDrainRequest,
   parseHostedExecutionRunnerRequest,
