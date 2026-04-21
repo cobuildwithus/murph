@@ -69,6 +69,7 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_WEB_BASE_URL: "https://web.example.test",
       HOSTED_EXECUTION_AUTOMATION_RECIPIENT_KEY_ID: "automation:v2",
       HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "180000",
+      HOSTED_ASSISTANT_ZERO_DATA_RETENTION: "true",
       HOSTED_EMAIL_DEFAULT_SUBJECT: "Murph note",
       HOSTED_EMAIL_DOMAIN: "mail.example.test",
       HOSTED_EMAIL_FROM_ADDRESS: "assistant@mail.example.test",
@@ -176,6 +177,7 @@ describe("hosted deploy automation helpers", () => {
     expect(config.vars.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS).toBe("45000");
     expect(config.vars.HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS).toBe("65000");
     expect(config.vars.HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS).toBe("180000");
+    expect(config.vars.HOSTED_ASSISTANT_ZERO_DATA_RETENTION).toBe("true");
     expect(config.vars.HOSTED_EXECUTION_AUTOMATION_RECIPIENT_KEY_ID).toBe("automation:v2");
     expect(config.vars.MURPH_WEB_FETCH_ENABLED).toBe("true");
     expect(config.vars.HOSTED_EMAIL_DEFAULT_SUBJECT).toBe("Murph note");
@@ -270,6 +272,9 @@ describe("hosted deploy automation helpers", () => {
     );
     expect(workflow).toContain(
       "CF_CONTAINER_MAX_INSTANCES: ${{ vars.CF_CONTAINER_MAX_INSTANCES || '1000' }}",
+    );
+    expect(workflow).toContain(
+      "HOSTED_ASSISTANT_ZERO_DATA_RETENTION: ${{ vars.HOSTED_ASSISTANT_ZERO_DATA_RETENTION }}",
     );
     expect(workflow).toContain('echo "- Container max instances: \\`${CF_CONTAINER_MAX_INSTANCES}\\`"');
   });
