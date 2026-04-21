@@ -18,10 +18,10 @@ export function StudyCard({
   last,
 }: StudyCardProps) {
   const badgeLabel = typeof year === "number" ? year.toString() : type;
+  const sampleLabel = participants ? `n=${participants.toLocaleString()}` : null;
   const metadata = [
     authors,
     journal,
-    participants ? `n=${participants.toLocaleString()}` : null,
     duration,
   ].filter(Boolean).join(" · ");
 
@@ -32,10 +32,17 @@ export function StudyCard({
           {badgeLabel}
         </span>
       </div>
-      <div className="flex flex-col gap-0.5">
-        <span className="text-sm/4.5 font-semibold text-foreground">
-          {title}
-        </span>
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <div className="flex items-start justify-between gap-4">
+          <span className="min-w-0 text-sm/4.5 font-semibold text-foreground">
+            {title}
+          </span>
+          {sampleLabel ? (
+            <span className="shrink-0 rounded-md border border-border bg-background px-2 py-1 font-mono text-[10px]/3.5 text-muted-foreground">
+              {sampleLabel}
+            </span>
+          ) : null}
+        </div>
         <span className="text-xs/4 text-chart-5">{metadata}</span>
         <span className="mt-0.5 text-xs/4 text-muted-foreground/70">{finding}</span>
         {url ? (
