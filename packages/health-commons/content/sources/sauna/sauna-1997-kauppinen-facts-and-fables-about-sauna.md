@@ -36,6 +36,7 @@ whyItMatters: "Expands the audited Finnish dry-sauna evidence corpus with a gene
 potentialMurphEndpoints:
   - supporting corpus context
 protocolTakeaway: "Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes."
+murphTakeaway: "This source supports plain-language guardrails and avoids overclaiming."
 studyDesign: "Review / meta"
 modality: "Sauna (unspecified / likely dry)"
 finnishDrySaunaFocus: "Likely"
@@ -43,6 +44,8 @@ murphV1Priority: "Medium"
 ---
 
 This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.
+
+**Findings:** This narrative review separates common sauna claims from better-supported physiology and safety observations. The main finding is that sauna has plausible benefits and real risks, but many popular claims need careful framing.
 
 **Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a general / mixed record marked medium priority for Murph v1 interpretation.
 

@@ -44,6 +44,7 @@ potentialMurphEndpoints:
   - heart-rate recovery
   - symptoms and adherence
 protocolTakeaway: "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol."
+murphTakeaway: "The main finding is that a 4x4 session should be judged by time in zone, not just by completing four intervals."
 studyDesign: "See source metadata and bibliography for exact design."
 modality: Aerobic high-intensity interval training / Norwegian 4x4 context
 norwegian4x4Focus: "Direct support"

@@ -44,6 +44,7 @@ potentialMurphEndpoints:
   - session tolerance
   - illness and respiratory context
 protocolTakeaway: "Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes."
+murphTakeaway: "This source supports symptom screening, BP/RHR context, and conservative dose design."
 studyDesign: "Experimental physiology"
 modality: "Finnish dry sauna"
 finnishDrySaunaFocus: "Yes"
@@ -51,6 +52,8 @@ murphV1Priority: "Medium"
 ---
 
 This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.
+
+**Findings:** This acute Finnish-sauna study measured haemodynamic and hormonal responses in healthy adults. The main finding is that a sauna bath creates measurable cardiovascular and hormonal stress, even in healthy volunteers.
 
 **Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a general / mixed record marked medium priority for Murph v1 interpretation.
 

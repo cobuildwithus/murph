@@ -41,6 +41,7 @@ potentialMurphEndpoints:
   - safety screening
   - session tolerance
 protocolTakeaway: "Use for safety screening and session-context interpretation rather than efficacy claims."
+murphTakeaway: "This source reinforces conservative screening and symptom stop rules."
 studyDesign: "Primary study / unclear"
 modality: "Sauna (unspecified / likely dry)"
 finnishDrySaunaFocus: "Likely"
@@ -49,6 +50,8 @@ sourceUrlCurationNote: Workbook source URL points to a bibliography or review ba
 ---
 
 This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.
+
+**Findings:** This pediatric physiology study examined ECG changes around sauna exposure. The main finding is that acute sauna can interact with cardiac electrical monitoring in children, making safety context important.
 
 **Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a safety / physiology record marked lower priority for Murph v1 interpretation.
 

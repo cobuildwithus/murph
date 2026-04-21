@@ -40,6 +40,7 @@ potentialMurphEndpoints:
   - blood pressure context
   - resting heart rate context
 protocolTakeaway: "Use as cardiovascular context around heat exposure, not as a guaranteed 21-day result-card endpoint."
+murphTakeaway: "This source supports logging alcohol and avoiding alcohol as a confounder during the experiment."
 studyDesign: "Primary study / unclear"
 modality: "Sauna (likely dry)"
 finnishDrySaunaFocus: "Likely"
@@ -48,6 +49,8 @@ sourceUrlCurationNote: Workbook source URL points to a bibliography or review ba
 ---
 
 This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.
+
+**Findings:** This crossover study tested sauna exposure with alcohol in healthy adults. The main finding is that alcohol can change the cardiac, blood-pressure, electrolyte, and cortisol context of sauna bathing.
 
 **Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a cardiovascular record marked medium priority for Murph v1 interpretation.
 

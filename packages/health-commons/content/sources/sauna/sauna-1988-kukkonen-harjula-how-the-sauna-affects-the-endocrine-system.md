@@ -37,6 +37,7 @@ potentialMurphEndpoints:
   - safety screening
   - session tolerance
 protocolTakeaway: "Use for safety screening and session-context interpretation rather than efficacy claims."
+murphTakeaway: "This source is a mechanism and safety source rather than a result-card endpoint."
 studyDesign: "Narrative physiology review"
 modality: "Sauna (unspecified / likely dry)"
 finnishDrySaunaFocus: "Likely"
@@ -44,6 +45,8 @@ murphV1Priority: "Lower"
 ---
 
 This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.
+
+**Findings:** This narrative physiology review summarizes how sauna bathing affects endocrine regulation. The main finding is that heat exposure can activate hormonal stress and recovery pathways, with context-dependent effects.
 
 **Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a safety / physiology record marked lower priority for Murph v1 interpretation.
 

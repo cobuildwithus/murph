@@ -41,6 +41,7 @@ potentialMurphEndpoints:
   - sleep quality
   - macular health
 protocolTakeaway: Use to support conservative claim language, superseded by the 2023 Cochrane review where overlapping.
+murphTakeaway: "Use to support conservative claim language, superseded by the 2023 Cochrane review where overlapping. It should shape lens choice, timing, endpoint selection, or adjacent-variant boundaries without promising a universal sleep benefit."
 studyDesign: Systematic review
 modality: evening short-wavelength or melanopic light reduction
 redLightGlassesFocus: Contextual
@@ -48,6 +49,8 @@ murphV1Priority: Low
 ---
 
 This source is included for **Eye and sleep claim calibration**.
+
+**Findings:** Pre-Cochrane systematic review concluding that high-quality evidence was lacking for broad blue-light spectacle claims. Earlier review reinforces that broad visual, macular-health, and sleep-quality claims need caution.
 
 **Why it matters:** Earlier review reinforces that broad visual, macular-health, and sleep-quality claims need caution.
 

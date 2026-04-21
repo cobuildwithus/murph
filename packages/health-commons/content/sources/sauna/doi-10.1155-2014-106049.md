@@ -32,6 +32,7 @@ potentialMurphEndpoints:
   - heat distress symptoms
   - recovery time
 protocolTakeaway: Track session conditions, symptoms, and cooling context when interpreting high-temperature sauna exposure; duration alone is not a complete dose.
+murphTakeaway: "Track session conditions, symptoms, and cooling context when interpreting high-temperature sauna exposure; duration alone is not a complete dose. It should shape dose, tolerance, endpoint choice, or safety context without promising a short-term wearable benefit."
 studyDesign: Acute mechanistic study
 modality: Dry sauna
 finnishDrySaunaFocus: Yes
@@ -46,6 +47,8 @@ researchEvidence:
 ---
 
 This source is included for **acute and mechanistic** sauna context.
+
+**Findings:** Acute dry-sauna physiology study used to ground core-temperature, heart-rate, and thermal-load interpretation for high-temperature sauna protocols. Gives direct dry-sauna context for interpreting acute thermal strain instead of treating air temperature and minutes as sufficient dose descriptors.
 
 **Why it matters:** It anchors dry-sauna dose interpretation in cardiovascular and thermal response rather than timer settings alone.
 

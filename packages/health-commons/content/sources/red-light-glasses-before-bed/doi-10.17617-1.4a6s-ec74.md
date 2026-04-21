@@ -40,6 +40,7 @@ potentialMurphEndpoints:
   - sleep latency
   - alertness
 protocolTakeaway: Keep the intervention in the evening window and preserve daytime light.
+murphTakeaway: "Keep the intervention in the evening window and preserve daytime light. It should shape lens choice, timing, endpoint selection, or adjacent-variant boundaries without promising a universal sleep benefit."
 studyDesign: Consensus statement
 modality: evening short-wavelength or melanopic light reduction
 redLightGlassesFocus: Yes

@@ -41,6 +41,7 @@ potentialMurphEndpoints:
   - resting heart rate context
   - safety screening
 protocolTakeaway: "Use as cardiovascular context around heat exposure, not as a guaranteed 21-day result-card endpoint."
+murphTakeaway: "This source is secondary cardiometabolic context rather than an MVP wearable endpoint."
 studyDesign: "Experimental physiology"
 modality: "Sauna (likely dry)"
 finnishDrySaunaFocus: "Likely"
@@ -49,6 +50,8 @@ sourceUrlCurationNote: Workbook source URL points to a bibliography or review ba
 ---
 
 This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.
+
+**Findings:** This single-arm study tested repeated sauna bathing in young physically active men and lipid markers. The main finding is that lipid and cardiometabolic markers were explored over repeated sessions, but without a strong control design.
 
 **Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a cardiometabolic record marked medium priority for Murph v1 interpretation.
 

@@ -41,6 +41,7 @@ potentialMurphEndpoints:
   - session tolerance
   - illness and respiratory context
 protocolTakeaway: "Use for safety screening and session-context interpretation rather than efficacy claims."
+murphTakeaway: "This source supports medication cautions rather than any sauna benefit claim."
 studyDesign: "Experimental physiology"
 modality: "Finnish dry sauna"
 finnishDrySaunaFocus: "Yes"
@@ -49,6 +50,8 @@ sourceUrlCurationNote: Workbook source URL points to a bibliography or review ba
 ---
 
 This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.
+
+**Findings:** This pharmacokinetic crossover study tested whether Finnish sauna heat changed midazolam handling. The main finding is a safety-context result: heat exposure can be relevant when interpreting medication metabolism and tolerance.
 
 **Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a safety / physiology record marked medium priority for Murph v1 interpretation.
 

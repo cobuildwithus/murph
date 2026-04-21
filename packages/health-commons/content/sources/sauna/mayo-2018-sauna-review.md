@@ -39,6 +39,7 @@ potentialMurphEndpoints:
   - inflammation
   - mortality context
 protocolTakeaway: Useful overview for rationale and mechanism section.
+murphTakeaway: "This source is rationale and mechanism context, not a substitute for protocol-specific intervention data."
 studyDesign: Review / meta
 modality: Finnish dry sauna
 finnishDrySaunaFocus: Yes
@@ -48,6 +49,8 @@ aliases:
 ---
 
 This source is included for **Evidence backbone**.
+
+**Findings:** This narrative review synthesizes cardiovascular, inflammatory, and mortality evidence for sauna bathing. The main finding is a coherent mechanism-and-outcomes story, especially around cardiovascular stress, vascular function, and long-term associations.
 
 **Why it matters:** Strong narrative synthesis focused on cardiovascular mechanisms and outcomes
 

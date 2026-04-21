@@ -42,6 +42,7 @@ potentialMurphEndpoints:
   - session tolerance
   - illness and respiratory context
 protocolTakeaway: "Use for safety screening and session-context interpretation rather than efficacy claims."
+murphTakeaway: "This source supports caution around stacking sauna with cold exposure rather than treating the combination as a default protocol."
 studyDesign: "Experimental physiology"
 modality: "Sauna (unspecified / likely dry)"
 finnishDrySaunaFocus: "Likely"
@@ -50,6 +51,8 @@ sourceUrlCurationNote: Workbook source URL points to a bibliography or review ba
 ---
 
 This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.
+
+**Findings:** This acute physiology study measured endocrine responses to sauna, shower, and ice-water immersion. The main finding is that heat and cold sequences can activate stress-hormone responses.
 
 **Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a safety / physiology record marked lower priority for Murph v1 interpretation.
 

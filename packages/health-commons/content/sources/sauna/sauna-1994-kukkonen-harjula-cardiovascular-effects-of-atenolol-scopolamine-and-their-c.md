@@ -41,6 +41,7 @@ potentialMurphEndpoints:
   - resting heart rate context
   - safety screening
 protocolTakeaway: "Use directly for safety, cardiovascular-context, or protocol-design guardrails; still avoid promising a short-term wearable outcome from this record alone."
+murphTakeaway: "This source supports medication-aware screening and clinician-guidance cautions."
 studyDesign: "Experimental physiology"
 modality: "Finnish dry sauna"
 finnishDrySaunaFocus: "Yes"
@@ -49,6 +50,8 @@ sourceUrlCurationNote: Workbook source URL points to a bibliography or review ba
 ---
 
 This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.
+
+**Findings:** This crossover study tested Finnish sauna exposure under atenolol, scopolamine, and combined drug conditions. The main finding is that medications can change cardiovascular responses to sauna heat.
 
 **Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a cardiovascular record marked high priority for Murph v1 interpretation.
 

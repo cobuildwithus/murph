@@ -35,6 +35,7 @@ potentialMurphEndpoints:
   - blood pressure context
   - resting heart rate context
 protocolTakeaway: "Use directly for safety, cardiovascular-context, or protocol-design guardrails; still avoid promising a short-term wearable outcome from this record alone."
+murphTakeaway: "This source supports cardiovascular screening and measured, conservative dose advice."
 studyDesign: "Review / meta"
 modality: "Finnish dry sauna"
 finnishDrySaunaFocus: "Yes"
@@ -43,6 +44,8 @@ sourceUrlCurationNote: Workbook source URL points to a bibliography or review ba
 ---
 
 This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.
+
+**Findings:** This review evaluates Finnish sauna use in patients with cardiovascular disease. The main finding is that clinical context determines whether sauna is likely tolerable or risky.
 
 **Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a cardiovascular record marked high priority for Murph v1 interpretation.
 

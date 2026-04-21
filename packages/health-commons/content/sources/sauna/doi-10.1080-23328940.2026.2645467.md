@@ -40,6 +40,7 @@ whyItMatters: Newest mechanistic Finnish-sauna paper
 potentialMurphEndpoints:
   - optional exploratory lab signals
 protocolTakeaway: Good for forward-looking mechanism section.
+murphTakeaway: "This source supports future lab-mechanism notes and not wearable promises."
 studyDesign: Experimental physiology
 modality: Finnish dry sauna
 finnishDrySaunaFocus: Yes
@@ -47,6 +48,8 @@ murphV1Priority: High
 ---
 
 This source is included for **Acute and mechanistic**.
+
+**Findings:** This acute Finnish-sauna study measured immune-cell and cytokine responses after a single heat exposure. The main finding is that immune-cell responses were stronger than cytokine changes, making it a mechanism paper rather than a consumer outcome source.
 
 **Why it matters:** Newest mechanistic Finnish-sauna paper
 
