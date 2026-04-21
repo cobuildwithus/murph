@@ -1,4 +1,5 @@
 import {
+  type HostedBillingStatus,
   HostedStripeEventStatus,
   Prisma,
   type PrismaClient,
@@ -20,7 +21,9 @@ import {
   type HostedStripeDispatchContext,
 } from "./stripe-dispatch";
 import {
+  coerceStripeInvoiceSubscriptionId,
   coerceStripeObjectId,
+  mapStripeSubscriptionStatusToHostedBillingStatus,
 } from "./billing";
 import {
   sanitizeHostedOnboardingPersistedErrorCode,
@@ -234,10 +237,16 @@ async function processHostedStripeEventRecord(
           payload as Stripe.Invoice,
           dispatchContext,
           prisma,
+          processingContext.canonicalBillingStatus,
         ),
       );
     case "invoice.payment_failed":
-      await applyStripeInvoicePaymentFailed(payload as Stripe.Invoice, dispatchContext, prisma);
+      await applyStripeInvoicePaymentFailed(
+        payload as Stripe.Invoice,
+        dispatchContext,
+        prisma,
+        processingContext.canonicalBillingStatus,
+      );
       return buildEmptyHostedStripeEventProcessingResult();
     case "refund.created":
       await applyStripeRefundCreated(
@@ -264,14 +273,18 @@ async function processHostedStripeEventRecord(
 }
 
 type HostedStripeEventProcessingContext = {
+  canonicalBillingStatus: HostedBillingStatus | null;
   customerId: string | null;
 };
 
 async function prepareHostedStripeEventProcessingContext(
   event: Stripe.Event,
 ): Promise<HostedStripeEventProcessingContext> {
+  const canonicalBillingStatus = await resolveHostedStripeEventCanonicalBillingStatus(event);
+
   if (event.type !== "refund.created" && !event.type.startsWith("charge.dispute.")) {
     return {
+      canonicalBillingStatus,
       customerId: null,
     };
   }
@@ -283,8 +296,31 @@ async function prepareHostedStripeEventProcessingContext(
   });
 
   return {
+    canonicalBillingStatus,
     customerId: customerContext.customerId,
   };
+}
+
+async function resolveHostedStripeEventCanonicalBillingStatus(
+  event: Stripe.Event,
+): Promise<HostedBillingStatus | null> {
+  if (event.type.startsWith("customer.subscription.")) {
+    const subscription = event.data.object as Stripe.Subscription;
+    return mapStripeSubscriptionStatusToHostedBillingStatus(subscription.status);
+  }
+
+  if (event.type === "invoice.paid" || event.type === "invoice.payment_failed") {
+    const subscriptionId = coerceStripeInvoiceSubscriptionId(event.data.object as Stripe.Invoice);
+
+    if (!subscriptionId) {
+      return null;
+    }
+
+    const subscription = await requireHostedStripeApi().subscriptions.retrieve(subscriptionId);
+    return mapStripeSubscriptionStatusToHostedBillingStatus(subscription.status);
+  }
+
+  return null;
 }
 
 function readHostedStripeEventObject(value: unknown): Record<string, unknown> {

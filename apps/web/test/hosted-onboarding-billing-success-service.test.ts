@@ -38,7 +38,6 @@ const mocks = vi.hoisted(() => {
       return "outbox";
     }),
     readHostedMemberCoreState: vi.fn(),
-    resolveHostedMemberEmailLinked: vi.fn(),
     requireHostedInviteForAuthentication: vi.fn(),
     requireHostedStripeApi: vi.fn(),
     stripe,
@@ -83,10 +82,6 @@ vi.mock("@/src/lib/hosted-onboarding/member-activation", () => ({
   activateHostedMemberForPositiveSourceTx: mocks.activateHostedMemberForPositiveSourceTx,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/member-channel-sync", () => ({
-  resolveHostedMemberEmailLinked: mocks.resolveHostedMemberEmailLinked,
-}));
-
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   requireHostedStripeApi: mocks.requireHostedStripeApi,
 }));
@@ -116,7 +111,6 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.requireHostedStripeApi.mockReturnValue(mocks.stripe);
-    mocks.resolveHostedMemberEmailLinked.mockResolvedValue(false);
     mocks.requireHostedInviteForAuthentication.mockResolvedValue({
       inviteCode: "invite-code",
       memberId: "member_123",
@@ -170,10 +164,6 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
     expect(mocks.stripe.checkout.sessions.retrieve).toHaveBeenCalledWith("cs_123", {
       expand: ["subscription"],
     });
-    expect(mocks.resolveHostedMemberEmailLinked).toHaveBeenCalledWith({
-      linkedAccounts: undefined,
-      memberId: "member_123",
-    });
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
     expect(prisma.$transaction).toHaveBeenCalledWith(
       expect.any(Function),
@@ -191,22 +181,47 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
       stripeSubscriptionId: "sub_123",
       tx,
     }));
-    expect(mocks.activateHostedMemberForPositiveSourceTx).toHaveBeenCalledWith(expect.objectContaining({
-      emailLinked: false,
-      member: expect.objectContaining({
-        core: expect.objectContaining({
-          billingStatus: HostedBillingStatus.active,
-          id: "member_123",
-        }),
-      }),
+    const activationInput = mocks.activateHostedMemberForPositiveSourceTx.mock.calls[0]?.[0];
+    expect(activationInput).toEqual(expect.objectContaining({
+      memberId: "member_123",
       prisma: tx,
       skipIfBillingAlreadyActive: false,
     }));
+    expect(activationInput).not.toHaveProperty("emailLinked");
     expect(mocks.drainHostedExecutionOutboxBestEffort).toHaveBeenCalledWith({
       eventIds: ["member.activated:stripe.checkout.session.success_redirect:member_123:cs_123"],
       limit: 1,
       prisma,
     });
+  });
+
+  it("passes email-linked activation through when the browser session already has a verified email account", async () => {
+    const tx = {
+      __tag: "tx",
+    };
+    const prisma = {
+      $transaction: vi.fn(async (callback: (innerTx: typeof tx) => Promise<unknown>) => callback(tx)),
+    };
+
+    await expect(reconcileHostedBillingCheckoutSuccess({
+      inviteCode: "invite-code",
+      linkedAccounts: [{
+        address: "user@example.test",
+        type: "email",
+        verifiedAt: 1_714_700_800,
+      }],
+      member: createAuthenticatedMember(),
+      prisma: prisma as never,
+      sessionId: "cs_123",
+    })).resolves.toEqual(createStatus({
+      stage: "activating",
+    }));
+
+    expect(mocks.activateHostedMemberForPositiveSourceTx).toHaveBeenCalledWith(expect.objectContaining({
+      emailLinked: true,
+      memberId: "member_123",
+      prisma: tx,
+    }));
   });
 
   it("only writes the durable billing reference when the checkout session has no subscription object", async () => {

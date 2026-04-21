@@ -7,9 +7,7 @@ const mocks = vi.hoisted(() => ({
   activateHostedMemberFromConfirmedRevnetIssuanceTx: vi.fn(),
   nudgeHostedRunBestEffort: vi.fn(async () => "outbox"),
   isHostedOnboardingRevnetEnabled: vi.fn(),
-  readHostedMemberSnapshot: vi.fn(),
   readHostedRevnetPaymentReceipt: vi.fn(),
-  resolveHostedMemberEmailLinked: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/member-activation", async () => {
@@ -24,17 +22,6 @@ vi.mock("@/src/lib/hosted-onboarding/member-activation", async () => {
   };
 });
 
-vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", async () => {
-  const actual = await vi.importActual<
-    typeof import("@/src/lib/hosted-onboarding/hosted-member-store")
-  >("@/src/lib/hosted-onboarding/hosted-member-store");
-
-  return {
-    ...actual,
-    readHostedMemberSnapshot: mocks.readHostedMemberSnapshot,
-  };
-});
-
 vi.mock("@/src/lib/hosted-onboarding/revnet", async () => {
   const actual = await vi.importActual<
     typeof import("@/src/lib/hosted-onboarding/revnet")
@@ -46,10 +33,6 @@ vi.mock("@/src/lib/hosted-onboarding/revnet", async () => {
     readHostedRevnetPaymentReceipt: mocks.readHostedRevnetPaymentReceipt,
   };
 });
-
-vi.mock("@/src/lib/hosted-onboarding/member-channel-sync", () => ({
-  resolveHostedMemberEmailLinked: mocks.resolveHostedMemberEmailLinked,
-}));
 vi.mock("@/src/lib/hosted-ingress/control", () => ({
   nudgeHostedRunBestEffort: mocks.nudgeHostedRunBestEffort,
 }));
@@ -69,11 +52,9 @@ describe("hosted Stripe RevNet reconciliation", () => {
       memberId: "member_123",
     });
     mocks.isHostedOnboardingRevnetEnabled.mockReturnValue(true);
-    mocks.readHostedMemberSnapshot.mockResolvedValue({ core: { id: "member_123" } });
     mocks.readHostedRevnetPaymentReceipt.mockResolvedValue({
       status: "confirmed",
     });
-    mocks.resolveHostedMemberEmailLinked.mockResolvedValue(false);
   });
 
   it("confirms submitted issuances and activates the matching member", async () => {
@@ -139,16 +120,8 @@ describe("hosted Stripe RevNet reconciliation", () => {
         status: HostedRevnetIssuanceStatus.confirmed,
       }),
     });
-    expect(mocks.readHostedMemberSnapshot).toHaveBeenCalledWith({
-      memberId: "member_123",
-      prisma: transactionClient,
-    });
-    expect(mocks.resolveHostedMemberEmailLinked).toHaveBeenCalledWith({
-      memberId: "member_123",
-    });
     expect(mocks.activateHostedMemberFromConfirmedRevnetIssuanceTx).toHaveBeenCalledWith({
-      emailLinked: false,
-      member: { core: { id: "member_123" } },
+      memberId: "member_123",
       occurredAt: expect.any(String),
       prisma: transactionClient,
       sourceEventId: "iss_confirmed_123",
@@ -197,7 +170,6 @@ describe("hosted Stripe RevNet reconciliation", () => {
       },
     });
     expect(prisma.$transaction).not.toHaveBeenCalled();
-    expect(mocks.readHostedMemberSnapshot).not.toHaveBeenCalled();
     expect(mocks.activateHostedMemberFromConfirmedRevnetIssuanceTx).not.toHaveBeenCalled();
   });
 });

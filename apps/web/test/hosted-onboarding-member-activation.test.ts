@@ -7,7 +7,10 @@ import type { HostedStripeDispatchContext } from "@/src/lib/hosted-onboarding/st
 const mocks = vi.hoisted(() => ({
   findHostedIngressByEventIdTx: vi.fn(),
   lockHostedMemberRow: vi.fn(),
-  readHostedMemberSnapshot: vi.fn(),
+  readHostedMemberCoreState: vi.fn(),
+  readHostedMemberEmailAuthorization: vi.fn(),
+  readHostedMemberIdentity: vi.fn(),
+  readHostedMemberRoutingState: vi.fn(),
   resolveHostedMemberActivationLinqRoute: vi.fn(),
   materializeHostedIngressEnvelopeTx: vi.fn(),
   updateHostedMemberCoreState: vi.fn(),
@@ -25,10 +28,19 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", async () => {
 
   return {
     ...actual,
-    readHostedMemberSnapshot: mocks.readHostedMemberSnapshot,
+    readHostedMemberCoreState: mocks.readHostedMemberCoreState,
+    readHostedMemberEmailAuthorization: mocks.readHostedMemberEmailAuthorization,
     updateHostedMemberCoreState: mocks.updateHostedMemberCoreState,
   };
 });
+
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", () => ({
+  readHostedMemberIdentity: mocks.readHostedMemberIdentity,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
+  readHostedMemberRoutingState: mocks.readHostedMemberRoutingState,
+}));
 
 vi.mock("@/src/lib/hosted-onboarding/linq-home-routing", () => ({
   resolveHostedMemberActivationLinqRoute: mocks.resolveHostedMemberActivationLinqRoute,
@@ -58,7 +70,7 @@ describe("hosted onboarding member activation", () => {
 
     mocks.findHostedIngressByEventIdTx.mockResolvedValue(null);
     mocks.lockHostedMemberRow.mockResolvedValue(undefined);
-    mocks.readHostedMemberSnapshot.mockResolvedValue(makeMemberSnapshot());
+    setActivationMemberSnapshot(makeMemberSnapshot());
     mocks.resolveHostedMemberActivationLinqRoute.mockResolvedValue({
       welcomeRoute: {
         actorId: "+15550100001",
@@ -97,7 +109,7 @@ describe("hosted onboarding member activation", () => {
       activateHostedMemberForPositiveSourceTx({
         dispatchContext,
         emailLinked: true,
-        member,
+        memberId: member.core.id,
         prisma: makeTransactionHarness() as never,
       }),
     ).resolves.toEqual({
@@ -154,7 +166,7 @@ describe("hosted onboarding member activation", () => {
 
     await expect(
       activateHostedMemberFromConfirmedRevnetIssuanceTx({
-        member,
+        memberId: member.core.id,
         occurredAt: "2026-04-12T00:00:00.000Z",
         prisma: makeTransactionHarness() as never,
         sourceEventId: "revnet_evt_123",
@@ -204,7 +216,7 @@ describe("hosted onboarding member activation", () => {
           sourceEventId: "evt_materialize",
           sourceType: "stripe.invoice.paid",
         },
-        member,
+        memberId: member.core.id,
         prisma: makeTransactionHarness() as never,
       }),
     ).resolves.toEqual({
@@ -254,7 +266,7 @@ describe("hosted onboarding member activation", () => {
         telegramUserLookupKey: "telegram_lookup_123",
       },
     });
-    mocks.readHostedMemberSnapshot.mockResolvedValue(member);
+    setActivationMemberSnapshot(member);
 
     await expect(
       activateHostedMemberForPositiveSourceTx({
@@ -264,7 +276,7 @@ describe("hosted onboarding member activation", () => {
           sourceEventId: "evt_telegram",
           sourceType: "stripe.invoice.paid",
         },
-        member,
+        memberId: member.core.id,
         prisma: makeTransactionHarness() as never,
       }),
     ).resolves.toEqual({
@@ -355,7 +367,7 @@ describe("hosted onboarding member activation", () => {
         telegramUserLookupKey: "telegram_lookup_456",
       },
     });
-    mocks.readHostedMemberSnapshot.mockResolvedValue(member);
+    setActivationMemberSnapshot(member);
 
     await activateHostedMemberForPositiveSourceTx({
       dispatchContext: {
@@ -364,7 +376,7 @@ describe("hosted onboarding member activation", () => {
         sourceEventId: "evt_member_channels",
         sourceType: "stripe.invoice.paid",
       },
-      member,
+      memberId: member.core.id,
       prisma: makeTransactionHarness() as never,
     });
 
@@ -397,7 +409,7 @@ describe("hosted onboarding member activation", () => {
         telegramUserLookupKey: "telegram_lookup_456",
       },
     });
-    mocks.readHostedMemberSnapshot.mockResolvedValue(member);
+    setActivationMemberSnapshot(member);
     mocks.materializeHostedIngressEnvelopeTx.mockResolvedValue({
       eventId: "member.activated:stripe.invoice.paid:member_123:evt_member_channels",
     });
@@ -409,7 +421,7 @@ describe("hosted onboarding member activation", () => {
         sourceEventId: "evt_member_channels",
         sourceType: "stripe.invoice.paid",
       },
-      member,
+      memberId: member.core.id,
       prisma: makeTransactionHarness() as never,
     })).resolves.toEqual({
       activated: true,
@@ -437,7 +449,7 @@ describe("hosted onboarding member activation", () => {
         billingStatus: HostedBillingStatus.active,
       },
     });
-    mocks.readHostedMemberSnapshot.mockResolvedValue(member);
+    setActivationMemberSnapshot(member);
     mocks.findHostedIngressByEventIdTx.mockResolvedValue(
       "member.activated:stripe.customer.subscription.updated:member_123:evt_123",
     );
@@ -450,7 +462,7 @@ describe("hosted onboarding member activation", () => {
           sourceEventId: "evt_123",
           sourceType: "stripe.customer.subscription.updated",
         },
-        member,
+        memberId: member.core.id,
         prisma: makeTransactionHarness() as never,
         skipIfBillingAlreadyActive: true,
       }),
@@ -468,6 +480,7 @@ describe("hosted onboarding member activation", () => {
 
 function makeMemberSnapshot(overrides?: {
   core?: Partial<HostedMemberSnapshot["core"]>;
+  emailAuthorization?: HostedMemberSnapshot["emailAuthorization"];
   identity?: Partial<NonNullable<HostedMemberSnapshot["identity"]>>;
   routing?: HostedMemberSnapshot["routing"];
 }): HostedMemberSnapshot {
@@ -483,6 +496,7 @@ function makeMemberSnapshot(overrides?: {
       suspendedAt: core.suspendedAt ?? null,
       updatedAt: core.updatedAt ?? new Date("2026-04-12T00:00:00.000Z"),
     },
+    emailAuthorization: overrides?.emailAuthorization ?? null,
     identity: {
       maskedPhoneNumberHint: "*** 0001",
       memberId: "member_123",
@@ -502,6 +516,13 @@ function makeMemberSnapshot(overrides?: {
     },
     routing: overrides?.routing ?? null,
   };
+}
+
+function setActivationMemberSnapshot(member: HostedMemberSnapshot | null): void {
+  mocks.readHostedMemberCoreState.mockResolvedValue(member?.core ?? null);
+  mocks.readHostedMemberEmailAuthorization.mockResolvedValue(member?.emailAuthorization ?? null);
+  mocks.readHostedMemberIdentity.mockResolvedValue(member?.identity ?? null);
+  mocks.readHostedMemberRoutingState.mockResolvedValue(member?.routing ?? null);
 }
 
 function makeTransactionHarness() {

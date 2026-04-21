@@ -8,13 +8,13 @@ import {
   coerceStripeInvoiceSubscriptionId,
   coerceStripeObjectId,
   coerceStripeSubscriptionId,
+  mapStripeSubscriptionStatusToHostedBillingStatus,
 } from "./billing";
 import { isHostedAccessBlockedBillingStatus } from "./entitlement";
 import { writeHostedMemberStripeBillingRefTx } from "./hosted-member-billing-store";
 import {
   activateHostedMemberForPositiveSourceTx,
 } from "./member-activation";
-import { resolveHostedMemberEmailLinked } from "./member-channel-sync";
 import {
   findMemberForStripeCheckoutSession,
   findMemberForStripeInvoice,
@@ -89,16 +89,18 @@ export async function applyStripeSubscriptionUpdated(
     return;
   }
 
-  const { canonicalBillingStatus, member: preparedMember } = await prepareHostedMemberStripeBillingWrite({
+  const {
+    canonicalBillingStatus: resolvedCanonicalBillingStatus,
+    member: preparedMember,
+  } = await prepareHostedMemberStripeBillingWrite({
+    canonicalBillingStatus: mapStripeSubscriptionStatusToHostedBillingStatus(subscription.status),
     dispatchContext,
     member,
-    prisma,
-    stripeSubscriptionId: subscription.id,
   });
 
   await updateHostedMemberStripeBillingIfFreshTx({
     billingStatus: member.core.billingStatus,
-    canonicalBillingStatus,
+    canonicalBillingStatus: resolvedCanonicalBillingStatus,
     dispatchContext,
     member: preparedMember,
     stripeCustomerId: coerceStripeObjectId(subscription.customer) ?? member.billingRef?.stripeCustomerId ?? null,
@@ -111,6 +113,7 @@ export async function applyStripeInvoicePaid(
   invoice: Stripe.Invoice,
   dispatchContext: HostedStripeDispatchContext,
   prisma: Prisma.TransactionClient,
+  canonicalBillingStatus?: HostedBillingStatus | null,
 ): Promise<HostedStripeActivationOutcome & { createdOrUpdatedRevnetIssuance: boolean }> {
   const subscriptionId = coerceStripeInvoiceSubscriptionId(invoice);
   const member = await findMemberForStripeInvoice({
@@ -128,15 +131,17 @@ export async function applyStripeInvoicePaid(
 
   const hadActiveBilling = member.core.billingStatus === HostedBillingStatus.active;
   const startingBillingStatus = member.core.billingStatus;
-  const { canonicalBillingStatus, member: preparedMember } = await prepareHostedMemberStripeBillingWrite({
+  const {
+    canonicalBillingStatus: resolvedCanonicalBillingStatus,
+    member: preparedMember,
+  } = await prepareHostedMemberStripeBillingWrite({
+    canonicalBillingStatus,
     dispatchContext,
     member,
-    prisma,
-    stripeSubscriptionId: subscriptionId,
   });
   const updatedMember = await updateHostedMemberStripeBillingIfFreshTx({
     billingStatus: HostedBillingStatus.active,
-    canonicalBillingStatus,
+    canonicalBillingStatus: resolvedCanonicalBillingStatus,
     dispatchContext,
     member: preparedMember,
     stripeCustomerId: coerceStripeObjectId(invoice.customer) ?? member.billingRef?.stripeCustomerId ?? null,
@@ -162,10 +167,7 @@ export async function applyStripeInvoicePaid(
 
   const activation = await activateHostedMemberForPositiveSourceTx({
     dispatchContext,
-    emailLinked: await resolveHostedMemberEmailLinked({
-      memberId: updatedMember.core.id,
-    }),
-    member: updatedMember,
+    memberId: updatedMember.core.id,
     prisma,
     skipIfBillingAlreadyActive: hadActiveBilling,
   });
@@ -181,6 +183,7 @@ export async function applyStripeInvoicePaymentFailed(
   invoice: Stripe.Invoice,
   dispatchContext: HostedStripeDispatchContext,
   prisma: Prisma.TransactionClient,
+  canonicalBillingStatus?: HostedBillingStatus | null,
 ): Promise<void> {
   const subscriptionId = coerceStripeInvoiceSubscriptionId(invoice);
   const member = await findMemberForStripeInvoice({
@@ -192,16 +195,18 @@ export async function applyStripeInvoicePaymentFailed(
     return;
   }
 
-  const { canonicalBillingStatus, member: preparedMember } = await prepareHostedMemberStripeBillingWrite({
+  const {
+    canonicalBillingStatus: resolvedCanonicalBillingStatus,
+    member: preparedMember,
+  } = await prepareHostedMemberStripeBillingWrite({
+    canonicalBillingStatus,
     dispatchContext,
     member,
-    prisma,
-    stripeSubscriptionId: subscriptionId ?? member.billingRef?.stripeSubscriptionId ?? null,
   });
 
   await updateHostedMemberStripeBillingIfFreshTx({
     billingStatus: HostedBillingStatus.past_due,
-    canonicalBillingStatus,
+    canonicalBillingStatus: resolvedCanonicalBillingStatus,
     dispatchContext,
     member: preparedMember,
     stripeCustomerId: coerceStripeObjectId(invoice.customer) ?? member.billingRef?.stripeCustomerId ?? null,
@@ -236,8 +241,6 @@ export async function applyStripeRefundCreated(
       sourceType: dispatchContext.sourceType,
     },
     member,
-    prisma,
-    stripeSubscriptionId: member.billingRef?.stripeSubscriptionId ?? null,
   });
 
   await suspendHostedMemberForBillingReversalTx({
@@ -275,8 +278,6 @@ export async function applyStripeDisputeUpdated(
       sourceType: dispatchContext.sourceType,
     },
     member,
-    prisma,
-    stripeSubscriptionId: member.billingRef?.stripeSubscriptionId ?? null,
   });
 
   await suspendHostedMemberForBillingReversalTx({

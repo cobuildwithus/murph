@@ -55,41 +55,16 @@ export async function handleHostedStripeWebhook(input: {
   });
 
   if (!recorded.duplicate) {
-    const reconciled = await reconcileHostedStripeEventById({
-      eventId: event.id,
-      prisma,
-    });
-
-    if (reconciled?.createdOrUpdatedRevnetIssuance) {
-      if (input.defer) {
-        await input.defer(() => drainHostedRevnetIssuanceSubmissionQueueBestEffort(prisma));
-      } else {
-        await drainHostedRevnetIssuanceSubmissionQueueBestEffort(prisma);
-      }
-    }
-
-    const hostedExecutionEventId = reconciled?.hostedExecutionEventId ?? null;
-
-    const hostedExecutionMemberId = reconciled?.activatedMemberId ?? null;
-
-    if (hostedExecutionEventId && hostedExecutionMemberId) {
-      if (input.defer) {
-        await input.defer(async () => {
-          await nudgeHostedRunBestEffort({
-            context: "stripe.webhook",
-            eventId: hostedExecutionEventId,
-            prisma,
-            userId: hostedExecutionMemberId,
-          });
-        });
-      } else {
-        await nudgeHostedRunBestEffort({
-          context: "stripe.webhook",
-          eventId: hostedExecutionEventId,
-          prisma,
-          userId: hostedExecutionMemberId,
-        });
-      }
+    if (input.defer) {
+      await input.defer(() => reconcileHostedStripeWebhookEventBestEffort({
+        eventId: event.id,
+        prisma,
+      }));
+    } else {
+      await reconcileHostedStripeWebhookEvent({
+        eventId: event.id,
+        prisma,
+      });
     }
   }
 
@@ -98,6 +73,50 @@ export async function handleHostedStripeWebhook(input: {
     ok: true,
     type: recorded.type,
   };
+}
+
+async function reconcileHostedStripeWebhookEvent(input: {
+  eventId: string;
+  prisma: PrismaClient;
+}): Promise<void> {
+  const reconciled = await reconcileHostedStripeEventById({
+    eventId: input.eventId,
+    prisma: input.prisma,
+  });
+
+  if (reconciled?.createdOrUpdatedRevnetIssuance) {
+    await drainHostedRevnetIssuanceSubmissionQueueBestEffort(input.prisma);
+  }
+
+  const hostedExecutionEventId = reconciled?.hostedExecutionEventId ?? null;
+  const hostedExecutionMemberId = reconciled?.activatedMemberId ?? null;
+
+  if (!hostedExecutionEventId || !hostedExecutionMemberId) {
+    return;
+  }
+
+  await nudgeHostedRunBestEffort({
+    context: "stripe.webhook",
+    eventId: hostedExecutionEventId,
+    prisma: input.prisma,
+    userId: hostedExecutionMemberId,
+  });
+}
+
+async function reconcileHostedStripeWebhookEventBestEffort(input: {
+  eventId: string;
+  prisma: PrismaClient;
+}): Promise<void> {
+  try {
+    await reconcileHostedStripeWebhookEvent(input);
+  } catch (error) {
+    console.error(
+      "Hosted Stripe webhook deferred reconciliation failed.",
+      sanitizeHostedOnboardingLogString(
+        error instanceof Error ? error.message : String(error),
+      ) ?? "Unknown error.",
+    );
+  }
 }
 
 function constructStripeWebhookEvent(input: {

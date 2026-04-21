@@ -20,8 +20,10 @@ import {
 } from "./hosted-member-store";
 import { getHostedInviteStatus, requireHostedInviteForAuthentication } from "./invite-service";
 import { activateHostedMemberForPositiveSourceTx } from "./member-activation";
-import { resolveHostedMemberEmailLinked } from "./member-channel-sync";
-import type { PrivyLinkedAccountLike } from "./privy-shared";
+import {
+  extractHostedPrivyVerifiedEmailAccount,
+  type PrivyLinkedAccountLike,
+} from "./privy-shared";
 import { requireHostedStripeApi } from "./runtime";
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
@@ -119,6 +121,10 @@ async function applyHostedCheckoutSessionSuccess(input: {
   const stripeCustomerId = coerceStripeObjectId(input.session.customer);
   const nextStripeSubscriptionId = subscriptionId;
 
+  const sessionEmailLinked = extractHostedPrivyVerifiedEmailAccount(
+    input.linkedAccounts ?? [],
+  ) !== null;
+
   return input.prisma.$transaction(async (tx) => {
     if (!subscriptionId || !subscriptionStatus) {
       await writeHostedMemberStripeBillingRefTx({
@@ -146,11 +152,8 @@ async function applyHostedCheckoutSessionSuccess(input: {
 
     const activation = await activateHostedMemberForPositiveSourceTx({
       dispatchContext,
-      emailLinked: await resolveHostedMemberEmailLinked({
-        linkedAccounts: input.linkedAccounts,
-        memberId: updatedMember.core.id,
-      }),
-      member: updatedMember,
+      ...(sessionEmailLinked ? { emailLinked: true } : {}),
+      memberId: updatedMember.core.id,
       prisma: tx,
       skipIfBillingAlreadyActive: member.core.billingStatus === HostedBillingStatus.active,
     });

@@ -1,9 +1,6 @@
 import { HostedBillingStatus, Prisma } from "@prisma/client";
 
 import {
-  mapStripeSubscriptionStatusToHostedBillingStatus,
-} from "./billing";
-import {
   writeHostedMemberStripeBillingRefTx,
 } from "./hosted-member-billing-store";
 import {
@@ -12,10 +9,8 @@ import {
   readHostedMemberCoreState,
   updateHostedMemberCoreState,
 } from "./hosted-member-store";
-import { requireHostedStripeApi } from "./runtime";
 import {
   lockHostedMemberRow,
-  type HostedOnboardingReadClient,
 } from "./shared";
 import {
   type HostedStripeDispatchContext,
@@ -26,10 +21,9 @@ import {
 } from "./stripe-billing-status";
 
 export async function prepareHostedMemberStripeBillingWrite(input: {
+  canonicalBillingStatus?: HostedBillingStatus | null;
   dispatchContext: HostedStripeDispatchContext;
   member: HostedMemberBillingSnapshot;
-  prisma: HostedOnboardingReadClient;
-  stripeSubscriptionId?: string | null;
 }): Promise<{
   canonicalBillingStatus: HostedBillingStatus | null;
   member: HostedMemberBillingSnapshot;
@@ -37,22 +31,16 @@ export async function prepareHostedMemberStripeBillingWrite(input: {
   const requiresCanonicalBillingStatus = requiresHostedCanonicalStripeBillingStatus(
     input.dispatchContext.sourceType,
   );
-  const member =
-    requiresCanonicalBillingStatus && !input.stripeSubscriptionId
-      ? (await readHostedMemberBillingSnapshot({
-          memberId: input.member.core.id,
-          prisma: input.prisma,
-        })) ?? input.member
-      : input.member;
+
+  if (requiresCanonicalBillingStatus && input.canonicalBillingStatus === undefined) {
+    throw new Error(
+      `Canonical Stripe subscription state must be resolved before ${input.dispatchContext.sourceType} billing writes.`,
+    );
+  }
 
   return {
-    canonicalBillingStatus: requiresCanonicalBillingStatus
-      ? await readHostedCanonicalStripeBillingStatus({
-          member,
-          stripeSubscriptionId: input.stripeSubscriptionId,
-        })
-      : null,
-    member,
+    canonicalBillingStatus: input.canonicalBillingStatus ?? null,
+    member: input.member,
   };
 }
 
@@ -102,22 +90,6 @@ export async function updateHostedMemberStripeBillingIfFreshTx(input: {
     memberId: currentMember.id,
     prisma: input.tx,
   });
-}
-
-async function readHostedCanonicalStripeBillingStatus(input: {
-  member: HostedMemberBillingSnapshot;
-  stripeSubscriptionId?: string | null;
-}): Promise<HostedBillingStatus | null> {
-  const subscriptionId =
-    input.stripeSubscriptionId ?? input.member.billingRef?.stripeSubscriptionId ?? null;
-
-  if (!subscriptionId) {
-    return null;
-  }
-
-  const stripe = requireHostedStripeApi();
-  const subscription = await stripe.subscriptions.retrieve(subscriptionId);
-  return mapStripeSubscriptionStatusToHostedBillingStatus(subscription.status);
 }
 
 export async function suspendHostedMemberForBillingReversalTx(input: {
