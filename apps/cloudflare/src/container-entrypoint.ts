@@ -5,7 +5,7 @@ import { pathToFileURL } from "node:url";
 
 import {
   type HostedAssistantRuntimeJobInput,
-} from "@murphai/assistant-runtime";
+} from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
   createRuntimeTimerSyntheticWake,
   buildHostedExecutionSafeErrorDetails,
@@ -48,16 +48,17 @@ const defaultHostedContainerExitScheduler = () => {
     process.exit(1);
   });
 };
-let hostedContainerRunnerRuntimeLoader:
-  | Promise<{
-    assistantRuntime: typeof import("@murphai/assistant-runtime");
-    nodeRunner: typeof import("./node-runner.js");
-  }>
+let hostedContainerRuntimeContractsLoader:
+  | Promise<typeof import("@murphai/assistant-runtime/hosted-runtime-contracts")>
   | null = null;
+let hostedContainerNodeRunnerLoader: Promise<typeof import("./node-runner.js")> | null = null;
 
 interface HostedContainerRuntimeOptions {
   exitScheduler?: () => void;
   fetchImpl?: typeof fetch;
+  loadNodeRunner?: () => Promise<typeof import("./node-runner.js")>;
+  loadRuntimeContracts?:
+    () => Promise<typeof import("@murphai/assistant-runtime/hosted-runtime-contracts")>;
   processApi?: Partial<HostedContainerProcessApi>;
   processIsolation?: boolean;
 }
@@ -65,6 +66,9 @@ interface HostedContainerRuntimeOptions {
 interface HostedContainerRuntimeDependencies {
   exitScheduler: () => void;
   fetchImpl: typeof fetch;
+  loadNodeRunner: () => Promise<typeof import("./node-runner.js")>;
+  loadRuntimeContracts:
+    () => Promise<typeof import("@murphai/assistant-runtime/hosted-runtime-contracts")>;
   processApi: HostedContainerProcessApi;
   processIsolation: boolean;
 }
@@ -180,6 +184,7 @@ export async function startHostedContainerEntrypoint(input: {
         const requestBody: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
         const parsed = await parseHostedExecutionContainerRunRequest(
           requestBody,
+          runtime,
         );
         job = parsed.job;
         internalWorkerProxyToken = parsed.internalWorkerProxyToken;
@@ -209,7 +214,7 @@ export async function startHostedContainerEntrypoint(input: {
         run: job.request.run ?? null,
       });
 
-      const result = await runHostedExecutionJob(job, {
+      const result = await runHostedExecutionJob(job, runtime, {
         internalWorkerProxyToken,
         localInternalProxyBaseUrl: localBridge.localInternalProxyBaseUrl,
         signal: requestAbort.signal,
@@ -294,6 +299,18 @@ export async function startHostedContainerEntrypoint(input: {
     throw error;
   }
 
+  if (input.controlToken) {
+    void runtime.loadNodeRunner().catch((error) => {
+      emitHostedExecutionStructuredLog({
+        component: "container",
+        error,
+        level: "error",
+        message: "Hosted runner runtime preload failed.",
+        phase: "failed",
+      });
+    });
+  }
+
   return server;
 }
 
@@ -302,7 +319,10 @@ function resolveHostedContainerJobWake(job: HostedAssistantRuntimeJobInput): Hos
   return firstEvent?.wake ?? createRuntimeTimerSyntheticWake(job.request.runDrain);
 }
 
-async function parseHostedExecutionContainerRunRequest(value: unknown): Promise<{
+async function parseHostedExecutionContainerRunRequest(
+  value: unknown,
+  runtime: HostedContainerRuntimeDependencies,
+): Promise<{
   internalWorkerProxyToken: string | null;
   localBridge: HostedExecutionLocalBridgeConfig;
   job: HostedAssistantRuntimeJobInput;
@@ -312,7 +332,7 @@ async function parseHostedExecutionContainerRunRequest(value: unknown): Promise<
   }
 
   const record = value as Record<string, unknown>;
-  const { assistantRuntime } = await loadHostedContainerRunnerRuntime();
+  const assistantRuntime = await runtime.loadRuntimeContracts();
 
   return {
     internalWorkerProxyToken: readNullableString(
@@ -407,6 +427,12 @@ function resolveHostedContainerRuntimeDependencies(
   runtime: HostedContainerRuntimeOptions | undefined,
 ): HostedContainerRuntimeDependencies {
   return {
+    loadNodeRunner: createCachedHostedContainerLoader(
+      runtime?.loadNodeRunner ?? loadHostedContainerNodeRunner,
+    ),
+    loadRuntimeContracts: createCachedHostedContainerLoader(
+      runtime?.loadRuntimeContracts ?? loadHostedContainerRuntimeContracts,
+    ),
     exitScheduler: runtime?.exitScheduler ?? defaultHostedContainerExitScheduler,
     fetchImpl: runtime?.fetchImpl ?? fetch,
     processApi: runtime?.processApi
@@ -693,33 +719,41 @@ function classifyRequestDecodeError(error: unknown): {
 
 async function runHostedExecutionJob(
   input: HostedAssistantRuntimeJobInput,
+  runtime: HostedContainerRuntimeDependencies,
   options?: {
     internalWorkerProxyToken?: string | null;
     localInternalProxyBaseUrl?: string | null;
     signal?: AbortSignal;
   },
 ): Promise<Awaited<ReturnType<typeof import("./node-runner.js")["runHostedExecutionJob"]>>> {
-  const runtime = await loadHostedContainerRunnerRuntime();
-  return await runtime.nodeRunner.runHostedExecutionJob(input, options);
-}
-
-async function loadHostedContainerRunnerRuntime(): Promise<{
-  assistantRuntime: typeof import("@murphai/assistant-runtime");
-  nodeRunner: typeof import("./node-runner.js");
-}> {
-  hostedContainerRunnerRuntimeLoader ??= Promise.all([
-    import("@murphai/assistant-runtime"),
-    import("./node-runner.js"),
-  ]).then(([assistantRuntime, nodeRunner]) => ({
-    assistantRuntime,
-    nodeRunner,
-  }));
-
-  return await hostedContainerRunnerRuntimeLoader;
+  const nodeRunner = await runtime.loadNodeRunner();
+  return await nodeRunner.runHostedExecutionJob(input, options);
 }
 
 function isHostedAssistantConfigurationError(
   error: unknown,
 ): error is Error & { code?: string | null } {
   return error instanceof Error && error.name === "HostedAssistantConfigurationError";
+}
+
+function createCachedHostedContainerLoader<T>(load: () => Promise<T>): () => Promise<T> {
+  let loader: Promise<T> | null = null;
+
+  return async () => {
+    loader ??= load();
+    return await loader;
+  };
+}
+
+async function loadHostedContainerRuntimeContracts(): Promise<
+  typeof import("@murphai/assistant-runtime/hosted-runtime-contracts")
+> {
+  hostedContainerRuntimeContractsLoader ??=
+    import("@murphai/assistant-runtime/hosted-runtime-contracts");
+  return await hostedContainerRuntimeContractsLoader;
+}
+
+async function loadHostedContainerNodeRunner(): Promise<typeof import("./node-runner.js")> {
+  hostedContainerNodeRunnerLoader ??= import("./node-runner.js");
+  return await hostedContainerNodeRunnerLoader;
 }
