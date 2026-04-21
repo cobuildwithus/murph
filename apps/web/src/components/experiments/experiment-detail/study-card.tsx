@@ -37,14 +37,8 @@ export function StudyCard({
     population,
     duration,
   ]);
-
-  return (
-    <Collapsible
-      open={open}
-      onOpenChange={setOpen}
-      className={cn(!last && "border-b border-border")}
-    >
-      <div className="flex gap-4 px-6 py-5">
+  const rowContent = (
+    <div className="flex gap-4 px-6 py-5">
       <div className="flex w-[74px] shrink-0 flex-col items-start gap-1">
         <div
           className="h-fit rounded-md bg-primary/8 px-2.5 py-1.5"
@@ -61,49 +55,65 @@ export function StudyCard({
         ) : null}
       </div>
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <CollapsibleTrigger
-          className={cn(
-            "-mx-2 flex w-[calc(100%+1rem)] flex-col rounded-lg px-2 py-1.5 text-left transition-colors outline-none hover:bg-secondary/8 focus-visible:bg-secondary/8",
-            finding ? "cursor-pointer" : "cursor-default",
-          )}
-          disabled={!finding}
-        >
-          <div className="flex items-start justify-between gap-4">
-            <span className="min-w-0 text-sm/4.5 font-semibold text-foreground">
-              {title}
-            </span>
-            {yearLabel ? (
-              <span className="shrink-0 rounded-md border border-border bg-background px-2 py-1 font-mono text-[10px]/3.5 text-muted-foreground">
-                {yearLabel}
-              </span>
-            ) : null}
-          </div>
-          {finding && !open ? (
-            <span className="max-w-[34ch] line-clamp-1 pt-1 text-[11px]/4 text-muted-foreground/85">
-              {finding}
+        <div className="flex items-start justify-between gap-4">
+          <span className="min-w-0 text-sm/4.5 font-semibold text-foreground">
+            {title}
+          </span>
+          {yearLabel ? (
+            <span className="shrink-0 rounded-md border border-border bg-background px-2 py-1 font-mono text-[10px]/3.5 text-muted-foreground">
+              {yearLabel}
             </span>
           ) : null}
+        </div>
+        {finding && !open ? (
+          <span className="max-w-[34ch] line-clamp-1 pt-1 text-[11px]/4 text-muted-foreground/85">
+            {finding}
+          </span>
+        ) : null}
+        <span className="mt-0.5 text-[11px]/4 text-muted-foreground/70">{metadata}</span>
+      </div>
+    </div>
+  );
+
+  return (
+    <Collapsible
+      open={open}
+      onOpenChange={setOpen}
+      className={cn(!last && "border-b border-border")}
+    >
+      {finding ? (
+        <CollapsibleTrigger
+          className={cn(
+            "w-full text-left transition-colors outline-none hover:bg-secondary/8 focus-visible:bg-secondary/8 cursor-pointer",
+            open && "bg-secondary/8",
+          )}
+        >
+          {rowContent}
         </CollapsibleTrigger>
-        {finding ? (
-          <CollapsibleContent className="pt-2">
+      ) : rowContent}
+      {finding ? (
+        <CollapsibleContent className="px-6 pb-5">
+          <div className="pl-[90px]">
             <p className="max-w-[52ch] text-[15px]/6 text-foreground/90">
               {finding}
             </p>
-          </CollapsibleContent>
-        ) : null}
-        <span className="mt-0.5 text-[11px]/4 text-muted-foreground/70">{metadata}</span>
-        {url ? (
-          <a
-            href={url}
-            className="mt-1 text-xs/4 text-primary underline-offset-4 hover:underline"
-            rel="noreferrer"
-            target="_blank"
-          >
-            Source ↗
-          </a>
-        ) : null}
-      </div>
-      </div>
+          </div>
+        </CollapsibleContent>
+      ) : null}
+      {url ? (
+        <div className="px-6 pb-5">
+          <div className="pl-[90px]">
+            <a
+              href={url}
+              className="text-xs/4 text-primary underline-offset-4 hover:underline"
+              rel="noreferrer"
+              target="_blank"
+            >
+              Source ↗
+            </a>
+          </div>
+        </div>
+      ) : null}
     </Collapsible>
   );
 }
