@@ -124,7 +124,7 @@ function createGatewayServiceMock(): AssistantLocalService['gateway'] {
       nextCursor: input?.cursor ?? 0,
       live: true,
     }),
-  } as AssistantLocalService['gateway']
+  }
 }
 
 function createAssistantServiceMock(): AssistantLocalService {
@@ -296,7 +296,7 @@ function createAssistantServiceMock(): AssistantLocalService {
     }),
     updateSessionOptions: async () => TEST_SESSION,
     vault: '/tmp/vault',
-  } as AssistantLocalService
+  }
 }
 
 test('startAssistantHttpServer binds a loopback listener and serves health checks', async () => {
