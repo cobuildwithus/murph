@@ -623,6 +623,18 @@ function sortStudySourcesForDisplay(
   sources: readonly HealthCommonsEntity[],
 ): HealthCommonsEntity[] {
   return [...sources].sort((left, right) => {
+    const participantDelta =
+      studyParticipantSortValue(right) - studyParticipantSortValue(left);
+    if (participantDelta !== 0) {
+      return participantDelta;
+    }
+
+    const includedStudyDelta =
+      studyIncludedStudySortValue(right) - studyIncludedStudySortValue(left);
+    if (includedStudyDelta !== 0) {
+      return includedStudyDelta;
+    }
+
     const rankDelta = studyDisplayRank(left) - studyDisplayRank(right);
     if (rankDelta !== 0) {
       return rankDelta;
@@ -636,6 +648,14 @@ function sortStudySourcesForDisplay(
 
     return left.title.localeCompare(right.title);
   });
+}
+
+function studyParticipantSortValue(entity: HealthCommonsEntity): number {
+  return entity.researchEvidence?.participantCount ?? -1;
+}
+
+function studyIncludedStudySortValue(entity: HealthCommonsEntity): number {
+  return entity.researchEvidence?.includedStudyCount ?? -1;
 }
 
 function studyDisplayRank(entity: HealthCommonsEntity): number {
@@ -860,7 +880,7 @@ function toResearchStats(
   const codedParticipantStats = codedParticipantCount > 0
     ? [
         {
-          label: "PEOPLE INCLUDED",
+          label: "TOTAL PARTICIPANTS",
           value: codedParticipantCount === 1
             ? "1"
             : `${codedParticipantCount.toLocaleString()}+`,

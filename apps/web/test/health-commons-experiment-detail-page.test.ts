@@ -109,29 +109,82 @@ describe("ExperimentDetailPage", () => {
         key: "protocol_variant:dry-sauna/bryan-johnson-blueprint",
       }),
       id: "bryan-johnson-blueprint",
+      researchSummaryLabel: "n=1 report",
+      studyCount: 12,
       title: expect.stringContaining("Bryan Johnson"),
     }));
+    expect(clientExperiment.researchStats).toEqual(expect.arrayContaining([
+      expect.objectContaining({ label: "SOURCES CHECKED", value: 12 }),
+      expect.objectContaining({ label: "TOTAL PARTICIPANTS", value: "1" }),
+    ]));
     expect(clientExperiment.studies).toEqual(expect.arrayContaining([
       expect.objectContaining({
+        designLabel: "Single-person report",
         journal: "Substack Post",
+        participants: 1,
+        population: "Bryan Johnson",
         title: "31 brutal minutes to saunamaxx",
+        type: "N1",
       }),
       expect.objectContaining({
         journal: "LinkedIn Post",
+        participants: 1,
         title: "Most people might miss the biggest benefit of sauna",
+        type: "N1",
       }),
       expect.objectContaining({
         journal: "X Post",
+        participants: 1,
         title: "Core-temperature sauna update",
+        type: "N1",
       }),
       expect.objectContaining({
+        participantCountKind: "reported",
         journal: "Blueprint Page",
+        participants: 1,
         title: "My #1 Longevity Protocol of 2025",
+        type: "N1",
       }),
     ]));
     expect(markup).toContain('data-experiment-id="bryan-johnson-blueprint"');
     expect(markup).toContain(
       'data-experiment-key="protocol_variant:dry-sauna/bryan-johnson-blueprint"',
+    );
+  });
+
+  it("projects Norwegian 4x4 coded evidence metadata into research stats and study rows", async () => {
+    const element = await ExperimentDetailPage({
+      params: Promise.resolve({
+        experimentId: "norwegian-4x4",
+      }),
+    });
+    renderToStaticMarkup(element);
+
+    const clientExperiment = mocks.experimentDetailClient.mock.calls.at(-1)?.[0]
+      ?.protocol as ExperimentProtocol;
+
+    expect(clientExperiment.researchStats).toEqual(expect.arrayContaining([
+      expect.objectContaining({ label: "TOTAL PARTICIPANTS", value: "5,804+" }),
+      expect.objectContaining({ label: "SOURCES CHECKED", value: 19 }),
+    ]));
+    expect(clientExperiment.studies).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        designLabel: "Four-arm randomized training trial",
+        participantCountKind: "reported",
+        participants: 40,
+        population: "Moderately trained men",
+        type: "RCT",
+      }),
+      expect.objectContaining({
+        includedStudyCount: 23,
+        participants: 1374,
+        type: "MA",
+      }),
+    ]));
+    expect(
+      clientExperiment.studies.findIndex((study) => study.participants === 1374),
+    ).toBeLessThan(
+      clientExperiment.studies.findIndex((study) => study.participants === 40),
     );
   });
 
