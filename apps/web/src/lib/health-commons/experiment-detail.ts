@@ -73,6 +73,11 @@ const BIOMARKER_DISPLAY_HINTS: Record<string, {
   },
 };
 
+const SOURCE_PERSON_EXPERT_QUOTES: Partial<Record<string, string>> = {
+  "source_person:bryan-johnson":
+    "Blueprint founder whose public sauna routine offers a higher-burden comparison to simpler dry-sauna experiments and highlights aggressive implementation choices.",
+};
+
 export function listHealthCommonsExperimentProtocols(
   catalog: HealthCommonsCatalogReader = healthCommonsCatalog,
 ): ExperimentProtocol[] {
@@ -460,8 +465,13 @@ function toExpert(entity: HealthCommonsEntity): Expert {
   return {
     initials,
     name: entity.title,
-    field: formatCategory(entity.categories?.[0] ?? "source"),
-    quote: entity.summary ?? summarizeBody(entity.body),
+    field: entity.entityType === "source_person"
+      ? ""
+      : formatCategory(entity.categories?.[0] ?? "source"),
+    quote:
+      SOURCE_PERSON_EXPERT_QUOTES[entity.key]
+      ?? entity.summary
+      ?? summarizeBody(entity.body),
   };
 }
 
