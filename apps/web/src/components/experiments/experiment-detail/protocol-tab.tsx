@@ -43,10 +43,6 @@ export function ProtocolTab({ experiment }: ProtocolTabProps) {
         <section className="flex flex-col gap-4 pt-2">
           <div className="flex max-w-2xl flex-col gap-1.5">
             <SectionLabel>What could change</SectionLabel>
-            <p className="text-[13px]/5 text-muted-foreground">
-              Start with the clearest signals for this experiment. Smaller,
-              noisier measures stay visible below as useful background.
-            </p>
           </div>
           <div className={getFocusSignalGridClassName(focusSignals.length)}>
             {focusSignals.map((signal) => (
