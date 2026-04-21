@@ -8,13 +8,17 @@ export interface Expert {
 }
 
 export interface Study {
-  type: "OBS" | "RCT" | "MA" | "SRC";
+  type: "OBS" | "RCT" | "INT" | "MECH" | "MA" | "REV" | "GUIDE" | "SRC";
   title: string;
   authors: string;
   journal: string;
   year?: number;
   participants?: number;
+  participantCountKind?: "reported" | "approximate" | "range";
+  includedStudyCount?: number;
+  population?: string;
   duration?: string;
+  designLabel?: string;
   finding: string;
   url?: string;
 }
@@ -39,6 +43,8 @@ export interface TrendData {
   delta: string;
 }
 
+export type ExperimentSignalProminence = "focus" | "context";
+
 export interface ExperimentSignal {
   label: string;
   value: string;
@@ -48,6 +54,7 @@ export interface ExperimentSignal {
   expected: string;
   baseline?: string;
   description?: string;
+  protocolProminence?: ExperimentSignalProminence;
 }
 
 export interface ExperimentSafety {

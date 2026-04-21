@@ -2,6 +2,7 @@ import type {
   HealthCommonsCatalogEntity,
   HealthCommonsClaim,
   HealthCommonsProtocolSpec,
+  HealthCommonsResearchEvidence,
   HealthCommonsSafety,
   HealthCommonsTestPlan,
   HealthCommonsSource,
@@ -47,29 +48,81 @@ const PROTOCOL_LIBRARY_ORDER = [
   "bryan-johnson-blueprint",
 ] as const;
 
-const BIOMARKER_DISPLAY_HINTS: Record<string, {
-  direction: "up" | "down" | "neutral";
+type BiomarkerSignalDirection =
+  ExperimentProtocol["expectedSignals"][number]["direction"];
+type BiomarkerSignalProminence = NonNullable<
+  ExperimentProtocol["expectedSignals"][number]["protocolProminence"]
+>;
+
+interface BiomarkerDisplayHint {
+  description?: string;
+  direction: BiomarkerSignalDirection;
   expected: string;
-}> = {
+  protocolProminence?: BiomarkerSignalProminence;
+}
+
+const DEFAULT_BIOMARKER_DISPLAY_HINTS: Record<string, BiomarkerDisplayHint> = {
   "biomarker:deep-sleep-minutes": {
     direction: "neutral",
-    expected: "Exploratory context",
+    expected: "Worth watching",
+  },
+  "biomarker:estimated-vo2max": {
+    direction: "up",
+    expected: "Could improve",
   },
   "biomarker:hrv-rmssd": {
     direction: "neutral",
-    expected: "Exploratory signal",
+    expected: "Worth watching",
   },
   "biomarker:morning-blood-pressure": {
     direction: "down",
-    expected: "Optional marker",
+    expected: "Could trend lower",
   },
   "biomarker:resting-heart-rate": {
     direction: "down",
-    expected: "Primary marker",
+    expected: "Could trend lower",
   },
   "biomarker:sleep-efficiency": {
     direction: "up",
-    expected: "Sleep context",
+    expected: "Could improve",
+  },
+  "biomarker:sleep-onset-latency": {
+    direction: "down",
+    expected: "May fall asleep sooner",
+  },
+};
+
+const PROTOCOL_BIOMARKER_DISPLAY_HINT_OVERRIDES: Record<
+  string,
+  Record<string, Partial<BiomarkerDisplayHint>>
+> = {
+  "protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed": {
+    "biomarker:deep-sleep-minutes": {
+      expected: "Can be noisy",
+      protocolProminence: "context",
+    },
+    "biomarker:hrv-rmssd": {
+      expected: "Can be noisy",
+      protocolProminence: "context",
+    },
+    "biomarker:resting-heart-rate": {
+      description:
+        "A calmer pre-bed window may show up as a lower overnight resting pulse versus baseline.",
+      expected: "Could trend lower",
+      protocolProminence: "focus",
+    },
+    "biomarker:sleep-efficiency": {
+      description:
+        "Watch whether the same sleep window contains more actual sleep compared with baseline.",
+      expected: "Could improve",
+      protocolProminence: "focus",
+    },
+    "biomarker:sleep-onset-latency": {
+      description:
+        "Useful to watch, but pair wearable estimates with a quick diary note because quiet wakefulness is easy to misclassify.",
+      expected: "May fall asleep sooner",
+      protocolProminence: "context",
+    },
   },
 };
 
@@ -169,7 +222,9 @@ function toExperimentDetail(
     evidenceLevel: QUALITY_TO_EVIDENCE_LEVEL[protocol.quality ?? ""] ?? 2,
     evidenceLabel: formatEvidenceLabel(protocol),
     description: protocol.summary ?? summarizeBody(protocol.body),
-    expectedSignals: biomarkerEntities.map((biomarker) => toExpectedSignal(biomarker)),
+    expectedSignals: biomarkerEntities.map((biomarker) =>
+      toExpectedSignal(protocol, biomarker)
+    ),
     protocolFacts: toProtocolFacts(protocolSpec, testPlan),
     protocol: toProtocolSteps(protocolSpec),
     protocolTips: protocolSpec?.tips ?? [],
@@ -281,11 +336,11 @@ function listProtocolBiomarkers(
   });
 }
 
-function toExpectedSignal(biomarker: HealthCommonsEntity): ExperimentProtocol["expectedSignals"][number] {
-  const hint = BIOMARKER_DISPLAY_HINTS[biomarker.key] ?? {
-    direction: "neutral" as const,
-    expected: "Worth watching",
-  };
+function toExpectedSignal(
+  protocol: HealthCommonsCatalogEntity,
+  biomarker: HealthCommonsEntity,
+): ExperimentProtocol["expectedSignals"][number] {
+  const hint = resolveBiomarkerDisplayHint(protocol.key, biomarker.key);
 
   return {
     label: biomarker.title,
@@ -293,8 +348,26 @@ function toExpectedSignal(biomarker: HealthCommonsEntity): ExperimentProtocol["e
     delta: "",
     direction: hint.direction,
     expected: hint.expected,
-    description: biomarker.summary ?? summarizeBody(biomarker.body),
+    description:
+      hint.description ?? biomarker.summary ?? summarizeBody(biomarker.body),
+    ...(hint.protocolProminence
+      ? { protocolProminence: hint.protocolProminence }
+      : {}),
   };
+}
+
+function resolveBiomarkerDisplayHint(
+  protocolKey: string,
+  biomarkerKey: string,
+): BiomarkerDisplayHint {
+  const baseHint = DEFAULT_BIOMARKER_DISPLAY_HINTS[biomarkerKey] ?? {
+    direction: "neutral" as const,
+    expected: "Worth watching",
+  };
+  const override =
+    PROTOCOL_BIOMARKER_DISPLAY_HINT_OVERRIDES[protocolKey]?.[biomarkerKey];
+
+  return override ? { ...baseHint, ...override } : baseHint;
 }
 
 function toProtocolFacts(
@@ -535,16 +608,62 @@ function isStudySource(entity: HealthCommonsEntity): boolean {
 
 function toStudy(entity: HealthCommonsEntity): Study {
   const source = entity.source;
+  const evidence = entity.researchEvidence;
 
   return {
-    type: sourceKindToStudyType(source),
+    type: researchEvidenceToStudyType(evidence, source),
     title: source?.title ?? entity.title,
     authors: source?.authors ?? "Health Commons",
     journal: source?.journal ?? formatSourceSurfaceLabel(entity, source),
     year: source?.year,
+    participants: evidence?.participantCount,
+    participantCountKind: evidence?.participantCountKind,
+    includedStudyCount: evidence?.includedStudyCount,
+    population: evidence?.populationLabel,
+    duration: evidence?.durationLabel,
+    designLabel: evidence?.designLabel ?? (evidence
+      ? formatResearchDesignLabel(evidence.designKind)
+      : undefined),
     finding: entity.summary ?? summarizeBody(entity.body),
     url: source?.url,
   };
+}
+
+function researchEvidenceToStudyType(
+  evidence: HealthCommonsResearchEvidence | undefined,
+  source: HealthCommonsSource | undefined,
+): Study["type"] {
+  switch (evidence?.designKind) {
+    case "randomized_controlled_trial":
+      return "RCT";
+    case "controlled_trial":
+    case "crossover_trial":
+    case "single_arm_trial":
+    case "pilot_intervention":
+      return "INT";
+    case "prospective_cohort":
+    case "retrospective_registry":
+    case "cross_sectional":
+    case "case_control":
+      return "OBS";
+    case "acute_mechanistic":
+      return "MECH";
+    case "meta_analysis":
+      return "MA";
+    case "systematic_review":
+    case "narrative_review":
+      return "REV";
+    case "guideline":
+      return "GUIDE";
+    case "expert_protocol":
+    case "bibliography":
+    case "other":
+      return "SRC";
+    case undefined:
+      break;
+  }
+
+  return sourceKindToStudyType(source);
 }
 
 function formatSourceSurfaceLabel(
@@ -594,8 +713,13 @@ function sourceKindToStudyType(source: HealthCommonsSource | undefined): Study["
     return "SRC";
   }
 
-  if (source.kind === "review" || source.kind === "guideline") {
-    return "MA";
+  if (source.kind === "guideline") {
+    return "GUIDE";
+  }
+
+  if (source.kind === "review") {
+    const title = source.title?.toLowerCase() ?? "";
+    return title.includes("meta-analysis") || title.includes("meta analysis") ? "MA" : "REV";
   }
 
   if (source.kind === "journal_article") {
@@ -626,6 +750,16 @@ function sourceKindToStudyType(source: HealthCommonsSource | undefined): Study["
   return "SRC";
 }
 
+function formatResearchDesignLabel(
+  designKind: HealthCommonsResearchEvidence["designKind"],
+): string {
+  return designKind
+    .split("_")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
 function toResearchStats(
   citedSources: readonly HealthCommonsEntity[],
 ): ExperimentProtocol["researchStats"] {
@@ -633,6 +767,15 @@ function toResearchStats(
   const journalArticleCount = citedSources.filter(
     (entity) => entity.source?.kind === "journal_article",
   ).length;
+  const codedParticipantCount = sumPrimaryParticipantCount(citedSources);
+  const codedParticipantStats = codedParticipantCount > 0
+    ? [
+        {
+          label: "CODED PARTICIPANTS",
+          value: `${codedParticipantCount.toLocaleString()}+`,
+        },
+      ]
+    : [];
   const years = citedSources
     .map((entity) => entity.source?.year)
     .filter((year): year is number => typeof year === "number")
@@ -646,10 +789,33 @@ function toResearchStats(
 
   return [
     { label: "STUDIES", value: citedSources.length },
+    ...codedParticipantStats,
     { label: "REVIEWS", value: reviewCount },
     { label: "JOURNAL ARTICLES", value: journalArticleCount },
     { label: "RESEARCH YEARS", value: researchYears },
   ];
+}
+
+function sumPrimaryParticipantCount(
+  citedSources: readonly HealthCommonsEntity[],
+): number {
+  const countsByCohort = new Map<string, number>();
+
+  for (const entity of citedSources) {
+    const evidence = entity.researchEvidence;
+    if (
+      evidence?.aggregateRole !== "primary" ||
+      typeof evidence.participantCount !== "number"
+    ) {
+      continue;
+    }
+
+    const cohortKey = evidence.cohortKey ?? entity.key;
+    const existingCount = countsByCohort.get(cohortKey) ?? 0;
+    countsByCohort.set(cohortKey, Math.max(existingCount, evidence.participantCount));
+  }
+
+  return [...countsByCohort.values()].reduce((sum, count) => sum + count, 0);
 }
 
 function toSafety(safety: HealthCommonsSafety | undefined): ExperimentProtocol["safety"] {
