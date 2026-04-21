@@ -261,6 +261,31 @@ describe("hosted run log handling", () => {
     ]);
   });
 
+  it("projects active running runs in status responses", async () => {
+    const run = buildRunRow({
+      eventSeqs: ["10"],
+      ingressEventIds: ["wake_10"],
+      runToken: "run-token.running-status",
+      status: "running",
+    });
+    const prisma = asHostedRunStoreClient({
+      hostedRun: {
+        findMany: vi.fn(async () => [run]),
+      },
+    });
+
+    const result = await readHostedRunStatus({
+      prisma,
+      runId: run.id,
+      userId: run.userId,
+    });
+
+    expect(result.run).toMatchObject({
+      id: run.id,
+      status: "running",
+    });
+  });
+
   it("sanitizes structured redacted payloads before storage and projection", async () => {
     const runToken = "run-token.structured-redaction";
     const run = buildRunRow({

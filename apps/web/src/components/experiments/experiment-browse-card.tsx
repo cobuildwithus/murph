@@ -4,7 +4,11 @@ import Link from "next/link";
 import { Badge } from "@/src/components/ui/badge";
 import { cn } from "@/src/lib/utils";
 
-type ExperimentCardStatusVariant = "default" | "secondary" | "outline" | "destructive";
+type ExperimentCardStatusVariant =
+  | "default"
+  | "secondary"
+  | "outline"
+  | "destructive";
 
 interface ExperimentBrowseCardProps {
   id: string;
@@ -50,7 +54,9 @@ export function ExperimentBrowseCard({
           fill
           className={cn(
             "object-cover",
-            isInteractive ? "transition-transform duration-300 group-hover:scale-[1.03]" : "",
+            isInteractive
+              ? "transition-transform duration-300 group-hover:scale-[1.03]"
+              : ""
           )}
         />
       </div>
@@ -97,9 +103,9 @@ export function ExperimentBrowseCard({
     </>
   );
   const cardClassName = cn(
-    "group flex flex-col overflow-hidden rounded-xl",
+    "group flex flex-col overflow-hidden",
     isInteractive ? "" : "cursor-default",
-    className,
+    className
   );
 
   if (resolvedHref === null) {
@@ -115,10 +121,14 @@ export function ExperimentBrowseCard({
 
 function formatDefaultMetadata(
   durationDays: number | undefined,
-  studyCount: number | undefined,
+  studyCount: number | undefined
 ): string {
-  return [
-    typeof durationDays === "number" ? `${durationDays} days` : null,
-    typeof studyCount === "number" ? `${studyCount} studies` : null,
-  ].filter((part): part is string => part !== null).join(" · ") || "Protocol";
+  return (
+    [
+      typeof durationDays === "number" ? `${durationDays} days` : null,
+      typeof studyCount === "number" ? `${studyCount} studies` : null,
+    ]
+      .filter((part): part is string => part !== null)
+      .join(" · ") || "Protocol"
+  );
 }

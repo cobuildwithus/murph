@@ -118,7 +118,6 @@ describe("settings email sync route", () => {
     });
     expect(mocks.nudgeHostedRunBestEffort).toHaveBeenCalledWith({
       context: "settings.email.sync",
-      eventId: "member.channels.updated:settings.email.sync:member_123:evt_123",
       userId: "member_123",
     });
     await expect(response.json()).resolves.toEqual({
