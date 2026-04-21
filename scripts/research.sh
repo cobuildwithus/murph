@@ -73,7 +73,7 @@ process.stdout.write(matches[matches.length - 1][0]);
 NODE
 }
 
-export_attachment_count() {
+export_download_target_count() {
   node - "$1" <<'NODE'
 const fs = require("node:fs");
 
@@ -82,7 +82,85 @@ const raw = fs.readFileSync(filePath, "utf8");
 const data = JSON.parse(raw);
 const buttons = Array.isArray(data.attachmentButtons) ? data.attachmentButtons : [];
 
-process.stdout.write(String(buttons.length));
+function normalizeValue(value) {
+  return String(value ?? "").trim();
+}
+
+function deriveHrefLabel(href) {
+  const normalizedHref = normalizeValue(href);
+  if (!normalizedHref) {
+    return "";
+  }
+
+  try {
+    const pathname = new URL(normalizedHref, "https://chatgpt.com").pathname;
+    return decodeURIComponent(pathname.split("/").filter(Boolean).at(-1) ?? "");
+  } catch {
+    return decodeURIComponent(normalizedHref.split("/").filter(Boolean).at(-1) ?? "");
+  }
+}
+
+function hasDownloadableHref(href) {
+  const normalizedHref = normalizeValue(href);
+  if (!normalizedHref) {
+    return false;
+  }
+  if (normalizedHref.startsWith("sandbox:/mnt/data/")) {
+    return true;
+  }
+
+  try {
+    const url = new URL(normalizedHref, "https://chatgpt.com");
+    return url.protocol === "blob:" || url.protocol === "data:";
+  } catch {
+    return false;
+  }
+}
+
+function isDownloadControl(button) {
+  const text = normalizeValue(button?.text);
+  const href = normalizeValue(button?.href);
+  const hrefLabel = deriveHrefLabel(href);
+
+  if (button?.download || hasDownloadableHref(href)) {
+    return true;
+  }
+
+  if (!button?.behaviorButton) {
+    return false;
+  }
+
+  return (
+    /\.(patch|diff|zip|txt|json|md|patched)\b/iu.test(text) ||
+    /\.(patch|diff|zip|txt|json|md|patched)\b/iu.test(href) ||
+    /\.(patch|diff|zip|txt|json|md|patched)\b/iu.test(hrefLabel) ||
+    /\bdownload\b/iu.test(text)
+  );
+}
+
+function scopeItemsToLatestUser(items) {
+  if (!items.some((item) => typeof item?.afterLastUserMessage === "boolean")) {
+    return items;
+  }
+
+  return items.filter((item) => item?.afterLastUserMessage === true);
+}
+
+const latestUserButtons = scopeItemsToLatestUser(buttons);
+const hasAssistantOwnershipMetadata = buttons.some(
+  (button) =>
+    typeof button?.insideAssistantMessage === "boolean" ||
+    typeof button?.insideFinalAssistantMessage === "boolean",
+);
+const assistantOwnedButtons = latestUserButtons.filter((button) => Boolean(button?.insideAssistantMessage));
+const finalAssistantButtons = assistantOwnedButtons.filter((button) => Boolean(button?.insideFinalAssistantMessage));
+const downloadTargets = hasAssistantOwnershipMetadata
+  ? finalAssistantButtons.length > 0
+    ? finalAssistantButtons.filter((button) => Boolean(button?.behaviorButton) || isDownloadControl(button))
+    : assistantOwnedButtons.filter((button) => isDownloadControl(button))
+  : latestUserButtons.filter((button) => isDownloadControl(button));
+
+process.stdout.write(String(downloadTargets.length));
 NODE
 }
 
@@ -534,7 +612,7 @@ download_turn_artifacts() {
   local export_output="$out_dir/exports/${turn}.thread.json"
   local export_log="$out_dir/logs/${turn}.thread-export.log"
   local turn_download_dir="$out_dir/downloads/${turn}"
-  local attachment_count="0"
+  local download_target_count="0"
 
   mkdir -p "$turn_download_dir"
 
@@ -551,10 +629,10 @@ download_turn_artifacts() {
     return 0
   fi
 
-  attachment_count="$(export_attachment_count "$export_output" 2>/dev/null || printf '0')"
+  download_target_count="$(export_download_target_count "$export_output" 2>/dev/null || printf '0')"
 
-  if [[ "$attachment_count" == "0" ]]; then
-    printf 'No downloadable attachment buttons found in thread export for pass %s.\n' "$turn" \
+  if [[ "$download_target_count" == "0" ]]; then
+    printf 'No latest-turn assistant download targets found in thread export for pass %s.\n' "$turn" \
       >"$out_dir/logs/${turn}.download-skip.log"
     return 0
   fi
