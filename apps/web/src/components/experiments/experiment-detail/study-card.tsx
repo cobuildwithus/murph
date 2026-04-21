@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/src/components/ui/collapsible";
+import { Collapsible, CollapsibleContent } from "@/src/components/ui/collapsible";
 import { cn } from "@/src/lib/utils";
 import type { Study } from "@/src/types/experiments";
 
@@ -14,29 +14,28 @@ export function StudyCard({
   type,
   title,
   authors,
-  journal,
   year,
   participants,
   includedStudyCount,
-  population,
-  duration,
   designLabel,
   url,
   finding,
   last,
 }: StudyCardProps) {
   const [open, setOpen] = useState(false);
+  const isInteractive = Boolean(finding);
   const yearLabel = typeof year === "number" ? year.toString() : null;
   const participantLabel = formatParticipantLabel({
     participants,
   });
   const includedStudiesLabel = formatIncludedStudiesLabel(includedStudyCount);
-  const metadata = formatMetadata([
-    authors,
-    journal,
-    population,
-    duration,
-  ]);
+  const toggleOpen = () => {
+    if (!isInteractive) {
+      return;
+    }
+
+    setOpen((current) => !current);
+  };
   const rowContent = (
     <div className="flex gap-4 px-6 py-5">
       <div className="flex w-[74px] shrink-0 flex-col items-start gap-1">
@@ -65,12 +64,22 @@ export function StudyCard({
             </span>
           ) : null}
         </div>
-        {finding && !open ? (
-          <span className="max-w-[34ch] line-clamp-1 pt-1 text-[11px]/4 text-muted-foreground/85">
-            {finding}
-          </span>
+        {authors ? (
+          <span className="mt-1 text-[11px]/4 text-muted-foreground/70">{authors}</span>
         ) : null}
-        <span className="mt-0.5 text-[11px]/4 text-muted-foreground/70">{metadata}</span>
+        {url ? (
+          <a
+            href={url}
+            className="mt-1 w-fit text-xs/4 text-primary underline-offset-4 hover:underline"
+            onClick={(event) => {
+              event.stopPropagation();
+            }}
+            rel="noreferrer"
+            target="_blank"
+          >
+            Source ↗
+          </a>
+        ) : null}
       </div>
     </div>
   );
@@ -81,39 +90,39 @@ export function StudyCard({
       onOpenChange={setOpen}
       className={cn(!last && "border-b border-border")}
     >
-      {finding ? (
-        <CollapsibleTrigger
-          className={cn(
-            "w-full text-left transition-colors outline-none hover:bg-secondary/8 focus-visible:bg-secondary/8 cursor-pointer",
-            open && "bg-secondary/8",
-          )}
-        >
-          {rowContent}
-        </CollapsibleTrigger>
-      ) : rowContent}
-      {finding ? (
-        <CollapsibleContent className="px-6 pb-5">
-          <div className="pl-[90px]">
-            <p className="max-w-[52ch] text-[15px]/6 text-foreground/90">
-              {finding}
-            </p>
-          </div>
-        </CollapsibleContent>
-      ) : null}
-      {url ? (
-        <div className="px-6 pb-5">
-          <div className="pl-[90px]">
-            <a
-              href={url}
-              className="text-xs/4 text-primary underline-offset-4 hover:underline"
-              rel="noreferrer"
-              target="_blank"
-            >
-              Source ↗
-            </a>
-          </div>
-        </div>
-      ) : null}
+      <div
+        aria-expanded={isInteractive ? open : undefined}
+        className={cn(
+          "transition-colors",
+          isInteractive && "cursor-pointer hover:bg-secondary/8 focus-visible:bg-secondary/8",
+          open && "bg-secondary/8",
+        )}
+        data-slot={isInteractive ? "study-card-trigger" : undefined}
+        onClick={toggleOpen}
+        onKeyDown={(event) => {
+          if (!isInteractive) {
+            return;
+          }
+
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            toggleOpen();
+          }
+        }}
+        role={isInteractive ? "button" : undefined}
+        tabIndex={isInteractive ? 0 : undefined}
+      >
+        {rowContent}
+        {finding ? (
+          <CollapsibleContent className="px-6 pb-5">
+            <div className="pl-[90px]">
+              <p className="max-w-[52ch] text-[15px]/6 text-foreground/90">
+                {finding}
+              </p>
+            </div>
+          </CollapsibleContent>
+        ) : null}
+      </div>
     </Collapsible>
   );
 }
@@ -130,25 +139,4 @@ function formatIncludedStudiesLabel(includedStudyCount: Study["includedStudyCoun
   return typeof includedStudyCount === "number"
     ? `${includedStudyCount.toLocaleString()} ${includedStudyCount === 1 ? "study" : "studies"}`
     : null;
-}
-
-function formatMetadata(parts: Array<string | undefined>): string {
-  const seen = new Set<string>();
-
-  return parts
-    .flatMap((part) => {
-      const trimmed = part?.trim();
-      return trimmed ? [trimmed] : [];
-    })
-    .filter((part) => {
-      const normalized = part.toLocaleLowerCase();
-
-      if (seen.has(normalized)) {
-        return false;
-      }
-
-      seen.add(normalized);
-      return true;
-    })
-    .join(" · ");
 }
