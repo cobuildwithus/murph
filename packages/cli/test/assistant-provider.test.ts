@@ -647,7 +647,7 @@ test('executeAssistantProviderTurn dispatches to the Codex adapter and preserves
   assert.equal(typeof call?.onProgress, 'function')
   assert.equal(call?.profile, 'primary')
   assert.equal(call?.oss, true)
-  assert.match(call?.prompt ?? '', /system prompt/u)
+  assert.doesNotMatch(call?.prompt ?? '', /system prompt/u)
   assert.match(call?.prompt ?? '', /channel: telegram/u)
   assert.match(call?.prompt ?? '', /thread: chat-123/u)
   assert.match(call?.prompt ?? '', /Recent local conversation transcript/u)

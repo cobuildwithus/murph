@@ -17,6 +17,7 @@ import {
   resolveAssistantOnboardingInjectionPlan,
 } from '../src/assistant/provider-turn-runner.js'
 import {
+  isAssistantSessionFreshForOnboarding,
   resolveAssistantTurnSharedPlan,
 } from '../src/assistant/turn-plan.js'
 import type {
@@ -37,7 +38,7 @@ afterEach(async () => {
 })
 
 describe('assistant onboarding prompt injection', () => {
-  it('keeps onboarding eligible in the first session after the signup welcome marked first contact seen', async () => {
+  it('ends onboarding eligibility after the first turn once first-contact state is seen', async () => {
     const vault = await createTempVault()
     const route = {
       actorId: 'actor-first',
@@ -74,7 +75,7 @@ describe('assistant onboarding prompt injection', () => {
     )
 
     expect(plan.firstContactStateDocIds).toEqual(stateDocIds)
-    expect(plan.earlySessionOnboardingEligible).toBe(true)
+    expect(plan.earlySessionOnboardingEligible).toBe(false)
   })
 
   it('does not inject onboarding for a later session in the same vault', async () => {
@@ -112,7 +113,7 @@ describe('assistant onboarding prompt injection', () => {
     expect(plan.earlySessionOnboardingEligible).toBe(false)
   })
 
-  it('forces a bootstrap prompt instead of native resume whenever first-session onboarding is eligible', () => {
+  it('preserves native resume even when the first-session onboarding gate is otherwise eligible', () => {
     expect(
       resolveAssistantOnboardingInjectionPlan({
         candidateResumeProviderSessionId: 'provider-session-1',
@@ -120,9 +121,9 @@ describe('assistant onboarding prompt injection', () => {
         promptProfile: 'conversation',
       }),
     ).toEqual({
-      earlySessionOnboardingInjected: true,
-      resumeProviderSessionId: null,
-      shouldInjectBootstrapContext: true,
+      earlySessionOnboardingInjected: false,
+      resumeProviderSessionId: 'provider-session-1',
+      shouldInjectBootstrapContext: false,
     })
     expect(
       resolveAssistantOnboardingInjectionPlan({
@@ -135,6 +136,11 @@ describe('assistant onboarding prompt injection', () => {
       resumeProviderSessionId: 'provider-session-1',
       shouldInjectBootstrapContext: false,
     })
+  })
+
+  it('treats only zero-turn sessions as fresh enough for onboarding', () => {
+    expect(isAssistantSessionFreshForOnboarding({ turnCount: 0 })).toBe(true)
+    expect(isAssistantSessionFreshForOnboarding({ turnCount: 1 })).toBe(false)
   })
 })
 

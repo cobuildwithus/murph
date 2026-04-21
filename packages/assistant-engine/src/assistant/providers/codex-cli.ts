@@ -73,7 +73,6 @@ export const codexCliProviderDefinition: AssistantProviderDefinition = {
       onTraceEvent: input.onTraceEvent,
       oss: providerConfig.target.oss,
       profile: providerConfig.target.profile ?? undefined,
-      prompt: resolveAssistantProviderPrompt(input),
       images: extractCodexUserMessageImages(input.userMessageContent),
       reasoningEffort: providerConfig.policy.reasoningEffort ?? undefined,
       sandbox: providerConfig.policy.sandbox ?? undefined,
@@ -84,6 +83,7 @@ export const codexCliProviderDefinition: AssistantProviderDefinition = {
     try {
       result = await executeCodexPrompt({
         ...baseExecInput,
+        prompt: resolveAssistantProviderPrompt(input),
         resumeSessionId: input.resumeProviderSessionId,
       })
     } catch (error) {
@@ -94,6 +94,10 @@ export const codexCliProviderDefinition: AssistantProviderDefinition = {
       ) {
         result = await executeCodexPrompt({
           ...baseExecInput,
+          prompt: resolveAssistantProviderPrompt({
+            ...input,
+            resumeProviderSessionId: null,
+          }),
           resumeSessionId: undefined,
         })
       } else {

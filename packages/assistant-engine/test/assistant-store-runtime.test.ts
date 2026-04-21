@@ -873,7 +873,10 @@ describe('assistant turn shared plan', () => {
     expect(runtimeStateMocks.listAssistantSessions).toHaveBeenCalledWith(
       '/tmp/turn-plan-vault',
     )
-    expect(turnPlanMocks.hasAssistantSeenFirstContact).not.toHaveBeenCalled()
+    expect(turnPlanMocks.hasAssistantSeenFirstContact).toHaveBeenCalledWith({
+      docIds: ['onboarding/first-contact/doc-1'],
+      vault: '/tmp/turn-plan-vault',
+    })
     expect(eligiblePlan.earlySessionOnboardingEligible).toBe(true)
     expect(eligiblePlan.firstContactStateDocIds).toEqual([
       'onboarding/first-contact/doc-1',
@@ -977,7 +980,7 @@ describe('assistant turn shared plan', () => {
     expect(plan.firstContactStateDocIds).toEqual([])
   })
 
-  it('treats equal createdAt values as ambiguous and keeps onboarding eligible', async () => {
+  it('treats equal createdAt values as ambiguous and keeps onboarding eligible when first contact is still unseen', async () => {
     turnPlanMocks.resolveAssistantCliAccessContext.mockReturnValue({
       env: {},
       rawCommand: 'vault-cli',
@@ -1033,6 +1036,10 @@ describe('assistant turn shared plan', () => {
     expect(runtimeStateMocks.listAssistantSessions).toHaveBeenCalledWith(
       '/tmp/turn-plan-vault',
     )
+    expect(turnPlanMocks.hasAssistantSeenFirstContact).toHaveBeenCalledWith({
+      docIds: ['onboarding/first-contact/doc-1'],
+      vault: '/tmp/turn-plan-vault',
+    })
     expect(plan.earlySessionOnboardingEligible).toBe(true)
   })
 })

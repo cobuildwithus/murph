@@ -3,6 +3,7 @@ import { resolveAssistantCliAccessContext } from '../assistant-cli-access.js'
 import { resolveAssistantOperatorAuthority } from './operator-authority.js'
 import { resolveAssistantConversationPolicy } from './conversation-policy.js'
 import {
+  hasAssistantSeenFirstContact,
   resolveAssistantFirstContactStateDocIds,
 } from './first-contact.js'
 import type {
@@ -43,7 +44,8 @@ export async function resolveAssistantTurnSharedPlan(
       : []
   const earlySessionOnboardingEligible =
     input.includeEarlySessionOnboarding === true &&
-    (await isAssistantFirstSessionForOnboarding({
+    (await isAssistantEarlySessionOnboardingEligible({
+      firstContactStateDocIds,
       session: resolved.session,
       vault: input.vault,
     }))
@@ -57,6 +59,38 @@ export async function resolveAssistantTurnSharedPlan(
     persistUserPromptOnFailure: input.persistUserPromptOnFailure ?? true,
     requestedWorkingDirectory,
   }
+}
+
+export async function isAssistantEarlySessionOnboardingEligible(input: {
+  firstContactStateDocIds?: readonly string[]
+  session: AssistantSession
+  vault: string
+}): Promise<boolean> {
+  if (!isAssistantSessionFreshForOnboarding(input.session)) {
+    return false
+  }
+
+  const firstContactStateDocIds = input.firstContactStateDocIds ?? []
+  if (
+    firstContactStateDocIds.length > 0 &&
+    (await hasAssistantSeenFirstContact({
+      docIds: firstContactStateDocIds,
+      vault: input.vault,
+    }))
+  ) {
+    return false
+  }
+
+  return await isAssistantFirstSessionForOnboarding({
+    session: input.session,
+    vault: input.vault,
+  })
+}
+
+export function isAssistantSessionFreshForOnboarding(
+  session: Pick<AssistantSession, 'turnCount'>,
+): boolean {
+  return session.turnCount === 0
 }
 
 export async function isAssistantFirstSessionForOnboarding(input: {

@@ -783,7 +783,7 @@ describe('executeProviderTurnWithRecovery', () => {
     ).toHaveLength(20)
   })
 
-  it('clears native resume and injects bootstrap context when onboarding stays eligible', async () => {
+  it('preserves native resume and skips bootstrap overlays when onboarding stays eligible', async () => {
     const session = createAssistantSession({
       providerSessionId: 'provider-session-primary',
       resumeRouteId: 'route-primary',
@@ -827,17 +827,12 @@ describe('executeProviderTurnWithRecovery', () => {
       turnId: 'turn-onboarding-overrides-native-resume',
     })
 
-    expect(runnerMocks.resolveAssistantCliSurfaceBootstrapContext).toHaveBeenCalled()
-    expect(runnerMocks.buildAssistantVaultOverviewBlock).toHaveBeenCalledWith(
-      '/tmp/test-vault',
-    )
+    expect(runnerMocks.resolveAssistantCliSurfaceBootstrapContext).not.toHaveBeenCalled()
+    expect(runnerMocks.buildAssistantVaultOverviewBlock).not.toHaveBeenCalled()
     expect(runnerMocks.executeAssistantProviderTurnAttempt).toHaveBeenCalledWith(
       expect.objectContaining({
-        resumeProviderSessionId: null,
-        sessionContext: {
-          binding: session.binding,
-        },
-        systemPrompt: 'prompt:none:first:cli-bootstrap:Vault overview for navigation only:\n- Canonical coverage includes 1 meal event.',
+        resumeProviderSessionId: 'provider-session-primary',
+        systemPrompt: 'prompt:none:later:no-bootstrap:no-overview',
       }),
     )
   })
