@@ -104,7 +104,7 @@ test("ExperimentsPage merges protocol-shaped private runs into the matching publ
   const markup = renderToStaticMarkup(createElement(ExperimentsPage));
 
   assert.match(markup, /Finnish Dry Sauna/);
-  assert.match(markup, /Started Apr 18, 2026 · 21 days · 81 studies/);
+  assert.match(markup, /Started Apr 18, 2026 · 14 days · 81 studies/);
   assert.doesNotMatch(markup, /protocol_variant:dry-sauna\/murph-finnish-standard-3x-week/);
   assert.doesNotMatch(markup, /Morning walk/);
 });
