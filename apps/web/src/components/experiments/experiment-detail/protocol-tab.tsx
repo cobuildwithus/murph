@@ -316,9 +316,6 @@ function ExpectedSignalContextPills({
     <div className="flex flex-col gap-3 rounded-xl border border-secondary/25 bg-card/70 p-4">
       <div className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between sm:gap-4">
         <SectionLabel>Also worth watching</SectionLabel>
-        <span className="text-[12px]/4 text-muted-foreground">
-          Helpful background, not promised signals.
-        </span>
       </div>
       <div className="flex flex-wrap gap-2.5">
         {signals.map((signal) => (
