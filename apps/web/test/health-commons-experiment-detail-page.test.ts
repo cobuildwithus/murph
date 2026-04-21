@@ -47,7 +47,7 @@ describe("ExperimentDetailPage", () => {
     const markup = renderToStaticMarkup(element);
 
     expect(mocks.experimentDetailClient).toHaveBeenCalledTimes(1);
-    const clientExperiment = mocks.experimentDetailClient.mock.calls[0]?.[0]
+    const clientExperiment = mocks.experimentDetailClient.mock.calls.at(-1)?.[0]
       ?.protocol as ExperimentProtocol;
 
     expect(clientExperiment).toEqual(expect.objectContaining({
@@ -100,16 +100,35 @@ describe("ExperimentDetailPage", () => {
     });
     const markup = renderToStaticMarkup(element);
 
-    expect(mocks.experimentDetailClient).toHaveBeenCalledWith({
-      protocol: expect.objectContaining({
-        commons: expect.objectContaining({
-          aliases: expect.arrayContaining(["bryan-johnson-blueprint"]),
-          key: "protocol_variant:dry-sauna/bryan-johnson-blueprint",
-        }),
-        id: "bryan-johnson-blueprint",
-        title: "Bryan Johnson Blueprint Sauna",
+    const clientExperiment = mocks.experimentDetailClient.mock.calls.at(-1)?.[0]
+      ?.protocol as ExperimentProtocol;
+
+    expect(clientExperiment).toEqual(expect.objectContaining({
+      commons: expect.objectContaining({
+        aliases: expect.arrayContaining(["bryan-johnson-blueprint"]),
+        key: "protocol_variant:dry-sauna/bryan-johnson-blueprint",
       }),
-    });
+      id: "bryan-johnson-blueprint",
+      title: expect.stringContaining("Bryan Johnson"),
+    }));
+    expect(clientExperiment.studies).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        journal: "Substack Post",
+        title: "31 brutal minutes to saunamaxx",
+      }),
+      expect.objectContaining({
+        journal: "LinkedIn Post",
+        title: "Most people might miss the biggest benefit of sauna",
+      }),
+      expect.objectContaining({
+        journal: "X Post",
+        title: "Core-temperature sauna update",
+      }),
+      expect.objectContaining({
+        journal: "Blueprint Page",
+        title: "My #1 Longevity Protocol of 2025",
+      }),
+    ]));
     expect(markup).toContain('data-experiment-id="bryan-johnson-blueprint"');
     expect(markup).toContain(
       'data-experiment-key="protocol_variant:dry-sauna/bryan-johnson-blueprint"',

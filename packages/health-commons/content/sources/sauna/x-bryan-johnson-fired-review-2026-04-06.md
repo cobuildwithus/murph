@@ -16,7 +16,7 @@ categories:
   - x-post
 source:
   kind: web_page
-  title: Bryan Johnson X post 2041202370672288028
+  title: 232-session sauna review
   authors: Bryan Johnson
   year: 2026
   url: https://x.com/bryan_johnson/status/2041202370672288028

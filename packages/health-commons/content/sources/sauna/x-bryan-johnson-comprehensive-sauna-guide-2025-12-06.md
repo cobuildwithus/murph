@@ -20,7 +20,7 @@ relations:
     target: source_artifact:linkedin-bryan-johnson-sauna-guide-2025-12-06
 source:
   kind: web_page
-  title: Bryan Johnson X post 1997403290171330638
+  title: Comprehensive sauna guide
   authors: Bryan Johnson
   year: 2025
   url: https://x.com/bryan_johnson/status/1997403290171330638

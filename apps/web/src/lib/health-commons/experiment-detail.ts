@@ -540,11 +540,53 @@ function toStudy(entity: HealthCommonsEntity): Study {
     type: sourceKindToStudyType(source),
     title: source?.title ?? entity.title,
     authors: source?.authors ?? "Health Commons",
-    journal: source?.journal ?? formatCategory(source?.kind ?? entity.entityType),
+    journal: source?.journal ?? formatSourceSurfaceLabel(entity, source),
     year: source?.year,
     finding: entity.summary ?? summarizeBody(entity.body),
     url: source?.url,
   };
+}
+
+function formatSourceSurfaceLabel(
+  entity: HealthCommonsEntity,
+  source: HealthCommonsSource | undefined,
+): string {
+  if (!source) {
+    return formatCategory(entity.entityType);
+  }
+
+  if (source.kind !== "web_page") {
+    return formatCategory(source.kind);
+  }
+
+  const categories = new Set((entity.categories ?? []).map((category) => category.toLowerCase()));
+  const url = source.url?.toLowerCase() ?? "";
+
+  if (
+    categories.has("x-post") ||
+    url.includes("://x.com/") ||
+    url.includes("://twitter.com/")
+  ) {
+    return "X Post";
+  }
+
+  if (
+    categories.has("linkedin") ||
+    url.includes("://www.linkedin.com/") ||
+    url.includes("://linkedin.com/")
+  ) {
+    return "LinkedIn Post";
+  }
+
+  if (categories.has("substack") || url.includes(".substack.com/")) {
+    return "Substack Post";
+  }
+
+  if (categories.has("blueprint") || url.includes("://blueprint.bryanjohnson.com/")) {
+    return "Blueprint Page";
+  }
+
+  return "Web Page";
 }
 
 function sourceKindToStudyType(source: HealthCommonsSource | undefined): Study["type"] {
