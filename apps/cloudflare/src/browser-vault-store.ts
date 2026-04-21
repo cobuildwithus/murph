@@ -63,8 +63,9 @@ export function createHostedBrowserVaultReplicaStore(input: {
         return null;
       }
 
+      const envelopeValue: unknown = JSON.parse(utf8Decoder.decode(await object.arrayBuffer()));
       return parseHostedCipherEnvelope(
-        JSON.parse(utf8Decoder.decode(await object.arrayBuffer())) as unknown,
+        envelopeValue,
         "Hosted browser vault replica envelope",
       );
     },

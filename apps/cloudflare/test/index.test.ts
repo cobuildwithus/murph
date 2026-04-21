@@ -49,6 +49,14 @@ const TEST_VERCEL_OIDC_PUBLIC_JWK = {
   use: "sig",
 };
 
+function createExecutionContext(waitUntil: ExecutionContext["waitUntil"]): ExecutionContext {
+  return {
+    passThroughOnException() {},
+    props: undefined,
+    waitUntil,
+  };
+}
+
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
@@ -432,7 +440,7 @@ describe("cloudflare worker routes", () => {
         method: "POST",
       })),
       createWorkerEnv(stub),
-      { waitUntil } as unknown as ExecutionContext,
+      createExecutionContext(waitUntil),
     );
 
     expect(response.status).toBe(202);

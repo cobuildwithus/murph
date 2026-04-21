@@ -116,7 +116,7 @@ describe("hosted browser vault replica store", () => {
       scope: "browser-vault-replica",
     });
     expect(loadedBytes).not.toBeNull();
-    const loaded = JSON.parse(new TextDecoder().decode(loadedBytes ?? undefined)) as unknown;
+    const loaded: unknown = JSON.parse(new TextDecoder().decode(loadedBytes ?? undefined));
     expect(loaded).toEqual(replica);
     expect(parseBrowserVaultReplica(loaded)).toEqual(replica);
     expect(replica.entities[0]?.tags).toEqual(["browser"]);

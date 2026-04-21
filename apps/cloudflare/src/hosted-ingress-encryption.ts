@@ -67,7 +67,7 @@ export async function decryptHostedIngressPayloadCiphertext(input: {
         userId: input.userId,
       });
 
-      return JSON.parse(plaintext) as unknown;
+      return parseJsonValue(plaintext, "Hosted ingress payload ciphertext");
     } catch (error) {
       lastError = error;
     }
@@ -130,17 +130,9 @@ function decodeHostedIngressEncryptionKeyring(input: {
   const keysByVersion: Record<string, Uint8Array> = {};
 
   if (input.keyringJson) {
-    let parsed: unknown;
+    const parsed = parseJsonValue(input.keyringJson, input.label);
 
-    try {
-      parsed = JSON.parse(input.keyringJson) as unknown;
-    } catch (error) {
-      throw new TypeError(
-        `${input.label} must be valid JSON: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
-
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    if (!isRecord(parsed)) {
       throw new TypeError(`${input.label} must be a JSON object keyed by key version.`);
     }
 
@@ -170,6 +162,20 @@ function decodeHostedIngressEncryptionKeyring(input: {
   }
 
   return keysByVersion;
+}
+
+function parseJsonValue(value: string, label: string): unknown {
+  try {
+    return JSON.parse(value);
+  } catch (error) {
+    throw new TypeError(
+      `${label} must be valid JSON: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 async function decryptHostedIngressCiphertext(input: {

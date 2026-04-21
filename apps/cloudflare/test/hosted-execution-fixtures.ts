@@ -72,6 +72,26 @@ interface TestHostedWakeFetchProofClaims {
   wakeSeq: string;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isTestHostedWakeFetchProofClaims(value: unknown): value is TestHostedWakeFetchProofClaims {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return value.kind === "hosted-ingress-fetch-proof"
+    && typeof value.userId === "string"
+    && typeof value.wakeEventId === "string"
+    && typeof value.wakeId === "string"
+    && typeof value.wakeSeq === "string"
+    && typeof value.fetchedCommittedSeq === "string"
+    && typeof value.fetchedCursorVersion === "string"
+    && typeof value.iat === "number"
+    && typeof value.exp === "number";
+}
+
 export function createHostedExecutionTestEnv(
   overrides: Partial<Record<string, string | undefined>> = {},
 ): Record<string, string | undefined> {
@@ -157,26 +177,21 @@ export function verifyTestHostedWakeFetchProof(input: {
 
   let claims: unknown;
   try {
-    claims = JSON.parse(Buffer.from(encodedClaims, "base64url").toString("utf8")) as unknown;
+    claims = JSON.parse(Buffer.from(encodedClaims, "base64url").toString("utf8"));
   } catch {
     return false;
   }
 
-  if (!claims || typeof claims !== "object" || Array.isArray(claims)) {
+  if (!isTestHostedWakeFetchProofClaims(claims)) {
     return false;
   }
 
-  const typedClaims = claims as Partial<TestHostedWakeFetchProofClaims>;
-
-  return typedClaims.kind === "hosted-ingress-fetch-proof"
-    && typedClaims.userId === input.wake.userId
-    && typedClaims.wakeEventId === input.wake.eventId
-    && typedClaims.wakeId === input.wake.id
-    && typedClaims.wakeSeq === input.wake.seq
-    && typedClaims.fetchedCommittedSeq === input.cursor.committedSeq
-    && typedClaims.fetchedCursorVersion === input.cursor.version
-    && typeof typedClaims.iat === "number"
-    && typeof typedClaims.exp === "number";
+  return claims.userId === input.wake.userId
+    && claims.wakeEventId === input.wake.eventId
+    && claims.wakeId === input.wake.id
+    && claims.wakeSeq === input.wake.seq
+    && claims.fetchedCommittedSeq === input.cursor.committedSeq
+    && claims.fetchedCursorVersion === input.cursor.version;
 }
 
 export function encryptTestHostedIngressPayload(input: {

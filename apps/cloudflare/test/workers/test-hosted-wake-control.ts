@@ -26,6 +26,7 @@ import {
   HOSTED_INGRESS_PAYLOAD_SCHEMA,
   buildHostedExecutionRuntimeTimerWake,
 } from "@murphai/hosted-execution";
+import { parseHostedExecutionBundleRef } from "@murphai/hosted-execution/parsers";
 import {
   encryptTestHostedIngressPayload,
   issueTestHostedWakeFetchProof,
@@ -173,6 +174,10 @@ type TestHostedWakeFinalizeTokenClaims = {
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 
 export async function appendTestHostedWake(input: {
   bucket: R2BucketLike;
@@ -462,30 +467,31 @@ function parseTestHostedWakeFinalizeToken(
   value: string,
 ): TestHostedWakeFinalizeTokenClaims | null {
   try {
-    const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as unknown;
+    const parsed: unknown = JSON.parse(Buffer.from(value, "base64url").toString("utf8"));
 
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    if (!isRecord(parsed)) {
       return null;
     }
-
-    const claims = parsed as Partial<TestHostedWakeFinalizeTokenClaims>;
     if (
-      typeof claims.userId !== "string"
-      || typeof claims.wakeId !== "string"
-      || typeof claims.wakeSeq !== "string"
-      || typeof claims.committedSeq !== "string"
-      || typeof claims.committedCursorVersion !== "string"
+      typeof parsed.userId !== "string"
+      || typeof parsed.wakeId !== "string"
+      || typeof parsed.wakeSeq !== "string"
+      || typeof parsed.committedSeq !== "string"
+      || typeof parsed.committedCursorVersion !== "string"
     ) {
       return null;
     }
 
     return {
-      committedCursorVersion: claims.committedCursorVersion,
-      committedSeq: claims.committedSeq,
-      previousSnapshotRef: claims.previousSnapshotRef ?? null,
-      userId: claims.userId,
-      wakeId: claims.wakeId,
-      wakeSeq: claims.wakeSeq,
+      committedCursorVersion: parsed.committedCursorVersion,
+      committedSeq: parsed.committedSeq,
+      previousSnapshotRef: parseHostedExecutionBundleRef(
+        parsed.previousSnapshotRef ?? null,
+        "Test hosted wake finalize token previousSnapshotRef",
+      ),
+      userId: parsed.userId,
+      wakeId: parsed.wakeId,
+      wakeSeq: parsed.wakeSeq,
     };
   } catch {
     return null;

@@ -413,9 +413,7 @@ async function handleBrowserVaultSessionRoute(
   const userId = decodeRouteParam(encodedUserId);
   let body;
   try {
-    body = parseBrowserVaultSessionRequest(
-      JSON.parse(await readCachedRequestText(context)) as unknown,
-    );
+    body = parseBrowserVaultSessionRequest(parseJsonValue(await readCachedRequestText(context)));
   } catch (error) {
     emitHostedExecutionStructuredLog({
       component: "worker",
@@ -465,6 +463,10 @@ async function handleBrowserVaultSessionRoute(
     replicaRef: body.replicaRef,
     state: "ready",
   });
+}
+
+function parseJsonValue(value: string): unknown {
+  return JSON.parse(value);
 }
 
 function parseBrowserVaultSessionRequest(value: unknown): {

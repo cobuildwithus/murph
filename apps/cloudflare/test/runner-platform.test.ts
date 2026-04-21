@@ -22,6 +22,33 @@ import {
   createHostedExecutionTestEnv,
 } from "./hosted-execution-fixtures.ts";
 
+function requireFetchCallArgs(
+  call: readonly unknown[] | undefined,
+  label: string,
+): { init?: RequestInit; input: RequestInfo | URL } {
+  if (!call) {
+    throw new Error(`${label} was not called.`);
+  }
+
+  const [input, init] = call;
+  if (!(input instanceof Request) && !(input instanceof URL) && typeof input !== "string") {
+    throw new Error(`${label} must receive a Request, URL, or string input.`);
+  }
+  if (init !== undefined && (typeof init !== "object" || init === null || Array.isArray(init))) {
+    throw new Error(`${label} init must be an object when provided.`);
+  }
+
+  return {
+    init: init as RequestInit | undefined,
+    input,
+  };
+}
+
+function requireFetchRequest(call: readonly unknown[] | undefined, label: string): Request {
+  const { init, input } = requireFetchCallArgs(call, label);
+  return input instanceof Request ? input : new Request(input, init);
+}
+
 describe("buildHostedExecutionRuntimePlatform", () => {
   beforeEach(() => {
     mocks.emitHostedExecutionStructuredLog.mockReset();
@@ -142,17 +169,12 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     await platform.effectsPort.readRawEmailMessage("raw/message#1");
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const firstCall = fetchMock.mock.calls[0];
-    if (!firstCall) {
-      throw new Error("Expected the effects port fetch to run.");
-    }
-    const [request] = firstCall as unknown as [RequestInfo | URL, RequestInit?];
-    expect(request).toBeInstanceOf(Request);
-    expect((request as Request).url).toBe("http://results.worker/messages/raw%2Fmessage%231");
-    expect((request as Request).headers.get("x-hosted-execution-runner-proxy-token")).toBe(
+    const request = requireFetchRequest(fetchMock.mock.calls[0], "effects port fetch");
+    expect(request.url).toBe("http://results.worker/messages/raw%2Fmessage%231");
+    expect(request.headers.get("x-hosted-execution-runner-proxy-token")).toBe(
       "runner-proxy-token",
     );
-    expect((request as Request).method).toBe("GET");
+    expect(request.method).toBe("GET");
   });
 
   it("fails closed before issuing internal-host requests when the per-run proxy token is missing", async () => {
@@ -182,19 +204,14 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     await platform.effectsPort.readRawEmailMessage("raw/message#1");
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const firstCall = fetchMock.mock.calls[0];
-    if (!firstCall) {
-      throw new Error("Expected the bridged effects port fetch to run.");
-    }
-    const [request] = firstCall as unknown as [RequestInfo | URL, RequestInit?];
-    expect(request).toBeInstanceOf(Request);
-    expect((request as Request).url).toBe(
+    const request = requireFetchRequest(fetchMock.mock.calls[0], "bridged effects port fetch");
+    expect(request.url).toBe(
       "http://127.0.0.1:8787/__murph/local-internal-proxy/users/member_123/results.worker/messages/raw%2Fmessage%231",
     );
-    expect((request as Request).headers.get("x-hosted-execution-runner-proxy-token")).toBe(
+    expect(request.headers.get("x-hosted-execution-runner-proxy-token")).toBe(
       "runner-proxy-token",
     );
-    expect((request as Request).method).toBe("GET");
+    expect(request.method).toBe("GET");
   });
 
   it("does not require a second local bridge token when loopback proxying is enabled", async () => {
@@ -208,12 +225,8 @@ describe("buildHostedExecutionRuntimePlatform", () => {
 
     await platform.effectsPort.readRawEmailMessage("raw/message#1");
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const firstCall = fetchMock.mock.calls[0];
-    if (!firstCall) {
-      throw new Error("Expected the bridged effects port fetch to run.");
-    }
-    const [request] = firstCall as unknown as [RequestInfo | URL, RequestInit?];
-    expect((request as Request).url).toBe(
+    const request = requireFetchRequest(fetchMock.mock.calls[0], "bridged effects port fetch");
+    expect(request.url).toBe(
       "http://127.0.0.1:8787/__murph/local-internal-proxy/users/member_123/results.worker/messages/raw%2Fmessage%231",
     );
   });
@@ -221,7 +234,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
   it("binds device-sync runtime requests to the hosted member id at the signed web callback seam", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const request = input instanceof Request ? input : new Request(input, init);
-      const body = await request.json() as Record<string, unknown>;
+      const body: unknown = await request.json();
 
       expect(body).toEqual({
         connectionId: "conn_123",
@@ -255,11 +268,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
 
     expect(snapshot.userId).toBe("member_123");
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const firstCall = fetchMock.mock.calls[0];
-    if (!firstCall) {
-      throw new Error("Expected the device-sync fetch to run.");
-    }
-    const [url, init] = firstCall as unknown as [RequestInfo | URL, RequestInit?];
+    const { init, input: url } = requireFetchCallArgs(fetchMock.mock.calls[0], "device-sync fetch");
     expect(String(url)).toBe("https://web.example.test/api/internal/device-sync/runtime/snapshot");
     const headers = new Headers(init?.headers);
     expect(headers.get("authorization")).toBeNull();
@@ -298,11 +307,10 @@ describe("buildHostedExecutionRuntimePlatform", () => {
 
     expect(connectLink.provider).toBe("oura");
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const firstCall = fetchMock.mock.calls[0];
-    if (!firstCall) {
-      throw new Error("Expected the device-sync connect-link fetch to run.");
-    }
-    const [url, init] = firstCall as unknown as [RequestInfo | URL, RequestInit?];
+    const { init, input: url } = requireFetchCallArgs(
+      fetchMock.mock.calls[0],
+      "device-sync connect-link fetch",
+    );
     expect(String(url)).toBe("https://web.example.test/api/internal/device-sync/providers/oura/connect-link");
     expect(init?.method).toBe("POST");
     expect(init?.body).toBeUndefined();
@@ -336,19 +344,14 @@ describe("buildHostedExecutionRuntimePlatform", () => {
 
     expect(snapshot.userId).toBe("member_123");
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const firstCall = fetchMock.mock.calls[0];
-    if (!firstCall) {
-      throw new Error("Expected the proxied web-control fetch to run.");
-    }
-    const [request] = firstCall as unknown as [RequestInfo | URL, RequestInit?];
-    expect(request).toBeInstanceOf(Request);
-    expect((request as Request).url).toBe("http://web-control.worker/api/internal/device-sync/runtime/snapshot");
-    expect((request as Request).method).toBe("POST");
-    expect((request as Request).headers.get("x-hosted-execution-runner-proxy-token")).toBe(
+    const request = requireFetchRequest(fetchMock.mock.calls[0], "proxied web-control fetch");
+    expect(request.url).toBe("http://web-control.worker/api/internal/device-sync/runtime/snapshot");
+    expect(request.method).toBe("POST");
+    expect(request.headers.get("x-hosted-execution-runner-proxy-token")).toBe(
       "runner-proxy-token",
     );
-    expect((request as Request).headers.get("content-type")).toBe("application/json");
-    await expect((request as Request).json()).resolves.toEqual({
+    expect(request.headers.get("content-type")).toBe("application/json");
+    await expect(request.json()).resolves.toEqual({
       connectionId: "conn_123",
       userId: "member_123",
     });
