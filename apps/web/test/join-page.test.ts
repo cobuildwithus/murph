@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -149,4 +150,15 @@ test("JoinInvitePage passes invite status and share data into the client tree", 
   assert.match(markup, /data-phone-country-code="GB"/);
   assert.match(markup, /data-invite-code="invite-code"/);
   assert.match(markup, /data-share-code="share-code"/);
+});
+
+test("JoinInvitePage keeps its route copy while inheriting the app-level Open Graph image", async () => {
+  const { metadata } = await import("../app/join/[inviteCode]/page");
+
+  expect(metadata.title).toBe("Murph hosted invite");
+  expect(metadata.openGraph?.title).toBe("Murph hosted invite");
+  expect(metadata.twitter?.title).toBe("Murph hosted invite");
+  expect(
+    existsSync(new URL("../app/join/[inviteCode]/opengraph-image.tsx", import.meta.url))
+  ).toBe(false);
 });
