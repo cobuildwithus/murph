@@ -25,12 +25,12 @@ export function StudyCard({
     participants,
   });
   const includedStudiesLabel = formatIncludedStudiesLabel(includedStudyCount);
-  const metadata = [
+  const metadata = formatMetadata([
     authors,
     journal,
     population,
     duration,
-  ].filter(Boolean).join(" · ");
+  ]);
 
   return (
     <div className={cn("flex gap-4 px-6 py-5", !last && "border-b border-border")}>
@@ -89,4 +89,25 @@ function formatIncludedStudiesLabel(includedStudyCount: Study["includedStudyCoun
   return typeof includedStudyCount === "number"
     ? `${includedStudyCount.toLocaleString()} ${includedStudyCount === 1 ? "study" : "studies"}`
     : null;
+}
+
+function formatMetadata(parts: Array<string | undefined>): string {
+  const seen = new Set<string>();
+
+  return parts
+    .flatMap((part) => {
+      const trimmed = part?.trim();
+      return trimmed ? [trimmed] : [];
+    })
+    .filter((part) => {
+      const normalized = part.toLocaleLowerCase();
+
+      if (seen.has(normalized)) {
+        return false;
+      }
+
+      seen.add(normalized);
+      return true;
+    })
+    .join(" · ");
 }
