@@ -276,6 +276,7 @@ describe("hosted deploy automation helpers", () => {
     expect(workflow).toContain(
       "HOSTED_ASSISTANT_ZERO_DATA_RETENTION: ${{ vars.HOSTED_ASSISTANT_ZERO_DATA_RETENTION }}",
     );
+    expect(workflow).toContain("VERCEL_AI_API_KEY: ${{ secrets.VERCEL_AI_API_KEY }}");
     expect(workflow).toContain('echo "- Container max instances: \\`${CF_CONTAINER_MAX_INSTANCES}\\`"');
   });
 
@@ -371,6 +372,7 @@ describe("hosted deploy automation helpers", () => {
       OPENAI_API_KEY: "sk-user",
       TELEGRAM_BOT_TOKEN: "bot-token",
       TELEGRAM_WEBHOOK_SECRET: "telegram-webhook-secret",
+      VERCEL_AI_API_KEY: "vercel-ai-gateway-key",
     })).toEqual({
       BRAVE_API_KEY: "brave-key",
       HOSTED_EMAIL_SIGNING_SECRET: "email-signing-secret",
@@ -386,6 +388,7 @@ describe("hosted deploy automation helpers", () => {
       MAPBOX_ACCESS_TOKEN: "mapbox-token",
       OPENAI_API_KEY: "sk-user",
       TELEGRAM_BOT_TOKEN: "bot-token",
+      VERCEL_AI_API_KEY: "vercel-ai-gateway-key",
     });
   });
 
