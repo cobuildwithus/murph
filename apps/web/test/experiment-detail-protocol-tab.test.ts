@@ -11,6 +11,28 @@ vi.mock("@/src/components/experiments/experiment-detail/expected-signal-card", (
   },
 }));
 
+vi.mock("@/src/components/experiments/experiment-detail/experiment-progress", () => ({
+  ExperimentProgress({
+    baselineLabel,
+    overallPercent,
+    protocolLabel,
+  }: {
+    baselineLabel: string;
+    overallPercent: number;
+    protocolLabel: string;
+  }) {
+    return createElement(
+      "div",
+      {
+        "data-progress-baseline": baselineLabel,
+        "data-progress-percent": String(overallPercent),
+        "data-progress-protocol": protocolLabel,
+      },
+      `${baselineLabel} | ${protocolLabel} | ${overallPercent}`,
+    );
+  },
+}));
+
 vi.mock("@/src/components/experiments/experiment-detail/expert-card", () => ({
   ExpertCard({ name }: { name: string }) {
     return createElement("div", null, name);
@@ -47,6 +69,13 @@ describe("ProtocolTab", () => {
     expect(markup).toContain("Run the protocol");
     expect(markup).toContain("At a glance");
     expect(markup).toContain("Why it works");
+    expect(markup).toContain("Baseline · 7 days");
+    expect(markup).toContain("Protocol · 14 days");
+    expect(markup).toContain('data-progress-percent="33"');
+    expect(markup).not.toContain("days to analysis");
+    expect(markup).not.toContain("Total run");
+    expect(markup).not.toContain("Protocol window");
+    expect(markup).not.toContain("Before change");
     expect(markup).not.toContain("Step 1");
     expect(markup).not.toContain("STEP 1");
 
@@ -77,6 +106,47 @@ describe("ProtocolTab", () => {
     expect(markup).toContain("Deep Sleep Minutes");
   });
 
+  it("keeps the Bryan Johnson sauna hierarchy focused on tolerability signals", () => {
+    const protocol = resolveHealthCommonsExperimentProtocol("bryan-johnson-blueprint");
+
+    expect(protocol).not.toBeNull();
+
+    const experiment = composeExperimentDetail({
+      protocol: protocol!,
+      privateRun: null,
+    });
+    const markup = renderToStaticMarkup(createElement(ProtocolTab, { experiment }));
+
+    expect(markup).toContain("What could change");
+    expect(countOccurrences(markup, "data-card=")).toBe(2);
+    expect(markup).toContain('data-card="HRV / RMSSD"');
+    expect(markup).toContain('data-card="Resting Heart Rate"');
+    expect(markup).not.toContain("Also worth watching");
+  });
+
+  it("prioritizes aerobic adaptation signals for Norwegian 4x4 and leaves slower proxies in context", () => {
+    const protocol = resolveHealthCommonsExperimentProtocol("norwegian-4x4");
+
+    expect(protocol).not.toBeNull();
+
+    const experiment = composeExperimentDetail({
+      protocol: protocol!,
+      privateRun: null,
+    });
+    const markup = renderToStaticMarkup(createElement(ProtocolTab, { experiment }));
+
+    expect(markup).toContain("What could change");
+    expect(markup).toContain("Also worth watching");
+    expect(countOccurrences(markup, "data-card=")).toBe(3);
+    expect(markup).toContain('data-card="Estimated VO2max"');
+    expect(markup).toContain('data-card="HRV / RMSSD"');
+    expect(markup).toContain('data-card="Resting Heart Rate"');
+    expect(markup).not.toContain('data-card="Morning Blood Pressure"');
+    expect(markup).not.toContain('data-card="Sleep Efficiency"');
+    expect(markup).toContain("Morning Blood Pressure");
+    expect(markup).toContain("Sleep Efficiency");
+  });
+
   it("prioritizes the clearest red-light-glasses signals and moves the noisier ones into context pills", () => {
     const protocol = resolveHealthCommonsExperimentProtocol("red-light-glasses-before-bed");
 
@@ -92,17 +162,18 @@ describe("ProtocolTab", () => {
     expect(markup).toContain("Also worth watching");
     expect(countOccurrences(markup, "data-card=")).toBe(2);
     expect(markup).toContain('data-card="Sleep Efficiency"');
-    expect(markup).toContain('data-card="Resting Heart Rate"');
+    expect(markup).toContain('data-card="Sleep Onset Latency"');
     expect(markup).not.toContain('data-card="Deep Sleep Minutes"');
     expect(markup).not.toContain('data-card="HRV / RMSSD"');
+    expect(markup).not.toContain('data-card="Resting Heart Rate"');
     expect(markup).not.toContain("Primary marker");
     expect(markup).not.toContain("Sleep context");
     expect(markup).not.toContain("Exploratory signal");
     expect(markup).toContain("Deep Sleep Minutes");
     expect(markup).toContain("HRV / RMSSD");
+    expect(markup).toContain("Resting Heart Rate");
     expect(markup).toContain("Sleep Onset Latency");
-    expect(countOccurrences(markup, "Uncertain")).toBe(2);
-    expect(markup).toContain("May fall asleep sooner");
+    expect(countOccurrences(markup, "Can be noisy")).toBe(3);
   });
 
 });

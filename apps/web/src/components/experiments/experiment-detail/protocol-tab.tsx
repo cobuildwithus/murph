@@ -2,9 +2,10 @@ import type { ReactNode } from "react";
 
 import type { Experiment, ExperimentSignal } from "@/src/types/experiments";
 import { ExpectedSignalCard } from "./expected-signal-card";
+import { ExperimentProgress } from "./experiment-progress";
 import { ExpertCard } from "./expert-card";
-import { StudyCard } from "./study-card";
 import { SafetySection } from "./safety-section";
+import { StudyCard } from "./study-card";
 
 interface ProtocolTabProps {
   experiment: Experiment;
@@ -91,30 +92,19 @@ export function ProtocolTab({ experiment }: ProtocolTabProps) {
             </div>
           )}
 
-          <ProtocolTextList
-            title="For a cleaner read"
-            items={protocolTips}
-          />
+          <ProtocolTextList title="For a cleaner read" items={protocolTips} />
         </section>
 
         <section className="flex flex-col gap-5 rounded-xl border border-secondary/25 bg-card/90 p-7">
           <SectionLabel>At a glance</SectionLabel>
 
           {(baselineFact || interventionFact) && (
-            <div className="flex flex-col gap-3">
-              {baselineFact ? (
-                <ProtocolPhaseCard
-                  badge="Before change"
-                  fact={baselineFact}
-                />
-              ) : null}
-              {interventionFact ? (
-                <ProtocolPhaseCard
-                  badge="Protocol window"
-                  fact={interventionFact}
-                />
-              ) : null}
-            </div>
+            <ProtocolPhaseTimeline
+              baselineDays={experiment.baselineDays}
+              baselineFact={baselineFact}
+              interventionFact={interventionFact}
+              totalDays={experiment.durationDays}
+            />
           )}
 
           {supportingFacts.length > 0 && (
@@ -182,7 +172,6 @@ export function ProtocolTab({ experiment }: ProtocolTabProps) {
         </div>
       </section>
 
-      {/* Recommended by */}
       {experts.length > 0 && (
         <div className="flex flex-col gap-3.5">
           <span className="font-mono text-[11px]/3.5 tracking-[0.12em] text-chart-5">
@@ -196,7 +185,6 @@ export function ProtocolTab({ experiment }: ProtocolTabProps) {
         </div>
       )}
 
-      {/* Research */}
       <div className="flex flex-col gap-5">
         <span className="font-mono text-[11px]/3.5 tracking-[0.12em] text-chart-5">
           RESEARCH
@@ -229,7 +217,6 @@ export function ProtocolTab({ experiment }: ProtocolTabProps) {
           </p>
         ) : null}
 
-        {/* Study cards - unified container */}
         {studies.length > 0 && (
           <div className="overflow-hidden rounded-xl border border-secondary/25 bg-card/90">
             {studies.map((study, i) => (
@@ -243,7 +230,6 @@ export function ProtocolTab({ experiment }: ProtocolTabProps) {
         )}
       </div>
 
-      {/* Podcast links */}
       {podcastLinks && podcastLinks.length > 0 && (
         <div className="flex gap-2.5">
           {podcastLinks.map((link) => (
@@ -262,7 +248,6 @@ export function ProtocolTab({ experiment }: ProtocolTabProps) {
         </div>
       )}
 
-      {/* Safety */}
       <SafetySection {...safety} />
     </div>
   );
@@ -365,31 +350,38 @@ function hasSpecificStepTitle(step: Experiment["protocol"][number]): boolean {
   return step.title.trim() !== `Step ${step.number}`;
 }
 
-function ProtocolPhaseCard({
-  fact,
-  badge,
+function ProtocolPhaseTimeline({
+  baselineDays,
+  baselineFact,
+  interventionFact,
+  totalDays,
 }: {
-  fact: Experiment["protocolFacts"][number];
-  badge: string;
+  baselineDays: number;
+  baselineFact?: Experiment["protocolFacts"][number];
+  interventionFact?: Experiment["protocolFacts"][number];
+  totalDays: number;
 }) {
+  const clampedTotalDays = Math.max(0, totalDays);
+  const baselinePercent = clampedTotalDays > 0
+    ? Math.round((Math.max(0, baselineDays) / clampedTotalDays) * 100)
+    : 0;
+  const baselineLabel = baselineFact
+    ? `Baseline · ${baselineFact.value}`
+    : "Baseline";
+  const protocolLabel = interventionFact
+    ? `Protocol · ${interventionFact.value}`
+    : "Protocol";
+
   return (
-    <div className="rounded-lg border border-border/70 bg-background/35 p-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <div className="font-mono text-[10px]/3 uppercase tracking-[0.08em] text-chart-5">
-            {fact.label}
-          </div>
-          <div className="mt-1 text-lg/7 font-semibold text-foreground">
-            {fact.value}
-          </div>
-        </div>
-        <span className="rounded-full bg-secondary/12 px-2.5 py-1 font-mono text-[10px]/3 uppercase tracking-[0.08em] text-chart-5">
-          {badge}
-        </span>
-      </div>
-      {fact.detail ? (
-        <p className="mt-3 text-sm/6 text-muted-foreground">
-          {fact.detail}
+    <div className="flex flex-col gap-3 rounded-lg border border-border/70 bg-background/35 p-4">
+      <ExperimentProgress
+        baselineLabel={baselineLabel}
+        overallPercent={baselinePercent}
+        protocolLabel={protocolLabel}
+      />
+      {interventionFact?.detail ? (
+        <p className="text-[13px]/5 text-muted-foreground">
+          {interventionFact.detail}
         </p>
       ) : null}
     </div>
