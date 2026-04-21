@@ -53,6 +53,8 @@ import type {
   StoredDeviceSyncAccount,
 } from "./types.ts";
 
+type SqliteRow = Record<string, unknown>;
+
 interface AccountUpsertInput {
   provider: string;
   externalAccountId: string;
@@ -129,10 +131,163 @@ interface StoredAccountRow {
   updated_at: string;
 }
 
-function mapAccountRow(row: StoredAccountRow | undefined): StoredDeviceSyncAccount | null {
-  if (!row) {
+interface DeviceSyncSummaryRow {
+  accounts_total: number;
+  accounts_active: number;
+  jobs_queued: number;
+  jobs_running: number;
+  jobs_dead: number;
+  oauth_states: number;
+  webhook_traces: number;
+}
+
+interface NextReconcileRow {
+  next_reconcile_at: string | null;
+}
+
+function expectString(value: unknown, field: string): string {
+  if (typeof value !== "string") {
+    throw new TypeError(`Expected ${field} to be a string.`);
+  }
+  return value;
+}
+
+function expectNullableString(value: unknown, field: string): string | null {
+  if (value === null) {
     return null;
   }
+  return expectString(value, field);
+}
+
+function expectNumber(value: unknown, field: string): number {
+  if (typeof value !== "number") {
+    throw new TypeError(`Expected ${field} to be a number.`);
+  }
+  return value;
+}
+
+function expectNullableNumber(value: unknown, field: string): number | null {
+  if (value === null) {
+    return null;
+  }
+  return expectNumber(value, field);
+}
+
+function parseStoredStringArray(value: string | null, field: string): string[] {
+  if (value === null) {
+    return [];
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new TypeError(`Expected ${field} to contain a valid JSON array.`);
+  }
+
+  if (!Array.isArray(parsed)) {
+    throw new TypeError(`Expected ${field} to contain a JSON array.`);
+  }
+
+  if (!parsed.every((entry) => typeof entry === "string")) {
+    throw new TypeError(`Expected ${field} to contain only strings.`);
+  }
+
+  return parsed;
+}
+
+function decodeStoredAccountRow(row: SqliteRow): StoredAccountRow {
+  return {
+    id: expectString(row.id, "device_connection.id"),
+    provider: expectString(row.provider, "device_connection.provider"),
+    external_account_id: expectString(
+      row.external_account_id,
+      "device_connection.external_account_id",
+    ),
+    display_name: expectNullableString(row.display_name, "device_connection.display_name"),
+    status: expectString(row.status, "device_connection.status") as DeviceSyncAccountStatus,
+    scopes_json: expectNullableString(row.scopes_json, "device_connection.scopes_json"),
+    disconnect_generation: expectNumber(
+      row.disconnect_generation,
+      "device_connection.disconnect_generation",
+    ),
+    access_token_encrypted: expectString(
+      row.access_token_encrypted,
+      "device_credential_state.access_token_encrypted",
+    ),
+    refresh_token_encrypted: expectNullableString(
+      row.refresh_token_encrypted,
+      "device_credential_state.refresh_token_encrypted",
+    ),
+    access_token_expires_at: expectNullableString(
+      row.access_token_expires_at,
+      "device_credential_state.access_token_expires_at",
+    ),
+    hosted_observed_updated_at: expectNullableString(
+      row.hosted_observed_updated_at,
+      "device_observation_state.hosted_observed_updated_at",
+    ),
+    hosted_observed_token_version: expectNullableNumber(
+      row.hosted_observed_token_version,
+      "device_observation_state.hosted_observed_token_version",
+    ),
+    metadata_json: expectNullableString(row.metadata_json, "device_connection.metadata_json"),
+    connected_at: expectString(row.connected_at, "device_connection.connected_at"),
+    last_webhook_at: expectNullableString(
+      row.last_webhook_at,
+      "device_observation_state.last_webhook_at",
+    ),
+    last_sync_started_at: expectNullableString(
+      row.last_sync_started_at,
+      "device_observation_state.last_sync_started_at",
+    ),
+    last_sync_completed_at: expectNullableString(
+      row.last_sync_completed_at,
+      "device_observation_state.last_sync_completed_at",
+    ),
+    last_sync_error_at: expectNullableString(
+      row.last_sync_error_at,
+      "device_observation_state.last_sync_error_at",
+    ),
+    last_error_code: expectNullableString(
+      row.last_error_code,
+      "device_observation_state.last_error_code",
+    ),
+    last_error_message: expectNullableString(
+      row.last_error_message,
+      "device_observation_state.last_error_message",
+    ),
+    next_reconcile_at: expectNullableString(
+      row.next_reconcile_at,
+      "device_observation_state.next_reconcile_at",
+    ),
+    created_at: expectString(row.created_at, "device_connection.created_at"),
+    updated_at: expectString(row.updated_at, "device_connection.updated_at"),
+  };
+}
+
+function decodeDeviceSyncSummaryRow(row: SqliteRow): DeviceSyncSummaryRow {
+  return {
+    accounts_total: expectNumber(row.accounts_total, "device_sync_summary.accounts_total"),
+    accounts_active: expectNumber(row.accounts_active, "device_sync_summary.accounts_active"),
+    jobs_queued: expectNumber(row.jobs_queued, "device_sync_summary.jobs_queued"),
+    jobs_running: expectNumber(row.jobs_running, "device_sync_summary.jobs_running"),
+    jobs_dead: expectNumber(row.jobs_dead, "device_sync_summary.jobs_dead"),
+    oauth_states: expectNumber(row.oauth_states, "device_sync_summary.oauth_states"),
+    webhook_traces: expectNumber(row.webhook_traces, "device_sync_summary.webhook_traces"),
+  };
+}
+
+function decodeNextReconcileRow(row: SqliteRow): NextReconcileRow {
+  return {
+    next_reconcile_at: expectNullableString(
+      row.next_reconcile_at,
+      "device_observation_state.next_reconcile_at",
+    ),
+  };
+}
+
+function mapAccountRow(row: StoredAccountRow): StoredDeviceSyncAccount {
 
   return {
     id: row.id,
@@ -140,7 +295,7 @@ function mapAccountRow(row: StoredAccountRow | undefined): StoredDeviceSyncAccou
     externalAccountId: row.external_account_id,
     displayName: row.display_name,
     status: row.status,
-    scopes: JSON.parse(row.scopes_json ?? "[]") as string[],
+    scopes: parseStoredStringArray(row.scopes_json, "device_connection.scopes_json"),
     disconnectGeneration: row.disconnect_generation,
     accessTokenEncrypted: row.access_token_encrypted,
     hostedObservedTokenVersion: row.hosted_observed_token_version,
@@ -279,24 +434,20 @@ export class SqliteDeviceSyncStore {
         (select count(*) from device_job where status = 'dead') as jobs_dead,
         (select count(*) from oauth_state) as oauth_states,
         (select count(*) from webhook_trace) as webhook_traces
-    `).get() as {
-      accounts_total: number;
-      accounts_active: number;
-      jobs_queued: number;
-      jobs_running: number;
-      jobs_dead: number;
-      oauth_states: number;
-      webhook_traces: number;
-    };
+    `).get();
+    if (!row) {
+      throw new Error("Failed to summarize device sync store.");
+    }
+    const decodedRow = decodeDeviceSyncSummaryRow(row);
 
     return {
-      accountsTotal: row.accounts_total,
-      accountsActive: row.accounts_active,
-      jobsQueued: row.jobs_queued,
-      jobsRunning: row.jobs_running,
-      jobsDead: row.jobs_dead,
-      oauthStates: row.oauth_states,
-      webhookTraces: row.webhook_traces,
+      accountsTotal: decodedRow.accounts_total,
+      accountsActive: decodedRow.accounts_active,
+      jobsQueued: decodedRow.jobs_queued,
+      jobsRunning: decodedRow.jobs_running,
+      jobsDead: decodedRow.jobs_dead,
+      oauthStates: decodedRow.oauth_states,
+      webhookTraces: decodedRow.webhook_traces,
     };
   }
 
@@ -322,27 +473,27 @@ export class SqliteDeviceSyncStore {
       : this.database.prepare(`
           ${ACCOUNT_ROW_SELECT}
           order by updated_at desc, connection.id desc
-        `).all()) as unknown as StoredAccountRow[];
+        `).all()).map((row) => decodeStoredAccountRow(row));
 
-    return rows.map((row) => mapAccountRow(row)).filter(Boolean) as StoredDeviceSyncAccount[];
+    return rows.map((row) => mapAccountRow(row));
   }
 
   getAccountById(accountId: string): StoredDeviceSyncAccount | null {
     const row = this.database.prepare(`
       ${ACCOUNT_ROW_SELECT}
       where connection.id = ?
-    `).get(accountId) as StoredAccountRow | undefined;
+    `).get(accountId);
 
-    return mapAccountRow(row);
+    return row ? mapAccountRow(decodeStoredAccountRow(row)) : null;
   }
 
   getAccountByExternalAccount(provider: string, externalAccountId: string): StoredDeviceSyncAccount | null {
     const row = this.database.prepare(`
       ${ACCOUNT_ROW_SELECT}
       where connection.provider = ? and connection.external_account_id = ?
-    `).get(provider, externalAccountId) as StoredAccountRow | undefined;
+    `).get(provider, externalAccountId);
 
-    return mapAccountRow(row);
+    return row ? mapAccountRow(decodeStoredAccountRow(row)) : null;
   }
 
   upsertAccount(input: AccountUpsertInput): StoredDeviceSyncAccount {
@@ -931,8 +1082,8 @@ export class SqliteDeviceSyncStore {
         and observation.next_reconcile_at is not null
       order by observation.next_reconcile_at asc, observation.updated_at asc, connection.id asc
       limit 1
-    `).get() as { next_reconcile_at?: string | null } | undefined;
-    return row?.next_reconcile_at ?? null;
+    `).get();
+    return row ? decodeNextReconcileRow(row).next_reconcile_at : null;
   }
 
   readNextJobWakeAt(): string | null {

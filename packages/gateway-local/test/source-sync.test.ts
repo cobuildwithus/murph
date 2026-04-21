@@ -878,3 +878,126 @@ test("capture, session, and outbox replacements skip rows that cannot resolve a 
     database.close();
   }
 });
+
+test("row readers reject malformed enum-like gateway source fields", () => {
+  const database = new DatabaseSync(":memory:");
+  ensureGatewayStoreBaseSchema(database);
+
+  try {
+    database.prepare(`
+      INSERT INTO gateway_source_events (
+        source_event_id,
+        source_event_kind,
+        source_record_id,
+        route_key,
+        session_key,
+        source,
+        identity_id,
+        actor_id,
+        actor_display_name,
+        actor_is_self,
+        alias,
+        directness,
+        occurred_at,
+        text,
+        thread_id,
+        thread_title,
+        reply_kind,
+        reply_target,
+        status,
+        sent_at,
+        provider_message_id,
+        provider_thread_id,
+        message_id
+      ) VALUES (?, 'session', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      "session-invalid-directness",
+      "session-invalid-directness",
+      "route-invalid-directness",
+      "session-invalid-directness",
+      "email",
+      "murph@example.com",
+      "contact:alex",
+      null,
+      0,
+      "Alias",
+      "side-channel",
+      "2026-04-08T00:00:00.000Z",
+      null,
+      "thread-email",
+      null,
+      "thread",
+      "thread-email",
+      null,
+      null,
+      null,
+      null,
+      null,
+    );
+
+    assert.throws(
+      () => readSessionSourceRows(database),
+      /gateway_source_events\.directness/u,
+    );
+
+    database.prepare("DELETE FROM gateway_source_events").run();
+
+    database.prepare(`
+      INSERT INTO gateway_source_events (
+        source_event_id,
+        source_event_kind,
+        source_record_id,
+        route_key,
+        session_key,
+        source,
+        identity_id,
+        actor_id,
+        actor_display_name,
+        actor_is_self,
+        alias,
+        directness,
+        occurred_at,
+        text,
+        thread_id,
+        thread_title,
+        reply_kind,
+        reply_target,
+        status,
+        sent_at,
+        provider_message_id,
+        provider_thread_id,
+        message_id
+      ) VALUES (?, 'outbox', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      "outbox-invalid-status",
+      "intent-invalid-status",
+      "route-invalid-status",
+      "session-invalid-status",
+      "email",
+      "murph@example.com",
+      "contact:alex",
+      null,
+      0,
+      null,
+      "direct",
+      "2026-04-08T00:00:00.000Z",
+      "hello",
+      "thread-email",
+      null,
+      "thread",
+      "thread-email",
+      "queued",
+      null,
+      null,
+      null,
+      "message-invalid-status",
+    );
+
+    assert.throws(
+      () => readOutboxSourceRows(database),
+      /gateway_source_events\.status/u,
+    );
+  } finally {
+    database.close();
+  }
+});

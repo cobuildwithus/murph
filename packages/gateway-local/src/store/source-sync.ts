@@ -22,6 +22,8 @@ import {
   createGatewayCaptureMessageId,
   createGatewayConversationSessionKey,
   createGatewayOutboxMessageId,
+  gatewayConversationDirectnessValues,
+  gatewayReplyRouteKindValues,
 } from '@murphai/gateway-core'
 import {
   gatewayConversationRouteFromBinding,
@@ -34,6 +36,15 @@ import { normalizeNullableString } from '../shared.js'
 const CAPTURE_SYNC_BATCH_SIZE = 500
 
 type GatewaySourceEventKind = 'capture' | 'outbox' | 'session'
+type SqliteRow = Record<string, unknown>
+const gatewayLocalOutboxStatusValues = [
+  'pending',
+  'sending',
+  'retryable',
+  'sent',
+  'failed',
+  'abandoned',
+] as const satisfies readonly GatewayLocalOutboxSource['status'][]
 
 interface GatewaySourceEventRow {
   actorDisplayName: string | null
@@ -137,6 +148,184 @@ export type CaptureSyncState =
     headCursor: number
   }
 
+interface CaptureIdRow {
+  captureId: string
+}
+
+function expectString(value: unknown, field: string): string {
+  if (typeof value !== 'string') {
+    throw new TypeError(`Expected ${field} to be a string.`)
+  }
+  return value
+}
+
+function expectNullableString(value: unknown, field: string): string | null {
+  if (value === null) {
+    return null
+  }
+  return expectString(value, field)
+}
+
+function expectNumber(value: unknown, field: string): number {
+  if (typeof value !== 'number') {
+    throw new TypeError(`Expected ${field} to be a number.`)
+  }
+  return value
+}
+
+function expectNullableNumber(value: unknown, field: string): number | null {
+  if (value === null) {
+    return null
+  }
+  return expectNumber(value, field)
+}
+
+function expectEnumString<TValue extends string>(
+  value: unknown,
+  field: string,
+  allowedValues: readonly TValue[],
+): TValue {
+  const parsed = expectString(value, field)
+  if (!allowedValues.includes(parsed as TValue)) {
+    throw new TypeError(`Expected ${field} to be one of: ${allowedValues.join(', ')}.`)
+  }
+  return parsed as TValue
+}
+
+function expectNullableEnumString<TValue extends string>(
+  value: unknown,
+  field: string,
+  allowedValues: readonly TValue[],
+): TValue | null {
+  if (value === null) {
+    return null
+  }
+  return expectEnumString(value, field, allowedValues)
+}
+
+function decodeCaptureIdRow(row: SqliteRow): CaptureIdRow {
+  return {
+    captureId: expectString(row.captureId, 'capture.captureId'),
+  }
+}
+
+function decodeSessionSourceRow(row: SqliteRow): SessionSourceRow {
+  return {
+    sourceRecordId: expectString(row.sourceRecordId, 'gateway_source_events.sourceRecordId'),
+    routeKey: expectString(row.routeKey, 'gateway_source_events.routeKey'),
+    sessionKey: expectString(row.sessionKey, 'gateway_source_events.sessionKey'),
+    alias: expectNullableString(row.alias, 'gateway_source_events.alias'),
+    source: expectNullableString(row.source, 'gateway_source_events.source'),
+    identityId: expectNullableString(row.identityId, 'gateway_source_events.identityId'),
+    participantId: expectNullableString(row.participantId, 'gateway_source_events.participantId'),
+    threadId: expectNullableString(row.threadId, 'gateway_source_events.threadId'),
+    directness: expectNullableEnumString(
+      row.directness,
+      'gateway_source_events.directness',
+      gatewayConversationDirectnessValues,
+    ),
+    replyKind: expectNullableEnumString(
+      row.replyKind,
+      'gateway_source_events.replyKind',
+      gatewayReplyRouteKindValues,
+    ),
+    replyTarget: expectNullableString(row.replyTarget, 'gateway_source_events.replyTarget'),
+    updatedAt: expectString(row.updatedAt, 'gateway_source_events.updatedAt'),
+  }
+}
+
+function decodeOutboxSourceRow(row: SqliteRow): OutboxSourceRow {
+  return {
+    sourceRecordId: expectString(row.sourceRecordId, 'gateway_source_events.sourceRecordId'),
+    routeKey: expectString(row.routeKey, 'gateway_source_events.routeKey'),
+    sessionKey: expectString(row.sessionKey, 'gateway_source_events.sessionKey'),
+    status: expectEnumString(
+      row.status,
+      'gateway_source_events.status',
+      gatewayLocalOutboxStatusValues,
+    ),
+    createdAt: expectString(row.createdAt, 'gateway_source_events.createdAt'),
+    updatedAt: expectString(row.updatedAt, 'gateway_source_events.updatedAt'),
+    sentAt: expectNullableString(row.sentAt, 'gateway_source_events.sentAt'),
+    message: expectString(row.message, 'gateway_source_events.message'),
+    source: expectNullableString(row.source, 'gateway_source_events.source'),
+    identityId: expectNullableString(row.identityId, 'gateway_source_events.identityId'),
+    actorId: expectNullableString(row.actorId, 'gateway_source_events.actorId'),
+    threadId: expectNullableString(row.threadId, 'gateway_source_events.threadId'),
+    directness: expectNullableEnumString(
+      row.directness,
+      'gateway_source_events.directness',
+      gatewayConversationDirectnessValues,
+    ),
+    replyKind: expectNullableEnumString(
+      row.replyKind,
+      'gateway_source_events.replyKind',
+      gatewayReplyRouteKindValues,
+    ),
+    replyTarget: expectNullableString(row.replyTarget, 'gateway_source_events.replyTarget'),
+    providerMessageId: expectNullableString(
+      row.providerMessageId,
+      'gateway_source_events.providerMessageId',
+    ),
+    providerThreadId: expectNullableString(
+      row.providerThreadId,
+      'gateway_source_events.providerThreadId',
+    ),
+    messageId: expectString(row.messageId, 'gateway_source_events.messageId'),
+  }
+}
+
+function decodeCaptureSourceRow(row: SqliteRow): CaptureSourceRow {
+  return {
+    sourceRecordId: expectString(row.sourceRecordId, 'gateway_source_events.sourceRecordId'),
+    routeKey: expectString(row.routeKey, 'gateway_source_events.routeKey'),
+    sessionKey: expectString(row.sessionKey, 'gateway_source_events.sessionKey'),
+    source: expectString(row.source, 'gateway_source_events.source'),
+    identityId: expectNullableString(row.identityId, 'gateway_source_events.identityId'),
+    providerMessageId: expectNullableString(
+      row.providerMessageId,
+      'gateway_source_events.providerMessageId',
+    ),
+    actorId: expectNullableString(row.actorId, 'gateway_source_events.actorId'),
+    actorDisplayName: expectNullableString(
+      row.actorDisplayName,
+      'gateway_source_events.actorDisplayName',
+    ),
+    actorIsSelf: expectNumber(row.actorIsSelf, 'gateway_source_events.actorIsSelf'),
+    directness: expectNullableEnumString(
+      row.directness,
+      'gateway_source_events.directness',
+      gatewayConversationDirectnessValues,
+    ),
+    occurredAt: expectString(row.occurredAt, 'gateway_source_events.occurredAt'),
+    text: expectNullableString(row.text, 'gateway_source_events.text'),
+    threadId: expectNullableString(row.threadId, 'gateway_source_events.threadId'),
+    threadTitle: expectNullableString(row.threadTitle, 'gateway_source_events.threadTitle'),
+    messageId: expectString(row.messageId, 'gateway_source_events.messageId'),
+  }
+}
+
+function decodeCaptureAttachmentRow(row: SqliteRow): CaptureAttachmentRow {
+  return {
+    captureId: expectString(row.captureId, 'gateway_capture_attachments.captureId'),
+    ordinal: expectNumber(row.ordinal, 'gateway_capture_attachments.ordinal'),
+    attachmentId: expectString(row.attachmentId, 'gateway_capture_attachments.attachmentId'),
+    kind: expectString(row.kind, 'gateway_capture_attachments.kind') as GatewayAttachment['kind'],
+    mime: expectNullableString(row.mime, 'gateway_capture_attachments.mime'),
+    fileName: expectNullableString(row.fileName, 'gateway_capture_attachments.fileName'),
+    byteSize: expectNullableNumber(row.byteSize, 'gateway_capture_attachments.byteSize'),
+    parseState: expectNullableString(row.parseState, 'gateway_capture_attachments.parseState'),
+    extractedText: expectNullableString(
+      row.extractedText,
+      'gateway_capture_attachments.extractedText',
+    ),
+    transcriptText: expectNullableString(
+      row.transcriptText,
+      'gateway_capture_attachments.transcriptText',
+    ),
+  }
+}
+
 export async function listAllInboxCapturesByCreatedOrder(
   vault: string,
 ): Promise<InboxCaptureRecord[]> {
@@ -145,12 +334,13 @@ export async function listAllInboxCapturesByCreatedOrder(
   try {
     const rows = database
       .prepare(
-        `SELECT capture_id AS captureId, created_at AS createdAt
+        `SELECT capture_id AS captureId
            FROM capture
           ORDER BY created_at ASC, capture_id ASC
         `,
       )
-      .all() as Array<{ captureId: string; createdAt: string }>
+      .all()
+      .map((row) => decodeCaptureIdRow(row))
 
     const captures: InboxCaptureRecord[] = []
     for (const row of rows) {
@@ -493,7 +683,7 @@ export function readSessionSourceRows(database: DatabaseSync): SessionSourceRow[
       occurred_at AS updatedAt
     FROM gateway_source_events
     WHERE source_event_kind = 'session'
-  `).all() as unknown as SessionSourceRow[]
+  `).all().map((row) => decodeSessionSourceRow(row))
 }
 
 export function readOutboxSourceRows(database: DatabaseSync): OutboxSourceRow[] {
@@ -519,7 +709,7 @@ export function readOutboxSourceRows(database: DatabaseSync): OutboxSourceRow[] 
       message_id AS messageId
     FROM gateway_source_events
     WHERE source_event_kind = 'outbox'
-  `).all() as unknown as OutboxSourceRow[]
+  `).all().map((row) => decodeOutboxSourceRow(row))
 }
 
 export function readCaptureSourceRows(database: DatabaseSync): CaptureSourceRow[] {
@@ -543,7 +733,7 @@ export function readCaptureSourceRows(database: DatabaseSync): CaptureSourceRow[
     FROM gateway_source_events
     WHERE source_event_kind = 'capture'
     ORDER BY occurred_at ASC, source_record_id ASC
-  `).all() as unknown as CaptureSourceRow[]
+  `).all().map((row) => decodeCaptureSourceRow(row))
 }
 
 export function readCaptureAttachmentRows(database: DatabaseSync): CaptureAttachmentRow[] {
@@ -560,7 +750,7 @@ export function readCaptureAttachmentRows(database: DatabaseSync): CaptureAttach
       extracted_text AS extractedText,
       transcript_text AS transcriptText
     FROM gateway_capture_attachments
-  `).all() as unknown as CaptureAttachmentRow[]
+  `).all().map((row) => decodeCaptureAttachmentRow(row))
 }
 
 export function readGatewaySourceEventCount(
@@ -573,8 +763,9 @@ export function readGatewaySourceEventCount(
       FROM gateway_source_events
       WHERE source_event_kind = ?
     `)
-    .get(sourceEventKind) as { count: number | null }
-  return row.count ?? 0
+    .get(sourceEventKind)
+
+  return row ? expectNullableNumber(row.count, 'gateway_source_events.count') ?? 0 : 0
 }
 
 export async function loadCaptureSyncState(

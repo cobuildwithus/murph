@@ -13,6 +13,8 @@ import {
 import { extractIsoDatePrefix } from "@murphai/contracts";
 
 import type { CanonicalEntity } from "./canonical-entities.ts";
+import type { CanonicalEntityFamily } from "./canonical-entities.ts";
+import { ALL_QUERY_ENTITY_FAMILIES } from "./entity-families.ts";
 import {
   filterSearchDocuments,
   materializeSearchDocuments,
@@ -36,6 +38,7 @@ import type {
 } from "./query-projection-types.ts";
 
 type DatabaseSync = import("node:sqlite").DatabaseSync;
+type SqliteRow = Record<string, unknown>;
 
 export type {
   QueryProjectionStatus,
@@ -73,6 +76,105 @@ interface QueryProjectionSearchDocumentRow {
   body_text: string;
   tags_text: string;
   structured_text: string;
+}
+
+interface QueryProjectionMetaRow {
+  value: string;
+}
+
+interface QueryProjectionCountRow {
+  count: number;
+}
+
+function expectString(value: unknown, field: string): string {
+  if (typeof value !== "string") {
+    throw new TypeError(`Expected ${field} to be a string.`);
+  }
+  return value;
+}
+
+function expectNullableString(value: unknown, field: string): string | null {
+  if (value === null) {
+    return null;
+  }
+  return expectString(value, field);
+}
+
+function expectNumber(value: unknown, field: string): number {
+  if (typeof value !== "number") {
+    throw new TypeError(`Expected ${field} to be a number.`);
+  }
+  return value;
+}
+
+function expectEnumString<TValue extends string>(
+  value: unknown,
+  field: string,
+  allowedValues: readonly TValue[],
+): TValue {
+  const parsed = expectString(value, field);
+  if (!allowedValues.includes(parsed as TValue)) {
+    throw new TypeError(`Expected ${field} to be one of: ${allowedValues.join(", ")}.`);
+  }
+  return parsed as TValue;
+}
+
+function decodeQueryProjectionEntityRow(row: SqliteRow): QueryProjectionEntityRow {
+  return {
+    entity_json: expectString(row.entity_json, "query_entities.entity_json"),
+  };
+}
+
+function decodeQueryProjectionSearchDocumentRow(
+  row: SqliteRow,
+): QueryProjectionSearchDocumentRow {
+  return {
+    record_id: expectString(row.record_id, "query_search_document.record_id"),
+    alias_ids_json: expectString(row.alias_ids_json, "query_search_document.alias_ids_json"),
+    record_type: expectEnumString(
+      row.record_type,
+      "query_search_document.record_type",
+      ALL_QUERY_ENTITY_FAMILIES,
+    ) as CanonicalEntityFamily,
+    kind: expectNullableString(row.kind, "query_search_document.kind"),
+    stream: expectNullableString(row.stream, "query_search_document.stream"),
+    title: expectNullableString(row.title, "query_search_document.title"),
+    occurred_at: expectNullableString(row.occurred_at, "query_search_document.occurred_at"),
+    date: expectNullableString(row.date, "query_search_document.date"),
+    experiment_slug: expectNullableString(
+      row.experiment_slug,
+      "query_search_document.experiment_slug",
+    ),
+    tags_json: expectString(row.tags_json, "query_search_document.tags_json"),
+    path: expectString(row.path, "query_search_document.path"),
+    title_text: expectString(row.title_text, "query_search_document.title_text"),
+    body_text: expectString(row.body_text, "query_search_document.body_text"),
+    tags_text: expectString(row.tags_text, "query_search_document.tags_text"),
+    structured_text: expectString(
+      row.structured_text,
+      "query_search_document.structured_text",
+    ),
+  };
+}
+
+function decodeQuerySourceManifestRow(row: SqliteRow): QuerySourceManifestEntry {
+  return {
+    relativePath: expectString(row.relativePath, "query_source_manifest.relativePath"),
+    sizeBytes: expectNumber(row.sizeBytes, "query_source_manifest.sizeBytes"),
+    mtimeMs: expectNumber(row.mtimeMs, "query_source_manifest.mtimeMs"),
+  };
+}
+
+function decodeQueryProjectionMetaRow(row: SqliteRow): QueryProjectionMetaRow {
+  return {
+    value: expectString(row.value, "query_meta.value"),
+  };
+}
+
+function decodeQueryProjectionCountRow(row: SqliteRow): QueryProjectionCountRow {
+  return {
+    count: expectNumber(row.count, "query_count.count"),
+  };
 }
 
 export async function getQueryProjectionStatus(
@@ -355,7 +457,7 @@ function readStoredVaultSource(
       SELECT entity_json
       FROM query_entities
       ORDER BY sort_rank ASC
-    `).all() as unknown as QueryProjectionEntityRow[];
+    `).all().map((row) => decodeQueryProjectionEntityRow(row));
 
     return {
       metadata: parseJsonValue<QueryRecordData | null>(readMeta(database, "metadata_json"), null),
@@ -469,7 +571,7 @@ function searchQueryProjection(
       WHERE ${whereClauses.join(" AND ")}
       ORDER BY bm25(query_search_fts) ASC, query_search_document.record_id ASC
       LIMIT ?
-    `).all(...parameters) as unknown as QueryProjectionSearchDocumentRow[];
+    `).all(...parameters).map((row) => decodeQueryProjectionSearchDocumentRow(row));
 
     return scoreSearchDocuments(
       filterSearchDocuments(rows.map(mapRowToSearchDocument), filters),
@@ -662,7 +764,7 @@ function readStoredSourceManifest(
       mtime_ms AS mtimeMs
     FROM query_source_manifest
     ORDER BY relative_path ASC
-  `).all() as unknown as QuerySourceManifestEntry[];
+  `).all().map((row) => decodeQuerySourceManifestRow(row));
 }
 
 function appendEqualityFilters(
@@ -729,10 +831,8 @@ function buildFtsQuery(terms: readonly string[]): string {
 }
 
 function readMeta(database: DatabaseSync, key: string): string | null {
-  const row = database.prepare("SELECT value FROM query_meta WHERE key = ?").get(key) as
-    | { value: string }
-    | undefined;
-  return row?.value ?? null;
+  const row = database.prepare("SELECT value FROM query_meta WHERE key = ?").get(key);
+  return row ? decodeQueryProjectionMetaRow(row).value : null;
 }
 
 function writeMeta(database: DatabaseSync, key: string, value: string): void {
@@ -746,9 +846,9 @@ function writeMeta(database: DatabaseSync, key: string, value: string): void {
 function countRows(database: DatabaseSync, tableName: string): number {
   const row = database
     .prepare(`SELECT COUNT(*) AS count FROM ${tableName}`)
-    .get() as { count: number } | undefined;
+    .get();
 
-  return row?.count ?? 0;
+  return row ? decodeQueryProjectionCountRow(row).count : 0;
 }
 
 function wantsSampleRows(filters: SearchFilters): boolean {
