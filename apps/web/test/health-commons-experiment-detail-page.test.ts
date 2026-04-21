@@ -75,10 +75,10 @@ describe("ExperimentDetailPage", () => {
       whyItWorks: expect.stringContaining("heat stressor"),
     }));
     expect(clientExperiment.researchStats).toEqual(expect.arrayContaining([
-      expect.objectContaining({ label: "STUDIES", value: 81 }),
-      expect.objectContaining({ label: "REVIEWS", value: 17 }),
-      expect.objectContaining({ label: "JOURNAL ARTICLES", value: 64 }),
-      expect.objectContaining({ label: "RESEARCH YEARS", value: "1979–2026" }),
+      expect.objectContaining({ label: "SOURCES CHECKED", value: 81 }),
+      expect.objectContaining({ label: "REVIEW PAPERS", value: 17 }),
+      expect.objectContaining({ label: "RESEARCH PAPERS", value: 64 }),
+      expect.objectContaining({ label: "YEARS COVERED", value: "1979–2026" }),
     ]));
     expect(clientExperiment.studies).toHaveLength(81);
     expect(clientExperiment.studies[0]).toEqual(expect.objectContaining({
