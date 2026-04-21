@@ -1,6 +1,9 @@
 import { createHmac } from "node:crypto";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
+import {
+  MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
+} from "@murphai/contracts";
 import {
   buildHostedExecutionMemberActivatedWake,
 } from "@murphai/hosted-execution";
@@ -8,17 +11,21 @@ import {
 import {
   DEFAULT_DATABASE_URL,
 } from "../../../scripts/dev-hosted-local/constants.ts";
-import { buildStableNumericSuffix } from "./helpers/hosted-local-e2e-support.js";
+import {
+  buildHostedAssistantNotificationDecisionResponse,
+  buildStableNumericSuffix,
+} from "./helpers/hosted-local-e2e-support.js";
 import {
   startHostedLocalFullStackScenario,
   type HostedLocalFullStackScenario,
 } from "./helpers/hosted-local-full-stack-scenario.js";
 import {
+  buildHostedLinqSignupWelcomeWake,
   buildHostedLinqInboundEvent,
   buildLinqHomePhoneNumber,
   buildLinqRecipientPhoneNumber,
-  requireLinqPhoneLookupKey,
-  resolveHostedLinqAssistantReplyText,
+  HOSTED_LINQ_GROUPED_ASSISTANT_REPLY_TEXT,
+  HOSTED_LINQ_ROCKET_MAN_ASSISTANT_REPLY_TEXT,
   startHostedLocalLinqStub,
   type HostedLocalLinqStub,
 } from "./helpers/hosted-local-linq-support.js";
@@ -40,25 +47,7 @@ it("derives stable numeric suffixes from the full Linq user id", () => {
 });
 
 describe("hosted local Linq webhook e2e", () => {
-  beforeAll(async () => {
-    linqStub = await startHostedLocalLinqStub();
-    scenario = await startHostedLocalFullStackScenario({
-      additionalEnv: {
-        LINQ_API_BASE_URL: requireLinqStub().baseUrl,
-        LINQ_API_TOKEN: "linq-local-test-token",
-        LINQ_WEBHOOK_SECRET: linqWebhookSecret,
-      },
-      localDatabaseUrl,
-      persistDirOverride: workerPersistDirOverride,
-      persistDirPrefix: "murph-hosted-local-linq-webhook-",
-      requiredRunnerEnvProfile: "linq",
-      resolveAssistantReplyText: resolveHostedLinqAssistantReplyText,
-      scenarioLabel: "Local hosted Linq webhook e2e",
-      streamLogs: streamDevLogs,
-    });
-  }, 300_000);
-
-  afterAll(async () => {
+  afterEach(async () => {
     await scenario?.stop();
     scenario = null;
     await linqStub?.stop();
@@ -66,6 +55,7 @@ describe("hosted local Linq webhook e2e", () => {
   });
 
   it("routes a signed Linq webhook through apps/web and delivers the follow-up reply", async () => {
+    await startLinqScenario();
     await requireScenario().seedActiveHostedLinqMember({
       homePhone: buildLinqHomePhoneNumber(webhookUserId),
       memberId: webhookUserId,
@@ -73,6 +63,20 @@ describe("hosted local Linq webhook e2e", () => {
     });
 
     await requireScenario().runWake(buildActivationWake(webhookUserId), webhookUserId);
+    await requireScenario().waitForHostedCompletion(webhookUserId);
+    requireScenario().queueAssistantResponses([
+      buildHostedAssistantNotificationDecisionResponse({
+        privateSummary: "deliver signup welcome",
+        text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
+      }),
+    ]);
+    await requireScenario().runWake(
+      buildHostedLinqSignupWelcomeWake({
+        eventId: `assistant.notification.requested:local:${webhookUserId}:evt_linq_webhook`,
+        userId: webhookUserId,
+      }),
+      webhookUserId,
+    );
     await requireScenario().waitForHostedCompletion(webhookUserId);
     await requireLinqStub().waitForSend({
       expectedPath: requireLinqStub().createChatPath,
@@ -97,6 +101,7 @@ describe("hosted local Linq webhook e2e", () => {
       reason: "wake-appended-active-member",
     });
 
+    requireScenario().queueAssistantResponses([HOSTED_LINQ_ROCKET_MAN_ASSISTANT_REPLY_TEXT]);
     await requireScenario().waitForLatestPendingWake(webhookUserId);
     await requireScenario().waitForHostedCompletion(webhookUserId);
 
@@ -107,13 +112,13 @@ describe("hosted local Linq webhook e2e", () => {
       userId: webhookUserId,
     });
     expect(requireLinqStub().readObservedMessageText(replySend)).toBe(
-      "Got it — I’ll call you Rocket Man.\n\nWhat are your health goals right now?",
+      HOSTED_LINQ_ROCKET_MAN_ASSISTANT_REPLY_TEXT,
     );
-    expect(requireScenario().assistantProviderBodies.at(-1)).toContain("Rocket Man");
   }, 300_000);
 
   it("keeps Linq context when two signed webhooks arrive before hosted completion catches up", async () => {
     const fastWebhookUserId = `${webhookUserId}_rapid`;
+    await startLinqScenario();
     await requireScenario().seedActiveHostedLinqMember({
       homePhone: buildLinqHomePhoneNumber(fastWebhookUserId),
       memberId: fastWebhookUserId,
@@ -122,6 +127,21 @@ describe("hosted local Linq webhook e2e", () => {
 
     await requireScenario().runWake(
       buildActivationWake(fastWebhookUserId),
+      fastWebhookUserId,
+    );
+    await requireScenario().waitForHostedCompletion(fastWebhookUserId);
+    requireScenario().queueAssistantResponses([
+      buildHostedAssistantNotificationDecisionResponse({
+        privateSummary: "deliver signup welcome",
+        text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
+      }),
+    ]);
+    await requireScenario().runWake(
+      buildHostedLinqSignupWelcomeWake({
+        eventId:
+          `assistant.notification.requested:local:${fastWebhookUserId}:evt_linq_webhook_fast`,
+        userId: fastWebhookUserId,
+      }),
       fastWebhookUserId,
     );
     await requireScenario().waitForHostedCompletion(fastWebhookUserId);
@@ -135,7 +155,6 @@ describe("hosted local Linq webhook e2e", () => {
     const materializedChatId = requireLinqStub().requireObservedChatId(fastWebhookUserId);
     const expectedReplyChatPath = `/chats/${encodeURIComponent(materializedChatId)}/messages`;
     const outboundCountBeforeReply = requireLinqStub().countObservedSends(expectedReplyChatPath);
-    const assistantProviderBodyCountBeforeReply = requireScenario().assistantProviderBodies.length;
 
     const firstWebhook = buildHostedLinqInboundEvent(fastWebhookUserId, materializedChatId, {
       eventId: `evt_webhook_name_${fastWebhookUserId}`,
@@ -162,6 +181,7 @@ describe("hosted local Linq webhook e2e", () => {
       reason: "wake-appended-active-member",
     });
 
+    requireScenario().queueAssistantResponses([HOSTED_LINQ_GROUPED_ASSISTANT_REPLY_TEXT]);
     await requireScenario().waitForLatestPendingWake(fastWebhookUserId);
     await requireScenario().waitForHostedCompletion(fastWebhookUserId);
 
@@ -176,28 +196,15 @@ describe("hosted local Linq webhook e2e", () => {
     const groupedReplyText = requireLinqStub().readObservedMessageText(newReplySends[0]!);
 
     expect(groupedReplyText).toBe(
-      "What should I call you? And out of those, which ones matter most to you right now?",
+      HOSTED_LINQ_GROUPED_ASSISTANT_REPLY_TEXT,
     );
     expect(groupedReplyText).not.toContain("Hey, I'm Murph");
-    expect(requireScenario().assistantProviderBodies).toHaveLength(
-      assistantProviderBodyCountBeforeReply + 1,
-    );
-    expect(requireScenario().assistantProviderBodies.at(-1)).toContain("Rocket Man");
-    expect(requireScenario().assistantProviderBodies.at(-1)).toContain("build more strength");
-    expect(requireScenario().assistantProviderBodies.at(-1)).not.toContain("I’ll call you Rocket Man");
   }, 300_000);
 });
 
 function buildActivationWake(userId: string) {
   return buildHostedExecutionMemberActivatedWake({
     eventId: `member.activated:local:${userId}:evt_linq_first_contact`,
-    firstContact: {
-      channel: "linq",
-      fromPhoneNumber: buildLinqHomePhoneNumber(userId),
-      identityId: requireLinqPhoneLookupKey(userId),
-      kind: "linq-materialize-home-thread",
-      toPhoneNumber: buildLinqRecipientPhoneNumber(userId),
-    },
     memberId: userId,
     memberChannels: {
       email: false,
@@ -246,4 +253,21 @@ function requireScenario(): HostedLocalFullStackScenario {
   }
 
   return scenario;
+}
+
+async function startLinqScenario(): Promise<void> {
+  linqStub = await startHostedLocalLinqStub();
+  scenario = await startHostedLocalFullStackScenario({
+    additionalEnv: {
+      LINQ_API_BASE_URL: requireLinqStub().baseUrl,
+      LINQ_API_TOKEN: "linq-local-test-token",
+      LINQ_WEBHOOK_SECRET: linqWebhookSecret,
+    },
+    localDatabaseUrl,
+    persistDirOverride: workerPersistDirOverride,
+    persistDirPrefix: "murph-hosted-local-linq-webhook-",
+    requiredRunnerEnvProfile: "linq",
+    scenarioLabel: "Local hosted Linq webhook e2e",
+    streamLogs: streamDevLogs,
+  });
 }

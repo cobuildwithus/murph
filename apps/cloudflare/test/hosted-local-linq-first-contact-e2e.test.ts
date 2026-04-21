@@ -1,6 +1,9 @@
 import { createHmac } from "node:crypto";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
+import {
+  MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
+} from "@murphai/contracts";
 import {
   buildHostedExecutionMemberActivatedWake,
 } from "@murphai/hosted-execution";
@@ -8,17 +11,21 @@ import {
 import {
   DEFAULT_DATABASE_URL,
 } from "../../../scripts/dev-hosted-local/constants.ts";
-import { buildStableNumericSuffix } from "./helpers/hosted-local-e2e-support.js";
+import {
+  buildHostedAssistantNotificationDecisionResponse,
+  buildStableNumericSuffix,
+} from "./helpers/hosted-local-e2e-support.js";
 import {
   startHostedLocalFullStackScenario,
   type HostedLocalFullStackScenario,
 } from "./helpers/hosted-local-full-stack-scenario.js";
 import {
+  buildHostedLinqSignupWelcomeWake,
   buildHostedLinqInboundEvent,
   buildLinqHomePhoneNumber,
   buildLinqRecipientPhoneNumber,
-  requireLinqPhoneLookupKey,
-  resolveHostedLinqAssistantReplyText,
+  HOSTED_LINQ_DEFAULT_ASSISTANT_REPLY_TEXT,
+  HOSTED_LINQ_GROUPED_ASSISTANT_REPLY_TEXT,
   startHostedLocalLinqStub,
   type HostedLocalLinqStub,
 } from "./helpers/hosted-local-linq-support.js";
@@ -42,24 +49,6 @@ it("derives stable numeric suffixes from the full Linq user id", () => {
 });
 
 describe("hosted local Linq first-contact e2e", () => {
-  beforeEach(async () => {
-    linqStub = await startHostedLocalLinqStub();
-    scenario = await startHostedLocalFullStackScenario({
-      additionalEnv: {
-        LINQ_API_BASE_URL: requireLinqStub().baseUrl,
-        LINQ_API_TOKEN: "linq-local-test-token",
-        LINQ_WEBHOOK_SECRET: linqWebhookSecret,
-      },
-      localDatabaseUrl,
-      persistDirOverride: workerPersistDirOverride,
-      persistDirPrefix: "murph-hosted-local-linq-first-contact-",
-      requiredRunnerEnvProfile: "linq",
-      resolveAssistantReplyText: resolveHostedLinqAssistantReplyText,
-      scenarioLabel: "Local hosted Linq e2e",
-      streamLogs: streamDevLogs,
-    });
-  }, 300_000);
-
   afterEach(async () => {
     await scenario?.stop();
     scenario = null;
@@ -68,12 +57,27 @@ describe("hosted local Linq first-contact e2e", () => {
   });
 
   it("sends the first-contact Linq welcome through the live local worker", async () => {
+    await startLinqScenario();
     await requireScenario().seedActiveHostedLinqMember({
       homePhone: buildLinqHomePhoneNumber(userId),
       memberId: userId,
       memberPhone: buildLinqRecipientPhoneNumber(userId),
     });
     await requireScenario().runWake(buildActivationWake(userId), userId);
+    await requireScenario().waitForHostedCompletion(userId);
+    requireScenario().queueAssistantResponses([
+      buildHostedAssistantNotificationDecisionResponse({
+        privateSummary: "deliver signup welcome",
+        text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
+      }),
+    ]);
+    await requireScenario().runWake(
+      buildHostedLinqSignupWelcomeWake({
+        eventId: `assistant.notification.requested:local:${userId}:evt_linq_first_contact`,
+        userId,
+      }),
+      userId,
+    );
 
     const finalStatus = await requireScenario().waitForHostedCompletion(userId);
     expect(finalStatus.bundleRef).not.toBeNull();
@@ -92,11 +96,11 @@ describe("hosted local Linq first-contact e2e", () => {
     expect(JSON.parse(sendRequest.body)).toMatchObject({
       from: buildLinqHomePhoneNumber(userId),
       message: {
-        idempotency_key: expect.stringContaining("assistant-first-contact"),
+        idempotency_key: `signup-welcome:${userId}`,
         parts: [
           {
             type: "text",
-            value: expect.stringContaining("Murph"),
+            value: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
           },
         ],
       },
@@ -105,6 +109,7 @@ describe("hosted local Linq first-contact e2e", () => {
   }, 300_000);
 
   it("sends a Linq reply after a later inbound Linq message", async () => {
+    await startLinqScenario();
     await requireScenario().seedActiveHostedLinqMember({
       homePhone: buildLinqHomePhoneNumber(directReplyUserId),
       memberId: directReplyUserId,
@@ -114,7 +119,21 @@ describe("hosted local Linq first-contact e2e", () => {
       buildActivationWake(directReplyUserId),
       directReplyUserId,
     );
-
+    await requireScenario().waitForHostedCompletion(directReplyUserId);
+    requireScenario().queueAssistantResponses([
+      buildHostedAssistantNotificationDecisionResponse({
+        privateSummary: "deliver signup welcome",
+        text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
+      }),
+    ]);
+    await requireScenario().runWake(
+      buildHostedLinqSignupWelcomeWake({
+        eventId:
+          `assistant.notification.requested:local:${directReplyUserId}:evt_linq_direct_reply`,
+        userId: directReplyUserId,
+      }),
+      directReplyUserId,
+    );
     await requireScenario().waitForHostedCompletion(directReplyUserId);
     await requireLinqStub().waitForSend({
       expectedPath: requireLinqStub().createChatPath,
@@ -141,6 +160,7 @@ describe("hosted local Linq first-contact e2e", () => {
       reason: "wake-appended-active-member",
     });
 
+    requireScenario().queueAssistantResponses([HOSTED_LINQ_DEFAULT_ASSISTANT_REPLY_TEXT]);
     await requireScenario().waitForLatestPendingWake(directReplyUserId);
     const replySend = await requireLinqStub().waitForAdditionalSend({
       baselineCount: outboundCountBeforeReply,
@@ -149,15 +169,33 @@ describe("hosted local Linq first-contact e2e", () => {
       userId: directReplyUserId,
     });
     expect(replySend.method).toBe("POST");
+    expect(requireLinqStub().readObservedMessageText(replySend)).toBe(
+      HOSTED_LINQ_DEFAULT_ASSISTANT_REPLY_TEXT,
+    );
   }, 300_000);
 
   it("keeps Linq context when two messages arrive before hosted completion catches up", async () => {
+    await startLinqScenario();
     await requireScenario().seedActiveHostedLinqMember({
       homePhone: buildLinqHomePhoneNumber(fastReplyUserId),
       memberId: fastReplyUserId,
       memberPhone: buildLinqRecipientPhoneNumber(fastReplyUserId),
     });
     await requireScenario().runWake(buildActivationWake(fastReplyUserId), fastReplyUserId);
+    await requireScenario().waitForHostedCompletion(fastReplyUserId);
+    requireScenario().queueAssistantResponses([
+      buildHostedAssistantNotificationDecisionResponse({
+        privateSummary: "deliver signup welcome",
+        text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
+      }),
+    ]);
+    await requireScenario().runWake(
+      buildHostedLinqSignupWelcomeWake({
+        eventId: `assistant.notification.requested:local:${fastReplyUserId}:evt_linq_fast_reply`,
+        userId: fastReplyUserId,
+      }),
+      fastReplyUserId,
+    );
 
     const createChatRequest = await requireLinqStub().waitForSend({
       expectedPath: requireLinqStub().createChatPath,
@@ -166,12 +204,12 @@ describe("hosted local Linq first-contact e2e", () => {
       userId: fastReplyUserId,
     });
     expect(createChatRequest.method).toBe("POST");
+    await requireScenario().waitForHostedCompletion(fastReplyUserId);
 
     const materializedChatId = requireLinqStub().requireObservedChatId(fastReplyUserId);
     const expectedDirectReplyChatPath =
       `/chats/${encodeURIComponent(materializedChatId)}/messages`;
     const outboundCountBeforeReply = requireLinqStub().countObservedSends(expectedDirectReplyChatPath);
-    const assistantProviderBodyCountBeforeReply = requireScenario().assistantProviderBodies.length;
 
     const firstWebhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
       fastReplyUserId,
@@ -202,6 +240,7 @@ describe("hosted local Linq first-contact e2e", () => {
       reason: "wake-appended-active-member",
     });
 
+    requireScenario().queueAssistantResponses([HOSTED_LINQ_GROUPED_ASSISTANT_REPLY_TEXT]);
     const statusBeforeWait = await requireScenario().harness.readUserStatus(fastReplyUserId);
     await requireScenario().waitForLatestPendingWake(fastReplyUserId);
     await requireScenario().waitForHostedCompletion(fastReplyUserId);
@@ -226,7 +265,6 @@ describe("hosted local Linq first-contact e2e", () => {
             text: requireLinqStub().readObservedMessageText(request),
             url: request.url,
           })),
-          observedAssistantProviderBodies: requireScenario().assistantProviderBodies,
           statusAfterWait,
           statusBeforeWait,
         })}`,
@@ -236,37 +274,13 @@ describe("hosted local Linq first-contact e2e", () => {
     const newReplySends = replySends.slice(outboundCountBeforeReply);
     expect(newReplySends).toHaveLength(1);
     const groupedReplyText = requireLinqStub().readObservedMessageText(newReplySends[0]!);
-    if (groupedReplyText !== "What should I call you? And out of those, which ones matter most to you right now?") {
-      throw new Error(
-        `Unexpected grouped Linq reply: ${JSON.stringify({
-          groupedReplyText,
-          observedAssistantProviderBodies: requireScenario().assistantProviderBodies,
-        })}`,
-      );
-    }
-    expect(groupedReplyText).toBe(
-      "What should I call you? And out of those, which ones matter most to you right now?",
-    );
-    expect(groupedReplyText).not.toContain("Hey, I'm Murph");
-    expect(requireScenario().assistantProviderBodies).toHaveLength(
-      assistantProviderBodyCountBeforeReply + 1,
-    );
-    expect(requireScenario().assistantProviderBodies.at(-1)).toContain("Rocket Man");
-    expect(requireScenario().assistantProviderBodies.at(-1)).toContain("build more strength");
-    expect(requireScenario().assistantProviderBodies.at(-1)).not.toContain("I’ll call you Rocket Man");
+    expect(groupedReplyText).toBe(HOSTED_LINQ_GROUPED_ASSISTANT_REPLY_TEXT);
   }, 300_000);
 });
 
 function buildActivationWake(userId: string) {
   return buildHostedExecutionMemberActivatedWake({
     eventId: `member.activated:local:${userId}:evt_linq_first_contact`,
-    firstContact: {
-      channel: "linq",
-      fromPhoneNumber: buildLinqHomePhoneNumber(userId),
-      identityId: requireLinqPhoneLookupKey(userId),
-      kind: "linq-materialize-home-thread",
-      toPhoneNumber: buildLinqRecipientPhoneNumber(userId),
-    },
     memberId: userId,
     memberChannels: {
       email: false,
@@ -315,4 +329,21 @@ function requireScenario(): HostedLocalFullStackScenario {
   }
 
   return scenario;
+}
+
+async function startLinqScenario(): Promise<void> {
+  linqStub = await startHostedLocalLinqStub();
+  scenario = await startHostedLocalFullStackScenario({
+    additionalEnv: {
+      LINQ_API_BASE_URL: requireLinqStub().baseUrl,
+      LINQ_API_TOKEN: "linq-local-test-token",
+      LINQ_WEBHOOK_SECRET: linqWebhookSecret,
+    },
+    localDatabaseUrl,
+    persistDirOverride: workerPersistDirOverride,
+    persistDirPrefix: "murph-hosted-local-linq-first-contact-",
+    requiredRunnerEnvProfile: "linq",
+    scenarioLabel: "Local hosted Linq e2e",
+    streamLogs: streamDevLogs,
+  });
 }

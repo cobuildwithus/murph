@@ -46,6 +46,13 @@ export interface HostedLocalTelegramStub {
   }): Promise<ObservedTelegramRequest[]>;
 }
 
+export const HOSTED_TELEGRAM_DEFAULT_ASSISTANT_REPLY_TEXT =
+  "I saw your Telegram message and I'm here.";
+export const HOSTED_TELEGRAM_ROCKET_MAN_ASSISTANT_REPLY_TEXT =
+  "Got it — I’ll call you Rocket Man.\n\nWhat are your health goals right now?";
+export const HOSTED_TELEGRAM_GROUPED_ASSISTANT_REPLY_TEXT =
+  "What should I call you? And out of those, which ones matter most to you right now?";
+
 export async function startHostedLocalTelegramStub(input: {
   botToken: string;
   debugLogFile?: string | null;
@@ -69,6 +76,13 @@ export async function startHostedLocalTelegramStub(input: {
     });
 
     if (request.method === "POST" && request.url === `/bot${input.botToken}/sendChatAction`) {
+      if (!isValidTelegramSendChatActionPayload(parseObservedTelegramJson(body))) {
+        writeJsonResponse(response, 400, {
+          error: "Expected a Telegram sendChatAction payload with chat_id and action=typing.",
+        });
+        return;
+      }
+
       writeJsonResponse(response, 200, {
         ok: true,
         result: true,
@@ -77,6 +91,13 @@ export async function startHostedLocalTelegramStub(input: {
     }
 
     if (request.method === "POST" && request.url === `/bot${input.botToken}/sendMessage`) {
+      if (!isValidTelegramSendMessagePayload(parseObservedTelegramJson(body))) {
+        writeJsonResponse(response, 400, {
+          error: "Expected a Telegram sendMessage payload with chat_id and text.",
+        });
+        return;
+      }
+
       writeJsonResponse(response, 200, {
         ok: true,
         result: {
@@ -235,22 +256,6 @@ export function buildTelegramThreadId(userId: string): string {
   return buildStableTelegramNumericId(userId, "600");
 }
 
-export function resolveHostedTelegramAssistantReplyText(body: string): string {
-  if (body.includes("Rocket Man") && body.includes("build more strength")) {
-    if (body.includes("I’ll call you Rocket Man") || body.includes("I'll call you Rocket Man")) {
-      return "Got you — stronger, fitter, faster, and more endurance.";
-    }
-
-    return "What should I call you? And out of those, which ones matter most to you right now?";
-  }
-
-  if (body.includes("Rocket Man")) {
-    return "Got it — I’ll call you Rocket Man.\n\nWhat are your health goals right now?";
-  }
-
-  return "I saw your Telegram message and I'm here.";
-}
-
 function buildStableTelegramNumericId(userId: string, prefix: string): string {
   return `${prefix}${buildStableNumericSuffix(userId, 7)}`;
 }
@@ -309,6 +314,33 @@ function requireBoundTcpPort(server: HttpServer, label: string): number {
 
 async function sleep(delayMs: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, delayMs));
+}
+
+function isValidTelegramSendChatActionPayload(
+  payload: Record<string, unknown> | null,
+): payload is Record<string, unknown> & {
+  action: string;
+  chat_id: string;
+} {
+  if (!payload || typeof payload.chat_id !== "string") {
+    return false;
+  }
+
+  return payload.action === "typing";
+}
+
+function isValidTelegramSendMessagePayload(
+  payload: Record<string, unknown> | null,
+): payload is Record<string, unknown> & {
+  chat_id: string;
+  text: string;
+} {
+  return Boolean(
+    payload
+    && typeof payload.chat_id === "string"
+    && typeof payload.text === "string"
+    && payload.text.trim().length > 0,
+  );
 }
 
 async function writeTelegramDebugLog(
