@@ -8,7 +8,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { ExperimentProtocol } from "@/src/types/experiments";
 
-const CURRENT_EXPERIMENT_PROTOCOL_CONTRACT_VERSION = 2;
+const CURRENT_EXPERIMENT_PROTOCOL_CONTRACT_VERSION = 3;
 
 const mocks = vi.hoisted(() => ({
   composeExperimentDetail: vi.fn(({ protocol }: { protocol: ExperimentProtocol }) => ({

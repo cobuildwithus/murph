@@ -54,6 +54,29 @@ describe("ProtocolTab", () => {
     expect(countOccurrences(markup, summaryParagraph!)).toBe(1);
   });
 
+  it("caps focus cards at three and moves overflow signals into context pills", () => {
+    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+
+    expect(protocol).not.toBeNull();
+
+    const experiment = composeExperimentDetail({
+      protocol: protocol!,
+      privateRun: null,
+    });
+    const markup = renderToStaticMarkup(createElement(ProtocolTab, { experiment }));
+
+    expect(markup).toContain("What could change");
+    expect(markup).toContain("Also worth watching");
+    expect(countOccurrences(markup, "data-card=")).toBe(3);
+    expect(markup).toContain('data-card="Resting Heart Rate"');
+    expect(markup).toContain('data-card="Morning Blood Pressure"');
+    expect(markup).toContain('data-card="HRV / RMSSD"');
+    expect(markup).not.toContain('data-card="Sleep Efficiency"');
+    expect(markup).not.toContain('data-card="Deep Sleep Minutes"');
+    expect(markup).toContain("Sleep Efficiency");
+    expect(markup).toContain("Deep Sleep Minutes");
+  });
+
   it("prioritizes the clearest red-light-glasses signals and moves the noisier ones into context pills", () => {
     const protocol = resolveHealthCommonsExperimentProtocol("red-light-glasses-before-bed");
 
@@ -81,6 +104,7 @@ describe("ProtocolTab", () => {
     expect(markup).toContain("Can be noisy");
     expect(markup).toContain("May fall asleep sooner");
   });
+
 });
 
 function countOccurrences(haystack: string, needle: string): number {
