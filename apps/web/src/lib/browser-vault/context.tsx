@@ -204,7 +204,7 @@ async function loadBrowserVaultReplica(knownDataVersion: string | null): Promise
     scope: "browser-vault-replica",
   });
   const replica = parseBrowserVaultReplica(
-    JSON.parse(textDecoder.decode(plaintext)) as unknown,
+    JSON.parse(textDecoder.decode(plaintext)),
   );
 
   if (replica.source.dataVersion !== session.replicaRef.dataVersion) {

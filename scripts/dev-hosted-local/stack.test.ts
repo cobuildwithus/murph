@@ -18,7 +18,15 @@ const defaultConfig: HostedLocalDevConfig = {
   workerProtocol: "http",
 };
 
-const runCommand = vi.fn(async () => {});
+const runCommand = vi.fn<(
+  command: string,
+  args: string[],
+  input: {
+    cwd: string;
+    env: NodeJS.ProcessEnv;
+    name: "setup";
+  },
+) => Promise<void>>(async () => {});
 const spawnChildProcess = vi.fn<
   (
     name: "cloudflare" | "web",
@@ -347,8 +355,8 @@ describe("hosted local dev stack", () => {
     await stack.stop();
 
     expect(vi.mocked(vercelModule.ensureVercelLinkExists)).not.toHaveBeenCalled();
-    const sawVercelSetup = (runCommand.mock.calls as unknown[][])
-      .some((call) => call[0] === "vercel");
+    const sawVercelSetup = runCommand.mock.calls
+      .some(([command]) => command === "vercel");
     expect(sawVercelSetup).toBe(false);
   });
 

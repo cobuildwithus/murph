@@ -95,7 +95,7 @@ export function decodeHostedIngressStoredPayload(input: {
     return null;
   }
 
-  return JSON.parse(decrypted) as unknown;
+  return JSON.parse(decrypted);
 }
 
 export {

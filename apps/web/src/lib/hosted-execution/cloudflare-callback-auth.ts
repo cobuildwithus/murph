@@ -188,7 +188,7 @@ function parseJsonObject(value: string, label: string): Record<string, unknown> 
   let parsed: unknown;
 
   try {
-    parsed = JSON.parse(value) as unknown;
+    parsed = JSON.parse(value);
   } catch (error) {
     throw new TypeError(`${label} must be valid JSON: ${error instanceof Error ? error.message : String(error)}`);
   }

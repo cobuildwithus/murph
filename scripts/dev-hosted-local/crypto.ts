@@ -22,7 +22,7 @@ export function parsePrivateEcP256Jwk(value: string): Record<string, string> {
   let parsed: unknown;
 
   try {
-    parsed = JSON.parse(value) as unknown;
+    parsed = JSON.parse(value);
   } catch (error) {
     throw new Error(
       `HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK in apps/cloudflare/.dev.vars must be valid JSON: ${error instanceof Error ? error.message : String(error)}`,
@@ -33,7 +33,7 @@ export function parsePrivateEcP256Jwk(value: string): Record<string, string> {
     throw new Error("HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK in apps/cloudflare/.dev.vars must be a JSON object.");
   }
 
-  const record = parsed as Record<string, unknown>;
+  const record = Object.fromEntries(Object.entries(parsed));
   if (
     record.kty !== "EC"
     || record.crv !== "P-256"
@@ -44,7 +44,13 @@ export function parsePrivateEcP256Jwk(value: string): Record<string, string> {
     throw new Error("HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK in apps/cloudflare/.dev.vars must be an EC P-256 private JWK.");
   }
 
-  return record as Record<string, string>;
+  return {
+    crv: record.crv,
+    d: record.d,
+    kty: record.kty,
+    x: record.x,
+    y: record.y,
+  };
 }
 
 export function toPublicEcP256Jwk(privateJwk: Record<string, string>): Record<string, string> {

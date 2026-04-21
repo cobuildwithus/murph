@@ -111,7 +111,7 @@ export function projectHostedSharePayloadState(
   return {
     pack: assertContract(
       sharePackSchema,
-      JSON.parse(payloadText) as unknown,
+      JSON.parse(payloadText),
       "stored hosted share payload",
     ),
     payloadSchema: normalizeHostedSharePayloadSchema(record.payloadSchema),

@@ -276,7 +276,7 @@ async function prepareHostedStripeEventProcessingContext(
     };
   }
 
-  const object = event.data.object as unknown as Record<string, unknown>;
+  const object = readHostedStripeEventObject(event.data.object);
   const customerContext = await resolveStripeCustomerContext({
     chargeId: readHostedStripeEventChargeId(event.type, object),
     paymentIntentId: readHostedStripeEventPaymentIntentId(event.type, object),
@@ -285,6 +285,14 @@ async function prepareHostedStripeEventProcessingContext(
   return {
     customerId: customerContext.customerId,
   };
+}
+
+function readHostedStripeEventObject(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+
+  return Object.fromEntries(Object.entries(value));
 }
 
 function readHostedStripeEventChargeId(type: string, object: Record<string, unknown>): string | null {
