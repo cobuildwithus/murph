@@ -4,7 +4,7 @@ entityType: protocol_variant
 key: protocol_variant:norwegian-4x4/norwegian-4x4
 slug: protocols/norwegian-4x4/norwegian-4x4
 title: Norwegian 4x4 Intervals
-summary: "A structured six-week cardio experiment: two repeatable 4x4 interval sessions per week, guided by heart rate and symptoms, to see whether this dose improves fitness without overwhelming recovery."
+summary: "Do repeatable hard cardio intervals on a bike, rower, treadmill, hill, or safe route to see whether your fitness signal improves without creating too much recovery strain."
 status: field-testing
 quality: usable
 aliases:

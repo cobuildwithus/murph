@@ -4,7 +4,7 @@ entityType: protocol_variant
 key: protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed
 slug: protocols/red-light-glasses-before-bed/red-light-glasses-before-bed
 title: Red-Light Glasses Before Bed
-summary: "A low-burden evening experiment: wear high-filtering amber/red/brown glasses before bed for two weeks and see whether the last hour of the night feels calmer and sleep comes more easily."
+summary: "Wear high-filtering amber, red, or brown glasses before bed to reduce evening light exposure and see whether you feel less wired or fall asleep more easily."
 status: draft
 quality: usable
 aliases:
@@ -123,12 +123,13 @@ protocol:
   interventionSessionsMinimum: 10
   interventionSessionsTarget: 12
   steps:
-    - For 14 intervention nights, put the glasses on 90–120 minutes before intended bedtime.
+    - Choose high-filtering amber, red, or brown glasses that fit closely enough to limit light leakage.
+    - Put the glasses on 90–120 minutes before intended bedtime.
     - Wear them indoors only during the pre-bed window, then remove them before sleep.
     - Remove the glasses before driving, cycling, cooking with visual hazards, navigating stairs or unfamiliar low-light spaces, or doing color-critical work.
     - Log wear time, bedtime target, actual bedtime, screens, room light, caffeine or alcohol, stress, and any symptoms.
   tips:
-    - Use high-filtering amber, red, or brown lenses with good fit; lens color alone is not proof of useful filtering.
+    - Lens color alone is not proof of useful filtering; product spectral data is better when available.
     - Keep room lighting, screen brightness, bedtime target, caffeine, alcohol, exercise timing, sleep supplements, and melatonin as stable as practical.
     - Do not add a new screen curfew, sleep supplement, bedtime, light-therapy device, or major room-light redesign during this test.
     - Do not wear strong filtering lenses during the day; daytime light is a different signal.
