@@ -222,6 +222,7 @@ pnpm --dir apps/cloudflare verify
 - optional: copy `apps/cloudflare/.dev.vars.example` to `apps/cloudflare/.dev.vars` when you want to pin local Worker secrets or add provider-specific Worker vars; otherwise `pnpm dev` uses Wrangler's documented local process-env path for required Worker secrets and CLI `--var` overrides for local non-secret vars
 - either keep `DATABASE_URL` in the linked Vercel development env or run local Postgres on `127.0.0.1:5432` so the default local database URL works
 - keep the linked Vercel development env populated with the real hosted signup secrets you need locally, such as Privy and Stripe test credentials
+- optional: install the [Stripe CLI](https://docs.stripe.com/stripe-cli) (`brew install stripe/stripe-cli/stripe`) and run `stripe login` once. `pnpm dev` then auto-launches `stripe listen` for hosted onboarding webhooks and captures the per-developer `whsec_...` signing secret from the listener's startup output into the web child's env. Set `MURPH_DEV_SKIP_STRIPE_LISTEN=1` to opt out; see `apps/web/README.md` for the full contract.
 
 Repeatable launcher sanity check:
 

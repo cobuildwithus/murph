@@ -13,6 +13,7 @@ export function resolveHostedLocalDevConfig(
 ): HostedLocalDevConfig {
   return {
     skipPrismaMigrate: env.MURPH_DEV_SKIP_PRISMA_MIGRATE === "1",
+    skipStripeListen: env.MURPH_DEV_SKIP_STRIPE_LISTEN === "1",
     skipWeb: env.MURPH_DEV_SKIP_WEB === "1",
     skipVercelPull: env.MURPH_DEV_SKIP_VERCEL_PULL === "1",
     webHost: env.MURPH_DEV_WEB_HOST?.trim() || DEFAULT_WEB_HOST,
@@ -62,6 +63,7 @@ export function printHelp(): void {
       "Optional environment overrides:",
       "  MURPH_DEV_SKIP_VERCEL_PULL=1        Reuse the current shell env instead of pulling Vercel development env",
       "  MURPH_DEV_SKIP_PRISMA_MIGRATE=1     Skip prisma migrate deploy before startup",
+      "  MURPH_DEV_SKIP_STRIPE_LISTEN=1      Skip the auto-launched `stripe listen` forwarder for hosted onboarding webhooks",
       "  MURPH_DEV_SKIP_WEB=1                Start only the local worker/container lane",
       "  MURPH_DEV_WEB_HOST=127.0.0.1        Hosted web listen host",
       "  MURPH_DEV_WEB_PORT=3000             Hosted web listen port",
