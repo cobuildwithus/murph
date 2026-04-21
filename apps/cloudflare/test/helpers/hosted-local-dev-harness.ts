@@ -94,6 +94,7 @@ export async function startHostedLocalDevHarness(input: {
     const runtimeEnv: NodeJS.ProcessEnv = {
       ...input.env,
       MURPH_DEV_CF_PERSIST_DIR: persistDir,
+      MURPH_HOSTED_WEB_DEV_OWNER_PID: String(process.pid),
       NEXT_DIST_DIR_SUFFIX: resolvedNextDistDirSuffix,
     };
     nextDistDir = resolveHostedLocalHarnessDistDir(
