@@ -18,10 +18,11 @@ const FINNISH_SAUNA_ROUTE_ID = "finnish-sauna";
 const NORWEGIAN_4X4_ROUTE_ID = "norwegian-4x4";
 const RED_LIGHT_GLASSES_ROUTE_ID = "red-light-glasses-before-bed";
 const BRYAN_JOHNSON_SAUNA_ROUTE_ID = "bryan-johnson-blueprint";
-const FINNISH_SAUNA_IMAGE = "/design-assets/hero-sauna.png";
+const FINNISH_SAUNA_IMAGE = "/design-assets/hero-finnish-sauna.jpeg";
 const NORWEGIAN_4X4_IMAGE = "/design-assets/hero-norwegian-4x4.jpeg";
 const RED_LIGHT_GLASSES_IMAGE = "/design-assets/hero-red-light-glasses-before-bed.jpeg";
 const BRYAN_JOHNSON_SAUNA_IMAGE = "/design-assets/hero-bryan-johnson-sauna.jpg";
+const GENERIC_SAUNA_IMAGE = "/design-assets/hero-sauna.png";
 const SLEEP_EXPERIMENT_IMAGE = "/design-assets/hero-02.png";
 const EXERCISE_EXPERIMENT_IMAGE = "/design-assets/hero-03.png";
 
@@ -352,6 +353,10 @@ function formatProtocolCategory(protocol: HealthCommonsCatalogEntity): string {
 }
 
 function resolveProtocolImage(protocol: HealthCommonsCatalogEntity): string {
+  if (toExperimentId(protocol) === FINNISH_SAUNA_ROUTE_ID) {
+    return FINNISH_SAUNA_IMAGE;
+  }
+
   if (toExperimentId(protocol) === NORWEGIAN_4X4_ROUTE_ID) {
     return NORWEGIAN_4X4_IMAGE;
   }
@@ -379,7 +384,7 @@ function resolveProtocolImage(protocol: HealthCommonsCatalogEntity): string {
     return EXERCISE_EXPERIMENT_IMAGE;
   }
 
-  return FINNISH_SAUNA_IMAGE;
+  return GENERIC_SAUNA_IMAGE;
 }
 
 function toExperimentId(protocol: HealthCommonsCatalogEntity): string {

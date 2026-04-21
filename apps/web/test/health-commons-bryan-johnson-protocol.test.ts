@@ -17,6 +17,13 @@ describe("Health Commons experiment protocol metadata", () => {
     expect(protocol?.image).toBe("/design-assets/hero-bryan-johnson-sauna.jpg");
   });
 
+  it("uses the dedicated Finnish sauna artwork", () => {
+    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+
+    expect(protocol).not.toBeNull();
+    expect(protocol?.image).toBe("/design-assets/hero-finnish-sauna.jpeg");
+  });
+
   it("uses the dedicated Norwegian 4x4 artwork", () => {
     const protocol = resolveHealthCommonsExperimentProtocol("norwegian-4x4");
 
