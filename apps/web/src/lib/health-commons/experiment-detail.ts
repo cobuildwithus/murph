@@ -25,6 +25,12 @@ const BRYAN_JOHNSON_SAUNA_IMAGE = "/design-assets/hero-bryan-johnson-sauna.jpg";
 const GENERIC_SAUNA_IMAGE = "/design-assets/hero-sauna.png";
 const SLEEP_EXPERIMENT_IMAGE = "/design-assets/hero-02.png";
 const EXERCISE_EXPERIMENT_IMAGE = "/design-assets/hero-03.png";
+const EXPERIMENT_IMAGE_BY_ROUTE_ID: Readonly<Partial<Record<string, string>>> = {
+  [FINNISH_SAUNA_ROUTE_ID]: FINNISH_SAUNA_IMAGE,
+  [NORWEGIAN_4X4_ROUTE_ID]: NORWEGIAN_4X4_IMAGE,
+  [RED_LIGHT_GLASSES_ROUTE_ID]: RED_LIGHT_GLASSES_IMAGE,
+  [BRYAN_JOHNSON_SAUNA_ROUTE_ID]: BRYAN_JOHNSON_SAUNA_IMAGE,
+};
 
 const QUALITY_TO_EVIDENCE_LEVEL: Record<string, number> = {
   stub: 1,
@@ -353,22 +359,17 @@ function formatProtocolCategory(protocol: HealthCommonsCatalogEntity): string {
 }
 
 function resolveProtocolImage(protocol: HealthCommonsCatalogEntity): string {
-  if (toExperimentId(protocol) === FINNISH_SAUNA_ROUTE_ID) {
-    return FINNISH_SAUNA_IMAGE;
+  const routeId = toExperimentId(protocol);
+  const mappedImage = EXPERIMENT_IMAGE_BY_ROUTE_ID[routeId];
+
+  if (mappedImage) {
+    return mappedImage;
   }
 
-  if (toExperimentId(protocol) === NORWEGIAN_4X4_ROUTE_ID) {
-    return NORWEGIAN_4X4_IMAGE;
-  }
+  return inferFallbackProtocolImage(protocol);
+}
 
-  if (toExperimentId(protocol) === RED_LIGHT_GLASSES_ROUTE_ID) {
-    return RED_LIGHT_GLASSES_IMAGE;
-  }
-
-  if (toExperimentId(protocol) === BRYAN_JOHNSON_SAUNA_ROUTE_ID) {
-    return BRYAN_JOHNSON_SAUNA_IMAGE;
-  }
-
+function inferFallbackProtocolImage(protocol: HealthCommonsCatalogEntity): string {
   const lookupText = [
     protocol.key,
     protocol.slug,
