@@ -1,4 +1,3 @@
-import type { PrismaClient } from "@prisma/client";
 import type { HostedRunNudgeResult } from "@murphai/hosted-execution";
 
 import { readHostedExecutionControlClientIfConfigured } from "../hosted-execution/control";
@@ -38,35 +37,14 @@ export async function nudgeHostedRunUserBestEffort(input: {
 
 export async function nudgeHostedRunBestEffort(input: {
   context?: string;
-  defer?: (drain: () => Promise<void>) => Promise<void> | void;
-  eventId: string;
-  prisma?: PrismaClient;
   timeoutMs?: number;
   userId: string;
 }): Promise<void> {
-  const nudge = () => nudgeHostedRunUserBestEffort({
+  await nudgeHostedRunUserBestEffort({
     context: input.context,
     timeoutMs: input.timeoutMs,
     userId: input.userId,
   });
-
-  try {
-    if (input.defer) {
-      await input.defer(async () => {
-        await nudge();
-      });
-      return;
-    }
-
-    await nudge();
-  } catch (error) {
-    console.error(
-      input.context
-        ? `Hosted run nudge failed (${input.context}).`
-        : "Hosted run nudge failed.",
-      formatHostedExecutionSafeLogError(error),
-    );
-  }
 }
 
 // Compatibility aliases for callers that still use the older trigger naming.

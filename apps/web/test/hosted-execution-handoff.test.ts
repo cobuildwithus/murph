@@ -41,7 +41,6 @@ describe("nudgeHostedRunBestEffort", () => {
 
     await expect(
       nudgeHostedRunBestEffort({
-        eventId: "member.activated:test-event",
         userId: "user-123",
       }),
     ).resolves.toBeUndefined();
@@ -52,7 +51,7 @@ describe("nudgeHostedRunBestEffort", () => {
     );
   });
 
-  it("nudges the user through the deferred callback when present", async () => {
+  it("nudges the user immediately when configured", async () => {
     const nudgeUserRun = vi.fn().mockResolvedValue({
       accepted: true,
       alarmScheduled: false,
@@ -64,19 +63,12 @@ describe("nudgeHostedRunBestEffort", () => {
       nudgeUserRun,
     } as ReturnType<typeof readHostedExecutionControlClientIfConfigured>);
 
-    const defer = vi.fn(async (run: () => Promise<void>) => {
-      await run();
-    });
-
     await nudgeHostedRunBestEffort({
       context: "member-activation",
-      defer,
-      eventId: "member.activated:test-event",
       timeoutMs: 25,
       userId: "user-123",
     });
 
-    expect(defer).toHaveBeenCalledTimes(1);
     expect(nudgeUserRun).toHaveBeenCalledWith("user-123");
   });
 

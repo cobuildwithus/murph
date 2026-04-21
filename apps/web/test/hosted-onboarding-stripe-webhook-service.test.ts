@@ -58,11 +58,11 @@ describe("hosted Stripe webhook service", () => {
     const prisma = {
       __tag: "prisma",
     };
-    let deferredDrain: (() => Promise<void>) | null = null;
+    const deferred: Array<() => Promise<void>> = [];
 
     await expect(handleHostedStripeWebhook({
       defer: vi.fn(async (drain) => {
-        deferredDrain = drain;
+        deferred.push(drain);
       }),
       prisma: prisma as never,
       rawBody: "{}",
@@ -76,11 +76,11 @@ describe("hosted Stripe webhook service", () => {
       event: makeStripeEvent(),
       prisma,
     });
-    expect(deferredDrain).not.toBeNull();
+    expect(deferred).toHaveLength(1);
     expect(mocks.reconcileHostedStripeEventById).not.toHaveBeenCalled();
     expect(mocks.nudgeHostedRunBestEffort).not.toHaveBeenCalled();
 
-    await deferredDrain?.();
+    await deferred[0]!();
 
     expect(mocks.reconcileHostedStripeEventById).toHaveBeenCalledWith({
       eventId: "evt_123",
@@ -88,8 +88,6 @@ describe("hosted Stripe webhook service", () => {
     });
     expect(mocks.nudgeHostedRunBestEffort).toHaveBeenCalledWith({
       context: "stripe.webhook",
-      eventId: "dispatch_123",
-      prisma,
       userId: "member_123",
     });
   });
@@ -114,8 +112,6 @@ describe("hosted Stripe webhook service", () => {
     });
     expect(mocks.nudgeHostedRunBestEffort).toHaveBeenCalledWith({
       context: "stripe.webhook",
-      eventId: "dispatch_123",
-      prisma,
       userId: "member_123",
     });
   });

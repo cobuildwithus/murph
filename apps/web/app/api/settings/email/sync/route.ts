@@ -57,7 +57,6 @@ export const POST = withJsonError(async (request: Request) => {
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
   await nudgeHostedRunBestEffort({
     context: "settings.email.sync",
-    eventId: channelSyncDispatch.eventId,
     userId: auth.member.id,
   });
 
