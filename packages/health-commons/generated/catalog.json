@@ -1576,7 +1576,7 @@
       "schemaVersion": "murph.commons.artifact-manifest.v1"
     }
   ],
-  "catalogHash": "sha256:168ffe83760a2c223cc16d7d0ad403195c6cd80db987ee3864744c59e5c92a33",
+  "catalogHash": "sha256:abbade542b74ba9903a1cbb574bc8ac05d870a280655b15c9d1cf76d9e1a6d14",
   "changes": [
     {
       "affectedFields": [
@@ -2001,6 +2001,32 @@
       "reviewStatus": "accepted",
       "schemaVersion": "murph.commons.change.v1",
       "sourceKeys": [
+        "source_artifact:ntnu-cerg-norwegian-4x4"
+      ]
+    },
+    {
+      "affectedFields": [
+        "researchLandscape",
+        "sources/norwegian-4x4.protocolEvidence",
+        "relations",
+        "apps/web.researchGroups",
+        "generated.catalog"
+      ],
+      "changeId": "chg_2026_04_21_norwegian_4x4_research_landscape_groups",
+      "changeType": "evidence_change",
+      "editSummary": "Grouped the Norwegian 4x4 research section into protocol-support, mixed clinical-superiority, safety-boundary, and adjacent-context categories, and added protocol-specific appraisal metadata to every displayed Norwegian 4x4 source.",
+      "entityKey": "protocol_variant:norwegian-4x4/norwegian-4x4",
+      "minor": false,
+      "rationale": "The experiment page should explain what the evidence supports, what is mixed, what is safety-only, and what is adjacent without forcing users to infer that from paper titles and counts.",
+      "reviewStatus": "proposed",
+      "schemaVersion": "murph.commons.change.v1",
+      "sourceKeys": [
+        "source_artifact:pmid-17414804",
+        "source_artifact:pmid-25464446",
+        "source_artifact:pmid-28082387",
+        "source_artifact:pmid-22879367",
+        "source_artifact:pmid-33239350",
+        "source_artifact:pmid-30293954",
         "source_artifact:ntnu-cerg-norwegian-4x4"
       ]
     },
@@ -4567,6 +4593,10 @@
           "type": "cites"
         },
         {
+          "target": "source_artifact:pmid-33239350",
+          "type": "cites"
+        },
+        {
           "target": "source_artifact:pmid-30293954",
           "type": "cites"
         },
@@ -4604,8 +4634,78 @@
           "safetyAndContraindicationRecords": 9
         }
       },
+      "researchLandscape": {
+        "bottomLine": "Best read as a VO2max-oriented fitness protocol with explicit safety and recovery boundaries, not a general disease-treatment claim.",
+        "confidenceLabel": "moderate",
+        "groups": [
+          {
+            "defaultOpen": true,
+            "id": "supports-fitness-claim",
+            "label": "Supports the fitness claim",
+            "sourceKeys": [
+              "source_artifact:ntnu-cerg-norwegian-4x4",
+              "source_artifact:pmid-17414804",
+              "source_artifact:pmid-26440134",
+              "source_artifact:pmid-30733142",
+              "source_artifact:pmid-24066036",
+              "source_artifact:doi-10.3390-ijerph17145103",
+              "source_artifact:pmid-23988787"
+            ],
+            "stance": "supports",
+            "summary": "The direct and close-family evidence supports Norwegian 4x4 as a cardiorespiratory-fitness experiment, especially for VO2max. The key practical caveat is dose fidelity: the source card should ask whether the intervals actually reached the intended hard aerobic zone."
+          },
+          {
+            "id": "clinical-context-mixed-superiority",
+            "label": "Clinical context and mixed superiority",
+            "sourceKeys": [
+              "source_artifact:pmid-25464446",
+              "source_artifact:pmid-28082387",
+              "source_artifact:pmid-33560320",
+              "source_artifact:pmid-29502328",
+              "source_artifact:pmid-15179103",
+              "source_artifact:pmid-17548726",
+              "source_artifact:pmid-18606913",
+              "source_artifact:pmid-18673303",
+              "source_artifact:pmid-19958872",
+              "source_artifact:pmid-21450580",
+              "source_artifact:pmid-28385556"
+            ],
+            "stance": "mixed",
+            "summary": "Early supervised clinical-lineage studies often favored interval training, but larger coronary-disease and heart-failure trials did not consistently confirm superiority over moderate training or guideline advice. This category keeps the claim honest: worth testing for fitness, not always better and not self-treatment evidence."
+          },
+          {
+            "id": "safety-boundary",
+            "label": "Safety boundaries",
+            "sourceKeys": [
+              "source_artifact:pmid-22879367",
+              "source_artifact:pmid-30376749",
+              "source_artifact:pmid-29416382",
+              "source_artifact:pmid-32100573",
+              "source_artifact:pmid-32860412",
+              "source_artifact:pmid-33239350"
+            ],
+            "stance": "safety_boundary",
+            "summary": "Safety evidence is mostly about screened, supervised, or guideline-managed exercise. Serious events appear uncommon in those settings, but the evidence does not make unsupervised vigorous intervals risk-free, especially for people with cardiovascular symptoms, disease, medication, recent infection, or pregnancy/postpartum context."
+          },
+          {
+            "id": "adjacent-variants-and-recovery-context",
+            "label": "Adjacent variants and recovery context",
+            "sourceKeys": [
+              "source_artifact:pmid-30293954",
+              "source_artifact:pmid-28846513",
+              "source_artifact:pmid-39256000",
+              "source_artifact:pmid-36314990",
+              "source_artifact:pmid-37608507"
+            ],
+            "stance": "context_only",
+            "summary": "Low-volume HIIT, sprint-interval comparisons, athlete studies, metabolic-syndrome syntheses, and autonomic-control reviews help separate neighboring protocols and secondary signals. They are useful context, but they should not be counted as direct proof that this exact 4x4 recipe will move a user's wearable metrics."
+          }
+        ],
+        "mainCaveat": "Supervised clinical and disease-population studies are mixed, so they should calibrate safety and population fit instead of proving home superiority over moderate cardio.",
+        "primaryClaim": "The strongest support is for improving lab VO2max or wearable cardio-fitness when the 4x4 intensity target is actually reached."
+      },
       "revision": {
-        "pageRevisionId": "sha256:a8c60049c9eecd70914e4784507cb0c2b8e427b400348c8a017c02a751f4c56f",
+        "pageRevisionId": "sha256:b38c7c276f4bac06249f95ae53e6bc9ec17b5b80064419057ecc122badc90207",
         "recipeHash": "sha256:a36ee9d7c6cf5d9c816817cb9366d0a7d815922f2135ecd739884d1afd7a38d1",
         "runSpecRevisionId": "sha256:80e12ca616f3426cfe7a4f2c60696a066a55fdbf5a1fce79c95901d7ba3fff2b"
       },
@@ -5973,6 +6073,22 @@
         "heart-rate recovery",
         "symptoms and adherence"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "Single-session physiology is implementation evidence, not long-term efficacy evidence.",
+          "displayPriority": 60,
+          "endpointKeys": [
+            "biomarker:estimated-vo2max"
+          ],
+          "groupId": "supports-fitness-claim",
+          "headline": "The acute heart-rate study shows a completed 4x4 session should be judged by target-zone fidelity, not only by finishing four intervals.",
+          "implication": "Log interval heart-rate peaks and time near target so the experiment knows whether the intended dose happened.",
+          "protocolKey": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "result": "not_efficacy_evidence",
+          "scope": "measurement_context",
+          "stance": "supports"
+        }
+      ],
       "protocolTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol.",
       "quality": "usable",
       "relations": [
@@ -5997,7 +6113,7 @@
         "populationLabel": "Healthy active adults"
       },
       "revision": {
-        "pageRevisionId": "sha256:3b663fd118604e5e209f1add3adf7d8cd413097ba5183a26b42c52e348d89f3f",
+        "pageRevisionId": "sha256:af6560111727bc4af6921019eb43414c9a22b54aba41573d572fa49dee20426f",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -6482,6 +6598,19 @@
         "heart-rate recovery",
         "symptoms and adherence"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "Public protocol guidance does not estimate benefit size or safety for a specific user.",
+          "displayPriority": 10,
+          "groupId": "supports-fitness-claim",
+          "headline": "Defines the commonly cited Norwegian 4x4 dose: warm up, four 4-minute hard intervals, active recoveries, and cooldown.",
+          "implication": "Use this as the recipe anchor for the Murph protocol, not as outcome evidence.",
+          "protocolKey": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "result": "not_efficacy_evidence",
+          "scope": "direct_protocol",
+          "stance": "supports"
+        }
+      ],
       "protocolTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol.",
       "quality": "usable",
       "relations": [
@@ -6502,7 +6631,7 @@
         "populationLabel": "Public-facing exercise guidance"
       },
       "revision": {
-        "pageRevisionId": "sha256:96e8cfa7868f9c8eab0dd560864a75be03301cf884b0a389e230aa6e6ec8884f",
+        "pageRevisionId": "sha256:28fe1234a69fcb7ac42e191e543ac00b093f0a3f5ef7a8429a08ac3469d05bad",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -6666,6 +6795,22 @@
         "clinician-supervised intensity fidelity",
         "symptoms and adverse events"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "Coronary disease exercise should not be self-prescribed from this trial.",
+          "displayPriority": 50,
+          "endpointKeys": [
+            "biomarker:estimated-vo2max"
+          ],
+          "groupId": "clinical-context-mixed-superiority",
+          "headline": "An early supervised coronary-disease trial favored high-intensity intervals over moderate exercise for aerobic capacity.",
+          "implication": "Supports the clinical lineage of 4x4-style training while staying population-bounded.",
+          "protocolKey": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "result": "positive",
+          "scope": "clinical_supervised",
+          "stance": "mixed"
+        }
+      ],
       "protocolTakeaway": "Use as clinical lineage and population-mismatch context only; do not use it as direct support for unscreened users self-treating coronary disease.",
       "quality": "usable",
       "relations": [
@@ -6693,7 +6838,7 @@
         "populationLabel": "Stable coronary artery disease patients"
       },
       "revision": {
-        "pageRevisionId": "sha256:f2c362d326ee721231a6ddb9be754c549ac594430a82540e399992d4908a286f",
+        "pageRevisionId": "sha256:d370b639a0319263c16f15a1804fa55a64396006d5c303bba78f5842034e127e",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -6937,6 +7082,22 @@
         "heart-rate recovery",
         "symptoms and adherence"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "The trial was small and controlled, so it should not be read as a universal home-protocol guarantee.",
+          "displayPriority": 20,
+          "endpointKeys": [
+            "biomarker:estimated-vo2max"
+          ],
+          "groupId": "supports-fitness-claim",
+          "headline": "A small RCT found classic 4x4 intervals improved lab VO2max more than moderate continuous training.",
+          "implication": "This is the cleanest direct support for making VO2max or wearable cardio-fitness the primary signal.",
+          "protocolKey": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "result": "positive",
+          "scope": "direct_protocol",
+          "stance": "supports"
+        }
+      ],
       "protocolTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol.",
       "quality": "usable",
       "relations": [
@@ -6961,7 +7122,7 @@
         "populationLabel": "Moderately trained men"
       },
       "revision": {
-        "pageRevisionId": "sha256:b004dea0b94443d71d8e4e297551e97130669796cc57a6709e30d363daba771e",
+        "pageRevisionId": "sha256:3cb2525355c0f931f4b613afb5f54f6419bb9ebe8dd5f910ed134e000308353c",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -7007,6 +7168,22 @@
         "left-ventricular function context",
         "clinician-supervised symptoms and adherence"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "Heart-failure exercise protocols require clinical screening and supervision.",
+          "displayPriority": 60,
+          "endpointKeys": [
+            "biomarker:estimated-vo2max"
+          ],
+          "groupId": "clinical-context-mixed-superiority",
+          "headline": "A supervised heart-failure trial reported stronger cardiovascular adaptations from aerobic interval training.",
+          "implication": "Useful for mechanism and lineage, but not for unsupervised disease-treatment claims.",
+          "protocolKey": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "result": "positive",
+          "scope": "clinical_supervised",
+          "stance": "mixed"
+        }
+      ],
       "protocolTakeaway": "Use as clinical lineage and overclaim guardrail; do not treat heart-failure rehabilitation evidence as permission for unsupervised vigorous intervals.",
       "quality": "usable",
       "relations": [
@@ -7034,7 +7211,7 @@
         "populationLabel": "Stable post-infarction heart failure patients"
       },
       "revision": {
-        "pageRevisionId": "sha256:ad67d743c1e4db5ba29ee2f9065fa72fd671a50bfe27613ed0949b97133b0147",
+        "pageRevisionId": "sha256:e9b23531abf086eeca993a43fa54656f116feb26be39a97534b5c7014a664d8b",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -7080,6 +7257,22 @@
         "resting blood pressure context",
         "cardiometabolic risk context"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "Small clinical-pilot evidence should not become a blanket wellness guarantee.",
+          "displayPriority": 70,
+          "endpointKeys": [
+            "biomarker:estimated-vo2max"
+          ],
+          "groupId": "clinical-context-mixed-superiority",
+          "headline": "A metabolic-syndrome pilot found interval training improved aerobic capacity and cardiometabolic markers.",
+          "implication": "Supports plausibility for fitness and vascular signals while keeping the metabolic-syndrome population separate.",
+          "protocolKey": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "result": "positive",
+          "scope": "clinical_supervised",
+          "stance": "mixed"
+        }
+      ],
       "protocolTakeaway": "Use as clinical lineage and population-mismatch context only; keep metabolic-syndrome treatment claims separate from this wearable self-experiment.",
       "quality": "usable",
       "relations": [
@@ -7107,7 +7300,7 @@
         "populationLabel": "Adults with metabolic syndrome"
       },
       "revision": {
-        "pageRevisionId": "sha256:b0b062386d0d98ef8395c9911e33e1e7cf2e6e44e79f0017a8d014befe11a679",
+        "pageRevisionId": "sha256:a615c90eaa47f01b80a4a3ac29fe697988e44efbc647b8ddc3f9b7772ad2db2b",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -7153,6 +7346,22 @@
         "cardiovascular risk-factor context",
         "adherence and supervision context"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "Youth, obesity-treatment, and program-supervision context are not interchangeable with Murph's general experiment.",
+          "displayPriority": 80,
+          "endpointKeys": [
+            "biomarker:estimated-vo2max"
+          ],
+          "groupId": "clinical-context-mixed-superiority",
+          "headline": "An overweight-adolescent program found interval training reduced cardiovascular risk factors more than multitreatment advice.",
+          "implication": "Use as population-specific context, not as proof for the adult home protocol.",
+          "protocolKey": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "result": "positive",
+          "scope": "clinical_supervised",
+          "stance": "mixed"
+        }
+      ],
       "protocolTakeaway": "Use as adjacent clinical context only; adolescent overweight trials should not directly set adult unsupervised protocol claims.",
       "quality": "usable",
       "relations": [
@@ -7180,7 +7389,7 @@
         "populationLabel": "Overweight adolescents"
       },
       "revision": {
-        "pageRevisionId": "sha256:0e34be9dfac1f9d645427dfd38576cb648c8878369ad1c5553059e51b1cf62b4",
+        "pageRevisionId": "sha256:5eb75cb0d2450b9282cb468373819ae001685645039fc6849baa3b15518f052a",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -7290,6 +7499,22 @@
         "quality-of-life context",
         "clinician-supervised symptoms and adverse events"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "Post-surgical cardiac rehabilitation has a different risk model and supervision structure.",
+          "displayPriority": 90,
+          "endpointKeys": [
+            "biomarker:estimated-vo2max"
+          ],
+          "groupId": "clinical-context-mixed-superiority",
+          "headline": "A post-CABG supervised rehabilitation trial compared aerobic intervals with continuous moderate exercise.",
+          "implication": "Adds cardiac-rehab lineage evidence while reinforcing that this is not unsupervised self-treatment evidence.",
+          "protocolKey": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "result": "positive",
+          "scope": "clinical_supervised",
+          "stance": "mixed"
+        }
+      ],
       "protocolTakeaway": "Use as cardiac-rehabilitation context and safety-boundary support only; do not use it to recommend unsupervised 4x4 after cardiac surgery.",
       "quality": "usable",
       "relations": [
@@ -7317,7 +7542,7 @@
         "populationLabel": "Coronary artery bypass surgery patients"
       },
       "revision": {
-        "pageRevisionId": "sha256:867e0ca7df3632082f9b51fa4fb893e958935c06d50bae9047ea8275277b5473",
+        "pageRevisionId": "sha256:17f313249fae8b1482b795a14a9d8954032958a66a9af8576ce83404d095c2c0",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -7492,6 +7717,23 @@
         "estimated VO2max / cardio-fitness proxy",
         "clinician-supervised symptoms and adherence"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "Uncontrolled hypertension is a clinician-guidance boundary for vigorous intervals.",
+          "displayPriority": 100,
+          "endpointKeys": [
+            "biomarker:estimated-vo2max",
+            "biomarker:morning-blood-pressure"
+          ],
+          "groupId": "clinical-context-mixed-superiority",
+          "headline": "A hypertension trial reported blood-pressure and myocardial-function improvements with aerobic intervals.",
+          "implication": "Supports tracking blood pressure as context, but not promising blood-pressure treatment from a home 4x4 trial.",
+          "protocolKey": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "result": "positive",
+          "scope": "clinical_supervised",
+          "stance": "mixed"
+        }
+      ],
       "protocolTakeaway": "Use for blood-pressure context and hypertension guardrails only; the Murph protocol is not a hypertension treatment plan.",
       "quality": "usable",
       "relations": [
@@ -7519,7 +7761,7 @@
         "populationLabel": "Adults with essential hypertension"
       },
       "revision": {
-        "pageRevisionId": "sha256:d9602e48efe9a0f3c81ac12275737d1121684e6574951a90617511211ee4fb34",
+        "pageRevisionId": "sha256:5eb1db35521cb48449bf97d68aac24f203f95639a602964226bc57da9cd4a2d4",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -7626,6 +7868,19 @@
         "heart-rate recovery",
         "symptoms and adherence"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "Screened supervised patients are not the same as unscreened home users.",
+          "displayPriority": 10,
+          "groupId": "safety-boundary",
+          "headline": "The cardiac-rehab registry found serious events during supervised HIIT were rare, but not zero.",
+          "implication": "Supports a low-risk-with-supervision frame and justifies strong stop-condition language.",
+          "protocolKey": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "result": "not_efficacy_evidence",
+          "scope": "clinical_supervised",
+          "stance": "safety_boundary"
+        }
+      ],
       "protocolTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol.",
       "quality": "usable",
       "relations": [
@@ -7650,7 +7905,7 @@
         "populationLabel": "Coronary heart disease cardiac-rehabilitation patients"
       },
       "revision": {
-        "pageRevisionId": "sha256:d92bab8507dafe999b9b1d042f40c7264eea6f997aacab8181d436c5dcd7f9e9",
+        "pageRevisionId": "sha256:a689f2d89a031864875d945f4edde301757ff67fcfe32badd25061df9449d029",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -7761,6 +8016,22 @@
         "heart-rate recovery",
         "symptoms and adherence"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "Heart-rate estimates and wrist sensors can also be wrong, especially during vigorous movement.",
+          "displayPriority": 70,
+          "endpointKeys": [
+            "biomarker:estimated-vo2max"
+          ],
+          "groupId": "supports-fitness-claim",
+          "headline": "The RPE-intensity study warns that perceived effort alone may miss the intended interval target.",
+          "implication": "Prefer heart-rate feedback plus symptoms and RPE when testing the actual 4x4 dose.",
+          "protocolKey": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "result": "not_efficacy_evidence",
+          "scope": "measurement_context",
+          "stance": "supports"
+        }
+      ],
       "protocolTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol.",
       "quality": "usable",
       "relations": [
@@ -7785,7 +8056,7 @@
         "populationLabel": "Cardiac-rehabilitation participants"
       },
       "revision": {
-        "pageRevisionId": "sha256:511c78e5c07bc8fa7e1824d55b877356602b70f9b856a871f721e82429011a4b",
+        "pageRevisionId": "sha256:f63aaaf924bb306a0eebdb1e8f43d43d4f8102c35f2d1c0938eedcbd0f67f570",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -7832,6 +8103,22 @@
         "heart-rate recovery",
         "symptoms and adherence"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "This is not specific to the Murph recipe and should not override direct 4x4 evidence.",
+          "displayPriority": 50,
+          "endpointKeys": [
+            "biomarker:estimated-vo2max"
+          ],
+          "groupId": "supports-fitness-claim",
+          "headline": "A VO2max trainability meta-analysis supports high-intensity interval training as a plausible fitness stimulus.",
+          "implication": "Use as broader mechanism support for why cardio-fitness can move over weeks.",
+          "protocolKey": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "result": "positive",
+          "scope": "same_mechanism",
+          "stance": "supports"
+        }
+      ],
       "protocolTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol.",
       "quality": "usable",
       "relations": [
@@ -7856,7 +8143,7 @@
         "populationLabel": "Healthy sedentary or recreationally active adults under 45"
       },
       "revision": {
-        "pageRevisionId": "sha256:bd6d02d4efa1e738abbc456b9d78a7706d3e1a7597310462b250f054ee104345",
+        "pageRevisionId": "sha256:9774d9551c0cf967c33fbadf26fbeaab2baacbef5b9d37180071eefa838e078f",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -8169,6 +8456,22 @@
         "heart-rate recovery",
         "symptoms and adherence"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "The setting was supervised clinical rehabilitation, not a general wellness experiment.",
+          "displayPriority": 10,
+          "endpointKeys": [
+            "biomarker:estimated-vo2max"
+          ],
+          "groupId": "clinical-context-mixed-superiority",
+          "headline": "A larger CAD trial found interval and continuous training both improved exercise capacity without a clear interval advantage.",
+          "implication": "This prevents claiming 4x4 is always better than moderate cardio.",
+          "protocolKey": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "result": "no_clear_advantage",
+          "scope": "clinical_supervised",
+          "stance": "does_not_confirm"
+        }
+      ],
       "protocolTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol.",
       "quality": "usable",
       "relations": [
@@ -8193,7 +8496,7 @@
         "populationLabel": "Stable coronary artery disease patients"
       },
       "revision": {
-        "pageRevisionId": "sha256:f51f60f0686e07f747202bd0b7021902e7e9fcc1942d8422e29ed61fdc11bf02",
+        "pageRevisionId": "sha256:d00d9ad7696a7b683beaa29412118e119de7c466c5b5b9ec086f259991e318dc",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -8497,6 +8800,22 @@
         "session heart-rate fidelity",
         "variant separation"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "The comparison was structured research exercise, not a free-living wearable experiment.",
+          "displayPriority": 30,
+          "endpointKeys": [
+            "biomarker:estimated-vo2max"
+          ],
+          "groupId": "supports-fitness-claim",
+          "headline": "In overweight and obese adults, 4x4-style aerobic intervals improved VO2max compared with other exercise modalities.",
+          "implication": "Supports the fitness-outcome claim while keeping population and program context explicit.",
+          "protocolKey": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "result": "positive",
+          "scope": "same_mechanism",
+          "stance": "supports"
+        }
+      ],
       "protocolTakeaway": "Use for 4x4 dose support and variant separation, while preserving the overweight/obese adult population caveat.",
       "quality": "usable",
       "relations": [
@@ -8524,7 +8843,7 @@
         "populationLabel": "Overweight and obese adults"
       },
       "revision": {
-        "pageRevisionId": "sha256:4d2c4c4ca23066b24805da9c085caac7c274371a01ab6225f498eb028530f345",
+        "pageRevisionId": "sha256:e59782daa335cf3b6ce4db8b7d608002635cf7c3171f056f3491d84ce5dd63cd",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -8908,6 +9227,22 @@
         "heart-rate recovery",
         "symptoms and adherence"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "Heart-failure participants need clinician-directed exercise decisions.",
+          "displayPriority": 20,
+          "endpointKeys": [
+            "biomarker:estimated-vo2max"
+          ],
+          "groupId": "clinical-context-mixed-superiority",
+          "headline": "The SMARTEX-HF trial did not confirm durable HIIT superiority in HFrEF and highlighted intensity-fidelity problems.",
+          "implication": "Use it as a guardrail: the intended dose matters, and clinical outcomes do not automatically transfer to home 4x4.",
+          "protocolKey": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "result": "no_clear_advantage",
+          "scope": "clinical_supervised",
+          "stance": "does_not_confirm"
+        }
+      ],
       "protocolTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol.",
       "quality": "usable",
       "relations": [
@@ -8932,7 +9267,7 @@
         "populationLabel": "Heart failure patients with reduced ejection fraction"
       },
       "revision": {
-        "pageRevisionId": "sha256:c0c60828a9658890095338bd4d6e1bc01258ee24fb9a9235efb83ce75b7152a1",
+        "pageRevisionId": "sha256:6d3287d10076bd12e157d53a116ec8d591a5427da2b58eaf84a378abd6270b3b",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -8978,6 +9313,22 @@
         "implementation context",
         "symptoms and adherence"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "Narrative reviews are useful for framing but do not settle protocol-specific effect size.",
+          "displayPriority": 110,
+          "endpointKeys": [
+            "biomarker:estimated-vo2max"
+          ],
+          "groupId": "clinical-context-mixed-superiority",
+          "headline": "The clinical HIIT review summarizes health-outcome opportunities and implementation cautions.",
+          "implication": "Use it for clinical context and language calibration, not as direct proof for this exact protocol.",
+          "protocolKey": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "result": "not_efficacy_evidence",
+          "scope": "clinical_supervised",
+          "stance": "context_only"
+        }
+      ],
       "protocolTakeaway": "Use as implementation and review context only; primary trial claims should cite the underlying trials or meta-analyses.",
       "quality": "usable",
       "relations": [
@@ -9001,7 +9352,7 @@
         "populationLabel": "Clinical and general aerobic HIIT literature"
       },
       "revision": {
-        "pageRevisionId": "sha256:0699bcbc581a9eb2deece43db42242b6108455c3210f189418024b25b80a10ad",
+        "pageRevisionId": "sha256:6ad62c88dc7489b58ee2a40379cc8ef236e1422d9ae59a6863e6de45f0c374db",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -9182,6 +9533,22 @@
         "heart-rate recovery",
         "symptoms and adherence"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "Low-volume protocols have different burden, dose, and interpretation.",
+          "displayPriority": 20,
+          "endpointKeys": [
+            "biomarker:estimated-vo2max"
+          ],
+          "groupId": "adjacent-variants-and-recovery-context",
+          "headline": "The low-volume HIIT trial supports a related but different 1 x 4 style metabolic-syndrome variant.",
+          "implication": "Useful for variant separation; do not merge it into the standard four-interval protocol.",
+          "protocolKey": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "result": "positive",
+          "scope": "adjacent_variant",
+          "stance": "context_only"
+        }
+      ],
       "protocolTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol.",
       "quality": "usable",
       "relations": [
@@ -9207,7 +9574,7 @@
         "populationLabel": "Adults with metabolic syndrome"
       },
       "revision": {
-        "pageRevisionId": "sha256:4d6139264f952bca7340fa4a28a2f3d7be131e739b16952c4dd104c61244d50c",
+        "pageRevisionId": "sha256:34b5cbdb8a6c038024f83ca152d00f3a5974a0a95c9e96c608743988e0af6b2d",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -9626,6 +9993,19 @@
         "heart-rate recovery",
         "symptoms and adherence"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "Cardiac rehab is a clinical care setting with monitoring and escalation paths.",
+          "displayPriority": 30,
+          "groupId": "safety-boundary",
+          "headline": "The cardiac-rehabilitation meta-analysis compares HIIT and moderate continuous training within supervised programs.",
+          "implication": "Use it as rehabilitation safety and implementation context, not as direct home-protocol proof.",
+          "protocolKey": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "result": "not_efficacy_evidence",
+          "scope": "clinical_supervised",
+          "stance": "safety_boundary"
+        }
+      ],
       "protocolTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol.",
       "quality": "usable",
       "relations": [
@@ -9649,7 +10029,7 @@
         "populationLabel": "Cardiac-rehabilitation participants"
       },
       "revision": {
-        "pageRevisionId": "sha256:e13df6b9ed9d1c42729ffa2e735fa3ffa45c6019f2acd1c607c00a353f8e59ba",
+        "pageRevisionId": "sha256:6c89ef9913daef759ff16dd78b499233887f03b3bb6d643d2b272e8868fe0ef4",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -9695,6 +10075,22 @@
         "clinical secondary outcomes",
         "safety and supervision context"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "Clinical synthesis is valuable context, but not direct evidence for unscreened users.",
+          "displayPriority": 40,
+          "endpointKeys": [
+            "biomarker:estimated-vo2max"
+          ],
+          "groupId": "clinical-context-mixed-superiority",
+          "headline": "The CAD and heart-failure synthesis frames interval-versus-continuous findings as clinically mixed rather than settled.",
+          "implication": "Use it to calibrate the strength of superiority claims and keep population boundaries visible.",
+          "protocolKey": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "result": "mixed",
+          "scope": "clinical_supervised",
+          "stance": "mixed"
+        }
+      ],
       "protocolTakeaway": "Use as clinical synthesis and overclaim guardrail; do not cite it as direct proof for unscreened home 4x4.",
       "quality": "usable",
       "relations": [
@@ -9718,7 +10114,7 @@
         "populationLabel": "Patients with coronary artery disease or heart failure"
       },
       "revision": {
-        "pageRevisionId": "sha256:594ad9442b2a7b9e6ee3aefdd1a99cfffa31fa480820c01fce777cc09f7adae7",
+        "pageRevisionId": "sha256:210069b5bf94dd0f778bf9f5199630dd8928924e58addd664fd2c2eee0b95981",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -10084,6 +10480,23 @@
         "heart-rate recovery",
         "symptoms and adherence"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "Autonomic measures are sensitive to illness, alcohol, stress, sleep, and total training load.",
+          "displayPriority": 10,
+          "endpointKeys": [
+            "biomarker:hrv-rmssd",
+            "biomarker:resting-heart-rate"
+          ],
+          "groupId": "adjacent-variants-and-recovery-context",
+          "headline": "The autonomic-control review suggests HRV and recovery markers can move inconsistently after HIIT.",
+          "implication": "Keep HRV and sleep as recovery context rather than promised outcomes.",
+          "protocolKey": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "result": "mixed",
+          "scope": "measurement_context",
+          "stance": "mixed"
+        }
+      ],
       "protocolTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol.",
       "quality": "usable",
       "relations": [
@@ -10105,7 +10518,7 @@
         "populationLabel": "Healthy adults and cardiometabolic-risk participants"
       },
       "revision": {
-        "pageRevisionId": "sha256:19f6d3d3d77a8cf96075652d7d908959a02ee844d085da09c7c5cdfcbe844a0d",
+        "pageRevisionId": "sha256:8f3c41c44468196372e4f47fff9502019e96d71d29efb2d9766f71ddd72903f6",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -10152,6 +10565,19 @@
         "heart-rate recovery",
         "symptoms and adherence"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "Supervision, screening, medications, and disease status determine whether vigorous intervals are appropriate.",
+          "displayPriority": 20,
+          "groupId": "safety-boundary",
+          "headline": "The cardiovascular-disease safety review suggests supervised HIIT can be feasible, with safety evidence still bounded.",
+          "implication": "Use it to describe safety boundaries for higher-risk users, not to remove clinician guidance.",
+          "protocolKey": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "result": "not_efficacy_evidence",
+          "scope": "clinical_supervised",
+          "stance": "safety_boundary"
+        }
+      ],
       "protocolTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol.",
       "quality": "usable",
       "relations": [
@@ -10176,7 +10602,7 @@
         "populationLabel": "Cardiovascular-disease rehabilitation patients"
       },
       "revision": {
-        "pageRevisionId": "sha256:bb3d6e4aaa8af238a871f43c57fbaad86d2d7a146192726c8c1d52ba1581dd21",
+        "pageRevisionId": "sha256:b26020d0a601d722c7d8a97ac56d9a7b41a5796d0861101d2bff0cf3de6d070c",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -10477,6 +10903,22 @@
         "heart-rate recovery",
         "symptoms and adherence"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "It pools many HIIT protocols and adults, so it is support for the protocol family, not only Norwegian 4x4.",
+          "displayPriority": 40,
+          "endpointKeys": [
+            "biomarker:estimated-vo2max"
+          ],
+          "groupId": "supports-fitness-claim",
+          "headline": "A broad HIIT meta-analysis found protocol features like interval duration and intensity matter for VO2max gains.",
+          "implication": "Supports the design choice to use repeated 4-minute aerobic intervals rather than treating all HIIT as interchangeable.",
+          "protocolKey": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "result": "positive",
+          "scope": "same_mechanism",
+          "stance": "supports"
+        }
+      ],
       "protocolTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol.",
       "quality": "usable",
       "relations": [
@@ -10500,7 +10942,7 @@
         "populationLabel": "Healthy, overweight/obese, and athletic adults"
       },
       "revision": {
-        "pageRevisionId": "sha256:037682648837652393772c31cf5d02d6d422c6860a5937404880e6e0e58eb0cb",
+        "pageRevisionId": "sha256:f908463ce5244b1863735ea94ccec10c04d9cfcc1268ecbacdc40f88e9d4ee45",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -11383,6 +11825,19 @@
         "heart-rate recovery",
         "symptoms and adherence"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "Guidelines frame risk management; they do not test the Murph 4x4 recipe.",
+          "displayPriority": 40,
+          "groupId": "safety-boundary",
+          "headline": "The AHA scientific statement outlines acute cardiovascular-event risks and screening considerations around exercise.",
+          "implication": "Supports caution language for symptoms, recent illness, heart disease, and other higher-risk situations.",
+          "protocolKey": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "result": "not_efficacy_evidence",
+          "scope": "general_guideline",
+          "stance": "safety_boundary"
+        }
+      ],
       "protocolTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol.",
       "quality": "usable",
       "relations": [
@@ -11403,7 +11858,7 @@
         "populationLabel": "Adults considering moderate-to-vigorous or high-volume exercise"
       },
       "revision": {
-        "pageRevisionId": "sha256:add76511793b829891e7f8caa717b17ca9e27fd6c0a6ce82e5a4c15e5d596f1c",
+        "pageRevisionId": "sha256:3586d51eb0db0e95d1624a863dbb4a2467673a687ab0b128dc5c2070bcb39a18",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -11963,6 +12418,19 @@
         "heart-rate recovery",
         "symptoms and adherence"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "The guideline is intentionally broader than this protocol and should not be treated as efficacy evidence.",
+          "displayPriority": 50,
+          "groupId": "safety-boundary",
+          "headline": "The ESC sports-cardiology guideline gives exercise-risk boundaries for people with cardiovascular disease.",
+          "implication": "Use it to keep clinician-clearance rules visible for known or suspected cardiovascular disease.",
+          "protocolKey": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "result": "not_efficacy_evidence",
+          "scope": "general_guideline",
+          "stance": "safety_boundary"
+        }
+      ],
       "protocolTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol.",
       "quality": "usable",
       "relations": [
@@ -11983,7 +12451,7 @@
         "populationLabel": "People with cardiovascular disease considering exercise or sport"
       },
       "revision": {
-        "pageRevisionId": "sha256:d65fee295a65dde40eb1e4895c6cbb2a78e91807358c1e6d75af84a14eaafe99",
+        "pageRevisionId": "sha256:72c830ecb90efb03adac152de92134d7956c383650761cebaebe1a4c7c1e660b",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -12154,6 +12622,19 @@
         "heart-rate recovery",
         "symptoms and adherence"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "Public-health guidance is not evidence that high-intensity intervals are the best fit for every user.",
+          "displayPriority": 60,
+          "groupId": "safety-boundary",
+          "headline": "WHO physical-activity guidelines provide broad public-health context for aerobic activity.",
+          "implication": "Use as background that movement matters, while keeping Norwegian 4x4 as one bounded experiment.",
+          "protocolKey": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "result": "not_efficacy_evidence",
+          "scope": "general_guideline",
+          "stance": "context_only"
+        }
+      ],
       "protocolTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol.",
       "quality": "usable",
       "relations": [
@@ -12174,7 +12655,7 @@
         "populationLabel": "Children, adolescents, adults, older adults, pregnant/postpartum people, and people living with chronic conditions or disability"
       },
       "revision": {
-        "pageRevisionId": "sha256:a34100b6a4b7e088ae66af0d121ab96bec5aaabdf2226ef907244d5ae1132e8e",
+        "pageRevisionId": "sha256:85c8db8b68a98029dc453b52db0cea7fa1afc6bb4700f2351c0f2a2573922371",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -12280,6 +12761,22 @@
         "heart-rate recovery",
         "symptoms and adherence"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "HFpEF is a clinical population with different risks and supervision needs.",
+          "displayPriority": 30,
+          "endpointKeys": [
+            "biomarker:estimated-vo2max"
+          ],
+          "groupId": "clinical-context-mixed-superiority",
+          "headline": "The HFpEF trial found no significant primary peak-VO2 advantage for HIIT over moderate training or guideline advice.",
+          "implication": "Keeps the Murph claim bounded to a fitness experiment, not a treatment claim for heart failure.",
+          "protocolKey": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "result": "no_clear_advantage",
+          "scope": "clinical_supervised",
+          "stance": "does_not_confirm"
+        }
+      ],
       "protocolTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol.",
       "quality": "usable",
       "relations": [
@@ -12304,7 +12801,7 @@
         "populationLabel": "Heart failure patients with preserved ejection fraction"
       },
       "revision": {
-        "pageRevisionId": "sha256:51f450b5512eb426f5494b0586129d25197ada9daa7b5bd42c0add699633dc01",
+        "pageRevisionId": "sha256:b09e2e709a5b9a8d61b9640b334063e03f7b3891ab5b97d8c101ea88941172fb",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -13513,6 +14010,22 @@
         "heart-rate recovery",
         "symptoms and adherence"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "Well-trained athletes are not representative of most wearable users.",
+          "displayPriority": 40,
+          "endpointKeys": [
+            "biomarker:estimated-vo2max"
+          ],
+          "groupId": "adjacent-variants-and-recovery-context",
+          "headline": "The male athlete trial found aerobic high-intensity intervals improved VO2max more than sprint intervals.",
+          "implication": "Supports separating 4x4-style aerobic intervals from supramaximal sprint intervals.",
+          "protocolKey": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "result": "positive",
+          "scope": "adjacent_variant",
+          "stance": "context_only"
+        }
+      ],
       "protocolTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol.",
       "quality": "usable",
       "relations": [
@@ -13538,7 +14051,7 @@
         "populationLabel": "Aerobically well-trained men"
       },
       "revision": {
-        "pageRevisionId": "sha256:a932e699fdc5f5a207f0bbe5dfe06fc6d57b63643d2b008f4e402b73799aca78",
+        "pageRevisionId": "sha256:2a2595523f6079e3026f5b2b7a5085df3a11261e0c8b541972417fcb06755a55",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -13960,6 +14473,22 @@
         "heart-rate recovery",
         "symptoms and adherence"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "The athlete setting is useful for protocol taxonomy, not general user prediction.",
+          "displayPriority": 50,
+          "endpointKeys": [
+            "biomarker:estimated-vo2max"
+          ],
+          "groupId": "adjacent-variants-and-recovery-context",
+          "headline": "The female athlete trial similarly favored aerobic high-intensity intervals over supramaximal sprint intervals for VO2max.",
+          "implication": "Reinforces that sprint-interval variants should be modeled separately from Norwegian 4x4.",
+          "protocolKey": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "result": "positive",
+          "scope": "adjacent_variant",
+          "stance": "context_only"
+        }
+      ],
       "protocolTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol.",
       "quality": "usable",
       "relations": [
@@ -13985,7 +14514,7 @@
         "populationLabel": "Aerobically well-trained females"
       },
       "revision": {
-        "pageRevisionId": "sha256:aef907d840c6ba01303c5ef7672f89345ac251fc6e65f5eb668a85c5f9e58125",
+        "pageRevisionId": "sha256:f6196e0b0853c3de6ea5835d1dfebac055ad406e994c7b72fd2706bbc1630591",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -14545,6 +15074,22 @@
         "heart-rate recovery",
         "symptoms and adherence"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "Metabolic-syndrome trials mix protocols, outcomes, and clinical populations.",
+          "displayPriority": 30,
+          "endpointKeys": [
+            "biomarker:estimated-vo2max"
+          ],
+          "groupId": "adjacent-variants-and-recovery-context",
+          "headline": "The metabolic-syndrome HIIT meta-analysis summarizes adjacent cardiometabolic variants rather than this exact protocol.",
+          "implication": "Use it for population and variant context, not as direct Norwegian 4x4 proof.",
+          "protocolKey": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "result": "mixed",
+          "scope": "adjacent_variant",
+          "stance": "context_only"
+        }
+      ],
       "protocolTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol.",
       "quality": "usable",
       "relations": [
@@ -14568,7 +15113,7 @@
         "populationLabel": "Adults with metabolic syndrome"
       },
       "revision": {
-        "pageRevisionId": "sha256:834c571d95f376a4de878a7f97b4aa2d6ba334703f0ce07f1060252baf6db403",
+        "pageRevisionId": "sha256:702639e6602aa379038d8e1d8d7d8db5eb55b6f9b41246e8cb8a99122802c371",
         "recipeHash": null,
         "runSpecRevisionId": null
       },

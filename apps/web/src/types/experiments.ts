@@ -8,6 +8,29 @@ export interface Expert {
   quote: string;
 }
 
+export type EvidenceStance =
+  | "supports"
+  | "mixed"
+  | "does_not_confirm"
+  | "contradicts"
+  | "safety_boundary"
+  | "context_only";
+
+export type EvidenceScope =
+  | "direct_protocol"
+  | "same_mechanism"
+  | "clinical_supervised"
+  | "adjacent_variant"
+  | "measurement_context"
+  | "general_guideline";
+
+export type StudyResult =
+  | "positive"
+  | "mixed"
+  | "no_clear_advantage"
+  | "negative"
+  | "not_efficacy_evidence";
+
 export interface Study {
   type: "OBS" | "RCT" | "INT" | "N1" | "MECH" | "MA" | "REV" | "GUIDE" | "SRC";
   title: string;
@@ -20,7 +43,15 @@ export interface Study {
   population?: string;
   duration?: string;
   designLabel?: string;
+  groupId?: string;
+  stance?: EvidenceStance;
+  scope?: EvidenceScope;
+  result?: StudyResult;
+  headline?: string;
   finding?: string;
+  implication?: string;
+  caveat?: string;
+  displayPriority?: number;
   url?: string;
 }
 
@@ -81,6 +112,23 @@ export interface ExperimentResearchStat {
   value: string | number;
 }
 
+export interface ExperimentResearchGroup {
+  id: string;
+  label: string;
+  stance: EvidenceStance;
+  summary: string;
+  studies: Study[];
+  defaultOpen?: boolean;
+}
+
+export interface ExperimentResearchLandscape {
+  bottomLine: string;
+  confidenceLabel: "early" | "moderate" | "strong" | "mixed" | "limited";
+  primaryClaim: string;
+  mainCaveat: string;
+  groups: ExperimentResearchGroup[];
+}
+
 export interface ExperimentCommonsReference {
   aliases: string[];
   catalogHash: string;
@@ -129,6 +177,8 @@ export interface ExperimentProtocol {
   whyItWorks: string;
   experts: Expert[];
   researchStats: ExperimentResearchStat[];
+  researchLandscape?: ExperimentResearchLandscape;
+  researchGroups?: ExperimentResearchGroup[];
   studies: Study[];
   podcastLinks?: { label: string; url: string }[];
   safety: ExperimentSafety;

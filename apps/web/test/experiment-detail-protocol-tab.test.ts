@@ -145,6 +145,13 @@ describe("ProtocolTab", () => {
     expect(markup).not.toContain('data-card="Sleep Efficiency"');
     expect(markup).toContain("Morning Blood Pressure");
     expect(markup).toContain("Sleep Efficiency");
+    expect(markup).toContain("Bottom line");
+    expect(markup).toContain("Best-supported claim");
+    expect(markup).toContain("Confidence · Moderate");
+    expect(markup).toContain("Supports the fitness claim");
+    expect(markup).toContain("Clinical context and mixed superiority");
+    expect(markup).toContain("Safety boundaries");
+    expect(markup).toContain("Adjacent variants and recovery context");
   });
 
   it("prioritizes the clearest red-light-glasses signals and moves the noisier ones into context pills", () => {

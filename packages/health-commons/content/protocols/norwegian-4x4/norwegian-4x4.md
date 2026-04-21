@@ -111,6 +111,9 @@ relations:
     target: source_artifact:pmid-32100573
   -
     type: cites
+    target: source_artifact:pmid-33239350
+  -
+    type: cites
     target: source_artifact:pmid-30293954
   -
     type: cites
@@ -318,6 +321,66 @@ claims:
       - HRV is highly sensitive to sleep, illness, alcohol, psychological stress, and training load.
       - Sleep should be tracked as recovery context and a confounder, not as a promised outcome.
       - A flat or worse HRV signal does not automatically mean the protocol failed.
+researchLandscape:
+  bottomLine: "Best read as a VO2max-oriented fitness protocol with explicit safety and recovery boundaries, not a general disease-treatment claim."
+  confidenceLabel: moderate
+  primaryClaim: "The strongest support is for improving lab VO2max or wearable cardio-fitness when the 4x4 intensity target is actually reached."
+  mainCaveat: "Supervised clinical and disease-population studies are mixed, so they should calibrate safety and population fit instead of proving home superiority over moderate cardio."
+  groups:
+    -
+      id: supports-fitness-claim
+      label: "Supports the fitness claim"
+      stance: supports
+      summary: "The direct and close-family evidence supports Norwegian 4x4 as a cardiorespiratory-fitness experiment, especially for VO2max. The key practical caveat is dose fidelity: the source card should ask whether the intervals actually reached the intended hard aerobic zone."
+      sourceKeys:
+        - source_artifact:ntnu-cerg-norwegian-4x4
+        - source_artifact:pmid-17414804
+        - source_artifact:pmid-26440134
+        - source_artifact:pmid-30733142
+        - source_artifact:pmid-24066036
+        - source_artifact:doi-10.3390-ijerph17145103
+        - source_artifact:pmid-23988787
+      defaultOpen: true
+    -
+      id: clinical-context-mixed-superiority
+      label: "Clinical context and mixed superiority"
+      stance: mixed
+      summary: "Early supervised clinical-lineage studies often favored interval training, but larger coronary-disease and heart-failure trials did not consistently confirm superiority over moderate training or guideline advice. This category keeps the claim honest: worth testing for fitness, not always better and not self-treatment evidence."
+      sourceKeys:
+        - source_artifact:pmid-25464446
+        - source_artifact:pmid-28082387
+        - source_artifact:pmid-33560320
+        - source_artifact:pmid-29502328
+        - source_artifact:pmid-15179103
+        - source_artifact:pmid-17548726
+        - source_artifact:pmid-18606913
+        - source_artifact:pmid-18673303
+        - source_artifact:pmid-19958872
+        - source_artifact:pmid-21450580
+        - source_artifact:pmid-28385556
+    -
+      id: safety-boundary
+      label: "Safety boundaries"
+      stance: safety_boundary
+      summary: "Safety evidence is mostly about screened, supervised, or guideline-managed exercise. Serious events appear uncommon in those settings, but the evidence does not make unsupervised vigorous intervals risk-free, especially for people with cardiovascular symptoms, disease, medication, recent infection, or pregnancy/postpartum context."
+      sourceKeys:
+        - source_artifact:pmid-22879367
+        - source_artifact:pmid-30376749
+        - source_artifact:pmid-29416382
+        - source_artifact:pmid-32100573
+        - source_artifact:pmid-32860412
+        - source_artifact:pmid-33239350
+    -
+      id: adjacent-variants-and-recovery-context
+      label: "Adjacent variants and recovery context"
+      stance: context_only
+      summary: "Low-volume HIIT, sprint-interval comparisons, athlete studies, metabolic-syndrome syntheses, and autonomic-control reviews help separate neighboring protocols and secondary signals. They are useful context, but they should not be counted as direct proof that this exact 4x4 recipe will move a user's wearable metrics."
+      sourceKeys:
+        - source_artifact:pmid-30293954
+        - source_artifact:pmid-28846513
+        - source_artifact:pmid-39256000
+        - source_artifact:pmid-36314990
+        - source_artifact:pmid-37608507
 safety:
   cautionLevel: high
   avoidOrGetClinicianGuidance:

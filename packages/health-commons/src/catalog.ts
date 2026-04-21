@@ -77,6 +77,17 @@ export function validateHealthCommonsContent(content: HealthCommonsContentSet): 
         assertTargetExists(keys, sourceKey, `${page.frontmatter.key} claim ${claim.claimId}`);
       }
     }
+    for (const appraisal of page.frontmatter.protocolEvidence ?? []) {
+      assertTargetExists(keys, appraisal.protocolKey, `${page.frontmatter.key} protocolEvidence ${appraisal.groupId} protocolKey`);
+      for (const endpointKey of appraisal.endpointKeys ?? []) {
+        assertTargetExists(keys, endpointKey, `${page.frontmatter.key} protocolEvidence ${appraisal.groupId} endpointKeys`);
+      }
+    }
+    for (const group of page.frontmatter.researchLandscape?.groups ?? []) {
+      for (const sourceKey of group.sourceKeys) {
+        assertTargetExists(keys, sourceKey, `${page.frontmatter.key} researchLandscape group ${group.id}`);
+      }
+    }
     for (const plan of page.frontmatter.testPlans ?? []) {
       assertTargetExists(keys, plan.primaryBiomarkerKey, `${page.frontmatter.key} test plan ${plan.planId}`);
       for (const biomarkerKey of plan.secondaryBiomarkerKeys ?? []) {

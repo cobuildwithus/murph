@@ -31,6 +31,17 @@ researchEvidence:
   designLabel: "Public protocol guidance"
   populationLabel: "Public-facing exercise guidance"
   aggregateRole: "context"
+protocolEvidence:
+  -
+    protocolKey: protocol_variant:norwegian-4x4/norwegian-4x4
+    groupId: supports-fitness-claim
+    stance: supports
+    scope: direct_protocol
+    result: not_efficacy_evidence
+    headline: "Defines the commonly cited Norwegian 4x4 dose: warm up, four 4-minute hard intervals, active recoveries, and cooldown."
+    implication: "Use this as the recipe anchor for the Murph protocol, not as outcome evidence."
+    caveat: "Public protocol guidance does not estimate benefit size or safety for a specific user."
+    displayPriority: 10
 evidenceBucket: "Protocol dose and design"
 whyItMatters: "Public-facing source for the commonly cited Norwegian 4x4 session structure."
 potentialMurphEndpoints:

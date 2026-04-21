@@ -100,6 +100,48 @@ export const HEALTH_COMMONS_RESEARCH_EVIDENCE_PARTICIPANT_COUNT_KINDS = [
   "range",
 ] as const;
 
+export const HEALTH_COMMONS_PROTOCOL_EVIDENCE_STANCES = [
+  "supports",
+  "mixed",
+  "does_not_confirm",
+  "contradicts",
+  "safety_boundary",
+  "context_only",
+] as const;
+
+export type HealthCommonsProtocolEvidenceStance = (typeof HEALTH_COMMONS_PROTOCOL_EVIDENCE_STANCES)[number];
+
+export const HEALTH_COMMONS_PROTOCOL_EVIDENCE_SCOPES = [
+  "direct_protocol",
+  "same_mechanism",
+  "clinical_supervised",
+  "adjacent_variant",
+  "measurement_context",
+  "general_guideline",
+] as const;
+
+export type HealthCommonsProtocolEvidenceScope = (typeof HEALTH_COMMONS_PROTOCOL_EVIDENCE_SCOPES)[number];
+
+export const HEALTH_COMMONS_PROTOCOL_EVIDENCE_RESULTS = [
+  "positive",
+  "mixed",
+  "no_clear_advantage",
+  "negative",
+  "not_efficacy_evidence",
+] as const;
+
+export type HealthCommonsProtocolEvidenceResult = (typeof HEALTH_COMMONS_PROTOCOL_EVIDENCE_RESULTS)[number];
+
+export const HEALTH_COMMONS_RESEARCH_LANDSCAPE_CONFIDENCE_LABELS = [
+  "early",
+  "moderate",
+  "strong",
+  "mixed",
+  "limited",
+] as const;
+
+export type HealthCommonsResearchLandscapeConfidenceLabel = (typeof HEALTH_COMMONS_RESEARCH_LANDSCAPE_CONFIDENCE_LABELS)[number];
+
 const KEY_PATTERN = "^[a-z_]+:[a-z0-9][a-z0-9._/-]*(?:@[A-Za-z0-9._:-]+)?$";
 const STABLE_ID_PATTERN = "^[a-zA-Z0-9][a-zA-Z0-9._:-]*$";
 const PATH_SEGMENT_PATTERN = "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]+$";
@@ -280,6 +322,54 @@ export type HealthCommonsResearchEvidence = z.infer<
   typeof healthCommonsResearchEvidenceSchema
 >;
 
+export const healthCommonsProtocolEvidenceAppraisalSchema = z
+  .object({
+    protocolKey: healthCommonsKeySchema,
+    groupId: healthCommonsStableIdSchema,
+    stance: z.enum(HEALTH_COMMONS_PROTOCOL_EVIDENCE_STANCES),
+    scope: z.enum(HEALTH_COMMONS_PROTOCOL_EVIDENCE_SCOPES),
+    result: z.enum(HEALTH_COMMONS_PROTOCOL_EVIDENCE_RESULTS),
+    endpointKeys: z.array(healthCommonsKeySchema).optional(),
+    headline: longStringSchema,
+    implication: longStringSchema,
+    caveat: longStringSchema.optional(),
+    displayPriority: z.number().int().optional(),
+  })
+  .strict();
+
+export type HealthCommonsProtocolEvidenceAppraisal = z.infer<
+  typeof healthCommonsProtocolEvidenceAppraisalSchema
+>;
+
+export const healthCommonsResearchLandscapeGroupSchema = z
+  .object({
+    id: healthCommonsStableIdSchema,
+    label: shortStringSchema,
+    stance: z.enum(HEALTH_COMMONS_PROTOCOL_EVIDENCE_STANCES),
+    summary: longStringSchema,
+    sourceKeys: z.array(healthCommonsKeySchema),
+    defaultOpen: z.boolean().optional(),
+  })
+  .strict();
+
+export type HealthCommonsResearchLandscapeGroup = z.infer<
+  typeof healthCommonsResearchLandscapeGroupSchema
+>;
+
+export const healthCommonsResearchLandscapeSchema = z
+  .object({
+    bottomLine: longStringSchema,
+    confidenceLabel: z.enum(HEALTH_COMMONS_RESEARCH_LANDSCAPE_CONFIDENCE_LABELS),
+    primaryClaim: longStringSchema,
+    mainCaveat: longStringSchema,
+    groups: z.array(healthCommonsResearchLandscapeGroupSchema),
+  })
+  .strict();
+
+export type HealthCommonsResearchLandscape = z.infer<
+  typeof healthCommonsResearchLandscapeSchema
+>;
+
 export const healthCommonsSourceSchema = z
   .object({
     kind: z.enum([
@@ -383,6 +473,8 @@ export const healthCommonsPageFrontmatterSchema = z
     safety: healthCommonsSafetySchema.optional(),
     source: healthCommonsSourceSchema.optional(),
     researchEvidence: healthCommonsResearchEvidenceSchema.optional(),
+    protocolEvidence: z.array(healthCommonsProtocolEvidenceAppraisalSchema).optional(),
+    researchLandscape: healthCommonsResearchLandscapeSchema.optional(),
     artifacts: z.array(healthCommonsArtifactPointerSchema).optional(),
     options: z.array(healthCommonsDisambiguationOptionSchema).optional(),
   })
