@@ -12,6 +12,9 @@ describe("readHostedOnboardingEnvironment", () => {
       HOSTED_ONBOARDING_PUBLIC_BASE_URL: "https://join.example.test",
       HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_ANNUAL: "price_annual_123",
       HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY: "price_monthly_123",
+      HOSTED_ONBOARDING_STRIPE_USAGE_PRICE_ID_LAUNCH_ANNUAL: "price_usage_annual_123",
+      HOSTED_ONBOARDING_STRIPE_USAGE_PRICE_ID_LAUNCH_MONTHLY: "price_usage_monthly_123",
+      HOSTED_AI_USAGE_STRIPE_METER_EVENT_NAME: "murph_ai_tokens",
       NEXT_PUBLIC_PRIVY_APP_ID: "cm_app_123",
       PRIVY_VERIFICATION_KEY: "privy-verification-key",
       STRIPE_SECRET_KEY: "sk_test_123",
@@ -25,6 +28,11 @@ describe("readHostedOnboardingEnvironment", () => {
     expect(environment.stripePriceIdsByPlan).toEqual({
       launch_annual: "price_annual_123",
       launch_monthly: "price_monthly_123",
+    });
+    expect(environment.stripeUsageMeterEventName).toBe("murph_ai_tokens");
+    expect(environment.stripeUsagePriceIdsByPlan).toEqual({
+      launch_annual: "price_usage_annual_123",
+      launch_monthly: "price_usage_monthly_123",
     });
   });
 

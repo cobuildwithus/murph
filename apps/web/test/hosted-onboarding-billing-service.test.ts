@@ -55,6 +55,11 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
       launch_monthly: "price_monthly_123",
     },
     stripeSecretKey: "sk_test_123",
+    stripeUsageMeterEventName: "murph_ai_tokens",
+    stripeUsagePriceIdsByPlan: {
+      launch_annual: "price_usage_annual_123",
+      launch_monthly: "price_usage_monthly_123",
+    },
     stripeWebhookSecret: "whsec_123",
     telegramBotUsername: null,
     telegramWebhookSecret: null,
@@ -91,6 +96,7 @@ describe("createHostedBillingCheckout", () => {
       billingPlanCode: "launch_monthly",
       priceId: "price_123",
       stripe: mocks.stripe,
+      usagePriceId: "price_usage_123",
     });
     mocks.stripe.checkout.sessions.create.mockResolvedValue({
       id: "cs_123",
@@ -189,6 +195,15 @@ describe("createHostedBillingCheckout", () => {
         cancel_url: "https://join.example.test/join/invite-code/cancel?share=share_123",
         client_reference_id: "member_123",
         customer_email: "member@example.test",
+        line_items: [
+          {
+            price: "price_123",
+            quantity: 1,
+          },
+          {
+            price: "price_usage_123",
+          },
+        ],
         metadata: {
           billingPlanCode: "launch_monthly",
           memberId: "member_123",

@@ -13,6 +13,7 @@ export interface HostedBillingPlanDefinition {
   readonly interval: HostedBillingPlanInterval;
   readonly priceIdEnvKey: string;
   readonly recurringAmountUsdCents: number;
+  readonly usagePriceIdEnvKey: string;
 }
 
 export interface HostedBillingPlanPresentation {
@@ -33,6 +34,7 @@ const HOSTED_BILLING_PLAN_DEFINITIONS = {
     interval: "year",
     priceIdEnvKey: "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_ANNUAL",
     recurringAmountUsdCents: 8_000,
+    usagePriceIdEnvKey: "HOSTED_ONBOARDING_STRIPE_USAGE_PRICE_ID_LAUNCH_ANNUAL",
   },
   launch_monthly: {
     badge: null,
@@ -41,6 +43,7 @@ const HOSTED_BILLING_PLAN_DEFINITIONS = {
     interval: "month",
     priceIdEnvKey: "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY",
     recurringAmountUsdCents: 800,
+    usagePriceIdEnvKey: "HOSTED_ONBOARDING_STRIPE_USAGE_PRICE_ID_LAUNCH_MONTHLY",
   },
 } as const satisfies Record<HostedBillingPlanCode, HostedBillingPlanDefinition>;
 
@@ -77,21 +80,24 @@ export function listHostedBillingPlanPresentations(input?: {
 export function resolveHostedBillingReady(input: {
   stripePriceIdsByPlan: Readonly<Record<HostedBillingPlanCode, string | null>>;
   stripeSecretKey: string | null;
+  stripeUsageMeterEventName: string | null;
+  stripeUsagePriceIdsByPlan: Readonly<Record<HostedBillingPlanCode, string | null>>;
 }): boolean {
-  if (!input.stripeSecretKey) {
+  if (!input.stripeSecretKey || !input.stripeUsageMeterEventName) {
     return false;
   }
 
   return HOSTED_BILLING_PLAN_CODES.some((code) =>
-    Boolean(input.stripePriceIdsByPlan[code])
+    hasHostedBillingPlanStripePrices(input, code)
   );
 }
 
 export function resolveConfiguredHostedBillingPlanCodes(input: {
   stripePriceIdsByPlan: Readonly<Record<HostedBillingPlanCode, string | null>>;
+  stripeUsagePriceIdsByPlan: Readonly<Record<HostedBillingPlanCode, string | null>>;
 }): HostedBillingPlanCode[] {
   return HOSTED_BILLING_PLAN_CODES.filter((code) =>
-    Boolean(input.stripePriceIdsByPlan[code])
+    hasHostedBillingPlanStripePrices(input, code)
   );
 }
 
@@ -132,6 +138,16 @@ function buildHostedBillingPlanPresentation(
         ? `${formatUsdCompact(definition.recurringAmountUsdCents)}/mo`
         : `${formatUsdCompact(definition.recurringAmountUsdCents)}/yr`,
   };
+}
+
+function hasHostedBillingPlanStripePrices(
+  input: {
+    stripePriceIdsByPlan: Readonly<Record<HostedBillingPlanCode, string | null>>;
+    stripeUsagePriceIdsByPlan: Readonly<Record<HostedBillingPlanCode, string | null>>;
+  },
+  code: HostedBillingPlanCode,
+): boolean {
+  return Boolean(input.stripePriceIdsByPlan[code] && input.stripeUsagePriceIdsByPlan[code]);
 }
 
 function hasHostedBillingPlanCode(

@@ -99,6 +99,11 @@ function createHostedOnboardingEnvironment(
       launch_monthly: null,
     },
     stripeSecretKey: null,
+    stripeUsageMeterEventName: null,
+    stripeUsagePriceIdsByPlan: {
+      launch_annual: null,
+      launch_monthly: null,
+    },
     stripeWebhookSecret: null,
     telegramBotUsername: null,
     telegramWebhookSecret: null,

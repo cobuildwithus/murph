@@ -45,6 +45,26 @@ export interface HostedBillingCheckoutInput {
   shareCode?: string | null;
 }
 
+export interface HostedBillingCheckoutLineItem {
+  price: string;
+  quantity?: number;
+}
+
+export function buildHostedBillingCheckoutLineItems(input: {
+  priceId: string;
+  usagePriceId: string;
+}): HostedBillingCheckoutLineItem[] {
+  return [
+    {
+      price: input.priceId,
+      quantity: 1,
+    },
+    {
+      price: input.usagePriceId,
+    },
+  ];
+}
+
 export async function createHostedBillingCheckout(
   input: HostedBillingCheckoutInput,
 ): Promise<{ alreadyActive: boolean; url: string | null }> {
@@ -111,7 +131,7 @@ export async function createHostedBillingCheckout(
       });
     }
 
-    const { priceId, stripe } = requireHostedStripeCheckoutConfig({
+    const { priceId, stripe, usagePriceId } = requireHostedStripeCheckoutConfig({
       billingPlanCode,
     });
     const publicBaseUrl = requireHostedOnboardingPublicBaseUrl();
@@ -131,12 +151,10 @@ export async function createHostedBillingCheckout(
       client_reference_id: invite.member.id,
       ...(customerId ? { customer: customerId } : {}),
       ...(verifiedEmail ? { customer_email: verifiedEmail } : {}),
-      line_items: [
-        {
-          price: priceId,
-          quantity: 1,
-        },
-      ],
+      line_items: buildHostedBillingCheckoutLineItems({
+        priceId,
+        usagePriceId,
+      }),
       metadata: checkoutMetadata,
       mode: "subscription",
       payment_method_types: ["card"],

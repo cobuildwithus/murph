@@ -65,10 +65,13 @@ export async function getHostedInviteStatus(input: {
   const invite = await findHostedInviteByCode(input.inviteCode, prisma);
   const configuredBillingPlanCodes = resolveConfiguredHostedBillingPlanCodes({
     stripePriceIdsByPlan: environment.stripePriceIdsByPlan,
+    stripeUsagePriceIdsByPlan: environment.stripeUsagePriceIdsByPlan,
   });
   const billingReady = resolveHostedBillingReady({
     stripePriceIdsByPlan: environment.stripePriceIdsByPlan,
     stripeSecretKey: environment.stripeSecretKey,
+    stripeUsageMeterEventName: environment.stripeUsageMeterEventName,
+    stripeUsagePriceIdsByPlan: environment.stripeUsagePriceIdsByPlan,
   });
   const billingPlans = listHostedBillingPlanPresentations({
     configuredPlanCodes: configuredBillingPlanCodes,
