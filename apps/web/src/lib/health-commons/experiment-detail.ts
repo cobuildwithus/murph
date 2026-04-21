@@ -11,6 +11,8 @@ import { healthCommonsCatalog, type HealthCommonsCatalogReader, type HealthCommo
 
 const FINNISH_SAUNA_ROUTE_ID = "finnish-sauna";
 const FINNISH_SAUNA_IMAGE = "/design-assets/hero-sauna.png";
+const SLEEP_EXPERIMENT_IMAGE = "/design-assets/hero-02.png";
+const EXERCISE_EXPERIMENT_IMAGE = "/design-assets/hero-03.png";
 
 const QUALITY_TO_EVIDENCE_LEVEL: Record<string, number> = {
   stub: 1,
@@ -33,6 +35,13 @@ const QUALITY_LABELS: Record<string, string> = {
   stub: "Stub",
   usable: "Usable",
 };
+
+const PROTOCOL_LIBRARY_ORDER = [
+  FINNISH_SAUNA_ROUTE_ID,
+  "norwegian-4x4",
+  "red-light-glasses-before-bed",
+  "bryan-johnson-blueprint",
+] as const;
 
 const BIOMARKER_DISPLAY_HINTS: Record<string, {
   direction: "up" | "down" | "neutral";
@@ -60,6 +69,17 @@ const BIOMARKER_DISPLAY_HINTS: Record<string, {
   },
 };
 
+export function listHealthCommonsExperimentProtocols(
+  catalog: HealthCommonsCatalogReader = healthCommonsCatalog,
+): ExperimentProtocol[] {
+  return catalog
+    .listByEntityType("protocol_variant")
+    .filter((protocol) => protocol.entityType === "protocol_variant")
+    .filter((protocol) => protocol.status !== "deprecated")
+    .map((protocol) => toExperimentDetail(protocol, catalog))
+    .sort(compareExperimentProtocolOrder);
+}
+
 export function resolveHealthCommonsExperimentProtocol(
   experimentId: string,
   catalog: HealthCommonsCatalogReader = healthCommonsCatalog,
@@ -82,6 +102,28 @@ function normalizeExperimentRouteId(value: string): string {
   }
 
   return value;
+}
+
+function compareExperimentProtocolOrder(
+  left: ExperimentProtocol,
+  right: ExperimentProtocol,
+): number {
+  const leftOrder = protocolLibraryOrder(left.id);
+  const rightOrder = protocolLibraryOrder(right.id);
+
+  if (leftOrder !== rightOrder) {
+    return leftOrder - rightOrder;
+  }
+
+  return left.title.localeCompare(right.title);
+}
+
+function protocolLibraryOrder(protocolId: string): number {
+  const order = PROTOCOL_LIBRARY_ORDER.findIndex((knownProtocolId) =>
+    knownProtocolId === protocolId
+  );
+
+  return order === -1 ? Number.MAX_SAFE_INTEGER : order;
 }
 
 function toExperimentDetail(
@@ -108,8 +150,8 @@ function toExperimentDetail(
   return {
     id: routeId,
     title: protocol.title,
-    category: formatCategory(protocol.categories?.[0] ?? protocol.entityType),
-    image: FINNISH_SAUNA_IMAGE,
+    category: formatProtocolCategory(protocol),
+    image: resolveProtocolImage(protocol),
     durationDays: testPlan?.durationDays ?? protocolSpecDurationDays(protocolSpec),
     baselineDays: testPlan?.baselineDays ?? 0,
     studyCount: citedSources.length,
@@ -137,6 +179,51 @@ function toExperimentDetail(
       slug: protocol.slug,
     },
   };
+}
+
+function formatProtocolCategory(protocol: HealthCommonsCatalogEntity): string {
+  const categories = protocol.categories ?? [];
+
+  if (categories.includes("sleep") || categories.includes("circadian")) {
+    return "Sleep";
+  }
+
+  if (
+    categories.includes("exercise") ||
+    categories.includes("hiit") ||
+    categories.includes("vo2max")
+  ) {
+    return "Exercise";
+  }
+
+  if (
+    categories.includes("recovery") ||
+    categories.includes("dry-sauna") ||
+    categories.includes("passive-heat")
+  ) {
+    return "Recovery";
+  }
+
+  return formatCategory(categories[0] ?? protocol.entityType);
+}
+
+function resolveProtocolImage(protocol: HealthCommonsCatalogEntity): string {
+  const lookupText = [
+    protocol.key,
+    protocol.slug,
+    protocol.title,
+    ...(protocol.categories ?? []),
+  ].join(" ");
+
+  if (/red-light|sleep|circadian|evening-light/iu.test(lookupText)) {
+    return SLEEP_EXPERIMENT_IMAGE;
+  }
+
+  if (/4x4|exercise|cardio|vo2max|hiit/iu.test(lookupText)) {
+    return EXERCISE_EXPERIMENT_IMAGE;
+  }
+
+  return FINNISH_SAUNA_IMAGE;
 }
 
 function toExperimentId(protocol: HealthCommonsCatalogEntity): string {

@@ -17,6 +17,7 @@ export interface HealthCommonsCatalogReader {
     routeId: string;
   }): HealthCommonsEntity | null;
   findBySlug(slug: string): HealthCommonsEntity | null;
+  listByEntityType(entityType: HealthCommonsEntityType): HealthCommonsEntity[];
   listRelated(input: {
     entity: HealthCommonsEntity;
     relationTypes?: readonly HealthCommonsRelationType[];
@@ -33,10 +34,15 @@ export function createHealthCommonsCatalogReader(
 ): HealthCommonsCatalogReader {
   const entitiesByKey = new Map(catalog.entities.map((entity) => [entity.key, entity]));
   const entitiesBySlug = new Map(catalog.entities.map((entity) => [entity.slug, entity]));
+  const entitiesByType = new Map<HealthCommonsEntityType, HealthCommonsEntity[]>();
   const entitiesByTrailingSlug = new Map<string, HealthCommonsEntity[]>();
   const redirectsBySource = new Map(catalog.redirects.map((redirect) => [redirect.from, redirect.to]));
 
   for (const entity of catalog.entities) {
+    const existingByType = entitiesByType.get(entity.entityType) ?? [];
+    existingByType.push(entity);
+    entitiesByType.set(entity.entityType, existingByType);
+
     const trailingSlug = entity.slug.split("/").at(-1);
     if (!trailingSlug) {
       continue;
@@ -87,6 +93,9 @@ export function createHealthCommonsCatalogReader(
     findBySlug(slug: string) {
       const normalizedSlug = normalizeRouteId(slug);
       return entitiesBySlug.get(normalizedSlug) ?? null;
+    },
+    listByEntityType(entityType: HealthCommonsEntityType) {
+      return entitiesByType.get(entityType)?.slice() ?? [];
     },
     listRelated({ entity, entityTypes, relationTypes }) {
       const relationTypeSet: ReadonlySet<string> | null = relationTypes
