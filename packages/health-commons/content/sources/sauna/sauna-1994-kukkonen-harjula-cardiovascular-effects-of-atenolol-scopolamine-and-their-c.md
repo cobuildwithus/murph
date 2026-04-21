@@ -25,6 +25,15 @@ source:
   year: 1994
   journal: "Eur J Appl Physiol"
   citation: "Kukkonen-Harjula K, Oja P, Vuori I et al. Cardiovascular effects of atenolol, scopolamine and their combination on healthy men in Finnish sauna baths. Eur J Appl Physiol 1994;69:10-15."
+researchEvidence:
+  designKind: "crossover_trial"
+  designLabel: "Medication/sauna crossover study"
+  participantCount: 12
+  participantCountKind: "approximate"
+  populationLabel: "Healthy adult volunteers"
+  durationLabel: "Acute sauna exposure under drug conditions"
+  aggregateRole: "primary"
+  cohortKey: "kukkonen-harjula-1994-drug-sauna-volunteers"
 evidenceBucket: Finnish dry-sauna corpus
 whyItMatters: "Expands the audited Finnish dry-sauna evidence corpus with a cardiovascular record marked high priority for Murph v1 interpretation."
 potentialMurphEndpoints:

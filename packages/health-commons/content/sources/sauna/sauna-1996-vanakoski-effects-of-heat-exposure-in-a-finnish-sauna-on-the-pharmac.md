@@ -25,6 +25,15 @@ source:
   year: 1996
   journal: "Eur J Clin Pharmacol"
   citation: "Vanakoski J, Idänpää Heikkilä JJ, Olkkola KT, Seppälä T. Effects of heat exposure in a Finnish sauna on the pharmacokinetics and metabolism of midazolam. Eur J Clin Pharmacol 1996;51:335-338."
+researchEvidence:
+  designKind: "crossover_trial"
+  designLabel: "Pharmacokinetic crossover study"
+  participantCount: 10
+  participantCountKind: "approximate"
+  populationLabel: "Healthy adult volunteers"
+  durationLabel: "Acute sauna plus midazolam exposure"
+  aggregateRole: "primary"
+  cohortKey: "vanakoski-1996-midazolam-sauna-volunteers"
 evidenceBucket: Finnish dry-sauna corpus
 whyItMatters: "Expands the audited Finnish dry-sauna evidence corpus with a safety / physiology record marked medium priority for Murph v1 interpretation."
 potentialMurphEndpoints:

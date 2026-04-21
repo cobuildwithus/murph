@@ -26,6 +26,15 @@ source:
   citation: "Bartolomé I, et al. Effect of a Four-Week Extreme Heat (100 ± 2 °C) Sauna Baths Program in Combination with Resistance Training on Lower Limb Strength and Body Composition: A Blinded, Randomized Study. Applied Sciences. 2025;15(19):10762. doi:10.3390/app151910762."
   doi: 10.3390/app151910762
   url: https://www.mdpi.com/2076-3417/15/19/10762
+researchEvidence:
+  designKind: "randomized_controlled_trial"
+  designLabel: "Blinded heat-plus-resistance RCT"
+  participantCount: 29
+  participantCountKind: "approximate"
+  populationLabel: "Resistance-trained adults"
+  durationLabel: "4-week sauna-plus-resistance intervention"
+  aggregateRole: "primary"
+  cohortKey: "vojta-2025-extreme-heat-resistance-rct"
 evidenceBucket: Intervention design / reality checks
 whyItMatters: Adds a newer randomized dry-sauna training study and defines an upper-bound intensity that is far more aggressive than most consumer protocols.
 potentialMurphEndpoints:

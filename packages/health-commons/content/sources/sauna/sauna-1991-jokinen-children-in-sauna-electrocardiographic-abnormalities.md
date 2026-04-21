@@ -25,6 +25,16 @@ source:
   year: 1991
   journal: "Acta Paediatr Scand"
   citation: "Jokinen E, Välimäki I. Children in sauna: Electrocardiographic abnormalities. Acta Paediatr Scand 1991;80:370-374."
+researchEvidence:
+  designKind: "acute_mechanistic"
+  designLabel: "Pediatric ECG physiology study"
+  participantCount: 25
+  participantCountKind: "approximate"
+  populationLabel: "Children"
+  durationLabel: "Acute sauna exposure"
+  aggregateRole: "primary"
+  aggregationNote: "Approximate count from older pediatric physiology metadata; deduped with companion cardiovascular paper."
+  cohortKey: "jokinen-children-sauna-cohort"
 evidenceBucket: Finnish dry-sauna corpus
 whyItMatters: "Expands the audited Finnish dry-sauna evidence corpus with a safety / physiology record marked lower priority for Murph v1 interpretation."
 potentialMurphEndpoints:

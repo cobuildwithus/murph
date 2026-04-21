@@ -25,6 +25,15 @@ source:
   year: 2005
   journal: "Journal of Cardiac Failure"
   citation: "H. Miyamoto, H. Kai, H. Nakaura et al., “Safety and efficacy of repeated sauna bathing in patients with chronic systolic heart failure: a preliminary report,” Journal of Cardiac Failure, vol. 11, no. 6, pp. 432–436, 2005."
+researchEvidence:
+  designKind: "pilot_intervention"
+  designLabel: "Heart-failure pilot intervention"
+  participantCount: 15
+  participantCountKind: "reported"
+  populationLabel: "Chronic systolic heart failure patients"
+  durationLabel: "4-week repeated sauna intervention"
+  aggregateRole: "primary"
+  cohortKey: "miyamoto-2005-chf-pilot"
 evidenceBucket: Finnish dry-sauna corpus
 whyItMatters: "Expands the audited Finnish dry-sauna evidence corpus with a cardiovascular record marked medium priority for Murph v1 interpretation."
 potentialMurphEndpoints:

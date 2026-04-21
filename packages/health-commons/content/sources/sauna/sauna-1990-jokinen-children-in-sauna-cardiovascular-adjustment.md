@@ -25,6 +25,16 @@ source:
   year: 1990
   journal: "Pediatrics"
   citation: "Jokinen E, Välimäki I, Antila K, Seppänen A, Tuominen J. Children in sauna: Cardiovascular adjustment. Pediatrics 1990;86:282-288."
+researchEvidence:
+  designKind: "acute_mechanistic"
+  designLabel: "Pediatric physiology study"
+  participantCount: 25
+  participantCountKind: "approximate"
+  populationLabel: "Children"
+  durationLabel: "Acute sauna exposure"
+  aggregateRole: "primary"
+  aggregationNote: "Approximate count from older pediatric physiology metadata; deduped with companion ECG paper."
+  cohortKey: "jokinen-children-sauna-cohort"
 evidenceBucket: Finnish dry-sauna corpus
 whyItMatters: "Expands the audited Finnish dry-sauna evidence corpus with a cardiovascular record marked medium priority for Murph v1 interpretation."
 potentialMurphEndpoints:

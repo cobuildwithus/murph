@@ -26,6 +26,15 @@ source:
   citation: IHA Heinonen, et al. Acute Finnish sauna heat exposure induces stronger immune cell than cytokine responses. Temperature 2026.
   doi: 10.1080/23328940.2026.2645467
   url: https://doi.org/10.1080/23328940.2026.2645467
+researchEvidence:
+  designKind: "acute_mechanistic"
+  designLabel: "Acute immune/cytokine study"
+  participantCount: 61
+  participantCountKind: "reported"
+  populationLabel: "Adults in acute Finnish-sauna heat exposure study"
+  durationLabel: "Single acute sauna exposure"
+  aggregateRole: "primary"
+  cohortKey: "heinonen-2026-acute-immune-sauna"
 evidenceBucket: Acute and mechanistic
 whyItMatters: Newest mechanistic Finnish-sauna paper
 potentialMurphEndpoints:

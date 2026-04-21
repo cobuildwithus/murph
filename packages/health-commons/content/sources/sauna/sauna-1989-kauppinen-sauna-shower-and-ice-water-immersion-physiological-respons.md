@@ -25,6 +25,16 @@ source:
   year: 1989
   journal: "Arctic Med Res"
   citation: "Kauppinen K. Sauna, shower, and ice water immersion. Physiological responses to brief exposures to heat, cool, and cold. Part I. Body fluid balance. Arctic Med Res 1989;48:55-63."
+researchEvidence:
+  designKind: "acute_mechanistic"
+  designLabel: "Thermal-sequence physiology study"
+  participantCount: 8
+  participantCountKind: "approximate"
+  populationLabel: "Healthy adult volunteers"
+  durationLabel: "Brief sauna/shower/ice-water exposures"
+  aggregateRole: "primary"
+  aggregationNote: "Approximate count; same volunteer series as companion 1989 Kauppinen papers."
+  cohortKey: "kauppinen-1989-sauna-shower-ice-water-volunteers"
 evidenceBucket: Finnish dry-sauna corpus
 whyItMatters: "Expands the audited Finnish dry-sauna evidence corpus with a safety / physiology record marked lower priority for Murph v1 interpretation."
 potentialMurphEndpoints:

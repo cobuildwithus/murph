@@ -25,6 +25,15 @@ source:
   year: 1989
   journal: "Eur J Appl Physiol"
   citation: "Kukkonen-Harjula K, Oja P, Laustiola K et al. Haemodynamic and hormonal responses to heat exposure in a Finnish sauna bath. Eur J Appl Physiol 1989;58:543-550."
+researchEvidence:
+  designKind: "acute_mechanistic"
+  designLabel: "Hemodynamic/hormonal physiology study"
+  participantCount: 10
+  participantCountKind: "approximate"
+  populationLabel: "Healthy adult volunteers"
+  durationLabel: "Acute sauna heat exposure"
+  aggregateRole: "primary"
+  cohortKey: "kukkonen-harjula-1989-heat-exposure-volunteers"
 evidenceBucket: Finnish dry-sauna corpus
 whyItMatters: "Expands the audited Finnish dry-sauna evidence corpus with a general / mixed record marked medium priority for Murph v1 interpretation."
 potentialMurphEndpoints:

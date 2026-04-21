@@ -25,6 +25,15 @@ source:
   year: 1992
   journal: "J Intern Med"
   citation: "Roine R, Luurila OJ, Suokas A et al. Alcohol and sauna bathing: Effects on cardiac rhythm, blood pressure, and serum electrolyte and cortisol concentrations. J Intern Med 1992;231:333-338."
+researchEvidence:
+  designKind: "crossover_trial"
+  designLabel: "Alcohol/sauna crossover study"
+  participantCount: 10
+  participantCountKind: "approximate"
+  populationLabel: "Healthy adult volunteers"
+  durationLabel: "Acute alcohol plus sauna exposure"
+  aggregateRole: "primary"
+  cohortKey: "roine-1992-alcohol-sauna-volunteers"
 evidenceBucket: Finnish dry-sauna corpus
 whyItMatters: "Expands the audited Finnish dry-sauna evidence corpus with a cardiovascular record marked medium priority for Murph v1 interpretation."
 potentialMurphEndpoints:

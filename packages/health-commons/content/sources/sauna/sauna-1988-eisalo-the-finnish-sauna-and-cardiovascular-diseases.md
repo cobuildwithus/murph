@@ -25,6 +25,10 @@ source:
   year: 1988
   journal: "Ann Clin Res"
   citation: "Eisalo A, Luurila OJ. The Finnish sauna and cardiovascular diseases. Ann Clin Res 1988;20:267-270."
+researchEvidence:
+  designKind: "narrative_review"
+  designLabel: "Narrative review"
+  aggregateRole: "synthesis"
 evidenceBucket: Finnish dry-sauna corpus
 whyItMatters: "Expands the audited Finnish dry-sauna evidence corpus with a cardiovascular record marked high priority for Murph v1 interpretation."
 potentialMurphEndpoints:
