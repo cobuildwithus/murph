@@ -30,7 +30,9 @@ Environment:
 
 Notes:
   The final landing-producing pass uses `thread wake` when CODEX_THREAD_ID is available.
-  That means 4-turn runs wake after pass 4, and 5-turn runs wake after pass 5.
+  4-turn runs wake after pass 4.
+  5-turn runs wake after pass 4 and use one recursive same-thread audit/fix cycle.
+  If CODEX_THREAD_ID is unavailable, 5-turn runs fall back to the explicit pass-5 send.
 USAGE
   exit "${1:-2}"
 }
@@ -83,11 +85,20 @@ count_downloaded_files() {
   find "$search_dir" -type f ! -name '.gitkeep' 2>/dev/null | wc -l | tr -d '[:space:]'
 }
 
+uses_recursive_final_audit() {
+  [[ "$smoke_test" != "1" && "$turns" == "5" && -n "${CODEX_THREAD_ID:-}" ]]
+}
+
 is_final_landing_pass() {
   local turn="$1"
 
   if [[ "$smoke_test" == "1" ]]; then
     return 1
+  fi
+
+  if uses_recursive_final_audit; then
+    [[ "$turn" == "04" ]]
+    return
   fi
 
   if [[ "$turns" == "5" ]]; then
@@ -546,6 +557,8 @@ OUTPUT:
 - Revised patch if required
 - Final artifact-manifest corrections
 - Final verification checklist
+
+If you propose code changes, attach them as a .patch or .diff artifact instead of only describing them in prose.
 EOF
 }
 
@@ -619,6 +632,8 @@ wake_final_turn() {
   local wake_result="$out_dir/logs/${turn}-${label}.wake.json"
   local wake_stderr="$out_dir/logs/${turn}-${label}.wake.stderr.log"
   local resume_prompt="This wake came from research pass ${turn} (${label}) for topic: ${topic}. If a returned patch or diff was downloaded, inspect it, apply it locally if valid, run the repo-required verification for the touched slice, and land the patch. If no returned patch exists, report that clearly and stop. Watched thread: {{chat_url}}."
+  local -a wake_args
+  local recursive_prompt=""
 
   if [[ -z "${CODEX_THREAD_ID:-}" ]]; then
     echo "Final pass ${turn} completed, but CODEX_THREAD_ID is not set. Falling back to download-only artifact capture." >&2
@@ -628,15 +643,23 @@ wake_final_turn() {
 
   mkdir -p "$wake_dir"
 
+  wake_args=(
+    pnpm chatgpt:thread:wake
+    --delay 0s
+    --chat-url "$chat_url"
+    --session-id "$CODEX_THREAD_ID"
+    --repo-dir "$ROOT_DIR"
+    --output-dir "$wake_dir"
+    --resume-prompt "$resume_prompt"
+  )
+
+  if uses_recursive_final_audit; then
+    recursive_prompt="$(cat "$out_dir/prompts/05-final-audit.md")"
+    wake_args+=(--recursive-depth 1 --recursive-prompt "$recursive_prompt")
+  fi
+
   set +e
-  pnpm chatgpt:thread:wake \
-    --delay 0s \
-    --chat-url "$chat_url" \
-    --session-id "$CODEX_THREAD_ID" \
-    --repo-dir "$ROOT_DIR" \
-    --output-dir "$wake_dir" \
-    --resume-prompt "$resume_prompt" \
-    >"$wake_result" 2>"$wake_stderr"
+  "${wake_args[@]}" >"$wake_result" 2>"$wake_stderr"
   local wake_status=$?
   set -e
 
@@ -733,7 +756,15 @@ if (( start_turn <= 4 )) && (( turns >= 4 )); then
   run_turn "04" "landing"
 fi
 
-if [[ "$turns" == "5" ]] && (( start_turn <= 5 )); then
+if uses_recursive_final_audit && [[ "$turns" == "5" ]] && (( start_turn == 5 )); then
+  if [[ -z "$chat_url" ]]; then
+    echo "Recursive audit wake requires --chat-url when resuming at turn 5." >&2
+    exit 1
+  fi
+  wake_final_turn "04" "landing"
+fi
+
+if ! uses_recursive_final_audit && [[ "$turns" == "5" ]] && (( start_turn <= 5 )); then
   run_turn "05" "final-audit"
 fi
 

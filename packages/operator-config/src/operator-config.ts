@@ -147,7 +147,7 @@ export async function readOperatorConfig(
     }
 
     return normalizeParsedOperatorConfig(
-      operatorConfigSchema.parse(JSON.parse(raw) as unknown),
+      operatorConfigSchema.parse(JSON.parse(raw)),
     )
   } catch (error) {
     if (error instanceof z.ZodError || error instanceof SyntaxError) {

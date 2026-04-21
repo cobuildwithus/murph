@@ -781,7 +781,7 @@ function parseAssistantDaemonJsonPayload(text: string):
   try {
     return {
       ok: true,
-      value: JSON.parse(trimmed) as unknown,
+      value: JSON.parse(trimmed),
     }
   } catch (error) {
     return {
