@@ -15,7 +15,9 @@ import type { ExperimentProtocol, Expert, Study } from "@/src/types/experiments"
 import { healthCommonsCatalog, type HealthCommonsCatalogReader, type HealthCommonsEntity } from "./catalog";
 
 const FINNISH_SAUNA_ROUTE_ID = "finnish-sauna";
+const NORWEGIAN_4X4_ROUTE_ID = "norwegian-4x4";
 const FINNISH_SAUNA_IMAGE = "/design-assets/hero-sauna.png";
+const NORWEGIAN_4X4_IMAGE = "/design-assets/hero-norwegian-4x4.jpeg";
 const SLEEP_EXPERIMENT_IMAGE = "/design-assets/hero-02.png";
 const EXERCISE_EXPERIMENT_IMAGE = "/design-assets/hero-03.png";
 
@@ -43,7 +45,7 @@ const QUALITY_LABELS: Record<string, string> = {
 
 const PROTOCOL_LIBRARY_ORDER = [
   FINNISH_SAUNA_ROUTE_ID,
-  "norwegian-4x4",
+  NORWEGIAN_4X4_ROUTE_ID,
   "red-light-glasses-before-bed",
   "bryan-johnson-blueprint",
 ] as const;
@@ -346,6 +348,10 @@ function formatProtocolCategory(protocol: HealthCommonsCatalogEntity): string {
 }
 
 function resolveProtocolImage(protocol: HealthCommonsCatalogEntity): string {
+  if (toExperimentId(protocol) === NORWEGIAN_4X4_ROUTE_ID) {
+    return NORWEGIAN_4X4_IMAGE;
+  }
+
   const lookupText = [
     protocol.key,
     protocol.slug,
