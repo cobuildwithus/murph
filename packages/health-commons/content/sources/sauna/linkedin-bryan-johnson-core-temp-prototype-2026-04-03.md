@@ -46,4 +46,4 @@ artifacts:
     accessNotes: Optional mirror snapshot for provenance; review rights before storing or redistributing.
 ---
 
-Source retained for provenance and future review.
+This LinkedIn mirror captures the early April 3 core-temperature prototype. Johnson reports reaching about 102.2 F / 39 C after 38 minutes with face and neck ice and after 33 minutes without it at 195 F. The test suggests cooling can improve tolerability while extending time needed to reach the same core-temperature endpoint. It was later superseded by the April 14-16 updates.

@@ -43,4 +43,4 @@ artifacts:
     accessNotes: X content may require special access and rights review before snapshotting; corroboration is limited to secondary snippets unless a full readable mirror is captured.
 ---
 
-Source retained for provenance and future review.
+This X thread is Johnson's review after 232 dry-sauna sessions. He says the older 20-minute 200 F routine did not hit his target core-temperature threshold. That finding explains why later sources distinguish air-temperature minutes from actual core-temperature dose. It also means the prior routine should not be treated as identical to the longer saunamaxx version.

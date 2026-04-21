@@ -4,7 +4,7 @@ entityType: source_artifact
 key: source_artifact:sauna-1988-kukkonen-harjula-how-the-sauna-affects-the-endocrine-system
 slug: sources/sauna/sauna-1988-kukkonen-harjula-how-the-sauna-affects-the-endocrine-system
 title: "How the sauna affects the endocrine system"
-summary: "Finnish dry-sauna bibliography record (likely focus) used as supporting safety / physiology evidence for protocol context and guardrails."
+summary: "This narrative physiology review summarizes how sauna bathing affects endocrine regulation. The main finding is that heat exposure can activate hormonal stress and recovery pathways, with context-dependent effects. For Murph, it is a mechanism and safety source rather than a result-card endpoint."
 status: draft
 quality: usable
 categories:

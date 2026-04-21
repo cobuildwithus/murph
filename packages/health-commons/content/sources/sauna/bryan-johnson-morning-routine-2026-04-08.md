@@ -42,4 +42,4 @@ artifacts:
     accessNotes: Optional HTML snapshot for provenance; review rights before storing or redistributing.
 ---
 
-Source retained for provenance and future review.
+This morning-routine page corroborates that sauna is part of Johnson's daily routine. It repeats the 20-minute 200 F exposure and adds details such as ear-temperature checks, groin ice packs, a wool hat, and face or neck cooling experiments. It helps distinguish the routine he reports following from the safer beginner dose. It does not add population evidence.

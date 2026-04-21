@@ -4,7 +4,7 @@ entityType: source_artifact
 key: source_artifact:sauna-1990-ernst-regular-sauna-bathing-and-the-incidence-of-common-colds
 slug: sources/sauna/sauna-1990-ernst-regular-sauna-bathing-and-the-incidence-of-common-colds
 title: "Regular sauna bathing and the incidence of common colds"
-summary: "Finnish dry-sauna bibliography record (likely focus) used as supporting respiratory / ent evidence for protocol context and guardrails."
+summary: "This controlled trial followed adults for common-cold incidence over six months. The main finding is that regular sauna bathing was tested as a respiratory-illness intervention, but it is not a direct wearable recovery signal. For Murph, it supports illness-log context and keeps respiratory claims cautious."
 status: draft
 quality: usable
 categories:

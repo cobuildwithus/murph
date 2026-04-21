@@ -4,7 +4,7 @@ entityType: source_artifact
 key: source_artifact:doi-10.1080-23328940.2026.2645467
 slug: sources/sauna/doi-10.1080-23328940.2026.2645467
 title: Acute Finnish sauna heat exposure induces stronger immune cell than cytokine responses
-summary: Acute or mechanistic source used to guide measurable near-term signals and session-standardization choices.
+summary: "This acute Finnish-sauna study measured immune-cell and cytokine responses after a single heat exposure. The main finding is that immune-cell responses were stronger than cytokine changes, making it a mechanism paper rather than a consumer outcome source. For Murph, it supports future lab-mechanism notes and not wearable promises."
 status: draft
 quality: usable
 categories:

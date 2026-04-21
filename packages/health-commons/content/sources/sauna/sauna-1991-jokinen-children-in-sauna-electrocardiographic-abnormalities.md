@@ -4,7 +4,7 @@ entityType: source_artifact
 key: source_artifact:sauna-1991-jokinen-children-in-sauna-electrocardiographic-abnormalities
 slug: sources/sauna/sauna-1991-jokinen-children-in-sauna-electrocardiographic-abnormalities
 title: "Children in sauna: Electrocardiographic abnormalities"
-summary: "Finnish dry-sauna bibliography record (likely focus) used as supporting safety / physiology evidence for protocol context and guardrails."
+summary: "This pediatric physiology study examined ECG changes around sauna exposure. The main finding is that acute sauna can interact with cardiac electrical monitoring in children, making safety context important. For Murph, it reinforces conservative screening and symptom stop rules."
 status: draft
 quality: usable
 categories:

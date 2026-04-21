@@ -4,7 +4,7 @@ entityType: source_artifact
 key: source_artifact:sauna-1994-kukkonen-harjula-cardiovascular-effects-of-atenolol-scopolamine-and-their-c
 slug: sources/sauna/sauna-1994-kukkonen-harjula-cardiovascular-effects-of-atenolol-scopolamine-and-their-c
 title: "Cardiovascular effects of atenolol, scopolamine and their combination on healthy men in Finnish sauna baths"
-summary: "Finnish dry-sauna bibliography record (yes focus) used as supporting cardiovascular evidence for protocol context and guardrails."
+summary: "This crossover study tested Finnish sauna exposure under atenolol, scopolamine, and combined drug conditions. The main finding is that medications can change cardiovascular responses to sauna heat. For Murph, it supports medication-aware screening and clinician-guidance cautions."
 status: draft
 quality: usable
 categories:

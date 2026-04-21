@@ -4,7 +4,7 @@ entityType: source_artifact
 key: source_artifact:doi-10.3390-app151910762
 slug: sources/sauna/doi-10.3390-app151910762
 title: "Effect of a Four-Week Extreme Heat (100 ± 2 °C) Sauna Baths Program in Combination with Resistance Training on Lower Limb Strength and Body Composition: A Blinded, Randomized Study"
-summary: Intervention-design evidence that helps keep sauna dose, context, hydration, and expectations realistic.
+summary: "This blinded randomized study tested a four-week 100 °C sauna program combined with resistance training. The main finding is that very high heat plus training is a distinct, higher-burden intervention that may affect strength or body-composition context. For Murph, it sets an upper-bound dose case rather than a default consumer protocol."
 status: draft
 quality: usable
 categories:

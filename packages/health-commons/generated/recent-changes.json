@@ -229,8 +229,7 @@
       "sourceKeys": [
         "source_artifact:bryan-johnson-sauna-protocol-2026-01-28",
         "source_artifact:bryan-johnson-saunamaxx-2026-04-14",
-        "source_artifact:linkedin-bryan-johnson-core-temp-2026-04-16",
-        "source_artifact:pmid-25432420"
+        "source_artifact:linkedin-bryan-johnson-core-temp-2026-04-16"
       ]
     },
     {
@@ -481,6 +480,36 @@
       "schemaVersion": "murph.commons.change.v1",
       "sourceKeys": [
         "source_artifact:sauna-bibliography-2026-04-18"
+      ]
+    },
+    {
+      "affectedFields": [
+        "sources/sauna",
+        "families/sauna.relations",
+        "families/dry-sauna.relations",
+        "sources/sauna/sauna-bibliography-2026-04-18.supplementalReview",
+        "protocols/dry-sauna/bryan-johnson-blueprint.scope-note"
+      ],
+      "changeId": "chg_2026_04_21_sauna_supplemental_research_source_split",
+      "changeType": "evidence_change",
+      "editSummary": "Added supplemental sauna research source pages for fertility, thermal-dose, extreme-heat safety, vascular, passive-heat synthesis, and sweat/detox-claim caveats while keeping Bryan Johnson protocol citations limited to Bryan/Blueprint source posts.",
+      "entityKey": "source_artifact:sauna-bibliography-2026-04-18",
+      "minor": false,
+      "rationale": "Independent sauna literature belongs on the broader sauna and dry-sauna evidence graph; Bryan Johnson's protocol page should remain a source-attributed external routine rather than a mixed general-literature review.",
+      "reviewStatus": "accepted",
+      "schemaVersion": "murph.commons.change.v1",
+      "sourceKeys": [
+        "source_artifact:pmid-23411620",
+        "source_artifact:pmid-9972494",
+        "source_artifact:doi-10.1155-2014-106049",
+        "source_artifact:pmid-38344040",
+        "source_artifact:pmid-32615263",
+        "source_artifact:pmid-41049507",
+        "source_artifact:pmid-39762944",
+        "source_artifact:pmid-34363927",
+        "source_artifact:pmid-11874249",
+        "source_artifact:pmid-22505948",
+        "source_artifact:doi-10.1152-ajpregu.00012.2025"
       ]
     }
   ]

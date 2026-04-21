@@ -4,7 +4,7 @@ entityType: source_artifact
 key: source_artifact:sauna-1988-eisalo-the-finnish-sauna-and-cardiovascular-diseases
 slug: sources/sauna/sauna-1988-eisalo-the-finnish-sauna-and-cardiovascular-diseases
 title: "The Finnish sauna and cardiovascular diseases"
-summary: "Finnish dry-sauna bibliography record (yes focus) used as supporting cardiovascular evidence for protocol context and guardrails."
+summary: "This review focuses on Finnish sauna use in people with cardiovascular disease. The main finding is that sauna exposure has real cardiovascular effects, so benefits and risks must be interpreted by baseline health status and medication context. For Murph, it anchors cardiovascular safety guardrails and BP/RHR framing."
 status: draft
 quality: usable
 categories:

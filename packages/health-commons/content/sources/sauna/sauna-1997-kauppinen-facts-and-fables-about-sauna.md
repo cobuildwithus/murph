@@ -4,7 +4,7 @@ entityType: source_artifact
 key: source_artifact:sauna-1997-kauppinen-facts-and-fables-about-sauna
 slug: sources/sauna/sauna-1997-kauppinen-facts-and-fables-about-sauna
 title: "Facts and fables about sauna"
-summary: "Finnish dry-sauna bibliography record (likely focus) used as supporting general / mixed evidence for protocol context and guardrails."
+summary: "This narrative review separates common sauna claims from better-supported physiology and safety observations. The main finding is that sauna has plausible benefits and real risks, but many popular claims need careful framing. For Murph, it supports plain-language guardrails and avoids overclaiming."
 status: draft
 quality: usable
 categories:

@@ -43,4 +43,4 @@ artifacts:
     accessNotes: Optional HTML snapshot for provenance; review rights before storing or redistributing.
 ---
 
-Source retained for provenance and future review.
+This Blueprint article is the main source for Bryan Johnson's public sauna routine. It reports a daily 20-minute dry sauna at 200 F / 93 C, usually after morning training. It also includes heat-protection tactics, rehydration, beginner guidance, contraindications, and Johnson's personal outcome claims. Read those outcomes as a one-person report, not as expected results.

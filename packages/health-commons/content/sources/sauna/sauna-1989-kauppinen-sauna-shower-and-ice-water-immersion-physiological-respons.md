@@ -4,7 +4,7 @@ entityType: source_artifact
 key: source_artifact:sauna-1989-kauppinen-sauna-shower-and-ice-water-immersion-physiological-respons
 slug: sources/sauna/sauna-1989-kauppinen-sauna-shower-and-ice-water-immersion-physiological-respons
 title: "Sauna, shower, and ice water immersion. Physiological responses to brief exposures to heat, cool, and cold. Part I. Body fluid balance"
-summary: "Finnish dry-sauna bibliography record (likely focus) used as supporting safety / physiology evidence for protocol context and guardrails."
+summary: "This thermal-sequence study measured body-fluid responses to sauna, shower, and ice-water exposure. The main finding is that brief heat and cold sequences can alter fluid balance enough that hydration status matters. For Murph, it supports hydration logging and safety cautions."
 status: draft
 quality: usable
 categories:

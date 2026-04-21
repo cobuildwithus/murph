@@ -47,4 +47,4 @@ artifacts:
     accessNotes: X content may require special access and rights review before snapshotting; readable LinkedIn mirror is included separately.
 ---
 
-Source retained for provenance and future review.
+This X post is the primary April 3 source for Johnson's early core-temperature test. He reports reaching 102.2 F / 39 C after 38 minutes with face-and-neck ice and after 33 minutes without it. The result supports the idea that cooling changes the dose curve rather than simply making the same session easier. Use it as preliminary context because later April posts refine the numbers.

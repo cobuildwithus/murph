@@ -4,7 +4,7 @@ entityType: source_artifact
 key: source_artifact:sauna-1989-markkola-sauna-habits-and-related-symptoms-in-finnish-children
 slug: sources/sauna/sauna-1989-markkola-sauna-habits-and-related-symptoms-in-finnish-children
 title: "Sauna habits and related symptoms in Finnish children"
-summary: "Finnish dry-sauna bibliography record (yes focus) used as supporting safety / physiology evidence for protocol context and guardrails."
+summary: "This cross-sectional study describes sauna habits and symptoms in Finnish children. The main finding is observational: sauna use was common enough to study, but symptoms and age context matter. For Murph, it supports family and pediatric caution rather than adult efficacy claims."
 status: draft
 quality: usable
 categories:

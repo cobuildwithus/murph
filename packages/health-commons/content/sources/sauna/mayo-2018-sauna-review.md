@@ -4,7 +4,7 @@ entityType: source_artifact
 key: source_artifact:mayo-2018-sauna-review
 slug: sources/sauna/mayo-2018-sauna-review
 title: "Cardiovascular and other health benefits of sauna bathing: a review of the evidence"
-summary: Narrative review used for cardiovascular rationale, modality framing, and mechanism context.
+summary: "This narrative review synthesizes cardiovascular, inflammatory, and mortality evidence for sauna bathing. The main finding is a coherent mechanism-and-outcomes story, especially around cardiovascular stress, vascular function, and long-term associations. For Murph, it is rationale and mechanism context, not a substitute for protocol-specific intervention data."
 status: draft
 quality: usable
 categories:

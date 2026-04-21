@@ -4,7 +4,7 @@ entityType: source_artifact
 key: source_artifact:sauna-2015-kanji-efficacy-of-regular-sauna-bathing-for-chronic-tension-type
 slug: sources/sauna/sauna-2015-kanji-efficacy-of-regular-sauna-bathing-for-chronic-tension-type
 title: "Efficacy of regular sauna bathing for chronic tension-type headache: a randomized controlled study"
-summary: "Finnish dry-sauna bibliography record (likely focus) used as supporting symptoms / musculoskeletal evidence for protocol context and guardrails."
+summary: "This randomized study tested regular sauna bathing for chronic tension-type headache. The main finding is that symptom outcomes can be studied with repeated sauna exposure, but the endpoint is condition-specific. For Murph, it supports symptom-context notes, not a generic recovery claim."
 status: draft
 quality: usable
 categories:

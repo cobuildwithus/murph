@@ -46,4 +46,4 @@ artifacts:
     accessNotes: X content may require special access and rights review before snapshotting; use LinkedIn or Substack mirrors for readable corroboration.
 ---
 
-Source retained for provenance and future review.
+This X post is the primary social source for the April 16 core-temperature update. It points to the same conclusion as the readable LinkedIn mirror: the older 20-minute 200 F routine may not have reached Johnson's heat-shock target. The important reported number is about 31 minutes to cross 102.4 F / 39 C. Use the mirror for readable details and this post for provenance.

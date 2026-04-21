@@ -43,6 +43,63 @@ relations:
     target: source_artifact:red-light-glasses-before-bed-bibliography
   -
     type: cites
+    target: source_artifact:pmid-16842544
+  -
+    type: cites
+    target: source_artifact:pmid-26730983
+  -
+    type: cites
+    target: source_artifact:pmid-31752544
+  -
+    type: cites
+    target: source_artifact:pmid-25287985
+  -
+    type: cites
+    target: source_artifact:pmid-30410784
+  -
+    type: cites
+    target: source_artifact:pmid-32658494
+  -
+    type: cites
+    target: source_artifact:pmid-21193540
+  -
+    type: cites
+    target: source_artifact:pmid-25535358
+  -
+    type: cites
+    target: source_artifact:pmid-32168244
+  -
+    type: cites
+    target: source_artifact:pmid-36854795
+  -
+    type: cites
+    target: source_artifact:pmid-28488943
+  -
+    type: cites
+    target: source_artifact:pmid-32276301
+  -
+    type: cites
+    target: source_artifact:pmid-31967375
+  -
+    type: cites
+    target: source_artifact:pmid-39642162
+  -
+    type: cites
+    target: source_artifact:pmid-35268469
+  -
+    type: cites
+    target: source_artifact:doi-10.1111-opo.12406
+  -
+    type: cites
+    target: source_artifact:pmid-28045969
+  -
+    type: cites
+    target: source_artifact:pmid-31504080
+  -
+    type: cites
+    target: source_artifact:pmid-34030534
+  -
+    type: cites
     target: source_artifact:pmid-41341515
   -
     type: cites
@@ -184,6 +241,10 @@ claims:
     sourceKeys:
       - source_artifact:pmid-35298459
       - source_artifact:doi-10.17617-1.4a6s-ec74
+      - source_artifact:pmid-36051910
+      - source_artifact:pmid-16842544
+      - source_artifact:pmid-21193540
+      - source_artifact:pmid-36854795
     caveats:
       - Plausible mechanism is not the same as reliable wearable improvement.
       - Ambient room light and screen brightness may matter as much as the glasses.
@@ -197,6 +258,10 @@ claims:
       - source_artifact:pmid-37192881
       - source_artifact:pmid-34030534
       - source_artifact:pmid-37593770
+      - source_artifact:pmid-33707105
+      - source_artifact:pmid-26730983
+      - source_artifact:pmid-31752544
+      - source_artifact:pmid-30427265
     caveats:
       - Some individual studies report subjective sleep benefits.
       - Lack of statistically significant pooled actigraphy effects does not rule out personal benefit in a specific user.
@@ -209,6 +274,8 @@ claims:
       - source_artifact:pmid-29101797
       - source_artifact:pmid-20030543
       - source_artifact:pmid-33707105
+      - source_artifact:pmid-26730983
+      - source_artifact:pmid-31752544
       - source_artifact:pmid-40728371
       - source_artifact:pmid-35298459
     caveats:
@@ -223,6 +290,9 @@ claims:
       - source_artifact:pmid-29101797
       - source_artifact:pmid-20030543
       - source_artifact:pmid-33707105
+      - source_artifact:pmid-26730983
+      - source_artifact:pmid-31752544
+      - source_artifact:pmid-30410784
       - source_artifact:pmid-41341515
     caveats:
       - Subjective benefit can reflect expectation, routine stability, or reduced screen use.
@@ -235,6 +305,11 @@ claims:
     sourceKeys:
       - source_artifact:pmid-40728371
       - source_artifact:pmid-35298459
+      - source_artifact:pmid-16842544
+      - source_artifact:pmid-32168244
+      - source_artifact:pmid-36854795
+      - source_artifact:pmid-41565717
+      - source_artifact:pmid-28045969
     caveats:
       - Focus on lens quality and fit rather than recommending a specific brand.
       - Weak clear blue-light lenses should not be treated as equivalent to high-filtering evening lenses.
@@ -247,6 +322,16 @@ claims:
       - source_artifact:pmid-35089982
       - source_artifact:pmid-35024497
       - source_artifact:pmid-41421618
+      - source_artifact:pmid-25287985
+      - source_artifact:pmid-41166315
+      - source_artifact:pmid-27322730
+      - source_artifact:pmid-15713707
+      - source_artifact:pmid-27226262
+      - source_artifact:pmid-31967375
+      - source_artifact:pmid-32276301
+      - source_artifact:pmid-28488943
+      - source_artifact:pmid-39642162
+      - source_artifact:pmid-35268469
     caveats:
       - Those populations may need different timing, supervision, signals, and safety framing.
       - Mood-disorder and circadian-disorder protocols should be clinician-guided.
@@ -257,6 +342,8 @@ claims:
     strength: high
     sourceKeys:
       - source_artifact:pmid-37593770
+      - source_artifact:doi-10.1111-opo.12406
+      - source_artifact:pmid-33587901
     caveats:
       - Users with persistent eye symptoms should consider an eye exam rather than using this protocol as eye care.
   -
@@ -267,6 +354,7 @@ claims:
     sourceKeys:
       - source_artifact:pmid-35298459
       - source_artifact:doi-10.17617-1.4a6s-ec74
+      - source_artifact:pmid-36051910
     caveats:
       - Morning and daytime light can be beneficial for circadian stability.
       - Daytime use of strong filtering lenses is a different intervention.
@@ -306,18 +394,22 @@ lensSpec:
 researchCoverage:
   bibliographyKey: source_artifact:red-light-glasses-before-bed-bibliography
   corpusStats:
-    refinedRecords: 42
+    rawDiscoveryRecords: 42
+    canonicalSourceRecords: 41
+    sourcePageRecords: 41
     directAdultCrossoverRCTsInActigraphyMetaAnalysis: 3
     participantsInActigraphyMetaAnalysis: 49
-    highestPriorityProtocolRecords: 18
-    auditCutoff: 2026-04-20
+    highestPriorityProtocolRecords: 24
+    resolvedInventoryOnlyRecords: 28
+    canonicalizedDuplicateDiscoveryKeys: 4
+    auditCutoff: 2026-04-21
   shortlistBucketCounts:
-    evidence-backbone: 8
-    protocol-dose-and-design: 7
-    wearable-or-testable-endpoints: 5
-    safety-and-contraindications: 10
-    adjacent-variants-to-split: 9
-    context-only-rationale: 7
+    evidence-backbone: 13
+    protocol-dose-and-design: 12
+    wearable-or-testable-endpoints: 8
+    safety-and-contraindications: 14
+    adjacent-variants-to-split: 15
+    context-only-rationale: 12
   backboneSourceKeys:
     - source_artifact:pmid-40728371
     - source_artifact:pmid-41341515
@@ -326,15 +418,28 @@ researchCoverage:
     - source_artifact:pmid-37593770
     - source_artifact:pmid-35298459
     - source_artifact:doi-10.17617-1.4a6s-ec74
+    - source_artifact:pmid-16842544
+    - source_artifact:pmid-21193540
+    - source_artifact:pmid-36854795
     - source_artifact:pmid-29991437
+    - source_artifact:pmid-26414986
   causalInterventionSourceKeys:
     - source_artifact:pmid-29101797
     - source_artifact:pmid-20030543
     - source_artifact:pmid-33707105
+    - source_artifact:pmid-26730983
+    - source_artifact:pmid-31752544
+    - source_artifact:pmid-30427265
+    - source_artifact:pmid-30410784
     - source_artifact:pmid-35089982
     - source_artifact:pmid-35024497
   safetySourceKeys:
     - source_artifact:pmid-37593770
+    - source_artifact:doi-10.1111-opo.12406
+    - source_artifact:pmid-33587901
+    - source_artifact:pmid-27226262
+    - source_artifact:pmid-31967375
+    - source_artifact:pmid-32276301
     - source_artifact:pmid-41421618
 nightlyLoggingFields:
   - glasses_worn

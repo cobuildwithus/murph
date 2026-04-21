@@ -46,4 +46,4 @@ artifacts:
     accessNotes: Optional mirror snapshot for provenance; review rights before storing or redistributing.
 ---
 
-Source retained for provenance and future review.
+This LinkedIn post is a readable mirror for the April 2026 core-temperature update. It says many 20-minute 200 F sauna sessions may miss the 102.4 F / 39 C threshold. Johnson reports needing about 31 minutes to reach that mark in his own test. The finding is useful for dose interpretation, but remains a single-person report.

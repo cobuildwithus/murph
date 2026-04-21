@@ -20,6 +20,60 @@ relations:
     target: experiment_family:evening-light-reduction
   -
     type: cites
+    target: source_artifact:pmid-16842544
+  -
+    type: cites
+    target: source_artifact:pmid-26730983
+  -
+    type: cites
+    target: source_artifact:pmid-31752544
+  -
+    type: cites
+    target: source_artifact:pmid-25287985
+  -
+    type: cites
+    target: source_artifact:pmid-30410784
+  -
+    type: cites
+    target: source_artifact:pmid-32658494
+  -
+    type: cites
+    target: source_artifact:pmid-21193540
+  -
+    type: cites
+    target: source_artifact:pmid-25535358
+  -
+    type: cites
+    target: source_artifact:pmid-32168244
+  -
+    type: cites
+    target: source_artifact:pmid-36854795
+  -
+    type: cites
+    target: source_artifact:pmid-28488943
+  -
+    type: cites
+    target: source_artifact:pmid-32276301
+  -
+    type: cites
+    target: source_artifact:pmid-31967375
+  -
+    type: cites
+    target: source_artifact:pmid-39642162
+  -
+    type: cites
+    target: source_artifact:pmid-35268469
+  -
+    type: cites
+    target: source_artifact:doi-10.1111-opo.12406
+  -
+    type: cites
+    target: source_artifact:pmid-28045969
+  -
+    type: cites
+    target: source_artifact:pmid-31504080
+  -
+    type: cites
     target: source_artifact:pmid-41341515
   -
     type: cites
@@ -93,7 +147,7 @@ source:
   authors: Health Commons Research
   year: 2026
   journal: Health Commons research curation
-  citation: Health Commons Research. Red-light glasses before bed research bibliography. Prepared 2026-04-20.
+  citation: Health Commons Research. Red-light glasses before bed research bibliography. Prepared 2026-04-21.
 evidenceBucket: Research curation
 whyItMatters: Structured curation artifact used to turn discovery and gap-fill passes into a bounded protocol.
 potentialMurphEndpoints:
@@ -109,21 +163,26 @@ modality: Evening short-wavelength or melanopic light reduction using glasses, p
 redLightGlassesFocus: Yes
 murphV1Priority: High
 corpusStats:
-  refinedRecords: 42
+  rawDiscoveryRecords: 42
+  canonicalSourceRecords: 41
+  sourcePageRecords: 41
   directAdultCrossoverRCTsInActigraphyMetaAnalysis: 3
   participantsInActigraphyMetaAnalysis: 49
-  highestPriorityProtocolRecords: 18
-  auditCutoff: 2026-04-20
+  highestPriorityProtocolRecords: 24
+  resolvedInventoryOnlyRecords: 28
+  canonicalizedDuplicateDiscoveryKeys: 4
+  auditCutoff: 2026-04-21
 evidenceMap:
   shortlistBucketCounts:
-    evidence-backbone: 8
-    protocol-dose-and-design: 7
-    wearable-or-testable-endpoints: 5
-    safety-and-contraindications: 10
-    adjacent-variants-to-split: 9
-    context-only-rationale: 7
+    evidence-backbone: 13
+    protocol-dose-and-design: 12
+    wearable-or-testable-endpoints: 8
+    safety-and-contraindications: 14
+    adjacent-variants-to-split: 15
+    context-only-rationale: 12
   directEvidencePosture: small_mixed_subjective_stronger_than_objective
   rightsPosture: only_clearly_open_access_pdfs_marked_redistributable
+  sourcePagePosture: pass2_inventory_records_resolved_to_canonical_source_pages
 backboneSourceKeys:
   - source_artifact:pmid-41341515
   - source_artifact:pmid-40728371
@@ -133,6 +192,10 @@ backboneSourceKeys:
   - source_artifact:pmid-35298459
   - source_artifact:doi-10.17617-1.4a6s-ec74
   - source_artifact:pmid-29101797
+  - source_artifact:pmid-16842544
+  - source_artifact:pmid-26730983
+  - source_artifact:pmid-36854795
+  - source_artifact:pmid-21193540
 shortlistSourceKeys:
   - source_artifact:pmid-41341515
   - source_artifact:pmid-40728371
@@ -142,21 +205,39 @@ shortlistSourceKeys:
   - source_artifact:pmid-35298459
   - source_artifact:doi-10.17617-1.4a6s-ec74
   - source_artifact:pmid-29101797
-  - source_artifact:pmid-20030543
+  - source_artifact:pmid-16842544
+  - source_artifact:pmid-26730983
   - source_artifact:pmid-33707105
+  - source_artifact:pmid-20030543
+  - source_artifact:pmid-31752544
+  - source_artifact:pmid-30427265
+  - source_artifact:pmid-30410784
+  - source_artifact:pmid-32658494
   - source_artifact:pmid-35089982
   - source_artifact:pmid-35024497
   - source_artifact:pmid-29991437
+  - source_artifact:pmid-26414986
   - source_artifact:pmid-41421618
-  - source_artifact:pmid-30427265
-  - source_artifact:pmid-33587901
-  - source_artifact:pmid-36051910
   - source_artifact:pmid-41166315
   - source_artifact:pmid-41565717
+  - source_artifact:pmid-32168244
+  - source_artifact:pmid-36854795
+  - source_artifact:pmid-21193540
+  - source_artifact:pmid-25535358
+  - source_artifact:pmid-25287985
   - source_artifact:pmid-27322730
   - source_artifact:pmid-15713707
   - source_artifact:pmid-27226262
-  - source_artifact:pmid-26414986
+  - source_artifact:pmid-31967375
+  - source_artifact:pmid-32276301
+  - source_artifact:pmid-28488943
+  - source_artifact:pmid-39642162
+  - source_artifact:pmid-35268469
+  - source_artifact:pmid-33587901
+  - source_artifact:pmid-36051910
+  - source_artifact:doi-10.1111-opo.12406
+  - source_artifact:pmid-28045969
+  - source_artifact:pmid-31504080
 ---
 
 ## What this is
@@ -167,11 +248,13 @@ The consumer phrase “red light glasses before bed” is treated here as evenin
 
 ## Corpus at a glance
 
-- 42 refined records in the pass-2 corpus
-- 18 highest-priority protocol records for the landing page
+- 41 canonical source records in the pass-2 corpus after collapsing duplicate discovery keys
+- 42 raw discovery records were reviewed; 4 duplicate discovery keys were canonicalized into PMID/DOI-backed records
+- 41 records now resolve to canonical source pages instead of pass-2 inventory-only placeholders
+- 24 highest-priority protocol records for the landing page
 - 3 adult randomized crossover trials in the actigraphy meta-analysis
 - 49 adults in that objective-sleep meta-analysis
-- audit cutoff 2026-04-20
+- audit cutoff 2026-04-21
 
 ## Evidence posture
 
@@ -192,3 +275,10 @@ Use this bibliography to keep the protocol bounded:
 ## Important caution
 
 This bibliography does not show that every user should wear tinted glasses. It supports a reversible, low-burden test when the user’s evening environment is likely bright enough to matter.
+## 2026-04-21 gap-fill changes
+
+This pass resolved the prior inventory-only records into source pages before expanding claims. It also canonicalized duplicate discovery keys to PMID or DOI-backed source pages where possible.
+
+Newly added or promoted primary sources cover: acute lens/melatonin mechanism, adult two-hour pre-bed device-use eyewear, CBT-I-adjacent insomnia treatment, adolescent LED-screen exposure, student feasibility, occupational field experiments, smartphone-filter comparisons, room-light and eReader confounders, melanopic-display dose, psychiatric-light variants, blue-light spectacle claim calibration, and metabolic/circadian context.
+
+The direct consumer protocol remains cautious: these additions broaden context and fix citation coverage, but they do not turn evening glasses into a reliable insomnia treatment claim.

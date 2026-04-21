@@ -4,7 +4,7 @@ entityType: source_artifact
 key: source_artifact:sauna-1990-jokinen-children-in-sauna-cardiovascular-adjustment
 slug: sources/sauna/sauna-1990-jokinen-children-in-sauna-cardiovascular-adjustment
 title: "Children in sauna: Cardiovascular adjustment"
-summary: "Finnish dry-sauna bibliography record (likely focus) used as supporting cardiovascular evidence for protocol context and guardrails."
+summary: "This pediatric physiology study measured cardiovascular adjustment during acute sauna exposure. The main finding is that children can show measurable heart-rate and blood-pressure responses to sauna heat. For Murph, it supports age-sensitive safety cautions rather than adult protocol claims."
 status: draft
 quality: usable
 categories:

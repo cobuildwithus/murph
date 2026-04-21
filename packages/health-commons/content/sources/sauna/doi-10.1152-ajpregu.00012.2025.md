@@ -24,8 +24,9 @@ source:
   year: 2025
   journal: American Journal of Physiology-Regulatory, Integrative and Comparative Physiology
   citation: Atencio JK, et al. Comparison of thermoregulatory, cardiovascular, and immune responses to different passive heat therapy modalities. American Journal of Physiology-Regulatory, Integrative and Comparative Physiology. 2025;329(1):R20-R35. doi:10.1152/ajpregu.00012.2025.
+  pmid: "40332494"
   doi: 10.1152/ajpregu.00012.2025
-  url: https://journals.physiology.org/doi/10.1152/ajpregu.00012.2025
+  url: https://pubmed.ncbi.nlm.nih.gov/40332494/
 evidenceBucket: Acute and mechanistic
 whyItMatters: Helps prevent bad inference from hot-water immersion papers to sauna protocols by showing modality-specific physiological differences.
 potentialMurphEndpoints:

@@ -34,6 +34,36 @@ relations:
   -
     type: cites
     target: source_artifact:pmid-38577299
+  -
+    type: cites
+    target: source_artifact:pmid-23411620
+  -
+    type: cites
+    target: source_artifact:pmid-9972494
+  -
+    type: cites
+    target: source_artifact:doi-10.1155-2014-106049
+  -
+    type: cites
+    target: source_artifact:pmid-38344040
+  -
+    type: cites
+    target: source_artifact:pmid-32615263
+  -
+    type: cites
+    target: source_artifact:pmid-41049507
+  -
+    type: cites
+    target: source_artifact:pmid-39762944
+  -
+    type: cites
+    target: source_artifact:pmid-34363927
+  -
+    type: cites
+    target: source_artifact:pmid-11874249
+  -
+    type: cites
+    target: source_artifact:pmid-22505948
 source:
   kind: other
   title: Sauna research bibliography
@@ -74,6 +104,36 @@ corpusStats:
   earliestYear: 1978
   latestYear: 2026
   auditCutoff: 2026-04-18
+supplementalReview:
+  reviewedAt: 2026-04-21
+  addedSourceCount: 10
+  scopeNote: Broader sauna literature additions are held on the sauna and dry-sauna evidence graph; the Bryan Johnson protocol page remains source-attributed to Bryan Johnson / Blueprint posts and mirrors.
+  sourceKeys:
+    - source_artifact:pmid-23411620
+    - source_artifact:pmid-9972494
+    - source_artifact:doi-10.1155-2014-106049
+    - source_artifact:pmid-38344040
+    - source_artifact:pmid-32615263
+    - source_artifact:pmid-41049507
+    - source_artifact:pmid-39762944
+    - source_artifact:pmid-34363927
+    - source_artifact:pmid-11874249
+    - source_artifact:pmid-22505948
+  finnishDrySaunaOrLikelySourceKeys:
+    - source_artifact:pmid-23411620
+    - source_artifact:pmid-9972494
+    - source_artifact:doi-10.1155-2014-106049
+    - source_artifact:pmid-38344040
+    - source_artifact:pmid-32615263
+    - source_artifact:pmid-34363927
+    - source_artifact:pmid-11874249
+  bucketCounts:
+    fertilityAndMaleHeatSafety: 2
+    acuteThermalDoseAndSafety: 2
+    acuteVascularPhysiology: 1
+    passiveHeatSynthesis: 2
+    explanatoryBackboneReview: 1
+    sweatAndDetoxClaimCaveats: 2
 evidenceMap:
   recordTypeCounts:
     reviewMeta: 32
@@ -257,6 +317,21 @@ This page represents the structured sauna research corpus behind the Finnish dry
 - publication window 1978–2026
 - audit cutoff 2026-04-18
 - 81 Finnish dry-sauna yes/likely records now materialized as source pages and linked to the canonical protocol
+
+## Supplemental 2026-04-21 review
+
+A follow-up source pass added ten targeted records for gaps that matter when comparing high-burden sauna routines against the broader evidence graph:
+
+- male fertility and heat-safety guardrails: Garolla 2013 and Saikhun 1998
+- acute dose, core-temperature, and extreme-heat safety context: Zalewski 2014 and Podstawski 2024
+- acute vascular context: Gravel 2021
+- mixed or cautious passive-heat syntheses: Hamaya 2025 and Solomon 2025
+- public mechanism synthesis: Patrick and Johnson 2021
+- sweat, minerals, and detox-claim calibration: Hoshi 2001 and Sears 2012
+
+The 2026-04-18 corpus counts above are preserved as the original audit snapshot. These supplemental records are tracked separately so the data does not pretend that the whole 180-record workbook was re-audited.
+
+The Bryan Johnson protocol page intentionally remains source-attributed to Bryan Johnson / Blueprint posts and mirrors. These broader papers belong to the dry-sauna and parent sauna evidence graph, not to Bryan Johnson's protocol-specific research cards.
 
 ## Source groups
 

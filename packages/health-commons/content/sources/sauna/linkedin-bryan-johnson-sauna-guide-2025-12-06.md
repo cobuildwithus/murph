@@ -46,4 +46,4 @@ artifacts:
     accessNotes: Optional mirror snapshot for provenance; review rights before storing or redistributing.
 ---
 
-Source retained for provenance and future review.
+This LinkedIn guide summarizes Johnson's case for sauna as a high-yield personal protocol. It reports his dry-sauna setup, hydration routine, groin-cooling tactic, and observed changes in toxin markers, microplastics, fertility, vascular measures, and resting heart rate. Those claims are useful provenance for what he says happened. They should not be presented as causal outcomes for other users.
