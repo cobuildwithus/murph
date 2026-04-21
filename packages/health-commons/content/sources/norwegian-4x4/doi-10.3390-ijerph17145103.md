@@ -58,4 +58,6 @@ This source is included for **Wearable or testable signals**.
 
 **Why it matters:** Acute implementation source showing how heart rate behaves during a 4x4 session and why target-zone fidelity needs to be logged.
 
+**Findings:** The study tracked heart-rate behavior during one 4x4 cycling session. Participants spent most of the protocol in the intended high-intensity heart-rate range, and later intervals reached target intensity more reliably than the first. For Murph, the main finding is that a 4x4 session should be judged by time in zone, not just by completing four intervals.
+
 **Protocol takeaway:** Use this source only within its `claimUse: supports-protocol` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.

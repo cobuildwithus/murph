@@ -1576,7 +1576,7 @@
       "schemaVersion": "murph.commons.artifact-manifest.v1"
     }
   ],
-  "catalogHash": "sha256:8f8a9dace884b7e79a46709ca3d4112c9d544dcbe05f3c803b4f86f0477105d3",
+  "catalogHash": "sha256:168ffe83760a2c223cc16d7d0ad403195c6cd80db987ee3864744c59e5c92a33",
   "changes": [
     {
       "affectedFields": [
@@ -1834,6 +1834,35 @@
     },
     {
       "affectedFields": [
+        "sources/sauna/*.body",
+        "generated.catalog",
+        "generated.recentChanges"
+      ],
+      "changeId": "chg_2026_04_21_bryan_sauna_source_findings",
+      "changeType": "copy_edit",
+      "editSummary": "Added findings paragraphs to the Bryan Johnson sauna source pages so each cited artifact explains what the source reports and how cautiously to read it.",
+      "entityKey": "protocol_variant:dry-sauna/bryan-johnson-blueprint",
+      "minor": true,
+      "rationale": "The experiment detail research section needs source-level finding copy rather than placeholder provenance text, especially for self-reported social and web sources that should not be treated as general causal evidence.",
+      "reviewStatus": "accepted",
+      "schemaVersion": "murph.commons.change.v1",
+      "sourceKeys": [
+        "source_artifact:bryan-johnson-sauna-protocol-2026-01-28",
+        "source_artifact:bryan-johnson-morning-routine-2026-04-08",
+        "source_artifact:bryan-johnson-saunamaxx-2026-04-14",
+        "source_artifact:linkedin-bryan-johnson-core-temp-2026-04-16",
+        "source_artifact:linkedin-bryan-johnson-sauna-guide-2025-12-06",
+        "source_artifact:linkedin-bryan-johnson-core-temp-prototype-2026-04-03",
+        "source_artifact:x-bryan-johnson-core-temp-2026-04-16",
+        "source_artifact:x-bryan-johnson-ice-balls-2026-04-09",
+        "source_artifact:x-bryan-johnson-fired-review-2026-04-06",
+        "source_artifact:x-bryan-johnson-core-temp-update-2026-04-03",
+        "source_artifact:x-bryan-johnson-comprehensive-sauna-guide-2025-12-06",
+        "source_artifact:x-bryan-johnson-most-people-sauna-wrong-2025-11-12"
+      ]
+    },
+    {
+      "affectedFields": [
         "whyItWorks"
       ],
       "changeId": "chg_2026_04_21_finnish_sauna_mechanism_copy",
@@ -1872,6 +1901,38 @@
       "schemaVersion": "murph.commons.change.v1",
       "sourceKeys": [
         "source_artifact:sauna-bibliography-2026-04-18"
+      ]
+    },
+    {
+      "affectedFields": [
+        "relations",
+        "claims",
+        "researchCoverage.supplementalReview",
+        "sources/sauna",
+        "families/dry-sauna",
+        "sources/sauna/sauna-bibliography-2026-04-18.supplementalReview"
+      ],
+      "changeId": "chg_2026_04_21_finnish_sauna_source_audit",
+      "changeType": "evidence_change",
+      "editSummary": "Added missing Finnish dry-sauna source pages and corrected ambiguous source metadata, including the stroke-cohort PMID mismatch, acute vascular null evidence, post-exercise context, classic thermoregulation and fluid-balance references, and modality guardrails.",
+      "entityKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+      "minor": false,
+      "rationale": "The Finnish dry-sauna protocol should cite the exact primary and review records used for claims while separating long-term cohort rationale, acute physiology, short-term experiment design, and modality or safety caveats without copying stale corpus totals from an older sauna snapshot.",
+      "reviewStatus": "proposed",
+      "schemaVersion": "murph.commons.change.v1",
+      "sourceKeys": [
+        "source_artifact:pmid-29720543",
+        "source_artifact:pmid-31293098",
+        "source_artifact:pmid-32615263",
+        "source_artifact:pmid-34363927",
+        "source_artifact:pmid-41049507",
+        "source_artifact:pmid-38836690",
+        "source_artifact:pmid-24304490",
+        "source_artifact:pmid-30800676",
+        "source_artifact:pmid-24899780",
+        "source_artifact:pmid-3218892",
+        "source_artifact:pmid-3218894",
+        "source_artifact:pmid-3218897"
       ]
     },
     {
@@ -2492,7 +2553,7 @@
         "Finnish dry sauna",
         "traditional dry sauna"
       ],
-      "body": "Dry sauna is the family for high-temperature, low-humidity sauna exposure. The first practical version here is a **Finnish dry-sauna** experiment.\n\nDry sauna stays separate from infrared sauna for three reasons:\n\n1. **Dose is different.** Temperature, humidity, and session duration differ enough that instructions should not silently transfer.\n2. **Evidence is different.** Much of the strongest supporting literature is Finnish dry-sauna or likely-dry-sauna work, not generic passive-heat evidence.\n3. **Interpretation is different.** Standalone dry sauna, post-exercise dry sauna, and other heat modalities can produce different physiological stories.\n\nThe dry-sauna research base is no longer just a few review papers. The corpus includes backbone reviews, long-term Finnish cohort papers, acute and mechanistic papers, and intervention-design or reality-check papers.\n\nA 2026-04-21 supplemental pass added independent fertility, high-heat safety, acute cardiovascular, core-temperature, and sweat-composition sources here instead of attaching them to the Bryan Johnson protocol page. That keeps Bryan Johnson's page focused on Bryan/Blueprint posts while the dry-sauna family owns the broader safety and physiology evidence.",
+      "body": "Dry sauna is the family for high-temperature, low-humidity sauna exposure. The first practical version here is a **Finnish dry-sauna** experiment.\n\nDry sauna stays separate from infrared sauna for three reasons:\n\n1. **Dose is different.** Temperature, humidity, and session duration differ enough that instructions should not silently transfer.\n2. **Evidence is different.** Much of the strongest supporting literature is Finnish dry-sauna or likely-dry-sauna work, not generic passive-heat evidence.\n3. **Interpretation is different.** Standalone dry sauna, post-exercise dry sauna, and other heat modalities can produce different physiological stories.\n\nThe dry-sauna research base is no longer just a few review papers. The corpus includes backbone reviews, long-term Finnish cohort papers, acute and mechanistic papers, intervention-design or reality-check papers, and a 2026-04-21 supplemental pass that added dry-vs-steam, acute vascular, thermoregulation, and fluid-balance context without collapsing everything into the Bryan Johnson routine.\n\nA 2026-04-21 supplemental pass also kept the broader fertility, high-heat safety, and physiology evidence on the dry-sauna family instead of attaching it to the Bryan Johnson protocol page. That keeps Bryan Johnson's page focused on Bryan/Blueprint posts while the dry-sauna family owns the broader safety and physiology evidence.",
       "canonicalModality": "finnish_dry_sauna",
       "categories": [
         "passive-heat",
@@ -2560,6 +2621,30 @@
         {
           "target": "source_artifact:pmid-11874249",
           "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-34363927",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-41049507",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-31293098",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-24899780",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-3218894",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-3218897",
+          "type": "cites"
         }
       ],
       "relativePath": "families/dry-sauna.md",
@@ -2586,7 +2671,7 @@
           "long-term-finnish-cohort-evidence": 14
         },
         "supplementalReview": {
-          "note": "Added fertility, acute thermal-dose, extreme-heat, acute vascular, and sweat-composition sources to the dry-sauna family while leaving source-attributed external protocols to their own posts.",
+          "note": "Added fertility, acute thermal-dose, extreme-heat, acute vascular, passive-heat review, dry-vs-steam modality, and classic thermoregulation or fluid-balance sources to the dry-sauna family while leaving source-attributed external protocols to their own posts.",
           "reviewedAt": "2026-04-21",
           "sourceKeys": [
             "source_artifact:pmid-23411620",
@@ -2594,12 +2679,18 @@
             "source_artifact:doi-10.1155-2014-106049",
             "source_artifact:pmid-38344040",
             "source_artifact:pmid-32615263",
-            "source_artifact:pmid-11874249"
+            "source_artifact:pmid-11874249",
+            "source_artifact:pmid-34363927",
+            "source_artifact:pmid-41049507",
+            "source_artifact:pmid-31293098",
+            "source_artifact:pmid-24899780",
+            "source_artifact:pmid-3218894",
+            "source_artifact:pmid-3218897"
           ]
         }
       },
       "revision": {
-        "pageRevisionId": "sha256:484a157a04867a7b52a9c5c5aee3db82a4122fb35a67fee313cfad7da83b930e",
+        "pageRevisionId": "sha256:8c0b6d7cdfe4618084dfe893a0fd637b7f7a5afaf68f06f47d3d7c16e0172a09",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -3231,7 +3322,7 @@
       "attribution": {
         "ownerType": "murph"
       },
-      "body": "## Question this experiment answers\n\nAfter a stable baseline, does a short block of **stand-alone Finnish dry sauna** make recovery, sleep, or cardiovascular signals move enough to be worth repeating?\n\n## Simple version\n\nRun a 21-day experiment:\n\n- **7 baseline days**\n- **14 intervention days**\n- **3 sessions per week**\n- **15–20 minutes per session**\n- roughly **80–100 °C**\n- **6 target sessions**, with **4 sessions** as the minimum for a useful first read\n\nThis is intentionally practical: a repeatable dry-sauna routine, not an extreme heat-adaptation block and not a treatment plan.\n\n## Why this version\n\nSauna research is broad, but not all sauna studies are testing the same thing. Heat source, temperature, humidity, timing, workout context, hydration, and study population can all change the story.\n\nThis version starts with a clean, low-drama question: what happens when you add a few stand-alone Finnish dry-sauna sessions without adding cold plunges, new supplements, new training blocks, or major diet changes at the same time?\n\n## What to watch\n\nThe main read is whether baseline-vs-intervention averages move in a useful direction and whether the routine felt repeatable. Resting heart rate is the most practical wearable signal; morning blood pressure can help if you already measure it consistently; HRV and sleep-stage changes are context, not promises.\n\n## What to log\n\nAt minimum, log session duration, approximate temperature, time of day, whether the session followed exercise, illness, alcohol, travel, unusually hard training, and any symptoms during or after the session.\n\nIf those details are missing, the experiment can still count, but the result should be read more cautiously.\n\n## What this does not test\n\nThis experiment does not test mortality, dementia, stroke, kidney outcomes, pneumonia, or long-term disease incidence. Those findings are background context, not results a 21-day experiment can prove.\n\nIt also does not promise HRV improvement, gut benefits, vascular improvements, or a perfect wearable score. A useful result is usually modest: the averages move, the person completed enough sessions, no obvious confounder explains everything, and the routine felt worth repeating.\n\n## Evidence snapshot\n\nThe sauna research map includes reviews, long-term Finnish cohort papers, acute physiology work, and intervention-design papers. That mix is enough to make the experiment worth trying, while also keeping the claims careful.",
+      "body": "## Question this experiment answers\n\nAfter a stable baseline, does a short block of **stand-alone Finnish dry sauna** make recovery, sleep, or cardiovascular signals move enough to be worth repeating?\n\n## Simple version\n\nRun a 21-day experiment:\n\n- **7 baseline days**\n- **14 intervention days**\n- **3 sessions per week**\n- **15–20 minutes per session**\n- roughly **80–100 °C**\n- **6 target sessions**, with **4 sessions** as the minimum for a useful first read\n\nThis is intentionally practical: a repeatable dry-sauna routine, not an extreme heat-adaptation block and not a treatment plan.\n\n## Why this version\n\nSauna research is broad, but not all sauna studies are testing the same thing. Heat source, temperature, humidity, timing, workout context, hydration, and study population can all change the story.\n\nThis version starts with a clean, low-drama question: what happens when you add a few stand-alone Finnish dry-sauna sessions without adding cold plunges, new supplements, new training blocks, or major diet changes at the same time?\n\n## What to watch\n\nThe main read is whether baseline-vs-intervention averages move in a useful direction and whether the routine felt repeatable. Resting heart rate is the most practical wearable signal; morning blood pressure can help if you already measure it consistently; HRV and sleep-stage changes are context, not promises.\n\n## What to log\n\nAt minimum, log session duration, approximate temperature, time of day, whether the session followed exercise, illness, alcohol, travel, unusually hard training, and any symptoms during or after the session.\n\nIf those details are missing, the experiment can still count, but the result should be read more cautiously.\n\n## What this does not test\n\nThis experiment does not test mortality, dementia, stroke, kidney outcomes, pneumonia, or long-term disease incidence. Those findings are background context, not results a 21-day experiment can prove.\n\nIt also does not promise HRV improvement, gut benefits, vascular improvements, or a perfect wearable score. A useful result is usually modest: the averages move, the person completed enough sessions, no obvious confounder explains everything, and the routine felt worth repeating.\n\n## Evidence snapshot\n\nThe sauna research map includes reviews, corrected long-term Finnish cohort papers, acute physiology work, post-exercise context, classic thermoregulation and fluid-balance sources, dry-vs-steam modality comparisons, and intervention-design papers. That mix is enough to make the experiment worth trying, while also keeping the claims careful.",
       "categories": [
         "passive-heat",
         "recovery",
@@ -3250,7 +3341,9 @@
             "source_artifact:pmid-16871826",
             "source_artifact:pmid-29849692",
             "source_artifact:mayo-2018-sauna-review",
-            "source_artifact:pmid-38577299"
+            "source_artifact:pmid-38577299",
+            "source_artifact:pmid-34363927",
+            "source_artifact:pmid-41049507"
           ],
           "strength": "moderate",
           "text": "Dry-sauna research is broad enough to support a simple self-test, but the studies vary by heat type, temperature, duration, session context, population, and outcome.",
@@ -3266,7 +3359,10 @@
             "source_artifact:pmid-32814462",
             "source_artifact:pmid-29269746",
             "source_artifact:pmid-31126559",
-            "source_artifact:pmid-31331560"
+            "source_artifact:pmid-31331560",
+            "source_artifact:pmid-31293098",
+            "source_artifact:pmid-32615263",
+            "source_artifact:pmid-41049507"
           ],
           "strength": "moderate",
           "text": "Acute and short-term sauna papers support watching practical near-term cardiovascular signals over a few weeks, while keeping medical claims off the table.",
@@ -3297,7 +3393,8 @@
             "source_artifact:pmid-34622026",
             "source_artifact:pmid-35785965",
             "source_artifact:pmid-41032138",
-            "source_artifact:pmid-31490429"
+            "source_artifact:pmid-31490429",
+            "source_artifact:pmid-24304490"
           ],
           "strength": "high",
           "text": "A standalone dry-sauna session and a post-exercise sauna session should be read separately because workout context can change physiology, hydration, and recovery.",
@@ -3311,7 +3408,9 @@
           "sourceKeys": [
             "source_artifact:pmid-34727008",
             "source_artifact:pmid-31490429",
-            "source_artifact:pmid-31126559"
+            "source_artifact:pmid-31126559",
+            "source_artifact:pmid-3218897",
+            "source_artifact:pmid-30800676"
           ],
           "strength": "moderate",
           "text": "Hydration status, recent exercise load, and session context can materially change sauna responses, so they are worth logging before interpreting the result.",
@@ -3329,11 +3428,12 @@
             "source_artifact:pmid-27932366",
             "source_artifact:pmid-29229091",
             "source_artifact:pmid-28905164",
-            "source_artifact:pmid-30665914",
+            "source_artifact:pmid-29720543",
             "source_artifact:pmid-35908583",
             "source_artifact:pmid-36255556",
             "source_artifact:pmid-37029766",
-            "source_artifact:pmid-38410962"
+            "source_artifact:pmid-38410962",
+            "source_artifact:pmid-38836690"
           ],
           "strength": "high",
           "text": "Long-term Finnish cohort findings on mortality, hypertension, dementia, pneumonia, stroke, kidney outcomes, and other disease signals are background context, not outcomes a 21-day personal experiment can test.",
@@ -3348,7 +3448,9 @@
           "sourceKeys": [
             "source_artifact:pmid-35710395",
             "source_artifact:pmid-37650138",
-            "source_artifact:pmid-40611569"
+            "source_artifact:pmid-40611569",
+            "source_artifact:pmid-41049507",
+            "source_artifact:pmid-31293098"
           ],
           "strength": "high",
           "text": "Null and mixed intervention findings belong alongside positive findings, so users do not get the impression that every vascular, inflammatory, gut, or HRV marker reliably improves.",
@@ -3362,7 +3464,9 @@
           "sourceKeys": [
             "source_artifact:pmid-38577299",
             "source_artifact:doi-10.1152-ajpregu.00012.2025",
-            "source_artifact:mayo-2018-sauna-review"
+            "source_artifact:mayo-2018-sauna-review",
+            "source_artifact:pmid-24899780",
+            "source_artifact:pmid-3218892"
           ],
           "strength": "high",
           "text": "Finnish dry sauna, infrared sauna, and other passive-heat approaches should stay separate because heat source, temperature profile, humidity, and evidence base can change dose and interpretation.",
@@ -3654,7 +3758,7 @@
           "type": "cites"
         },
         {
-          "target": "source_artifact:pmid-30665914",
+          "target": "source_artifact:pmid-29720543",
           "type": "cites"
         },
         {
@@ -3800,6 +3904,54 @@
         {
           "target": "source_artifact:doi-10.1080-23328940.2026.2645467",
           "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-31293098",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-32615263",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-38836690",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-41049507",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-34363927",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-24304490",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-30800676",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-38344040",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-24899780",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-3218892",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-3218894",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-3218897",
+          "type": "cites"
         }
       ],
       "relativePath": "protocols/dry-sauna/murph-finnish-standard-3x-week.md",
@@ -3872,7 +4024,7 @@
           "source_artifact:pmid-30173212",
           "source_artifact:pmid-30486813",
           "source_artifact:pmid-31126559",
-          "source_artifact:pmid-30665914",
+          "source_artifact:pmid-29720543",
           "source_artifact:pmid-31372865",
           "source_artifact:pmid-31102597",
           "source_artifact:pmid-31331560",
@@ -3915,12 +4067,31 @@
           "evidence-backbone": 5,
           "intervention-design-reality-checks": 13,
           "long-term-finnish-cohort-evidence": 14
+        },
+        "supplementalReview": {
+          "reviewedAt": "2026-04-21",
+          "scopeNote": "Added missing Finnish dry-sauna source pages and corrected the stroke-cohort PMID while preserving the earlier corpus-count snapshot because broader sauna source work was already in flight in the current tree.",
+          "sourceKeys": [
+            "source_artifact:pmid-29720543",
+            "source_artifact:pmid-31293098",
+            "source_artifact:pmid-32615263",
+            "source_artifact:pmid-38836690",
+            "source_artifact:pmid-41049507",
+            "source_artifact:pmid-34363927",
+            "source_artifact:pmid-24304490",
+            "source_artifact:pmid-30800676",
+            "source_artifact:pmid-38344040",
+            "source_artifact:pmid-24899780",
+            "source_artifact:pmid-3218892",
+            "source_artifact:pmid-3218894",
+            "source_artifact:pmid-3218897"
+          ]
         }
       },
       "revision": {
-        "pageRevisionId": "sha256:694b2e18324af42518f43ec967ca0757f6e5098481c72686ef7ccde05bb47c4f",
-        "recipeHash": "sha256:cfad1eb2de5ac764a416c35fda6ff951b32ed2c29551dca37ba81174830858ff",
-        "runSpecRevisionId": "sha256:9936dc455885c9c481e01f5c2652813ee91af79914b91042b91259ef141382ab"
+        "pageRevisionId": "sha256:8ef05c8bdd67b1f7bfc1a2873e01a6dd44dbb345a53c48c3b88f1237a9f282f7",
+        "recipeHash": "sha256:f5f87f4b6d5cb6cdd4c6e50100b2d27ed99bc7e43a0b4e4390c15fe8be276055",
+        "runSpecRevisionId": "sha256:e794e9986abf5ad0fbfab3d84bb2bd2ef15c7730366ecee5d09b1366d9e7db62"
       },
       "safety": {
         "avoidOrGetClinicianGuidance": [
@@ -3940,7 +4111,8 @@
           "Avoid alcohol before sauna sessions.",
           "This is a bounded wellness self-experiment, not a treatment plan for cardiovascular disease.",
           "People with known cardiovascular disease or major medical conditions should use clinician guidance before starting.",
-          "Exiting early is normal if heat discomfort starts to feel concerning."
+          "Exiting early is normal if heat discomfort starts to feel concerning.",
+          "Avoid extreme-temperature sessions; this protocol is not a 120 °C heat-stress test."
         ],
         "stopIf": [
           "chest_pain",
@@ -5781,7 +5953,7 @@
       "aliases": [
         "doi-10.3390-ijerph17145103"
       ],
-      "body": "This source is included for **Wearable or testable signals**.\n\n**Why it matters:** Acute implementation source showing how heart rate behaves during a 4x4 session and why target-zone fidelity needs to be logged.\n\n**Protocol takeaway:** Use this source only within its `claimUse: supports-protocol` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
+      "body": "This source is included for **Wearable or testable signals**.\n\n**Why it matters:** Acute implementation source showing how heart rate behaves during a 4x4 session and why target-zone fidelity needs to be logged.\n\n**Findings:** The study tracked heart-rate behavior during one 4x4 cycling session. Participants spent most of the protocol in the intended high-intensity heart-rate range, and later intervals reached target intensity more reliably than the first. For Murph, the main finding is that a 4x4 session should be judged by time in zone, not just by completing four intervals.\n\n**Protocol takeaway:** Use this source only within its `claimUse: supports-protocol` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
       "categories": [
         "norwegian-4x4",
         "hiit",
@@ -5825,7 +5997,7 @@
         "populationLabel": "Healthy active adults"
       },
       "revision": {
-        "pageRevisionId": "sha256:5e64a61ab45c8b99ac11d18fd1483340fd955eb7b779ccded94818ccfb190a8a",
+        "pageRevisionId": "sha256:3b663fd118604e5e209f1add3adf7d8cd413097ba5183a26b42c52e348d89f3f",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -6745,7 +6917,7 @@
       "aliases": [
         "pmid-17414804"
       ],
-      "body": "This source is included for **Evidence backbone**.\n\n**Why it matters:** Canonical small RCT supporting the Norwegian 4x4 dose as a VO2max-oriented aerobic interval protocol.\n\n**Protocol takeaway:** Use this source only within its `claimUse: supports-protocol` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
+      "body": "This source is included for **Evidence backbone**.\n\n**Why it matters:** Canonical small RCT supporting the Norwegian 4x4 dose as a VO2max-oriented aerobic interval protocol.\n\n**Findings:** The trial compared 4x4 intervals with moderate continuous and other aerobic training in moderately trained men. The high-intensity interval arms improved VO2max more than moderate training, and the 4x4 format also supported stroke-volume gains. This is the clearest direct evidence that the classic 4x4 dose can drive cardiorespiratory-fitness gains.\n\n**Protocol takeaway:** Use this source only within its `claimUse: supports-protocol` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
       "categories": [
         "norwegian-4x4",
         "hiit",
@@ -6789,7 +6961,7 @@
         "populationLabel": "Moderately trained men"
       },
       "revision": {
-        "pageRevisionId": "sha256:14be224bd917d18ecb19a28008ab1318e73ba0420525da61eb45089276931a5a",
+        "pageRevisionId": "sha256:b004dea0b94443d71d8e4e297551e97130669796cc57a6709e30d363daba771e",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -7434,7 +7606,7 @@
       "aliases": [
         "pmid-22879367"
       ],
-      "body": "This source is included for **Safety and contraindications**.\n\n**Why it matters:** Quantified supervised cardiac-rehabilitation safety registry; key low-but-not-zero risk framing.\n\n**Protocol takeaway:** Use this source only within its `claimUse: safety-only` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
+      "body": "This source is included for **Safety and contraindications**.\n\n**Why it matters:** Quantified supervised cardiac-rehabilitation safety registry; key low-but-not-zero risk framing.\n\n**Findings:** The registry compared adverse events during supervised high-intensity and moderate-intensity exercise in coronary heart disease rehabilitation. Serious events were rare across many training hours, but they were not zero. The finding supports a low-risk-with-supervision frame, not a blanket claim that high intensity is safe for everyone.\n\n**Protocol takeaway:** Use this source only within its `claimUse: safety-only` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
       "categories": [
         "norwegian-4x4",
         "hiit",
@@ -7478,7 +7650,7 @@
         "populationLabel": "Coronary heart disease cardiac-rehabilitation patients"
       },
       "revision": {
-        "pageRevisionId": "sha256:eb3b944f4ee9ede8d25f2152f96a83b2c087ccdc4c53e810e06c70d0d25349b5",
+        "pageRevisionId": "sha256:d92bab8507dafe999b9b1d042f40c7264eea6f997aacab8181d436c5dcd7f9e9",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -7569,7 +7741,7 @@
       "aliases": [
         "pmid-23988787"
       ],
-      "body": "This source is included for **Wearable or testable signals**.\n\n**Why it matters:** Implementation caution source: RPE-only guidance can miss the intended HR target during interval training.\n\n**Protocol takeaway:** Use this source only within its `claimUse: supports-protocol` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
+      "body": "This source is included for **Wearable or testable signals**.\n\n**Why it matters:** Implementation caution source: RPE-only guidance can miss the intended HR target during interval training.\n\n**Findings:** The crossover study tested whether Borg-scale perceived exertion kept cardiac-rehabilitation participants in the target interval intensity. RPE-guided sessions tended to undershoot the desired high-intensity heart-rate zone. The finding supports heart-rate monitoring when the protocol depends on hitting a specific intensity.\n\n**Protocol takeaway:** Use this source only within its `claimUse: supports-protocol` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
       "categories": [
         "norwegian-4x4",
         "hiit",
@@ -7613,7 +7785,7 @@
         "populationLabel": "Cardiac-rehabilitation participants"
       },
       "revision": {
-        "pageRevisionId": "sha256:29a0304922fef6dfbd3da41900d432eb2dac40b939c5c148c05adf166bc41d87",
+        "pageRevisionId": "sha256:511c78e5c07bc8fa7e1824d55b877356602b70f9b856a871f721e82429011a4b",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -7640,7 +7812,7 @@
       "aliases": [
         "pmid-24066036"
       ],
-      "body": "This source is included for **Context-only rationale**.\n\n**Why it matters:** Open-access meta-analysis supporting the general concept of VO2max trainability from HIIT while showing response variability.\n\n**Protocol takeaway:** Use this source only within its `claimUse: context-only` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
+      "body": "This source is included for **Context-only rationale**.\n\n**Why it matters:** Open-access meta-analysis supporting the general concept of VO2max trainability from HIIT while showing response variability.\n\n**Findings:** This meta-analysis found that HIIT generally improves VO2max over short interventions. It also showed meaningful response variation across studies and participants. The finding supports estimated VO2max as a plausible signal while keeping expectations individualized.\n\n**Protocol takeaway:** Use this source only within its `claimUse: context-only` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
       "categories": [
         "norwegian-4x4",
         "hiit",
@@ -7684,7 +7856,7 @@
         "populationLabel": "Healthy sedentary or recreationally active adults under 45"
       },
       "revision": {
-        "pageRevisionId": "sha256:923d1b43f80f2ade0731f53a67f693e71b9c1c63726c5ab8a52ecdf19b90955b",
+        "pageRevisionId": "sha256:bd6d02d4efa1e738abbc456b9d78a7706d3e1a7597310462b250f054ee104345",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -7706,6 +7878,140 @@
       "summary": "Open-access meta-analysis supporting the general concept of VO2max trainability from HIIT while showing response variability.",
       "title": "VO2max trainability and high intensity interval training in humans: a meta-analysis",
       "whyItMatters": "Open-access meta-analysis supporting the general concept of VO2max trainability from HIIT while showing response variability."
+    },
+    {
+      "aliases": [
+        "Sutkowy 2014 Finnish sauna oxidative status"
+      ],
+      "body": "This source is included as a post-exercise context guardrail.\n\n**Protocol takeaway:** it reinforces the protocol’s instruction to log whether a sauna session follows exercise.",
+      "categories": [
+        "sauna",
+        "exercise-recovery",
+        "biomarkers"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Acute and mechanistic",
+      "finnishDrySaunaFocus": "Yes",
+      "key": "source_artifact:pmid-24304490",
+      "modality": "Dry-sauna exercise adjunct",
+      "murphV1Priority": "Medium",
+      "potentialMurphEndpoints": [
+        "exercise context",
+        "oxidative-stress context"
+      ],
+      "protocolTakeaway": "Supports tracking workout context; it is not a stand-alone dry-sauna efficacy result.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:dry-sauna",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/sauna/pmid-24304490.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "sutkowy-2014-postexercise-oxidative-status",
+        "designKind": "acute_mechanistic",
+        "designLabel": "Post-exercise acute biomarker study",
+        "durationLabel": "Single post-exercise Finnish sauna recovery session",
+        "participantCount": 43,
+        "participantCountKind": "reported",
+        "populationLabel": "Healthy men"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:6b00e9b141309b5f42fb164feee79a347f1ffeed09201e6cd876e2094c4eadfc",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/sauna/pmid-24304490",
+      "source": {
+        "authors": "P Sutkowy, K Woźniak, D Boraczyński, A Mila-Kierzenkowska, A Boraczyński",
+        "citation": "Sutkowy P, Woźniak K, Boraczyński D, Mila-Kierzenkowska A, Boraczyński A. The effect of a single Finnish sauna bath after aerobic exercise on the oxidative status in healthy men. Scand J Clin Lab Invest. 2014;74:89-94. doi:10.3109/00365513.2013.860616.",
+        "doi": "10.3109/00365513.2013.860616",
+        "journal": "Scandinavian Journal of Clinical and Laboratory Investigation",
+        "kind": "journal_article",
+        "pmid": "24304490",
+        "title": "The effect of a single Finnish sauna bath after aerobic exercise on the oxidative status in healthy men",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/24304490/",
+        "year": 2014
+      },
+      "status": "draft",
+      "studyDesign": "Acute post-exercise physiology study",
+      "summary": "Post-exercise Finnish sauna study in healthy men measuring oxidative and antioxidant markers after aerobic exercise followed by sauna recovery.",
+      "title": "The effect of a single Finnish sauna bath after aerobic exercise on the oxidative status in healthy men",
+      "whyItMatters": "Adds biomarker-level context for why post-exercise sauna should be logged separately from stand-alone sauna."
+    },
+    {
+      "aliases": [
+        "Pilch 2014 dry steam sauna comparison"
+      ],
+      "body": "This source is included for modality separation and heat-strain context.\n\n**Protocol takeaway:** humidity can change physiological strain enough that dry-sauna and steam-room protocols should not be silently merged.",
+      "categories": [
+        "sauna",
+        "safety-physiology",
+        "modality-comparison"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Acute and mechanistic",
+      "finnishDrySaunaFocus": "Yes",
+      "key": "source_artifact:pmid-24899780",
+      "modality": "Dry and steam sauna comparator",
+      "murphV1Priority": "High",
+      "potentialMurphEndpoints": [
+        "modality separation",
+        "heat-strain context"
+      ],
+      "protocolTakeaway": "Keep dry sauna, steam room, and wet heat as separate recipes and evidence lanes.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:dry-sauna",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/sauna/pmid-24899780.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "pilch-2014-dry-steam-sauna",
+        "designKind": "crossover_trial",
+        "designLabel": "Dry-vs-steam sauna physiology comparison",
+        "durationLabel": "Three 15-minute dry sauna and steam sauna exposures with breaks",
+        "participantCount": 10,
+        "participantCountKind": "reported",
+        "populationLabel": "Healthy young men"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:a727ac3272ad658d74751d782d3666c29ee827dc70cb6a426aed0f91fafa298b",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/sauna/pmid-24899780",
+      "source": {
+        "authors": "W Pilch, Z Szygula, T Palka, P Pilch, T Cison, S Wiecha, Ł Tota",
+        "citation": "Pilch W, Szygula Z, Palka T, Pilch P, Cison T, Wiecha S, Tota Ł. Comparison of physiological reactions and physiological strain in healthy men under heat stress in dry and steam heat saunas. Biol Sport. 2014;31:145-149. doi:10.5604/20831862.1099045.",
+        "doi": "10.5604/20831862.1099045",
+        "journal": "Biology of Sport",
+        "kind": "journal_article",
+        "pmid": "24899780",
+        "title": "Comparison of physiological reactions and physiological strain in healthy men under heat stress in dry and steam heat saunas",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/24899780/",
+        "year": 2014
+      },
+      "status": "draft",
+      "studyDesign": "Dry-vs-steam crossover physiology study",
+      "summary": "Dry-vs-steam sauna comparison showing that humidity and modality change heat strain, reinforcing why dry sauna and steam-room protocols should not be merged.",
+      "title": "Comparison of physiological reactions and physiological strain in healthy men under heat stress in dry and steam heat saunas",
+      "whyItMatters": "Gives primary-study support for separating dry sauna from wet steam heat in protocol and interpretation."
     },
     {
       "aliases": [
@@ -7843,7 +8149,7 @@
       "aliases": [
         "pmid-25464446"
       ],
-      "body": "This source is included for **Mixed and null clinical evidence**.\n\n**Why it matters:** Larger CAD trial that prevents overclaiming HIIT superiority over moderate continuous training.\n\n**Protocol takeaway:** Use this source only within its `claimUse: context-only` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
+      "body": "This source is included for **Mixed and null clinical evidence**.\n\n**Why it matters:** Larger CAD trial that prevents overclaiming HIIT superiority over moderate continuous training.\n\n**Findings:** The SAINTEX-CAD trial found that aerobic interval training and continuous training both improved exercise capacity in stable coronary artery disease patients. It did not show a clear superiority of interval training over continuous training. The finding is an overclaim guardrail for disease-treatment or superiority claims.\n\n**Protocol takeaway:** Use this source only within its `claimUse: context-only` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
       "categories": [
         "norwegian-4x4",
         "hiit",
@@ -7887,7 +8193,7 @@
         "populationLabel": "Stable coronary artery disease patients"
       },
       "revision": {
-        "pageRevisionId": "sha256:97ecedefcf7ea963088ec6b606608e6aa4b8148246d09af1edab71d16670d37b",
+        "pageRevisionId": "sha256:f51f60f0686e07f747202bd0b7021902e7e9fcc1942d8422e29ed61fdc11bf02",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -8017,15 +8323,16 @@
         "populationLabel": "KIHD Finnish men"
       },
       "revision": {
-        "pageRevisionId": "sha256:0e544f67f4c4e4a644aae37e4dcaef62238971b05f93a532fd04447a286cdb21",
+        "pageRevisionId": "sha256:181cd237aefee031e9872cef1056c71b071c5d94f2be110ef14ed94f63b6b714",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
       "schemaVersion": "murph.commons.page.v1",
       "slug": "sources/sauna/pmid-25705824",
       "source": {
-        "authors": "T",
+        "authors": "T Laukkanen, H Khan, F Zaccardi, JA Laukkanen",
         "citation": "T. Laukkanen, H. Khan, F. Zaccardi, and J. A. Laukkanen, “Association between sauna bathing and fatal cardiovascular and all-cause mortality events,” JAMA Internal Medicine, vol. 175, no. 4, pp. 542–548, 2015.",
+        "doi": "10.1001/jamainternmed.2014.8187",
         "journal": "JAMA Internal Medicine",
         "kind": "journal_article",
         "pmid": "25705824",
@@ -8034,7 +8341,7 @@
         "year": 2015
       },
       "status": "draft",
-      "studyDesign": "Primary study / unclear",
+      "studyDesign": "Prospective cohort",
       "summary": "This prospective KIHD cohort paper linked sauna frequency with fatal cardiovascular and all-cause mortality over long follow-up. The main finding is an inverse long-term association, not proof that a short experiment will move wearable metrics. For Murph, it informs dose-frequency rationale and long-horizon education.",
       "title": "Association between sauna bathing and fatal cardiovascular and all-cause mortality events",
       "whyItMatters": "Landmark Kuopio cohort paper"
@@ -8489,7 +8796,7 @@
         "populationLabel": "KIHD Finnish men"
       },
       "revision": {
-        "pageRevisionId": "sha256:81dec237377c1c07172f8fdf5d072236be4769ad706436de52cacccd20dbb531",
+        "pageRevisionId": "sha256:672f8072d8055f482ea5fe08596b88845c62213cccc3a52f609788dbc44d06d8",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -8498,6 +8805,7 @@
       "source": {
         "authors": "T Laukkanen, et al",
         "citation": "T Laukkanen, et al. Sauna bathing is inversely associated with dementia and Alzheimer's disease in middle-aged Finnish men. Age Ageing 2017.",
+        "doi": "10.1093/ageing/afw212",
         "journal": "Age Ageing",
         "kind": "journal_article",
         "pmid": "27932366",
@@ -8580,7 +8888,7 @@
       "aliases": [
         "pmid-28082387"
       ],
-      "body": "This source is included for **Mixed and null clinical evidence**.\n\n**Why it matters:** Larger HFrEF trial that did not confirm clear HIIT superiority and highlighted intensity-fidelity issues.\n\n**Protocol takeaway:** Use this source only within its `claimUse: context-only` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
+      "body": "This source is included for **Mixed and null clinical evidence**.\n\n**Why it matters:** Larger HFrEF trial that did not confirm clear HIIT superiority and highlighted intensity-fidelity issues.\n\n**Findings:** This heart-failure trial did not confirm a clear durable superiority of HIIT over moderate training or recommended regular exercise. It also highlighted that participants often missed the prescribed high-intensity target. The finding warns that clinical 4x4-style protocols need supervision and intensity checks.\n\n**Protocol takeaway:** Use this source only within its `claimUse: context-only` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
       "categories": [
         "norwegian-4x4",
         "hiit",
@@ -8624,7 +8932,7 @@
         "populationLabel": "Heart failure patients with reduced ejection fraction"
       },
       "revision": {
-        "pageRevisionId": "sha256:e57d76c46561faac07c103b872f8a3f20df824e5208d774c993d46bc8b11f0a6",
+        "pageRevisionId": "sha256:c0c60828a9658890095338bd4d6e1bc01258ee24fb9a9235efb83ce75b7152a1",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -8827,7 +9135,7 @@
         "populationLabel": "KIHD Finnish men"
       },
       "revision": {
-        "pageRevisionId": "sha256:bfdaf53bc423242b243ab86c4e507ac98648aef1b83e8250b0e44597c756c12f",
+        "pageRevisionId": "sha256:895599eec86a32340d858b48178d6190613224febe0f469df034b78a4fc71871",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -8836,6 +9144,7 @@
       "source": {
         "authors": "F Zaccardi, et al",
         "citation": "F Zaccardi, et al. Sauna Bathing and Incident Hypertension: A Prospective Cohort Study. Am J Hypertens 2017.",
+        "doi": "10.1093/ajh/hpx102",
         "journal": "Am J Hypertens",
         "kind": "journal_article",
         "pmid": "28633297",
@@ -8853,7 +9162,7 @@
       "aliases": [
         "pmid-28846513"
       ],
-      "body": "This source is included for **Adjacent variants to split**.\n\n**Why it matters:** Low-volume 1x4 HIIT evidence that should not be treated as the same as standard 4x4.\n\n**Protocol takeaway:** Use this source only within its `claimUse: context-only` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
+      "body": "This source is included for **Adjacent variants to split**.\n\n**Why it matters:** Low-volume 1x4 HIIT evidence that should not be treated as the same as standard 4x4.\n\n**Findings:** The trial found that low-volume HIIT could improve metabolic-syndrome severity. Its protocol was a lower-volume variant rather than classic four-by-four-minute intervals. The finding is useful cardiometabolic context but should stay separate from Norwegian 4x4 dosing.\n\n**Protocol takeaway:** Use this source only within its `claimUse: context-only` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
       "categories": [
         "norwegian-4x4",
         "hiit",
@@ -8898,7 +9207,7 @@
         "populationLabel": "Adults with metabolic syndrome"
       },
       "revision": {
-        "pageRevisionId": "sha256:05b8f974d6b512e2fc3a2a0cc4e7541e07c54f77b33cb1bb762f92c11e67db3c",
+        "pageRevisionId": "sha256:4d6139264f952bca7340fa4a28a2f3d7be131e739b16952c4dd104c61244d50c",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -8960,7 +9269,7 @@
         "populationLabel": "KIHD Finnish men"
       },
       "revision": {
-        "pageRevisionId": "sha256:ef702ed571ce444e7c6ef619275f2a8d564d6ad06c1d1862786ba269b35b7cc2",
+        "pageRevisionId": "sha256:2da0581382092d17e2c40593a260b94fecbd4359b9104e058c059e634f0d8651",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -8969,6 +9278,7 @@
       "source": {
         "authors": "SK Kunutsor, et al",
         "citation": "SK Kunutsor, et al. Frequent sauna bathing may reduce the risk of respiratory diseases. Clin Respir J 2017.",
+        "doi": "10.1007/s10654-017-0311-6",
         "journal": "Clin Respir J",
         "kind": "journal_article",
         "pmid": "28905164",
@@ -9021,7 +9331,7 @@
         "populationLabel": "KIHD Finnish men"
       },
       "revision": {
-        "pageRevisionId": "sha256:cf57804728fd7a23d6a27d0a0c55206fa04198aa4937c54d919a9ce959009ba6",
+        "pageRevisionId": "sha256:f346c39922c48ccaa6d8861a09f915a12b670da2fa3150bd5ce667b30fb92027",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -9030,6 +9340,7 @@
       "source": {
         "authors": "SK Kunutsor, et al",
         "citation": "SK Kunutsor, et al. Joint associations of sauna bathing and cardiorespiratory fitness on cardiovascular and all-cause mortality risk: a long-term prospective cohort study. Ann Med 2018.",
+        "doi": "10.1080/07853890.2017.1387927",
         "journal": "Ann Med",
         "kind": "journal_article",
         "pmid": "28972808",
@@ -9146,7 +9457,7 @@
         "populationLabel": "KIHD Finnish men"
       },
       "revision": {
-        "pageRevisionId": "sha256:f7d74dfcd3b7bfae31e0e98edd86326847bd4597aa9e20b6e418f0b82053db66",
+        "pageRevisionId": "sha256:1b51fa8382123ed498e58d935a5a9297f06e5552364cdfbe5dfc15818f5f4e8a",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -9155,6 +9466,7 @@
       "source": {
         "authors": "SK Kunutsor, et al",
         "citation": "SK Kunutsor, et al. Frequent sauna bathing may reduce the risk of pneumonia. Respir Med 2017.",
+        "doi": "10.1016/j.rmed.2017.10.018",
         "journal": "Respir Med",
         "kind": "journal_article",
         "pmid": "29229091",
@@ -9210,7 +9522,7 @@
         "populationLabel": "Adults with cardiovascular risk factors"
       },
       "revision": {
-        "pageRevisionId": "sha256:adfb09dc19e18946b076b1063645372249b19ed07ddf9229468e29f59d2f47f3",
+        "pageRevisionId": "sha256:4373207ee54c52ba2c5a229de884e98d2434a1a8ee285fd53c923d23db9f905e",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -9219,6 +9531,7 @@
       "source": {
         "authors": "T Laukkanen, et al",
         "citation": "T Laukkanen, et al. Acute effects of sauna bathing on cardiovascular function. J Hum Hypertens or Eur J Prev Cardiol 2018.",
+        "doi": "10.1038/s41371-017-0008-z",
         "journal": "J Hum Hypertens or Eur J Prev Cardiol",
         "kind": "journal_article",
         "pmid": "29269746",
@@ -9293,7 +9606,7 @@
       "aliases": [
         "pmid-29416382"
       ],
-      "body": "This source is included for **Safety and contraindications**.\n\n**Why it matters:** Cardiac-rehabilitation meta-analysis supporting efficacy and safety context under supervision.\n\n**Protocol takeaway:** Use this source only within its `claimUse: safety-only` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
+      "body": "This source is included for **Safety and contraindications**.\n\n**Why it matters:** Cardiac-rehabilitation meta-analysis supporting efficacy and safety context under supervision.\n\n**Findings:** The review found that HIIT and moderate continuous training can both improve fitness within cardiac rehabilitation. The included studies were supervised clinical programs, not ordinary home self-experiments. The finding supports safety and efficacy context only when screening and monitoring are part of the setup.\n\n**Protocol takeaway:** Use this source only within its `claimUse: safety-only` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
       "categories": [
         "norwegian-4x4",
         "hiit",
@@ -9336,7 +9649,7 @@
         "populationLabel": "Cardiac-rehabilitation participants"
       },
       "revision": {
-        "pageRevisionId": "sha256:7ee159489b40ca7a3d2b045174c0a6351b34742d77d828966aba002cc313f128",
+        "pageRevisionId": "sha256:e13df6b9ed9d1c42729ffa2e735fa3ffa45c6019f2acd1c607c00a353f8e59ba",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -9427,6 +9740,72 @@
       "summary": "Updated CAD/HF synthesis that keeps clinical effect claims separated from the general self-experiment protocol.",
       "title": "Aerobic interval vs. continuous training in patients with coronary artery disease or heart failure: an updated systematic review and meta-analysis with a focus on secondary outcomes",
       "whyItMatters": "Adds a clinical synthesis around CAD/HF trials so early positive disease-population studies do not dominate the practical claim set."
+    },
+    {
+      "aliases": [
+        "Kunutsor 2018 sauna stroke cohort"
+      ],
+      "body": "This source is the corrected article record for the Finnish sauna stroke cohort. It replaces the earlier Health Commons use of PMID 30665914, which is a reader-response record rather than the cohort paper.\n\n**Why it matters:** it belongs in the long-term cohort rationale set, but it should not become a promised short-term personal result.",
+      "categories": [
+        "sauna",
+        "observational-cohort",
+        "cerebrovascular"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Long-term Finnish cohort evidence",
+      "finnishDrySaunaFocus": "Yes",
+      "key": "source_artifact:pmid-29720543",
+      "modality": "Finnish dry sauna",
+      "murphV1Priority": "High",
+      "potentialMurphEndpoints": [
+        "education / rationale only"
+      ],
+      "protocolTakeaway": "Do not use this as a 21-day endpoint; cite it only as long-term Finnish cohort context.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:dry-sauna",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/sauna/pmid-29720543.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "kihd-men-women-stroke",
+        "designKind": "prospective_cohort",
+        "designLabel": "Prospective cohort",
+        "durationLabel": "Long-term stroke follow-up",
+        "participantCount": 1628,
+        "participantCountKind": "reported",
+        "populationLabel": "Finnish men and women aged 53–74 without known prior stroke"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:56f2c8f0aae5736a816faedbce932002e3d2dcc35c310e3938972efa18063ecd",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/sauna/pmid-29720543",
+      "source": {
+        "authors": "SK Kunutsor, H Khan, F Zaccardi, T Laukkanen, P Willeit, JA Laukkanen",
+        "citation": "Kunutsor SK, Khan H, Zaccardi F, Laukkanen T, Willeit P, Laukkanen JA. Sauna bathing reduces the risk of stroke in Finnish men and women: A prospective cohort study. Neurology. 2018;90:e1937-e1944. doi:10.1212/WNL.0000000000005606.",
+        "doi": "10.1212/WNL.0000000000005606",
+        "journal": "Neurology",
+        "kind": "journal_article",
+        "pmid": "29720543",
+        "title": "Sauna bathing reduces the risk of stroke in Finnish men and women: A prospective cohort study",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/29720543/",
+        "year": 2018
+      },
+      "status": "draft",
+      "studyDesign": "Prospective cohort",
+      "summary": "Correct PubMed record for the Finnish prospective stroke cohort; used as long-term context, not as a short-term protocol endpoint.",
+      "title": "Sauna bathing reduces the risk of stroke in Finnish men and women: A prospective cohort study",
+      "whyItMatters": "Corrects the stroke cohort citation and keeps cerebrovascular findings as rationale-only evidence."
     },
     {
       "aliases": [
@@ -9533,7 +9912,7 @@
         "populationLabel": "KIHD Finnish men"
       },
       "revision": {
-        "pageRevisionId": "sha256:45f2d8f430bb15c3f31864f7f7a57d2d7a1decf52f7a370ccb6098f0a9ad779d",
+        "pageRevisionId": "sha256:9acb07305bf320ddfc87edd7c53664efadc45fa0911700e5865231470d26abda",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -9542,6 +9921,7 @@
       "source": {
         "authors": "SK Kunutsor, T Laukkanen, JA Laukkanen",
         "citation": "SK Kunutsor, T Laukkanen, JA Laukkanen. Longitudinal associations of sauna bathing with inflammation and oxidative stress: the KIHD prospective cohort study. Ann Med 2018.",
+        "doi": "10.1080/07853890.2018.1489143",
         "journal": "Ann Med",
         "kind": "journal_article",
         "pmid": "29897261",
@@ -9657,7 +10037,7 @@
         "populationLabel": "KIHD Finnish men"
       },
       "revision": {
-        "pageRevisionId": "sha256:6c0b6c48397c8cacb9240061b855085acc662b3234bda9f03b63b71bae1d8740",
+        "pageRevisionId": "sha256:e678d6a4e6228eeb0cf176f21e94a674110f5caa2967aebfbdc562ee1c2d8832",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -9666,6 +10046,7 @@
       "source": {
         "authors": "T Laukkanen, JA Laukkanen, SK Kunutsor",
         "citation": "T Laukkanen, JA Laukkanen, SK Kunutsor. Sauna Bathing and Risk of Psychotic Disorders. Med Princ Pract 2018.",
+        "doi": "10.1159/000493392",
         "journal": "Med Princ Pract",
         "kind": "journal_article",
         "pmid": "30173212",
@@ -9683,7 +10064,7 @@
       "aliases": [
         "pmid-30293954"
       ],
-      "body": "This source is included for **Wearable or testable signals**.\n\n**Why it matters:** HRV/autonomic-control synthesis; useful for setting cautious expectations around HRV.\n\n**Protocol takeaway:** Use this source only within its `claimUse: context-only` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
+      "body": "This source is included for **Wearable or testable signals**.\n\n**Why it matters:** HRV/autonomic-control synthesis; useful for setting cautious expectations around HRV.\n\n**Findings:** The review found limited evidence that HIIT may change cardiac autonomic-control markers such as HRV in some populations. The evidence base was small and heterogeneous. The finding makes HRV an exploratory signal, not a primary verdict for Norwegian 4x4.\n\n**Protocol takeaway:** Use this source only within its `claimUse: context-only` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
       "categories": [
         "norwegian-4x4",
         "hiit",
@@ -9724,7 +10105,7 @@
         "populationLabel": "Healthy adults and cardiometabolic-risk participants"
       },
       "revision": {
-        "pageRevisionId": "sha256:3933f563f2132ccb03a3949f18308cb3f929e87163bf31cd424b5b402e08c170",
+        "pageRevisionId": "sha256:19f6d3d3d77a8cf96075652d7d908959a02ee844d085da09c7c5cdfcbe844a0d",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -9751,7 +10132,7 @@
       "aliases": [
         "pmid-30376749"
       ],
-      "body": "This source is included for **Safety and contraindications**.\n\n**Why it matters:** Systematic review of HIIT safety in cardiovascular disease populations.\n\n**Protocol takeaway:** Use this source only within its `claimUse: safety-only` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
+      "body": "This source is included for **Safety and contraindications**.\n\n**Why it matters:** Systematic review of HIIT safety in cardiovascular disease populations.\n\n**Findings:** The safety review found serious adverse events during supervised cardiovascular-disease HIIT studies were uncommon. The evidence still came from screened and monitored rehabilitation populations. The finding supports cautious safety language rather than unsupervised disease-population claims.\n\n**Protocol takeaway:** Use this source only within its `claimUse: safety-only` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
       "categories": [
         "norwegian-4x4",
         "hiit",
@@ -9795,7 +10176,7 @@
         "populationLabel": "Cardiovascular-disease rehabilitation patients"
       },
       "revision": {
-        "pageRevisionId": "sha256:8481733efd8f0aa48dd61effae0b9c2580f958797cd26ef3c9bfb89d33799e94",
+        "pageRevisionId": "sha256:bb3d6e4aaa8af238a871f43c57fbaad86d2d7a146192726c8c1d52ba1581dd21",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -10017,71 +10398,66 @@
       "whyItMatters": "Extends mortality signal beyond men-only analyses"
     },
     {
-      "body": "This source is included for **Long-term Finnish cohort evidence**.\n\n**Why it matters:** Adds cerebrovascular long-term signal\n\n**Potential experiment signals:** education / rationale only\n\n**Protocol takeaway:** Not ideal as a first short-term experiment signal.",
+      "aliases": [
+        "Yu 2019 reader response sauna stroke"
+      ],
+      "body": "This record was previously misused as the stroke cohort article. The primary cohort source is now tracked as **source_artifact:pmid-29720543**.",
       "categories": [
         "sauna",
-        "observational-cohort"
+        "correspondence"
       ],
       "entityType": "source_artifact",
-      "evidenceBucket": "Long-term Finnish cohort evidence",
-      "finnishDrySaunaFocus": "Yes",
+      "evidenceBucket": "Citation correction",
+      "finnishDrySaunaFocus": "No",
       "key": "source_artifact:pmid-30665914",
-      "modality": "Finnish dry sauna",
-      "murphV1Priority": "High",
+      "modality": "Reader response / correspondence",
+      "murphV1Priority": "Lower",
       "potentialMurphEndpoints": [
-        "education / rationale only"
+        "citation hygiene"
       ],
-      "protocolTakeaway": "Not ideal as a first short-term experiment signal.",
+      "protocolTakeaway": "Do not cite this as primary evidence; cite source_artifact:pmid-29720543 for the cohort.",
       "quality": "usable",
       "relations": [
         {
-          "target": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
-          "type": "related_protocol"
-        },
-        {
-          "target": "experiment_family:dry-sauna",
-          "type": "parent_family"
+          "target": "source_artifact:pmid-29720543",
+          "type": "responds_to"
         }
       ],
       "relativePath": "sources/sauna/pmid-30665914.md",
       "researchEvidence": {
-        "aggregateRole": "primary",
-        "cohortKey": "finnish-men-women-cvd-1688",
-        "designKind": "prospective_cohort",
-        "designLabel": "Prospective cohort",
-        "durationLabel": "Long-term stroke follow-up",
-        "participantCount": 1628,
-        "participantCountKind": "reported",
-        "populationLabel": "Finnish men and women"
+        "aggregateRole": "context",
+        "aggregationNote": "This is not the prospective cohort record; use source_artifact:pmid-29720543 for the primary stroke cohort.",
+        "designKind": "other",
+        "designLabel": "Reader response / correspondence"
       },
       "revision": {
-        "pageRevisionId": "sha256:aec168fe57cc0529d9a9bcf001ba5dbc2e361dfdf81ce3784b156edd6ac5eb6c",
+        "pageRevisionId": "sha256:40fde05afe2d2416f1b32a6b2bf34a44ee5d945f7c1b18448f7e383bfdd5e931",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
       "schemaVersion": "murph.commons.page.v1",
       "slug": "sources/sauna/pmid-30665914",
       "source": {
-        "authors": "SK Kunutsor, et al",
-        "citation": "SK Kunutsor, et al. Sauna bathing reduces the risk of stroke in Finnish men and women: A prospective cohort study. Neurology 2019.",
+        "authors": "Y Yu",
+        "citation": "Yu Y. Reader Response: Sauna Bathing Reduces the Risk of Stroke in Finnish Men and Women. Neurology. 2019.",
         "journal": "Neurology",
         "kind": "journal_article",
         "pmid": "30665914",
-        "title": "Sauna bathing reduces the risk of stroke in Finnish men and women: A prospective cohort study",
+        "title": "Reader Response: Sauna Bathing Reduces the Risk of Stroke in Finnish Men and Women",
         "url": "https://pubmed.ncbi.nlm.nih.gov/30665914/",
         "year": 2019
       },
       "status": "draft",
-      "studyDesign": "Prospective cohort",
-      "summary": "This prospective cohort paper associated more frequent sauna bathing with lower stroke risk in Finnish men and women. The main finding is a long-term cerebrovascular signal. For Murph, it supports rationale and safety education, not a first 21-day outcome target.",
-      "title": "Sauna bathing reduces the risk of stroke in Finnish men and women: A prospective cohort study",
-      "whyItMatters": "Adds cerebrovascular long-term signal"
+      "studyDesign": "Reader response / correspondence",
+      "summary": "Reader-response record about the Finnish sauna stroke cohort; retained to clarify that the actual cohort article is PMID 29720543.",
+      "title": "Reader Response: Sauna Bathing Reduces the Risk of Stroke in Finnish Men and Women",
+      "whyItMatters": "Prevents the reader-response PMID from being mistaken for the primary stroke cohort article."
     },
     {
       "aliases": [
         "pmid-30733142"
       ],
-      "body": "This source is included for **Protocol dose and design**.\n\n**Why it matters:** Meta-analysis used to justify long-interval HIIT as a plausible VO2max-oriented design class.\n\n**Protocol takeaway:** Use this source only within its `claimUse: supports-protocol` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
+      "body": "This source is included for **Protocol dose and design**.\n\n**Why it matters:** Meta-analysis used to justify long-interval HIIT as a plausible VO2max-oriented design class.\n\n**Findings:** The meta-analysis found HIIT improved VO2max across adult populations and protocol types. Longer intervals, higher total interval volume, and multi-week programs showed stronger effects. The finding supports the long-interval design class behind 4x4 without proving every implementation is superior.\n\n**Protocol takeaway:** Use this source only within its `claimUse: supports-protocol` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
       "categories": [
         "norwegian-4x4",
         "hiit",
@@ -10124,7 +10500,7 @@
         "populationLabel": "Healthy, overweight/obese, and athletic adults"
       },
       "revision": {
-        "pageRevisionId": "sha256:8f1373a6ea7e706228fe0713106873f2872322c0214b5382a34a720e9d31e73f",
+        "pageRevisionId": "sha256:037682648837652393772c31cf5d02d6d422c6860a5937404880e6e0e58eb0cb",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -10146,6 +10522,73 @@
       "summary": "Meta-analysis used to justify long-interval HIIT as a plausible VO2max-oriented design class.",
       "title": "Effects of different protocols of high intensity interval training for VO2max improvements in adults: a meta-analysis of randomised controlled trials",
       "whyItMatters": "Meta-analysis used to justify long-interval HIIT as a plausible VO2max-oriented design class."
+    },
+    {
+      "aliases": [
+        "Podstawski 2019 overweight men dry sauna"
+      ],
+      "body": "This source is included for intervention-design and safety context.\n\n**Protocol takeaway:** transient body-mass loss and cardiovascular strain should be interpreted as heat and fluid physiology, not durable fat loss.",
+      "categories": [
+        "sauna",
+        "safety-physiology",
+        "body-composition"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Intervention design / reality checks",
+      "finnishDrySaunaFocus": "Yes",
+      "key": "source_artifact:pmid-30800676",
+      "modality": "Finnish dry sauna",
+      "murphV1Priority": "Medium",
+      "potentialMurphEndpoints": [
+        "session tolerance",
+        "hydration and body-mass context"
+      ],
+      "protocolTakeaway": "Do not sell dry sauna as weight loss; use the study for dose and tolerance caveats.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:dry-sauna",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/sauna/pmid-30800676.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "podstawski-2019-overweight-men-dry-sauna",
+        "designKind": "acute_mechanistic",
+        "designLabel": "Repeated acute dry-sauna physiology study",
+        "durationLabel": "Repeated 4 x 10-minute dry sauna exposures",
+        "participantCount": 45,
+        "participantCountKind": "reported",
+        "populationLabel": "Young sedentary overweight men"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:9d75338bda0a4c21d61ee63d7aaa9948f24680e32e810f13fd225de52a23ac1b",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/sauna/pmid-30800676",
+      "source": {
+        "authors": "R Podstawski, K Borysławski, R Clark, K Choszcz, B Finn, B Gronek",
+        "citation": "Podstawski R, Borysławski K, Clark R, Choszcz K, Finn B, Gronek B. Correlations between repeated use of dry sauna for 4 x 10 minutes, physiological parameters, anthropometric features, and body composition in young sedentary and overweight men. BioMed Res Int. 2019;2019:7535140. doi:10.1155/2019/7535140.",
+        "doi": "10.1155/2019/7535140",
+        "journal": "BioMed Research International",
+        "kind": "journal_article",
+        "pmid": "30800676",
+        "title": "Correlations between Repeated Use of Dry Sauna for 4 x 10 Minutes, Physiological Parameters, Anthropometric Features, and Body Composition in Young Sedentary and Overweight Men",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/30800676/",
+        "year": 2019
+      },
+      "status": "draft",
+      "studyDesign": "Repeated acute physiology study",
+      "summary": "Repeated dry-sauna physiology or body-composition study in young sedentary overweight men, useful for dose tolerance and body-size caveats.",
+      "title": "Correlations between Repeated Use of Dry Sauna for 4 x 10 Minutes, Physiological Parameters, Anthropometric Features, and Body Composition in Young Sedentary and Overweight Men",
+      "whyItMatters": "Adds body-size and sedentary-user tolerance context for safety and interpretation."
     },
     {
       "body": "This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.\n\n**Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a general / mixed record marked medium priority for Murph v1 interpretation.\n\n**Potential Murph endpoints/context:** supporting corpus context\n\n**Protocol takeaway:** Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes.",
@@ -10268,6 +10711,73 @@
       "summary": "This acute physiology study compared sauna blood-pressure and heart-rate responses with submaximal dynamic exercise. The main finding is that a sauna bath can create cardiovascular responses comparable to light-to-moderate exercise stress. For Murph, it supports treating sauna as a physiological load and standardizing cooldown.",
       "title": "The blood pressure and heart rate during sauna bath correspond to cardiac responses during submaximal dynamic exercise",
       "whyItMatters": "Clarifies the immediate cardiovascular load of a sauna session and helps frame sauna as a measurable physiological stressor, not just a relaxation ritual."
+    },
+    {
+      "aliases": [
+        "Gravel 2019 healthy adults sauna FMD"
+      ],
+      "body": "This source is included for acute and mechanistic guardrails.\n\n**Protocol takeaway:** a standard brief Finnish-sauna exposure may not move acute endothelial-function markers in healthy middle-aged and older adults, so near-term cardiovascular claims should stay cautious.",
+      "categories": [
+        "sauna",
+        "acute-mechanistic",
+        "cardiovascular"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Acute and mechanistic",
+      "finnishDrySaunaFocus": "Yes",
+      "key": "source_artifact:pmid-31293098",
+      "modality": "Finnish dry sauna",
+      "murphV1Priority": "High",
+      "potentialMurphEndpoints": [
+        "vascular-function context",
+        "blood-pressure interpretation"
+      ],
+      "protocolTakeaway": "Treat acute endothelial improvement as population- and context-dependent rather than guaranteed.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:dry-sauna",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/sauna/pmid-31293098.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "gravel-2019-healthy-adults-fmd",
+        "designKind": "crossover_trial",
+        "designLabel": "Randomized crossover acute physiology study",
+        "durationLabel": "Acute one- or two-bout Finnish sauna exposure",
+        "participantCount": 21,
+        "participantCountKind": "reported",
+        "populationLabel": "Healthy middle-aged and older adults"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:27c0e8b0e7b63fff4c60e499b1dad4b7319c57574f2b06db3e7f3d11dfc289f4",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/sauna/pmid-31293098",
+      "source": {
+        "authors": "H Gravel, GB Coombs, P Behzadi, D Gagnon",
+        "citation": "Gravel H, Coombs GB, Behzadi P, Gagnon D. Acute effect of Finnish sauna bathing on brachial artery flow-mediated dilation and reactive hyperemia in healthy middle-aged and older adults. Physiological Reports. 2019;7:e14166. doi:10.14814/phy2.14166.",
+        "doi": "10.14814/phy2.14166",
+        "journal": "Physiological Reports",
+        "kind": "journal_article",
+        "pmid": "31293098",
+        "title": "Acute effect of Finnish sauna bathing on brachial artery flow-mediated dilation and reactive hyperemia in healthy middle-aged and older adults",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/31293098/",
+        "year": 2019
+      },
+      "status": "draft",
+      "studyDesign": "Randomized crossover acute physiology study",
+      "summary": "Finnish-sauna crossover study showing that one or two short sauna bouts did not acutely improve brachial artery flow-mediated dilation or reactive hyperemia in healthy middle-aged and older adults.",
+      "title": "Acute effect of Finnish sauna bathing on brachial artery flow-mediated dilation and reactive hyperemia in healthy middle-aged and older adults",
+      "whyItMatters": "Adds an important null acute vascular finding in healthy adults, preventing overgeneralization from CAD or cohort evidence."
     },
     {
       "body": "This source is included for **Acute and mechanistic**.\n\n**Why it matters:** Directly relevant to HRV-style wearable outcomes\n\n**Potential experiment signals:** overnight HRV, resting HR, recovery metrics\n\n**Protocol takeaway:** Strong candidate for early experiment metrics.",
@@ -10853,7 +11363,7 @@
       "aliases": [
         "pmid-32100573"
       ],
-      "body": "This source is included for **Safety and contraindications**.\n\n**Why it matters:** AHA scientific statement for acute cardiovascular event risk and progression language.\n\n**Protocol takeaway:** Use this source only within its `claimUse: safety-only` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
+      "body": "This source is included for **Safety and contraindications**.\n\n**Why it matters:** AHA scientific statement for acute cardiovascular event risk and progression language.\n\n**Findings:** The AHA statement emphasizes that regular physical activity lowers cardiovascular risk, while strenuous exercise can transiently raise acute event risk in susceptible people. That risk is especially relevant for inactive people or people with unrecognized disease starting vigorous exercise. The finding supports gradual progression and screening language.\n\n**Protocol takeaway:** Use this source only within its `claimUse: safety-only` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
       "categories": [
         "norwegian-4x4",
         "hiit",
@@ -10893,7 +11403,7 @@
         "populationLabel": "Adults considering moderate-to-vigorous or high-volume exercise"
       },
       "revision": {
-        "pageRevisionId": "sha256:80ca3343f8ba02d9c67df988b5264acb686bdb5c515484af6460f6282438b993",
+        "pageRevisionId": "sha256:add76511793b829891e7f8caa717b17ca9e27fd6c0a6ce82e5a4c15e5d596f1c",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -10981,6 +11491,193 @@
       "summary": "Smartphone study comparing software and spectacle strategies; blue-light-reducing spectacles reduced melatonin suppression, with coated lenses outperforming tinted lenses.",
       "title": "Evaluation of two strategies for alleviating the impact on sleep of evening smartphone use",
       "whyItMatters": "Supports separating lens spectral performance from generic “night mode” or tint labels."
+    },
+    {
+      "aliases": [
+        "Helamaa 1988 good loyly",
+        "Helamaa Aikas 1988 loyly"
+      ],
+      "body": "This source is included for classic Finnish sauna context.\n\n**Protocol takeaway:** it helps define the sauna-room experience behind the dry-sauna protocol, but it is not an efficacy trial.",
+      "categories": [
+        "sauna",
+        "classic-review",
+        "safety-physiology"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Acute and mechanistic",
+      "finnishDrySaunaFocus": "Yes",
+      "key": "source_artifact:pmid-3218892",
+      "modality": "Finnish dry sauna",
+      "murphV1Priority": "Medium",
+      "potentialMurphEndpoints": [
+        "modality definition",
+        "session context"
+      ],
+      "protocolTakeaway": "Use to keep the protocol tied to traditional Finnish dry sauna rather than generic heat exposure.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:dry-sauna",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/sauna/pmid-3218892.md",
+      "researchEvidence": {
+        "aggregateRole": "synthesis",
+        "aggregationNote": "Classic context source for sauna-room conditions and loyly, not a protocol efficacy study.",
+        "designKind": "narrative_review",
+        "designLabel": "Classic Finnish sauna environment review"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:49ca1e2c3dccfadd00abcf85ce55f488434aaa2dfb527b1b7a4bf384fef82ee1",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/sauna/pmid-3218892",
+      "source": {
+        "authors": "E Helamaa, E Aikas",
+        "citation": "Helamaa E, Aikas E. The secret of good 'loyly'. Ann Clin Res. 1988;20:224-229.",
+        "journal": "Annals of Clinical Research",
+        "kind": "journal_article",
+        "pmid": "3218892",
+        "title": "The secret of good 'loyly'",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/3218892/",
+        "year": 1988
+      },
+      "status": "draft",
+      "studyDesign": "Classic sauna environment review",
+      "summary": "Classic Finnish sauna paper on loyly, sauna-room conditions, and the practical heat-humidity experience of traditional sauna bathing.",
+      "title": "The secret of good 'loyly'",
+      "whyItMatters": "Adds a classic Finnish source for the practical definition of sauna heat, humidity, and loyly."
+    },
+    {
+      "aliases": [
+        "Leppaluoto 1988 sauna thermoregulation"
+      ],
+      "body": "This source is included for classic thermoregulation context.\n\n**Protocol takeaway:** it helps explain the acute heat load behind the protocol without converting physiology into guaranteed results.",
+      "categories": [
+        "sauna",
+        "classic-review",
+        "safety-physiology"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Acute and mechanistic",
+      "finnishDrySaunaFocus": "Yes",
+      "key": "source_artifact:pmid-3218894",
+      "modality": "Finnish dry sauna",
+      "murphV1Priority": "Medium",
+      "potentialMurphEndpoints": [
+        "heat-load mechanism",
+        "sweating and cooling context"
+      ],
+      "protocolTakeaway": "Use for mechanism framing and safety interpretation, not for promised wearable outcomes.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:dry-sauna",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/sauna/pmid-3218894.md",
+      "researchEvidence": {
+        "aggregateRole": "synthesis",
+        "aggregationNote": "Mechanism and safety context; not a direct efficacy estimate.",
+        "designKind": "narrative_review",
+        "designLabel": "Classic thermoregulation review"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:af90b30acfaca5a0df76d6cd5a4e1c7f46877021e83dc8f670f367799362fb6b",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/sauna/pmid-3218894",
+      "source": {
+        "authors": "J Leppaluoto",
+        "citation": "Leppaluoto J. Human thermoregulation in sauna. Ann Clin Res. 1988;20:240-243.",
+        "journal": "Annals of Clinical Research",
+        "kind": "review",
+        "pmid": "3218894",
+        "title": "Human thermoregulation in sauna",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/3218894/",
+        "year": 1988
+      },
+      "status": "draft",
+      "studyDesign": "Classic thermoregulation review",
+      "summary": "Classic Finnish sauna thermoregulation review used for heat-load, sweating, and core-temperature context.",
+      "title": "Human thermoregulation in sauna",
+      "whyItMatters": "Adds classic thermoregulation context for why heart rate, sweating, and cooling-down signals matter."
+    },
+    {
+      "aliases": [
+        "Ahonen Nousiainen 1988 sauna body fluid balance"
+      ],
+      "body": "This source is included for hydration and fluid-balance context.\n\n**Protocol takeaway:** it supports the protocol’s hydration and interpretation caveats.",
+      "categories": [
+        "sauna",
+        "classic-review",
+        "safety-physiology"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Acute and mechanistic",
+      "finnishDrySaunaFocus": "Yes",
+      "key": "source_artifact:pmid-3218897",
+      "modality": "Finnish dry sauna",
+      "murphV1Priority": "Medium",
+      "potentialMurphEndpoints": [
+        "hydration context",
+        "body-mass-loss caveat"
+      ],
+      "protocolTakeaway": "Treat weight change around sauna as fluid context, not a fat-loss result.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:dry-sauna",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/sauna/pmid-3218897.md",
+      "researchEvidence": {
+        "aggregateRole": "synthesis",
+        "aggregationNote": "Hydration and safety context; not an efficacy study.",
+        "designKind": "narrative_review",
+        "designLabel": "Classic body-fluid-balance review"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:981251533d6f6183eecd5cb5364440df04fbbc3eda3bda0c9da1837dea895ee5",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/sauna/pmid-3218897",
+      "source": {
+        "authors": "E Ahonen, U Nousiainen",
+        "citation": "Ahonen E, Nousiainen U. The sauna and body fluid balance. Ann Clin Res. 1988;20:257-261.",
+        "journal": "Annals of Clinical Research",
+        "kind": "review",
+        "pmid": "3218897",
+        "title": "The sauna and body fluid balance",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/3218897/",
+        "year": 1988
+      },
+      "status": "draft",
+      "studyDesign": "Classic body-fluid-balance review",
+      "summary": "Classic Finnish sauna review on fluid-balance effects, useful for hydration and body-mass-loss interpretation.",
+      "title": "The sauna and body fluid balance",
+      "whyItMatters": "Adds classic fluid-balance context for hydration instructions and weight-loss caveats."
     },
     {
       "body": "This source is included for **Bipolar adjacent variant**.\n\n**Why it matters:** Supports a clinician-guided bipolar variant but reinforces the need to keep mood-disorder safety separate.\n\n**Potential experiment signals:** sleep, circadian rhythm, bipolar symptoms\n\n**Protocol takeaway:** Do not generalize bipolar treatment protocols to a consumer self-experiment.",
@@ -11211,8 +11908,15 @@
         }
       ],
       "relativePath": "sources/sauna/pmid-32814462.md",
+      "researchEvidence": {
+        "aggregateRole": "synthesis",
+        "aggregationNote": "Includes mixed sauna-treatment studies and populations; use as synthesis, not Finnish dry-sauna-only evidence.",
+        "designKind": "meta_analysis",
+        "designLabel": "Meta-analysis of acute and short-term sauna treatment studies",
+        "includedStudyCount": 16
+      },
       "revision": {
-        "pageRevisionId": "sha256:e50ff9b5b2e801b11db71abc270a8ed46dc828ae69fb7c14a411775809f15aed",
+        "pageRevisionId": "sha256:7ebc3dd07e6237d31d4361bf354fab2dc8bc15a269270f67a54c8bfa960faae3",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -11220,7 +11924,8 @@
       "slug": "sources/sauna/pmid-32814462",
       "source": {
         "authors": "Z Li, et al",
-        "citation": "Z Li, et al. Acute and short-term efficacy of sauna treatment on cardiovascular function: A meta-analysis. Eur J Cardiovasc Nurs 2020.",
+        "citation": "Li Z, Jiang W, Chen Y, Wang G, Yan F, Zeng T, Fan H. Acute and short-term efficacy of sauna treatment on cardiovascular function: A meta-analysis. Eur J Cardiovasc Nurs. 2021;20:96-105. doi:10.1177/1474515120944584.",
+        "doi": "10.1177/1474515120944584",
         "journal": "Eur J Cardiovasc Nurs",
         "kind": "review",
         "pmid": "32814462",
@@ -11238,7 +11943,7 @@
       "aliases": [
         "pmid-32860412"
       ],
-      "body": "This source is included for **Safety and contraindications**.\n\n**Why it matters:** Backbone guideline for cardiovascular disease, exercise eligibility, and clinician-clearance boundaries.\n\n**Protocol takeaway:** Use this source only within its `claimUse: safety-only` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
+      "body": "This source is included for **Safety and contraindications**.\n\n**Why it matters:** Backbone guideline for cardiovascular disease, exercise eligibility, and clinician-clearance boundaries.\n\n**Findings:** The ESC guideline treats exercise as beneficial for many cardiovascular conditions but makes eligibility disease- and risk-specific. Higher-intensity exercise is appropriate only when clinical status, risk category, and progression support it. The finding keeps Norwegian 4x4 out of unsupervised self-experiment territory for users with cardiovascular disease.\n\n**Protocol takeaway:** Use this source only within its `claimUse: safety-only` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
       "categories": [
         "norwegian-4x4",
         "hiit",
@@ -11278,7 +11983,7 @@
         "populationLabel": "People with cardiovascular disease considering exercise or sport"
       },
       "revision": {
-        "pageRevisionId": "sha256:0b1db9a304d0b4e40a49376f2051bb03ff77128beb751d76ade50e4c66e55bd0",
+        "pageRevisionId": "sha256:d65fee295a65dde40eb1e4895c6cbb2a78e91807358c1e6d75af84a14eaafe99",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -11429,7 +12134,7 @@
       "aliases": [
         "pmid-33239350"
       ],
-      "body": "This source is included for **Public health context**.\n\n**Why it matters:** Public-health context showing vigorous aerobic exercise as one option within weekly activity guidance.\n\n**Protocol takeaway:** Use this source only within its `claimUse: context-only` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
+      "body": "This source is included for **Public health context**.\n\n**Why it matters:** Public-health context showing vigorous aerobic exercise as one option within weekly activity guidance.\n\n**Findings:** The WHO guideline recommends regular aerobic activity for adults and recognizes vigorous activity as one valid way to meet weekly targets. It also emphasizes reducing sedentary behavior and adapting activity to health status. The finding supports public-health context, not a specific 4x4 efficacy claim.\n\n**Protocol takeaway:** Use this source only within its `claimUse: context-only` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
       "categories": [
         "norwegian-4x4",
         "hiit",
@@ -11469,7 +12174,7 @@
         "populationLabel": "Children, adolescents, adults, older adults, pregnant/postpartum people, and people living with chronic conditions or disability"
       },
       "revision": {
-        "pageRevisionId": "sha256:3b809ea337ed1ad11b89f7b98d2c674231b3251d8112bf9a34397ca123720cf7",
+        "pageRevisionId": "sha256:a34100b6a4b7e088ae66af0d121ab96bec5aaabdf2226ef907244d5ae1132e8e",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -11555,7 +12260,7 @@
       "aliases": [
         "pmid-33560320"
       ],
-      "body": "This source is included for **Mixed and null clinical evidence**.\n\n**Why it matters:** HFpEF clinical trial showing no significant primary peak-VO2 advantage for HIIT over comparators.\n\n**Protocol takeaway:** Use this source only within its `claimUse: context-only` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
+      "body": "This source is included for **Mixed and null clinical evidence**.\n\n**Why it matters:** HFpEF clinical trial showing no significant primary peak-VO2 advantage for HIIT over comparators.\n\n**Findings:** The HFpEF randomized trial found no statistically significant, clinically meaningful advantage for HIIT or moderate training over guideline-based physical-activity advice on peak VO2. Short-term changes did not become strong group differences at 12 months. The finding argues against applying healthy-adult 4x4 claims to HFpEF treatment.\n\n**Protocol takeaway:** Use this source only within its `claimUse: context-only` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
       "categories": [
         "norwegian-4x4",
         "hiit",
@@ -11599,7 +12304,7 @@
         "populationLabel": "Heart failure patients with preserved ejection fraction"
       },
       "revision": {
-        "pageRevisionId": "sha256:f9954a0ff435b332ed54cca5efab41f035fb0b4fdfd714c9eb2c1e68d166282b",
+        "pageRevisionId": "sha256:51f450b5512eb426f5494b0586129d25197ada9daa7b5bd42c0add699633dc01",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -12788,7 +13493,7 @@
       "aliases": [
         "pmid-36314990"
       ],
-      "body": "This source is included for **Adjacent variants to split**.\n\n**Why it matters:** Athlete trial comparing 4x4-style intervals with sprint-interval training; supports not merging SIT with Norwegian 4x4.\n\n**Protocol takeaway:** Use this source only within its `claimUse: context-only` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
+      "body": "This source is included for **Adjacent variants to split**.\n\n**Why it matters:** Athlete trial comparing 4x4-style intervals with sprint-interval training; supports not merging SIT with Norwegian 4x4.\n\n**Findings:** The athlete trial compared aerobic high-intensity intervals with sprint-interval approaches in well-trained men. Aerobic intervals improved VO2max more than the sprint-interval comparators. The finding supports separating Norwegian-style aerobic intervals from supramaximal sprint protocols.\n\n**Protocol takeaway:** Use this source only within its `claimUse: context-only` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
       "categories": [
         "norwegian-4x4",
         "hiit",
@@ -12833,7 +13538,7 @@
         "populationLabel": "Aerobically well-trained men"
       },
       "revision": {
-        "pageRevisionId": "sha256:6527e01c1427d1e9bb64f265214201d1b365d033d675015a53cd964c0229a2b2",
+        "pageRevisionId": "sha256:a932e699fdc5f5a207f0bbe5dfe06fc6d57b63643d2b008f4e402b73799aca78",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -13235,7 +13940,7 @@
       "aliases": [
         "pmid-37608507"
       ],
-      "body": "This source is included for **Adjacent variants to split**.\n\n**Why it matters:** Female athlete comparison source supporting separation of 4x4 from supramaximal sprint-interval training.\n\n**Protocol takeaway:** Use this source only within its `claimUse: context-only` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
+      "body": "This source is included for **Adjacent variants to split**.\n\n**Why it matters:** Female athlete comparison source supporting separation of 4x4 from supramaximal sprint-interval training.\n\n**Findings:** The female athlete trial made the same interval-type distinction in well-trained women. Aerobic high-intensity intervals improved VO2max more than supramaximal sprint intervals. The finding supports a sex-inclusive variant split, not a new general-population safety claim.\n\n**Protocol takeaway:** Use this source only within its `claimUse: context-only` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
       "categories": [
         "norwegian-4x4",
         "hiit",
@@ -13280,7 +13985,7 @@
         "populationLabel": "Aerobically well-trained females"
       },
       "revision": {
-        "pageRevisionId": "sha256:364f3490a2521358d892e31e861b765f74f4700f4fe0e5d0efc6bd655eaeb958",
+        "pageRevisionId": "sha256:aef907d840c6ba01303c5ef7672f89345ac251fc6e65f5eb668a85c5f9e58125",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -13728,7 +14433,7 @@
         "designLabel": "Comprehensive passive-heat review"
       },
       "revision": {
-        "pageRevisionId": "sha256:ec767da253618eb162887cb9f47822c0e9781aac49402fe664d61f6d1636414d",
+        "pageRevisionId": "sha256:0fd837c7d76449530a9a118dc46f8dad1b143bc940d73d58176da3570ff55a32",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -13737,6 +14442,7 @@
       "source": {
         "authors": "JA Laukkanen, SK Kunutsor",
         "citation": "JA Laukkanen, SK Kunutsor. The multifaceted benefits of passive heat therapies for extending the healthspan: A comprehensive review with a focus on Finnish sauna. Temperature (Austin) 2024.",
+        "doi": "10.1080/23328940.2023.2300623",
         "journal": "Temperature (Austin)",
         "kind": "review",
         "pmid": "38577299",
@@ -13752,9 +14458,74 @@
     },
     {
       "aliases": [
+        "Kunutsor 2024 sauna cardiorespiratory fitness"
+      ],
+      "body": "This source is included for long-term Finnish cohort context.\n\n**Protocol takeaway:** it belongs in rationale and future fitness-context discussions, not in the near-term wearable result promise for the first dry-sauna protocol.",
+      "categories": [
+        "sauna",
+        "observational-cohort",
+        "cardiorespiratory-fitness"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Long-term Finnish cohort evidence",
+      "finnishDrySaunaFocus": "Yes",
+      "key": "source_artifact:pmid-38836690",
+      "modality": "Finnish dry sauna",
+      "murphV1Priority": "High",
+      "potentialMurphEndpoints": [
+        "education / rationale only",
+        "future VO2max context"
+      ],
+      "protocolTakeaway": "Use as long-term context; a 21-day dry-sauna experiment should not promise improved fitness.",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "type": "related_protocol"
+        },
+        {
+          "target": "experiment_family:dry-sauna",
+          "type": "parent_family"
+        }
+      ],
+      "relativePath": "sources/sauna/pmid-38836690.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "kihd-men-cardiorespiratory-fitness",
+        "designKind": "prospective_cohort",
+        "designLabel": "Prospective cohort fitness association study",
+        "durationLabel": "Cross-sectional and longitudinal cardiorespiratory-fitness analyses",
+        "populationLabel": "KIHD Finnish men"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:8c52555ad3e7ddd5369514406abaf06043ef5ce87407eabfd0247a895bbe59c8",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/sauna/pmid-38836690",
+      "source": {
+        "authors": "SK Kunutsor, NM Isiozor, S Kurl, JA Laukkanen",
+        "citation": "Kunutsor SK, Isiozor NM, Kurl S, Laukkanen JA. Enhancing Cardiorespiratory Fitness Through Sauna Bathing: Insights From the Kuopio Ischemic Heart Disease Prospective Study. J Cardiopulm Rehabil Prev. 2024;44:295-300. doi:10.1097/HCR.0000000000000876.",
+        "doi": "10.1097/HCR.0000000000000876",
+        "journal": "Journal of Cardiopulmonary Rehabilitation and Prevention",
+        "kind": "journal_article",
+        "pmid": "38836690",
+        "title": "Enhancing Cardiorespiratory Fitness Through Sauna Bathing: Insights From the Kuopio Ischemic Heart Disease Prospective Study",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/38836690/",
+        "year": 2024
+      },
+      "status": "draft",
+      "studyDesign": "Prospective cohort",
+      "summary": "KIHD study evaluating cross-sectional and longitudinal associations between sauna frequency or duration and cardiorespiratory fitness.",
+      "title": "Enhancing Cardiorespiratory Fitness Through Sauna Bathing: Insights From the Kuopio Ischemic Heart Disease Prospective Study",
+      "whyItMatters": "Adds cardiorespiratory-fitness context to the KIHD sauna evidence base without turning sauna into an exercise substitute."
+    },
+    {
+      "aliases": [
         "pmid-39256000"
       ],
-      "body": "This source is included for **Adjacent variants to split**.\n\n**Why it matters:** Recent metabolic-syndrome HIIT synthesis; useful to separate metabolic HIIT and low-volume variants from standard 4x4.\n\n**Protocol takeaway:** Use this source only within its `claimUse: context-only` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
+      "body": "This source is included for **Adjacent variants to split**.\n\n**Why it matters:** Recent metabolic-syndrome HIIT synthesis; useful to separate metabolic HIIT and low-volume variants from standard 4x4.\n\n**Findings:** The review found HIIT can improve cardiometabolic outcomes in metabolic-syndrome populations compared with control or moderate-training comparators. The included protocols and populations were broader than Norwegian 4x4. The finding supports adjacent metabolic-HIIT context while keeping the standard 4x4 protocol separate.\n\n**Protocol takeaway:** Use this source only within its `claimUse: context-only` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
       "categories": [
         "norwegian-4x4",
         "hiit",
@@ -13797,7 +14568,7 @@
         "populationLabel": "Adults with metabolic syndrome"
       },
       "revision": {
-        "pageRevisionId": "sha256:5098c874b0b1fe88d0c7d7ebdda07832a90345a48251ab11c03b8c0c95ab36c5",
+        "pageRevisionId": "sha256:834c571d95f376a4de878a7f97b4aa2d6ba334703f0ce07f1060252baf6db403",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -14230,8 +15001,14 @@
         }
       ],
       "relativePath": "sources/sauna/pmid-41032138.md",
+      "researchEvidence": {
+        "aggregateRole": "synthesis",
+        "aggregationNote": "Post-exercise heat exposure review; not standalone Finnish sauna only.",
+        "designKind": "systematic_review",
+        "designLabel": "Systematic review of post-exercise heat exposure"
+      },
       "revision": {
-        "pageRevisionId": "sha256:49f997f6aa7051a92767f01be3abcc88967581f160073240bb43f44451b1b03b",
+        "pageRevisionId": "sha256:26e89d900b147cdfa1e2ae9c677d21bd8d3309f0f0c75efbf9eda0529004d21c",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -15257,7 +16034,7 @@
       "whyItMatters": "Structured curation artifact used to turn discovery and gap-fill passes into a bounded protocol."
     },
     {
-      "body": "This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.\n\n**Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a general / mixed record marked medium priority for Murph v1 interpretation.\n\n**Potential Murph endpoints/context:** supporting corpus context\n\n**Protocol takeaway:** Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes.\n\nThe workbook linked this record through a review or bibliography backbone rather than a direct article page. Keep it in the corpus, but do not show a potentially misleading outbound source link in the product UI.",
+      "body": "This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.\n\n**Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a general / mixed record marked medium priority for Murph v1 interpretation.\n\n**Potential Murph endpoints/context:** supporting corpus context\n\n**Protocol takeaway:** Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes.\n\nDirect PubMed metadata is now attached so the source card can point to the actual review record rather than a secondary bibliography row.",
       "categories": [
         "sauna",
         "review",
@@ -15291,7 +16068,7 @@
         "designLabel": "Narrative review"
       },
       "revision": {
-        "pageRevisionId": "sha256:0349d2bf44ca3455d8e5ee45cd29ed3053e27e299c8a2ebf73f4dbf1594350b3",
+        "pageRevisionId": "sha256:356919cfffd9fb385f67dafb56fbfb541847662d39866213ad638e6cee8ecd64",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -15302,10 +16079,11 @@
         "citation": "Kauppinen K, Vuori I. Man in the sauna. Review article. Ann Clin Res 1986;18:173-185.",
         "journal": "Ann Clin Res",
         "kind": "review",
+        "pmid": "3538994",
         "title": "Man in the sauna. Review article",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/3538994/",
         "year": 1986
       },
-      "sourceUrlCurationNote": "Workbook source URL points to a bibliography or review backbone rather than a direct article landing page, so the public source link is intentionally omitted from the app card.",
       "status": "draft",
       "studyDesign": "Review / meta",
       "summary": "This narrative review synthesizes classic Finnish sauna physiology, risks, and practical claims. The main finding is a broad context map: sauna produces meaningful heat stress, cardiovascular, thermal, fluid, and endocrine responses, but the evidence is mixed by outcome. For Murph, it is background for rationale and guardrails, not a short-term wearable endpoint.",
@@ -15370,10 +16148,10 @@
       "whyItMatters": "Expands the audited Finnish dry-sauna evidence corpus with a cardiovascular record marked high priority for Murph v1 interpretation."
     },
     {
-      "body": "This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.\n\n**Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a safety / physiology record marked lower priority for Murph v1 interpretation.\n\n**Potential Murph endpoints/context:** safety screening, session tolerance\n\n**Protocol takeaway:** Use for safety screening and session-context interpretation rather than efficacy claims.\n\nThe workbook linked this record through a review or bibliography backbone rather than a direct article page. Keep it in the corpus, but do not show a potentially misleading outbound source link in the product UI.",
+      "body": "This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.\n\n**Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a safety / physiology record marked lower priority for Murph v1 interpretation.\n\n**Potential Murph endpoints/context:** safety screening, session tolerance\n\n**Protocol takeaway:** Use for safety screening and session-context interpretation rather than efficacy claims.\n\nDirect PubMed metadata is now attached so the source card can point to the actual endocrine-system review record rather than a secondary bibliography row.",
       "categories": [
         "sauna",
-        "study",
+        "review",
         "safety-physiology"
       ],
       "entityType": "source_artifact",
@@ -15405,7 +16183,7 @@
         "designLabel": "Narrative physiology review"
       },
       "revision": {
-        "pageRevisionId": "sha256:70798da2d014f6e56728d6038231e39518d31a1c78bc543f33a04e4bfd8c3f8f",
+        "pageRevisionId": "sha256:e8db37c7f530491df8fc51bcfadd83334368ec05c19ea4d7e9ac86685d6ed093",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -15415,13 +16193,14 @@
         "authors": "Kukkonen-Harjula K, Kauppinen K",
         "citation": "Kukkonen-Harjula K, Kauppinen K. How the sauna affects the endocrine system. Ann Clin Res 1988;20:262-266.",
         "journal": "Ann Clin Res",
-        "kind": "journal_article",
+        "kind": "review",
+        "pmid": "3218898",
         "title": "How the sauna affects the endocrine system",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/3218898/",
         "year": 1988
       },
-      "sourceUrlCurationNote": "Workbook source URL points to a bibliography or review backbone rather than a direct article landing page, so the public source link is intentionally omitted from the app card.",
       "status": "draft",
-      "studyDesign": "Primary study / unclear",
+      "studyDesign": "Narrative physiology review",
       "summary": "This narrative physiology review summarizes how sauna bathing affects endocrine regulation. The main finding is that heat exposure can activate hormonal stress and recovery pathways, with context-dependent effects. For Murph, it is a mechanism and safety source rather than a result-card endpoint.",
       "title": "How the sauna affects the endocrine system",
       "whyItMatters": "Expands the audited Finnish dry-sauna evidence corpus with a safety / physiology record marked lower priority for Murph v1 interpretation."
@@ -15739,7 +16518,7 @@
       "whyItMatters": "Expands the audited Finnish dry-sauna evidence corpus with a safety / physiology record marked lower priority for Murph v1 interpretation."
     },
     {
-      "body": "This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.\n\n**Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a general / mixed record marked medium priority for Murph v1 interpretation.\n\n**Potential Murph endpoints/context:** safety screening, session tolerance, illness and respiratory context\n\n**Protocol takeaway:** Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes.\n\nThe workbook linked this record through a review or bibliography backbone rather than a direct article page. Keep it in the corpus, but do not show a potentially misleading outbound source link in the product UI.",
+      "body": "This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.\n\n**Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a general / mixed record marked medium priority for Murph v1 interpretation.\n\n**Potential Murph endpoints/context:** safety screening, session tolerance, illness and respiratory context\n\n**Protocol takeaway:** Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes.\n\nDirect PubMed and DOI metadata are now attached so the source card can point to the actual physiology paper rather than a secondary bibliography row.",
       "categories": [
         "sauna",
         "study",
@@ -15775,12 +16554,12 @@
         "designKind": "acute_mechanistic",
         "designLabel": "Hemodynamic/hormonal physiology study",
         "durationLabel": "Acute sauna heat exposure",
-        "participantCount": 10,
-        "participantCountKind": "approximate",
-        "populationLabel": "Healthy adult volunteers"
+        "participantCount": 8,
+        "participantCountKind": "reported",
+        "populationLabel": "Healthy young men"
       },
       "revision": {
-        "pageRevisionId": "sha256:ba4fb0495068d5ffe55965eb1daa07fc8c4f0d715b137697825fd3b57629e7a9",
+        "pageRevisionId": "sha256:5ee3e279af515fdf24f04fb4b58ad5f75f5e9fac5dc87430bea501479018816e",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -15788,13 +16567,15 @@
       "slug": "sources/sauna/sauna-1989-kukkonen-harjula-haemodynamic-and-hormonal-responses-to-heat-exposure-in-a",
       "source": {
         "authors": "Kukkonen-Harjula K, Oja P, Laustiola K et al",
-        "citation": "Kukkonen-Harjula K, Oja P, Laustiola K et al. Haemodynamic and hormonal responses to heat exposure in a Finnish sauna bath. Eur J Appl Physiol 1989;58:543-550.",
+        "citation": "Kukkonen-Harjula K, Oja P, Laustiola K et al. Haemodynamic and hormonal responses to heat exposure in a Finnish sauna bath. Eur J Appl Physiol 1989;58:543-550. doi:10.1007/BF02330710.",
+        "doi": "10.1007/BF02330710",
         "journal": "Eur J Appl Physiol",
         "kind": "journal_article",
+        "pmid": "2759081",
         "title": "Haemodynamic and hormonal responses to heat exposure in a Finnish sauna bath",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/2759081/",
         "year": 1989
       },
-      "sourceUrlCurationNote": "Workbook source URL points to a bibliography or review backbone rather than a direct article landing page, so the public source link is intentionally omitted from the app card.",
       "status": "draft",
       "studyDesign": "Experimental physiology",
       "summary": "This acute Finnish-sauna study measured haemodynamic and hormonal responses in healthy adults. The main finding is that a sauna bath creates measurable cardiovascular and hormonal stress, even in healthy volunteers. For Murph, it supports symptom screening, BP/RHR context, and conservative dose design.",
@@ -16240,7 +17021,7 @@
       "whyItMatters": "Expands the audited Finnish dry-sauna evidence corpus with a safety / physiology record marked medium priority for Murph v1 interpretation."
     },
     {
-      "body": "This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.\n\n**Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a general / mixed record marked medium priority for Murph v1 interpretation.\n\n**Potential Murph endpoints/context:** supporting corpus context\n\n**Protocol takeaway:** Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes.\n\nThe workbook linked this record through a review or bibliography backbone rather than a direct article page. Keep it in the corpus, but do not show a potentially misleading outbound source link in the product UI.",
+      "body": "This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.\n\n**Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a general / mixed record marked medium priority for Murph v1 interpretation.\n\n**Potential Murph endpoints/context:** supporting corpus context\n\n**Protocol takeaway:** Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes.\n\nDirect PubMed metadata is now attached so the source card can point to the actual review record rather than a secondary bibliography row.",
       "categories": [
         "sauna",
         "review",
@@ -16274,7 +17055,7 @@
         "designLabel": "Narrative review"
       },
       "revision": {
-        "pageRevisionId": "sha256:83366605e74d8b951d6b0be3c3379692dc086e85fcf591b3a4d1472813bb6909",
+        "pageRevisionId": "sha256:ee8296da1fe129f168e1aebedb66bdf25642bc191e81925dccdfb44c90ea2693",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -16285,10 +17066,11 @@
         "citation": "Kauppinen K. Facts and fables about sauna. Ann N Y Acad Sci 1997;813:654-662.",
         "journal": "Ann N Y Acad Sci",
         "kind": "review",
+        "pmid": "9100952",
         "title": "Facts and fables about sauna",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/9100952/",
         "year": 1997
       },
-      "sourceUrlCurationNote": "Workbook source URL points to a bibliography or review backbone rather than a direct article landing page, so the public source link is intentionally omitted from the app card.",
       "status": "draft",
       "studyDesign": "Review / meta",
       "summary": "This narrative review separates common sauna claims from better-supported physiology and safety observations. The main finding is that sauna has plausible benefits and real risks, but many popular claims need careful framing. For Murph, it supports plain-language guardrails and avoids overclaiming.",
@@ -16552,7 +17334,7 @@
         "source_artifact:pmid-32814462",
         "source_artifact:pmid-38577299"
       ],
-      "body": "## What this is\n\nThis page represents the structured sauna research corpus behind the Finnish dry-sauna experiment. It is a curation artifact, not a primary study.\n\n## Corpus at a glance\n\n- 180 master bibliography records\n- 81 records in the Finnish dry-sauna yes/likely subset\n- 32 review or meta-analysis records\n- 40 papers on the curated source list\n- 24 high-priority records for the first dry-sauna experiment\n- publication window 1978–2026\n- audit cutoff 2026-04-18\n- 81 Finnish dry-sauna yes/likely records now materialized as source pages and linked to the canonical protocol\n\n## Supplemental 2026-04-21 review\n\nA follow-up source pass added ten targeted records for gaps that matter when comparing high-burden sauna routines against the broader evidence graph:\n\n- male fertility and heat-safety guardrails: Garolla 2013 and Saikhun 1998\n- acute dose, core-temperature, and extreme-heat safety context: Zalewski 2014 and Podstawski 2024\n- acute vascular context: Gravel 2021\n- mixed or cautious passive-heat syntheses: Hamaya 2025 and Solomon 2025\n- public mechanism synthesis: Patrick and Johnson 2021\n- sweat, minerals, and detox-claim calibration: Hoshi 2001 and Sears 2012\n\nThe 2026-04-18 corpus counts above are preserved as the original audit snapshot. These supplemental records are tracked separately so the data does not pretend that the whole 180-record workbook was re-audited.\n\nThe Bryan Johnson protocol page intentionally remains source-attributed to Bryan Johnson / Blueprint posts and mirrors. These broader papers belong to the dry-sauna and parent sauna evidence graph, not to Bryan Johnson's protocol-specific research cards.\n\n## Source groups\n\n- Evidence backbone: 5\n- Long-term Finnish cohort evidence: 14\n- Acute and mechanistic: 8\n- Intervention design / reality checks: 13\n\n## How to use this evidence\n\nUse this page to understand how deep the sauna research base is, which evidence buckets are strongest for protocol design, and why the Finnish dry-sauna experiment separates long-term context from short-term measurable signals.\n\n- The **evidence backbone** papers help define the overall research base and safety framing.\n- The **long-term Finnish cohort** papers are rationale and screening context, not 21-day signals.\n- The **acute and mechanistic** papers help pick measurable session and near-term signals.\n- The **intervention design / reality checks** papers stop the protocol from overclaiming and help define how to standardize timing, hydration, exercise context, and expected latency.\n\n## Important caution\n\nThis page is not itself evidence that a sauna protocol works. It is the map used to build a bounded, user-readable protocol from the underlying literature.",
+      "body": "## What this is\n\nThis page represents the structured sauna research corpus behind the Finnish dry-sauna experiment. It is a curation artifact, not a primary study.\n\n## Corpus at a glance\n\n- 180 master bibliography records\n- 81 records in the Finnish dry-sauna yes/likely subset\n- 32 review or meta-analysis records\n- 40 papers on the curated source list\n- 24 high-priority records for the first dry-sauna experiment\n- publication window 1978–2026\n- audit cutoff 2026-04-18\n- 81 Finnish dry-sauna yes/likely records now materialized as source pages and linked to the canonical protocol\n\n## Supplemental 2026-04-21 review\n\nA follow-up source pass added nineteen targeted records for gaps that matter when comparing high-burden sauna routines against the broader evidence graph:\n\n- male fertility and heat-safety guardrails: Garolla 2013 and Saikhun 1998\n- acute dose, core-temperature, and extreme-heat safety context: Zalewski 2014 and Podstawski 2024\n- acute vascular context: Gravel 2019 and Gravel 2021\n- mixed or cautious passive-heat syntheses: Hamaya 2025 and Solomon 2025\n- public mechanism synthesis: Patrick and Johnson 2021\n- sweat, minerals, and detox-claim calibration: Hoshi 2001 and Sears 2012\n- corrected Finnish stroke and cardiorespiratory-fitness cohort context: Kunutsor 2018 and Kunutsor 2024\n- post-exercise, repeated-dose, and dry-vs-steam context: Sutkowy 2014, Podstawski 2019, and Pilch 2014\n- classic Finnish löyly, thermoregulation, and body-fluid-balance context: Helamaa 1988, Leppäluoto 1988, and Ahonen 1988\n\nThe 2026-04-18 corpus counts above are preserved as the original audit snapshot. These supplemental records are tracked separately so the data does not pretend that the whole workbook was re-audited.\n\nThe Bryan Johnson protocol page intentionally remains source-attributed to Bryan Johnson / Blueprint posts and mirrors. These broader papers belong to the dry-sauna and parent sauna evidence graph, not to Bryan Johnson's protocol-specific research cards.\n\n## Source groups\n\n- Evidence backbone: 5\n- Long-term Finnish cohort evidence: 14\n- Acute and mechanistic: 8\n- Intervention design / reality checks: 13\n\n## How to use this evidence\n\nUse this page to understand how deep the sauna research base is, which evidence buckets are strongest for protocol design, and why the Finnish dry-sauna experiment separates long-term context from short-term measurable signals.\n\n- The **evidence backbone** papers help define the overall research base and safety framing.\n- The **long-term Finnish cohort** papers are rationale and screening context, not 21-day signals; the stroke cohort should now point to PMID 29720543 rather than the reader-response PMID 30665914.\n- The **acute and mechanistic** papers help pick measurable session and near-term signals.\n- The **intervention design / reality checks** papers stop the protocol from overclaiming and help define how to standardize timing, hydration, exercise context, and expected latency.\n\n## Important caution\n\nThis page is not itself evidence that a sauna protocol works. It is the map used to build a bounded, user-readable protocol from the underlying literature.",
       "categories": [
         "sauna"
       ],
@@ -16663,7 +17445,7 @@
         "source_artifact:pmid-30173212",
         "source_artifact:pmid-30486813",
         "source_artifact:pmid-31126559",
-        "source_artifact:pmid-30665914",
+        "source_artifact:pmid-29720543",
         "source_artifact:pmid-31372865",
         "source_artifact:pmid-31102597",
         "source_artifact:pmid-31331560",
@@ -16784,6 +17566,42 @@
         {
           "target": "source_artifact:pmid-22505948",
           "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-29720543",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-31293098",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-38836690",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-24304490",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-30800676",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-24899780",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-3218892",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-3218894",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-3218897",
+          "type": "cites"
         }
       ],
       "relativePath": "sources/sauna/sauna-bibliography-2026-04-18.md",
@@ -16794,7 +17612,7 @@
         "designLabel": "Bibliography"
       },
       "revision": {
-        "pageRevisionId": "sha256:6309c754ffd21bdd2f2c9dfd36613d148a1b99dbe53537078fccdf490645f0de",
+        "pageRevisionId": "sha256:3602bd6bba71b8feabae056c63a3157508ff8c661865b1db18d0ac7a8017e9c5",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -16813,7 +17631,7 @@
         "source_artifact:pmid-28972808",
         "source_artifact:pmid-29897261",
         "source_artifact:pmid-30486813",
-        "source_artifact:pmid-30665914",
+        "source_artifact:pmid-29720543",
         "source_artifact:pmid-31372865",
         "source_artifact:pmid-35908583",
         "source_artifact:pmid-36255556",
@@ -16854,13 +17672,17 @@
       "studyDesign": "Research bibliography / curation artifact",
       "summary": "Research map for the Finnish dry-sauna experiment, summarizing the sauna literature review, long-term context, short-term physiology, and dose-design caveats.",
       "supplementalReview": {
-        "addedSourceCount": 10,
+        "addedSourceCount": 19,
         "bucketCounts": {
           "acuteThermalDoseAndSafety": 2,
-          "acuteVascularPhysiology": 1,
+          "acuteVascularPhysiology": 2,
+          "classicFinnishPhysiologyAndFluidBalance": 3,
+          "dryVsSteamModalityContext": 1,
           "explanatoryBackboneReview": 1,
           "fertilityAndMaleHeatSafety": 2,
           "passiveHeatSynthesis": 2,
+          "postExerciseAndBodyCompositionContext": 2,
+          "strokeAndFitnessCohortContext": 2,
           "sweatAndDetoxClaimCaveats": 2
         },
         "finnishDrySaunaOrLikelySourceKeys": [
@@ -16870,10 +17692,19 @@
           "source_artifact:pmid-38344040",
           "source_artifact:pmid-32615263",
           "source_artifact:pmid-34363927",
-          "source_artifact:pmid-11874249"
+          "source_artifact:pmid-11874249",
+          "source_artifact:pmid-29720543",
+          "source_artifact:pmid-31293098",
+          "source_artifact:pmid-38836690",
+          "source_artifact:pmid-24304490",
+          "source_artifact:pmid-30800676",
+          "source_artifact:pmid-24899780",
+          "source_artifact:pmid-3218892",
+          "source_artifact:pmid-3218894",
+          "source_artifact:pmid-3218897"
         ],
         "reviewedAt": "2026-04-21",
-        "scopeNote": "Broader sauna literature additions are held on the sauna and dry-sauna evidence graph; the Bryan Johnson protocol page remains source-attributed to Bryan Johnson / Blueprint posts and mirrors.",
+        "scopeNote": "Broader sauna literature additions and corrected Finnish dry-sauna citation records are held on the sauna and dry-sauna evidence graph; the Bryan Johnson protocol page remains source-attributed to Bryan Johnson / Blueprint posts and mirrors.",
         "sourceKeys": [
           "source_artifact:pmid-23411620",
           "source_artifact:pmid-9972494",
@@ -16884,7 +17715,16 @@
           "source_artifact:pmid-39762944",
           "source_artifact:pmid-34363927",
           "source_artifact:pmid-11874249",
-          "source_artifact:pmid-22505948"
+          "source_artifact:pmid-22505948",
+          "source_artifact:pmid-29720543",
+          "source_artifact:pmid-31293098",
+          "source_artifact:pmid-38836690",
+          "source_artifact:pmid-24304490",
+          "source_artifact:pmid-30800676",
+          "source_artifact:pmid-24899780",
+          "source_artifact:pmid-3218892",
+          "source_artifact:pmid-3218894",
+          "source_artifact:pmid-3218897"
         ]
       },
       "title": "Sauna research bibliography",
