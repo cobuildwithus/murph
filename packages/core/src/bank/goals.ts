@@ -243,13 +243,15 @@ function parseGoalStoredDocument(
   markdown: string,
 ): GoalStoredDocument {
   const parsed = parseGoalFrontmatter(attributes);
-  requireMatchingDocType(
-    parsed as unknown as FrontmatterObject,
-    GOAL_SCHEMA_VERSION,
-    GOAL_DOC_TYPE,
-    "VAULT_INVALID_GOAL",
-    "Goal registry document has an unexpected shape.",
-  );
+  if (
+    parsed.schemaVersion !== GOAL_SCHEMA_VERSION ||
+    parsed.docType !== GOAL_DOC_TYPE
+  ) {
+    throw new VaultError(
+      "VAULT_INVALID_GOAL",
+      "Goal registry document has an unexpected shape.",
+    );
+  }
   const links = parseGoalLinks(attributes, parsed.goalId);
   const relations = canonicalizeGoalRelations({
     goalId: parsed.goalId,

@@ -159,13 +159,15 @@ function parseAllergyRecord(
   markdown: string,
 ): AllergyStoredDocument {
   const parsed = parseAllergyFrontmatter(attributes);
-  requireMatchingDocType(
-    parsed as unknown as FrontmatterObject,
-    ALLERGY_SCHEMA_VERSION,
-    ALLERGY_DOC_TYPE,
-    "VAULT_INVALID_ALLERGY",
-    "Allergy registry document has an unexpected shape.",
-  );
+  if (
+    parsed.schemaVersion !== ALLERGY_SCHEMA_VERSION ||
+    parsed.docType !== ALLERGY_DOC_TYPE
+  ) {
+    throw new VaultError(
+      "VAULT_INVALID_ALLERGY",
+      "Allergy registry document has an unexpected shape.",
+    );
+  }
   const relations = canonicalizeAllergyRelations({
     links: parseAllergyLinks(attributes),
   });

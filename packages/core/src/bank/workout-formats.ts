@@ -199,7 +199,8 @@ function parseWorkoutFormatRecord(
 function buildAttributes(
   record: WorkoutFormatFrontmatter | WorkoutFormatRecord,
 ): FrontmatterObject {
-  return validateContract(
+  return {
+    ...validateContract(
     workoutFormatFrontmatterSchema,
     stripUndefined({
       schemaVersion: WORKOUT_FORMAT_SCHEMA_VERSION,
@@ -219,7 +220,8 @@ function buildAttributes(
     }),
     "VAULT_INVALID_INPUT",
     "Workout format payload is invalid.",
-  ) as unknown as FrontmatterObject;
+    ),
+  };
 }
 
 const workoutFormatRegistryApi = createMarkdownRegistryApi<WorkoutFormatRecord>({

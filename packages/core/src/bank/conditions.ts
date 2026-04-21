@@ -186,13 +186,15 @@ function parseConditionRecord(
   markdown: string,
 ): ConditionStoredDocument {
   const parsed = parseConditionFrontmatter(attributes);
-  requireMatchingDocType(
-    parsed as unknown as FrontmatterObject,
-    CONDITION_SCHEMA_VERSION,
-    CONDITION_DOC_TYPE,
-    "VAULT_INVALID_CONDITION",
-    "Condition registry document has an unexpected shape.",
-  );
+  if (
+    parsed.schemaVersion !== CONDITION_SCHEMA_VERSION ||
+    parsed.docType !== CONDITION_DOC_TYPE
+  ) {
+    throw new VaultError(
+      "VAULT_INVALID_CONDITION",
+      "Condition registry document has an unexpected shape.",
+    );
+  }
   const relations = canonicalizeConditionRelations({
     links: parseConditionLinks(attributes),
   });

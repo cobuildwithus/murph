@@ -52,6 +52,10 @@ async function makeTempDirectory(name: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), `${name}-`));
 }
 
+function invalidTestValue<T>(value: unknown): T {
+  return value as T;
+}
+
 function selectAuditMetadata(records: unknown[], action: string): Array<{
   action: string | undefined;
   commandName: string | undefined;
@@ -1215,7 +1219,7 @@ test("food and recipe text-list normalization preserves validation messages and 
       upsertFood({
         vaultRoot,
         title: "Broken Food",
-        aliases: "usual smoothie" as unknown as string[],
+        aliases: invalidTestValue<string[]>("usual smoothie"),
       }),
     (error: unknown) =>
       error instanceof VaultError &&
@@ -1254,7 +1258,7 @@ test("food and recipe text-list normalization preserves validation messages and 
       upsertRecipe({
         vaultRoot,
         title: "Broken Recipe",
-        steps: "Mix everything." as unknown as string[],
+        steps: invalidTestValue<string[]>("Mix everything."),
       }),
     (error: unknown) =>
       error instanceof VaultError &&
@@ -1292,7 +1296,7 @@ test("food and recipe text-list normalization preserves validation messages and 
     vaultRoot,
     foodId: createdFood.record.foodId,
     title: createdFood.record.title,
-    aliases: null as unknown as string[] | undefined,
+    aliases: invalidTestValue<string[] | undefined>(null),
     ingredients: [] as string[],
   });
   await upsertRecipe({
@@ -1300,7 +1304,7 @@ test("food and recipe text-list normalization preserves validation messages and 
     recipeId: createdRecipe.record.recipeId,
     title: createdRecipe.record.title,
     ingredients: [] as string[],
-    steps: null as unknown as string[] | undefined,
+    steps: invalidTestValue<string[] | undefined>(null),
   });
 
   const clearedFood = await readFood({

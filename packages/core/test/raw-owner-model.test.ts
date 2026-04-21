@@ -346,7 +346,7 @@ describe("raw owner model", () => {
 
     await expect(
       readFile(resolveVaultPath(vaultRoot, manifestPath).absolutePath, "utf8").then((manifestText) =>
-        parseRawImportManifest(JSON.parse(manifestText) as unknown),
+        parseRawImportManifest(JSON.parse(manifestText)),
       ),
     ).rejects.toThrow();
     const result = await validateVault({ vaultRoot });

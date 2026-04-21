@@ -52,6 +52,10 @@ async function readDeviceImportManifest(
   return JSON.parse(await fs.readFile(path.join(vaultRoot, relativePath), "utf8")) as DeviceImportManifest;
 }
 
+function invalidTestValue<T>(value: unknown): T {
+  return value as T;
+}
+
 test("importDeviceBatch writes inline raw integration payloads and canonical records", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-import");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
@@ -666,7 +670,7 @@ test("importDeviceBatch rejects unsupported event kinds and invalid event fields
             kind: "note",
             occurredAt: "2026-03-16T07:30:00.000Z",
             note: "bad fields",
-            fields: "not-an-object" as unknown as Record<string, unknown>,
+            fields: invalidTestValue<Record<string, unknown>>("not-an-object"),
           },
         ],
       }),
@@ -686,7 +690,7 @@ test("importDeviceBatch rejects unsupported sample streams and missing sample pa
         provider: "whoop",
         samples: [
           {
-            stream: "oxygen" as unknown as "hrv",
+            stream: invalidTestValue<"hrv">("oxygen"),
             unit: "%",
             sample: {
               recordedAt: "2026-03-16T07:30:00.000Z",
@@ -708,7 +712,7 @@ test("importDeviceBatch rejects unsupported sample streams and missing sample pa
           {
             stream: "hrv",
             unit: "ms",
-            sample: null as unknown as Record<string, unknown>,
+            sample: invalidTestValue<Record<string, unknown>>(null),
           },
         ],
       }),
@@ -759,7 +763,7 @@ test("importDeviceBatch validates canonical payloads before raw artifact errors"
         rawArtifacts: [
           {
             content: { payload: true },
-            metadata: "bad" as unknown as Record<string, unknown>,
+            metadata: invalidTestValue<Record<string, unknown>>("bad"),
           },
         ],
       }),
@@ -817,7 +821,7 @@ test("importDeviceBatch rejects invalid provenance, raw metadata, and empty raw 
       importDeviceBatch({
         vaultRoot,
         provider: "whoop",
-        provenance: "not-an-object" as unknown as Record<string, unknown>,
+        provenance: invalidTestValue<Record<string, unknown>>("not-an-object"),
         rawArtifacts: [
           { content: { payload: true } },
         ],
@@ -834,7 +838,7 @@ test("importDeviceBatch rejects invalid provenance, raw metadata, and empty raw 
         rawArtifacts: [
           {
             content: { payload: true },
-            metadata: "bad" as unknown as Record<string, unknown>,
+            metadata: invalidTestValue<Record<string, unknown>>("bad"),
           },
         ],
       }),
@@ -849,7 +853,7 @@ test("importDeviceBatch rejects invalid provenance, raw metadata, and empty raw 
         provider: "whoop",
         rawArtifacts: [
           {
-            content: undefined as unknown as string,
+            content: invalidTestValue<string>(undefined),
           },
         ],
       }),
