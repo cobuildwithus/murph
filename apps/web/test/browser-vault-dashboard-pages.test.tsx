@@ -58,15 +58,37 @@ test("HistoryPage renders recent timeline entries", () => {
   assert.doesNotMatch(markup, /history\/sample\/sample_1\.md/);
 });
 
-test("ExperimentsPage renders tracked experiments", () => {
+test("ExperimentsPage renders the public library with private browser-vault overlays", () => {
   const markup = renderToStaticMarkup(createElement(ExperimentsPage));
 
-  assert.match(markup, /tracked experiments/i);
+  assert.match(markup, /Library · 4 experiments/);
+  assert.match(markup, /Browse public experiments, with your private run state layered in when Murph has browser-vault data\./);
+  assert.match(markup, /Murph Finnish Dry Sauna/);
   assert.match(markup, /Morning walk/);
+  assert.match(markup, /Private only run/);
+  assert.match(markup, /2 with data/);
   assert.match(markup, /Short walks are helping with afternoon energy\./);
 });
 
-test("ExperimentsPage hides protocol-shaped experiment slugs", async () => {
+test("ExperimentsPage keeps the public library visible when browser-vault is unauthenticated", () => {
+  mocks.useBrowserVault.mockReturnValue({
+    client: null,
+    dataVersion: null,
+    error: null,
+    ref: null,
+    refresh: async () => {},
+    status: "ready",
+  });
+
+  const markup = renderToStaticMarkup(createElement(ExperimentsPage));
+
+  assert.match(markup, /Library · 4 experiments/);
+  assert.match(markup, /Murph Finnish Dry Sauna/);
+  assert.match(markup, /Red-Light Glasses Before Bed/);
+  assert.doesNotMatch(markup, /Could not load your experiment data/);
+});
+
+test("ExperimentsPage merges protocol-shaped private runs into the matching public protocol card", async () => {
   const protocolVariantClient = await createFixtureClient({
     experimentSlug: "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
   });
@@ -81,8 +103,47 @@ test("ExperimentsPage hides protocol-shaped experiment slugs", async () => {
 
   const markup = renderToStaticMarkup(createElement(ExperimentsPage));
 
-  assert.match(markup, /Morning walk/);
+  assert.match(markup, /Murph Finnish Dry Sauna/);
+  assert.match(markup, /Started Apr 18, 2026 · 21 days · 7 studies/);
   assert.doesNotMatch(markup, /protocol_variant:dry-sauna\/murph-finnish-standard-3x-week/);
+  assert.doesNotMatch(markup, /Morning walk/);
+});
+
+test("ExperimentsPage shows private-only tracked experiments as non-link cards", async () => {
+  const clientWithPrivateOnlyExperiment = await createFixtureClient();
+  mocks.useBrowserVault.mockReturnValue({
+    client: clientWithPrivateOnlyExperiment,
+    dataVersion: clientWithPrivateOnlyExperiment.replica.source.dataVersion,
+    error: null,
+    ref: null,
+    refresh: async () => {},
+    status: "ready",
+  });
+
+  const markup = renderToStaticMarkup(createElement(ExperimentsPage));
+
+  assert.match(markup, /Private/);
+  assert.match(markup, /<article[^>]*>[\s\S]*Private only run[\s\S]*Started Apr 19, 2026 · Private run only[\s\S]*Private run only[\s\S]*<\/article>/);
+  assert.doesNotMatch(markup, /href="\/experiments\/private-only-run"/);
+});
+
+test("ExperimentsPage keeps the public library visible when browser-vault loading fails", () => {
+  mocks.useBrowserVault.mockReturnValue({
+    client: null,
+    dataVersion: null,
+    error: "The latest refresh failed.",
+    ref: null,
+    refresh: async () => {},
+    status: "error",
+  });
+
+  const markup = renderToStaticMarkup(createElement(ExperimentsPage));
+
+  assert.match(markup, /Private overlays could not be refreshed/);
+  assert.match(markup, /The latest refresh failed\./);
+  assert.match(markup, /The public experiment library is still available below\./);
+  assert.match(markup, /Murph Finnish Dry Sauna/);
+  assert.match(markup, /Red-Light Glasses Before Bed/);
 });
 
 test("OverviewPage preserves stale data when a refresh fails", () => {
@@ -179,6 +240,15 @@ async function createFixtureClient(input: {
           status: "active",
           tags: ["movement"],
           title: "Morning walk",
+        }),
+        createEntity("experiment", "exp_private_only", {
+          body: "This experiment only exists in browser vault state.\n",
+          date: "2026-04-19",
+          experimentSlug: "private-only-run",
+          occurredAt: "2026-04-19T08:00:00.000Z",
+          status: "active",
+          tags: ["breathwork"],
+          title: "Private only run",
         }),
         createEntity("journal", "journal_1", {
           body: "# Note\n\nFelt steadier after a full night of sleep.\n",
