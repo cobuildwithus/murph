@@ -58,16 +58,17 @@ if [[ "$has_send_override" == "0" ]]; then
 fi
 
 tmp_log_path="$(mktemp "${TMPDIR:-/tmp}/review-gpt-data.XXXXXX")"
+declare -a review_gpt_command=(pnpm exec cobuild-review-gpt)
 
 set +e
-bash scripts/review-gpt-cli.sh --config scripts/review-gpt.data.config.sh "${forward_args[@]}" 2>&1 | tee "$tmp_log_path"
+"${review_gpt_command[@]}" --config scripts/review-gpt.data.config.sh "${forward_args[@]}" 2>&1 | tee "$tmp_log_path"
 command_status="${PIPESTATUS[0]}"
 set -e
 
 if [[ "$command_status" -ne 0 && -n "$chat_url" ]]; then
   set +e
   diagnostics_dir="$(
-    bash scripts/review-gpt-cli.sh thread diagnose \
+    "${review_gpt_command[@]}" thread diagnose \
       --chat-url "$chat_url" \
       --command-label review:gpt:data \
       --exit-code "$command_status" \

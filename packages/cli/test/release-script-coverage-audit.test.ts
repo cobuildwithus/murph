@@ -163,21 +163,33 @@ describe('monorepo release flow coverage audit', () => {
     expect(rootPackageJson.scripts?.['release:patch']).toBe('bash scripts/release.sh patch')
     expect(rootPackageJson.scripts?.['release:minor']).toBe('bash scripts/release.sh minor')
     expect(rootPackageJson.scripts?.['release:major']).toBe('bash scripts/release.sh major')
+    expect(rootPackageJson.scripts?.['review:gpt']).toBe(
+      'pnpm exec cobuild-review-gpt --config scripts/review-gpt.config.sh',
+    )
     expect(rootPackageJson.scripts?.['review:gpt:full']).toBe(
-      'bash scripts/review-gpt-cli.sh --config scripts/review-gpt-full.config.sh',
+      'pnpm exec cobuild-review-gpt --config scripts/review-gpt-full.config.sh',
+    )
+    expect(rootPackageJson.scripts?.['review:gpt:diagnose']).toBe(
+      'pnpm exec cobuild-review-gpt thread diagnose',
+    )
+    expect(rootPackageJson.scripts?.['review:gpt:delay']).toBe(
+      'pnpm exec cobuild-review-gpt delay --config scripts/review-gpt.config.sh',
+    )
+    expect(rootPackageJson.scripts?.['review:gpt:schedule']).toBe(
+      'pnpm exec cobuild-review-gpt delay --config scripts/review-gpt.config.sh',
     )
     expect(rootPackageJson.scripts?.['review:gpt:data']).toBe('bash scripts/review-gpt-data.sh')
     expect(rootPackageJson.scripts?.['chatgpt:thread:export']).toBe(
-      'bash scripts/review-gpt-cli.sh thread export --format json --filter-output exportPath',
+      'pnpm exec cobuild-review-gpt thread export --format json --filter-output exportPath',
     )
     expect(rootPackageJson.scripts?.['chatgpt:thread:download']).toBe(
-      'bash scripts/review-gpt-cli.sh thread download --format json --filter-output downloadedFile',
+      'pnpm exec cobuild-review-gpt thread download --format json --filter-output downloadedFile',
     )
     expect(rootPackageJson.scripts?.['chatgpt:thread:watch']).toBe(
-      'bash scripts/review-gpt-cli.sh thread wake --no-poll-until-complete --format json',
+      'pnpm exec cobuild-review-gpt thread wake --no-poll-until-complete --format json',
     )
     expect(rootPackageJson.scripts?.['chatgpt:thread:wake']).toBe(
-      'bash scripts/review-gpt-cli.sh thread wake --no-poll-until-complete --format json',
+      'pnpm exec cobuild-review-gpt thread wake --no-poll-until-complete --format json',
     )
     expect(rootPackageJson.scripts?.['verify:workspace-package-cycles']).toBe(
       'node scripts/check-workspace-package-cycles.mjs',
@@ -203,6 +215,8 @@ describe('monorepo release flow coverage audit', () => {
     expect(existsSync(path.join(repoRoot, 'scripts', 'chatgpt-attachment-files.test.mjs'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'chatgpt-managed-browser.mjs'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'chatgpt-managed-browser.test.mjs'))).toBe(false)
+    expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.sh'))).toBe(false)
+    expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-cli.sh'))).toBe(false)
     expect(reviewGptVersionRange).toMatch(/^\^0\.5\.\d+$/u)
     expect(pnpmWorkspace).toContain(`  - '@cobuild/review-gpt@${reviewGptPinnedVersion}'`)
     expect(pnpmWorkspace).not.toContain('patchedDependencies:')
