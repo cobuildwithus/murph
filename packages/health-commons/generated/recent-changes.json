@@ -428,6 +428,32 @@
     },
     {
       "affectedFields": [
+        "researchLandscape",
+        "sources/norwegian-4x4.protocolEvidence",
+        "relations",
+        "apps/web.researchGroups",
+        "generated.catalog"
+      ],
+      "changeId": "chg_2026_04_21_norwegian_4x4_research_landscape_groups",
+      "changeType": "evidence_change",
+      "editSummary": "Grouped the Norwegian 4x4 research section into protocol-support, mixed clinical-superiority, safety-boundary, and adjacent-context categories, and added protocol-specific appraisal metadata to every displayed Norwegian 4x4 source.",
+      "entityKey": "protocol_variant:norwegian-4x4/norwegian-4x4",
+      "minor": false,
+      "rationale": "The experiment page should explain what the evidence supports, what is mixed, what is safety-only, and what is adjacent without forcing users to infer that from paper titles and counts.",
+      "reviewStatus": "proposed",
+      "schemaVersion": "murph.commons.change.v1",
+      "sourceKeys": [
+        "source_artifact:pmid-17414804",
+        "source_artifact:pmid-25464446",
+        "source_artifact:pmid-28082387",
+        "source_artifact:pmid-22879367",
+        "source_artifact:pmid-33239350",
+        "source_artifact:pmid-30293954",
+        "source_artifact:ntnu-cerg-norwegian-4x4"
+      ]
+    },
+    {
+      "affectedFields": [
         "relations",
         "claims",
         "expectedSignal.primary.sourceKeys",

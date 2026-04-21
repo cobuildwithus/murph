@@ -36,6 +36,19 @@ researchEvidence:
   durationLabel: "Single 4x4 cycling session"
   aggregateRole: "primary"
   cohortKey: "acala-2020-4x4-hr-response"
+protocolEvidence:
+  -
+    protocolKey: protocol_variant:norwegian-4x4/norwegian-4x4
+    groupId: supports-fitness-claim
+    stance: supports
+    scope: measurement_context
+    result: not_efficacy_evidence
+    endpointKeys:
+      - biomarker:estimated-vo2max
+    headline: "The acute heart-rate study shows a completed 4x4 session should be judged by target-zone fidelity, not only by finishing four intervals."
+    implication: "Log interval heart-rate peaks and time near target so the experiment knows whether the intended dose happened."
+    caveat: "Single-session physiology is implementation evidence, not long-term efficacy evidence."
+    displayPriority: 60
 evidenceBucket: "Wearable or testable signals"
 whyItMatters: "Acute implementation source showing how heart rate behaves during a 4x4 session and why target-zone fidelity needs to be logged."
 potentialMurphEndpoints:

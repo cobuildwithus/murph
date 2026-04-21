@@ -6,9 +6,8 @@ import { act, createElement, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
+import { CURRENT_EXPERIMENT_PROTOCOL_CONTRACT_VERSION } from "@/src/lib/experiments/experiment-detail";
 import type { ExperimentProtocol } from "@/src/types/experiments";
-
-const CURRENT_EXPERIMENT_PROTOCOL_CONTRACT_VERSION = 3;
 
 const mocks = vi.hoisted(() => ({
   composeExperimentDetail: vi.fn(({ protocol }: { protocol: ExperimentProtocol }) => ({

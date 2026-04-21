@@ -195,11 +195,66 @@ describe("ExperimentDetailPage", () => {
     const clientExperiment = mocks.experimentDetailClient.mock.calls.at(-1)?.[0]
       ?.protocol as ExperimentProtocol;
 
-    expect(clientExperiment.researchStats).toEqual(expect.arrayContaining([
-      expect.objectContaining({ label: "TOTAL PARTICIPANTS", value: "6,115+" }),
-      expect.objectContaining({ label: "SOURCES CHECKED", value: 28 }),
-      expect.objectContaining({ label: "YEARS COVERED", value: "2004–2024" }),
-    ]));
+    expect(clientExperiment.researchStats).toEqual([
+      { label: "SOURCES CHECKED", value: 29 },
+      { label: "TOTAL PARTICIPANTS", value: "6,115+" },
+      { label: "REVIEW PAPERS", value: 8 },
+      { label: "RESEARCH PAPERS", value: 17 },
+      { label: "YEARS COVERED", value: "2004–2024" },
+    ]);
+    expect(clientExperiment.researchLandscape).toEqual(expect.objectContaining({
+      bottomLine:
+        "Best read as a VO2max-oriented fitness protocol with explicit safety and recovery boundaries, not a general disease-treatment claim.",
+      confidenceLabel: "moderate",
+      mainCaveat:
+        "Supervised clinical and disease-population studies are mixed, so they should calibrate safety and population fit instead of proving home superiority over moderate cardio.",
+      primaryClaim:
+        "The strongest support is for improving lab VO2max or wearable cardio-fitness when the 4x4 intensity target is actually reached.",
+    }));
+    expect(clientExperiment.researchGroups).toHaveLength(4);
+    expect(
+      clientExperiment.researchGroups?.map((group) => ({
+        count: group.studies.length,
+        defaultOpen: group.defaultOpen ?? false,
+        id: group.id,
+        label: group.label,
+        stance: group.stance,
+      })),
+    ).toEqual([
+      {
+        count: 7,
+        defaultOpen: true,
+        id: "supports-fitness-claim",
+        label: "Supports the fitness claim",
+        stance: "supports",
+      },
+      {
+        count: 11,
+        defaultOpen: false,
+        id: "clinical-context-mixed-superiority",
+        label: "Clinical context and mixed superiority",
+        stance: "mixed",
+      },
+      {
+        count: 6,
+        defaultOpen: false,
+        id: "safety-boundary",
+        label: "Safety boundaries",
+        stance: "safety_boundary",
+      },
+      {
+        count: 5,
+        defaultOpen: false,
+        id: "adjacent-variants-and-recovery-context",
+        label: "Adjacent variants and recovery context",
+        stance: "context_only",
+      },
+    ]);
+    expect(
+      clientExperiment.researchGroups?.every((group) =>
+        group.studies.every((study) => typeof study.implication === "string" && study.implication.length > 0)
+      ),
+    ).toBe(true);
     expect(clientExperiment.studies).toEqual(expect.arrayContaining([
       expect.objectContaining({
         designLabel: "Four-arm randomized training trial",
@@ -231,6 +286,28 @@ describe("ExperimentDetailPage", () => {
     expect(safetyRegistryStudy?.finding).not.toBe(
       "Quantified supervised cardiac-rehabilitation safety registry; key low-but-not-zero risk framing.",
     );
+    expect(
+      clientExperiment.researchGroups?.find((group) => group.id === "safety-boundary")?.studies,
+    ).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        implication:
+          "Supports a low-risk-with-supervision frame and justifies strong stop-condition language.",
+        result: "not_efficacy_evidence",
+        scope: "clinical_supervised",
+        stance: "safety_boundary",
+        title:
+          "Cardiovascular risk of high- versus moderate-intensity aerobic exercise in coronary heart disease patients",
+      }),
+      expect.objectContaining({
+        implication:
+          "Supports caution language for symptoms, recent illness, heart disease, and other higher-risk situations.",
+        result: "not_efficacy_evidence",
+        scope: "general_guideline",
+        stance: "safety_boundary",
+        title:
+          "Exercise-related acute cardiovascular events and potential deleterious adaptations following long-term exercise training: placing the risks into perspective",
+      }),
+    ]));
   });
 
   it("routes missing experiment ids to notFound", async () => {

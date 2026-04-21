@@ -75,6 +75,32 @@ describe("StudyCard", () => {
     expect(markup).not.toContain("n≈2,138");
   });
 
+  it("renders evidence pills for grouped research metadata", () => {
+    const markup = renderToStaticMarkup(
+      createElement(StudyCard, {
+        type: "RCT",
+        title: "Grouped research placeholder",
+        authors: "A Researcher",
+        journal: "Example Journal",
+        result: "positive",
+        scope: "direct_protocol",
+        stance: "supports",
+        headline: "A grouped evidence headline",
+        implication: "A protocol-specific implication.",
+        caveat: "A protocol-specific caveat.",
+        last: true,
+      }),
+    );
+
+    expect(markup).toContain(">Positive signal<");
+    expect(markup).toContain(">Direct<");
+    expect(markup).toContain(">Supports<");
+    expect(markup).toContain('aria-expanded="false"');
+    expect(markup).not.toContain("A grouped evidence headline");
+    expect(markup).not.toContain("A protocol-specific implication.");
+    expect(markup).not.toContain("A protocol-specific caveat.");
+  });
+
   it("renders the author label without the removed metadata strip", () => {
     const markup = renderToStaticMarkup(
       createElement(StudyCard, {

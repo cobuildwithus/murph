@@ -22,6 +22,8 @@ export function ProtocolTab({ experiment }: ProtocolTabProps) {
     whyItWorks,
     experts,
     researchStats,
+    researchLandscape,
+    researchGroups,
     studies,
     podcastLinks,
     safety,
@@ -189,6 +191,9 @@ export function ProtocolTab({ experiment }: ProtocolTabProps) {
         <span className="font-mono text-[11px]/3.5 tracking-[0.12em] text-chart-5">
           RESEARCH
         </span>
+        {researchLandscape ? (
+          <ResearchLandscapeReadout landscape={researchLandscape} />
+        ) : null}
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
           {researchStats.map((stat) => (
             <div
@@ -207,17 +212,23 @@ export function ProtocolTab({ experiment }: ProtocolTabProps) {
           ))}
         </div>
         {researchStats.some((stat) =>
-          stat.label === "PEOPLE INCLUDED" && stat.value !== "—"
+          stat.label === "TOTAL PARTICIPANTS" && stat.value !== "—"
         ) ? (
           <p className="text-xs/4 text-muted-foreground/70">
             Sources checked is the full set used for this page. Research papers
-            test people directly; review papers summarize other papers. People
-            included counts only direct human research with participant totals,
+            test people directly; review papers summarize other papers. Total
+            participants counts only direct human research with participant totals,
             avoiding duplicate cohorts where possible.
           </p>
         ) : null}
 
-        {studies.length > 0 && (
+        {researchGroups && researchGroups.length > 0 ? (
+          <div className="flex flex-col gap-4">
+            {researchGroups.map((group) => (
+              <ResearchGroupCard key={group.id} group={group} />
+            ))}
+          </div>
+        ) : studies.length > 0 ? (
           <div className="overflow-hidden rounded-xl border border-secondary/25 bg-card/90">
             {studies.map((study, i) => (
               <StudyCard
@@ -227,7 +238,7 @@ export function ProtocolTab({ experiment }: ProtocolTabProps) {
               />
             ))}
           </div>
-        )}
+        ) : null}
       </div>
 
       {podcastLinks && podcastLinks.length > 0 && (
@@ -251,6 +262,109 @@ export function ProtocolTab({ experiment }: ProtocolTabProps) {
       <SafetySection {...safety} />
     </div>
   );
+}
+
+function ResearchLandscapeReadout({
+  landscape,
+}: {
+  landscape: NonNullable<Experiment["researchLandscape"]>;
+}) {
+  return (
+    <div className="grid gap-3 md:grid-cols-3">
+      <ResearchReadoutCard
+        label="Bottom line"
+        text={landscape.bottomLine}
+      />
+      <ResearchReadoutCard
+        label="Best-supported claim"
+        text={landscape.primaryClaim}
+      />
+      <ResearchReadoutCard
+        label={`Confidence · ${formatResearchConfidence(landscape.confidenceLabel)}`}
+        text={landscape.mainCaveat}
+      />
+    </div>
+  );
+}
+
+function ResearchReadoutCard({ label, text }: { label: string; text: string }) {
+  return (
+    <div className="flex flex-col gap-2 rounded-xl border border-secondary/25 bg-card/90 p-5">
+      <span className="font-mono text-[10px]/3 uppercase tracking-[0.08em] text-chart-5">
+        {label}
+      </span>
+      <p className="text-[13px]/5 text-foreground/80">{text}</p>
+    </div>
+  );
+}
+
+function ResearchGroupCard({
+  group,
+}: {
+  group: NonNullable<Experiment["researchGroups"]>[number];
+}) {
+  return (
+    <section className="overflow-hidden rounded-xl border border-secondary/25 bg-card/90">
+      <div className="flex flex-col gap-2 border-b border-border/70 px-6 py-5">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+          <div className="flex flex-col gap-1.5">
+            <SectionLabel>{group.label}</SectionLabel>
+            <p className="max-w-3xl text-[14px]/6 text-foreground/80">
+              {group.summary}
+            </p>
+          </div>
+          <span className="w-fit rounded-full border border-border/70 bg-background/35 px-2.5 py-1 font-mono text-[10px]/3.5 text-muted-foreground">
+            {formatEvidenceStance(group.stance)}
+          </span>
+        </div>
+      </div>
+      <div>
+        {group.studies.map((study, index) => (
+          <StudyCard
+            key={`${group.id}-${study.title}`}
+            {...study}
+            last={index === group.studies.length - 1}
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function formatResearchConfidence(
+  confidenceLabel: NonNullable<Experiment["researchLandscape"]>["confidenceLabel"],
+): string {
+  switch (confidenceLabel) {
+    case "early":
+      return "Early";
+    case "moderate":
+      return "Moderate";
+    case "strong":
+      return "Strong";
+    case "mixed":
+      return "Mixed";
+    case "limited":
+      return "Limited";
+  }
+}
+
+function formatEvidenceStance(
+  stance: NonNullable<Experiment["researchGroups"]>[number]["stance"],
+): string {
+  switch (stance) {
+    case "supports":
+      return "Supports";
+    case "mixed":
+      return "Mixed evidence";
+    case "does_not_confirm":
+      return "Does not confirm";
+    case "contradicts":
+      return "Evidence against";
+    case "safety_boundary":
+      return "Safety boundary";
+    case "context_only":
+      return "Context only";
+  }
 }
 
 const MAX_FOCUS_SIGNAL_CARDS = 3;

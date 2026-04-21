@@ -18,17 +18,26 @@ export function StudyCard({
   participants,
   includedStudyCount,
   designLabel,
+  result,
+  scope,
+  stance,
   url,
+  headline,
   finding,
+  implication,
+  caveat,
   last,
 }: StudyCardProps) {
   const [open, setOpen] = useState(false);
-  const isInteractive = Boolean(finding);
+  const isInteractive = Boolean(headline || finding || implication || caveat);
   const yearLabel = typeof year === "number" ? year.toString() : null;
   const participantLabel = formatParticipantLabel({
     participants,
   });
   const includedStudiesLabel = formatIncludedStudiesLabel(includedStudyCount);
+  const resultLabel = result ? formatStudyResult(result) : null;
+  const scopeLabel = scope ? formatEvidenceScope(scope) : null;
+  const stanceLabel = stance ? formatEvidenceStance(stance) : null;
   const toggleOpen = () => {
     if (!isInteractive) {
       return;
@@ -66,6 +75,13 @@ export function StudyCard({
         </div>
         {authors ? (
           <span className="mt-1 text-[11px]/4 text-muted-foreground/70">{authors}</span>
+        ) : null}
+        {(resultLabel || scopeLabel || stanceLabel) ? (
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {resultLabel ? <StudyPill>{resultLabel}</StudyPill> : null}
+            {scopeLabel ? <StudyPill>{scopeLabel}</StudyPill> : null}
+            {stanceLabel ? <StudyPill>{stanceLabel}</StudyPill> : null}
+          </div>
         ) : null}
         {url ? (
           <a
@@ -113,17 +129,47 @@ export function StudyCard({
         tabIndex={isInteractive ? 0 : undefined}
       >
         {rowContent}
-        {finding ? (
+        {isInteractive ? (
           <CollapsibleContent className="px-6 pb-5">
-            <div className="pl-[90px]">
-              <p className="max-w-[52ch] text-[15px]/6 text-foreground/90">
-                {finding}
-              </p>
+            <div className="flex max-w-[62ch] flex-col gap-3 pl-[90px]">
+              {headline ? (
+                <p className="text-[15px]/6 font-medium text-foreground">
+                  {headline}
+                </p>
+              ) : null}
+              {finding ? (
+                <StudyDetail label="Found" text={finding} />
+              ) : null}
+              {implication ? (
+                <StudyDetail label="Means here" text={implication} />
+              ) : null}
+              {caveat ? (
+                <StudyDetail label="Caveat" text={caveat} />
+              ) : null}
             </div>
           </CollapsibleContent>
         ) : null}
       </div>
     </Collapsible>
+  );
+}
+
+function StudyPill({ children }: { children: string }) {
+  return (
+    <span className="rounded-full border border-border/70 bg-background/35 px-2 py-0.5 text-[10px]/3.5 text-muted-foreground">
+      {children}
+    </span>
+  );
+}
+
+function StudyDetail({ label, text }: { label: string; text: string }) {
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="font-mono text-[10px]/3 uppercase tracking-[0.08em] text-chart-5">
+        {label}
+      </span>
+      <p className="text-[14px]/6 text-foreground/85">{text}</p>
+    </div>
   );
 }
 
@@ -139,4 +185,59 @@ function formatIncludedStudiesLabel(includedStudyCount: Study["includedStudyCoun
   return typeof includedStudyCount === "number"
     ? `${includedStudyCount.toLocaleString()} ${includedStudyCount === 1 ? "study" : "studies"}`
     : null;
+}
+
+function formatStudyResult(result: Study["result"]): string {
+  switch (result) {
+    case "positive":
+      return "Positive signal";
+    case "mixed":
+      return "Mixed";
+    case "no_clear_advantage":
+      return "No clear advantage";
+    case "negative":
+      return "Negative";
+    case "not_efficacy_evidence":
+      return "Context";
+    case undefined:
+      return "";
+  }
+}
+
+function formatEvidenceScope(scope: Study["scope"]): string {
+  switch (scope) {
+    case "direct_protocol":
+      return "Direct";
+    case "same_mechanism":
+      return "Same mechanism";
+    case "clinical_supervised":
+      return "Clinical supervised";
+    case "adjacent_variant":
+      return "Adjacent";
+    case "measurement_context":
+      return "Measurement";
+    case "general_guideline":
+      return "Guideline";
+    case undefined:
+      return "";
+  }
+}
+
+function formatEvidenceStance(stance: Study["stance"]): string {
+  switch (stance) {
+    case "supports":
+      return "Supports";
+    case "mixed":
+      return "Mixed";
+    case "does_not_confirm":
+      return "Does not confirm";
+    case "contradicts":
+      return "Against";
+    case "safety_boundary":
+      return "Safety";
+    case "context_only":
+      return "Context only";
+    case undefined:
+      return "";
+  }
 }
