@@ -196,4 +196,15 @@ Ready to get started?`)
       'When you write a richer run, preserve the exact protocol `key`, `pageRevisionId`, `runSpecRevisionId`, and chosen `testPlanId` under `protocolRef`',
     )
   })
+
+  it('keeps source-attributed external protocols separate from the default run plan', () => {
+    const prompt = buildPrompt('bound-tools')
+
+    expect(prompt).toContain(
+      'For source-attributed external protocols, keep the source routine separate from the user\'s run plan.',
+    )
+    expect(prompt).toContain(
+      'Do not present a celebrity or external source protocol as Murph\'s default recommendation; offer a lower-burden variant or defer when the onboarding slots or safety context suggest poor fit.',
+    )
+  })
 })
