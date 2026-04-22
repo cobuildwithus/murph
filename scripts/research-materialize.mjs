@@ -17,6 +17,7 @@ import {
   slugify,
   toPosixRelative,
   writeExecutable,
+  writeResearchReviewGptSupportFiles,
   writeTextFile,
 } from "./research-orchestrator/lib.mjs";
 
@@ -568,6 +569,7 @@ function main(argv) {
   if (!existsSync(helperScriptPath) || readFileSync(helperScriptPath, "utf8") !== helperScriptContent) {
     writeExecutable(helperScriptPath, helperScriptContent);
   }
+  writeResearchReviewGptSupportFiles(workspaceDir);
 
   const materializedSpec = {
     protocolName: charterArtifacts.manifest.protocolName,

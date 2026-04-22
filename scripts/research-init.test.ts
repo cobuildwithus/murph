@@ -198,10 +198,14 @@ describe("research init scaffold", () => {
         path.join(outDir, "commands", "_run-review-gpt.sh"),
         "utf8",
       );
-      expect(helperScript).toContain("pnpm review:gpt");
+      expect(helperScript).toContain("pnpm exec cobuild-review-gpt");
+      expect(helperScript).toContain('--config "${review_gpt_config}"');
+      expect(helperScript).toContain('config/review-gpt-research.config.sh');
       expect(helperScript).toContain("--send");
       expect(helperScript).toContain("--wait");
       expect(helperScript).toContain("murph-workspace");
+
+      assertResearchReviewGptSupportFiles(outDir);
 
       const initReadme = readFileSync(path.join(outDir, "README.md"), "utf8");
       expect(initReadme).toContain("Only the charter stage is runnable right now.");
@@ -237,6 +241,8 @@ describe("research init scaffold", () => {
         sampleCharterResponse,
         "utf8",
       );
+      rmSync(path.join(outDir, "config"), { recursive: true, force: true });
+      rmSync(path.join(outDir, "scripts"), { recursive: true, force: true });
 
       const materializeResult = runResearchMaterialize("--workspace", outDir);
 
@@ -261,6 +267,7 @@ describe("research init scaffold", () => {
       expect(
         existsSync(path.join(outDir, "prompts", "20-section-synthesis-stale.template.md")),
       ).toBe(false);
+      assertResearchReviewGptSupportFiles(outDir);
 
       const materializedWorkflow = JSON.parse(
         readFileSync(path.join(outDir, "workflow.json"), "utf8"),
@@ -394,4 +401,21 @@ describe("research init scaffold", () => {
 
 function writeTextFileSync(filePath: string, content: string) {
   writeFileSync(filePath, content, "utf8");
+}
+
+function assertResearchReviewGptSupportFiles(outDir: string) {
+  const configPath = path.join(outDir, "config", "review-gpt-research.config.sh");
+  const packageScriptPath = path.join(outDir, "scripts", "package-research-context.sh");
+
+  expect(existsSync(configPath)).toBe(true);
+  expect(existsSync(packageScriptPath)).toBe(true);
+
+  const researchConfig = readFileSync(configPath, "utf8");
+  expect(researchConfig).toContain('scripts/review-gpt.config.sh');
+  expect(researchConfig).toContain('package_script="${workspace_dir}/scripts/package-research-context.sh"');
+
+  const packageScript = readFileSync(packageScriptPath, "utf8");
+  expect(packageScript).toContain('add_if_exists "${workspace_relative}/workflow.json"');
+  expect(packageScript).toContain('collect_dir_files "${workspace_relative}/prompts"');
+  expect(packageScript).toContain('collect_dir_files "${workspace_relative}/responses"');
 }
