@@ -3,6 +3,7 @@ import {
   type PrismaClient,
 } from "@prisma/client";
 import {
+  normalizeAssistantUsageStripeMeterSource,
   parseAssistantUsageRecord,
   type AssistantUsageCredentialSource,
   type AssistantUsageRecord,
@@ -17,7 +18,12 @@ export interface ImportHostedAiUsageResult {
 }
 
 type HostedAiUsageClient = PrismaClient | Prisma.TransactionClient;
-export type HostedAiUsageStripeMeterStatus = "failed" | "metered" | "pending" | "skipped";
+export type HostedAiUsageStripeMeterStatus =
+  | "delegated"
+  | "failed"
+  | "metered"
+  | "pending"
+  | "skipped";
 
 export interface HostedAiUsageStripeCandidate {
   apiKeyEnv: string | null;
@@ -59,6 +65,7 @@ const HOSTED_AI_USAGE_IMMUTABLE_SELECT = {
   routeId: true,
   servedModel: true,
   sessionId: true,
+  stripeMeterSource: true,
   surface: true,
   totalTokens: true,
   triggerKind: true,
@@ -82,6 +89,7 @@ export async function listHostedAiUsagePendingStripeMetering(input: {
       credentialSource: {
         not: null,
       },
+      stripeMeterSource: "murph",
       stripeMeterStatus: "pending",
       OR: [
         {
@@ -188,7 +196,8 @@ function normalizeHostedAiUsageStripeMeterStatus(
   value: string,
 ): HostedAiUsageStripeMeterStatus {
   if (
-    value === "failed"
+    value === "delegated"
+    || value === "failed"
     || value === "metered"
     || value === "pending"
     || value === "skipped"
@@ -197,6 +206,29 @@ function normalizeHostedAiUsageStripeMeterStatus(
   }
 
   throw new TypeError(`Unsupported hosted AI usage Stripe meter status: ${value}`);
+}
+
+export async function markHostedAiUsageStripeDelegated(input: {
+  id: string;
+  message: string;
+  prisma?: HostedAiUsageClient;
+}): Promise<void> {
+  const prisma = input.prisma ?? getPrisma();
+
+  await prisma.hostedAiUsage.updateMany({
+    where: {
+      id: input.id,
+      stripeMeterStatus: "pending",
+    },
+    data: {
+      stripeMeterError: input.message,
+      stripeMeterIdentifier: null,
+      stripeMeterLastAttemptedAt: null,
+      stripeMeterNextAttemptAt: null,
+      stripeMeterStatus: "delegated",
+      stripeMeteredAt: null,
+    },
+  });
 }
 
 export async function markHostedAiUsageStripeMetered(input: {
@@ -356,14 +388,21 @@ export async function importHostedAiUsageRecords(input: {
     input.usage.map((entry) => parseAssistantUsageRecord(entry)),
   );
   const recordedIds: string[] = [];
+  const memberStripeCustomerIdCache = new Map<string, Promise<string | null>>();
 
   for (const record of records) {
     const memberId = requireHostedAiUsageMemberId(record, input.trustedUserId ?? null);
+    const stripeMeterSource = await resolveHostedAiUsageStripeMeterSource({
+      memberId,
+      prisma,
+      record,
+      stripeCustomerIdCache: memberStripeCustomerIdCache,
+    });
     const storedRecord = await prisma.hostedAiUsage.upsert({
       where: {
         id: record.usageId,
       },
-      create: buildHostedAiUsageCreateData(record, memberId),
+      create: buildHostedAiUsageCreateData(record, memberId, stripeMeterSource),
       update: {},
       select: HOSTED_AI_USAGE_IMMUTABLE_SELECT,
     });
@@ -371,6 +410,7 @@ export async function importHostedAiUsageRecords(input: {
     assertStoredHostedAiUsageMatchesRecord({
       memberId,
       record,
+      stripeMeterSource,
       storedRecord,
     });
     recordedIds.push(record.usageId);
@@ -412,6 +452,7 @@ function sameAssistantUsageRecord(
 function buildHostedAiUsageCreateData(
   record: AssistantUsageRecord,
   memberId: string,
+  stripeMeterSource: AssistantUsageRecord["stripeMeterSource"],
 ): Prisma.HostedAiUsageUncheckedCreateInput {
   return {
     id: record.usageId,
@@ -432,6 +473,7 @@ function buildHostedAiUsageCreateData(
     gatewayTagsJson: record.gatewayTags,
     reportingUserId: record.reportingUserId,
     surface: record.surface,
+    stripeMeterSource,
     triggerKind: record.triggerKind,
     inputTokens: record.inputTokens,
     outputTokens: record.outputTokens,
@@ -439,12 +481,20 @@ function buildHostedAiUsageCreateData(
     cachedInputTokens: record.cachedInputTokens,
     cacheWriteTokens: record.cacheWriteTokens,
     totalTokens: record.totalTokens,
+    ...(stripeMeterSource === "vercel-ai-gateway"
+      ? {
+          stripeMeterError:
+            "Delegated Stripe token metering is handled upstream by Vercel AI Gateway.",
+          stripeMeterStatus: "delegated" as const,
+        }
+      : {}),
   };
 }
 
 function assertStoredHostedAiUsageMatchesRecord(input: {
   memberId: string;
   record: AssistantUsageRecord;
+  stripeMeterSource: AssistantUsageRecord["stripeMeterSource"];
   storedRecord: StoredHostedAiUsageImmutableFields;
 }): void {
   const expected = {
@@ -452,6 +502,7 @@ function assertStoredHostedAiUsageMatchesRecord(input: {
     id: input.record.usageId,
     memberId: input.memberId,
     occurredAt: normalizeHostedAiUsageDate(input.record.occurredAt, "occurredAt").toISOString(),
+    stripeMeterSource: input.stripeMeterSource,
   };
   const mismatchedFields = [
     compareHostedAiUsageField("memberId", input.storedRecord.memberId, expected.memberId),
@@ -471,6 +522,11 @@ function assertStoredHostedAiUsageMatchesRecord(input: {
     compareHostedAiUsageJsonField("gatewayTagsJson", input.storedRecord.gatewayTagsJson, expected.gatewayTags),
     compareHostedAiUsageField("reportingUserId", input.storedRecord.reportingUserId, expected.reportingUserId),
     compareHostedAiUsageField("surface", input.storedRecord.surface, expected.surface),
+    compareHostedAiUsageField(
+      "stripeMeterSource",
+      normalizeHostedAiUsageStripeMeterSource(input.storedRecord.stripeMeterSource),
+      expected.stripeMeterSource,
+    ),
     compareHostedAiUsageField("triggerKind", input.storedRecord.triggerKind, expected.triggerKind),
     compareHostedAiUsageField("inputTokens", input.storedRecord.inputTokens, expected.inputTokens),
     compareHostedAiUsageField("outputTokens", input.storedRecord.outputTokens, expected.outputTokens),
@@ -484,6 +540,85 @@ function assertStoredHostedAiUsageMatchesRecord(input: {
     throw new TypeError(
       `Hosted AI usage id ${input.record.usageId} already exists with different immutable fields: ${mismatchedFields.join(", ")}.`,
     );
+  }
+}
+
+async function resolveHostedAiUsageStripeMeterSource(input: {
+  memberId: string;
+  prisma: PrismaClient;
+  record: AssistantUsageRecord;
+  stripeCustomerIdCache: Map<string, Promise<string | null>>;
+}): Promise<AssistantUsageRecord["stripeMeterSource"]> {
+  const requestedSource = normalizeAssistantUsageStripeMeterSource(input.record.stripeMeterSource);
+
+  if (requestedSource !== "vercel-ai-gateway") {
+    return "murph";
+  }
+
+  if (
+    input.record.credentialSource !== "platform"
+    || !isHostedAiUsageVercelAiGatewayRecord(input.record)
+  ) {
+    return "murph";
+  }
+
+  const stripeCustomerId = await readHostedAiUsageMemberStripeCustomerId({
+    memberId: input.memberId,
+    prisma: input.prisma,
+    stripeCustomerIdCache: input.stripeCustomerIdCache,
+  });
+
+  return stripeCustomerId ? "vercel-ai-gateway" : "murph";
+}
+
+async function readHostedAiUsageMemberStripeCustomerId(input: {
+  memberId: string;
+  prisma: PrismaClient;
+  stripeCustomerIdCache: Map<string, Promise<string | null>>;
+}): Promise<string | null> {
+  const cached = input.stripeCustomerIdCache.get(input.memberId);
+
+  if (cached) {
+    return cached;
+  }
+
+  const pendingStripeCustomerId = input.prisma.hostedMemberBillingRef.findUnique({
+    where: {
+      memberId: input.memberId,
+    },
+    select: {
+      memberId: true,
+      stripeCustomerIdEncrypted: true,
+      stripeSubscriptionIdEncrypted: true,
+    },
+  }).then((billingRef) =>
+    billingRef ? readHostedMemberBillingPrivateState(billingRef).stripeCustomerId : null,
+  );
+
+  input.stripeCustomerIdCache.set(input.memberId, pendingStripeCustomerId);
+  return pendingStripeCustomerId;
+}
+
+function isHostedAiUsageVercelAiGatewayRecord(record: AssistantUsageRecord): boolean {
+  if (record.provider !== "openai-compatible") {
+    return false;
+  }
+
+  const normalizedProviderName = normalizeOptionalString(record.providerName, "providerName");
+  if (normalizedProviderName?.toLowerCase() === "vercel-ai-gateway") {
+    return true;
+  }
+
+  const normalizedBaseUrl = normalizeOptionalString(record.baseUrl, "baseUrl");
+  if (!normalizedBaseUrl) {
+    return false;
+  }
+
+  try {
+    const url = new URL(normalizedBaseUrl);
+    return url.protocol === "https:" && url.hostname.toLowerCase() === "ai-gateway.vercel.sh";
+  } catch {
+    return false;
   }
 }
 
@@ -511,6 +646,16 @@ function normalizeHostedAiUsageDate(value: Date | string, label: string): Date {
   }
 
   return date;
+}
+
+function normalizeHostedAiUsageStripeMeterSource(
+  value: string,
+): AssistantUsageRecord["stripeMeterSource"] {
+  if (value === "murph" || value === "vercel-ai-gateway") {
+    return value;
+  }
+
+  throw new TypeError(`Unsupported hosted AI usage Stripe meter source: ${value}`);
 }
 
 function requireHostedAiUsageMemberId(
