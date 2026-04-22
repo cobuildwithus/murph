@@ -4,6 +4,7 @@ import {
   HEALTH_COMMONS_ARTIFACT_MANIFEST_SCHEMA_VERSION,
   HEALTH_COMMONS_CATALOG_SCHEMA_VERSION,
   HEALTH_COMMONS_CHANGE_SCHEMA_VERSION,
+  HEALTH_COMMONS_EXPERIMENT_ONBOARDING_SCHEMA_VERSION,
   HEALTH_COMMONS_PAGE_SCHEMA_VERSION,
   healthCommonsArtifactManifestSchema,
   healthCommonsArtifactPointerSchema,
@@ -51,6 +52,79 @@ const validCatalogEntity = {
   },
 } as const;
 
+const validProtocolVariantPageWithOnboarding = {
+  schemaVersion: HEALTH_COMMONS_PAGE_SCHEMA_VERSION,
+  entityType: "protocol_variant",
+  key: "protocol_variant:norwegian-4x4/norwegian-4x4",
+  slug: "protocols/norwegian-4x4/norwegian-4x4",
+  title: "Norwegian 4x4",
+  lineage: {
+    relationship: "root",
+  },
+  attribution: {
+    ownerType: "murph",
+  },
+  protocol: {
+    doseSignature: "2x/week",
+  },
+  safety: {
+    cautionLevel: "high",
+  },
+  testPlans: [
+    {
+      planId: "wearable-cardio-fitness-49d",
+      durationDays: 49,
+      baselineDays: 7,
+      interventionDays: 42,
+      primaryBiomarkerKey: "biomarker:estimated-vo2max",
+    },
+  ],
+  experimentOnboarding: {
+    schemaVersion: HEALTH_COMMONS_EXPERIMENT_ONBOARDING_SCHEMA_VERSION,
+    startIntent: {
+      displayPrompt: "Hey Murph, I want to explore doing Norwegian 4x4 intervals.",
+      intentSummary: "Explore Norwegian 4x4 Intervals",
+    },
+    safetyScreen: {
+      cautionLevel: "high",
+      mode: "ask_compact_then_expand_if_positive",
+      dispositionIfAnyPositive: "clinician_guidance_before_unsupervised_start",
+      mustAsk: [
+        {
+          id: "cardiovascular_red_flags",
+          prompt: "known cardiovascular disease or chest pain with exertion",
+        },
+      ],
+    },
+    setupSlots: [
+      {
+        id: "modality",
+        label: "Modality",
+        purpose: "logistics",
+        valueType: "enum",
+        askPolicy: "ask_if_unknown",
+        required: true,
+        options: ["bike", "rower"],
+      },
+    ],
+    planDefaults: {
+      testPlanId: "wearable-cardio-fitness-49d",
+      baselineDays: 7,
+      interventionDays: 42,
+      sessionsPerWeek: 2,
+      targetSessions: 12,
+      minimumUsefulSessions: 8,
+    },
+    logging: {
+      sessionFields: ["modality", "interval_peak_hrs"],
+    },
+    assistantPolicy: {
+      askBeforeCreatingAutomations: true,
+      missedLogFollowup: "opt_in_only",
+    },
+  },
+} as const;
+
 describe("@murphai/contracts health commons schemas", () => {
   it("accepts the source-artifact page and manifest shapes used by Health Commons", () => {
     expect(safeParseContract(healthCommonsArtifactPointerSchema, validArtifactPointer)).toEqual({
@@ -74,6 +148,15 @@ describe("@murphai/contracts health commons schemas", () => {
     expect(safeParseContract(healthCommonsPageFrontmatterSchema, validSourceArtifactPage)).toEqual({
       success: true,
       data: validSourceArtifactPage,
+    });
+    expect(
+      safeParseContract(
+        healthCommonsPageFrontmatterSchema,
+        validProtocolVariantPageWithOnboarding,
+      ),
+    ).toEqual({
+      success: true,
+      data: validProtocolVariantPageWithOnboarding,
     });
     expect(safeParseContract(healthCommonsCatalogEntitySchema, validCatalogEntity)).toEqual({
       success: true,
@@ -213,6 +296,36 @@ describe("@murphai/contracts health commons schemas", () => {
         type: "mechanistic",
         text: "Example claim text",
         strength: "low",
+      }),
+    ).toMatchObject({
+      success: false,
+    });
+    expect(
+      safeParseContract(healthCommonsPageFrontmatterSchema, {
+        ...validProtocolVariantPageWithOnboarding,
+        experimentOnboarding: {
+          ...validProtocolVariantPageWithOnboarding.experimentOnboarding,
+          setupSlots: [
+            {
+              ...validProtocolVariantPageWithOnboarding.experimentOnboarding.setupSlots[0],
+              options: undefined,
+            },
+          ],
+        },
+      }),
+    ).toMatchObject({
+      success: false,
+    });
+    expect(
+      safeParseContract(healthCommonsPageFrontmatterSchema, {
+        ...validProtocolVariantPageWithOnboarding,
+        experimentOnboarding: {
+          ...validProtocolVariantPageWithOnboarding.experimentOnboarding,
+          setupSlots: [
+            validProtocolVariantPageWithOnboarding.experimentOnboarding.setupSlots[0],
+            validProtocolVariantPageWithOnboarding.experimentOnboarding.setupSlots[0],
+          ],
+        },
       }),
     ).toMatchObject({
       success: false,

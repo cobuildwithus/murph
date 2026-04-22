@@ -63,6 +63,9 @@ export function buildAssistantSystemPrompt(
       assistantHostedDeviceConnectAvailable:
         input.assistantHostedDeviceConnectAvailable ?? false,
     }),
+    buildAssistantExperimentOnboardingGuidanceText({
+      assistantCommandAccessMode: input.assistantCommandAccessMode,
+    }),
     buildAssistantExecutionBehaviorText({
       profile: input.modelBehaviorProfile,
     }),
@@ -181,6 +184,29 @@ ${routeEstimateLine}${boundToolResultLine}
 - For wearable questions, prefer \`vault-cli wearables day\` or the relevant \`vault-cli wearables sleep|activity|recovery|body|sources list\` command before inspecting raw events or samples.
 - Use targeted local file reads only when the CLI/query surface does not expose the needed detail or the user explicitly asks for file-level inspection.
 - Use the matching write surface directly for straightforward captures and memory updates. Shared health data like meals, journals, blood tests, medications, supplements, and symptoms counts as permission to use the matching write surface. Treat a successful save receipt as confirmation the requested write completed. If the result says nothing changed, do not claim that something new was saved. Slow down only when the target record or command is unclear.`;
+}
+
+function buildAssistantExperimentOnboardingGuidanceText(input: {
+  assistantCommandAccessMode: AssistantMurphCommandAccessMode;
+}): string {
+  const commandSurface =
+    input.assistantCommandAccessMode === "bound-tools"
+      ? "Use `vault.cli.run` to execute these `vault-cli ...` commands in the bound vault."
+      : input.assistantCommandAccessMode === "direct-cli"
+        ? "Use direct `vault-cli ...` commands in this privileged local route."
+        : "Use the canonical `vault-cli ...` commands when a command surface is available; otherwise explain what you would need to inspect or write.";
+
+  return `Experiment onboarding:
+- When the user asks to start, run, explore, or set up a protocol or experiment, treat that as a planning conversation until they explicitly confirm the final run plan. Do not create an active experiment or reminder automation from the first request alone.
+- Resolve the protocol page and use its Health Commons \`experimentOnboarding\` block when available. For protocol pages in this repo, the block defines the start prompt, vault checks, safety screen, setup slots, plan defaults, logging fields, and assistant reminder policy.
+- ${commandSurface}
+- Before setup questions, check whether the user already has an active experiment with \`vault-cli experiment list --status active --format json\`. If there is one, ask whether they want to pause or finish it, defer this protocol, or knowingly run multiple experiments with weaker attribution.
+- Review relevant context instead of asking everything from scratch: use \`vault-cli memory show --format json\`, \`vault-cli search query "<protocol safety/logistics context>" --format json\`, \`vault-cli timeline ... --format json\`, \`vault-cli wearables sources list --format json\`, and \`vault-cli wearables day <date> --format json\` as appropriate.
+- For high-caution protocols, ask the compact safety screen even if the vault is silent. If the user says yes or is unsure about a red flag, do not set up the protocol as an unsupervised active experiment; suggest clinician guidance, a lower-intensity alternative, or postponing.
+- Ask only setup slots that change safety, logistics, measurement fidelity, or assistant support. Keep it to one or two questions per turn unless the user asks for a form-like flow.
+- Before any write, summarize the exact plan: protocol reference, baseline and intervention dates, schedule, modality or dose, success or minimum adherence target, logging fields, stop conditions, and reminder or missed-log policy.
+- Create the run only after explicit confirmation, then use \`vault-cli experiment create <slug> --title "<title>" --hypothesis "<hypothesis>" --startedOn <YYYY-MM-DD> --status active\` for a simple run, or scaffold and update the experiment record with \`vault-cli experiment update --input -\` when richer \`protocolRef\`, \`runPlan\`, or onboarding fields are needed.
+- Create reminders only after opt-in with \`vault-cli automation scaffold --format json\`, edit the payload to the agreed neutral instructions and schedule, then save with \`vault-cli automation upsert --input -\`. Missed-log checks should be neutral, at most once per planned session, and easy to decline.`;
 }
 
 function buildAssistantAudienceSafetyText(

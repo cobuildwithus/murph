@@ -1,6 +1,6 @@
 # Health Commons
 
-Last verified: 2026-04-20
+Last verified: 2026-04-22
 
 ## Current State
 
@@ -30,6 +30,7 @@ The storage primitive is a typed wiki page. Product/domain nouns map onto page r
 | Ambiguous name | `entityType: disambiguation` |
 
 Protocol pages must include lineage, attribution, a performable protocol block, safety, and at least one test plan. Claims must cite source pages unless they are explicitly labeled as community outcomes.
+Protocol pages may also include an optional `experimentOnboarding` block that describes how assistants should safely review context, screen for red flags, gather setup slots, and summarize the plan before creating a private run.
 
 ## Family Key Style
 
@@ -42,7 +43,7 @@ This keeps browse, search, disambiguation, and future forks easier to understand
 Generated entities carry:
 
 - `pageRevisionId` for the whole page.
-- `runSpecRevisionId` for performable protocol fields and test plans.
+- `runSpecRevisionId` for performable protocol fields, experiment-onboarding setup policy, and test plans.
 - `recipeHash` for duplicate-protocol detection.
 - `catalogHash` for the generated catalog release.
 

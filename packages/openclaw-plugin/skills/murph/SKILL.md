@@ -38,3 +38,30 @@ If Murph is not configured yet:
 - ask them to run `murph onboard` or set `VAULT=/path/to/vault` if no default vault is configured
 
 When you answer, summarize the relevant Murph output instead of dumping large raw JSON unless the user asked for the raw result.
+
+## Experiment onboarding
+
+When a user asks to start, run, explore, or set up a protocol, keep the flow as planning until the user explicitly confirms the final run plan. Do not create an active experiment or scheduled automation from the first message alone.
+
+Read the protocol first. If the protocol comes from Health Commons and has an `experimentOnboarding` block, use that block as the source for the start prompt, vault checks, safety screen, setup slots, plan defaults, logging fields, and assistant support policy.
+
+Useful commands:
+
+- `vault-cli experiment list --status active --format json` before starting, so Murph can preserve the one-meaningful-experiment default.
+- `vault-cli memory show --format json` for current saved context.
+- `vault-cli search query "<protocol-relevant context>" --format json` for conditions, medications, prior symptoms, injuries, recent workouts, or previous experiment notes.
+- `vault-cli timeline ... --format json` for chronological context when timing matters.
+- `vault-cli wearables sources list --format json` and `vault-cli wearables day <YYYY-MM-DD> --format json` when wearable measurement or baseline quality matters.
+- `vault-cli experiment create <slug> --title "<title>" --hypothesis "<hypothesis>" --startedOn <YYYY-MM-DD> --status active` only after the user confirms a simple run plan.
+- `vault-cli experiment update --input -` when the run needs richer `protocolRef`, `runPlan`, `onboarding`, or `assistantSupport` fields.
+- `vault-cli automation scaffold --format json` followed by `vault-cli automation upsert --input -` only after the user opts into reminders or check-ins.
+
+Flow:
+
+1. Check for active experiments.
+2. Review relevant vault and wearable context before asking repeated setup questions.
+3. Ask the protocol safety screen even when the vault is silent, especially for high-caution protocols.
+4. Ask only setup slots that affect safety, logistics, measurement fidelity, or assistant support. Keep it to one or two questions per turn unless the user asks for a form.
+5. If a high-caution screen is positive or uncertain, do not start the protocol unsupervised. Suggest clinician guidance, a lower-intensity alternative, or postponing.
+6. Before writing, summarize the exact protocol reference, baseline/intervention dates, schedule, modality or dose, logging fields, stop conditions, and reminder policy.
+7. Use neutral language for reminders and missed-log checks. A missed-log check should ask whether the session happened, not imply failure.

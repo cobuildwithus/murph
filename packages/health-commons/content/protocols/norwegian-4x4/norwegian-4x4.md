@@ -189,6 +189,170 @@ testPlans:
       - Session fidelity is part of the outcome; record whether each interval reached the intended heart-rate zone without unsafe symptoms.
       - Resting heart rate and heart-rate recovery may be useful secondary signals, but sleep, illness, stress, alcohol, heat, and training load can confound them.
       - HRV is exploratory. Sleep efficiency is recovery context and a confounder; neither is a promised outcome.
+experimentOnboarding:
+  schemaVersion: murph.commons.experiment-onboarding.v1
+  startIntent:
+    displayPrompt: "Hey Murph, I want to explore doing Norwegian 4x4 intervals."
+    intentSummary: "Explore Norwegian 4x4 Intervals"
+  contextReview:
+    vaultChecks:
+      -
+        id: active_experiments
+        label: Active experiments
+        reason: Avoid starting more than one meaningful experiment at once unless the user explicitly chooses that tradeoff.
+        readHints:
+          - experiment list --status active
+      -
+        id: wearable_sources
+        label: Wearable sources
+        reason: Confirm that cardio-fitness, heart-rate, recovery, sleep, or activity signals can be observed during the baseline and intervention windows.
+        freshnessDays: 14
+        readHints:
+          - wearables sources list
+          - wearables day
+      -
+        id: recent_activity_sessions
+        label: Recent activity sessions
+        reason: Understand current training load, interval familiarity, and likely modality fit before scheduling two hard weekly sessions.
+        freshnessDays: 45
+        readHints:
+          - search query "recent workouts intervals running cycling rowing"
+          - timeline --record-type event
+      -
+        id: conditions_medications_and_context
+        label: Conditions, medications, and special context
+        reason: High-intensity intervals need explicit screening for cardiovascular red flags, heart-rate-limiting medication, pregnancy or postpartum context, acute illness, and recovery-limiting patterns.
+        freshnessDays: 30
+        readHints:
+          - memory show
+          - search query "condition medication pregnancy postpartum infection asthma COPD diabetes beta blocker long COVID injury"
+    notes:
+      - Review vault context first, but still ask the compact high-intensity safety screen because silence in the vault is not clearance.
+  safetyScreen:
+    cautionLevel: high
+    mode: ask_compact_then_expand_if_positive
+    dispositionIfAnyPositive: clinician_guidance_before_unsupervised_start
+    mustAsk:
+      -
+        id: cardiovascular_red_flags
+        prompt: known cardiovascular disease, exertional chest pain or pressure, unexplained shortness of breath, fainting or near-fainting, significant palpitations or arrhythmia, heart failure, recent heart attack or stroke, uncontrolled blood pressure, or possible myocarditis/pericarditis
+      -
+        id: acute_or_special_context
+        prompt: recent significant infection or fever, pregnancy or early postpartum if relevant, diabetes medication that can cause lows, beta blockers or other heart-rate-limiting medication, or severe asthma/COPD symptoms
+      -
+        id: movement_or_recovery_risk
+        prompt: injury or pain that vigorous exercise worsens, or a long-COVID/post-exertional-malaise pattern
+    stopIf:
+      inheritFromProtocolSafety: true
+    notes:
+      - A positive or uncertain screen is not a diagnosis; it means Murph should not set up this as an unsupervised high-intensity self-experiment.
+      - Offer a lower-intensity or clinician-guided alternative when the self-directed 4x4 path is not a safe fit.
+  setupSlots:
+    -
+      id: modality
+      label: Modality
+      purpose: logistics
+      valueType: enum
+      askPolicy: ask_if_unknown
+      required: true
+      question: "What would you use for the hard intervals: bike, rower, elliptical, treadmill, hill, or a safe running route?"
+      options:
+        - bike
+        - rower
+        - elliptical
+        - treadmill
+        - hill
+        - safe_running_route
+      writePath: runPlan.modality
+    -
+      id: safe_environment
+      label: Safe environment
+      purpose: safety
+      valueType: boolean
+      askPolicy: ask_if_unknown
+      required: true
+      question: Do you have a place to do this without traffic, obstacles, or footing hazards?
+      writePath: onboarding.answers.safe_environment
+    -
+      id: hr_monitor
+      label: Heart-rate monitor
+      purpose: measurement_fidelity
+      valueType: enum
+      askPolicy: ask_if_unknown
+      required: true
+      question: "What heart-rate monitor would you use for the intervals: chest strap, wrist wearable, or none?"
+      options:
+        - chest_strap
+        - wrist_wearable
+        - none
+      writePath: runPlan.hrMonitor
+    -
+      id: weekly_schedule
+      label: Weekly schedule
+      purpose: logistics
+      valueType: weekly_time_windows
+      askPolicy: ask_if_unknown
+      required: true
+      question: What two days and rough times would realistically work, with at least 48 hours between sessions?
+      constraints:
+        sessionsPerWeek: 2
+        minimumHoursBetweenSessions: 48
+      writePath: runPlan.schedule
+    -
+      id: reminder_policy
+      label: Reminder policy
+      purpose: assistant_support
+      valueType: reminder_policy
+      askPolicy: ask_at_confirmation
+      required: true
+      question: Want a reminder before each planned session, and if you do not log it by later that day should Murph ask once or leave it alone?
+      options:
+        - none
+        - pre_session
+        - pre_session_plus_same_day_missing_log_check
+      writePath: assistantSupport.reminderPolicy
+  planDefaults:
+    testPlanId: wearable-cardio-fitness-49d
+    baselineDays: 7
+    interventionDays: 42
+    sessionsPerWeek: 2
+    targetSessions: 12
+    minimumUsefulSessions: 8
+    firstSessionGuidance: Keep the first session conservative; the goal is repeatable hard aerobic work, not maximal suffering.
+  logging:
+    sessionFields:
+      - modality
+      - completed_intervals
+      - interval_peak_hrs
+      - time_in_85_to_95_percent_hrmax
+      - rpe_each_interval
+      - one_minute_hr_recovery
+      - two_minute_hr_recovery
+      - symptoms_during_or_after
+      - recovery_after_24_to_48h
+      - sleep_disruption
+      - other_hard_training
+    confounders:
+      - illness_or_fever
+      - acute_infection_recovery
+      - alcohol_last_24h
+      - caffeine_last_6h
+      - hard_training_last_24h
+      - travel_or_timezone_shift
+      - unusually_high_work_or_life_stress
+      - new_medication_or_supplement
+  assistantPolicy:
+    maxSetupQuestionsPerTurn: 2
+    askBeforeCreatingAutomations: true
+    missedLogFollowup: opt_in_only
+    reminderOptions:
+      - none
+      - pre_session
+      - pre_session_plus_same_day_missing_log_check
+      - weekly_digest
+    weeklyDigestDefault: true
+    missedLogFollowupCopy: "Did you end up doing today's 4x4 session? Totally fine either way — I just want the experiment record to be accurate."
+    confirmationPrompt: Show the safety outcome, exact baseline/intervention dates, two weekly session windows, modality, heart-rate monitor, target/minimum session counts, logging fields, and reminder policy before creating the active experiment or automations.
 whyItWorks:
   - Norwegian 4x4 works by spending repeated minutes near the top of your aerobic system. A four-minute interval is long enough for oxygen demand, heart rate, ventilation, stroke volume, and cardiac output to climb toward a high steady load rather than peaking for only a few sprint seconds.
   - The three-minute active recoveries are part of the mechanism. They lower effort enough to repeat the next interval, but keep the aerobic system warm, so the session accumulates more total time near high oxygen uptake than one unsustainably hard continuous effort.

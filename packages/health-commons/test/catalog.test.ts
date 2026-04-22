@@ -22,7 +22,9 @@ describe("health commons catalog", () => {
       (entity) => entity.key === "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
     );
     expect(saunaProtocol?.revision.pageRevisionId).toMatch(/^sha256:[a-f0-9]{64}$/u);
-    expect(saunaProtocol?.revision.runSpecRevisionId).toMatch(/^sha256:[a-f0-9]{64}$/u);
+    expect(saunaProtocol?.revision.runSpecRevisionId).toBe(
+      "sha256:e794e9986abf5ad0fbfab3d84bb2bd2ef15c7730366ecee5d09b1366d9e7db62",
+    );
     expect(saunaProtocol?.revision.recipeHash).toMatch(/^sha256:[a-f0-9]{64}$/u);
     const protocolRelationTargets = saunaProtocol?.relations?.map((relation) => relation.target) ?? [];
     expect(protocolRelationTargets).toContain(
@@ -35,6 +37,25 @@ describe("health commons catalog", () => {
     }
 
     expect(catalog.entities.map((entity) => entity.key)).toContain("experiment_family:infrared-sauna");
+
+    const norwegianProtocol = catalog.entities.find(
+      (entity) => entity.key === "protocol_variant:norwegian-4x4/norwegian-4x4",
+    );
+    expect(norwegianProtocol).toMatchObject({
+      experimentOnboarding: {
+        planDefaults: {
+          testPlanId: "wearable-cardio-fitness-49d",
+        },
+        startIntent: {
+          intentSummary: "Explore Norwegian 4x4 Intervals",
+        },
+      },
+      revision: {
+        runSpecRevisionId:
+          "sha256:141c35d7b0af6e614b59aa9cb031a39f0580ffc283c066ac04dd0d1a2db789db",
+      },
+    });
+
     expect(catalog.redirects).toContainEqual(
       expect.objectContaining({
         from: "experiment_family:sauna/finnish-dry",
