@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Murph stores durable health records in a file-native vault. Markdown remains the human-reviewable source of truth, derived machine-readable ledgers stay append-only, and all canonical writes flow through one core library.
+Murph stores durable health records in a file-native vault and pairs them with a public Health Commons of protocol, biomarker, source, and aggregate outcome pages. Markdown remains the human-reviewable source of truth, derived machine-readable ledgers stay append-only, and all canonical writes flow through one core library.
 
 ## Repo Shape
 
@@ -30,6 +30,7 @@ repo/
     inboxd/
     parsers/
     query/
+    health-commons/
   fixtures/
     minimal-vault/
     sample-imports/
@@ -53,6 +54,7 @@ repo/
 - `packages/inboxd` owns source-agnostic inbox capture, raw evidence persistence, the append-only `ledger/inbox-captures` canonical capture log, inbox-local runtime cursors/source-specific checkpoints/capture indexes, and attachment-level derived-job orchestration, with its rebuildable SQLite projection under `.runtime/projections/inboxd.sqlite` and daemon/config JSON state under `.runtime/operations/inbox/**`.
 - `packages/parsers` owns local-first multimedia parsing for inbox attachments and writes only derived artifacts under `derived/inbox/**`.
 - `packages/query` reads canonical vault state, builds derived export packs, owns the rebuildable local query projection under `.runtime/projections/query.sqlite` that powers both canonical reads and lexical search, exposes the stable health reference graph under `bank/library/**`, and exposes read helpers for the non-canonical compiled knowledge wiki under `derived/knowledge/**`.
+- `packages/health-commons` owns the public Health Commons for protocol, biomarker, source, and source-person pages, plus the generated catalogs and aggregate outcome summaries consumed by local and hosted surfaces.
 - `packages/assistant-cli` owns CLI-only assistant wrappers, assistant commands, foreground terminal logging, and the Ink chat UI.
 - `packages/setup-cli` owns CLI-only onboarding, host setup, and setup-wizard flows.
 - `packages/cli` exposes the published `vault-cli` / `murph` shell, composes the command graph, and must not bypass core for canonical writes.

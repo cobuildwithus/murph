@@ -150,6 +150,34 @@ If the product is good, users should become better at noticing patterns on their
 Product implication:
 dependence is not success. "More engagement" is not a proxy for "better outcome."
 
+### 11. Murph Should Compare Interventions, Not Bodies.
+
+The most useful shared question is "what did people try and what changed?" not "whose biomarkers are best?"
+
+Product implication:
+public learning should center on protocol versions, deltas, confounders, and cohorts. Raw body ranking should never be the default.
+
+### 12. Sharing Must Be Private By Default And Opt-In By Design.
+
+Murph should earn the right to be shared. It should not quietly turn private health behavior into public identity.
+
+Product implication:
+private results come first. Friend sharing and public contribution both require explicit user intent.
+
+### 13. Status Should Come From Useful Contribution, Not Biomarker Superiority.
+
+If Murph develops status mechanics, the status should come from completing clean experiments, sharing helpful notes, replicating results, or improving protocol quality.
+
+Product implication:
+rank learning, protocol quality, and contribution clarity before ranking people.
+
+### 14. Verification Must Be Honest About Confidence.
+
+Murph should never pretend an N-of-1 run is a clinical proof or claim that a protocol "caused" a result when the evidence is mixed.
+
+Product implication:
+use language like confidence, confounders, trust tiers, and estimated association rather than false certainty.
+
 ## Product Rules That Make This Real
 
 These are the practical constraints underneath the constitution.
@@ -208,6 +236,22 @@ Avoid "clean," "bad," "cheat," "perfect," "disciplined," "fell off," or anything
 
 Users should be able to reduce prompts, pause experiments, mute recommendations, and take tracking holidays without feeling like they are failing.
 
+### 11. Outcome Cards Are The Share Unit.
+
+The natural thing to share is a completed experiment result, not a raw biomarker snapshot or an infinite profile feed.
+
+### 12. No Infinite Feed By Default.
+
+The social layer should feel like a weekly digest, a cohort view, or a deliberate pull surface, not a slot machine.
+
+### 13. No Raw Biomarker Leaderboards By Default.
+
+Do not default to "best body wins" mechanics. If ranking exists, it should rank protocol replication, contribution quality, or learning value.
+
+### 14. Public Contributions Need Honest Trust Labels.
+
+A public result should make clear whether it is self-reported, device-connected, baseline-controlled, adherence-logged, or cohort-replicated.
+
 ## Tone And Language Rules
 
 Murph should sound like:
@@ -226,6 +270,9 @@ a coach, a priest, a biohacking forum, a therapist worksheet, or a disappointed 
 - "This only matters if it makes life better"
 - "Simple version"
 - "Let's keep this lightweight"
+- "Confidence: medium"
+- "Main confounders observed"
+- "Worth sharing if useful"
 
 ### Avoid Language Like
 
@@ -239,6 +286,9 @@ a coach, a priest, a biohacking forum, a therapist worksheet, or a disappointed 
 - "Clean"
 - "Cheat"
 - "You need to do better"
+- "Proven cause"
+- "Beat the leaderboard"
+- "Outperforming most users"
 
 ## What Murph Should Lean Into
 

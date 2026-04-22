@@ -2,11 +2,11 @@
 
 # Murph 🌙
 
-Murph is your personal health assistant.
+Murph is the experiment layer for personal health.
 
-Think OpenClaw, but built specifically to help you live longer and healthier.
+It helps people run bounded protocols, measure what changed, and, when they choose, contribute structured outcomes to a living Health Commons. The assistant is the interface into that loop, not the whole category by itself.
 
-Underneath that assistant, Murph keeps durable human-reviewed truth in Markdown, append-only machine event ledgers in JSONL, and layers a typed CLI, local daemons, and hosted control/execution surfaces on top of that vault.
+Underneath that product loop, Murph keeps durable human-reviewed truth in Markdown, append-only machine event ledgers in JSONL, and layers a typed CLI, local daemons, and hosted control/execution surfaces on top of that vault.
 
 The main installable product entrypoint is `@murphai/murph`, which gives you the `murph` command.
 
@@ -15,6 +15,7 @@ The main installable product entrypoint is `@murphai/murph`, which gives you the
 - a file-native vault with canonical writes owned by `packages/core`
 - the installable `@murphai/murph` package, which provides the `murph` CLI and onboarding flow
 - provider-backed local assistant chat and automation, with runtime state under `vault/.runtime/operations/assistant/**`
+- a public Health Commons in `packages/health-commons` for protocol pages, biomarker pages, source pages, exact revisions, and generated outcome summaries
 - a two-layer knowledge system: stable health reference pages under `bank/library/**` plus a non-canonical compiled personal wiki under `derived/knowledge/**`, synthesized by the active assistant, persisted through shared assistant/CLI write surfaces, searchable locally, and kept rebuildable
 - inbox capture, indexing, and parser-driven attachment extraction
 - local wearable/device sync through the workspace-private `packages/device-syncd` runtime bundled into `@murphai/murph`
@@ -126,6 +127,7 @@ Only five packages are published to npm: `@murphai/murph`, `@murphai/openclaw-pl
 | `packages/inboxd`            | Workspace-private inbox capture, canonical evidence persistence, runtime indexing, and attachment parse-job orchestration.                 |
 | `packages/parsers`           | Workspace-private local-first attachment parsing and derived artifact publication.                                                         |
 | `packages/query`             | Workspace-private read helpers, summaries, list/search helpers, export-pack generation, and derived-knowledge parser/search/index helpers. |
+| `packages/health-commons`    | Workspace-private public Health Commons owner for protocol pages, biomarker pages, sources, generated catalogs, and aggregate outcome summaries. |
 | `packages/device-syncd`      | Workspace-private local wearable/device OAuth, webhook, and reconcile daemon.                                                              |
 | `packages/assistant-engine`  | Workspace-private headless assistant execution/runtime owner.                                                                              |
 | `packages/operator-config`   | Workspace-private operator config, setup/runtime-env, and hosted assistant config owner.                                                   |
