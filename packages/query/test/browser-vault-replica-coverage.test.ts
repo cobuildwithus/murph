@@ -106,9 +106,21 @@ test("browser vault replica creation projects safe fields, filters excluded fami
           date: "2026-04-20",
           experimentSlug: "steady-sleep",
           frontmatter: {
+            protocolRef: {
+              key: "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+              pageRevisionId: "sha256:page-revision",
+              runSpecRevisionId: "sha256:run-spec-revision",
+              testPlanId: "rhr-21d",
+            },
             category: "sleep",
             group: ["baseline", { phase: "week-1" }],
             privateNotes: "omit",
+            runPlan: {
+              baselineStart: "2026-04-15",
+              baselineEnd: "2026-04-21",
+              interventionStart: "2026-04-22",
+              interventionEnd: "2026-05-05",
+            },
             startedOn: "2026-04-15",
             status: "active",
             summary: { outcome: ["steadier", "lighter"] },
@@ -238,6 +250,18 @@ test("browser vault replica creation projects safe fields, filters excluded fami
   assert.equal(replica.entities.some((entity) => entity.id === "food_excluded"), false);
   assert.equal(experiment?.bodyPreview?.endsWith("…"), true);
   assert.deepEqual(experiment?.attributes.group, ["baseline", { phase: "week-1" }]);
+  assert.deepEqual(experiment?.attributes.protocolRef, {
+    key: "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+    pageRevisionId: "sha256:page-revision",
+    runSpecRevisionId: "sha256:run-spec-revision",
+    testPlanId: "rhr-21d",
+  });
+  assert.deepEqual(experiment?.attributes.runPlan, {
+    baselineStart: "2026-04-15",
+    baselineEnd: "2026-04-21",
+    interventionStart: "2026-04-22",
+    interventionEnd: "2026-05-05",
+  });
   assert.deepEqual(experiment?.attributes.summary, { outcome: ["steadier", "lighter"] });
   assert.equal(experiment?.attributes.privateNotes, undefined);
   assert.equal(experiment?.attributes.value, undefined);

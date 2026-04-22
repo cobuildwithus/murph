@@ -136,6 +136,7 @@ const EVENT_WRITE_KINDS = [
   'body_measurement',
   'sleep_session',
   'intervention_session',
+  'experiment_context',
 ] as const
 
 export const eventScaffoldKindSchema = z.enum(EVENT_WRITE_KINDS)
@@ -253,6 +254,16 @@ const eventTemplates: Record<(typeof EVENT_KINDS)[number], JsonObject> = {
     experimentId: 'exp_01JNV422Y2M5ZBV64ZP4N1DRB1',
     experimentSlug: 'focus-sprint',
     phase: 'checkpoint',
+  },
+  experiment_context: {
+    kind: 'experiment_context',
+    occurredAt: '2026-03-12T21:00:00.000Z',
+    title: 'Travel week during sauna experiment',
+    experimentId: 'exp_01JNV422Y2M5ZBV64ZP4N1DRB1',
+    experimentSlug: 'sauna-rhr',
+    contextType: 'travel',
+    severity: 'potential_confounder',
+    note: 'Hotel sleep and late meals may affect this week of the experiment.',
   },
   medication_intake: {
     kind: 'medication_intake',

@@ -188,6 +188,7 @@ export interface EventScaffoldResult {
     | "body_measurement"
     | "sleep_session"
     | "intervention_session"
+    | "experiment_context"
   payload: JsonObject
 }
 
@@ -284,7 +285,7 @@ export interface ExperimentContextLogResult {
   eventId: string
   ledgerFile: string
   created: boolean
-  kind: "note" | "exposure" | "supplement_intake" | "adverse_effect"
+  kind: "note" | "supplement_intake" | "experiment_context"
 }
 
 export interface ExperimentProgressResult {
@@ -303,6 +304,8 @@ export interface ExperimentOutcomeResult {
   slug: string
   asOf: string
   outcome: QueryExperimentOutcomeSummary
+  outcomePath?: string | null
+  updatedExperiment?: boolean
 }
 
 export interface JournalMutationResult {
@@ -575,6 +578,12 @@ export interface CoreWriteServices extends HealthCoreServiceMethods {
       inputFile: string
     },
   ): Promise<ExperimentContextLogResult>
+  writeExperimentOutcome(
+    input: CommandContext & {
+      lookup: string
+      asOf?: string
+    },
+  ): Promise<ExperimentOutcomeResult>
   ensureJournal(
     input: CommandContext & {
       date: string

@@ -58,12 +58,17 @@ declare module 'incur' {
       'event delete': { args: { id: string }; options: { vault: string; requestId?: string } }
       'event edit': { args: { id: string }; options: { vault: string; requestId?: string; input?: string; set?: string[]; clear?: string[]; dayKeyPolicy?: "keep" | "recompute" } }
       'event list': { args: {}; options: { vault: string; requestId?: string; kind?: string; from?: string; to?: string; tag?: string[]; experiment?: string; limit: number } }
-      'event scaffold': { args: {}; options: { vault: string; requestId?: string; kind: "symptom" | "note" | "observation" | "measurement" | "medication_intake" | "supplement_intake" | "activity_session" | "body_measurement" | "sleep_session" | "intervention_session" } }
+      'event scaffold': { args: {}; options: { vault: string; requestId?: string; kind: "symptom" | "note" | "observation" | "measurement" | "medication_intake" | "supplement_intake" | "activity_session" | "body_measurement" | "sleep_session" | "intervention_session" | "experiment_context" } }
       'event show': { args: { id: string }; options: { vault: string; requestId?: string } }
       'event upsert': { args: {}; options: { vault: string; requestId?: string; input: string } }
       'experiment checkpoint': { args: {}; options: { vault: string; requestId?: string; input: string } }
+      'experiment context log': { args: { id: string }; options: { vault: string; requestId?: string; input: string } }
       'experiment create': { args: { slug: string }; options: { vault: string; requestId?: string; title?: string; hypothesis?: string; startedOn?: string; status?: "planned" | "active" | "paused" | "completed" | "abandoned" } }
       'experiment list': { args: {}; options: { vault: string; requestId?: string; status?: "planned" | "active" | "paused" | "completed" | "abandoned"; limit: number } }
+      'experiment outcome analyze': { args: { id: string }; options: { vault: string; requestId?: string; asOf?: string } }
+      'experiment outcome write': { args: { id: string }; options: { vault: string; requestId?: string; asOf?: string } }
+      'experiment progress': { args: { id: string }; options: { vault: string; requestId?: string; asOf?: string } }
+      'experiment session log': { args: { id: string }; options: { vault: string; requestId?: string; input: string } }
       'experiment show': { args: { id: string }; options: { vault: string; requestId?: string } }
       'experiment stop': { args: { id: string }; options: { vault: string; requestId?: string; occurredAt?: string | string; note?: string } }
       'experiment update': { args: {}; options: { vault: string; requestId?: string; input: string } }

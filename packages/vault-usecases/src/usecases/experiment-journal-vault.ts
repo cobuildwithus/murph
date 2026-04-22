@@ -1,4 +1,12 @@
-import { EXPERIMENT_STATUSES } from '@murphai/contracts'
+import {
+  EXPERIMENT_STATUSES,
+  VAULT_LAYOUT,
+  eventSourceSchema,
+  experimentOutcomeSchema,
+  experimentFrontmatterSchema,
+  safeParseContract,
+} from '@murphai/contracts'
+import { stringifyFrontmatterDocument } from '@murphai/core'
 import { z } from 'zod'
 import {
   loadQueryRuntime,
@@ -28,6 +36,8 @@ import {
   stringArray,
   uniqueStrings,
 } from './vault-usecase-helpers.js'
+import { upsertEventRecord } from './provider-event.js'
+import type { JsonObject } from '../health-cli-method-types.js'
 
 type EntityFamily = 'experiment' | 'journal'
 type JournalLinkKind = 'eventIds' | 'sampleStreams'
@@ -57,7 +67,7 @@ interface ExperimentJournalVaultCoreRuntime {
     title?: string
     hypothesis?: string
     startedOn?: string
-    status?: string
+    status?: ExperimentStatusValue
   }): Promise<{
     created?: boolean
     experiment: {
@@ -72,14 +82,21 @@ interface ExperimentJournalVaultCoreRuntime {
     title?: string
     hypothesis?: string
     startedOn?: string
-    status?: string
+    status?: ExperimentStatusValue
     body?: string
     tags?: string[]
+    protocolRef?: z.infer<typeof experimentFrontmatterSchema>['protocolRef'] | null
+    runPlan?: z.infer<typeof experimentFrontmatterSchema>['runPlan'] | null
+    analysisPlan?: z.infer<typeof experimentFrontmatterSchema>['analysisPlan'] | null
+    onboarding?: z.infer<typeof experimentFrontmatterSchema>['onboarding'] | null
+    assistantSupport?: z.infer<typeof experimentFrontmatterSchema>['assistantSupport'] | null
+    outcome?: z.infer<typeof experimentFrontmatterSchema>['outcome'] | null
+    outcomeRef?: z.infer<typeof experimentFrontmatterSchema>['outcomeRef'] | null
   }): Promise<{
     experimentId: string
     slug: string
     relativePath: string
-    status: string
+    status: ExperimentStatusValue
     updated: true
   }>
   checkpointExperiment(input: {
@@ -92,7 +109,7 @@ interface ExperimentJournalVaultCoreRuntime {
     experimentId: string
     slug: string
     relativePath: string
-    status: string
+    status: ExperimentStatusValue
     eventId: string
     ledgerFile: string
     updated: true
@@ -107,7 +124,7 @@ interface ExperimentJournalVaultCoreRuntime {
     experimentId: string
     slug: string
     relativePath: string
-    status: string
+    status: ExperimentStatusValue
     eventId: string
     ledgerFile: string
     updated: true
@@ -144,9 +161,30 @@ interface ExperimentJournalVaultCoreRuntime {
     updatedAt: string
     updated: true
   }>
+  applyCanonicalWriteBatch(input: {
+    vaultRoot: string
+    operationType: string
+    summary: string
+    occurredAt?: string
+    audit: {
+      action: string
+      commandName: string
+      summary: string
+      targetIds?: string[]
+    }
+    textWrites?: Array<{
+      relativePath: string
+      content: string
+      overwrite?: boolean
+      allowExistingMatch?: boolean
+    }>
+  }): Promise<{
+    textWrites: string[]
+  }>
 }
 
 const experimentStatusSchema = z.enum(EXPERIMENT_STATUSES)
+type ExperimentStatusValue = z.infer<typeof experimentStatusSchema>
 const experimentSelectorPayloadSchema = z
   .object({
     lookup: z.string().min(1).optional(),
@@ -167,12 +205,79 @@ const experimentUpdatePayloadSchema = experimentSelectorPayloadSchema.extend({
   status: experimentStatusSchema.optional(),
   body: z.string().optional(),
   tags: z.array(slugSchema).optional(),
+  protocolRef: experimentFrontmatterSchema.shape.protocolRef.nullable().optional(),
+  runPlan: experimentFrontmatterSchema.shape.runPlan.nullable().optional(),
+  analysisPlan: experimentFrontmatterSchema.shape.analysisPlan.nullable().optional(),
+  onboarding: experimentFrontmatterSchema.shape.onboarding.nullable().optional(),
+  assistantSupport: experimentFrontmatterSchema.shape.assistantSupport.nullable().optional(),
+  outcome: experimentFrontmatterSchema.shape.outcome.nullable().optional(),
+  outcomeRef: experimentFrontmatterSchema.shape.outcomeRef.nullable().optional(),
 })
 const experimentCheckpointPayloadSchema = experimentSelectorPayloadSchema.extend({
   occurredAt: isoTimestampSchema.optional(),
   title: z.string().min(1).optional(),
   note: z.string().min(1).optional(),
 })
+const experimentSessionPayloadSchema = z.object({
+  occurredAt: isoTimestampSchema.optional(),
+  source: eventSourceSchema.optional(),
+  title: z.string().min(1).optional(),
+  note: z.string().optional(),
+  interventionType: z.string().min(1).optional(),
+  status: z.enum(['completed', 'partial', 'missed', 'skipped']).optional(),
+  sessionStatus: z.enum(['completed', 'partial', 'missed', 'skipped']).optional(),
+  durationMinutes: z.number().int().positive().optional(),
+  protocolId: z.string().min(1).optional(),
+  timing: z.string().min(1).max(120).optional(),
+  temperatureC: z.number().min(0).max(200).optional(),
+  afterExercise: z.boolean().optional(),
+  symptoms: z.array(z.string().min(1).max(160)).max(25).optional(),
+  confounders: z.union([
+    z.array(z.string().min(1)),
+    z.record(z.string(), z.union([z.string().min(1), z.number(), z.boolean(), z.null()])),
+  ]).optional(),
+})
+const experimentSimpleContextPayloadSchema = z.object({
+  occurredAt: isoTimestampSchema.optional(),
+  source: eventSourceSchema.optional(),
+  title: z.string().min(1).optional(),
+  note: z.string().optional(),
+  contextType: z.string().min(1),
+  severity: z.enum(['info', 'potential_confounder', 'safety', 'blocking']).optional(),
+  tags: z.array(slugSchema).optional(),
+})
+const experimentContextPayloadSchema = z.union([
+  experimentSimpleContextPayloadSchema,
+  z.object({
+    kind: z.literal('experiment_context'),
+    occurredAt: isoTimestampSchema.optional(),
+    source: eventSourceSchema.optional(),
+    title: z.string().min(1).optional(),
+    note: z.string().optional(),
+    contextType: z.string().min(1),
+    severity: z.enum(['info', 'potential_confounder', 'safety', 'blocking']).optional(),
+    tags: z.array(slugSchema).optional(),
+  }),
+  z.object({
+    kind: z.literal('note'),
+    occurredAt: isoTimestampSchema.optional(),
+    source: eventSourceSchema.optional(),
+    title: z.string().min(1).optional(),
+    note: z.string().min(1),
+    tags: z.array(slugSchema).optional(),
+  }),
+  z.object({
+    kind: z.literal('supplement_intake'),
+    occurredAt: isoTimestampSchema.optional(),
+    source: eventSourceSchema.optional(),
+    title: z.string().min(1).optional(),
+    note: z.string().optional(),
+    supplementName: z.string().min(1),
+    dose: z.number().nonnegative(),
+    unit: z.string().min(1),
+    tags: z.array(slugSchema).optional(),
+  }),
+])
 const JOURNAL_LINK_RUNTIME_ACTIONS: Record<
   JournalLinkKind,
   Record<JournalLinkOperation, JournalLinkRuntimeAction>
@@ -193,7 +298,7 @@ export async function createExperimentRecord(input: {
   title?: string
   hypothesis?: string
   startedOn?: string
-  status?: string
+  status?: ExperimentStatusValue
 }) {
   const core = await loadExperimentJournalVaultCoreRuntime()
   const result = await core.createExperiment({
@@ -202,7 +307,7 @@ export async function createExperimentRecord(input: {
     title: normalizeOptionalText(input.title) ?? input.slug,
     hypothesis: normalizeOptionalText(input.hypothesis) ?? undefined,
     startedOn: input.startedOn,
-    status: normalizeOptionalText(input.status) ?? 'active',
+    status: input.status ?? 'active',
   })
 
   return {
@@ -232,6 +337,13 @@ export async function updateExperimentRecordFromInput(input: {
     status: payload.status,
     body: payload.body,
     tags: payload.tags,
+    protocolRef: payload.protocolRef,
+    runPlan: payload.runPlan,
+    analysisPlan: payload.analysisPlan,
+    onboarding: payload.onboarding,
+    assistantSupport: payload.assistantSupport,
+    outcome: payload.outcome,
+    outcomeRef: payload.outcomeRef,
   })
 }
 
@@ -241,9 +353,16 @@ export async function updateExperimentRecord(input: {
   title?: string
   hypothesis?: string
   startedOn?: string
-  status?: string
+  status?: ExperimentStatusValue
   body?: string
   tags?: string[]
+  protocolRef?: z.infer<typeof experimentFrontmatterSchema>['protocolRef'] | null
+  runPlan?: z.infer<typeof experimentFrontmatterSchema>['runPlan'] | null
+  analysisPlan?: z.infer<typeof experimentFrontmatterSchema>['analysisPlan'] | null
+  onboarding?: z.infer<typeof experimentFrontmatterSchema>['onboarding'] | null
+  assistantSupport?: z.infer<typeof experimentFrontmatterSchema>['assistantSupport'] | null
+  outcome?: z.infer<typeof experimentFrontmatterSchema>['outcome'] | null
+  outcomeRef?: z.infer<typeof experimentFrontmatterSchema>['outcomeRef'] | null
 }) {
   const core = await loadExperimentJournalVaultCoreRuntime()
   const entity = await requireEntityFamily(input.vault, input.lookup, 'experiment')
@@ -257,6 +376,13 @@ export async function updateExperimentRecord(input: {
       status: input.status,
       body: input.body,
       tags: input.tags,
+      protocolRef: input.protocolRef,
+      runPlan: input.runPlan,
+      analysisPlan: input.analysisPlan,
+      onboarding: input.onboarding,
+      assistantSupport: input.assistantSupport,
+      outcome: input.outcome,
+      outcomeRef: input.outcomeRef,
     })
 
     return {
@@ -339,7 +465,7 @@ export async function showExperimentRecord(vault: string, lookup: string) {
 
 export async function listExperimentRecords(input: {
   vault: string
-  status?: string
+  status?: ExperimentStatusValue
   limit: number
 }) {
   const query = await loadExperimentJournalVaultQueryRuntime()
@@ -356,6 +482,337 @@ export async function listExperimentRecords(input: {
     status: input.status ?? null,
     limit: input.limit,
   }, items)
+}
+
+export async function logExperimentSessionRecordFromInput(input: {
+  vault: string
+  lookup: string
+  inputFile: string
+}) {
+  const payload = experimentSessionPayloadSchema.parse(
+    await readJsonPayload(input.inputFile, 'experiment session payload'),
+  )
+
+  return logExperimentSessionRecord({
+    vault: input.vault,
+    lookup: input.lookup,
+    ...payload,
+  })
+}
+
+export async function logExperimentSessionRecord(input: {
+  vault: string
+  lookup: string
+  occurredAt?: string
+  source?: z.infer<typeof eventSourceSchema>
+  title?: string
+  note?: string
+  interventionType?: string
+  status?: 'completed' | 'partial' | 'missed' | 'skipped'
+  sessionStatus?: 'completed' | 'partial' | 'missed' | 'skipped'
+  durationMinutes?: number
+  protocolId?: string
+  timing?: string
+  temperatureC?: number
+  afterExercise?: boolean
+  symptoms?: string[]
+  confounders?: string[] | Record<string, string | number | boolean | null>
+}) {
+  const experiment = await requireEntityFamily(input.vault, input.lookup, 'experiment')
+  const frontmatter = requireExperimentFrontmatter(experiment)
+  const interventionType =
+    slugifyExperimentValue(input.interventionType) ??
+    slugifyExperimentValue(frontmatter.runPlan?.modality) ??
+    inferExperimentInterventionType(frontmatter.protocolRef?.key)
+
+  if (!interventionType) {
+    throw new VaultCliError(
+      'invalid_payload',
+      'Experiment session logging requires interventionType or runPlan.modality.',
+    )
+  }
+
+  const title = normalizeOptionalText(input.title) ?? buildExperimentSessionTitle({
+    durationMinutes: input.durationMinutes,
+    interventionType,
+  })
+  const event = await upsertEventRecord({
+    vault: input.vault,
+    payload: compactObject({
+      kind: 'intervention_session',
+      occurredAt: input.occurredAt ?? new Date().toISOString(),
+      source: input.source ?? 'manual',
+      title,
+      note: normalizeOptionalText(input.note) ?? undefined,
+      experimentId: frontmatter.experimentId,
+      experimentSlug: frontmatter.slug,
+      links: [{ type: 'related_to', targetId: frontmatter.experimentId }],
+      interventionType,
+      durationMinutes: input.durationMinutes,
+      protocolId: normalizeOptionalText(input.protocolId) ?? undefined,
+      sessionStatus: input.sessionStatus ?? input.status ?? 'completed',
+      timing: normalizeOptionalText(input.timing) ?? undefined,
+      temperatureC: input.temperatureC,
+      afterExercise: input.afterExercise,
+      symptoms: normalizeExperimentFreeTextList(input.symptoms, 160),
+      confounders: normalizeExperimentConfounders(input.confounders),
+    }) as JsonObject,
+  })
+
+  return {
+    vault: input.vault,
+    experimentId: frontmatter.experimentId,
+    lookupId: frontmatter.experimentId,
+    slug: frontmatter.slug,
+    eventId: event.eventId,
+    ledgerFile: event.ledgerFile,
+    created: event.created,
+    kind: 'intervention_session' as const,
+  }
+}
+
+export async function logExperimentContextRecordFromInput(input: {
+  vault: string
+  lookup: string
+  inputFile: string
+}) {
+  const payload = experimentContextPayloadSchema.parse(
+    await readJsonPayload(input.inputFile, 'experiment context payload'),
+  )
+
+  return logExperimentContextRecord({
+    vault: input.vault,
+    lookup: input.lookup,
+    payload,
+  })
+}
+
+export async function logExperimentContextRecord(input: {
+  vault: string
+  lookup: string
+  payload: z.infer<typeof experimentContextPayloadSchema>
+}) {
+  const experiment = await requireEntityFamily(input.vault, input.lookup, 'experiment')
+  const frontmatter = requireExperimentFrontmatter(experiment)
+  const payload = input.payload
+  const occurredAt = payload.occurredAt ?? new Date().toISOString()
+  const source = payload.source ?? 'manual'
+
+  const base = {
+    occurredAt,
+    source,
+    experimentId: frontmatter.experimentId,
+    experimentSlug: frontmatter.slug,
+    links: [{ type: 'related_to', targetId: frontmatter.experimentId }],
+    note: normalizeOptionalText(payload.note) ?? undefined,
+    tags: 'tags' in payload ? payload.tags : undefined,
+  }
+
+  const event = await upsertEventRecord({
+    vault: input.vault,
+    payload: (() => {
+      if (!('kind' in payload) || payload.kind === 'experiment_context') {
+        const contextType = slugifyExperimentValue(payload.contextType)
+        if (!contextType) {
+          throw new VaultCliError(
+            'invalid_payload',
+            'Experiment context logging requires a usable contextType.',
+          )
+        }
+
+        return compactObject({
+          kind: 'experiment_context',
+          ...base,
+          title:
+            normalizeOptionalText(payload.title) ??
+            `${contextType.replace(/-/gu, ' ')} context (${frontmatter.slug})`,
+          contextType,
+          severity: payload.severity ?? 'potential_confounder',
+        })
+      }
+
+      switch (payload.kind) {
+        case 'note':
+          return compactObject({
+            kind: 'note',
+            ...base,
+            title:
+              normalizeOptionalText(payload.title) ??
+              `Experiment context note (${frontmatter.slug})`,
+            note: payload.note,
+          })
+        case 'supplement_intake':
+          return compactObject({
+            kind: 'supplement_intake',
+            ...base,
+            title:
+              normalizeOptionalText(payload.title) ??
+              `${payload.supplementName} logged for ${frontmatter.slug}`,
+            supplementName: payload.supplementName,
+            dose: payload.dose,
+            unit: payload.unit,
+          })
+      }
+    })() as JsonObject,
+  })
+
+  return {
+    vault: input.vault,
+    experimentId: frontmatter.experimentId,
+    lookupId: frontmatter.experimentId,
+    slug: frontmatter.slug,
+    eventId: event.eventId,
+    ledgerFile: event.ledgerFile,
+    created: event.created,
+    kind: 'kind' in payload ? payload.kind : 'experiment_context',
+  }
+}
+
+export async function showExperimentProgress(input: {
+  vault: string
+  lookup: string
+  asOf?: string
+}) {
+  const query = await loadExperimentJournalVaultQueryRuntime()
+  const readModel = await readExperimentJournalVault(input.vault)
+  const entity = query.lookupEntityById(readModel, input.lookup)
+
+  if (!entity || entity.family !== 'experiment') {
+    throw new VaultCliError('not_found', `No experiment found for "${input.lookup}".`)
+  }
+
+  const slug = entity.experimentSlug ?? stringOrNull(entity.attributes.slug)
+  if (!slug) {
+    throw new VaultCliError('invalid_payload', 'Experiment progress requires a canonical slug.')
+  }
+
+  const progress = query.summarizeExperimentProgress(readModel, slug, {
+    asOf: input.asOf,
+  })
+
+  return {
+    vault: input.vault,
+    experimentId: entity.entityId,
+    lookupId: entity.entityId,
+    slug,
+    asOf: progress.asOf,
+    progress,
+  }
+}
+
+export async function analyzeExperimentOutcomeRecord(input: {
+  vault: string
+  lookup: string
+  asOf?: string
+}) {
+  const query = await loadExperimentJournalVaultQueryRuntime()
+  const readModel = await readExperimentJournalVault(input.vault)
+  const entity = query.lookupEntityById(readModel, input.lookup)
+
+  if (!entity || entity.family !== 'experiment') {
+    throw new VaultCliError('not_found', `No experiment found for "${input.lookup}".`)
+  }
+
+  const slug = entity.experimentSlug ?? stringOrNull(entity.attributes.slug)
+  if (!slug) {
+    throw new VaultCliError('invalid_payload', 'Experiment outcome analysis requires a canonical slug.')
+  }
+
+  const outcome = query.analyzeExperimentOutcome(readModel, slug, {
+    asOf: input.asOf,
+  })
+
+  return {
+    vault: input.vault,
+    experimentId: entity.entityId,
+    lookupId: entity.entityId,
+    slug,
+    asOf: outcome.asOf,
+    outcome,
+  }
+}
+
+export async function writeExperimentOutcomeRecord(input: {
+  vault: string
+  lookup: string
+  asOf?: string
+}) {
+  const analysis = await analyzeExperimentOutcomeRecord(input)
+  const experiment = await requireEntityFamily(input.vault, input.lookup, 'experiment')
+  const frontmatter = requireExperimentFrontmatter(experiment)
+  const generatedAt = new Date().toISOString()
+  const validatedOutcome = experimentOutcomeSchema.parse({
+    ...analysis.outcome,
+    generatedAt,
+  })
+  const outcomeId =
+    validatedOutcome.outcomeId ??
+    `${frontmatter.experimentId}-outcome-${analysis.asOf}`
+  const outcomePath = `${VAULT_LAYOUT.experimentsDirectory}/outcomes/${frontmatter.slug}-${analysis.asOf}.json`
+  const core = await loadExperimentJournalVaultCoreRuntime()
+  const nextFrontmatter = experimentFrontmatterSchema.parse({
+    ...frontmatter,
+    outcome: {
+      ...frontmatter.outcome,
+      latestOutcomeId: outcomeId,
+      readyForReviewAt:
+        frontmatter.outcome?.readyForReviewAt ??
+        generatedAt,
+      finalAnalysisStatus: 'generated' as const,
+    },
+    outcomeRef: {
+      outcomeId,
+      generatedAt,
+      relativePath: outcomePath,
+    },
+  })
+  const serializedFrontmatterAttributes = JSON.parse(
+    JSON.stringify(nextFrontmatter),
+  ) as NonNullable<Parameters<typeof stringifyFrontmatterDocument>[0]>['attributes']
+  const nextExperimentMarkdown = stringifyFrontmatterDocument({
+    attributes: serializedFrontmatterAttributes,
+    body: experiment.body ?? '',
+  })
+
+  try {
+    await core.applyCanonicalWriteBatch({
+      vaultRoot: input.vault,
+      operationType: 'experiment_outcome_write',
+      summary: `Write experiment outcome ${validatedOutcome.outcomeId ?? `${frontmatter.experimentId}-outcome-${analysis.asOf}`}`,
+      occurredAt: validatedOutcome.generatedAt,
+      audit: {
+        action: 'experiment_update',
+        commandName: 'vault-cli experiment outcome write',
+        summary: `Wrote outcome analysis for experiment ${frontmatter.experimentId}.`,
+        targetIds: [frontmatter.experimentId],
+      },
+      textWrites: [
+        {
+          relativePath: outcomePath,
+          content: `${JSON.stringify(validatedOutcome, null, 2)}\n`,
+          overwrite: true,
+        },
+        {
+          relativePath: experiment.path,
+          content: nextExperimentMarkdown,
+          overwrite: true,
+        },
+      ],
+    })
+  } catch (error) {
+    throw toVaultCliError(error)
+  }
+
+  return {
+    ...analysis,
+    outcome: {
+      ...validatedOutcome,
+      outcomeId,
+      schema: validatedOutcome.schema ?? validatedOutcome.schemaVersion,
+    },
+    outcomePath,
+    updatedExperiment: true,
+  }
 }
 
 export async function ensureJournalRecord(input: {
@@ -777,4 +1234,128 @@ function latestDate(records: readonly QueryCanonicalEntity[]) {
 
 function stringOrNull(value: unknown) {
   return typeof value === 'string' && value.length > 0 ? value : null
+}
+
+function requireExperimentFrontmatter(entity: QueryCanonicalEntity) {
+  const result = safeParseContract(experimentFrontmatterSchema, entity.attributes)
+
+  if (!result.success) {
+    throw new VaultCliError(
+      'invalid_payload',
+      `Experiment "${entity.entityId}" has invalid frontmatter for rich experiment operations.`,
+    )
+  }
+
+  return result.data
+}
+
+function slugifyExperimentValue(value: string | null | undefined): string | null {
+  const normalized = normalizeOptionalText(value ?? undefined)
+  if (!normalized) {
+    return null
+  }
+
+  const slug = normalized
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/gu, '-')
+    .replace(/^-+|-+$/gu, '')
+
+  return slug.length > 0 ? slug : null
+}
+
+function slugifyExperimentValueList(values: readonly string[] | undefined): string[] | undefined {
+  if (!Array.isArray(values)) {
+    return undefined
+  }
+
+  const normalized = values
+    .map((value) => slugifyExperimentValue(value))
+    .filter((value): value is string => typeof value === 'string' && value.length > 0)
+
+  return normalized.length > 0 ? uniqueStrings(normalized) : undefined
+}
+
+function normalizeExperimentFreeTextList(
+  values: readonly string[] | undefined,
+  maxLength: number,
+): string[] | undefined {
+  if (!Array.isArray(values)) {
+    return undefined
+  }
+
+  const normalized = uniqueStrings(values
+    .map((value) => normalizeOptionalText(value))
+    .filter((value): value is string => typeof value === 'string' && value.length > 0)
+    .map((value) => value.slice(0, maxLength)))
+
+  return normalized.length > 0 ? normalized : undefined
+}
+
+function normalizeExperimentConfounders(
+  value: string[] | Record<string, string | number | boolean | null> | undefined,
+) {
+  if (Array.isArray(value)) {
+    return slugifyExperimentValueList(value)
+  }
+
+  if (!value || typeof value !== 'object') {
+    return undefined
+  }
+
+  const normalized: Record<string, string | number | boolean | null> = {}
+
+  for (const [key, entry] of Object.entries(value)) {
+    const normalizedKey = normalizeOptionalText(key)
+    if (!normalizedKey) {
+      continue
+    }
+
+    if (typeof entry === 'string') {
+      const normalizedValue = normalizeOptionalText(entry)
+      if (normalizedValue) {
+        normalized[normalizedKey] = normalizedValue
+      }
+      continue
+    }
+
+    if (
+      typeof entry === 'number' ||
+      typeof entry === 'boolean' ||
+      entry === null
+    ) {
+      normalized[normalizedKey] = entry
+    }
+  }
+
+  return Object.keys(normalized).length > 0 ? normalized : undefined
+}
+
+function inferExperimentInterventionType(protocolKey: string | undefined): string | null {
+  const normalized = normalizeOptionalText(protocolKey)?.toLowerCase() ?? null
+  if (!normalized) {
+    return null
+  }
+
+  if (normalized.includes('sauna')) {
+    return 'sauna'
+  }
+
+  if (normalized.includes('magnesium')) {
+    return 'magnesium'
+  }
+
+  const tail = normalized.split('/').at(-1) ?? normalized
+  return slugifyExperimentValue(tail)
+}
+
+function buildExperimentSessionTitle(input: {
+  durationMinutes?: number
+  interventionType: string
+}) {
+  const label = input.interventionType.replace(/-/gu, ' ')
+  if (typeof input.durationMinutes === 'number') {
+    return `${input.durationMinutes}-minute ${label}`
+  }
+
+  return `${label[0]?.toUpperCase() ?? ''}${label.slice(1)} session`
 }

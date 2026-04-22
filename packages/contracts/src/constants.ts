@@ -67,6 +67,7 @@ export const EVENT_KINDS = Object.freeze([
   "note",
   "observation",
   "experiment_event",
+  "experiment_context",
   "medication_intake",
   "procedure",
   "supplement_intake",

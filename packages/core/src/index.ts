@@ -203,6 +203,7 @@ export * from "./shares.ts";
 export {
   buildActivitySessionEventDraft,
   buildBodyMeasurementEventDraft,
+  buildExperimentContextEventDraft,
   buildMeasurementEventDraft,
   buildInterventionSessionEventDraft,
   buildMedicationIntakeEventDraft,

@@ -1,0 +1,1060 @@
+import {
+  EXPERIMENT_OUTCOME_SCHEMA_VERSION,
+  EXPERIMENT_PROGRESS_SCHEMA_VERSION,
+  experimentFrontmatterSchema,
+  experimentOutcomeSchema,
+  experimentProgressSnapshotSchema,
+  safeParseContract,
+  type ExperimentFrontmatter,
+  type ExperimentOutcome,
+  type ExperimentProtocolRef,
+  type ExperimentProgressMetricSignal,
+  type ExperimentProgressSnapshot,
+} from "@murphai/contracts";
+
+import { getExperiment, type VaultReadModel } from "./read-model.ts";
+import { summarizeWearableDay, type WearableDaySummary, type WearableResolvedMetric } from "./wearables.ts";
+
+import type { CanonicalEntity } from "./canonical-entities.ts";
+
+export type ExperimentProgressPhase =
+  | "planned"
+  | "baseline"
+  | "intervention"
+  | "review_due"
+  | "completed"
+  | "paused"
+  | "abandoned";
+export type ExperimentAdherenceStatus =
+  | "not_started"
+  | "behind"
+  | "on_track"
+  | "met_minimum"
+  | "met_target"
+  | "unknown";
+export type ExperimentCoverageStatus =
+  | "no_wearable_data"
+  | "insufficient"
+  | "partial"
+  | "sufficient_for_progress"
+  | "ready_for_review";
+export type ExperimentRecommendationAction = "skip" | "remind" | "summary" | "review";
+export type ExperimentOutcomeConfidenceLevel = "low" | "medium" | "high";
+
+export interface ExperimentMetricPeriodSummary {
+  daysWithData: number;
+  mean: number | null;
+  totalDays: number;
+  unit: string | null;
+}
+
+export interface ExperimentMetricResult {
+  baselineDayCount: number;
+  baselineMean: number | null;
+  baseline: ExperimentMetricPeriodSummary;
+  biomarkerKey: string;
+  completeness: "insufficient" | "partial" | "good";
+  deltaAbs: number | null;
+  deltaPct: number | null;
+  expectedDirection: "increase" | "decrease" | "stabilize" | null;
+  interventionDayCount: number;
+  interventionMean: number | null;
+  intervention: ExperimentMetricPeriodSummary;
+  label: string;
+  movedAsExpected: boolean | null;
+  unit: string | null;
+}
+
+export interface ExperimentProgressSummary extends ExperimentProgressSnapshot {
+  schema: typeof EXPERIMENT_PROGRESS_SCHEMA_VERSION;
+  asOf: string;
+  adherence: {
+    completedSessions: number;
+    expectedSessionsByNow: number | null;
+    minimumUsefulSessions: number | null;
+    sessionEventIds?: string[];
+    status: ExperimentAdherenceStatus;
+    targetSessions: number | null;
+  };
+  confounders: string[];
+  dataCoverage: {
+    baselineDaysAvailable: number;
+    interventionDaysAvailable: number;
+    primaryBiomarkerKey?: string | null;
+    primaryMetricDaysAvailable: number;
+    status: ExperimentCoverageStatus;
+    wearableProviders: string[];
+  };
+  dayInRun: number | null;
+  experiment: {
+    id: string;
+    slug: string;
+    status: ExperimentFrontmatter["status"];
+    title: string;
+  };
+  phase: ExperimentProgressPhase;
+  protocolRef: ExperimentProtocolRef | null;
+  recommendation: {
+    action: ExperimentRecommendationAction;
+    reason: string;
+    shouldNotifyUser: boolean;
+  };
+  earlySignals?: ExperimentProgressMetricSignal[];
+  signals: ExperimentMetricResult[];
+  windows: {
+    baselineEnd: string | null;
+    baselineStart: string | null;
+    interventionEnd: string | null;
+    interventionStart: string | null;
+  };
+}
+
+export interface ExperimentOutcomeSummary extends ExperimentOutcome {
+  schema: typeof EXPERIMENT_OUTCOME_SCHEMA_VERSION;
+  adherenceSummary: {
+    adherenceLevel?: "unknown" | "low" | "partial" | "good";
+    completedSessions: number;
+    minimumUsefulSessions: number | null;
+    status: ExperimentAdherenceStatus;
+    targetSessions: number | null;
+  };
+  asOf: string;
+  generatedAt?: string;
+  outcomeId?: string;
+  conclusion: {
+    caveats: string[];
+    headline: string;
+    plainLanguage: string;
+  };
+  confidence: {
+    level: ExperimentOutcomeConfidenceLevel;
+    reasons: string[];
+  };
+  confounders: string[];
+  experiment: {
+    id: string;
+    slug: string;
+    status: ExperimentFrontmatter["status"];
+    title: string;
+  };
+  metricResults: ExperimentMetricResult[];
+  protocolRef: ExperimentProtocolRef | null;
+  runRef?: ExperimentProtocolRef;
+  windows: ExperimentProgressSummary["windows"];
+}
+
+interface ExperimentSummaryContext {
+  asOf: string;
+  baselineDates: string[];
+  completedSessions: number;
+  confounders: string[];
+  events: CanonicalEntity[];
+  experiment: CanonicalEntity;
+  frontmatter: ExperimentFrontmatter;
+  interventionDates: string[];
+  progressPhase: ExperimentProgressPhase;
+  summariesByDate: Map<string, WearableDaySummary | null>;
+}
+
+interface MetricWindowPoint {
+  date: string;
+  unit: string | null;
+  value: number;
+}
+
+export function summarizeExperimentProgress(
+  vault: VaultReadModel,
+  slug: string,
+  options: { asOf?: string } = {},
+): ExperimentProgressSummary {
+  const context = buildExperimentSummaryContext(vault, slug, options);
+  const signals = buildMetricResults(context);
+  const completedSessionEventIds = context.events
+    .filter(isCompletedSessionEvent)
+    .map((event) => event.entityId);
+  const primarySignal = signals[0] ?? null;
+  const baselineDaysAvailable = countDatesWithWearableData(
+    context.baselineDates,
+    context.summariesByDate,
+  );
+  const interventionDaysAvailable = countDatesWithWearableData(
+    context.interventionDates,
+    context.summariesByDate,
+  );
+  const adherence = {
+    ...buildAdherenceSummary(context),
+    sessionEventIds: completedSessionEventIds,
+  };
+  const dataCoverage = buildCoverageSummary({
+    baselineDaysAvailable,
+    interventionDaysAvailable,
+    primarySignal,
+    progressPhase: context.progressPhase,
+    summariesByDate: context.summariesByDate,
+  });
+
+  const result = safeParseContract(experimentProgressSnapshotSchema, {
+    schemaVersion: EXPERIMENT_PROGRESS_SCHEMA_VERSION,
+    schema: EXPERIMENT_PROGRESS_SCHEMA_VERSION,
+    asOf: context.asOf,
+    adherence,
+    confounders: context.confounders,
+    dataCoverage,
+    dayInRun: dayInRun(context.frontmatter, context.asOf),
+    experiment: {
+      id: context.frontmatter.experimentId,
+      slug: context.frontmatter.slug,
+      status: context.frontmatter.status,
+      title: context.frontmatter.title,
+    },
+    phase: context.progressPhase,
+    protocolRef: context.frontmatter.protocolRef ?? null,
+    recommendation: buildProgressRecommendation({
+      adherence,
+      assistantSupport: context.frontmatter.assistantSupport,
+      dataCoverage,
+      hasSafetyFollowUp: hasSafetyFollowUp(context.events),
+      phase: context.progressPhase,
+    }),
+    earlySignals: buildProgressSignals(signals),
+    signals,
+    windows: buildWindowSummary(context.frontmatter),
+  });
+
+  if (!result.success) {
+    throw new Error(`Experiment progress for "${slug}" is invalid.`);
+  }
+
+  return result.data as ExperimentProgressSummary;
+}
+
+export function analyzeExperimentOutcome(
+  vault: VaultReadModel,
+  slug: string,
+  options: { asOf?: string } = {},
+): ExperimentOutcomeSummary {
+  const context = buildExperimentSummaryContext(vault, slug, options);
+  const metricResults = buildMetricResults(context);
+  const adherence = buildAdherenceSummary(context);
+  const confidence = buildOutcomeConfidence({
+    adherence,
+    confounders: context.confounders,
+    metricResults,
+  });
+  const primary = metricResults[0] ?? null;
+
+  const result = safeParseContract(experimentOutcomeSchema, {
+    schemaVersion: EXPERIMENT_OUTCOME_SCHEMA_VERSION,
+    schema: EXPERIMENT_OUTCOME_SCHEMA_VERSION,
+    adherenceSummary: {
+      adherenceLevel: classifyAdherenceLevel(adherence),
+      completedSessions: adherence.completedSessions,
+      minimumUsefulSessions: adherence.minimumUsefulSessions,
+      status: adherence.status,
+      targetSessions: adherence.targetSessions,
+    },
+    asOf: context.asOf,
+    conclusion: buildOutcomeConclusion(primary, confidence.level),
+    confidence,
+    confounders: context.confounders,
+    experiment: {
+      id: context.frontmatter.experimentId,
+      slug: context.frontmatter.slug,
+      status: context.frontmatter.status,
+      title: context.frontmatter.title,
+    },
+    metricResults,
+    outcomeId: `${context.frontmatter.experimentId}-outcome-${context.asOf}`,
+    protocolRef: context.frontmatter.protocolRef ?? null,
+    runRef: context.frontmatter.protocolRef ?? undefined,
+    windows: buildWindowSummary(context.frontmatter),
+  });
+
+  if (!result.success) {
+    throw new Error(`Experiment outcome for "${slug}" is invalid.`);
+  }
+
+  return result.data as ExperimentOutcomeSummary;
+}
+
+function buildExperimentSummaryContext(
+  vault: VaultReadModel,
+  slug: string,
+  options: { asOf?: string },
+): ExperimentSummaryContext {
+  const experiment = getExperiment(vault, slug);
+  if (!experiment) {
+    throw new Error(`Experiment "${slug}" was not found in the query read model.`);
+  }
+
+  const frontmatter = requireExperimentFrontmatter(experiment);
+  const asOf = normalizeAsOfDate(options.asOf);
+  const progressPhase = resolveProgressPhase(frontmatter, asOf);
+  const events = findExperimentEvents(vault, experiment, frontmatter, asOf);
+  const completedSessions = events.filter(isCompletedSessionEvent).length;
+  const dateSet = new Set<string>([
+    ...dateRange(frontmatter.runPlan?.baselineStart, frontmatter.runPlan?.baselineEnd),
+    ...dateRange(
+      frontmatter.runPlan?.interventionStart,
+      minIsoDate(frontmatter.runPlan?.interventionEnd, asOf),
+    ),
+  ]);
+  const summariesByDate = new Map<string, WearableDaySummary | null>();
+
+  for (const date of dateSet) {
+    summariesByDate.set(date, summarizeWearableDay(vault, date));
+  }
+
+  return {
+    asOf,
+    baselineDates: dateRange(frontmatter.runPlan?.baselineStart, frontmatter.runPlan?.baselineEnd),
+    completedSessions,
+    confounders: summarizeConfounders(events),
+    events,
+    experiment,
+    frontmatter,
+    interventionDates: dateRange(
+      frontmatter.runPlan?.interventionStart,
+      minIsoDate(frontmatter.runPlan?.interventionEnd, asOf),
+    ),
+    progressPhase,
+    summariesByDate,
+  };
+}
+
+function requireExperimentFrontmatter(entity: CanonicalEntity): ExperimentFrontmatter {
+  const result = safeParseContract(experimentFrontmatterSchema, entity.attributes);
+  if (!result.success) {
+    throw new Error(`Experiment "${entity.entityId}" has invalid frontmatter for experiment analysis.`);
+  }
+
+  return result.data;
+}
+
+function buildMetricResults(context: ExperimentSummaryContext): ExperimentMetricResult[] {
+  const biomarkerKeys = [
+    context.frontmatter.analysisPlan?.primaryBiomarkerKey,
+    ...(context.frontmatter.analysisPlan?.secondaryBiomarkerKeys ?? []),
+  ].filter((value): value is string => typeof value === "string" && value.length > 0);
+
+  return biomarkerKeys.map((biomarkerKey) => {
+    const baseline = collectMetricWindow(
+      biomarkerKey,
+      context.baselineDates,
+      context.summariesByDate,
+    );
+    const intervention = collectMetricWindow(
+      biomarkerKey,
+      context.interventionDates,
+      context.summariesByDate,
+    );
+    const baselineMean = mean(baseline.map((entry) => entry.value));
+    const interventionMean = mean(intervention.map((entry) => entry.value));
+    const deltaAbs =
+      baselineMean !== null && interventionMean !== null
+        ? round(interventionMean - baselineMean)
+        : null;
+    const deltaPct =
+      baselineMean !== null &&
+      interventionMean !== null &&
+      baselineMean !== 0
+        ? round(((interventionMean - baselineMean) / Math.abs(baselineMean)) * 100)
+        : null;
+    const unit = intervention[0]?.unit ?? baseline[0]?.unit ?? null;
+    const expectedDirection = context.frontmatter.analysisPlan?.desiredDirection ?? null;
+    const baselineSummary = {
+      daysWithData: baseline.length,
+      mean: baselineMean,
+      totalDays: context.baselineDates.length,
+      unit,
+    };
+    const interventionSummary = {
+      daysWithData: intervention.length,
+      mean: interventionMean,
+      totalDays: context.interventionDates.length,
+      unit,
+    };
+
+    return {
+      baselineDayCount: baseline.length,
+      baselineMean,
+      baseline: baselineSummary,
+      biomarkerKey,
+      completeness: classifyMetricCompleteness(baseline.length, intervention.length),
+      deltaAbs,
+      deltaPct,
+      expectedDirection,
+      interventionDayCount: intervention.length,
+      interventionMean,
+      intervention: interventionSummary,
+      label: humanizeBiomarkerKey(biomarkerKey),
+      movedAsExpected: movedAsExpected(deltaAbs, expectedDirection),
+      unit,
+    };
+  });
+}
+
+function buildAdherenceSummary(context: ExperimentSummaryContext): ExperimentProgressSummary["adherence"] {
+  const targetSessions = context.frontmatter.runPlan?.targetSessions ?? null;
+  const minimumUsefulSessions = context.frontmatter.runPlan?.minimumUsefulSessions ?? null;
+  const expectedSessionsByNow = computeExpectedSessionsByNow(
+    context.frontmatter,
+    context.asOf,
+    targetSessions,
+  );
+  const completedSessions = context.completedSessions;
+
+  let status: ExperimentAdherenceStatus = "unknown";
+  if (completedSessions === 0) {
+    status = "not_started";
+  } else if (targetSessions !== null && completedSessions >= targetSessions) {
+    status = "met_target";
+  } else if (
+    minimumUsefulSessions !== null &&
+    completedSessions >= minimumUsefulSessions
+  ) {
+    status = "met_minimum";
+  } else if (
+    expectedSessionsByNow !== null &&
+    completedSessions < expectedSessionsByNow
+  ) {
+    status = "behind";
+  } else if (completedSessions > 0) {
+    status = "on_track";
+  }
+
+  return {
+    completedSessions,
+    expectedSessionsByNow,
+    minimumUsefulSessions,
+    status,
+    targetSessions,
+  };
+}
+
+function buildCoverageSummary(input: {
+  baselineDaysAvailable: number;
+  interventionDaysAvailable: number;
+  primarySignal: ExperimentMetricResult | null;
+  progressPhase: ExperimentProgressPhase;
+  summariesByDate: Map<string, WearableDaySummary | null>;
+}): ExperimentProgressSummary["dataCoverage"] {
+  const primaryMetricDaysAvailable =
+    (input.primarySignal?.baselineDayCount ?? 0) +
+    (input.primarySignal?.interventionDayCount ?? 0);
+  let status: ExperimentCoverageStatus = "no_wearable_data";
+
+  if (primaryMetricDaysAvailable === 0) {
+    status = "no_wearable_data";
+  } else if (
+    (input.progressPhase === "review_due" || input.progressPhase === "completed") &&
+    (input.primarySignal?.baselineDayCount ?? 0) >= 3 &&
+    (input.primarySignal?.interventionDayCount ?? 0) >= 3
+  ) {
+    status = "ready_for_review";
+  } else if (
+    (input.primarySignal?.baselineDayCount ?? 0) >= 3 &&
+    (input.primarySignal?.interventionDayCount ?? 0) >= 2
+  ) {
+    status = "sufficient_for_progress";
+  } else if (primaryMetricDaysAvailable > 0) {
+    status = "partial";
+  } else {
+    status = "insufficient";
+  }
+
+  const wearableProviders = [...new Set(
+    [...input.summariesByDate.values()].flatMap((summary) => summary?.providers ?? []),
+  )].sort((left, right) => left.localeCompare(right));
+
+  return {
+    baselineDaysAvailable: input.baselineDaysAvailable,
+    interventionDaysAvailable: input.interventionDaysAvailable,
+    primaryBiomarkerKey: input.primarySignal?.biomarkerKey ?? null,
+    primaryMetricDaysAvailable,
+    status,
+    wearableProviders,
+  };
+}
+
+function buildProgressRecommendation(input: {
+  adherence: ExperimentProgressSummary["adherence"];
+  assistantSupport: ExperimentFrontmatter["assistantSupport"];
+  dataCoverage: ExperimentProgressSummary["dataCoverage"];
+  hasSafetyFollowUp: boolean;
+  phase: ExperimentProgressPhase;
+}): ExperimentProgressSummary["recommendation"] {
+  if (input.hasSafetyFollowUp) {
+    return {
+      action: "summary",
+      reason: "A safety-related experiment event was logged and needs follow-up.",
+      shouldNotifyUser: true,
+    };
+  }
+
+  if (input.phase === "review_due") {
+    return {
+      action: "review",
+      reason: "The intervention window ended and the experiment is ready for review.",
+      shouldNotifyUser: true,
+    };
+  }
+
+  if (
+    input.phase === "intervention" &&
+    input.assistantSupport?.remindersEnabled &&
+    input.adherence.status === "behind"
+  ) {
+    return {
+      action: "remind",
+      reason: "Logged sessions are behind the current target pace.",
+      shouldNotifyUser: true,
+    };
+  }
+
+  if (
+    input.phase === "intervention" &&
+    input.assistantSupport?.weeklyDigestEnabled &&
+    input.dataCoverage.status !== "no_wearable_data"
+  ) {
+    return {
+      action: "summary",
+      reason: "A weekly digest is enabled and wearable data is available.",
+      shouldNotifyUser: true,
+    };
+  }
+
+  return {
+    action: "skip",
+    reason:
+      input.dataCoverage.status === "no_wearable_data"
+        ? "No wearable data is available yet."
+        : "Too early; no action is needed.",
+    shouldNotifyUser: false,
+  };
+}
+
+function buildOutcomeConfidence(input: {
+  adherence: ExperimentProgressSummary["adherence"];
+  confounders: string[];
+  metricResults: ExperimentMetricResult[];
+}): ExperimentOutcomeSummary["confidence"] {
+  const reasons: string[] = [];
+  const primary = input.metricResults[0] ?? null;
+
+  if (!primary || primary.completeness === "insufficient") {
+    reasons.push("Primary biomarker coverage is insufficient for a strong before-and-after read.")
+  }
+
+  if (
+    input.adherence.minimumUsefulSessions !== null &&
+    input.adherence.completedSessions < input.adherence.minimumUsefulSessions
+  ) {
+    reasons.push("Completed session count stayed below the minimum useful target.")
+  }
+
+  if (input.confounders.length > 0) {
+    reasons.push("Context and confounder logs were present during the run.")
+  }
+
+  let level: ExperimentOutcomeConfidenceLevel = "high";
+  if (reasons.length >= 2) {
+    level = "low";
+  } else if (reasons.length === 1) {
+    level = "medium";
+  }
+
+  return {
+    level,
+    reasons,
+  };
+}
+
+function buildOutcomeConclusion(
+  primary: ExperimentMetricResult | null,
+  confidenceLevel: ExperimentOutcomeConfidenceLevel,
+): ExperimentOutcomeSummary["conclusion"] {
+  if (!primary || primary.deltaAbs === null || primary.interventionMean === null) {
+    return {
+      caveats: [
+        "This is an N-of-1 readout, not medical advice.",
+        "Sparse wearable coverage or missing sessions can make this directional rather than decisive.",
+      ],
+      headline: "The experiment finished, but the primary biomarker readout is incomplete.",
+      plainLanguage:
+        "Murph reached the end of the run, but there was not enough primary biomarker data to make a trustworthy before-and-after comparison.",
+    };
+  }
+
+  const deltaText = primary.unit
+    ? `${formatSignedNumber(primary.deltaAbs)} ${primary.unit}`
+    : formatSignedNumber(primary.deltaAbs);
+
+  return {
+    caveats: [
+      "This is an N-of-1 result, not medical advice.",
+      "Concurrent illness, travel, alcohol, training load, and other context can change the readout.",
+    ],
+    headline: `${primary.label} moved ${deltaText} during the experiment.`,
+    plainLanguage:
+      `${primary.label} changed from ${formatNullableNumber(primary.baselineMean)} to ` +
+      `${formatNullableNumber(primary.interventionMean)}${primary.unit ? ` ${primary.unit}` : ""}. ` +
+      `Confidence is ${confidenceLevel}; treat this as associated with the intervention window rather than proof of causation.`,
+  };
+}
+
+function buildProgressSignals(
+  signals: readonly ExperimentMetricResult[],
+): ExperimentProgressMetricSignal[] {
+  return signals.map((signal) => ({
+    baselineDaysAvailable: signal.baselineDayCount,
+    baselineMean: signal.baselineMean,
+    biomarkerKey: signal.biomarkerKey,
+    confidence:
+      signal.baselineDayCount >= 5 && signal.interventionDayCount >= 5
+        ? "medium"
+        : "low",
+    currentInterventionMean: signal.interventionMean,
+    deltaAbs: signal.deltaAbs,
+    expectedDirection: signal.expectedDirection,
+    interventionDaysAvailable: signal.interventionDayCount,
+    label: signal.label,
+    movedAsExpected: signal.movedAsExpected,
+    reason:
+      signal.interventionDayCount === 0
+        ? "No intervention-window wearable data is available yet."
+        : `Only ${signal.interventionDayCount} intervention day(s) are available so far.`,
+    unit: signal.unit,
+  }));
+}
+
+function buildWindowSummary(
+  frontmatter: ExperimentFrontmatter,
+): ExperimentProgressSummary["windows"] {
+  return {
+    baselineEnd: frontmatter.runPlan?.baselineEnd ?? null,
+    baselineStart: frontmatter.runPlan?.baselineStart ?? null,
+    interventionEnd: frontmatter.runPlan?.interventionEnd ?? null,
+    interventionStart: frontmatter.runPlan?.interventionStart ?? null,
+  };
+}
+
+function countDatesWithWearableData(
+  dates: readonly string[],
+  summariesByDate: ReadonlyMap<string, WearableDaySummary | null>,
+): number {
+  return dates.filter((date) => {
+    const summary = summariesByDate.get(date);
+    return Boolean(summary && summary.providers.length > 0);
+  }).length;
+}
+
+function summarizeConfounders(events: readonly CanonicalEntity[]): string[] {
+  const values = new Set<string>();
+
+  for (const event of events) {
+    const attributes = event.attributes as Record<string, unknown>;
+    const date = event.date ?? extractDate(event.occurredAt);
+    if (event.kind === "intervention_session") {
+      if (attributes.afterExercise === true && date) {
+        values.add(`post-exercise session on ${date}`);
+      }
+
+      for (const confounder of readConfounders(attributes.confounders)) {
+        values.add(`${humanizeSlug(confounder)} on ${date ?? "unknown date"}`);
+      }
+
+      for (const symptom of readStringArray(attributes.symptoms)) {
+        values.add(`${symptom} reported on ${date ?? "unknown date"}`);
+      }
+
+      continue;
+    }
+
+    if (event.kind === "experiment_context") {
+      const contextType =
+        typeof attributes.contextType === "string" && attributes.contextType.length > 0
+          ? attributes.contextType
+          : event.title ?? event.kind;
+      values.add(`${humanizeSlug(contextType)} context logged on ${date ?? "unknown date"}`);
+      continue;
+    }
+
+    if (event.kind !== "experiment_event") {
+      values.add(`${event.title ?? event.kind} on ${date ?? "unknown date"}`);
+    }
+  }
+
+  return [...values].slice(0, 8);
+}
+
+function hasSafetyFollowUp(events: readonly CanonicalEntity[]): boolean {
+  return events.some((event) => {
+    if (event.kind === "adverse_effect") {
+      return true;
+    }
+
+    if (event.kind !== "experiment_context") {
+      return false;
+    }
+
+    const severity = (event.attributes as Record<string, unknown>).severity;
+    return severity === "safety" || severity === "blocking";
+  });
+}
+
+function collectMetricWindow(
+  biomarkerKey: string,
+  dates: readonly string[],
+  summariesByDate: ReadonlyMap<string, WearableDaySummary | null>,
+): MetricWindowPoint[] {
+  const points: MetricWindowPoint[] = [];
+
+  for (const date of dates) {
+    const resolved = resolveBiomarkerMetric(
+      biomarkerKey,
+      summariesByDate.get(date) ?? null,
+    );
+    const value = resolved?.selection.value ?? null;
+    if (value === null) {
+      continue;
+    }
+
+    points.push({
+      date,
+      unit: resolved?.selection.unit ?? null,
+      value,
+    });
+  }
+
+  return points;
+}
+
+function resolveBiomarkerMetric(
+  biomarkerKey: string,
+  summary: WearableDaySummary | null,
+): WearableResolvedMetric | null {
+  if (!summary) {
+    return null;
+  }
+
+  const normalized = biomarkerKey.trim().toLowerCase();
+  if (normalized.includes("resting-heart-rate")) {
+    return summary.recovery?.restingHeartRate ?? null;
+  }
+
+  if (normalized.includes("hrv")) {
+    return summary.recovery?.hrv ?? summary.sleep?.hrv ?? null;
+  }
+
+  if (normalized.includes("sleep-efficiency")) {
+    return summary.sleep?.sleepEfficiency ?? null;
+  }
+
+  if (normalized.includes("deep-sleep")) {
+    return summary.sleep?.deepMinutes ?? null;
+  }
+
+  if (normalized.includes("respiratory-rate")) {
+    return summary.recovery?.respiratoryRate ?? summary.sleep?.respiratoryRate ?? null;
+  }
+
+  if (normalized.includes("temperature")) {
+    return summary.recovery?.temperatureDeviation ?? summary.bodyState?.temperature ?? null;
+  }
+
+  return null;
+}
+
+function resolveProgressPhase(
+  frontmatter: ExperimentFrontmatter,
+  asOf: string,
+): ExperimentProgressPhase {
+  if (frontmatter.status === "completed") {
+    return "completed";
+  }
+
+  if (frontmatter.status === "paused") {
+    return "paused";
+  }
+
+  if (frontmatter.status === "abandoned") {
+    return "abandoned";
+  }
+
+  if (frontmatter.status === "planned") {
+    return "planned";
+  }
+
+  const interventionStart = frontmatter.runPlan?.interventionStart;
+  const interventionEnd = frontmatter.runPlan?.interventionEnd;
+  const baselineEnd = frontmatter.runPlan?.baselineEnd;
+
+  if (interventionEnd && asOf > interventionEnd) {
+    return "review_due";
+  }
+
+  if (interventionStart && asOf >= interventionStart) {
+    return "intervention";
+  }
+
+  if (baselineEnd && asOf <= baselineEnd) {
+    return "baseline";
+  }
+
+  return "baseline";
+}
+
+function findExperimentEvents(
+  vault: VaultReadModel,
+  experiment: CanonicalEntity,
+  frontmatter: ExperimentFrontmatter,
+  asOf: string,
+): CanonicalEntity[] {
+  const from = frontmatter.runPlan?.baselineStart ?? frontmatter.startedOn;
+  const experimentId = frontmatter.experimentId;
+
+  return vault.events.filter((event) => {
+    const date = event.date ?? extractDate(event.occurredAt);
+    if (from && date && date < from) {
+      return false;
+    }
+
+    if (date && date > asOf) {
+      return false;
+    }
+
+    if (event.experimentSlug === frontmatter.slug) {
+      return true;
+    }
+
+    if (typeof event.attributes.experimentSlug === "string" && event.attributes.experimentSlug === frontmatter.slug) {
+      return true;
+    }
+
+    if (event.attributes.experimentId === experimentId) {
+      return true;
+    }
+
+    if (event.relatedIds.includes(experimentId)) {
+      return true;
+    }
+
+    return event.links.some((link) => link.targetId === experiment.entityId);
+  });
+}
+
+function isCompletedSessionEvent(event: CanonicalEntity): boolean {
+  if (event.kind !== "intervention_session") {
+    return false;
+  }
+
+  const sessionStatus = event.attributes.sessionStatus;
+  return sessionStatus !== "missed" && sessionStatus !== "skipped";
+}
+
+function computeExpectedSessionsByNow(
+  frontmatter: ExperimentFrontmatter,
+  asOf: string,
+  targetSessions: number | null,
+): number | null {
+  const interventionStart = frontmatter.runPlan?.interventionStart;
+  const interventionEnd = frontmatter.runPlan?.interventionEnd;
+  if (
+    targetSessions === null ||
+    !interventionStart ||
+    !interventionEnd ||
+    asOf < interventionStart
+  ) {
+    return null;
+  }
+
+  const totalDays = daysBetweenInclusive(interventionStart, interventionEnd);
+  const elapsedDays = daysBetweenInclusive(
+    interventionStart,
+    minIsoDate(interventionEnd, asOf) ?? interventionEnd,
+  );
+  if (totalDays <= 0) {
+    return null;
+  }
+
+  return Math.max(1, Math.floor((targetSessions * elapsedDays) / totalDays));
+}
+
+function dayInRun(frontmatter: ExperimentFrontmatter, asOf: string): number | null {
+  const start = frontmatter.runPlan?.baselineStart ?? frontmatter.startedOn;
+  if (!start || asOf < start) {
+    return null;
+  }
+
+  return daysBetweenInclusive(start, asOf);
+}
+
+function dateRange(start: string | undefined, end: string | undefined | null): string[] {
+  if (!start || !end || start > end) {
+    return [];
+  }
+
+  const dates: string[] = [];
+  let cursor = start;
+
+  while (cursor <= end) {
+    dates.push(cursor);
+    cursor = addDaysToIsoDate(cursor, 1);
+  }
+
+  return dates;
+}
+
+function normalizeAsOfDate(value: string | undefined): string {
+  if (!value) {
+    return new Date().toISOString().slice(0, 10);
+  }
+
+  return value;
+}
+
+function classifyMetricCompleteness(
+  baselineDays: number,
+  interventionDays: number,
+): ExperimentMetricResult["completeness"] {
+  if (baselineDays >= 3 && interventionDays >= 3) {
+    return "good";
+  }
+
+  if (baselineDays > 0 || interventionDays > 0) {
+    return "partial";
+  }
+
+  return "insufficient";
+}
+
+function humanizeBiomarkerKey(value: string): string {
+  const label = value.split(":").at(-1) ?? value;
+  return label
+    .split("-")
+    .map((part) => part.length === 0 ? part : `${part[0]?.toUpperCase()}${part.slice(1)}`)
+    .join(" ");
+}
+
+function humanizeSlug(value: string): string {
+  return value.replace(/-/gu, " ");
+}
+
+function movedAsExpected(
+  deltaAbs: number | null,
+  expectedDirection: ExperimentMetricResult["expectedDirection"],
+): boolean | null {
+  if (deltaAbs === null || expectedDirection === null || deltaAbs === 0) {
+    return null;
+  }
+
+  if (expectedDirection === "increase") {
+    return deltaAbs > 0;
+  }
+
+  if (expectedDirection === "decrease") {
+    return deltaAbs < 0;
+  }
+
+  return Math.abs(deltaAbs) < 0.5;
+}
+
+function mean(values: readonly number[]): number | null {
+  if (values.length === 0) {
+    return null;
+  }
+
+  return round(values.reduce((sum, value) => sum + value, 0) / values.length);
+}
+
+function round(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
+function formatSignedNumber(value: number): string {
+  return value > 0 ? `+${value}` : String(value);
+}
+
+function formatNullableNumber(value: number | null): string {
+  return value === null ? "n/a" : String(value);
+}
+
+function minIsoDate(left: string | undefined, right: string | undefined): string | null {
+  if (!left && !right) {
+    return null;
+  }
+
+  if (!left) {
+    return right ?? null;
+  }
+
+  if (!right) {
+    return left;
+  }
+
+  return left <= right ? left : right;
+}
+
+function addDaysToIsoDate(date: string, days: number): string {
+  const stamp = new Date(`${date}T00:00:00.000Z`);
+  stamp.setUTCDate(stamp.getUTCDate() + days);
+  return stamp.toISOString().slice(0, 10);
+}
+
+function daysBetweenInclusive(start: string, end: string): number {
+  const startStamp = new Date(`${start}T00:00:00.000Z`);
+  const endStamp = new Date(`${end}T00:00:00.000Z`);
+  return Math.floor((endStamp.valueOf() - startStamp.valueOf()) / 86_400_000) + 1;
+}
+
+function extractDate(value: string | null): string | null {
+  return typeof value === "string" && value.length >= 10 ? value.slice(0, 10) : null;
+}
+
+function readStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === "string" && entry.length > 0)
+    : [];
+}
+
+function readConfounders(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return readStringArray(value);
+  }
+
+  if (!value || typeof value !== "object") {
+    return [];
+  }
+
+  return Object.entries(value)
+    .flatMap(([key, entry]) => {
+      if (entry === false || entry === null || entry === undefined) {
+        return [];
+      }
+
+      if (typeof entry === "string" && entry.trim().length === 0) {
+        return [];
+      }
+
+      return [key];
+    });
+}
+
+function classifyAdherenceLevel(
+  adherence: ExperimentProgressSummary["adherence"],
+): "unknown" | "low" | "partial" | "good" {
+  if (adherence.status === "met_target") {
+    return "good";
+  }
+
+  if (adherence.status === "met_minimum" || adherence.status === "on_track") {
+    return "partial";
+  }
+
+  if (adherence.completedSessions > 0) {
+    return "low";
+  }
+
+  return "unknown";
+}

@@ -60,6 +60,13 @@ import {
   protocolRelationLinkSchema,
   recipeRelationLinkSchema,
 } from "./relation-links.ts";
+import {
+  HEALTH_COMMONS_EXPERIMENT_ONBOARDING_CAUTION_LEVELS,
+  HEALTH_COMMONS_EXPERIMENT_ONBOARDING_MISSED_LOG_POLICIES,
+  HEALTH_COMMONS_EXPERIMENT_ONBOARDING_POSITIVE_DISPOSITIONS,
+  healthCommonsKeySchema,
+  healthCommonsStableIdSchema,
+} from "./health-commons.ts";
 
 export type AssessmentSource = (typeof ASSESSMENT_SOURCES)[number];
 export type EventKind = (typeof EVENT_KINDS)[number];
@@ -113,6 +120,52 @@ const SLUG_PATTERN = "^[a-z0-9]+(?:-[a-z0-9]+)*$";
 const DAILY_TIME_PATTERN = "^(?:[01]\\d|2[0-3]):[0-5]\\d$";
 const UNIT_PATTERN = "^[A-Za-z0-9._/%-]+$";
 const GENERIC_CONTRACT_ID_REGEX = new RegExp(GENERIC_CONTRACT_ID_PATTERN);
+const EXPERIMENT_SIGNAL_DIRECTIONS = ["increase", "decrease", "stabilize"] as const;
+const EXPERIMENT_CHECKIN_CADENCES = ["none", "daily", "every_3_days", "weekly"] as const;
+const EXPERIMENT_NOTIFICATION_STYLES = [
+  "skip_by_default",
+  "send_scheduled_summary",
+] as const;
+const EXPERIMENT_ADHERENCE_STATUSES = [
+  "not_started",
+  "behind",
+  "on_track",
+  "met_minimum",
+  "met_target",
+  "unknown",
+] as const;
+const EXPERIMENT_CONFIDENCE_LEVELS = ["low", "medium", "high"] as const;
+const EXPERIMENT_CONTEXT_SEVERITIES = [
+  "info",
+  "potential_confounder",
+  "safety",
+  "blocking",
+] as const;
+const EXPERIMENT_DATA_COMPLETENESS_LEVELS = [
+  "insufficient",
+  "partial",
+  "good",
+] as const;
+const EXPERIMENT_PROGRESS_PHASES = [
+  "planned",
+  "baseline",
+  "intervention",
+  "review_due",
+  "completed",
+  "paused",
+  "abandoned",
+] as const;
+const EXPERIMENT_RECOMMENDATION_ACTIONS = ["skip", "remind", "summary", "review"] as const;
+const EXPERIMENT_COVERAGE_STATUSES = [
+  "no_wearable_data",
+  "insufficient",
+  "partial",
+  "sufficient_for_progress",
+  "ready_for_review",
+] as const;
+const EXPERIMENT_ANALYSIS_STATUSES = ["not_ready", "ready", "generated"] as const;
+export const EXPERIMENT_OUTCOME_SCHEMA_VERSION = "murph.experiment-outcome.v1" as const;
+export const EXPERIMENT_PROGRESS_SCHEMA_VERSION = "murph.experiment-progress.v1" as const;
 export const FAMILY_MEMBER_LIMITS = Object.freeze({
   title: 160,
   relationship: 120,
@@ -605,6 +658,24 @@ const baseEventOptionalShape = {
   timeZone: timeZoneString({ optional: true }),
 } satisfies z.ZodRawShape;
 
+const experimentLinkShape = {
+  experimentId: idSchema(ID_PREFIXES.experiment).optional(),
+  experimentSlug: patternedString(SLUG_PATTERN).optional(),
+} satisfies z.ZodRawShape;
+const experimentContextSeveritySchema = z.enum(EXPERIMENT_CONTEXT_SEVERITIES);
+const experimentSessionStatusSchema = z.enum(["completed", "partial", "missed", "skipped"]);
+const experimentConfounderValueSchema = z.union([
+  boundedString(1, 240),
+  numberSchema(),
+  z.boolean(),
+  z.null(),
+]);
+const experimentConfounderMapSchema = z.record(z.string(), experimentConfounderValueSchema);
+const experimentConfounderSchema = z.union([
+  uniqueArray(patternedString(SLUG_PATTERN), { uniqueItems: true }),
+  experimentConfounderMapSchema,
+]);
+
 function eventSchema<const TKind extends EventKind, TExtra extends z.ZodRawShape>(
   kind: TKind,
   extraShape: TExtra,
@@ -689,6 +760,7 @@ export const eventRecordSchema = withContractMetadata(
         ...baseEventShape,
         kind: z.literal("note"),
         ...baseEventOptionalShape,
+        ...experimentLinkShape,
         note: boundedString(1, 4000),
       })
       .strict(),
@@ -706,6 +778,12 @@ export const eventRecordSchema = withContractMetadata(
       experimentSlug: patternedString(SLUG_PATTERN),
       phase: z.enum(EXPERIMENT_PHASES),
     }),
+    eventSchema("experiment_context", {
+      experimentId: idSchema(ID_PREFIXES.experiment),
+      experimentSlug: patternedString(SLUG_PATTERN),
+      contextType: patternedString(SLUG_PATTERN),
+      severity: experimentContextSeveritySchema.optional(),
+    }),
     eventSchema("medication_intake", {
       medicationName: boundedString(1, 160),
       dose: numberSchema(0),
@@ -719,6 +797,7 @@ export const eventRecordSchema = withContractMetadata(
       supplementName: boundedString(1, 160),
       dose: numberSchema(0),
       unit: patternedString(UNIT_PATTERN),
+      ...experimentLinkShape,
     }),
     eventSchema("test", {
       testName: boundedString(1, 160),
@@ -737,6 +816,7 @@ export const eventRecordSchema = withContractMetadata(
       activityType: patternedString(SLUG_PATTERN),
       durationMinutes: integerSchema(1),
       distanceKm: numberSchema(0).optional(),
+      ...experimentLinkShape,
       workout: workoutSessionSchema,
     }),
     eventSchema("body_measurement", {
@@ -752,16 +832,25 @@ export const eventRecordSchema = withContractMetadata(
       interventionType: patternedString(SLUG_PATTERN),
       durationMinutes: integerSchema(1).optional(),
       protocolId: idSchema(ID_PREFIXES.protocol).optional(),
+      ...experimentLinkShape,
+      sessionStatus: experimentSessionStatusSchema.optional(),
+      timing: boundedString(1, 120).optional(),
+      temperatureC: numberSchema(0, 200).optional(),
+      afterExercise: z.boolean().optional(),
+      symptoms: uniqueArray(boundedString(1, 160), { maxItems: 25, uniqueItems: true }).optional(),
+      confounders: experimentConfounderSchema.optional(),
     }),
     eventSchema("adverse_effect", {
       substance: boundedString(1, 160),
       effect: boundedString(1, 160),
       severity: z.enum(ADVERSE_EFFECT_SEVERITIES),
+      ...experimentLinkShape,
     }),
     eventSchema("exposure", {
       exposureType: boundedString(1, 160),
       substance: boundedString(1, 160),
       duration: boundedString(1, 120).optional(),
+      ...experimentLinkShape,
     }),
   ]),
   "@murphai/contracts/event-record.schema.json",
@@ -932,6 +1021,243 @@ export const journalDayFrontmatterSchema = withContractMetadata(
   "Murph Journal Day Frontmatter",
 );
 
+export const experimentProtocolRefSchema = z
+  .object({
+    key: healthCommonsKeySchema,
+    pageRevisionId: z.string().startsWith("sha256:"),
+    runSpecRevisionId: z.string().startsWith("sha256:"),
+    testPlanId: healthCommonsStableIdSchema.optional(),
+  })
+  .strict();
+
+export const experimentRunLoggingSchema = z
+  .object({
+    sessionFields: uniqueArray(healthCommonsStableIdSchema, { minItems: 1, uniqueItems: true }),
+    confounderFields: uniqueArray(healthCommonsStableIdSchema, { uniqueItems: true }).optional(),
+  })
+  .strict();
+
+export const experimentRunPlanSchema = z
+  .object({
+    baselineStart: isoDateString().optional(),
+    baselineEnd: isoDateString().optional(),
+    interventionStart: isoDateString().optional(),
+    interventionEnd: isoDateString().optional(),
+    modality: boundedString(1, 160).optional(),
+    schedule: boundedString(1, 4000).optional(),
+    dose: boundedString(1, 160).optional(),
+    sessionsPerWeek: numberSchema(0).optional(),
+    targetSessions: integerSchema(0).optional(),
+    minimumUsefulSessions: integerSchema(0).optional(),
+    logging: experimentRunLoggingSchema.optional(),
+    stopConditions: z.array(boundedString(1, 4000)).optional(),
+  })
+  .strict();
+
+export const experimentAnalysisPlanSchema = z
+  .object({
+    primaryBiomarkerKey: healthCommonsKeySchema.optional(),
+    secondaryBiomarkerKeys: uniqueArray(healthCommonsKeySchema, { uniqueItems: true }).optional(),
+    desiredDirection: z.enum(EXPERIMENT_SIGNAL_DIRECTIONS).optional(),
+    notes: z.array(boundedString(1, 4000)).optional(),
+  })
+  .strict();
+
+export const experimentAssistantSupportSchema = z
+  .object({
+    reminderPolicy: healthCommonsStableIdSchema.optional(),
+    reminderOptionId: healthCommonsStableIdSchema.optional(),
+    remindersEnabled: z.boolean().optional(),
+    checkInCadence: z.enum(EXPERIMENT_CHECKIN_CADENCES).optional(),
+    notificationStyle: z.enum(EXPERIMENT_NOTIFICATION_STYLES).optional(),
+    missedLogFollowup: z.enum(HEALTH_COMMONS_EXPERIMENT_ONBOARDING_MISSED_LOG_POLICIES).optional(),
+    weeklyDigestEnabled: z.boolean().optional(),
+  })
+  .strict();
+
+export const experimentOnboardingSafetySchema = z
+  .object({
+    cautionLevel: z.enum(HEALTH_COMMONS_EXPERIMENT_ONBOARDING_CAUTION_LEVELS).optional(),
+    disposition: z.enum(HEALTH_COMMONS_EXPERIMENT_ONBOARDING_POSITIVE_DISPOSITIONS).optional(),
+    positiveQuestionIds: uniqueArray(healthCommonsStableIdSchema, { uniqueItems: true }).optional(),
+    notes: z.array(boundedString(1, 4000)).optional(),
+  })
+  .strict();
+
+export const experimentOnboardingCaptureSchema = z
+  .object({
+    completedAt: isoDateTimeString().optional(),
+    setupAnswers: jsonObjectSchema.optional(),
+    safety: experimentOnboardingSafetySchema.optional(),
+    contextNotes: z.array(boundedString(1, 4000)).optional(),
+  })
+  .strict();
+
+export const experimentOutcomeTrackingSchema = z
+  .object({
+    latestOutcomeId: boundedString(1, 160).optional(),
+    readyForReviewAt: isoDateTimeString().optional(),
+    finalAnalysisStatus: z.enum(EXPERIMENT_ANALYSIS_STATUSES).optional(),
+  })
+  .strict();
+
+export const experimentOutcomeRefSchema = z
+  .object({
+    outcomeId: boundedString(1, 160),
+    generatedAt: isoDateTimeString().optional(),
+    relativePath: patternedString(RELATIVE_PATH_PATTERN).optional(),
+  })
+  .strict();
+
+export const experimentMetricPeriodSummarySchema = z
+  .object({
+    mean: z.number().nullable(),
+    daysWithData: integerSchema(0),
+    totalDays: integerSchema(0),
+    unit: patternedString(UNIT_PATTERN).nullable(),
+  })
+  .strict();
+
+export const experimentMetricResultSchema = z
+  .object({
+    baselineDayCount: integerSchema(0),
+    baselineMean: z.number().nullable(),
+    biomarkerKey: healthCommonsKeySchema,
+    completeness: z.enum(EXPERIMENT_DATA_COMPLETENESS_LEVELS),
+    deltaAbs: z.number().nullable(),
+    deltaPct: z.number().nullable(),
+    expectedDirection: z.enum(EXPERIMENT_SIGNAL_DIRECTIONS).nullable(),
+    interventionDayCount: integerSchema(0),
+    interventionMean: z.number().nullable(),
+    label: boundedString(1, 160),
+    movedAsExpected: z.boolean().nullable(),
+    unit: patternedString(UNIT_PATTERN).nullable(),
+    baseline: experimentMetricPeriodSummarySchema.optional(),
+    intervention: experimentMetricPeriodSummarySchema.optional(),
+  })
+  .strict();
+
+export const experimentProgressMetricSignalSchema = z
+  .object({
+    biomarkerKey: healthCommonsKeySchema,
+    label: boundedString(1, 160),
+    unit: patternedString(UNIT_PATTERN).nullable(),
+    baselineMean: z.number().nullable(),
+    currentInterventionMean: z.number().nullable(),
+    deltaAbs: z.number().nullable(),
+    expectedDirection: z.enum(EXPERIMENT_SIGNAL_DIRECTIONS).nullable(),
+    movedAsExpected: z.boolean().nullable(),
+    confidence: z.enum(EXPERIMENT_CONFIDENCE_LEVELS),
+    reason: boundedString(1, 4000),
+    baselineDaysAvailable: integerSchema(0),
+    interventionDaysAvailable: integerSchema(0),
+  })
+  .strict();
+
+export const experimentWindowSummarySchema = z
+  .object({
+    baselineEnd: isoDateString().nullable(),
+    baselineStart: isoDateString().nullable(),
+    interventionEnd: isoDateString().nullable(),
+    interventionStart: isoDateString().nullable(),
+  })
+  .strict();
+
+export const experimentProgressSnapshotSchema = z
+  .object({
+    schemaVersion: z.literal(EXPERIMENT_PROGRESS_SCHEMA_VERSION),
+    schema: z.literal(EXPERIMENT_PROGRESS_SCHEMA_VERSION).optional(),
+    asOf: isoDateString(),
+    adherence: z
+      .object({
+        completedSessions: integerSchema(0),
+        expectedSessionsByNow: integerSchema(0).nullable(),
+        minimumUsefulSessions: integerSchema(0).nullable(),
+        sessionEventIds: uniqueArray(idSchema(ID_PREFIXES.event), { uniqueItems: true }).optional(),
+        status: z.enum(EXPERIMENT_ADHERENCE_STATUSES),
+        targetSessions: integerSchema(0).nullable(),
+      })
+      .strict(),
+    confounders: z.array(boundedString(1, 4000)).max(100),
+    dataCoverage: z
+      .object({
+        baselineDaysAvailable: integerSchema(0),
+        interventionDaysAvailable: integerSchema(0),
+        primaryBiomarkerKey: healthCommonsKeySchema.nullable().optional(),
+        primaryMetricDaysAvailable: integerSchema(0),
+        status: z.enum(EXPERIMENT_COVERAGE_STATUSES),
+        wearableProviders: z.array(boundedString(1, 160)).max(20),
+      })
+      .strict(),
+    dayInRun: integerSchema(1).nullable(),
+    experiment: z
+      .object({
+        id: idSchema(ID_PREFIXES.experiment),
+        slug: patternedString(SLUG_PATTERN),
+        status: z.enum(EXPERIMENT_STATUSES),
+        title: boundedString(1, 160),
+      })
+      .strict(),
+    phase: z.enum(EXPERIMENT_PROGRESS_PHASES),
+    protocolRef: experimentProtocolRefSchema.nullable(),
+    recommendation: z
+      .object({
+        action: z.enum(EXPERIMENT_RECOMMENDATION_ACTIONS),
+        reason: boundedString(1, 4000),
+        shouldNotifyUser: z.boolean(),
+      })
+      .strict(),
+    signals: z.array(experimentMetricResultSchema).max(50),
+    earlySignals: z.array(experimentProgressMetricSignalSchema).max(50).optional(),
+    windows: experimentWindowSummarySchema,
+  })
+  .strict();
+
+export const experimentOutcomeSchema = z
+  .object({
+    schemaVersion: z.literal(EXPERIMENT_OUTCOME_SCHEMA_VERSION),
+    schema: z.literal(EXPERIMENT_OUTCOME_SCHEMA_VERSION).optional(),
+    outcomeId: boundedString(1, 160).optional(),
+    generatedAt: isoDateTimeString().optional(),
+    adherenceSummary: z
+      .object({
+        adherenceLevel: z.enum(["unknown", "low", "partial", "good"]).optional(),
+        completedSessions: integerSchema(0),
+        minimumUsefulSessions: integerSchema(0).nullable(),
+        status: z.enum(EXPERIMENT_ADHERENCE_STATUSES),
+        targetSessions: integerSchema(0).nullable(),
+      })
+      .strict(),
+    asOf: isoDateString(),
+    conclusion: z
+      .object({
+        caveats: z.array(boundedString(1, 4000)).max(50),
+        headline: boundedString(1, 240),
+        plainLanguage: boundedString(1, 4000),
+      })
+      .strict(),
+    confidence: z
+      .object({
+        level: z.enum(EXPERIMENT_CONFIDENCE_LEVELS),
+        reasons: z.array(boundedString(1, 4000)).max(50),
+      })
+      .strict(),
+    confounders: z.array(boundedString(1, 4000)).max(100),
+    experiment: z
+      .object({
+        id: idSchema(ID_PREFIXES.experiment),
+        slug: patternedString(SLUG_PATTERN),
+        status: z.enum(EXPERIMENT_STATUSES),
+        title: boundedString(1, 160),
+      })
+      .strict(),
+    metricResults: z.array(experimentMetricResultSchema).max(50),
+    protocolRef: experimentProtocolRefSchema.nullable(),
+    runRef: experimentProtocolRefSchema.optional(),
+    windows: experimentWindowSummarySchema,
+  })
+  .strict();
+
 export const experimentFrontmatterSchema = withContractMetadata(
   z
     .object({
@@ -945,6 +1271,13 @@ export const experimentFrontmatterSchema = withContractMetadata(
       endedOn: isoDateString().optional(),
       hypothesis: boundedString(1, 4000).optional(),
       tags: uniqueArray(patternedString(SLUG_PATTERN), { uniqueItems: true }).optional(),
+      protocolRef: experimentProtocolRefSchema.optional(),
+      runPlan: experimentRunPlanSchema.optional(),
+      analysisPlan: experimentAnalysisPlanSchema.optional(),
+      onboarding: experimentOnboardingCaptureSchema.optional(),
+      assistantSupport: experimentAssistantSupportSchema.optional(),
+      outcome: experimentOutcomeTrackingSchema.optional(),
+      outcomeRef: experimentOutcomeRefSchema.optional(),
     })
     .strict(),
   "@murphai/contracts/frontmatter-experiment.schema.json",
@@ -1376,6 +1709,21 @@ export type InboxCaptureAttachmentRecord = z.infer<typeof inboxCaptureAttachment
 export type InboxCaptureRecord = z.infer<typeof inboxCaptureRecordSchema>;
 export type CoreFrontmatter = z.infer<typeof coreFrontmatterSchema>;
 export type JournalDayFrontmatter = z.infer<typeof journalDayFrontmatterSchema>;
+export type ExperimentProtocolRef = z.infer<typeof experimentProtocolRefSchema>;
+export type ExperimentRunLogging = z.infer<typeof experimentRunLoggingSchema>;
+export type ExperimentRunPlan = z.infer<typeof experimentRunPlanSchema>;
+export type ExperimentAnalysisPlan = z.infer<typeof experimentAnalysisPlanSchema>;
+export type ExperimentOnboardingSafety = z.infer<typeof experimentOnboardingSafetySchema>;
+export type ExperimentOnboardingCapture = z.infer<typeof experimentOnboardingCaptureSchema>;
+export type ExperimentAssistantSupport = z.infer<typeof experimentAssistantSupportSchema>;
+export type ExperimentOutcomeTracking = z.infer<typeof experimentOutcomeTrackingSchema>;
+export type ExperimentOutcomeRef = z.infer<typeof experimentOutcomeRefSchema>;
+export type ExperimentMetricPeriodSummary = z.infer<typeof experimentMetricPeriodSummarySchema>;
+export type ExperimentMetricResult = z.infer<typeof experimentMetricResultSchema>;
+export type ExperimentProgressMetricSignal = z.infer<typeof experimentProgressMetricSignalSchema>;
+export type ExperimentWindowSummary = z.infer<typeof experimentWindowSummarySchema>;
+export type ExperimentProgressSnapshot = z.infer<typeof experimentProgressSnapshotSchema>;
+export type ExperimentOutcome = z.infer<typeof experimentOutcomeSchema>;
 export type ExperimentFrontmatter = z.infer<typeof experimentFrontmatterSchema>;
 export type ProviderFrontmatter = z.infer<typeof providerFrontmatterSchema>;
 export type FoodFrontmatter = z.infer<typeof foodFrontmatterSchema>;
