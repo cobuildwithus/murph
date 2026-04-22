@@ -1,6 +1,6 @@
 # Murph Agent Docs Index
 
-Last verified: 2026-04-15
+Last verified: 2026-04-22
 
 ## Purpose
 
@@ -30,6 +30,7 @@ It intentionally lists live architecture, product, verification, and package-bou
 | `agent-docs/product-specs/index.md` | Index for product-spec docs. | Product-spec inventory | High | 2026-04-06 |
 | `agent-docs/product-specs/repo.md` | Canonical repository posture and success criteria. | Current repo product spec | High | 2026-04-06 |
 | `agent-docs/product-specs/health-commons.md` | Health Commons product boundary for wiki-like pages, generated catalogs, revisions, and artifact manifests. | Health Commons behavior | High | 2026-04-20 |
+| `agent-docs/product-specs/experiment-onboarding.md` | Experiment onboarding product boundary for start intents, Health Commons setup slots, assistant safety/setup flow, and private run handoff. | Experiment onboarding behavior | High | 2026-04-22 |
 | `agent-docs/product-specs/captures.md` | Capture primitive product boundary for dated private media evidence. | Capture behavior | High | 2026-04-21 |
 | `agent-docs/references/README.md` | Reference-pack overview and maintenance rules. | Reference pack conventions | Medium | 2026-03-12 |
 | `agent-docs/references/repo-scope.md` | Concrete repo scope and routing boundaries. | Repo ownership boundary | High | 2026-04-06 |

@@ -172,4 +172,22 @@ Ready to get started?`)
       'If the user mentions urgent, severe, or safety-sensitive symptoms, do not stay in onboarding;',
     )
   })
+
+  it('includes the protocol experiment onboarding guidance for planning and setup flows', () => {
+    const prompt = buildPrompt('bound-tools')
+
+    expect(prompt).toContain('Experiment onboarding:')
+    expect(prompt).toContain(
+      'Resolve the protocol page and use its Health Commons `experimentOnboarding` block when available.',
+    )
+    expect(prompt).toContain(
+      'Before setup questions, check whether the user already has an active experiment with `vault-cli experiment list --status active --format json`.',
+    )
+    expect(prompt).toContain(
+      'treat that as a planning conversation until they explicitly confirm the final run plan.',
+    )
+    expect(prompt).toContain(
+      'Create the run only after explicit confirmation, then use `vault-cli experiment create <slug> --title "<title>" --hypothesis "<hypothesis>" --startedOn <YYYY-MM-DD> --status active` for a simple run',
+    )
+  })
 })

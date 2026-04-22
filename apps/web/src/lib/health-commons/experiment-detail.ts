@@ -338,6 +338,9 @@ function toExperimentDetail(
     protocolTips: protocolSpec?.tips ?? [],
     protocolKeepInMind: protocolSpec?.keepInMind ?? [],
     protocolLogFields: protocolSpec?.logFields ?? [],
+    ...(protocol.experimentOnboarding
+      ? { onboarding: protocol.experimentOnboarding }
+      : {}),
     whyItWorks: toWhyItWorks(protocol, claims),
     experts: sourcePeople.map(toExpert),
     researchStats: toResearchStats({

@@ -94,6 +94,15 @@ export function validateHealthCommonsContent(content: HealthCommonsContentSet): 
         assertTargetExists(keys, biomarkerKey, `${page.frontmatter.key} test plan ${plan.planId}`);
       }
     }
+    const onboardingTestPlanId = page.frontmatter.experimentOnboarding?.planDefaults?.testPlanId;
+    if (
+      onboardingTestPlanId
+      && !(page.frontmatter.testPlans ?? []).some((plan) => plan.planId === onboardingTestPlanId)
+    ) {
+      throw new Error(
+        `${page.frontmatter.key} experimentOnboarding planDefaults.testPlanId points to missing test plan ${onboardingTestPlanId}.`,
+      );
+    }
     if (page.frontmatter.lineage?.forkOf) {
       assertTargetExists(keys, page.frontmatter.lineage.forkOf, `${page.frontmatter.key} lineage forkOf`);
     }
@@ -157,11 +166,15 @@ function computeRevision(frontmatter: HealthCommonsPageFrontmatter, body: string
   const recipeHash = frontmatter.protocol
     ? sha256StableJson({ protocol: frontmatter.protocol, safety: frontmatter.safety })
     : null;
-  const runSpecRevisionId = sha256StableJson({
+  const runSpecRevisionInput = {
     protocol: frontmatter.protocol ?? null,
     safety: frontmatter.safety ?? null,
     testPlans: frontmatter.testPlans ?? [],
-  });
+    ...(frontmatter.experimentOnboarding === undefined
+      ? {}
+      : { experimentOnboarding: frontmatter.experimentOnboarding }),
+  };
+  const runSpecRevisionId = sha256StableJson(runSpecRevisionInput);
 
   return {
     pageRevisionId,

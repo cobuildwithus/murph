@@ -213,4 +213,35 @@ describe("@murphai/health-commons catalog coverage", () => {
       /Duplicate protocol recipeHash/u,
     );
   });
+
+  it("rejects experiment onboarding plan defaults that point to a missing test plan", () => {
+    const onboardingPlanMismatchContent: HealthCommonsContentSet = {
+      artifactManifests: [],
+      changes: [],
+      redirects: [],
+      pages: [
+        biomarkerPage,
+        {
+          ...protocolPage("protocol_variant:norwegian-4x4/example", "norwegian"),
+          frontmatter: {
+            ...protocolPage("protocol_variant:norwegian-4x4/example", "norwegian").frontmatter,
+            experimentOnboarding: {
+              schemaVersion: "murph.commons.experiment-onboarding.v1",
+              startIntent: {
+                displayPrompt: "Explore Norwegian 4x4",
+                intentSummary: "Explore Norwegian 4x4",
+              },
+              planDefaults: {
+                testPlanId: "missing-test-plan",
+              },
+            },
+          },
+        },
+      ],
+    };
+
+    expect(() => validateHealthCommonsContent(onboardingPlanMismatchContent)).toThrow(
+      "experimentOnboarding planDefaults.testPlanId points to missing test plan missing-test-plan",
+    );
+  });
 });

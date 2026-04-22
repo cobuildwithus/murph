@@ -1576,7 +1576,7 @@
       "schemaVersion": "murph.commons.artifact-manifest.v1"
     }
   ],
-  "catalogHash": "sha256:cc36b06718204d9adba678911b84e04ca71237b59f73da78f97a2b192d1615f0",
+  "catalogHash": "sha256:85d41ef2a139b6797a36b2db519eacce3e4fe7bd67c7f67404f75be305b97e05",
   "changes": [
     {
       "affectedFields": [
@@ -4961,6 +4961,206 @@
           }
         ]
       },
+      "experimentOnboarding": {
+        "assistantPolicy": {
+          "askBeforeCreatingAutomations": true,
+          "confirmationPrompt": "Show the safety outcome, exact baseline/intervention dates, two weekly session windows, modality, heart-rate monitor, target/minimum session counts, logging fields, and reminder policy before creating the active experiment or automations.",
+          "maxSetupQuestionsPerTurn": 2,
+          "missedLogFollowup": "opt_in_only",
+          "missedLogFollowupCopy": "Did you end up doing today's 4x4 session? Totally fine either way — I just want the experiment record to be accurate.",
+          "reminderOptions": [
+            "none",
+            "pre_session",
+            "pre_session_plus_same_day_missing_log_check",
+            "weekly_digest"
+          ],
+          "weeklyDigestDefault": true
+        },
+        "contextReview": {
+          "notes": [
+            "Review vault context first, but still ask the compact high-intensity safety screen because silence in the vault is not clearance."
+          ],
+          "vaultChecks": [
+            {
+              "id": "active_experiments",
+              "label": "Active experiments",
+              "readHints": [
+                "experiment list --status active"
+              ],
+              "reason": "Avoid starting more than one meaningful experiment at once unless the user explicitly chooses that tradeoff."
+            },
+            {
+              "freshnessDays": 14,
+              "id": "wearable_sources",
+              "label": "Wearable sources",
+              "readHints": [
+                "wearables sources list",
+                "wearables day"
+              ],
+              "reason": "Confirm that cardio-fitness, heart-rate, recovery, sleep, or activity signals can be observed during the baseline and intervention windows."
+            },
+            {
+              "freshnessDays": 45,
+              "id": "recent_activity_sessions",
+              "label": "Recent activity sessions",
+              "readHints": [
+                "search query \"recent workouts intervals running cycling rowing\"",
+                "timeline --record-type event"
+              ],
+              "reason": "Understand current training load, interval familiarity, and likely modality fit before scheduling two hard weekly sessions."
+            },
+            {
+              "freshnessDays": 30,
+              "id": "conditions_medications_and_context",
+              "label": "Conditions, medications, and special context",
+              "readHints": [
+                "memory show",
+                "search query \"condition medication pregnancy postpartum infection asthma COPD diabetes beta blocker long COVID injury\""
+              ],
+              "reason": "High-intensity intervals need explicit screening for cardiovascular red flags, heart-rate-limiting medication, pregnancy or postpartum context, acute illness, and recovery-limiting patterns."
+            }
+          ]
+        },
+        "logging": {
+          "confounders": [
+            "illness_or_fever",
+            "acute_infection_recovery",
+            "alcohol_last_24h",
+            "caffeine_last_6h",
+            "hard_training_last_24h",
+            "travel_or_timezone_shift",
+            "unusually_high_work_or_life_stress",
+            "new_medication_or_supplement"
+          ],
+          "sessionFields": [
+            "modality",
+            "completed_intervals",
+            "interval_peak_hrs",
+            "time_in_85_to_95_percent_hrmax",
+            "rpe_each_interval",
+            "one_minute_hr_recovery",
+            "two_minute_hr_recovery",
+            "symptoms_during_or_after",
+            "recovery_after_24_to_48h",
+            "sleep_disruption",
+            "other_hard_training"
+          ]
+        },
+        "planDefaults": {
+          "baselineDays": 7,
+          "firstSessionGuidance": "Keep the first session conservative; the goal is repeatable hard aerobic work, not maximal suffering.",
+          "interventionDays": 42,
+          "minimumUsefulSessions": 8,
+          "sessionsPerWeek": 2,
+          "targetSessions": 12,
+          "testPlanId": "wearable-cardio-fitness-49d"
+        },
+        "safetyScreen": {
+          "cautionLevel": "high",
+          "dispositionIfAnyPositive": "clinician_guidance_before_unsupervised_start",
+          "mode": "ask_compact_then_expand_if_positive",
+          "mustAsk": [
+            {
+              "id": "cardiovascular_red_flags",
+              "prompt": "known cardiovascular disease, exertional chest pain or pressure, unexplained shortness of breath, fainting or near-fainting, significant palpitations or arrhythmia, heart failure, recent heart attack or stroke, uncontrolled blood pressure, or possible myocarditis/pericarditis"
+            },
+            {
+              "id": "acute_or_special_context",
+              "prompt": "recent significant infection or fever, pregnancy or early postpartum if relevant, diabetes medication that can cause lows, beta blockers or other heart-rate-limiting medication, or severe asthma/COPD symptoms"
+            },
+            {
+              "id": "movement_or_recovery_risk",
+              "prompt": "injury or pain that vigorous exercise worsens, or a long-COVID/post-exertional-malaise pattern"
+            }
+          ],
+          "notes": [
+            "A positive or uncertain screen is not a diagnosis; it means Murph should not set up this as an unsupervised high-intensity self-experiment.",
+            "Offer a lower-intensity or clinician-guided alternative when the self-directed 4x4 path is not a safe fit."
+          ],
+          "stopIf": {
+            "inheritFromProtocolSafety": true
+          }
+        },
+        "schemaVersion": "murph.commons.experiment-onboarding.v1",
+        "setupSlots": [
+          {
+            "askPolicy": "ask_if_unknown",
+            "id": "modality",
+            "label": "Modality",
+            "options": [
+              "bike",
+              "rower",
+              "elliptical",
+              "treadmill",
+              "hill",
+              "safe_running_route"
+            ],
+            "purpose": "logistics",
+            "question": "What would you use for the hard intervals: bike, rower, elliptical, treadmill, hill, or a safe running route?",
+            "required": true,
+            "valueType": "enum",
+            "writePath": "runPlan.modality"
+          },
+          {
+            "askPolicy": "ask_if_unknown",
+            "id": "safe_environment",
+            "label": "Safe environment",
+            "purpose": "safety",
+            "question": "Do you have a place to do this without traffic, obstacles, or footing hazards?",
+            "required": true,
+            "valueType": "boolean",
+            "writePath": "onboarding.answers.safe_environment"
+          },
+          {
+            "askPolicy": "ask_if_unknown",
+            "id": "hr_monitor",
+            "label": "Heart-rate monitor",
+            "options": [
+              "chest_strap",
+              "wrist_wearable",
+              "none"
+            ],
+            "purpose": "measurement_fidelity",
+            "question": "What heart-rate monitor would you use for the intervals: chest strap, wrist wearable, or none?",
+            "required": true,
+            "valueType": "enum",
+            "writePath": "runPlan.hrMonitor"
+          },
+          {
+            "askPolicy": "ask_if_unknown",
+            "constraints": {
+              "minimumHoursBetweenSessions": 48,
+              "sessionsPerWeek": 2
+            },
+            "id": "weekly_schedule",
+            "label": "Weekly schedule",
+            "purpose": "logistics",
+            "question": "What two days and rough times would realistically work, with at least 48 hours between sessions?",
+            "required": true,
+            "valueType": "weekly_time_windows",
+            "writePath": "runPlan.schedule"
+          },
+          {
+            "askPolicy": "ask_at_confirmation",
+            "id": "reminder_policy",
+            "label": "Reminder policy",
+            "options": [
+              "none",
+              "pre_session",
+              "pre_session_plus_same_day_missing_log_check"
+            ],
+            "purpose": "assistant_support",
+            "question": "Want a reminder before each planned session, and if you do not log it by later that day should Murph ask once or leave it alone?",
+            "required": true,
+            "valueType": "reminder_policy",
+            "writePath": "assistantSupport.reminderPolicy"
+          }
+        ],
+        "startIntent": {
+          "displayPrompt": "Hey Murph, I want to explore doing Norwegian 4x4 intervals.",
+          "intentSummary": "Explore Norwegian 4x4 Intervals"
+        }
+      },
       "key": "protocol_variant:norwegian-4x4/norwegian-4x4",
       "lineage": {
         "rationale": "Default Norwegian 4x4 experiment for general fitness, kept separate from sprint intervals, low-volume HIIT variants, athlete protocols, and clinical rehabilitation programs.",
@@ -5247,9 +5447,9 @@
         "primaryClaim": "The strongest support is for improving lab VO2max or wearable cardio-fitness when the 4x4 intensity target is actually reached."
       },
       "revision": {
-        "pageRevisionId": "sha256:b38c7c276f4bac06249f95ae53e6bc9ec17b5b80064419057ecc122badc90207",
+        "pageRevisionId": "sha256:b7578fe31aff836656eaa08479accd1c909113caaa6bc78df407d629d233a4b7",
         "recipeHash": "sha256:a36ee9d7c6cf5d9c816817cb9366d0a7d815922f2135ecd739884d1afd7a38d1",
-        "runSpecRevisionId": "sha256:80e12ca616f3426cfe7a4f2c60696a066a55fdbf5a1fce79c95901d7ba3fff2b"
+        "runSpecRevisionId": "sha256:141c35d7b0af6e614b59aa9cb031a39f0580ffc283c066ac04dd0d1a2db789db"
       },
       "safety": {
         "avoidOrGetClinicianGuidance": [
