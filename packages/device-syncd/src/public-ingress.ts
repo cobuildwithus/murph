@@ -1,5 +1,6 @@
 import { deviceSyncError, isDeviceSyncError } from "./errors.ts";
 import { sanitizeHostedRuntimeErrorText } from "./hosted-runtime.ts";
+import { normalizeConfiguredDeviceSyncJobInput } from "./config/provider-manifests.ts";
 import {
   addMilliseconds,
   generateStateCode,
@@ -215,6 +216,9 @@ export class DeviceSyncPublicIngress {
         },
         code,
       );
+      const initialJobs = connection.initialJobs?.map((job) =>
+        normalizeConfiguredDeviceSyncJobInput(provider.provider, job, "oauth callback")
+      );
 
       const ownerId =
         typeof stateRecord.metadata?.ownerId === "string" ? normalizeString(stateRecord.metadata.ownerId) : null;
@@ -237,7 +241,10 @@ export class DeviceSyncPublicIngress {
 
       await this.hooks.onConnectionEstablished?.({
         account,
-        connection,
+        connection: {
+          ...connection,
+          ...(initialJobs ? { initialJobs } : {}),
+        },
         provider,
         now,
       } satisfies DeviceSyncPublicIngressConnectionEstablishedInput);
@@ -272,12 +279,18 @@ export class DeviceSyncPublicIngress {
       rawBody,
       now,
     });
+    const jobs = parsed.jobs.map((job) =>
+      normalizeConfiguredDeviceSyncJobInput(provider.provider, job, "webhook")
+    );
     const traceId = scopeWebhookTraceId(
       provider.provider,
       parsed.externalAccountId,
       parsed.traceId,
     );
-    const webhook = toIngressWebhook(parsed);
+    const webhook = toIngressWebhook({
+      ...parsed,
+      jobs,
+    });
 
     const traceClaim = await this.store.claimWebhookTrace({
       provider: provider.provider,

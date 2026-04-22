@@ -1623,3 +1623,136 @@ test("public ingress does not complete a claimed webhook trace twice when the du
 
   assert.equal(store.completedWebhookTraceCalls, 1);
 });
+
+test("public ingress rejects built-in OAuth callback jobs that drift from the provider manifest", async () => {
+  const store = new InMemoryPublicIngressStore();
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([
+      createFakeProvider({
+        provider: "strava",
+        descriptor: {
+          provider: "strava",
+          displayName: "Strava",
+          transportModes: ["oauth_callback", "scheduled_poll", "webhook_push"],
+          oauth: {
+            callbackPath: "/oauth/strava/callback",
+            defaultScopes: ["activity:read"],
+          },
+          webhook: {
+            path: "/webhooks/strava",
+            deliveryMode: "notification",
+            supportsAdmin: false,
+          },
+          normalization: {
+            metricFamilies: ["activity"],
+            snapshotParser: "schema",
+          },
+          sourcePriorityHints: {
+            defaultPriority: 50,
+            metricFamilies: {
+              activity: 50,
+            },
+          },
+        },
+        async exchangeAuthorizationCode(_context, code) {
+          return {
+            externalAccountId: `strava-${code}`,
+            displayName: `Strava ${code}`,
+            scopes: ["activity:read"],
+            metadata: {},
+            tokens: {
+              accessToken: "access-token",
+              refreshToken: "refresh-token",
+            },
+            initialJobs: [
+              {
+                kind: "backfill",
+                payload: {
+                  unexpected: true,
+                },
+              },
+            ],
+            nextReconcileAt: "2026-03-24T00:00:00.000Z",
+          };
+        },
+      }),
+    ]),
+    store,
+  });
+
+  const begin = await ingress.startConnection({ provider: "strava" });
+
+  await assert.rejects(
+    () =>
+      ingress.handleOAuthCallback({
+        provider: "strava",
+        state: begin.state,
+        code: "abc",
+      }),
+    /not declared in the provider manifest/u,
+  );
+
+  assert.equal(store.getConnectionByExternalAccount("strava", "strava-abc"), null);
+});
+
+test("public ingress rejects built-in webhook jobs that drift from the provider manifest before durable trace claim", async () => {
+  const store = new InMemoryPublicIngressStore();
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([
+      createFakeProvider({
+        provider: "whoop",
+        descriptor: {
+          provider: "whoop",
+          displayName: "WHOOP",
+          transportModes: ["oauth_callback", "scheduled_poll", "webhook_push"],
+          oauth: {
+            callbackPath: "/oauth/whoop/callback",
+            defaultScopes: ["offline"],
+          },
+          webhook: {
+            path: "/webhooks/whoop",
+            deliveryMode: "notification",
+            supportsAdmin: false,
+          },
+          normalization: {
+            metricFamilies: ["activity"],
+            snapshotParser: "schema",
+          },
+          sourcePriorityHints: {
+            defaultPriority: 50,
+            metricFamilies: {
+              activity: 50,
+            },
+          },
+        },
+        async verifyAndParseWebhook() {
+          return {
+            externalAccountId: "whoop-abc",
+            eventType: "sleep.updated",
+            traceId: "trace-1",
+            jobs: [
+              {
+                kind: "resource",
+                payload: {
+                  resourceId: 123,
+                  resourceType: "sleep",
+                },
+              },
+            ],
+          };
+        },
+      }),
+    ]),
+    store,
+  });
+
+  await assert.rejects(
+    () => ingress.handleWebhook("whoop", new Headers(), Buffer.from("{}")),
+    /resourceId must be a string/u,
+  );
+
+  assert.equal(store.completedWebhookTraceCalls, 0);
+  assert.equal(readRecordedWebhookTrace(store), null);
+});

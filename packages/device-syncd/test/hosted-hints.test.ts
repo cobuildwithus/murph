@@ -4,7 +4,7 @@ import { test } from "vitest";
 
 import { shapeHostedDeviceSyncJobHintPayload } from "../src/hosted-hints.ts";
 
-test("hosted job hint payload shaping keeps only the provider-specific allowlists", () => {
+test("hosted job hint payload shaping keeps only the provider-specific job-definition fields", () => {
   assert.deepEqual(
     shapeHostedDeviceSyncJobHintPayload("garmin", {
       kind: "backfill",

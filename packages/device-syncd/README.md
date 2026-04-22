@@ -69,7 +69,7 @@ Strava uses OAuth, polling, and optional app-global webhooks.
 Oura uses OAuth plus refresh tokens and works well in a polling-first mode, so the basic Murph setup does not require Oura webhooks. Once the operator configures the Oura client ID and secret, the end-user flow is just connect once and let scheduled sync keep the account fresh.
 
 The provider lifecycle metadata used here now comes from the shared `@murphai/importers/device-providers/provider-descriptors` surface, so callback paths, default scopes, webhook capabilities, sync windows, metric families, and source-priority hints stay aligned between connector code and snapshot normalization.
-The configured-provider assembly is now derived from one shared provider-manifest registry in `packages/device-syncd/src/config/provider-manifests.ts`, so env specs, config readers, provider factories, serializable hosted-runtime config, hosted wake hint shaping, and importer wiring all follow the same provider list.
+The configured-provider assembly is now derived from one shared provider-manifest registry in `packages/device-syncd/src/config/provider-manifests.ts`, so env specs, config readers, provider factories, provider-owned job definitions, serializable hosted-runtime config, hosted wake hint shaping, and importer wiring all follow the same provider list.
 
 ## Adding another provider
 

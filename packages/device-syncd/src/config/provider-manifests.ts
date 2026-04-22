@@ -72,7 +72,9 @@ import {
   type DeviceSyncProviderEnvSpec,
 } from "./provider-env.ts";
 
-import type { DeviceSyncProvider } from "../types.ts";
+import { deviceSyncError } from "../errors.ts";
+
+import type { DeviceSyncJobInput, DeviceSyncJobRecord, DeviceSyncProvider } from "../types.ts";
 import type {
   ConfiguredDeviceSyncProviderConfigByKey,
   ConfiguredDeviceSyncProviderKey,
@@ -82,7 +84,22 @@ import type {
 } from "./provider-types.ts";
 
 export type SerializableConfigFieldKind = "number" | "string" | "string[]";
-export type HostedHintFieldKind = "boolean" | "number" | "string";
+export type DeviceSyncJobPayloadFieldKind = "boolean" | "number" | "string" | "string[]";
+export type HostedHintFieldKind = Exclude<DeviceSyncJobPayloadFieldKind, "string[]">;
+
+export interface DeviceSyncJobPayloadFieldSpec {
+  kind: DeviceSyncJobPayloadFieldKind;
+  includeInHostedHint?: boolean;
+  required?: boolean;
+}
+
+export interface DeviceSyncProviderJobDefinition {
+  payload: Readonly<Record<string, DeviceSyncJobPayloadFieldSpec>>;
+}
+
+export type DeviceSyncProviderJobDefinitionMap =
+  Readonly<Partial<Record<string, DeviceSyncProviderJobDefinition>>>;
+
 export type HostedHintPayloadFieldMap = Readonly<Record<string, HostedHintFieldKind>>;
 
 export interface ConfiguredDeviceSyncProviderCapabilities {
@@ -105,8 +122,8 @@ export interface DeviceSyncConfiguredProviderManifest<
   descriptor: DeviceProviderDescriptor;
   disallowedSerializableFields?: Readonly<Record<string, string>>;
   env: DeviceSyncProviderEnvSpec;
-  hostedHintPayloads?: Readonly<Partial<Record<string, HostedHintPayloadFieldMap>>>;
   importer: DeviceProviderAdapter;
+  jobs: DeviceSyncProviderJobDefinitionMap;
   readConfig(env: DeviceSyncEnvSource): TConfig | null;
   serializableFields: Readonly<Record<Extract<keyof TSerializableConfig, string>, SerializableConfigFieldKind>>;
 }
@@ -137,6 +154,42 @@ export interface DeviceSyncConfiguredProviderManifestByKey {
 const DEFAULT_DISALLOWED_SERIALIZABLE_FIELDS = Object.freeze({
   fetchImpl: "is not supported in serialized runtime config.",
 });
+
+function booleanJobField(
+  options: Pick<DeviceSyncJobPayloadFieldSpec, "includeInHostedHint" | "required"> = {},
+): DeviceSyncJobPayloadFieldSpec {
+  return {
+    kind: "boolean",
+    ...options,
+  };
+}
+
+function numberJobField(
+  options: Pick<DeviceSyncJobPayloadFieldSpec, "includeInHostedHint" | "required"> = {},
+): DeviceSyncJobPayloadFieldSpec {
+  return {
+    kind: "number",
+    ...options,
+  };
+}
+
+function stringJobField(
+  options: Pick<DeviceSyncJobPayloadFieldSpec, "includeInHostedHint" | "required"> = {},
+): DeviceSyncJobPayloadFieldSpec {
+  return {
+    kind: "string",
+    ...options,
+  };
+}
+
+function stringArrayJobField(
+  options: Pick<DeviceSyncJobPayloadFieldSpec, "required"> = {},
+): DeviceSyncJobPayloadFieldSpec {
+  return {
+    kind: "string[]",
+    ...options,
+  };
+}
 
 const GARMIN_DEVICE_SYNC_PROVIDER_MANIFEST = defineConfiguredDeviceSyncProviderManifest<
   "garmin",
@@ -184,16 +237,24 @@ const GARMIN_DEVICE_SYNC_PROVIDER_MANIFEST = defineConfiguredDeviceSyncProviderM
     tokenBaseUrl: "string",
   },
   disallowedSerializableFields: DEFAULT_DISALLOWED_SERIALIZABLE_FIELDS,
-  hostedHintPayloads: {
+  jobs: {
     backfill: {
-      includeProfile: "boolean",
-      windowEnd: "string",
-      windowStart: "string",
+      payload: {
+        dataType: stringJobField(),
+        dataTypes: stringArrayJobField(),
+        includeProfile: booleanJobField({ includeInHostedHint: true }),
+        windowEnd: stringJobField({ includeInHostedHint: true }),
+        windowStart: stringJobField({ includeInHostedHint: true }),
+      },
     },
     reconcile: {
-      includeProfile: "boolean",
-      windowEnd: "string",
-      windowStart: "string",
+      payload: {
+        dataType: stringJobField(),
+        dataTypes: stringArrayJobField(),
+        includeProfile: booleanJobField({ includeInHostedHint: true }),
+        windowEnd: stringJobField({ includeInHostedHint: true }),
+        windowStart: stringJobField({ includeInHostedHint: true }),
+      },
     },
   },
 });
@@ -251,30 +312,38 @@ const OURA_DEVICE_SYNC_PROVIDER_MANIFEST = defineConfiguredDeviceSyncProviderMan
     webhookVerificationToken:
       "is a provider-owned admin secret and is not supported in serialized runtime config.",
   },
-  hostedHintPayloads: {
+  jobs: {
     backfill: {
-      includePersonalInfo: "boolean",
-      windowEnd: "string",
-      windowStart: "string",
+      payload: {
+        includePersonalInfo: booleanJobField({ includeInHostedHint: true }),
+        windowEnd: stringJobField({ includeInHostedHint: true }),
+        windowStart: stringJobField({ includeInHostedHint: true }),
+      },
     },
     reconcile: {
-      includePersonalInfo: "boolean",
-      windowEnd: "string",
-      windowStart: "string",
+      payload: {
+        includePersonalInfo: booleanJobField({ includeInHostedHint: true }),
+        windowEnd: stringJobField({ includeInHostedHint: true }),
+        windowStart: stringJobField({ includeInHostedHint: true }),
+      },
     },
     resource: {
-      dataType: "string",
-      includePersonalInfo: "boolean",
-      objectId: "string",
-      occurredAt: "string",
-      windowEnd: "string",
-      windowStart: "string",
+      payload: {
+        dataType: stringJobField({ includeInHostedHint: true }),
+        includePersonalInfo: booleanJobField({ includeInHostedHint: true }),
+        objectId: stringJobField({ includeInHostedHint: true }),
+        occurredAt: stringJobField({ includeInHostedHint: true }),
+        windowEnd: stringJobField({ includeInHostedHint: true }),
+        windowStart: stringJobField({ includeInHostedHint: true }),
+      },
     },
     delete: {
-      dataType: "string",
-      objectId: "string",
-      occurredAt: "string",
-      sourceEventType: "string",
+      payload: {
+        dataType: stringJobField({ includeInHostedHint: true, required: true }),
+        objectId: stringJobField({ includeInHostedHint: true, required: true }),
+        occurredAt: stringJobField({ includeInHostedHint: true }),
+        sourceEventType: stringJobField({ includeInHostedHint: true }),
+      },
     },
   },
 });
@@ -325,26 +394,34 @@ const WHOOP_DEVICE_SYNC_PROVIDER_MANIFEST = defineConfiguredDeviceSyncProviderMa
     webhookTimestampToleranceMs: "number",
   },
   disallowedSerializableFields: DEFAULT_DISALLOWED_SERIALIZABLE_FIELDS,
-  hostedHintPayloads: {
+  jobs: {
     backfill: {
-      windowEnd: "string",
-      windowStart: "string",
+      payload: {
+        windowEnd: stringJobField({ includeInHostedHint: true }),
+        windowStart: stringJobField({ includeInHostedHint: true }),
+      },
     },
     reconcile: {
-      windowEnd: "string",
-      windowStart: "string",
+      payload: {
+        windowEnd: stringJobField({ includeInHostedHint: true }),
+        windowStart: stringJobField({ includeInHostedHint: true }),
+      },
     },
     resource: {
-      eventType: "string",
-      occurredAt: "string",
-      resourceId: "string",
-      resourceType: "string",
+      payload: {
+        eventType: stringJobField({ includeInHostedHint: true }),
+        occurredAt: stringJobField({ includeInHostedHint: true }),
+        resourceId: stringJobField({ includeInHostedHint: true, required: true }),
+        resourceType: stringJobField({ includeInHostedHint: true, required: true }),
+      },
     },
     delete: {
-      eventType: "string",
-      occurredAt: "string",
-      resourceId: "string",
-      resourceType: "string",
+      payload: {
+        eventType: stringJobField({ includeInHostedHint: true }),
+        occurredAt: stringJobField({ includeInHostedHint: true }),
+        resourceId: stringJobField({ includeInHostedHint: true, required: true }),
+        resourceType: stringJobField({ includeInHostedHint: true, required: true }),
+      },
     },
   },
 });
@@ -400,32 +477,46 @@ const STRAVA_DEVICE_SYNC_PROVIDER_MANIFEST = defineConfiguredDeviceSyncProviderM
     webhookVerifyToken:
       "is a provider-owned admin secret and is not supported in serialized runtime config.",
   },
-  hostedHintPayloads: {
+  jobs: {
     backfill: {
-      windowEnd: "string",
-      windowStart: "string",
+      payload: {
+        includeAthlete: booleanJobField(),
+        windowEnd: stringJobField({ includeInHostedHint: true }),
+        windowKind: stringJobField(),
+        windowStart: stringJobField({ includeInHostedHint: true }),
+      },
     },
     reconcile: {
-      windowEnd: "string",
-      windowStart: "string",
+      payload: {
+        includeAthlete: booleanJobField(),
+        windowEnd: stringJobField({ includeInHostedHint: true }),
+        windowKind: stringJobField(),
+        windowStart: stringJobField({ includeInHostedHint: true }),
+      },
     },
     resource: {
-      eventType: "string",
-      occurredAt: "string",
-      resourceId: "string",
-      resourceType: "string",
+      payload: {
+        eventType: stringJobField({ includeInHostedHint: true }),
+        occurredAt: stringJobField({ includeInHostedHint: true }),
+        resourceId: stringJobField({ includeInHostedHint: true, required: true }),
+        resourceType: stringJobField({ includeInHostedHint: true, required: true }),
+      },
     },
     delete: {
-      eventType: "string",
-      occurredAt: "string",
-      resourceId: "string",
-      resourceType: "string",
+      payload: {
+        eventType: stringJobField({ includeInHostedHint: true }),
+        occurredAt: stringJobField({ includeInHostedHint: true }),
+        resourceId: stringJobField({ includeInHostedHint: true, required: true }),
+        resourceType: stringJobField({ includeInHostedHint: true }),
+      },
     },
     deauthorize: {
-      eventType: "string",
-      occurredAt: "string",
-      resourceId: "string",
-      resourceType: "string",
+      payload: {
+        eventType: stringJobField({ includeInHostedHint: true }),
+        occurredAt: stringJobField({ includeInHostedHint: true }),
+        resourceId: stringJobField({ includeInHostedHint: true, required: true }),
+        resourceType: stringJobField({ includeInHostedHint: true, required: true }),
+      },
     },
   },
 });
@@ -501,6 +592,52 @@ export function listConfiguredDeviceSyncProviderManifests(
   );
 }
 
+export function getConfiguredDeviceSyncProviderJobDefinition(
+  provider: string,
+  kind: string,
+): DeviceSyncProviderJobDefinition | undefined {
+  const manifest = resolveConfiguredDeviceSyncProviderManifest(provider);
+  return manifest?.jobs[kind];
+}
+
+export function normalizeConfiguredDeviceSyncJobInput(
+  provider: string,
+  job: DeviceSyncJobInput,
+  context: string,
+): DeviceSyncJobInput {
+  return {
+    ...job,
+    payload: normalizeConfiguredDeviceSyncJobPayload(provider, job.kind, job.payload, context),
+  };
+}
+
+export function normalizeConfiguredDeviceSyncJobRecord(
+  provider: string,
+  job: DeviceSyncJobRecord,
+  context: string,
+): DeviceSyncJobRecord {
+  return {
+    ...job,
+    payload: normalizeConfiguredDeviceSyncJobPayload(provider, job.kind, job.payload, context),
+  };
+}
+
+export function shapeConfiguredDeviceSyncHostedHintPayload(
+  provider: string,
+  job: Pick<DeviceSyncJobInput, "kind" | "payload">,
+): Record<string, unknown> {
+  const definition = getConfiguredDeviceSyncProviderJobDefinition(provider, job.kind);
+
+  if (!definition) {
+    return {};
+  }
+
+  return pickConfiguredDeviceSyncHostedHintPayload(
+    normalizeJobPayloadRecord(job.payload, `${provider} ${job.kind} hosted hint payload`),
+    definition,
+  );
+}
+
 function defineConfiguredDeviceSyncProviderManifest<
   TProvider extends ConfiguredDeviceSyncProviderKey,
   TConfig extends ConfiguredDeviceSyncProviderConfigByKey[TProvider],
@@ -518,9 +655,7 @@ function defineConfiguredDeviceSyncProviderManifest<
       ? Object.freeze({ ...input.disallowedSerializableFields })
       : undefined,
     env: freezeDeviceSyncProviderEnvSpec(input.env),
-    hostedHintPayloads: input.hostedHintPayloads
-      ? freezeHostedHintPayloads(input.hostedHintPayloads)
-      : undefined,
+    jobs: freezeConfiguredDeviceSyncProviderJobDefinitions(input.jobs),
     serializableFields: Object.freeze({ ...input.serializableFields }),
   });
 }
@@ -552,17 +687,157 @@ function freezeDeviceSyncProviderEnvSpec(env: DeviceSyncProviderEnvSpec): Device
   });
 }
 
-function freezeHostedHintPayloads(
-  hostedHintPayloads: Readonly<Partial<Record<string, HostedHintPayloadFieldMap>>>,
-): Readonly<Partial<Record<string, HostedHintPayloadFieldMap>>> {
+function freezeConfiguredDeviceSyncProviderJobDefinitions(
+  definitions: DeviceSyncProviderJobDefinitionMap,
+): DeviceSyncProviderJobDefinitionMap {
   return Object.freeze(
     Object.fromEntries(
-      Object.entries(hostedHintPayloads).map(([kind, fields]) => [
-        kind,
-        Object.freeze({ ...fields }),
-      ]),
+      Object.entries(definitions).flatMap(([kind, definition]) =>
+        definition
+          ? [
+              [
+                kind,
+                Object.freeze({
+                  payload: Object.freeze(
+                    Object.fromEntries(
+                      Object.entries(definition.payload).map(([field, spec]) => [
+                        field,
+                        Object.freeze({ ...spec }),
+                      ]),
+                    ),
+                  ),
+                }),
+              ] as const,
+            ]
+          : [],
+      ),
     ),
   );
+}
+
+function normalizeConfiguredDeviceSyncJobPayload(
+  provider: string,
+  kind: string,
+  payload: Record<string, unknown> | undefined,
+  context: string,
+): Record<string, unknown> {
+  const normalizedPayload = normalizeJobPayloadRecord(payload, `${provider} ${kind} ${context} payload`);
+  const manifest = resolveConfiguredDeviceSyncProviderManifest(provider);
+
+  if (!manifest) {
+    return normalizedPayload;
+  }
+
+  const definition = manifest.jobs[kind];
+
+  if (!definition) {
+    throw deviceSyncError({
+      code: "DEVICE_SYNC_JOB_PAYLOAD_INVALID",
+      message: `Device sync provider ${provider} job kind ${kind} is not declared in the provider manifest.`,
+      retryable: false,
+    });
+  }
+
+  const output: Record<string, unknown> = {};
+
+  for (const key of Object.keys(normalizedPayload)) {
+    if (!Object.prototype.hasOwnProperty.call(definition.payload, key)) {
+      throw deviceSyncError({
+        code: "DEVICE_SYNC_JOB_PAYLOAD_INVALID",
+        message: `Device sync provider ${provider} job ${kind} ${context} payload field ${key} is not declared in the provider manifest.`,
+        retryable: false,
+      });
+    }
+  }
+
+  for (const [field, spec] of Object.entries(definition.payload)) {
+    const value = normalizedPayload[field];
+
+    if (value === undefined) {
+      if (spec.required) {
+        throw deviceSyncError({
+          code: "DEVICE_SYNC_JOB_PAYLOAD_INVALID",
+          message: `Device sync provider ${provider} job ${kind} ${context} payload field ${field} is required.`,
+          retryable: false,
+        });
+      }
+
+      continue;
+    }
+
+    if (!matchesConfiguredDeviceSyncJobFieldKind(value, spec.kind)) {
+      throw deviceSyncError({
+        code: "DEVICE_SYNC_JOB_PAYLOAD_INVALID",
+        message:
+          `Device sync provider ${provider} job ${kind} ${context} payload field ${field} must be ${describeConfiguredDeviceSyncJobFieldKind(spec.kind)}.`,
+        retryable: false,
+      });
+    }
+
+    output[field] = spec.kind === "string[]" && Array.isArray(value) ? [...value] : value;
+  }
+
+  return output;
+}
+
+function normalizeJobPayloadRecord(
+  payload: Record<string, unknown> | undefined,
+  context: string,
+): Record<string, unknown> {
+  if (payload === undefined) {
+    return {};
+  }
+
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    throw deviceSyncError({
+      code: "DEVICE_SYNC_JOB_PAYLOAD_INVALID",
+      message: `Device sync ${context} must be an object payload.`,
+      retryable: false,
+    });
+  }
+
+  return { ...payload };
+}
+
+function matchesConfiguredDeviceSyncJobFieldKind(
+  value: unknown,
+  kind: DeviceSyncJobPayloadFieldKind,
+): value is boolean | number | string | string[] {
+  switch (kind) {
+    case "boolean":
+      return value === true || value === false;
+    case "number":
+      return typeof value === "number" && Number.isFinite(value);
+    case "string":
+      return typeof value === "string";
+    case "string[]":
+      return Array.isArray(value) && value.every((entry) => typeof entry === "string");
+  }
+}
+
+function describeConfiguredDeviceSyncJobFieldKind(kind: DeviceSyncJobPayloadFieldKind): string {
+  return kind === "string[]" ? "an array of strings" : `a ${kind}`;
+}
+
+function pickConfiguredDeviceSyncHostedHintPayload(
+  payload: Record<string, unknown>,
+  definition: DeviceSyncProviderJobDefinition,
+): Record<string, unknown> {
+  const shaped: Record<string, unknown> = {};
+
+  for (const [field, spec] of Object.entries(definition.payload)) {
+    if (!spec.includeInHostedHint || spec.kind === "string[]") {
+      continue;
+    }
+
+    const value = payload[field];
+
+    if (matchesConfiguredDeviceSyncJobFieldKind(value, spec.kind)) {
+      shaped[field] = value;
+    }
+  }
+
+  return shaped;
 }
 
 function uniqueDeviceSyncProviderEnvKeys(keys: readonly string[]): string[] {

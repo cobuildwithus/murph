@@ -1,5 +1,9 @@
 import { createImporters } from "@murphai/importers";
 
+import {
+  normalizeConfiguredDeviceSyncJobInput,
+  normalizeConfiguredDeviceSyncJobRecord,
+} from "./config/provider-manifests.ts";
 import { buildDeviceSyncTokenCipherOptions, createSecretCodec } from "./crypto.ts";
 import { deviceSyncError, isDeviceSyncError } from "./errors.ts";
 import { sanitizeHostedRuntimeErrorText } from "./hosted-runtime.ts";
@@ -442,6 +446,7 @@ export class DeviceSyncService {
 
     try {
       currentAccount = this.toDecryptedAccount(storedAccount);
+      const normalizedJob = normalizeConfiguredDeviceSyncJobRecord(provider.provider, job, "execution");
       const result = await provider.executeJob(
         {
           account: currentAccount,
@@ -484,7 +489,7 @@ export class DeviceSyncService {
           },
           logger: this.logger,
         },
-        job,
+        normalizedJob,
       );
 
       if (executionDisconnected) {
@@ -694,18 +699,19 @@ export class DeviceSyncService {
     account: Pick<PublicDeviceSyncAccount, "id" | "provider">,
     jobs: readonly DeviceSyncJobInput[],
   ): DeviceSyncJobRecord[] {
-    return jobs.map((job) =>
-      this.store.enqueueJob({
+    return jobs.map((job) => {
+      const normalizedJob = normalizeConfiguredDeviceSyncJobInput(account.provider, job, "enqueue");
+      return this.store.enqueueJob({
         provider: account.provider,
         accountId: account.id,
-        kind: job.kind,
-        payload: job.payload ?? {},
-        priority: job.priority ?? 0,
-        availableAt: job.availableAt,
-        maxAttempts: job.maxAttempts,
-        dedupeKey: job.dedupeKey,
-      }),
-    );
+        kind: normalizedJob.kind,
+        payload: normalizedJob.payload ?? {},
+        priority: normalizedJob.priority ?? 0,
+        availableAt: normalizedJob.availableAt,
+        maxAttempts: normalizedJob.maxAttempts,
+        dedupeKey: normalizedJob.dedupeKey,
+      });
+    });
   }
 }
 

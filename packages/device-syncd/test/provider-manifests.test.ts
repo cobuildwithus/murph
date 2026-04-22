@@ -8,6 +8,9 @@ import {
   deviceSyncProviderRuntimeSecretEnvKeys,
   deviceSyncProviderRuntimeVariableEnvKeys,
   getConfiguredDeviceSyncProviderManifest,
+  getConfiguredDeviceSyncProviderJobDefinition,
+  normalizeConfiguredDeviceSyncJobInput,
+  normalizeConfiguredDeviceSyncJobRecord,
   parseSerializableConfiguredDeviceSyncProviderConfigs,
   readConfiguredDeviceSyncProviderConfigs,
 } from "@murphai/device-syncd/config";
@@ -16,6 +19,7 @@ import {
   configuredDeviceSyncProviderKeys as rootConfiguredDeviceSyncProviderKeys,
   deviceSyncProviderManifests as rootDeviceSyncProviderManifests,
   getConfiguredDeviceSyncProviderManifest as rootGetConfiguredDeviceSyncProviderManifest,
+  getConfiguredDeviceSyncProviderJobDefinition as rootGetConfiguredDeviceSyncProviderJobDefinition,
   resolveConfiguredDeviceSyncProviderManifest as rootResolveConfiguredDeviceSyncProviderManifest,
 } from "@murphai/device-syncd";
 
@@ -44,7 +48,36 @@ describe("deviceSyncProviderManifests", () => {
       expect(manifest.capabilities.remoteDisconnect).toBe(
         Boolean(manifest.descriptor.sync?.supportsRemoteDisconnect),
       );
+      expect(Object.keys(manifest.jobs).length).toBeGreaterThan(0);
     }
+  });
+
+  it("declares provider-owned job definitions for every built-in provider job kind", () => {
+    expect(getConfiguredDeviceSyncProviderJobDefinition("garmin", "backfill")).toMatchObject({
+      payload: {
+        dataType: { kind: "string" },
+        dataTypes: { kind: "string[]" },
+        includeProfile: { kind: "boolean", includeInHostedHint: true },
+      },
+    });
+    expect(getConfiguredDeviceSyncProviderJobDefinition("oura", "resource")).toMatchObject({
+      payload: {
+        dataType: { kind: "string", includeInHostedHint: true },
+        objectId: { kind: "string", includeInHostedHint: true },
+      },
+    });
+    expect(getConfiguredDeviceSyncProviderJobDefinition("whoop", "delete")).toMatchObject({
+      payload: {
+        resourceId: { kind: "string", includeInHostedHint: true, required: true },
+        resourceType: { kind: "string", includeInHostedHint: true, required: true },
+      },
+    });
+    expect(getConfiguredDeviceSyncProviderJobDefinition("strava", "deauthorize")).toMatchObject({
+      payload: {
+        resourceId: { kind: "string", includeInHostedHint: true, required: true },
+        resourceType: { kind: "string", includeInHostedHint: true, required: true },
+      },
+    });
   });
 
   it("derives runtime env lists from manifest env specs", () => {
@@ -233,11 +266,109 @@ describe("deviceSyncProviderManifests", () => {
     expect(getConfiguredDeviceSyncProviderManifest("oura").provider).toBe("oura");
   });
 
+  it("normalizes built-in job payloads through the manifest job definitions", () => {
+    expect(
+      normalizeConfiguredDeviceSyncJobInput("garmin", {
+        kind: "backfill",
+        payload: {
+          dataTypes: ["sleeps", "activities"],
+          includeProfile: true,
+          windowStart: "2026-04-01T00:00:00.000Z",
+        },
+      }, "test"),
+    ).toEqual({
+      kind: "backfill",
+      payload: {
+        dataTypes: ["sleeps", "activities"],
+        includeProfile: true,
+        windowStart: "2026-04-01T00:00:00.000Z",
+      },
+    });
+
+    expect(
+      normalizeConfiguredDeviceSyncJobRecord("strava", {
+        id: "job-1",
+        provider: "strava",
+        accountId: "acct-1",
+        kind: "resource",
+        payload: {
+          eventType: "activity.update",
+          resourceId: "activity-123",
+          resourceType: "activity",
+        },
+        priority: 90,
+        availableAt: "2026-04-22T00:00:00.000Z",
+        attempts: 0,
+        maxAttempts: 5,
+        dedupeKey: null,
+        status: "queued",
+        leaseOwner: null,
+        leaseExpiresAt: null,
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        createdAt: "2026-04-22T00:00:00.000Z",
+        updatedAt: "2026-04-22T00:00:00.000Z",
+        startedAt: null,
+        finishedAt: null,
+      }, "test"),
+    ).toMatchObject({
+      kind: "resource",
+      payload: {
+        eventType: "activity.update",
+        resourceId: "activity-123",
+        resourceType: "activity",
+      },
+    });
+  });
+
+  it("rejects built-in job payloads that drift from the provider manifest", () => {
+    expect(() =>
+      normalizeConfiguredDeviceSyncJobInput("oura", {
+        kind: "resource",
+        payload: {
+          dataType: "daily_sleep",
+          objectId: "sleep_123",
+          unexpected: true,
+        },
+      }, "test"),
+    ).toThrow(/not declared in the provider manifest/);
+
+    expect(() =>
+      normalizeConfiguredDeviceSyncJobRecord("strava", {
+        id: "job-2",
+        provider: "strava",
+        accountId: "acct-1",
+        kind: "resource",
+        payload: {
+          resourceId: 123,
+          resourceType: "activity",
+        },
+        priority: 90,
+        availableAt: "2026-04-22T00:00:00.000Z",
+        attempts: 0,
+        maxAttempts: 5,
+        dedupeKey: null,
+        status: "queued",
+        leaseOwner: null,
+        leaseExpiresAt: null,
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        createdAt: "2026-04-22T00:00:00.000Z",
+        updatedAt: "2026-04-22T00:00:00.000Z",
+        startedAt: null,
+        finishedAt: null,
+      }, "test"),
+    ).toThrow(/resourceId must be a string/);
+  });
+
   it("re-exports the manifest registry through the package root barrel", () => {
     expect(rootConfiguredDeviceSyncProviderKeys).toEqual(configuredDeviceSyncProviderKeys);
     expect(rootDeviceSyncProviderManifests).toEqual(deviceSyncProviderManifests);
     expect(rootGetConfiguredDeviceSyncProviderManifest("garmin")).toBe(
       getConfiguredDeviceSyncProviderManifest("garmin"),
+    );
+    expect(rootGetConfiguredDeviceSyncProviderJobDefinition("strava", "resource")).toBe(
+      getConfiguredDeviceSyncProviderJobDefinition("strava", "resource"),
     );
     expect(rootResolveConfiguredDeviceSyncProviderManifest("oura")).toBe(
       getConfiguredDeviceSyncProviderManifest("oura"),
@@ -251,8 +382,10 @@ describe("deviceSyncProviderManifests", () => {
     expect(Object.isFrozen(ouraManifest.capabilities)).toBe(true);
     expect(Object.isFrozen(ouraManifest.env)).toBe(true);
     expect(Object.isFrozen(ouraManifest.env.configKeys)).toBe(true);
+    expect(Object.isFrozen(ouraManifest.jobs)).toBe(true);
+    expect(Object.isFrozen(ouraManifest.jobs.resource ?? {})).toBe(true);
+    expect(Object.isFrozen(ouraManifest.jobs.resource?.payload ?? {})).toBe(true);
+    expect(Object.isFrozen(ouraManifest.jobs.resource?.payload.objectId ?? {})).toBe(true);
     expect(Object.isFrozen(ouraManifest.serializableFields)).toBe(true);
-    expect(Object.isFrozen(ouraManifest.hostedHintPayloads ?? {})).toBe(true);
-    expect(Object.isFrozen(ouraManifest.hostedHintPayloads?.resource ?? {})).toBe(true);
   });
 });
