@@ -10,7 +10,10 @@ import {
   processDueAssistantCronJobsLocal as processDueAssistantCronJobs,
 } from '../cron.js'
 import { recordAssistantDiagnosticEvent } from '../diagnostics.js'
-import type { AssistantExecutionContext } from '../execution-context.js'
+import {
+  normalizeAssistantExecutionContext,
+  type AssistantExecutionContext,
+} from '../execution-context.js'
 import { maybeThrowInjectedAssistantFault } from '../fault-injection.js'
 import {
   drainAssistantOutboxLocal as drainAssistantOutbox,
@@ -26,6 +29,10 @@ import {
   saveAssistantAutomationState,
 } from '../store.js'
 import { sameAssistantAutoReplyState } from '../automation-state.js'
+import {
+  createInboxBackedAssistantTurnInputPort,
+  type AssistantTurnInputPort,
+} from '../turn-input.js'
 import {
   errorMessage,
   formatStructuredErrorMessage,
@@ -66,6 +73,7 @@ export interface RunAssistantAutomationInput {
   signal?: AbortSignal
   startDaemon?: boolean
   sessionMaxAgeMs?: number | null
+  turnInputPort?: AssistantTurnInputPort
   vault: string
   vaultServices?: VaultServices
 }
@@ -250,6 +258,16 @@ export async function runAssistantAutomationPass(
   input: RunAssistantAutomationPassInput,
 ): Promise<AssistantAutomationPassResult> {
   const inboxServices = input.inboxServices ?? createIntegratedInboxServices()
+  const executionContext = normalizeAssistantExecutionContext(input.executionContext)
+  const turnInputPort =
+    input.turnInputPort ??
+    (executionContext.hosted
+      ? undefined
+      : createInboxBackedAssistantTurnInputPort({
+          inboxServices,
+          requestId: input.requestId ?? null,
+          vault: input.vault,
+        }))
   const vaultServices = input.vaultServices ?? createIntegratedVaultServices({
     foodAutoLogHooks: createAssistantFoodAutoLogHooks(),
   })
@@ -295,20 +313,21 @@ export async function runAssistantAutomationPass(
     allowSelfAuthored: input.allowSelfAuthored ?? false,
     deliveryDispatchMode: input.deliveryDispatchMode,
     autoReply: state.autoReply,
-    executionContext: input.executionContext,
+    executionContext,
     inboxServices,
     maxPerScan: input.maxPerScan,
     onEvent: input.onEvent,
     requestId: input.requestId,
     signal: input.signal,
     sessionMaxAgeMs: input.sessionMaxAgeMs ?? null,
+    turnInputPort,
     vault: input.vault,
   })
 
   const scanResult = await scanAssistantAutomationOnce({
     allowSelfAuthored: input.allowSelfAuthored ?? false,
     deliveryDispatchMode: input.deliveryDispatchMode,
-    executionContext: input.executionContext,
+    executionContext,
     inboxServices,
     maxPerScan: input.maxPerScan,
     modelSpec: input.modelSpec,
@@ -317,6 +336,7 @@ export async function runAssistantAutomationPass(
     signal: input.signal,
     sessionMaxAgeMs: input.sessionMaxAgeMs ?? null,
     state,
+    turnInputPort,
     vault: input.vault,
     vaultServices,
     async onStateProgress(next) {
@@ -330,7 +350,7 @@ export async function runAssistantAutomationPass(
   })
   const cronResult = await processDueAssistantCronJobs({
     deliveryDispatchMode: input.deliveryDispatchMode,
-    executionContext: input.executionContext,
+    executionContext,
     vault: input.vault,
     signal: input.signal,
     limit: input.maxPerScan,

@@ -169,11 +169,15 @@ export async function finalizeAssistantTurnReceipt(input: {
     kind:
       input.status === 'deferred'
         ? 'turn.deferred'
-        : 'turn.completed',
+        : input.status === 'blocked'
+          ? 'turn.blocked'
+          : 'turn.completed',
     detail:
       input.status === 'failed'
         ? input.error?.message ?? 'assistant turn failed'
-        : null,
+        : input.status === 'blocked'
+          ? input.error?.message ?? 'assistant turn blocked before delivery'
+          : null,
     metadata: input.metadata ?? {},
   })
 

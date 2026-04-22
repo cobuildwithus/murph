@@ -15,6 +15,7 @@ export async function runAssistantAutomation(
     input.onEvent === undefined &&
     input.onInboxEvent === undefined &&
     input.signal === undefined &&
+    input.turnInputPort === undefined &&
     input.vaultServices === undefined
   if (canUseDaemonClient) {
     const remote = await maybeRunAssistantAutomationViaDaemon(

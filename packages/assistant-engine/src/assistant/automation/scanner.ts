@@ -4,6 +4,7 @@ import type { AssistantModelSpec } from '../../model-harness.js'
 import type { VaultServices } from '@murphai/vault-usecases/vault-services'
 import type { AssistantExecutionContext } from '../execution-context.js'
 import type { AssistantOutboxDispatchMode } from '../outbox.js'
+import type { AssistantTurnInputPort } from '../turn-input.js'
 import { errorMessage } from '../shared.js'
 import { collectAssistantAutoReplyGroup } from './grouping.js'
 import {
@@ -62,6 +63,7 @@ export async function scanAssistantAutomationOnce(input: {
   signal?: AbortSignal
   sessionMaxAgeMs?: number | null
   state: Pick<AssistantAutomationState, 'autoReply' | 'inboxScanCursor'>
+  turnInputPort?: AssistantTurnInputPort
   vault: string
   vaultServices?: VaultServices
 }): Promise<AssistantAutomationScanResult> {
@@ -260,6 +262,7 @@ export async function scanAssistantAutomationOnce(input: {
         requestId: input.requestId ?? null,
         signal: input.signal,
         sessionMaxAgeMs: input.sessionMaxAgeMs ?? null,
+        turnInputPort: input.turnInputPort,
         vault: input.vault,
       })
       const stopReplyScan = applyAssistantAutoReplyProcessResult({

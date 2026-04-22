@@ -28,6 +28,7 @@ import type {
 } from './operator-authority.js'
 import type { ConversationRef } from './conversation-ref.js'
 import type { AssistantExecutionContext } from './execution-context.js'
+import type { AssistantTurnBeforeDeliveryHook } from './turn-input.js'
 import type {
   ResolvedAssistantFailoverRoute,
   readAssistantFailoverState,
@@ -68,6 +69,7 @@ export interface AssistantSessionResolutionFields {
 
 export interface AssistantMessageInput extends AssistantSessionResolutionFields {
   abortSignal?: AbortSignal
+  beforeDelivery?: AssistantTurnBeforeDeliveryHook
   codexCommand?: string
   deliverResponse?: boolean
   deliveryDispatchMode?: AssistantOutboxDispatchMode

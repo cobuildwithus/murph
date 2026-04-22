@@ -3,7 +3,11 @@ import assert from 'node:assert/strict'
 import { afterEach, test, vi } from 'vitest'
 
 import type { AssistantSession } from '@murphai/operator-config/assistant-cli-contracts'
+import type { InboxListResult } from '@murphai/operator-config/inbox-cli-contracts'
 import type { AssistantTurnSharedPlan } from '../src/assistant/service-contracts.ts'
+import {
+  createAssistantTurnBeforeDeliveryHook,
+} from '../src/assistant/turn-input.js'
 
 type Deferred<T> = {
   promise: Promise<T>
@@ -90,7 +94,7 @@ test('sendAssistantMessageLocal completes a successful turn, persists usage, and
 })
 
 test('sendAssistantMessageLocal prefers the hosted execution default target when resolving the session', async () => {
-  const hostedDefaultTarget = {
+  const hostedDefaultTarget: AssistantSession['target'] = {
     adapter: 'openai-compatible',
     apiKeyEnv: 'HOSTED_OPENAI_API_KEY',
     endpoint: 'https://gateway.example.com/v1',
@@ -100,7 +104,7 @@ test('sendAssistantMessageLocal prefers the hosted execution default target when
     providerName: 'Hosted Gateway',
     reasoningEffort: null,
     webSearch: null,
-  } as const
+  }
   const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule()
 
   await sendAssistantMessageLocal({
@@ -153,6 +157,99 @@ test('sendAssistantMessageLocal prefers the hosted execution default target when
       timezone: 'Australia/Sydney',
     },
   )
+})
+
+test('sendAssistantMessageLocal marks delivery as blocked when a late capture requires revision', async () => {
+  const lateCapture: InboxListResult['items'][number] = {
+    captureId: 'capture-late',
+    source: 'telegram',
+    accountId: null,
+    externalId: 'external-late',
+    threadId: 'thread-1',
+    threadTitle: null,
+    threadIsDirect: true,
+    actorId: 'actor-1',
+    actorName: 'Sender',
+    actorIsSelf: false,
+    occurredAt: '2026-04-08T12:00:06.000Z',
+    receivedAt: '2026-04-08T12:00:07.000Z',
+    text: 'late follow up',
+    attachmentCount: 0,
+    envelopePath: 'inbox/telegram/capture-late.json',
+    eventId: 'event-late',
+    createdAt: '2026-04-08T12:00:08.000Z',
+    promotions: [],
+  }
+  const beforeDelivery = createAssistantTurnBeforeDeliveryHook({
+    afterCursor: {
+      captureId: 'capture-1',
+      createdAt: '2026-04-08T12:00:01.000Z',
+      occurredAt: '2026-04-08T12:00:00.000Z',
+    },
+    conversation: {
+      accountId: null,
+      actorId: 'actor-1',
+      actorIsSelf: false,
+      source: 'telegram',
+      threadId: 'thread-1',
+      threadIsDirect: true,
+    },
+    knownCaptureIds: ['capture-1'],
+    port: {
+      async refresh() {
+        return {
+          progressed: true,
+          reason: 'ingested_input',
+        }
+      },
+      async listNewConversationCaptures(input) {
+        assert.deepEqual(input.knownCaptureIds, ['capture-1'])
+        return {
+          captures: [lateCapture],
+          nextCursor: {
+            captureId: lateCapture.captureId,
+            createdAt: lateCapture.createdAt,
+            occurredAt: lateCapture.occurredAt,
+          },
+        }
+      },
+    },
+  })
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    providerOutcome: {
+      kind: 'succeeded',
+      providerTurn: {
+        earlySessionOnboardingInjected: true,
+        response: 'draft response',
+        session: createAssistantSession({
+          sessionId: 'session-revision',
+        }),
+      },
+    },
+  })
+
+  await assert.rejects(
+    () =>
+      sendAssistantMessageLocal({
+        beforeDelivery,
+        deliverResponse: true,
+        prompt: 'Summarize my inbox',
+        vault: '/vaults/test',
+      }),
+    (error) => error instanceof Error && error.name === 'AssistantTurnRevisionRequiredError',
+  )
+
+  assert.equal(mocks.finalizeAssistantTurnReceipt.mock.calls.length, 1)
+  assert.equal(mocks.finalizeAssistantTurnReceipt.mock.calls[0]?.[0]?.status, 'blocked')
+  assert.equal(
+    mocks.finalizeAssistantTurnReceipt.mock.calls[0]?.[0]?.deliveryDisposition,
+    'blocked',
+  )
+  assert.equal(mocks.recordAssistantDiagnosticEvent.mock.calls.length, 2)
+  assert.equal(mocks.recordAssistantDiagnosticEvent.mock.calls[1]?.[0]?.kind, 'turn.blocked')
+  assert.equal(mocks.persistPendingAssistantUsageEvent.mock.calls.length, 0)
+  assert.equal(mocks.dispatchAssistantReply.mock.calls.length, 0)
+  assert.equal(mocks.finalizeAssistantTurnArtifacts.mock.calls.length, 0)
 })
 
 test('sendAssistantMessageLocal runs best-effort failure cleanup and rethrows terminal provider failures', async () => {
@@ -1076,6 +1173,11 @@ async function loadLocalServiceModule(input?: {
   }))
   vi.doMock('../src/assistant/channel-adapters.js', () => ({
     getAssistantChannelAdapter: mocks.getAssistantChannelAdapter,
+  }))
+  vi.doMock('../src/assistant/turn-input.js', () => ({
+    isAssistantTurnRevisionRequiredError: (value: unknown) =>
+      value instanceof Error &&
+      value.name === 'AssistantTurnRevisionRequiredError',
   }))
   vi.doMock('../src/assistant/turn-lock.js', () => ({
     withAssistantTurnLock: mocks.withAssistantTurnLock,

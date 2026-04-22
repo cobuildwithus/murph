@@ -1,4 +1,5 @@
 import type { InboxListResult } from '@murphai/operator-config/inbox-cli-contracts'
+import { isSameAssistantConversationCapture } from '../conversation-ref.js'
 import {
   loadTelegramAutoReplyMetadata,
   type TelegramAutoReplyMetadata,
@@ -25,10 +26,7 @@ export async function collectAssistantAutoReplyGroup(input: {
     }
   }
   const items: AssistantAutoReplyGroupItem[] = [
-    {
-      summary: first,
-      telegramMetadata: await loadCaptureTelegramMetadata(input.vault, first),
-    },
+    await createAssistantAutoReplyGroupItem(input.vault, first),
   ]
   let endIndex = input.startIndex
 
@@ -38,16 +36,34 @@ export async function collectAssistantAutoReplyGroup(input: {
       break
     }
 
-    items.push({
-      summary: candidate,
-      telegramMetadata: await loadCaptureTelegramMetadata(input.vault, candidate),
-    })
+    items.push(await createAssistantAutoReplyGroupItem(input.vault, candidate))
     endIndex = index
   }
 
   return {
     endIndex,
     items,
+  }
+}
+
+export async function loadAssistantAutoReplyGroupItems(input: {
+  captures: readonly InboxListResult['items'][number][]
+  vault: string
+}): Promise<AssistantAutoReplyGroupItem[]> {
+  return Promise.all(
+    input.captures.map((capture) =>
+      createAssistantAutoReplyGroupItem(input.vault, capture),
+    ),
+  )
+}
+
+async function createAssistantAutoReplyGroupItem(
+  vault: string,
+  capture: InboxListResult['items'][number],
+): Promise<AssistantAutoReplyGroupItem> {
+  return {
+    summary: capture,
+    telegramMetadata: await loadCaptureTelegramMetadata(vault, capture),
   }
 }
 
@@ -65,12 +81,5 @@ export function shouldGroupAdjacentConversationCapture(
   first: InboxListResult['items'][number],
   candidate: InboxListResult['items'][number],
 ): boolean {
-  return (
-    candidate.source === first.source &&
-    candidate.threadId === first.threadId &&
-    candidate.accountId === first.accountId &&
-    candidate.threadIsDirect === first.threadIsDirect &&
-    candidate.actorId === first.actorId &&
-    candidate.actorIsSelf === first.actorIsSelf
-  )
+  return isSameAssistantConversationCapture(first, candidate)
 }

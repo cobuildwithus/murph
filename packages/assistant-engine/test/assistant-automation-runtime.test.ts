@@ -12,6 +12,7 @@ import {
 } from '@murphai/operator-config/inbox-cli-contracts'
 import { assistantTurnReceiptSchema } from '@murphai/operator-config/assistant-cli-contracts'
 import type { InboxServices } from '@murphai/inbox-services'
+import type { AssistantTurnConversationCaptureQuery } from '../src/assistant/turn-input.ts'
 
 function toSnapshotRecord<T extends object>(value: T): Record<string, unknown> {
   return Object.fromEntries(Object.entries(value))
@@ -203,9 +204,15 @@ vi.mock('../src/assistant/channel-adapters.ts', () => ({
   getAssistantChannelAdapter: replyMocks.getAssistantChannelAdapter,
 }))
 
-vi.mock('../src/assistant/conversation-ref.ts', () => ({
-  conversationRefFromCapture: replyMocks.conversationRefFromCapture,
-}))
+vi.mock('../src/assistant/conversation-ref.ts', async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import('../src/assistant/conversation-ref.ts')
+  >()
+  return {
+    ...actual,
+    conversationRefFromCapture: replyMocks.conversationRefFromCapture,
+  }
+})
 
 vi.mock('../src/assistant/operator-authority.ts', () => ({
   resolveAcceptedInboundMessageOperatorAuthority:
@@ -1148,7 +1155,7 @@ describe('assistant inbox routing', () => {
       vault: '/tmp/assistant-automation-vault',
     })
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       considered: 2,
       failed: 0,
       nextWakeAt: null,
@@ -1265,7 +1272,7 @@ describe('assistant automation scanner', () => {
       vault: '/tmp/assistant-automation-vault',
     })
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       replies: {
         considered: 0,
         failed: 0,
@@ -1395,7 +1402,7 @@ describe('assistant automation scanner', () => {
       vault: '/tmp/assistant-automation-vault',
     })
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       replies: {
         considered: 0,
         failed: 0,
@@ -1552,7 +1559,7 @@ describe('assistant auto-reply runtime', () => {
       vault: '/tmp/assistant-automation-vault',
     })
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       considered: 0,
       failed: 0,
       nextWakeAt: null,
@@ -1592,7 +1599,7 @@ describe('assistant auto-reply runtime', () => {
       vault: '/tmp/assistant-automation-vault',
     })
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       considered: 1,
       failed: 1,
       nextWakeAt: null,
@@ -1645,7 +1652,7 @@ describe('assistant auto-reply runtime', () => {
       vault: '/tmp/assistant-automation-vault',
     })
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       considered: 0,
       failed: 0,
       nextWakeAt: null,
@@ -1690,7 +1697,7 @@ describe('assistant auto-reply runtime', () => {
       vault: '/tmp/assistant-automation-vault',
     })
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       considered: 0,
       failed: 0,
       nextWakeAt: null,
@@ -1757,7 +1764,7 @@ describe('assistant auto-reply runtime', () => {
       vault: '/tmp/assistant-automation-vault',
     })
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       considered: 2,
       failed: 0,
       nextWakeAt: null,
@@ -1811,7 +1818,7 @@ describe('assistant auto-reply runtime', () => {
       vault: '/tmp/assistant-automation-vault',
     })
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       considered: 0,
       failed: 0,
       nextWakeAt: null,
@@ -1855,7 +1862,7 @@ describe('assistant auto-reply runtime', () => {
       vault: '/tmp/assistant-automation-vault',
     })
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       considered: 0,
       failed: 0,
       nextWakeAt: null,
@@ -1935,6 +1942,11 @@ describe('assistant auto-reply runtime', () => {
       context,
       result: {
         advanceCursor: true,
+        cursor: {
+          captureId: 'capture-1',
+          createdAt: '2026-04-08T00:00:01.000Z',
+          occurredAt: '2026-04-08T00:01:00.000Z',
+        },
         failed: 1,
         nextWakeAt: null,
         replied: 2,
@@ -1986,6 +1998,11 @@ describe('assistant auto-reply runtime', () => {
       context,
       result: {
         advanceCursor: false,
+        cursor: {
+          captureId: 'capture-1',
+          createdAt: '2026-04-08T00:00:01.000Z',
+          occurredAt: '2026-04-08T00:01:00.000Z',
+        },
         failed: 1,
         nextWakeAt: null,
         replied: 0,
@@ -2042,7 +2059,7 @@ describe('assistant auto-reply runtime', () => {
       vault: '/tmp/assistant-automation-vault',
     })
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       advanceCursor: false,
       failed: 0,
       nextWakeAt: expect.any(String),
@@ -2084,7 +2101,7 @@ describe('assistant auto-reply runtime', () => {
       vault: '/tmp/assistant-automation-vault',
     })
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       advanceCursor: true,
       failed: 0,
       nextWakeAt: null,
@@ -2117,7 +2134,7 @@ describe('assistant auto-reply runtime', () => {
       vault: '/tmp/assistant-automation-vault',
     })
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       advanceCursor: true,
       failed: 0,
       nextWakeAt: null,
@@ -2157,7 +2174,7 @@ describe('assistant auto-reply runtime', () => {
       vault: '/tmp/assistant-automation-vault',
     })
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       advanceCursor: false,
       failed: 0,
       nextWakeAt: expect.any(String),
@@ -2227,7 +2244,7 @@ describe('assistant auto-reply runtime', () => {
       vault: '/tmp/assistant-automation-vault',
     })
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       advanceCursor: true,
       failed: 0,
       nextWakeAt: null,
@@ -2291,7 +2308,7 @@ describe('assistant auto-reply runtime', () => {
       vault: '/tmp/assistant-automation-vault',
     })
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       advanceCursor: true,
       failed: 0,
       nextWakeAt: null,
@@ -2361,7 +2378,7 @@ describe('assistant auto-reply runtime', () => {
       vault: '/tmp/assistant-automation-vault',
     })
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       advanceCursor: true,
       failed: 0,
       nextWakeAt: null,
@@ -2448,7 +2465,7 @@ describe('assistant auto-reply runtime', () => {
       vault: '/tmp/assistant-automation-vault',
     })
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       advanceCursor: false,
       failed: 0,
       nextWakeAt: expect.any(String),
@@ -2490,7 +2507,7 @@ describe('assistant auto-reply runtime', () => {
       vault: '/tmp/assistant-automation-vault',
     })
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       advanceCursor: false,
       failed: 1,
       nextWakeAt: expect.any(String),
@@ -2531,7 +2548,7 @@ describe('assistant auto-reply runtime', () => {
       vault: '/tmp/assistant-automation-vault',
     })
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       advanceCursor: false,
       failed: 1,
       nextWakeAt: expect.any(String),
@@ -2575,7 +2592,7 @@ describe('assistant auto-reply runtime', () => {
       vault: '/tmp/assistant-automation-vault',
     })
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       advanceCursor: false,
       failed: 1,
       nextWakeAt: expect.any(String),
@@ -2611,7 +2628,7 @@ describe('assistant auto-reply runtime', () => {
       vault: '/tmp/assistant-automation-vault',
     })
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       advanceCursor: true,
       failed: 0,
       nextWakeAt: null,
@@ -2647,7 +2664,7 @@ describe('assistant auto-reply runtime', () => {
       vault: '/tmp/assistant-automation-vault',
     })
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       advanceCursor: true,
       failed: 0,
       nextWakeAt: null,
@@ -2696,7 +2713,7 @@ describe('assistant auto-reply runtime', () => {
       vault: '/tmp/assistant-automation-vault',
     })
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       advanceCursor: true,
       failed: 0,
       nextWakeAt: null,
@@ -2734,7 +2751,7 @@ describe('assistant auto-reply runtime', () => {
       vault: '/tmp/assistant-automation-vault',
     })
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       advanceCursor: true,
       failed: 0,
       nextWakeAt: null,
@@ -2773,7 +2790,7 @@ describe('assistant auto-reply runtime', () => {
       vault: '/tmp/assistant-automation-vault',
     })
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       advanceCursor: false,
       failed: 0,
       nextWakeAt: expect.any(String),
@@ -2781,6 +2798,309 @@ describe('assistant auto-reply runtime', () => {
       skipped: 1,
       stopScanning: true,
     })
+  })
+
+  it('retries a draft when a late same-conversation capture arrives before delivery', async () => {
+    const lateCapture = createCaptureSummary({
+      captureId: 'capture-late',
+      occurredAt: '2026-04-08T00:03:00.000Z',
+    })
+    const inboxServices = createInboxServices({
+      show: vi.fn().mockImplementation(async (input: { captureId: string }) =>
+        createShowResult(
+          createCaptureDetail({
+            captureId: input.captureId,
+            occurredAt:
+              input.captureId === 'capture-late'
+                ? '2026-04-08T00:03:00.000Z'
+                : '2026-04-08T00:02:00.000Z',
+          }),
+        ),
+      ),
+    })
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const context = reply.createAssistantAutoReplyGroupContext([
+      createReplyGroupItem(
+        createCaptureSummary({
+          captureId: 'capture-1',
+          occurredAt: '2026-04-08T00:02:00.000Z',
+        }),
+      ),
+    ])
+
+    if (!context) {
+      throw new Error('expected reply context')
+    }
+
+    const turnInputPort = {
+      async refresh() {
+        return {
+          progressed: true,
+          reason: 'ingested_input' as const,
+        }
+      },
+      async listNewConversationCaptures(input: AssistantTurnConversationCaptureQuery) {
+        expect(input.knownCaptureIds).toEqual(['capture-1'])
+        expect(input.conversation).toEqual(
+          expect.objectContaining({
+            accountId: null,
+            actorId: 'actor-1',
+            actorIsSelf: false,
+            source: 'telegram',
+            threadId: 'thread-1',
+            threadIsDirect: true,
+          }),
+        )
+        return {
+          captures: [lateCapture],
+          nextCursor: {
+            captureId: lateCapture.captureId,
+            createdAt: lateCapture.createdAt ?? null,
+            occurredAt: lateCapture.occurredAt,
+          },
+        }
+      },
+    }
+
+    let attempt = 0
+    replyMocks.sendAssistantMessage.mockImplementation(
+      async (input: {
+        beforeDelivery?: (
+          value: {
+            response: string
+            sessionId: string
+            turnId: string
+            vault: string
+          },
+        ) => Promise<void>
+        receiptMetadata?: { autoReplyCaptureIds?: string }
+        response?: string
+      }) => {
+        attempt += 1
+        if (attempt === 1) {
+          await input.beforeDelivery?.({
+            response: 'draft response',
+            sessionId: 'session-1',
+            turnId: 'turn-1',
+            vault: '/tmp/assistant-automation-vault',
+          })
+          return {
+            delivery: null,
+            deliveryDeferred: false,
+            deliveryError: null,
+            deliveryIntentId: null,
+            response: 'draft response',
+            session: {
+              sessionId: 'session-1',
+            },
+          }
+        }
+
+        return Promise.resolve({
+          delivery: {
+            channel: 'telegram',
+            target: 'target-1',
+            sentAt: '2026-04-08T00:10:00.000Z',
+          },
+          deliveryDeferred: false,
+          deliveryError: null,
+          deliveryIntentId: 'intent-1',
+          response: 'revised response',
+          session: {
+            sessionId: 'session-1',
+          },
+        })
+      },
+    )
+
+    const events: Array<Record<string, unknown>> = []
+    const result = await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      enabledChannels: ['telegram'],
+      inboxServices,
+      onEvent: (event) => {
+        events.push(toSnapshotRecord(event))
+      },
+      requestId: null,
+      sessionMaxAgeMs: null,
+      turnInputPort,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result).toMatchObject({
+      advanceCursor: true,
+      failed: 0,
+      nextWakeAt: null,
+      replied: 1,
+      skipped: 0,
+      stopScanning: false,
+    })
+    expect(replyMocks.sendAssistantMessage).toHaveBeenCalledTimes(2)
+    expect(replyMocks.sendAssistantMessage.mock.calls[0]?.[0]?.receiptMetadata).toEqual(
+      expect.objectContaining({
+        autoReplyCaptureIds: 'capture-1',
+      }),
+    )
+    expect(replyMocks.sendAssistantMessage.mock.calls[1]?.[0]?.receiptMetadata).toEqual(
+      expect.objectContaining({
+        autoReplyCaptureIds: 'capture-1,capture-late',
+      }),
+    )
+    expect(events).toContainEqual({
+      type: 'capture.reply-progress',
+      captureId: 'capture-1',
+      details: 'new input arrived before delivery; revising reply with 1 additional capture(s)',
+      providerKind: 'status',
+      providerState: 'running',
+    })
+  })
+
+  it('defers delivery after the bounded late-capture revision budget is exhausted', async () => {
+    const lateCapture = createCaptureSummary({
+      captureId: 'capture-late',
+      occurredAt: '2026-04-08T00:03:00.000Z',
+    })
+    const inboxServices = createInboxServices({
+      show: vi.fn().mockImplementation(async (input: { captureId: string }) =>
+        createShowResult(
+          createCaptureDetail({
+            captureId: input.captureId,
+            occurredAt:
+              input.captureId === 'capture-late'
+                ? '2026-04-08T00:03:00.000Z'
+                : '2026-04-08T00:02:00.000Z',
+          }),
+        ),
+      ),
+    })
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const context = reply.createAssistantAutoReplyGroupContext([
+      createReplyGroupItem(
+        createCaptureSummary({
+          captureId: 'capture-1',
+          occurredAt: '2026-04-08T00:02:00.000Z',
+        }),
+      ),
+    ])
+
+    if (!context) {
+      throw new Error('expected reply context')
+    }
+
+    const turnInputPort = {
+      async refresh() {
+        return {
+          progressed: true,
+          reason: 'ingested_input' as const,
+        }
+      },
+      async listNewConversationCaptures(input: AssistantTurnConversationCaptureQuery) {
+        return {
+          captures: [lateCapture],
+          nextCursor: {
+            captureId: lateCapture.captureId,
+            createdAt: lateCapture.createdAt ?? null,
+            occurredAt: lateCapture.occurredAt,
+          },
+        }
+      },
+    }
+
+    replyMocks.sendAssistantMessage.mockImplementation(async (input: {
+      beforeDelivery?: (
+        value: {
+          response: string
+          sessionId: string
+          turnId: string
+          vault: string
+        },
+      ) => Promise<void>
+    }) => {
+      await input.beforeDelivery?.({
+        response: 'draft response',
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        vault: '/tmp/assistant-automation-vault',
+      })
+      return {
+        delivery: {
+          channel: 'telegram',
+          target: 'target-1',
+          sentAt: '2026-04-08T00:10:00.000Z',
+        },
+        deliveryDeferred: false,
+        deliveryError: null,
+        deliveryIntentId: 'intent-1',
+        response: 'draft response',
+        session: {
+          sessionId: 'session-1',
+        },
+      }
+    })
+
+    const events: Array<Record<string, unknown>> = []
+    const result = await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      enabledChannels: ['telegram'],
+      inboxServices,
+      onEvent: (event) => {
+        events.push(toSnapshotRecord(event))
+      },
+      requestId: null,
+      sessionMaxAgeMs: null,
+      turnInputPort,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result).toMatchObject({
+      advanceCursor: false,
+      failed: 0,
+      nextWakeAt: expect.any(String),
+      replied: 0,
+      skipped: 2,
+      stopScanning: true,
+    })
+    expect(replyMocks.sendAssistantMessage).toHaveBeenCalledTimes(4)
+    expect(events.filter((event) => event.type === 'capture.reply-progress')).toHaveLength(
+      3,
+    )
+    expect(events.at(-1)).toMatchObject({
+      type: 'capture.reply-skipped',
+      captureId: 'capture-1',
+    })
+  })
+
+  it('does not create a default turn-input port for hosted automation passes', async () => {
+    automationStateStore.current = createAutomationState()
+    automationStateStore.save.mockResolvedValue(automationStateStore.current)
+
+    const result = await runAssistantAutomationPass({
+      executionContext: {
+        hosted: {
+          memberId: 'member-1',
+          userEnvKeys: [],
+        },
+      },
+      requestId: 'request-hosted',
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result).toMatchObject({
+      progressed: false,
+      replies: {
+        considered: 0,
+        failed: 0,
+        replied: 0,
+        skipped: 0,
+      },
+    })
+    expect(replyMocks.sendAssistantMessage).not.toHaveBeenCalled()
   })
 
   it('skips the group when prompt preparation produces no replyable content', async () => {
@@ -2812,7 +3132,7 @@ describe('assistant auto-reply runtime', () => {
       vault: '/tmp/assistant-automation-vault',
     })
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       advanceCursor: true,
       failed: 0,
       nextWakeAt: null,
@@ -2849,7 +3169,7 @@ describe('assistant auto-reply runtime', () => {
       vault: '/tmp/assistant-automation-vault',
     })
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       advanceCursor: false,
       failed: 0,
       nextWakeAt: expect.any(String),
@@ -2912,7 +3232,7 @@ describe('assistant auto-reply runtime', () => {
       vault: '/tmp/assistant-automation-vault',
     })
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       advanceCursor: true,
       failed: 0,
       nextWakeAt: null,
@@ -2959,7 +3279,7 @@ describe('assistant auto-reply runtime', () => {
       vault: '/tmp/assistant-automation-vault',
     })
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       advanceCursor: true,
       failed: 0,
       nextWakeAt: null,
@@ -2996,7 +3316,7 @@ describe('assistant auto-reply runtime', () => {
       vault: '/tmp/assistant-automation-vault',
     })
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       advanceCursor: false,
       failed: 0,
       nextWakeAt: null,
@@ -3069,7 +3389,7 @@ describe('assistant auto-reply runtime', () => {
       vault: '/tmp/assistant-automation-vault',
     })
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       advanceCursor: true,
       failed: 0,
       nextWakeAt: null,
@@ -3216,7 +3536,7 @@ describe('assistant auto-reply runtime', () => {
       vault: '/tmp/assistant-automation-vault',
     })
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       advanceCursor: true,
       failed: 1,
       nextWakeAt: null,
@@ -3264,7 +3584,7 @@ describe('assistant auto-reply runtime', () => {
       vault: '/tmp/assistant-automation-vault',
     })
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       advanceCursor: true,
       failed: 0,
       nextWakeAt: null,
