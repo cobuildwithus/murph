@@ -428,14 +428,47 @@ test('setup wizard public URL guidance recommends hosted web for wearables and k
   assert.match(review.summary, /hosted `apps\/web`/u)
   assert.match(review.summary, /Linq still needs the local inbox webhook/u)
   assert.deepEqual(
-    review.targets.map((target) => [target.label, target.url]),
+    review.targets.map((target) => [
+      target.label,
+      target.localReceiverUrl,
+      target.providerUrl,
+      target.requirement,
+    ]),
     [
-      ['Garmin callback', 'http://127.0.0.1:8788/oauth/garmin/callback'],
-      ['Oura callback', 'http://127.0.0.1:8788/oauth/oura/callback'],
-      ['Oura webhook', 'http://127.0.0.1:8788/webhooks/oura'],
-      ['Linq webhook', 'http://127.0.0.1:8789/linq-webhook'],
+      [
+        'Garmin callback',
+        'http://127.0.0.1:8788/oauth/garmin/callback',
+        'https://<your-public-host>/oauth/garmin/callback',
+        'required',
+      ],
+      [
+        'Oura callback',
+        'http://127.0.0.1:8788/oauth/oura/callback',
+        'https://<your-public-host>/oauth/oura/callback',
+        'required',
+      ],
+      [
+        'Oura webhook',
+        'http://127.0.0.1:8788/webhooks/oura',
+        'https://<your-public-host>/webhooks/oura',
+        'optional',
+      ],
+      [
+        'Linq webhook',
+        'http://127.0.0.1:8789/linq-webhook',
+        'https://<your-public-host>/linq-webhook',
+        'required',
+      ],
     ],
   )
+  assert.deepEqual(review.providerDocs.map((link) => link.label), [
+    'Garmin setup docs',
+    'Oura auth docs',
+  ])
+  assert.deepEqual(review.tunnelCommands, [
+    'ngrok http 8788',
+    'cloudflared tunnel --url http://127.0.0.1:8788',
+  ])
   assert.equal(
     describeSetupWizardPublicUrlStrategyChoice({
       review,
@@ -448,7 +481,7 @@ test('setup wizard public URL guidance recommends hosted web for wearables and k
       review,
       strategy: 'tunnel',
     }),
-    'Expose the local callback routes through a tunnel instead of setting up hosted `apps/web` first.',
+    'Expose the local callback routes through a tunnel. Keep Murph listening on localhost, then paste the public HTTPS tunnel URL into each provider.',
   )
 })
 
@@ -461,7 +494,18 @@ test('setup wizard public URL guidance recommends a tunnel for Linq-only setups'
   assert.equal(review.enabled, true)
   assert.equal(review.recommendedStrategy, 'tunnel')
   assert.match(review.summary, /local inbox webhook/u)
-  assert.deepEqual(review.targets.map((target) => target.label), ['Linq webhook'])
+  assert.deepEqual(review.targets, [
+    {
+      detail:
+        'Required if you enable Linq. Point Linq at the public tunnel URL that forwards here. Hosted `apps/web` does not replace this Linq webhook yet.',
+      label: 'Linq webhook',
+      localReceiverUrl: 'http://127.0.0.1:8789/linq-webhook',
+      providerUrl: 'https://<your-public-host>/linq-webhook',
+      requirement: 'required',
+    },
+  ])
+  assert.deepEqual(review.providerDocs, [])
+  assert.deepEqual(review.tunnelCommands, [])
   assert.equal(
     describeSetupWizardPublicUrlStrategyChoice({
       review,
@@ -474,7 +518,7 @@ test('setup wizard public URL guidance recommends a tunnel for Linq-only setups'
       review,
       strategy: 'tunnel',
     }),
-    'Expose the local Linq webhook through a tunnel. Murph does not have a hosted Linq webhook yet.',
+    'Expose the local Linq webhook through a tunnel. Hosted `apps/web` does not replace this Linq webhook yet.',
   )
 })
 
@@ -503,12 +547,35 @@ test('setup wizard public URL guidance trims local endpoints and lists WHOOP tar
   assert.equal(review.recommendedStrategy, 'hosted')
   assert.match(review.summary, /public callback URL/u)
   assert.deepEqual(
-    review.targets.map((target) => [target.label, target.url]),
+    review.targets.map((target) => [
+      target.label,
+      target.localReceiverUrl,
+      target.providerUrl,
+      target.requirement,
+    ]),
     [
-      ['WHOOP callback', 'http://127.0.0.1:9797/oauth/whoop/callback'],
-      ['WHOOP webhook', 'http://127.0.0.1:9797/webhooks/whoop'],
+      [
+        'WHOOP callback',
+        'http://127.0.0.1:9797/oauth/whoop/callback',
+        'https://<your-public-host>/oauth/whoop/callback',
+        'required',
+      ],
+      [
+        'WHOOP webhook',
+        'http://127.0.0.1:9797/webhooks/whoop',
+        'https://<your-public-host>/webhooks/whoop',
+        'optional',
+      ],
     ],
   )
+  assert.deepEqual(review.providerDocs.map((link) => link.label), [
+    'WHOOP OAuth docs',
+    'WHOOP webhook docs',
+  ])
+  assert.deepEqual(review.tunnelCommands, [
+    'ngrok http 9797',
+    'cloudflared tunnel --url http://127.0.0.1:9797',
+  ])
   assert.equal(
     describeSetupWizardPublicUrlStrategyChoice({
       review,
@@ -521,7 +588,7 @@ test('setup wizard public URL guidance trims local endpoints and lists WHOOP tar
       review,
       strategy: 'tunnel',
     }),
-    'Expose the local callback routes through a tunnel instead of setting up hosted `apps/web` first.',
+    'Expose the local callback routes through a tunnel. Keep Murph listening on localhost, then paste the public HTTPS tunnel URL into each provider.',
   )
 })
 
@@ -535,12 +602,31 @@ test('setup wizard public URL guidance includes Strava callback and webhook targ
   assert.equal(review.enabled, true)
   assert.equal(review.recommendedStrategy, 'hosted')
   assert.deepEqual(
-    review.targets.map((target) => [target.label, target.url]),
+    review.targets.map((target) => [
+      target.label,
+      target.localReceiverUrl,
+      target.providerUrl,
+      target.requirement,
+    ]),
     [
-      ['Strava callback', 'http://127.0.0.1:8788/oauth/strava/callback'],
-      ['Strava webhook', 'http://127.0.0.1:8788/webhooks/strava'],
+      [
+        'Strava callback',
+        'http://127.0.0.1:8788/oauth/strava/callback',
+        'https://<your-public-host>/oauth/strava/callback',
+        'required',
+      ],
+      [
+        'Strava webhook',
+        'http://127.0.0.1:8788/webhooks/strava',
+        'https://<your-public-host>/webhooks/strava',
+        'optional',
+      ],
     ],
   )
+  assert.deepEqual(review.providerDocs.map((link) => link.label), [
+    'Strava auth docs',
+    'Strava webhook docs',
+  ])
   assert.equal(
     describeSetupWizardPublicUrlStrategyChoice({
       review,
@@ -548,6 +634,17 @@ test('setup wizard public URL guidance includes Strava callback and webhook targ
     }),
     'Use hosted `apps/web` for Garmin/WHOOP/Oura/Strava so callbacks stay on one stable public base.',
   )
+})
+
+test('setup wizard public URL guidance stays enabled when the configured public base is localhost', () => {
+  const review = buildSetupWizardPublicUrlReview({
+    channels: [],
+    wearables: ['oura'],
+    publicBaseUrl: 'http://localhost:8788',
+  })
+
+  assert.equal(review.enabled, true)
+  assert.equal(review.targets[0]?.providerUrl, 'https://<your-public-host>/oauth/oura/callback')
 })
 
 test.sequential('setup wizard runs the public-link flow, preserves explicit opt-outs, and returns sorted selections', async () => {
@@ -600,8 +697,23 @@ test.sequential('setup wizard runs the public-link flow, preserves explicit opt-
       /Public links/u,
     )
     assert.match(publicLinkOutput, /Public links/u)
-    assert.match(publicLinkOutput, /WHOOP webhook/u)
+    assert.match(publicLinkOutput, /WHOOP callback \(required\)/u)
+    assert.match(publicLinkOutput, /WHOOP webhook \(optional\)/u)
     assert.match(publicLinkOutput, /Linq webhook/u)
+    assert.match(
+      publicLinkOutput,
+      /Local receiver: http:\/\/localhost:8788\/oauth\/whoop\/callback/u,
+    )
+    assert.match(
+      publicLinkOutput,
+      /Paste into provider: https:\/\/<your-public-host>\/oauth\/whoop\/callback/u,
+    )
+    assert.match(publicLinkOutput, /ngrok http 8788/u)
+    assert.match(
+      publicLinkOutput,
+      /cloudflared tunnel --url http:\/\/localhost:8788/u,
+    )
+    assert.match(publicLinkOutput, /WHOOP OAuth docs/u)
     assert.match(
       publicLinkOutput,
       /This step is informational only\. Murph does not save a public URL choice yet\./u,

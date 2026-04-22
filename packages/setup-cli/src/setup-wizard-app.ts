@@ -202,6 +202,10 @@ export function SetupWizardApp(
         strategy: publicUrlReview.recommendedStrategy,
       })
     : null
+  const publicUrlHelpHint =
+    publicUrlReview.enabled
+      ? 'Type ? or help at a missing-key prompt to reprint this callback, webhook, tunnel, and docs guidance.'
+      : null
 
   React.useEffect(() => {
     latestAssistantRef.current = assistantSelection
@@ -791,6 +795,40 @@ export function SetupWizardApp(
                   'public-url-recommended',
                 ),
                 createElement(Text, null, ''),
+                publicUrlReview.targets.some((target) => target.label !== 'Linq webhook')
+                  ? createSetupWizardBulletRow(
+                      {
+                        body:
+                          '`localhost` is only Murph’s local receiver. When a provider asks for a callback or webhook URL, paste the public HTTPS address instead.',
+                        label: 'Important',
+                        tone: 'warn',
+                      },
+                      'public-url-important',
+                    )
+                  : null,
+                publicUrlReview.tunnelCommands.length > 0
+                  ? createElement(Text, null, '')
+                  : null,
+                publicUrlReview.tunnelCommands.length > 0
+                  ? createElement(
+                      Text,
+                      { color: resolveSetupWizardToneColor('muted'), bold: true },
+                      'Local test path',
+                    )
+                  : null,
+                ...publicUrlReview.tunnelCommands.map((command) =>
+                  createElement(
+                    Text,
+                    {
+                      color: resolveSetupWizardToneColor('accent'),
+                      key: `public-url-command:${command}`,
+                    },
+                    `  ${command}`,
+                  ),
+                ),
+                publicUrlReview.tunnelCommands.length > 0
+                  ? createElement(Text, { key: 'public-url-command-gap' }, '')
+                  : null,
                 createElement(
                   Text,
                   { color: resolveSetupWizardToneColor('muted'), bold: true },
@@ -800,12 +838,42 @@ export function SetupWizardApp(
                 ...publicUrlReview.targets.map((target) =>
                   createSetupWizardPublicUrlTargetRow(target),
                 ),
+                publicUrlReview.providerDocs.length > 0
+                  ? createElement(Text, null, '')
+                  : null,
+                publicUrlReview.providerDocs.length > 0
+                  ? createElement(
+                      Text,
+                      { color: resolveSetupWizardToneColor('muted'), bold: true },
+                      'Provider setup docs',
+                    )
+                  : null,
+                ...publicUrlReview.providerDocs.map((link) =>
+                  createSetupWizardBulletRow(
+                    {
+                      body: link.url,
+                      label: link.label,
+                      tone: 'accent',
+                    },
+                    `public-url-doc:${link.url}`,
+                  ),
+                ),
                 createElement(Text, null, ''),
                 createElement(
                   Text,
                   { color: resolveSetupWizardToneColor('muted') },
                   'This step is informational only. Murph does not save a public URL choice yet.',
                 ),
+                publicUrlHelpHint
+                  ? createElement(
+                      Text,
+                      {
+                        color: resolveSetupWizardToneColor('muted'),
+                        dimColor: true,
+                      },
+                      publicUrlHelpHint,
+                    )
+                  : null,
               ],
             })
           : createSetupWizardPanel({
@@ -856,6 +924,16 @@ export function SetupWizardApp(
                         tone: 'accent',
                       },
                       'confirm-public-url',
+                    )
+                  : null,
+                publicUrlHelpHint
+                  ? createSetupWizardBulletRow(
+                      {
+                        body: publicUrlHelpHint,
+                        label: 'Need these links later?',
+                        tone: 'muted',
+                      },
+                      'confirm-public-url-help',
                     )
                   : null,
                 createElement(Text, null, ''),

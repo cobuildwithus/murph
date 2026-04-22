@@ -40,9 +40,11 @@ export {
 } from './setup-assistant-wizard.js'
 export { wrapSetupWizardIndex, type SetupWizardCompletionController } from './setup-wizard-core.js'
 export {
+  buildSetupWizardPublicUrlHelpText,
   buildSetupWizardPublicUrlReview,
   describeSetupWizardPublicUrlStrategyChoice,
   type SetupPublicUrlStrategy,
+  type SetupWizardPublicUrlDocLink,
   type SetupWizardPublicUrlReview,
   type SetupWizardPublicUrlTarget,
 } from './setup-wizard-public-url.js'

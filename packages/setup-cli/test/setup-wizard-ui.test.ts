@@ -131,13 +131,22 @@ test('setup wizard answered, detail, and hint rows render the expected labels an
   assert.equal(collectElementText(keyValue), 'Assistant: Codex')
 
   const publicUrl = createSetupWizardPublicUrlTargetRow({
-    detail: 'Point your tunnel here.',
+    detail: 'Required. Point Linq at the public tunnel URL that forwards here.',
     label: 'Linq webhook',
-    url: 'http://127.0.0.1:8789/linq-webhook',
+    localReceiverUrl: 'http://127.0.0.1:8789/linq-webhook',
+    providerUrl: 'https://<your-public-host>/linq-webhook',
+    requirement: 'required',
   })
   assert.equal(
     collectElementText(publicUrl),
-    'Linq webhook: http://127.0.0.1:8789/linq-webhook  Point your tunnel here.',
+    [
+      'Linq webhook (required)',
+      '  Local receiver: ',
+      'http://127.0.0.1:8789/linq-webhook',
+      '  Paste into provider: ',
+      'https://<your-public-host>/linq-webhook',
+      '  Required. Point Linq at the public tunnel URL that forwards here.',
+    ].join(''),
   )
 
   const hintRow = createSetupWizardHintRow([

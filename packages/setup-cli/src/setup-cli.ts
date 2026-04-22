@@ -56,6 +56,7 @@ import {
   detectCodexAccountFromAuthJson,
 } from './setup-assistant-account.js'
 import {
+  buildSetupWizardPublicUrlHelpText,
   buildSetupWizardPublicUrlReview,
   createSetupWizardCompletionController,
   describeSetupWizardPublicUrlStrategyChoice,
@@ -244,10 +245,21 @@ export function createSetupCli(options: SetupCliOptions = {}): Cli.Cli {
       }
 
       selectedAssistantProviderPreset = undefined
+      const publicUrlHelpText = buildSetupWizardPublicUrlHelpText({
+        review: buildSetupWizardPublicUrlReview({
+          channels: selectedChannels,
+          wearables: selectedWearables,
+          publicBaseUrl: resolveSetupWizardPublicBaseUrl(currentEnv),
+          deviceSyncLocalBaseUrl:
+            resolveSetupWizardDeviceSyncLocalBaseUrl(currentEnv),
+          linqLocalWebhookUrl: resolveSetupWizardLinqLocalWebhookUrl(),
+        }),
+      })
       envOverrides = await runtimeEnv.promptForMissing({
         assistantApiKeyEnv: selectedAssistantApiKeyEnv,
         channels: selectedChannels,
         env: currentEnv,
+        helpText: publicUrlHelpText,
         wearables: selectedWearables,
       })
       applySetupRuntimeEnvOverridesToProcess(envOverrides)
