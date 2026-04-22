@@ -125,6 +125,82 @@ const validProtocolVariantPageWithOnboarding = {
   },
 } as const;
 
+const validBiomarkerPageWithRanking = {
+  schemaVersion: HEALTH_COMMONS_PAGE_SCHEMA_VERSION,
+  entityType: "biomarker",
+  key: "biomarker:resting-heart-rate",
+  slug: "biomarkers/resting-heart-rate",
+  title: "Resting Heart Rate",
+  unit: "bpm",
+  measurementContexts: [
+    "overnight_wearable",
+  ],
+  biomarker: {
+    shortName: "RHR",
+    displayName: "Resting Heart Rate",
+    unit: "bpm",
+    valuePrecision: 0,
+    direction: {
+      desired: "lower_or_stable",
+      label: "Lower or stable is usually better.",
+    },
+    privateMetricBindings: [
+      {
+        source: "browser_vault_metric",
+        domain: "recovery",
+        metric: "restingHeartRate",
+        unit: "bpm",
+        preferred: true,
+      },
+    ],
+    trendDefaults: {
+      latestWindowDays: 7,
+      comparisonWindowDays: 30,
+      minimumPoints: 5,
+      aggregation: "median",
+    },
+    explainerCards: [
+      {
+        title: "What it is",
+        body: "A resting pulse trend.",
+      },
+    ],
+    measurement: {
+      bestContext: "Overnight wearable readings.",
+      howToMeasure: [
+        "Use the same device.",
+      ],
+      confounders: [
+        "illness",
+      ],
+    },
+  },
+  protocolRanking: {
+    version: "deterministic-v0",
+    scoreFormula: "evidenceWeight * 3",
+    candidates: [
+      {
+        protocolKey: "protocol_variant:norwegian-4x4/norwegian-4x4",
+        expectedDirection: "down",
+        mechanism: "Aerobic training can lower resting heart rate over time.",
+        relationship: "primary_biomarker",
+        scoring: {
+          evidenceWeight: 5,
+          biomarkerRelevance: 5,
+          wearableMeasurability: 5,
+          burdenPenalty: 4,
+          safetyCautionPenalty: 3,
+        },
+      },
+    ],
+  },
+  communityOutcomeSummary: {
+    state: "coming_soon",
+    minimumCohortSize: 20,
+    placeholder: "Coming soon.",
+  },
+} as const;
+
 describe("@murphai/contracts health commons schemas", () => {
   it("accepts the source-artifact page and manifest shapes used by Health Commons", () => {
     expect(safeParseContract(healthCommonsArtifactPointerSchema, validArtifactPointer)).toEqual({
@@ -157,6 +233,15 @@ describe("@murphai/contracts health commons schemas", () => {
     ).toEqual({
       success: true,
       data: validProtocolVariantPageWithOnboarding,
+    });
+    expect(
+      safeParseContract(
+        healthCommonsPageFrontmatterSchema,
+        validBiomarkerPageWithRanking,
+      ),
+    ).toEqual({
+      success: true,
+      data: validBiomarkerPageWithRanking,
     });
     expect(safeParseContract(healthCommonsCatalogEntitySchema, validCatalogEntity)).toEqual({
       success: true,
@@ -326,6 +411,14 @@ describe("@murphai/contracts health commons schemas", () => {
             validProtocolVariantPageWithOnboarding.experimentOnboarding.setupSlots[0],
           ],
         },
+      }),
+    ).toMatchObject({
+      success: false,
+    });
+    expect(
+      safeParseContract(healthCommonsPageFrontmatterSchema, {
+        ...validBiomarkerPageWithRanking,
+        biomarker: undefined,
       }),
     ).toMatchObject({
       success: false,
