@@ -1,6 +1,7 @@
 import { parseHostedEmailSendRequest } from "@murphai/assistant-runtime/hosted-email";
 import {
   HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH,
+  HOSTED_EXECUTION_RUNNER_TURN_INPUT_REFRESH_PATH,
 } from "@murphai/hosted-execution/routes";
 
 import { readHostedExecutionEnvironment } from "../env.ts";
@@ -17,6 +18,7 @@ import {
   resolveRunnerOutboundUserCryptoContext,
   type RunnerOutboundEnvironmentSource,
 } from "./shared.ts";
+import { handleRunnerTurnInputRefreshRequest } from "./turn-input.ts";
 
 export async function handleRunnerResultsRequest(input: {
   bucket: RunnerOutboundEnvironmentSource["BUNDLES"];
@@ -32,6 +34,20 @@ export async function handleRunnerResultsRequest(input: {
     }
 
     return handleRunnerEmailSendRequest({
+      bucket: input.bucket,
+      env: input.env,
+      environment: input.environment,
+      request: input.request,
+      userId: input.userId,
+    });
+  }
+
+  if (input.url.pathname === HOSTED_EXECUTION_RUNNER_TURN_INPUT_REFRESH_PATH) {
+    if (input.request.method !== "POST") {
+      return methodNotAllowed();
+    }
+
+    return handleRunnerTurnInputRefreshRequest({
       bucket: input.bucket,
       env: input.env,
       environment: input.environment,

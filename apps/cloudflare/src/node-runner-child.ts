@@ -81,6 +81,8 @@ export async function runHostedExecutionChild(
         platform: buildHostedExecutionRuntimePlatform({
           boundUserId: input.job.request.runDrain.userId,
           commitTimeoutMs: input.job.runtime?.commitTimeoutMs ?? null,
+          hostedRunId: input.job.request.run.runId,
+          hostedRunToken: input.job.request.runToken ?? null,
           internalWorkerProxyToken: input.internalWorkerProxyToken,
           localInternalProxyBaseUrl: input.localInternalProxyBaseUrl,
         }),

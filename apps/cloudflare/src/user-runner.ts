@@ -530,12 +530,19 @@ export class HostedUserRunner {
         });
       }
 
+      const commitInputs = await this.mergeAdoptedHostedRunCommitInputs({
+        eventResults: resolved.eventResults,
+        outputCommittedSeq: resolved.outputCommittedSeq,
+        run,
+        userId: input.userId,
+      });
+
       this.recordHostedRunBreadcrumb({
         message: "Cloudflare attempted to commit the acquired hosted run.",
         phase: "commit_attempted",
         redacted: {
           commitKind: execution.finalizeRequired ? "prepared_snapshot_finalize" : "prepared_snapshot",
-          eventCount: resolved.events.length,
+          eventCount: commitInputs.eventResults.length,
           preparedSnapshotPresent: execution.cursorSnapshotRef !== null,
         },
         run,
@@ -545,7 +552,7 @@ export class HostedUserRunner {
       const commit = await commitHostedRunToWeb({
         baseUrl: this.readHostedWebControlBaseUrl(),
         body: {
-          eventResults: resolved.eventResults,
+          eventResults: commitInputs.eventResults,
           expectedCursorVersion: input.acquired.cursor.version,
           finalizeRequired: execution.finalizeRequired,
           ...(execution.nextRuntimeWakeAt === undefined
@@ -554,7 +561,7 @@ export class HostedUserRunner {
                 nextRuntimeWakeAt: execution.nextRuntimeWakeAt ?? null,
                 nextRuntimeWakeReason: execution.nextRuntimeWakeAt ? "runtime" : null,
               }),
-          outputCommittedSeq: resolved.outputCommittedSeq,
+          outputCommittedSeq: commitInputs.outputCommittedSeq,
           browserVaultReplicaRef: execution.finalizeRequired ? undefined : execution.browserVaultReplicaRef ?? null,
           preparedSnapshotRef: execution.cursorSnapshotRef,
           redactedSummary: execution.redactedSummary ?? null,
@@ -574,7 +581,7 @@ export class HostedUserRunner {
         phase: commit.committed ? "commit_won" : "commit_lost",
         redacted: {
           commitKind: execution.finalizeRequired ? "prepared_snapshot_finalize" : "prepared_snapshot",
-          eventCount: resolved.events.length,
+          eventCount: commitInputs.eventResults.length,
           needsFinalize: commit.needsFinalize,
         },
         run,
@@ -860,6 +867,72 @@ export class HostedUserRunner {
     return {
       cursor: commit.cursor,
       state: "backpressured",
+    };
+  }
+
+  private async mergeAdoptedHostedRunCommitInputs(input: {
+    eventResults: HostedRunEventResult[];
+    outputCommittedSeq: string;
+    run: HostedRunRecord;
+    userId: string;
+  }): Promise<{
+    eventResults: HostedRunEventResult[];
+    outputCommittedSeq: string;
+  }> {
+    const status = await readHostedRunStatusFromWeb({
+      baseUrl: this.readHostedWebControlBaseUrl(),
+      body: {
+        runId: input.run.id,
+      },
+      boundUserId: input.userId,
+      callbackSigning: this.env.webCallbackSigning,
+      timeoutMs: this.env.runnerTimeoutMs,
+    });
+    if (status.run?.id !== input.run.id) {
+      throw new Error("Hosted run status refresh did not return the active run before commit.");
+    }
+
+    const latestRun = status.run;
+    const mergedResults: HostedRunEventResult[] = [...input.eventResults];
+    const resultIds = new Set(mergedResults.map((result) => result.ingressEventId));
+    let outputCommittedSeq = BigInt(input.outputCommittedSeq);
+    const eventCount = Math.min(
+      latestRun.eventSeqs.length,
+      latestRun.ingressEventIds.length,
+    );
+
+    for (let index = 0; index < eventCount; index += 1) {
+      const seqText = latestRun.eventSeqs[index];
+      if (!seqText) {
+        continue;
+      }
+      const seq = BigInt(seqText);
+      if (seq > outputCommittedSeq) {
+        outputCommittedSeq = seq;
+      }
+    }
+
+    for (let index = 0; index < eventCount; index += 1) {
+      const seqText = latestRun.eventSeqs[index];
+      const ingressEventId = latestRun.ingressEventIds[index];
+      if (!seqText || !ingressEventId) {
+        continue;
+      }
+      const seq = BigInt(seqText);
+      if (seq > outputCommittedSeq || resultIds.has(ingressEventId)) {
+        continue;
+      }
+
+      mergedResults.push({
+        ingressEventId,
+        state: "completed",
+      });
+      resultIds.add(ingressEventId);
+    }
+
+    return {
+      eventResults: mergedResults,
+      outputCommittedSeq: outputCommittedSeq.toString(),
     };
   }
 

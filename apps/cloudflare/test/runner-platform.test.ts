@@ -177,6 +177,58 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(request.method).toBe("GET");
   });
 
+  it("routes hosted turn-input refreshes through the Cloudflare internal effects port", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      events: [
+        {
+          ingressEventId: "wake_11",
+          seq: "11",
+          wake: {
+            eventId: "evt_timer",
+            kind: "runtime.timer",
+            occurredAt: "2026-04-23T00:00:00.000Z",
+            triggerKind: "runtime_timer",
+            userId: "member_123",
+          },
+        },
+      ],
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      hostedRunId: "run_123",
+      hostedRunToken: "run-token",
+      internalWorkerProxyToken: "runner-proxy-token",
+    });
+
+    const result = await platform.turnInputPort!.refresh({
+      afterSeq: "10",
+      phase: "before_delivery",
+      requestId: "req_123",
+    });
+
+    expect(result.events).toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const request = requireFetchRequest(fetchMock.mock.calls[0], "turn-input fetch");
+    expect(request.url).toBe("http://results.worker/turn-input/refresh");
+    expect(request.headers.get("x-hosted-execution-runner-proxy-token")).toBe(
+      "runner-proxy-token",
+    );
+    expect(request.method).toBe("POST");
+    await expect(request.json()).resolves.toEqual({
+      afterSeq: "10",
+      phase: "before_delivery",
+      requestId: "req_123",
+      runId: "run_123",
+      runToken: "run-token",
+    });
+  });
+
   it("fails closed before issuing internal-host requests when the per-run proxy token is missing", async () => {
     const fetchMock = vi.fn(async () => new Response(null, { status: 200 }));
     const platform = buildHostedExecutionRuntimePlatform({

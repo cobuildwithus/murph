@@ -409,6 +409,9 @@ async function drainHostedImmediateMaintenanceUntilIdleOrBudget(input: {
       const assistantMetrics = await runHostedAssistantRuntimeTimerLane({
         executionContext: input.executionContext,
         requestId: `${input.runDrain.runId}:assistant`,
+        runtime: {
+          platform: input.runtime.platform,
+        },
         vaultRoot: input.vaultRoot,
         wake: input.wake,
       });

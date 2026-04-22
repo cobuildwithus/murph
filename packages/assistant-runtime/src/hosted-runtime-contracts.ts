@@ -17,6 +17,7 @@ export type {
   HostedRuntimeIssueExportPort,
   HostedRuntimeIssueRecordResponse,
   HostedRuntimePlatform,
+  HostedRuntimeTurnInputPort,
   HostedRuntimeUsageExportPort,
   HostedRuntimeUsageRecordResponse,
 } from "./hosted-runtime/platform.ts";

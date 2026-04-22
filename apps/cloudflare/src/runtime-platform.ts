@@ -13,7 +13,11 @@ import {
 } from "@murphai/hosted-execution/contracts";
 import {
   HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH,
+  HOSTED_EXECUTION_RUNNER_TURN_INPUT_REFRESH_PATH,
 } from "@murphai/hosted-execution/routes";
+import {
+  parseHostedRuntimeDrainEvent,
+} from "@murphai/hosted-execution/parsers";
 import {
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH,
@@ -53,6 +57,8 @@ export function buildHostedExecutionRuntimePlatform(input: {
   boundUserId: string;
   commitTimeoutMs?: number | null;
   fetchImpl?: typeof fetch;
+  hostedRunId?: string | null;
+  hostedRunToken?: string | null;
   internalWorkerProxyToken?: string | null;
   localInternalProxyBaseUrl?: string | null;
   webCallbackSigning?: HostedWebCallbackSigningEnvironment | null;
@@ -77,6 +83,12 @@ export function buildHostedExecutionRuntimePlatform(input: {
         timeoutMs,
         transport: hostedWebControlTransport,
       })
+    : null;
+  const hostedTurnInputRun = input.hostedRunId && input.hostedRunToken
+    ? {
+        runId: input.hostedRunId,
+        runToken: input.hostedRunToken,
+      }
     : null;
 
   return {
@@ -158,6 +170,35 @@ export function buildHostedExecutionRuntimePlatform(input: {
         return target ? { target } : undefined;
       },
     },
+    ...(hostedTurnInputRun
+      ? {
+          turnInputPort: {
+            async refresh(refreshInput) {
+              const payload = await fetchHostedJson({
+                body: {
+                  ...(refreshInput.afterSeq === undefined
+                    ? {}
+                    : { afterSeq: refreshInput.afterSeq }),
+                  phase: refreshInput.phase,
+                  requestId: refreshInput.requestId,
+                  runId: hostedTurnInputRun.runId,
+                  runToken: hostedTurnInputRun.runToken,
+                },
+                description: "Hosted turn-input refresh",
+                fetchImpl,
+                method: "POST",
+                timeoutMs,
+                url: new URL(
+                  HOSTED_EXECUTION_RUNNER_TURN_INPUT_REFRESH_PATH,
+                  `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.effectsPort}/`,
+                ),
+              });
+
+              return parseHostedRuntimeTurnInputRefreshResponse(payload);
+            },
+          },
+        }
+      : {}),
     ...(hostedWebControlTransport
       ? {
           issueExportPort: {
@@ -725,6 +766,26 @@ function readOptionalStringField(value: unknown, field: string): string | null {
   }
 
   return entry;
+}
+
+function parseHostedRuntimeTurnInputRefreshResponse(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("Hosted turn-input refresh response must be an object.");
+  }
+
+  const events = (value as Record<string, unknown>).events;
+  if (!Array.isArray(events)) {
+    throw new TypeError("Hosted turn-input refresh response.events must be an array.");
+  }
+
+  return {
+    events: events.map((event, index) =>
+      parseHostedRuntimeDrainEvent(
+        event,
+        `Hosted turn-input refresh response events[${index}]`,
+      )
+    ),
+  };
 }
 
 function copyBytesToArrayBuffer(bytes: Uint8Array): ArrayBuffer {

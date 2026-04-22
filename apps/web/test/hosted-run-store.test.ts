@@ -34,9 +34,11 @@ vi.mock("@/src/lib/hosted-ingress/store", () => ({
 }));
 
 import {
+  adoptHostedRunTurnInputTx,
   acquireHostedRunTx,
   commitHostedRunTx,
   finalizeHostedRunTx,
+  peekHostedRunTurnInputTx,
   readHostedRunStatus,
   recordHostedRunLog,
   releaseHostedRunFinalizeTx,
@@ -998,6 +1000,194 @@ describe("commitHostedRunTx", () => {
         userId: run.userId,
       },
     });
+  });
+});
+
+describe("hosted run turn input", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.countPendingHostedIngressEvents.mockResolvedValue(0);
+    mocks.hydrateHostedIngressEventsTx.mockImplementation(async ({ records }) =>
+      records.map((record: { id: string; kind: string; seq: bigint }) => ({
+        behavior: "ordered",
+        createdAt: "2026-04-20T00:00:00.000Z",
+        id: record.id,
+        kind: record.kind,
+        occurredAt: "2026-04-20T00:00:00.000Z",
+        payloadCiphertext: "ciphertext",
+        payloadSchema: "murph.hosted-ingress-execution.v1",
+        seq: record.seq.toString(),
+        updatedAt: "2026-04-20T00:00:00.000Z",
+        userId: "member_123",
+      }))
+    );
+    mocks.lockHostedExecutionCursorRowTx.mockResolvedValue(undefined);
+    mocks.ensureHostedExecutionCursorRowTx.mockResolvedValue(buildCursorRow());
+  });
+
+  it("peeks pending contiguous ingress after the active run high-water", async () => {
+    const runToken = "run-token.turn-input";
+    const run = buildRunRow({
+      eventSeqs: ["10"],
+      ingressEventIds: ["wake_10"],
+      runToken,
+      status: "running",
+    });
+    const pendingRows = [
+      {
+        id: "wake_11",
+        kind: "conversation.message",
+        seq: 11n,
+      },
+      {
+        id: "wake_12",
+        kind: "conversation.message",
+        seq: 12n,
+      },
+    ];
+    const hostedIngressEventFindMany = vi.fn(async () => pendingRows);
+    const tx = asHostedRunMutationTx({
+      hostedRun: {
+        findFirst: vi.fn(async () => run),
+      },
+      hostedIngressEvent: {
+        findMany: hostedIngressEventFindMany,
+      },
+    });
+
+    const result = await peekHostedRunTurnInputTx({
+      runId: run.id,
+      runToken,
+      tx,
+      userId: run.userId,
+    });
+
+    expect(result.events.map((event) => event.id)).toEqual(["wake_11", "wake_12"]);
+    expect(hostedIngressEventFindMany).toHaveBeenCalledWith({
+      orderBy: { seq: "asc" },
+      take: 64,
+      where: {
+        quarantinedAt: null,
+        runId: null,
+        seq: { gt: 10n },
+        state: "pending",
+        userId: run.userId,
+      },
+    });
+  });
+
+  it("adopts only the requested contiguous prefix into the active run projection", async () => {
+    const runToken = "run-token.turn-input-adopt";
+    const run = buildRunRow({
+      eventSeqs: ["10"],
+      ingressEventIds: ["wake_10"],
+      runToken,
+      status: "running",
+    });
+    const pendingRows = [
+      {
+        id: "wake_11",
+        kind: "conversation.message",
+        seq: 11n,
+      },
+    ];
+    const updatedRun = {
+      ...run,
+      eventCount: 2,
+      eventSeqsJson: ["10", "11"],
+      ingressEventIdsJson: ["wake_10", "wake_11"],
+    };
+    const hostedIngressEventUpdateMany = vi.fn(async () => ({ count: 1 }));
+    const hostedRunUpdate = vi.fn(async () => updatedRun);
+    const tx = asHostedRunMutationTx({
+      hostedRun: {
+        findFirst: vi.fn(async () => run),
+        update: hostedRunUpdate,
+      },
+      hostedIngressEvent: {
+        findMany: vi.fn(async () => pendingRows),
+        updateMany: hostedIngressEventUpdateMany,
+      },
+    });
+
+    const result = await adoptHostedRunTurnInputTx({
+      ingressEventIds: ["wake_11"],
+      runId: run.id,
+      runToken,
+      tx,
+      userId: run.userId,
+    });
+
+    expect(result.adopted).toBe(true);
+    expect(result.events.map((event) => event.id)).toEqual(["wake_11"]);
+    expect(result.run?.ingressEventIds).toEqual(["wake_10", "wake_11"]);
+    expect(hostedIngressEventUpdateMany).toHaveBeenCalledWith({
+      data: {
+        runId: run.id,
+        state: "running",
+      },
+      where: {
+        id: { in: ["wake_11"] },
+        quarantinedAt: null,
+        runId: null,
+        state: "pending",
+        userId: run.userId,
+      },
+    });
+    expect(hostedRunUpdate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        eventCount: 2,
+        eventSeqsJson: ["10", "11"],
+        ingressEventIdsJson: ["wake_10", "wake_11"],
+      }),
+      where: { id: run.id },
+    });
+  });
+
+  it("does not adopt past a non-matching first pending event", async () => {
+    const runToken = "run-token.turn-input-mismatch";
+    const run = buildRunRow({
+      eventSeqs: ["10"],
+      ingressEventIds: ["wake_10"],
+      runToken,
+      status: "running",
+    });
+    const hostedIngressEventUpdateMany = vi.fn();
+    const hostedRunUpdate = vi.fn();
+    const tx = asHostedRunMutationTx({
+      hostedRun: {
+        findFirst: vi.fn(async () => run),
+        update: hostedRunUpdate,
+      },
+      hostedIngressEvent: {
+        findMany: vi.fn(async () => [
+          {
+            id: "wake_11",
+            kind: "assistant.notification.requested",
+            seq: 11n,
+          },
+        ]),
+        updateMany: hostedIngressEventUpdateMany,
+      },
+    });
+
+    const result = await adoptHostedRunTurnInputTx({
+      ingressEventIds: ["wake_12"],
+      runId: run.id,
+      runToken,
+      tx,
+      userId: run.userId,
+    });
+
+    expect(result).toMatchObject({
+      adopted: false,
+      events: [],
+      run: expect.objectContaining({
+        ingressEventIds: ["wake_10"],
+      }),
+    });
+    expect(hostedIngressEventUpdateMany).not.toHaveBeenCalled();
+    expect(hostedRunUpdate).not.toHaveBeenCalled();
   });
 });
 
