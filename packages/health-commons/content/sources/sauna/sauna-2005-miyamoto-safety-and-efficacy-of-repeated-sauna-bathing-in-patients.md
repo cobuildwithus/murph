@@ -49,6 +49,20 @@ protocolEvidence:
     implication: "This source supports ramping and safety monitoring, not unsupervised clinical advice."
     caveat: "Safety and special-population records support screening, stopping rules, and logging; they are not efficacy proof."
     displayPriority: 40
+  -
+    protocolKey: protocol_variant:dry-sauna/murph-finnish-standard-3x-week
+    groupId: intervention-design-training-and-mixed-results
+    stance: mixed
+    scope: clinical_supervised
+    result: mixed
+    endpointKeys:
+      - biomarker:resting-heart-rate
+      - biomarker:morning-blood-pressure
+      - biomarker:hrv-rmssd
+    headline: "This supervised heart-failure pilot shows repeated sauna can be feasible and physiologically meaningful in a clinical setting, while staying far from a generic home claim."
+    implication: "Useful for dose-ramping and expectation setting, not for unsupervised clinical advice."
+    caveat: "Small supervised heart-failure pilot; it informs design realism more than it proves broad efficacy."
+    displayPriority: 120
 evidenceBucket: Finnish dry-sauna corpus
 whyItMatters: "Expands the audited Finnish dry-sauna evidence corpus with a cardiovascular record marked medium priority for Murph v1 interpretation."
 potentialMurphEndpoints:

@@ -46,6 +46,16 @@ protocolEvidence:
     implication: "This source supports tracking temperature, duration, cooldown, and symptoms."
     caveat: "Acute mechanistic responses explain the heat load but are not direct repeated-protocol efficacy outcomes."
     displayPriority: 50
+  -
+    protocolKey: protocol_variant:dry-sauna/murph-finnish-standard-3x-week
+    groupId: safety-dose-modality-and-context-boundaries
+    stance: safety_boundary
+    scope: adjacent_variant
+    result: not_efficacy_evidence
+    headline: "This sauna-plus-cold body-temperature study reinforces conservative duration, cooldown, and symptom stop rules when mixed thermal exposures are layered together."
+    implication: "Use it to justify explicit temperature, cooldown, and stop-condition guardrails instead of silently merging cold exposure into the default sauna plan."
+    caveat: "Acute body-temperature physiology with cold exposure informs safety boundaries, not repeated-protocol efficacy."
+    displayPriority: 120
 evidenceBucket: Finnish dry-sauna corpus
 whyItMatters: "Expands the audited Finnish dry-sauna evidence corpus with a general / mixed record marked lower priority for Murph v1 interpretation."
 potentialMurphEndpoints:

@@ -43,6 +43,19 @@ protocolEvidence:
     implication: "This source supports cardiovascular screening and measured, conservative dose advice."
     caveat: "Safety and special-population records support screening, stopping rules, and logging; they are not efficacy proof."
     displayPriority: 20
+  -
+    protocolKey: protocol_variant:dry-sauna/murph-finnish-standard-3x-week
+    groupId: evidence-backbone-and-claim-calibration
+    stance: mixed
+    scope: clinical_supervised
+    result: mixed
+    endpointKeys:
+      - biomarker:resting-heart-rate
+      - biomarker:morning-blood-pressure
+    headline: "This cardiovascular-disease review reinforces that sauna can be tolerable in selected clinical settings, but only with explicit population and supervision caveats."
+    implication: "Use it to frame the evidence backbone as plausible but population-bounded."
+    caveat: "Clinical review evidence is useful for claim calibration, not for promising an unsupervised home-sauna outcome."
+    displayPriority: 140
 evidenceBucket: Finnish dry-sauna corpus
 whyItMatters: "Expands the audited Finnish dry-sauna evidence corpus with a cardiovascular record marked high priority for Murph v1 interpretation."
 potentialMurphEndpoints:

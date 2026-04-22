@@ -46,6 +46,16 @@ protocolEvidence:
     implication: "This source supports family and pediatric caution rather than adult efficacy claims."
     caveat: "Safety and special-population records support screening, stopping rules, and logging; they are not efficacy proof."
     displayPriority: 100
+  -
+    protocolKey: protocol_variant:dry-sauna/murph-finnish-standard-3x-week
+    groupId: long-term-finnish-cohort-and-real-world-context
+    stance: context_only
+    scope: measurement_context
+    result: not_efficacy_evidence
+    headline: "This Finnish child-survey paper adds real-world sauna-use and symptom context, but it belongs in age-specific background rather than the adult outcome promise."
+    implication: "Useful for real-world Finnish context and age-based caution, not for adult efficacy claims."
+    caveat: "Cross-sectional pediatric survey data are descriptive context, not a short-term adult protocol outcome."
+    displayPriority: 220
 evidenceBucket: Finnish dry-sauna corpus
 whyItMatters: "Expands the audited Finnish dry-sauna evidence corpus with a safety / physiology record marked lower priority for Murph v1 interpretation."
 potentialMurphEndpoints:
