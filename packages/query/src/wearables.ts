@@ -17,6 +17,7 @@ import {
   summarizeMetricsConfidence,
 } from "./wearables/confidence.ts";
 import { buildWearableSourceHealth } from "./wearables/source-health.ts";
+export { collectCanonicalWearableDataset } from "./wearables/canonical-records.ts";
 import { collectLatestDate, collectSortedDatesDesc, uniqueStrings } from "./wearables/shared.ts";
 import {
   resolveMetric,
@@ -77,6 +78,7 @@ export type {
   WearableFilters,
   WearableMetricCandidate,
   WearableMetricConfidence,
+  WearableMetricKey,
   WearableMetricSelection,
   WearableMetricValue,
   WearableRecoveryDay,

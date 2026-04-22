@@ -1,7 +1,8 @@
+import type { WearableCanonicalMetricKey } from "@murphai/importers/device-providers/metric-catalog";
 import type { DeviceProviderMetricFamily } from "@murphai/importers/device-providers/provider-descriptors";
 
 export type WearableConfidenceLevel = "none" | "low" | "medium" | "high";
-export type WearableCandidateSourceFamily = "event" | "sample" | "derived";
+export type WearableCandidateSourceFamily = "canonical" | "event" | "sample" | "derived";
 
 export interface WearableExternalRef {
   system: string | null;
@@ -259,39 +260,7 @@ export interface WearableSleepWindowScorecard {
   total: number;
 }
 
-export type WearableMetricKey =
-  | "activeCalories"
-  | "activityScore"
-  | "averageHeartRate"
-  | "awakeMinutes"
-  | "bmi"
-  | "bodyBattery"
-  | "bodyFatPercentage"
-  | "dayStrain"
-  | "deepMinutes"
-  | "distanceKm"
-  | "hrv"
-  | "lightMinutes"
-  | "lowestHeartRate"
-  | "readinessScore"
-  | "recoveryScore"
-  | "remMinutes"
-  | "respiratoryRate"
-  | "restingHeartRate"
-  | "sessionCount"
-  | "sessionMinutes"
-  | "sleepConsistency"
-  | "sleepEfficiency"
-  | "sleepPerformance"
-  | "sleepScore"
-  | "spo2"
-  | "steps"
-  | "stressLevel"
-  | "temperature"
-  | "temperatureDeviation"
-  | "timeInBedMinutes"
-  | "totalSleepMinutes"
-  | "weightKg";
+export type WearableMetricKey = WearableCanonicalMetricKey;
 
 export type WearableMetricPolicyFamily = DeviceProviderMetricFamily | null;
 

@@ -1,3 +1,4 @@
+import { resolveWearableMetricTolerance } from "@murphai/importers/device-providers/metric-catalog";
 import {
   defaultDeviceProviderDescriptors,
   resolveDeviceProviderDescriptor,
@@ -147,56 +148,13 @@ export function formatMetricValue(value: number, unit: string): string {
 }
 
 export function resolveMetricTolerance(metric: WearableMetricKey): number {
-  switch (metric) {
-    case "steps":
-      return 250;
-    case "activeCalories":
-      return 25;
-    case "distanceKm":
-      return 0.25;
-    case "sessionMinutes":
-    case "totalSleepMinutes":
-    case "timeInBedMinutes":
-    case "awakeMinutes":
-    case "lightMinutes":
-    case "deepMinutes":
-    case "remMinutes":
-      return 5;
-    case "sessionCount":
-      return 0;
-    case "activityScore":
-    case "sleepEfficiency":
-    case "sleepScore":
-    case "sleepPerformance":
-    case "sleepConsistency":
-    case "recoveryScore":
-    case "readinessScore":
-    case "bodyBattery":
-    case "stressLevel":
-    case "spo2":
-    case "bodyFatPercentage":
-      return 1;
-    case "averageHeartRate":
-    case "lowestHeartRate":
-    case "restingHeartRate":
-    case "respiratoryRate":
-      return 1;
-    case "hrv":
-      return 3;
-    case "temperature":
-    case "temperatureDeviation":
-      return 0.2;
-    case "weightKg":
-      return 0.2;
-    case "bmi":
-      return 0.1;
-    case "dayStrain":
-      return 0.5;
-  }
+  return resolveWearableMetricTolerance(metric);
 }
 
 export function sourceFamilyScore(family: WearableCandidateSourceFamily): number {
   switch (family) {
+    case "canonical":
+      return 4;
     case "event":
       return 3;
     case "sample":
