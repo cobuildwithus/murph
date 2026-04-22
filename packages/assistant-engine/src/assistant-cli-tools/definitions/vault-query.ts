@@ -10,6 +10,25 @@ const localDateSchema = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/u)
 const optionalStringArraySchema = z.array(z.string().min(1)).optional()
+const wearableMetricSchema = z.string().min(1)
+
+async function executeVaultQueryMethod<TResult>(
+  input: AssistantToolContext,
+  methodName: string,
+  methodInput: Record<string, unknown>,
+): Promise<TResult> {
+  const candidate = (
+    input.vaultServices?.query as Record<string, unknown> | undefined
+  )?.[methodName]
+
+  if (typeof candidate !== 'function') {
+    throw new Error(`Missing vault query service method ${methodName}`)
+  }
+
+  return (
+    candidate as (runtimeInput: Record<string, unknown>) => Promise<TResult>
+  )(methodInput)
+}
 
 export function createVaultQueryToolDefinitions(
   input: AssistantToolContext,
@@ -63,6 +82,76 @@ export function createVaultQueryToolDefinitions(
             ...filters,
           } as Parameters<NonNullable<typeof input.vaultServices>['query']['list']>[0],
         ),
+    }),
+    defineVaultServiceBackedTool({
+      name: 'vault.wearables.latest',
+      description:
+        'Show the normalized latest wearable bundle across connected providers. Prefer this as the first read for common "latest nightly metrics" or "how am I doing lately?" questions before raw wearable reads.',
+      inputSchema: z.object({
+        providers: optionalStringArraySchema,
+      }),
+      inputExample: {
+        providers: ['oura'],
+      },
+      execute: ({ providers }) =>
+        executeVaultQueryMethod(input, 'showWearableLatest', {
+          vault: input.vault,
+          requestId: input.requestId ?? null,
+          providers,
+        }),
+    }),
+    defineVaultServiceBackedTool({
+      name: 'vault.wearables.metric_latest',
+      description:
+        'Show the normalized latest reading for one wearable metric alias such as resting-heart-rate, hrv, or skin-temp. Prefer this before raw wearable record inspection for single-metric latest questions.',
+      inputSchema: z.object({
+        metric: wearableMetricSchema,
+        providers: optionalStringArraySchema,
+      }),
+      inputExample: {
+        metric: 'resting-heart-rate',
+      },
+      execute: ({ metric, providers }) =>
+        executeVaultQueryMethod(input, 'showWearableMetricLatest', {
+          vault: input.vault,
+          requestId: input.requestId ?? null,
+          metric,
+          providers,
+        }),
+    }),
+    defineVaultServiceBackedTool({
+      name: 'vault.wearables.metric_trend',
+      description:
+        'Show the normalized recent trend for one wearable metric alias. Prefer this before raw wearable record inspection for "is this trending up or down?" questions.',
+      inputSchema: z.object({
+        metric: wearableMetricSchema,
+        providers: optionalStringArraySchema,
+      }),
+      inputExample: {
+        metric: 'hrv',
+      },
+      execute: ({ metric, providers }) =>
+        executeVaultQueryMethod(input, 'showWearableMetricTrend', {
+          vault: input.vault,
+          requestId: input.requestId ?? null,
+          metric,
+          providers,
+        }),
+    }),
+    defineVaultServiceBackedTool({
+      name: 'vault.wearables.drift',
+      description:
+        'Explain recent wearable drift across the normalized surfaces so the assistant can answer "what changed?" questions before dropping down to raw wearable reads.',
+      inputSchema: z.object({
+        providers: optionalStringArraySchema,
+      }),
+      inputExample: {},
+      execute: ({ providers }) =>
+        executeVaultQueryMethod(input, 'showWearableDrift', {
+          vault: input.vault,
+          requestId: input.requestId ?? null,
+          providers,
+        }),
     }),
     defineVaultServiceBackedTool({
       name: 'vault.wearables.day',

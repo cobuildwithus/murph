@@ -139,6 +139,25 @@ describe('buildAssistantSystemPrompt', () => {
     )
   })
 
+  it('prefers the new normalized wearable reads before older day/list or raw wearable inspection', () => {
+    const prompt = buildPrompt('bound-tools')
+
+    expect(prompt).toContain('`vault-cli wearables latest` for recent nightly summaries')
+    expect(prompt).toContain(
+      '`vault-cli wearables metric latest <metric>` for one metric\'s freshest reading',
+    )
+    expect(prompt).toContain(
+      '`vault-cli wearables metric trend <metric>` for recent direction',
+    )
+    expect(prompt).toContain('`vault-cli wearables drift` for "what changed?" explanations')
+    expect(prompt).toContain(
+      'Use `vault-cli wearables day` or the relevant `vault-cli wearables sleep|activity|recovery|body|sources list` command when the question is date-specific or you need one summary family in more detail.',
+    )
+    expect(prompt).toContain(
+      'Inspect raw events or samples only when those normalized surfaces still do not answer the question or the user explicitly asks for raw evidence.',
+    )
+  })
+
   it('uses the gradual early-session onboarding guidance when the first-contact flow is enabled', () => {
     const prompt = buildPrompt('bound-tools', null, { earlySessionOnboarding: true })
 
@@ -186,6 +205,10 @@ Ready to get started?`)
     expect(prompt).toContain(
       'Before setup questions, check whether the user already has an active experiment with `vault-cli experiment list --status active --format json`.',
     )
+    expect(prompt).toContain('`vault-cli wearables latest --format json`')
+    expect(prompt).toContain('`vault-cli wearables metric latest <metric> --format json`')
+    expect(prompt).toContain('`vault-cli wearables metric trend <metric> --format json`')
+    expect(prompt).toContain('`vault-cli wearables drift --format json`')
     expect(prompt).toContain(
       'treat that as a planning conversation until they explicitly confirm the final run plan.',
     )
