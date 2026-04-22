@@ -113,8 +113,11 @@ export interface DeleteEventResult {
   deleted: true;
 }
 
-type AttachmentBackedPublicEventKind = "activity_session" | "measurement" | "body_measurement";
-type AttachmentBackedEventDraft<K extends AttachmentBackedPublicEventKind> = Omit<EventDraftByKind<K>, "kind">;
+type AttachmentBackedPublicEventKind = "activity_session" | "capture" | "measurement" | "body_measurement";
+type CaptureEventDraft = Omit<EventDraftByKind<"note">, "kind">;
+type AttachmentBackedEventDraft<K extends AttachmentBackedPublicEventKind> = K extends "capture"
+  ? CaptureEventDraft
+  : Omit<EventDraftByKind<Extract<K, PublicWritableEventKind>>, "kind">;
 
 interface RawImportOptions {
   importId?: string;
@@ -138,6 +141,13 @@ export interface AddBodyMeasurementInput {
   rawImport?: RawImportOptions;
 }
 
+export interface AddCaptureInput {
+  vaultRoot: string;
+  draft: AttachmentBackedEventDraft<"capture">;
+  attachments: readonly EventAttachmentSourceInput[];
+  rawImport?: RawImportOptions;
+}
+
 export interface AddMeasurementInput {
   vaultRoot: string;
   draft: AttachmentBackedEventDraft<"measurement">;
@@ -152,6 +162,11 @@ export interface AddActivitySessionResult extends UpsertEventResult {
 
 export interface AddBodyMeasurementResult extends UpsertEventResult {
   event: EventRecordByKind<"body_measurement">;
+  manifestPath: string | null;
+}
+
+export interface AddCaptureResult extends UpsertEventResult {
+  event: EventRecordByKind<"note">;
   manifestPath: string | null;
 }
 
@@ -524,10 +539,18 @@ function ensureSpecializedEventKind(
     return;
   }
 
-  if (latestMatchedEvent.record.kind !== kind) {
+  const expectedRecordKind: EventRecord["kind"] = kind === "capture" ? "note" : kind;
+  if (latestMatchedEvent.record.kind !== expectedRecordKind) {
     throw new VaultError(
       "EVENT_KIND_INVALID",
       `Event "${eventId}" already exists as kind "${latestMatchedEvent.record.kind}" and cannot be rewritten as "${kind}".`,
+    );
+  }
+
+  if (kind === "capture" && !latestMatchedEvent.record.tags?.includes("capture")) {
+    throw new VaultError(
+      "EVENT_KIND_INVALID",
+      `Event "${eventId}" already exists as a note and cannot be rewritten as a capture without the capture tag.`,
     );
   }
 }
@@ -553,6 +576,36 @@ function applyActivitySessionAttachmentProjections(
       ...draft.workout,
       ...(mergedWorkoutMedia ? { media: mergedWorkoutMedia } : {}),
     },
+  };
+}
+
+function applyCaptureAttachmentProjections(
+  draft: AttachmentBackedEventDraft<"capture">,
+  attachments: readonly EventAttachment[],
+): AttachmentBackedEventDraft<"capture"> {
+  if (attachments.length === 0) {
+    return draft;
+  }
+
+  const mergedAttachments = mergeByRelativePath(draft.attachments, attachments);
+  const mergedRawRefs = mergeStringLists(
+    draft.rawRefs,
+    attachments.map((attachment) => attachment.relativePath),
+  );
+
+  return {
+    ...draft,
+    ...(mergedAttachments ? { attachments: mergedAttachments } : {}),
+    ...(mergedRawRefs ? { rawRefs: mergedRawRefs } : {}),
+  };
+}
+
+function normalizeCaptureDraft(
+  draft: AttachmentBackedEventDraft<"capture">,
+): AttachmentBackedEventDraft<"capture"> {
+  return {
+    ...draft,
+    tags: uniqueTrimmedStringList([...(draft.tags ?? []), "capture"]) ?? ["capture"],
   };
 }
 
@@ -740,6 +793,92 @@ export async function addBodyMeasurement(
         created: matchedShards.length === 0,
         event: eventRecord,
         manifestPath: stagedAttachments?.manifestPath ?? null,
+      };
+    },
+  });
+}
+
+export async function addCapture(
+  input: AddCaptureInput,
+): Promise<AddCaptureResult> {
+  const vault = await loadVault({ vaultRoot: input.vaultRoot });
+  const eventId = normalizeDraftEventId(input.draft.id) ?? generateRecordId(ID_PREFIXES.event);
+  const draft = normalizeCaptureDraft({
+    ...input.draft,
+    id: eventId,
+  });
+  const matchedShards = await loadEventLedgerShardsById(input.vaultRoot, eventId);
+  ensureSpecializedEventKind("capture", eventId, matchedShards);
+  const latestMatchedEvent = selectLatestMatchedEvent(matchedShards);
+  const lifecycle = buildEventSpineLifecycle(
+    latestMatchedEvent ? eventSpineRevision(latestMatchedEvent.record) + 1 : 1,
+  );
+  const preparedAttachments = prepareEventAttachments({
+    ownerKind: "capture",
+    ownerId: eventId,
+    occurredAt: draft.occurredAt,
+    attachments: input.attachments,
+  });
+
+  if (preparedAttachments.length === 0) {
+    throw new VaultError("CAPTURE_MEDIA_MISSING", "Capture writes require at least one media attachment.");
+  }
+
+  return runCanonicalWrite<AddCaptureResult>({
+    vaultRoot: input.vaultRoot,
+    operationType: "capture_write",
+    summary: `Write capture ${eventId}`,
+    occurredAt: draft.occurredAt,
+    mutate: async ({ batch }) => {
+      const stagedAttachments = await stagePreparedEventAttachmentsInBatch({
+        batch,
+        owner: {
+          kind: "capture",
+          id: eventId,
+        },
+        attachments: preparedAttachments,
+        importId: input.rawImport?.importId ?? eventId,
+        importKind: input.rawImport?.importKind ?? "capture",
+        importedAt: resolveRawImportImportedAt(input.rawImport?.importedAt),
+        source: resolveRawImportSource(input.rawImport?.source, draft.source),
+        provenance: input.rawImport?.provenance ?? {
+          eventId,
+          family: "capture",
+          mediaCount: preparedAttachments.length,
+        },
+      });
+      if (!stagedAttachments) {
+        throw new VaultError("CAPTURE_MEDIA_MISSING", "Capture writes require at least one media attachment.");
+      }
+      const projectedDraft = applyCaptureAttachmentProjections(draft, stagedAttachments.attachments);
+      const eventRecord = buildTypedEventRecord(
+        {
+          kind: "note",
+          ...projectedDraft,
+        },
+        vault.metadata.timezone,
+        lifecycle,
+      ) as EventRecordByKind<"note">;
+      const ledgerFile = toEventLedgerFile(eventRecord.occurredAt);
+
+      await batch.stageJsonlAppend(ledgerFile, `${JSON.stringify(eventRecord)}\n`);
+      await emitAuditRecord({
+        vaultRoot: input.vaultRoot,
+        batch,
+        action: "event_upsert",
+        commandName: "core.addCapture",
+        summary: `Wrote capture ${eventId}.`,
+        occurredAt: eventRecord.occurredAt,
+        files: [ledgerFile],
+        targetIds: [eventId],
+      });
+
+      return {
+        eventId,
+        ledgerFile,
+        created: matchedShards.length === 0,
+        event: eventRecord,
+        manifestPath: stagedAttachments.manifestPath,
       };
     },
   });

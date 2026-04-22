@@ -78,6 +78,14 @@ const RAW_ASSET_OWNER_DEFINITIONS = Object.freeze<Record<RawAssetOwnerKind, RawA
     rootDirectory: VAULT_LAYOUT.rawAssessmentsDirectory,
     resolveFileName: () => "source.json",
   },
+  capture: {
+    rootDirectory: VAULT_LAYOUT.rawCapturesDirectory,
+    resolveFileName: ({ originalFileName, role, targetName }) => {
+      const safeFileName = resolveDefaultFileName({ originalFileName, targetName });
+      const safeRole = sanitizePathSegment(role, "media");
+      return `${safeRole}-${safeFileName}`;
+    },
+  },
   device_batch: {
     rootDirectory: VAULT_LAYOUT.rawIntegrationsDirectory,
     resolveFileName: resolveDefaultFileName,
@@ -195,6 +203,18 @@ export function inferRawAssetOwnerFromDirectory(rawDirectory: string): RawAssetO
     /^\d{4}$/u.test(year ?? "") && /^\d{2}$/u.test(month ?? "");
 
   try {
+    if (
+      segments[0] === "raw"
+      && segments[1] === "captures"
+      && segments.length === 5
+      && hasYearMonth(segments[2], segments[3])
+    ) {
+      return normalizeRawAssetOwner({
+        kind: "capture",
+        id: segments[4] as string,
+      });
+    }
+
     if (
       segments[0] === "raw"
       && segments[1] === "documents"

@@ -6,8 +6,9 @@ import { afterEach, describe, expect, it } from 'vitest'
 
 import {
   addActivitySession,
-  addMeasurement,
   addBodyMeasurement,
+  addCapture,
+  addMeasurement,
   initializeVault,
   readJsonlRecords,
 } from '@murphai/core'
@@ -250,6 +251,86 @@ describe('workout primitive core mutations', () => {
       kind: 'body_measurement',
     })
     expect(auditRecord?.commandName).toBe('core.addBodyMeasurement')
+    expect(auditRecord?.changes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: result.ledgerFile,
+        }),
+      ]),
+    )
+  })
+
+  it('adds captures through the dedicated core seam and always tags them as capture', async () => {
+    const vaultRoot = await createTempVault('murph-core-capture-')
+    const sourcePath = await createSourceFile(vaultRoot, 'capture-photo.jpg', 'capture-photo')
+
+    const result = await addCapture({
+      vaultRoot,
+      draft: {
+        occurredAt: '2026-04-08T07:30:00.000Z',
+        source: 'manual',
+        title: 'Left forearm baseline',
+        note: 'Reference photo for later comparison.',
+      },
+      attachments: [{
+        role: 'photo_1',
+        sourcePath,
+      }],
+    })
+
+    expect(result.created).toBe(true)
+    expect(result.event.kind).toBe('note')
+    expect(result.manifestPath).toBeTruthy()
+    expect(result.event.tags).toEqual(expect.arrayContaining(['capture']))
+    expect(result.event.attachments).toHaveLength(1)
+
+    const attachment = result.event.attachments?.[0]
+    expect(attachment).toBeDefined()
+    expect(attachment!.relativePath).toContain('raw/captures/')
+    expect(result.event.rawRefs).toEqual(
+      expect.arrayContaining([attachment!.relativePath]),
+    )
+
+    const ledgerRecords = await readJsonlRecords({
+      vaultRoot,
+      relativePath: result.ledgerFile,
+    })
+    expect(ledgerRecords).toHaveLength(1)
+    expect(ledgerRecords[0]).toMatchObject({
+      id: result.eventId,
+      kind: 'note',
+      tags: expect.arrayContaining(['capture']),
+      rawRefs: expect.arrayContaining([attachment!.relativePath]),
+    })
+
+    const manifest = JSON.parse(
+      await readFile(path.join(vaultRoot, result.manifestPath!), 'utf8'),
+    ) as {
+      importKind: string
+      provenance?: Record<string, unknown>
+      rawDirectory: string
+    }
+    const auditRecords = await readAuditRecords(vaultRoot, result.event.occurredAt)
+    const auditRecord = auditRecords.find(
+      (record) =>
+        (record as { action?: string }).action === 'event_upsert' &&
+        Array.isArray((record as { targetIds?: unknown }).targetIds) &&
+        (record as { targetIds: string[] }).targetIds.includes(result.eventId),
+    ) as
+      | {
+          commandName?: string
+          changes?: Array<{ path?: string }>
+        }
+      | undefined
+
+    expect(manifest.importKind).toBe('capture')
+    expect(manifest.rawDirectory).toContain('raw/captures/')
+    expect(manifest.provenance).toMatchObject({
+      eventId: result.eventId,
+      family: 'capture',
+      mediaCount: 1,
+    })
+    expect(auditRecord?.commandName).toBe('core.addCapture')
     expect(auditRecord?.changes).toEqual(
       expect.arrayContaining([
         expect.objectContaining({

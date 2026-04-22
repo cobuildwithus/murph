@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { test } from "vitest";
 
 import * as helpersModule from "../src/helpers.ts";
+import * as capturesModule from "../src/captures.ts";
 import * as indexModule from "../src/index.ts";
 import * as recordsModule from "../src/records.ts";
 import * as runtimeModule from "../src/runtime.ts";
@@ -18,6 +19,12 @@ test("public entrypoints expose the expected symbols", () => {
   assert.equal(typeof helpersModule.resolveVaultRelativePath, "function");
   assert.equal(typeof helpersModule.preparePatchedUpsertPayload, "function");
   assert.equal(typeof helpersModule.inferVaultLinkKind, "function");
+
+  assert.equal(typeof capturesModule.addCaptureRecord, "function");
+  assert.equal(typeof capturesModule.listCaptureRecords, "function");
+  assert.equal(typeof capturesModule.showCaptureRecord, "function");
+  assert.equal(typeof capturesModule.showCaptureManifest, "function");
+  assert.equal(typeof capturesModule.captureLookupSchema.parse, "function");
 
   assert.equal(typeof recordsModule.renderAutoLoggedFoodMealNote, "function");
   assert.equal(typeof recordsModule.scaffoldProviderPayload, "function");

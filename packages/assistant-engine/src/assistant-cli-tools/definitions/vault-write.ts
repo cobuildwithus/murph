@@ -33,6 +33,18 @@ const mealIngredientsSchema = z
   .array(mealIngredientSchema)
   .max(100)
 
+const captureEntrySchema = z.object({
+  media: z.array(vaultFilePathSchema).min(1).max(20),
+  label: z.string().trim().min(1).max(160).optional(),
+  bodySite: z.string().trim().min(1).max(400).optional(),
+  collection: z.string().trim().min(1).max(160).optional(),
+  tags: z.array(z.string().trim().min(1).max(120)).max(50).optional(),
+  title: z.string().trim().min(1).max(160).optional(),
+  note: z.string().trim().min(1).max(4000).optional(),
+  occurredAt: isoTimestampSchema.optional(),
+  source: eventSourceSchema.optional(),
+})
+
 function assertMealAddInputHasContent(input: {
   photo?: string
   audio?: string
@@ -101,6 +113,48 @@ export function createCanonicalVaultWriteToolDefinitions(
           occurredAt,
           note,
           source,
+        }),
+    }),
+    defineVaultServiceBackedTool({
+      name: 'vault.capture.add',
+      description:
+        'Create dated media captures from photos, videos, or similar evidence. Use one capture per observed thing/timepoint; pass multiple captures when the user sends a batch such as separate mole photos with labels/body sites. This records context only and does not diagnose the media.',
+      inputSchema: z.object({
+        collection: z.string().trim().min(1).max(160).optional(),
+        tags: z.array(z.string().trim().min(1).max(120)).max(50).optional(),
+        occurredAt: isoTimestampSchema.optional(),
+        source: eventSourceSchema.optional(),
+        captures: z.array(captureEntrySchema).min(1).max(100),
+      }),
+      inputExample: {
+        collection: 'skin-check-2026-04',
+        tags: ['mole', 'dermatology'],
+        captures: [
+          {
+            media: ['raw/inbox/captures/cap_123/attachments/1/left-forearm.jpg'],
+            label: 'mole-left-forearm-1',
+            bodySite: 'Left forearm, dorsal side, about 8cm below elbow',
+          },
+        ],
+      },
+      execute: async ({ collection, tags, occurredAt, source, captures }) =>
+        input.vaultServices!.core.addCapture({
+          vault: input.vault,
+          requestId: input.requestId ?? null,
+          collection,
+          tags,
+          occurredAt,
+          source,
+          captures: await Promise.all(
+            captures.map(async (capture) => ({
+              ...capture,
+              media: await Promise.all(
+                capture.media.map((file) =>
+                  resolveAssistantVaultPath(input.vault, file, 'file path'),
+                ),
+              ),
+            })),
+          ),
         }),
     }),
     defineVaultServiceBackedTool({

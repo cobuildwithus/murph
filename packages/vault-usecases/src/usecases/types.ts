@@ -24,6 +24,10 @@ import type {
   VaultInitResult,
   VaultValidateResult,
 } from "@murphai/operator-config/vault-cli-contracts"
+import type {
+  AddCaptureRecordInput,
+  CaptureAddResult,
+} from "./capture.js"
 import type { RawImportManifestResult } from "./document-meal-read.js"
 import type {
   CommandContext,
@@ -451,6 +455,9 @@ export interface CoreWriteServices extends HealthCoreServiceMethods {
       nutrition?: MealNutrition
     },
   ): Promise<MealAddResult>
+  addCapture(
+    input: CommandContext & Omit<AddCaptureRecordInput, "vault">,
+  ): Promise<CaptureAddResult>
   createExperiment(
     input: CommandContext & {
       slug: string

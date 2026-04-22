@@ -248,6 +248,30 @@ export const workoutAddResultSchema = z.object({
   note: z.string().min(1),
 })
 
+export const captureResultItemSchema = z.object({
+  vault: pathSchema,
+  eventId: z.string().min(1),
+  lookupId: z.string().min(1),
+  ledgerFile: pathSchema,
+  created: z.boolean(),
+  occurredAt: isoTimestampSchema,
+  kind: z.literal('capture'),
+  title: z.string().min(1),
+  label: slugSchema.nullable(),
+  bodySite: z.string().min(1).nullable(),
+  collection: slugSchema.nullable(),
+  tags: z.array(slugSchema),
+  media: z.array(storedMediaResultSchema).min(1),
+  manifestFile: pathSchema.nullable(),
+  note: z.string().min(1).nullable(),
+})
+
+export const captureAddResultSchema = z.object({
+  vault: pathSchema,
+  addedCount: z.number().int().positive(),
+  captures: z.array(captureResultItemSchema).min(1),
+})
+
 export const measurementAddResultSchema = z.object({
   vault: pathSchema,
   eventId: z.string().min(1),
@@ -498,6 +522,8 @@ export type VaultInitResult = z.infer<typeof vaultInitResultSchema>
 export type VaultValidateResult = z.infer<typeof vaultValidateResultSchema>
 export type DocumentImportResult = z.infer<typeof documentImportResultSchema>
 export type MealAddResult = z.infer<typeof mealAddResultSchema>
+export type CaptureResultItem = z.infer<typeof captureResultItemSchema>
+export type CaptureAddResult = z.infer<typeof captureAddResultSchema>
 export type WorkoutAddResult = z.infer<typeof workoutAddResultSchema>
 export type WorkoutFormatSaveResult = z.infer<typeof workoutFormatSaveResultSchema>
 export type WorkoutImportInspectResult = z.infer<typeof workoutImportInspectResultSchema>
