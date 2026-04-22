@@ -117,6 +117,14 @@ export async function readHostedMemberStripeBillingRef(input: {
   return billingRef ? projectHostedMemberStripeBillingRefSnapshot(billingRef) : null;
 }
 
+export async function readHostedMemberStripeCustomerId(input: {
+  memberId: string;
+  prisma: HostedOnboardingReadClient;
+}): Promise<string | null> {
+  const billingRef = await readHostedMemberStripeBillingRef(input);
+  return billingRef?.stripeCustomerId ?? null;
+}
+
 export async function writeHostedMemberStripeBillingRefTx(
   input: HostedMemberStripeBillingRefWriteInput,
 ): Promise<HostedMemberStripeBillingRefSnapshot> {
