@@ -64,6 +64,16 @@ export async function runHostedExecutionChild(
   }
 
   try {
+    emitHostedRunnerChildDebug({
+      stage: "before-run",
+      payload: {
+        hostedAssistantBaseUrl: input.job.runtime?.forwardedEnv?.HOSTED_ASSISTANT_BASE_URL ?? null,
+        hostedAssistantModel: input.job.runtime?.forwardedEnv?.HOSTED_ASSISTANT_MODEL ?? null,
+        hostedAssistantProvider: input.job.runtime?.forwardedEnv?.HOSTED_ASSISTANT_PROVIDER ?? null,
+        linqApiBaseUrl: input.job.runtime?.forwardedEnv?.LINQ_API_BASE_URL ?? null,
+        localInternalProxyBaseUrl: input.localInternalProxyBaseUrl,
+      },
+    });
     const result = await runInProcess(
       input.job,
       {
@@ -75,8 +85,21 @@ export async function runHostedExecutionChild(
         }),
       },
     );
+    emitHostedRunnerChildDebug({
+      stage: "after-run",
+      payload: {
+        resultPhase: result.phase ?? null,
+      },
+    });
     stdout.write(`${formatHostedRuntimeChildResult({ ok: true, result })}\n`);
   } catch (error) {
+    emitHostedRunnerChildDebug({
+      stage: "run-error",
+      payload: {
+        errorMessage: error instanceof Error ? error.message : String(error),
+        errorName: error instanceof Error ? error.name : null,
+      },
+    });
     stdout.write(
       `${formatHostedRuntimeChildResult({
         ok: false,
@@ -156,6 +179,17 @@ function readNullableString(value: unknown, label: string): string | null {
 
   const normalized = value.trim();
   return normalized.length > 0 ? normalized : null;
+}
+
+function emitHostedRunnerChildDebug(input: {
+  payload: Record<string, unknown>;
+  stage: string;
+}): void {
+  if (process.env.MURPH_E2E_DEBUG_HOSTED_RUNNER !== "1") {
+    return;
+  }
+
+  console.error(`[hosted-runner-child:${input.stage}] ${JSON.stringify(input.payload)}`);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

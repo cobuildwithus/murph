@@ -182,17 +182,42 @@ export async function executeHostedAssistantNotificationWake(input: {
   executionContext: AssistantExecutionContext;
   vaultRoot: string;
 }): Promise<HostedIngressOutcome> {
+  emitHostedExecutionStructuredLog({
+    component: "runtime",
+    details: buildHostedAssistantNotificationLogDetails(input.wake),
+    message: "Hosted assistant notification started.",
+    phase: "wake.running",
+    wake: input.wake,
+  });
+
   try {
     await sendAssistantNotification(
       buildAssistantNotificationInput(input.wake, input.executionContext, input.vaultRoot),
     );
   } catch (error) {
     if (!shouldSkipFailedHostedAssistantNotification(input.wake)) {
+      emitHostedExecutionStructuredLog({
+        component: "runtime",
+        details: buildHostedAssistantNotificationLogDetails(input.wake),
+        error,
+        level: "error",
+        message: "Hosted assistant notification failed.",
+        phase: "failed",
+        wake: input.wake,
+      });
       throw error;
     }
 
     emitHostedAssistantNotificationSkipLog(input.wake, error);
   }
+
+  emitHostedExecutionStructuredLog({
+    component: "runtime",
+    details: buildHostedAssistantNotificationLogDetails(input.wake),
+    message: "Hosted assistant notification finished.",
+    phase: "wake.running",
+    wake: input.wake,
+  });
 
   return createNoopIngressEffect({
     conversationMetrics: null,
@@ -211,23 +236,33 @@ function emitHostedAssistantNotificationSkipLog(
   wake: HostedExecutionAssistantNotificationRequestedWake,
   error: unknown,
 ): void {
-  const route = wake.notification.route;
   emitHostedExecutionStructuredLog({
     component: "runtime",
-    details: {
-      deliveryDedupeTokenPresent: wake.notification.deliveryDedupeToken != null,
-      deliveryDispatchMode: wake.notification.deliveryDispatchMode ?? "default",
-      firstContact: wake.notification.firstContact != null,
-      notificationRouteChannel: route.channel,
-      notificationRouteDeliveryKind: route.delivery.kind,
-      responsePolicyKind: wake.notification.responsePolicy?.kind ?? "none",
-    },
+    details: buildHostedAssistantNotificationLogDetails(wake),
     error,
     level: "warn",
     message: "Hosted assistant notification failed and was skipped so the hosted run can continue.",
     phase: "wake.running",
     wake,
   });
+}
+
+function buildHostedAssistantNotificationLogDetails(
+  wake: HostedExecutionAssistantNotificationRequestedWake,
+): Record<string, boolean | string | null> {
+  const route = wake.notification.route;
+
+  return {
+    deliveryDedupeTokenPresent: wake.notification.deliveryDedupeToken != null,
+    deliveryDispatchMode: wake.notification.deliveryDispatchMode ?? "default",
+    firstContact: wake.notification.firstContact != null,
+    notificationRouteChannel: route.channel,
+    notificationRouteDeliveryKind: route.delivery.kind,
+    notificationRouteIdentityPresent: route.identityId != null,
+    notificationRouteThreadIdPresent: route.threadId != null,
+    notificationRouteThreadIsDirect: route.threadIsDirect,
+    responsePolicyKind: wake.notification.responsePolicy?.kind ?? "none",
+  };
 }
 
 function createNoopIngressEffect(input: {

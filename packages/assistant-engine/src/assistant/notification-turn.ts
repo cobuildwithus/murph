@@ -13,6 +13,7 @@ import {
   executeProviderTurnWithRecovery,
   type AssistantProviderTurnExecutionProfile,
 } from './provider-turn-runner.js'
+import type { ResolvedAssistantFailoverRoute } from './failover.js'
 import { persistPendingAssistantUsageEvent } from './service-usage.js'
 import { persistAssistantTurnAndSession } from './turn-finalizer.js'
 import { resolveAssistantTurnRoutes } from './service-turn-routes.js'
@@ -173,10 +174,19 @@ export async function sendAssistantNotificationLocal(
         turnId,
       })
       if (providerOutcome.kind === 'failed_terminal') {
-        throw providerOutcome.error
+        throw annotateAssistantNotificationError(
+          providerOutcome.error,
+          buildAssistantNotificationObservabilityDetails({
+            stage: 'provider',
+            input: messageInput,
+            route: providerOutcome.route ?? routes[0] ?? null,
+            session: resolved.session,
+          }),
+        )
       }
 
       const providerResult = providerOutcome.providerTurn
+      const selectedRoute = providerResult.route
       await persistPendingAssistantUsageEvent({
         executionContext,
         providerResult,
@@ -202,13 +212,12 @@ export async function sendAssistantNotificationLocal(
         text: responseText,
       })
 
-      const primaryRoute = routes[0] ?? null
       const state = createAssistantRuntimeStateService(input.vault)
       await state.turns.createReceipt({
         sessionId: providerResult.session.sessionId,
-        provider: primaryRoute?.provider ?? providerResult.session.provider,
+        provider: selectedRoute.provider,
         providerModel:
-          primaryRoute?.providerOptions.model
+          selectedRoute.providerOptions.model
           ?? providerResult.session.providerOptions.model
           ?? null,
         prompt: messageInput.prompt,
@@ -259,7 +268,15 @@ export async function sendAssistantNotificationLocal(
       await state.status.refreshSnapshot()
 
       if (deliveryOutcome.kind === 'failed') {
-        throw deliveryOutcome.error
+        throw annotateAssistantNotificationError(
+          deliveryOutcome.error,
+          buildAssistantNotificationObservabilityDetails({
+            stage: 'delivery',
+            input: messageInput,
+            route: selectedRoute,
+            session: savedSession,
+          }),
+        )
       }
 
       return {
@@ -272,6 +289,114 @@ export async function sendAssistantNotificationLocal(
       }
     },
   })
+}
+
+type AssistantNotificationAnnotatedError = Error & {
+  details?: Record<string, unknown>
+}
+
+function annotateAssistantNotificationError(
+  error: unknown,
+  details: Record<string, unknown>,
+): Error {
+  if (error instanceof Error) {
+    const annotatedError = error as AssistantNotificationAnnotatedError
+    annotatedError.details = mergeAssistantNotificationErrorDetails(
+      annotatedError.details,
+      details,
+    )
+    return annotatedError
+  }
+
+  const wrapped = new Error(
+    typeof error === 'string' && error.trim().length > 0
+      ? error
+      : 'Assistant notification execution failed.',
+  ) as AssistantNotificationAnnotatedError
+  wrapped.details = { ...details }
+  return wrapped
+}
+
+function mergeAssistantNotificationErrorDetails(
+  existing: Record<string, unknown> | undefined,
+  next: Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    ...(isAssistantNotificationDetailsRecord(existing) ? existing : {}),
+    ...next,
+  }
+}
+
+function isAssistantNotificationDetailsRecord(
+  value: unknown,
+): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function buildAssistantNotificationObservabilityDetails(input: {
+  input: AssistantMessageInput
+  route: ResolvedAssistantFailoverRoute | null
+  session: AssistantSession
+  stage: 'delivery' | 'provider'
+}): Record<string, unknown> {
+  const channel = input.input.channel ?? input.session.binding.channel ?? null
+  const providerOptions = input.route?.providerOptions ?? input.session.providerOptions
+  const bindingDelivery = input.session.binding.delivery
+  const linqBaseUrl = readAssistantNotificationUrlDetails(process.env.LINQ_API_BASE_URL)
+  const providerBaseUrl = readAssistantNotificationUrlDetails(providerOptions.baseUrl)
+
+  return {
+    assistantNotificationChannel: channel,
+    assistantNotificationDeliveryDispatchMode: input.input.deliveryDispatchMode ?? null,
+    assistantNotificationDeliveryKind:
+      bindingDelivery?.kind ?? input.input.deliveryKind ?? null,
+    assistantNotificationExplicitTargetPresent:
+      normalizeNullableString(input.input.deliveryTarget) !== null,
+    assistantNotificationIdentityIdPresent:
+      normalizeNullableString(input.input.identityId) !== null,
+    assistantNotificationLinqBaseUrlOrigin: linqBaseUrl.origin,
+    assistantNotificationLinqBaseUrlPath: linqBaseUrl.path,
+    assistantNotificationProvider: input.route?.provider ?? input.session.provider,
+    assistantNotificationProviderBaseUrlOrigin: providerBaseUrl.origin,
+    assistantNotificationProviderBaseUrlPath: providerBaseUrl.path,
+    assistantNotificationProviderModel: providerOptions.model ?? null,
+    assistantNotificationRouteId: input.route?.routeId ?? null,
+    assistantNotificationStage: input.stage,
+    assistantNotificationThreadIdPresent:
+      normalizeNullableString(input.input.threadId) !== null,
+    assistantNotificationThreadIsDirect:
+      input.input.threadIsDirect ?? input.session.binding.threadIsDirect ?? null,
+    assistantNotificationTurnTrigger: input.input.turnTrigger ?? null,
+    assistantNotificationWorkingDirectoryPresent:
+      normalizeNullableString(input.input.workingDirectory) !== null,
+    executionContextHosted: input.input.executionContext?.hosted != null,
+  }
+}
+
+function readAssistantNotificationUrlDetails(value: string | null | undefined): {
+  origin: string | null
+  path: string | null
+} {
+  const normalized = normalizeNullableString(value)
+  if (!normalized) {
+    return {
+      origin: null,
+      path: null,
+    }
+  }
+
+  try {
+    const url = new URL(normalized)
+    return {
+      origin: url.origin,
+      path: url.pathname,
+    }
+  } catch {
+    return {
+      origin: null,
+      path: null,
+    }
+  }
 }
 
 function buildAssistantNotificationMessageInput(

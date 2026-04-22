@@ -1067,6 +1067,7 @@ describe('executeProviderTurnWithRecovery', () => {
     expect(outcome).toEqual({
       kind: 'failed_terminal',
       error: toolError,
+      route: primaryRoute,
       session: recoveredSession,
     })
     expect(runnerMocks.recordAssistantFailoverRouteFailure).toHaveBeenCalledTimes(1)
@@ -1141,6 +1142,7 @@ describe('executeProviderTurnWithRecovery', () => {
     expect(outcome).toEqual({
       kind: 'failed_terminal',
       error: exhaustedError,
+      route: duplicatePrimary,
       session: createAssistantSession(),
     })
     expect(exhaustedError).toMatchObject({

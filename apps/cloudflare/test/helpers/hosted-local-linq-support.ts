@@ -75,6 +75,9 @@ export async function startHostedLocalLinqStub(): Promise<HostedLocalLinqStub> {
       method: request.method ?? "GET",
       url: request.url ?? "/",
     });
+    if (process.env.MURPH_E2E_DEBUG_LINQ_STUB === "1") {
+      console.log(`[linq-stub] ${request.method ?? "GET"} ${request.url ?? "/"}`);
+    }
 
     if (request.method === "POST" && request.url === linqCreateChatPath) {
       const parsedBody = parseObservedLinqJson(body);

@@ -17,6 +17,7 @@ import {
 } from "./hosted-runtime-test-helpers.ts";
 
 const mocks = vi.hoisted(() => ({
+  emitHostedExecutionStructuredLog: vi.fn(),
   handleHostedShareAcceptedWake: vi.fn(),
   hydrateHostedExecutionDefaultTarget: vi.fn(async (value) => value),
   ingestHostedConversationMessageWake: vi.fn(),
@@ -32,6 +33,17 @@ vi.mock("../src/hosted-runtime/context.ts", () => ({
 vi.mock("@murphai/assistant-engine", () => ({
   sendAssistantNotification: mocks.sendAssistantNotification,
 }));
+
+vi.mock("@murphai/hosted-execution", async () => {
+  const actual = await vi.importActual<typeof import("@murphai/hosted-execution")>(
+    "@murphai/hosted-execution",
+  );
+
+  return {
+    ...actual,
+    emitHostedExecutionStructuredLog: mocks.emitHostedExecutionStructuredLog,
+  };
+});
 
 vi.mock("../src/hosted-runtime/events/conversation.ts", () => ({
   ingestHostedConversationMessageWake: mocks.ingestHostedConversationMessageWake,
@@ -71,6 +83,7 @@ function createRuntime(userEnv: Readonly<Record<string, string>> = {}) {
 
 afterEach(() => {
   vi.clearAllMocks();
+  mocks.emitHostedExecutionStructuredLog.mockReset();
   mocks.prepareHostedWakeContext.mockResolvedValue(null);
   mocks.hydrateHostedExecutionDefaultTarget.mockImplementation(async (value) => value);
   mocks.handleHostedShareAcceptedWake.mockResolvedValue({
@@ -170,6 +183,35 @@ describe("executeHostedIngressEvent", () => {
       turnTrigger: "automation-cron",
       vault: "/tmp/assistant-runtime-events",
     });
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        component: "runtime",
+        details: expect.objectContaining({
+          deliveryDispatchMode: "queue-only",
+          firstContact: true,
+          notificationRouteChannel: "linq",
+          notificationRouteDeliveryKind: "thread",
+          responsePolicyKind: "require_send_exact_text",
+        }),
+        message: "Hosted assistant notification started.",
+        phase: "wake.running",
+        wake,
+      }),
+    );
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        component: "runtime",
+        details: expect.objectContaining({
+          notificationRouteChannel: "linq",
+          notificationRouteDeliveryKind: "thread",
+        }),
+        message: "Hosted assistant notification finished.",
+        phase: "wake.running",
+        wake,
+      }),
+    );
     assert.deepEqual(result, {
       bootstrapResult,
       conversationMetrics: null,
@@ -276,7 +318,7 @@ describe("executeHostedIngressEvent", () => {
           },
           identityId: "hbidx:phone:v1:test",
           threadId: "thread_123",
-          threadIsDirect: true,
+          threadIsDirect: null,
         },
       },
       occurredAt: "2026-04-08T00:00:00.000Z",
@@ -295,6 +337,19 @@ describe("executeHostedIngressEvent", () => {
       conversationMetrics: null,
       ingressLane: "assistant-notification",
     });
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        component: "runtime",
+        details: expect.objectContaining({
+          notificationRouteThreadIsDirect: null,
+        }),
+        level: "warn",
+        message: "Hosted assistant notification failed and was skipped so the hosted run can continue.",
+        phase: "wake.running",
+        wake,
+      }),
+    );
   });
 
   it("skips failed allow-send-or-skip notifications instead of blocking ingress progress", async () => {

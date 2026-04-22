@@ -222,6 +222,7 @@ export type AssistantProviderTurnRecoveryOutcome =
   | {
       kind: 'failed_terminal'
       error: unknown
+      route?: ResolvedAssistantFailoverRoute | null
       session: AssistantSession
     }
   | {
@@ -242,6 +243,7 @@ export async function executeProviderTurnWithRecovery(input: {
   let failoverState = await readAssistantFailoverState(input.input.vault)
   const attemptedRouteIds = new Set<string>()
   let lastRetriableFailure: unknown = null
+  let lastAttemptedRoute: ResolvedAssistantFailoverRoute | null = null
   let nextAttemptCount = 1
 
   while (attemptedRouteIds.size < executionPlan.routes.length) {
@@ -257,6 +259,7 @@ export async function executeProviderTurnWithRecovery(input: {
     }
 
     attemptedRouteIds.add(attemptPlan.route.routeId)
+    lastAttemptedRoute = attemptPlan.route
     nextAttemptCount = attemptPlan.attemptCount + 1
 
     const attemptOutcome = await executeAssistantProviderAttempt({
@@ -280,6 +283,7 @@ export async function executeProviderTurnWithRecovery(input: {
         return {
           kind: 'failed_terminal',
           error: attemptOutcome.error,
+          route: attemptPlan.route,
           session: attemptOutcome.session,
         }
     }
@@ -296,6 +300,7 @@ export async function executeProviderTurnWithRecovery(input: {
             ),
             error: lastRetriableFailure,
           }),
+    route: lastAttemptedRoute,
     session: input.resolvedSession,
   }
 }

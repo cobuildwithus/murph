@@ -17,6 +17,12 @@ export interface HostedLocalAssistantProviderStubState {
   queuedResponseTexts: string[];
 }
 
+export interface HostedLocalAssistantProviderStubRequest {
+  body: string;
+  method: string;
+  url: string;
+}
+
 export function buildHostedAssistantNotificationDecisionResponse(input: {
   privateSummary?: string;
   subject?: string | null;
@@ -38,17 +44,68 @@ export function buildHostedAssistantNotificationDecisionResponse(input: {
   });
 }
 
+function dequeueAssistantProviderResponseText(input: {
+  fallbackResponseText?: string | null;
+  responseState?: HostedLocalAssistantProviderStubState;
+}): string | null {
+  return (
+    input.responseState?.queuedResponseTexts.shift()
+    ?? input.responseState?.currentResponseText
+    ?? input.fallbackResponseText
+    ?? null
+  );
+}
+
+function buildAssistantProviderResponsesApiStubResponse(input: {
+  modelId: string;
+  responseText: string;
+}): Record<string, unknown> {
+  return {
+    created_at: Math.floor(Date.now() / 1000),
+    id: "resp_stub_hosted_local_e2e",
+    model: input.modelId,
+    output: [
+      {
+        content: [
+          {
+            annotations: [],
+            text: input.responseText,
+            type: "output_text",
+          },
+        ],
+        id: "msg_stub_hosted_local_e2e",
+        role: "assistant",
+        type: "message",
+      },
+    ],
+    usage: {
+      input_tokens: 24,
+      output_tokens: 11,
+    },
+  };
+}
+
 export async function startAssistantProviderStubServer(input: {
   fallbackResponseText?: string | null;
   modelId?: string;
-  onRequestBody?: (body: string) => void;
+  onRequest?: (request: HostedLocalAssistantProviderStubRequest) => void;
   responseState?: HostedLocalAssistantProviderStubState;
 } = {}): Promise<ReturnType<typeof createServer>> {
   const modelId = input.modelId ?? "stub-openrouter-model";
 
   const server = createServer(async (request, response) => {
     const body = await readRequestBody(request);
-    input.onRequestBody?.(body);
+    const requestRecord = {
+      body,
+      method: request.method ?? "GET",
+      url: request.url ?? "/",
+    } satisfies HostedLocalAssistantProviderStubRequest;
+    input.onRequest?.(requestRecord);
+    if (process.env.MURPH_E2E_DEBUG_ASSISTANT_PROVIDER_STUB === "1") {
+      console.log(
+        `[assistant-provider-stub] ${requestRecord.method} ${requestRecord.url}`,
+      );
+    }
 
     if (request.method === "GET" && request.url === "/v1/models") {
       writeJsonResponse(response, 200, {
@@ -61,6 +118,37 @@ export async function startAssistantProviderStubServer(input: {
       return;
     }
 
+    if (request.method === "POST" && request.url === "/v1/responses") {
+      const bodyJson = parseJsonObject(body);
+      if (!bodyJson || typeof bodyJson !== "object") {
+        writeJsonResponse(response, 400, {
+          error: "Assistant provider stub requires a responses request with a JSON object body.",
+        });
+        return;
+      }
+
+      const responseText = dequeueAssistantProviderResponseText({
+        fallbackResponseText: input.fallbackResponseText,
+        responseState: input.responseState,
+      });
+      if (!responseText) {
+        writeJsonResponse(response, 500, {
+          error: "Assistant provider stub received a responses request without a queued response.",
+        });
+        return;
+      }
+
+      writeJsonResponse(
+        response,
+        200,
+        buildAssistantProviderResponsesApiStubResponse({
+          modelId,
+          responseText,
+        }),
+      );
+      return;
+    }
+
     if (request.method === "POST" && request.url === "/v1/chat/completions") {
       const bodyJson = parseJsonObject(body);
       if (!bodyJson || !Array.isArray(bodyJson.messages)) {
@@ -70,11 +158,10 @@ export async function startAssistantProviderStubServer(input: {
         return;
       }
 
-      const responseText =
-        input.responseState?.queuedResponseTexts.shift()
-        ?? input.responseState?.currentResponseText
-        ?? input.fallbackResponseText
-        ?? null;
+      const responseText = dequeueAssistantProviderResponseText({
+        fallbackResponseText: input.fallbackResponseText,
+        responseState: input.responseState,
+      });
       if (!responseText) {
         writeJsonResponse(response, 500, {
           error: "Assistant provider stub received a completion request without a queued response.",
