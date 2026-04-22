@@ -159,6 +159,35 @@ Stripe's graduated metered price rather than subtracting allowance in app code.
 Hosted pages assume the hosted Privy phone-auth setup is present and fail fast
 when it is missing instead of carrying fallback branches in page code.
 
+### Local Stripe webhook listener
+
+`pnpm dev` auto-launches `stripe listen --forward-to http://<web-host>:<web-port>/api/hosted-onboarding/stripe/webhook`
+and captures the listener's live `whsec_...` signing secret from its startup
+output. The captured secret is injected into the web dev child's env as
+`STRIPE_WEBHOOK_SECRET` before Next.js boots, so hosted onboarding checkout
+works locally without a second terminal.
+
+- The listener's signing secret is per-developer (tied to each operator's
+  Stripe CLI login), so sharing a single `STRIPE_WEBHOOK_SECRET` in Vercel
+  Development env does not work for a multi-dev team. Remove that value from
+  Vercel Development so the captured secret takes over.
+- An explicit shell `STRIPE_WEBHOOK_SECRET` or repo-root `.env`
+  `STRIPE_WEBHOOK_SECRET` is preserved over the captured value. A stale value
+  that would otherwise arrive only through `vercel env pull` is discarded.
+- If the Stripe CLI is not on `PATH`, the orchestrator logs an actionable
+  warning (`brew install stripe/stripe-cli/stripe`) and continues without the
+  listener. Hosted onboarding checkout will fail locally until the CLI is
+  installed or `STRIPE_WEBHOOK_SECRET` is set explicitly.
+- The listener runs alongside `cloudflare` and `web` but is treated as an
+  ancillary process: if it exits post-startup, the orchestrator logs a
+  degraded-mode warning and keeps the rest of the stack running. Restart
+  `pnpm dev` to recover webhook forwarding.
+- Set `MURPH_DEV_SKIP_STRIPE_LISTEN=1` to fully opt out of the auto-listener
+  (for example, when running integration tests with a mocked webhook surface).
+- Captured secret bytes are redacted before they reach the orchestrator's
+  stdout pipe, stderr pipe, and output-tail buffers, so operator logs never
+  contain the live `whsec_...`.
+
 ## Hosted public origin and Cloudflare callback auth
 
 This section is the operator-facing contract for hosted public origin and the

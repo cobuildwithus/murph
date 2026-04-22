@@ -1,3 +1,5 @@
+import { Writable } from "node:stream";
+
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
@@ -6,8 +8,26 @@ import type {
   HostedLocalDevConfig,
 } from "./types.ts";
 
+class CapturingWritable extends Writable {
+  readonly chunks: string[] = [];
+
+  override _write(
+    chunk: Buffer | string,
+    _encoding: string,
+    callback: (error?: Error | null) => void,
+  ): void {
+    this.chunks.push(typeof chunk === "string" ? chunk : chunk.toString());
+    callback();
+  }
+
+  text(): string {
+    return this.chunks.join("");
+  }
+}
+
 const defaultConfig: HostedLocalDevConfig = {
   skipPrismaMigrate: false,
+  skipStripeListen: true,
   skipWeb: false,
   skipVercelPull: false,
   webHost: "127.0.0.1",
@@ -27,18 +47,42 @@ const runCommand = vi.fn<(
     name: "setup";
   },
 ) => Promise<void>>(async () => {});
+let nextChildPid = 100;
 const spawnChildProcess = vi.fn<
   (
-    name: "cloudflare" | "web",
+    name: "cloudflare" | "stripe" | "web",
     command: string,
     args: string[],
     env: NodeJS.ProcessEnv,
     input?: {
       pipeOutput?: boolean;
-      stderrTarget?: NodeJS.WriteStream;
-      stdoutTarget?: NodeJS.WriteStream;
+      stderrTarget?: NodeJS.WritableStream;
+      stdoutTarget?: NodeJS.WritableStream;
     },
   ) => BufferedNamedChildProcess
+>((name) =>
+  createBufferedChild({
+    exitCode: null,
+    name,
+    pid: nextChildPid++,
+  }),
+);
+class StripeCliMissingError extends Error {
+  constructor() {
+    super("stripe CLI executable was not found on PATH");
+    this.name = "StripeCliMissingError";
+  }
+}
+const spawnStripeListenerWithSecretCapture = vi.fn<
+  (input: {
+    command: string;
+    args: string[];
+    env: NodeJS.ProcessEnv;
+    pipeOutput?: boolean;
+    stderrTarget?: NodeJS.WritableStream;
+    stdoutTarget?: NodeJS.WritableStream;
+    timeoutMs: number;
+  }) => Promise<{ child: BufferedNamedChildProcess; secret: string }>
 >();
 const terminateChildProcessAndWait = vi.fn(async () => {});
 const waitForHealthyHttpEndpoint = vi.fn(async () => {});
@@ -100,6 +144,8 @@ vi.mock("./runtime.ts", () => ({
   collectDockerDevDiagnostics,
   runCommand,
   spawnChildProcess,
+  spawnStripeListenerWithSecretCapture,
+  StripeCliMissingError,
   terminateChildProcessAndWait,
   waitForFirstChildExit,
   waitForHealthyHttpEndpoint,
@@ -117,7 +163,7 @@ vi.mock("./vercel.ts", () => ({
 
 function createBufferedChild(input: {
   exitCode: number | null;
-  name: "cloudflare" | "web";
+  name: "cloudflare" | "stripe" | "web";
   pid: number;
 }): BufferedNamedChildProcess {
   const child: HostedLocalChildProcess = {
@@ -490,5 +536,236 @@ describe("hosted local dev stack", () => {
       expect.any(Object),
       expect.any(Object),
     );
+  });
+
+  describe("stripe webhook listener", () => {
+    async function withListenerConfig(
+      overrides: Partial<HostedLocalDevConfig>,
+      run: () => Promise<void>,
+    ): Promise<void> {
+      const configModule = await import("./config.ts");
+      vi.mocked(configModule.resolveHostedLocalDevConfig).mockReturnValueOnce({
+        ...defaultConfig,
+        skipStripeListen: false,
+        ...overrides,
+      });
+      await run();
+    }
+
+    it("warns and continues without the listener when the Stripe CLI is missing", async () => {
+      const stderrTarget = new CapturingWritable();
+      spawnStripeListenerWithSecretCapture.mockRejectedValueOnce(
+        new StripeCliMissingError(),
+      );
+
+      await withListenerConfig({}, async () => {
+        const { startHostedLocalDevStack } = await import("./stack.ts");
+
+        const stack = await startHostedLocalDevStack({
+          env: process.env,
+          stderrTarget,
+        });
+        await stack.ready;
+        await stack.stop();
+
+        expect(spawnStripeListenerWithSecretCapture).toHaveBeenCalledTimes(1);
+        const writes = stderrTarget.text();
+        expect(writes).toContain("Stripe CLI not found on PATH");
+        expect(writes).toContain("brew install stripe/stripe-cli/stripe");
+        expect(writes).toContain("MURPH_DEV_SKIP_STRIPE_LISTEN=1");
+        expect(stack.processes.stripe).toBeNull();
+      });
+    });
+
+    it("captures the listener's whsec and injects it into the web child env", async () => {
+      const stderrTarget = new CapturingWritable();
+      const listenerChild = createBufferedChild({
+        exitCode: null,
+        name: "stripe",
+        pid: 911,
+      });
+      spawnStripeListenerWithSecretCapture.mockResolvedValueOnce({
+        child: listenerChild,
+        secret: "whsec_captured_abc123",
+      });
+
+      await withListenerConfig({}, async () => {
+        const { startHostedLocalDevStack } = await import("./stack.ts");
+
+        const stack = await startHostedLocalDevStack({
+          env: process.env,
+          stderrTarget,
+        });
+        await stack.ready;
+        await stack.stop();
+
+        expect(spawnStripeListenerWithSecretCapture).toHaveBeenCalledWith(
+          expect.objectContaining({
+            args: [
+              "listen",
+              "--forward-to",
+              "http://127.0.0.1:3000/api/hosted-onboarding/stripe/webhook",
+            ],
+            command: "stripe",
+            timeoutMs: 15_000,
+          }),
+        );
+        expect(spawnChildProcess).toHaveBeenCalledWith(
+          "web",
+          "pnpm",
+          expect.any(Array),
+          expect.objectContaining({
+            STRIPE_WEBHOOK_SECRET: "whsec_captured_abc123",
+          }),
+          expect.any(Object),
+        );
+        expect(stack.processes.stripe).toBe(listenerChild);
+      });
+    });
+
+    it("preserves a shell-provided STRIPE_WEBHOOK_SECRET over the captured value", async () => {
+      const stderrTarget = new CapturingWritable();
+      spawnStripeListenerWithSecretCapture.mockResolvedValueOnce({
+        child: createBufferedChild({ exitCode: null, name: "stripe", pid: 912 }),
+        secret: "whsec_captured_zzz",
+      });
+      vi.stubEnv("STRIPE_WEBHOOK_SECRET", "whsec_shell_override");
+
+      await withListenerConfig({}, async () => {
+        const { startHostedLocalDevStack } = await import("./stack.ts");
+
+        const stack = await startHostedLocalDevStack({
+          env: process.env,
+          stderrTarget,
+        });
+        await stack.ready;
+        await stack.stop();
+
+        expect(spawnChildProcess).toHaveBeenCalledWith(
+          "web",
+          "pnpm",
+          expect.any(Array),
+          expect.objectContaining({
+            STRIPE_WEBHOOK_SECRET: "whsec_shell_override",
+          }),
+          expect.any(Object),
+        );
+        expect(stderrTarget.text()).toContain("does not match the listener");
+      });
+    });
+
+    it("discards a pulled-only STRIPE_WEBHOOK_SECRET in favor of the captured value", async () => {
+      const stderrTarget = new CapturingWritable();
+      spawnStripeListenerWithSecretCapture.mockResolvedValueOnce({
+        child: createBufferedChild({ exitCode: null, name: "stripe", pid: 913 }),
+        secret: "whsec_captured_fresh",
+      });
+      const environmentModule = await import("./environment.ts");
+      vi.mocked(environmentModule.readSimpleEnvFile).mockResolvedValueOnce({
+        STRIPE_WEBHOOK_SECRET: "whsec_stale_from_vercel",
+      });
+
+      await withListenerConfig({}, async () => {
+        const { startHostedLocalDevStack } = await import("./stack.ts");
+
+        const stack = await startHostedLocalDevStack({
+          env: process.env,
+          stderrTarget,
+        });
+        await stack.ready;
+        await stack.stop();
+
+        expect(spawnChildProcess).toHaveBeenCalledWith(
+          "web",
+          "pnpm",
+          expect.any(Array),
+          expect.objectContaining({
+            STRIPE_WEBHOOK_SECRET: "whsec_captured_fresh",
+          }),
+          expect.any(Object),
+        );
+      });
+    });
+
+    it("skips the listener when MURPH_DEV_SKIP_WEB=1 is set", async () => {
+      await withListenerConfig({ skipWeb: true }, async () => {
+        const { startHostedLocalDevStack } = await import("./stack.ts");
+
+        const stack = await startHostedLocalDevStack({
+          env: process.env,
+        });
+        await stack.ready;
+        await stack.stop();
+
+        expect(spawnStripeListenerWithSecretCapture).not.toHaveBeenCalled();
+        expect(stack.processes.stripe).toBeNull();
+      });
+    });
+
+    it("skips the listener when MURPH_DEV_SKIP_STRIPE_LISTEN=1 is set", async () => {
+      // default config already has skipStripeListen: true
+      const { startHostedLocalDevStack } = await import("./stack.ts");
+
+      const stack = await startHostedLocalDevStack({
+        env: process.env,
+      });
+      await stack.ready;
+      await stack.stop();
+
+      expect(spawnStripeListenerWithSecretCapture).not.toHaveBeenCalled();
+      expect(stack.processes.stripe).toBeNull();
+    });
+
+    it("does not participate in waitForFirstChildExit when the listener dies after ready", async () => {
+      const stderrTarget = new CapturingWritable();
+      const listenerChild = createBufferedChild({
+        exitCode: null,
+        name: "stripe",
+        pid: 914,
+      });
+      let recordedExitHandler:
+        | ((code: number | null, signal: NodeJS.Signals | null) => void)
+        | null = null;
+      const onceMock = vi.mocked(listenerChild.child.once);
+      onceMock.mockImplementation(
+        function (this: typeof listenerChild.child, event, handler) {
+          if (event === "exit") {
+            recordedExitHandler = handler;
+          }
+          return this;
+        },
+      );
+      spawnStripeListenerWithSecretCapture.mockResolvedValueOnce({
+        child: listenerChild,
+        secret: "whsec_captured_post_ready",
+      });
+
+      await withListenerConfig({}, async () => {
+        const { startHostedLocalDevStack } = await import("./stack.ts");
+
+        const stack = await startHostedLocalDevStack({
+          env: process.env,
+          stderrTarget,
+        });
+        await stack.ready;
+
+        expect(waitForFirstChildExit).toHaveBeenCalledTimes(1);
+        const firstCallArgs = waitForFirstChildExit.mock.calls[0];
+        const watchedChildren = firstCallArgs?.[0] ?? [];
+        expect(
+          watchedChildren.some(
+            (entry: BufferedNamedChildProcess) => entry.name === "stripe",
+          ),
+        ).toBe(false);
+
+        // Simulate post-ready listener exit
+        recordedExitHandler?.(1, "SIGTERM");
+        const writes = stderrTarget.text();
+        expect(writes).toContain("listener exited");
+        expect(writes).toContain("Restart `pnpm dev`");
+
+        await stack.stop();
+      });
+    });
   });
 });

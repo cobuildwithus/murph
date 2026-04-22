@@ -31,6 +31,8 @@ import {
   collectDockerDevDiagnostics,
   runCommand,
   spawnChildProcess,
+  spawnStripeListenerWithSecretCapture,
+  StripeCliMissingError,
   terminateChildProcessAndWait,
   waitForFirstChildExit,
   waitForHealthyHttpEndpoint,
@@ -55,6 +57,7 @@ export interface HostedLocalDevStack {
   oidcToken: string;
   processes: {
     cloudflare: BufferedNamedChildProcess;
+    stripe: BufferedNamedChildProcess | null;
     web: BufferedNamedChildProcess | null;
   };
   ready: Promise<void>;
@@ -66,11 +69,14 @@ export interface HostedLocalDevStack {
   workerBaseUrl: string;
 }
 
+const STRIPE_WEBHOOK_FORWARD_PATH = "/api/hosted-onboarding/stripe/webhook";
+const STRIPE_LISTENER_SECRET_CAPTURE_TIMEOUT_MS = 15_000;
+
 export async function startHostedLocalDevStack(input: {
   env: NodeJS.ProcessEnv;
   pipeOutput?: boolean;
-  stderrTarget?: NodeJS.WriteStream;
-  stdoutTarget?: NodeJS.WriteStream;
+  stderrTarget?: NodeJS.WritableStream;
+  stdoutTarget?: NodeJS.WritableStream;
 }): Promise<HostedLocalDevStack> {
   const initialEnv = { ...input.env } satisfies NodeJS.ProcessEnv;
   const config = resolveHostedLocalDevConfig(initialEnv);
@@ -112,6 +118,7 @@ export async function startHostedLocalDevStack(input: {
   let stopped = false;
   let stopPromise: Promise<void> | null = null;
   const children: BufferedNamedChildProcess[] = [];
+  let stripeListener: BufferedNamedChildProcess | null = null;
   let workerRuntimeEnv: NodeJS.ProcessEnv | null = null;
 
   try {
@@ -212,7 +219,10 @@ export async function startHostedLocalDevStack(input: {
       runtimeEnv.HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_ANNUAL,
     );
     warnForMissingEnv("STRIPE_SECRET_KEY", runtimeEnv.STRIPE_SECRET_KEY);
-    warnForMissingEnv("STRIPE_WEBHOOK_SECRET", runtimeEnv.STRIPE_WEBHOOK_SECRET);
+    const stripeListenerWillCaptureSecret = !config.skipStripeListen && !config.skipWeb;
+    if (!stripeListenerWillCaptureSecret) {
+      warnForMissingEnv("STRIPE_WEBHOOK_SECRET", runtimeEnv.STRIPE_WEBHOOK_SECRET);
+    }
 
     await runCommand("pnpm", ["--dir", "apps/web", "prisma:generate"], {
       cwd: repoRoot,
@@ -267,6 +277,32 @@ export async function startHostedLocalDevStack(input: {
     });
     children.push(cloudflareProcess);
 
+    stripeListener = await maybeStartStripeWebhookListener({
+      config,
+      initialEnv,
+      pipeOutput: input.pipeOutput,
+      repoEnv,
+      runtimeEnv,
+      stderrTarget: input.stderrTarget,
+      stdoutTarget: input.stdoutTarget,
+    });
+    if (stripeListener !== null) {
+      const listenerChild = stripeListener;
+      listenerChild.child.once("exit", (code, signal) => {
+        if (stopped) {
+          return;
+        }
+        const stderrTarget = input.stderrTarget ?? process.stderr;
+        stderrTarget.write(
+          [
+            `[stripe] listener exited (code=${code ?? "unknown"}, signal=${signal ?? "none"}); `,
+            "webhooks are no longer being forwarded to this dev server. ",
+            "Restart `pnpm dev` to recover.\n",
+          ].join(""),
+        );
+      });
+    }
+
     const webProcess = config.skipWeb
       ? null
       : spawnChildProcess("web", "pnpm", [
@@ -318,6 +354,9 @@ export async function startHostedLocalDevStack(input: {
         stopped = true;
         for (const { child } of children) {
           await terminateChildProcessAndWait(child, { signal });
+        }
+        if (stripeListener !== null) {
+          await terminateChildProcessAndWait(stripeListener.child, { signal });
         }
         if (workerRuntimeEnv) {
           await cleanupHostedRunnerContainers({
@@ -374,20 +413,29 @@ export async function startHostedLocalDevStack(input: {
       }
     })();
 
+    const reportingChildren = stripeListener === null
+      ? children
+      : [...children, stripeListener];
+
     return {
       config,
       oidcIdentity,
       oidcToken,
       processes: {
         cloudflare: cloudflareProcess,
+        stripe: stripeListener,
         web: webProcess,
       },
       ready,
       stderrTail: (maxChars?: number): string => tail(combineChildOutput(
-        children.map((child) => `[${child.name}:stderr]\n${child.stderrText()}`),
+        reportingChildren.map(
+          (child) => `[${child.name}:stderr]\n${child.stderrText()}`,
+        ),
       ), maxChars),
       stdoutTail: (maxChars?: number): string => tail(combineChildOutput(
-        children.map((child) => `[${child.name}:stdout]\n${child.stdoutText()}`),
+        reportingChildren.map(
+          (child) => `[${child.name}:stdout]\n${child.stdoutText()}`,
+        ),
       ), maxChars),
       stop,
       waitForExit: async (): Promise<NamedChildProcess> => {
@@ -399,6 +447,9 @@ export async function startHostedLocalDevStack(input: {
   } catch (error) {
     for (const { child } of children) {
       await terminateChildProcessAndWait(child, { signal: "SIGTERM" }).catch(() => {});
+    }
+    if (stripeListener !== null) {
+      await terminateChildProcessAndWait(stripeListener.child, { signal: "SIGTERM" }).catch(() => {});
     }
     if (workerRuntimeEnv) {
       await cleanupHostedRunnerContainers({
@@ -420,6 +471,86 @@ export async function startHostedLocalDevStack(input: {
       }
     }
     throw error;
+  }
+}
+
+async function maybeStartStripeWebhookListener(input: {
+  config: HostedLocalDevConfig;
+  initialEnv: NodeJS.ProcessEnv;
+  pipeOutput?: boolean;
+  repoEnv: NodeJS.ProcessEnv;
+  runtimeEnv: NodeJS.ProcessEnv;
+  stderrTarget?: NodeJS.WritableStream;
+  stdoutTarget?: NodeJS.WritableStream;
+}): Promise<BufferedNamedChildProcess | null> {
+  const { config, initialEnv, repoEnv, runtimeEnv } = input;
+  if (config.skipStripeListen || config.skipWeb) {
+    return null;
+  }
+
+  const stderrTarget = input.stderrTarget ?? process.stderr;
+
+  const shellSecret = initialEnv.STRIPE_WEBHOOK_SECRET?.trim() ?? "";
+  const repoSecret = repoEnv.STRIPE_WEBHOOK_SECRET?.trim() ?? "";
+  const trustedExistingSecret = shellSecret.length > 0
+    ? shellSecret
+    : repoSecret.length > 0
+      ? repoSecret
+      : null;
+
+  if (trustedExistingSecret === null) {
+    delete runtimeEnv.STRIPE_WEBHOOK_SECRET;
+  }
+
+  const forwardUrl = `http://${config.webHost}:${config.webPort}${STRIPE_WEBHOOK_FORWARD_PATH}`;
+
+  try {
+    const result = await spawnStripeListenerWithSecretCapture({
+      args: ["listen", "--forward-to", forwardUrl],
+      command: "stripe",
+      env: runtimeEnv,
+      pipeOutput: input.pipeOutput,
+      stderrTarget: input.stderrTarget,
+      stdoutTarget: input.stdoutTarget,
+      timeoutMs: STRIPE_LISTENER_SECRET_CAPTURE_TIMEOUT_MS,
+    });
+
+    if (trustedExistingSecret !== null) {
+      runtimeEnv.STRIPE_WEBHOOK_SECRET = trustedExistingSecret;
+      if (trustedExistingSecret !== result.secret) {
+        stderrTarget.write(
+          [
+            "[stripe] STRIPE_WEBHOOK_SECRET from shell or repo .env does not match the listener's captured secret; ",
+            "hosted webhook signature verification will fail unless the shell value matches the CLI login. ",
+            "Unset the shell value or set MURPH_DEV_SKIP_STRIPE_LISTEN=1 to manage the listener yourself.\n",
+          ].join(""),
+        );
+      }
+    } else {
+      runtimeEnv.STRIPE_WEBHOOK_SECRET = result.secret;
+    }
+
+    return result.child;
+  } catch (error) {
+    if (error instanceof StripeCliMissingError) {
+      stderrTarget.write(
+        [
+          "[stripe] Stripe CLI not found on PATH — skipping the local webhook listener.\n",
+          "[stripe] Install with `brew install stripe/stripe-cli/stripe` (docs: https://docs.stripe.com/stripe-cli)\n",
+          "[stripe] Hosted onboarding checkout will fail locally until a webhook signing secret is available.\n",
+          "[stripe] Set MURPH_DEV_SKIP_STRIPE_LISTEN=1 to silence this warning.\n",
+        ].join(""),
+      );
+      return null;
+    }
+    const message = error instanceof Error ? error.message : String(error);
+    stderrTarget.write(
+      `[stripe] Failed to start the Stripe webhook listener: ${message}\n`,
+    );
+    stderrTarget.write(
+      "[stripe] Continuing without the listener; hosted onboarding checkout will fail locally until webhooks are available.\n",
+    );
+    return null;
   }
 }
 
