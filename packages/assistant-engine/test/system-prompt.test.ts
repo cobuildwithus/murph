@@ -9,10 +9,12 @@ function buildPrompt(
   assistantCommandAccessMode: 'bound-tools' | 'direct-cli' | 'none',
   turnTrigger: 'automation-cron' | 'manual-ask' | null = null,
   options?: {
+    activeExperimentContext?: string | null
     earlySessionOnboarding?: boolean
   },
 ) {
   return buildAssistantSystemPrompt({
+    activeExperimentContext: options?.activeExperimentContext ?? null,
     assistantCliContract: null,
     allowSensitiveHealthContext: true,
     assistantCommandAccessMode,
@@ -32,8 +34,14 @@ function buildPrompt(
   })
 }
 
-function buildNotificationPrompt(channel: string | null = null) {
+function buildNotificationPrompt(
+  channel: string | null = null,
+  options?: {
+    activeExperimentContext?: string | null
+  },
+) {
   return buildAssistantNotificationDecisionSystemPrompt({
+    activeExperimentContext: options?.activeExperimentContext ?? null,
     allowSensitiveHealthContext: true,
     channel,
     currentLocalDate: '2026-04-10',
@@ -272,9 +280,42 @@ Ready to get started?`)
       'prefer early-signal, associated-with, may reflect, and confounded-by language over causal certainty unless the evidence is unusually clean.',
     )
   })
+
+  it('includes active experiment context as a navigation-only prompt block when supplied', () => {
+    const activeExperimentContext = [
+      'Active experiment context for navigation only:',
+      '- Sauna RHR (`sauna-rhr`, exp_test): started 2026-04-01.',
+    ].join('\n')
+    const prompt = buildPrompt('bound-tools', null, {
+      activeExperimentContext,
+    })
+
+    expect(prompt).toContain(activeExperimentContext)
+    expect(prompt.indexOf('Vault and tool usage:')).toBeLessThan(
+      prompt.indexOf(activeExperimentContext),
+    )
+    expect(prompt.indexOf(activeExperimentContext)).toBeLessThan(
+      prompt.indexOf('This conversation is private enough for full health context'),
+    )
+  })
 })
 
 describe('buildAssistantNotificationDecisionSystemPrompt', () => {
+  it('includes active experiment context when notification decisions receive it', () => {
+    const activeExperimentContext = [
+      'Active experiment context for navigation only:',
+      '- Sauna RHR (`sauna-rhr`, exp_test): started 2026-04-01.',
+    ].join('\n')
+    const prompt = buildNotificationPrompt('telegram', {
+      activeExperimentContext,
+    })
+
+    expect(prompt).toContain(activeExperimentContext)
+    expect(prompt.indexOf(activeExperimentContext)).toBeLessThan(
+      prompt.indexOf('Notification execution rules:'),
+    )
+  })
+
   it('defaults experiment notifications to skip unless progress shows a real reason to send', () => {
     const prompt = buildNotificationPrompt('telegram')
 
