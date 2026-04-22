@@ -61,6 +61,7 @@ import { registerReadCommands } from './commands/read.js'
 import { registerProtocolCommands } from './commands/protocol.js'
 import { registerSamplesCommands } from './commands/samples.js'
 import { registerSearchCommands } from './commands/search.js'
+import { registerScheduledLogCommands } from './commands/scheduled-log.js'
 import { registerSyncCommands, syncPushResultSchema } from './commands/sync.js'
 import { registerSupplementCommands } from './commands/supplement.js'
 import { registerVaultCommands } from './commands/vault.js'
@@ -309,6 +310,14 @@ export const vaultCliCommandDescriptors = [
     rootCommandNames: ['automation'],
     register({ cli }) {
       registerAutomationCommands(cli)
+    },
+  },
+  {
+    id: 'scheduled-log',
+    bindingMode: 'none',
+    rootCommandNames: ['scheduled-log'],
+    register({ cli }) {
+      registerScheduledLogCommands(cli)
     },
   },
   {

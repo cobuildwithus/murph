@@ -1,4 +1,4 @@
-import type { FoodNutrition, MealNutrition } from '@murphai/contracts'
+import type { ExternalRef, FoodNutrition, MealNutrition } from '@murphai/contracts'
 import type { AssistantCronSchedule } from '@murphai/operator-config/assistant-cli-contracts'
 import { loadRuntimeModule } from '@murphai/vault-usecases/runtime'
 import {
@@ -31,6 +31,7 @@ interface FoodAutoLogRecord {
 }
 
 interface FoodAutoLogCoreRuntime {
+  findEventByExternalRef(input: ExternalRef & { vaultRoot: string }): Promise<{ id: string; kind: string } | null>
   listFoods(vaultRoot: string): Promise<FoodAutoLogRecord[]>
   readFood(input: {
     vaultRoot: string
@@ -140,6 +141,7 @@ export async function clearCanonicalFoodAutoLogSchedule(
 export async function runFoodAutoLogCronJob(input: {
   vault: string
   foodId: string
+  occurrenceAt?: string
 }): Promise<string> {
   const [core, importers] = await Promise.all([
     loadRuntimeModule<FoodAutoLogCoreRuntime>('@murphai/core'),
@@ -149,12 +151,26 @@ export async function runFoodAutoLogCronJob(input: {
     vaultRoot: input.vault,
     foodId: input.foodId,
   })
-  const note = renderAutoLoggedFoodMealNote(food)
-  const mealInput: Parameters<typeof importers.addMeal>[0] = {
+  const occurrenceAt = input.occurrenceAt ?? new Date().toISOString()
+  const externalRef: ExternalRef = {
+    system: 'murph-food-auto-log',
+    resourceType: 'occurrence',
+    resourceId: `${input.foodId}:${occurrenceAt}`,
+  }
+  const existing = await core.findEventByExternalRef({
     vaultRoot: input.vault,
-    occurredAt: new Date().toISOString(),
+    ...externalRef,
+  })
+  if (existing) {
+    return `Skipped recurring food "${food.title}" because occurrence ${occurrenceAt} is already logged as ${existing.kind} ${existing.id}.`
+  }
+  const note = renderAutoLoggedFoodMealNote(food)
+  const mealInput: Parameters<typeof importers.addMeal>[0] & { externalRef: ExternalRef } = {
+    vaultRoot: input.vault,
+    occurredAt: occurrenceAt,
     note,
-    source: 'derived',
+    source: 'derived' as const,
+    externalRef,
   }
   const inheritedNutrition = buildInheritedMealNutrition(food.nutrition, food.title)
   if (inheritedNutrition != null) {

@@ -15,6 +15,7 @@
       "enum": [
         "allergy_upsert",
         "automation_upsert",
+        "scheduled_log_upsert",
         "condition_upsert",
         "family_upsert",
         "genetics_upsert",
@@ -99,7 +100,7 @@
       "type": "array",
       "items": {
         "type": "string",
-        "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+        "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
       },
       "uniqueItems": true
     },

@@ -1,5 +1,6 @@
 import {
   type EventSource,
+  type ExternalRef,
   type MealNutrition,
   mealNutritionSchema,
 } from "@murphai/contracts";
@@ -26,11 +27,22 @@ export interface MealImportInput {
   source?: EventSource;
   ingredients?: string[];
   nutrition?: MealNutrition;
+  externalRef?: ExternalRef;
 }
 
 export interface ImporterExecutionOptions {
   corePort?: unknown;
 }
+
+const externalRefSchema = z
+  .object({
+    system: z.string().min(1),
+    resourceType: z.string().min(1),
+    resourceId: z.string().min(1),
+    version: z.string().min(1).optional(),
+    facet: z.string().min(1).optional(),
+  })
+  .strict()
 
 const mealImportInputSchema = z
   .object({
@@ -42,6 +54,7 @@ const mealImportInputSchema = z
     source: optionalEventSourceSchema("source"),
     ingredients: optionalStringListSchema("ingredients"),
     nutrition: mealNutritionSchema.optional(),
+    externalRef: externalRefSchema.optional(),
   })
   .passthrough();
 
@@ -87,6 +100,7 @@ export async function prepareMealImport(input: unknown): Promise<MealImportPaylo
     source: request.source,
     ingredients: hasIngredients ? request.ingredients : undefined,
     nutrition: hasNutrition ? request.nutrition : undefined,
+    externalRef: request.externalRef,
   });
 }
 

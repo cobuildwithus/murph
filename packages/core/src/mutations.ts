@@ -17,6 +17,7 @@ import type {
   SampleStream,
 } from "@murphai/contracts";
 import {
+  assertContractId,
   experimentFrontmatterSchema,
   journalDayFrontmatterSchema,
   eventRecordSchema,
@@ -122,6 +123,8 @@ interface ImportDocumentResult {
 
 interface AddMealInput {
   vaultRoot: string;
+  mealId?: string;
+  eventId?: string;
   occurredAt?: DateInput;
   note?: string;
   photoPath?: string;
@@ -129,6 +132,7 @@ interface AddMealInput {
   ingredients?: string[];
   nutrition?: MealNutrition;
   source?: string;
+  externalRef?: ExternalRef;
 }
 
 interface AddMealResult {
@@ -653,6 +657,19 @@ function encodeBase32(bytes: Uint8Array, length: number): string {
 function deterministicContractId(prefix: string, seed: string): string {
   const hash = createHash("sha256").update(seed).digest();
   return `${prefix}_${encodeBase32(hash, 26)}`;
+}
+
+function normalizeOptionalContractId(value: string | undefined, prefix: string, fieldName: string): string | undefined {
+  if (value === undefined || value === null || value === "") {
+    return undefined;
+  }
+
+  try {
+    return assertContractId(value, prefix, fieldName);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : `${fieldName} must be a valid id.`;
+    throw new VaultError("VAULT_INVALID_INPUT", message);
+  }
 }
 
 function buildPreparedAttachmentState(
@@ -1518,6 +1535,8 @@ export async function importDocument({
 
 export async function addMeal({
   vaultRoot,
+  mealId: requestedMealId,
+  eventId: requestedEventId,
   occurredAt = new Date(),
   note,
   photoPath,
@@ -1525,6 +1544,7 @@ export async function addMeal({
   ingredients,
   nutrition,
   source = "manual",
+  externalRef,
 }: AddMealInput): Promise<AddMealResult> {
   const vault = await loadVault({ vaultRoot });
   const normalizedNote =
@@ -1539,8 +1559,10 @@ export async function addMeal({
     );
   }
 
-  const mealId = generateRecordId(ID_PREFIXES.meal);
-  const eventId = generateRecordId(ID_PREFIXES.event);
+  const mealId = normalizeOptionalContractId(requestedMealId, ID_PREFIXES.meal, "mealId") ??
+    generateRecordId(ID_PREFIXES.meal);
+  const eventId = normalizeOptionalContractId(requestedEventId, ID_PREFIXES.event, "eventId") ??
+    generateRecordId(ID_PREFIXES.event);
   const preparedAttachments = prepareEventAttachments({
     ownerKind: "meal",
     ownerId: mealId,
@@ -1584,6 +1606,7 @@ export async function addMeal({
     source,
     title: "Meal",
     note: normalizedNote,
+    externalRef,
     links: [{ type: "related_to", targetId: mealId }],
     rawRefs: pendingAttachmentState.rawRefs,
     fields: {

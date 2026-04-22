@@ -30,6 +30,7 @@ export const FRONTMATTER_SCHEMA_VERSIONS = Object.freeze({
   goal: CONTRACT_SCHEMA_VERSION.goalFrontmatter,
   journalDay: CONTRACT_SCHEMA_VERSION.journalDayFrontmatter,
   recipe: CONTRACT_SCHEMA_VERSION.recipeFrontmatter,
+  scheduledLog: CONTRACT_SCHEMA_VERSION.scheduledLogFrontmatter,
   protocol: CONTRACT_SCHEMA_VERSION.protocolFrontmatter,
   workoutFormat: CONTRACT_SCHEMA_VERSION.workoutFormatFrontmatter,
 });
@@ -49,6 +50,7 @@ export const VAULT_PATHS = Object.freeze({
   allergiesRoot: VAULT_LAYOUT.allergiesDirectory,
   assessmentLedgerRoot: VAULT_LAYOUT.assessmentLedgerDirectory,
   automationsRoot: VAULT_LAYOUT.automationsDirectory,
+  scheduledLogsRoot: VAULT_LAYOUT.scheduledLogsDirectory,
   conditionsRoot: VAULT_LAYOUT.conditionsDirectory,
   coreDocument: VAULT_LAYOUT.coreDocument,
   eventsRoot: VAULT_LAYOUT.eventLedgerDirectory,

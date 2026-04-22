@@ -10,6 +10,7 @@ export {
 } from "./constants.ts";
 export { VaultError, isVaultError } from "./errors.ts";
 export * from "./automation.ts";
+export * from "./scheduled-logs.ts";
 export * from "./memory.ts";
 export {
   readPreferencesDocument,
@@ -208,6 +209,7 @@ export {
   buildNoteEventDraft,
   buildObservationEventDraft,
   buildPublicEventRecord,
+  findEventByExternalRef,
   buildSleepSessionEventDraft,
   buildSupplementIntakeEventDraft,
   buildSymptomEventDraft,
@@ -222,6 +224,7 @@ export type {
   AddMeasurementInput,
   AddMeasurementResult,
   EventDraftByKind,
+  FindEventByExternalRefInput,
   PublicEventDraft,
   PublicWritableEventKind,
   UpsertEventDraftInput,

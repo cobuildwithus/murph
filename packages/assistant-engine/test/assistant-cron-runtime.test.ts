@@ -185,6 +185,7 @@ beforeEach(() => {
     },
   })
   cronMocks.loadRuntimeModule.mockReset().mockResolvedValue({
+    findEventByExternalRef: vi.fn(async () => null),
     readFood: vi.fn(async ({ foodId }: { foodId?: string }) => ({
       foodId: foodId ?? 'food-1',
       title: 'Daily Oats',
