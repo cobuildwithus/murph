@@ -33,6 +33,11 @@ const ALLOWLISTED_WEB_CONTROL_CASES = [
     path: "/api/internal/hosted-execution/usage/record",
   },
   {
+    body: undefined,
+    name: "delegated billing Stripe customer lookup",
+    path: "/api/internal/hosted-execution/billing/stripe/customer/resolve",
+  },
+  {
     body: {
       provider: "google",
       returnPath: "/settings/sync",
@@ -194,10 +199,14 @@ describe("handleRunnerOutboundRequest", () => {
 
       const response = await handleRunnerOutboundRequest(
         new Request(`http://web-control.worker${path}`, {
-          body: JSON.stringify(body),
-          headers: createRunnerProxyHeaders({
-            "content-type": "application/json; charset=utf-8",
-          }),
+          ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+          headers: createRunnerProxyHeaders(
+            body === undefined
+              ? {}
+              : {
+                  "content-type": "application/json; charset=utf-8",
+                },
+          ),
           method: "POST",
         }),
         createRunnerOutboundEnv({
@@ -220,9 +229,9 @@ describe("handleRunnerOutboundRequest", () => {
       const [url, init] = firstCall;
       expect(String(url)).toBe(`https://web.example.test${path}`);
       expect(init?.method).toBe("POST");
-      expect(init?.body).toBe(JSON.stringify(body));
+      expect(init?.body).toBe(body === undefined ? undefined : JSON.stringify(body));
       const headers = new Headers(init?.headers);
-      expect(headers.get("content-type")).toBe("application/json");
+      expect(headers.get("content-type")).toBe(body === undefined ? null : "application/json");
       expect(headers.get("x-hosted-execution-user-id")).toBe("member_123");
     },
   );

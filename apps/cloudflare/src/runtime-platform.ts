@@ -1,4 +1,5 @@
 import {
+  parseHostedRuntimeBillingStripeCustomerResponse,
   parseHostedRuntimeIssueRecordResponse,
   parseHostedRuntimeUsageRecordResponse,
   readHostedRunnerCommitTimeoutMs,
@@ -35,6 +36,8 @@ import type { HostedWebCallbackSigningEnvironment } from "./web-callback-auth.ts
 
 const HOSTED_WEB_USAGE_RECORD_PATH = "/api/internal/hosted-execution/usage/record";
 const HOSTED_WEB_ISSUE_RECORD_PATH = "/api/internal/hosted-execution/issues/record";
+const HOSTED_WEB_STRIPE_CUSTOMER_LOOKUP_PATH =
+  "/api/internal/hosted-execution/billing/stripe/customer/resolve";
 
 type HostedWebControlTransport =
   | {
@@ -108,6 +111,16 @@ export function buildHostedExecutionRuntimePlatform(input: {
         assertHostedOk(response, `Hosted artifact upload ${sha256}`);
       },
     },
+    ...(hostedWebControlTransport
+      ? {
+          billingPort: createHostedWebBillingPort({
+            boundUserId: input.boundUserId,
+            fetchImpl,
+            timeoutMs,
+            transport: hostedWebControlTransport,
+          }),
+        }
+      : {}),
     ...(hostedWebDeviceSyncPort ? { deviceSyncPort: hostedWebDeviceSyncPort } : {}),
     effectsPort: {
       async readRawEmailMessage(rawMessageKey) {
@@ -423,6 +436,36 @@ function createHostedWebDeviceSyncPort(input: {
       });
 
       return parseHostedExecutionDeviceSyncRuntimeSnapshotResponse(payload);
+    },
+  };
+}
+
+function createHostedWebBillingPort(input: {
+  boundUserId: string;
+  fetchImpl: typeof fetch;
+  timeoutMs: number;
+  transport: HostedWebControlTransport;
+}) {
+  return {
+    async resolveVercelAiGatewayStripeCustomerId() {
+      const payload = await fetchHostedWebControlPlaneJson({
+        boundUserId: input.boundUserId,
+        description: "Hosted delegated billing Stripe customer lookup",
+        fetchImpl: input.fetchImpl,
+        method: "POST",
+        path: HOSTED_WEB_STRIPE_CUSTOMER_LOOKUP_PATH,
+        timeoutMs: input.timeoutMs,
+        transport: input.transport,
+      });
+
+      try {
+        return parseHostedRuntimeBillingStripeCustomerResponse(payload);
+      } catch (error) {
+        throw new Error(
+          "Hosted delegated billing Stripe customer lookup returned invalid JSON.",
+          { cause: error },
+        );
+      }
     },
   };
 }

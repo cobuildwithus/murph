@@ -614,6 +614,101 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
     );
   });
 
+  it("passes the delegated billing Stripe customer id into the hosted execution context for platform-funded Vercel AI Gateway runs", async () => {
+    const billingPort = {
+      resolveVercelAiGatewayStripeCustomerId: vi.fn(async () => ({
+        stripeCustomerId: "cus_platform_123",
+      })),
+    };
+    mocks.executeHostedRunDrainForCommit.mockImplementationOnce(async (input) => {
+      expect(input.executionContext.hosted?.stripeCustomerId).toBe("cus_platform_123");
+      return committedExecution;
+    });
+
+    const result = await runHostedAssistantRuntimeJobInProcessDetailed(
+      {
+        request: {
+          bundle: "incoming-bundle",
+          run: HOSTED_RUN_CONTEXT,
+          runDrain: createSingleWakeRunDrain(buildMemberActivatedWake("evt_billing_platform")),
+        },
+        runtime: {
+          forwardedEnv: {
+            HOSTED_ASSISTANT_BASE_URL: "https://ai-gateway.vercel.sh/v1",
+            HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+            HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY: "rk_test_123",
+            HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED: "true",
+          },
+          userEnv: {},
+        },
+      },
+      {
+        platform: {
+          artifactStore: {
+            async get() {
+              return null;
+            },
+            async put() {},
+          },
+          billingPort,
+          effectsPort: createHostedRuntimeEffectsPortStub(),
+        },
+      },
+    );
+
+    assert.deepEqual(result, committedFirstPassResult);
+    expect(billingPort.resolveVercelAiGatewayStripeCustomerId).toHaveBeenCalledTimes(1);
+  });
+
+  it("skips delegated billing lookup for member-funded Vercel AI Gateway runs", async () => {
+    const billingPort = {
+      resolveVercelAiGatewayStripeCustomerId: vi.fn(async () => ({
+        stripeCustomerId: "cus_platform_123",
+      })),
+    };
+    mocks.executeHostedRunDrainForCommit.mockImplementationOnce(async (input) => {
+      expect(input.executionContext.hosted?.stripeCustomerId).toBeNull();
+      return committedExecution;
+    });
+
+    const result = await runHostedAssistantRuntimeJobInProcessDetailed(
+      {
+        request: {
+          bundle: "incoming-bundle",
+          run: HOSTED_RUN_CONTEXT,
+          runDrain: createSingleWakeRunDrain(buildMemberActivatedWake("evt_billing_member")),
+        },
+        runtime: {
+          forwardedEnv: {
+            HOSTED_ASSISTANT_API_KEY_ENV: "VERCEL_AI_API_KEY",
+            HOSTED_ASSISTANT_BASE_URL: "https://ai-gateway.vercel.sh/v1",
+            HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+            HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY: "rk_test_123",
+            HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED: "true",
+          },
+          userEnv: {
+            VERCEL_AI_API_KEY: "member-key",
+          },
+        },
+      },
+      {
+        platform: {
+          artifactStore: {
+            async get() {
+              return null;
+            },
+            async put() {},
+          },
+          billingPort,
+          effectsPort: createHostedRuntimeEffectsPortStub(),
+        },
+      },
+    );
+
+    assert.deepEqual(result, committedFirstPassResult);
+    expect(billingPort.resolveVercelAiGatewayStripeCustomerId).not.toHaveBeenCalled();
+  });
+
   it("still emits a failure log when runtime normalization fails before startup telemetry can be recorded", async () => {
     mocks.normalizeHostedAssistantRuntimeConfig.mockImplementationOnce(() => {
       throw new Error("missing hosted runtime config");
@@ -762,6 +857,53 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
       }),
     );
     expect(mocks.stopLinqChatTypingIndicator).not.toHaveBeenCalled();
+  });
+
+  it("skips delegated billing lookup for resume-finalize drains", async () => {
+    const billingPort = {
+      resolveVercelAiGatewayStripeCustomerId: vi.fn(async () => ({
+        stripeCustomerId: "cus_platform_123",
+      })),
+    };
+
+    const result = await runHostedAssistantRuntimeJobInProcessDetailed(
+      {
+        request: {
+          bundle: "incoming-bundle",
+          run: HOSTED_RUN_CONTEXT,
+          runDrain: {
+            ...createSingleWakeRunDrain(buildSystemIngressWake("evt_resume_finalize_skip"), {
+              triggerKind: "runtime_timer",
+            }),
+            resumeFinalize: true,
+          },
+        },
+        runtime: {
+          forwardedEnv: {
+            HOSTED_ASSISTANT_BASE_URL: "https://ai-gateway.vercel.sh/v1",
+            HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+            HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY: "rk_test_123",
+            HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED: "true",
+          },
+        },
+      },
+      {
+        platform: {
+          artifactStore: {
+            async get() {
+              return null;
+            },
+            async put() {},
+          },
+          billingPort,
+          effectsPort: createHostedRuntimeEffectsPortStub(),
+        },
+      },
+    );
+
+    assert.deepEqual(result, finalResult);
+    expect(billingPort.resolveVercelAiGatewayStripeCustomerId).not.toHaveBeenCalled();
+    expect(mocks.completeHostedRunDrainAfterCommit).toHaveBeenCalledTimes(1);
   });
 
   it("emits a failure log with run context when finalize-time normalization fails", async () => {

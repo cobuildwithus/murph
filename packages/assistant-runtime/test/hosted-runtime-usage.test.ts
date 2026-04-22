@@ -41,6 +41,7 @@ async function writePendingRecord(vaultRoot: string, turnId: string) {
       schema: ASSISTANT_USAGE_SCHEMA,
       servedModel: "gpt-5.4-mini",
       sessionId: "asst_123",
+      stripeMeterSource: "murph",
       surface: null,
       totalTokens: 15,
       triggerKind: null,

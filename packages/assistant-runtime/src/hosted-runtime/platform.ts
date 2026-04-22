@@ -50,6 +50,10 @@ export interface HostedRuntimeDeviceSyncPort {
   }): Promise<HostedExecutionDeviceSyncRuntimeSnapshotResponse>;
 }
 
+export interface HostedRuntimeBillingPort {
+  resolveVercelAiGatewayStripeCustomerId(): Promise<HostedRuntimeBillingStripeCustomerResponse>;
+}
+
 export interface HostedRuntimeUsageExportPort {
   recordUsage(usage: readonly object[]): Promise<HostedRuntimeUsageRecordResponse>;
 }
@@ -60,10 +64,15 @@ export interface HostedRuntimeIssueExportPort {
 
 export interface HostedRuntimePlatform {
   artifactStore: HostedRuntimeArtifactStore;
+  billingPort?: HostedRuntimeBillingPort | null;
   deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
   effectsPort: HostedRuntimeEffectsPort;
   issueExportPort?: HostedRuntimeIssueExportPort | null;
   usageExportPort?: HostedRuntimeUsageExportPort | null;
+}
+
+export interface HostedRuntimeBillingStripeCustomerResponse {
+  stripeCustomerId: string | null;
 }
 
 export interface HostedRuntimeUsageRecordResponse {
@@ -79,10 +88,48 @@ export interface HostedRuntimeIssueRecordResponse {
 export function parseHostedRuntimeUsageRecordResponse(
   value: unknown,
 ): HostedRuntimeUsageRecordResponse {
-  const response = parseHostedRuntimeRecordResponse(value, "usageIds")
+  const response = parseHostedRuntimeRecordResponse(value, "usageIds");
   return {
     recorded: response.recorded,
     usageIds: response.ids,
+  };
+}
+
+export const HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED_ENV =
+  "HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED";
+export const HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY_ENV =
+  "HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY";
+
+export function parseHostedRuntimeBillingStripeCustomerResponse(
+  value: unknown,
+): HostedRuntimeBillingStripeCustomerResponse {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("Hosted runtime Stripe customer response must be an object.");
+  }
+
+  const stripeCustomerId = (value as { stripeCustomerId?: unknown }).stripeCustomerId;
+
+  if (stripeCustomerId !== null && stripeCustomerId !== undefined && typeof stripeCustomerId !== "string") {
+    throw new TypeError(
+      "Hosted runtime Stripe customer response.stripeCustomerId must be a string or null.",
+    );
+  }
+
+  if (typeof stripeCustomerId === "string") {
+    const normalizedStripeCustomerId = stripeCustomerId.trim();
+    if (normalizedStripeCustomerId.length === 0) {
+      throw new TypeError(
+        "Hosted runtime Stripe customer response.stripeCustomerId must be a non-empty string or null.",
+      );
+    }
+
+    return {
+      stripeCustomerId: normalizedStripeCustomerId,
+    };
+  }
+
+  return {
+    stripeCustomerId: null,
   };
 }
 
@@ -127,9 +174,9 @@ function parseHostedRuntimeRecordResponse(
 export function parseHostedRuntimeIssueRecordResponse(
   value: unknown,
 ): HostedRuntimeIssueRecordResponse {
-  const response = parseHostedRuntimeRecordResponse(value, "issueIds")
+  const response = parseHostedRuntimeRecordResponse(value, "issueIds");
   return {
     issueIds: response.ids,
     recorded: response.recorded,
-  }
+  };
 }
