@@ -63,6 +63,8 @@ const PROTOCOL_LIBRARY_ORDER = [
   BRYAN_JOHNSON_SAUNA_ROUTE_ID,
 ] as const;
 
+const PARTICIPANT_STAT_LABEL = "HUMAN PARTICIPANTS";
+
 type BiomarkerSignalDirection =
   ExperimentProtocol["expectedSignals"][number]["direction"];
 type BiomarkerSignalProminence = NonNullable<
@@ -794,14 +796,20 @@ function isCountedResearchSource(entity: HealthCommonsEntity): boolean {
   return entity.source?.kind === "journal_article" || entity.source?.kind === "review";
 }
 
-function toStudy(entity: HealthCommonsEntity, protocolKey?: string): Study {
+function toStudy(
+  entity: HealthCommonsEntity,
+  protocolKey?: string,
+  appraisal?: HealthCommonsProtocolEvidenceAppraisal,
+): Study {
   const source = entity.source;
   const evidence = entity.researchEvidence;
-  const appraisal = protocolKey
+  const resolvedAppraisal = appraisal ?? (protocolKey
     ? findProtocolEvidenceAppraisal(entity, protocolKey)
-    : undefined;
+    : undefined);
   const extractedFinding = extractStudyFinding(entity.body);
-  const fallbackFinding = extractedFinding ? undefined : buildStudyFindingFallback(entity, appraisal);
+  const fallbackFinding = extractedFinding
+    ? undefined
+    : buildStudyFindingFallback(entity, resolvedAppraisal);
 
   return {
     type: researchEvidenceToStudyType(evidence, source),
@@ -817,16 +825,16 @@ function toStudy(entity: HealthCommonsEntity, protocolKey?: string): Study {
     designLabel: evidence?.designLabel ?? (evidence
       ? formatResearchDesignLabel(evidence.designKind)
       : undefined),
-    groupId: appraisal?.groupId,
-    stance: appraisal?.stance,
-    scope: appraisal?.scope,
-    result: appraisal?.result,
-    headline: appraisal?.headline,
+    groupId: resolvedAppraisal?.groupId,
+    stance: resolvedAppraisal?.stance,
+    scope: resolvedAppraisal?.scope,
+    result: resolvedAppraisal?.result,
+    headline: resolvedAppraisal?.headline,
     finding: extractedFinding ?? fallbackFinding?.text,
     findingKind: extractedFinding ? "finding" : fallbackFinding?.kind,
-    implication: appraisal?.implication,
-    caveat: appraisal?.caveat,
-    displayPriority: appraisal?.displayPriority,
+    implication: resolvedAppraisal?.implication,
+    caveat: resolvedAppraisal?.caveat,
+    displayPriority: resolvedAppraisal?.displayPriority,
     url: source?.url,
   };
 }
@@ -841,9 +849,11 @@ function findProtocolEvidenceAppraisal(
   entity: HealthCommonsEntity,
   protocolKey: string,
 ): HealthCommonsProtocolEvidenceAppraisal | undefined {
-  return entity.protocolEvidence?.find((appraisal) =>
+  const matchingAppraisals = entity.protocolEvidence?.filter((appraisal) =>
     appraisal.protocolKey === protocolKey
-  );
+  ) ?? [];
+
+  return matchingAppraisals.length === 1 ? matchingAppraisals[0] : undefined;
 }
 
 function toResearchGroups({
@@ -870,10 +880,18 @@ function toResearchGroups({
   const coveredSourceKeys = new Set<string>();
   const groups = landscapeGroups.flatMap((group) => {
     const studies = orderGroupStudySources(group, sourcesByKey, protocol.key)
-      .filter((source) => hasGroupAppraisal(source, protocol.key, group.id))
+      .flatMap((source) => {
+        const appraisal = findGroupProtocolEvidenceAppraisal(
+          source,
+          protocol.key,
+          group.id,
+        );
+        return appraisal ? [[source, appraisal] as const] : [];
+      })
       .map((source) => {
-        coveredSourceKeys.add(source.key);
-        return toStudy(source, protocol.key);
+        const [entity, appraisal] = source;
+        coveredSourceKeys.add(entity.key);
+        return toStudy(entity, protocol.key, appraisal);
       });
 
     if (studies.length === 0) {
@@ -925,11 +943,18 @@ function findStudyDisplayPriority(
   groupId: string,
   protocolKey: string,
 ): number {
-  return entity.protocolEvidence
-    ?.find((appraisal) =>
-      appraisal.protocolKey === protocolKey && appraisal.groupId === groupId
-    )
+  return findGroupProtocolEvidenceAppraisal(entity, protocolKey, groupId)
     ?.displayPriority ?? Number.MAX_SAFE_INTEGER;
+}
+
+function findGroupProtocolEvidenceAppraisal(
+  entity: HealthCommonsEntity,
+  protocolKey: string,
+  groupId: string,
+): HealthCommonsProtocolEvidenceAppraisal | undefined {
+  return entity.protocolEvidence?.find((appraisal) =>
+    appraisal.protocolKey === protocolKey && appraisal.groupId === groupId
+  );
 }
 
 function hasGroupAppraisal(
@@ -937,9 +962,7 @@ function hasGroupAppraisal(
   protocolKey: string,
   groupId: string,
 ): boolean {
-  return entity.protocolEvidence?.some((appraisal) =>
-    appraisal.protocolKey === protocolKey && appraisal.groupId === groupId
-  ) ?? false;
+  return findGroupProtocolEvidenceAppraisal(entity, protocolKey, groupId) !== undefined;
 }
 
 function researchEvidenceToStudyType(
@@ -1167,7 +1190,7 @@ function toResearchStats({
     const codedParticipantStats = codedParticipantCount > 0
       ? [
           {
-            label: "TOTAL PARTICIPANTS",
+            label: PARTICIPANT_STAT_LABEL,
             value: codedParticipantCount === 1
               ? "1"
               : `${codedParticipantCount.toLocaleString()}+`,
@@ -1204,7 +1227,7 @@ function toResearchStats({
   const codedParticipantStats = codedParticipantCount > 0
     ? [
         {
-          label: "TOTAL PARTICIPANTS",
+          label: PARTICIPANT_STAT_LABEL,
           value: codedParticipantCount === 1
             ? "1"
             : `${codedParticipantCount.toLocaleString()}+`,

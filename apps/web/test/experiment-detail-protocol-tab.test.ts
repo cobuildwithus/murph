@@ -189,7 +189,7 @@ describe("ProtocolTab", () => {
     const researchGroups: ExperimentResearchGroup[] = [
       {
         id: "near-term-autonomic-vascular-and-immune-signals",
-        label: "Near-term physiology and wearable signals",
+        label: "Synthetic fallback label that should not drive the display mapping",
         stance: "mixed",
         summary: "Synthetic grouped-research proof for the UI-only label formatting pass.",
         defaultOpen: true,
@@ -228,7 +228,7 @@ describe("ProtocolTab", () => {
     const markup = renderToStaticMarkup(createElement(ProtocolTab, { experiment }));
 
     expect(markup).toContain("Short-term signals to watch");
-    expect(markup).not.toContain("Near-term physiology and wearable signals");
+    expect(markup).not.toContain("Synthetic fallback label that should not drive the display mapping");
     expect(markup).toContain("4 sources · 2 physiology studies · 1 intervention · 1 review");
     expect(countOccurrences(markup, 'open=""')).toBe(1);
   });

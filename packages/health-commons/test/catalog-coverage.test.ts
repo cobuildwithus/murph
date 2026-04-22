@@ -244,4 +244,57 @@ describe("@murphai/health-commons catalog coverage", () => {
       "experimentOnboarding planDefaults.testPlanId points to missing test plan missing-test-plan",
     );
   });
+
+  it("rejects grouped research sources that lack matching same-group protocol evidence", () => {
+    const groupedCoverageMismatchContent: HealthCommonsContentSet = {
+      artifactManifests: [],
+      changes: [],
+      redirects: [],
+      pages: [
+        biomarkerPage,
+        {
+          ...sourcePage("source_artifact:sauna/example", "sauna-example"),
+          frontmatter: {
+            ...sourcePage("source_artifact:sauna/example", "sauna-example").frontmatter,
+            protocolEvidence: [
+              {
+                protocolKey: "protocol_variant:dry-sauna/example",
+                groupId: "wrong-group",
+                stance: "supports",
+                scope: "direct_protocol",
+                result: "positive",
+                headline: "Example headline",
+                implication: "Example implication",
+              },
+            ],
+          },
+        },
+        {
+          ...protocolPage("protocol_variant:dry-sauna/example", "dry-sauna-example"),
+          frontmatter: {
+            ...protocolPage("protocol_variant:dry-sauna/example", "dry-sauna-example").frontmatter,
+            researchLandscape: {
+              bottomLine: "Grouped evidence should be internally aligned.",
+              confidenceLabel: "mixed",
+              primaryClaim: "Only group-covered sources should appear in grouped research.",
+              mainCaveat: "Missing same-group appraisals should fail fast.",
+              groups: [
+                {
+                  id: "expected-group",
+                  label: "Expected group",
+                  stance: "supports",
+                  summary: "A grouped source without a same-group appraisal should be rejected.",
+                  sourceKeys: ["source_artifact:sauna/example"],
+                },
+              ],
+            },
+          },
+        },
+      ],
+    };
+
+    expect(() => validateHealthCommonsContent(groupedCoverageMismatchContent)).toThrow(
+      "protocol_variant:dry-sauna/example researchLandscape group expected-group source source_artifact:sauna/example lacks matching protocolEvidence appraisal",
+    );
+  });
 });

@@ -191,6 +191,13 @@ declare module 'incur' {
       'samples import-csv': { args: { file: string }; options: { vault: string; requestId?: string; preset?: string; stream?: string; tsColumn?: string; valueColumn?: string; unit?: string; delimiter?: string; metadataColumns?: string[]; source?: string } }
       'samples list': { args: {}; options: { vault: string; requestId?: string; stream?: string; from?: string; to?: string; quality?: string; limit: number } }
       'samples show': { args: { id: string }; options: { vault: string; requestId?: string } }
+      'scheduled-log archive': { args: { lookup: string }; options: { vault: string; requestId?: string } }
+      'scheduled-log list': { args: {}; options: { vault: string; requestId?: string; status?: ("active" | "paused" | "archived")[]; text?: string; limit: number } }
+      'scheduled-log pause': { args: { lookup: string }; options: { vault: string; requestId?: string } }
+      'scheduled-log resume': { args: { lookup: string }; options: { vault: string; requestId?: string } }
+      'scheduled-log scaffold': { args: {}; options: { vault: string; requestId?: string } }
+      'scheduled-log show': { args: { lookup: string }; options: { vault: string; requestId?: string } }
+      'scheduled-log upsert': { args: {}; options: { vault: string; requestId?: string; input: string } }
       'search query': { args: { query?: string }; options: { vault: string; requestId?: string; text?: string; recordType?: string[]; kind?: string[]; stream?: string[]; experiment?: string; from?: string; to?: string; tag?: string[]; limit: number } }
       'show': { args: { id: string }; options: { vault: string; requestId?: string } }
       'status': { args: {}; options: { vault: string; requestId?: string; session?: string; limit: number } }
