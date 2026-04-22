@@ -130,6 +130,10 @@ describe('capture usecases', () => {
 
     expect(result.addedCount).toBe(2)
     expect(result.captures.map((capture) => capture.lookupId)).toEqual([
+      'evt_capture_1',
+      'evt_capture_2',
+    ])
+    expect(result.captures.map((capture) => capture.stableLookupId)).toEqual([
       'mole-left-forearm-1',
       'mole-right-shoulder-1',
     ])
@@ -181,6 +185,10 @@ describe('capture usecases', () => {
     })
 
     expect(result.captures.map((capture) => capture.lookupId)).toEqual([
+      'evt_capture_1',
+      'evt_capture_2',
+    ])
+    expect(result.captures.map((capture) => capture.stableLookupId)).toEqual([
       'mole-left-forearm-1',
       'mole-right-shoulder-1',
     ])
@@ -229,7 +237,8 @@ describe('capture usecases', () => {
 
     expect(result.addedCount).toBe(1)
     expect(result.captures[0]).toMatchObject({
-      lookupId: 'mole-left-forearm-1',
+      lookupId: 'evt_capture_1',
+      stableLookupId: 'mole-left-forearm-1',
       label: 'mole-left-forearm-1',
       collection: 'dermatology-baseline',
     })

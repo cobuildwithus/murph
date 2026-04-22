@@ -81,6 +81,7 @@ export interface CaptureResultItem {
   vault: string
   eventId: string
   lookupId: string
+  stableLookupId: string | null
   ledgerFile: string
   created: boolean
   occurredAt: string
@@ -471,7 +472,8 @@ async function addOneCaptureRecord(input: {
     return {
       vault: input.vault,
       eventId: result.eventId,
-      lookupId: label ?? result.eventId,
+      lookupId: result.eventId,
+      stableLookupId: label,
       ledgerFile: result.ledgerFile,
       created: result.created,
       occurredAt: result.event.occurredAt,
