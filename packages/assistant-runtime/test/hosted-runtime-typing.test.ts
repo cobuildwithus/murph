@@ -392,6 +392,7 @@ describe("hosted runtime messaging activity helpers", () => {
         env: {
           TELEGRAM_BOT_TOKEN: "telegram-token",
         },
+        signal: expect.any(AbortSignal),
       },
     );
     await vi.waitFor(() => {

@@ -225,7 +225,10 @@ function buildHostedMessagingActivityDependencies(
       refreshMs: options.linqRefreshMs,
       signal: options.signal,
     }),
-    startTelegramTyping: (input) => startTelegramTypingIndicator(input, { env }),
+    startTelegramTyping: (input) => startTelegramTypingIndicator(input, {
+      env,
+      signal: options.signal,
+    }),
   };
 }
 

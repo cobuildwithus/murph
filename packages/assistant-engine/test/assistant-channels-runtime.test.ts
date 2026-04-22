@@ -460,7 +460,7 @@ describe('assistant channels runtime seam', () => {
           LINQ_API_TOKEN: 'linq-token',
         },
         fetchImplementation: undefined,
-        signal: expect.any(AbortSignal),
+        signal: undefined,
       },
     )
     expect(runtimeMocks.stopLinqChatTypingIndicator).toHaveBeenCalledTimes(1)
@@ -475,6 +475,45 @@ describe('assistant channels runtime seam', () => {
         fetchImplementation: undefined,
       },
     )
+  })
+
+  it('passes the dependency abort signal to Linq typing and removes the listener after stop', async () => {
+    const dependencyController = new AbortController()
+    const addEventListenerSpy = vi.spyOn(dependencyController.signal, 'addEventListener')
+    const removeEventListenerSpy = vi.spyOn(dependencyController.signal, 'removeEventListener')
+
+    runtimeMocks.startLinqChatTypingIndicator.mockResolvedValue(undefined)
+    runtimeMocks.stopLinqChatTypingIndicator.mockResolvedValue(undefined)
+
+    const handle = await startLinqTypingIndicator(
+      {
+        target: 'chat-typing',
+      },
+      {
+        env: {
+          LINQ_API_TOKEN: 'linq-token',
+        },
+        signal: dependencyController.signal,
+      },
+    )
+
+    await handle.stop()
+
+    expect(runtimeMocks.startLinqChatTypingIndicator).toHaveBeenCalledWith(
+      {
+        chatId: 'chat-typing',
+      },
+      {
+        env: {
+          LINQ_API_TOKEN: 'linq-token',
+        },
+        fetchImplementation: undefined,
+        signal: dependencyController.signal,
+      },
+    )
+    expect(addEventListenerSpy).toHaveBeenCalledTimes(1)
+    expect(removeEventListenerSpy).toHaveBeenCalledTimes(1)
+    expect(runtimeMocks.stopLinqChatTypingIndicator).toHaveBeenCalledTimes(1)
   })
 
   it('refreshes the Linq typing indicator until stop', async () => {

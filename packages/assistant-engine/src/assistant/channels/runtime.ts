@@ -176,6 +176,7 @@ export async function startTelegramTypingIndicator(
     {
       env: dependencies.env,
       fetchImplementation: dependencies.fetchImplementation,
+      signal: dependencies.signal,
     },
   )
 }
@@ -210,15 +211,17 @@ export async function startLinqTypingIndicator(
     {
       env,
       fetchImplementation: dependencies.fetchImplementation,
-      signal: createLinkedAbortSignal([dependencies.signal]),
+      signal: dependencies.signal,
     },
   )
 
   const stopController = new AbortController()
-  const requestSignal = createLinkedAbortSignal([
-    dependencies.signal,
-    stopController.signal,
-  ])
+  const abortFromDependencySignal = () => stopController.abort()
+  if (dependencies.signal?.aborted) {
+    stopController.abort()
+  } else {
+    dependencies.signal?.addEventListener('abort', abortFromDependencySignal, { once: true })
+  }
 
   let refreshFailure: unknown = null
   const refreshLoop = keepLinqTypingIndicatorAlive({
@@ -226,9 +229,9 @@ export async function startLinqTypingIndicator(
     env,
     fetchImplementation: dependencies.fetchImplementation,
     refreshMs: dependencies.refreshMs ?? LINQ_TYPING_REFRESH_MS,
-    signal: requestSignal,
+    signal: stopController.signal,
   }).catch((error) => {
-    if (!requestSignal.aborted) {
+    if (!stopController.signal.aborted) {
       refreshFailure = error
     }
   })
@@ -246,6 +249,7 @@ export async function startLinqTypingIndicator(
 
       stopped = true
       stopController.abort()
+      dependencies.signal?.removeEventListener('abort', abortFromDependencySignal)
       await refreshLoop
       let stopFailure: unknown = null
       try {
@@ -325,27 +329,6 @@ function waitForLinqActivityRefresh(
   })
 }
 
-function createLinkedAbortSignal(signals: Array<AbortSignal | undefined>): AbortSignal {
-  const presentSignals = signals.filter((signal): signal is AbortSignal => Boolean(signal))
-  if (presentSignals.length === 0) {
-    return new AbortController().signal
-  }
-  if (presentSignals.length === 1) {
-    return presentSignals[0]!
-  }
-
-  const controller = new AbortController()
-  const abort = () => controller.abort()
-  for (const signal of presentSignals) {
-    if (signal.aborted) {
-      controller.abort()
-      break
-    }
-    signal.addEventListener('abort', abort, { once: true })
-  }
-
-  return controller.signal
-}
 
 export async function sendEmailMessage(
   input: {

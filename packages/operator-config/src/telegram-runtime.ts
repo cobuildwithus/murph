@@ -57,6 +57,7 @@ export async function startTelegramTypingSession(
     env?: NodeJS.ProcessEnv
     fetchImplementation?: TelegramFetchImplementation
     refreshMs?: number
+    signal?: AbortSignal
   } = {},
 ): Promise<TelegramTypingIndicatorHandle> {
   const env = dependencies.env ?? process.env
@@ -86,14 +87,26 @@ export async function startTelegramTypingSession(
       ? parseTelegramTargetOrThrow(input.target)
       : input.target
   const stopController = new AbortController()
+  const abortFromDependencySignal = () => stopController.abort()
+  if (dependencies.signal?.aborted) {
+    stopController.abort()
+  } else {
+    dependencies.signal?.addEventListener('abort', abortFromDependencySignal, { once: true })
+  }
 
-  target = await sendTelegramTypingIndicatorOnce({
-    baseUrl,
-    fetchImplementation,
-    target,
-    targetLabel: serializeTelegramThreadTarget(target),
-    token,
-  })
+  try {
+    target = await sendTelegramTypingIndicatorOnce({
+      baseUrl,
+      fetchImplementation,
+      signal: dependencies.signal,
+      target,
+      targetLabel: serializeTelegramThreadTarget(target),
+      token,
+    })
+  } catch (error) {
+    dependencies.signal?.removeEventListener('abort', abortFromDependencySignal)
+    throw error
+  }
 
   let failure: unknown = null
   const running = keepTelegramTypingIndicatorAlive({
@@ -112,6 +125,7 @@ export async function startTelegramTypingSession(
   return {
     async stop() {
       stopController.abort()
+      dependencies.signal?.removeEventListener('abort', abortFromDependencySignal)
       await running
       if (failure) {
         throw failure
@@ -171,6 +185,7 @@ async function keepTelegramTypingIndicatorAlive(input: {
     target = await sendTelegramTypingIndicatorOnce({
       baseUrl: input.baseUrl,
       fetchImplementation: input.fetchImplementation,
+      ignoreAbortedSignal: true,
       signal: input.signal,
       target,
       targetLabel: serializeTelegramThreadTarget(target),
@@ -182,6 +197,7 @@ async function keepTelegramTypingIndicatorAlive(input: {
 async function sendTelegramTypingIndicatorOnce(input: {
   baseUrl: string
   fetchImplementation: TelegramFetchImplementation
+  ignoreAbortedSignal?: boolean
   signal?: AbortSignal
   target: TelegramThreadTarget
   targetLabel: string
@@ -203,8 +219,11 @@ async function sendTelegramTypingIndicatorOnce(input: {
       token: input.token,
     })
   } catch (error) {
-    if (input.signal?.aborted) {
+    if (input.ignoreAbortedSignal && input.signal?.aborted) {
       return input.target
+    }
+    if (input.signal?.aborted) {
+      throw error
     }
 
     throw new VaultCliError(
