@@ -144,13 +144,21 @@ function optionalStringArray(value: unknown, fieldName: string): string[] | unde
   }
 
   if (!Array.isArray(value)) {
-    throw new VaultCliError('invalid_payload', `${fieldName} must be an array of non-empty strings.`)
+    throw new VaultCliError('invalid_payload', `${fieldName} must be an array of strings.`)
   }
 
+  const invalidIndex = value.findIndex((entry) => typeof entry !== 'string')
+  if (invalidIndex >= 0) {
+    throw new VaultCliError(
+      'invalid_payload',
+      `${fieldName}[${invalidIndex}] must be a string.`,
+    )
+  }
+
+  const stringEntries = value as string[]
   const entries = [
     ...new Set(
-      value
-        .filter((entry): entry is string => typeof entry === 'string')
+      stringEntries
         .map((entry) => entry.trim())
         .filter((entry) => entry.length > 0),
     ),
@@ -366,6 +374,11 @@ function normalizeCaptureEntry(value: unknown, fieldName: string): CaptureEntryI
 async function loadStructuredCapturePayload(inputFile: string): Promise<StructuredCapturePayload> {
   const payload = await loadJsonInputObject(inputFile, 'capture payload')
   const normalizedRoot = normalizeCaptureEntry(payload, 'capture payload')
+
+  if (payload.captures !== undefined && !Array.isArray(payload.captures)) {
+    throw new VaultCliError('invalid_payload', 'captures must be an array of capture entries.')
+  }
+
   const captures = Array.isArray(payload.captures)
     ? payload.captures.map((entry, index) => normalizeCaptureEntry(entry, `captures[${index}]`))
     : undefined
@@ -393,8 +406,8 @@ function mergeCaptureDefaults(
     label: entry.label ?? defaults.label,
     bodySite: entry.bodySite ?? defaults.bodySite,
     tags: uniqueStrings([...(defaults.tags ?? []), ...(entry.tags ?? [])]),
-    media: entry.media,
-    mediaPaths: entry.mediaPaths,
+    media: entry.media ?? defaults.media,
+    mediaPaths: entry.mediaPaths ?? defaults.mediaPaths,
     relatedIds: entry.relatedIds ?? defaults.relatedIds,
     externalRef: entry.externalRef ?? defaults.externalRef,
     links: entry.links ?? defaults.links,
@@ -458,7 +471,7 @@ async function addOneCaptureRecord(input: {
     return {
       vault: input.vault,
       eventId: result.eventId,
-      lookupId: result.eventId,
+      lookupId: label ?? result.eventId,
       ledgerFile: result.ledgerFile,
       created: result.created,
       occurredAt: result.event.occurredAt,
@@ -477,8 +490,37 @@ async function addOneCaptureRecord(input: {
   }
 }
 
-function resolveCaptureEntries(input: AddCaptureRecordInput, structuredPayload?: StructuredCapturePayload): CaptureEntryInput[] {
-  const defaults = structuredPayload ?? input
+function ensureUniqueCaptureLabels(captures: readonly CaptureEntryInput[]): void {
+  const seenByLabel = new Map<string, number>()
+
+  captures.forEach((capture, index) => {
+    const label = capture.label
+      ? normalizeCaptureSlug(capture.label, `captures[${index}].label`)
+      : null
+    if (!label) {
+      return
+    }
+
+    const previousIndex = seenByLabel.get(label)
+    if (previousIndex !== undefined) {
+      throw new VaultCliError(
+        'invalid_payload',
+        `Duplicate capture label "${label}" in batch entries ${previousIndex + 1} and ${index + 1}. ` +
+          'Put multiple views of the same observation in one media array, or use unique labels.',
+      )
+    }
+
+    seenByLabel.set(label, index)
+  })
+}
+
+function resolveCaptureEntries(
+  input: AddCaptureRecordInput,
+  structuredPayload?: StructuredCapturePayload,
+): CaptureEntryInput[] {
+  const defaults = structuredPayload
+    ? mergeCaptureDefaults(input, structuredPayload)
+    : input
   const explicitCaptures = structuredPayload?.captures ?? input.captures
 
   if (explicitCaptures && explicitCaptures.length > 0) {
@@ -489,7 +531,16 @@ function resolveCaptureEntries(input: AddCaptureRecordInput, structuredPayload?:
       )
     }
 
-    return explicitCaptures.map((entry) => mergeCaptureDefaults(defaults, entry))
+    const batchDefaults: CaptureEntryInput = {
+      ...defaults,
+      media: undefined,
+      mediaPaths: undefined,
+    }
+    const captures = explicitCaptures.map((entry) =>
+      mergeCaptureDefaults(batchDefaults, entry),
+    )
+    ensureUniqueCaptureLabels(captures)
+    return captures
   }
 
   return [defaults]
@@ -624,6 +675,7 @@ export async function listCaptureRecords(input: {
     })
     .filter((record: QueryRecord) => isCaptureRecord(record))
     .filter((record: QueryRecord) => recordMatchesAllTags(record, requiredTags))
+    .sort(compareByLatest)
     .slice(0, limit)
     .map((record: QueryRecord) => toCaptureListEntity(record))
 
