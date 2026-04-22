@@ -626,6 +626,7 @@ describe("assistant pending usage seam", () => {
         schema: "murph.assistant-usage.v1",
         servedModel: "gpt-5-mini",
         sessionId: "session-test",
+        stripeMeterSource: "murph",
         surface: null,
         totalTokens: 41,
         triggerKind: null,
@@ -1192,6 +1193,7 @@ describe("assistant execution context normalization", () => {
           issueDeviceConnectLink,
           issueShareLink,
           memberId: " member-1 ",
+          stripeCustomerId: " cus_123 ",
           userEnvKeys: [" OPENAI_API_KEY ", "", " CUSTOM_KEY ", "   "],
         },
       })
@@ -1201,6 +1203,7 @@ describe("assistant execution context normalization", () => {
         issueDeviceConnectLink,
         issueShareLink,
         memberId: "member-1",
+        stripeCustomerId: "cus_123",
         userEnvKeys: ["OPENAI_API_KEY", "CUSTOM_KEY"],
       },
     });

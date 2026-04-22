@@ -96,6 +96,8 @@ describe("assistant usage attribution", () => {
       memberId: "member_123",
       reportingSecret: "reporting-secret",
       surface: " Hosted Web ",
+      stripeCustomerId: " cus_123 ",
+      stripeMeterSource: "vercel-ai-gateway",
       triggerKind: " Manual Ask ",
       zeroDataRetention: true,
     });
@@ -125,6 +127,8 @@ describe("assistant usage attribution", () => {
         "zdr:on",
       ],
       reportingUserId: expectedReportingUserId,
+      stripeCustomerId: "cus_123",
+      stripeMeterSource: "vercel-ai-gateway",
     });
     expect(expectedReportingUserId).not.toBe(legacyReportingUserId);
 

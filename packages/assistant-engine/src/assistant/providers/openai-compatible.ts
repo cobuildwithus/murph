@@ -30,6 +30,7 @@ import {
   normalizeAssistantUsageGatewayTags,
   type AssistantUsageAttribution,
 } from '../usage-attribution.js'
+import type { AssistantUsageCredentialSource } from '@murphai/runtime-state/node'
 import {
   isAssistantOpenAICompatibleTargetConfig,
   resolveAssistantChatProviderFromConfig,
@@ -60,6 +61,24 @@ interface GatewayProviderOptions extends JsonObject {
   user?: string
   zeroDataRetention?: boolean
 }
+
+interface AssistantStripeBillingContext {
+  credentialSource: AssistantUsageCredentialSource
+  stripeCustomerId?: string | null
+}
+
+interface OpenAiCompatibleTargetIdentity {
+  baseUrl?: string | null
+  presetId?: string | null
+  providerName?: string | null
+}
+
+export const HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED_ENV =
+  'HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED'
+export const HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY_ENV =
+  'HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY'
+const VERCEL_STRIPE_CUSTOMER_ID_HEADER = 'stripe-customer-id'
+const VERCEL_STRIPE_RESTRICTED_ACCESS_KEY_HEADER = 'stripe-restricted-access-key'
 
 export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
   capabilities: {
@@ -188,9 +207,14 @@ export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
     }
 
     const usageAttribution = input.usageAttribution ?? null
-    const languageModelSpec = applyOpenAiCompatibleGatewayReporting({
+    const languageModelSpec = applyOpenAiCompatibleGatewayPolicies({
+      env: {
+        ...process.env,
+        ...(input.env ?? {}),
+      },
       languageModelSpec: resolvedLanguageModelSpec,
-      providerConfig,
+      providerZeroDataRetention: providerConfig.policy.zeroDataRetention === true,
+      providerTarget: providerConfig.target,
       usageAttribution,
     })
 
@@ -309,18 +333,46 @@ export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
 }
 
 
-function applyOpenAiCompatibleGatewayReporting(input: {
+function applyOpenAiCompatibleGatewayPolicies(input: {
+  env: NodeJS.ProcessEnv
   languageModelSpec: AssistantModelSpec
-  providerConfig: AssistantProviderConfig
+  providerZeroDataRetention: boolean
+  providerTarget: OpenAiCompatibleTargetIdentity
   usageAttribution: AssistantUsageAttribution | null
 }): AssistantModelSpec {
-  const gatewayOptions = resolveOpenAiCompatibleGatewayProviderOptions(input)
+  const billingHeaders = resolveOpenAiCompatibleVercelStripeBillingHeaders({
+    billingContext: input.usageAttribution
+      ? {
+          credentialSource: input.usageAttribution.credentialSource,
+          stripeCustomerId: input.usageAttribution.stripeCustomerId,
+        }
+      : null,
+    env: input.env,
+    providerTarget: input.providerTarget,
+  })
+  const gatewayOptions = resolveOpenAiCompatibleGatewayProviderOptions({
+    providerZeroDataRetention: input.providerZeroDataRetention,
+    providerTarget: input.providerTarget,
+    usageAttribution: input.usageAttribution,
+  })
+  const sanitizedHeaders = stripVercelStripeBillingHeaders(input.languageModelSpec.headers)
+  const nextHeaders = billingHeaders
+    ? {
+        ...(sanitizedHeaders ?? {}),
+        ...billingHeaders,
+      }
+    : sanitizedHeaders
 
   if (
     !gatewayOptions ||
     (input.languageModelSpec.executionDriver ?? 'openai-compatible') !== 'responses'
   ) {
-    return input.languageModelSpec
+    return nextHeaders === input.languageModelSpec.headers
+      ? input.languageModelSpec
+      : {
+          ...input.languageModelSpec,
+          headers: nextHeaders,
+        }
   }
 
   const existingPolicy = input.languageModelSpec.responsesRequestPolicy
@@ -335,6 +387,11 @@ function applyOpenAiCompatibleGatewayReporting(input: {
 
   return {
     ...input.languageModelSpec,
+    ...(nextHeaders
+      ? {
+          headers: nextHeaders,
+        }
+      : {}),
     responsesRequestPolicy: {
       ...existingPolicy,
       ...(gatewayOptions.zeroDataRetention === true
@@ -478,7 +535,10 @@ export function resolveOpenAiCompatibleProviderOptions(input: {
     input.resumeProviderSessionId,
   )
   const gatewayOptions = resolveOpenAiCompatibleGatewayProviderOptions({
-    providerConfig: input.providerConfig,
+    providerZeroDataRetention: input.providerConfig.policy.zeroDataRetention === true,
+    providerTarget: isAssistantOpenAICompatibleTargetConfig(input.providerConfig)
+      ? input.providerConfig.target
+      : {},
     usageAttribution: input.usageAttribution ?? null,
   })
 
@@ -519,16 +579,17 @@ export function resolveOpenAiCompatibleProviderOptions(input: {
 }
 
 function resolveOpenAiCompatibleGatewayProviderOptions(input: {
-  providerConfig: AssistantProviderConfig
+  providerZeroDataRetention: boolean
+  providerTarget: OpenAiCompatibleTargetIdentity
   usageAttribution?: AssistantUsageAttribution | null
 }): GatewayProviderOptions | null {
-  if (!isOpenAiCompatibleVercelAiGatewayConfig(input.providerConfig)) {
+  if (!isOpenAiCompatibleVercelAiGatewayTarget(input.providerTarget)) {
     return null
   }
 
   const gatewayOptions: GatewayProviderOptions = {}
 
-  if (input.providerConfig.policy.zeroDataRetention === true) {
+  if (input.providerZeroDataRetention) {
     gatewayOptions.zeroDataRetention = true
   }
 
@@ -557,14 +618,48 @@ function isOpenAiCompatibleVercelAiGatewayConfig(
     return false
   }
 
-  const presetId = normalizeNullableString(providerConfig.target.presetId)
-  const providerName = normalizeNullableString(providerConfig.target.providerName)
+  return isOpenAiCompatibleVercelAiGatewayTarget(providerConfig.target)
+}
 
+export function isOpenAiCompatibleVercelAiGatewayTarget(
+  target: OpenAiCompatibleTargetIdentity,
+): boolean {
+  const presetId = normalizeNullableString(target.presetId)
+  const providerName = normalizeNullableString(target.providerName)
   return (
     presetId === 'vercel-ai-gateway' ||
     providerName?.toLowerCase() === 'vercel-ai-gateway' ||
-    isVercelAiGatewayBaseUrl(providerConfig.target.baseUrl)
+    isVercelAiGatewayBaseUrl(target.baseUrl)
   )
+}
+
+export function resolveOpenAiCompatibleVercelStripeBillingHeaders(input: {
+  billingContext: AssistantStripeBillingContext | null
+  env: Readonly<Record<string, string | undefined>>
+  providerTarget: OpenAiCompatibleTargetIdentity
+}): Record<string, string> | null {
+  if (
+    !input.billingContext ||
+    !isOpenAiCompatibleVercelAiGatewayTarget(input.providerTarget) ||
+    input.billingContext.credentialSource !== 'platform' ||
+    !readEnabledFlag(input.env[HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED_ENV])
+  ) {
+    return null
+  }
+
+  const restrictedAccessKey = normalizeVercelStripeRestrictedAccessKey(
+    input.env[HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY_ENV],
+  )
+  const stripeCustomerId = normalizeStripeCustomerId(input.billingContext.stripeCustomerId)
+
+  if (!restrictedAccessKey || !stripeCustomerId) {
+    return null
+  }
+
+  return {
+    [VERCEL_STRIPE_CUSTOMER_ID_HEADER]: stripeCustomerId,
+    [VERCEL_STRIPE_RESTRICTED_ACCESS_KEY_HEADER]: restrictedAccessKey,
+  }
 }
 
 function isVercelAiGatewayBaseUrl(value: string | null | undefined): boolean {
@@ -580,6 +675,54 @@ function isVercelAiGatewayBaseUrl(value: string | null | undefined): boolean {
   } catch {
     return false
   }
+}
+
+function normalizeStripeCustomerId(value: string | null | undefined): string | null {
+  const normalized = normalizeNullableString(value)
+
+  return normalized?.startsWith('cus_') ? normalized : null
+}
+
+function normalizeVercelStripeRestrictedAccessKey(
+  value: string | null | undefined,
+): string | null {
+  const normalized = normalizeNullableString(value)
+
+  return normalized?.startsWith('rk_') ? normalized : null
+}
+
+function readEnabledFlag(value: string | null | undefined): boolean {
+  const normalized = normalizeNullableString(value)
+
+  return normalized === '1' || normalized?.toLowerCase() === 'true'
+}
+
+function stripVercelStripeBillingHeaders(
+  headers: Record<string, string> | undefined,
+): Record<string, string> | undefined {
+  if (!headers) {
+    return headers
+  }
+
+  let removed = false
+  const filteredEntries = Object.entries(headers).filter(([key]) => {
+    const normalizedKey = key.toLowerCase()
+    const keep =
+      normalizedKey !== VERCEL_STRIPE_CUSTOMER_ID_HEADER &&
+      normalizedKey !== VERCEL_STRIPE_RESTRICTED_ACCESS_KEY_HEADER
+
+    if (!keep) {
+      removed = true
+    }
+
+    return keep
+  })
+
+  if (!removed) {
+    return headers
+  }
+
+  return filteredEntries.length > 0 ? Object.fromEntries(filteredEntries) : undefined
 }
 
 function createOpenAiCompatibleToolRawEvent(input: {

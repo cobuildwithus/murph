@@ -9,6 +9,7 @@ import type {
   AssistantToolCatalog,
   AssistantToolExecutionMode,
 } from '../src/model-harness.ts'
+import { createAssistantUsageAttribution } from '../src/assistant/usage-attribution.ts'
 
 const providerMocks = vi.hoisted(() => ({
   executeCodexPrompt: vi.fn(),
@@ -758,6 +759,10 @@ describe('openAiCompatibleProviderDefinition.executeTurn', () => {
     })
 
     await openAiCompatibleProviderDefinition.executeTurn({
+      env: {
+        HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY: 'rk_test_123',
+        HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED: '1',
+      },
       providerConfig: normalizeAssistantProviderConfig({
         provider: 'openai-compatible',
         apiKeyEnv: 'VERCEL_AI_API_KEY',
@@ -766,6 +771,18 @@ describe('openAiCompatibleProviderDefinition.executeTurn', () => {
         presetId: 'vercel-ai-gateway',
         providerName: 'vercel-ai-gateway',
         reasoningEffort: 'low',
+        zeroDataRetention: true,
+      }),
+      usageAttribution: createAssistantUsageAttribution({
+        credentialSource: 'platform',
+        environment: 'production',
+        featureKey: 'assistant_reply',
+        memberId: 'member_123',
+        reportingSecret: 'reporting-secret',
+        surface: 'hosted_web',
+        stripeCustomerId: 'cus_123',
+        stripeMeterSource: 'vercel-ai-gateway',
+        triggerKind: 'manual_ask',
         zeroDataRetention: true,
       }),
       prompt: 'Use the gateway',
@@ -777,11 +794,15 @@ describe('openAiCompatibleProviderDefinition.executeTurn', () => {
         apiKeyEnv: 'VERCEL_AI_API_KEY',
         baseUrl: 'https://ai-gateway.vercel.sh/v1',
         executionDriver: 'responses',
+        headers: {
+          'stripe-customer-id': 'cus_123',
+          'stripe-restricted-access-key': 'rk_test_123',
+        },
         model: 'openai/gpt-5.4',
         providerName: 'vercel-ai-gateway',
-        responsesRequestPolicy: {
+        responsesRequestPolicy: expect.objectContaining({
           gatewayZeroDataRetention: true,
-        },
+        }),
       }),
     )
 
@@ -798,9 +819,9 @@ describe('openAiCompatibleProviderDefinition.executeTurn', () => {
         provider: 'mock-language-model',
       },
       providerOptions: {
-        gateway: {
+        gateway: expect.objectContaining({
           zeroDataRetention: true,
-        },
+        }),
         openai: {
           reasoningEffort: 'low',
           store: false,
@@ -818,6 +839,57 @@ describe('openAiCompatibleProviderDefinition.executeTurn', () => {
         }),
       },
     })
+  })
+
+  it('strips inherited Stripe delegation headers when the current turn is not eligible for delegated billing', async () => {
+    providerMocks.generateText.mockResolvedValue({
+      text: 'Gateway answer',
+      response: {
+        id: 'gateway-resp-2',
+        modelId: 'openai/gpt-5.4',
+      },
+      usage: {
+        completion_tokens: 3,
+        prompt_tokens: 5,
+      },
+    })
+
+    await openAiCompatibleProviderDefinition.executeTurn({
+      providerConfig: normalizeAssistantProviderConfig({
+        provider: 'openai-compatible',
+        apiKeyEnv: 'VERCEL_AI_API_KEY',
+        baseUrl: 'https://ai-gateway.vercel.sh/v1',
+        headers: {
+          'stripe-customer-id': 'cus_prefilled',
+          'stripe-restricted-access-key': 'rk_prefilled',
+          'x-extra-header': 'keep-me',
+        },
+        model: 'openai/gpt-5.4',
+        presetId: 'vercel-ai-gateway',
+        providerName: 'vercel-ai-gateway',
+      }),
+      usageAttribution: createAssistantUsageAttribution({
+        credentialSource: 'member',
+        environment: 'production',
+        featureKey: 'assistant_reply',
+        memberId: 'member_123',
+        reportingSecret: 'reporting-secret',
+        surface: 'hosted_web',
+        stripeCustomerId: 'cus_123',
+        stripeMeterSource: 'murph',
+        triggerKind: 'manual_ask',
+      }),
+      prompt: 'Use the gateway without delegated billing',
+      workingDirectory: WORKING_DIRECTORY,
+    })
+
+    expect(providerMocks.resolveAssistantLanguageModel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        headers: {
+          'X-Extra-Header': 'keep-me',
+        },
+      }),
+    )
   })
 })
 

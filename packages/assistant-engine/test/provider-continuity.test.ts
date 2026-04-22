@@ -9,6 +9,7 @@ import {
   resolveAssistantProviderPrompt,
 } from '../src/assistant/providers/helpers.js'
 import {
+  resolveOpenAiCompatibleVercelStripeBillingHeaders,
   resolveOpenAiCompatibleProviderOptions,
   shouldUseOpenAiCompatibleProviderState,
 } from '../src/assistant/providers/openai-compatible.js'
@@ -188,6 +189,8 @@ describe('OpenAI-compatible native resume retention options', () => {
       memberId: 'member_123',
       reportingSecret: 'reporting-secret',
       surface: ' Hosted Web ',
+      stripeCustomerId: 'cus_123',
+      stripeMeterSource: 'vercel-ai-gateway',
       triggerKind: ' Manual Ask ',
       zeroDataRetention: true,
     })
@@ -237,5 +240,64 @@ describe('OpenAI-compatible native resume retention options', () => {
       zeroDataRetention: true,
     })
     expect(JSON.stringify(providerOptions)).not.toContain('member_123')
+  })
+
+  it('delegates Stripe token billing headers only for platform-funded Vercel gateway turns with a valid customer id', () => {
+    expect(
+      resolveOpenAiCompatibleVercelStripeBillingHeaders({
+        billingContext: {
+          credentialSource: 'platform',
+          stripeCustomerId: ' cus_123 ',
+        },
+        env: {
+          HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY: ' rk_test_123 ',
+          HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED: '1',
+        },
+        providerTarget: {
+          baseUrl: 'https://ai-gateway.vercel.sh/v1',
+          providerName: 'vercel-ai-gateway',
+          presetId: 'vercel-ai-gateway',
+        },
+      }),
+    ).toEqual({
+      'stripe-customer-id': 'cus_123',
+      'stripe-restricted-access-key': 'rk_test_123',
+    })
+
+    expect(
+      resolveOpenAiCompatibleVercelStripeBillingHeaders({
+        billingContext: {
+          credentialSource: 'member',
+          stripeCustomerId: 'cus_123',
+        },
+        env: {
+          HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY: 'rk_test_123',
+          HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED: '1',
+        },
+        providerTarget: {
+          baseUrl: 'https://ai-gateway.vercel.sh/v1',
+          providerName: 'vercel-ai-gateway',
+          presetId: 'vercel-ai-gateway',
+        },
+      }),
+    ).toBeNull()
+
+    expect(
+      resolveOpenAiCompatibleVercelStripeBillingHeaders({
+        billingContext: {
+          credentialSource: 'platform',
+          stripeCustomerId: 'customer_123',
+        },
+        env: {
+          HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY: 'sk_test_123',
+          HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED: '1',
+        },
+        providerTarget: {
+          baseUrl: 'https://ai-gateway.vercel.sh/v1',
+          providerName: 'vercel-ai-gateway',
+          presetId: 'vercel-ai-gateway',
+        },
+      }),
+    ).toBeNull()
   })
 })
