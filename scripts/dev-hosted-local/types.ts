@@ -1,5 +1,6 @@
 export interface HostedLocalDevConfig {
   skipPrismaMigrate: boolean;
+  skipStripeListen: boolean;
   skipWeb: boolean;
   skipVercelPull: boolean;
   webHost: string;
@@ -36,7 +37,7 @@ export interface HostedLocalChildProcess {
 
 export interface NamedChildProcess {
   child: HostedLocalChildProcess;
-  name: "cloudflare" | "web";
+  name: "cloudflare" | "stripe" | "web";
 }
 
 export interface BufferedNamedChildProcess extends NamedChildProcess {

@@ -5,6 +5,7 @@ import https from "node:https";
 import net from "node:net";
 import path from "node:path";
 import process from "node:process";
+import { PassThrough } from "node:stream";
 
 import {
   HEALTH_POLL_INTERVAL_MS,
@@ -112,14 +113,14 @@ export async function assertPortAvailable(host: string, port: number, message: s
 }
 
 export function spawnChildProcess(
-  name: "cloudflare" | "web",
+  name: "cloudflare" | "stripe" | "web",
   command: string,
   args: string[],
   env: NodeJS.ProcessEnv,
   input: {
     pipeOutput?: boolean;
-    stderrTarget?: NodeJS.WriteStream;
-    stdoutTarget?: NodeJS.WriteStream;
+    stderrTarget?: NodeJS.WritableStream;
+    stdoutTarget?: NodeJS.WritableStream;
   } = {},
 ): BufferedNamedChildProcess {
   const child = spawn(command, args, {
@@ -163,6 +164,195 @@ export async function waitForFirstChildExit(
       entry.child.once("exit", () => resolve(entry));
     }
   });
+}
+
+export class StripeCliMissingError extends Error {
+  constructor() {
+    super("stripe CLI executable was not found on PATH");
+    this.name = "StripeCliMissingError";
+  }
+}
+
+export interface StripeListenerSpawnResult {
+  child: BufferedNamedChildProcess;
+  secret: string;
+}
+
+export async function spawnStripeListenerWithSecretCapture(input: {
+  command: string;
+  args: string[];
+  env: NodeJS.ProcessEnv;
+  pipeOutput?: boolean;
+  stderrTarget?: NodeJS.WritableStream;
+  stdoutTarget?: NodeJS.WritableStream;
+  timeoutMs: number;
+}): Promise<StripeListenerSpawnResult> {
+  const child = spawn(input.command, input.args, {
+    cwd: repoRoot,
+    detached: process.platform !== "win32",
+    env: input.env,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+
+  child.stdout?.setEncoding("utf8");
+  child.stderr?.setEncoding("utf8");
+
+  const stdoutCapture = createOutputBuffer();
+  const stderrCapture = createOutputBuffer();
+
+  let secret: string;
+  try {
+    secret = await new Promise<string>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        cleanup();
+        reject(
+          new Error(
+            `stripe listen did not print a webhook signing secret within ${input.timeoutMs}ms; stderr: ${tail(stderrCapture.read(), 512)}`,
+          ),
+        );
+      }, input.timeoutMs);
+
+      // Stripe CLI versions differ on which stream carries the startup
+      // "Ready!" banner that contains `whsec_...`: older builds print it to
+      // stdout, current builds print it to stderr. Scan both so the capture
+      // keeps working as the CLI evolves.
+      const onStdout = (chunk: string | Buffer): void => {
+        stdoutCapture.append(chunk);
+        const match = /whsec_[A-Za-z0-9_]+/.exec(stdoutCapture.read());
+        if (match) {
+          cleanup();
+          resolve(match[0]);
+        }
+      };
+
+      const onStderr = (chunk: string | Buffer): void => {
+        stderrCapture.append(chunk);
+        const match = /whsec_[A-Za-z0-9_]+/.exec(stderrCapture.read());
+        if (match) {
+          cleanup();
+          resolve(match[0]);
+        }
+      };
+
+      const onExit = (code: number | null): void => {
+        cleanup();
+        reject(
+          new Error(
+            `stripe listen exited with code ${code ?? "unknown"} before printing a secret; stderr: ${tail(stderrCapture.read(), 512)}`,
+          ),
+        );
+      };
+
+      const onError = (error: NodeJS.ErrnoException): void => {
+        cleanup();
+        if (error.code === "ENOENT") {
+          reject(new StripeCliMissingError());
+          return;
+        }
+        reject(error);
+      };
+
+      const cleanup = (): void => {
+        clearTimeout(timer);
+        child.stdout?.off("data", onStdout);
+        child.stderr?.off("data", onStderr);
+        child.off("exit", onExit);
+        child.off("error", onError);
+      };
+
+      child.stdout?.on("data", onStdout);
+      child.stderr?.on("data", onStderr);
+      child.once("exit", onExit);
+      child.once("error", onError);
+    });
+  } catch (error) {
+    // Pre-capture rejection must not leak a detached `stripe listen` process.
+    // StripeCliMissingError means spawn ENOENT'd, so there is no running child.
+    // Otherwise kill the child best-effort — if it has already exited, kill()
+    // returns false without throwing, so this stays safe either way.
+    if (!(error instanceof StripeCliMissingError)) {
+      try {
+        child.kill("SIGTERM");
+      } catch {
+        // best-effort; child may already be gone
+      }
+    }
+    throw error;
+  }
+
+  // Line-buffered redactor: holds partial lines until a newline arrives so a
+  // `whsec_...` split across chunk boundaries still gets replaced before any
+  // downstream consumer (pipe target or text buffer) sees it.
+  const stdoutLineRedactor = createLineBufferedSecretRedactor(secret);
+  const stderrLineRedactor = createLineBufferedSecretRedactor(secret);
+
+  const stdoutBuffer = createOutputBuffer();
+  const stderrBuffer = createOutputBuffer();
+
+  const redactedStdout = new PassThrough();
+  const redactedStderr = new PassThrough();
+  redactedStdout.setEncoding("utf8");
+  redactedStderr.setEncoding("utf8");
+
+  redactedStdout.on("data", (chunk: string | Buffer) => {
+    stdoutBuffer.append(chunk.toString());
+  });
+  redactedStderr.on("data", (chunk: string | Buffer) => {
+    stderrBuffer.append(chunk.toString());
+  });
+
+  if (input.pipeOutput !== false) {
+    pipeWithPrefix("stripe", redactedStdout, input.stdoutTarget ?? process.stdout);
+    pipeWithPrefix("stripe", redactedStderr, input.stderrTarget ?? process.stderr);
+  }
+
+  const stdoutInitial = stdoutLineRedactor.push(stdoutCapture.read());
+  if (stdoutInitial.length > 0) {
+    redactedStdout.write(stdoutInitial);
+  }
+  const stderrInitial = stderrLineRedactor.push(stderrCapture.read());
+  if (stderrInitial.length > 0) {
+    redactedStderr.write(stderrInitial);
+  }
+
+  child.stdout?.on("data", (chunk: string | Buffer) => {
+    const redacted = stdoutLineRedactor.push(chunk.toString());
+    if (redacted.length > 0) {
+      redactedStdout.write(redacted);
+    }
+  });
+  child.stderr?.on("data", (chunk: string | Buffer) => {
+    const redacted = stderrLineRedactor.push(chunk.toString());
+    if (redacted.length > 0) {
+      redactedStderr.write(redacted);
+    }
+  });
+  child.stdout?.on("end", () => {
+    const flushed = stdoutLineRedactor.flush();
+    if (flushed.length > 0) {
+      redactedStdout.write(flushed);
+    }
+    redactedStdout.end();
+  });
+  child.stderr?.on("end", () => {
+    const flushed = stderrLineRedactor.flush();
+    if (flushed.length > 0) {
+      redactedStderr.write(flushed);
+    }
+    redactedStderr.end();
+  });
+
+  return {
+    child: {
+      child,
+      name: "stripe",
+      stderrTail: (maxChars?: number): string => tail(stderrBuffer.read(), maxChars),
+      stderrText: (): string => stderrBuffer.read(),
+      stdoutTail: (maxChars?: number): string => tail(stdoutBuffer.read(), maxChars),
+      stdoutText: (): string => stdoutBuffer.read(),
+    },
+    secret,
+  };
 }
 
 export async function runCommand(
@@ -824,12 +1014,14 @@ async function requestStatus(input: {
 function pipeWithPrefix(
   prefix: string,
   stream: NodeJS.ReadableStream | null | undefined,
-  target: NodeJS.WriteStream,
+  target: NodeJS.WritableStream,
+  options: { redactor?: (line: string) => string } = {},
 ): void {
   if (!stream) {
     return;
   }
 
+  const redact = options.redactor ?? ((line: string): string => line);
   let buffer = "";
 
   stream.on("data", (chunk: string | Buffer) => {
@@ -843,13 +1035,13 @@ function pipeWithPrefix(
 
       const line = buffer.slice(0, newlineIndex);
       buffer = buffer.slice(newlineIndex + 1);
-      target.write(`[${prefix}] ${line}\n`);
+      target.write(`[${prefix}] ${redact(line)}\n`);
     }
   });
 
   stream.on("end", () => {
     if (buffer.length > 0) {
-      target.write(`[${prefix}] ${buffer}\n`);
+      target.write(`[${prefix}] ${redact(buffer)}\n`);
       buffer = "";
     }
   });
@@ -867,6 +1059,33 @@ function createOutputBuffer(): {
     },
     read(): string {
       return value;
+    },
+  };
+}
+
+function createLineBufferedSecretRedactor(secret: string): {
+  push(chunk: string): string;
+  flush(): string;
+} {
+  let pending = "";
+  const redactLine = (text: string): string =>
+    text.includes(secret) ? text.split(secret).join("[redacted whsec]") : text;
+
+  return {
+    push(chunk: string): string {
+      pending += chunk;
+      const lastNewline = pending.lastIndexOf("\n");
+      if (lastNewline < 0) {
+        return "";
+      }
+      const complete = pending.slice(0, lastNewline + 1);
+      pending = pending.slice(lastNewline + 1);
+      return redactLine(complete);
+    },
+    flush(): string {
+      const last = pending;
+      pending = "";
+      return redactLine(last);
     },
   };
 }
