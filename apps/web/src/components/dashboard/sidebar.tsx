@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { usePrivy, useUser } from "@privy-io/react-auth";
-import { ChevronsUpDown, LogOut } from "lucide-react";
+import { ChevronsUpDown } from "lucide-react";
 import type { CSSProperties } from "react";
 
 import { Avatar, AvatarFallback } from "@/src/components/ui/avatar";
@@ -109,7 +109,6 @@ function AccountMenu() {
             </DropdownMenuGroup>
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={() => void logout()}>
-              <LogOut className="size-4" />
               Sign out
             </DropdownMenuItem>
           </DropdownMenuContent>
@@ -132,13 +131,13 @@ export function Sidebar() {
       )}
       style={sidebarThemeStyle}
     >
-      <SidebarHeader className="pt-5 pb-1">
+      <SidebarHeader className="pt-7 pb-4">
         <BrandMark />
-        <div className="mt-2 h-px bg-white/10" />
+        <div className="mt-4 h-px bg-white/10" />
       </SidebarHeader>
 
       <SidebarContent className="px-2">
-        <SidebarMenu>
+        <SidebarMenu className="gap-1">
           {navItems.map((item) => {
             const activePrefix = item.matchPrefix ?? item.href;
             const isActive =
