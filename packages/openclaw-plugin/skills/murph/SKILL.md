@@ -43,10 +43,14 @@ When you answer, summarize the relevant Murph output instead of dumping large ra
 
 When a user asks to start, run, explore, or set up a protocol, keep the flow as planning until the user explicitly confirms the final run plan. Do not create an active experiment or scheduled automation from the first message alone.
 
-Read the protocol first. If the protocol comes from Health Commons and has an `experimentOnboarding` block, use that block as the source for the start prompt, vault checks, safety screen, setup slots, plan defaults, logging fields, and assistant support policy.
+Read the protocol first with `vault-cli protocol show <protocol id or slug> --format json`. If the user names a family or a fuzzy protocol idea, use `vault-cli protocol list --format json` or `vault-cli search query "<protocol name>" --format json` to resolve the canonical protocol page before planning.
+
+If the protocol comes from Health Commons and has an `experimentOnboarding` block, use that block as the source for the start prompt, vault checks, safety screen, setup slots, plan defaults, logging fields, assistant support policy, and protocol-specific read hints. If the page does not have an onboarding block, fall back to the protocol `safety`, `testPlans`, `protocol`, and `claims` fields for a lightweight onboarding flow.
 
 Useful commands:
 
+- `vault-cli protocol show <protocol id or slug> --format json` so you can read `protocol`, `safety`, `testPlans`, `experimentOnboarding`, and `revision.{pageRevisionId,runSpecRevisionId}` before asking setup questions.
+- `vault-cli protocol list --format json` when the user names a category or approximate protocol rather than one exact page.
 - `vault-cli experiment list --status active --format json` before starting, so Murph can preserve the one-meaningful-experiment default.
 - `vault-cli memory show --format json` for current saved context.
 - `vault-cli search query "<protocol-relevant context>" --format json` for conditions, medications, prior symptoms, injuries, recent workouts, or previous experiment notes.
@@ -59,9 +63,10 @@ Useful commands:
 Flow:
 
 1. Check for active experiments.
-2. Review relevant vault and wearable context before asking repeated setup questions.
+2. Review the protocol page and relevant vault or wearable context before asking repeated setup questions. If the onboarding block includes `contextReview.vaultChecks[].readHints`, treat those as the first read plan. If a hint looks abbreviated or stale, verify the exact command with `vault-cli <command path> --help` or `vault-cli <command path> --schema --format json` before running it.
 3. Ask the protocol safety screen even when the vault is silent, especially for high-caution protocols.
 4. Ask only setup slots that affect safety, logistics, measurement fidelity, or assistant support. Keep it to one or two questions per turn unless the user asks for a form.
 5. If a high-caution screen is positive or uncertain, do not start the protocol unsupervised. Suggest clinician guidance, a lower-intensity alternative, or postponing.
-6. Before writing, summarize the exact protocol reference, baseline/intervention dates, schedule, modality or dose, logging fields, stop conditions, and reminder policy.
-7. Use neutral language for reminders and missed-log checks. A missed-log check should ask whether the session happened, not imply failure.
+6. Before writing, summarize the exact protocol reference, `revision.pageRevisionId`, `revision.runSpecRevisionId`, selected `testPlanId`, baseline/intervention dates, schedule, modality or dose, logging fields, stop conditions, and reminder policy.
+7. If you persist a richer run with `vault-cli experiment update --input -`, include `protocolRef.key`, `protocolRef.pageRevisionId`, `protocolRef.runSpecRevisionId`, and the chosen `testPlanId` instead of copying protocol prose into ad hoc fields.
+8. Use neutral language for reminders and missed-log checks. A missed-log check should ask whether the session happened, not imply failure.

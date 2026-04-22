@@ -178,7 +178,10 @@ Ready to get started?`)
 
     expect(prompt).toContain('Experiment onboarding:')
     expect(prompt).toContain(
-      'Resolve the protocol page and use its Health Commons `experimentOnboarding` block when available.',
+      'Resolve the protocol page first with `vault-cli protocol show <protocol id or slug> --format json`.',
+    )
+    expect(prompt).toContain(
+      "Use the protocol page's Health Commons `experimentOnboarding` block when available.",
     )
     expect(prompt).toContain(
       'Before setup questions, check whether the user already has an active experiment with `vault-cli experiment list --status active --format json`.',
@@ -188,6 +191,9 @@ Ready to get started?`)
     )
     expect(prompt).toContain(
       'Create the run only after explicit confirmation, then use `vault-cli experiment create <slug> --title "<title>" --hypothesis "<hypothesis>" --startedOn <YYYY-MM-DD> --status active` for a simple run',
+    )
+    expect(prompt).toContain(
+      'When you write a richer run, preserve the exact protocol `key`, `pageRevisionId`, `runSpecRevisionId`, and chosen `testPlanId` under `protocolRef`',
     )
   })
 })
