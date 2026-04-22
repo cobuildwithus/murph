@@ -6,6 +6,8 @@ Last verified: 2026-04-22
 
 Murph can already surface public experiment protocols and can already create private experiment runs in the vault, but it needs a durable contract for the step in between: helping a user explore whether and how to start a protocol without silently converting the first message into an active run.
 
+Because Murph's downstream outcome-card and contribution loop depends on exact protocol lineage, onboarding must preserve the runnable protocol reference before any run exists.
+
 ## Product Boundary
 
 Experiment onboarding is planning by default.
@@ -14,6 +16,7 @@ Experiment onboarding is planning by default.
 - Health Commons protocol pages may carry an `experimentOnboarding` block that defines the start intent, context review hints, safety screen, setup slots, plan defaults, logging fields, and assistant-support policy for that protocol.
 - The onboarding block is public protocol metadata. It does not itself create a private run, reminder, or user state.
 - Private run creation still happens only in the user vault after explicit confirmation.
+- The richer downstream loop is: onboarding plan -> private run -> outcome card -> optional sharing or contribution. Onboarding owns only the planning step.
 - Safety-screen positives or uncertainty are guardrails for unsupervised setup, not diagnoses.
 - Reminder automations are opt-in and should use neutral language that records what happened rather than implying failure.
 
@@ -47,6 +50,7 @@ Before Murph writes a private run, it should already know the exact Health Commo
 - Preserve `protocolRef.key`, `protocolRef.pageRevisionId`, `protocolRef.runSpecRevisionId`, and the selected `testPlanId` in the richer private run record.
 - Treat `runSpecRevisionId` as the hash of the runnable contract: protocol dose, safety, test plans, and experiment onboarding. Copy edits or narrative body changes may change `pageRevisionId` without changing `runSpecRevisionId`.
 - The private run should store user choices and assistant support policy separately from public protocol copy.
+- Completed outcome cards, shares, and community contributions must remain traceable back to this exact runnable contract.
 
 ## Reminder Policy
 
@@ -74,6 +78,7 @@ Chat is the interface. The onboarding block and the saved run are the source of 
 - Ask the safety screen even when the vault is silent for high-caution protocols.
 - Keep setup lightweight: ask only the slots that materially affect safety, logistics, measurement fidelity, or assistant support, and prefer one or two questions per turn.
 - Before any write, summarize the exact protocol reference, dates, schedule, modality or dose, logging expectations, stop conditions, and reminder policy.
+- That summary should be crisp enough that a later outcome card or share artifact can clearly point back to what was actually run.
 - Create the private run only after explicit confirmation.
 
 ## Success Criteria
@@ -84,3 +89,4 @@ Chat is the interface. The onboarding block and the saved run are the source of 
 4. A user must explicitly confirm before Murph creates an active experiment or reminder automation.
 5. High-caution protocols can steer users toward clinician guidance, lower-intensity alternatives, or postponement without pretending that Murph diagnosed them.
 6. Protocol-specific read hints stay on the public protocol page so assistants do not need a second protocol-by-protocol prompt fork to know which CLI reads matter.
+7. Completed runs remain traceable to exact protocol revisions so outcome cards, comparisons, and later cohort summaries mean the same thing.

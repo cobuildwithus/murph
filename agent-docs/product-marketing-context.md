@@ -1,221 +1,282 @@
 # Product Marketing Context
 
-*Last updated: 2026-04-10*
+*Last updated: 2026-04-22*
 
 ## Product Overview
-**One-liner:** A place to try things with your body and see what actually works — backed by research, measured by your wearable.
 
-**What it does:** Connect your wearable, browse a library of health experiments sourced from experts using AI, start one, follow the protocol, and see AI-analyzed results showing what changed. Each experiment is a bounded hypothesis — something to try, not a new way to live. You interact with Murph through Telegram, iMessage, or email — no app to download.
+**One-liner:** Murph is the experiment layer for personal health: run a protocol, measure what changed, and optionally contribute the result to a living Health Commons.
 
-**Product category:** Health experimentation / personal health assistant
+**Consumer shorthand:** Try things with your body, see what actually worked, and learn from other people doing the same.
 
-**Product type:** SaaS ($15/mo or $150/yr managed launch pricing) — works through existing messaging apps, no separate app to install
+**What it does:** Connect your wearable, browse or receive a protocol recommendation, run one bounded experiment through Telegram, iMessage, or email, and get a private outcome card showing what changed, what may have confounded it, and whether it looks worth repeating. Over time, Murph is building toward a living Health Commons where opt-in, structured results help people discover what works for bodies like theirs without turning health into a leaderboard.
+
+**Product category:** Personal health experimentation / protocol outcome network
+
+**Product type:** SaaS ($15/mo or $150/yr managed launch pricing) that works through existing messaging apps instead of a dedicated mobile app.
 
 **Business model:** $15/mo or $150/yr for the launch tier.
 
+## Positioning
+
+Murph should not be positioned primarily as a generic AI health assistant. The assistant is the wedge, not the moat.
+
+The wedge is:
+- chat-first personal experimentation
+- easy logging and follow-up in channels people already use
+- private before/after learning tied to wearable data
+
+The moat is:
+- exact protocol version + user context + adherence + biomarker deltas + confounders + cohort learning
+- a public Health Commons of protocol pages, biomarker pages, sources, and aggregate outcomes
+- a network of structured results rather than a generic chatbot transcript pile
+
+Useful internal analogies:
+- GitHub for exact protocol versions, variants, and diffs
+- Strava for lightweight sharing attached to real activity
+- Wikipedia for the public Health Commons of reusable knowledge
+
+Murph combines those patterns around protocols and outcomes rather than around identity, posting, or raw biomarker status.
+
 ## Product Philosophy
 
-Murph exists to help people understand their bodies better. Not to turn the body into a permanent optimization project.
+Murph exists to help people understand their bodies better without turning health into a permanent optimization project.
 
 **Presence without piety.** Help people notice more, obsess less, and trust themselves more.
 
 Core beliefs:
-- **Curiosity beats compliance.** The right feeling is "huh, interesting" — not "I need to get back on track."
-- **Silence is a feature.** A great health product knows when not to speak.
-- **Protocols are temporary tools, not identities.** Every experiment has a reason, a burden, an expected upside, a stop condition, and a review point.
-- **Numbers are clues, not verdicts.** A low score doesn't mean something is wrong. A mismatch between data and lived experience is often the interesting part.
-- **Life-fit beats marginal gain.** Recommendations should account for work, relationships, travel, pleasure, and ordinary human mess.
-- **The default should be "lighter," not "more."** The app should often say: keep this simple, leave this alone, this might be noise, this may not be worth it.
+- **Curiosity beats compliance.** The right feeling is "huh, interesting," not "I need to get back on track."
+- **Silence is a feature.** A good health product knows when not to speak.
+- **Compare interventions, not bodies.** The interesting question is what people tried and what changed, not who has the best resting heart rate.
+- **Protocols are temporary tools, not identities.** Every experiment has a reason, burden, expected upside, stop condition, and review point.
+- **Numbers are clues, not verdicts.** A low score is not a moral event.
+- **Life-fit beats marginal gain.** Recommendations and rankings should account for friction, social cost, pleasure, and ordinary life.
+- **Private by default, sharing by consent.** The product should never quietly turn private health behavior into public performance.
+- **Status should come from useful contribution, not elite biomarkers.** If there is social proof, it should reward clean experiments, helpful notes, replication, and good evidence.
 
 What we refuse to become:
-- A whispering earring that gets increasingly granular and directive
-- A protocol machine where the answer is always another stack, another fix
-- A shame engine that makes the body feel like a disappointing project
-- An anxiety business whose engagement comes from guilt and hypervigilance
+- A whispering earring that grows increasingly granular and directive
+- A protocol machine where the answer is always another stack
+- A shame engine that makes people feel behind or broken
+- An anxiety business powered by guilt and hypervigilance
+- A health-status social network that ranks bodies before it teaches anything
 
 ## Target Audience
-**Target users:** People who own a wearable (Oura, Whoop, eventually Garmin/Apple Watch) and want more from their data than a daily score.
 
-**Primary use case:** Running bounded health experiments with measurable outcomes instead of passively checking scores.
+**Target users:** Wearable owners (Oura, WHOOP, and adjacent device users over time) who want more from their data than passive scores and are willing to try small experiments.
+
+**Initial ICP:** The data-curious, socially motivated experimenter who already screenshots graphs to friends, wants clearer answers than "my score was weird," and does not want another app or a permanent health identity.
+
+**Primary use case:** Run one bounded protocol, measure what changed, and decide whether it is worth repeating, sharing, or contributing anonymously.
 
 **Jobs to be done:**
-- Help me figure out what to actually try — and whether it worked for my body
-- Give me expert-backed experiments I can trust, not random internet advice
-- Let me learn something concrete, then move on
+- Help me figure out what to try next and whether it worked for my body
+- Show me what people like me tried, what changed, and how confident the signal looks
+- Give me a result I can keep private, share with friends, or contribute to the commons
+- Keep the whole loop lightweight enough that I do not need another dashboard or logging chore
 
 **Use cases:**
-- "I want to improve my HRV — what should I try, and did it work?"
-- "I heard cold showers help recovery — let me try it and see"
-- "I quit drinking — show me the data on how my body responded"
-- "My sleep sucks — what do experts suggest that I can actually measure?"
+- "I want to improve my HRV. What should I try, and did it work?"
+- "I heard Norwegian 4x4 can move VO2 max. Show me the cleanest version and what people actually saw."
+- "I stopped drinking. Give me a result card I can compare against my baseline."
+- "My sleep sucks. What low-burden protocol is worth trying first?"
+- "Show me what people with bodies like mine tried, without turning this into a gross comparison game."
 
 ## Personas
-*B2C product — single persona for MVP*
 
 | Persona | Cares about | Challenge | Value we promise |
-|---------|-------------|-----------|------------------|
-| Health-curious wearable owner | Understanding their body better, sleeping/recovering/feeling better | Data overload without actionability, "3-month wall" where wearable becomes useless, anxiety from scores | Bounded experiments that answer real questions about your body — then get out of the way |
+| --- | --- | --- | --- |
+| Data-curious wearable experimenter | Learning what actually helps, with enough proof to trust the answer | Scores create awareness but not action; screenshots and anecdotes do not add up to clean learning | Run one protocol, get a private outcome card, and learn from cleaner cohort evidence when you want it |
 
 ## Problems & Pain Points
-**Core problem:** Wearables give you data but never tell you what to do with it. You check your recovery score, shrug, and go about your day. After 3 months the novelty wears off and the device sits in a drawer.
+
+**Core problem:** Wearables create awareness without an experiment loop. People accumulate scores, anecdotes, and screenshots but still do not know what to try, what changed, or how to learn from other people's results.
 
 **Why alternatives fall short:**
-- Whoop/Oura dashboards show scores but no action plan
-- Wearable companion apps live on your phone in a place you don't want to be — opening a mobile app to chat with an advisor or log a meal feels clunky. Logging takes too long, the assistant is buried, the experience doesn't fit how people communicate.
-- Generic health advice isn't personalized to your biometrics
-- No way to measure whether a specific protocol actually worked for you
-- AI chatbots can analyze data but require technical setup
-- Most health apps escalate: more tracking, more nudges, more guilt
-- Most health apps monetize your data or require yet another app on your phone
+- Wearable dashboards show status but not exact protocol-versioned before/after learning
+- Wearable assistants and generic AI can answer questions, but they do not bind advice to exact protocol revisions, adherence, confounders, and sharable outcomes
+- People already share graphs with friends, but the unit of sharing is messy and unstructured
+- Most health communities drift into status comparison, guru dynamics, or protocol stacking
+- Most health apps either keep the experience purely private or make the social layer feel gross
+- Most health products still require opening another app to log, ask, or reflect
 
-**What it costs them:** Wasted subscription, abandoned devices, no behavior change despite owning health data.
+**What it costs them:** Wasted wearable subscriptions, abandoned devices, weak behavior change, noisy self-experiments, and no compounding shared evidence.
 
-**Emotional tension:** Frustration ("I have all this data and nothing changes"), anxiety from tracking ("bad score ruins my day"), creeping guilt ("I should be doing more with this").
+**Emotional tension:** "I want clearer answers and some social proof, but I do not want my body turned into a competition."
 
 ## Competitive Landscape
-**Direct:** No direct competitor combines wearable data + expert-sourced experiment library + AI analysis in one product.
+
+**Direct:** No direct competitor combines exact protocol versions, wearable-connected private runs, sharable outcome cards, and an opt-in Health Commons of aggregate results.
 
 **Secondary:**
-- Whoop/Oura native apps — show data, no experiment framework
-- Whoop Coach AI / Oura Advisor — generic suggestions, not structured experiments with before/after measurement
-- Manual DIY (export CSV, paste into ChatGPT) — works but requires effort, no protocol library
+- Wearable apps with built-in AI helpers
+- Generic AI chat used as a DIY health coach
+- Research databases, podcasts, and expert content
+- Manual spreadsheet or screenshot-based self-experimentation
+- Human coaching
 
-**Indirect:**
-- Health coaches / personal trainers — expensive, not data-driven
-- Huberman Lab / podcasts — great protocols but no measurement infrastructure
-- Examine.com / research databases — information without implementation
-- General-purpose AI (ChatGPT, Gemini, Claude) as DIY health coach — people already do this but must manually prompt, paste data, and maintain context across sessions. No wearable integration, no experiment structure, no persistent memory.
+**Strategic read:** Assistant-only positioning is weak because assistant features will be table stakes. The defensible layer is the protocol outcome graph: protocol family -> protocol variant -> private run -> outcome card -> cohort summary -> next protocol discovery.
 
 ## Differentiation
+
 **Key differentiators:**
-- Expert-sourced experiment library with real study citations
-- Automatic baseline measurement (7 days before) vs experiment period comparison
-- AI analysis connecting your biometric changes to research
-- One experiment at a time = you know what caused the change
-- Match % based on your profile data — personalized recommendations
-- Every experiment has a stop condition — we don't escalate, we conclude
-- Chat-first interface — talk to Murph through Telegram, iMessage, or email. Log a meal, ask about your experiment, get a reminder. No app to open.
-- Your data stays yours — encrypted infrastructure, minimal data collection, no data sales. Health apps monetize your data; Murph doesn't.
-- Experiment-aware assistant — Murph knows what you're running and reaches out at the right moments. Reminds you to log what you ate, asks if you did your sauna session, nudges you when a check-in matters for the experiment. The assistant lives inside the experiment, not in a separate tab.
+- Exact protocol revision binding from public protocol page to private run to finished outcome
+- One meaningful experiment at a time by default for cleaner attribution
+- Private outcome cards with biomarker deltas, confidence, and confounders
+- Opt-in contribution path from private result to anonymous cohort learning
+- Health Commons that combines literature-backed protocol pages with community outcome summaries
+- Structured protocol variants and forks instead of vague "I kind of tried this" posts
+- Chat-first interface in Telegram, iMessage, or email rather than a separate app
+- Anti-shame product design that rewards useful learning, not elite biomarkers
+- Privacy posture: private by default, minimal data exposure, no quiet data sale story
 
-**How we do it differently:** Instead of showing you a score and saying "good luck", we give you a bounded protocol, measure your baseline, track the experiment, and tell you what changed. Then we let you decide what's next.
+**How we do it differently:** Instead of showing a score and saying "good luck," Murph gives the user a bounded protocol, a clean before/after frame, a private result, and an optional way to contribute that learning to something larger.
 
-**Why that's better:** Data becomes a tool for curiosity, not a source of anxiety. Each experiment answers a real question. And the product gets quieter as you learn more about yourself.
+**Why that is better:** Data becomes a tool for curiosity instead of a source of anxiety. Users learn something concrete from each run. The product gets more useful as the commons fills in, but it does not need to become louder or more addictive.
 
-**Why customers choose us:** The wearable finally makes sense. You learn something concrete about your body and move on.
+**Why customers choose us:** Their wearable finally becomes useful, and the result is something they can actually act on or share.
+
+## Product Loop
+
+1. Discover a protocol or ask Murph what is worth trying.
+2. Start a private, bounded run tied to an exact protocol revision.
+3. Log only what matters for the run.
+4. Finish with a private outcome card showing what changed.
+5. Keep it private, share it with selected friends, or contribute it anonymously.
+6. Use that result and the commons to decide what to try next.
+
+The first-class social object is the completed outcome card, not the biomarker itself and not a scrolling feed.
 
 ## Objections
-| Objection | Response |
-|-----------|----------|
-| "I already have Whoop/Oura — why another app?" | We don't replace your wearable. We make it useful. Your device collects data, we turn it into experiments with measurable outcomes. |
-| "I can just Google protocols and track them myself" | You could. But you won't set up a proper baseline, control for variables, or compare your data to the research. We automate that. |
-| "One experiment at a time is too limiting" | That's the point. Running multiple means you can't attribute changes to anything specific. Clean experiments = trustworthy results. |
-| "Won't this just make me more obsessed with my data?" | The opposite. Experiments have a defined end. You try something, learn from it, and move on. No infinite dashboards, no daily score anxiety. |
-| "I don't want another app on my phone" | There isn't one. Murph works through Telegram, iMessage, or email — wherever you already are. |
-| "Is my health data safe?" | Encrypted infrastructure, minimal data collection, no data sales. Your data stays yours. |
 
-**Anti-persona:** People who want a passive dashboard. People who don't own a wearable. People looking for medical diagnosis. People who want to be told what to do every day forever.
+| Objection | Response |
+| --- | --- |
+| "I already have Oura or WHOOP." | Murph does not replace the wearable. It gives the wearable an experiment loop and a result worth acting on. |
+| "I can already do this in ChatGPT." | You can improvise the analysis, but you do not get exact protocol versions, persistent run context, clean before/after structure, sharable outcome cards, or a living commons of comparable results. |
+| "This sounds like social health leaderboards." | That is explicitly not the goal. Murph compares interventions and outcomes, keeps sharing opt-in, and avoids raw body-ranking as the default social mechanic. |
+| "Won't this make me more obsessive?" | The product is built around one bounded run, explicit stop conditions, and lightweight sharing. It should lower noise, not create more of it. |
+| "I do not want another app." | There is not one. Murph works through the messaging channels people already use. |
+| "I do not want my health data to become public." | Private is the default. Public learning comes only from explicit contribution, and it should be aggregated or permissioned rather than silently identity-first. |
+
+**Anti-persona:** People who want a passive dashboard only. People seeking diagnosis. People who mainly want public health-status leaderboards. People who want the app to tell them what to do every day forever.
 
 ## Switching Dynamics
-**Push:** "I'm paying $30/mo for Whoop and not using the data." / "After 3 months it just tells me what I already know." / "Too much data, no actionability."
-**Pull:** "I can see if sauna actually improved my HRV." / "Expert-backed protocols, not random advice." / "It concludes — I don't have to track forever." / "I just text it — no app to open." / "It reminds me what to log for my experiment." / "My data isn't being sold."
-**Habit:** Checking the daily score is a habit even if it's useless. People are used to passive monitoring.
-**Anxiety:** "What if the experiments don't show results?" / "What if I can't follow the protocol perfectly?" / "Am I just adding another health app to the pile?"
+
+**Push:** "I pay for the wearable but I am not using the data." / "After a few months it just tells me what I already know." / "I already screenshot graphs to friends because the app itself is not enough."
+
+**Pull:** "I can see whether a protocol actually moved my numbers." / "I can learn from people like me without turning it into a competition." / "The result is shareable if it is useful." / "I just text it; I do not have to open another app."
+
+**Habit:** Passive score checking is easy even when it is not helpful. Existing social behavior already happens in screenshots, texts, and anecdotes rather than in structured product loops.
+
+**Anxiety:** "What if the experiment does not show anything?" / "What if my result looks bad?" / "What if this turns into another health-status rabbit hole?"
 
 ## Customer Language
+
 **How they describe the problem:**
-- "I wasn't using the data to change anything"
-- "I stopped doing the things I loved because the data told me to"
-- "Too much information and not really that helpful"
-- "It only told me what I already knew"
-- "The insights are not actionable"
-- "It never tells you what to actually do differently"
-- "Expensive self-awareness with no behavioral loop"
-- "How much stress is added by tracking your stress?"
-- "Useful for 3 months, then you catch the patterns and it's done"
-- "I felt fine but my score said I recovered bad, and it got in my head"
-- "I don't want to open a separate app just to log a meal or talk to an advisor"
-- "The assistant in my wearable app is buried and clunky"
-- "Logging takes too long, I just stop doing it"
+- "I have all this data and I am still not changing anything."
+- "The wearable told me something was off, but not what to try."
+- "I already send screenshots to friends when something weird happens."
+- "It is too much information without a clear experiment."
+- "I want to know what people actually tried and what changed."
+- "Show me where I stand without making it weird."
+- "Do not make this into a gross leaderboard."
+- "I do not want another app just to log something small."
 
 **How they describe what they want:**
-- "Connect the API to AI and get a daily overview of what to do"
-- "Seeing the effect of a single drink on my HRV made me stop drinking"
-- "The gap is connecting daily inputs (food, timing, habits) to outputs"
-- "Tell me how hard to push myself each day"
-- "Something that reaches out to me, not something I have to remember to open"
-- "Log a meal in two seconds by texting what I ate"
+- "Tell me what is worth trying first."
+- "Give me a clean before/after."
+- "Show me what worked for people like me."
+- "Let me share the result if it is interesting."
+- "I want the social part to help me learn, not compare bodies."
+- "Keep it lightweight."
 
-**Words to use:** experiment, try, see what happens, your body, what changed, evidence, expert-backed, bounded, protocol, baseline, results, interesting, clue, notice
+**Words to use:** experiment, protocol, outcome, what changed, baseline, confidence, confounders, cohort, contribution, evidence, result card, worth trying, private by default
 
-**Words to avoid:** optimize, biohack, score, tracking, monitoring, dashboard, data-driven, crush it, level up, hack, stack, routine (when meaning permanent lifestyle change)
+**Words to avoid:** optimize, biohack, leaderboard, top percentile, elite, compliance, score, monitoring, crush it, level up, hack, stack
 
 **Glossary:**
 | Term | Meaning |
-|------|---------|
-| Experiment | A bounded health protocol — something to try, with a start, end, and review point |
-| Baseline | 7 days of data before an experiment starts, used as the comparison point |
-| Protocol | The specific instructions for an experiment (frequency, duration, dosage, timing) |
-| Match % | How well an experiment fits your profile based on your wearable data |
-| Evidence level | How strong the research is (clinical trial → expert opinion → anecdotal) |
+| --- | --- |
+| Experiment | A bounded health protocol with a start, end, and review point |
+| Protocol | The exact instructions for an experiment version |
+| Outcome card | The concise result of a completed run, including what changed and how trustworthy it looks |
+| Health Commons | The public protocol, biomarker, source, and aggregate-outcome layer |
+| Contribution | An explicit choice to turn a private result into public or cohort learning |
+| Confidence | Murph's honest read on how clean the signal looks, not proof of causation |
 
 ## Brand Voice
-**Tone:** Warm, curious, grounded. Like a friend who reads the research and tells you the interesting parts — without lecturing.
 
-**Style:** Direct, conversational, no jargon. Present data as signal with uncertainty, not judgment. Prefer "huh, interesting" over "you need to fix this."
+**Tone:** Warm, curious, grounded, lightly skeptical. Murph should sound like a calm companion who knows the research and respects uncertainty.
 
-**Personality:** Curious, calm, trustworthy, understated, gently skeptical. Anti-hype.
+**Style:** Direct, conversational, no hype. Present data as signal with caveats, not as moral judgment or clinical certainty.
+
+**Personality:** Curious, calm, trustworthy, understated, anti-hype.
 
 **What we sound like:**
-- "Worth trying. Here's what changed."
-- "Probably noise. Don't worry about it."
-- "Interesting — your HRV moved. Could be the magnesium, could be the better sleep. Hard to say."
-- "You finished the experiment. Here's what we saw. Want to try something else, or leave it?"
+- "You finished the run. Here is what moved, what may have confounded it, and what looks worth repeating."
+- "Could be noise. Probably not worth optimizing right now."
+- "Interesting. People running this protocol often see a signal here, but your result looks mixed."
+- "This is worth sharing if it helped. You can also keep it private."
 
 **What we never sound like:**
-- "Your recovery is DOWN 12%! Take action NOW."
-- "Unlock your full potential with these 5 protocols."
-- "You're falling behind on your health goals."
+- "Your recovery is down 12%. Fix this now."
+- "Beat your cohort."
+- "You are outperforming most users."
+- "Unlock your full potential with these five stacks."
 
 ## Proof Points
+
 **Metrics:** TBD (MVP stage)
 
-**Customers:** Early-access users with Oura or Whoop wearables.
+**Customers:** Early-access wearable owners experimenting with Oura, WHOOP, and adjacent data sources.
 
 **Value themes:**
 | Theme | Evidence |
-|-------|----------|
-| Passive data → bounded experiments | Wearable users say data is useless without an action framework |
-| Alcohol/HRV is the #1 "aha moment" | Seeing alcohol's effect on biometrics is the most common catalyst for actual behavior change |
-| 3-month wall is real | Wearables become useless after initial novelty — bounded experiments give a reason to keep going |
-| People already build this manually | Technically savvy users wire wearable APIs to AI — we make that accessible |
-| Expert trust matters | Study citations and evidence levels address "random internet advice" skepticism |
-| Tracking anxiety is a real problem | Many users report that scores make them feel worse, not better — bounded experiments with stop conditions solve this |
-| People already use general-purpose AI as health coaches | Users feed their height, weight, and training history into ChatGPT/Gemini/Claude and get workout plans back. It works but requires manual prompting, no wearable integration, no memory across sessions. We productize this with persistent context and real biometric data. |
-| "Graduation" is a feature, not churn | Users quit wearables after learning what they needed — "once I made the changes I didn't need the membership." Bounded experiments align with this: you learn, you finish, the product gets quieter. This is healthy, not failure. |
+| --- | --- |
+| Wearables need an experiment loop | Users already say passive scores are interesting at first and then stop changing behavior |
+| People already improvise this manually | Users screenshot graphs, text friends, or paste context into general AI tools |
+| The right share unit is the result, not the dashboard | People naturally talk about "I tried this and here is what happened," not "here is my abstract health profile" |
+| Exact protocol version matters | Clean before/after learning requires knowing what someone actually did, not just the topic |
+| Social learning has to stay healthy | Users want to learn from others without body-status theater |
+| Graduation is a feature, not churn | Murph should help people learn, conclude, and get quieter over time |
 
 ## Goals
-**Business goal:** Validate the experiment loop with early-access users, then open access.
-**Conversion action:** Connect wearable → start first experiment.
-**Current metrics:** Pre-launch. Launch pricing is $15/mo or $150/yr.
 
-## Experiment Data Model
+**Business goal:** Validate the private experiment loop first, then validate that opt-in contributions and cohort learning materially improve discovery and retention.
 
-The library is a layered knowledge graph, not a flat list of protocols:
+**Primary conversion action:** Connect wearable -> start first experiment.
 
-**Missions** — long-horizon health directions (e.g., longevity, performance)
-**Domains** — areas of health (sleep, cardiovascular, nutrition, stress, exercise, supplements, circadian, breathwork/cold). Each domain groups related experiments and biomarkers.
-**Goal templates** — specific goals within a domain (e.g., lower resting heart rate, improve sleep consistency)
-**Experiment families** — categories of interventions that share a mechanism (e.g., heat exposure, aerobic base, meal timing)
-**Protocol variants** — specific, actionable versions within a family. Each variant has instructions, contraindications, a source expert, and links to biomarkers with expected direction, latency, evidence level, and confidence score.
-**Biomarkers** — measured outcomes with reference ranges, mechanisms, guardrails, and healthspan evidence. Each biomarker supports multiple measurement contexts (e.g., nighttime wearable vs morning manual vs clinical).
-**Source people** — experts behind protocols
-**Source artifacts** — studies and references backing each claim
+**Compounding loop:** Finish experiment -> review outcome card -> share or contribute if useful -> discover next protocol.
 
-Each protocol tells you what should change, how long it might take, and how confident the research is. Active experiments bind a protocol to a hypothesis, a primary biomarker, and a time window — with a clear start, end, and review point.
+## Protocol Outcome Graph
+
+Murph is not a flat library and not just a chat thread. The product graph is:
+
+- **Missions** - long-horizon health directions such as longevity, resilience, or performance
+- **Domains** - areas such as sleep, cardiovascular, nutrition, stress, exercise, supplements, circadian, or recovery
+- **Goal templates** - specific desired changes within a domain
+- **Experiment families** - categories of interventions sharing a mechanism
+- **Protocol variants** - exact performable versions with instructions, contraindications, and expected biomarker directions
+- **Biomarkers** - measured outcomes with context, caveats, and expected latency
+- **Private runs** - one user's bounded execution of one exact protocol revision
+- **Outcome cards** - concise results derived from those runs
+- **Contribution records** - explicit permissioned summaries used for cohort learning
+- **Cohort summaries** - aggregate "what people saw" blocks on protocol and biomarker pages
+- **Protocol variants and forks** - structured diffs that keep lineage clear instead of turning protocols into free-form posts
+- **Source people and source artifacts** - the literature, experts, and references behind each claim
+
+The compounding asset is the graph from biomarker -> goal -> protocol family -> protocol variant -> run -> outcome -> cohort -> next protocol.
 
 ## Design & Tech
-**Stack:** Next.js + Tailwind, Postgres (Supabase/Neon), Claude API, Oura API v2, Whoop API v1, Vercel
-**Design aesthetic:** Warm, natural — cream background, olive accents, Fraunces serif + DM Sans. Grounded and calm, not clinical or tech-bro.
-**Key screens:** Library (browse/filter/recommended), Experiment Detail (protocol + research + safety), Your Results (active experiment with live metrics vs baseline)
-**Expert sources:** Peter Attia, Rhonda Patrick, Andrew Huberman, Bryan Johnson, Andy Galpin, Matthew Walker, Layne Norton, David Sinclair, Tim Ferriss, Wim Hof, James Clear, Gabrielle Lyon, Sara Gottfried, Stan Efferding, and others.
+
+**Stack:** Next.js + Tailwind, Postgres, hosted execution, local vault surfaces, wearable integrations, and AI providers.
+
+**Design aesthetic:** Warm, calm, grounded. Avoid clinical dashboards and avoid hype-y quantified-self visuals.
+
+**Key screens and surfaces:**
+- Health Commons protocol page
+- Biomarker page with community outcomes
+- Private experiment run and result card
+- Friend or cohort digest
+- Chat-based onboarding, logging, and check-ins
+
+**Design rule:** If a surface makes the body feel like a public scoreboard, it is pointed in the wrong direction.
