@@ -366,11 +366,11 @@ describe("hosted runner container image contract", () => {
     );
     expect(packageJson.scripts?.["runner:docker:smoke:prepare"]).toContain("pnpm --filter @murphai/cloudflare-runner... run build && pnpm runner:bundle:assemble-only &&");
     expect(packageJson.scripts?.["test:e2e:linq-delivery:local"]).toContain(
-      "pnpm runner:bundle:assemble-only &&",
+      "pnpm runner:bundle:hosted-local &&",
     );
     expect(packageJson.scripts?.["test:e2e:linq-delivery:local"]).toContain("MURPH_DEV_SKIP_RUNNER_BUNDLE=1");
     expect(packageJson.scripts?.["test:e2e:telegram:local"]).toContain(
-      "pnpm runner:bundle:assemble-only &&",
+      "pnpm runner:bundle:hosted-local &&",
     );
     expect(packageJson.scripts?.["test:e2e:telegram:local"]).toContain("MURPH_DEV_SKIP_RUNNER_BUNDLE=1");
     expect(container.image).toBe("../../../Dockerfile.cloudflare-hosted-runner");

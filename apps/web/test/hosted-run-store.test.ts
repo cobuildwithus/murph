@@ -1009,6 +1009,95 @@ describe("acquireHostedRunTx", () => {
     mocks.lockHostedExecutionCursorRowTx.mockResolvedValue(undefined);
   });
 
+  it("returns no work when there are no wakes and no runtime timer unless repair was requested explicitly", async () => {
+    const cursor = buildCursorRow();
+    const hostedRunCreate = vi.fn();
+    const tx = asHostedRunMutationTx({
+      hostedRun: {
+        create: hostedRunCreate,
+        findFirst: vi.fn(async () => null),
+        findMany: vi.fn(async () => []),
+      },
+      hostedIngressEvent: {
+        findMany: vi.fn(async () => []),
+        update: vi.fn(),
+        updateMany: vi.fn(),
+      },
+    });
+
+    mocks.ensureHostedExecutionCursorRowTx.mockResolvedValue(cursor);
+
+    const result = await acquireHostedRunTx({
+      tx,
+      userId: "member_123",
+    });
+
+    expect(result).toMatchObject({
+      acquired: false,
+      events: [],
+      pendingIngressEventCount: 0,
+      resumeFinalize: false,
+      run: null,
+    });
+    expect(hostedRunCreate).not.toHaveBeenCalled();
+  });
+
+  it("creates an explicit manual repair run even when there are no wakes and no runtime timer", async () => {
+    const cursor = buildCursorRow();
+    const manualRepairRun = buildRunRow({
+      eventSeqs: [],
+      ingressEventIds: [],
+      runToken: "manual-repair-run-token",
+      triggerKind: "manual_repair",
+    });
+    const hostedRunCreate = vi.fn(async () => manualRepairRun);
+    const hostedIngressEventUpdateMany = vi.fn();
+    const tx = asHostedRunMutationTx({
+      hostedRun: {
+        create: hostedRunCreate,
+        findFirst: vi.fn(async () => null),
+        findMany: vi.fn(async () => []),
+      },
+      hostedIngressEvent: {
+        findMany: vi.fn(async () => []),
+        update: vi.fn(),
+        updateMany: hostedIngressEventUpdateMany,
+      },
+    });
+
+    mocks.ensureHostedExecutionCursorRowTx.mockResolvedValue(cursor);
+
+    const result = await acquireHostedRunTx({
+      triggerKind: "manual_repair",
+      tx,
+      userId: "member_123",
+    });
+
+    expect(result).toMatchObject({
+      acquired: true,
+      events: [],
+      pendingIngressEventCount: 0,
+      resumeFinalize: false,
+      run: expect.objectContaining({
+        eventCount: 0,
+        id: manualRepairRun.id,
+        inputCommittedSeq: "9",
+        inputCursorVersion: "3",
+        triggerKind: "manual_repair",
+        userId: "member_123",
+      }),
+      runToken: expect.any(String),
+    });
+    expect(hostedRunCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        eventCount: 0,
+        ingressEventIdsJson: [],
+        triggerKind: "manual_repair",
+      }),
+    });
+    expect(hostedIngressEventUpdateMany).not.toHaveBeenCalled();
+  });
+
   it("claims resumable finalize runs by moving them to finalizing with a fresh token", async () => {
     const cursor = buildCursorRow();
     const resumableRun = buildRunRow({

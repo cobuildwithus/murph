@@ -18,6 +18,7 @@ import type {
 
 afterEach(() => {
   vi.resetModules()
+  vi.unstubAllEnvs()
   vi.restoreAllMocks()
   vi.clearAllMocks()
   vi.doUnmock('@murphai/operator-config/operator-config')
@@ -590,12 +591,27 @@ test('sendAssistantNotificationLocal returns skip decisions without persisting o
 test('sendAssistantNotificationLocal surfaces failed delivery results', async () => {
   const providerSession = createAssistantSession()
   const sharedPlan = createSharedPlan()
+  const primaryRoute = createRoute({
+    providerOptions: {
+      baseUrl: 'https://api.primary.example.test/v1',
+      model: 'gpt-4.1-primary',
+    },
+    routeId: 'route-primary',
+  })
+  const backupRoute = createRoute({
+    providerOptions: {
+      baseUrl: 'https://api.backup.example.test/v1',
+      model: 'gpt-4.1-backup',
+    },
+    routeId: 'route-backup',
+  })
   const providerResult = createProviderResult({
     response: JSON.stringify({
       kind: 'send_message',
       text: 'Needs delivery',
       privateSummary: 'deliver',
     }),
+    route: backupRoute,
     session: providerSession,
   })
   const deliveryError = new Error('delivery exploded')
@@ -646,7 +662,7 @@ test('sendAssistantNotificationLocal surfaces failed delivery results', async ()
     resolveAssistantSessionForMessage: vi.fn(async () => ({
       session: providerSession,
     })),
-    resolveAssistantTurnRoutes: vi.fn(() => [providerResult.route]),
+    resolveAssistantTurnRoutes: vi.fn(() => [primaryRoute, backupRoute]),
     resolveAssistantTurnSharedPlan: vi.fn(async () => sharedPlan),
     withAssistantTurnLock: vi.fn(async (input: { run(): Promise<unknown> }) => await input.run()),
   }
@@ -703,6 +719,8 @@ test('sendAssistantNotificationLocal surfaces failed delivery results', async ()
     '../src/assistant/notification-turn.ts'
   )
 
+  vi.stubEnv('LINQ_API_BASE_URL', 'https://linq.example.test/api/partner/v3')
+
   await expect(
     sendAssistantNotificationLocal({
       executionContext: {
@@ -712,6 +730,137 @@ test('sendAssistantNotificationLocal surfaces failed delivery results', async ()
       vault: '/vaults/delivery-error',
     }),
   ).rejects.toThrow('delivery exploded')
+  expect(mocks.createAssistantRuntimeStateService.mock.results[0]?.value.turns.createReceipt)
+    .toHaveBeenCalledWith(expect.objectContaining({
+      provider: 'openai-compatible',
+      providerModel: 'gpt-4.1-backup',
+    }))
+  expect((deliveryError as Error & {
+    details?: Record<string, unknown>
+  }).details).toMatchObject({
+    assistantNotificationChannel: null,
+    assistantNotificationDeliveryKind: null,
+    assistantNotificationLinqBaseUrlOrigin: 'https://linq.example.test',
+    assistantNotificationLinqBaseUrlPath: '/api/partner/v3',
+    assistantNotificationProvider: 'openai-compatible',
+    assistantNotificationProviderBaseUrlOrigin: 'https://api.backup.example.test',
+    assistantNotificationProviderBaseUrlPath: '/v1',
+    assistantNotificationProviderModel: 'gpt-4.1-backup',
+    assistantNotificationRouteId: 'route-backup',
+    assistantNotificationStage: 'delivery',
+  })
+})
+
+test('sendAssistantNotificationLocal annotates terminal provider failures with route context', async () => {
+  const providerSession = createAssistantSession()
+  const sharedPlan = createSharedPlan()
+  const providerError = new Error('provider route returned 404')
+  const primaryRoute = createRoute({
+    routeId: 'route-primary',
+    providerOptions: {
+      baseUrl: 'https://gateway-primary.example.test/v1',
+      model: 'gpt-4.1-primary',
+    },
+  })
+  const route = createRoute({
+    routeId: 'route-provider-failure',
+    providerOptions: {
+      baseUrl: 'https://gateway.example.test/v1',
+      model: 'gpt-4.1-mini',
+    },
+  })
+  const mocks = {
+    executeProviderTurnWithRecovery: vi.fn(async () => ({
+      error: providerError,
+      kind: 'failed_terminal',
+      route,
+    })),
+    normalizeAssistantExecutionContext: vi.fn((value) => value),
+    resolveAssistantExecutionDefaultTarget: vi.fn((input) =>
+      input.executionContext?.hosted?.defaultTarget ?? input.fallbackTarget,
+    ),
+    resolveAssistantExecutionOperatorDefaults: vi.fn((input) =>
+      input.executionContext?.hosted?.defaultTarget
+        ? {
+            ...(input.defaults ?? {}),
+            backend: input.executionContext.hosted.defaultTarget,
+          }
+        : (input.defaults ?? null),
+    ),
+    prioritizeAssistantRoutesForRichUserMessageContent: vi.fn((input) => input.routes),
+    resolveAssistantOperatorDefaults: vi.fn(async () => ({
+      timezone: 'Australia/Sydney',
+    })),
+    resolveAssistantSessionForMessage: vi.fn(async () => ({
+      session: providerSession,
+    })),
+    resolveAssistantTurnRoutes: vi.fn(() => [primaryRoute, route]),
+    resolveAssistantTurnSharedPlan: vi.fn(async () => sharedPlan),
+    withAssistantTurnLock: vi.fn(async (input: { run(): Promise<unknown> }) => await input.run()),
+  }
+
+  vi.doMock('@murphai/operator-config/operator-config', () => ({
+    resolveAssistantOperatorDefaults: mocks.resolveAssistantOperatorDefaults,
+  }))
+  vi.doMock('@murphai/operator-config/assistant-backend', () => ({
+    createDefaultLocalAssistantModelTarget: () => ({
+      adapter: 'openai-compatible',
+      model: 'gpt-5.4',
+    }),
+  }))
+  vi.doMock('../src/assistant/execution-context.js', () => ({
+    normalizeAssistantExecutionContext: mocks.normalizeAssistantExecutionContext,
+    resolveAssistantExecutionDefaultTarget:
+      mocks.resolveAssistantExecutionDefaultTarget,
+    resolveAssistantExecutionOperatorDefaults:
+      mocks.resolveAssistantExecutionOperatorDefaults,
+  }))
+  vi.doMock('../src/assistant/session-resolution.js', () => ({
+    resolveAssistantSessionForMessage: mocks.resolveAssistantSessionForMessage,
+  }))
+  vi.doMock('../src/assistant/turn-plan.js', () => ({
+    resolveAssistantTurnSharedPlan: mocks.resolveAssistantTurnSharedPlan,
+  }))
+  vi.doMock('../src/assistant/provider-turn-runner.js', () => ({
+    executeProviderTurnWithRecovery: mocks.executeProviderTurnWithRecovery,
+  }))
+  vi.doMock('../src/assistant/service-turn-routes.js', () => ({
+    resolveAssistantTurnRoutes: mocks.resolveAssistantTurnRoutes,
+  }))
+  vi.doMock('../src/assistant/rich-content-routing.js', () => ({
+    prioritizeAssistantRoutesForRichUserMessageContent:
+      mocks.prioritizeAssistantRoutesForRichUserMessageContent,
+  }))
+  vi.doMock('../src/assistant/turns.js', () => ({
+    createAssistantTurnId: () => 'turn-notification-provider-error',
+  }))
+  vi.doMock('../src/assistant/turn-lock.js', () => ({
+    withAssistantTurnLock: mocks.withAssistantTurnLock,
+  }))
+
+  const { sendAssistantNotificationLocal } = await import(
+    '../src/assistant/notification-turn.ts'
+  )
+
+  await expect(
+    sendAssistantNotificationLocal({
+      executionContext: {
+        hosted: null,
+      },
+      instructions: 'Deliver this',
+      vault: '/vaults/provider-error',
+    }),
+  ).rejects.toThrow('provider route returned 404')
+  expect((providerError as Error & {
+    details?: Record<string, unknown>
+  }).details).toMatchObject({
+    assistantNotificationProvider: 'openai-compatible',
+    assistantNotificationProviderBaseUrlOrigin: 'https://gateway.example.test',
+    assistantNotificationProviderBaseUrlPath: '/v1',
+    assistantNotificationProviderModel: 'gpt-4.1-mini',
+    assistantNotificationRouteId: 'route-provider-failure',
+    assistantNotificationStage: 'provider',
+  })
 })
 
 test('sendAssistantNotificationLocal rejects email thread subject overrides before outbound delivery dispatch', async () => {

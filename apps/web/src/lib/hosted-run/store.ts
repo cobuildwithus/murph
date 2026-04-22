@@ -198,13 +198,8 @@ export async function acquireHostedRunTx(input: {
     userId: input.userId,
   });
   const runtimeTimerDue = isHostedRuntimeTimerDue(cursor, now);
-  const triggerKind = resolveHostedRunTriggerKind({
-    explicit: input.triggerKind ?? null,
-    runtimeTimerDue,
-    wakeCount: wakeRows.length,
-  });
 
-  if (wakeRows.length === 0 && !runtimeTimerDue && triggerKind !== "manual_repair") {
+  if (wakeRows.length === 0 && !runtimeTimerDue && input.triggerKind !== "manual_repair") {
     return buildHostedRunAcquireResponseTx({
       acquired: false,
       events: [],
@@ -215,6 +210,12 @@ export async function acquireHostedRunTx(input: {
       cursor,
     });
   }
+
+  const triggerKind = resolveHostedRunTriggerKind({
+    explicit: input.triggerKind ?? null,
+    runtimeTimerDue,
+    wakeCount: wakeRows.length,
+  });
 
   const runToken = createHostedRunToken();
   const events = await hydrateHostedIngressEventsTx({
@@ -1275,7 +1276,13 @@ function resolveHostedRunTriggerKind(input: {
     return "external_ingress";
   }
 
-  return input.runtimeTimerDue ? "runtime_timer" : "manual_repair";
+  if (input.runtimeTimerDue) {
+    return "runtime_timer";
+  }
+
+  throw new Error(
+    "Hosted run trigger kind requires explicit manual repair, pending wakes, or a due runtime timer.",
+  );
 }
 
 function isHostedRuntimeTimerDue(cursor: HostedExecutionCursorRow, now: Date): boolean {

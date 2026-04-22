@@ -30,6 +30,7 @@ import {
   startAssistantProviderStubServer,
   stopHttpStubServer,
   type HostedLocalAssistantProviderMode,
+  type HostedLocalAssistantProviderStubRequest,
   type HostedLocalAssistantProviderStubState,
 } from "./hosted-local-e2e-support.js";
 import {
@@ -58,7 +59,7 @@ interface HostedActiveLinqMemberSeedArgs extends HostedActiveMemberSeedArgs {
 }
 
 export interface HostedLocalFullStackScenario {
-  assistantProviderBodies: string[];
+  assistantProviderRequests: HostedLocalAssistantProviderStubRequest[];
   bindActiveHostedLinqHomeChat(input: {
     chatId: string;
     memberId: string;
@@ -100,7 +101,7 @@ export async function startHostedLocalFullStackScenario(input: {
   seedEnvironment?: NodeJS.ProcessEnv;
   streamLogs?: boolean;
 }): Promise<HostedLocalFullStackScenario> {
-  const assistantProviderBodies: string[] = [];
+  const assistantProviderRequests: HostedLocalAssistantProviderStubRequest[] = [];
   const assistantProviderStubState: HostedLocalAssistantProviderStubState = {
     currentResponseText: null,
     queuedResponseTexts: [...(input.assistantProviderResponses ?? [])],
@@ -124,8 +125,8 @@ export async function startHostedLocalFullStackScenario(input: {
     if (assistantProviderMode === "stub") {
       assistantProviderServer = await startAssistantProviderStubServer({
         fallbackResponseText: null,
-        onRequestBody: (body) => {
-          assistantProviderBodies.push(body);
+        onRequest: (request) => {
+          assistantProviderRequests.push(request);
         },
         responseState: assistantProviderStubState,
       });
@@ -176,7 +177,7 @@ export async function startHostedLocalFullStackScenario(input: {
     const scenarioHarness = harness;
 
     return {
-      assistantProviderBodies,
+      assistantProviderRequests,
       bindActiveHostedLinqHomeChat: async (bindingInput) => {
         await bindHostedActiveLinqHomeChat({
           chatId: bindingInput.chatId,
@@ -195,9 +196,15 @@ export async function startHostedLocalFullStackScenario(input: {
         summaryLines: readonly string[],
       ): Promise<string> => {
         const status = await scenarioHarness.readUserStatus(userId).catch(() => null);
+        const assistantProviderRequestLog = assistantProviderRequests.map((request) => ({
+          body: request.body,
+          method: request.method,
+          url: request.url,
+        }));
         return [
           ...summaryLines,
           ...(status ? [`hosted status: ${JSON.stringify(status)}`] : []),
+          `assistant provider requests: ${JSON.stringify(assistantProviderRequestLog)}`,
           `stdout tail: ${scenarioHarness.stdoutTail()}`,
           `stderr tail: ${scenarioHarness.stderrTail()}`,
         ].join("\n");

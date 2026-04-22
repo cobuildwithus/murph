@@ -183,6 +183,7 @@ export type AssistantProviderTurnRecoveryOutcome =
   | {
       kind: 'failed_terminal'
       error: unknown
+      route?: ResolvedAssistantFailoverRoute | null
       session: AssistantSession
     }
   | {
