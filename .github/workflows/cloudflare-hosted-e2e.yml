@@ -16,7 +16,10 @@ permissions:
   contents: read
 
 env:
-  DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:1/murph_test
+  # The hosted local E2E harness runs `prisma db push` during setup, so these
+  # jobs need a real loopback Postgres target rather than the unreachable
+  # build-only placeholder URL used by release/build verification lanes.
+  DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/murph_test
   DEVICE_SYNC_ENCRYPTION_KEY: 0101010101010101010101010101010101010101010101010101010101010101
   DEVICE_SYNC_ENCRYPTION_KEY_VERSION: v1
   HOSTED_CONTACT_PRIVACY_KEYS: v1:BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc
@@ -28,6 +31,20 @@ jobs:
     name: Linq delivery E2E
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres
+        env:
+          POSTGRES_DB: murph_test
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
     concurrency:
       group: cloudflare-hosted-e2e-linq-${{ github.event.pull_request.number || github.ref || github.run_id }}
       cancel-in-progress: true
@@ -66,6 +83,20 @@ jobs:
     name: Telegram delivery E2E
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres
+        env:
+          POSTGRES_DB: murph_test
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
     concurrency:
       group: cloudflare-hosted-e2e-telegram-${{ github.event.pull_request.number || github.ref || github.run_id }}
       cancel-in-progress: true
@@ -104,6 +135,20 @@ jobs:
     name: Duplicate commit E2E
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres
+        env:
+          POSTGRES_DB: murph_test
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
     concurrency:
       group: cloudflare-hosted-e2e-duplicate-${{ github.event.pull_request.number || github.ref || github.run_id }}
       cancel-in-progress: true

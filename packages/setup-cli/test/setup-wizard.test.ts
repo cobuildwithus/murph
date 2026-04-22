@@ -39,6 +39,7 @@ import {
   formatSetupWearable,
 } from '../src/setup-wizard-options.ts'
 import {
+  buildSetupWizardPublicUrlHelpText,
   formatSetupPublicUrlStrategy,
   normalizeSetupWizardText,
 } from '../src/setup-wizard-public-url.ts'
@@ -534,6 +535,76 @@ test('setup wizard public URL guidance stays disabled when no public callbacks a
   assert.equal(review.summary, '')
 })
 
+test('setup wizard public URL help text renders warnings, docs, and provider-less targets', () => {
+  const lines = buildSetupWizardPublicUrlHelpText({
+    review: {
+      enabled: true,
+      providerDocs: [
+        {
+          label: 'WHOOP OAuth docs',
+          url: 'https://developer.whoop.com/docs/developing/oauth/',
+        },
+      ],
+      recommendedStrategy: 'hosted',
+      summary: 'Hosted `apps/web` is the easiest stable base.',
+      targets: [
+        {
+          detail: 'Register this redirect URL in the WHOOP dashboard.',
+          label: 'WHOOP callback',
+          localReceiverUrl: 'http://127.0.0.1:8788/oauth/whoop/callback',
+          providerUrl: 'https://murph.example/oauth/whoop/callback',
+          requirement: 'required',
+        },
+        {
+          detail: 'Paste the tunnel URL into Linq when you are ready.',
+          label: 'Linq webhook',
+          localReceiverUrl: 'http://127.0.0.1:8789/linq-webhook',
+          providerUrl: null,
+          requirement: 'required',
+        },
+      ],
+      tunnelCommands: ['ngrok http 8788'],
+    },
+  })
+
+  assert.deepEqual(lines, [
+    'Hosted `apps/web` is the easiest stable base.',
+    '',
+    '`localhost` is only Murph’s local receiver. Do not paste a localhost URL into Garmin, WHOOP, Oura, or Strava. Use a public HTTPS URL from a tunnel or hosted deployment instead.',
+    '',
+    'Local test path:',
+    '  ngrok http 8788',
+    '',
+    'WHOOP callback (required)',
+    '  Local receiver: http://127.0.0.1:8788/oauth/whoop/callback',
+    '  Paste into provider: https://murph.example/oauth/whoop/callback',
+    '  Register this redirect URL in the WHOOP dashboard.',
+    '',
+    'Linq webhook (required)',
+    '  Local receiver: http://127.0.0.1:8789/linq-webhook',
+    '  Paste the tunnel URL into Linq when you are ready.',
+    '',
+    'Provider setup docs:',
+    '  WHOOP OAuth docs: https://developer.whoop.com/docs/developing/oauth/',
+    '',
+    'This step is informational only. Murph does not save a public URL choice yet.',
+  ])
+
+  assert.deepEqual(
+    buildSetupWizardPublicUrlHelpText({
+      review: {
+        enabled: false,
+        providerDocs: [],
+        recommendedStrategy: 'hosted',
+        summary: '',
+        targets: [],
+        tunnelCommands: [],
+      },
+    }),
+    [],
+  )
+})
+
 test('setup wizard public URL guidance trims local endpoints and lists WHOOP targets when wearables need a tunnel', () => {
   const review = buildSetupWizardPublicUrlReview({
     channels: [],
@@ -645,6 +716,57 @@ test('setup wizard public URL guidance stays enabled when the configured public 
 
   assert.equal(review.enabled, true)
   assert.equal(review.targets[0]?.providerUrl, 'https://<your-public-host>/oauth/oura/callback')
+})
+
+test('setup wizard public URL guidance handles invalid public URLs and tunnel command edge cases', () => {
+  const invalidPublicBaseReview = buildSetupWizardPublicUrlReview({
+    channels: ['linq'],
+    wearables: [],
+    publicBaseUrl: 'ftp://murph.example',
+    linqLocalWebhookUrl: '/linq-webhook',
+  })
+  assert.equal(invalidPublicBaseReview.enabled, true)
+  assert.equal(
+    invalidPublicBaseReview.targets[0]?.providerUrl,
+    'https://<your-public-host>/linq-webhook',
+  )
+
+  const ipv6LoopbackReview = buildSetupWizardPublicUrlReview({
+    channels: ['linq'],
+    wearables: [],
+    publicBaseUrl: 'https://[::1]:8788',
+  })
+  assert.equal(ipv6LoopbackReview.enabled, true)
+
+  const httpTunnelReview = buildSetupWizardPublicUrlReview({
+    channels: [],
+    wearables: ['garmin'],
+    deviceSyncLocalBaseUrl: 'http://127.0.0.1/base',
+  })
+  assert.deepEqual(httpTunnelReview.tunnelCommands, [
+    'ngrok http 80',
+    'cloudflared tunnel --url http://127.0.0.1',
+  ])
+
+  const httpsTunnelReview = buildSetupWizardPublicUrlReview({
+    channels: [],
+    wearables: ['garmin'],
+    deviceSyncLocalBaseUrl: 'https://127.0.0.1/base',
+  })
+  assert.deepEqual(httpsTunnelReview.tunnelCommands, [
+    'ngrok http 443',
+    'cloudflared tunnel --url https://127.0.0.1',
+  ])
+
+  const unsupportedTunnelReview = buildSetupWizardPublicUrlReview({
+    channels: [],
+    wearables: ['garmin'],
+    deviceSyncLocalBaseUrl: 'ws://127.0.0.1/base',
+  })
+  assert.deepEqual(unsupportedTunnelReview.tunnelCommands, [
+    'ngrok http 8788',
+    'cloudflared tunnel --url http://localhost:8788',
+  ])
 })
 
 test.sequential('setup wizard runs the public-link flow, preserves explicit opt-outs, and returns sorted selections', async () => {

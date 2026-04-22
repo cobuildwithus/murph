@@ -4,6 +4,7 @@ import type { HostedLocalDevConfig } from "../../../../scripts/dev-hosted-local/
 
 const hostedLocalDevConfig: HostedLocalDevConfig = {
   skipPrismaMigrate: true,
+  skipStripeListen: true,
   skipWeb: false,
   skipVercelPull: true,
   webHost: "127.0.0.1",
