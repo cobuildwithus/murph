@@ -201,31 +201,66 @@ experimentOnboarding:
         label: Active experiments
         reason: Avoid starting more than one meaningful experiment at once unless the user explicitly chooses that tradeoff.
         readHints:
-          - experiment list --status active
+          - experiment list --status active --format json
       -
         id: wearable_sources
         label: Wearable sources
         reason: Confirm that cardio-fitness, heart-rate, recovery, sleep, or activity signals can be observed during the baseline and intervention windows.
         freshnessDays: 14
         readHints:
-          - wearables sources list
-          - wearables day
+          - wearables sources list --format json
+          - wearables day <YYYY-MM-DD> --format json
       -
         id: recent_activity_sessions
         label: Recent activity sessions
         reason: Understand current training load, interval familiarity, and likely modality fit before scheduling two hard weekly sessions.
         freshnessDays: 45
         readHints:
-          - search query "recent workouts intervals running cycling rowing"
-          - timeline --record-type event
+          - search query "interval workouts running cycling rowing" --format json
+          - timeline --entry-type event --kind activity_session --from <YYYY-MM-DD> --format json
       -
-        id: conditions_medications_and_context
-        label: Conditions, medications, and special context
-        reason: High-intensity intervals need explicit screening for cardiovascular red flags, heart-rate-limiting medication, pregnancy or postpartum context, acute illness, and recovery-limiting patterns.
+        id: cardiovascular_or_respiratory_conditions
+        label: Cardiovascular or respiratory conditions
+        reason: Known cardiovascular or respiratory disease can change whether unsupervised vigorous intervals are a good fit even before the compact safety screen.
+        freshnessDays: 180
+        readHints:
+          - search query "heart disease arrhythmia chest pain syncope hypertension asthma COPD" --format json
+      -
+        id: heart_rate_affecting_or_glucose_lowering_medications
+        label: Medications that change heart-rate interpretation or hypoglycemia risk
+        reason: Beta blockers, other heart-rate-limiting medications, and diabetes medications that can cause lows materially change safety and interpretation.
         freshnessDays: 30
         readHints:
-          - memory show
-          - search query "condition medication pregnancy postpartum infection asthma COPD diabetes beta blocker long COVID injury"
+          - search query "beta blocker medication insulin sulfonylurea hypoglycemia" --format json
+      -
+        id: blood_pressure_records
+        label: Blood pressure context
+        reason: Recent elevated blood pressure or a known uncontrolled-hypertension context matters before unsupervised vigorous intervals.
+        freshnessDays: 30
+        readHints:
+          - search query "blood pressure hypertension" --format json
+      -
+        id: pregnancy_or_postpartum_context
+        label: Pregnancy or postpartum context
+        reason: Pregnancy and early postpartum status can change whether unsupervised vigorous intervals are a good fit right now.
+        freshnessDays: 30
+        readHints:
+          - memory show --format json
+          - search query "pregnancy postpartum" --format json
+      -
+        id: recent_illness_or_infection
+        label: Recent illness or infection
+        reason: Recent fever, infection, or possible myocarditis or pericarditis changes the safety posture for vigorous intervals.
+        freshnessDays: 21
+        readHints:
+          - search query "fever infection illness myocarditis pericarditis" --format json
+      -
+        id: injuries_pain_and_post_exertional_malaise
+        label: Injuries, pain, and post-exertional malaise
+        reason: Injury, pain, or a long-COVID or post-exertional-malaise pattern can make this protocol a poor fit even if the fitness goal is reasonable.
+        freshnessDays: 45
+        readHints:
+          - search query "injury pain long COVID post-exertional malaise" --format json
     notes:
       - Review vault context first, but still ask the compact high-intensity safety screen because silence in the vault is not clearance.
   safetyScreen:
@@ -352,7 +387,7 @@ experimentOnboarding:
       - weekly_digest
     weeklyDigestDefault: true
     missedLogFollowupCopy: "Did you end up doing today's 4x4 session? Totally fine either way — I just want the experiment record to be accurate."
-    confirmationPrompt: Show the safety outcome, exact baseline/intervention dates, two weekly session windows, modality, heart-rate monitor, target/minimum session counts, logging fields, and reminder policy before creating the active experiment or automations.
+    confirmationPrompt: Show the protocol key plus pageRevisionId and runSpecRevisionId, the chosen testPlanId, the safety outcome, exact baseline/intervention dates, two weekly session windows, modality, heart-rate monitor, target/minimum session counts, logging fields, and reminder policy before creating the active experiment or automations.
 whyItWorks:
   - Norwegian 4x4 works by spending repeated minutes near the top of your aerobic system. A four-minute interval is long enough for oxygen demand, heart rate, ventilation, stroke volume, and cardiac output to climb toward a high steady load rather than peaking for only a few sprint seconds.
   - The three-minute active recoveries are part of the mechanism. They lower effort enough to repeat the next interval, but keep the aerobic system warm, so the session accumulates more total time near high oxygen uptake than one unsustainably hard continuous effort.
