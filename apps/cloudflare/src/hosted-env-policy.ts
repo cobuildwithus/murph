@@ -31,13 +31,16 @@ const RUNNER_SECRET_PROCESS_CONTROL_KEY_SET = new Set<string>(
 
 const DEFAULT_ALLOWED_RUNNER_SECRET_KEYS = [
   ...HOSTED_SHARED_MODEL_CREDENTIAL_ENV_NAMES,
-  "HOSTED_AI_USAGE_REPORTING_SECRET",
 ] as const;
 
 const DISALLOWED_RUNNER_SECRET_KEYS = new Set([
   ...OPERATOR_ONLY_RUNNER_BINARY_ENV_KEYS,
   ...RUNNER_SECRET_PROCESS_CONTROL_KEYS,
   "HOME",
+  // This is a platform metering secret forwarded by the assistant env profile,
+  // not a member-supplied runner secret. Letting userEnv override it would
+  // break stable anonymized Gateway reporting IDs.
+  "HOSTED_AI_USAGE_REPORTING_SECRET",
   "HOSTED_EXECUTION_AUTOMATION_RECIPIENT_KEY_ID",
   "HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK",
   "HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_KEYRING_JSON",

@@ -58,6 +58,7 @@ describe("hosted assistant runner env policy", () => {
 
   it("forwards Vercel AI Gateway bootstrap vars and gateway key aliases", () => {
     const env = buildHostedRunnerContainerEnv({
+      HOSTED_AI_USAGE_REPORTING_SECRET: "usage-reporting-secret",
       VERCEL_AI_API_KEY: "gateway-secret",
       HOSTED_ASSISTANT_API_KEY_ENV: "VERCEL_AI_API_KEY",
       HOSTED_ASSISTANT_MODEL: "openai/gpt-5.4",
@@ -66,6 +67,7 @@ describe("hosted assistant runner env policy", () => {
     });
 
     expect(env).toMatchObject({
+      HOSTED_AI_USAGE_REPORTING_SECRET: "usage-reporting-secret",
       VERCEL_AI_API_KEY: "gateway-secret",
       HOSTED_ASSISTANT_API_KEY_ENV: "VERCEL_AI_API_KEY",
       HOSTED_ASSISTANT_MODEL: "openai/gpt-5.4",

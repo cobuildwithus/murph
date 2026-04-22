@@ -161,6 +161,7 @@ describe("hosted runner secrets policy", () => {
     expect(isHostedRunnerSecretKeyAllowed("OPENAI_API_KEY")).toBe(true);
 
     expect(isHostedRunnerSecretKeyAllowed("FFMPEG_COMMAND")).toBe(false);
+    expect(isHostedRunnerSecretKeyAllowed("HOSTED_AI_USAGE_REPORTING_SECRET")).toBe(false);
     expect(isHostedRunnerSecretKeyAllowed("WHISPER_COMMAND")).toBe(false);
     expect(isHostedRunnerSecretKeyAllowed("WHISPER_MODEL_PATH")).toBe(false);
   });
@@ -169,12 +170,14 @@ describe("hosted runner secrets policy", () => {
     const source = {
       HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: [
         "FFMPEG_COMMAND",
+        "HOSTED_AI_USAGE_REPORTING_SECRET",
         "WHISPER_COMMAND",
         "NODE_OPTIONS",
       ].join(","),
     };
 
     expect(isHostedRunnerSecretKeyAllowed("FFMPEG_COMMAND", source)).toBe(false);
+    expect(isHostedRunnerSecretKeyAllowed("HOSTED_AI_USAGE_REPORTING_SECRET", source)).toBe(false);
     expect(isHostedRunnerSecretKeyAllowed("WHISPER_COMMAND", source)).toBe(false);
     expect(isHostedRunnerSecretKeyAllowed("NODE_OPTIONS", source)).toBe(false);
   });
@@ -182,6 +185,7 @@ describe("hosted runner secrets policy", () => {
   it("filters operator-only keys out of runner secrets before execution", () => {
     expect(filterHostedRunnerSecrets({
       FFMPEG_COMMAND: "/tmp/evil-ffmpeg",
+      HOSTED_AI_USAGE_REPORTING_SECRET: "usage-reporting-secret",
       NODE_OPTIONS: "--require /tmp/evil-loader.js",
       OPENAI_API_KEY: "sk-test",
       WHISPER_COMMAND: "/tmp/evil-whisper",
