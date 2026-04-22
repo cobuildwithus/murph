@@ -10,6 +10,7 @@ vi.mock("@/src/components/dashboard/sidebar", () => ({
       "data-dashboard-sidebar": "true",
     });
   },
+  SIDEBAR_BRAND_GRADIENT: "",
 }));
 
 import BiomarkersLayout from "../app/biomarkers/layout";
