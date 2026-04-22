@@ -16,9 +16,11 @@ import BiomarkersLayout from "../app/biomarkers/layout";
 
 test("BiomarkersLayout renders biomarker pages inside the shared dashboard shell", () => {
   const markup = renderToStaticMarkup(
-    createElement(BiomarkersLayout, {
-      children: createElement("div", { "data-biomarker-page": "true" }, "biomarker"),
-    }),
+    createElement(
+      BiomarkersLayout,
+      null,
+      createElement("div", { "data-biomarker-page": "true" }, "biomarker"),
+    ),
   );
 
   assert.match(markup, /#global-footer \{ display: none; \}/);

@@ -4,12 +4,16 @@ import type { InboxServices } from '@murphai/inbox-services'
 import {
   createAssistantTurnBeforeDeliveryHook,
   createInboxBackedAssistantTurnInputPort,
+  createNoopAssistantTurnInputPort,
+  isAssistantTurnRevisionRequiredError,
 } from '../src/assistant/turn-input.ts'
 
 type AssistantInboxCaptureSummary = InboxListResult['items'][number]
 
 function createCaptureSummary(
-  overrides: Partial<AssistantInboxCaptureSummary> = {},
+  overrides: Partial<Omit<AssistantInboxCaptureSummary, 'createdAt'>> & {
+    createdAt?: string | null
+  } = {},
 ): AssistantInboxCaptureSummary {
   return {
     captureId: overrides.captureId ?? 'cap_1',
@@ -28,7 +32,10 @@ function createCaptureSummary(
     attachmentCount: overrides.attachmentCount ?? 0,
     envelopePath: overrides.envelopePath ?? 'captures/cap_1.json',
     eventId: overrides.eventId ?? 'evt_1',
-    createdAt: overrides.createdAt ?? '2026-04-22T10:00:02.000Z',
+    createdAt:
+      'createdAt' in overrides
+        ? overrides.createdAt ?? undefined
+        : '2026-04-22T10:00:02.000Z',
     promotions: overrides.promotions ?? [],
   }
 }
@@ -102,6 +109,28 @@ function createListResult(input: {
 }
 
 describe('createInboxBackedAssistantTurnInputPort', () => {
+  it('reports no new input for refresh calls', async () => {
+    const inboxServices = {
+      async list() {
+        throw new Error('list should not be called during refresh')
+      },
+    } as Pick<InboxServices, 'list'> as InboxServices
+    const port = createInboxBackedAssistantTurnInputPort({
+      inboxServices,
+      requestId: null,
+      vault: '/vault',
+    })
+
+    await expect(
+      port.refresh({
+        phase: 'before_provider',
+      }),
+    ).resolves.toEqual({
+      progressed: false,
+      reason: 'no_new_input',
+    })
+  })
+
   it('lists only new captures from the active conversation', async () => {
     const beforeCursor = createCaptureSummary({
       captureId: 'cap_before',
@@ -325,6 +354,159 @@ describe('createInboxBackedAssistantTurnInputPort', () => {
       occurredAt: sameOccurredLaterCreated.occurredAt,
     })
   })
+
+  it('returns the original cursor when the inbox page is empty', async () => {
+    const afterCursor = {
+      captureId: 'cap_empty',
+      createdAt: null,
+      occurredAt: '2026-04-22T10:00:00.000Z',
+    }
+    const inboxServices = {
+      async list(input) {
+        expect(input.requestId).toBeNull()
+        expect(input.afterCreatedAt).toBeNull()
+        expect(input.limit).toBe(100)
+        return createListResult({
+          afterCaptureId: input.afterCaptureId,
+          afterCreatedAt: input.afterCreatedAt,
+          afterOccurredAt: input.afterOccurredAt,
+          items: [],
+          limit: input.limit ?? 100,
+          oldestFirst: input.oldestFirst ?? false,
+          sourceId: input.sourceId,
+        })
+      },
+    } as Pick<InboxServices, 'list'> as InboxServices
+    const port = createInboxBackedAssistantTurnInputPort({
+      inboxServices,
+      requestId: null,
+      vault: '/vault',
+    })
+
+    await expect(
+      port.listNewConversationCaptures({
+        afterCursor,
+        conversation: {
+          accountId: 'acct_1',
+          actorId: 'actor_1',
+          actorIsSelf: false,
+          source: 'telegram',
+          threadId: 'thread_1',
+          threadIsDirect: true,
+        },
+        limit: Number.NaN,
+      }),
+    ).resolves.toEqual({
+      captures: [],
+      nextCursor: afterCursor,
+    })
+  })
+
+  it('uses occurredAt ordering when createdAt is absent and respects fractional limits', async () => {
+    const first = createCaptureSummary({
+      captureId: 'cap_b',
+      createdAt: null,
+      externalId: 'ext_b',
+      eventId: 'evt_b',
+      occurredAt: '2026-04-22T10:00:00.000Z',
+    })
+    const second = createCaptureSummary({
+      captureId: 'cap_a',
+      createdAt: null,
+      externalId: 'ext_a',
+      eventId: 'evt_a',
+      occurredAt: '2026-04-22T10:00:00.000Z',
+    })
+    const third = createCaptureSummary({
+      captureId: 'cap_c',
+      createdAt: null,
+      externalId: 'ext_c',
+      eventId: 'evt_c',
+      occurredAt: '2026-04-22T10:01:00.000Z',
+    })
+    const inboxServices = {
+      async list(input) {
+        expect(input.limit).toBe(100)
+        return createListResult({
+          afterCaptureId: input.afterCaptureId,
+          afterCreatedAt: input.afterCreatedAt,
+          afterOccurredAt: input.afterOccurredAt,
+          items: [first, second, third],
+          limit: input.limit ?? 100,
+          oldestFirst: input.oldestFirst ?? false,
+          sourceId: input.sourceId,
+        })
+      },
+    } as Pick<InboxServices, 'list'> as InboxServices
+    const port = createInboxBackedAssistantTurnInputPort({
+      inboxServices,
+      requestId: 'req_limit',
+      vault: '/vault',
+    })
+
+    const result = await port.listNewConversationCaptures({
+      afterCursor: {
+        captureId: 'cap_0',
+        createdAt: null,
+        occurredAt: '2026-04-22T09:59:00.000Z',
+      },
+      conversation: {
+        accountId: first.accountId,
+        actorId: first.actorId,
+        actorIsSelf: first.actorIsSelf,
+        source: first.source,
+        threadId: first.threadId,
+        threadIsDirect: first.threadIsDirect,
+      },
+      limit: 2.9,
+    })
+
+    expect(result.captures.map((capture) => capture.captureId)).toEqual([
+      'cap_a',
+      'cap_b',
+    ])
+    expect(result.nextCursor).toEqual({
+      captureId: 'cap_b',
+      createdAt: null,
+      occurredAt: '2026-04-22T10:00:00.000Z',
+    })
+  })
+})
+
+describe('createNoopAssistantTurnInputPort', () => {
+  it('returns stable no-op refresh and capture-list responses', async () => {
+    const afterCursor = {
+      captureId: 'cap_1',
+      createdAt: '2026-04-22T10:00:02.000Z',
+      occurredAt: '2026-04-22T10:00:00.000Z',
+    }
+    const port = createNoopAssistantTurnInputPort()
+
+    await expect(
+      port.refresh({
+        phase: 'after_provider',
+      }),
+    ).resolves.toEqual({
+      progressed: false,
+      reason: 'no_port',
+    })
+    await expect(
+      port.listNewConversationCaptures({
+        afterCursor,
+        conversation: {
+          accountId: 'acct_1',
+          actorId: 'actor_1',
+          actorIsSelf: false,
+          source: 'telegram',
+          threadId: 'thread_1',
+          threadIsDirect: true,
+        },
+      }),
+    ).resolves.toEqual({
+      captures: [],
+      nextCursor: afterCursor,
+    })
+  })
 })
 
 describe('createAssistantTurnBeforeDeliveryHook', () => {
@@ -372,21 +554,27 @@ describe('createAssistantTurnBeforeDeliveryHook', () => {
       },
     })
 
-    await expect(
-      hook({
+    let caught: unknown
+    try {
+      await hook({
         response: 'draft response',
         sessionId: 'sess_1',
         turnId: 'turn_1',
         vault: '/vault',
-      }),
-    ).rejects.toMatchObject({
-      name: 'AssistantTurnRevisionRequiredError',
-      captures: [lateCapture],
-      nextCursor: {
-        captureId: lateCapture.captureId,
-        createdAt: lateCapture.createdAt ?? null,
-        occurredAt: lateCapture.occurredAt,
-      },
+      })
+    } catch (error) {
+      caught = error
+    }
+
+    expect(isAssistantTurnRevisionRequiredError(caught)).toBe(true)
+    if (!isAssistantTurnRevisionRequiredError(caught)) {
+      throw new Error('expected AssistantTurnRevisionRequiredError')
+    }
+    expect(caught.captures).toEqual([lateCapture])
+    expect(caught.nextCursor).toEqual({
+      captureId: lateCapture.captureId,
+      createdAt: lateCapture.createdAt ?? null,
+      occurredAt: lateCapture.occurredAt,
     })
   })
 

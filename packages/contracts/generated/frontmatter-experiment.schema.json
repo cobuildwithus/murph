@@ -53,6 +53,303 @@
         "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
       },
       "uniqueItems": true
+    },
+    "protocolRef": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "pattern": "^[a-z_]+:[a-z0-9][a-z0-9._/-]*(?:@[A-Za-z0-9._:-]+)?$"
+        },
+        "pageRevisionId": {
+          "type": "string",
+          "pattern": "^sha256:.*"
+        },
+        "runSpecRevisionId": {
+          "type": "string",
+          "pattern": "^sha256:.*"
+        },
+        "testPlanId": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]*$"
+        }
+      },
+      "required": [
+        "key",
+        "pageRevisionId",
+        "runSpecRevisionId"
+      ],
+      "additionalProperties": false
+    },
+    "runPlan": {
+      "type": "object",
+      "properties": {
+        "baselineStart": {
+          "type": "string",
+          "format": "date"
+        },
+        "baselineEnd": {
+          "type": "string",
+          "format": "date"
+        },
+        "interventionStart": {
+          "type": "string",
+          "format": "date"
+        },
+        "interventionEnd": {
+          "type": "string",
+          "format": "date"
+        },
+        "modality": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "schedule": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000
+        },
+        "dose": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "sessionsPerWeek": {
+          "type": "number",
+          "minimum": 0
+        },
+        "targetSessions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "minimumUsefulSessions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "logging": {
+          "type": "object",
+          "properties": {
+            "sessionFields": {
+              "minItems": 1,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]*$"
+              },
+              "uniqueItems": true
+            },
+            "confounderFields": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]*$"
+              },
+              "uniqueItems": true
+            }
+          },
+          "required": [
+            "sessionFields"
+          ],
+          "additionalProperties": false
+        },
+        "stopConditions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "analysisPlan": {
+      "type": "object",
+      "properties": {
+        "primaryBiomarkerKey": {
+          "type": "string",
+          "pattern": "^[a-z_]+:[a-z0-9][a-z0-9._/-]*(?:@[A-Za-z0-9._:-]+)?$"
+        },
+        "secondaryBiomarkerKeys": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z_]+:[a-z0-9][a-z0-9._/-]*(?:@[A-Za-z0-9._:-]+)?$"
+          },
+          "uniqueItems": true
+        },
+        "desiredDirection": {
+          "type": "string",
+          "enum": [
+            "increase",
+            "decrease",
+            "stabilize"
+          ]
+        },
+        "notes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "onboarding": {
+      "type": "object",
+      "properties": {
+        "completedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "setupAnswers": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema0"
+          }
+        },
+        "safety": {
+          "type": "object",
+          "properties": {
+            "cautionLevel": {
+              "type": "string",
+              "enum": [
+                "low",
+                "moderate",
+                "high",
+                "unknown"
+              ]
+            },
+            "disposition": {
+              "type": "string",
+              "enum": [
+                "continue_with_caution",
+                "clinician_guidance_before_unsupervised_start",
+                "do_not_start_unsupervised"
+              ]
+            },
+            "positiveQuestionIds": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]*$"
+              },
+              "uniqueItems": true
+            },
+            "notes": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4000
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "contextNotes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "assistantSupport": {
+      "type": "object",
+      "properties": {
+        "reminderPolicy": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]*$"
+        },
+        "reminderOptionId": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]*$"
+        },
+        "remindersEnabled": {
+          "type": "boolean"
+        },
+        "checkInCadence": {
+          "type": "string",
+          "enum": [
+            "none",
+            "daily",
+            "every_3_days",
+            "weekly"
+          ]
+        },
+        "notificationStyle": {
+          "type": "string",
+          "enum": [
+            "skip_by_default",
+            "send_scheduled_summary"
+          ]
+        },
+        "missedLogFollowup": {
+          "type": "string",
+          "enum": [
+            "never",
+            "opt_in_only",
+            "default_on"
+          ]
+        },
+        "weeklyDigestEnabled": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "outcome": {
+      "type": "object",
+      "properties": {
+        "latestOutcomeId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "readyForReviewAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "finalAnalysisStatus": {
+          "type": "string",
+          "enum": [
+            "not_ready",
+            "ready",
+            "generated"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "outcomeRef": {
+      "type": "object",
+      "properties": {
+        "outcomeId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "generatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "relativePath": {
+          "type": "string",
+          "pattern": "^(?!\\/)(?!.*(?:^|\\/)\\.\\.(?:\\/|$))[A-Za-z0-9._/-]+$"
+        }
+      },
+      "required": [
+        "outcomeId"
+      ],
+      "additionalProperties": false
     }
   },
   "required": [
@@ -66,5 +363,36 @@
   ],
   "additionalProperties": false,
   "$id": "@murphai/contracts/frontmatter-experiment.schema.json",
-  "title": "Murph Experiment Frontmatter"
+  "title": "Murph Experiment Frontmatter",
+  "$defs": {
+    "__schema0": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema0"
+          }
+        },
+        {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema0"
+          }
+        }
+      ]
+    }
+  }
 }

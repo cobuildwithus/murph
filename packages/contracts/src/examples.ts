@@ -1096,8 +1096,13 @@ assistantSupport:
   missedLogFollowup: opt_in_only
   weeklyDigestEnabled: true
 outcome:
+  latestOutcomeId: exp_01JNV4458HYPP53JDQCBP1QJFM-outcome-2026-04-02
   readyForReviewAt: 2026-04-02T08:00:00Z
   finalAnalysisStatus: ready
+outcomeRef:
+  outcomeId: exp_01JNV4458HYPP53JDQCBP1QJFM-outcome-2026-04-02
+  generatedAt: 2026-04-02T08:05:00Z
+  relativePath: bank/experiments/outcomes/magnesium-sleep-2026-04-02.json
 ---
 
 # Magnesium For Sleep Onset

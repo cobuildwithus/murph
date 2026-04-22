@@ -4552,7 +4552,8 @@
                             "activity_session",
                             "body_measurement",
                             "sleep_session",
-                            "intervention_session"
+                            "intervention_session",
+                            "experiment_context"
                           ],
                           "description": "Canonical event kind to scaffold."
                         }
@@ -5689,6 +5690,13 @@
                           "minLength": 1,
                           "maxLength": 128
                         },
+                        "limit": {
+                          "default": 50,
+                          "description": "Maximum number of results to return.",
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 200
+                        },
                         "status": {
                           "description": "Optional experiment status filter.",
                           "type": "string",
@@ -5699,13 +5707,6 @@
                             "completed",
                             "abandoned"
                           ]
-                        },
-                        "limit": {
-                          "default": 50,
-                          "description": "Maximum number of results to return.",
-                          "type": "integer",
-                          "exclusiveMinimum": 0,
-                          "maximum": 200
                         }
                       }
                     }
@@ -5786,24 +5787,187 @@
                         },
                         "occurredAt": {
                           "description": "Optional stop timestamp in ISO 8601 form or YYYY-MM-DD form.",
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "format": "date-time",
-                              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
-                              "description": "Timestamp in ISO 8601 format with an explicit UTC offset."
-                            },
-                            {
-                              "type": "string",
-                              "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
-                              "description": "Calendar date in YYYY-MM-DD form."
-                            }
-                          ]
+                          "type": "string",
+                          "minLength": 1
                         },
                         "note": {
                           "description": "Optional stop note.",
                           "type": "string",
                           "minLength": 1
+                        }
+                      }
+                    }
+                  }
+                },
+                "progress": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "vault": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "Vault root to operate against."
+                        },
+                        "requestId": {
+                          "description": "Optional caller-supplied request id for audit correlation.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "asOf": {
+                          "description": "Optional analysis date in YYYY-MM-DD form.",
+                          "type": "string",
+                          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                        }
+                      }
+                    }
+                  }
+                },
+                "session": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "commands": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "log": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "options": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "properties": {
+                                "vault": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "description": "Vault root to operate against."
+                                },
+                                "requestId": {
+                                  "description": "Optional caller-supplied request id for audit correlation.",
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 128
+                                },
+                                "input": {
+                                  "type": "string",
+                                  "description": "Payload input in @file.json form or - for stdin."
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "context": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "commands": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "log": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "options": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "properties": {
+                                "vault": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "description": "Vault root to operate against."
+                                },
+                                "requestId": {
+                                  "description": "Optional caller-supplied request id for audit correlation.",
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 128
+                                },
+                                "input": {
+                                  "type": "string",
+                                  "description": "Payload input in @file.json form or - for stdin."
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "outcome": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "commands": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "analyze": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "options": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "properties": {
+                                "vault": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "description": "Vault root to operate against."
+                                },
+                                "requestId": {
+                                  "description": "Optional caller-supplied request id for audit correlation.",
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 128
+                                },
+                                "asOf": {
+                                  "description": "Optional analysis date in YYYY-MM-DD form.",
+                                  "type": "string",
+                                  "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "write": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "options": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "properties": {
+                                "vault": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "description": "Vault root to operate against."
+                                },
+                                "requestId": {
+                                  "description": "Optional caller-supplied request id for audit correlation.",
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 128
+                                },
+                                "asOf": {
+                                  "description": "Optional analysis date in YYYY-MM-DD form.",
+                                  "type": "string",
+                                  "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                                }
+                              }
+                            }
+                          }
                         }
                       }
                     }

@@ -690,6 +690,10 @@ describe('assistant CLI tool capability seam', () => {
     })
     await executeTool(queryTools, 'vault.wearables.day', { date: '2026-03-31' })
     await executeTool(queryTools, 'vault.wearables.sleep', { from: '2026-03-25' })
+    await executeTool(queryTools, 'vault.wearables.sleep', {
+      from: '2026-03-25',
+      limit: 3,
+    })
     await executeTool(queryTools, 'vault.wearables.activity', { date: '2026-03-31' })
     await executeTool(queryTools, 'vault.wearables.body', {})
     await executeTool(queryTools, 'vault.wearables.recovery', { from: '2026-03-25' })
@@ -700,6 +704,9 @@ describe('assistant CLI tool capability seam', () => {
     await executeTool(queryTools, 'vault.food.list', { status: 'active' })
     expect(findCall(queryCalls, 'listWearableSleep')).toMatchObject({
       limit: 14,
+    })
+    expect(findLastCall(queryCalls, 'listWearableSleep')).toMatchObject({
+      limit: 3,
     })
     expect(findCall(queryCalls, 'showWearableLatest')).toMatchObject({
       from: '2026-03-28',
@@ -744,6 +751,18 @@ describe('assistant CLI tool capability seam', () => {
     expect(findCall(queryCalls, 'listFoods')).toMatchObject({
       limit: 10,
     })
+
+    const missingMethodTools = createVaultQueryToolDefinitions(
+      createToolContext({
+        vault: vaultRoot,
+        vaultServices: assumeVaultServices({
+          query: {},
+        }),
+      }),
+    )
+    await expect(
+      executeTool(missingMethodTools, 'vault.wearables.latest', {}),
+    ).rejects.toThrow('Missing vault query service method showWearableLatest')
 
     const writeToolsWithoutState = createCanonicalVaultWriteToolDefinitions(context, {
       includeStatefulWriteTools: false,

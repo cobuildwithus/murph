@@ -64,13 +64,13 @@ declare module 'incur' {
       'experiment checkpoint': { args: {}; options: { vault: string; requestId?: string; input: string } }
       'experiment context log': { args: { id: string }; options: { vault: string; requestId?: string; input: string } }
       'experiment create': { args: { slug: string }; options: { vault: string; requestId?: string; title?: string; hypothesis?: string; startedOn?: string; status?: "planned" | "active" | "paused" | "completed" | "abandoned" } }
-      'experiment list': { args: {}; options: { vault: string; requestId?: string; status?: "planned" | "active" | "paused" | "completed" | "abandoned"; limit: number } }
+      'experiment list': { args: {}; options: { vault: string; requestId?: string; limit: number; status?: "planned" | "active" | "paused" | "completed" | "abandoned" } }
       'experiment outcome analyze': { args: { id: string }; options: { vault: string; requestId?: string; asOf?: string } }
       'experiment outcome write': { args: { id: string }; options: { vault: string; requestId?: string; asOf?: string } }
       'experiment progress': { args: { id: string }; options: { vault: string; requestId?: string; asOf?: string } }
       'experiment session log': { args: { id: string }; options: { vault: string; requestId?: string; input: string } }
       'experiment show': { args: { id: string }; options: { vault: string; requestId?: string } }
-      'experiment stop': { args: { id: string }; options: { vault: string; requestId?: string; occurredAt?: string | string; note?: string } }
+      'experiment stop': { args: { id: string }; options: { vault: string; requestId?: string; occurredAt?: string; note?: string } }
       'experiment update': { args: {}; options: { vault: string; requestId?: string; input: string } }
       'export pack create': { args: {}; options: { vault: string; requestId?: string; from: string; to: string; experiment?: string; out?: string } }
       'export pack list': { args: {}; options: { vault: string; requestId?: string; from?: string; to?: string; experiment?: string; limit: number } }
