@@ -31,7 +31,7 @@ Read-command chooser:
 - `vault-cli timeline ...` for chronological questions.
 - `vault-cli memory show` plus `vault-cli knowledge ...` reads for saved user context.
 - `vault-cli wearables day ...` or other `wearables ... list` commands for wearable summaries.
-- family `manifest` commands such as `meal manifest`, `document manifest`, `intake manifest`, and `workout manifest` for immutable import provenance.
+- family `manifest` commands such as `capture manifest`, `meal manifest`, `document manifest`, `intake manifest`, and `workout manifest` for immutable import provenance.
 
 If Murph is not configured yet:
 - ask the operator to install `@murphai/murph` if `vault-cli` is missing

@@ -214,6 +214,50 @@ claims:
       - source_artifact:bryan-johnson-saunamaxx-2026-04-14
     caveats:
       - This is specific to Bryan Johnson's heat-shock or core-temperature goal and should not be generalized to every sauna user or every sauna protocol.
+researchLandscape:
+  bottomLine: "This page is best read as source-attribution for Bryan Johnson's high-burden Blueprint sauna routine, not as direct clinical evidence that the routine's reported outcomes will generalize."
+  confidenceLabel: limited
+  primaryClaim: "The source record strongly establishes what the public Blueprint routine says to do: dry sauna, about 93 C / 200 F, 20 minutes, daily, usually after a workout, with hydration and heat-protection tactics."
+  mainCaveat: "All protocol-specific cited sources are Bryan Johnson or Blueprint self-reports; they support provenance, dose interpretation, and safety boundaries, but not population-level efficacy."
+  groups:
+    -
+      id: source-routine-spec
+      label: "Source routine and beginner boundary"
+      stance: supports
+      summary: "The clearest evidence here is protocol provenance: Blueprint describes the daily 20-minute 200 F dry-sauna routine and also gives a more conservative beginner adaptation. This supports representing Johnson's routine accurately while separating it from a safer starter dose."
+      sourceKeys:
+        - source_artifact:bryan-johnson-sauna-protocol-2026-01-28
+        - source_artifact:bryan-johnson-morning-routine-2026-04-08
+      defaultOpen: true
+    -
+      id: personal-outcomes-not-causal
+      label: "Personal outcomes, not causal proof"
+      stance: does_not_confirm
+      summary: "Johnson reports toxin, microplastic, fertility, vascular, blood, and resting-heart-rate observations around his sauna practice. Those sources explain the protocol's motivation, but they are one-person reports with many confounders and should not be rendered as expected user outcomes."
+      sourceKeys:
+        - source_artifact:x-bryan-johnson-comprehensive-sauna-guide-2025-12-06
+        - source_artifact:linkedin-bryan-johnson-sauna-guide-2025-12-06
+        - source_artifact:x-bryan-johnson-most-people-sauna-wrong-2025-11-12
+    -
+      id: core-temperature-dose-variant
+      label: "Core-temperature dose variant"
+      stance: mixed
+      summary: "The April 2026 core-temperature posts change the interpretation of the original 20-minute routine: Johnson reports that reaching roughly 102.4 F / 39 C took closer to 31 minutes, and longer with face or neck cooling. This makes the threshold-targeted saunamaxx version a higher-burden variant rather than a silent replacement for the default page protocol."
+      sourceKeys:
+        - source_artifact:bryan-johnson-saunamaxx-2026-04-14
+        - source_artifact:linkedin-bryan-johnson-core-temp-2026-04-16
+        - source_artifact:x-bryan-johnson-core-temp-2026-04-16
+        - source_artifact:x-bryan-johnson-fired-review-2026-04-06
+        - source_artifact:linkedin-bryan-johnson-core-temp-prototype-2026-04-03
+        - source_artifact:x-bryan-johnson-core-temp-update-2026-04-03
+      defaultOpen: true
+    -
+      id: safety-fertility-cooling-boundary
+      label: "Fertility and cooling boundary"
+      stance: safety_boundary
+      summary: "The groin-cooling source explains why this page treats fertility concerns and local cooling as source-specific safety boundaries. It does not prove that groin icing prevents sauna-related fertility risk, so users with fertility goals should treat heat exposure cautiously."
+      sourceKeys:
+        - source_artifact:x-bryan-johnson-ice-balls-2026-04-09
 safety:
   cautionLevel: high
   avoidOrGetClinicianGuidance:
