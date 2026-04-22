@@ -9,6 +9,12 @@ import type {
   HostedExecutionDeviceSyncRuntimeSnapshotResponse,
 } from "@murphai/device-syncd/hosted-runtime";
 import type {
+  HostedRuntimeDrainEvent,
+} from "@murphai/hosted-execution/contracts";
+import type {
+  AssistantTurnInputRefreshPhase,
+} from "@murphai/assistant-engine";
+import type {
   HostedEmailSendRequest,
 } from "../hosted-email.ts";
 
@@ -62,12 +68,23 @@ export interface HostedRuntimeIssueExportPort {
   recordIssues(issues: readonly object[]): Promise<HostedRuntimeIssueRecordResponse>;
 }
 
+export interface HostedRuntimeTurnInputPort {
+  refresh(input: {
+    afterSeq?: string | null;
+    phase: AssistantTurnInputRefreshPhase;
+    requestId: string;
+  }): Promise<{
+    events: HostedRuntimeDrainEvent[];
+  }>;
+}
+
 export interface HostedRuntimePlatform {
   artifactStore: HostedRuntimeArtifactStore;
   billingPort?: HostedRuntimeBillingPort | null;
   deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
   effectsPort: HostedRuntimeEffectsPort;
   issueExportPort?: HostedRuntimeIssueExportPort | null;
+  turnInputPort?: HostedRuntimeTurnInputPort | null;
   usageExportPort?: HostedRuntimeUsageExportPort | null;
 }
 

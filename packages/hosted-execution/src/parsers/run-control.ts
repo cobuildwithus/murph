@@ -23,6 +23,10 @@ import type {
   HostedRunStatus,
   HostedRunStatusRequest,
   HostedRunStatusResponse,
+  HostedRunTurnInputAdoptRequest,
+  HostedRunTurnInputAdoptResponse,
+  HostedRunTurnInputPeekRequest,
+  HostedRunTurnInputPeekResponse,
   HostedRunTriggerKind,
 } from "../contracts.ts";
 import {
@@ -123,6 +127,84 @@ export function parseHostedRunAcquireResponse(value: unknown): HostedRunAcquireR
       : {
           runToken: readNullableString(record.runToken, "Hosted run acquire response runToken"),
         }),
+  };
+}
+
+export function parseHostedRunTurnInputPeekRequest(
+  value: unknown,
+): HostedRunTurnInputPeekRequest {
+  const record = requireObject(value, "Hosted run turn-input peek request");
+
+  return {
+    ...(record.afterSeq === undefined
+      ? {}
+      : {
+          afterSeq: record.afterSeq === null
+            ? null
+            : requireBigIntString(
+                record.afterSeq,
+                "Hosted run turn-input peek request afterSeq",
+              ),
+        }),
+    ...(record.limit === undefined
+      ? {}
+      : {
+          limit: record.limit === null
+            ? null
+            : requireNumber(record.limit, "Hosted run turn-input peek request limit"),
+        }),
+    runId: requireString(record.runId, "Hosted run turn-input peek request runId"),
+    runToken: requireString(record.runToken, "Hosted run turn-input peek request runToken"),
+  };
+}
+
+export function parseHostedRunTurnInputPeekResponse(
+  value: unknown,
+): HostedRunTurnInputPeekResponse {
+  const record = requireObject(value, "Hosted run turn-input peek response");
+
+  return {
+    events: requireArray(record.events, "Hosted run turn-input peek response events")
+      .map((entry) => parseHostedIngressEvent(entry)),
+    run: record.run === null ? null : parseHostedRunRecord(record.run),
+  };
+}
+
+export function parseHostedRunTurnInputAdoptRequest(
+  value: unknown,
+): HostedRunTurnInputAdoptRequest {
+  const record = requireObject(value, "Hosted run turn-input adopt request");
+
+  return {
+    ...(record.afterSeq === undefined
+      ? {}
+      : {
+          afterSeq: record.afterSeq === null
+            ? null
+            : requireBigIntString(
+                record.afterSeq,
+                "Hosted run turn-input adopt request afterSeq",
+              ),
+        }),
+    ingressEventIds: requireStringArray(
+      record.ingressEventIds,
+      "Hosted run turn-input adopt request ingressEventIds",
+    ),
+    runId: requireString(record.runId, "Hosted run turn-input adopt request runId"),
+    runToken: requireString(record.runToken, "Hosted run turn-input adopt request runToken"),
+  };
+}
+
+export function parseHostedRunTurnInputAdoptResponse(
+  value: unknown,
+): HostedRunTurnInputAdoptResponse {
+  const record = requireObject(value, "Hosted run turn-input adopt response");
+
+  return {
+    adopted: requireBoolean(record.adopted, "Hosted run turn-input adopt response adopted"),
+    events: requireArray(record.events, "Hosted run turn-input adopt response events")
+      .map((entry) => parseHostedIngressEvent(entry)),
+    run: record.run === null ? null : parseHostedRunRecord(record.run),
   };
 }
 

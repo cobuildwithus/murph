@@ -647,6 +647,7 @@ export class RunnerRunProcessor {
         currentBundleRef,
         run,
         runDrain,
+        ...(runToken ? { runToken } : {}),
       },
       runtime: options.messagingActivityOwnedByExecutor === true
         ? markHostedRunMessagingActivityOwnedByExecutor(runtimeConfig)

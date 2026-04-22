@@ -13,6 +13,7 @@ import { createIntegratedVaultServices } from "@murphai/vault-usecases/vault-ser
 import type {
   HostedAssistantRuntimeDeviceSyncConfig,
   HostedMaintenanceMetrics,
+  NormalizedHostedAssistantRuntimeConfig,
 } from "./models.ts";
 import {
   reconcileHostedDeviceSyncControlPlaneState,
@@ -29,6 +30,7 @@ import {
 import type {
   HostedRuntimeDeviceSyncPort,
 } from "./platform.ts";
+import { createHostedAssistantTurnInputPort } from "./turn-input.ts";
 
 const HOSTED_MAX_DEVICE_SYNC_JOBS = 20;
 
@@ -96,6 +98,7 @@ export async function runHostedAssistantRuntimeTimerLane(input: {
   wake: HostedRuntimeEvent;
   executionContext: AssistantExecutionContext;
   requestId: string;
+  runtime?: Pick<NormalizedHostedAssistantRuntimeConfig, "platform">;
   skipAssistantAutomation?: boolean;
   vaultRoot: string;
 }): Promise<HostedMaintenanceMetrics> {
@@ -113,6 +116,7 @@ export async function runHostedAssistantRuntimeTimerLane(input: {
         input.requestId,
         input.executionContext,
         input.wake,
+        input.runtime,
       )
     : {
         nextWakeAt: null,
@@ -134,11 +138,21 @@ export async function runHostedAssistantAutomation(
   requestId: string,
   executionContext: AssistantExecutionContext,
   wake: HostedRuntimeEvent,
+  runtime?: Pick<NormalizedHostedAssistantRuntimeConfig, "platform">,
 ): Promise<{ nextWakeAt: string | null; progressed: boolean }> {
   const inboxServices = createIntegratedInboxServices();
   const vaultServices = createIntegratedVaultServices({
     foodAutoLogHooks: createAssistantFoodAutoLogHooks(),
   });
+  const turnInputPort = runtime
+    ? createHostedAssistantTurnInputPort({
+        inboxServices,
+        requestId,
+        runtime,
+        vaultRoot,
+        wake,
+      })
+    : undefined;
   const beforeState = await readAssistantAutomationState(vaultRoot);
   emitHostedExecutionStructuredLog({
     component: "runtime",
@@ -177,6 +191,7 @@ export async function runHostedAssistantAutomation(
       },
       vaultServices,
       requestId,
+      ...(turnInputPort ? { turnInputPort } : {}),
       vault: vaultRoot,
     });
     const afterState = await readAssistantAutomationState(vaultRoot);

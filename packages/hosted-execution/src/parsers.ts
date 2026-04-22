@@ -120,6 +120,10 @@ export {
   parseHostedRunRecord,
   parseHostedRunStatusRequest,
   parseHostedRunStatusResponse,
+  parseHostedRunTurnInputAdoptRequest,
+  parseHostedRunTurnInputAdoptResponse,
+  parseHostedRunTurnInputPeekRequest,
+  parseHostedRunTurnInputPeekResponse,
 } from "./parsers/run-control.ts";
 
 export function parseHostedIngressEnvelope(value: unknown): HostedIngressEnvelope {

@@ -43,10 +43,22 @@ export function parseHostedAssistantRuntimeJobRequest(
   }
 
   const runDrain = parseHostedRuntimeDrainRequest(record.runDrain);
-  return parseHostedExecutionRunnerRequest({
+  const request = parseHostedExecutionRunnerRequest({
     ...record,
     runDrain,
   });
+
+  return {
+    ...request,
+    ...(record.runToken === undefined
+      ? {}
+      : {
+          runToken: readNullableString(
+            record.runToken,
+            "Hosted assistant runtime job request runToken",
+          ),
+        }),
+  };
 }
 
 export function parseHostedAssistantRuntimeConfig(

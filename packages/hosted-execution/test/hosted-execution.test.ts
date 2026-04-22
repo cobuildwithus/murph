@@ -14,6 +14,7 @@ import {
   HOSTED_EXECUTION_EVENT_KINDS,
   HOSTED_EXECUTION_NONCE_HEADER,
   HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER,
+  HOSTED_INGRESS_PAYLOAD_SCHEMA,
   HOSTED_RUN_STATUSES,
   HOSTED_EXECUTION_SIGNATURE_HEADER,
   HOSTED_EXECUTION_SIGNING_KEY_ID_HEADER,
@@ -30,6 +31,10 @@ import {
   parseHostedExecutionRunnerVaultSyncImport,
   parseHostedIngressEnvelope,
   parseHostedRuntimeDrainEvent,
+  parseHostedRunTurnInputAdoptRequest,
+  parseHostedRunTurnInputAdoptResponse,
+  parseHostedRunTurnInputPeekRequest,
+  parseHostedRunTurnInputPeekResponse,
 } from "../src/parsers.ts";
 
 function decodeUtf8(buffer: ArrayBuffer): string {
@@ -191,7 +196,66 @@ describe("hosted execution coverage gaps", () => {
     expect("parseHostedWakeEmailMessageReceivedPayload" in rootModule).toBe(false);
     expect(Object.keys(routeModule).sort()).toEqual([
       "HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH",
+      "HOSTED_EXECUTION_RUNNER_TURN_INPUT_REFRESH_PATH",
     ]);
+  });
+
+  it("parses hosted run turn-input peek and adopt contracts", () => {
+    const event = {
+      behavior: "ordered",
+      createdAt: "2026-04-23T00:00:00.000Z",
+      id: "wake_11",
+      kind: "conversation.message",
+      occurredAt: "2026-04-23T00:00:00.000Z",
+      payloadCiphertext: "ciphertext",
+      payloadSchema: HOSTED_INGRESS_PAYLOAD_SCHEMA,
+      seq: "11",
+      updatedAt: "2026-04-23T00:00:00.000Z",
+      userId: "member_123",
+    };
+
+    expect(parseHostedRunTurnInputPeekRequest({
+      afterSeq: "10",
+      limit: 2,
+      runId: "run_123",
+      runToken: "run-token",
+    })).toEqual({
+      afterSeq: "10",
+      limit: 2,
+      runId: "run_123",
+      runToken: "run-token",
+    });
+    expect(parseHostedRunTurnInputPeekResponse({
+      events: [event],
+      run: null,
+    })).toEqual({
+      events: [event],
+      run: null,
+    });
+    expect(parseHostedRunTurnInputAdoptRequest({
+      ingressEventIds: ["wake_11"],
+      runId: "run_123",
+      runToken: "run-token",
+    })).toEqual({
+      ingressEventIds: ["wake_11"],
+      runId: "run_123",
+      runToken: "run-token",
+    });
+    expect(parseHostedRunTurnInputAdoptResponse({
+      adopted: true,
+      events: [event],
+      run: null,
+    })).toEqual({
+      adopted: true,
+      events: [event],
+      run: null,
+    });
+
+    expect(() => parseHostedRunTurnInputPeekRequest({
+      afterSeq: "not-a-seq",
+      runId: "run_123",
+      runToken: "run-token",
+    })).toThrow(/base-10 integer string/iu);
   });
 
   it("builds and parses hosted vault sync import side-input contracts", () => {

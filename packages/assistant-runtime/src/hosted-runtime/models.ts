@@ -44,6 +44,7 @@ export interface HostedAssistantRuntimeConfig {
 export interface HostedAssistantRuntimeJobRequest
   extends Omit<HostedExecutionRunnerRequest, "runDrain"> {
   runDrain: HostedRuntimeDrainRequest;
+  runToken?: string | null;
 }
 
 export interface HostedAssistantRuntimeJobInput {

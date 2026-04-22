@@ -34,7 +34,7 @@ import {
   createHostedExecutionTestEnv,
   encryptTestHostedIngressPayload,
 } from "./hosted-execution-fixtures.ts";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const envMocks = vi.hoisted(() => ({
   readHostedExecutionEnvironment: vi.fn(),
@@ -111,10 +111,6 @@ vi.mock("../src/user-runner/runner-run-processor.js", async () => {
     ...actual,
     RunnerRunProcessor: MockRunnerRunProcessor,
   };
-});
-
-afterEach(() => {
-  vi.clearAllMocks();
 });
 
 function createTestRuntimeEnvironment() {
@@ -302,6 +298,33 @@ function createRunRecord(): HostedRunRecord {
     ingressEventIds: [],
   };
 }
+
+beforeEach(() => {
+  webControlMocks.readHostedRunStatusFromWeb.mockImplementation(async (input: {
+    body?: {
+      runId?: string | null;
+    };
+  }) => {
+    const run = createRunRecord();
+    run.id = input.body?.runId ?? run.id;
+    run.status = "running";
+
+    return {
+      cursor: createCursorState({
+        committedSeq: "10",
+        nextSeq: "11",
+        snapshotKey: "snapshot/status",
+        version: "cursor-status",
+      }),
+      pendingIngressEventCount: 0,
+      run,
+    };
+  });
+});
+
+afterEach(() => {
+  vi.clearAllMocks();
+});
 
 describe("HostedUserRunner resumeFinalize drain", () => {
   it("marks bootstrap state as runtime-ready so later alarms can drain", async () => {
@@ -556,6 +579,36 @@ describe("HostedUserRunner resumeFinalize drain", () => {
       "commit_attempted",
       "commit_won",
     ]);
+  });
+
+  it("fails closed when hosted run status cannot be refreshed before commit", async () => {
+    envMocks.readHostedExecutionEnvironment.mockReturnValue(createTestRuntimeEnvironment());
+    const runner = new HostedUserRunner(
+      createDurableObjectStateHarness(),
+      envMocks.readHostedExecutionEnvironment(createHostedExecutionTestEnv()),
+      new MemoryEncryptedR2Bucket(),
+    );
+    const mergeCommitInputs = Reflect.get(
+      runner,
+      "mergeAdoptedHostedRunCommitInputs",
+    );
+    if (typeof mergeCommitInputs !== "function") {
+      throw new Error("Expected hosted runner commit merge helper to be callable.");
+    }
+    const run = createRunRecord();
+    run.status = "acquired";
+    webControlMocks.readHostedRunStatusFromWeb.mockRejectedValueOnce(
+      new Error("status refresh failed"),
+    );
+
+    await expect(
+      mergeCommitInputs.call(runner, {
+        eventResults: [],
+        outputCommittedSeq: "10",
+        run,
+        userId: "user-resume-finalize",
+      }),
+    ).rejects.toThrow("status refresh failed");
   });
 
   it("keeps runtime fallback ownership enabled when runner typing only returns a cleanup handle", async () => {

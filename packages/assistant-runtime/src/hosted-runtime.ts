@@ -78,6 +78,7 @@ export type {
   HostedRuntimeDeviceSyncPort,
   HostedRuntimeEffectsPort,
   HostedRuntimePlatform,
+  HostedRuntimeTurnInputPort,
   HostedRuntimeUsageRecordResponse,
   HostedRuntimeUsageExportPort,
 } from "./hosted-runtime/platform.ts";

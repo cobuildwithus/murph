@@ -15,6 +15,10 @@ import {
   type HostedRunReleaseFinalizeResponse,
   type HostedRunStatusRequest,
   type HostedRunStatusResponse,
+  type HostedRunTurnInputAdoptRequest,
+  type HostedRunTurnInputAdoptResponse,
+  type HostedRunTurnInputPeekRequest,
+  type HostedRunTurnInputPeekResponse,
 } from "@murphai/hosted-execution/contracts";
 import {
   parseHostedRunAcquireResponse,
@@ -23,6 +27,8 @@ import {
   parseHostedRunLogResponse,
   parseHostedRunReleaseFinalizeResponse,
   parseHostedRunStatusResponse,
+  parseHostedRunTurnInputAdoptResponse,
+  parseHostedRunTurnInputPeekResponse,
 } from "@murphai/hosted-execution/parsers";
 import {
   normalizeHostedExecutionBaseUrl,
@@ -106,6 +112,10 @@ const HOSTED_WEB_HOSTED_RUN_FINALIZE_PATH = "/api/internal/hosted-run/finalize";
 const HOSTED_WEB_HOSTED_RUN_LOG_PATH = "/api/internal/hosted-run/log";
 const HOSTED_WEB_HOSTED_RUN_RELEASE_FINALIZE_PATH = "/api/internal/hosted-run/release-finalize";
 const HOSTED_WEB_HOSTED_RUN_STATUS_PATH = "/api/internal/hosted-run/status";
+const HOSTED_WEB_HOSTED_RUN_TURN_INPUT_ADOPT_PATH =
+  "/api/internal/hosted-run/turn-input/adopt";
+const HOSTED_WEB_HOSTED_RUN_TURN_INPUT_PEEK_PATH =
+  "/api/internal/hosted-run/turn-input/peek";
 
 export async function acquireHostedRunFromWeb(input: {
   baseUrl: string;
@@ -206,6 +216,40 @@ export async function readHostedRunStatusFromWeb(input: {
     input,
     parse: parseHostedRunStatusResponse,
     path: HOSTED_WEB_HOSTED_RUN_STATUS_PATH,
+  });
+}
+
+export async function peekHostedRunTurnInputFromWeb(input: {
+  baseUrl: string;
+  body: HostedRunTurnInputPeekRequest;
+  boundUserId: string;
+  callbackSigning?: HostedWebCallbackSigningEnvironment | null;
+  fetchImpl?: typeof fetch;
+  timeoutMs: number | null;
+}): Promise<HostedRunTurnInputPeekResponse> {
+  return requestHostedWebControlPlaneJson({
+    body: JSON.stringify(input.body),
+    description: "Hosted run turn-input peek",
+    input,
+    parse: parseHostedRunTurnInputPeekResponse,
+    path: HOSTED_WEB_HOSTED_RUN_TURN_INPUT_PEEK_PATH,
+  });
+}
+
+export async function adoptHostedRunTurnInputInWeb(input: {
+  baseUrl: string;
+  body: HostedRunTurnInputAdoptRequest;
+  boundUserId: string;
+  callbackSigning?: HostedWebCallbackSigningEnvironment | null;
+  fetchImpl?: typeof fetch;
+  timeoutMs: number | null;
+}): Promise<HostedRunTurnInputAdoptResponse> {
+  return requestHostedWebControlPlaneJson({
+    body: JSON.stringify(input.body),
+    description: "Hosted run turn-input adopt",
+    input,
+    parse: parseHostedRunTurnInputAdoptResponse,
+    path: HOSTED_WEB_HOSTED_RUN_TURN_INPUT_ADOPT_PATH,
   });
 }
 

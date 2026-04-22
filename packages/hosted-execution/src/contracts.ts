@@ -615,6 +615,31 @@ export interface HostedRunAcquireResponse {
   runToken?: string | null;
 }
 
+export interface HostedRunTurnInputPeekRequest {
+  afterSeq?: string | null;
+  limit?: number | null;
+  runId: string;
+  runToken: string;
+}
+
+export interface HostedRunTurnInputPeekResponse {
+  events: HostedIngressEvent[];
+  run: HostedRunRecord | null;
+}
+
+export interface HostedRunTurnInputAdoptRequest {
+  afterSeq?: string | null;
+  ingressEventIds: string[];
+  runId: string;
+  runToken: string;
+}
+
+export interface HostedRunTurnInputAdoptResponse {
+  adopted: boolean;
+  events: HostedIngressEvent[];
+  run: HostedRunRecord | null;
+}
+
 export interface HostedRunEventResult {
   ingressEventId: string;
   quarantineCode?: string | null;

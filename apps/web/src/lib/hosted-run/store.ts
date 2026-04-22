@@ -14,6 +14,8 @@ import type {
   HostedRunRecord,
   HostedRunStatus,
   HostedRunStatusResponse,
+  HostedRunTurnInputAdoptResponse,
+  HostedRunTurnInputPeekResponse,
   HostedRunTriggerKind,
   HostedIngressSnapshotRef,
   HostedBrowserVaultReplicaCursorRef,
@@ -79,6 +81,46 @@ export async function acquireHostedRun(input: {
     limit: input.limit,
     now: input.now,
     triggerKind: input.triggerKind,
+    tx,
+    userId: input.userId,
+  }));
+}
+
+export async function peekHostedRunTurnInput(input: {
+  afterSeq?: bigint | null;
+  limit?: number | null;
+  prisma?: PrismaClient;
+  runId: string;
+  runToken: string;
+  userId: string;
+}): Promise<HostedRunTurnInputPeekResponse> {
+  const prisma = input.prisma ?? getPrisma();
+
+  return prisma.$transaction((tx) => peekHostedRunTurnInputTx({
+    afterSeq: input.afterSeq,
+    limit: input.limit,
+    runId: input.runId,
+    runToken: input.runToken,
+    tx,
+    userId: input.userId,
+  }));
+}
+
+export async function adoptHostedRunTurnInput(input: {
+  afterSeq?: bigint | null;
+  ingressEventIds: string[];
+  prisma?: PrismaClient;
+  runId: string;
+  runToken: string;
+  userId: string;
+}): Promise<HostedRunTurnInputAdoptResponse> {
+  const prisma = input.prisma ?? getPrisma();
+
+  return prisma.$transaction((tx) => adoptHostedRunTurnInputTx({
+    afterSeq: input.afterSeq,
+    ingressEventIds: input.ingressEventIds,
+    runId: input.runId,
+    runToken: input.runToken,
     tx,
     userId: input.userId,
   }));
@@ -267,6 +309,140 @@ export async function acquireHostedRunTx(input: {
     userId: input.userId,
     cursor,
   });
+}
+
+export async function peekHostedRunTurnInputTx(input: {
+  afterSeq?: bigint | null;
+  limit?: number | null;
+  runId: string;
+  runToken: string;
+  tx: HostedRunMutationTx;
+  userId: string;
+}): Promise<HostedRunTurnInputPeekResponse> {
+  await ensureHostedExecutionCursorRowTx({ tx: input.tx, userId: input.userId });
+  await lockHostedExecutionCursorRowTx({ tx: input.tx, userId: input.userId });
+  const run = await readHostedRunForMutationTx({
+    allowedStatuses: ["acquired", "running"],
+    runId: input.runId,
+    runToken: input.runToken,
+    tx: input.tx,
+    userId: input.userId,
+  });
+
+  if (!run) {
+    return {
+      events: [],
+      run: null,
+    };
+  }
+
+  const afterSeq = resolveHostedRunTurnInputPeekAfterSeq({
+    afterSeq: input.afterSeq ?? null,
+    run,
+  });
+  const rows = await listContiguousHostedRunWakeRowsAfterSeqTx({
+    afterSeq,
+    limit: normalizeHostedRunTurnInputLimit(input.limit),
+    tx: input.tx,
+    userId: input.userId,
+  });
+
+  return {
+    events: await hydrateHostedIngressEventsTx({
+      records: rows,
+      tx: input.tx,
+    }),
+    run: projectHostedRunRecord(run),
+  };
+}
+
+export async function adoptHostedRunTurnInputTx(input: {
+  afterSeq?: bigint | null;
+  ingressEventIds: string[];
+  runId: string;
+  runToken: string;
+  tx: HostedRunMutationTx;
+  userId: string;
+}): Promise<HostedRunTurnInputAdoptResponse> {
+  await ensureHostedExecutionCursorRowTx({ tx: input.tx, userId: input.userId });
+  await lockHostedExecutionCursorRowTx({ tx: input.tx, userId: input.userId });
+  const run = await readHostedRunForMutationTx({
+    allowedStatuses: ["acquired", "running"],
+    runId: input.runId,
+    runToken: input.runToken,
+    tx: input.tx,
+    userId: input.userId,
+  });
+
+  if (!run) {
+    return {
+      adopted: false,
+      events: [],
+      run: null,
+    };
+  }
+
+  if (input.ingressEventIds.length === 0) {
+    return {
+      adopted: false,
+      events: [],
+      run: projectHostedRunRecord(run),
+    };
+  }
+
+  const rows = await listContiguousHostedRunWakeRowsAfterSeqTx({
+    afterSeq: highestHostedRunClaimedSeq(run),
+    limit: input.ingressEventIds.length,
+    tx: input.tx,
+    userId: input.userId,
+  });
+  const requestedIdsMatchPrefix =
+    rows.length === input.ingressEventIds.length
+    && rows.every((row, index) => row.id === input.ingressEventIds[index]);
+
+  if (!requestedIdsMatchPrefix) {
+    return {
+      adopted: false,
+      events: [],
+      run: projectHostedRunRecord(run),
+    };
+  }
+
+  const updateResult = await input.tx.hostedIngressEvent.updateMany({
+    where: {
+      id: { in: input.ingressEventIds },
+      quarantinedAt: null,
+      runId: null,
+      state: "pending",
+      userId: input.userId,
+    },
+    data: {
+      runId: run.id,
+      state: "running",
+    },
+  });
+
+  if (updateResult.count !== input.ingressEventIds.length) {
+    return {
+      adopted: false,
+      events: [],
+      run: projectHostedRunRecord(run),
+    };
+  }
+
+  const updatedRun = await input.tx.hostedRun.update({
+    where: { id: run.id },
+    data: appendHostedRunIngressProjection(run, rows),
+  });
+
+  return {
+    adopted: true,
+    events: await hydrateHostedIngressEventsTx({
+      records: rows,
+      tx: input.tx,
+    }),
+    run: projectHostedRunRecord(updatedRun),
+  };
 }
 
 export async function commitHostedRun(input: {
@@ -913,6 +1089,10 @@ function normalizeHostedRunAcquireLimit(value: number | null | undefined): numbe
   return value;
 }
 
+function normalizeHostedRunTurnInputLimit(value: number | null | undefined): number {
+  return normalizeHostedRunAcquireLimit(value);
+}
+
 function normalizeHostedRunStatusLimit(value: number | null | undefined): number {
   if (value === null || value === undefined) {
     return 10;
@@ -955,6 +1135,89 @@ async function listContiguousHostedRunWakeRowsTx(input: {
   }
 
   return contiguous;
+}
+
+async function listContiguousHostedRunWakeRowsAfterSeqTx(input: {
+  afterSeq: bigint;
+  limit: number;
+  tx: HostedIngressStoreClient;
+  userId: string;
+}): Promise<HostedIngressEventRow[]> {
+  const rows = await input.tx.hostedIngressEvent.findMany({
+    where: {
+      quarantinedAt: null,
+      runId: null,
+      seq: { gt: input.afterSeq },
+      state: "pending",
+      userId: input.userId,
+    },
+    orderBy: { seq: "asc" },
+    take: input.limit,
+  });
+  const contiguous: HostedIngressEventRow[] = [];
+  let expectedSeq = input.afterSeq + 1n;
+
+  for (const row of rows) {
+    if (row.seq !== expectedSeq) {
+      break;
+    }
+
+    contiguous.push(row);
+    expectedSeq += 1n;
+  }
+
+  return contiguous;
+}
+
+function resolveHostedRunTurnInputPeekAfterSeq(input: {
+  afterSeq: bigint | null;
+  run: HostedRunRow;
+}): bigint {
+  const claimedSeq = highestHostedRunClaimedSeq(input.run);
+  if (input.afterSeq === null || input.afterSeq < claimedSeq) {
+    return claimedSeq;
+  }
+
+  return input.afterSeq;
+}
+
+function highestHostedRunClaimedSeq(run: HostedRunRow): bigint {
+  const seqs = readHostedRunBigIntArray(run.eventSeqsJson, "Hosted run eventSeqsJson");
+  return seqs.length === 0 ? run.inputCommittedSeq : seqs[seqs.length - 1];
+}
+
+function appendHostedRunIngressProjection(
+  run: HostedRunRow,
+  rows: readonly HostedIngressEventRow[],
+): Prisma.HostedRunUpdateInput {
+  const existingKinds = readHostedRunStringArray(
+    run.eventKindsJson,
+    "Hosted run eventKindsJson",
+  );
+  const existingSeqs = readHostedRunStringArray(
+    run.eventSeqsJson,
+    "Hosted run eventSeqsJson",
+  );
+  const existingIngressEventIds = readHostedRunStringArray(
+    run.ingressEventIdsJson,
+    "Hosted run ingressEventIdsJson",
+  );
+
+  return {
+    eventCount: existingSeqs.length + rows.length,
+    eventKindsJson: toPrismaJsonArray(uniqueStrings([
+      ...existingKinds,
+      ...rows.map((row) => row.kind),
+    ])),
+    eventSeqsJson: toPrismaJsonArray([
+      ...existingSeqs,
+      ...rows.map((row) => row.seq.toString()),
+    ]),
+    ingressEventIdsJson: toPrismaJsonArray([
+      ...existingIngressEventIds,
+      ...rows.map((row) => row.id),
+    ]),
+  } satisfies Prisma.HostedRunUpdateInput;
 }
 
 async function findActiveHostedRunTx(input: {

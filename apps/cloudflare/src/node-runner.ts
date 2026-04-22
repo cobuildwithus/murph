@@ -97,6 +97,8 @@ export function createHostedExecutionJobRunner(
     const runtimePlatform = buildRuntimePlatform({
       boundUserId: input.request.runDrain.userId,
       commitTimeoutMs: runtime.commitTimeoutMs,
+      hostedRunId: input.request.run.runId,
+      hostedRunToken: input.request.runToken ?? null,
       internalWorkerProxyToken,
       localInternalProxyBaseUrl,
       webCallbackSigning: directHostedEnvironment?.webCallbackSigning ?? null,
