@@ -93,6 +93,7 @@ Hosted assistant config:
 - `HOSTED_ASSISTANT_PROVIDER`
 - `HOSTED_ASSISTANT_MODEL`
 - `HOSTED_ASSISTANT_API_KEY_ENV`
+- `HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED` when delegated Vercel AI Gateway billing is enabled
 - the rest of the `HOSTED_ASSISTANT_*` profile vars when you want activation-time seeding of the platform-managed hosted assistant profile
 
 Opt-in runtime integrations and tool overrides:
@@ -133,6 +134,7 @@ Key rotation and future envelope lanes:
 Hosted assistant provider secrets:
 
 - any provider key referenced by `HOSTED_ASSISTANT_API_KEY_ENV`
+- `HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY` when Vercel AI Gateway should emit Stripe meter events directly
 - supported examples include `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, `VENICE_API_KEY`, `TOGETHER_API_KEY`, `GROQ_API_KEY`, `XAI_API_KEY`, `MISTRAL_API_KEY`, `GOOGLE_API_KEY`, and `GOOGLE_GENERATIVE_AI_API_KEY`
 
 Opt-in execution integrations:

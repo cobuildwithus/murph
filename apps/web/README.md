@@ -147,14 +147,21 @@ Hosted onboarding extras:
 
 Hosted AI usage metering:
 
-- `HOSTED_AI_USAGE_STRIPE_METER_EVENT_NAME` must match the Stripe Billing meter attached to the configured `HOSTED_ONBOARDING_STRIPE_USAGE_PRICE_ID_*` prices.
+- `HOSTED_AI_USAGE_STRIPE_METER_EVENT_NAME` must match the Stripe Billing meter attached to the configured `HOSTED_ONBOARDING_STRIPE_USAGE_PRICE_ID_*` prices when you use the hosted-web fallback drain.
 - `HOSTED_AI_USAGE_STRIPE_BATCH_LIMIT` controls how many pending usage rows each cron drain attempts.
+- `HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED=1` enables the delegated Vercel AI Gateway billing path for platform-owned Gateway requests.
+- `HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY` must be a Stripe restricted key with billing meter-event write permission only; it is forwarded to hosted execution, never persisted with usage rows, and ignored unless it starts with `rk_`.
 
 `apps/web` records every hosted assistant usage row by member in `HostedAiUsage`.
-Stripe pricing should own the included allowance and overage rate: configure the
-metered AI-usage prices with the same cadence as their launch plan and a free
-tier for the usage included in the flat subscription, then bill overage through
-Stripe's graduated metered price rather than subtracting allowance in app code.
+Rows delegated to Vercel AI Gateway keep `stripeMeterSource=vercel-ai-gateway`
+and `stripeMeterStatus=delegated` for reconciliation, while the existing
+hosted-web Stripe drain continues to own `stripeMeterSource=murph`.
+
+For exact flat-fee plus included-credit plus provider token cost with margin
+pricing, prefer Stripe pricing plans and Billing for LLM tokens when your
+account has preview access. If you stay on the classic metered-price fallback,
+keep included allowance and overage logic in Stripe pricing rather than
+subtracting allowance in app code.
 
 Hosted pages assume the hosted Privy phone-auth setup is present and fail fast
 when it is missing instead of carrying fallback branches in page code.
