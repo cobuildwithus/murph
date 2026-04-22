@@ -102,3 +102,55 @@ test('setup runtime resolver turns SIGINT prompt cancellation into a setup_cance
       error.message === 'Murph setup was cancelled.',
   )
 })
+
+test('setup runtime resolver reprints help text on ? or help and treats q as cancellation', async () => {
+  const prompts: string[] = []
+  const stderrWrites: string[] = []
+  const answers = ['?', 'help', 'q']
+
+  vi.spyOn(process.stderr, 'write').mockImplementation(((chunk: string | Uint8Array) => {
+    stderrWrites.push(String(chunk))
+    return true
+  }) as typeof process.stderr.write)
+
+  readlineMock.createInterface.mockImplementation(() => ({
+    close() {},
+    once() {},
+    question(question: string, callback: (answer: string) => void) {
+      prompts.push(question)
+      callback(answers.shift() ?? '')
+    },
+    removeListener() {},
+  }))
+
+  const resolver = createSetupRuntimeEnvResolver()
+
+  await assert.rejects(
+    resolver.promptForMissing({
+      channels: [],
+      env: {},
+      helpText: [
+        'Local test path:',
+        '  ngrok http 8788',
+      ],
+      wearables: ['oura'],
+    }),
+    (error: unknown) =>
+      error instanceof VaultCliError &&
+      error.code === 'setup_cancelled' &&
+      error.message === 'Murph setup was cancelled.',
+  )
+
+  assert.deepEqual(prompts, [
+    'Enter OURA_CLIENT_ID for this setup run (leave blank to skip): ',
+    'Enter OURA_CLIENT_ID for this setup run (leave blank to skip): ',
+    'Enter OURA_CLIENT_ID for this setup run (leave blank to skip): ',
+  ])
+  const stderrOutput = stderrWrites.join('')
+  assert.match(
+    stderrOutput,
+    /Type \? or help to reprint the callback, webhook, tunnel, and docs guidance\. Type q to cancel setup\./u,
+  )
+  assert.match(stderrOutput, /Local test path:/u)
+  assert.match(stderrOutput, /ngrok http 8788/u)
+})

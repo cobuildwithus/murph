@@ -1,5 +1,6 @@
 import * as React from 'react'
 import { Box, Text } from 'ink'
+import type { SetupWizardPublicUrlTarget } from './setup-wizard-public-url.js'
 
 export type SetupWizardTone = 'accent' | 'success' | 'warn' | 'danger' | 'muted'
 
@@ -21,12 +22,6 @@ export interface SetupWizardSelectionLine {
   key: string
   selected: boolean
   title: string
-}
-
-export interface SetupWizardPublicUrlTarget {
-  detail: string
-  label: string
-  url: string
 }
 
 export function resolveSetupWizardToneColor(tone: SetupWizardTone): string {
@@ -275,6 +270,8 @@ export function createSetupWizardPublicUrlTargetRow(
   target: SetupWizardPublicUrlTarget,
 ): React.ReactElement {
   const createElement = React.createElement
+  const requirementLabel =
+    target.requirement === 'required' ? 'required' : 'optional'
 
   return createElement(
     Box,
@@ -285,6 +282,11 @@ export function createSetupWizardPublicUrlTargetRow(
     },
     createElement(
       Text,
+      { color: resolveSetupWizardToneColor('muted'), bold: true },
+      `${target.label} (${requirementLabel})`,
+    ),
+    createElement(
+      Text,
       null,
       createElement(
         Text,
@@ -292,14 +294,33 @@ export function createSetupWizardPublicUrlTargetRow(
           color: resolveSetupWizardToneColor('muted'),
           bold: true,
         },
-        `${target.label}: `,
+        '  Local receiver: ',
       ),
       createElement(
         Text,
         { color: resolveSetupWizardToneColor('accent') },
-        target.url,
+        target.localReceiverUrl,
       ),
     ),
+    target.providerUrl
+      ? createElement(
+          Text,
+          null,
+          createElement(
+            Text,
+            {
+              color: resolveSetupWizardToneColor('muted'),
+              bold: true,
+            },
+            '  Paste into provider: ',
+          ),
+          createElement(
+            Text,
+            { color: resolveSetupWizardToneColor('accent') },
+            target.providerUrl,
+          ),
+        )
+      : null,
     createElement(
       Text,
       {

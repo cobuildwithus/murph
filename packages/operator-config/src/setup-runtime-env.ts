@@ -41,6 +41,7 @@ export interface SetupRuntimeEnvResolver {
     assistantApiKeyEnv?: string | null
     channels: readonly SetupChannel[]
     env: NodeJS.ProcessEnv
+    helpText?: readonly string[]
     wearables: readonly SetupWearable[]
   }): Promise<NodeJS.ProcessEnv>
 }
@@ -60,11 +61,17 @@ export function createSetupRuntimeEnvResolver(): SetupRuntimeEnvResolver {
       process.stderr.write(
         'Enter any missing keys for this setup run. Leave a prompt blank to skip it for now.\n\n',
       )
+      if (input.helpText && input.helpText.length > 0) {
+        process.stderr.write(
+          'Type ? or help to reprint the callback, webhook, tunnel, and docs guidance. Type q to cancel setup.\n\n',
+        )
+      }
 
       const overrides: NodeJS.ProcessEnv = {}
       for (const key of missingKeys) {
         const value = await promptForRuntimeEnvValue(
           `Enter ${key} for this setup run (leave blank to skip): `,
+          input.helpText,
         )
         if (value) {
           overrides[key] = value
@@ -332,7 +339,32 @@ function normalizeEnvValue(value: string | null | undefined): string | null {
   return trimmed ? trimmed : null
 }
 
-async function promptForRuntimeEnvValue(question: string): Promise<string> {
+async function promptForRuntimeEnvValue(
+  question: string,
+  helpText?: readonly string[],
+): Promise<string> {
+  while (true) {
+    const answer = await readSetupRuntimePromptAnswer(question)
+    const normalizedAnswer = answer.trim()
+
+    if (normalizedAnswer.toLowerCase() === 'q') {
+      throw new VaultCliError('setup_cancelled', 'Murph setup was cancelled.')
+    }
+
+    if (
+      helpText
+      && helpText.length > 0
+      && (normalizedAnswer === '?' || normalizedAnswer.toLowerCase() === 'help')
+    ) {
+      writeSetupRuntimePromptHelp(helpText)
+      continue
+    }
+
+    return normalizedAnswer
+  }
+}
+
+async function readSetupRuntimePromptAnswer(question: string): Promise<string> {
   return await new Promise<string>((resolve, reject) => {
     prepareSetupPromptInput(process.stdin)
     const readline = createInterface({
@@ -351,9 +383,17 @@ async function promptForRuntimeEnvValue(question: string): Promise<string> {
     readline.question(question, (answer) => {
       readline.removeListener('SIGINT', cancel)
       readline.close()
-      resolve(answer.trim())
+      resolve(answer)
     })
   })
+}
+
+function writeSetupRuntimePromptHelp(helpText: readonly string[]): void {
+  process.stderr.write('\n')
+  for (const line of helpText) {
+    process.stderr.write(`${line}\n`)
+  }
+  process.stderr.write('\n')
 }
 
 function formatSetupWearableName(wearable: SetupWearable): string {

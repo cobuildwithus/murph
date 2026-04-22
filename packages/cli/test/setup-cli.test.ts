@@ -317,15 +317,43 @@ test('public URL review recommends hosted apps/web for wearable ingress when no 
   assert.equal(review.recommendedStrategy, 'hosted')
   assert.match(review.summary, /Hosted `apps\/web`/u)
   assert.deepEqual(
-    review.targets.map((target) => target.url),
+    review.targets.map((target) => [
+      target.localReceiverUrl,
+      target.providerUrl,
+      target.requirement,
+    ]),
     [
-      'http://localhost:8788/oauth/garmin/callback',
-      'http://localhost:8788/oauth/whoop/callback',
-      'http://localhost:8788/webhooks/whoop',
-      'http://localhost:8788/oauth/oura/callback',
-      'http://localhost:8788/webhooks/oura',
+      [
+        'http://localhost:8788/oauth/garmin/callback',
+        'https://<your-public-host>/oauth/garmin/callback',
+        'required',
+      ],
+      [
+        'http://localhost:8788/oauth/whoop/callback',
+        'https://<your-public-host>/oauth/whoop/callback',
+        'required',
+      ],
+      [
+        'http://localhost:8788/webhooks/whoop',
+        'https://<your-public-host>/webhooks/whoop',
+        'optional',
+      ],
+      [
+        'http://localhost:8788/oauth/oura/callback',
+        'https://<your-public-host>/oauth/oura/callback',
+        'required',
+      ],
+      [
+        'http://localhost:8788/webhooks/oura',
+        'https://<your-public-host>/webhooks/oura',
+        'optional',
+      ],
     ],
   )
+  assert.deepEqual(review.tunnelCommands, [
+    'ngrok http 8788',
+    'cloudflared tunnel --url http://localhost:8788',
+  ])
   assert.match(
     describeSetupWizardPublicUrlStrategyChoice({
       review,
@@ -347,9 +375,11 @@ test('public URL review recommends tunnel mode for Linq-only ingress and keeps t
   assert.deepEqual(review.targets, [
     {
       detail:
-        'Point your tunnel here. Hosted `apps/web` does not replace this Linq webhook yet.',
+        'Required if you enable Linq. Point Linq at the public tunnel URL that forwards here. Hosted `apps/web` does not replace this Linq webhook yet.',
       label: 'Linq webhook',
-      url: 'http://127.0.0.1:8789/linq-webhook',
+      localReceiverUrl: 'http://127.0.0.1:8789/linq-webhook',
+      providerUrl: 'https://<your-public-host>/linq-webhook',
+      requirement: 'required',
     },
   ])
   assert.match(
@@ -357,7 +387,7 @@ test('public URL review recommends tunnel mode for Linq-only ingress and keeps t
       review,
       strategy: 'tunnel',
     }),
-    /does not have a hosted Linq webhook yet/u,
+    /does not replace this Linq webhook yet/u,
   )
 })
 
@@ -372,14 +402,14 @@ test('public URL review keeps hosted wearable guidance while preserving the loca
   assert.match(review.summary, /hosted `apps\/web`/u)
   assert.match(review.summary, /local inbox webhook/u)
   assert.deepEqual(
-    review.targets.map((target) => target.label),
+    review.targets.map((target) => `${target.label}:${target.requirement}`),
     [
-      'Garmin callback',
-      'WHOOP callback',
-      'WHOOP webhook',
-      'Oura callback',
-      'Oura webhook',
-      'Linq webhook',
+      'Garmin callback:required',
+      'WHOOP callback:required',
+      'WHOOP webhook:optional',
+      'Oura callback:required',
+      'Oura webhook:optional',
+      'Linq webhook:required',
     ],
   )
   assert.match(
@@ -1481,6 +1511,7 @@ test('interactive onboarding prompts for missing channel and wearable credential
   const promptedInputs: Array<{
     channels: string[]
     env: NodeJS.ProcessEnv
+    helpText: string[]
     wearables: string[]
   }> = []
   const receivedInputs: Array<{
@@ -1505,6 +1536,7 @@ test('interactive onboarding prompts for missing channel and wearable credential
         promptedInputs.push({
           channels: [...input.channels],
           env: { ...input.env },
+          helpText: [...(input.helpText ?? [])],
           wearables: [...input.wearables],
         })
         return {
@@ -1556,6 +1588,30 @@ test('interactive onboarding prompts for missing channel and wearable credential
       {
         channels: ['email'],
         env: {},
+        helpText: [
+          'Garmin/WHOOP/Oura/Strava need a public callback URL. Hosted `apps/web` is the easiest stable base.',
+          '',
+          '`localhost` is only Murph’s local receiver. Do not paste a localhost URL into Garmin, WHOOP, Oura, or Strava. Use a public HTTPS URL from a tunnel or hosted deployment instead.',
+          '',
+          'Local test path:',
+          '  ngrok http 8788',
+          '  cloudflared tunnel --url http://localhost:8788',
+          '',
+          'Oura callback (required)',
+          '  Local receiver: http://localhost:8788/oauth/oura/callback',
+          '  Paste into provider: https://<your-public-host>/oauth/oura/callback',
+          '  Required. Oura redirect URIs must match this public callback URL exactly.',
+          '',
+          'Oura webhook (optional)',
+          '  Local receiver: http://localhost:8788/webhooks/oura',
+          '  Paste into provider: https://<your-public-host>/webhooks/oura',
+          '  Optional today. Oura can work without webhooks; use this public URL only if you enable Oura webhooks.',
+          '',
+          'Provider setup docs:',
+          '  Oura auth docs: https://cloud.ouraring.com/docs/authentication',
+          '',
+          'This step is informational only. Murph does not save a public URL choice yet.',
+        ],
         wearables: ['oura'],
       },
     ])
