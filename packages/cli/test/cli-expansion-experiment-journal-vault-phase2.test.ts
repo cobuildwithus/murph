@@ -238,6 +238,508 @@ test.sequential(
 )
 
 test.sequential(
+  'experiment session/context logging feeds deterministic progress and outcome analysis for the same run',
+  async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-experiment-analysis-'))
+    const updatePayloadPath = path.join(vaultRoot, 'experiment-analysis-update.json')
+    const firstSessionPayloadPath = path.join(vaultRoot, 'experiment-session-1.json')
+    const secondSessionPayloadPath = path.join(vaultRoot, 'experiment-session-2.json')
+    const contextPayloadPath = path.join(vaultRoot, 'experiment-context.json')
+
+    try {
+      await runSliceCli([
+        'init',
+        '--vault',
+        vaultRoot,
+        '--timezone',
+        'America/Los_Angeles',
+      ])
+      const created = await runSliceCli<{
+        experimentId: string
+        slug: string
+      }>([
+        'experiment',
+        'create',
+        'focus-sprint',
+        '--title',
+        'Focus Sprint',
+        '--started-on',
+        '2026-04-01',
+        '--status',
+        'active',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(created.ok, true)
+
+      await writeFile(
+        updatePayloadPath,
+        JSON.stringify({
+          lookup: 'focus-sprint',
+          hypothesis: 'Heat exposure and consistent timing reduce resting heart rate.',
+          protocolRef: {
+            key: 'protocol_variant:dry-sauna/finnish-standard-3x-week',
+            pageRevisionId: 'sha256:protocol-page',
+            runSpecRevisionId: 'sha256:run-spec',
+            testPlanId: 'resting-heart-rate-21d',
+          },
+          runPlan: {
+            baselineStart: '2026-04-01',
+            baselineEnd: '2026-04-07',
+            interventionStart: '2026-04-08',
+            interventionEnd: '2026-04-21',
+            modality: 'sauna',
+            targetSessions: 4,
+            minimumUsefulSessions: 3,
+          },
+          analysisPlan: {
+            primaryBiomarkerKey: 'biomarker:resting-heart-rate',
+            desiredDirection: 'decrease',
+          },
+          assistantSupport: {
+            remindersEnabled: true,
+            weeklyDigestEnabled: false,
+          },
+        }),
+        'utf8',
+      )
+      await writeFile(
+        firstSessionPayloadPath,
+        JSON.stringify({
+          occurredAt: '2026-04-10T02:00:00.000Z',
+          title: 'Sauna Session 1',
+          interventionType: 'sauna',
+          durationMinutes: 20,
+          timing: 'evening',
+        }),
+        'utf8',
+      )
+      await writeFile(
+        secondSessionPayloadPath,
+        JSON.stringify({
+          occurredAt: '2026-04-18T20:00:00.000Z',
+          title: 'Sauna Session 2',
+          interventionType: 'sauna',
+          durationMinutes: 22,
+          timing: 'evening',
+          afterExercise: true,
+          confounders: ['hard training'],
+          symptoms: ['lightheaded'],
+        }),
+        'utf8',
+      )
+      await writeFile(
+        contextPayloadPath,
+        JSON.stringify({
+          kind: 'note',
+          occurredAt: '2026-04-19T09:00:00.000Z',
+          title: 'Travel day',
+          note: 'Hotel sleep and airport food likely affected recovery.',
+          tags: ['travel'],
+        }),
+        'utf8',
+      )
+
+      const updated = await runSliceCli<{
+        experimentId: string
+        slug: string
+        status: string
+      }>([
+        'experiment',
+        'update',
+        '--input',
+        `@${updatePayloadPath}`,
+        '--vault',
+        vaultRoot,
+      ])
+      const sessionBySlug = await runSliceCli<{
+        experimentId: string
+        lookupId: string
+        slug: string
+        eventId: string
+        kind: string
+      }>([
+        'experiment',
+        'session',
+        'log',
+        'focus-sprint',
+        '--input',
+        `@${firstSessionPayloadPath}`,
+        '--vault',
+        vaultRoot,
+      ])
+      const sessionById = await runSliceCli<{
+        experimentId: string
+        lookupId: string
+        slug: string
+        eventId: string
+        kind: string
+      }>([
+        'experiment',
+        'session',
+        'log',
+        requireData(created).experimentId,
+        '--input',
+        `@${secondSessionPayloadPath}`,
+        '--vault',
+        vaultRoot,
+      ])
+      const contextById = await runSliceCli<{
+        experimentId: string
+        lookupId: string
+        slug: string
+        eventId: string
+        kind: string
+      }>([
+        'experiment',
+        'context',
+        'log',
+        requireData(created).experimentId,
+        '--input',
+        `@${contextPayloadPath}`,
+        '--vault',
+        vaultRoot,
+      ])
+      const shownSession = await runSliceCli<{
+        entity: {
+          kind: string
+          title: string | null
+          data: Record<string, unknown>
+        }
+      }>([
+        'show',
+        requireData(sessionById).eventId,
+        '--vault',
+        vaultRoot,
+      ])
+      const shownContext = await runSliceCli<{
+        entity: {
+          kind: string
+          title: string | null
+          data: Record<string, unknown>
+        }
+      }>([
+        'show',
+        requireData(contextById).eventId,
+        '--vault',
+        vaultRoot,
+      ])
+      const progress = await runSliceCli<{
+        experimentId: string
+        lookupId: string
+        slug: string
+        asOf: string
+        progress: {
+          schema: string
+          dayInRun: number | null
+          phase: string
+          adherence: {
+            completedSessions: number
+            expectedSessionsByNow: number | null
+            minimumUsefulSessions: number | null
+            status: string
+            targetSessions: number | null
+          }
+          dataCoverage: {
+            baselineDaysAvailable: number
+            interventionDaysAvailable: number
+            primaryMetricDaysAvailable: number
+            status: string
+          }
+          recommendation: {
+            action: string
+            reason: string
+            shouldNotifyUser: boolean
+          }
+          confounders: string[]
+          windows: Record<string, string | null>
+        }
+      }>([
+        'experiment',
+        'progress',
+        'focus-sprint',
+        '--as-of',
+        '2026-04-20',
+        '--vault',
+        vaultRoot,
+      ])
+      const progressAgain = await runSliceCli<{
+        progress: Record<string, unknown>
+      }>([
+        'experiment',
+        'progress',
+        'focus-sprint',
+        '--as-of',
+        '2026-04-20',
+        '--vault',
+        vaultRoot,
+      ])
+      const outcome = await runSliceCli<{
+        experimentId: string
+        lookupId: string
+        slug: string
+        asOf: string
+        outcome: {
+          schema: string
+          outcomeId: string
+          adherenceSummary: {
+            adherenceLevel?: string
+            completedSessions: number
+            minimumUsefulSessions: number | null
+            status: string
+            targetSessions: number | null
+          }
+          confidence: {
+            level: string
+            reasons: string[]
+          }
+          conclusion: {
+            caveats: string[]
+            headline: string
+            plainLanguage: string
+          }
+          confounders: string[]
+          windows: Record<string, string | null>
+          metricResults: Array<{
+            baselineDayCount: number
+            baselineMean: number | null
+            biomarkerKey: string
+            completeness: string
+            deltaAbs: number | null
+            deltaPct: number | null
+            expectedDirection: string | null
+            interventionDayCount: number
+            interventionMean: number | null
+            label: string
+            movedAsExpected: boolean | null
+            unit: string | null
+          }>
+          generatedAt?: string
+        }
+      }>([
+        'experiment',
+        'outcome',
+        'analyze',
+        requireData(created).experimentId,
+        '--as-of',
+        '2026-04-25',
+        '--vault',
+        vaultRoot,
+      ])
+      const outcomeAgain = await runSliceCli<{
+        outcome: {
+          adherenceSummary: Record<string, unknown>
+          confidence: Record<string, unknown>
+          conclusion: Record<string, unknown>
+          confounders: string[]
+          metricResults: unknown
+          outcomeId: string
+          schema: string
+          windows: Record<string, string | null>
+        } & Record<string, unknown>
+      }>([
+        'experiment',
+        'outcome',
+        'analyze',
+        requireData(created).experimentId,
+        '--as-of',
+        '2026-04-25',
+        '--vault',
+        vaultRoot,
+      ])
+
+      assert.equal(updated.ok, true)
+      assert.equal(updated.meta?.command, 'experiment update')
+
+      assert.equal(sessionBySlug.ok, true)
+      assert.equal(sessionBySlug.meta?.command, 'experiment session log')
+      assert.equal(requireData(sessionBySlug).lookupId, requireData(created).experimentId)
+      assert.equal(requireData(sessionBySlug).slug, 'focus-sprint')
+      assert.equal(requireData(sessionBySlug).kind, 'intervention_session')
+      assert.match(requireData(sessionBySlug).eventId, /^evt_/u)
+
+      assert.equal(sessionById.ok, true)
+      assert.equal(sessionById.meta?.command, 'experiment session log')
+      assert.equal(requireData(sessionById).lookupId, requireData(created).experimentId)
+      assert.equal(requireData(sessionById).kind, 'intervention_session')
+      assert.notEqual(requireData(sessionById).eventId, requireData(sessionBySlug).eventId)
+
+      assert.equal(contextById.ok, true)
+      assert.equal(contextById.meta?.command, 'experiment context log')
+      assert.equal(requireData(contextById).lookupId, requireData(created).experimentId)
+      assert.equal(requireData(contextById).slug, 'focus-sprint')
+      assert.equal(requireData(contextById).kind, 'note')
+      assert.match(requireData(contextById).eventId, /^evt_/u)
+
+      assert.equal(shownSession.ok, true)
+      assert.equal(requireData(shownSession).entity.kind, 'intervention_session')
+      assert.equal(requireData(shownSession).entity.title, 'Sauna Session 2')
+      assert.equal(
+        requireData(shownSession).entity.data.experimentId,
+        requireData(created).experimentId,
+      )
+      assert.equal(requireData(shownSession).entity.data.experimentSlug, 'focus-sprint')
+
+      assert.equal(shownContext.ok, true)
+      assert.equal(requireData(shownContext).entity.kind, 'note')
+      assert.equal(requireData(shownContext).entity.title, 'Travel day')
+      assert.equal(
+        requireData(shownContext).entity.data.experimentId,
+        requireData(created).experimentId,
+      )
+      assert.equal(requireData(shownContext).entity.data.experimentSlug, 'focus-sprint')
+
+      assert.equal(progress.ok, true)
+      assert.equal(progress.meta?.command, 'experiment progress')
+      assert.equal(requireData(progress).experimentId, requireData(created).experimentId)
+      assert.equal(requireData(progress).lookupId, requireData(created).experimentId)
+      assert.equal(requireData(progress).slug, 'focus-sprint')
+      assert.equal(requireData(progress).asOf, '2026-04-20')
+      assert.equal(requireData(progress).progress.schema, 'murph.experiment-progress.v1')
+      assert.equal(requireData(progress).progress.phase, 'intervention')
+      assert.equal(requireData(progress).progress.dayInRun, 20)
+      assert.deepEqual(requireData(progress).progress.adherence, {
+        completedSessions: 2,
+        expectedSessionsByNow: 3,
+        minimumUsefulSessions: 3,
+        sessionEventIds: [
+          requireData(sessionBySlug).eventId,
+          requireData(sessionById).eventId,
+        ],
+        status: 'behind',
+        targetSessions: 4,
+      })
+      assert.deepEqual(requireData(progress).progress.dataCoverage, {
+        baselineDaysAvailable: 0,
+        interventionDaysAvailable: 0,
+        primaryBiomarkerKey: 'biomarker:resting-heart-rate',
+        primaryMetricDaysAvailable: 0,
+        status: 'no_wearable_data',
+        wearableProviders: [],
+      })
+      assert.deepEqual(requireData(progress).progress.confounders, [
+        'post-exercise session on 2026-04-18',
+        'hard training on 2026-04-18',
+        'lightheaded reported on 2026-04-18',
+        'Travel day on 2026-04-19',
+      ])
+      assert.deepEqual(requireData(progress).progress.recommendation, {
+        action: 'remind',
+        reason: 'Logged sessions are behind the current target pace.',
+        shouldNotifyUser: true,
+      })
+      assert.deepEqual(requireData(progress).progress.windows, {
+        baselineEnd: '2026-04-07',
+        baselineStart: '2026-04-01',
+        interventionEnd: '2026-04-21',
+        interventionStart: '2026-04-08',
+      })
+      assert.deepEqual(requireData(progressAgain).progress, requireData(progress).progress)
+
+      assert.equal(outcome.ok, true)
+      assert.equal(outcome.meta?.command, 'experiment outcome analyze')
+      assert.equal(requireData(outcome).experimentId, requireData(created).experimentId)
+      assert.equal(requireData(outcome).lookupId, requireData(created).experimentId)
+      assert.equal(requireData(outcome).slug, 'focus-sprint')
+      assert.equal(requireData(outcome).asOf, '2026-04-25')
+      assert.equal(requireData(outcome).outcome.schema, 'murph.experiment-outcome.v1')
+      assert.equal(
+        requireData(outcome).outcome.outcomeId,
+        `${requireData(created).experimentId}-outcome-2026-04-25`,
+      )
+      assert.deepEqual(requireData(outcome).outcome.adherenceSummary, {
+        adherenceLevel: 'low',
+        completedSessions: 2,
+        minimumUsefulSessions: 3,
+        status: 'behind',
+        targetSessions: 4,
+      })
+      assert.deepEqual(requireData(outcome).outcome.confidence, {
+        level: 'low',
+        reasons: [
+          'Primary biomarker coverage is insufficient for a strong before-and-after read.',
+          'Completed session count stayed below the minimum useful target.',
+          'Context and confounder logs were present during the run.',
+        ],
+      })
+      assert.deepEqual(requireData(outcome).outcome.conclusion, {
+        caveats: [
+          'This is an N-of-1 readout, not medical advice.',
+          'Sparse wearable coverage or missing sessions can make this directional rather than decisive.',
+        ],
+        headline: 'The experiment finished, but the primary biomarker readout is incomplete.',
+        plainLanguage:
+          'Murph reached the end of the run, but there was not enough primary biomarker data to make a trustworthy before-and-after comparison.',
+      })
+      assert.deepEqual(requireData(outcome).outcome.metricResults, [
+        {
+          baseline: {
+            daysWithData: 0,
+            mean: null,
+            totalDays: 7,
+            unit: null,
+          },
+          baselineDayCount: 0,
+          baselineMean: null,
+          biomarkerKey: 'biomarker:resting-heart-rate',
+          completeness: 'insufficient',
+          deltaAbs: null,
+          deltaPct: null,
+          expectedDirection: 'decrease',
+          intervention: {
+            daysWithData: 0,
+            mean: null,
+            totalDays: 14,
+            unit: null,
+          },
+          interventionDayCount: 0,
+          interventionMean: null,
+          label: 'Resting Heart Rate',
+          movedAsExpected: null,
+          unit: null,
+        },
+      ])
+      assert.deepEqual(requireData(outcome).outcome.confounders, [
+        'post-exercise session on 2026-04-18',
+        'hard training on 2026-04-18',
+        'lightheaded reported on 2026-04-18',
+        'Travel day on 2026-04-19',
+      ])
+      assert.deepEqual(requireData(outcome).outcome.windows, {
+        baselineEnd: '2026-04-07',
+        baselineStart: '2026-04-01',
+        interventionEnd: '2026-04-21',
+        interventionStart: '2026-04-08',
+      })
+      assert.deepEqual(
+        {
+          adherenceSummary: requireData(outcomeAgain).outcome.adherenceSummary,
+          confidence: requireData(outcomeAgain).outcome.confidence,
+          conclusion: requireData(outcomeAgain).outcome.conclusion,
+          confounders: requireData(outcomeAgain).outcome.confounders,
+          metricResults: requireData(outcomeAgain).outcome.metricResults,
+          outcomeId: requireData(outcomeAgain).outcome.outcomeId,
+          schema: requireData(outcomeAgain).outcome.schema,
+          windows: requireData(outcomeAgain).outcome.windows,
+        },
+        {
+          adherenceSummary: requireData(outcome).outcome.adherenceSummary,
+          confidence: requireData(outcome).outcome.confidence,
+          conclusion: requireData(outcome).outcome.conclusion,
+          confounders: requireData(outcome).outcome.confounders,
+          metricResults: requireData(outcome).outcome.metricResults,
+          outcomeId: requireData(outcome).outcome.outcomeId,
+          schema: requireData(outcome).outcome.schema,
+          windows: requireData(outcome).outcome.windows,
+        },
+      )
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  },
+)
+
+test.sequential(
   'journal append plus typed link and unlink flags mutate body and frontmatter collections',
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-journal-phase2-'))
