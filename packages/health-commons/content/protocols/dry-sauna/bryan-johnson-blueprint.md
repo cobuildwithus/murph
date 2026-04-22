@@ -179,6 +179,267 @@ testPlans:
     notes:
       - This test plan is an observation wrapper around an external named routine, not proof that the source routine is broadly advisable.
       - Compare the intervention window against your own baseline and log heat burden, hydration, symptoms, illness, alcohol, and post-workout timing.
+experimentOnboarding:
+  schemaVersion: murph.commons.experiment-onboarding.v1
+  startIntent:
+    displayPrompt: "Hey Murph, I want to explore doing the Bryan Johnson sauna protocol."
+    intentSummary: "Explore Bryan Johnson Sauna"
+  contextReview:
+    vaultChecks:
+      -
+        id: active_experiments
+        label: Active experiments
+        reason: Avoid stacking a daily post-workout heat protocol on top of another meaningful experiment unless the user knowingly accepts weaker attribution.
+        readHints:
+          - experiment list --status active
+      -
+        id: wearable_recovery_baseline
+        label: Wearable recovery baseline
+        reason: Check whether resting heart rate, HRV, sleep, and recovery data are available for the 7-day baseline and 14-day intervention windows.
+        freshnessDays: 14
+        readHints:
+          - wearables sources list
+          - wearables day <YYYY-MM-DD>
+      -
+        id: recent_training_load
+        label: Recent training load
+        reason: The source routine is usually layered after workouts, so heavy training, soreness, and recovery debt can confound both safety and results.
+        freshnessDays: 14
+        readHints:
+          - timeline --since 14d
+          - search query "recent workout training load soreness recovery injury sauna heat"
+      -
+        id: sauna_heat_history
+        label: Sauna and heat-tolerance history
+        reason: Distinguish a heat-adapted user from someone who should choose the conservative Blueprint adaptation or the simpler Finnish dry-sauna protocol.
+        freshnessDays: 90
+        readHints:
+          - memory show
+          - search query "sauna heat exposure heat intolerance dizziness fainting dehydration"
+      -
+        id: cardiovascular_heat_safety_context
+        label: Cardiovascular, medication, and heat-safety context
+        reason: Screen for cardiovascular disease, uncontrolled blood pressure, heat intolerance, medications that alter heat or blood-pressure response, and other reasons high heat should not be framed as a simple self-experiment.
+        freshnessDays: 90
+        readHints:
+          - memory show
+          - search query "cardiovascular disease blood pressure fainting palpitations diuretic beta blocker diabetes medication seizure asthma COPD kidney heat intolerance alcohol drug illness fever"
+      -
+        id: fertility_pregnancy_or_skin_context
+        label: Fertility, pregnancy, and skin context
+        reason: The Blueprint routine includes source-specific groin cooling and independent sauna literature makes fertility, pregnancy, and skin conditions safety boundaries rather than routine setup details.
+        freshnessDays: 90
+        readHints:
+          - memory show
+          - search query "pregnancy postpartum fertility trying to conceive semen sperm skin condition eczema rash sauna heat"
+    notes:
+      - Treat this as a source-attributed external routine first and a user experiment second. Murph should not imply that Bryan Johnson's reported outcomes are expected user outcomes.
+      - Prefer the user's recent wearable and training context when it exists, but keep the safety screen explicit because missing vault context is not a clearance signal.
+  safetyScreen:
+    cautionLevel: high
+    mode: ask_compact_then_expand_if_positive
+    dispositionIfAnyPositive: clinician_guidance_before_unsupervised_start
+    mustAsk:
+      -
+        id: cardiovascular_or_bp_red_flags
+        prompt: known serious cardiovascular disease, exertional chest pain or pressure, fainting or near-fainting, significant palpitations, uncontrolled blood pressure, recent heart attack or stroke, heart failure, or unusual shortness of breath with heat or exercise
+      -
+        id: heat_or_hydration_risk
+        prompt: recent illness or fever, dehydration, prior heat illness or heat intolerance, alcohol or recreational drug use today, or any situation where you cannot leave the sauna and cool down quickly
+      -
+        id: medication_or_condition_risk
+        prompt: diuretics, beta blockers, recent blood-pressure medication changes, diabetes medication that can cause lows, seizure disorder, severe asthma or COPD, kidney disease, or another condition where high heat may be risky
+      -
+        id: pregnancy_fertility_or_skin_context
+        prompt: pregnancy or early postpartum if relevant, fertility concerns or trying to conceive, irritated or inflamed skin conditions, or clinician guidance to avoid sauna or high heat
+    stopIf:
+      inheritFromProtocolSafety: true
+      additionalConditions:
+        - Stop immediately for chest pain, faintness, severe dizziness, confusion, palpitations, shortness of breath, new neurologic symptoms, or intolerable heat distress.
+        - End the experiment and seek appropriate care if severe or repeated symptoms occur.
+    notes:
+      - A positive or uncertain high-caution screen means Murph should not create an unsupervised active Blueprint sauna run. Offer clinician guidance, postponing, or a lower-burden sauna protocol instead.
+  setupSlots:
+    -
+      id: sauna_available
+      label: Dry sauna available
+      purpose: logistics
+      valueType: boolean
+      askPolicy: ask_if_unknown
+      required: true
+      question: Do you have access to a low-humidity dry sauna for this test?
+      writePath: onboarding.answers.sauna_available
+    -
+      id: run_variant
+      label: Run variant
+      purpose: personalization
+      valueType: enum
+      askPolicy: ask_if_unknown
+      required: true
+      question: Do you want to mirror the 7x/week source routine, start with the more conservative Blueprint beginner adaptation, or switch to the simpler Finnish dry-sauna experiment?
+      options:
+        - source_routine_7x_weekly
+        - conservative_adaptation_3_to_5x_weekly
+        - simpler_finnish_dry_sauna
+      constraints:
+        sourceRoutineSessionsPerWeek: 7
+        conservativeSessionsPerWeekMin: 3
+        conservativeSessionsPerWeekMax: 5
+      writePath: runPlan.variant
+    -
+      id: sauna_temperature_range
+      label: Sauna temperature range
+      purpose: measurement_fidelity
+      valueType: enum
+      askPolicy: ask_if_unknown
+      required: true
+      question: "What temperature can you realistically use: around 93 C / 200 F, 80-100 C, or lower/unsure?"
+      options:
+        - around_93c_200f
+        - between_80c_and_100c
+        - below_80c_or_unsure
+      constraints:
+        sourceTargetTemperatureC: 93
+        sourceTargetTemperatureF: 200
+      writePath: runPlan.temperatureRange
+    -
+      id: heat_adaptation
+      label: Heat adaptation
+      purpose: safety
+      valueType: enum
+      askPolicy: ask_if_unknown
+      required: true
+      question: Are you already regularly doing sauna or similar heat exposure, occasional only, or basically new or heat-sensitive?
+      options:
+        - already_regular_sauna
+        - occasional_sauna
+        - new_to_sauna_or_heat_sensitive
+      writePath: onboarding.answers.heat_adaptation
+    -
+      id: workout_pairing
+      label: Workout pairing
+      purpose: confounder_control
+      valueType: enum
+      askPolicy: ask_if_unknown
+      required: true
+      question: Will the sauna usually happen after a workout like the source routine, at another time, or without workout pairing?
+      options:
+        - morning_after_workout
+        - different_time_after_workout
+        - no_workout_pairing
+      writePath: runPlan.workoutPairing
+    -
+      id: weekly_schedule
+      label: Weekly schedule
+      purpose: logistics
+      valueType: weekly_time_windows
+      askPolicy: ask_if_unknown_or_stale
+      required: true
+      question: Which days and time window are realistic for sauna sessions during the 14-day intervention?
+      constraints:
+        sourceRoutineSessionsPerWeek: 7
+        minimumUsefulSessions: 7
+        targetSessions: 14
+      writePath: runPlan.schedule
+    -
+      id: hydration_plan
+      label: Hydration plan
+      purpose: safety
+      valueType: enum
+      askPolicy: ask_if_unknown
+      required: true
+      question: "What will you use for rehydration after each session: water plus electrolytes or minerals, water only, or no plan yet?"
+      options:
+        - water_plus_electrolytes_or_minerals
+        - water_only
+        - no_plan_yet
+      writePath: runPlan.hydrationPlan
+    -
+      id: cooling_tactic_policy
+      label: Cooling tactics
+      purpose: measurement_fidelity
+      valueType: enum
+      askPolicy: ask_if_unknown
+      required: false
+      question: Do you plan to use source-specific cooling tactics such as groin cooling, face or neck cooling, or no cooling tactics?
+      options:
+        - no_cooling_tactics
+        - groin_cooling_if_relevant
+        - face_or_neck_cooling
+        - source_specific_cooling_tactics
+      constraints:
+        note: Face or neck cooling may change the thermal-dose curve; groin cooling is a source-specific fertility guardrail, not proven protection.
+      writePath: runPlan.coolingTactics
+    -
+      id: measurement_support
+      label: Measurement support
+      purpose: measurement_fidelity
+      valueType: enum
+      askPolicy: ask_if_unknown
+      required: false
+      question: Can you track wearable resting heart rate and HRV, and optionally pre/post sauna heart rate or blood pressure?
+      options:
+        - wearable_plus_optional_bp_or_hr
+        - wearable_only
+        - manual_or_subjective_only
+      writePath: runPlan.measurementSupport
+    -
+      id: reminder_policy
+      label: Reminder policy
+      purpose: assistant_support
+      valueType: reminder_policy
+      askPolicy: ask_at_confirmation
+      required: true
+      question: Do you want a reminder before planned sauna sessions, and if nothing is logged later that day should Murph ask once or leave it alone?
+      options:
+        - none
+        - pre_session
+        - pre_session_plus_same_day_missing_log_check
+      writePath: assistantSupport.reminderPolicy
+  planDefaults:
+    testPlanId: source-attributed-rhr-hrv-21d
+    baselineDays: 7
+    interventionDays: 14
+    sessionsPerWeek: 7
+    targetSessions: 14
+    minimumUsefulSessions: 7
+    firstSessionGuidance: Treat the first saved run plan as a safety-gated source-attributed comparison. If the user is not already heat-adapted, propose the conservative Blueprint adaptation or the simpler Finnish dry-sauna protocol rather than silently starting the daily 93 C / 200 F routine.
+  logging:
+    sessionFields:
+      - duration_minutes
+      - temperature_c_or_f
+      - humidity_if_known
+      - workout_before_sauna
+      - workout_intensity_or_load
+      - hydration_or_electrolytes
+      - cooling_tactics_used
+      - symptoms_during_or_after
+      - post_sauna_cold_exposure_or_shower
+      - sleep_or_recovery_disruption
+      - next_workout_soreness_or_performance
+      - optional_pre_post_heart_rate_or_bp
+    confounders:
+      - illness_or_fever
+      - alcohol_last_24h
+      - dehydration_or_low_fluid_intake
+      - hard_training_last_24h
+      - travel_or_timezone_shift
+      - unusual_stress
+      - hot_weather_or_other_heat_exposure
+      - new_medication_or_supplement_change
+    notes:
+      - The core result question is whether the heat routine changes resting heart rate, HRV, recovery, or perceived training tolerance enough to be worth the burden, not whether Bryan Johnson's personal claims reproduce.
+  assistantPolicy:
+    maxSetupQuestionsPerTurn: 2
+    askBeforeCreatingAutomations: true
+    missedLogFollowup: opt_in_only
+    reminderOptions:
+      - none
+      - pre_session
+      - pre_session_plus_same_day_missing_log_check
+    weeklyDigestDefault: true
+    missedLogFollowupCopy: "Did you end up doing today's sauna session? Totally fine either way, I just want the experiment record to be accurate."
+    confirmationPrompt: Show the source-attributed nature of the protocol, safety-screen outcome, chosen run variant, sauna access and temperature, schedule, hydration plan, logging fields, stop conditions, baseline/intervention dates, selected testPlanId, and reminder policy before creating the active experiment or automations.
 whyItWorks:
   - This routine uses the same dry-sauna engine as Finnish sauna, but with a stronger dose: 93 °C / 200 °F, daily exposure, and usually post-workout timing. Skin blood vessels open, sweating accelerates, heart rate rises, and the cardiovascular system has to support cooling while exercise residue may already be raising heat, catecholamines, and fluid loss.
   - Johnson’s newer core-temperature framing treats air temperature and minutes as rough proxies; the proposed biological dose is how high core temperature rises and how long it stays elevated. Face or neck cooling can make the session more tolerable and change thermal feedback, but it also changes the core-temperature curve you are trying to interpret.

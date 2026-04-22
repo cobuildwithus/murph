@@ -47,6 +47,8 @@ Read the protocol first with `vault-cli protocol show <protocol id or slug> --fo
 
 If the protocol comes from Health Commons and has an `experimentOnboarding` block, use that block as the source for the start prompt, vault checks, safety screen, setup slots, plan defaults, logging fields, assistant support policy, and protocol-specific read hints. If the page does not have an onboarding block, fall back to the protocol `safety`, `testPlans`, `protocol`, and `claims` fields for a lightweight onboarding flow.
 
+For source-attributed external protocols, keep the source routine separate from the user's run plan. Do not present a celebrity or external source protocol as Murph's default recommendation; offer a lower-burden variant or defer when the onboarding slots or safety context suggest poor fit.
+
 Useful commands:
 
 - `vault-cli protocol show <protocol id or slug> --format json` so you can read `protocol`, `safety`, `testPlans`, `experimentOnboarding`, and `revision.{pageRevisionId,runSpecRevisionId}` before asking setup questions.

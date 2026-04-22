@@ -742,6 +742,28 @@
     },
     {
       "affectedFields": [
+        "experimentOnboarding",
+        "assistant.systemPrompt.experimentOnboarding",
+        "openclaw.skill.murph.experimentOnboarding",
+        "generated.catalog"
+      ],
+      "changeId": "chg_2026_04_22_bryan_johnson_sauna_onboarding",
+      "changeType": "copy_edit",
+      "editSummary": "Added structured experimentOnboarding data for the Bryan Johnson Blueprint sauna protocol, including safety screening, setup slots, read hints, logging fields, and assistant reminder policy.",
+      "entityKey": "protocol_variant:dry-sauna/bryan-johnson-blueprint",
+      "minor": false,
+      "rationale": "Murph needs protocol-specific onboarding data so the assistant can safely distinguish the external source routine from a user-confirmed run plan before creating an experiment or reminders.",
+      "reviewStatus": "proposed",
+      "schemaVersion": "murph.commons.change.v1",
+      "sourceKeys": [
+        "source_artifact:bryan-johnson-sauna-protocol-2026-01-28",
+        "source_artifact:mayo-2018-sauna-review",
+        "source_artifact:pmid-11165553",
+        "source_artifact:pmid-16871826"
+      ]
+    },
+    {
+      "affectedFields": [
         "relations",
         "claims",
         "researchLandscape",
