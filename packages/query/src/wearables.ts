@@ -511,6 +511,9 @@ const DEFAULT_WEARABLE_DRIFT_SIGNALS: ReadonlyArray<{
 const WEARABLE_METRIC_ALIAS_FALLBACKS: Readonly<Record<string, WearableMetricKey>> = {
   "skin-temp": "temperatureDeviation",
   "skin-temperature": "temperatureDeviation",
+  "session-count": "sessionCount",
+  "session-minutes": "sessionMinutes",
+  "workout-minutes": "sessionMinutes",
 };
 
 function resolveWearableMetricWindowDays(windowDays: number | undefined): number {
@@ -564,6 +567,25 @@ function resolveWearableMetricSummaryKind(metric: WearableMetricKey): WearableMe
   }
 }
 
+function resolveWearableRequestedSummaryKind(
+  metric: WearableMetricKey,
+  normalizedMetricRequest: string,
+  summaryKind?: WearableMetricSummaryKind,
+): WearableMetricSummaryKind {
+  if (summaryKind) {
+    return summaryKind;
+  }
+
+  if (
+    metric === "sessionMinutes"
+    && (normalizedMetricRequest === "duration" || normalizedMetricRequest === "session-minutes" || normalizedMetricRequest === "workout-minutes")
+  ) {
+    return "activity";
+  }
+
+  return resolveWearableMetricSummaryKind(metric);
+}
+
 function resolveWearableMetricRequest(
   requestedMetric: string,
   summaryKind?: WearableMetricSummaryKind,
@@ -595,7 +617,7 @@ function resolveWearableMetricRequest(
     metric,
     requestedMetric: trimmed,
     resolvedAlias: trimmed === metric ? null : normalized,
-    summaryKind: summaryKind ?? resolveWearableMetricSummaryKind(metric),
+    summaryKind: resolveWearableRequestedSummaryKind(metric, normalized, summaryKind),
   };
 }
 
@@ -736,15 +758,40 @@ function summarizeWearableMetricFromBundle(
   };
 }
 
+function collectWearableLatestDateMismatchNotes(
+  latestDate: string,
+  bundle: WearableSummaryBundle,
+): string[] {
+  return uniqueStrings([
+    ...collectWearableLatestDateMismatchNote("sleep", latestDate, bundle.sleepNights[0]?.date),
+    ...collectWearableLatestDateMismatchNote("recovery", latestDate, bundle.recoveryDays[0]?.date),
+    ...collectWearableLatestDateMismatchNote("activity", latestDate, bundle.activityDays[0]?.date),
+    ...collectWearableLatestDateMismatchNote("body-state", latestDate, bundle.bodyStateDays[0]?.date),
+  ]);
+}
+
+function collectWearableLatestDateMismatchNote(
+  summaryKind: string,
+  latestDate: string,
+  freshestSummaryDate: string | undefined,
+): string[] {
+  if (!freshestSummaryDate || freshestSummaryDate === latestDate) {
+    return [];
+  }
+
+  return [
+    `Latest ${summaryKind} summary date ${freshestSummaryDate} differs from the joined wearable latest day ${latestDate}.`,
+  ];
+}
+
 function buildWearableLatestSummary(
   vault: VaultReadModel,
   bundle: WearableSummaryBundle,
   filters: WearableFilters,
 ): WearableLatestSummary | null {
-  const latestDate = collectLatestDate([
-    bundle.activityDays[0]?.date,
-    bundle.sleepNights[0]?.date,
+  const latestDate = bundle.sleepNights[0]?.date ?? collectLatestDate([
     bundle.recoveryDays[0]?.date,
+    bundle.activityDays[0]?.date,
     bundle.bodyStateDays[0]?.date,
   ]);
 
@@ -761,17 +808,21 @@ function buildWearableLatestSummary(
   }
 
   return {
-    activity: bundle.activityDays[0] ?? null,
-    bodyState: bundle.bodyStateDays[0] ?? null,
+    activity: day.activity,
+    bodyState: day.bodyState,
     day,
     latestDate,
-    notes: [...day.notes],
+    notes: uniqueStrings([
+      `Latest wearable summary is joined on local day ${latestDate}.`,
+      ...day.notes,
+      ...collectWearableLatestDateMismatchNotes(latestDate, bundle),
+    ]),
     providers: uniqueStrings([
       ...day.providers,
       ...bundle.sourceHealth.map((entry) => entry.provider),
     ]).sort(),
-    recovery: bundle.recoveryDays[0] ?? null,
-    sleep: bundle.sleepNights[0] ?? null,
+    recovery: day.recovery,
+    sleep: day.sleep,
     sourceHealth: bundle.sourceHealth,
   };
 }

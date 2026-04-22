@@ -73,6 +73,74 @@ function makeObservation(input: {
   });
 }
 
+function makeActivitySession(input: {
+  entityId: string;
+  dayKey: string;
+  durationMinutes: number;
+  occurredAt: string;
+  recordedAt: string;
+  provider?: string;
+  path?: string;
+  title?: string;
+}): CanonicalEntity {
+  return makeEntity({
+    entityId: input.entityId,
+    family: "event",
+    kind: "activity_session",
+    recordClass: "ledger",
+    occurredAt: input.occurredAt,
+    date: input.dayKey,
+    path: input.path ?? `ledger/events/2026/${input.entityId}.jsonl`,
+    title: input.title ?? `${input.provider ?? "garmin"} activity session`,
+    attributes: {
+      dayKey: input.dayKey,
+      durationMinutes: input.durationMinutes,
+      recordedAt: input.recordedAt,
+      externalRef: {
+        system: input.provider ?? "garmin",
+        resourceType: "activity_session",
+        resourceId: `${input.entityId}-resource`,
+      },
+    },
+  });
+}
+
+function makeSleepSession(input: {
+  entityId: string;
+  dayKey: string;
+  durationMinutes: number;
+  occurredAt: string;
+  recordedAt: string;
+  startAt: string;
+  endAt: string;
+  provider?: string;
+  path?: string;
+  title?: string;
+}): CanonicalEntity {
+  return makeEntity({
+    entityId: input.entityId,
+    family: "event",
+    kind: "sleep_session",
+    recordClass: "ledger",
+    occurredAt: input.occurredAt,
+    date: input.dayKey,
+    path: input.path ?? `ledger/events/2026/${input.entityId}.jsonl`,
+    title: input.title ?? `${input.provider ?? "oura"} overnight sleep`,
+    attributes: {
+      dayKey: input.dayKey,
+      durationMinutes: input.durationMinutes,
+      endAt: input.endAt,
+      recordedAt: input.recordedAt,
+      startAt: input.startAt,
+      externalRef: {
+        system: input.provider ?? "oura",
+        resourceType: "sleep_session",
+        resourceId: `${input.entityId}-resource`,
+      },
+    },
+  });
+}
+
 function makeVault(entities: readonly CanonicalEntity[]) {
   return createVaultReadModel({
     entities,
@@ -182,6 +250,117 @@ test("latest and metric-latest surfaces stay structured and respect dayKey seman
   assert.equal(skinTemp?.metric, "temperatureDeviation");
   assert.equal(skinTemp?.resolvedAlias, "skin-temp");
   assert.equal(skinTemp?.value, 0.2);
+});
+
+test("latest surface stays joined to the latest sleep-backed local day instead of mixing newer activity-only dates", () => {
+  const vault = makeVault([
+    makeObservation({
+      entityId: "evt_sleep_score_04",
+      metric: "sleep-score",
+      value: 88,
+      unit: "%",
+      dayKey: "2026-04-04",
+      occurredAt: "2026-04-04T06:00:00Z",
+      recordedAt: "2026-04-04T06:15:00Z",
+    }),
+    makeObservation({
+      entityId: "evt_recovery_04",
+      metric: "recovery-score",
+      value: 74,
+      unit: "%",
+      dayKey: "2026-04-04",
+      occurredAt: "2026-04-04T06:00:00Z",
+      recordedAt: "2026-04-04T06:10:00Z",
+    }),
+    makeObservation({
+      entityId: "evt_steps_05",
+      metric: "daily-steps",
+      value: 11234,
+      unit: "count",
+      dayKey: "2026-04-05",
+      occurredAt: "2026-04-05T18:00:00Z",
+      recordedAt: "2026-04-05T18:05:00Z",
+    }),
+  ]);
+
+  const latest = summarizeWearableLatest(vault);
+
+  assert.equal(latest?.latestDate, "2026-04-04");
+  assert.equal(latest?.day.date, "2026-04-04");
+  assert.equal(latest?.sleep?.sleepScore.selection.value, 88);
+  assert.equal(latest?.recovery?.recoveryScore.selection.value, 74);
+  assert.equal(latest?.activity, null);
+  assert.equal(
+    latest?.notes.some((note) => note.includes("Latest wearable summary is joined on local day 2026-04-04")),
+    true,
+  );
+  assert.equal(
+    latest?.notes.some((note) => note.includes("Latest activity summary date 2026-04-05 differs")),
+    true,
+  );
+});
+
+test("metric latest and trend surfaces keep fallback and aggregate-backed points", () => {
+  const vault = makeVault([
+    makeSleepSession({
+      entityId: "evt_sleep_04",
+      dayKey: "2026-04-04",
+      durationMinutes: 465,
+      occurredAt: "2026-04-03T22:30:00Z",
+      recordedAt: "2026-04-04T06:05:00Z",
+      startAt: "2026-04-03T22:30:00Z",
+      endAt: "2026-04-04T06:15:00Z",
+    }),
+    makeActivitySession({
+      entityId: "evt_run_05",
+      dayKey: "2026-04-05",
+      durationMinutes: 20,
+      occurredAt: "2026-04-05T07:00:00Z",
+      recordedAt: "2026-04-05T07:30:00Z",
+      title: "Garmin running session",
+    }),
+    makeActivitySession({
+      entityId: "evt_cycle_05",
+      dayKey: "2026-04-05",
+      durationMinutes: 35,
+      occurredAt: "2026-04-05T12:00:00Z",
+      recordedAt: "2026-04-05T12:45:00Z",
+      title: "Garmin cycling session",
+    }),
+  ]);
+
+  const totalSleep = summarizeWearableMetricTrend(vault, "totalSleepMinutes", { windowDays: 1 });
+  const timeInBed = summarizeWearableMetricLatest(vault, "timeInBedMinutes", { windowDays: 1 });
+  const sleepSessionMinutes = summarizeWearableMetricTrend(vault, "sessionMinutes", { windowDays: 1 });
+  const workoutMinutes = summarizeWearableMetricTrend(vault, "workout-minutes", { windowDays: 1 });
+  const sessionCount = summarizeWearableMetricLatest(vault, "sessionCount", { windowDays: 1 });
+
+  assert.equal(totalSleep?.value, 465);
+  assert.equal(totalSleep?.points[0]?.value, 465);
+  assert.equal(totalSleep?.provider, "oura");
+  assert.equal(
+    totalSleep?.notes.some((note) => note.includes("Used the selected sleep session duration because no direct total-sleep metric was available.")),
+    true,
+  );
+
+  assert.equal(timeInBed?.value, 465);
+  assert.equal(
+    timeInBed?.notes.some((note) => note.includes("Used the selected sleep session duration because no explicit time-in-bed metric was available.")),
+    true,
+  );
+
+  assert.equal(sleepSessionMinutes?.value, 465);
+  assert.equal(sleepSessionMinutes?.points[0]?.value, 465);
+  assert.equal(sleepSessionMinutes?.provider, "oura");
+
+  assert.equal(workoutMinutes?.metric, "sessionMinutes");
+  assert.equal(workoutMinutes?.resolvedAlias, "workout-minutes");
+  assert.equal(workoutMinutes?.value, 55);
+  assert.equal(workoutMinutes?.points[0]?.value, 55);
+  assert.equal(workoutMinutes?.provider, "garmin");
+
+  assert.equal(sessionCount?.value, 2);
+  assert.equal(sessionCount?.provider, "garmin");
 });
 
 test("metric-trend and drift surfaces return compact structured bundles", () => {
