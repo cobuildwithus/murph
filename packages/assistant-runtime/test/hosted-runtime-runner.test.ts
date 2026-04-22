@@ -873,7 +873,7 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
     expect(mocks.materializeHostedExecutionArtifacts).toHaveBeenCalledTimes(1);
   });
 
-  it("does not block hosted execution while Linq typing startup is in flight and stops after the committed first pass", async () => {
+  it("waits for Linq typing startup confirmation before executing the hosted run and stops after commit", async () => {
     const steps: string[] = [];
     const stopHandle = vi.fn(async () => {
       steps.push("stop");
@@ -917,14 +917,15 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
     );
 
     await vi.waitFor(() => {
-      expect(mocks.executeHostedRunDrainForCommit).toHaveBeenCalledTimes(1);
-    });
-    await vi.waitFor(() => {
       expect(mocks.startLinqTypingIndicator).toHaveBeenCalledTimes(1);
     });
+    expect(mocks.executeHostedRunDrainForCommit).not.toHaveBeenCalled();
 
     resolveTypingStart({
       stop: stopHandle,
+    });
+    await vi.waitFor(() => {
+      expect(mocks.executeHostedRunDrainForCommit).toHaveBeenCalledTimes(1);
     });
     await runPromise;
 
@@ -936,6 +937,8 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
         env: {
           LINQ_API_TOKEN: "linq-token",
         },
+        refreshMs: undefined,
+        signal: expect.any(AbortSignal),
       },
     );
     expect(stopHandle).toHaveBeenCalledTimes(1);
@@ -1057,7 +1060,7 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
     );
   });
 
-  it("does not block hosted execution while Telegram typing startup is in flight and stops after the committed first pass", async () => {
+  it("waits for Telegram typing startup confirmation before executing the hosted run and stops after commit", async () => {
     const steps: string[] = [];
     const stopHandle = vi.fn(async () => {
       steps.push("stop");
@@ -1110,14 +1113,15 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
     );
 
     await vi.waitFor(() => {
-      expect(mocks.executeHostedRunDrainForCommit).toHaveBeenCalledTimes(1);
-    });
-    await vi.waitFor(() => {
       expect(mocks.startTelegramTypingIndicator).toHaveBeenCalledTimes(1);
     });
+    expect(mocks.executeHostedRunDrainForCommit).not.toHaveBeenCalled();
 
     resolveTypingStart({
       stop: stopHandle,
+    });
+    await vi.waitFor(() => {
+      expect(mocks.executeHostedRunDrainForCommit).toHaveBeenCalledTimes(1);
     });
     await runPromise;
 

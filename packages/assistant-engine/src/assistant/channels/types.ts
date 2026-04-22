@@ -20,6 +20,7 @@ export interface AssistantChannelActivityHandle {
 export interface TelegramRuntimeDependencies {
   env?: NodeJS.ProcessEnv
   fetchImplementation?: TelegramFetchImplementation
+  signal?: AbortSignal
 }
 
 export interface EmailRuntimeDependencies {
@@ -30,6 +31,8 @@ export interface EmailRuntimeDependencies {
 export interface LinqRuntimeDependencies {
   env?: NodeJS.ProcessEnv
   fetchImplementation?: LinqFetch
+  refreshMs?: number
+  signal?: AbortSignal
 }
 
 export interface AssistantChannelDependencies {

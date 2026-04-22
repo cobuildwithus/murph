@@ -344,6 +344,29 @@ describe("HostedUserRunner resumeFinalize drain", () => {
     expect(record.nextWakeAt).not.toBeNull();
   });
 
+  it("still schedules an immediate retry alarm when a run is already draining", async () => {
+    envMocks.readHostedExecutionEnvironment.mockReturnValue(createTestRuntimeEnvironment());
+    const state = createDurableObjectStateHarness();
+    const stateStore = new RunnerStateStore(state);
+    await stateStore.bootstrapUser("user-resume-finalize");
+    const runner = new HostedUserRunner(
+      state,
+      envMocks.readHostedExecutionEnvironment(createHostedExecutionTestEnv()),
+      new MemoryEncryptedR2Bucket(),
+    );
+    Reflect.set(runner, "runDrainLock", Promise.resolve());
+
+    const result = await runner.nudgeHostedRun();
+    const record = await stateStore.readState();
+
+    expect(result).toEqual({
+      accepted: true,
+      alarmScheduled: true,
+      alreadyRunning: true,
+    });
+    expect(record.nextWakeAt).not.toBeNull();
+  });
+
   it("refetches after a successful finalize-resume before declaring the queue drained", async () => {
     envMocks.readHostedExecutionEnvironment.mockReturnValue(createTestRuntimeEnvironment());
     const state = createDurableObjectStateHarness();

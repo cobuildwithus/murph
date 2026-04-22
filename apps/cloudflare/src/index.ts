@@ -360,11 +360,11 @@ async function handleRunRoute(
     throw error;
   }
   const stub = await resolveUserRunnerStub(context.env, userId);
-  const acceptedResponse = {
-    accepted: true,
-    alarmScheduled: false,
-    alreadyRunning: false,
-  } satisfies HostedRunNudgeResult;
+  const acceptedResponse = await stub.nudgeHostedRun();
+  if (acceptedResponse.alreadyRunning) {
+    return json(acceptedResponse, 202);
+  }
+
   const drainPromise = stub.drainHostedRuns().then(() => acceptedResponse).catch(async (error) => {
     emitHostedExecutionStructuredLog({
       component: "hosted.runner",

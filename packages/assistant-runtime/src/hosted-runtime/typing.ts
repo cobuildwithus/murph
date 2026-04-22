@@ -33,6 +33,8 @@ export type HostedRunMessagingActivityHandle = {
 
 type HostedMessagingActivityChannel = "linq" | "telegram" | "email";
 
+const HOSTED_RUN_MESSAGING_ACTIVITY_START_TIMEOUT_MS = 2_000;
+
 export interface HostedRunMessagingActivityTarget {
   channel: HostedMessagingActivityChannel;
   explicitTarget: string;
@@ -52,8 +54,10 @@ export function shouldStartRuntimeHostedRunMessagingActivity(
 export async function startHostedRunMessagingActivity(input: {
   component?: HostedMessagingActivityComponent;
   events: readonly HostedRuntimeDrainEvent[];
+  linqRefreshMs?: number;
   runtimeEnv: Readonly<Record<string, string>>;
   run: HostedAssistantRuntimeJobInput["request"]["run"] | null;
+  startTimeoutMs?: number;
 }): Promise<HostedRunMessagingActivityHandle | null> {
   const target = selectHostedRunMessagingActivityTarget(input.events);
   if (!target) {
@@ -66,19 +70,70 @@ export async function startHostedRunMessagingActivity(input: {
     return null;
   }
 
-  return createAsyncHostedRunMessagingActivityHandle({
-    component,
-    run: input.run,
-    start: () => adapter.startTypingIndicator!(
-      {
-        bindingDelivery: null,
-        explicitTarget: target.explicitTarget,
-        identityId: target.identityId,
+  const startRequestedAtMs = Date.now();
+  const startAbortController = new AbortController();
+
+  try {
+    const indicator = await confirmHostedRunMessagingActivityStarted({
+      component,
+      run: input.run,
+      startAbortController,
+      startPromise: adapter.startTypingIndicator!(
+        {
+          bindingDelivery: null,
+          explicitTarget: target.explicitTarget,
+          identityId: target.identityId,
+        },
+        buildHostedMessagingActivityDependencies(input.runtimeEnv, {
+          linqRefreshMs: input.linqRefreshMs,
+          signal: startAbortController.signal,
+        }),
+      ),
+      startRequestedAtMs,
+      startTimeoutMs: normalizeHostedMessagingActivityStartTimeoutMs(input.startTimeoutMs),
+      target,
+    });
+
+    if (!indicator) {
+      return null;
+    }
+
+    emitHostedExecutionStructuredLog({
+      component,
+      details: {
+        ...target.logDetails,
+        runElapsedMs: computeHostedRunElapsedMs(input.run),
+        startLatencyMs: Date.now() - startRequestedAtMs,
       },
-      buildHostedMessagingActivityDependencies(input.runtimeEnv),
-    ),
-    target,
-  });
+      wake: target.wake,
+      message: `Hosted ${formatHostedMessagingActivityChannelLabel(target.channel)} typing indicator started.`,
+      phase: "wake.running",
+      run: input.run,
+    });
+
+    return createStartedHostedRunMessagingActivityHandle({
+      component,
+      indicator,
+      run: input.run,
+      target,
+    });
+  } catch (error) {
+    emitHostedExecutionStructuredLog({
+      component,
+      details: {
+        ...target.logDetails,
+        runElapsedMs: computeHostedRunElapsedMs(input.run),
+        startLatencyMs: Date.now() - startRequestedAtMs,
+      },
+      error,
+      level: "warn",
+      message: `Hosted ${formatHostedMessagingActivityChannelLabel(target.channel)} typing indicator could not be started.`,
+      phase: "wake.running",
+      run: input.run,
+      wake: target.wake,
+    });
+    return null;
+  }
 }
 
 export async function stopHostedRunMessagingActivity(input: {
@@ -157,108 +212,174 @@ function resolveHostedMessagingActivityTarget(
 
 function buildHostedMessagingActivityDependencies(
   runtimeEnv: Readonly<Record<string, string>>,
+  options: {
+    linqRefreshMs?: number;
+    signal: AbortSignal;
+  },
 ): AssistantChannelDependencies {
   const env = runtimeEnv as NodeJS.ProcessEnv;
 
   return {
-    startLinqTyping: (input) => startLinqTypingIndicator(input, { env }),
+    startLinqTyping: (input) => startLinqTypingIndicator(input, {
+      env,
+      refreshMs: options.linqRefreshMs,
+      signal: options.signal,
+    }),
     startTelegramTyping: (input) => startTelegramTypingIndicator(input, { env }),
   };
 }
 
-function createAsyncHostedRunMessagingActivityHandle(input: {
+async function confirmHostedRunMessagingActivityStarted(input: {
   component: HostedMessagingActivityComponent;
   run: HostedAssistantRuntimeJobInput["request"]["run"] | null;
-  start(): Promise<AssistantChannelActivityHandle | null>;
+  startAbortController: AbortController;
+  startPromise: Promise<AssistantChannelActivityHandle | null>;
+  startRequestedAtMs: number;
+  startTimeoutMs: number;
   target: HostedRunMessagingActivityTarget;
-}): HostedRunMessagingActivityHandle {
-  let activeIndicator: AssistantChannelActivityHandle | null = null;
-  let stopRequested = false;
-  let stopPromise: Promise<void> | null = null;
-  const startRequestedAtMs = Date.now();
+}): Promise<AssistantChannelActivityHandle | null> {
+  let startCancelled = false;
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
-  const stopActiveIndicator = (indicator: AssistantChannelActivityHandle) => {
-    if (!stopPromise) {
-      stopPromise = indicator.stop().catch((error) => {
-        emitHostedExecutionStructuredLog({
-          component: input.component,
-          details: input.target.logDetails,
-          error,
-          level: "warn",
-          message: `Hosted ${formatHostedMessagingActivityChannelLabel(input.target.channel)} typing indicator could not be stopped.`,
-          phase: "side-effects.draining",
-          run: input.run,
-          wake: input.target.wake,
-        });
-      });
+  const guardedStartPromise = input.startPromise.then(async (indicator) => {
+    if (!indicator) {
+      return null;
     }
 
-    return stopPromise;
-  };
+    if (startCancelled) {
+      await stopLateHostedMessagingActivityIndicator({
+        component: input.component,
+        indicator,
+        run: input.run,
+        target: input.target,
+      });
+      return null;
+    }
 
-  const startPromise = input.start()
-    .then(async (indicator) => {
-      if (!indicator) {
-        return;
-      }
+    return indicator;
+  });
 
-      activeIndicator = indicator;
+  const timeoutPromise = new Promise<null>((resolve) => {
+    timeoutId = setTimeout(() => {
+      startCancelled = true;
+      input.startAbortController.abort();
       emitHostedExecutionStructuredLog({
         component: input.component,
         details: {
           ...input.target.logDetails,
           runElapsedMs: computeHostedRunElapsedMs(input.run),
-          startLatencyMs: Date.now() - startRequestedAtMs,
+          startLatencyMs: Date.now() - input.startRequestedAtMs,
+          startTimeoutMs: input.startTimeoutMs,
         },
-        wake: input.target.wake,
-        message: `Hosted ${formatHostedMessagingActivityChannelLabel(input.target.channel)} typing indicator started.`,
-        phase: "wake.running",
-        run: input.run,
-      });
-      if (stopRequested) {
-        await stopActiveIndicator(indicator);
-      }
-    })
-    .catch((error) => {
-      emitHostedExecutionStructuredLog({
-        component: input.component,
-        details: input.target.logDetails,
-        error,
         level: "warn",
-        message: `Hosted ${formatHostedMessagingActivityChannelLabel(input.target.channel)} typing indicator could not be started.`,
+        message: `Hosted ${formatHostedMessagingActivityChannelLabel(input.target.channel)} typing indicator start was not confirmed before the timeout.`,
         phase: "wake.running",
         run: input.run,
         wake: input.target.wake,
       });
-    });
+      resolve(null);
+    }, input.startTimeoutMs);
+  });
 
-  let stopped = false;
+  let indicator: AssistantChannelActivityHandle | null;
+  try {
+    indicator = await Promise.race([guardedStartPromise, timeoutPromise]);
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  }
+
+  if (!indicator) {
+    void guardedStartPromise.catch((error) => {
+      if (!startCancelled) {
+        emitHostedExecutionStructuredLog({
+          component: input.component,
+          details: input.target.logDetails,
+          error,
+          level: "warn",
+          message: `Hosted ${formatHostedMessagingActivityChannelLabel(input.target.channel)} typing indicator late start failed after ownership was declined.`,
+          phase: "wake.running",
+          run: input.run,
+          wake: input.target.wake,
+        });
+      }
+    });
+  }
+
+  return indicator;
+}
+
+function createStartedHostedRunMessagingActivityHandle(input: {
+  component: HostedMessagingActivityComponent;
+  indicator: AssistantChannelActivityHandle;
+  run: HostedAssistantRuntimeJobInput["request"]["run"] | null;
+  target: HostedRunMessagingActivityTarget;
+}): HostedRunMessagingActivityHandle {
+  let stopPromise: Promise<void> | null = null;
 
   return {
     async stop() {
-      if (stopped) {
-        await (stopPromise ?? startPromise);
-        return;
+      if (!stopPromise) {
+        stopPromise = stopHostedMessagingActivityIndicator({
+          component: input.component,
+          indicator: input.indicator,
+          run: input.run,
+          target: input.target,
+        });
       }
 
-      stopped = true;
-
-      if (activeIndicator) {
-        const indicator = activeIndicator;
-        activeIndicator = null;
-        await stopActiveIndicator(indicator);
-        return;
-      }
-
-      stopRequested = true;
-      await startPromise;
-      if (activeIndicator) {
-        const indicator = activeIndicator;
-        activeIndicator = null;
-        await stopActiveIndicator(indicator);
-      }
+      await stopPromise;
     },
   };
+}
+
+async function stopLateHostedMessagingActivityIndicator(input: {
+  component: HostedMessagingActivityComponent;
+  indicator: AssistantChannelActivityHandle;
+  run: HostedAssistantRuntimeJobInput["request"]["run"] | null;
+  target: HostedRunMessagingActivityTarget;
+}): Promise<void> {
+  await stopHostedMessagingActivityIndicator(input);
+  emitHostedExecutionStructuredLog({
+    component: input.component,
+    details: input.target.logDetails,
+    level: "warn",
+    message: `Hosted ${formatHostedMessagingActivityChannelLabel(input.target.channel)} typing indicator was stopped after a late start because ownership had already been declined.`,
+    phase: "side-effects.draining",
+    run: input.run,
+    wake: input.target.wake,
+  });
+}
+
+async function stopHostedMessagingActivityIndicator(input: {
+  component: HostedMessagingActivityComponent;
+  indicator: AssistantChannelActivityHandle;
+  run: HostedAssistantRuntimeJobInput["request"]["run"] | null;
+  target: HostedRunMessagingActivityTarget;
+}): Promise<void> {
+  try {
+    await input.indicator.stop();
+  } catch (error) {
+    emitHostedExecutionStructuredLog({
+      component: input.component,
+      details: input.target.logDetails,
+      error,
+      level: "warn",
+      message: `Hosted ${formatHostedMessagingActivityChannelLabel(input.target.channel)} typing indicator could not be stopped.`,
+      phase: "side-effects.draining",
+      run: input.run,
+      wake: input.target.wake,
+    });
+  }
+}
+
+function normalizeHostedMessagingActivityStartTimeoutMs(value: number | undefined): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    return HOSTED_RUN_MESSAGING_ACTIVITY_START_TIMEOUT_MS;
+  }
+
+  return Math.max(1, Math.trunc(value));
 }
 
 function formatHostedMessagingActivityChannelLabel(channel: HostedMessagingActivityChannel): string {

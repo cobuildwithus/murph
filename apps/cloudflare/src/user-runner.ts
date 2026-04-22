@@ -264,9 +264,13 @@ export class HostedUserRunner {
 
   async nudgeHostedRun(): Promise<HostedRunNudgeResult> {
     if (this.runDrainLock !== null) {
+      await this.runtimeAlarmScheduler.syncNextWake({
+        preferredWakeAt: new Date().toISOString(),
+      });
+
       return {
         accepted: true,
-        alarmScheduled: false,
+        alarmScheduled: true,
         alreadyRunning: true,
       };
     }
