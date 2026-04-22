@@ -37,6 +37,8 @@ const DISALLOWED_RUNNER_SECRET_KEYS = new Set([
   ...OPERATOR_ONLY_RUNNER_BINARY_ENV_KEYS,
   ...RUNNER_SECRET_PROCESS_CONTROL_KEYS,
   "HOME",
+  "HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY",
+  "HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED",
   // This is a platform metering secret forwarded by the assistant env profile,
   // not a member-supplied runner secret. Letting userEnv override it would
   // break stable anonymized Gateway reporting IDs.
@@ -78,6 +80,8 @@ export const HOSTED_EXECUTION_RUNNER_ENV_PROFILES_ENV =
 const RUNNER_ENV_PROFILE_KEYS = {
   assistant: [
     ...HOSTED_ASSISTANT_ALLOWED_API_KEY_ENV_NAMES,
+    "HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY",
+    "HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED",
     "HOSTED_ASSISTANT_ZERO_DATA_RETENTION",
     "HOSTED_AI_USAGE_REPORTING_SECRET",
     "NODE_ENV",

@@ -9,6 +9,8 @@ import { fetchHostedExecutionWebControlPlaneResponse } from "../web-control-plan
 
 const HOSTED_WEB_USAGE_RECORD_PATH = "/api/internal/hosted-execution/usage/record";
 const HOSTED_WEB_ISSUE_RECORD_PATH = "/api/internal/hosted-execution/issues/record";
+const HOSTED_WEB_STRIPE_CUSTOMER_LOOKUP_PATH =
+  "/api/internal/hosted-execution/billing/stripe/customer/resolve";
 const HOSTED_DEVICE_SYNC_CONNECT_LINK_PATH =
   /^\/api\/internal\/device-sync\/providers\/[^/]+\/connect-link$/u;
 
@@ -45,6 +47,7 @@ function isAllowedRunnerWebControlRoute(path: string): boolean {
   return path === HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH
     || path === HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH
     || path === HOSTED_WEB_ISSUE_RECORD_PATH
+    || path === HOSTED_WEB_STRIPE_CUSTOMER_LOOKUP_PATH
     || path === HOSTED_WEB_USAGE_RECORD_PATH
     || HOSTED_DEVICE_SYNC_CONNECT_LINK_PATH.test(path);
 }

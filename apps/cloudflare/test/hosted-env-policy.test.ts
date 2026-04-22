@@ -41,6 +41,16 @@ describe("buildHostedRunnerContainerEnv", () => {
 
     expect(env.VERCEL_AI_API_KEY).toBe("vercel-secret");
   });
+
+  it("forwards the delegated billing restricted Stripe key only through the assistant env profile", () => {
+    const env = buildHostedRunnerContainerEnv({
+      HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY: "rk_test_123",
+      HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED: "true",
+    });
+
+    expect(env.HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY).toBe("rk_test_123");
+    expect(env.HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED).toBe("true");
+  });
 });
 
 describe("hosted runner log categories", () => {
@@ -89,6 +99,15 @@ describe("buildHostedWorkerSecretsPayload", () => {
     });
 
     expect(payload.STRIPE_SECRET_KEY).toBeUndefined();
+  });
+
+  it("includes the delegated billing restricted Stripe key in the worker secret payload", () => {
+    const payload = buildHostedWorkerSecretsPayload({
+      ...requiredWorkerSecrets,
+      HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY: "rk_test_123",
+    });
+
+    expect(payload.HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY).toBe("rk_test_123");
   });
 });
 

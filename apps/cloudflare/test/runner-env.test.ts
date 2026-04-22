@@ -497,7 +497,11 @@ describe("hosted deploy automation device-sync surface", () => {
       expect.arrayContaining(["GARMIN_CLIENT_ID", "GARMIN_CLIENT_SECRET"]),
     );
     expect(HOSTED_WORKER_OPTIONAL_VAR_NAMES).toEqual(
-      expect.arrayContaining(["GARMIN_API_BASE_URL", "WHOOP_SCOPES"]),
+      expect.arrayContaining([
+        "GARMIN_API_BASE_URL",
+        "HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED",
+        "WHOOP_SCOPES",
+      ]),
     );
     expect(HOSTED_WORKER_OPTIONAL_SECRET_NAMES).not.toContain(
       "OURA_WEBHOOK_VERIFICATION_TOKEN",
