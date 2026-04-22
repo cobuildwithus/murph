@@ -38,6 +38,7 @@ export interface AssistantHostedExecutionContext {
     input: AssistantHostedShareLinkRequest,
   ): Promise<AssistantHostedShareLink>
   memberId: string
+  stripeCustomerId?: string | null
   userEnvKeys: readonly string[]
 }
 
@@ -51,6 +52,7 @@ export function normalizeAssistantExecutionContext(
   const hosted = input?.hosted
   const memberId = normalizeNullableString(hosted?.memberId)
   const defaultTarget = normalizeAssistantBackendTarget(hosted?.defaultTarget ?? null)
+  const stripeCustomerId = normalizeNullableString(hosted?.stripeCustomerId ?? null)
   if (!memberId) {
     return {
       hosted: null,
@@ -72,6 +74,11 @@ export function normalizeAssistantExecutionContext(
       ...(defaultTarget
         ? {
             defaultTarget,
+          }
+        : {}),
+      ...(stripeCustomerId
+        ? {
+            stripeCustomerId,
           }
         : {}),
       memberId,

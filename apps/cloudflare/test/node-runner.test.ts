@@ -1978,6 +1978,7 @@ describe("runHostedExecutionJob", () => {
         schema: "murph.assistant-usage.v1",
         servedModel: "gpt-5.4",
         sessionId: "asst_usage_proxy",
+        stripeMeterSource: "murph",
         surface: null,
         totalTokens: 14,
         triggerKind: null,

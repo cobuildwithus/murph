@@ -33,6 +33,7 @@ const HOSTED_MEMBER_AI_CREDENTIAL_ENV_KEYS = new Set([
 ]);
 
 export type AssistantUsageCredentialSource = "member" | "platform" | "unknown";
+export type AssistantUsageStripeMeterSource = "murph" | "vercel-ai-gateway";
 
 export interface AssistantUsageRecord {
   apiKeyEnv: string | null;
@@ -56,6 +57,7 @@ export interface AssistantUsageRecord {
   schema: typeof ASSISTANT_USAGE_SCHEMA;
   servedModel: string | null;
   sessionId: string;
+  stripeMeterSource: AssistantUsageStripeMeterSource;
   surface: string | null;
   totalTokens: number | null;
   triggerKind: string | null;
@@ -172,6 +174,7 @@ export function parseAssistantUsageRecord(value: unknown): AssistantUsageRecord 
     schema: normalizeUsageSchema(record.schema),
     servedModel: normalizeOptionalString(record.servedModel, "servedModel"),
     sessionId: normalizeRequiredString(record.sessionId, "sessionId"),
+    stripeMeterSource: normalizeAssistantUsageStripeMeterSource(record.stripeMeterSource),
     surface: normalizeOptionalString(record.surface, "surface"),
     totalTokens: normalizeOptionalInteger(record.totalTokens, "totalTokens"),
     triggerKind: normalizeOptionalString(record.triggerKind, "triggerKind"),
@@ -275,6 +278,24 @@ function normalizeCredentialSource(value: unknown): AssistantUsageCredentialSour
 
   if (normalized !== "member" && normalized !== "platform" && normalized !== "unknown") {
     throw new TypeError("credentialSource must be 'member', 'platform', or 'unknown'.");
+  }
+
+  return normalized;
+}
+
+export function normalizeAssistantUsageStripeMeterSource(
+  value: unknown,
+): AssistantUsageStripeMeterSource {
+  const normalized = normalizeOptionalString(value, "stripeMeterSource");
+
+  if (!normalized) {
+    return "murph";
+  }
+
+  if (normalized !== "murph" && normalized !== "vercel-ai-gateway") {
+    throw new TypeError(
+      "stripeMeterSource must be 'murph' or 'vercel-ai-gateway' when provided.",
+    );
   }
 
   return normalized;

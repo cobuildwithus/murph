@@ -4,7 +4,11 @@ import type {
   AssistantSession,
   AssistantTurnTrigger,
 } from '@murphai/operator-config/assistant-cli-contracts'
-import type { AssistantUsageCredentialSource } from '@murphai/runtime-state/node'
+import type {
+  AssistantUsageCredentialSource,
+  AssistantUsageStripeMeterSource,
+} from '@murphai/runtime-state/node'
+import { normalizeAssistantUsageStripeMeterSource } from '@murphai/runtime-state/node'
 
 import type { AssistantMessageInput } from './service-contracts.js'
 
@@ -19,6 +23,8 @@ export interface AssistantUsageAttribution {
   gatewayTags: readonly string[]
   reportingUserId: string | null
   surface: string
+  stripeCustomerId: string | null
+  stripeMeterSource: AssistantUsageStripeMeterSource
   triggerKind: string
 }
 
@@ -29,6 +35,8 @@ export function createAssistantUsageAttribution(input: {
   memberId: string
   reportingSecret?: string | null
   surface: string
+  stripeCustomerId?: string | null
+  stripeMeterSource?: AssistantUsageStripeMeterSource | null
   triggerKind: string
   zeroDataRetention?: boolean | null
 }): AssistantUsageAttribution {
@@ -37,6 +45,7 @@ export function createAssistantUsageAttribution(input: {
   const surface = normalizeUsageAttributionPart(input.surface) ?? 'assistant'
   const triggerKind = normalizeUsageAttributionPart(input.triggerKind) ?? 'manual_ask'
   const credentialSource = input.credentialSource
+  const stripeCustomerId = normalizeOptionalString(input.stripeCustomerId)
   const reportingUserId = createAssistantUsageReportingUserId({
     memberId: input.memberId,
     reportingSecret: input.reportingSecret,
@@ -57,6 +66,8 @@ export function createAssistantUsageAttribution(input: {
     gatewayTags,
     reportingUserId,
     surface,
+    stripeCustomerId,
+    stripeMeterSource: normalizeAssistantUsageStripeMeterSource(input.stripeMeterSource),
     triggerKind,
   }
 }

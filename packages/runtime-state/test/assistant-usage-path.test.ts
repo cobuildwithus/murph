@@ -36,6 +36,7 @@ function createUsageRecord(usageId: string): AssistantUsageRecord {
     schema: "murph.assistant-usage.v1",
     servedModel: "gpt-test",
     sessionId: "session-usage-path",
+    stripeMeterSource: "murph",
     surface: null,
     totalTokens: 30,
     triggerKind: null,

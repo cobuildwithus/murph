@@ -58,6 +58,7 @@ import {
   attachRecoveredAssistantSession,
   recoverAssistantSessionAfterProviderFailure,
 } from './provider-turn-recovery.js'
+import { resolveOpenAiCompatibleVercelStripeBillingHeaders } from './providers/openai-compatible.js'
 import {
   resolveAssistantProviderResumeKey,
   resolveAssistantRouteResumeBinding,
@@ -642,13 +643,28 @@ function createAssistantProviderUsageAttribution(input: {
   }
 
   const apiKeyEnv = input.attemptPlan.route.providerOptions.apiKeyEnv ?? null
+  const credentialSource = resolveAssistantUsageCredentialSource({
+    apiKeyEnv,
+    provider: input.attemptPlan.route.provider,
+    userEnvKeys: [...(input.executionPlan.executionContext?.hosted?.userEnvKeys ?? [])],
+  })
+  const stripeCustomerId =
+    input.executionPlan.executionContext?.hosted?.stripeCustomerId ?? null
+  const stripeMeterSource =
+    input.attemptPlan.route.provider === 'openai-compatible' &&
+    resolveOpenAiCompatibleVercelStripeBillingHeaders({
+      billingContext: {
+        credentialSource,
+        stripeCustomerId,
+      },
+      env: input.env,
+      providerTarget: input.attemptPlan.route.providerOptions,
+    })
+      ? 'vercel-ai-gateway'
+      : 'murph'
 
   return createAssistantUsageAttribution({
-    credentialSource: resolveAssistantUsageCredentialSource({
-      apiKeyEnv,
-      provider: input.attemptPlan.route.provider,
-      userEnvKeys: [...(input.executionPlan.executionContext?.hosted?.userEnvKeys ?? [])],
-    }),
+    credentialSource,
     environment: resolveAssistantUsageEnvironment(input.env),
     featureKey: resolveAssistantUsageFeatureKey({
       deliverResponse: input.executionPlan.input.deliverResponse,
@@ -661,6 +677,8 @@ function createAssistantProviderUsageAttribution(input: {
       messageInput: input.executionPlan.input,
       session: input.attemptPlan.session,
     }),
+    stripeCustomerId,
+    stripeMeterSource,
     triggerKind: resolveAssistantUsageTriggerKind(
       input.executionPlan.input.turnTrigger ?? 'manual-ask',
     ),

@@ -61,6 +61,7 @@ test("assistant usage records round-trip through pending storage and sort by occ
       schema: ASSISTANT_USAGE_SCHEMA,
       servedModel: "gpt-5.4-mini",
       sessionId: "asst_123",
+      stripeMeterSource: "vercel-ai-gateway",
       surface: "assistant",
       totalTokens: 165,
       triggerKind: "manual_ask",
@@ -146,6 +147,7 @@ test("assistant usage parsing preserves a missing totalTokens value", () => {
       schema: ASSISTANT_USAGE_SCHEMA,
       servedModel: null,
       sessionId: "asst_123",
+      stripeMeterSource: "murph",
       surface: null,
       totalTokens: null,
       triggerKind: null,
@@ -210,6 +212,7 @@ test("assistant usage parsing rejects invalid schema and non-string optional val
       parseAssistantUsageRecord({
         attemptCount: 1,
         credentialSource: "invalid",
+        stripeMeterSource: "invalid",
         occurredAt: "2026-03-29T12:00:00.000Z",
         provider: "codex-cli",
         schema: "murph.assistant-usage.v0",
@@ -218,6 +221,22 @@ test("assistant usage parsing rejects invalid schema and non-string optional val
         usageId: "turn_123.attempt-1",
       }),
     /credentialSource must be 'member', 'platform', or 'unknown'/u,
+  );
+
+  assert.throws(
+    () =>
+      parseAssistantUsageRecord({
+        attemptCount: 1,
+        credentialSource: "platform",
+        stripeMeterSource: "invalid",
+        occurredAt: "2026-03-29T12:00:00.000Z",
+        provider: "codex-cli",
+        schema: ASSISTANT_USAGE_SCHEMA,
+        sessionId: "asst_123",
+        turnId: "turn_123",
+        usageId: "turn_123.attempt-1",
+      }),
+    /stripeMeterSource must be 'murph' or 'vercel-ai-gateway' when provided/u,
   );
 });
 
