@@ -84,6 +84,23 @@ researchCoverage:
     auditCutoff: 2026-04-21
 ---
 
-Norwegian 4x4 is the family for aerobic high-intensity interval sessions built around four 4-minute hard efforts.
+Norwegian 4x4 is the family for aerobic high-intensity interval sessions built around **four repeatable 4-minute hard efforts** with active recovery between them.
 
-The source graph now includes the healthy-adult protocol backbone, direct 4HIIT-vs-1HIIT variant evidence, early supervised cardiometabolic and cardiac-rehabilitation lineage trials, later mixed/null clinical trials, and safety guidance. This family stays separate from sprint-interval training, low-volume 1 x 4 HIIT, adolescent or disease-treatment protocols, athletic performance protocols, hypertension treatment, and cardiac-rehabilitation protocols because those variants differ in dose, risk, population, supervision, and interpretation.
+## What belongs in this family
+
+Use this family when the protocol is fundamentally about the classic aerobic 4x4 shape: warm up, work hard for four minutes, recover actively, repeat four times, then cool down. The practical target is high aerobic effort—often framed around 85–95% of estimated HRmax by the later part of the intervals—not all-out sprinting from the first second.
+
+## What stays separate
+
+This family intentionally stays separate from sprint-interval training, low-volume **1 x 4** protocols, athlete-only performance variants, pediatric or adolescent obesity-treatment programs, hypertension treatment, and supervised cardiac rehabilitation. Those studies are useful context, but they differ in dose, risk, supervision, population, or endpoint.
+
+## How to read the evidence
+
+The corpus now separates four jobs:
+
+1. **Fitness support:** direct or close evidence that repeated aerobic intervals can improve VO2max or cardio-fitness.
+2. **Clinical context:** supervised disease-population studies that explain the lineage but should not be treated as home self-treatment evidence.
+3. **Safety boundaries:** guidelines, registries, and reviews that shape clinician-guidance and stop-condition language.
+4. **Adjacent variants:** nearby HIIT, sprint, autonomic, and metabolic-syndrome evidence that helps prevent overclaiming.
+
+For an average health-conscious person, the clean claim is: Norwegian 4x4 is a plausible, testable way to try to improve cardio fitness over about six weeks, but the result depends on intensity fidelity, recovery, baseline fitness, and whether vigorous intervals are appropriate for the person.

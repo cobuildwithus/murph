@@ -797,6 +797,8 @@ function toStudy(entity: HealthCommonsEntity, protocolKey?: string): Study {
   const appraisal = protocolKey
     ? findProtocolEvidenceAppraisal(entity, protocolKey)
     : undefined;
+  const extractedFinding = extractStudyFinding(entity.body);
+  const fallbackFinding = extractedFinding ? undefined : buildStudyFindingFallback(entity, appraisal);
 
   return {
     type: researchEvidenceToStudyType(evidence, source),
@@ -817,7 +819,8 @@ function toStudy(entity: HealthCommonsEntity, protocolKey?: string): Study {
     scope: appraisal?.scope,
     result: appraisal?.result,
     headline: appraisal?.headline,
-    finding: extractStudyFinding(entity.body),
+    finding: extractedFinding ?? fallbackFinding?.text,
+    findingKind: extractedFinding ? "finding" : fallbackFinding?.kind,
     implication: appraisal?.implication,
     caveat: appraisal?.caveat,
     displayPriority: appraisal?.displayPriority,
@@ -1367,6 +1370,40 @@ function summarizeBody(body: string): string {
     .join(" ");
 
   return normalized.length <= 360 ? normalized : `${normalized.slice(0, 357)}...`;
+}
+
+function buildStudyFindingFallback(
+  entity: HealthCommonsEntity,
+  appraisal: HealthCommonsProtocolEvidenceAppraisal | undefined,
+): { kind: Study["findingKind"]; text: string } | undefined {
+  const headline = normalizeStudyCardText(appraisal?.headline);
+  const whyItMatters = normalizeStudyCardText(readPassthroughString(entity, "whyItMatters"));
+  if (whyItMatters && whyItMatters !== headline) {
+    return {
+      kind: "why_it_matters",
+      text: whyItMatters,
+    };
+  }
+
+  const protocolTakeaway = normalizeStudyCardText(readPassthroughString(entity, "protocolTakeaway"));
+  if (protocolTakeaway && protocolTakeaway !== headline && protocolTakeaway !== whyItMatters) {
+    return {
+      kind: "protocol_takeaway",
+      text: protocolTakeaway,
+    };
+  }
+
+  return undefined;
+}
+
+function readPassthroughString(entity: HealthCommonsEntity, key: string): string | undefined {
+  const value = (entity as Record<string, unknown>)[key];
+  return typeof value === "string" ? value : undefined;
+}
+
+function normalizeStudyCardText(value: string | undefined): string | undefined {
+  const normalized = value?.replace(/\s+/gu, " ").trim();
+  return normalized ? normalized : undefined;
 }
 
 function extractStudyFinding(body: string): string | undefined {

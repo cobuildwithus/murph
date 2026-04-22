@@ -49,6 +49,7 @@ export interface Study {
   result?: StudyResult;
   headline?: string;
   finding?: string;
+  findingKind?: "finding" | "why_it_matters" | "protocol_takeaway";
   implication?: string;
   caveat?: string;
   displayPriority?: number;

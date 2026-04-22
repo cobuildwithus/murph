@@ -56,9 +56,9 @@ potentialMurphEndpoints:
   - session heart-rate fidelity
   - heart-rate recovery
   - symptoms and adherence
-protocolTakeaway: "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol."
+protocolTakeaway: "Use to judge session fidelity by heart-rate-zone behavior and repeatability, not merely by whether four intervals were completed."
 murphTakeaway: "The main finding is that a 4x4 session should be judged by time in zone, not just by completing four intervals."
-studyDesign: "See source metadata and bibliography for exact design."
+studyDesign: "Acute implementation physiology study"
 modality: Aerobic high-intensity interval training / Norwegian 4x4 context
 norwegian4x4Focus: "Direct support"
 claimUse: supports-protocol
@@ -70,8 +70,33 @@ aliases:
 
 This source is included for **Wearable or testable signals**.
 
-**Why it matters:** Acute implementation source showing how heart rate behaves during a 4x4 session and why target-zone fidelity needs to be logged.
+## Quick read
+
+- **Source type:** Acute implementation physiology study (2020).
+- **People studied or addressed:** Healthy active adults (39 participants).
+- **Role in Murph:** direct or close support for the cardio-fitness claim; supports evidence; useful for measurement and logging, not for efficacy proof.
+- **Most relevant Murph signals:** estimated VO2max / cardio-fitness proxy, session heart-rate fidelity, heart-rate recovery, symptoms and adherence.
+
+## Why it matters for Norwegian 4x4
+
+Acute implementation source showing how heart rate behaves during a 4x4 session and why target-zone fidelity needs to be logged.
+
+## What it found
 
 **Findings:** The study tracked heart-rate behavior during one 4x4 cycling session. Participants spent most of the protocol in the intended high-intensity heart-rate range, and later intervals reached target intensity more reliably than the first. For Murph, the main finding is that a 4x4 session should be judged by time in zone, not just by completing four intervals.
 
-**Protocol takeaway:** Use this source only within its `claimUse: supports-protocol` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.
+## How Murph should use it
+
+Log interval heart-rate peaks and time near target so the experiment knows whether the intended dose happened.
+
+Use to judge session fidelity by heart-rate-zone behavior and repeatability, not merely by whether four intervals were completed.
+
+## Important limits
+
+Single-session physiology is implementation evidence, not long-term efficacy evidence.
+
+The safe interpretation is narrower than “4x4 is always better.” Keep the population, supervision level, comparator, and exact interval dose visible before applying this source to a home wearable experiment.
+
+## Plain-language takeaway
+
+For a generally healthy user, this belongs in the evidence pile that makes a 6-week 4x4 fitness test plausible, as long as the session is actually hard enough and recovery stays reasonable.

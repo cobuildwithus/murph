@@ -322,16 +322,16 @@ claims:
       - Sleep should be tracked as recovery context and a confounder, not as a promised outcome.
       - A flat or worse HRV signal does not automatically mean the protocol failed.
 researchLandscape:
-  bottomLine: "Best read as a VO2max-oriented fitness protocol with explicit safety and recovery boundaries, not a general disease-treatment claim."
+  bottomLine: "Best read as a bounded VO2max/cardio-fitness experiment with explicit safety and recovery boundaries, not as a disease-treatment plan or a guarantee that a wearable score will move."
   confidenceLabel: moderate
-  primaryClaim: "The strongest support is for improving lab VO2max or wearable cardio-fitness when the 4x4 intensity target is actually reached."
-  mainCaveat: "Supervised clinical and disease-population studies are mixed, so they should calibrate safety and population fit instead of proving home superiority over moderate cardio."
+  primaryClaim: "The strongest support is for improving lab-measured VO2max, and secondarily wearable cardio-fitness estimates, when the intervals actually reach a hard aerobic zone and recovery remains tolerable."
+  mainCaveat: "Clinical and disease-population studies are supervised and mixed; use them to set boundaries, not to claim that unsupervised 4x4 is always safer, better, or more effective than moderate cardio."
   groups:
     -
       id: supports-fitness-claim
       label: "Supports the fitness claim"
       stance: supports
-      summary: "The direct and close-family evidence supports Norwegian 4x4 as a cardiorespiratory-fitness experiment, especially for VO2max. The key practical caveat is dose fidelity: the source card should ask whether the intervals actually reached the intended hard aerobic zone."
+      summary: "The direct and close-family evidence supports Norwegian 4x4 as a cardiorespiratory-fitness experiment, especially for VO2max. For users, the make-or-break detail is fidelity: did each interval build into the intended hard aerobic zone without turning into unsafe sprinting or unrecoverable strain?"
       sourceKeys:
         - source_artifact:ntnu-cerg-norwegian-4x4
         - source_artifact:pmid-17414804
@@ -345,7 +345,7 @@ researchLandscape:
       id: clinical-context-mixed-superiority
       label: "Clinical context and mixed superiority"
       stance: mixed
-      summary: "Early supervised clinical-lineage studies often favored interval training, but larger coronary-disease and heart-failure trials did not consistently confirm superiority over moderate training or guideline advice. This category keeps the claim honest: worth testing for fitness, not always better and not self-treatment evidence."
+      summary: "Early supervised clinical-lineage studies often favored interval training, but larger coronary-disease and heart-failure trials did not consistently confirm superiority over moderate training or guideline advice. This group keeps the claim honest: useful lineage, not proof that home 4x4 treats cardiovascular disease or always beats moderate cardio."
       sourceKeys:
         - source_artifact:pmid-25464446
         - source_artifact:pmid-28082387
@@ -362,7 +362,7 @@ researchLandscape:
       id: safety-boundary
       label: "Safety boundaries"
       stance: safety_boundary
-      summary: "Safety evidence is mostly about screened, supervised, or guideline-managed exercise. Serious events appear uncommon in those settings, but the evidence does not make unsupervised vigorous intervals risk-free, especially for people with cardiovascular symptoms, disease, medication, recent infection, or pregnancy/postpartum context."
+      summary: "Safety evidence is mostly about screened, supervised, or guideline-managed exercise. Serious events appear uncommon in those settings, but that does not make unsupervised vigorous intervals risk-free—especially with cardiovascular symptoms, known disease, heart-rate-limiting medication, recent infection, pregnancy/postpartum status, or post-exertional malaise."
       sourceKeys:
         - source_artifact:pmid-22879367
         - source_artifact:pmid-30376749
@@ -374,7 +374,7 @@ researchLandscape:
       id: adjacent-variants-and-recovery-context
       label: "Adjacent variants and recovery context"
       stance: context_only
-      summary: "Low-volume HIIT, sprint-interval comparisons, athlete studies, metabolic-syndrome syntheses, and autonomic-control reviews help separate neighboring protocols and secondary signals. They are useful context, but they should not be counted as direct proof that this exact 4x4 recipe will move a user's wearable metrics."
+      summary: "Low-volume HIIT, sprint-interval comparisons, athlete studies, metabolic-syndrome syntheses, and autonomic-control reviews help separate neighboring protocols and secondary signals. They are useful context for dose selection and recovery interpretation, but they are not direct proof that this exact 4x4 recipe will move a user's wearable metrics."
       sourceKeys:
         - source_artifact:pmid-30293954
         - source_artifact:pmid-28846513
@@ -538,4 +538,8 @@ It also does not promise HRV improvement, sleep improvement, fat loss, or a wear
 
 ## Evidence snapshot
 
-The evidence supports 4x4 intervals as a plausible VO2max-oriented training dose, but it also includes small direct trials, early supervised clinical-lineage studies, larger mixed clinical comparisons, and safety caveats. Low-volume 1 x 4 HIIT, sprint intervals, athlete-performance plans, pediatric/adolescent cardiometabolic trials, hypertension treatment, and supervised cardiac-rehabilitation protocols belong nearby, not inside this exact experiment.
+The strongest practical read is straightforward: Norwegian 4x4 is a plausible way to test whether hard aerobic intervals improve your cardio-fitness signal over about six weeks. The evidence is strongest for VO2max-style fitness outcomes when the intervals are actually performed at the intended intensity.
+
+The corpus also contains studies that should **not** be overread. Supervised cardiac-rehabilitation, heart-failure, coronary-disease, hypertension, adolescent, metabolic-syndrome, athlete, sprint-interval, and low-volume HIIT studies help define boundaries, risks, and adjacent variants. They do not prove that an unscreened home user should treat disease, skip clinician guidance, or expect every wearable metric to improve.
+
+In plain language: use the research cards to answer three questions before starting—does this source support the 4x4 fitness idea, does it merely provide clinical or safety context, and does it describe a different protocol that should stay separate?

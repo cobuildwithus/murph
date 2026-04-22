@@ -16,7 +16,10 @@ export function StudyCard({
   authors,
   year,
   participants,
+  participantCountKind,
   includedStudyCount,
+  population,
+  duration,
   designLabel,
   result,
   scope,
@@ -24,6 +27,7 @@ export function StudyCard({
   url,
   headline,
   finding,
+  findingKind,
   implication,
   caveat,
   last,
@@ -32,12 +36,19 @@ export function StudyCard({
   const isInteractive = Boolean(headline || finding || implication || caveat);
   const yearLabel = typeof year === "number" ? year.toString() : null;
   const participantLabel = formatParticipantLabel({
+    participantCountKind,
     participants,
   });
   const includedStudiesLabel = formatIncludedStudiesLabel(includedStudyCount);
+  const studyFacts = buildStudyFacts({
+    designLabel,
+    population,
+    duration,
+  });
   const resultLabel = result ? formatStudyResult(result) : null;
   const scopeLabel = scope ? formatEvidenceScope(scope) : null;
   const stanceLabel = stance ? formatEvidenceStance(stance) : null;
+  const findingLabel = finding ? formatFindingLabel(findingKind) : null;
   const toggleOpen = () => {
     if (!isInteractive) {
       return;
@@ -53,9 +64,14 @@ export function StudyCard({
           title={designLabel ? `${type}: ${designLabel}` : type}
         >
           <span className="font-mono text-xs/4 font-medium text-primary">
-            {participantLabel ?? type}
+            {type}
           </span>
         </div>
+        {participantLabel ? (
+          <span className="rounded-md border border-border/70 bg-background/60 px-1.5 py-0.5 font-mono text-[9px]/3 text-muted-foreground/75">
+            {participantLabel}
+          </span>
+        ) : null}
         {includedStudiesLabel ? (
           <span className="rounded-md border border-border/70 bg-background/60 px-1.5 py-0.5 font-mono text-[9px]/3 text-muted-foreground/75">
             {includedStudiesLabel}
@@ -76,6 +92,23 @@ export function StudyCard({
         {authors ? (
           <span className="mt-1 text-[11px]/4 text-muted-foreground/70">{authors}</span>
         ) : null}
+        {studyFacts.length > 0 ? (
+          <dl className="mt-2 grid gap-2 sm:grid-cols-3">
+            {studyFacts.map((fact) => (
+              <div
+                key={fact.label}
+                className="rounded-md border border-border/60 bg-background/25 px-2.5 py-2"
+              >
+                <dt className="font-mono text-[9px]/3 uppercase tracking-[0.08em] text-chart-5">
+                  {fact.label}
+                </dt>
+                <dd className="mt-0.5 text-[11px]/4 text-foreground/80">
+                  {fact.value}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        ) : null}
         {(resultLabel || scopeLabel || stanceLabel) ? (
           <div className="mt-2 flex flex-wrap gap-1.5">
             {resultLabel ? <StudyPill>{resultLabel}</StudyPill> : null}
@@ -93,7 +126,7 @@ export function StudyCard({
             rel="noreferrer"
             target="_blank"
           >
-            Source ↗
+            Open source ↗
           </a>
         ) : null}
       </div>
@@ -137,14 +170,14 @@ export function StudyCard({
                   {headline}
                 </p>
               ) : null}
-              {finding ? (
-                <StudyDetail label="Found" text={finding} />
+              {finding && findingLabel ? (
+                <StudyDetail label={findingLabel} text={finding} />
               ) : null}
               {implication ? (
-                <StudyDetail label="Means here" text={implication} />
+                <StudyDetail label="How to read it" text={implication} />
               ) : null}
               {caveat ? (
-                <StudyDetail label="Caveat" text={caveat} />
+                <StudyDetail label="Important limit" text={caveat} />
               ) : null}
             </div>
           </CollapsibleContent>
@@ -173,12 +206,28 @@ function StudyDetail({ label, text }: { label: string; text: string }) {
   );
 }
 
+function formatFindingLabel(findingKind: Study["findingKind"]): string {
+  switch (findingKind) {
+    case "why_it_matters":
+      return "Why it matters";
+    case "protocol_takeaway":
+      return "Protocol takeaway";
+    case "finding":
+    case undefined:
+      return "What it found";
+  }
+}
+
 function formatParticipantLabel({
+  participantCountKind,
   participants,
-}: Pick<Study, "participants">): string | null {
-  return typeof participants === "number"
-    ? `n=${participants.toLocaleString()}`
-    : null;
+}: Pick<Study, "participantCountKind" | "participants">): string | null {
+  if (typeof participants !== "number") {
+    return null;
+  }
+
+  const prefix = participantCountKind === "approximate" ? "n≈" : "n=";
+  return `${prefix}${participants.toLocaleString()}`;
 }
 
 function formatIncludedStudiesLabel(includedStudyCount: Study["includedStudyCount"]): string | null {
@@ -207,17 +256,17 @@ function formatStudyResult(result: Study["result"]): string {
 function formatEvidenceScope(scope: Study["scope"]): string {
   switch (scope) {
     case "direct_protocol":
-      return "Direct";
+      return "Direct protocol";
     case "same_mechanism":
-      return "Same mechanism";
+      return "Shared mechanism";
     case "clinical_supervised":
-      return "Clinical supervised";
+      return "Clinical setting";
     case "adjacent_variant":
-      return "Adjacent";
+      return "Adjacent variant";
     case "measurement_context":
-      return "Measurement";
+      return "Measurement context";
     case "general_guideline":
-      return "Guideline";
+      return "Guideline context";
     case undefined:
       return "";
   }
@@ -228,16 +277,31 @@ function formatEvidenceStance(stance: Study["stance"]): string {
     case "supports":
       return "Supports";
     case "mixed":
-      return "Mixed";
+      return "Mixed evidence";
     case "does_not_confirm":
       return "Does not confirm";
     case "contradicts":
-      return "Against";
+      return "Evidence against";
     case "safety_boundary":
-      return "Safety";
+      return "Safety guardrail";
     case "context_only":
-      return "Context only";
+      return "Context, not proof";
     case undefined:
       return "";
   }
+}
+
+function buildStudyFacts({
+  designLabel,
+  population,
+  duration,
+}: Pick<Study, "designLabel" | "population" | "duration">): Array<{
+  label: string;
+  value: string;
+}> {
+  return [
+    designLabel ? { label: "Design", value: designLabel } : null,
+    population ? { label: "People", value: population } : null,
+    duration ? { label: "Timeframe", value: duration } : null,
+  ].filter((fact): fact is { label: string; value: string } => fact !== null);
 }
