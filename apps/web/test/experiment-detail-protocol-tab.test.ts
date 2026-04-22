@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { composeExperimentDetail } from "@/src/lib/experiments/experiment-detail";
 import { resolveHealthCommonsExperimentProtocol } from "@/src/lib/health-commons/experiment-detail";
+import type { ExperimentResearchGroup } from "@/src/types/experiments";
 
 vi.mock("@/src/components/experiments/experiment-detail/expected-signal-card", () => ({
   ExpectedSignalCard({ label }: { label: string }) {
@@ -156,6 +157,80 @@ describe("ProtocolTab", () => {
     expect(markup).toContain("Clinical context and mixed superiority");
     expect(markup).toContain("Safety boundaries");
     expect(markup).toContain("Adjacent variants and recovery context");
+  });
+
+  it("renders grouped research inside native details cards with source-mix summaries", () => {
+    const protocol = resolveHealthCommonsExperimentProtocol("norwegian-4x4");
+
+    expect(protocol).not.toBeNull();
+
+    const experiment = composeExperimentDetail({
+      protocol: protocol!,
+      privateRun: null,
+    });
+    const markup = renderToStaticMarkup(createElement(ProtocolTab, { experiment }));
+
+    expect(countOccurrences(markup, "<details")).toBe(4);
+    expect(countOccurrences(markup, 'open=""')).toBe(1);
+    expect(markup).toContain("7 sources · 3 interventions · 2 reviews · 1 physiology study");
+    expect(markup).toContain("11 sources · 9 interventions · 2 reviews");
+    expect(markup).toContain("6 sources · 3 guidelines · 2 reviews · 1 observational study");
+  });
+
+  it("shortens long Finnish research-group labels at display time only", () => {
+    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+
+    expect(protocol).not.toBeNull();
+
+    const baseExperiment = composeExperimentDetail({
+      protocol: protocol!,
+      privateRun: null,
+    });
+    const researchGroups: ExperimentResearchGroup[] = [
+      {
+        id: "near-term-autonomic-vascular-and-immune-signals",
+        label: "Near-term physiology and wearable signals",
+        stance: "mixed",
+        summary: "Synthetic grouped-research proof for the UI-only label formatting pass.",
+        defaultOpen: true,
+        studies: [
+          {
+            type: "MECH",
+            title: "Physiology study A",
+            authors: "A Team",
+            journal: "Example Journal",
+          },
+          {
+            type: "MECH",
+            title: "Physiology study B",
+            authors: "A Team",
+            journal: "Example Journal",
+          },
+          {
+            type: "INT",
+            title: "Intervention study",
+            authors: "B Team",
+            journal: "Example Journal",
+          },
+          {
+            type: "REV",
+            title: "Review study",
+            authors: "C Team",
+            journal: "Example Journal",
+          },
+        ],
+      },
+    ];
+    const experiment = {
+      ...baseExperiment,
+      researchGroups,
+    };
+    const markup = renderToStaticMarkup(createElement(ProtocolTab, { experiment }));
+
+    expect(markup).toContain("Short-term signals to watch");
+    expect(markup).not.toContain("Near-term physiology and wearable signals");
+    expect(markup).toContain("4 sources · 2 physiology studies · 1 intervention · 1 review");
+    expect(countOccurrences(markup, 'open=""')).toBe(1);
   });
 
   it("prioritizes the clearest red-light-glasses signals and moves the noisier ones into context pills", () => {

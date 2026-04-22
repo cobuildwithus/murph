@@ -303,22 +303,38 @@ function ResearchGroupCard({
 }: {
   group: NonNullable<Experiment["researchGroups"]>[number];
 }) {
+  const sourceMixSummary = formatResearchGroupSourceMix(group.studies);
+
   return (
-    <section className="overflow-hidden rounded-xl border border-secondary/25 bg-card/90">
-      <div className="flex flex-col gap-2 border-b border-border/70 px-6 py-5">
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-          <div className="flex flex-col gap-1.5">
-            <SectionLabel>{group.label}</SectionLabel>
-            <p className="max-w-3xl text-[14px]/6 text-foreground/80">
+    <details
+      className="group overflow-hidden rounded-xl border border-secondary/25 bg-card/90"
+      open={group.defaultOpen}
+    >
+      <summary className="cursor-pointer list-none px-6 py-5 transition-colors hover:bg-secondary/6 [&::-webkit-details-marker]:hidden">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="flex max-w-3xl flex-col gap-2">
+            <SectionLabel>{formatResearchGroupLabel(group.label)}</SectionLabel>
+            <p className="text-[14px]/6 text-foreground/80">
               {group.summary}
             </p>
+            <p className="font-mono text-[10px]/3.5 tracking-[0.08em] text-muted-foreground/80">
+              {sourceMixSummary}
+            </p>
           </div>
-          <span className="w-fit rounded-full border border-border/70 bg-background/35 px-2.5 py-1 font-mono text-[10px]/3.5 text-muted-foreground">
-            {formatEvidenceStance(group.stance)}
-          </span>
+          <div className="flex w-fit shrink-0 items-center gap-2 self-start sm:justify-end">
+            <span className="rounded-full border border-border/70 bg-background/35 px-2.5 py-1 font-mono text-[10px]/3.5 text-muted-foreground">
+              {formatEvidenceStance(group.stance)}
+            </span>
+            <span
+              aria-hidden="true"
+              className="rounded-full border border-border/70 bg-background/35 px-2 py-1 font-mono text-[10px]/3.5 text-muted-foreground transition-transform group-open:rotate-180"
+            >
+              ˅
+            </span>
+          </div>
         </div>
-      </div>
-      <div>
+      </summary>
+      <div className="border-t border-border/70">
         {group.studies.map((study, index) => (
           <StudyCard
             key={`${group.id}-${study.title}`}
@@ -327,8 +343,99 @@ function ResearchGroupCard({
           />
         ))}
       </div>
-    </section>
+    </details>
   );
+}
+
+function formatResearchGroupLabel(label: string): string {
+  switch (label) {
+    case "Evidence backbone and claim calibration":
+      return "What the evidence can and can't say";
+    case "Near-term physiology and wearable signals":
+      return "Short-term signals to watch";
+    case "Long-term Finnish cohort and real-world context":
+      return "Long-term Finnish population context";
+    case "Intervention design, training, and mixed results":
+      return "Repeated-use trials and mixed results";
+    case "Safety, dose, and modality boundaries":
+      return "Safety, dose, and sauna type";
+    default:
+      return label;
+  }
+}
+
+function formatResearchGroupSourceMix(
+  studies: NonNullable<Experiment["researchGroups"]>[number]["studies"],
+): string {
+  const sourceCount = studies.length;
+  const categoryCounts = [
+    {
+      count: countStudiesByType(studies, ["MECH"]),
+      pluralLabel: "physiology studies",
+      singularLabel: "physiology study",
+      sortOrder: 0,
+    },
+    {
+      count: countStudiesByType(studies, ["RCT", "INT"]),
+      pluralLabel: "interventions",
+      singularLabel: "intervention",
+      sortOrder: 1,
+    },
+    {
+      count: countStudiesByType(studies, ["OBS"]),
+      pluralLabel: "observational studies",
+      singularLabel: "observational study",
+      sortOrder: 2,
+    },
+    {
+      count: countStudiesByType(studies, ["MA", "REV"]),
+      pluralLabel: "reviews",
+      singularLabel: "review",
+      sortOrder: 3,
+    },
+    {
+      count: countStudiesByType(studies, ["GUIDE"]),
+      pluralLabel: "guidelines",
+      singularLabel: "guideline",
+      sortOrder: 4,
+    },
+    {
+      count: countStudiesByType(studies, ["N1"]),
+      pluralLabel: "self-experiments",
+      singularLabel: "self-experiment",
+      sortOrder: 5,
+    },
+    {
+      count: countStudiesByType(studies, ["SRC"]),
+      pluralLabel: "source notes",
+      singularLabel: "source note",
+      sortOrder: 6,
+    },
+  ]
+    .filter((category) => category.count > 0)
+    .sort((left, right) => {
+      if (left.count !== right.count) {
+        return right.count - left.count;
+      }
+
+      return left.sortOrder - right.sortOrder;
+    })
+    .slice(0, 3)
+    .map((category) =>
+      `${category.count.toLocaleString()} ${category.count === 1 ? category.singularLabel : category.pluralLabel}`
+    );
+
+  return [
+    `${sourceCount.toLocaleString()} ${sourceCount === 1 ? "source" : "sources"}`,
+    ...categoryCounts,
+  ].join(" · ");
+}
+
+function countStudiesByType(
+  studies: NonNullable<Experiment["researchGroups"]>[number]["studies"],
+  includedTypes: readonly Experiment["studies"][number]["type"][],
+): number {
+  return studies.filter((study) => includedTypes.includes(study.type)).length;
 }
 
 function formatResearchConfidence(
