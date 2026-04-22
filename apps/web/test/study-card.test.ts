@@ -27,14 +27,15 @@ describe("StudyCard", () => {
     );
 
     expect(markup).toContain(">2007<");
-    expect(markup).toContain(">RCT<");
-    expect(markup).toContain("40 people");
+    expect(markup).toContain(">Randomized<");
+    expect(markup).toContain("n=40");
     expect(markup).toContain("23 studies");
     expect(markup).toContain('data-slot="collapsible"');
     expect(markup).toContain('data-slot="study-card-trigger"');
     expect(markup).toContain('aria-expanded="false"');
-    expect(markup).toContain('class="mt-1 text-[11px]/4 text-muted-foreground/70"');
+    expect(markup).toContain('class="mt-1 flex flex-col gap-0.5 text-[11px]/4 text-muted-foreground/70"');
     expect(markup).toContain(">J Helgerud<");
+    expect(markup).toContain(">Medicine and Science in Sports and Exercise<");
     expect(markup).toContain('href="https://example.com/study"');
     expect(markup).toContain(">Open source ↗<");
     expect(markup).toContain(">People<");
@@ -44,13 +45,12 @@ describe("StudyCard", () => {
     expect(markup).toContain("Moderately trained men");
     expect(markup).toContain("8-week training intervention");
     expect(countOccurrences(markup, "2007")).toBe(1);
-    expect(markup.indexOf("40 people")).toBeLessThan(markup.indexOf("2007"));
-    expect(markup.indexOf("23 studies")).toBeGreaterThan(markup.indexOf("40 people"));
+    expect(markup.indexOf("n=40")).toBeLessThan(markup.indexOf("2007"));
+    expect(markup.indexOf("23 studies")).toBeGreaterThan(markup.indexOf("n=40"));
     expect(markup.indexOf("J Helgerud")).toBeLessThan(markup.indexOf("Open source ↗"));
     expect(markup.indexOf("Open source ↗")).toBeGreaterThan(markup.indexOf("J Helgerud"));
     expect(markup).not.toContain("line-clamp-1");
     expect(markup).not.toContain("Canonical small RCT supporting the Norwegian 4x4 dose.");
-    expect(markup).not.toContain("Medicine and Science in Sports and Exercise");
   });
 
   it("uses n≈ for approximate participant counts", () => {
@@ -67,9 +67,9 @@ describe("StudyCard", () => {
       }),
     );
 
-    expect(markup).toContain("≈2,138 people");
+    expect(markup).toContain("n≈2,138");
     expect(markup).not.toContain("n=2,138");
-    expect(markup).toContain(">MA<");
+    expect(markup).toContain(">Meta-analysis<");
   });
 
   it("resolves the fallback study copy when a source has no Findings block", () => {
@@ -105,10 +105,10 @@ describe("StudyCard", () => {
     );
 
     expect(markup).toContain(">Positive signal<");
-    expect(markup).toContain(">Direct protocol<");
+    expect(markup).toContain(">Exact protocol match<");
     expect(markup).toContain(">Supports<");
     expect(markup).toContain('aria-expanded="false"');
-    expect(markup).not.toContain("A grouped evidence headline");
+    expect(markup).toContain("A grouped evidence headline");
     expect(markup).not.toContain("A protocol-specific implication.");
     expect(markup).not.toContain("A protocol-specific caveat.");
   });
@@ -128,8 +128,8 @@ describe("StudyCard", () => {
     );
 
     expect(markup).toContain(">No clear advantage<");
-    expect(markup).toContain(">Same mechanism<");
-    expect(markup).toContain(">Does not confirm<");
+    expect(markup).toContain(">Similar, not exact<");
+    expect(markup).toContain("Doesn&#x27;t confirm");
     expect(markup).not.toContain("No clear objective gain");
     expect(markup).not.toContain("Does not confirm benefit");
   });
@@ -152,10 +152,10 @@ describe("StudyCard", () => {
     expect(markup).toContain("> Bryan Johnson <");
     expect(markup).toContain(">People<");
     expect(markup).toContain(">Timeframe<");
-    expect(markup).toContain("1 person");
+    expect(markup).toContain("n=1");
     expect(markup).toContain("bryan johnson");
     expect(markup).toContain("14-day intervention window");
-    expect(markup).not.toContain("Substack Post");
+    expect(markup).toContain(">Substack Post<");
     expect(countOccurrences(markup, "Bryan Johnson")).toBe(1);
   });
 
@@ -179,8 +179,8 @@ describe("StudyCard", () => {
     expect(markup).toContain(">A Cohort Team<");
     expect(markup).toContain(">People<");
     expect(markup).toContain(">Timeframe<");
-    expect(markup).toContain("1,688 people");
-    expect(markup).not.toContain("Example Journal");
+    expect(markup).toContain("n=1,688");
+    expect(markup).toContain(">Example Journal<");
     expect(markup).toContain("Adults");
     expect(markup).toContain("Long-term follow-up");
   });

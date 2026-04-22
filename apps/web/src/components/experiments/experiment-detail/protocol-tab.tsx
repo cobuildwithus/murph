@@ -194,6 +194,13 @@ export function ProtocolTab({ experiment }: ProtocolTabProps) {
         {researchLandscape ? (
           <ResearchLandscapeReadout landscape={researchLandscape} />
         ) : null}
+        {experiment.id === "norwegian-4x4" && researchGroups && researchGroups.length > 0 ? (
+          <p className="max-w-3xl text-sm/6 text-muted-foreground/80">
+            Read these top to bottom: the earliest groups are the closest match to the
+            exact protocol, and the later groups mainly add safety, boundary, or nearby-
+            variant context.
+          </p>
+        ) : null}
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
           {researchStats.map((stat) => (
             <div
@@ -212,15 +219,19 @@ export function ProtocolTab({ experiment }: ProtocolTabProps) {
           ))}
         </div>
         {researchStats.some((stat) =>
-          stat.label === "HUMAN PARTICIPANTS" && stat.value !== "—"
-        ) ? (
-          <p className="text-xs/4 text-muted-foreground/70">
-            Sources checked is the full set used for this page. Research papers
-            test people directly; review papers summarize other papers. Total
-            human participants counts only direct human research with participant totals,
-            avoiding duplicate cohorts where possible.
-          </p>
-        ) : null}
+      /HUMAN PARTICIPANTS/u.test(stat.label) && stat.value !== "—"
+    ) ? (
+      <p className="text-xs/4 text-muted-foreground/70">
+        Sources checked is every card shown on this page. Direct human participants
+        counts only primary human studies with coded participant totals, deduplicated
+        by cohort when possible. Review cards may show larger pooled head counts on
+        their own rows, and those pooled totals are treated as approximate rather than
+        added into the page-level number.
+        {experiment.id === "norwegian-4x4"
+          ? " On Norwegian 4x4, safety-boundary registries also stay off that page-level total."
+          : ""}
+      </p>
+    ) : null}
 
         {researchGroups && researchGroups.length > 0 ? (
           <div className="flex flex-col gap-4">
@@ -377,8 +388,8 @@ function formatResearchGroupSourceMix(
     },
     {
       count: countStudiesByType(studies, ["RCT", "INT"]),
-      pluralLabel: "interventions",
-      singularLabel: "intervention",
+      pluralLabel: "trials",
+      singularLabel: "trial",
       sortOrder: 1,
     },
     {
@@ -395,8 +406,8 @@ function formatResearchGroupSourceMix(
     },
     {
       count: countStudiesByType(studies, ["GUIDE"]),
-      pluralLabel: "guidelines",
-      singularLabel: "guideline",
+      pluralLabel: "guidance sources",
+      singularLabel: "guidance source",
       sortOrder: 4,
     },
     {
@@ -407,8 +418,8 @@ function formatResearchGroupSourceMix(
     },
     {
       count: countStudiesByType(studies, ["SRC"]),
-      pluralLabel: "source notes",
-      singularLabel: "source note",
+      pluralLabel: "supporting sources",
+      singularLabel: "supporting source",
       sortOrder: 6,
     },
   ]
@@ -464,13 +475,13 @@ function formatEvidenceStance(
     case "mixed":
       return "Mixed evidence";
     case "does_not_confirm":
-      return "Does not confirm";
+      return "Doesn't confirm";
     case "contradicts":
       return "Evidence against";
     case "safety_boundary":
       return "Safety boundary";
     case "context_only":
-      return "Context only";
+      return "Context, not proof";
   }
 }
 

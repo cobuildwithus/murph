@@ -4,7 +4,7 @@ entityType: protocol_variant
 key: protocol_variant:norwegian-4x4/norwegian-4x4
 slug: protocols/norwegian-4x4/norwegian-4x4
 title: Norwegian 4x4 Intervals
-summary: "Do repeatable hard cardio intervals on a bike, rower, treadmill, hill, or safe route to see whether your fitness signal improves without creating too much recovery strain."
+summary: "Use a repeatable hard-aerobic 4x4 workout to test whether cardio fitness improves over about six weeks without pushing symptoms or recovery in the wrong direction."
 status: field-testing
 quality: usable
 aliases:
@@ -521,30 +521,43 @@ claims:
       - Sleep should be tracked as recovery context and a confounder, not as a promised outcome.
       - A flat or worse HRV signal does not automatically mean the protocol failed.
 researchLandscape:
-  bottomLine: "Best read as a bounded VO2max/cardio-fitness experiment with explicit safety and recovery boundaries, not as a disease-treatment plan or a guarantee that a wearable score will move."
+  bottomLine: "Best read as a bounded cardio-fitness experiment: the strongest proof comes from two small direct 4x4 trials, the next layer shows how to hit the intended dose, and the rest mainly sets boundaries around safety, clinical mismatch, and nearby variants."
   confidenceLabel: moderate
-  primaryClaim: "The strongest support is for improving lab-measured VO2max, and secondarily wearable cardio-fitness estimates, when the intervals actually reach a hard aerobic zone and recovery remains tolerable."
-  mainCaveat: "Clinical and disease-population studies are supervised and mixed; use them to set boundaries, not to claim that unsupervised 4x4 is always safer, better, or more effective than moderate cardio."
+  primaryClaim: "If vigorous exercise is appropriate for you, the best-supported claim is that a well-executed 4x4 block can improve lab VO2max, and sometimes a wearable cardio-fitness proxy, over roughly six weeks."
+  mainCaveat: "The direct 4x4 trials are small, while many larger papers come from supervised cardiac or cardiometabolic settings. Those studies help set boundaries, not prove that unscreened home users should self-treat disease or expect every metric to improve."
   groups:
     -
-      id: supports-fitness-claim
-      label: "Supports the fitness claim"
+      id: exact-or-close-4x4-trials
+      label: "Exact or close 4x4 trials"
       stance: supports
-      summary: "The direct and close-family evidence supports Norwegian 4x4 as a cardiorespiratory-fitness experiment, especially for VO2max. For users, the make-or-break detail is fidelity: did each interval build into the intended hard aerobic zone without turning into unsafe sprinting or unrecoverable strain?"
+      summary: "Start here. These are the two closest direct tests of the classic long-interval 4x4 idea. They give the cleanest answer to whether this dose can move VO2max-style fitness outcomes."
       sourceKeys:
-        - source_artifact:ntnu-cerg-norwegian-4x4
         - source_artifact:pmid-17414804
         - source_artifact:pmid-26440134
-        - source_artifact:pmid-30733142
-        - source_artifact:pmid-24066036
+      defaultOpen: true
+    -
+      id: dose-fidelity-and-implementation
+      label: "Dose, target zone, and implementation"
+      stance: supports
+      summary: "These sources explain how to make the session actually count as Norwegian 4x4: pace into the target zone, use heart-rate feedback instead of pure guesswork, and judge the workout by repeatable time in zone rather than by suffering alone."
+      sourceKeys:
+        - source_artifact:ntnu-cerg-norwegian-4x4
         - source_artifact:doi-10.3390-ijerph17145103
         - source_artifact:pmid-23988787
       defaultOpen: true
     -
+      id: broader-hiit-vo2-context
+      label: "Broader HIIT and VO2max context"
+      stance: context_only
+      summary: "These broader syntheses help explain why longer aerobic intervals are plausible for VO2max, and why individual response varies, but they are not direct proof that this exact 4x4 recipe will change a wearable score."
+      sourceKeys:
+        - source_artifact:pmid-30733142
+        - source_artifact:pmid-24066036
+    -
       id: clinical-context-mixed-superiority
-      label: "Clinical context and mixed superiority"
+      label: "Clinical lineage and mixed superiority"
       stance: mixed
-      summary: "Early supervised clinical-lineage studies often favored interval training, but larger coronary-disease and heart-failure trials did not consistently confirm superiority over moderate training or guideline advice. This group keeps the claim honest: useful lineage, not proof that home 4x4 treats cardiovascular disease or always beats moderate cardio."
+      summary: "This is where the Norwegian/CERG lineage came from, but it is also where overclaim risk lives. Early supervised clinical studies often looked favorable for interval training, while larger later trials and syntheses did not consistently show interval training beating moderate training or guideline care."
       sourceKeys:
         - source_artifact:pmid-25464446
         - source_artifact:pmid-28082387
@@ -561,7 +574,7 @@ researchLandscape:
       id: safety-boundary
       label: "Safety boundaries"
       stance: safety_boundary
-      summary: "Safety evidence is mostly about screened, supervised, or guideline-managed exercise. Serious events appear uncommon in those settings, but that does not make unsupervised vigorous intervals risk-free—especially with cardiovascular symptoms, known disease, heart-rate-limiting medication, recent infection, pregnancy/postpartum status, or post-exertional malaise."
+      summary: "Low event rates mostly come from screened, supervised, or guideline-managed exercise settings. Useful safety context, but not a permission slip to ignore symptoms, clinician guidance, or post-viral/post-exertional red flags."
       sourceKeys:
         - source_artifact:pmid-22879367
         - source_artifact:pmid-30376749
@@ -571,9 +584,9 @@ researchLandscape:
         - source_artifact:pmid-33239350
     -
       id: adjacent-variants-and-recovery-context
-      label: "Adjacent variants and recovery context"
+      label: "Nearby protocols and recovery context"
       stance: context_only
-      summary: "Low-volume HIIT, sprint-interval comparisons, athlete studies, metabolic-syndrome syntheses, and autonomic-control reviews help separate neighboring protocols and secondary signals. They are useful context for dose selection and recovery interpretation, but they are not direct proof that this exact 4x4 recipe will move a user's wearable metrics."
+      summary: "Low-volume 1x4 HIIT, sprint-interval training, athlete studies, metabolic-syndrome syntheses, and HRV/autonomic reviews help prevent category mistakes. They are useful for variant separation and recovery interpretation, not as direct proof for the exact four-interval recipe."
       sourceKeys:
         - source_artifact:pmid-30293954
         - source_artifact:pmid-28846513
@@ -737,8 +750,12 @@ It also does not promise HRV improvement, sleep improvement, fat loss, or a wear
 
 ## Evidence snapshot
 
-The strongest practical read is straightforward: Norwegian 4x4 is a plausible way to test whether hard aerobic intervals improve your cardio-fitness signal over about six weeks. The evidence is strongest for VO2max-style fitness outcomes when the intervals are actually performed at the intended intensity.
+The strongest practical read is now easier to separate into layers.
 
-The corpus also contains studies that should **not** be overread. Supervised cardiac-rehabilitation, heart-failure, coronary-disease, hypertension, adolescent, metabolic-syndrome, athlete, sprint-interval, and low-volume HIIT studies help define boundaries, risks, and adjacent variants. They do not prove that an unscreened home user should treat disease, skip clinician guidance, or expect every wearable metric to improve.
+- **Layer 1: exact or close 4x4 trials.** Two small direct trials give the clearest evidence that the classic long-interval dose can improve VO2max-style fitness outcomes over about six weeks.
+- **Layer 2: dose fidelity and implementation.** The public CERG guidance plus the heart-rate and RPE papers explain how to run the workout so it actually counts as 4x4 rather than as random hard cardio.
+- **Layer 3: broader context and boundaries.** Meta-analyses, cardiac-rehab papers, guidelines, HRV reviews, low-volume HIIT, and sprint-interval studies help set expectations, safety boundaries, and variant separation.
 
-In plain language: use the research cards to answer three questions before starting—does this source support the 4x4 fitness idea, does it merely provide clinical or safety context, and does it describe a different protocol that should stay separate?
+The corpus also contains studies that should **not** be overread. Supervised cardiac-rehabilitation, heart-failure, coronary-disease, hypertension, adolescent, metabolic-syndrome, athlete, sprint-interval, and low-volume HIIT studies help define boundaries, risks, and nearby protocols. They do not prove that an unscreened home user should treat disease, skip clinician guidance, or expect every wearable metric to improve.
+
+In plain language: read the research cards from top to bottom. Start with the two exact or close 4x4 trials, then the dose-fidelity/how-to papers, then the broader VO2max context, and only then the clinical, safety, and adjacent-variant boundary papers.

@@ -76,7 +76,7 @@ describe("ExperimentDetailPage", () => {
     }));
     expect(clientExperiment.researchStats).toEqual(expect.arrayContaining([
       expect.objectContaining({ label: "SOURCES CHECKED", value: 93 }),
-      expect.objectContaining({ label: "HUMAN PARTICIPANTS", value: "11,706+" }),
+      expect.objectContaining({ label: "DIRECT HUMAN PARTICIPANTS", value: "11,706+" }),
       expect.objectContaining({ label: "REVIEW PAPERS", value: 22 }),
       expect.objectContaining({ label: "RESEARCH PAPERS", value: 71 }),
       expect.objectContaining({ label: "YEARS COVERED", value: "1979–2026" }),
@@ -250,7 +250,7 @@ describe("ExperimentDetailPage", () => {
     ]));
     expect(clientExperiment.researchStats).toEqual(expect.arrayContaining([
       expect.objectContaining({ label: "SOURCES CHECKED", value: 26 }),
-      expect.objectContaining({ label: "HUMAN PARTICIPANTS", value: "2,557+" }),
+      expect.objectContaining({ label: "DIRECT HUMAN PARTICIPANTS", value: "2,557+" }),
       expect.objectContaining({ label: "REVIEW PAPERS", value: 3 }),
       expect.objectContaining({ label: "RESEARCH PAPERS", value: 11 }),
       expect.objectContaining({ label: "YEARS COVERED", value: "1998–2025" }),
@@ -329,21 +329,21 @@ describe("ExperimentDetailPage", () => {
 
     expect(clientExperiment.researchStats).toEqual([
       { label: "SOURCES CHECKED", value: 29 },
-      { label: "HUMAN PARTICIPANTS", value: "6,115+" },
+      { label: "DIRECT HUMAN PARTICIPANTS", value: "1,269+" },
       { label: "REVIEW PAPERS", value: 8 },
       { label: "RESEARCH PAPERS", value: 17 },
       { label: "YEARS COVERED", value: "2004–2024" },
     ]);
     expect(clientExperiment.researchLandscape).toEqual(expect.objectContaining({
       bottomLine:
-        "Best read as a bounded VO2max/cardio-fitness experiment with explicit safety and recovery boundaries, not as a disease-treatment plan or a guarantee that a wearable score will move.",
+        "Best read as a bounded cardio-fitness experiment: the strongest proof comes from two small direct 4x4 trials, the next layer shows how to hit the intended dose, and the rest mainly sets boundaries around safety, clinical mismatch, and nearby variants.",
       confidenceLabel: "moderate",
       mainCaveat:
-        "Clinical and disease-population studies are supervised and mixed; use them to set boundaries, not to claim that unsupervised 4x4 is always safer, better, or more effective than moderate cardio.",
+        "The direct 4x4 trials are small, while many larger papers come from supervised cardiac or cardiometabolic settings. Those studies help set boundaries, not prove that unscreened home users should self-treat disease or expect every metric to improve.",
       primaryClaim:
-        "The strongest support is for improving lab-measured VO2max, and secondarily wearable cardio-fitness estimates, when the intervals actually reach a hard aerobic zone and recovery remains tolerable.",
+        "If vigorous exercise is appropriate for you, the best-supported claim is that a well-executed 4x4 block can improve lab VO2max, and sometimes a wearable cardio-fitness proxy, over roughly six weeks.",
     }));
-    expect(clientExperiment.researchGroups).toHaveLength(4);
+    expect(clientExperiment.researchGroups).toHaveLength(6);
     expect(
       clientExperiment.researchGroups?.map((group) => ({
         count: group.studies.length,
@@ -354,17 +354,31 @@ describe("ExperimentDetailPage", () => {
       })),
     ).toEqual([
       {
-        count: 7,
+        count: 2,
         defaultOpen: true,
-        id: "supports-fitness-claim",
-        label: "Supports the fitness claim",
+        id: "exact-or-close-4x4-trials",
+        label: "Exact or close 4x4 trials",
         stance: "supports",
+      },
+      {
+        count: 3,
+        defaultOpen: true,
+        id: "dose-fidelity-and-implementation",
+        label: "Dose, target zone, and implementation",
+        stance: "supports",
+      },
+      {
+        count: 2,
+        defaultOpen: false,
+        id: "broader-hiit-vo2-context",
+        label: "Broader HIIT and VO2max context",
+        stance: "context_only",
       },
       {
         count: 11,
         defaultOpen: false,
         id: "clinical-context-mixed-superiority",
-        label: "Clinical context and mixed superiority",
+        label: "Clinical lineage and mixed superiority",
         stance: "mixed",
       },
       {
@@ -378,7 +392,7 @@ describe("ExperimentDetailPage", () => {
         count: 5,
         defaultOpen: false,
         id: "adjacent-variants-and-recovery-context",
-        label: "Adjacent variants and recovery context",
+        label: "Nearby protocols and recovery context",
         stance: "context_only",
       },
     ]);
