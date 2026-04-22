@@ -42,6 +42,16 @@ protocolEvidence:
     implication: "This source is a mechanism and safety source rather than a result-card endpoint."
     caveat: "Safety and special-population records support screening, stopping rules, and logging; they are not efficacy proof."
     displayPriority: 140
+  -
+    protocolKey: protocol_variant:dry-sauna/murph-finnish-standard-3x-week
+    groupId: evidence-backbone-and-claim-calibration
+    stance: mixed
+    scope: same_mechanism
+    result: mixed
+    headline: "This endocrine review reinforces that sauna is a real systemic stressor, which supports mechanism plausibility without turning hormone changes into promised consumer outcomes."
+    implication: "Use it as evidence-backbone context for mechanism plausibility and overclaim control."
+    caveat: "Narrative endocrine review evidence explains plausibility; it is not a direct protocol efficacy result."
+    displayPriority: 150
 evidenceBucket: Finnish dry-sauna corpus
 whyItMatters: "Expands the audited Finnish dry-sauna evidence corpus with a safety / physiology record marked lower priority for Murph v1 interpretation."
 potentialMurphEndpoints:

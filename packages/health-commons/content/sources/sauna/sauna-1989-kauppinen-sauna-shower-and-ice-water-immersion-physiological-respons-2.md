@@ -49,6 +49,19 @@ protocolEvidence:
     implication: "This source supports blood-pressure and heart-rate guardrails, especially when cold exposure is added."
     caveat: "Acute mechanistic responses explain the heat load but are not direct repeated-protocol efficacy outcomes."
     displayPriority: 40
+  -
+    protocolKey: protocol_variant:dry-sauna/murph-finnish-standard-3x-week
+    groupId: safety-dose-modality-and-context-boundaries
+    stance: safety_boundary
+    scope: adjacent_variant
+    result: not_efficacy_evidence
+    endpointKeys:
+      - biomarker:resting-heart-rate
+      - biomarker:morning-blood-pressure
+    headline: "This sauna-plus-cold circulation study reinforces that rapid thermal switching changes cardiovascular load enough to require explicit cold-exposure guardrails."
+    implication: "Use it to keep cold plunges and other mixed-modality thermal sequences separate from the default sauna protocol."
+    caveat: "Acute circulation physiology with added cold exposure informs guardrails, not stand-alone sauna efficacy."
+    displayPriority: 110
 evidenceBucket: Finnish dry-sauna corpus
 whyItMatters: "Expands the audited Finnish dry-sauna evidence corpus with a general / mixed record marked lower priority for Murph v1 interpretation."
 potentialMurphEndpoints:
