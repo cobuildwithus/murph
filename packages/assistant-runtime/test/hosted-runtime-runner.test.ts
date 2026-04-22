@@ -1133,6 +1133,7 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
         env: {
           TELEGRAM_BOT_TOKEN: "telegram-token",
         },
+        signal: expect.any(AbortSignal),
       },
     );
     expect(stopHandle).toHaveBeenCalledTimes(1);

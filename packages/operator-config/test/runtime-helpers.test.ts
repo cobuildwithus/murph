@@ -330,6 +330,60 @@ test('startTelegramTypingSession validates Telegram runtime prerequisites and ta
   )
 })
 
+test('startTelegramTypingSession aborts instead of resolving a handle when the initial Telegram request is cancelled', async () => {
+  const dependencyController = new AbortController()
+  const seenSignals: AbortSignal[] = []
+  const fetchImplementation = vi.fn(async (_url: string, init: {
+    body?: string
+    headers?: Record<string, string>
+    method: 'POST'
+    signal?: AbortSignal
+  }) => {
+    if (!init.signal) {
+      throw new Error('Expected the dependency abort signal to be forwarded.')
+    }
+
+    seenSignals.push(init.signal)
+    return await new Promise<{
+      json(): Promise<unknown>
+      ok: boolean
+      status: number
+    }>((_resolve, reject) => {
+      init.signal?.addEventListener('abort', () => {
+        reject(createAbortError())
+      }, { once: true })
+    })
+  })
+
+  const handlePromise = startTelegramTypingSession(
+    {
+      target: '123',
+    },
+    {
+      env: {
+        TELEGRAM_BOT_TOKEN: 'bot-token',
+      },
+      fetchImplementation,
+      refreshMs: 25,
+      signal: dependencyController.signal,
+    },
+  )
+
+  await Promise.resolve()
+  dependencyController.abort()
+
+  await assert.rejects(
+    () => handlePromise,
+    (error) =>
+      error instanceof Error &&
+      error.name === 'AbortError' &&
+      error.message === 'Operation aborted.',
+  )
+  assert.equal(fetchImplementation.mock.calls.length, 1)
+  assert.equal(seenSignals.length, 1)
+  assert.equal(seenSignals[0]?.aborted, true)
+})
+
 test('startTelegramTypingSession applies migrated chat ids and preserves optional routing fields', async () => {
   vi.useFakeTimers()
 
