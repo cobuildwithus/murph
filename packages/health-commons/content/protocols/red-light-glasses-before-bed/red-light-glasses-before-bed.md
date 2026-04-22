@@ -530,16 +530,16 @@ claims:
       - Morning and daytime light can be beneficial for circadian stability.
       - Daytime use of strong filtering lenses is a different intervention.
 researchLandscape:
-  bottomLine: "Best read as a low-burden evening-light self-experiment: the mechanism is plausible, but direct glasses trials are small and mixed, especially for objective wearable sleep outcomes."
+  bottomLine: "Best read as a low-burden evening-light self-experiment, not a sleep treatment: the circadian mechanism is real enough to test, but direct glasses trials are small, mixed, and weakest on objective wearable outcomes."
   confidenceLabel: mixed
-  primaryClaim: "High-filtering amber, red, or brown glasses may help some users feel less wired or fall asleep more easily when evening melanopic exposure is high."
-  mainCaveat: "Recent adult actigraphy synthesis did not find statistically significant pooled improvements, so the protocol should not promise insomnia treatment, eye-strain relief, retinal protection, or wearable sleep-stage gains."
+  primaryClaim: "High-filtering amber, red, or brown glasses may help some users feel less wired or fall asleep more easily when their last two pre-bed hours include bright rooms, screens, or cool-white light."
+  mainCaveat: "The best objective adult synthesis found no statistically significant pooled actigraphy improvements, so the page should promise only a personal test of sleep onset and pre-bed wiredness—not insomnia treatment, eye-strain relief, retinal protection, or sleep-stage gains."
   groups:
     -
       id: direct-adult-sleep-evidence
       label: Direct adult sleep evidence
       stance: mixed
-      summary: "The closest adult sleep evidence is useful but not decisive: small insomnia and device-use trials support the two-hour evening window, while healthy-adult and actigraphy syntheses do not show reliable objective gains. The practical claim should stay personal and bounded: test sleep-onset and pre-bed wiredness first, treat wearable sleep stages as exploratory, and expect null results in low-symptom users."
+      summary: "Read this bucket as the actual bedtime-glasses evidence. It has a few small positive trials in people with insomnia symptoms, poor sleep, device use, or athletic evening routines, but the newest objective actigraphy meta-analysis found no statistically significant pooled gains in sleep onset, total sleep time, sleep efficiency, or wake after sleep onset. Plain-language takeaway: it is reasonable to test whether your own evenings feel less wired, but a wearable sleep-stage improvement is a maybe, not an expectation."
       defaultOpen: true
       sourceKeys:
         - source_artifact:pmid-41341515
@@ -558,7 +558,7 @@ researchLandscape:
       id: mechanism-dose-and-implementation
       label: Mechanism and dose fidelity
       stance: supports
-      summary: "The mechanism is stronger than the outcome evidence: evening melanopic light, room light, displays, and lens filtering can move melatonin, alertness, and sleep-latency physiology. That makes implementation details central—spectral filtering, fit/leakage, room brightness, screen dose, and preserving daytime light all matter more than lens color or marketing copy alone."
+      summary: "This bucket explains why the test is plausible and why implementation can make or break it. Melanopic evening light from lamps and displays can affect melatonin and alertness, but glasses only reduce that signal if the lenses actually filter enough short-wavelength light and fit well enough to limit leakage. Plain-language takeaway: red or amber color is not enough; room brightness, screen brightness, wraparound fit, and not wearing strong filters during the day all matter."
       sourceKeys:
         - source_artifact:pmid-40728371
         - source_artifact:pmid-35298459
@@ -576,7 +576,7 @@ researchLandscape:
       id: measurement-and-claim-guardrails
       label: Measurement and claim guardrails
       stance: context_only
-      summary: "A useful self-test needs conservative measurement language. Wearable and actigraphy estimates are trend proxies that should be paired with a subjective sleep-onset log, while eye-strain, headache, retinal protection, and macular-health claims belong outside this bedtime sleep protocol."
+      summary: "This bucket keeps the page honest about what the experiment can measure. Actigraphy and consumer wearables are useful trend proxies, but they can mistake quiet wakefulness for sleep, so pair them with a one-tap subjective sleep-onset and pre-bed-wiredness log. Eye-strain, headache, retinal-protection, and macular-health claims are outside this bedtime experiment."
       sourceKeys:
         - source_artifact:pmid-29991437
         - source_artifact:pmid-33587901
@@ -585,7 +585,7 @@ researchLandscape:
       id: adjacent-clinical-variants
       label: Adjacent clinical variants
       stance: safety_boundary
-      summary: "Several nearby literatures use similar light-reduction logic—delayed sleep phase, shift work, pregnancy, pediatrics, depression, bipolar/mania virtual darkness, and psychiatric-ward lighting—but they are not the default adult bedtime-glasses experiment. These sources mostly set boundaries: special populations and mood/circadian disorders need separate protocols, different timing, and clinician guidance."
+      summary: "This bucket explains what not to generalize from. Delayed sleep phase, shift work, pregnancy, pediatrics, depression, bipolar/mania virtual-darkness protocols, and psychiatric-ward lighting all use related light-reduction ideas, but they involve different risks, timing, and supervision. Plain-language takeaway: those papers help set safety boundaries; they are not proof that ordinary bedtime glasses will work for a healthy adult."
       sourceKeys:
         - source_artifact:pmid-26414986
         - source_artifact:pmid-27322730
@@ -645,6 +645,8 @@ researchCoverage:
     highestPriorityProtocolRecords: 24
     resolvedInventoryOnlyRecords: 28
     canonicalizedDuplicateDiscoveryKeys: 4
+    directAdultStandaloneGlassesTrialsInResearchGroup: 7
+    latestCorpusSourceYear: 2026
     auditCutoff: 2026-04-21
   shortlistBucketCounts:
     evidence-backbone: 13
@@ -735,13 +737,13 @@ Run a 21-day experiment:
 - no daytime use
 - no new melatonin, sleep supplements, screen curfew, bedtime target, or room-light redesign during the same test
 
-Use the simplest version first. This is not “avoid blue light forever.” It is a short test of whether lowering evening melanopic light helps you wind down.
+Use the simplest version first. This is not “avoid blue light forever.” It is a short test of whether lowering evening melanopic light helps you wind down. The point is the **last part of the evening**, not daytime light avoidance.
 
 ## Why this version
 
-The evidence points in two directions at once. Lowering evening melanopic light is biologically plausible, but direct glasses trials are small, mixed, and often stronger on subjective sleep than objective actigraphy.
+The evidence points in two directions at once. Lowering evening melanopic light is biologically plausible, but direct glasses trials are small, mixed, and often stronger on subjective sleep than objective actigraphy or wearable-style outcomes.
 
-That makes this a good low-burden experiment, not a promise. The practical question is whether your evenings feel calmer and whether sleep onset looks easier often enough to repeat.
+That makes this a good low-burden experiment, not a promise. The practical question is whether your own evenings feel calmer and whether sleep onset looks easier often enough to repeat. Null results are expected for some people, especially when their evenings are already dim or their sleep is already stable.
 
 ## What counts as a signal
 
@@ -761,11 +763,13 @@ Exploratory signals:
 - HRV RMSSD
 - resting heart rate
 
+Do not score the experiment on one impressive night. A useful signal should repeat on several adherent nights and should still make sense after checking the confounders below.
+
 A result is interesting only when it repeats across multiple adherent nights and is not obviously explained by bedtime shifts, alcohol, caffeine, travel, illness, stress, hard training, or another routine change.
 
 ## Product and safety notes
 
-Lens quality matters. A clear office lens with weak filtering is not the same intervention as high-filtering amber/red/brown evening eyewear. When spectral transmittance or melanopic daylight filtering density is available, prefer that over marketing labels.
+Lens quality matters. A clear office lens with weak filtering is not the same intervention as high-filtering amber/red/brown evening eyewear. When spectral transmittance or melanopic daylight filtering density is available, prefer that over marketing labels. Wraparound fit matters too, because light leaking around the lens can reduce the practical dose.
 
 Keep this separate from delayed sleep phase disorder, shift work, pregnancy, pediatric use, depression, bipolar/mania, inpatient psychiatric ward lighting, and screen-software variants. Those may use similar mechanisms but need different supervision, signals, and safety language.
 

@@ -171,6 +171,8 @@ corpusStats:
   highestPriorityProtocolRecords: 24
   resolvedInventoryOnlyRecords: 28
   canonicalizedDuplicateDiscoveryKeys: 4
+  directAdultStandaloneGlassesTrialsInResearchGroup: 7
+  latestCorpusSourceYear: 2026
   auditCutoff: 2026-04-21
 evidenceMap:
   shortlistBucketCounts:
@@ -260,7 +262,7 @@ The consumer phrase “red light glasses before bed” is treated here as evenin
 
 The strongest rationale is mechanistic and guideline-level: evening melanopic light can affect circadian and sleep physiology, and public-health guidance supports bright daytime light plus lower evening/night light.
 
-The direct glasses evidence is mixed. Small trials sometimes report subjective sleep improvements, but the adult actigraphy synthesis did not find statistically significant pooled improvements for sleep onset latency, total sleep time, sleep efficiency, or wake after sleep onset.
+The direct adult literature is useful but not definitive. A few small randomized and crossover trials report improvements in sleep onset, melatonin, or sleep quality with high-filtering lenses worn for roughly two hours before bed. But healthy-adult null trials and the adult actigraphy meta-analysis show that objective sleep effects are inconsistent and may often be small.
 
 ## How to use this evidence
 

@@ -41,7 +41,6 @@ export function StudyCard({
   });
   const includedStudiesLabel = formatIncludedStudiesLabel(includedStudyCount);
   const studyFacts = buildStudyFacts({
-    designLabel,
     population,
     duration,
   });
@@ -58,7 +57,7 @@ export function StudyCard({
   };
   const rowContent = (
     <div className="flex gap-4 px-6 py-5">
-      <div className="flex w-[74px] shrink-0 flex-col items-start gap-1">
+      <div className="flex w-[88px] shrink-0 flex-col items-start gap-1">
         <div
           className="h-fit rounded-md bg-primary/8 px-2.5 py-1.5"
           title={designLabel ? `${type}: ${designLabel}` : type}
@@ -89,11 +88,14 @@ export function StudyCard({
             </span>
           ) : null}
         </div>
+        {designLabel ? (
+          <span className="mt-1 text-xs/4 text-muted-foreground">{designLabel}</span>
+        ) : null}
         {authors ? (
           <span className="mt-1 text-[11px]/4 text-muted-foreground/70">{authors}</span>
         ) : null}
         {studyFacts.length > 0 ? (
-          <dl className="mt-2 grid gap-2 sm:grid-cols-3">
+          <dl className="mt-2 grid gap-2 sm:grid-cols-2">
             {studyFacts.map((fact) => (
               <div
                 key={fact.label}
@@ -164,7 +166,7 @@ export function StudyCard({
         {rowContent}
         {isInteractive ? (
           <CollapsibleContent className="px-6 pb-5">
-            <div className="flex max-w-[62ch] flex-col gap-3 pl-[90px]">
+            <div className="flex max-w-[62ch] flex-col gap-3 pl-[104px]">
               {headline ? (
                 <p className="text-[15px]/6 font-medium text-foreground">
                   {headline}
@@ -174,7 +176,7 @@ export function StudyCard({
                 <StudyDetail label={findingLabel} text={finding} />
               ) : null}
               {implication ? (
-                <StudyDetail label="How to read it" text={implication} />
+                <StudyDetail label="What it means here" text={implication} />
               ) : null}
               {caveat ? (
                 <StudyDetail label="Important limit" text={caveat} />
@@ -214,7 +216,7 @@ function formatFindingLabel(findingKind: Study["findingKind"]): string {
       return "Protocol takeaway";
     case "finding":
     case undefined:
-      return "What it found";
+      return "What they found";
   }
 }
 
@@ -226,8 +228,8 @@ function formatParticipantLabel({
     return null;
   }
 
-  const prefix = participantCountKind === "approximate" ? "n≈" : "n=";
-  return `${prefix}${participants.toLocaleString()}`;
+  const countLabel = `${participants.toLocaleString()} ${participants === 1 ? "person" : "people"}`;
+  return participantCountKind === "approximate" ? `≈${countLabel}` : countLabel;
 }
 
 function formatIncludedStudiesLabel(includedStudyCount: Study["includedStudyCount"]): string | null {
@@ -247,7 +249,7 @@ function formatStudyResult(result: Study["result"]): string {
     case "negative":
       return "Negative";
     case "not_efficacy_evidence":
-      return "Context";
+      return "Context, not proof";
     case undefined:
       return "";
   }
@@ -258,15 +260,15 @@ function formatEvidenceScope(scope: Study["scope"]): string {
     case "direct_protocol":
       return "Direct protocol";
     case "same_mechanism":
-      return "Shared mechanism";
+      return "Same mechanism";
     case "clinical_supervised":
-      return "Clinical setting";
+      return "Clinician-guided";
     case "adjacent_variant":
-      return "Adjacent variant";
+      return "Adjacent";
     case "measurement_context":
       return "Measurement context";
     case "general_guideline":
-      return "Guideline context";
+      return "Guideline";
     case undefined:
       return "";
   }
@@ -277,30 +279,28 @@ function formatEvidenceStance(stance: Study["stance"]): string {
     case "supports":
       return "Supports";
     case "mixed":
-      return "Mixed evidence";
+      return "Mixed";
     case "does_not_confirm":
       return "Does not confirm";
     case "contradicts":
-      return "Evidence against";
+      return "Against";
     case "safety_boundary":
-      return "Safety guardrail";
+      return "Boundary / safety";
     case "context_only":
-      return "Context, not proof";
+      return "Context only";
     case undefined:
       return "";
   }
 }
 
 function buildStudyFacts({
-  designLabel,
   population,
   duration,
-}: Pick<Study, "designLabel" | "population" | "duration">): Array<{
+}: Pick<Study, "population" | "duration">): Array<{
   label: string;
   value: string;
 }> {
   return [
-    designLabel ? { label: "Design", value: designLabel } : null,
     population ? { label: "People", value: population } : null,
     duration ? { label: "Timeframe", value: duration } : null,
   ].filter((fact): fact is { label: string; value: string } => fact !== null);

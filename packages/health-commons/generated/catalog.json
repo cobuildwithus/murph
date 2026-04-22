@@ -1576,7 +1576,7 @@
       "schemaVersion": "murph.commons.artifact-manifest.v1"
     }
   ],
-  "catalogHash": "sha256:678d5ea1b978eca5d6960244e29b1297b4aef1d6811397af426edabcea6bc028",
+  "catalogHash": "sha256:9f6d4d036d5181b841d592248509540370669af6bbb57daa33a04a523292da7e",
   "changes": [
     {
       "affectedFields": [
@@ -4964,7 +4964,7 @@
       "experimentOnboarding": {
         "assistantPolicy": {
           "askBeforeCreatingAutomations": true,
-          "confirmationPrompt": "Show the safety outcome, exact baseline/intervention dates, two weekly session windows, modality, heart-rate monitor, target/minimum session counts, logging fields, and reminder policy before creating the active experiment or automations.",
+          "confirmationPrompt": "Show the protocol key plus pageRevisionId and runSpecRevisionId, the chosen testPlanId, the safety outcome, exact baseline/intervention dates, two weekly session windows, modality, heart-rate monitor, target/minimum session counts, logging fields, and reminder policy before creating the active experiment or automations.",
           "maxSetupQuestionsPerTurn": 2,
           "missedLogFollowup": "opt_in_only",
           "missedLogFollowupCopy": "Did you end up doing today's 4x4 session? Totally fine either way — I just want the experiment record to be accurate.",
@@ -4985,7 +4985,7 @@
               "id": "active_experiments",
               "label": "Active experiments",
               "readHints": [
-                "experiment list --status active"
+                "experiment list --status active --format json"
               ],
               "reason": "Avoid starting more than one meaningful experiment at once unless the user explicitly chooses that tradeoff."
             },
@@ -4994,8 +4994,8 @@
               "id": "wearable_sources",
               "label": "Wearable sources",
               "readHints": [
-                "wearables sources list",
-                "wearables day"
+                "wearables sources list --format json",
+                "wearables day <YYYY-MM-DD> --format json"
               ],
               "reason": "Confirm that cardio-fitness, heart-rate, recovery, sleep, or activity signals can be observed during the baseline and intervention windows."
             },
@@ -5004,20 +5004,65 @@
               "id": "recent_activity_sessions",
               "label": "Recent activity sessions",
               "readHints": [
-                "search query \"recent workouts intervals running cycling rowing\"",
-                "timeline --record-type event"
+                "search query \"interval workouts running cycling rowing\" --format json",
+                "timeline --entry-type event --kind activity_session --from <YYYY-MM-DD> --format json"
               ],
               "reason": "Understand current training load, interval familiarity, and likely modality fit before scheduling two hard weekly sessions."
             },
             {
-              "freshnessDays": 30,
-              "id": "conditions_medications_and_context",
-              "label": "Conditions, medications, and special context",
+              "freshnessDays": 180,
+              "id": "cardiovascular_or_respiratory_conditions",
+              "label": "Cardiovascular or respiratory conditions",
               "readHints": [
-                "memory show",
-                "search query \"condition medication pregnancy postpartum infection asthma COPD diabetes beta blocker long COVID injury\""
+                "search query \"heart disease arrhythmia chest pain syncope hypertension asthma COPD\" --format json"
               ],
-              "reason": "High-intensity intervals need explicit screening for cardiovascular red flags, heart-rate-limiting medication, pregnancy or postpartum context, acute illness, and recovery-limiting patterns."
+              "reason": "Known cardiovascular or respiratory disease can change whether unsupervised vigorous intervals are a good fit even before the compact safety screen."
+            },
+            {
+              "freshnessDays": 30,
+              "id": "heart_rate_affecting_or_glucose_lowering_medications",
+              "label": "Medications that change heart-rate interpretation or hypoglycemia risk",
+              "readHints": [
+                "search query \"beta blocker medication insulin sulfonylurea hypoglycemia\" --format json"
+              ],
+              "reason": "Beta blockers, other heart-rate-limiting medications, and diabetes medications that can cause lows materially change safety and interpretation."
+            },
+            {
+              "freshnessDays": 30,
+              "id": "blood_pressure_records",
+              "label": "Blood pressure context",
+              "readHints": [
+                "search query \"blood pressure hypertension\" --format json"
+              ],
+              "reason": "Recent elevated blood pressure or a known uncontrolled-hypertension context matters before unsupervised vigorous intervals."
+            },
+            {
+              "freshnessDays": 30,
+              "id": "pregnancy_or_postpartum_context",
+              "label": "Pregnancy or postpartum context",
+              "readHints": [
+                "memory show --format json",
+                "search query \"pregnancy postpartum\" --format json"
+              ],
+              "reason": "Pregnancy and early postpartum status can change whether unsupervised vigorous intervals are a good fit right now."
+            },
+            {
+              "freshnessDays": 21,
+              "id": "recent_illness_or_infection",
+              "label": "Recent illness or infection",
+              "readHints": [
+                "search query \"fever infection illness myocarditis pericarditis\" --format json"
+              ],
+              "reason": "Recent fever, infection, or possible myocarditis or pericarditis changes the safety posture for vigorous intervals."
+            },
+            {
+              "freshnessDays": 45,
+              "id": "injuries_pain_and_post_exertional_malaise",
+              "label": "Injuries, pain, and post-exertional malaise",
+              "readHints": [
+                "search query \"injury pain long COVID post-exertional malaise\" --format json"
+              ],
+              "reason": "Injury, pain, or a long-COVID or post-exertional-malaise pattern can make this protocol a poor fit even if the fitness goal is reasonable."
             }
           ]
         },
@@ -5447,9 +5492,9 @@
         "primaryClaim": "The strongest support is for improving lab-measured VO2max, and secondarily wearable cardio-fitness estimates, when the intervals actually reach a hard aerobic zone and recovery remains tolerable."
       },
       "revision": {
-        "pageRevisionId": "sha256:b7578fe31aff836656eaa08479accd1c909113caaa6bc78df407d629d233a4b7",
+        "pageRevisionId": "sha256:328000ffe7738e9bffaed6ae1e83bb95d8e94612a9bdf30cc6cc0622c843903c",
         "recipeHash": "sha256:a36ee9d7c6cf5d9c816817cb9366d0a7d815922f2135ecd739884d1afd7a38d1",
-        "runSpecRevisionId": "sha256:141c35d7b0af6e614b59aa9cb031a39f0580ffc283c066ac04dd0d1a2db789db"
+        "runSpecRevisionId": "sha256:65d0f19d222801b39710b751d7d097883199c49e49acb5ab1a795f5a92236698"
       },
       "safety": {
         "avoidOrGetClinicianGuidance": [
@@ -5555,7 +5600,7 @@
       "attribution": {
         "ownerType": "murph"
       },
-      "body": "## Question this experiment answers\n\nAfter a stable baseline, does wearing high-filtering amber/red/brown glasses for the last **90–120 minutes before bed** make the evening feel less wired or sleep come more easily?\n\n## Simple version\n\nRun a 21-day experiment:\n\n- **7 baseline days**\n- **14 intervention nights**\n- glasses on **90–120 minutes before intended bedtime**\n- **12 target nights**, with **10 nights** as the minimum for a useful first read\n- no daytime use\n- no new melatonin, sleep supplements, screen curfew, bedtime target, or room-light redesign during the same test\n\nUse the simplest version first. This is not “avoid blue light forever.” It is a short test of whether lowering evening melanopic light helps you wind down.\n\n## Why this version\n\nThe evidence points in two directions at once. Lowering evening melanopic light is biologically plausible, but direct glasses trials are small, mixed, and often stronger on subjective sleep than objective actigraphy.\n\nThat makes this a good low-burden experiment, not a promise. The practical question is whether your evenings feel calmer and whether sleep onset looks easier often enough to repeat.\n\n## What counts as a signal\n\nPrimary signal:\n\n- shorter subjective or wearable-estimated sleep-onset latency compared with your own 7-day baseline\n\nUseful subjective check:\n\n- “Did I feel less wired in the last hour before bed?”\n\nExploratory signals:\n\n- sleep efficiency\n- total sleep time\n- deep-sleep minutes\n- HRV RMSSD\n- resting heart rate\n\nA result is interesting only when it repeats across multiple adherent nights and is not obviously explained by bedtime shifts, alcohol, caffeine, travel, illness, stress, hard training, or another routine change.\n\n## Product and safety notes\n\nLens quality matters. A clear office lens with weak filtering is not the same intervention as high-filtering amber/red/brown evening eyewear. When spectral transmittance or melanopic daylight filtering density is available, prefer that over marketing labels.\n\nKeep this separate from delayed sleep phase disorder, shift work, pregnancy, pediatric use, depression, bipolar/mania, inpatient psychiatric ward lighting, and screen-software variants. Those may use similar mechanisms but need different supervision, signals, and safety language.\n\n## Off-ramp\n\nAt the end of 21 days, choose the plainest conclusion:\n\n1. **Worth repeating** if sleep onset or pre-bed wiredness clearly improved with low burden.\n2. **Probably noise** if only one or two nights moved or the signal was confounded.\n3. **Not worth it** if the tint was annoying, unsafe, mood-disrupting, or made sleep worse.",
+      "body": "## Question this experiment answers\n\nAfter a stable baseline, does wearing high-filtering amber/red/brown glasses for the last **90–120 minutes before bed** make the evening feel less wired or sleep come more easily?\n\n## Simple version\n\nRun a 21-day experiment:\n\n- **7 baseline days**\n- **14 intervention nights**\n- glasses on **90–120 minutes before intended bedtime**\n- **12 target nights**, with **10 nights** as the minimum for a useful first read\n- no daytime use\n- no new melatonin, sleep supplements, screen curfew, bedtime target, or room-light redesign during the same test\n\nUse the simplest version first. This is not “avoid blue light forever.” It is a short test of whether lowering evening melanopic light helps you wind down. The point is the **last part of the evening**, not daytime light avoidance.\n\n## Why this version\n\nThe evidence points in two directions at once. Lowering evening melanopic light is biologically plausible, but direct glasses trials are small, mixed, and often stronger on subjective sleep than objective actigraphy or wearable-style outcomes.\n\nThat makes this a good low-burden experiment, not a promise. The practical question is whether your own evenings feel calmer and whether sleep onset looks easier often enough to repeat. Null results are expected for some people, especially when their evenings are already dim or their sleep is already stable.\n\n## What counts as a signal\n\nPrimary signal:\n\n- shorter subjective or wearable-estimated sleep-onset latency compared with your own 7-day baseline\n\nUseful subjective check:\n\n- “Did I feel less wired in the last hour before bed?”\n\nExploratory signals:\n\n- sleep efficiency\n- total sleep time\n- deep-sleep minutes\n- HRV RMSSD\n- resting heart rate\n\nDo not score the experiment on one impressive night. A useful signal should repeat on several adherent nights and should still make sense after checking the confounders below.\n\nA result is interesting only when it repeats across multiple adherent nights and is not obviously explained by bedtime shifts, alcohol, caffeine, travel, illness, stress, hard training, or another routine change.\n\n## Product and safety notes\n\nLens quality matters. A clear office lens with weak filtering is not the same intervention as high-filtering amber/red/brown evening eyewear. When spectral transmittance or melanopic daylight filtering density is available, prefer that over marketing labels. Wraparound fit matters too, because light leaking around the lens can reduce the practical dose.\n\nKeep this separate from delayed sleep phase disorder, shift work, pregnancy, pediatric use, depression, bipolar/mania, inpatient psychiatric ward lighting, and screen-software variants. Those may use similar mechanisms but need different supervision, signals, and safety language.\n\n## Off-ramp\n\nAt the end of 21 days, choose the plainest conclusion:\n\n1. **Worth repeating** if sleep onset or pre-bed wiredness clearly improved with low burden.\n2. **Probably noise** if only one or two nights moved or the signal was confounded.\n3. **Not worth it** if the tint was annoying, unsafe, mood-disrupting, or made sleep worse.",
       "categories": [
         "sleep",
         "circadian",
@@ -6245,7 +6290,9 @@
           "canonicalSourceRecords": 41,
           "canonicalizedDuplicateDiscoveryKeys": 4,
           "directAdultCrossoverRCTsInActigraphyMetaAnalysis": 3,
+          "directAdultStandaloneGlassesTrialsInResearchGroup": 7,
           "highestPriorityProtocolRecords": 24,
+          "latestCorpusSourceYear": 2026,
           "participantsInActigraphyMetaAnalysis": 49,
           "rawDiscoveryRecords": 42,
           "resolvedInventoryOnlyRecords": 28,
@@ -6270,7 +6317,7 @@
         }
       },
       "researchLandscape": {
-        "bottomLine": "Best read as a low-burden evening-light self-experiment: the mechanism is plausible, but direct glasses trials are small and mixed, especially for objective wearable sleep outcomes.",
+        "bottomLine": "Best read as a low-burden evening-light self-experiment, not a sleep treatment: the circadian mechanism is real enough to test, but direct glasses trials are small, mixed, and weakest on objective wearable outcomes.",
         "confidenceLabel": "mixed",
         "groups": [
           {
@@ -6292,7 +6339,7 @@
               "source_artifact:pmid-32658494"
             ],
             "stance": "mixed",
-            "summary": "The closest adult sleep evidence is useful but not decisive: small insomnia and device-use trials support the two-hour evening window, while healthy-adult and actigraphy syntheses do not show reliable objective gains. The practical claim should stay personal and bounded: test sleep-onset and pre-bed wiredness first, treat wearable sleep stages as exploratory, and expect null results in low-symptom users."
+            "summary": "Read this bucket as the actual bedtime-glasses evidence. It has a few small positive trials in people with insomnia symptoms, poor sleep, device use, or athletic evening routines, but the newest objective actigraphy meta-analysis found no statistically significant pooled gains in sleep onset, total sleep time, sleep efficiency, or wake after sleep onset. Plain-language takeaway: it is reasonable to test whether your own evenings feel less wired, but a wearable sleep-stage improvement is a maybe, not an expectation."
           },
           {
             "id": "mechanism-dose-and-implementation",
@@ -6312,7 +6359,7 @@
               "source_artifact:pmid-31504080"
             ],
             "stance": "supports",
-            "summary": "The mechanism is stronger than the outcome evidence: evening melanopic light, room light, displays, and lens filtering can move melatonin, alertness, and sleep-latency physiology. That makes implementation details central—spectral filtering, fit/leakage, room brightness, screen dose, and preserving daytime light all matter more than lens color or marketing copy alone."
+            "summary": "This bucket explains why the test is plausible and why implementation can make or break it. Melanopic evening light from lamps and displays can affect melatonin and alertness, but glasses only reduce that signal if the lenses actually filter enough short-wavelength light and fit well enough to limit leakage. Plain-language takeaway: red or amber color is not enough; room brightness, screen brightness, wraparound fit, and not wearing strong filters during the day all matter."
           },
           {
             "id": "measurement-and-claim-guardrails",
@@ -6323,7 +6370,7 @@
               "source_artifact:doi-10.1111-opo.12406"
             ],
             "stance": "context_only",
-            "summary": "A useful self-test needs conservative measurement language. Wearable and actigraphy estimates are trend proxies that should be paired with a subjective sleep-onset log, while eye-strain, headache, retinal protection, and macular-health claims belong outside this bedtime sleep protocol."
+            "summary": "This bucket keeps the page honest about what the experiment can measure. Actigraphy and consumer wearables are useful trend proxies, but they can mistake quiet wakefulness for sleep, so pair them with a one-tap subjective sleep-onset and pre-bed-wiredness log. Eye-strain, headache, retinal-protection, and macular-health claims are outside this bedtime experiment."
           },
           {
             "id": "adjacent-clinical-variants",
@@ -6345,14 +6392,14 @@
               "source_artifact:pmid-39642162"
             ],
             "stance": "safety_boundary",
-            "summary": "Several nearby literatures use similar light-reduction logic—delayed sleep phase, shift work, pregnancy, pediatrics, depression, bipolar/mania virtual darkness, and psychiatric-ward lighting—but they are not the default adult bedtime-glasses experiment. These sources mostly set boundaries: special populations and mood/circadian disorders need separate protocols, different timing, and clinician guidance."
+            "summary": "This bucket explains what not to generalize from. Delayed sleep phase, shift work, pregnancy, pediatrics, depression, bipolar/mania virtual-darkness protocols, and psychiatric-ward lighting all use related light-reduction ideas, but they involve different risks, timing, and supervision. Plain-language takeaway: those papers help set safety boundaries; they are not proof that ordinary bedtime glasses will work for a healthy adult."
           }
         ],
-        "mainCaveat": "Recent adult actigraphy synthesis did not find statistically significant pooled improvements, so the protocol should not promise insomnia treatment, eye-strain relief, retinal protection, or wearable sleep-stage gains.",
-        "primaryClaim": "High-filtering amber, red, or brown glasses may help some users feel less wired or fall asleep more easily when evening melanopic exposure is high."
+        "mainCaveat": "The best objective adult synthesis found no statistically significant pooled actigraphy improvements, so the page should promise only a personal test of sleep onset and pre-bed wiredness—not insomnia treatment, eye-strain relief, retinal protection, or sleep-stage gains.",
+        "primaryClaim": "High-filtering amber, red, or brown glasses may help some users feel less wired or fall asleep more easily when their last two pre-bed hours include bright rooms, screens, or cool-white light."
       },
       "revision": {
-        "pageRevisionId": "sha256:e76d954511b22c9267f508de0668c8f20d39697ca92483e0e1b5baa03bce4678",
+        "pageRevisionId": "sha256:95dd846ed6ff93ce80e219c8b783198dd0440b5207e0662d9c8208534108568e",
         "recipeHash": "sha256:d00da6997c366d5a8c8d9a2b46fc25395adb257a5ef0c60507873cc2ddb192e6",
         "runSpecRevisionId": "sha256:d0c97230a4778a71af198962b62631a66538db0ffade803aed94f6ced907f622"
       },
@@ -10599,7 +10646,7 @@
         "ayaki 2016 adult blue-light shield eyewear",
         "blue-light shield eyewear adults self-luminous devices"
       ],
-      "body": "This source is included for **Direct adult device-use sleep/melatonin trial**.\n\n**Findings:** Small adult crossover study wearing blue-light shield eyewear for two hours before sleep during device use; reports higher melatonin and better sleep latency/efficiency versus control eyewear. One of the clearest small human sources for the two-hour pre-bed eyewear window.\n\n**Why it matters:** One of the clearest small human sources for the two-hour pre-bed eyewear window.\n\n**Potential experiment signals:** overnight melatonin secretion, sleep latency, sleep efficiency, subjective sleepiness\n\n**Protocol takeaway:** Supports the protocol timing window, while the sample size keeps confidence modest.",
+      "body": "This source is included for **Direct adult device-use sleep/melatonin trial**.\n\n**Findings:** This small adult crossover study tested blue-light shield eyewear for two hours before sleep during night-time device use. It reported higher melatonin and better sleep latency/efficiency versus control eyewear. It is one of the clearest small human sources for the two-hour pre-bed eyewear window, especially when screens are the exposure being managed.\n\n**Why it matters:** One of the clearest small human sources for the two-hour pre-bed eyewear window.\n\n**Potential experiment signals:** overnight melatonin secretion, sleep latency, sleep efficiency, subjective sleepiness\n\n**Protocol takeaway:** Supports the protocol timing window, while the sample size keeps confidence modest.",
       "categories": [
         "red-light-glasses-before-bed",
         "evening-light"
@@ -10618,15 +10665,15 @@
       ],
       "protocolEvidence": [
         {
-          "caveat": "Very small sample and laboratory/device-use context; ordinary home lighting may change the signal.",
+          "caveat": "Very small sample and device-use context; room lighting and real-world adherence may change the signal.",
           "displayPriority": 30,
           "endpointKeys": [
             "biomarker:sleep-onset-latency",
             "biomarker:sleep-efficiency"
           ],
           "groupId": "direct-adult-sleep-evidence",
-          "headline": "Small adult device-use crossover trial reported higher melatonin and better sleep latency/efficiency with blue-light shield eyewear.",
-          "implication": "Supports testing glasses during the last two hours before bed, especially when evening device use is present.",
+          "headline": "Small adult device-use crossover trial reported higher melatonin and better sleep latency/efficiency.",
+          "implication": "Supports testing high-filtering glasses during the last two hours before bed when screens are part of the evening.",
           "protocolKey": "protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed",
           "result": "positive",
           "scope": "direct_protocol",
@@ -10658,7 +10705,7 @@
         "populationLabel": "Adults using self-luminous portable devices at night"
       },
       "revision": {
-        "pageRevisionId": "sha256:9d034983afdb948f941738114a4cc4bf289b9e0a756c232c98e36e059157f479",
+        "pageRevisionId": "sha256:6de633efc71896c2bca47a5185bca213bd1d07b7408c5d2a6d419a77ac3c1663",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -11610,7 +11657,7 @@
       "whyItMatters": "Important for interaction with exercise"
     },
     {
-      "body": "This source is included for **Ordinary bedtime glasses insomnia**.\n\n**Findings:** Adults with insomnia symptoms wore amber lenses for two hours before bed in a randomized crossover trial. Compared with clear lenses, the amber condition improved several sleep and insomnia measures. The trial is a practical dose anchor, but it was small and short.\n\n**Why it matters:** Directly informs the 2-hour pre-bed design, while remaining a small pilot with imperfect blinding.\n\n**Potential experiment signals:** insomnia symptoms, sleep diary, actigraphy total sleep time, sleep quality\n\n**Protocol takeaway:** Use as a practical dose anchor, not as definitive treatment evidence.",
+      "body": "This source is included for **Ordinary bedtime glasses insomnia**.\n\n**Findings:** Adults with insomnia symptoms wore amber lenses for two hours before bed in a randomized crossover trial. Compared with clear lenses, the amber condition improved several sleep and insomnia measures. This is one of the clearest dose anchors for the protocol, but the trial was small, short, and not enough to call the glasses an insomnia treatment.\n\n**Why it matters:** Directly informs the 2-hour pre-bed design, while remaining a small pilot with imperfect blinding.\n\n**Potential experiment signals:** insomnia symptoms, sleep diary, actigraphy total sleep time, sleep quality\n\n**Protocol takeaway:** Use as a practical dose anchor, not as definitive treatment evidence.",
       "categories": [
         "red-light-glasses-before-bed",
         "evening-light"
@@ -11629,15 +11676,15 @@
       ],
       "protocolEvidence": [
         {
-          "caveat": "Small, short insomnia-symptom sample with imperfect blinding; not definitive insomnia treatment evidence.",
+          "caveat": "Small, short insomnia-symptom sample with imperfect blinding; useful dose anchor, not definitive insomnia treatment evidence.",
           "displayPriority": 20,
           "endpointKeys": [
             "biomarker:sleep-onset-latency",
             "biomarker:sleep-efficiency"
           ],
           "groupId": "direct-adult-sleep-evidence",
-          "headline": "Small randomized crossover insomnia trial used amber lenses for two hours before bed and found improved sleep measures.",
-          "implication": "Anchors the practical 90–120 minute pre-bed dose and makes sleep-onset latency the cleanest first signal.",
+          "headline": "Small insomnia-symptom crossover trial found sleep improvements with amber lenses for two hours before bed.",
+          "implication": "Anchors the practical 90–120 minute pre-bed dose and makes subjective sleep onset a clean first signal.",
           "protocolKey": "protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed",
           "result": "positive",
           "scope": "direct_protocol",
@@ -11669,7 +11716,7 @@
         "populationLabel": "Adults with insomnia symptoms"
       },
       "revision": {
-        "pageRevisionId": "sha256:b0165d06bd500c809c588d3f064dbc88c32d9c2b41246729e2685ac36fced702",
+        "pageRevisionId": "sha256:c49be6de0d8ddd93238eadd53c7b598a9cc8240d7509921219cd3be7ebd974e1",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -15461,7 +15508,7 @@
       "whyItMatters": "Directly useful for blocking eye-strain, headache, and visual-performance overclaims on the bedtime sleep page."
     },
     {
-      "body": "This source is included for **Healthy-adult mixed/null trial**.\n\n**Findings:** Healthy adults wearing blue-blocking glasses in the evening did not show clear objective sleep improvements. Some subjective signals were modest, but sleep duration and quality were not reliably better. This is the main reminder that low-symptom users may not see a measurable effect.\n\n**Why it matters:** Important check against overpromising benefits in already-healthy sleepers.\n\n**Potential experiment signals:** actigraphy sleep duration, actigraphy sleep quality, subjective sleep, sleep diary\n\n**Protocol takeaway:** Low-symptom users may see little or no objective signal.",
+      "body": "This source is included for **Healthy-adult mixed/null trial**.\n\n**Findings:** Healthy adults wearing blue-blocking glasses in the evening did not show clear objective sleep improvements. Some subjective signals were modest, but sleep duration and sleep quality were not reliably better. This is the main direct reminder that people with already-stable sleep may not see a measurable wearable effect.\n\n**Why it matters:** Important check against overpromising benefits in already-healthy sleepers.\n\n**Potential experiment signals:** actigraphy sleep duration, actigraphy sleep quality, subjective sleep, sleep diary\n\n**Protocol takeaway:** Low-symptom users may see little or no objective signal.",
       "categories": [
         "red-light-glasses-before-bed",
         "evening-light"
@@ -15480,7 +15527,7 @@
       ],
       "protocolEvidence": [
         {
-          "caveat": "Some subjective signals were modest, but sleep duration and quality were not reliably better.",
+          "caveat": "Some subjective signals were modest, but sleep duration and sleep quality were not reliably better.",
           "displayPriority": 40,
           "endpointKeys": [
             "biomarker:sleep-onset-latency",
@@ -15488,7 +15535,7 @@
           ],
           "groupId": "direct-adult-sleep-evidence",
           "headline": "Healthy-adult randomized trial found no clear objective sleep improvement from evening blue-blocking glasses.",
-          "implication": "Low-symptom users may see little or no wearable signal, so the page should not promise objective improvement.",
+          "implication": "Low-symptom users may see little or no wearable signal; the page should normalize null results.",
           "protocolKey": "protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed",
           "result": "no_clear_advantage",
           "scope": "direct_protocol",
@@ -15520,7 +15567,7 @@
         "populationLabel": "Healthy adults"
       },
       "revision": {
-        "pageRevisionId": "sha256:d07c7d2d051c8986fbe91d5584cec683538fa583b458c96e514e02a3047d9771",
+        "pageRevisionId": "sha256:6101ecdc9818382e101b83476dc072d1724924ab5f72e7c55411782eab86f199",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -16267,7 +16314,7 @@
       "whyItMatters": "Keeps bipolar use clinician-guided and prevents overgeneralizing mania data to ordinary bedtime glasses."
     },
     {
-      "body": "This source is included for **Light-dose guideline**.\n\n**Findings:** This expert consensus recommends strong melanopic light exposure during the day, much lower melanopic exposure in the evening, and minimal light during sleep. It expresses these targets using melanopic equivalent daylight illuminance. The finding for this protocol is timing-specific: reduce evening light without avoiding daytime light.\n\n**Why it matters:** Defines the broader practical target: adequate daytime light, low evening melanopic light, and very low light during sleep.\n\n**Potential experiment signals:** melanopic equivalent daylight illuminance, daytime light, evening light, sleep-period light\n\n**Protocol takeaway:** Use glasses as one possible evening-light tool, not an all-day blue-light avoidance rule.",
+      "body": "This source is included for **Light-dose guideline**.\n\n**Findings:** This expert consensus recommends strong melanopic light exposure during the day, much lower melanopic exposure in the evening, and minimal light during sleep. The finding for this protocol is timing-specific: reduce bright evening light without treating daytime light as harmful.\n\n**Why it matters:** Defines the broader practical target: adequate daytime light, low evening melanopic light, and very low light during sleep.\n\n**Potential experiment signals:** melanopic equivalent daylight illuminance, daytime light, evening light, sleep-period light\n\n**Protocol takeaway:** Use glasses as one possible evening-light tool, not an all-day blue-light avoidance rule.",
       "categories": [
         "red-light-glasses-before-bed",
         "evening-light"
@@ -16292,7 +16339,7 @@
             "biomarker:sleep-onset-latency"
           ],
           "groupId": "mechanism-dose-and-implementation",
-          "headline": "Expert consensus recommends high daytime melanopic light and much lower evening/night melanopic exposure.",
+          "headline": "Consensus guidance supports bright daytime light, lower evening light, and darkness during sleep.",
           "implication": "Supports evening-only use and prevents all-day blue-light avoidance framing.",
           "protocolKey": "protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed",
           "result": "not_efficacy_evidence",
@@ -16322,7 +16369,7 @@
         "populationLabel": "Expert consensus on daytime, evening, and nighttime indoor light"
       },
       "revision": {
-        "pageRevisionId": "sha256:9e1a64fcd48291bcf8f40e5458ce04b203aa6bec96d6107ef6d4ab02af6c9188",
+        "pageRevisionId": "sha256:7a3b2ef6e5bd31636748214dbeec95d62039ba6ec41a26ec6b410e54e291a0c4",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -17326,7 +17373,7 @@
       "whyItMatters": "Expands the audited Finnish dry-sauna evidence corpus with a general / mixed record marked medium priority for Murph v1 interpretation."
     },
     {
-      "body": "This source is included for **Claim calibration**.\n\n**Findings:** The Cochrane review found little or no short-term benefit of blue-light filtering lenses for digital eye strain. Sleep-quality evidence was very uncertain and mixed across small trials. It found no trial evidence for several visual performance or macular-health outcomes. This prevents using the bedtime protocol as an eye-health claim.\n\n**Why it matters:** Main overclaim guardrail for eye-strain, macular-health, and broad sleep claims.\n\n**Potential experiment signals:** visual fatigue, sleep quality, macular health\n\n**Protocol takeaway:** Do not present this protocol as eye care or retinal protection.",
+      "body": "This source is included for **Claim calibration**.\n\n**Findings:** The Cochrane review found little or no short-term benefit of blue-light filtering lenses for digital eye strain. Sleep-quality evidence was very uncertain and mixed across small trials, and several visual-performance or macular-health outcomes lacked trial evidence. This prevents using the bedtime protocol as an eye-health or retinal-protection claim.\n\n**Why it matters:** Main overclaim guardrail for eye-strain, macular-health, and broad sleep claims.\n\n**Potential experiment signals:** visual fatigue, sleep quality, macular health\n\n**Protocol takeaway:** Do not present this protocol as eye care or retinal protection.",
       "categories": [
         "red-light-glasses-before-bed",
         "evening-light"
@@ -17351,8 +17398,8 @@
             "biomarker:sleep-efficiency"
           ],
           "groupId": "direct-adult-sleep-evidence",
-          "headline": "Cochrane review found very uncertain and mixed sleep evidence for blue-light filtering spectacle lenses.",
-          "implication": "Keeps direct evidence language conservative and prevents eye-care or retinal-protection overclaims.",
+          "headline": "Cochrane review found very uncertain sleep evidence and little support for broad spectacle-lens claims.",
+          "implication": "Keeps the bedtime protocol from becoming an eye-strain, retinal-protection, or universal sleep-improvement claim.",
           "protocolKey": "protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed",
           "result": "mixed",
           "scope": "same_mechanism",
@@ -17384,7 +17431,7 @@
         "populationLabel": "Participants in randomized trials of blue-light-filtering spectacle lenses"
       },
       "revision": {
-        "pageRevisionId": "sha256:5d43c07c11149d2f2f0e81637ea678539df8613caf25081c883bbdab6f497664",
+        "pageRevisionId": "sha256:c03dacd5fe8bb0ec82d0dd099a6fcd007490c21fc094fe494087442e8b4e0ecc",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -18644,7 +18691,7 @@
       "whyItMatters": "Newest null HRV trial"
     },
     {
-      "body": "This source is included for **Product characterization and implementation**.\n\n**Findings:** This review found that commercial blue-blocking products vary widely in melanopic filtering strength. Only lenses with sufficient melanopic daylight filtering density justified strong blue-blocking claims. It also emphasized that timing, fit, and use matter as much as lens labeling. This makes spectral adequacy a protocol guardrail.\n\n**Why it matters:** Shows why lens color and marketing labels are not enough; spectral filtering, fit, timing, and usage determine whether melanopic input is actually reduced.\n\n**Potential experiment signals:** melanopic daylight filtering density, spectral transmittance, implementation timing\n\n**Protocol takeaway:** Use as the product-quality guardrail and avoid brand recommendations unless spectral data is available.",
+      "body": "This source is included for **Product characterization and implementation**.\n\n**Findings:** This review found that commercial blue-blocking products vary widely in melanopic filtering strength. Lens color and marketing copy were not enough to know whether the product meaningfully reduced circadian-relevant light. Timing, fit, edge leakage, and use conditions matter, so spectral adequacy becomes a protocol guardrail rather than a nice-to-have detail.\n\n**Why it matters:** Shows why lens color and marketing labels are not enough; spectral filtering, fit, timing, and usage determine whether melanopic input is actually reduced.\n\n**Potential experiment signals:** melanopic daylight filtering density, spectral transmittance, implementation timing\n\n**Protocol takeaway:** Use as the product-quality guardrail and avoid brand recommendations unless spectral data is available.",
       "categories": [
         "red-light-glasses-before-bed",
         "evening-light"
@@ -18662,11 +18709,11 @@
       ],
       "protocolEvidence": [
         {
-          "caveat": "Implementation review, not an outcome trial.",
+          "caveat": "Implementation and product-characterization review, not a sleep-outcome trial.",
           "displayPriority": 10,
           "groupId": "mechanism-dose-and-implementation",
-          "headline": "Review shows commercial blue-blocking glasses vary widely in melanopic filtering strength.",
-          "implication": "Lens color and marketing labels are insufficient; spectral filtering, fit, leakage, and dose fidelity belong in the protocol.",
+          "headline": "Commercial blue-blocking glasses vary widely; color alone does not prove melanopic filtering strength.",
+          "implication": "Prefer spectral data when available, and keep fit, edge leakage, timing, and room/screen brightness in the protocol.",
           "protocolKey": "protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed",
           "result": "not_efficacy_evidence",
           "scope": "measurement_context",
@@ -18695,7 +18742,7 @@
         "populationLabel": "Blue-blocking spectacle lens literature and commercial-lens spectral profiles"
       },
       "revision": {
-        "pageRevisionId": "sha256:8d734e186c575d586c0ba9be539f1b49385a2171a12a3c103e632600db6ac2dc",
+        "pageRevisionId": "sha256:1d4e46e9ccbb2da22d7ae990dbcaa1899697ce75df7fc0e045ca5829ae089455",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -19030,7 +19077,7 @@
       "whyItMatters": "Expands the audited Finnish dry-sauna evidence corpus with a general / mixed record marked lower priority for Murph v1 interpretation."
     },
     {
-      "body": "This source is included for **Objective sleep meta-analysis**.\n\n**Findings:** This meta-analysis pooled three small randomized crossover trials using actigraphy. Blue-light blocking glasses produced small, non-significant changes in sleep-onset latency, total sleep time, sleep efficiency, and awakenings. It is the strongest objective counterweight in this corpus and keeps claims modest.\n\n**Why it matters:** Best current null/objective counterweight: small adult crossover RCT synthesis with no statistically significant pooled actigraphy improvement.\n\n**Potential experiment signals:** actigraphy sleep onset latency, total sleep time, sleep efficiency, wake after sleep onset\n\n**Protocol takeaway:** Use to keep the protocol framed as a bounded self-experiment, not a reliable insomnia treatment.",
+      "body": "This source is included for **Objective sleep meta-analysis**.\n\n**Findings:** This meta-analysis pooled three randomized crossover trials with actigraphy-measured sleep outcomes in adults using blue-light-blocking glasses. It found no statistically significant pooled improvement in sleep onset latency, total sleep time, sleep efficiency, or wake after sleep onset. This is the main objective-evidence check that keeps the protocol framed as a bounded self-test rather than a likely wearable improvement.\n\n**Why it matters:** Best current null/objective counterweight: small adult crossover RCT synthesis with no statistically significant pooled actigraphy improvement.\n\n**Potential experiment signals:** actigraphy sleep onset latency, total sleep time, sleep efficiency, wake after sleep onset\n\n**Protocol takeaway:** Use to keep the protocol framed as a bounded self-experiment, not a reliable insomnia treatment.",
       "categories": [
         "red-light-glasses-before-bed",
         "evening-light"
@@ -19056,8 +19103,8 @@
             "biomarker:sleep-efficiency"
           ],
           "groupId": "direct-adult-sleep-evidence",
-          "headline": "Small adult actigraphy meta-analysis did not find significant pooled objective sleep improvements.",
-          "implication": "Use this as the main counterweight: the protocol is reasonable to test personally, but not reliable enough to promise wearable sleep gains.",
+          "headline": "Adult actigraphy meta-analysis found no statistically significant pooled improvement in objective sleep outcomes.",
+          "implication": "Strongest direct reason to present the protocol as a personal test, not a likely wearable win.",
           "protocolKey": "protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed",
           "result": "no_clear_advantage",
           "scope": "direct_protocol",
@@ -19089,7 +19136,7 @@
         "populationLabel": "Adults in double-blind crossover trials with actigraphy sleep outcomes"
       },
       "revision": {
-        "pageRevisionId": "sha256:196d4c7d8719c6f4050bc83cb7c5cd6cbf799392f792123dc06d19c06f8e62f7",
+        "pageRevisionId": "sha256:7b55564d4c552eaf71e40a464caf06e9be37ef9704211721a4abcb1bb14d9ba6",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -19685,7 +19732,7 @@
         "source_artifact:pmid-36854795",
         "source_artifact:pmid-21193540"
       ],
-      "body": "## What this is\n\nThis page represents the structured research corpus for the **red light glasses before bed** protocol. It is a curation artifact, not a primary study.\n\nThe consumer phrase “red light glasses before bed” is treated here as evening amber/orange/red **short-wavelength or melanopic-light filtering eyewear**, not red-light therapy or photobiomodulation.\n\n## Corpus at a glance\n\n- 41 canonical source records in the pass-2 corpus after collapsing duplicate discovery keys\n- 42 raw discovery records were reviewed; 4 duplicate discovery keys were canonicalized into PMID/DOI-backed records\n- 41 records now resolve to canonical source pages instead of pass-2 inventory-only placeholders\n- 24 highest-priority protocol records for the landing page\n- 3 adult randomized crossover trials in the actigraphy meta-analysis\n- 49 adults in that objective-sleep meta-analysis\n- audit cutoff 2026-04-21\n\n## Evidence posture\n\nThe strongest rationale is mechanistic and guideline-level: evening melanopic light can affect circadian and sleep physiology, and public-health guidance supports bright daytime light plus lower evening/night light.\n\nThe direct glasses evidence is mixed. Small trials sometimes report subjective sleep improvements, but the adult actigraphy synthesis did not find statistically significant pooled improvements for sleep onset latency, total sleep time, sleep efficiency, or wake after sleep onset.\n\n## How to use this evidence\n\nUse this bibliography to keep the protocol bounded:\n\n- The **guideline and mechanistic** sources justify the evening-light hypothesis.\n- The **direct trial** sources set the 90–120 minute pre-bed timing and stop the page from becoming all-evening or overnight virtual darkness.\n- The **Cochrane and actigraphy** sources prevent sleep, eye-strain, and eye-protection overclaims.\n- The **product-quality and home-lighting** sources keep the protocol from treating lens color alone as the intervention.\n- The **pregnancy, pediatric, delayed-sleep-phase, shift-work, and mania** sources are adjacent variants that should not be merged into a general wellness recipe.\n\n## Important caution\n\nThis bibliography does not show that every user should wear tinted glasses. It supports a reversible, low-burden test when the user’s evening environment is likely bright enough to matter.\n## 2026-04-21 gap-fill changes\n\nThis pass resolved the prior inventory-only records into source pages before expanding claims. It also canonicalized duplicate discovery keys to PMID or DOI-backed source pages where possible.\n\nNewly added or promoted primary sources cover: acute lens/melatonin mechanism, adult two-hour pre-bed device-use eyewear, CBT-I-adjacent insomnia treatment, adolescent LED-screen exposure, student feasibility, occupational field experiments, smartphone-filter comparisons, room-light and eReader confounders, melanopic-display dose, psychiatric-light variants, blue-light spectacle claim calibration, and metabolic/circadian context.\n\nThe direct consumer protocol remains cautious: these additions broaden context and fix citation coverage, but they do not turn evening glasses into a reliable insomnia treatment claim.",
+      "body": "## What this is\n\nThis page represents the structured research corpus for the **red light glasses before bed** protocol. It is a curation artifact, not a primary study.\n\nThe consumer phrase “red light glasses before bed” is treated here as evening amber/orange/red **short-wavelength or melanopic-light filtering eyewear**, not red-light therapy or photobiomodulation.\n\n## Corpus at a glance\n\n- 41 canonical source records in the pass-2 corpus after collapsing duplicate discovery keys\n- 42 raw discovery records were reviewed; 4 duplicate discovery keys were canonicalized into PMID/DOI-backed records\n- 41 records now resolve to canonical source pages instead of pass-2 inventory-only placeholders\n- 24 highest-priority protocol records for the landing page\n- 3 adult randomized crossover trials in the actigraphy meta-analysis\n- 49 adults in that objective-sleep meta-analysis\n- audit cutoff 2026-04-21\n\n## Evidence posture\n\nThe strongest rationale is mechanistic and guideline-level: evening melanopic light can affect circadian and sleep physiology, and public-health guidance supports bright daytime light plus lower evening/night light.\n\nThe direct adult literature is useful but not definitive. A few small randomized and crossover trials report improvements in sleep onset, melatonin, or sleep quality with high-filtering lenses worn for roughly two hours before bed. But healthy-adult null trials and the adult actigraphy meta-analysis show that objective sleep effects are inconsistent and may often be small.\n\n## How to use this evidence\n\nUse this bibliography to keep the protocol bounded:\n\n- The **guideline and mechanistic** sources justify the evening-light hypothesis.\n- The **direct trial** sources set the 90–120 minute pre-bed timing and stop the page from becoming all-evening or overnight virtual darkness.\n- The **Cochrane and actigraphy** sources prevent sleep, eye-strain, and eye-protection overclaims.\n- The **product-quality and home-lighting** sources keep the protocol from treating lens color alone as the intervention.\n- The **pregnancy, pediatric, delayed-sleep-phase, shift-work, and mania** sources are adjacent variants that should not be merged into a general wellness recipe.\n\n## Important caution\n\nThis bibliography does not show that every user should wear tinted glasses. It supports a reversible, low-burden test when the user’s evening environment is likely bright enough to matter.\n## 2026-04-21 gap-fill changes\n\nThis pass resolved the prior inventory-only records into source pages before expanding claims. It also canonicalized duplicate discovery keys to PMID or DOI-backed source pages where possible.\n\nNewly added or promoted primary sources cover: acute lens/melatonin mechanism, adult two-hour pre-bed device-use eyewear, CBT-I-adjacent insomnia treatment, adolescent LED-screen exposure, student feasibility, occupational field experiments, smartphone-filter comparisons, room-light and eReader confounders, melanopic-display dose, psychiatric-light variants, blue-light spectacle claim calibration, and metabolic/circadian context.\n\nThe direct consumer protocol remains cautious: these additions broaden context and fix citation coverage, but they do not turn evening glasses into a reliable insomnia treatment claim.",
       "categories": [
         "red-light-glasses-before-bed",
         "sleep",
@@ -19696,7 +19743,9 @@
         "canonicalSourceRecords": 41,
         "canonicalizedDuplicateDiscoveryKeys": 4,
         "directAdultCrossoverRCTsInActigraphyMetaAnalysis": 3,
+        "directAdultStandaloneGlassesTrialsInResearchGroup": 7,
         "highestPriorityProtocolRecords": 24,
+        "latestCorpusSourceYear": 2026,
         "participantsInActigraphyMetaAnalysis": 49,
         "rawDiscoveryRecords": 42,
         "resolvedInventoryOnlyRecords": 28,
@@ -19907,7 +19956,7 @@
       ],
       "relativePath": "sources/red-light-glasses-before-bed/red-light-glasses-before-bed-bibliography.md",
       "revision": {
-        "pageRevisionId": "sha256:ba1af7869573980ef2de955603cefbc55def7c09249430d0a393c6e60d9cdd23",
+        "pageRevisionId": "sha256:25e3083f95402926857d9906b3b7a7f56b71624f93b9022df3e7bd8b7d5b5de6",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
