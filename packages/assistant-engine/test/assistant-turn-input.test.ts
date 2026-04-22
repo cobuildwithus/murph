@@ -4,7 +4,7 @@ import type { InboxServices } from '@murphai/inbox-services'
 import {
   createAssistantTurnBeforeDeliveryHook,
   createInboxBackedAssistantTurnInputPort,
-} from './turn-input.js'
+} from '../src/assistant/turn-input.ts'
 
 type AssistantInboxCaptureSummary = InboxListResult['items'][number]
 
@@ -73,10 +73,12 @@ function createListResult(input: {
       )
     })
     .sort((left, right) => {
-      if (left.occurredAt !== right.occurredAt) {
+      const leftTimestamp = left.createdAt ?? left.occurredAt
+      const rightTimestamp = right.createdAt ?? right.occurredAt
+      if (leftTimestamp !== rightTimestamp) {
         return input.oldestFirst
-          ? left.occurredAt.localeCompare(right.occurredAt)
-          : right.occurredAt.localeCompare(left.occurredAt)
+          ? leftTimestamp.localeCompare(rightTimestamp)
+          : rightTimestamp.localeCompare(leftTimestamp)
       }
 
       return input.oldestFirst
@@ -180,6 +182,88 @@ describe('createInboxBackedAssistantTurnInputPort', () => {
     })
   })
 
+  it('pages past unrelated captures until it finds a late match in the same conversation', async () => {
+    const beforeCursor = createCaptureSummary({
+      captureId: 'cap_before',
+      externalId: 'ext_before',
+      eventId: 'evt_before',
+      occurredAt: '2026-04-22T09:59:00.000Z',
+      createdAt: '2026-04-22T09:59:01.000Z',
+    })
+    const unrelatedCaptures = Array.from({ length: 100 }, (_, index) =>
+      createCaptureSummary({
+        captureId: `cap_unrelated_${String(index).padStart(3, '0')}`,
+        externalId: `ext_unrelated_${index}`,
+        eventId: `evt_unrelated_${index}`,
+        threadId: 'thread_other',
+        occurredAt: `2026-04-22T10:${String(Math.floor(index / 60)).padStart(2, '0')}:${String(index % 60).padStart(2, '0')}.000Z`,
+        createdAt: `2026-04-22T10:${String(Math.floor(index / 60)).padStart(2, '0')}:${String(index % 60).padStart(2, '0')}.500Z`,
+      }),
+    )
+    const lateMatch = createCaptureSummary({
+      captureId: 'cap_same_late',
+      externalId: 'ext_same_late',
+      eventId: 'evt_same_late',
+      occurredAt: '2026-04-22T10:02:00.000Z',
+      createdAt: '2026-04-22T10:02:01.000Z',
+      text: 'late same-conversation follow up',
+    })
+    const listCalls: Array<{
+      afterCaptureId?: string | null
+      afterCreatedAt?: string | null
+      afterOccurredAt?: string | null
+    }> = []
+    const captures = [beforeCursor, ...unrelatedCaptures, lateMatch]
+    const inboxServices = {
+      async list(input) {
+        listCalls.push({
+          afterCaptureId: input.afterCaptureId,
+          afterCreatedAt: input.afterCreatedAt,
+          afterOccurredAt: input.afterOccurredAt,
+        })
+        return createListResult({
+          afterCaptureId: input.afterCaptureId,
+          afterCreatedAt: input.afterCreatedAt,
+          afterOccurredAt: input.afterOccurredAt,
+          items: captures,
+          limit: input.limit ?? 100,
+          oldestFirst: input.oldestFirst ?? false,
+          sourceId: input.sourceId,
+        })
+      },
+    } as Pick<InboxServices, 'list'> as InboxServices
+
+    const port = createInboxBackedAssistantTurnInputPort({
+      inboxServices,
+      requestId: 'req_2',
+      vault: '/vault',
+    })
+
+    const result = await port.listNewConversationCaptures({
+      afterCursor: {
+        captureId: beforeCursor.captureId,
+        createdAt: beforeCursor.createdAt ?? null,
+        occurredAt: beforeCursor.occurredAt,
+      },
+      conversation: {
+        accountId: lateMatch.accountId,
+        actorId: lateMatch.actorId,
+        actorIsSelf: lateMatch.actorIsSelf,
+        source: lateMatch.source,
+        threadId: lateMatch.threadId,
+        threadIsDirect: lateMatch.threadIsDirect,
+      },
+    })
+
+    expect(listCalls).toHaveLength(2)
+    expect(result.captures.map((capture) => capture.captureId)).toEqual(['cap_same_late'])
+    expect(result.nextCursor).toEqual({
+      captureId: lateMatch.captureId,
+      createdAt: lateMatch.createdAt ?? null,
+      occurredAt: lateMatch.occurredAt,
+    })
+  })
+
   it('keeps the createdAt tie-breaker when late captures share occurredAt', async () => {
     const beforeCursor = createCaptureSummary({
       captureId: 'cap_z',
@@ -214,7 +298,7 @@ describe('createInboxBackedAssistantTurnInputPort', () => {
 
     const port = createInboxBackedAssistantTurnInputPort({
       inboxServices,
-      requestId: 'req_2',
+      requestId: 'req_3',
       vault: '/vault',
     })
 

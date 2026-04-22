@@ -3,7 +3,7 @@ import type { InboxListResult } from '@murphai/operator-config/inbox-cli-contrac
 import {
   conversationCaptureRefFromCapture,
   isSameAssistantConversationCapture,
-} from './conversation-ref.js'
+} from '../src/assistant/conversation-ref.ts'
 
 type AssistantInboxCaptureSummary = InboxListResult['items'][number]
 
@@ -75,41 +75,47 @@ describe('isSameAssistantConversationCapture', () => {
 
   it('rejects captures when any conversation identity field changes', () => {
     const first = createCaptureSummary()
+    const differingCaptures = [
+      createCaptureSummary({
+        captureId: 'cap_other_source',
+        externalId: 'ext_other_source',
+        eventId: 'evt_other_source',
+        source: 'sms',
+      }),
+      createCaptureSummary({
+        captureId: 'cap_other_account',
+        externalId: 'ext_other_account',
+        eventId: 'evt_other_account',
+        accountId: 'acct_2',
+      }),
+      createCaptureSummary({
+        captureId: 'cap_other_actor',
+        externalId: 'ext_other_actor',
+        eventId: 'evt_other_actor',
+        actorId: 'actor_2',
+      }),
+      createCaptureSummary({
+        captureId: 'cap_other_thread',
+        externalId: 'ext_other_thread',
+        eventId: 'evt_other_thread',
+        threadId: 'thread_2',
+      }),
+      createCaptureSummary({
+        captureId: 'cap_other_directness',
+        externalId: 'ext_other_directness',
+        eventId: 'evt_other_directness',
+        threadIsDirect: false,
+      }),
+      createCaptureSummary({
+        captureId: 'cap_self_echo',
+        externalId: 'ext_self_echo',
+        eventId: 'evt_self_echo',
+        actorIsSelf: true,
+      }),
+    ]
 
-    expect(
-      isSameAssistantConversationCapture(
-        first,
-        createCaptureSummary({
-          captureId: 'cap_other_actor',
-          externalId: 'ext_other_actor',
-          eventId: 'evt_other_actor',
-          actorId: 'actor_2',
-        }),
-      ),
-    ).toBe(false)
-
-    expect(
-      isSameAssistantConversationCapture(
-        first,
-        createCaptureSummary({
-          captureId: 'cap_other_thread',
-          externalId: 'ext_other_thread',
-          eventId: 'evt_other_thread',
-          threadId: 'thread_2',
-        }),
-      ),
-    ).toBe(false)
-
-    expect(
-      isSameAssistantConversationCapture(
-        first,
-        createCaptureSummary({
-          captureId: 'cap_self_echo',
-          externalId: 'ext_self_echo',
-          eventId: 'evt_self_echo',
-          actorIsSelf: true,
-        }),
-      ),
-    ).toBe(false)
+    for (const capture of differingCaptures) {
+      expect(isSameAssistantConversationCapture(first, capture)).toBe(false)
+    }
   })
 })
