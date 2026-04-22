@@ -104,6 +104,10 @@ describe("ProtocolTab", () => {
     expect(markup).not.toContain('data-card="Deep Sleep Minutes"');
     expect(markup).toContain("Sleep Efficiency");
     expect(markup).toContain("Deep Sleep Minutes");
+    expect(markup).toContain("Bottom line");
+    expect(markup).toContain("Best-supported claim");
+    expect(markup).toContain("Confidence · Mixed");
+    expect(markup).not.toContain("Evidence backbone and claim calibration");
   });
 
   it("keeps the Bryan Johnson sauna hierarchy focused on tolerability signals", () => {

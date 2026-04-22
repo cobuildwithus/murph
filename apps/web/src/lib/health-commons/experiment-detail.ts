@@ -289,10 +289,17 @@ function toExperimentDetail(
   const citedStudySources = citedSources.filter(isStudySource);
   const studies = sortStudySourcesForDisplay(citedStudySources)
     .map((source) => toStudy(source, protocol.key));
-  const researchGroups = toResearchGroups({
+  const {
+    coveredSourceCount: researchGroupCoveredSourceCount,
+    groups: researchGroups,
+    totalSourceCount: researchGroupTotalSourceCount,
+  } = toResearchGroups({
     protocol,
     citedStudySources,
   });
+  const hasCompleteResearchGroupCoverage =
+    researchGroups.length > 0
+    && researchGroupCoveredSourceCount === researchGroupTotalSourceCount;
   const biomarkerEntities = listProtocolBiomarkers(protocol, catalog);
   const sourcePeople = catalog.listRelated({
     entity: protocol,
@@ -325,16 +332,16 @@ function toExperimentDetail(
     whyItWorks: toWhyItWorks(protocol, claims),
     experts: sourcePeople.map(toExpert),
     researchStats: toResearchStats(citedStudySources),
-    ...(researchGroups.length > 0
+    ...(protocol.researchLandscape
       ? {
           researchLandscape: {
             bottomLine: protocol.researchLandscape?.bottomLine ?? "The evidence base is mixed enough to read by category.",
             confidenceLabel: protocol.researchLandscape?.confidenceLabel ?? "limited",
             primaryClaim: protocol.researchLandscape?.primaryClaim ?? "Use the highest-quality direct sources to set the main claim.",
             mainCaveat: protocol.researchLandscape?.mainCaveat ?? "Adjacent and safety sources should calibrate the claim rather than become direct proof.",
-            groups: researchGroups,
+            groups: hasCompleteResearchGroupCoverage ? researchGroups : [],
           },
-          researchGroups,
+          ...(hasCompleteResearchGroupCoverage ? { researchGroups } : {}),
         }
       : {}),
     studies,
@@ -802,6 +809,11 @@ function toStudy(entity: HealthCommonsEntity, protocolKey?: string): Study {
   };
 }
 
+interface BuiltResearchGroups {
+  coveredSourceCount: number;
+  groups: ExperimentResearchGroup[];
+  totalSourceCount: number;
+}
 
 function findProtocolEvidenceAppraisal(
   entity: HealthCommonsEntity,
@@ -818,20 +830,29 @@ function toResearchGroups({
 }: {
   citedStudySources: readonly HealthCommonsEntity[];
   protocol: HealthCommonsCatalogEntity;
-}): ExperimentResearchGroup[] {
+}): BuiltResearchGroups {
   const landscapeGroups = protocol.researchLandscape?.groups ?? [];
 
   if (landscapeGroups.length === 0) {
-    return [];
+    return {
+      coveredSourceCount: 0,
+      groups: [],
+      totalSourceCount: citedStudySources.length,
+    };
   }
 
   const sourcesByKey = new Map(
     citedStudySources.map((source) => [source.key, source]),
   );
 
-  return landscapeGroups.flatMap((group) => {
+  const coveredSourceKeys = new Set<string>();
+  const groups = landscapeGroups.flatMap((group) => {
     const studies = orderGroupStudySources(group, sourcesByKey, protocol.key)
-      .map((source) => toStudy(source, protocol.key));
+      .filter((source) => hasGroupAppraisal(source, protocol.key, group.id))
+      .map((source) => {
+        coveredSourceKeys.add(source.key);
+        return toStudy(source, protocol.key);
+      });
 
     if (studies.length === 0) {
       return [];
@@ -848,6 +869,12 @@ function toResearchGroups({
       },
     ];
   });
+
+  return {
+    coveredSourceCount: coveredSourceKeys.size,
+    groups,
+    totalSourceCount: citedStudySources.length,
+  };
 }
 
 function orderGroupStudySources(
@@ -881,6 +908,16 @@ function findStudyDisplayPriority(
       appraisal.protocolKey === protocolKey && appraisal.groupId === groupId
     )
     ?.displayPriority ?? Number.MAX_SAFE_INTEGER;
+}
+
+function hasGroupAppraisal(
+  entity: HealthCommonsEntity,
+  protocolKey: string,
+  groupId: string,
+): boolean {
+  return entity.protocolEvidence?.some((appraisal) =>
+    appraisal.protocolKey === protocolKey && appraisal.groupId === groupId
+  ) ?? false;
 }
 
 function researchEvidenceToStudyType(

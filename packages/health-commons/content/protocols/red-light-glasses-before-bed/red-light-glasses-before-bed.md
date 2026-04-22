@@ -358,6 +358,78 @@ claims:
     caveats:
       - Morning and daytime light can be beneficial for circadian stability.
       - Daytime use of strong filtering lenses is a different intervention.
+researchLandscape:
+  bottomLine: "Best read as a low-burden evening-light self-experiment: the mechanism is plausible, but direct glasses trials are small and mixed, especially for objective wearable sleep outcomes."
+  confidenceLabel: mixed
+  primaryClaim: "High-filtering amber, red, or brown glasses may help some users feel less wired or fall asleep more easily when evening melanopic exposure is high."
+  mainCaveat: "Recent adult actigraphy synthesis did not find statistically significant pooled improvements, so the protocol should not promise insomnia treatment, eye-strain relief, retinal protection, or wearable sleep-stage gains."
+  groups:
+    -
+      id: direct-adult-sleep-evidence
+      label: Direct adult sleep evidence
+      stance: mixed
+      summary: "The closest adult sleep evidence is useful but not decisive: small insomnia and device-use trials support the two-hour evening window, while healthy-adult and actigraphy syntheses do not show reliable objective gains. The practical claim should stay personal and bounded: test sleep-onset and pre-bed wiredness first, treat wearable sleep stages as exploratory, and expect null results in low-symptom users."
+      defaultOpen: true
+      sourceKeys:
+        - source_artifact:pmid-41341515
+        - source_artifact:pmid-29101797
+        - source_artifact:pmid-26730983
+        - source_artifact:pmid-33707105
+        - source_artifact:pmid-30427265
+        - source_artifact:pmid-20030543
+        - source_artifact:pmid-37192881
+        - source_artifact:pmid-34030534
+        - source_artifact:pmid-37593770
+        - source_artifact:pmid-31752544
+        - source_artifact:pmid-30410784
+        - source_artifact:pmid-32658494
+    -
+      id: mechanism-dose-and-implementation
+      label: Mechanism and dose fidelity
+      stance: supports
+      summary: "The mechanism is stronger than the outcome evidence: evening melanopic light, room light, displays, and lens filtering can move melatonin, alertness, and sleep-latency physiology. That makes implementation details central—spectral filtering, fit/leakage, room brightness, screen dose, and preserving daytime light all matter more than lens color or marketing copy alone."
+      sourceKeys:
+        - source_artifact:pmid-40728371
+        - source_artifact:pmid-35298459
+        - source_artifact:doi-10.17617-1.4a6s-ec74
+        - source_artifact:pmid-16842544
+        - source_artifact:pmid-36854795
+        - source_artifact:pmid-21193540
+        - source_artifact:pmid-32168244
+        - source_artifact:pmid-25535358
+        - source_artifact:pmid-28045969
+        - source_artifact:pmid-41565717
+        - source_artifact:pmid-36051910
+        - source_artifact:pmid-31504080
+    -
+      id: measurement-and-claim-guardrails
+      label: Measurement and claim guardrails
+      stance: context_only
+      summary: "A useful self-test needs conservative measurement language. Wearable and actigraphy estimates are trend proxies that should be paired with a subjective sleep-onset log, while eye-strain, headache, retinal protection, and macular-health claims belong outside this bedtime sleep protocol."
+      sourceKeys:
+        - source_artifact:pmid-29991437
+        - source_artifact:pmid-33587901
+        - source_artifact:doi-10.1111-opo.12406
+    -
+      id: adjacent-clinical-variants
+      label: Adjacent clinical variants
+      stance: safety_boundary
+      summary: "Several nearby literatures use similar light-reduction logic—delayed sleep phase, shift work, pregnancy, pediatrics, depression, bipolar/mania virtual darkness, and psychiatric-ward lighting—but they are not the default adult bedtime-glasses experiment. These sources mostly set boundaries: special populations and mood/circadian disorders need separate protocols, different timing, and clinician guidance."
+      sourceKeys:
+        - source_artifact:pmid-26414986
+        - source_artifact:pmid-27322730
+        - source_artifact:pmid-15713707
+        - source_artifact:pmid-25287985
+        - source_artifact:pmid-41166315
+        - source_artifact:pmid-35024497
+        - source_artifact:pmid-35089982
+        - source_artifact:pmid-28488943
+        - source_artifact:pmid-27226262
+        - source_artifact:pmid-41421618
+        - source_artifact:pmid-31967375
+        - source_artifact:pmid-32276301
+        - source_artifact:pmid-35268469
+        - source_artifact:pmid-39642162
 safety:
   cautionLevel: moderate
   avoidOrGetClinicianGuidance:

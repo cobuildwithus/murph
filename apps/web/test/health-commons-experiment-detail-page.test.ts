@@ -80,6 +80,16 @@ describe("ExperimentDetailPage", () => {
       expect.objectContaining({ label: "RESEARCH PAPERS", value: 71 }),
       expect.objectContaining({ label: "YEARS COVERED", value: "1979–2026" }),
     ]));
+    expect(clientExperiment.researchLandscape).toEqual(expect.objectContaining({
+      bottomLine:
+        "Best read as a bounded dry-sauna self-experiment for near-term recovery and cardiovascular proxies, not as proof of long-term disease prevention or a guarantee that HRV, vascular, gut, or inflammatory markers will improve.",
+      confidenceLabel: "mixed",
+      mainCaveat:
+        "The strongest long-term findings are observational, several modern intervention endpoints are null or mixed, and post-exercise, cold-immersion, clinical, extreme-heat, infrared, and steam-sauna contexts must stay separate.",
+      primaryClaim:
+        "The most practical support is for testing resting heart rate, optional morning blood pressure, recovery context, and session tolerance across repeated dry-sauna sessions.",
+    }));
+    expect(clientExperiment.researchGroups).toBeUndefined();
     expect(clientExperiment.studies).toHaveLength(93);
     const highestParticipantCount = Math.max(
       ...clientExperiment.studies.map((study) => study.participants ?? -1),
