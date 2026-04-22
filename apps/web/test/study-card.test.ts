@@ -2,10 +2,11 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
+import { resolveHealthCommonsExperimentProtocol } from "@/src/lib/health-commons/experiment-detail";
 import { StudyCard } from "@/src/components/experiments/experiment-detail/study-card";
 
 describe("StudyCard", () => {
-  it("uses the participant count as the leading badge and renders the year beside the title", () => {
+  it("keeps the study type visible while showing participant counts, study facts, and the year beside the title", () => {
     const markup = renderToStaticMarkup(
       createElement(StudyCard, {
         type: "RCT",
@@ -26,6 +27,7 @@ describe("StudyCard", () => {
     );
 
     expect(markup).toContain(">2007<");
+    expect(markup).toContain(">RCT<");
     expect(markup).toContain("n=40");
     expect(markup).toContain("23 studies");
     expect(markup).toContain('data-slot="collapsible"');
@@ -34,30 +36,24 @@ describe("StudyCard", () => {
     expect(markup).toContain('class="mt-1 text-[11px]/4 text-muted-foreground/70"');
     expect(markup).toContain(">J Helgerud<");
     expect(markup).toContain('href="https://example.com/study"');
-    expect(markup).toContain(">Source ↗<");
+    expect(markup).toContain(">Open source ↗<");
+    expect(markup).toContain(">Design<");
+    expect(markup).toContain(">People<");
+    expect(markup).toContain(">Timeframe<");
+    expect(markup).toContain("Four-arm randomized training trial");
+    expect(markup).toContain("Moderately trained men");
+    expect(markup).toContain("8-week training intervention");
     expect(countOccurrences(markup, "2007")).toBe(1);
     expect(markup.indexOf("n=40")).toBeLessThan(markup.indexOf("2007"));
     expect(markup.indexOf("23 studies")).toBeGreaterThan(markup.indexOf("n=40"));
-    expect(
-      markup.indexOf("J Helgerud"),
-    ).toBeLessThan(
-      markup.indexOf(
-        "Source ↗",
-      ),
-    );
-    expect(
-      markup.indexOf("Source ↗"),
-    ).toBeGreaterThan(
-      markup.indexOf("J Helgerud"),
-    );
+    expect(markup.indexOf("J Helgerud")).toBeLessThan(markup.indexOf("Open source ↗"));
+    expect(markup.indexOf("Open source ↗")).toBeGreaterThan(markup.indexOf("J Helgerud"));
     expect(markup).not.toContain("line-clamp-1");
     expect(markup).not.toContain("Canonical small RCT supporting the Norwegian 4x4 dose.");
     expect(markup).not.toContain("Medicine and Science in Sports and Exercise");
-    expect(markup).not.toContain("Moderately trained men");
-    expect(markup).not.toContain("8-week training intervention");
   });
 
-  it("uses n= for approximate participant counts", () => {
+  it("uses n≈ for approximate participant counts", () => {
     const markup = renderToStaticMarkup(
       createElement(StudyCard, {
         type: "MA",
@@ -66,13 +62,29 @@ describe("StudyCard", () => {
         journal: "Example Journal",
         participants: 2138,
         participantCountKind: "approximate",
-        finding: "Approximate participant totals should still use the standard n= badge.",
+        finding: "Approximate participant totals should render an approximate badge.",
         last: true,
       }),
     );
 
-    expect(markup).toContain("n=2,138");
-    expect(markup).not.toContain("n≈2,138");
+    expect(markup).toContain("n≈2,138");
+    expect(markup).not.toContain("n=2,138");
+    expect(markup).toContain(">MA<");
+  });
+
+  it("resolves the fallback study copy when a source has no Findings block", () => {
+    const protocol = resolveHealthCommonsExperimentProtocol("bryan-johnson-blueprint");
+    expect(protocol).toBeTruthy();
+
+    const study = protocol?.studies.find((entry) => entry.title === "My Morning Routine 2026");
+
+    expect(study).toEqual(expect.objectContaining({
+      caveat: "It repeats the same single-person source family and does not add independent outcome evidence.",
+      finding: undefined,
+      findingKind: undefined,
+      headline: "Morning-routine page corroborates the 20-minute 200 F daily sauna and adds routine-level tactics.",
+      implication: "Supports the page's exact timing, groin-cooling, head-protection, and tracking details for the Blueprint routine.",
+    }));
   });
 
   it("renders evidence pills for grouped research metadata", () => {
@@ -93,7 +105,7 @@ describe("StudyCard", () => {
     );
 
     expect(markup).toContain(">Positive signal<");
-    expect(markup).toContain(">Direct<");
+    expect(markup).toContain(">Direct protocol<");
     expect(markup).toContain(">Supports<");
     expect(markup).toContain('aria-expanded="false"');
     expect(markup).not.toContain("A grouped evidence headline");
@@ -101,7 +113,7 @@ describe("StudyCard", () => {
     expect(markup).not.toContain("A protocol-specific caveat.");
   });
 
-  it("renders the author label without the removed metadata strip", () => {
+  it("renders the author label and study facts without the removed metadata strip", () => {
     const markup = renderToStaticMarkup(
       createElement(StudyCard, {
         type: "N1",
@@ -117,8 +129,11 @@ describe("StudyCard", () => {
     );
 
     expect(markup).toContain("> Bryan Johnson <");
+    expect(markup).toContain(">People<");
+    expect(markup).toContain(">Timeframe<");
+    expect(markup).toContain("bryan johnson");
+    expect(markup).toContain("14-day intervention window");
     expect(markup).not.toContain("Substack Post");
-    expect(markup).not.toContain("14-day intervention window");
     expect(countOccurrences(markup, "Bryan Johnson")).toBe(1);
   });
 
@@ -140,9 +155,11 @@ describe("StudyCard", () => {
     expect(markup).not.toContain("line-clamp-1");
     expect(markup).not.toContain('data-slot="collapsible-content"');
     expect(markup).toContain(">A Cohort Team<");
+    expect(markup).toContain(">People<");
+    expect(markup).toContain(">Timeframe<");
     expect(markup).not.toContain("Example Journal");
-    expect(markup).not.toContain("Adults");
-    expect(markup).not.toContain("Long-term follow-up");
+    expect(markup).toContain("Adults");
+    expect(markup).toContain("Long-term follow-up");
   });
 });
 

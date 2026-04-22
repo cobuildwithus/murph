@@ -49,8 +49,8 @@ potentialMurphEndpoints:
   - session heart-rate fidelity
   - heart-rate recovery
   - symptoms and adherence
-protocolTakeaway: "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol."
-studyDesign: "See source metadata and bibliography for exact design."
+protocolTakeaway: "Use as the recipe anchor for warm-up, four 4-minute hard intervals, 3-minute active recoveries, and cooldown; do not read it as outcome or safety proof."
+studyDesign: "Public protocol guidance"
 modality: Aerobic high-intensity interval training / Norwegian 4x4 context
 norwegian4x4Focus: "Direct support"
 claimUse: supports-protocol
@@ -62,6 +62,33 @@ aliases:
 
 This source is included for **Protocol dose and design**.
 
-**Why it matters:** Public-facing source for the commonly cited Norwegian 4x4 session structure.
+## Quick read
 
-**Protocol takeaway:** Use this source only within its `claimUse: supports-protocol` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.
+- **Source type:** Public protocol guidance (2024).
+- **People studied or addressed:** Public-facing exercise guidance.
+- **Role in Murph:** direct or close support for the cardio-fitness claim; supports evidence; directly about the protocol dose or a very close implementation detail.
+- **Most relevant Murph signals:** estimated VO2max / cardio-fitness proxy, session heart-rate fidelity, heart-rate recovery, symptoms and adherence.
+
+## Why it matters for Norwegian 4x4
+
+Public-facing source for the commonly cited Norwegian 4x4 session structure.
+
+## What it found
+
+**Findings:** Defines the commonly cited Norwegian 4x4 dose: warm up, four 4-minute hard intervals, active recoveries, and cooldown.
+
+## How Murph should use it
+
+Use this as the recipe anchor for the Murph protocol, not as outcome evidence.
+
+Use as the recipe anchor for warm-up, four 4-minute hard intervals, 3-minute active recoveries, and cooldown; do not read it as outcome or safety proof.
+
+## Important limits
+
+Public protocol guidance does not estimate benefit size or safety for a specific user.
+
+The safe interpretation is narrower than “4x4 is always better.” Keep the population, supervision level, comparator, and exact interval dose visible before applying this source to a home wearable experiment.
+
+## Plain-language takeaway
+
+For a generally healthy user, this belongs in the evidence pile that makes a 6-week 4x4 fitness test plausible, as long as the session is actually hard enough and recovery stays reasonable.
