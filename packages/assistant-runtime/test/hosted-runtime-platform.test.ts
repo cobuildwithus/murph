@@ -8,15 +8,31 @@ import {
   listPendingAssistantUsageRecords,
   writePendingAssistantUsageRecord,
 } from "@murphai/runtime-state/node";
+import { buildHostedExecutionRuntimeTimerWake } from "@murphai/hosted-execution";
 
 import { normalizeHostedAssistantRuntimeConfig } from "../src/hosted-runtime/environment.ts";
 import {
+  HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY_ENV,
+  HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED_ENV,
+  parseHostedRuntimeBillingStripeCustomerResponse,
   parseHostedRuntimeIssueRecordResponse,
   parseHostedRuntimeUsageRecordResponse,
 } from "../src/hosted-runtime/platform.ts";
+import {
+  resolveHostedVercelAiGatewayStripeCustomerId,
+} from "../src/hosted-runtime.ts";
 import { exportHostedPendingAssistantUsage } from "../src/hosted-runtime/usage.ts";
 import type { HostedRuntimePlatform } from "../src/hosted-runtime/platform.ts";
 import { createHostedRuntimeWorkspace } from "./hosted-runtime-test-helpers.ts";
+
+function createHostedRuntimeTestWake() {
+  return buildHostedExecutionRuntimeTimerWake({
+    eventId: "evt_123",
+    occurredAt: "2026-04-22T00:00:00.000Z",
+    userId: "member_123",
+    triggerKind: "runtime_timer",
+  });
+}
 
 test("hosted runtime config fails closed when the platform is not injected", () => {
   assert.throws(
@@ -35,6 +51,34 @@ test("hosted runtime usage parser accepts a non-negative integer count and trims
       recorded: 2,
       usageIds: ["usage_1", "usage_2"],
     },
+  );
+});
+
+test("hosted runtime Stripe customer parser accepts trimmed ids and nulls", () => {
+  assert.deepEqual(
+    parseHostedRuntimeBillingStripeCustomerResponse({
+      stripeCustomerId: " cus_123 ",
+    }),
+    {
+      stripeCustomerId: "cus_123",
+    },
+  );
+  assert.deepEqual(
+    parseHostedRuntimeBillingStripeCustomerResponse({
+      stripeCustomerId: null,
+    }),
+    {
+      stripeCustomerId: null,
+    },
+  );
+});
+
+test("hosted runtime Stripe customer parser rejects blank ids", () => {
+  assert.throws(
+    () => parseHostedRuntimeBillingStripeCustomerResponse({
+      stripeCustomerId: "   ",
+    }),
+    /stripeCustomerId must be a non-empty string or null/u,
   );
 });
 
@@ -69,6 +113,137 @@ test("hosted runtime usage parser rejects non-string or blank usage ids", () => 
       usageIds: ["   "],
     }),
     /usageIds must be a string array of non-empty values/u,
+  );
+});
+
+test("hosted runtime delegated billing resolves the Stripe customer id only for Vercel AI Gateway requests", async () => {
+  const billingPort = {
+    async resolveVercelAiGatewayStripeCustomerId() {
+      return {
+        stripeCustomerId: "cus_123",
+      };
+    },
+  } satisfies NonNullable<HostedRuntimePlatform["billingPort"]>;
+
+  assert.deepEqual(
+    await resolveHostedVercelAiGatewayStripeCustomerId({
+      billingPort,
+      forwardedEnv: {
+        HOSTED_ASSISTANT_BASE_URL: "https://ai-gateway.vercel.sh/v1",
+        HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+        [HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY_ENV]: "rk_test_123",
+        [HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED_ENV]: "true",
+      },
+      run: null,
+      wake: createHostedRuntimeTestWake(),
+    }),
+    "cus_123",
+  );
+});
+
+test("hosted runtime delegated billing skips lookup when the request is not using Vercel AI Gateway", async () => {
+  let called = false;
+  const billingPort = {
+    async resolveVercelAiGatewayStripeCustomerId() {
+      called = true;
+      return {
+        stripeCustomerId: "cus_123",
+      };
+    },
+  } satisfies NonNullable<HostedRuntimePlatform["billingPort"]>;
+
+  assert.deepEqual(
+    await resolveHostedVercelAiGatewayStripeCustomerId({
+      billingPort,
+      forwardedEnv: {
+        HOSTED_ASSISTANT_BASE_URL: "https://api.openai.com/v1",
+        HOSTED_ASSISTANT_PROVIDER: "openai-compatible",
+        [HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY_ENV]: "rk_test_123",
+        [HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED_ENV]: "true",
+      },
+      run: null,
+      wake: createHostedRuntimeTestWake(),
+    }),
+    null,
+  );
+  assert.equal(called, false);
+});
+
+test("hosted runtime delegated billing skips lookup when the billing flag is disabled", async () => {
+  let called = false;
+  const billingPort = {
+    async resolveVercelAiGatewayStripeCustomerId() {
+      called = true;
+      return {
+        stripeCustomerId: "cus_123",
+      };
+    },
+  } satisfies NonNullable<HostedRuntimePlatform["billingPort"]>;
+
+  assert.equal(
+    await resolveHostedVercelAiGatewayStripeCustomerId({
+      billingPort,
+      forwardedEnv: {
+        HOSTED_ASSISTANT_BASE_URL: "https://ai-gateway.vercel.sh/v1",
+        HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+        [HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY_ENV]: "rk_test_123",
+        [HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED_ENV]: "false",
+      },
+      run: null,
+      wake: createHostedRuntimeTestWake(),
+    }),
+    null,
+  );
+  assert.equal(called, false);
+});
+
+test("hosted runtime delegated billing skips lookup when the restricted access key is missing", async () => {
+  let called = false;
+  const billingPort = {
+    async resolveVercelAiGatewayStripeCustomerId() {
+      called = true;
+      return {
+        stripeCustomerId: "cus_123",
+      };
+    },
+  } satisfies NonNullable<HostedRuntimePlatform["billingPort"]>;
+
+  assert.equal(
+    await resolveHostedVercelAiGatewayStripeCustomerId({
+      billingPort,
+      forwardedEnv: {
+        HOSTED_ASSISTANT_BASE_URL: "https://ai-gateway.vercel.sh/v1",
+        HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+        [HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED_ENV]: "true",
+      },
+      run: null,
+      wake: createHostedRuntimeTestWake(),
+    }),
+    null,
+  );
+  assert.equal(called, false);
+});
+
+test("hosted runtime delegated billing fails closed when the Stripe customer lookup throws", async () => {
+  const billingPort = {
+    async resolveVercelAiGatewayStripeCustomerId() {
+      throw new Error("lookup failed");
+    },
+  } satisfies NonNullable<HostedRuntimePlatform["billingPort"]>;
+
+  assert.equal(
+    await resolveHostedVercelAiGatewayStripeCustomerId({
+      billingPort,
+      forwardedEnv: {
+        HOSTED_ASSISTANT_BASE_URL: "https://ai-gateway.vercel.sh/v1",
+        HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+        [HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY_ENV]: "rk_test_123",
+        [HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED_ENV]: "true",
+      },
+      run: null,
+      wake: createHostedRuntimeTestWake(),
+    }),
+    null,
   );
 });
 
@@ -126,6 +301,7 @@ test("hosted usage export stays non-fatal and leaves records pending when no usa
         schema: ASSISTANT_USAGE_SCHEMA,
         servedModel: "gpt-5.4-mini",
         sessionId: "asst_123",
+        stripeMeterSource: "murph",
         surface: null,
         totalTokens: 15,
         triggerKind: null,
@@ -197,6 +373,7 @@ test("hosted usage export deletes only the usage ids acknowledged by the injecte
           schema: ASSISTANT_USAGE_SCHEMA,
           servedModel: "gpt-5.4-mini",
           sessionId: "asst_123",
+          stripeMeterSource: "murph",
           surface: null,
           totalTokens: 15,
           triggerKind: null,
