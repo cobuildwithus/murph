@@ -1,18 +1,16 @@
 # Research Orchestrator Templates
 
-This directory holds the tracked prompt architecture and preset data used by `pnpm research:init`.
+This directory holds the tracked prompt architecture used by the charter-first research tooling.
 
 What lives here:
 
 - `prompts/`: the reusable DAG-stage prompt templates
-- `presets/`: topic presets that specialize family slugs, protocol slugs, discovery shards, and section seams
+- `lib.mjs`: shared path-safety, wrapper-generation, and template-rendering helpers for the research tooling
 
-What `research:init` does:
+What the workflow does:
 
-- chooses a preset when the topic matches one
-- creates a per-topic workspace under `output-packages/research/`
-- renders the prompt templates with topic-specific metadata
-- creates runnable review:gpt command wrappers for the charter and discovery tranche
-- leaves later reducer, extraction, synthesis, and QA prompts as generated templates with explicit `TODO_*` placeholders
+1. `pnpm research:init` creates a per-topic workspace under `output-packages/research/` with only the charter prompt, charter command, and shared runner.
+2. The charter response must return explicit machine-readable JSON blocks for the resolved protocol identity, discovery shards, section seams, source-extraction schema, and initial file plan.
+3. `pnpm research:materialize --workspace <dir>` reads that charter output and generates the post-charter discovery commands plus later template prompts with explicit `TODO_*` placeholders.
 
-The generated workspaces are intended to be human-reviewable and safe to inspect in git diffs if needed. They should not hardcode local absolute paths.
+The generated workspaces are intended to be human-reviewable and safe to inspect in git diffs if needed. They should not hardcode local absolute paths or bake in topic-specific default shard maps before the charter runs.
