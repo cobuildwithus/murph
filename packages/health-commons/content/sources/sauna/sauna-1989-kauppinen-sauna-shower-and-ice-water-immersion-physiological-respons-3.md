@@ -35,6 +35,17 @@ researchEvidence:
   aggregateRole: "primary"
   aggregationNote: "Approximate count; same volunteer series as companion 1989 Kauppinen papers."
   cohortKey: "kauppinen-1989-sauna-shower-ice-water-volunteers"
+protocolEvidence:
+  -
+    protocolKey: protocol_variant:dry-sauna/murph-finnish-standard-3x-week
+    groupId: near-term-autonomic-vascular-and-immune-signals
+    stance: supports
+    scope: direct_protocol
+    result: not_efficacy_evidence
+    headline: "This companion physiology study measured body-temperature responses across sauna, shower, and ice-water exposure. The main finding is that heat and cold sequencing changes thermal load, not just subjective comfort."
+    implication: "This source supports tracking temperature, duration, cooldown, and symptoms."
+    caveat: "Acute mechanistic responses explain the heat load but are not direct repeated-protocol efficacy outcomes."
+    displayPriority: 50
 evidenceBucket: Finnish dry-sauna corpus
 whyItMatters: "Expands the audited Finnish dry-sauna evidence corpus with a general / mixed record marked lower priority for Murph v1 interpretation."
 potentialMurphEndpoints:
