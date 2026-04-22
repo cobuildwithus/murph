@@ -41,6 +41,8 @@ export interface AssistantUsageRecord {
   cacheWriteTokens: number | null;
   cachedInputTokens: number | null;
   credentialSource: AssistantUsageCredentialSource;
+  featureKey: string | null;
+  gatewayTags: string[];
   inputTokens: number | null;
   memberId: string | null;
   occurredAt: string;
@@ -48,12 +50,15 @@ export interface AssistantUsageRecord {
   provider: string;
   providerName: string | null;
   reasoningTokens: number | null;
+  reportingUserId: string | null;
   requestedModel: string | null;
   routeId: string | null;
   schema: typeof ASSISTANT_USAGE_SCHEMA;
   servedModel: string | null;
   sessionId: string;
+  surface: string | null;
   totalTokens: number | null;
+  triggerKind: string | null;
   turnId: string;
   usageId: string;
 }
@@ -152,6 +157,8 @@ export function parseAssistantUsageRecord(value: unknown): AssistantUsageRecord 
     cacheWriteTokens: normalizeOptionalInteger(record.cacheWriteTokens, "cacheWriteTokens"),
     cachedInputTokens: normalizeOptionalInteger(record.cachedInputTokens, "cachedInputTokens"),
     credentialSource: normalizeCredentialSource(record.credentialSource),
+    featureKey: normalizeOptionalString(record.featureKey, "featureKey"),
+    gatewayTags: normalizeOptionalStringArray(record.gatewayTags, "gatewayTags"),
     inputTokens,
     memberId: normalizeOptionalString(record.memberId, "memberId"),
     occurredAt: normalizeRequiredString(record.occurredAt, "occurredAt"),
@@ -159,12 +166,15 @@ export function parseAssistantUsageRecord(value: unknown): AssistantUsageRecord 
     provider: normalizeRequiredString(record.provider, "provider"),
     providerName: normalizeOptionalString(record.providerName, "providerName"),
     reasoningTokens: normalizeOptionalInteger(record.reasoningTokens, "reasoningTokens"),
+    reportingUserId: normalizeOptionalString(record.reportingUserId, "reportingUserId"),
     requestedModel: normalizeOptionalString(record.requestedModel, "requestedModel"),
     routeId: normalizeOptionalString(record.routeId, "routeId"),
     schema: normalizeUsageSchema(record.schema),
     servedModel: normalizeOptionalString(record.servedModel, "servedModel"),
     sessionId: normalizeRequiredString(record.sessionId, "sessionId"),
+    surface: normalizeOptionalString(record.surface, "surface"),
     totalTokens: normalizeOptionalInteger(record.totalTokens, "totalTokens"),
+    triggerKind: normalizeOptionalString(record.triggerKind, "triggerKind"),
     turnId: normalizeRequiredString(record.turnId, "turnId"),
     usageId: normalizeRequiredString(record.usageId, "usageId"),
   };
@@ -291,6 +301,32 @@ function normalizeOptionalString(value: unknown, label: string): string | null {
 
   const normalized = value.trim();
   return normalized.length > 0 ? normalized : null;
+}
+
+function normalizeOptionalStringArray(value: unknown, label: string): string[] {
+  if (value === null || value === undefined) {
+    return [];
+  }
+
+  if (!Array.isArray(value)) {
+    throw new TypeError(`${label} must be an array of strings when provided.`);
+  }
+
+  const seen = new Set<string>();
+  const normalizedValues: string[] = [];
+
+  for (const [index, entry] of value.entries()) {
+    const normalized = normalizeOptionalString(entry, `${label}[${index}]`);
+
+    if (!normalized || seen.has(normalized)) {
+      continue;
+    }
+
+    seen.add(normalized);
+    normalizedValues.push(normalized);
+  }
+
+  return normalizedValues;
 }
 
 function normalizeRequiredInteger(value: unknown, label: string): number {

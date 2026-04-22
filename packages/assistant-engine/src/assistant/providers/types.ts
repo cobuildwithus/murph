@@ -17,6 +17,7 @@ import type {
   AssistantUserMessageContentPart,
   AssistantToolCatalog,
 } from '../../model-harness.js'
+import type { AssistantUsageAttribution } from '../usage-attribution.js'
 
 export type AssistantProviderProgressEvent = SharedAssistantProviderProgressEvent
 export type AssistantUserMessageContentType = AssistantUserMessageContentPart['type']
@@ -113,6 +114,7 @@ export interface AssistantProviderTurnInput {
   toolRuntime?: AssistantProviderToolRuntime | null
   userPrompt?: string | null
   userMessageContent?: AssistantUserMessageContentPart[] | null
+  usageAttribution?: AssistantUsageAttribution | null
   workingDirectory: string
 }
 
@@ -137,6 +139,7 @@ export interface AssistantProviderTurnExecutionInput {
   toolRuntime?: AssistantProviderToolRuntime | null
   userPrompt?: string | null
   userMessageContent?: AssistantUserMessageContentPart[] | null
+  usageAttribution?: AssistantUsageAttribution | null
   workingDirectory: string
 }
 

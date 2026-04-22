@@ -16,6 +16,9 @@ import {
   resolveAssistantProviderTargetExecutionCapabilities,
 } from '../src/assistant/providers/registry.js'
 import {
+  createAssistantUsageAttribution,
+} from '../src/assistant/usage-attribution.js'
+import {
   resolveAssistantEarlySessionOnboardingEligibility,
 } from '../src/assistant/turn-plan.js'
 
@@ -175,5 +178,64 @@ describe('OpenAI-compatible native resume retention options', () => {
     ).toEqual({
       store: false,
     })
+  })
+
+  it('attaches anonymized gateway reporting metadata for Vercel AI Gateway turns', () => {
+    const usageAttribution = createAssistantUsageAttribution({
+      credentialSource: 'platform',
+      environment: ' Production ',
+      featureKey: ' Assistant Reply ',
+      memberId: 'member_123',
+      reportingSecret: 'reporting-secret',
+      surface: ' Hosted Web ',
+      triggerKind: ' Manual Ask ',
+      zeroDataRetention: true,
+    })
+
+    expect(usageAttribution).toMatchObject({
+      credentialSource: 'platform',
+      environment: 'production',
+      featureKey: 'assistant_reply',
+      gatewayTags: [
+        'env:production',
+        'feature:assistant_reply',
+        'surface:hosted_web',
+        'trigger:manual_ask',
+        'credential:platform',
+        'zdr:on',
+      ],
+      reportingUserId: expect.stringMatching(/^musr_[A-Za-z0-9_-]{32}$/),
+      surface: 'hosted_web',
+      triggerKind: 'manual_ask',
+    })
+    expect(usageAttribution.reportingUserId).not.toContain('member_123')
+
+    const providerOptions = resolveOpenAiCompatibleProviderOptions({
+      providerConfig: normalizeAssistantProviderConfig({
+        baseUrl: 'https://ai-gateway.vercel.sh/v1',
+        model: 'openai/gpt-5',
+        presetId: 'vercel-ai-gateway',
+        provider: 'openai-compatible',
+        providerName: 'vercel-ai-gateway',
+        zeroDataRetention: true,
+      }),
+      resumeProviderSessionId: null,
+      usageAttribution,
+      usesResponsesApi: true,
+    })
+
+    expect(providerOptions?.gateway).toEqual({
+      tags: [
+        'env:production',
+        'feature:assistant_reply',
+        'surface:hosted_web',
+        'trigger:manual_ask',
+        'credential:platform',
+        'zdr:on',
+      ],
+      user: usageAttribution.reportingUserId,
+      zeroDataRetention: true,
+    })
+    expect(JSON.stringify(providerOptions)).not.toContain('member_123')
   })
 })

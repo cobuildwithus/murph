@@ -12,6 +12,7 @@ import type {
   AssistantTurnTrigger,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import type { AssistantProviderTraceEvent } from './provider-traces.js'
+import type { AssistantUsageAttribution } from './usage-attribution.js'
 import type {
   AssistantProviderProgressEvent,
   AssistantProviderTurnExecutionResult,
@@ -135,6 +136,7 @@ export interface ExecutedAssistantProviderTurnResult extends AssistantProviderTu
   providerOptions: AssistantProviderSessionOptions
   route: ResolvedAssistantFailoverRoute
   session: AssistantSession
+  usageAttribution?: AssistantUsageAttribution | null
   workingDirectory: string
 }
 

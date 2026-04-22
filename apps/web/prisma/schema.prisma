@@ -606,6 +606,12 @@ model HostedAiUsage {
   baseUrl                    String?      @map("base_url")
   apiKeyEnv                  String?      @map("api_key_env")
   credentialSource           String?      @map("credential_source")
+  featureKey                 String?      @map("feature_key")
+  surface                    String?
+  triggerKind                String?      @map("trigger_kind")
+  reportingUserId            String?      @map("reporting_user_id")
+  gatewayTagsJson            Json?        @map("gateway_tags_json")
+  stripeMeterSource          String       @default("murph") @map("stripe_meter_source")
   inputTokens                Int?         @map("input_tokens")
   outputTokens               Int?         @map("output_tokens")
   reasoningTokens            Int?         @map("reasoning_tokens")
@@ -623,8 +629,11 @@ model HostedAiUsage {
   updatedAt                  DateTime     @updatedAt @map("updated_at")
   member                     HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
 
+  @@index([featureKey, createdAt])
   @@index([memberId, occurredAt])
+  @@index([reportingUserId, createdAt])
   @@index([stripeMeterStatus, stripeMeterNextAttemptAt, occurredAt], map: "hosted_ai_usage_stripe_meter_due_idx")
+  @@index([surface, createdAt])
   @@index([turnId, attemptCount])
   @@map("hosted_ai_usage")
 }

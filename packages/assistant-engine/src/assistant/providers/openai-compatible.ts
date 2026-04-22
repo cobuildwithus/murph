@@ -27,6 +27,10 @@ import {
   createAssistantProviderToolProgressEvent,
 } from '../provider-progress.js'
 import {
+  normalizeAssistantUsageGatewayTags,
+  type AssistantUsageAttribution,
+} from '../usage-attribution.js'
+import {
   isAssistantOpenAICompatibleTargetConfig,
   resolveAssistantChatProviderFromConfig,
   shouldAssistantProviderUseGatewayWebSearch,
@@ -47,6 +51,15 @@ const OPENAI_COMPATIBLE_PROVIDER_TIMEOUT_MS = 10 * 60 * 1000
 const OPENAI_COMPATIBLE_PROVIDER_MAX_RETRIES = 2
 const OPENAI_COMPATIBLE_PROVIDER_MAX_TOOL_STEPS = 8
 const MODEL_DISCOVERY_TIMEOUT_MS = 2_500
+
+type JsonPrimitive = boolean | number | string | null
+type JsonValue = JsonPrimitive | JsonObject | JsonValue[]
+type JsonObject = { [key: string]: JsonValue | undefined }
+interface GatewayProviderOptions extends JsonObject {
+  tags?: string[]
+  user?: string
+  zeroDataRetention?: boolean
+}
 
 export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
   capabilities: {
@@ -154,14 +167,14 @@ export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
       )
     }
 
-    const languageModelSpec = resolveAssistantModelSpecFromProviderConfig(
+    const resolvedLanguageModelSpec = resolveAssistantModelSpecFromProviderConfig(
       providerConfig,
       {
         ...process.env,
         ...(input.env ?? {}),
       },
     )
-    if (!languageModelSpec) {
+    if (!resolvedLanguageModelSpec) {
       if (!providerConfig.target.baseUrl) {
         throw new VaultCliError(
           'ASSISTANT_BASE_URL_REQUIRED',
@@ -173,6 +186,13 @@ export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
         'The openai-compatible assistant provider requires a model id.',
       )
     }
+
+    const usageAttribution = input.usageAttribution ?? null
+    const languageModelSpec = applyOpenAiCompatibleGatewayReporting({
+      languageModelSpec: resolvedLanguageModelSpec,
+      providerConfig,
+      usageAttribution,
+    })
 
     const toolEvents: unknown[] = []
     let executedToolCount = 0
@@ -218,6 +238,7 @@ export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
       const providerOptions = resolveOpenAiCompatibleProviderOptions({
         providerConfig,
         resumeProviderSessionId: input.resumeProviderSessionId,
+        usageAttribution,
         usesResponsesApi,
       })
 
@@ -285,6 +306,52 @@ export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
   resolveStaticModels() {
     return []
   },
+}
+
+
+function applyOpenAiCompatibleGatewayReporting(input: {
+  languageModelSpec: AssistantModelSpec
+  providerConfig: AssistantProviderConfig
+  usageAttribution: AssistantUsageAttribution | null
+}): AssistantModelSpec {
+  const gatewayOptions = resolveOpenAiCompatibleGatewayProviderOptions(input)
+
+  if (
+    !gatewayOptions ||
+    (input.languageModelSpec.executionDriver ?? 'openai-compatible') !== 'responses'
+  ) {
+    return input.languageModelSpec
+  }
+
+  const existingPolicy = input.languageModelSpec.responsesRequestPolicy
+  const existingReporting = existingPolicy?.gatewayReporting
+  const user = typeof gatewayOptions.user === 'string'
+    ? gatewayOptions.user
+    : existingReporting?.user ?? null
+  const tags = normalizeAssistantUsageGatewayTags([
+    ...(existingReporting?.tags ?? []),
+    ...(Array.isArray(gatewayOptions.tags) ? gatewayOptions.tags : []),
+  ])
+
+  return {
+    ...input.languageModelSpec,
+    responsesRequestPolicy: {
+      ...existingPolicy,
+      ...(gatewayOptions.zeroDataRetention === true
+        ? {
+            gatewayZeroDataRetention: true,
+          }
+        : {}),
+      ...(user || tags.length > 0
+        ? {
+            gatewayReporting: {
+              ...(user ? { user } : {}),
+              ...(tags.length > 0 ? { tags } : {}),
+            },
+          }
+        : {}),
+    },
+  }
 }
 
 function resolveOpenAiCompatibleAiSdkTools(input: {
@@ -400,19 +467,26 @@ export function shouldUseOpenAiCompatibleProviderState(
 export function resolveOpenAiCompatibleProviderOptions(input: {
   providerConfig: AssistantProviderConfig
   resumeProviderSessionId: string | null | undefined
+  usageAttribution?: AssistantUsageAttribution | null
   usesResponsesApi: boolean
-}): Record<string, Record<string, boolean | string>> | undefined {
+}): Record<string, JsonObject> | undefined {
+  const providerOptions: Record<string, JsonObject> = {}
   const reasoningEffort = supportsAssistantReasoningEffort(input.providerConfig)
     ? normalizeNullableString(input.providerConfig.policy.reasoningEffort)
     : null
   const normalizedResumeProviderSessionId = normalizeNullableString(
     input.resumeProviderSessionId,
   )
+  const gatewayOptions = resolveOpenAiCompatibleGatewayProviderOptions({
+    providerConfig: input.providerConfig,
+    usageAttribution: input.usageAttribution ?? null,
+  })
+
   if (input.usesResponsesApi) {
     const providerStateEnabled = shouldUseOpenAiCompatibleProviderState(
       input.providerConfig,
     )
-    const openAiOptions: Record<string, boolean | string> = {
+    const openAiOptions: JsonObject = {
       store: providerStateEnabled,
     }
 
@@ -424,23 +498,87 @@ export function resolveOpenAiCompatibleProviderOptions(input: {
       openAiOptions.previousResponseId = normalizedResumeProviderSessionId
     }
 
-    return {
-      openai: openAiOptions,
+    providerOptions.openai = openAiOptions
+  } else if (reasoningEffort) {
+    providerOptions[
+      normalizeAssistantProviderOptionKey(
+        isAssistantOpenAICompatibleTargetConfig(input.providerConfig)
+          ? input.providerConfig.target.providerName
+          : null,
+      )
+    ] = {
+      reasoningEffort,
     }
   }
 
-  if (!reasoningEffort) {
-    return undefined
+  if (gatewayOptions) {
+    providerOptions.gateway = gatewayOptions
   }
 
-  return {
-    [normalizeAssistantProviderOptionKey(
-      isAssistantOpenAICompatibleTargetConfig(input.providerConfig)
-        ? input.providerConfig.target.providerName
-        : null,
-    )]: {
-      reasoningEffort,
-    },
+  return Object.keys(providerOptions).length > 0 ? providerOptions : undefined
+}
+
+function resolveOpenAiCompatibleGatewayProviderOptions(input: {
+  providerConfig: AssistantProviderConfig
+  usageAttribution?: AssistantUsageAttribution | null
+}): GatewayProviderOptions | null {
+  if (!isOpenAiCompatibleVercelAiGatewayConfig(input.providerConfig)) {
+    return null
+  }
+
+  const gatewayOptions: GatewayProviderOptions = {}
+
+  if (input.providerConfig.policy.zeroDataRetention === true) {
+    gatewayOptions.zeroDataRetention = true
+  }
+
+  const reportingUserId = normalizeNullableString(
+    input.usageAttribution?.reportingUserId ?? null,
+  )
+  const gatewayTags = normalizeAssistantUsageGatewayTags(
+    input.usageAttribution?.gatewayTags ?? [],
+  )
+
+  if (reportingUserId) {
+    gatewayOptions.user = reportingUserId
+  }
+
+  if (gatewayTags.length > 0) {
+    gatewayOptions.tags = gatewayTags
+  }
+
+  return Object.keys(gatewayOptions).length > 0 ? gatewayOptions : null
+}
+
+function isOpenAiCompatibleVercelAiGatewayConfig(
+  providerConfig: AssistantProviderConfig,
+): boolean {
+  if (!isAssistantOpenAICompatibleTargetConfig(providerConfig)) {
+    return false
+  }
+
+  const presetId = normalizeNullableString(providerConfig.target.presetId)
+  const providerName = normalizeNullableString(providerConfig.target.providerName)
+
+  return (
+    presetId === 'vercel-ai-gateway' ||
+    providerName?.toLowerCase() === 'vercel-ai-gateway' ||
+    isVercelAiGatewayBaseUrl(providerConfig.target.baseUrl)
+  )
+}
+
+function isVercelAiGatewayBaseUrl(value: string | null | undefined): boolean {
+  const normalized = normalizeNullableString(value)
+
+  if (!normalized) {
+    return false
+  }
+
+  try {
+    const url = new URL(normalized)
+    return url.protocol === 'https:' && url.hostname.toLowerCase() === 'ai-gateway.vercel.sh'
+  } catch {
+    return false
   }
 }
 
