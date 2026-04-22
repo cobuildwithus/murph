@@ -35,6 +35,17 @@ researchEvidence:
   aggregateRole: "primary"
   aggregationNote: "Fifteen hundred children were sampled; 1,247 families responded."
   cohortKey: "markkola-1989-finnish-children-survey"
+protocolEvidence:
+  -
+    protocolKey: protocol_variant:dry-sauna/murph-finnish-standard-3x-week
+    groupId: safety-dose-modality-and-context-boundaries
+    stance: safety_boundary
+    scope: direct_protocol
+    result: not_efficacy_evidence
+    headline: "This cross-sectional study describes sauna habits and symptoms in Finnish children. The main finding is observational: sauna use was common enough to study, but symptoms and age context matter."
+    implication: "This source supports family and pediatric caution rather than adult efficacy claims."
+    caveat: "Safety and special-population records support screening, stopping rules, and logging; they are not efficacy proof."
+    displayPriority: 100
 evidenceBucket: Finnish dry-sauna corpus
 whyItMatters: "Expands the audited Finnish dry-sauna evidence corpus with a safety / physiology record marked lower priority for Murph v1 interpretation."
 potentialMurphEndpoints:

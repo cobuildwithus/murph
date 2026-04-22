@@ -1576,7 +1576,7 @@
       "schemaVersion": "murph.commons.artifact-manifest.v1"
     }
   ],
-  "catalogHash": "sha256:7733926b402901f47bfed2ab7cb27df8b6738290e447576761dc8b93ac9e2ac2",
+  "catalogHash": "sha256:9a1af61c2c32e4b9485bf197be4c8623ee02f248cda93e277b72f0415d33c54e",
   "changes": [
     {
       "affectedFields": [
@@ -1994,6 +1994,29 @@
       "schemaVersion": "murph.commons.change.v1",
       "sourceKeys": [
         "source_artifact:sauna-bibliography-2026-04-18"
+      ]
+    },
+    {
+      "affectedFields": [
+        "researchLandscape",
+        "sources/sauna.protocolEvidence",
+        "generated.catalog"
+      ],
+      "changeId": "chg_2026_04_21_finnish_sauna_research_landscape_tranche1",
+      "changeType": "evidence_change",
+      "editSummary": "Added research-landscape groups and protocol-specific appraisal metadata for the first 47 Finnish dry-sauna source reports.",
+      "entityKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+      "minor": false,
+      "rationale": "The sauna page should explain which sources support the self-test rationale, which are acute physiology, which are long-term context, and which mainly set safety or confounder boundaries without making users infer that from titles alone.",
+      "reviewStatus": "proposed",
+      "schemaVersion": "murph.commons.change.v1",
+      "sourceKeys": [
+        "source_artifact:pmid-29849692",
+        "source_artifact:pmid-29269746",
+        "source_artifact:pmid-25432420",
+        "source_artifact:pmid-25705824",
+        "source_artifact:sauna-1988-eisalo-the-finnish-sauna-and-cardiovascular-diseases",
+        "source_artifact:pmid-445022"
       ]
     },
     {
@@ -6929,6 +6952,24 @@
         "inflammation",
         "mortality context"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "Review evidence should calibrate rationale and claims; it does not prove this exact 21-day self-experiment will move wearable signals.",
+          "displayPriority": 20,
+          "endpointKeys": [
+            "biomarker:resting-heart-rate",
+            "biomarker:morning-blood-pressure",
+            "biomarker:hrv-rmssd"
+          ],
+          "groupId": "evidence-backbone-and-claim-calibration",
+          "headline": "This narrative review synthesizes cardiovascular, inflammatory, and mortality evidence for sauna bathing. The main finding is a coherent mechanism-and-outcomes story, especially around cardiovascular stress, vascular function, and long-term associations.",
+          "implication": "This source is rationale and mechanism context, not a substitute for protocol-specific intervention data.",
+          "protocolKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "result": "mixed",
+          "scope": "same_mechanism",
+          "stance": "mixed"
+        }
+      ],
       "protocolTakeaway": "Useful overview for rationale and mechanism section.",
       "quality": "usable",
       "relations": [
@@ -6948,7 +6989,7 @@
         "designLabel": "Evidence review"
       },
       "revision": {
-        "pageRevisionId": "sha256:53df6bf1990d0f87b0426bd5704c8f63ad6eb988d0e157b714f02e932f551f7b",
+        "pageRevisionId": "sha256:b342a6533d73fd0df418d0ac88ab1b3be10f30f51a1c3f6fedce34e7b196bbdb",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -7253,6 +7294,23 @@
       "potentialMurphEndpoints": [
         "supporting corpus context"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "Review evidence should calibrate rationale and claims; it does not prove this exact 21-day self-experiment will move wearable signals.",
+          "displayPriority": 40,
+          "endpointKeys": [
+            "biomarker:resting-heart-rate",
+            "biomarker:morning-blood-pressure"
+          ],
+          "groupId": "evidence-backbone-and-claim-calibration",
+          "headline": "This clinical review summarizes potential sauna benefits, risks, and contraindications. The main finding is balanced: sauna may be well tolerated for many people, but risk rises with certain medical conditions, dehydration, alcohol, or medication contexts.",
+          "implication": "This source is a safety and education source rather than a protocol-efficacy paper.",
+          "protocolKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "result": "mixed",
+          "scope": "same_mechanism",
+          "stance": "mixed"
+        }
+      ],
       "protocolTakeaway": "Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes.",
       "quality": "usable",
       "relations": [
@@ -7272,7 +7330,7 @@
         "designLabel": "Clinical narrative review"
       },
       "revision": {
-        "pageRevisionId": "sha256:8147af3f27e2bd7fe36d73558f2c17d21c0473701b114bf3e3c8d246edabebeb",
+        "pageRevisionId": "sha256:0fced24c492947493c1a47a4b4f4dcdc7c05866f230f2b3f951a5ecfaf71cf57",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -7637,6 +7695,24 @@
         "BP context",
         "general physiology framing"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "Review evidence should calibrate rationale and claims; it does not prove this exact 21-day self-experiment will move wearable signals.",
+          "displayPriority": 30,
+          "endpointKeys": [
+            "biomarker:resting-heart-rate",
+            "biomarker:morning-blood-pressure",
+            "biomarker:hrv-rmssd"
+          ],
+          "groupId": "evidence-backbone-and-claim-calibration",
+          "headline": "This safety review summarizes older evidence on sauna physiology, benefits, and adverse contexts. The main finding is that sauna exposure affects circulation, thermoregulation, and symptoms enough to require risk screening.",
+          "implication": "This source anchors safety copy while newer studies guide outcome expectations.",
+          "protocolKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "result": "mixed",
+          "scope": "same_mechanism",
+          "stance": "mixed"
+        }
+      ],
       "protocolTakeaway": "Useful as an older anchor review and safety context source, but do not let it override newer modality-specific intervention studies.",
       "quality": "usable",
       "relations": [
@@ -7656,7 +7732,7 @@
         "designLabel": "Safety narrative review"
       },
       "revision": {
-        "pageRevisionId": "sha256:a3664c8981fc51ea5622aa0c38ba04facf2a51b7a1847d3c824c072dcd2e0b2f",
+        "pageRevisionId": "sha256:ce54738dfa0ff7673ba3425af379175538f81853820f71352af4d5a6f63bae40",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -8054,6 +8130,24 @@
         "resting heart rate context",
         "illness and respiratory context"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "Safety and special-population records support screening, stopping rules, and logging; they are not efficacy proof.",
+          "displayPriority": 30,
+          "endpointKeys": [
+            "biomarker:resting-heart-rate",
+            "biomarker:morning-blood-pressure",
+            "biomarker:hrv-rmssd"
+          ],
+          "groupId": "safety-dose-modality-and-context-boundaries",
+          "headline": "This pilot report tested sauna safety, acceptance, and physiologic effects in people with chronic heart failure. The main finding is that supervised sauna was studied as a tolerability and physiology exposure in a clinical population, not a general wellness shortcut.",
+          "implication": "This source supports careful screening and clinical caution.",
+          "protocolKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "result": "mixed",
+          "scope": "clinical_supervised",
+          "stance": "safety_boundary"
+        }
+      ],
       "protocolTakeaway": "Use as cardiovascular context around heat exposure, not as a guaranteed 21-day result-card endpoint.",
       "quality": "usable",
       "relations": [
@@ -8078,7 +8172,7 @@
         "populationLabel": "Chronic heart failure patients"
       },
       "revision": {
-        "pageRevisionId": "sha256:86c4f1360541d52902ab3a895b42ca3e798816070186a9f20b21c76f627877fa",
+        "pageRevisionId": "sha256:8678ced9c245d4ca6a6cd499f55b5f38d4458ebde97591f97150477061493b80",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -9098,6 +9192,23 @@
         "plasma volume proxies",
         "performance"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "Repeated-intervention signals vary by population, dose, and outcome, so use them to justify testing rather than to promise improvement.",
+          "displayPriority": 10,
+          "endpointKeys": [
+            "biomarker:resting-heart-rate",
+            "biomarker:hrv-rmssd"
+          ],
+          "groupId": "intervention-design-training-and-mixed-results",
+          "headline": "This heat-acclimation pilot studied repeated post-exercise sauna exposure in well-trained cyclists. The main finding is that adaptation may build across repeated sessions, with plasma-volume, HRV, and performance context.",
+          "implication": "This source supports repeated-session designs and separating post-exercise sauna from standalone sauna.",
+          "protocolKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "result": "positive",
+          "scope": "adjacent_variant",
+          "stance": "supports"
+        }
+      ],
       "protocolTakeaway": "Shows adaptation may accrue over repeated post-exercise sessions.",
       "quality": "usable",
       "relations": [
@@ -9122,7 +9233,7 @@
         "populationLabel": "Well-trained male cyclists"
       },
       "revision": {
-        "pageRevisionId": "sha256:045858c8e17280d45084b3698bc11b9e70fa0078260134e85d6fb7fa120f839d",
+        "pageRevisionId": "sha256:f76325691cc81b72394b6f09e407fafd1dc829daacbb3b2fd9b932d6c8d44641",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -9333,6 +9444,19 @@
         "long-term dose logic",
         "frequency framing"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "Prospective cohort associations are not randomized 21-day experiments and should remain long-horizon context.",
+          "displayPriority": 10,
+          "groupId": "long-term-finnish-cohort-and-real-world-context",
+          "headline": "This prospective KIHD cohort paper linked sauna frequency with fatal cardiovascular and all-cause mortality over long follow-up. The main finding is an inverse long-term association, not proof that a short experiment will move wearable metrics.",
+          "implication": "This source informs dose-frequency rationale and long-horizon education.",
+          "protocolKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "result": "not_efficacy_evidence",
+          "scope": "same_mechanism",
+          "stance": "context_only"
+        }
+      ],
       "protocolTakeaway": "Not a protocol paper, but strongest long-term signal.",
       "quality": "usable",
       "relations": [
@@ -9357,7 +9481,7 @@
         "populationLabel": "KIHD Finnish men"
       },
       "revision": {
-        "pageRevisionId": "sha256:871b8a4fab8e51f6f7b84419b1436009f33556b22b8c7cb05a83460c172f549b",
+        "pageRevisionId": "sha256:df4604e4ba005523637af0555bddd99b1812df53532d03a44567be8525425934",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -9399,6 +9523,24 @@
         "resting heart rate context",
         "safety screening"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "Safety and special-population records support screening, stopping rules, and logging; they are not efficacy proof.",
+          "displayPriority": 50,
+          "endpointKeys": [
+            "biomarker:resting-heart-rate",
+            "biomarker:morning-blood-pressure",
+            "biomarker:hrv-rmssd"
+          ],
+          "groupId": "safety-dose-modality-and-context-boundaries",
+          "headline": "This acute Finnish-sauna and cold-water study measured hemodynamic and autonomic responses in heart failure, CAD, and control participants. The main finding is that the sauna-plus-cold sequence has measurable cardiovascular effects in clinical and control groups.",
+          "implication": "This source supports cardiovascular safety screening and not bundling cold immersion into the default sauna protocol.",
+          "protocolKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "result": "not_efficacy_evidence",
+          "scope": "clinical_supervised",
+          "stance": "safety_boundary"
+        }
+      ],
       "protocolTakeaway": "Use directly for safety, cardiovascular-context, or protocol-design guardrails; still avoid promising a short-term wearable outcome from this record alone.",
       "quality": "usable",
       "relations": [
@@ -9423,7 +9565,7 @@
         "populationLabel": "Heart failure, CAD, and control participants"
       },
       "revision": {
-        "pageRevisionId": "sha256:5e122b630e53d0c9a4c48480a2c9ad16a0d9fd86ab36d0d97c001b25786f25bb",
+        "pageRevisionId": "sha256:a430c6cbe1511e915e173f1c804afd03e9115006d5d08666c7b77da0ad587223",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -9891,6 +10033,19 @@
         "sleep",
         "long-horizon education"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "Prospective cohort associations are not randomized 21-day experiments and should remain long-horizon context.",
+          "displayPriority": 90,
+          "groupId": "long-term-finnish-cohort-and-real-world-context",
+          "headline": "This prospective KIHD cohort paper associated sauna frequency with lower dementia and Alzheimer's disease risk in middle-aged Finnish men. The main finding is a long-term brain-health association, not a near-term cognition experiment result.",
+          "implication": "This source supports education only and should not be used as a short protocol promise.",
+          "protocolKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "result": "not_efficacy_evidence",
+          "scope": "same_mechanism",
+          "stance": "context_only"
+        }
+      ],
       "protocolTakeaway": "Use cautiously; not a short-term personal-result paper.",
       "quality": "usable",
       "relations": [
@@ -9915,7 +10070,7 @@
         "populationLabel": "KIHD Finnish men"
       },
       "revision": {
-        "pageRevisionId": "sha256:0de723198f9c710319c51ee0710c05a5f0b9fa3dc726d1263d33b3a91ee5f69b",
+        "pageRevisionId": "sha256:bb8d111e1fa0240ff79f96fb361acbaca54a4f0e409b3344aac5dfb96147a88f",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -10296,6 +10451,22 @@
         "resting BP",
         "trends over weeks"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "Prospective cohort associations are not randomized 21-day experiments and should remain long-horizon context.",
+          "displayPriority": 30,
+          "endpointKeys": [
+            "biomarker:morning-blood-pressure"
+          ],
+          "groupId": "long-term-finnish-cohort-and-real-world-context",
+          "headline": "This prospective cohort study linked sauna bathing frequency with incident hypertension risk. The main finding is directly relevant to blood-pressure rationale, but it is still observational and long-term.",
+          "implication": "This source supports morning BP as a sensible tracked outcome while avoiding causal certainty.",
+          "protocolKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "result": "not_efficacy_evidence",
+          "scope": "same_mechanism",
+          "stance": "context_only"
+        }
+      ],
       "protocolTakeaway": "Good support for BP as a primary biomarker.",
       "quality": "usable",
       "relations": [
@@ -10320,7 +10491,7 @@
         "populationLabel": "KIHD Finnish men"
       },
       "revision": {
-        "pageRevisionId": "sha256:5a92989d327d7ed8b4e5c88271ae2d703f1605e2ec881fd0305f183d788d5f63",
+        "pageRevisionId": "sha256:7f8e0319eaa73891af130533587c169a7b54b283d9f11322de017ae97c0b77ea",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -10448,6 +10619,19 @@
         "illness logs",
         "symptom days"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "Prospective cohort associations are not randomized 21-day experiments and should remain long-horizon context.",
+          "displayPriority": 80,
+          "groupId": "long-term-finnish-cohort-and-real-world-context",
+          "headline": "This prospective KIHD cohort paper associated frequent sauna bathing with lower respiratory-disease risk. The main finding is an observational long-term respiratory signal that may fit education and rationale.",
+          "implication": "This source is not a short-term wearable endpoint and should be framed cautiously.",
+          "protocolKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "result": "not_efficacy_evidence",
+          "scope": "same_mechanism",
+          "stance": "context_only"
+        }
+      ],
       "protocolTakeaway": "More useful for education than first wearable protocol.",
       "quality": "usable",
       "relations": [
@@ -10472,7 +10656,7 @@
         "populationLabel": "KIHD Finnish men"
       },
       "revision": {
-        "pageRevisionId": "sha256:c0cb506c6478118f318de67e4d5f2852b9eaca046126d96d6628a6ea05a490f6",
+        "pageRevisionId": "sha256:7809e49666cb9be661bf9efb6f2cbfc28d8f19fcd8271e518624e9f556ec11d6",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -10511,6 +10695,19 @@
       "potentialMurphEndpoints": [
         "exercise+sauna combined experiment design"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "Prospective cohort associations are not randomized 21-day experiments and should remain long-horizon context.",
+          "displayPriority": 50,
+          "groupId": "long-term-finnish-cohort-and-real-world-context",
+          "headline": "This prospective KIHD cohort paper examined sauna bathing together with cardiorespiratory fitness. The main finding is that sauna and fitness may have joint associations with lower cardiovascular and all-cause mortality risk.",
+          "implication": "This source supports exercise-context logging and prevents framing sauna as a replacement for fitness.",
+          "protocolKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "result": "not_efficacy_evidence",
+          "scope": "same_mechanism",
+          "stance": "context_only"
+        }
+      ],
       "protocolTakeaway": "Suggests sauna may augment exercise rather than replace it.",
       "quality": "usable",
       "relations": [
@@ -10535,7 +10732,7 @@
         "populationLabel": "KIHD Finnish men"
       },
       "revision": {
-        "pageRevisionId": "sha256:26a01934818a0d3d09cf230d9244f4df8f5c25a76b12a83ef6055f3ee4a2df66",
+        "pageRevisionId": "sha256:f4e49ca3ecf2f949a1e1503d864622caaf2ca1c61a40d486e4c0854af1b33917",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -10656,6 +10853,19 @@
       "potentialMurphEndpoints": [
         "illness incidence/logs"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "Prospective cohort associations are not randomized 21-day experiments and should remain long-horizon context.",
+          "displayPriority": 70,
+          "groupId": "long-term-finnish-cohort-and-real-world-context",
+          "headline": "This prospective KIHD cohort paper associated frequent sauna bathing with lower pneumonia risk over long follow-up. The main finding is a respiratory long-horizon signal, not an immediate experiment outcome.",
+          "implication": "This source supports illness-log education while keeping the wearable protocol focused on nearer signals.",
+          "protocolKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "result": "not_efficacy_evidence",
+          "scope": "same_mechanism",
+          "stance": "context_only"
+        }
+      ],
       "protocolTakeaway": "Again long-horizon, not a first wearable signal.",
       "quality": "usable",
       "relations": [
@@ -10680,7 +10890,7 @@
         "populationLabel": "KIHD Finnish men"
       },
       "revision": {
-        "pageRevisionId": "sha256:b1cd4a78f71a2a9ffc0b76131799145ce8eb79c450fa0804a335282581a9bec6",
+        "pageRevisionId": "sha256:f4a6d5f58fdb5e276ad7db9cc37c8952f556986927f25f7dd72fffe34b7673e2",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -10722,6 +10932,24 @@
         "HR",
         "biomarkers"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "Acute mechanistic responses explain the heat load but are not direct repeated-protocol efficacy outcomes.",
+          "displayPriority": 10,
+          "endpointKeys": [
+            "biomarker:resting-heart-rate",
+            "biomarker:morning-blood-pressure",
+            "biomarker:hrv-rmssd"
+          ],
+          "groupId": "near-term-autonomic-vascular-and-immune-signals",
+          "headline": "This acute study measured cardiovascular function before and after a single sauna session in adults with cardiovascular risk factors. The main finding is that sauna can acutely change blood pressure, heart rate, arterial stiffness, and related markers.",
+          "implication": "This source is one of the best sources for choosing pre/post BP, HR, and recovery signals.",
+          "protocolKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "result": "not_efficacy_evidence",
+          "scope": "direct_protocol",
+          "stance": "supports"
+        }
+      ],
       "protocolTakeaway": "Great for choosing measurable pre/post signals.",
       "quality": "usable",
       "relations": [
@@ -10746,7 +10974,7 @@
         "populationLabel": "Adults with cardiovascular risk factors"
       },
       "revision": {
-        "pageRevisionId": "sha256:9ba05660f0794edfbdd788bbb26d41edae339f03ce9b7317bff82ac7a0a96820",
+        "pageRevisionId": "sha256:3f6d05e0fb210465cfd9e2fc80b7076e3730795ec562c77a2fb6ba4baec51f39",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -10786,6 +11014,23 @@
       "potentialMurphEndpoints": [
         "supporting corpus context"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "Review evidence should calibrate rationale and claims; it does not prove this exact 21-day self-experiment will move wearable signals.",
+          "displayPriority": 60,
+          "endpointKeys": [
+            "biomarker:resting-heart-rate",
+            "biomarker:morning-blood-pressure"
+          ],
+          "groupId": "evidence-backbone-and-claim-calibration",
+          "headline": "This narrative review compares health effects of heat and cold with special attention to Finnish sauna bathing. The main finding is that heat and cold exposures should be treated as separate physiological stressors with different mechanisms and risks.",
+          "implication": "This source supports modality separation and careful cold-exposure caveats.",
+          "protocolKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "result": "mixed",
+          "scope": "same_mechanism",
+          "stance": "mixed"
+        }
+      ],
       "protocolTakeaway": "Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes.",
       "quality": "usable",
       "relations": [
@@ -10805,7 +11050,7 @@
         "designLabel": "Narrative physiology review"
       },
       "revision": {
-        "pageRevisionId": "sha256:77505cd7b0bc05c312c9d2a0e2388cb4b71d437d2e1f4ee4005032ebc919f4ed",
+        "pageRevisionId": "sha256:ba88645d3051adfb467855b56c6df3e0f7253d4cb0ba039f1cdd043660c0dd69",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -11017,6 +11262,19 @@
       "potentialMurphEndpoints": [
         "education / rationale only"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "Prospective cohort associations are not randomized 21-day experiments and should remain long-horizon context.",
+          "displayPriority": 40,
+          "groupId": "long-term-finnish-cohort-and-real-world-context",
+          "headline": "Correct PubMed record for the Finnish prospective stroke cohort; used as long-term context, not as a short-term protocol endpoint.",
+          "implication": "Do not use this as a 21-day endpoint; cite it only as long-term Finnish cohort context. It should shape dose, tolerance, endpoint choice, or safety context without promising a short-term wearable benefit.",
+          "protocolKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "result": "not_efficacy_evidence",
+          "scope": "same_mechanism",
+          "stance": "context_only"
+        }
+      ],
       "protocolTakeaway": "Do not use this as a 21-day endpoint; cite it only as long-term Finnish cohort context.",
       "quality": "usable",
       "relations": [
@@ -11041,7 +11299,7 @@
         "populationLabel": "Finnish men and women aged 53–74 without known prior stroke"
       },
       "revision": {
-        "pageRevisionId": "sha256:03c9897b3ff1642fa13305228f33862504ce47f07efcb7e45863cdd1b7d9b97e",
+        "pageRevisionId": "sha256:bec120105fa52c4b296400c13db74e83deae8b25e9ba2c9553c35d43cbf33ef1",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -11085,6 +11343,24 @@
         "duration",
         "adverse events"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "Review evidence should calibrate rationale and claims; it does not prove this exact 21-day self-experiment will move wearable signals.",
+          "displayPriority": 10,
+          "endpointKeys": [
+            "biomarker:resting-heart-rate",
+            "biomarker:morning-blood-pressure",
+            "biomarker:hrv-rmssd"
+          ],
+          "groupId": "evidence-backbone-and-claim-calibration",
+          "headline": "This systematic review summarizes clinical effects of regular dry sauna bathing across heterogeneous studies. The main finding is that repeated dry sauna has plausible clinical effects, but study designs, doses, and outcomes vary.",
+          "implication": "This source is the evidence backbone for dose, session frequency, adverse-event framing, and uncertainty.",
+          "protocolKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "result": "mixed",
+          "scope": "direct_protocol",
+          "stance": "mixed"
+        }
+      ],
       "protocolTakeaway": "Use as evidence backbone; heterogeneous but practical.",
       "quality": "usable",
       "relations": [
@@ -11108,7 +11384,7 @@
         "populationLabel": "Dry-sauna clinical studies"
       },
       "revision": {
-        "pageRevisionId": "sha256:175379984c42833a3d5d8267645dade0f1ed2e0926a315885b96f9f64df5d1f9",
+        "pageRevisionId": "sha256:c439407476ea25fa670e8efa493f1abd1277047ba7c3d92383abe6376ca76243",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -11147,6 +11423,19 @@
         "hsCRP",
         "oxidative stress markers if available"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "Prospective cohort associations are not randomized 21-day experiments and should remain long-horizon context.",
+          "displayPriority": 60,
+          "groupId": "long-term-finnish-cohort-and-real-world-context",
+          "headline": "This prospective KIHD biomarker paper links sauna frequency with inflammation and oxidative-stress markers over time. The main finding is a mechanistic bridge between long-term cohort outcomes and measurable biology.",
+          "implication": "This source supports rationale and optional lab-marker extensions rather than near-term wearable guarantees.",
+          "protocolKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "result": "not_efficacy_evidence",
+          "scope": "same_mechanism",
+          "stance": "context_only"
+        }
+      ],
       "protocolTakeaway": "Good mechanism paper for protocol rationale.",
       "quality": "usable",
       "relations": [
@@ -11171,7 +11460,7 @@
         "populationLabel": "KIHD Finnish men"
       },
       "revision": {
-        "pageRevisionId": "sha256:e0a06427ad82762ac42ea23510e1e753bfbef93f61574d464cf20a5c5a9a3ba8",
+        "pageRevisionId": "sha256:3fa166d040e29b0c68d38ce4ddfe5355c1947f502021fa7d3d65780519105b2b",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -11292,6 +11581,19 @@
         "illness and respiratory context",
         "long-horizon neuro/mental context"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "Prospective cohort associations are not randomized 21-day experiments and should remain long-horizon context.",
+          "displayPriority": 100,
+          "groupId": "long-term-finnish-cohort-and-real-world-context",
+          "headline": "This prospective KIHD cohort paper linked sauna frequency with risk of psychotic disorders over long follow-up. The main finding is a neuro-mental observational signal, not a short-term mood or cognition result.",
+          "implication": "This source belongs in long-horizon education and should not drive the first wearable protocol.",
+          "protocolKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "result": "not_efficacy_evidence",
+          "scope": "same_mechanism",
+          "stance": "context_only"
+        }
+      ],
       "protocolTakeaway": "Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes.",
       "quality": "usable",
       "relations": [
@@ -11316,7 +11618,7 @@
         "populationLabel": "KIHD Finnish men"
       },
       "revision": {
-        "pageRevisionId": "sha256:2b3f554b983728065f690f3ad66161d3213160083ffbbf1ee809afbf46130d9b",
+        "pageRevisionId": "sha256:5521cd941d63bdc7a5460cfacae3267dee5ee3739ca939e5b7f8019664759504",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -11699,6 +12001,19 @@
       "potentialMurphEndpoints": [
         "frequency framing"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "Prospective cohort associations are not randomized 21-day experiments and should remain long-horizon context.",
+          "displayPriority": 20,
+          "groupId": "long-term-finnish-cohort-and-real-world-context",
+          "headline": "This prospective cohort study extended sauna-mortality analysis to Finnish men and women. The main finding is that sauna exposure was associated with lower cardiovascular mortality and improved risk prediction in that cohort.",
+          "implication": "This source strengthens long-term context but does not prove short-term experiment effects.",
+          "protocolKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "result": "not_efficacy_evidence",
+          "scope": "same_mechanism",
+          "stance": "context_only"
+        }
+      ],
       "protocolTakeaway": "Supports external validity of long-term claims.",
       "quality": "usable",
       "relations": [
@@ -11723,7 +12038,7 @@
         "populationLabel": "Finnish men and women"
       },
       "revision": {
-        "pageRevisionId": "sha256:ffe4ffa9a599e9f2c11f8fb73a7e7d83de20826d938ed042e1609c3f4a137df5",
+        "pageRevisionId": "sha256:0094c94a8d82081e12412c656d36cbf5dfe383b9761bef0562865b16b630aca9",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -12064,6 +12379,23 @@
         "cooldown HR decay",
         "perceived heat strain"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "Acute mechanistic responses explain the heat load but are not direct repeated-protocol efficacy outcomes.",
+          "displayPriority": 20,
+          "endpointKeys": [
+            "biomarker:resting-heart-rate",
+            "biomarker:morning-blood-pressure"
+          ],
+          "groupId": "near-term-autonomic-vascular-and-immune-signals",
+          "headline": "This acute physiology study compared sauna blood-pressure and heart-rate responses with submaximal dynamic exercise. The main finding is that a sauna bath can create cardiovascular responses comparable to light-to-moderate exercise stress.",
+          "implication": "This source supports treating sauna as a physiological load and standardizing cooldown.",
+          "protocolKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "result": "not_efficacy_evidence",
+          "scope": "measurement_context",
+          "stance": "supports"
+        }
+      ],
       "protocolTakeaway": "Treat a sauna session like a light-to-moderate cardiovascular stimulus and standardize cooldown if you want comparable pre/post data.",
       "quality": "usable",
       "relations": [
@@ -12088,7 +12420,7 @@
         "populationLabel": "Healthy adult volunteers"
       },
       "revision": {
-        "pageRevisionId": "sha256:6f9314dadb691b4223886bbcbb37eef340ef7ff9d63cd8bc59ba16e13be656d8",
+        "pageRevisionId": "sha256:326c8da4c561496b51e4f3c6ac76becdb9fb80f266ca2eb2f1552ca6e2c83e58",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -12291,6 +12623,19 @@
       "potentialMurphEndpoints": [
         "none for MVP"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "Prospective cohort associations are not randomized 21-day experiments and should remain long-horizon context.",
+          "displayPriority": 110,
+          "groupId": "long-term-finnish-cohort-and-real-world-context",
+          "headline": "This prospective KIHD cohort paper associated sauna bathing with lower venous thromboembolism risk. The main finding is an observational vascular outcome beyond classic cardiovascular endpoints.",
+          "implication": "This source completes the evidence map but should not shape MVP outcome tracking.",
+          "protocolKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "result": "not_efficacy_evidence",
+          "scope": "same_mechanism",
+          "stance": "context_only"
+        }
+      ],
       "protocolTakeaway": "Good for literature completeness, not first experiment design.",
       "quality": "usable",
       "relations": [
@@ -12315,7 +12660,7 @@
         "populationLabel": "KIHD Finnish men"
       },
       "revision": {
-        "pageRevisionId": "sha256:32c444b09b997a8ac1e1d325727e4ec15d258504e94dff32d28ae0ff7854f2eb",
+        "pageRevisionId": "sha256:247afec913c567c0466190d5b55c06775d9c83805a6b12035f4731436365857c",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -12520,6 +12865,23 @@
         "session tolerance",
         "illness and respiratory context"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "Acute mechanistic responses explain the heat load but are not direct repeated-protocol efficacy outcomes.",
+          "displayPriority": 70,
+          "endpointKeys": [
+            "biomarker:resting-heart-rate",
+            "biomarker:morning-blood-pressure"
+          ],
+          "groupId": "near-term-autonomic-vascular-and-immune-signals",
+          "headline": "This acute study compared Finnish sauna with other heat-bath procedures in healthy volunteers. The main finding is that Finnish sauna is one distinct heat stressor among several, with systemic responses that differ by modality.",
+          "implication": "This source supports separating Finnish dry sauna from other heat modalities.",
+          "protocolKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "result": "not_efficacy_evidence",
+          "scope": "measurement_context",
+          "stance": "context_only"
+        }
+      ],
       "protocolTakeaway": "Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes.",
       "quality": "usable",
       "relations": [
@@ -12545,7 +12907,7 @@
         "populationLabel": "Healthy adult volunteers"
       },
       "revision": {
-        "pageRevisionId": "sha256:e157cd99a95215705496e1477ddc8e56d5f0b86ecd882a7bcb58cc05132d705f",
+        "pageRevisionId": "sha256:b188e4eb0c39a7340651fbc371f56550397873457401b397e295040ef72e8817",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -16295,6 +16657,23 @@
         "resting heart rate context",
         "safety screening"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "Acute mechanistic responses explain the heat load but are not direct repeated-protocol efficacy outcomes.",
+          "displayPriority": 60,
+          "endpointKeys": [
+            "biomarker:resting-heart-rate",
+            "biomarker:morning-blood-pressure"
+          ],
+          "groupId": "near-term-autonomic-vascular-and-immune-signals",
+          "headline": "This repeated-exposure physiology study followed healthy volunteers through seven days of sauna bathing. The main finding is that repeated sauna produces cardiovascular and metabolic responses that matter for blood pressure, heart rate, and tolerance framing.",
+          "implication": "This source supports heat-exposure context and safety screening rather than a guaranteed 21-day result.",
+          "protocolKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "result": "not_efficacy_evidence",
+          "scope": "same_mechanism",
+          "stance": "supports"
+        }
+      ],
       "protocolTakeaway": "Use as cardiovascular context around heat exposure, not as a guaranteed 21-day result-card endpoint.",
       "quality": "usable",
       "relations": [
@@ -16319,7 +16698,7 @@
         "populationLabel": "Healthy volunteers"
       },
       "revision": {
-        "pageRevisionId": "sha256:055bfbf49f4237fbf170a61f5fe3c4189e60d05d28deb2f7b68657bad3f5de74",
+        "pageRevisionId": "sha256:dad8ff2ef1bf5de42b9c7e67dab5e82df9a22eabfb314547cbfc973924f7946c",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -16360,6 +16739,19 @@
         "session tolerance",
         "illness and respiratory context"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "Safety and special-population records support screening, stopping rules, and logging; they are not efficacy proof.",
+          "displayPriority": 130,
+          "groupId": "safety-dose-modality-and-context-boundaries",
+          "headline": "This repeated-exposure study examined endocrine changes during a week of sauna bathing. The main finding is that sauna can shift hormonal stress-response signals, but these lab markers are not simple consumer outcomes.",
+          "implication": "This source supports session-tolerance and safety context, not an efficacy promise.",
+          "protocolKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "result": "not_efficacy_evidence",
+          "scope": "same_mechanism",
+          "stance": "safety_boundary"
+        }
+      ],
       "protocolTakeaway": "Use for safety screening and session-context interpretation rather than efficacy claims.",
       "quality": "usable",
       "relations": [
@@ -16384,7 +16776,7 @@
         "populationLabel": "Healthy volunteers"
       },
       "revision": {
-        "pageRevisionId": "sha256:56d144d869b581764389114ac244068f12004a98578332944efd3d20d0088b70",
+        "pageRevisionId": "sha256:39f261bb4a5c1d9aff498fe56ce9a6114a53dc22e02ea44668bf5d9b97c69c00",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -18167,6 +18559,19 @@
         "safety screening",
         "session tolerance"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "Safety and special-population records support screening, stopping rules, and logging; they are not efficacy proof.",
+          "displayPriority": 90,
+          "groupId": "safety-dose-modality-and-context-boundaries",
+          "headline": "This cross-sectional survey describes how Finnish women used sauna during pregnancy. The main finding is not an efficacy claim, but a safety-context record about real-world pregnancy habits and tolerance.",
+          "implication": "This source supports pregnancy screening and cautions rather than a general protocol claim.",
+          "protocolKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "result": "not_efficacy_evidence",
+          "scope": "direct_protocol",
+          "stance": "safety_boundary"
+        }
+      ],
       "protocolTakeaway": "Use for safety screening and session-context interpretation rather than efficacy claims.",
       "quality": "usable",
       "relations": [
@@ -18188,7 +18593,7 @@
         "populationLabel": "Finnish pregnant women"
       },
       "revision": {
-        "pageRevisionId": "sha256:b66b4a00e8555aab10cc46b923c55bcdbcc6f4b0df3f291c2973214b555acffb",
+        "pageRevisionId": "sha256:58bfe83f9601d188cc11abeb2010a4ec27ea3a1df6c2d55c019b26259b0deebb",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -18590,6 +18995,24 @@
       "potentialMurphEndpoints": [
         "supporting corpus context"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "Review evidence should calibrate rationale and claims; it does not prove this exact 21-day self-experiment will move wearable signals.",
+          "displayPriority": 80,
+          "endpointKeys": [
+            "biomarker:resting-heart-rate",
+            "biomarker:morning-blood-pressure",
+            "biomarker:hrv-rmssd"
+          ],
+          "groupId": "evidence-backbone-and-claim-calibration",
+          "headline": "This narrative review synthesizes classic Finnish sauna physiology, risks, and practical claims. The main finding is a broad context map: sauna produces meaningful heat stress, cardiovascular, thermal, fluid, and endocrine responses, but the evidence is mixed by outcome.",
+          "implication": "This source is background for rationale and guardrails, not a short-term wearable endpoint.",
+          "protocolKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "result": "mixed",
+          "scope": "same_mechanism",
+          "stance": "mixed"
+        }
+      ],
       "protocolTakeaway": "Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes.",
       "quality": "usable",
       "relations": [
@@ -18609,7 +19032,7 @@
         "designLabel": "Narrative review"
       },
       "revision": {
-        "pageRevisionId": "sha256:b93ac6ba732ae2e4335ae5b7ababf5ea1b27448dcfed4c9beab804c5d10e5575",
+        "pageRevisionId": "sha256:d59e74c2d207dc7ee357569d73f5d938814199d654cea83b689e7b2e6443b7b5",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -18649,6 +19072,23 @@
         "blood pressure context",
         "resting heart rate context"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "Safety and special-population records support screening, stopping rules, and logging; they are not efficacy proof.",
+          "displayPriority": 10,
+          "endpointKeys": [
+            "biomarker:resting-heart-rate",
+            "biomarker:morning-blood-pressure"
+          ],
+          "groupId": "safety-dose-modality-and-context-boundaries",
+          "headline": "This review focuses on Finnish sauna use in people with cardiovascular disease. The main finding is that sauna exposure has real cardiovascular effects, so benefits and risks must be interpreted by baseline health status and medication context.",
+          "implication": "This source anchors cardiovascular safety guardrails and BP/RHR framing.",
+          "protocolKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "result": "not_efficacy_evidence",
+          "scope": "clinical_supervised",
+          "stance": "safety_boundary"
+        }
+      ],
       "protocolTakeaway": "Use directly for safety, cardiovascular-context, or protocol-design guardrails; still avoid promising a short-term wearable outcome from this record alone.",
       "quality": "usable",
       "relations": [
@@ -18668,7 +19108,7 @@
         "designLabel": "Narrative review"
       },
       "revision": {
-        "pageRevisionId": "sha256:ab5d9b960f53dd80046a5b1328dca58cb73f3d5b0601112d806d25f1637c98b8",
+        "pageRevisionId": "sha256:6c26114a68f92fa5423a0c00ce4efee295c121d3b7e2dfca50842358891d6662",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -18707,6 +19147,19 @@
         "safety screening",
         "session tolerance"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "Safety and special-population records support screening, stopping rules, and logging; they are not efficacy proof.",
+          "displayPriority": 140,
+          "groupId": "safety-dose-modality-and-context-boundaries",
+          "headline": "This narrative physiology review summarizes how sauna bathing affects endocrine regulation. The main finding is that heat exposure can activate hormonal stress and recovery pathways, with context-dependent effects.",
+          "implication": "This source is a mechanism and safety source rather than a result-card endpoint.",
+          "protocolKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "result": "not_efficacy_evidence",
+          "scope": "same_mechanism",
+          "stance": "safety_boundary"
+        }
+      ],
       "protocolTakeaway": "Use for safety screening and session-context interpretation rather than efficacy claims.",
       "quality": "usable",
       "relations": [
@@ -18726,7 +19179,7 @@
         "designLabel": "Narrative physiology review"
       },
       "revision": {
-        "pageRevisionId": "sha256:a65e91aa8832c130de84454d979f4c2d0359cf21c56aeaa2998542e8f411ebad",
+        "pageRevisionId": "sha256:2094978619f4de6ff03e0f6804ba61c5f2d81b6acf077a491d7f60ba4db17def",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -18765,6 +19218,19 @@
       "potentialMurphEndpoints": [
         "illness and respiratory context"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "Safety and special-population records support screening, stopping rules, and logging; they are not efficacy proof.",
+          "displayPriority": 150,
+          "groupId": "safety-dose-modality-and-context-boundaries",
+          "headline": "This narrative physiology review covers lung and ventilation responses in the sauna. The main finding is that respiratory effects are part of the sauna response, especially for heat tolerance and symptom context.",
+          "implication": "This source supports respiratory cautions and illness-context logging rather than a performance claim.",
+          "protocolKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "result": "not_efficacy_evidence",
+          "scope": "direct_protocol",
+          "stance": "safety_boundary"
+        }
+      ],
       "protocolTakeaway": "Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes.",
       "quality": "usable",
       "relations": [
@@ -18784,7 +19250,7 @@
         "designLabel": "Narrative physiology review"
       },
       "revision": {
-        "pageRevisionId": "sha256:d37ff35739f113c941d0dcfd3695a0fdae19a92c98ed5e80ee29179dcca4a281",
+        "pageRevisionId": "sha256:3c36e37cc6574ea48606b0cdd6a3631624e557a7c579b4bdbd68169882782c98",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -18824,6 +19290,19 @@
         "session tolerance",
         "illness and respiratory context"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "Safety and special-population records support screening, stopping rules, and logging; they are not efficacy proof.",
+          "displayPriority": 160,
+          "groupId": "safety-dose-modality-and-context-boundaries",
+          "headline": "This thermal-sequence study measured body-fluid responses to sauna, shower, and ice-water exposure. The main finding is that brief heat and cold sequences can alter fluid balance enough that hydration status matters.",
+          "implication": "This source supports hydration logging and safety cautions.",
+          "protocolKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "result": "not_efficacy_evidence",
+          "scope": "direct_protocol",
+          "stance": "safety_boundary"
+        }
+      ],
       "protocolTakeaway": "Use for safety screening and session-context interpretation rather than efficacy claims.",
       "quality": "usable",
       "relations": [
@@ -18849,7 +19328,7 @@
         "populationLabel": "Healthy adult volunteers"
       },
       "revision": {
-        "pageRevisionId": "sha256:98a8842faa6cc168d5a79057ae7d6d0c6d15ac02434c25fd4b63c6fea6eb1a3f",
+        "pageRevisionId": "sha256:9b2c0b425e5975fbb34be76e7b26819df25daeb9b647a369609819e5d6effd18",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -18889,6 +19368,23 @@
         "session tolerance",
         "illness and respiratory context"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "Acute mechanistic responses explain the heat load but are not direct repeated-protocol efficacy outcomes.",
+          "displayPriority": 40,
+          "endpointKeys": [
+            "biomarker:resting-heart-rate",
+            "biomarker:morning-blood-pressure"
+          ],
+          "groupId": "near-term-autonomic-vascular-and-immune-signals",
+          "headline": "This companion physiology study measured circulation during sauna, shower, and ice-water exposure. The main finding is that hot and cold exposures can rapidly shift cardiovascular load and circulation.",
+          "implication": "This source supports blood-pressure and heart-rate guardrails, especially when cold exposure is added.",
+          "protocolKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "result": "not_efficacy_evidence",
+          "scope": "direct_protocol",
+          "stance": "supports"
+        }
+      ],
       "protocolTakeaway": "Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes.",
       "quality": "usable",
       "relations": [
@@ -18914,7 +19410,7 @@
         "populationLabel": "Healthy adult volunteers"
       },
       "revision": {
-        "pageRevisionId": "sha256:cc2bc36537d6d3cd424fc0044e82d34858615bd53ae648d1e94113b1efc64e0b",
+        "pageRevisionId": "sha256:81d0f97b5f56f36746f53d181cfd949948e695c916baeec6fb937f0fee5e689e",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -18954,6 +19450,19 @@
         "session tolerance",
         "illness and respiratory context"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "Acute mechanistic responses explain the heat load but are not direct repeated-protocol efficacy outcomes.",
+          "displayPriority": 50,
+          "groupId": "near-term-autonomic-vascular-and-immune-signals",
+          "headline": "This companion physiology study measured body-temperature responses across sauna, shower, and ice-water exposure. The main finding is that heat and cold sequencing changes thermal load, not just subjective comfort.",
+          "implication": "This source supports tracking temperature, duration, cooldown, and symptoms.",
+          "protocolKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "result": "not_efficacy_evidence",
+          "scope": "direct_protocol",
+          "stance": "supports"
+        }
+      ],
       "protocolTakeaway": "Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes.",
       "quality": "usable",
       "relations": [
@@ -18979,7 +19488,7 @@
         "populationLabel": "Healthy adult volunteers"
       },
       "revision": {
-        "pageRevisionId": "sha256:3e5639868815610bf87b7f19c12b2c68387dcac80bcad2e789defeecbe1f3b2d",
+        "pageRevisionId": "sha256:1247f95afd568ad54b06b6356da889111a04f2d00e36ee4360858e467cb57b2a",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -19019,6 +19528,19 @@
         "session tolerance",
         "illness and respiratory context"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "Safety and special-population records support screening, stopping rules, and logging; they are not efficacy proof.",
+          "displayPriority": 170,
+          "groupId": "safety-dose-modality-and-context-boundaries",
+          "headline": "This acute physiology study measured endocrine responses to sauna, shower, and ice-water immersion. The main finding is that heat and cold sequences can activate stress-hormone responses.",
+          "implication": "This source supports caution around stacking sauna with cold exposure rather than treating the combination as a default protocol.",
+          "protocolKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "result": "not_efficacy_evidence",
+          "scope": "same_mechanism",
+          "stance": "safety_boundary"
+        }
+      ],
       "protocolTakeaway": "Use for safety screening and session-context interpretation rather than efficacy claims.",
       "quality": "usable",
       "relations": [
@@ -19044,7 +19566,7 @@
         "populationLabel": "Healthy adult volunteers"
       },
       "revision": {
-        "pageRevisionId": "sha256:e2a7207652192275377caf81814a14ac077d39066463fc4785b74032d2a88fe7",
+        "pageRevisionId": "sha256:61afa53f93a3ac9ceff5261da329297ea86e459cc42d0f0e48fbf7688d23a482",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -19084,6 +19606,23 @@
         "session tolerance",
         "illness and respiratory context"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "Acute mechanistic responses explain the heat load but are not direct repeated-protocol efficacy outcomes.",
+          "displayPriority": 30,
+          "endpointKeys": [
+            "biomarker:resting-heart-rate",
+            "biomarker:morning-blood-pressure"
+          ],
+          "groupId": "near-term-autonomic-vascular-and-immune-signals",
+          "headline": "This acute Finnish-sauna study measured haemodynamic and hormonal responses in healthy adults. The main finding is that a sauna bath creates measurable cardiovascular and hormonal stress, even in healthy volunteers.",
+          "implication": "This source supports symptom screening, BP/RHR context, and conservative dose design.",
+          "protocolKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "result": "not_efficacy_evidence",
+          "scope": "direct_protocol",
+          "stance": "supports"
+        }
+      ],
       "protocolTakeaway": "Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes.",
       "quality": "usable",
       "relations": [
@@ -19108,7 +19647,7 @@
         "populationLabel": "Healthy young men"
       },
       "revision": {
-        "pageRevisionId": "sha256:73429bf5393b968c91230ce65a97049aa7b57589b8837ba7e9eaa39c0d812e9b",
+        "pageRevisionId": "sha256:e63fade9069d0b92f85bfc3037f0d731ab1e971e188ca0dd35df2812205a8640",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -19149,6 +19688,19 @@
         "safety screening",
         "session tolerance"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "Safety and special-population records support screening, stopping rules, and logging; they are not efficacy proof.",
+          "displayPriority": 100,
+          "groupId": "safety-dose-modality-and-context-boundaries",
+          "headline": "This cross-sectional study describes sauna habits and symptoms in Finnish children. The main finding is observational: sauna use was common enough to study, but symptoms and age context matter.",
+          "implication": "This source supports family and pediatric caution rather than adult efficacy claims.",
+          "protocolKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "result": "not_efficacy_evidence",
+          "scope": "direct_protocol",
+          "stance": "safety_boundary"
+        }
+      ],
       "protocolTakeaway": "Use for safety screening and session-context interpretation rather than efficacy claims.",
       "quality": "usable",
       "relations": [
@@ -19174,7 +19726,7 @@
         "populationLabel": "Finnish children/families answering questionnaire"
       },
       "revision": {
-        "pageRevisionId": "sha256:97b950c83f2863e8fb41487cefb2faae1c1f577abcb1d83e0ed0f59175fa15cc",
+        "pageRevisionId": "sha256:d49e7fa11623f5cf6e482c3282e92b45062f078a8ee461e7ac5e54d3d6d856cc",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -19212,6 +19764,19 @@
       "potentialMurphEndpoints": [
         "illness and respiratory context"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "Repeated-intervention signals vary by population, dose, and outcome, so use them to justify testing rather than to promise improvement.",
+          "displayPriority": 40,
+          "groupId": "intervention-design-training-and-mixed-results",
+          "headline": "This controlled trial followed adults for common-cold incidence over six months. The main finding is that regular sauna bathing was tested as a respiratory-illness intervention, but it is not a direct wearable recovery signal.",
+          "implication": "This source supports illness-log context and keeps respiratory claims cautious.",
+          "protocolKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "result": "positive",
+          "scope": "adjacent_variant",
+          "stance": "mixed"
+        }
+      ],
       "protocolTakeaway": "Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes.",
       "quality": "usable",
       "relations": [
@@ -19236,7 +19801,7 @@
         "populationLabel": "Adult volunteers"
       },
       "revision": {
-        "pageRevisionId": "sha256:b039c109d699e479f136e282ffab8ffd29835bd56a2387a537131adadc001aab",
+        "pageRevisionId": "sha256:2c76a77f020e2ab2233fa4ec019947c387f6061877b5909847246a6fad69c0ab",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -19275,6 +19840,23 @@
         "blood pressure context",
         "resting heart rate context"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "Safety and special-population records support screening, stopping rules, and logging; they are not efficacy proof.",
+          "displayPriority": 110,
+          "endpointKeys": [
+            "biomarker:resting-heart-rate",
+            "biomarker:morning-blood-pressure"
+          ],
+          "groupId": "safety-dose-modality-and-context-boundaries",
+          "headline": "This pediatric physiology study measured cardiovascular adjustment during acute sauna exposure. The main finding is that children can show measurable heart-rate and blood-pressure responses to sauna heat.",
+          "implication": "This source supports age-sensitive safety cautions rather than adult protocol claims.",
+          "protocolKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "result": "not_efficacy_evidence",
+          "scope": "direct_protocol",
+          "stance": "safety_boundary"
+        }
+      ],
       "protocolTakeaway": "Use as cardiovascular context around heat exposure, not as a guaranteed 21-day result-card endpoint.",
       "quality": "usable",
       "relations": [
@@ -19300,7 +19882,7 @@
         "populationLabel": "Children"
       },
       "revision": {
-        "pageRevisionId": "sha256:0f5db64e9e00f2415d5100b9952ba8af1319c16b6537edd09016b1ad2acf9616",
+        "pageRevisionId": "sha256:d2b1ea461d2ba39d013fbd6d606b2a6f8d2d00ecfec8105ae0f5846482927f7d",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -19339,6 +19921,22 @@
         "safety screening",
         "session tolerance"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "Safety and special-population records support screening, stopping rules, and logging; they are not efficacy proof.",
+          "displayPriority": 120,
+          "endpointKeys": [
+            "biomarker:resting-heart-rate"
+          ],
+          "groupId": "safety-dose-modality-and-context-boundaries",
+          "headline": "This pediatric physiology study examined ECG changes around sauna exposure. The main finding is that acute sauna can interact with cardiac electrical monitoring in children, making safety context important.",
+          "implication": "This source reinforces conservative screening and symptom stop rules.",
+          "protocolKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "result": "not_efficacy_evidence",
+          "scope": "direct_protocol",
+          "stance": "safety_boundary"
+        }
+      ],
       "protocolTakeaway": "Use for safety screening and session-context interpretation rather than efficacy claims.",
       "quality": "usable",
       "relations": [
@@ -19364,7 +19962,7 @@
         "populationLabel": "Children"
       },
       "revision": {
-        "pageRevisionId": "sha256:ae1c38b2b004bfccc09c5fd67fce76e37f3c76870d65715722ce366c9471c294",
+        "pageRevisionId": "sha256:9d7306381573a5bda5ff0ffc470e1204abd26aba233e9e14ce7c824488e827db",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -19403,6 +20001,23 @@
         "blood pressure context",
         "resting heart rate context"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "Safety and special-population records support screening, stopping rules, and logging; they are not efficacy proof.",
+          "displayPriority": 60,
+          "endpointKeys": [
+            "biomarker:resting-heart-rate",
+            "biomarker:morning-blood-pressure"
+          ],
+          "groupId": "safety-dose-modality-and-context-boundaries",
+          "headline": "This crossover study tested sauna exposure with alcohol in healthy adults. The main finding is that alcohol can change the cardiac, blood-pressure, electrolyte, and cortisol context of sauna bathing.",
+          "implication": "This source supports logging alcohol and avoiding alcohol as a confounder during the experiment.",
+          "protocolKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "result": "not_efficacy_evidence",
+          "scope": "direct_protocol",
+          "stance": "safety_boundary"
+        }
+      ],
       "protocolTakeaway": "Use as cardiovascular context around heat exposure, not as a guaranteed 21-day result-card endpoint.",
       "quality": "usable",
       "relations": [
@@ -19427,7 +20042,7 @@
         "populationLabel": "Healthy adult volunteers"
       },
       "revision": {
-        "pageRevisionId": "sha256:afe84a27812c360010df200f5cec29a77e0a0d3fa12307126c5d06c3b8c23f10",
+        "pageRevisionId": "sha256:703d18ccf1ebc6decffe015a563fca004c64fdbb809b9eeab050185ab027fd47",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -19467,6 +20082,23 @@
         "resting heart rate context",
         "safety screening"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "Safety and special-population records support screening, stopping rules, and logging; they are not efficacy proof.",
+          "displayPriority": 70,
+          "endpointKeys": [
+            "biomarker:resting-heart-rate",
+            "biomarker:morning-blood-pressure"
+          ],
+          "groupId": "safety-dose-modality-and-context-boundaries",
+          "headline": "This crossover study tested Finnish sauna exposure under atenolol, scopolamine, and combined drug conditions. The main finding is that medications can change cardiovascular responses to sauna heat.",
+          "implication": "This source supports medication-aware screening and clinician-guidance cautions.",
+          "protocolKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "result": "not_efficacy_evidence",
+          "scope": "direct_protocol",
+          "stance": "safety_boundary"
+        }
+      ],
       "protocolTakeaway": "Use directly for safety, cardiovascular-context, or protocol-design guardrails; still avoid promising a short-term wearable outcome from this record alone.",
       "quality": "usable",
       "relations": [
@@ -19491,7 +20123,7 @@
         "populationLabel": "Healthy adult volunteers"
       },
       "revision": {
-        "pageRevisionId": "sha256:72d5fc75049997f38e3904bbce8dbf222cf5afbba5ed8ca877610bda3e4f70de",
+        "pageRevisionId": "sha256:e0e956bec79ddfe2970ff413408973c1070d16d0b89858a251d7677b487f1800",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -19531,6 +20163,19 @@
         "session tolerance",
         "illness and respiratory context"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "Safety and special-population records support screening, stopping rules, and logging; they are not efficacy proof.",
+          "displayPriority": 80,
+          "groupId": "safety-dose-modality-and-context-boundaries",
+          "headline": "This pharmacokinetic crossover study tested whether Finnish sauna heat changed midazolam handling. The main finding is a safety-context result: heat exposure can be relevant when interpreting medication metabolism and tolerance.",
+          "implication": "This source supports medication cautions rather than any sauna benefit claim.",
+          "protocolKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "result": "not_efficacy_evidence",
+          "scope": "direct_protocol",
+          "stance": "safety_boundary"
+        }
+      ],
       "protocolTakeaway": "Use for safety screening and session-context interpretation rather than efficacy claims.",
       "quality": "usable",
       "relations": [
@@ -19555,7 +20200,7 @@
         "populationLabel": "Healthy adult volunteers"
       },
       "revision": {
-        "pageRevisionId": "sha256:fdbe1e5dda50a85771a7246e3ccaa4171a9cb4fb899d1af08f7449acffc75426",
+        "pageRevisionId": "sha256:8124ab9900b2fa8cf4f572aa1d2e885b06583fe45ad69654a905412ae0e61c87",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -19593,6 +20238,23 @@
       "potentialMurphEndpoints": [
         "supporting corpus context"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "Review evidence should calibrate rationale and claims; it does not prove this exact 21-day self-experiment will move wearable signals.",
+          "displayPriority": 50,
+          "endpointKeys": [
+            "biomarker:resting-heart-rate",
+            "biomarker:morning-blood-pressure"
+          ],
+          "groupId": "evidence-backbone-and-claim-calibration",
+          "headline": "This narrative review separates common sauna claims from better-supported physiology and safety observations. The main finding is that sauna has plausible benefits and real risks, but many popular claims need careful framing.",
+          "implication": "This source supports plain-language guardrails and avoids overclaiming.",
+          "protocolKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "result": "mixed",
+          "scope": "same_mechanism",
+          "stance": "mixed"
+        }
+      ],
       "protocolTakeaway": "Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes.",
       "quality": "usable",
       "relations": [
@@ -19612,7 +20274,7 @@
         "designLabel": "Narrative review"
       },
       "revision": {
-        "pageRevisionId": "sha256:4a448bd5212eb354945ef5f0f54311b8d52fe684234d14b18eafbfb17d542177",
+        "pageRevisionId": "sha256:bf0c3fd96d77d66d5b132ac561df4f264eda5d42608235509fdab5804ba110d3",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -19652,6 +20314,23 @@
         "blood pressure context",
         "resting heart rate context"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "Safety and special-population records support screening, stopping rules, and logging; they are not efficacy proof.",
+          "displayPriority": 20,
+          "endpointKeys": [
+            "biomarker:resting-heart-rate",
+            "biomarker:morning-blood-pressure"
+          ],
+          "groupId": "safety-dose-modality-and-context-boundaries",
+          "headline": "This review evaluates Finnish sauna use in patients with cardiovascular disease. The main finding is that clinical context determines whether sauna is likely tolerable or risky.",
+          "implication": "This source supports cardiovascular screening and measured, conservative dose advice.",
+          "protocolKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "result": "not_efficacy_evidence",
+          "scope": "clinical_supervised",
+          "stance": "safety_boundary"
+        }
+      ],
       "protocolTakeaway": "Use directly for safety, cardiovascular-context, or protocol-design guardrails; still avoid promising a short-term wearable outcome from this record alone.",
       "quality": "usable",
       "relations": [
@@ -19671,7 +20350,7 @@
         "designLabel": "Clinical narrative review"
       },
       "revision": {
-        "pageRevisionId": "sha256:385f5aa4c8a89d4ae2e03ed962321363dd9819908cf3160396eff6e811b8dbf4",
+        "pageRevisionId": "sha256:353cb35529ac5620ee2f06a1fae5cf286bb24756c53efe0ebcb5832211b27d0b",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -19711,6 +20390,24 @@
         "resting heart rate context",
         "illness and respiratory context"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "Safety and special-population records support screening, stopping rules, and logging; they are not efficacy proof.",
+          "displayPriority": 40,
+          "endpointKeys": [
+            "biomarker:resting-heart-rate",
+            "biomarker:morning-blood-pressure",
+            "biomarker:hrv-rmssd"
+          ],
+          "groupId": "safety-dose-modality-and-context-boundaries",
+          "headline": "This pilot intervention tested repeated sauna bathing in chronic systolic heart failure patients. The main finding is that supervised repeated sauna may be feasible and physiologically meaningful in a clinical group, but the evidence is preliminary.",
+          "implication": "This source supports ramping and safety monitoring, not unsupervised clinical advice.",
+          "protocolKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "result": "mixed",
+          "scope": "clinical_supervised",
+          "stance": "safety_boundary"
+        }
+      ],
       "protocolTakeaway": "Use as cardiovascular context around heat exposure, not as a guaranteed 21-day result-card endpoint.",
       "quality": "usable",
       "relations": [
@@ -19735,7 +20432,7 @@
         "populationLabel": "Chronic systolic heart failure patients"
       },
       "revision": {
-        "pageRevisionId": "sha256:56dacb27d13116adf981641fab34c84abe20192a8ce9383210c5e97d225bda8a",
+        "pageRevisionId": "sha256:7af9cf214ea1b62791b8e5dd97f579d284f38a13ec7c038b3d63d6b3efcc0c99",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -19775,6 +20472,19 @@
         "resting heart rate context",
         "safety screening"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "Repeated-intervention signals vary by population, dose, and outcome, so use them to justify testing rather than to promise improvement.",
+          "displayPriority": 20,
+          "groupId": "intervention-design-training-and-mixed-results",
+          "headline": "This single-arm study tested repeated sauna bathing in young physically active men and lipid markers. The main finding is that lipid and cardiometabolic markers were explored over repeated sessions, but without a strong control design.",
+          "implication": "This source is secondary cardiometabolic context rather than an MVP wearable endpoint.",
+          "protocolKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "result": "mixed",
+          "scope": "adjacent_variant",
+          "stance": "mixed"
+        }
+      ],
       "protocolTakeaway": "Use as cardiovascular context around heat exposure, not as a guaranteed 21-day result-card endpoint.",
       "quality": "usable",
       "relations": [
@@ -19799,7 +20509,7 @@
         "populationLabel": "Young physically active men"
       },
       "revision": {
-        "pageRevisionId": "sha256:f5b2d9fb02e240d7e5df6896c678d15c230c049fb05143c3050255f0633686fd",
+        "pageRevisionId": "sha256:81b952b6d3e73801780ed4d3cc947fad5d2c2d256d4dfa3bd45fd2c17910a2e5",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -19838,6 +20548,19 @@
         "illness and respiratory context",
         "symptom context"
       ],
+      "protocolEvidence": [
+        {
+          "caveat": "Repeated-intervention signals vary by population, dose, and outcome, so use them to justify testing rather than to promise improvement.",
+          "displayPriority": 30,
+          "groupId": "intervention-design-training-and-mixed-results",
+          "headline": "This randomized study tested regular sauna bathing for chronic tension-type headache. The main finding is that symptom outcomes can be studied with repeated sauna exposure, but the endpoint is condition-specific.",
+          "implication": "This source supports symptom-context notes, not a generic recovery claim.",
+          "protocolKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "result": "positive",
+          "scope": "adjacent_variant",
+          "stance": "mixed"
+        }
+      ],
       "protocolTakeaway": "Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes.",
       "quality": "usable",
       "relations": [
@@ -19862,7 +20585,7 @@
         "populationLabel": "Chronic tension-type headache patients"
       },
       "revision": {
-        "pageRevisionId": "sha256:568c2c776e20178a649bbdad21d0d7cf5198436afc5ecc3df93cad1e94936336",
+        "pageRevisionId": "sha256:8a9642bd6494d8442d18055b4dd6d56c2c974c17aa6a4ed19ef1eaecf7a96ffe",
         "recipeHash": null,
         "runSpecRevisionId": null
       },

@@ -34,6 +34,21 @@ researchEvidence:
   durationLabel: "4-week repeated sauna intervention"
   aggregateRole: "primary"
   cohortKey: "miyamoto-2005-chf-pilot"
+protocolEvidence:
+  -
+    protocolKey: protocol_variant:dry-sauna/murph-finnish-standard-3x-week
+    groupId: safety-dose-modality-and-context-boundaries
+    stance: safety_boundary
+    scope: clinical_supervised
+    result: mixed
+    endpointKeys:
+      - biomarker:resting-heart-rate
+      - biomarker:morning-blood-pressure
+      - biomarker:hrv-rmssd
+    headline: "This pilot intervention tested repeated sauna bathing in chronic systolic heart failure patients. The main finding is that supervised repeated sauna may be feasible and physiologically meaningful in a clinical group, but the evidence is preliminary."
+    implication: "This source supports ramping and safety monitoring, not unsupervised clinical advice."
+    caveat: "Safety and special-population records support screening, stopping rules, and logging; they are not efficacy proof."
+    displayPriority: 40
 evidenceBucket: Finnish dry-sauna corpus
 whyItMatters: "Expands the audited Finnish dry-sauna evidence corpus with a cardiovascular record marked medium priority for Murph v1 interpretation."
 potentialMurphEndpoints:
