@@ -21,9 +21,23 @@ describe("health commons catalog", () => {
     const saunaProtocol = catalog.entities.find(
       (entity) => entity.key === "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
     );
+    expect(saunaProtocol).toMatchObject({
+      experimentOnboarding: {
+        assistantPolicy: {
+          missedLogFollowup: "opt_in_only",
+        },
+        planDefaults: {
+          sessionsPerWeek: 3,
+          testPlanId: "rhr-21d",
+        },
+        startIntent: {
+          intentSummary: "Explore Finnish Dry Sauna",
+        },
+      },
+    });
     expect(saunaProtocol?.revision.pageRevisionId).toMatch(/^sha256:[a-f0-9]{64}$/u);
     expect(saunaProtocol?.revision.runSpecRevisionId).toBe(
-      "sha256:e794e9986abf5ad0fbfab3d84bb2bd2ef15c7730366ecee5d09b1366d9e7db62",
+      "sha256:99ccf2b48a613677bbb2a58101a97526d385cd9eaedcb8ac0076d8ef57edd996",
     );
     expect(saunaProtocol?.revision.recipeHash).toMatch(/^sha256:[a-f0-9]{64}$/u);
     const protocolRelationTargets = saunaProtocol?.relations?.map((relation) => relation.target) ?? [];
