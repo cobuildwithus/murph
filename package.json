@@ -57,6 +57,7 @@
     "review:gpt:schedule": "pnpm exec cobuild-review-gpt delay --config scripts/review-gpt.config.sh",
     "review:gpt:data": "bash scripts/review-gpt-data.sh",
     "research": "bash scripts/research.sh",
+    "research:init": "node scripts/research-init.mjs",
     "chatgpt:thread:export": "pnpm exec cobuild-review-gpt thread export --format json --filter-output exportPath",
     "chatgpt:thread:download": "pnpm exec cobuild-review-gpt thread download --format json --filter-output downloadedFile",
     "chatgpt:thread:watch": "pnpm exec cobuild-review-gpt thread wake --no-poll-until-complete --format json",

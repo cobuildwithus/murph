@@ -1,0 +1,254 @@
+{
+  "presetId": "cold-plunge",
+  "matchTopics": [
+    "cold plunge",
+    "cold-water immersion",
+    "cold water immersion",
+    "cold plunge protocol"
+  ],
+  "protocolName": "Cold Plunge",
+  "protocolSlug": "cold-plunge",
+  "familySlug": "cold-water-immersion",
+  "startingPoints": [
+    "Start with Cold Plunge as a Murph protocol_variant under experiment_family:cold-water-immersion.",
+    "Keep post-exercise cold-water immersion, winter swimming, cold shower, whole-body cryotherapy, contrast therapy, and mood-focused deliberate cold exposure separate until the evidence says they should merge.",
+    "Favor near-term self-experiment outcomes such as HRV, resting heart rate, sleep, perceived stress, mood, exercise recovery, and blood pressure over long-term disease or brown-fat claims.",
+    "Treat cold-shock response, arrhythmia risk, blood pressure spikes, and hypothermia as mandatory safety boundaries."
+  ],
+  "discoveryShards": [
+    {
+      "id": "direct-cwi",
+      "topic": "Direct cold-water immersion interventions, including cold plunge and immersion temperature or duration studies.",
+      "queryStrings": [
+        "cold water immersion randomized trial adults temperature duration",
+        "cold plunge intervention study adults",
+        "cold water immersion dose response study humans"
+      ],
+      "sourceTypes": [
+        "Randomized trials",
+        "Controlled crossover studies",
+        "Acute physiology studies with a stated immersion dose"
+      ],
+      "directEvidence": [
+        "Whole-body or neck-down deliberate cold-water immersion that could plausibly map to a Murph cold-plunge protocol."
+      ],
+      "adjacentEvidence": [
+        "Cold showers, ice baths bundled with another therapy, or clinically supervised protocols that define only a boundary."
+      ],
+      "endpointFamilies": [
+        "HRV and autonomic markers",
+        "Mood or stress outcomes",
+        "Blood pressure and resting heart rate",
+        "Sleep and next-day recovery"
+      ]
+    },
+    {
+      "id": "reviews-guidelines",
+      "topic": "Reviews, meta-analyses, and guidance relevant to cold-water immersion and deliberate cold exposure.",
+      "queryStrings": [
+        "cold water immersion systematic review humans",
+        "cold water immersion meta analysis safety adults",
+        "cold exposure consensus statement humans"
+      ],
+      "sourceTypes": [
+        "Systematic reviews",
+        "Meta-analyses",
+        "Consensus statements or guidelines"
+      ],
+      "directEvidence": [
+        "Review-level evidence that directly addresses cold-water immersion or deliberate cold exposure in humans."
+      ],
+      "adjacentEvidence": [
+        "Broad recovery or sports-medicine reviews that do not cleanly separate deliberate cold exposure from performance contexts."
+      ],
+      "endpointFamilies": [
+        "Evidence quality",
+        "Dose framing",
+        "Safety boundaries",
+        "Protocol non-claims"
+      ]
+    },
+    {
+      "id": "post-exercise-recovery",
+      "topic": "Cold-water immersion after exercise for soreness, recovery, performance, and hypertrophy-interference questions.",
+      "queryStrings": [
+        "post exercise cold water immersion recovery randomized trial",
+        "cold water immersion soreness performance hypertrophy review",
+        "cold water immersion after exercise safety study"
+      ],
+      "sourceTypes": [
+        "Sports-medicine trials",
+        "Recovery reviews",
+        "Resistance or endurance training interference studies"
+      ],
+      "directEvidence": [
+        "Only studies that directly inform how post-exercise cold immersion differs from a stand-alone cold-plunge experiment."
+      ],
+      "adjacentEvidence": [
+        "Any evidence that should remain a separate post-exercise variant instead of merging into the default protocol."
+      ],
+      "endpointFamilies": [
+        "Soreness and recovery",
+        "Performance",
+        "Training adaptation",
+        "Workout-context confounding"
+      ]
+    },
+    {
+      "id": "cardiovascular-safety",
+      "topic": "Cold shock, arrhythmia, blood pressure, hypothermia, drowning risk, syncope, and contraindications.",
+      "queryStrings": [
+        "cold shock response arrhythmia cold water immersion review",
+        "cold water immersion blood pressure contraindications",
+        "winter swimming case report arrhythmia hypothermia"
+      ],
+      "sourceTypes": [
+        "Safety reviews",
+        "Case reports",
+        "Clinical reviews or guidelines"
+      ],
+      "directEvidence": [
+        "Human safety findings tied to cold-water immersion, cold plunge, or closely matching whole-body cold exposure."
+      ],
+      "adjacentEvidence": [
+        "Open-water, drowning, and rescue literature that defines a safety boundary without becoming a protocol efficacy claim."
+      ],
+      "endpointFamilies": [
+        "Adverse events",
+        "Contraindications",
+        "Stop conditions",
+        "Population boundaries"
+      ]
+    },
+    {
+      "id": "mood-stress-hrv",
+      "topic": "Cold exposure effects on mood, stress, catecholamines, autonomic markers, and perceived resilience.",
+      "queryStrings": [
+        "cold water immersion mood stress trial",
+        "cold exposure HRV adults study",
+        "cold plunge catecholamines stress response humans"
+      ],
+      "sourceTypes": [
+        "Human intervention trials",
+        "Acute physiology studies",
+        "Mental-state or stress-response studies"
+      ],
+      "directEvidence": [
+        "Human cold-exposure studies that directly report mood, stress, HRV, or autonomic outcomes."
+      ],
+      "adjacentEvidence": [
+        "Resilience narratives or observational lifestyle evidence that should stay context-only."
+      ],
+      "endpointFamilies": [
+        "Perceived stress",
+        "Mood",
+        "HRV",
+        "Sympathetic or parasympathetic context"
+      ]
+    },
+    {
+      "id": "sleep-circadian",
+      "topic": "Cold exposure, arousal, sleep quality, sleep onset, and circadian-timing effects.",
+      "queryStrings": [
+        "cold water immersion sleep study adults",
+        "cold exposure sleep onset circadian human",
+        "cold plunge sleep recovery wearable study"
+      ],
+      "sourceTypes": [
+        "Sleep-focused trials",
+        "Recovery studies with sleep endpoints",
+        "Circadian or thermoregulation papers with human sleep outcomes"
+      ],
+      "directEvidence": [
+        "Human studies that directly report sleep or next-day recovery effects from cold exposure."
+      ],
+      "adjacentEvidence": [
+        "Thermoregulation studies that support mechanism only and should not become a sleep claim."
+      ],
+      "endpointFamilies": [
+        "Sleep onset",
+        "Sleep quality",
+        "Recovery",
+        "Next-day physiology"
+      ]
+    },
+    {
+      "id": "mechanisms-physiology",
+      "topic": "Thermoregulation, autonomic response, inflammation, brown fat, and other mechanism literature for cold immersion.",
+      "queryStrings": [
+        "cold water immersion thermoregulation mechanism humans",
+        "cold exposure inflammation physiology human study",
+        "cold water immersion brown adipose tissue human"
+      ],
+      "sourceTypes": [
+        "Mechanistic human studies",
+        "Physiology reviews",
+        "Targeted basic-science overviews only when they clarify the human chain"
+      ],
+      "directEvidence": [
+        "Human physiology that explains plausible causal chains or dose fidelity for cold-water immersion."
+      ],
+      "adjacentEvidence": [
+        "Mechanistic claims that cannot support a protocol outcome on their own."
+      ],
+      "endpointFamilies": [
+        "Mechanistic plausibility",
+        "Dose fidelity",
+        "Limitations of causal interpretation"
+      ]
+    },
+    {
+      "id": "adjacent-variants",
+      "topic": "Winter swimming, cold showers, whole-body cryotherapy, contrast therapy, and other nearby variants that should not be silently merged.",
+      "queryStrings": [
+        "winter swimming health study",
+        "whole body cryotherapy versus cold water immersion",
+        "cold shower randomized trial sleep mood",
+        "contrast therapy cold immersion recovery study"
+      ],
+      "sourceTypes": [
+        "Variant protocol studies",
+        "Comparative modality reviews",
+        "Clinical or implementation references"
+      ],
+      "directEvidence": [
+        "Evidence that clearly matches deliberate cold-water immersion and helps define what belongs in the default protocol."
+      ],
+      "adjacentEvidence": [
+        "Nearby modalities or routines that should stay separate, become redirects, or set non-claims."
+      ],
+      "endpointFamilies": [
+        "Variant boundaries",
+        "Disambiguation",
+        "Community naming",
+        "Non-claims"
+      ]
+    }
+  ],
+  "sectionSeams": [
+    {
+      "id": "dose-implementation",
+      "focus": "human steps, dose, frequency, timing, immersion depth, duration, setup, adherence, and logging fields"
+    },
+    {
+      "id": "outcomes-biomarkers",
+      "focus": "primary and secondary biomarkers, expected signal, latency, and wearable or manual measurability"
+    },
+    {
+      "id": "safety-contraindications",
+      "focus": "caution level, avoid or ask-clinician groups, stop conditions, adverse events, and safety boundaries"
+    },
+    {
+      "id": "mechanisms",
+      "focus": "physiology, causal chain, mechanistic plausibility, and limits of mechanism evidence"
+    },
+    {
+      "id": "evidence-quality",
+      "focus": "directness, confidence label, conflicts, null results, adjacent variants, and non-claims"
+    },
+    {
+      "id": "user-experience",
+      "focus": "one-sentence description, human understandable steps, things that could improve, and things to watch"
+    }
+  ]
+}
