@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 
-import { afterEach, test, vi } from 'vitest'
+import { afterEach, expect, test, vi } from 'vitest'
 
 import {
   resolveDeviceSyncBaseUrl,
@@ -10,6 +10,7 @@ import {
 import { readEnvValue } from '../src/env-values.ts'
 import {
   createAbortError,
+  createLinkedAbortSignal,
   createTimeoutAbortController,
   parseRetryAfterHeaderMs,
   waitForRetryDelay,
@@ -191,6 +192,23 @@ test('createTimeoutAbortController aborts on timeout and can be cleaned up first
   await vi.advanceTimersByTimeAsync(25)
   assert.equal(cleanedController.signal.aborted, false)
   assert.equal(cleanedController.timedOut(), false)
+})
+
+test('createLinkedAbortSignal mirrors upstream abort and removes the linked listener on cleanup', () => {
+  const upstream = new AbortController()
+  const addEventListenerSpy = vi.spyOn(upstream.signal, 'addEventListener')
+  const removeEventListenerSpy = vi.spyOn(upstream.signal, 'removeEventListener')
+
+  const linked = createLinkedAbortSignal(upstream.signal)
+
+  assert.equal(linked.signal.aborted, false)
+  expect(addEventListenerSpy).toHaveBeenCalledTimes(1)
+
+  upstream.abort()
+  assert.equal(linked.signal.aborted, true)
+
+  linked.cleanup()
+  expect(removeEventListenerSpy).toHaveBeenCalledTimes(1)
 })
 
 test('startTelegramTypingSession stops a pending refresh request cleanly', async () => {

@@ -28,12 +28,14 @@ export const HOSTED_RUN_MESSAGING_ACTIVITY_OWNER_EXECUTOR = "executor";
 export type HostedMessagingActivityComponent = "runtime" | "runner";
 
 export type HostedRunMessagingActivityHandle = {
+  ownsRuntimeActivity: boolean;
   stop(): Promise<void>;
 };
 
 type HostedMessagingActivityChannel = "linq" | "telegram" | "email";
 
 const HOSTED_RUN_MESSAGING_ACTIVITY_START_TIMEOUT_MS = 2_000;
+const HOSTED_RUN_MESSAGING_ACTIVITY_LATE_CLEANUP_TIMEOUT_MS = 2_000;
 
 export interface HostedRunMessagingActivityTarget {
   channel: HostedMessagingActivityChannel;
@@ -74,7 +76,7 @@ export async function startHostedRunMessagingActivity(input: {
   const startAbortController = new AbortController();
 
   try {
-    const indicator = await confirmHostedRunMessagingActivityStarted({
+    const activity = await confirmHostedRunMessagingActivityStarted({
       component,
       run: input.run,
       startAbortController,
@@ -94,29 +96,26 @@ export async function startHostedRunMessagingActivity(input: {
       target,
     });
 
-    if (!indicator) {
+    if (!activity) {
       return null;
     }
 
-    emitHostedExecutionStructuredLog({
-      component,
-      details: {
-        ...target.logDetails,
-        runElapsedMs: computeHostedRunElapsedMs(input.run),
-        startLatencyMs: Date.now() - startRequestedAtMs,
-      },
-      wake: target.wake,
-      message: `Hosted ${formatHostedMessagingActivityChannelLabel(target.channel)} typing indicator started.`,
-      phase: "wake.running",
-      run: input.run,
-    });
+    if (activity.ownsRuntimeActivity) {
+      emitHostedExecutionStructuredLog({
+        component,
+        details: {
+          ...target.logDetails,
+          runElapsedMs: computeHostedRunElapsedMs(input.run),
+          startLatencyMs: Date.now() - startRequestedAtMs,
+        },
+        wake: target.wake,
+        message: `Hosted ${formatHostedMessagingActivityChannelLabel(target.channel)} typing indicator started.`,
+        phase: "wake.running",
+        run: input.run,
+      });
+    }
 
-    return createStartedHostedRunMessagingActivityHandle({
-      component,
-      indicator,
-      run: input.run,
-      target,
-    });
+    return activity;
   } catch (error) {
     emitHostedExecutionStructuredLog({
       component,
@@ -240,31 +239,17 @@ async function confirmHostedRunMessagingActivityStarted(input: {
   startRequestedAtMs: number;
   startTimeoutMs: number;
   target: HostedRunMessagingActivityTarget;
-}): Promise<AssistantChannelActivityHandle | null> {
-  let startCancelled = false;
+}): Promise<HostedRunMessagingActivityHandle | null> {
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  const startOutcomePromise = input.startPromise.then((indicator) => ({
+    indicator,
+    kind: "started" as const,
+  }));
 
-  const guardedStartPromise = input.startPromise.then(async (indicator) => {
-    if (!indicator) {
-      return null;
-    }
-
-    if (startCancelled) {
-      await stopLateHostedMessagingActivityIndicator({
-        component: input.component,
-        indicator,
-        run: input.run,
-        target: input.target,
-      });
-      return null;
-    }
-
-    return indicator;
-  });
-
-  const timeoutPromise = new Promise<null>((resolve) => {
+  const timeoutPromise = new Promise<{
+    kind: "timeout";
+  }>((resolve) => {
     timeoutId = setTimeout(() => {
-      startCancelled = true;
       input.startAbortController.abort();
       emitHostedExecutionStructuredLog({
         component: input.component,
@@ -280,56 +265,79 @@ async function confirmHostedRunMessagingActivityStarted(input: {
         run: input.run,
         wake: input.target.wake,
       });
-      resolve(null);
+      resolve({
+        kind: "timeout",
+      });
     }, input.startTimeoutMs);
   });
 
-  let indicator: AssistantChannelActivityHandle | null;
+  let outcome:
+    | {
+        indicator: AssistantChannelActivityHandle | null;
+        kind: "started";
+      }
+    | {
+        kind: "timeout";
+      };
   try {
-    indicator = await Promise.race([guardedStartPromise, timeoutPromise]);
+    outcome = await Promise.race([startOutcomePromise, timeoutPromise]);
   } finally {
     if (timeoutId) {
       clearTimeout(timeoutId);
     }
   }
 
-  if (!indicator) {
-    void guardedStartPromise.catch((error) => {
-      if (!startCancelled) {
-        emitHostedExecutionStructuredLog({
-          component: input.component,
-          details: input.target.logDetails,
-          error,
-          level: "warn",
-          message: `Hosted ${formatHostedMessagingActivityChannelLabel(input.target.channel)} typing indicator late start failed after ownership was declined.`,
-          phase: "wake.running",
-          run: input.run,
-          wake: input.target.wake,
-        });
-      }
+  if (outcome.kind === "timeout") {
+    return createHostedRunMessagingActivityHandle({
+      component: input.component,
+      indicatorPromise: startOutcomePromise
+        .then((startOutcome) => startOutcome.indicator)
+        .catch(() => null),
+      ownsRuntimeActivity: false,
+      run: input.run,
+      target: input.target,
     });
   }
 
-  return indicator;
+  if (!outcome.indicator) {
+    return null;
+  }
+
+  return createHostedRunMessagingActivityHandle({
+    component: input.component,
+    indicatorPromise: Promise.resolve(outcome.indicator),
+    ownsRuntimeActivity: true,
+    run: input.run,
+    target: input.target,
+  });
 }
 
-function createStartedHostedRunMessagingActivityHandle(input: {
+function createHostedRunMessagingActivityHandle(input: {
   component: HostedMessagingActivityComponent;
-  indicator: AssistantChannelActivityHandle;
+  indicatorPromise: Promise<AssistantChannelActivityHandle | null>;
+  ownsRuntimeActivity: boolean;
   run: HostedAssistantRuntimeJobInput["request"]["run"] | null;
   target: HostedRunMessagingActivityTarget;
 }): HostedRunMessagingActivityHandle {
   let stopPromise: Promise<void> | null = null;
 
   return {
+    ownsRuntimeActivity: input.ownsRuntimeActivity,
     async stop() {
       if (!stopPromise) {
-        stopPromise = stopHostedMessagingActivityIndicator({
-          component: input.component,
-          indicator: input.indicator,
-          run: input.run,
-          target: input.target,
-        });
+        stopPromise = (async () => {
+          const indicator = await resolveHostedMessagingActivityIndicatorForStop(input);
+          if (!indicator) {
+            return;
+          }
+
+          await stopHostedMessagingActivityIndicator({
+            component: input.component,
+            indicator,
+            run: input.run,
+            target: input.target,
+          });
+        })();
       }
 
       await stopPromise;
@@ -337,22 +345,66 @@ function createStartedHostedRunMessagingActivityHandle(input: {
   };
 }
 
-async function stopLateHostedMessagingActivityIndicator(input: {
+async function resolveHostedMessagingActivityIndicatorForStop(input: {
   component: HostedMessagingActivityComponent;
-  indicator: AssistantChannelActivityHandle;
+  indicatorPromise: Promise<AssistantChannelActivityHandle | null>;
+  ownsRuntimeActivity: boolean;
   run: HostedAssistantRuntimeJobInput["request"]["run"] | null;
   target: HostedRunMessagingActivityTarget;
-}): Promise<void> {
-  await stopHostedMessagingActivityIndicator(input);
-  emitHostedExecutionStructuredLog({
-    component: input.component,
-    details: input.target.logDetails,
-    level: "warn",
-    message: `Hosted ${formatHostedMessagingActivityChannelLabel(input.target.channel)} typing indicator was stopped after a late start because ownership had already been declined.`,
-    phase: "side-effects.draining",
-    run: input.run,
-    wake: input.target.wake,
+}): Promise<AssistantChannelActivityHandle | null> {
+  if (input.ownsRuntimeActivity) {
+    return input.indicatorPromise;
+  }
+
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  const indicatorOutcomePromise = input.indicatorPromise.then((indicator) => ({
+    indicator,
+    kind: "indicator" as const,
+  }));
+  const timeoutPromise = new Promise<{
+    kind: "timeout";
+  }>((resolve) => {
+    timeoutId = setTimeout(() => {
+      emitHostedExecutionStructuredLog({
+        component: input.component,
+        details: {
+          ...input.target.logDetails,
+          cleanupTimeoutMs: HOSTED_RUN_MESSAGING_ACTIVITY_LATE_CLEANUP_TIMEOUT_MS,
+        },
+        level: "warn",
+        message: `Hosted ${formatHostedMessagingActivityChannelLabel(input.target.channel)} typing indicator cleanup stopped waiting for a late start handle after the cleanup timeout.`,
+        phase: "side-effects.draining",
+        run: input.run,
+        wake: input.target.wake,
+      });
+      resolve({
+        kind: "timeout",
+      });
+    }, HOSTED_RUN_MESSAGING_ACTIVITY_LATE_CLEANUP_TIMEOUT_MS);
   });
+
+  const outcome = await Promise.race([indicatorOutcomePromise, timeoutPromise]);
+  if (timeoutId) {
+    clearTimeout(timeoutId);
+  }
+
+  if (outcome.kind === "timeout") {
+    void indicatorOutcomePromise.then(async (lateOutcome) => {
+      if (!lateOutcome.indicator) {
+        return;
+      }
+
+      await stopHostedMessagingActivityIndicator({
+        component: input.component,
+        indicator: lateOutcome.indicator,
+        run: input.run,
+        target: input.target,
+      });
+    });
+    return null;
+  }
+
+  return outcome.indicator;
 }
 
 async function stopHostedMessagingActivityIndicator(input: {

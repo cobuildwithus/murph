@@ -460,7 +460,7 @@ describe('assistant channels runtime seam', () => {
           LINQ_API_TOKEN: 'linq-token',
         },
         fetchImplementation: undefined,
-        signal: undefined,
+        signal: expect.any(AbortSignal),
       },
     )
     expect(runtimeMocks.stopLinqChatTypingIndicator).toHaveBeenCalledTimes(1)
@@ -508,7 +508,7 @@ describe('assistant channels runtime seam', () => {
           LINQ_API_TOKEN: 'linq-token',
         },
         fetchImplementation: undefined,
-        signal: dependencyController.signal,
+        signal: expect.any(AbortSignal),
       },
     )
     expect(addEventListenerSpy).toHaveBeenCalledTimes(1)

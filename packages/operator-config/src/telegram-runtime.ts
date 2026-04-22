@@ -4,7 +4,10 @@ import {
   type TelegramThreadTarget,
 } from '@murphai/messaging-ingress/telegram-webhook'
 
-import { createTimeoutAbortController } from './http-retry.js'
+import {
+  createLinkedAbortSignal,
+  createTimeoutAbortController,
+} from './http-retry.js'
 import { normalizeNullableString } from './text/shared.js'
 import { VaultCliError } from './vault-cli-errors.js'
 
@@ -86,25 +89,19 @@ export async function startTelegramTypingSession(
     typeof input.target === 'string'
       ? parseTelegramTargetOrThrow(input.target)
       : input.target
-  const stopController = new AbortController()
-  const abortFromDependencySignal = () => stopController.abort()
-  if (dependencies.signal?.aborted) {
-    stopController.abort()
-  } else {
-    dependencies.signal?.addEventListener('abort', abortFromDependencySignal, { once: true })
-  }
+  const linkedStopSignal = createLinkedAbortSignal(dependencies.signal)
 
   try {
     target = await sendTelegramTypingIndicatorOnce({
       baseUrl,
       fetchImplementation,
-      signal: dependencies.signal,
+      signal: linkedStopSignal.signal,
       target,
       targetLabel: serializeTelegramThreadTarget(target),
       token,
     })
   } catch (error) {
-    dependencies.signal?.removeEventListener('abort', abortFromDependencySignal)
+    linkedStopSignal.cleanup()
     throw error
   }
 
@@ -113,19 +110,19 @@ export async function startTelegramTypingSession(
     baseUrl,
     fetchImplementation,
     refreshMs: dependencies.refreshMs ?? TELEGRAM_TYPING_REFRESH_MS,
-    signal: stopController.signal,
+    signal: linkedStopSignal.signal,
     target,
     token,
   }).catch((error) => {
-    if (!stopController.signal.aborted) {
+    if (!linkedStopSignal.signal.aborted) {
       failure = error
     }
   })
 
   return {
     async stop() {
-      stopController.abort()
-      dependencies.signal?.removeEventListener('abort', abortFromDependencySignal)
+      linkedStopSignal.controller.abort()
+      linkedStopSignal.cleanup()
       await running
       if (failure) {
         throw failure
