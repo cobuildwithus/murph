@@ -21,9 +21,12 @@ export function DashboardShell({
       <SidebarProvider>
         <Sidebar />
         <SidebarInset className="bg-background">
-          <header className="flex md:hidden items-center gap-2 bg-linear-to-r from-[#2d3436] via-[#3a2e24] to-[#2a1f16] px-4 py-3">
+          <header className="grid md:hidden grid-cols-[auto_1fr_auto] items-center bg-linear-to-r from-[#2d3436] via-[#3a2e24] to-[#2a1f16] px-4 py-3">
             <SidebarTrigger className="text-white/80 hover:bg-white/5 hover:text-white" />
-            <img src="/logo-dark.svg" alt="Murph" className="h-5" />
+            <div className="flex justify-center">
+              <img src="/logo-dark.svg" alt="Murph" className="h-5" />
+            </div>
+            <div className="size-7" aria-hidden="true" />
           </header>
           <main
             className={cn(
