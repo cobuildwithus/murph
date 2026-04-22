@@ -20,6 +20,7 @@ import {
   toPosixRelative,
   toTitleCase,
   writeExecutable,
+  writeResearchReviewGptSupportFiles,
   writeTextFile,
 } from "./research-orchestrator/lib.mjs";
 
@@ -252,6 +253,7 @@ function main(argv) {
     path.join(outDir, "commands", "_run-review-gpt.sh"),
     buildCommandHelperScript(),
   );
+  writeResearchReviewGptSupportFiles(outDir);
   writeExecutable(
     path.join(outDir, "commands", "01-charter.sh"),
     buildCommandWrapper("01-charter", "prompts/01-charter.md"),

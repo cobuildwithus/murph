@@ -218,11 +218,27 @@ mkdir -p "\${run_dir}/responses" "\${run_dir}/logs" "\${run_dir}/state/chat-urls
 result_file="\${run_dir}/logs/\${label}.result.json"
 stderr_file="\${run_dir}/logs/\${label}.stderr.log"
 chat_url_file="\${run_dir}/state/chat-urls/\${label}.txt"
+default_config_file="\${run_dir}/config/review-gpt-research.config.sh"
+work_profile_config_file="\${run_dir}/config/review-gpt-work-profile.sh"
+review_gpt_config="\${RESEARCH_REVIEW_GPT_CONFIG:-}"
+
+if [[ -z "\${review_gpt_config}" ]]; then
+  if [[ -f "\${work_profile_config_file}" ]]; then
+    review_gpt_config="\${work_profile_config_file}"
+  else
+    review_gpt_config="\${default_config_file}"
+  fi
+fi
+
+if [[ ! -f "\${review_gpt_config}" ]]; then
+  review_gpt_config="\${repo_dir}/scripts/review-gpt.config.sh"
+fi
 
 cd "\${repo_dir}"
 
 set +e
-pnpm review:gpt \\
+pnpm exec cobuild-review-gpt \\
+  --config "\${review_gpt_config}" \\
   --send \\
   --wait \\
   --format json \\
@@ -271,6 +287,147 @@ if [[ -f "\${chat_url_file}" ]]; then
   echo "Chat URL: $(cat "\${chat_url_file}")"
 fi
 `;
+}
+
+export function buildResearchReviewGptConfig() {
+  return `#!/usr/bin/env bash
+
+script_dir="$(cd "$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
+workspace_dir="$(cd "\${script_dir}/.." && pwd)"
+
+find_repo_dir() {
+  local dir="$1"
+  while [[ "$dir" != "/" ]]; do
+    if [[ -f "$dir/package.json" ]] && grep -q '"name"[[:space:]]*:[[:space:]]*"murph-workspace"' "$dir/package.json"; then
+      printf '%s\\n' "$dir"
+      return 0
+    fi
+    dir="$(dirname "$dir")"
+  done
+  return 1
+}
+
+repo_dir="$(find_repo_dir "\${workspace_dir}")" || {
+  echo "Could not locate the murph workspace root from \${workspace_dir}" >&2
+  return 1
+}
+
+# shellcheck source=/dev/null
+. "\${repo_dir}/scripts/review-gpt.config.sh"
+
+package_script="\${workspace_dir}/scripts/package-research-context.sh"
+`;
+}
+
+export function buildResearchPackageScript() {
+  return `#!/usr/bin/env bash
+set -euo pipefail
+
+script_dir="$(cd "$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
+workspace_dir="$(cd "\${script_dir}/.." && pwd)"
+
+find_repo_dir() {
+  local dir="$1"
+  while [[ "$dir" != "/" ]]; do
+    if [[ -f "$dir/package.json" ]] && grep -q '"name"[[:space:]]*:[[:space:]]*"murph-workspace"' "$dir/package.json"; then
+      printf '%s\\n' "$dir"
+      return 0
+    fi
+    dir="$(dirname "$dir")"
+  done
+  return 1
+}
+
+repo_dir="$(find_repo_dir "\${workspace_dir}")" || {
+  echo "Could not locate the murph workspace root from \${workspace_dir}" >&2
+  exit 1
+}
+
+case "\${workspace_dir}" in
+  "\${repo_dir}"/*)
+    workspace_relative="\${workspace_dir#"\${repo_dir}/"}"
+    ;;
+  *)
+    echo "Research workspace must live inside the repo root: \${workspace_dir}" >&2
+    exit 1
+    ;;
+esac
+
+base_output="$("\${repo_dir}/scripts/package-audit-context.sh" "$@")"
+printf '%s\\n' "\${base_output}"
+
+zip_display_path="$(printf '%s\\n' "\${base_output}" | sed -n 's/^ZIP: \\([^ ]*\\).*/\\1/p' | tail -n 1)"
+if [[ -z "\${zip_display_path}" ]]; then
+  echo "Could not determine audit ZIP path from package-audit-context output." >&2
+  exit 1
+fi
+
+if [[ "\${zip_display_path}" == /* ]]; then
+  zip_path="\${zip_display_path}"
+else
+  zip_path="\${repo_dir}/\${zip_display_path}"
+fi
+
+if [[ ! -f "\${zip_path}" ]]; then
+  echo "Audit ZIP does not exist: \${zip_path}" >&2
+  exit 1
+fi
+
+declare -a extra_paths=()
+
+add_if_exists() {
+  local relative_path="$1"
+  if [[ -f "\${repo_dir}/\${relative_path}" ]]; then
+    extra_paths+=("\${relative_path}")
+  fi
+}
+
+collect_dir_files() {
+  local relative_dir="$1"
+  local absolute_dir="\${repo_dir}/\${relative_dir}"
+  if [[ ! -d "\${absolute_dir}" ]]; then
+    return 0
+  fi
+
+  while IFS= read -r -d '' absolute_path; do
+    extra_paths+=("\${absolute_path#"\${repo_dir}/"}")
+  done < <(find "\${absolute_dir}" -type f -print0 | sort -z)
+}
+
+add_if_exists "\${workspace_relative}/README.md"
+add_if_exists "\${workspace_relative}/workflow.json"
+collect_dir_files "\${workspace_relative}/prompts"
+collect_dir_files "\${workspace_relative}/responses"
+
+if [[ "\${#extra_paths[@]}" -eq 0 ]]; then
+  echo "Research workspace files added: 0"
+  echo "Research workspace root: \${workspace_relative}"
+  exit 0
+fi
+
+file_list="$(mktemp)"
+trap 'rm -f "\${file_list}"' EXIT
+printf '%s\\n' "\${extra_paths[@]}" > "\${file_list}"
+
+(
+  cd "\${repo_dir}"
+  zip -qur "\${zip_path}" -@ < "\${file_list}"
+)
+
+echo "Research workspace files added: \${#extra_paths[@]}"
+echo "Research workspace root: \${workspace_relative}"
+`;
+}
+
+export function writeResearchReviewGptSupportFiles(workspaceDir) {
+  writeTextFile(
+    path.join(workspaceDir, "config", "review-gpt-research.config.sh"),
+    buildResearchReviewGptConfig(),
+  );
+  writeExecutable(
+    path.join(workspaceDir, "scripts", "package-research-context.sh"),
+    buildResearchPackageScript(),
+  );
 }
 
 export function buildCommandWrapper(label, promptRelativePath) {
