@@ -10,9 +10,7 @@ import { Avatar, AvatarFallback } from "@/src/components/ui/avatar";
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuGroup,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/src/components/ui/dropdown-menu";
@@ -49,23 +47,9 @@ const sidebarThemeStyle = {
 
 function BrandMark() {
   return (
-    <Link href="/overview" className="flex items-center gap-2.5 px-2 py-1">
-      <div className="flex size-7 items-center justify-center rounded-full border border-white/20 text-xs font-semibold text-white">
-        M
-      </div>
-      <span className="font-serif text-sm font-semibold text-white">
-        Murph
-      </span>
+    <Link href="/overview" className="flex items-center px-2 py-1">
+      <img src="/logo-dark.svg" alt="Murph" className="h-6" />
     </Link>
-  );
-}
-
-function OuraStatus() {
-  return (
-    <div className="flex items-center gap-2 px-3 py-1.5">
-      <div className="size-2 rounded-full bg-green-400" />
-      <span className="text-xs text-white/50">Oura connected</span>
-    </div>
   );
 }
 
@@ -75,7 +59,12 @@ function AccountMenu() {
 
   const primaryLabel =
     user?.email?.address ?? user?.phone?.number ?? "Account";
-  const initials = primaryLabel.replace(/[^a-zA-Z0-9]/g, "").slice(0, 2).toUpperCase() || "M";
+  const initials =
+    primaryLabel.replace(/[^a-zA-Z0-9]/g, "").slice(0, 2).toUpperCase() || "M";
+
+  // TODO: wire lastSyncAt + onSync from Oura/device-sync integration state.
+  const lastSyncLabel = "2m ago";
+  const onSync = () => {};
 
   return (
     <SidebarMenu>
@@ -85,28 +74,33 @@ function AccountMenu() {
             render={
               <SidebarMenuButton
                 size="lg"
-                className="text-white/80 hover:bg-white/5 hover:text-white data-popup-open:bg-white/5"
+                className="h-auto py-2 text-white/80 hover:bg-white/5 hover:text-white data-popup-open:bg-white/5"
               />
             }
           >
-            <Avatar className="size-7 border border-white/15">
+            <Avatar className="size-8 border border-white/15">
               <AvatarFallback className="bg-white/5 text-[0.6875rem] font-medium text-white/80">
                 {initials}
               </AvatarFallback>
             </Avatar>
-            <div className="grid flex-1 text-left text-xs leading-tight">
-              <span className="truncate font-medium text-white/90">
+            <div className="grid flex-1 text-left leading-tight">
+              <span className="truncate text-xs font-medium text-white/90">
                 {primaryLabel}
               </span>
+              <span className="mt-0.5 flex items-center gap-1.5 text-[0.6875rem] text-white/50">
+                <span className="size-1.5 shrink-0 rounded-full bg-green-400" />
+                <span className="truncate">Oura connected</span>
+              </span>
             </div>
-            <ChevronsUpDown className="ml-auto size-3.5 text-white/50" />
+            <ChevronsUpDown className="ml-auto size-3.5 shrink-0 text-white/50" />
           </DropdownMenuTrigger>
           <DropdownMenuContent side="top" align="end" className="min-w-56">
-            <DropdownMenuGroup>
-              <DropdownMenuLabel className="truncate">
-                {primaryLabel}
-              </DropdownMenuLabel>
-            </DropdownMenuGroup>
+            <DropdownMenuItem onClick={onSync}>
+              Sync data
+              <span className="ml-auto text-xs text-muted-foreground">
+                {lastSyncLabel}
+              </span>
+            </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={() => void logout()}>
               Sign out
@@ -131,7 +125,7 @@ export function Sidebar() {
       )}
       style={sidebarThemeStyle}
     >
-      <SidebarHeader className="pt-7 pb-3">
+      <SidebarHeader className="pt-7 pb-6">
         <BrandMark />
       </SidebarHeader>
 
@@ -160,8 +154,7 @@ export function Sidebar() {
         </SidebarMenu>
       </SidebarContent>
 
-      <SidebarFooter className="gap-2 border-t border-white/10 pt-2">
-        <OuraStatus />
+      <SidebarFooter className="pb-4">
         <AccountMenu />
       </SidebarFooter>
     </ShadcnSidebar>
