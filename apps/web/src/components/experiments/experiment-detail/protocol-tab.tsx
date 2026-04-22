@@ -212,12 +212,12 @@ export function ProtocolTab({ experiment }: ProtocolTabProps) {
           ))}
         </div>
         {researchStats.some((stat) =>
-          stat.label === "TOTAL PARTICIPANTS" && stat.value !== "—"
+          stat.label === "HUMAN PARTICIPANTS" && stat.value !== "—"
         ) ? (
           <p className="text-xs/4 text-muted-foreground/70">
             Sources checked is the full set used for this page. Research papers
             test people directly; review papers summarize other papers. Total
-            participants counts only direct human research with participant totals,
+            human participants counts only direct human research with participant totals,
             avoiding duplicate cohorts where possible.
           </p>
         ) : null}
@@ -313,7 +313,7 @@ function ResearchGroupCard({
       <summary className="cursor-pointer list-none px-6 py-5 transition-colors hover:bg-secondary/6 [&::-webkit-details-marker]:hidden">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="flex max-w-3xl flex-col gap-2">
-            <SectionLabel>{formatResearchGroupLabel(group.label)}</SectionLabel>
+            <SectionLabel>{formatResearchGroupLabel(group.id, group.label)}</SectionLabel>
             <p className="text-[14px]/6 text-foreground/80">
               {group.summary}
             </p>
@@ -347,20 +347,20 @@ function ResearchGroupCard({
   );
 }
 
-function formatResearchGroupLabel(label: string): string {
-  switch (label) {
-    case "Evidence backbone and claim calibration":
+function formatResearchGroupLabel(id: string, fallbackLabel: string): string {
+  switch (id) {
+    case "evidence-backbone-and-claim-calibration":
       return "What the evidence can and can't say";
-    case "Near-term physiology and wearable signals":
+    case "near-term-autonomic-vascular-and-immune-signals":
       return "Short-term signals to watch";
-    case "Long-term Finnish cohort and real-world context":
+    case "long-term-finnish-cohort-and-real-world-context":
       return "Long-term Finnish population context";
-    case "Intervention design, training, and mixed results":
+    case "intervention-design-training-and-mixed-results":
       return "Repeated-use trials and mixed results";
-    case "Safety, dose, and modality boundaries":
+    case "safety-dose-modality-and-context-boundaries":
       return "Safety, dose, and sauna type";
     default:
-      return label;
+      return fallbackLabel;
   }
 }
 

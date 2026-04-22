@@ -47,6 +47,7 @@ export function buildHealthCommonsCatalogFromContent(
 export function validateHealthCommonsContent(content: HealthCommonsContentSet): void {
   const keys = new Map<string, string>();
   const aliases = new Map<string, string>();
+  const pagesByKey = new Map<string, HealthCommonsSourcePage>();
 
   for (const page of content.pages) {
     const existingPath = keys.get(page.frontmatter.key);
@@ -54,6 +55,7 @@ export function validateHealthCommonsContent(content: HealthCommonsContentSet): 
       throw new Error(`Duplicate health commons key ${page.frontmatter.key} in ${existingPath} and ${page.relativePath}.`);
     }
     keys.set(page.frontmatter.key, page.relativePath);
+    pagesByKey.set(page.frontmatter.key, page);
 
     for (const alias of page.frontmatter.aliases ?? []) {
       const normalizedAlias = normalizeAlias(alias);
@@ -86,6 +88,16 @@ export function validateHealthCommonsContent(content: HealthCommonsContentSet): 
     for (const group of page.frontmatter.researchLandscape?.groups ?? []) {
       for (const sourceKey of group.sourceKeys) {
         assertTargetExists(keys, sourceKey, `${page.frontmatter.key} researchLandscape group ${group.id}`);
+        const sourcePage = pagesByKey.get(stripRevision(sourceKey));
+        const hasMatchingAppraisal = sourcePage?.frontmatter.protocolEvidence?.some((appraisal) =>
+          appraisal.protocolKey === page.frontmatter.key && appraisal.groupId === group.id
+        ) ?? false;
+
+        if (!hasMatchingAppraisal) {
+          throw new Error(
+            `${page.frontmatter.key} researchLandscape group ${group.id} source ${sourceKey} lacks matching protocolEvidence appraisal.`,
+          );
+        }
       }
     }
     for (const plan of page.frontmatter.testPlans ?? []) {
