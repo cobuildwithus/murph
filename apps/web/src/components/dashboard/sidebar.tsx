@@ -6,7 +6,6 @@ import { usePrivy, useUser } from "@privy-io/react-auth";
 import { ChevronsUpDown } from "lucide-react";
 import type { CSSProperties } from "react";
 
-import { SIDEBAR_BRAND_GRADIENT } from "@/src/components/dashboard/theme";
 import { Avatar, AvatarFallback } from "@/src/components/ui/avatar";
 import {
   DropdownMenu,
@@ -120,7 +119,7 @@ export function Sidebar() {
     <ShadcnSidebar
       collapsible="offcanvas"
       className={cn(
-        SIDEBAR_BRAND_GRADIENT,
+        "bg-linear-to-b from-[#2d3436] via-[#3a2e24] to-[#2a1f16]",
         "[&_[data-slot=sidebar-inner]]:bg-transparent",
         "group-data-[side=left]:[&_[data-slot=sidebar-container]]:border-r-0",
       )}

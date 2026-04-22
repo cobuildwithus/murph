@@ -1,7 +1,6 @@
 import type { ReactNode } from "react";
 
 import { Sidebar } from "@/src/components/dashboard/sidebar";
-import { SIDEBAR_BRAND_GRADIENT } from "@/src/components/dashboard/theme";
 import {
   SidebarInset,
   SidebarProvider,
@@ -22,12 +21,7 @@ export function DashboardShell({
       <SidebarProvider>
         <Sidebar />
         <SidebarInset className="bg-background">
-          <header
-            className={cn(
-              "grid md:hidden grid-cols-[auto_1fr_auto] items-center px-4 py-3",
-              SIDEBAR_BRAND_GRADIENT,
-            )}
-          >
+          <header className="grid md:hidden grid-cols-[auto_1fr_auto] items-center bg-linear-to-b from-[#2d3436] via-[#3a2e24] to-[#2a1f16] px-4 py-3">
             <SidebarTrigger className="text-white/80 hover:bg-white/5 hover:text-white" />
             <div className="flex justify-center">
               <img src="/logo-dark.svg" alt="Murph" className="h-5" />
