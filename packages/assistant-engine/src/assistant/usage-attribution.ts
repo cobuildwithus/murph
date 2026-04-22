@@ -9,6 +9,8 @@ import type { AssistantUsageCredentialSource } from '@murphai/runtime-state/node
 import type { AssistantMessageInput } from './service-contracts.js'
 
 export const HOSTED_AI_USAGE_REPORTING_SECRET_ENV = 'HOSTED_AI_USAGE_REPORTING_SECRET'
+const ASSISTANT_USAGE_REPORTING_USER_ID_HMAC_CONTEXT =
+  'murph.assistant-usage.reporting-user.v1'
 
 export interface AssistantUsageAttribution {
   credentialSource: AssistantUsageCredentialSource
@@ -71,6 +73,8 @@ export function createAssistantUsageReportingUserId(input: {
   }
 
   const digest = createHmac('sha256', reportingSecret)
+    .update(ASSISTANT_USAGE_REPORTING_USER_ID_HMAC_CONTEXT)
+    .update('\0')
     .update(memberId)
     .digest('base64url')
     .slice(0, 32)

@@ -1,3 +1,4 @@
+import { createHmac } from "node:crypto";
 import { rm } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 
@@ -98,6 +99,16 @@ describe("assistant usage attribution", () => {
       triggerKind: " Manual Ask ",
       zeroDataRetention: true,
     });
+    const expectedReportingUserId = `musr_${createHmac("sha256", "reporting-secret")
+      .update("murph.assistant-usage.reporting-user.v1")
+      .update("\0")
+      .update("member_123")
+      .digest("base64url")
+      .slice(0, 32)}`;
+    const legacyReportingUserId = `musr_${createHmac("sha256", "reporting-secret")
+      .update("member_123")
+      .digest("base64url")
+      .slice(0, 32)}`;
 
     expect(attribution).toMatchObject({
       credentialSource: "platform",
@@ -113,13 +124,14 @@ describe("assistant usage attribution", () => {
         "credential:platform",
         "zdr:on",
       ],
-      reportingUserId: expect.stringMatching(/^musr_[A-Za-z0-9_-]{32}$/),
+      reportingUserId: expectedReportingUserId,
     });
+    expect(expectedReportingUserId).not.toBe(legacyReportingUserId);
 
     expect(createAssistantUsageReportingUserId({
       memberId: "member_123",
       reportingSecret: "reporting-secret",
-    })).toEqual(attribution.reportingUserId);
+    })).toEqual(expectedReportingUserId);
     expect(createAssistantUsageReportingUserId({
       memberId: "member_123",
       reportingSecret: " ",
