@@ -252,6 +252,7 @@ export const captureResultItemSchema = z.object({
   vault: pathSchema,
   eventId: z.string().min(1),
   lookupId: z.string().min(1),
+  stableLookupId: slugSchema.nullable(),
   ledgerFile: pathSchema,
   created: z.boolean(),
   occurredAt: isoTimestampSchema,
