@@ -58,6 +58,10 @@ Useful commands:
 - `vault-cli search query "<protocol-relevant context>" --format json` for conditions, medications, prior symptoms, injuries, recent workouts, or previous experiment notes.
 - `vault-cli timeline ... --format json` for chronological context when timing matters.
 - `vault-cli wearables latest --format json`, `vault-cli wearables metric latest <metric> --format json`, `vault-cli wearables metric trend <metric> --format json`, `vault-cli wearables drift --format json`, `vault-cli wearables sources list --format json`, and `vault-cli wearables day <YYYY-MM-DD> --format json` when wearable measurement or baseline quality matters.
+- `vault-cli experiment session log <id> --input -` when the user reports one intervention session for an active experiment and that evidence should become a canonical experiment-linked record.
+- `vault-cli experiment context log <id> --input -` when the user reports confounders, symptoms, illness, travel, medication changes, or other run context that should stay linked to the active experiment.
+- `vault-cli experiment progress <id> --format json` before any scheduled experiment check-in, reminder, or review nudge so the message reflects current adherence, missing evidence, and review readiness.
+- `vault-cli experiment outcome analyze <id> --format json` when the user wants a run review, end-of-run interpretation, or a worth-repeating judgment.
 - `vault-cli experiment create <slug> --title "<title>" --hypothesis "<hypothesis>" --startedOn <YYYY-MM-DD> --status active` only after the user confirms a simple run plan.
 - `vault-cli experiment update --input -` when the run needs richer `protocolRef`, `runPlan`, `onboarding`, or `assistantSupport` fields.
 - `vault-cli automation scaffold --format json` followed by `vault-cli automation upsert --input -` only after the user opts into reminders or check-ins.
@@ -68,7 +72,10 @@ Flow:
 2. Review the protocol page and relevant vault or wearable context before asking repeated setup questions. If the onboarding block includes `contextReview.vaultChecks[].readHints`, treat those as the first read plan. If a hint looks abbreviated or stale, verify the exact command with `vault-cli <command path> --help` or `vault-cli <command path> --schema --format json` before running it.
 3. Ask the protocol safety screen even when the vault is silent, especially for high-caution protocols.
 4. Ask only setup slots that affect safety, logistics, measurement fidelity, or assistant support. Keep it to one or two questions per turn unless the user asks for a form.
-5. If a high-caution screen is positive or uncertain, do not start the protocol unsupervised. Suggest clinician guidance, a lower-intensity alternative, or postponing.
-6. Before writing, summarize the exact protocol reference, `revision.pageRevisionId`, `revision.runSpecRevisionId`, selected `testPlanId`, baseline/intervention dates, schedule, modality or dose, logging fields, stop conditions, and reminder policy.
-7. If you persist a richer run with `vault-cli experiment update --input -`, include `protocolRef.key`, `protocolRef.pageRevisionId`, `protocolRef.runSpecRevisionId`, and the chosen `testPlanId` instead of copying protocol prose into ad hoc fields.
-8. Use neutral language for reminders and missed-log checks. A missed-log check should ask whether the session happened, not imply failure.
+5. If the user reports active-experiment evidence, convert it into canonical experiment-linked records instead of leaving it only in chat prose. If one missing detail blocks a faithful record, ask one compact clarifying question, then log it.
+6. If a high-caution screen is positive or uncertain, do not start the protocol unsupervised. Suggest clinician guidance, a lower-intensity alternative, or postponing.
+7. Before writing, summarize the exact protocol reference, `revision.pageRevisionId`, `revision.runSpecRevisionId`, selected `testPlanId`, baseline/intervention dates, schedule, modality or dose, logging fields, stop conditions, and reminder policy.
+8. If you persist a richer run with `vault-cli experiment update --input -`, include `protocolRef.key`, `protocolRef.pageRevisionId`, `protocolRef.runSpecRevisionId`, and the chosen `testPlanId` instead of copying protocol prose into ad hoc fields.
+9. Before any scheduled experiment check-in or reminder decision, read `vault-cli experiment progress <id> --format json`. Skip by default unless there is a user-opted-in reminder due now, broken or missing data, a weekly summary, a review-ready transition, or a safety follow-up that genuinely needs outreach.
+10. Use `vault-cli experiment outcome analyze <id> --format json` for run reviews, and summarize the result with early-signal, associated-with, and confounded-by language rather than causal certainty.
+11. Use neutral language for reminders and missed-log checks. A missed-log check should ask whether the session happened, not imply failure.

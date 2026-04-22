@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 
-import { buildAssistantSystemPrompt } from '../src/assistant/system-prompt.js'
+import {
+  buildAssistantNotificationDecisionSystemPrompt,
+  buildAssistantSystemPrompt,
+} from '../src/assistant/system-prompt.js'
 
 function buildPrompt(
   assistantCommandAccessMode: 'bound-tools' | 'direct-cli' | 'none',
@@ -25,6 +28,16 @@ function buildPrompt(
     earlySessionOnboarding: options?.earlySessionOnboarding ?? false,
     modelBehaviorProfile: 'default',
     turnTrigger,
+    vaultOverview: null,
+  })
+}
+
+function buildNotificationPrompt(channel: string | null = null) {
+  return buildAssistantNotificationDecisionSystemPrompt({
+    allowSensitiveHealthContext: true,
+    channel,
+    currentLocalDate: '2026-04-10',
+    currentTimeZone: 'Australia/Sydney',
     vaultOverview: null,
   })
 }
@@ -213,10 +226,28 @@ Ready to get started?`)
       'treat that as a planning conversation until they explicitly confirm the final run plan.',
     )
     expect(prompt).toContain(
+      'convert it into canonical experiment-linked records instead of leaving it only in chat prose',
+    )
+    expect(prompt).toContain(
+      '`vault-cli experiment session log <id> --input -` for intervention sessions',
+    )
+    expect(prompt).toContain(
+      '`vault-cli experiment context log <id> --input -` for confounders, symptoms, illness, travel, medication changes, or other context tied to the run.',
+    )
+    expect(prompt).toContain(
+      'If exactly one missing detail blocks a faithful plan or experiment-linked record, ask one compact clarifying question, then continue.',
+    )
+    expect(prompt).toContain(
       'Create the run only after explicit confirmation, then use `vault-cli experiment create <slug> --title "<title>" --hypothesis "<hypothesis>" --startedOn <YYYY-MM-DD> --status active` for a simple run',
     )
     expect(prompt).toContain(
       'When you write a richer run, preserve the exact protocol `key`, `pageRevisionId`, `runSpecRevisionId`, and chosen `testPlanId` under `protocolRef`',
+    )
+    expect(prompt).toContain(
+      'read `vault-cli experiment progress <id> --format json` so the message reflects current adherence, missing evidence, and review readiness instead of a generic nudge',
+    )
+    expect(prompt).toContain(
+      'Use `vault-cli experiment outcome analyze <id> --format json` when the user asks for a run review, end-of-run interpretation, or worth-repeating judgment',
     )
   })
 
@@ -229,5 +260,27 @@ Ready to get started?`)
     expect(prompt).toContain(
       'Do not present a celebrity or external source protocol as Murph\'s default recommendation; offer a lower-burden variant or defer when the onboarding slots or safety context suggest poor fit.',
     )
+  })
+
+  it('uses early-signal language for experiment interpretations instead of causal certainty', () => {
+    const prompt = buildPrompt('bound-tools')
+
+    expect(prompt).toContain(
+      'prefer early-signal, associated-with, may reflect, and confounded-by language over causal certainty unless the evidence is unusually clean.',
+    )
+  })
+})
+
+describe('buildAssistantNotificationDecisionSystemPrompt', () => {
+  it('defaults experiment notifications to skip unless progress shows a real reason to send', () => {
+    const prompt = buildNotificationPrompt('telegram')
+
+    expect(prompt).toContain(
+      'For experiment-related scheduled checks, inspect `vault-cli experiment progress <id> --format json` first when the target experiment is identifiable from the prompt or schedule context.',
+    )
+    expect(prompt).toContain(
+      'Default to skip for experiment notifications unless there is a user-opted-in reminder due now, broken or missing data that blocks interpretation, a weekly summary, a review-ready transition, or a safety follow-up that genuinely needs outreach.',
+    )
+    expect(prompt).toContain('The bound outbound channel is telegram.')
   })
 })
