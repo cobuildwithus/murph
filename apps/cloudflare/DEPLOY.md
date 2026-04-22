@@ -93,6 +93,14 @@ Hosted ingress encryption rotation metadata:
 
 - `HOSTED_WAKE_ENCRYPTION_KEY_VERSION`
 
+Execution recipient key metadata:
+
+- `HOSTED_EXECUTION_AUTOMATION_RECIPIENT_KEY_ID`
+
+Optional TEE metadata:
+
+- `HOSTED_EXECUTION_TEE_AUTOMATION_RECIPIENT_KEY_ID` when `HOSTED_EXECUTION_TEE_AUTOMATION_RECIPIENT_PUBLIC_JWK` is configured
+
 Hosted assistant config:
 
 - `HOSTED_ASSISTANT_PROVIDER`
@@ -120,6 +128,38 @@ Opt-in runtime integrations and tool overrides:
 - `WHISPER_MODEL_PATH`
 - `DEVICE_SYNC_PUBLIC_BASE_URL`
 
+Device-sync provider runtime overrides:
+
+- `GARMIN_API_BASE_URL`
+- `GARMIN_AUTH_BASE_URL`
+- `GARMIN_BACKFILL_DAYS`
+- `GARMIN_RECONCILE_DAYS`
+- `GARMIN_RECONCILE_INTERVAL_MS`
+- `GARMIN_REQUEST_TIMEOUT_MS`
+- `GARMIN_TOKEN_BASE_URL`
+- `OURA_API_BASE_URL`
+- `OURA_AUTH_BASE_URL`
+- `OURA_BACKFILL_DAYS`
+- `OURA_RECONCILE_DAYS`
+- `OURA_RECONCILE_INTERVAL_MS`
+- `OURA_REQUEST_TIMEOUT_MS`
+- `OURA_SCOPES`
+- `OURA_WEBHOOK_TIMESTAMP_TOLERANCE_MS`
+- `STRAVA_API_BASE_URL`
+- `STRAVA_AUTH_BASE_URL`
+- `STRAVA_BACKFILL_DAYS`
+- `STRAVA_RECONCILE_DAYS`
+- `STRAVA_RECONCILE_INTERVAL_MS`
+- `STRAVA_REQUEST_TIMEOUT_MS`
+- `STRAVA_SCOPES`
+- `WHOOP_BACKFILL_DAYS`
+- `WHOOP_BASE_URL`
+- `WHOOP_RECONCILE_DAYS`
+- `WHOOP_RECONCILE_INTERVAL_MS`
+- `WHOOP_REQUEST_TIMEOUT_MS`
+- `WHOOP_SCOPES`
+- `WHOOP_WEBHOOK_TIMESTAMP_TOLERANCE_MS`
+
 If the selected GitHub environment already defines container sizing overrides, update these existing vars there as well:
 
 - `CF_CONTAINER_INSTANCE_TYPE={"vcpu":1,"memory_mib":3072,"disk_mb":6000}`
@@ -139,8 +179,13 @@ Key rotation and future envelope lanes:
 Hosted assistant provider secrets:
 
 - any provider key referenced by `HOSTED_ASSISTANT_API_KEY_ENV`
+- `VERCEL_AI_API_KEY` when the hosted assistant should call Vercel AI Gateway
 - `HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY` when Vercel AI Gateway should emit Stripe meter events directly
-- supported examples include `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, `VENICE_API_KEY`, `TOGETHER_API_KEY`, `GROQ_API_KEY`, `XAI_API_KEY`, `MISTRAL_API_KEY`, `GOOGLE_API_KEY`, and `GOOGLE_GENERATIVE_AI_API_KEY`
+- supported examples include `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, `VENICE_API_KEY`, `TOGETHER_API_KEY`, `GROQ_API_KEY`, `XAI_API_KEY`, `MISTRAL_API_KEY`, `GOOGLE_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY`, `CEREBRAS_API_KEY`, `DEEPSEEK_API_KEY`, `FIREWORKS_API_KEY`, `HF_TOKEN`, `HUGGINGFACEHUB_API_TOKEN`, `HUGGINGFACE_API_KEY`, `HUGGING_FACE_HUB_TOKEN`, `LITELLM_PROXY_API_KEY`, `LM_STUDIO_API_KEY`, `NVIDIA_API_KEY`, `NGC_API_KEY`, `OLLAMA_API_KEY`, `PERPLEXITY_API_KEY`, and `VLLM_API_KEY`
+
+Hosted usage-reporting secrets:
+
+- `HOSTED_AI_USAGE_REPORTING_SECRET` when stable anonymized usage attribution should be forwarded to the hosted assistant and Gateway
 
 Opt-in execution integrations:
 
