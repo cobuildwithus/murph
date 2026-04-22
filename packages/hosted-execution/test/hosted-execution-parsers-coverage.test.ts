@@ -274,6 +274,19 @@ describe("hosted execution parsers coverage", () => {
         result: {
           eventsHandled: 3,
           nextWakeAt: "2026-04-08T01:00:00.000Z",
+          redactedLogEntries: [
+            {
+              component: "runtime",
+              eventId: "evt_notification",
+              level: "warn",
+              message: "Hosted assistant notification failed and was skipped so the hosted run can continue.",
+              phase: "wake.running",
+              redacted: {
+                errorCode: "runtime_error",
+                notificationRouteChannel: "linq",
+              },
+            },
+          ],
           summary: "Processed queued work.",
         },
       })).toEqual({
@@ -281,6 +294,19 @@ describe("hosted execution parsers coverage", () => {
         result: {
           eventsHandled: 3,
           nextWakeAt: "2026-04-08T01:00:00.000Z",
+          redactedLogEntries: [
+            {
+              component: "runtime",
+              eventId: "evt_notification",
+              level: "warn",
+              message: "Hosted assistant notification failed and was skipped so the hosted run can continue.",
+              phase: "wake.running",
+              redacted: {
+                errorCode: "runtime_error",
+                notificationRouteChannel: "linq",
+              },
+            },
+          ],
           summary: "Processed queued work.",
         },
       });

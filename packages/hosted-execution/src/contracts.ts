@@ -13,6 +13,7 @@ import type {
 import type { SharePack } from "@murphai/contracts";
 import type {
   HostedExecutionRunContext,
+  HostedExecutionRunLevel,
   HostedExecutionRunStatus,
   HostedExecutionTimelineEntry,
 } from "./observability.ts";
@@ -364,12 +365,22 @@ export interface HostedExecutionRunnerRequest {
   runDrain: HostedRuntimeDrainRequest;
 }
 
+export interface HostedExecutionRedactedLogEntry {
+  component: string;
+  eventId?: string | null;
+  level: HostedExecutionRunLevel;
+  message: string;
+  phase: string;
+  redacted?: Record<string, unknown> | null;
+}
+
 export interface HostedExecutionRunnerResult {
   bundle: HostedExecutionBundlePayload;
   result: {
     eventsHandled: number;
     nextWakeAt?: string | null;
     redactedDetails?: Record<string, unknown> | null;
+    redactedLogEntries?: HostedExecutionRedactedLogEntry[] | null;
     summary: string;
   };
 }

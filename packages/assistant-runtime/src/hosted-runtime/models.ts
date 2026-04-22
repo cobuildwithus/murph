@@ -8,6 +8,7 @@ import type {
 } from "@murphai/device-syncd/runtime-config";
 import type {
   HostedIngressEnvelope,
+  HostedExecutionRedactedLogEntry,
   HostedExecutionRunnerRequest,
   HostedExecutionRunnerResult,
   HostedRuntimeDrainRequest,
@@ -87,6 +88,7 @@ export interface HostedRunDrainMetrics {
   eventsHandled: number;
   nextWakeAt: string | null;
   parserProcessed: number;
+  redactedLogEntries: HostedExecutionRedactedLogEntry[];
   shareImportResult: HostedShareImportResult | null;
   shareImportTitle: string | null;
   vaultSyncImportResult: HostedVaultSyncImportResult | null;
@@ -145,6 +147,7 @@ export type HostedVaultSyncImportResult = VaultSyncImportMergeResult;
 
 export interface HostedIngressEffect {
   conversationMetrics: HostedConversationWakeMetrics | null;
+  redactedLogEntries?: HostedExecutionRedactedLogEntry[] | null;
   shareImportResult: HostedShareImportResult | null;
   shareImportTitle: string | null;
   vaultSyncImportResult: HostedVaultSyncImportResult | null;

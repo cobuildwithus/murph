@@ -212,10 +212,48 @@ describe("executeHostedIngressEvent", () => {
         wake,
       }),
     );
-    assert.deepEqual(result, {
+    expect(result).toEqual({
       bootstrapResult,
       conversationMetrics: null,
       ingressLane: "assistant-notification",
+      redactedLogEntries: [
+        {
+          component: "runtime",
+          eventId: "evt_notification",
+          level: "info",
+          message: "Hosted assistant notification started.",
+          phase: "wake.running",
+          redacted: {
+            deliveryDedupeTokenPresent: true,
+            deliveryDispatchMode: "queue-only",
+            firstContact: true,
+            notificationRouteChannel: "linq",
+            notificationRouteDeliveryKind: "thread",
+            notificationRouteIdentityPresent: true,
+            notificationRouteThreadIdPresent: true,
+            notificationRouteThreadIsDirect: true,
+            responsePolicyKind: "require_send_exact_text",
+          },
+        },
+        {
+          component: "runtime",
+          eventId: "evt_notification",
+          level: "info",
+          message: "Hosted assistant notification finished.",
+          phase: "wake.running",
+          redacted: {
+            deliveryDedupeTokenPresent: true,
+            deliveryDispatchMode: "queue-only",
+            firstContact: true,
+            notificationRouteChannel: "linq",
+            notificationRouteDeliveryKind: "thread",
+            notificationRouteIdentityPresent: true,
+            notificationRouteThreadIdPresent: true,
+            notificationRouteThreadIsDirect: true,
+            responsePolicyKind: "require_send_exact_text",
+          },
+        },
+      ],
       shareImportResult: null,
       shareImportTitle: null,
       vaultSyncImportResult: null,
@@ -327,16 +365,33 @@ describe("executeHostedIngressEvent", () => {
       new Error("Azure content filter blocked the welcome message"),
     );
 
-    await expect(executeHostedIngressEvent({
+    const result = await executeHostedIngressEvent({
       wake,
       executionContext,
       runtime: createRuntime(),
       runtimeEnv: {},
       vaultRoot: "/tmp/assistant-runtime-events",
-    })).resolves.toMatchObject({
+    });
+
+    expect(result).toMatchObject({
       conversationMetrics: null,
       ingressLane: "assistant-notification",
     });
+    expect(result.redactedLogEntries).toEqual([
+      expect.objectContaining({
+        eventId: "evt_notification_skipped",
+        message: "Hosted assistant notification started.",
+      }),
+      expect.objectContaining({
+        eventId: "evt_notification_skipped",
+        level: "warn",
+        message: "Hosted assistant notification failed and was skipped so the hosted run can continue.",
+        redacted: expect.objectContaining({
+          errorCode: "runtime_error",
+          notificationRouteThreadIsDirect: null,
+        }),
+      }),
+    ]);
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({
@@ -571,6 +626,7 @@ describe("executeHostedIngressEvent", () => {
         parserProcessed: 0,
       },
       ingressLane: "conversation-message",
+      redactedLogEntries: [],
       shareImportResult: null,
       shareImportTitle: null,
       vaultSyncImportResult: null,
@@ -602,6 +658,7 @@ describe("executeHostedIngressEvent", () => {
       bootstrapResult: null,
       conversationMetrics: null,
       ingressLane: "member-channels-updated",
+      redactedLogEntries: [],
       shareImportResult: null,
       shareImportTitle: null,
       vaultSyncImportResult: null,

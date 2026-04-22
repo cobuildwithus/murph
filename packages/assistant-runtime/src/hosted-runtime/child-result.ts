@@ -10,6 +10,7 @@ export interface HostedAssistantRuntimeChildResult {
   ok: boolean;
   error?: {
     code?: string | null;
+    details?: Record<string, unknown> | null;
     message: string;
     name?: string | null;
     stack?: string | null;
@@ -32,17 +33,23 @@ export function createHostedRuntimeChildError(
         ? "HOSTED_ASSISTANT_CONFIG_REQUIRED"
         : "HOSTED_ASSISTANT_CONFIG_INVALID",
       message,
-    );
+    ) as HostedAssistantConfigurationError & { details?: Record<string, unknown> | null };
     classified.stack = error.stack ?? classified.stack;
+    if (error?.details) {
+      classified.details = error.details;
+    }
     return classified;
   }
 
-  const untyped = new Error(message);
+  const untyped = new Error(message) as Error & { details?: Record<string, unknown> | null };
   if (error?.name) {
     untyped.name = error.name;
   }
   if (error?.stack) {
     untyped.stack = error.stack;
+  }
+  if (error?.details) {
+    untyped.details = error.details;
   }
   return untyped;
 }

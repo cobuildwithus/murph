@@ -1,6 +1,7 @@
 import type {
   HostedExecutionBundleRef,
   HostedBrowserVaultReplicaRef,
+  HostedExecutionRedactedLogEntry,
   HostedExecutionRunContext,
   HostedExecutionRunLevel,
   HostedExecutionRunPhase,
@@ -18,6 +19,7 @@ import type { GatewayProjectionSnapshot } from "@murphai/gateway-core";
 import {
   deriveHostedExecutionErrorCode,
   emitHostedExecutionStructuredLog,
+  extractHostedAssistantNotificationRedactedDetails,
   formatHostedExecutionLogMessage,
 } from "@murphai/hosted-execution";
 import {
@@ -239,6 +241,15 @@ export class RunnerRunProcessor {
           result: runnerResult.result,
           run,
         });
+        void recordHostedRunnerResultLogsInWebBestEffort({
+          baseUrl: this.dependencies.hostedWebBaseUrl,
+          callbackSigning: this.dependencies.env.webCallbackSigning,
+          redactedLogEntries: result.result.redactedLogEntries ?? null,
+          run,
+          runToken: input.runToken,
+          userId,
+          wakeEventId: runEventId,
+        });
         void recordHostedRunBreadcrumbInWebBestEffort({
           baseUrl: this.dependencies.hostedWebBaseUrl,
           callbackSigning: this.dependencies.env.webCallbackSigning,
@@ -289,6 +300,15 @@ export class RunnerRunProcessor {
         result: runnerResult.result,
         run,
       });
+      void recordHostedRunnerResultLogsInWebBestEffort({
+        baseUrl: this.dependencies.hostedWebBaseUrl,
+        callbackSigning: this.dependencies.env.webCallbackSigning,
+        redactedLogEntries: result.result.redactedLogEntries ?? null,
+        run,
+        runToken: input.runToken,
+        userId,
+        wakeEventId: runEventId,
+      });
       const browserVaultReplicaRef = await this.persistBrowserVaultReplicaBestEffort(
         userId,
         runnerResult.browserVaultReplica ?? null,
@@ -327,11 +347,14 @@ export class RunnerRunProcessor {
           ? "Cloudflare deferred hosted run execution because the runtime is not configured yet."
           : "Cloudflare runner invocation failed while preparing the hosted run snapshot.",
         phase: backpressured ? "runtime_backpressured" : "runtime_failed",
-        redacted: {
-          eventCount: input.events.length,
-          reason: backpressured ? "runtime_not_configured" : "runner_invocation_failed",
-          resumeFinalize: false,
-        },
+        redacted: mergeHostedRunRedactedDetails(
+          {
+            eventCount: input.events.length,
+            reason: backpressured ? "runtime_not_configured" : "runner_invocation_failed",
+            resumeFinalize: false,
+          },
+          extractHostedAssistantNotificationRedactedDetails(error),
+        ),
         run,
         runToken: input.runToken,
         userId,
@@ -499,10 +522,13 @@ export class RunnerRunProcessor {
           ? "Cloudflare deferred hosted run finalization because the runtime is not configured yet."
           : "Cloudflare runner invocation failed while finalizing the hosted run.",
         phase: backpressured ? "runtime_backpressured" : "runtime_failed",
-        redacted: {
-          reason: backpressured ? "runtime_not_configured" : "runner_finalize_failed",
-          resumeFinalize: true,
-        },
+        redacted: mergeHostedRunRedactedDetails(
+          {
+            reason: backpressured ? "runtime_not_configured" : "runner_finalize_failed",
+            resumeFinalize: true,
+          },
+          extractHostedAssistantNotificationRedactedDetails(error),
+        ),
         run,
         runToken: input.runToken,
         userId,
@@ -1013,6 +1039,7 @@ export function summarizeHostedAssistantDeliveryOutcomes(
 export async function recordHostedRunPhaseLogInWebBestEffort(input: {
   baseUrl: string | null;
   callbackSigning: HostedExecutionEnvironment["webCallbackSigning"];
+  component?: string;
   error?: unknown;
   level?: HostedExecutionRunLevel;
   message: string;
@@ -1034,6 +1061,7 @@ export async function recordHostedRunPhaseLogInWebBestEffort(input: {
 export async function recordHostedRunBreadcrumbInWebBestEffort(input: {
   baseUrl: string | null;
   callbackSigning: HostedExecutionEnvironment["webCallbackSigning"];
+  component?: string;
   error?: unknown;
   level?: HostedExecutionRunLevel;
   message: string;
@@ -1057,7 +1085,7 @@ export async function recordHostedRunBreadcrumbInWebBestEffort(input: {
   const recordLog = input.recordLog ?? recordHostedRunLogInWeb;
   const redacted = {
     ...(input.redacted ?? {}),
-    errorCode: input.error === undefined ? null : deriveHostedExecutionErrorCode(input.error),
+    ...(input.error === undefined ? {} : { errorCode: deriveHostedExecutionErrorCode(input.error) }),
     runElapsedMs: computeHostedRunElapsedMs(input.run),
   };
 
@@ -1066,7 +1094,7 @@ export async function recordHostedRunBreadcrumbInWebBestEffort(input: {
       baseUrl: input.baseUrl,
       body: {
         at: new Date().toISOString(),
-        component: HOSTED_RUN_LOG_COMPONENT,
+        component: input.component ?? HOSTED_RUN_LOG_COMPONENT,
         level: input.level ?? (input.error === undefined ? "info" : "error"),
         message: input.message,
         phase: input.phase,
@@ -1094,6 +1122,52 @@ export async function recordHostedRunBreadcrumbInWebBestEffort(input: {
       userId: input.userId,
     });
   }
+}
+
+export async function recordHostedRunnerResultLogsInWebBestEffort(input: {
+  baseUrl: string | null;
+  callbackSigning: HostedExecutionEnvironment["webCallbackSigning"];
+  recordLog?: typeof recordHostedRunLogInWeb;
+  redactedLogEntries: readonly HostedExecutionRedactedLogEntry[] | null | undefined;
+  run: HostedExecutionRunContext;
+  runToken?: string | null;
+  userId: string;
+  wakeEventId: string;
+}): Promise<void> {
+  for (const entry of input.redactedLogEntries ?? []) {
+    const eventId = entry.eventId ?? input.wakeEventId;
+    await recordHostedRunBreadcrumbInWebBestEffort({
+      baseUrl: input.baseUrl,
+      callbackSigning: input.callbackSigning,
+      component: entry.component,
+      level: entry.level,
+      message: entry.message,
+      phase: entry.phase,
+      recordLog: input.recordLog,
+      redacted: mergeHostedRunRedactedDetails(
+        {
+          eventId,
+        },
+        entry.redacted ?? null,
+      ),
+      run: input.run,
+      runToken: input.runToken,
+      userId: input.userId,
+      wakeEventId: eventId,
+    });
+  }
+}
+
+function mergeHostedRunRedactedDetails(
+  primary: Record<string, unknown> | null | undefined,
+  secondary: Record<string, unknown> | null | undefined,
+): Record<string, unknown> | null {
+  const merged = {
+    ...(primary ?? {}),
+    ...(secondary ?? {}),
+  };
+
+  return Object.keys(merged).length > 0 ? merged : null;
 }
 
 

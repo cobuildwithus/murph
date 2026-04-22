@@ -25,6 +25,7 @@ import type {
   HostedExecutionEvent,
   HostedExecutionConversationMessageWake,
   HostedExecutionLinqConversationMessagePayload,
+  HostedExecutionRedactedLogEntry,
   HostedExecutionRunnerRequest,
   HostedExecutionRunnerSharePack,
   HostedExecutionRunnerVaultSyncImport,
@@ -42,6 +43,7 @@ import type {
 } from "./contracts.ts";
 import type {
   HostedExecutionRunContext,
+  HostedExecutionRunLevel,
   HostedExecutionRunStatus,
   HostedExecutionTimelineEntry,
 } from "./observability.ts";
@@ -488,9 +490,60 @@ export function parseHostedExecutionRunnerResult(value: unknown): HostedExecutio
                   "Hosted execution runner result redactedDetails",
                 ),
           }),
+      ...(result.redactedLogEntries === undefined
+        ? {}
+        : {
+            redactedLogEntries: result.redactedLogEntries === null
+              ? null
+              : requireArray(
+                  result.redactedLogEntries,
+                  "Hosted execution runner result redactedLogEntries",
+                ).map((entry, index) =>
+                  parseHostedExecutionRedactedLogEntry(
+                    entry,
+                    `Hosted execution runner result redactedLogEntries[${index}]`,
+                  ),
+                ),
+          }),
       summary: requireString(result.summary, "Hosted execution runner result summary"),
     },
   };
+}
+
+function parseHostedExecutionRedactedLogEntry(
+  value: unknown,
+  label: string,
+): HostedExecutionRedactedLogEntry {
+  const record = requireObject(value, label);
+  return {
+    component: requireString(record.component, `${label} component`),
+    ...(record.eventId === undefined
+      ? {}
+      : {
+          eventId: readOptionalNullableString(record.eventId, `${label} eventId`),
+        }),
+    level: parseHostedRunLogLevelValue(record.level, `${label} level`),
+    message: requireString(record.message, `${label} message`),
+    phase: requireString(record.phase, `${label} phase`),
+    ...(record.redacted === undefined
+      ? {}
+      : {
+          redacted: record.redacted === null
+            ? null
+            : requireObject(record.redacted, `${label} redacted`),
+        }),
+  };
+}
+
+function parseHostedRunLogLevelValue(
+  value: unknown,
+  label: string,
+): HostedExecutionRunLevel {
+  const level = requireString(value, label);
+  if (isHostedExecutionRunLevel(level)) {
+    return level;
+  }
+  throw new TypeError(`${label} must be a valid hosted execution run level.`);
 }
 
 export function parseHostedExecutionUserStatus(value: unknown): HostedExecutionUserStatus {

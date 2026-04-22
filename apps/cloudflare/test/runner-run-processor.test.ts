@@ -18,6 +18,7 @@ import {
   RunnerRunProcessor,
   recordHostedRunBreadcrumbInWebBestEffort,
   recordHostedRunPhaseLogInWebBestEffort,
+  recordHostedRunnerResultLogsInWebBestEffort,
   summarizeHostedAssistantDeliveryOutcomes,
 } from "../src/user-runner/runner-run-processor.ts";
 import { MemoryEncryptedR2Bucket, createTestRootKey } from "./test-helpers.js";
@@ -320,6 +321,43 @@ describe("recordHostedRunBreadcrumbInWebBestEffort", () => {
 
     expect(recordLog).not.toHaveBeenCalled();
   });
+
+  it("allows explicit log components and preserves provided error codes when no error object is passed", async () => {
+    const recordLog = vi.fn().mockResolvedValue({
+      log: null,
+      logged: true,
+    });
+
+    await recordHostedRunBreadcrumbInWebBestEffort({
+      baseUrl: "https://hosted.example",
+      callbackSigning,
+      component: "runtime",
+      level: "warn",
+      message: "Hosted assistant notification failed and was skipped so the hosted run can continue.",
+      phase: "wake.running",
+      recordLog,
+      redacted: {
+        errorCode: "runtime_error",
+      },
+      run: {
+        attempt: 1,
+        runId: "run-321",
+        startedAt: new Date(Date.now() - 250).toISOString(),
+      },
+      runToken: "run-token-321",
+      userId: "user-321",
+      wakeEventId: "wake-321",
+    });
+
+    expect(recordLog).toHaveBeenCalledWith(expect.objectContaining({
+      body: expect.objectContaining({
+        component: "runtime",
+        redacted: expect.objectContaining({
+          errorCode: "runtime_error",
+        }),
+      }),
+    }));
+  });
 });
 
 describe("recordHostedRunPhaseLogInWebBestEffort", () => {
@@ -358,6 +396,79 @@ describe("recordHostedRunPhaseLogInWebBestEffort", () => {
         redacted: expect.objectContaining({
           eventId: "wake-999",
           errorCode: expect.any(String),
+        }),
+      }),
+    }));
+  });
+});
+
+describe("recordHostedRunnerResultLogsInWebBestEffort", () => {
+  const callbackSigning = {
+    keyId: "v1",
+    privateKeyJwkJson: "{\"kty\":\"EC\"}",
+  };
+
+  it("forwards runtime-owned redacted log entries with their originating event ids", async () => {
+    const recordLog = vi.fn().mockResolvedValue({
+      log: null,
+      logged: true,
+    });
+
+    await recordHostedRunnerResultLogsInWebBestEffort({
+      baseUrl: "https://hosted.example",
+      callbackSigning,
+      recordLog,
+      redactedLogEntries: [
+        {
+          component: "runtime",
+          eventId: "wake-notification-1",
+          level: "warn",
+          message: "Hosted assistant notification failed and was skipped so the hosted run can continue.",
+          phase: "wake.running",
+          redacted: {
+            errorCode: "runtime_error",
+            notificationRouteChannel: "linq",
+          },
+        },
+        {
+          component: "runtime",
+          eventId: "wake-notification-2",
+          level: "info",
+          message: "Hosted assistant notification finished.",
+          phase: "wake.running",
+          redacted: {
+            notificationRouteChannel: "telegram",
+          },
+        },
+      ],
+      run: {
+        attempt: 1,
+        runId: "run-654",
+        startedAt: new Date(Date.now() - 250).toISOString(),
+      },
+      runToken: "run-token-654",
+      userId: "user-654",
+      wakeEventId: "wake-batch",
+    });
+
+    expect(recordLog).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      body: expect.objectContaining({
+        component: "runtime",
+        message: "Hosted assistant notification failed and was skipped so the hosted run can continue.",
+        redacted: expect.objectContaining({
+          errorCode: "runtime_error",
+          eventId: "wake-notification-1",
+          notificationRouteChannel: "linq",
+        }),
+      }),
+    }));
+    expect(recordLog).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      body: expect.objectContaining({
+        component: "runtime",
+        message: "Hosted assistant notification finished.",
+        redacted: expect.objectContaining({
+          eventId: "wake-notification-2",
+          notificationRouteChannel: "telegram",
         }),
       }),
     }));

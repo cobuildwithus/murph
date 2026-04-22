@@ -1,14 +1,19 @@
 import type {
   HostedExecutionAssistantNotificationRequestedWake,
   HostedExecutionConversationMessageWake,
+  HostedExecutionRedactedLogEntry,
   HostedExecutionRunnerSharePack,
   HostedExecutionRunnerVaultSyncImport,
+  HostedExecutionRunLevel,
   HostedIngressSystemEnvelope,
   HostedIngressEnvelope,
+  HostedExecutionRunPhase,
 } from "@murphai/hosted-execution";
 import { sendAssistantNotification } from "@murphai/assistant-engine";
 import {
+  deriveHostedExecutionErrorCode,
   emitHostedExecutionStructuredLog,
+  extractHostedAssistantNotificationRedactedDetails,
   isHostedConversationMessageWake,
 } from "@murphai/hosted-execution";
 import {
@@ -65,6 +70,7 @@ export async function executeHostedIngressEvent(input: {
     bootstrapResult,
     conversationMetrics: ingressEffect.conversationMetrics,
     ingressLane: ingressEffect.ingressLane,
+    redactedLogEntries: ingressEffect.redactedLogEntries ?? [],
     shareImportResult: ingressEffect.shareImportResult,
     shareImportTitle: ingressEffect.shareImportTitle,
     vaultSyncImportResult: ingressEffect.vaultSyncImportResult,
@@ -155,6 +161,7 @@ async function executeHostedSystemWake(input: {
           vaultRoot: input.vaultRoot,
         })),
         conversationMetrics: null,
+        redactedLogEntries: [],
         vaultSyncImportResult: null,
         ingressLane: "vault-share-accepted",
       };
@@ -168,6 +175,7 @@ async function executeHostedSystemWake(input: {
           vaultRoot: input.vaultRoot,
           vaultSyncImport: input.vaultSyncImport,
         })),
+        redactedLogEntries: [],
         ingressLane: "vault-sync-import",
       };
   }
@@ -182,13 +190,13 @@ export async function executeHostedAssistantNotificationWake(input: {
   executionContext: AssistantExecutionContext;
   vaultRoot: string;
 }): Promise<HostedIngressOutcome> {
-  emitHostedExecutionStructuredLog({
-    component: "runtime",
-    details: buildHostedAssistantNotificationLogDetails(input.wake),
-    message: "Hosted assistant notification started.",
-    phase: "wake.running",
-    wake: input.wake,
-  });
+  const redactedLogEntries: HostedExecutionRedactedLogEntry[] = [
+    emitHostedAssistantNotificationLifecycleLog({
+      message: "Hosted assistant notification started.",
+      phase: "wake.running",
+      wake: input.wake,
+    }),
+  ];
 
   try {
     await sendAssistantNotification(
@@ -196,32 +204,38 @@ export async function executeHostedAssistantNotificationWake(input: {
     );
   } catch (error) {
     if (!shouldSkipFailedHostedAssistantNotification(input.wake)) {
-      emitHostedExecutionStructuredLog({
-        component: "runtime",
-        details: buildHostedAssistantNotificationLogDetails(input.wake),
-        error,
-        level: "error",
-        message: "Hosted assistant notification failed.",
-        phase: "failed",
-        wake: input.wake,
-      });
+      redactedLogEntries.push(
+        emitHostedAssistantNotificationLifecycleLog({
+          error,
+          level: "error",
+          message: "Hosted assistant notification failed.",
+          phase: "failed",
+          wake: input.wake,
+        }),
+      );
       throw error;
     }
 
-    emitHostedAssistantNotificationSkipLog(input.wake, error);
+    redactedLogEntries.push(emitHostedAssistantNotificationSkipLog(input.wake, error));
+    return createNoopIngressEffect({
+      conversationMetrics: null,
+      ingressLane: "assistant-notification",
+      redactedLogEntries,
+    });
   }
 
-  emitHostedExecutionStructuredLog({
-    component: "runtime",
-    details: buildHostedAssistantNotificationLogDetails(input.wake),
-    message: "Hosted assistant notification finished.",
-    phase: "wake.running",
-    wake: input.wake,
-  });
+  redactedLogEntries.push(
+    emitHostedAssistantNotificationLifecycleLog({
+      message: "Hosted assistant notification finished.",
+      phase: "wake.running",
+      wake: input.wake,
+    }),
+  );
 
   return createNoopIngressEffect({
     conversationMetrics: null,
     ingressLane: "assistant-notification",
+    redactedLogEntries,
   });
 }
 
@@ -235,10 +249,8 @@ function shouldSkipFailedHostedAssistantNotification(
 function emitHostedAssistantNotificationSkipLog(
   wake: HostedExecutionAssistantNotificationRequestedWake,
   error: unknown,
-): void {
-  emitHostedExecutionStructuredLog({
-    component: "runtime",
-    details: buildHostedAssistantNotificationLogDetails(wake),
+): HostedExecutionRedactedLogEntry {
+  return emitHostedAssistantNotificationLifecycleLog({
     error,
     level: "warn",
     message: "Hosted assistant notification failed and was skipped so the hosted run can continue.",
@@ -268,13 +280,46 @@ function buildHostedAssistantNotificationLogDetails(
 function createNoopIngressEffect(input: {
   conversationMetrics: HostedConversationWakeMetrics | null;
   ingressLane: HostedIngressLane;
+  redactedLogEntries?: HostedExecutionRedactedLogEntry[];
 }): HostedIngressOutcome {
   return {
     conversationMetrics: input.conversationMetrics,
     ingressLane: input.ingressLane,
+    redactedLogEntries: input.redactedLogEntries ?? [],
     shareImportResult: null,
     shareImportTitle: null,
     vaultSyncImportResult: null,
+  };
+}
+
+function emitHostedAssistantNotificationLifecycleLog(input: {
+  error?: unknown;
+  level?: HostedExecutionRunLevel;
+  message: string;
+  phase: HostedExecutionRunPhase;
+  wake: HostedExecutionAssistantNotificationRequestedWake;
+}): HostedExecutionRedactedLogEntry {
+  emitHostedExecutionStructuredLog({
+    component: "runtime",
+    details: buildHostedAssistantNotificationLogDetails(input.wake),
+    ...(input.error === undefined ? {} : { error: input.error }),
+    ...(input.level === undefined ? {} : { level: input.level }),
+    message: input.message,
+    phase: input.phase,
+    wake: input.wake,
+  });
+
+  return {
+    component: "runtime",
+    eventId: input.wake.eventId,
+    level: input.level ?? (input.error === undefined ? "info" : "error"),
+    message: input.message,
+    phase: input.phase,
+    redacted: {
+      ...buildHostedAssistantNotificationLogDetails(input.wake),
+      ...(extractHostedAssistantNotificationRedactedDetails(input.error) ?? {}),
+      ...(input.error === undefined ? {} : { errorCode: deriveHostedExecutionErrorCode(input.error) }),
+    },
   };
 }
 

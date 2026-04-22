@@ -260,6 +260,9 @@ export async function executeHostedRunDrainForCommit(input: {
         eventsHandled: metrics.eventsHandled,
         nextWakeAt: metrics.nextWakeAt,
         redactedDetails: buildHostedRunDrainRedactedDetails(metrics),
+        ...(metrics.redactedLogEntries.length === 0
+          ? {}
+          : { redactedLogEntries: metrics.redactedLogEntries }),
         summary: summarizeHostedRunDrain(runDrain, metrics),
       },
     },
@@ -318,6 +321,7 @@ function createHostedRunDrainMetrics(): HostedRunDrainMetrics {
     eventsHandled: 0,
     nextWakeAt: null,
     parserProcessed: 0,
+    redactedLogEntries: [],
     shareImportResult: null,
     shareImportTitle: null,
     vaultSyncImportResult: null,
@@ -350,6 +354,10 @@ function mergeHostedRunDrainWakeMetrics(
     target.nextWakeAt,
     metrics.conversationMetrics?.nextWakeAt ?? null,
   );
+  const redactedLogEntries = metrics.redactedLogEntries ?? [];
+  if (redactedLogEntries.length > 0) {
+    target.redactedLogEntries.push(...redactedLogEntries);
+  }
 
   if (metrics.shareImportResult) {
     target.shareImportResult = metrics.shareImportResult;

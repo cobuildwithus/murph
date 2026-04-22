@@ -138,6 +138,26 @@ export type HostedExecutionStructuredLogDetails = {
   [key: string]: HostedExecutionStructuredLogDetailValue;
 };
 
+const HOSTED_ASSISTANT_NOTIFICATION_STRING_DETAIL_KEYS = [
+  "assistantNotificationChannel",
+  "assistantNotificationDeliveryDispatchMode",
+  "assistantNotificationDeliveryKind",
+  "assistantNotificationProvider",
+  "assistantNotificationProviderModel",
+  "assistantNotificationRouteId",
+  "assistantNotificationStage",
+  "assistantNotificationTurnTrigger",
+] as const;
+
+const HOSTED_ASSISTANT_NOTIFICATION_BOOLEAN_DETAIL_KEYS = [
+  "assistantNotificationExplicitTargetPresent",
+  "assistantNotificationIdentityIdPresent",
+  "assistantNotificationThreadIdPresent",
+  "assistantNotificationThreadIsDirect",
+  "assistantNotificationWorkingDirectoryPresent",
+  "executionContextHosted",
+] as const;
+
 export interface HostedExecutionStructuredLogInput {
   component: string;
   details?: HostedExecutionStructuredLogDetails | null;
@@ -335,6 +355,63 @@ export function buildHostedExecutionStructuredLogRecord(
     time: input.time ?? new Date().toISOString(),
     userId: input.userId ?? null,
   };
+}
+
+export function extractHostedAssistantNotificationRedactedDetails(
+  error: unknown,
+): HostedExecutionStructuredLogDetails | null {
+  if (!(error instanceof Error)) {
+    return null;
+  }
+
+  const mergedDetails = mergeHostedExecutionStructuredLogDetails(
+    sanitizeHostedExecutionStructuredLogDetails(
+      readHostedExecutionObjectErrorProperty(error, ["context"]),
+    ),
+    sanitizeHostedExecutionStructuredLogDetails(
+      readHostedExecutionObjectErrorProperty(error, ["details"]),
+    ),
+  );
+
+  if (!mergedDetails) {
+    return null;
+  }
+
+  const details: HostedExecutionStructuredLogDetails = {};
+
+  for (const key of HOSTED_ASSISTANT_NOTIFICATION_STRING_DETAIL_KEYS) {
+    const value = mergedDetails[key];
+    if (typeof value === "string" || value === null) {
+      details[key] = value;
+    }
+  }
+
+  for (const key of HOSTED_ASSISTANT_NOTIFICATION_BOOLEAN_DETAIL_KEYS) {
+    const value = mergedDetails[key];
+    if (typeof value === "boolean" || value === null) {
+      details[key] = value;
+    }
+  }
+
+  if (
+    "assistantNotificationLinqBaseUrlOrigin" in mergedDetails
+    || "assistantNotificationLinqBaseUrlPath" in mergedDetails
+  ) {
+    details.assistantNotificationLinqBaseUrlConfigured =
+      typeof mergedDetails.assistantNotificationLinqBaseUrlOrigin === "string"
+      || typeof mergedDetails.assistantNotificationLinqBaseUrlPath === "string";
+  }
+
+  if (
+    "assistantNotificationProviderBaseUrlOrigin" in mergedDetails
+    || "assistantNotificationProviderBaseUrlPath" in mergedDetails
+  ) {
+    details.assistantNotificationProviderBaseUrlConfigured =
+      typeof mergedDetails.assistantNotificationProviderBaseUrlOrigin === "string"
+      || typeof mergedDetails.assistantNotificationProviderBaseUrlPath === "string";
+  }
+
+  return Object.keys(details).length > 0 ? details : null;
 }
 
 function shouldEmitHostedExecutionStructuredLogToStdIo(
