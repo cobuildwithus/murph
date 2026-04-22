@@ -220,6 +220,10 @@ declare module 'incur' {
       'wearables activity list': { args: {}; options: { vault: string; requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; limit: number } }
       'wearables body list': { args: {}; options: { vault: string; requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; limit: number } }
       'wearables day': { args: {}; options: { vault: string; requestId?: string; date: string; provider?: string[] } }
+      'wearables drift': { args: {}; options: { vault: string; requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; windowDays: number } }
+      'wearables latest': { args: {}; options: { vault: string; requestId?: string; date?: string; from?: string; to?: string; provider?: string[] } }
+      'wearables metric latest': { args: { metric: string }; options: { vault: string; requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; windowDays: number } }
+      'wearables metric trend': { args: { metric: string }; options: { vault: string; requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; windowDays: number } }
       'wearables recovery list': { args: {}; options: { vault: string; requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; limit: number } }
       'wearables sleep list': { args: {}; options: { vault: string; requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; limit: number } }
       'wearables sources list': { args: {}; options: { vault: string; requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; limit: number } }

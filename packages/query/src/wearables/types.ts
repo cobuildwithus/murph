@@ -177,6 +177,10 @@ export interface WearableSummaryFilters extends WearableFilters {
   limit?: number;
 }
 
+export interface WearableMetricSummaryFilters extends WearableFilters {
+  windowDays?: number;
+}
+
 export type WearableActivitySummary = WearableActivityDay;
 export type WearableSleepSummary = WearableSleepNight;
 export type WearableRecoverySummary = WearableRecoveryDay;
@@ -194,6 +198,74 @@ export interface WearableDaySummary {
   sleep: WearableSleepNight | null;
   sourceHealth: WearableSourceHealth[];
   summaryConfidence: WearableConfidenceLevel;
+}
+
+export type WearableMetricSummaryKind = "activity" | "bodyState" | "recovery" | "sleep";
+
+export interface WearableMetricWindowStats {
+  average: number | null;
+  count: number;
+  from: string | null;
+  max: number | null;
+  min: number | null;
+  to: string | null;
+}
+
+export interface WearableMetricTrendPoint {
+  confidence: WearableConfidenceLevel;
+  date: string;
+  paths: string[];
+  provider: string | null;
+  recordedAt: string | null;
+  recordIds: string[];
+  unit: string | null;
+  value: number;
+}
+
+export interface WearableMetricLatestSummary {
+  confidence: WearableMetricConfidence;
+  date: string | null;
+  delta: number | null;
+  max: number | null;
+  metric: WearableMetricKey;
+  min: number | null;
+  notes: string[];
+  paths: string[];
+  percentChange: number | null;
+  priorWindow: WearableMetricWindowStats;
+  provider: string | null;
+  recentWindow: WearableMetricWindowStats;
+  recordedAt: string | null;
+  recordIds: string[];
+  requestedMetric: string;
+  resolvedAlias: string | null;
+  summaryKind: WearableMetricSummaryKind;
+  unit: string | null;
+  value: number | null;
+  windowDays: number;
+}
+
+export interface WearableMetricTrendSummary extends WearableMetricLatestSummary {
+  points: WearableMetricTrendPoint[];
+}
+
+export interface WearableLatestSummary {
+  activity: WearableActivityDay | null;
+  bodyState: WearableBodyStateDay | null;
+  day: WearableDaySummary;
+  latestDate: string;
+  notes: string[];
+  providers: string[];
+  recovery: WearableRecoveryDay | null;
+  sleep: WearableSleepNight | null;
+  sourceHealth: WearableSourceHealth[];
+}
+
+export interface WearableDriftSummary {
+  latest: WearableLatestSummary;
+  notes: string[];
+  signals: WearableMetricLatestSummary[];
+  windowDays: number;
 }
 
 export interface WearableSleepWindowCandidate {
