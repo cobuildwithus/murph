@@ -68,6 +68,8 @@ export default createMurphPackageVitestConfig({
     "src/usecases/shared.ts",
     "src/usecases/text-duration.ts",
     "src/usecases/vault-usecase-helpers.ts",
+    "src/usecases/capture.ts",
+    "src/captures.ts",
     "src/usecases/workout-model.ts",
   ],
 });
