@@ -150,9 +150,13 @@ export {
 export {
   deviceSyncProviderManifests,
   getConfiguredDeviceSyncProviderManifest,
+  getConfiguredDeviceSyncProviderJobDefinition,
   listConfiguredDeviceSyncProviderManifests,
+  normalizeConfiguredDeviceSyncJobInput,
+  normalizeConfiguredDeviceSyncJobRecord,
   requireConfiguredDeviceSyncProviderManifest,
   resolveConfiguredDeviceSyncProviderManifest,
+  shapeConfiguredDeviceSyncHostedHintPayload,
 } from "./config/provider-manifests.ts";
 export {
   createConfiguredDeviceSyncProviders,
@@ -177,6 +181,10 @@ export type {
 } from "./config/provider-configs.ts";
 export type {
   ConfiguredDeviceSyncProviderCapabilities,
+  DeviceSyncJobPayloadFieldKind,
+  DeviceSyncJobPayloadFieldSpec,
+  DeviceSyncProviderJobDefinition,
+  DeviceSyncProviderJobDefinitionMap,
   DeviceSyncConfiguredProviderManifest,
   DeviceSyncConfiguredProviderManifestByKey,
   HostedHintFieldKind,

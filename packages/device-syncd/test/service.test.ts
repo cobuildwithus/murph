@@ -148,6 +148,19 @@ function createFakeProvider(overrides: Partial<DeviceSyncProvider> = {}): Device
   };
 }
 
+const TEST_SECRET_CODEC = createSecretCodec("secret-for-tests");
+
+function encryptStoredAccessToken(provider: string, externalAccountId: string, accessToken: string): string {
+  return TEST_SECRET_CODEC.encrypt(
+    accessToken,
+    buildDeviceSyncTokenCipherOptions({
+      externalAccountId,
+      provider,
+      purpose: "device-sync-access-token",
+    }),
+  );
+}
+
 function requireCallback(callback: (() => void) | null, message: string): () => void {
   assert.ok(callback, message);
   return callback;
@@ -751,6 +764,118 @@ test("device sync service treats token refresh races as cancelled work instead o
     accountId: connected.account.id,
     jobId: processedJob!.id,
   });
+
+  service.close();
+});
+
+test("device sync service accepts legacy Oura resource jobs that fall back without a dataType", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-oura-legacy-resource-job");
+  let seenPayload: Record<string, unknown> | null = null;
+  const service = createDeviceSyncService({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [
+      createFakeProvider({
+        provider: "oura",
+        async executeJob(_context, job) {
+          seenPayload = { ...job.payload };
+          return {};
+        },
+      }),
+    ],
+  });
+
+  const account = service.store.upsertAccount({
+    provider: "oura",
+    externalAccountId: "oura-legacy",
+    displayName: "Oura Legacy",
+    scopes: ["personal"],
+    tokens: {
+      accessToken: "oura-access",
+      accessTokenEncrypted: encryptStoredAccessToken("oura", "oura-legacy", "oura-access"),
+    },
+    connectedAt: "2026-03-17T10:00:00.000Z",
+  });
+  const job = service.store.enqueueJob({
+    accountId: account.id,
+    provider: "oura",
+    kind: "resource",
+    payload: {
+      objectId: "missing-data-type",
+    },
+    availableAt: "2026-03-17T10:00:00.000Z",
+  });
+
+  const processedJob = await service.runWorkerOnce();
+
+  assert.equal(processedJob?.id, job.id);
+  if (!seenPayload) {
+    assert.fail("Expected the Oura legacy resource job to reach provider execution.");
+  }
+  assert.deepEqual(seenPayload, {
+    objectId: "missing-data-type",
+  });
+  assert.equal(service.store.getJobById(job.id)?.status, "succeeded");
+
+  service.close();
+});
+
+test("device sync service accepts legacy Strava delete jobs that rely on the default resource type", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-strava-legacy-delete-job");
+  let seenPayload: Record<string, unknown> | null = null;
+  const service = createDeviceSyncService({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [
+      createFakeProvider({
+        provider: "strava",
+        async executeJob(_context, job) {
+          seenPayload = { ...job.payload };
+          return {};
+        },
+      }),
+    ],
+  });
+
+  const account = service.store.upsertAccount({
+    provider: "strava",
+    externalAccountId: "strava-legacy",
+    displayName: "Strava Legacy",
+    scopes: ["activity:read"],
+    tokens: {
+      accessToken: "strava-access",
+      accessTokenEncrypted: encryptStoredAccessToken("strava", "strava-legacy", "strava-access"),
+    },
+    connectedAt: "2026-03-17T10:00:00.000Z",
+  });
+  const job = service.store.enqueueJob({
+    accountId: account.id,
+    provider: "strava",
+    kind: "delete",
+    payload: {
+      resourceId: "activity-123",
+    },
+    availableAt: "2026-03-17T10:00:00.000Z",
+  });
+
+  const processedJob = await service.runWorkerOnce();
+
+  assert.equal(processedJob?.id, job.id);
+  if (!seenPayload) {
+    assert.fail("Expected the Strava legacy delete job to reach provider execution.");
+  }
+  assert.deepEqual(seenPayload, {
+    resourceId: "activity-123",
+  });
+  assert.equal(service.store.getJobById(job.id)?.status, "succeeded");
 
   service.close();
 });
