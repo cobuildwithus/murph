@@ -67,6 +67,7 @@ import {
 import { persistFailedAssistantPromptAttempt } from './prompt-attempts.js'
 import { resolveAssistantTurnRoutes } from './service-turn-routes.js'
 import { persistPendingAssistantUsageEvent } from './service-usage.js'
+import { isAssistantTurnRevisionRequiredError } from './turn-input.js'
 import {
   getAssistantChannelAdapter,
   type AssistantChannelActivityHandle,
@@ -206,12 +207,19 @@ export async function sendAssistantMessageLocal(
 
         const providerResult = providerOutcome.providerTurn
         responseText = providerResult.response
-        await persistPendingAssistantUsageEvent({
+        const usagePersistenceInput = {
           executionContext,
           providerResult,
           turnId: userTurn.turnId,
           vault: input.vault,
+        }
+        await input.beforeDelivery?.({
+          response: providerResult.response,
+          sessionId: providerResult.session.sessionId,
+          turnId: userTurn.turnId,
+          vault: input.vault,
         })
+        await persistPendingAssistantUsageEvent(usagePersistenceInput)
         const session = await finalizeAssistantTurnArtifacts({
           input,
           plan: sharedPlan,
@@ -258,6 +266,38 @@ export async function sendAssistantMessageLocal(
               : null,
         })
       } catch (error) {
+        if (isAssistantTurnRevisionRequiredError(error)) {
+          const blockedAt = new Date().toISOString()
+          const blockedSession =
+            extractRecoveredAssistantSession(error) ?? resolved.session
+
+          await runAssistantTurnBestEffort(() =>
+            finalizeAssistantTurnReceipt({
+              vault: input.vault,
+              turnId: receipt.turnId,
+              status: 'blocked',
+              deliveryDisposition:
+                input.deliverResponse === true ? 'blocked' : 'not-requested',
+              completedAt: blockedAt,
+            }),
+          )
+
+          await runAssistantTurnBestEffort(() =>
+            recordAssistantDiagnosticEvent({
+              vault: input.vault,
+              component: 'assistant',
+              kind: 'turn.blocked',
+              level: 'info',
+              message: error.message,
+              sessionId: blockedSession.sessionId,
+              turnId: receipt.turnId,
+              at: blockedAt,
+            }),
+          )
+
+          throw error
+        }
+
         const normalizedError = normalizeAssistantDeliveryError(error)
         const failedAt = new Date().toISOString()
         const retryAt =

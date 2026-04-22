@@ -52,6 +52,15 @@ export interface ConversationLocatorResolution {
   explicitAlias: string | null
 }
 
+export interface AssistantConversationCaptureRef {
+  accountId: string | null
+  actorId: string | null
+  actorIsSelf: boolean
+  source: string | null
+  threadId: string | null
+  threadIsDirect: boolean | null
+}
+
 export function normalizeConversationRef(
   input: ConversationRef | null | undefined,
 ): ConversationRef {
@@ -178,14 +187,79 @@ export function conversationRefFromCapture(input: {
   threadId?: string | null
   threadIsDirect?: boolean | null
 }): ConversationRef {
+  const captureRef = conversationCaptureRefFromCapture(input)
+
   return normalizeConversationRef({
-    channel: input.source,
+    channel: captureRef.source,
     identityId:
-      input.source === 'email' || input.source === 'linq' ? input.accountId : null,
-    participantId: input.actorId,
-    threadId: input.threadId,
-    directness: conversationDirectnessFromThreadIsDirect(input.threadIsDirect),
+      captureRef.source === 'email' || captureRef.source === 'linq'
+        ? captureRef.accountId
+        : null,
+    participantId: captureRef.actorId,
+    threadId: captureRef.threadId,
+    directness: conversationDirectnessFromThreadIsDirect(captureRef.threadIsDirect),
   })
+}
+
+export function conversationCaptureRefFromCapture(input: {
+  accountId?: string | null
+  actorId?: string | null
+  actorIsSelf?: boolean | null
+  source?: string | null
+  threadId?: string | null
+  threadIsDirect?: boolean | null
+}): AssistantConversationCaptureRef {
+  return {
+    accountId: normalizeNullableString(input.accountId),
+    actorId: normalizeNullableString(input.actorId),
+    actorIsSelf: input.actorIsSelf === true,
+    source: normalizeNullableString(input.source),
+    threadId: normalizeNullableString(input.threadId),
+    threadIsDirect:
+      typeof input.threadIsDirect === 'boolean' ? input.threadIsDirect : null,
+  }
+}
+
+export function isSameAssistantConversationRef(
+  left: AssistantConversationCaptureRef | null | undefined,
+  right: AssistantConversationCaptureRef | null | undefined,
+): boolean {
+  if (!left || !right) {
+    return false
+  }
+
+  return (
+    left.accountId === right.accountId &&
+    left.actorId === right.actorId &&
+    left.actorIsSelf === right.actorIsSelf &&
+    left.source === right.source &&
+    left.threadId === right.threadId &&
+    left.threadIsDirect === right.threadIsDirect
+  )
+}
+
+export function isSameAssistantConversationCapture(
+  left: {
+    accountId?: string | null
+    actorId?: string | null
+    actorIsSelf?: boolean | null
+    source?: string | null
+    threadId?: string | null
+    threadIsDirect?: boolean | null
+  },
+  right: {
+    accountId?: string | null
+    actorId?: string | null
+    actorIsSelf?: boolean | null
+    source?: string | null
+    threadId?: string | null
+    threadIsDirect?: boolean | null
+  },
+): boolean {
+  return isSameAssistantConversationRef(
+    conversationCaptureRefFromCapture(left),
+    conversationCaptureRefFromCapture(right),
+  )
 }
 
 export function mergeConversationRefs(

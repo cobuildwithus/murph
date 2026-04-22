@@ -497,6 +497,9 @@ test('assistant automation run loop only uses the daemon for remote-safe inputs'
   automationEngineMocks.runAssistantAutomationLocal.mockResolvedValueOnce({
     source: 'local-run',
   })
+  automationEngineMocks.runAssistantAutomationLocal.mockResolvedValueOnce({
+    source: 'local-run',
+  })
 
   assert.deepEqual(
     await runAssistantAutomation({
@@ -532,6 +535,30 @@ test('assistant automation run loop only uses the daemon for remote-safe inputs'
   )
   assert.equal(daemonMocks.maybeRunAssistantAutomationViaDaemon.mock.calls.length, 1)
   assert.equal(automationEngineMocks.runAssistantAutomationLocal.mock.calls.length, 1)
+
+  assert.deepEqual(
+    await runAssistantAutomation({
+      once: true,
+      turnInputPort: {
+        async listNewConversationCaptures(input) {
+          return {
+            captures: [],
+            nextCursor: input.afterCursor,
+          }
+        },
+        async refresh() {
+          return {
+            progressed: false,
+            reason: 'no_new_input',
+          }
+        },
+      },
+      vault: TEST_VAULT,
+    }),
+    { source: 'local-run' },
+  )
+  assert.equal(daemonMocks.maybeRunAssistantAutomationViaDaemon.mock.calls.length, 1)
+  assert.equal(automationEngineMocks.runAssistantAutomationLocal.mock.calls.length, 2)
 })
 
 test('assistant facade modules re-export the package runtime and daemon-aware seams', () => {

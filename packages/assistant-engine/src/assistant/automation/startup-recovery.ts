@@ -6,6 +6,7 @@ import type {
 import type { InboxServices } from '@murphai/inbox-services'
 import type { AssistantExecutionContext } from '../execution-context.js'
 import type { AssistantOutboxDispatchMode } from '../outbox.js'
+import type { AssistantTurnInputPort } from '../turn-input.js'
 import { listAssistantTurnReceipts } from '../receipts.js'
 import { assistantChatReplyArtifactExists } from './artifacts.js'
 import { readAssistantAutoReplyRetryAt } from './auto-reply-retry.js'
@@ -45,6 +46,7 @@ export interface RecoverAssistantAutoRepliesInput {
   scanCursor?: AssistantAutomationCursor | null
   signal?: AbortSignal
   sessionMaxAgeMs?: number | null
+  turnInputPort?: AssistantTurnInputPort
   vault: string
 }
 
@@ -70,9 +72,10 @@ export async function recoverAssistantAutoReplies(
   const enabledChannels = normalizeEnabledChannels(
     autoReply.map((entry) => entry.channel),
   )
-  const autoReplyByChannel = new Map(
-    autoReply.map((entry) => [entry.channel, entry] as const),
-  )
+  const autoReplyByChannel = new Map<
+    string,
+    AssistantAutomationState['autoReply'][number]
+  >(autoReply.map((entry) => [entry.channel, entry] as const))
   if (
     enabledChannels.length === 0 ||
     autoReply.every((entry) => entry.cursor === null) ||
@@ -146,6 +149,7 @@ export async function recoverAssistantAutoReplies(
       requestId: input.requestId ?? null,
       signal: input.signal,
       sessionMaxAgeMs: input.sessionMaxAgeMs ?? null,
+      turnInputPort: input.turnInputPort,
       vault: input.vault,
     })
     summary.failed += result.failed
