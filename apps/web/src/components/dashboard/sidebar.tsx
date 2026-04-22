@@ -2,10 +2,29 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
-import { MenuIcon } from "lucide-react";
+import { usePrivy, useUser } from "@privy-io/react-auth";
+import { ChevronsUpDown, LogOut } from "lucide-react";
+import type { CSSProperties } from "react";
 
-import { Sheet, SheetContent, SheetTrigger } from "@/src/components/ui/sheet";
+import { Avatar, AvatarFallback } from "@/src/components/ui/avatar";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/src/components/ui/dropdown-menu";
+import {
+  Sidebar as ShadcnSidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarHeader,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+} from "@/src/components/ui/sidebar";
 import { cn } from "@/src/lib/utils";
 
 const navItems = [
@@ -19,44 +38,18 @@ const navItems = [
   { label: "Settings", href: "/settings" },
 ];
 
-function NavList({
-  pathname,
-  onNavigate,
-}: {
-  pathname: string;
-  onNavigate?: () => void;
-}) {
-  return (
-    <nav className="flex flex-col gap-1">
-      {navItems.map((item) => {
-        const activePrefix = item.matchPrefix ?? item.href;
-        const isActive =
-          pathname === item.href ||
-          (activePrefix !== "/overview" && pathname.startsWith(activePrefix));
-
-        return (
-          <Link
-            key={item.href}
-            href={item.href}
-            onClick={onNavigate}
-            className={cn(
-              "rounded-lg px-3 py-2 text-sm transition-colors",
-              isActive
-                ? "bg-white/10 font-semibold text-white"
-                : "text-white/60 hover:bg-white/5 hover:text-white/80"
-            )}
-          >
-            {item.label}
-          </Link>
-        );
-      })}
-    </nav>
-  );
-}
+const sidebarThemeStyle = {
+  "--sidebar": "transparent",
+  "--sidebar-foreground": "rgba(255, 255, 255, 0.85)",
+  "--sidebar-accent": "rgba(255, 255, 255, 0.1)",
+  "--sidebar-accent-foreground": "#ffffff",
+  "--sidebar-border": "rgba(255, 255, 255, 0.1)",
+  "--sidebar-ring": "rgba(255, 255, 255, 0.3)",
+} as CSSProperties;
 
 function BrandMark() {
   return (
-    <Link href="/overview" className="flex items-center gap-2.5 px-2">
+    <Link href="/overview" className="flex items-center gap-2.5 px-2 py-1">
       <div className="flex size-7 items-center justify-center rounded-full border border-white/20 text-xs font-semibold text-white">
         M
       </div>
@@ -67,54 +60,112 @@ function BrandMark() {
   );
 }
 
-export function Sidebar() {
-  const pathname = usePathname();
-  const [mobileOpen, setMobileOpen] = useState(false);
+function OuraStatus() {
+  return (
+    <div className="flex items-center gap-2 px-3 py-1.5">
+      <div className="size-2 rounded-full bg-green-400" />
+      <span className="text-xs text-white/50">Oura connected</span>
+    </div>
+  );
+}
+
+function AccountMenu() {
+  const { user } = useUser();
+  const { logout } = usePrivy();
+
+  const primaryLabel =
+    user?.email?.address ?? user?.phone?.number ?? "Account";
+  const initials = primaryLabel.replace(/[^a-zA-Z0-9]/g, "").slice(0, 2).toUpperCase() || "M";
 
   return (
-    <>
-      <aside className="hidden md:flex w-[170px] shrink-0 flex-col justify-between bg-gradient-to-b from-[#2d3436] via-[#3a2e24] to-[#2a1f16] px-4 py-6">
-        <div className="flex flex-col gap-6">
-          <div className="flex flex-col gap-5">
-            <BrandMark />
-            <div className="h-px bg-white/10" />
-          </div>
-          <NavList pathname={pathname} />
-        </div>
-
-        <div className="flex items-center gap-2 px-3">
-          <div className="size-2 rounded-full bg-green-400" />
-          <span className="text-xs text-white/50">Oura connected</span>
-        </div>
-      </aside>
-
-      <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
-        <header className="flex md:hidden items-center justify-between bg-gradient-to-r from-[#2d3436] via-[#3a2e24] to-[#2a1f16] px-5 py-3.5">
-          <BrandMark />
-          <SheetTrigger
+    <SidebarMenu>
+      <SidebarMenuItem>
+        <DropdownMenu>
+          <DropdownMenuTrigger
             render={
-              <button
-                type="button"
-                aria-label="Open navigation"
-                className="inline-flex size-9 items-center justify-center rounded-lg border border-white/15 text-white/80 transition-colors hover:bg-white/5"
-              >
-                <MenuIcon className="size-4" />
-              </button>
+              <SidebarMenuButton
+                size="lg"
+                className="text-white/80 hover:bg-white/5 hover:text-white data-popup-open:bg-white/5"
+              />
             }
-          />
-        </header>
-        <SheetContent
-          side="left"
-          className="w-[240px] border-r border-white/10 bg-gradient-to-b from-[#2d3436] via-[#3a2e24] to-[#2a1f16] p-5 text-white"
-        >
-          <div className="mt-6 flex flex-col gap-5">
-            <NavList
-              pathname={pathname}
-              onNavigate={() => setMobileOpen(false)}
-            />
-          </div>
-        </SheetContent>
-      </Sheet>
-    </>
+          >
+            <Avatar className="size-7 border border-white/15">
+              <AvatarFallback className="bg-white/5 text-[11px] font-medium text-white/80">
+                {initials}
+              </AvatarFallback>
+            </Avatar>
+            <div className="grid flex-1 text-left text-xs leading-tight">
+              <span className="truncate font-medium text-white/90">
+                {primaryLabel}
+              </span>
+            </div>
+            <ChevronsUpDown className="ml-auto size-3.5 text-white/50" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent side="top" align="end" className="min-w-56">
+            <DropdownMenuGroup>
+              <DropdownMenuLabel className="truncate">
+                {primaryLabel}
+              </DropdownMenuLabel>
+            </DropdownMenuGroup>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => void logout()}>
+              <LogOut className="size-4" />
+              Sign out
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </SidebarMenuItem>
+    </SidebarMenu>
+  );
+}
+
+export function Sidebar() {
+  const pathname = usePathname();
+
+  return (
+    <ShadcnSidebar
+      collapsible="offcanvas"
+      className={cn(
+        "bg-gradient-to-b from-[#2d3436] via-[#3a2e24] to-[#2a1f16]",
+        "[&_[data-slot=sidebar-inner]]:bg-transparent",
+        "group-data-[side=left]:[&_[data-slot=sidebar-container]]:border-r-0",
+      )}
+      style={sidebarThemeStyle}
+    >
+      <SidebarHeader className="pt-5 pb-1">
+        <BrandMark />
+        <div className="mt-2 h-px bg-white/10" />
+      </SidebarHeader>
+
+      <SidebarContent className="px-2">
+        <SidebarMenu>
+          {navItems.map((item) => {
+            const activePrefix = item.matchPrefix ?? item.href;
+            const isActive =
+              pathname === item.href ||
+              (activePrefix !== "/overview" &&
+                pathname.startsWith(activePrefix));
+
+            return (
+              <SidebarMenuItem key={item.href}>
+                <SidebarMenuButton
+                  isActive={isActive}
+                  className={cn(
+                    "rounded-lg text-white/60 hover:bg-white/5 hover:text-white/80",
+                    "data-active:bg-white/10 data-active:font-semibold data-active:text-white",
+                  )}
+                  render={<Link href={item.href}>{item.label}</Link>}
+                />
+              </SidebarMenuItem>
+            );
+          })}
+        </SidebarMenu>
+      </SidebarContent>
+
+      <SidebarFooter className="gap-2 border-t border-white/10 pt-2">
+        <OuraStatus />
+        <AccountMenu />
+      </SidebarFooter>
+    </ShadcnSidebar>
   );
 }
