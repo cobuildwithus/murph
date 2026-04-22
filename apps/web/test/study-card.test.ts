@@ -28,7 +28,7 @@ describe("StudyCard", () => {
 
     expect(markup).toContain(">2007<");
     expect(markup).toContain(">RCT<");
-    expect(markup).toContain("n=40");
+    expect(markup).toContain("40 people");
     expect(markup).toContain("23 studies");
     expect(markup).toContain('data-slot="collapsible"');
     expect(markup).toContain('data-slot="study-card-trigger"');
@@ -37,15 +37,15 @@ describe("StudyCard", () => {
     expect(markup).toContain(">J Helgerud<");
     expect(markup).toContain('href="https://example.com/study"');
     expect(markup).toContain(">Open source ↗<");
-    expect(markup).toContain(">Design<");
     expect(markup).toContain(">People<");
     expect(markup).toContain(">Timeframe<");
     expect(markup).toContain("Four-arm randomized training trial");
+    expect(markup).not.toContain(">Design<");
     expect(markup).toContain("Moderately trained men");
     expect(markup).toContain("8-week training intervention");
     expect(countOccurrences(markup, "2007")).toBe(1);
-    expect(markup.indexOf("n=40")).toBeLessThan(markup.indexOf("2007"));
-    expect(markup.indexOf("23 studies")).toBeGreaterThan(markup.indexOf("n=40"));
+    expect(markup.indexOf("40 people")).toBeLessThan(markup.indexOf("2007"));
+    expect(markup.indexOf("23 studies")).toBeGreaterThan(markup.indexOf("40 people"));
     expect(markup.indexOf("J Helgerud")).toBeLessThan(markup.indexOf("Open source ↗"));
     expect(markup.indexOf("Open source ↗")).toBeGreaterThan(markup.indexOf("J Helgerud"));
     expect(markup).not.toContain("line-clamp-1");
@@ -67,7 +67,7 @@ describe("StudyCard", () => {
       }),
     );
 
-    expect(markup).toContain("n≈2,138");
+    expect(markup).toContain("≈2,138 people");
     expect(markup).not.toContain("n=2,138");
     expect(markup).toContain(">MA<");
   });
@@ -113,6 +113,27 @@ describe("StudyCard", () => {
     expect(markup).not.toContain("A protocol-specific caveat.");
   });
 
+  it("keeps shared null-result labels neutral across experiment families", () => {
+    const markup = renderToStaticMarkup(
+      createElement(StudyCard, {
+        type: "RCT",
+        title: "Neutral grouped research placeholder",
+        authors: "A Researcher",
+        journal: "Example Journal",
+        result: "no_clear_advantage",
+        scope: "same_mechanism",
+        stance: "does_not_confirm",
+        last: true,
+      }),
+    );
+
+    expect(markup).toContain(">No clear advantage<");
+    expect(markup).toContain(">Same mechanism<");
+    expect(markup).toContain(">Does not confirm<");
+    expect(markup).not.toContain("No clear objective gain");
+    expect(markup).not.toContain("Does not confirm benefit");
+  });
+
   it("renders the author label and study facts without the removed metadata strip", () => {
     const markup = renderToStaticMarkup(
       createElement(StudyCard, {
@@ -131,6 +152,7 @@ describe("StudyCard", () => {
     expect(markup).toContain("> Bryan Johnson <");
     expect(markup).toContain(">People<");
     expect(markup).toContain(">Timeframe<");
+    expect(markup).toContain("1 person");
     expect(markup).toContain("bryan johnson");
     expect(markup).toContain("14-day intervention window");
     expect(markup).not.toContain("Substack Post");
@@ -157,6 +179,7 @@ describe("StudyCard", () => {
     expect(markup).toContain(">A Cohort Team<");
     expect(markup).toContain(">People<");
     expect(markup).toContain(">Timeframe<");
+    expect(markup).toContain("1,688 people");
     expect(markup).not.toContain("Example Journal");
     expect(markup).toContain("Adults");
     expect(markup).toContain("Long-term follow-up");
