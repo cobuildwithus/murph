@@ -4,14 +4,14 @@ import {
   ID_PREFIXES as CONTRACT_ID_PREFIXES,
   SCHEDULED_LOG_DOC_TYPE,
   SCHEDULED_LOG_SCHEMA_VERSION,
-  scheduleIntentKindValues,
+  formatScheduleIntentIssues,
+  scheduleIntentSchema,
   scheduledLogActionSchema,
   scheduledLogStatusValues,
   type ExternalRef,
   type FoodNutrition,
   type MealNutrition,
   type ScheduleIntent,
-  type ScheduleIntentKind,
   type ScheduledLogAction,
   type ScheduledLogScaffoldPayload as ContractScheduledLogScaffoldPayload,
   type ScheduledLogStatus,
@@ -24,7 +24,6 @@ import {
   normalizeSlug,
   optionalEnum,
   optionalString,
-  requireObject,
   requireString,
 } from "./bank/shared.ts";
 import { VAULT_LAYOUT } from "./constants.ts";
@@ -44,7 +43,6 @@ import type { FrontmatterObject } from "./types.ts";
 
 const SCHEDULED_LOGS_DIRECTORY = VAULT_LAYOUT.scheduledLogsDirectory;
 const slugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
-const dailyLocalTimePattern = /^(?:[01]\d|2[0-3]):[0-5]\d$/u;
 const CROCKFORD_BASE32_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
 export type { ScheduleIntent, ScheduledLogAction, ScheduledLogStatus };
@@ -113,11 +111,12 @@ export interface ExecuteScheduledLogOccurrenceInput {
 
 export interface ExecuteScheduledLogOccurrenceResult {
   actionKind: ScheduledLogAction["kind"];
-  eventId: string;
-  eventKind: string;
+  eventId: string | null;
+  eventKind: string | null;
   idempotent: boolean;
   message: string;
   scheduledLogId: string;
+  skipped: boolean;
 }
 
 function normalizeNullableString(value: string | null | undefined): string | null {
@@ -131,32 +130,14 @@ function normalizeScheduledLogStatus(value: unknown): ScheduledLogStatus {
 }
 
 function normalizeScheduleIntent(value: unknown): ScheduleIntent {
-  const object = requireObject(value, "schedule");
-  const kind = requireString(object.kind, "schedule.kind", 24);
-  if (!scheduleIntentKindValues.includes(kind as ScheduleIntentKind)) {
-    throw new VaultError("VAULT_INVALID_INPUT", "schedule.kind must match a supported scheduled-log schedule.");
+  const parsed = scheduleIntentSchema.safeParse(value);
+  if (!parsed.success) {
+    const message = formatScheduleIntentIssues(parsed.error) ||
+      "schedule must match a supported scheduled-log schedule.";
+    throw new VaultError("VAULT_INVALID_INPUT", message);
   }
 
-  switch (kind) {
-    case "at":
-      return { kind, at: requireString(object.at, "schedule.at", 64) };
-    case "every":
-      if (typeof object.everyMs !== "number" || !Number.isInteger(object.everyMs) || object.everyMs <= 0) {
-        throw new VaultError("VAULT_INVALID_INPUT", "schedule.everyMs must be a positive integer.");
-      }
-      return { kind, everyMs: object.everyMs };
-    case "cron":
-      return { kind, expression: requireString(object.expression, "schedule.expression", 400) };
-    case "dailyLocal": {
-      const localTime = requireString(object.localTime, "schedule.localTime", 5);
-      if (!dailyLocalTimePattern.test(localTime)) {
-        throw new VaultError("VAULT_INVALID_INPUT", "schedule.localTime must use HH:MM format.");
-      }
-      return { kind, localTime };
-    }
-  }
-
-  throw new VaultError("VAULT_INVALID_INPUT", `Unsupported scheduled-log schedule kind: ${kind}`);
+  return parsed.data;
 }
 
 function normalizeScheduledLogAction(value: unknown): ScheduledLogAction {
@@ -540,6 +521,7 @@ async function executeScheduledLogAction(input: {
         ingredients: input.action.ingredients ?? food?.ingredients,
         nutrition: input.action.nutrition ?? buildInheritedMealNutrition(food?.nutrition, food?.title ?? "Food"),
         source: "derived",
+        tags: input.action.tags,
         externalRef: input.externalRef,
       });
       return { eventId: result.event.id, eventKind: result.event.kind };
@@ -620,11 +602,22 @@ export async function executeScheduledLogOccurrence(input: ExecuteScheduledLogOc
       idempotent: true,
       message: `Skipped scheduled log "${record.title}" because occurrence ${occurrenceAt} is already logged as ${existing.kind} ${existing.id}.`,
       scheduledLogId: record.scheduledLogId,
+      skipped: true,
     };
   }
+
   if (record.status !== "active") {
-    throw new VaultError("VAULT_SCHEDULED_LOG_INACTIVE", `Scheduled log "${record.title}" is ${record.status} and cannot be executed.`);
+    return {
+      actionKind: record.action.kind,
+      eventId: null,
+      eventKind: null,
+      idempotent: false,
+      message: `Skipped scheduled log "${record.title}" because it is ${record.status}.`,
+      scheduledLogId: record.scheduledLogId,
+      skipped: true,
+    };
   }
+
   const written = await executeScheduledLogAction({ action: record.action, externalRef, occurrenceAt, scheduledLogId: record.scheduledLogId, vaultRoot: input.vaultRoot });
   return {
     actionKind: record.action.kind,
@@ -633,5 +626,6 @@ export async function executeScheduledLogOccurrence(input: ExecuteScheduledLogOc
     idempotent: false,
     message: `Auto-logged scheduled log "${record.title}" as ${written.eventKind} ${written.eventId}.`,
     scheduledLogId: record.scheduledLogId,
+    skipped: false,
   };
 }

@@ -53,6 +53,34 @@ export const scheduleIntentSchema = z.discriminatedUnion("kind", [
   scheduleIntentCronSchema,
   scheduleIntentDailyLocalSchema,
 ]);
+
+function formatScheduleIntentIssue(issue: z.ZodIssue): string {
+  if (issue.path.length === 0 && issue.code === "invalid_type") {
+    return "schedule must be an object.";
+  }
+
+  const field = typeof issue.path[0] === "string" ? issue.path[0] : null;
+
+  switch (field) {
+    case "kind":
+      return "schedule.kind must match a supported scheduled-log schedule.";
+    case "at":
+      return "schedule.at is required.";
+    case "everyMs":
+      return "schedule.everyMs must be a positive integer.";
+    case "expression":
+      return "schedule.expression is required.";
+    case "localTime":
+      return "schedule.localTime must use HH:MM format.";
+    default:
+      return issue.message;
+  }
+}
+
+export function formatScheduleIntentIssues(error: z.ZodError): string {
+  return error.issues.map((issue) => formatScheduleIntentIssue(issue)).join("; ");
+}
+
 export type ScheduleIntentKind = (typeof scheduleIntentKindValues)[number];
 export type ScheduleIntent = z.infer<typeof scheduleIntentSchema>;
 
@@ -66,17 +94,7 @@ const scheduledMealActionSchema = scheduledActionBaseSchema.extend({
   note: noteSchema.optional(),
   ingredients: z.array(z.string().min(1).max(4_000)).max(100).optional(),
   nutrition: mealNutritionSchema.optional(),
-}).strict().superRefine((value, context) => {
-  if (value.foodId || value.note || value.ingredients?.length || value.nutrition) {
-    return;
-  }
-
-  context.addIssue({
-    code: "custom",
-    message: "meal.add scheduled logs require a foodId, note, ingredients, or nutrition template.",
-    path: ["foodId"],
-  });
-});
+}).strict();
 
 const scheduledActivitySessionActionSchema = scheduledActionBaseSchema.extend({
   kind: z.literal("activity_session.add"),
@@ -109,7 +127,23 @@ export const scheduledLogActionSchema = z.discriminatedUnion("kind", [
   scheduledActivitySessionActionSchema,
   scheduledInterventionSessionActionSchema,
   scheduledMeasurementActionSchema,
-]);
+]).superRefine((value, context) => {
+  if (
+    value.kind !== "meal.add" ||
+    value.foodId ||
+    value.note ||
+    value.ingredients?.length ||
+    value.nutrition
+  ) {
+    return;
+  }
+
+  context.addIssue({
+    code: z.ZodIssueCode.custom,
+    message: "meal.add scheduled logs require a foodId, note, ingredients, or nutrition template.",
+    path: ["foodId"],
+  });
+});
 export type ScheduledLogAction = z.infer<typeof scheduledLogActionSchema>;
 
 export const scheduledLogFrontmatterSchema = z.object({

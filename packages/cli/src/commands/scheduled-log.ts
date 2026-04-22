@@ -166,12 +166,11 @@ export function registerScheduledLogCommands(cli: Cli.Cli) {
     }),
     output: scheduledLogUpsertResultSchema,
     async run(context) {
-      const input = scheduledLogScaffoldPayloadSchema.parse(
-        (await loadJsonInputObject(
-          context.options.input,
-          "scheduled-log payload",
-        )) as ScheduledLogScaffoldPayload,
+      const rawInput = await loadJsonInputObject(
+        context.options.input,
+        "scheduled-log payload",
       );
+      const input = scheduledLogScaffoldPayloadSchema.parse(rawInput);
       const result = await upsertScheduledLog({
         ...input,
         vaultRoot: context.options.vault,
