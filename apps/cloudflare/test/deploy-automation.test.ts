@@ -70,11 +70,13 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED: "true",
       HOSTED_EXECUTION_AUTOMATION_RECIPIENT_KEY_ID: "automation:v2",
       HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "180000",
+      HOSTED_WAKE_ENCRYPTION_KEY_VERSION: "wake:v2",
       HOSTED_ASSISTANT_ZERO_DATA_RETENTION: "true",
       HOSTED_EMAIL_DEFAULT_SUBJECT: "Murph note",
       HOSTED_EMAIL_DOMAIN: "mail.example.test",
       HOSTED_EMAIL_FROM_ADDRESS: "assistant@mail.example.test",
       HOSTED_EMAIL_LOCAL_PART: "assistant",
+      HOSTED_WEB_CALLBACK_SIGNING_KEY_ID: "callback:v2",
       MURPH_WEB_SEARCH_MAX_RESULTS: "8",
       MURPH_WEB_SEARCH_PROVIDER: "brave",
       MURPH_WEB_SEARCH_TIMEOUT_MS: "10000",
@@ -183,6 +185,8 @@ describe("hosted deploy automation helpers", () => {
     expect(config.vars.HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS).toBe("65000");
     expect(config.vars.HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS).toBe("180000");
     expect(config.vars.HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED).toBe("true");
+    expect(config.vars.HOSTED_WAKE_ENCRYPTION_KEY_VERSION).toBe("wake:v2");
+    expect(config.vars.HOSTED_WEB_CALLBACK_SIGNING_KEY_ID).toBe("callback:v2");
     expect(config.vars.HOSTED_ASSISTANT_ZERO_DATA_RETENTION).toBe("true");
     expect(config.vars.HOSTED_EXECUTION_AUTOMATION_RECIPIENT_KEY_ID).toBe("automation:v2");
     expect(config.vars.MURPH_WEB_FETCH_ENABLED).toBe("true");
@@ -280,19 +284,24 @@ describe("hosted deploy automation helpers", () => {
       "utf8",
     );
 
-    expect(workflow).toContain(
+    for (const expectedLine of [
       "CF_CONTAINER_INSTANCE_TYPE: ${{ vars.CF_CONTAINER_INSTANCE_TYPE || '{\"vcpu\":1,\"memory_mib\":3072,\"disk_mb\":6000}' }}",
-    );
-    expect(workflow).toContain(
       "CF_CONTAINER_MAX_INSTANCES: ${{ vars.CF_CONTAINER_MAX_INSTANCES || '1000' }}",
-    );
-    expect(workflow).toContain(
-      "HOSTED_ASSISTANT_ZERO_DATA_RETENTION: ${{ vars.HOSTED_ASSISTANT_ZERO_DATA_RETENTION }}",
-    );
-    expect(workflow).toContain(
+      "CF_RUNNER_READY_TIMEOUT_MS: ${{ vars.CF_RUNNER_READY_TIMEOUT_MS }}",
       "HOSTED_AI_USAGE_REPORTING_SECRET: ${{ secrets.HOSTED_AI_USAGE_REPORTING_SECRET }}",
-    );
-    expect(workflow).toContain("VERCEL_AI_API_KEY: ${{ secrets.VERCEL_AI_API_KEY }}");
+      "HOSTED_ASSISTANT_ZERO_DATA_RETENTION: ${{ vars.HOSTED_ASSISTANT_ZERO_DATA_RETENTION }}",
+      "HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: ${{ vars.HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS }}",
+      "HOSTED_WAKE_ENCRYPTION_KEYRING_JSON: ${{ secrets.HOSTED_WAKE_ENCRYPTION_KEYRING_JSON }}",
+      "HOSTED_WAKE_ENCRYPTION_KEY_VERSION: ${{ vars.HOSTED_WAKE_ENCRYPTION_KEY_VERSION }}",
+      "HOSTED_WEB_CALLBACK_SIGNING_KEY_ID: ${{ vars.HOSTED_WEB_CALLBACK_SIGNING_KEY_ID }}",
+      "GARMIN_CLIENT_ID: ${{ secrets.GARMIN_CLIENT_ID }}",
+      "GARMIN_CLIENT_SECRET: ${{ secrets.GARMIN_CLIENT_SECRET }}",
+      "STRAVA_CLIENT_ID: ${{ secrets.STRAVA_CLIENT_ID }}",
+      "STRAVA_CLIENT_SECRET: ${{ secrets.STRAVA_CLIENT_SECRET }}",
+      "VERCEL_AI_API_KEY: ${{ secrets.VERCEL_AI_API_KEY }}",
+    ]) {
+      expect(workflow).toContain(expectedLine);
+    }
     expect(workflow).toContain('echo "- Container max instances: \\`${CF_CONTAINER_MAX_INSTANCES}\\`"');
   });
 
@@ -374,6 +383,8 @@ describe("hosted deploy automation helpers", () => {
     expect(buildHostedWorkerSecretsPayload({
       AGENTMAIL_API_KEY: "agentmail-secret",
       BRAVE_API_KEY: "brave-key",
+      GARMIN_CLIENT_ID: "garmin-client-id",
+      GARMIN_CLIENT_SECRET: "garmin-client-secret",
       HOSTED_EMAIL_SIGNING_SECRET: "email-signing-secret",
       HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK: "automation-private-jwk",
       HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_KEYRING_JSON: "{\"automation:v1\":{}}",
@@ -386,11 +397,15 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_WAKE_ENCRYPTION_KEYRING_JSON: "{\"v0\":\"old-wake-key\"}",
       MAPBOX_ACCESS_TOKEN: "mapbox-token",
       OPENAI_API_KEY: "sk-user",
+      STRAVA_CLIENT_ID: "strava-client-id",
+      STRAVA_CLIENT_SECRET: "strava-client-secret",
       TELEGRAM_BOT_TOKEN: "bot-token",
       TELEGRAM_WEBHOOK_SECRET: "telegram-webhook-secret",
       VERCEL_AI_API_KEY: "vercel-ai-gateway-key",
     })).toEqual({
       BRAVE_API_KEY: "brave-key",
+      GARMIN_CLIENT_ID: "garmin-client-id",
+      GARMIN_CLIENT_SECRET: "garmin-client-secret",
       HOSTED_EMAIL_SIGNING_SECRET: "email-signing-secret",
       HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK: "automation-private-jwk",
       HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_KEYRING_JSON: "{\"automation:v1\":{}}",
@@ -403,6 +418,8 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_WAKE_ENCRYPTION_KEYRING_JSON: "{\"v0\":\"old-wake-key\"}",
       MAPBOX_ACCESS_TOKEN: "mapbox-token",
       OPENAI_API_KEY: "sk-user",
+      STRAVA_CLIENT_ID: "strava-client-id",
+      STRAVA_CLIENT_SECRET: "strava-client-secret",
       TELEGRAM_BOT_TOKEN: "bot-token",
       VERCEL_AI_API_KEY: "vercel-ai-gateway-key",
     });
