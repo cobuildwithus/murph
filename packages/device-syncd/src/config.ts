@@ -148,6 +148,13 @@ export {
   readConfiguredWhoopDeviceSyncProviderConfig,
 } from "./config/provider-configs.ts";
 export {
+  deviceSyncProviderManifests,
+  getConfiguredDeviceSyncProviderManifest,
+  listConfiguredDeviceSyncProviderManifests,
+  requireConfiguredDeviceSyncProviderManifest,
+  resolveConfiguredDeviceSyncProviderManifest,
+} from "./config/provider-manifests.ts";
+export {
   createConfiguredDeviceSyncProviders,
   createConfiguredDeviceSyncProvidersFromConfigs,
   createConfiguredDeviceSyncRegistry,
@@ -168,6 +175,14 @@ export type {
   ConfiguredDeviceSyncProviderConfigs,
   ConfiguredDeviceSyncProviderKey,
 } from "./config/provider-configs.ts";
+export type {
+  ConfiguredDeviceSyncProviderCapabilities,
+  DeviceSyncConfiguredProviderManifest,
+  DeviceSyncConfiguredProviderManifestByKey,
+  HostedHintFieldKind,
+  HostedHintPayloadFieldMap,
+  SerializableConfigFieldKind,
+} from "./config/provider-manifests.ts";
 export type {
   SerializableConfiguredDeviceSyncProviderConfigByKey,
   SerializableConfiguredDeviceSyncProviderConfigs,
