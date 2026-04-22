@@ -798,6 +798,9 @@ describe('openAiCompatibleProviderDefinition.executeTurn', () => {
         provider: 'mock-language-model',
       },
       providerOptions: {
+        gateway: {
+          zeroDataRetention: true,
+        },
         openai: {
           reasoningEffort: 'low',
           store: false,

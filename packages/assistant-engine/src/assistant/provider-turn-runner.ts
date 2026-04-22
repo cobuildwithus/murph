@@ -10,6 +10,9 @@ import {
 } from '@murphai/contracts'
 import { loadVault } from '@murphai/core'
 import {
+  resolveAssistantUsageCredentialSource,
+} from '@murphai/runtime-state/node'
+import {
   resolveAssistantCliAccessContext,
 } from '../assistant-cli-access.js'
 import {
@@ -71,6 +74,15 @@ import {
 } from './rich-content-routing.js'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases/vault-services'
 import { createAssistantFoodAutoLogHooks } from './food-auto-log-hooks.js'
+import {
+  createAssistantUsageAttribution,
+  resolveAssistantUsageEnvironment,
+  resolveAssistantUsageFeatureKey,
+  resolveAssistantUsageReportingSecret,
+  resolveAssistantUsageSurface,
+  resolveAssistantUsageTriggerKind,
+  type AssistantUsageAttribution,
+} from './usage-attribution.js'
 import type { AssistantMessageInput } from './service-contracts.js'
 
 interface AssistantTurnSharedPlan {
@@ -171,6 +183,7 @@ export interface ExecutedAssistantProviderTurnResult
   providerOptions: AssistantProviderSessionOptions
   route: ResolvedAssistantFailoverRoute
   session: AssistantSession
+  usageAttribution?: AssistantUsageAttribution | null
   workingDirectory: string
 }
 
@@ -179,6 +192,7 @@ type AssistantProviderFailoverState = Awaited<
 >
 
 interface AssistantProviderTurnExecutionPlan {
+  executionContext: ReturnType<typeof normalizeAssistantExecutionContext>
   input: AssistantMessageInput
   memoryTurnEnv: NodeJS.ProcessEnv
   profile: Required<AssistantProviderTurnExecutionProfile>
@@ -345,6 +359,7 @@ async function buildAssistantProviderTurnExecutionPlan(input: {
   const promptTimeContext = await resolveAssistantPromptTimeContext(input.input.vault)
 
   return {
+    executionContext,
     input: input.input,
     memoryTurnEnv,
     profile,
@@ -615,6 +630,44 @@ function resolveAssistantCommandAccessMode(input: {
   }
 }
 
+
+function createAssistantProviderUsageAttribution(input: {
+  attemptPlan: AssistantProviderAttemptPlan
+  env: NodeJS.ProcessEnv
+  executionPlan: AssistantProviderTurnExecutionPlan
+  hostedMemberId: string | null
+}): AssistantUsageAttribution | null {
+  if (!input.hostedMemberId) {
+    return null
+  }
+
+  const apiKeyEnv = input.attemptPlan.route.providerOptions.apiKeyEnv ?? null
+
+  return createAssistantUsageAttribution({
+    credentialSource: resolveAssistantUsageCredentialSource({
+      apiKeyEnv,
+      provider: input.attemptPlan.route.provider,
+      userEnvKeys: [...(input.executionPlan.executionContext?.hosted?.userEnvKeys ?? [])],
+    }),
+    environment: resolveAssistantUsageEnvironment(input.env),
+    featureKey: resolveAssistantUsageFeatureKey({
+      deliverResponse: input.executionPlan.input.deliverResponse,
+      promptProfile: input.executionPlan.profile.promptProfile,
+      turnTrigger: input.executionPlan.input.turnTrigger ?? 'manual-ask',
+    }),
+    memberId: input.hostedMemberId,
+    reportingSecret: resolveAssistantUsageReportingSecret(input.env),
+    surface: resolveAssistantUsageSurface({
+      messageInput: input.executionPlan.input,
+      session: input.attemptPlan.session,
+    }),
+    triggerKind: resolveAssistantUsageTriggerKind(
+      input.executionPlan.input.turnTrigger ?? 'manual-ask',
+    ),
+    zeroDataRetention: input.attemptPlan.route.providerOptions.zeroDataRetention ?? null,
+  })
+}
+
 async function executeAssistantProviderAttempt(input: {
   attemptPlan: AssistantProviderAttemptPlan
   executionPlan: AssistantProviderTurnExecutionPlan
@@ -661,14 +714,22 @@ async function executeAssistantProviderAttempt(input: {
       toolCatalog,
       vault: executionPlan.input.vault,
     }
+    const attemptEnv = {
+      ...attemptPlan.routePlan.cliEnv,
+      ...executionPlan.memoryTurnEnv,
+    }
+    const usageAttribution = createAssistantProviderUsageAttribution({
+      attemptPlan,
+      env: attemptEnv,
+      executionPlan,
+      hostedMemberId: executionPlan.executionContext?.hosted?.memberId ?? null,
+    })
     const attemptResult = await executeAssistantProviderTurnAttempt({
       abortSignal: executionPlan.input.abortSignal,
       provider: attemptPlan.route.provider,
       workingDirectory: attemptPlan.routePlan.workingDirectory,
-      env: {
-        ...attemptPlan.routePlan.cliEnv,
-        ...executionPlan.memoryTurnEnv,
-      },
+      env: attemptEnv,
+      usageAttribution,
       userPrompt: executionPlan.input.prompt,
       userMessageContent: resolveAssistantRouteUserMessageContent({
         route: attemptPlan.route,
@@ -740,6 +801,7 @@ async function executeAssistantProviderAttempt(input: {
         providerOptions: attemptPlan.route.providerOptions,
         route: attemptPlan.route,
         session: attemptPlan.session,
+        usageAttribution,
         workingDirectory: attemptPlan.routePlan.workingDirectory,
       },
     }

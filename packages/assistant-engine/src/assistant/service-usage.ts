@@ -19,6 +19,7 @@ export async function persistPendingAssistantUsageEvent(input: {
   const apiKeyEnv = normalizeNullableString(
     usage?.apiKeyEnv ?? input.providerResult.providerOptions.apiKeyEnv,
   )
+  const usageAttribution = input.providerResult.usageAttribution ?? null
 
   if (!usage || !hostedMemberId) {
     return
@@ -48,11 +49,16 @@ export async function persistPendingAssistantUsageEvent(input: {
         usage.baseUrl ?? input.providerResult.providerOptions.baseUrl,
       ),
       apiKeyEnv,
-      credentialSource: resolveAssistantUsageCredentialSource({
+      credentialSource: usageAttribution?.credentialSource ?? resolveAssistantUsageCredentialSource({
         apiKeyEnv,
         provider: input.providerResult.provider,
         userEnvKeys: [...(input.executionContext.hosted?.userEnvKeys ?? [])],
       }),
+      featureKey: usageAttribution?.featureKey ?? null,
+      gatewayTags: [...(usageAttribution?.gatewayTags ?? [])],
+      reportingUserId: usageAttribution?.reportingUserId ?? null,
+      surface: usageAttribution?.surface ?? null,
+      triggerKind: usageAttribution?.triggerKind ?? null,
       inputTokens: usage.inputTokens,
       outputTokens: usage.outputTokens,
       reasoningTokens: usage.reasoningTokens,

@@ -449,6 +449,10 @@ export interface AssistantModelMessage {
 }
 
 export interface AssistantResponsesRequestPolicy {
+  gatewayReporting?: {
+    tags?: readonly string[]
+    user?: string | null
+  }
   gatewayZeroDataRetention?: boolean
 }
 
@@ -955,7 +959,9 @@ function applyAssistantResponsesRequestPolicy(
     }
   }
 
-  if (requestPolicy?.gatewayZeroDataRetention === true) {
+  const gatewayOptions = resolveAssistantGatewayRequestOptions(requestPolicy)
+
+  if (gatewayOptions) {
     const currentProviderOptions = nextPayload?.providerOptions ?? payload.providerOptions
     const nextProviderOptions = isAssistantPlainObject(currentProviderOptions)
       ? {
@@ -967,18 +973,71 @@ function applyAssistantResponsesRequestPolicy(
           ...nextProviderOptions.gateway,
         }
       : {}
+    const nextGatewayOptions = {
+      ...currentGatewayOptions,
+      ...gatewayOptions,
+    }
 
-    if (currentGatewayOptions.zeroDataRetention !== true) {
-      currentGatewayOptions.zeroDataRetention = true
-      nextProviderOptions.gateway = currentGatewayOptions
-      nextPayload = {
-        ...(nextPayload ?? payload),
-        providerOptions: nextProviderOptions,
-      }
+    nextProviderOptions.gateway = nextGatewayOptions
+    nextPayload = {
+      ...(nextPayload ?? payload),
+      providerOptions: nextProviderOptions,
     }
   }
 
   return nextPayload
+}
+
+
+function resolveAssistantGatewayRequestOptions(
+  requestPolicy: AssistantResponsesRequestPolicy | undefined,
+): Record<string, unknown> | null {
+  const gatewayOptions: Record<string, unknown> = {}
+
+  if (requestPolicy?.gatewayZeroDataRetention === true) {
+    gatewayOptions.zeroDataRetention = true
+  }
+
+  const reporting = requestPolicy?.gatewayReporting
+  const user = normalizeGatewayReportingString(reporting?.user ?? null)
+  const tags = normalizeGatewayReportingTags(reporting?.tags ?? [])
+
+  if (user) {
+    gatewayOptions.user = user
+  }
+
+  if (tags.length > 0) {
+    gatewayOptions.tags = tags
+  }
+
+  return Object.keys(gatewayOptions).length > 0 ? gatewayOptions : null
+}
+
+function normalizeGatewayReportingString(value: string | null | undefined): string | null {
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  const normalized = value.trim()
+  return normalized.length > 0 ? normalized : null
+}
+
+function normalizeGatewayReportingTags(tags: readonly string[]): string[] {
+  const seen = new Set<string>()
+  const normalizedTags: string[] = []
+
+  for (const tag of tags) {
+    const normalized = normalizeGatewayReportingString(tag)
+
+    if (!normalized || seen.has(normalized)) {
+      continue
+    }
+
+    seen.add(normalized)
+    normalizedTags.push(normalized)
+  }
+
+  return normalizedTags
 }
 
 function shouldMutateAssistantResponsesRequest(

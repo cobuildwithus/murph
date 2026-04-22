@@ -29,8 +29,10 @@ export interface HostedAiUsageStripeCandidate {
   outputTokens: number | null;
   provider: string;
   requestedModel: string | null;
+  servedModel: string | null;
   stripeCustomerId: string;
   stripeMeterAttemptCount: number;
+  stripeMeterIdentifier: string | null;
   stripeMeterStatus: HostedAiUsageStripeMeterStatus;
   totalTokens: number | null;
 }
@@ -42,6 +44,8 @@ const HOSTED_AI_USAGE_IMMUTABLE_SELECT = {
   cacheWriteTokens: true,
   cachedInputTokens: true,
   credentialSource: true,
+  featureKey: true,
+  gatewayTagsJson: true,
   id: true,
   inputTokens: true,
   memberId: true,
@@ -50,11 +54,14 @@ const HOSTED_AI_USAGE_IMMUTABLE_SELECT = {
   provider: true,
   providerName: true,
   reasoningTokens: true,
+  reportingUserId: true,
   requestedModel: true,
   routeId: true,
   servedModel: true,
   sessionId: true,
+  surface: true,
   totalTokens: true,
+  triggerKind: true,
   turnId: true,
 } as const satisfies Prisma.HostedAiUsageSelect;
 
@@ -129,7 +136,9 @@ export async function listHostedAiUsagePendingStripeMetering(input: {
       outputTokens: true,
       provider: true,
       requestedModel: true,
+      servedModel: true,
       stripeMeterAttemptCount: true,
+      stripeMeterIdentifier: true,
       stripeMeterStatus: true,
       totalTokens: true,
     },
@@ -154,8 +163,13 @@ export async function listHostedAiUsagePendingStripeMetering(input: {
       outputTokens: record.outputTokens,
       provider: record.provider,
       requestedModel: record.requestedModel,
+      servedModel: record.servedModel,
       stripeCustomerId,
       stripeMeterAttemptCount: record.stripeMeterAttemptCount,
+      stripeMeterIdentifier: normalizeOptionalString(
+        record.stripeMeterIdentifier,
+        "stripeMeterIdentifier",
+      ),
       stripeMeterStatus: normalizeHostedAiUsageStripeMeterStatus(record.stripeMeterStatus),
       totalTokens: record.totalTokens,
     } satisfies HostedAiUsageStripeCandidate;
@@ -230,6 +244,7 @@ export async function markHostedAiUsageStripeSkipped(input: {
 export async function markHostedAiUsageStripeRetryableFailure(input: {
   attemptedAt?: Date | string;
   id: string;
+  identifier?: string | null;
   message: string;
   nextAttemptAt: Date | string;
   prisma?: HostedAiUsageClient;
@@ -241,7 +256,7 @@ export async function markHostedAiUsageStripeRetryableFailure(input: {
     incrementAttemptCount: true,
     prisma: input.prisma,
     stripeMeterError: input.message,
-    stripeMeterIdentifier: null,
+    stripeMeterIdentifier: normalizeOptionalString(input.identifier, "identifier"),
     stripeMeterLastAttemptedAt: attemptedAt,
     stripeMeterNextAttemptAt: normalizeHostedAiUsageDate(input.nextAttemptAt, "nextAttemptAt"),
     stripeMeterStatus: "pending",
@@ -252,6 +267,7 @@ export async function markHostedAiUsageStripeRetryableFailure(input: {
 export async function markHostedAiUsageStripeFailed(input: {
   attemptedAt?: Date | string;
   id: string;
+  identifier?: string | null;
   message: string;
   prisma?: HostedAiUsageClient;
 }): Promise<void> {
@@ -262,10 +278,34 @@ export async function markHostedAiUsageStripeFailed(input: {
     incrementAttemptCount: true,
     prisma: input.prisma,
     stripeMeterError: input.message,
-    stripeMeterIdentifier: null,
+    stripeMeterIdentifier: normalizeOptionalString(input.identifier, "identifier"),
     stripeMeterLastAttemptedAt: attemptedAt,
     stripeMeterNextAttemptAt: null,
     stripeMeterStatus: "failed",
+    stripeMeteredAt: null,
+  });
+}
+
+export async function markHostedAiUsageStripeProgress(input: {
+  attemptedAt?: Date | string;
+  id: string;
+  identifier: string;
+  prisma?: HostedAiUsageClient;
+}): Promise<void> {
+  const attemptedAt = normalizeHostedAiUsageDate(
+    input.attemptedAt ?? new Date().toISOString(),
+    "attemptedAt",
+  );
+
+  await updateHostedAiUsageStripeMeterState({
+    id: input.id,
+    incrementAttemptCount: false,
+    prisma: input.prisma,
+    stripeMeterError: null,
+    stripeMeterIdentifier: normalizeOptionalString(input.identifier, "identifier"),
+    stripeMeterLastAttemptedAt: attemptedAt,
+    stripeMeterNextAttemptAt: null,
+    stripeMeterStatus: "pending",
     stripeMeteredAt: null,
   });
 }
@@ -388,6 +428,11 @@ function buildHostedAiUsageCreateData(
     baseUrl: record.baseUrl,
     apiKeyEnv: record.apiKeyEnv,
     credentialSource: record.credentialSource,
+    featureKey: record.featureKey,
+    gatewayTagsJson: record.gatewayTags,
+    reportingUserId: record.reportingUserId,
+    surface: record.surface,
+    triggerKind: record.triggerKind,
     inputTokens: record.inputTokens,
     outputTokens: record.outputTokens,
     reasoningTokens: record.reasoningTokens,
@@ -422,6 +467,11 @@ function assertStoredHostedAiUsageMatchesRecord(input: {
     compareHostedAiUsageField("baseUrl", input.storedRecord.baseUrl, expected.baseUrl),
     compareHostedAiUsageField("apiKeyEnv", input.storedRecord.apiKeyEnv, expected.apiKeyEnv),
     compareHostedAiUsageField("credentialSource", input.storedRecord.credentialSource, expected.credentialSource),
+    compareHostedAiUsageField("featureKey", input.storedRecord.featureKey, expected.featureKey),
+    compareHostedAiUsageJsonField("gatewayTagsJson", input.storedRecord.gatewayTagsJson, expected.gatewayTags),
+    compareHostedAiUsageField("reportingUserId", input.storedRecord.reportingUserId, expected.reportingUserId),
+    compareHostedAiUsageField("surface", input.storedRecord.surface, expected.surface),
+    compareHostedAiUsageField("triggerKind", input.storedRecord.triggerKind, expected.triggerKind),
     compareHostedAiUsageField("inputTokens", input.storedRecord.inputTokens, expected.inputTokens),
     compareHostedAiUsageField("outputTokens", input.storedRecord.outputTokens, expected.outputTokens),
     compareHostedAiUsageField("reasoningTokens", input.storedRecord.reasoningTokens, expected.reasoningTokens),
@@ -443,6 +493,14 @@ function compareHostedAiUsageField(
   expected: number | string | null,
 ): string | null {
   return actual === expected ? null : fieldName;
+}
+
+function compareHostedAiUsageJsonField(
+  fieldName: string,
+  actual: Prisma.JsonValue | null,
+  expected: Prisma.JsonValue,
+): string | null {
+  return JSON.stringify(actual) === JSON.stringify(expected) ? null : fieldName;
 }
 
 function normalizeHostedAiUsageDate(value: Date | string, label: string): Date {
@@ -472,4 +530,20 @@ function requireHostedAiUsageMemberId(
   }
 
   return record.memberId;
+}
+
+function normalizeOptionalString(
+  value: string | null | undefined,
+  label: string,
+): string | null {
+  if (value == null) {
+    return null;
+  }
+
+  if (typeof value !== "string") {
+    throw new TypeError(`Hosted AI usage ${label} must be a string when provided.`);
+  }
+
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
 }

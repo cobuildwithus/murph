@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   markHostedAiUsageStripeFailed: vi.fn(),
   listHostedAiUsagePendingStripeMetering: vi.fn(),
   markHostedAiUsageStripeMetered: vi.fn(),
+  markHostedAiUsageStripeProgress: vi.fn(),
   markHostedAiUsageStripeRetryableFailure: vi.fn(),
   markHostedAiUsageStripeSkipped: vi.fn(),
 }));
@@ -12,6 +13,7 @@ vi.mock("@/src/lib/hosted-execution/usage", () => ({
   markHostedAiUsageStripeFailed: mocks.markHostedAiUsageStripeFailed,
   listHostedAiUsagePendingStripeMetering: mocks.listHostedAiUsagePendingStripeMetering,
   markHostedAiUsageStripeMetered: mocks.markHostedAiUsageStripeMetered,
+  markHostedAiUsageStripeProgress: mocks.markHostedAiUsageStripeProgress,
   markHostedAiUsageStripeRetryableFailure: mocks.markHostedAiUsageStripeRetryableFailure,
   markHostedAiUsageStripeSkipped: mocks.markHostedAiUsageStripeSkipped,
 }));
@@ -98,7 +100,7 @@ describe("drainHostedAiUsageStripeMetering", () => {
     });
   });
 
-  it("sends platform total-token usage to Stripe with a deterministic identifier and original timestamp", async () => {
+  it("sends platform input and output token usage to Stripe with deterministic identifiers and the original timestamp", async () => {
     mocks.listHostedAiUsagePendingStripeMetering.mockResolvedValue([
       {
         apiKeyEnv: null,
@@ -112,6 +114,7 @@ describe("drainHostedAiUsageStripeMetering", () => {
         requestedModel: "venice/deepseek-r1-671b",
         stripeCustomerId: "cus_123",
         stripeMeterAttemptCount: 0,
+        stripeMeterIdentifier: null,
         stripeMeterStatus: "pending",
         totalTokens: 165,
       },
@@ -144,24 +147,42 @@ describe("drainHostedAiUsageStripeMetering", () => {
       metered: 1,
       skipped: 0,
     });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const requestCall = fetchCalls.at(0);
-    expect(requestCall).toBeDefined();
-    const [url, requestInit] = requestCall as [string, RequestInit | undefined];
-    expect(url).toBe("https://api.stripe.com/v1/billing/meter_events");
-    const headers = new Headers(requestInit?.headers);
-    expect(headers.get("authorization")).toBe("Bearer sk_test_123");
-    expect(headers.get("Idempotency-Key")).toBe("usage_abc");
-    const body = String(requestInit?.body ?? "");
-    expect(body).toContain("event_name=ai_total_tokens");
-    expect(body).toContain("identifier=usage_abc");
-    expect(body).toContain("payload%5Bstripe_customer_id%5D=cus_123");
-    expect(body).toContain("payload%5Bvalue%5D=165");
-    expect(body).toContain("timestamp=1774787696");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const firstCall = fetchCalls.at(0);
+    const secondCall = fetchCalls.at(1);
+    expect(firstCall).toBeDefined();
+    expect(secondCall).toBeDefined();
+    const [firstUrl, firstRequestInit] = firstCall as [string, RequestInit | undefined];
+    const [secondUrl, secondRequestInit] = secondCall as [string, RequestInit | undefined];
+    expect(firstUrl).toBe("https://api.stripe.com/v1/billing/meter_events");
+    expect(secondUrl).toBe("https://api.stripe.com/v1/billing/meter_events");
+    const firstHeaders = new Headers(firstRequestInit?.headers);
+    const secondHeaders = new Headers(secondRequestInit?.headers);
+    expect(firstHeaders.get("authorization")).toBe("Bearer sk_test_123");
+    expect(firstHeaders.get("Idempotency-Key")).toBe("usage_abc:input");
+    expect(secondHeaders.get("Idempotency-Key")).toBe("usage_abc:output");
+    const firstBody = String(firstRequestInit?.body ?? "");
+    const secondBody = String(secondRequestInit?.body ?? "");
+    expect(firstBody).toContain("event_name=ai_total_tokens");
+    expect(firstBody).toContain("identifier=usage_abc%3Ainput");
+    expect(firstBody).toContain("payload%5Bstripe_customer_id%5D=cus_123");
+    expect(firstBody).toContain("payload%5Bvalue%5D=120");
+    expect(firstBody).toContain("payload%5Btoken_type%5D=input");
+    expect(firstBody).toContain("payload%5Bmodel%5D=venice%2Fdeepseek-r1-671b");
+    expect(firstBody).toContain("timestamp=1774787696");
+    expect(secondBody).toContain("identifier=usage_abc%3Aoutput");
+    expect(secondBody).toContain("payload%5Bvalue%5D=45");
+    expect(secondBody).toContain("payload%5Btoken_type%5D=output");
+    expect(mocks.markHostedAiUsageStripeProgress).toHaveBeenCalledWith({
+      attemptedAt: new Date(attemptedAt),
+      id: "usage_abc",
+      identifier: "tokens-v1:input",
+      prisma: undefined,
+    });
     expect(mocks.markHostedAiUsageStripeMetered).toHaveBeenCalledWith({
       attemptedAt: new Date(attemptedAt),
       id: "usage_abc",
-      identifier: "usage_abc",
+      identifier: "usage_abc:tokens-v1",
       prisma: undefined,
     });
   });
@@ -188,6 +209,7 @@ describe("drainHostedAiUsageStripeMetering", () => {
         requestedModel: "gpt-5.4-mini",
         stripeCustomerId: "cus_123",
         stripeMeterAttemptCount: 2,
+        stripeMeterIdentifier: null,
         stripeMeterStatus: "pending",
         totalTokens: 15,
       },
@@ -213,7 +235,8 @@ describe("drainHostedAiUsageStripeMetering", () => {
     expect(mocks.markHostedAiUsageStripeRetryableFailure).toHaveBeenCalledWith({
       attemptedAt: new Date(attemptedAt),
       id: "usage_retry",
-      message: "Stripe meter event usage_retry failed with HTTP 500.",
+      identifier: null,
+      message: "Stripe meter event usage_retry:input failed with HTTP 500.",
       nextAttemptAt: new Date("2026-03-29T12:25:00.000Z"),
       prisma: undefined,
     });
@@ -244,6 +267,7 @@ describe("drainHostedAiUsageStripeMetering", () => {
         requestedModel: "gpt-5.4-mini",
         stripeCustomerId: "cus_123",
         stripeMeterAttemptCount: 0,
+        stripeMeterIdentifier: null,
         stripeMeterStatus: "pending",
         totalTokens: 15,
       },
@@ -269,7 +293,8 @@ describe("drainHostedAiUsageStripeMetering", () => {
     expect(mocks.markHostedAiUsageStripeFailed).toHaveBeenCalledWith({
       attemptedAt: new Date(attemptedAt),
       id: "usage_bad_request",
-      message: "Stripe meter event usage_bad_request failed with HTTP 400.",
+      identifier: null,
+      message: "Stripe meter event usage_bad_request:input failed with HTTP 400.",
       prisma: undefined,
     });
     expect(mocks.markHostedAiUsageStripeRetryableFailure).not.toHaveBeenCalled();
@@ -289,6 +314,7 @@ describe("drainHostedAiUsageStripeMetering", () => {
         requestedModel: "gpt-5.4-mini",
         stripeCustomerId: "cus_123",
         stripeMeterAttemptCount: 0,
+        stripeMeterIdentifier: null,
         stripeMeterStatus: "pending",
         totalTokens: null,
       },
@@ -321,11 +347,13 @@ describe("drainHostedAiUsageStripeMetering", () => {
       metered: 1,
       skipped: 0,
     });
-    const requestCall = fetchCalls.at(0);
-    expect(requestCall).toBeDefined();
-    const requestInit = requestCall?.[1];
-    const body = String(requestInit?.body ?? "");
-    expect(body).toContain("payload%5Bvalue%5D=165");
+    expect(fetchCalls).toHaveLength(2);
+    const inputBody = String(fetchCalls.at(0)?.[1]?.body ?? "");
+    const outputBody = String(fetchCalls.at(1)?.[1]?.body ?? "");
+    expect(inputBody).toContain("payload%5Bvalue%5D=120");
+    expect(inputBody).toContain("payload%5Btoken_type%5D=input");
+    expect(outputBody).toContain("payload%5Bvalue%5D=45");
+    expect(outputBody).toContain("payload%5Btoken_type%5D=output");
   });
 
   it("skips usage when no positive token count can be proven", async () => {
@@ -342,6 +370,7 @@ describe("drainHostedAiUsageStripeMetering", () => {
         requestedModel: "gpt-5.4-mini",
         stripeCustomerId: "cus_123",
         stripeMeterAttemptCount: 0,
+        stripeMeterIdentifier: null,
         stripeMeterStatus: "pending",
         totalTokens: null,
       },
@@ -369,7 +398,140 @@ describe("drainHostedAiUsageStripeMetering", () => {
     expect(mocks.markHostedAiUsageStripeSkipped).toHaveBeenCalledWith({
       attemptedAt: new Date(attemptedAt),
       id: "usage_missing_total",
-      message: "Skipped Stripe AI metering because no positive token count was available.",
+      message: "Skipped Stripe AI metering because no positive input or output token count was available.",
+      prisma: undefined,
+    });
+  });
+
+  it("persists split-meter progress and retries only the missing token side after a partial failure", async () => {
+    const attemptedAt = "2026-03-29T12:05:00.000Z";
+    const fetchMock = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+      const body = String(init?.body ?? "");
+
+      if (body.includes("payload%5Btoken_type%5D=input")) {
+        return new Response(JSON.stringify({ id: "mtr_evt_input" }), {
+          status: 200,
+          headers: {
+            "content-type": "application/json",
+          },
+        });
+      }
+
+      return new Response(JSON.stringify({
+        error: {
+          message: "temporary failure",
+        },
+      }), {
+        status: 500,
+      });
+    });
+    mocks.listHostedAiUsagePendingStripeMetering.mockResolvedValueOnce([
+      {
+        apiKeyEnv: null,
+        credentialSource: "platform",
+        id: "usage_partial",
+        inputTokens: 10,
+        memberId: "member_123",
+        occurredAt: new Date("2026-03-29T12:00:00.000Z"),
+        outputTokens: 5,
+        provider: "openai-compatible",
+        requestedModel: "gpt-5.4-mini",
+        stripeCustomerId: "cus_123",
+        stripeMeterAttemptCount: 0,
+        stripeMeterIdentifier: null,
+        stripeMeterStatus: "pending",
+        totalTokens: 15,
+      },
+    ]);
+
+    await expect(
+      drainHostedAiUsageStripeMetering({
+        environment: {
+          batchLimit: 32,
+          meterEventName: "ai_total_tokens",
+          stripeSecretKey: "sk_test_123",
+        },
+        fetchImpl: fetchMock as typeof fetch,
+        now: attemptedAt,
+      }),
+    ).resolves.toEqual({
+      configured: true,
+      failed: 1,
+      metered: 0,
+      skipped: 0,
+    });
+
+    expect(mocks.markHostedAiUsageStripeProgress).toHaveBeenCalledWith({
+      attemptedAt: new Date(attemptedAt),
+      id: "usage_partial",
+      identifier: "tokens-v1:input",
+      prisma: undefined,
+    });
+    expect(mocks.markHostedAiUsageStripeRetryableFailure).toHaveBeenCalledWith({
+      attemptedAt: new Date(attemptedAt),
+      id: "usage_partial",
+      identifier: "tokens-v1:input",
+      message: "Stripe meter event usage_partial:output failed with HTTP 500.",
+      nextAttemptAt: new Date("2026-03-29T12:10:00.000Z"),
+      prisma: undefined,
+    });
+
+    vi.clearAllMocks();
+    const retryFetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({ id: "mtr_evt_output" }), {
+        status: 200,
+        headers: {
+          "content-type": "application/json",
+        },
+      }));
+    mocks.listHostedAiUsagePendingStripeMetering.mockResolvedValueOnce([
+      {
+        apiKeyEnv: null,
+        credentialSource: "platform",
+        id: "usage_partial",
+        inputTokens: 10,
+        memberId: "member_123",
+        occurredAt: new Date("2026-03-29T12:00:00.000Z"),
+        outputTokens: 5,
+        provider: "openai-compatible",
+        requestedModel: "gpt-5.4-mini",
+        stripeCustomerId: "cus_123",
+        stripeMeterAttemptCount: 1,
+        stripeMeterIdentifier: "tokens-v1:input",
+        stripeMeterStatus: "pending",
+        totalTokens: 15,
+      },
+    ]);
+
+    await expect(
+      drainHostedAiUsageStripeMetering({
+        environment: {
+          batchLimit: 32,
+          meterEventName: "ai_total_tokens",
+          stripeSecretKey: "sk_test_123",
+        },
+        fetchImpl: retryFetchMock as typeof fetch,
+        now: "2026-03-29T12:15:00.000Z",
+      }),
+    ).resolves.toEqual({
+      configured: true,
+      failed: 0,
+      metered: 1,
+      skipped: 0,
+    });
+
+    expect(retryFetchMock).toHaveBeenCalledTimes(1);
+    const retryRequest = retryFetchMock.mock.calls[0] as unknown as
+      | [unknown, RequestInit | undefined]
+      | undefined;
+    expect(retryRequest).toBeDefined();
+    const retryBody = String(retryRequest?.[1]?.body ?? "");
+    expect(retryBody).toContain("identifier=usage_partial%3Aoutput");
+    expect(retryBody).toContain("payload%5Btoken_type%5D=output");
+    expect(mocks.markHostedAiUsageStripeMetered).toHaveBeenCalledWith({
+      attemptedAt: new Date("2026-03-29T12:15:00.000Z"),
+      id: "usage_partial",
+      identifier: "usage_partial:tokens-v1",
       prisma: undefined,
     });
   });
@@ -386,6 +548,18 @@ describe("readHostedAiUsageStripeMeterEnvironment", () => {
     ).toEqual({
       batchLimit: 16,
       meterEventName: "ai_total_tokens",
+      stripeSecretKey: "sk_test_123",
+    });
+  });
+
+  it("defaults the Stripe meter event name when the env var is absent", () => {
+    expect(
+      readHostedAiUsageStripeMeterEnvironment({
+        STRIPE_SECRET_KEY: "sk_test_123",
+      }),
+    ).toEqual({
+      batchLimit: 32,
+      meterEventName: "token-billing-tokens",
       stripeSecretKey: "sk_test_123",
     });
   });

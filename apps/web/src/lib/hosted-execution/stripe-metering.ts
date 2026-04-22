@@ -2,6 +2,7 @@ import type { PrismaClient } from "@prisma/client";
 
 import {
   markHostedAiUsageStripeFailed,
+  markHostedAiUsageStripeProgress,
   listHostedAiUsagePendingStripeMetering,
   markHostedAiUsageStripeMetered,
   markHostedAiUsageStripeRetryableFailure,
@@ -11,8 +12,17 @@ import {
 
 const STRIPE_METER_EVENTS_URL = "https://api.stripe.com/v1/billing/meter_events";
 const DEFAULT_STRIPE_METER_BATCH_LIMIT = 32;
+const DEFAULT_STRIPE_METER_EVENT_NAME = "token-billing-tokens";
 const STRIPE_METER_RETRY_BASE_DELAY_MS = 5 * 60_000;
 const STRIPE_METER_RETRY_MAX_DELAY_MS = 24 * 60 * 60_000;
+const STRIPE_METER_PROGRESS_PREFIX = "tokens-v1:";
+
+type HostedAiUsageStripeTokenType = "input" | "output";
+
+interface HostedAiUsageStripeTokenEvent {
+  tokenType: HostedAiUsageStripeTokenType;
+  value: number;
+}
 
 export interface HostedAiUsageStripeMeterEnvironment {
   meterEventName: string | null;
@@ -69,13 +79,30 @@ export async function drainHostedAiUsageStripeMetering(input: {
       continue;
     }
 
-    const value = resolveHostedAiUsageStripeValue(candidate);
+    const allTokenEvents = resolveHostedAiUsageStripeTokenEvents(candidate);
+    const completedTokenTypes = parseHostedAiUsageStripeCompletedTokenTypes(
+      candidate.stripeMeterIdentifier,
+    );
+    const tokenEvents = allTokenEvents.filter(
+      (tokenEvent) => !completedTokenTypes.has(tokenEvent.tokenType),
+    );
 
-    if (value === null) {
+    if (tokenEvents.length === 0) {
+      if (completedTokenTypes.size > 0) {
+        await markHostedAiUsageStripeMetered({
+          attemptedAt,
+          id: candidate.id,
+          identifier: `${candidate.id}:tokens-v1`,
+          prisma: input.prisma,
+        });
+        metered += 1;
+        continue;
+      }
+
       await markHostedAiUsageStripeSkipped({
         attemptedAt,
         id: candidate.id,
-        message: "Skipped Stripe AI metering because no positive token count was available.",
+        message: "Skipped Stripe AI metering because no positive input or output token count was available.",
         prisma: input.prisma,
       });
       skipped += 1;
@@ -83,19 +110,40 @@ export async function drainHostedAiUsageStripeMetering(input: {
     }
 
     try {
-      await createHostedAiUsageStripeMeterEvent({
-        eventName: environment.meterEventName,
-        fetchImpl,
-        identifier: candidate.id,
-        occurredAt: candidate.occurredAt,
-        stripeCustomerId: candidate.stripeCustomerId,
-        stripeSecretKey: environment.stripeSecretKey,
-        value,
-      });
+      for (const tokenEvent of tokenEvents) {
+        await createHostedAiUsageStripeMeterEvent({
+          eventName: environment.meterEventName,
+          fetchImpl,
+          identifier: `${candidate.id}:${tokenEvent.tokenType}`,
+          model: resolveHostedAiUsageStripeModel(candidate),
+          occurredAt: candidate.occurredAt,
+          stripeCustomerId: candidate.stripeCustomerId,
+          stripeSecretKey: environment.stripeSecretKey,
+          tokenEvent,
+        });
+        completedTokenTypes.add(tokenEvent.tokenType);
+
+        if (completedTokenTypes.size < allTokenEvents.length) {
+          const progressIdentifier = formatHostedAiUsageStripeProgressIdentifier(
+            completedTokenTypes,
+          );
+
+          if (!progressIdentifier) {
+            throw new TypeError("Hosted AI usage Stripe metering progress identifier was missing.");
+          }
+
+          await markHostedAiUsageStripeProgress({
+            attemptedAt,
+            id: candidate.id,
+            identifier: progressIdentifier,
+            prisma: input.prisma,
+          });
+        }
+      }
       await markHostedAiUsageStripeMetered({
         attemptedAt,
         id: candidate.id,
-        identifier: candidate.id,
+        identifier: `${candidate.id}:tokens-v1`,
         prisma: input.prisma,
       });
       metered += 1;
@@ -106,6 +154,7 @@ export async function drainHostedAiUsageStripeMetering(input: {
         await markHostedAiUsageStripeRetryableFailure({
           attemptedAt,
           id: candidate.id,
+          identifier: formatHostedAiUsageStripeProgressIdentifier(completedTokenTypes),
           message,
           nextAttemptAt: computeHostedAiUsageStripeRetryAt({
             attemptedAt,
@@ -117,6 +166,7 @@ export async function drainHostedAiUsageStripeMetering(input: {
         await markHostedAiUsageStripeFailed({
           attemptedAt,
           id: candidate.id,
+          identifier: formatHostedAiUsageStripeProgressIdentifier(completedTokenTypes),
           message,
           prisma: input.prisma,
         });
@@ -137,7 +187,9 @@ export function readHostedAiUsageStripeMeterEnvironment(
   source: Readonly<Record<string, string | undefined>> = process.env,
 ): HostedAiUsageStripeMeterEnvironment {
   return {
-    meterEventName: normalizeOptionalString(source.HOSTED_AI_USAGE_STRIPE_METER_EVENT_NAME),
+    meterEventName:
+      normalizeOptionalString(source.HOSTED_AI_USAGE_STRIPE_METER_EVENT_NAME)
+      ?? DEFAULT_STRIPE_METER_EVENT_NAME,
     stripeSecretKey: normalizeOptionalString(source.STRIPE_SECRET_KEY),
     batchLimit: readPositiveInteger(
       normalizeOptionalString(source.HOSTED_AI_USAGE_STRIPE_BATCH_LIMIT),
@@ -151,16 +203,19 @@ async function createHostedAiUsageStripeMeterEvent(input: {
   eventName: string;
   fetchImpl: typeof fetch;
   identifier: string;
+  model: string;
   occurredAt: Date;
   stripeCustomerId: string;
   stripeSecretKey: string;
-  value: number;
+  tokenEvent: HostedAiUsageStripeTokenEvent;
 }): Promise<void> {
   const body = new URLSearchParams();
   body.set("event_name", input.eventName);
   body.set("identifier", input.identifier);
   body.set("payload[stripe_customer_id]", input.stripeCustomerId);
-  body.set("payload[value]", String(input.value));
+  body.set("payload[value]", String(input.tokenEvent.value));
+  body.set("payload[token_type]", input.tokenEvent.tokenType);
+  body.set("payload[model]", input.model);
   body.set("timestamp", String(Math.floor(input.occurredAt.getTime() / 1000)));
 
   const response = await input.fetchImpl(STRIPE_METER_EVENTS_URL, {
@@ -192,20 +247,57 @@ function resolveHostedAiUsageStripeSkipReason(
     : "Skipped Stripe AI metering because the credential source could not be proven platform-owned.";
 }
 
-function resolveHostedAiUsageStripeValue(
+function resolveHostedAiUsageStripeTokenEvents(
   candidate: HostedAiUsageStripeCandidate,
-): number | null {
-  const totalTokens = normalizePositiveTokenCount(candidate.totalTokens);
+): HostedAiUsageStripeTokenEvent[] {
+  return [
+    {
+      tokenType: "input" as const,
+      value: normalizePositiveTokenCount(candidate.inputTokens),
+    },
+    {
+      tokenType: "output" as const,
+      value: normalizePositiveTokenCount(candidate.outputTokens),
+    },
+  ].filter((event): event is HostedAiUsageStripeTokenEvent => event.value !== null);
+}
 
-  if (totalTokens !== null) {
-    return totalTokens;
+function resolveHostedAiUsageStripeModel(candidate: HostedAiUsageStripeCandidate): string {
+  return (
+    normalizeOptionalString(candidate.servedModel)
+    ?? normalizeOptionalString(candidate.requestedModel)
+    ?? candidate.provider
+  );
+}
+
+function parseHostedAiUsageStripeCompletedTokenTypes(
+  identifier: string | null,
+): Set<HostedAiUsageStripeTokenType> {
+  const normalizedIdentifier = normalizeOptionalString(identifier);
+
+  if (!normalizedIdentifier || !normalizedIdentifier.startsWith(STRIPE_METER_PROGRESS_PREFIX)) {
+    return new Set();
   }
 
-  const fallbackTokenTotal = [candidate.inputTokens, candidate.outputTokens]
-    .map(normalizePositiveTokenCount)
-    .reduce<number>((sum, value) => sum + (value ?? 0), 0);
+  return new Set(
+    normalizedIdentifier
+      .slice(STRIPE_METER_PROGRESS_PREFIX.length)
+      .split(",")
+      .flatMap((tokenType) =>
+        tokenType === "input" || tokenType === "output" ? [tokenType] : [],
+      ),
+  );
+}
 
-  return fallbackTokenTotal > 0 ? fallbackTokenTotal : null;
+function formatHostedAiUsageStripeProgressIdentifier(
+  completedTokenTypes: Iterable<HostedAiUsageStripeTokenType>,
+): string | null {
+  const normalizedTokenTypes = [...new Set(completedTokenTypes)].sort();
+  if (normalizedTokenTypes.length === 0) {
+    return null;
+  }
+
+  return `${STRIPE_METER_PROGRESS_PREFIX}${normalizedTokenTypes.join(",")}`;
 }
 
 function normalizePositiveTokenCount(value: number | null): number | null {
