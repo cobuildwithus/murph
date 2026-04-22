@@ -97,7 +97,7 @@ function resolvedMetric(
       recordedAt: string | null;
       recordIds: string[];
       resolution: "direct" | "fallback" | "none";
-      sourceFamily: "event" | "sample" | "derived" | null;
+      sourceFamily: "canonical" | "event" | "sample" | "derived" | null;
       sourceKind: string | null;
       title: string | null;
       unit: string | null;

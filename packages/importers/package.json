@@ -24,6 +24,21 @@
       "types": "./dist/device-providers/provider-descriptors.d.ts",
       "import": "./dist/device-providers/provider-descriptors.js",
       "default": "./dist/device-providers/provider-descriptors.js"
+    },
+    "./device-providers/canonical-wearable-records": {
+      "types": "./dist/device-providers/canonical-wearable-records.d.ts",
+      "import": "./dist/device-providers/canonical-wearable-records.js",
+      "default": "./dist/device-providers/canonical-wearable-records.js"
+    },
+    "./device-providers/metric-catalog": {
+      "types": "./dist/device-providers/metric-catalog.d.ts",
+      "import": "./dist/device-providers/metric-catalog.js",
+      "default": "./dist/device-providers/metric-catalog.js"
+    },
+    "./device-providers/raw-ingest-envelope": {
+      "types": "./dist/device-providers/raw-ingest-envelope.d.ts",
+      "import": "./dist/device-providers/raw-ingest-envelope.js",
+      "default": "./dist/device-providers/raw-ingest-envelope.js"
     }
   },
   "scripts": {

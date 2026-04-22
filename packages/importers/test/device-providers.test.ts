@@ -1585,24 +1585,27 @@ test("importDeviceProviderSnapshot strips snapshot input fields before delegatin
   );
 
   assert.equal(calls.length, 1);
-  assert.deepEqual(calls[0], {
-    provider: "polar",
-    accountId: "polar-user-2",
-    source: "device",
-    events: [
-      {
-        kind: "observation",
-        occurredAt: "2026-03-16T12:00:00.000Z",
-        title: "Polar daily steps",
-        fields: {
-          metric: "daily-steps",
-          value: 4321,
-          unit: "count",
-        },
+  assert.equal(calls[0]?.provider, "polar");
+  assert.equal(calls[0]?.accountId, "polar-user-2");
+  assert.equal(calls[0]?.source, "device");
+  assert.deepEqual(calls[0]?.events, [
+    {
+      kind: "observation",
+      occurredAt: "2026-03-16T12:00:00.000Z",
+      title: "Polar daily steps",
+      fields: {
+        metric: "daily-steps",
+        value: 4321,
+        unit: "count",
       },
-    ],
-  });
-  assert.equal("snapshot" in (calls[0] as Record<string, unknown>), false);
+    },
+  ]);
+  assert.equal(Object.hasOwn(calls[0] ?? {}, "snapshot"), false);
+  assert.equal(calls[0]?.rawIngestEnvelopes?.length, 1);
+  assert.equal(calls[0]?.canonicalWearableRecords?.length, 1);
+  assert.ok(calls[0]?.rawArtifacts?.some((artifact) => artifact.role.startsWith("wearable-raw-envelope:")));
+  assert.ok(calls[0]?.rawArtifacts?.some((artifact) => artifact.role.startsWith("wearable-canonical-records:")));
+  assert.equal(calls[0]?.vaultRoot, undefined);
 });
 
 test("createImporters composes custom device providers behind the same core seam", async () => {

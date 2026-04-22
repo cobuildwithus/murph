@@ -1,5 +1,10 @@
 import type { DeviceBatchImportPayload } from "../core-port.ts";
 import type { DeviceProviderDescriptor } from "./provider-descriptors.ts";
+import type {
+  WearableRawIngestDeliveryMode,
+  WearableRawIngestEventType,
+  WearableRawIngestSourceKind,
+} from "./raw-ingest-envelope.ts";
 
 export interface NormalizedDeviceBatch extends Omit<DeviceBatchImportPayload, "vaultRoot"> {}
 
@@ -8,6 +13,24 @@ export interface DeviceProviderAdapter<TSnapshot = unknown> extends DeviceProvid
   normalizeSnapshot(snapshot: TSnapshot): Promise<NormalizedDeviceBatch> | NormalizedDeviceBatch;
 }
 
-export interface DeviceProviderSnapshotImportPayload extends DeviceBatchImportPayload {
+export interface WearableIngestContext {
+  userId?: string;
+  connectionId?: string;
+  sourceKind?: WearableRawIngestSourceKind;
+  deliveryMode?: WearableRawIngestDeliveryMode;
+  resourceType?: string;
+  resourceId?: string;
+  providerEventId?: string;
+  eventType?: WearableRawIngestEventType;
+  observedAt?: string;
+  occurredAt?: string;
+  windowStart?: string;
+  windowEnd?: string;
+  cursor?: string;
+  signatureVerified?: boolean;
+  normalizerVersion?: string;
+}
+
+export interface DeviceProviderSnapshotImportPayload extends DeviceBatchImportPayload, WearableIngestContext {
   snapshot: unknown;
 }

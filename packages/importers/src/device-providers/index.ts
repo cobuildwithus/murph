@@ -40,6 +40,7 @@ export type {
   DeviceProviderAdapter,
   DeviceProviderSnapshotImportPayload,
   NormalizedDeviceBatch,
+  WearableIngestContext,
 } from "./types.ts";
 
 export {
@@ -66,3 +67,40 @@ export type {
   NamedDeviceProviderRegistry,
   ResolveDeviceProviderSourcePriorityInput,
 } from "./provider-descriptors.ts";
+
+export {
+  canonicalizeDeviceBatchPayload,
+} from "./canonical-wearable-records.ts";
+export type {
+  CanonicalWearableObservationRecord,
+  CanonicalWearableRecord,
+  CanonicalWearableRecordKind,
+  CanonicalWearableSampleRecord,
+  CanonicalWearableSchemaVersion,
+  CanonicalWearableSessionRecord,
+  CanonicalWearableSource,
+  CanonicalWearableTombstoneRecord,
+} from "./canonical-wearable-records.ts";
+export {
+  resolveWearableCanonicalMetricKey,
+  resolveWearableMetricCatalogEntry,
+  resolveWearableMetricTolerance,
+  wearableCanonicalMetricKeys,
+  wearableMetricCatalog,
+} from "./metric-catalog.ts";
+export type {
+  WearableCanonicalMetricKey,
+  WearableMetricCatalogEntry,
+  WearableMetricRecordKind,
+} from "./metric-catalog.ts";
+export {
+  buildWearableRawIngestEnvelope,
+  stableStringify,
+} from "./raw-ingest-envelope.ts";
+export type {
+  BuildWearableRawIngestEnvelopeInput,
+  WearableRawIngestDeliveryMode,
+  WearableRawIngestEnvelope,
+  WearableRawIngestEventType,
+  WearableRawIngestSourceKind,
+} from "./raw-ingest-envelope.ts";

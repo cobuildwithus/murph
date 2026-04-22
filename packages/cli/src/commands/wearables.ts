@@ -14,7 +14,7 @@ import type { VaultServices } from '@murphai/vault-usecases'
 const nullableTimestampSchema = z.string().min(1).nullable()
 const nullableTextSchema = z.string().min(1).nullable()
 const wearableConfidenceLevelSchema = z.enum(['none', 'low', 'medium', 'high'])
-const wearableSourceFamilySchema = z.enum(['event', 'sample', 'derived'])
+const wearableSourceFamilySchema = z.enum(['canonical', 'event', 'sample', 'derived'])
 const repeatableProviderOptionSchema = z
   .array(z.string().min(1))
   .optional()

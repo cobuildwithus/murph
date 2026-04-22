@@ -91,6 +91,7 @@ export {
 } from "./query-projection-types.ts";
 export {
   buildWearableAssistantSummary,
+  collectCanonicalWearableDataset,
   listWearableActivityDays,
   listWearableBodyStateDays,
   listWearableRecoveryDays,
@@ -116,6 +117,7 @@ export type {
   WearableDaySummary,
   WearableMetricCandidate,
   WearableMetricConfidence,
+  WearableMetricKey,
   WearableMetricSelection,
   WearableMetricValue,
   WearableRecoveryDay,
