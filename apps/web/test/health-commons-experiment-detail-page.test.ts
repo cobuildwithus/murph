@@ -131,13 +131,31 @@ describe("ExperimentDetailPage", () => {
         key: "protocol_variant:dry-sauna/bryan-johnson-blueprint",
       }),
       id: "bryan-johnson-blueprint",
-      researchSummaryLabel: "n=1 report",
-      studyCount: 12,
+      researchSummaryLabel: "11 studies + 3 reviews",
+      studyCount: 11,
       title: expect.stringContaining("Bryan Johnson"),
     }));
+    expect(clientExperiment.researchGroups).toHaveLength(8);
+    expect(clientExperiment.researchGroups).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: "independent-sauna-physiology-context",
+        label: "Independent heat-load context",
+      }),
+      expect.objectContaining({
+        id: "post-workout-training-context",
+        label: "Post-workout and recovery evidence",
+      }),
+      expect.objectContaining({
+        id: "safety-fertility-cooling-boundary",
+        label: "Fertility and groin-cooling boundary",
+      }),
+    ]));
     expect(clientExperiment.researchStats).toEqual(expect.arrayContaining([
-      expect.objectContaining({ label: "SOURCES CHECKED", value: 12 }),
-      expect.objectContaining({ label: "TOTAL PARTICIPANTS", value: "1" }),
+      expect.objectContaining({ label: "SOURCES CHECKED", value: 26 }),
+      expect.objectContaining({ label: "TOTAL PARTICIPANTS", value: "2,557+" }),
+      expect.objectContaining({ label: "REVIEW PAPERS", value: 3 }),
+      expect.objectContaining({ label: "RESEARCH PAPERS", value: 11 }),
+      expect.objectContaining({ label: "YEARS COVERED", value: "1998–2025" }),
     ]));
     expect(clientExperiment.studies).toEqual(expect.arrayContaining([
       expect.objectContaining({

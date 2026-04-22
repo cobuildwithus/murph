@@ -17,6 +17,9 @@ relations:
   -
     type: parent_family
     target: experiment_family:dry-sauna
+  -
+    type: related_protocol
+    target: protocol_variant:dry-sauna/bryan-johnson-blueprint
 source:
   kind: review
   title: "Cardiovascular and other health benefits of sauna bathing: a review of the evidence"
@@ -46,6 +49,19 @@ protocolEvidence:
     implication: "This source is rationale and mechanism context, not a substitute for protocol-specific intervention data."
     caveat: "Review evidence should calibrate rationale and claims; it does not prove this exact 21-day self-experiment will move wearable signals."
     displayPriority: 20
+  -
+    protocolKey: "protocol_variant:dry-sauna/bryan-johnson-blueprint"
+    groupId: "independent-sauna-physiology-context"
+    stance: context_only
+    scope: same_mechanism
+    result: not_efficacy_evidence
+    endpointKeys:
+      - biomarker:resting-heart-rate
+      - biomarker:morning-blood-pressure
+    headline: "Review explains why sauna can act like a real cardiovascular heat stressor."
+    implication: "Use it for mechanism and endpoint selection, not as proof of the daily 200 F Blueprint routine."
+    caveat: "Narrative review; the underlying studies use varied doses, populations, and outcomes."
+    displayPriority: 40
 evidenceBucket: Evidence backbone
 whyItMatters: Strong narrative synthesis focused on cardiovascular mechanisms and outcomes
 potentialMurphEndpoints:
