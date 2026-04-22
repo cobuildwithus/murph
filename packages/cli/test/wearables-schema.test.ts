@@ -85,12 +85,29 @@ test("wearables day schema preserves fallback selection metadata", () => {
 
 test("additive wearables schemas stay compact and metric-aware", () => {
   const latestParsed = wearablesLatestResultSchema.parse({
+    filters: {
+      date: null,
+      from: null,
+      providers: [],
+      to: null,
+    },
     summary: {
       activity: null,
       bodyState: null,
-      highlights: ["No wearable summaries were available for the selected range."],
-      latestDate: null,
-      providers: [],
+      day: {
+        activity: null,
+        bodyState: null,
+        date: "2026-04-05",
+        notes: ["Latest wearable day was sourced from oura."],
+        providers: ["oura"],
+        recovery: null,
+        sleep: null,
+        sourceHealth: [],
+        summaryConfidence: "high",
+      },
+      latestDate: "2026-04-05",
+      notes: ["Latest wearable day was sourced from oura."],
+      providers: ["oura"],
       recovery: null,
       sleep: null,
       sourceHealth: [],
@@ -99,70 +116,188 @@ test("additive wearables schemas stay compact and metric-aware", () => {
   });
 
   const metricLatestParsed = wearablesMetricLatestResultSchema.parse({
-    latest: {
-      date: "2026-04-05",
-      resolvedMetric: resolvedMetric({
-        metric: "hrv",
-        selection: {
-          ...resolvedMetric().selection,
-          provider: "oura",
-          unit: "ms",
-          value: 48,
-        },
-      }),
-      unit: "ms",
-      value: 48,
+    filters: {
+      date: null,
+      from: null,
+      metric: "resting-heart-rate",
+      providers: [],
+      to: null,
+      windowDays: 7,
     },
-    metric: {
-      input: "resting-heart-rate",
-      resolved: "restingHeartRate",
+    summary: {
+      confidence: {
+        candidateCount: 1,
+        conflictingProviders: [],
+        exactDuplicateCount: 0,
+        level: "high",
+        reasons: [],
+      },
+      date: "2026-04-05",
+      delta: -3,
+      max: 58,
+      metric: "restingHeartRate",
+      min: 55,
+      notes: ["Resting heart rate improved over the recent window."],
+      paths: ["derived/query/wearables.json"],
+      percentChange: -5.17,
+      priorWindow: {
+        average: 58,
+        count: 2,
+        from: "2026-04-01",
+        max: 59,
+        min: 57,
+        to: "2026-04-02",
+      },
+      provider: "oura",
+      recentWindow: {
+        average: 55,
+        count: 2,
+        from: "2026-04-04",
+        max: 56,
+        min: 54,
+        to: "2026-04-05",
+      },
+      recordedAt: "2026-04-05T07:05:00.000Z",
+      recordIds: ["wearable_metric_01"],
+      requestedMetric: "resting-heart-rate",
+      resolvedAlias: "resting-heart-rate",
+      summaryKind: "recovery",
+      unit: "bpm",
+      value: 55,
+      windowDays: 7,
     },
     vault: "/tmp/example-vault",
   });
 
   const metricTrendParsed = wearablesMetricTrendResultSchema.parse({
-    metric: {
-      input: "hrv",
-      resolved: "hrv",
+    filters: {
+      date: null,
+      from: null,
+      metric: "hrv",
+      providers: [],
+      to: null,
+      windowDays: 7,
     },
-    trend: {
-      latest: {
-        date: "2026-04-05",
-        resolvedMetric: resolvedMetric({
-          metric: "hrv",
-          selection: {
-            ...resolvedMetric().selection,
-            provider: "oura",
-            unit: "ms",
-            value: 48,
-          },
-        }),
+    summary: {
+      confidence: {
+        candidateCount: 1,
+        conflictingProviders: [],
+        exactDuplicateCount: 0,
+        level: "high",
+        reasons: [],
       },
+      date: "2026-04-05",
+      delta: 6,
+      max: 48,
+      metric: "hrv",
+      min: 42,
       notes: ["HRV improved over the recent window."],
+      paths: ["derived/query/wearables.json"],
+      percentChange: 14.29,
       points: [
         {
+          confidence: "high",
           date: "2026-04-03",
-          resolvedMetric: resolvedMetric({
-            metric: "hrv",
-            selection: {
-              ...resolvedMetric().selection,
-              provider: "oura",
-              unit: "ms",
-              value: 42,
-            },
-          }),
+          paths: ["derived/query/wearables.json"],
+          provider: "oura",
+          recordedAt: "2026-04-03T07:05:00.000Z",
+          recordIds: ["wearable_metric_00"],
+          unit: "ms",
+          value: 42,
         },
         {
+          confidence: "high",
           date: "2026-04-05",
-          resolvedMetric: resolvedMetric({
-            metric: "hrv",
-            selection: {
-              ...resolvedMetric().selection,
-              provider: "oura",
-              unit: "ms",
-              value: 48,
-            },
-          }),
+          paths: ["derived/query/wearables.json"],
+          provider: "oura",
+          recordedAt: "2026-04-05T07:05:00.000Z",
+          recordIds: ["wearable_metric_01"],
+          unit: "ms",
+          value: 48,
+        },
+      ],
+      priorWindow: {
+        average: 42,
+        count: 1,
+        from: "2026-04-03",
+        max: 42,
+        min: 42,
+        to: "2026-04-03",
+      },
+      provider: "oura",
+      recentWindow: {
+        average: 48,
+        count: 1,
+        from: "2026-04-05",
+        max: 48,
+        min: 48,
+        to: "2026-04-05",
+      },
+      recordedAt: "2026-04-05T07:05:00.000Z",
+      recordIds: ["wearable_metric_01"],
+      requestedMetric: "hrv",
+      resolvedAlias: null,
+      summaryKind: "sleep",
+      unit: "ms",
+      value: 48,
+      windowDays: 7,
+    },
+    vault: "/tmp/example-vault",
+  });
+
+  const driftParsed = wearablesDriftResultSchema.parse({
+    filters: {
+      date: null,
+      from: null,
+      providers: [],
+      to: null,
+      windowDays: 7,
+    },
+    summary: {
+      latest: latestParsed.summary,
+      notes: ["HRV improved meaningfully over the recent window."],
+      signals: [
+        {
+          confidence: {
+            candidateCount: 1,
+            conflictingProviders: [],
+            exactDuplicateCount: 0,
+            level: "high",
+            reasons: [],
+          },
+          date: "2026-04-05",
+          delta: 6,
+          metric: "hrv",
+          max: 48,
+          min: 42,
+          notes: ["HRV rose versus the baseline window."],
+          paths: ["derived/query/wearables.json"],
+          percentChange: 14.29,
+          priorWindow: {
+            average: 42,
+            count: 1,
+            from: "2026-04-03",
+            max: 42,
+            min: 42,
+            to: "2026-04-03",
+          },
+          provider: "oura",
+          recentWindow: {
+            average: 48,
+            count: 1,
+            from: "2026-04-05",
+            max: 48,
+            min: 48,
+            to: "2026-04-05",
+          },
+          recordedAt: "2026-04-05T07:05:00.000Z",
+          recordIds: ["wearable_metric_01"],
+          requestedMetric: "hrv",
+          resolvedAlias: null,
+          summaryKind: "sleep",
+          unit: "ms",
+          value: 48,
+          windowDays: 7,
         },
       ],
       windowDays: 7,
@@ -170,25 +305,10 @@ test("additive wearables schemas stay compact and metric-aware", () => {
     vault: "/tmp/example-vault",
   });
 
-  const driftParsed = wearablesDriftResultSchema.parse({
-    drift: {
-      latestDate: "2026-04-05",
-      metrics: [
-        {
-          direction: "up",
-          metric: "hrv",
-          notes: ["HRV rose versus the baseline window."],
-        },
-      ],
-      summary: ["HRV improved meaningfully over the recent window."],
-    },
-    vault: "/tmp/example-vault",
-  });
-
-  assert.equal(latestParsed.summary?.highlights[0], "No wearable summaries were available for the selected range.");
-  assert.equal(metricLatestParsed.metric.resolved, "restingHeartRate");
-  assert.equal(metricTrendParsed.trend?.windowDays, 7);
-  assert.equal(driftParsed.drift?.metrics[0]?.metric, "hrv");
+  assert.equal(latestParsed.summary?.day.date, "2026-04-05");
+  assert.equal(metricLatestParsed.summary?.metric, "restingHeartRate");
+  assert.equal(metricTrendParsed.summary?.windowDays, 7);
+  assert.equal(driftParsed.summary?.signals[0]?.metric, "hrv");
 });
 
 function resolvedMetric(

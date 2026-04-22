@@ -1,4 +1,8 @@
-import { resolveSystemTimeZone, VAULT_LAYOUT } from "@murphai/contracts"
+import {
+  type ExperimentStatus,
+  resolveSystemTimeZone,
+  VAULT_LAYOUT,
+} from "@murphai/contracts"
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors"
 import {
   ensureManagedDeviceSyncControlPlane,
@@ -84,10 +88,14 @@ import {
   upsertRecipeRecordFromInput,
 } from "./recipe.js"
 import {
+  analyzeExperimentOutcomeRecord,
   appendJournalText,
   checkpointExperimentRecordFromInput,
+  logExperimentContextRecordFromInput,
+  logExperimentSessionRecordFromInput,
   listExperimentRecords,
   listJournalRecords,
+  showExperimentProgress,
   showExperimentRecord,
   showJournalRecord,
   showVaultStats as showVaultStatsUseCase,
@@ -230,7 +238,7 @@ function createIntegratedCoreServices(
       title?: string
       hypothesis?: string
       startedOn?: string
-      status?: string
+      status?: ExperimentStatus
     }) {
       return createExperimentRecord(input)
     },
@@ -250,6 +258,18 @@ function createIntegratedCoreServices(
       note?: string
     }) {
       return stopExperimentRecord(input)
+    },
+    async logExperimentSession(input: CommandContext & {
+      lookup: string
+      inputFile: string
+    }) {
+      return logExperimentSessionRecordFromInput(input)
+    },
+    async logExperimentContext(input: CommandContext & {
+      lookup: string
+      inputFile: string
+    }) {
+      return logExperimentContextRecordFromInput(input)
     },
     async ensureJournal(input: CommandContext & {
       date: string
@@ -610,10 +630,22 @@ function createIntegratedQueryServices(): QueryServices {
       return showExperimentRecord(input.vault, input.lookup)
     },
     async listExperiments(input: CommandContext & {
-      status?: string
+      status?: ExperimentStatus
       limit: number
     }) {
       return listExperimentRecords(input)
+    },
+    async showExperimentProgress(input: CommandContext & {
+      lookup: string
+      asOf?: string
+    }) {
+      return showExperimentProgress(input)
+    },
+    async analyzeExperimentOutcome(input: CommandContext & {
+      lookup: string
+      asOf?: string
+    }) {
+      return analyzeExperimentOutcomeRecord(input)
     },
     async showJournal(input: CommandContext & {
       date: string
@@ -725,6 +757,88 @@ function createIntegratedQueryServices(): QueryServices {
         vault: input.vault,
         date: normalized.date,
         filters: normalized.filters,
+        summary,
+      }
+    },
+    async showWearableLatest(input: CommandContext & {
+      date?: string
+      from?: string
+      to?: string
+      providers?: string[]
+    }) {
+      const normalized = normalizeWearableSurfaceInput(input)
+      const { query } = await loadIntegratedRuntime()
+      const readModel = await query.readVault(input.vault)
+      const summary = query.summarizeWearableLatest(readModel, normalized.queryFilters)
+
+      return {
+        vault: input.vault,
+        filters: normalized.filters,
+        summary,
+      }
+    },
+    async showWearableMetricLatest(input: CommandContext & {
+      metric: string
+      date?: string
+      from?: string
+      to?: string
+      providers?: string[]
+      windowDays?: number
+    }) {
+      const normalized = normalizeWearableMetricInput(input)
+      const { query } = await loadIntegratedRuntime()
+      const readModel = await query.readVault(input.vault)
+      const summary = query.summarizeWearableMetricLatest(readModel, normalized.metric, normalized.queryFilters)
+
+      return {
+        vault: input.vault,
+        filters: normalized.filters,
+        summary,
+      }
+    },
+    async showWearableMetricTrend(input: CommandContext & {
+      metric: string
+      date?: string
+      from?: string
+      to?: string
+      providers?: string[]
+      windowDays?: number
+    }) {
+      const normalized = normalizeWearableMetricInput(input)
+      const { query } = await loadIntegratedRuntime()
+      const readModel = await query.readVault(input.vault)
+      const summary = query.summarizeWearableMetricTrend(readModel, normalized.metric, normalized.queryFilters)
+
+      return {
+        vault: input.vault,
+        filters: normalized.filters,
+        summary,
+      }
+    },
+    async showWearableDrift(input: CommandContext & {
+      date?: string
+      from?: string
+      to?: string
+      providers?: string[]
+      windowDays?: number
+    }) {
+      const normalized = normalizeWearableMetricInput({
+        ...input,
+        metric: "drift",
+      })
+      const { query } = await loadIntegratedRuntime()
+      const readModel = await query.readVault(input.vault)
+      const summary = query.explainWearableDrift(readModel, normalized.queryFilters)
+
+      return {
+        vault: input.vault,
+        filters: {
+          date: normalized.filters.date,
+          from: normalized.filters.from,
+          to: normalized.filters.to,
+          providers: normalized.filters.providers,
+          windowDays: normalized.filters.windowDays,
+        },
         summary,
       }
     },
@@ -877,6 +991,89 @@ function normalizeWearableDayInput(input: {
   }
 }
 
+function normalizeWearableSurfaceInput(input: {
+  date?: string
+  from?: string
+  to?: string
+  providers?: string[]
+}): {
+  filters: {
+    date: string | null
+    from: string | null
+    to: string | null
+    providers: string[]
+  }
+  queryFilters: {
+    date?: string
+    from?: string
+    to?: string
+    providers?: string[]
+  }
+} {
+  const date = typeof input.date === 'string' && input.date.trim() ? input.date.trim() : undefined
+  const providers = normalizeWearableProviders(input.providers)
+  const from = date ? undefined : normalizeOptionalString(input.from)
+  const to = date ? undefined : normalizeOptionalString(input.to)
+
+  return {
+    filters: {
+      date: date ?? null,
+      from: date ?? from ?? null,
+      to: date ?? to ?? null,
+      providers,
+    },
+    queryFilters: {
+      date,
+      from,
+      to,
+      providers: providers.length > 0 ? providers : undefined,
+    },
+  }
+}
+
+function normalizeWearableMetricInput(input: {
+  metric: string
+  date?: string
+  from?: string
+  to?: string
+  providers?: string[]
+  windowDays?: number
+}): {
+  filters: {
+    date: string | null
+    from: string | null
+    to: string | null
+    providers: string[]
+    metric: string
+    windowDays: number
+  }
+  metric: string
+  queryFilters: {
+    date?: string
+    from?: string
+    to?: string
+    providers?: string[]
+    windowDays: number
+  }
+} {
+  const normalized = normalizeWearableSurfaceInput(input)
+  const metric = input.metric.trim()
+  const windowDays = normalizeWearableWindowDays(input.windowDays)
+
+  return {
+    filters: {
+      ...normalized.filters,
+      metric,
+      windowDays,
+    },
+    metric,
+    queryFilters: {
+      ...normalized.queryFilters,
+      windowDays,
+    },
+  }
+}
+
 function normalizeWearableSummaryInput(input: {
   date?: string
   from?: string
@@ -898,24 +1095,25 @@ function normalizeWearableSummaryInput(input: {
     limit: number
   }
 } {
-  const date = typeof input.date === 'string' && input.date.trim() ? input.date.trim() : undefined
-  const from = date ?? input.from
-  const to = date ?? input.to
-  const providers = normalizeWearableProviders(input.providers)
+  const normalized = normalizeWearableSurfaceInput(input)
   const limit = normalizeWearableLimit(input.limit)
 
   return {
     filters: {
-      date: date ?? null,
-      from: from ?? null,
-      to: to ?? null,
-      providers,
+      ...normalized.filters,
       limit,
     },
     queryFilters: {
-      from,
-      to,
-      providers: providers.length > 0 ? providers : undefined,
+      ...(normalized.queryFilters.date
+        ? {
+            from: normalized.queryFilters.date,
+            to: normalized.queryFilters.date,
+          }
+        : {
+            from: normalized.queryFilters.from,
+            to: normalized.queryFilters.to,
+          }),
+      providers: normalized.queryFilters.providers,
       limit,
     },
   }
@@ -935,6 +1133,18 @@ function normalizeWearableLimit(limit: number): number {
   }
 
   return Math.min(limit, 200)
+}
+
+function normalizeWearableWindowDays(windowDays: number | undefined): number {
+  if (!Number.isInteger(windowDays) || (windowDays ?? 0) <= 0) {
+    return 7
+  }
+
+  return Math.min(windowDays ?? 7, 30)
+}
+
+function normalizeOptionalString(value: string | undefined): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined
 }
 
 function createIntegratedDeviceSyncServices(): DeviceSyncServices {

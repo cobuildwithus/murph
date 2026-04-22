@@ -61,6 +61,20 @@ export type {
   OverviewMetric,
   OverviewWeeklyStat,
 } from "./overview.ts";
+export {
+  analyzeExperimentOutcome,
+  summarizeExperimentProgress,
+} from "./experiments.ts";
+export type {
+  ExperimentAdherenceStatus,
+  ExperimentCoverageStatus,
+  ExperimentMetricResult,
+  ExperimentOutcomeConfidenceLevel,
+  ExperimentOutcomeSummary,
+  ExperimentProgressPhase,
+  ExperimentProgressSummary,
+  ExperimentRecommendationAction,
+} from "./experiments.ts";
 export type { DailySampleSummary } from "./summaries.ts";
 export { summarizeDailySamples } from "./summaries.ts";
 export {
@@ -92,14 +106,18 @@ export {
 export {
   buildWearableAssistantSummary,
   collectCanonicalWearableDataset,
+  explainWearableDrift,
   listWearableActivityDays,
   listWearableBodyStateDays,
   listWearableRecoveryDays,
   listWearableSleepNights,
   listWearableSourceHealth,
+  summarizeWearableLatest,
   summarizeWearableActivity,
   summarizeWearableBodyState,
   summarizeWearableDay,
+  summarizeWearableMetricLatest,
+  summarizeWearableMetricTrend,
   summarizeWearableRecovery,
   summarizeWearableSleep,
   summarizeWearableSourceHealth,
@@ -115,11 +133,19 @@ export type {
   WearableExternalRef,
   WearableFilters,
   WearableDaySummary,
+  WearableDriftSummary,
+  WearableLatestSummary,
   WearableMetricCandidate,
   WearableMetricConfidence,
   WearableMetricKey,
+  WearableMetricLatestSummary,
   WearableMetricSelection,
+  WearableMetricSummaryFilters,
+  WearableMetricSummaryKind,
+  WearableMetricTrendPoint,
+  WearableMetricTrendSummary,
   WearableMetricValue,
+  WearableMetricWindowStats,
   WearableRecoveryDay,
   WearableRecoverySummary,
   WearableResolvedMetric,

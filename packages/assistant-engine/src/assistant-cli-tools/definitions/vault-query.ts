@@ -11,6 +11,7 @@ const localDateSchema = z
   .regex(/^\d{4}-\d{2}-\d{2}$/u)
 const optionalStringArraySchema = z.array(z.string().min(1)).optional()
 const wearableMetricSchema = z.string().min(1)
+const wearableWindowDaysSchema = z.number().int().positive().max(30).optional()
 
 async function executeVaultQueryMethod<TResult>(
   input: AssistantToolContext,
@@ -88,15 +89,21 @@ export function createVaultQueryToolDefinitions(
       description:
         'Show the normalized latest wearable bundle across connected providers. Prefer this as the first read for common "latest nightly metrics" or "how am I doing lately?" questions before raw wearable reads.',
       inputSchema: z.object({
+        date: localDateSchema.optional(),
+        from: localDateSchema.optional(),
+        to: localDateSchema.optional(),
         providers: optionalStringArraySchema,
       }),
       inputExample: {
         providers: ['oura'],
       },
-      execute: ({ providers }) =>
+      execute: ({ date, from, to, providers }) =>
         executeVaultQueryMethod(input, 'showWearableLatest', {
           vault: input.vault,
           requestId: input.requestId ?? null,
+          date,
+          from,
+          to,
           providers,
         }),
     }),
@@ -106,17 +113,25 @@ export function createVaultQueryToolDefinitions(
         'Show the normalized latest reading for one wearable metric alias such as resting-heart-rate, hrv, or skin-temp. Prefer this before raw wearable record inspection for single-metric latest questions.',
       inputSchema: z.object({
         metric: wearableMetricSchema,
+        date: localDateSchema.optional(),
+        from: localDateSchema.optional(),
+        to: localDateSchema.optional(),
         providers: optionalStringArraySchema,
+        windowDays: wearableWindowDaysSchema,
       }),
       inputExample: {
         metric: 'resting-heart-rate',
       },
-      execute: ({ metric, providers }) =>
+      execute: ({ metric, date, from, to, providers, windowDays }) =>
         executeVaultQueryMethod(input, 'showWearableMetricLatest', {
           vault: input.vault,
           requestId: input.requestId ?? null,
           metric,
+          date,
+          from,
+          to,
           providers,
+          windowDays,
         }),
     }),
     defineVaultServiceBackedTool({
@@ -125,17 +140,25 @@ export function createVaultQueryToolDefinitions(
         'Show the normalized recent trend for one wearable metric alias. Prefer this before raw wearable record inspection for "is this trending up or down?" questions.',
       inputSchema: z.object({
         metric: wearableMetricSchema,
+        date: localDateSchema.optional(),
+        from: localDateSchema.optional(),
+        to: localDateSchema.optional(),
         providers: optionalStringArraySchema,
+        windowDays: wearableWindowDaysSchema,
       }),
       inputExample: {
         metric: 'hrv',
       },
-      execute: ({ metric, providers }) =>
+      execute: ({ metric, date, from, to, providers, windowDays }) =>
         executeVaultQueryMethod(input, 'showWearableMetricTrend', {
           vault: input.vault,
           requestId: input.requestId ?? null,
           metric,
+          date,
+          from,
+          to,
           providers,
+          windowDays,
         }),
     }),
     defineVaultServiceBackedTool({
@@ -143,14 +166,22 @@ export function createVaultQueryToolDefinitions(
       description:
         'Explain recent wearable drift across the normalized surfaces so the assistant can answer "what changed?" questions before dropping down to raw wearable reads.',
       inputSchema: z.object({
+        date: localDateSchema.optional(),
+        from: localDateSchema.optional(),
+        to: localDateSchema.optional(),
         providers: optionalStringArraySchema,
+        windowDays: wearableWindowDaysSchema,
       }),
       inputExample: {},
-      execute: ({ providers }) =>
+      execute: ({ date, from, to, providers, windowDays }) =>
         executeVaultQueryMethod(input, 'showWearableDrift', {
           vault: input.vault,
           requestId: input.requestId ?? null,
+          date,
+          from,
+          to,
           providers,
+          windowDays,
         }),
     }),
     defineVaultServiceBackedTool({

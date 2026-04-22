@@ -5008,6 +5008,52 @@
               "type": "object",
               "additionalProperties": false,
               "properties": {
+                "latest": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "vault": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "Vault root to operate against."
+                        },
+                        "requestId": {
+                          "description": "Optional caller-supplied request id for audit correlation.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "date": {
+                          "description": "Optional one-day filter. When present, Murph treats it as both --from and --to.",
+                          "type": "string",
+                          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                        },
+                        "from": {
+                          "description": "Inclusive lower date bound.",
+                          "type": "string",
+                          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                        },
+                        "to": {
+                          "description": "Inclusive upper date bound.",
+                          "type": "string",
+                          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                        },
+                        "provider": {
+                          "description": "Optional provider filter. Repeat --provider for multiple values such as oura, whoop, or garmin.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
                 "day": {
                   "type": "object",
                   "additionalProperties": false,
@@ -5038,6 +5084,177 @@
                           "items": {
                             "type": "string",
                             "minLength": 1
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "drift": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "vault": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "Vault root to operate against."
+                        },
+                        "requestId": {
+                          "description": "Optional caller-supplied request id for audit correlation.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "date": {
+                          "description": "Optional one-day filter. When present, Murph treats it as both --from and --to.",
+                          "type": "string",
+                          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                        },
+                        "from": {
+                          "description": "Inclusive lower date bound.",
+                          "type": "string",
+                          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                        },
+                        "to": {
+                          "description": "Inclusive upper date bound.",
+                          "type": "string",
+                          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                        },
+                        "provider": {
+                          "description": "Optional provider filter. Repeat --provider for multiple values such as oura, whoop, or garmin.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "windowDays": {
+                          "default": 7,
+                          "description": "Rolling local-day window size for recent versus prior summary comparisons.",
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 30
+                        }
+                      }
+                    }
+                  }
+                },
+                "metric": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "commands": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "latest": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "options": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "properties": {
+                                "vault": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "description": "Vault root to operate against."
+                                },
+                                "requestId": {
+                                  "description": "Optional caller-supplied request id for audit correlation.",
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 128
+                                },
+                                "date": {
+                                  "description": "Optional one-day filter. When present, Murph treats it as both --from and --to.",
+                                  "type": "string",
+                                  "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                                },
+                                "from": {
+                                  "description": "Inclusive lower date bound.",
+                                  "type": "string",
+                                  "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                                },
+                                "to": {
+                                  "description": "Inclusive upper date bound.",
+                                  "type": "string",
+                                  "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                                },
+                                "provider": {
+                                  "description": "Optional provider filter. Repeat --provider for multiple values such as oura, whoop, or garmin.",
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  }
+                                },
+                                "windowDays": {
+                                  "default": 7,
+                                  "description": "Rolling local-day window size for recent versus prior summary comparisons.",
+                                  "type": "integer",
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 30
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "trend": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "options": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "properties": {
+                                "vault": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "description": "Vault root to operate against."
+                                },
+                                "requestId": {
+                                  "description": "Optional caller-supplied request id for audit correlation.",
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 128
+                                },
+                                "date": {
+                                  "description": "Optional one-day filter. When present, Murph treats it as both --from and --to.",
+                                  "type": "string",
+                                  "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                                },
+                                "from": {
+                                  "description": "Inclusive lower date bound.",
+                                  "type": "string",
+                                  "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                                },
+                                "to": {
+                                  "description": "Inclusive upper date bound.",
+                                  "type": "string",
+                                  "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                                },
+                                "provider": {
+                                  "description": "Optional provider filter. Repeat --provider for multiple values such as oura, whoop, or garmin.",
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  }
+                                },
+                                "windowDays": {
+                                  "default": 7,
+                                  "description": "Rolling local-day window size for recent versus prior summary comparisons.",
+                                  "type": "integer",
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 30
+                                }
+                              }
+                            }
                           }
                         }
                       }

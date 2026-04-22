@@ -1,4 +1,5 @@
 import type { VaultReadModel } from "./read-model.ts";
+import { resolveWearableCanonicalMetricKey } from "@murphai/importers/device-providers/metric-catalog";
 
 import {
   buildActivitySessionMetricCandidate,
@@ -16,6 +17,7 @@ import {
   inferDaySummaryConfidence,
   summarizeMetricsConfidence,
 } from "./wearables/confidence.ts";
+import { formatMetricLabel, inferDefaultMetricFamily } from "./wearables/provider-policy.ts";
 import { buildWearableSourceHealth } from "./wearables/source-health.ts";
 export { collectCanonicalWearableDataset } from "./wearables/canonical-records.ts";
 import { collectLatestDate, collectSortedDatesDesc, uniqueStrings } from "./wearables/shared.ts";
@@ -41,13 +43,21 @@ import type {
   WearableConfidenceLevel,
   WearableDataset,
   WearableDaySummary,
+  WearableDriftSummary,
   WearableExternalRef,
   WearableFilters,
+  WearableLatestSummary,
   WearableMetricCandidate,
   WearableMetricConfidence,
   WearableMetricKey,
+  WearableMetricLatestSummary,
   WearableMetricSelection,
+  WearableMetricSummaryFilters,
+  WearableMetricSummaryKind,
+  WearableMetricTrendPoint,
+  WearableMetricTrendSummary,
   WearableMetricValue,
+  WearableMetricWindowStats,
   WearableRecoveryDay,
   WearableRecoverySummary,
   WearableResolvedMetric,
@@ -74,13 +84,21 @@ export type {
   WearableCandidateSourceFamily,
   WearableConfidenceLevel,
   WearableDaySummary,
+  WearableDriftSummary,
   WearableExternalRef,
   WearableFilters,
+  WearableLatestSummary,
   WearableMetricCandidate,
   WearableMetricConfidence,
   WearableMetricKey,
+  WearableMetricLatestSummary,
   WearableMetricSelection,
+  WearableMetricSummaryFilters,
+  WearableMetricSummaryKind,
+  WearableMetricTrendPoint,
+  WearableMetricTrendSummary,
   WearableMetricValue,
+  WearableMetricWindowStats,
   WearableRecoveryDay,
   WearableRecoverySummary,
   WearableResolvedMetric,
@@ -465,11 +483,376 @@ function buildWearableSummaryBundleFromDataset(dataset: WearableDataset): {
   };
 }
 
+type WearableSummaryBundle = ReturnType<typeof buildWearableSummaryBundleFromDataset>;
+
+interface WearableMetricObservation {
+  date: string;
+  notes: string[];
+  resolved: WearableResolvedMetric;
+  summaryKind: WearableMetricSummaryKind;
+}
+
+const DEFAULT_WEARABLE_METRIC_WINDOW_DAYS = 7;
+const DEFAULT_WEARABLE_DRIFT_SIGNALS: ReadonlyArray<{
+  metric: WearableMetricKey;
+  summaryKind: WearableMetricSummaryKind;
+}> = [
+  { metric: "recoveryScore", summaryKind: "recovery" },
+  { metric: "readinessScore", summaryKind: "recovery" },
+  { metric: "restingHeartRate", summaryKind: "recovery" },
+  { metric: "hrv", summaryKind: "recovery" },
+  { metric: "temperatureDeviation", summaryKind: "recovery" },
+  { metric: "sleepScore", summaryKind: "sleep" },
+  { metric: "totalSleepMinutes", summaryKind: "sleep" },
+  { metric: "sleepEfficiency", summaryKind: "sleep" },
+  { metric: "weightKg", summaryKind: "bodyState" },
+  { metric: "bodyFatPercentage", summaryKind: "bodyState" },
+];
+const WEARABLE_METRIC_ALIAS_FALLBACKS: Readonly<Record<string, WearableMetricKey>> = {
+  "skin-temp": "temperatureDeviation",
+  "skin-temperature": "temperatureDeviation",
+};
+
+function resolveWearableMetricWindowDays(windowDays: number | undefined): number {
+  return Number.isInteger(windowDays) && (windowDays ?? 0) > 0
+    ? windowDays as number
+    : DEFAULT_WEARABLE_METRIC_WINDOW_DAYS;
+}
+
+function emptyWearableMetricConfidence(): WearableMetricConfidence {
+  return {
+    candidateCount: 0,
+    conflictingProviders: [],
+    exactDuplicateCount: 0,
+    level: "none",
+    reasons: [],
+  };
+}
+
+function emptyWearableMetricWindow(): WearableMetricWindowStats {
+  return {
+    average: null,
+    count: 0,
+    from: null,
+    max: null,
+    min: null,
+    to: null,
+  };
+}
+
+function normalizeWearableMetricQuery(value: string): string | null {
+  const trimmed = value.trim();
+
+  if (!trimmed) {
+    return null;
+  }
+
+  return trimmed.toLowerCase().replace(/[\s_]+/gu, "-");
+}
+
+function resolveWearableMetricSummaryKind(metric: WearableMetricKey): WearableMetricSummaryKind {
+  switch (inferDefaultMetricFamily(metric)) {
+    case "activity":
+      return "activity";
+    case "body":
+      return "bodyState";
+    case "recovery":
+      return "recovery";
+    case "sleep":
+    default:
+      return "sleep";
+  }
+}
+
+function resolveWearableMetricRequest(
+  requestedMetric: string,
+  summaryKind?: WearableMetricSummaryKind,
+): {
+  metric: WearableMetricKey;
+  requestedMetric: string;
+  resolvedAlias: string | null;
+  summaryKind: WearableMetricSummaryKind;
+} | null {
+  const normalized = normalizeWearableMetricQuery(requestedMetric);
+
+  if (!normalized) {
+    return null;
+  }
+
+  const metric =
+    resolveWearableCanonicalMetricKey(requestedMetric)
+    ?? resolveWearableCanonicalMetricKey(normalized)
+    ?? WEARABLE_METRIC_ALIAS_FALLBACKS[normalized]
+    ?? null;
+
+  if (!metric) {
+    return null;
+  }
+
+  const trimmed = requestedMetric.trim();
+
+  return {
+    metric,
+    requestedMetric: trimmed,
+    resolvedAlias: trimmed === metric ? null : normalized,
+    summaryKind: summaryKind ?? resolveWearableMetricSummaryKind(metric),
+  };
+}
+
+function isWearableResolvedMetric(value: unknown): value is WearableResolvedMetric {
+  return typeof value === "object" && value !== null && "metric" in value && "selection" in value && "confidence" in value;
+}
+
+function listWearableMetricObservations(
+  bundle: WearableSummaryBundle,
+  metric: WearableMetricKey,
+  summaryKind: WearableMetricSummaryKind,
+): WearableMetricObservation[] {
+  const summaries =
+    summaryKind === "activity"
+      ? bundle.activityDays
+      : summaryKind === "bodyState"
+        ? bundle.bodyStateDays
+        : summaryKind === "recovery"
+          ? bundle.recoveryDays
+          : bundle.sleepNights;
+
+  return summaries.flatMap((summary) => {
+    const resolved = Reflect.get(summary, metric);
+
+    if (!isWearableResolvedMetric(resolved) || resolved.selection.value === null) {
+      return [];
+    }
+
+    return [{
+      date: summary.date,
+      notes: [...summary.notes],
+      resolved,
+      summaryKind,
+    }];
+  });
+}
+
+function buildWearableMetricWindowStats(
+  observations: readonly WearableMetricObservation[],
+): WearableMetricWindowStats {
+  if (observations.length === 0) {
+    return emptyWearableMetricWindow();
+  }
+
+  const values = observations
+    .map((observation) => observation.resolved.selection.value)
+    .filter((value): value is number => value !== null);
+
+  return {
+    average: values.length > 0
+      ? Number((values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(4))
+      : null,
+    count: values.length,
+    from: observations.at(-1)?.date ?? null,
+    max: values.length > 0 ? Math.max(...values) : null,
+    min: values.length > 0 ? Math.min(...values) : null,
+    to: observations[0]?.date ?? null,
+  };
+}
+
+function buildWearableMetricTrendPoint(
+  observation: WearableMetricObservation,
+): WearableMetricTrendPoint {
+  return {
+    confidence: observation.resolved.confidence.level,
+    date: observation.date,
+    paths: [...observation.resolved.selection.paths],
+    provider: observation.resolved.selection.provider,
+    recordedAt: observation.resolved.selection.recordedAt,
+    recordIds: [...observation.resolved.selection.recordIds],
+    unit: observation.resolved.selection.unit,
+    value: observation.resolved.selection.value ?? 0,
+  };
+}
+
+function summarizeWearableMetricFromBundle(
+  bundle: WearableSummaryBundle,
+  requestedMetric: string,
+  filters: WearableMetricSummaryFilters = {},
+  summaryKind?: WearableMetricSummaryKind,
+): WearableMetricLatestSummary | null {
+  const resolvedRequest = resolveWearableMetricRequest(requestedMetric, summaryKind);
+
+  if (!resolvedRequest) {
+    return null;
+  }
+
+  const observations = listWearableMetricObservations(bundle, resolvedRequest.metric, resolvedRequest.summaryKind);
+  const windowDays = resolveWearableMetricWindowDays(filters.windowDays);
+  const recentObservations = observations.slice(0, windowDays);
+  const priorObservations = observations.slice(windowDays, windowDays * 2);
+  const latestObservation = observations[0] ?? null;
+  const recentWindow = buildWearableMetricWindowStats(recentObservations);
+  const priorWindow = buildWearableMetricWindowStats(priorObservations);
+  const values = observations
+    .map((observation) => observation.resolved.selection.value)
+    .filter((value): value is number => value !== null);
+  const delta =
+    recentWindow.average !== null && priorWindow.average !== null
+      ? Number((recentWindow.average - priorWindow.average).toFixed(4))
+      : null;
+  const percentChange =
+    delta !== null && priorWindow.average !== null && priorWindow.average !== 0
+      ? Number(((delta / priorWindow.average) * 100).toFixed(2))
+      : null;
+  const metricLabel = formatMetricLabel(resolvedRequest.metric).toLowerCase();
+  const notes = uniqueStrings([
+    ...(latestObservation?.notes ?? []),
+    ...(latestObservation?.resolved.confidence.reasons ?? []),
+    observations.length === 0
+      ? `No ${metricLabel} observations were available for the selected wearable range.`
+      : priorWindow.count > 0
+        ? `Compared recent ${recentWindow.count} ${metricLabel} day${recentWindow.count === 1 ? "" : "s"} (${recentWindow.from ?? "unknown"} to ${recentWindow.to ?? "unknown"}) against prior ${priorWindow.count} day${priorWindow.count === 1 ? "" : "s"} (${priorWindow.from ?? "unknown"} to ${priorWindow.to ?? "unknown"}).`
+        : `Not enough earlier ${metricLabel} days were available for a prior-window comparison.`,
+  ]);
+
+  return {
+    confidence: latestObservation?.resolved.confidence ?? emptyWearableMetricConfidence(),
+    date: latestObservation?.date ?? null,
+    delta,
+    max: values.length > 0 ? Math.max(...values) : null,
+    metric: resolvedRequest.metric,
+    min: values.length > 0 ? Math.min(...values) : null,
+    notes,
+    paths: [...(latestObservation?.resolved.selection.paths ?? [])],
+    percentChange,
+    priorWindow,
+    provider: latestObservation?.resolved.selection.provider ?? null,
+    recentWindow,
+    recordedAt: latestObservation?.resolved.selection.recordedAt ?? null,
+    recordIds: [...(latestObservation?.resolved.selection.recordIds ?? [])],
+    requestedMetric: resolvedRequest.requestedMetric,
+    resolvedAlias: resolvedRequest.resolvedAlias,
+    summaryKind: resolvedRequest.summaryKind,
+    unit: latestObservation?.resolved.selection.unit ?? null,
+    value: latestObservation?.resolved.selection.value ?? null,
+    windowDays,
+  };
+}
+
+function buildWearableLatestSummary(
+  vault: VaultReadModel,
+  bundle: WearableSummaryBundle,
+  filters: WearableFilters,
+): WearableLatestSummary | null {
+  const latestDate = collectLatestDate([
+    bundle.activityDays[0]?.date,
+    bundle.sleepNights[0]?.date,
+    bundle.recoveryDays[0]?.date,
+    bundle.bodyStateDays[0]?.date,
+  ]);
+
+  if (!latestDate) {
+    return null;
+  }
+
+  const day = summarizeWearableDay(vault, latestDate, {
+    providers: filters.providers,
+  });
+
+  if (!day) {
+    return null;
+  }
+
+  return {
+    activity: bundle.activityDays[0] ?? null,
+    bodyState: bundle.bodyStateDays[0] ?? null,
+    day,
+    latestDate,
+    notes: [...day.notes],
+    providers: uniqueStrings([
+      ...day.providers,
+      ...bundle.sourceHealth.map((entry) => entry.provider),
+    ]).sort(),
+    recovery: bundle.recoveryDays[0] ?? null,
+    sleep: bundle.sleepNights[0] ?? null,
+    sourceHealth: bundle.sourceHealth,
+  };
+}
+
 export function listWearableSourceHealth(
   vault: VaultReadModel,
   filters: WearableFilters = {},
 ): WearableSourceHealth[] {
   return buildWearableSummaryBundleFromDataset(collectWearableDataset(vault, filters)).sourceHealth;
+}
+
+export function summarizeWearableLatest(
+  vault: VaultReadModel,
+  filters: WearableFilters = {},
+): WearableLatestSummary | null {
+  return buildWearableLatestSummary(
+    vault,
+    buildWearableSummaryBundleFromDataset(collectWearableDataset(vault, filters)),
+    filters,
+  );
+}
+
+export function summarizeWearableMetricLatest(
+  vault: VaultReadModel,
+  metric: string,
+  filters: WearableMetricSummaryFilters = {},
+): WearableMetricLatestSummary | null {
+  return summarizeWearableMetricFromBundle(
+    buildWearableSummaryBundleFromDataset(collectWearableDataset(vault, filters)),
+    metric,
+    filters,
+  );
+}
+
+export function summarizeWearableMetricTrend(
+  vault: VaultReadModel,
+  metric: string,
+  filters: WearableMetricSummaryFilters = {},
+): WearableMetricTrendSummary | null {
+  const bundle = buildWearableSummaryBundleFromDataset(collectWearableDataset(vault, filters));
+  const metricSummary = summarizeWearableMetricFromBundle(bundle, metric, filters);
+
+  if (!metricSummary) {
+    return null;
+  }
+
+  const points = listWearableMetricObservations(bundle, metricSummary.metric, metricSummary.summaryKind)
+    .slice(0, metricSummary.windowDays)
+    .map(buildWearableMetricTrendPoint);
+
+  return {
+    ...metricSummary,
+    points,
+  };
+}
+
+export function explainWearableDrift(
+  vault: VaultReadModel,
+  filters: WearableMetricSummaryFilters = {},
+): WearableDriftSummary | null {
+  const bundle = buildWearableSummaryBundleFromDataset(collectWearableDataset(vault, filters));
+  const latest = buildWearableLatestSummary(vault, bundle, filters);
+
+  if (!latest) {
+    return null;
+  }
+
+  const signals = DEFAULT_WEARABLE_DRIFT_SIGNALS
+    .map((signal) => summarizeWearableMetricFromBundle(bundle, signal.metric, filters, signal.summaryKind))
+    .filter((signal): signal is WearableMetricLatestSummary => Boolean(signal));
+  const notes = uniqueStrings([
+    ...latest.notes,
+    `Compared recent and prior ${resolveWearableMetricWindowDays(filters.windowDays)}-day wearable windows across the default sleep, recovery, and body signals.`,
+  ]);
+
+  return {
+    latest,
+    notes,
+    signals,
+    windowDays: resolveWearableMetricWindowDays(filters.windowDays),
+  };
 }
 
 export function buildWearableAssistantSummary(

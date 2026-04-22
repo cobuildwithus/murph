@@ -665,16 +665,28 @@ describe('assistant CLI tool capability seam', () => {
       method: 'show',
     })
     await executeTool(queryTools, 'vault.list', { kind: 'goal', limit: 10 })
-    await executeTool(queryTools, 'vault.wearables.latest', {})
+    await executeTool(queryTools, 'vault.wearables.latest', {
+      from: '2026-03-28',
+      providers: ['oura'],
+      to: '2026-03-31',
+    })
     await executeTool(queryTools, 'vault.wearables.metric_latest', {
+      from: '2026-03-25',
       metric: 'resting-heart-rate',
+      providers: ['whoop'],
+      windowDays: 5,
     })
     await executeTool(queryTools, 'vault.wearables.metric_trend', {
+      from: '2026-03-20',
       metric: 'hrv',
       providers: ['oura'],
+      to: '2026-03-31',
+      windowDays: 10,
     })
     await executeTool(queryTools, 'vault.wearables.drift', {
+      date: '2026-03-31',
       providers: ['whoop'],
+      windowDays: 6,
     })
     await executeTool(queryTools, 'vault.wearables.day', { date: '2026-03-31' })
     await executeTool(queryTools, 'vault.wearables.sleep', { from: '2026-03-25' })
@@ -690,24 +702,35 @@ describe('assistant CLI tool capability seam', () => {
       limit: 14,
     })
     expect(findCall(queryCalls, 'showWearableLatest')).toMatchObject({
+      from: '2026-03-28',
+      providers: ['oura'],
       requestId: 'req_123',
+      to: '2026-03-31',
       vault: vaultRoot,
     })
     expect(findCall(queryCalls, 'showWearableMetricLatest')).toMatchObject({
+      from: '2026-03-25',
       metric: 'resting-heart-rate',
-      requestId: 'req_123',
-      vault: vaultRoot,
-    })
-    expect(findCall(queryCalls, 'showWearableMetricTrend')).toMatchObject({
-      metric: 'hrv',
-      providers: ['oura'],
-      requestId: 'req_123',
-      vault: vaultRoot,
-    })
-    expect(findCall(queryCalls, 'showWearableDrift')).toMatchObject({
       providers: ['whoop'],
       requestId: 'req_123',
       vault: vaultRoot,
+      windowDays: 5,
+    })
+    expect(findCall(queryCalls, 'showWearableMetricTrend')).toMatchObject({
+      from: '2026-03-20',
+      metric: 'hrv',
+      providers: ['oura'],
+      requestId: 'req_123',
+      to: '2026-03-31',
+      vault: vaultRoot,
+      windowDays: 10,
+    })
+    expect(findCall(queryCalls, 'showWearableDrift')).toMatchObject({
+      date: '2026-03-31',
+      providers: ['whoop'],
+      requestId: 'req_123',
+      vault: vaultRoot,
+      windowDays: 6,
     })
     expect(findCall(queryCalls, 'listWearableBodyState')).toMatchObject({
       limit: 14,

@@ -9,7 +9,7 @@ import type {
   DeviceDaemonStopResult,
   DeviceProviderListResult,
 } from "@murphai/operator-config/device-cli-contracts"
-import type { MealNutrition } from "@murphai/contracts"
+import type { ExperimentStatus, MealNutrition } from "@murphai/contracts"
 import type {
   DocumentImportResult,
   ExperimentCreateResult,
@@ -42,6 +42,8 @@ import type {
 } from "../health-cli-method-types.js"
 import type {
   QueryCanonicalEntity,
+  QueryExperimentOutcomeSummary,
+  QueryExperimentProgressSummary,
   QueryMealNutritionDayTotal,
   QueryMealNutritionMetricTotal,
   QueryMealNutritionTotals,
@@ -49,6 +51,10 @@ import type {
   QueryWearableActivitySummary,
   QueryWearableBodyStateSummary,
   QueryWearableDaySummary,
+  QueryWearableDriftSummary,
+  QueryWearableLatestSummary,
+  QueryWearableMetricLatestSummary,
+  QueryWearableMetricTrendSummary,
   QueryWearableRecoverySummary,
   QueryWearableSleepSummary,
   QueryWearableSourceHealthSummary,
@@ -239,7 +245,7 @@ export interface ExperimentUpdateResult {
   lookupId: string
   slug: string
   experimentPath: string
-  status: string
+  status: ExperimentStatus
   updated: boolean
 }
 
@@ -251,12 +257,52 @@ export interface ExperimentLifecycleResult extends ExperimentUpdateResult {
 export interface ExperimentListResult {
   vault: string
   filters: {
-    status: string | null
+    status: ExperimentStatus | null
     limit: number
   }
   items: ListEntity[]
   count: number
   nextCursor: string | null
+}
+
+export interface ExperimentSessionLogResult {
+  vault: string
+  experimentId: string
+  lookupId: string
+  slug: string
+  eventId: string
+  ledgerFile: string
+  created: boolean
+  kind: "intervention_session"
+}
+
+export interface ExperimentContextLogResult {
+  vault: string
+  experimentId: string
+  lookupId: string
+  slug: string
+  eventId: string
+  ledgerFile: string
+  created: boolean
+  kind: "note" | "exposure" | "supplement_intake" | "adverse_effect"
+}
+
+export interface ExperimentProgressResult {
+  vault: string
+  experimentId: string
+  lookupId: string
+  slug: string
+  asOf: string
+  progress: QueryExperimentProgressSummary
+}
+
+export interface ExperimentOutcomeResult {
+  vault: string
+  experimentId: string
+  lookupId: string
+  slug: string
+  asOf: string
+  outcome: QueryExperimentOutcomeSummary
 }
 
 export interface JournalMutationResult {
@@ -323,6 +369,39 @@ export type WearableActivityListResult = WearableListResult<QueryWearableActivit
 export type WearableBodyStateListResult = WearableListResult<QueryWearableBodyStateSummary>
 export type WearableRecoveryListResult = WearableListResult<QueryWearableRecoverySummary>
 export type WearableSourceListResult = WearableListResult<QueryWearableSourceHealthSummary>
+
+export interface WearableLatestResult {
+  vault: string
+  filters: Omit<WearableListFiltersResult, "limit">
+  summary: QueryWearableLatestSummary | null
+}
+
+export interface WearableMetricFiltersResult extends Omit<WearableListFiltersResult, "limit"> {
+  metric: string
+  windowDays: number
+}
+
+export interface WearableDriftFiltersResult extends Omit<WearableListFiltersResult, "limit"> {
+  windowDays: number
+}
+
+export interface WearableMetricLatestResult {
+  vault: string
+  filters: WearableMetricFiltersResult
+  summary: QueryWearableMetricLatestSummary | null
+}
+
+export interface WearableMetricTrendResult {
+  vault: string
+  filters: WearableMetricFiltersResult
+  summary: QueryWearableMetricTrendSummary | null
+}
+
+export interface WearableDriftResult {
+  vault: string
+  filters: WearableDriftFiltersResult
+  summary: QueryWearableDriftSummary | null
+}
 
 export interface VaultShowResult {
   vault: string
@@ -464,7 +543,7 @@ export interface CoreWriteServices extends HealthCoreServiceMethods {
       title?: string
       hypothesis?: string
       startedOn?: string
-      status?: string
+      status?: ExperimentStatus
     },
   ): Promise<ExperimentCreateResult>
   updateExperiment(
@@ -484,6 +563,18 @@ export interface CoreWriteServices extends HealthCoreServiceMethods {
       note?: string
     },
   ): Promise<ExperimentLifecycleResult>
+  logExperimentSession(
+    input: CommandContext & {
+      lookup: string
+      inputFile: string
+    },
+  ): Promise<ExperimentSessionLogResult>
+  logExperimentContext(
+    input: CommandContext & {
+      lookup: string
+      inputFile: string
+    },
+  ): Promise<ExperimentContextLogResult>
   ensureJournal(
     input: CommandContext & {
       date: string
@@ -747,10 +838,22 @@ export interface QueryServices extends HealthQueryServiceMethods {
   ): Promise<ShowResult>
   listExperiments(
     input: CommandContext & {
-      status?: string
+      status?: ExperimentStatus
       limit: number
     },
   ): Promise<ExperimentListResult>
+  showExperimentProgress(
+    input: CommandContext & {
+      lookup: string
+      asOf?: string
+    },
+  ): Promise<ExperimentProgressResult>
+  analyzeExperimentOutcome(
+    input: CommandContext & {
+      lookup: string
+      asOf?: string
+    },
+  ): Promise<ExperimentOutcomeResult>
   showJournal(
     input: CommandContext & {
       date: string
@@ -779,6 +882,43 @@ export interface QueryServices extends HealthQueryServiceMethods {
       providers?: string[]
     },
   ): Promise<WearableDayResult>
+  showWearableLatest(
+    input: CommandContext & {
+      date?: string
+      from?: string
+      to?: string
+      providers?: string[]
+    },
+  ): Promise<WearableLatestResult>
+  showWearableMetricLatest(
+    input: CommandContext & {
+      metric: string
+      date?: string
+      from?: string
+      to?: string
+      providers?: string[]
+      windowDays?: number
+    },
+  ): Promise<WearableMetricLatestResult>
+  showWearableMetricTrend(
+    input: CommandContext & {
+      metric: string
+      date?: string
+      from?: string
+      to?: string
+      providers?: string[]
+      windowDays?: number
+    },
+  ): Promise<WearableMetricTrendResult>
+  showWearableDrift(
+    input: CommandContext & {
+      date?: string
+      from?: string
+      to?: string
+      providers?: string[]
+      windowDays?: number
+    },
+  ): Promise<WearableDriftResult>
   listWearableSleep(
     input: CommandContext & {
       date?: string
