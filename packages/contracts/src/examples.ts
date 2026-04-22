@@ -490,10 +490,35 @@ export const exampleEventRecords: readonly Readonly<EventRecord>[] = Object.free
     source: "manual",
     title: "20-minute sauna",
     note: "20 min sauna after lifting.",
-    links: [{ type: "related_to", targetId: "prot_01JNV422Y2M5ZBV64ZP4N1DRB1" }],
+    links: [
+      { type: "related_to", targetId: "prot_01JNV422Y2M5ZBV64ZP4N1DRB1" },
+      { type: "related_to", targetId: "exp_01JNV4458HYPP53JDQCBP1QJFM" },
+    ],
+    experimentId: "exp_01JNV4458HYPP53JDQCBP1QJFM",
+    experimentSlug: "magnesium-sleep",
     interventionType: "sauna",
     durationMinutes: 20,
     protocolId: "prot_01JNV422Y2M5ZBV64ZP4N1DRB1",
+    timing: "evening",
+    temperatureC: 88,
+    afterExercise: true,
+    symptoms: ["lightheaded"],
+    confounders: ["hard-training"],
+  },
+  {
+    schemaVersion: "murph.event.v1",
+    id: "evt_01JNV45YJ4M22V2PE9Q4KQ7H1Y",
+    kind: "experiment_context",
+    occurredAt: "2026-03-14T21:00:00Z",
+    recordedAt: "2026-03-14T21:00:05Z",
+    dayKey: "2026-03-14",
+    source: "manual",
+    title: "Travel week during the experiment",
+    note: "Hotel sleep and late meals may affect this week of the experiment.",
+    experimentId: "exp_01JNV4458HYPP53JDQCBP1QJFM",
+    experimentSlug: "magnesium-sleep",
+    contextType: "travel",
+    severity: "potential_confounder",
   },
 ]);
 
@@ -678,6 +703,65 @@ export const exampleFrontmatterObjects: Readonly<FrontmatterExamples> = Object.f
     startedOn: "2026-03-12",
     hypothesis: "Evening magnesium reduces time to fall asleep.",
     tags: ["sleep", "supplement"],
+    protocolRef: {
+      key: "protocol_variant:magnesium/sleep-onset",
+      pageRevisionId: "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      runSpecRevisionId: "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      testPlanId: "sleep-onset-21d",
+    },
+    runPlan: {
+      baselineStart: "2026-03-12",
+      baselineEnd: "2026-03-18",
+      interventionStart: "2026-03-19",
+      interventionEnd: "2026-04-01",
+      modality: "magnesium",
+      schedule: "Take the evening dose 60 minutes before bed.",
+      dose: "200 mg nightly",
+      targetSessions: 14,
+      minimumUsefulSessions: 10,
+      logging: {
+        sessionFields: ["time-taken", "dose-mg", "sleep-context"],
+        confounderFields: ["alcohol", "travel", "illness"],
+      },
+      stopConditions: ["Stop if nausea is moderate or worse for more than two nights."],
+    },
+    analysisPlan: {
+      primaryBiomarkerKey: "biomarker:sleep-onset-latency",
+      secondaryBiomarkerKeys: ["biomarker:sleep-efficiency", "biomarker:resting-heart-rate"],
+      desiredDirection: "decrease",
+      notes: ["Compare the 7-day baseline against the 14-day intervention window."],
+    },
+    onboarding: {
+      completedAt: "2026-03-12T18:00:00Z",
+      setupAnswers: {
+        bedtime_window: "22:30-23:30",
+        reminder_opt_in: true,
+      },
+      safety: {
+        cautionLevel: "low",
+        positiveQuestionIds: [],
+      },
+      contextNotes: ["The user already has wearable sleep data from Oura."],
+    },
+    assistantSupport: {
+      reminderPolicy: "bedtime-reminder",
+      reminderOptionId: "bedtime-reminder",
+      remindersEnabled: true,
+      checkInCadence: "weekly",
+      notificationStyle: "skip_by_default",
+      missedLogFollowup: "opt_in_only",
+      weeklyDigestEnabled: true,
+    },
+    outcome: {
+      latestOutcomeId: "exp_01JNV4458HYPP53JDQCBP1QJFM-outcome-2026-04-02",
+      readyForReviewAt: "2026-04-02T08:00:00Z",
+      finalAnalysisStatus: "ready",
+    },
+    outcomeRef: {
+      outcomeId: "exp_01JNV4458HYPP53JDQCBP1QJFM-outcome-2026-04-02",
+      generatedAt: "2026-04-02T08:05:00Z",
+      relativePath: "bank/experiments/outcomes/magnesium-sleep-2026-04-02.json",
+    },
   },
   food: {
     schemaVersion: "murph.frontmatter.food.v1",
@@ -959,6 +1043,61 @@ hypothesis: Evening magnesium reduces time to fall asleep.
 tags:
   - sleep
   - supplement
+protocolRef:
+  key: protocol_variant:magnesium/sleep-onset
+  pageRevisionId: sha256:1111111111111111111111111111111111111111111111111111111111111111
+  runSpecRevisionId: sha256:2222222222222222222222222222222222222222222222222222222222222222
+  testPlanId: sleep-onset-21d
+runPlan:
+  baselineStart: 2026-03-12
+  baselineEnd: 2026-03-18
+  interventionStart: 2026-03-19
+  interventionEnd: 2026-04-01
+  modality: magnesium
+  schedule: Take the evening dose 60 minutes before bed.
+  dose: 200 mg nightly
+  targetSessions: 14
+  minimumUsefulSessions: 10
+  logging:
+    sessionFields:
+      - time-taken
+      - dose-mg
+      - sleep-context
+    confounderFields:
+      - alcohol
+      - travel
+      - illness
+  stopConditions:
+    - Stop if nausea is moderate or worse for more than two nights.
+analysisPlan:
+  primaryBiomarkerKey: biomarker:sleep-onset-latency
+  secondaryBiomarkerKeys:
+    - biomarker:sleep-efficiency
+    - biomarker:resting-heart-rate
+  desiredDirection: decrease
+  notes:
+    - Compare the 7-day baseline against the 14-day intervention window.
+onboarding:
+  completedAt: 2026-03-12T18:00:00Z
+  setupAnswers:
+    bedtime_window: 22:30-23:30
+    reminder_opt_in: true
+  safety:
+    cautionLevel: low
+    positiveQuestionIds: []
+  contextNotes:
+    - The user already has wearable sleep data from Oura.
+assistantSupport:
+  reminderPolicy: bedtime-reminder
+  reminderOptionId: bedtime-reminder
+  remindersEnabled: true
+  checkInCadence: weekly
+  notificationStyle: skip_by_default
+  missedLogFollowup: opt_in_only
+  weeklyDigestEnabled: true
+outcome:
+  readyForReviewAt: 2026-04-02T08:00:00Z
+  finalAnalysisStatus: ready
 ---
 
 # Magnesium For Sleep Onset

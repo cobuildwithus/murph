@@ -52,6 +52,7 @@ const PUBLIC_EVENT_WRITE_KIND_LIST = [
   "body_measurement",
   "sleep_session",
   "intervention_session",
+  "experiment_context",
 ] as const;
 
 export type PublicWritableEventKind = (typeof PUBLIC_EVENT_WRITE_KIND_LIST)[number];
@@ -197,6 +198,7 @@ const RESERVED_EVENT_KEYS = new Set([
   "title",
   "note",
   "tags",
+  "experimentSlug",
   "links",
   "relatedIds",
   "rawRefs",
@@ -268,12 +270,13 @@ function buildEventRecord(
         dayKey: valueAsString(payload.dayKey),
         timeZone: valueAsString(payload.timeZone),
         fallbackTimeZone,
-        source: valueAsString(payload.source),
-        title: requireText(payload.title, "Event payload requires a title."),
-        note: normalizeOptionalText(valueAsString(payload.note)) ?? undefined,
-        tags: uniqueTrimmedStringList(payload.tags) ?? undefined,
-        links: payload.links,
-        relatedIds: payload.relatedIds,
+      source: valueAsString(payload.source),
+      title: requireText(payload.title, "Event payload requires a title."),
+      note: normalizeOptionalText(valueAsString(payload.note)) ?? undefined,
+      tags: uniqueTrimmedStringList(payload.tags) ?? undefined,
+      experimentSlug: valueAsString(payload.experimentSlug),
+      links: payload.links,
+      relatedIds: payload.relatedIds,
         normalizeRelationIds: uniqueTrimmedStringList,
         rawRefs: uniqueTrimmedStringList(payload.rawRefs) ?? undefined,
         attachments,
@@ -308,6 +311,9 @@ function buildBaseEventContractInput(
       title: requireText(draft.title, "Event draft requires a title."),
       note: normalizeOptionalText(valueAsString(draft.note)) ?? undefined,
       tags: uniqueTrimmedStringList(draft.tags) ?? undefined,
+      experimentSlug: valueAsString(
+        "experimentSlug" in draft ? draft.experimentSlug : undefined,
+      ),
       links: draft.links,
       normalizeRelationIds: uniqueTrimmedStringList,
       rawRefs: uniqueTrimmedStringList(draft.rawRefs) ?? undefined,
@@ -331,6 +337,7 @@ function buildTypedEventRecord(
         return compactObject({
           ...base,
           kind: "note",
+          experimentId: draft.experimentId,
         });
       case "symptom":
         return compactObject({
@@ -367,6 +374,7 @@ function buildTypedEventRecord(
         return compactObject({
           ...base,
           kind: "supplement_intake",
+          experimentId: draft.experimentId,
           supplementName: draft.supplementName,
           dose: draft.dose,
           unit: draft.unit,
@@ -375,6 +383,7 @@ function buildTypedEventRecord(
         return compactObject({
           ...base,
           kind: "activity_session",
+          experimentId: draft.experimentId,
           activityType: draft.activityType,
           durationMinutes: draft.durationMinutes,
           distanceKm: draft.distanceKm,
@@ -399,9 +408,24 @@ function buildTypedEventRecord(
         return compactObject({
           ...base,
           kind: "intervention_session",
+          experimentId: draft.experimentId,
           interventionType: draft.interventionType,
           durationMinutes: draft.durationMinutes,
           protocolId: draft.protocolId,
+          sessionStatus: draft.sessionStatus,
+          temperatureC: draft.temperatureC,
+          timing: draft.timing,
+          afterExercise: draft.afterExercise,
+          symptoms: draft.symptoms,
+          confounders: draft.confounders,
+        });
+      case "experiment_context":
+        return compactObject({
+          ...base,
+          kind: "experiment_context",
+          experimentId: draft.experimentId,
+          contextType: draft.contextType,
+          severity: draft.severity,
         });
     }
   })();
@@ -485,6 +509,12 @@ export function buildInterventionSessionEventDraft(
   input: Omit<EventDraftByKind<"intervention_session">, "kind">,
 ): EventDraftByKind<"intervention_session"> {
   return buildTypedEventDraft("intervention_session", input);
+}
+
+export function buildExperimentContextEventDraft(
+  input: Omit<EventDraftByKind<"experiment_context">, "kind">,
+): EventDraftByKind<"experiment_context"> {
+  return buildTypedEventDraft("experiment_context", input);
 }
 
 export function buildPublicEventRecord<K extends PublicWritableEventKind>(

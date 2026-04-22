@@ -1,5 +1,12 @@
 import type {
+  ExperimentAnalysisPlan,
+  ExperimentAssistantSupport,
   ExperimentFrontmatter,
+  ExperimentOnboardingCapture,
+  ExperimentOutcomeRef,
+  ExperimentOutcomeTracking,
+  ExperimentProtocolRef,
+  ExperimentRunPlan,
   ExperimentStatus,
 } from "@murphai/contracts";
 import {
@@ -64,6 +71,13 @@ export interface UpdateExperimentInput {
   status?: string;
   body?: string;
   tags?: string[];
+  protocolRef?: ExperimentProtocolRef | null;
+  runPlan?: ExperimentRunPlan | null;
+  analysisPlan?: ExperimentAnalysisPlan | null;
+  onboarding?: ExperimentOnboardingCapture | null;
+  assistantSupport?: ExperimentAssistantSupport | null;
+  outcome?: ExperimentOutcomeTracking | null;
+  outcomeRef?: ExperimentOutcomeRef | null;
 }
 
 export interface UpdateExperimentResult {
@@ -94,6 +108,17 @@ const EXPERIMENT_STATUS_SET = new Set<ExperimentStatus>(EXPERIMENT_STATUSES);
 
 function normalizeExperimentHypothesis(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function nextOptionalExperimentValue<TValue>(
+  inputValue: TValue | null | undefined,
+  existingValue: TValue | undefined,
+): TValue | undefined {
+  if (inputValue === undefined) {
+    return existingValue;
+  }
+
+  return inputValue ?? undefined;
 }
 
 function requireExperimentStatus(value: unknown): ExperimentStatus {
@@ -358,6 +383,19 @@ export async function updateExperiment(
         input.tags === undefined
           ? document.attributes.tags
           : uniqueTrimmedStringList(input.tags) ?? undefined,
+      protocolRef: nextOptionalExperimentValue(input.protocolRef, document.attributes.protocolRef),
+      runPlan: nextOptionalExperimentValue(input.runPlan, document.attributes.runPlan),
+      analysisPlan: nextOptionalExperimentValue(
+        input.analysisPlan,
+        document.attributes.analysisPlan,
+      ),
+      onboarding: nextOptionalExperimentValue(input.onboarding, document.attributes.onboarding),
+      assistantSupport: nextOptionalExperimentValue(
+        input.assistantSupport,
+        document.attributes.assistantSupport,
+      ),
+      outcome: nextOptionalExperimentValue(input.outcome, document.attributes.outcome),
+      outcomeRef: nextOptionalExperimentValue(input.outcomeRef, document.attributes.outcomeRef),
     }),
     input.relativePath,
   );

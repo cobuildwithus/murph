@@ -1,6 +1,12 @@
 import {
+  experimentProtocolRefSchema,
+  experimentRunPlanSchema,
+  safeParseContract,
+} from "@murphai/contracts";
+import {
   isActiveOverviewExperimentStatus,
   selectBrowserVaultTrackedExperiments,
+  type BrowserVaultEntity,
   type BrowserVaultQueryClient,
   type OverviewExperiment,
 } from "@murphai/query/browser";
@@ -48,13 +54,21 @@ export function resolveBrowserVaultExperimentRun({
     return null;
   }
 
-  const startedOn = extractIsoDate(trackedExperiment.startedOn);
-  const referenceDate = extractIsoDate(client.replica.generatedAt) ?? todayIsoDate();
-  const durationDays = normalizeDayCount(protocol.durationDays, 1);
-  const baselineDays = Math.min(
-    normalizeDayCount(protocol.baselineDays, 0),
-    Math.max(0, durationDays - 1),
+  const startedOn = extractIsoDate(
+    trackedExperiment.runPlan?.baselineStart ?? trackedExperiment.startedOn,
   );
+  const referenceDate = extractIsoDate(client.replica.generatedAt) ?? todayIsoDate();
+  const protocolDurationDays = normalizeDayCount(protocol.durationDays, 1);
+  const baselineDays = resolveTrackedBaselineDays(trackedExperiment, protocolDurationDays, protocol);
+  const analysisAvailableOn = extractIsoDate(
+    trackedExperiment.runPlan?.interventionEnd,
+  ) ?? (startedOn
+    ? addDaysToIsoDate(startedOn, protocolDurationDays - 1)
+    : undefined);
+  const durationDays =
+    startedOn && analysisAvailableOn
+      ? Math.max(1, daysBetweenInclusive(startedOn, analysisAvailableOn))
+      : protocolDurationDays;
   const day = startedOn
     ? clamp(daysBetweenInclusive(startedOn, referenceDate), 1, durationDays)
     : undefined;
@@ -63,9 +77,6 @@ export function resolveBrowserVaultExperimentRun({
     : day
       ? clamp(Math.round((day / durationDays) * 100), 1, 99)
       : undefined;
-  const analysisAvailableOn = startedOn
-    ? addDaysToIsoDate(startedOn, durationDays - 1)
-    : undefined;
 
   return {
     id: trackedExperiment.id,
@@ -125,11 +136,35 @@ function findTrackedExperiment(
 ): OverviewExperiment | null {
   const protocolKeys = buildProtocolLookupKeys(protocol);
 
-  return selectBrowserVaultTrackedExperiments(client).find((entry) =>
+  return selectBrowserVaultTrackedExperiments(client).map((entry) =>
+    mergeTrackedExperimentMetadata(client, entry)
+  ).find((entry) =>
     listTrackedExperimentLookupValues(entry).some((value) =>
       protocolKeys.has(normalizeLookupKey(value))
     )
   ) ?? null;
+}
+
+function mergeTrackedExperimentMetadata(
+  client: BrowserVaultQueryClient,
+  entry: OverviewExperiment,
+): OverviewExperiment {
+  const entity = client.entities.get(entry.id);
+  if (!entity) {
+    return entry;
+  }
+
+  const protocolRef = parseTrackedExperimentProtocolRef(entity) ?? entry.protocolRef;
+  const runPlan = parseTrackedExperimentRunPlan(entity) ?? entry.runPlan;
+  if (protocolRef === entry.protocolRef && runPlan === entry.runPlan) {
+    return entry;
+  }
+
+  return {
+    ...entry,
+    protocolRef,
+    runPlan,
+  };
 }
 
 function buildProtocolLookupKeys(protocol: ExperimentProtocol): ReadonlySet<string> {
@@ -156,9 +191,26 @@ function buildProtocolLookupKeys(protocol: ExperimentProtocol): ReadonlySet<stri
 }
 
 function listTrackedExperimentLookupValues(entry: OverviewExperiment): string[] {
-  return [entry.id, entry.slug].filter((value): value is string =>
-    typeof value === "string" && value.length > 0,
-  );
+  return [
+    entry.id,
+    entry.slug,
+    entry.protocolRef?.key,
+    entry.protocolRef?.key?.replace(/^protocol_variant:/u, ""),
+  ].filter((value): value is string => typeof value === "string" && value.length > 0);
+}
+
+function parseTrackedExperimentProtocolRef(
+  entity: BrowserVaultEntity,
+): OverviewExperiment["protocolRef"] | null {
+  const result = safeParseContract(experimentProtocolRefSchema, entity.attributes.protocolRef);
+  return result.success ? result.data : null;
+}
+
+function parseTrackedExperimentRunPlan(
+  entity: BrowserVaultEntity,
+): OverviewExperiment["runPlan"] | null {
+  const result = safeParseContract(experimentRunPlanSchema, entity.attributes.runPlan);
+  return result.success ? result.data : null;
 }
 
 function normalizeLookupKey(value: string | null | undefined): string {
@@ -240,6 +292,23 @@ function buildRunNextStep(input: {
       ?? "Follow the protocol steps and keep the rest of the week ordinary.",
     context: "Personal outcome analysis becomes useful after the protocol window closes and enough wearable data is available.",
   };
+}
+
+function resolveTrackedBaselineDays(
+  entry: OverviewExperiment,
+  protocolDurationDays: number,
+  protocol: ExperimentProtocol,
+): number {
+  const baselineStart = extractIsoDate(entry.runPlan?.baselineStart);
+  const baselineEnd = extractIsoDate(entry.runPlan?.baselineEnd);
+  if (baselineStart && baselineEnd) {
+    return Math.max(0, Math.min(daysBetweenInclusive(baselineStart, baselineEnd), protocolDurationDays - 1));
+  }
+
+  return Math.min(
+    normalizeDayCount(protocol.baselineDays, 0),
+    Math.max(0, protocolDurationDays - 1),
+  );
 }
 
 function buildPrivateRunTimeline(input: {

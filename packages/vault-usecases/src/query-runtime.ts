@@ -33,7 +33,11 @@ import {
   type WearableSourceHealthSummary as WearableSourceHealthSummaryShape,
   type WearableSummaryFilters as WearableSummaryFiltersShape,
 } from '@murphai/query'
-import type { ExperimentStatus } from '@murphai/contracts'
+import type {
+  ExperimentProgressMetricSignal,
+  ExperimentProtocolRef,
+  ExperimentStatus,
+} from '@murphai/contracts'
 import {
   describeLookupConstraint as describeSharedLookupConstraint,
   inferIdEntityKind as inferSharedIdEntityKind,
@@ -63,9 +67,16 @@ export type QueryMealNutritionTotals = SharedMealNutritionTotals
 export type QueryMealNutritionDayTotal = SharedMealNutritionDayTotal
 export type QueryMealNutritionTotalsOptions = SharedMealNutritionTotalsOptions
 export type QueryMealNutritionTotalsResult = SharedMealNutritionTotalsResult
+export interface QueryExperimentMetricPeriodSummary {
+  daysWithData: number
+  mean: number | null
+  totalDays: number
+  unit: string | null
+}
 export interface QueryExperimentMetricResult {
   baselineDayCount: number
   baselineMean: number | null
+  baseline?: QueryExperimentMetricPeriodSummary
   biomarkerKey: string
   completeness: "insufficient" | "partial" | "good"
   deltaAbs: number | null
@@ -73,6 +84,7 @@ export interface QueryExperimentMetricResult {
   expectedDirection: "increase" | "decrease" | "stabilize" | null
   interventionDayCount: number
   interventionMean: number | null
+  intervention?: QueryExperimentMetricPeriodSummary
   label: string
   movedAsExpected: boolean | null
   unit: string | null
@@ -84,12 +96,14 @@ export interface QueryExperimentWindows {
   interventionStart: string | null
 }
 export interface QueryExperimentProgressSummary {
+  schemaVersion: "murph.experiment-progress.v1"
   schema: "murph.experiment-progress.v1"
   asOf: string
   adherence: {
     completedSessions: number
     expectedSessionsByNow: number | null
     minimumUsefulSessions: number | null
+    sessionEventIds?: string[]
     status: "not_started" | "behind" | "on_track" | "met_minimum" | "met_target" | "unknown"
     targetSessions: number | null
   }
@@ -97,6 +111,7 @@ export interface QueryExperimentProgressSummary {
   dataCoverage: {
     baselineDaysAvailable: number
     interventionDaysAvailable: number
+    primaryBiomarkerKey?: string | null
     primaryMetricDaysAvailable: number
     status:
       | "no_wearable_data"
@@ -114,18 +129,23 @@ export interface QueryExperimentProgressSummary {
     title: string
   }
   phase: "planned" | "baseline" | "intervention" | "review_due" | "completed" | "paused" | "abandoned"
-  protocolRef: Record<string, unknown> | null
+  protocolRef: ExperimentProtocolRef | null
   recommendation: {
     action: "skip" | "remind" | "summary" | "review"
     reason: string
     shouldNotifyUser: boolean
   }
+  earlySignals?: ExperimentProgressMetricSignal[]
   signals: QueryExperimentMetricResult[]
   windows: QueryExperimentWindows
 }
 export interface QueryExperimentOutcomeSummary {
+  schemaVersion: "murph.experiment-outcome.v1"
   schema: "murph.experiment-outcome.v1"
+  outcomeId?: string
+  generatedAt?: string
   adherenceSummary: {
+    adherenceLevel?: "unknown" | "low" | "partial" | "good"
     completedSessions: number
     minimumUsefulSessions: number | null
     status: "not_started" | "behind" | "on_track" | "met_minimum" | "met_target" | "unknown"
@@ -149,7 +169,8 @@ export interface QueryExperimentOutcomeSummary {
     title: string
   }
   metricResults: QueryExperimentMetricResult[]
-  protocolRef: Record<string, unknown> | null
+  protocolRef: ExperimentProtocolRef | null
+  runRef?: ExperimentProtocolRef
   windows: QueryExperimentWindows
 }
 

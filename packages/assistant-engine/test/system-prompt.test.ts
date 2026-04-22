@@ -249,6 +249,9 @@ Ready to get started?`)
     expect(prompt).toContain(
       'Use `vault-cli experiment outcome analyze <id> --format json` when the user asks for a run review, end-of-run interpretation, or worth-repeating judgment',
     )
+    expect(prompt).toContain(
+      'If the deterministic outcome is good enough to save and the user wants it persisted, use `vault-cli experiment outcome write <id> --format json`.',
+    )
   })
 
   it('keeps source-attributed external protocols separate from the default run plan', () => {

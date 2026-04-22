@@ -867,14 +867,68 @@ export const vaultCliCommandDescriptors = [
     id: 'experiment',
     bindingMode: 'direct',
     rootCommandNames: ['experiment'],
+    leafCommands: [
+      {
+        path: ['experiment', 'create'],
+        description: 'Create a baseline experiment document.',
+      },
+      {
+        path: ['experiment', 'show'],
+        description: 'Show one experiment by canonical id or slug.',
+      },
+      {
+        path: ['experiment', 'list'],
+        description: 'List experiments through the query read model.',
+      },
+      {
+        path: ['experiment', 'update'],
+        description: 'Update one experiment frontmatter/body payload from a JSON payload file or stdin.',
+      },
+      {
+        path: ['experiment', 'checkpoint'],
+        description: 'Append one experiment checkpoint event from a JSON payload file or stdin.',
+      },
+      {
+        path: ['experiment', 'stop'],
+        description: 'Stop one experiment by id or slug and append a stop lifecycle event.',
+      },
+      {
+        path: ['experiment', 'progress'],
+        description: 'Read the deterministic progress summary for one experiment.',
+      },
+      {
+        path: ['experiment', 'session', 'log'],
+        description: 'Log one structured intervention session for an experiment from a JSON payload file or stdin.',
+      },
+      {
+        path: ['experiment', 'context', 'log'],
+        description: 'Log one experiment-linked context record from a JSON payload file or stdin.',
+      },
+      {
+        path: ['experiment', 'outcome', 'analyze'],
+        description: 'Run the deterministic final analysis for one experiment.',
+      },
+      {
+        path: ['experiment', 'outcome', 'write'],
+        description: 'Run the deterministic final analysis for one experiment and persist the outcome record.',
+      },
+    ],
     directVaultServiceBindings: {
       core: [
         'createExperiment',
         'updateExperiment',
         'checkpointExperiment',
         'stopExperiment',
+        'logExperimentSession',
+        'logExperimentContext',
+        'writeExperimentOutcome',
       ],
-      query: ['showExperiment', 'listExperiments'],
+      query: [
+        'showExperiment',
+        'listExperiments',
+        'showExperimentProgress',
+        'analyzeExperimentOutcome',
+      ],
     },
     register({ cli, services }) {
       registerExperimentCommands(cli, services)

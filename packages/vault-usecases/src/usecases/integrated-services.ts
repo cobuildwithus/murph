@@ -103,6 +103,7 @@ import {
   stopExperimentRecord,
   updateExperimentRecordFromInput,
   updateVaultSummary,
+  writeExperimentOutcomeRecord,
   createExperimentRecord,
   ensureJournalRecord,
   linkJournalEventIds,
@@ -270,6 +271,12 @@ function createIntegratedCoreServices(
       inputFile: string
     }) {
       return logExperimentContextRecordFromInput(input)
+    },
+    async writeExperimentOutcome(input: CommandContext & {
+      lookup: string
+      asOf?: string
+    }) {
+      return writeExperimentOutcomeRecord(input)
     },
     async ensureJournal(input: CommandContext & {
       date: string

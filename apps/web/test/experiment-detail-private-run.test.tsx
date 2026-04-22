@@ -18,6 +18,7 @@ type BrowserVaultEntity = Parameters<typeof createVaultReadModel>[0]["entities"]
 async function createClient(input: {
   generatedAt: string;
   trackedExperiments: Array<{
+    frontmatter?: Record<string, unknown>;
     id: string;
     slug: string | null;
     startedOn: string | null;
@@ -36,6 +37,7 @@ async function createClient(input: {
           body: entry.summary,
           date: entry.startedOn ?? input.generatedAt.slice(0, 10),
           experimentSlug: entry.slug,
+          frontmatter: entry.frontmatter,
           lookupIds: [entry.id, ...(entry.slug ? [entry.slug] : [])],
           occurredAt: `${entry.startedOn ?? input.generatedAt.slice(0, 10)}T08:00:00.000Z`,
           status: entry.status,
@@ -113,6 +115,115 @@ describe("experiment detail private-run composition", () => {
     });
 
     expect(privateRun).toBeNull();
+  });
+
+  it("matches browser-vault tracked experiments by canonical protocolRef key", async () => {
+    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+
+    expect(protocol).not.toBeNull();
+
+    const privateRun = resolveBrowserVaultExperimentRun({
+      client: await createClient({
+        generatedAt: "2026-04-12T08:00:00.000Z",
+        trackedExperiments: [{
+          frontmatter: createExperimentFrontmatter({
+            id: "exp_sauna_protocol_ref",
+            protocolRef: {
+              key: protocol!.commons!.key,
+              pageRevisionId: "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+              runSpecRevisionId: "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+              testPlanId: "finnish-sauna-21d",
+            },
+            slug: "unrelated-private-sauna-run",
+            startedOn: "2026-04-10",
+            status: "active",
+            title: "Private sauna run",
+          }),
+          id: "exp_sauna_protocol_ref",
+          slug: null,
+          startedOn: "2026-04-10",
+          status: "active",
+          summary: "Canonical metadata links this run to the sauna protocol.",
+          tags: ["sauna"],
+          title: "Private sauna run",
+        }],
+      }),
+      protocol: protocol!,
+    });
+
+    expect(privateRun).toEqual(expect.objectContaining({
+      id: "exp_sauna_protocol_ref",
+      slug: null,
+      status: "active",
+    }));
+    expect(privateRun?.nextStep).toEqual(expect.objectContaining({
+      title: "Keep the baseline clean",
+      when: "Baseline day 3 of 7",
+    }));
+  });
+
+  it("prefers canonical runPlan windows for baseline days and analysis availability", async () => {
+    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+
+    expect(protocol).not.toBeNull();
+
+    const privateRun = resolveBrowserVaultExperimentRun({
+      client: await createClient({
+        generatedAt: "2026-04-06T08:00:00.000Z",
+        trackedExperiments: [{
+          frontmatter: createExperimentFrontmatter({
+            id: "exp_sauna_canonical_windows",
+            runPlan: {
+              baselineEnd: "2026-04-03",
+              baselineStart: "2026-04-01",
+              interventionEnd: "2026-04-12",
+              interventionStart: "2026-04-04",
+            },
+            slug: "finnish-sauna",
+            startedOn: "2026-04-10",
+            status: "active",
+            title: "Private sauna run",
+          }),
+          id: "exp_sauna_canonical_windows",
+          slug: "finnish-sauna",
+          startedOn: "2026-04-10",
+          status: "active",
+          summary: "Canonical run metadata shortens the baseline and intervention windows.",
+          tags: ["sauna"],
+          title: "Private sauna run",
+        }],
+      }),
+      protocol: protocol!,
+    });
+
+    expect(privateRun).toEqual(expect.objectContaining({
+      analysisAvailableOn: "2026-04-12",
+      completionPercent: 50,
+      day: 6,
+      startedOn: "2026-04-01",
+      status: "active",
+    }));
+    expect(privateRun?.nextStep).toEqual(expect.objectContaining({
+      title: "Continue the protocol",
+      when: "Day 6",
+    }));
+    expect(privateRun?.timeline).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        date: "Apr 1",
+        description: "3 baseline days before the protocol window.",
+        title: "Baseline started",
+      }),
+      expect.objectContaining({
+        date: "Apr 4",
+        title: "Protocol window starts",
+        upcoming: false,
+      }),
+      expect.objectContaining({
+        date: "Apr 12",
+        title: "Analysis window",
+        upcoming: true,
+      }),
+    ]));
   });
 
   it("renders honest baseline progress before the protocol window starts", async () => {
@@ -297,4 +408,27 @@ function resolveRecordClass(family: BrowserVaultEntity["family"]): BrowserVaultE
     default:
       throw new Error(`Unsupported browser-vault test family: ${family}`);
   }
+}
+
+function createExperimentFrontmatter(input: {
+  id: string;
+  slug: string;
+  startedOn: string;
+  status: string;
+  title: string;
+  protocolRef?: Record<string, unknown>;
+  runPlan?: Record<string, unknown>;
+}): Record<string, unknown> {
+  return {
+    docType: "experiment",
+    experimentId: input.id,
+    hypothesis: "Test the canonical private-run metadata path.",
+    protocolRef: input.protocolRef,
+    runPlan: input.runPlan,
+    schemaVersion: "murph.frontmatter.experiment.v1",
+    slug: input.slug,
+    startedOn: input.startedOn,
+    status: input.status,
+    title: input.title,
+  };
 }

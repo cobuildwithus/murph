@@ -646,6 +646,8 @@ function projectSafeAttributes(entity: CanonicalEntity): Record<string, unknown>
   const allowed: Record<string, unknown> = {};
 
   for (const key of [
+    "analysisPlan",
+    "assistantSupport",
     "baselineEnd",
     "baselineStart",
     "category",
@@ -653,6 +655,11 @@ function projectSafeAttributes(entity: CanonicalEntity): Record<string, unknown>
     "endedOn",
     "group",
     "metric",
+    "onboarding",
+    "outcome",
+    "outcomeRef",
+    "protocolRef",
+    "runPlan",
     "startedOn",
     "status",
     "summary",

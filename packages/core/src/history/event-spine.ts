@@ -41,6 +41,7 @@ export interface BuildEventSpineEnvelopeInput {
   title: string;
   note?: string;
   tags?: string[];
+  experimentSlug?: string;
   links?: unknown;
   relatedIds?: unknown;
   normalizeRelationIds?: (value: unknown) => string[] | undefined;
@@ -194,6 +195,7 @@ export function buildEventSpineEnvelope(
     title: input.title,
     note: input.note,
     tags: input.tags,
+    experimentSlug: input.experimentSlug,
     links: canonicalRelations.links,
     rawRefs: input.rawRefs ?? attachmentProjections?.rawRefs ?? undefined,
     attachments,

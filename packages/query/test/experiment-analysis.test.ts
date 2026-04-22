@@ -1,0 +1,461 @@
+import assert from "node:assert/strict";
+
+import { test } from "vitest";
+
+import type { CanonicalEntity } from "../src/canonical-entities.ts";
+import { createVaultReadModel } from "../src/model.ts";
+import {
+  analyzeExperimentOutcome,
+  summarizeExperimentProgress,
+} from "../src/index.ts";
+
+function makeEntity(
+  overrides: Partial<CanonicalEntity> & Pick<CanonicalEntity, "entityId" | "family" | "kind" | "recordClass">,
+): CanonicalEntity {
+  return {
+    entityId: overrides.entityId,
+    primaryLookupId: overrides.primaryLookupId ?? overrides.entityId,
+    lookupIds: overrides.lookupIds ?? [overrides.entityId],
+    family: overrides.family,
+    recordClass: overrides.recordClass,
+    kind: overrides.kind,
+    status: overrides.status ?? null,
+    occurredAt: overrides.occurredAt ?? null,
+    date: overrides.date ?? null,
+    path: overrides.path ?? `history/${overrides.family}/${overrides.entityId}.md`,
+    title: overrides.title ?? null,
+    body: overrides.body ?? null,
+    attributes: overrides.attributes ?? {},
+    frontmatter: overrides.frontmatter ?? null,
+    links: overrides.links ?? [],
+    relatedIds: overrides.relatedIds ?? [],
+    stream: overrides.stream ?? null,
+    experimentSlug: overrides.experimentSlug ?? null,
+    tags: overrides.tags ?? [],
+  };
+}
+
+function makeExperiment(status: "active" | "completed" = "active"): CanonicalEntity {
+  return makeEntity({
+    entityId: "exp_01JNV4458HYPP53JDQCBP1QJFM",
+    family: "experiment",
+    kind: "experiment_entry",
+    recordClass: "bank",
+    occurredAt: "2026-04-01T08:00:00.000Z",
+    date: "2026-04-01",
+    experimentSlug: "sauna-rhr",
+    status,
+    title: "Sauna RHR",
+    attributes: {
+      schemaVersion: "murph.frontmatter.experiment.v1",
+      docType: "experiment",
+      experimentId: "exp_01JNV4458HYPP53JDQCBP1QJFM",
+      slug: "sauna-rhr",
+      status,
+      title: "Sauna RHR",
+      startedOn: "2026-04-01",
+      protocolRef: {
+        key: "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+        pageRevisionId: "sha256:page-revision",
+        runSpecRevisionId: "sha256:run-spec-revision",
+        testPlanId: "rhr-21d",
+      },
+      runPlan: {
+        baselineStart: "2026-04-01",
+        baselineEnd: "2026-04-07",
+        interventionStart: "2026-04-08",
+        interventionEnd: "2026-04-21",
+        modality: "sauna",
+        targetSessions: 6,
+        minimumUsefulSessions: 4,
+      },
+      analysisPlan: {
+        primaryBiomarkerKey: "biomarker:resting-heart-rate",
+        desiredDirection: "decrease",
+      },
+      assistantSupport: {
+        remindersEnabled: true,
+        weeklyDigestEnabled: false,
+      },
+    },
+  });
+}
+
+function makeObservation(input: {
+  entityId: string;
+  dayKey: string;
+  metric: string;
+  occurredAt: string;
+  provider?: string;
+  unit: string;
+  value: number;
+}): CanonicalEntity {
+  return makeEntity({
+    entityId: input.entityId,
+    family: "event",
+    kind: "observation",
+    recordClass: "ledger",
+    occurredAt: input.occurredAt,
+    date: input.dayKey,
+    title: `${input.provider ?? "whoop"} ${input.metric}`,
+    attributes: {
+      dayKey: input.dayKey,
+      externalRef: {
+        resourceId: `${input.entityId}-resource`,
+        resourceType: "summary",
+        system: input.provider ?? "whoop",
+      },
+      metric: input.metric,
+      recordedAt: input.occurredAt,
+      unit: input.unit,
+      value: input.value,
+    },
+  });
+}
+
+function makeSession(input: {
+  entityId: string;
+  occurredAt: string;
+  afterExercise?: boolean;
+  confounders?: string[];
+  symptoms?: string[];
+}): CanonicalEntity {
+  const dayKey = input.occurredAt.slice(0, 10);
+
+  return makeEntity({
+    entityId: input.entityId,
+    family: "event",
+    kind: "intervention_session",
+    recordClass: "ledger",
+    occurredAt: input.occurredAt,
+    date: dayKey,
+    experimentSlug: "sauna-rhr",
+    title: "Sauna session",
+    attributes: {
+      afterExercise: input.afterExercise,
+      confounders: input.confounders,
+      symptoms: input.symptoms,
+    },
+  });
+}
+
+function makeContextNote(): CanonicalEntity {
+  return makeEntity({
+    entityId: "evt_01JNV45RHN0TQ9ZXE0A7YSE1YK",
+    family: "event",
+    kind: "experiment_context",
+    recordClass: "ledger",
+    occurredAt: "2026-04-19T09:00:00.000Z",
+    date: "2026-04-19",
+    experimentSlug: "sauna-rhr",
+    title: "Travel day",
+    attributes: {
+      experimentId: "exp_01JNV4458HYPP53JDQCBP1QJFM",
+      experimentSlug: "sauna-rhr",
+      contextType: "travel",
+      severity: "potential_confounder",
+      note: "Hotel sleep and travel day during the intervention window.",
+    },
+  });
+}
+
+function makeSafetyContext(): CanonicalEntity {
+  return makeEntity({
+    entityId: "evt_01JNV45RHN0TQ9ZXE0A7YSE1YL",
+    family: "event",
+    kind: "experiment_context",
+    recordClass: "ledger",
+    occurredAt: "2026-04-20T08:30:00.000Z",
+    date: "2026-04-20",
+    experimentSlug: "sauna-rhr",
+    title: "Dizziness follow-up",
+    attributes: {
+      experimentId: "exp_01JNV4458HYPP53JDQCBP1QJFM",
+      experimentSlug: "sauna-rhr",
+      contextType: "dizziness",
+      severity: "safety",
+      note: "The user felt dizzy after the session and asked whether to continue.",
+    },
+  });
+}
+
+function createExperimentVault() {
+  return createVaultReadModel({
+    vaultRoot: "/virtual/experiment-analysis",
+    metadata: null,
+    entities: [
+      makeExperiment(),
+      makeObservation({
+        entityId: "evt_01JNV45RHN0TQ9ZXE0A7YSE1YA",
+        dayKey: "2026-04-01",
+        metric: "resting-heart-rate",
+        occurredAt: "2026-04-01T06:00:00.000Z",
+        unit: "bpm",
+        value: 62,
+      }),
+      makeObservation({
+        entityId: "evt_01JNV45RHN0TQ9ZXE0A7YSE1YB",
+        dayKey: "2026-04-02",
+        metric: "resting-heart-rate",
+        occurredAt: "2026-04-02T06:00:00.000Z",
+        unit: "bpm",
+        value: 61,
+      }),
+      makeObservation({
+        entityId: "evt_01JNV45RHN0TQ9ZXE0A7YSE1YC",
+        dayKey: "2026-04-03",
+        metric: "resting-heart-rate",
+        occurredAt: "2026-04-03T06:00:00.000Z",
+        unit: "bpm",
+        value: 61,
+      }),
+      makeObservation({
+        entityId: "evt_01JNV45RHN0TQ9ZXE0A7YSE1YD",
+        dayKey: "2026-04-08",
+        metric: "resting-heart-rate",
+        occurredAt: "2026-04-08T06:00:00.000Z",
+        unit: "bpm",
+        value: 59,
+      }),
+      makeObservation({
+        entityId: "evt_01JNV45RHN0TQ9ZXE0A7YSE1YE",
+        dayKey: "2026-04-09",
+        metric: "resting-heart-rate",
+        occurredAt: "2026-04-09T06:00:00.000Z",
+        unit: "bpm",
+        value: 58,
+      }),
+      makeObservation({
+        entityId: "evt_01JNV45RHN0TQ9ZXE0A7YSE1YF",
+        dayKey: "2026-04-10",
+        metric: "resting-heart-rate",
+        occurredAt: "2026-04-10T06:00:00.000Z",
+        unit: "bpm",
+        value: 59,
+      }),
+      makeSession({
+        entityId: "evt_01JNV45RHN0TQ9ZXE0A7YSE1YG",
+        occurredAt: "2026-04-08T19:00:00.000Z",
+      }),
+      makeSession({
+        entityId: "evt_01JNV45RHN0TQ9ZXE0A7YSE1YH",
+        occurredAt: "2026-04-12T19:30:00.000Z",
+      }),
+      makeSession({
+        entityId: "evt_01JNV45RHN0TQ9ZXE0A7YSE1YJ",
+        occurredAt: "2026-04-18T20:00:00.000Z",
+        afterExercise: true,
+        confounders: ["hard-training"],
+        symptoms: ["lightheaded"],
+      }),
+      makeContextNote(),
+    ],
+  });
+}
+
+function createExperimentVaultWithSafetyFollowUp() {
+  return createVaultReadModel({
+    vaultRoot: "/virtual/experiment-analysis-safety",
+    metadata: null,
+    entities: [...createExperimentVault().entities, makeSafetyContext()],
+  });
+}
+
+test("experiment progress summarizes adherence, coverage, confounders, and reminder recommendations", () => {
+  const progress = summarizeExperimentProgress(createExperimentVault(), "sauna-rhr", {
+    asOf: "2026-04-20",
+  });
+
+  assert.equal(progress.schema, "murph.experiment-progress.v1");
+  assert.equal(progress.schemaVersion, "murph.experiment-progress.v1");
+  assert.equal(progress.phase, "intervention");
+  assert.equal(progress.dayInRun, 20);
+  assert.equal(progress.experiment.id, "exp_01JNV4458HYPP53JDQCBP1QJFM");
+  assert.equal(progress.protocolRef?.key, "protocol_variant:dry-sauna/murph-finnish-standard-3x-week");
+  assert.deepEqual(progress.windows, {
+    baselineEnd: "2026-04-07",
+    baselineStart: "2026-04-01",
+    interventionEnd: "2026-04-21",
+    interventionStart: "2026-04-08",
+  });
+
+  assert.deepEqual(progress.adherence, {
+    completedSessions: 3,
+    expectedSessionsByNow: 5,
+    minimumUsefulSessions: 4,
+    sessionEventIds: [
+      "evt_01JNV45RHN0TQ9ZXE0A7YSE1YG",
+      "evt_01JNV45RHN0TQ9ZXE0A7YSE1YH",
+      "evt_01JNV45RHN0TQ9ZXE0A7YSE1YJ",
+    ],
+    status: "behind",
+    targetSessions: 6,
+  });
+  assert.deepEqual(progress.dataCoverage, {
+    baselineDaysAvailable: 3,
+    interventionDaysAvailable: 3,
+    primaryBiomarkerKey: "biomarker:resting-heart-rate",
+    primaryMetricDaysAvailable: 6,
+    status: "sufficient_for_progress",
+    wearableProviders: ["whoop"],
+  });
+  assert.deepEqual(progress.signals[0], {
+    baselineDayCount: 3,
+    baselineMean: 61.33,
+    biomarkerKey: "biomarker:resting-heart-rate",
+    completeness: "good",
+    deltaAbs: -2.66,
+    deltaPct: -4.34,
+    expectedDirection: "decrease",
+    interventionDayCount: 3,
+    interventionMean: 58.67,
+    intervention: {
+      daysWithData: 3,
+      mean: 58.67,
+      totalDays: 13,
+      unit: "bpm",
+    },
+    label: "Resting Heart Rate",
+    movedAsExpected: true,
+    unit: "bpm",
+    baseline: {
+      daysWithData: 3,
+      mean: 61.33,
+      totalDays: 7,
+      unit: "bpm",
+    },
+  });
+  assert.deepEqual(progress.earlySignals?.[0], {
+    baselineDaysAvailable: 3,
+    baselineMean: 61.33,
+    biomarkerKey: "biomarker:resting-heart-rate",
+    confidence: "low",
+    currentInterventionMean: 58.67,
+    deltaAbs: -2.66,
+    expectedDirection: "decrease",
+    interventionDaysAvailable: 3,
+    label: "Resting Heart Rate",
+    movedAsExpected: true,
+    reason: "Only 3 intervention day(s) are available so far.",
+    unit: "bpm",
+  });
+  assert.deepEqual(progress.confounders, [
+    "post-exercise session on 2026-04-18",
+    "hard training on 2026-04-18",
+    "lightheaded reported on 2026-04-18",
+    "travel context logged on 2026-04-19",
+  ]);
+  assert.deepEqual(progress.recommendation, {
+    action: "remind",
+    reason: "Logged sessions are behind the current target pace.",
+    shouldNotifyUser: true,
+  });
+});
+
+test("experiment outcome stays deterministic and expresses uncertainty through confidence reasons", () => {
+  const outcome = analyzeExperimentOutcome(createExperimentVault(), "sauna-rhr", {
+    asOf: "2026-04-25",
+  });
+  const repeatedOutcome = analyzeExperimentOutcome(createExperimentVault(), "sauna-rhr", {
+    asOf: "2026-04-25",
+  });
+
+  assert.equal(outcome.schema, "murph.experiment-outcome.v1");
+  assert.equal(outcome.schemaVersion, "murph.experiment-outcome.v1");
+  assert.equal(outcome.experiment.status, "active");
+  assert.equal(outcome.outcomeId, "exp_01JNV4458HYPP53JDQCBP1QJFM-outcome-2026-04-25");
+  assert.equal(outcome.runRef?.key, "protocol_variant:dry-sauna/murph-finnish-standard-3x-week");
+  assert.equal(outcome.generatedAt, undefined);
+  assert.deepEqual(outcome.adherenceSummary, {
+    adherenceLevel: "low",
+    completedSessions: 3,
+    minimumUsefulSessions: 4,
+    status: "behind",
+    targetSessions: 6,
+  });
+  assert.deepEqual(outcome.metricResults[0], {
+    baselineDayCount: 3,
+    baselineMean: 61.33,
+    biomarkerKey: "biomarker:resting-heart-rate",
+    completeness: "good",
+    deltaAbs: -2.66,
+    deltaPct: -4.34,
+    expectedDirection: "decrease",
+    interventionDayCount: 3,
+    interventionMean: 58.67,
+    intervention: {
+      daysWithData: 3,
+      mean: 58.67,
+      totalDays: 14,
+      unit: "bpm",
+    },
+    label: "Resting Heart Rate",
+    movedAsExpected: true,
+    unit: "bpm",
+    baseline: {
+      daysWithData: 3,
+      mean: 61.33,
+      totalDays: 7,
+      unit: "bpm",
+    },
+  });
+  assert.deepEqual(outcome.confidence, {
+    level: "low",
+    reasons: [
+      "Completed session count stayed below the minimum useful target.",
+      "Context and confounder logs were present during the run.",
+    ],
+  });
+  assert.deepEqual(outcome.conclusion, {
+    caveats: [
+      "This is an N-of-1 result, not medical advice.",
+      "Concurrent illness, travel, alcohol, training load, and other context can change the readout.",
+    ],
+    headline: "Resting Heart Rate moved -2.66 bpm during the experiment.",
+    plainLanguage:
+      "Resting Heart Rate changed from 61.33 to 58.67 bpm. Confidence is low; treat this as associated with the intervention window rather than proof of causation.",
+  });
+  assert.deepEqual(repeatedOutcome, outcome);
+});
+
+test("experiment progress prioritizes safety follow-up over ordinary reminder logic", () => {
+  const progress = summarizeExperimentProgress(
+    createExperimentVaultWithSafetyFollowUp(),
+    "sauna-rhr",
+    {
+      asOf: "2026-04-20",
+    },
+  );
+
+  assert.deepEqual(progress.recommendation, {
+    action: "summary",
+    reason: "A safety-related experiment event was logged and needs follow-up.",
+    shouldNotifyUser: true,
+  });
+  assert.ok(progress.confounders.includes("dizziness context logged on 2026-04-20"));
+});
+
+test("completed experiments stay terminal even before the planned intervention window ends", () => {
+  const vault = createVaultReadModel({
+    vaultRoot: "/virtual/experiment-analysis-completed",
+    metadata: null,
+    entities: [
+      makeExperiment("completed"),
+      makeSession({
+        entityId: "evt_01JNV45RHN0TQ9ZXE0A7YSE1YM",
+        occurredAt: "2026-04-09T19:00:00.000Z",
+      }),
+    ],
+  });
+
+  const progress = summarizeExperimentProgress(vault, "sauna-rhr", {
+    asOf: "2026-04-10",
+  });
+
+  assert.equal(progress.phase, "completed");
+  assert.deepEqual(progress.recommendation, {
+    action: "skip",
+    reason: "No wearable data is available yet.",
+    shouldNotifyUser: false,
+  });
+});

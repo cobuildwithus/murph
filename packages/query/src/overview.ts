@@ -1,3 +1,9 @@
+import {
+  experimentFrontmatterSchema,
+  safeParseContract,
+  type ExperimentFrontmatter,
+} from "@murphai/contracts";
+
 import type { VaultReadModel } from "./read-model.ts";
 import { summarizeDailySamples, type DailySampleSummary } from "./summaries.ts";
 
@@ -16,7 +22,14 @@ export interface OverviewJournalEntry {
 }
 
 export interface OverviewExperiment {
+  analysisPlan: ExperimentFrontmatter["analysisPlan"] | null;
+  assistantSupport: ExperimentFrontmatter["assistantSupport"] | null;
   id: string;
+  onboarding: ExperimentFrontmatter["onboarding"] | null;
+  outcome: ExperimentFrontmatter["outcome"] | null;
+  outcomeRef: ExperimentFrontmatter["outcomeRef"] | null;
+  protocolRef: ExperimentFrontmatter["protocolRef"] | null;
+  runPlan: ExperimentFrontmatter["runPlan"] | null;
   slug: string | null;
   startedOn: string | null;
   status: string | null;
@@ -253,7 +266,14 @@ export function summarizeOverviewExperiments(
   ];
 
   return prioritizedExperiments.slice(0, normalizeLimit(limit, 6)).map((entry) => ({
+    analysisPlan: readExperimentFrontmatterField(entry, "analysisPlan"),
+    assistantSupport: readExperimentFrontmatterField(entry, "assistantSupport"),
     id: entry.entityId,
+    onboarding: readExperimentFrontmatterField(entry, "onboarding"),
+    outcome: readExperimentFrontmatterField(entry, "outcome"),
+    outcomeRef: readExperimentFrontmatterField(entry, "outcomeRef"),
+    protocolRef: readExperimentFrontmatterField(entry, "protocolRef"),
+    runPlan: readExperimentFrontmatterField(entry, "runPlan"),
     slug: entry.experimentSlug,
     startedOn: entry.date ?? extractDate(entry.occurredAt),
     status: entry.status ?? null,
@@ -261,6 +281,18 @@ export function summarizeOverviewExperiments(
     tags: compactStrings(entry.tags),
     title: entry.title ?? entry.entityId,
   }));
+}
+
+function readExperimentFrontmatterField<TKey extends keyof ExperimentFrontmatter>(
+  entry: VaultReadModel["experiments"][number],
+  key: TKey,
+): ExperimentFrontmatter[TKey] | null {
+  const result = safeParseContract(experimentFrontmatterSchema, entry.attributes);
+  if (!result.success) {
+    return null;
+  }
+
+  return result.data[key] ?? null;
 }
 
 function summarizeText(value: string | null): string | null {

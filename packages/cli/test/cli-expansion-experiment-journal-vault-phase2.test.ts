@@ -57,6 +57,162 @@ async function rewriteVaultMetadataWithFormatVersion(
 }
 
 test.sequential(
+  'experiment context log can write a dedicated experiment_context event from simple context payloads',
+  async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-experiment-context-'))
+    const contextPayloadPath = path.join(vaultRoot, 'experiment-context-simple.json')
+    const supplementPayloadPath = path.join(vaultRoot, 'experiment-context-supplement.json')
+
+    try {
+      await runSliceCli([
+        'init',
+        '--vault',
+        vaultRoot,
+        '--timezone',
+        'America/Los_Angeles',
+      ])
+      const created = await runSliceCli<{
+        experimentId: string
+        slug: string
+      }>([
+        'experiment',
+        'create',
+        'context-seam',
+        '--title',
+        'Context Seam',
+        '--started-on',
+        '2026-04-01',
+        '--status',
+        'active',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(created.ok, true)
+
+      await writeFile(
+        contextPayloadPath,
+        JSON.stringify({
+          occurredAt: '2026-04-10T18:00:00.000Z',
+          title: 'Travel week',
+          contextType: 'travel',
+          severity: 'potential_confounder',
+          note: 'Hotel sleep and airport meals likely affected recovery.',
+          tags: ['travel'],
+        }),
+        'utf8',
+      )
+      await writeFile(
+        supplementPayloadPath,
+        JSON.stringify({
+          kind: 'supplement_intake',
+          occurredAt: '2026-04-11T07:30:00.000Z',
+          title: 'Creatine added',
+          supplementName: 'Creatine',
+          dose: 5,
+          unit: 'g',
+          note: 'Added during the intervention window.',
+        }),
+        'utf8',
+      )
+
+      const loggedContext = await runSliceCli<{
+        experimentId: string
+        lookupId: string
+        slug: string
+        eventId: string
+        kind: string
+      }>([
+        'experiment',
+        'context',
+        'log',
+        'context-seam',
+        '--input',
+        `@${contextPayloadPath}`,
+        '--vault',
+        vaultRoot,
+      ])
+      const shownContext = await runSliceCli<{
+        entity: {
+          kind: string
+          title: string | null
+          data: Record<string, unknown>
+        }
+      }>([
+        'show',
+        requireData(loggedContext).eventId,
+        '--vault',
+        vaultRoot,
+      ])
+      const loggedSupplement = await runSliceCli<{
+        experimentId: string
+        lookupId: string
+        slug: string
+        eventId: string
+        kind: string
+      }>([
+        'experiment',
+        'context',
+        'log',
+        'context-seam',
+        '--input',
+        `@${supplementPayloadPath}`,
+        '--vault',
+        vaultRoot,
+      ])
+      const shownSupplement = await runSliceCli<{
+        entity: {
+          kind: string
+          title: string | null
+          data: Record<string, unknown>
+        }
+      }>([
+        'show',
+        requireData(loggedSupplement).eventId,
+        '--vault',
+        vaultRoot,
+      ])
+
+      assert.equal(loggedContext.ok, true)
+      assert.equal(loggedContext.meta?.command, 'experiment context log')
+      assert.equal(requireData(loggedContext).lookupId, requireData(created).experimentId)
+      assert.equal(requireData(loggedContext).kind, 'experiment_context')
+      assert.match(requireData(loggedContext).eventId, /^evt_/u)
+
+      assert.equal(shownContext.ok, true)
+      assert.equal(requireData(shownContext).entity.kind, 'experiment_context')
+      assert.equal(requireData(shownContext).entity.title, 'Travel week')
+      assert.equal(
+        requireData(shownContext).entity.data.experimentId,
+        requireData(created).experimentId,
+      )
+      assert.equal(requireData(shownContext).entity.data.experimentSlug, 'context-seam')
+      assert.equal(requireData(shownContext).entity.data.contextType, 'travel')
+      assert.equal(requireData(shownContext).entity.data.severity, 'potential_confounder')
+
+      assert.equal(loggedSupplement.ok, true)
+      assert.equal(loggedSupplement.meta?.command, 'experiment context log')
+      assert.equal(requireData(loggedSupplement).lookupId, requireData(created).experimentId)
+      assert.equal(requireData(loggedSupplement).kind, 'supplement_intake')
+      assert.match(requireData(loggedSupplement).eventId, /^evt_/u)
+
+      assert.equal(shownSupplement.ok, true)
+      assert.equal(requireData(shownSupplement).entity.kind, 'supplement_intake')
+      assert.equal(requireData(shownSupplement).entity.title, 'Creatine added')
+      assert.equal(
+        requireData(shownSupplement).entity.data.experimentId,
+        requireData(created).experimentId,
+      )
+      assert.equal(requireData(shownSupplement).entity.data.experimentSlug, 'context-seam')
+      assert.equal(requireData(shownSupplement).entity.data.supplementName, 'Creatine')
+      assert.equal(requireData(shownSupplement).entity.data.dose, 5)
+      assert.equal(requireData(shownSupplement).entity.data.unit, 'g')
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  },
+)
+
+test.sequential(
   'experiment update, checkpoint, and stop mutate the experiment page and append lifecycle events',
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-experiment-phase2-'))
@@ -547,6 +703,45 @@ test.sequential(
         '--vault',
         vaultRoot,
       ])
+      const writtenOutcome = await runSliceCli<{
+        experimentId: string
+        lookupId: string
+        slug: string
+        asOf: string
+        outcomePath: string
+        updatedExperiment: boolean
+        outcome: {
+          schema: string
+          outcomeId: string
+          generatedAt?: string
+          adherenceSummary: Record<string, unknown>
+          confidence: Record<string, unknown>
+          conclusion: Record<string, unknown>
+          confounders: string[]
+          metricResults: unknown
+          windows: Record<string, string | null>
+        } & Record<string, unknown>
+      }>([
+        'experiment',
+        'outcome',
+        'write',
+        requireData(created).experimentId,
+        '--as-of',
+        '2026-04-25',
+        '--vault',
+        vaultRoot,
+      ])
+      const shownExperimentAfterWrite = await runSliceCli<{
+        entity: {
+          data: Record<string, unknown>
+        }
+      }>([
+        'experiment',
+        'show',
+        'focus-sprint',
+        '--vault',
+        vaultRoot,
+      ])
 
       assert.equal(updated.ok, true)
       assert.equal(updated.meta?.command, 'experiment update')
@@ -732,6 +927,78 @@ test.sequential(
           schema: requireData(outcome).outcome.schema,
           windows: requireData(outcome).outcome.windows,
         },
+      )
+
+      assert.equal(writtenOutcome.ok, true)
+      assert.equal(writtenOutcome.meta?.command, 'experiment outcome write')
+      assert.equal(requireData(writtenOutcome).experimentId, requireData(created).experimentId)
+      assert.equal(requireData(writtenOutcome).lookupId, requireData(created).experimentId)
+      assert.equal(requireData(writtenOutcome).slug, 'focus-sprint')
+      assert.equal(requireData(writtenOutcome).asOf, '2026-04-25')
+      assert.equal(requireData(writtenOutcome).updatedExperiment, true)
+      assert.equal(
+        requireData(writtenOutcome).outcomePath,
+        'bank/experiments/outcomes/focus-sprint-2026-04-25.json',
+      )
+      assert.equal(
+        requireData(writtenOutcome).outcome.outcomeId,
+        `${requireData(created).experimentId}-outcome-2026-04-25`,
+      )
+      assert.equal(typeof requireData(writtenOutcome).outcome.generatedAt, 'string')
+      assert.deepEqual(
+        {
+          adherenceSummary: requireData(writtenOutcome).outcome.adherenceSummary,
+          confidence: requireData(writtenOutcome).outcome.confidence,
+          conclusion: requireData(writtenOutcome).outcome.conclusion,
+          confounders: requireData(writtenOutcome).outcome.confounders,
+          metricResults: requireData(writtenOutcome).outcome.metricResults,
+          outcomeId: requireData(writtenOutcome).outcome.outcomeId,
+          schema: requireData(writtenOutcome).outcome.schema,
+          windows: requireData(writtenOutcome).outcome.windows,
+        },
+        {
+          adherenceSummary: requireData(outcome).outcome.adherenceSummary,
+          confidence: requireData(outcome).outcome.confidence,
+          conclusion: requireData(outcome).outcome.conclusion,
+          confounders: requireData(outcome).outcome.confounders,
+          metricResults: requireData(outcome).outcome.metricResults,
+          outcomeId: requireData(outcome).outcome.outcomeId,
+          schema: requireData(outcome).outcome.schema,
+          windows: requireData(outcome).outcome.windows,
+        },
+      )
+
+      const persistedOutcome = JSON.parse(
+        await readFile(
+          path.join(vaultRoot, requireData(writtenOutcome).outcomePath),
+          'utf8',
+        ),
+      ) as Record<string, unknown>
+      assert.deepEqual(persistedOutcome, requireData(writtenOutcome).outcome)
+
+      const shownExperimentData = requireData(shownExperimentAfterWrite).entity.data
+      const outcomeSummary = shownExperimentData.outcome
+      assert.equal(typeof outcomeSummary, 'object')
+      assert.ok(outcomeSummary && !Array.isArray(outcomeSummary))
+      assert.equal(
+        (outcomeSummary as Record<string, unknown>).latestOutcomeId,
+        requireData(writtenOutcome).outcome.outcomeId,
+      )
+      assert.equal(
+        (outcomeSummary as Record<string, unknown>).finalAnalysisStatus,
+        'generated',
+      )
+
+      const outcomeRef = shownExperimentData.outcomeRef
+      assert.equal(typeof outcomeRef, 'object')
+      assert.ok(outcomeRef && !Array.isArray(outcomeRef))
+      assert.equal(
+        (outcomeRef as Record<string, unknown>).outcomeId,
+        requireData(writtenOutcome).outcome.outcomeId,
+      )
+      assert.equal(
+        (outcomeRef as Record<string, unknown>).relativePath,
+        requireData(writtenOutcome).outcomePath,
       )
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })

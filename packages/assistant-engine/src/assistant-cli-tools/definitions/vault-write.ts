@@ -1,4 +1,5 @@
 import {
+  EXPERIMENT_STATUSES,
   eventSourceSchema,
   mealNutritionSchema,
   type MealNutrition,
@@ -281,7 +282,7 @@ export function createCanonicalVaultWriteToolDefinitions(
         title: z.string().min(1).optional(),
         hypothesis: z.string().min(1).optional(),
         startedOn: localDateSchema.optional(),
-        status: z.string().min(1).optional(),
+        status: z.enum(EXPERIMENT_STATUSES).optional(),
       }),
       inputExample: {
         slug: 'creatine-trial',
