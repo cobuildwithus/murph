@@ -112,7 +112,14 @@ test("overview helpers normalize journal and experiment summaries", () => {
 
   assert.deepEqual(summarizeOverviewExperiments(vault, 2), [
     {
+      analysisPlan: null,
+      assistantSupport: null,
       id: "exp_active",
+      onboarding: null,
+      outcome: null,
+      outcomeRef: null,
+      protocolRef: null,
+      runPlan: null,
       slug: "magnesium-trial",
       startedOn: "2026-04-08",
       status: "Active",
@@ -121,7 +128,14 @@ test("overview helpers normalize journal and experiment summaries", () => {
       title: "Magnesium trial",
     },
     {
+      analysisPlan: null,
+      assistantSupport: null,
       id: "exp_archived",
+      onboarding: null,
+      outcome: null,
+      outcomeRef: null,
+      protocolRef: null,
+      runPlan: null,
       slug: null,
       startedOn: "2026-04-12",
       status: "archived",

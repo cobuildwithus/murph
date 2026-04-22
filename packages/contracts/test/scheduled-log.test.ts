@@ -8,6 +8,7 @@ import {
   scheduleIntentDailyLocalSchema,
   scheduleIntentEverySchema,
   scheduleIntentSchema,
+  formatScheduleIntentIssues,
   scheduledLogActionSchema,
   scheduledLogFrontmatterSchema,
   scheduledLogMarkdownDocumentSchema,
@@ -161,6 +162,104 @@ describe("scheduled-log contracts", () => {
     })).toMatchObject({
       frontmatter,
       body: "Writes a sauna intervention event.",
+    });
+  });
+
+  it("formats schedule intent validation issues for CLI and runtime callers", () => {
+    const invalidSchedules = [
+      {
+        input: null,
+        message: "schedule must be an object.",
+      },
+      {
+        input: {
+          kind: "weekly",
+        },
+        message: "schedule.kind must match a supported scheduled-log schedule.",
+      },
+      {
+        input: {
+          kind: "at",
+        },
+        message: "schedule.at is required.",
+      },
+      {
+        input: {
+          kind: "every",
+          everyMs: 0,
+        },
+        message: "schedule.everyMs must be a positive integer.",
+      },
+      {
+        input: {
+          kind: "cron",
+          expression: "",
+        },
+        message: "schedule.expression is required.",
+      },
+      {
+        input: {
+          kind: "dailyLocal",
+          localTime: "7:30",
+        },
+        message: "schedule.localTime must use HH:MM format.",
+      },
+    ];
+
+    for (const { input, message } of invalidSchedules) {
+      const result = scheduleIntentSchema.safeParse(input);
+      expect(result.success).toBe(false);
+
+      if (!result.success) {
+        expect(formatScheduleIntentIssues(result.error)).toBe(message);
+      }
+    }
+
+    const strictResult = scheduleIntentAtSchema.safeParse({
+      kind: "at",
+      at: "2026-04-22T08:00:00.000Z",
+      extra: true,
+    });
+    expect(strictResult.success).toBe(false);
+
+    if (!strictResult.success) {
+      expect(formatScheduleIntentIssues(strictResult.error)).toContain("Unrecognized");
+    }
+  });
+
+  it("accepts each meal.add template source without requiring note-only content", () => {
+    expect(scheduledLogActionSchema.parse({
+      kind: "meal.add",
+      foodId: "food_recovery_shake",
+    })).toEqual({
+      kind: "meal.add",
+      foodId: "food_recovery_shake",
+    });
+
+    expect(scheduledLogActionSchema.parse({
+      kind: "meal.add",
+      ingredients: ["whey protein", "banana"],
+    })).toEqual({
+      kind: "meal.add",
+      ingredients: ["whey protein", "banana"],
+    });
+
+    expect(scheduledLogActionSchema.parse({
+      kind: "meal.add",
+      nutrition: {
+        totals: {
+          calories: 320,
+          proteinGrams: 35,
+        },
+      },
+    })).toEqual({
+      kind: "meal.add",
+      nutrition: {
+        totals: {
+          calories: 320,
+          proteinGrams: 35,
+        },
+      },
     });
   });
 

@@ -95,6 +95,7 @@ const baseSmokeImportPaths = [
   "packages/importers/dist/index.js",
   "packages/importers/dist/core-port.js",
   "packages/device-syncd/dist/index.js",
+  "packages/device-syncd/dist/client.js",
   "packages/query/dist/index.js",
   "packages/inboxd/dist/index.js",
   "packages/parsers/dist/index.js",
@@ -123,6 +124,12 @@ const smokeImportPaths = [
   ...baseSmokeImportPaths,
   ...ownerPackageSmokeImportPaths,
 ];
+const requiredArtifactPaths = [
+  ...smokeImportPaths,
+  ...smokeImportPaths.map((artifactPath) =>
+    artifactPath.replace(/\.js$/, ".d.ts"),
+  ),
+];
 
 function runCommand(command, args) {
   const result = spawnSync(command, args, {
@@ -134,7 +141,7 @@ function runCommand(command, args) {
 }
 
 async function hasPreparedArtifacts(importAttempt = 0) {
-  for (const artifactPath of smokeImportPaths) {
+  for (const artifactPath of requiredArtifactPaths) {
     if (!existsSync(artifactPath)) {
       return false;
     }
@@ -308,7 +315,10 @@ async function sleep(delayMs) {
 const preparedStatus = runPreparedBuild();
 
 if (preparedStatus !== 0) {
-  process.exit(preparedStatus);
+  const forcedStatus = runPreparedBuild(true);
+  if (forcedStatus !== 0) {
+    process.exit(forcedStatus);
+  }
 }
 
 if (await hasPreparedArtifacts(0)) {

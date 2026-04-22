@@ -138,6 +138,7 @@ interface LifecycleEntityGroupConfig<
     output: z.ZodType<TStop>
     run(input: CommandContext & { id: string } & Record<string, unknown>): Promise<TStop>
   }
+  additionalCommands?: readonly AnyFactoryCommandConfig[]
 }
 
 export function createRegistryDocEntityGroup<
@@ -376,6 +377,7 @@ export function createLifecycleEntityGroup<
           })
         },
       },
+      ...(config.additionalCommands ?? []),
     ],
   })
 }

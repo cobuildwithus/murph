@@ -35,48 +35,72 @@ function makeEntity(
   };
 }
 
-function makeExperiment(status: "active" | "completed" = "active"): CanonicalEntity {
+type TestExperimentStatus = "active" | "completed" | "planned" | "paused" | "abandoned";
+
+function makeExperiment(
+  status: TestExperimentStatus = "active",
+  overrides: {
+    analysisPlan?: Record<string, unknown>;
+    assistantSupport?: Record<string, unknown>;
+    experimentId?: string;
+    protocolRef?: Record<string, unknown> | null;
+    runPlan?: Record<string, unknown>;
+    slug?: string;
+    startedOn?: string;
+  } = {},
+): CanonicalEntity {
+  const experimentId = overrides.experimentId ?? "exp_01JNV4458HYPP53JDQCBP1QJFM";
+  const slug = overrides.slug ?? "sauna-rhr";
+  const startedOn = overrides.startedOn ?? "2026-04-01";
+  const runPlan = overrides.runPlan ?? {
+    baselineStart: "2026-04-01",
+    baselineEnd: "2026-04-07",
+    interventionStart: "2026-04-08",
+    interventionEnd: "2026-04-21",
+    modality: "sauna",
+    targetSessions: 6,
+    minimumUsefulSessions: 4,
+  };
+  const analysisPlan = overrides.analysisPlan ?? {
+    primaryBiomarkerKey: "biomarker:resting-heart-rate",
+    desiredDirection: "decrease",
+  };
+  const assistantSupport = overrides.assistantSupport ?? {
+    remindersEnabled: true,
+    weeklyDigestEnabled: false,
+  };
+  const protocolRef =
+    overrides.protocolRef === null
+      ? undefined
+      : overrides.protocolRef ?? {
+          key: "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          pageRevisionId: "sha256:page-revision",
+          runSpecRevisionId: "sha256:run-spec-revision",
+          testPlanId: "rhr-21d",
+        };
+
   return makeEntity({
-    entityId: "exp_01JNV4458HYPP53JDQCBP1QJFM",
+    entityId: experimentId,
     family: "experiment",
     kind: "experiment_entry",
     recordClass: "bank",
-    occurredAt: "2026-04-01T08:00:00.000Z",
-    date: "2026-04-01",
-    experimentSlug: "sauna-rhr",
+    occurredAt: `${startedOn}T08:00:00.000Z`,
+    date: startedOn,
+    experimentSlug: slug,
     status,
-    title: "Sauna RHR",
+    title: slug === "sauna-rhr" ? "Sauna RHR" : "Sleep metrics",
     attributes: {
       schemaVersion: "murph.frontmatter.experiment.v1",
       docType: "experiment",
-      experimentId: "exp_01JNV4458HYPP53JDQCBP1QJFM",
-      slug: "sauna-rhr",
+      experimentId,
+      slug,
       status,
-      title: "Sauna RHR",
-      startedOn: "2026-04-01",
-      protocolRef: {
-        key: "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
-        pageRevisionId: "sha256:page-revision",
-        runSpecRevisionId: "sha256:run-spec-revision",
-        testPlanId: "rhr-21d",
-      },
-      runPlan: {
-        baselineStart: "2026-04-01",
-        baselineEnd: "2026-04-07",
-        interventionStart: "2026-04-08",
-        interventionEnd: "2026-04-21",
-        modality: "sauna",
-        targetSessions: 6,
-        minimumUsefulSessions: 4,
-      },
-      analysisPlan: {
-        primaryBiomarkerKey: "biomarker:resting-heart-rate",
-        desiredDirection: "decrease",
-      },
-      assistantSupport: {
-        remindersEnabled: true,
-        weeklyDigestEnabled: false,
-      },
+      title: slug === "sauna-rhr" ? "Sauna RHR" : "Sleep metrics",
+      startedOn,
+      ...(protocolRef ? { protocolRef } : {}),
+      runPlan,
+      analysisPlan,
+      assistantSupport,
     },
   });
 }
@@ -113,14 +137,51 @@ function makeObservation(input: {
   });
 }
 
+function makeSample(input: {
+  entityId: string;
+  dayKey: string;
+  occurredAt: string;
+  provider?: string;
+  stream: string;
+  unit: string;
+  value: number;
+}): CanonicalEntity {
+  return makeEntity({
+    entityId: input.entityId,
+    family: "sample",
+    kind: "sample",
+    recordClass: "ledger",
+    occurredAt: input.occurredAt,
+    date: input.dayKey,
+    stream: input.stream,
+    title: `${input.provider ?? "oura"} ${input.stream}`,
+    attributes: {
+      dayKey: input.dayKey,
+      externalRef: {
+        resourceId: `${input.entityId}-resource`,
+        resourceType: "summary",
+        system: input.provider ?? "oura",
+      },
+      recordedAt: input.occurredAt,
+      unit: input.unit,
+      value: input.value,
+    },
+  });
+}
+
 function makeSession(input: {
   entityId: string;
   occurredAt: string;
   afterExercise?: boolean;
   confounders?: string[];
+  experimentId?: string;
+  experimentSlug?: string;
+  relatedIds?: string[];
+  sessionStatus?: string;
   symptoms?: string[];
 }): CanonicalEntity {
   const dayKey = input.occurredAt.slice(0, 10);
+  const experimentSlug = input.experimentSlug ?? "sauna-rhr";
 
   return makeEntity({
     entityId: input.entityId,
@@ -129,11 +190,15 @@ function makeSession(input: {
     recordClass: "ledger",
     occurredAt: input.occurredAt,
     date: dayKey,
-    experimentSlug: "sauna-rhr",
+    experimentSlug,
     title: "Sauna session",
+    relatedIds: input.relatedIds,
     attributes: {
       afterExercise: input.afterExercise,
       confounders: input.confounders,
+      experimentId: input.experimentId,
+      experimentSlug,
+      sessionStatus: input.sessionStatus,
       symptoms: input.symptoms,
     },
   });
@@ -458,4 +523,304 @@ test("completed experiments stay terminal even before the planned intervention w
     reason: "No wearable data is available yet.",
     shouldNotifyUser: false,
   });
+});
+
+test("experiment progress exposes review readiness once the intervention window has ended", () => {
+  const progress = summarizeExperimentProgress(createExperimentVault(), "sauna-rhr", {
+    asOf: "2026-04-25",
+  });
+
+  assert.equal(progress.phase, "review_due");
+  assert.equal(progress.dataCoverage.status, "ready_for_review");
+  assert.deepEqual(progress.recommendation, {
+    action: "review",
+    reason: "The intervention window ended and the experiment is ready for review.",
+    shouldNotifyUser: true,
+  });
+});
+
+test("experiment analysis validates missing and malformed experiment records", () => {
+  assert.throws(
+    () => summarizeExperimentProgress(createExperimentVault(), "missing-experiment", {
+      asOf: "2026-04-10",
+    }),
+    /Experiment "missing-experiment" was not found/u,
+  );
+
+  const vault = createVaultReadModel({
+    vaultRoot: "/virtual/experiment-analysis-invalid",
+    metadata: null,
+    entities: [
+      makeEntity({
+        entityId: "exp_01JNV4458HYPP53JDQCBP1QJFP",
+        family: "experiment",
+        kind: "experiment_entry",
+        recordClass: "bank",
+        experimentSlug: "broken-frontmatter",
+        attributes: {
+          schemaVersion: "murph.frontmatter.experiment.v1",
+          docType: "experiment",
+          experimentId: "exp_01JNV4458HYPP53JDQCBP1QJFP",
+          slug: "broken-frontmatter",
+          status: "active",
+        },
+      }),
+    ],
+  });
+
+  assert.throws(
+    () => analyzeExperimentOutcome(vault, "broken-frontmatter", { asOf: "2026-04-10" }),
+    /invalid frontmatter/u,
+  );
+});
+
+test("experiment progress preserves explicit terminal and planned phases", () => {
+  for (const [status, phase] of [
+    ["planned", "planned"],
+    ["paused", "paused"],
+    ["abandoned", "abandoned"],
+  ] as const) {
+    const vault = createVaultReadModel({
+      vaultRoot: `/virtual/experiment-analysis-${status}`,
+      metadata: null,
+      entities: [makeExperiment(status)],
+    });
+
+    assert.equal(
+      summarizeExperimentProgress(vault, "sauna-rhr", { asOf: "2026-04-10" }).phase,
+      phase,
+    );
+  }
+});
+
+test("experiment progress resolves linked events, skipped sessions, digest reminders, and wearable metric aliases", () => {
+  const experimentId = "exp_01JNV4458HYPP53JDQCBP1QJFN";
+  const experiment = makeExperiment("active", {
+    experimentId,
+    slug: "sleep-metrics",
+    runPlan: {
+      baselineStart: "2026-05-01",
+      baselineEnd: "2026-05-02",
+      interventionStart: "2026-05-03",
+      interventionEnd: "2026-05-05",
+      targetSessions: 4,
+      minimumUsefulSessions: 1,
+    },
+    analysisPlan: {
+      primaryBiomarkerKey: "biomarker:hrv",
+      secondaryBiomarkerKeys: [
+        "biomarker:sleep-efficiency",
+        "biomarker:deep-sleep",
+        "biomarker:respiratory-rate",
+        "biomarker:temperature",
+        "biomarker:unknown-signal",
+      ],
+      desiredDirection: "increase",
+    },
+    assistantSupport: {
+      remindersEnabled: false,
+      weeklyDigestEnabled: true,
+    },
+    protocolRef: null,
+  });
+  const linkedSession = makeEntity({
+    entityId: "evt_01JNV45RHN0TQ9ZXE0A7YSE2AA",
+    family: "event",
+    kind: "intervention_session",
+    recordClass: "ledger",
+    occurredAt: "2026-05-03T19:00:00.000Z",
+    date: "2026-05-03",
+    experimentSlug: null,
+    title: "Linked session",
+    attributes: {
+      experimentId,
+      experimentSlug: "sleep-metrics",
+    },
+  });
+  const skippedSession = makeSession({
+    entityId: "evt_01JNV45RHN0TQ9ZXE0A7YSE2AB",
+    occurredAt: "2026-05-04T19:00:00.000Z",
+    experimentId,
+    experimentSlug: "sleep-metrics",
+    sessionStatus: "skipped",
+  });
+  const unrelatedEarlySession = makeSession({
+    entityId: "evt_01JNV45RHN0TQ9ZXE0A7YSE2AC",
+    occurredAt: "2026-04-30T19:00:00.000Z",
+    experimentId,
+    experimentSlug: "sleep-metrics",
+  });
+  const futureRelatedSession = makeSession({
+    entityId: "evt_01JNV45RHN0TQ9ZXE0A7YSE2AD",
+    occurredAt: "2026-05-09T19:00:00.000Z",
+    relatedIds: [experimentId],
+    experimentSlug: "sleep-metrics",
+  });
+  const linkedContext = makeEntity({
+    entityId: "evt_01JNV45RHN0TQ9ZXE0A7YSE2AE",
+    family: "event",
+    kind: "note",
+    recordClass: "ledger",
+    occurredAt: "2026-05-04T08:00:00.000Z",
+    date: "2026-05-04",
+    links: [{ type: "related_to", targetId: experiment.entityId }],
+    title: "Late caffeine",
+    attributes: {},
+  });
+  const metrics = [
+    makeSample({
+      entityId: "sample_sleep_hrv_1",
+      dayKey: "2026-05-01",
+      stream: "hrv",
+      occurredAt: "2026-05-01T06:00:00.000Z",
+      unit: "ms",
+      value: 45,
+    }),
+    makeSample({
+      entityId: "sample_sleep_hrv_2",
+      dayKey: "2026-05-02",
+      stream: "hrv",
+      occurredAt: "2026-05-02T06:00:00.000Z",
+      unit: "ms",
+      value: 46,
+    }),
+    makeSample({
+      entityId: "sample_sleep_hrv_3",
+      dayKey: "2026-05-03",
+      stream: "hrv",
+      occurredAt: "2026-05-03T06:00:00.000Z",
+      unit: "ms",
+      value: 50,
+    }),
+    makeSample({
+      entityId: "sample_sleep_hrv_4",
+      dayKey: "2026-05-04",
+      stream: "hrv",
+      occurredAt: "2026-05-04T06:00:00.000Z",
+      unit: "ms",
+      value: 51,
+    }),
+    makeObservation({
+      entityId: "evt_sleep_efficiency",
+      dayKey: "2026-05-03",
+      metric: "sleep-efficiency",
+      occurredAt: "2026-05-03T06:00:00.000Z",
+      unit: "%",
+      value: 89,
+    }),
+    makeObservation({
+      entityId: "evt_deep_sleep",
+      dayKey: "2026-05-03",
+      metric: "sleep-deep-minutes",
+      occurredAt: "2026-05-03T06:00:00.000Z",
+      unit: "minutes",
+      value: 80,
+    }),
+    makeObservation({
+      entityId: "evt_respiratory_rate",
+      dayKey: "2026-05-03",
+      metric: "respiratory-rate",
+      occurredAt: "2026-05-03T06:00:00.000Z",
+      unit: "breaths_per_minute",
+      value: 14.5,
+    }),
+    makeObservation({
+      entityId: "evt_temperature",
+      dayKey: "2026-05-03",
+      metric: "temperature-deviation",
+      occurredAt: "2026-05-03T06:00:00.000Z",
+      unit: "celsius",
+      value: 0.2,
+    }),
+  ];
+  const vault = createVaultReadModel({
+    vaultRoot: "/virtual/experiment-analysis-metrics",
+    metadata: null,
+    entities: [
+      experiment,
+      linkedSession,
+      skippedSession,
+      unrelatedEarlySession,
+      futureRelatedSession,
+      linkedContext,
+      ...metrics,
+    ],
+  });
+
+  const progress = summarizeExperimentProgress(vault, "sleep-metrics", {
+    asOf: "2026-05-04",
+  });
+
+  assert.equal(progress.phase, "intervention");
+  assert.deepEqual(progress.adherence, {
+    completedSessions: 1,
+    expectedSessionsByNow: 2,
+    minimumUsefulSessions: 1,
+    sessionEventIds: ["evt_01JNV45RHN0TQ9ZXE0A7YSE2AA"],
+    status: "met_minimum",
+    targetSessions: 4,
+  });
+  assert.deepEqual(progress.recommendation, {
+    action: "summary",
+    reason: "A weekly digest is enabled and wearable data is available.",
+    shouldNotifyUser: true,
+  });
+  assert.deepEqual(
+    progress.signals.map((signal) => [signal.biomarkerKey, signal.unit]),
+    [
+      ["biomarker:hrv", "ms"],
+      ["biomarker:sleep-efficiency", "%"],
+      ["biomarker:deep-sleep", "minutes"],
+      ["biomarker:respiratory-rate", "breaths_per_minute"],
+      ["biomarker:temperature", "celsius"],
+      ["biomarker:unknown-signal", null],
+    ],
+  );
+  assert.equal(progress.signals[0]?.deltaAbs, 5);
+  assert.equal(progress.signals[0]?.movedAsExpected, true);
+  assert.equal(progress.signals[5]?.completeness, "insufficient");
+  assert.deepEqual(progress.confounders, ["Late caffeine on 2026-05-04"]);
+  assert.equal(progress.protocolRef, null);
+});
+
+test("experiment outcome reports sparse primary data as medium-confidence incomplete evidence", () => {
+  const experiment = makeExperiment("active", {
+    experimentId: "exp_01JNV4458HYPP53JDQCBP1QJFR",
+    slug: "no-primary-data",
+    protocolRef: null,
+    runPlan: {},
+    analysisPlan: {},
+    assistantSupport: {},
+  });
+  const vault = createVaultReadModel({
+    vaultRoot: "/virtual/experiment-analysis-sparse",
+    metadata: null,
+    entities: [experiment],
+  });
+
+  const outcome = analyzeExperimentOutcome(vault, "no-primary-data", {
+    asOf: "2026-06-01",
+  });
+
+  assert.deepEqual(outcome.adherenceSummary, {
+    adherenceLevel: "unknown",
+    completedSessions: 0,
+    minimumUsefulSessions: null,
+    status: "not_started",
+    targetSessions: null,
+  });
+  assert.deepEqual(outcome.confidence, {
+    level: "medium",
+    reasons: [
+      "Primary biomarker coverage is insufficient for a strong before-and-after read.",
+    ],
+  });
+  assert.deepEqual(outcome.metricResults, []);
+  assert.equal(
+    outcome.conclusion.headline,
+    "The experiment finished, but the primary biomarker readout is incomplete.",
+  );
+  assert.match(outcome.conclusion.plainLanguage, /not enough primary biomarker data/u);
+  assert.equal(outcome.protocolRef, null);
+  assert.equal(outcome.runRef, undefined);
 });
