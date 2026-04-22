@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { InboxListResult } from '@murphai/operator-config/inbox-cli-contracts'
-import { shouldGroupAdjacentConversationCapture } from './grouping.js'
+import { shouldGroupAdjacentConversationCapture } from '../src/assistant/automation/grouping.ts'
 
 type AssistantInboxCaptureSummary = InboxListResult['items'][number]
 

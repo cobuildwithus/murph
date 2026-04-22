@@ -3077,30 +3077,38 @@ describe('assistant auto-reply runtime', () => {
   })
 
   it('does not create a default turn-input port for hosted automation passes', async () => {
-    automationStateStore.current = createAutomationState()
-    automationStateStore.save.mockResolvedValue(automationStateStore.current)
+    const runLoop = await vi.importActual<
+      typeof import('../src/assistant/automation/run-loop.ts')
+    >('../src/assistant/automation/run-loop.ts')
 
-    const result = await runAssistantAutomationPass({
-      executionContext: {
-        hosted: {
-          memberId: 'member-1',
-          userEnvKeys: [],
-        },
+    const executionContext = {
+      hosted: {
+        memberId: 'member-1',
+        userEnvKeys: [],
       },
+    } as const
+
+    const result = await runLoop.runAssistantAutomationPass({
+      executionContext,
       requestId: 'request-hosted',
       vault: '/tmp/assistant-automation-vault',
     })
 
-    expect(result).toMatchObject({
-      progressed: false,
-      replies: {
-        considered: 0,
-        failed: 0,
-        replied: 0,
-        skipped: 0,
-      },
+    expect(result.replies).toMatchObject({
+      failed: 0,
     })
-    expect(replyMocks.sendAssistantMessage).not.toHaveBeenCalled()
+    expect(runLoopMocks.recoverAssistantAutoReplies).toHaveBeenCalledWith(
+      expect.objectContaining({
+        executionContext,
+        turnInputPort: undefined,
+      }),
+    )
+    expect(runLoopMocks.scanAssistantAutomationOnce).toHaveBeenCalledWith(
+      expect.objectContaining({
+        executionContext,
+        turnInputPort: undefined,
+      }),
+    )
   })
 
   it('skips the group when prompt preparation produces no replyable content', async () => {
