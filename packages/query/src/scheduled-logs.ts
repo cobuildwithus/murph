@@ -1,12 +1,12 @@
 import {
   SCHEDULED_LOG_DOC_TYPE,
   SCHEDULED_LOG_SCHEMA_VERSION,
-  scheduleIntentKindValues,
+  formatScheduleIntentIssues,
+  scheduleIntentSchema,
   scheduledLogActionSchema,
   scheduledLogStatusValues,
   VAULT_LAYOUT,
   type ScheduleIntent,
-  type ScheduleIntentKind,
   type ScheduledLogAction,
   type ScheduledLogStatus,
 } from "@murphai/contracts";
@@ -22,7 +22,6 @@ import {
 import { parseFrontmatterDocument, type FrontmatterObject } from "./health/shared.ts";
 
 const SCHEDULED_LOGS_DIRECTORY = VAULT_LAYOUT.scheduledLogsDirectory;
-const dailyLocalTimePattern = /^(?:[01]\d|2[0-3]):[0-5]\d$/u;
 
 export type {
   ScheduleIntent,
@@ -82,52 +81,14 @@ function normalizeScheduledLogStatus(value: unknown): ScheduledLogStatus {
 }
 
 function normalizeScheduleIntent(value: unknown): ScheduleIntent {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new Error("schedule must be an object.");
+  const parsed = scheduleIntentSchema.safeParse(value);
+  if (!parsed.success) {
+    const message = formatScheduleIntentIssues(parsed.error) ||
+      "schedule must match a supported scheduled-log schedule.";
+    throw new Error(message);
   }
 
-  const object = value as Record<string, unknown>;
-  const kind = requireStringValue(object.kind, "schedule.kind");
-  if (!scheduleIntentKindValues.includes(kind as ScheduleIntentKind)) {
-    throw new Error("schedule.kind must match a supported scheduled-log schedule.");
-  }
-
-  switch (kind) {
-    case "at":
-      return {
-        kind,
-        at: requireStringValue(object.at, "schedule.at"),
-      };
-    case "every": {
-      const everyMs = typeof object.everyMs === "number" ? object.everyMs : Number(object.everyMs);
-      if (!Number.isInteger(everyMs) || everyMs <= 0) {
-        throw new Error("schedule.everyMs must be a positive integer.");
-      }
-
-      return {
-        kind,
-        everyMs,
-      };
-    }
-    case "cron":
-      return {
-        kind,
-        expression: requireStringValue(object.expression, "schedule.expression"),
-      };
-    case "dailyLocal": {
-      const localTime = requireStringValue(object.localTime, "schedule.localTime");
-      if (!dailyLocalTimePattern.test(localTime)) {
-        throw new Error("schedule.localTime must use HH:MM format.");
-      }
-
-      return {
-        kind,
-        localTime,
-      };
-    }
-  }
-
-  throw new Error("schedule.kind must match a supported scheduled-log schedule.");
+  return parsed.data;
 }
 
 function normalizeScheduledLogAction(value: unknown): ScheduledLogAction {

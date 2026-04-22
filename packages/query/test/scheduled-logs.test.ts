@@ -268,6 +268,38 @@ test("scheduled log queries reject unsupported schedules and actions", async () 
 
     await writeVaultFile(
       vaultRoot,
+      "bank/scheduled-logs/non-object-schedule.md",
+      [
+        "---",
+        "schemaVersion: murph.frontmatter.scheduled-log.v1",
+        "docType: scheduled_log",
+        "scheduledLogId: slog_01JX8T8QY2M5ZBV64ZP4N1DRB8",
+        "slug: non-object-schedule",
+        "title: Non-object schedule",
+        "schedule: invalid",
+        "action:",
+        "  kind: intervention_session.add",
+        "  title: Non-object schedule",
+        "  interventionType: sauna",
+        "createdAt: 2026-04-22T07:00:00.000Z",
+        "updatedAt: 2026-04-22T07:00:00.000Z",
+        "---",
+      ].join("\n"),
+    );
+
+    await assert.rejects(
+      () => readScheduledLog(vaultRoot, "slog_01JX8T8QY2M5ZBV64ZP4N1DRB8"),
+      (error: unknown) =>
+        error instanceof Error &&
+        error.message === "schedule must be an object.",
+    );
+
+    await rm(path.join(vaultRoot, "bank/scheduled-logs/non-object-schedule.md"), {
+      force: true,
+    });
+
+    await writeVaultFile(
+      vaultRoot,
       "bank/scheduled-logs/bad-action.md",
       [
         "---",

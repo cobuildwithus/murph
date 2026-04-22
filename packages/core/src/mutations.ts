@@ -132,6 +132,7 @@ interface AddMealInput {
   ingredients?: string[];
   nutrition?: MealNutrition;
   source?: string;
+  tags?: string[];
   externalRef?: ExternalRef;
 }
 
@@ -1544,6 +1545,7 @@ export async function addMeal({
   ingredients,
   nutrition,
   source = "manual",
+  tags,
   externalRef,
 }: AddMealInput): Promise<AddMealResult> {
   const vault = await loadVault({ vaultRoot });
@@ -1606,6 +1608,7 @@ export async function addMeal({
     source,
     title: "Meal",
     note: normalizedNote,
+    tags,
     externalRef,
     links: [{ type: "related_to", targetId: mealId }],
     rawRefs: pendingAttachmentState.rawRefs,

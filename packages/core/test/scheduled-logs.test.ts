@@ -249,6 +249,11 @@ test("scheduled log execution inherits food details and is idempotent per occurr
     scheduledLogId: scheduledLog.record.scheduledLogId,
     occurrenceAt,
   });
+  await setScheduledLogStatus({
+    vaultRoot,
+    scheduledLogId: scheduledLog.record.scheduledLogId,
+    status: "paused",
+  });
   const secondRun = await executeScheduledLogOccurrence({
     vaultRoot,
     scheduledLogId: scheduledLog.record.scheduledLogId,
@@ -262,8 +267,10 @@ test("scheduled log execution inherits food details and is idempotent per occurr
   });
 
   assert.equal(firstRun.idempotent, false);
+  assert.equal(firstRun.skipped, false);
   assert.equal(firstRun.eventKind, "meal");
   assert.equal(secondRun.idempotent, true);
+  assert.equal(secondRun.skipped, true);
   assert.equal(secondRun.eventId, firstRun.eventId);
   assert.ok(mealEvent);
   assert.equal(mealEvent?.kind, "meal");
@@ -275,6 +282,7 @@ test("scheduled log execution inherits food details and is idempotent per occurr
   assert.match(mealEvent.note ?? "", /Auto-logged saved food: Recovery Smoothie/);
   assert.match(mealEvent.note ?? "", /Serving: 1 glass/);
   assert.deepEqual(mealEvent.ingredients, ["banana", "berries"]);
+  assert.deepEqual(mealEvent.tags, ["post-workout"]);
   assert.deepEqual(mealEvent.nutrition, {
     totals: {
       calories: 420,
@@ -382,6 +390,29 @@ test("scheduled log execution covers activity, intervention, measurement, and in
     body: "Leave this paused until it is resumed.",
   });
 
+  const archived = await upsertScheduledLog({
+    vaultRoot,
+    scheduledLogId: "slog_01JX8V9QY2M5ZBV64ZP4N1DRB9",
+    title: "Archived check-in",
+    slug: "archived-check-in",
+    status: "archived",
+    schedule: {
+      kind: "dailyLocal",
+      localTime: "09:00",
+    },
+    action: {
+      kind: "measurement.add",
+      measurements: [
+        {
+          metric: "resting-heart-rate",
+          value: 56,
+          unit: "bpm",
+        },
+      ],
+    },
+    body: "Keep this archived.",
+  });
+
   const activityResult = await executeScheduledLogOccurrence({
     vaultRoot,
     scheduledLogId: activity.record.scheduledLogId,
@@ -402,18 +433,35 @@ test("scheduled log execution covers activity, intervention, measurement, and in
   assert.equal(interventionResult.eventKind, "intervention_session");
   assert.equal(measurementResult.eventKind, "measurement");
 
-  await assert.rejects(
-    () =>
-      executeScheduledLogOccurrence({
-        vaultRoot,
-        scheduledLogId: paused.record.scheduledLogId,
-        occurrenceAt: "2026-04-22T08:00:00.000Z",
-      }),
-    (error: unknown) =>
-      error instanceof VaultError &&
-      error.code === "VAULT_SCHEDULED_LOG_INACTIVE" &&
-      error.message === 'Scheduled log "Paused check-in" is paused and cannot be executed.',
-  );
+  const pausedResult = await executeScheduledLogOccurrence({
+    vaultRoot,
+    scheduledLogId: paused.record.scheduledLogId,
+    occurrenceAt: "2026-04-22T08:00:00.000Z",
+  });
+  const archivedResult = await executeScheduledLogOccurrence({
+    vaultRoot,
+    scheduledLogId: archived.record.scheduledLogId,
+    occurrenceAt: "2026-04-22T09:00:00.000Z",
+  });
+
+  assert.deepEqual(pausedResult, {
+    actionKind: "measurement.add",
+    eventId: null,
+    eventKind: null,
+    idempotent: false,
+    message: 'Skipped scheduled log "Paused check-in" because it is paused.',
+    scheduledLogId: paused.record.scheduledLogId,
+    skipped: true,
+  });
+  assert.deepEqual(archivedResult, {
+    actionKind: "measurement.add",
+    eventId: null,
+    eventKind: null,
+    idempotent: false,
+    message: 'Skipped scheduled log "Archived check-in" because it is archived.',
+    scheduledLogId: archived.record.scheduledLogId,
+    skipped: true,
+  });
 
   await assert.rejects(
     () =>
@@ -522,5 +570,38 @@ test("scheduled logs reject malformed previews and broken registry documents", a
       error instanceof VaultError &&
       error.code === "VAULT_INVALID_INPUT" &&
       error.message === "schedule.kind must match a supported scheduled-log schedule.",
+  );
+
+  await fs.rm(path.join(badScheduleVault, "bank/scheduled-logs/bad-schedule.md"), {
+    force: true,
+  });
+
+  await writeVaultFile(
+    badScheduleVault,
+    "bank/scheduled-logs/non-object-schedule.md",
+    [
+      "---",
+      "schemaVersion: murph.frontmatter.scheduled-log.v1",
+      "docType: scheduled_log",
+      "scheduledLogId: slog_01JX8VBQY2M5ZBV64ZP4N1DRBB",
+      "slug: non-object-schedule",
+      "title: Non-object schedule",
+      "schedule: invalid",
+      "action:",
+      "  kind: intervention_session.add",
+      "  title: Non-object schedule",
+      "  interventionType: sauna",
+      "createdAt: 2026-04-22T07:00:00.000Z",
+      "updatedAt: 2026-04-22T07:00:00.000Z",
+      "---",
+    ].join("\n"),
+  );
+
+  await assert.rejects(
+    () => listScheduledLogs({ vaultRoot: badScheduleVault }),
+    (error: unknown) =>
+      error instanceof VaultError &&
+      error.code === "VAULT_INVALID_INPUT" &&
+      error.message === "schedule must be an object.",
   );
 });
