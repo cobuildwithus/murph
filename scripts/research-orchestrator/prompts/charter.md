@@ -5,8 +5,8 @@ TASK: Build the protocol research charter and extraction plan.
 Goal:
 Create the research map for {{PROTOCOL_NAME}} before any source extraction. Do not write the protocol page yet.
 
-Preset starting points:
-{{PRESET_STARTING_POINTS}}
+Initial identity hints:
+{{INITIAL_IDENTITY_HINTS}}
 
 Inputs:
 - The Health Commons schema expectations from existing protocol and source pages.
@@ -73,4 +73,72 @@ List likely files to create or update:
 - biomarkers if missing
 - experimentOnboarding block if this protocol is expected to power Murph experiment creation
 
-Return only the charter and machine-readable search plan. Do not synthesize recommendations yet.
+Machine-readable outputs:
+Return the following JSON blocks exactly once, using these exact headings and fenced `json` code blocks:
+
+## CHARTER_MANIFEST_V1
+```json
+{
+  "protocolName": "{{PROTOCOL_NAME}}",
+  "protocolSlug": "{{PROTOCOL_SLUG}}",
+  "familySlug": "{{FAMILY_SLUG}}",
+  "protocolAliases": ["..."],
+  "variantDecision": "single_protocol | split_variants | unclear",
+  "notes": ["..."]
+}
+```
+
+## SEARCH_SHARDS_V1
+```json
+{
+  "shards": [
+    {
+      "id": "direct-intervention",
+      "topic": "...",
+      "queryStrings": ["..."],
+      "sourceTypes": ["..."],
+      "directEvidence": ["..."],
+      "adjacentEvidence": ["..."],
+      "endpointFamilies": ["..."]
+    }
+  ]
+}
+```
+
+## SECTION_SEAMS_V1
+```json
+{
+  "sections": [
+    {
+      "id": "dose-implementation",
+      "focus": "..."
+    }
+  ]
+}
+```
+
+## SOURCE_EXTRACTION_SCHEMA_V1
+```json
+{
+  "fields": ["source metadata", "researchEvidence", "protocolEvidence"]
+}
+```
+
+## INITIAL_FILE_PLAN_V1
+```json
+{
+  "files": [
+    {
+      "kind": "protocol_page",
+      "path": "packages/health-commons/content/protocols/{{FAMILY_SLUG}}/{{PROTOCOL_SLUG}}.md",
+      "why": "..."
+    }
+  ]
+}
+```
+
+Rules:
+- Use the prose charter sections plus the machine-readable blocks.
+- The machine-readable blocks define the later seams for `research:materialize`.
+- If the provisional slugs above are wrong, replace them in `CHARTER_MANIFEST_V1`.
+- Do not synthesize recommendations yet.
