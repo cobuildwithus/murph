@@ -90,7 +90,7 @@ function AccountMenu() {
             }
           >
             <Avatar className="size-7 border border-white/15">
-              <AvatarFallback className="bg-white/5 text-[11px] font-medium text-white/80">
+              <AvatarFallback className="bg-white/5 text-[0.6875rem] font-medium text-white/80">
                 {initials}
               </AvatarFallback>
             </Avatar>
@@ -125,15 +125,14 @@ export function Sidebar() {
     <ShadcnSidebar
       collapsible="offcanvas"
       className={cn(
-        "bg-gradient-to-b from-[#2d3436] via-[#3a2e24] to-[#2a1f16]",
+        "bg-linear-to-b from-[#2d3436] via-[#3a2e24] to-[#2a1f16]",
         "[&_[data-slot=sidebar-inner]]:bg-transparent",
         "group-data-[side=left]:[&_[data-slot=sidebar-container]]:border-r-0",
       )}
       style={sidebarThemeStyle}
     >
-      <SidebarHeader className="pt-7 pb-4">
+      <SidebarHeader className="pt-7 pb-3">
         <BrandMark />
-        <div className="mt-4 h-px bg-white/10" />
       </SidebarHeader>
 
       <SidebarContent className="px-2">
@@ -151,7 +150,7 @@ export function Sidebar() {
                   isActive={isActive}
                   className={cn(
                     "rounded-lg text-white/60 hover:bg-white/5 hover:text-white/80",
-                    "data-active:bg-white/10 data-active:font-semibold data-active:text-white",
+                    "data-active:bg-white/10 data-active:text-white",
                   )}
                   render={<Link href={item.href}>{item.label}</Link>}
                 />
