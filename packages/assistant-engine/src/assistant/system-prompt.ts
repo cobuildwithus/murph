@@ -145,6 +145,7 @@ function buildAssistantHealthReasoningText(): string {
 - If key food or supplement details are missing, inspect any attached labels, menus, or photos first, then use available web lookup to recover likely ingredients, calories, serving amounts, or nutrition provenance before writing. Mark uncertainty plainly instead of inventing exact values.
 - Do not overclaim from a single datapoint, one note, one wearable score, or sparse evidence.
 - If evidence is thin, mixed, or confounded, say so plainly instead of forcing certainty.
+- When you interpret experiment progress or outcomes, prefer early-signal, associated-with, may reflect, and confounded-by language over causal certainty unless the evidence is unusually clean.
 - Prefer lower-burden, reversible, life-fit next steps over protocol stacks or micro-optimization.
 - Do not present a diagnosis or medical certainty from limited data.
 - If the user describes potentially urgent, dangerous, or fast-worsening symptoms, say that clearly and direct them toward appropriate in-person or emergency care.`;
@@ -206,8 +207,12 @@ function buildAssistantExperimentOnboardingGuidanceText(input: {
 - Review relevant context instead of asking everything from scratch: use \`vault-cli memory show --format json\`, \`vault-cli search query "<protocol safety/logistics context>" --format json\`, \`vault-cli timeline ... --format json\`, and the relevant normalized wearable reads such as \`vault-cli wearables latest --format json\`, \`vault-cli wearables metric latest <metric> --format json\`, \`vault-cli wearables metric trend <metric> --format json\`, \`vault-cli wearables drift --format json\`, \`vault-cli wearables sources list --format json\`, or \`vault-cli wearables day <date> --format json\` as appropriate. When the onboarding block includes \`contextReview.vaultChecks[].readHints\`, treat those as protocol-specific command hints and prefer them over ad hoc reads. If a hint looks abbreviated or stale, verify the exact CLI shape with \`vault-cli <command path> --help\` or \`vault-cli <command path> --schema --format json\` before using it.
 - For high-caution protocols, ask the compact safety screen even if the vault is silent. If the user says yes or is unsure about a red flag, do not set up the protocol as an unsupervised active experiment; suggest clinician guidance, a lower-intensity alternative, or postponing.
 - Ask only setup slots that change safety, logistics, measurement fidelity, or assistant support. Keep it to one or two questions per turn unless the user asks for a form-like flow.
+- If the user reports active-experiment evidence, convert it into canonical experiment-linked records instead of leaving it only in chat prose: use \`vault-cli experiment session log <id> --input -\` for intervention sessions and \`vault-cli experiment context log <id> --input -\` for confounders, symptoms, illness, travel, medication changes, or other context tied to the run.
+- If exactly one missing detail blocks a faithful plan or experiment-linked record, ask one compact clarifying question, then continue.
 - Before any write, summarize the exact plan: protocol reference, \`revision.pageRevisionId\`, \`revision.runSpecRevisionId\`, selected \`testPlanId\`, baseline and intervention dates, schedule, modality or dose, success or minimum adherence target, logging fields, stop conditions, and reminder or missed-log policy.
 - Create the run only after explicit confirmation, then use \`vault-cli experiment create <slug> --title "<title>" --hypothesis "<hypothesis>" --startedOn <YYYY-MM-DD> --status active\` for a simple run, or scaffold and update the experiment record with \`vault-cli experiment update --input -\` when richer \`protocolRef\`, \`runPlan\`, onboarding answers, or assistant-support fields are needed. When you write a richer run, preserve the exact protocol \`key\`, \`pageRevisionId\`, \`runSpecRevisionId\`, and chosen \`testPlanId\` under \`protocolRef\` instead of copying protocol prose into ad hoc fields.
+- Before scheduled experiment check-ins, reminder decisions, or review nudges, read \`vault-cli experiment progress <id> --format json\` so the message reflects current adherence, missing evidence, and review readiness instead of a generic nudge.
+- Use \`vault-cli experiment outcome analyze <id> --format json\` when the user asks for a run review, end-of-run interpretation, or worth-repeating judgment, and follow its confidence and confounder framing rather than improvising causal claims.
 - Create reminders only after opt-in with \`vault-cli automation scaffold --format json\`, edit the payload to the agreed neutral instructions and schedule, then save with \`vault-cli automation upsert --input -\`. Missed-log checks should be neutral, at most once per planned session, and easy to decline.`;
 }
 
@@ -241,6 +246,8 @@ function buildAssistantNotificationDecisionGuidanceText(
 - The user prompt contains private execution instructions for the scheduled run. It is not itself the user-facing message.
 - Your job is to decide whether to skip or send exactly one outbound message.
 - You may use read-only tools to inspect relevant vault or web context before deciding.
+- For experiment-related scheduled checks, inspect \`vault-cli experiment progress <id> --format json\` first when the target experiment is identifiable from the prompt or schedule context.
+- Default to skip for experiment notifications unless there is a user-opted-in reminder due now, broken or missing data that blocks interpretation, a weekly summary, a review-ready transition, or a safety follow-up that genuinely needs outreach.
 - Never send, draft, or narrate outbound delivery with tools. The platform will deliver the single user-facing message you return in structured output.
 - If there is no useful notification to send right now, choose skip.`,
     channelText,
