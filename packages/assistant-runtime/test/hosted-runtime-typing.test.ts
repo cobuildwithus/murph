@@ -294,6 +294,7 @@ describe("hosted runtime messaging activity helpers", () => {
     if (!activity) {
       throw new Error("Expected a Linq messaging activity handle.");
     }
+    expect(activity.ownsRuntimeActivity).toBe(true);
 
     expect(mocks.getAssistantChannelAdapter).toHaveBeenCalledWith("linq");
     expect(mocks.startLinqTypingIndicator).toHaveBeenCalledWith(
@@ -523,11 +524,12 @@ describe("hosted runtime messaging activity helpers", () => {
 
     const activity = await activityPromise;
     expect(activity).not.toBeNull();
+    expect(activity?.ownsRuntimeActivity).toBe(true);
     await activity?.stop();
     expect(stop).toHaveBeenCalledTimes(1);
   });
 
-  it("returns null when Linq typing is not confirmed before the timeout and stops the late handle", async () => {
+  it("returns a non-owning cleanup handle when Linq typing confirmation times out and only stops after final cleanup", async () => {
     vi.useFakeTimers();
     let resolveStart: ((value: { stop: ReturnType<typeof vi.fn> }) => void) | null = null;
     const stop = vi.fn(async () => {});
@@ -546,7 +548,10 @@ describe("hosted runtime messaging activity helpers", () => {
     });
 
     await vi.advanceTimersByTimeAsync(10);
-    await expect(activityPromise).resolves.toBeNull();
+    const activity = await activityPromise;
+    expect(activity).not.toBeNull();
+    expect(activity?.ownsRuntimeActivity).toBe(false);
+    const logCountAfterTimeout = mocks.emitHostedExecutionStructuredLog.mock.calls.length;
 
     requirePendingTypingResolver(resolveStart)({
       stop,
@@ -554,17 +559,49 @@ describe("hosted runtime messaging activity helpers", () => {
     await Promise.resolve();
     await Promise.resolve();
 
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledTimes(logCountAfterTimeout);
+    expect(stop).not.toHaveBeenCalled();
+    await activity?.stop();
     expect(stop).toHaveBeenCalledTimes(1);
-    await vi.waitFor(() => {
-      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-        expect.objectContaining({
-          component: "runner",
-          level: "warn",
-          message: "Hosted Linq typing indicator was stopped after a late start because ownership had already been declined.",
-          phase: "side-effects.draining",
-        }),
-      );
+    vi.useRealTimers();
+  });
+
+  it("does not block cleanup forever when a timed-out Linq start never settles", async () => {
+    vi.useFakeTimers();
+    mocks.startLinqTypingIndicator.mockImplementationOnce(() => new Promise(() => {}));
+
+    const activityPromise = startHostedRunMessagingActivity({
+      component: "runner",
+      events: [createDrainEvent(createLinqWake(), "014")],
+      run: null,
+      runtimeEnv: {
+        LINQ_API_TOKEN: "linq-token",
+      },
+      startTimeoutMs: 10,
     });
+
+    await vi.advanceTimersByTimeAsync(10);
+    const activity = await activityPromise;
+    expect(activity).not.toBeNull();
+    expect(activity?.ownsRuntimeActivity).toBe(false);
+
+    const stopPromise = activity?.stop();
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    await expect(stopPromise).resolves.toBeUndefined();
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "runner",
+        details: expect.objectContaining({
+          cleanupTimeoutMs: 2_000,
+          provider: "linq",
+          sourceSeq: "014",
+        }),
+        level: "warn",
+        message: "Hosted Linq typing indicator cleanup stopped waiting for a late start handle after the cleanup timeout.",
+        phase: "side-effects.draining",
+      }),
+    );
     vi.useRealTimers();
   });
 });

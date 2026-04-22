@@ -515,7 +515,7 @@ export class HostedUserRunner {
         currentBundleRef: this.resolveAcquiredRunInputSnapshotRef(input.acquired),
         events: resolved.events,
         primaryWake,
-        messagingActivityOwnedByExecutor: messagingActivity !== null,
+        messagingActivityOwnedByExecutor: messagingActivity?.ownsRuntimeActivity === true,
         run,
         runToken,
       });
@@ -621,7 +621,7 @@ export class HostedUserRunner {
         }
         const finalized = await this.finalizeAcquiredHostedRun({
           acquired: resumeFinalizeAcquire,
-          messagingActivityOwnedByExecutor: messagingActivity !== null,
+          messagingActivityOwnedByExecutor: messagingActivity?.ownsRuntimeActivity === true,
           onRuntimeDeliveryFinished: stopMessagingActivity,
           userId: input.userId,
         });

@@ -22,7 +22,10 @@ import {
   type TelegramFetchResponse,
   startTelegramTypingSession,
 } from '@murphai/operator-config/telegram-runtime'
-import { createTimeoutAbortController } from '@murphai/operator-config/http-retry'
+import {
+  createLinkedAbortSignal,
+  createTimeoutAbortController,
+} from '@murphai/operator-config/http-retry'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type {
   AssistantChannelActivityHandle,
@@ -204,23 +207,21 @@ export async function startLinqTypingIndicator(
     )
   }
 
-  await startLinqChatTypingIndicator(
-    {
-      chatId,
-    },
-    {
-      env,
-      fetchImplementation: dependencies.fetchImplementation,
-      signal: dependencies.signal,
-    },
-  )
-
-  const stopController = new AbortController()
-  const abortFromDependencySignal = () => stopController.abort()
-  if (dependencies.signal?.aborted) {
-    stopController.abort()
-  } else {
-    dependencies.signal?.addEventListener('abort', abortFromDependencySignal, { once: true })
+  const linkedStopSignal = createLinkedAbortSignal(dependencies.signal)
+  try {
+    await startLinqChatTypingIndicator(
+      {
+        chatId,
+      },
+      {
+        env,
+        fetchImplementation: dependencies.fetchImplementation,
+        signal: linkedStopSignal.signal,
+      },
+    )
+  } catch (error) {
+    linkedStopSignal.cleanup()
+    throw error
   }
 
   let refreshFailure: unknown = null
@@ -229,9 +230,9 @@ export async function startLinqTypingIndicator(
     env,
     fetchImplementation: dependencies.fetchImplementation,
     refreshMs: dependencies.refreshMs ?? LINQ_TYPING_REFRESH_MS,
-    signal: stopController.signal,
+    signal: linkedStopSignal.signal,
   }).catch((error) => {
-    if (!stopController.signal.aborted) {
+    if (!linkedStopSignal.signal.aborted) {
       refreshFailure = error
     }
   })
@@ -248,8 +249,8 @@ export async function startLinqTypingIndicator(
       }
 
       stopped = true
-      stopController.abort()
-      dependencies.signal?.removeEventListener('abort', abortFromDependencySignal)
+      linkedStopSignal.controller.abort()
+      linkedStopSignal.cleanup()
       await refreshLoop
       let stopFailure: unknown = null
       try {

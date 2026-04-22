@@ -110,6 +110,31 @@ export function createTimeoutAbortController(
   }
 }
 
+export function createLinkedAbortSignal(
+  upstream?: AbortSignal,
+): {
+  cleanup(): void
+  controller: AbortController
+  signal: AbortSignal
+} {
+  const controller = new AbortController()
+  const onAbort = () => controller.abort()
+
+  if (upstream?.aborted) {
+    controller.abort()
+  } else {
+    upstream?.addEventListener('abort', onAbort, { once: true })
+  }
+
+  return {
+    cleanup() {
+      upstream?.removeEventListener('abort', onAbort)
+    },
+    controller,
+    signal: controller.signal,
+  }
+}
+
 export function createAbortError(): Error {
   const error = new Error('Operation aborted.')
   error.name = 'AbortError'
