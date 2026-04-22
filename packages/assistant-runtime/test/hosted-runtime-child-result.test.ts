@@ -17,6 +17,9 @@ describe("hosted runtime child-result helpers", () => {
     const error = createHostedRuntimeChildError(
       {
         code: "HOSTED_ASSISTANT_CONFIG_REQUIRED",
+        details: {
+          assistantNotificationStage: "provider",
+        },
         message: "Hosted assistant config is required.",
         name: "HostedAssistantConfigurationError",
         stack: "child-stack",
@@ -29,6 +32,12 @@ describe("hosted runtime child-result helpers", () => {
     assert.equal(error.message, "Hosted assistant config is required.");
     assert.equal(error.stack, "child-stack");
     assert.equal(error.code, "HOSTED_ASSISTANT_CONFIG_REQUIRED");
+    assert.deepEqual(
+      (error as HostedAssistantConfigurationError & { details?: Record<string, unknown> | null }).details,
+      {
+        assistantNotificationStage: "provider",
+      },
+    );
   });
 
   it("defaults unknown hosted assistant configuration errors to invalid", () => {
@@ -91,6 +100,30 @@ describe("hosted runtime child-result helpers", () => {
     ].join("\n");
 
     assert.deepEqual(parseHostedRuntimeChildResult(output), payload);
+  });
+
+  it("preserves optional redacted child error details", () => {
+    const output = formatHostedRuntimeChildResult({
+      error: {
+        details: {
+          assistantNotificationProvider: "openai-compatible",
+        },
+        message: "child aborted",
+        name: "Error",
+      },
+      ok: false,
+    });
+
+    expect(parseHostedRuntimeChildResult(output)).toEqual({
+      error: {
+        details: {
+          assistantNotificationProvider: "openai-compatible",
+        },
+        message: "child aborted",
+        name: "Error",
+      },
+      ok: false,
+    });
   });
 
   it("fails closed when the child never emits a payload line", () => {

@@ -9,6 +9,7 @@ import {
   buildHostedExecutionSafeErrorDetails,
   deriveHostedExecutionErrorCode,
   emitHostedExecutionStructuredLog,
+  extractHostedAssistantNotificationRedactedDetails,
   readHostedExecutionSafeErrorName,
 } from "@murphai/hosted-execution";
 
@@ -111,6 +112,7 @@ export async function runHostedExecutionChild(
             && typeof error.code === "string"
               ? error.code
               : null,
+          details: extractHostedAssistantNotificationRedactedDetails(error),
           message: error instanceof Error ? error.message : String(error),
           name: error instanceof Error ? error.name : null,
           stack: error instanceof Error ? error.stack ?? null : null,

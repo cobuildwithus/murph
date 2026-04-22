@@ -9,6 +9,7 @@ import {
   buildHostedExecutionStructuredLogRecord,
   deriveHostedExecutionErrorCode,
   emitHostedExecutionStructuredLog,
+  extractHostedAssistantNotificationRedactedDetails,
   formatHostedExecutionLogMessage,
   isHostedAssistantDeliveryKind,
   isHostedExecutionRunLevel,
@@ -232,6 +233,49 @@ describe("hosted execution observability", () => {
       phase: "failed",
     });
     expect(record.details?.stackPreview).toEqual(expect.any(Array));
+  });
+
+  it("extracts a privacy-bounded assistant-notification detail subset from annotated errors", () => {
+    const error = Object.assign(new Error("provider failed"), {
+      details: {
+        assistantNotificationChannel: "linq",
+        assistantNotificationDeliveryKind: "thread",
+        assistantNotificationExplicitTargetPresent: false,
+        assistantNotificationIdentityIdPresent: true,
+        assistantNotificationLinqBaseUrlOrigin: "https://linq.example.test",
+        assistantNotificationLinqBaseUrlPath: "/v1",
+        assistantNotificationProvider: "openai-compatible",
+        assistantNotificationProviderBaseUrlOrigin: "https://gateway.example.test",
+        assistantNotificationProviderBaseUrlPath: "/v1/responses",
+        assistantNotificationProviderModel: "gpt-4.1-mini",
+        assistantNotificationRouteId: "route_primary",
+        assistantNotificationStage: "provider",
+        assistantNotificationThreadIdPresent: true,
+        assistantNotificationThreadIsDirect: true,
+        assistantNotificationTurnTrigger: "automation-cron",
+        assistantNotificationWorkingDirectoryPresent: false,
+        executionContextHosted: true,
+        prompt: "do not keep me",
+      },
+    });
+
+    expect(extractHostedAssistantNotificationRedactedDetails(error)).toEqual({
+      assistantNotificationChannel: "linq",
+      assistantNotificationDeliveryKind: "thread",
+      assistantNotificationExplicitTargetPresent: false,
+      assistantNotificationIdentityIdPresent: true,
+      assistantNotificationLinqBaseUrlConfigured: true,
+      assistantNotificationProvider: "openai-compatible",
+      assistantNotificationProviderBaseUrlConfigured: true,
+      assistantNotificationProviderModel: "gpt-4.1-mini",
+      assistantNotificationRouteId: "route_primary",
+      assistantNotificationStage: "provider",
+      assistantNotificationThreadIdPresent: true,
+      assistantNotificationThreadIsDirect: true,
+      assistantNotificationTurnTrigger: "automation-cron",
+      assistantNotificationWorkingDirectoryPresent: false,
+      executionContextHosted: true,
+    });
   });
 
   it("formats operator-facing log messages with redacted detail appended only once", () => {

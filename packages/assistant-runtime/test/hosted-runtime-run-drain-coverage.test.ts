@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  buildHostedExecutionAssistantNotificationRequestedWake,
   buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionDeviceSyncWake,
   buildHostedExecutionMemberActivatedWake,
@@ -235,6 +236,92 @@ describe("executeHostedRunDrainForCommit", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("threads redacted notification lifecycle logs into the committed runner result", async () => {
+    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: "evt_notification",
+      memberId: "member_123",
+      notification: {
+        instructions: "Send the update.",
+        route: {
+          actorId: "+15550002222",
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "thread_123",
+          },
+          identityId: "hbidx:phone:v1:test",
+          threadId: "thread_123",
+          threadIsDirect: true,
+        },
+      },
+      occurredAt: "2026-04-08T00:00:00.000Z",
+    });
+
+    mocks.executeHostedIngressEvent.mockResolvedValueOnce({
+      bootstrapResult: null,
+      conversationMetrics: null,
+      ingressLane: "assistant-notification",
+      redactedLogEntries: [
+        {
+          component: "runtime",
+          eventId: "evt_notification",
+          level: "warn",
+          message: "Hosted assistant notification failed and was skipped so the hosted run can continue.",
+          phase: "wake.running",
+          redacted: {
+            errorCode: "runtime_error",
+            notificationRouteChannel: "linq",
+            notificationRouteDeliveryKind: "thread",
+          },
+        },
+      ],
+      shareImportResult: null,
+      shareImportTitle: null,
+      vaultSyncImportResult: null,
+    });
+
+    const result = await executeHostedRunDrainForCommit({
+      executionContext: createExecutionContext(),
+      request: {
+        bundle: "incoming-bundle",
+        run: HOSTED_RUN_CONTEXT,
+        runDrain: {
+          acquiredAt: "2026-04-08T00:00:00.000Z",
+          events: [
+            {
+              ingressEventId: "ingress-notification",
+              seq: "24",
+              wake,
+            },
+          ],
+          inputCommittedSeq: "24",
+          inputCursorVersion: "4",
+          runId: "run_123",
+          triggerKind: "external_ingress",
+          userId: "member_123",
+        },
+      },
+      restored: createRestored(),
+      runtime: createRuntime(),
+      runtimeEnv: {},
+    });
+
+    expect(result.committedResult.result.redactedLogEntries).toEqual([
+      {
+        component: "runtime",
+        eventId: "evt_notification",
+        level: "warn",
+        message: "Hosted assistant notification failed and was skipped so the hosted run can continue.",
+        phase: "wake.running",
+        redacted: {
+          errorCode: "runtime_error",
+          notificationRouteChannel: "linq",
+          notificationRouteDeliveryKind: "thread",
+        },
+      },
+    ]);
   });
 
   it("drains repeated immediate assistant follow-up work before snapshotting", async () => {
