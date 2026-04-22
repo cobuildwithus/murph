@@ -2,7 +2,13 @@ import assert from "node:assert/strict";
 
 import { test } from "vitest";
 
-import { wearablesDayResultSchema } from "../src/commands/wearables.ts";
+import {
+  wearablesDayResultSchema,
+  wearablesDriftResultSchema,
+  wearablesLatestResultSchema,
+  wearablesMetricLatestResultSchema,
+  wearablesMetricTrendResultSchema,
+} from "../src/commands/wearables.ts";
 
 test("wearables day schema preserves fallback selection metadata", () => {
   const parsed = wearablesDayResultSchema.parse({
@@ -77,6 +83,114 @@ test("wearables day schema preserves fallback selection metadata", () => {
   assert.equal(parsed.summary?.sleep?.sessionMinutes.selection.fallbackFromMetric, "totalSleepMinutes");
 });
 
+test("additive wearables schemas stay compact and metric-aware", () => {
+  const latestParsed = wearablesLatestResultSchema.parse({
+    summary: {
+      activity: null,
+      bodyState: null,
+      highlights: ["No wearable summaries were available for the selected range."],
+      latestDate: null,
+      providers: [],
+      recovery: null,
+      sleep: null,
+      sourceHealth: [],
+    },
+    vault: "/tmp/example-vault",
+  });
+
+  const metricLatestParsed = wearablesMetricLatestResultSchema.parse({
+    latest: {
+      date: "2026-04-05",
+      resolvedMetric: resolvedMetric({
+        metric: "hrv",
+        selection: {
+          ...resolvedMetric().selection,
+          provider: "oura",
+          unit: "ms",
+          value: 48,
+        },
+      }),
+      unit: "ms",
+      value: 48,
+    },
+    metric: {
+      input: "resting-heart-rate",
+      resolved: "restingHeartRate",
+    },
+    vault: "/tmp/example-vault",
+  });
+
+  const metricTrendParsed = wearablesMetricTrendResultSchema.parse({
+    metric: {
+      input: "hrv",
+      resolved: "hrv",
+    },
+    trend: {
+      latest: {
+        date: "2026-04-05",
+        resolvedMetric: resolvedMetric({
+          metric: "hrv",
+          selection: {
+            ...resolvedMetric().selection,
+            provider: "oura",
+            unit: "ms",
+            value: 48,
+          },
+        }),
+      },
+      notes: ["HRV improved over the recent window."],
+      points: [
+        {
+          date: "2026-04-03",
+          resolvedMetric: resolvedMetric({
+            metric: "hrv",
+            selection: {
+              ...resolvedMetric().selection,
+              provider: "oura",
+              unit: "ms",
+              value: 42,
+            },
+          }),
+        },
+        {
+          date: "2026-04-05",
+          resolvedMetric: resolvedMetric({
+            metric: "hrv",
+            selection: {
+              ...resolvedMetric().selection,
+              provider: "oura",
+              unit: "ms",
+              value: 48,
+            },
+          }),
+        },
+      ],
+      windowDays: 7,
+    },
+    vault: "/tmp/example-vault",
+  });
+
+  const driftParsed = wearablesDriftResultSchema.parse({
+    drift: {
+      latestDate: "2026-04-05",
+      metrics: [
+        {
+          direction: "up",
+          metric: "hrv",
+          notes: ["HRV rose versus the baseline window."],
+        },
+      ],
+      summary: ["HRV improved meaningfully over the recent window."],
+    },
+    vault: "/tmp/example-vault",
+  });
+
+  assert.equal(latestParsed.summary?.highlights[0], "No wearable summaries were available for the selected range.");
+  assert.equal(metricLatestParsed.metric.resolved, "restingHeartRate");
+  assert.equal(metricTrendParsed.trend?.windowDays, 7);
+  assert.equal(driftParsed.drift?.metrics[0]?.metric, "hrv");
+});
+
 function resolvedMetric(
   overrides: Partial<{
     candidates: Array<Record<string, unknown>>;
@@ -111,7 +225,7 @@ function resolvedMetric(
       candidateCount: 1,
       conflictingProviders: [],
       exactDuplicateCount: 0,
-      level: "medium",
+      level: "medium" as const,
       reasons: [],
     },
     metric: "sleepTotalMinutes",
@@ -123,7 +237,7 @@ function resolvedMetric(
       provider: null,
       recordedAt: null,
       recordIds: [],
-      resolution: "none",
+      resolution: "none" as const,
       sourceFamily: null,
       sourceKind: null,
       title: null,

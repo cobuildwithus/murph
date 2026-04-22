@@ -73,6 +73,10 @@ import {
   wearablesActivityListResultSchema,
   wearablesBodyStateListResultSchema,
   wearablesDayResultSchema,
+  wearablesDriftResultSchema,
+  wearablesLatestResultSchema,
+  wearablesMetricLatestResultSchema,
+  wearablesMetricTrendResultSchema,
   wearablesRecoveryListResultSchema,
   wearablesSleepListResultSchema,
   wearablesSourcesListResultSchema,
@@ -227,6 +231,12 @@ function mergeDirectVaultServiceBindings(
   }
 
   return mergedBindings as DirectVaultServiceBindings
+}
+
+function assumeDirectVaultServiceBindings(
+  bindings: Readonly<Record<string, readonly string[]>>,
+): DirectVaultServiceBindings {
+  return bindings as DirectVaultServiceBindings
 }
 
 function buildHealthCommandManifestDescriptor(input: {
@@ -785,9 +795,24 @@ export const vaultCliCommandDescriptors = [
     rootCommandNames: ['wearables'],
     leafCommands: [
       {
+        path: ['wearables', 'latest'],
+        description: 'Show the compact latest normalized wearable bundle across sleep, recovery, activity, body-state, and source freshness.',
+        output: wearablesLatestResultSchema,
+      },
+      {
         path: ['wearables', 'day'],
         description: 'Show one semantic wearable day mirror with deduped sleep, activity, body-state, recovery, and source-confidence notes.',
         output: wearablesDayResultSchema,
+      },
+      {
+        path: ['wearables', 'metric', 'latest'],
+        description: 'Show the latest normalized value for one wearable metric key or alias.',
+        output: wearablesMetricLatestResultSchema,
+      },
+      {
+        path: ['wearables', 'metric', 'trend'],
+        description: 'Show a compact normalized trend window for one wearable metric key or alias.',
+        output: wearablesMetricTrendResultSchema,
       },
       {
         path: ['wearables', 'sleep', 'list'],
@@ -814,17 +839,26 @@ export const vaultCliCommandDescriptors = [
         description: 'List wearable source health, coverage, freshness, and evidence counts by provider.',
         output: wearablesSourcesListResultSchema,
       },
+      {
+        path: ['wearables', 'drift'],
+        description: 'Explain the biggest normalized wearable drift Murph sees across the current wearable surfaces.',
+        output: wearablesDriftResultSchema,
+      },
     ],
-    directVaultServiceBindings: {
+    directVaultServiceBindings: assumeDirectVaultServiceBindings({
       query: [
+        'showWearableLatest',
         'showWearableDay',
+        'showWearableMetricLatest',
+        'showWearableMetricTrend',
         'listWearableSleep',
         'listWearableActivity',
         'listWearableBodyState',
         'listWearableRecovery',
         'listWearableSources',
+        'showWearableDrift',
       ],
-    },
+    }),
     register({ cli, services }) {
       registerWearablesCommands(cli, services)
     },
