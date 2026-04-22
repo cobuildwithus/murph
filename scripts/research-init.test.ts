@@ -115,7 +115,6 @@ describe("research init scaffold", () => {
         "utf8",
       );
       expect(helperScript).toContain("pnpm review:gpt");
-      expect(helperScript).toContain("--no-zip");
       expect(helperScript).toContain("--send");
       expect(helperScript).toContain("--wait");
       expect(helperScript).toContain("murph-workspace");

@@ -476,7 +476,6 @@ cd "\${repo_dir}"
 
 set +e
 pnpm review:gpt \\
-  --no-zip \\
   --send \\
   --wait \\
   --format json \\
