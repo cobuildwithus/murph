@@ -1,21 +1,17 @@
-import { createGarminDeviceSyncProvider } from "../providers/garmin.ts";
-import { createOuraDeviceSyncProvider } from "../providers/oura.ts";
-import { createStravaDeviceSyncProvider } from "../providers/strava.ts";
-import { createWhoopDeviceSyncProvider } from "../providers/whoop.ts";
 import { createDeviceSyncRegistry } from "../registry.ts";
 
 import {
   configuredDeviceSyncProviderKeys,
-  listConfiguredDeviceSyncProviderNames,
-  readConfiguredDeviceSyncProviderConfigs,
-} from "./provider-configs.ts";
+  getConfiguredDeviceSyncProviderManifest,
+} from "./provider-manifests.ts";
+import { readConfiguredDeviceSyncProviderConfigs } from "./provider-configs.ts";
 
 import type {
   ConfiguredDeviceSyncProviderConfigByKey,
   ConfiguredDeviceSyncProviderConfigs,
   ConfiguredDeviceSyncProviderKey,
   DeviceSyncEnvSource,
-} from "./provider-configs.ts";
+} from "./provider-types.ts";
 import type { DeviceSyncProvider, DeviceSyncRegistry } from "../types.ts";
 
 export function createConfiguredDeviceSyncProviders(env: DeviceSyncEnvSource): DeviceSyncProvider[] {
@@ -37,10 +33,10 @@ export function createConfiguredDeviceSyncProvidersFromConfigs(
 ): DeviceSyncProvider[] {
   const providers: DeviceSyncProvider[] = [];
 
-  for (const provider of listConfiguredDeviceSyncProviderNames(configs)) {
+  for (const provider of configuredDeviceSyncProviderKeys) {
     const config = configs[provider];
 
-    if (!config) {
+    if (config === undefined) {
       continue;
     }
 
@@ -58,20 +54,13 @@ export function createConfiguredDeviceSyncRegistryFromConfigs(
   );
 }
 
-function createConfiguredDeviceSyncProviderFromConfig(
-  provider: ConfiguredDeviceSyncProviderKey,
-  config: ConfiguredDeviceSyncProviderConfigByKey[ConfiguredDeviceSyncProviderKey],
+function createConfiguredDeviceSyncProviderFromConfig<
+  TProvider extends ConfiguredDeviceSyncProviderKey,
+>(
+  provider: TProvider,
+  config: ConfiguredDeviceSyncProviderConfigByKey[TProvider],
 ): DeviceSyncProvider {
-  switch (provider) {
-    case "garmin":
-      return createGarminDeviceSyncProvider(config as ConfiguredDeviceSyncProviderConfigByKey["garmin"]);
-    case "oura":
-      return createOuraDeviceSyncProvider(config as ConfiguredDeviceSyncProviderConfigByKey["oura"]);
-    case "whoop":
-      return createWhoopDeviceSyncProvider(config as ConfiguredDeviceSyncProviderConfigByKey["whoop"]);
-    case "strava":
-      return createStravaDeviceSyncProvider(config as ConfiguredDeviceSyncProviderConfigByKey["strava"]);
-  }
+  return getConfiguredDeviceSyncProviderManifest(provider).createProvider(config);
 }
 
 export { configuredDeviceSyncProviderKeys };

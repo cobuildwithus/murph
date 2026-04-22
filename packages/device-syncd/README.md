@@ -69,6 +69,7 @@ Strava uses OAuth, polling, and optional app-global webhooks.
 Oura uses OAuth plus refresh tokens and works well in a polling-first mode, so the basic Murph setup does not require Oura webhooks. Once the operator configures the Oura client ID and secret, the end-user flow is just connect once and let scheduled sync keep the account fresh.
 
 The provider lifecycle metadata used here now comes from the shared `@murphai/importers/device-providers/provider-descriptors` surface, so callback paths, default scopes, webhook capabilities, sync windows, metric families, and source-priority hints stay aligned between connector code and snapshot normalization.
+The configured-provider assembly is now derived from one shared provider-manifest registry in `packages/device-syncd/src/config/provider-manifests.ts`, so env specs, config readers, provider factories, serializable hosted-runtime config, hosted wake hint shaping, and importer wiring all follow the same provider list.
 
 ## Adding another provider
 
@@ -76,7 +77,7 @@ The permanent provider path is:
 - add one shared descriptor in `@murphai/importers`
 - add one `packages/device-syncd/src/providers/<provider>.ts` transport module that owns auth, refresh, jobs, and any provider-owned webhook preflight/admin behavior
 - add one importer adapter in `packages/importers/src/device-providers/<provider>.ts`
-- register the provider once through the shared `@murphai/device-syncd/config` assembly path
+- register the provider once in `packages/device-syncd/src/config/provider-manifests.ts`, which now feeds the shared `@murphai/device-syncd/config` assembly path
 
 Hosted web should not need a second provider registry or a provider-specific
 Prisma table for a normal addition. Its Postgres device-sync models stay
@@ -84,7 +85,7 @@ provider-generic, and its route layer should keep using the shared
 `DeviceSyncPublicIngress` seam.
 
 Provider-readiness checkpoint:
-- a normal provider addition should stop at the descriptor, transport module, importer adapter, and one shared config/factory registration
+- a normal provider addition should stop at the descriptor, transport module, importer adapter, and one shared provider-manifest registration
 - generic hosted or local ingress should not gain provider-specific webhook secrets, provider-specific route branching, or provider-specific persistence tables
 - if a provider seems to need edits outside those seams, treat it as an architecture review instead of routine provider wiring
 

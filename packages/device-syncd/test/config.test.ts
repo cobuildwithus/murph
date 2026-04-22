@@ -18,9 +18,11 @@ import {
   parseConfiguredDeviceSyncRuntimeConfig,
   parseSerializableConfiguredDeviceSyncProviderConfigs,
   readConfiguredDeviceSyncRuntimeConfig,
+  readConfiguredGarminDeviceSyncProviderConfig,
   readConfiguredDeviceSyncProviderConfigs,
   readConfiguredOuraDeviceSyncProviderConfig,
   readConfiguredStravaDeviceSyncProviderConfig,
+  readConfiguredWhoopDeviceSyncProviderConfig,
 } from "../src/config.ts";
 import { computeRetryDelayMs } from "../src/shared.ts";
 import { createDeviceSyncEnv, requireValue } from "./helpers.ts";
@@ -767,6 +769,58 @@ test("readConfiguredOuraDeviceSyncProviderConfig rejects invalid integer overrid
       }),
     /OURA_BACKFILL_DAYS must be an integer/u,
   );
+});
+
+test("readConfiguredGarminDeviceSyncProviderConfig keeps optional Garmin overrides", () => {
+  const config = readConfiguredGarminDeviceSyncProviderConfig({
+    GARMIN_CLIENT_ID: "garmin-client-id",
+    GARMIN_CLIENT_SECRET: "garmin-client-secret",
+    GARMIN_API_BASE_URL: "https://apis.garmin.example.test",
+    GARMIN_AUTH_BASE_URL: "https://connect.garmin.example.test",
+    GARMIN_TOKEN_BASE_URL: "https://token.garmin.example.test",
+    GARMIN_BACKFILL_DAYS: "14",
+    GARMIN_RECONCILE_DAYS: "7",
+    GARMIN_RECONCILE_INTERVAL_MS: "3600000",
+    GARMIN_REQUEST_TIMEOUT_MS: "15000",
+  });
+
+  assert.deepEqual(config, {
+    apiBaseUrl: "https://apis.garmin.example.test",
+    authBaseUrl: "https://connect.garmin.example.test",
+    backfillDays: 14,
+    clientId: "garmin-client-id",
+    clientSecret: "garmin-client-secret",
+    reconcileDays: 7,
+    reconcileIntervalMs: 3_600_000,
+    requestTimeoutMs: 15_000,
+    tokenBaseUrl: "https://token.garmin.example.test",
+  });
+});
+
+test("readConfiguredWhoopDeviceSyncProviderConfig trims scopes and parses integer overrides", () => {
+  const config = readConfiguredWhoopDeviceSyncProviderConfig({
+    WHOOP_CLIENT_ID: "whoop-client-id",
+    WHOOP_CLIENT_SECRET: "whoop-client-secret",
+    WHOOP_BASE_URL: "https://api.whoop.example.test",
+    WHOOP_SCOPES: "read:profile, read:sleep, ",
+    WHOOP_BACKFILL_DAYS: "21",
+    WHOOP_RECONCILE_DAYS: "14",
+    WHOOP_RECONCILE_INTERVAL_MS: "7200000",
+    WHOOP_REQUEST_TIMEOUT_MS: "10000",
+    WHOOP_WEBHOOK_TIMESTAMP_TOLERANCE_MS: "300000",
+  });
+
+  assert.deepEqual(config, {
+    backfillDays: 21,
+    baseUrl: "https://api.whoop.example.test",
+    clientId: "whoop-client-id",
+    clientSecret: "whoop-client-secret",
+    reconcileDays: 14,
+    reconcileIntervalMs: 7_200_000,
+    requestTimeoutMs: 10_000,
+    scopes: ["read:profile", "read:sleep"],
+    webhookTimestampToleranceMs: 300_000,
+  });
 });
 
 test("readConfiguredStravaDeviceSyncProviderConfig trims scopes and keeps the webhook verify token", () => {
