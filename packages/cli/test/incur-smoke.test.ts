@@ -9,6 +9,9 @@ import { Cli, z } from 'incur'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { localParallelCliTest as test } from './local-parallel-test.js'
 import {
+  captureCommandDescriptions,
+} from '../src/commands/capture.ts'
+import {
   collectVaultCliDescriptorRootCommandNames,
   collectVaultCliDirectServiceBindings,
   vaultCliCommandDescriptors,
@@ -359,6 +362,45 @@ test('workout descriptor does not expose the removed workout measurement alias',
       (leafCommand) => leafCommand.path.join(' ').startsWith('workout measurement '),
     ),
     false,
+  )
+})
+
+test('capture descriptor exposes the add, show, list, and manifest leaves', () => {
+  const captureDescriptor = vaultCliCommandDescriptors.find(
+    (descriptor) => descriptor.id === 'capture',
+  )
+
+  if (
+    !captureDescriptor
+    || !('leafCommands' in captureDescriptor)
+    || !captureDescriptor.leafCommands
+  ) {
+    throw new Error('The capture command descriptor is missing its leaf commands.')
+  }
+
+  const descriptionsByPath = new Map(
+    captureDescriptor.leafCommands.map((leafCommand) => [
+      leafCommand.path.join(' '),
+      {
+        description: leafCommand.description,
+        hint: 'hint' in leafCommand ? leafCommand.hint : undefined,
+      },
+    ]),
+  )
+
+  assert.deepEqual([...descriptionsByPath.keys()], [
+    'capture add',
+    'capture show',
+    'capture list',
+    'capture manifest',
+  ])
+  assert.equal(descriptionsByPath.get('capture add')?.description, captureCommandDescriptions.add)
+  assert.equal(descriptionsByPath.get('capture add')?.hint, captureCommandDescriptions.addHint)
+  assert.equal(descriptionsByPath.get('capture show')?.description, captureCommandDescriptions.show)
+  assert.equal(descriptionsByPath.get('capture list')?.description, captureCommandDescriptions.list)
+  assert.equal(
+    descriptionsByPath.get('capture manifest')?.description,
+    captureCommandDescriptions.manifest,
   )
 })
 

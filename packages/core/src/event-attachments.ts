@@ -20,7 +20,7 @@ import { loadVault } from "./vault.ts";
 
 import type { DateInput } from "./types.ts";
 
-export type EventAttachmentOwnerKind = Extract<RawAssetOwnerKind, "document" | "meal" | "measurement" | "workout">;
+export type EventAttachmentOwnerKind = Extract<RawAssetOwnerKind, "capture" | "document" | "meal" | "measurement" | "workout">;
 
 export interface EventAttachmentSourceInput {
   role: string;

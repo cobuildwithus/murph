@@ -16,6 +16,10 @@ import type { VaultServices } from '@murphai/vault-usecases'
 import { registerAssistantCommands } from '@murphai/assistant-cli/commands/assistant'
 import { registerAuditCommands } from './commands/audit.js'
 import { registerAutomationCommands } from './commands/automation.js'
+import {
+  captureCommandDescriptions,
+  registerCaptureCommands,
+} from './commands/capture.js'
 import { registerDeviceCommands } from './commands/device.js'
 import { registerDocumentCommands } from './commands/document.js'
 import { registerEventCommands } from './commands/event.js'
@@ -313,6 +317,33 @@ export const vaultCliCommandDescriptors = [
     rootCommandNames: ['audit'],
     register({ cli, services }) {
       registerAuditCommands(cli, services)
+    },
+  },
+  {
+    id: 'capture',
+    bindingMode: 'none',
+    rootCommandNames: ['capture'],
+    leafCommands: [
+      {
+        path: ['capture', 'add'],
+        description: captureCommandDescriptions.add,
+        hint: captureCommandDescriptions.addHint,
+      },
+      {
+        path: ['capture', 'show'],
+        description: captureCommandDescriptions.show,
+      },
+      {
+        path: ['capture', 'list'],
+        description: captureCommandDescriptions.list,
+      },
+      {
+        path: ['capture', 'manifest'],
+        description: captureCommandDescriptions.manifest,
+      },
+    ],
+    register({ cli, services }) {
+      registerCaptureCommands(cli, services)
     },
   },
   {

@@ -704,6 +704,25 @@ describe('assistant CLI tool capability seam', () => {
       note: 'note',
       source: 'import',
     })
+    await writeVaultBinaryFile(
+      vaultRoot,
+      'raw/captures/2026/04/evt_01/attachments/1/left-forearm.jpg',
+      Buffer.from('capture-media'),
+    )
+    await executeTool(writeTools, 'vault.capture.add', {
+      collection: 'skin-check-2026-04',
+      tags: ['mole', 'dermatology'],
+      occurredAt: '2026-04-08T09:35:00Z',
+      source: 'manual',
+      captures: [
+        {
+          media: ['raw/captures/2026/04/evt_01/attachments/1/left-forearm.jpg'],
+          label: 'mole-left-forearm-1',
+          bodySite: 'Left forearm',
+          note: 'Small mole on the left forearm.',
+        },
+      ],
+    })
     await executeTool(writeTools, 'vault.meal.add', {
       photo: 'raw/inbox/captures/cap_123/attachments/1/photo.jpg',
       audio: 'raw/inbox/captures/cap_123/attachments/1/audio.m4a',
@@ -831,6 +850,25 @@ describe('assistant CLI tool capability seam', () => {
           sourceDetail: 'Recovered from the photo and note.',
         },
       },
+    })
+    expect(findCall(coreCalls, 'addCapture')).toMatchObject({
+      collection: 'skin-check-2026-04',
+      tags: ['mole', 'dermatology'],
+      occurredAt: '2026-04-08T09:35:00Z',
+      source: 'manual',
+      captures: [
+        {
+          media: [
+            path.join(
+              vaultRoot,
+              'raw/captures/2026/04/evt_01/attachments/1/left-forearm.jpg',
+            ),
+          ],
+          label: 'mole-left-forearm-1',
+          bodySite: 'Left forearm',
+          note: 'Small mole on the left forearm.',
+        },
+      ],
     })
     const mealAddCalls = coreCalls
       .filter((candidate) => candidate.name === 'addMeal')
@@ -1542,6 +1580,7 @@ function createVaultServicesStub(input: {
 
   const core = {
     addMeal: makeCoreMethod('addMeal'),
+    addCapture: makeCoreMethod('addCapture'),
     ensureJournal: makeCoreMethod('ensureJournal'),
     appendJournal: makeCoreMethod('appendJournal'),
     createExperiment: makeCoreMethod('createExperiment'),

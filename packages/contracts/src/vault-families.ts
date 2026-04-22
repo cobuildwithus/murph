@@ -52,6 +52,7 @@ export const INBOX_CAPTURE_LEDGER_DIRECTORY = "ledger/inbox-captures" as const;
 export const RAW_INBOX_DIRECTORY = "raw/inbox" as const;
 export const RAW_INTEGRATIONS_DIRECTORY = "raw/integrations" as const;
 export const RAW_ASSESSMENTS_DIRECTORY = "raw/assessments" as const;
+export const RAW_CAPTURES_DIRECTORY = "raw/captures" as const;
 export const RAW_DOCUMENTS_DIRECTORY = "raw/documents" as const;
 export const RAW_MEASUREMENTS_DIRECTORY = "raw/measurements" as const;
 export const RAW_MEALS_DIRECTORY = "raw/meals" as const;
@@ -83,6 +84,7 @@ export const VAULT_FAMILY_IDS = Object.freeze({
   audits: "audits",
   inboxCaptures: "inboxCaptures",
   rawAssessments: "rawAssessments",
+  rawCaptures: "rawCaptures",
   rawDocuments: "rawDocuments",
   rawInbox: "rawInbox",
   rawIntegrations: "rawIntegrations",
@@ -513,6 +515,14 @@ const vaultFamilyDescriptors = [
     querySource: "none",
   },
   {
+    id: VAULT_FAMILY_IDS.rawCaptures,
+    description: "Immutable raw media captures.",
+    owner: "core",
+    storageKind: "directory",
+    directory: RAW_CAPTURES_DIRECTORY,
+    querySource: "none",
+  },
+  {
     id: VAULT_FAMILY_IDS.rawDocuments,
     description: "Immutable raw document imports.",
     owner: "core",
@@ -788,6 +798,7 @@ export const VAULT_LAYOUT = Object.freeze({
   inboxCaptureLedgerDirectory: INBOX_CAPTURE_LEDGER_DIRECTORY,
   rawDirectory: RAW_DIRECTORY,
   rawAssessmentsDirectory: RAW_ASSESSMENTS_DIRECTORY,
+  rawCapturesDirectory: RAW_CAPTURES_DIRECTORY,
   rawDocumentsDirectory: RAW_DOCUMENTS_DIRECTORY,
   rawInboxDirectory: RAW_INBOX_DIRECTORY,
   rawIntegrationsDirectory: RAW_INTEGRATIONS_DIRECTORY,

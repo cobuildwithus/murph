@@ -39,6 +39,10 @@
       "types": "./dist/measurements.d.ts",
       "default": "./dist/measurements.js"
     },
+    "./captures": {
+      "types": "./dist/captures.d.ts",
+      "default": "./dist/captures.js"
+    },
     "./workouts": {
       "types": "./dist/workouts.d.ts",
       "default": "./dist/workouts.js"

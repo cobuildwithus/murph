@@ -69,6 +69,7 @@ export { loadVault } from "./vault.ts";
 export {
   addActivitySession,
   addBodyMeasurement,
+  addCapture,
   addMeasurement,
   addMeal,
   applyCanonicalWriteBatch,
@@ -216,6 +217,8 @@ export type {
   AddActivitySessionResult,
   AddBodyMeasurementInput,
   AddBodyMeasurementResult,
+  AddCaptureInput,
+  AddCaptureResult,
   AddMeasurementInput,
   AddMeasurementResult,
   EventDraftByKind,

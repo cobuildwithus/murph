@@ -64,6 +64,7 @@ export const VAULT_PATHS = Object.freeze({
   protocolsRoot: VAULT_LAYOUT.protocolsDirectory,
   providersRoot: VAULT_LAYOUT.providersDirectory,
   rawAssessmentsRoot: VAULT_LAYOUT.rawAssessmentsDirectory,
+  rawCapturesRoot: VAULT_LAYOUT.rawCapturesDirectory,
   rawDocumentsRoot: VAULT_LAYOUT.rawDocumentsDirectory,
   rawInboxRoot: VAULT_LAYOUT.rawInboxDirectory,
   rawIntegrationsRoot: VAULT_LAYOUT.rawIntegrationsDirectory,

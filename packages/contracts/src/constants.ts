@@ -109,6 +109,7 @@ export const ASSESSMENT_SOURCES = Object.freeze(["import", "manual", "derived"] 
 
 export const RAW_IMPORT_KINDS = Object.freeze([
   "assessment",
+  "capture",
   "device_batch",
   "document",
   "measurement_batch",
@@ -119,6 +120,7 @@ export const RAW_IMPORT_KINDS = Object.freeze([
 
 export const RAW_ASSET_OWNER_KINDS = Object.freeze([
   "assessment",
+  "capture",
   "device_batch",
   "document",
   "meal",

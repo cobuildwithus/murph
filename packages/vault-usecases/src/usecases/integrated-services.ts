@@ -102,6 +102,7 @@ import {
   unlinkJournalEventIds,
   unlinkJournalStreams,
 } from "./experiment-journal-vault.js"
+import { addCaptureRecord } from "./capture.js"
 import { toVaultCliError } from "./vault-usecase-helpers.js"
 
 interface IntegratedVaultServiceDependencies {
@@ -188,6 +189,41 @@ function createIntegratedCoreServices(
         ingredients: result.event.ingredients ?? null,
         nutrition: result.event.nutrition ?? null,
       }
+    },
+    async addCapture(input: CommandContext & {
+      media?: string[]
+      mediaPaths?: string[]
+      title?: string
+      note?: string
+      occurredAt?: string
+      source?: "manual" | "import" | "device" | "derived"
+      label?: string
+      bodySite?: string
+      collection?: string
+      tags?: string[]
+      relatedIds?: string[]
+      externalRef?: JsonObject
+      links?: unknown
+      timeZone?: string
+      inputFile?: string
+      captures?: Array<{
+        media?: string[]
+        mediaPaths?: string[]
+        title?: string
+        note?: string
+        occurredAt?: string
+        source?: "manual" | "import" | "device" | "derived"
+        label?: string
+        bodySite?: string
+        collection?: string
+        tags?: string[]
+        relatedIds?: string[]
+        externalRef?: JsonObject
+        links?: unknown
+        timeZone?: string
+      }>
+    }) {
+      return addCaptureRecord(input)
     },
     async createExperiment(input: CommandContext & {
       slug: string

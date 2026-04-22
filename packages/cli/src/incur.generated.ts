@@ -29,6 +29,10 @@ declare module 'incur' {
       'blood-test scaffold': { args: {}; options: { vault: string; requestId?: string } }
       'blood-test show': { args: { id: string }; options: { vault: string; requestId?: string } }
       'blood-test upsert': { args: {}; options: { vault: string; requestId?: string; input: string } }
+      'capture add': { args: {}; options: { vault: string; requestId?: string; input?: string; media?: string[]; label?: string; bodySite?: string; collection?: string; tag?: string[]; note?: string; title?: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived" } }
+      'capture list': { args: {}; options: { vault: string; requestId?: string; from?: string; to?: string; label?: string; bodySite?: string; collection?: string; tag?: string[]; limit: number } }
+      'capture manifest': { args: { id: string }; options: { vault: string; requestId?: string } }
+      'capture show': { args: { id: string }; options: { vault: string; requestId?: string } }
       'chat': { args: { prompt?: string }; options: { vault: string; requestId?: string; session?: string; alias?: string; channel?: string; identity?: string; participant?: string; thread?: string; provider?: "codex-cli" | "openai-compatible"; codexCommand?: string; model?: string; baseUrl?: string; apiKeyEnv?: string; providerName?: string; headersJson?: string; sandbox?: "read-only" | "workspace-write" | "danger-full-access"; approvalPolicy?: "untrusted" | "on-request" | "never"; profile?: string; oss?: boolean } }
       'condition list': { args: {}; options: { vault: string; requestId?: string; status?: string; limit: number } }
       'condition scaffold': { args: {}; options: { vault: string; requestId?: string } }

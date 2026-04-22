@@ -175,6 +175,9 @@ const eventUpsertVaultErrorMappings: Record<string, VaultErrorMapping> = {
   INVALID_INPUT: {
     code: 'contract_invalid',
   },
+  CAPTURE_MEDIA_MISSING: {
+    code: 'invalid_option',
+  },
 }
 
 const vaultMetadataVaultErrorMappings: Record<string, VaultErrorMapping> = {
