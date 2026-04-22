@@ -289,6 +289,9 @@ describe("hosted deploy automation helpers", () => {
     expect(workflow).toContain(
       "HOSTED_ASSISTANT_ZERO_DATA_RETENTION: ${{ vars.HOSTED_ASSISTANT_ZERO_DATA_RETENTION }}",
     );
+    expect(workflow).toContain(
+      "HOSTED_AI_USAGE_REPORTING_SECRET: ${{ secrets.HOSTED_AI_USAGE_REPORTING_SECRET }}",
+    );
     expect(workflow).toContain("VERCEL_AI_API_KEY: ${{ secrets.VERCEL_AI_API_KEY }}");
     expect(workflow).toContain('echo "- Container max instances: \\`${CF_CONTAINER_MAX_INSTANCES}\\`"');
   });
