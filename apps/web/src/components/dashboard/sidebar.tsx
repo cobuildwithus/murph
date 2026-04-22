@@ -10,6 +10,11 @@ import { cn } from "@/src/lib/utils";
 
 const navItems = [
   { label: "Overview", href: "/overview" },
+  {
+    label: "Biomarkers",
+    href: "/biomarkers/resting-heart-rate",
+    matchPrefix: "/biomarkers",
+  },
   { label: "Experiments", href: "/experiments" },
   { label: "Settings", href: "/settings" },
 ];
@@ -24,9 +29,10 @@ function NavList({
   return (
     <nav className="flex flex-col gap-1">
       {navItems.map((item) => {
+        const activePrefix = item.matchPrefix ?? item.href;
         const isActive =
           pathname === item.href ||
-          (item.href !== "/overview" && pathname.startsWith(item.href));
+          (activePrefix !== "/overview" && pathname.startsWith(activePrefix));
 
         return (
           <Link

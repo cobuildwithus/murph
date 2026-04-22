@@ -2,10 +2,10 @@ import type { ReactNode } from "react";
 
 import { DashboardShell } from "@/src/components/dashboard/dashboard-shell";
 
-export default function DashboardLayout({
+export default function BiomarkersLayout({
   children,
 }: {
   children: ReactNode;
 }) {
-  return <DashboardShell>{children}</DashboardShell>;
+  return <DashboardShell padded={false}>{children}</DashboardShell>;
 }
