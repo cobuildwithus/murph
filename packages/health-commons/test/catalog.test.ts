@@ -38,21 +38,23 @@ describe("health commons catalog", () => {
 
     expect(catalog.entities.map((entity) => entity.key)).toContain("experiment_family:infrared-sauna");
 
-    const norwegianProtocol = catalog.entities.find(
-      (entity) => entity.key === "protocol_variant:norwegian-4x4/norwegian-4x4",
+    const redLightProtocol = catalog.entities.find(
+      (entity) =>
+        entity.key ===
+        "protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed",
     );
-    expect(norwegianProtocol).toMatchObject({
+    expect(redLightProtocol).toMatchObject({
       experimentOnboarding: {
         planDefaults: {
-          testPlanId: "wearable-cardio-fitness-49d",
+          testPlanId: "sol-proxy-21d",
         },
         startIntent: {
-          intentSummary: "Explore Norwegian 4x4 Intervals",
+          intentSummary: "Explore Red-Light Glasses Before Bed",
         },
       },
       revision: {
         runSpecRevisionId:
-          "sha256:141c35d7b0af6e614b59aa9cb031a39f0580ffc283c066ac04dd0d1a2db789db",
+          "sha256:d0c97230a4778a71af198962b62631a66538db0ffade803aed94f6ced907f622",
       },
     });
 

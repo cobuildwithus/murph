@@ -1,6 +1,8 @@
-import type { HealthCommonsExperimentOnboarding } from "@murphai/contracts/health-commons";
+import type { HealthCommonsExperimentOnboarding } from "@murphai/contracts";
 
 export type ExperimentStatus = "active" | "paused" | "finished" | "stopped" | "upcoming";
+
+export type ExperimentOnboarding = HealthCommonsExperimentOnboarding;
 
 export interface Expert {
   initials: string;
@@ -177,7 +179,7 @@ export interface ExperimentProtocol {
   protocolTips: string[];
   protocolKeepInMind: string[];
   protocolLogFields: string[];
-  onboarding?: HealthCommonsExperimentOnboarding;
+  experimentOnboarding?: ExperimentOnboarding;
   whyItWorks: string;
   experts: Expert[];
   researchStats: ExperimentResearchStat[];

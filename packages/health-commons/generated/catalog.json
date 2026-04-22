@@ -1576,7 +1576,7 @@
       "schemaVersion": "murph.commons.artifact-manifest.v1"
     }
   ],
-  "catalogHash": "sha256:85d41ef2a139b6797a36b2db519eacce3e4fe7bd67c7f67404f75be305b97e05",
+  "catalogHash": "sha256:678d5ea1b978eca5d6960244e29b1297b4aef1d6811397af426edabcea6bc028",
   "changes": [
     {
       "affectedFields": [
@@ -3004,7 +3004,7 @@
         "Norwegian intervals",
         "CERG 4x4"
       ],
-      "body": "Norwegian 4x4 is the family for aerobic high-intensity interval sessions built around four 4-minute hard efforts.\n\nThe source graph now includes the healthy-adult protocol backbone, direct 4HIIT-vs-1HIIT variant evidence, early supervised cardiometabolic and cardiac-rehabilitation lineage trials, later mixed/null clinical trials, and safety guidance. This family stays separate from sprint-interval training, low-volume 1 x 4 HIIT, adolescent or disease-treatment protocols, athletic performance protocols, hypertension treatment, and cardiac-rehabilitation protocols because those variants differ in dose, risk, population, supervision, and interpretation.",
+      "body": "Norwegian 4x4 is the family for aerobic high-intensity interval sessions built around **four repeatable 4-minute hard efforts** with active recovery between them.\n\n## What belongs in this family\n\nUse this family when the protocol is fundamentally about the classic aerobic 4x4 shape: warm up, work hard for four minutes, recover actively, repeat four times, then cool down. The practical target is high aerobic effort—often framed around 85–95% of estimated HRmax by the later part of the intervals—not all-out sprinting from the first second.\n\n## What stays separate\n\nThis family intentionally stays separate from sprint-interval training, low-volume **1 x 4** protocols, athlete-only performance variants, pediatric or adolescent obesity-treatment programs, hypertension treatment, and supervised cardiac rehabilitation. Those studies are useful context, but they differ in dose, risk, supervision, population, or endpoint.\n\n## How to read the evidence\n\nThe corpus now separates four jobs:\n\n1. **Fitness support:** direct or close evidence that repeated aerobic intervals can improve VO2max or cardio-fitness.\n2. **Clinical context:** supervised disease-population studies that explain the lineage but should not be treated as home self-treatment evidence.\n3. **Safety boundaries:** guidelines, registries, and reviews that shape clinician-guidance and stop-condition language.\n4. **Adjacent variants:** nearby HIIT, sprint, autonomic, and metabolic-syndrome evidence that helps prevent overclaiming.\n\nFor an average health-conscious person, the clean claim is: Norwegian 4x4 is a plausible, testable way to try to improve cardio fitness over about six weeks, but the result depends on intensity fidelity, recovery, baseline fitness, and whether vigorous intervals are appropriate for the person.",
       "canonicalModality": "aerobic_4x4_intervals",
       "categories": [
         "cardiovascular",
@@ -3100,7 +3100,7 @@
         }
       },
       "revision": {
-        "pageRevisionId": "sha256:85440c5af9c8f416d36adf51eb905da01bc32bc9f88a6ff7f8fe2d54bb1310a9",
+        "pageRevisionId": "sha256:7ae97cf29c51169feb87498e83ac13d3f80e16f5941818811e9f418fa1e36712",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -4750,7 +4750,7 @@
       "attribution": {
         "ownerType": "murph"
       },
-      "body": "## Question this experiment answers\n\nAfter a stable baseline, does a short block of **Norwegian-style 4x4 aerobic intervals** make your fitness signal or recovery pattern improve enough to be worth repeating?\n\n## Simple version\n\nRun a 49-day experiment:\n\n- **7 baseline days**\n- **42 intervention days**\n- **2 interval sessions per week**\n- **12 target sessions**, with **8 sessions** as the minimum for a useful first read\n- each session: warm-up, **4 x 4 minutes hard**, 3-minute active recoveries, cooldown\n- target: reach about **85–95% of estimated HRmax** by the later part of each hard interval\n\nThat heart-rate target is not a sprint-start instruction. The goal is repeatable hard aerobic work that rises into the zone by the later part of each interval, not an all-out first minute.\n\nThis is not a permanent training identity. It is a bounded test of whether this interval dose fits your body and life.\n\n## What to watch\n\nThe main read is whether cardio fitness trends in a useful direction without making recovery worse. Session fidelity matters too: did the intervals reach the intended zone, did recovery stay reasonable, and did the protocol remain repeatable?\n\nHRV, sleep, soreness, symptoms, and morning blood pressure are context. They help explain the result, but they are not promised wins.\n\n## What to log every session\n\nAt minimum, log modality, completed intervals, interval peak heart rates, rough time in the target zone, perceived exertion for each interval, 1- and 2-minute heart-rate recovery, symptoms, sleep disruption, alcohol, illness, travel, unusually hard training, and major stress.\n\n## Stop conditions\n\nStop the session if chest pain or pressure, faintness, severe dizziness, confusion, palpitations, unusual shortness of breath, neurologic symptoms, or unsafe pain occurs.\n\nEnd the experiment and seek appropriate care if severe symptoms occur, symptoms repeat across sessions, or recovery feels unusually impaired for more than 24–48 hours.\n\n## Ask a clinician first\n\nAsk a clinician before trying this if you have known cardiovascular disease, exertional chest symptoms, unexplained shortness of breath, fainting or near-fainting, significant arrhythmia, heart failure, recent myocardial infarction or stroke, uncontrolled hypertension, possible myocarditis or pericarditis, pregnancy or early postpartum status, diabetes medication with hypoglycemia risk, severe asthma/COPD symptoms, long-COVID-like post-exertional malaise, or an injury that vigorous exercise could worsen.\n\nPeople taking beta blockers or other heart-rate-limiting medicines should not rely on generic HRmax zones.\n\n## What this does not test\n\nThis experiment does not test longevity, heart-failure treatment, coronary disease treatment, diabetes treatment, hypertension treatment, or superiority over every form of moderate continuous training.\n\nIt also does not promise HRV improvement, sleep improvement, fat loss, or a wearable VO2max increase. A useful signal, if it appears, is practical: sessions become more repeatable, heart-rate recovery or resting heart rate moves in a helpful direction, and the wearable cardio-fitness estimate trends favorably.\n\n## Evidence snapshot\n\nThe evidence supports 4x4 intervals as a plausible VO2max-oriented training dose, but it also includes small direct trials, early supervised clinical-lineage studies, larger mixed clinical comparisons, and safety caveats. Low-volume 1 x 4 HIIT, sprint intervals, athlete-performance plans, pediatric/adolescent cardiometabolic trials, hypertension treatment, and supervised cardiac-rehabilitation protocols belong nearby, not inside this exact experiment.",
+      "body": "## Question this experiment answers\n\nAfter a stable baseline, does a short block of **Norwegian-style 4x4 aerobic intervals** make your fitness signal or recovery pattern improve enough to be worth repeating?\n\n## Simple version\n\nRun a 49-day experiment:\n\n- **7 baseline days**\n- **42 intervention days**\n- **2 interval sessions per week**\n- **12 target sessions**, with **8 sessions** as the minimum for a useful first read\n- each session: warm-up, **4 x 4 minutes hard**, 3-minute active recoveries, cooldown\n- target: reach about **85–95% of estimated HRmax** by the later part of each hard interval\n\nThat heart-rate target is not a sprint-start instruction. The goal is repeatable hard aerobic work that rises into the zone by the later part of each interval, not an all-out first minute.\n\nThis is not a permanent training identity. It is a bounded test of whether this interval dose fits your body and life.\n\n## What to watch\n\nThe main read is whether cardio fitness trends in a useful direction without making recovery worse. Session fidelity matters too: did the intervals reach the intended zone, did recovery stay reasonable, and did the protocol remain repeatable?\n\nHRV, sleep, soreness, symptoms, and morning blood pressure are context. They help explain the result, but they are not promised wins.\n\n## What to log every session\n\nAt minimum, log modality, completed intervals, interval peak heart rates, rough time in the target zone, perceived exertion for each interval, 1- and 2-minute heart-rate recovery, symptoms, sleep disruption, alcohol, illness, travel, unusually hard training, and major stress.\n\n## Stop conditions\n\nStop the session if chest pain or pressure, faintness, severe dizziness, confusion, palpitations, unusual shortness of breath, neurologic symptoms, or unsafe pain occurs.\n\nEnd the experiment and seek appropriate care if severe symptoms occur, symptoms repeat across sessions, or recovery feels unusually impaired for more than 24–48 hours.\n\n## Ask a clinician first\n\nAsk a clinician before trying this if you have known cardiovascular disease, exertional chest symptoms, unexplained shortness of breath, fainting or near-fainting, significant arrhythmia, heart failure, recent myocardial infarction or stroke, uncontrolled hypertension, possible myocarditis or pericarditis, pregnancy or early postpartum status, diabetes medication with hypoglycemia risk, severe asthma/COPD symptoms, long-COVID-like post-exertional malaise, or an injury that vigorous exercise could worsen.\n\nPeople taking beta blockers or other heart-rate-limiting medicines should not rely on generic HRmax zones.\n\n## What this does not test\n\nThis experiment does not test longevity, heart-failure treatment, coronary disease treatment, diabetes treatment, hypertension treatment, or superiority over every form of moderate continuous training.\n\nIt also does not promise HRV improvement, sleep improvement, fat loss, or a wearable VO2max increase. A useful signal, if it appears, is practical: sessions become more repeatable, heart-rate recovery or resting heart rate moves in a helpful direction, and the wearable cardio-fitness estimate trends favorably.\n\n## Evidence snapshot\n\nThe strongest practical read is straightforward: Norwegian 4x4 is a plausible way to test whether hard aerobic intervals improve your cardio-fitness signal over about six weeks. The evidence is strongest for VO2max-style fitness outcomes when the intervals are actually performed at the intended intensity.\n\nThe corpus also contains studies that should **not** be overread. Supervised cardiac-rehabilitation, heart-failure, coronary-disease, hypertension, adolescent, metabolic-syndrome, athlete, sprint-interval, and low-volume HIIT studies help define boundaries, risks, and adjacent variants. They do not prove that an unscreened home user should treat disease, skip clinician guidance, or expect every wearable metric to improve.\n\nIn plain language: use the research cards to answer three questions before starting—does this source support the 4x4 fitness idea, does it merely provide clinical or safety context, and does it describe a different protocol that should stay separate?",
       "categories": [
         "cardiovascular",
         "exercise",
@@ -5377,7 +5377,7 @@
         }
       },
       "researchLandscape": {
-        "bottomLine": "Best read as a VO2max-oriented fitness protocol with explicit safety and recovery boundaries, not a general disease-treatment claim.",
+        "bottomLine": "Best read as a bounded VO2max/cardio-fitness experiment with explicit safety and recovery boundaries, not as a disease-treatment plan or a guarantee that a wearable score will move.",
         "confidenceLabel": "moderate",
         "groups": [
           {
@@ -5394,7 +5394,7 @@
               "source_artifact:pmid-23988787"
             ],
             "stance": "supports",
-            "summary": "The direct and close-family evidence supports Norwegian 4x4 as a cardiorespiratory-fitness experiment, especially for VO2max. The key practical caveat is dose fidelity: the source card should ask whether the intervals actually reached the intended hard aerobic zone."
+            "summary": "The direct and close-family evidence supports Norwegian 4x4 as a cardiorespiratory-fitness experiment, especially for VO2max. For users, the make-or-break detail is fidelity: did each interval build into the intended hard aerobic zone without turning into unsafe sprinting or unrecoverable strain?"
           },
           {
             "id": "clinical-context-mixed-superiority",
@@ -5413,7 +5413,7 @@
               "source_artifact:pmid-28385556"
             ],
             "stance": "mixed",
-            "summary": "Early supervised clinical-lineage studies often favored interval training, but larger coronary-disease and heart-failure trials did not consistently confirm superiority over moderate training or guideline advice. This category keeps the claim honest: worth testing for fitness, not always better and not self-treatment evidence."
+            "summary": "Early supervised clinical-lineage studies often favored interval training, but larger coronary-disease and heart-failure trials did not consistently confirm superiority over moderate training or guideline advice. This group keeps the claim honest: useful lineage, not proof that home 4x4 treats cardiovascular disease or always beats moderate cardio."
           },
           {
             "id": "safety-boundary",
@@ -5427,7 +5427,7 @@
               "source_artifact:pmid-33239350"
             ],
             "stance": "safety_boundary",
-            "summary": "Safety evidence is mostly about screened, supervised, or guideline-managed exercise. Serious events appear uncommon in those settings, but the evidence does not make unsupervised vigorous intervals risk-free, especially for people with cardiovascular symptoms, disease, medication, recent infection, or pregnancy/postpartum context."
+            "summary": "Safety evidence is mostly about screened, supervised, or guideline-managed exercise. Serious events appear uncommon in those settings, but that does not make unsupervised vigorous intervals risk-free—especially with cardiovascular symptoms, known disease, heart-rate-limiting medication, recent infection, pregnancy/postpartum status, or post-exertional malaise."
           },
           {
             "id": "adjacent-variants-and-recovery-context",
@@ -5440,11 +5440,11 @@
               "source_artifact:pmid-37608507"
             ],
             "stance": "context_only",
-            "summary": "Low-volume HIIT, sprint-interval comparisons, athlete studies, metabolic-syndrome syntheses, and autonomic-control reviews help separate neighboring protocols and secondary signals. They are useful context, but they should not be counted as direct proof that this exact 4x4 recipe will move a user's wearable metrics."
+            "summary": "Low-volume HIIT, sprint-interval comparisons, athlete studies, metabolic-syndrome syntheses, and autonomic-control reviews help separate neighboring protocols and secondary signals. They are useful context for dose selection and recovery interpretation, but they are not direct proof that this exact 4x4 recipe will move a user's wearable metrics."
           }
         ],
-        "mainCaveat": "Supervised clinical and disease-population studies are mixed, so they should calibrate safety and population fit instead of proving home superiority over moderate cardio.",
-        "primaryClaim": "The strongest support is for improving lab VO2max or wearable cardio-fitness when the 4x4 intensity target is actually reached."
+        "mainCaveat": "Clinical and disease-population studies are supervised and mixed; use them to set boundaries, not to claim that unsupervised 4x4 is always safer, better, or more effective than moderate cardio.",
+        "primaryClaim": "The strongest support is for improving lab-measured VO2max, and secondarily wearable cardio-fitness estimates, when the intervals actually reach a hard aerobic zone and recovery remains tolerable."
       },
       "revision": {
         "pageRevisionId": "sha256:b7578fe31aff836656eaa08479accd1c909113caaa6bc78df407d629d233a4b7",
@@ -5730,6 +5730,215 @@
         "partner_child_pet_sleep_disruption"
       ],
       "entityType": "protocol_variant",
+      "experimentOnboarding": {
+        "assistantPolicy": {
+          "askBeforeCreatingAutomations": true,
+          "confirmationPrompt": "Show the safety outcome, bedtime anchor, wear-window target, lens-confidence choice, logging expectations, stop conditions, and reminder policy before creating the active experiment or any automations.",
+          "maxSetupQuestionsPerTurn": 2,
+          "missedLogFollowup": "opt_in_only",
+          "missedLogFollowupCopy": "Did you end up wearing the glasses before bed last night? Totally fine either way, I just want the experiment record to be accurate.",
+          "reminderOptions": [
+            "none",
+            "pre_window",
+            "pre_window_plus_next_morning_missing_log_check"
+          ]
+        },
+        "contextReview": {
+          "notes": [
+            "Prefer recent wearable sleep data when it exists, but explain that the experiment can still run with subjective sleep-onset notes when wearables are missing or noisy.",
+            "Do not re-ask stable context the vault already answers unless it changes safety, logistics, measurement fidelity, or user consent."
+          ],
+          "vaultChecks": [
+            {
+              "id": "active_experiments",
+              "label": "Active experiments",
+              "readHints": [
+                "experiment list --status active"
+              ],
+              "reason": "Avoid stacking another meaningful experiment on top of an active one unless the user explicitly chooses weaker attribution."
+            },
+            {
+              "freshnessDays": 14,
+              "id": "wearable_sleep_baseline",
+              "label": "Wearable sleep baseline",
+              "readHints": [
+                "wearables sources list",
+                "wearables day"
+              ],
+              "reason": "Check whether sleep-onset, sleep-efficiency, HRV, or resting-heart-rate trends are available during the baseline and intervention windows."
+            },
+            {
+              "freshnessDays": 30,
+              "id": "sleep_schedule_and_evening_context",
+              "label": "Sleep schedule and evening light context",
+              "readHints": [
+                "memory show",
+                "search query \"bedtime evening light screens sleep schedule room light\"",
+                "journal show"
+              ],
+              "reason": "Understand usual bedtime, screen use, room-light habits, and whether the user already has a stable evening routine that makes this experiment measurable."
+            },
+            {
+              "freshnessDays": 90,
+              "id": "eye_mood_and_medication_context",
+              "label": "Eye, mood, and medication context",
+              "readHints": [
+                "memory show",
+                "search query \"migraine photosensitivity eye surgery eye disease bipolar mania insomnia delayed sleep phase shift work melatonin light therapy pregnancy postpartum medication\""
+              ],
+              "reason": "Screen for eye or light sensitivity, mood or circadian-risk context, pregnancy or postpartum context, melatonin or timed-light therapy, and other reasons Murph should not frame this as a simple unsupervised self-experiment."
+            }
+          ]
+        },
+        "logging": {
+          "confounders": [
+            "screen_use_last_2h",
+            "room_light_brightness_last_2h",
+            "caffeine_after_noon",
+            "alcohol_last_24h",
+            "hard_training_last_24h",
+            "late_exercise",
+            "travel_or_timezone_shift",
+            "illness_or_fever",
+            "unusual_stress",
+            "new_supplement_or_medication_change"
+          ],
+          "sessionFields": [
+            "glasses_on_time",
+            "glasses_off_time",
+            "intended_bedtime",
+            "actual_bedtime",
+            "estimated_time_to_fall_asleep_minutes",
+            "felt_less_wired_before_bed",
+            "headache_or_visual_discomfort",
+            "mood_change"
+          ]
+        },
+        "planDefaults": {
+          "baselineDays": 7,
+          "firstSessionGuidance": "Keep the first night simple. Wear the glasses during the usual pre-bed routine and do not add another new sleep intervention at the same time.",
+          "interventionDays": 14,
+          "minimumUsefulSessions": 10,
+          "sessionsPerWeek": 7,
+          "targetSessions": 12,
+          "testPlanId": "sol-proxy-21d"
+        },
+        "safetyScreen": {
+          "cautionLevel": "moderate",
+          "dispositionIfAnyPositive": "clinician_guidance_before_unsupervised_start",
+          "mode": "ask_compact_then_expand_if_positive",
+          "mustAsk": [
+            {
+              "id": "eye_or_light_sensitivity",
+              "prompt": "eye disease, recent eye surgery, migraine or photosensitivity, epilepsy triggered by visual stimuli, or a history of tinted-lens discomfort"
+            },
+            {
+              "id": "mood_or_sleep_phase_risk",
+              "prompt": "bipolar disorder, recent mania or hypomania, severe insomnia, delayed sleep phase, shift-work sleep disruption, or another reason changing evening light exposure could destabilize sleep or mood"
+            },
+            {
+              "id": "safety_critical_evening_tasks",
+              "prompt": "needing to drive, cycle, cook with visual hazards, use stairs or tools, or do color-critical evening work while the glasses are on"
+            }
+          ],
+          "notes": [
+            "A positive or uncertain screen is not a diagnosis. It means Murph should not set this up as an unsupervised bedtime experiment without a lower-burden alternative or clinician guidance."
+          ],
+          "stopIf": {
+            "inheritFromProtocolSafety": true
+          }
+        },
+        "schemaVersion": "murph.commons.experiment-onboarding.v1",
+        "setupSlots": [
+          {
+            "askPolicy": "ask_if_unknown",
+            "id": "glasses_available",
+            "label": "Glasses available",
+            "purpose": "logistics",
+            "question": "Do you already have amber, red, or brown blue-light-filtering glasses you can wear before bed?",
+            "required": true,
+            "valueType": "boolean",
+            "writePath": "onboarding.answers.glasses_available"
+          },
+          {
+            "askPolicy": "ask_if_unknown",
+            "id": "lens_filter_confidence",
+            "label": "Lens filter confidence",
+            "options": [
+              "published_specs",
+              "visibly_dark",
+              "unsure"
+            ],
+            "purpose": "measurement_fidelity",
+            "question": "How confident are you that the lenses strongly filter blue and green light: published specs, visibly dark amber or red, or unsure?",
+            "required": true,
+            "valueType": "enum",
+            "writePath": "runPlan.lensFilterConfidence"
+          },
+          {
+            "askPolicy": "ask_if_unknown",
+            "constraints": {
+              "preferredMinutes": 120,
+              "targetMinutes": 90
+            },
+            "id": "wear_window",
+            "label": "Wear window before bed",
+            "options": [
+              "ninety_minutes",
+              "one_hundred_twenty_minutes",
+              "shorter_or_inconsistent"
+            ],
+            "purpose": "logistics",
+            "question": "Can you realistically wear them for the last 90 to 120 minutes before bed on experiment nights?",
+            "required": true,
+            "valueType": "enum",
+            "writePath": "runPlan.wearWindow"
+          },
+          {
+            "askPolicy": "ask_if_unknown_or_stale",
+            "id": "bedtime_anchor",
+            "label": "Bedtime anchor",
+            "purpose": "logistics",
+            "question": "What bedtime should Murph anchor the glasses reminder to?",
+            "required": true,
+            "valueType": "local_time",
+            "writePath": "runPlan.bedtimeAnchor"
+          },
+          {
+            "askPolicy": "ask_if_unknown",
+            "id": "evening_light_stability",
+            "label": "Evening light stability",
+            "options": [
+              "keep_existing_habits_stable",
+              "also_reduce_screens_or_room_light"
+            ],
+            "purpose": "confounder_control",
+            "question": "Should we keep your current evening screen and room-light habits stable rather than changing them during the same test?",
+            "required": false,
+            "valueType": "enum",
+            "writePath": "runPlan.eveningLightPolicy"
+          },
+          {
+            "askPolicy": "ask_at_confirmation",
+            "id": "reminder_policy",
+            "label": "Reminder policy",
+            "options": [
+              "none",
+              "pre_window",
+              "pre_window_plus_next_morning_missing_log_check"
+            ],
+            "purpose": "assistant_support",
+            "question": "Do you want a reminder before the wear window, and if nothing is logged by the next morning should Murph ask once or leave it alone?",
+            "required": true,
+            "valueType": "reminder_policy",
+            "writePath": "assistantSupport.reminderPolicy"
+          }
+        ],
+        "startIntent": {
+          "displayPrompt": "Hey Murph, I want to explore wearing red-light glasses before bed.",
+          "intentSummary": "Explore Red-Light Glasses Before Bed"
+        }
+      },
       "key": "protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed",
       "lensSpec": {
         "avoidAsPrimaryIntervention": "Clear office/computer lenses with weak blue-light filtering and no spectral data.",
@@ -6143,9 +6352,9 @@
         "primaryClaim": "High-filtering amber, red, or brown glasses may help some users feel less wired or fall asleep more easily when evening melanopic exposure is high."
       },
       "revision": {
-        "pageRevisionId": "sha256:7c6b9a598f86d758cf6dca1fc8f479facd8ba9fd6bcc8de8df27f3c3815cbf69",
+        "pageRevisionId": "sha256:e76d954511b22c9267f508de0668c8f20d39697ca92483e0e1b5baa03bce4678",
         "recipeHash": "sha256:d00da6997c366d5a8c8d9a2b46fc25395adb257a5ef0c60507873cc2ddb192e6",
-        "runSpecRevisionId": "sha256:7ed5f1fb13d305ec23b75167515715f9616807f17700a75c3400215d8486e5b8"
+        "runSpecRevisionId": "sha256:d0c97230a4778a71af198962b62631a66538db0ffade803aed94f6ced907f622"
       },
       "safety": {
         "avoidOrGetClinicianGuidance": [
@@ -7045,7 +7254,7 @@
       "aliases": [
         "doi-10.3390-ijerph17145103"
       ],
-      "body": "This source is included for **Wearable or testable signals**.\n\n**Why it matters:** Acute implementation source showing how heart rate behaves during a 4x4 session and why target-zone fidelity needs to be logged.\n\n**Findings:** The study tracked heart-rate behavior during one 4x4 cycling session. Participants spent most of the protocol in the intended high-intensity heart-rate range, and later intervals reached target intensity more reliably than the first. For Murph, the main finding is that a 4x4 session should be judged by time in zone, not just by completing four intervals.\n\n**Protocol takeaway:** Use this source only within its `claimUse: supports-protocol` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
+      "body": "This source is included for **Wearable or testable signals**.\n\n## Quick read\n\n- **Source type:** Acute implementation physiology study (2020).\n- **People studied or addressed:** Healthy active adults (39 participants).\n- **Role in Murph:** direct or close support for the cardio-fitness claim; supports evidence; useful for measurement and logging, not for efficacy proof.\n- **Most relevant Murph signals:** estimated VO2max / cardio-fitness proxy, session heart-rate fidelity, heart-rate recovery, symptoms and adherence.\n\n## Why it matters for Norwegian 4x4\n\nAcute implementation source showing how heart rate behaves during a 4x4 session and why target-zone fidelity needs to be logged.\n\n## What it found\n\n**Findings:** The study tracked heart-rate behavior during one 4x4 cycling session. Participants spent most of the protocol in the intended high-intensity heart-rate range, and later intervals reached target intensity more reliably than the first. For Murph, the main finding is that a 4x4 session should be judged by time in zone, not just by completing four intervals.\n\n## How Murph should use it\n\nLog interval heart-rate peaks and time near target so the experiment knows whether the intended dose happened.\n\nUse to judge session fidelity by heart-rate-zone behavior and repeatability, not merely by whether four intervals were completed.\n\n## Important limits\n\nSingle-session physiology is implementation evidence, not long-term efficacy evidence.\n\nThe safe interpretation is narrower than “4x4 is always better.” Keep the population, supervision level, comparator, and exact interval dose visible before applying this source to a home wearable experiment.\n\n## Plain-language takeaway\n\nFor a generally healthy user, this belongs in the evidence pile that makes a 6-week 4x4 fitness test plausible, as long as the session is actually hard enough and recovery stays reasonable.",
       "categories": [
         "norwegian-4x4",
         "hiit",
@@ -7082,7 +7291,7 @@
           "stance": "supports"
         }
       ],
-      "protocolTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol.",
+      "protocolTakeaway": "Use to judge session fidelity by heart-rate-zone behavior and repeatability, not merely by whether four intervals were completed.",
       "quality": "usable",
       "relations": [
         {
@@ -7106,7 +7315,7 @@
         "populationLabel": "Healthy active adults"
       },
       "revision": {
-        "pageRevisionId": "sha256:971d925ce95d825dde7568e40796514c472d07c3003ac3911aff48c206531515",
+        "pageRevisionId": "sha256:d1a4cb87eedc3d5d7a404286504cbce64ca14152ba453f7b62bd5f758c116cd5",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -7123,7 +7332,7 @@
         "year": 2020
       },
       "status": "draft",
-      "studyDesign": "See source metadata and bibliography for exact design.",
+      "studyDesign": "Acute implementation physiology study",
       "summary": "Acute implementation source showing how heart rate behaves during a 4x4 session and why target-zone fidelity needs to be logged.",
       "title": "Characterizing the heart rate response to the 4 × 4 interval exercise protocol",
       "whyItMatters": "Acute implementation source showing how heart rate behaves during a 4x4 session and why target-zone fidelity needs to be logged."
@@ -7653,7 +7862,7 @@
       "aliases": [
         "ntnu-cerg-norwegian-4x4"
       ],
-      "body": "This source is included for **Protocol dose and design**.\n\n**Why it matters:** Public-facing source for the commonly cited Norwegian 4x4 session structure.\n\n**Protocol takeaway:** Use this source only within its `claimUse: supports-protocol` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
+      "body": "This source is included for **Protocol dose and design**.\n\n## Quick read\n\n- **Source type:** Public protocol guidance (2024).\n- **People studied or addressed:** Public-facing exercise guidance.\n- **Role in Murph:** direct or close support for the cardio-fitness claim; supports evidence; directly about the protocol dose or a very close implementation detail.\n- **Most relevant Murph signals:** estimated VO2max / cardio-fitness proxy, session heart-rate fidelity, heart-rate recovery, symptoms and adherence.\n\n## Why it matters for Norwegian 4x4\n\nPublic-facing source for the commonly cited Norwegian 4x4 session structure.\n\n## What it found\n\n**Findings:** Defines the commonly cited Norwegian 4x4 dose: warm up, four 4-minute hard intervals, active recoveries, and cooldown.\n\n## How Murph should use it\n\nUse this as the recipe anchor for the Murph protocol, not as outcome evidence.\n\nUse as the recipe anchor for warm-up, four 4-minute hard intervals, 3-minute active recoveries, and cooldown; do not read it as outcome or safety proof.\n\n## Important limits\n\nPublic protocol guidance does not estimate benefit size or safety for a specific user.\n\nThe safe interpretation is narrower than “4x4 is always better.” Keep the population, supervision level, comparator, and exact interval dose visible before applying this source to a home wearable experiment.\n\n## Plain-language takeaway\n\nFor a generally healthy user, this belongs in the evidence pile that makes a 6-week 4x4 fitness test plausible, as long as the session is actually hard enough and recovery stays reasonable.",
       "categories": [
         "norwegian-4x4",
         "hiit",
@@ -7686,7 +7895,7 @@
           "stance": "supports"
         }
       ],
-      "protocolTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol.",
+      "protocolTakeaway": "Use as the recipe anchor for warm-up, four 4-minute hard intervals, 3-minute active recoveries, and cooldown; do not read it as outcome or safety proof.",
       "quality": "usable",
       "relations": [
         {
@@ -7706,7 +7915,7 @@
         "populationLabel": "Public-facing exercise guidance"
       },
       "revision": {
-        "pageRevisionId": "sha256:28fe1234a69fcb7ac42e191e543ac00b093f0a3f5ef7a8429a08ac3469d05bad",
+        "pageRevisionId": "sha256:d76fb193d09f53e0870411815271735e4d17333e1f7136f0d7ba0ed038d7839d",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -7722,7 +7931,7 @@
         "year": 2024
       },
       "status": "draft",
-      "studyDesign": "See source metadata and bibliography for exact design.",
+      "studyDesign": "Public protocol guidance",
       "summary": "Public-facing source for the commonly cited Norwegian 4x4 session structure.",
       "title": "CERG's 4x4 interval training advice",
       "whyItMatters": "Public-facing source for the commonly cited Norwegian 4x4 session structure."
@@ -7885,7 +8094,7 @@
       "aliases": [
         "pmid-15179103"
       ],
-      "body": "This source is included for **Clinical lineage and population mismatch**.\n\n**Findings:** The trial reported that supervised high-intensity aerobic interval exercise improved aerobic capacity more than moderate exercise in stable coronary artery disease patients. Because the population was screened and clinically supervised, the finding belongs in the clinical-lineage evidence rather than the ordinary unsupervised wellness claim base.\n\n**Why it matters:** Adds the early CAD 4x4-lineage trial so positive disease-treatment data is visible without being mistaken for unscreened self-experiment evidence.\n\n**Protocol takeaway:** Use as clinical lineage and population-mismatch context only; do not use it as direct support for unscreened users self-treating coronary disease.",
+      "body": "This source is included for **Clinical lineage and population mismatch**.\n\n## Quick read\n\n- **Source type:** Small supervised coronary artery disease intensity-comparison trial (2004).\n- **People studied or addressed:** Stable coronary artery disease patients (21 participants).\n- **Role in Murph:** clinical context and overclaim control; mixed evidence; screened or supervised clinical exercise, not unsupervised home training.\n- **Most relevant Murph signals:** estimated VO2max / cardio-fitness proxy, clinician-supervised intensity fidelity, symptoms and adverse events.\n\n## Why it matters for Norwegian 4x4\n\nAdds the early CAD 4x4-lineage trial so positive disease-treatment data is visible without being mistaken for unscreened self-experiment evidence.\n\n## What it found\n\n**Findings:** The trial reported that supervised high-intensity aerobic interval exercise improved aerobic capacity more than moderate exercise in stable coronary artery disease patients. Because the population was screened and clinically supervised, the finding belongs in the clinical-lineage evidence rather than the ordinary unsupervised wellness claim base.\n\n## How Murph should use it\n\nSupports the clinical lineage of 4x4-style training while staying population-bounded.\n\nUse as clinical lineage and population-mismatch context only; do not use it as direct support for unscreened users self-treating coronary disease.\n\n## Important limits\n\nCoronary disease exercise should not be self-prescribed from this trial.\n\nThe safe interpretation is narrower than “4x4 is always better.” Keep the population, supervision level, comparator, and exact interval dose visible before applying this source to a home wearable experiment.\n\n## Plain-language takeaway\n\nThis helps explain where the 4x4 idea came from in supervised clinical exercise, but stable coronary artery disease patients are not the same as unscreened wellness users.",
       "categories": [
         "norwegian-4x4",
         "hiit",
@@ -7948,7 +8157,7 @@
         "populationLabel": "Stable coronary artery disease patients"
       },
       "revision": {
-        "pageRevisionId": "sha256:606249f4f75c2e915454799aae454467a783425e10841dbf1ccbbedb364076e4",
+        "pageRevisionId": "sha256:e5bc1aa12619d4699c04dfa1d55c363f94ffaa666846c9a88d74a2b7e50d48fe",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -7966,7 +8175,7 @@
         "year": 2004
       },
       "status": "draft",
-      "studyDesign": "See source metadata and bibliography for exact design.",
+      "studyDesign": "Small supervised coronary artery disease intensity-comparison trial",
       "summary": "Early supervised coronary-artery-disease interval-training RCT that belongs in the clinical lineage, not the unsupervised wellness claim base.",
       "title": "High intensity aerobic interval exercise is superior to moderate intensity exercise for increasing aerobic capacity in patients with coronary artery disease",
       "whyItMatters": "Adds the early CAD 4x4-lineage trial so positive disease-treatment data is visible without being mistaken for unscreened self-experiment evidence."
@@ -8320,7 +8529,7 @@
       "aliases": [
         "pmid-17414804"
       ],
-      "body": "This source is included for **Evidence backbone**.\n\n**Why it matters:** Canonical small RCT supporting the Norwegian 4x4 dose as a VO2max-oriented aerobic interval protocol.\n\n**Findings:** The trial compared 4x4 intervals with moderate continuous and other aerobic training in moderately trained men. The high-intensity interval arms improved VO2max more than moderate training, and the 4x4 format also supported stroke-volume gains. This is the clearest direct evidence that the classic 4x4 dose can drive cardiorespiratory-fitness gains.\n\n**Protocol takeaway:** Use this source only within its `claimUse: supports-protocol` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
+      "body": "This source is included for **Evidence backbone**.\n\n## Quick read\n\n- **Source type:** Four-arm randomized training trial (2007).\n- **People studied or addressed:** Moderately trained men (40 participants).\n- **Role in Murph:** direct or close support for the cardio-fitness claim; supports evidence; directly about the protocol dose or a very close implementation detail.\n- **Most relevant Murph signals:** estimated VO2max / cardio-fitness proxy, session heart-rate fidelity, heart-rate recovery, symptoms and adherence.\n\n## Why it matters for Norwegian 4x4\n\nCanonical small RCT supporting the Norwegian 4x4 dose as a VO2max-oriented aerobic interval protocol.\n\n## What it found\n\n**Findings:** The trial compared 4x4 intervals with moderate continuous and other aerobic training in moderately trained men. The high-intensity interval arms improved VO2max more than moderate training, and the 4x4 format also supported stroke-volume gains. This is the clearest direct evidence that the classic 4x4 dose can drive cardiorespiratory-fitness gains.\n\n## How Murph should use it\n\nThis is the cleanest direct support for making VO2max or wearable cardio-fitness the primary signal.\n\nUse as support for a bounded cardio-fitness experiment when the hard intervals actually reach the intended aerobic intensity.\n\n## Important limits\n\nThe trial was small and controlled, so it should not be read as a universal home-protocol guarantee.\n\nThe safe interpretation is narrower than “4x4 is always better.” Keep the population, supervision level, comparator, and exact interval dose visible before applying this source to a home wearable experiment.\n\n## Plain-language takeaway\n\nFor a generally healthy user, this belongs in the evidence pile that makes a 6-week 4x4 fitness test plausible, as long as the session is actually hard enough and recovery stays reasonable.",
       "categories": [
         "norwegian-4x4",
         "hiit",
@@ -8331,7 +8540,7 @@
       "evidenceBucket": "Evidence backbone",
       "key": "source_artifact:pmid-17414804",
       "modality": "Aerobic high-intensity interval training / Norwegian 4x4 context",
-      "murphTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol. It should shape intensity targets, population-fit, or safety interpretation without becoming a blanket guarantee for unscreened home 4x4.",
+      "murphTakeaway": "Use as support for a bounded cardio-fitness experiment when the hard intervals actually reach the intended aerobic intensity. It should shape intensity targets, population-fit, safety interpretation, or variant separation without becoming a blanket guarantee for unscreened home 4x4.",
       "murphV1Priority": "High",
       "norwegian4x4Focus": "Direct support",
       "pdfRightsStatus": "permission_required",
@@ -8357,7 +8566,7 @@
           "stance": "supports"
         }
       ],
-      "protocolTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol.",
+      "protocolTakeaway": "Use as support for a bounded cardio-fitness experiment when the hard intervals actually reach the intended aerobic intensity.",
       "quality": "usable",
       "relations": [
         {
@@ -8381,7 +8590,7 @@
         "populationLabel": "Moderately trained men"
       },
       "revision": {
-        "pageRevisionId": "sha256:05e6c0d1da5f3ebb05b9e2397d28ee0b3005b31e13d5fce031685d915072291f",
+        "pageRevisionId": "sha256:43b7043b105c37ecb3b585c3a458c52a84f610864f90efb9e2845b4973561b9b",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -8399,7 +8608,7 @@
         "year": 2007
       },
       "status": "draft",
-      "studyDesign": "See source metadata and bibliography for exact design.",
+      "studyDesign": "Four-arm randomized training trial",
       "summary": "Canonical small RCT supporting the Norwegian 4x4 dose as a VO2max-oriented aerobic interval protocol.",
       "title": "Aerobic high-intensity intervals improve VO2max more than moderate training",
       "whyItMatters": "Canonical small RCT supporting the Norwegian 4x4 dose as a VO2max-oriented aerobic interval protocol."
@@ -8408,7 +8617,7 @@
       "aliases": [
         "pmid-17548726"
       ],
-      "body": "This source is included for **Clinical lineage and population mismatch**.\n\n**Findings:** This randomized heart-failure study reported stronger cardiovascular effects from aerobic interval training than from moderate continuous training. The positive physiologic signal is useful lineage evidence, but the disease population and supervision requirements keep it from being direct home-protocol proof.\n\n**Why it matters:** Important early positive 4x4-lineage RCT, but its heart-failure population and supervision level make it inappropriate as direct wellness evidence.\n\n**Protocol takeaway:** Use as clinical lineage and overclaim guardrail; do not treat heart-failure rehabilitation evidence as permission for unsupervised vigorous intervals.",
+      "body": "This source is included for **Clinical lineage and population mismatch**.\n\n## Quick read\n\n- **Source type:** Small supervised heart-failure interval-training trial (2007).\n- **People studied or addressed:** Stable post-infarction heart failure patients (27 participants).\n- **Role in Murph:** clinical context and overclaim control; mixed evidence; screened or supervised clinical exercise, not unsupervised home training.\n- **Most relevant Murph signals:** estimated VO2max / cardio-fitness proxy, left-ventricular function context, clinician-supervised symptoms and adherence.\n\n## Why it matters for Norwegian 4x4\n\nImportant early positive 4x4-lineage RCT, but its heart-failure population and supervision level make it inappropriate as direct wellness evidence.\n\n## What it found\n\n**Findings:** This randomized heart-failure study reported stronger cardiovascular effects from aerobic interval training than from moderate continuous training. The positive physiologic signal is useful lineage evidence, but the disease population and supervision requirements keep it from being direct home-protocol proof.\n\n## How Murph should use it\n\nUseful for mechanism and lineage, but not for unsupervised disease-treatment claims.\n\nUse as clinical lineage and overclaim guardrail; do not treat heart-failure rehabilitation evidence as permission for unsupervised vigorous intervals.\n\n## Important limits\n\nHeart-failure exercise protocols require clinical screening and supervision.\n\nThe safe interpretation is narrower than “4x4 is always better.” Keep the population, supervision level, comparator, and exact interval dose visible before applying this source to a home wearable experiment.\n\n## Plain-language takeaway\n\nThis helps explain where the 4x4 idea came from in supervised clinical exercise, but stable post-infarction heart-failure patients are not the same as unscreened wellness users.",
       "categories": [
         "norwegian-4x4",
         "hiit",
@@ -8471,7 +8680,7 @@
         "populationLabel": "Stable post-infarction heart failure patients"
       },
       "revision": {
-        "pageRevisionId": "sha256:06a6fdfd5c0b69108595b5a864d813e200e18591c3dea05a0288f09cacf430f8",
+        "pageRevisionId": "sha256:6fdb91234c95e7c5240b3d217283f45023de33cc5179684141d8c6686a20c80e",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -8489,7 +8698,7 @@
         "year": 2007
       },
       "status": "draft",
-      "studyDesign": "See source metadata and bibliography for exact design.",
+      "studyDesign": "Small supervised heart-failure interval-training trial",
       "summary": "Classic supervised heart-failure 4x4-lineage RCT showing strong physiologic effects in a disease population.",
       "title": "Superior cardiovascular effect of aerobic interval training versus moderate continuous training in heart failure patients: a randomized study",
       "whyItMatters": "Important early positive 4x4-lineage RCT, but its heart-failure population and supervision level make it inappropriate as direct wellness evidence."
@@ -8498,7 +8707,7 @@
       "aliases": [
         "pmid-18606913"
       ],
-      "body": "This source is included for **Clinical lineage and population mismatch**.\n\n**Findings:** This pilot metabolic-syndrome trial compared aerobic interval training with continuous moderate exercise and helped establish the cardiometabolic 4x4 lineage. The study is small and clinical, so it informs population boundaries rather than a generic wearable self-experiment promise.\n\n**Why it matters:** Shows why the 4x4 literature often discusses cardiometabolic risk, while also making clear that disease-risk trials are not generic wellness proof.\n\n**Protocol takeaway:** Use as clinical lineage and population-mismatch context only; keep metabolic-syndrome treatment claims separate from this wearable self-experiment.",
+      "body": "This source is included for **Clinical lineage and population mismatch**.\n\n## Quick read\n\n- **Source type:** Small supervised metabolic-syndrome interval-training trial (2008).\n- **People studied or addressed:** Adults with metabolic syndrome (32 participants).\n- **Role in Murph:** clinical context and overclaim control; mixed evidence; screened or supervised clinical exercise, not unsupervised home training.\n- **Most relevant Murph signals:** estimated VO2max / cardio-fitness proxy, resting blood pressure context, cardiometabolic risk context.\n\n## Why it matters for Norwegian 4x4\n\nShows why the 4x4 literature often discusses cardiometabolic risk, while also making clear that disease-risk trials are not generic wellness proof.\n\n## What it found\n\n**Findings:** This pilot metabolic-syndrome trial compared aerobic interval training with continuous moderate exercise and helped establish the cardiometabolic 4x4 lineage. The study is small and clinical, so it informs population boundaries rather than a generic wearable self-experiment promise.\n\n## How Murph should use it\n\nSupports plausibility for fitness and vascular signals while keeping the metabolic-syndrome population separate.\n\nUse as clinical lineage and population-mismatch context only; keep metabolic-syndrome treatment claims separate from this wearable self-experiment.\n\n## Important limits\n\nSmall clinical-pilot evidence should not become a blanket wellness guarantee.\n\nThe safe interpretation is narrower than “4x4 is always better.” Keep the population, supervision level, comparator, and exact interval dose visible before applying this source to a home wearable experiment.\n\n## Plain-language takeaway\n\nThis helps explain where the 4x4 idea came from in supervised clinical exercise, but adults with metabolic syndrome are not the same as unscreened wellness users.",
       "categories": [
         "norwegian-4x4",
         "hiit",
@@ -8561,7 +8770,7 @@
         "populationLabel": "Adults with metabolic syndrome"
       },
       "revision": {
-        "pageRevisionId": "sha256:ee8a13342807e6177bc50ed303001878d55fa32e42cd2ad69186ae75d7b7c7c0",
+        "pageRevisionId": "sha256:293aef8a8e9cfe4059e8526cbe5eb8a760615ebae07b171e942c20625950c4b7",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -8579,7 +8788,7 @@
         "year": 2008
       },
       "status": "draft",
-      "studyDesign": "See source metadata and bibliography for exact design.",
+      "studyDesign": "Small supervised metabolic-syndrome interval-training trial",
       "summary": "Small supervised metabolic-syndrome RCT from the 4x4 lineage, useful for clinical context and population boundaries.",
       "title": "Aerobic interval training versus continuous moderate exercise as a treatment for the metabolic syndrome: a pilot study",
       "whyItMatters": "Shows why the 4x4 literature often discusses cardiometabolic risk, while also making clear that disease-risk trials are not generic wellness proof."
@@ -8588,7 +8797,7 @@
       "aliases": [
         "pmid-18673303"
       ],
-      "body": "This source is included for **Clinical lineage and population mismatch**.\n\n**Findings:** This adolescent overweight/obesity trial reported larger cardiovascular-risk-factor improvements with aerobic interval training than with a multitreatment comparison. The result is adjacent pediatric clinical context, not direct evidence for an adult home 4x4 recipe.\n\n**Why it matters:** Adds pediatric/adolescent lineage evidence so the bibliography does not silently generalize adolescent clinical-risk findings to adult self-experiments.\n\n**Protocol takeaway:** Use as adjacent clinical context only; adolescent overweight trials should not directly set adult unsupervised protocol claims.",
+      "body": "This source is included for **Clinical lineage and population mismatch**.\n\n## Quick read\n\n- **Source type:** Overweight adolescent interval-training trial (2009).\n- **People studied or addressed:** Overweight adolescents (54 participants).\n- **Role in Murph:** clinical context and overclaim control; mixed evidence; screened or supervised clinical exercise, not unsupervised home training.\n- **Most relevant Murph signals:** estimated VO2max / cardio-fitness proxy, cardiovascular risk-factor context, adherence and supervision context.\n\n## Why it matters for Norwegian 4x4\n\nAdds pediatric/adolescent lineage evidence so the bibliography does not silently generalize adolescent clinical-risk findings to adult self-experiments.\n\n## What it found\n\n**Findings:** This adolescent overweight/obesity trial reported larger cardiovascular-risk-factor improvements with aerobic interval training than with a multitreatment comparison. The result is adjacent pediatric clinical context, not direct evidence for an adult home 4x4 recipe.\n\n## How Murph should use it\n\nUse as population-specific context, not as proof for the adult home protocol.\n\nUse as adjacent clinical context only; adolescent overweight trials should not directly set adult unsupervised protocol claims.\n\n## Important limits\n\nYouth, obesity-treatment, and program-supervision context are not interchangeable with Murph's general experiment.\n\nThe safe interpretation is narrower than “4x4 is always better.” Keep the population, supervision level, comparator, and exact interval dose visible before applying this source to a home wearable experiment.\n\n## Plain-language takeaway\n\nThis helps explain where the 4x4 idea came from in supervised clinical exercise, but overweight adolescents are not the same as unscreened wellness users.",
       "categories": [
         "norwegian-4x4",
         "hiit",
@@ -8651,7 +8860,7 @@
         "populationLabel": "Overweight adolescents"
       },
       "revision": {
-        "pageRevisionId": "sha256:3851ee1088e1a3493e1a82fb075e2a8e192620e5e166135a13c21212e634eda8",
+        "pageRevisionId": "sha256:cafb355aa5adfa5c224506a1ad8f67a44d534415d9b965e7e80f66cc638f431c",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -8669,7 +8878,7 @@
         "year": 2009
       },
       "status": "draft",
-      "studyDesign": "See source metadata and bibliography for exact design.",
+      "studyDesign": "Overweight adolescent interval-training trial",
       "summary": "Adolescent overweight/obesity 4x4-style trial that should be kept as adjacent clinical context rather than folded into the adult wellness recipe.",
       "title": "Aerobic interval training reduces cardiovascular risk factors more than a multitreatment approach in overweight adolescents",
       "whyItMatters": "Adds pediatric/adolescent lineage evidence so the bibliography does not silently generalize adolescent clinical-risk findings to adult self-experiments."
@@ -8709,6 +8918,22 @@
           "result": "mixed",
           "scope": "clinical_supervised",
           "stance": "safety_boundary"
+        },
+        {
+          "caveat": "Small supervised crossover pilot in chronic heart failure; it informs design realism more than broad efficacy.",
+          "displayPriority": 130,
+          "endpointKeys": [
+            "biomarker:resting-heart-rate",
+            "biomarker:morning-blood-pressure",
+            "biomarker:hrv-rmssd"
+          ],
+          "groupId": "intervention-design-training-and-mixed-results",
+          "headline": "This supervised heart-failure pilot keeps intervention expectations grounded: sauna can be tolerable and physiologically active in a clinical setting without becoming a general home claim.",
+          "implication": "Use it for dose realism and cautious expectation setting, not for unsupervised efficacy claims.",
+          "protocolKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "result": "mixed",
+          "scope": "clinical_supervised",
+          "stance": "mixed"
         }
       ],
       "protocolTakeaway": "Use as cardiovascular context around heat exposure, not as a guaranteed 21-day result-card endpoint.",
@@ -8735,7 +8960,7 @@
         "populationLabel": "Chronic heart failure patients"
       },
       "revision": {
-        "pageRevisionId": "sha256:8678ced9c245d4ca6a6cd499f55b5f38d4458ebde97591f97150477061493b80",
+        "pageRevisionId": "sha256:f960d73bf41ef9fe16f1b0f2f7e287f0e951c46b50306fe0d46a3f25274c8508",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -8761,7 +8986,7 @@
       "aliases": [
         "pmid-19958872"
       ],
-      "body": "This source is included for **Clinical lineage and population mismatch**.\n\n**Findings:** This post-CABG randomized study compared aerobic interval training with continuous moderate exercise during supervised cardiac rehabilitation. It supports the clinical-rehabilitation lineage while reinforcing that post-surgical cardiac populations need separate safety framing.\n\n**Why it matters:** Shows another supervised cardiac-rehab setting in the 4x4 lineage and sharpens why cardiac-rehab evidence should stay separate from home self-experiments.\n\n**Protocol takeaway:** Use as cardiac-rehabilitation context and safety-boundary support only; do not use it to recommend unsupervised 4x4 after cardiac surgery.",
+      "body": "This source is included for **Clinical lineage and population mismatch**.\n\n## Quick read\n\n- **Source type:** Supervised post-CABG cardiac-rehabilitation trial (2009).\n- **People studied or addressed:** Coronary artery bypass surgery patients (59 participants).\n- **Role in Murph:** clinical context and overclaim control; mixed evidence; screened or supervised clinical exercise, not unsupervised home training.\n- **Most relevant Murph signals:** estimated VO2max / cardio-fitness proxy, quality-of-life context, clinician-supervised symptoms and adverse events.\n\n## Why it matters for Norwegian 4x4\n\nShows another supervised cardiac-rehab setting in the 4x4 lineage and sharpens why cardiac-rehab evidence should stay separate from home self-experiments.\n\n## What it found\n\n**Findings:** This post-CABG randomized study compared aerobic interval training with continuous moderate exercise during supervised cardiac rehabilitation. It supports the clinical-rehabilitation lineage while reinforcing that post-surgical cardiac populations need separate safety framing.\n\n## How Murph should use it\n\nAdds cardiac-rehab lineage evidence while reinforcing that this is not unsupervised self-treatment evidence.\n\nUse as cardiac-rehabilitation context and safety-boundary support only; do not use it to recommend unsupervised 4x4 after cardiac surgery.\n\n## Important limits\n\nPost-surgical cardiac rehabilitation has a different risk model and supervision structure.\n\nThe safe interpretation is narrower than “4x4 is always better.” Keep the population, supervision level, comparator, and exact interval dose visible before applying this source to a home wearable experiment.\n\n## Plain-language takeaway\n\nThis helps explain where the 4x4 idea came from in supervised clinical exercise, but coronary-artery bypass patients are not the same as unscreened wellness users.",
       "categories": [
         "norwegian-4x4",
         "hiit",
@@ -8824,7 +9049,7 @@
         "populationLabel": "Coronary artery bypass surgery patients"
       },
       "revision": {
-        "pageRevisionId": "sha256:dbffd96c830d05fcdb34ba69de022a4dc671d16818848a6aaf939e227a97688d",
+        "pageRevisionId": "sha256:9ebf23804270e6c6c9daa6d2d4c9e18280263f46a7c0ec2c57dac97bbc76891b",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -8842,7 +9067,7 @@
         "year": 2009
       },
       "status": "draft",
-      "studyDesign": "See source metadata and bibliography for exact design.",
+      "studyDesign": "Supervised post-CABG cardiac-rehabilitation trial",
       "summary": "Post-CABG supervised cardiac-rehabilitation trial supporting clinical-lineage context and safety-boundary language.",
       "title": "Aerobic interval training versus continuous moderate exercise after coronary artery bypass surgery: a randomized study of cardiovascular effects and quality of life",
       "whyItMatters": "Shows another supervised cardiac-rehab setting in the 4x4 lineage and sharpens why cardiac-rehab evidence should stay separate from home self-experiments."
@@ -9015,7 +9240,7 @@
       "aliases": [
         "pmid-21450580"
       ],
-      "body": "This source is included for **Clinical lineage and population mismatch**.\n\n**Findings:** This hypertension trial reported blood-pressure and myocardial-function improvements with aerobic interval training. That makes blood pressure a useful context signal, but the study should not turn the Murph protocol into a hypertension treatment plan.\n\n**Why it matters:** Supports why morning blood pressure can be tracked as context, but also why hypertension treatment claims need clinician-supervised framing.\n\n**Protocol takeaway:** Use for blood-pressure context and hypertension guardrails only; the Murph protocol is not a hypertension treatment plan.",
+      "body": "This source is included for **Clinical lineage and population mismatch**.\n\n## Quick read\n\n- **Source type:** Essential-hypertension interval-training trial (2012).\n- **People studied or addressed:** Adults with essential hypertension (88 participants).\n- **Role in Murph:** clinical context and overclaim control; mixed evidence; screened or supervised clinical exercise, not unsupervised home training.\n- **Most relevant Murph signals:** morning blood pressure context, estimated VO2max / cardio-fitness proxy, clinician-supervised symptoms and adherence.\n\n## Why it matters for Norwegian 4x4\n\nSupports why morning blood pressure can be tracked as context, but also why hypertension treatment claims need clinician-supervised framing.\n\n## What it found\n\n**Findings:** This hypertension trial reported blood-pressure and myocardial-function improvements with aerobic interval training. That makes blood pressure a useful context signal, but the study should not turn the Murph protocol into a hypertension treatment plan.\n\n## How Murph should use it\n\nSupports tracking blood pressure as context, but not promising blood-pressure treatment from a home 4x4 trial.\n\nUse for blood-pressure context and hypertension guardrails only; the Murph protocol is not a hypertension treatment plan.\n\n## Important limits\n\nUncontrolled hypertension is a clinician-guidance boundary for vigorous intervals.\n\nThe safe interpretation is narrower than “4x4 is always better.” Keep the population, supervision level, comparator, and exact interval dose visible before applying this source to a home wearable experiment.\n\n## Plain-language takeaway\n\nThis helps explain where the 4x4 idea came from in supervised clinical exercise, but adults with essential hypertension are not the same as unscreened wellness users.",
       "categories": [
         "norwegian-4x4",
         "hiit",
@@ -9079,7 +9304,7 @@
         "populationLabel": "Adults with essential hypertension"
       },
       "revision": {
-        "pageRevisionId": "sha256:634853d3e8d95e15b31bf85e9b96e0d97ead7433afdd07f1f3f5c9f0cbf20216",
+        "pageRevisionId": "sha256:765ff40c4a3288d91920a7030e74e074b547464062df9d0765826c74a8bad6a8",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -9097,7 +9322,7 @@
         "year": 2012
       },
       "status": "draft",
-      "studyDesign": "See source metadata and bibliography for exact design.",
+      "studyDesign": "Essential-hypertension interval-training trial",
       "summary": "Essential-hypertension RCT useful for blood-pressure context while reinforcing clinician-guidance boundaries for hypertension.",
       "title": "Aerobic interval training reduces blood pressure and improves myocardial function in hypertensive patients",
       "whyItMatters": "Supports why morning blood pressure can be tracked as context, but also why hypertension treatment claims need clinician-supervised framing."
@@ -9167,7 +9392,7 @@
       "aliases": [
         "pmid-22879367"
       ],
-      "body": "This source is included for **Safety and contraindications**.\n\n**Why it matters:** Quantified supervised cardiac-rehabilitation safety registry; key low-but-not-zero risk framing.\n\n**Findings:** The registry compared adverse events during supervised high-intensity and moderate-intensity exercise in coronary heart disease rehabilitation. Serious events were rare across many training hours, but they were not zero. The finding supports a low-risk-with-supervision frame, not a blanket claim that high intensity is safe for everyone.\n\n**Protocol takeaway:** Use this source only within its `claimUse: safety-only` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
+      "body": "This source is included for **Safety and contraindications**.\n\n## Quick read\n\n- **Source type:** Supervised cardiac-rehabilitation safety registry (2012).\n- **People studied or addressed:** Coronary heart disease cardiac-rehabilitation patients (4,846 participants).\n- **Role in Murph:** safety and clinician-guidance boundary; supports safety boundaries; screened or supervised clinical exercise, not unsupervised home training.\n- **Most relevant Murph signals:** estimated VO2max / cardio-fitness proxy, session heart-rate fidelity, heart-rate recovery, symptoms and adherence.\n\n## Why it matters for Norwegian 4x4\n\nQuantified supervised cardiac-rehabilitation safety registry; key low-but-not-zero risk framing.\n\n## What it found\n\n**Findings:** The registry compared adverse events during supervised high-intensity and moderate-intensity exercise in coronary heart disease rehabilitation. Serious events were rare across many training hours, but they were not zero. The finding supports a low-risk-with-supervision frame, not a blanket claim that high intensity is safe for everyone.\n\n## How Murph should use it\n\nSupports a low-risk-with-supervision frame and justifies strong stop-condition language.\n\nUse to set screening, clinician-guidance, and stop-condition language; do not use it as evidence that unsupervised vigorous intervals are risk-free.\n\n## Important limits\n\nScreened supervised patients are not the same as unscreened home users.\n\nThe safe interpretation is narrower than “4x4 is always better.” Keep the population, supervision level, comparator, and exact interval dose visible before applying this source to a home wearable experiment.\n\n## Plain-language takeaway\n\nThis is mainly a guardrail source: it helps decide who should get medical guidance, when to stop, and why screened supervision matters.",
       "categories": [
         "norwegian-4x4",
         "hiit",
@@ -9178,7 +9403,7 @@
       "evidenceBucket": "Safety and contraindications",
       "key": "source_artifact:pmid-22879367",
       "modality": "Aerobic high-intensity interval training / Norwegian 4x4 context",
-      "murphTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol. It should shape intensity targets, population-fit, or safety interpretation without becoming a blanket guarantee for unscreened home 4x4.",
+      "murphTakeaway": "Use to set screening, clinician-guidance, and stop-condition language; do not use it as evidence that unsupervised vigorous intervals are risk-free. It should shape intensity targets, population-fit, safety interpretation, or variant separation without becoming a blanket guarantee for unscreened home 4x4.",
       "murphV1Priority": "High",
       "norwegian4x4Focus": "Context, safety, or adjacent variant",
       "pdfRightsStatus": "permission_required",
@@ -9201,7 +9426,7 @@
           "stance": "safety_boundary"
         }
       ],
-      "protocolTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol.",
+      "protocolTakeaway": "Use to set screening, clinician-guidance, and stop-condition language; do not use it as evidence that unsupervised vigorous intervals are risk-free.",
       "quality": "usable",
       "relations": [
         {
@@ -9225,7 +9450,7 @@
         "populationLabel": "Coronary heart disease cardiac-rehabilitation patients"
       },
       "revision": {
-        "pageRevisionId": "sha256:708a333b6220685ad94d86498ba73aece6ca5a0a6cedd5bc26bf81903bb3e4b4",
+        "pageRevisionId": "sha256:353abdb5bda7097fc3e5ff1476b3b3370e11666ae3a637d98118d7f53f25a560",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -9243,7 +9468,7 @@
         "year": 2012
       },
       "status": "draft",
-      "studyDesign": "See source metadata and bibliography for exact design.",
+      "studyDesign": "Supervised cardiac-rehabilitation safety registry",
       "summary": "Quantified supervised cardiac-rehabilitation safety registry; key low-but-not-zero risk framing.",
       "title": "Cardiovascular risk of high- versus moderate-intensity aerobic exercise in coronary heart disease patients",
       "whyItMatters": "Quantified supervised cardiac-rehabilitation safety registry; key low-but-not-zero risk framing."
@@ -9334,7 +9559,7 @@
       "aliases": [
         "pmid-23988787"
       ],
-      "body": "This source is included for **Wearable or testable signals**.\n\n**Why it matters:** Implementation caution source: RPE-only guidance can miss the intended HR target during interval training.\n\n**Findings:** The crossover study tested whether Borg-scale perceived exertion kept cardiac-rehabilitation participants in the target interval intensity. RPE-guided sessions tended to undershoot the desired high-intensity heart-rate zone. The finding supports heart-rate monitoring when the protocol depends on hitting a specific intensity.\n\n**Protocol takeaway:** Use this source only within its `claimUse: supports-protocol` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
+      "body": "This source is included for **Wearable or testable signals**.\n\n## Quick read\n\n- **Source type:** Single-group crossover implementation study (2014).\n- **People studied or addressed:** Cardiac-rehabilitation participants (10 participants).\n- **Role in Murph:** direct or close support for the cardio-fitness claim; supports evidence; useful for measurement and logging, not for efficacy proof.\n- **Most relevant Murph signals:** estimated VO2max / cardio-fitness proxy, session heart-rate fidelity, heart-rate recovery, symptoms and adherence.\n\n## Why it matters for Norwegian 4x4\n\nImplementation caution source: RPE-only guidance can miss the intended HR target during interval training.\n\n## What it found\n\n**Findings:** The crossover study tested whether Borg-scale perceived exertion kept cardiac-rehabilitation participants in the target interval intensity. RPE-guided sessions tended to undershoot the desired high-intensity heart-rate zone. The finding supports heart-rate monitoring when the protocol depends on hitting a specific intensity.\n\n## How Murph should use it\n\nPrefer heart-rate feedback plus symptoms and RPE when testing the actual 4x4 dose.\n\nUse to improve logging and intensity interpretation; do not treat measurement-context evidence as proof of a health outcome.\n\n## Important limits\n\nHeart-rate estimates and wrist sensors can also be wrong, especially during vigorous movement.\n\nThe safe interpretation is narrower than “4x4 is always better.” Keep the population, supervision level, comparator, and exact interval dose visible before applying this source to a home wearable experiment.\n\n## Plain-language takeaway\n\nFor a generally healthy user, this belongs in the evidence pile that makes a 6-week 4x4 fitness test plausible, as long as the session is actually hard enough and recovery stays reasonable.",
       "categories": [
         "norwegian-4x4",
         "hiit",
@@ -9345,7 +9570,7 @@
       "evidenceBucket": "Wearable or testable signals",
       "key": "source_artifact:pmid-23988787",
       "modality": "Aerobic high-intensity interval training / Norwegian 4x4 context",
-      "murphTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol. It should shape intensity targets, population-fit, or safety interpretation without becoming a blanket guarantee for unscreened home 4x4.",
+      "murphTakeaway": "Use to improve logging and intensity interpretation; do not treat measurement-context evidence as proof of a health outcome. It should shape intensity targets, population-fit, safety interpretation, or variant separation without becoming a blanket guarantee for unscreened home 4x4.",
       "murphV1Priority": "High",
       "norwegian4x4Focus": "Direct support",
       "pdfRightsStatus": "permission_required",
@@ -9371,7 +9596,7 @@
           "stance": "supports"
         }
       ],
-      "protocolTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol.",
+      "protocolTakeaway": "Use to improve logging and intensity interpretation; do not treat measurement-context evidence as proof of a health outcome.",
       "quality": "usable",
       "relations": [
         {
@@ -9395,7 +9620,7 @@
         "populationLabel": "Cardiac-rehabilitation participants"
       },
       "revision": {
-        "pageRevisionId": "sha256:9b488fe7806f568effb6fee7e3c02b4d19d914617972b41131749c079ca68ef7",
+        "pageRevisionId": "sha256:8bded50d8440f271ae4a00c1cb821ce1971880f97f2098a25457bdc07bf4a44e",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -9413,7 +9638,7 @@
         "year": 2014
       },
       "status": "draft",
-      "studyDesign": "See source metadata and bibliography for exact design.",
+      "studyDesign": "Single-group crossover implementation study",
       "summary": "Implementation caution source: RPE-only guidance can miss the intended HR target during interval training.",
       "title": "Does rating of perceived exertion result in target exercise intensity during interval training in cardiac rehabilitation? A study of the Borg scale versus a heart rate monitor",
       "whyItMatters": "Implementation caution source: RPE-only guidance can miss the intended HR target during interval training."
@@ -9422,7 +9647,7 @@
       "aliases": [
         "pmid-24066036"
       ],
-      "body": "This source is included for **Context-only rationale**.\n\n**Why it matters:** Open-access meta-analysis supporting the general concept of VO2max trainability from HIIT while showing response variability.\n\n**Findings:** This meta-analysis found that HIIT generally improves VO2max over short interventions. It also showed meaningful response variation across studies and participants. The finding supports estimated VO2max as a plausible signal while keeping expectations individualized.\n\n**Protocol takeaway:** Use this source only within its `claimUse: context-only` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
+      "body": "This source is included for **Context-only rationale**.\n\n## Quick read\n\n- **Source type:** Meta-analysis of HIIT and VO2max trainability (2013).\n- **People studied or addressed:** Healthy sedentary or recreationally active adults under 45 (334 participants / 37 included studies).\n- **Role in Murph:** direct or close support for the cardio-fitness claim; supports evidence; same aerobic-HIIT mechanism, but not always this exact Murph recipe.\n- **Most relevant Murph signals:** estimated VO2max / cardio-fitness proxy, session heart-rate fidelity, heart-rate recovery, symptoms and adherence.\n\n## Why it matters for Norwegian 4x4\n\nOpen-access meta-analysis supporting the general concept of VO2max trainability from HIIT while showing response variability.\n\n## What it found\n\n**Findings:** This meta-analysis found that HIIT generally improves VO2max over short interventions. It also showed meaningful response variation across studies and participants. The finding supports estimated VO2max as a plausible signal while keeping expectations individualized.\n\n## How Murph should use it\n\nUse as broader mechanism support for why cardio-fitness can move over weeks.\n\nUse as support for a bounded cardio-fitness experiment when the hard intervals actually reach the intended aerobic intensity.\n\n## Important limits\n\nThis is not specific to the Murph recipe and should not override direct 4x4 evidence.\n\nThe safe interpretation is narrower than “4x4 is always better.” Keep the population, supervision level, comparator, and exact interval dose visible before applying this source to a home wearable experiment.\n\n## Plain-language takeaway\n\nFor a generally healthy user, this belongs in the evidence pile that makes a 6-week 4x4 fitness test plausible, as long as the session is actually hard enough and recovery stays reasonable.",
       "categories": [
         "norwegian-4x4",
         "hiit",
@@ -9433,7 +9658,7 @@
       "evidenceBucket": "Context-only rationale",
       "key": "source_artifact:pmid-24066036",
       "modality": "Aerobic high-intensity interval training / Norwegian 4x4 context",
-      "murphTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol. It should shape intensity targets, population-fit, or safety interpretation without becoming a blanket guarantee for unscreened home 4x4.",
+      "murphTakeaway": "Use as support for a bounded cardio-fitness experiment when the hard intervals actually reach the intended aerobic intensity. It should shape intensity targets, population-fit, safety interpretation, or variant separation without becoming a blanket guarantee for unscreened home 4x4.",
       "murphV1Priority": "Medium",
       "norwegian4x4Focus": "Context, safety, or adjacent variant",
       "pdfRightsStatus": "open_access",
@@ -9459,7 +9684,7 @@
           "stance": "supports"
         }
       ],
-      "protocolTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol.",
+      "protocolTakeaway": "Use as support for a bounded cardio-fitness experiment when the hard intervals actually reach the intended aerobic intensity.",
       "quality": "usable",
       "relations": [
         {
@@ -9483,7 +9708,7 @@
         "populationLabel": "Healthy sedentary or recreationally active adults under 45"
       },
       "revision": {
-        "pageRevisionId": "sha256:94d8ffa7f750c9434a6d0a5e4307ad1e062f9b9f7e4012349e56706e4f2a5e52",
+        "pageRevisionId": "sha256:ca751b688517f64eeb0799e2d96c6da020deae1d9ae9122db130e1edc2ad9db4",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -9501,7 +9726,7 @@
         "year": 2013
       },
       "status": "draft",
-      "studyDesign": "See source metadata and bibliography for exact design.",
+      "studyDesign": "Meta-analysis of HIIT and VO2max trainability",
       "summary": "Open-access meta-analysis supporting the general concept of VO2max trainability from HIIT while showing response variability.",
       "title": "VO2max trainability and high intensity interval training in humans: a meta-analysis",
       "whyItMatters": "Open-access meta-analysis supporting the general concept of VO2max trainability from HIIT while showing response variability."
@@ -9839,7 +10064,7 @@
       "aliases": [
         "pmid-25464446"
       ],
-      "body": "This source is included for **Mixed and null clinical evidence**.\n\n**Why it matters:** Larger CAD trial that prevents overclaiming HIIT superiority over moderate continuous training.\n\n**Findings:** The SAINTEX-CAD trial found that aerobic interval training and continuous training both improved exercise capacity in stable coronary artery disease patients. It did not show a clear superiority of interval training over continuous training. The finding is an overclaim guardrail for disease-treatment or superiority claims.\n\n**Protocol takeaway:** Use this source only within its `claimUse: context-only` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
+      "body": "This source is included for **Mixed and null clinical evidence**.\n\n## Quick read\n\n- **Source type:** Multicenter randomized cardiac-rehabilitation trial (2015).\n- **People studied or addressed:** Stable coronary artery disease patients (200 participants).\n- **Role in Murph:** clinical context and overclaim control; does not confirm evidence; screened or supervised clinical exercise, not unsupervised home training.\n- **Most relevant Murph signals:** estimated VO2max / cardio-fitness proxy, session heart-rate fidelity, heart-rate recovery, symptoms and adherence.\n\n## Why it matters for Norwegian 4x4\n\nLarger CAD trial that prevents overclaiming HIIT superiority over moderate continuous training.\n\n## What it found\n\n**Findings:** The SAINTEX-CAD trial found that aerobic interval training and continuous training both improved exercise capacity in stable coronary artery disease patients. It did not show a clear superiority of interval training over continuous training. The finding is an overclaim guardrail for disease-treatment or superiority claims.\n\n## How Murph should use it\n\nThis prevents claiming 4x4 is always better than moderate cardio.\n\nUse to calibrate clinical context and avoid overclaiming superiority; do not treat supervised disease-population results as direct home-protocol proof.\n\n## Important limits\n\nThe setting was supervised clinical rehabilitation, not a general wellness experiment.\n\nThe safe interpretation is narrower than “4x4 is always better.” Keep the population, supervision level, comparator, and exact interval dose visible before applying this source to a home wearable experiment.\n\n## Plain-language takeaway\n\nThis helps explain where the 4x4 idea came from in supervised clinical exercise, but stable coronary artery disease patients are not the same as unscreened wellness users.",
       "categories": [
         "norwegian-4x4",
         "hiit",
@@ -9850,7 +10075,7 @@
       "evidenceBucket": "Mixed and null clinical evidence",
       "key": "source_artifact:pmid-25464446",
       "modality": "Aerobic high-intensity interval training / Norwegian 4x4 context",
-      "murphTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol. It should shape intensity targets, population-fit, or safety interpretation without becoming a blanket guarantee for unscreened home 4x4.",
+      "murphTakeaway": "Use to calibrate clinical context and avoid overclaiming superiority; do not treat supervised disease-population results as direct home-protocol proof. It should shape intensity targets, population-fit, safety interpretation, or variant separation without becoming a blanket guarantee for unscreened home 4x4.",
       "murphV1Priority": "High",
       "norwegian4x4Focus": "Context, safety, or adjacent variant",
       "pdfRightsStatus": "not_redistributable",
@@ -9876,7 +10101,7 @@
           "stance": "does_not_confirm"
         }
       ],
-      "protocolTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol.",
+      "protocolTakeaway": "Use to calibrate clinical context and avoid overclaiming superiority; do not treat supervised disease-population results as direct home-protocol proof.",
       "quality": "usable",
       "relations": [
         {
@@ -9900,7 +10125,7 @@
         "populationLabel": "Stable coronary artery disease patients"
       },
       "revision": {
-        "pageRevisionId": "sha256:c55c88d0fe9309ffb1aceaa4d0e7119b0f2797a763bf4b120a71c9062341bcaf",
+        "pageRevisionId": "sha256:c209a395698fd58191914d67a7bb18ddd2f0dc430a2e200e5cd82a5dba8003f0",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -9918,7 +10143,7 @@
         "year": 2015
       },
       "status": "draft",
-      "studyDesign": "See source metadata and bibliography for exact design.",
+      "studyDesign": "Multicenter randomized cardiac-rehabilitation trial",
       "summary": "Larger CAD trial that prevents overclaiming HIIT superiority over moderate continuous training.",
       "title": "Aerobic interval training and continuous training equally improve aerobic exercise capacity in patients with coronary artery disease: the SAINTEX-CAD study",
       "whyItMatters": "Larger CAD trial that prevents overclaiming HIIT superiority over moderate continuous training."
@@ -10134,6 +10359,22 @@
           "result": "not_efficacy_evidence",
           "scope": "clinical_supervised",
           "stance": "safety_boundary"
+        },
+        {
+          "caveat": "Clinical participants and added cold immersion make this adjacent context, not a clean stand-alone Finnish-sauna efficacy read.",
+          "displayPriority": 110,
+          "endpointKeys": [
+            "biomarker:resting-heart-rate",
+            "biomarker:morning-blood-pressure",
+            "biomarker:hrv-rmssd"
+          ],
+          "groupId": "near-term-autonomic-vascular-and-immune-signals",
+          "headline": "This clinical sauna-plus-cold physiology study supports blood-pressure, heart-rate, and autonomic context while showing why cold-immersion sequences should stay separate from the default sauna test.",
+          "implication": "Use it to justify near-term cardiovascular signal tracking without silently merging cold exposure into the default protocol.",
+          "protocolKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "result": "mixed",
+          "scope": "adjacent_variant",
+          "stance": "mixed"
         }
       ],
       "protocolTakeaway": "Use directly for safety, cardiovascular-context, or protocol-design guardrails; still avoid promising a short-term wearable outcome from this record alone.",
@@ -10160,7 +10401,7 @@
         "populationLabel": "Heart failure, CAD, and control participants"
       },
       "revision": {
-        "pageRevisionId": "sha256:a430c6cbe1511e915e173f1c804afd03e9115006d5d08666c7b77da0ad587223",
+        "pageRevisionId": "sha256:5fa45e9614d986d7f57e137f8381cb8d69346305ddfb810eb82139fae2674f64",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -10267,7 +10508,7 @@
       "aliases": [
         "pmid-26440134"
       ],
-      "body": "This source is included for **Protocol dose and variant separation**.\n\n**Findings:** This 6-week comparison found the standard 4x4-style dose should be kept distinct from 1x4 HIIT and moderate continuous training when interpreting VO2max outcomes. It supports dose and variant separation while retaining the overweight/obese adult population caveat.\n\n**Why it matters:** Directly supports keeping 4x4 separate from low-volume 1x4 and helps justify the 6-week wearable test window.\n\n**Protocol takeaway:** Use for 4x4 dose support and variant separation, while preserving the overweight/obese adult population caveat.",
+      "body": "This source is included for **Protocol dose and variant separation**.\n\n## Quick read\n\n- **Source type:** Three-arm 4x4 versus 1x4 versus moderate-continuous trial (2016).\n- **People studied or addressed:** Overweight and obese adults (30 participants).\n- **Role in Murph:** direct or close support for the cardio-fitness claim; supports evidence; same aerobic-HIIT mechanism, but not always this exact Murph recipe.\n- **Most relevant Murph signals:** estimated VO2max / cardio-fitness proxy, session heart-rate fidelity, variant separation.\n\n## Why it matters for Norwegian 4x4\n\nDirectly supports keeping 4x4 separate from low-volume 1x4 and helps justify the 6-week wearable test window.\n\n## What it found\n\n**Findings:** This 6-week comparison found the standard 4x4-style dose should be kept distinct from 1x4 HIIT and moderate continuous training when interpreting VO2max outcomes. It supports dose and variant separation while retaining the overweight/obese adult population caveat.\n\n## How Murph should use it\n\nSupports the fitness-outcome claim while keeping population and program context explicit.\n\nUse for 4x4 dose support and variant separation, while preserving the overweight/obese adult population caveat.\n\n## Important limits\n\nThe comparison was structured research exercise, not a free-living wearable experiment.\n\nThe safe interpretation is narrower than “4x4 is always better.” Keep the population, supervision level, comparator, and exact interval dose visible before applying this source to a home wearable experiment.\n\n## Plain-language takeaway\n\nFor a generally healthy user, this belongs in the evidence pile that makes a 6-week 4x4 fitness test plausible, as long as the session is actually hard enough and recovery stays reasonable.",
       "categories": [
         "norwegian-4x4",
         "hiit",
@@ -10330,7 +10571,7 @@
         "populationLabel": "Overweight and obese adults"
       },
       "revision": {
-        "pageRevisionId": "sha256:b631ffba4f21f82dcc86bfa7be83e3a0e743d61343ebdeb331d7df6b289d7779",
+        "pageRevisionId": "sha256:64e1957da5845a8a2db840dddac6ce831becd25c95de6a1992f724333a70dc11",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -10348,7 +10589,7 @@
         "year": 2016
       },
       "status": "draft",
-      "studyDesign": "See source metadata and bibliography for exact design.",
+      "studyDesign": "Three-arm 4x4 versus 1x4 versus moderate-continuous trial",
       "summary": "Direct 6-week comparison showing the standard 4x4 dose should not be collapsed into 1x4 HIIT or moderate continuous training.",
       "title": "Comparison of three popular exercise modalities on VO2max in overweight and obese",
       "whyItMatters": "Directly supports keeping 4x4 separate from low-volume 1x4 and helps justify the 6-week wearable test window."
@@ -10771,7 +11012,7 @@
       "aliases": [
         "pmid-28082387"
       ],
-      "body": "This source is included for **Mixed and null clinical evidence**.\n\n**Why it matters:** Larger HFrEF trial that did not confirm clear HIIT superiority and highlighted intensity-fidelity issues.\n\n**Findings:** This heart-failure trial did not confirm a clear durable superiority of HIIT over moderate training or recommended regular exercise. It also highlighted that participants often missed the prescribed high-intensity target. The finding warns that clinical 4x4-style protocols need supervision and intensity checks.\n\n**Protocol takeaway:** Use this source only within its `claimUse: context-only` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
+      "body": "This source is included for **Mixed and null clinical evidence**.\n\n## Quick read\n\n- **Source type:** Multicenter randomized heart-failure trial (2017).\n- **People studied or addressed:** Heart failure patients with reduced ejection fraction (261 participants).\n- **Role in Murph:** clinical context and overclaim control; does not confirm evidence; screened or supervised clinical exercise, not unsupervised home training.\n- **Most relevant Murph signals:** estimated VO2max / cardio-fitness proxy, session heart-rate fidelity, heart-rate recovery, symptoms and adherence.\n\n## Why it matters for Norwegian 4x4\n\nLarger HFrEF trial that did not confirm clear HIIT superiority and highlighted intensity-fidelity issues.\n\n## What it found\n\n**Findings:** This heart-failure trial did not confirm a clear durable superiority of HIIT over moderate training or recommended regular exercise. It also highlighted that participants often missed the prescribed high-intensity target. The finding warns that clinical 4x4-style protocols need supervision and intensity checks.\n\n## How Murph should use it\n\nUse it as a guardrail: the intended dose matters, and clinical outcomes do not automatically transfer to home 4x4.\n\nUse to calibrate clinical context and avoid overclaiming superiority; do not treat supervised disease-population results as direct home-protocol proof.\n\n## Important limits\n\nHeart-failure participants need clinician-directed exercise decisions.\n\nThe safe interpretation is narrower than “4x4 is always better.” Keep the population, supervision level, comparator, and exact interval dose visible before applying this source to a home wearable experiment.\n\n## Plain-language takeaway\n\nThis helps explain where the 4x4 idea came from in supervised clinical exercise, but heart-failure patients with reduced ejection fraction are not the same as unscreened wellness users.",
       "categories": [
         "norwegian-4x4",
         "hiit",
@@ -10782,7 +11023,7 @@
       "evidenceBucket": "Mixed and null clinical evidence",
       "key": "source_artifact:pmid-28082387",
       "modality": "Aerobic high-intensity interval training / Norwegian 4x4 context",
-      "murphTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol. It should shape intensity targets, population-fit, or safety interpretation without becoming a blanket guarantee for unscreened home 4x4.",
+      "murphTakeaway": "Use to calibrate clinical context and avoid overclaiming superiority; do not treat supervised disease-population results as direct home-protocol proof. It should shape intensity targets, population-fit, safety interpretation, or variant separation without becoming a blanket guarantee for unscreened home 4x4.",
       "murphV1Priority": "High",
       "norwegian4x4Focus": "Context, safety, or adjacent variant",
       "pdfRightsStatus": "permission_required",
@@ -10808,7 +11049,7 @@
           "stance": "does_not_confirm"
         }
       ],
-      "protocolTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol.",
+      "protocolTakeaway": "Use to calibrate clinical context and avoid overclaiming superiority; do not treat supervised disease-population results as direct home-protocol proof.",
       "quality": "usable",
       "relations": [
         {
@@ -10832,7 +11073,7 @@
         "populationLabel": "Heart failure patients with reduced ejection fraction"
       },
       "revision": {
-        "pageRevisionId": "sha256:a895ba6d2159a2dd45a506b2e609e2fd5e57c09766997bd39c2e8f54f1df0d7f",
+        "pageRevisionId": "sha256:a321419f625b6194f4ca2ec24208b4bd6adb542666d17283e19dd08b3b077b50",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -10850,7 +11091,7 @@
         "year": 2017
       },
       "status": "draft",
-      "studyDesign": "See source metadata and bibliography for exact design.",
+      "studyDesign": "Multicenter randomized heart-failure trial",
       "summary": "Larger HFrEF trial that did not confirm clear HIIT superiority and highlighted intensity-fidelity issues.",
       "title": "High-intensity interval training in patients with heart failure with reduced ejection fraction",
       "whyItMatters": "Larger HFrEF trial that did not confirm clear HIIT superiority and highlighted intensity-fidelity issues."
@@ -10859,7 +11100,7 @@
       "aliases": [
         "pmid-28385556"
       ],
-      "body": "This source is included for **Clinical synthesis and implementation context**.\n\n**Findings:** This CERG-lineage review explains how high-intensity interval training is framed across clinical and home-based health-outcome contexts. It is useful implementation context, but primary effect claims should still cite the underlying trials and meta-analyses.\n\n**Why it matters:** Gives a review-level explanation of HIIT health-outcome framing from the Norwegian/CERG lineage without replacing primary trial evidence.\n\n**Protocol takeaway:** Use as implementation and review context only; primary trial claims should cite the underlying trials or meta-analyses.",
+      "body": "This source is included for **Clinical synthesis and implementation context**.\n\n## Quick read\n\n- **Source type:** Narrative review and practical HIIT guidance (2017).\n- **People studied or addressed:** Clinical and general aerobic HIIT literature.\n- **Role in Murph:** clinical context and overclaim control; context only evidence; screened or supervised clinical exercise, not unsupervised home training.\n- **Most relevant Murph signals:** estimated VO2max / cardio-fitness proxy, implementation context, symptoms and adherence.\n\n## Why it matters for Norwegian 4x4\n\nGives a review-level explanation of HIIT health-outcome framing from the Norwegian/CERG lineage without replacing primary trial evidence.\n\n## What it found\n\n**Findings:** This CERG-lineage review explains how high-intensity interval training is framed across clinical and home-based health-outcome contexts. It is useful implementation context, but primary effect claims should still cite the underlying trials and meta-analyses.\n\n## How Murph should use it\n\nUse it for clinical context and language calibration, not as direct proof for this exact protocol.\n\nUse as implementation and review context only; primary trial claims should cite the underlying trials or meta-analyses.\n\n## Important limits\n\nNarrative reviews are useful for framing but do not settle protocol-specific effect size.\n\nThe safe interpretation is narrower than “4x4 is always better.” Keep the population, supervision level, comparator, and exact interval dose visible before applying this source to a home wearable experiment.\n\n## Plain-language takeaway\n\nThis helps explain where the 4x4 idea came from in supervised clinical exercise, but clinical and general aerobic-HIIT literature are not the same as evidence for unscreened wellness users.",
       "categories": [
         "norwegian-4x4",
         "hiit",
@@ -10918,7 +11159,7 @@
         "populationLabel": "Clinical and general aerobic HIIT literature"
       },
       "revision": {
-        "pageRevisionId": "sha256:8a54a6e7a50db46821bdc633347d4dd0ed0b3cc6b2592fb40546ccb15308b858",
+        "pageRevisionId": "sha256:34cdea18a2f79a5f6811e2543d62b89651abdc5ec24185d917ccf2b0ed08d7e4",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -10936,7 +11177,7 @@
         "year": 2017
       },
       "status": "draft",
-      "studyDesign": "See source metadata and bibliography for exact design.",
+      "studyDesign": "Narrative review and practical HIIT guidance",
       "summary": "CERG-lineage narrative review that explains clinical and home-based HIIT framing, useful as context rather than primary trial evidence.",
       "title": "High Intensity Interval Training for Maximizing Health Outcomes",
       "whyItMatters": "Gives a review-level explanation of HIIT health-outcome framing from the Norwegian/CERG lineage without replacing primary trial evidence."
@@ -11131,7 +11372,7 @@
       "aliases": [
         "pmid-28846513"
       ],
-      "body": "This source is included for **Adjacent variants to split**.\n\n**Why it matters:** Low-volume 1x4 HIIT evidence that should not be treated as the same as standard 4x4.\n\n**Findings:** The trial found that low-volume HIIT could improve metabolic-syndrome severity. Its protocol was a lower-volume variant rather than classic four-by-four-minute intervals. The finding is useful cardiometabolic context but should stay separate from Norwegian 4x4 dosing.\n\n**Protocol takeaway:** Use this source only within its `claimUse: context-only` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
+      "body": "This source is included for **Adjacent variants to split**.\n\n## Quick read\n\n- **Source type:** Randomized metabolic-syndrome training-volume substudy (2017).\n- **People studied or addressed:** Adults with metabolic syndrome (99 participants).\n- **Role in Murph:** adjacent-variant or recovery-context evidence; context only evidence; a related HIIT variant that should stay separate from standard 4x4.\n- **Most relevant Murph signals:** estimated VO2max / cardio-fitness proxy, session heart-rate fidelity, heart-rate recovery, symptoms and adherence.\n\n## Why it matters for Norwegian 4x4\n\nLow-volume 1x4 HIIT evidence that should not be treated as the same as standard 4x4.\n\n## What it found\n\n**Findings:** The trial found that low-volume HIIT could improve metabolic-syndrome severity. Its protocol was a lower-volume variant rather than classic four-by-four-minute intervals. The finding is useful cardiometabolic context but should stay separate from Norwegian 4x4 dosing.\n\n## How Murph should use it\n\nUseful for variant separation; do not merge it into the standard four-interval protocol.\n\nUse for variant separation, recovery context, or secondary-signal interpretation; do not count it as direct proof for the standard 4x4 self-experiment.\n\n## Important limits\n\nLow-volume protocols have different burden, dose, and interpretation.\n\nThe safe interpretation is narrower than “4x4 is always better.” Keep the population, supervision level, comparator, and exact interval dose visible before applying this source to a home wearable experiment.\n\n## Plain-language takeaway\n\nThis is useful nearby evidence, but it should not be mixed into the direct claim that the standard four-interval recipe will improve a user's wearable fitness score.",
       "categories": [
         "norwegian-4x4",
         "hiit",
@@ -11142,7 +11383,7 @@
       "evidenceBucket": "Adjacent variants to split",
       "key": "source_artifact:pmid-28846513",
       "modality": "Aerobic high-intensity interval training / Norwegian 4x4 context",
-      "murphTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol. It should shape intensity targets, population-fit, or safety interpretation without becoming a blanket guarantee for unscreened home 4x4.",
+      "murphTakeaway": "Use for variant separation, recovery context, or secondary-signal interpretation; do not count it as direct proof for the standard 4x4 self-experiment. It should shape intensity targets, population-fit, safety interpretation, or variant separation without becoming a blanket guarantee for unscreened home 4x4.",
       "murphV1Priority": "Medium",
       "norwegian4x4Focus": "Context, safety, or adjacent variant",
       "pdfRightsStatus": "permission_required",
@@ -11168,7 +11409,7 @@
           "stance": "context_only"
         }
       ],
-      "protocolTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol.",
+      "protocolTakeaway": "Use for variant separation, recovery context, or secondary-signal interpretation; do not count it as direct proof for the standard 4x4 self-experiment.",
       "quality": "usable",
       "relations": [
         {
@@ -11193,7 +11434,7 @@
         "populationLabel": "Adults with metabolic syndrome"
       },
       "revision": {
-        "pageRevisionId": "sha256:bad8926267b1bdd1cccfbf2885a14983579e21dc6a7a7dab1d3e60aaadc4dfbd",
+        "pageRevisionId": "sha256:fd56b831f54cf96644c81146008359f9ef5c3565b8a8b5b3adfedd3874309f23",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -11211,7 +11452,7 @@
         "year": 2017
       },
       "status": "draft",
-      "studyDesign": "See source metadata and bibliography for exact design.",
+      "studyDesign": "Randomized metabolic-syndrome training-volume substudy",
       "summary": "Low-volume 1x4 HIIT evidence that should not be treated as the same as standard 4x4.",
       "title": "Low-volume high-intensity interval training is sufficient to ameliorate the severity of metabolic syndrome",
       "whyItMatters": "Low-volume 1x4 HIIT evidence that should not be treated as the same as standard 4x4."
@@ -11708,7 +11949,7 @@
       "aliases": [
         "pmid-29416382"
       ],
-      "body": "This source is included for **Safety and contraindications**.\n\n**Why it matters:** Cardiac-rehabilitation meta-analysis supporting efficacy and safety context under supervision.\n\n**Findings:** The review found that HIIT and moderate continuous training can both improve fitness within cardiac rehabilitation. The included studies were supervised clinical programs, not ordinary home self-experiments. The finding supports safety and efficacy context only when screening and monitoring are part of the setup.\n\n**Protocol takeaway:** Use this source only within its `claimUse: safety-only` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
+      "body": "This source is included for **Safety and contraindications**.\n\n## Quick read\n\n- **Source type:** Cardiac-rehabilitation systematic review and meta-analysis (2018).\n- **People studied or addressed:** Cardiac-rehabilitation participants (953 participants / 17 included studies).\n- **Role in Murph:** safety and clinician-guidance boundary; supports safety boundaries; screened or supervised clinical exercise, not unsupervised home training.\n- **Most relevant Murph signals:** estimated VO2max / cardio-fitness proxy, session heart-rate fidelity, heart-rate recovery, symptoms and adherence.\n\n## Why it matters for Norwegian 4x4\n\nCardiac-rehabilitation meta-analysis supporting efficacy and safety context under supervision.\n\n## What it found\n\n**Findings:** The review found that HIIT and moderate continuous training can both improve fitness within cardiac rehabilitation. The included studies were supervised clinical programs, not ordinary home self-experiments. The finding supports safety and efficacy context only when screening and monitoring are part of the setup.\n\n## How Murph should use it\n\nUse it as rehabilitation safety and implementation context, not as direct home-protocol proof.\n\nUse to set screening, clinician-guidance, and stop-condition language; do not use it as evidence that unsupervised vigorous intervals are risk-free.\n\n## Important limits\n\nCardiac rehab is a clinical care setting with monitoring and escalation paths.\n\nThe safe interpretation is narrower than “4x4 is always better.” Keep the population, supervision level, comparator, and exact interval dose visible before applying this source to a home wearable experiment.\n\n## Plain-language takeaway\n\nThis is mainly a guardrail source: it helps decide who should get medical guidance, when to stop, and why screened supervision matters.",
       "categories": [
         "norwegian-4x4",
         "hiit",
@@ -11719,7 +11960,7 @@
       "evidenceBucket": "Safety and contraindications",
       "key": "source_artifact:pmid-29416382",
       "modality": "Aerobic high-intensity interval training / Norwegian 4x4 context",
-      "murphTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol. It should shape intensity targets, population-fit, or safety interpretation without becoming a blanket guarantee for unscreened home 4x4.",
+      "murphTakeaway": "Use to set screening, clinician-guidance, and stop-condition language; do not use it as evidence that unsupervised vigorous intervals are risk-free. It should shape intensity targets, population-fit, safety interpretation, or variant separation without becoming a blanket guarantee for unscreened home 4x4.",
       "murphV1Priority": "High",
       "norwegian4x4Focus": "Context, safety, or adjacent variant",
       "pdfRightsStatus": "open_access",
@@ -11742,7 +11983,7 @@
           "stance": "safety_boundary"
         }
       ],
-      "protocolTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol.",
+      "protocolTakeaway": "Use to set screening, clinician-guidance, and stop-condition language; do not use it as evidence that unsupervised vigorous intervals are risk-free.",
       "quality": "usable",
       "relations": [
         {
@@ -11765,7 +12006,7 @@
         "populationLabel": "Cardiac-rehabilitation participants"
       },
       "revision": {
-        "pageRevisionId": "sha256:39308bc6e92594869d2efdd7b6a364f9008e8c7ec7f791cdfc33e02a670d4d8d",
+        "pageRevisionId": "sha256:a9c8085890e7bb4ea2e9d9d0ad08912fefe3ee56e8add55c097fdd86bbc0e1ca",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -11783,7 +12024,7 @@
         "year": 2018
       },
       "status": "draft",
-      "studyDesign": "See source metadata and bibliography for exact design.",
+      "studyDesign": "Cardiac-rehabilitation systematic review and meta-analysis",
       "summary": "Cardiac-rehabilitation meta-analysis supporting efficacy and safety context under supervision.",
       "title": "High-intensity interval training versus moderate-intensity continuous training within cardiac rehabilitation: a systematic review and meta-analysis",
       "whyItMatters": "Cardiac-rehabilitation meta-analysis supporting efficacy and safety context under supervision."
@@ -11792,7 +12033,7 @@
       "aliases": [
         "pmid-29502328"
       ],
-      "body": "This source is included for **Clinical synthesis and overclaim guardrails**.\n\n**Findings:** This updated CAD/HF systematic review and meta-analysis synthesizes interval-versus-continuous training evidence in clinical cardiovascular populations. It keeps disease-population outcomes visible while preventing those results from standing in for unscreened home 4x4 evidence.\n\n**Why it matters:** Adds a clinical synthesis around CAD/HF trials so early positive disease-population studies do not dominate the practical claim set.\n\n**Protocol takeaway:** Use as clinical synthesis and overclaim guardrail; do not cite it as direct proof for unscreened home 4x4.",
+      "body": "This source is included for **Clinical synthesis and overclaim guardrails**.\n\n## Quick read\n\n- **Source type:** Updated CAD and heart-failure aerobic-interval meta-analysis (2018).\n- **People studied or addressed:** Patients with coronary artery disease or heart failure (1,080 participants / 24 included studies).\n- **Role in Murph:** clinical context and overclaim control; mixed evidence; screened or supervised clinical exercise, not unsupervised home training.\n- **Most relevant Murph signals:** estimated VO2max / cardio-fitness proxy, clinical secondary outcomes, safety and supervision context.\n\n## Why it matters for Norwegian 4x4\n\nAdds a clinical synthesis around CAD/HF trials so early positive disease-population studies do not dominate the practical claim set.\n\n## What it found\n\n**Findings:** This updated CAD/HF systematic review and meta-analysis synthesizes interval-versus-continuous training evidence in clinical cardiovascular populations. It keeps disease-population outcomes visible while preventing those results from standing in for unscreened home 4x4 evidence.\n\n## How Murph should use it\n\nUse it to calibrate the strength of superiority claims and keep population boundaries visible.\n\nUse as clinical synthesis and overclaim guardrail; do not cite it as direct proof for unscreened home 4x4.\n\n## Important limits\n\nClinical synthesis is valuable context, but not direct evidence for unscreened users.\n\nThe safe interpretation is narrower than “4x4 is always better.” Keep the population, supervision level, comparator, and exact interval dose visible before applying this source to a home wearable experiment.\n\n## Plain-language takeaway\n\nThis helps explain where the 4x4 idea came from in supervised clinical exercise, but patients with coronary artery disease or heart failure are not the same as unscreened wellness users.",
       "categories": [
         "norwegian-4x4",
         "hiit",
@@ -11845,13 +12086,17 @@
         "aggregateRole": "synthesis",
         "designKind": "meta_analysis",
         "designLabel": "Updated CAD and heart-failure aerobic-interval meta-analysis",
+        "includedStudyCount": 24,
         "notes": [
+          "The review reports 1,080 participants across 24 included studies; treat that as an aggregated clinical-synthesis count rather than a single trial sample.",
           "The review is clinically useful but population-limited for Murph's general wearable experiment."
         ],
+        "participantCount": 1080,
+        "participantCountKind": "reported",
         "populationLabel": "Patients with coronary artery disease or heart failure"
       },
       "revision": {
-        "pageRevisionId": "sha256:b231df54478cc2dd515102cc1b3aad52efaa77ca82a85c2bb005331000f8d4ec",
+        "pageRevisionId": "sha256:35a572eef4b37843d2347970e3ff1ad4f274a5ba6090c2c5694516eb3db1fa9b",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -11869,7 +12114,7 @@
         "year": 2018
       },
       "status": "draft",
-      "studyDesign": "See source metadata and bibliography for exact design.",
+      "studyDesign": "Updated CAD and heart-failure aerobic-interval meta-analysis",
       "summary": "Updated CAD/HF synthesis that keeps clinical effect claims separated from the general self-experiment protocol.",
       "title": "Aerobic interval vs. continuous training in patients with coronary artery disease or heart failure: an updated systematic review and meta-analysis with a focus on secondary outcomes",
       "whyItMatters": "Adds a clinical synthesis around CAD/HF trials so early positive disease-population studies do not dominate the practical claim set."
@@ -11878,7 +12123,7 @@
       "aliases": [
         "Kunutsor 2018 sauna stroke cohort"
       ],
-      "body": "This source is the corrected article record for the Finnish sauna stroke cohort. It replaces the earlier Health Commons use of PMID 30665914, which is a reader-response record rather than the cohort paper.\n\n**Findings:** Correct PubMed record for the Finnish prospective stroke cohort; used as long-term context, not as a short-term protocol endpoint. Corrects the stroke cohort citation and keeps cerebrovascular findings as rationale-only evidence.\n\n**Why it matters:** it belongs in the long-term cohort rationale set, but it should not become a promised short-term personal result.",
+      "body": "This source is the corrected article record for the Finnish sauna stroke cohort. It replaces the earlier Health Commons use of PMID 30665914, which is a reader-response record rather than the cohort paper.\n\n**Findings:** Correct PubMed record for the Finnish prospective stroke cohort of 1,628 adults with median 14.9-year follow-up; used as long-term context, not as a short-term protocol endpoint. Corrects the stroke cohort citation and keeps cerebrovascular findings as rationale-only evidence.\n\n**Why it matters:** it belongs in the long-term cohort rationale set, but it should not become a promised short-term personal result.",
       "categories": [
         "sauna",
         "observational-cohort",
@@ -11925,13 +12170,13 @@
         "cohortKey": "kihd-men-women-stroke",
         "designKind": "prospective_cohort",
         "designLabel": "Prospective cohort",
-        "durationLabel": "Long-term stroke follow-up",
+        "durationLabel": "Median 14.9-year stroke follow-up",
         "participantCount": 1628,
         "participantCountKind": "reported",
         "populationLabel": "Finnish men and women aged 53–74 without known prior stroke"
       },
       "revision": {
-        "pageRevisionId": "sha256:bec120105fa52c4b296400c13db74e83deae8b25e9ba2c9553c35d43cbf33ef1",
+        "pageRevisionId": "sha256:a6644d3a5559c6b44080c6e8a8704db7cf141b493025a593ad843a272ec1179f",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -11950,7 +12195,7 @@
       },
       "status": "draft",
       "studyDesign": "Prospective cohort",
-      "summary": "Correct PubMed record for the Finnish prospective stroke cohort; used as long-term context, not as a short-term protocol endpoint.",
+      "summary": "Correct PubMed record for the Finnish prospective stroke cohort of 1,628 adults with median 14.9-year follow-up; used as long-term context, not as a short-term protocol endpoint.",
       "title": "Sauna bathing reduces the risk of stroke in Finnish men and women: A prospective cohort study",
       "whyItMatters": "Corrects the stroke cohort citation and keeps cerebrovascular findings as rationale-only evidence."
     },
@@ -12277,7 +12522,7 @@
       "aliases": [
         "pmid-30293954"
       ],
-      "body": "This source is included for **Wearable or testable signals**.\n\n**Why it matters:** HRV/autonomic-control synthesis; useful for setting cautious expectations around HRV.\n\n**Findings:** The review found limited evidence that HIIT may change cardiac autonomic-control markers such as HRV in some populations. The evidence base was small and heterogeneous. The finding makes HRV an exploratory signal, not a primary verdict for Norwegian 4x4.\n\n**Protocol takeaway:** Use this source only within its `claimUse: context-only` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
+      "body": "This source is included for **Wearable or testable signals**.\n\n## Quick read\n\n- **Source type:** Systematic review of cardiac autonomic-control outcomes (2019).\n- **People studied or addressed:** Healthy adults and cardiometabolic-risk participants (6 included studies).\n- **Role in Murph:** adjacent-variant or recovery-context evidence; mixed evidence; useful for measurement and logging, not for efficacy proof.\n- **Most relevant Murph signals:** estimated VO2max / cardio-fitness proxy, session heart-rate fidelity, heart-rate recovery, symptoms and adherence.\n\n## Why it matters for Norwegian 4x4\n\nHRV/autonomic-control synthesis; useful for setting cautious expectations around HRV.\n\n## What it found\n\n**Findings:** The review found limited evidence that HIIT may change cardiac autonomic-control markers such as HRV in some populations. The evidence base was small and heterogeneous. The finding makes HRV an exploratory signal, not a primary verdict for Norwegian 4x4.\n\n## How Murph should use it\n\nKeep HRV and sleep as recovery context rather than promised outcomes.\n\nUse to improve logging and intensity interpretation; do not treat measurement-context evidence as proof of a health outcome.\n\n## Important limits\n\nAutonomic measures are sensitive to illness, alcohol, stress, sleep, and total training load.\n\nThe safe interpretation is narrower than “4x4 is always better.” Keep the population, supervision level, comparator, and exact interval dose visible before applying this source to a home wearable experiment.\n\n## Plain-language takeaway\n\nThis is useful nearby evidence, but it should not be mixed into the direct claim that the standard four-interval recipe will improve a user's wearable fitness score.",
       "categories": [
         "norwegian-4x4",
         "hiit",
@@ -12288,7 +12533,7 @@
       "evidenceBucket": "Wearable or testable signals",
       "key": "source_artifact:pmid-30293954",
       "modality": "Aerobic high-intensity interval training / Norwegian 4x4 context",
-      "murphTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol. It should shape intensity targets, population-fit, or safety interpretation without becoming a blanket guarantee for unscreened home 4x4.",
+      "murphTakeaway": "Use to improve logging and intensity interpretation; do not treat measurement-context evidence as proof of a health outcome. It should shape intensity targets, population-fit, safety interpretation, or variant separation without becoming a blanket guarantee for unscreened home 4x4.",
       "murphV1Priority": "Medium",
       "norwegian4x4Focus": "Context, safety, or adjacent variant",
       "pdfRightsStatus": "open_access",
@@ -12315,7 +12560,7 @@
           "stance": "mixed"
         }
       ],
-      "protocolTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol.",
+      "protocolTakeaway": "Use to improve logging and intensity interpretation; do not treat measurement-context evidence as proof of a health outcome.",
       "quality": "usable",
       "relations": [
         {
@@ -12336,7 +12581,7 @@
         "populationLabel": "Healthy adults and cardiometabolic-risk participants"
       },
       "revision": {
-        "pageRevisionId": "sha256:b3e699ef34f1f1fe97fc3718c6016b6127f5e44babc636537dfbe08c1f8b01f5",
+        "pageRevisionId": "sha256:887e5dacb6538fe14083148f0e3d2f93a10f911901ba14848da158010d79fcab",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -12354,7 +12599,7 @@
         "year": 2019
       },
       "status": "draft",
-      "studyDesign": "See source metadata and bibliography for exact design.",
+      "studyDesign": "Systematic review of cardiac autonomic-control outcomes",
       "summary": "HRV/autonomic-control synthesis; useful for setting cautious expectations around HRV.",
       "title": "Can high-intensity interval training change cardiac autonomic control? A systematic review",
       "whyItMatters": "HRV/autonomic-control synthesis; useful for setting cautious expectations around HRV."
@@ -12363,7 +12608,7 @@
       "aliases": [
         "pmid-30376749"
       ],
-      "body": "This source is included for **Safety and contraindications**.\n\n**Why it matters:** Systematic review of HIIT safety in cardiovascular disease populations.\n\n**Findings:** The safety review found serious adverse events during supervised cardiovascular-disease HIIT studies were uncommon. The evidence still came from screened and monitored rehabilitation populations. The finding supports cautious safety language rather than unsupervised disease-population claims.\n\n**Protocol takeaway:** Use this source only within its `claimUse: safety-only` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
+      "body": "This source is included for **Safety and contraindications**.\n\n## Quick read\n\n- **Source type:** Cardiovascular-disease HIIT safety systematic review (2018).\n- **People studied or addressed:** Cardiovascular-disease rehabilitation patients (1,117 participants / 23 included studies).\n- **Role in Murph:** safety and clinician-guidance boundary; supports safety boundaries; screened or supervised clinical exercise, not unsupervised home training.\n- **Most relevant Murph signals:** estimated VO2max / cardio-fitness proxy, session heart-rate fidelity, heart-rate recovery, symptoms and adherence.\n\n## Why it matters for Norwegian 4x4\n\nSystematic review of HIIT safety in cardiovascular disease populations.\n\n## What it found\n\n**Findings:** The safety review found serious adverse events during supervised cardiovascular-disease HIIT studies were uncommon. The evidence still came from screened and monitored rehabilitation populations. The finding supports cautious safety language rather than unsupervised disease-population claims.\n\n## How Murph should use it\n\nUse it to describe safety boundaries for higher-risk users, not to remove clinician guidance.\n\nUse to set screening, clinician-guidance, and stop-condition language; do not use it as evidence that unsupervised vigorous intervals are risk-free.\n\n## Important limits\n\nSupervision, screening, medications, and disease status determine whether vigorous intervals are appropriate.\n\nThe safe interpretation is narrower than “4x4 is always better.” Keep the population, supervision level, comparator, and exact interval dose visible before applying this source to a home wearable experiment.\n\n## Plain-language takeaway\n\nThis is mainly a guardrail source: it helps decide who should get medical guidance, when to stop, and why screened supervision matters.",
       "categories": [
         "norwegian-4x4",
         "hiit",
@@ -12374,7 +12619,7 @@
       "evidenceBucket": "Safety and contraindications",
       "key": "source_artifact:pmid-30376749",
       "modality": "Aerobic high-intensity interval training / Norwegian 4x4 context",
-      "murphTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol. It should shape intensity targets, population-fit, or safety interpretation without becoming a blanket guarantee for unscreened home 4x4.",
+      "murphTakeaway": "Use to set screening, clinician-guidance, and stop-condition language; do not use it as evidence that unsupervised vigorous intervals are risk-free. It should shape intensity targets, population-fit, safety interpretation, or variant separation without becoming a blanket guarantee for unscreened home 4x4.",
       "murphV1Priority": "High",
       "norwegian4x4Focus": "Context, safety, or adjacent variant",
       "pdfRightsStatus": "permission_required",
@@ -12397,7 +12642,7 @@
           "stance": "safety_boundary"
         }
       ],
-      "protocolTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol.",
+      "protocolTakeaway": "Use to set screening, clinician-guidance, and stop-condition language; do not use it as evidence that unsupervised vigorous intervals are risk-free.",
       "quality": "usable",
       "relations": [
         {
@@ -12421,7 +12666,7 @@
         "populationLabel": "Cardiovascular-disease rehabilitation patients"
       },
       "revision": {
-        "pageRevisionId": "sha256:371c3d394ef03ad44f1ab59fbda9ef3d4b8134718d1f79ff1ca9061644c3c864",
+        "pageRevisionId": "sha256:240e4372b82edea294ac2f6a56d83cf196a0e263d5dd93a0b97941799b191ac1",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -12439,7 +12684,7 @@
         "year": 2018
       },
       "status": "draft",
-      "studyDesign": "See source metadata and bibliography for exact design.",
+      "studyDesign": "Cardiovascular-disease HIIT safety systematic review",
       "summary": "Systematic review of HIIT safety in cardiovascular disease populations.",
       "title": "High-intensity interval training for patients with cardiovascular disease-is it safe? A systematic review",
       "whyItMatters": "Systematic review of HIIT safety in cardiovascular disease populations."
@@ -12753,7 +12998,7 @@
       "aliases": [
         "pmid-30733142"
       ],
-      "body": "This source is included for **Protocol dose and design**.\n\n**Why it matters:** Meta-analysis used to justify long-interval HIIT as a plausible VO2max-oriented design class.\n\n**Findings:** The meta-analysis found HIIT improved VO2max across adult populations and protocol types. Longer intervals, higher total interval volume, and multi-week programs showed stronger effects. The finding supports the long-interval design class behind 4x4 without proving every implementation is superior.\n\n**Protocol takeaway:** Use this source only within its `claimUse: supports-protocol` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
+      "body": "This source is included for **Protocol dose and design**.\n\n## Quick read\n\n- **Source type:** Meta-analysis of randomized HIIT protocol trials (2019).\n- **People studied or addressed:** Healthy, overweight/obese, and athletic adults (1,514 participants / 53 included studies).\n- **Role in Murph:** direct or close support for the cardio-fitness claim; supports evidence; same aerobic-HIIT mechanism, but not always this exact Murph recipe.\n- **Most relevant Murph signals:** estimated VO2max / cardio-fitness proxy, session heart-rate fidelity, heart-rate recovery, symptoms and adherence.\n\n## Why it matters for Norwegian 4x4\n\nMeta-analysis used to justify long-interval HIIT as a plausible VO2max-oriented design class.\n\n## What it found\n\n**Findings:** The meta-analysis found HIIT improved VO2max across adult populations and protocol types. Longer intervals, higher total interval volume, and multi-week programs showed stronger effects. The finding supports the long-interval design class behind 4x4 without proving every implementation is superior.\n\n## How Murph should use it\n\nSupports the design choice to use repeated 4-minute aerobic intervals rather than treating all HIIT as interchangeable.\n\nUse as support for a bounded cardio-fitness experiment when the hard intervals actually reach the intended aerobic intensity.\n\n## Important limits\n\nIt pools many HIIT protocols and adults, so it is support for the protocol family, not only Norwegian 4x4.\n\nThe safe interpretation is narrower than “4x4 is always better.” Keep the population, supervision level, comparator, and exact interval dose visible before applying this source to a home wearable experiment.\n\n## Plain-language takeaway\n\nFor a generally healthy user, this belongs in the evidence pile that makes a 6-week 4x4 fitness test plausible, as long as the session is actually hard enough and recovery stays reasonable.",
       "categories": [
         "norwegian-4x4",
         "hiit",
@@ -12764,7 +13009,7 @@
       "evidenceBucket": "Protocol dose and design",
       "key": "source_artifact:pmid-30733142",
       "modality": "Aerobic high-intensity interval training / Norwegian 4x4 context",
-      "murphTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol. It should shape intensity targets, population-fit, or safety interpretation without becoming a blanket guarantee for unscreened home 4x4.",
+      "murphTakeaway": "Use as support for a bounded cardio-fitness experiment when the hard intervals actually reach the intended aerobic intensity. It should shape intensity targets, population-fit, safety interpretation, or variant separation without becoming a blanket guarantee for unscreened home 4x4.",
       "murphV1Priority": "High",
       "norwegian4x4Focus": "Direct support",
       "pdfRightsStatus": "not_redistributable",
@@ -12790,7 +13035,7 @@
           "stance": "supports"
         }
       ],
-      "protocolTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol.",
+      "protocolTakeaway": "Use as support for a bounded cardio-fitness experiment when the hard intervals actually reach the intended aerobic intensity.",
       "quality": "usable",
       "relations": [
         {
@@ -12813,7 +13058,7 @@
         "populationLabel": "Healthy, overweight/obese, and athletic adults"
       },
       "revision": {
-        "pageRevisionId": "sha256:729093eabb8bd66f15f59bd766854e02c90be92be19e1bbb3efb7128b7c78cdf",
+        "pageRevisionId": "sha256:0b6cdbd6992e4fe5c286dad8ed90b899cdfafd53a84dd1a9dd55b22195ece048",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -12831,7 +13076,7 @@
         "year": 2019
       },
       "status": "draft",
-      "studyDesign": "See source metadata and bibliography for exact design.",
+      "studyDesign": "Meta-analysis of randomized HIIT protocol trials",
       "summary": "Meta-analysis used to justify long-interval HIIT as a plausible VO2max-oriented design class.",
       "title": "Effects of different protocols of high intensity interval training for VO2max improvements in adults: a meta-analysis of randomised controlled trials",
       "whyItMatters": "Meta-analysis used to justify long-interval HIIT as a plausible VO2max-oriented design class."
@@ -13939,7 +14184,7 @@
       "aliases": [
         "pmid-32100573"
       ],
-      "body": "This source is included for **Safety and contraindications**.\n\n**Why it matters:** AHA scientific statement for acute cardiovascular event risk and progression language.\n\n**Findings:** The AHA statement emphasizes that regular physical activity lowers cardiovascular risk, while strenuous exercise can transiently raise acute event risk in susceptible people. That risk is especially relevant for inactive people or people with unrecognized disease starting vigorous exercise. The finding supports gradual progression and screening language.\n\n**Protocol takeaway:** Use this source only within its `claimUse: safety-only` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
+      "body": "This source is included for **Safety and contraindications**.\n\n## Quick read\n\n- **Source type:** American Heart Association scientific statement (2020).\n- **People studied or addressed:** Adults considering moderate-to-vigorous or high-volume exercise.\n- **Role in Murph:** safety and clinician-guidance boundary; supports safety boundaries; broad guideline context, not protocol-specific efficacy evidence.\n- **Most relevant Murph signals:** estimated VO2max / cardio-fitness proxy, session heart-rate fidelity, heart-rate recovery, symptoms and adherence.\n\n## Why it matters for Norwegian 4x4\n\nAHA scientific statement for acute cardiovascular event risk and progression language.\n\n## What it found\n\n**Findings:** The AHA statement emphasizes that regular physical activity lowers cardiovascular risk, while strenuous exercise can transiently raise acute event risk in susceptible people. That risk is especially relevant for inactive people or people with unrecognized disease starting vigorous exercise. The finding supports gradual progression and screening language.\n\n## How Murph should use it\n\nSupports caution language for symptoms, recent illness, heart disease, and other higher-risk situations.\n\nUse to set screening, clinician-guidance, and stop-condition language; do not use it as evidence that unsupervised vigorous intervals are risk-free.\n\n## Important limits\n\nGuidelines frame risk management; they do not test the Murph 4x4 recipe.\n\nThe safe interpretation is narrower than “4x4 is always better.” Keep the population, supervision level, comparator, and exact interval dose visible before applying this source to a home wearable experiment.\n\n## Plain-language takeaway\n\nThis is mainly a guardrail source: it helps decide who should get medical guidance, when to stop, and why screened supervision matters.",
       "categories": [
         "norwegian-4x4",
         "hiit",
@@ -13950,7 +14195,7 @@
       "evidenceBucket": "Safety and contraindications",
       "key": "source_artifact:pmid-32100573",
       "modality": "Aerobic high-intensity interval training / Norwegian 4x4 context",
-      "murphTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol. It should shape intensity targets, population-fit, or safety interpretation without becoming a blanket guarantee for unscreened home 4x4.",
+      "murphTakeaway": "Use to set screening, clinician-guidance, and stop-condition language; do not use it as evidence that unsupervised vigorous intervals are risk-free. It should shape intensity targets, population-fit, safety interpretation, or variant separation without becoming a blanket guarantee for unscreened home 4x4.",
       "murphV1Priority": "High",
       "norwegian4x4Focus": "Context, safety, or adjacent variant",
       "pdfRightsStatus": "not_redistributable",
@@ -13973,7 +14218,7 @@
           "stance": "safety_boundary"
         }
       ],
-      "protocolTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol.",
+      "protocolTakeaway": "Use to set screening, clinician-guidance, and stop-condition language; do not use it as evidence that unsupervised vigorous intervals are risk-free.",
       "quality": "usable",
       "relations": [
         {
@@ -13993,7 +14238,7 @@
         "populationLabel": "Adults considering moderate-to-vigorous or high-volume exercise"
       },
       "revision": {
-        "pageRevisionId": "sha256:9dce53ca4b0963ce8ee10b4641735874e51a7d9b7bef0997920034b3e1083fcf",
+        "pageRevisionId": "sha256:9953b89adcdb910b7d902706795367840eed4459155fef50e2d0173ddabb3357",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -14011,7 +14256,7 @@
         "year": 2020
       },
       "status": "draft",
-      "studyDesign": "See source metadata and bibliography for exact design.",
+      "studyDesign": "American Heart Association scientific statement",
       "summary": "AHA scientific statement for acute cardiovascular event risk and progression language.",
       "title": "Exercise-related acute cardiovascular events and potential deleterious adaptations following long-term exercise training: placing the risks into perspective",
       "whyItMatters": "AHA scientific statement for acute cardiovascular event risk and progression language."
@@ -14414,7 +14659,7 @@
       "whyItMatters": "Supports a clinician-guided bipolar variant but reinforces the need to keep mood-disorder safety separate."
     },
     {
-      "body": "This source is included for **acute and mechanistic** cardiovascular context.\n\n**Findings:** Acute Finnish-sauna vascular study used as cardiovascular-context evidence while preserving clinical-population and acute-outcome caveats. Adds a clinically relevant acute vascular response paper without implying that a brief self-experiment should promise durable vascular change.\n\n**Why it matters:** It supports acute vascular-response plausibility while reinforcing that clinical-status and endpoint choice matter.\n\n**Potential Murph endpoints/context:** blood pressure context, session heart rate, vascular-function context, safety screening\n\n**Protocol takeaway:** Use as context, not as a 21-day wearable-result promise.",
+      "body": "This source is included for **acute and mechanistic** cardiovascular context.\n\n**Findings:** Acute Finnish-sauna vascular study in 22 adults with stable coronary artery disease, used as cardiovascular-context evidence while preserving clinical-population and acute-outcome caveats. Adds a clinically relevant acute vascular response paper without implying that a brief self-experiment should promise durable vascular change.\n\n**Why it matters:** It supports acute vascular-response plausibility while reinforcing that clinical-status and endpoint choice matter.\n\n**Potential Murph endpoints/context:** blood pressure context, session heart rate, vascular-function context, safety screening\n\n**Protocol takeaway:** Use as context, not as a 21-day wearable-result promise.",
       "categories": [
         "sauna",
         "study",
@@ -14463,13 +14708,16 @@
         "aggregateRole": "primary",
         "designKind": "acute_mechanistic",
         "designLabel": "Acute Finnish-sauna vascular study",
+        "durationLabel": "Single-session 2 x 10-minute Finnish sauna exposure",
         "notes": [
           "Clinical-population context, not a general healthy-user outcome promise."
         ],
+        "participantCount": 22,
+        "participantCountKind": "reported",
         "populationLabel": "Middle-aged and older adults with stable coronary artery disease"
       },
       "revision": {
-        "pageRevisionId": "sha256:ed3871726ca82dd91dad1f4c7f5b1eee732ad1b8bf92e4286cfaced70f8c53b4",
+        "pageRevisionId": "sha256:52e8351b2c9b6bed931737a078c95ad4f8980fa101c8051e66e80dc8fb00baf4",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -14488,7 +14736,7 @@
       },
       "status": "draft",
       "studyDesign": "Acute clinical physiology study",
-      "summary": "Acute Finnish-sauna vascular study used as cardiovascular-context evidence while preserving clinical-population and acute-outcome caveats.",
+      "summary": "Acute Finnish-sauna vascular study in 22 adults with stable coronary artery disease, used as cardiovascular-context evidence while preserving clinical-population and acute-outcome caveats.",
       "title": "Acute vascular benefits of Finnish sauna bathing in patients with stable coronary artery disease",
       "whyItMatters": "Adds a clinically relevant acute vascular response paper without implying that a brief self-experiment should promise durable vascular change."
     },
@@ -14650,7 +14898,7 @@
       "aliases": [
         "pmid-32860412"
       ],
-      "body": "This source is included for **Safety and contraindications**.\n\n**Why it matters:** Backbone guideline for cardiovascular disease, exercise eligibility, and clinician-clearance boundaries.\n\n**Findings:** The ESC guideline treats exercise as beneficial for many cardiovascular conditions but makes eligibility disease- and risk-specific. Higher-intensity exercise is appropriate only when clinical status, risk category, and progression support it. The finding keeps Norwegian 4x4 out of unsupervised self-experiment territory for users with cardiovascular disease.\n\n**Protocol takeaway:** Use this source only within its `claimUse: safety-only` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
+      "body": "This source is included for **Safety and contraindications**.\n\n## Quick read\n\n- **Source type:** European Society of Cardiology guideline (2021).\n- **People studied or addressed:** People with cardiovascular disease considering exercise or sport.\n- **Role in Murph:** safety and clinician-guidance boundary; supports safety boundaries; broad guideline context, not protocol-specific efficacy evidence.\n- **Most relevant Murph signals:** estimated VO2max / cardio-fitness proxy, session heart-rate fidelity, heart-rate recovery, symptoms and adherence.\n\n## Why it matters for Norwegian 4x4\n\nBackbone guideline for cardiovascular disease, exercise eligibility, and clinician-clearance boundaries.\n\n## What it found\n\n**Findings:** The ESC guideline treats exercise as beneficial for many cardiovascular conditions but makes eligibility disease- and risk-specific. Higher-intensity exercise is appropriate only when clinical status, risk category, and progression support it. The finding keeps Norwegian 4x4 out of unsupervised self-experiment territory for users with cardiovascular disease.\n\n## How Murph should use it\n\nUse it to keep clinician-clearance rules visible for known or suspected cardiovascular disease.\n\nUse to set screening, clinician-guidance, and stop-condition language; do not use it as evidence that unsupervised vigorous intervals are risk-free.\n\n## Important limits\n\nThe guideline is intentionally broader than this protocol and should not be treated as efficacy evidence.\n\nThe safe interpretation is narrower than “4x4 is always better.” Keep the population, supervision level, comparator, and exact interval dose visible before applying this source to a home wearable experiment.\n\n## Plain-language takeaway\n\nThis is mainly a guardrail source: it helps decide who should get medical guidance, when to stop, and why screened supervision matters.",
       "categories": [
         "norwegian-4x4",
         "hiit",
@@ -14661,7 +14909,7 @@
       "evidenceBucket": "Safety and contraindications",
       "key": "source_artifact:pmid-32860412",
       "modality": "Aerobic high-intensity interval training / Norwegian 4x4 context",
-      "murphTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol. It should shape intensity targets, population-fit, or safety interpretation without becoming a blanket guarantee for unscreened home 4x4.",
+      "murphTakeaway": "Use to set screening, clinician-guidance, and stop-condition language; do not use it as evidence that unsupervised vigorous intervals are risk-free. It should shape intensity targets, population-fit, safety interpretation, or variant separation without becoming a blanket guarantee for unscreened home 4x4.",
       "murphV1Priority": "High",
       "norwegian4x4Focus": "Context, safety, or adjacent variant",
       "pdfRightsStatus": "not_redistributable",
@@ -14684,7 +14932,7 @@
           "stance": "safety_boundary"
         }
       ],
-      "protocolTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol.",
+      "protocolTakeaway": "Use to set screening, clinician-guidance, and stop-condition language; do not use it as evidence that unsupervised vigorous intervals are risk-free.",
       "quality": "usable",
       "relations": [
         {
@@ -14704,7 +14952,7 @@
         "populationLabel": "People with cardiovascular disease considering exercise or sport"
       },
       "revision": {
-        "pageRevisionId": "sha256:db72a0913a99ab73a24469fe5104dc7b34d612b1cc2c44e1eeb912405da4db18",
+        "pageRevisionId": "sha256:d5d161cbca23f2683bc7f4bfcaca3bcdd4492fea97745c615ee6a2b7a50e96bf",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -14722,7 +14970,7 @@
         "year": 2021
       },
       "status": "draft",
-      "studyDesign": "See source metadata and bibliography for exact design.",
+      "studyDesign": "European Society of Cardiology guideline",
       "summary": "Backbone guideline for cardiovascular disease, exercise eligibility, and clinician-clearance boundaries.",
       "title": "2020 ESC Guidelines on sports cardiology and exercise in patients with cardiovascular disease",
       "whyItMatters": "Backbone guideline for cardiovascular disease, exercise eligibility, and clinician-clearance boundaries."
@@ -14887,7 +15135,7 @@
       "aliases": [
         "pmid-33239350"
       ],
-      "body": "This source is included for **Public health context**.\n\n**Why it matters:** Public-health context showing vigorous aerobic exercise as one option within weekly activity guidance.\n\n**Findings:** The WHO guideline recommends regular aerobic activity for adults and recognizes vigorous activity as one valid way to meet weekly targets. It also emphasizes reducing sedentary behavior and adapting activity to health status. The finding supports public-health context, not a specific 4x4 efficacy claim.\n\n**Protocol takeaway:** Use this source only within its `claimUse: context-only` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
+      "body": "This source is included for **Public health context**.\n\n## Quick read\n\n- **Source type:** World Health Organization physical-activity guideline (2020).\n- **People studied or addressed:** Children, adolescents, adults, older adults, pregnant/postpartum people, and people living with chronic conditions or disability.\n- **Role in Murph:** safety and clinician-guidance boundary; context only evidence; broad guideline context, not protocol-specific efficacy evidence.\n- **Most relevant Murph signals:** estimated VO2max / cardio-fitness proxy, session heart-rate fidelity, heart-rate recovery, symptoms and adherence.\n\n## Why it matters for Norwegian 4x4\n\nPublic-health context showing vigorous aerobic exercise as one option within weekly activity guidance.\n\n## What it found\n\n**Findings:** The WHO guideline recommends regular aerobic activity for adults and recognizes vigorous activity as one valid way to meet weekly targets. It also emphasizes reducing sedentary behavior and adapting activity to health status. The finding supports public-health context, not a specific 4x4 efficacy claim.\n\n## How Murph should use it\n\nUse as background that movement matters, while keeping Norwegian 4x4 as one bounded experiment.\n\nUse to set screening, clinician-guidance, and stop-condition language; do not use it as evidence that unsupervised vigorous intervals are risk-free.\n\n## Important limits\n\nPublic-health guidance is not evidence that high-intensity intervals are the best fit for every user.\n\nThe safe interpretation is narrower than “4x4 is always better.” Keep the population, supervision level, comparator, and exact interval dose visible before applying this source to a home wearable experiment.\n\n## Plain-language takeaway\n\nThis is mainly a guardrail source: it helps decide who should get medical guidance, when to stop, and why screened supervision matters.",
       "categories": [
         "norwegian-4x4",
         "hiit",
@@ -14898,7 +15146,7 @@
       "evidenceBucket": "Public health context",
       "key": "source_artifact:pmid-33239350",
       "modality": "Aerobic high-intensity interval training / Norwegian 4x4 context",
-      "murphTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol. It should shape intensity targets, population-fit, or safety interpretation without becoming a blanket guarantee for unscreened home 4x4.",
+      "murphTakeaway": "Use to set screening, clinician-guidance, and stop-condition language; do not use it as evidence that unsupervised vigorous intervals are risk-free. It should shape intensity targets, population-fit, safety interpretation, or variant separation without becoming a blanket guarantee for unscreened home 4x4.",
       "murphV1Priority": "Medium",
       "norwegian4x4Focus": "Context, safety, or adjacent variant",
       "pdfRightsStatus": "permission_required",
@@ -14921,7 +15169,7 @@
           "stance": "context_only"
         }
       ],
-      "protocolTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol.",
+      "protocolTakeaway": "Use to set screening, clinician-guidance, and stop-condition language; do not use it as evidence that unsupervised vigorous intervals are risk-free.",
       "quality": "usable",
       "relations": [
         {
@@ -14941,7 +15189,7 @@
         "populationLabel": "Children, adolescents, adults, older adults, pregnant/postpartum people, and people living with chronic conditions or disability"
       },
       "revision": {
-        "pageRevisionId": "sha256:963b2a60fa915f33991121a3dffd5a08526166c5676ce66c58d8d999f78086c9",
+        "pageRevisionId": "sha256:bcb4f002a1ce25aebe3e3cf07fe50095845b327da4488f5e89588cd52710f325",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -14959,7 +15207,7 @@
         "year": 2020
       },
       "status": "draft",
-      "studyDesign": "See source metadata and bibliography for exact design.",
+      "studyDesign": "World Health Organization physical-activity guideline",
       "summary": "Public-health context showing vigorous aerobic exercise as one option within weekly activity guidance.",
       "title": "World Health Organization 2020 guidelines on physical activity and sedentary behaviour",
       "whyItMatters": "Public-health context showing vigorous aerobic exercise as one option within weekly activity guidance."
@@ -15045,7 +15293,7 @@
       "aliases": [
         "pmid-33560320"
       ],
-      "body": "This source is included for **Mixed and null clinical evidence**.\n\n**Why it matters:** HFpEF clinical trial showing no significant primary peak-VO2 advantage for HIIT over comparators.\n\n**Findings:** The HFpEF randomized trial found no statistically significant, clinically meaningful advantage for HIIT or moderate training over guideline-based physical-activity advice on peak VO2. Short-term changes did not become strong group differences at 12 months. The finding argues against applying healthy-adult 4x4 claims to HFpEF treatment.\n\n**Protocol takeaway:** Use this source only within its `claimUse: context-only` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
+      "body": "This source is included for **Mixed and null clinical evidence**.\n\n## Quick read\n\n- **Source type:** Randomized HFpEF exercise-mode trial (2021).\n- **People studied or addressed:** Heart failure patients with preserved ejection fraction (180 participants).\n- **Role in Murph:** clinical context and overclaim control; does not confirm evidence; screened or supervised clinical exercise, not unsupervised home training.\n- **Most relevant Murph signals:** estimated VO2max / cardio-fitness proxy, session heart-rate fidelity, heart-rate recovery, symptoms and adherence.\n\n## Why it matters for Norwegian 4x4\n\nHFpEF clinical trial showing no significant primary peak-VO2 advantage for HIIT over comparators.\n\n## What it found\n\n**Findings:** The HFpEF randomized trial found no statistically significant, clinically meaningful advantage for HIIT or moderate training over guideline-based physical-activity advice on peak VO2. Short-term changes did not become strong group differences at 12 months. The finding argues against applying healthy-adult 4x4 claims to HFpEF treatment.\n\n## How Murph should use it\n\nKeeps the Murph claim bounded to a fitness experiment, not a treatment claim for heart failure.\n\nUse to calibrate clinical context and avoid overclaiming superiority; do not treat supervised disease-population results as direct home-protocol proof.\n\n## Important limits\n\nHFpEF is a clinical population with different risks and supervision needs.\n\nThe safe interpretation is narrower than “4x4 is always better.” Keep the population, supervision level, comparator, and exact interval dose visible before applying this source to a home wearable experiment.\n\n## Plain-language takeaway\n\nThis helps explain where the 4x4 idea came from in supervised clinical exercise, but heart-failure patients with preserved ejection fraction are not the same as unscreened wellness users.",
       "categories": [
         "norwegian-4x4",
         "hiit",
@@ -15056,7 +15304,7 @@
       "evidenceBucket": "Mixed and null clinical evidence",
       "key": "source_artifact:pmid-33560320",
       "modality": "Aerobic high-intensity interval training / Norwegian 4x4 context",
-      "murphTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol. It should shape intensity targets, population-fit, or safety interpretation without becoming a blanket guarantee for unscreened home 4x4.",
+      "murphTakeaway": "Use to calibrate clinical context and avoid overclaiming superiority; do not treat supervised disease-population results as direct home-protocol proof. It should shape intensity targets, population-fit, safety interpretation, or variant separation without becoming a blanket guarantee for unscreened home 4x4.",
       "murphV1Priority": "High",
       "norwegian4x4Focus": "Context, safety, or adjacent variant",
       "pdfRightsStatus": "permission_required",
@@ -15082,7 +15330,7 @@
           "stance": "does_not_confirm"
         }
       ],
-      "protocolTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol.",
+      "protocolTakeaway": "Use to calibrate clinical context and avoid overclaiming superiority; do not treat supervised disease-population results as direct home-protocol proof.",
       "quality": "usable",
       "relations": [
         {
@@ -15106,7 +15354,7 @@
         "populationLabel": "Heart failure patients with preserved ejection fraction"
       },
       "revision": {
-        "pageRevisionId": "sha256:f364a9ae2b0e85db8cb3ef9ed121222b135d867e402ebe8c895123a842ab5c76",
+        "pageRevisionId": "sha256:a052744af10842519ffce9bb9678ece8737efcdbd8b49d93acd4fd546e5dd6f6",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -15124,7 +15372,7 @@
         "year": 2021
       },
       "status": "draft",
-      "studyDesign": "See source metadata and bibliography for exact design.",
+      "studyDesign": "Randomized HFpEF exercise-mode trial",
       "summary": "HFpEF clinical trial showing no significant primary peak-VO2 advantage for HIIT over comparators.",
       "title": "Effect of high-intensity interval training, moderate continuous training, or guideline-based physical activity advice on peak oxygen consumption in patients with heart failure with preserved ejection fraction: a randomized clinical trial",
       "whyItMatters": "HFpEF clinical trial showing no significant primary peak-VO2 advantage for HIIT over comparators."
@@ -16604,7 +16852,7 @@
       "aliases": [
         "pmid-36314990"
       ],
-      "body": "This source is included for **Adjacent variants to split**.\n\n**Why it matters:** Athlete trial comparing 4x4-style intervals with sprint-interval training; supports not merging SIT with Norwegian 4x4.\n\n**Findings:** The athlete trial compared aerobic high-intensity intervals with sprint-interval approaches in well-trained men. Aerobic intervals improved VO2max more than the sprint-interval comparators. The finding supports separating Norwegian-style aerobic intervals from supramaximal sprint protocols.\n\n**Protocol takeaway:** Use this source only within its `claimUse: context-only` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
+      "body": "This source is included for **Adjacent variants to split**.\n\n## Quick read\n\n- **Source type:** Three-arm randomized athlete interval-protocol trial (2023).\n- **People studied or addressed:** Aerobically well-trained men (48 participants).\n- **Role in Murph:** adjacent-variant or recovery-context evidence; context only evidence; a related HIIT variant that should stay separate from standard 4x4.\n- **Most relevant Murph signals:** estimated VO2max / cardio-fitness proxy, session heart-rate fidelity, heart-rate recovery, symptoms and adherence.\n\n## Why it matters for Norwegian 4x4\n\nAthlete trial comparing 4x4-style intervals with sprint-interval training; supports not merging SIT with Norwegian 4x4.\n\n## What it found\n\n**Findings:** The athlete trial compared aerobic high-intensity intervals with sprint-interval approaches in well-trained men. Aerobic intervals improved VO2max more than the sprint-interval comparators. The finding supports separating Norwegian-style aerobic intervals from supramaximal sprint protocols.\n\n## How Murph should use it\n\nSupports separating 4x4-style aerobic intervals from supramaximal sprint intervals.\n\nUse for variant separation, recovery context, or secondary-signal interpretation; do not count it as direct proof for the standard 4x4 self-experiment.\n\n## Important limits\n\nWell-trained athletes are not representative of most wearable users.\n\nThe safe interpretation is narrower than “4x4 is always better.” Keep the population, supervision level, comparator, and exact interval dose visible before applying this source to a home wearable experiment.\n\n## Plain-language takeaway\n\nThis is useful nearby evidence, but it should not be mixed into the direct claim that the standard four-interval recipe will improve a user's wearable fitness score.",
       "categories": [
         "norwegian-4x4",
         "hiit",
@@ -16615,7 +16863,7 @@
       "evidenceBucket": "Adjacent variants to split",
       "key": "source_artifact:pmid-36314990",
       "modality": "Aerobic high-intensity interval training / Norwegian 4x4 context",
-      "murphTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol. It should shape intensity targets, population-fit, or safety interpretation without becoming a blanket guarantee for unscreened home 4x4.",
+      "murphTakeaway": "Use for variant separation, recovery context, or secondary-signal interpretation; do not count it as direct proof for the standard 4x4 self-experiment. It should shape intensity targets, population-fit, safety interpretation, or variant separation without becoming a blanket guarantee for unscreened home 4x4.",
       "murphV1Priority": "Medium",
       "norwegian4x4Focus": "Context, safety, or adjacent variant",
       "pdfRightsStatus": "open_access",
@@ -16641,7 +16889,7 @@
           "stance": "context_only"
         }
       ],
-      "protocolTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol.",
+      "protocolTakeaway": "Use for variant separation, recovery context, or secondary-signal interpretation; do not count it as direct proof for the standard 4x4 self-experiment.",
       "quality": "usable",
       "relations": [
         {
@@ -16666,7 +16914,7 @@
         "populationLabel": "Aerobically well-trained men"
       },
       "revision": {
-        "pageRevisionId": "sha256:c57bfe170ef8b1b6a324a251f9404c178a386f39c932f00e2e20e36cc704427f",
+        "pageRevisionId": "sha256:c594396ecd5fd228208f5be981ee277e6e23963b003a27e01b3fa7426abb37ef",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -16684,7 +16932,7 @@
         "year": 2023
       },
       "status": "draft",
-      "studyDesign": "See source metadata and bibliography for exact design.",
+      "studyDesign": "Three-arm randomized athlete interval-protocol trial",
       "summary": "Athlete trial comparing 4x4-style intervals with sprint-interval training; supports not merging SIT with Norwegian 4x4.",
       "title": "Aerobic high-intensity intervals are superior to improve VO2max compared with sprint intervals in well-trained men",
       "whyItMatters": "Athlete trial comparing 4x4-style intervals with sprint-interval training; supports not merging SIT with Norwegian 4x4."
@@ -17163,7 +17411,7 @@
       "aliases": [
         "pmid-37608507"
       ],
-      "body": "This source is included for **Adjacent variants to split**.\n\n**Why it matters:** Female athlete comparison source supporting separation of 4x4 from supramaximal sprint-interval training.\n\n**Findings:** The female athlete trial made the same interval-type distinction in well-trained women. Aerobic high-intensity intervals improved VO2max more than supramaximal sprint intervals. The finding supports a sex-inclusive variant split, not a new general-population safety claim.\n\n**Protocol takeaway:** Use this source only within its `claimUse: context-only` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
+      "body": "This source is included for **Adjacent variants to split**.\n\n## Quick read\n\n- **Source type:** Three-arm randomized female athlete interval-protocol trial (2023).\n- **People studied or addressed:** Aerobically well-trained females (81 participants).\n- **Role in Murph:** adjacent-variant or recovery-context evidence; context only evidence; a related HIIT variant that should stay separate from standard 4x4.\n- **Most relevant Murph signals:** estimated VO2max / cardio-fitness proxy, session heart-rate fidelity, heart-rate recovery, symptoms and adherence.\n\n## Why it matters for Norwegian 4x4\n\nFemale athlete comparison source supporting separation of 4x4 from supramaximal sprint-interval training.\n\n## What it found\n\n**Findings:** The female athlete trial made the same interval-type distinction in well-trained women. Aerobic high-intensity intervals improved VO2max more than supramaximal sprint intervals. The finding supports a sex-inclusive variant split, not a new general-population safety claim.\n\n## How Murph should use it\n\nReinforces that sprint-interval variants should be modeled separately from Norwegian 4x4.\n\nUse for variant separation, recovery context, or secondary-signal interpretation; do not count it as direct proof for the standard 4x4 self-experiment.\n\n## Important limits\n\nThe athlete setting is useful for protocol taxonomy, not general user prediction.\n\nThe safe interpretation is narrower than “4x4 is always better.” Keep the population, supervision level, comparator, and exact interval dose visible before applying this source to a home wearable experiment.\n\n## Plain-language takeaway\n\nThis is useful nearby evidence, but it should not be mixed into the direct claim that the standard four-interval recipe will improve a user's wearable fitness score.",
       "categories": [
         "norwegian-4x4",
         "hiit",
@@ -17174,7 +17422,7 @@
       "evidenceBucket": "Adjacent variants to split",
       "key": "source_artifact:pmid-37608507",
       "modality": "Aerobic high-intensity interval training / Norwegian 4x4 context",
-      "murphTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol. It should shape intensity targets, population-fit, or safety interpretation without becoming a blanket guarantee for unscreened home 4x4.",
+      "murphTakeaway": "Use for variant separation, recovery context, or secondary-signal interpretation; do not count it as direct proof for the standard 4x4 self-experiment. It should shape intensity targets, population-fit, safety interpretation, or variant separation without becoming a blanket guarantee for unscreened home 4x4.",
       "murphV1Priority": "Medium",
       "norwegian4x4Focus": "Context, safety, or adjacent variant",
       "pdfRightsStatus": "not_redistributable",
@@ -17200,7 +17448,7 @@
           "stance": "context_only"
         }
       ],
-      "protocolTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol.",
+      "protocolTakeaway": "Use for variant separation, recovery context, or secondary-signal interpretation; do not count it as direct proof for the standard 4x4 self-experiment.",
       "quality": "usable",
       "relations": [
         {
@@ -17225,7 +17473,7 @@
         "populationLabel": "Aerobically well-trained females"
       },
       "revision": {
-        "pageRevisionId": "sha256:4cfc562f9fcc3e3df7cd7b90ac988879e198772b90b7dceaaf43d04fdbc236d5",
+        "pageRevisionId": "sha256:59fa950934f73622f6e167a2a854ab162caa6d463d3d62f9a1ab5a7ff272c19f",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -17243,7 +17491,7 @@
         "year": 2023
       },
       "status": "draft",
-      "studyDesign": "See source metadata and bibliography for exact design.",
+      "studyDesign": "Three-arm randomized female athlete interval-protocol trial",
       "summary": "Female athlete comparison source supporting separation of 4x4 from supramaximal sprint-interval training.",
       "title": "Aerobic high-intensity intervals improve VO2max more than supramaximal sprint intervals in females, similar to males",
       "whyItMatters": "Female athlete comparison source supporting separation of 4x4 from supramaximal sprint-interval training."
@@ -17442,6 +17690,17 @@
           "result": "not_efficacy_evidence",
           "scope": "same_mechanism",
           "stance": "safety_boundary"
+        },
+        {
+          "caveat": "Repeated endocrine physiology helps explain load and adaptation context, not direct protocol efficacy.",
+          "displayPriority": 140,
+          "groupId": "near-term-autonomic-vascular-and-immune-signals",
+          "headline": "This repeated-exposure endocrine study supports sauna as a real short-horizon stress-and-recovery signal, while keeping hormonal changes separate from promised consumer outcomes.",
+          "implication": "Useful for session-tolerance and recovery-context interpretation, not for claiming a specific wearable improvement.",
+          "protocolKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "result": "not_efficacy_evidence",
+          "scope": "same_mechanism",
+          "stance": "mixed"
         }
       ],
       "protocolTakeaway": "Use for safety screening and session-context interpretation rather than efficacy claims.",
@@ -17468,7 +17727,7 @@
         "populationLabel": "Healthy volunteers"
       },
       "revision": {
-        "pageRevisionId": "sha256:39f261bb4a5c1d9aff498fe56ce9a6114a53dc22e02ea44668bf5d9b97c69c00",
+        "pageRevisionId": "sha256:e99f10aaf41f7885a03d983776f25ddf2adddeb8e7b7522c9ac6fd1859c488d3",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -17817,7 +18076,7 @@
       "aliases": [
         "Kunutsor 2024 sauna cardiorespiratory fitness"
       ],
-      "body": "This source is included for long-term Finnish cohort context.\n\n**Findings:** KIHD study evaluating cross-sectional and longitudinal associations between sauna frequency or duration and cardiorespiratory fitness. Adds cardiorespiratory-fitness context to the KIHD sauna evidence base without turning sauna into an exercise substitute.\n\n**Protocol takeaway:** it belongs in rationale and future fitness-context discussions, not in the near-term wearable result promise for the first dry-sauna protocol.",
+      "body": "This source is included for long-term Finnish cohort context.\n\n**Findings:** KIHD study of 2,012 Finnish men evaluating cross-sectional and longitudinal associations between sauna exposure and cardiorespiratory fitness over an 11-year follow-up. Adds cardiorespiratory-fitness context to the KIHD sauna evidence base without turning sauna into an exercise substitute.\n\n**Protocol takeaway:** it belongs in rationale and future fitness-context discussions, not in the near-term wearable result promise for the first dry-sauna protocol.",
       "categories": [
         "sauna",
         "observational-cohort",
@@ -17865,14 +18124,17 @@
       "relativePath": "sources/sauna/pmid-38836690.md",
       "researchEvidence": {
         "aggregateRole": "primary",
+        "aggregationNote": "Cross-sectional baseline plus longitudinal fitness analyses within the KIHD cohort.",
         "cohortKey": "kihd-men-cardiorespiratory-fitness",
         "designKind": "prospective_cohort",
         "designLabel": "Prospective cohort fitness association study",
-        "durationLabel": "Cross-sectional and longitudinal cardiorespiratory-fitness analyses",
-        "populationLabel": "KIHD Finnish men"
+        "durationLabel": "Baseline plus 11-year cardiorespiratory-fitness follow-up",
+        "participantCount": 2012,
+        "participantCountKind": "reported",
+        "populationLabel": "KIHD Finnish men aged 42–61 at baseline"
       },
       "revision": {
-        "pageRevisionId": "sha256:d8c82ccc0e0735a0d7b757bfd099a9371e1190d8cac37a7ad40fe2a8dc8a6531",
+        "pageRevisionId": "sha256:5735804287959fc7f99acd28b3bdf9348c946c8c684ff3e9566a69e4ff5dcf50",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -17891,7 +18153,7 @@
       },
       "status": "draft",
       "studyDesign": "Prospective cohort",
-      "summary": "KIHD study evaluating cross-sectional and longitudinal associations between sauna frequency or duration and cardiorespiratory fitness.",
+      "summary": "KIHD study of 2,012 Finnish men evaluating cross-sectional and longitudinal associations between sauna exposure and cardiorespiratory fitness over an 11-year follow-up.",
       "title": "Enhancing Cardiorespiratory Fitness Through Sauna Bathing: Insights From the Kuopio Ischemic Heart Disease Prospective Study",
       "whyItMatters": "Adds cardiorespiratory-fitness context to the KIHD sauna evidence base without turning sauna into an exercise substitute."
     },
@@ -17899,7 +18161,7 @@
       "aliases": [
         "pmid-39256000"
       ],
-      "body": "This source is included for **Adjacent variants to split**.\n\n**Why it matters:** Recent metabolic-syndrome HIIT synthesis; useful to separate metabolic HIIT and low-volume variants from standard 4x4.\n\n**Findings:** The review found HIIT can improve cardiometabolic outcomes in metabolic-syndrome populations compared with control or moderate-training comparators. The included protocols and populations were broader than Norwegian 4x4. The finding supports adjacent metabolic-HIIT context while keeping the standard 4x4 protocol separate.\n\n**Protocol takeaway:** Use this source only within its `claimUse: context-only` boundary. Do not use safety-only, mixed clinical, or adjacent-variant evidence as direct support for a general unsupervised self-experiment claim.",
+      "body": "This source is included for **Adjacent variants to split**.\n\n## Quick read\n\n- **Source type:** Metabolic-syndrome RCT systematic review and meta-analysis (2024).\n- **People studied or addressed:** Adults with metabolic syndrome (1,374 participants / 23 included studies).\n- **Role in Murph:** adjacent-variant or recovery-context evidence; context only evidence; a related HIIT variant that should stay separate from standard 4x4.\n- **Most relevant Murph signals:** estimated VO2max / cardio-fitness proxy, session heart-rate fidelity, heart-rate recovery, symptoms and adherence.\n\n## Why it matters for Norwegian 4x4\n\nRecent metabolic-syndrome HIIT synthesis; useful to separate metabolic HIIT and low-volume variants from standard 4x4.\n\n## What it found\n\n**Findings:** The review found HIIT can improve cardiometabolic outcomes in metabolic-syndrome populations compared with control or moderate-training comparators. The included protocols and populations were broader than Norwegian 4x4. The finding supports adjacent metabolic-HIIT context while keeping the standard 4x4 protocol separate.\n\n## How Murph should use it\n\nUse it for population and variant context, not as direct Norwegian 4x4 proof.\n\nUse for variant separation, recovery context, or secondary-signal interpretation; do not count it as direct proof for the standard 4x4 self-experiment.\n\n## Important limits\n\nMetabolic-syndrome trials mix protocols, outcomes, and clinical populations.\n\nThe safe interpretation is narrower than “4x4 is always better.” Keep the population, supervision level, comparator, and exact interval dose visible before applying this source to a home wearable experiment.\n\n## Plain-language takeaway\n\nThis is useful nearby evidence, but it should not be mixed into the direct claim that the standard four-interval recipe will improve a user's wearable fitness score.",
       "categories": [
         "norwegian-4x4",
         "hiit",
@@ -17910,7 +18172,7 @@
       "evidenceBucket": "Adjacent variants to split",
       "key": "source_artifact:pmid-39256000",
       "modality": "Aerobic high-intensity interval training / Norwegian 4x4 context",
-      "murphTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol. It should shape intensity targets, population-fit, or safety interpretation without becoming a blanket guarantee for unscreened home 4x4.",
+      "murphTakeaway": "Use for variant separation, recovery context, or secondary-signal interpretation; do not count it as direct proof for the standard 4x4 self-experiment. It should shape intensity targets, population-fit, safety interpretation, or variant separation without becoming a blanket guarantee for unscreened home 4x4.",
       "murphV1Priority": "Medium",
       "norwegian4x4Focus": "Context, safety, or adjacent variant",
       "pdfRightsStatus": "not_redistributable",
@@ -17936,7 +18198,7 @@
           "stance": "context_only"
         }
       ],
-      "protocolTakeaway": "Use only within the stated claimUse boundary when building the Norwegian 4x4 protocol.",
+      "protocolTakeaway": "Use for variant separation, recovery context, or secondary-signal interpretation; do not count it as direct proof for the standard 4x4 self-experiment.",
       "quality": "usable",
       "relations": [
         {
@@ -17959,7 +18221,7 @@
         "populationLabel": "Adults with metabolic syndrome"
       },
       "revision": {
-        "pageRevisionId": "sha256:1acdc36bda5edc478721d5b46c7c6f21725cc21450ecb697ff5424f3357f2baf",
+        "pageRevisionId": "sha256:729e0e9db5e8ca988b5d373baeeb6e07ce64a0f43b7b2413365c859c5c3a1a31",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -17977,7 +18239,7 @@
         "year": 2024
       },
       "status": "draft",
-      "studyDesign": "See source metadata and bibliography for exact design.",
+      "studyDesign": "Metabolic-syndrome RCT systematic review and meta-analysis",
       "summary": "Recent metabolic-syndrome HIIT synthesis; useful to separate metabolic HIIT and low-volume variants from standard 4x4.",
       "title": "High-intensity interval training for cardiometabolic health in adults with metabolic syndrome: a systematic review and meta-analysis of randomised controlled trials",
       "whyItMatters": "Recent metabolic-syndrome HIIT synthesis; useful to separate metabolic HIIT and low-volume variants from standard 4x4."
@@ -19817,6 +20079,21 @@
           "result": "not_efficacy_evidence",
           "scope": "clinical_supervised",
           "stance": "safety_boundary"
+        },
+        {
+          "caveat": "Clinical review evidence should calibrate the claim, not turn into an unsupervised home-sauna promise.",
+          "displayPriority": 130,
+          "endpointKeys": [
+            "biomarker:resting-heart-rate",
+            "biomarker:morning-blood-pressure"
+          ],
+          "groupId": "evidence-backbone-and-claim-calibration",
+          "headline": "This cardiovascular-disease review reinforces that sauna is a real circulatory stressor whose benefits and risks depend on baseline health status, medication context, and supervision.",
+          "implication": "Use it to anchor the evidence backbone as physiologically plausible but strongly population-bounded.",
+          "protocolKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "result": "mixed",
+          "scope": "clinical_supervised",
+          "stance": "mixed"
         }
       ],
       "protocolTakeaway": "Use directly for safety, cardiovascular-context, or protocol-design guardrails; still avoid promising a short-term wearable outcome from this record alone.",
@@ -19838,7 +20115,7 @@
         "designLabel": "Narrative review"
       },
       "revision": {
-        "pageRevisionId": "sha256:6c26114a68f92fa5423a0c00ce4efee295c121d3b7e2dfca50842358891d6662",
+        "pageRevisionId": "sha256:04fe4132fcfd9f73e9f023873bc858940e1a36eddf992e8759f68c4a9d5c44b4",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -19888,6 +20165,17 @@
           "result": "not_efficacy_evidence",
           "scope": "same_mechanism",
           "stance": "safety_boundary"
+        },
+        {
+          "caveat": "Narrative endocrine review evidence explains plausibility; it is not a direct protocol efficacy result.",
+          "displayPriority": 150,
+          "groupId": "evidence-backbone-and-claim-calibration",
+          "headline": "This endocrine review reinforces that sauna is a real systemic stressor, which supports mechanism plausibility without turning hormone changes into promised consumer outcomes.",
+          "implication": "Use it as evidence-backbone context for mechanism plausibility and overclaim control.",
+          "protocolKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "result": "mixed",
+          "scope": "same_mechanism",
+          "stance": "mixed"
         }
       ],
       "protocolTakeaway": "Use for safety screening and session-context interpretation rather than efficacy claims.",
@@ -19909,7 +20197,7 @@
         "designLabel": "Narrative physiology review"
       },
       "revision": {
-        "pageRevisionId": "sha256:2094978619f4de6ff03e0f6804ba61c5f2d81b6acf077a491d7f60ba4db17def",
+        "pageRevisionId": "sha256:3307e27f0dfbc7a9fe88d875f47193b9b766300acb404c82710a5028769f9618",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -19959,6 +20247,17 @@
           "result": "not_efficacy_evidence",
           "scope": "direct_protocol",
           "stance": "safety_boundary"
+        },
+        {
+          "caveat": "Respiratory physiology reviews calibrate symptoms and plausibility; they do not prove a short home protocol outcome.",
+          "displayPriority": 160,
+          "groupId": "evidence-backbone-and-claim-calibration",
+          "headline": "This ventilation review keeps the evidence backbone grounded in real sauna respiratory physiology rather than generic wellness language.",
+          "implication": "Use it to frame tolerability and illness-context caveats without overpromising performance or recovery effects.",
+          "protocolKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "result": "mixed",
+          "scope": "direct_protocol",
+          "stance": "mixed"
         }
       ],
       "protocolTakeaway": "Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes.",
@@ -19980,7 +20279,7 @@
         "designLabel": "Narrative physiology review"
       },
       "revision": {
-        "pageRevisionId": "sha256:3c36e37cc6574ea48606b0cdd6a3631624e557a7c579b4bdbd68169882782c98",
+        "pageRevisionId": "sha256:9e697f33132863f6d4b5e30a2fd46a3ce4c58f18e15d30d3d74bc8ab25cb7633",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -20113,6 +20412,21 @@
           "result": "not_efficacy_evidence",
           "scope": "direct_protocol",
           "stance": "supports"
+        },
+        {
+          "caveat": "Acute circulation physiology with added cold exposure informs guardrails, not stand-alone sauna efficacy.",
+          "displayPriority": 110,
+          "endpointKeys": [
+            "biomarker:resting-heart-rate",
+            "biomarker:morning-blood-pressure"
+          ],
+          "groupId": "safety-dose-modality-and-context-boundaries",
+          "headline": "This sauna-plus-cold circulation study reinforces that rapid thermal switching changes cardiovascular load enough to require explicit cold-exposure guardrails.",
+          "implication": "Use it to keep cold plunges and other mixed-modality thermal sequences separate from the default sauna protocol.",
+          "protocolKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "result": "not_efficacy_evidence",
+          "scope": "adjacent_variant",
+          "stance": "safety_boundary"
         }
       ],
       "protocolTakeaway": "Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes.",
@@ -20140,7 +20454,7 @@
         "populationLabel": "Healthy adult volunteers"
       },
       "revision": {
-        "pageRevisionId": "sha256:81d0f97b5f56f36746f53d181cfd949948e695c916baeec6fb937f0fee5e689e",
+        "pageRevisionId": "sha256:4e42d64c4714c788b7df9438529c31bd980e861082bff75173a8c3d8693a69f8",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -20191,6 +20505,17 @@
           "result": "not_efficacy_evidence",
           "scope": "direct_protocol",
           "stance": "supports"
+        },
+        {
+          "caveat": "Acute body-temperature physiology with cold exposure informs safety boundaries, not repeated-protocol efficacy.",
+          "displayPriority": 120,
+          "groupId": "safety-dose-modality-and-context-boundaries",
+          "headline": "This sauna-plus-cold body-temperature study reinforces conservative duration, cooldown, and symptom stop rules when mixed thermal exposures are layered together.",
+          "implication": "Use it to justify explicit temperature, cooldown, and stop-condition guardrails instead of silently merging cold exposure into the default sauna plan.",
+          "protocolKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "result": "not_efficacy_evidence",
+          "scope": "adjacent_variant",
+          "stance": "safety_boundary"
         }
       ],
       "protocolTakeaway": "Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes.",
@@ -20218,7 +20543,7 @@
         "populationLabel": "Healthy adult volunteers"
       },
       "revision": {
-        "pageRevisionId": "sha256:1247f95afd568ad54b06b6356da889111a04f2d00e36ee4360858e467cb57b2a",
+        "pageRevisionId": "sha256:b0a38fd3c1fa3691953aa2766da22313b3d1e930dd3ed80cd13e487176035936",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -20429,6 +20754,17 @@
           "result": "not_efficacy_evidence",
           "scope": "direct_protocol",
           "stance": "safety_boundary"
+        },
+        {
+          "caveat": "Cross-sectional pediatric survey data are descriptive context, not a short-term adult protocol outcome.",
+          "displayPriority": 220,
+          "groupId": "long-term-finnish-cohort-and-real-world-context",
+          "headline": "This Finnish child-survey paper adds real-world sauna-use and symptom context, but it belongs in age-specific background rather than the adult outcome promise.",
+          "implication": "Useful for real-world Finnish context and age-based caution, not for adult efficacy claims.",
+          "protocolKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "result": "not_efficacy_evidence",
+          "scope": "measurement_context",
+          "stance": "context_only"
         }
       ],
       "protocolTakeaway": "Use for safety screening and session-context interpretation rather than efficacy claims.",
@@ -20456,7 +20792,7 @@
         "populationLabel": "Finnish children/families answering questionnaire"
       },
       "revision": {
-        "pageRevisionId": "sha256:d49e7fa11623f5cf6e482c3282e92b45062f078a8ee461e7ac5e54d3d6d856cc",
+        "pageRevisionId": "sha256:7a45aa8cab540de7375687bbaeeec8dcc3f3d82fe9cd683ef11941f5f30a660c",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -21059,6 +21395,21 @@
           "result": "not_efficacy_evidence",
           "scope": "clinical_supervised",
           "stance": "safety_boundary"
+        },
+        {
+          "caveat": "Clinical review evidence is useful for claim calibration, not for promising an unsupervised home-sauna outcome.",
+          "displayPriority": 140,
+          "endpointKeys": [
+            "biomarker:resting-heart-rate",
+            "biomarker:morning-blood-pressure"
+          ],
+          "groupId": "evidence-backbone-and-claim-calibration",
+          "headline": "This cardiovascular-disease review reinforces that sauna can be tolerable in selected clinical settings, but only with explicit population and supervision caveats.",
+          "implication": "Use it to frame the evidence backbone as plausible but population-bounded.",
+          "protocolKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "result": "mixed",
+          "scope": "clinical_supervised",
+          "stance": "mixed"
         }
       ],
       "protocolTakeaway": "Use directly for safety, cardiovascular-context, or protocol-design guardrails; still avoid promising a short-term wearable outcome from this record alone.",
@@ -21080,7 +21431,7 @@
         "designLabel": "Clinical narrative review"
       },
       "revision": {
-        "pageRevisionId": "sha256:353cb35529ac5620ee2f06a1fae5cf286bb24756c53efe0ebcb5832211b27d0b",
+        "pageRevisionId": "sha256:f9f695f1626be60e9b16e4e64ca931b7d3f69bb4629208e7ec58e002125f993d",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -21136,6 +21487,22 @@
           "result": "mixed",
           "scope": "clinical_supervised",
           "stance": "safety_boundary"
+        },
+        {
+          "caveat": "Small supervised heart-failure pilot; it informs design realism more than it proves broad efficacy.",
+          "displayPriority": 120,
+          "endpointKeys": [
+            "biomarker:resting-heart-rate",
+            "biomarker:morning-blood-pressure",
+            "biomarker:hrv-rmssd"
+          ],
+          "groupId": "intervention-design-training-and-mixed-results",
+          "headline": "This supervised heart-failure pilot shows repeated sauna can be feasible and physiologically meaningful in a clinical setting, while staying far from a generic home claim.",
+          "implication": "Useful for dose-ramping and expectation setting, not for unsupervised clinical advice.",
+          "protocolKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "result": "mixed",
+          "scope": "clinical_supervised",
+          "stance": "mixed"
         }
       ],
       "protocolTakeaway": "Use as cardiovascular context around heat exposure, not as a guaranteed 21-day result-card endpoint.",
@@ -21162,7 +21529,7 @@
         "populationLabel": "Chronic systolic heart failure patients"
       },
       "revision": {
-        "pageRevisionId": "sha256:7af9cf214ea1b62791b8e5dd97f579d284f38a13ec7c038b3d63d6b3efcc0c99",
+        "pageRevisionId": "sha256:c0abdbb434c835cb0c3df1d35e62a30172c54bd438b437139d7586af2591af9a",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
