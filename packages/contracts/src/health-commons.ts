@@ -144,6 +144,64 @@ export const HEALTH_COMMONS_RESEARCH_LANDSCAPE_CONFIDENCE_LABELS = [
 
 export type HealthCommonsResearchLandscapeConfidenceLabel = (typeof HEALTH_COMMONS_RESEARCH_LANDSCAPE_CONFIDENCE_LABELS)[number];
 
+export const HEALTH_COMMONS_BIOMARKER_METRIC_DOMAINS = [
+  "activity",
+  "body_state",
+  "recovery",
+  "sleep",
+] as const;
+
+export type HealthCommonsBiomarkerMetricDomain =
+  (typeof HEALTH_COMMONS_BIOMARKER_METRIC_DOMAINS)[number];
+
+export const HEALTH_COMMONS_BIOMARKER_DESIRED_DIRECTIONS = [
+  "higher",
+  "higher_or_stable",
+  "lower",
+  "lower_or_stable",
+  "mixed_or_contextual",
+  "stable",
+] as const;
+
+export type HealthCommonsBiomarkerDesiredDirection =
+  (typeof HEALTH_COMMONS_BIOMARKER_DESIRED_DIRECTIONS)[number];
+
+export const HEALTH_COMMONS_BIOMARKER_TREND_AGGREGATIONS = ["mean", "median"] as const;
+
+export type HealthCommonsBiomarkerTrendAggregation =
+  (typeof HEALTH_COMMONS_BIOMARKER_TREND_AGGREGATIONS)[number];
+
+export const HEALTH_COMMONS_BIOMARKER_PROTOCOL_EXPECTED_DIRECTIONS = [
+  "down",
+  "down_or_stable",
+  "mixed_or_contextual",
+  "stable",
+  "up",
+  "up_or_stable",
+] as const;
+
+export type HealthCommonsBiomarkerProtocolExpectedDirection =
+  (typeof HEALTH_COMMONS_BIOMARKER_PROTOCOL_EXPECTED_DIRECTIONS)[number];
+
+export const HEALTH_COMMONS_BIOMARKER_PROTOCOL_RELATIONSHIPS = [
+  "manual_candidate",
+  "primary_biomarker",
+  "related_protocol",
+  "secondary_biomarker",
+] as const;
+
+export type HealthCommonsBiomarkerProtocolRelationship =
+  (typeof HEALTH_COMMONS_BIOMARKER_PROTOCOL_RELATIONSHIPS)[number];
+
+export const HEALTH_COMMONS_BIOMARKER_COMMUNITY_OUTCOME_STATES = [
+  "active",
+  "coming_soon",
+  "insufficient_data",
+] as const;
+
+export type HealthCommonsBiomarkerCommunityOutcomeState =
+  (typeof HEALTH_COMMONS_BIOMARKER_COMMUNITY_OUTCOME_STATES)[number];
+
 const KEY_PATTERN = "^[a-z_]+:[a-z0-9][a-z0-9._/-]*(?:@[A-Za-z0-9._:-]+)?$";
 const STABLE_ID_PATTERN = "^[a-zA-Z0-9][a-zA-Z0-9._:-]*$";
 const PATH_SEGMENT_PATTERN = "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]+$";
@@ -713,6 +771,187 @@ export const healthCommonsArtifactManifestSchema = z
 
 export type HealthCommonsArtifactManifest = z.infer<typeof healthCommonsArtifactManifestSchema>;
 
+export const healthCommonsInterpretationFrameSchema = z
+  .object({
+    principle: longStringSchema,
+    caveat: longStringSchema,
+  })
+  .strict();
+
+export type HealthCommonsInterpretationFrame = z.infer<
+  typeof healthCommonsInterpretationFrameSchema
+>;
+
+const biomarkerScoreSchema = z.number().int().min(0).max(5);
+
+export const healthCommonsBiomarkerDirectionSchema = z
+  .object({
+    desired: z.enum(HEALTH_COMMONS_BIOMARKER_DESIRED_DIRECTIONS),
+    label: shortStringSchema,
+    nuance: longStringSchema.optional(),
+  })
+  .strict();
+
+export type HealthCommonsBiomarkerDirection = z.infer<
+  typeof healthCommonsBiomarkerDirectionSchema
+>;
+
+export const healthCommonsBiomarkerPrivateMetricBindingSchema = z
+  .object({
+    source: z.enum(["browser_vault_metric", "browser_vault_signal_summary"]),
+    domain: z.enum(HEALTH_COMMONS_BIOMARKER_METRIC_DOMAINS).optional(),
+    metric: shortStringSchema.optional(),
+    accessor: shortStringSchema.optional(),
+    unit: shortStringSchema.optional(),
+    preferred: z.boolean().optional(),
+  })
+  .strict()
+  .superRefine((binding, context) => {
+    if (binding.source === "browser_vault_metric") {
+      if (!binding.domain) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "browser_vault_metric bindings must include domain.",
+          path: ["domain"],
+        });
+      }
+      if (!binding.metric) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "browser_vault_metric bindings must include metric.",
+          path: ["metric"],
+        });
+      }
+    }
+
+    if (binding.source === "browser_vault_signal_summary" && !binding.accessor) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "browser_vault_signal_summary bindings must include accessor.",
+        path: ["accessor"],
+      });
+    }
+  });
+
+export type HealthCommonsBiomarkerPrivateMetricBinding = z.infer<
+  typeof healthCommonsBiomarkerPrivateMetricBindingSchema
+>;
+
+export const healthCommonsBiomarkerTrendDefaultsSchema = z
+  .object({
+    latestWindowDays: z.number().int().positive(),
+    comparisonWindowDays: z.number().int().positive(),
+    minimumPoints: z.number().int().positive(),
+    aggregation: z.enum(HEALTH_COMMONS_BIOMARKER_TREND_AGGREGATIONS),
+  })
+  .strict();
+
+export type HealthCommonsBiomarkerTrendDefaults = z.infer<
+  typeof healthCommonsBiomarkerTrendDefaultsSchema
+>;
+
+export const healthCommonsBiomarkerExplainerCardSchema = z
+  .object({
+    title: shortStringSchema,
+    body: longStringSchema,
+  })
+  .strict();
+
+export type HealthCommonsBiomarkerExplainerCard = z.infer<
+  typeof healthCommonsBiomarkerExplainerCardSchema
+>;
+
+export const healthCommonsBiomarkerMeasurementSchema = z
+  .object({
+    bestContext: longStringSchema,
+    howToMeasure: z.array(longStringSchema).min(1),
+    confounders: z.array(shortStringSchema).optional(),
+  })
+  .strict();
+
+export type HealthCommonsBiomarkerMeasurement = z.infer<
+  typeof healthCommonsBiomarkerMeasurementSchema
+>;
+
+export const healthCommonsBiomarkerDetailSchema = z
+  .object({
+    shortName: shortStringSchema.optional(),
+    displayName: shortStringSchema.optional(),
+    unit: shortStringSchema.optional(),
+    valuePrecision: z.number().int().min(0).max(4).optional(),
+    direction: healthCommonsBiomarkerDirectionSchema.optional(),
+    privateMetricBindings: z.array(healthCommonsBiomarkerPrivateMetricBindingSchema).optional(),
+    trendDefaults: healthCommonsBiomarkerTrendDefaultsSchema.optional(),
+    explainerCards: z.array(healthCommonsBiomarkerExplainerCardSchema).optional(),
+    measurement: healthCommonsBiomarkerMeasurementSchema.optional(),
+  })
+  .strict();
+
+export type HealthCommonsBiomarkerDetail = z.infer<
+  typeof healthCommonsBiomarkerDetailSchema
+>;
+
+export const healthCommonsBiomarkerProtocolScoringSchema = z
+  .object({
+    evidenceWeight: biomarkerScoreSchema,
+    biomarkerRelevance: biomarkerScoreSchema,
+    wearableMeasurability: biomarkerScoreSchema,
+    burdenPenalty: biomarkerScoreSchema,
+    safetyCautionPenalty: biomarkerScoreSchema,
+    communityOutcomeConfidence: biomarkerScoreSchema.optional(),
+  })
+  .strict();
+
+export type HealthCommonsBiomarkerProtocolScoring = z.infer<
+  typeof healthCommonsBiomarkerProtocolScoringSchema
+>;
+
+export const healthCommonsBiomarkerProtocolCandidateSchema = z
+  .object({
+    protocolKey: healthCommonsKeySchema,
+    expectedDirection: z.enum(HEALTH_COMMONS_BIOMARKER_PROTOCOL_EXPECTED_DIRECTIONS),
+    relationship: z.enum(HEALTH_COMMONS_BIOMARKER_PROTOCOL_RELATIONSHIPS),
+    mechanism: longStringSchema,
+    scoring: healthCommonsBiomarkerProtocolScoringSchema,
+    display: z
+      .object({
+        confidence: z.enum(["high", "medium", "low", "unknown"]).optional(),
+        burdenLabel: shortStringSchema.optional(),
+        cautionLabel: shortStringSchema.optional(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+
+export type HealthCommonsBiomarkerProtocolCandidate = z.infer<
+  typeof healthCommonsBiomarkerProtocolCandidateSchema
+>;
+
+export const healthCommonsBiomarkerProtocolRankingSchema = z
+  .object({
+    version: shortStringSchema,
+    scoreFormula: longStringSchema,
+    candidates: z.array(healthCommonsBiomarkerProtocolCandidateSchema).optional(),
+  })
+  .strict();
+
+export type HealthCommonsBiomarkerProtocolRanking = z.infer<
+  typeof healthCommonsBiomarkerProtocolRankingSchema
+>;
+
+export const healthCommonsBiomarkerCommunityOutcomeSummarySchema = z
+  .object({
+    state: z.enum(HEALTH_COMMONS_BIOMARKER_COMMUNITY_OUTCOME_STATES),
+    minimumCohortSize: z.number().int().positive().optional(),
+    placeholder: longStringSchema.optional(),
+  })
+  .strict();
+
+export type HealthCommonsBiomarkerCommunityOutcomeSummary = z.infer<
+  typeof healthCommonsBiomarkerCommunityOutcomeSummarySchema
+>;
+
 export const healthCommonsDisambiguationOptionSchema = z
   .object({
     key: healthCommonsKeySchema,
@@ -737,6 +976,12 @@ export const healthCommonsPageFrontmatterSchema = z
     lineage: healthCommonsLineageSchema.optional(),
     attribution: healthCommonsAttributionSchema.optional(),
     protocol: healthCommonsProtocolSpecSchema.optional(),
+    unit: shortStringSchema.optional(),
+    measurementContexts: z.array(shortStringSchema).optional(),
+    interpretationFrame: healthCommonsInterpretationFrameSchema.optional(),
+    biomarker: healthCommonsBiomarkerDetailSchema.optional(),
+    protocolRanking: healthCommonsBiomarkerProtocolRankingSchema.optional(),
+    communityOutcomeSummary: healthCommonsBiomarkerCommunityOutcomeSummarySchema.optional(),
     testPlans: z.array(healthCommonsTestPlanSchema).optional(),
     experimentOnboarding: healthCommonsExperimentOnboardingSchema.optional(),
     whyItWorks: z.array(longStringSchema).optional(),
@@ -787,6 +1032,14 @@ export const healthCommonsPageFrontmatterSchema = z
           path: ["attribution"],
         });
       }
+    }
+
+    if (page.entityType === "biomarker" && page.protocolRanking && !page.biomarker) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "biomarker pages with protocolRanking should include a biomarker block.",
+        path: ["biomarker"],
+      });
     }
 
     if (page.entityType === "source_artifact" && !page.source) {
