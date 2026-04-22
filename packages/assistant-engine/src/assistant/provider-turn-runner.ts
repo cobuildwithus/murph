@@ -34,6 +34,7 @@ import {
   buildAssistantNotificationDecisionSystemPrompt,
   buildAssistantSystemPrompt,
 } from './system-prompt.js'
+import { buildAssistantActiveExperimentContextBlock } from './active-experiment-context.js'
 import { resolveAssistantModelBehaviorProfile } from './model-behavior.js'
 import { errorMessage } from './shared.js'
 import {
@@ -492,6 +493,9 @@ async function resolveAssistantRouteTurnPlan(input: {
   const vaultOverview = shouldPrepareBootstrapContext
     ? await resolveAssistantVaultOverviewBlock(input.input.vault)
     : null
+  const activeExperimentContext = input.sharedPlan.allowSensitiveHealthContext
+    ? await resolveAssistantActiveExperimentContextBlock(input.input.vault)
+    : null
 
   return {
     assistantCliContract,
@@ -510,6 +514,7 @@ async function resolveAssistantRouteTurnPlan(input: {
     systemPrompt:
       input.profile.promptProfile === 'notification-decision'
         ? buildAssistantNotificationDecisionSystemPrompt({
+            activeExperimentContext,
             allowSensitiveHealthContext: input.sharedPlan.allowSensitiveHealthContext,
             channel: resolvedChannel,
             currentLocalDate: input.promptTimeContext.currentLocalDate,
@@ -517,6 +522,7 @@ async function resolveAssistantRouteTurnPlan(input: {
             vaultOverview,
           })
         : buildAssistantSystemPrompt({
+            activeExperimentContext,
             assistantCliContract,
             allowSensitiveHealthContext: input.sharedPlan.allowSensitiveHealthContext,
             assistantCommandAccessMode:
@@ -566,6 +572,16 @@ async function resolveAssistantVaultOverviewBlock(
 ): Promise<string | null> {
   try {
     return await buildAssistantVaultOverviewBlock(vaultRoot)
+  } catch {
+    return null
+  }
+}
+
+async function resolveAssistantActiveExperimentContextBlock(
+  vaultRoot: string,
+): Promise<string | null> {
+  try {
+    return await buildAssistantActiveExperimentContextBlock(vaultRoot)
   } catch {
     return null
   }

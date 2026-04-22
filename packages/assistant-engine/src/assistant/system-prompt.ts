@@ -12,6 +12,7 @@ import {
 } from "./model-behavior.js";
 
 export interface AssistantSystemPromptInput {
+  activeExperimentContext?: string | null;
   assistantCliContract: string | null;
   allowSensitiveHealthContext: boolean;
   assistantCommandAccessMode: AssistantMurphCommandAccessMode;
@@ -28,6 +29,7 @@ export interface AssistantSystemPromptInput {
 }
 
 export interface AssistantNotificationDecisionSystemPromptInput {
+  activeExperimentContext?: string | null;
   allowSensitiveHealthContext: boolean;
   channel: string | null;
   currentLocalDate: string;
@@ -70,6 +72,7 @@ export function buildAssistantSystemPrompt(
       profile: input.modelBehaviorProfile,
     }),
     input.vaultOverview ?? null,
+    input.activeExperimentContext ?? null,
     buildAssistantAudienceSafetyText(input.allowSensitiveHealthContext),
     buildAssistantToolTruthfulnessText(),
     buildAssistantEvidenceAndReplyStyleText(input.channel),
@@ -104,6 +107,7 @@ export function buildAssistantNotificationDecisionSystemPrompt(
     buildAssistantProductPrinciplesText(),
     buildAssistantHealthReasoningText(),
     input.vaultOverview ?? null,
+    input.activeExperimentContext ?? null,
     buildAssistantAudienceSafetyText(input.allowSensitiveHealthContext),
     buildAssistantToolTruthfulnessText(),
     buildAssistantNotificationDecisionGuidanceText(input.channel)

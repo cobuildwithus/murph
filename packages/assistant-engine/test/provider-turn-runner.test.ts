@@ -11,6 +11,7 @@ import type { ResolvedAssistantFailoverRoute } from '../src/assistant/failover.t
 const runnerMocks = vi.hoisted(() => ({
   appendAssistantTurnReceiptEvent: vi.fn(),
   attachRecoveredAssistantSession: vi.fn(),
+  buildAssistantActiveExperimentContextBlock: vi.fn(),
   buildAssistantSystemPrompt: vi.fn(),
   buildAssistantNotificationDecisionSystemPrompt: vi.fn(),
   buildAssistantVaultOverviewBlock: vi.fn(),
@@ -75,6 +76,11 @@ vi.mock('../src/assistant/system-prompt.ts', () => ({
   buildAssistantNotificationDecisionSystemPrompt:
     runnerMocks.buildAssistantNotificationDecisionSystemPrompt,
   buildAssistantSystemPrompt: runnerMocks.buildAssistantSystemPrompt,
+}))
+
+vi.mock('../src/assistant/active-experiment-context.ts', () => ({
+  buildAssistantActiveExperimentContextBlock:
+    runnerMocks.buildAssistantActiveExperimentContextBlock,
 }))
 
 vi.mock('../src/assistant/vault-overview.ts', () => ({
@@ -178,6 +184,9 @@ describe('executeProviderTurnWithRecovery', () => {
       }) =>
         `prompt:${input.channel ?? 'none'}:${input.earlySessionOnboarding ? 'first' : 'later'}:${input.assistantCliContract ?? 'no-bootstrap'}:${input.vaultOverview ?? 'no-overview'}`,
       )
+    runnerMocks.buildAssistantActiveExperimentContextBlock
+      .mockReset()
+      .mockResolvedValue(null)
     runnerMocks.buildAssistantVaultOverviewBlock
       .mockReset()
       .mockResolvedValue('Vault overview for navigation only:\n- Canonical coverage includes 1 meal event.')
@@ -474,6 +483,9 @@ describe('executeProviderTurnWithRecovery', () => {
         response: '{"kind":"skip","privateSummary":"No notification needed."}',
       }),
     )
+    runnerMocks.buildAssistantActiveExperimentContextBlock.mockResolvedValueOnce(
+      'Active experiment context for navigation only:\n- Sauna RHR (`sauna-rhr`, exp_test): started 2026-04-01.',
+    )
 
     const outcome = await executeProviderTurnWithRecovery({
       input: createMessageInput({
@@ -515,6 +527,8 @@ describe('executeProviderTurnWithRecovery', () => {
     expect(runnerMocks.buildAssistantSystemPrompt).not.toHaveBeenCalled()
     expect(runnerMocks.buildAssistantNotificationDecisionSystemPrompt).toHaveBeenCalledWith(
       expect.objectContaining({
+        activeExperimentContext:
+          'Active experiment context for navigation only:\n- Sauna RHR (`sauna-rhr`, exp_test): started 2026-04-01.',
         allowSensitiveHealthContext: true,
         channel: 'chat',
         currentLocalDate: '2026-04-08',
@@ -652,6 +666,9 @@ describe('executeProviderTurnWithRecovery', () => {
     runnerMocks.resolveAssistantProviderResumeKey.mockReturnValue(
       'provider-session-primary',
     )
+    runnerMocks.buildAssistantActiveExperimentContextBlock.mockResolvedValueOnce(
+      'Active experiment context for navigation only:\n- Sauna RHR (`sauna-rhr`, exp_test): started 2026-04-01.',
+    )
     toolCatalog.hasTool.mockReturnValue(false)
     runnerMocks.executeAssistantProviderTurnAttempt.mockResolvedValue(
       createSuccessfulAttemptResult({
@@ -665,6 +682,7 @@ describe('executeProviderTurnWithRecovery', () => {
         prompt: 'Current prompt',
       }),
       plan: createTurnPlan({
+        allowSensitiveHealthContext: true,
         earlySessionOnboardingEligible: false,
       }),
       resolvedSession: session,
@@ -693,10 +711,15 @@ describe('executeProviderTurnWithRecovery', () => {
         currentLocalDate: '2026-04-08',
         currentTimeZone: 'America/Los_Angeles',
         earlySessionOnboarding: false,
+        activeExperimentContext:
+          'Active experiment context for navigation only:\n- Sauna RHR (`sauna-rhr`, exp_test): started 2026-04-01.',
         vaultOverview: null,
       }),
     )
     expect(runnerMocks.buildAssistantVaultOverviewBlock).not.toHaveBeenCalled()
+    expect(runnerMocks.buildAssistantActiveExperimentContextBlock).toHaveBeenCalledWith(
+      '/tmp/test-vault',
+    )
     expect(runnerMocks.listAssistantTranscriptEntries).not.toHaveBeenCalled()
     expect(toolCatalog.hasTool).not.toHaveBeenCalled()
     expect(runnerMocks.executeAssistantProviderTurnAttempt).toHaveBeenCalledWith(
@@ -705,6 +728,42 @@ describe('executeProviderTurnWithRecovery', () => {
         resumeProviderSessionId: 'provider-session-primary',
         sessionContext: undefined,
         systemPrompt: 'prompt:none:later:no-bootstrap:no-overview',
+      }),
+    )
+  })
+
+  it('does not resolve active experiment context when sensitive context is disallowed', async () => {
+    const route = createRoute({
+      routeId: 'route-private-context-gated',
+    })
+    const session = createAssistantSession()
+
+    runnerMocks.executeAssistantProviderTurnAttempt.mockResolvedValue(
+      createSuccessfulAttemptResult({
+        providerSessionId: 'provider-session-gated',
+        response: 'Gated answer',
+      }),
+    )
+
+    await executeProviderTurnWithRecovery({
+      input: createMessageInput({
+        prompt: 'What am I working on?',
+      }),
+      plan: createTurnPlan({
+        allowSensitiveHealthContext: false,
+        earlySessionOnboardingEligible: true,
+      }),
+      resolvedSession: session,
+      routes: [route],
+      turnCreatedAt: '2026-04-08T00:00:00.000Z',
+      turnId: 'turn-active-experiment-context-gated',
+    })
+
+    expect(runnerMocks.buildAssistantActiveExperimentContextBlock).not.toHaveBeenCalled()
+    expect(runnerMocks.buildAssistantSystemPrompt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        activeExperimentContext: null,
+        allowSensitiveHealthContext: false,
       }),
     )
   })
@@ -934,6 +993,47 @@ describe('executeProviderTurnWithRecovery', () => {
     expect(runnerMocks.executeAssistantProviderTurnAttempt).toHaveBeenCalledWith(
       expect.objectContaining({
         systemPrompt: 'prompt:chat:first:cli-bootstrap:no-overview',
+      }),
+    )
+  })
+
+  it('keeps the turn moving when active experiment context cannot be read', async () => {
+    const route = createRoute({
+      routeId: 'route-active-experiment-context-failure',
+    })
+    const session = createAssistantSession()
+
+    runnerMocks.buildAssistantActiveExperimentContextBlock.mockRejectedValueOnce(
+      new Error('active context failed'),
+    )
+    runnerMocks.executeAssistantProviderTurnAttempt.mockResolvedValue(
+      createSuccessfulAttemptResult({
+        providerSessionId: 'provider-session-active-context',
+        response: 'Active context fallback answer',
+      }),
+    )
+
+    const outcome = await executeProviderTurnWithRecovery({
+      input: createMessageInput({
+        channel: 'chat',
+        prompt: 'What is active?',
+      }),
+      plan: createTurnPlan({
+        allowSensitiveHealthContext: true,
+        earlySessionOnboardingEligible: true,
+      }),
+      resolvedSession: session,
+      routes: [route],
+      turnCreatedAt: '2026-04-08T00:00:00.000Z',
+      turnId: 'turn-active-context-failure',
+    })
+
+    expect(outcome).toMatchObject({
+      kind: 'succeeded',
+    })
+    expect(runnerMocks.buildAssistantSystemPrompt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        activeExperimentContext: null,
       }),
     )
   })
