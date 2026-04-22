@@ -1,9 +1,7 @@
 import type { ReactNode } from "react";
 
-import {
-  Sidebar,
-  SIDEBAR_BRAND_GRADIENT,
-} from "@/src/components/dashboard/sidebar";
+import { Sidebar } from "@/src/components/dashboard/sidebar";
+import { SIDEBAR_BRAND_GRADIENT } from "@/src/components/dashboard/theme";
 import {
   SidebarInset,
   SidebarProvider,

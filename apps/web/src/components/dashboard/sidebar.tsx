@@ -6,6 +6,7 @@ import { usePrivy, useUser } from "@privy-io/react-auth";
 import { ChevronsUpDown } from "lucide-react";
 import type { CSSProperties } from "react";
 
+import { SIDEBAR_BRAND_GRADIENT } from "@/src/components/dashboard/theme";
 import { Avatar, AvatarFallback } from "@/src/components/ui/avatar";
 import {
   DropdownMenu,
@@ -35,13 +36,6 @@ const navItems = [
   { label: "Experiments", href: "/experiments" },
   { label: "Settings", href: "/settings" },
 ];
-
-/**
- * Shared between the desktop sidebar and the mobile dashboard header so
- * both surfaces drift together if the brand palette changes.
- */
-export const SIDEBAR_BRAND_GRADIENT =
-  "bg-linear-to-b from-[#2d3436] via-[#3a2e24] to-[#2a1f16]";
 
 const sidebarThemeStyle = {
   "--sidebar": "transparent",
