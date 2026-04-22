@@ -227,8 +227,8 @@ pnpm review:gpt \\
   --wait \\
   --format json \\
   --model "\${RESEARCH_MODEL:-gpt-5.4-pro}" \\
-  --wait-timeout "\${RESEARCH_WAIT_TIMEOUT:-45m}" \\
-  --timeout "\${RESEARCH_TIMEOUT:-60m}" \\
+  --wait-timeout "\${RESEARCH_WAIT_TIMEOUT:-200m}" \\
+  --timeout "\${RESEARCH_TIMEOUT:-210m}" \\
   --prompt-file "\${prompt_file}" \\
   --response-file "\${response_file}" \\
   >"\${result_file}" 2>"\${stderr_file}"
