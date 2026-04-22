@@ -36,6 +36,13 @@ const navItems = [
   { label: "Settings", href: "/settings" },
 ];
 
+/**
+ * Shared between the desktop sidebar and the mobile dashboard header so
+ * both surfaces drift together if the brand palette changes.
+ */
+export const SIDEBAR_BRAND_GRADIENT =
+  "bg-linear-to-b from-[#2d3436] via-[#3a2e24] to-[#2a1f16]";
+
 const sidebarThemeStyle = {
   "--sidebar": "transparent",
   "--sidebar-foreground": "rgba(255, 255, 255, 0.85)",
@@ -119,7 +126,7 @@ export function Sidebar() {
     <ShadcnSidebar
       collapsible="offcanvas"
       className={cn(
-        "bg-linear-to-b from-[#2d3436] via-[#3a2e24] to-[#2a1f16]",
+        SIDEBAR_BRAND_GRADIENT,
         "[&_[data-slot=sidebar-inner]]:bg-transparent",
         "group-data-[side=left]:[&_[data-slot=sidebar-container]]:border-r-0",
       )}
