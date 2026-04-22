@@ -460,6 +460,7 @@ describe('assistant channels runtime seam', () => {
           LINQ_API_TOKEN: 'linq-token',
         },
         fetchImplementation: undefined,
+        signal: expect.any(AbortSignal),
       },
     )
     expect(runtimeMocks.stopLinqChatTypingIndicator).toHaveBeenCalledTimes(1)
@@ -474,6 +475,30 @@ describe('assistant channels runtime seam', () => {
         fetchImplementation: undefined,
       },
     )
+  })
+
+  it('refreshes the Linq typing indicator until stop', async () => {
+    vi.useFakeTimers()
+    runtimeMocks.startLinqChatTypingIndicator.mockResolvedValue(undefined)
+    runtimeMocks.stopLinqChatTypingIndicator.mockResolvedValue(undefined)
+
+    const handle = await startLinqTypingIndicator(
+      {
+        target: 'chat-typing',
+      },
+      {
+        env: {
+          LINQ_API_TOKEN: 'linq-token',
+        },
+        refreshMs: 5,
+      },
+    )
+
+    await vi.advanceTimersByTimeAsync(16)
+    await handle.stop()
+
+    expect(runtimeMocks.startLinqChatTypingIndicator).toHaveBeenCalledTimes(4)
+    expect(runtimeMocks.stopLinqChatTypingIndicator).toHaveBeenCalledTimes(1)
   })
 
   it('recovers Linq thread sends when the stored chat id is stale', async () => {

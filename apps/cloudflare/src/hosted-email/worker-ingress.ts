@@ -197,6 +197,11 @@ export async function handleHostedEmailIngress(
 
   try {
     const stub = await resolveUserRunnerStub(env, route.userId);
+    const nudge = await stub.nudgeHostedRun();
+    if (nudge.alreadyRunning) {
+      return;
+    }
+
     const drainPromise = stub.drainHostedRuns().catch(async (error) => {
       emitHostedExecutionStructuredLog({
         component: "hosted.email",

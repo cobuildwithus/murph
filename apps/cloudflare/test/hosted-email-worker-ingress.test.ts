@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   appendHostedEmailIngressWakeInWeb: vi.fn(),
   drainHostedRuns: vi.fn(),
   fetchHostedExecutionWebControlPlaneResponse: vi.fn(),
+  nudgeHostedRun: vi.fn(),
   readHostedExecutionEnvironment: vi.fn(),
   resolveHostedExecutionUserCryptoContext: vi.fn(),
   resolveUserRunnerStub: vi.fn(),
@@ -122,8 +123,14 @@ describe("hosted email worker ingress", () => {
       requestedTargetSeq: null,
       targetReached: true,
     });
+    mocks.nudgeHostedRun.mockResolvedValue({
+      accepted: true,
+      alarmScheduled: true,
+      alreadyRunning: false,
+    });
     mocks.resolveUserRunnerStub.mockResolvedValue({
       drainHostedRuns: mocks.drainHostedRuns,
+      nudgeHostedRun: mocks.nudgeHostedRun,
     });
   });
 
@@ -292,8 +299,41 @@ describe("hosted email worker ingress", () => {
       }),
       boundUserId: "user_456",
     }));
+    expect(mocks.nudgeHostedRun).toHaveBeenCalledTimes(1);
     expect(mocks.drainHostedRuns).toHaveBeenCalledWith();
     expect(listHostedEmailMessageKeys(bucket)).toHaveLength(1);
+  });
+
+  it("returns after nudging when the hosted email drain is already running", async () => {
+    const bucket = new MemoryEncryptedR2Bucket();
+    mocks.nudgeHostedRun.mockResolvedValueOnce({
+      accepted: true,
+      alarmScheduled: true,
+      alreadyRunning: true,
+    });
+    mocks.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValue(new Response(
+      JSON.stringify({
+        userId: "user_456",
+      }),
+      {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      },
+    ));
+
+    await handleHostedEmailIngress({
+      from: "owner@example.com",
+      raw: buildRawEmail({
+        from: "Owner <owner@example.com>",
+        to: "assistant@mail.example.test",
+      }),
+      to: "assistant@mail.example.test",
+    }, createWorkerEnv(bucket));
+
+    expect(mocks.nudgeHostedRun).toHaveBeenCalledTimes(1);
+    expect(mocks.drainHostedRuns).not.toHaveBeenCalled();
   });
 
   it("falls back to the retry-arm nudge when the direct email drain call fails", async () => {
@@ -316,14 +356,9 @@ describe("hosted email worker ingress", () => {
       },
     ));
 
-    const nudgeHostedRun = vi.fn(async () => ({
-      accepted: true,
-      alarmScheduled: true,
-      alreadyRunning: false,
-    }));
     mocks.resolveUserRunnerStub.mockResolvedValue({
       drainHostedRuns: mocks.drainHostedRuns,
-      nudgeHostedRun,
+      nudgeHostedRun: mocks.nudgeHostedRun,
     });
 
     await handleHostedEmailIngress({
@@ -336,7 +371,7 @@ describe("hosted email worker ingress", () => {
     }, createWorkerEnv(bucket), { waitUntil });
 
     expect(mocks.drainHostedRuns).toHaveBeenCalledWith();
-    expect(nudgeHostedRun).toHaveBeenCalledTimes(1);
+    expect(mocks.nudgeHostedRun).toHaveBeenCalledTimes(2);
     expect(waitUntil).toHaveBeenCalledTimes(1);
   });
 

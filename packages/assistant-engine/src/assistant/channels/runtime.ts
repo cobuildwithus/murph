@@ -36,6 +36,7 @@ import { normalizeOptionalText } from './helpers.js'
 const TELEGRAM_MAX_TEXT_LENGTH = 4096
 const TELEGRAM_MAX_DELIVERY_ATTEMPTS = 3
 const TELEGRAM_SEND_TIMEOUT_MS = 30_000
+const LINQ_TYPING_REFRESH_MS = 4_000
 
 type TelegramParsedTarget = TelegramThreadTarget
 
@@ -209,28 +210,141 @@ export async function startLinqTypingIndicator(
     {
       env,
       fetchImplementation: dependencies.fetchImplementation,
+      signal: createLinkedAbortSignal([dependencies.signal]),
     },
   )
+
+  const stopController = new AbortController()
+  const requestSignal = createLinkedAbortSignal([
+    dependencies.signal,
+    stopController.signal,
+  ])
+
+  let refreshFailure: unknown = null
+  const refreshLoop = keepLinqTypingIndicatorAlive({
+    chatId,
+    env,
+    fetchImplementation: dependencies.fetchImplementation,
+    refreshMs: dependencies.refreshMs ?? LINQ_TYPING_REFRESH_MS,
+    signal: requestSignal,
+  }).catch((error) => {
+    if (!requestSignal.aborted) {
+      refreshFailure = error
+    }
+  })
 
   let stopped = false
   return {
     async stop() {
       if (stopped) {
+        await refreshLoop
+        if (refreshFailure) {
+          throw refreshFailure
+        }
         return
       }
 
       stopped = true
-      await stopLinqChatTypingIndicator(
-        {
-          chatId,
-        },
-        {
-          env,
-          fetchImplementation: dependencies.fetchImplementation,
-        },
-      )
+      stopController.abort()
+      await refreshLoop
+      let stopFailure: unknown = null
+      try {
+        await stopLinqChatTypingIndicator(
+          {
+            chatId,
+          },
+          {
+            env,
+            fetchImplementation: dependencies.fetchImplementation,
+          },
+        )
+      } catch (error) {
+        stopFailure = error
+      }
+
+      if (refreshFailure) {
+        throw refreshFailure
+      }
+      if (stopFailure) {
+        throw stopFailure
+      }
     },
   }
+}
+
+async function keepLinqTypingIndicatorAlive(input: {
+  chatId: string
+  env: NodeJS.ProcessEnv
+  fetchImplementation?: LinqRuntimeDependencies['fetchImplementation']
+  refreshMs: number
+  signal: AbortSignal
+}): Promise<void> {
+  const refreshMs = Math.max(1, Math.trunc(input.refreshMs))
+
+  while (!input.signal.aborted) {
+    await waitForLinqActivityRefresh(refreshMs, input.signal)
+    if (input.signal.aborted) {
+      return
+    }
+
+    await startLinqChatTypingIndicator(
+      {
+        chatId: input.chatId,
+      },
+      {
+        env: input.env,
+        fetchImplementation: input.fetchImplementation,
+        signal: input.signal,
+      },
+    )
+  }
+}
+
+function waitForLinqActivityRefresh(
+  delayMs: number,
+  signal: AbortSignal,
+): Promise<void> {
+  if (signal.aborted) {
+    return Promise.resolve()
+  }
+
+  return new Promise((resolve) => {
+    const cleanup = () => {
+      clearTimeout(timeout)
+      signal.removeEventListener('abort', onAbort)
+    }
+    const onAbort = () => {
+      cleanup()
+      resolve()
+    }
+    const timeout = setTimeout(() => {
+      cleanup()
+      resolve()
+    }, delayMs)
+    signal.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
+function createLinkedAbortSignal(signals: Array<AbortSignal | undefined>): AbortSignal {
+  const presentSignals = signals.filter((signal): signal is AbortSignal => Boolean(signal))
+  if (presentSignals.length === 0) {
+    return new AbortController().signal
+  }
+  if (presentSignals.length === 1) {
+    return presentSignals[0]!
+  }
+
+  const controller = new AbortController()
+  const abort = () => controller.abort()
+  for (const signal of presentSignals) {
+    if (signal.aborted) {
+      controller.abort()
+      break
+    }
+    signal.addEventListener('abort', abort, { once: true })
+  }
+
+  return controller.signal
 }
 
 export async function sendEmailMessage(

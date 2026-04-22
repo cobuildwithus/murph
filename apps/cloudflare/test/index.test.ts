@@ -446,12 +446,38 @@ describe("cloudflare worker routes", () => {
     expect(response.status).toBe(202);
     await expect(response.json()).resolves.toEqual({
       accepted: true,
-      alarmScheduled: false,
+      alarmScheduled: true,
       alreadyRunning: false,
     });
-    expect(stub.nudgeHostedRun).not.toHaveBeenCalled();
+    expect(stub.nudgeHostedRun).toHaveBeenCalledTimes(1);
     expect(stub.drainHostedRuns).toHaveBeenCalledTimes(1);
     expect(waitUntil).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns the nudge result without draining when a run is already in progress", async () => {
+    const stub = createUserRunnerStub({
+      nudgeHostedRun: vi.fn(async () => ({
+        accepted: true,
+        alarmScheduled: true,
+        alreadyRunning: true,
+      })),
+    });
+
+    const response = await worker.fetch(
+      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/run", {
+        method: "POST",
+      })),
+      createWorkerEnv(stub),
+    );
+
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toEqual({
+      accepted: true,
+      alarmScheduled: true,
+      alreadyRunning: true,
+    });
+    expect(stub.nudgeHostedRun).toHaveBeenCalledTimes(1);
+    expect(stub.drainHostedRuns).not.toHaveBeenCalled();
   });
 
   it("falls back to the retry-arm nudge when the direct drain call fails", async () => {
@@ -484,7 +510,7 @@ describe("cloudflare worker routes", () => {
       alreadyRunning: false,
     });
     expect(stub.drainHostedRuns).toHaveBeenCalledTimes(1);
-    expect(stub.nudgeHostedRun).toHaveBeenCalledTimes(1);
+    expect(stub.nudgeHostedRun).toHaveBeenCalledTimes(2);
   });
 
   it("stores and reads encrypted hosted artifact objects through the outbound artifacts.worker handler", async () => {
@@ -958,7 +984,7 @@ function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
     bootstrapUser: vi.fn(async (userId: string) => ({ userId })),
     nudgeHostedRun: vi.fn(async () => ({
       accepted: true,
-      alarmScheduled: false,
+      alarmScheduled: true,
       alreadyRunning: false,
     })),
     status: vi.fn(async () => ({

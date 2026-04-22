@@ -252,6 +252,126 @@ describe("executeHostedIngressEvent", () => {
     });
   });
 
+  it("skips failed first-contact notifications instead of blocking ingress progress", async () => {
+    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: "evt_notification_skipped",
+      memberId: "member_123",
+      notification: {
+        deliveryDedupeToken: "signup-welcome:member_123",
+        deliveryIdempotencyKey: "signup-welcome:member_123",
+        firstContact: {
+          markSeenOnDeliveryAccepted: true,
+        },
+        instructions: "Send exactly the signup welcome.",
+        responsePolicy: {
+          kind: "require_send_exact_text",
+          text: "Welcome to Murph.",
+        },
+        route: {
+          actorId: "+15550002222",
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "thread_123",
+          },
+          identityId: "hbidx:phone:v1:test",
+          threadId: "thread_123",
+          threadIsDirect: true,
+        },
+      },
+      occurredAt: "2026-04-08T00:00:00.000Z",
+    });
+    mocks.sendAssistantNotification.mockRejectedValueOnce(
+      new Error("Azure content filter blocked the welcome message"),
+    );
+
+    await expect(executeHostedIngressEvent({
+      wake,
+      executionContext,
+      runtime: createRuntime(),
+      runtimeEnv: {},
+      vaultRoot: "/tmp/assistant-runtime-events",
+    })).resolves.toMatchObject({
+      conversationMetrics: null,
+      ingressLane: "assistant-notification",
+    });
+  });
+
+  it("skips failed allow-send-or-skip notifications instead of blocking ingress progress", async () => {
+    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: "evt_notification_allow_send_or_skip",
+      memberId: "member_123",
+      notification: {
+        instructions: "Send the optional update if possible.",
+        responsePolicy: {
+          kind: "allow_send_or_skip",
+        },
+        route: {
+          actorId: "+15550002222",
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "thread_123",
+          },
+          identityId: "hbidx:phone:v1:test",
+          threadId: "thread_123",
+          threadIsDirect: true,
+        },
+      },
+      occurredAt: "2026-04-08T00:00:00.000Z",
+    });
+    mocks.sendAssistantNotification.mockRejectedValueOnce(
+      new Error("optional notification skipped by provider"),
+    );
+
+    await expect(executeHostedIngressEvent({
+      wake,
+      executionContext,
+      runtime: createRuntime(),
+      runtimeEnv: {},
+      vaultRoot: "/tmp/assistant-runtime-events",
+    })).resolves.toMatchObject({
+      conversationMetrics: null,
+      ingressLane: "assistant-notification",
+    });
+  });
+
+  it("still fails closed for non-first-contact required notifications", async () => {
+    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: "evt_notification_required_failure",
+      memberId: "member_123",
+      notification: {
+        instructions: "Send the required update.",
+        responsePolicy: {
+          kind: "require_send",
+        },
+        route: {
+          actorId: "+15550002222",
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "thread_123",
+          },
+          identityId: "hbidx:phone:v1:test",
+          threadId: "thread_123",
+          threadIsDirect: true,
+        },
+      },
+      occurredAt: "2026-04-08T00:00:00.000Z",
+    });
+    mocks.sendAssistantNotification.mockRejectedValueOnce(
+      new Error("required notification failed"),
+    );
+
+    await expect(executeHostedIngressEvent({
+      wake,
+      executionContext,
+      runtime: createRuntime(),
+      runtimeEnv: {},
+      vaultRoot: "/tmp/assistant-runtime-events",
+    })).rejects.toThrow("required notification failed");
+  });
+
   it("passes participant delivery notification data through unchanged", async () => {
     const wake = buildHostedExecutionAssistantNotificationRequestedWake({
       eventId: "evt_notification_materialize_linq_home",
