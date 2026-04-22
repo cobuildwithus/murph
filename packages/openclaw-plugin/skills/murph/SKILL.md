@@ -30,7 +30,7 @@ Read-command chooser:
 - `vault-cli search query "<query>"` for fuzzy recall. `--text "<query>"` remains valid for explicit callers.
 - `vault-cli timeline ...` for chronological questions.
 - `vault-cli memory show` plus `vault-cli knowledge ...` reads for saved user context.
-- `vault-cli wearables day ...` or other `wearables ... list` commands for wearable summaries.
+- For common wearable questions, prefer the normalized first reads first: `vault-cli wearables latest`, `vault-cli wearables metric latest <metric>`, `vault-cli wearables metric trend <metric>`, and `vault-cli wearables drift`. Use `vault-cli wearables day ...` or other `wearables ... list` commands when the question is date-specific or you need one summary family in more detail.
 - family `manifest` commands such as `capture manifest`, `meal manifest`, `document manifest`, `intake manifest`, and `workout manifest` for immutable import provenance.
 
 If Murph is not configured yet:
@@ -57,7 +57,7 @@ Useful commands:
 - `vault-cli memory show --format json` for current saved context.
 - `vault-cli search query "<protocol-relevant context>" --format json` for conditions, medications, prior symptoms, injuries, recent workouts, or previous experiment notes.
 - `vault-cli timeline ... --format json` for chronological context when timing matters.
-- `vault-cli wearables sources list --format json` and `vault-cli wearables day <YYYY-MM-DD> --format json` when wearable measurement or baseline quality matters.
+- `vault-cli wearables latest --format json`, `vault-cli wearables metric latest <metric> --format json`, `vault-cli wearables metric trend <metric> --format json`, `vault-cli wearables drift --format json`, `vault-cli wearables sources list --format json`, and `vault-cli wearables day <YYYY-MM-DD> --format json` when wearable measurement or baseline quality matters.
 - `vault-cli experiment create <slug> --title "<title>" --hypothesis "<hypothesis>" --startedOn <YYYY-MM-DD> --status active` only after the user confirms a simple run plan.
 - `vault-cli experiment update --input -` when the run needs richer `protocolRef`, `runPlan`, `onboarding`, or `assistantSupport` fields.
 - `vault-cli automation scaffold --format json` followed by `vault-cli automation upsert --input -` only after the user opts into reminders or check-ins.

@@ -665,6 +665,17 @@ describe('assistant CLI tool capability seam', () => {
       method: 'show',
     })
     await executeTool(queryTools, 'vault.list', { kind: 'goal', limit: 10 })
+    await executeTool(queryTools, 'vault.wearables.latest', {})
+    await executeTool(queryTools, 'vault.wearables.metric_latest', {
+      metric: 'resting-heart-rate',
+    })
+    await executeTool(queryTools, 'vault.wearables.metric_trend', {
+      metric: 'hrv',
+      providers: ['oura'],
+    })
+    await executeTool(queryTools, 'vault.wearables.drift', {
+      providers: ['whoop'],
+    })
     await executeTool(queryTools, 'vault.wearables.day', { date: '2026-03-31' })
     await executeTool(queryTools, 'vault.wearables.sleep', { from: '2026-03-25' })
     await executeTool(queryTools, 'vault.wearables.activity', { date: '2026-03-31' })
@@ -677,6 +688,26 @@ describe('assistant CLI tool capability seam', () => {
     await executeTool(queryTools, 'vault.food.list', { status: 'active' })
     expect(findCall(queryCalls, 'listWearableSleep')).toMatchObject({
       limit: 14,
+    })
+    expect(findCall(queryCalls, 'showWearableLatest')).toMatchObject({
+      requestId: 'req_123',
+      vault: vaultRoot,
+    })
+    expect(findCall(queryCalls, 'showWearableMetricLatest')).toMatchObject({
+      metric: 'resting-heart-rate',
+      requestId: 'req_123',
+      vault: vaultRoot,
+    })
+    expect(findCall(queryCalls, 'showWearableMetricTrend')).toMatchObject({
+      metric: 'hrv',
+      providers: ['oura'],
+      requestId: 'req_123',
+      vault: vaultRoot,
+    })
+    expect(findCall(queryCalls, 'showWearableDrift')).toMatchObject({
+      providers: ['whoop'],
+      requestId: 'req_123',
+      vault: vaultRoot,
     })
     expect(findCall(queryCalls, 'listWearableBodyState')).toMatchObject({
       limit: 14,
@@ -1618,7 +1649,11 @@ function createVaultServicesStub(input: {
       show: makeQueryMethod('show'),
       showFood: makeQueryMethod('showFood'),
       showRecipe: makeQueryMethod('showRecipe'),
+      showWearableDrift: makeQueryMethod('showWearableDrift'),
       showWearableDay: makeQueryMethod('showWearableDay'),
+      showWearableLatest: makeQueryMethod('showWearableLatest'),
+      showWearableMetricLatest: makeQueryMethod('showWearableMetricLatest'),
+      showWearableMetricTrend: makeQueryMethod('showWearableMetricTrend'),
     },
   })
 }
