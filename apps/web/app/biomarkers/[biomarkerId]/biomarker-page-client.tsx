@@ -80,7 +80,7 @@ export function BiomarkerPageClient({ biomarker }: BiomarkerPageClientProps) {
 
 function BiomarkerPageContent({ biomarker }: BiomarkerPageClientProps) {
   return (
-    <main className="min-h-screen bg-background">
+    <div className="bg-background">
       <div className="mx-auto flex max-w-7xl flex-col gap-10 px-6 py-8 md:px-12 lg:px-16 lg:py-12">
         <BiomarkerBreadcrumb biomarker={biomarker} />
         <section className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_380px] lg:items-stretch">
@@ -92,14 +92,17 @@ function BiomarkerPageContent({ biomarker }: BiomarkerPageClientProps) {
         <BiomarkerProtocolRankingSection biomarker={biomarker} />
         <BiomarkerCommunityOutcomeSection biomarker={biomarker} />
       </div>
-    </main>
+    </div>
   );
 }
 
 function BiomarkerBreadcrumb({ biomarker }: BiomarkerPageClientProps) {
   return (
     <nav className="flex items-center gap-2 text-sm" aria-label="Breadcrumb">
-      <Link href="/" className="text-muted-foreground transition-colors hover:text-foreground">
+      <Link
+        href="/overview"
+        className="text-muted-foreground transition-colors hover:text-foreground"
+      >
         Murph
       </Link>
       <span className="text-muted-foreground/60">→</span>
