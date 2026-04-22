@@ -1,6 +1,7 @@
 import {
   automationFrontmatterSchema,
 } from "./automation.ts";
+import { scheduledLogFrontmatterSchema } from "./scheduled-log.ts";
 import {
   familyBankEntityDefinition,
   allergyBankEntityDefinition,
@@ -42,6 +43,7 @@ export const EXPORTS_DIRECTORY = "exports" as const;
 export const VAULT_METADATA_FILE = "vault.json" as const;
 export const CORE_DOCUMENT_RELATIVE_PATH = "CORE.md" as const;
 export const AUTOMATIONS_DIRECTORY = "bank/automations" as const;
+export const SCHEDULED_LOGS_DIRECTORY = "bank/scheduled-logs" as const;
 export const EXPERIMENTS_DIRECTORY = "bank/experiments" as const;
 export const JOURNAL_DIRECTORY = "journal" as const;
 export const ASSESSMENT_LEDGER_DIRECTORY = "ledger/assessments" as const;
@@ -66,6 +68,7 @@ export const VAULT_FAMILY_IDS = Object.freeze({
   memoryDocument: "memoryDocument",
   preferencesDocument: "preferencesDocument",
   automations: "automations",
+  scheduledLogs: "scheduledLogs",
   experiments: "experiments",
   journal: "journal",
   goals: "goals",
@@ -249,6 +252,21 @@ const vaultFamilyDescriptors = [
       kind: "frontmatter",
       issueCode: "FRONTMATTER_INVALID",
       schema: automationFrontmatterSchema,
+    },
+  },
+  {
+    id: VAULT_FAMILY_IDS.scheduledLogs,
+    description: "Canonical scheduled log markdown documents.",
+    owner: "core",
+    storageKind: "markdown-directory",
+    naming: "slug",
+    directory: SCHEDULED_LOGS_DIRECTORY,
+    fileExtension: ".md",
+    querySource: "markdown-root",
+    validation: {
+      kind: "frontmatter",
+      issueCode: "FRONTMATTER_INVALID",
+      schema: scheduledLogFrontmatterSchema,
     },
   },
   {
@@ -780,6 +798,7 @@ export const VAULT_LAYOUT = Object.freeze({
   bankDirectory: BANK_DIRECTORY,
   journalDirectory: JOURNAL_DIRECTORY,
   automationsDirectory: AUTOMATIONS_DIRECTORY,
+  scheduledLogsDirectory: SCHEDULED_LOGS_DIRECTORY,
   allergiesDirectory: allergyBankEntityDefinition.registry.directory,
   conditionsDirectory: conditionBankEntityDefinition.registry.directory,
   experimentsDirectory: EXPERIMENTS_DIRECTORY,

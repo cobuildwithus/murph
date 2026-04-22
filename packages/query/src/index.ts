@@ -256,3 +256,5 @@ export async function searchVaultRuntime(
   const mod = await import("./query-projection.ts");
   return mod.searchVaultRuntime(vaultRoot, query, filters);
 }
+
+export * from "./scheduled-logs.ts";

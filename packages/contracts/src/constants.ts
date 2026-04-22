@@ -2,6 +2,7 @@ export const CONTRACT_SCHEMA_VERSION = Object.freeze({
   assessmentResponse: "murph.assessment-response.v1",
   audit: "murph.audit.v1",
   automationFrontmatter: "murph.frontmatter.automation.v1",
+  scheduledLogFrontmatter: "murph.frontmatter.scheduled-log.v1",
   event: "murph.event.v1",
   inboxCapture: "murph.inbox-capture.v1",
   allergyFrontmatter: "murph.frontmatter.allergy.v1",
@@ -33,6 +34,7 @@ export const ID_PREFIXES = Object.freeze({
   assessment: "asmt",
   audit: "aud",
   automation: "automation",
+  scheduledLog: "slog",
   condition: "cond",
   document: "doc",
   event: "evt",
@@ -178,6 +180,7 @@ export const VARIANT_SIGNIFICANCES = Object.freeze(
 export const AUDIT_ACTIONS = Object.freeze([
   "allergy_upsert",
   "automation_upsert",
+  "scheduled_log_upsert",
   "condition_upsert",
   "family_upsert",
   "genetics_upsert",
@@ -237,6 +240,7 @@ export const FILE_CHANGE_OPERATIONS = Object.freeze(["create", "append", "update
 export const FRONTMATTER_DOC_TYPES = Object.freeze({
   allergy: "allergy",
   automation: "automation",
+  scheduledLog: "scheduled_log",
   core: "core",
   condition: "condition",
   experiment: "experiment",

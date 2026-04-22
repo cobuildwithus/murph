@@ -18,6 +18,7 @@ export interface MealImportPayload {
   source?: EventSource;
   ingredients?: string[];
   nutrition?: MealNutrition;
+  externalRef?: DeviceExternalRefPayload;
 }
 
 export interface SampleImportRecord {

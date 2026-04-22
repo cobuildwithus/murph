@@ -100,6 +100,15 @@ export interface DeleteEventInput {
   eventId: string;
 }
 
+export interface FindEventByExternalRefInput {
+  vaultRoot: string;
+  system: string;
+  resourceType: string;
+  resourceId: string;
+  version?: string;
+  facet?: string;
+}
+
 export interface UpsertEventResult {
   eventId: string;
   ledgerFile: string;
@@ -1023,6 +1032,47 @@ function validateStoredEventRecord(record: JsonObject): EventRecord {
     "EVENT_CONTRACT_INVALID",
     "Stored event record is invalid.",
   );
+}
+
+function externalRefMatches(record: EventRecord, input: FindEventByExternalRefInput): boolean {
+  const externalRef = record.externalRef;
+  if (!externalRef) {
+    return false;
+  }
+
+  return externalRef.system === input.system &&
+    externalRef.resourceType === input.resourceType &&
+    externalRef.resourceId === input.resourceId &&
+    (input.version === undefined || externalRef.version === input.version) &&
+    (input.facet === undefined || externalRef.facet === input.facet);
+}
+
+export async function findEventByExternalRef(input: FindEventByExternalRefInput): Promise<EventRecord | null> {
+  const relativePaths = await walkVaultFiles(input.vaultRoot, VAULT_LAYOUT.eventLedgerDirectory, {
+    extension: ".jsonl",
+  });
+  const matches: MatchedEventRecord[] = [];
+
+  for (const relativePath of relativePaths) {
+    const records = await readJsonlRecords({
+      vaultRoot: input.vaultRoot,
+      relativePath,
+    });
+
+    for (const rawRecord of records) {
+      const record = validateStoredEventRecord(rawRecord as JsonObject);
+      if (externalRefMatches(record, input)) {
+        matches.push({ relativePath, record });
+      }
+    }
+  }
+
+  const latest = selectLatestEventSpineEntry(matches);
+  if (!latest || isDeletedEventSpineRecord(latest.record)) {
+    return null;
+  }
+
+  return latest.record;
 }
 
 function flattenMatchedEventRecords(

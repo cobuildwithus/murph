@@ -208,6 +208,7 @@ beforeEach(() => {
     },
   })
   cronMocks.loadRuntimeModule.mockReset().mockResolvedValue({
+    findEventByExternalRef: vi.fn(async () => null),
     readFood: vi.fn(),
   })
   cronMocks.loadImporterRuntime.mockReset().mockResolvedValue({
@@ -529,6 +530,7 @@ describe('assistant cron runtime threshold coverage', () => {
     const { vaultRoot } = await createRuntimeContext('assistant-cron-local-one-shot-')
 
     cronMocks.loadRuntimeModule.mockResolvedValueOnce({
+      findEventByExternalRef: vi.fn(async () => null),
       readFood: vi.fn(async () => ({
         foodId: 'food-1',
         title: 'Daily Oats',
@@ -586,6 +588,7 @@ describe('assistant cron runtime threshold coverage', () => {
     }))
 
     cronMocks.loadRuntimeModule.mockResolvedValueOnce({
+      findEventByExternalRef: vi.fn(async () => null),
       readFood: vi.fn(async () => ({
         foodId: 'food-nutrition',
         nutrition,
@@ -672,6 +675,7 @@ describe('assistant cron runtime threshold coverage', () => {
     const { vaultRoot } = await createRuntimeContext('assistant-cron-local-race-')
 
     cronMocks.loadRuntimeModule.mockResolvedValueOnce({
+      findEventByExternalRef: vi.fn(async () => null),
       readFood: vi.fn(async () => ({
         foodId: 'food-race',
         title: 'Race Oats',

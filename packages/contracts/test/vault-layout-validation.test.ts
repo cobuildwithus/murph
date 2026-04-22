@@ -30,6 +30,7 @@ import {
   RAW_WORKOUTS_DIRECTORY,
   REQUIRED_VAULT_DIRECTORIES,
   SAMPLE_LEDGER_DIRECTORY,
+  SCHEDULED_LOGS_DIRECTORY,
   VAULT_FAMILY_BY_ID,
   VAULT_FAMILY_DESCRIPTORS,
   VAULT_FAMILY_IDS,
@@ -242,6 +243,7 @@ describe("vault layout exports", () => {
     expect(REQUIRED_VAULT_DIRECTORIES).toEqual([
       BANK_DIRECTORY,
       AUTOMATIONS_DIRECTORY,
+      SCHEDULED_LOGS_DIRECTORY,
       EXPERIMENTS_DIRECTORY,
       JOURNAL_DIRECTORY,
       "bank/goals",
@@ -279,6 +281,7 @@ describe("vault layout exports", () => {
     expect(VAULT_QUERY_SOURCE).toEqual({
       optionalFiles: [VAULT_METADATA_FILE, CORE_DOCUMENT_RELATIVE_PATH],
       markdownRoots: [
+        SCHEDULED_LOGS_DIRECTORY,
         EXPERIMENTS_DIRECTORY,
         JOURNAL_DIRECTORY,
         "bank/goals",
@@ -308,6 +311,7 @@ describe("vault layout exports", () => {
       bankDirectory: BANK_DIRECTORY,
       journalDirectory: JOURNAL_DIRECTORY,
       automationsDirectory: AUTOMATIONS_DIRECTORY,
+      scheduledLogsDirectory: SCHEDULED_LOGS_DIRECTORY,
       allergiesDirectory: "bank/allergies",
       conditionsDirectory: "bank/conditions",
       experimentsDirectory: EXPERIMENTS_DIRECTORY,
