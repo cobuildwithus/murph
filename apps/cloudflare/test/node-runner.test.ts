@@ -69,6 +69,7 @@ import {
   buildHostedExecutionJobRuntime,
   createHostedExecutionJobRunner,
 } from "../src/node-runner.ts";
+import { HOSTED_RUNNER_ENV_KEY_NAMES } from "../src/hosted-env-policy.ts";
 import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures.ts";
 
 const describe = baseDescribe.sequential;
@@ -2754,6 +2755,7 @@ describe("runHostedExecutionJob", () => {
         "HOSTED_ASSISTANT_BASE_URL",
         "WHISPER_COMMAND",
         "WHISPER_MODEL_PATH",
+        ...HOSTED_RUNNER_ENV_KEY_NAMES,
         ...HOSTED_ASSISTANT_ALLOWED_API_KEY_ENV_NAMES,
         ...HOSTED_ASSISTANT_CONFIG_ENV_NAMES,
       ]),

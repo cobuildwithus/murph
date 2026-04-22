@@ -74,6 +74,7 @@ Core execution tuning:
 - `CF_RETRY_DELAY_MS` defaults to `30000`
 - `CF_RUNNER_TIMEOUT_MS` defaults to `120000`
 - `CF_RUNNER_COMMIT_TIMEOUT_MS` defaults to `30000`
+- `CF_RUNNER_READY_TIMEOUT_MS` defaults to `20000`
 - `CF_ALLOWED_RUNNER_SECRET_KEYS` to seed `HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS` in the rendered worker config
 - `HOSTED_EXECUTION_RUNNER_ENV_PROFILES` adds deploy-time profiles on top of the runtime's minimal `assistant,parsers,web` baseline; deploy automation defaults to `hosted-email,linq,mapbox,telegram`. Hosted device-sync runtime config is resolved from worker env directly rather than a child-env profile.
 - `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS` defaults to `300000`
@@ -87,6 +88,10 @@ Observability:
 Signed hosted-web callback metadata:
 
 - `HOSTED_WEB_CALLBACK_SIGNING_KEY_ID`
+
+Hosted ingress encryption rotation metadata:
+
+- `HOSTED_WAKE_ENCRYPTION_KEY_VERSION`
 
 Hosted assistant config:
 
@@ -113,6 +118,7 @@ Opt-in runtime integrations and tool overrides:
 - `FFMPEG_COMMAND`
 - `WHISPER_COMMAND`
 - `WHISPER_MODEL_PATH`
+- `DEVICE_SYNC_PUBLIC_BASE_URL`
 
 If the selected GitHub environment already defines container sizing overrides, update these existing vars there as well:
 
@@ -128,7 +134,6 @@ Key rotation and future envelope lanes:
 - `HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEYRING_JSON`
 - `HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_KEYRING_JSON`
 - `HOSTED_EXECUTION_TEE_AUTOMATION_RECIPIENT_PUBLIC_JWK`
-- `HOSTED_WAKE_ENCRYPTION_KEY_VERSION`
 - `HOSTED_WAKE_ENCRYPTION_KEYRING_JSON`
 
 Hosted assistant provider secrets:
@@ -140,10 +145,19 @@ Hosted assistant provider secrets:
 Opt-in execution integrations:
 
 - `HOSTED_EMAIL_SIGNING_SECRET`
+- `DEVICE_SYNC_SECRET`
+- `GARMIN_CLIENT_ID`
+- `GARMIN_CLIENT_SECRET`
 - `LINQ_API_TOKEN`
 - `LINQ_WEBHOOK_SECRET`
 - `MAPBOX_ACCESS_TOKEN`
+- `OURA_CLIENT_ID`
+- `OURA_CLIENT_SECRET`
+- `STRAVA_CLIENT_ID`
+- `STRAVA_CLIENT_SECRET`
 - `TELEGRAM_BOT_TOKEN`
+- `WHOOP_CLIENT_ID`
+- `WHOOP_CLIENT_SECRET`
 - `BRAVE_API_KEY` when `MURPH_WEB_SEARCH_PROVIDER=brave`
 
 The documented deploy surface is intentionally limited to the vars and secrets above for the narrowed execution plane and its opt-in runtime integrations.

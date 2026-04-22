@@ -103,6 +103,10 @@ const RUNNER_ENV_PROFILE_KEYS = {
   ],
 } as const;
 
+export const HOSTED_RUNNER_ENV_KEY_NAMES: readonly string[] = Array.from(
+  new Set(Object.values(RUNNER_ENV_PROFILE_KEYS).flatMap((keys) => [...keys])),
+);
+
 const DEFAULT_RUNNER_ENV_PROFILE_NAMES = [
   "assistant",
   "parsers",
