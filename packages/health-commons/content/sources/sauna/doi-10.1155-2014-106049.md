@@ -15,6 +15,9 @@ relations:
   -
     type: parent_family
     target: experiment_family:dry-sauna
+  -
+    type: related_protocol
+    target: protocol_variant:dry-sauna/bryan-johnson-blueprint
 source:
   kind: journal_article
   title: Cardiovascular and Thermal Response to Dry-Sauna Exposure in Healthy Subjects
@@ -24,6 +27,19 @@ source:
   citation: Zalewski P, Zawadka-Kunikowska M, Słomko J, Szrajda J, Klawe JJ, Tafil-Klawe M, Newton J. Cardiovascular and Thermal Response to Dry-Sauna Exposure in Healthy Subjects. Physiology Journal. 2014;2014:106049. doi:10.1155/2014/106049.
   doi: 10.1155/2014/106049
   url: https://onlinelibrary.wiley.com/doi/10.1155/2014/106049
+protocolEvidence:
+  -
+    protocolKey: "protocol_variant:dry-sauna/bryan-johnson-blueprint"
+    groupId: "independent-sauna-physiology-context"
+    stance: context_only
+    scope: same_mechanism
+    result: not_efficacy_evidence
+    endpointKeys:
+      - biomarker:resting-heart-rate
+    headline: "High-temperature dry-sauna study anchors core-temperature and heart-rate interpretation."
+    implication: "Air temperature and minutes are incomplete dose descriptors; log symptoms, cooling, and heat burden."
+    caveat: "Only 9 healthy young men in a single 15-minute 100 C exposure."
+    displayPriority: 30
 evidenceBucket: Acute and mechanistic
 whyItMatters: Gives direct dry-sauna context for interpreting acute thermal strain instead of treating air temperature and minutes as sufficient dose descriptors.
 potentialMurphEndpoints:
@@ -40,10 +56,15 @@ murphV1Priority: Medium
 researchEvidence:
   designKind: acute_mechanistic
   designLabel: Acute dry-sauna physiology study
-  populationLabel: Healthy adult subjects
+  participantCount: 9
+  participantCountKind: reported
+  populationLabel: Healthy young men
+  durationLabel: Single 15-minute dry-sauna exposure at 100 C and 30-40 percent humidity
   aggregateRole: context
+  cohortKey: zalewski-2014-dry-sauna-9
   notes:
     - Useful for dose interpretation and high-heat safety framing.
+    - Added the reported sample size and exposure details so the high-temperature card is less ambiguous.
 ---
 
 This source is included for **acute and mechanistic** sauna context.

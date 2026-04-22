@@ -286,8 +286,9 @@ function toExperimentDetail(
     entityTypes: ["source_artifact"],
     relationTypes: ["cites"],
   });
-  const citedStudySources = citedSources.filter(isStudySource);
-  const studies = sortStudySourcesForDisplay(citedStudySources)
+  const citedDisplaySources = citedSources.filter(isDisplaySource);
+  const countedResearchSources = citedDisplaySources.filter(isCountedResearchSource);
+  const studies = sortStudySourcesForDisplay(citedDisplaySources)
     .map((source) => toStudy(source, protocol.key));
   const {
     coveredSourceCount: researchGroupCoveredSourceCount,
@@ -295,7 +296,7 @@ function toExperimentDetail(
     totalSourceCount: researchGroupTotalSourceCount,
   } = toResearchGroups({
     protocol,
-    citedStudySources,
+    citedStudySources: citedDisplaySources,
   });
   const hasCompleteResearchGroupCoverage =
     researchGroups.length > 0
@@ -316,8 +317,16 @@ function toExperimentDetail(
     image: resolveProtocolImage(protocol),
     durationDays: testPlan?.durationDays ?? protocolSpecDurationDays(protocolSpec),
     baselineDays: testPlan?.baselineDays ?? 0,
-    studyCount: citedStudySources.length,
-    researchSummaryLabel: formatResearchSummaryLabel(citedStudySources),
+    studyCount: hasMixedResearchAndProvenanceSources({
+      countedResearchSources,
+      displaySources: citedDisplaySources,
+    })
+      ? countResearchStudies(countedResearchSources)
+      : citedDisplaySources.length,
+    researchSummaryLabel: formatResearchSummaryLabel({
+      countedResearchSources,
+      displaySources: citedDisplaySources,
+    }),
     evidenceLevel: QUALITY_TO_EVIDENCE_LEVEL[protocol.quality ?? ""] ?? 2,
     evidenceLabel: formatEvidenceLabel(protocol),
     description: protocol.summary ?? summarizeBody(protocol.body),
@@ -331,7 +340,10 @@ function toExperimentDetail(
     protocolLogFields: protocolSpec?.logFields ?? [],
     whyItWorks: toWhyItWorks(protocol, claims),
     experts: sourcePeople.map(toExpert),
-    researchStats: toResearchStats(citedStudySources),
+    researchStats: toResearchStats({
+      countedResearchSources,
+      displaySources: citedDisplaySources,
+    }),
     ...(protocol.researchLandscape
       ? {
           researchLandscape: {
@@ -771,8 +783,12 @@ function studyDisplayRank(entity: HealthCommonsEntity): number {
   return 6;
 }
 
-function isStudySource(entity: HealthCommonsEntity): boolean {
+function isDisplaySource(entity: HealthCommonsEntity): boolean {
   return entity.source?.kind !== undefined && entity.source.kind !== "other";
+}
+
+function isCountedResearchSource(entity: HealthCommonsEntity): boolean {
+  return entity.source?.kind === "journal_article" || entity.source?.kind === "review";
 }
 
 function toStudy(entity: HealthCommonsEntity, protocolKey?: string): Study {
@@ -1043,19 +1059,76 @@ function sourceKindToStudyType(source: HealthCommonsSource | undefined): Study["
   return "SRC";
 }
 
-function formatResearchSummaryLabel(
-  citedSources: readonly HealthCommonsEntity[],
-): string {
-  const primaryParticipantCount = sumPrimaryParticipantCount(citedSources);
-  if (
-    primaryParticipantCount === 1 &&
-    citedSources.some((entity) => entity.researchEvidence?.designKind === "single_person_report")
-  ) {
-    return "n=1 report";
+function countResearchStudies(
+  countedResearchSources: readonly HealthCommonsEntity[],
+): number {
+  return countedResearchSources.filter(
+    (entity) => entity.source?.kind === "journal_article",
+  ).length;
+}
+
+function hasMixedResearchAndProvenanceSources({
+  countedResearchSources,
+  displaySources,
+}: {
+  countedResearchSources: readonly HealthCommonsEntity[];
+  displaySources: readonly HealthCommonsEntity[];
+}): boolean {
+  return countedResearchSources.length > 0
+    && countedResearchSources.length < displaySources.length;
+}
+
+function formatResearchSummaryLabel({
+  countedResearchSources,
+  displaySources,
+}: {
+  countedResearchSources: readonly HealthCommonsEntity[];
+  displaySources: readonly HealthCommonsEntity[];
+}): string {
+  if (!hasMixedResearchAndProvenanceSources({
+    countedResearchSources,
+    displaySources,
+  })) {
+    const primaryParticipantCount = sumPrimaryParticipantCount(displaySources);
+    if (
+      primaryParticipantCount === 1 &&
+      displaySources.some((entity) => entity.researchEvidence?.designKind === "single_person_report")
+    ) {
+      return "n=1 report";
+    }
+
+    return `${displaySources.length.toLocaleString()} ${
+      displaySources.length === 1 ? "study" : "studies"
+    }`;
   }
 
-  return `${citedSources.length.toLocaleString()} ${
-    citedSources.length === 1 ? "study" : "studies"
+  const journalArticleCount = countResearchStudies(countedResearchSources);
+  const reviewCount = countedResearchSources.filter(
+    (entity) => entity.source?.kind === "review",
+  ).length;
+
+  if (journalArticleCount > 0 && reviewCount > 0) {
+    return `${journalArticleCount.toLocaleString()} ${
+      journalArticleCount === 1 ? "study" : "studies"
+    } + ${reviewCount.toLocaleString()} ${
+      reviewCount === 1 ? "review" : "reviews"
+    }`;
+  }
+
+  if (journalArticleCount > 0) {
+    return `${journalArticleCount.toLocaleString()} ${
+      journalArticleCount === 1 ? "study" : "studies"
+    }`;
+  }
+
+  if (reviewCount > 0) {
+    return `${reviewCount.toLocaleString()} ${
+      reviewCount === 1 ? "review" : "reviews"
+    }`;
+  }
+
+  return `${displaySources.length.toLocaleString()} ${
+    displaySources.length === 1 ? "source" : "sources"
   }`;
 }
 
@@ -1069,14 +1142,59 @@ function formatResearchDesignLabel(
     .join(" ");
 }
 
-function toResearchStats(
-  citedSources: readonly HealthCommonsEntity[],
-): ExperimentProtocol["researchStats"] {
-  const reviewCount = citedSources.filter((entity) => entity.source?.kind === "review").length;
-  const journalArticleCount = citedSources.filter(
+function toResearchStats({
+  countedResearchSources,
+  displaySources,
+}: {
+  countedResearchSources: readonly HealthCommonsEntity[];
+  displaySources: readonly HealthCommonsEntity[];
+}): ExperimentProtocol["researchStats"] {
+  if (!hasMixedResearchAndProvenanceSources({
+    countedResearchSources,
+    displaySources,
+  })) {
+    const reviewCount = displaySources.filter((entity) => entity.source?.kind === "review").length;
+    const journalArticleCount = displaySources.filter(
+      (entity) => entity.source?.kind === "journal_article",
+    ).length;
+    const codedParticipantCount = sumPrimaryParticipantCount(displaySources);
+    const codedParticipantStats = codedParticipantCount > 0
+      ? [
+          {
+            label: "TOTAL PARTICIPANTS",
+            value: codedParticipantCount === 1
+              ? "1"
+              : `${codedParticipantCount.toLocaleString()}+`,
+          },
+        ]
+      : [];
+    const years = displaySources
+      .map((entity) => entity.source?.year)
+      .filter((year): year is number => typeof year === "number")
+      .sort((left, right) => left - right);
+    const researchYears =
+      years.length === 0
+        ? "—"
+        : years[0] === years[years.length - 1]
+          ? `${years[0]}`
+          : `${years[0]}–${years[years.length - 1]}`;
+
+    return [
+      { label: "SOURCES CHECKED", value: displaySources.length },
+      ...codedParticipantStats,
+      { label: "REVIEW PAPERS", value: reviewCount },
+      { label: "RESEARCH PAPERS", value: journalArticleCount },
+      { label: "YEARS COVERED", value: researchYears },
+    ];
+  }
+
+  const reviewCount = countedResearchSources.filter(
+    (entity) => entity.source?.kind === "review",
+  ).length;
+  const journalArticleCount = countedResearchSources.filter(
     (entity) => entity.source?.kind === "journal_article",
   ).length;
-  const codedParticipantCount = sumPrimaryParticipantCount(citedSources);
+  const codedParticipantCount = sumPrimaryParticipantCount(countedResearchSources);
   const codedParticipantStats = codedParticipantCount > 0
     ? [
         {
@@ -1087,7 +1205,7 @@ function toResearchStats(
         },
       ]
     : [];
-  const years = citedSources
+  const years = countedResearchSources
     .map((entity) => entity.source?.year)
     .filter((year): year is number => typeof year === "number")
     .sort((left, right) => left - right);
@@ -1099,7 +1217,7 @@ function toResearchStats(
         : `${years[0]}–${years[years.length - 1]}`;
 
   return [
-    { label: "SOURCES CHECKED", value: citedSources.length },
+    { label: "SOURCES CHECKED", value: displaySources.length },
     ...codedParticipantStats,
     { label: "REVIEW PAPERS", value: reviewCount },
     { label: "RESEARCH PAPERS", value: journalArticleCount },

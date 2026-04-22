@@ -739,6 +739,41 @@
         "source_artifact:pmid-22505948",
         "source_artifact:doi-10.1152-ajpregu.00012.2025"
       ]
+    },
+    {
+      "affectedFields": [
+        "relations",
+        "claims",
+        "researchLandscape",
+        "sources/sauna.protocolEvidence",
+        "sources/sauna/pmid-16877041.md",
+        "apps/web.researchGroups",
+        "generated.catalog"
+      ],
+      "changeId": "chg_2026_04_22_bryan_johnson_sauna_research_gap_fill",
+      "changeType": "evidence_change",
+      "editSummary": "Expanded the Bryan Johnson sauna research section beyond source attribution with independent sauna physiology, long-term cohort, post-exercise, fertility, and safety evidence groups.",
+      "entityKey": "protocol_variant:dry-sauna/bryan-johnson-blueprint",
+      "minor": false,
+      "rationale": "The prior research section was readable but sparse and over-dependent on Bryan Johnson / Blueprint self-reports; the experiment page should separate exact source provenance from independent mechanism context, adjacent intervention findings, and safety boundaries.",
+      "reviewStatus": "proposed",
+      "schemaVersion": "murph.commons.change.v1",
+      "sourceKeys": [
+        "source_artifact:mayo-2018-sauna-review",
+        "source_artifact:pmid-25705824",
+        "source_artifact:pmid-28633297",
+        "source_artifact:pmid-29269746",
+        "source_artifact:pmid-31126559",
+        "source_artifact:doi-10.1155-2014-106049",
+        "source_artifact:pmid-35785965",
+        "source_artifact:pmid-40611569",
+        "source_artifact:pmid-31869820",
+        "source_artifact:pmid-16877041",
+        "source_artifact:pmid-23411620",
+        "source_artifact:pmid-9972494",
+        "source_artifact:pmid-11165553",
+        "source_artifact:pmid-16871826"
+      ]
     }
   ]
 }
