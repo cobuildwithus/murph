@@ -227,6 +227,177 @@ testPlans:
       - Compare intervention-window averages against the user’s own 7-day baseline rather than highlighting single-night changes.
       - Treat HRV, resting heart rate, sleep stages, and total sleep time as exploratory unless the personal signal is repeated and not obviously confounded.
       - The primary practical question is whether evenings feel less wired and sleep onset appears earlier, not whether every sleep metric improves.
+experimentOnboarding:
+  schemaVersion: murph.commons.experiment-onboarding.v1
+  startIntent:
+    displayPrompt: "Hey Murph, I want to explore wearing red-light glasses before bed."
+    intentSummary: "Explore Red-Light Glasses Before Bed"
+  contextReview:
+    vaultChecks:
+      -
+        id: active_experiments
+        label: Active experiments
+        reason: Avoid stacking another meaningful experiment on top of an active one unless the user explicitly chooses weaker attribution.
+        readHints:
+          - experiment list --status active
+      -
+        id: wearable_sleep_baseline
+        label: Wearable sleep baseline
+        reason: Check whether sleep-onset, sleep-efficiency, HRV, or resting-heart-rate trends are available during the baseline and intervention windows.
+        freshnessDays: 14
+        readHints:
+          - wearables sources list
+          - wearables day
+      -
+        id: sleep_schedule_and_evening_context
+        label: Sleep schedule and evening light context
+        reason: Understand usual bedtime, screen use, room-light habits, and whether the user already has a stable evening routine that makes this experiment measurable.
+        freshnessDays: 30
+        readHints:
+          - memory show
+          - search query "bedtime evening light screens sleep schedule room light"
+          - journal show
+      -
+        id: eye_mood_and_medication_context
+        label: Eye, mood, and medication context
+        reason: Screen for eye or light sensitivity, mood or circadian-risk context, pregnancy or postpartum context, melatonin or timed-light therapy, and other reasons Murph should not frame this as a simple unsupervised self-experiment.
+        freshnessDays: 90
+        readHints:
+          - memory show
+          - search query "migraine photosensitivity eye surgery eye disease bipolar mania insomnia delayed sleep phase shift work melatonin light therapy pregnancy postpartum medication"
+    notes:
+      - Prefer recent wearable sleep data when it exists, but explain that the experiment can still run with subjective sleep-onset notes when wearables are missing or noisy.
+      - Do not re-ask stable context the vault already answers unless it changes safety, logistics, measurement fidelity, or user consent.
+  safetyScreen:
+    cautionLevel: moderate
+    mode: ask_compact_then_expand_if_positive
+    dispositionIfAnyPositive: clinician_guidance_before_unsupervised_start
+    mustAsk:
+      -
+        id: eye_or_light_sensitivity
+        prompt: eye disease, recent eye surgery, migraine or photosensitivity, epilepsy triggered by visual stimuli, or a history of tinted-lens discomfort
+      -
+        id: mood_or_sleep_phase_risk
+        prompt: bipolar disorder, recent mania or hypomania, severe insomnia, delayed sleep phase, shift-work sleep disruption, or another reason changing evening light exposure could destabilize sleep or mood
+      -
+        id: safety_critical_evening_tasks
+        prompt: needing to drive, cycle, cook with visual hazards, use stairs or tools, or do color-critical evening work while the glasses are on
+    stopIf:
+      inheritFromProtocolSafety: true
+    notes:
+      - A positive or uncertain screen is not a diagnosis. It means Murph should not set this up as an unsupervised bedtime experiment without a lower-burden alternative or clinician guidance.
+  setupSlots:
+    -
+      id: glasses_available
+      label: Glasses available
+      purpose: logistics
+      valueType: boolean
+      askPolicy: ask_if_unknown
+      required: true
+      question: Do you already have amber, red, or brown blue-light-filtering glasses you can wear before bed?
+      writePath: onboarding.answers.glasses_available
+    -
+      id: lens_filter_confidence
+      label: Lens filter confidence
+      purpose: measurement_fidelity
+      valueType: enum
+      askPolicy: ask_if_unknown
+      required: true
+      question: How confident are you that the lenses strongly filter blue and green light: published specs, visibly dark amber or red, or unsure?
+      options:
+        - published_specs
+        - visibly_dark
+        - unsure
+      writePath: runPlan.lensFilterConfidence
+    -
+      id: wear_window
+      label: Wear window before bed
+      purpose: logistics
+      valueType: enum
+      askPolicy: ask_if_unknown
+      required: true
+      question: Can you realistically wear them for the last 90 to 120 minutes before bed on experiment nights?
+      options:
+        - ninety_minutes
+        - one_hundred_twenty_minutes
+        - shorter_or_inconsistent
+      constraints:
+        targetMinutes: 90
+        preferredMinutes: 120
+      writePath: runPlan.wearWindow
+    -
+      id: bedtime_anchor
+      label: Bedtime anchor
+      purpose: logistics
+      valueType: local_time
+      askPolicy: ask_if_unknown_or_stale
+      required: true
+      question: What bedtime should Murph anchor the glasses reminder to?
+      writePath: runPlan.bedtimeAnchor
+    -
+      id: evening_light_stability
+      label: Evening light stability
+      purpose: confounder_control
+      valueType: enum
+      askPolicy: ask_if_unknown
+      required: false
+      question: Should we keep your current evening screen and room-light habits stable rather than changing them during the same test?
+      options:
+        - keep_existing_habits_stable
+        - also_reduce_screens_or_room_light
+      writePath: runPlan.eveningLightPolicy
+    -
+      id: reminder_policy
+      label: Reminder policy
+      purpose: assistant_support
+      valueType: reminder_policy
+      askPolicy: ask_at_confirmation
+      required: true
+      question: Do you want a reminder before the wear window, and if nothing is logged by the next morning should Murph ask once or leave it alone?
+      options:
+        - none
+        - pre_window
+        - pre_window_plus_next_morning_missing_log_check
+      writePath: assistantSupport.reminderPolicy
+  planDefaults:
+    testPlanId: sol-proxy-21d
+    baselineDays: 7
+    interventionDays: 14
+    sessionsPerWeek: 7
+    targetSessions: 12
+    minimumUsefulSessions: 10
+    firstSessionGuidance: Keep the first night simple. Wear the glasses during the usual pre-bed routine and do not add another new sleep intervention at the same time.
+  logging:
+    sessionFields:
+      - glasses_on_time
+      - glasses_off_time
+      - intended_bedtime
+      - actual_bedtime
+      - estimated_time_to_fall_asleep_minutes
+      - felt_less_wired_before_bed
+      - headache_or_visual_discomfort
+      - mood_change
+    confounders:
+      - screen_use_last_2h
+      - room_light_brightness_last_2h
+      - caffeine_after_noon
+      - alcohol_last_24h
+      - hard_training_last_24h
+      - late_exercise
+      - travel_or_timezone_shift
+      - illness_or_fever
+      - unusual_stress
+      - new_supplement_or_medication_change
+  assistantPolicy:
+    maxSetupQuestionsPerTurn: 2
+    askBeforeCreatingAutomations: true
+    missedLogFollowup: opt_in_only
+    reminderOptions:
+      - none
+      - pre_window
+      - pre_window_plus_next_morning_missing_log_check
+    missedLogFollowupCopy: "Did you end up wearing the glasses before bed last night? Totally fine either way, I just want the experiment record to be accurate."
+    confirmationPrompt: Show the safety outcome, bedtime anchor, wear-window target, lens-confidence choice, logging expectations, stop conditions, and reminder policy before creating the active experiment or any automations.
 whyItWorks:
   - The mechanism starts in the retina. Short-wavelength, melanopic evening light activates melanopsin-containing retinal ganglion cells that signal the brain’s circadian clock, which can suppress or delay melatonin and keep the body in a more daytime-like alerting state.
   - High-filtering amber, red, or brown glasses try to lower that melanopic signal during the last 90–120 minutes before bed. If the signal is reduced enough, the theory is that circadian night can unfold more normally: melatonin rises, alerting eases, core temperature trends downward, and sleep onset feels less effortful.
