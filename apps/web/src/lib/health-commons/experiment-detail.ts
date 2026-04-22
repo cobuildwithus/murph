@@ -63,7 +63,7 @@ const PROTOCOL_LIBRARY_ORDER = [
   BRYAN_JOHNSON_SAUNA_ROUTE_ID,
 ] as const;
 
-const PARTICIPANT_STAT_LABEL = "HUMAN PARTICIPANTS";
+const PARTICIPANT_STAT_LABEL = "DIRECT HUMAN PARTICIPANTS";
 
 type BiomarkerSignalDirection =
   ExperimentProtocol["expectedSignals"][number]["direction"];
@@ -348,6 +348,8 @@ function toExperimentDetail(
     researchStats: toResearchStats({
       countedResearchSources,
       displaySources: citedDisplaySources,
+      protocolKey: protocol.key,
+      routeId,
     }),
     ...(protocol.researchLandscape
       ? {
@@ -957,14 +959,6 @@ function findGroupProtocolEvidenceAppraisal(
   );
 }
 
-function hasGroupAppraisal(
-  entity: HealthCommonsEntity,
-  protocolKey: string,
-  groupId: string,
-): boolean {
-  return findGroupProtocolEvidenceAppraisal(entity, protocolKey, groupId) !== undefined;
-}
-
 function researchEvidenceToStudyType(
   evidence: HealthCommonsResearchEvidence | undefined,
   source: HealthCommonsSource | undefined,
@@ -992,8 +986,8 @@ function researchEvidenceToStudyType(
     case "narrative_review":
       return "REV";
     case "guideline":
-      return "GUIDE";
     case "expert_protocol":
+      return "GUIDE";
     case "bibliography":
     case "other":
       return "SRC";
@@ -1051,7 +1045,7 @@ function sourceKindToStudyType(source: HealthCommonsSource | undefined): Study["
     return "SRC";
   }
 
-  if (source.kind === "guideline") {
+  if (source.kind === "guideline" || source.kind === "external_protocol") {
     return "GUIDE";
   }
 
@@ -1174,10 +1168,20 @@ function formatResearchDesignLabel(
 function toResearchStats({
   countedResearchSources,
   displaySources,
+  protocolKey,
+  routeId,
 }: {
   countedResearchSources: readonly HealthCommonsEntity[];
   displaySources: readonly HealthCommonsEntity[];
+  protocolKey: string;
+  routeId: string;
 }): ExperimentProtocol["researchStats"] {
+  const participantCountSources = participantCountResearchSources({
+    countedResearchSources,
+    protocolKey,
+    routeId,
+  });
+
   if (!hasMixedResearchAndProvenanceSources({
     countedResearchSources,
     displaySources,
@@ -1186,7 +1190,7 @@ function toResearchStats({
     const journalArticleCount = displaySources.filter(
       (entity) => entity.source?.kind === "journal_article",
     ).length;
-    const codedParticipantCount = sumPrimaryParticipantCount(displaySources);
+    const codedParticipantCount = sumPrimaryParticipantCount(participantCountSources);
     const codedParticipantStats = codedParticipantCount > 0
       ? [
           {
@@ -1223,7 +1227,7 @@ function toResearchStats({
   const journalArticleCount = countedResearchSources.filter(
     (entity) => entity.source?.kind === "journal_article",
   ).length;
-  const codedParticipantCount = sumPrimaryParticipantCount(countedResearchSources);
+  const codedParticipantCount = sumPrimaryParticipantCount(participantCountSources);
   const codedParticipantStats = codedParticipantCount > 0
     ? [
         {
@@ -1254,6 +1258,24 @@ function toResearchStats({
   ];
 }
 
+function participantCountResearchSources({
+  countedResearchSources,
+  protocolKey,
+  routeId,
+}: {
+  countedResearchSources: readonly HealthCommonsEntity[];
+  protocolKey: string;
+  routeId: string;
+}): readonly HealthCommonsEntity[] {
+  if (routeId !== NORWEGIAN_4X4_ROUTE_ID) {
+    return countedResearchSources;
+  }
+
+  return countedResearchSources.filter((entity) =>
+    !isExcludedNorwegianParticipantCountSource(entity, protocolKey)
+  );
+}
+
 function sumPrimaryParticipantCount(
   citedSources: readonly HealthCommonsEntity[],
 ): number {
@@ -1274,6 +1296,24 @@ function sumPrimaryParticipantCount(
   }
 
   return [...countsByCohort.values()].reduce((sum, count) => sum + count, 0);
+}
+
+function isExcludedNorwegianParticipantCountSource(
+  entity: HealthCommonsEntity,
+  protocolKey: string,
+): boolean {
+  const evidence = entity.researchEvidence;
+
+  if (
+    evidence?.aggregateRole !== "primary"
+    || evidence.designKind !== "retrospective_registry"
+  ) {
+    return false;
+  }
+
+  return entity.protocolEvidence?.some((appraisal) =>
+    appraisal.protocolKey === protocolKey && appraisal.stance === "safety_boundary"
+  ) ?? false;
 }
 
 function toSafety(safety: HealthCommonsSafety | undefined): ExperimentProtocol["safety"] {

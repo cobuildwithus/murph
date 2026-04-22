@@ -4,7 +4,7 @@ entityType: source_artifact
 key: source_artifact:doi-10.3390-ijerph17145103
 slug: sources/norwegian-4x4/doi-10.3390-ijerph17145103
 title: "Characterizing the heart rate response to the 4 × 4 interval exercise protocol"
-summary: "Acute implementation source showing how heart rate behaves during a 4x4 session and why target-zone fidelity needs to be logged."
+summary: "Acute implementation study showing that a 4x4 session should be judged by time in the target zone, not just by finishing four intervals."
 status: draft
 quality: usable
 categories:
@@ -39,25 +39,25 @@ researchEvidence:
 protocolEvidence:
   -
     protocolKey: protocol_variant:norwegian-4x4/norwegian-4x4
-    groupId: supports-fitness-claim
+    groupId: dose-fidelity-and-implementation
     stance: supports
     scope: measurement_context
     result: not_efficacy_evidence
     endpointKeys:
       - biomarker:estimated-vo2max
-    headline: "The acute heart-rate study shows a completed 4x4 session should be judged by target-zone fidelity, not only by finishing four intervals."
-    implication: "Log interval heart-rate peaks and time near target so the experiment knows whether the intended dose happened."
-    caveat: "Single-session physiology is implementation evidence, not long-term efficacy evidence."
-    displayPriority: 60
-evidenceBucket: "Wearable or testable signals"
-whyItMatters: "Acute implementation source showing how heart rate behaves during a 4x4 session and why target-zone fidelity needs to be logged."
+    headline: "The heart-rate-response study shows later intervals are where people usually spend the most time in the target zone, so four completed intervals does not automatically mean the right dose happened."
+    implication: "Log interval peaks and rough time in zone; later intervals often tell you more about fidelity than interval one."
+    caveat: "Single-session physiology is useful for implementation, but it does not tell you the long-term effect size of a 4x4 program."
+    displayPriority: 20
+evidenceBucket: "Dose, target zone, and implementation"
+whyItMatters: "Shows why target-zone fidelity should be logged instead of assuming that completing four intervals means the intended 4x4 dose was achieved."
 potentialMurphEndpoints:
   - estimated VO2max / cardio-fitness proxy
   - session heart-rate fidelity
   - heart-rate recovery
   - symptoms and adherence
-protocolTakeaway: "Use to judge session fidelity by heart-rate-zone behavior and repeatability, not merely by whether four intervals were completed."
-murphTakeaway: "The main finding is that a 4x4 session should be judged by time in zone, not just by completing four intervals."
+protocolTakeaway: "Use to judge whether the session really hit the intended dose: log interval peaks, approximate time in zone, and whether later intervals reached the target more reliably than the first."
+murphTakeaway: "Use to judge whether the session really hit the intended dose rather than to claim a long-term health effect from one acute physiology paper."
 studyDesign: "Acute implementation physiology study"
 modality: Aerobic high-intensity interval training / Norwegian 4x4 context
 norwegian4x4Focus: "Direct support"
@@ -68,35 +68,31 @@ aliases:
   - "doi-10.3390-ijerph17145103"
 ---
 
-This source is included for **Wearable or testable signals**.
+This source is included for **Dose, target zone, and implementation**.
 
 ## Quick read
 
 - **Source type:** Acute implementation physiology study (2020).
 - **People studied or addressed:** Healthy active adults (39 participants).
-- **Role in Murph:** direct or close support for the cardio-fitness claim; supports evidence; useful for measurement and logging, not for efficacy proof.
+- **Role in Murph:** dose-fidelity evidence; helps interpret whether a session actually counted as the intended 4x4 stimulus.
 - **Most relevant Murph signals:** estimated VO2max / cardio-fitness proxy, session heart-rate fidelity, heart-rate recovery, symptoms and adherence.
 
 ## Why it matters for Norwegian 4x4
 
-Acute implementation source showing how heart rate behaves during a 4x4 session and why target-zone fidelity needs to be logged.
+A session can look complete on paper while still missing the intended dose.
 
 ## What it found
 
-**Findings:** The study tracked heart-rate behavior during one 4x4 cycling session. Participants spent most of the protocol in the intended high-intensity heart-rate range, and later intervals reached target intensity more reliably than the first. For Murph, the main finding is that a 4x4 session should be judged by time in zone, not just by completing four intervals.
+**Findings:** The study tracked heart-rate behavior during one 4x4 cycling session. Participants spent more time in the intended high-intensity zone during the later intervals than during the first interval, which means “four intervals completed” is not the same as “the right 4x4 dose happened.” For Murph, that makes interval peaks and approximate time in zone part of the experiment record.
 
 ## How Murph should use it
 
-Log interval heart-rate peaks and time near target so the experiment knows whether the intended dose happened.
-
-Use to judge session fidelity by heart-rate-zone behavior and repeatability, not merely by whether four intervals were completed.
+Use it to decide whether a workout was a real 4x4 session or just a hard workout that never quite reached the intended zone.
 
 ## Important limits
 
-Single-session physiology is implementation evidence, not long-term efficacy evidence.
-
-The safe interpretation is narrower than “4x4 is always better.” Keep the population, supervision level, comparator, and exact interval dose visible before applying this source to a home wearable experiment.
+This is a single-session implementation study, not a long-term outcome trial.
 
 ## Plain-language takeaway
 
-For a generally healthy user, this belongs in the evidence pile that makes a 6-week 4x4 fitness test plausible, as long as the session is actually hard enough and recovery stays reasonable.
+Finishing the workout is not enough; you want the last half of the hard reps to actually live in the intended zone.

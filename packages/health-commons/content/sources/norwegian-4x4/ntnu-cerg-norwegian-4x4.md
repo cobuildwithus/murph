@@ -4,7 +4,7 @@ entityType: source_artifact
 key: source_artifact:ntnu-cerg-norwegian-4x4
 slug: sources/norwegian-4x4/ntnu-cerg-norwegian-4x4
 title: "CERG's 4x4 interval training advice"
-summary: "Public-facing source for the commonly cited Norwegian 4x4 session structure."
+summary: "Recipe anchor for what most people mean by Norwegian 4x4, including pacing into the target zone instead of sprinting too hard too soon."
 status: draft
 quality: usable
 categories:
@@ -34,22 +34,22 @@ researchEvidence:
 protocolEvidence:
   -
     protocolKey: protocol_variant:norwegian-4x4/norwegian-4x4
-    groupId: supports-fitness-claim
+    groupId: dose-fidelity-and-implementation
     stance: supports
     scope: direct_protocol
     result: not_efficacy_evidence
-    headline: "Defines the commonly cited Norwegian 4x4 dose: warm up, four 4-minute hard intervals, active recoveries, and cooldown."
-    implication: "Use this as the recipe anchor for the Murph protocol, not as outcome evidence."
-    caveat: "Public protocol guidance does not estimate benefit size or safety for a specific user."
+    headline: "Defines the public 4x4 recipe and makes the key coaching point explicit: build toward about 90% max HR instead of going all-out early."
+    implication: "Use this page to coach the session: hard but repeatable, usually 2–3 sessions per week for fitness, and clinician guidance first if CAD or exercise-test concerns apply."
+    caveat: "This is expert protocol guidance, not a randomized outcome trial; HRmax estimates and unsupervised safety boundaries still vary by person."
     displayPriority: 10
-evidenceBucket: "Protocol dose and design"
-whyItMatters: "Public-facing source for the commonly cited Norwegian 4x4 session structure."
+evidenceBucket: "Dose, target zone, and implementation"
+whyItMatters: "This is the practical recipe anchor for what most people mean by Norwegian 4x4, including pacing into the target zone instead of sprinting too hard too soon."
 potentialMurphEndpoints:
   - estimated VO2max / cardio-fitness proxy
   - session heart-rate fidelity
   - heart-rate recovery
   - symptoms and adherence
-protocolTakeaway: "Use as the recipe anchor for warm-up, four 4-minute hard intervals, 3-minute active recoveries, and cooldown; do not read it as outcome or safety proof."
+protocolTakeaway: "Use as the recipe and pacing anchor for warm-up, four 4-minute hard intervals, active recoveries, and cooldown; do not treat it as outcome or safety proof for a specific person."
 studyDesign: "Public protocol guidance"
 modality: Aerobic high-intensity interval training / Norwegian 4x4 context
 norwegian4x4Focus: "Direct support"
@@ -60,35 +60,31 @@ aliases:
   - "ntnu-cerg-norwegian-4x4"
 ---
 
-This source is included for **Protocol dose and design**.
+This source is included for **Dose, target zone, and implementation**.
 
 ## Quick read
 
 - **Source type:** Public protocol guidance (2024).
 - **People studied or addressed:** Public-facing exercise guidance.
-- **Role in Murph:** direct or close support for the cardio-fitness claim; supports evidence; directly about the protocol dose or a very close implementation detail.
+- **Role in Murph:** recipe anchor and implementation context; helps define what should count as Norwegian 4x4, but does not estimate outcome size.
 - **Most relevant Murph signals:** estimated VO2max / cardio-fitness proxy, session heart-rate fidelity, heart-rate recovery, symptoms and adherence.
 
 ## Why it matters for Norwegian 4x4
 
-Public-facing source for the commonly cited Norwegian 4x4 session structure.
+This is the page most people are implicitly referring to when they say “Norwegian 4x4.”
 
 ## What it found
 
-**Findings:** Defines the commonly cited Norwegian 4x4 dose: warm up, four 4-minute hard intervals, active recoveries, and cooldown.
+**Findings:** The page recommends a warm-up, four 4-minute work intervals, 3-minute active recoveries, and a cooldown. It tells users to build toward about 90% of maximum heart rate during the first interval and about 1–2 minutes into the later intervals, not to fully exhaust themselves early, and notes that many people improve fitness with 2–3 sessions per week.
 
 ## How Murph should use it
 
-Use this as the recipe anchor for the Murph protocol, not as outcome evidence.
-
-Use as the recipe anchor for warm-up, four 4-minute hard intervals, 3-minute active recoveries, and cooldown; do not read it as outcome or safety proof.
+Use this page to coach pacing and fidelity: hard but repeatable, not a first-minute sprint.
 
 ## Important limits
 
-Public protocol guidance does not estimate benefit size or safety for a specific user.
-
-The safe interpretation is narrower than “4x4 is always better.” Keep the population, supervision level, comparator, and exact interval dose visible before applying this source to a home wearable experiment.
+Public coaching guidance is not a randomized outcome trial. Estimated HRmax can be off, and people with coronary disease or other high-risk contexts still need clinician guidance.
 
 ## Plain-language takeaway
 
-For a generally healthy user, this belongs in the evidence pile that makes a 6-week 4x4 fitness test plausible, as long as the session is actually hard enough and recovery stays reasonable.
+This is the how-to page. It helps you avoid two common mistakes: going so hard at the start that the session falls apart, or staying too easy for the workout to count as a real 4x4 test.

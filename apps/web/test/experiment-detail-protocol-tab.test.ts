@@ -109,6 +109,7 @@ describe("ProtocolTab", () => {
     expect(markup).toContain("Best-supported claim");
     expect(markup).toContain("Confidence · Mixed");
     expect(markup).not.toContain("Evidence backbone and claim calibration");
+    expect(markup).not.toContain("Read these top to bottom");
   });
 
   it("keeps the Bryan Johnson sauna hierarchy focused on tolerability signals", () => {
@@ -153,10 +154,13 @@ describe("ProtocolTab", () => {
     expect(markup).toContain("Bottom line");
     expect(markup).toContain("Best-supported claim");
     expect(markup).toContain("Confidence · Moderate");
-    expect(markup).toContain("Supports the fitness claim");
-    expect(markup).toContain("Clinical context and mixed superiority");
+    expect(markup).toContain("Exact or close 4x4 trials");
+    expect(markup).toContain("Dose, target zone, and implementation");
+    expect(markup).toContain("Broader HIIT and VO2max context");
+    expect(markup).toContain("Clinical lineage and mixed superiority");
     expect(markup).toContain("Safety boundaries");
-    expect(markup).toContain("Adjacent variants and recovery context");
+    expect(markup).toContain("Nearby protocols and recovery context");
+    expect(markup).toContain("Read these top to bottom");
   });
 
   it("renders grouped research inside native details cards with source-mix summaries", () => {
@@ -170,11 +174,12 @@ describe("ProtocolTab", () => {
     });
     const markup = renderToStaticMarkup(createElement(ProtocolTab, { experiment }));
 
-    expect(countOccurrences(markup, "<details")).toBe(4);
-    expect(countOccurrences(markup, 'open=""')).toBe(1);
-    expect(markup).toContain("7 sources · 3 interventions · 2 reviews · 1 physiology study");
-    expect(markup).toContain("11 sources · 9 interventions · 2 reviews");
-    expect(markup).toContain("6 sources · 3 guidelines · 2 reviews · 1 observational study");
+    expect(countOccurrences(markup, "<details")).toBe(6);
+    expect(countOccurrences(markup, 'open=""')).toBe(2);
+    expect(markup).toContain("2 sources · 2 trials");
+    expect(markup).toContain("3 sources · 1 physiology study · 1 trial · 1 guidance source");
+    expect(markup).toContain("11 sources · 9 trials · 2 reviews");
+    expect(markup).toContain("6 sources · 3 guidance sources · 2 reviews · 1 observational study");
   });
 
   it("shortens long Finnish research-group labels at display time only", () => {
@@ -229,7 +234,7 @@ describe("ProtocolTab", () => {
 
     expect(markup).toContain("Short-term signals to watch");
     expect(markup).not.toContain("Synthetic fallback label that should not drive the display mapping");
-    expect(markup).toContain("4 sources · 2 physiology studies · 1 intervention · 1 review");
+    expect(markup).toContain("4 sources · 2 physiology studies · 1 trial · 1 review");
     expect(countOccurrences(markup, 'open=""')).toBe(1);
   });
 

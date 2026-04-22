@@ -14,6 +14,7 @@ export function StudyCard({
   type,
   title,
   authors,
+  journal,
   year,
   participants,
   participantCountKind,
@@ -33,7 +34,7 @@ export function StudyCard({
   last,
 }: StudyCardProps) {
   const [open, setOpen] = useState(false);
-  const isInteractive = Boolean(headline || finding || implication || caveat);
+  const isInteractive = Boolean(finding || implication || caveat);
   const yearLabel = typeof year === "number" ? year.toString() : null;
   const participantLabel = formatParticipantLabel({
     participantCountKind,
@@ -48,6 +49,8 @@ export function StudyCard({
   const scopeLabel = scope ? formatEvidenceScope(scope) : null;
   const stanceLabel = stance ? formatEvidenceStance(stance) : null;
   const findingLabel = finding ? formatFindingLabel(findingKind) : null;
+  const typeLabel = formatStudyType(type);
+
   const toggleOpen = () => {
     if (!isInteractive) {
       return;
@@ -55,21 +58,24 @@ export function StudyCard({
 
     setOpen((current) => !current);
   };
+
   const rowContent = (
     <div className="flex gap-4 px-6 py-5">
-      <div className="flex w-[88px] shrink-0 flex-col items-start gap-1">
+      <div className="flex w-[112px] shrink-0 flex-col items-start gap-1.5">
         <div
-          className="h-fit rounded-md bg-primary/8 px-2.5 py-1.5"
-          title={designLabel ? `${type}: ${designLabel}` : type}
+          className="rounded-md border border-border/70 bg-background px-2.5 py-1"
+          title={designLabel ? `${typeLabel}: ${designLabel}` : typeLabel}
         >
-          <span className="font-mono text-xs/4 font-medium text-primary">
-            {type}
+          <span className="font-mono text-[10px]/3.5 text-muted-foreground">
+            {typeLabel}
           </span>
         </div>
         {participantLabel ? (
-          <span className="rounded-md border border-border/70 bg-background/60 px-1.5 py-0.5 font-mono text-[9px]/3 text-muted-foreground/75">
-            {participantLabel}
-          </span>
+          <div className="rounded-md bg-primary/8 px-2.5 py-1.5">
+            <span className="font-mono text-xs/4 font-medium text-primary">
+              {participantLabel}
+            </span>
+          </div>
         ) : null}
         {includedStudiesLabel ? (
           <span className="rounded-md border border-border/70 bg-background/60 px-1.5 py-0.5 font-mono text-[9px]/3 text-muted-foreground/75">
@@ -79,7 +85,7 @@ export function StudyCard({
       </div>
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <div className="flex items-start justify-between gap-4">
-          <span className="min-w-0 text-sm/4.5 font-semibold text-foreground">
+          <span className="min-w-0 text-sm/5 font-semibold text-foreground">
             {title}
           </span>
           {yearLabel ? (
@@ -88,14 +94,19 @@ export function StudyCard({
             </span>
           ) : null}
         </div>
-        {designLabel ? (
-          <span className="mt-1 text-xs/4 text-muted-foreground">{designLabel}</span>
+        {(authors || journal) ? (
+          <div className="mt-1 flex flex-col gap-0.5 text-[11px]/4 text-muted-foreground/70">
+            {authors ? <span>{authors}</span> : null}
+            {journal ? <span>{journal}</span> : null}
+          </div>
         ) : null}
-        {authors ? (
-          <span className="mt-1 text-[11px]/4 text-muted-foreground/70">{authors}</span>
+        {headline ? (
+          <p className="mt-2 max-w-[62ch] text-[13px]/5 text-foreground/82">
+            {headline}
+          </p>
         ) : null}
         {studyFacts.length > 0 ? (
-          <dl className="mt-2 grid gap-2 sm:grid-cols-2">
+          <dl className="mt-2 grid gap-2 sm:grid-cols-3">
             {studyFacts.map((fact) => (
               <div
                 key={fact.label}
@@ -166,12 +177,7 @@ export function StudyCard({
         {rowContent}
         {isInteractive ? (
           <CollapsibleContent className="px-6 pb-5">
-            <div className="flex max-w-[62ch] flex-col gap-3 pl-[104px]">
-              {headline ? (
-                <p className="text-[15px]/6 font-medium text-foreground">
-                  {headline}
-                </p>
-              ) : null}
+            <div className="flex max-w-[62ch] flex-col gap-3 pl-[128px]">
               {finding && findingLabel ? (
                 <StudyDetail label={findingLabel} text={finding} />
               ) : null}
@@ -208,6 +214,29 @@ function StudyDetail({ label, text }: { label: string; text: string }) {
   );
 }
 
+function formatStudyType(type: Study["type"]): string {
+  switch (type) {
+    case "RCT":
+      return "Randomized";
+    case "INT":
+      return "Trial";
+    case "OBS":
+      return "Observed";
+    case "N1":
+      return "Self-test";
+    case "MECH":
+      return "Mechanism";
+    case "MA":
+      return "Meta-analysis";
+    case "REV":
+      return "Review";
+    case "GUIDE":
+      return "Guidance";
+    case "SRC":
+      return "Source";
+  }
+}
+
 function formatFindingLabel(findingKind: Study["findingKind"]): string {
   switch (findingKind) {
     case "why_it_matters":
@@ -228,8 +257,13 @@ function formatParticipantLabel({
     return null;
   }
 
-  const countLabel = `${participants.toLocaleString()} ${participants === 1 ? "person" : "people"}`;
-  return participantCountKind === "approximate" ? `≈${countLabel}` : countLabel;
+  const prefix = participantCountKind === "approximate"
+    ? "n≈"
+    : participantCountKind === "range"
+      ? "n~"
+      : "n=";
+
+  return `${prefix}${participants.toLocaleString()}`;
 }
 
 function formatIncludedStudiesLabel(includedStudyCount: Study["includedStudyCount"]): string | null {
@@ -243,13 +277,13 @@ function formatStudyResult(result: Study["result"]): string {
     case "positive":
       return "Positive signal";
     case "mixed":
-      return "Mixed";
+      return "Mixed result";
     case "no_clear_advantage":
       return "No clear advantage";
     case "negative":
-      return "Negative";
+      return "Negative result";
     case "not_efficacy_evidence":
-      return "Context, not proof";
+      return "Not outcome proof";
     case undefined:
       return "";
   }
@@ -258,17 +292,17 @@ function formatStudyResult(result: Study["result"]): string {
 function formatEvidenceScope(scope: Study["scope"]): string {
   switch (scope) {
     case "direct_protocol":
-      return "Direct protocol";
+      return "Exact protocol match";
     case "same_mechanism":
-      return "Same mechanism";
+      return "Similar, not exact";
     case "clinical_supervised":
-      return "Clinician-guided";
+      return "Supervised clinical setting";
     case "adjacent_variant":
-      return "Adjacent";
+      return "Nearby but different protocol";
     case "measurement_context":
-      return "Measurement context";
+      return "Helps run the session";
     case "general_guideline":
-      return "Guideline";
+      return "General exercise guidance";
     case undefined:
       return "";
   }
@@ -279,15 +313,15 @@ function formatEvidenceStance(stance: Study["stance"]): string {
     case "supports":
       return "Supports";
     case "mixed":
-      return "Mixed";
+      return "Mixed evidence";
     case "does_not_confirm":
-      return "Does not confirm";
+      return "Doesn't confirm";
     case "contradicts":
-      return "Against";
+      return "Evidence against";
     case "safety_boundary":
-      return "Boundary / safety";
+      return "Safety boundary";
     case "context_only":
-      return "Context only";
+      return "Context, not proof";
     case undefined:
       return "";
   }

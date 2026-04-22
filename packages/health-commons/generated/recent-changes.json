@@ -774,6 +774,37 @@
         "source_artifact:pmid-11165553",
         "source_artifact:pmid-16871826"
       ]
+    },
+    {
+      "affectedFields": [
+        "protocols/norwegian-4x4/norwegian-4x4.researchLandscape",
+        "families/norwegian-4x4.md",
+        "sources/norwegian-4x4/*.md",
+        "sources/norwegian-4x4/norwegian-4x4-bibliography.md",
+        "apps/web/src/components/experiments/experiment-detail/study-card.tsx",
+        "apps/web/src/components/experiments/experiment-detail/protocol-tab.tsx",
+        "apps/web/src/lib/health-commons/experiment-detail.ts"
+      ],
+      "changeId": "chg_2026_04_22_norwegian_4x4_research_readability_and_evidence_split",
+      "changeType": "copy_edit",
+      "editSummary": "Reorganized the Norwegian 4x4 research section into exact-dose, dose-fidelity, broader-context, clinical, safety, and adjacent-variant layers while tightening source metadata and making the experiment-page cards easier to scan.",
+      "entityKey": "protocol_variant:norwegian-4x4/norwegian-4x4",
+      "minor": false,
+      "rationale": "The prior page mixed exact 4x4 trials, how-to sources, pooled HIIT context, and cardiac-rehab boundary papers too closely; average health-conscious users need the direct evidence first and the larger-context guardrails clearly labeled.",
+      "reviewStatus": "proposed",
+      "schemaVersion": "murph.commons.change.v1",
+      "sourceKeys": [
+        "source_artifact:pmid-17414804",
+        "source_artifact:pmid-26440134",
+        "source_artifact:ntnu-cerg-norwegian-4x4",
+        "source_artifact:doi-10.3390-ijerph17145103",
+        "source_artifact:pmid-23988787",
+        "source_artifact:pmid-30733142",
+        "source_artifact:pmid-24066036",
+        "source_artifact:pmid-29502328",
+        "source_artifact:pmid-30376749",
+        "source_artifact:pmid-39256000"
+      ]
     }
   ]
 }
