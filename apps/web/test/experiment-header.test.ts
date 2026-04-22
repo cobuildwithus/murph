@@ -49,7 +49,8 @@ test("shows protocol days at the top level without counting baseline days", () =
   );
 
   assert.match(markup, /14 DAYS/);
-  assert.match(markup, /7-day baseline · 14-day protocol/);
+  assert.match(markup, /14-day protocol/);
+  assert.doesNotMatch(markup, /7-day baseline/);
   assert.doesNotMatch(markup, /21 DAYS/);
   assert.doesNotMatch(markup, /21-day protocol/);
 });

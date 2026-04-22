@@ -262,6 +262,7 @@ describe("hosted Prisma baseline migration", () => {
       "2026040600_init",
       "2026042100_hosted_vault_sync",
       "2026042101_hosted_ai_usage_meter_attempts",
+      "2026042200_hosted_ai_usage_gateway_attribution",
       "migration_lock.toml",
     ]);
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_assistant_runtime_issue"');
