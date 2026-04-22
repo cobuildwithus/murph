@@ -21,7 +21,7 @@ export function DashboardShell({
       <SidebarProvider>
         <Sidebar />
         <SidebarInset className="bg-background">
-          <header className="flex md:hidden items-center gap-2 bg-gradient-to-r from-[#2d3436] via-[#3a2e24] to-[#2a1f16] px-4 py-3">
+          <header className="flex md:hidden items-center gap-2 bg-linear-to-r from-[#2d3436] via-[#3a2e24] to-[#2a1f16] px-4 py-3">
             <SidebarTrigger className="text-white/80 hover:bg-white/5 hover:text-white" />
             <span className="font-serif text-sm font-semibold text-white">
               Murph
