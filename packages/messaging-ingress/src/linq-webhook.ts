@@ -446,7 +446,7 @@ export function minimizeLinqMessageReceivedEvent(
       message: compactRecord({
         effect: pickLinqMessageEffect(event.data.message.effect),
         id: event.data.message.id,
-        parts: event.data.message.parts.map((part) => pickHostedLinqMessagePart(part)),
+        parts: event.data.message.parts.map((part) => pickLinqMessagePart(part)),
         reply_to: pickLinqReplyTo(event.data.message.reply_to),
       }),
       preferred_service: event.data.preferred_service,
@@ -846,31 +846,6 @@ function pickLinqMessagePart(part: LinqMessagePart): Record<string, unknown> {
     filename: part.filename,
     mime_type: part.mime_type,
     size: part.size,
-  });
-}
-
-function pickHostedLinqMessagePart(part: LinqMessagePart): Record<string, unknown> {
-  if (part.type === "text") {
-    return compactRecord({
-      type: part.type,
-      value: part.value,
-    });
-  }
-
-  if (part.type === "link") {
-    return compactRecord({
-      type: part.type,
-      value: part.value,
-    });
-  }
-
-  return compactRecord({
-    attachment_id: part.attachment_id,
-    filename: part.filename,
-    mime_type: part.mime_type,
-    size: part.size,
-    type: part.type,
-    url: part.url,
   });
 }
 
