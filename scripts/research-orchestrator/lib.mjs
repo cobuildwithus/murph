@@ -241,15 +241,21 @@ repo_dir="$(find_repo_dir "$run_dir")" || {
   exit 1
 }
 
-mkdir -p "\${run_dir}/responses" "\${run_dir}/logs" "\${run_dir}/state/chat-urls" "\${run_dir}/state/thread-exports"
+mkdir -p "\${run_dir}/responses" "\${run_dir}/logs" "\${run_dir}/downloads" "\${run_dir}/state/chat-urls" "\${run_dir}/state/thread-exports"
 
 result_file="\${run_dir}/logs/\${label}.result.json"
 stderr_file="\${run_dir}/logs/\${label}.stderr.log"
 chat_url_file="\${run_dir}/state/chat-urls/\${label}.txt"
 thread_export_file="\${run_dir}/state/thread-exports/\${label}.thread.json"
+wake_output_dir="\${run_dir}/downloads/\${label}"
+wake_status_file="\${wake_output_dir}/status.json"
+wake_thread_file="\${wake_output_dir}/thread.json"
 default_config_file="\${run_dir}/config/review-gpt-research.config.sh"
 work_profile_config_file="\${run_dir}/config/review-gpt-work-profile.sh"
 review_gpt_config="\${RESEARCH_REVIEW_GPT_CONFIG:-}"
+
+rm -f "\${result_file}" "\${stderr_file}" "\${chat_url_file}" "\${thread_export_file}" "\${response_file}"
+rm -rf "\${wake_output_dir}"
 
 if [[ -z "\${review_gpt_config}" ]]; then
   if [[ -f "\${work_profile_config_file}" ]]; then
@@ -311,6 +317,11 @@ fi
 
 script_dir="$(cd "$(dirname "\${review_gpt_config}")" && pwd)"
 
+review_gpt_register_alias() { :; }
+review_gpt_register_preset() { :; }
+review_gpt_register_dir_preset() { :; }
+review_gpt_register_preset_group() { :; }
+
 # shellcheck source=/dev/null
 . "\${review_gpt_config}" >/dev/null 2>&1
 
@@ -356,31 +367,34 @@ assert_workspace_package_script() {
 assert_workspace_package_script
 
 capture_chat_url() {
-  node - "\${result_file}" "\${chat_url_file}" <<'NODE'
+  node - "\${result_file}" "\${stderr_file}" "\${chat_url_file}" <<'NODE'
 const fs = require("node:fs");
 
-const [resultPath, chatUrlPath] = process.argv.slice(2);
-if (!fs.existsSync(resultPath)) {
-  process.exit(0);
-}
+const [stdoutPath, stderrPath, chatUrlPath] = process.argv.slice(2);
+for (const sourcePath of [stdoutPath, stderrPath]) {
+  if (!fs.existsSync(sourcePath)) {
+    continue;
+  }
 
-const raw = fs.readFileSync(resultPath, "utf8");
+  const raw = fs.readFileSync(sourcePath, "utf8");
 
-const directLine = raw
-  .split(/\\r?\\n/u)
-  .find((line) => /ChatGPT (thread|conversation) URL: https:\\/\\/chatgpt\\.com\\/c\\//u.test(line));
+  const directLine = raw
+    .split(/\\r?\\n/u)
+    .find((line) => /ChatGPT (thread|conversation) URL: https:\\/\\/chatgpt\\.com\\/c\\//u.test(line));
 
-if (directLine) {
-  const match = directLine.match(/https:\\/\\/chatgpt\\.com\\/c\\/\\S+/u);
-  if (match) {
-    fs.writeFileSync(chatUrlPath, match[0] + "\\n", "utf8");
+  if (directLine) {
+    const match = directLine.match(/https:\\/\\/chatgpt\\.com\\/c\\/\\S+/u);
+    if (match) {
+      fs.writeFileSync(chatUrlPath, match[0] + "\\n", "utf8");
+      process.exit(0);
+    }
+  }
+
+  const matches = [...raw.matchAll(/https:\\/\\/chatgpt\\.com\\/c\\/\\S+/gu)];
+  if (matches.length > 0) {
+    fs.writeFileSync(chatUrlPath, matches.at(-1)[0] + "\\n", "utf8");
     process.exit(0);
   }
-}
-
-const matches = [...raw.matchAll(/https:\\/\\/chatgpt\\.com\\/c\\/\\S+/gu)];
-if (matches.length > 0) {
-  fs.writeFileSync(chatUrlPath, matches.at(-1)[0] + "\\n", "utf8");
 }
 NODE
 }
@@ -420,29 +434,185 @@ resolve_browser_endpoint() {
 
   local configured_endpoint=""
   configured_endpoint="$(
-    sed -n 's/^[[:space:]]*research_thread_export_browser_endpoint="\\(.*\\)"[[:space:]]*$/\\1/p' "\${review_gpt_config}" | tail -n 1
-  )"
+    REVIEW_GPT_CONFIG_PATH="\${review_gpt_config}" RUN_DIR="\${run_dir}" bash <<'BASH'
+set -euo pipefail
+
+review_gpt_config="\${REVIEW_GPT_CONFIG_PATH}"
+run_dir="\${RUN_DIR}"
+workspace_dir="\${run_dir}"
+
+if [[ ! -f "\${review_gpt_config}" ]]; then
+  exit 0
+fi
+
+script_dir="$(cd "$(dirname "\${review_gpt_config}")" && pwd)"
+
+review_gpt_register_alias() { :; }
+review_gpt_register_preset() { :; }
+review_gpt_register_dir_preset() { :; }
+review_gpt_register_preset_group() { :; }
+
+# shellcheck source=/dev/null
+. "\${review_gpt_config}" >/dev/null 2>&1
+
+if [[ -n "\${research_thread_export_browser_endpoint:-}" ]]; then
+  printf '%s\\n' "\${research_thread_export_browser_endpoint}"
+  exit 0
+fi
+
+if [[ -n "\${managed_browser_endpoint:-}" ]]; then
+  printf '%s\\n' "\${managed_browser_endpoint}"
+  exit 0
+fi
+
+if [[ -n "\${managed_browser_port:-}" ]]; then
+  printf 'http://127.0.0.1:%s\\n' "\${managed_browser_port}"
+  exit 0
+fi
+
+if [[ -n "\${remote_port:-}" ]]; then
+  printf 'http://127.0.0.1:%s\\n' "\${remote_port}"
+fi
+BASH
+  )" || true
+
   if [[ -n "\${configured_endpoint}" ]]; then
     printf '%s\\n' "\${configured_endpoint}"
+    return 0
   fi
 }
 
-export_thread_snapshot() {
+run_thread_wake() {
   if [[ ! -f "\${chat_url_file}" ]]; then
-    return 0
+    return 1
   fi
 
-  local browser_endpoint
-  browser_endpoint="\$(resolve_browser_endpoint || true)"
-  if [[ -z "\${browser_endpoint}" ]]; then
-    return 0
+  mkdir -p "\${wake_output_dir}"
+
+  local browser_endpoint=""
+  browser_endpoint="$(resolve_browser_endpoint || true)"
+
+  local -a wake_cmd=(
+    pnpm
+    exec
+    cobuild-review-gpt
+    thread
+    wake
+    --delay
+    "\${RESEARCH_WAKE_DELAY:-0s}"
+    --poll-interval
+    "\${RESEARCH_POLL_INTERVAL:-1m}"
+    --poll-jitter
+    "\${RESEARCH_POLL_JITTER:-1m}"
+    --poll-timeout
+    "\${RESEARCH_POLL_TIMEOUT:-200m}"
+    --chat-url
+    "$(tr -d '\\r\\n' < "\${chat_url_file}")"
+    --output-dir
+    "\${wake_output_dir}"
+    --repo-dir
+    "\${repo_dir}"
+    --skip-resume
+  )
+
+  if [[ -n "\${browser_endpoint}" ]]; then
+    wake_cmd+=(
+      --browser-endpoint
+      "\${browser_endpoint}"
+    )
   fi
 
-  pnpm exec cobuild-review-gpt thread export \\
-    --browser-endpoint "\${browser_endpoint}" \\
-    --chat-url "\$(tr -d '\\r\\n' < "\${chat_url_file}")" \\
-    --output "\${thread_export_file}" \\
-    --format json >/dev/null 2>&1 || true
+  printf '%s\\n' '--- thread wake ---' >>"\${result_file}"
+  "\${wake_cmd[@]}" >>"\${result_file}" 2>>"\${stderr_file}"
+}
+
+copy_thread_export_from_wake() {
+  if [[ -f "\${wake_thread_file}" ]]; then
+    cp "\${wake_thread_file}" "\${thread_export_file}"
+  fi
+}
+
+recover_response_from_thread_export() {
+  node - "\${thread_export_file}" "\${response_file}" "\${wake_status_file}" <<'NODE'
+const fs = require("node:fs");
+const path = require("node:path");
+
+const [threadPath, responsePath, statusPath] = process.argv.slice(2);
+if (!fs.existsSync(threadPath)) {
+  process.exit(0);
+}
+
+let thread;
+try {
+  thread = JSON.parse(fs.readFileSync(threadPath, "utf8"));
+} catch {
+  process.exit(0);
+}
+
+let status = undefined;
+if (statusPath && fs.existsSync(statusPath)) {
+  try {
+    status = JSON.parse(fs.readFileSync(statusPath, "utf8"));
+  } catch {
+    status = undefined;
+  }
+}
+
+const assistantSnapshots = Array.isArray(thread.assistantSnapshots)
+  ? thread.assistantSnapshots
+  : [];
+
+const candidateTexts = assistantSnapshots
+  .filter((entry) => entry && entry.afterLastUserMessage !== false)
+  .map((entry) => String(entry.text ?? "").trim())
+  .filter(Boolean);
+
+const meaningfulTexts = candidateTexts.filter((entry) => !/^(attached\\b|pro thinking\\b)/iu.test(entry));
+
+let responseText = meaningfulTexts.at(-1) ?? "";
+if (!responseText && candidateTexts.length > 0) {
+  responseText = candidateTexts.at(-1) ?? "";
+}
+if (!responseText) {
+  const bodyText = String(thread.bodyText ?? "").trim();
+  if (bodyText) {
+    responseText = bodyText;
+  }
+}
+
+if (!responseText) {
+  const downloadedArtifacts = Array.isArray(status?.downloadedArtifacts)
+    ? status.downloadedArtifacts
+    : [];
+  const relativeArtifacts = downloadedArtifacts.map((entry) => path.relative(process.cwd(), entry) || entry);
+  const lines = [
+    "Recovered via thread wake.",
+    "",
+  ];
+
+  if (thread.chatUrl) {
+    lines.push("Chat URL: " + thread.chatUrl, "");
+  }
+
+  if (relativeArtifacts.length > 0) {
+    lines.push("Downloaded artifacts:");
+    for (const artifact of relativeArtifacts) {
+      lines.push("- " + artifact);
+    }
+  } else {
+    lines.push("No inline assistant text or downloaded artifacts were exposed in the final thread export.");
+  }
+
+  responseText = lines.join("\\n").trim();
+}
+
+fs.mkdirSync(path.dirname(responsePath), { recursive: true });
+fs.writeFileSync(
+  responsePath,
+  responseText.endsWith("\\n") ? responseText : responseText + "\\n",
+  "utf8",
+);
+NODE
 }
 
 cd "\${repo_dir}"
@@ -451,39 +621,68 @@ set +e
 pnpm exec cobuild-review-gpt \\
   --config "\${review_gpt_config}" \\
   --send \\
-  --wait \\
   --format json \\
   --model "\${RESEARCH_MODEL:-gpt-5.4-pro}" \\
-  --wait-timeout "\${RESEARCH_WAIT_TIMEOUT:-200m}" \\
   --timeout "\${RESEARCH_TIMEOUT:-210m}" \\
   --prompt-file "\${prompt_file}" \\
-  --response-file "\${response_file}" \\
   >"\${result_file}" 2>"\${stderr_file}"
-status=$?
+send_status=$?
 set -e
 
 capture_chat_url
-export_thread_snapshot
+wake_status=0
+if [[ -f "\${chat_url_file}" ]]; then
+  set +e
+  run_thread_wake
+  wake_status=$?
+  set -e
+  copy_thread_export_from_wake
+  recover_response_from_thread_export
+fi
 
-if [[ "$status" -ne 0 ]]; then
+if [[ "\${send_status}" -ne 0 && ! -f "\${chat_url_file}" ]]; then
   cat "\${stderr_file}" >&2
-  if [[ -f "\${chat_url_file}" ]]; then
-    echo "Chat URL: \$(cat "\${chat_url_file}")" >&2
-  fi
+  echo "research step \${label} failed" >&2
+  exit "\${send_status}"
+fi
+
+if [[ ! -f "\${chat_url_file}" ]]; then
+  cat "\${stderr_file}" >&2
+  echo "No ChatGPT thread URL detected for research step \${label}" >&2
+  exit 65
+fi
+
+if [[ "\${wake_status}" -ne 0 ]]; then
+  cat "\${stderr_file}" >&2
+  echo "Chat URL: \$(cat "\${chat_url_file}")" >&2
   if [[ -f "\${thread_export_file}" ]]; then
     echo "Thread export: \${thread_export_file}" >&2
   fi
-  echo "research step \${label} failed" >&2
-  exit "$status"
+  echo "research step \${label} failed during thread wake" >&2
+  exit "\${wake_status}"
+fi
+
+if [[ ! -f "\${thread_export_file}" ]]; then
+  echo "Thread export missing after thread wake: \${thread_export_file}" >&2
+  exit 66
+fi
+
+if [[ ! -f "\${response_file}" ]]; then
+  echo "Recovered response missing after thread wake: \${response_file}" >&2
+  exit 67
 fi
 
 echo "Response: \${response_file}"
 echo "Result log: \${result_file}"
+echo "Wake output: \${wake_output_dir}"
 if [[ -f "\${chat_url_file}" ]]; then
   echo "Chat URL: $(cat "\${chat_url_file}")"
 fi
 if [[ -f "\${thread_export_file}" ]]; then
   echo "Thread export: \${thread_export_file}"
+fi
+if [[ "\${send_status}" -ne 0 ]]; then
+  echo "Recovered after send failure: yes"
 fi
 `;
 }
@@ -525,7 +724,23 @@ export function buildResearchWorkProfileConfig() {
 # Inherit the repo's normal review:gpt presets and packaging defaults, but isolate
 # browser auth into a separate managed Chrome profile for research work.
 script_dir="$(cd "$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
-repo_dir="$(cd "\${script_dir}/../../../.." && pwd)"
+
+find_repo_dir() {
+  local dir="$1"
+  while [[ "$dir" != "/" ]]; do
+    if [[ -f "$dir/package.json" ]] && grep -q '"name"[[:space:]]*:[[:space:]]*"murph-workspace"' "$dir/package.json"; then
+      printf '%s\\n' "$dir"
+      return 0
+    fi
+    dir="$(dirname "$dir")"
+  done
+  return 1
+}
+
+repo_dir="$(find_repo_dir "\${script_dir}")" || {
+  echo "Could not locate the murph workspace root from \${script_dir}" >&2
+  return 1
+}
 
 # shellcheck source=/dev/null
 . "\${repo_dir}/scripts/review-gpt.config.sh"
@@ -536,6 +751,7 @@ browser_binary_path="\${browser_binary_path:-/Applications/Google Chrome.app/Con
 managed_browser_user_data_dir="\${RESEARCH_MANAGED_BROWSER_USER_DATA_DIR:-$HOME/.review-gpt-work/murph-research-chrome}"
 managed_browser_profile="\${RESEARCH_MANAGED_BROWSER_PROFILE:-Default}"
 managed_browser_port="\${RESEARCH_MANAGED_BROWSER_PORT:-9224}"
+research_thread_export_browser_endpoint="\${RESEARCH_THREAD_EXPORT_BROWSER_ENDPOINT:-http://127.0.0.1:\${managed_browser_port}}"
 `;
 }
 
