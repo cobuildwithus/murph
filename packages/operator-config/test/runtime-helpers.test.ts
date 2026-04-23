@@ -272,15 +272,21 @@ test('startTelegramTypingSession stops a pending refresh request cleanly', async
   assert.equal(seenSignals[1]?.aborted, true)
 })
 
-test('deleteTelegramMessages batches ids and uses the chat id from the serialized target', async () => {
-  const seenBodies: Array<Record<string, unknown> | null> = []
-  const fetchImplementation = vi.fn(async (_url: string, init: {
+test('deleteTelegramMessages batches ids and uses deleteMessages for non-business targets', async () => {
+  const seenRequests: Array<{
+    body: Record<string, unknown> | null
+    url: string
+  }> = []
+  const fetchImplementation = vi.fn(async (url: string, init: {
     body?: string
     headers?: Record<string, string>
     method: 'POST'
     signal?: AbortSignal
   }) => {
-    seenBodies.push(init.body ? JSON.parse(init.body) as Record<string, unknown> : null)
+    seenRequests.push({
+      body: init.body ? JSON.parse(init.body) as Record<string, unknown> : null,
+      url,
+    })
     return createTelegramResponse({ ok: true })
   })
 
@@ -299,15 +305,73 @@ test('deleteTelegramMessages batches ids and uses the chat id from the serialize
   )
 
   expect(fetchImplementation).toHaveBeenCalledTimes(2)
-  expect(seenBodies[0]).toMatchObject({
+  expect(seenRequests[0]?.url).toBe(
+    'https://api.telegram.example/botbot-token/deleteMessages',
+  )
+  expect(seenRequests[0]?.body).toMatchObject({
     chat_id: '123',
     message_ids: expect.any(Array),
   })
-  expect((seenBodies[0]?.message_ids as unknown[])?.length).toBe(100)
-  expect(seenBodies[1]).toMatchObject({
+  expect((seenRequests[0]?.body?.message_ids as unknown[])?.length).toBe(100)
+  expect(seenRequests[1]?.url).toBe(
+    'https://api.telegram.example/botbot-token/deleteMessages',
+  )
+  expect(seenRequests[1]?.body).toMatchObject({
     chat_id: '123',
     message_ids: [101],
   })
+})
+
+test('deleteTelegramMessages batches ids and uses deleteBusinessMessages for business targets', async () => {
+  const seenRequests: Array<{
+    body: Record<string, unknown> | null
+    url: string
+  }> = []
+  const fetchImplementation = vi.fn(async (url: string, init: {
+    body?: string
+    headers?: Record<string, string>
+    method: 'POST'
+    signal?: AbortSignal
+  }) => {
+    seenRequests.push({
+      body: init.body ? JSON.parse(init.body) as Record<string, unknown> : null,
+      url,
+    })
+    return createTelegramResponse({ ok: true })
+  })
+
+  await deleteTelegramMessages(
+    {
+      messageIds: Array.from({ length: 101 }, (_, index) => String(index + 1)),
+      target: '123:business:biz-123:topic:456',
+    },
+    {
+      env: {
+        TELEGRAM_API_BASE_URL: 'https://api.telegram.example',
+        TELEGRAM_BOT_TOKEN: 'bot-token',
+      },
+      fetchImplementation,
+    },
+  )
+
+  expect(fetchImplementation).toHaveBeenCalledTimes(2)
+  expect(seenRequests[0]?.url).toBe(
+    'https://api.telegram.example/botbot-token/deleteBusinessMessages',
+  )
+  expect(seenRequests[0]?.body).toMatchObject({
+    business_connection_id: 'biz-123',
+    message_ids: expect.any(Array),
+  })
+  expect(seenRequests[0]?.body).not.toHaveProperty('chat_id')
+  expect((seenRequests[0]?.body?.message_ids as unknown[])?.length).toBe(100)
+  expect(seenRequests[1]?.url).toBe(
+    'https://api.telegram.example/botbot-token/deleteBusinessMessages',
+  )
+  expect(seenRequests[1]?.body).toMatchObject({
+    business_connection_id: 'biz-123',
+    message_ids: [101],
+  })
+  expect(seenRequests[1]?.body).not.toHaveProperty('chat_id')
 })
 
 test('startTelegramTypingSession validates Telegram runtime prerequisites and target format', async () => {
