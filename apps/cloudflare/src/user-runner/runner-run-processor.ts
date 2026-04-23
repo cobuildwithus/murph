@@ -1365,7 +1365,6 @@ export function summarizeHostedAssistantDeliveryOutcomes(
     ...(nonSent ? {
       assistantDeliveryFirstNonSentChannel: nonSent.deliveryChannel ?? "unknown",
       assistantDeliveryFirstNonSentCode: nonSent.deliveryErrorCode ?? "unknown",
-      assistantDeliveryFirstNonSentMessage: nonSent.deliveryErrorMessage ?? "unknown",
       assistantDeliveryFirstNonSentStatus: nonSent.deliveryStatus,
     } : {}),
   };
@@ -1385,12 +1384,7 @@ export async function recordHostedRunPhaseLogInWebBestEffort(input: {
   userId: string;
   wakeEventId: string;
 }): Promise<void> {
-  return recordHostedRunBreadcrumbInWebBestEffort({
-    ...input,
-    redacted: {
-      eventId: input.wakeEventId,
-    },
-  });
+  return recordHostedRunBreadcrumbInWebBestEffort(input);
 }
 
 export async function recordHostedRunBreadcrumbInWebBestEffort(input: {
@@ -1418,8 +1412,11 @@ export async function recordHostedRunBreadcrumbInWebBestEffort(input: {
 
   const runToken = input.runToken;
   const recordLog = input.recordLog ?? recordHostedRunLogInWeb;
+  // Keep web-visible observability linkable without persisting canonical wake ids.
+  const correlationId = await createHostedRunLogCorrelationId(input.wakeEventId);
   const redacted = {
-    ...(input.redacted ?? {}),
+    ...(stripHostedRunObservabilityEventFields(input.redacted) ?? {}),
+    correlationId,
     ...(input.error === undefined ? {} : { errorCode: deriveHostedExecutionErrorCode(input.error) }),
     runElapsedMs: computeHostedRunElapsedMs(input.run),
   };
@@ -1446,7 +1443,7 @@ export async function recordHostedRunBreadcrumbInWebBestEffort(input: {
       component: HOSTED_RUN_LOG_COMPONENT,
       details: {
         runElapsedMs: computeHostedRunElapsedMs(input.run),
-        runLogWakeEventId: input.wakeEventId,
+        runLogCorrelationId: correlationId,
       },
       error,
       eventId: input.wakeEventId,
@@ -1479,12 +1476,7 @@ export async function recordHostedRunnerResultLogsInWebBestEffort(input: {
       message: entry.message,
       phase: entry.phase,
       recordLog: input.recordLog,
-      redacted: mergeHostedRunRedactedDetails(
-        {
-          eventId,
-        },
-        entry.redacted ?? null,
-      ),
+      redacted: entry.redacted ?? null,
       run: input.run,
       runToken: input.runToken,
       userId: input.userId,
@@ -1503,6 +1495,34 @@ function mergeHostedRunRedactedDetails(
   };
 
   return Object.keys(merged).length > 0 ? merged : null;
+}
+
+function stripHostedRunObservabilityEventFields(
+  value: Record<string, unknown> | null | undefined,
+): Record<string, unknown> | null {
+  if (!value) {
+    return null;
+  }
+
+  const { correlationId: _ignoredCorrelationId, eventId: _ignoredEventId, ...rest } = value;
+  return Object.keys(rest).length > 0 ? rest : null;
+}
+
+async function createHostedRunLogCorrelationId(eventId: string): Promise<string> {
+  const digest = new Uint8Array(
+    await crypto.subtle.digest(
+      "SHA-256",
+      new TextEncoder().encode(`hosted-run-log:${eventId}`),
+    ),
+  );
+
+  return `evtcorr_${bytesToHex(digest.subarray(0, 16))}`;
+}
+
+function bytesToHex(bytes: Uint8Array): string {
+  return [...bytes]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
 }
 
 
