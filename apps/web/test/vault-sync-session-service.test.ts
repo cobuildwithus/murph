@@ -79,6 +79,7 @@ describe("vault sync shared projections", () => {
     mocks.decryptHostedWebNullableString.mockReturnValue(JSON.stringify({
       bundleBase64: "AQID",
       sessionId: "vsi_123",
+      sourceSchemaVersion: "murph.vault.v1",
     }));
 
     expect(projectHostedVaultSyncPayload({
@@ -89,6 +90,7 @@ describe("vault sync shared projections", () => {
     })).toEqual({
       bundleBase64: "AQID",
       sessionId: "vsi_123",
+      sourceSchemaVersion: "murph.vault.v1",
     });
   });
 });

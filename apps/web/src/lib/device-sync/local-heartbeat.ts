@@ -35,6 +35,8 @@ type HostedLocalHeartbeatState = Pick<
   "lastSyncStartedAt" | "lastSyncCompletedAt" | "lastSyncErrorAt" | "lastErrorCode" | "lastErrorMessage"
 >;
 
+export type HostedLocalHeartbeatStateUpdate = Partial<HostedLocalHeartbeatState>;
+
 export function parseHostedLocalHeartbeatPatch(
   body: Record<string, unknown>,
   now: Date = new Date(),
@@ -93,7 +95,7 @@ export function parseHostedLocalHeartbeatPatch(
 export function buildHostedLocalHeartbeatRuntimeLocalStateUpdate(
   existing: HostedLocalHeartbeatState,
   patch: HostedLocalHeartbeatPatch,
-): HostedLocalHeartbeatPatch {
+): HostedLocalHeartbeatStateUpdate {
   const nextStartedMs = patch.lastSyncStartedAt ? Date.parse(patch.lastSyncStartedAt) : null;
   const nextCompletedMs = patch.lastSyncCompletedAt ? Date.parse(patch.lastSyncCompletedAt) : null;
   const nextErrorMs = patch.lastSyncErrorAt ? Date.parse(patch.lastSyncErrorAt) : null;
@@ -115,21 +117,40 @@ export function buildHostedLocalHeartbeatRuntimeLocalStateUpdate(
     throw invalidLocalHeartbeat("Local heartbeat lastSyncErrorAt may not be earlier than lastSyncStartedAt.");
   }
 
+  const startedAdvanced = nextStartedMs !== null && (currentStartedMs === null || nextStartedMs > currentStartedMs);
+  const clearStaleCompletedAt =
+    startedAdvanced && patch.lastSyncCompletedAt === undefined && currentCompletedMs !== null && currentCompletedMs <= nextStartedMs;
+  const clearStaleErrorState =
+    startedAdvanced
+    && patch.lastSyncErrorAt === undefined
+    && (
+      (currentErrorMs !== null && currentErrorMs <= nextStartedMs)
+      || (
+        currentErrorMs === null
+        && (existing.lastErrorCode !== null || existing.lastErrorMessage !== null)
+      )
+    );
+
+  const nextCompletedAt = clearStaleCompletedAt ? null : patch.lastSyncCompletedAt;
+  const nextErrorAt = clearStaleErrorState ? null : patch.lastSyncErrorAt;
+  const nextErrorCode = clearStaleErrorState ? null : patch.lastErrorCode;
+  const nextErrorMessage = clearStaleErrorState ? null : patch.lastErrorMessage;
+
   return {
     ...(patch.lastSyncStartedAt !== undefined
       ? { lastSyncStartedAt: patch.lastSyncStartedAt }
       : {}),
-    ...(patch.lastSyncCompletedAt !== undefined
-      ? { lastSyncCompletedAt: patch.lastSyncCompletedAt }
+    ...(nextCompletedAt !== undefined
+      ? { lastSyncCompletedAt: nextCompletedAt }
       : {}),
-    ...(patch.lastSyncErrorAt !== undefined
-      ? { lastSyncErrorAt: patch.lastSyncErrorAt }
+    ...(nextErrorAt !== undefined
+      ? { lastSyncErrorAt: nextErrorAt }
       : {}),
-    ...(patch.lastErrorCode !== undefined
-      ? { lastErrorCode: patch.lastErrorCode }
+    ...(nextErrorCode !== undefined
+      ? { lastErrorCode: nextErrorCode }
       : {}),
-    ...(patch.lastErrorMessage !== undefined
-      ? { lastErrorMessage: patch.lastErrorMessage }
+    ...(nextErrorMessage !== undefined
+      ? { lastErrorMessage: nextErrorMessage }
       : {}),
   };
 }

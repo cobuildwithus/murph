@@ -214,11 +214,13 @@ describe("HostedDeviceSyncAgentSessionService retry-safe bearer reuse", () => {
       const firstSession = await firstService.requireAgentSession();
       const firstExport = await firstService.exportTokenBundle(firstSession, "conn-1");
 
-      expect(firstExport.agentSession).toMatchObject({
-        id: SESSION.id,
-        bearerToken,
-        expiresAt: SESSION.expiresAt,
+      expect(firstExport).toMatchObject({
+        tokenBundle: {
+          tokenVersion: 2,
+        },
       });
+      expect(firstExport).not.toHaveProperty("agentSession");
+      expect(JSON.stringify(firstExport)).not.toContain(bearerToken);
 
       vi.setSystemTime(new Date("2026-04-01T00:15:00.000Z"));
       const retryService = new HostedDeviceSyncAgentSessionService({
@@ -228,16 +230,14 @@ describe("HostedDeviceSyncAgentSessionService retry-safe bearer reuse", () => {
       });
 
       const retrySession = await retryService.requireAgentSession();
-      await expect(retryService.exportTokenBundle(retrySession, "conn-1")).resolves.toMatchObject({
-        agentSession: {
-          id: SESSION.id,
-          bearerToken,
-          expiresAt: SESSION.expiresAt,
-        },
+      const retryExport = await retryService.exportTokenBundle(retrySession, "conn-1");
+      expect(retryExport).toMatchObject({
         tokenBundle: {
           tokenVersion: 2,
         },
       });
+      expect(retryExport).not.toHaveProperty("agentSession");
+      expect(JSON.stringify(retryExport)).not.toContain(bearerToken);
       expect(harness.sessionState.revokedAt).toBeNull();
       expect(harness.audits).toHaveLength(2);
 
@@ -305,12 +305,9 @@ describe("HostedDeviceSyncAgentSessionService retry-safe bearer reuse", () => {
       expect(firstRefresh).toMatchObject({
         refreshed: false,
         tokenVersionChanged: false,
-        agentSession: {
-          id: SESSION.id,
-          bearerToken,
-          expiresAt: SESSION.expiresAt,
-        },
       });
+      expect(firstRefresh).not.toHaveProperty("agentSession");
+      expect(JSON.stringify(firstRefresh)).not.toContain(bearerToken);
 
       vi.setSystemTime(new Date("2026-04-01T00:15:00.000Z"));
       const retryService = new HostedDeviceSyncAgentSessionService({
@@ -320,20 +317,18 @@ describe("HostedDeviceSyncAgentSessionService retry-safe bearer reuse", () => {
       });
 
       const retrySession = await retryService.requireAgentSession();
-      await expect(retryService.refreshTokenBundle(retrySession, "conn-1", {
+      const retryRefresh = await retryService.refreshTokenBundle(retrySession, "conn-1", {
         expectedTokenVersion: 2,
-      })).resolves.toMatchObject({
+      });
+      expect(retryRefresh).toMatchObject({
         refreshed: false,
         tokenVersionChanged: false,
-        agentSession: {
-          id: SESSION.id,
-          bearerToken,
-          expiresAt: SESSION.expiresAt,
-        },
         tokenBundle: {
           tokenVersion: 2,
         },
       });
+      expect(retryRefresh).not.toHaveProperty("agentSession");
+      expect(JSON.stringify(retryRefresh)).not.toContain(bearerToken);
       expect(harness.sessionState.revokedAt).toBeNull();
       expect(harness.audits).toHaveLength(2);
     } finally {
@@ -371,17 +366,14 @@ describe("HostedDeviceSyncAgentSessionService retry-safe bearer reuse", () => {
       expect(firstRefresh).toMatchObject({
         refreshed: true,
         tokenVersionChanged: true,
-        agentSession: {
-          id: SESSION.id,
-          bearerToken,
-          expiresAt: SESSION.expiresAt,
-        },
         tokenBundle: {
           accessToken: "access-token-refreshed",
           refreshToken: "refresh-token-refreshed",
           tokenVersion: 3,
         },
       });
+      expect(firstRefresh).not.toHaveProperty("agentSession");
+      expect(JSON.stringify(firstRefresh)).not.toContain(bearerToken);
       expect(refreshTokens).toHaveBeenCalledTimes(1);
 
       vi.setSystemTime(new Date("2026-04-01T00:15:00.000Z"));
@@ -392,22 +384,20 @@ describe("HostedDeviceSyncAgentSessionService retry-safe bearer reuse", () => {
       });
 
       const retrySession = await retryService.requireAgentSession();
-      await expect(retryService.refreshTokenBundle(retrySession, "conn-1", {
+      const retryRefresh = await retryService.refreshTokenBundle(retrySession, "conn-1", {
         expectedTokenVersion: 2,
-      })).resolves.toMatchObject({
+      });
+      expect(retryRefresh).toMatchObject({
         refreshed: false,
         tokenVersionChanged: true,
-        agentSession: {
-          id: SESSION.id,
-          bearerToken,
-          expiresAt: SESSION.expiresAt,
-        },
         tokenBundle: {
           accessToken: "access-token-refreshed",
           refreshToken: "refresh-token-refreshed",
           tokenVersion: 3,
         },
       });
+      expect(retryRefresh).not.toHaveProperty("agentSession");
+      expect(JSON.stringify(retryRefresh)).not.toContain(bearerToken);
       expect(refreshTokens).toHaveBeenCalledTimes(1);
       expect(harness.sessionState.revokedAt).toBeNull();
       expect(harness.audits).toHaveLength(3);

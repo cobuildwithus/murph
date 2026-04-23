@@ -279,6 +279,7 @@ export async function completeHostedVaultSyncAgentUpload(input: {
       payload: {
         bundleBase64: input.bundleBase64,
         sessionId: input.sessionId,
+        sourceSchemaVersion: input.sourceSchemaVersion ?? null,
       },
       prisma: tx,
       sessionId: input.sessionId,
@@ -293,6 +294,7 @@ export async function completeHostedVaultSyncAgentUpload(input: {
         vaultSync: {
           localManifestHash: input.localManifestHash,
           sessionId: input.sessionId,
+          sourceSchemaVersion: input.sourceSchemaVersion ?? null,
           sourceVaultId: input.sourceVaultId ?? null,
           sourceVaultTitle: input.sourceVaultTitle ?? null,
         },

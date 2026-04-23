@@ -157,4 +157,68 @@ describe("PrismaDeviceSyncControlPlaneStore local heartbeat updates", () => {
       httpStatus: 400,
     });
   });
+
+  it("clears stale completion and error state before persisting an advanced sync start", async () => {
+    const { store, updateConnection } = createHeartbeatStore({
+      lastErrorCode: "SYNC_FAILED",
+      lastErrorMessage: "Token expired",
+      lastSyncCompletedAt: new Date("2026-03-25T01:05:00.000Z"),
+      lastSyncErrorAt: new Date("2026-03-25T01:06:00.000Z"),
+      lastSyncStartedAt: new Date("2026-03-25T01:00:00.000Z"),
+    });
+
+    const updated = await store.updateConnectionFromLocalHeartbeat("user-123", "dsc_123", {
+      lastSyncStartedAt: "2026-03-25T01:10:00.000Z",
+    });
+
+    expect(updated).toMatchObject({
+      id: "dsc_123",
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      lastSyncCompletedAt: null,
+      lastSyncErrorAt: null,
+      lastSyncStartedAt: "2026-03-25T01:10:00.000Z",
+    });
+    expect(updateConnection).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastSyncCompletedAt: null,
+        lastSyncErrorAt: null,
+        lastSyncStartedAt: expect.any(Date),
+      }),
+    }));
+  });
+
+  it("clears completion and error timestamps equal to a new sync start before persisting", async () => {
+    const { store, updateConnection } = createHeartbeatStore({
+      lastErrorCode: "SYNC_FAILED",
+      lastErrorMessage: "Token expired",
+      lastSyncCompletedAt: new Date("2026-03-25T01:10:00.000Z"),
+      lastSyncErrorAt: new Date("2026-03-25T01:10:00.000Z"),
+      lastSyncStartedAt: new Date("2026-03-25T01:00:00.000Z"),
+    });
+
+    const updated = await store.updateConnectionFromLocalHeartbeat("user-123", "dsc_123", {
+      lastSyncStartedAt: "2026-03-25T01:10:00.000Z",
+    });
+
+    expect(updated).toMatchObject({
+      id: "dsc_123",
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      lastSyncCompletedAt: null,
+      lastSyncErrorAt: null,
+      lastSyncStartedAt: "2026-03-25T01:10:00.000Z",
+    });
+    expect(updateConnection).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastSyncCompletedAt: null,
+        lastSyncErrorAt: null,
+        lastSyncStartedAt: expect.any(Date),
+      }),
+    }));
+  });
 });

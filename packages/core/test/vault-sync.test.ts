@@ -15,6 +15,7 @@ import {
   restoreVaultSyncImportPack,
   validateVault,
   VAULT_LAYOUT,
+  VAULT_SCHEMA_VERSION,
 } from "../src/index.ts";
 
 const tempRoots: string[] = [];
@@ -210,6 +211,8 @@ describe("vault sync import packs", () => {
 
     const manifest = await readVaultSyncImportManifest(restored.metaRoot);
     expect(manifest.manifestHash).toBe(pack.manifestHash);
+    expect(pack.sourceSchemaVersion).toBe(VAULT_SCHEMA_VERSION);
+    expect(manifest.sourceVault.schemaVersion).toBe(VAULT_SCHEMA_VERSION);
     expect(manifest.sourceVault.vaultId).toBe(pack.sourceVaultId);
   });
 

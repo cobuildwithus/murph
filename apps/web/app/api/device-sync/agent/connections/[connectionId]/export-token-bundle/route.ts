@@ -17,5 +17,9 @@ export const POST = withJsonError(async (
   const controlPlane = createHostedDeviceSyncControlPlane(request);
   const session = await controlPlane.requireAgentSession();
   const connectionId = await resolveDecodedRouteParam(context.params, "connectionId");
-  return jsonOk(await controlPlane.exportTokenBundle(session, connectionId));
+  const { connection, tokenBundle } = await controlPlane.exportTokenBundle(session, connectionId);
+  return jsonOk({
+    connection,
+    tokenBundle,
+  });
 });

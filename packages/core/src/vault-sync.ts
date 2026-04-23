@@ -264,10 +264,8 @@ function stringField(value: Record<string, unknown> | null, keys: readonly strin
 
 async function readSourceVaultMetadata(vaultRoot: string): Promise<VaultSyncSourceVaultMetadata> {
   const metadata = await readJsonObjectIfExists(path.join(vaultRoot, VAULT_LAYOUT.metadata));
-  const formatVersion = metadata?.formatVersion;
   return {
-    schemaVersion: stringField(metadata, ["schemaVersion", "vaultSchemaVersion"])
-      ?? (typeof formatVersion === "number" ? String(formatVersion) : VAULT_SCHEMA_VERSION),
+    schemaVersion: stringField(metadata, ["schemaVersion", "vaultSchemaVersion"]) ?? VAULT_SCHEMA_VERSION,
     title: stringField(metadata, ["title", "name"]),
     vaultId: stringField(metadata, ["vaultId", "id"]),
   };

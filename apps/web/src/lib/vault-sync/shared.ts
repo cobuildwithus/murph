@@ -216,6 +216,14 @@ export function projectHostedVaultSyncPayload(
   return {
     bundleBase64: requireString(payload.bundleBase64, "bundleBase64"),
     sessionId: requireString(payload.sessionId, "sessionId"),
+    ...(payload.sourceSchemaVersion === undefined
+      ? {}
+      : {
+          sourceSchemaVersion: requireNullableString(
+            payload.sourceSchemaVersion,
+            "sourceSchemaVersion",
+          ),
+        }),
   };
 }
 
@@ -237,6 +245,13 @@ function requireString(value: unknown, label: string): string {
     throw new TypeError(`Hosted vault sync payload ${label} must be a non-empty string.`);
   }
   return value;
+}
+
+function requireNullableString(value: unknown, label: string): string | null {
+  if (value === null) {
+    return null;
+  }
+  return requireString(value, label);
 }
 
 function shellQuote(value: string): string {

@@ -65,4 +65,72 @@ describe("hosted local heartbeat seam", () => {
       ),
     ).toThrowError(/may not be earlier than lastSyncStartedAt/u);
   });
+
+  it("clears stale completion and error state when sync start advances", () => {
+    expect(
+      buildHostedLocalHeartbeatRuntimeLocalStateUpdate(
+        {
+          lastErrorCode: "SYNC_FAILED",
+          lastErrorMessage: "Token expired",
+          lastSyncCompletedAt: "2026-04-12T00:05:00.000Z",
+          lastSyncErrorAt: "2026-04-12T00:06:00.000Z",
+          lastSyncStartedAt: "2026-04-12T00:00:00.000Z",
+        },
+        {
+          lastSyncStartedAt: "2026-04-12T00:10:00.000Z",
+        },
+      ),
+    ).toEqual({
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      lastSyncCompletedAt: null,
+      lastSyncErrorAt: null,
+      lastSyncStartedAt: "2026-04-12T00:10:00.000Z",
+    });
+  });
+
+  it("treats completion and error timestamps equal to a new sync start as stale", () => {
+    expect(
+      buildHostedLocalHeartbeatRuntimeLocalStateUpdate(
+        {
+          lastErrorCode: "SYNC_FAILED",
+          lastErrorMessage: "Token expired",
+          lastSyncCompletedAt: "2026-04-12T00:10:00.000Z",
+          lastSyncErrorAt: "2026-04-12T00:10:00.000Z",
+          lastSyncStartedAt: "2026-04-12T00:00:00.000Z",
+        },
+        {
+          lastSyncStartedAt: "2026-04-12T00:10:00.000Z",
+        },
+      ),
+    ).toEqual({
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      lastSyncCompletedAt: null,
+      lastSyncErrorAt: null,
+      lastSyncStartedAt: "2026-04-12T00:10:00.000Z",
+    });
+  });
+
+  it("clears legacy error details when sync start advances without an error timestamp", () => {
+    expect(
+      buildHostedLocalHeartbeatRuntimeLocalStateUpdate(
+        {
+          lastErrorCode: "SYNC_FAILED",
+          lastErrorMessage: "Token expired",
+          lastSyncCompletedAt: null,
+          lastSyncErrorAt: null,
+          lastSyncStartedAt: "2026-04-12T00:00:00.000Z",
+        },
+        {
+          lastSyncStartedAt: "2026-04-12T00:10:00.000Z",
+        },
+      ),
+    ).toEqual({
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      lastSyncErrorAt: null,
+      lastSyncStartedAt: "2026-04-12T00:10:00.000Z",
+    });
+  });
 });

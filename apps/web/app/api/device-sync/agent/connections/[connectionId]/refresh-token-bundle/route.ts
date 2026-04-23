@@ -21,10 +21,14 @@ export const POST = withJsonError(async (
   const expectedTokenVersion = typeof body.expectedTokenVersion === "number" ? body.expectedTokenVersion : null;
   const force = body.force === true;
   const connectionId = await resolveDecodedRouteParam(context.params, "connectionId");
-  return jsonOk(
-    await controlPlane.refreshTokenBundle(session, connectionId, {
-      expectedTokenVersion,
-      force,
-    }),
-  );
+  const refresh = await controlPlane.refreshTokenBundle(session, connectionId, {
+    expectedTokenVersion,
+    force,
+  });
+  return jsonOk({
+    connection: refresh.connection,
+    tokenBundle: refresh.tokenBundle,
+    refreshed: refresh.refreshed,
+    tokenVersionChanged: refresh.tokenVersionChanged,
+  });
 });
