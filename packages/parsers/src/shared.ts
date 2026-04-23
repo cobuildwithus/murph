@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import path from "node:path";
-import { promises as fs } from "node:fs";
+import { constants as fsConstants, promises as fs } from "node:fs";
 
 import {
   assertPathWithinVaultOnDisk,
@@ -199,8 +199,8 @@ export async function resolveExecutable(candidates: string[]): Promise<string | 
   const unique = [...new Set(candidates.map((candidate) => candidate.trim()).filter(Boolean))];
 
   for (const candidate of unique) {
-    if (candidate.includes(path.sep) || path.isAbsolute(candidate)) {
-      if (await fileExists(candidate)) {
+    if (isPathLikeExecutableCandidate(candidate)) {
+      if (await isExecutableFile(candidate)) {
         return candidate;
       }
       continue;
@@ -209,9 +209,14 @@ export async function resolveExecutable(candidates: string[]): Promise<string | 
     const locator = process.platform === "win32" ? "where" : "which";
     try {
       const result = await runCommand(locator, [candidate]);
-      const firstLine = result.stdout.split(/\r?\n/u).map((line) => line.trim()).find(Boolean);
-      if (firstLine) {
-        return firstLine;
+      const matches = result.stdout
+        .split(/\r?\n/u)
+        .map((line) => line.trim())
+        .filter(Boolean);
+      for (const match of matches) {
+        if (await isExecutableFile(match)) {
+          return match;
+        }
       }
     } catch {
       continue;
@@ -232,6 +237,41 @@ export async function resolveConfiguredExecutable(input: {
     envValue ?? "",
     ...(input.fallbackCommands ?? []),
   ]);
+}
+
+function isPathLikeExecutableCandidate(candidate: string): boolean {
+  return (
+    path.isAbsolute(candidate) ||
+    candidate.includes("/") ||
+    candidate.includes("\\")
+  );
+}
+
+async function isExecutableFile(filePath: string): Promise<boolean> {
+  try {
+    const stats = await fs.stat(filePath);
+    if (!stats.isFile()) {
+      return false;
+    }
+
+    if (process.platform === "win32") {
+      const extension = path.extname(filePath).toUpperCase();
+      return extension.length > 0 && getWindowsExecutableExtensions().has(extension);
+    }
+
+    await fs.access(filePath, fsConstants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function getWindowsExecutableExtensions(): Set<string> {
+  const rawValue = process.env.PATHEXT;
+  const values = rawValue
+    ? rawValue.split(";").map((value) => value.trim().toUpperCase()).filter(Boolean)
+    : [".COM", ".EXE", ".BAT", ".CMD"];
+  return new Set(values);
 }
 
 export function readConfiguredEnvValue(

@@ -19,12 +19,24 @@ export interface WhisperCppProviderOptions {
   language?: string;
   translate?: boolean;
   extraArgs?: string[];
+  resolvedToolState?: {
+    available: boolean;
+    reason: string;
+    commandPath: string | null;
+    modelPath: string | null;
+  };
 }
 
 export function createWhisperCppProvider(
   options: WhisperCppProviderOptions = {},
 ): ParserProvider {
+  const resolvedToolState = options.resolvedToolState;
+
   async function resolveCommand(): Promise<string | null> {
+    if (resolvedToolState) {
+      return normalizeNullableString(resolvedToolState.commandPath);
+    }
+
     return resolveConfiguredExecutable({
       explicitCandidates: options.commandCandidates,
       envValue: () => readConfiguredEnvValue(process.env, ["WHISPER_COMMAND"]),
@@ -33,6 +45,10 @@ export function createWhisperCppProvider(
   }
 
   function resolveModelPath(): string | null {
+    if (resolvedToolState) {
+      return normalizeNullableString(resolvedToolState.modelPath);
+    }
+
     const candidate =
       options.modelPath ??
       readConfiguredEnvValue(process.env, ["WHISPER_MODEL_PATH"]);
@@ -46,6 +62,10 @@ export function createWhisperCppProvider(
     runtime: "cli",
     priority: 900,
     async discover() {
+      if (resolvedToolState) {
+        return buildResolvedAvailability(resolvedToolState);
+      }
+
       const command = await resolveCommand();
       const modelPath = resolveModelPath();
       const availability = describeExecutableAvailability({
@@ -78,14 +98,18 @@ export function createWhisperCppProvider(
       return kind === "audio";
     },
     async run(request): Promise<ProviderRunResult> {
+      if (resolvedToolState && !resolvedToolState.available) {
+        throw new TypeError(resolvedToolState.reason);
+      }
+
       const command = requireExecutable(
         await resolveCommand(),
-        "whisper.cpp CLI executable not found.",
+        resolvedToolState?.reason ?? "whisper.cpp CLI executable not found.",
       );
       const modelPath = resolveModelPath();
 
       if (!modelPath) {
-        throw new TypeError("Whisper model path is not configured.");
+        throw new TypeError(resolvedToolState?.reason ?? "Whisper model path is not configured.");
       }
 
       const outputBase = path.join(request.scratchDirectory, `${request.artifact.attachmentId}.whisper`);
@@ -130,6 +154,35 @@ export function createWhisperCppProvider(
       };
     },
   };
+}
+
+function buildResolvedAvailability(
+  resolvedToolState: NonNullable<WhisperCppProviderOptions["resolvedToolState"]>,
+) {
+  const executablePath = normalizeNullableString(resolvedToolState.commandPath);
+  const modelPath = normalizeNullableString(resolvedToolState.modelPath);
+
+  return {
+    available: resolvedToolState.available,
+    reason: resolvedToolState.reason,
+    ...(executablePath ? { executablePath } : {}),
+    ...(resolvedToolState.available && modelPath
+      ? {
+          details: {
+            modelPath,
+          },
+        }
+      : {}),
+  };
+}
+
+function normalizeNullableString(value: string | null | undefined): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
 }
 
 function parseSrtBlocks(content: string): ParsedBlock[] {
