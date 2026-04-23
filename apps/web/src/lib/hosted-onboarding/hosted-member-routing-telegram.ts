@@ -2,16 +2,28 @@ import {
   Prisma,
   type PrismaClient,
 } from "@prisma/client";
+import { parseTelegramThreadTarget } from "@murphai/messaging-ingress/telegram-webhook";
 
 import { getPrisma } from "../prisma";
-import { createHostedTelegramUserLookupKey } from "./contact-privacy";
+import {
+  createHostedTelegramUserLookupConflictLockToken,
+  createHostedTelegramUserLookupKey,
+  createHostedTelegramUserLookupKeyReadCandidates,
+} from "./contact-privacy";
 import { hostedOnboardingError } from "./errors";
-import { buildHostedMemberRoutingPrivateColumns } from "./member-private-codecs";
-import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "./shared";
+import {
+  buildHostedMemberRoutingPrivateColumns,
+  readHostedMemberRoutingTelegramPrivateState,
+} from "./member-private-codecs";
+import {
+  HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+  lockHostedAdvisoryKey,
+} from "./shared";
 
 export async function upsertHostedMemberTelegramRoutingBindingTx(input: {
   memberId: string;
   prisma: Prisma.TransactionClient;
+  telegramThreadId?: string | null;
   telegramUserId: string;
 }): Promise<void> {
   const telegramUserLookupKey = createHostedTelegramUserLookupKey(input.telegramUserId);
@@ -20,12 +32,38 @@ export async function upsertHostedMemberTelegramRoutingBindingTx(input: {
     throw new TypeError("Hosted Telegram routing requires a non-empty Telegram user id.");
   }
 
+  await assertHostedMemberTelegramRoutingBindingAvailableTx({
+    memberId: input.memberId,
+    prisma: input.prisma,
+    telegramUserId: input.telegramUserId,
+  });
+  const existingRouting = await input.prisma.hostedMemberRouting.findUnique({
+    where: {
+      memberId: input.memberId,
+    },
+    select: {
+      memberId: true,
+      telegramUserIdEncrypted: true,
+    },
+  });
+  const existingTelegramRouting = existingRouting
+    ? readHostedMemberRoutingTelegramPrivateState(existingRouting)
+    : null;
+  const preferredTelegramThreadId =
+    existingTelegramRouting?.telegramUserId === input.telegramUserId
+      ? choosePreferredTelegramThreadTarget({
+        existingTelegramThreadId: existingTelegramRouting.telegramThreadId,
+        incomingTelegramThreadId: input.telegramThreadId ?? null,
+      })
+      : null;
+
   const routingPrivateColumns = buildHostedMemberRoutingPrivateColumns({
     linqChatId: null,
     linqRecipientPhone: null,
     memberId: input.memberId,
     pendingLinqChatId: null,
     pendingLinqRecipientPhone: null,
+    telegramThreadId: preferredTelegramThreadId ?? input.telegramThreadId ?? null,
     telegramUserId: input.telegramUserId,
   });
 
@@ -50,12 +88,7 @@ export async function upsertHostedMemberTelegramRoutingBindingTx(input: {
     });
   } catch (error) {
     if (isPrismaUniqueConstraintError(error)) {
-      throw hostedOnboardingError({
-        code: "TELEGRAM_IDENTITY_CONFLICT",
-        message:
-          "That Telegram account is already linked to a different Murph account. Contact support so we can merge it safely.",
-        httpStatus: 409,
-      });
+      throw buildHostedTelegramIdentityConflictError();
     }
 
     throw error;
@@ -65,6 +98,7 @@ export async function upsertHostedMemberTelegramRoutingBindingTx(input: {
 export async function syncHostedMemberTelegramRoutingBinding(input: {
   memberId: string;
   prisma?: PrismaClient;
+  telegramThreadId?: string | null;
   telegramUserId: string;
 }): Promise<void> {
   const prisma = input.prisma ?? getPrisma();
@@ -73,6 +107,7 @@ export async function syncHostedMemberTelegramRoutingBinding(input: {
     (tx) => upsertHostedMemberTelegramRoutingBindingTx({
       memberId: input.memberId,
       prisma: tx,
+      telegramThreadId: input.telegramThreadId,
       telegramUserId: input.telegramUserId,
     }),
     HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
@@ -83,4 +118,97 @@ function isPrismaUniqueConstraintError(
   error: unknown,
 ): error is Prisma.PrismaClientKnownRequestError {
   return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
+}
+
+async function assertHostedMemberTelegramRoutingBindingAvailableTx(input: {
+  memberId: string;
+  prisma: Prisma.TransactionClient;
+  telegramUserId: string;
+}): Promise<void> {
+  const telegramUserLookupKeys = createHostedTelegramUserLookupKeyReadCandidates(
+    input.telegramUserId,
+  );
+  const telegramUserConflictLockToken = createHostedTelegramUserLookupConflictLockToken(
+    input.telegramUserId,
+  );
+
+  if (telegramUserLookupKeys.length === 0 || !telegramUserConflictLockToken) {
+    throw new TypeError("Hosted Telegram routing requires a non-empty Telegram user id.");
+  }
+
+  await lockHostedAdvisoryKey(input.prisma, telegramUserConflictLockToken);
+
+  const existingBindings = await input.prisma.hostedMemberRouting.findMany({
+    where: {
+      telegramUserLookupKey: {
+        in: telegramUserLookupKeys,
+      },
+    },
+    select: {
+      memberId: true,
+    },
+  });
+
+  const conflictingMemberIds = new Set(
+    existingBindings
+      .map((binding) => binding.memberId)
+      .filter((memberId) => memberId !== input.memberId),
+  );
+
+  if (conflictingMemberIds.size > 0) {
+    throw buildHostedTelegramIdentityConflictError();
+  }
+}
+
+function buildHostedTelegramIdentityConflictError() {
+  return hostedOnboardingError({
+    code: "TELEGRAM_IDENTITY_CONFLICT",
+    message:
+      "That Telegram account is already linked to a different Murph account. Contact support so we can merge it safely.",
+    httpStatus: 409,
+  });
+}
+
+function choosePreferredTelegramThreadTarget(input: {
+  existingTelegramThreadId: string | null;
+  incomingTelegramThreadId: string | null;
+}): string | null {
+  if (!input.incomingTelegramThreadId) {
+    return input.existingTelegramThreadId;
+  }
+
+  if (!input.existingTelegramThreadId) {
+    return input.incomingTelegramThreadId;
+  }
+
+  const incomingSpecificity = scoreTelegramThreadTargetSpecificity(
+    input.incomingTelegramThreadId,
+  );
+  const existingSpecificity = scoreTelegramThreadTargetSpecificity(
+    input.existingTelegramThreadId,
+  );
+
+  return incomingSpecificity >= existingSpecificity
+    ? input.incomingTelegramThreadId
+    : input.existingTelegramThreadId;
+}
+
+function scoreTelegramThreadTargetSpecificity(target: string): number {
+  const parsed = parseTelegramThreadTarget(target);
+
+  if (!parsed) {
+    return -1;
+  }
+
+  let score = 0;
+
+  if (parsed.businessConnectionId) {
+    score += 1;
+  }
+
+  if (parsed.directMessagesTopicId) {
+    score += 1;
+  }
+
+  return score;
 }

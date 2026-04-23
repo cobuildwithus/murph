@@ -1,6 +1,7 @@
 import { HostedBillingStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  createHostedEmailLookupKey,
   createHostedPhoneLookupKey,
   createHostedPrivyUserLookupKey,
   createHostedWalletAddressLookupKey,
@@ -84,9 +85,20 @@ type HostedMemberDelegate = {
   update?: (input: { data?: Record<string, unknown>; where?: Record<string, unknown> }) => Promise<unknown>;
 };
 type HostedMemberRoutingDelegate = {
+  findMany?: (input: { where?: Record<string, unknown> }) => Promise<unknown>;
+  findFirst?: (input: { where?: Record<string, unknown> }) => Promise<unknown>;
   findUnique?: (input: { where?: Record<string, unknown> }) => Promise<unknown>;
   upsert?: (input: {
     create: Record<string, unknown>;
+    update: Record<string, unknown>;
+    where?: Record<string, unknown>;
+  }) => Promise<unknown>;
+};
+type HostedMemberEmailAuthorizationDelegate = {
+  findUnique?: (input: { select?: Record<string, unknown>; where?: Record<string, unknown> }) => Promise<unknown>;
+  upsert?: (input: {
+    create: Record<string, unknown>;
+    select?: Record<string, unknown>;
     update: Record<string, unknown>;
     where?: Record<string, unknown>;
   }) => Promise<unknown>;
@@ -129,6 +141,7 @@ function makeIdentity(overrides: IdentityOverrides = {}): HostedPrivyIdentity {
 
 function baseIdentity(): BaseHostedPrivyIdentity {
   return {
+    email: null,
     phone: {
       number: DEFAULT_PHONE_NUMBER,
       verifiedAt: 1742990400,
@@ -371,6 +384,340 @@ describe("completeHostedPrivyVerification", () => {
     expect(result.inviteCode).toBe("public-invite-code");
     expect(result.messagingSetupRequired).toBe(false);
     expect(result.stage).toBe("checkout");
+  });
+
+  it.each([
+    {
+      identity: makeIdentity(),
+      label: "phone",
+    },
+    {
+      identity: makeIdentity({
+        email: {
+          address: "user@example.com",
+          verifiedAt: 1743064200,
+        },
+        phone: null,
+        wallet: null,
+      }),
+      label: "email",
+    },
+    {
+      identity: makeIdentity({
+        phone: null,
+        telegram: {
+          firstName: "Alice",
+          lastName: null,
+          photoUrl: null,
+          telegramUserId: "456",
+          username: "alice",
+        },
+        wallet: null,
+      }),
+      label: "telegram",
+    },
+  ])("fails closed for existing-account $label sign-in when no hosted binding exists", async ({
+    identity,
+  }) => {
+    const prisma = asCompleteHostedPrivyVerificationPrisma({
+      hostedInvite: {
+        create: vi.fn(),
+        findFirst: vi.fn().mockResolvedValue(null),
+        update: vi.fn(),
+      },
+      hostedMember: {
+        create: vi.fn(),
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
+    });
+
+    await expect(
+      completeHostedPrivyVerification({
+        identity,
+        intent: "signin",
+        now: NOW,
+        prisma,
+      }),
+    ).rejects.toMatchObject({
+      code: "HOSTED_SIGNIN_MEMBER_NOT_FOUND",
+      httpStatus: 403,
+    });
+
+    expect(prisma.hostedMember.create).not.toHaveBeenCalled();
+    expect(prisma.hostedInvite.create).not.toHaveBeenCalled();
+    expect(prisma.hostedMemberRouting.upsert).not.toHaveBeenCalled();
+    expect(prisma.hostedMemberEmailAuthorization.upsert).not.toHaveBeenCalled();
+  });
+
+  it("resolves an existing sign-in by verified email without creating a duplicate member", async () => {
+    const existingMember = makeMember({
+      id: "member_email_existing",
+      maskedPhoneNumberHint: null,
+      phoneLookupKey: null,
+      phoneNumberVerifiedAt: null,
+      privyUserId: null,
+      walletAddress: null,
+      walletChainType: null,
+      walletCreatedAt: null,
+      walletProvider: null,
+    });
+    const activeInvite = makeInvite(existingMember, {
+      channel: "web",
+      id: "invite_email_existing",
+      inviteCode: "invite-email-existing",
+      memberId: existingMember.id,
+    });
+    const hostedMemberEmailAuthorizationRecord = {
+      directPublicSenderAddressEncrypted: null,
+      directPublicSenderAuthorizedAt: null,
+      directPublicSenderLookupKey: null,
+      member: existingMember,
+      memberId: existingMember.id,
+      verifiedEmailAddressEncrypted: encryptHostedWebNullableString({
+        field: "hosted-member-email-authorization.verified-email",
+        memberId: existingMember.id,
+        value: "user@example.com",
+      }),
+      verifiedEmailLookupKey: createHostedEmailLookupKey("user@example.com"),
+      verifiedEmailVerifiedAt: NOW,
+    };
+    const prisma = asCompleteHostedPrivyVerificationPrisma({
+      hostedInvite: {
+        create: vi.fn().mockResolvedValue(activeInvite),
+        findFirst: vi.fn().mockResolvedValue(null),
+        update: vi.fn(),
+      },
+      hostedMember: {
+        create: vi.fn(),
+        findUnique: vi.fn().mockImplementation(async ({ where }: { where: Record<string, unknown> }) => (
+          where.id === existingMember.id ? existingMember : null
+        )),
+      },
+      hostedMemberEmailAuthorization: {
+        findUnique: vi.fn(async ({ where }: { where?: Record<string, unknown> }) => (
+          where?.verifiedEmailLookupKey === hostedMemberEmailAuthorizationRecord.verifiedEmailLookupKey
+            ? hostedMemberEmailAuthorizationRecord
+            : null
+        )),
+        upsert: vi.fn(async ({
+          create,
+          update,
+        }: {
+          create: Record<string, unknown>;
+          update: Record<string, unknown>;
+        }) => ({
+          ...create,
+          ...update,
+        })),
+      },
+    });
+
+    await expect(
+      completeHostedPrivyVerification({
+        identity: makeIdentity({
+          email: {
+            address: "user@example.com",
+            verifiedAt: 1743064200,
+          },
+          phone: null,
+          wallet: null,
+        }),
+        intent: "signin",
+        now: NOW,
+        prisma,
+      }),
+    ).resolves.toEqual({
+      inviteCode: expect.any(String),
+      joinUrl: expect.stringContaining("/join/"),
+      memberId: existingMember.id,
+      messagingSetupRequired: true,
+      stage: "checkout",
+    });
+
+    expect(prisma.hostedMember.create).not.toHaveBeenCalled();
+    expect(prisma.hostedInvite.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        memberId: existingMember.id,
+      }),
+    }));
+    expect(prisma.hostedMemberEmailAuthorization.upsert).toHaveBeenCalled();
+  });
+
+  it("resolves an existing sign-in by Telegram binding without creating a duplicate member", async () => {
+    const existingMember = makeMember({
+      id: "member_telegram_existing",
+      maskedPhoneNumberHint: null,
+      phoneLookupKey: null,
+      phoneNumberVerifiedAt: null,
+      privyUserId: null,
+      walletAddress: null,
+      walletChainType: null,
+      walletCreatedAt: null,
+      walletProvider: null,
+    });
+    const activeInvite = makeInvite(existingMember, {
+      channel: "web",
+      id: "invite_telegram_existing",
+      inviteCode: "invite-telegram-existing",
+      memberId: existingMember.id,
+    });
+    const prisma = asCompleteHostedPrivyVerificationPrisma({
+      hostedInvite: {
+        create: vi.fn().mockResolvedValue(activeInvite),
+        findFirst: vi.fn().mockResolvedValue(null),
+        update: vi.fn(),
+      },
+      hostedMember: {
+        create: vi.fn(),
+        findUnique: vi.fn().mockImplementation(async ({ where }: { where: Record<string, unknown> }) => (
+          where.id === existingMember.id ? existingMember : null
+        )),
+      },
+      hostedMemberRouting: {
+        findFirst: vi.fn(async () => ({
+          linqChatIdEncrypted: null,
+          linqRecipientPhoneEncrypted: null,
+          member: existingMember,
+          memberId: existingMember.id,
+          pendingLinqChatIdEncrypted: null,
+          pendingLinqRecipientPhoneEncrypted: null,
+          telegramUserIdEncrypted: encryptHostedWebNullableString({
+            field: "hosted-member-routing.telegram-user-id",
+            memberId: existingMember.id,
+            value: "456",
+          }),
+          telegramUserLookupKey: "hbidx:telegram-user:v1:telegram_lookup_456",
+        })),
+        findUnique: vi.fn(async ({ where }: { where?: Record<string, unknown> }) => (
+          where?.memberId === existingMember.id
+            ? {
+                linqChatIdEncrypted: null,
+                linqRecipientPhoneEncrypted: null,
+                member: existingMember,
+                memberId: existingMember.id,
+                pendingLinqChatIdEncrypted: null,
+                pendingLinqRecipientPhoneEncrypted: null,
+                telegramUserIdEncrypted: encryptHostedWebNullableString({
+                  field: "hosted-member-routing.telegram-user-id",
+                  memberId: existingMember.id,
+                  value: "456",
+                }),
+                telegramUserLookupKey: "hbidx:telegram-user:v1:telegram_lookup_456",
+              }
+            : null
+        )),
+        upsert: vi.fn(async ({
+          create,
+          update,
+        }: {
+          create: Record<string, unknown>;
+          update: Record<string, unknown>;
+        }) => ({
+          ...create,
+          ...update,
+        })),
+      },
+    });
+
+    await expect(
+      completeHostedPrivyVerification({
+        identity: makeIdentity({
+          phone: null,
+          telegram: {
+            firstName: "Alice",
+            lastName: null,
+            photoUrl: null,
+            telegramUserId: "456",
+            username: "alice",
+          },
+          wallet: null,
+        }),
+        intent: "signin",
+        now: NOW,
+        prisma,
+      }),
+    ).resolves.toEqual({
+      inviteCode: expect.any(String),
+      joinUrl: expect.stringContaining("/join/"),
+      memberId: existingMember.id,
+      messagingSetupRequired: true,
+      stage: "checkout",
+    });
+
+    expect(prisma.hostedMember.create).not.toHaveBeenCalled();
+    expect(prisma.hostedInvite.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        memberId: existingMember.id,
+      }),
+    }));
+    expect(prisma.hostedMemberRouting.upsert).toHaveBeenCalled();
+  });
+
+  it("fails closed when Telegram sign-in resolves to multiple members across blind-index read candidates", async () => {
+    const prisma = asCompleteHostedPrivyVerificationPrisma({
+      hostedInvite: {
+        create: vi.fn(),
+        findFirst: vi.fn().mockResolvedValue(null),
+        update: vi.fn(),
+      },
+      hostedMember: {
+        create: vi.fn(),
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
+      hostedMemberRouting: {
+        findMany: vi.fn(async () => [
+          {
+            linqChatIdEncrypted: null,
+            linqRecipientPhoneEncrypted: null,
+            member: makeMember({ id: "member_telegram_v1" }),
+            memberId: "member_telegram_v1",
+            pendingLinqChatIdEncrypted: null,
+            pendingLinqRecipientPhoneEncrypted: null,
+            telegramUserIdEncrypted: null,
+            telegramUserLookupKey: "hbidx:telegram-user:v1:telegram_lookup_456",
+          },
+          {
+            linqChatIdEncrypted: null,
+            linqRecipientPhoneEncrypted: null,
+            member: makeMember({ id: "member_telegram_v2" }),
+            memberId: "member_telegram_v2",
+            pendingLinqChatIdEncrypted: null,
+            pendingLinqRecipientPhoneEncrypted: null,
+            telegramUserIdEncrypted: null,
+            telegramUserLookupKey: "hbidx:telegram-user:v2:telegram_lookup_456",
+          },
+        ]),
+      },
+    });
+
+    await expect(
+      completeHostedPrivyVerification({
+        identity: makeIdentity({
+          phone: null,
+          telegram: {
+            firstName: "Alice",
+            lastName: null,
+            photoUrl: null,
+            telegramUserId: "456",
+            username: "alice",
+          },
+          wallet: null,
+        }),
+        intent: "signin",
+        now: NOW,
+        prisma,
+      }),
+    ).rejects.toMatchObject({
+      code: "TELEGRAM_ROUTING_LOOKUP_AMBIGUOUS",
+      details: {
+        matchCount: 2,
+      },
+      httpStatus: 500,
+      retryable: true,
+    });
+
+    expect(prisma.hostedMember.create).not.toHaveBeenCalled();
+    expect(prisma.hostedInvite.create).not.toHaveBeenCalled();
   });
 
   it("creates a hosted member and a web invite for a new public phone signup even when the Privy wallet is not ready yet", async () => {
@@ -941,6 +1288,8 @@ function asCompleteHostedPrivyVerificationPrisma<T extends Record<string, unknow
   const hostedInvite = readHostedInviteDelegate(prismaWithQueryRaw.hostedInvite);
   const hostedMember = readHostedMemberDelegate(prismaWithQueryRaw.hostedMember);
   const hostedMemberRouting = readHostedMemberRoutingDelegate(prismaWithQueryRaw.hostedMemberRouting);
+  const hostedMemberEmailAuthorization =
+    readHostedMemberEmailAuthorizationDelegate(prismaWithQueryRaw.hostedMemberEmailAuthorization);
   const hostedIngressEvent = readHostedIngressEventDelegate(prismaWithQueryRaw.hostedIngressEvent);
   if (!("hostedMember" in prismaWithQueryRaw) || !prismaWithQueryRaw.hostedMember || typeof hostedMember?.findUnique !== "function") {
     Object.defineProperty(prismaWithQueryRaw, "hostedMember", {
@@ -1044,6 +1393,44 @@ function asCompleteHostedPrivyVerificationPrisma<T extends Record<string, unknow
       configurable: true,
       value: {
         ...(hostedMemberRouting ?? {}),
+        findMany: vi.fn(async ({ where }: { where?: Record<string, unknown> }) => {
+          const lookupKey = Array.isArray(
+            (where?.telegramUserLookupKey as { in?: unknown[] } | undefined)?.in,
+          )
+            ? ((where?.telegramUserLookupKey as { in: unknown[] }).in[0] ?? null)
+            : null;
+
+          if (!lookupKey || typeof lookupKey !== "string") {
+            return [];
+          }
+
+          for (const routingRecord of routingRecordsByMemberId.values()) {
+            if (routingRecord.telegramUserLookupKey === lookupKey) {
+              return [routingRecord];
+            }
+          }
+
+          return [];
+        }),
+        findFirst: vi.fn(async ({ where }: { where?: Record<string, unknown> }) => {
+          const lookupKey = Array.isArray(
+            (where?.telegramUserLookupKey as { in?: unknown[] } | undefined)?.in,
+          )
+            ? ((where?.telegramUserLookupKey as { in: unknown[] }).in[0] ?? null)
+            : null;
+
+          if (!lookupKey || typeof lookupKey !== "string") {
+            return null;
+          }
+
+          for (const routingRecord of routingRecordsByMemberId.values()) {
+            if (routingRecord.telegramUserLookupKey === lookupKey) {
+              return routingRecord;
+            }
+          }
+
+          return null;
+        }),
         findUnique: vi.fn(async ({ where }: { where?: Record<string, unknown> }) => {
           const memberId = typeof where?.memberId === "string" ? where.memberId : null;
           return memberId ? routingRecordsByMemberId.get(memberId) ?? null : null;
@@ -1072,6 +1459,19 @@ function asCompleteHostedPrivyVerificationPrisma<T extends Record<string, unknow
           return nextRecord;
         }),
       },
+    });
+  } else if (
+    typeof prismaWithQueryRaw.hostedMemberRouting.findMany !== "function"
+    && typeof prismaWithQueryRaw.hostedMemberRouting.findFirst === "function"
+  ) {
+    Object.defineProperty(prismaWithQueryRaw.hostedMemberRouting, "findMany", {
+      configurable: true,
+      value: vi.fn(async (...args: unknown[]) => {
+        const result = await prismaWithQueryRaw.hostedMemberRouting?.findFirst?.(
+          ...(args as Parameters<NonNullable<HostedMemberRoutingDelegate["findFirst"]>>),
+        );
+        return result ? [result] : [];
+      }),
     });
   }
 
@@ -1281,6 +1681,29 @@ function asCompleteHostedPrivyVerificationPrisma<T extends Record<string, unknow
     });
   }
 
+  if (
+    !("hostedMemberEmailAuthorization" in prismaWithQueryRaw)
+    || !prismaWithQueryRaw.hostedMemberEmailAuthorization
+  ) {
+    Object.defineProperty(prismaWithQueryRaw, "hostedMemberEmailAuthorization", {
+      configurable: true,
+      value: {
+        ...(hostedMemberEmailAuthorization ?? {}),
+        findUnique: vi.fn(async () => null),
+        upsert: vi.fn(async ({
+          create,
+          update,
+        }: {
+          create: Record<string, unknown>;
+          update: Record<string, unknown>;
+        }) => ({
+          ...create,
+          ...update,
+        })),
+      },
+    });
+  }
+
   if (!("$queryRaw" in prismaWithQueryRaw)) {
     Object.defineProperty(prismaWithQueryRaw, "$queryRaw", {
       configurable: true,
@@ -1343,8 +1766,46 @@ function readHostedMemberRoutingDelegate(value: unknown): HostedMemberRoutingDel
     return undefined;
   }
 
+  const findMany: HostedMemberRoutingDelegate["findMany"] | undefined = Reflect.get(value, "findMany");
+  const findFirst: HostedMemberRoutingDelegate["findFirst"] | undefined = Reflect.get(value, "findFirst");
   const findUnique: HostedMemberRoutingDelegate["findUnique"] | undefined = Reflect.get(value, "findUnique");
   const upsert: HostedMemberRoutingDelegate["upsert"] | undefined = Reflect.get(value, "upsert");
+
+  return {
+    ...(typeof findMany === "function"
+      ? {
+          findMany,
+        }
+      : {}),
+    ...(typeof findFirst === "function"
+      ? {
+          findFirst,
+        }
+      : {}),
+    ...(typeof findUnique === "function"
+      ? {
+          findUnique,
+        }
+      : {}),
+    ...(typeof upsert === "function"
+      ? {
+          upsert,
+        }
+      : {}),
+  };
+}
+
+function readHostedMemberEmailAuthorizationDelegate(
+  value: unknown,
+): HostedMemberEmailAuthorizationDelegate | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+
+  const findUnique: HostedMemberEmailAuthorizationDelegate["findUnique"] | undefined =
+    Reflect.get(value, "findUnique");
+  const upsert: HostedMemberEmailAuthorizationDelegate["upsert"] | undefined =
+    Reflect.get(value, "upsert");
 
   return {
     ...(typeof findUnique === "function"

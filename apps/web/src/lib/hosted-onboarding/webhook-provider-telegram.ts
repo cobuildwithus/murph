@@ -12,7 +12,10 @@ import {
   parseHostedTelegramWebhookUpdate,
   summarizeHostedTelegramWebhook,
 } from "./telegram";
-import { lookupHostedMemberRoutingByTelegramUserId } from "./hosted-member-routing-store";
+import {
+  resolveHostedMemberRoutingByTelegramUserId,
+  upsertHostedMemberTelegramRoutingBindingTx,
+} from "./hosted-member-routing-store";
 import {
   type HostedWebhookPlan,
 } from "./webhook-service-types";
@@ -46,11 +49,18 @@ export async function planHostedOnboardingTelegramWebhook(input: {
     return buildIgnoredTelegramWebhookPlan("missing-sender");
   }
 
-  const existingMemberLookup = await lookupHostedMemberRoutingByTelegramUserId({
+  const existingMemberLookup = await resolveHostedMemberRoutingByTelegramUserId({
     prisma: input.prisma,
     telegramUserId: summary.senderTelegramUserId,
   });
-  const existingMember = existingMemberLookup?.core ?? null;
+
+  if (existingMemberLookup.status === "ambiguous") {
+    return buildIgnoredTelegramWebhookPlan("ambiguous-telegram-binding");
+  }
+
+  const existingMember = existingMemberLookup.status === "found"
+    ? existingMemberLookup.lookup.core
+    : null;
 
   if (!existingMember) {
     return buildIgnoredTelegramWebhookPlan("unlinked-telegram");
@@ -69,6 +79,13 @@ export async function planHostedOnboardingTelegramWebhook(input: {
   if (!telegramMessage) {
     return buildIgnoredTelegramWebhookPlan("unsupported-update");
   }
+
+  await upsertHostedMemberTelegramRoutingBindingTx({
+    memberId: existingMember.id,
+    prisma: input.prisma,
+    telegramThreadId: telegramMessage.threadId,
+    telegramUserId: summary.senderTelegramUserId,
+  });
 
   await materializeHostedIngressEnvelopeTx({
     wake: buildHostedExecutionTelegramConversationMessageWake({
