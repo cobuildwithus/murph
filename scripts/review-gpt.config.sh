@@ -5,6 +5,30 @@ include_docs=0
 preset_dir="scripts/chatgpt-review-presets"
 package_script="scripts/package-audit-context.sh"
 
+# Repo-owned repomix exclusions. Keep `output-packages/**` included so
+# research workspaces can be surfaced to ChatGPT when the package script
+# intentionally stages them.
+repomix_ignore_patterns=(
+  ".git/**"
+  ".env"
+  ".env.*"
+  "**/.env"
+  "**/.env.*"
+  "node_modules/**"
+  "**/node_modules/**"
+  ".next/**"
+  "**/.next/**"
+  "dist/**"
+  "**/dist/**"
+  "build/**"
+  "**/build/**"
+  "coverage/**"
+  "**/coverage/**"
+  "*.tsbuildinfo"
+  "**/*.tsbuildinfo"
+  "audit-packages/**"
+)
+
 review_gpt_register_dir_preset "security" "security-audit.md" \
   "General correctness and security audit focused on vault trust boundaries." \
   "security-audit" \
