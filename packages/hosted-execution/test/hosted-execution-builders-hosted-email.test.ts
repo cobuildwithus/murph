@@ -195,6 +195,7 @@ describe("hosted execution wake builders", () => {
       telegramMessage: {
         attachments,
         messageId: "message_123",
+        replyContextPreview: "Replying to: Earlier message",
         schema: "murph.hosted-telegram-message.v1",
         text: "hello",
         threadId: "thread_123",
@@ -219,6 +220,9 @@ describe("hosted execution wake builders", () => {
         kind: "photo",
       },
     ]);
+    expect(wake.message.telegramMessage.replyContextPreview).toBe(
+      "Replying to: Earlier message",
+    );
     expect(wake.message.telegramMessage.attachments).not.toBe(attachments);
     expect(wake.message.telegramMessage.attachments?.[0]).not.toBe(attachments[0]);
   });

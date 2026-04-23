@@ -12,7 +12,10 @@ import {
   type TelegramPhotoSize,
   type TelegramUpdateLike,
 } from "@murphai/messaging-ingress/telegram-webhook";
-import { parseTelegramWebhookUpdate } from "@murphai/messaging-ingress/telegram-webhook-payload";
+import {
+  buildTelegramReplyContextPreview,
+  parseTelegramWebhookUpdate,
+} from "@murphai/messaging-ingress/telegram-webhook-payload";
 
 import { hostedOnboardingError } from "./errors";
 import { getHostedOnboardingEnvironment } from "./runtime";
@@ -63,12 +66,14 @@ export function buildHostedTelegramMessagePayload(
 
   const attachments = buildHostedTelegramAttachmentPayloads(message);
   const mediaGroupId = normalizeNullableString(message.media_group_id ?? null);
+  const replyContextPreview = buildTelegramReplyContextPreview(message);
   const text = resolveHostedTelegramMessageText(message);
 
   return {
     ...(mediaGroupId === null ? {} : { mediaGroupId }),
     ...(attachments.length > 0 ? { attachments } : {}),
     messageId: String(message.message_id),
+    ...(replyContextPreview === null ? {} : { replyContextPreview }),
     schema: HOSTED_EXECUTION_TELEGRAM_MESSAGE_SCHEMA,
     ...(text === null ? {} : { text }),
     threadId: buildTelegramThreadId(message),

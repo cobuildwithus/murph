@@ -174,6 +174,7 @@ describe("ingestHostedConversationMessageWake", () => {
       occurredAt: "2026-04-08T00:01:00.000Z",
       telegramMessage: {
         messageId: "tg_message_123",
+        replyContextPreview: "Replying to: Earlier message",
         schema: "murph.hosted-telegram-message.v1",
         text: "hello",
         threadId: "chat_123",

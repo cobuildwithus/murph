@@ -274,6 +274,7 @@ test("normalizeHostedTelegramMessage stores only minimal durable Telegram captur
       ],
       mediaGroupId: "album-7",
       messageId: "17",
+      replyContextPreview: "Replying to: Earlier message",
       text: "[shared location]",
       threadId: "-100555:dm-topic:9",
     },
@@ -292,6 +293,7 @@ test("normalizeHostedTelegramMessage stores only minimal durable Telegram captur
   assert.deepEqual(capture.raw, {
     media_group_id: "album-7",
     message_id: "17",
+    reply_context_preview: "Replying to: Earlier message",
     schema: "murph.telegram-capture.v1",
   });
   assert.equal(capture.attachments.length, 1);

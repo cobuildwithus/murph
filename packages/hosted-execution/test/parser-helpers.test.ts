@@ -69,6 +69,7 @@ describe("telegram parser", () => {
       ],
       mediaGroupId: null,
       messageId: "message-1",
+      replyContextPreview: "Replying to: Earlier message",
       schema: "murph.hosted-telegram-message.v1",
       text: "hello",
       threadId: "thread-1",
@@ -87,6 +88,7 @@ describe("telegram parser", () => {
       ],
       mediaGroupId: null,
       messageId: "message-1",
+      replyContextPreview: "Replying to: Earlier message",
       schema: "murph.hosted-telegram-message.v1",
       text: "hello",
       threadId: "thread-1",
@@ -101,6 +103,19 @@ describe("telegram parser", () => {
       schema: "murph.hosted-telegram-message.v1",
       threadId: "thread-2",
     });
+  });
+
+  it("bounds overlong telegram reply context previews at the shared hosted-execution boundary", () => {
+    const preview = parseHostedExecutionTelegramMessage({
+      messageId: "message-3",
+      replyContextPreview: `Replying to: ${"x".repeat(400)}`,
+      schema: "murph.hosted-telegram-message.v1",
+      threadId: "thread-3",
+    }).replyContextPreview;
+
+    expect(preview).toHaveLength(240);
+    expect(preview).toMatch(/^Replying to: /u);
+    expect(preview).toMatch(/\.\.\.$/u);
   });
 
   it("rejects invalid telegram attachment, schema, and shape values", () => {

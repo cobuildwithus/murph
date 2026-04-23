@@ -832,6 +832,7 @@ describe("hosted wake parser contracts", () => {
       occurredAt: "2026-04-17T00:00:00.000Z",
       telegramMessage: {
         messageId: "message_123",
+        replyContextPreview: "Replying to: Earlier message",
         schema: "murph.hosted-telegram-message.v1",
         threadId: "thread_123",
       },

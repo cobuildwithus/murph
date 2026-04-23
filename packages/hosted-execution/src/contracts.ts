@@ -149,6 +149,7 @@ export interface HostedExecutionTelegramMessage {
   attachments?: HostedExecutionTelegramAttachment[];
   mediaGroupId?: string | null;
   messageId: string;
+  replyContextPreview?: string | null;
   schema: typeof HOSTED_EXECUTION_TELEGRAM_MESSAGE_SCHEMA;
   text?: string | null;
   threadId: string;

@@ -111,7 +111,7 @@ function normalizeTelegramReplyContextPreview(value: string | null): string | nu
     : normalized;
 }
 
-function buildTelegramReplyContextPreview(
+export function buildTelegramReplyContextPreview(
   message: TelegramMessageLike | null | undefined,
 ): string | null {
   if (!message) {
@@ -131,7 +131,9 @@ function buildTelegramReplyContextPreview(
     lines.push(`Quoted text: ${summarizeTelegramPreviewText(quotePreview)}`);
   }
 
-  return lines.length > 0 ? lines.join("\n") : null;
+  return lines.length > 0
+    ? normalizeTelegramReplyContextPreview(lines.join("\n"))
+    : null;
 }
 
 function summarizeTelegramReplyTarget(
