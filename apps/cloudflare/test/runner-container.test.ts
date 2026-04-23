@@ -321,8 +321,11 @@ describe("RunnerContainer", () => {
       expect.objectContaining({
         component: "container",
         details: expect.objectContaining({
+          destroyLatencyMs: expect.any(Number),
+          destroyTimeoutMs: 5_000,
           failClosed: false,
           lifecycleStage: "destroy",
+          statusBeforeDestroy: "running",
         }),
         level: "warn",
         message: "Hosted execution container destroy request failed.",
@@ -651,6 +654,20 @@ describe("RunnerContainer", () => {
 
       await expect(destroyPromise).resolves.toBeUndefined();
       expect(destroy).toHaveBeenCalledTimes(1);
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          component: "container",
+          details: expect.objectContaining({
+            destroyLatencyMs: expect.any(Number),
+            destroyTimeoutMs: 5_000,
+            failClosed: true,
+            lifecycleStage: "stopped",
+            statusBeforeDestroy: "running",
+          }),
+          message: "Hosted execution container destroy confirmed stopped.",
+          phase: "container.ready",
+        }),
+      );
     } finally {
       vi.useRealTimers();
     }

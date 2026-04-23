@@ -429,16 +429,21 @@ export class RunnerContainer extends Container {
     failClosed?: boolean;
   } = {}): Promise<void> {
     const failClosed = Boolean(input.failClosed);
+    let statusBeforeDestroy: string | null = null;
 
     try {
-      if (isRunnerContainerStopped(await readRunnerContainerStatus(this))) {
+      statusBeforeDestroy = await readRunnerContainerStatus(this);
+      if (isRunnerContainerStopped(statusBeforeDestroy)) {
         return;
       }
     } catch (error) {
       emitRunnerContainerLifecycleFailure({
+        destroyLatencyMs: null,
+        destroyTimeoutMs: RUNNER_DESTROY_TIMEOUT_MS,
         error,
         failClosed,
         message: "Hosted execution container failed while checking its lifecycle state.",
+        statusBeforeDestroy,
         stage: "status",
       });
       if (failClosed) {
@@ -447,6 +452,7 @@ export class RunnerContainer extends Container {
       return;
     }
 
+    const destroyStartedAt = Date.now();
     let destroyError: unknown = null;
 
     try {
@@ -457,9 +463,12 @@ export class RunnerContainer extends Container {
       }
       destroyError = error;
       emitRunnerContainerLifecycleFailure({
+        destroyLatencyMs: Date.now() - destroyStartedAt,
+        destroyTimeoutMs: RUNNER_DESTROY_TIMEOUT_MS,
         error,
         failClosed,
         message: "Hosted execution container destroy request failed.",
+        statusBeforeDestroy,
         stage: "destroy",
       });
     }
@@ -471,9 +480,12 @@ export class RunnerContainer extends Container {
         return;
       }
       emitRunnerContainerLifecycleFailure({
+        destroyLatencyMs: Date.now() - destroyStartedAt,
+        destroyTimeoutMs: RUNNER_DESTROY_TIMEOUT_MS,
         error,
         failClosed,
         message: "Hosted execution container destroy did not stop the shell.",
+        statusBeforeDestroy,
         stage: "wait-for-stop",
       });
       if (failClosed) {
@@ -481,6 +493,19 @@ export class RunnerContainer extends Container {
       }
       return;
     }
+
+    emitHostedExecutionStructuredLog({
+      component: "container",
+      details: {
+        destroyLatencyMs: Date.now() - destroyStartedAt,
+        destroyTimeoutMs: RUNNER_DESTROY_TIMEOUT_MS,
+        failClosed,
+        lifecycleStage: "stopped",
+        statusBeforeDestroy,
+      },
+      message: "Hosted execution container destroy confirmed stopped.",
+      phase: "container.ready",
+    });
 
     if (destroyError) {
       return;
@@ -633,16 +658,22 @@ function createRunnerOutboundProxyToken(): string {
 }
 
 function emitRunnerContainerLifecycleFailure(input: {
+  destroyLatencyMs: number | null;
+  destroyTimeoutMs: number;
   error: unknown;
   failClosed: boolean;
   message: string;
+  statusBeforeDestroy: string | null;
   stage: "destroy" | "status" | "wait-for-stop";
 }): void {
   emitHostedExecutionStructuredLog({
     component: "container",
     details: {
+      destroyLatencyMs: input.destroyLatencyMs,
+      destroyTimeoutMs: input.destroyTimeoutMs,
       failClosed: input.failClosed,
       lifecycleStage: input.stage,
+      statusBeforeDestroy: input.statusBeforeDestroy,
     },
     error: input.error,
     level: input.failClosed ? "error" : "warn",

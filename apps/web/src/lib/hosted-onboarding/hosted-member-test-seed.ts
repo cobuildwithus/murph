@@ -1,10 +1,17 @@
 import { createHostedWebSmokeEnvironment } from "../../../next-artifacts";
 
-const prismaModuleSpecifier = "../prisma";
-const contactPrivacyModuleSpecifier = "./contact-privacy";
-const hostedMemberIdentityStoreModuleSpecifier = "./hosted-member-identity-store";
-const hostedMemberRoutingStoreModuleSpecifier = "./hosted-member-routing-store";
-const hostedMemberStoreModuleSpecifier = "./hosted-member-store";
+const prismaModuleSpecifier = new URL("../prisma.ts", import.meta.url).href;
+const contactPrivacyModuleSpecifier = new URL("./contact-privacy.ts", import.meta.url).href;
+const hostedMemberIdentityStoreModuleSpecifier = new URL(
+  "./hosted-member-identity-store.ts",
+  import.meta.url,
+).href;
+const hostedMemberRoutingStoreModuleSpecifier = new URL(
+  "./hosted-member-routing-store.ts",
+  import.meta.url,
+).href;
+const hostedMemberStoreModuleSpecifier = new URL("./hosted-member-store.ts", import.meta.url)
+  .href;
 
 interface HostedActiveMemberSeedInput {
   environment?: NodeJS.ProcessEnv;

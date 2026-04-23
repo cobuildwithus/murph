@@ -3,8 +3,8 @@ import type { HostedIngressAppendResponse } from "@murphai/hosted-execution/cont
 
 import { createHostedWebSmokeEnvironment } from "../../../next-artifacts";
 
-const prismaModuleSpecifier = "../prisma";
-const hostedIngressQueueModuleSpecifier = "./queue";
+const prismaModuleSpecifier = new URL("../prisma.ts", import.meta.url).href;
+const hostedIngressQueueModuleSpecifier = new URL("./queue.ts", import.meta.url).href;
 
 interface HostedIngressSeedPrismaClient {
   $disconnect(): Promise<void>;
