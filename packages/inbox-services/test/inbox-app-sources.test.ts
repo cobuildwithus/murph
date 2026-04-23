@@ -248,6 +248,38 @@ test('sourceAdd rejects local Linq connector creation', async () => {
   )
 })
 
+test('sourceAdd normalizes Telegram account ids before persistence', async () => {
+  const enableAssistantAutoReplyChannel = vi.fn(async () => false)
+  const config = createConfig()
+  readConfigMock.mockResolvedValue(config)
+
+  const ops = createInboxSourceOps(
+    createEnv({
+      enableAssistantAutoReplyChannel,
+    }),
+  )
+
+  const result = await ops.sourceAdd({
+    ...commandContext(),
+    id: 'telegram:bot',
+    source: 'telegram',
+    account: null,
+    address: null,
+    backfillLimit: 25,
+    provision: false,
+    enableAutoReply: false,
+    includeOwn: false,
+    linqWebhookHost: null,
+    linqWebhookPath: null,
+    linqWebhookPort: undefined,
+  })
+
+  assert.equal(result.connector.accountId, 'bot')
+  const writtenConfig = writeConfigMock.mock.calls[0]?.[1]
+  assert.equal(writtenConfig?.connectors[0]?.accountId, 'bot')
+  assert.equal(enableAssistantAutoReplyChannel.mock.calls.length, 0)
+})
+
 test('sourceAdd provisions email connectors and enables auto reply when requested', async () => {
   const enableAssistantAutoReplyChannel = vi.fn(
     async (_vault: string, _channel: InboxConnectorConfig['source']) => true,
@@ -295,14 +327,58 @@ test('sourceAdd provisions email connectors and enables auto reply when requeste
     linqWebhookPort: undefined,
   })
 
-  assert.equal(config.connectors.length, 1)
-  assert.equal(config.connectors[0]?.id, 'email:primary')
-  assert.equal(config.connectors[0]?.accountId, 'mailbox-9')
-  assert.equal(config.connectors[0]?.options.emailAddress, 'resolved@example.com')
+  assert.equal(config.connectors.length, 0)
+  const writtenConfig = writeConfigMock.mock.calls[0]?.[1]
+  assert.equal(writtenConfig?.connectors.length, 1)
+  assert.equal(writtenConfig?.connectors[0]?.id, 'email:primary')
+  assert.equal(writtenConfig?.connectors[0]?.accountId, 'mailbox-9')
+  assert.equal(
+    writtenConfig?.connectors[0]?.options.emailAddress,
+    'resolved@example.com',
+  )
   assert.equal(result.autoReplyEnabled, true)
   assert.equal(enableAssistantAutoReplyChannel.mock.calls[0]?.[1], 'email')
   assert.equal(sortConnectorsMock.mock.calls.length, 1)
   assert.equal(writeConfigMock.mock.calls.length, 1)
+})
+
+test('sourceAdd does not persist the connector when auto reply enablement throws', async () => {
+  const enableAssistantAutoReplyChannel = vi.fn(
+    async () => {
+      throw new Error('auto reply failed')
+    },
+  )
+  const config = createConfig()
+  readConfigMock.mockResolvedValue(config)
+
+  const ops = createInboxSourceOps(
+    createEnv({
+      enableAssistantAutoReplyChannel,
+    }),
+  )
+
+  await assert.rejects(
+    () =>
+      ops.sourceAdd({
+        ...commandContext(),
+        id: 'telegram:bot',
+        source: 'telegram',
+        account: null,
+        address: null,
+        backfillLimit: 25,
+        provision: false,
+        enableAutoReply: true,
+        includeOwn: false,
+        linqWebhookHost: null,
+        linqWebhookPath: null,
+        linqWebhookPort: undefined,
+      }),
+    /auto reply failed/,
+  )
+
+  assert.equal(config.connectors.length, 0)
+  assert.equal(writeConfigMock.mock.calls.length, 0)
+  assert.equal(sortConnectorsMock.mock.calls.length, 0)
 })
 
 test('sourceList returns the current config connectors', async () => {

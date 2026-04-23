@@ -5,8 +5,9 @@ import {
   inboxDoctorCheckSchema,
   type InboxConnectorConfig,
   type InboxDoctorCheck,
+  normalizeInboxConnectorAccountId,
 } from '@murphai/operator-config/inbox-cli-contracts'
-import { errorMessage, normalizeNullableString } from '@murphai/operator-config/text/shared'
+import { errorMessage } from '@murphai/operator-config/text/shared'
 import { extractIsoDatePrefix } from '@murphai/contracts'
 
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
@@ -51,9 +52,12 @@ export async function fileExists(absolutePath: string): Promise<boolean> {
 }
 
 export function runtimeNamespaceAccountId(
-  connector: Pick<InboxConnectorConfig, 'accountId'>,
+  connector: Pick<InboxConnectorConfig, 'source' | 'accountId'>,
 ): string | null {
-  return connector.accountId ?? null
+  return normalizeInboxConnectorAccountId(
+    connector.source,
+    connector.accountId,
+  )
 }
 
 export function connectorNamespaceKey(
@@ -66,22 +70,7 @@ export function normalizeConnectorAccountId(
   source: InboxConnectorConfig['source'],
   value: string | null | undefined,
 ): string | null {
-  const normalized = normalizeNullableString(value)
-
-  switch (source) {
-    case 'telegram':
-      return normalized ?? 'bot'
-    case 'email':
-      return normalized
-    case 'linq':
-      return normalized ?? 'default'
-    default: {
-      throw new VaultCliError(
-        'INBOX_SOURCE_UNSUPPORTED',
-        `Inbox source "${source}" is not supported.`,
-      )
-    }
-  }
+  return normalizeInboxConnectorAccountId(source, value)
 }
 
 export function normalizeBackfillLimit(

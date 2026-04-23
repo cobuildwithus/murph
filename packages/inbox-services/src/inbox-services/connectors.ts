@@ -8,7 +8,10 @@ import type {
   PollConnector,
   TelegramDriver,
 } from '../inbox-app/types.js'
-import { normalizeBackfillLimit } from './shared.js'
+import {
+  normalizeBackfillLimit,
+  runtimeNamespaceAccountId,
+} from './shared.js'
 
 export async function instantiateConnector(input: {
   connector: InboxConnectorConfig
@@ -21,10 +24,11 @@ export async function instantiateConnector(input: {
     case 'telegram': {
       const inboxd = await input.loadInbox()
       const driver = await input.loadTelegramDriver(input.connector)
+      const accountId = runtimeNamespaceAccountId(input.connector)
       return inboxd.createTelegramPollConnector({
         driver,
         id: input.connector.id,
-        accountId: input.connector.accountId ?? 'bot',
+        accountId: accountId ?? 'bot',
         backfillLimit:
           normalizeBackfillLimit(input.inputLimit) ??
           input.connector.options.backfillLimit ??
@@ -39,10 +43,11 @@ export async function instantiateConnector(input: {
         throw new Error('Email connector instantiation requires loadEmailDriver.')
       }
       const driver = await input.loadEmailDriver(input.connector)
+      const accountId = runtimeNamespaceAccountId(input.connector)
       return inboxd.createEmailPollConnector({
         driver,
         id: input.connector.id,
-        accountId: input.connector.accountId,
+        accountId,
         accountAddress: input.connector.options.emailAddress ?? null,
         backfillLimit:
           normalizeBackfillLimit(input.inputLimit) ??

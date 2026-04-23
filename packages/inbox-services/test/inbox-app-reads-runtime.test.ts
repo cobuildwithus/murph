@@ -409,8 +409,14 @@ function createInboxModule(
     async openInboxRuntime() {
       throw new Error('not used in reads/runtime tests')
     },
+    async createParsedInboxPipeline() {
+      throw new Error('not used in reads/runtime tests')
+    },
     async rebuildRuntimeFromVault() {},
     async runInboxDaemon() {},
+    async runPollConnectorBackfill() {
+      throw new Error('not used in reads/runtime tests')
+    },
     async runInboxDaemonWithParsers() {},
     ...overrides,
   }
@@ -983,7 +989,7 @@ test('runtime backfill imports captures, updates cursors, and drains parsers onl
     pipeline: 'attachment_text',
     state: 'succeeded',
   }
-  const { cursorStore, runtime } = createRuntimeStore({
+  const { runtime } = createRuntimeStore({
     captures: [emittedCapture],
   })
   const processCapture = vi
@@ -1014,9 +1020,35 @@ test('runtime backfill imports captures, updates cursors, and drains parsers onl
       status: 'succeeded' as const,
     },
   ])
+  const createParsedInboxPipeline = vi.fn(async (input: {
+    onParserDrain?: (results: ParserRuntimeDrainResult[]) => Promise<void> | void
+  }) => ({
+    close: pipeline.close,
+    runtime,
+    async processCapture(capture: RuntimeCaptureRecordInput) {
+      const persisted = await processCapture(capture)
+      if (!persisted.deduped) {
+        await input.onParserDrain?.(await parserDrain({ captureId: persisted.captureId }))
+      }
+      return persisted
+    },
+  }))
+  const runPollConnectorBackfill = vi.fn(async (input: {
+    connector: PollConnector
+    pipeline: { processCapture(capture: RuntimeCaptureRecordInput): Promise<PersistedCapture> }
+    accountId?: string | null
+  }) => {
+    assert.equal(input.accountId, 'bot')
+    return {
+      cursor: await input.connector.backfill(null, async (capture) =>
+        input.pipeline.processCapture(capture),
+      ),
+    }
+  })
   const inboxModule = createInboxModule({
-    createInboxPipeline: vi.fn(async () => pipeline),
+    createParsedInboxPipeline,
     openInboxRuntime: vi.fn(async () => runtime),
+    runPollConnectorBackfill,
   })
 
   stateMocks.ensureInitialized.mockResolvedValue(paths)
@@ -1079,10 +1111,8 @@ test('runtime backfill imports captures, updates cursors, and drains parsers onl
   assert.equal(backfilled.dedupedCount, 1)
   assert.deepEqual(backfilled.cursor, { marker: 'next' })
   assert.equal(backfilled.parse?.attempted, 1)
-  assert.equal(
-    cursorStore.get('telegram:default')?.['marker'],
-    'next',
-  )
+  assert.equal(createParsedInboxPipeline.mock.calls.length, 1)
+  assert.equal(runPollConnectorBackfill.mock.calls.length, 1)
   assert.equal(pipeline.close.mock.calls.length, 1)
 })
 
