@@ -502,7 +502,15 @@ describe("research init scaffold", () => {
         "utf8",
       );
       expect(sectionPrompt).toContain("Section ID: dose-implementation");
-      expect(sectionPrompt).toContain("TODO_CANONICAL_SOURCE_LEDGER_V1_SOURCE");
+      expect(sectionPrompt).toContain(
+        `${path.relative(repoRoot, outDir).split(path.sep).join(path.posix.sep)}/downloads/11-source-ledger-reducer/downloads/CANONICAL_SOURCE_LEDGER_V1.json`,
+      );
+      expect(sectionPrompt).toContain(
+        `${path.relative(repoRoot, outDir).split(path.sep).join(path.posix.sep)}/downloads/*/normalized/ATOMIC_FINDINGS_V1*.json`,
+      );
+      expect(sectionPrompt).toContain(
+        `${path.relative(repoRoot, outDir).split(path.sep).join(path.posix.sep)}/downloads/*/downloads/*source-page-drafts*.md`,
+      );
 
       const sourceLedgerReducerPrompt = readFileSync(
         path.join(outDir, "prompts", "11-source-ledger-reducer.template.md"),
@@ -510,13 +518,26 @@ describe("research init scaffold", () => {
       );
       expect(sourceLedgerReducerPrompt).toContain("canonical_source_ledger_v1.json");
       expect(sourceLedgerReducerPrompt).toContain("source_extraction_batches_v1.json");
+      expect(sourceLedgerReducerPrompt).toContain(
+        `${path.relative(repoRoot, outDir).split(path.sep).join(path.posix.sep)}/downloads/0*-discovery-*/source_candidates*.json`,
+      );
+      expect(sourceLedgerReducerPrompt).toContain(
+        `packages/health-commons/content/sources/cold-water-immersion/`,
+      );
 
       const pageBuilderPrompt = readFileSync(
         path.join(outDir, "prompts", "30-page-builder.template.md"),
         "utf8",
       );
-      expect(pageBuilderPrompt).toContain("TODO_CHARTER_SOURCE");
-      expect(pageBuilderPrompt).toContain("TODO_SECTION_SYNTHESIS_SOURCE");
+      expect(pageBuilderPrompt).toContain(
+        `${path.relative(repoRoot, outDir).split(path.sep).join(path.posix.sep)}/responses/01-charter.md`,
+      );
+      expect(pageBuilderPrompt).toContain(
+        `${path.relative(repoRoot, outDir).split(path.sep).join(path.posix.sep)}/responses/2*.md`,
+      );
+      expect(pageBuilderPrompt).toContain(
+        `${path.relative(repoRoot, outDir).split(path.sep).join(path.posix.sep)}/downloads/*/downloads/ARTIFACT_CANDIDATES_V1*.json`,
+      );
 
       const evidenceQaPrompt = readFileSync(
         path.join(outDir, "prompts", "31-evidence-qa.template.md"),
@@ -527,6 +548,12 @@ describe("research init scaffold", () => {
       );
       expect(evidenceQaPrompt).toContain(
         `- ${path.relative(repoRoot, outDir).split(path.sep).join(path.posix.sep)}/downloads/30-page-builder/downloads/cold-water-immersion-package-draft.zip`,
+      );
+      expect(evidenceQaPrompt).toContain(
+        `${path.relative(repoRoot, outDir).split(path.sep).join(path.posix.sep)}/responses/2*.md (extract SECTION_CLAIMS_V1 blocks from all section synthesis outputs)`,
+      );
+      expect(evidenceQaPrompt).toContain(
+        `${path.relative(repoRoot, outDir).split(path.sep).join(path.posix.sep)}/downloads/*/downloads/ATOMIC_FINDINGS_V1*.json`,
       );
 
       expect(existsSync(path.join(outDir, "prompts", "33-schema-artifact-qa.template.md"))).toBe(
@@ -540,8 +567,18 @@ describe("research init scaffold", () => {
       expect(finalReducerPrompt).toContain(
         `- ${path.relative(repoRoot, outDir).split(path.sep).join(path.posix.sep)}/downloads/30-page-builder/downloads/cold-plunge.md`,
       );
-      expect(finalReducerPrompt).toContain("TODO_EVIDENCE_QA_SOURCE");
-      expect(finalReducerPrompt).toContain("TODO_SAFETY_QA_SOURCE");
+      expect(finalReducerPrompt).toContain(
+        `${path.relative(repoRoot, outDir).split(path.sep).join(path.posix.sep)}/responses/31-evidence-qa.md`,
+      );
+      expect(finalReducerPrompt).toContain(
+        `${path.relative(repoRoot, outDir).split(path.sep).join(path.posix.sep)}/downloads/31-evidence-qa/thread.json`,
+      );
+      expect(finalReducerPrompt).toContain(
+        `${path.relative(repoRoot, outDir).split(path.sep).join(path.posix.sep)}/responses/32-safety-qa.md`,
+      );
+      expect(finalReducerPrompt).toContain(
+        `${path.relative(repoRoot, outDir).split(path.sep).join(path.posix.sep)}/downloads/32-safety-qa/thread.json`,
+      );
       expect(finalReducerPrompt).not.toContain("SCHEMA_ARTIFACT_QA_SOURCE");
 
       const materializedReadme = readFileSync(path.join(outDir, "README.md"), "utf8");

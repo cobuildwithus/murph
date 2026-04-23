@@ -491,6 +491,98 @@ function buildPageBuilderDraftSourceList(outDirRelative, protocolSlug, familySlu
   ]);
 }
 
+function buildCharterSourceList(outDirRelative) {
+  return formatBulletList([
+    `${outDirRelative}/responses/01-charter.md`,
+    `${outDirRelative}/state/thread-exports/01-charter.thread.json (fallback only if the response file is stale or missing)`,
+  ]);
+}
+
+function buildDiscoveryOutputsSourceList(outDirRelative) {
+  return formatBulletList([
+    `${outDirRelative}/downloads/0*-discovery-*/source_candidates*.json`,
+    `${outDirRelative}/downloads/0*-discovery-*/thread.json (fallback only if a shard returned inline text without a candidate file)`,
+  ]);
+}
+
+function buildExistingSourcePageInventorySourceList(familySlug) {
+  return formatBulletList([`packages/health-commons/content/sources/${familySlug}/`]);
+}
+
+function buildCanonicalLedgerSourceList(outDirRelative) {
+  return formatBulletList([
+    `${outDirRelative}/downloads/${SOURCE_LEDGER_REDUCER_LABEL}/downloads/CANONICAL_SOURCE_LEDGER_V1.json`,
+    `${outDirRelative}/downloads/${SOURCE_LEDGER_REDUCER_LABEL}/canonical_source_ledger_v1.json`,
+    `${outDirRelative}/downloads/${SOURCE_LEDGER_REDUCER_LABEL}/thread.json (fallback only if the reducer returned inline JSON without downloadable files)`,
+  ]);
+}
+
+function buildExtractionBatchSourceList(outDirRelative) {
+  return formatBulletList([
+    `${outDirRelative}/downloads/${SOURCE_LEDGER_REDUCER_LABEL}/downloads/SOURCE_EXTRACTION_BATCHES_V1.json`,
+    `${outDirRelative}/downloads/${SOURCE_LEDGER_REDUCER_LABEL}/source_extraction_batches_v1.json`,
+    `${outDirRelative}/downloads/${SOURCE_LEDGER_REDUCER_LABEL}/thread.json (fallback only if the reducer returned inline JSON without downloadable files)`,
+  ]);
+}
+
+function buildAtomicFindingsSourceList(outDirRelative) {
+  return formatBulletList([
+    `${outDirRelative}/downloads/*/normalized/ATOMIC_FINDINGS_V1*.json`,
+    `${outDirRelative}/downloads/*/downloads/ATOMIC_FINDINGS_V1*.json`,
+    `${outDirRelative}/downloads/*/thread.json (fallback only when a batch returned findings inline instead of as downloadable JSON)`,
+  ]);
+}
+
+function buildSourcePageDraftsSourceList(outDirRelative) {
+  return formatBulletList([
+    `${outDirRelative}/downloads/*/normalized/*source-page-drafts*.md`,
+    `${outDirRelative}/downloads/*/downloads/*source-page-drafts*.md`,
+    `${outDirRelative}/downloads/*/downloads/SOURCE_PAGE_DRAFTS*.md`,
+    `${outDirRelative}/downloads/*/thread.json (fallback only when a batch returned source drafts inline instead of as downloadable Markdown)`,
+  ]);
+}
+
+function buildArtifactCandidatesSourceList(outDirRelative) {
+  return formatBulletList([
+    `${outDirRelative}/downloads/*/normalized/ARTIFACT_CANDIDATES_V1*.json`,
+    `${outDirRelative}/downloads/*/downloads/ARTIFACT_CANDIDATES_V1*.json`,
+    `${outDirRelative}/downloads/*/thread.json (fallback only when a batch returned artifact candidates inline instead of as downloadable JSON)`,
+  ]);
+}
+
+function buildSectionSynthesisSourceList(outDirRelative) {
+  return formatBulletList([
+    `${outDirRelative}/responses/2*.md`,
+    `${outDirRelative}/state/thread-exports/2*.thread.json (fallback only if a section response file is missing or stale)`,
+    `${outDirRelative}/downloads/2*/thread.json (fallback only if a section was harvested without a response file)`,
+  ]);
+}
+
+function buildSectionClaimsSourceList(outDirRelative) {
+  return formatBulletList([
+    `${outDirRelative}/responses/2*.md (extract SECTION_CLAIMS_V1 blocks from all section synthesis outputs)`,
+    `${outDirRelative}/state/thread-exports/2*.thread.json (fallback only if a section response file is missing or stale)`,
+    `${outDirRelative}/downloads/2*/thread.json (fallback only if a section was harvested without a response file)`,
+  ]);
+}
+
+function buildSafetyFindingsSourceList(outDirRelative) {
+  return formatBulletList([
+    `${outDirRelative}/downloads/*/normalized/ATOMIC_FINDINGS_V1*.json`,
+    `${outDirRelative}/downloads/*/downloads/ATOMIC_FINDINGS_V1*.json`,
+    `${outDirRelative}/downloads/*/normalized/*source-page-drafts*.md`,
+    `${outDirRelative}/downloads/*/downloads/*source-page-drafts*.md`,
+    `${outDirRelative}/responses/2*.md (use any safety-oriented synthesis sections already present)`,
+  ]);
+}
+
+function buildQaSourceList(outDirRelative, label) {
+  return formatBulletList([
+    `${outDirRelative}/responses/${label}.md`,
+    `${outDirRelative}/downloads/${label}/thread.json (fallback only if the response file is missing or stale)`,
+  ]);
+}
+
 function buildRunbook({
   outDirRelative,
   manifest,
@@ -645,6 +737,28 @@ function main(argv) {
     materializedSpec.protocolSlug,
     materializedSpec.familySlug,
   );
+  const lateStageTemplateReplacements = {
+    CHARTER_SOURCE: buildCharterSourceList(outDirRelative),
+    DISCOVERY_OUTPUTS_SOURCE: buildDiscoveryOutputsSourceList(outDirRelative),
+    EXISTING_SOURCE_PAGE_INVENTORY_SOURCE: buildExistingSourcePageInventorySourceList(
+      materializedSpec.familySlug,
+    ),
+    CANONICAL_LEDGER_SOURCE: buildCanonicalLedgerSourceList(outDirRelative),
+    CANONICAL_SOURCE_LEDGER_V1_SOURCE: buildCanonicalLedgerSourceList(outDirRelative),
+    BATCH_SOURCE: buildExtractionBatchSourceList(outDirRelative),
+    SOURCE_EXTRACTION_BATCHES_V1_SOURCE: buildExtractionBatchSourceList(outDirRelative),
+    SOURCE_PAGE_DRAFTS_SOURCE: buildSourcePageDraftsSourceList(outDirRelative),
+    ATOMIC_FINDINGS_SOURCE: buildAtomicFindingsSourceList(outDirRelative),
+    ATOMIC_FINDINGS_V1_SOURCE: buildAtomicFindingsSourceList(outDirRelative),
+    ARTIFACT_CANDIDATES_SOURCE: buildArtifactCandidatesSourceList(outDirRelative),
+    SECTION_SYNTHESIS_SOURCE: buildSectionSynthesisSourceList(outDirRelative),
+    CLAIMS_SOURCE: buildSectionClaimsSourceList(outDirRelative),
+    SECTION_CLAIMS_V1_SOURCE: buildSectionClaimsSourceList(outDirRelative),
+    SAFETY_FINDINGS_SOURCE: buildSafetyFindingsSourceList(outDirRelative),
+    PROTOCOL_PACKAGE_DRAFT_SOURCE: pageBuilderDraftSource,
+    EVIDENCE_QA_SOURCE: buildQaSourceList(outDirRelative, "31-evidence-qa"),
+    SAFETY_QA_SOURCE: buildQaSourceList(outDirRelative, "32-safety-qa"),
+  };
   const updatedWorkflow = {
     ...workflow,
     schemaVersion: ORCHESTRATOR_SCHEMA_VERSION,
@@ -690,33 +804,12 @@ function main(argv) {
     }),
   );
 
-  // Patch the late-stage templates with the artifact-first page-builder sources so
-  // downstream manual or scripted materialization uses the stable downloads path.
-  const lateStageTemplatePatches = [
-    {
-      relativePath: "prompts/31-evidence-qa.template.md",
-      replacements: {
-        PROTOCOL_PACKAGE_DRAFT_SOURCE: pageBuilderDraftSource,
-      },
-    },
-    {
-      relativePath: "prompts/32-safety-qa.template.md",
-      replacements: {
-        PROTOCOL_PACKAGE_DRAFT_SOURCE: pageBuilderDraftSource,
-      },
-    },
-    {
-      relativePath: "prompts/34-final-landing-reducer.template.md",
-      replacements: {
-        PROTOCOL_PACKAGE_DRAFT_SOURCE: pageBuilderDraftSource,
-      },
-    },
-  ];
-
-  for (const { relativePath, replacements } of lateStageTemplatePatches) {
+  // Patch post-charter templates with stable workspace-wide source paths so later
+  // seams can consume the full harvested corpus without bespoke rewiring.
+  for (const relativePath of templateOnlyPrompts) {
     const absolutePath = path.join(workspaceDir, relativePath);
     let content = readFileSync(absolutePath, "utf8");
-    for (const [token, value] of Object.entries(replacements)) {
+    for (const [token, value] of Object.entries(lateStageTemplateReplacements)) {
       content = content.replaceAll(`TODO_${token}`, value);
     }
     writeTextFile(absolutePath, content);
