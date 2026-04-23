@@ -135,6 +135,7 @@ function createHostedOnboardingEnvironment(
   overrides: Partial<HostedOnboardingEnvironment>,
 ): HostedOnboardingEnvironment {
   return {
+    aiUsageBillingMode: "disabled",
     contactPrivacyKeyring: {
       currentVersion: "v1",
       keysByVersion: {

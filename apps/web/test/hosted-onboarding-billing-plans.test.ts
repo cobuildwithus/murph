@@ -63,8 +63,9 @@ describe("hosted billing launch plan Stripe configuration", () => {
     ]);
   });
 
-  it("requires both a base price and a metered usage price for each configured plan", () => {
+  it("requires only a base price for configured plans while AI usage billing is disabled", () => {
     expect(resolveConfiguredHostedBillingPlanCodes({
+      aiUsageBillingMode: "disabled",
       stripePriceIdsByPlan: {
         ...basePriceIds,
         launch_annual: null,
@@ -73,6 +74,18 @@ describe("hosted billing launch plan Stripe configuration", () => {
     })).toEqual(["launch_monthly"]);
 
     expect(resolveConfiguredHostedBillingPlanCodes({
+      aiUsageBillingMode: "disabled",
+      stripePriceIdsByPlan: basePriceIds,
+      stripeUsagePriceIdsByPlan: {
+        ...usagePriceIds,
+        launch_monthly: null,
+      },
+    })).toEqual(["launch_monthly", "launch_annual"]);
+  });
+
+  it("requires usage price configuration only when Stripe metering is explicitly enabled", () => {
+    expect(resolveConfiguredHostedBillingPlanCodes({
+      aiUsageBillingMode: "stripe_meter",
       stripePriceIdsByPlan: basePriceIds,
       stripeUsagePriceIdsByPlan: {
         ...usagePriceIds,
@@ -81,8 +94,33 @@ describe("hosted billing launch plan Stripe configuration", () => {
     })).toEqual(["launch_annual"]);
   });
 
-  it("does not mark billing ready unless usage metering and at least one complete plan are configured", () => {
+  it("marks billing ready with a base price and Stripe key while AI usage billing is disabled", () => {
     expect(resolveHostedBillingReady({
+      aiUsageBillingMode: "disabled",
+      stripePriceIdsByPlan: basePriceIds,
+      stripeSecretKey: "sk_test_123",
+      stripeUsageMeterEventName: null,
+      stripeUsagePriceIdsByPlan: {
+        launch_annual: null,
+        launch_monthly: null,
+      },
+    })).toBe(true);
+
+    expect(resolveHostedBillingReady({
+      aiUsageBillingMode: "disabled",
+      stripePriceIdsByPlan: {
+        launch_annual: null,
+        launch_monthly: null,
+      },
+      stripeSecretKey: "sk_test_123",
+      stripeUsageMeterEventName: "murph_ai_tokens",
+      stripeUsagePriceIdsByPlan: usagePriceIds,
+    })).toBe(false);
+  });
+
+  it("does not mark billing ready for Stripe metering unless usage metering and at least one complete plan are configured", () => {
+    expect(resolveHostedBillingReady({
+      aiUsageBillingMode: "stripe_meter",
       stripePriceIdsByPlan: basePriceIds,
       stripeSecretKey: "sk_test_123",
       stripeUsageMeterEventName: "murph_ai_tokens",
@@ -90,6 +128,7 @@ describe("hosted billing launch plan Stripe configuration", () => {
     })).toBe(true);
 
     expect(resolveHostedBillingReady({
+      aiUsageBillingMode: "stripe_meter",
       stripePriceIdsByPlan: basePriceIds,
       stripeSecretKey: "sk_test_123",
       stripeUsageMeterEventName: null,
@@ -97,6 +136,7 @@ describe("hosted billing launch plan Stripe configuration", () => {
     })).toBe(false);
 
     expect(resolveHostedBillingReady({
+      aiUsageBillingMode: "stripe_meter",
       stripePriceIdsByPlan: basePriceIds,
       stripeSecretKey: "sk_test_123",
       stripeUsageMeterEventName: "murph_ai_tokens",
@@ -114,7 +154,19 @@ describe("hosted billing launch plan Stripe configuration", () => {
       .toBe("HOSTED_ONBOARDING_STRIPE_USAGE_PRICE_ID_LAUNCH_ANNUAL");
   });
 
-  it("builds checkout with a licensed base item and a metered usage item", () => {
+  it("builds checkout with only a licensed base item while usage billing is disabled", () => {
+    expect(buildHostedBillingCheckoutLineItems({
+      priceId: "price_base_monthly",
+      usagePriceId: null,
+    })).toEqual([
+      {
+        price: "price_base_monthly",
+        quantity: 1,
+      },
+    ]);
+  });
+
+  it("builds checkout with a licensed base item and a metered usage item when supplied", () => {
     expect(buildHostedBillingCheckoutLineItems({
       priceId: "price_base_monthly",
       usagePriceId: "price_usage_monthly",

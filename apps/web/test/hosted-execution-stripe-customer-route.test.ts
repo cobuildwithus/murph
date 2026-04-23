@@ -1,4 +1,4 @@
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   getPrisma: vi.fn(),
@@ -23,6 +23,7 @@ type HostedExecutionStripeCustomerRouteModule = typeof import(
 );
 
 let hostedExecutionStripeCustomerRoute: HostedExecutionStripeCustomerRouteModule;
+const originalHostedAiUsageBillingMode = process.env.HOSTED_AI_USAGE_BILLING_MODE;
 
 describe("hosted execution Stripe customer route", () => {
   beforeAll(async () => {
@@ -33,9 +34,18 @@ describe("hosted execution Stripe customer route", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    process.env.HOSTED_AI_USAGE_BILLING_MODE = "stripe_meter";
     mocks.getPrisma.mockReturnValue({ prisma: true });
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_123");
     mocks.readHostedMemberStripeCustomerId.mockResolvedValue("cus_123");
+  });
+
+  afterEach(() => {
+    if (originalHostedAiUsageBillingMode === undefined) {
+      delete process.env.HOSTED_AI_USAGE_BILLING_MODE;
+    } else {
+      process.env.HOSTED_AI_USAGE_BILLING_MODE = originalHostedAiUsageBillingMode;
+    }
   });
 
   it("returns the bound member's Stripe customer id", async () => {
@@ -69,6 +79,40 @@ describe("hosted execution Stripe customer route", () => {
     );
 
     expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      stripeCustomerId: null,
+    });
+  });
+
+  it("returns null without reading Stripe customer state while usage billing is disabled", async () => {
+    process.env.HOSTED_AI_USAGE_BILLING_MODE = "disabled";
+
+    const response = await hostedExecutionStripeCustomerRoute.POST(
+      new Request("https://join.example.test/api/internal/hosted-execution/billing/stripe/customer/resolve", {
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalledWith(expect.any(Request));
+    expect(mocks.readHostedMemberStripeCustomerId).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      stripeCustomerId: null,
+    });
+  });
+
+  it("returns null without reading Stripe customer state for unsupported billing modes", async () => {
+    process.env.HOSTED_AI_USAGE_BILLING_MODE = "usage_allowance";
+
+    const response = await hostedExecutionStripeCustomerRoute.POST(
+      new Request("https://join.example.test/api/internal/hosted-execution/billing/stripe/customer/resolve", {
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalledWith(expect.any(Request));
+    expect(mocks.readHostedMemberStripeCustomerId).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       stripeCustomerId: null,
     });

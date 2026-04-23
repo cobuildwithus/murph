@@ -4,6 +4,7 @@ import type {
 } from "@murphai/hosted-execution";
 import {
   emitHostedExecutionStructuredLog,
+  readHostedAiUsageBillingMode,
 } from "@murphai/hosted-execution";
 import {
   isAssistantVercelAIGatewayBaseUrl,
@@ -64,16 +65,26 @@ function isHostedVercelAiGatewayStripeBillingConfigured(
   forwardedEnv: Readonly<Record<string, string>>,
   userEnv: Readonly<Record<string, string>>,
 ): boolean {
-  return Boolean(
-    readHostedRuntimeEnabledFlag(
+  return readHostedAiUsageStripeMeterBillingModeEnabled(forwardedEnv)
+    && readHostedRuntimeEnabledFlag(
       forwardedEnv[HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED_ENV],
     )
-  ) && Boolean(
-    normalizeHostedRuntimeString(
-      forwardedEnv[HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY_ENV],
-    ),
-  ) && isHostedAssistantUsingVercelAiGateway(forwardedEnv)
+    && Boolean(
+      normalizeHostedRuntimeString(
+        forwardedEnv[HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY_ENV],
+      ),
+    ) && isHostedAssistantUsingVercelAiGateway(forwardedEnv)
     && isHostedAssistantUsingPlatformCredential(forwardedEnv, userEnv);
+}
+
+function readHostedAiUsageStripeMeterBillingModeEnabled(
+  forwardedEnv: Readonly<Record<string, string>>,
+): boolean {
+  try {
+    return readHostedAiUsageBillingMode(forwardedEnv) === "stripe_meter";
+  } catch {
+    return false;
+  }
 }
 
 function isHostedAssistantUsingPlatformCredential(

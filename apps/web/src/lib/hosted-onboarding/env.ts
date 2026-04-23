@@ -1,3 +1,8 @@
+import {
+  readHostedAiUsageBillingMode,
+  type HostedAiUsageBillingMode,
+} from "@murphai/hosted-execution";
+
 import { decodeHostedEncryptionKey } from "../device-sync/crypto";
 import { readHostedPublicBaseUrl } from "../hosted-web/public-url";
 import { readLinqEnvironment } from "../linq/env";
@@ -18,6 +23,7 @@ export interface HostedContactPrivacyKeyring {
 }
 
 export interface HostedOnboardingEnvironment {
+  aiUsageBillingMode: HostedAiUsageBillingMode;
   contactPrivacyKeyring: HostedContactPrivacyKeyring;
   inviteTtlHours: number;
   isProduction: boolean;
@@ -49,6 +55,7 @@ export function readHostedOnboardingEnvironment(
   const linq = readLinqEnvironment(source as NodeJS.ProcessEnv);
 
   return {
+    aiUsageBillingMode: readHostedAiUsageBillingMode(source),
     contactPrivacyKeyring: readHostedContactPrivacyKeyring(source),
     inviteTtlHours: readPositiveInteger(
       readEnv(source, "HOSTED_ONBOARDING_INVITE_TTL_HOURS"),

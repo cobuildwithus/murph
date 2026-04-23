@@ -69,6 +69,7 @@ describe("hosted deploy automation helpers", () => {
       CF_RUNNER_READY_TIMEOUT_MS: "65000",
       CF_WORKER_NAME: "hosted-worker",
       HOSTED_WEB_BASE_URL: "https://web.example.test",
+      HOSTED_AI_USAGE_BILLING_MODE: "stripe_meter",
       HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED: "true",
       HOSTED_EXECUTION_AUTOMATION_RECIPIENT_KEY_ID: "automation:v2",
       HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "180000",
@@ -192,6 +193,7 @@ describe("hosted deploy automation helpers", () => {
     expect(config.vars.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS).toBe("45000");
     expect(config.vars.HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS).toBe("65000");
     expect(config.vars.HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS).toBe("180000");
+    expect(config.vars.HOSTED_AI_USAGE_BILLING_MODE).toBe("stripe_meter");
     expect(config.vars.HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED).toBe("true");
     expect(config.vars.HOSTED_EXECUTION_TEE_AUTOMATION_RECIPIENT_KEY_ID).toBe("tee-automation:v1");
     expect(config.vars.HOSTED_WAKE_ENCRYPTION_KEY_VERSION).toBe("wake:v2");

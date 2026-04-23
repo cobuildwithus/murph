@@ -4,10 +4,14 @@ import {
   HOSTED_ASSISTANT_ALLOWED_API_KEY_ENV_NAMES,
   isHostedAssistantApiKeyEnvName,
 } from "@murphai/assistant-runtime/hosted-assistant-env";
+import {
+  HOSTED_AI_USAGE_BILLING_MODE_ENV,
+} from "@murphai/hosted-execution";
 
 import { buildHostedWorkerSecretsPayload } from "../scripts/deploy-automation/secrets.ts";
 import {
   buildHostedRunnerContainerEnv,
+  isHostedRunnerSecretKeyAllowed,
   summarizeHostedRunnerForwardedEnvLogCategories,
   summarizeHostedRunnerSecretLogCategories,
 } from "../src/hosted-env-policy.ts";
@@ -42,14 +46,25 @@ describe("buildHostedRunnerContainerEnv", () => {
     expect(env.VERCEL_AI_API_KEY).toBe("vercel-secret");
   });
 
-  it("forwards the delegated billing restricted Stripe key only through the assistant env profile", () => {
+  it("forwards delegated billing config only through the assistant env profile", () => {
     const env = buildHostedRunnerContainerEnv({
+      [HOSTED_AI_USAGE_BILLING_MODE_ENV]: "stripe_meter",
       HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY: "rk_test_123",
       HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED: "true",
     });
 
+    expect(env[HOSTED_AI_USAGE_BILLING_MODE_ENV]).toBe("stripe_meter");
     expect(env.HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY).toBe("rk_test_123");
     expect(env.HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED).toBe("true");
+  });
+
+  it("does not allow runner secrets to override the platform billing mode", () => {
+    expect(isHostedRunnerSecretKeyAllowed(
+      HOSTED_AI_USAGE_BILLING_MODE_ENV,
+      {
+        HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: HOSTED_AI_USAGE_BILLING_MODE_ENV,
+      },
+    )).toBe(false);
   });
 });
 

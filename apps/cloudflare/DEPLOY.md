@@ -107,7 +107,7 @@ Hosted assistant config:
 - `HOSTED_ASSISTANT_MODEL`
 - `HOSTED_ASSISTANT_API_KEY_ENV`
 - `HOSTED_ASSISTANT_GATEWAY_ONLY_PROVIDERS`, for example `openai`, to restrict Vercel AI Gateway routing to specific provider slugs
-- `HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED` when delegated Vercel AI Gateway billing is enabled
+- `HOSTED_AI_USAGE_BILLING_MODE=stripe_meter` and `HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED` when delegated Vercel AI Gateway billing is enabled
 - the rest of the `HOSTED_ASSISTANT_*` profile vars when you want activation-time seeding of the platform-managed hosted assistant profile
 
 Opt-in runtime integrations and tool overrides:
@@ -181,7 +181,7 @@ Hosted assistant provider secrets:
 
 - any provider key referenced by `HOSTED_ASSISTANT_API_KEY_ENV`
 - `VERCEL_AI_API_KEY` when the hosted assistant should call Vercel AI Gateway
-- `HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY` when Vercel AI Gateway should emit Stripe meter events directly
+- `HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY` when Vercel AI Gateway should emit Stripe meter events directly under `HOSTED_AI_USAGE_BILLING_MODE=stripe_meter`
 - supported examples include `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, `VENICE_API_KEY`, `TOGETHER_API_KEY`, `GROQ_API_KEY`, `XAI_API_KEY`, `MISTRAL_API_KEY`, `GOOGLE_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY`, `CEREBRAS_API_KEY`, `DEEPSEEK_API_KEY`, `FIREWORKS_API_KEY`, `HF_TOKEN`, `HUGGINGFACEHUB_API_TOKEN`, `HUGGINGFACE_API_KEY`, `HUGGING_FACE_HUB_TOKEN`, `LITELLM_PROXY_API_KEY`, `LM_STUDIO_API_KEY`, `NVIDIA_API_KEY`, `NGC_API_KEY`, `OLLAMA_API_KEY`, `PERPLEXITY_API_KEY`, and `VLLM_API_KEY`
 
 Hosted usage-reporting secrets:

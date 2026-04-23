@@ -9,6 +9,11 @@ import {
   type AssistantUsageRecord,
 } from "@murphai/runtime-state/node/assistant-usage";
 
+import {
+  HOSTED_AI_USAGE_BILLING_DISABLED_MESSAGE,
+  readHostedAiUsageBillingMode,
+  type HostedAiUsageBillingMode,
+} from "@murphai/hosted-execution";
 import { readHostedMemberBillingPrivateState } from "../hosted-onboarding/member-private-codecs";
 import { getPrisma } from "../prisma";
 
@@ -525,11 +530,13 @@ async function updateHostedAiUsageStripeMeterState(input: {
 }
 
 export async function importHostedAiUsageRecords(input: {
+  aiUsageBillingMode?: HostedAiUsageBillingMode;
   prisma?: PrismaClient;
   trustedUserId?: string | null;
   usage: readonly unknown[];
 }): Promise<ImportHostedAiUsageResult> {
   const prisma = input.prisma ?? getPrisma();
+  const aiUsageBillingMode = input.aiUsageBillingMode ?? readHostedAiUsageBillingMode();
   const records = dedupeHostedAiUsageRecords(
     input.usage.map((entry) => parseAssistantUsageRecord(entry)),
   );
@@ -542,6 +549,7 @@ export async function importHostedAiUsageRecords(input: {
       memberId,
       prisma,
       record,
+      aiUsageBillingMode,
       stripeCustomerIdCache: memberStripeCustomerIdCache,
     });
     const storedRecord = await prisma.hostedAiUsage.upsert({
@@ -551,7 +559,12 @@ export async function importHostedAiUsageRecords(input: {
           turnId: record.turnId,
         },
       },
-      create: buildHostedAiUsageCreateData(record, memberId, stripeMeterSource),
+      create: buildHostedAiUsageCreateData(
+        record,
+        memberId,
+        stripeMeterSource,
+        aiUsageBillingMode,
+      ),
       update: {},
       select: HOSTED_AI_USAGE_IMMUTABLE_SELECT,
     });
@@ -559,7 +572,6 @@ export async function importHostedAiUsageRecords(input: {
     assertStoredHostedAiUsageMatchesRecord({
       memberId,
       record,
-      stripeMeterSource,
       storedRecord,
     });
     recordedIds.push(record.usageId);
@@ -569,6 +581,59 @@ export async function importHostedAiUsageRecords(input: {
     recordedIds,
     records,
   };
+}
+
+export async function markHostedAiUsageStripeMeteringDisabled(input: {
+  limit?: number;
+  message?: string;
+  now?: Date | string;
+  prisma?: HostedAiUsageClient;
+} = {}): Promise<number> {
+  const prisma = input.prisma ?? getPrisma();
+  const now = normalizeHostedAiUsageDate(input.now ?? new Date().toISOString(), "now");
+  const records = await prisma.hostedAiUsage.findMany({
+    where: buildHostedAiUsageStripeMeterDisabledWhere(now),
+    orderBy: [
+      {
+        stripeMeterNextAttemptAt: "asc",
+      },
+      {
+        occurredAt: "asc",
+      },
+      {
+        createdAt: "asc",
+      },
+    ],
+    take: normalizePositiveInteger(input.limit ?? 32, "limit"),
+    select: {
+      id: true,
+    },
+  });
+
+  const ids = records.map((record) => record.id);
+
+  if (ids.length === 0) {
+    return 0;
+  }
+
+  const updated = await prisma.hostedAiUsage.updateMany({
+    where: {
+      id: {
+        in: ids,
+      },
+      ...buildHostedAiUsageStripeMeterDisabledWhere(now),
+    },
+    data: {
+      stripeMeterError: input.message ?? HOSTED_AI_USAGE_BILLING_DISABLED_MESSAGE,
+      stripeMeterIdentifier: null,
+      stripeMeterLastAttemptedAt: now,
+      stripeMeterNextAttemptAt: null,
+      stripeMeterStatus: "skipped",
+      stripeMeteredAt: null,
+    },
+  });
+
+  return updated.count;
 }
 
 function dedupeHostedAiUsageRecords(
@@ -602,6 +667,7 @@ function buildHostedAiUsageCreateData(
   record: AssistantUsageRecord,
   memberId: string,
   stripeMeterSource: AssistantUsageRecord["stripeMeterSource"],
+  aiUsageBillingMode: HostedAiUsageBillingMode,
 ): Prisma.HostedAiUsageUncheckedCreateInput {
   return {
     id: record.usageId,
@@ -630,6 +696,12 @@ function buildHostedAiUsageCreateData(
     cachedInputTokens: record.cachedInputTokens,
     cacheWriteTokens: record.cacheWriteTokens,
     totalTokens: record.totalTokens,
+    ...(aiUsageBillingMode === "disabled"
+      ? {
+          stripeMeterError: HOSTED_AI_USAGE_BILLING_DISABLED_MESSAGE,
+          stripeMeterStatus: "skipped" as const,
+        }
+      : {}),
     ...(stripeMeterSource === "vercel-ai-gateway"
       ? {
           stripeMeterError:
@@ -643,7 +715,6 @@ function buildHostedAiUsageCreateData(
 function assertStoredHostedAiUsageMatchesRecord(input: {
   memberId: string;
   record: AssistantUsageRecord;
-  stripeMeterSource: AssistantUsageRecord["stripeMeterSource"];
   storedRecord: StoredHostedAiUsageImmutableFields;
 }): void {
   const expected = {
@@ -651,7 +722,6 @@ function assertStoredHostedAiUsageMatchesRecord(input: {
     id: input.record.usageId,
     memberId: input.memberId,
     occurredAt: normalizeHostedAiUsageDate(input.record.occurredAt, "occurredAt").toISOString(),
-    stripeMeterSource: input.stripeMeterSource,
   };
   const mismatchedFields = [
     compareHostedAiUsageField("id", input.storedRecord.id, expected.id),
@@ -672,11 +742,6 @@ function assertStoredHostedAiUsageMatchesRecord(input: {
     compareHostedAiUsageJsonField("gatewayTagsJson", input.storedRecord.gatewayTagsJson, expected.gatewayTags),
     compareHostedAiUsageField("reportingUserId", input.storedRecord.reportingUserId, expected.reportingUserId),
     compareHostedAiUsageField("surface", input.storedRecord.surface, expected.surface),
-    compareHostedAiUsageField(
-      "stripeMeterSource",
-      normalizeHostedAiUsageStripeMeterSource(input.storedRecord.stripeMeterSource),
-      expected.stripeMeterSource,
-    ),
     compareHostedAiUsageField("triggerKind", input.storedRecord.triggerKind, expected.triggerKind),
     compareHostedAiUsageField("inputTokens", input.storedRecord.inputTokens, expected.inputTokens),
     compareHostedAiUsageField("outputTokens", input.storedRecord.outputTokens, expected.outputTokens),
@@ -694,11 +759,16 @@ function assertStoredHostedAiUsageMatchesRecord(input: {
 }
 
 async function resolveHostedAiUsageStripeMeterSource(input: {
+  aiUsageBillingMode: HostedAiUsageBillingMode;
   memberId: string;
   prisma: PrismaClient;
   record: AssistantUsageRecord;
   stripeCustomerIdCache: Map<string, Promise<string | null>>;
 }): Promise<AssistantUsageRecord["stripeMeterSource"]> {
+  if (input.aiUsageBillingMode === "disabled") {
+    return "murph";
+  }
+
   const requestedSource = normalizeAssistantUsageStripeMeterSource(input.record.stripeMeterSource);
 
   if (requestedSource !== "vercel-ai-gateway") {
@@ -813,22 +883,29 @@ function buildHostedAiUsageStripeMeterDueWhere(
   ];
 }
 
+function buildHostedAiUsageStripeMeterDisabledWhere(
+  now: Date,
+): Prisma.HostedAiUsageWhereInput {
+  return {
+    stripeMeterSource: "murph",
+    OR: [
+      {
+        stripeMeterStatus: "pending",
+      },
+      {
+        stripeMeterStatus: "processing",
+        OR: buildHostedAiUsageStripeMeterDueWhere(now),
+      },
+    ],
+  };
+}
+
 function normalizePositiveInteger(value: number, label: string): number {
   if (!Number.isInteger(value) || value < 1) {
     throw new RangeError(`Hosted AI usage ${label} must be a positive integer.`);
   }
 
   return value;
-}
-
-function normalizeHostedAiUsageStripeMeterSource(
-  value: string,
-): AssistantUsageRecord["stripeMeterSource"] {
-  if (value === "murph" || value === "vercel-ai-gateway") {
-    return value;
-  }
-
-  throw new TypeError(`Unsupported hosted AI usage Stripe meter source: ${value}`);
 }
 
 function requireHostedAiUsageMemberId(
