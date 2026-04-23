@@ -12,6 +12,7 @@ import type {
 import type {
   HostedWorkspaceArtifactMaterializer,
 } from "./models.ts";
+import { toHostedArtifactPathKey } from "./artifact-paths.ts";
 
 export function createHostedArtifactResolver(input: {
   artifactStore: HostedRuntimeArtifactStore;
@@ -50,21 +51,34 @@ export function createHostedArtifactMaterializer(input: {
   workspaceRoot: string;
 }): HostedWorkspaceArtifactMaterializer {
   return async (relativePaths) => {
-    const pendingPaths = [...new Set(relativePaths)]
-      .filter((relativePath) => !input.materializedArtifactPaths.has(relativePath));
-    if (pendingPaths.length === 0) {
+    const materializedArtifactPathKeys = new Set(
+      [...input.materializedArtifactPaths].map((relativePath) =>
+        toHostedArtifactPathKey({ path: relativePath })
+      ),
+    );
+    const pendingRelativePaths = [...new Set(relativePaths)]
+      .filter((relativePath) => (
+        !materializedArtifactPathKeys.has(toHostedArtifactPathKey({ path: relativePath }))
+      ));
+    if (pendingRelativePaths.length === 0) {
       return;
     }
 
+    const pendingArtifactPathKeys = new Set(
+      pendingRelativePaths.map((relativePath) => toHostedArtifactPathKey({ path: relativePath })),
+    );
     await materializeHostedExecutionArtifacts({
       artifactResolver: input.artifactResolver,
       bundle: input.bundle,
       shouldRestoreArtifact: ({ path: artifactPath, root }) => (
-        root === "vault" && pendingPaths.includes(artifactPath)
+        pendingArtifactPathKeys.has(toHostedArtifactPathKey({
+          path: artifactPath,
+          root,
+        }))
       ),
       workspaceRoot: input.workspaceRoot,
     });
-    for (const relativePath of pendingPaths) {
+    for (const relativePath of pendingRelativePaths) {
       input.materializedArtifactPaths.add(relativePath);
     }
   };

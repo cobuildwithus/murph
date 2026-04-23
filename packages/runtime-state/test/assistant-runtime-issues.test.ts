@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -7,6 +7,7 @@ import { test } from "vitest";
 
 import {
   ASSISTANT_RUNTIME_ISSUE_SCHEMA,
+  type AssistantRuntimeIssueRecord,
   createAssistantRuntimeIssueFingerprint,
   createAssistantRuntimeIssueId,
   deletePendingAssistantRuntimeIssueRecord,
@@ -90,17 +91,20 @@ test("assistant runtime issue helpers sanitize, persist, sort, and delete pendin
     const persisted = JSON.parse(
       await readFile(resolvePendingAssistantRuntimeIssuePath(paths, firstIssueId), "utf8"),
     ) as Record<string, unknown>;
+    const persistedValue = persisted.value as Record<string, unknown>;
 
-    assert.equal(persisted.component, "assistant-runtime");
-    assert.equal(persisted.errorCode, null);
-    assert.equal(persisted.operation, null);
-    assert.equal(persisted.surface, "dashboard");
+    assert.equal(persisted.schema, ASSISTANT_RUNTIME_ISSUE_SCHEMA);
+    assert.equal(persisted.schemaVersion, 1);
+    assert.equal(persistedValue.component, "assistant-runtime");
+    assert.equal(persistedValue.errorCode, null);
+    assert.equal(persistedValue.operation, null);
+    assert.equal(persistedValue.surface, "dashboard");
     assert.equal(
-      persisted.summary,
+      persistedValue.summary,
       "Assistant runtime issue: fallback used during tool_call.",
     );
 
-    const persistedDetails = persisted.details as Record<string, unknown>;
+    const persistedDetails = persistedValue.details as Record<string, unknown>;
     assert.equal(Object.keys(persistedDetails).length, 24);
     assert.deepEqual(persistedDetails.array, [
       "item0",
@@ -131,6 +135,144 @@ test("assistant runtime issue helpers sanitize, persist, sort, and delete pendin
     assert.deepEqual(
       (await listPendingAssistantRuntimeIssueRecords({ paths })).map((record) => record.issueId),
       [firstIssueId],
+    );
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true });
+  }
+});
+
+test("assistant runtime issue listing accepts legacy raw pending files", async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-assistant-runtime-issues-"));
+  const paths = resolveAssistantStatePaths(vaultRoot);
+  const record = parseAssistantRuntimeIssueRecord({
+    component: "assistant.runtime",
+    details: {},
+    environment: "local",
+    errorCode: null,
+    fingerprint: "abcdef1234567890abcdef12",
+    issueId: "ari_4444444444444444_dddddddddddddddddddddddd",
+    issueKind: "tool_error",
+    occurredAt: "2026-04-20T12:00:00.000Z",
+    operation: "provider.turn",
+    phase: "provider_turn",
+    schema: ASSISTANT_RUNTIME_ISSUE_SCHEMA,
+    severity: "error",
+    summary: "ignored",
+    surface: null,
+  });
+
+  try {
+    await mkdir(paths.issuesPendingDirectory, { recursive: true });
+    await writeFile(
+      resolvePendingAssistantRuntimeIssuePath(paths, record.issueId),
+      `${JSON.stringify(record)}\n`,
+      "utf8",
+    );
+
+    assert.deepEqual(
+      await listPendingAssistantRuntimeIssueRecords({
+        paths,
+      }),
+      [record],
+    );
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true });
+  }
+});
+
+test("assistant runtime issue listing skips forward-versioned pending files when requested", async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-assistant-runtime-issues-"));
+  const paths = resolveAssistantStatePaths(vaultRoot);
+  const validRecord = parseAssistantRuntimeIssueRecord({
+    component: "assistant.runtime",
+    details: {},
+    environment: "local",
+    errorCode: null,
+    fingerprint: "abcdef1234567890abcdef12",
+    issueId: "ari_5555555555555555_eeeeeeeeeeeeeeeeeeeeeeee",
+    issueKind: "tool_error",
+    occurredAt: "2026-04-20T12:05:00.000Z",
+    operation: "provider.turn",
+    phase: "provider_turn",
+    schema: ASSISTANT_RUNTIME_ISSUE_SCHEMA,
+    severity: "error",
+    summary: "ignored",
+    surface: null,
+  });
+  const invalidFiles: string[] = [];
+
+  try {
+    await mkdir(paths.issuesPendingDirectory, { recursive: true });
+    await writePendingAssistantRuntimeIssueRecord({
+      paths,
+      record: validRecord,
+    });
+    await writeFile(
+      resolvePendingAssistantRuntimeIssuePath(paths, "ari_6666666666666666_ffffffffffffffffffffffff"),
+      `${JSON.stringify({
+        schema: ASSISTANT_RUNTIME_ISSUE_SCHEMA,
+        schemaVersion: 2,
+        value: {
+          ...validRecord,
+          issueId: "ari_6666666666666666_ffffffffffffffffffffffff",
+        },
+      })}\n`,
+      "utf8",
+    );
+
+    assert.deepEqual(
+      await listPendingAssistantRuntimeIssueRecords({
+        onInvalidRecord: ({ fileName }) => {
+          invalidFiles.push(fileName);
+        },
+        paths,
+        skipInvalidRecords: true,
+      }),
+      [validRecord],
+    );
+    assert.deepEqual(invalidFiles, ["ari_6666666666666666_ffffffffffffffffffffffff.json"]);
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true });
+  }
+});
+
+test("assistant runtime issue listing fails closed on forward-versioned pending files by default", async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-assistant-runtime-issues-"));
+  const paths = resolveAssistantStatePaths(vaultRoot);
+  const invalidIssueId = "ari_7777777777777777_aaaaaaaaaaaaaaaaaaaaaaaa";
+
+  try {
+    await mkdir(paths.issuesPendingDirectory, { recursive: true });
+    await writeFile(
+      resolvePendingAssistantRuntimeIssuePath(paths, invalidIssueId),
+      `${JSON.stringify({
+        schema: ASSISTANT_RUNTIME_ISSUE_SCHEMA,
+        schemaVersion: 2,
+        value: {
+          component: "assistant.runtime",
+          details: {},
+          environment: "local",
+          errorCode: null,
+          fingerprint: "abcdef1234567890abcdef12",
+          issueId: invalidIssueId,
+          issueKind: "tool_error",
+          occurredAt: "2026-04-20T12:10:00.000Z",
+          operation: "provider.turn",
+          phase: "provider_turn",
+          schema: ASSISTANT_RUNTIME_ISSUE_SCHEMA,
+          severity: "error",
+          summary: "ignored",
+          surface: null,
+        },
+      })}\n`,
+      "utf8",
+    );
+
+    await assert.rejects(
+      () => listPendingAssistantRuntimeIssueRecords({
+        paths,
+      }),
+      /pending assistant runtime issue record schemaVersion must be 1\./u,
     );
   } finally {
     await rm(vaultRoot, { force: true, recursive: true });
@@ -257,6 +399,62 @@ test("assistant runtime issue parsing covers canonical summaries and fail-closed
     () => listPendingAssistantRuntimeIssueRecords({}),
     /vault or paths is required when resolving assistant runtime issue state\./u,
   );
+});
+
+test("assistant runtime issue path helpers reject invalid ids before touching sibling runtime files", async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-assistant-runtime-issues-"));
+
+  try {
+    const paths = resolveAssistantStatePaths(vaultRoot);
+    const validIssueId = "ari_3333333333333333_cccccccccccccccccccccccc";
+    const validRecord: AssistantRuntimeIssueRecord = {
+      component: "assistant.runtime",
+      details: {},
+      environment: "hosted" as const,
+      errorCode: null,
+      fingerprint: "abcdef1234567890abcdef12",
+      issueId: validIssueId,
+      issueKind: "tool_error" as const,
+      occurredAt: "2026-04-20T11:00:00.000Z",
+      operation: "provider.turn",
+      phase: "provider_turn" as const,
+      schema: ASSISTANT_RUNTIME_ISSUE_SCHEMA,
+      severity: "error" as const,
+      summary: "ignored",
+      surface: null,
+    };
+
+    await writePendingAssistantRuntimeIssueRecord({
+      paths,
+      record: validRecord,
+    });
+
+    await writeFile(paths.statusPath, JSON.stringify({ schema: "murph.assistant-status.v1" }), "utf8");
+
+    assert.throws(
+      () => resolvePendingAssistantRuntimeIssuePath(paths, "../../status"),
+      /issueId must match the assistant runtime issue id format\./u,
+    );
+    await assert.rejects(
+      () => deletePendingAssistantRuntimeIssueRecord({ issueId: "../../status", paths }),
+      /issueId must match the assistant runtime issue id format\./u,
+    );
+
+    assert.equal(
+      await readFile(paths.statusPath, "utf8"),
+      JSON.stringify({ schema: "murph.assistant-status.v1" }),
+    );
+    assert.deepEqual(
+      JSON.parse(await readFile(resolvePendingAssistantRuntimeIssuePath(paths, validIssueId), "utf8")),
+      {
+        schema: ASSISTANT_RUNTIME_ISSUE_SCHEMA,
+        schemaVersion: 1,
+        value: parseAssistantRuntimeIssueRecord(validRecord),
+      },
+    );
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true });
+  }
 });
 
 function createUnsanitizedDetails(): Record<string, unknown> {

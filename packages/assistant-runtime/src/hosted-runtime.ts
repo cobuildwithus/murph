@@ -34,6 +34,9 @@ import {
   withHostedProcessEnvironment,
 } from "./hosted-runtime/environment.ts";
 import {
+  resolveHostedVercelAiGatewayStripeCustomerId,
+} from "./hosted-runtime/billing.ts";
+import {
   completeHostedRunDrainAfterCommit,
   executeHostedRunDrainForCommit,
 } from "./hosted-runtime/execution.ts";
@@ -56,14 +59,13 @@ import {
   HOSTED_RUNTIME_USER_ENV_CATEGORY_KEYS,
   resolveHostedWake,
 } from "./hosted-runtime/utils.ts";
-import {
-  HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY_ENV,
-  HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED_ENV,
-} from "./hosted-runtime/platform.ts";
 export {
   formatHostedRuntimeChildResult,
   parseHostedRuntimeChildResult,
 } from "./hosted-runtime/child-result.ts";
+export {
+  resolveHostedVercelAiGatewayStripeCustomerId,
+} from "./hosted-runtime/billing.ts";
 
 export type {
   HostedAssistantRuntimeChannelCapabilities,
@@ -200,6 +202,7 @@ export async function runHostedAssistantRuntimeJobInProcessDetailed(
           ? await startHostedRunMessagingActivity({
               component: "runtime",
               events: runDrain.events,
+              platformEnv: runtime.platformEnv,
               runtimeEnv,
               run: input.request.run ?? null,
             })
@@ -386,100 +389,6 @@ function buildHostedRuntimeStartDetails(
   };
 }
 
-export async function resolveHostedVercelAiGatewayStripeCustomerId(input: {
-  billingPort: HostedRuntimePlatform["billingPort"] | null | undefined;
-  forwardedEnv: Readonly<Record<string, string>>;
-  run: HostedAssistantRuntimeJobInput["request"]["run"] | null | undefined;
-  userEnv: Readonly<Record<string, string>>;
-  wake: HostedRuntimeEvent;
-}): Promise<string | null> {
-  if (
-    !isHostedVercelAiGatewayStripeBillingConfigured(input.forwardedEnv, input.userEnv)
-    || !input.billingPort
-  ) {
-    return null;
-  }
-
-  try {
-    const response = await input.billingPort.resolveVercelAiGatewayStripeCustomerId();
-    return response.stripeCustomerId;
-  } catch (error) {
-    emitHostedExecutionStructuredLog({
-      component: "runtime",
-      details: {
-        provider: normalizeHostedRuntimeString(input.forwardedEnv.HOSTED_ASSISTANT_PROVIDER),
-        providerName: normalizeHostedRuntimeString(input.forwardedEnv.HOSTED_ASSISTANT_PROVIDER_NAME),
-        stripeRestrictedAccessKeyConfigured: Boolean(
-          normalizeHostedRuntimeString(
-            input.forwardedEnv[HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY_ENV],
-          ),
-        ),
-        vercelStripeBillingEnabled: readHostedRuntimeEnabledFlag(
-          input.forwardedEnv[HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED_ENV],
-        ),
-      },
-      error,
-      level: "warn",
-      message: "Hosted runtime delegated Vercel Stripe billing customer lookup failed; proceeding without delegated billing.",
-      phase: "runtime.starting",
-      run: input.run ?? null,
-      wake: input.wake,
-    });
-    return null;
-  }
-}
-
-function isHostedVercelAiGatewayStripeBillingConfigured(
-  forwardedEnv: Readonly<Record<string, string>>,
-  userEnv: Readonly<Record<string, string>>,
-): boolean {
-  return Boolean(
-    readHostedRuntimeEnabledFlag(
-      forwardedEnv[HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED_ENV],
-    )
-  ) && Boolean(
-    normalizeHostedRuntimeString(
-      forwardedEnv[HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY_ENV],
-    ),
-  ) && isHostedAssistantUsingVercelAiGateway(forwardedEnv)
-    && isHostedAssistantUsingPlatformCredential(forwardedEnv, userEnv);
-}
-
-function isHostedAssistantUsingPlatformCredential(
-  forwardedEnv: Readonly<Record<string, string>>,
-  userEnv: Readonly<Record<string, string>>,
-): boolean {
-  const apiKeyEnv = normalizeHostedRuntimeString(forwardedEnv.HOSTED_ASSISTANT_API_KEY_ENV);
-
-  return !apiKeyEnv || !Object.prototype.hasOwnProperty.call(userEnv, apiKeyEnv);
-}
-
-function isHostedAssistantUsingVercelAiGateway(
-  forwardedEnv: Readonly<Record<string, string>>,
-): boolean {
-  const provider = normalizeHostedRuntimeString(forwardedEnv.HOSTED_ASSISTANT_PROVIDER);
-  if (provider?.toLowerCase() === "vercel-ai-gateway") {
-    return true;
-  }
-
-  const providerName = normalizeHostedRuntimeString(forwardedEnv.HOSTED_ASSISTANT_PROVIDER_NAME);
-  if (providerName?.toLowerCase() === "vercel-ai-gateway") {
-    return true;
-  }
-
-  const baseUrl = normalizeHostedRuntimeString(forwardedEnv.HOSTED_ASSISTANT_BASE_URL);
-  if (!baseUrl) {
-    return false;
-  }
-
-  try {
-    const url = new URL(baseUrl);
-    return url.protocol === "https:" && url.hostname.toLowerCase() === "ai-gateway.vercel.sh";
-  } catch {
-    return false;
-  }
-}
-
 function normalizeHostedRuntimeString(value: string | null | undefined): string | null {
   if (typeof value !== "string") {
     return null;
@@ -487,9 +396,4 @@ function normalizeHostedRuntimeString(value: string | null | undefined): string 
 
   const normalized = value.trim();
   return normalized.length > 0 ? normalized : null;
-}
-
-function readHostedRuntimeEnabledFlag(value: string | null | undefined): boolean {
-  const normalized = normalizeHostedRuntimeString(value)?.toLowerCase();
-  return normalized === "1" || normalized === "true";
 }

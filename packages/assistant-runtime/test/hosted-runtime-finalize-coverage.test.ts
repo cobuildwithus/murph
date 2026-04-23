@@ -182,6 +182,7 @@ function createRuntime(overrides: {
       effectsPort: createHostedRuntimeEffectsPortStub(),
       usageExportPort: null,
     },
+    platformEnv: {},
     resolvedConfig: createHostedRuntimeResolvedConfig({
       deviceSync:
         overrides.deviceSyncConfig === undefined ? null : overrides.deviceSyncConfig,
@@ -486,16 +487,18 @@ describe("assistant-runtime execution coverage", () => {
   it("drains committed side effects, snapshots final state, and preserves untouched artifacts", async () => {
     mocks.listHostedBundleArtifacts.mockReturnValue([
       {
-        path: "vault/raw/already-materialized.bin",
+        path: "raw/already-materialized.bin",
         ref: {
           sha256: "sha_materialized",
         },
+        root: "vault",
       },
       {
-        path: "vault/raw/preserved.bin",
+        path: "raw/preserved.bin",
         ref: {
           sha256: "sha_preserved",
         },
+        root: "vault",
       },
     ]);
 
@@ -541,7 +544,15 @@ describe("assistant-runtime execution coverage", () => {
     );
     expect(mocks.drainHostedCommittedAssistantDeliveriesAfterCommit).toHaveBeenCalledWith({
       assistantDeliveryEffects: [hostedDeliveryEffect],
-      effectsPort: expect.any(Object),
+      effectsPort: expect.objectContaining({
+        deletePreparedAssistantDelivery: expect.any(Function),
+        readAssistantDeliveryRecord: expect.any(Function),
+        readRawEmailMessage: expect.any(Function),
+        sendEmail: expect.any(Function),
+        writeAssistantDeliveryRecord: expect.any(Function),
+      }),
+      forwardedEnv: {},
+      platformEnv: {},
       vaultRoot: "/tmp/vault-root",
       wake: buildHostedExecutionRuntimeTimerWake({
         eventId: "evt_runtime_timer",
@@ -556,13 +567,15 @@ describe("assistant-runtime execution coverage", () => {
     });
     expect(mocks.snapshotHostedExecutionContext).toHaveBeenCalledWith({
       artifactSink: expect.any(Symbol),
+      materializedArtifactPaths: new Set(["vault/raw/already-materialized.bin"]),
       operatorHomeRoot: "/tmp/operator-home",
       preservedArtifacts: [
         {
-          path: "vault/raw/preserved.bin",
+          path: "raw/preserved.bin",
           ref: {
             sha256: "sha_preserved",
           },
+          root: "vault",
         },
       ],
       vaultRoot: "/tmp/vault-root",

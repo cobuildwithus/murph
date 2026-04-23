@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
@@ -8,9 +8,12 @@ import {
   exportHostedPendingAssistantRuntimeIssues,
 } from '../src/hosted-runtime/issues.ts'
 import {
+  ASSISTANT_RUNTIME_ISSUE_SCHEMA,
   createAssistantRuntimeIssueFingerprint,
   createAssistantRuntimeIssueId,
   listPendingAssistantRuntimeIssueRecords,
+  resolveAssistantStatePaths,
+  resolvePendingAssistantRuntimeIssuePath,
   writePendingAssistantRuntimeIssueRecord,
 } from '@murphai/runtime-state/node'
 
@@ -143,10 +146,83 @@ describe('exportHostedPendingAssistantRuntimeIssues', () => {
       ])
       await expect(
         listPendingAssistantRuntimeIssueRecords({
+          skipInvalidRecords: true,
           vault: vaultRoot,
         }),
       ).resolves.toEqual([])
     } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      })
+    }
+  })
+
+  it('skips malformed or forward-versioned pending issue files and still exports valid records', async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-hosted-runtime-issues-'))
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    try {
+      const record = createPendingIssueRecord({
+        occurredAt: '2026-04-08T12:05:00.000Z',
+      })
+      await writePendingAssistantRuntimeIssueRecord({
+        record,
+        vault: vaultRoot,
+      })
+
+      const invalidIssueId = 'ari_5555555555555555_eeeeeeeeeeeeeeeeeeeeeeee'
+      const invalidRecordPath = resolvePendingAssistantRuntimeIssuePath(
+        resolveAssistantStatePaths(vaultRoot),
+        invalidIssueId,
+      )
+
+      await writeFile(
+        invalidRecordPath,
+        `${JSON.stringify({
+          schema: ASSISTANT_RUNTIME_ISSUE_SCHEMA,
+          schemaVersion: 2,
+          value: {
+            ...record,
+            issueId: invalidIssueId,
+          },
+        })}\n`,
+        'utf8',
+      )
+
+      const issueExportPort = {
+        recordIssues: vi.fn(async (issues: readonly object[]) => ({
+          issueIds: issues.map((issue) =>
+            (issue as { issueId: string }).issueId,
+          ),
+          recorded: issues.length,
+        })),
+      }
+
+      const result = await exportHostedPendingAssistantRuntimeIssues({
+        issueExportPort,
+        vaultRoot,
+      })
+
+      expect(result).toEqual({
+        exported: 1,
+        failed: 1,
+        pending: 1,
+      })
+      await expect(
+        listPendingAssistantRuntimeIssueRecords({
+          skipInvalidRecords: true,
+          vault: vaultRoot,
+        }),
+      ).resolves.toEqual([])
+      expect((await stat(invalidRecordPath)).isFile()).toBe(true)
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringMatching(
+          /Skipping malformed pending assistant runtime issue file .*; leaving it pending:/,
+        ),
+      )
+    } finally {
+      warnSpy.mockRestore()
       await rm(vaultRoot, {
         force: true,
         recursive: true,

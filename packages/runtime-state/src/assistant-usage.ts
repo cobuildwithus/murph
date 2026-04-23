@@ -7,8 +7,13 @@ import {
   resolveAssistantStatePaths,
   type AssistantStatePaths,
 } from "./assistant-state.ts";
+import {
+  createVersionedJsonStateEnvelope,
+  parseVersionedJsonStateEnvelope,
+} from "./versioned-json-state.ts";
 
 export const ASSISTANT_USAGE_SCHEMA = "murph.assistant-usage.v1";
+const ASSISTANT_USAGE_FILE_SCHEMA_VERSION = 1;
 const HOSTED_MEMBER_AI_CREDENTIAL_ENV_KEYS = new Set([
   "ANTHROPIC_API_KEY",
   "CEREBRAS_API_KEY",
@@ -65,6 +70,11 @@ export interface AssistantUsageRecord {
   usageId: string;
 }
 
+export interface PendingAssistantUsageRecordParseFailure {
+  error: unknown;
+  fileName: string;
+}
+
 export function createAssistantUsageId(input: {
   attemptCount: number;
   turnId: string;
@@ -93,28 +103,51 @@ export async function writePendingAssistantUsageRecord(input: {
   const paths = resolveAssistantUsagePaths(input.vault, input.paths);
   const record = parseAssistantUsageRecord(input.record);
   await ensureAssistantStateDirectory(paths.usagePendingDirectory);
-  await writeJsonFileAtomic(resolvePendingAssistantUsagePath(paths, record.usageId), record);
-  await deleteLegacyPendingAssistantUsagePathIfSafe(paths, record.usageId);
+  await writeJsonFileAtomic(
+    resolvePendingAssistantUsagePath(paths, record.usageId),
+    createVersionedJsonStateEnvelope({
+      schema: ASSISTANT_USAGE_SCHEMA,
+      schemaVersion: ASSISTANT_USAGE_FILE_SCHEMA_VERSION,
+      value: record,
+    }),
+  );
 }
 
 export async function listPendingAssistantUsageRecords(input: {
+  onInvalidRecord?: ((failure: PendingAssistantUsageRecordParseFailure) => void) | null;
   paths?: AssistantStatePaths;
+  skipInvalidRecords?: boolean;
   vault?: string;
 }): Promise<AssistantUsageRecord[]> {
   const paths = resolveAssistantUsagePaths(input.vault, input.paths);
+  const onInvalidRecord = input.onInvalidRecord ?? null;
+  const skipInvalidRecords = input.skipInvalidRecords ?? false;
 
   try {
     const entries = await readdir(paths.usagePendingDirectory, {
       withFileTypes: true,
     });
-    const records = await Promise.all(
-      entries
-        .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
-        .map(async (entry) => {
-          const raw = await readFile(path.join(paths.usagePendingDirectory, entry.name), "utf8");
-          return parseAssistantUsageRecord(JSON.parse(raw));
-        }),
-    );
+    const records: AssistantUsageRecord[] = [];
+
+    for (const entry of entries) {
+      if (!entry.isFile() || !isCanonicalPendingAssistantUsageFileName(entry.name)) {
+        continue;
+      }
+
+      try {
+        const raw = await readFile(path.join(paths.usagePendingDirectory, entry.name), "utf8");
+        records.push(parsePendingAssistantUsageFile(JSON.parse(raw)));
+      } catch (error) {
+        if (!skipInvalidRecords) {
+          throw error;
+        }
+
+        onInvalidRecord?.({
+          error,
+          fileName: entry.name,
+        });
+      }
+    }
 
     return records.sort((left, right) => {
       const occurredAtOrder = left.occurredAt.localeCompare(right.occurredAt);
@@ -144,17 +177,24 @@ export async function deletePendingAssistantUsageRecord(input: {
   await rm(resolvePendingAssistantUsagePath(paths, input.usageId), {
     force: true,
   });
-  await deleteLegacyPendingAssistantUsagePathIfSafe(paths, input.usageId);
 }
 
 export function parseAssistantUsageRecord(value: unknown): AssistantUsageRecord {
   const record = requireRecord(value, "assistant usage record");
+  const attemptCount = normalizeRequiredInteger(record.attemptCount, "attemptCount");
   const inputTokens = normalizeOptionalInteger(record.inputTokens, "inputTokens");
+  const occurredAt = normalizeRequiredString(record.occurredAt, "occurredAt");
   const outputTokens = normalizeOptionalInteger(record.outputTokens, "outputTokens");
+  const turnId = normalizeRequiredString(record.turnId, "turnId");
+  const usageId = normalizeCanonicalAssistantUsageId({
+    attemptCount,
+    turnId,
+    usageId: normalizeRequiredString(record.usageId, "usageId"),
+  });
 
   return {
     apiKeyEnv: normalizeOptionalString(record.apiKeyEnv, "apiKeyEnv"),
-    attemptCount: normalizeRequiredInteger(record.attemptCount, "attemptCount"),
+    attemptCount,
     baseUrl: normalizeOptionalString(record.baseUrl, "baseUrl"),
     cacheWriteTokens: normalizeOptionalInteger(record.cacheWriteTokens, "cacheWriteTokens"),
     cachedInputTokens: normalizeOptionalInteger(record.cachedInputTokens, "cachedInputTokens"),
@@ -163,7 +203,7 @@ export function parseAssistantUsageRecord(value: unknown): AssistantUsageRecord 
     gatewayTags: normalizeOptionalStringArray(record.gatewayTags, "gatewayTags"),
     inputTokens,
     memberId: normalizeOptionalString(record.memberId, "memberId"),
-    occurredAt: normalizeRequiredString(record.occurredAt, "occurredAt"),
+    occurredAt,
     outputTokens,
     provider: normalizeRequiredString(record.provider, "provider"),
     providerName: normalizeOptionalString(record.providerName, "providerName"),
@@ -178,29 +218,44 @@ export function parseAssistantUsageRecord(value: unknown): AssistantUsageRecord 
     surface: normalizeOptionalString(record.surface, "surface"),
     totalTokens: normalizeOptionalInteger(record.totalTokens, "totalTokens"),
     triggerKind: normalizeOptionalString(record.triggerKind, "triggerKind"),
-    turnId: normalizeRequiredString(record.turnId, "turnId"),
-    usageId: normalizeRequiredString(record.usageId, "usageId"),
+    turnId,
+    usageId,
   };
 }
 
 export function resolveAssistantUsageCredentialSource(input: {
   apiKeyEnv: string | null;
+  effectiveEnv?: Readonly<Record<string, string | undefined>> | null;
+  headers?: Readonly<Record<string, string>> | null;
   provider: string;
   userEnvKeys: Iterable<string>;
 }): AssistantUsageCredentialSource {
   const userEnvKeys = new Set(
     [...input.userEnvKeys].map((key) => normalizeRequiredString(key, "userEnvKey")),
   );
+  const effectiveEnv = input.effectiveEnv ?? null;
+
+  if (hasCredentialLikeAssistantHeaders(input.headers)) {
+    return "member";
+  }
 
   if (!input.apiKeyEnv) {
-    if (input.provider === "codex-cli" && hasHostedMemberAiCredential(userEnvKeys)) {
+    if (input.provider === "codex-cli" && hasHostedMemberAiCredential(userEnvKeys, effectiveEnv)) {
       return "unknown";
     }
 
     return "platform";
   }
 
-  return userEnvKeys.has(input.apiKeyEnv) ? "member" : "platform";
+  if (!userEnvKeys.has(input.apiKeyEnv)) {
+    return "platform";
+  }
+
+  if (!effectiveEnv) {
+    return "member";
+  }
+
+  return hasNonEmptyAssistantEnvValue(effectiveEnv, input.apiKeyEnv) ? "member" : "platform";
 }
 
 function resolveAssistantUsagePaths(
@@ -222,37 +277,21 @@ function encodePendingAssistantUsageFileName(usageId: string): string {
   return `${Buffer.from(usageId, "utf8").toString("base64url")}.json`;
 }
 
-async function deleteLegacyPendingAssistantUsagePathIfSafe(
-  paths: AssistantStatePaths,
-  usageId: string,
-): Promise<void> {
-  const legacyPath = resolveLegacyPendingAssistantUsagePathIfSafe(paths, usageId);
-
-  if (!legacyPath || legacyPath === resolvePendingAssistantUsagePath(paths, usageId)) {
-    return;
-  }
-
-  await rm(legacyPath, { force: true });
+function isCanonicalPendingAssistantUsageFileName(fileName: string): boolean {
+  return /^[A-Za-z0-9_-]+\.json$/u.test(fileName);
 }
 
-function resolveLegacyPendingAssistantUsagePathIfSafe(
-  paths: AssistantStatePaths,
-  usageId: string,
-): string | null {
-  const normalized = normalizeRequiredString(usageId, "usageId");
-
-  if (
-    normalized === "."
-    || normalized === ".."
-    || normalized.includes("/")
-    || normalized.includes("\\")
-    || normalized.includes(path.sep)
-    || (process.platform === "win32" && /[<>:"|?*]/u.test(normalized))
-  ) {
-    return null;
+function parsePendingAssistantUsageFile(value: unknown): AssistantUsageRecord {
+  if (hasVersionedJsonEnvelope(value)) {
+    return parseVersionedJsonStateEnvelope(value, {
+      label: "pending assistant usage record",
+      parseValue: parseAssistantUsageRecord,
+      schema: ASSISTANT_USAGE_SCHEMA,
+      schemaVersion: ASSISTANT_USAGE_FILE_SCHEMA_VERSION,
+    });
   }
 
-  return path.join(paths.usagePendingDirectory, `${normalized}.json`);
+  return parseAssistantUsageRecord(value);
 }
 
 function requireRecord(value: unknown, label: string): Record<string, unknown> {
@@ -261,6 +300,21 @@ function requireRecord(value: unknown, label: string): Record<string, unknown> {
   }
 
   return value as Record<string, unknown>;
+}
+
+function hasVersionedJsonEnvelope(value: unknown): value is {
+  schema: unknown;
+  schemaVersion: unknown;
+  value: unknown;
+} {
+  return Boolean(
+    value
+    && typeof value === "object"
+    && !Array.isArray(value)
+    && "schema" in value
+    && "schemaVersion" in value
+    && "value" in value,
+  );
 }
 
 function normalizeUsageSchema(value: unknown): typeof ASSISTANT_USAGE_SCHEMA {
@@ -360,6 +414,25 @@ function normalizeRequiredInteger(value: unknown, label: string): number {
   return normalized;
 }
 
+function normalizeCanonicalAssistantUsageId(input: {
+  attemptCount: number;
+  turnId: string;
+  usageId: string;
+}): string {
+  const canonicalUsageId = createAssistantUsageId({
+    attemptCount: input.attemptCount,
+    turnId: input.turnId,
+  });
+
+  if (input.usageId !== canonicalUsageId) {
+    throw new TypeError(
+      `usageId must match the canonical turnId/attemptCount-derived value ${canonicalUsageId}.`,
+    );
+  }
+
+  return canonicalUsageId;
+}
+
 function normalizeOptionalInteger(value: unknown, label: string): number | null {
   if (value === null || value === undefined) {
     return null;
@@ -372,6 +445,10 @@ function normalizeOptionalInteger(value: unknown, label: string): number | null 
   return value;
 }
 
+const SENSITIVE_HEADER_NAME_PATTERN =
+  /(?:^|[-_])(?:authorization|cookie|token|secret|api[-_]?key|session[-_]?key)(?:$|[-_])/iu;
+const SENSITIVE_HEADER_VALUE_PATTERN = /\b(?:Bearer|Basic)\s+[A-Za-z0-9._~+/=-]{8,}\b/iu;
+
 function isMissingFileError(error: unknown): boolean {
   return Boolean(
     error
@@ -381,6 +458,40 @@ function isMissingFileError(error: unknown): boolean {
   );
 }
 
-function hasHostedMemberAiCredential(userEnvKeys: ReadonlySet<string>): boolean {
-  return [...userEnvKeys].some((key) => HOSTED_MEMBER_AI_CREDENTIAL_ENV_KEYS.has(key));
+function hasCredentialLikeAssistantHeaders(
+  headers: Readonly<Record<string, string>> | null | undefined,
+): boolean {
+  if (!headers || Object.keys(headers).length === 0) {
+    return false;
+  }
+
+  return Object.entries(headers).some(([name, value]) =>
+    isCredentialLikeAssistantHeader(name, value),
+  );
+}
+
+function isCredentialLikeAssistantHeader(name: string, value: string): boolean {
+  return (
+    SENSITIVE_HEADER_NAME_PATTERN.test(name)
+    || SENSITIVE_HEADER_VALUE_PATTERN.test(value)
+  );
+}
+
+function hasHostedMemberAiCredential(
+  userEnvKeys: ReadonlySet<string>,
+  effectiveEnv: Readonly<Record<string, string | undefined>> | null,
+): boolean {
+  return [...userEnvKeys].some(
+    (key) =>
+      HOSTED_MEMBER_AI_CREDENTIAL_ENV_KEYS.has(key)
+      && (effectiveEnv === null || hasNonEmptyAssistantEnvValue(effectiveEnv, key)),
+  );
+}
+
+function hasNonEmptyAssistantEnvValue(
+  env: Readonly<Record<string, string | undefined>>,
+  key: string,
+): boolean {
+  const value = env[key];
+  return typeof value === "string" && value.trim().length > 0;
 }
