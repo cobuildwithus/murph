@@ -49,7 +49,8 @@ It intentionally lists live architecture, product, verification, and package-bou
 | `agent-docs/exec-plans/active/COORDINATION_LEDGER.md` | Active-work ledger for concurrent repo tasks. | Concurrency coordination | High | 2026-04-06 |
 | `agent-docs/exec-plans/completed/` | Historical execution-plan snapshots kept as process records rather than live architecture docs. | Completed plan archive | Low | 2026-03-28 |
 | `agent-docs/exec-plans/tech-debt-tracker.md` | Current debt register with owner/priority/status. | Rolling debt tracker | Medium | 2026-03-12 |
-| `agent-docs/prompts/` | Reusable review and audit prompt templates for the completion workflow. | Workflow prompt library | Low | 2026-04-09 |
+| `agent-docs/prompts/` | Reusable review and audit prompt templates for the completion workflow. | Workflow prompt library | Low | 2026-04-23 |
+| `agent-docs/prompts/seam-audits/` | One-pass bespoke audit prompts for the major repo seams used in broad risk and simplification review sweeps. | Seam-audit prompt library | Low | 2026-04-23 |
 | `apps/web/README.md` | Hosted web control-plane overview and env/runtime contract. | `apps/web/**` | Medium | 2026-04-02 |
 | `apps/cloudflare/README.md` | Hosted execution-plane overview and runtime contract. | `apps/cloudflare/**` | Medium | 2026-03-29 |
 | `apps/cloudflare/DEPLOY.md` | Current deployment procedure for hosted execution. | Hosted deploy flow | Medium | 2026-04-05 |
