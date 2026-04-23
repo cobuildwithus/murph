@@ -1,5 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 import type { SQLInputValue } from "node:sqlite";
+import { gzipSync } from "node:zlib";
 
 import type {
   HostedExecutionCursorState,
@@ -10,12 +11,23 @@ import type {
   HostedRunRecord,
 } from "@murphai/hosted-execution/contracts";
 import { HOSTED_INGRESS_PAYLOAD_SCHEMA } from "@murphai/hosted-execution/contracts";
+import { sha256HostedBundleHex } from "@murphai/runtime-state/node/hosted-bundle-codec";
 import {
   buildHostedExecutionEmailConversationMessageWake,
   buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionVaultSyncImportWake,
 } from "@murphai/hosted-execution";
+import {
+  createBrowserVaultReplica,
+  createVaultReadModel,
+} from "@murphai/query/browser";
+import {
+  createHostedArtifactStore,
+  createHostedBundleStore,
+} from "../src/bundle-store.ts";
+import { createHostedBrowserVaultReplicaStore } from "../src/browser-vault-store.ts";
+import { hostedArtifactObjectKey } from "../src/storage-paths.ts";
 import { HostedUserRunner } from "../src/user-runner.ts";
 import { createHostedUserKeyStore } from "../src/user-key-store.ts";
 import { RunnerStateStore } from "../src/user-runner/runner-state-store.js";
@@ -273,19 +285,22 @@ function createSnapshotRef(key: string) {
 }
 
 function createCursorState(input: {
+  browserVaultReplicaRef?: HostedExecutionCursorState["browserVaultReplicaRef"];
   committedSeq: string;
   nextSeq: string;
   nextRuntimeWakeAt?: string | null;
-  snapshotKey: string;
+  snapshotKey?: string;
+  snapshotRef?: HostedExecutionCursorState["snapshotRef"];
   version: string;
 }): HostedExecutionCursorState {
   return {
+    browserVaultReplicaRef: input.browserVaultReplicaRef ?? null,
     committedSeq: input.committedSeq,
     createdAt: "2026-04-20T00:00:00.000Z",
     nextSeq: input.nextSeq,
     nextRuntimeWakeAt: input.nextRuntimeWakeAt ?? null,
     nextRuntimeWakeReason: input.nextRuntimeWakeAt ? "runtime" : null,
-    snapshotRef: createSnapshotRef(input.snapshotKey),
+    snapshotRef: input.snapshotRef ?? createSnapshotRef(input.snapshotKey ?? "snapshot/default"),
     updatedAt: "2026-04-20T00:00:00.000Z",
     userId: "user-resume-finalize",
     version: input.version,
@@ -310,6 +325,119 @@ function createRunRecord(): HostedRunRecord {
     userId: "user-resume-finalize",
     ingressEventIds: [],
   };
+}
+
+async function writeHostedBundleFixture(input: {
+  artifactPayloads: string[];
+  bucket: MemoryEncryptedR2Bucket;
+  crypto: {
+    keysById: Readonly<Record<string, Uint8Array>>;
+    rootKey: Uint8Array;
+    rootKeyId: string;
+  };
+  userId: string;
+}): Promise<{
+  artifactKeys: string[];
+  ref: NonNullable<HostedExecutionCursorState["snapshotRef"]>;
+}> {
+  const artifactStore = createHostedArtifactStore({
+    bucket: input.bucket,
+    key: input.crypto.rootKey,
+    keyId: input.crypto.rootKeyId,
+    keysById: input.crypto.keysById,
+    userId: input.userId,
+  });
+  const bundleStore = createHostedBundleStore({
+    bucket: input.bucket,
+    key: input.crypto.rootKey,
+    keyId: input.crypto.rootKeyId,
+    keysById: input.crypto.keysById,
+    userId: input.userId,
+  });
+  const artifactRefs = await Promise.all(
+    input.artifactPayloads.map(async (payload, index) => {
+      const bytes = Uint8Array.from(Buffer.from(payload, "utf8"));
+      const sha256 = sha256HostedBundleHex(bytes);
+      await artifactStore.writeArtifact(sha256, bytes);
+      return {
+        byteSize: bytes.byteLength,
+        key: await hostedArtifactObjectKey(input.crypto.rootKey, input.userId, sha256),
+        path: `artifacts/file-${index + 1}.bin`,
+        root: "vault",
+        sha256,
+      };
+    }),
+  );
+
+  return {
+    artifactKeys: artifactRefs.map((artifact) => artifact.key),
+    ref: await bundleStore.writeBundle(
+      "vault",
+      createHostedArtifactBundleBytes(artifactRefs),
+    ),
+  };
+}
+
+async function writeBrowserVaultReplicaFixture(input: {
+  bucket: MemoryEncryptedR2Bucket;
+  generatedAt: string;
+  rootKey: Uint8Array;
+  sourceBundleHash: string;
+  userId: string;
+}) {
+  const store = createHostedBrowserVaultReplicaStore({
+    bucket: input.bucket,
+    rootKey: input.rootKey,
+  });
+
+  return store.writeBrowserVaultReplica({
+    replica: await createBrowserVaultReplica({
+      generatedAt: input.generatedAt,
+      sourceBundleHash: input.sourceBundleHash,
+      vault: createVaultReadModel({
+        entities: [],
+        metadata: null,
+        vaultRoot: "browser://vault",
+      }),
+    }),
+    userId: input.userId,
+  });
+}
+
+function createHostedArtifactBundleBytes(input: Array<{
+  byteSize: number;
+  path: string;
+  root: string;
+  sha256: string;
+}>): Uint8Array {
+  return Uint8Array.from(
+    gzipSync(
+      Buffer.from(JSON.stringify({
+        files: input.map((artifact) => ({
+          artifact: {
+            byteSize: artifact.byteSize,
+            sha256: artifact.sha256,
+          },
+          path: artifact.path,
+          root: artifact.root,
+        })),
+        kind: "vault",
+        schema: "murph.hosted-bundle.v1",
+      })),
+    ),
+  );
+}
+
+async function writeRequiredPendingCleanupState(
+  stateStore: RunnerStateStore,
+  runId: string,
+): Promise<void> {
+  await stateStore.writePendingRunCleanup(runId, {
+    emailMessages: [],
+    linqMessageIds: [],
+    required: true,
+    telegramMessages: [],
+  });
 }
 
 async function expectRecordedRunPhases(phases: readonly string[]): Promise<void> {
@@ -380,7 +508,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  vi.clearAllMocks();
+  vi.resetAllMocks();
 });
 
 describe("HostedUserRunner resumeFinalize drain", () => {
@@ -480,6 +608,12 @@ describe("HostedUserRunner resumeFinalize drain", () => {
       ...createRunRecord(),
       status: "finalizing" as const,
     };
+    await stateStore.writePendingRunCleanup(run.id, {
+      emailMessages: [],
+      linqMessageIds: ["linq_outbound_message"],
+      required: true,
+      telegramMessages: [],
+    });
 
     const resumeFinalizeAcquire: HostedRunAcquireResponse = {
       acquired: true,
@@ -632,6 +766,1534 @@ describe("HostedUserRunner resumeFinalize drain", () => {
       "commit_attempted",
       "commit_won",
     ]);
+  });
+
+  it("deletes superseded bundle and browser-vault replica objects after a commit wins without finalize", async () => {
+    envMocks.readHostedExecutionEnvironment.mockReturnValue(createTestRuntimeEnvironment());
+    const state = createDurableObjectStateHarness();
+    const stateStore = new RunnerStateStore(state);
+    await stateStore.bootstrapUser("user-resume-finalize");
+    const environment = envMocks.readHostedExecutionEnvironment(createHostedExecutionTestEnv());
+    const bucket = new MemoryEncryptedR2Bucket();
+    const userKeyStore = createHostedUserKeyStore({
+      automationRecipientKeyId: environment.automationRecipientKeyId,
+      automationRecipientPrivateKey: environment.automationRecipientPrivateKey,
+      automationRecipientPrivateKeysById: environment.automationRecipientPrivateKeysById,
+      automationRecipientPublicKey: environment.automationRecipientPublicKey,
+      bucket,
+      envelopeEncryptionKey: environment.platformEnvelopeKey,
+      envelopeEncryptionKeyId: environment.platformEnvelopeKeyId,
+      envelopeEncryptionKeysById: environment.platformEnvelopeKeysById,
+      recoveryRecipientKeyId: environment.recoveryRecipientKeyId,
+      recoveryRecipientPublicKey: environment.recoveryRecipientPublicKey,
+      teeAutomationRecipientKeyId: environment.teeAutomationRecipientKeyId,
+      teeAutomationRecipientPublicKey: environment.teeAutomationRecipientPublicKey,
+    });
+    await userKeyStore.provisionManagedUserCryptoAtActivation("user-resume-finalize");
+    const crypto = await userKeyStore.requireUserCryptoContext("user-resume-finalize", {
+      reason: "test-committed-cleanup",
+    });
+    const previousBundle = await writeHostedBundleFixture({
+      artifactPayloads: ["old-artifact"],
+      bucket,
+      crypto,
+      userId: "user-resume-finalize",
+    });
+    const nextBundle = await writeHostedBundleFixture({
+      artifactPayloads: [],
+      bucket,
+      crypto,
+      userId: "user-resume-finalize",
+    });
+    const previousReplicaRef = await writeBrowserVaultReplicaFixture({
+      bucket,
+      generatedAt: "2026-04-20T08:30:00.000Z",
+      rootKey: crypto.rootKey,
+      sourceBundleHash: "a".repeat(64),
+      userId: "user-resume-finalize",
+    });
+    const runner = new HostedUserRunner(
+      state,
+      environment,
+      bucket,
+    );
+
+    const acquiredCursor = createCursorState({
+      browserVaultReplicaRef: previousReplicaRef,
+      committedSeq: "10",
+      nextSeq: "11",
+      snapshotRef: previousBundle.ref,
+      version: "cursor-v1",
+    });
+    const committedCursor = createCursorState({
+      browserVaultReplicaRef: null,
+      committedSeq: "10",
+      nextSeq: "11",
+      snapshotRef: nextBundle.ref,
+      version: "cursor-v2",
+    });
+    const run = createRunRecord();
+    run.status = "acquired";
+    run.triggerKind = "runtime_timer";
+
+    webControlMocks.acquireHostedRunFromWeb.mockResolvedValueOnce({
+      acquired: true,
+      cursor: acquiredCursor,
+      events: [],
+      pendingIngressEventCount: 1,
+      resumeFinalize: false,
+      run,
+      runToken: "run-token",
+    });
+    webControlMocks.commitHostedRunToWeb.mockResolvedValue({
+      committed: true,
+      cursor: committedCursor,
+      needsFinalize: false,
+      run,
+    });
+    webControlMocks.recordHostedRunLogInWeb.mockResolvedValue({
+      log: null,
+      logged: true,
+    });
+    wakeProcessorMocks.executeRunDrain.mockResolvedValue({
+      browserVaultReplicaRef: null,
+      cursorSnapshotRef: nextBundle.ref,
+      finalizeRequired: false,
+      nextRuntimeWakeAt: null,
+      redactedSummary: null,
+      state: "completed",
+    });
+
+    const result = await runner.drainHostedRuns();
+
+    expect(result).toEqual({
+      committedSeq: committedCursor.committedSeq,
+      requestedTargetSeq: null,
+      targetReached: true,
+    });
+    expect(bucket.deleted).toEqual(expect.arrayContaining([
+      previousBundle.ref.key,
+      previousBundle.artifactKeys[0],
+      previousReplicaRef.objectKey,
+    ]));
+    expect(bucket.deleted).toHaveLength(3);
+    expect(bucket.objects.has(previousBundle.ref.key)).toBe(false);
+    expect(bucket.objects.has(nextBundle.ref.key)).toBe(true);
+    expect(bucket.objects.has(previousReplicaRef.objectKey)).toBe(false);
+  });
+
+  it("deletes losing candidate bundle and browser-vault replica objects when commit loses", async () => {
+    envMocks.readHostedExecutionEnvironment.mockReturnValue(createTestRuntimeEnvironment());
+    const state = createDurableObjectStateHarness();
+    const stateStore = new RunnerStateStore(state);
+    await stateStore.bootstrapUser("user-resume-finalize");
+    const environment = envMocks.readHostedExecutionEnvironment(createHostedExecutionTestEnv());
+    const bucket = new MemoryEncryptedR2Bucket();
+    const userKeyStore = createHostedUserKeyStore({
+      automationRecipientKeyId: environment.automationRecipientKeyId,
+      automationRecipientPrivateKey: environment.automationRecipientPrivateKey,
+      automationRecipientPrivateKeysById: environment.automationRecipientPrivateKeysById,
+      automationRecipientPublicKey: environment.automationRecipientPublicKey,
+      bucket,
+      envelopeEncryptionKey: environment.platformEnvelopeKey,
+      envelopeEncryptionKeyId: environment.platformEnvelopeKeyId,
+      envelopeEncryptionKeysById: environment.platformEnvelopeKeysById,
+      recoveryRecipientKeyId: environment.recoveryRecipientKeyId,
+      recoveryRecipientPublicKey: environment.recoveryRecipientPublicKey,
+      teeAutomationRecipientKeyId: environment.teeAutomationRecipientKeyId,
+      teeAutomationRecipientPublicKey: environment.teeAutomationRecipientPublicKey,
+    });
+    await userKeyStore.provisionManagedUserCryptoAtActivation("user-resume-finalize");
+    const crypto = await userKeyStore.requireUserCryptoContext("user-resume-finalize", {
+      reason: "test-commit-loss-candidate-cleanup",
+    });
+    const authoritativeBundle = await writeHostedBundleFixture({
+      artifactPayloads: ["authoritative-artifact"],
+      bucket,
+      crypto,
+      userId: "user-resume-finalize",
+    });
+    const candidateBundle = await writeHostedBundleFixture({
+      artifactPayloads: ["candidate-artifact"],
+      bucket,
+      crypto,
+      userId: "user-resume-finalize",
+    });
+    const authoritativeReplicaRef = await writeBrowserVaultReplicaFixture({
+      bucket,
+      generatedAt: "2026-04-20T08:30:00.000Z",
+      rootKey: crypto.rootKey,
+      sourceBundleHash: "a".repeat(64),
+      userId: "user-resume-finalize",
+    });
+    const candidateReplicaRef = await writeBrowserVaultReplicaFixture({
+      bucket,
+      generatedAt: "2026-04-20T09:30:00.000Z",
+      rootKey: crypto.rootKey,
+      sourceBundleHash: "b".repeat(64),
+      userId: "user-resume-finalize",
+    });
+    const runner = new HostedUserRunner(
+      state,
+      environment,
+      bucket,
+    );
+
+    const acquiredCursor = createCursorState({
+      browserVaultReplicaRef: authoritativeReplicaRef,
+      committedSeq: "10",
+      nextSeq: "11",
+      snapshotRef: authoritativeBundle.ref,
+      version: "cursor-v1",
+    });
+    const run = {
+      ...createRunRecord(),
+      status: "acquired" as const,
+      triggerKind: "runtime_timer" as const,
+    };
+
+    webControlMocks.acquireHostedRunFromWeb.mockResolvedValueOnce({
+      acquired: true,
+      cursor: acquiredCursor,
+      events: [],
+      pendingIngressEventCount: 1,
+      resumeFinalize: false,
+      run,
+      runToken: "run-token",
+    });
+    webControlMocks.commitHostedRunToWeb.mockResolvedValue({
+      committed: false,
+      cursor: acquiredCursor,
+      needsFinalize: false,
+      run: null,
+    });
+    webControlMocks.recordHostedRunLogInWeb.mockResolvedValue({
+      log: null,
+      logged: true,
+    });
+    wakeProcessorMocks.executeRunDrain.mockResolvedValue({
+      browserVaultReplicaRef: candidateReplicaRef,
+      cursorSnapshotRef: candidateBundle.ref,
+      finalizeRequired: false,
+      nextRuntimeWakeAt: null,
+      redactedSummary: null,
+      state: "completed",
+    });
+
+    const result = await runner.drainHostedRuns();
+
+    expect(result).toEqual({
+      committedSeq: acquiredCursor.committedSeq,
+      requestedTargetSeq: null,
+      targetReached: true,
+    });
+    expect(bucket.deleted).toEqual(expect.arrayContaining([
+      candidateBundle.artifactKeys[0],
+      candidateBundle.ref.key,
+      candidateReplicaRef.objectKey,
+    ]));
+    expect(bucket.deleted).toHaveLength(3);
+    expect(bucket.objects.has(authoritativeBundle.artifactKeys[0])).toBe(true);
+    expect(bucket.objects.has(authoritativeBundle.ref.key)).toBe(true);
+    expect(bucket.objects.has(authoritativeReplicaRef.objectKey)).toBe(true);
+    expect(bucket.objects.has(candidateBundle.ref.key)).toBe(false);
+    expect(bucket.objects.has(candidateReplicaRef.objectKey)).toBe(false);
+  });
+
+  it("reconciles old authoritative cleanup on the next drain when commit response loss hides a winning cursor swap", async () => {
+    envMocks.readHostedExecutionEnvironment.mockReturnValue(createTestRuntimeEnvironment());
+    const state = createDurableObjectStateHarness();
+    const stateStore = new RunnerStateStore(state);
+    await stateStore.bootstrapUser("user-resume-finalize");
+    const environment = envMocks.readHostedExecutionEnvironment(createHostedExecutionTestEnv());
+    const bucket = new MemoryEncryptedR2Bucket();
+    const userKeyStore = createHostedUserKeyStore({
+      automationRecipientKeyId: environment.automationRecipientKeyId,
+      automationRecipientPrivateKey: environment.automationRecipientPrivateKey,
+      automationRecipientPrivateKeysById: environment.automationRecipientPrivateKeysById,
+      automationRecipientPublicKey: environment.automationRecipientPublicKey,
+      bucket,
+      envelopeEncryptionKey: environment.platformEnvelopeKey,
+      envelopeEncryptionKeyId: environment.platformEnvelopeKeyId,
+      envelopeEncryptionKeysById: environment.platformEnvelopeKeysById,
+      recoveryRecipientKeyId: environment.recoveryRecipientKeyId,
+      recoveryRecipientPublicKey: environment.recoveryRecipientPublicKey,
+      teeAutomationRecipientKeyId: environment.teeAutomationRecipientKeyId,
+      teeAutomationRecipientPublicKey: environment.teeAutomationRecipientPublicKey,
+    });
+    await userKeyStore.provisionManagedUserCryptoAtActivation("user-resume-finalize");
+    const crypto = await userKeyStore.requireUserCryptoContext("user-resume-finalize", {
+      reason: "test-commit-response-loss-cleanup",
+    });
+    const previousBundle = await writeHostedBundleFixture({
+      artifactPayloads: ["old-artifact"],
+      bucket,
+      crypto,
+      userId: "user-resume-finalize",
+    });
+    const currentBundle = await writeHostedBundleFixture({
+      artifactPayloads: [],
+      bucket,
+      crypto,
+      userId: "user-resume-finalize",
+    });
+    const previousReplicaRef = await writeBrowserVaultReplicaFixture({
+      bucket,
+      generatedAt: "2026-04-20T08:30:00.000Z",
+      rootKey: crypto.rootKey,
+      sourceBundleHash: "a".repeat(64),
+      userId: "user-resume-finalize",
+    });
+    const currentReplicaRef = await writeBrowserVaultReplicaFixture({
+      bucket,
+      generatedAt: "2026-04-20T09:30:00.000Z",
+      rootKey: crypto.rootKey,
+      sourceBundleHash: "b".repeat(64),
+      userId: "user-resume-finalize",
+    });
+    const runner = new HostedUserRunner(
+      state,
+      environment,
+      bucket,
+    );
+
+    const acquiredCursor = createCursorState({
+      browserVaultReplicaRef: previousReplicaRef,
+      committedSeq: "10",
+      nextSeq: "11",
+      snapshotRef: previousBundle.ref,
+      version: "cursor-v1",
+    });
+    const committedCursor = createCursorState({
+      browserVaultReplicaRef: currentReplicaRef,
+      committedSeq: "10",
+      nextSeq: "11",
+      snapshotRef: currentBundle.ref,
+      version: "cursor-v2",
+    });
+    const run = {
+      ...createRunRecord(),
+      status: "acquired" as const,
+      triggerKind: "runtime_timer" as const,
+    };
+
+    webControlMocks.acquireHostedRunFromWeb
+      .mockResolvedValueOnce({
+        acquired: true,
+        cursor: acquiredCursor,
+        events: [],
+        pendingIngressEventCount: 1,
+        resumeFinalize: false,
+        run,
+        runToken: "prepare-token",
+      })
+      .mockResolvedValueOnce({
+        acquired: false,
+        cursor: committedCursor,
+        events: [],
+        pendingIngressEventCount: 0,
+        resumeFinalize: false,
+        run: null,
+      });
+    webControlMocks.commitHostedRunToWeb.mockRejectedValueOnce(
+      new Error("hosted run commit response lost"),
+    );
+    webControlMocks.recordHostedRunLogInWeb.mockResolvedValue({
+      log: null,
+      logged: true,
+    });
+    wakeProcessorMocks.executeRunDrain.mockResolvedValue({
+      browserVaultReplicaRef: currentReplicaRef,
+      cursorSnapshotRef: currentBundle.ref,
+      finalizeRequired: false,
+      nextRuntimeWakeAt: null,
+      redactedSummary: null,
+      state: "completed",
+    });
+
+    await expect(runner.drainHostedRuns()).rejects.toThrow("hosted run commit response lost");
+
+    const recovered = await runner.drainHostedRuns();
+
+    expect(recovered).toEqual({
+      committedSeq: committedCursor.committedSeq,
+      requestedTargetSeq: null,
+      targetReached: true,
+    });
+    expect(bucket.deleted).toEqual(expect.arrayContaining([
+      previousBundle.artifactKeys[0],
+      previousBundle.ref.key,
+      previousReplicaRef.objectKey,
+    ]));
+    expect(bucket.deleted).toHaveLength(3);
+    expect(bucket.objects.has(previousBundle.ref.key)).toBe(false);
+    expect(bucket.objects.has(currentBundle.ref.key)).toBe(true);
+    expect(bucket.objects.has(previousReplicaRef.objectKey)).toBe(false);
+    expect(bucket.objects.has(currentReplicaRef.objectKey)).toBe(true);
+  });
+
+  it("preserves pending finalize cleanup when commit response loss hides a winning prepared snapshot", async () => {
+    envMocks.readHostedExecutionEnvironment.mockReturnValue(createTestRuntimeEnvironment());
+    const state = createDurableObjectStateHarness();
+    const stateStore = new RunnerStateStore(state);
+    await stateStore.bootstrapUser("user-resume-finalize");
+    const environment = envMocks.readHostedExecutionEnvironment(createHostedExecutionTestEnv());
+    const bucket = new MemoryEncryptedR2Bucket();
+    const userKeyStore = createHostedUserKeyStore({
+      automationRecipientKeyId: environment.automationRecipientKeyId,
+      automationRecipientPrivateKey: environment.automationRecipientPrivateKey,
+      automationRecipientPrivateKeysById: environment.automationRecipientPrivateKeysById,
+      automationRecipientPublicKey: environment.automationRecipientPublicKey,
+      bucket,
+      envelopeEncryptionKey: environment.platformEnvelopeKey,
+      envelopeEncryptionKeyId: environment.platformEnvelopeKeyId,
+      envelopeEncryptionKeysById: environment.platformEnvelopeKeysById,
+      recoveryRecipientKeyId: environment.recoveryRecipientKeyId,
+      recoveryRecipientPublicKey: environment.recoveryRecipientPublicKey,
+      teeAutomationRecipientKeyId: environment.teeAutomationRecipientKeyId,
+      teeAutomationRecipientPublicKey: environment.teeAutomationRecipientPublicKey,
+    });
+    await userKeyStore.provisionManagedUserCryptoAtActivation("user-resume-finalize");
+    const crypto = await userKeyStore.requireUserCryptoContext("user-resume-finalize", {
+      reason: "test-finalize-response-loss-recovery",
+    });
+    const initialBundle = await writeHostedBundleFixture({
+      artifactPayloads: ["initial-artifact"],
+      bucket,
+      crypto,
+      userId: "user-resume-finalize",
+    });
+    const preparedBundle = await writeHostedBundleFixture({
+      artifactPayloads: ["prepared-artifact"],
+      bucket,
+      crypto,
+      userId: "user-resume-finalize",
+    });
+    const finalBundle = await writeHostedBundleFixture({
+      artifactPayloads: [],
+      bucket,
+      crypto,
+      userId: "user-resume-finalize",
+    });
+    const previousReplicaRef = await writeBrowserVaultReplicaFixture({
+      bucket,
+      generatedAt: "2026-04-20T08:45:00.000Z",
+      rootKey: crypto.rootKey,
+      sourceBundleHash: "d".repeat(64),
+      userId: "user-resume-finalize",
+    });
+    const runner = new HostedUserRunner(
+      state,
+      environment,
+      bucket,
+    );
+
+    const acquiredCursor = createCursorState({
+      browserVaultReplicaRef: previousReplicaRef,
+      committedSeq: "10",
+      nextSeq: "11",
+      snapshotRef: initialBundle.ref,
+      version: "cursor-v1",
+    });
+    const committedCursor = createCursorState({
+      browserVaultReplicaRef: previousReplicaRef,
+      committedSeq: "10",
+      nextSeq: "11",
+      snapshotRef: preparedBundle.ref,
+      version: "cursor-v2",
+    });
+    const finalizedCursor = createCursorState({
+      browserVaultReplicaRef: null,
+      committedSeq: "10",
+      nextSeq: "11",
+      snapshotRef: finalBundle.ref,
+      version: "cursor-v3",
+    });
+    const acquiredRun = {
+      ...createRunRecord(),
+      status: "acquired" as const,
+      triggerKind: "runtime_timer" as const,
+    };
+    const committedRun = {
+      ...acquiredRun,
+      status: "committed_needs_finalize" as const,
+    };
+    const finalizingRun = {
+      ...acquiredRun,
+      status: "finalizing" as const,
+      triggerKind: "retry_finalize" as const,
+    };
+
+    webControlMocks.acquireHostedRunFromWeb
+      .mockResolvedValueOnce({
+        acquired: true,
+        cursor: acquiredCursor,
+        events: [],
+        pendingIngressEventCount: 1,
+        resumeFinalize: false,
+        run: acquiredRun,
+        runToken: "prepare-token",
+      })
+      .mockResolvedValueOnce({
+        acquired: true,
+        cursor: committedCursor,
+        events: [],
+        pendingIngressEventCount: 1,
+        resumeFinalize: true,
+        run: finalizingRun,
+        runToken: "finalize-token",
+      })
+      .mockResolvedValueOnce({
+        acquired: false,
+        cursor: finalizedCursor,
+        events: [],
+        pendingIngressEventCount: 0,
+        resumeFinalize: false,
+        run: null,
+        runToken: null,
+      });
+    webControlMocks.commitHostedRunToWeb.mockRejectedValueOnce(
+      new Error("hosted run commit response lost"),
+    );
+    webControlMocks.finalizeHostedRunInWeb.mockResolvedValue({
+      cursor: finalizedCursor,
+      finalized: true,
+      run: finalizingRun,
+    });
+    webControlMocks.recordHostedRunLogInWeb.mockResolvedValue({
+      log: null,
+      logged: true,
+    });
+    wakeProcessorMocks.executeRunDrain.mockResolvedValue({
+      cursorSnapshotRef: preparedBundle.ref,
+      finalizeRequired: true,
+      nextRuntimeWakeAt: null,
+      redactedSummary: null,
+      state: "completed",
+    });
+    wakeProcessorMocks.finalizeRunDrain.mockResolvedValue({
+      browserVaultReplicaRef: null,
+      cursorSnapshotRef: finalBundle.ref,
+      nextRuntimeWakeAt: null,
+      redactedSummary: null,
+      state: "completed",
+    });
+    wakeProcessorMocks.persistPendingRunCleanupData.mockImplementation(async (input: {
+      runId: string;
+    }) => {
+      await writeRequiredPendingCleanupState(stateStore, input.runId);
+    });
+    wakeProcessorMocks.cleanupTransientWakeDataBestEffortForRunDrain.mockImplementation(async (input: {
+      runId: string;
+    }) => {
+      await stateStore.clearPendingRunCleanup(input.runId);
+    });
+
+    await expect(runner.drainHostedRuns()).rejects.toThrow("hosted run commit response lost");
+    await expect(stateStore.readDurablePendingRunCleanup(acquiredRun.id)).resolves.toEqual({
+      emailMessages: [],
+      linqMessageIds: [],
+      required: true,
+      telegramMessages: [],
+    });
+
+    const recovered = await runner.drainHostedRuns();
+
+    expect(recovered).toEqual({
+      committedSeq: finalizedCursor.committedSeq,
+      requestedTargetSeq: null,
+      targetReached: true,
+    });
+    expect(wakeProcessorMocks.finalizeRunDrain).toHaveBeenCalledTimes(1);
+    expect(webControlMocks.releaseHostedRunFinalizeInWeb).not.toHaveBeenCalled();
+    await expect(stateStore.readDurablePendingRunCleanup(acquiredRun.id)).resolves.toBeNull();
+    expect(bucket.deleted).toEqual(expect.arrayContaining([
+      initialBundle.artifactKeys[0],
+      initialBundle.ref.key,
+      preparedBundle.artifactKeys[0],
+      preparedBundle.ref.key,
+      previousReplicaRef.objectKey,
+    ]));
+    expect(bucket.deleted).toHaveLength(5);
+    expect(bucket.objects.has(initialBundle.ref.key)).toBe(false);
+    expect(bucket.objects.has(preparedBundle.ref.key)).toBe(false);
+    expect(bucket.objects.has(finalBundle.ref.key)).toBe(true);
+    expect(bucket.objects.has(previousReplicaRef.objectKey)).toBe(false);
+  });
+
+  it("keeps the current browser-vault replica when commit rewrites it in place", async () => {
+    envMocks.readHostedExecutionEnvironment.mockReturnValue(createTestRuntimeEnvironment());
+    const state = createDurableObjectStateHarness();
+    const stateStore = new RunnerStateStore(state);
+    await stateStore.bootstrapUser("user-resume-finalize");
+    const environment = envMocks.readHostedExecutionEnvironment(createHostedExecutionTestEnv());
+    const bucket = new MemoryEncryptedR2Bucket();
+    const userKeyStore = createHostedUserKeyStore({
+      automationRecipientKeyId: environment.automationRecipientKeyId,
+      automationRecipientPrivateKey: environment.automationRecipientPrivateKey,
+      automationRecipientPrivateKeysById: environment.automationRecipientPrivateKeysById,
+      automationRecipientPublicKey: environment.automationRecipientPublicKey,
+      bucket,
+      envelopeEncryptionKey: environment.platformEnvelopeKey,
+      envelopeEncryptionKeyId: environment.platformEnvelopeKeyId,
+      envelopeEncryptionKeysById: environment.platformEnvelopeKeysById,
+      recoveryRecipientKeyId: environment.recoveryRecipientKeyId,
+      recoveryRecipientPublicKey: environment.recoveryRecipientPublicKey,
+      teeAutomationRecipientKeyId: environment.teeAutomationRecipientKeyId,
+      teeAutomationRecipientPublicKey: environment.teeAutomationRecipientPublicKey,
+    });
+    await userKeyStore.provisionManagedUserCryptoAtActivation("user-resume-finalize");
+    const crypto = await userKeyStore.requireUserCryptoContext("user-resume-finalize", {
+      reason: "test-in-place-browser-vault-rewrite",
+    });
+    const previousReplicaRef = await writeBrowserVaultReplicaFixture({
+      bucket,
+      generatedAt: "2026-04-20T08:30:00.000Z",
+      rootKey: crypto.rootKey,
+      sourceBundleHash: "c".repeat(64),
+      userId: "user-resume-finalize",
+    });
+    const nextReplicaRef = await writeBrowserVaultReplicaFixture({
+      bucket,
+      generatedAt: "2026-04-21T08:30:00.000Z",
+      rootKey: crypto.rootKey,
+      sourceBundleHash: "c".repeat(64),
+      userId: "user-resume-finalize",
+    });
+    const runner = new HostedUserRunner(
+      state,
+      environment,
+      bucket,
+    );
+
+    expect(nextReplicaRef.objectKey).toBe(previousReplicaRef.objectKey);
+    expect(nextReplicaRef.generatedAt).not.toBe(previousReplicaRef.generatedAt);
+
+    const acquiredCursor = createCursorState({
+      browserVaultReplicaRef: previousReplicaRef,
+      committedSeq: "10",
+      nextSeq: "11",
+      snapshotKey: "snapshot/current",
+      version: "cursor-v1",
+    });
+    const committedCursor = createCursorState({
+      browserVaultReplicaRef: nextReplicaRef,
+      committedSeq: "10",
+      nextSeq: "11",
+      snapshotKey: "snapshot/current",
+      version: "cursor-v2",
+    });
+    const run = createRunRecord();
+    run.status = "acquired";
+    run.triggerKind = "runtime_timer";
+
+    webControlMocks.acquireHostedRunFromWeb.mockResolvedValueOnce({
+      acquired: true,
+      cursor: acquiredCursor,
+      events: [],
+      pendingIngressEventCount: 1,
+      resumeFinalize: false,
+      run,
+      runToken: "run-token",
+    });
+    webControlMocks.commitHostedRunToWeb.mockResolvedValue({
+      committed: true,
+      cursor: committedCursor,
+      needsFinalize: false,
+      run,
+    });
+    webControlMocks.recordHostedRunLogInWeb.mockResolvedValue({
+      log: null,
+      logged: true,
+    });
+    wakeProcessorMocks.executeRunDrain.mockResolvedValue({
+      browserVaultReplicaRef: nextReplicaRef,
+      cursorSnapshotRef: acquiredCursor.snapshotRef,
+      finalizeRequired: false,
+      nextRuntimeWakeAt: null,
+      redactedSummary: null,
+      state: "completed",
+    });
+
+    const result = await runner.drainHostedRuns();
+
+    expect(result).toEqual({
+      committedSeq: committedCursor.committedSeq,
+      requestedTargetSeq: null,
+      targetReached: true,
+    });
+    expect(bucket.deleted).toEqual([]);
+    expect(bucket.objects.has(nextReplicaRef.objectKey)).toBe(true);
+  });
+
+  it("deletes superseded prepared snapshots only after finalization commits the replacement ref", async () => {
+    envMocks.readHostedExecutionEnvironment.mockReturnValue(createTestRuntimeEnvironment());
+    const state = createDurableObjectStateHarness();
+    const stateStore = new RunnerStateStore(state);
+    await stateStore.bootstrapUser("user-resume-finalize");
+    const environment = envMocks.readHostedExecutionEnvironment(createHostedExecutionTestEnv());
+    const bucket = new MemoryEncryptedR2Bucket();
+    const userKeyStore = createHostedUserKeyStore({
+      automationRecipientKeyId: environment.automationRecipientKeyId,
+      automationRecipientPrivateKey: environment.automationRecipientPrivateKey,
+      automationRecipientPrivateKeysById: environment.automationRecipientPrivateKeysById,
+      automationRecipientPublicKey: environment.automationRecipientPublicKey,
+      bucket,
+      envelopeEncryptionKey: environment.platformEnvelopeKey,
+      envelopeEncryptionKeyId: environment.platformEnvelopeKeyId,
+      envelopeEncryptionKeysById: environment.platformEnvelopeKeysById,
+      recoveryRecipientKeyId: environment.recoveryRecipientKeyId,
+      recoveryRecipientPublicKey: environment.recoveryRecipientPublicKey,
+      teeAutomationRecipientKeyId: environment.teeAutomationRecipientKeyId,
+      teeAutomationRecipientPublicKey: environment.teeAutomationRecipientPublicKey,
+    });
+    await userKeyStore.provisionManagedUserCryptoAtActivation("user-resume-finalize");
+    const crypto = await userKeyStore.requireUserCryptoContext("user-resume-finalize", {
+      reason: "test-finalize-cleanup",
+    });
+    const initialBundle = await writeHostedBundleFixture({
+      artifactPayloads: ["initial-artifact"],
+      bucket,
+      crypto,
+      userId: "user-resume-finalize",
+    });
+    const preparedBundle = await writeHostedBundleFixture({
+      artifactPayloads: ["prepared-artifact"],
+      bucket,
+      crypto,
+      userId: "user-resume-finalize",
+    });
+    const finalBundle = await writeHostedBundleFixture({
+      artifactPayloads: [],
+      bucket,
+      crypto,
+      userId: "user-resume-finalize",
+    });
+    const previousReplicaRef = await writeBrowserVaultReplicaFixture({
+      bucket,
+      generatedAt: "2026-04-20T08:45:00.000Z",
+      rootKey: crypto.rootKey,
+      sourceBundleHash: "b".repeat(64),
+      userId: "user-resume-finalize",
+    });
+    const runner = new HostedUserRunner(
+      state,
+      environment,
+      bucket,
+    );
+
+    const acquiredCursor = createCursorState({
+      browserVaultReplicaRef: previousReplicaRef,
+      committedSeq: "10",
+      nextSeq: "11",
+      snapshotRef: initialBundle.ref,
+      version: "cursor-v1",
+    });
+    const committedCursor = createCursorState({
+      browserVaultReplicaRef: previousReplicaRef,
+      committedSeq: "10",
+      nextSeq: "11",
+      snapshotRef: preparedBundle.ref,
+      version: "cursor-v2",
+    });
+    const finalizedCursor = createCursorState({
+      browserVaultReplicaRef: null,
+      committedSeq: "10",
+      nextSeq: "11",
+      snapshotRef: finalBundle.ref,
+      version: "cursor-v3",
+    });
+    const run = {
+      ...createRunRecord(),
+      status: "acquired" as const,
+      triggerKind: "runtime_timer" as const,
+    };
+    const committedRun = {
+      ...run,
+      status: "committed_needs_finalize" as const,
+    };
+    const finalizingRun = {
+      ...run,
+      status: "finalizing" as const,
+      triggerKind: "retry_finalize" as const,
+    };
+
+    webControlMocks.acquireHostedRunFromWeb
+      .mockResolvedValueOnce({
+        acquired: true,
+        cursor: acquiredCursor,
+        events: [],
+        pendingIngressEventCount: 1,
+        resumeFinalize: false,
+        run,
+        runToken: "prepare-token",
+      })
+      .mockResolvedValueOnce({
+        acquired: true,
+        cursor: committedCursor,
+        events: [],
+        pendingIngressEventCount: 1,
+        resumeFinalize: true,
+        run: finalizingRun,
+        runToken: "finalize-token",
+      });
+    webControlMocks.commitHostedRunToWeb.mockResolvedValue({
+      committed: true,
+      cursor: committedCursor,
+      needsFinalize: true,
+      run: committedRun,
+    });
+    webControlMocks.finalizeHostedRunInWeb.mockResolvedValue({
+      cursor: finalizedCursor,
+      finalized: true,
+      run: finalizingRun,
+    });
+    webControlMocks.recordHostedRunLogInWeb.mockResolvedValue({
+      log: null,
+      logged: true,
+    });
+    wakeProcessorMocks.executeRunDrain.mockResolvedValue({
+      cursorSnapshotRef: preparedBundle.ref,
+      finalizeRequired: true,
+      nextRuntimeWakeAt: null,
+      redactedSummary: null,
+      state: "completed",
+    });
+    wakeProcessorMocks.finalizeRunDrain.mockResolvedValue({
+      browserVaultReplicaRef: null,
+      cursorSnapshotRef: finalBundle.ref,
+      nextRuntimeWakeAt: null,
+      redactedSummary: null,
+      state: "completed",
+    });
+
+    const result = await runner.drainHostedRuns();
+
+    expect(result).toEqual({
+      committedSeq: finalizedCursor.committedSeq,
+      requestedTargetSeq: null,
+      targetReached: true,
+    });
+    expect(bucket.deleted).toEqual(expect.arrayContaining([
+      initialBundle.artifactKeys[0],
+      initialBundle.ref.key,
+      preparedBundle.artifactKeys[0],
+      preparedBundle.ref.key,
+      previousReplicaRef.objectKey,
+    ]));
+    expect(bucket.deleted).toHaveLength(5);
+    expect(bucket.objects.has(initialBundle.ref.key)).toBe(false);
+    expect(bucket.objects.has(preparedBundle.ref.key)).toBe(false);
+    expect(bucket.objects.has(finalBundle.ref.key)).toBe(true);
+    expect(bucket.objects.has(previousReplicaRef.objectKey)).toBe(false);
+  });
+
+  it("deletes losing finalization candidate objects when finalize loses", async () => {
+    envMocks.readHostedExecutionEnvironment.mockReturnValue(createTestRuntimeEnvironment());
+    const state = createDurableObjectStateHarness();
+    const stateStore = new RunnerStateStore(state);
+    await stateStore.bootstrapUser("user-resume-finalize");
+    const environment = envMocks.readHostedExecutionEnvironment(createHostedExecutionTestEnv());
+    const bucket = new MemoryEncryptedR2Bucket();
+    const userKeyStore = createHostedUserKeyStore({
+      automationRecipientKeyId: environment.automationRecipientKeyId,
+      automationRecipientPrivateKey: environment.automationRecipientPrivateKey,
+      automationRecipientPrivateKeysById: environment.automationRecipientPrivateKeysById,
+      automationRecipientPublicKey: environment.automationRecipientPublicKey,
+      bucket,
+      envelopeEncryptionKey: environment.platformEnvelopeKey,
+      envelopeEncryptionKeyId: environment.platformEnvelopeKeyId,
+      envelopeEncryptionKeysById: environment.platformEnvelopeKeysById,
+      recoveryRecipientKeyId: environment.recoveryRecipientKeyId,
+      recoveryRecipientPublicKey: environment.recoveryRecipientPublicKey,
+      teeAutomationRecipientKeyId: environment.teeAutomationRecipientKeyId,
+      teeAutomationRecipientPublicKey: environment.teeAutomationRecipientPublicKey,
+    });
+    await userKeyStore.provisionManagedUserCryptoAtActivation("user-resume-finalize");
+    const crypto = await userKeyStore.requireUserCryptoContext("user-resume-finalize", {
+      reason: "test-finalize-loss-candidate-cleanup",
+    });
+    const committedBundle = await writeHostedBundleFixture({
+      artifactPayloads: ["prepared-artifact"],
+      bucket,
+      crypto,
+      userId: "user-resume-finalize",
+    });
+    const finalCandidateBundle = await writeHostedBundleFixture({
+      artifactPayloads: ["final-candidate-artifact"],
+      bucket,
+      crypto,
+      userId: "user-resume-finalize",
+    });
+    const committedReplicaRef = await writeBrowserVaultReplicaFixture({
+      bucket,
+      generatedAt: "2026-04-20T08:45:00.000Z",
+      rootKey: crypto.rootKey,
+      sourceBundleHash: "b".repeat(64),
+      userId: "user-resume-finalize",
+    });
+    const finalCandidateReplicaRef = await writeBrowserVaultReplicaFixture({
+      bucket,
+      generatedAt: "2026-04-20T09:45:00.000Z",
+      rootKey: crypto.rootKey,
+      sourceBundleHash: "c".repeat(64),
+      userId: "user-resume-finalize",
+    });
+    const runner = new HostedUserRunner(
+      state,
+      environment,
+      bucket,
+    );
+
+    const committedCursor = createCursorState({
+      browserVaultReplicaRef: committedReplicaRef,
+      committedSeq: "10",
+      nextSeq: "11",
+      snapshotRef: committedBundle.ref,
+      version: "cursor-v2",
+    });
+    const run = {
+      ...createRunRecord(),
+      status: "finalizing" as const,
+      triggerKind: "retry_finalize" as const,
+    };
+    await writeRequiredPendingCleanupState(stateStore, run.id);
+
+    webControlMocks.acquireHostedRunFromWeb.mockResolvedValueOnce({
+      acquired: true,
+      cursor: committedCursor,
+      events: [],
+      pendingIngressEventCount: 1,
+      resumeFinalize: true,
+      run,
+      runToken: "finalize-token",
+    });
+    webControlMocks.finalizeHostedRunInWeb.mockResolvedValue({
+      cursor: committedCursor,
+      finalized: false,
+      run: null,
+    });
+    webControlMocks.recordHostedRunLogInWeb.mockResolvedValue({
+      log: null,
+      logged: true,
+    });
+    wakeProcessorMocks.finalizeRunDrain.mockResolvedValue({
+      browserVaultReplicaRef: finalCandidateReplicaRef,
+      cursorSnapshotRef: finalCandidateBundle.ref,
+      nextRuntimeWakeAt: null,
+      redactedSummary: null,
+      state: "completed",
+    });
+
+    const result = await runner.drainHostedRuns();
+
+    expect(result).toEqual({
+      committedSeq: committedCursor.committedSeq,
+      requestedTargetSeq: null,
+      targetReached: true,
+    });
+    expect(bucket.deleted).toEqual(expect.arrayContaining([
+      finalCandidateBundle.artifactKeys[0],
+      finalCandidateBundle.ref.key,
+      finalCandidateReplicaRef.objectKey,
+    ]));
+    expect(bucket.deleted).toHaveLength(3);
+    expect(bucket.objects.has(committedBundle.ref.key)).toBe(true);
+    expect(bucket.objects.has(committedReplicaRef.objectKey)).toBe(true);
+    expect(bucket.objects.has(finalCandidateBundle.ref.key)).toBe(false);
+    expect(bucket.objects.has(finalCandidateReplicaRef.objectKey)).toBe(false);
+  });
+
+  it("reconciles prepared snapshot cleanup on the next drain when finalize response loss hides a winning final ref", async () => {
+    envMocks.readHostedExecutionEnvironment.mockReturnValue(createTestRuntimeEnvironment());
+    const state = createDurableObjectStateHarness();
+    const stateStore = new RunnerStateStore(state);
+    await stateStore.bootstrapUser("user-resume-finalize");
+    const environment = envMocks.readHostedExecutionEnvironment(createHostedExecutionTestEnv());
+    const bucket = new MemoryEncryptedR2Bucket();
+    const userKeyStore = createHostedUserKeyStore({
+      automationRecipientKeyId: environment.automationRecipientKeyId,
+      automationRecipientPrivateKey: environment.automationRecipientPrivateKey,
+      automationRecipientPrivateKeysById: environment.automationRecipientPrivateKeysById,
+      automationRecipientPublicKey: environment.automationRecipientPublicKey,
+      bucket,
+      envelopeEncryptionKey: environment.platformEnvelopeKey,
+      envelopeEncryptionKeyId: environment.platformEnvelopeKeyId,
+      envelopeEncryptionKeysById: environment.platformEnvelopeKeysById,
+      recoveryRecipientKeyId: environment.recoveryRecipientKeyId,
+      recoveryRecipientPublicKey: environment.recoveryRecipientPublicKey,
+      teeAutomationRecipientKeyId: environment.teeAutomationRecipientKeyId,
+      teeAutomationRecipientPublicKey: environment.teeAutomationRecipientPublicKey,
+    });
+    await userKeyStore.provisionManagedUserCryptoAtActivation("user-resume-finalize");
+    const crypto = await userKeyStore.requireUserCryptoContext("user-resume-finalize", {
+      reason: "test-finalize-response-loss-cleanup",
+    });
+    const preparedBundle = await writeHostedBundleFixture({
+      artifactPayloads: ["prepared-artifact"],
+      bucket,
+      crypto,
+      userId: "user-resume-finalize",
+    });
+    const finalBundle = await writeHostedBundleFixture({
+      artifactPayloads: [],
+      bucket,
+      crypto,
+      userId: "user-resume-finalize",
+    });
+    const preparedReplicaRef = await writeBrowserVaultReplicaFixture({
+      bucket,
+      generatedAt: "2026-04-20T08:45:00.000Z",
+      rootKey: crypto.rootKey,
+      sourceBundleHash: "b".repeat(64),
+      userId: "user-resume-finalize",
+    });
+    const runner = new HostedUserRunner(
+      state,
+      environment,
+      bucket,
+    );
+
+    const committedCursor = createCursorState({
+      browserVaultReplicaRef: preparedReplicaRef,
+      committedSeq: "10",
+      nextSeq: "11",
+      snapshotRef: preparedBundle.ref,
+      version: "cursor-v2",
+    });
+    const finalizedCursor = createCursorState({
+      browserVaultReplicaRef: null,
+      committedSeq: "10",
+      nextSeq: "11",
+      snapshotRef: finalBundle.ref,
+      version: "cursor-v3",
+    });
+    const run = {
+      ...createRunRecord(),
+      status: "finalizing" as const,
+      triggerKind: "retry_finalize" as const,
+    };
+    let finalizeResponseLost = false;
+    await writeRequiredPendingCleanupState(stateStore, run.id);
+
+    webControlMocks.acquireHostedRunFromWeb
+      .mockResolvedValueOnce({
+        acquired: true,
+        cursor: committedCursor,
+        events: [],
+        pendingIngressEventCount: 1,
+        resumeFinalize: true,
+        run,
+        runToken: "finalize-token",
+      })
+      .mockResolvedValueOnce({
+        acquired: false,
+        cursor: finalizedCursor,
+        events: [],
+        pendingIngressEventCount: 0,
+        resumeFinalize: false,
+        run: null,
+      });
+    webControlMocks.finalizeHostedRunInWeb.mockImplementationOnce(async () => {
+      finalizeResponseLost = true;
+      throw new Error("hosted run finalize response lost");
+    });
+    webControlMocks.recordHostedRunLogInWeb.mockResolvedValue({
+      log: null,
+      logged: true,
+    });
+    webControlMocks.readHostedRunStatusFromWeb.mockImplementation(async (input: {
+      body?: {
+        runId?: string | null;
+      };
+    }) => {
+      const statusRun = createRunRecord();
+      statusRun.id = input.body?.runId ?? statusRun.id;
+      statusRun.status = input.body?.runId === run.id && finalizeResponseLost
+        ? "finalized"
+        : "running";
+
+      return {
+        cursor: finalizedCursor,
+        pendingIngressEventCount: 0,
+        run: statusRun,
+      };
+    });
+    wakeProcessorMocks.finalizeRunDrain.mockResolvedValue({
+      browserVaultReplicaRef: null,
+      cursorSnapshotRef: finalBundle.ref,
+      nextRuntimeWakeAt: null,
+      redactedSummary: null,
+      state: "completed",
+    });
+    wakeProcessorMocks.cleanupTransientWakeDataBestEffortForRunDrain.mockImplementation(async (input) => {
+      if (input.runId === run.id) {
+        await stateStore.clearPendingRunCleanup(run.id);
+      }
+    });
+
+    await expect(runner.drainHostedRuns()).rejects.toThrow("hosted run finalize response lost");
+
+    const recovered = await runner.drainHostedRuns();
+
+    expect(recovered).toEqual({
+      committedSeq: finalizedCursor.committedSeq,
+      requestedTargetSeq: null,
+      targetReached: true,
+    });
+    expect(wakeProcessorMocks.cleanupTransientWakeDataBestEffortForRunDrain).toHaveBeenCalledTimes(1);
+    expect(wakeProcessorMocks.cleanupTransientWakeDataBestEffortForRunDrain).toHaveBeenCalledWith({
+      runId: run.id,
+      userId: "user-resume-finalize",
+      wakes: [],
+    });
+    expect(bucket.deleted).toEqual(expect.arrayContaining([
+      preparedBundle.artifactKeys[0],
+      preparedBundle.ref.key,
+      preparedReplicaRef.objectKey,
+    ]));
+    expect(bucket.deleted).toHaveLength(3);
+    expect(bucket.objects.has(preparedBundle.ref.key)).toBe(false);
+    expect(bucket.objects.has(finalBundle.ref.key)).toBe(true);
+    expect(bucket.objects.has(preparedReplicaRef.objectKey)).toBe(false);
+  });
+
+  it("replays finalized pending cleanup state and prunes stale recovery sidecars", async () => {
+    envMocks.readHostedExecutionEnvironment.mockReturnValue(createTestRuntimeEnvironment());
+    const state = createDurableObjectStateHarness();
+    const stateStore = new RunnerStateStore(state);
+    await stateStore.bootstrapUser("user-resume-finalize");
+    const environment = envMocks.readHostedExecutionEnvironment(createHostedExecutionTestEnv());
+    const bucket = new MemoryEncryptedR2Bucket();
+    const userKeyStore = createHostedUserKeyStore({
+      automationRecipientKeyId: environment.automationRecipientKeyId,
+      automationRecipientPrivateKey: environment.automationRecipientPrivateKey,
+      automationRecipientPrivateKeysById: environment.automationRecipientPrivateKeysById,
+      automationRecipientPublicKey: environment.automationRecipientPublicKey,
+      bucket,
+      envelopeEncryptionKey: environment.platformEnvelopeKey,
+      envelopeEncryptionKeyId: environment.platformEnvelopeKeyId,
+      envelopeEncryptionKeysById: environment.platformEnvelopeKeysById,
+      recoveryRecipientKeyId: environment.recoveryRecipientKeyId,
+      recoveryRecipientPublicKey: environment.recoveryRecipientPublicKey,
+      teeAutomationRecipientKeyId: environment.teeAutomationRecipientKeyId,
+      teeAutomationRecipientPublicKey: environment.teeAutomationRecipientPublicKey,
+    });
+    await userKeyStore.provisionManagedUserCryptoAtActivation("user-resume-finalize");
+    const crypto = await userKeyStore.requireUserCryptoContext("user-resume-finalize", {
+      reason: "test-recovered-pending-cleanup-replay",
+    });
+    const trackedBundle = await writeHostedBundleFixture({
+      artifactPayloads: ["tracked-before-cleanup"],
+      bucket,
+      crypto,
+      userId: "user-resume-finalize",
+    });
+    const acquiredBundle = await writeHostedBundleFixture({
+      artifactPayloads: [],
+      bucket,
+      crypto,
+      userId: "user-resume-finalize",
+    });
+    const runner = new HostedUserRunner(
+      state,
+      environment,
+      bucket,
+    );
+
+    const trackedCursor = createCursorState({
+      committedSeq: "10",
+      nextSeq: "11",
+      snapshotRef: trackedBundle.ref,
+      version: "cursor-v1",
+    });
+    const acquiredCursor = createCursorState({
+      committedSeq: "11",
+      nextSeq: "12",
+      snapshotRef: acquiredBundle.ref,
+      version: "cursor-v2",
+    });
+    await stateStore.writeTrackedAuthoritativeCursor({
+      browserVaultReplicaRef: trackedCursor.browserVaultReplicaRef ?? null,
+      snapshotRef: trackedCursor.snapshotRef,
+    });
+    await stateStore.writePendingRunCleanup("run-cleanup-a", {
+      emailMessages: [],
+      linqMessageIds: ["linq-a"],
+      required: true,
+      telegramMessages: [],
+    });
+    await stateStore.writePendingRunCleanup("run-cleanup-b", {
+      emailMessages: [],
+      linqMessageIds: ["linq-b"],
+      required: true,
+      telegramMessages: [],
+    });
+    await stateStore.clearPendingRunCleanup("run-cleanup-b");
+
+    const run = createRunRecord();
+    run.id = "run-fresh-work";
+    run.status = "acquired";
+
+    webControlMocks.acquireHostedRunFromWeb.mockResolvedValueOnce({
+      acquired: true,
+      cursor: acquiredCursor,
+      events: [],
+      pendingIngressEventCount: 1,
+      resumeFinalize: false,
+      run,
+      runToken: "run-token",
+    });
+    webControlMocks.commitHostedRunToWeb.mockResolvedValueOnce({
+      committed: true,
+      cursor: acquiredCursor,
+      needsFinalize: false,
+      run,
+    });
+    webControlMocks.recordHostedRunLogInWeb.mockResolvedValue({
+      log: null,
+      logged: true,
+    });
+    webControlMocks.readHostedRunStatusFromWeb.mockImplementation(async (input: {
+      body?: {
+        runId?: string | null;
+      };
+    }) => {
+      const statusRun = createRunRecord();
+      statusRun.id = input.body?.runId ?? statusRun.id;
+      statusRun.status = input.body?.runId === "run-cleanup-a"
+        ? "finalized"
+        : input.body?.runId === "run-cleanup-b"
+          ? "failed"
+          : "running";
+
+      return {
+        cursor: acquiredCursor,
+        pendingIngressEventCount: 0,
+        run: statusRun,
+      };
+    });
+    wakeProcessorMocks.executeRunDrain.mockResolvedValue({
+      cursorSnapshotRef: acquiredCursor.snapshotRef,
+      finalizeRequired: false,
+      nextRuntimeWakeAt: null,
+      redactedSummary: null,
+      state: "completed",
+    });
+    wakeProcessorMocks.cleanupTransientWakeDataBestEffortForRunDrain.mockImplementation(async (input) => {
+      if (input.runId === "run-cleanup-a") {
+        await stateStore.clearPendingRunCleanup("run-cleanup-a");
+      }
+    });
+
+    const result = await runner.drainHostedRuns();
+
+    expect(result).toEqual({
+      committedSeq: acquiredCursor.committedSeq,
+      requestedTargetSeq: null,
+      targetReached: true,
+    });
+    expect(wakeProcessorMocks.cleanupTransientWakeDataBestEffortForRunDrain).toHaveBeenCalledTimes(2);
+    expect(
+      wakeProcessorMocks.cleanupTransientWakeDataBestEffortForRunDrain.mock.calls[0]?.[0],
+    ).toEqual({
+      runId: "run-cleanup-a",
+      userId: "user-resume-finalize",
+      wakes: [],
+    });
+    expect(
+      wakeProcessorMocks.cleanupTransientWakeDataBestEffortForRunDrain.mock.calls[1]?.[0],
+    ).toEqual({
+      assistantDeliveryOutcomes: [],
+      runId: "run-fresh-work",
+      userId: "user-resume-finalize",
+      wakes: [],
+    });
+    expect(wakeProcessorMocks.cleanupTransientWakeDataBestEffortForRunDrain).not.toHaveBeenCalledWith(expect.objectContaining({
+      runId: "run-cleanup-b",
+    }));
+    await expect(stateStore.readDurablePendingRunCleanup("run-cleanup-b")).resolves.toBeNull();
+    expect(wakeProcessorMocks.executeRunDrain).toHaveBeenCalledTimes(1);
+    expect(bucket.deleted).toEqual(expect.arrayContaining([
+      trackedBundle.artifactKeys[0],
+      trackedBundle.ref.key,
+    ]));
+    expect(bucket.deleted).toHaveLength(2);
+    expect(bucket.objects.has(trackedBundle.ref.key)).toBe(false);
+    expect(bucket.objects.has(acquiredBundle.ref.key)).toBe(true);
+  });
+
+  it("replays durable pending cleanup before the tracked authoritative cursor is first seeded", async () => {
+    envMocks.readHostedExecutionEnvironment.mockReturnValue(createTestRuntimeEnvironment());
+    const state = createDurableObjectStateHarness();
+    const stateStore = new RunnerStateStore(state);
+    await stateStore.bootstrapUser("user-resume-finalize");
+    const runner = new HostedUserRunner(
+      state,
+      envMocks.readHostedExecutionEnvironment(createHostedExecutionTestEnv()),
+      new MemoryEncryptedR2Bucket(),
+    );
+    const currentCursor = createCursorState({
+      committedSeq: "11",
+      nextSeq: "12",
+      snapshotKey: "snapshot/finalized",
+      version: "cursor-v2",
+    });
+
+    await stateStore.writePendingRunCleanup("run-cleanup-bootstrap", {
+      emailMessages: [],
+      linqMessageIds: ["linq-bootstrap"],
+      required: true,
+      telegramMessages: [],
+    });
+
+    webControlMocks.acquireHostedRunFromWeb.mockResolvedValueOnce({
+      acquired: false,
+      cursor: currentCursor,
+      events: [],
+      pendingIngressEventCount: 0,
+      resumeFinalize: false,
+      run: null,
+      runToken: null,
+    });
+    webControlMocks.readHostedRunStatusFromWeb.mockImplementation(async (input: {
+      body?: {
+        runId?: string | null;
+      };
+    }) => {
+      const statusRun = createRunRecord();
+      statusRun.id = input.body?.runId ?? statusRun.id;
+      statusRun.status = input.body?.runId === "run-cleanup-bootstrap" ? "finalized" : "running";
+
+      return {
+        cursor: currentCursor,
+        pendingIngressEventCount: 0,
+        run: statusRun,
+      };
+    });
+    wakeProcessorMocks.cleanupTransientWakeDataBestEffortForRunDrain.mockImplementation(async (input) => {
+      if (input.runId === "run-cleanup-bootstrap") {
+        await stateStore.clearPendingRunCleanup("run-cleanup-bootstrap");
+      }
+    });
+
+    const result = await runner.drainHostedRuns();
+
+    expect(result).toEqual({
+      committedSeq: currentCursor.committedSeq,
+      requestedTargetSeq: null,
+      targetReached: true,
+    });
+    expect(wakeProcessorMocks.cleanupTransientWakeDataBestEffortForRunDrain).toHaveBeenCalledTimes(1);
+    expect(wakeProcessorMocks.cleanupTransientWakeDataBestEffortForRunDrain).toHaveBeenCalledWith({
+      runId: "run-cleanup-bootstrap",
+      userId: "user-resume-finalize",
+      wakes: [],
+    });
+    await expect(stateStore.readTrackedAuthoritativeCursor()).resolves.toEqual({
+      browserVaultReplicaRef: currentCursor.browserVaultReplicaRef ?? null,
+      snapshotRef: currentCursor.snapshotRef,
+    });
+    await expect(stateStore.readDurablePendingRunCleanup("run-cleanup-bootstrap")).resolves.toBeNull();
+  });
+
+  it("preserves durable pending cleanup for a live finalize run when the authoritative cursor has advanced", async () => {
+    envMocks.readHostedExecutionEnvironment.mockReturnValue(createTestRuntimeEnvironment());
+    const state = createDurableObjectStateHarness();
+    const stateStore = new RunnerStateStore(state);
+    await stateStore.bootstrapUser("user-resume-finalize");
+    const environment = envMocks.readHostedExecutionEnvironment(createHostedExecutionTestEnv());
+    const bucket = new MemoryEncryptedR2Bucket();
+    const userKeyStore = createHostedUserKeyStore({
+      automationRecipientKeyId: environment.automationRecipientKeyId,
+      automationRecipientPrivateKey: environment.automationRecipientPrivateKey,
+      automationRecipientPrivateKeysById: environment.automationRecipientPrivateKeysById,
+      automationRecipientPublicKey: environment.automationRecipientPublicKey,
+      bucket,
+      envelopeEncryptionKey: environment.platformEnvelopeKey,
+      envelopeEncryptionKeyId: environment.platformEnvelopeKeyId,
+      envelopeEncryptionKeysById: environment.platformEnvelopeKeysById,
+      recoveryRecipientKeyId: environment.recoveryRecipientKeyId,
+      recoveryRecipientPublicKey: environment.recoveryRecipientPublicKey,
+      teeAutomationRecipientKeyId: environment.teeAutomationRecipientKeyId,
+      teeAutomationRecipientPublicKey: environment.teeAutomationRecipientPublicKey,
+    });
+    await userKeyStore.provisionManagedUserCryptoAtActivation("user-resume-finalize");
+    const runner = new HostedUserRunner(
+      state,
+      environment,
+      bucket,
+    );
+    const trackedCursor = createCursorState({
+      committedSeq: "10",
+      nextSeq: "11",
+      snapshotKey: "snapshot/tracked",
+      version: "cursor-v1",
+    });
+    const currentCursor = createCursorState({
+      committedSeq: "11",
+      nextSeq: "12",
+      snapshotKey: "snapshot/prepared",
+      version: "cursor-v2",
+    });
+
+    await stateStore.writeTrackedAuthoritativeCursor({
+      browserVaultReplicaRef: trackedCursor.browserVaultReplicaRef ?? null,
+      snapshotRef: trackedCursor.snapshotRef,
+    });
+    await stateStore.writePendingRunCleanup("run-cleanup-live", {
+      emailMessages: [],
+      linqMessageIds: ["linq-live"],
+      required: true,
+      telegramMessages: [],
+    });
+
+    webControlMocks.acquireHostedRunFromWeb.mockResolvedValueOnce({
+      acquired: false,
+      cursor: currentCursor,
+      events: [],
+      pendingIngressEventCount: 0,
+      resumeFinalize: false,
+      run: null,
+      runToken: null,
+    });
+    webControlMocks.readHostedRunStatusFromWeb.mockImplementation(async (input: {
+      body?: {
+        runId?: string | null;
+      };
+    }) => {
+      const statusRun = createRunRecord();
+      statusRun.id = input.body?.runId ?? statusRun.id;
+      statusRun.status = input.body?.runId === "run-cleanup-live"
+        ? "committed_needs_finalize"
+        : "running";
+
+      return {
+        cursor: currentCursor,
+        pendingIngressEventCount: 0,
+        run: statusRun,
+      };
+    });
+
+    const result = await runner.drainHostedRuns();
+
+    expect(result).toEqual({
+      committedSeq: currentCursor.committedSeq,
+      requestedTargetSeq: null,
+      targetReached: true,
+    });
+    await expect(stateStore.readTrackedAuthoritativeCursor()).resolves.toEqual({
+      browserVaultReplicaRef: currentCursor.browserVaultReplicaRef ?? null,
+      snapshotRef: currentCursor.snapshotRef,
+    });
+    await expect(stateStore.readDurablePendingRunCleanup("run-cleanup-live")).resolves.toEqual({
+      emailMessages: [],
+      linqMessageIds: ["linq-live"],
+      required: true,
+      telegramMessages: [],
+    });
+    expect(wakeProcessorMocks.cleanupTransientWakeDataBestEffortForRunDrain).not.toHaveBeenCalled();
+  });
+
+  it("retries durable pending cleanup replay even when the authoritative cursor does not change again", async () => {
+    envMocks.readHostedExecutionEnvironment.mockReturnValue(createTestRuntimeEnvironment());
+    const state = createDurableObjectStateHarness();
+    const stateStore = new RunnerStateStore(state);
+    await stateStore.bootstrapUser("user-resume-finalize");
+    const runner = new HostedUserRunner(
+      state,
+      envMocks.readHostedExecutionEnvironment(createHostedExecutionTestEnv()),
+      new MemoryEncryptedR2Bucket(),
+    );
+    const currentCursor = createCursorState({
+      committedSeq: "11",
+      nextSeq: "12",
+      snapshotKey: "snapshot/finalized",
+      version: "cursor-v2",
+    });
+
+    await stateStore.writeTrackedAuthoritativeCursor({
+      browserVaultReplicaRef: currentCursor.browserVaultReplicaRef ?? null,
+      snapshotRef: currentCursor.snapshotRef,
+    });
+    await stateStore.writePendingRunCleanup("run-cleanup-retry", {
+      emailMessages: [],
+      linqMessageIds: ["linq-retry"],
+      required: true,
+      telegramMessages: [],
+    });
+
+    webControlMocks.acquireHostedRunFromWeb
+      .mockResolvedValueOnce({
+        acquired: false,
+        cursor: currentCursor,
+        events: [],
+        pendingIngressEventCount: 0,
+        resumeFinalize: false,
+        run: null,
+        runToken: null,
+      })
+      .mockResolvedValueOnce({
+        acquired: false,
+        cursor: currentCursor,
+        events: [],
+        pendingIngressEventCount: 0,
+        resumeFinalize: false,
+        run: null,
+        runToken: null,
+      });
+    webControlMocks.readHostedRunStatusFromWeb.mockImplementation(async (input: {
+      body?: {
+        runId?: string | null;
+      };
+    }) => {
+      const statusRun = createRunRecord();
+      statusRun.id = input.body?.runId ?? statusRun.id;
+      statusRun.status = input.body?.runId === "run-cleanup-retry" ? "finalized" : "running";
+
+      return {
+        cursor: currentCursor,
+        pendingIngressEventCount: 0,
+        run: statusRun,
+      };
+    });
+    wakeProcessorMocks.cleanupTransientWakeDataBestEffortForRunDrain
+      .mockRejectedValueOnce(new Error("cleanup replay failed"))
+      .mockImplementationOnce(async (input) => {
+        if (input.runId === "run-cleanup-retry") {
+          await stateStore.clearPendingRunCleanup("run-cleanup-retry");
+        }
+      });
+
+    const first = await runner.drainHostedRuns();
+    const second = await runner.drainHostedRuns();
+
+    expect(first).toEqual({
+      committedSeq: currentCursor.committedSeq,
+      requestedTargetSeq: null,
+      targetReached: true,
+    });
+    expect(second).toEqual({
+      committedSeq: currentCursor.committedSeq,
+      requestedTargetSeq: null,
+      targetReached: true,
+    });
+    expect(wakeProcessorMocks.cleanupTransientWakeDataBestEffortForRunDrain).toHaveBeenCalledTimes(2);
+    expect(
+      wakeProcessorMocks.cleanupTransientWakeDataBestEffortForRunDrain.mock.calls[0]?.[0],
+    ).toEqual({
+      runId: "run-cleanup-retry",
+      userId: "user-resume-finalize",
+      wakes: [],
+    });
+    expect(
+      wakeProcessorMocks.cleanupTransientWakeDataBestEffortForRunDrain.mock.calls[1]?.[0],
+    ).toEqual({
+      runId: "run-cleanup-retry",
+      userId: "user-resume-finalize",
+      wakes: [],
+    });
+    await expect(stateStore.readDurablePendingRunCleanup("run-cleanup-retry")).resolves.toBeNull();
   });
 
   it("fails closed when hosted run status cannot be refreshed before commit", async () => {
@@ -1001,6 +2663,23 @@ describe("HostedUserRunner resumeFinalize drain", () => {
       logged: true,
     });
     wakeProcessorMocks.executeRunDrain.mockResolvedValue({
+      assistantDeliveryOutcomes: [
+        {
+          deliveryChannel: "linq",
+          deliveryErrorCode: null,
+          deliveryErrorMessage: null,
+          deliveryStatus: "sent",
+          effectFingerprint: "fingerprint-linq",
+          effectId: "effect-linq",
+          journalMethod: null,
+          journalStatus: null,
+          providerMessageId: "linq_outbound_message",
+          providerThreadId: "chat_123",
+          retryable: false,
+          target: "chat_123",
+          targetKind: "thread",
+        },
+      ],
       cursorSnapshotRef: committedCursor.snapshotRef,
       finalizeRequired: true,
       nextRuntimeWakeAt: null,
@@ -1020,15 +2699,23 @@ describe("HostedUserRunner resumeFinalize drain", () => {
     expect(webControlMocks.commitHostedRunToWeb).toHaveBeenCalledTimes(1);
     expect(webControlMocks.finalizeHostedRunInWeb).toHaveBeenCalledTimes(1);
     expect(wakeProcessorMocks.cleanupTransientWakeDataBestEffortForRunDrain).toHaveBeenCalledTimes(1);
-    expect(wakeProcessorMocks.persistPendingRunCleanupData).toHaveBeenCalledWith({
-      runId: acquiredRun.id,
-      wakes: [
-        expect.objectContaining({
-          eventId: "linq-wake",
-          kind: "conversation.message",
-        }),
-      ],
-    });
+    expect(wakeProcessorMocks.persistPendingRunCleanupData).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assistantDeliveryOutcomes: [
+          expect.objectContaining({
+            deliveryChannel: "linq",
+            providerMessageId: "linq_outbound_message",
+          }),
+        ],
+        runId: acquiredRun.id,
+        wakes: [
+          expect.objectContaining({
+            eventId: "linq-wake",
+            kind: "conversation.message",
+          }),
+        ],
+      }),
+    );
     expect(wakeProcessorMocks.finalizeRunDrain).toHaveBeenCalledTimes(1);
     expect(webControlMocks.finalizeHostedRunInWeb).toHaveBeenCalledWith(expect.objectContaining({
       body: expect.objectContaining({
@@ -1063,7 +2750,7 @@ describe("HostedUserRunner resumeFinalize drain", () => {
     ]);
   });
 
-  it("logs and ignores pending cleanup persistence failures when same-request finalize can finish", async () => {
+  it("fails closed before a finalize-required commit when pending cleanup persistence fails", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     envMocks.readHostedExecutionEnvironment.mockReturnValue(createTestRuntimeEnvironment());
     const state = createDurableObjectStateHarness();
@@ -1084,34 +2771,13 @@ describe("HostedUserRunner resumeFinalize drain", () => {
     const committedCursor = createCursorState({
       committedSeq: "10",
       nextSeq: "11",
-      snapshotKey: "snapshot/committed",
+      snapshotKey: "snapshot/retry",
       version: "cursor-v2",
-    });
-    const finalizeCursor = createCursorState({
-      committedSeq: "10",
-      nextSeq: "11",
-      snapshotKey: "snapshot/finalize",
-      version: "cursor-v3",
-    });
-    const finalizedCursor = createCursorState({
-      committedSeq: "11",
-      nextSeq: "12",
-      snapshotKey: "snapshot/finalized",
-      version: "cursor-v4",
     });
     const acquiredRun = {
       ...createRunRecord(),
       status: "acquired" as const,
       triggerKind: "external_ingress" as const,
-    };
-    const committedRun = {
-      ...acquiredRun,
-      status: "committed_needs_finalize" as const,
-    };
-    const finalizingRun = {
-      ...acquiredRun,
-      status: "finalizing" as const,
-      triggerKind: "retry_finalize" as const,
     };
     const cleanupWake = buildHostedExecutionLinqConversationMessageWake({
       eventId: "linq-wake",
@@ -1148,32 +2814,15 @@ describe("HostedUserRunner resumeFinalize drain", () => {
       run: acquiredRun,
       runToken: "prepare-token",
     };
-    const resumeFinalizeAcquire: HostedRunAcquireResponse = {
-      acquired: true,
-      cursor: finalizeCursor,
-      events: [],
-      pendingIngressEventCount: 1,
-      resumeFinalize: true,
-      run: finalizingRun,
-      runToken: "finalize-token",
-    };
     const commitResponse: HostedRunCommitResponse = {
       committed: true,
-      cursor: committedCursor,
-      needsFinalize: true,
-      run: committedRun,
-    };
-    const finalizedResponse: HostedRunFinalizeResponse = {
-      cursor: finalizedCursor,
-      finalized: true,
-      run: finalizingRun,
+      cursor: acquiredCursor,
+      needsFinalize: false,
+      run: null,
     };
 
-    webControlMocks.acquireHostedRunFromWeb
-      .mockResolvedValueOnce(prepareAcquire)
-      .mockResolvedValueOnce(resumeFinalizeAcquire);
+    webControlMocks.acquireHostedRunFromWeb.mockResolvedValueOnce(prepareAcquire);
     webControlMocks.commitHostedRunToWeb.mockResolvedValue(commitResponse);
-    webControlMocks.finalizeHostedRunInWeb.mockResolvedValue(finalizedResponse);
     webControlMocks.recordHostedRunLogInWeb.mockResolvedValue({
       log: null,
       logged: true,
@@ -1188,6 +2837,337 @@ describe("HostedUserRunner resumeFinalize drain", () => {
     wakeProcessorMocks.persistPendingRunCleanupData.mockRejectedValueOnce(
       new Error("pending cleanup sidecar write failed"),
     );
+
+    try {
+      const result = await runner.drainHostedRuns();
+
+      expect(result).toEqual({
+        committedSeq: acquiredCursor.committedSeq,
+        requestedTargetSeq: null,
+        targetReached: true,
+      });
+      expect(wakeProcessorMocks.persistPendingRunCleanupData).toHaveBeenCalledWith(
+        expect.objectContaining({
+          assistantDeliveryOutcomes: [],
+          runId: acquiredRun.id,
+          wakes: [cleanupWake],
+        }),
+      );
+      expect(webControlMocks.acquireHostedRunFromWeb).toHaveBeenCalledTimes(1);
+      expect(webControlMocks.commitHostedRunToWeb).toHaveBeenCalledTimes(1);
+      expect(webControlMocks.commitHostedRunToWeb).toHaveBeenCalledWith(expect.objectContaining({
+        body: expect.objectContaining({
+          failureClass: "hosted_run_runtime",
+          failureCode: "HOSTED_RUN_FINALIZE_CLEANUP_PERSIST_FAILED",
+          finalizeRequired: false,
+          preparedSnapshotRef: acquiredCursor.snapshotRef,
+          runId: acquiredRun.id,
+          runToken: "prepare-token",
+        }),
+      }));
+      expect(wakeProcessorMocks.finalizeRunDrain).not.toHaveBeenCalled();
+      expect(webControlMocks.finalizeHostedRunInWeb).not.toHaveBeenCalled();
+      expect(webControlMocks.releaseHostedRunFinalizeInWeb).not.toHaveBeenCalled();
+      expect(wakeProcessorMocks.cleanupTransientWakeDataBestEffortForRunDrain).not.toHaveBeenCalled();
+
+      const warningPayloads = warnSpy.mock.calls.map(([entry]) => (
+        JSON.parse(String(entry ?? "{}")) as Record<string, unknown>
+      ));
+      const payload = warningPayloads.find((entry) => String(entry.message ?? "").includes(
+        "Hosted run pending cleanup persistence failed; refusing to commit a finalize-required snapshot without durable cleanup recovery state.",
+      ));
+      expect(payload).toBeDefined();
+      expect(payload).toEqual(expect.objectContaining({
+        component: "cloudflare.user-runner",
+        details: expect.objectContaining({
+          cleanupWakeCount: 1,
+          runId: acquiredRun.id,
+        }),
+        level: "warn",
+        message: expect.stringContaining(
+          "Hosted run pending cleanup persistence failed; refusing to commit a finalize-required snapshot without durable cleanup recovery state.",
+        ),
+        phase: "wake.running",
+        userId: "user-resume-finalize",
+      }));
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("fails closed when resume-finalize is missing pending cleanup recovery state", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    envMocks.readHostedExecutionEnvironment.mockReturnValue(createTestRuntimeEnvironment());
+    const state = createDurableObjectStateHarness();
+    const stateStore = new RunnerStateStore(state);
+    await stateStore.bootstrapUser("user-resume-finalize");
+    const runner = new HostedUserRunner(
+      state,
+      envMocks.readHostedExecutionEnvironment(createHostedExecutionTestEnv()),
+      new MemoryEncryptedR2Bucket(),
+    );
+
+    const finalizeCursor = createCursorState({
+      committedSeq: "10",
+      nextSeq: "11",
+      snapshotKey: "snapshot/finalize",
+      version: "cursor-v3",
+    });
+    const finalizingRun = {
+      ...createRunRecord(),
+      status: "finalizing" as const,
+      triggerKind: "retry_finalize" as const,
+    };
+    const resumeFinalizeAcquire: HostedRunAcquireResponse = {
+      acquired: true,
+      cursor: finalizeCursor,
+      events: [],
+      pendingIngressEventCount: 1,
+      resumeFinalize: true,
+      run: finalizingRun,
+      runToken: "finalize-token",
+    };
+
+    webControlMocks.acquireHostedRunFromWeb.mockResolvedValueOnce(resumeFinalizeAcquire);
+    webControlMocks.recordHostedRunLogInWeb.mockResolvedValue({
+      log: null,
+      logged: true,
+    });
+    webControlMocks.releaseHostedRunFinalizeInWeb.mockResolvedValue({
+      cursor: finalizeCursor,
+      released: true,
+      run: {
+        ...finalizingRun,
+        errorClass: "hosted_run_finalize_retryable",
+        errorCode: "HOSTED_RUN_FINALIZE_CLEANUP_RECOVERY_MISSING",
+        status: "committed_needs_finalize",
+      },
+    });
+
+    try {
+      const result = await runner.drainHostedRuns();
+
+      expect(result).toEqual({
+        committedSeq: finalizeCursor.committedSeq,
+        requestedTargetSeq: null,
+        targetReached: true,
+      });
+      expect(wakeProcessorMocks.finalizeRunDrain).not.toHaveBeenCalled();
+      expect(webControlMocks.finalizeHostedRunInWeb).not.toHaveBeenCalled();
+      expect(webControlMocks.releaseHostedRunFinalizeInWeb).toHaveBeenCalledWith(expect.objectContaining({
+        body: expect.objectContaining({
+          failureCode: "HOSTED_RUN_FINALIZE_CLEANUP_RECOVERY_MISSING",
+          runId: finalizingRun.id,
+          runToken: "finalize-token",
+        }),
+      }));
+
+      const payload = JSON.parse(String(warnSpy.mock.calls[0]?.[0] ?? "{}")) as Record<string, unknown>;
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(payload).toEqual(expect.objectContaining({
+        component: "cloudflare.user-runner",
+        details: expect.objectContaining({
+          runId: finalizingRun.id,
+        }),
+        level: "warn",
+        message: expect.stringContaining(
+          "Hosted run finalize resume is missing pending cleanup recovery state; refusing to finalize until recovery data is available.",
+        ),
+        phase: "wake.running",
+        userId: "user-resume-finalize",
+      }));
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("fails closed when resume-finalize cannot read pending cleanup recovery state", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    envMocks.readHostedExecutionEnvironment.mockReturnValue(createTestRuntimeEnvironment());
+    const state = createDurableObjectStateHarness();
+    const originalGet = state.storage.get.bind(state.storage);
+    state.storage.get = async <T,>(key: string): Promise<T | undefined> => {
+      if (key === "runner:pending-cleanup:run-resume-finalize") {
+        throw new Error("pending cleanup sidecar unreadable");
+      }
+
+      return await originalGet<T>(key);
+    };
+    const stateStore = new RunnerStateStore(state);
+    await stateStore.bootstrapUser("user-resume-finalize");
+    const runner = new HostedUserRunner(
+      state,
+      envMocks.readHostedExecutionEnvironment(createHostedExecutionTestEnv()),
+      new MemoryEncryptedR2Bucket(),
+    );
+
+    const finalizeCursor = createCursorState({
+      committedSeq: "10",
+      nextSeq: "11",
+      snapshotKey: "snapshot/finalize",
+      version: "cursor-v3",
+    });
+    const finalizingRun = {
+      ...createRunRecord(),
+      status: "finalizing" as const,
+      triggerKind: "retry_finalize" as const,
+    };
+    const resumeFinalizeAcquire: HostedRunAcquireResponse = {
+      acquired: true,
+      cursor: finalizeCursor,
+      events: [],
+      pendingIngressEventCount: 1,
+      resumeFinalize: true,
+      run: finalizingRun,
+      runToken: "finalize-token",
+    };
+
+    webControlMocks.acquireHostedRunFromWeb.mockResolvedValueOnce(resumeFinalizeAcquire);
+    webControlMocks.recordHostedRunLogInWeb.mockResolvedValue({
+      log: null,
+      logged: true,
+    });
+    webControlMocks.releaseHostedRunFinalizeInWeb.mockResolvedValue({
+      cursor: finalizeCursor,
+      released: true,
+      run: {
+        ...finalizingRun,
+        errorClass: "hosted_run_finalize_retryable",
+        errorCode: "HOSTED_RUN_FINALIZE_CLEANUP_RECOVERY_UNREADABLE",
+        status: "committed_needs_finalize",
+      },
+    });
+
+    try {
+      const result = await runner.drainHostedRuns();
+
+      expect(result).toEqual({
+        committedSeq: finalizeCursor.committedSeq,
+        requestedTargetSeq: null,
+        targetReached: true,
+      });
+      expect(wakeProcessorMocks.finalizeRunDrain).not.toHaveBeenCalled();
+      expect(webControlMocks.finalizeHostedRunInWeb).not.toHaveBeenCalled();
+      expect(webControlMocks.releaseHostedRunFinalizeInWeb).toHaveBeenCalledWith(expect.objectContaining({
+        body: expect.objectContaining({
+          failureCode: "HOSTED_RUN_FINALIZE_CLEANUP_RECOVERY_UNREADABLE",
+          runId: finalizingRun.id,
+          runToken: "finalize-token",
+        }),
+      }));
+
+      const payload = JSON.parse(String(warnSpy.mock.calls[0]?.[0] ?? "{}")) as Record<string, unknown>;
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(payload).toEqual(expect.objectContaining({
+        component: "cloudflare.user-runner",
+        details: expect.objectContaining({
+          runId: finalizingRun.id,
+        }),
+        level: "warn",
+        message: expect.stringContaining(
+          "Hosted run finalize resume could not read pending cleanup recovery state; refusing to finalize until recovery data is available.",
+        ),
+        phase: "wake.running",
+        userId: "user-resume-finalize",
+      }));
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("uses runner-local fallback cleanup recovery state for resume-finalize on the same Durable Object", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    envMocks.readHostedExecutionEnvironment.mockReturnValue(createTestRuntimeEnvironment());
+    const state = createDurableObjectStateHarness();
+    const stateStore = new RunnerStateStore(state);
+    await stateStore.bootstrapUser("user-resume-finalize");
+    const runner = new HostedUserRunner(
+      state,
+      envMocks.readHostedExecutionEnvironment(createHostedExecutionTestEnv()),
+      new MemoryEncryptedR2Bucket(),
+    );
+    const runnerStateStore = Reflect.get(runner, "stateStore") as RunnerStateStore;
+
+    if (!runnerStateStore) {
+      throw new Error("Expected hosted runner state store to be available for test setup.");
+    }
+
+    const originalPut = state.storage.put.bind(state.storage);
+    let failPendingCleanupPut = true;
+    state.storage.put = async (key, value) => {
+      if (failPendingCleanupPut) {
+        failPendingCleanupPut = false;
+        throw new Error("pending cleanup sidecar write failed");
+      }
+
+      await originalPut(key, value);
+    };
+
+    await expect(runnerStateStore.writePendingRunCleanup("run-resume-finalize", {
+      emailMessages: [],
+      linqMessageIds: ["linq-fallback"],
+      required: true,
+      telegramMessages: [],
+    })).rejects.toThrow("pending cleanup sidecar write failed");
+    state.storage.put = originalPut;
+
+    await expect(runnerStateStore.readPendingRunCleanup("run-resume-finalize")).resolves.toEqual({
+      emailMessages: [],
+      linqMessageIds: ["linq-fallback"],
+      required: true,
+      telegramMessages: [],
+    });
+    await expect(runnerStateStore.readDurablePendingRunCleanup("run-resume-finalize")).resolves.toBeNull();
+
+    const finalizeCursor = createCursorState({
+      committedSeq: "10",
+      nextSeq: "11",
+      snapshotKey: "snapshot/finalize",
+      version: "cursor-v3",
+    });
+    const finalizedCursor = createCursorState({
+      committedSeq: "11",
+      nextSeq: "12",
+      snapshotKey: "snapshot/finalized",
+      version: "cursor-v4",
+    });
+    const finalizingRun = {
+      ...createRunRecord(),
+      status: "finalizing" as const,
+      triggerKind: "retry_finalize" as const,
+    };
+    const resumeFinalizeAcquire: HostedRunAcquireResponse = {
+      acquired: true,
+      cursor: finalizeCursor,
+      events: [],
+      pendingIngressEventCount: 1,
+      resumeFinalize: true,
+      run: finalizingRun,
+      runToken: "finalize-token",
+    };
+    const noWorkAcquire: HostedRunAcquireResponse = {
+      acquired: false,
+      cursor: finalizedCursor,
+      events: [],
+      pendingIngressEventCount: 0,
+      resumeFinalize: false,
+      run: null,
+      runToken: null,
+    };
+    const finalizedResponse: HostedRunFinalizeResponse = {
+      cursor: finalizedCursor,
+      finalized: true,
+      run: finalizingRun,
+    };
+
+    webControlMocks.acquireHostedRunFromWeb
+      .mockResolvedValueOnce(resumeFinalizeAcquire)
+      .mockResolvedValueOnce(noWorkAcquire);
+    webControlMocks.finalizeHostedRunInWeb.mockResolvedValue(finalizedResponse);
+    webControlMocks.recordHostedRunLogInWeb.mockResolvedValue({
+      log: null,
+      logged: true,
+    });
     wakeProcessorMocks.finalizeRunDrain.mockResolvedValue({
       cursorSnapshotRef: finalizedCursor.snapshotRef,
       nextRuntimeWakeAt: null,
@@ -1203,36 +3183,27 @@ describe("HostedUserRunner resumeFinalize drain", () => {
         requestedTargetSeq: null,
         targetReached: true,
       });
-      expect(wakeProcessorMocks.persistPendingRunCleanupData).toHaveBeenCalledWith({
-        runId: acquiredRun.id,
-        wakes: [cleanupWake],
-      });
-      expect(webControlMocks.acquireHostedRunFromWeb).toHaveBeenCalledTimes(2);
       expect(wakeProcessorMocks.finalizeRunDrain).toHaveBeenCalledTimes(1);
       expect(webControlMocks.finalizeHostedRunInWeb).toHaveBeenCalledTimes(1);
+      expect(webControlMocks.releaseHostedRunFinalizeInWeb).not.toHaveBeenCalled();
       expect(wakeProcessorMocks.cleanupTransientWakeDataBestEffortForRunDrain).toHaveBeenCalledWith(
         expect.objectContaining({
+          assistantDeliveryOutcomes: [],
           runId: finalizingRun.id,
           userId: "user-resume-finalize",
-          wakes: [cleanupWake],
+          wakes: [],
         }),
       );
 
-      const payload = JSON.parse(String(warnSpy.mock.calls[0]?.[0] ?? "{}")) as Record<string, unknown>;
-      expect(warnSpy).toHaveBeenCalledTimes(1);
-      expect(payload).toEqual(expect.objectContaining({
-        component: "cloudflare.user-runner",
-        details: expect.objectContaining({
-          cleanupWakeCount: 1,
-          runId: acquiredRun.id,
-        }),
-        level: "warn",
-        message: expect.stringContaining(
-          "Hosted run pending cleanup persistence failed after commit; continuing without durable cleanup recovery state.",
-        ),
-        phase: "wake.running",
-        userId: "user-resume-finalize",
-      }));
+      const warningPayloads = warnSpy.mock.calls.map(([entry]) => (
+        JSON.parse(String(entry ?? "{}")) as Record<string, unknown>
+      ));
+      expect(warningPayloads.some((entry) => String(entry.message ?? "").includes(
+        "Hosted run finalize resume is missing pending cleanup recovery state",
+      ))).toBe(false);
+      expect(warningPayloads.some((entry) => String(entry.message ?? "").includes(
+        "Hosted run finalize resume could not read pending cleanup recovery state",
+      ))).toBe(false);
     } finally {
       warnSpy.mockRestore();
     }
@@ -1408,6 +3379,7 @@ describe("HostedUserRunner resumeFinalize drain", () => {
       status: "finalizing" as const,
       triggerKind: "retry_finalize" as const,
     };
+    await writeRequiredPendingCleanupState(stateStore, finalizingRun.id);
     const resumeFinalizeAcquire: HostedRunAcquireResponse = {
       acquired: true,
       cursor: finalizeCursor,

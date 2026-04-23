@@ -109,6 +109,32 @@ test("browser vault replica dataVersion stays stable when only generatedAt chang
   assert.equal(first.source.dataVersion, second.source.dataVersion);
 });
 
+test("browser vault replica dataVersion changes when only sourceBundleHash changes", async () => {
+  const vault = createVaultReadModel({
+    entities: [
+      createEntity("journal", "journal_1", {
+        body: "Kept the baseline ordinary.",
+        title: "Baseline note",
+      }),
+    ],
+    metadata: null,
+    vaultRoot: "browser://vault",
+  });
+
+  const first = await createBrowserVaultReplica({
+    generatedAt: "2026-04-20T12:00:00.000Z",
+    sourceBundleHash: "b".repeat(64),
+    vault,
+  });
+  const second = await createBrowserVaultReplica({
+    generatedAt: "2026-04-20T12:00:00.000Z",
+    sourceBundleHash: "c".repeat(64),
+    vault,
+  });
+
+  assert.notEqual(first.source.dataVersion, second.source.dataVersion);
+});
+
 test("browser vault replicas validate schema", () => {
   assert.throws(
     () => parseBrowserVaultReplica({

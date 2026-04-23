@@ -12,7 +12,9 @@ import {
 } from "./crypto-context.js";
 import {
   hostedBundleObjectKey,
+  hostedBundleUserPrefix,
   hostedArtifactObjectKey,
+  isUserScopedHostedBundleObjectKey,
   hostedRunnerSecretsObjectKey,
 } from "./storage-paths.js";
 import {
@@ -35,6 +37,7 @@ export interface R2BucketLike extends EncryptedR2BucketLike {
 }
 
 export interface HostedBundleStore {
+  deleteBundle(ref: HostedExecutionBundleRef | null): Promise<void>;
   readBundle(ref: HostedExecutionBundleRef | null): Promise<Uint8Array | null>;
   writeBundle(kind: HostedExecutionBundleKind, plaintext: Uint8Array): Promise<HostedExecutionBundleRef>;
 }
@@ -43,6 +46,22 @@ export interface HostedArtifactStore {
   deleteArtifact(sha256: string): Promise<void>;
   readArtifact(sha256: string): Promise<Uint8Array | null>;
   writeArtifact(sha256: string, plaintext: Uint8Array): Promise<void>;
+}
+
+export class MissingHostedBundleError extends Error {
+  constructor(readonly ref: HostedExecutionBundleRef) {
+    super(`Hosted ${inferBundleKindFromKey(ref.key)} bundle ${ref.key} is missing from R2.`);
+    this.name = "MissingHostedBundleError";
+  }
+}
+
+export function isMissingHostedBundleError(error: unknown): error is MissingHostedBundleError {
+  return error instanceof MissingHostedBundleError;
+}
+
+export function isStoredHostedBundleObjectKey(key: string): boolean {
+  return /^users\/bundles\/[0-9a-f]{24}\/vault\/[0-9a-f]{48}\.bundle\.json$/u.test(key)
+    || /^bundles\/vault\/[0-9a-f]{48}\.bundle\.json$/u.test(key);
 }
 
 export interface HostedRunnerSecretsReader {
@@ -129,12 +148,25 @@ export function createHostedBundleStore(input: {
   key: Uint8Array;
   keyId: string;
   keysById?: Readonly<Record<string, Uint8Array>>;
+  userId?: string | null;
 }): HostedBundleStore {
   return {
+    async deleteBundle(ref) {
+      if (!ref || !input.bucket.delete || !isUserScopedHostedBundleObjectKey(ref.key)) {
+        return;
+      }
+
+      await assertHostedBundleOwnedByUser(input, ref);
+
+      await input.bucket.delete(ref.key);
+    },
+
     async readBundle(ref) {
       if (!ref) {
         return null;
       }
+
+      await assertHostedBundleOwnedByUser(input, ref);
 
       const kind = inferBundleKindFromKey(ref.key);
       const plaintext = await readEncryptedR2Payload({
@@ -155,7 +187,7 @@ export function createHostedBundleStore(input: {
       });
 
       if (!plaintext) {
-        return null;
+        throw new MissingHostedBundleError(ref);
       }
 
       assertHostedBundleMatchesRef(ref, plaintext);
@@ -164,7 +196,7 @@ export function createHostedBundleStore(input: {
 
     async writeBundle(kind, plaintext) {
       const hash = sha256HostedBundleHex(plaintext);
-      const key = await hostedBundleObjectKey(input.key, kind, hash);
+      const key = await hostedBundleObjectKey(input.key, kind, hash, input.userId ?? null);
       await writeEncryptedR2Payload({
         aad: buildHostedStorageAad({
           hash,
@@ -189,6 +221,23 @@ export function createHostedBundleStore(input: {
       };
     },
   };
+}
+
+async function assertHostedBundleOwnedByUser(
+  input: {
+    key: Uint8Array;
+    userId?: string | null;
+  },
+  ref: HostedExecutionBundleRef,
+): Promise<void> {
+  if (!input.userId || !isUserScopedHostedBundleObjectKey(ref.key)) {
+    return;
+  }
+
+  const expectedPrefix = await hostedBundleUserPrefix(input.key, input.userId);
+  if (!ref.key.startsWith(expectedPrefix)) {
+    throw new Error(`Hosted bundle ${ref.key} is outside the bound user bundle namespace.`);
+  }
 }
 
 export function createHostedArtifactStore(input: {
@@ -280,7 +329,12 @@ function pendingBundleRefKey(kind: HostedExecutionBundleKind): string {
 }
 
 function inferBundleKindFromKey(key: string): HostedExecutionBundleKind {
-  if (key.startsWith("bundles/vault/")) {
+  const userScopedMatch = /^users\/bundles\/[0-9a-f]{24}\/([^/]+)\//u.exec(key);
+  if (userScopedMatch?.[1] === "vault") {
+    return "vault";
+  }
+
+  if (/^bundles\/vault\/[0-9a-f]{48}\.bundle\.json$/u.test(key)) {
     return "vault";
   }
 

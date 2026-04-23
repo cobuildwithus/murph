@@ -130,6 +130,14 @@ function pendingRunCleanupStorageKey(runId: string): string {
   return `runner:pending-cleanup:${runId}`;
 }
 
+function pendingRunCleanupRunIdsStorageKey(): string {
+  return "runner:pending-cleanup:run-ids";
+}
+
+function trackedAuthoritativeCursorStorageKey(): string {
+  return "runner:tracked-authoritative-cursor";
+}
+
 function makeBundleRef(key: string): HostedExecutionBundleRef {
   return {
     hash: `${key}-hash`,
@@ -241,11 +249,13 @@ describe("RunnerStateStore pending cleanup sidecar", () => {
     await store.writePendingRunCleanup(runId, {
       emailMessages: [],
       linqMessageIds: ["linq-1"],
+      required: true,
       telegramMessages: [],
     });
     expect(storageValues.get(pendingRunCleanupStorageKey(runId))).toEqual({
       emailMessages: [],
       linqMessageIds: ["linq-1"],
+      required: true,
       telegramMessages: [],
     });
 
@@ -253,5 +263,231 @@ describe("RunnerStateStore pending cleanup sidecar", () => {
 
     expect(storageValues.has(pendingRunCleanupStorageKey(runId))).toBe(false);
     await expect(store.readPendingRunCleanup(runId)).resolves.toBeNull();
+  });
+
+  it("keeps a runner-local fallback copy when the durable cleanup sidecar write fails", async () => {
+    const db = new DatabaseSync(":memory:");
+    const storageValues = new Map<string, unknown>();
+    const runId = "run-cleanup";
+    let failCleanupPut = true;
+    const state: DurableObjectStateLike = {
+      storage: {
+        delete: async (key) => storageValues.delete(key),
+        deleteAlarm: async () => {},
+        get: async <T,>(key: string) => storageValues.get(key) as T | undefined,
+        getAlarm: async () => null,
+        put: async (key, value) => {
+          if (key === pendingRunCleanupStorageKey(runId) && failCleanupPut) {
+            failCleanupPut = false;
+            throw new Error("pending cleanup sidecar write failed");
+          }
+          storageValues.set(key, value);
+        },
+        setAlarm: async () => {},
+        sql: new SqliteDurableObjectSqlStorage(db),
+      },
+    };
+    const store = new RunnerStateStore(state);
+
+    await store.bootstrapUser("user-cache");
+    await expect(store.writePendingRunCleanup(runId, {
+      emailMessages: [],
+      linqMessageIds: ["linq-1"],
+      required: true,
+      telegramMessages: [],
+    })).rejects.toThrow("pending cleanup sidecar write failed");
+
+    expect(storageValues.has(pendingRunCleanupStorageKey(runId))).toBe(false);
+    expect(storageValues.has(pendingRunCleanupRunIdsStorageKey())).toBe(false);
+    await expect(store.readDurablePendingRunCleanup(runId)).resolves.toBeNull();
+    await expect(store.readPendingRunCleanup(runId)).resolves.toEqual({
+      emailMessages: [],
+      linqMessageIds: ["linq-1"],
+      required: true,
+      telegramMessages: [],
+    });
+
+    await store.clearPendingRunCleanup(runId);
+    await expect(store.readPendingRunCleanup(runId)).resolves.toBeNull();
+  });
+
+  it("does not write the durable payload before its recovery index", async () => {
+    const db = new DatabaseSync(":memory:");
+    const storageValues = new Map<string, unknown>();
+    const runId = "run-cleanup";
+    let failRunIdsPut = true;
+    const state: DurableObjectStateLike = {
+      storage: {
+        delete: async (key) => storageValues.delete(key),
+        deleteAlarm: async () => {},
+        get: async <T,>(key: string) => storageValues.get(key) as T | undefined,
+        getAlarm: async () => null,
+        put: async (key, value) => {
+          if (key === pendingRunCleanupRunIdsStorageKey() && failRunIdsPut) {
+            failRunIdsPut = false;
+            throw new Error("pending cleanup recovery index write failed");
+          }
+          storageValues.set(key, value);
+        },
+        setAlarm: async () => {},
+        sql: new SqliteDurableObjectSqlStorage(db),
+      },
+    };
+    const store = new RunnerStateStore(state);
+
+    await store.bootstrapUser("user-cache");
+    await expect(store.writePendingRunCleanup(runId, {
+      emailMessages: [],
+      linqMessageIds: ["linq-1"],
+      required: true,
+      telegramMessages: [],
+    })).rejects.toThrow("pending cleanup recovery index write failed");
+
+    expect(storageValues.has(pendingRunCleanupStorageKey(runId))).toBe(false);
+    expect(storageValues.has(pendingRunCleanupRunIdsStorageKey())).toBe(false);
+    await expect(store.readPendingRunCleanup(runId)).resolves.toEqual({
+      emailMessages: [],
+      linqMessageIds: ["linq-1"],
+      required: true,
+      telegramMessages: [],
+    });
+    await expect(store.readPendingRunCleanupRecoveryRunIds()).resolves.toEqual([]);
+  });
+
+  it("uses the runner-local cleanup fallback when the durable sidecar read fails", async () => {
+    const db = new DatabaseSync(":memory:");
+    const storageValues = new Map<string, unknown>();
+    const runId = "run-cleanup";
+    let failCleanupPut = true;
+    const state: DurableObjectStateLike = {
+      storage: {
+        delete: async (key) => storageValues.delete(key),
+        deleteAlarm: async () => {},
+        get: async <T,>(key: string) => {
+          if (key === pendingRunCleanupStorageKey(runId)) {
+            throw new Error("pending cleanup sidecar read failed");
+          }
+          return storageValues.get(key) as T | undefined;
+        },
+        getAlarm: async () => null,
+        put: async (key, value) => {
+          if (key === pendingRunCleanupStorageKey(runId) && failCleanupPut) {
+            failCleanupPut = false;
+            throw new Error("pending cleanup sidecar write failed");
+          }
+          storageValues.set(key, value);
+        },
+        setAlarm: async () => {},
+        sql: new SqliteDurableObjectSqlStorage(db),
+      },
+    };
+    const store = new RunnerStateStore(state);
+
+    await store.bootstrapUser("user-cache");
+    await expect(store.writePendingRunCleanup(runId, {
+      emailMessages: [],
+      linqMessageIds: ["linq-1"],
+      required: true,
+      telegramMessages: [],
+    })).rejects.toThrow("pending cleanup sidecar write failed");
+
+    await expect(store.readPendingRunCleanup(runId)).resolves.toEqual({
+      emailMessages: [],
+      linqMessageIds: ["linq-1"],
+      required: true,
+      telegramMessages: [],
+    });
+  });
+
+  it("clears a malformed durable recovery run-id index when it cannot normalize any entries", async () => {
+    const { storageValues, store } = createRunnerStateStoreHarness();
+    const runId = "run-cleanup";
+
+    await store.bootstrapUser("user-cache");
+    storageValues.set(pendingRunCleanupStorageKey(runId), {
+      emailMessages: [],
+      linqMessageIds: ["linq-1"],
+      required: true,
+      telegramMessages: [],
+    });
+    storageValues.set(pendingRunCleanupRunIdsStorageKey(), {
+      runId,
+    });
+
+    await expect(store.readPendingRunCleanupRecoveryRunIds()).resolves.toEqual([]);
+    expect(storageValues.has(pendingRunCleanupRunIdsStorageKey())).toBe(false);
+    await expect(store.readDurablePendingRunCleanup(runId)).resolves.toEqual({
+      emailMessages: [],
+      linqMessageIds: ["linq-1"],
+      required: true,
+      telegramMessages: [],
+    });
+  });
+});
+
+describe("RunnerStateStore tracked authoritative cursor", () => {
+  it("persists the tracked authoritative cursor across cold stores", async () => {
+    const { db, storageValues, store } = createRunnerStateStoreHarness();
+    const cursor = {
+      browserVaultReplicaRef: null,
+      snapshotRef: makeBundleRef("vault/current"),
+    } as const;
+
+    await store.bootstrapUser("user-cache");
+    await store.writeTrackedAuthoritativeCursor(cursor);
+    await expect(store.readTrackedAuthoritativeCursor()).resolves.toEqual(cursor);
+
+    const coldStore = new RunnerStateStore(createDurableObjectState(db, storageValues));
+    await coldStore.bootstrapUser("user-cache");
+    await expect(coldStore.readTrackedAuthoritativeCursor()).resolves.toEqual(cursor);
+
+    await coldStore.writeTrackedAuthoritativeCursor(null);
+    await expect(coldStore.readTrackedAuthoritativeCursor()).resolves.toBeNull();
+  });
+
+  it("accepts legacy full-cursor-shaped tracked authoritative state", async () => {
+    const { storageValues, store } = createRunnerStateStoreHarness();
+    const snapshotRef = makeBundleRef("vault/current");
+
+    await store.bootstrapUser("user-cache");
+    storageValues.set(trackedAuthoritativeCursorStorageKey(), {
+      browserVaultReplicaRef: null,
+      committedSeq: "10",
+      createdAt: "2026-04-20T00:00:00.000Z",
+      nextRuntimeWakeAt: null,
+      nextRuntimeWakeReason: null,
+      nextSeq: "11",
+      snapshotRef,
+      updatedAt: "2026-04-20T00:00:00.000Z",
+      userId: "user-cache",
+      version: "cursor-v1",
+    });
+
+    await expect(store.readTrackedAuthoritativeCursor()).resolves.toEqual({
+      browserVaultReplicaRef: null,
+      snapshotRef,
+    });
+  });
+
+  it("clears malformed tracked authoritative cursor state so later reads can reseed recovery", async () => {
+    const { storageValues, store } = createRunnerStateStoreHarness();
+
+    await store.bootstrapUser("user-cache");
+    storageValues.set(trackedAuthoritativeCursorStorageKey(), {
+      browserVaultReplicaRef: null,
+      snapshotRef: {
+        hash: 123,
+      },
+    });
+
+    await expect(store.readTrackedAuthoritativeCursor()).resolves.toBeNull();
+    expect(storageValues.has(trackedAuthoritativeCursorStorageKey())).toBe(false);
+
+    const cursor = {
+      browserVaultReplicaRef: null,
+      snapshotRef: makeBundleRef("vault/reseeded"),
+    } as const;
+    await store.writeTrackedAuthoritativeCursor(cursor);
+    await expect(store.readTrackedAuthoritativeCursor()).resolves.toEqual(cursor);
   });
 });

@@ -7,6 +7,8 @@ import type { HostedExecutionBundleRef } from "@murphai/hosted-execution/contrac
 import {
   createHostedArtifactStore,
   createHostedBundleStore,
+  isMissingHostedBundleError,
+  isStoredHostedBundleObjectKey,
   type R2BucketLike,
 } from "./bundle-store.js";
 
@@ -27,11 +29,16 @@ export class HostedBundleGarbageCollector {
       return;
     }
 
+    if (sameHostedBundlePayloadRef(input.previousBundleRef, input.nextBundleRef)) {
+      return;
+    }
+
     const bundleStore = createHostedBundleStore({
       bucket: this.bucket,
       key: this.platformEnvelopeKey,
       keyId: this.platformEnvelopeKeyId,
       keysById: this.platformEnvelopeKeysById,
+      userId: input.userId,
     });
 
     await this.cleanupRemovedArtifacts({
@@ -40,6 +47,7 @@ export class HostedBundleGarbageCollector {
       previousBundleRef: input.previousBundleRef,
       userId: input.userId,
     });
+    await bundleStore.deleteBundle(input.previousBundleRef);
   }
 
   private async cleanupRemovedArtifacts(input: {
@@ -55,15 +63,22 @@ export class HostedBundleGarbageCollector {
     const previousArtifacts = await this.readArtifactHashes(
       input.bundleStore,
       input.previousBundleRef,
+      {
+        failIfMissing: false,
+        failIfUnreadable: false,
+      },
+    );
+    const nextArtifacts = await this.readArtifactHashes(
+      input.bundleStore,
+      input.nextBundleRef,
+      {
+        failIfMissing: input.nextBundleRef !== null,
+        failIfUnreadable: input.nextBundleRef !== null,
+      },
     );
     if (previousArtifacts.size === 0) {
       return;
     }
-
-    const nextArtifacts = await this.readArtifactHashes(
-      input.bundleStore,
-      input.nextBundleRef,
-    );
     const artifactStore = createHostedArtifactStore({
       bucket: this.bucket,
       key: this.platformEnvelopeKey,
@@ -82,12 +97,32 @@ export class HostedBundleGarbageCollector {
   private async readArtifactHashes(
     bundleStore: ReturnType<typeof createHostedBundleStore>,
     ref: HostedExecutionBundleRef | null,
+    options: {
+      failIfUnreadable?: boolean;
+      failIfMissing?: boolean;
+    } = {},
   ): Promise<Set<string>> {
     if (!ref) {
       return new Set();
     }
 
-    const bytes = await bundleStore.readBundle(ref);
+    if (!isStoredHostedBundleObjectKey(ref.key)) {
+      return new Set();
+    }
+
+    let bytes: Uint8Array | null;
+    try {
+      bytes = await bundleStore.readBundle(ref);
+    } catch (error) {
+      if (!options.failIfMissing && isMissingHostedBundleError(error)) {
+        return new Set();
+      }
+      if (!options.failIfUnreadable) {
+        return new Set();
+      }
+      throw error;
+    }
+
     if (!bytes) {
       return new Set();
     }

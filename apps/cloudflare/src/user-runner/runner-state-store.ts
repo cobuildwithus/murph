@@ -8,6 +8,10 @@ import {
   type HostedExecutionRunStatus,
   type HostedExecutionTimelineEntry,
 } from "@murphai/hosted-execution";
+import {
+  parseHostedBrowserVaultReplicaRef,
+  parseHostedExecutionCursorSnapshotRef,
+} from "@murphai/hosted-execution/parsers";
 import type { HostedExecutionBundleRef } from "@murphai/runtime-state";
 
 import { ensureRunnerStateSchema } from "./runner-state-schema.js";
@@ -26,6 +30,10 @@ import {
 } from "./types.js";
 
 type RunnerMetaBundleRow = RunnerMetaRow;
+type HostedExecutionRunTrackedCursor = {
+  browserVaultReplicaRef: null | ReturnType<typeof parseHostedBrowserVaultReplicaRef>;
+  snapshotRef: ReturnType<typeof parseHostedExecutionCursorSnapshotRef>;
+};
 
 export interface RunnerLeaseOwnerInput {
   eventId: string;
@@ -35,6 +43,7 @@ export interface RunnerLeaseOwnerInput {
 
 export class RunnerStateStore {
   private cachedBundleRef: HostedExecutionBundleRef | null = null;
+  private readonly volatilePendingCleanupByRunId = new Map<string, RunnerPendingCleanupState | null>();
   private volatileRun: HostedExecutionRunStatus | null = null;
   private volatileTimeline: HostedExecutionTimelineEntry[] = [];
   private userId: string | null = null;
@@ -265,19 +274,170 @@ export class RunnerStateStore {
   async readPendingRunCleanup(
     runId: string,
   ): Promise<RunnerPendingCleanupState | null> {
+    try {
+      const normalized = await this.readDurablePendingRunCleanup(runId);
+      if (normalized) {
+        return normalized;
+      }
+    } catch (error) {
+      const fallback = this.volatilePendingCleanupByRunId.get(runId);
+      if (fallback) {
+        emitHostedExecutionStructuredLog({
+          component: "runner",
+          details: {
+            runId,
+          },
+          error,
+          level: "warn",
+          message:
+            "Hosted pending cleanup sidecar read failed; falling back to runner-local cleanup recovery state for this Durable Object instance.",
+          phase: "wake.running",
+          userId: this.tryResolveUserIdSync() ?? "unknown",
+        });
+        return fallback;
+      }
+
+      throw error;
+    }
+
+    return this.volatilePendingCleanupByRunId.get(runId) ?? null;
+  }
+
+  async readPendingRunCleanupRecoveryRunIds(): Promise<string[]> {
+    const legacyValue = await this.state.storage.get<unknown>(pendingRunCleanupLatestRunIdStorageKey());
+    const legacyRunId = normalizePendingRunCleanupRunId(legacyValue);
+    const value = await this.state.storage.get<unknown>(pendingRunCleanupRunIdsStorageKey());
+    const runIds = normalizePendingRunCleanupRunIds(value);
+    const candidates = runIds.length > 0
+      ? runIds
+      : (legacyRunId ? [legacyRunId] : []);
+
+    if (candidates.length === 0) {
+      await this.state.storage.delete(pendingRunCleanupRunIdsStorageKey());
+      await this.state.storage.delete(pendingRunCleanupLatestRunIdStorageKey());
+      return [];
+    }
+
+    const retained: string[] = [];
+    for (const runId of candidates) {
+      const cleanup = await this.readDurablePendingRunCleanup(runId);
+      if (cleanup) {
+        retained.push(runId);
+      }
+    }
+
+    if (retained.length > 0) {
+      await this.state.storage.put(pendingRunCleanupRunIdsStorageKey(), retained);
+    } else {
+      await this.state.storage.delete(pendingRunCleanupRunIdsStorageKey());
+    }
+    await this.state.storage.delete(pendingRunCleanupLatestRunIdStorageKey());
+
+    return retained;
+  }
+
+  async readDurablePendingRunCleanup(
+    runId: string,
+  ): Promise<RunnerPendingCleanupState | null> {
     const value = await this.state.storage.get<unknown>(pendingRunCleanupStorageKey(runId));
-    return normalizeRunnerPendingCleanupState(value);
+    const normalized = normalizeRunnerPendingCleanupState(value);
+
+    if (normalized) {
+      this.volatilePendingCleanupByRunId.set(runId, normalized);
+    }
+
+    return normalized;
   }
 
   async writePendingRunCleanup(
     runId: string,
     cleanup: RunnerPendingCleanupState | null,
   ): Promise<void> {
-    await this.state.storage.put(pendingRunCleanupStorageKey(runId), cleanup);
+    this.volatilePendingCleanupByRunId.set(runId, cleanup);
+    if (cleanup) {
+      const runIds = await this.readPendingRunCleanupRecoveryRunIds();
+      const nextRunIds = normalizePendingRunCleanupRunIds([
+        ...runIds,
+        runId,
+      ]);
+      await this.state.storage.put(pendingRunCleanupRunIdsStorageKey(), nextRunIds);
+      try {
+        await this.state.storage.put(pendingRunCleanupStorageKey(runId), cleanup);
+      } catch (error) {
+        try {
+          await this.removePendingRunCleanupRecoveryRunId(runId);
+        } catch {
+          // Best-effort rollback only; preserve the original payload write failure.
+        }
+        throw error;
+      }
+      try {
+        await this.state.storage.delete(pendingRunCleanupLatestRunIdStorageKey());
+      } catch {
+        // Legacy-pointer cleanup should not make the durable write itself fail.
+      }
+      return;
+    }
+
+    await this.state.storage.delete(pendingRunCleanupStorageKey(runId));
+    await this.removePendingRunCleanupRecoveryRunId(runId);
   }
 
   async clearPendingRunCleanup(runId: string): Promise<void> {
+    this.volatilePendingCleanupByRunId.delete(runId);
     await this.state.storage.delete(pendingRunCleanupStorageKey(runId));
+    await this.removePendingRunCleanupRecoveryRunId(runId);
+  }
+
+  async readTrackedAuthoritativeCursor(): Promise<{
+    browserVaultReplicaRef: HostedExecutionRunTrackedCursor["browserVaultReplicaRef"];
+    snapshotRef: HostedExecutionRunTrackedCursor["snapshotRef"];
+  } | null> {
+    const value = await this.state.storage.get<unknown>(trackedAuthoritativeCursorStorageKey());
+
+    if (value === undefined || value === null) {
+      return null;
+    }
+
+    try {
+      return normalizeTrackedAuthoritativeCursorState(value);
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "runner",
+        details: {},
+        error,
+        level: "warn",
+        message:
+          "Hosted runner tracked authoritative cursor cleanup state was malformed; clearing it so later authoritative cursor reads can reseed recovery state.",
+        phase: "wake.running",
+        userId: this.tryResolveUserIdSync() ?? "unknown",
+      });
+      await this.state.storage.delete(trackedAuthoritativeCursorStorageKey());
+      return null;
+    }
+  }
+
+  async writeTrackedAuthoritativeCursor(
+    cursor: HostedExecutionRunTrackedCursor | null,
+  ): Promise<void> {
+    if (cursor === null) {
+      await this.state.storage.delete(trackedAuthoritativeCursorStorageKey());
+      return;
+    }
+
+    await this.state.storage.put(trackedAuthoritativeCursorStorageKey(), cursor);
+  }
+
+  private async removePendingRunCleanupRecoveryRunId(runId: string): Promise<void> {
+    const runIds = await this.readPendingRunCleanupRecoveryRunIds();
+    const retainedRunIds = runIds.filter((candidate) => candidate !== runId);
+
+    if (retainedRunIds.length > 0) {
+      await this.state.storage.put(pendingRunCleanupRunIdsStorageKey(), retainedRunIds);
+    } else {
+      await this.state.storage.delete(pendingRunCleanupRunIdsStorageKey());
+    }
+    await this.state.storage.delete(pendingRunCleanupLatestRunIdStorageKey());
   }
 
   private readStateSync(): RunnerStateRecord {
@@ -524,6 +684,67 @@ function pendingRunCleanupStorageKey(runId: string): string {
   return `runner:pending-cleanup:${runId}`;
 }
 
+function pendingRunCleanupLatestRunIdStorageKey(): string {
+  return "runner:pending-cleanup:latest-run-id";
+}
+
+function pendingRunCleanupRunIdsStorageKey(): string {
+  return "runner:pending-cleanup:run-ids";
+}
+
+function trackedAuthoritativeCursorStorageKey(): string {
+  return "runner:tracked-authoritative-cursor";
+}
+
+function normalizePendingRunCleanupRunId(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
+function normalizePendingRunCleanupRunIds(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const normalized = new Set<string>();
+  for (const candidate of value) {
+    const runId = normalizePendingRunCleanupRunId(candidate);
+    if (runId) {
+      normalized.add(runId);
+    }
+  }
+
+  return [...normalized];
+}
+
+function normalizeTrackedAuthoritativeCursorState(
+  value: unknown,
+): HostedExecutionRunTrackedCursor | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const record = value as {
+    browserVaultReplicaRef?: unknown;
+    snapshotRef?: unknown;
+  };
+
+  return {
+    browserVaultReplicaRef: parseHostedBrowserVaultReplicaRef(
+      record.browserVaultReplicaRef ?? null,
+      "Hosted runner tracked authoritative cursor browserVaultReplicaRef",
+    ),
+    snapshotRef: parseHostedExecutionCursorSnapshotRef(
+      record.snapshotRef,
+      "Hosted runner tracked authoritative cursor snapshotRef",
+    ),
+  };
+}
+
 function normalizeRunnerPendingCleanupState(value: unknown): RunnerPendingCleanupState | null {
   if (!value || typeof value !== "object") {
     return null;
@@ -532,6 +753,7 @@ function normalizeRunnerPendingCleanupState(value: unknown): RunnerPendingCleanu
   const record = value as {
     emailMessages?: unknown;
     linqMessageIds?: unknown;
+    required?: unknown;
     telegramMessages?: unknown;
   };
   const emailMessages = Array.isArray(record.emailMessages)
@@ -577,14 +799,19 @@ function normalizeRunnerPendingCleanupState(value: unknown): RunnerPendingCleanu
         : [];
     })
     : [];
+  const required = record.required === true
+    || emailMessages.length > 0
+    || linqMessageIds.length > 0
+    || telegramMessages.length > 0;
 
-  if (emailMessages.length === 0 && linqMessageIds.length === 0 && telegramMessages.length === 0) {
+  if (!required) {
     return null;
   }
 
   return {
     emailMessages,
     linqMessageIds,
+    required,
     telegramMessages,
   };
 }
