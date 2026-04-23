@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildHostedRunnerAmbientEnv,
+  buildHostedRunnerChildRuntimeEnv,
   buildHostedRunnerJobRuntime,
   buildHostedRunnerJobRuntimeConfig,
   buildHostedRunnerContainerEnv,
@@ -70,7 +71,19 @@ describe("buildHostedRunnerContainerEnv", () => {
       HOSTED_EMAIL_SEND_READY: "true",
       MAPBOX_ACCESS_TOKEN: "mapbox-token",
       NODE_ENV: "production",
-      TELEGRAM_BOT_TOKEN: "telegram-token",
+    });
+  });
+
+  it("does not forward the Linq webhook verification secret into the runner", () => {
+    expect(buildHostedRunnerContainerEnv({
+      HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "linq",
+      LINQ_API_TOKEN: "linq-token",
+      LINQ_WEBHOOK_SECRET: "linq-webhook-secret",
+    })).toEqual({
+      HOSTED_EMAIL_INGRESS_READY: "false",
+      HOSTED_EMAIL_SEND_READY: "false",
+      LINQ_API_TOKEN: "linq-token",
+      NODE_ENV: "production",
     });
   });
 
@@ -236,6 +249,9 @@ describe("buildHostedRunnerContainerEnv", () => {
       DEEPSEEK_API_KEY: "deepseek-user",
       HF_TOKEN: "hf-user",
       OPENAI_API_KEY: "sk-user",
+      TELEGRAM_API_BASE_URL: "https://evil.telegram.example",
+      TELEGRAM_BOT_TOKEN: "telegram-user",
+      TELEGRAM_FILE_BASE_URL: "https://evil-files.telegram.example",
       VENICE_API_KEY: "venice-user",
       XAI_API_KEY: "xai-user",
     })).toEqual({
@@ -245,6 +261,17 @@ describe("buildHostedRunnerContainerEnv", () => {
       VENICE_API_KEY: "venice-user",
       XAI_API_KEY: "xai-user",
     });
+  });
+
+  it("rejects ingress-only secrets from runner secrets even when explicitly allowlisted", () => {
+    expect(filterHostedRunnerSecrets(
+      {
+        LINQ_WEBHOOK_SECRET: "linq-webhook-secret",
+      },
+      {
+        HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: "LINQ_WEBHOOK_SECRET",
+      },
+    )).toEqual({});
   });
 });
 
@@ -319,6 +346,90 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
     });
   });
 
+  it("prefers explicit platform env over conflicting forwarded Telegram env", () => {
+    expect(buildHostedRunnerJobRuntime({
+      forwardedEnv: {
+        TELEGRAM_API_BASE_URL: "https://evil.telegram.example",
+        TELEGRAM_BOT_TOKEN: "evil-telegram-token",
+        TELEGRAM_FILE_BASE_URL: "https://evil-files.telegram.example",
+      },
+      platformEnv: {
+        TELEGRAM_API_BASE_URL: "https://api.telegram.example",
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+        TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
+      },
+      runnerSecrets: {},
+    })).toEqual({
+      commitTimeoutMs: 30_000,
+      forwardedEnv: {},
+      platformEnv: {
+        TELEGRAM_API_BASE_URL: "https://api.telegram.example",
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+        TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
+      },
+      resolvedConfig: {
+        channelCapabilities: {
+          emailSendReady: false,
+          telegramBotConfigured: true,
+        },
+        deviceSync: null,
+      },
+      userEnv: {},
+    });
+  });
+
+  it("treats explicit platform env as Telegram-only and does not backfill missing keys from forwarded env", () => {
+    expect(buildHostedRunnerJobRuntime({
+      forwardedEnv: {
+        OPENAI_API_KEY: "sk-worker",
+        TELEGRAM_API_BASE_URL: "https://evil.telegram.example",
+        TELEGRAM_FILE_BASE_URL: "https://evil-files.telegram.example",
+      },
+      platformEnv: {
+        HOSTED_WAKE_ENCRYPTION_KEY: "wake-key",
+        HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+      } as Record<string, string>,
+      runnerSecrets: {},
+    })).toEqual({
+      commitTimeoutMs: 30_000,
+      forwardedEnv: {
+        OPENAI_API_KEY: "sk-worker",
+      },
+      platformEnv: {
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+      },
+      resolvedConfig: {
+        channelCapabilities: {
+          emailSendReady: false,
+          telegramBotConfigured: true,
+        },
+        deviceSync: null,
+      },
+      userEnv: {},
+    });
+  });
+
+  it("drops worker-only secret material from explicit forwarded env", () => {
+    expect(buildHostedRunnerJobRuntimeConfig({
+      forwardedEnv: {
+        HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK: '{"kty":"EC","d":"automation"}',
+        HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "platform-key",
+        HOSTED_WAKE_ENCRYPTION_KEY: "wake-key",
+        HOSTED_WEB_BASE_URL: "https://forwarded.example.test",
+        HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: '{"kty":"EC","d":"callback"}',
+        OPENAI_API_KEY: "sk-worker",
+      },
+      runnerSecrets: {},
+    })).toMatchObject({
+      forwardedEnv: {
+        HOSTED_WEB_BASE_URL: "https://forwarded.example.test",
+        OPENAI_API_KEY: "sk-worker",
+      },
+      userEnv: {},
+    });
+  });
+
   it("keeps loopback runner callback urls intact when the runtime envelope already has forwarded env", () => {
     expect(buildHostedRunnerJobRuntimeConfig({
       forwardedEnv: {
@@ -332,8 +443,62 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
       forwardedEnv: {
         HOSTED_ASSISTANT_BASE_URL: "http://127.0.0.1:4111/v1",
         LINQ_API_BASE_URL: "http://localhost:4011",
+      },
+      platformEnv: {
         TELEGRAM_API_BASE_URL: "http://127.0.0.1:4012",
         TELEGRAM_FILE_BASE_URL: "http://127.0.0.1:4013",
+      },
+      userEnv: {},
+    });
+  });
+
+  it("rewrites Telegram platform urls for container runtime even when they are not forwarded to user code", () => {
+    expect(buildHostedRunnerJobRuntimeConfig({
+      configSource: {
+        HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://host.docker.internal:8787",
+        TELEGRAM_API_BASE_URL: "http://127.0.0.1:4012",
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+        TELEGRAM_FILE_BASE_URL: "http://127.0.0.1:4013",
+      },
+      forwardedEnv: {},
+      rewritePlatformUrlsForContainer: true,
+      runnerSecrets: {},
+    })).toMatchObject({
+      forwardedEnv: {},
+      platformEnv: {
+        TELEGRAM_API_BASE_URL: "http://host.docker.internal:4012/",
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+        TELEGRAM_FILE_BASE_URL: "http://host.docker.internal:4013/",
+      },
+      userEnv: {},
+    });
+  });
+
+  it("keeps Telegram platform env out of runner secrets even when operators try to allowlist it", () => {
+    expect(buildHostedRunnerJobRuntimeConfig({
+      configSource: {
+        HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: [
+          "TELEGRAM_API_BASE_URL",
+          "TELEGRAM_BOT_TOKEN",
+          "TELEGRAM_FILE_BASE_URL",
+        ].join(","),
+      },
+      forwardedEnv: {
+        TELEGRAM_API_BASE_URL: "https://api.telegram.example",
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+        TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
+      },
+      runnerSecrets: {
+        TELEGRAM_API_BASE_URL: "https://evil.telegram.example",
+        TELEGRAM_BOT_TOKEN: "telegram-user",
+        TELEGRAM_FILE_BASE_URL: "https://evil-files.telegram.example",
+      },
+    })).toMatchObject({
+      forwardedEnv: {},
+      platformEnv: {
+        TELEGRAM_API_BASE_URL: "https://api.telegram.example",
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+        TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
       },
       userEnv: {},
     });
@@ -342,7 +507,9 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
   it("preserves an explicit resolved config override when the caller already computed semantics", () => {
     expect(buildHostedRunnerJobRuntimeConfig({
       forwardedEnv: {
+        TELEGRAM_API_BASE_URL: "https://api.telegram.example",
         TELEGRAM_BOT_TOKEN: "telegram-token",
+        TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
       },
       configSource: {},
       resolvedConfig: {
@@ -355,8 +522,11 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
       runnerSecrets: {},
     })).toEqual({
       commitTimeoutMs: 30_000,
-      forwardedEnv: {
+      forwardedEnv: {},
+      platformEnv: {
+        TELEGRAM_API_BASE_URL: "https://api.telegram.example",
         TELEGRAM_BOT_TOKEN: "telegram-token",
+        TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
       },
       resolvedConfig: {
         channelCapabilities: {
@@ -377,17 +547,24 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
         GARMIN_API_BASE_URL: "https://garmin.example",
         GARMIN_CLIENT_ID: "garmin-client",
         GARMIN_CLIENT_SECRET: "garmin-secret",
+        TELEGRAM_API_BASE_URL: "https://api.telegram.example",
         OURA_WEBHOOK_VERIFICATION_TOKEN: "control-plane-only",
         TELEGRAM_BOT_TOKEN: "telegram-token",
+        TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
       },
       forwardedEnv: {
+        TELEGRAM_API_BASE_URL: "https://api.telegram.example",
         TELEGRAM_BOT_TOKEN: "telegram-token",
+        TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
       },
       runnerSecrets: {},
     });
 
-    expect(runtime.forwardedEnv).toEqual({
+    expect(runtime.forwardedEnv).toEqual({});
+    expect(runtime.platformEnv).toEqual({
+      TELEGRAM_API_BASE_URL: "https://api.telegram.example",
       TELEGRAM_BOT_TOKEN: "telegram-token",
+      TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
     });
     expect(runtime.resolvedConfig).toBeDefined();
     expect(runtime.resolvedConfig?.channelCapabilities.telegramBotConfigured).toBe(true);
@@ -401,6 +578,40 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
       },
       publicBaseUrl: "https://murph.example/api/device-sync",
       secret: "runtime-codec-secret",
+    });
+  });
+});
+
+describe("buildHostedRunnerChildRuntimeEnv", () => {
+  it("falls back to the ambient runner allowlist instead of forwarding operator-only secrets", () => {
+    expect(buildHostedRunnerChildRuntimeEnv({
+      ambientSource: {
+        HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
+        OPENAI_API_KEY: "sk-test",
+      },
+    })).toEqual({
+      HOSTED_EMAIL_INGRESS_READY: "false",
+      HOSTED_EMAIL_SEND_READY: "false",
+      NODE_ENV: "production",
+      OPENAI_API_KEY: "sk-test",
+    });
+  });
+
+  it("preserves the explicit forwarded child runtime env when provided", () => {
+    expect(buildHostedRunnerChildRuntimeEnv({
+      forwardedEnv: {
+        HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "platform-key",
+        HOSTED_WAKE_ENCRYPTION_KEY: "wake-key",
+        HOSTED_WEB_BASE_URL: "https://forwarded.example.test",
+        HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
+        OPENAI_API_KEY: "sk-test",
+        TELEGRAM_API_BASE_URL: "https://api.telegram.example",
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+        TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
+      },
+    })).toEqual({
+      HOSTED_WEB_BASE_URL: "https://forwarded.example.test",
+      OPENAI_API_KEY: "sk-test",
     });
   });
 });

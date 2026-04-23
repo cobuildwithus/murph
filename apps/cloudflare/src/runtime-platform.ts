@@ -35,13 +35,13 @@ import {
   buildLocalInternalProxyRouteBaseUrl,
   isScopedLocalInternalProxyBaseUrl,
 } from "./local-internal-proxy-route.ts";
+import {
+  HOSTED_WEB_ISSUE_RECORD_PATH,
+  HOSTED_WEB_STRIPE_CUSTOMER_LOOKUP_PATH,
+  HOSTED_WEB_USAGE_RECORD_PATH,
+} from "./runner-outbound/shared-web-control-policy.ts";
 import { fetchHostedExecutionWebControlPlaneResponse } from "./web-control-plane.ts";
 import type { HostedWebCallbackSigningEnvironment } from "./web-callback-auth.ts";
-
-const HOSTED_WEB_USAGE_RECORD_PATH = "/api/internal/hosted-execution/usage/record";
-const HOSTED_WEB_ISSUE_RECORD_PATH = "/api/internal/hosted-execution/issues/record";
-const HOSTED_WEB_STRIPE_CUSTOMER_LOOKUP_PATH =
-  "/api/internal/hosted-execution/billing/stripe/customer/resolve";
 
 type HostedWebControlTransport =
   | {

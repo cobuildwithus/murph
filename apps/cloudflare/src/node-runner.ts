@@ -8,6 +8,7 @@ import {
 import {
   buildHostedRunnerAmbientEnv,
   buildHostedRunnerJobRuntime,
+  buildHostedRunnerPlatformEnv,
 } from "./runner-env.ts";
 import { isHostedRunnerProcessControlEnvKey } from "./hosted-env-policy.ts";
 import {
@@ -52,6 +53,11 @@ export function buildHostedExecutionJobRuntime(
   const forwardedEnv = requestedRuntime.forwardedEnv === undefined
     ? buildHostedRunnerAmbientEnv(process.env)
     : stripChildProcessControlEnvKeys(requestedRuntime.forwardedEnv);
+  const platformEnv = requestedRuntime.platformEnv === undefined
+    ? requestedRuntime.forwardedEnv === undefined
+      ? buildHostedRunnerPlatformEnv(process.env)
+      : {}
+    : { ...requestedRuntime.platformEnv };
   const configSource = requestedRuntime.resolvedConfig
     ? undefined
     : requestedRuntime.forwardedEnv === undefined
@@ -64,6 +70,7 @@ export function buildHostedExecutionJobRuntime(
     commitTimeoutMs: requestedRuntime.commitTimeoutMs ?? null,
     configSource,
     forwardedEnv,
+    platformEnv,
     resolvedConfig: requestedRuntime.resolvedConfig,
     runnerSecrets: requestedRuntime.userEnv ?? {},
   });

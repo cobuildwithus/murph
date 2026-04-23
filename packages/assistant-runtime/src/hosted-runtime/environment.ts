@@ -5,6 +5,11 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { cloneConfiguredDeviceSyncRuntimeConfig } from "@murphai/device-syncd/runtime-config";
 
+import {
+  HOSTED_SHARED_INGRESS_ONLY_SECRET_ENV_NAMES,
+  HOSTED_SHARED_PLATFORM_ONLY_ENV_NAMES,
+} from "../hosted-env-categories.ts";
+
 import type {
   HostedAssistantRuntimeResolvedConfig,
   HostedAssistantRuntimeConfig,
@@ -24,6 +29,19 @@ const HOSTED_RUNTIME_CHILD_AMBIENT_ENV_KEYS = [
   "SSL_CERT_FILE",
   "TZ",
 ] as const;
+const HOSTED_RUNTIME_FORWARDED_ENV_DENYLIST = new Set<string>(
+  [
+    ...HOSTED_SHARED_INGRESS_ONLY_SECRET_ENV_NAMES,
+    ...HOSTED_SHARED_PLATFORM_ONLY_ENV_NAMES,
+  ],
+);
+const HOSTED_RUNTIME_USER_ENV_DENYLIST = new Set<string>(
+  [
+    ...HOSTED_SHARED_INGRESS_ONLY_SECRET_ENV_NAMES,
+    ...HOSTED_SHARED_PLATFORM_ONLY_ENV_NAMES,
+  ],
+);
+
 export interface HostedRuntimeChildLauncherDirectories {
   cacheRoot: string;
   homeRoot: string;
@@ -35,7 +53,14 @@ export function normalizeHostedAssistantRuntimeConfig(
   input: HostedAssistantRuntimeConfig | undefined,
   platform: HostedRuntimePlatform | null | undefined,
 ): NormalizedHostedAssistantRuntimeConfig {
-  const forwardedEnv = { ...(input?.forwardedEnv ?? {}) };
+  const forwardedEnv = sanitizeHostedAssistantRuntimeForwardedEnv(
+    input?.forwardedEnv ?? {},
+  );
+  const platformEnv = { ...(input?.platformEnv ?? {}) };
+  const userEnv = sanitizeHostedAssistantRuntimeUserEnv({
+    forwardedEnv,
+    userEnv: input?.userEnv ?? {},
+  });
   const normalizedPlatform = platform ?? null;
 
   if (!normalizedPlatform) {
@@ -46,9 +71,58 @@ export function normalizeHostedAssistantRuntimeConfig(
     commitTimeoutMs: input?.commitTimeoutMs ?? null,
     forwardedEnv,
     platform: normalizedPlatform,
+    platformEnv,
     resolvedConfig: cloneHostedAssistantRuntimeResolvedConfig(input?.resolvedConfig),
-    userEnv: { ...(input?.userEnv ?? {}) },
+    userEnv,
   };
+}
+
+export function buildHostedPlatformBackedRuntimeEnv(input: {
+  forwardedEnv: Readonly<Record<string, string>>;
+  platformEnv?: Readonly<Record<string, string>>;
+}): Record<string, string> {
+  return {
+    ...sanitizeHostedAssistantRuntimeForwardedEnv(input.forwardedEnv),
+    ...(input.platformEnv ?? {}),
+  };
+}
+
+function sanitizeHostedAssistantRuntimeForwardedEnv(
+  forwardedEnv: Readonly<Record<string, string>>,
+): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(forwardedEnv).filter(([key]) => !HOSTED_RUNTIME_FORWARDED_ENV_DENYLIST.has(key)),
+  );
+}
+
+function sanitizeHostedAssistantRuntimeUserEnv(input: {
+  forwardedEnv: Readonly<Record<string, string>>;
+  userEnv: Readonly<Record<string, string>>;
+}): Record<string, string> {
+  const normalizedUserEnv = Object.fromEntries(
+    Object.entries(input.userEnv).filter(([key]) => !HOSTED_RUNTIME_USER_ENV_DENYLIST.has(key)),
+  );
+  const configuredApiKeyEnv = normalizeHostedRuntimeString(
+    input.forwardedEnv.HOSTED_ASSISTANT_API_KEY_ENV,
+  );
+
+  if (
+    configuredApiKeyEnv &&
+    normalizeHostedRuntimeString(normalizedUserEnv[configuredApiKeyEnv]) === null
+  ) {
+    delete normalizedUserEnv[configuredApiKeyEnv];
+  }
+
+  return normalizedUserEnv;
+}
+
+function normalizeHostedRuntimeString(value: string | null | undefined): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
 }
 
 function cloneHostedAssistantRuntimeResolvedConfig(
@@ -115,7 +189,7 @@ export function createHostedRuntimeChildProcessEnv(input: {
     }
   }
 
-  Object.assign(env, input.forwardedEnv, {
+  Object.assign(env, sanitizeHostedAssistantRuntimeForwardedEnv(input.forwardedEnv), {
     HF_HOME: input.launcherDirectories.huggingFaceRoot,
     HOME: input.launcherDirectories.homeRoot,
     TEMP: input.launcherDirectories.tempRoot,

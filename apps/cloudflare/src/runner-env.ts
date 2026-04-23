@@ -14,6 +14,7 @@ import {
   buildHostedRunnerAmbientEnv,
   buildHostedRunnerContainerEnv,
   filterHostedRunnerSecrets,
+  rewriteHostedRunnerLoopbackUrlForContainer,
 } from "./hosted-env-policy.ts";
 
 const HOSTED_RUNNER_OPERATOR_ENV_KEYS = [
@@ -48,21 +49,54 @@ const HOSTED_RUNNER_OPERATOR_ENV_KEYS = [
   "HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK",
 ] as const;
 
+const HOSTED_RUNNER_PLATFORM_ENV_KEYS = [
+  "TELEGRAM_API_BASE_URL",
+  "TELEGRAM_BOT_TOKEN",
+  "TELEGRAM_FILE_BASE_URL",
+] as const;
+const HOSTED_RUNNER_CHILD_SECRET_ENV_KEYS = [
+  "HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK",
+  "HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_KEYRING_JSON",
+  "HOSTED_EXECUTION_CONTROL_TOKEN",
+  "HOSTED_EXECUTION_CONTROL_TOKENS",
+  "HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY",
+  "HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEYRING_JSON",
+  "HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN",
+  "HOSTED_EXECUTION_RUNNER_CONTROL_TOKENS",
+  "HOSTED_WAKE_ENCRYPTION_KEY",
+  "HOSTED_WAKE_ENCRYPTION_KEYRING_JSON",
+  "HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK",
+] as const;
+const HOSTED_RUNNER_CHILD_SECRET_ENV_KEY_SET = new Set<string>(
+  HOSTED_RUNNER_CHILD_SECRET_ENV_KEYS,
+);
+
 export function buildHostedRunnerJobRuntime(input: {
   commitTimeoutMs?: number | null;
   configSource?: Readonly<Record<string, string | undefined>>;
   forwardedEnv: Readonly<Record<string, string>>;
+  platformEnv?: Readonly<Record<string, string>>;
   resolvedConfig?: HostedAssistantRuntimeResolvedConfig;
   runnerSecrets?: Readonly<Record<string, string>>;
 }): HostedAssistantRuntimeConfig {
-  const forwardedEnv = { ...input.forwardedEnv };
+  const splitEnv = splitHostedRunnerRuntimeEnv({
+    forwardedEnv: input.forwardedEnv,
+    platformEnv: input.platformEnv,
+  });
+  const resolvedConfigSource = {
+    ...(input.configSource ?? input.forwardedEnv),
+    ...splitEnv.platformEnv,
+  };
 
   return {
     commitTimeoutMs: readHostedRunnerCommitTimeoutMs(input.commitTimeoutMs ?? null),
-    forwardedEnv,
+    forwardedEnv: splitEnv.forwardedEnv,
+    ...(Object.keys(splitEnv.platformEnv).length === 0
+      ? {}
+      : { platformEnv: splitEnv.platformEnv }),
     resolvedConfig:
       input.resolvedConfig
-      ?? buildHostedRunnerResolvedConfig(input.configSource ?? forwardedEnv),
+      ?? buildHostedRunnerResolvedConfig(resolvedConfigSource),
     userEnv: { ...(input.runnerSecrets ?? {}) },
   };
 }
@@ -71,7 +105,44 @@ export {
   buildHostedRunnerAmbientEnv,
   buildHostedRunnerContainerEnv,
   filterHostedRunnerSecrets,
-} from "./hosted-env-policy.ts";
+};
+
+export function buildHostedRunnerChildRuntimeEnv(input: {
+  ambientSource?: Readonly<Record<string, unknown>>;
+  forwardedEnv?: Readonly<Record<string, string>>;
+} = {}): Record<string, string> {
+  if (input.forwardedEnv) {
+    return splitHostedRunnerRuntimeEnv({
+      forwardedEnv: input.forwardedEnv,
+    }).forwardedEnv;
+  }
+
+  return splitHostedRunnerRuntimeEnv({
+    forwardedEnv: buildHostedRunnerAmbientEnv(input.ambientSource ?? process.env),
+  }).forwardedEnv;
+}
+
+export function buildHostedRunnerPlatformEnv(
+  source: Readonly<Record<string, unknown>>,
+  options: {
+    rewriteLoopbackUrlsForContainer?: boolean;
+  } = {},
+): Record<string, string> {
+  const env: Record<string, string> = {};
+
+  for (const key of HOSTED_RUNNER_PLATFORM_ENV_KEYS) {
+    const value = normalizeEnvString(
+      typeof source[key] === "string" ? source[key] : undefined,
+    );
+    if (value) {
+      env[key] = options.rewriteLoopbackUrlsForContainer
+        ? rewriteHostedRunnerLoopbackUrlForContainer(key, value, source)
+        : value;
+    }
+  }
+
+  return env;
+}
 
 export function buildHostedRunnerOperatorEnv(
   source: Readonly<Record<string, unknown>>,
@@ -92,10 +163,14 @@ export function buildHostedRunnerOperatorEnv(
 export function buildHostedRunnerJobRuntimeConfig(input: {
   configSource?: Readonly<Record<string, string | undefined>>;
   forwardedEnv: Readonly<Record<string, string>>;
+  rewritePlatformUrlsForContainer?: boolean;
   resolvedConfig?: HostedAssistantRuntimeResolvedConfig;
   runnerSecrets: Readonly<Record<string, string>>;
 }): HostedAssistantRuntimeConfig {
   const configSource = input.configSource ?? input.forwardedEnv;
+  const platformEnv = buildHostedRunnerPlatformEnv(configSource, {
+    rewriteLoopbackUrlsForContainer: input.rewritePlatformUrlsForContainer === true,
+  });
 
   return buildHostedRunnerJobRuntime({
     commitTimeoutMs: Number.parseInt(
@@ -104,6 +179,7 @@ export function buildHostedRunnerJobRuntimeConfig(input: {
     ),
     configSource,
     forwardedEnv: input.forwardedEnv,
+    platformEnv: Object.keys(platformEnv).length === 0 ? undefined : platformEnv,
     resolvedConfig: input.resolvedConfig,
     runnerSecrets: filterHostedRunnerSecrets(input.runnerSecrets, configSource),
   });
@@ -127,4 +203,38 @@ export function buildHostedRunnerResolvedConfig(
 function normalizeEnvString(value: string | undefined): string | null {
   const normalized = value?.trim();
   return normalized ? normalized : null;
+}
+
+function splitHostedRunnerRuntimeEnv(input: {
+  forwardedEnv: Readonly<Record<string, string>>;
+  platformEnv?: Readonly<Record<string, string>>;
+}): {
+  forwardedEnv: Record<string, string>;
+  platformEnv: Record<string, string>;
+} {
+  const forwardedEnv = Object.fromEntries(
+    Object.entries(input.forwardedEnv).filter(([key]) =>
+      !HOSTED_RUNNER_CHILD_SECRET_ENV_KEY_SET.has(key)
+    ),
+  );
+  const explicitPlatformEnv =
+    input.platformEnv === undefined
+      ? null
+      : buildHostedRunnerPlatformEnv(input.platformEnv);
+  const platformEnv = explicitPlatformEnv ? { ...explicitPlatformEnv } : {};
+
+  for (const key of HOSTED_RUNNER_PLATFORM_ENV_KEYS) {
+    const forwardedValue = normalizeEnvString(forwardedEnv[key]);
+
+    if (explicitPlatformEnv === null && forwardedValue !== null) {
+      platformEnv[key] = forwardedValue;
+    }
+
+    delete forwardedEnv[key];
+  }
+
+  return {
+    forwardedEnv,
+    platformEnv,
+  };
 }

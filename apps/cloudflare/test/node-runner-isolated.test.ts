@@ -99,7 +99,7 @@ describe("runHostedExecutionJobIsolatedDetailed", () => {
     expect(processKillSpy).toHaveBeenCalledWith(-4242, "SIGKILL");
   });
 
-  it("passes the operator-owned hosted execution env alongside explicit forwarded env into the isolated child env", async () => {
+  it("passes only the normalized runtime env into the isolated child env", async () => {
     vi.stubEnv("HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK", '{"kty":"EC"}');
     vi.stubEnv("HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK", '{"kty":"EC","x":"pub","y":"pub"}');
     vi.stubEnv("HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK", '{"kty":"EC","x":"recovery","y":"recovery"}');
@@ -115,20 +115,20 @@ describe("runHostedExecutionJobIsolatedDetailed", () => {
 
     spawnMock.mockImplementation((_command, _args, options) => {
       expect(options?.env).toMatchObject({
-        HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK: '{"kty":"EC"}',
-        HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK: '{"kty":"EC","x":"pub","y":"pub"}',
         HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://127.0.0.1:8787",
-        HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "platform-key",
-        HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK: '{"kty":"EC","x":"recovery","y":"recovery"}',
-        HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "development",
-        HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL: "http://127.0.0.1:4010/.well-known/jwks",
-        HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME: "murph-web",
-        HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: "murph-team",
         HOSTED_WEB_BASE_URL: "https://forwarded.example.test",
-        HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: '{"kty":"EC","d":"secret"}',
         OPENAI_API_KEY: "openai-key",
       });
-      expect(options?.env?.HOSTED_WAKE_ENCRYPTION_KEY).toBe(Buffer.alloc(32, 5).toString("base64url"));
+      expect(options?.env?.HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK).toBeUndefined();
+      expect(options?.env?.HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK).toBeUndefined();
+      expect(options?.env?.HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY).toBeUndefined();
+      expect(options?.env?.HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK).toBeUndefined();
+      expect(options?.env?.HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT).toBeUndefined();
+      expect(options?.env?.HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL).toBeUndefined();
+      expect(options?.env?.HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME).toBeUndefined();
+      expect(options?.env?.HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG).toBeUndefined();
+      expect(options?.env?.HOSTED_WAKE_ENCRYPTION_KEY).toBeUndefined();
+      expect(options?.env?.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK).toBeUndefined();
 
       const child = new EventEmitter() as EventEmitter & {
         kill: ReturnType<typeof vi.fn>;
@@ -162,8 +162,11 @@ describe("runHostedExecutionJobIsolatedDetailed", () => {
         request: createCronJobRequest("evt_child_env"),
         runtime: {
           forwardedEnv: {
+            HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "platform-key",
             HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://127.0.0.1:8787",
+            HOSTED_WAKE_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64url"),
             HOSTED_WEB_BASE_URL: "https://forwarded.example.test",
+            HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: '{"kty":"EC","d":"secret"}',
             OPENAI_API_KEY: "openai-key",
           },
           userEnv: {},

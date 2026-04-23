@@ -1,18 +1,9 @@
-import {
-  HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH,
-  HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH,
-} from "@murphai/device-syncd/hosted-runtime";
-
 import { type readHostedExecutionEnvironment } from "../env.ts";
 import { methodNotAllowed, notFound } from "../json.ts";
 import { fetchHostedExecutionWebControlPlaneResponse } from "../web-control-plane.ts";
-
-const HOSTED_WEB_USAGE_RECORD_PATH = "/api/internal/hosted-execution/usage/record";
-const HOSTED_WEB_ISSUE_RECORD_PATH = "/api/internal/hosted-execution/issues/record";
-const HOSTED_WEB_STRIPE_CUSTOMER_LOOKUP_PATH =
-  "/api/internal/hosted-execution/billing/stripe/customer/resolve";
-const HOSTED_DEVICE_SYNC_CONNECT_LINK_PATH =
-  /^\/api\/internal\/device-sync\/providers\/[^/]+\/connect-link$/u;
+import {
+  isAllowedHostedRunnerWebControlPath,
+} from "./shared-web-control-policy.ts";
 
 export async function handleRunnerWebControlRequest(input: {
   environment: ReturnType<typeof readHostedExecutionEnvironment>;
@@ -24,7 +15,7 @@ export async function handleRunnerWebControlRequest(input: {
     return input.request.method === "GET" ? notFound() : methodNotAllowed();
   }
 
-  if (!isAllowedRunnerWebControlRoute(input.url.pathname)) {
+  if (!isAllowedHostedRunnerWebControlPath(input.url.pathname)) {
     return notFound();
   }
 
@@ -41,13 +32,4 @@ export async function handleRunnerWebControlRequest(input: {
     search: input.url.search || null,
     timeoutMs: input.environment.runnerTimeoutMs,
   });
-}
-
-function isAllowedRunnerWebControlRoute(path: string): boolean {
-  return path === HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH
-    || path === HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH
-    || path === HOSTED_WEB_ISSUE_RECORD_PATH
-    || path === HOSTED_WEB_STRIPE_CUSTOMER_LOOKUP_PATH
-    || path === HOSTED_WEB_USAGE_RECORD_PATH
-    || HOSTED_DEVICE_SYNC_CONNECT_LINK_PATH.test(path);
 }
