@@ -727,6 +727,11 @@ function buildHostedAssistantDeliveryOutcome(input: {
     journalMethod: null,
     journalStatus: null,
     providerMessageId: input.delivery?.providerMessageId ?? null,
+    ...(input.delivery?.providerMessageIds && input.delivery.providerMessageIds.length > 0
+      ? {
+          providerMessageIds: [...input.delivery.providerMessageIds],
+        }
+      : {}),
     providerThreadId: input.delivery?.providerThreadId ?? null,
     retryable: input.retryable,
     target: input.delivery?.target ?? null,

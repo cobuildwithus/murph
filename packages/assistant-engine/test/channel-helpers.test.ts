@@ -418,6 +418,7 @@ describe('channel helper seams', () => {
   it('routes descriptor sends through channel-specific helpers and enforces email identity requirements', async () => {
     const sendTelegram = vi.fn().mockResolvedValue({
       providerMessageId: '  telegram-message  ',
+      providerMessageIds: ['  telegram-message-1  ', 'telegram-message-2'],
       target: '  delivered-chat  ',
     })
     const sendLinq = vi.fn().mockResolvedValue({
@@ -454,6 +455,7 @@ describe('channel helper seams', () => {
       idempotencyKey: null,
       messageLength: 14,
       providerMessageId: 'telegram-message',
+      providerMessageIds: ['telegram-message-1', 'telegram-message-2'],
       providerThreadId: null,
       sentAt: FIXED_NOW.toISOString(),
       target: 'delivered-chat',

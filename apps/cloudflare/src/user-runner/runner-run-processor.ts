@@ -37,6 +37,8 @@ import {
   HOSTED_RUN_MESSAGING_ACTIVITY_OWNER_ENV,
   HOSTED_RUN_MESSAGING_ACTIVITY_OWNER_EXECUTOR,
   computeHostedRunElapsedMs,
+  deleteHostedLinqMessages,
+  deleteHostedTelegramMessages,
   selectHostedRunMessagingActivityTarget,
   startHostedRunMessagingActivity,
   type HostedRunMessagingActivityHandle,
@@ -62,6 +64,7 @@ import {
   summarizeHostedRunnerSecretLogCategories,
 } from "../hosted-env-policy.ts";
 import {
+  type RunnerPendingCleanupState,
   type RunnerStateRecord,
 } from "./types.js";
 import { RunnerBundleSync } from "./runner-bundle-sync.js";
@@ -86,6 +89,7 @@ export interface RunnerUserStores {
 }
 
 export interface RunnerRunDrainExecutionResult {
+  assistantDeliveryOutcomes?: HostedAssistantDeliveryOutcome[];
   browserVaultReplicaRef?: HostedBrowserVaultReplicaRef | null;
   cursorSnapshotRef: HostedExecutionBundleRef | null;
   finalizeRequired: boolean;
@@ -320,6 +324,11 @@ export class RunnerRunProcessor {
         leaseOwner,
       });
       return {
+        ...(runnerResult.assistantDeliveryOutcomes && runnerResult.assistantDeliveryOutcomes.length > 0
+          ? {
+              assistantDeliveryOutcomes: runnerResult.assistantDeliveryOutcomes,
+            }
+          : {}),
         browserVaultReplicaRef,
         cursorSnapshotRef,
         finalizeRequired: false,
@@ -391,7 +400,7 @@ export class RunnerRunProcessor {
     const run = hostedRunRecordToExecutionRunContext(input.run);
 
     try {
-      const runtimeEnv = await this.resolveRunnerMessagingActivityRuntimeEnv(input.run.userId);
+      const runtimeEnv = await this.resolveRunnerRuntimeEnv(input.run.userId);
 
       return startHostedRunMessagingActivity({
         component: "runner",
@@ -494,6 +503,11 @@ export class RunnerRunProcessor {
       });
 
       return {
+        ...(runnerResult.assistantDeliveryOutcomes && runnerResult.assistantDeliveryOutcomes.length > 0
+          ? {
+              assistantDeliveryOutcomes: runnerResult.assistantDeliveryOutcomes,
+            }
+          : {}),
         browserVaultReplicaRef,
         cursorSnapshotRef,
         finalizeRequired: false,
@@ -554,10 +568,55 @@ export class RunnerRunProcessor {
     }
   }
 
-  async cleanupTransientWakeDataBestEffortForRunDrain(
-    wake: HostedIngressEnvelope,
-  ): Promise<void> {
-    await this.deleteTransientWakeDataBestEffort(wake);
+  async cleanupTransientWakeDataBestEffortForRunDrain(input: {
+    assistantDeliveryOutcomes?: readonly HostedAssistantDeliveryOutcome[] | null;
+    runId?: string | null;
+    userId?: string | null;
+    wakes: readonly HostedIngressEnvelope[];
+  }): Promise<void> {
+    const pendingCleanup =
+      input.runId ? await this.dependencies.stateStore.readPendingRunCleanup(input.runId) : null;
+    if (
+      input.wakes.length === 0
+      && (!input.assistantDeliveryOutcomes || input.assistantDeliveryOutcomes.length === 0)
+      && !pendingCleanup
+    ) {
+      return;
+    }
+
+    for (const wake of input.wakes) {
+      await this.deleteTransientWakeDataBestEffort(wake);
+    }
+    for (const emailMessage of pendingCleanup?.emailMessages ?? []) {
+      await this.deletePendingEmailCleanupBestEffort(emailMessage);
+    }
+
+    await this.deleteHostedLinqMessagesBestEffort({
+      assistantDeliveryOutcomes: input.assistantDeliveryOutcomes ?? [],
+      pendingCleanup,
+      userId: input.userId ?? null,
+      wakes: input.wakes,
+    });
+    await this.deleteHostedTelegramMessagesBestEffort({
+      assistantDeliveryOutcomes: input.assistantDeliveryOutcomes ?? [],
+      pendingCleanup,
+      userId: input.userId ?? null,
+      wakes: input.wakes,
+    });
+
+    if (input.runId) {
+      await this.dependencies.stateStore.clearPendingRunCleanup(input.runId);
+    }
+  }
+
+  async persistPendingRunCleanupData(input: {
+    runId: string;
+    wakes: readonly HostedIngressEnvelope[];
+  }): Promise<void> {
+    await this.dependencies.stateStore.writePendingRunCleanup(
+      input.runId,
+      buildRunnerPendingCleanupState(input.wakes),
+    );
   }
 
   private async deleteTransientWakeDataBestEffort(wake: HostedIngressEnvelope): Promise<void> {
@@ -593,9 +652,199 @@ export class RunnerRunProcessor {
     }
   }
 
-  private async resolveRunnerMessagingActivityRuntimeEnv(
-    userId: string,
+  private async deletePendingEmailCleanupBestEffort(input: {
+    eventId: string;
+    rawMessageKey: string;
+    userId: string;
+  }): Promise<void> {
+    try {
+      const { crypto } = await this.dependencies.ensureRunnerStores(input.userId);
+      await deleteHostedEmailRawMessage({
+        bucket: this.dependencies.bucket,
+        key: crypto.rootKey,
+        keysById: crypto.keysById,
+        rawMessageKey: input.rawMessageKey,
+        userId: input.userId,
+      });
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "runner",
+        details: {
+          rawMessageKey: input.rawMessageKey,
+          wakeChannel: "email",
+          wakeKind: "conversation.message",
+        },
+        error,
+        eventId: input.eventId,
+        level: "warn",
+        message: "Hosted wake best-effort raw email cleanup failed; the durable raw message object may need manual cleanup.",
+        phase: "completed",
+        run: null,
+        userId: input.userId,
+      });
+    }
+  }
+
+  private async deleteHostedLinqMessagesBestEffort(input: {
+    assistantDeliveryOutcomes: readonly HostedAssistantDeliveryOutcome[];
+    pendingCleanup: RunnerPendingCleanupState | null;
+    userId: string | null;
+    wakes: readonly HostedIngressEnvelope[];
+  }): Promise<void> {
+    const messageIds = new Set<string>();
+
+    for (const wake of input.wakes) {
+      if (wake.kind === "conversation.message" && wake.message.channel === "linq") {
+        messageIds.add(wake.message.linqMessage.messageId);
+      }
+    }
+    for (const messageId of input.pendingCleanup?.linqMessageIds ?? []) {
+      messageIds.add(messageId);
+    }
+
+    for (const outcome of input.assistantDeliveryOutcomes) {
+      if (outcome.deliveryStatus !== "sent" || outcome.deliveryChannel !== "linq") {
+        continue;
+      }
+
+      for (const messageId of readHostedProviderMessageIds(outcome)) {
+        messageIds.add(messageId);
+      }
+    }
+
+    if (messageIds.size === 0) {
+      return;
+    }
+
+    const firstWake = input.wakes[0];
+    const cleanupUserId = firstWake?.userId ?? input.userId ?? null;
+    try {
+      const runtimeEnv = await this.resolveRunnerRuntimeEnv(cleanupUserId);
+      await deleteHostedLinqMessages({
+        env: runtimeEnv,
+        messageIds: [...messageIds],
+      });
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "runner",
+        details: {
+          messageIdCount: messageIds.size,
+          provider: "linq",
+        },
+        error,
+        eventId: firstWake?.eventId ?? "hosted-run:cleanup",
+        level: "warn",
+        message: "Hosted Linq message cleanup failed; the provider copy may need manual deletion.",
+        phase: "completed",
+        run: null,
+        userId: cleanupUserId ?? "unknown",
+      });
+    }
+  }
+
+  private async deleteHostedTelegramMessagesBestEffort(input: {
+    assistantDeliveryOutcomes: readonly HostedAssistantDeliveryOutcome[];
+    pendingCleanup: RunnerPendingCleanupState | null;
+    userId: string | null;
+    wakes: readonly HostedIngressEnvelope[];
+  }): Promise<void> {
+    const groupedMessageIds = new Map<string, Set<string>>();
+    const sentTargets = new Set<string>();
+
+    for (const outcome of input.assistantDeliveryOutcomes) {
+      if (outcome.deliveryStatus === "sent" && outcome.deliveryChannel === "telegram" && outcome.target) {
+        sentTargets.add(outcome.target);
+      }
+    }
+
+    for (const wake of input.wakes) {
+      if (wake.kind !== "conversation.message" || wake.message.channel !== "telegram") {
+        continue;
+      }
+
+      addHostedProviderMessageId(
+        groupedMessageIds,
+        resolveHostedTelegramCleanupTarget(wake.message.telegramMessage.threadId, sentTargets),
+        wake.message.telegramMessage.messageId,
+      );
+    }
+    for (const message of input.pendingCleanup?.telegramMessages ?? []) {
+      addHostedProviderMessageId(
+        groupedMessageIds,
+        resolveHostedTelegramCleanupTarget(message.target, sentTargets),
+        message.messageId,
+      );
+    }
+
+    for (const outcome of input.assistantDeliveryOutcomes) {
+      if (outcome.deliveryStatus !== "sent" || outcome.deliveryChannel !== "telegram" || !outcome.target) {
+        continue;
+      }
+
+      for (const messageId of readHostedProviderMessageIds(outcome)) {
+        addHostedProviderMessageId(groupedMessageIds, outcome.target, messageId);
+      }
+    }
+
+    if (groupedMessageIds.size === 0) {
+      return;
+    }
+
+    const firstWake = input.wakes[0];
+    const cleanupUserId = firstWake?.userId ?? input.userId ?? null;
+    try {
+      const runtimeEnv = await this.resolveRunnerRuntimeEnv(cleanupUserId);
+      for (const [target, messageIds] of groupedMessageIds) {
+        try {
+          await deleteHostedTelegramMessages({
+            env: runtimeEnv,
+            messageIds: [...messageIds],
+            target,
+          });
+        } catch (error) {
+          emitHostedExecutionStructuredLog({
+            component: "runner",
+            details: {
+              messageIdCount: messageIds.size,
+              provider: "telegram",
+              target,
+            },
+            error,
+            eventId: firstWake?.eventId ?? "hosted-run:cleanup",
+            level: "warn",
+            message: "Hosted Telegram message cleanup failed; the provider copy may need manual deletion.",
+            phase: "completed",
+            run: null,
+            userId: cleanupUserId ?? "unknown",
+          });
+        }
+      }
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "runner",
+        details: {
+          provider: "telegram",
+          targetCount: groupedMessageIds.size,
+        },
+        error,
+        eventId: firstWake?.eventId ?? "hosted-run:cleanup",
+        level: "warn",
+        message: "Hosted Telegram cleanup environment resolution failed; the provider copies may need manual deletion.",
+        phase: "completed",
+        run: null,
+        userId: cleanupUserId ?? "unknown",
+      });
+    }
+  }
+
+  private async resolveRunnerRuntimeEnv(
+    userId: string | null,
   ): Promise<Record<string, string>> {
+    if (!userId) {
+      return {
+        ...buildHostedRunnerAmbientEnv(this.dependencies.runnerRuntimeEnvSource),
+      };
+    }
     const { runnerSecrets: runnerSecretsService } = await this.dependencies.ensureRunnerStores(
       userId,
     );
@@ -613,6 +862,12 @@ export class RunnerRunProcessor {
       ...(runtimeConfig.forwardedEnv ?? {}),
       ...(runtimeConfig.userEnv ?? {}),
     };
+  }
+
+  private async resolveRunnerMessagingActivityRuntimeEnv(
+    userId: string,
+  ): Promise<Record<string, string>> {
+    return this.resolveRunnerRuntimeEnv(userId);
   }
 
   private async invokeRunner(
@@ -1011,6 +1266,84 @@ function buildRunnerRedactedSummary(
     ...summary,
     ...(redactedDetails ? { details: redactedDetails } : {}),
   };
+}
+
+function readHostedProviderMessageIds(
+  outcome: HostedAssistantDeliveryOutcome,
+): string[] {
+  if (Array.isArray(outcome.providerMessageIds) && outcome.providerMessageIds.length > 0) {
+    return outcome.providerMessageIds;
+  }
+
+  return outcome.providerMessageId ? [outcome.providerMessageId] : [];
+}
+
+function addHostedProviderMessageId(
+  groupedMessageIds: Map<string, Set<string>>,
+  target: string,
+  messageId: string,
+): void {
+  const bucket = groupedMessageIds.get(target) ?? new Set<string>();
+  bucket.add(messageId);
+  groupedMessageIds.set(target, bucket);
+}
+
+function buildRunnerPendingCleanupState(
+  wakes: readonly HostedIngressEnvelope[],
+): RunnerPendingCleanupState | null {
+  const cleanup: RunnerPendingCleanupState = {
+    emailMessages: [],
+    linqMessageIds: [],
+    telegramMessages: [],
+  };
+
+  for (const wake of wakes) {
+    if (wake.kind !== "conversation.message") {
+      continue;
+    }
+
+    switch (wake.message.channel) {
+      case "email":
+        cleanup.emailMessages.push({
+          eventId: wake.eventId,
+          rawMessageKey: wake.message.rawMessageKey,
+          userId: wake.userId,
+        });
+        break;
+      case "linq":
+        cleanup.linqMessageIds.push(wake.message.linqMessage.messageId);
+        break;
+      case "telegram":
+        cleanup.telegramMessages.push({
+          messageId: wake.message.telegramMessage.messageId,
+          target: wake.message.telegramMessage.threadId,
+        });
+        break;
+      default:
+        break;
+    }
+  }
+
+  return cleanup.emailMessages.length > 0
+    || cleanup.linqMessageIds.length > 0
+    || cleanup.telegramMessages.length > 0
+    ? cleanup
+    : null;
+}
+
+function resolveHostedTelegramCleanupTarget(
+  target: string,
+  sentTargets: ReadonlySet<string>,
+): string {
+  if (sentTargets.has(target)) {
+    return target;
+  }
+
+  if (sentTargets.size === 1) {
+    return [...sentTargets][0]!;
+  }
+
+  return target;
 }
 
 export function summarizeHostedAssistantDeliveryOutcomes(

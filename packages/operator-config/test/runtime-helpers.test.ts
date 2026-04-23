@@ -30,6 +30,7 @@ import {
   resolveLinqWebhookSecret,
 } from '../src/linq-runtime.ts'
 import {
+  deleteTelegramMessages,
   resolveTelegramApiBaseUrl,
   resolveTelegramBotToken,
   resolveTelegramFileBaseUrl,
@@ -269,6 +270,44 @@ test('startTelegramTypingSession stops a pending refresh request cleanly', async
   await handle.stop()
 
   assert.equal(seenSignals[1]?.aborted, true)
+})
+
+test('deleteTelegramMessages batches ids and uses the chat id from the serialized target', async () => {
+  const seenBodies: Array<Record<string, unknown> | null> = []
+  const fetchImplementation = vi.fn(async (_url: string, init: {
+    body?: string
+    headers?: Record<string, string>
+    method: 'POST'
+    signal?: AbortSignal
+  }) => {
+    seenBodies.push(init.body ? JSON.parse(init.body) as Record<string, unknown> : null)
+    return createTelegramResponse({ ok: true })
+  })
+
+  await deleteTelegramMessages(
+    {
+      messageIds: Array.from({ length: 101 }, (_, index) => String(index + 1)),
+      target: '123:topic:456',
+    },
+    {
+      env: {
+        TELEGRAM_API_BASE_URL: 'https://api.telegram.example',
+        TELEGRAM_BOT_TOKEN: 'bot-token',
+      },
+      fetchImplementation,
+    },
+  )
+
+  expect(fetchImplementation).toHaveBeenCalledTimes(2)
+  expect(seenBodies[0]).toMatchObject({
+    chat_id: '123',
+    message_ids: expect.any(Array),
+  })
+  expect((seenBodies[0]?.message_ids as unknown[])?.length).toBe(100)
+  expect(seenBodies[1]).toMatchObject({
+    chat_id: '123',
+    message_ids: [101],
+  })
 })
 
 test('startTelegramTypingSession validates Telegram runtime prerequisites and target format', async () => {

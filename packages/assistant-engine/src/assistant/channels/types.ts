@@ -50,6 +50,7 @@ export interface AssistantChannelDependencies {
   }) => Promise<
     | {
         providerMessageId?: string | null
+        providerMessageIds?: string[] | null
         providerThreadId?: string | null
         target?: string | null
         targetKind?: AssistantChannelDeliveryTargetKind | null
@@ -66,6 +67,7 @@ export interface AssistantChannelDependencies {
   }) => Promise<
     | {
         providerMessageId?: string | null
+        providerMessageIds?: string[] | null
         providerThreadId?: string | null
         target?: string | null
         targetKind?: AssistantChannelDeliveryTargetKind | null
@@ -83,6 +85,7 @@ export interface AssistantChannelDependencies {
   }) => Promise<
     | {
         providerMessageId?: string | null
+        providerMessageIds?: string[] | null
         providerThreadId?: string | null
         target: string
       }
@@ -155,6 +158,7 @@ export interface AssistantChannelAdapterSpec {
   }) => Promise<
     | {
         providerMessageId?: string | null
+        providerMessageIds?: string[] | null
         providerThreadId?: string | null
         target?: string | null
         targetKind?: AssistantChannelDeliveryTargetKind | null

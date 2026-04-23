@@ -117,6 +117,7 @@ export interface HostedAssistantDeliveryOutcome {
   journalMethod: "DELETE" | "GET" | "PUT" | null;
   journalStatus: string | null;
   providerMessageId: string | null;
+  providerMessageIds?: string[];
   providerThreadId: string | null;
   retryable: boolean;
   target: string | null;

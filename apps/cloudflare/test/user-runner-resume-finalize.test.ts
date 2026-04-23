@@ -12,6 +12,7 @@ import type {
 import { HOSTED_INGRESS_PAYLOAD_SCHEMA } from "@murphai/hosted-execution/contracts";
 import {
   buildHostedExecutionEmailConversationMessageWake,
+  buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionVaultSyncImportWake,
 } from "@murphai/hosted-execution";
@@ -53,6 +54,7 @@ const wakeProcessorMocks = vi.hoisted(() => ({
   cleanupTransientWakeDataBestEffortForRunDrain: vi.fn(),
   executeRunDrain: vi.fn(),
   finalizeRunDrain: vi.fn(),
+  persistPendingRunCleanupData: vi.fn(),
   readRunDrainSharePack: vi.fn(),
   readRunDrainVaultSyncImport: vi.fn(),
   startRunMessagingActivity: vi.fn(),
@@ -97,6 +99,8 @@ vi.mock("../src/user-runner/runner-run-processor.js", async () => {
     executeRunDrain = wakeProcessorMocks.executeRunDrain;
 
     finalizeRunDrain = wakeProcessorMocks.finalizeRunDrain;
+
+    persistPendingRunCleanupData = wakeProcessorMocks.persistPendingRunCleanupData;
 
     readRunDrainSharePack = wakeProcessorMocks.readRunDrainSharePack;
 
@@ -237,13 +241,18 @@ class SqliteDurableObjectSqlStorage {
 
 function createDurableObjectStateHarness(): DurableObjectStateLike {
   const db = new DatabaseSync(":memory:");
+  const storageValues = new Map<string, unknown>();
 
   return {
     storage: {
       deleteAlarm: async () => {},
-      get: async () => undefined,
+      get: async <T,>(key: string): Promise<T | undefined> => (
+        storageValues.get(key) as T | undefined
+      ),
       getAlarm: async () => null,
-      put: async () => {},
+      put: async (key, value) => {
+        storageValues.set(key, value);
+      },
       setAlarm: async () => {},
       sql: new SqliteDurableObjectSqlStorage(db),
     },
@@ -739,7 +748,31 @@ describe("HostedUserRunner resumeFinalize drain", () => {
     const prepareAcquire: HostedRunAcquireResponse = {
       acquired: true,
       cursor: acquiredCursor,
-      events: [],
+      events: [
+        createAcquireEvent({
+          id: "evt-linq",
+          seq: "11",
+          userId: "user-resume-finalize",
+          wake: buildHostedExecutionLinqConversationMessageWake({
+            eventId: "linq-wake",
+            linqMessage: {
+              chatId: "chat_123",
+              from: "+15550001",
+              isFromMe: false,
+              messageId: "linq_inbound_message",
+              parts: [
+                {
+                  type: "text",
+                  value: "hello",
+                },
+              ],
+            },
+            occurredAt: "2026-04-20T09:00:00.000Z",
+            phoneLookupKey: "lookup_123",
+            userId: "user-resume-finalize",
+          }),
+        }),
+      ],
       pendingIngressEventCount: 1,
       resumeFinalize: false,
       run: acquiredRun,
@@ -863,7 +896,31 @@ describe("HostedUserRunner resumeFinalize drain", () => {
     const prepareAcquire: HostedRunAcquireResponse = {
       acquired: true,
       cursor: acquiredCursor,
-      events: [],
+      events: [
+        createAcquireEvent({
+          id: "evt-linq",
+          seq: "11",
+          userId: "user-resume-finalize",
+          wake: buildHostedExecutionLinqConversationMessageWake({
+            eventId: "linq-wake",
+            linqMessage: {
+              chatId: "chat_123",
+              from: "+15550001",
+              isFromMe: false,
+              messageId: "linq_inbound_message",
+              parts: [
+                {
+                  type: "text",
+                  value: "hello",
+                },
+              ],
+            },
+            occurredAt: "2026-04-20T09:00:00.000Z",
+            phoneLookupKey: "lookup_123",
+            userId: "user-resume-finalize",
+          }),
+        }),
+      ],
       pendingIngressEventCount: 1,
       resumeFinalize: false,
       run: acquiredRun,
@@ -918,6 +975,16 @@ describe("HostedUserRunner resumeFinalize drain", () => {
     expect(webControlMocks.acquireHostedRunFromWeb).toHaveBeenCalledTimes(2);
     expect(webControlMocks.commitHostedRunToWeb).toHaveBeenCalledTimes(1);
     expect(webControlMocks.finalizeHostedRunInWeb).toHaveBeenCalledTimes(1);
+    expect(wakeProcessorMocks.cleanupTransientWakeDataBestEffortForRunDrain).toHaveBeenCalledTimes(1);
+    expect(wakeProcessorMocks.persistPendingRunCleanupData).toHaveBeenCalledWith({
+      runId: acquiredRun.id,
+      wakes: [
+        expect.objectContaining({
+          eventId: "linq-wake",
+          kind: "conversation.message",
+        }),
+      ],
+    });
     expect(wakeProcessorMocks.finalizeRunDrain).toHaveBeenCalledTimes(1);
     expect(webControlMocks.finalizeHostedRunInWeb).toHaveBeenCalledWith(expect.objectContaining({
       body: expect.objectContaining({
@@ -930,6 +997,19 @@ describe("HostedUserRunner resumeFinalize drain", () => {
       requestedTargetSeq: null,
       targetReached: true,
     });
+    expect(wakeProcessorMocks.cleanupTransientWakeDataBestEffortForRunDrain).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assistantDeliveryOutcomes: [],
+        runId: finalizingRun.id,
+        userId: "user-resume-finalize",
+        wakes: [
+          expect.objectContaining({
+            eventId: "linq-wake",
+            kind: "conversation.message",
+          }),
+        ],
+      }),
+    );
     expect(
       webControlMocks.recordHostedRunLogInWeb.mock.calls.map(([input]) => input.body.phase),
     ).toEqual([

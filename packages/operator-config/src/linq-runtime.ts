@@ -28,6 +28,7 @@ const LINQ_HTTP_RETRY_DELAYS_MS = Object.freeze([1_000, 3_000])
 type LinqOperation =
   | 'create_chat'
   | 'create_webhook_subscription'
+  | 'delete_message'
   | 'list_phone_numbers'
   | 'send_message'
   | 'typing_start'
@@ -166,6 +167,39 @@ export async function sendLinqChatMessage(
     }),
     signal: dependencies.signal,
   })
+}
+
+export async function deleteLinqMessage(
+  input: {
+    messageId: string
+  },
+  dependencies: {
+    env?: NodeJS.ProcessEnv
+    fetchImplementation?: LinqFetch
+    signal?: AbortSignal
+  } = {},
+): Promise<void> {
+  const messageId = normalizeRequiredString(input.messageId, 'message id')
+
+  try {
+    await requestLinqNoContent({
+      details: {
+        operation: 'delete_message',
+        provider: 'linq',
+      },
+      env: dependencies.env ?? process.env,
+      fetchImplementation: dependencies.fetchImplementation,
+      method: 'DELETE',
+      path: `/messages/${encodeURIComponent(messageId)}`,
+      signal: dependencies.signal,
+    })
+  } catch (error) {
+    if (isLinqNotFoundError(error)) {
+      return
+    }
+
+    throw error
+  }
 }
 
 export async function startLinqChatTypingIndicator(
@@ -528,6 +562,14 @@ function isRetryableLinqRequestError(error: unknown): error is VaultCliError {
     error instanceof VaultCliError &&
     error.code === 'LINQ_API_REQUEST_FAILED' &&
     error.context?.retryable === true
+  )
+}
+
+function isLinqNotFoundError(error: unknown): error is VaultCliError {
+  return (
+    error instanceof VaultCliError &&
+    error.code === 'LINQ_API_REQUEST_FAILED' &&
+    error.context?.status === 404
   )
 }
 

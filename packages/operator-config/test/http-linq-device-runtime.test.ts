@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
 
-import { afterEach, test, vi } from 'vitest'
+import { afterEach, expect, test, vi } from 'vitest'
 
 import {
   fetchJsonResponse,
@@ -18,6 +18,7 @@ import { createDeviceSyncClient } from '../src/device-sync-client.ts'
 import {
   createLinqChat,
   createLinqWebhookSubscription,
+  deleteLinqMessage,
   probeLinqApi,
   sendLinqChatMessage,
   startLinqChatTypingIndicator,
@@ -444,6 +445,47 @@ test('linq runtime surfaces non-retryable transport, http, and configuration fai
       error.context?.status === 429 &&
       error.message === 'rate limited',
   )
+})
+
+test('deleteLinqMessage treats missing provider messages as an idempotent success', async () => {
+  const env = {
+    LINQ_API_BASE_URL: 'https://linq.example.test/custom',
+    LINQ_API_TOKEN: 'linq-token',
+  } satisfies NodeJS.ProcessEnv
+  const fetchImplementation = vi.fn(async (url: string, init) => {
+    if (url.endsWith('/messages/message-present')) {
+      return new Response(null, { status: 204 })
+    }
+
+    if (url.endsWith('/messages/message-missing')) {
+      return createJsonResponse({ error: 'missing' }, { status: 404 })
+    }
+
+    throw new Error(`Unexpected request: ${init.method} ${url}`)
+  })
+
+  await deleteLinqMessage(
+    {
+      messageId: ' message-present ',
+    },
+    {
+      env,
+      fetchImplementation,
+    },
+  )
+  await deleteLinqMessage(
+    {
+      messageId: ' message-missing ',
+    },
+    {
+      env,
+      fetchImplementation,
+    },
+  )
+
+  expect(fetchImplementation).toHaveBeenCalledTimes(2)
+  expect(fetchImplementation.mock.calls[0]?.[0]).toContain('/messages/message-present')
+  expect(fetchImplementation.mock.calls[1]?.[0]).toContain('/messages/message-missing')
 })
 
 test('linq runtime covers optional payload omissions, fallback http messages, and timeout transport errors', async () => {
