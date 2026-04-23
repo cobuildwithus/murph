@@ -70,6 +70,8 @@ Return a JSON block named SOURCE_CANDIDATES_V1:
   ]
 }
 
+Also attach one downloadable JSON file named `source_candidates_v1.json` containing exactly the `SOURCE_CANDIDATES_V1` object and no Markdown fence. Treat that file as the canonical machine-readable output for this seam.
+
 ## Top candidates
 Rank the 20 most important records from this shard.
 

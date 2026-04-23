@@ -6,6 +6,8 @@ import path from "node:path";
 import {
   ORCHESTRATOR_SCHEMA_VERSION,
   assertWorkspaceDir,
+  buildDiscoveryStepLabel,
+  buildResearchArtifactContracts,
   buildCommandHelperScript,
   buildCommandWrapper,
   buildProtocolMetadata,
@@ -15,6 +17,7 @@ import {
   renderTemplate,
   repoRoot,
   slugify,
+  SOURCE_LEDGER_REDUCER_LABEL,
   toPosixRelative,
   writeExecutable,
   writeResearchReviewGptSupportFiles,
@@ -387,7 +390,7 @@ function buildLaterTemplateSpecs(commonPromptTokens, sharedHeader, sectionSeams)
       },
     },
     {
-      relativePath: "prompts/11-source-ledger-reducer.template.md",
+      relativePath: `prompts/${SOURCE_LEDGER_REDUCER_LABEL}.template.md`,
       templateName: "source-ledger-reducer.md",
       replacements: {
         ...commonPromptTokens,
@@ -532,6 +535,7 @@ Each command writes:
 - \`logs/<label>.result.json\`
 - \`logs/<label>.stderr.log\`
 - \`state/chat-urls/<label>.txt\` when a ChatGPT thread URL is detected
+- the canonical machine-readable seam artifact under \`downloads/<label>/...\` when the prompt requests one
 
 ## Template-Only Later Stages
 
@@ -588,8 +592,7 @@ function main(argv) {
   const templateOnlyPrompts = [];
 
   charterArtifacts.discoveryShards.forEach((shard, index) => {
-    const ordinal = String(index + 2).padStart(2, "0");
-    const baseName = `${ordinal}-discovery-${shard.fileId}`;
+    const baseName = buildDiscoveryStepLabel(index, shard.fileId);
     const promptRelativePath = `prompts/${baseName}.md`;
     writeTextFile(
       path.join(workspaceDir, promptRelativePath),
@@ -648,6 +651,10 @@ function main(argv) {
     charterManifest: charterArtifacts.manifest,
     sourceExtractionSchema: charterArtifacts.sourceExtractionSchema,
     initialFilePlan: charterArtifacts.initialFilePlan,
+    artifactContracts: buildResearchArtifactContracts({
+      discoveryShards: charterArtifacts.discoveryShards,
+      includeSourceLedgerReducer: true,
+    }),
     discoveryShards: charterArtifacts.discoveryShards.map(({ fileId, ...rest }) => rest),
     sectionSeams: charterArtifacts.sectionSeams.map(({ fileId, ...rest }) => rest),
     promptFiles,

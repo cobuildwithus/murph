@@ -10,6 +10,7 @@ export const scriptDir = path.resolve(orchestratorDir, "..");
 export const repoRoot = path.resolve(scriptDir, "..");
 export const promptTemplateDir = path.join(orchestratorDir, "prompts");
 export const researchOutputRoot = path.join(repoRoot, "output-packages", "research");
+export const SOURCE_LEDGER_REDUCER_LABEL = "11-source-ledger-reducer";
 
 export const RESEARCH_REFERENCE_FILE_PATHS = [
   "agent-docs/product-specs/health-commons.md",
@@ -208,6 +209,50 @@ export function buildSharedPromptHeader(spec) {
   }).trimEnd();
 }
 
+export function buildDiscoveryStepLabel(index, fileId) {
+  const ordinal = String(index + 2).padStart(2, "0");
+  return `${ordinal}-discovery-${fileId}`;
+}
+
+export function buildResearchArtifactContracts({
+  discoveryShards = [],
+  includeSourceLedgerReducer = false,
+} = {}) {
+  const contracts = {};
+
+  discoveryShards.forEach((shard, index) => {
+    const label = buildDiscoveryStepLabel(index, shard.fileId);
+    contracts[label] = {
+      requiredArtifacts: [
+        {
+          logicalName: "SOURCE_CANDIDATES_V1",
+          fileName: "source_candidates_v1.json",
+          relativePath: `downloads/${label}/source_candidates_v1.json`,
+        },
+      ],
+    };
+  });
+
+  if (includeSourceLedgerReducer) {
+    contracts[SOURCE_LEDGER_REDUCER_LABEL] = {
+      requiredArtifacts: [
+        {
+          logicalName: "CANONICAL_SOURCE_LEDGER_V1",
+          fileName: "canonical_source_ledger_v1.json",
+          relativePath: `downloads/${SOURCE_LEDGER_REDUCER_LABEL}/canonical_source_ledger_v1.json`,
+        },
+        {
+          logicalName: "SOURCE_EXTRACTION_BATCHES_V1",
+          fileName: "source_extraction_batches_v1.json",
+          relativePath: `downloads/${SOURCE_LEDGER_REDUCER_LABEL}/source_extraction_batches_v1.json`,
+        },
+      ],
+    };
+  }
+
+  return contracts;
+}
+
 export function buildCommandHelperScript() {
   return `#!/usr/bin/env bash
 set -euo pipefail
@@ -250,11 +295,14 @@ thread_export_file="\${run_dir}/state/thread-exports/\${label}.thread.json"
 wake_output_dir="\${run_dir}/downloads/\${label}"
 wake_status_file="\${wake_output_dir}/status.json"
 wake_thread_file="\${wake_output_dir}/thread.json"
+artifact_contract_status_file="\${wake_output_dir}/artifact-contract-status.json"
+workflow_file="\${run_dir}/workflow.json"
 default_config_file="\${run_dir}/config/review-gpt-research.config.sh"
 work_profile_config_file="\${run_dir}/config/review-gpt-work-profile.sh"
 review_gpt_config="\${RESEARCH_REVIEW_GPT_CONFIG:-}"
+required_artifacts_json="[]"
 
-rm -f "\${result_file}" "\${stderr_file}" "\${chat_url_file}" "\${thread_export_file}" "\${response_file}"
+rm -f "\${result_file}" "\${stderr_file}" "\${chat_url_file}" "\${thread_export_file}" "\${response_file}" "\${artifact_contract_status_file}"
 rm -rf "\${wake_output_dir}"
 
 if [[ -z "\${review_gpt_config}" ]]; then
@@ -266,7 +314,8 @@ if [[ -z "\${review_gpt_config}" ]]; then
 fi
 
 if [[ ! -f "\${review_gpt_config}" ]]; then
-  review_gpt_config="\${repo_dir}/scripts/review-gpt.config.sh"
+  echo "Missing research review:gpt config: \${review_gpt_config}" >&2
+  exit 63
 fi
 
 normalize_path() {
@@ -299,6 +348,27 @@ normalize_path() {
     cd "\${dir_name}"
     printf '%s/%s\\n' "$(pwd -P)" "$(basename "\${absolute_target}")"
   )
+}
+
+resolve_required_artifacts_from_workflow() {
+  node - "\${workflow_file}" "\${label}" <<'NODE'
+const fs = require("node:fs");
+
+const [workflowPath, label] = process.argv.slice(2);
+
+if (!workflowPath || !fs.existsSync(workflowPath)) {
+  process.stdout.write("[]");
+  process.exit(0);
+}
+
+try {
+  const workflow = JSON.parse(fs.readFileSync(workflowPath, "utf8"));
+  const requiredArtifacts = workflow?.artifactContracts?.[label]?.requiredArtifacts;
+  process.stdout.write(JSON.stringify(Array.isArray(requiredArtifacts) ? requiredArtifacts : []));
+} catch {
+  process.stdout.write("[]");
+}
+NODE
 }
 
 resolve_package_script_from_config() {
@@ -365,6 +435,222 @@ assert_workspace_package_script() {
 }
 
 assert_workspace_package_script
+
+normalize_required_artifacts_from_wake() {
+  node - "\${required_artifacts_json}" "\${run_dir}" "\${wake_output_dir}" "\${wake_status_file}" "\${artifact_contract_status_file}" <<'NODE'
+const fs = require("node:fs");
+const path = require("node:path");
+
+const [requiredJson, runDir, wakeOutputDir, statusPath, summaryPath] = process.argv.slice(2);
+
+let requiredArtifacts = [];
+try {
+  requiredArtifacts = JSON.parse(requiredJson);
+} catch {
+  requiredArtifacts = [];
+}
+
+if (!Array.isArray(requiredArtifacts)) {
+  requiredArtifacts = [];
+}
+
+const summary = {
+  requiredArtifacts,
+  rawCandidates: [],
+  normalizedArtifacts: [],
+  missingArtifacts: [],
+};
+
+function writeSummaryAndExit(code) {
+  fs.mkdirSync(path.dirname(summaryPath), { recursive: true });
+  fs.writeFileSync(summaryPath, JSON.stringify(summary, null, 2) + "\\n", "utf8");
+  process.exit(code);
+}
+
+if (requiredArtifacts.length === 0) {
+  writeSummaryAndExit(0);
+}
+
+const rawCandidateMap = new Map();
+const bookkeepingBasenames = new Set([
+  path.basename(statusPath),
+  path.basename(summaryPath),
+  "thread.json",
+]);
+
+function validateArtifactPayload(logicalName, targetPath) {
+  if (path.extname(targetPath).toLowerCase() !== ".json") {
+    return null;
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(fs.readFileSync(targetPath, "utf8"));
+  } catch (error) {
+    return {
+      reason: "invalid-json",
+      detail: error instanceof Error ? error.message : String(error),
+    };
+  }
+
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return {
+      reason: "invalid-json-shape",
+      detail: "Top-level JSON value must be an object.",
+    };
+  }
+
+  if (logicalName === "SOURCE_CANDIDATES_V1" && !Array.isArray(parsed.records)) {
+    return {
+      reason: "invalid-json-shape",
+      detail: "SOURCE_CANDIDATES_V1 requires a records array.",
+    };
+  }
+
+  if (logicalName === "CANONICAL_SOURCE_LEDGER_V1" && !Array.isArray(parsed.records)) {
+    return {
+      reason: "invalid-json-shape",
+      detail: "CANONICAL_SOURCE_LEDGER_V1 requires a records array.",
+    };
+  }
+
+  if (logicalName === "SOURCE_EXTRACTION_BATCHES_V1" && !Array.isArray(parsed.batches)) {
+    return {
+      reason: "invalid-json-shape",
+      detail: "SOURCE_EXTRACTION_BATCHES_V1 requires a batches array.",
+    };
+  }
+
+  return null;
+}
+
+function addCandidate(candidatePath) {
+  const normalizedPath = path.resolve(candidatePath);
+  if (!fs.existsSync(normalizedPath)) {
+    return;
+  }
+
+  let stat;
+  try {
+    stat = fs.statSync(normalizedPath);
+  } catch {
+    return;
+  }
+
+  if (!stat.isFile() || rawCandidateMap.has(normalizedPath)) {
+    return;
+  }
+
+  rawCandidateMap.set(normalizedPath, {
+    absolutePath: normalizedPath,
+    fileName: path.basename(normalizedPath),
+  });
+}
+
+if (fs.existsSync(statusPath)) {
+  try {
+    const status = JSON.parse(fs.readFileSync(statusPath, "utf8"));
+    const downloadedArtifacts = Array.isArray(status?.downloadedArtifacts)
+      ? status.downloadedArtifacts
+      : [];
+    for (const entry of downloadedArtifacts) {
+      if (typeof entry === "string" && entry.trim()) {
+        addCandidate(entry.trim());
+      }
+    }
+  } catch {
+    // Ignore malformed wake status and fall back to filesystem discovery.
+  }
+}
+
+function walkFiles(dirPath) {
+  if (!fs.existsSync(dirPath)) {
+    return;
+  }
+
+  for (const entry of fs.readdirSync(dirPath, { withFileTypes: true })) {
+    const absolutePath = path.join(dirPath, entry.name);
+    if (entry.isDirectory()) {
+      walkFiles(absolutePath);
+      continue;
+    }
+    if (entry.isFile() && !bookkeepingBasenames.has(entry.name)) {
+      addCandidate(absolutePath);
+    }
+  }
+}
+
+walkFiles(wakeOutputDir);
+
+const rawCandidates = Array.from(rawCandidateMap.values());
+summary.rawCandidates = rawCandidates.map((entry) => entry.absolutePath);
+
+for (const artifact of requiredArtifacts) {
+  const relativePath = String(artifact?.relativePath ?? "").trim();
+  const expectedFileName = String(artifact?.fileName ?? "").trim();
+  const logicalName = String(artifact?.logicalName ?? "").trim();
+
+  if (!relativePath || !expectedFileName || !logicalName) {
+    summary.missingArtifacts.push({
+      logicalName: logicalName || "unknown",
+      relativePath: relativePath || "unknown",
+      reason: "invalid-contract",
+    });
+    continue;
+  }
+
+  const targetPath = path.resolve(runDir, relativePath);
+  let sourcePath = rawCandidates.find((entry) => entry.fileName === expectedFileName)?.absolutePath;
+
+  if (!sourcePath && fs.existsSync(targetPath)) {
+    sourcePath = targetPath;
+  }
+
+  if (!sourcePath && requiredArtifacts.length === 1 && rawCandidates.length === 1) {
+    sourcePath = rawCandidates[0].absolutePath;
+  }
+
+  if (!sourcePath) {
+    summary.missingArtifacts.push({
+      logicalName,
+      relativePath,
+      expectedFileName,
+      reason: "missing-download",
+    });
+    continue;
+  }
+
+  fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+  if (path.resolve(sourcePath) !== path.resolve(targetPath)) {
+    fs.copyFileSync(sourcePath, targetPath);
+  }
+
+  const validationError = validateArtifactPayload(logicalName, targetPath);
+  if (validationError) {
+    summary.missingArtifacts.push({
+      logicalName,
+      relativePath,
+      expectedFileName,
+      sourcePath,
+      reason: validationError.reason,
+      detail: validationError.detail,
+    });
+    continue;
+  }
+
+  summary.normalizedArtifacts.push({
+    logicalName,
+    relativePath,
+    sourcePath,
+    targetPath,
+  });
+}
+
+writeSummaryAndExit(summary.missingArtifacts.length > 0 ? 1 : 0);
+NODE
+}
+
+required_artifacts_json="$(resolve_required_artifacts_from_workflow)"
 
 capture_chat_url() {
   node - "\${result_file}" "\${stderr_file}" "\${chat_url_file}" <<'NODE'
@@ -631,12 +917,19 @@ set -e
 
 capture_chat_url
 wake_status=0
+artifact_contract_status=0
 if [[ -f "\${chat_url_file}" ]]; then
   set +e
   run_thread_wake
   wake_status=$?
   set -e
   copy_thread_export_from_wake
+  if [[ "\${wake_status}" -eq 0 ]]; then
+    set +e
+    normalize_required_artifacts_from_wake
+    artifact_contract_status=$?
+    set -e
+  fi
   recover_response_from_thread_export
 fi
 
@@ -662,6 +955,12 @@ if [[ "\${wake_status}" -ne 0 ]]; then
   exit "\${wake_status}"
 fi
 
+if [[ "\${artifact_contract_status}" -ne 0 ]]; then
+  echo "Artifact contract status: \${artifact_contract_status_file}" >&2
+  echo "research step \${label} is missing required local artifacts after thread wake" >&2
+  exit 68
+fi
+
 if [[ ! -f "\${thread_export_file}" ]]; then
   echo "Thread export missing after thread wake: \${thread_export_file}" >&2
   exit 66
@@ -675,6 +974,9 @@ fi
 echo "Response: \${response_file}"
 echo "Result log: \${result_file}"
 echo "Wake output: \${wake_output_dir}"
+if [[ -f "\${artifact_contract_status_file}" ]]; then
+  echo "Artifact status: \${artifact_contract_status_file}"
+fi
 if [[ -f "\${chat_url_file}" ]]; then
   echo "Chat URL: $(cat "\${chat_url_file}")"
 fi
@@ -693,26 +995,6 @@ export function buildResearchReviewGptConfig() {
 script_dir="$(cd "$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
 workspace_dir="$(cd "\${script_dir}/.." && pwd)"
 
-find_repo_dir() {
-  local dir="$1"
-  while [[ "$dir" != "/" ]]; do
-    if [[ -f "$dir/package.json" ]] && grep -q '"name"[[:space:]]*:[[:space:]]*"murph-workspace"' "$dir/package.json"; then
-      printf '%s\\n' "$dir"
-      return 0
-    fi
-    dir="$(dirname "$dir")"
-  done
-  return 1
-}
-
-repo_dir="$(find_repo_dir "\${workspace_dir}")" || {
-  echo "Could not locate the murph workspace root from \${workspace_dir}" >&2
-  return 1
-}
-
-# shellcheck source=/dev/null
-. "\${repo_dir}/scripts/review-gpt.config.sh"
-
 package_script="\${workspace_dir}/scripts/package-research-context.sh"
 research_thread_export_browser_endpoint="\${RESEARCH_THREAD_EXPORT_BROWSER_ENDPOINT:-}"
 `;
@@ -721,31 +1003,10 @@ research_thread_export_browser_endpoint="\${RESEARCH_THREAD_EXPORT_BROWSER_ENDPO
 export function buildResearchWorkProfileConfig() {
   return `#!/usr/bin/env bash
 
-# Inherit the repo's normal review:gpt presets and packaging defaults, but isolate
-# browser auth into a separate managed Chrome profile for research work.
 script_dir="$(cd "$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
 
-find_repo_dir() {
-  local dir="$1"
-  while [[ "$dir" != "/" ]]; do
-    if [[ -f "$dir/package.json" ]] && grep -q '"name"[[:space:]]*:[[:space:]]*"murph-workspace"' "$dir/package.json"; then
-      printf '%s\\n' "$dir"
-      return 0
-    fi
-    dir="$(dirname "$dir")"
-  done
-  return 1
-}
-
-repo_dir="$(find_repo_dir "\${script_dir}")" || {
-  echo "Could not locate the murph workspace root from \${script_dir}" >&2
-  return 1
-}
-
 # shellcheck source=/dev/null
-. "\${repo_dir}/scripts/review-gpt.config.sh"
-
-package_script="\${workspace_dir:-$(cd "\${script_dir}/.." && pwd)}/scripts/package-research-context.sh"
+. "\${script_dir}/review-gpt-research.config.sh"
 
 browser_binary_path="\${browser_binary_path:-/Applications/Google Chrome.app/Contents/MacOS/Google Chrome}"
 managed_browser_user_data_dir="\${RESEARCH_MANAGED_BROWSER_USER_DATA_DIR:-$HOME/.review-gpt-work/murph-research-chrome}"

@@ -214,6 +214,10 @@ describe("research init scaffold", () => {
       const initWorkflow = JSON.parse(
         readFileSync(path.join(outDir, "workflow.json"), "utf8"),
       ) as {
+        artifactContracts: Record<
+          string,
+          { requiredArtifacts: Array<{ fileName: string; logicalName: string; relativePath: string }> }
+        >;
         schemaVersion: string;
         status: string;
         topic: string;
@@ -236,6 +240,7 @@ describe("research init scaffold", () => {
       expect(initWorkflow.protocol.familySlug).toBe("cold-plunge");
       expect(initWorkflow.protocol.protocolKey).toBe("protocol_variant:cold-plunge/cold-plunge");
       expect(initWorkflow.protocol.provisional).toBe(true);
+      expect(initWorkflow.artifactContracts).toEqual({});
       expect(initWorkflow.promptFiles).toEqual(["prompts/01-charter.md"]);
       expect(initWorkflow.runnableCommands).toEqual(["commands/01-charter.sh"]);
 
@@ -260,6 +265,9 @@ describe("research init scaffold", () => {
       expect(helperScript).toContain('config/review-gpt-research.config.sh');
       expect(helperScript).toContain('assert_workspace_package_script');
       expect(helperScript).toContain('resolve_package_script_from_config');
+      expect(helperScript).toContain('resolve_required_artifacts_from_workflow');
+      expect(helperScript).toContain('normalize_required_artifacts_from_wake');
+      expect(helperScript).toContain('artifact-contract-status.json');
       expect(helperScript).toContain("--send");
       expect(helperScript).toContain("thread wake");
       expect(helperScript).toContain("--skip-resume");
@@ -335,6 +343,10 @@ describe("research init scaffold", () => {
       const materializedWorkflow = JSON.parse(
         readFileSync(path.join(outDir, "workflow.json"), "utf8"),
       ) as {
+        artifactContracts: Record<
+          string,
+          { requiredArtifacts: Array<{ fileName: string; logicalName: string; relativePath: string }> }
+        >;
         schemaVersion: string;
         status: string;
         materializedFrom: string;
@@ -364,6 +376,28 @@ describe("research init scaffold", () => {
         "protocol_variant:cold-water-immersion/cold-plunge",
       );
       expect(materializedWorkflow.protocol.provisional).toBe(false);
+      expect(materializedWorkflow.artifactContracts["02-discovery-direct-cwi"]?.requiredArtifacts)
+        .toEqual([
+          {
+            fileName: "source_candidates_v1.json",
+            logicalName: "SOURCE_CANDIDATES_V1",
+            relativePath: "downloads/02-discovery-direct-cwi/source_candidates_v1.json",
+          },
+        ]);
+      expect(
+        materializedWorkflow.artifactContracts["11-source-ledger-reducer"]?.requiredArtifacts,
+      ).toEqual([
+        {
+          fileName: "canonical_source_ledger_v1.json",
+          logicalName: "CANONICAL_SOURCE_LEDGER_V1",
+          relativePath: "downloads/11-source-ledger-reducer/canonical_source_ledger_v1.json",
+        },
+        {
+          fileName: "source_extraction_batches_v1.json",
+          logicalName: "SOURCE_EXTRACTION_BATCHES_V1",
+          relativePath: "downloads/11-source-ledger-reducer/source_extraction_batches_v1.json",
+        },
+      ]);
       expect(materializedWorkflow.discoveryShards).toHaveLength(2);
       expect(materializedWorkflow.discoveryShards[0]?.id).toBe("direct-cwi");
       expect(materializedWorkflow.sectionSeams).toHaveLength(2);
@@ -382,6 +416,7 @@ describe("research init scaffold", () => {
       expect(discoveryPrompt).toContain(
         "\"cold water immersion randomized trial adults temperature duration\"",
       );
+      expect(discoveryPrompt).toContain("source_candidates_v1.json");
 
       const sectionPrompt = readFileSync(
         path.join(outDir, "prompts", "20-section-synthesis-dose-implementation.template.md"),
@@ -389,6 +424,13 @@ describe("research init scaffold", () => {
       );
       expect(sectionPrompt).toContain("Section ID: dose-implementation");
       expect(sectionPrompt).toContain("TODO_CANONICAL_SOURCE_LEDGER_V1_SOURCE");
+
+      const sourceLedgerReducerPrompt = readFileSync(
+        path.join(outDir, "prompts", "11-source-ledger-reducer.template.md"),
+        "utf8",
+      );
+      expect(sourceLedgerReducerPrompt).toContain("canonical_source_ledger_v1.json");
+      expect(sourceLedgerReducerPrompt).toContain("source_extraction_batches_v1.json");
 
       const pageBuilderPrompt = readFileSync(
         path.join(outDir, "prompts", "30-page-builder.template.md"),
@@ -401,6 +443,7 @@ describe("research init scaffold", () => {
       expect(materializedReadme).toContain("materialized from the charter response");
       expect(materializedReadme).toContain("commands/02-discovery-direct-cwi.sh");
       expect(materializedReadme).toContain("Template-Only Later Stages");
+      expect(materializedReadme).toContain("downloads/<label>/...");
 
       writeFileSync(
         path.join(outDir, "downloads", "sample-extraction.json"),
@@ -681,6 +724,401 @@ exit 17
     }
   });
 
+  it("normalizes a required discovery artifact into the canonical local filename", () => {
+    mkdirSync(researchOutputRoot, { recursive: true });
+    const tempRoot = mkdtempSync(path.join(researchOutputRoot, "tmp-research-helper-artifact-"));
+    const outDir = path.join(tempRoot, "helper-artifact-success");
+
+    try {
+      expect(runResearchInit("cold plunge", "--out-dir", outDir).status).toBe(0);
+      writeFileSync(path.join(outDir, "responses", "01-charter.md"), sampleCharterResponse, "utf8");
+      expect(runResearchMaterialize("--workspace", outDir).status).toBe(0);
+
+      const stubBinDir = path.join(tempRoot, "bin");
+      mkdirSync(stubBinDir, { recursive: true });
+      const stubPnpmPath = path.join(stubBinDir, "pnpm");
+      writeFileSync(
+        stubPnpmPath,
+        `#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "$#" -ge 4 && "$1" == "exec" && "$2" == "cobuild-review-gpt" && "$3" == "thread" && "$4" == "wake" ]]; then
+  output_dir=""
+  chat_url=""
+  while [[ "$#" -gt 0 ]]; do
+    case "$1" in
+      --output-dir)
+        output_dir="$2"
+        shift 2
+        ;;
+      --chat-url)
+        chat_url="$2"
+        shift 2
+        ;;
+      *)
+        shift
+        ;;
+    esac
+  done
+
+  mkdir -p "$output_dir/downloads"
+  cat >"$output_dir/downloads/unhelpful-export-name.json" <<'JSON'
+{"records":[{"candidateId":"candidate:direct-cwi:001","title":"Example"}]}
+JSON
+  cat >"$output_dir/thread.json" <<JSON
+{"chatUrl":"$chat_url","assistantSnapshots":[{"text":"Discovery finished."}]}
+JSON
+  cat >"$output_dir/status.json" <<JSON
+{"chatUrl":"$chat_url","downloadedArtifacts":["$output_dir/downloads/unhelpful-export-name.json"]}
+JSON
+  exit 0
+fi
+
+printf '%s\\n' '{"status":"sent"}'
+printf '%s\\n' 'ChatGPT conversation URL: https://chatgpt.com/c/test-thread-234' >&2
+exit 0
+`,
+        "utf8",
+      );
+      chmodSync(stubPnpmPath, 0o755);
+
+      const helperLabel = "02-discovery-direct-cwi";
+      const helperScriptPath = path.join(outDir, "commands", "_run-review-gpt.sh");
+      const promptPath = path.join(outDir, "prompts", `${helperLabel}.md`);
+      const responsePath = path.join(outDir, "responses", `${helperLabel}.md`);
+      const canonicalArtifactPath = path.join(
+        outDir,
+        "downloads",
+        helperLabel,
+        "source_candidates_v1.json",
+      );
+      const artifactStatusPath = path.join(
+        outDir,
+        "downloads",
+        helperLabel,
+        "artifact-contract-status.json",
+      );
+
+      const helperResult = runGeneratedReviewGptHelper(
+        helperScriptPath,
+        helperLabel,
+        promptPath,
+        responsePath,
+        {
+          ...process.env,
+          PATH: `${stubBinDir}${path.delimiter}${process.env.PATH ?? ""}`,
+        },
+      );
+
+      expect(helperResult.status).toBe(0);
+      expect(helperResult.stderr).toBe("");
+      expect(helperResult.stdout).toContain(`Artifact status: ${artifactStatusPath}`);
+      expect(existsSync(canonicalArtifactPath)).toBe(true);
+      expect(readFileSync(canonicalArtifactPath, "utf8")).toContain('"candidateId":"candidate:direct-cwi:001"');
+
+      const artifactStatus = JSON.parse(readFileSync(artifactStatusPath, "utf8")) as {
+        missingArtifacts: Array<unknown>;
+        normalizedArtifacts: Array<{ logicalName: string; relativePath: string }>;
+      };
+      expect(artifactStatus.missingArtifacts).toEqual([]);
+      expect(artifactStatus.normalizedArtifacts[0]?.logicalName).toBe("SOURCE_CANDIDATES_V1");
+      expect(artifactStatus.normalizedArtifacts[0]?.relativePath).toBe(
+        "downloads/02-discovery-direct-cwi/source_candidates_v1.json",
+      );
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("accepts a multi-artifact reducer seam from direct wake-output files without status-path hints", () => {
+    mkdirSync(researchOutputRoot, { recursive: true });
+    const tempRoot = mkdtempSync(path.join(researchOutputRoot, "tmp-research-helper-reducer-"));
+    const outDir = path.join(tempRoot, "helper-reducer-success");
+
+    try {
+      expect(runResearchInit("cold plunge", "--out-dir", outDir).status).toBe(0);
+      writeFileSync(path.join(outDir, "responses", "01-charter.md"), sampleCharterResponse, "utf8");
+      expect(runResearchMaterialize("--workspace", outDir).status).toBe(0);
+
+      const stubBinDir = path.join(tempRoot, "bin");
+      mkdirSync(stubBinDir, { recursive: true });
+      const stubPnpmPath = path.join(stubBinDir, "pnpm");
+      writeFileSync(
+        stubPnpmPath,
+        `#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "$#" -ge 4 && "$1" == "exec" && "$2" == "cobuild-review-gpt" && "$3" == "thread" && "$4" == "wake" ]]; then
+  output_dir=""
+  chat_url=""
+  while [[ "$#" -gt 0 ]]; do
+    case "$1" in
+      --output-dir)
+        output_dir="$2"
+        shift 2
+        ;;
+      --chat-url)
+        chat_url="$2"
+        shift 2
+        ;;
+      *)
+        shift
+        ;;
+    esac
+  done
+
+  mkdir -p "$output_dir"
+  cat >"$output_dir/canonical_source_ledger_v1.json" <<'JSON'
+{"records":[{"sourceKey":"source_artifact:pmid-1"}]}
+JSON
+  cat >"$output_dir/source_extraction_batches_v1.json" <<'JSON'
+{"batches":[{"batchId":"batch-001","sourceKeys":["source_artifact:pmid-1"]}]}
+JSON
+  cat >"$output_dir/thread.json" <<JSON
+{"chatUrl":"$chat_url","assistantSnapshots":[{"text":"Reducer finished."}]}
+JSON
+  cat >"$output_dir/status.json" <<JSON
+{"chatUrl":"$chat_url"}
+JSON
+  exit 0
+fi
+
+printf '%s\\n' '{"status":"sent"}'
+printf '%s\\n' 'ChatGPT conversation URL: https://chatgpt.com/c/test-thread-456' >&2
+exit 0
+`,
+        "utf8",
+      );
+      chmodSync(stubPnpmPath, 0o755);
+
+      const helperLabel = "11-source-ledger-reducer";
+      const helperScriptPath = path.join(outDir, "commands", "_run-review-gpt.sh");
+      const promptPath = path.join(outDir, "prompts", `${helperLabel}.template.md`);
+      const responsePath = path.join(outDir, "responses", `${helperLabel}.md`);
+      const artifactStatusPath = path.join(
+        outDir,
+        "downloads",
+        helperLabel,
+        "artifact-contract-status.json",
+      );
+
+      const helperResult = runGeneratedReviewGptHelper(
+        helperScriptPath,
+        helperLabel,
+        promptPath,
+        responsePath,
+        {
+          ...process.env,
+          PATH: `${stubBinDir}${path.delimiter}${process.env.PATH ?? ""}`,
+        },
+      );
+
+      expect(helperResult.status).toBe(0);
+      expect(helperResult.stderr).toBe("");
+      expect(existsSync(path.join(outDir, "downloads", helperLabel, "canonical_source_ledger_v1.json"))).toBe(true);
+      expect(
+        existsSync(path.join(outDir, "downloads", helperLabel, "source_extraction_batches_v1.json")),
+      ).toBe(true);
+
+      const artifactStatus = JSON.parse(readFileSync(artifactStatusPath, "utf8")) as {
+        missingArtifacts: Array<unknown>;
+        normalizedArtifacts: Array<{ logicalName: string }>;
+      };
+      expect(artifactStatus.missingArtifacts).toEqual([]);
+      expect(artifactStatus.normalizedArtifacts.map((entry) => entry.logicalName)).toEqual([
+        "CANONICAL_SOURCE_LEDGER_V1",
+        "SOURCE_EXTRACTION_BATCHES_V1",
+      ]);
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("fails closed when a lone discovery attachment is not valid seam JSON", () => {
+    mkdirSync(researchOutputRoot, { recursive: true });
+    const tempRoot = mkdtempSync(path.join(researchOutputRoot, "tmp-research-helper-invalid-artifact-"));
+    const outDir = path.join(tempRoot, "helper-artifact-invalid");
+
+    try {
+      expect(runResearchInit("cold plunge", "--out-dir", outDir).status).toBe(0);
+      writeFileSync(path.join(outDir, "responses", "01-charter.md"), sampleCharterResponse, "utf8");
+      expect(runResearchMaterialize("--workspace", outDir).status).toBe(0);
+
+      const stubBinDir = path.join(tempRoot, "bin");
+      mkdirSync(stubBinDir, { recursive: true });
+      const stubPnpmPath = path.join(stubBinDir, "pnpm");
+      writeFileSync(
+        stubPnpmPath,
+        `#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "$#" -ge 4 && "$1" == "exec" && "$2" == "cobuild-review-gpt" && "$3" == "thread" && "$4" == "wake" ]]; then
+  output_dir=""
+  chat_url=""
+  while [[ "$#" -gt 0 ]]; do
+    case "$1" in
+      --output-dir)
+        output_dir="$2"
+        shift 2
+        ;;
+      --chat-url)
+        chat_url="$2"
+        shift 2
+        ;;
+      *)
+        shift
+        ;;
+    esac
+  done
+
+  mkdir -p "$output_dir/downloads"
+  printf '%s\\n' '# not json' >"$output_dir/downloads/stray.md"
+  cat >"$output_dir/thread.json" <<JSON
+{"chatUrl":"$chat_url","assistantSnapshots":[{"text":"Discovery finished with the wrong attachment."}]}
+JSON
+  cat >"$output_dir/status.json" <<JSON
+{"chatUrl":"$chat_url","downloadedArtifacts":["$output_dir/downloads/stray.md"]}
+JSON
+  exit 0
+fi
+
+printf '%s\\n' '{"status":"sent"}'
+printf '%s\\n' 'ChatGPT conversation URL: https://chatgpt.com/c/test-thread-567' >&2
+exit 0
+`,
+        "utf8",
+      );
+      chmodSync(stubPnpmPath, 0o755);
+
+      const helperLabel = "02-discovery-direct-cwi";
+      const helperScriptPath = path.join(outDir, "commands", "_run-review-gpt.sh");
+      const promptPath = path.join(outDir, "prompts", `${helperLabel}.md`);
+      const responsePath = path.join(outDir, "responses", `${helperLabel}.md`);
+      const artifactStatusPath = path.join(
+        outDir,
+        "downloads",
+        helperLabel,
+        "artifact-contract-status.json",
+      );
+
+      const helperResult = runGeneratedReviewGptHelper(
+        helperScriptPath,
+        helperLabel,
+        promptPath,
+        responsePath,
+        {
+          ...process.env,
+          PATH: `${stubBinDir}${path.delimiter}${process.env.PATH ?? ""}`,
+        },
+      );
+
+      expect(helperResult.status).toBe(68);
+      expect(existsSync(artifactStatusPath)).toBe(true);
+
+      const artifactStatus = JSON.parse(readFileSync(artifactStatusPath, "utf8")) as {
+        missingArtifacts: Array<{ reason: string }>;
+      };
+      expect(artifactStatus.missingArtifacts[0]?.reason).toBe("invalid-json");
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("fails closed when a required discovery artifact never lands locally", () => {
+    mkdirSync(researchOutputRoot, { recursive: true });
+    const tempRoot = mkdtempSync(path.join(researchOutputRoot, "tmp-research-helper-missing-artifact-"));
+    const outDir = path.join(tempRoot, "helper-artifact-missing");
+
+    try {
+      expect(runResearchInit("cold plunge", "--out-dir", outDir).status).toBe(0);
+      writeFileSync(path.join(outDir, "responses", "01-charter.md"), sampleCharterResponse, "utf8");
+      expect(runResearchMaterialize("--workspace", outDir).status).toBe(0);
+
+      const stubBinDir = path.join(tempRoot, "bin");
+      mkdirSync(stubBinDir, { recursive: true });
+      const stubPnpmPath = path.join(stubBinDir, "pnpm");
+      writeFileSync(
+        stubPnpmPath,
+        `#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "$#" -ge 4 && "$1" == "exec" && "$2" == "cobuild-review-gpt" && "$3" == "thread" && "$4" == "wake" ]]; then
+  output_dir=""
+  chat_url=""
+  while [[ "$#" -gt 0 ]]; do
+    case "$1" in
+      --output-dir)
+        output_dir="$2"
+        shift 2
+        ;;
+      --chat-url)
+        chat_url="$2"
+        shift 2
+        ;;
+      *)
+        shift
+        ;;
+    esac
+  done
+
+  mkdir -p "$output_dir"
+  cat >"$output_dir/thread.json" <<JSON
+{"chatUrl":"$chat_url","assistantSnapshots":[{"text":"Discovery finished but the attachment never persisted."}]}
+JSON
+  cat >"$output_dir/status.json" <<JSON
+{"chatUrl":"$chat_url","downloadedArtifacts":[]}
+JSON
+  exit 0
+fi
+
+printf '%s\\n' '{"status":"sent"}'
+printf '%s\\n' 'ChatGPT conversation URL: https://chatgpt.com/c/test-thread-345' >&2
+exit 0
+`,
+        "utf8",
+      );
+      chmodSync(stubPnpmPath, 0o755);
+
+      const helperLabel = "02-discovery-direct-cwi";
+      const helperScriptPath = path.join(outDir, "commands", "_run-review-gpt.sh");
+      const promptPath = path.join(outDir, "prompts", `${helperLabel}.md`);
+      const responsePath = path.join(outDir, "responses", `${helperLabel}.md`);
+      const artifactStatusPath = path.join(
+        outDir,
+        "downloads",
+        helperLabel,
+        "artifact-contract-status.json",
+      );
+
+      const helperResult = runGeneratedReviewGptHelper(
+        helperScriptPath,
+        helperLabel,
+        promptPath,
+        responsePath,
+        {
+          ...process.env,
+          PATH: `${stubBinDir}${path.delimiter}${process.env.PATH ?? ""}`,
+        },
+      );
+
+      expect(helperResult.status).toBe(68);
+      expect(helperResult.stderr).toContain(
+        "research step 02-discovery-direct-cwi is missing required local artifacts after thread wake",
+      );
+      expect(existsSync(artifactStatusPath)).toBe(true);
+
+      const artifactStatus = JSON.parse(readFileSync(artifactStatusPath, "utf8")) as {
+        missingArtifacts: Array<{ expectedFileName: string; logicalName: string }>;
+      };
+      expect(artifactStatus.missingArtifacts[0]?.logicalName).toBe("SOURCE_CANDIDATES_V1");
+      expect(artifactStatus.missingArtifacts[0]?.expectedFileName).toBe(
+        "source_candidates_v1.json",
+      );
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it("refuses to send when an override config resolves to a different workspace package script", () => {
     mkdirSync(researchOutputRoot, { recursive: true });
     const tempRoot = mkdtempSync(path.join(researchOutputRoot, "tmp-research-helper-mismatch-"));
@@ -756,15 +1194,15 @@ function assertResearchReviewGptSupportFiles(outDir: string) {
   expect(existsSync(packageScriptPath)).toBe(true);
 
   const researchConfig = readFileSync(configPath, "utf8");
-  expect(researchConfig).toContain('scripts/review-gpt.config.sh');
   expect(researchConfig).toContain('package_script="${workspace_dir}/scripts/package-research-context.sh"');
   expect(researchConfig).toContain('research_thread_export_browser_endpoint="${RESEARCH_THREAD_EXPORT_BROWSER_ENDPOINT:-}"');
+  expect(researchConfig).not.toContain('scripts/review-gpt.config.sh');
 
   const workProfileConfig = readFileSync(workProfileConfigPath, "utf8");
-  expect(workProfileConfig).toContain('scripts/review-gpt.config.sh');
-  expect(workProfileConfig).toContain('package_script="${workspace_dir:-$(cd "${script_dir}/.." && pwd)}/scripts/package-research-context.sh"');
+  expect(workProfileConfig).toContain('. "${script_dir}/review-gpt-research.config.sh"');
   expect(workProfileConfig).toContain('managed_browser_port="${RESEARCH_MANAGED_BROWSER_PORT:-9224}"');
   expect(workProfileConfig).toContain('research_thread_export_browser_endpoint="${RESEARCH_THREAD_EXPORT_BROWSER_ENDPOINT:-http://127.0.0.1:${managed_browser_port}}"');
+  expect(workProfileConfig).not.toContain('scripts/review-gpt.config.sh');
 
   const packageScript = readFileSync(packageScriptPath, "utf8");
   expect(packageScript).toContain('add_file_if_exists "${workspace_relative}/workflow.json"');
