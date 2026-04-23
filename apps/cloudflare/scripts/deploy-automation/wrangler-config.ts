@@ -13,7 +13,7 @@ const DEFAULT_DEPLOY_ROOT = path.resolve(
   "..",
 );
 const CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD_SECONDS = 300;
-const CONTAINER_ROLLOUT_STEP_PERCENTAGE = [5, 25, 50, 100] as const;
+const CONTAINER_ROLLOUT_STEP_PERCENTAGE = [10, 25, 50, 100] as const;
 
 export function buildHostedWranglerDeployConfig(
   environment: HostedDeployAutomationEnvironment,
