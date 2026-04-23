@@ -3,7 +3,8 @@
 TASK: Final landing reducer.
 
 Inputs:
-- Protocol package draft from: {{PROTOCOL_PACKAGE_DRAFT_SOURCE}}
+- Protocol package draft from:
+{{PROTOCOL_PACKAGE_DRAFT_SOURCE}}
 - Evidence QA from: {{EVIDENCE_QA_SOURCE}}
 - Safety QA from: {{SAFETY_QA_SOURCE}}
 - Schema and artifact QA from: {{SCHEMA_ARTIFACT_QA_SOURCE}}

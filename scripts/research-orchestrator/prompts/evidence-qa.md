@@ -6,7 +6,8 @@ Goal:
 Block unsupported, overstated, miscited, or badly classified claims before landing.
 
 Review:
-- protocol package draft from: {{PROTOCOL_PACKAGE_DRAFT_SOURCE}}
+- protocol package draft from:
+{{PROTOCOL_PACKAGE_DRAFT_SOURCE}}
 - claims from: {{CLAIMS_SOURCE}}
 - researchLandscape
 - source pages

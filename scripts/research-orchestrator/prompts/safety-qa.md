@@ -6,7 +6,8 @@ Goal:
 Block unsafe or under-specified protocol guidance.
 
 Review:
-- protocol package draft from: {{PROTOCOL_PACKAGE_DRAFT_SOURCE}}
+- protocol package draft from:
+{{PROTOCOL_PACKAGE_DRAFT_SOURCE}}
 - protocol steps
 - stop conditions
 - safety block
