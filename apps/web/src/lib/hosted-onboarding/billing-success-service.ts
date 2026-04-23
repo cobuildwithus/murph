@@ -1,29 +1,14 @@
 import {
-  HostedBillingStatus,
   type HostedMember,
   type PrismaClient,
 } from "@prisma/client";
 import type Stripe from "stripe";
 
-import { nudgeHostedRunBestEffort } from "../hosted-ingress/control";
 import { getPrisma } from "../prisma";
-import {
-  coerceStripeObjectId,
-  coerceStripeSubscriptionId,
-  mapStripeSubscriptionStatusToHostedBillingStatus,
-} from "./billing";
 import { hostedOnboardingError } from "./errors";
-import { writeHostedMemberStripeBillingRefTx } from "./hosted-member-billing-store";
-import {
-  composeHostedMemberBillingSnapshot,
-  readHostedMemberCoreState,
-} from "./hosted-member-store";
+import { readHostedMemberCoreState } from "./hosted-member-store";
 import { getHostedInviteStatus, requireHostedInviteForAuthentication } from "./invite-service";
-import { activateHostedMemberForPositiveSourceTx } from "./member-activation";
-import {
-  extractHostedPrivyVerifiedEmailAccount,
-  type PrivyLinkedAccountLike,
-} from "./privy-shared";
+import { type PrivyLinkedAccountLike } from "./privy-shared";
 import { requireHostedStripeApi } from "./runtime";
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
@@ -31,7 +16,7 @@ import {
 import {
   listHostedStripeCheckoutSessionMemberIds,
 } from "./stripe-billing-lookup";
-import { updateHostedMemberStripeBillingIfFreshTx } from "./stripe-billing-policy";
+import { bindHostedStripeBillingRefsFromCheckoutSessionTx } from "./stripe-billing-events";
 
 export async function reconcileHostedBillingCheckoutSuccess(input: {
   inviteCode: string;
@@ -56,25 +41,19 @@ export async function reconcileHostedBillingCheckoutSuccess(input: {
     expand: ["subscription"],
   });
 
+  assertHostedCheckoutSessionReadyForSuccessRedirect(session);
+
   await assertHostedCheckoutSessionBelongsToMember({
     expectedMemberId: invite.memberId,
     prisma,
     session,
   });
 
-  const hostedExecutionEventId = await applyHostedCheckoutSessionSuccess({
-    linkedAccounts: input.linkedAccounts,
+  await applyHostedCheckoutSessionSuccess({
     memberId: invite.memberId,
     prisma,
     session,
   });
-
-  if (hostedExecutionEventId) {
-    await nudgeHostedRunBestEffort({
-      context: "billing-success.redirect",
-      userId: invite.memberId,
-    });
-  }
 
   return getHostedInviteStatus({
     authenticatedMember: input.member,
@@ -84,80 +63,42 @@ export async function reconcileHostedBillingCheckoutSuccess(input: {
 }
 
 async function applyHostedCheckoutSessionSuccess(input: {
-  linkedAccounts?: readonly PrivyLinkedAccountLike[];
   memberId: string;
   prisma: PrismaClient;
   session: Stripe.Checkout.Session;
-}): Promise<string | null> {
-  const memberCore = await readHostedMemberCoreState({
-    memberId: input.memberId,
-    prisma: input.prisma,
-  });
-
-  if (!memberCore) {
-    throw hostedOnboardingError({
-      code: "HOSTED_MEMBER_NOT_FOUND",
-      message: "Finish signup from your latest Murph link before continuing.",
-      httpStatus: 403,
+}): Promise<void> {
+  await input.prisma.$transaction(async (tx) => {
+    const memberCore = await readHostedMemberCoreState({
+      memberId: input.memberId,
+      prisma: tx,
     });
-  }
 
-  const member = composeHostedMemberBillingSnapshot(memberCore, null);
-
-  const sourceOccurredAt = new Date().toISOString();
-  const dispatchContext = {
-    eventCreatedAt: new Date(sourceOccurredAt),
-    occurredAt: sourceOccurredAt,
-    sourceEventId: input.session.id,
-    sourceType: "stripe.checkout.session.success_redirect",
-  } as const;
-  const subscriptionId = coerceStripeSubscriptionId(input.session.subscription);
-  const subscriptionStatus =
-    input.session.subscription && typeof input.session.subscription === "object"
-      ? mapStripeSubscriptionStatusToHostedBillingStatus(input.session.subscription.status)
-      : null;
-  const stripeCustomerId = coerceStripeObjectId(input.session.customer);
-  const nextStripeSubscriptionId = subscriptionId;
-
-  const sessionEmailLinked = extractHostedPrivyVerifiedEmailAccount(
-    input.linkedAccounts ?? [],
-  ) !== null;
-
-  return input.prisma.$transaction(async (tx) => {
-    if (!subscriptionId || !subscriptionStatus) {
-      await writeHostedMemberStripeBillingRefTx({
-        memberId: member.core.id,
-        stripeCustomerId,
-        stripeSubscriptionId: nextStripeSubscriptionId,
-        tx,
+    if (!memberCore) {
+      throw hostedOnboardingError({
+        code: "HOSTED_MEMBER_NOT_FOUND",
+        message: "Finish signup from your latest Murph link before continuing.",
+        httpStatus: 403,
       });
-      return null;
     }
 
-    const updatedMember = await updateHostedMemberStripeBillingIfFreshTx({
-      billingStatus: HostedBillingStatus.active,
-      canonicalBillingStatus: subscriptionStatus,
-      dispatchContext,
-      member,
-      stripeCustomerId,
-      stripeSubscriptionId: nextStripeSubscriptionId,
+    await bindHostedStripeBillingRefsFromCheckoutSessionTx({
+      memberId: memberCore.id,
+      session: input.session,
       tx,
     });
-
-    if (!updatedMember) {
-      return null;
-    }
-
-    const activation = await activateHostedMemberForPositiveSourceTx({
-      dispatchContext,
-      ...(sessionEmailLinked ? { emailLinked: true } : {}),
-      memberId: updatedMember.core.id,
-      prisma: tx,
-      skipIfBillingAlreadyActive: member.core.billingStatus === HostedBillingStatus.active,
-    });
-
-    return activation.hostedExecutionEventId;
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+}
+
+function assertHostedCheckoutSessionReadyForSuccessRedirect(session: Stripe.Checkout.Session) {
+  if (session.status === "complete") {
+    return;
+  }
+
+  throw hostedOnboardingError({
+    code: "STRIPE_CHECKOUT_SESSION_NOT_COMPLETE",
+    message: "That checkout session is not ready for success reconciliation yet.",
+    httpStatus: 409,
+  });
 }
 
 async function assertHostedCheckoutSessionBelongsToMember(input: {

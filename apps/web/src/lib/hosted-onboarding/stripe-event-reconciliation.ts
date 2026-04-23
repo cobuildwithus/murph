@@ -219,17 +219,20 @@ async function processHostedStripeEventRecord(
       return mapHostedStripeActivationOutcome(
         await applyStripeCheckoutCompleted(
           payload as Stripe.Checkout.Session,
-          dispatchContext,
           prisma,
         ),
       );
     case "checkout.session.expired":
-      await applyStripeCheckoutExpired(payload as Stripe.Checkout.Session, dispatchContext, prisma);
+      await applyStripeCheckoutExpired(payload as Stripe.Checkout.Session, prisma);
       return buildEmptyHostedStripeEventProcessingResult();
     case "customer.subscription.created":
     case "customer.subscription.updated":
     case "customer.subscription.deleted":
-      await applyStripeSubscriptionUpdated(payload as Stripe.Subscription, dispatchContext, prisma);
+      await applyStripeSubscriptionUpdated(
+        requireHostedStripeCanonicalSubscription(processingContext, event.type),
+        dispatchContext,
+        prisma,
+      );
       return buildEmptyHostedStripeEventProcessingResult();
     case "invoice.paid":
       return mapHostedStripeActivationOutcome(
@@ -238,6 +241,7 @@ async function processHostedStripeEventRecord(
           dispatchContext,
           prisma,
           processingContext.canonicalBillingStatus,
+          processingContext.canonicalSubscription,
         ),
       );
     case "invoice.payment_failed":
@@ -246,6 +250,7 @@ async function processHostedStripeEventRecord(
         dispatchContext,
         prisma,
         processingContext.canonicalBillingStatus,
+        processingContext.canonicalSubscription,
       );
       return buildEmptyHostedStripeEventProcessingResult();
     case "refund.created":
@@ -274,17 +279,22 @@ async function processHostedStripeEventRecord(
 
 type HostedStripeEventProcessingContext = {
   canonicalBillingStatus: HostedBillingStatus | null;
+  canonicalSubscription: Stripe.Subscription | null;
   customerId: string | null;
 };
 
 async function prepareHostedStripeEventProcessingContext(
   event: Stripe.Event,
 ): Promise<HostedStripeEventProcessingContext> {
-  const canonicalBillingStatus = await resolveHostedStripeEventCanonicalBillingStatus(event);
+  const canonicalSubscription = await resolveHostedStripeEventCanonicalSubscription(event);
+  const canonicalBillingStatus = canonicalSubscription
+    ? mapStripeSubscriptionStatusToHostedBillingStatus(canonicalSubscription.status)
+    : null;
 
   if (event.type !== "refund.created" && !event.type.startsWith("charge.dispute.")) {
     return {
       canonicalBillingStatus,
+      canonicalSubscription,
       customerId: null,
     };
   }
@@ -297,16 +307,17 @@ async function prepareHostedStripeEventProcessingContext(
 
   return {
     canonicalBillingStatus,
+    canonicalSubscription,
     customerId: customerContext.customerId,
   };
 }
 
-async function resolveHostedStripeEventCanonicalBillingStatus(
+async function resolveHostedStripeEventCanonicalSubscription(
   event: Stripe.Event,
-): Promise<HostedBillingStatus | null> {
+): Promise<Stripe.Subscription | null> {
   if (event.type.startsWith("customer.subscription.")) {
     const subscription = event.data.object as Stripe.Subscription;
-    return mapStripeSubscriptionStatusToHostedBillingStatus(subscription.status);
+    return requireHostedStripeApi().subscriptions.retrieve(subscription.id);
   }
 
   if (event.type === "invoice.paid" || event.type === "invoice.payment_failed") {
@@ -316,11 +327,21 @@ async function resolveHostedStripeEventCanonicalBillingStatus(
       return null;
     }
 
-    const subscription = await requireHostedStripeApi().subscriptions.retrieve(subscriptionId);
-    return mapStripeSubscriptionStatusToHostedBillingStatus(subscription.status);
+    return requireHostedStripeApi().subscriptions.retrieve(subscriptionId);
   }
 
   return null;
+}
+
+function requireHostedStripeCanonicalSubscription(
+  processingContext: HostedStripeEventProcessingContext,
+  eventType: string,
+): Stripe.Subscription {
+  if (processingContext.canonicalSubscription) {
+    return processingContext.canonicalSubscription;
+  }
+
+  throw new Error(`Canonical Stripe subscription is required for ${eventType}.`);
 }
 
 function readHostedStripeEventObject(value: unknown): Record<string, unknown> {

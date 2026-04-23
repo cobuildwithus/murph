@@ -1,12 +1,12 @@
 import { HostedBillingStatus, Prisma } from "@prisma/client";
 
 import {
+  type HostedMemberStripeBillingRefSnapshot,
   writeHostedMemberStripeBillingRefTx,
 } from "./hosted-member-billing-store";
 import {
   type HostedMemberBillingSnapshot,
   readHostedMemberBillingSnapshot,
-  readHostedMemberCoreState,
   updateHostedMemberCoreState,
 } from "./hosted-member-store";
 import {
@@ -44,7 +44,7 @@ export async function prepareHostedMemberStripeBillingWrite(input: {
   };
 }
 
-export async function updateHostedMemberStripeBillingIfFreshTx(input: {
+export async function writeHostedMemberStripeBillingTx(input: {
   billingStatus: HostedBillingStatus;
   canonicalBillingStatus: HostedBillingStatus | null;
   dispatchContext: HostedStripeDispatchContext;
@@ -55,8 +55,7 @@ export async function updateHostedMemberStripeBillingIfFreshTx(input: {
   tx: Prisma.TransactionClient;
 }): Promise<HostedMemberBillingSnapshot | null> {
   await lockHostedMemberRow(input.tx, input.member.core.id);
-
-  const currentMember = await readHostedMemberCoreState({
+  const currentMember = await readHostedMemberBillingSnapshot({
     memberId: input.member.core.id,
     prisma: input.tx,
   });
@@ -65,29 +64,71 @@ export async function updateHostedMemberStripeBillingIfFreshTx(input: {
     return null;
   }
 
+  if (isHostedStripeBillingWriteStale(currentMember.billingRef, input.dispatchContext)) {
+    return null;
+  }
+
   const nextBillingStatus = resolveHostedStripeBillingStatusForWrite({
     billingStatus: input.billingStatus,
     canonicalBillingStatus: input.canonicalBillingStatus,
-    currentBillingStatus: currentMember.billingStatus,
+    currentBillingStatus: currentMember.core.billingStatus,
     sourceType: input.dispatchContext.sourceType,
   });
 
   await updateHostedMemberCoreState({
     billingStatus: nextBillingStatus,
-    memberId: currentMember.id,
+    memberId: currentMember.core.id,
     prisma: input.tx,
     suspendedAt: input.suspendedAtOverride,
   });
 
   await writeHostedMemberStripeBillingRefTx({
-    memberId: currentMember.id,
+    memberId: currentMember.core.id,
+    stripeEventCreatedAt: input.dispatchContext.eventCreatedAt,
     stripeCustomerId: input.stripeCustomerId,
     stripeSubscriptionId: input.stripeSubscriptionId,
     tx: input.tx,
   });
 
   return readHostedMemberBillingSnapshot({
-    memberId: currentMember.id,
+    memberId: currentMember.core.id,
+    prisma: input.tx,
+  });
+}
+
+export const updateHostedMemberStripeBillingIfFreshTx = writeHostedMemberStripeBillingTx;
+
+export async function writeHostedMemberStripeBillingRefIfFreshTx(input: {
+  dispatchContext: Pick<HostedStripeDispatchContext, "eventCreatedAt" | "sourceEventId">;
+  memberId: string;
+  stripeCustomerId?: string | null;
+  stripeSubscriptionId?: string | null;
+  tx: Prisma.TransactionClient;
+}): Promise<HostedMemberBillingSnapshot | null> {
+  await lockHostedMemberRow(input.tx, input.memberId);
+  const currentMember = await readHostedMemberBillingSnapshot({
+    memberId: input.memberId,
+    prisma: input.tx,
+  });
+
+  if (!currentMember) {
+    return null;
+  }
+
+  if (isHostedStripeBillingWriteStale(currentMember.billingRef, input.dispatchContext)) {
+    return null;
+  }
+
+  await writeHostedMemberStripeBillingRefTx({
+    memberId: input.memberId,
+    stripeEventCreatedAt: input.dispatchContext.eventCreatedAt,
+    stripeCustomerId: input.stripeCustomerId,
+    stripeSubscriptionId: input.stripeSubscriptionId,
+    tx: input.tx,
+  });
+
+  return readHostedMemberBillingSnapshot({
+    memberId: input.memberId,
     prisma: input.tx,
   });
 }
@@ -99,7 +140,7 @@ export async function suspendHostedMemberForBillingReversalTx(input: {
   stripeCustomerId?: string | null;
   tx: Prisma.TransactionClient;
 }): Promise<void> {
-  await updateHostedMemberStripeBillingIfFreshTx({
+  await writeHostedMemberStripeBillingTx({
     billingStatus: HostedBillingStatus.unpaid,
     canonicalBillingStatus: input.canonicalBillingStatus,
     dispatchContext: {
@@ -113,4 +154,25 @@ export async function suspendHostedMemberForBillingReversalTx(input: {
     suspendedAtOverride: input.dispatchContext.eventCreatedAt,
     tx: input.tx,
   });
+}
+
+function isHostedStripeBillingWriteStale(
+  billingRef: HostedMemberStripeBillingRefSnapshot | null,
+  dispatchContext: Pick<HostedStripeDispatchContext, "eventCreatedAt" | "sourceEventId">,
+): boolean {
+  const lastStripeEventCreatedAt = billingRef?.lastStripeEventCreatedAt ?? null;
+
+  if (!lastStripeEventCreatedAt) {
+    return false;
+  }
+
+  const nextStripeEventCreatedAtMs = dispatchContext.eventCreatedAt.getTime();
+  const lastStripeEventCreatedAtMs = lastStripeEventCreatedAt.getTime();
+
+  // Stripe's event ids are not monotonic, so same-second writes remain eligible.
+  if (nextStripeEventCreatedAtMs === lastStripeEventCreatedAtMs) {
+    return false;
+  }
+
+  return nextStripeEventCreatedAtMs < lastStripeEventCreatedAtMs;
 }

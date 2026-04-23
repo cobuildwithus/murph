@@ -54,6 +54,7 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'stripeCustomerIdEncrypted String? @map("stripe_customer_id_encrypted")',
     'stripeSubscriptionLookupKey String? @unique @map("stripe_subscription_lookup_key")',
     'stripeSubscriptionIdEncrypted String? @map("stripe_subscription_id_encrypted")',
+    'lastStripeEventCreatedAt DateTime? @map("last_stripe_event_created_at")',
     'createdAt DateTime @default(now()) @map("created_at")',
     'updatedAt DateTime @updatedAt @map("updated_at")',
   ],
@@ -200,11 +201,13 @@ const HOSTED_INGRESS_RUNTIME_MIGRATION_GUARD = {
     foreignKeys: [
       'ALTER TABLE "hosted_ingress_event_alias" ADD CONSTRAINT "hosted_ingress_event_alias_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "hosted_member"("id") ON DELETE CASCADE ON UPDATE CASCADE',
       'ALTER TABLE "hosted_ingress_event_alias" ADD CONSTRAINT "hosted_ingress_event_alias_ingress_event_id_fkey" FOREIGN KEY ("ingress_event_id") REFERENCES "hosted_ingress_event"("id") ON DELETE CASCADE ON UPDATE CASCADE',
+      'ALTER TABLE "hosted_ingress_event_alias" ADD CONSTRAINT "hosted_ingress_event_alias_user_id_replaced_by_event_id_fkey" FOREIGN KEY ("user_id", "replaced_by_event_id") REFERENCES "hosted_ingress_event_alias"("user_id", "event_id") ON DELETE NO ACTION ON UPDATE CASCADE DEFERRABLE INITIALLY DEFERRED',
     ],
     indexes: [
       'CREATE INDEX "hosted_ingress_event_alias_event_id_idx" ON "hosted_ingress_event_alias"("event_id")',
       'CREATE INDEX "hosted_ingress_event_alias_user_id_idx" ON "hosted_ingress_event_alias"("user_id")',
       'CREATE INDEX "hosted_ingress_event_alias_user_id_replaced_by_event_id_idx" ON "hosted_ingress_event_alias"("user_id", "replaced_by_event_id")',
+      'CREATE UNIQUE INDEX "hosted_ingress_event_alias_user_id_ingress_event_id_current_key" ON "hosted_ingress_event_alias"("user_id", "ingress_event_id") WHERE "replaced_by_event_id" IS NULL',
       'CREATE INDEX "hosted_ingress_event_alias_ingress_event_id_idx" ON "hosted_ingress_event_alias"("ingress_event_id")',
     ],
   },
@@ -250,7 +253,7 @@ const HOSTED_MEMBER_RELATION_TYPES = new Set([
 ]);
 
 describe("hosted Prisma baseline migration", () => {
-  it("preserves the current split-table hosted-member shape in the single checked-in baseline", () => {
+  it("preserves the reviewed split-table hosted-member baseline plus the forward Stripe hardening migration", () => {
     const migrationEntries = readdirSync(new URL("../prisma/migrations/", import.meta.url))
       .filter((entry) => !entry.startsWith("."))
       .sort();
@@ -258,8 +261,13 @@ describe("hosted Prisma baseline migration", () => {
       new URL("../prisma/migrations/2026040600_init/migration.sql", import.meta.url),
       "utf8",
     );
+    const forwardMigrationSql = readFileSync(
+      new URL("../prisma/migrations/2026042301_hosted_stripe_hardening/migration.sql", import.meta.url),
+      "utf8",
+    );
     expect(migrationEntries).toEqual([
       "2026040600_init",
+      "2026042301_hosted_stripe_hardening",
       "migration_lock.toml",
     ]);
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_assistant_runtime_issue"');
@@ -318,7 +326,20 @@ describe("hosted Prisma baseline migration", () => {
       'CREATE INDEX "hosted_ingress_event_alias_event_id_idx" ON "hosted_ingress_event_alias"("event_id")',
     );
     expect(baselineMigrationSql).toContain(
+      'CREATE UNIQUE INDEX "hosted_ingress_event_alias_user_id_ingress_event_id_current_key" ON "hosted_ingress_event_alias"("user_id", "ingress_event_id") WHERE "replaced_by_event_id" IS NULL',
+    );
+    expect(baselineMigrationSql).toContain(
       'FOREIGN KEY ("ingress_event_id") REFERENCES "hosted_ingress_event"("id")',
+    );
+    expect(baselineMigrationSql).not.toContain('"last_stripe_event_created_at" TIMESTAMP(3)');
+    expect(forwardMigrationSql).toContain(
+      'ALTER TABLE "hosted_member_billing_ref"\n  ADD COLUMN IF NOT EXISTS "last_stripe_event_created_at" TIMESTAMP(3);',
+    );
+    expect(forwardMigrationSql).toContain(
+      'CREATE UNIQUE INDEX IF NOT EXISTS "hosted_ai_usage_turn_id_attempt_count_idx"',
+    );
+    expect(baselineMigrationSql).toContain(
+      'ALTER TABLE "hosted_ingress_event_alias" ADD CONSTRAINT "hosted_ingress_event_alias_user_id_replaced_by_event_id_fkey" FOREIGN KEY ("user_id", "replaced_by_event_id") REFERENCES "hosted_ingress_event_alias"("user_id", "event_id") ON DELETE NO ACTION ON UPDATE CASCADE DEFERRABLE INITIALLY DEFERRED',
     );
     expect(baselineMigrationSql).toContain(
       'CREATE UNIQUE INDEX "linq_webhook_event_user_id_event_id_key" ON "linq_webhook_event"("user_id", "event_id")',
@@ -343,6 +364,12 @@ describe("hosted Prisma baseline migration", () => {
     );
     expect(baselineMigrationSql).toContain(
       'CREATE INDEX "hosted_ai_usage_stripe_meter_due_idx" ON "hosted_ai_usage"("stripe_meter_status", "stripe_meter_next_attempt_at", "occurred_at")',
+    );
+    expect(baselineMigrationSql).not.toContain(
+      'CREATE UNIQUE INDEX "hosted_ai_usage_turn_id_attempt_count_idx" ON "hosted_ai_usage"("turn_id", "attempt_count")',
+    );
+    expect(forwardMigrationSql).toContain(
+      'CREATE UNIQUE INDEX IF NOT EXISTS "hosted_ai_usage_turn_id_attempt_count_idx"\n  ON "hosted_ai_usage"("turn_id", "attempt_count");',
     );
     expect(baselineMigrationSql).toContain('"telegram_user_lookup_key" TEXT');
     expect(baselineMigrationSql).not.toContain('CREATE TABLE "hosted_session"');
@@ -548,7 +575,7 @@ function readSqlTableIndexes(sql: string, tableName: string): Set<string> {
   return new Set(
     [...sql.matchAll(
       new RegExp(
-        String.raw`^CREATE (?:UNIQUE )?INDEX "[^"]+" ON "${tableName}"\([^\n]+\);$`,
+        String.raw`^CREATE (?:UNIQUE )?INDEX "[^"]+" ON "${tableName}"\([^\n]+\)(?: WHERE [^\n]+)?;$`,
         "gmu",
       ),
     )]

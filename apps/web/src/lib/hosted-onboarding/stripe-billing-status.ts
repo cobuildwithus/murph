@@ -42,6 +42,12 @@ export function resolveHostedStripeBillingStatusForWrite(input: {
         : input.canonicalBillingStatus;
     }
 
+    if (input.sourceType === "stripe.invoice.payment_failed") {
+      return input.canonicalBillingStatus === HostedBillingStatus.active
+        ? resolveHostedInvoicePaymentFailedBillingStatus(input.currentBillingStatus)
+        : input.canonicalBillingStatus;
+    }
+
     return input.canonicalBillingStatus;
   }
 
@@ -67,4 +73,12 @@ function isHostedStripeSubscriptionSourceType(sourceType: string): boolean {
 function isHostedStripeInvoiceSourceType(sourceType: string): boolean {
   return sourceType === "stripe.invoice.paid" ||
     sourceType === "stripe.invoice.payment_failed";
+}
+
+function resolveHostedInvoicePaymentFailedBillingStatus(
+  currentBillingStatus: HostedBillingStatus,
+): HostedBillingStatus {
+  return currentBillingStatus === HostedBillingStatus.active
+    ? HostedBillingStatus.active
+    : currentBillingStatus;
 }

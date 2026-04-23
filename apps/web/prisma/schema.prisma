@@ -272,6 +272,7 @@ model HostedMemberBillingRef {
   stripeCustomerIdEncrypted     String?      @map("stripe_customer_id_encrypted")
   stripeSubscriptionLookupKey   String?      @unique @map("stripe_subscription_lookup_key")
   stripeSubscriptionIdEncrypted String?      @map("stripe_subscription_id_encrypted")
+  lastStripeEventCreatedAt      DateTime?    @map("last_stripe_event_created_at")
   createdAt                     DateTime     @default(now()) @map("created_at")
   updatedAt                     DateTime     @updatedAt @map("updated_at")
   member                        HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
@@ -367,7 +368,7 @@ model HostedRun {
   eventCount           Int            @default(0) @map("event_count")
   eventKindsJson       Json           @map("event_kinds_json")
   eventSeqsJson        Json           @map("event_seqs_json")
-  ingressEventIdsJson  Json           @map("wake_ids_json")
+  ingressEventIdsJson  Json           @map("ingress_event_ids_json")
   redactedSummaryJson  Json?          @map("redacted_summary_json")
   errorCode            String?        @map("error_code")
   errorClass           String?        @map("error_class")
@@ -420,6 +421,8 @@ model HostedIngressEventAlias {
   updatedAt         DateTime     @updatedAt @map("updated_at")
   member            HostedMember @relation(fields: [userId], references: [id], onDelete: Cascade)
   ingressEvent      HostedIngressEvent @relation(fields: [ingressEventId], references: [id], onDelete: Cascade)
+  replacedBy        HostedIngressEventAlias? @relation("HostedIngressEventAliasReplacement", fields: [userId, replacedByEventId], references: [userId, eventId], onDelete: NoAction, onUpdate: Cascade)
+  replaces          HostedIngressEventAlias[] @relation("HostedIngressEventAliasReplacement")
 
   @@id([userId, eventId])
   @@index([eventId])
@@ -634,7 +637,7 @@ model HostedAiUsage {
   @@index([reportingUserId, createdAt])
   @@index([stripeMeterStatus, stripeMeterNextAttemptAt, occurredAt], map: "hosted_ai_usage_stripe_meter_due_idx")
   @@index([surface, createdAt])
-  @@index([turnId, attemptCount])
+  @@unique([turnId, attemptCount], map: "hosted_ai_usage_turn_id_attempt_count_idx")
   @@map("hosted_ai_usage")
 }
 

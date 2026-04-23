@@ -11,21 +11,20 @@ import {
   mapStripeSubscriptionStatusToHostedBillingStatus,
 } from "./billing";
 import { isHostedAccessBlockedBillingStatus } from "./entitlement";
-import { writeHostedMemberStripeBillingRefTx } from "./hosted-member-billing-store";
 import {
   activateHostedMemberForPositiveSourceTx,
 } from "./member-activation";
 import {
   findMemberForStripeCheckoutSession,
   findMemberForStripeInvoice,
-  findMemberForStripeObject,
   findMemberForStripeSubscription,
   findMemberForStripeReversal,
 } from "./stripe-billing-lookup";
 import {
   prepareHostedMemberStripeBillingWrite,
   suspendHostedMemberForBillingReversalTx,
-  updateHostedMemberStripeBillingIfFreshTx,
+  writeHostedMemberStripeBillingRefIfFreshTx,
+  writeHostedMemberStripeBillingTx,
 } from "./stripe-billing-policy";
 import {
   type HostedStripeDispatchContext,
@@ -38,7 +37,6 @@ type HostedStripeActivationOutcome = {
 
 export async function applyStripeCheckoutCompleted(
   session: Stripe.Checkout.Session,
-  _dispatchContext: HostedStripeDispatchContext,
   prisma: Prisma.TransactionClient,
 ): Promise<HostedStripeActivationOutcome> {
   const member = await findMemberForStripeCheckoutSession({
@@ -53,10 +51,9 @@ export async function applyStripeCheckoutCompleted(
     };
   }
 
-  await writeHostedMemberStripeBillingRefTx({
+  await bindHostedStripeBillingRefsFromCheckoutSessionTx({
     memberId: member.core.id,
-    stripeCustomerId: coerceStripeObjectId(session.customer) ?? member.billingRef?.stripeCustomerId ?? null,
-    stripeSubscriptionId: coerceStripeSubscriptionId(session.subscription) ?? member.billingRef?.stripeSubscriptionId ?? null,
+    session,
     tx: prisma,
   });
 
@@ -66,9 +63,22 @@ export async function applyStripeCheckoutCompleted(
   };
 }
 
+export async function bindHostedStripeBillingRefsFromCheckoutSessionTx(input: {
+  memberId: string;
+  session: Stripe.Checkout.Session;
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  await writeHostedMemberStripeBillingRefIfFreshTx({
+    dispatchContext: buildHostedStripeCheckoutSessionFreshness(input.session),
+    memberId: input.memberId,
+    stripeCustomerId: coerceStripeObjectId(input.session.customer) ?? undefined,
+    stripeSubscriptionId: coerceStripeSubscriptionId(input.session.subscription) ?? undefined,
+    tx: input.tx,
+  });
+}
+
 export async function applyStripeCheckoutExpired(
   session: Stripe.Checkout.Session,
-  _dispatchContext: HostedStripeDispatchContext,
   prisma: Prisma.TransactionClient,
 ): Promise<void> {
   void session;
@@ -98,7 +108,7 @@ export async function applyStripeSubscriptionUpdated(
     member,
   });
 
-  await updateHostedMemberStripeBillingIfFreshTx({
+  await writeHostedMemberStripeBillingTx({
     billingStatus: member.core.billingStatus,
     canonicalBillingStatus: resolvedCanonicalBillingStatus,
     dispatchContext,
@@ -114,11 +124,13 @@ export async function applyStripeInvoicePaid(
   dispatchContext: HostedStripeDispatchContext,
   prisma: Prisma.TransactionClient,
   canonicalBillingStatus?: HostedBillingStatus | null,
+  canonicalSubscription?: Stripe.Subscription | null,
 ): Promise<HostedStripeActivationOutcome & { createdOrUpdatedRevnetIssuance: boolean }> {
   const subscriptionId = coerceStripeInvoiceSubscriptionId(invoice);
   const member = await findMemberForStripeInvoice({
     invoice,
     prisma,
+    subscription: canonicalSubscription,
   });
 
   if (!member || !subscriptionId) {
@@ -139,12 +151,16 @@ export async function applyStripeInvoicePaid(
     dispatchContext,
     member,
   });
-  const updatedMember = await updateHostedMemberStripeBillingIfFreshTx({
+  const updatedMember = await writeHostedMemberStripeBillingTx({
     billingStatus: HostedBillingStatus.active,
     canonicalBillingStatus: resolvedCanonicalBillingStatus,
     dispatchContext,
     member: preparedMember,
-    stripeCustomerId: coerceStripeObjectId(invoice.customer) ?? member.billingRef?.stripeCustomerId ?? null,
+    stripeCustomerId:
+      coerceStripeObjectId(invoice.customer)
+      ?? coerceStripeObjectId(canonicalSubscription?.customer)
+      ?? member.billingRef?.stripeCustomerId
+      ?? null,
     stripeSubscriptionId: subscriptionId,
     tx: prisma,
   });
@@ -166,7 +182,7 @@ export async function applyStripeInvoicePaid(
   }
 
   const activation = await activateHostedMemberForPositiveSourceTx({
-    dispatchContext,
+    dispatchContext: buildHostedStripeInvoiceActivationDispatchContext(invoice, dispatchContext),
     memberId: updatedMember.core.id,
     prisma,
     skipIfBillingAlreadyActive: hadActiveBilling,
@@ -184,11 +200,13 @@ export async function applyStripeInvoicePaymentFailed(
   dispatchContext: HostedStripeDispatchContext,
   prisma: Prisma.TransactionClient,
   canonicalBillingStatus?: HostedBillingStatus | null,
+  canonicalSubscription?: Stripe.Subscription | null,
 ): Promise<void> {
   const subscriptionId = coerceStripeInvoiceSubscriptionId(invoice);
   const member = await findMemberForStripeInvoice({
     invoice,
     prisma,
+    subscription: canonicalSubscription,
   });
 
   if (!member) {
@@ -204,12 +222,16 @@ export async function applyStripeInvoicePaymentFailed(
     member,
   });
 
-  await updateHostedMemberStripeBillingIfFreshTx({
+  await writeHostedMemberStripeBillingTx({
     billingStatus: HostedBillingStatus.past_due,
     canonicalBillingStatus: resolvedCanonicalBillingStatus,
     dispatchContext,
     member: preparedMember,
-    stripeCustomerId: coerceStripeObjectId(invoice.customer) ?? member.billingRef?.stripeCustomerId ?? null,
+    stripeCustomerId:
+      coerceStripeObjectId(invoice.customer)
+      ?? coerceStripeObjectId(canonicalSubscription?.customer)
+      ?? member.billingRef?.stripeCustomerId
+      ?? null,
     stripeSubscriptionId: subscriptionId ?? member.billingRef?.stripeSubscriptionId ?? null,
     tx: prisma,
   });
@@ -250,6 +272,33 @@ export async function applyStripeRefundCreated(
     stripeCustomerId: customerId ?? undefined,
     tx: prisma,
   });
+}
+
+function buildHostedStripeInvoiceActivationDispatchContext(
+  invoice: Pick<Stripe.Invoice, "id">,
+  dispatchContext: HostedStripeDispatchContext,
+): HostedStripeDispatchContext {
+  return {
+    ...dispatchContext,
+    sourceEventId: typeof invoice.id === "string" && invoice.id.length > 0
+      ? `invoice:${invoice.id}`
+      : dispatchContext.sourceEventId,
+  };
+}
+
+function buildHostedStripeCheckoutSessionFreshness(
+  session: Pick<Stripe.Checkout.Session, "created" | "id">,
+): Pick<HostedStripeDispatchContext, "eventCreatedAt" | "sourceEventId"> {
+  const eventCreatedAt = Number.isFinite(session.created)
+    ? new Date(session.created * 1000)
+    : new Date(0);
+
+  return {
+    eventCreatedAt,
+    sourceEventId: typeof session.id === "string" && session.id.length > 0
+      ? `checkout.session:${session.id}`
+      : "checkout.session:unknown",
+  };
 }
 
 export async function applyStripeDisputeUpdated(

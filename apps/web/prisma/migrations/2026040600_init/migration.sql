@@ -290,7 +290,7 @@ CREATE TABLE "hosted_run" (
     "event_count" INTEGER NOT NULL DEFAULT 0,
     "event_kinds_json" JSONB NOT NULL,
     "event_seqs_json" JSONB NOT NULL,
-    "wake_ids_json" JSONB NOT NULL,
+    "ingress_event_ids_json" JSONB NOT NULL,
     "redacted_summary_json" JSONB,
     "error_code" TEXT,
     "error_class" TEXT,
@@ -754,6 +754,9 @@ CREATE INDEX "hosted_ingress_event_alias_user_id_idx" ON "hosted_ingress_event_a
 CREATE INDEX "hosted_ingress_event_alias_user_id_replaced_by_event_id_idx" ON "hosted_ingress_event_alias"("user_id", "replaced_by_event_id");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "hosted_ingress_event_alias_user_id_ingress_event_id_current_key" ON "hosted_ingress_event_alias"("user_id", "ingress_event_id") WHERE "replaced_by_event_id" IS NULL;
+
+-- CreateIndex
 CREATE INDEX "hosted_ingress_event_alias_ingress_event_id_idx" ON "hosted_ingress_event_alias"("ingress_event_id");
 
 -- CreateIndex
@@ -856,9 +859,6 @@ CREATE INDEX "hosted_ai_usage_stripe_meter_due_idx" ON "hosted_ai_usage"("stripe
 CREATE INDEX "hosted_ai_usage_surface_created_at_idx" ON "hosted_ai_usage"("surface", "created_at");
 
 -- CreateIndex
-CREATE INDEX "hosted_ai_usage_turn_id_attempt_count_idx" ON "hosted_ai_usage"("turn_id", "attempt_count");
-
--- CreateIndex
 CREATE INDEX "hosted_assistant_runtime_issue_fingerprint_occurred_at_idx" ON "hosted_assistant_runtime_issue"("fingerprint", "occurred_at");
 
 -- CreateIndex
@@ -941,6 +941,9 @@ ALTER TABLE "hosted_ingress_event_alias" ADD CONSTRAINT "hosted_ingress_event_al
 
 -- AddForeignKey
 ALTER TABLE "hosted_ingress_event_alias" ADD CONSTRAINT "hosted_ingress_event_alias_ingress_event_id_fkey" FOREIGN KEY ("ingress_event_id") REFERENCES "hosted_ingress_event"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "hosted_ingress_event_alias" ADD CONSTRAINT "hosted_ingress_event_alias_user_id_replaced_by_event_id_fkey" FOREIGN KEY ("user_id", "replaced_by_event_id") REFERENCES "hosted_ingress_event_alias"("user_id", "event_id") ON DELETE NO ACTION ON UPDATE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
 -- AddForeignKey
 ALTER TABLE "hosted_ingress_payload" ADD CONSTRAINT "hosted_ingress_payload_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "hosted_member"("id") ON DELETE CASCADE ON UPDATE CASCADE;

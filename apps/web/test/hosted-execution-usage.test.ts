@@ -2,8 +2,11 @@ import { describe, expect, it, vi } from "vitest";
 import { encryptHostedWebNullableString } from "@/src/lib/hosted-web/encryption";
 
 import {
+  claimHostedAiUsageStripeMetering,
+  HostedAiUsageStripeMeterClaimLostError,
   importHostedAiUsageRecords,
   listHostedAiUsagePendingStripeMetering,
+  markHostedAiUsageStripeProgress,
 } from "@/src/lib/hosted-execution/usage";
 
 const BASE_USAGE_RECORD = {
@@ -75,7 +78,10 @@ describe("importHostedAiUsageRecords", () => {
     expect(result.recordedIds).toEqual(["turn_123.attempt-1"]);
     expect(hostedAiUsageUpsert).toHaveBeenCalledWith({
       where: {
-        id: "turn_123.attempt-1",
+        turnId_attemptCount: {
+          attemptCount: 1,
+          turnId: "turn_123",
+        },
       },
       create: expect.objectContaining({
         id: "turn_123.attempt-1",
@@ -142,6 +148,35 @@ describe("importHostedAiUsageRecords", () => {
     );
   });
 
+  it("rejects non-canonical usage ids before any hosted usage row is persisted", async () => {
+    const hostedAiUsageUpsert = vi.fn(async (args: { create: Record<string, unknown> }) => args.create);
+    const prisma = {
+      hostedAiUsage: {
+        upsert: hostedAiUsageUpsert,
+      },
+      hostedMemberBillingRef: {
+        findUnique: vi.fn(async () => null),
+      },
+    };
+
+    await expect(
+      importHostedAiUsageRecords({
+        prisma: prisma as never,
+        trustedUserId: "member_123",
+        usage: [
+          {
+            ...BASE_USAGE_RECORD,
+            usageId: "turn_123.unexpected-1",
+          },
+        ],
+      }),
+    ).rejects.toThrow(
+      "usageId must match the canonical turnId/attemptCount-derived value turn_123.attempt-1.",
+    );
+
+    expect(hostedAiUsageUpsert).not.toHaveBeenCalled();
+  });
+
   it("rejects an existing usage row when immutable fields do not match", async () => {
     const prisma = {
       hostedAiUsage: {
@@ -163,6 +198,30 @@ describe("importHostedAiUsageRecords", () => {
       }),
     ).rejects.toThrow(
       "Hosted AI usage id turn_123.attempt-1 already exists with different immutable fields: totalTokens.",
+    );
+  });
+
+  it("rejects an existing logical turn-attempt row when the stored usage id differs", async () => {
+    const prisma = {
+      hostedAiUsage: {
+        upsert: vi.fn(async (args: { create: Record<string, unknown> }) => ({
+          ...args.create,
+          id: "turn_123.unexpected-1",
+        })),
+      },
+      hostedMemberBillingRef: {
+        findUnique: vi.fn(async () => null),
+      },
+    };
+
+    await expect(
+      importHostedAiUsageRecords({
+        prisma: prisma as never,
+        trustedUserId: "member_123",
+        usage: [BASE_USAGE_RECORD],
+      }),
+    ).rejects.toThrow(
+      "Hosted AI usage id turn_123.attempt-1 already exists with different immutable fields: id.",
     );
   });
 
@@ -367,6 +426,7 @@ describe("listHostedAiUsagePendingStripeMetering", () => {
       stripeMeterIdentifier: null,
       stripeMeterStatus: "pending",
       totalTokens: 15,
+      updatedAt: new Date("2026-03-29T12:04:00.000Z"),
     }]);
     const prisma = {
       hostedAiUsage: {
@@ -396,7 +456,9 @@ describe("listHostedAiUsagePendingStripeMetering", () => {
           },
         ],
         stripeMeterSource: "murph",
-        stripeMeterStatus: "pending",
+        stripeMeterStatus: {
+          in: ["pending", "processing"],
+        },
         member: {
           billingRef: {
             is: {
@@ -445,6 +507,7 @@ describe("listHostedAiUsagePendingStripeMetering", () => {
         stripeMeterIdentifier: true,
         stripeMeterStatus: true,
         totalTokens: true,
+        updatedAt: true,
       },
     });
     expect(
@@ -469,6 +532,129 @@ describe("listHostedAiUsagePendingStripeMetering", () => {
       stripeMeterIdentifier: null,
       stripeMeterStatus: "pending",
       totalTokens: 15,
+      updatedAt: new Date("2026-03-29T12:04:00.000Z"),
     }]);
+  });
+});
+
+describe("claimHostedAiUsageStripeMetering", () => {
+  it("claims a due row into processing and returns the refreshed write fence", async () => {
+    const updateMany = vi.fn(async () => ({ count: 1 }));
+    const findUnique = vi.fn(async () => ({
+      stripeMeterAttemptCount: 3,
+      updatedAt: new Date("2026-03-29T12:05:01.000Z"),
+    }));
+    const prisma = {
+      hostedAiUsage: {
+        findUnique,
+        updateMany,
+      },
+    };
+
+    await expect(
+      claimHostedAiUsageStripeMetering({
+        attemptedAt: "2026-03-29T12:05:00.000Z",
+        candidate: {
+          apiKeyEnv: null,
+          credentialSource: "platform",
+          id: "usage_claim",
+          inputTokens: 10,
+          memberId: "member_123",
+          occurredAt: new Date("2026-03-29T12:00:00.000Z"),
+          outputTokens: 5,
+          provider: "openai-compatible",
+          requestedModel: "gpt-5.4-mini",
+          servedModel: null,
+          stripeCustomerId: "cus_123",
+          stripeMeterAttemptCount: 2,
+          stripeMeterIdentifier: "tokens-v2:completed=input",
+          stripeMeterStatus: "pending",
+          totalTokens: 15,
+          updatedAt: new Date("2026-03-29T12:04:59.000Z"),
+        },
+        leaseMs: 60_000,
+        prisma: prisma as never,
+      }),
+    ).resolves.toEqual({
+      attemptCount: 3,
+      leaseExpiresAt: new Date("2026-03-29T12:06:00.000Z"),
+      updatedAt: new Date("2026-03-29T12:05:01.000Z"),
+    });
+
+    expect(updateMany).toHaveBeenCalledWith({
+      where: {
+        id: "usage_claim",
+        OR: [
+          {
+            stripeMeterNextAttemptAt: null,
+          },
+          {
+            stripeMeterNextAttemptAt: {
+              lte: new Date("2026-03-29T12:05:00.000Z"),
+            },
+          },
+        ],
+        stripeMeterAttemptCount: 2,
+        stripeMeterIdentifier: "tokens-v2:completed=input",
+        stripeMeterStatus: "pending",
+        updatedAt: new Date("2026-03-29T12:04:59.000Z"),
+      },
+      data: {
+        stripeMeterAttemptCount: {
+          increment: 1,
+        },
+        stripeMeterError: null,
+        stripeMeterIdentifier: "tokens-v2:completed=input",
+        stripeMeterLastAttemptedAt: new Date("2026-03-29T12:05:00.000Z"),
+        stripeMeterNextAttemptAt: new Date("2026-03-29T12:06:00.000Z"),
+        stripeMeterStatus: "processing",
+        stripeMeteredAt: null,
+      },
+    });
+  });
+});
+
+describe("markHostedAiUsageStripeProgress", () => {
+  it("fences progress on the old identifier and updatedAt so stale writers cannot clear newer state", async () => {
+    const updateMany = vi.fn(async () => ({ count: 0 }));
+    const prisma = {
+      hostedAiUsage: {
+        findUnique: vi.fn(async () => null),
+        updateMany,
+      },
+    };
+
+    await expect(
+      markHostedAiUsageStripeProgress({
+        attemptedAt: "2026-03-29T12:05:00.000Z",
+        claim: {
+          attemptCount: 3,
+          leaseExpiresAt: new Date("2026-03-29T12:10:00.000Z"),
+          updatedAt: new Date("2026-03-29T12:05:01.000Z"),
+        },
+        expectedIdentifier: "tokens-v2:completed=input",
+        id: "usage_claim",
+        identifier: "tokens-v2:completed=input;fenced=output",
+        prisma: prisma as never,
+      }),
+    ).rejects.toBeInstanceOf(HostedAiUsageStripeMeterClaimLostError);
+
+    expect(updateMany).toHaveBeenCalledWith({
+      where: {
+        id: "usage_claim",
+        stripeMeterAttemptCount: 3,
+        stripeMeterIdentifier: "tokens-v2:completed=input",
+        stripeMeterStatus: "processing",
+        updatedAt: new Date("2026-03-29T12:05:01.000Z"),
+      },
+      data: {
+        stripeMeterError: null,
+        stripeMeterIdentifier: "tokens-v2:completed=input;fenced=output",
+        stripeMeterLastAttemptedAt: new Date("2026-03-29T12:05:00.000Z"),
+        stripeMeterNextAttemptAt: new Date("2026-03-29T12:10:00.000Z"),
+        stripeMeterStatus: "processing",
+        stripeMeteredAt: null,
+      },
+    });
   });
 });
