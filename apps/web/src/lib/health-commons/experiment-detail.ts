@@ -9,6 +9,7 @@ import type {
   HealthCommonsTestPlan,
   HealthCommonsSource,
 } from "@murphai/contracts/health-commons";
+import type { StoredMedia } from "@murphai/contracts";
 
 import {
   CURRENT_EXPERIMENT_PROTOCOL_CONTRACT_VERSION,
@@ -405,6 +406,12 @@ function formatProtocolCategory(protocol: HealthCommonsCatalogEntity): string {
 }
 
 function resolveProtocolImage(protocol: HealthCommonsCatalogEntity): string {
+  const pageOwnedImage = resolveProtocolPageImage(protocol);
+
+  if (pageOwnedImage) {
+    return pageOwnedImage;
+  }
+
   const routeId = toExperimentId(protocol);
   const mappedImage = EXPERIMENT_IMAGE_BY_ROUTE_ID[routeId];
 
@@ -413,6 +420,72 @@ function resolveProtocolImage(protocol: HealthCommonsCatalogEntity): string {
   }
 
   return inferFallbackProtocolImage(protocol);
+}
+
+function resolveProtocolPageImage(protocol: HealthCommonsCatalogEntity): string | null {
+  const pageMedia = readProtocolMedia(protocol);
+  const imageEntry = pageMedia.find(isProtocolImageMedia);
+
+  if (!imageEntry) {
+    return null;
+  }
+
+  return imageEntry.relativePath.startsWith("/")
+    ? imageEntry.relativePath
+    : `/${imageEntry.relativePath}`;
+}
+
+function readProtocolMedia(protocol: HealthCommonsCatalogEntity): StoredMedia[] {
+  const protocolRecord = protocol as Record<string, unknown>;
+  const media = protocolRecord["media"];
+
+  if (!Array.isArray(media)) {
+    return [];
+  }
+
+  return media.filter(isStoredMediaEntry);
+}
+
+function isStoredMediaEntry(value: unknown): value is StoredMedia {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const record = value as Record<string, unknown>;
+  const kind = record["kind"];
+  const relativePath = record["relativePath"];
+  const mediaType = record["mediaType"];
+  const caption = record["caption"];
+
+  if (
+    kind !== "photo"
+    && kind !== "video"
+    && kind !== "gif"
+    && kind !== "image"
+    && kind !== "other"
+  ) {
+    return false;
+  }
+
+  if (typeof relativePath !== "string" || relativePath.length === 0) {
+    return false;
+  }
+
+  if (mediaType !== undefined && typeof mediaType !== "string") {
+    return false;
+  }
+
+  if (caption !== undefined && typeof caption !== "string") {
+    return false;
+  }
+
+  return true;
+}
+
+function isProtocolImageMedia(entry: StoredMedia): boolean {
+  return entry.kind === "image"
+    || entry.kind === "photo"
+    || entry.mediaType?.startsWith("image/") === true;
 }
 
 function inferFallbackProtocolImage(protocol: HealthCommonsCatalogEntity): string {

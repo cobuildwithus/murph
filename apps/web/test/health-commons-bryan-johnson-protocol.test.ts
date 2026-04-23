@@ -37,4 +37,11 @@ describe("Health Commons experiment protocol metadata", () => {
     expect(protocol).not.toBeNull();
     expect(protocol?.image).toBe("/design-assets/hero-red-light-glasses-before-bed.jpeg");
   });
+
+  it("prefers page-owned cold plunge artwork when the protocol declares media", () => {
+    const protocol = resolveHealthCommonsExperimentProtocol("cold-plunge");
+
+    expect(protocol).not.toBeNull();
+    expect(protocol?.image).toBe("/design-assets/cold-plunge-tub.jpeg");
+  });
 });
