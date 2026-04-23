@@ -6,8 +6,18 @@ import path from 'node:path'
 import { afterEach, test, vi } from 'vitest'
 
 import {
+  deviceAccountDisconnectResultSchema,
+  deviceAccountListResultSchema,
+  deviceAccountReconcileResultSchema,
+  deviceAccountShowResultSchema,
+  deviceConnectResultSchema,
   deviceDaemonStatusResultSchema,
+  deviceProviderListResultSchema,
   deviceSyncAccountStatusSchema,
+  deviceSyncProviderKeySchema,
+  deviceSyncProviderKeyValues,
+  formatDeviceSyncProviderKeyList,
+  normalizeDeviceSyncProviderKey,
 } from '../src/device-cli-contracts.ts'
 import {
   ensureManagedDeviceSyncControlPlane,
@@ -133,6 +143,100 @@ const deviceDaemonChildFixtureArgs = [
     '}, 25)',
   ].join('\n'),
 ] as const
+
+test('device CLI contracts normalize provider keys and parse result payloads', () => {
+  const provider = deviceSyncProviderKeyValues[0]
+
+  assert.equal(typeof provider, 'string')
+  assert.equal(normalizeDeviceSyncProviderKey(`  ${provider.toUpperCase()}  `), provider)
+  assert.equal(normalizeDeviceSyncProviderKey(' unsupported-provider '), null)
+  assert.equal(deviceSyncProviderKeySchema.parse(provider.toUpperCase()), provider.toUpperCase())
+  assert.throws(
+    () => deviceSyncProviderKeySchema.parse('unsupported-provider'),
+    /Unsupported device-sync provider/u,
+  )
+  assert.ok(formatDeviceSyncProviderKeyList().includes(provider))
+
+  const now = '2026-04-23T00:00:00.000Z'
+  const baseUrl = 'http://127.0.0.1:4318'
+  const providerRecord = {
+    provider,
+    callbackPath: '/oauth/callback',
+    callbackUrl: `${baseUrl}/oauth/callback`,
+    webhookPath: '/webhook',
+    webhookUrl: `${baseUrl}/webhook`,
+    supportsWebhooks: true,
+    defaultScopes: ['profile'],
+  }
+  const account = {
+    id: 'account_123',
+    provider,
+    externalAccountId: 'external_123',
+    displayName: null,
+    status: 'active',
+    scopes: ['profile'],
+    accessTokenExpiresAt: null,
+    metadata: { source: 'test' },
+    connectedAt: now,
+    lastWebhookAt: null,
+    lastSyncStartedAt: null,
+    lastSyncCompletedAt: null,
+    lastSyncErrorAt: null,
+    lastErrorCode: null,
+    lastErrorMessage: null,
+    nextReconcileAt: null,
+    createdAt: now,
+    updatedAt: now,
+  }
+  const job = {
+    id: 'job_123',
+    provider,
+    accountId: account.id,
+    kind: 'manual-sync',
+    payload: { reason: 'test' },
+    priority: 0,
+    availableAt: now,
+    attempts: 0,
+    maxAttempts: 3,
+    dedupeKey: null,
+    status: 'queued',
+    leaseOwner: null,
+    leaseExpiresAt: null,
+    lastErrorCode: null,
+    lastErrorMessage: null,
+    createdAt: now,
+    updatedAt: now,
+    startedAt: null,
+    finishedAt: null,
+  }
+
+  assert.deepEqual(deviceProviderListResultSchema.parse({
+    baseUrl,
+    providers: [providerRecord],
+  }).providers[0], providerRecord)
+  assert.equal(deviceConnectResultSchema.parse({
+    baseUrl,
+    provider,
+    state: 'state_123',
+    expiresAt: now,
+    authorizationUrl: `${baseUrl}/authorize`,
+    openedBrowser: false,
+  }).provider, provider)
+  assert.equal(deviceAccountListResultSchema.parse({
+    baseUrl,
+    provider: null,
+    accounts: [account],
+  }).accounts[0]?.id, account.id)
+  assert.equal(deviceAccountShowResultSchema.parse({ baseUrl, account }).account.id, account.id)
+  assert.equal(
+    deviceAccountReconcileResultSchema.parse({ baseUrl, account, job }).job.id,
+    job.id,
+  )
+  assert.equal(
+    deviceAccountDisconnectResultSchema.parse({ baseUrl, account }).account.id,
+    account.id,
+  )
+})
 
 test('device-daemon path, env, process, and state helpers stay deterministic', async () => {
   const vault = await createTempVault('operator-config-device-daemon-')
