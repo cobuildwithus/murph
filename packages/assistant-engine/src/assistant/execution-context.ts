@@ -11,6 +11,11 @@ export interface AssistantHostedDeviceConnectLink {
   providerLabel: string
 }
 
+export interface AssistantHostedDeviceConnectProvider {
+  label: string
+  provider: string
+}
+
 export interface AssistantHostedDeviceConnectRequest {
   provider: string
 }
@@ -30,6 +35,7 @@ export interface AssistantHostedShareLinkRequest {
 
 export interface AssistantHostedExecutionContext {
   defaultTarget?: AssistantModelTarget | null
+  deviceConnectProviders?: readonly AssistantHostedDeviceConnectProvider[]
   issueDeviceConnectLink?(
     input: AssistantHostedDeviceConnectRequest,
   ): Promise<AssistantHostedDeviceConnectLink>
@@ -52,6 +58,9 @@ export function normalizeAssistantExecutionContext(
   const hosted = input?.hosted
   const memberId = normalizeNullableString(hosted?.memberId)
   const defaultTarget = normalizeAssistantBackendTarget(hosted?.defaultTarget ?? null)
+  const deviceConnectProviders = normalizeAssistantHostedDeviceConnectProviders(
+    hosted?.deviceConnectProviders,
+  )
   const stripeCustomerId = normalizeNullableString(hosted?.stripeCustomerId ?? null)
   if (!memberId) {
     return {
@@ -76,6 +85,11 @@ export function normalizeAssistantExecutionContext(
             defaultTarget,
           }
         : {}),
+      ...(deviceConnectProviders.length > 0
+        ? {
+            deviceConnectProviders,
+          }
+        : {}),
       ...(stripeCustomerId
         ? {
             stripeCustomerId,
@@ -88,6 +102,61 @@ export function normalizeAssistantExecutionContext(
           .filter((key): key is string => key !== null) ?? [],
     },
   }
+}
+
+export function normalizeAssistantHostedDeviceConnectProviderKey(
+  value: string | null | undefined,
+): string | null {
+  const normalized = normalizeNullableString(value)?.toLowerCase() ?? null
+  if (!normalized || !/^[a-z0-9][a-z0-9_-]{0,63}$/u.test(normalized)) {
+    return null
+  }
+
+  return normalized
+}
+
+export function normalizeAssistantHostedDeviceConnectProviders(
+  input: readonly AssistantHostedDeviceConnectProvider[] | null | undefined,
+): AssistantHostedDeviceConnectProvider[] {
+  const providers: AssistantHostedDeviceConnectProvider[] = []
+  const seen = new Set<string>()
+
+  for (const entry of input ?? []) {
+    const provider = normalizeAssistantHostedDeviceConnectProviderKey(entry.provider)
+    if (!provider || seen.has(provider)) {
+      continue
+    }
+
+    seen.add(provider)
+    providers.push({
+      label: normalizeNullableString(entry.label) ?? provider,
+      provider,
+    })
+  }
+
+  return providers
+}
+
+export function formatAssistantHostedDeviceConnectProviderList(
+  providers: readonly AssistantHostedDeviceConnectProvider[] | null | undefined,
+): string {
+  const labels = normalizeAssistantHostedDeviceConnectProviders(providers).map(
+    (entry) => `${entry.label} (\`${entry.provider}\`)`,
+  )
+
+  if (labels.length === 0) {
+    return 'none'
+  }
+
+  if (labels.length === 1) {
+    return labels[0]!
+  }
+
+  if (labels.length === 2) {
+    return `${labels[0]} and ${labels[1]}`
+  }
+
+  return `${labels.slice(0, -1).join(', ')}, and ${labels[labels.length - 1]}`
 }
 
 export function resolveAssistantExecutionDefaultTarget(input: {

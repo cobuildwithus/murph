@@ -528,6 +528,10 @@ describe('assistant CLI tool capability seam', () => {
         hosted: {
           memberId: 'member-1',
           userEnvKeys: [],
+          deviceConnectProviders: [
+            { label: 'Oura', provider: 'oura' },
+            { label: 'WHOOP', provider: 'whoop' },
+          ],
           issueDeviceConnectLink: vi.fn(async ({ provider }) => ({
             authorizationUrl: `https://example.com/connect/${provider}`,
             expiresAt: '2026-04-09T00:00:00.000Z',

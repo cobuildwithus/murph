@@ -389,6 +389,9 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
     };
 
     mocks.executeHostedRunDrainForCommit.mockImplementation(async (input) => {
+      expect(input.executionContext.hosted.deviceConnectProviders).toEqual([
+        { label: "Oura", provider: "oura" },
+      ]);
       await input.executionContext.hosted.issueDeviceConnectLink({
         provider: "oura",
       });
@@ -418,6 +421,19 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
           forwardedEnv: {
             OPENAI_API_KEY: "secret",
           },
+          resolvedConfig: createHostedRuntimeResolvedConfig({
+            deviceSync: {
+              providerConfigs: {
+                oura: {
+                  clientId: "oura-client",
+                  clientSecret: "oura-secret",
+                  scopes: ["daily", "sleep"],
+                },
+              },
+              publicBaseUrl: "https://device-sync.example.test",
+              secret: "secret_123",
+            },
+          }),
           userEnv: {},
         },
       },
@@ -612,6 +628,66 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
         phase: "runtime.starting",
       }),
     );
+  });
+
+  it("rejects unconfigured hosted device-link providers before the control-plane call", async () => {
+    const deviceSyncPort = {
+      applyUpdates: vi.fn(),
+      createConnectLink: vi.fn(async ({ provider }: { provider: string }) => ({
+        authorizationUrl: `https://connect.example.test/${provider}`,
+        expiresAt: "2026-04-08T00:30:00.000Z",
+        provider,
+        providerLabel: provider.toUpperCase(),
+      })),
+      fetchSnapshot: vi.fn(),
+    };
+
+    mocks.executeHostedRunDrainForCommit.mockImplementationOnce(async (input) => {
+      await input.executionContext.hosted.issueDeviceConnectLink({
+        provider: "ottoai",
+      });
+      return committedExecution;
+    });
+
+    await expect(
+      runHostedAssistantRuntimeJobInProcessDetailed(
+        {
+          request: {
+            bundle: "incoming-bundle",
+            run: HOSTED_RUN_CONTEXT,
+            runDrain: createSingleWakeRunDrain(buildMemberActivatedWake("evt_bad_provider")),
+          },
+          runtime: {
+            resolvedConfig: createHostedRuntimeResolvedConfig({
+              deviceSync: {
+                providerConfigs: {
+                  oura: {
+                    clientId: "oura-client",
+                    clientSecret: "oura-secret",
+                  },
+                },
+                publicBaseUrl: "https://device-sync.example.test",
+                secret: "secret_123",
+              },
+            }),
+          },
+        },
+        {
+          platform: {
+            artifactStore: {
+              async get() {
+                return null;
+              },
+              async put() {},
+            },
+            deviceSyncPort,
+            effectsPort: createHostedRuntimeEffectsPortStub(),
+          },
+        },
+      ),
+    ).rejects.toThrow(/not configured in this hosted environment/u);
+
+    expect(deviceSyncPort.createConnectLink).not.toHaveBeenCalled();
   });
 
   it("passes the delegated billing Stripe customer id into the hosted execution context for platform-funded Vercel AI Gateway runs", async () => {

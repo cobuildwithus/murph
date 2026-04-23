@@ -29,7 +29,10 @@ import type {
   AssistantMurphCommandAccessMode,
 } from './providers/types.js'
 import { recordAssistantDiagnosticEvent } from './diagnostics.js'
-import { normalizeAssistantExecutionContext } from './execution-context.js'
+import {
+  normalizeAssistantExecutionContext,
+  type AssistantHostedDeviceConnectProvider,
+} from './execution-context.js'
 import {
   buildAssistantNotificationDecisionSystemPrompt,
   buildAssistantSystemPrompt,
@@ -115,6 +118,7 @@ interface AssistantRouteTurnPlan {
 interface AssistantPromptCapabilityAvailability {
   assistantCommandAccessMode: AssistantMurphCommandAccessMode
   assistantHostedDeviceConnectAvailable: boolean
+  assistantHostedDeviceConnectProviders: readonly AssistantHostedDeviceConnectProvider[]
   assistantKnowledgeToolsAvailable: boolean
 }
 
@@ -405,6 +409,7 @@ async function resolveAssistantProviderAttemptPlan(input: {
     remainingRoutes: prioritizedRoutes.slice(1),
     route,
     routePlan: await resolveAssistantRouteTurnPlan({
+      executionContext: input.executionPlan.executionContext,
       input: input.executionPlan.input,
       profile: input.executionPlan.profile,
       promptTimeContext: input.executionPlan.promptTimeContext,
@@ -418,6 +423,7 @@ async function resolveAssistantProviderAttemptPlan(input: {
 }
 
 async function resolveAssistantRouteTurnPlan(input: {
+  executionContext: ReturnType<typeof normalizeAssistantExecutionContext> | null
   toolCatalog: ReturnType<typeof createProviderTurnAssistantToolCatalog>
   input: AssistantMessageInput
   profile: Required<AssistantProviderTurnExecutionProfile>
@@ -477,6 +483,7 @@ async function resolveAssistantRouteTurnPlan(input: {
       )
     : undefined
   const promptCapabilityAvailability = resolveAssistantPromptCapabilityAvailability({
+    executionContext: input.executionContext,
     providerCapabilities,
     toolCatalog: input.toolCatalog,
   })
@@ -516,6 +523,10 @@ async function resolveAssistantRouteTurnPlan(input: {
         ? buildAssistantNotificationDecisionSystemPrompt({
             activeExperimentContext,
             allowSensitiveHealthContext: input.sharedPlan.allowSensitiveHealthContext,
+            assistantHostedDeviceConnectAvailable:
+              promptCapabilityAvailability.assistantHostedDeviceConnectAvailable,
+            assistantHostedDeviceConnectProviders:
+              promptCapabilityAvailability.assistantHostedDeviceConnectProviders,
             channel: resolvedChannel,
             currentLocalDate: input.promptTimeContext.currentLocalDate,
             currentTimeZone: input.promptTimeContext.currentTimeZone,
@@ -529,6 +540,8 @@ async function resolveAssistantRouteTurnPlan(input: {
               promptCapabilityAvailability.assistantCommandAccessMode,
             assistantHostedDeviceConnectAvailable:
               promptCapabilityAvailability.assistantHostedDeviceConnectAvailable,
+            assistantHostedDeviceConnectProviders:
+              promptCapabilityAvailability.assistantHostedDeviceConnectProviders,
             assistantKnowledgeToolsAvailable:
               promptCapabilityAvailability.assistantKnowledgeToolsAvailable,
             cliAccess: input.sharedPlan.cliAccess,
@@ -588,19 +601,25 @@ async function resolveAssistantActiveExperimentContextBlock(
 }
 
 function resolveAssistantPromptCapabilityAvailability(input: {
+  executionContext: ReturnType<typeof normalizeAssistantExecutionContext> | null
   providerCapabilities: ReturnType<typeof resolveAssistantProviderTargetExecutionCapabilities>
   toolCatalog: ReturnType<typeof createProviderTurnAssistantToolCatalog>
 }): AssistantPromptCapabilityAvailability {
+  const assistantHostedDeviceConnectAvailable = hasRouteToolRuntimeAccess({
+    providerCapabilities: input.providerCapabilities,
+    toolCatalog: input.toolCatalog,
+    toolNames: ['murph.device.connect'],
+  })
+
   return {
     assistantCommandAccessMode: resolveAssistantCommandAccessMode({
       providerCapabilities: input.providerCapabilities,
       toolCatalog: input.toolCatalog,
     }),
-    assistantHostedDeviceConnectAvailable: hasRouteToolRuntimeAccess({
-      providerCapabilities: input.providerCapabilities,
-      toolCatalog: input.toolCatalog,
-      toolNames: ['murph.device.connect'],
-    }),
+    assistantHostedDeviceConnectAvailable,
+    assistantHostedDeviceConnectProviders: assistantHostedDeviceConnectAvailable
+      ? input.executionContext?.hosted?.deviceConnectProviders ?? []
+      : [],
     assistantKnowledgeToolsAvailable: hasRouteToolRuntimeAccess({
       providerCapabilities: input.providerCapabilities,
       toolCatalog: input.toolCatalog,

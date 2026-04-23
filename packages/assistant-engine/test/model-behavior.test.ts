@@ -50,6 +50,9 @@ describe('assistant GPT-5 execution prompt overlay', () => {
       allowSensitiveHealthContext: true,
       assistantCommandAccessMode: 'bound-tools',
       assistantHostedDeviceConnectAvailable: true,
+      assistantHostedDeviceConnectProviders: [
+        { label: 'Oura', provider: 'oura' },
+      ],
       assistantKnowledgeToolsAvailable: true,
       channel: 'telegram',
       cliAccess: {

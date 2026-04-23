@@ -10,6 +10,8 @@ function buildPrompt(
   turnTrigger: 'automation-cron' | 'manual-ask' | null = null,
   options?: {
     activeExperimentContext?: string | null
+    assistantHostedDeviceConnectAvailable?: boolean
+    assistantHostedDeviceConnectProviders?: Array<{ label: string; provider: string }>
     earlySessionOnboarding?: boolean
   },
 ) {
@@ -18,7 +20,10 @@ function buildPrompt(
     assistantCliContract: null,
     allowSensitiveHealthContext: true,
     assistantCommandAccessMode,
-    assistantHostedDeviceConnectAvailable: false,
+    assistantHostedDeviceConnectAvailable:
+      options?.assistantHostedDeviceConnectAvailable ?? false,
+    assistantHostedDeviceConnectProviders:
+      options?.assistantHostedDeviceConnectProviders ?? [],
     assistantKnowledgeToolsAvailable: false,
     channel: null,
     cliAccess: {
@@ -38,11 +43,17 @@ function buildNotificationPrompt(
   channel: string | null = null,
   options?: {
     activeExperimentContext?: string | null
+    assistantHostedDeviceConnectAvailable?: boolean
+    assistantHostedDeviceConnectProviders?: Array<{ label: string; provider: string }>
   },
 ) {
   return buildAssistantNotificationDecisionSystemPrompt({
     activeExperimentContext: options?.activeExperimentContext ?? null,
     allowSensitiveHealthContext: true,
+    assistantHostedDeviceConnectAvailable:
+      options?.assistantHostedDeviceConnectAvailable ?? false,
+    assistantHostedDeviceConnectProviders:
+      options?.assistantHostedDeviceConnectProviders ?? [],
     channel,
     currentLocalDate: '2026-04-10',
     currentTimeZone: 'Australia/Sydney',
@@ -298,6 +309,24 @@ Ready to get started?`)
       prompt.indexOf('This conversation is private enough for full health context'),
     )
   })
+
+  it('describes hosted connection providers from the supplied runtime list', () => {
+    const prompt = buildPrompt('bound-tools', null, {
+      assistantHostedDeviceConnectAvailable: true,
+      assistantHostedDeviceConnectProviders: [
+        { label: 'Oura', provider: 'oura' },
+        { label: 'WHOOP', provider: 'whoop' },
+      ],
+    })
+
+    expect(prompt).toContain(
+      'Hosted wearable connection is currently supported only for Oura (`oura`) and WHOOP (`whoop`).',
+    )
+    expect(prompt).toContain(
+      'for other apps or devices, say automatic connection is not available',
+    )
+    expect(prompt).not.toContain('Garmin, Oura, Strava, or WHOOP')
+  })
 })
 
 describe('buildAssistantNotificationDecisionSystemPrompt', () => {
@@ -326,5 +355,22 @@ describe('buildAssistantNotificationDecisionSystemPrompt', () => {
       'Default to skip for experiment notifications unless there is a user-opted-in reminder due now, broken or missing data that blocks interpretation, a weekly summary, a review-ready transition, or a safety follow-up that genuinely needs outreach.',
     )
     expect(prompt).toContain('The bound outbound channel is telegram.')
+  })
+
+  it('includes dynamic hosted connection provider guidance for notification decisions', () => {
+    const prompt = buildNotificationPrompt('linq', {
+      assistantHostedDeviceConnectAvailable: true,
+      assistantHostedDeviceConnectProviders: [
+        { label: 'Garmin', provider: 'garmin' },
+        { label: 'Strava', provider: 'strava' },
+      ],
+    })
+
+    expect(prompt).toContain(
+      'Hosted wearable connection is currently supported only for Garmin (`garmin`) and Strava (`strava`).',
+    )
+    expect(prompt.indexOf('Hosted wearable connection')).toBeLessThan(
+      prompt.indexOf('Notification execution rules:'),
+    )
   })
 })
