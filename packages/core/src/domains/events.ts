@@ -27,7 +27,6 @@ import {
   parseEventSpineAttachments,
   selectLatestEventSpineEntry,
 } from "../history/event-spine.ts";
-import { canonicalizeEventRelations } from "../event-links.ts";
 
 import {
   compactObject,
@@ -260,13 +259,6 @@ function buildEventRecord(
     throw new VaultError("EVENT_OCCURRED_AT_MISSING", "Event payload requires occurredAt.");
   }
   const attachments = parseEventSpineAttachments(payload.attachments);
-  const canonicalLinks = canonicalizeEventRelations({
-    links: payload.links,
-    relatedIds: payload.relatedIds,
-    normalizeStringList: uniqueTrimmedStringList,
-    errorCode: "EVENT_CONTRACT_INVALID",
-    errorMessage: "Event payload links must contain objects with type and targetId fields.",
-  }).links;
 
   return validateContract(
     eventRecordSchema,
@@ -283,7 +275,9 @@ function buildEventRecord(
         note: normalizeOptionalText(valueAsString(payload.note)) ?? undefined,
         tags: uniqueTrimmedStringList(payload.tags) ?? undefined,
         experimentSlug: valueAsString(payload.experimentSlug),
-        links: canonicalLinks,
+        links: payload.links,
+        relatedIds: payload.relatedIds,
+        normalizeRelationIds: uniqueTrimmedStringList,
         rawRefs: uniqueTrimmedStringList(payload.rawRefs) ?? undefined,
         attachments,
         lifecycle,
@@ -321,6 +315,7 @@ function buildBaseEventContractInput(
         "experimentSlug" in draft ? draft.experimentSlug : undefined,
       ),
       links: draft.links,
+      normalizeRelationIds: uniqueTrimmedStringList,
       rawRefs: uniqueTrimmedStringList(draft.rawRefs) ?? undefined,
       attachments: draft.attachments,
       lifecycle: undefined,
@@ -1071,7 +1066,8 @@ export function buildExperimentEventRecord(input: {
         source: "manual",
         title: input.title.trim(),
         note: normalizeOptionalText(input.note) ?? undefined,
-        links: [{ type: "related_to", targetId: input.experimentId }],
+        relatedIds: [input.experimentId],
+        normalizeRelationIds: uniqueTrimmedStringList,
       }),
       kind: "experiment_event",
       experimentId: input.experimentId,
