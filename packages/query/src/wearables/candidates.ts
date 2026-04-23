@@ -422,6 +422,12 @@ function buildSampleMetricCandidates(
       return [{ ...base, metric: "temperature", unit: normalizeUnit(entity.attributes.unit) ?? "celsius", value }];
     case "heart_rate":
       return [{ ...base, metric: "averageHeartRate", unit: normalizeUnit(entity.attributes.unit) ?? "bpm", value }];
+    case "estimated_vo2_max":
+    case "estimated_vo2max":
+    case "vo2_max":
+    case "vo2max":
+    case "cardio_fitness":
+      return [{ ...base, metric: "estimatedVo2Max", unit: normalizeUnit(entity.attributes.unit) ?? "ml/kg/min", value }];
     default:
       return [];
   }
@@ -602,7 +608,7 @@ function mapScalarMetric(
   value: number,
   unit: string | null,
 ): { metric: WearableMetricKey; unit: string | null; value: number } | null {
-  const normalizedMetric = metric.toLowerCase().replace(/_/gu, "-");
+  const normalizedMetric = metric.toLowerCase().replace(/[_\s]+/gu, "-");
   const normalizedUnit = normalizeMetricUnit(unit);
 
   if (normalizedMetric === "weight") {
@@ -630,6 +636,13 @@ function mapScalarMetric(
       return { metric: "activityScore", unit: normalizedUnit ?? "%", value };
     case "day-strain":
       return { metric: "dayStrain", unit: normalizedUnit ?? "whoop_strain", value };
+    case "estimated-vo2-max":
+    case "estimated-vo2max":
+    case "vo2-max":
+    case "vo2max":
+    case "cardio-fitness":
+    case "cardiorespiratory-fitness":
+      return { metric: "estimatedVo2Max", unit: normalizedUnit ?? "ml/kg/min", value };
     case "sleep-efficiency":
       return { metric: "sleepEfficiency", unit: normalizedUnit ?? "%", value };
     case "sleep-total-minutes":

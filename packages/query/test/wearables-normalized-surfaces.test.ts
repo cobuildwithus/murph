@@ -449,13 +449,17 @@ test("metric-trend and drift surfaces return compact structured bundles", () => 
 
   assert.equal(drift?.windowDays, 2);
   assert.equal(drift?.latest.latestDate, "2026-04-04");
-  assert.equal(drift?.signals.length, 10);
+  assert.equal(drift?.signals.length, 11);
   assert.equal(
     drift?.signals.some((signal) => signal.metric === "restingHeartRate" && signal.value === 51),
     true,
   );
   assert.equal(
     drift?.signals.some((signal) => signal.metric === "temperatureDeviation" && signal.value === 0.1),
+    true,
+  );
+  assert.equal(
+    drift?.signals.some((signal) => signal.metric === "estimatedVo2Max" && signal.value === null),
     true,
   );
   assert.equal(

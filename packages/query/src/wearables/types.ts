@@ -75,6 +75,7 @@ export interface WearableActivityDay {
   date: string;
   dayStrain: WearableResolvedMetric;
   distanceKm: WearableResolvedMetric;
+  estimatedVo2Max: WearableResolvedMetric;
   notes: string[];
   sessionCount: WearableResolvedMetric;
   sessionMinutes: WearableResolvedMetric;
@@ -380,6 +381,7 @@ export const ACTIVITY_METRIC_KEYS = new Set<WearableMetricKey>([
   "activityScore",
   "dayStrain",
   "distanceKm",
+  "estimatedVo2Max",
   "sessionCount",
   "sessionMinutes",
   "steps",

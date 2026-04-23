@@ -137,6 +137,9 @@ function listWearableActivityDaysFromDataset(dataset: WearableDataset): Wearable
     const distanceKm = resolveMetric("distanceKm", selectMetricCandidates(dateCandidates, "distanceKm"), {
       metricFamily: "activity",
     });
+    const estimatedVo2Max = resolveMetric("estimatedVo2Max", selectMetricCandidates(dateCandidates, "estimatedVo2Max"), {
+      metricFamily: "cardio",
+    });
     const activityScore = resolveMetric("activityScore", selectMetricCandidates(dateCandidates, "activityScore"), {
       metricFamily: "activity",
     });
@@ -158,6 +161,7 @@ function listWearableActivityDaysFromDataset(dataset: WearableDataset): Wearable
       ["steps", steps],
       ["activeCalories", activeCalories],
       ["distanceKm", distanceKm],
+      ["estimatedVo2Max", estimatedVo2Max],
       ["activityScore", activityScore],
       ["dayStrain", dayStrain],
       ["sessionMinutes", sessionMinutes],
@@ -179,6 +183,7 @@ function listWearableActivityDaysFromDataset(dataset: WearableDataset): Wearable
       date,
       dayStrain,
       distanceKm,
+      estimatedVo2Max,
       notes,
       sessionCount,
       sessionMinutes,
@@ -502,6 +507,7 @@ const DEFAULT_WEARABLE_DRIFT_SIGNALS: ReadonlyArray<{
   { metric: "restingHeartRate", summaryKind: "recovery" },
   { metric: "hrv", summaryKind: "recovery" },
   { metric: "temperatureDeviation", summaryKind: "recovery" },
+  { metric: "estimatedVo2Max", summaryKind: "activity" },
   { metric: "sleepScore", summaryKind: "sleep" },
   { metric: "totalSleepMinutes", summaryKind: "sleep" },
   { metric: "sleepEfficiency", summaryKind: "sleep" },

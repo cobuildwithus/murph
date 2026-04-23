@@ -38,6 +38,10 @@ test("wearable metric catalog resolves current hyphenated and sample aliases", (
   assert.equal(resolveWearableCanonicalMetricKey("sleep-total-minutes"), "totalSleepMinutes");
   assert.equal(resolveWearableCanonicalMetricKey("resting-heart-rate"), "restingHeartRate");
   assert.equal(resolveWearableCanonicalMetricKey("heart_rate"), "averageHeartRate");
+  assert.equal(resolveWearableCanonicalMetricKey("estimated_vo2_max"), "estimatedVo2Max");
+  assert.equal(resolveWearableCanonicalMetricKey("vo2max"), "estimatedVo2Max");
+  assert.equal(resolveWearableCanonicalMetricKey("cardio_fitness"), "estimatedVo2Max");
+  assert.equal(resolveWearableCanonicalMetricKey("cardiorespiratory_fitness"), "estimatedVo2Max");
   assert.equal(resolveWearableMetricTolerance("day-strain"), 0.5);
 });
 
