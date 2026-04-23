@@ -12,6 +12,8 @@ const DEFAULT_DEPLOY_ROOT = path.resolve(
   "..",
   "..",
 );
+const CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD_SECONDS = 300;
+const CONTAINER_ROLLOUT_STEP_PERCENTAGE = [5, 25, 50, 100] as const;
 
 export function buildHostedWranglerDeployConfig(
   environment: HostedDeployAutomationEnvironment,
@@ -48,6 +50,8 @@ export function buildHostedWranglerDeployConfig(
         image_build_context: "..",
         instance_type: environment.containerInstanceType,
         max_instances: environment.containerMaxInstances,
+        rollout_active_grace_period: CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD_SECONDS,
+        rollout_step_percentage: [...CONTAINER_ROLLOUT_STEP_PERCENTAGE],
       },
     ],
     durable_objects: {
