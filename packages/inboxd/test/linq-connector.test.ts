@@ -395,6 +395,177 @@ test("normalizeHostedLinqConversationMessage preserves reply metadata and metada
   });
 });
 
+test("normalizeHostedLinqConversationMessage hydrates metadata-only voice memos through downloadPart", async () => {
+  const downloadPart = vi.fn(async (part: {
+    attachmentId?: string | null;
+    fileName?: string | null;
+    mimeType?: string | null;
+    type: "media" | "voice_memo";
+    url?: string | null;
+  }) => {
+    assert.deepEqual(part, {
+      attachmentId: "voice_att_download_part",
+      fileName: "voice-note.m4a",
+      mimeType: "audio/m4a",
+      type: "voice_memo",
+      url: null,
+    });
+    return Uint8Array.from([7, 8, 9]);
+  });
+
+  const capture = await normalizeHostedLinqConversationMessage({
+    accountId: "hbid:linq.recipient:v1:test",
+    attachmentDownloadTimeoutMs: 5_000,
+    downloadDriver: {
+      downloadPart,
+      async downloadUrl() {
+        throw new Error("downloadUrl should not run without a voice memo url");
+      },
+    },
+    linqMessage: {
+      chatId: "chat_stored",
+      from: "hbid:linq.from:v1:test",
+      isFromMe: false,
+      messageId: "msg_download_part_123",
+      parts: [
+        {
+          attachmentId: "voice_att_download_part",
+          fileName: "voice-note.m4a",
+          mimeType: "audio/m4a",
+          size: 4096,
+          type: "voice_memo",
+        },
+      ],
+      service: "iMessage",
+    },
+    occurredAt: "2026-04-02T04:00:01.000Z",
+  });
+
+  assert.equal(downloadPart.mock.calls.length, 1);
+  assert.deepEqual(capture.attachments, [
+    {
+      byteSize: 4096,
+      data: Uint8Array.from([7, 8, 9]),
+      externalId: "voice_att_download_part",
+      fileName: "voice-note.m4a",
+      kind: "audio",
+      mime: "audio/m4a",
+    },
+  ]);
+});
+
+test("normalizeHostedLinqConversationMessage prefers downloadUrl for url-backed attachments", async () => {
+  const downloadUrl = vi.fn(async (url: string) => {
+    assert.equal(url, "https://cdn.example.test/voice-note.m4a");
+    return Uint8Array.from([1, 2, 3]);
+  });
+  const downloadPart = vi.fn(async () => {
+    throw new Error("downloadPart should not run when downloadUrl succeeds");
+  });
+
+  const capture = await normalizeHostedLinqConversationMessage({
+    accountId: "hbid:linq.recipient:v1:test",
+    attachmentDownloadTimeoutMs: 5_000,
+    downloadDriver: {
+      downloadPart,
+      downloadUrl,
+    },
+    linqMessage: {
+      chatId: "chat_stored",
+      from: "hbid:linq.from:v1:test",
+      isFromMe: false,
+      messageId: "msg_download_url_first_123",
+      parts: [
+        {
+          attachmentId: "voice_att_download_url_first",
+          fileName: "voice-note.m4a",
+          mimeType: "audio/m4a",
+          size: 4096,
+          type: "voice_memo",
+          url: "https://cdn.example.test/voice-note.m4a",
+        },
+      ],
+      service: "iMessage",
+    },
+    occurredAt: "2026-04-02T04:00:01.000Z",
+  });
+
+  assert.equal(downloadUrl.mock.calls.length, 1);
+  assert.equal(downloadPart.mock.calls.length, 0);
+  assert.deepEqual(capture.attachments, [
+    {
+      byteSize: 4096,
+      data: Uint8Array.from([1, 2, 3]),
+      externalId: "voice_att_download_url_first",
+      fileName: "voice-note.m4a",
+      kind: "audio",
+      mime: "audio/m4a",
+    },
+  ]);
+});
+
+test("normalizeHostedLinqConversationMessage falls back to downloadPart after url download failure", async () => {
+  const downloadUrl = vi.fn(async () => {
+    throw new Error("direct url failed");
+  });
+  const downloadPart = vi.fn(async (part: {
+    attachmentId?: string | null;
+    fileName?: string | null;
+    mimeType?: string | null;
+    type: "media" | "voice_memo";
+    url?: string | null;
+  }) => {
+    assert.deepEqual(part, {
+      attachmentId: "voice_att_download_fallback",
+      fileName: "voice-note.m4a",
+      mimeType: "audio/m4a",
+      type: "voice_memo",
+      url: "https://cdn.example.test/voice-note.m4a",
+    });
+    return Uint8Array.from([4, 5, 6]);
+  });
+
+  const capture = await normalizeHostedLinqConversationMessage({
+    accountId: "hbid:linq.recipient:v1:test",
+    attachmentDownloadTimeoutMs: 5_000,
+    downloadDriver: {
+      downloadPart,
+      downloadUrl,
+    },
+    linqMessage: {
+      chatId: "chat_stored",
+      from: "hbid:linq.from:v1:test",
+      isFromMe: false,
+      messageId: "msg_download_fallback_123",
+      parts: [
+        {
+          attachmentId: "voice_att_download_fallback",
+          fileName: "voice-note.m4a",
+          mimeType: "audio/m4a",
+          size: 4096,
+          type: "voice_memo",
+          url: "https://cdn.example.test/voice-note.m4a",
+        },
+      ],
+      service: "iMessage",
+    },
+    occurredAt: "2026-04-02T04:00:01.000Z",
+  });
+
+  assert.equal(downloadUrl.mock.calls.length, 1);
+  assert.equal(downloadPart.mock.calls.length, 1);
+  assert.deepEqual(capture.attachments, [
+    {
+      byteSize: 4096,
+      data: Uint8Array.from([4, 5, 6]),
+      externalId: "voice_att_download_fallback",
+      fileName: "voice-note.m4a",
+      kind: "audio",
+      mime: "audio/m4a",
+    },
+  ]);
+});
+
 test("toLinqChatMessage validates stable message and chat ids", async () => {
   await assert.rejects(
     () =>

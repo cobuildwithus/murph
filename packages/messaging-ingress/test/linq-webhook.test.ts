@@ -667,6 +667,61 @@ test("parseCanonicalLinqMessageReceivedEvent accepts audio media parts and prese
   });
 });
 
+test("parseCanonicalLinqMessageReceivedEvent accepts camelCase media metadata in canonical snapshots", () => {
+  const event = parseCanonicalLinqMessageReceivedEvent({
+    api_version: "v3",
+    created_at: "2026-04-23T06:17:45.000Z",
+    data: {
+      chat: {
+        id: "chat_voice_camel",
+        owner_handle: {
+          handle: "+15557654321",
+          id: "handle_owner_voice_camel",
+          is_me: true,
+          service: "iMessage",
+        },
+      },
+      chat_id: "chat_voice_camel",
+      direction: "inbound",
+      from: "+15551234567",
+      is_from_me: false,
+      message: {
+        id: "msg_voice_camel",
+        parts: [
+          {
+            attachmentId: "att_voice_camel",
+            fileName: "voice-camel.m4a",
+            mimeType: "audio/m4a",
+            sizeBytes: 4096,
+            type: "voice_memo",
+            url: "https://cdn.linqapp.com/files/voice-camel.m4a",
+          },
+        ],
+      },
+      recipient_phone: "+15557654321",
+      sender_handle: {
+        handle: "+15551234567",
+        id: "handle_sender_voice_camel",
+        service: "iMessage",
+      },
+      service: "iMessage",
+    },
+    event_id: "evt_voice_camel",
+    event_type: "message.received",
+  } as never);
+
+  assert.deepEqual(event.data.message.parts, [
+    {
+      attachment_id: "att_voice_camel",
+      filename: "voice-camel.m4a",
+      mime_type: "audio/m4a",
+      size: 4096,
+      type: "voice_memo",
+      url: "https://cdn.linqapp.com/files/voice-camel.m4a",
+    },
+  ]);
+});
+
 test("parseCanonicalLinqMessageReceivedEvent infers canonical outbound direction and hosted link minimization", () => {
   const event = parseCanonicalLinqMessageReceivedEvent({
     api_version: "v3",

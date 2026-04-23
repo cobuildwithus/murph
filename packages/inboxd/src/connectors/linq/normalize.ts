@@ -22,6 +22,16 @@ import {
 
 export interface LinqAttachmentDownloadDriver {
   downloadUrl(url: string, signal?: AbortSignal): Promise<Uint8Array | null>;
+  downloadPart?(
+    part: {
+      attachmentId?: string | null;
+      fileName?: string | null;
+      mimeType?: string | null;
+      type: "media" | "voice_memo";
+      url?: string | null;
+    },
+    signal?: AbortSignal,
+  ): Promise<Uint8Array | null>;
 }
 
 export interface NormalizeLinqWebhookEventInput {
@@ -312,30 +322,58 @@ async function downloadLinqAttachmentInlineBestEffort(
   attachmentDownloadTimeoutMs?: number | null,
 ): Promise<Uint8Array | null> {
   const url = normalizeTextValue(part.url ?? null);
-  if (!downloadDriver || !url) {
+  if (!downloadDriver || (!url && !downloadDriver.downloadPart)) {
     return null;
   }
 
   try {
     const normalizedTimeoutMs = normalizeAttachmentDownloadTimeout(attachmentDownloadTimeoutMs);
+    const attachmentDownloadPart = {
+      attachmentId: normalizeTextValue(part.attachment_id ?? null),
+      fileName: normalizeTextValue(part.filename ?? null),
+      mimeType: normalizeTextValue(part.mime_type ?? null),
+      type: part.type,
+      url,
+    };
+    const downloadOperation = (downloadSignal?: AbortSignal) => {
+      if (url) {
+        return downloadDriver
+          .downloadUrl(url, downloadSignal)
+          .catch(async (error) => {
+            if (!downloadDriver.downloadPart) {
+              throw error;
+            }
+
+            return downloadDriver.downloadPart(attachmentDownloadPart, downloadSignal);
+          })
+          .then(async (data) => {
+            if (data !== null || !downloadDriver.downloadPart) {
+              return data;
+            }
+
+            return downloadDriver.downloadPart(attachmentDownloadPart, downloadSignal);
+          });
+      }
+
+      if (!downloadDriver.downloadPart) {
+        return Promise.resolve<Uint8Array | null>(null);
+      }
+
+      return downloadDriver.downloadPart(attachmentDownloadPart, downloadSignal);
+    };
+
     if (normalizedTimeoutMs !== null) {
-      return await downloadLinqAttachmentWithTimeout(
-        downloadDriver,
-        url,
-        normalizedTimeoutMs,
-        signal,
-      );
+      return await runLinqAttachmentDownloadWithTimeout(downloadOperation, normalizedTimeoutMs, signal);
     }
 
-    return await downloadDriver.downloadUrl(url, signal);
+    return await downloadOperation(signal);
   } catch {
     return null;
   }
 }
 
-async function downloadLinqAttachmentWithTimeout(
-  downloadDriver: LinqAttachmentDownloadDriver,
-  url: string,
+async function runLinqAttachmentDownloadWithTimeout(
+  downloadOperation: (signal?: AbortSignal) => Promise<Uint8Array | null>,
   timeoutMs: number,
   signal?: AbortSignal,
 ): Promise<Uint8Array | null> {
@@ -349,8 +387,7 @@ async function downloadLinqAttachmentWithTimeout(
         resolve(null);
       }, timeoutMs);
 
-      void downloadDriver
-        .downloadUrl(url, controller.signal)
+      void downloadOperation(controller.signal)
         .then((data) => {
           clearTimeout(timeout);
           resolve(data);
