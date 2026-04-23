@@ -2,13 +2,14 @@ import path from 'node:path'
 import { tmpdir } from 'node:os'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
   addActivitySession,
   addBodyMeasurement,
   addCapture,
   addMeasurement,
+  deleteEvent,
   initializeVault,
   readJsonlRecords,
 } from '@murphai/core'
@@ -408,5 +409,201 @@ describe('workout primitive core mutations', () => {
         },
       ],
     })
+  })
+
+  it('rehydrates prior evidence across specialized event rewrites', async () => {
+    const vaultRoot = await createTempVault('murph-core-specialized-rewrite-evidence-')
+    const activityFirstSource = await createSourceFile(vaultRoot, 'activity-first.jpg', 'activity-first')
+    const activitySecondSource = await createSourceFile(vaultRoot, 'activity-second.jpg', 'activity-second')
+    const bodyFirstSource = await createSourceFile(vaultRoot, 'body-first.jpg', 'body-first')
+    const bodySecondSource = await createSourceFile(vaultRoot, 'body-second.jpg', 'body-second')
+    const captureFirstSource = await createSourceFile(vaultRoot, 'capture-first.jpg', 'capture-first')
+    const captureSecondSource = await createSourceFile(vaultRoot, 'capture-second.jpg', 'capture-second')
+    const measurementFirstSource = await createSourceFile(vaultRoot, 'measurement-first.jpg', 'measurement-first')
+    const measurementSecondSource = await createSourceFile(vaultRoot, 'measurement-second.jpg', 'measurement-second')
+
+    vi.useFakeTimers()
+    let activityFirst
+    let activityRewrite
+    try {
+      vi.setSystemTime(new Date('2026-04-08T12:00:00.000Z'))
+      activityFirst = await addActivitySession({
+        vaultRoot,
+        draft: {
+          id: 'evt_01JSHY3D0V5A8XJQF8M0Q0Q0A1',
+          occurredAt: '2026-04-08T06:15:00.000Z',
+          source: 'manual',
+          title: 'Morning intervals',
+          activityType: 'running',
+          durationMinutes: 31,
+          workout: {
+            exercises: [],
+          },
+        },
+        attachments: [{
+          role: 'media_1',
+          sourcePath: activityFirstSource,
+        }],
+      })
+      vi.setSystemTime(new Date('2026-05-08T12:00:00.000Z'))
+      activityRewrite = await addActivitySession({
+        vaultRoot,
+        draft: {
+          id: activityFirst.eventId,
+          occurredAt: '2026-05-08T06:20:00.000Z',
+          source: 'manual',
+          title: 'Morning intervals revised',
+          activityType: 'running',
+          durationMinutes: 33,
+          workout: {
+            exercises: [],
+          },
+        },
+        attachments: [{
+          role: 'media_2',
+          sourcePath: activitySecondSource,
+        }],
+      })
+    } finally {
+      vi.useRealTimers()
+    }
+    const activityPaths = activityRewrite.event.attachments?.map((attachment) => attachment.relativePath) ?? []
+    expect(activityRewrite.created).toBe(false)
+    expect(activityPaths).toHaveLength(2)
+    expect(activityRewrite.event.dayKey).toBe('2026-05-08')
+    expect(activityRewrite.event.recordedAt).toBe('2026-05-08T12:00:00.000Z')
+    expect(activityRewrite.event.workout.media?.map((media) => media.relativePath)).toEqual(
+      expect.arrayContaining(activityPaths),
+    )
+    expect(activityRewrite.event.rawRefs).toEqual(expect.arrayContaining(activityPaths))
+
+    const deletedActivity = await deleteEvent({
+      vaultRoot,
+      eventId: activityFirst.eventId,
+    })
+    expect(deletedActivity.retainedPaths).toEqual(expect.arrayContaining(activityPaths))
+
+    const bodyFirst = await addBodyMeasurement({
+      vaultRoot,
+      draft: {
+        id: 'evt_01JSHY3D0V5A8XJQF8M0Q0Q0A2',
+        occurredAt: '2026-04-08T07:00:00.000Z',
+        source: 'manual',
+        title: 'Body check-in',
+        measurements: [{
+          type: 'weight',
+          value: 180.4,
+          unit: 'lb',
+        }],
+      },
+      attachments: [{
+        role: 'media_1',
+        sourcePath: bodyFirstSource,
+      }],
+    })
+    const bodyRewrite = await addBodyMeasurement({
+      vaultRoot,
+      draft: {
+        id: bodyFirst.eventId,
+        occurredAt: '2026-05-08T07:10:00.000Z',
+        source: 'manual',
+        title: 'Body check-in revised',
+        measurements: [{
+          type: 'weight',
+          value: 179.8,
+          unit: 'lb',
+        }],
+      },
+      attachments: [{
+        role: 'media_2',
+        sourcePath: bodySecondSource,
+      }],
+    })
+    const bodyPaths = bodyRewrite.event.attachments?.map((attachment) => attachment.relativePath) ?? []
+    expect(bodyRewrite.created).toBe(false)
+    expect(bodyPaths).toHaveLength(2)
+    expect(bodyRewrite.event.media?.map((media) => media.relativePath)).toEqual(
+      expect.arrayContaining(bodyPaths),
+    )
+    expect(bodyRewrite.event.rawRefs).toEqual(expect.arrayContaining(bodyPaths))
+
+    const captureFirst = await addCapture({
+      vaultRoot,
+      draft: {
+        id: 'evt_01JSHY3D0V5A8XJQF8M0Q0Q0A3',
+        occurredAt: '2026-04-08T08:00:00.000Z',
+        source: 'manual',
+        title: 'Baseline capture',
+        note: 'Baseline image.',
+        tags: ['baseline'],
+      },
+      attachments: [{
+        role: 'photo_1',
+        sourcePath: captureFirstSource,
+      }],
+    })
+    const captureRewrite = await addCapture({
+      vaultRoot,
+      draft: {
+        id: captureFirst.eventId,
+        occurredAt: '2026-05-08T08:05:00.000Z',
+        source: 'manual',
+        title: 'Baseline capture revised',
+        note: 'Follow-up image.',
+      },
+      attachments: [{
+        role: 'photo_2',
+        sourcePath: captureSecondSource,
+      }],
+    })
+    const capturePaths = captureRewrite.event.attachments?.map((attachment) => attachment.relativePath) ?? []
+    expect(captureRewrite.created).toBe(false)
+    expect(capturePaths).toHaveLength(2)
+    expect(captureRewrite.event.rawRefs).toEqual(expect.arrayContaining(capturePaths))
+    expect(captureRewrite.event.tags).toEqual(expect.arrayContaining(['baseline', 'capture']))
+
+    const measurementFirst = await addMeasurement({
+      vaultRoot,
+      draft: {
+        id: 'evt_01JSHY3D0V5A8XJQF8M0Q0Q0A4',
+        occurredAt: '2026-04-08T09:00:00.000Z',
+        source: 'manual',
+        title: 'Grip strength',
+        measurements: [{
+          metric: 'grip-strength',
+          value: 97.2,
+          unit: 'lb',
+        }],
+      },
+      attachments: [{
+        role: 'media_1',
+        sourcePath: measurementFirstSource,
+      }],
+    })
+    const measurementRewrite = await addMeasurement({
+      vaultRoot,
+      draft: {
+        id: measurementFirst.eventId,
+        occurredAt: '2026-05-08T09:05:00.000Z',
+        source: 'manual',
+        title: 'Grip strength revised',
+        measurements: [{
+          metric: 'grip-strength',
+          value: 99.1,
+          unit: 'lb',
+        }],
+      },
+      attachments: [{
+        role: 'media_2',
+        sourcePath: measurementSecondSource,
+      }],
+    })
+    const measurementPaths = measurementRewrite.event.attachments?.map((attachment) => attachment.relativePath) ?? []
+    expect(measurementRewrite.created).toBe(false)
+    expect(measurementPaths).toHaveLength(2)
+    expect(measurementRewrite.event.media?.map((media) => media.relativePath)).toEqual(
+      expect.arrayContaining(measurementPaths),
+    )
+    expect(measurementRewrite.event.rawRefs).toEqual(expect.arrayContaining(measurementPaths))
   })
 })
