@@ -778,6 +778,42 @@ test("capture upserts normalize provider ids across sources and fall back when t
         source: "telegram" as const,
       },
       {
+        ...createCapture("capture-telegram-minimal", {
+          externalId: "telegram:ignored",
+          threadId: "thread-telegram-minimal",
+        }),
+        accountId: null,
+        raw: {
+          message_id: "43",
+          schema: "murph.telegram-capture.v1",
+        },
+        source: "telegram" as const,
+      },
+      {
+        ...createCapture("capture-telegram-minimal-blank", {
+          externalId: "telegram:ignored",
+          threadId: "thread-telegram-minimal-blank",
+        }),
+        accountId: null,
+        raw: {
+          message_id: "   ",
+          schema: "murph.telegram-capture.v1",
+        },
+        source: "telegram" as const,
+      },
+      {
+        ...createCapture("capture-telegram-minimal-float", {
+          externalId: "telegram:ignored",
+          threadId: "thread-telegram-minimal-float",
+        }),
+        accountId: null,
+        raw: {
+          message_id: 42.5,
+          schema: "murph.telegram-capture.v1",
+        },
+        source: "telegram" as const,
+      },
+      {
         ...createCapture("capture-telegram-invalid", {
           externalId: "telegram:ignored",
           threadId: "thread-telegram-invalid",
@@ -831,6 +867,21 @@ test("capture upserts normalize provider ids across sources and fall back when t
         },
         {
           captureId: "capture-telegram-invalid",
+          identityId: null,
+          providerMessageId: null,
+        },
+        {
+          captureId: "capture-telegram-minimal",
+          identityId: null,
+          providerMessageId: "43",
+        },
+        {
+          captureId: "capture-telegram-minimal-blank",
+          identityId: null,
+          providerMessageId: null,
+        },
+        {
+          captureId: "capture-telegram-minimal-float",
           identityId: null,
           providerMessageId: null,
         },

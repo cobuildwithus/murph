@@ -9,7 +9,10 @@ import {
   type TelegramUpdateLike,
   type TelegramUser,
 } from "@murphai/messaging-ingress/telegram-webhook";
-import { minimizeTelegramUpdate } from "@murphai/messaging-ingress/telegram-webhook-payload";
+import {
+  buildTelegramCaptureRawMetadata,
+  minimizeTelegramUpdate,
+} from "@murphai/messaging-ingress/telegram-webhook-payload";
 
 import type { ChatMessage } from "../chat/message.ts";
 import { createInboundCaptureFromChatMessage } from "../chat/message.ts";
@@ -511,9 +514,8 @@ function toHostedTelegramFileBase(
 function buildHostedTelegramRawMetadata(
   message: NormalizeHostedTelegramMessageInput["message"],
 ): Record<string, unknown> {
-  return {
-    message_id: message.messageId,
-    ...(typeof message.mediaGroupId === "string" ? { media_group_id: message.mediaGroupId } : {}),
-    schema: "murph.telegram-capture.v1",
-  };
+  return buildTelegramCaptureRawMetadata({
+    mediaGroupId: message.mediaGroupId ?? null,
+    messageId: message.messageId,
+  });
 }

@@ -6,6 +6,7 @@
 
 import {
   compactRecord,
+  normalizeTextValue,
   sanitizeRawMetadata,
 } from "./internal.ts";
 
@@ -24,6 +25,9 @@ import type {
   TelegramUser,
   TelegramVenue,
 } from "./telegram-types.ts";
+
+const TELEGRAM_CAPTURE_RAW_SCHEMA = "murph.telegram-capture.v1";
+const TELEGRAM_REPLY_CONTEXT_PREVIEW_LIMIT = 240;
 
 export function parseTelegramWebhookUpdate(rawBody: string): TelegramUpdateLike {
   let payload: unknown;
@@ -53,220 +57,166 @@ export function parseTelegramWebhookUpdate(rawBody: string): TelegramUpdateLike 
   } as TelegramUpdateLike;
 }
 
-export function minimizeTelegramUpdate(update: TelegramUpdateLike): Record<string, unknown> {
+export function buildTelegramCaptureRawMetadata(input: {
+  mediaGroupId?: string | null;
+  messageId: number | string | null | undefined;
+  replyContextPreview?: string | null;
+}): Record<string, unknown> {
+  const normalizedPreview = normalizeTelegramReplyContextPreview(
+    input.replyContextPreview ?? null,
+  );
   return sanitizeRawMetadata(
     compactRecord({
-      update_id: update.update_id,
-      message: pickTelegramMessage(update.message),
-      business_message: pickTelegramMessage(update.business_message),
+      media_group_id: normalizeTextValue(input.mediaGroupId ?? null) ?? undefined,
+      message_id: normalizeTelegramCaptureMessageId(input.messageId),
+      reply_context_preview: normalizedPreview ?? undefined,
+      schema: TELEGRAM_CAPTURE_RAW_SCHEMA,
     }),
   ) as Record<string, unknown>;
 }
 
-function pickTelegramMessage(
+export function minimizeTelegramUpdate(update: TelegramUpdateLike): Record<string, unknown> {
+  const message = update.message ?? update.business_message ?? null;
+
+  return buildTelegramCaptureRawMetadata({
+    mediaGroupId: message?.media_group_id ?? null,
+    messageId: message?.message_id,
+    replyContextPreview: buildTelegramReplyContextPreview(message),
+  });
+}
+
+function normalizeTelegramCaptureMessageId(
+  value: number | string | null | undefined,
+): number | string | undefined {
+  if (typeof value === "number" && Number.isSafeInteger(value) && value > 0) {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    const normalized = normalizeTextValue(value);
+    return normalized && /^\d+$/u.test(normalized) ? normalized : undefined;
+  }
+
+  return undefined;
+}
+
+function normalizeTelegramReplyContextPreview(value: string | null): string | null {
+  const normalized = normalizeTextValue(value);
+  if (!normalized) {
+    return null;
+  }
+
+  return normalized.length > TELEGRAM_REPLY_CONTEXT_PREVIEW_LIMIT
+    ? `${normalized.slice(0, TELEGRAM_REPLY_CONTEXT_PREVIEW_LIMIT - 3)}...`
+    : normalized;
+}
+
+function buildTelegramReplyContextPreview(
   message: TelegramMessageLike | null | undefined,
-): Record<string, unknown> | null {
+): string | null {
   if (!message) {
     return null;
   }
 
-  return compactRecord({
-    message_id: message.message_id,
-    date: message.date,
-    edit_date: message.edit_date,
-    business_connection_id: message.business_connection_id,
-    direct_messages_topic: pickTelegramDirectMessagesTopic(message.direct_messages_topic),
-    media_group_id: message.media_group_id,
-    message_thread_id: message.message_thread_id,
-    text: message.text,
-    caption: message.caption,
-    chat: pickTelegramChat(message.chat),
-    from: pickTelegramUser(message.from),
-    sender_chat: pickTelegramChat(message.sender_chat),
-    sender_business_bot: pickTelegramUser(message.sender_business_bot),
-    reply_to_message: pickTelegramReplyMessage(message.reply_to_message),
-    quote: pickTelegramQuote(message.quote),
-    photo: message.photo?.map((photo) => pickTelegramPhotoSize(photo)) ?? message.photo ?? undefined,
-    document: pickTelegramFile(message.document),
-    audio: pickTelegramFile(message.audio),
-    voice: pickTelegramFile(message.voice),
-    video: pickTelegramFile(message.video),
-    video_note: pickTelegramFile(message.video_note),
-    animation: pickTelegramFile(message.animation),
-    sticker: pickTelegramFile(message.sticker),
-    contact: pickTelegramContact(message.contact),
-    location: pickTelegramLocation(message.location),
-    venue: pickTelegramVenue(message.venue),
-    poll: pickTelegramPoll(message.poll),
-  });
-}
-
-function pickTelegramChat(chat: TelegramChat | null | undefined): Record<string, unknown> | null {
-  if (!chat) {
-    return null;
+  const lines: string[] = [];
+  const replyPreview = summarizeTelegramReplyTarget(message.reply_to_message);
+  if (replyPreview) {
+    lines.push(`Replying to: ${replyPreview}`);
+  } else if (message.reply_to_message) {
+    lines.push("Replying to an earlier Telegram message");
   }
 
-  return compactRecord({
-    id: chat.id,
-    type: chat.type,
-    title: chat.title,
-    username: chat.username,
-    first_name: chat.first_name,
-    last_name: chat.last_name,
-    is_direct_messages: chat.is_direct_messages,
-  });
-}
-
-function pickTelegramUser(user: TelegramUser | null | undefined): Record<string, unknown> | null {
-  if (!user) {
-    return null;
+  const quotePreview = normalizeTextValue(message.quote?.text ?? null);
+  if (quotePreview) {
+    lines.push(`Quoted text: ${summarizeTelegramPreviewText(quotePreview)}`);
   }
 
-  return compactRecord({
-    id: user.id,
-    is_bot: user.is_bot,
-    first_name: user.first_name,
-    last_name: user.last_name,
-    username: user.username,
-  });
+  return lines.length > 0 ? lines.join("\n") : null;
 }
 
-function pickTelegramPhotoSize(photo: TelegramPhotoSize): Record<string, unknown> {
-  return compactRecord({
-    file_id: photo.file_id,
-    file_unique_id: photo.file_unique_id,
-    file_size: photo.file_size,
-    file_name: photo.file_name,
-    mime_type: photo.mime_type,
-    width: photo.width,
-    height: photo.height,
-  });
-}
-
-function pickTelegramFile(file: TelegramFileBase | null | undefined): Record<string, unknown> | null {
-  if (!file) {
-    return null;
-  }
-
-  return compactRecord({
-    file_id: file.file_id,
-    file_unique_id: file.file_unique_id,
-    file_size: file.file_size,
-    file_name: file.file_name,
-    mime_type: file.mime_type,
-  });
-}
-
-function pickTelegramDirectMessagesTopic(
-  topic: TelegramDirectMessagesTopic | null | undefined,
-): Record<string, unknown> | null {
-  if (!topic) {
-    return null;
-  }
-
-  return compactRecord({
-    topic_id: topic.topic_id,
-    title: topic.title,
-  });
-}
-
-function pickTelegramReplyMessage(
+function summarizeTelegramReplyTarget(
   message: TelegramMessageLike | null | undefined,
-): Record<string, unknown> | null {
+): string | null {
   if (!message) {
     return null;
   }
 
-  return compactRecord({
-    message_id: message.message_id,
-    date: message.date,
-    business_connection_id: message.business_connection_id,
-    direct_messages_topic: pickTelegramDirectMessagesTopic(message.direct_messages_topic),
-    media_group_id: message.media_group_id,
-    message_thread_id: message.message_thread_id,
-    text: message.text,
-    caption: message.caption,
-    chat: pickTelegramChat(message.chat),
-    from: pickTelegramUser(message.from),
-    sender_chat: pickTelegramChat(message.sender_chat),
-    sender_business_bot: pickTelegramUser(message.sender_business_bot),
-    quote: pickTelegramQuote(message.quote),
-    contact: pickTelegramContact(message.contact),
-    location: pickTelegramLocation(message.location),
-    venue: pickTelegramVenue(message.venue),
-    poll: pickTelegramPoll(message.poll),
-  });
-}
-
-function pickTelegramQuote(
-  quote: TelegramTextQuote | null | undefined,
-): Record<string, unknown> | null {
-  if (!quote) {
-    return null;
+  const textPreview = normalizeTextValue(message.text ?? message.caption ?? null);
+  if (textPreview) {
+    return summarizeTelegramPreviewText(textPreview);
   }
 
-  return compactRecord({
-    text: quote.text,
-  });
-}
-
-function pickTelegramContact(
-  contact: TelegramContact | null | undefined,
-): Record<string, unknown> | null {
-  if (!contact) {
-    return null;
+  if (message.contact) {
+    return "Shared contact card";
   }
 
-  return compactRecord({
-    first_name: contact.first_name,
-    last_name: contact.last_name,
-    phone_number: contact.phone_number,
-    user_id: contact.user_id,
-    vcard: contact.vcard,
-  });
-}
-
-function pickTelegramLocation(
-  location: TelegramLocation | null | undefined,
-): Record<string, unknown> | null {
-  if (!location) {
-    return null;
+  const venuePreview = buildTelegramVenuePreview(message.venue);
+  if (venuePreview) {
+    return venuePreview;
   }
 
-  return compactRecord({
-    latitude: location.latitude,
-    longitude: location.longitude,
-  });
+  if (hasCompleteTelegramLocation(message.location)) {
+    return "Shared location";
+  }
+
+  const pollPreview = buildTelegramPollPreview(message.poll);
+  if (pollPreview) {
+    return pollPreview;
+  }
+
+  return null;
 }
 
-function pickTelegramVenue(
+function buildTelegramVenuePreview(
   venue: TelegramVenue | null | undefined,
-): Record<string, unknown> | null {
+): string | null {
   if (!venue) {
     return null;
   }
 
-  return compactRecord({
-    title: venue.title,
-    address: venue.address,
-    location: pickTelegramLocation(venue.location),
-  });
+  const title = normalizeTextValue(venue.title ?? null);
+  return title ? `Shared venue ${summarizeTelegramPreviewText(title)}` : "Shared venue";
 }
 
-function pickTelegramPoll(
+function hasCompleteTelegramLocation(
+  location: TelegramLocation | null | undefined,
+): boolean {
+  return (
+    typeof location?.latitude === "number"
+    && Number.isFinite(location.latitude)
+    && typeof location.longitude === "number"
+    && Number.isFinite(location.longitude)
+  );
+}
+
+function buildTelegramPollPreview(
   poll: TelegramPoll | null | undefined,
-): Record<string, unknown> | null {
+): string | null {
   if (!poll) {
     return null;
   }
 
-  return compactRecord({
-    question: poll.question,
-    options: poll.options?.map((option) =>
-      compactRecord({
-        text: option.text,
-      })) ?? undefined,
-  });
+  const question = normalizeTextValue(poll.question ?? null);
+  const options = (poll.options ?? [])
+    .map((option) => normalizeTextValue(option.text ?? null))
+    .filter((value): value is string => value !== null)
+    .map((value) => summarizeTelegramPreviewText(value));
+
+  if (!question && options.length === 0) {
+    return null;
+  }
+
+  const questionPreview = summarizeTelegramPreviewText(question ?? "untitled poll");
+  return options.length > 0
+    ? `Poll ${questionPreview} [${options.join(" | ")}]`
+    : `Poll ${questionPreview}`;
+}
+
+function summarizeTelegramPreviewText(text: string): string {
+  const normalized = text.replace(/\s+/gu, " ").trim();
+  return normalized.length > TELEGRAM_REPLY_CONTEXT_PREVIEW_LIMIT
+    ? `${normalized.slice(0, TELEGRAM_REPLY_CONTEXT_PREVIEW_LIMIT - 3)}...`
+    : normalized;
 }
 
 function requireTelegramRecord(value: unknown, label: string): Record<string, unknown> {

@@ -830,10 +830,11 @@ function resolveCaptureProviderMessageId(capture: InboxCaptureRecord): string | 
       return stripKnownProviderPrefix(capture.externalId, 'linq:')
     case 'telegram': {
       const telegramMessageId =
-        extractNestedNumber(capture.raw, ['message', 'message_id']) ??
-        extractNestedNumber(capture.raw, ['edited_message', 'message_id']) ??
-        extractNestedNumber(capture.raw, ['channel_post', 'message_id'])
-      return telegramMessageId !== null ? String(telegramMessageId) : null
+        normalizeTelegramProviderMessageId(readNestedValue(capture.raw, ['message_id'])) ??
+        normalizeTelegramProviderMessageId(readNestedValue(capture.raw, ['message', 'message_id'])) ??
+        normalizeTelegramProviderMessageId(readNestedValue(capture.raw, ['edited_message', 'message_id'])) ??
+        normalizeTelegramProviderMessageId(readNestedValue(capture.raw, ['channel_post', 'message_id']))
+      return telegramMessageId
     }
     default:
       return normalizeNullableString(capture.externalId)
@@ -863,6 +864,24 @@ function stripKnownProviderPrefix(value: string | null | undefined, prefix: stri
 }
 
 function extractNestedNumber(value: unknown, path: readonly string[]): number | null {
+  const candidate = readNestedValue(value, path)
+  return typeof candidate === 'number' && Number.isFinite(candidate) ? candidate : null
+}
+
+function normalizeTelegramProviderMessageId(value: unknown): string | null {
+  if (typeof value === 'number' && Number.isSafeInteger(value) && value > 0) {
+    return String(value)
+  }
+
+  if (typeof value === 'string') {
+    const normalized = normalizeNullableString(value)
+    return normalized && /^\d+$/u.test(normalized) ? normalized : null
+  }
+
+  return null
+}
+
+function readNestedValue(value: unknown, path: readonly string[]): unknown {
   let cursor: unknown = value
   for (const key of path) {
     if (!cursor || typeof cursor !== 'object' || !(key in cursor)) {
@@ -870,8 +889,7 @@ function extractNestedNumber(value: unknown, path: readonly string[]): number | 
     }
     cursor = (cursor as Record<string, unknown>)[key]
   }
-
-  return typeof cursor === 'number' && Number.isFinite(cursor) ? cursor : null
+  return cursor
 }
 
 async function readInboxCapturesById(

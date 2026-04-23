@@ -705,6 +705,7 @@ describe('assistant auto-reply grouping', () => {
       JSON.stringify({
         input: {
           raw: {
+            reply_context_preview: 'Replying to: Shared venue Coffee Shop',
             schema: 'murph.telegram-capture.v1',
             media_group_id: 'group-1',
             message_id: '101',
@@ -765,9 +766,17 @@ describe('assistant auto-reply grouping', () => {
       'capture-1',
       'capture-2',
     ])
-    expect(result.items.map((item) => item.telegramMetadata?.messageId)).toEqual([
-      '101',
-      '102',
+    expect(result.items.map((item) => item.telegramMetadata)).toEqual([
+      {
+        mediaGroupId: 'group-1',
+        messageId: '101',
+        replyContext: 'Replying to: Shared venue Coffee Shop',
+      },
+      {
+        mediaGroupId: 'group-2',
+        messageId: '102',
+        replyContext: null,
+      },
     ])
   })
 })
