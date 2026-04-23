@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   allergyFrontmatterSchema,
+  automationFrontmatterSchema,
   assessmentResponseSchema,
   auditRecordSchema,
   commandNounCapabilityByNoun,
@@ -18,6 +19,7 @@ import {
   exampleFrontmatterMarkdown,
   exampleFrontmatterObjects,
   exampleHealthFrontmatterObjects,
+  examplePreferencesDocument,
   eventRecordSchema,
   experimentFrontmatterSchema,
   familyMemberFrontmatterSchema,
@@ -29,14 +31,18 @@ import {
   isStrictIsoDate,
   isStrictIsoDateTime,
   journalDayFrontmatterSchema,
+  memoryDocumentFrontmatterSchema,
   exampleSampleRecords,
   normalizeStrictIsoTimestamp,
+  preferencesDocumentSchema,
+  scheduledLogFrontmatterSchema,
   exampleVaultMetadata,
   providerFrontmatterSchema,
   recipeFrontmatterSchema,
   protocolFrontmatterSchema,
   safeParseContract,
   sampleRecordSchema,
+  VAULT_FAMILY_DESCRIPTORS,
   vaultMetadataSchema,
   workoutFormatFrontmatterSchema,
   parseFrontmatterDocument,
@@ -120,6 +126,7 @@ assert.deepEqual(Object.keys(schemaCatalog).sort(), [
   "audit-record",
   "event-record",
   "frontmatter-allergy",
+  "frontmatter-automation",
   "frontmatter-condition",
   "frontmatter-core",
   "frontmatter-experiment",
@@ -129,13 +136,47 @@ assert.deepEqual(Object.keys(schemaCatalog).sort(), [
   "frontmatter-goal",
   "frontmatter-journal-day",
   "frontmatter-protocol",
+  "frontmatter-memory",
   "frontmatter-provider",
   "frontmatter-recipe",
+  "frontmatter-scheduled-log",
   "frontmatter-workout-format",
   "inbox-capture-record",
+  "preferences-document",
   "sample-record",
   "vault-metadata",
-]);
+].sort());
+const schemaCatalogIds = new Set(
+  Object.values(schemaCatalog)
+    .map((schema) => (schema as { $id?: unknown }).$id)
+    .filter((value): value is string => typeof value === "string"),
+);
+for (const family of VAULT_FAMILY_DESCRIPTORS) {
+  if (!("validation" in family) || !family.validation) {
+    continue;
+  }
+
+  const metadata = family.validation.schema.meta();
+  if (!metadata) {
+    throw new Error(`Validated vault family "${family.id}" is missing schema metadata.`);
+  }
+
+  assert.equal(
+    typeof metadata.$id,
+    "string",
+    `Validated vault family "${family.id}" is missing schema $id metadata.`,
+  );
+  assert.equal(
+    typeof metadata.title,
+    "string",
+    `Validated vault family "${family.id}" is missing schema title metadata.`,
+  );
+  assert.equal(
+    schemaCatalogIds.has(metadata.$id as string),
+    true,
+    `Validated vault family "${family.id}" is missing from schemaCatalog.`,
+  );
+}
 assert.equal((schemaCatalog["event-record"] as { oneOf?: unknown[] }).oneOf?.length, 19);
 assert.equal((schemaCatalog["sample-record"] as { oneOf?: unknown[] }).oneOf?.length, 8);
 assert.deepEqual(commandNounCapabilityByNoun.get("food")?.bundles, ["payloadCrud"]);
@@ -198,13 +239,17 @@ exampleAssessmentResponses.forEach((record, index) =>
 exampleEventRecords.forEach((record, index) => assertNoErrors(`event example ${index + 1}`, record, eventRecordSchema));
 exampleSampleRecords.forEach((record, index) => assertNoErrors(`sample example ${index + 1}`, record, sampleRecordSchema));
 exampleAuditRecords.forEach((record, index) => assertNoErrors(`audit example ${index + 1}`, record, auditRecordSchema));
+assertNoErrors("preferences document example", examplePreferencesDocument, preferencesDocumentSchema);
 
+assertNoErrors("automation frontmatter object", exampleFrontmatterObjects.automation, automationFrontmatterSchema);
 assertNoErrors("core frontmatter object", exampleFrontmatterObjects.core, coreFrontmatterSchema);
 assertNoErrors("journal day frontmatter object", exampleFrontmatterObjects.journalDay, journalDayFrontmatterSchema);
+assertNoErrors("memory frontmatter object", exampleFrontmatterObjects.memory, memoryDocumentFrontmatterSchema);
 assertNoErrors("experiment frontmatter object", exampleFrontmatterObjects.experiment, experimentFrontmatterSchema);
 assertNoErrors("food frontmatter object", exampleFrontmatterObjects.food, foodFrontmatterSchema);
 assertNoErrors("provider frontmatter object", exampleFrontmatterObjects.provider, providerFrontmatterSchema);
 assertNoErrors("recipe frontmatter object", exampleFrontmatterObjects.recipe, recipeFrontmatterSchema);
+assertNoErrors("scheduled-log frontmatter object", exampleFrontmatterObjects.scheduledLog, scheduledLogFrontmatterSchema);
 assertNoErrors(
   "workout-format frontmatter object",
   exampleFrontmatterObjects.workoutFormat,
@@ -236,12 +281,20 @@ assertHasErrors(
 );
 
 assert.deepEqual(
+  parseFrontmatterDocument(exampleFrontmatterMarkdown.automation).attributes,
+  exampleFrontmatterObjects.automation,
+);
+assert.deepEqual(
   parseFrontmatterDocument(exampleFrontmatterMarkdown.core).attributes,
   exampleFrontmatterObjects.core,
 );
 assert.deepEqual(
   parseFrontmatterDocument(exampleFrontmatterMarkdown.journalDay).attributes,
   exampleFrontmatterObjects.journalDay,
+);
+assert.deepEqual(
+  parseFrontmatterDocument(exampleFrontmatterMarkdown.memory).attributes,
+  exampleFrontmatterObjects.memory,
 );
 assert.deepEqual(
   parseFrontmatterDocument(exampleFrontmatterMarkdown.experiment).attributes,
@@ -258,6 +311,10 @@ assert.deepEqual(
 assert.deepEqual(
   parseFrontmatterDocument(exampleFrontmatterMarkdown.recipe).attributes,
   exampleFrontmatterObjects.recipe,
+);
+assert.deepEqual(
+  parseFrontmatterDocument(exampleFrontmatterMarkdown.scheduledLog).attributes,
+  exampleFrontmatterObjects.scheduledLog,
 );
 assert.deepEqual(
   parseFrontmatterDocument(exampleFrontmatterMarkdown.workoutFormat).attributes,

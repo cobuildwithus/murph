@@ -76,6 +76,7 @@ describe("hosted Linq webhook transport", () => {
       memberId: "member-1",
       pendingLinqChatId: null,
       pendingLinqRecipientPhone: null,
+      telegramThreadId: null,
       telegramUserId: null,
       telegramUserLookupKey: null,
     });

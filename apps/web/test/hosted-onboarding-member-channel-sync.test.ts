@@ -224,6 +224,7 @@ function makeMemberSnapshot(): HostedMemberSnapshot {
       memberId: "member_123",
       pendingLinqChatId: null,
       pendingLinqRecipientPhone: null,
+      telegramThreadId: "telegram_user_123:business:biz-42:dm-topic:9",
       telegramUserId: "telegram_user_123",
       telegramUserLookupKey: "telegram_lookup_123",
     },

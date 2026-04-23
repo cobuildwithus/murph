@@ -236,6 +236,31 @@ describe("settings telegram sync route", () => {
     });
   });
 
+  it("ignores client-supplied Telegram thread targets and binds only the authenticated Telegram user id", async () => {
+    const response = await settingsTelegramSyncRoute.POST(
+      new Request("https://join.example.test/api/settings/telegram/sync", {
+        body: JSON.stringify({
+          expectedTelegramUserId: "456",
+          telegramThreadId: "-1009999999999",
+        }),
+        headers: {
+          "content-type": "application/json",
+          origin: SAME_ORIGIN_HEADERS.origin,
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.upsertHostedMemberTelegramRoutingBindingTx).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: mocks.prismaClient,
+      telegramThreadId: undefined,
+      telegramUserId: "456",
+    });
+    expect(response.status).toBe(200);
+  });
+
   it("requires Privy-authenticated hosted member context before syncing Telegram", async () => {
     mocks.requirePrivyMemberAuth.mockRejectedValue(hostedOnboardingError({
       code: "AUTH_REQUIRED",

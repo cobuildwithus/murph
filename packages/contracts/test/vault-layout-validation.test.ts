@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+
 import { describe, expect, it } from "vitest";
 
 import { CURRENT_VAULT_FORMAT_VERSION, ID_PREFIXES } from "../src/constants.ts";
@@ -13,9 +15,15 @@ import {
   AUTOMATIONS_DIRECTORY,
   BANK_DIRECTORY,
   CORE_DOCUMENT_RELATIVE_PATH,
+  DERIVED_DIRECTORY,
+  DERIVED_KNOWLEDGE_DIRECTORY,
+  DERIVED_KNOWLEDGE_INDEX_FILE,
+  DERIVED_KNOWLEDGE_LOG_FILE,
+  DERIVED_KNOWLEDGE_PAGES_DIRECTORY,
   EVENT_LEDGER_DIRECTORY,
   EXPORT_PACKS_DIRECTORY,
   EXPERIMENTS_DIRECTORY,
+  HEALTH_LIBRARY_DIRECTORY,
   INBOX_CAPTURE_LEDGER_DIRECTORY,
   JOURNAL_DIRECTORY,
   RAW_ASSESSMENTS_DIRECTORY,
@@ -58,6 +66,31 @@ const VALID_METADATA = Object.freeze({
   title: "Deterministic test vault",
   timezone: "Australia/Sydney",
 });
+
+const VAULT_LAYOUT_DOC_URL = new URL("../../../docs/contracts/01-vault-layout.md", import.meta.url);
+
+function extractCodeBlockLinesAfterHeading(document: string, heading: string): string[] {
+  const escapedHeading = heading.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+  const match = document.match(new RegExp(`${escapedHeading}\\n\\n\`\`\`text\\n([\\s\\S]*?)\\n\`\`\``, "u"));
+  if (!match?.[1]) {
+    throw new Error(`Expected code block after heading "${heading}".`);
+  }
+
+  return match[1]
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function extractSectionCodeSpans(document: string, heading: string): string[] {
+  const escapedHeading = heading.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+  const match = document.match(new RegExp(`${escapedHeading}\\n\\n([\\s\\S]*?)(?:\\n## |$)`, "u"));
+  if (!match?.[1]) {
+    throw new Error(`Expected section "${heading}".`);
+  }
+
+  return [...match[1].matchAll(/`([^`]+)`/gu)].map(([, value]) => value);
+}
 
 function familyTarget(family: VaultFamilyDescriptor): string {
   return family.storageKind === "singleton-file" ? family.relativePath : family.directory;
@@ -309,6 +342,7 @@ describe("vault layout exports", () => {
       memoryDocument: "bank/memory.md",
       preferencesDocument: preferencesDocumentRelativePath,
       bankDirectory: BANK_DIRECTORY,
+      derivedDirectory: DERIVED_DIRECTORY,
       journalDirectory: JOURNAL_DIRECTORY,
       automationsDirectory: AUTOMATIONS_DIRECTORY,
       scheduledLogsDirectory: SCHEDULED_LOGS_DIRECTORY,
@@ -319,6 +353,7 @@ describe("vault layout exports", () => {
       foodsDirectory: "bank/foods",
       geneticsDirectory: "bank/genetics",
       goalsDirectory: "bank/goals",
+      healthLibraryDirectory: HEALTH_LIBRARY_DIRECTORY,
       providersDirectory: "bank/providers",
       recipesDirectory: "bank/recipes",
       workoutFormatsDirectory: "bank/workout-formats",
@@ -339,6 +374,10 @@ describe("vault layout exports", () => {
       rawSamplesDirectory: RAW_SAMPLES_DIRECTORY,
       rawWorkoutsDirectory: RAW_WORKOUTS_DIRECTORY,
       auditDirectory: AUDIT_DIRECTORY,
+      derivedKnowledgeDirectory: DERIVED_KNOWLEDGE_DIRECTORY,
+      derivedKnowledgeIndex: DERIVED_KNOWLEDGE_INDEX_FILE,
+      derivedKnowledgeLog: DERIVED_KNOWLEDGE_LOG_FILE,
+      derivedKnowledgePagesDirectory: DERIVED_KNOWLEDGE_PAGES_DIRECTORY,
       exportsDirectory: "exports",
       exportPacksDirectory: EXPORT_PACKS_DIRECTORY,
     });
@@ -350,5 +389,85 @@ describe("vault layout exports", () => {
       audit: "audit/YYYY/YYYY-MM.jsonl",
       inboxCaptures: "ledger/inbox-captures/YYYY/YYYY-MM.jsonl",
     });
+  });
+
+  it("keeps descriptive query-owned layout entries out of required scaffold directories", () => {
+    expect(REQUIRED_VAULT_DIRECTORIES).not.toContain(HEALTH_LIBRARY_DIRECTORY);
+    expect(REQUIRED_VAULT_DIRECTORIES).not.toContain(DERIVED_DIRECTORY);
+    expect(REQUIRED_VAULT_DIRECTORIES).not.toContain(DERIVED_KNOWLEDGE_DIRECTORY);
+    expect(REQUIRED_VAULT_DIRECTORIES).not.toContain(DERIVED_KNOWLEDGE_PAGES_DIRECTORY);
+    expect(VAULT_LAYOUT.healthLibraryDirectory).toBe(HEALTH_LIBRARY_DIRECTORY);
+    expect(VAULT_LAYOUT.derivedKnowledgeDirectory).toBe(DERIVED_KNOWLEDGE_DIRECTORY);
+    expect(VAULT_LAYOUT.derivedKnowledgePagesDirectory).toBe(DERIVED_KNOWLEDGE_PAGES_DIRECTORY);
+  });
+
+  it("keeps the frozen vault-layout doc aligned with the exported registry", async () => {
+    const document = await readFile(VAULT_LAYOUT_DOC_URL, "utf8");
+
+    expect(extractCodeBlockLinesAfterHeading(document, "## Baseline Root")).toEqual([
+      "vault/",
+      VAULT_METADATA_FILE,
+      CORE_DOCUMENT_RELATIVE_PATH,
+      "journal/YYYY/YYYY-MM-DD.md",
+      VAULT_LAYOUT.memoryDocument,
+      VAULT_LAYOUT.preferencesDocument,
+      `${VAULT_LAYOUT.automationsDirectory}/<slug>.md`,
+      `${VAULT_LAYOUT.scheduledLogsDirectory}/<slug>.md`,
+      `${VAULT_LAYOUT.experimentsDirectory}/<slug>.md`,
+      `${VAULT_LAYOUT.goalsDirectory}/<slug>.md`,
+      `${VAULT_LAYOUT.conditionsDirectory}/<slug>.md`,
+      `${VAULT_LAYOUT.allergiesDirectory}/<slug>.md`,
+      `${VAULT_LAYOUT.protocolsDirectory}/<group>/<slug>.md`,
+      `${VAULT_LAYOUT.familyDirectory}/<slug>.md`,
+      `${VAULT_LAYOUT.geneticsDirectory}/<slug>.md`,
+      `${VAULT_LAYOUT.foodsDirectory}/<slug>.md`,
+      `${VAULT_LAYOUT.recipesDirectory}/<slug>.md`,
+      `${VAULT_LAYOUT.providersDirectory}/<slug>.md`,
+      `${VAULT_LAYOUT.workoutFormatsDirectory}/<slug>.md`,
+      `${VAULT_LAYOUT.healthLibraryDirectory}/<slug>.md`,
+      `${VAULT_LAYOUT.rawDocumentsDirectory}/YYYY/MM/<documentId>/<filename>`,
+      `${VAULT_LAYOUT.rawDocumentsDirectory}/YYYY/MM/<documentId>/manifest.json`,
+      `${VAULT_LAYOUT.rawAssessmentsDirectory}/YYYY/MM/<assessmentId>/source.json`,
+      `${VAULT_LAYOUT.rawAssessmentsDirectory}/YYYY/MM/<assessmentId>/manifest.json`,
+      `${VAULT_LAYOUT.rawCapturesDirectory}/YYYY/MM/<eventId>/<filename>`,
+      `${VAULT_LAYOUT.rawCapturesDirectory}/YYYY/MM/<eventId>/manifest.json`,
+      `${VAULT_LAYOUT.rawInboxDirectory}/<source>/<account>/YYYY/MM/<captureId>/envelope.json`,
+      `${VAULT_LAYOUT.rawInboxDirectory}/<source>/<account>/YYYY/MM/<captureId>/attachments/<filename>`,
+      `${VAULT_LAYOUT.rawMeasurementsDirectory}/YYYY/MM/<eventId>/<filename>`,
+      `${VAULT_LAYOUT.rawMeasurementsDirectory}/YYYY/MM/<eventId>/manifest.json`,
+      `${VAULT_LAYOUT.rawMealsDirectory}/YYYY/MM/<mealId>/<slot>-<filename>`,
+      `${VAULT_LAYOUT.rawMealsDirectory}/YYYY/MM/<mealId>/manifest.json`,
+      `${VAULT_LAYOUT.rawSamplesDirectory}/<stream>/YYYY/MM/<transformId>/<filename>.csv`,
+      `${VAULT_LAYOUT.rawSamplesDirectory}/<stream>/YYYY/MM/<transformId>/manifest.json`,
+      `${VAULT_LAYOUT.rawWorkoutsDirectory}/YYYY/MM/<eventId>/<filename>`,
+      `${VAULT_LAYOUT.rawWorkoutsDirectory}/YYYY/MM/<eventId>/manifest.json`,
+      `${VAULT_LAYOUT.rawIntegrationsDirectory}/<provider>/YYYY/MM/<transformId>/<filename>`,
+      `${VAULT_LAYOUT.rawIntegrationsDirectory}/<provider>/YYYY/MM/<transformId>/manifest.json`,
+      `${VAULT_LAYOUT.inboxCaptureLedgerDirectory}/YYYY/YYYY-MM.jsonl`,
+      `${VAULT_LAYOUT.assessmentLedgerDirectory}/YYYY/YYYY-MM.jsonl`,
+      `${VAULT_LAYOUT.eventLedgerDirectory}/YYYY/YYYY-MM.jsonl`,
+      `${VAULT_LAYOUT.sampleLedgerDirectory}/<stream>/YYYY/YYYY-MM.jsonl`,
+      `${VAULT_LAYOUT.auditDirectory}/YYYY/YYYY-MM.jsonl`,
+      VAULT_LAYOUT.derivedKnowledgeIndex,
+      VAULT_LAYOUT.derivedKnowledgeLog,
+      `${VAULT_LAYOUT.derivedKnowledgePagesDirectory}/<slug>.md`,
+      `${VAULT_LAYOUT.exportPacksDirectory}/<packId>/`,
+    ]);
+
+    expect(extractSectionCodeSpans(document, "## Path Rules")).toEqual(
+      expect.arrayContaining([
+        "bank/memory.md",
+        "bank/preferences.json",
+        "bank/automations/*.md",
+        "bank/scheduled-logs/*.md",
+        "bank/recipes",
+        "bank/providers",
+        "bank/library/**/*.md",
+        "bank/protocols/**/*.md",
+        "derived/knowledge/index.md",
+        "derived/knowledge/log.md",
+        "derived/knowledge/pages/*.md",
+      ]),
+    );
   });
 });

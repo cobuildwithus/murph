@@ -48,6 +48,7 @@ export interface HostedMemberRoutingStateSnapshot {
   memberId: string;
   pendingLinqChatId: string | null;
   pendingLinqRecipientPhone: string | null;
+  telegramThreadId: string | null;
   telegramUserId: string | null;
   telegramUserLookupKey: string | null;
 }
@@ -79,6 +80,7 @@ export function projectHostedMemberRoutingState(
     memberId: routing.memberId,
     pendingLinqChatId: privateState.pendingLinqChatId,
     pendingLinqRecipientPhone: privateState.pendingLinqRecipientPhone,
+    telegramThreadId: privateState.telegramThreadId,
     telegramUserId: privateState.telegramUserId,
     telegramUserLookupKey: routing.telegramUserLookupKey ?? null,
   };

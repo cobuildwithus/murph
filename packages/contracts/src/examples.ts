@@ -1,4 +1,8 @@
 import { CURRENT_VAULT_FORMAT_VERSION } from "./constants.ts";
+import type { AutomationFrontmatter } from "./automation.ts";
+import type { MemoryDocumentFrontmatter } from "./memory.ts";
+import type { PreferencesDocument } from "./preferences.ts";
+import type { ScheduledLogFrontmatter } from "./scheduled-log.ts";
 
 import type {
   AllergyFrontmatter,
@@ -23,12 +27,15 @@ import type {
 } from "./zod.ts";
 
 type FrontmatterExamples = {
+  automation: AutomationFrontmatter;
   core: CoreFrontmatter;
-  journalDay: JournalDayFrontmatter;
   experiment: ExperimentFrontmatter;
   food: FoodFrontmatter;
+  journalDay: JournalDayFrontmatter;
+  memory: MemoryDocumentFrontmatter;
   provider: ProviderFrontmatter;
   recipe: RecipeFrontmatter;
+  scheduledLog: ScheduledLogFrontmatter;
   workoutFormat: WorkoutFormatFrontmatter;
 };
 
@@ -47,6 +54,18 @@ export const exampleVaultMetadata: Readonly<VaultMetadata> = Object.freeze<Vault
   createdAt: "2026-03-12T14:00:00Z",
   title: "Murph Vault",
   timezone: "America/New_York",
+});
+
+export const examplePreferencesDocument: Readonly<PreferencesDocument> = Object.freeze<PreferencesDocument>({
+  schemaVersion: 1,
+  updatedAt: "2026-03-12T20:10:00Z",
+  workoutUnitPreferences: {
+    weight: "kg",
+    bodyMeasurement: "cm",
+  },
+  wearablePreferences: {
+    desiredProviders: ["oura", "whoop"],
+  },
 });
 
 export const exampleInboxCaptureRecords: readonly Readonly<InboxCaptureRecord>[] = Object.freeze([
@@ -677,6 +696,30 @@ export const exampleAssessmentResponses: readonly Readonly<AssessmentResponseRec
 ]);
 
 export const exampleFrontmatterObjects: Readonly<FrontmatterExamples> = Object.freeze({
+  automation: {
+    schemaVersion: "murph.frontmatter.automation.v1",
+    docType: "automation",
+    automationId: "automation_01JNV44KZP7X0E4H59N7B6AQ2F",
+    slug: "daily-check-in",
+    title: "Daily check-in",
+    status: "active",
+    summary: "Ask for a short end-of-day status update.",
+    schedule: {
+      kind: "dailyLocal",
+      localTime: "19:30",
+    },
+    route: {
+      channel: "telegram",
+      deliveryTarget: "chat-123",
+      identityId: "identity-telegram-bot",
+      participantId: "participant-user",
+      threadId: "thread-daily-check-in",
+    },
+    continuityPolicy: "preserve",
+    tags: ["assistant", "check-in"],
+    createdAt: "2026-03-12T10:00:00Z",
+    updatedAt: "2026-03-12T20:05:00Z",
+  },
   core: {
     schemaVersion: "murph.frontmatter.core.v1",
     docType: "core",
@@ -692,6 +735,12 @@ export const exampleFrontmatterObjects: Readonly<FrontmatterExamples> = Object.f
     dayKey: "2026-03-12",
     eventIds: ["evt_01JNV42F34M22V2PE9Q4KQ7H1X", "evt_01JNV43AK9SK58T6GX3DWRZH9Q"],
     sampleStreams: ["heart_rate", "steps", "glucose"],
+  },
+  memory: {
+    schemaVersion: "murph.frontmatter.memory.v1",
+    docType: "memory",
+    title: "Memory",
+    updatedAt: "2026-03-12T20:06:00Z",
   },
   experiment: {
     schemaVersion: "murph.frontmatter.experiment.v1",
@@ -850,6 +899,35 @@ export const exampleFrontmatterObjects: Readonly<FrontmatterExamples> = Object.f
     relatedGoalIds: ["goal_01JNV43AK9SK58T6GX3DWRZH9Q"],
     relatedConditionIds: ["cond_01JNV43NDX1N7BX08NQ19MJ4DK"],
   },
+  scheduledLog: {
+    schemaVersion: "murph.frontmatter.scheduled-log.v1",
+    docType: "scheduled_log",
+    scheduledLogId: "slog_01JNV44P4R5SWC90K2AHXQJQYT",
+    slug: "morning-weight",
+    title: "Morning weight",
+    status: "active",
+    schedule: {
+      kind: "dailyLocal",
+      localTime: "07:15",
+    },
+    action: {
+      kind: "measurement.add",
+      title: "Morning weight",
+      note: "Use the hallway scale before breakfast.",
+      measurements: [
+        {
+          metric: "weight",
+          value: 78.4,
+          unit: "kg",
+        },
+      ],
+      tags: ["morning", "weight"],
+    },
+    summary: "Capture the first morning body weight measurement.",
+    tags: ["body-metrics"],
+    createdAt: "2026-03-12T06:45:00Z",
+    updatedAt: "2026-03-12T20:07:00Z",
+  },
   workoutFormat: {
     schemaVersion: "murph.frontmatter.workout-format.v1",
     docType: "workout_format",
@@ -1003,6 +1081,33 @@ export const exampleHealthFrontmatterObjects: Readonly<HealthFrontmatterExamples
 });
 
 export const exampleFrontmatterMarkdown: Readonly<Record<keyof FrontmatterExamples, string>> = Object.freeze({
+  automation: `---
+schemaVersion: murph.frontmatter.automation.v1
+docType: automation
+automationId: automation_01JNV44KZP7X0E4H59N7B6AQ2F
+slug: daily-check-in
+title: Daily check-in
+status: active
+summary: Ask for a short end-of-day status update.
+schedule:
+  kind: dailyLocal
+  localTime: 19:30
+route:
+  channel: telegram
+  deliveryTarget: chat-123
+  identityId: identity-telegram-bot
+  participantId: participant-user
+  threadId: thread-daily-check-in
+continuityPolicy: preserve
+tags:
+  - assistant
+  - check-in
+createdAt: 2026-03-12T10:00:00Z
+updatedAt: 2026-03-12T20:05:00Z
+---
+
+# Daily Check-In
+`,
   core: `---
 schemaVersion: murph.frontmatter.core.v1
 docType: core
@@ -1030,6 +1135,15 @@ sampleStreams:
 ---
 
 # 2026-03-12
+`,
+  memory: `---
+schemaVersion: murph.frontmatter.memory.v1
+docType: memory
+title: Memory
+updatedAt: 2026-03-12T20:06:00Z
+---
+
+# Memory
 `,
   experiment: `---
 schemaVersion: murph.frontmatter.experiment.v1
@@ -1204,6 +1318,37 @@ relatedConditionIds:
 ---
 
 # Sheet Pan Salmon Bowls
+`,
+  scheduledLog: `---
+schemaVersion: murph.frontmatter.scheduled-log.v1
+docType: scheduled_log
+scheduledLogId: slog_01JNV44P4R5SWC90K2AHXQJQYT
+slug: morning-weight
+title: Morning weight
+status: active
+schedule:
+  kind: dailyLocal
+  localTime: 07:15
+action:
+  kind: measurement.add
+  title: Morning weight
+  note: Use the hallway scale before breakfast.
+  measurements:
+    -
+      metric: weight
+      value: 78.4
+      unit: kg
+  tags:
+    - morning
+    - weight
+summary: Capture the first morning body weight measurement.
+tags:
+  - body-metrics
+createdAt: 2026-03-12T06:45:00Z
+updatedAt: 2026-03-12T20:07:00Z
+---
+
+# Morning Weight
 `,
   workoutFormat: `---
 schemaVersion: murph.frontmatter.workout-format.v1

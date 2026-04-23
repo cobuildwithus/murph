@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "updatedAt": {
+      "type": "string",
+      "minLength": 1
+    },
+    "workoutUnitPreferences": {
+      "default": {},
+      "type": "object",
+      "properties": {
+        "weight": {
+          "type": "string",
+          "enum": [
+            "lb",
+            "kg"
+          ]
+        },
+        "bodyMeasurement": {
+          "type": "string",
+          "enum": [
+            "cm",
+            "in"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "wearablePreferences": {
+      "type": "object",
+      "properties": {
+        "desiredProviders": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "garmin",
+              "oura",
+              "strava",
+              "whoop"
+            ]
+          }
+        }
+      },
+      "required": [
+        "desiredProviders"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "updatedAt",
+    "workoutUnitPreferences",
+    "wearablePreferences"
+  ],
+  "additionalProperties": false,
+  "$id": "@murphai/contracts/preferences-document.schema.json",
+  "title": "Murph Preferences Document"
+}

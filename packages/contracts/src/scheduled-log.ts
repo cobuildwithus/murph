@@ -2,6 +2,7 @@ import * as z from "zod";
 
 import { CONTRACT_SCHEMA_VERSION, FRONTMATTER_DOC_TYPES, ID_PREFIXES } from "./constants.ts";
 import { idPattern } from "./ids.ts";
+import { withContractMetadata } from "./schema-metadata.ts";
 import {
   mealNutritionSchema,
   measurementEntrySchema,
@@ -146,20 +147,26 @@ export const scheduledLogActionSchema = z.discriminatedUnion("kind", [
 });
 export type ScheduledLogAction = z.infer<typeof scheduledLogActionSchema>;
 
-export const scheduledLogFrontmatterSchema = z.object({
-  schemaVersion: z.literal(SCHEDULED_LOG_SCHEMA_VERSION),
-  docType: z.literal(SCHEDULED_LOG_DOC_TYPE),
-  scheduledLogId: scheduledLogIdSchema,
-  slug: slugSchema,
-  title: titleSchema,
-  status: scheduledLogStatusSchema,
-  schedule: scheduleIntentSchema,
-  action: scheduledLogActionSchema,
-  summary: z.string().min(1).max(500).optional(),
-  tags: tagListSchema.optional(),
-  createdAt: z.string().min(1),
-  updatedAt: z.string().min(1),
-}).strict();
+export const scheduledLogFrontmatterSchema = withContractMetadata(
+  z
+    .object({
+      schemaVersion: z.literal(SCHEDULED_LOG_SCHEMA_VERSION),
+      docType: z.literal(SCHEDULED_LOG_DOC_TYPE),
+      scheduledLogId: scheduledLogIdSchema,
+      slug: slugSchema,
+      title: titleSchema,
+      status: scheduledLogStatusSchema,
+      schedule: scheduleIntentSchema,
+      action: scheduledLogActionSchema,
+      summary: z.string().min(1).max(500).optional(),
+      tags: tagListSchema.optional(),
+      createdAt: z.string().min(1),
+      updatedAt: z.string().min(1),
+    })
+    .strict(),
+  "@murphai/contracts/frontmatter-scheduled-log.schema.json",
+  "Murph Scheduled Log Frontmatter",
+);
 
 export const scheduledLogMarkdownDocumentSchema = z.object({
   frontmatter: scheduledLogFrontmatterSchema,
