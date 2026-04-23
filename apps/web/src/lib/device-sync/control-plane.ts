@@ -1,5 +1,4 @@
 import type {
-  PublicDeviceSyncAccount,
   PublicProviderDescriptor,
 } from "@murphai/device-syncd/public-ingress";
 
@@ -17,10 +16,10 @@ import type { HostedLocalHeartbeatPatch } from "./local-heartbeat";
 import {
   type HostedAgentSessionRecord,
 } from "./prisma-store";
-import type { HostedAgentSessionBearer } from "../hosted-agent-sessions";
 import {
   HostedDeviceSyncAgentSessionService,
-  type HostedTokenExport,
+  type HostedTokenBundleExportResponse,
+  type HostedTokenBundleRefreshResponse,
 } from "./agent-session-service";
 import { HostedDeviceSyncPublicIngressService } from "./public-ingress-service";
 import {
@@ -125,11 +124,10 @@ export class HostedDeviceSyncControlPlane {
     return this.agentSessions.listSignals(agentUserId, url);
   }
 
-  async exportTokenBundle(session: HostedAgentSessionRecord, connectionId: string): Promise<{
-    connection: PublicDeviceSyncAccount;
-    tokenBundle: HostedTokenExport;
-    agentSession: HostedAgentSessionBearer;
-  }> {
+  async exportTokenBundle(
+    session: HostedAgentSessionRecord,
+    connectionId: string,
+  ): Promise<HostedTokenBundleExportResponse> {
     return this.agentSessions.exportTokenBundle(session, connectionId);
   }
 
@@ -137,13 +135,7 @@ export class HostedDeviceSyncControlPlane {
     session: HostedAgentSessionRecord,
     connectionId: string,
     options: { expectedTokenVersion?: number | null; force?: boolean } = {},
-  ): Promise<{
-    connection: PublicDeviceSyncAccount;
-    tokenBundle: HostedTokenExport;
-    refreshed: boolean;
-    tokenVersionChanged: boolean;
-    agentSession: HostedAgentSessionBearer;
-  }> {
+  ): Promise<HostedTokenBundleRefreshResponse> {
     return this.agentSessions.refreshTokenBundle(session, connectionId, options);
   }
 

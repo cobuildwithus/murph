@@ -982,6 +982,14 @@ export function parseHostedExecutionVaultSyncImportReference(
       record.sessionId,
       "Hosted execution vault sync import reference sessionId",
     ),
+    ...(record.sourceSchemaVersion === undefined
+      ? {}
+      : {
+          sourceSchemaVersion: readOptionalNullableString(
+            record.sourceSchemaVersion,
+            "Hosted execution vault sync import reference sourceSchemaVersion",
+          ),
+        }),
     ...(record.sourceVaultId === undefined
       ? {}
       : {
@@ -1029,6 +1037,14 @@ export function parseHostedExecutionRunnerVaultSyncImport(
       record.sessionId,
       "Hosted execution runner vault sync import sessionId",
     ),
+    ...(record.sourceSchemaVersion === undefined
+      ? {}
+      : {
+          sourceSchemaVersion: readOptionalNullableString(
+            record.sourceSchemaVersion,
+            "Hosted execution runner vault sync import sourceSchemaVersion",
+          ),
+        }),
   };
 }
 

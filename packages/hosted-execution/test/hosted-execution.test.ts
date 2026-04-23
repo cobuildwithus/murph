@@ -266,6 +266,7 @@ describe("hosted execution coverage gaps", () => {
       vaultSync: {
         localManifestHash: "sha256:local",
         sessionId: "vsi_contract",
+        sourceSchemaVersion: "murph.vault.v1",
         sourceVaultId: "vault_local",
         sourceVaultTitle: "Local Vault",
       },
@@ -296,6 +297,7 @@ describe("hosted execution coverage gaps", () => {
     const runnerPayload = {
       bundleBase64: "AAAA",
       sessionId: "vsi_contract",
+      sourceSchemaVersion: "murph.vault.v1",
     };
     expect(parseHostedExecutionRunnerVaultSyncImport(runnerPayload)).toEqual(runnerPayload);
     expect(parseHostedRuntimeDrainEvent({

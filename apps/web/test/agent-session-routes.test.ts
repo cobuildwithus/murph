@@ -187,16 +187,19 @@ describe("hosted device-sync agent token routes", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.exportTokenBundle).toHaveBeenCalledWith(session, "dsc_123");
-    await expect(response.json()).resolves.toMatchObject({
+    const body = await response.json();
+    expect(body).toMatchObject({
       connection: {
         externalAccountId: "acct_123",
         id: "dsc_123",
       },
-      agentSession: {
-        id: "dsa_active",
-        bearerToken: "hbds_agent_active",
+      tokenBundle: {
+        accessToken: "access",
+        tokenVersion: 2,
       },
     });
+    expect(body).not.toHaveProperty("agentSession");
+    expect(JSON.stringify(body)).not.toContain("hbds_agent_active");
   });
 
   it("passes the authenticated session and refresh options into refresh-token-bundle", async () => {
@@ -221,17 +224,17 @@ describe("hosted device-sync agent token routes", () => {
       expectedTokenVersion: 2,
       force: true,
     });
-    await expect(response.json()).resolves.toMatchObject({
+    const body = await response.json();
+    expect(body).toMatchObject({
       connection: {
         externalAccountId: "acct_123",
         id: "dsc_123",
       },
       refreshed: true,
-      agentSession: {
-        id: "dsa_active",
-        bearerToken: "hbds_agent_active",
-      },
+      tokenVersionChanged: false,
     });
+    expect(body).not.toHaveProperty("agentSession");
+    expect(JSON.stringify(body)).not.toContain("hbds_agent_active");
   });
 
   it("passes the authenticated session into revoke so the handler can invalidate it", async () => {

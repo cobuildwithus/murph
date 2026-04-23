@@ -180,6 +180,7 @@ export interface HostedExecutionVaultShareAcceptedEvent extends HostedExecutionB
 export interface HostedExecutionVaultSyncImportReference {
   localManifestHash: string;
   sessionId: string;
+  sourceSchemaVersion?: string | null;
   sourceVaultId?: string | null;
   sourceVaultTitle?: string | null;
 }
@@ -198,6 +199,7 @@ export interface HostedExecutionRunnerSharePack {
 export interface HostedExecutionRunnerVaultSyncImport {
   bundleBase64: string;
   sessionId: string;
+  sourceSchemaVersion?: string | null;
 }
 
 export interface HostedRuntimeDrainEvent {

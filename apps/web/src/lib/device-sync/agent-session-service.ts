@@ -6,7 +6,6 @@ import type {
 } from "@murphai/device-syncd/public-ingress";
 import {
   HostedAgentSessionService,
-  type HostedAgentSessionBearer,
   type HostedAgentUser,
 } from "../hosted-agent-sessions";
 import {
@@ -29,6 +28,16 @@ import { refreshProviderTokensWithStatusHandling } from "./agent-session-token-r
 import { parseInteger, toIsoTimestamp } from "./shared";
 
 export type { HostedTokenExport } from "./agent-session-token-bundle";
+
+export interface HostedTokenBundleExportResponse {
+  connection: PublicDeviceSyncAccount;
+  tokenBundle: HostedTokenExport;
+}
+
+export interface HostedTokenBundleRefreshResponse extends HostedTokenBundleExportResponse {
+  refreshed: boolean;
+  tokenVersionChanged: boolean;
+}
 
 const HOSTED_DEVICE_SYNC_AGENT_PAIR_PATH = "/api/device-sync/agents/pair";
 const HOSTED_DEVICE_SYNC_AGENT_AUTH_MESSAGES = {
@@ -99,11 +108,10 @@ export class HostedDeviceSyncAgentSessionService {
     };
   }
 
-  async exportTokenBundle(session: HostedAgentSessionRecord, connectionId: string): Promise<{
-    connection: PublicDeviceSyncAccount;
-    tokenBundle: HostedTokenExport;
-    agentSession: HostedAgentSessionBearer;
-  }> {
+  async exportTokenBundle(
+    session: HostedAgentSessionRecord,
+    connectionId: string,
+  ): Promise<HostedTokenBundleExportResponse> {
     const now = toIsoTimestamp(new Date());
     const connection = await this.requireOwnedConnection(session.userId, connectionId);
     const storedAccount = await this.store.getStoredConnectionAccountForUser(session.userId, connectionId);
@@ -127,10 +135,11 @@ export class HostedDeviceSyncAgentSessionService {
       createdAt: now,
     });
 
+    await this.assertCurrentAgentSessionStillActive();
+
     return {
       connection,
       tokenBundle,
-      agentSession: await this.readCurrentAgentSessionBearer(),
     };
   }
 
@@ -138,13 +147,7 @@ export class HostedDeviceSyncAgentSessionService {
     session: HostedAgentSessionRecord,
     connectionId: string,
     options: { expectedTokenVersion?: number | null; force?: boolean } = {},
-  ): Promise<{
-    connection: PublicDeviceSyncAccount;
-    tokenBundle: HostedTokenExport;
-    refreshed: boolean;
-    tokenVersionChanged: boolean;
-    agentSession: HostedAgentSessionBearer;
-  }> {
+  ): Promise<HostedTokenBundleRefreshResponse> {
     const now = toIsoTimestamp(new Date());
     const forceRefresh = options.force === true;
 
@@ -331,12 +334,13 @@ export class HostedDeviceSyncAgentSessionService {
       });
     }
 
+    await this.assertCurrentAgentSessionStillActive();
+
     return {
       connection: result.connection,
       tokenBundle: result.tokenBundle,
       refreshed: result.refreshed,
       tokenVersionChanged: result.tokenVersionChanged,
-      agentSession: await this.readCurrentAgentSessionBearer(),
     };
   }
 
@@ -420,25 +424,7 @@ export class HostedDeviceSyncAgentSessionService {
     return connection;
   }
 
-  private async readCurrentAgentSessionBearer(): Promise<HostedAgentSessionBearer> {
-    const session = await this.agentSessions.requireAgentSession();
-    const { scheme, token } = this.agentSessions.readBearerAuthorization();
-
-    if (scheme !== "bearer" || !token) {
-      throw deviceSyncError({
-        code: "AGENT_AUTH_INVALID",
-        message: "Hosted device-sync agent bearer token is invalid or revoked.",
-        retryable: false,
-        httpStatus: 401,
-      });
-    }
-
-    return {
-      id: session.id,
-      label: session.label,
-      createdAt: session.createdAt,
-      expiresAt: session.expiresAt,
-      bearerToken: token,
-    };
+  private async assertCurrentAgentSessionStillActive(): Promise<void> {
+    await this.agentSessions.requireAgentSession();
   }
 }

@@ -35,6 +35,7 @@ describe("hosted vault sync payload route", () => {
     mocks.projectHostedVaultSyncPayload.mockReturnValue({
       bundleBase64: "AQID",
       sessionId: "vsi_123",
+      sourceSchemaVersion: "murph.vault.v1",
     });
   });
 
@@ -67,6 +68,7 @@ describe("hosted vault sync payload route", () => {
     await expect(response.json()).resolves.toEqual({
       bundleBase64: "AQID",
       sessionId: "vsi_123",
+      sourceSchemaVersion: "murph.vault.v1",
     });
     expect(mocks.projectHostedVaultSyncPayload).toHaveBeenCalledWith({
       memberId: "member_123",
