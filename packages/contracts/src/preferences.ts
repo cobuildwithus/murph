@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { withContractMetadata } from "./schema-metadata.ts";
+
 export const preferencesDocumentRelativePath = "bank/preferences.json";
 export const preferencesDocumentSchemaVersion = 1;
 
@@ -22,14 +24,18 @@ export const wearablePreferencesSchema = z
   })
   .strict();
 
-export const preferencesDocumentSchema = z
-  .object({
-    schemaVersion: z.literal(preferencesDocumentSchemaVersion),
-    updatedAt: z.string().min(1),
-    workoutUnitPreferences: workoutUnitPreferencesSchema.default({}),
-    wearablePreferences: wearablePreferencesSchema,
-  })
-  .strict();
+export const preferencesDocumentSchema = withContractMetadata(
+  z
+    .object({
+      schemaVersion: z.literal(preferencesDocumentSchemaVersion),
+      updatedAt: z.string().min(1),
+      workoutUnitPreferences: workoutUnitPreferencesSchema.default({}),
+      wearablePreferences: wearablePreferencesSchema,
+    })
+    .strict(),
+  "@murphai/contracts/preferences-document.schema.json",
+  "Murph Preferences Document",
+);
 
 /** @deprecated Use preferencesDocumentSchema. */
 export const validPreferencesDocumentSchema = preferencesDocumentSchema;

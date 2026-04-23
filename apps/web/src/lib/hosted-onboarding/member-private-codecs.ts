@@ -3,6 +3,10 @@ import type {
   HostedMemberIdentity,
   HostedMemberRouting,
 } from "@prisma/client";
+import {
+  parseTelegramThreadTarget,
+  serializeTelegramThreadTarget,
+} from "@murphai/messaging-ingress/telegram-webhook";
 
 import {
   decryptHostedWebNullableString,
@@ -22,6 +26,8 @@ const HOSTED_MEMBER_ROUTING_PENDING_LINQ_CHAT_FIELD =
 const HOSTED_MEMBER_ROUTING_PENDING_LINQ_RECIPIENT_PHONE_FIELD =
   "hosted-member-routing.pending-linq-recipient-phone";
 const HOSTED_MEMBER_ROUTING_TELEGRAM_USER_FIELD = "hosted-member-routing.telegram-user-id";
+const HOSTED_MEMBER_ROUTING_TELEGRAM_PRIVATE_STATE_SCHEMA =
+  "murph.hosted-member-routing.telegram.v1";
 const HOSTED_MEMBER_BILLING_STRIPE_CUSTOMER_FIELD = "hosted-member-billing-ref.stripe-customer-id";
 const HOSTED_MEMBER_BILLING_STRIPE_SUBSCRIPTION_FIELD =
   "hosted-member-billing-ref.stripe-subscription-id";
@@ -41,6 +47,7 @@ export interface HostedMemberRoutingPrivateState {
   linqRecipientPhone: string | null;
   pendingLinqChatId: string | null;
   pendingLinqRecipientPhone: string | null;
+  telegramThreadId: string | null;
   telegramUserId: string | null;
 }
 
@@ -132,6 +139,7 @@ export function buildHostedMemberRoutingPrivateColumns(input: {
   memberId: string;
   pendingLinqChatId: string | null;
   pendingLinqRecipientPhone: string | null;
+  telegramThreadId: string | null;
   telegramUserId: string | null;
 }) {
   return {
@@ -158,7 +166,10 @@ export function buildHostedMemberRoutingPrivateColumns(input: {
     telegramUserIdEncrypted: encryptHostedWebNullableString({
       field: HOSTED_MEMBER_ROUTING_TELEGRAM_USER_FIELD,
       memberId: input.memberId,
-      value: input.telegramUserId,
+      value: buildHostedMemberRoutingTelegramPrivateValue({
+        telegramThreadId: input.telegramThreadId,
+        telegramUserId: input.telegramUserId,
+      }),
     }),
   } as const;
 }
@@ -174,6 +185,11 @@ export function readHostedMemberRoutingPrivateState(
     | "telegramUserIdEncrypted"
   >,
 ): HostedMemberRoutingPrivateState {
+  const telegramState = readHostedMemberRoutingTelegramPrivateState({
+    memberId: routing.memberId,
+    telegramUserIdEncrypted: routing.telegramUserIdEncrypted,
+  });
+
   return {
     linqChatId: decryptHostedWebNullableString({
       field: HOSTED_MEMBER_ROUTING_HOME_LINQ_CHAT_FIELD,
@@ -195,12 +211,147 @@ export function readHostedMemberRoutingPrivateState(
       memberId: routing.memberId,
       value: routing.pendingLinqRecipientPhoneEncrypted,
     }),
-    telegramUserId: decryptHostedWebNullableString({
-      field: HOSTED_MEMBER_ROUTING_TELEGRAM_USER_FIELD,
-      memberId: routing.memberId,
-      value: routing.telegramUserIdEncrypted,
-    }),
+    telegramThreadId: telegramState.telegramThreadId,
+    telegramUserId: telegramState.telegramUserId,
   };
+}
+
+export function readHostedMemberRoutingTelegramPrivateState(
+  routing: Pick<HostedMemberRouting, "memberId" | "telegramUserIdEncrypted">,
+): Pick<HostedMemberRoutingPrivateState, "telegramThreadId" | "telegramUserId"> {
+  const decryptedValue = decryptHostedWebNullableString({
+    field: HOSTED_MEMBER_ROUTING_TELEGRAM_USER_FIELD,
+    memberId: routing.memberId,
+    value: routing.telegramUserIdEncrypted,
+  });
+
+  return parseHostedMemberRoutingTelegramPrivateValue(decryptedValue);
+}
+
+function buildHostedMemberRoutingTelegramPrivateValue(input: {
+  telegramThreadId: string | null;
+  telegramUserId: string | null;
+}): string | null {
+  const telegramUserId = normalizeNullableString(input.telegramUserId);
+  const rawTelegramThreadId = normalizeNullableString(input.telegramThreadId);
+  const telegramThreadId = rawTelegramThreadId === null
+    ? null
+    : normalizeHostedTelegramDirectThreadTarget(rawTelegramThreadId);
+
+  if (rawTelegramThreadId !== null && telegramThreadId === null) {
+    throw new TypeError("Hosted Telegram routing requires a valid Telegram thread target.");
+  }
+
+  if (telegramUserId === null && telegramThreadId === null) {
+    return null;
+  }
+
+  return JSON.stringify({
+    schema: HOSTED_MEMBER_ROUTING_TELEGRAM_PRIVATE_STATE_SCHEMA,
+    telegramThreadId: telegramThreadId ?? telegramUserId,
+    telegramUserId,
+  });
+}
+
+function parseHostedMemberRoutingTelegramPrivateValue(
+  value: string | null,
+): Pick<HostedMemberRoutingPrivateState, "telegramThreadId" | "telegramUserId"> {
+  const normalized = normalizeNullableString(value);
+
+  if (normalized === null) {
+    return {
+      telegramThreadId: null,
+      telegramUserId: null,
+    };
+  }
+
+  const envelope = parseHostedMemberRoutingTelegramPrivateEnvelope(normalized);
+
+  if (envelope.status === "supported") {
+    const telegramUserId = normalizeNullableString(envelope.telegramUserId);
+    const normalizedThreadId = normalizeHostedTelegramDirectThreadTarget(
+      envelope.telegramThreadId,
+    );
+
+    return {
+      telegramThreadId: normalizedThreadId ?? telegramUserId,
+      telegramUserId,
+    };
+  }
+
+  if (envelope.status === "unsupported") {
+    return {
+      telegramThreadId: null,
+      telegramUserId: null,
+    };
+  }
+
+  const legacyTelegramTarget = normalizeHostedTelegramDirectThreadTarget(normalized);
+
+  return {
+    telegramThreadId: legacyTelegramTarget,
+    telegramUserId: legacyTelegramTarget,
+  };
+}
+
+function parseHostedMemberRoutingTelegramPrivateEnvelope(
+  value: string,
+):
+  | { status: "legacy" }
+  | { status: "supported"; telegramThreadId: string | null; telegramUserId: string | null }
+  | { status: "unsupported" } {
+  try {
+    const parsed: unknown = JSON.parse(value);
+
+    if (!parsed || typeof parsed !== "object") {
+      return { status: "legacy" };
+    }
+
+    if (Array.isArray(parsed)) {
+      return { status: "unsupported" };
+    }
+
+    const record = parsed as Record<string, unknown>;
+
+    if (record.schema !== HOSTED_MEMBER_ROUTING_TELEGRAM_PRIVATE_STATE_SCHEMA) {
+      return { status: "unsupported" };
+    }
+
+    return {
+      status: "supported",
+      telegramThreadId:
+        typeof record.telegramThreadId === "string" ? record.telegramThreadId : null,
+      telegramUserId: typeof record.telegramUserId === "string" ? record.telegramUserId : null,
+    };
+  } catch {
+    return { status: "legacy" };
+  }
+}
+
+export function normalizeHostedTelegramDirectThreadTarget(
+  value: string | null,
+): string | null {
+  const normalized = normalizeNullableString(value);
+
+  if (normalized === null) {
+    return null;
+  }
+
+  const parsed = parseTelegramThreadTarget(normalized);
+
+  if (!parsed || parsed.messageThreadId != null) {
+    return null;
+  }
+
+  if (
+    !parsed.businessConnectionId &&
+    !parsed.directMessagesTopicId &&
+    parsed.chatId.startsWith("-")
+  ) {
+    return null;
+  }
+
+  return serializeTelegramThreadTarget(parsed);
 }
 
 export function buildHostedMemberBillingPrivateColumns(input: {

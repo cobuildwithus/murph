@@ -1,5 +1,6 @@
 import * as z from "zod";
 
+import { withContractMetadata } from "./schema-metadata.ts";
 import {
   ADVERSE_EFFECT_SEVERITIES,
   ALLERGY_CRITICALITIES,
@@ -179,17 +180,6 @@ export const GENETIC_VARIANT_LIMITS = Object.freeze({
   inheritance: 120,
   note: 4000,
 } as const);
-
-function withContractMetadata<TSchema extends z.ZodTypeAny>(
-  schema: TSchema,
-  id: string,
-  title: string,
-): TSchema {
-  return schema.meta({
-    $id: id,
-    title,
-  }) as TSchema;
-}
 
 function boundedString(minLength: number, maxLength: number): z.ZodString {
   return z.string().min(minLength).max(maxLength);

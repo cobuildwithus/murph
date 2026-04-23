@@ -437,6 +437,7 @@ function createRouting(input?: {
       memberId: "member_123",
       pendingLinqChatId: input?.pendingLinqChatId ?? null,
       pendingLinqRecipientPhone: input?.pendingLinqRecipientPhone ?? null,
+      telegramThreadId: null,
       telegramUserId: null,
     }),
   };

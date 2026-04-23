@@ -65,6 +65,7 @@ export async function upsertHostedMemberHomeLinqRecipientPhoneTx(input: {
     memberId: input.memberId,
     pendingLinqChatId: null,
     pendingLinqRecipientPhone: null,
+    telegramThreadId: null,
     telegramUserId: null,
   });
 
@@ -178,6 +179,7 @@ async function writeHostedMemberLinqBindingTx(input: {
     memberId: input.memberId,
     pendingLinqChatId: input.kind === "pending" ? input.linqChatId : null,
     pendingLinqRecipientPhone: input.kind === "pending" ? recipientPhone : null,
+    telegramThreadId: null,
     telegramUserId: null,
   });
 

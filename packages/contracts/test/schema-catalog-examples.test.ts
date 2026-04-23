@@ -8,10 +8,15 @@ import {
   exampleFrontmatterObjects,
   exampleHealthFrontmatterObjects,
   exampleInboxCaptureRecords,
+  examplePreferencesDocument,
   exampleSampleRecords,
   exampleVaultMetadata,
 } from "../src/examples.ts";
+import { automationFrontmatterSchema as automationFrontmatterContract } from "../src/automation.ts";
 import { parseFrontmatterDocument } from "../src/frontmatter.ts";
+import { memoryDocumentFrontmatterSchema as memoryDocumentFrontmatterContract } from "../src/memory.ts";
+import { preferencesDocumentSchema as preferencesDocumentContract } from "../src/preferences.ts";
+import { scheduledLogFrontmatterSchema as scheduledLogFrontmatterContract } from "../src/scheduled-log.ts";
 import {
   allergyFrontmatterSchema as allergyFrontmatterContract,
   assessmentResponseSchema as assessmentResponseContract,
@@ -42,6 +47,7 @@ import type { ContractSchema } from "../src/validate.ts";
 import { safeParseContract } from "../src/validate.ts";
 import {
   allergyFrontmatterSchema,
+  automationFrontmatterSchema,
   assessmentResponseSchema,
   auditRecordSchema,
   conditionFrontmatterSchema,
@@ -54,14 +60,18 @@ import {
   goalFrontmatterSchema,
   inboxCaptureRecordSchema,
   journalDayFrontmatterSchema,
+  memoryDocumentFrontmatterSchema,
+  preferencesDocumentSchema,
   protocolFrontmatterSchema,
   providerFrontmatterSchema,
   recipeFrontmatterSchema,
   sampleRecordSchema,
+  scheduledLogFrontmatterSchema,
   schemaCatalog,
   vaultMetadataSchema,
   workoutFormatFrontmatterSchema,
 } from "../src/schemas.ts";
+import { VAULT_FAMILY_DESCRIPTORS } from "../src/vault-families.ts";
 
 const schemaFixtures = [
   ["assessment-response", assessmentResponseSchema, assessmentResponseContract],
@@ -69,6 +79,7 @@ const schemaFixtures = [
   ["event-record", eventRecordSchema, eventRecordContract],
   ["inbox-capture-record", inboxCaptureRecordSchema, inboxCaptureRecordContract],
   ["frontmatter-allergy", allergyFrontmatterSchema, allergyFrontmatterContract],
+  ["frontmatter-automation", automationFrontmatterSchema, automationFrontmatterContract],
   ["frontmatter-condition", conditionFrontmatterSchema, conditionFrontmatterContract],
   ["frontmatter-core", coreFrontmatterSchema, coreFrontmatterContract],
   ["frontmatter-experiment", experimentFrontmatterSchema, experimentFrontmatterContract],
@@ -77,30 +88,37 @@ const schemaFixtures = [
   ["frontmatter-genetic-variant", geneticVariantFrontmatterSchema, geneticVariantFrontmatterContract],
   ["frontmatter-goal", goalFrontmatterSchema, goalFrontmatterContract],
   ["frontmatter-journal-day", journalDayFrontmatterSchema, journalDayFrontmatterContract],
+  ["frontmatter-memory", memoryDocumentFrontmatterSchema, memoryDocumentFrontmatterContract],
   ["frontmatter-provider", providerFrontmatterSchema, providerFrontmatterContract],
   ["frontmatter-protocol", protocolFrontmatterSchema, protocolFrontmatterContract],
   ["frontmatter-recipe", recipeFrontmatterSchema, recipeFrontmatterContract],
+  ["frontmatter-scheduled-log", scheduledLogFrontmatterSchema, scheduledLogFrontmatterContract],
   ["frontmatter-workout-format", workoutFormatFrontmatterSchema, workoutFormatFrontmatterContract],
+  ["preferences-document", preferencesDocumentSchema, preferencesDocumentContract],
   ["sample-record", sampleRecordSchema, sampleRecordContract],
   ["vault-metadata", vaultMetadataSchema, vaultMetadataContract],
 ] as const;
 
-const recordExamples = [
+const contractExamples = [
   ["vault metadata", vaultMetadataContract, [exampleVaultMetadata]],
   ["inbox capture records", inboxCaptureRecordContract, exampleInboxCaptureRecords],
   ["event records", eventRecordContract, exampleEventRecords],
   ["sample records", sampleRecordContract, exampleSampleRecords],
   ["audit records", auditRecordContract, exampleAuditRecords],
   ["assessment responses", assessmentResponseContract, exampleAssessmentResponses],
+  ["preferences document", preferencesDocumentContract, [examplePreferencesDocument]],
 ] as const;
 
 const frontmatterObjectExamples = [
+  ["automation", automationFrontmatterContract, exampleFrontmatterObjects.automation],
   ["core", coreFrontmatterContract, exampleFrontmatterObjects.core],
-  ["journal day", journalDayFrontmatterContract, exampleFrontmatterObjects.journalDay],
   ["experiment", experimentFrontmatterContract, exampleFrontmatterObjects.experiment],
   ["food", foodFrontmatterContract, exampleFrontmatterObjects.food],
+  ["journal day", journalDayFrontmatterContract, exampleFrontmatterObjects.journalDay],
+  ["memory", memoryDocumentFrontmatterContract, exampleFrontmatterObjects.memory],
   ["provider", providerFrontmatterContract, exampleFrontmatterObjects.provider],
   ["recipe", recipeFrontmatterContract, exampleFrontmatterObjects.recipe],
+  ["scheduled log", scheduledLogFrontmatterContract, exampleFrontmatterObjects.scheduledLog],
   ["workout format", workoutFormatFrontmatterContract, exampleFrontmatterObjects.workoutFormat],
   ["goal", goalFrontmatterContract, exampleHealthFrontmatterObjects.goal],
   ["condition", conditionFrontmatterContract, exampleHealthFrontmatterObjects.condition],
@@ -111,12 +129,24 @@ const frontmatterObjectExamples = [
 ] as const;
 
 const frontmatterMarkdownExamples = [
+  [
+    "automation",
+    automationFrontmatterContract,
+    exampleFrontmatterMarkdown.automation,
+    exampleFrontmatterObjects.automation,
+  ],
   ["core", coreFrontmatterContract, exampleFrontmatterMarkdown.core, exampleFrontmatterObjects.core],
   [
     "journal day",
     journalDayFrontmatterContract,
     exampleFrontmatterMarkdown.journalDay,
     exampleFrontmatterObjects.journalDay,
+  ],
+  [
+    "memory",
+    memoryDocumentFrontmatterContract,
+    exampleFrontmatterMarkdown.memory,
+    exampleFrontmatterObjects.memory,
   ],
   [
     "experiment",
@@ -136,6 +166,12 @@ const frontmatterMarkdownExamples = [
     recipeFrontmatterContract,
     exampleFrontmatterMarkdown.recipe,
     exampleFrontmatterObjects.recipe,
+  ],
+  [
+    "scheduled log",
+    scheduledLogFrontmatterContract,
+    exampleFrontmatterMarkdown.scheduledLog,
+    exampleFrontmatterObjects.scheduledLog,
   ],
   [
     "workout format",
@@ -171,8 +207,31 @@ describe("schema catalog and example seam", () => {
     }
   });
 
-  it("validates exported record examples against the canonical contracts", () => {
-    for (const [, contract, examples] of recordExamples) {
+  it("keeps every validated vault family on the schema-artifact seam", () => {
+    const catalogSchemaIds = new Set(
+      Object.values(schemaCatalog)
+        .map((schema) => schema.$id)
+        .filter((value): value is string => typeof value === "string"),
+    );
+
+    for (const family of VAULT_FAMILY_DESCRIPTORS) {
+      if (!("validation" in family) || !family.validation) {
+        continue;
+      }
+
+      const metadata = family.validation.schema.meta();
+      if (!metadata) {
+        throw new Error(`Validated vault family "${family.id}" is missing schema metadata.`);
+      }
+
+      expect(typeof metadata.$id).toBe("string");
+      expect(typeof metadata.title).toBe("string");
+      expect(catalogSchemaIds.has(metadata.$id as string)).toBe(true);
+    }
+  });
+
+  it("validates exported contract examples against the canonical contracts", () => {
+    for (const [, contract, examples] of contractExamples) {
       for (const example of examples) {
         expectValidExample(contract, example);
       }

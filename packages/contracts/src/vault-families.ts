@@ -36,6 +36,7 @@ import {
 } from "./zod.ts";
 
 export const BANK_DIRECTORY = "bank" as const;
+export const DERIVED_DIRECTORY = "derived" as const;
 export const LEDGER_DIRECTORY = "ledger" as const;
 export const RAW_DIRECTORY = "raw" as const;
 export const EXPORTS_DIRECTORY = "exports" as const;
@@ -45,6 +46,7 @@ export const CORE_DOCUMENT_RELATIVE_PATH = "CORE.md" as const;
 export const AUTOMATIONS_DIRECTORY = "bank/automations" as const;
 export const SCHEDULED_LOGS_DIRECTORY = "bank/scheduled-logs" as const;
 export const EXPERIMENTS_DIRECTORY = "bank/experiments" as const;
+export const HEALTH_LIBRARY_DIRECTORY = "bank/library" as const;
 export const JOURNAL_DIRECTORY = "journal" as const;
 export const ASSESSMENT_LEDGER_DIRECTORY = "ledger/assessments" as const;
 export const EVENT_LEDGER_DIRECTORY = "ledger/events" as const;
@@ -60,6 +62,10 @@ export const RAW_MEASUREMENTS_DIRECTORY = "raw/measurements" as const;
 export const RAW_MEALS_DIRECTORY = "raw/meals" as const;
 export const RAW_SAMPLES_DIRECTORY = "raw/samples" as const;
 export const RAW_WORKOUTS_DIRECTORY = "raw/workouts" as const;
+export const DERIVED_KNOWLEDGE_DIRECTORY = "derived/knowledge" as const;
+export const DERIVED_KNOWLEDGE_INDEX_FILE = "derived/knowledge/index.md" as const;
+export const DERIVED_KNOWLEDGE_LOG_FILE = "derived/knowledge/log.md" as const;
+export const DERIVED_KNOWLEDGE_PAGES_DIRECTORY = "derived/knowledge/pages" as const;
 export const EXPORT_PACKS_DIRECTORY = "exports/packs" as const;
 
 export const VAULT_FAMILY_IDS = Object.freeze({
@@ -81,6 +87,7 @@ export const VAULT_FAMILY_IDS = Object.freeze({
   recipes: "recipes",
   providers: "providers",
   workoutFormats: "workoutFormats",
+  healthLibrary: "healthLibrary",
   assessments: "assessments",
   events: "events",
   samples: "samples",
@@ -95,6 +102,9 @@ export const VAULT_FAMILY_IDS = Object.freeze({
   rawMeals: "rawMeals",
   rawSamples: "rawSamples",
   rawWorkouts: "rawWorkouts",
+  derivedKnowledgeIndex: "derivedKnowledgeIndex",
+  derivedKnowledgeLog: "derivedKnowledgeLog",
+  derivedKnowledgePages: "derivedKnowledgePages",
   exportPacks: "exportPacks",
 } as const);
 
@@ -130,6 +140,7 @@ export interface VaultFamilyDescriptorBase {
   id: VaultFamilyId;
   owner: VaultFamilyOwner;
   querySource: VaultFamilyQuerySourceKind;
+  requiredDirectory?: boolean;
   validation?: VaultFamilyValidationDescriptor;
 }
 
@@ -450,6 +461,17 @@ const vaultFamilyDescriptors = [
     },
   },
   {
+    id: VAULT_FAMILY_IDS.healthLibrary,
+    description: "Stable health-reference markdown library.",
+    owner: "query",
+    storageKind: "markdown-directory",
+    naming: "slug",
+    directory: HEALTH_LIBRARY_DIRECTORY,
+    fileExtension: ".md",
+    querySource: "none",
+    requiredDirectory: false,
+  },
+  {
     id: VAULT_FAMILY_IDS.assessments,
     description: "Assessment-response ledger shards.",
     owner: "core",
@@ -597,6 +619,37 @@ const vaultFamilyDescriptors = [
     querySource: "none",
   },
   {
+    id: VAULT_FAMILY_IDS.derivedKnowledgeIndex,
+    description: "Derived knowledge index markdown.",
+    owner: "query",
+    storageKind: "singleton-file",
+    fileFormat: "markdown",
+    relativePath: DERIVED_KNOWLEDGE_INDEX_FILE,
+    querySource: "none",
+    requiredDirectory: false,
+  },
+  {
+    id: VAULT_FAMILY_IDS.derivedKnowledgeLog,
+    description: "Derived knowledge append-only log markdown.",
+    owner: "query",
+    storageKind: "singleton-file",
+    fileFormat: "markdown",
+    relativePath: DERIVED_KNOWLEDGE_LOG_FILE,
+    querySource: "none",
+    requiredDirectory: false,
+  },
+  {
+    id: VAULT_FAMILY_IDS.derivedKnowledgePages,
+    description: "Derived knowledge page markdown documents.",
+    owner: "query",
+    storageKind: "markdown-directory",
+    naming: "slug",
+    directory: DERIVED_KNOWLEDGE_PAGES_DIRECTORY,
+    fileExtension: ".md",
+    querySource: "none",
+    requiredDirectory: false,
+  },
+  {
     id: VAULT_FAMILY_IDS.exportPacks,
     description: "Generated export packs.",
     owner: "query",
@@ -696,11 +749,19 @@ function familyDirectories(family: VaultFamilyDescriptor): string[] {
   );
 }
 
+function isRequiredVaultDirectory(family: VaultFamilyDescriptor): boolean {
+  return family.requiredDirectory !== false;
+}
+
 function collectVaultDirectories(): string[] {
   const seen = new Set<string>();
   const directories: string[] = [];
 
   for (const family of VAULT_FAMILY_DESCRIPTORS) {
+    if (!isRequiredVaultDirectory(family)) {
+      continue;
+    }
+
     for (const directory of familyDirectories(family)) {
       if (seen.has(directory)) {
         continue;
@@ -796,6 +857,7 @@ export const VAULT_LAYOUT = Object.freeze({
   memoryDocument: memoryDocumentRelativePath,
   preferencesDocument: preferencesDocumentRelativePath,
   bankDirectory: BANK_DIRECTORY,
+  derivedDirectory: DERIVED_DIRECTORY,
   journalDirectory: JOURNAL_DIRECTORY,
   automationsDirectory: AUTOMATIONS_DIRECTORY,
   scheduledLogsDirectory: SCHEDULED_LOGS_DIRECTORY,
@@ -806,6 +868,7 @@ export const VAULT_LAYOUT = Object.freeze({
   foodsDirectory: foodBankEntityDefinition.registry.directory,
   geneticsDirectory: geneticsBankEntityDefinition.registry.directory,
   goalsDirectory: goalBankEntityDefinition.registry.directory,
+  healthLibraryDirectory: HEALTH_LIBRARY_DIRECTORY,
   providersDirectory: providerBankEntityDefinition.registry.directory,
   recipesDirectory: recipeBankEntityDefinition.registry.directory,
   workoutFormatsDirectory: workoutFormatBankEntityDefinition.registry.directory,
@@ -826,6 +889,10 @@ export const VAULT_LAYOUT = Object.freeze({
   rawSamplesDirectory: RAW_SAMPLES_DIRECTORY,
   rawWorkoutsDirectory: RAW_WORKOUTS_DIRECTORY,
   auditDirectory: AUDIT_DIRECTORY,
+  derivedKnowledgeDirectory: DERIVED_KNOWLEDGE_DIRECTORY,
+  derivedKnowledgeIndex: DERIVED_KNOWLEDGE_INDEX_FILE,
+  derivedKnowledgeLog: DERIVED_KNOWLEDGE_LOG_FILE,
+  derivedKnowledgePagesDirectory: DERIVED_KNOWLEDGE_PAGES_DIRECTORY,
   exportsDirectory: EXPORTS_DIRECTORY,
   exportPacksDirectory: EXPORT_PACKS_DIRECTORY,
 });

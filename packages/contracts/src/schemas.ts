@@ -1,6 +1,9 @@
 import * as z from "zod";
 
 import {
+  automationFrontmatterSchema as automationFrontmatterContract,
+} from "./automation.ts";
+import {
   allergyFrontmatterSchema as allergyFrontmatterContract,
   assessmentResponseSchema as assessmentResponseContract,
   auditRecordSchema as auditRecordContract,
@@ -14,13 +17,22 @@ import {
   inboxCaptureRecordSchema as inboxCaptureRecordContract,
   goalFrontmatterSchema as goalFrontmatterContract,
   journalDayFrontmatterSchema as journalDayFrontmatterContract,
+  protocolFrontmatterSchema as protocolFrontmatterContract,
   providerFrontmatterSchema as providerFrontmatterContract,
   recipeFrontmatterSchema as recipeFrontmatterContract,
-  protocolFrontmatterSchema as protocolFrontmatterContract,
-  workoutFormatFrontmatterSchema as workoutFormatFrontmatterContract,
   sampleRecordSchema as sampleRecordContract,
   vaultMetadataSchema as vaultMetadataContract,
+  workoutFormatFrontmatterSchema as workoutFormatFrontmatterContract,
 } from "./zod.ts";
+import {
+  memoryDocumentFrontmatterSchema as memoryDocumentFrontmatterContract,
+} from "./memory.ts";
+import {
+  preferencesDocumentSchema as preferencesDocumentContract,
+} from "./preferences.ts";
+import {
+  scheduledLogFrontmatterSchema as scheduledLogFrontmatterContract,
+} from "./scheduled-log.ts";
 
 import type { JsonSchema } from "./types.ts";
 
@@ -35,13 +47,17 @@ export const eventRecordSchema = toJsonSchema(eventRecordContract);
 export const sampleRecordSchema = toJsonSchema(sampleRecordContract);
 export const auditRecordSchema = toJsonSchema(auditRecordContract);
 export const inboxCaptureRecordSchema = toJsonSchema(inboxCaptureRecordContract);
+export const automationFrontmatterSchema = toJsonSchema(automationFrontmatterContract);
 export const coreFrontmatterSchema = toJsonSchema(coreFrontmatterContract);
 export const journalDayFrontmatterSchema = toJsonSchema(journalDayFrontmatterContract);
 export const experimentFrontmatterSchema = toJsonSchema(experimentFrontmatterContract);
 export const foodFrontmatterSchema = toJsonSchema(foodFrontmatterContract);
 export const assessmentResponseSchema = toJsonSchema(assessmentResponseContract);
+export const memoryDocumentFrontmatterSchema = toJsonSchema(memoryDocumentFrontmatterContract);
+export const preferencesDocumentSchema = toJsonSchema(preferencesDocumentContract);
 export const providerFrontmatterSchema = toJsonSchema(providerFrontmatterContract);
 export const recipeFrontmatterSchema = toJsonSchema(recipeFrontmatterContract);
+export const scheduledLogFrontmatterSchema = toJsonSchema(scheduledLogFrontmatterContract);
 export const workoutFormatFrontmatterSchema = toJsonSchema(workoutFormatFrontmatterContract);
 export const goalFrontmatterSchema = toJsonSchema(goalFrontmatterContract);
 export const conditionFrontmatterSchema = toJsonSchema(conditionFrontmatterContract);
@@ -56,6 +72,7 @@ export const schemaCatalog = Object.freeze({
   "event-record": eventRecordSchema,
   "inbox-capture-record": inboxCaptureRecordSchema,
   "frontmatter-allergy": allergyFrontmatterSchema,
+  "frontmatter-automation": automationFrontmatterSchema,
   "frontmatter-condition": conditionFrontmatterSchema,
   "frontmatter-core": coreFrontmatterSchema,
   "frontmatter-experiment": experimentFrontmatterSchema,
@@ -64,10 +81,13 @@ export const schemaCatalog = Object.freeze({
   "frontmatter-genetic-variant": geneticVariantFrontmatterSchema,
   "frontmatter-goal": goalFrontmatterSchema,
   "frontmatter-journal-day": journalDayFrontmatterSchema,
+  "frontmatter-memory": memoryDocumentFrontmatterSchema,
   "frontmatter-provider": providerFrontmatterSchema,
-  "frontmatter-recipe": recipeFrontmatterSchema,
   "frontmatter-protocol": protocolFrontmatterSchema,
+  "frontmatter-recipe": recipeFrontmatterSchema,
+  "frontmatter-scheduled-log": scheduledLogFrontmatterSchema,
   "frontmatter-workout-format": workoutFormatFrontmatterSchema,
+  "preferences-document": preferencesDocumentSchema,
   "sample-record": sampleRecordSchema,
   "vault-metadata": vaultMetadataSchema,
 });

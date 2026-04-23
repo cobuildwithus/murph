@@ -11,20 +11,28 @@ Status: frozen current contract plus health extension fence
   journal/YYYY/YYYY-MM-DD.md
   bank/memory.md
   bank/preferences.json
+  bank/automations/<slug>.md
+  bank/scheduled-logs/<slug>.md
   bank/experiments/<slug>.md
-  bank/providers/<provider-slug>.md
   bank/goals/<slug>.md
   bank/conditions/<slug>.md
   bank/allergies/<slug>.md
-  bank/foods/<slug>.md
-  bank/workout-formats/<slug>.md
   bank/protocols/<group>/<slug>.md
   bank/family/<slug>.md
   bank/genetics/<slug>.md
+  bank/foods/<slug>.md
+  bank/recipes/<slug>.md
+  bank/providers/<slug>.md
+  bank/workout-formats/<slug>.md
+  bank/library/<slug>.md
   raw/documents/YYYY/MM/<documentId>/<filename>
   raw/documents/YYYY/MM/<documentId>/manifest.json
   raw/assessments/YYYY/MM/<assessmentId>/source.json
   raw/assessments/YYYY/MM/<assessmentId>/manifest.json
+  raw/captures/YYYY/MM/<eventId>/<filename>
+  raw/captures/YYYY/MM/<eventId>/manifest.json
+  raw/inbox/<source>/<account>/YYYY/MM/<captureId>/envelope.json
+  raw/inbox/<source>/<account>/YYYY/MM/<captureId>/attachments/<filename>
   raw/measurements/YYYY/MM/<eventId>/<filename>
   raw/measurements/YYYY/MM/<eventId>/manifest.json
   raw/meals/YYYY/MM/<mealId>/<slot>-<filename>
@@ -81,7 +89,9 @@ Generated artifact: `packages/contracts/generated/vault-metadata.schema.json`
 - Export-pack directories under `exports/packs/<packId>/` are derived, read-only outputs. Current pack ids are path-safe names derived from scope rather than canonical record ids.
 - `bank/memory.md` is the durable freeform current-state document for user-facing context that should stay small enough to read whole.
 - `bank/preferences.json` is the canonical typed preferences singleton for compact machine-readable defaults such as workout units.
-- `bank/goals`, `bank/conditions`, `bank/allergies`, `bank/foods`, `bank/workout-formats`, `bank/family`, and `bank/genetics` store one Markdown document per canonical record id or slug-safe alias or saved-default lookup key.
+- `bank/automations/*.md` stores canonical assistant automation definitions, including schedule, route, and continuity policy frontmatter alongside the authored prompt body.
+- `bank/scheduled-logs/*.md` stores canonical scheduled log definitions that later mint canonical events when the schedule executes.
+- `bank/goals`, `bank/conditions`, `bank/allergies`, `bank/foods`, `bank/recipes`, `bank/providers`, `bank/workout-formats`, `bank/family`, and `bank/genetics` store one Markdown document per canonical record id or slug-safe alias or saved-default lookup key.
 - `bank/library/**/*.md` is the stable health reference layer for reusable entities such as biomarkers, domains, protocol variants, and source artifacts. It is durable reference context, not the user-specific synthesized wiki.
 - `bank/foods` stores long-lived remembered foods such as regular restaurant orders, smoothie presets, and grocery staples so assistants can resolve shorthand references without re-scraping menus or ingredient lists, and food records may optionally carry a narrow `autoLogDaily.time` rule for daily note-only meal auto-logging.
 - `bank/workout-formats` stores reusable workout templates plus summary defaults such as activity type, duration, distance, and saved routine text; `workout format log` still writes the canonical `activity_session` event and does not create a separate workout record family.
@@ -95,6 +105,8 @@ Generated artifact: `packages/contracts/generated/vault-metadata.schema.json`
 - Document imports use `raw/documents/YYYY/MM/<documentId>/<filename>`.
 - Auto-preserved inbox document attachments reuse the same `raw/documents/YYYY/MM/<documentId>/<filename>` contract instead of introducing a second evidence folder family.
 - Assessment imports use `raw/assessments/YYYY/MM/<assessmentId>/source.json`.
+- Capture imports use `raw/captures/YYYY/MM/<eventId>/<filename>`.
+- Inbox captures use `raw/inbox/<source>/<account>/YYYY/MM/<captureId>/envelope.json` plus copied attachments under `raw/inbox/<source>/<account>/YYYY/MM/<captureId>/attachments/`.
 - Body-measurement attachments use `raw/measurements/YYYY/MM/<eventId>/<filename>`.
 - Meal attachments use `raw/meals/YYYY/MM/<mealId>/<slot>-<filename>`.
 - Sample CSV imports use `raw/samples/<stream>/YYYY/MM/<transformId>/<filename>.csv`, where `transformId` is the returned import-batch id.

@@ -30,6 +30,7 @@ export function resolveHostedMemberChannelsForSnapshot(input: {
       phoneLookupKey: input.member.identity?.phoneLookupKey ?? null,
     },
     routing: {
+      telegramThreadId: input.member.routing?.telegramThreadId ?? null,
       telegramUserId: input.member.routing?.telegramUserId ?? null,
     },
   });

@@ -1,6 +1,7 @@
 import * as z from "zod";
 
 import { CONTRACT_SCHEMA_VERSION, FRONTMATTER_DOC_TYPES } from "./constants.ts";
+import { withContractMetadata } from "./schema-metadata.ts";
 
 export const AUTOMATION_SCHEMA_VERSION = CONTRACT_SCHEMA_VERSION.automationFrontmatter;
 export const AUTOMATION_DOC_TYPE = FRONTMATTER_DOC_TYPES.automation;
@@ -75,23 +76,27 @@ export const automationRouteSchema = z
   })
   .strict();
 
-export const automationFrontmatterSchema = z
-  .object({
-    schemaVersion: z.literal(AUTOMATION_SCHEMA_VERSION),
-    docType: z.literal(AUTOMATION_DOC_TYPE),
-    automationId: z.string().min(1),
-    slug: z.string().regex(slugPattern),
-    title: z.string().min(1).max(160),
-    status: z.enum(automationStatusValues),
-    summary: z.string().min(1).max(4000).optional(),
-    schedule: automationScheduleSchema,
-    route: automationRouteSchema,
-    continuityPolicy: z.enum(automationContinuityPolicyValues),
-    tags: z.array(z.string().min(1)).optional(),
-    createdAt: isoTimestampSchema(),
-    updatedAt: isoTimestampSchema(),
-  })
-  .strict();
+export const automationFrontmatterSchema = withContractMetadata(
+  z
+    .object({
+      schemaVersion: z.literal(AUTOMATION_SCHEMA_VERSION),
+      docType: z.literal(AUTOMATION_DOC_TYPE),
+      automationId: z.string().min(1),
+      slug: z.string().regex(slugPattern),
+      title: z.string().min(1).max(160),
+      status: z.enum(automationStatusValues),
+      summary: z.string().min(1).max(4000).optional(),
+      schedule: automationScheduleSchema,
+      route: automationRouteSchema,
+      continuityPolicy: z.enum(automationContinuityPolicyValues),
+      tags: z.array(z.string().min(1)).optional(),
+      createdAt: isoTimestampSchema(),
+      updatedAt: isoTimestampSchema(),
+    })
+    .strict(),
+  "@murphai/contracts/frontmatter-automation.schema.json",
+  "Murph Automation Frontmatter",
+);
 
 export const automationMarkdownDocumentSchema = z
   .object({

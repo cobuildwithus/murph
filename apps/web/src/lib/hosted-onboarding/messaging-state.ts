@@ -10,6 +10,7 @@ interface HostedMemberMessagingIdentitySlice {
 }
 
 interface HostedMemberMessagingRoutingSlice {
+  telegramThreadId?: string | null;
   telegramUserId?: string | null;
 }
 
@@ -30,7 +31,9 @@ export function resolveHostedMemberMessagingState(input: {
   routing: HostedMemberMessagingRoutingSlice | null;
 }): HostedMemberMessagingState {
   const phoneLookupKey = normalizeMessagingIdentity(input.identity?.phoneLookupKey);
-  const telegramThreadId = normalizeMessagingIdentity(input.routing?.telegramUserId);
+  const telegramThreadId =
+    normalizeMessagingIdentity(input.routing?.telegramThreadId)
+    ?? normalizeMessagingIdentity(input.routing?.telegramUserId);
   const hasPhone = phoneLookupKey !== null;
   const hasTelegram = telegramThreadId !== null;
 

@@ -240,6 +240,7 @@ export function buildHostedMemberActivationWelcomeRoute(input: {
   linqRecipientPhone?: string | null;
   memberPhoneNumber?: string | null;
   phoneLookupKey: string | null;
+  telegramThreadId: string | null;
   telegramUserId: string | null;
 }): HostedExecutionAssistantNotificationRoute | null {
   return resolveHostedMemberAssistantNotificationRoute({
@@ -251,6 +252,7 @@ export function buildHostedMemberActivationWelcomeRoute(input: {
         phoneLookupKey: input.phoneLookupKey,
       },
       routing: {
+        telegramThreadId: input.telegramThreadId,
         telegramUserId: input.telegramUserId,
       },
     }),
@@ -268,6 +270,7 @@ async function resolveHostedMemberActivationWelcomeLinqRoute(input: {
         linqRecipientPhone: input.member.routing?.linqRecipientPhone ?? null,
         memberPhoneNumber: input.member.identity?.phoneNumber ?? null,
         phoneLookupKey: input.member.identity?.phoneLookupKey ?? null,
+        telegramThreadId: input.member.routing?.telegramThreadId ?? null,
         telegramUserId: input.member.routing?.telegramUserId ?? null,
       }),
     };
@@ -385,6 +388,7 @@ function buildHostedMemberActivationWakeForMember(input: {
     memberId: input.member.core.id,
     memberPhoneNumber: input.member.identity?.phoneNumber ?? null,
     phoneLookupKey: input.member.identity?.phoneLookupKey ?? null,
+    telegramThreadId: input.member.routing?.telegramThreadId ?? null,
     telegramUserId: input.member.routing?.telegramUserId ?? null,
     occurredAt: input.occurredAt,
     sourceEventId: input.sourceEventId,
@@ -397,6 +401,7 @@ function buildHostedMemberActivationWake(input: {
   memberId: string;
   memberPhoneNumber?: string | null;
   phoneLookupKey?: string | null;
+  telegramThreadId?: string | null;
   telegramUserId?: string | null;
   occurredAt: string;
   sourceEventId: string;
@@ -410,6 +415,7 @@ function buildHostedMemberActivationWake(input: {
         phoneLookupKey: input.phoneLookupKey ?? null,
       },
       routing: {
+        telegramThreadId: input.telegramThreadId ?? null,
         telegramUserId: input.telegramUserId ?? null,
       },
     }),
