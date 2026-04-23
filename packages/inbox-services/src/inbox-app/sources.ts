@@ -1,4 +1,7 @@
-import type { InboxConnectorConfig } from '@murphai/operator-config/inbox-cli-contracts'
+import {
+  normalizeInboxConnectorConfig,
+  type InboxConnectorConfig,
+} from '@murphai/operator-config/inbox-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type {
   InboxAppEnvironment,
@@ -83,7 +86,7 @@ export function createInboxSourceOps(
         })
       }
 
-      const connector: InboxConnectorConfig = {
+      const connector: InboxConnectorConfig = normalizeInboxConnectorConfig({
         id: input.id,
         source: input.source,
         enabled: true,
@@ -92,12 +95,8 @@ export function createInboxSourceOps(
           backfillLimit: normalizeBackfillLimit(input.backfillLimit),
           emailAddress: input.source === 'email' ? emailAddress : undefined,
         },
-      }
+      })
       ensureConnectorNamespaceAvailable(config, connector)
-
-      config.connectors.push(connector)
-      sortConnectors(config)
-      await writeConfig(paths, config)
 
       const autoReplyEnabled = input.enableAutoReply
         ? await env.enableAssistantAutoReplyChannel(
@@ -106,11 +105,18 @@ export function createInboxSourceOps(
           )
         : undefined
 
+      const nextConfig = {
+        ...config,
+        connectors: [...config.connectors, connector],
+      }
+      sortConnectors(nextConfig)
+      await writeConfig(paths, nextConfig)
+
       return {
         vault: paths.absoluteVaultRoot,
         configPath: relativeToVault(paths.absoluteVaultRoot, paths.inboxConfigPath),
         connector,
-        connectorCount: config.connectors.length,
+        connectorCount: nextConfig.connectors.length,
         provisionedMailbox,
         reusedMailbox,
         autoReplyEnabled,

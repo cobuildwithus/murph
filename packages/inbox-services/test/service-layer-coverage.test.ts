@@ -292,7 +292,7 @@ test('service-layer helpers cover connector, query, state, daemon, and vault pat
   const connector = createConnector({
     id: 'telegram:bot',
     source: 'telegram',
-    accountId: 'bot',
+    accountId: null,
     options: { backfillLimit: 10 },
   })
   assert.equal(runtimeNamespaceAccountId(connector), 'bot')
@@ -358,8 +358,14 @@ test('service-layer helpers cover connector, query, state, daemon, and vault pat
       async openInboxRuntime() {
         return createRuntimeStore([])
       },
+      async createParsedInboxPipeline() {
+        throw new Error('unused')
+      },
       async rebuildRuntimeFromVault() {},
       async runInboxDaemon() {},
+      async runPollConnectorBackfill() {
+        throw new Error('unused')
+      },
       async runInboxDaemonWithParsers() {},
     } satisfies InboxRuntimeModule),
     loadTelegramDriver: async () => ({}) as TelegramDriver,
@@ -407,8 +413,14 @@ test('service-layer helpers cover connector, query, state, daemon, and vault pat
       async openInboxRuntime() {
         return createRuntimeStore([])
       },
+      async createParsedInboxPipeline() {
+        throw new Error('unused')
+      },
       async rebuildRuntimeFromVault() {},
       async runInboxDaemon() {},
+      async runPollConnectorBackfill() {
+        throw new Error('unused')
+      },
       async runInboxDaemonWithParsers() {},
     } satisfies InboxRuntimeModule),
     loadTelegramDriver: async () => ({}) as TelegramDriver,
@@ -459,6 +471,24 @@ test('service-layer helpers cover connector, query, state, daemon, and vault pat
     accountId: 'bot',
     source: 'telegram',
   })
+  assert.deepEqual(
+    resolveSourceFilter(
+      {
+        connectors: [
+          createConnector({
+            id: 'linq:legacy',
+            source: 'linq',
+            accountId: null,
+          }),
+        ],
+      },
+      'linq:legacy',
+    ),
+    {
+      accountId: 'default',
+      source: 'linq',
+    },
+  )
 
   assert.equal(resolveAttachmentParseState(attachment, []), 'succeeded')
   assert.equal(
@@ -474,6 +504,7 @@ test('service-layer helpers cover connector, query, state, daemon, and vault pat
   assert.deepEqual(await readConfig(configPaths as InboxPaths), { connectors: [] })
   await writeConfig(configPaths as InboxPaths, config)
   const persistedConfig = await readConfig(configPaths as InboxPaths)
+  assert.equal(findConnector(persistedConfig, 'telegram:bot')?.accountId, 'bot')
   assert.equal(findConnector(persistedConfig, 'telegram:bot')?.id, 'telegram:bot')
   assert.equal(requireConnector(persistedConfig, 'telegram:bot').id, 'telegram:bot')
   assert.throws(() => requireConnector(persistedConfig, 'missing'), /is not configured/)
@@ -563,6 +594,9 @@ test('service-layer helpers cover connector, query, state, daemon, and vault pat
       async createInboxPipeline() {
         throw new Error('unused')
       },
+      async createParsedInboxPipeline() {
+        throw new Error('unused')
+      },
       createTelegramPollConnector() {
         throw new Error('unused')
       },
@@ -577,6 +611,9 @@ test('service-layer helpers cover connector, query, state, daemon, and vault pat
       },
       async rebuildRuntimeFromVault() {},
       async runInboxDaemon() {},
+      async runPollConnectorBackfill() {
+        throw new Error('unused')
+      },
       async runInboxDaemonWithParsers() {},
     } as InboxRuntimeModule,
   )

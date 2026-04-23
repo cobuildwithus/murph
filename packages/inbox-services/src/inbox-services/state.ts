@@ -9,6 +9,7 @@ import {
   inboxRuntimeConfigSchema,
   type InboxConnectorConfig,
   type InboxRuntimeConfig,
+  normalizeInboxRuntimeConfig,
 } from '@murphai/operator-config/inbox-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type {
@@ -97,7 +98,9 @@ export async function ensureConfigFile(
     filePath: paths.inboxConfigPath,
     schema: INBOX_RUNTIME_CONFIG_SCHEMA,
     schemaVersion: INBOX_RUNTIME_CONFIG_SCHEMA_VERSION,
-    value: inboxRuntimeConfigSchema.parse(emptyConfig),
+    value: normalizeInboxRuntimeConfig(
+      inboxRuntimeConfigSchema.parse(emptyConfig),
+    ),
   })
   createdPaths.push(relativeToVault(paths.absoluteVaultRoot, paths.inboxConfigPath))
 }
@@ -110,7 +113,9 @@ export async function readConfig(
       currentPath: paths.inboxConfigPath,
       label: 'Inbox runtime config',
       parseValue(value) {
-        return inboxRuntimeConfigSchema.parse(value)
+        return normalizeInboxRuntimeConfig(
+          inboxRuntimeConfigSchema.parse(value),
+        )
       },
       schema: INBOX_RUNTIME_CONFIG_SCHEMA,
       schemaVersion: INBOX_RUNTIME_CONFIG_SCHEMA_VERSION,
@@ -135,7 +140,9 @@ export async function writeConfig(
     filePath: paths.inboxConfigPath,
     schema: INBOX_RUNTIME_CONFIG_SCHEMA,
     schemaVersion: INBOX_RUNTIME_CONFIG_SCHEMA_VERSION,
-    value: inboxRuntimeConfigSchema.parse(config),
+    value: normalizeInboxRuntimeConfig(
+      inboxRuntimeConfigSchema.parse(config),
+    ),
   })
 }
 

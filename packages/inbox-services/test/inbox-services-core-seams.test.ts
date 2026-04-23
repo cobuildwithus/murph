@@ -188,8 +188,14 @@ function createPollConnector(id: string) {
 }
 
 test('shared utility helpers normalize inbox metadata and paths', async () => {
-  assert.equal(runtimeNamespaceAccountId({ accountId: null }), null)
-  assert.equal(connectorNamespaceKey({ source: 'telegram', accountId: null }), 'telegram::default')
+  assert.equal(
+    runtimeNamespaceAccountId({ source: 'telegram', accountId: null }),
+    'bot',
+  )
+  assert.equal(
+    connectorNamespaceKey({ source: 'telegram', accountId: null }),
+    'telegram::bot',
+  )
   assert.throws(
     () => normalizeConnectorAccountId('unsupported' as never, undefined),
     (error: unknown) => error instanceof VaultCliError && error.code === 'INBOX_SOURCE_UNSUPPORTED',
@@ -969,6 +975,8 @@ test('initialized inbox helpers open runtime, rebuild captures, and normalize fi
 
     let closed = 0
     let rebuildCalls = 0
+    const normalizedConfig = await readConfig(paths)
+    assert.equal(normalizedConfig.connectors[0]?.accountId, 'bot')
     const runtime = createRuntimeStore([createCapture(), createCapture({ captureId: 'capture-2' })])
     runtime.close = () => {
       closed += 1
@@ -1013,7 +1021,7 @@ test('initialized inbox helpers open runtime, rebuild captures, and normalize fi
       ),
       {
         source: 'telegram',
-        accountId: null,
+        accountId: 'bot',
       },
     )
     assert.equal(resolveSourceFilter({ connectors: [] }, null), null)
