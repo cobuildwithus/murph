@@ -749,7 +749,10 @@ export class RunnerRunProcessor {
     wakes: readonly HostedIngressEnvelope[];
   }): Promise<void> {
     const groupedMessageIds = new Map<string, Set<string>>();
+    const cleanupTargets = new Set<string>();
     const sentTargets = new Set<string>();
+    const cleanupWakeMessages: Array<{ messageId: string; target: string }> = [];
+    const persistedCleanupMessages = [...(input.pendingCleanup?.telegramMessages ?? [])];
 
     for (const outcome of input.assistantDeliveryOutcomes) {
       if (outcome.deliveryStatus === "sent" && outcome.deliveryChannel === "telegram" && outcome.target) {
@@ -762,16 +765,38 @@ export class RunnerRunProcessor {
         continue;
       }
 
+      const target = wake.message.telegramMessage.threadId;
+      cleanupTargets.add(target);
+      cleanupWakeMessages.push({
+        messageId: wake.message.telegramMessage.messageId,
+        target,
+      });
+    }
+    for (const message of persistedCleanupMessages) {
+      cleanupTargets.add(message.target);
+    }
+
+    const allowPlainChatRetarget = cleanupTargets.size === 1 && sentTargets.size === 1;
+
+    for (const message of cleanupWakeMessages) {
       addHostedProviderMessageId(
         groupedMessageIds,
-        resolveHostedTelegramCleanupTarget(wake.message.telegramMessage.threadId, sentTargets),
-        wake.message.telegramMessage.messageId,
+        resolveHostedTelegramCleanupTarget(
+          message.target,
+          sentTargets,
+          allowPlainChatRetarget,
+        ),
+        message.messageId,
       );
     }
-    for (const message of input.pendingCleanup?.telegramMessages ?? []) {
+    for (const message of persistedCleanupMessages) {
       addHostedProviderMessageId(
         groupedMessageIds,
-        resolveHostedTelegramCleanupTarget(message.target, sentTargets),
+        resolveHostedTelegramCleanupTarget(
+          message.target,
+          sentTargets,
+          allowPlainChatRetarget,
+        ),
         message.messageId,
       );
     }
@@ -1334,16 +1359,154 @@ function buildRunnerPendingCleanupState(
 function resolveHostedTelegramCleanupTarget(
   target: string,
   sentTargets: ReadonlySet<string>,
+  allowPlainChatRetarget: boolean,
 ): string {
   if (sentTargets.has(target)) {
     return target;
   }
 
-  if (sentTargets.size === 1) {
-    return [...sentTargets][0]!;
+  const parsedTarget = parseHostedTelegramCleanupTarget(target);
+  if (!parsedTarget) {
+    return target;
   }
 
-  return target;
+  let compatibleReplacement: string | null = null;
+  for (const sentTarget of sentTargets) {
+    const parsedSentTarget = parseHostedTelegramCleanupTarget(sentTarget);
+    if (
+      !parsedSentTarget ||
+      !areHostedTelegramCleanupTargetsCompatible(
+        parsedTarget,
+        parsedSentTarget,
+        allowPlainChatRetarget,
+      )
+    ) {
+      continue;
+    }
+
+    if (compatibleReplacement && compatibleReplacement !== sentTarget) {
+      return target;
+    }
+
+    compatibleReplacement = sentTarget;
+  }
+
+  return compatibleReplacement ?? target;
+}
+
+interface HostedTelegramCleanupTarget {
+  businessConnectionId: string | null;
+  chatId: string;
+  directMessagesTopicId: number | null;
+  messageThreadId: number | null;
+}
+
+function areHostedTelegramCleanupTargetsCompatible(
+  current: HostedTelegramCleanupTarget,
+  replacement: HostedTelegramCleanupTarget,
+  allowPlainChatRetarget: boolean,
+): boolean {
+  const hasExplicitRoutingScope = current.businessConnectionId != null
+    || current.directMessagesTopicId != null
+    || current.messageThreadId != null;
+
+  return current.chatId !== replacement.chatId
+    && current.businessConnectionId === replacement.businessConnectionId
+    && current.directMessagesTopicId === replacement.directMessagesTopicId
+    && current.messageThreadId === replacement.messageThreadId
+    && (hasExplicitRoutingScope || allowPlainChatRetarget);
+}
+
+function parseHostedTelegramCleanupTarget(
+  target: string,
+): HostedTelegramCleanupTarget | null {
+  const normalizedTarget = target.trim();
+  if (normalizedTarget.length === 0) {
+    return null;
+  }
+
+  const segments = normalizedTarget.split(":");
+  const chatId = segments.shift()?.trim();
+  if (!chatId) {
+    return null;
+  }
+
+  const parsed: HostedTelegramCleanupTarget = {
+    businessConnectionId: null,
+    chatId,
+    directMessagesTopicId: null,
+    messageThreadId: null,
+  };
+
+  while (segments.length > 0) {
+    const key = segments.shift();
+    const value = segments.shift();
+    if (!key || value === undefined) {
+      return null;
+    }
+
+    if (key === "topic") {
+      const topicId = parseHostedTelegramCleanupPositiveInteger(value);
+      if (
+        topicId === null ||
+        parsed.messageThreadId != null ||
+        parsed.directMessagesTopicId != null
+      ) {
+        return null;
+      }
+      parsed.messageThreadId = topicId;
+      continue;
+    }
+
+    if (key === "business") {
+      const businessConnectionId = decodeHostedTelegramCleanupBusinessConnectionId(value);
+      if (!businessConnectionId || parsed.businessConnectionId != null) {
+        return null;
+      }
+      parsed.businessConnectionId = businessConnectionId;
+      continue;
+    }
+
+    if (key === "dm-topic") {
+      const directMessagesTopicId = parseHostedTelegramCleanupPositiveInteger(value);
+      if (
+        directMessagesTopicId === null ||
+        parsed.directMessagesTopicId != null ||
+        parsed.messageThreadId != null
+      ) {
+        return null;
+      }
+      parsed.directMessagesTopicId = directMessagesTopicId;
+      continue;
+    }
+
+    return null;
+  }
+
+  return parsed;
+}
+
+function decodeHostedTelegramCleanupBusinessConnectionId(
+  value: string,
+): string | null {
+  try {
+    const decoded = decodeURIComponent(value);
+    return decoded.trim().length > 0 ? decoded : null;
+  } catch {
+    return null;
+  }
+}
+
+function parseHostedTelegramCleanupPositiveInteger(
+  value: string,
+): number | null {
+  const normalized = value.trim();
+  if (!/^[1-9]\d*$/u.test(normalized)) {
+    return null;
+  }
+
+  const parsed = Number.parseInt(normalized, 10);
+  return Number.isSafeInteger(parsed) ? parsed : null;
 }
 
 export function summarizeHostedAssistantDeliveryOutcomes(
