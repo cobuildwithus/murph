@@ -5,46 +5,7 @@ export interface CanonicalEventLink {
   targetId: string;
 }
 
-export function canonicalizeEventRelations({
-  links,
-  relatedIds,
-  normalizeStringList,
-  errorCode,
-  errorMessage,
-}: {
-  links: unknown;
-  relatedIds: unknown;
-  normalizeStringList: (value: unknown) => string[] | undefined;
-  errorCode: string;
-  errorMessage: string;
-}): {
-  links: CanonicalEventLink[] | undefined;
-  relatedIds: string[] | undefined;
-} {
-  const normalizedLinksInput = normalizeCanonicalEventLinks({
-    value: links,
-    errorCode,
-    errorMessage,
-  });
-  const normalizedRelatedIds = normalizeStringList(relatedIds);
-  const canonicalLinks =
-    normalizedLinksInput !== undefined
-      ? normalizedLinksInput
-      : normalizedRelatedIds?.map((targetId) => ({
-          type: "related_to",
-          targetId,
-        }));
-
-  return {
-    links: canonicalLinks,
-    relatedIds:
-      canonicalLinks !== undefined
-        ? projectRelatedIdsFromLinks(canonicalLinks)
-        : normalizedRelatedIds,
-  };
-}
-
-function normalizeCanonicalEventLinks({
+export function normalizeCanonicalEventLinks({
   value,
   errorCode,
   errorMessage,
@@ -89,9 +50,36 @@ function normalizeCanonicalEventLinks({
   return links.length > 0 ? links : [];
 }
 
-function projectRelatedIdsFromLinks(
-  links: readonly CanonicalEventLink[],
-): string[] | undefined {
-  const targetIds = [...new Set(links.map((link) => link.targetId))];
-  return targetIds.length > 0 ? targetIds : undefined;
+export function canonicalizeEventRelations({
+  links,
+  relatedIds,
+  normalizeStringList,
+  errorCode,
+  errorMessage,
+}: {
+  links: unknown;
+  relatedIds: unknown;
+  normalizeStringList: (value: unknown) => string[] | undefined;
+  errorCode: string;
+  errorMessage: string;
+}): {
+  links: CanonicalEventLink[] | undefined;
+} {
+  const normalizedLinks = normalizeCanonicalEventLinks({
+    value: links,
+    errorCode,
+    errorMessage,
+  });
+  const normalizedRelatedIds = normalizeStringList(relatedIds);
+  const canonicalLinks =
+    normalizedLinks !== undefined
+      ? normalizedLinks
+      : normalizedRelatedIds?.map((targetId) => ({
+          type: "related_to",
+          targetId,
+        }));
+
+  return {
+    links: canonicalLinks,
+  };
 }

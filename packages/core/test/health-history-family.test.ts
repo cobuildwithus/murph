@@ -149,6 +149,97 @@ test("history links round-trip through write, storage, read, and list surfaces",
   assert.deepEqual(storedRecord?.links, [
     { type: "related_to", targetId: "prov_01JNW7YJ7MNE7M9Q2QWQK4Z3F8" },
   ]);
+  assert.equal(storedRecord?.relatedIds, undefined);
+});
+
+test("history relatedIds ingress still canonicalizes to links and omits legacy storage fields", async () => {
+  const vaultRoot = await makeTempDirectory("murph-history-related-ids");
+  await initializeVault({ vaultRoot });
+
+  const appended = await appendHistoryEvent({
+    vaultRoot,
+    kind: "encounter",
+    occurredAt: "2026-03-03T18:00:00.000Z",
+    title: "Legacy linked encounter",
+    encounterType: "office_visit",
+    relatedIds: [
+      "prov_01JNW7YJ7MNE7M9Q2QWQK4Z3F8",
+      " prov_01JNW7YJ7MNE7M9Q2QWQK4Z3F8 ",
+    ],
+  });
+  const read = await readHistoryEvent({
+    vaultRoot,
+    eventId: appended.record.id,
+  });
+  const stored = await readJsonlRecords({
+    vaultRoot,
+    relativePath: appended.relativePath,
+  });
+  const storedRecord = stored.find(
+    (record) => (record as { id?: string }).id === appended.record.id,
+  ) as {
+    links?: unknown;
+    relatedIds?: unknown;
+  } | undefined;
+
+  assert.deepEqual(appended.record.links, [
+    { type: "related_to", targetId: "prov_01JNW7YJ7MNE7M9Q2QWQK4Z3F8" },
+  ]);
+  assert.deepEqual(read.record.links, [
+    { type: "related_to", targetId: "prov_01JNW7YJ7MNE7M9Q2QWQK4Z3F8" },
+  ]);
+  assert.deepEqual(storedRecord?.links, [
+    { type: "related_to", targetId: "prov_01JNW7YJ7MNE7M9Q2QWQK4Z3F8" },
+  ]);
+  assert.equal(storedRecord?.relatedIds, undefined);
+});
+
+test("history reads legacy relatedIds rows back as canonical links", async () => {
+  const vaultRoot = await makeTempDirectory("murph-history-legacy-related-ids");
+  await initializeVault({ vaultRoot });
+
+  const legacyRelativePath = toMonthlyShardRelativePath(
+    VAULT_LAYOUT.eventLedgerDirectory,
+    "2026-03-04T12:00:00.000Z",
+    "occurredAt",
+  );
+  const legacyEventId = "evt_01JNW7YJ7MNE7M9Q2QWQK4Z3F9";
+
+  await appendJsonlRecord({
+    vaultRoot,
+    relativePath: legacyRelativePath,
+    record: {
+      schemaVersion: "murph.event.v1",
+      id: legacyEventId,
+      kind: "encounter",
+      occurredAt: "2026-03-04T12:00:00.000Z",
+      recordedAt: "2026-03-04T12:05:00.000Z",
+      dayKey: "2026-03-04",
+      source: "manual",
+      title: "Legacy related-id encounter",
+      encounterType: "office_visit",
+      relatedIds: ["prov_01JNW7YJ7MNE7M9Q2QWQK4Z3F8"],
+      lifecycle: {
+        revision: 1,
+      },
+    },
+  });
+
+  const read = await readHistoryEvent({
+    vaultRoot,
+    eventId: legacyEventId,
+  });
+  const listed = await listHistoryEvents({
+    vaultRoot,
+    kinds: ["encounter"],
+  });
+
+  assert.deepEqual(read.record.links, [
+    { type: "related_to", targetId: "prov_01JNW7YJ7MNE7M9Q2QWQK4Z3F8" },
+  ]);
+  assert.deepEqual(listed[0]?.links, [
+    { type: "related_to", targetId: "prov_01JNW7YJ7MNE7M9Q2QWQK4Z3F8" },
+  ]);
 });
 
 test("health history append rejects explicit duplicate event ids", async () => {
