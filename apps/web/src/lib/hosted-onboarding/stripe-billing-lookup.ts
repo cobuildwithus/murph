@@ -142,14 +142,27 @@ export async function findMemberForStripeSubscription(input: {
 export async function findMemberForStripeInvoice(input: {
   invoice: Stripe.Invoice;
   prisma: HostedOnboardingReadClient;
+  subscription?: Stripe.Subscription | null;
 }): Promise<HostedMemberBillingSnapshot | null> {
-  return findMemberForStripeObject({
+  const directMember = await findMemberForStripeObject({
     clientReferenceId: null,
     customerId: coerceStripeObjectId(input.invoice.customer),
     memberId: null,
     prisma: input.prisma,
     subscriptionId: coerceStripeInvoiceSubscriptionId(input.invoice),
   });
+
+  if (directMember) {
+    return directMember;
+  }
+
+  const liveSubscription = input.subscription ?? await readStripeInvoiceCanonicalSubscription(input.invoice);
+  return liveSubscription
+    ? findMemberForStripeSubscription({
+        prisma: input.prisma,
+        subscription: liveSubscription,
+      })
+    : null;
 }
 
 export async function findMemberForStripeReversal(input: {
@@ -233,6 +246,18 @@ export async function resolveStripeCustomerContext(input: {
   return {
     customerId: null,
   };
+}
+
+async function readStripeInvoiceCanonicalSubscription(
+  invoice: Stripe.Invoice,
+): Promise<Stripe.Subscription | null> {
+  const subscriptionId = coerceStripeInvoiceSubscriptionId(invoice);
+
+  if (!subscriptionId) {
+    return null;
+  }
+
+  return requireHostedStripeApi().subscriptions.retrieve(subscriptionId);
 }
 
 async function readHostedMemberBillingSnapshotWithoutRef(input: {

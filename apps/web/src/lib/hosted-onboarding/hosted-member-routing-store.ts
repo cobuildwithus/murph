@@ -5,12 +5,14 @@ import { Prisma } from "@prisma/client";
 
 import { buildHostedMemberRoutingPrivateColumns } from "./member-private-codecs";
 import { createHostedTelegramUserLookupKeyReadCandidates } from "./contact-privacy";
+import { hostedOnboardingError } from "./errors";
 import {
   hostedMemberRoutingLookupSelect,
   hostedMemberRoutingStateSelect,
   projectHostedMemberRoutingLookup,
   projectHostedMemberRoutingState,
   type HostedMemberRoutingLookup,
+  type HostedMemberRoutingLookupRecord,
 } from "./hosted-member-routing-state";
 import { type HostedOnboardingReadClient } from "./shared";
 
@@ -30,6 +32,19 @@ export {
   type HostedMemberRoutingLookupSnapshot,
   type HostedMemberRoutingStateSnapshot,
 } from "./hosted-member-routing-state";
+
+export type HostedMemberRoutingByTelegramUserIdResolution =
+  | {
+      lookup: HostedMemberRoutingLookup;
+      status: "found";
+    }
+  | {
+      memberIds: string[];
+      status: "ambiguous";
+    }
+  | {
+      status: "missing";
+    };
 
 export async function readHostedMemberIdByReplyAliasLookupKey(input: {
   prisma: HostedOnboardingReadClient;
@@ -70,6 +85,7 @@ export async function upsertHostedMemberReplyAliasLookupKeyTx(input: {
     memberId: input.memberId,
     pendingLinqChatId: null,
     pendingLinqRecipientPhone: null,
+    telegramThreadId: null,
     telegramUserId: null,
   });
 
@@ -109,15 +125,61 @@ export async function lookupHostedMemberRoutingByTelegramUserId(input: {
   prisma: HostedOnboardingReadClient;
   telegramUserId: string;
 }): Promise<HostedMemberRoutingLookup | null> {
+  const resolution = await resolveHostedMemberRoutingByTelegramUserId(input);
+
+  if (resolution.status === "ambiguous") {
+    throw buildHostedTelegramRoutingLookupAmbiguousError(resolution.memberIds.length);
+  }
+
+  return resolution.status === "found" ? resolution.lookup : null;
+}
+
+export async function resolveHostedMemberRoutingByTelegramUserId(input: {
+  prisma: HostedOnboardingReadClient;
+  telegramUserId: string;
+}): Promise<HostedMemberRoutingByTelegramUserIdResolution> {
+  const routingRecords = await readHostedMemberRoutingRecordsByTelegramUserId(input);
+
+  if (routingRecords.length === 0) {
+    return { status: "missing" };
+  }
+
+  const routingRecordByMemberId = new Map<string, HostedMemberRoutingLookupRecord>();
+
+  for (const routingRecord of routingRecords) {
+    if (!routingRecordByMemberId.has(routingRecord.memberId)) {
+      routingRecordByMemberId.set(routingRecord.memberId, routingRecord);
+    }
+  }
+
+  if (routingRecordByMemberId.size !== 1) {
+    return {
+      memberIds: [...routingRecordByMemberId.keys()].sort(),
+      status: "ambiguous",
+    };
+  }
+
+  const [routingRecord] = [...routingRecordByMemberId.values()];
+
+  return {
+    lookup: projectHostedMemberRoutingLookup(routingRecord, "telegramUserId"),
+    status: "found",
+  };
+}
+
+async function readHostedMemberRoutingRecordsByTelegramUserId(input: {
+  prisma: HostedOnboardingReadClient;
+  telegramUserId: string;
+}): Promise<HostedMemberRoutingLookupRecord[]> {
   const telegramUserLookupKeys = createHostedTelegramUserLookupKeyReadCandidates(
     input.telegramUserId,
   );
 
   if (telegramUserLookupKeys.length === 0) {
-    return null;
+    return [];
   }
 
-  const routingRecord = await input.prisma.hostedMemberRouting.findFirst({
+  return input.prisma.hostedMemberRouting.findMany({
     where: {
       telegramUserLookupKey: {
         in: telegramUserLookupKeys,
@@ -125,10 +187,19 @@ export async function lookupHostedMemberRoutingByTelegramUserId(input: {
     },
     select: hostedMemberRoutingLookupSelect,
   });
+}
 
-  return routingRecord
-    ? projectHostedMemberRoutingLookup(routingRecord, "telegramUserId")
-    : null;
+function buildHostedTelegramRoutingLookupAmbiguousError(matchCount: number) {
+  return hostedOnboardingError({
+    code: "TELEGRAM_ROUTING_LOOKUP_AMBIGUOUS",
+    details: {
+      matchCount,
+    },
+    httpStatus: 500,
+    message:
+      "Telegram routing lookup matched multiple Murph accounts during blind-index rotation. Repair the duplicate binding before retrying.",
+    retryable: true,
+  });
 }
 
 export async function readHostedMemberRoutingState(input: {

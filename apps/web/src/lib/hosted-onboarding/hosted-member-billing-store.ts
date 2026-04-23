@@ -10,22 +10,27 @@ import {
 
 import { getPrisma } from "../prisma";
 import {
+  createHostedStripeCustomerLookupConflictLockToken,
   createHostedStripeCustomerLookupKey,
   createHostedStripeCustomerLookupKeyReadCandidates,
+  createHostedStripeSubscriptionLookupConflictLockToken,
   createHostedStripeSubscriptionLookupKey,
   createHostedStripeSubscriptionLookupKeyReadCandidates,
 } from "./contact-privacy";
+import { hostedOnboardingError } from "./errors";
 import {
   buildHostedMemberBillingPrivateColumns,
   readHostedMemberBillingPrivateState,
 } from "./member-private-codecs";
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+  lockHostedAdvisoryKey,
   lockHostedMemberRow,
   type HostedOnboardingReadClient,
 } from "./shared";
 
 export interface HostedMemberStripeBillingRefSnapshot {
+  lastStripeEventCreatedAt?: Date | null;
   memberId: string;
   stripeCustomerId: string | null;
   stripeSubscriptionId: string | null;
@@ -43,6 +48,7 @@ export interface HostedMemberStripeBillingLookup {
 
 export interface HostedMemberStripeBillingRefWriteInput {
   memberId: string;
+  stripeEventCreatedAt?: Date | null;
   stripeCustomerId?: string | null;
   stripeSubscriptionId?: string | null;
   tx: Prisma.TransactionClient;
@@ -60,7 +66,7 @@ export async function lookupHostedMemberStripeBillingRefByStripeCustomerId(input
     return null;
   }
 
-  const billingRefRecord = await input.prisma.hostedMemberBillingRef.findFirst({
+  const billingRefRecords = await input.prisma.hostedMemberBillingRef.findMany({
     where: {
       stripeCustomerLookupKey: {
         in: stripeCustomerLookupKeys,
@@ -71,9 +77,7 @@ export async function lookupHostedMemberStripeBillingRefByStripeCustomerId(input
     },
   });
 
-  return billingRefRecord
-    ? projectHostedMemberStripeBillingLookup(billingRefRecord, "stripeCustomerId")
-    : null;
+  return resolveHostedMemberStripeBillingLookup(billingRefRecords, "stripeCustomerId");
 }
 
 export async function lookupHostedMemberStripeBillingRefByStripeSubscriptionId(input: {
@@ -88,7 +92,7 @@ export async function lookupHostedMemberStripeBillingRefByStripeSubscriptionId(i
     return null;
   }
 
-  const billingRefRecord = await input.prisma.hostedMemberBillingRef.findFirst({
+  const billingRefRecords = await input.prisma.hostedMemberBillingRef.findMany({
     where: {
       stripeSubscriptionLookupKey: {
         in: stripeSubscriptionLookupKeys,
@@ -99,9 +103,7 @@ export async function lookupHostedMemberStripeBillingRefByStripeSubscriptionId(i
     },
   });
 
-  return billingRefRecord
-    ? projectHostedMemberStripeBillingLookup(billingRefRecord, "stripeSubscriptionId")
-    : null;
+  return resolveHostedMemberStripeBillingLookup(billingRefRecords, "stripeSubscriptionId");
 }
 
 export async function readHostedMemberStripeBillingRef(input: {
@@ -128,6 +130,8 @@ export async function readHostedMemberStripeCustomerId(input: {
 export async function writeHostedMemberStripeBillingRefTx(
   input: HostedMemberStripeBillingRefWriteInput,
 ): Promise<HostedMemberStripeBillingRefSnapshot> {
+  await assertHostedMemberStripeBillingIdentifiersAvailableTx(input);
+
   const billingRef = await input.tx.hostedMemberBillingRef.upsert({
     where: {
       memberId: input.memberId,
@@ -157,6 +161,11 @@ export async function bindHostedMemberStripeCustomerIdIfMissingTx(input: {
   });
 
   await lockHostedMemberRow(input.tx, input.memberId);
+  await assertHostedMemberStripeBillingIdentifiersAvailableTx({
+    memberId: input.memberId,
+    stripeCustomerId: input.stripeCustomerId,
+    tx: input.tx,
+  });
 
   const currentBillingRef = await input.tx.hostedMemberBillingRef.findUnique({
     where: {
@@ -207,6 +216,11 @@ export function projectHostedMemberStripeBillingRefSnapshot(
   const privateState = readHostedMemberBillingPrivateState(billingRef);
 
   return {
+    ...(billingRef.lastStripeEventCreatedAt !== undefined
+      ? {
+          lastStripeEventCreatedAt: billingRef.lastStripeEventCreatedAt,
+        }
+      : {}),
     memberId: billingRef.memberId,
     stripeCustomerId: privateState.stripeCustomerId,
     stripeSubscriptionId: privateState.stripeSubscriptionId,
@@ -226,10 +240,42 @@ function projectHostedMemberStripeBillingLookup(
   };
 }
 
+function resolveHostedMemberStripeBillingLookup(
+  billingRefRecords: Array<HostedMemberBillingRef & { member: HostedMember }>,
+  matchedBy: HostedMemberStripeBillingLookupMatch,
+): HostedMemberStripeBillingLookup | null {
+  if (billingRefRecords.length === 0) {
+    return null;
+  }
+
+  const billingRefRecordByMemberId = new Map<string, HostedMemberBillingRef & { member: HostedMember }>();
+
+  for (const billingRefRecord of billingRefRecords) {
+    if (!billingRefRecordByMemberId.has(billingRefRecord.memberId)) {
+      billingRefRecordByMemberId.set(billingRefRecord.memberId, billingRefRecord);
+    }
+  }
+
+  if (billingRefRecordByMemberId.size !== 1) {
+    throw buildHostedStripeBillingLookupAmbiguousError(
+      matchedBy,
+      billingRefRecordByMemberId.size,
+    );
+  }
+
+  const [billingRefRecord] = [...billingRefRecordByMemberId.values()];
+  return projectHostedMemberStripeBillingLookup(billingRefRecord, matchedBy);
+}
+
 function buildHostedMemberBillingRefCreateData(
   input: HostedMemberStripeBillingRefWriteInput,
 ): Prisma.HostedMemberBillingRefUncheckedCreateInput {
   return {
+    ...(input.stripeEventCreatedAt !== undefined
+      ? {
+          lastStripeEventCreatedAt: input.stripeEventCreatedAt,
+        }
+      : {}),
     memberId: input.memberId,
     ...buildHostedMemberBillingPrivateColumns({
       memberId: input.memberId,
@@ -248,6 +294,9 @@ function buildHostedMemberBillingRefUpdateData(
 ): Prisma.HostedMemberBillingRefUncheckedUpdateInput {
   const data: Prisma.HostedMemberBillingRefUncheckedUpdateInput = {};
 
+  if (input.stripeEventCreatedAt !== undefined) {
+    data.lastStripeEventCreatedAt = input.stripeEventCreatedAt;
+  }
   if (input.stripeCustomerId !== undefined) {
     data.stripeCustomerLookupKey = createHostedStripeCustomerLookupKey(input.stripeCustomerId);
     data.stripeCustomerIdEncrypted = buildHostedMemberBillingPrivateColumns({
@@ -268,4 +317,112 @@ function buildHostedMemberBillingRefUpdateData(
   }
 
   return data;
+}
+
+async function assertHostedMemberStripeBillingIdentifiersAvailableTx(input: {
+  memberId: string;
+  stripeCustomerId?: string | null;
+  stripeSubscriptionId?: string | null;
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  const lockTokens = [
+    input.stripeCustomerId === undefined
+      ? null
+      : createHostedStripeCustomerLookupConflictLockToken(input.stripeCustomerId),
+    input.stripeSubscriptionId === undefined
+      ? null
+      : createHostedStripeSubscriptionLookupConflictLockToken(input.stripeSubscriptionId),
+  ].filter((token): token is string => Boolean(token));
+
+  for (const lockToken of [...new Set(lockTokens)].sort()) {
+    await lockHostedAdvisoryKey(input.tx, lockToken);
+  }
+
+  if (input.stripeCustomerId !== undefined) {
+    await assertHostedStripeBillingLookupCandidatesAvailableTx({
+      lookupKeys: createHostedStripeCustomerLookupKeyReadCandidates(input.stripeCustomerId),
+      memberId: input.memberId,
+      tx: input.tx,
+      violatedField: "stripeCustomerId",
+    });
+  }
+
+  if (input.stripeSubscriptionId !== undefined) {
+    await assertHostedStripeBillingLookupCandidatesAvailableTx({
+      lookupKeys: createHostedStripeSubscriptionLookupKeyReadCandidates(input.stripeSubscriptionId),
+      memberId: input.memberId,
+      tx: input.tx,
+      violatedField: "stripeSubscriptionId",
+    });
+  }
+}
+
+async function assertHostedStripeBillingLookupCandidatesAvailableTx(input: {
+  lookupKeys: string[];
+  memberId: string;
+  tx: Prisma.TransactionClient;
+  violatedField: HostedMemberStripeBillingLookupMatch;
+}): Promise<void> {
+  if (input.lookupKeys.length === 0) {
+    return;
+  }
+
+  const existingBindings = await input.tx.hostedMemberBillingRef.findMany({
+    where: input.violatedField === "stripeCustomerId"
+      ? {
+          stripeCustomerLookupKey: {
+            in: input.lookupKeys,
+          },
+        }
+      : {
+          stripeSubscriptionLookupKey: {
+            in: input.lookupKeys,
+          },
+        },
+    select: {
+      memberId: true,
+    },
+  });
+
+  const conflictingMemberIds = new Set(
+    existingBindings
+      .map((binding) => binding.memberId)
+      .filter((memberId) => memberId !== input.memberId),
+  );
+
+  if (conflictingMemberIds.size > 0) {
+    throw buildHostedStripeBillingIdentityConflictError(input.violatedField);
+  }
+}
+
+function buildHostedStripeBillingIdentityConflictError(
+  violatedField: HostedMemberStripeBillingLookupMatch,
+) {
+  return hostedOnboardingError({
+    code: "STRIPE_BILLING_IDENTITY_CONFLICT",
+    details: {
+      violatedField,
+    },
+    httpStatus: 500,
+    message:
+      "Stripe billing references matched a different Murph account during blind-index rotation. Repair the duplicate binding before retrying.",
+    retryable: true,
+  });
+}
+
+function buildHostedStripeBillingLookupAmbiguousError(
+  violatedField: HostedMemberStripeBillingLookupMatch,
+  matchCount: number,
+) {
+  return hostedOnboardingError({
+    code: "STRIPE_BILLING_LOOKUP_AMBIGUOUS",
+    details: {
+      matchCount,
+      violatedField,
+    },
+    httpStatus: 500,
+    message:
+      "Stripe billing lookup matched multiple Murph accounts during blind-index rotation. Repair the duplicate binding before retrying.",
+    retryable: true,
+  });
 }
