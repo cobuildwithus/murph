@@ -57,6 +57,7 @@ function makeActivityDay(date: string, provider: string, conflictingProviders: s
     date,
     dayStrain: makeMetric("dayStrain", 7.5),
     distanceKm: makeMetric("distanceKm", 5.2),
+    estimatedVo2Max: makeMetric("estimatedVo2Max", 48.6),
     notes: [],
     sessionCount: makeMetric("sessionCount", 1),
     sessionMinutes: makeMetric("sessionMinutes", 42),
