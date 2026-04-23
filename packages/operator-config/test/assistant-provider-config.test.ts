@@ -41,6 +41,7 @@ describe('assistant provider config runtime resolution', () => {
       via: 'vercel-ai-gateway',
       apiKeyEnv: null,
       baseUrl: null,
+      gatewayOnlyProviders: null,
       headers: null,
       model: 'openai/gpt-5.1',
       presetId: 'vercel-ai-gateway',
@@ -53,6 +54,37 @@ describe('assistant provider config runtime resolution', () => {
 
     const sessionOptions = serializeAssistantProviderSessionOptions(input)
     expect(sessionOptions.zeroDataRetention).toBe(true)
+  })
+
+  it('preserves Vercel AI Gateway provider-only routing filters', () => {
+    const input = {
+      provider: 'openai-compatible',
+      presetId: 'vercel-ai-gateway',
+      model: 'openai/gpt-5.4',
+      gatewayOnlyProviders: [' OpenAI ', 'azure', 'openai'],
+    } as const
+    const normalized = normalizeAssistantProviderConfig(input)
+
+    expect(
+      normalized.target.kind === 'responses'
+        ? normalized.target.gatewayOnlyProviders
+        : null,
+    ).toEqual(['openai', 'azure'])
+    expect(serializeAssistantProviderSessionOptions(input).gatewayOnlyProviders).toEqual([
+      'openai',
+      'azure',
+    ])
+
+    const nonGateway = normalizeAssistantProviderConfig({
+      ...input,
+      presetId: 'openai',
+      model: 'gpt-5.4',
+    })
+    expect(
+      nonGateway.target.kind === 'responses'
+        ? nonGateway.target.gatewayOnlyProviders
+        : null,
+    ).toBeNull()
   })
 
   it('resolves gateway openai models to the native-resume-capable runtime', () => {

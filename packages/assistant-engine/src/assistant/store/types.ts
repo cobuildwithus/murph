@@ -28,6 +28,7 @@ export interface CreateAssistantSessionInput extends AssistantSessionLocator {
   apiKeyEnv?: string | null
   baseUrl?: string | null
   codexHome?: string | null
+  gatewayOnlyProviders?: readonly string[] | null
   headers?: Record<string, string> | null
   model?: string | null
   now?: Date

@@ -106,6 +106,7 @@ Hosted assistant config:
 - `HOSTED_ASSISTANT_PROVIDER`
 - `HOSTED_ASSISTANT_MODEL`
 - `HOSTED_ASSISTANT_API_KEY_ENV`
+- `HOSTED_ASSISTANT_GATEWAY_ONLY_PROVIDERS`, for example `openai`, to restrict Vercel AI Gateway routing to specific provider slugs
 - `HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED` when delegated Vercel AI Gateway billing is enabled
 - the rest of the `HOSTED_ASSISTANT_*` profile vars when you want activation-time seeding of the platform-managed hosted assistant profile
 

@@ -112,6 +112,9 @@ export function buildResolveAssistantSessionInput(
         : null,
     ...(isAssistantOpenAICompatibleTargetConfig(providerConfig)
       ? {
+          ...(providerConfig.target.gatewayOnlyProviders
+            ? { gatewayOnlyProviders: providerConfig.target.gatewayOnlyProviders }
+            : {}),
           presetId: providerConfig.target.presetId,
           webSearch: providerConfig.policy.webSearch,
           zeroDataRetention: providerConfig.policy.zeroDataRetention ?? null,

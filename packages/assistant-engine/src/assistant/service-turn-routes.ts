@@ -26,6 +26,7 @@ export type AssistantTurnRouteOverride = Pick<
   | 'baseUrl'
   | 'codexCommand'
   | 'codexHome'
+  | 'gatewayOnlyProviders'
   | 'headers'
   | 'model'
   | 'oss'
@@ -114,6 +115,12 @@ export function selectAssistantTurnRouteOverride(
       baseUrl: selectedRoute.providerOptions.baseUrl ?? null,
       codexCommand: selectedRoute.codexCommand ?? undefined,
       codexHome: selectedRoute.providerOptions.codexHome ?? null,
+      ...(selectedRoute.providerOptions.gatewayOnlyProviders
+        ? {
+            gatewayOnlyProviders:
+              selectedRoute.providerOptions.gatewayOnlyProviders,
+          }
+        : {}),
       headers: selectedRoute.providerOptions.headers ?? null,
       model: selectedRoute.providerOptions.model ?? null,
       oss: selectedRoute.providerOptions.oss,

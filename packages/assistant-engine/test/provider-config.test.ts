@@ -9,6 +9,7 @@ describe('assistant provider config model spec', () => {
       model: 'openai/gpt-5.4',
       presetId: 'vercel-ai-gateway',
       provider: 'openai-compatible',
+      gatewayOnlyProviders: ['openai'],
       zeroDataRetention: true,
     })
 
@@ -17,6 +18,7 @@ describe('assistant provider config model spec', () => {
       executionDriver: 'responses',
       model: 'openai/gpt-5.4',
       responsesRequestPolicy: {
+        gatewayOnlyProviders: ['openai'],
         gatewayZeroDataRetention: true,
       },
     })

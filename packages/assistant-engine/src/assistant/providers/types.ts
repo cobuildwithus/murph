@@ -91,6 +91,7 @@ export interface AssistantProviderTurnInput {
     role: 'assistant' | 'user'
   }>
   env?: NodeJS.ProcessEnv
+  gatewayOnlyProviders?: readonly string[] | null
   headers?: Record<string, string> | null
   model?: string | null
   onEvent?: ((event: AssistantProviderProgressEvent) => void) | null

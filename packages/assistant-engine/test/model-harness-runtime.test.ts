@@ -301,6 +301,7 @@ describe('model harness runtime helpers', () => {
       model: 'openai/gpt-5.4',
       providerName: 'vercel-ai-gateway',
       responsesRequestPolicy: {
+        gatewayOnlyProviders: ['openai'],
         gatewayZeroDataRetention: true,
       },
     })
@@ -327,6 +328,7 @@ describe('model harness runtime helpers', () => {
     const injectedBody = JSON.parse(String(firstFetchCall?.[1]?.body))
     expect(injectedBody.providerOptions).toEqual({
       gateway: {
+        only: ['openai'],
         zeroDataRetention: true,
       },
       openai: {

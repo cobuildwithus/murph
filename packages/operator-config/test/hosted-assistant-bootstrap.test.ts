@@ -46,6 +46,7 @@ test('hosted assistant config parsing and readiness helpers normalize expected s
   const hostedConfigModule = await loadHostedAssistantModule()
   const {
     HOSTED_ASSISTANT_API_KEY_ENV,
+    HOSTED_ASSISTANT_GATEWAY_ONLY_PROVIDERS_ENV,
     HOSTED_ASSISTANT_ZERO_DATA_RETENTION_ENV,
     compileHostedAssistantProfileProviderConfig,
     isHostedAssistantProfileReady,
@@ -90,31 +91,38 @@ test('hosted assistant config parsing and readiness helpers normalize expected s
   assert.equal(tryParseHostedAssistantConfig('bad-json-shape'), null)
   assert.deepEqual(prepareHostedAssistantConfigForWrite(config), config)
   assert.equal(readHostedAssistantApiKeyEnvName({ [HOSTED_ASSISTANT_API_KEY_ENV]: ' OPENAI_API_KEY ' }), 'OPENAI_API_KEY')
-  assert.equal(
-    prepareHostedAssistantConfigForWrite(
-      createHostedAssistantConfig({
-        activeProfileId: 'zdr',
-        profiles: [
-          createHostedAssistantProfile({
-            id: 'zdr',
-            providerConfig: {
-              provider: 'openai-compatible',
-              apiKeyEnv: 'VERCEL_AI_API_KEY',
-              baseUrl: 'https://ai-gateway.vercel.sh/v1',
-              model: 'openai/gpt-5.4',
-              presetId: 'vercel-ai-gateway',
-              zeroDataRetention: true,
-            },
-          }),
-        ],
-      }),
-    )?.profiles[0]?.target.zeroDataRetention,
-    true,
+  const preparedGatewayConfig = prepareHostedAssistantConfigForWrite(
+    createHostedAssistantConfig({
+      activeProfileId: 'gateway',
+      profiles: [
+        createHostedAssistantProfile({
+          id: 'gateway',
+          providerConfig: {
+            provider: 'openai-compatible',
+            apiKeyEnv: 'VERCEL_AI_API_KEY',
+            baseUrl: 'https://ai-gateway.vercel.sh/v1',
+            model: 'openai/gpt-5.4',
+            presetId: 'vercel-ai-gateway',
+            gatewayOnlyProviders: ['openai'],
+            zeroDataRetention: true,
+          },
+        }),
+      ],
+    }),
+  )
+  assert.equal(preparedGatewayConfig?.profiles[0]?.target.zeroDataRetention, true)
+  assert.deepEqual(
+    preparedGatewayConfig?.profiles[0]?.target.gatewayOnlyProviders,
+    ['openai'],
   )
   assert.equal(readHostedAssistantApiKeyEnvName({ [HOSTED_ASSISTANT_API_KEY_ENV]: '   ' }), null)
   assert.equal(
     HOSTED_ASSISTANT_ZERO_DATA_RETENTION_ENV,
     'HOSTED_ASSISTANT_ZERO_DATA_RETENTION',
+  )
+  assert.equal(
+    HOSTED_ASSISTANT_GATEWAY_ONLY_PROVIDERS_ENV,
+    'HOSTED_ASSISTANT_GATEWAY_ONLY_PROVIDERS',
   )
   assert.deepEqual(resolveHostedAssistantProfile(config, ' platform-default '), readyProfile)
   assert.equal(resolveHostedAssistantProfile(config, 'missing'), null)
@@ -246,6 +254,7 @@ test('hosted assistant bootstrap reads process env and accepts valid boolean and
     env: {
       HOSTED_ASSISTANT_PROVIDER: 'vercel-ai-gateway',
       HOSTED_ASSISTANT_MODEL: 'openai/gpt-5.4',
+      HOSTED_ASSISTANT_GATEWAY_ONLY_PROVIDERS: ' openai,openai ',
     },
   })
 
@@ -259,6 +268,11 @@ test('hosted assistant bootstrap reads process env and accepts valid boolean and
     hostedConfigModule.saveHostedAssistantConfig.mock.calls[1]?.[0]?.profiles?.[0]?.target
       ?.zeroDataRetention,
     true,
+  )
+  assert.deepEqual(
+    hostedConfigModule.saveHostedAssistantConfig.mock.calls[1]?.[0]?.profiles?.[0]?.target
+      ?.gatewayOnlyProviders,
+    ['openai'],
   )
 
   const gatewaySeedWithoutZdr = await hostedConfigModule.ensureHostedAssistantOperatorDefaults({
@@ -296,6 +310,24 @@ test('hosted assistant bootstrap reads process env and accepts valid boolean and
       error instanceof hostedConfigModule.HostedAssistantConfigurationError &&
       error.code === 'HOSTED_ASSISTANT_CONFIG_INVALID' &&
       /HOSTED_ASSISTANT_ZERO_DATA_RETENTION can be used only with a hosted target that enforces zero data retention/u.test(
+        error.message,
+      ),
+  )
+
+  await assert.rejects(
+    () =>
+      hostedConfigModule.ensureHostedAssistantOperatorDefaults({
+        allowMissing: false,
+        env: {
+          HOSTED_ASSISTANT_PROVIDER: 'openai',
+          HOSTED_ASSISTANT_MODEL: 'gpt-5',
+          HOSTED_ASSISTANT_GATEWAY_ONLY_PROVIDERS: 'openai',
+        },
+      }),
+    (error) =>
+      error instanceof hostedConfigModule.HostedAssistantConfigurationError &&
+      error.code === 'HOSTED_ASSISTANT_CONFIG_INVALID' &&
+      /HOSTED_ASSISTANT_GATEWAY_ONLY_PROVIDERS can be used only with Vercel AI Gateway/u.test(
         error.message,
       ),
   )

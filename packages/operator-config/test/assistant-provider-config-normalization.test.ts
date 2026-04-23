@@ -13,6 +13,7 @@ describe('assistant provider config normalization', () => {
         kind: 'openai-compatible',
         apiKeyEnv: 'VERCEL_AI_API_KEY',
         baseUrl: 'https://ai-gateway.vercel.sh/v1',
+        gatewayOnlyProviders: null,
         headers: null,
         model: 'openai/gpt-5',
         presetId: 'openrouter',

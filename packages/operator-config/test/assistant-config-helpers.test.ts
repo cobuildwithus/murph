@@ -155,6 +155,7 @@ test('assistant provider config helpers infer, merge, compact, and serialize by 
         via: 'openai',
         apiKeyEnv: 'OPENAI_API_KEY',
         baseUrl: 'https://api.openai.com/v1',
+        gatewayOnlyProviders: null,
         headers: {
           Authorization: 'Bearer secret-value-1234',
           'X-Trace-Id': 'trace-id',

@@ -767,6 +767,7 @@ describe('openAiCompatibleProviderDefinition.executeTurn', () => {
         provider: 'openai-compatible',
         apiKeyEnv: 'VERCEL_AI_API_KEY',
         baseUrl: 'https://ai-gateway.vercel.sh/v1',
+        gatewayOnlyProviders: ['openai'],
         model: 'openai/gpt-5.4',
         presetId: 'vercel-ai-gateway',
         providerName: 'vercel-ai-gateway',
@@ -801,6 +802,7 @@ describe('openAiCompatibleProviderDefinition.executeTurn', () => {
         model: 'openai/gpt-5.4',
         providerName: 'vercel-ai-gateway',
         responsesRequestPolicy: expect.objectContaining({
+          gatewayOnlyProviders: ['openai'],
           gatewayZeroDataRetention: true,
         }),
       }),
@@ -820,6 +822,7 @@ describe('openAiCompatibleProviderDefinition.executeTurn', () => {
       },
       providerOptions: {
         gateway: expect.objectContaining({
+          only: ['openai'],
           zeroDataRetention: true,
         }),
         openai: {

@@ -500,6 +500,7 @@ describe("hosted deploy automation device-sync surface", () => {
       expect.arrayContaining([
         "GARMIN_API_BASE_URL",
         "HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED",
+        "HOSTED_ASSISTANT_GATEWAY_ONLY_PROVIDERS",
         "WHOOP_SCOPES",
       ]),
     );

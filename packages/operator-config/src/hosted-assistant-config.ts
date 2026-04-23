@@ -24,6 +24,7 @@ import {
   type SetupAssistantProviderPreset,
 } from './assistant/openai-compatible-provider-presets.js'
 import { resolveAssistantRuntimeTarget } from './assistant/target-runtime.js'
+import { isAssistantVercelAIGatewayBaseUrl } from './assistant/shared.js'
 import type { AssistantProviderConfigInput } from './assistant/provider-config.js'
 import {
   readOperatorConfig,
@@ -36,6 +37,7 @@ import {
   HOSTED_ASSISTANT_BASE_URL_ENV,
   HOSTED_ASSISTANT_CODEX_COMMAND_ENV,
   HOSTED_ASSISTANT_CONFIG_ENV_NAMES,
+  HOSTED_ASSISTANT_GATEWAY_ONLY_PROVIDERS_ENV,
   HOSTED_ASSISTANT_MODEL_ENV,
   HOSTED_ASSISTANT_OSS_ENV,
   HOSTED_ASSISTANT_PROFILE_ENV,
@@ -53,6 +55,7 @@ export {
   HOSTED_ASSISTANT_BASE_URL_ENV,
   HOSTED_ASSISTANT_CODEX_COMMAND_ENV,
   HOSTED_ASSISTANT_CONFIG_ENV_NAMES,
+  HOSTED_ASSISTANT_GATEWAY_ONLY_PROVIDERS_ENV,
   HOSTED_ASSISTANT_MODEL_ENV,
   HOSTED_ASSISTANT_OSS_ENV,
   HOSTED_ASSISTANT_PROFILE_ENV,
@@ -108,6 +111,7 @@ interface HostedAssistantRawEnvConfig {
   approvalPolicy: AssistantApprovalPolicy | null
   baseUrl: string | null
   codexCommand: string | null
+  gatewayOnlyProviders: readonly string[] | null
   model: string | null
   oss: boolean | null
   profile: string | null
@@ -463,6 +467,7 @@ function resolveHostedAssistantSeedPlan(
     provider: 'openai-compatible',
     apiKeyEnv: raw.apiKeyEnv ?? providerSelection.presetApiKeyEnv,
     baseUrl,
+    gatewayOnlyProviders: raw.gatewayOnlyProviders,
     model: raw.model,
     presetId: providerSelection.presetId,
     providerName: raw.providerName ?? providerSelection.presetProviderName,
@@ -477,6 +482,20 @@ function resolveHostedAssistantSeedPlan(
     )
   }
 
+  if (
+    raw.gatewayOnlyProviders &&
+    !isHostedAssistantVercelAiGatewayTarget({
+      baseUrl,
+      presetId: providerSelection.presetId,
+      providerName: raw.providerName ?? providerSelection.presetProviderName,
+    })
+  ) {
+    throw new HostedAssistantConfigurationError(
+      'HOSTED_ASSISTANT_CONFIG_INVALID',
+      `${HOSTED_ASSISTANT_GATEWAY_ONLY_PROVIDERS_ENV} can be used only with Vercel AI Gateway hosted assistant targets.`,
+    )
+  }
+
   const zeroDataRetention = runtimeTarget.supportsZeroDataRetention
     ? (raw.zeroDataRetention ?? true)
     : raw.zeroDataRetention
@@ -486,6 +505,9 @@ function resolveHostedAssistantSeedPlan(
       provider: 'openai-compatible',
       apiKeyEnv: raw.apiKeyEnv ?? providerSelection.presetApiKeyEnv,
       baseUrl,
+      ...(raw.gatewayOnlyProviders
+        ? { gatewayOnlyProviders: raw.gatewayOnlyProviders }
+        : {}),
       model: raw.model,
       presetId: providerSelection.presetId,
       providerName: raw.providerName ?? providerSelection.presetProviderName,
@@ -515,6 +537,9 @@ function readHostedAssistantRawEnvConfig(
       normalizeHostedAssistantString(source[HOSTED_ASSISTANT_BASE_URL_ENV]),
     ),
     codexCommand: normalizeHostedAssistantString(source[HOSTED_ASSISTANT_CODEX_COMMAND_ENV]),
+    gatewayOnlyProviders: parseHostedAssistantGatewayOnlyProviders(
+      source[HOSTED_ASSISTANT_GATEWAY_ONLY_PROVIDERS_ENV],
+    ),
     model: normalizeHostedAssistantString(source[HOSTED_ASSISTANT_MODEL_ENV]),
     oss: parseHostedAssistantBoolean(rawOss, HOSTED_ASSISTANT_OSS_ENV),
     profile: normalizeHostedAssistantString(source[HOSTED_ASSISTANT_PROFILE_ENV]),
@@ -545,6 +570,7 @@ function readHostedAssistantRawEnvConfig(
       values.apiKeyEnv,
       values.providerName,
       values.codexCommand,
+      values.gatewayOnlyProviders,
       values.approvalPolicy,
       values.sandbox,
       values.profile,
@@ -632,6 +658,18 @@ function resolveHostedAssistantProviderPreset(providerToken: string): {
   }
 }
 
+function isHostedAssistantVercelAiGatewayTarget(input: {
+  baseUrl: string | null
+  presetId: SetupAssistantProviderPreset | null
+  providerName: string | null
+}): boolean {
+  return (
+    input.presetId === 'vercel-ai-gateway' ||
+    input.providerName?.toLowerCase() === 'vercel-ai-gateway' ||
+    isAssistantVercelAIGatewayBaseUrl(input.baseUrl)
+  )
+}
+
 function normalizeHostedAssistantString(value: unknown): string | null {
   if (typeof value !== 'string') {
     return null
@@ -639,6 +677,46 @@ function normalizeHostedAssistantString(value: unknown): string | null {
 
   const normalized = value.trim()
   return normalized.length > 0 ? normalized : null
+}
+
+function parseHostedAssistantGatewayOnlyProviders(
+  value: string | undefined,
+): readonly string[] | null {
+  const raw = normalizeHostedAssistantString(value)
+
+  if (raw === null) {
+    return null
+  }
+
+  const seen = new Set<string>()
+  const providers: string[] = []
+
+  for (const token of raw.split(',')) {
+    const normalized = normalizeHostedAssistantString(token)?.toLowerCase() ?? null
+
+    if (!normalized || !/^[a-z0-9][a-z0-9._-]*$/u.test(normalized)) {
+      throw new HostedAssistantConfigurationError(
+        'HOSTED_ASSISTANT_CONFIG_INVALID',
+        `${HOSTED_ASSISTANT_GATEWAY_ONLY_PROVIDERS_ENV} must be a comma-separated list of Vercel AI Gateway provider slugs.`,
+      )
+    }
+
+    if (seen.has(normalized)) {
+      continue
+    }
+
+    seen.add(normalized)
+    providers.push(normalized)
+  }
+
+  if (providers.length === 0) {
+    throw new HostedAssistantConfigurationError(
+      'HOSTED_ASSISTANT_CONFIG_INVALID',
+      `${HOSTED_ASSISTANT_GATEWAY_ONLY_PROVIDERS_ENV} must include at least one provider slug when set.`,
+    )
+  }
+
+  return providers
 }
 
 function parseHostedAssistantBoolean(

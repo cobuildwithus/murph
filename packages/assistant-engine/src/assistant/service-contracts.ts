@@ -47,6 +47,7 @@ export interface AssistantSessionResolutionFields {
   codexHome?: string | null
   deliveryKind?: AssistantBindingDeliveryKind | null
   conversation?: ConversationRef | null
+  gatewayOnlyProviders?: readonly string[] | null
   headers?: Record<string, string> | null
   identityId?: string | null
   maxSessionAgeMs?: number | null

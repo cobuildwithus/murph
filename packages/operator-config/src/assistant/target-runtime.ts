@@ -33,6 +33,7 @@ export interface AssistantRuntimeResolutionInput {
   approvalPolicy?: string | null
   baseUrl?: string | null
   codexHome?: string | null
+  gatewayOnlyProviders?: readonly string[] | null
   headers?: Record<string, string> | null
   model?: string | null
   oss?: boolean | null
@@ -51,6 +52,7 @@ export interface AssistantRuntimeResolutionInput {
         profile?: string | null
         baseUrl?: never
         apiKeyEnv?: never
+        gatewayOnlyProviders?: never
         providerName?: never
         presetId?: never
         headers?: never
@@ -60,6 +62,7 @@ export interface AssistantRuntimeResolutionInput {
         model?: string | null
         baseUrl?: string | null
         apiKeyEnv?: string | null
+        gatewayOnlyProviders?: readonly string[] | null
         providerName?: string | null
         presetId?: string | null
         headers?: Record<string, string> | null
@@ -198,6 +201,7 @@ export function resolveAssistantRuntimeTarget(
       input?.target && input.target.kind !== 'codex-cli'
         ? input.target.headers
         : input?.headers,
+    gatewayOnlyProviders: readAssistantRuntimeGatewayOnlyProviders(input),
     model: input?.target?.model ?? input?.model,
     presetId,
     provider: 'openai-compatible',
@@ -369,10 +373,21 @@ function buildAssistantContinuityFingerprint(
     baseUrl: normalizeNullableString(input.baseUrl),
     apiKeyEnv: normalizeNullableString(input.apiKeyEnv),
     providerName: normalizeNullableString(input.providerName),
+    gatewayOnlyProviders: serializeStringList(input.gatewayOnlyProviders),
     headers: serializeHeaders(input.headers),
     zeroDataRetention: input.zeroDataRetention === true,
     webSearch: input.webSearch ?? 'auto',
   })
+}
+
+function readAssistantRuntimeGatewayOnlyProviders(
+  input: AssistantRuntimeResolutionInput | null | undefined,
+): readonly string[] | null {
+  if (input?.target && input.target.kind !== 'codex-cli') {
+    return normalizeStringList(input.target.gatewayOnlyProviders)
+  }
+
+  return normalizeStringList(input?.gatewayOnlyProviders)
 }
 
 function serializeHeaders(
@@ -383,6 +398,37 @@ function serializeHeaders(
   }
 
   return Object.entries(value).sort(([left], [right]) => left.localeCompare(right))
+}
+
+function serializeStringList(
+  value: readonly string[] | null | undefined,
+): readonly string[] {
+  return [...normalizeStringList(value)].sort((left, right) =>
+    left.localeCompare(right),
+  )
+}
+
+function normalizeStringList(
+  value: readonly string[] | null | undefined,
+): readonly string[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  const seen = new Set<string>()
+  const normalizedValues: string[] = []
+
+  for (const item of value) {
+    const normalized = normalizeNullableString(item)?.toLowerCase() ?? null
+    if (!normalized || seen.has(normalized)) {
+      continue
+    }
+
+    seen.add(normalized)
+    normalizedValues.push(normalized)
+  }
+
+  return normalizedValues
 }
 
 function resolveAssistantRuntimeResolutionProvider(
