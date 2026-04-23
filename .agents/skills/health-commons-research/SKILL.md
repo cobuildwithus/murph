@@ -46,6 +46,13 @@ The current repo flow is:
 
 The scaffold currently automates the early phases best. Later phases may still require the agent to materialize concrete prompt files and command wrappers from templates already present in the workspace.
 
+When a later seam is still template-only:
+
+- replace the `TODO_*` placeholders in the relevant `prompts/*.template.md`
+- write the concrete prompt beside it as `prompts/<label>.md`
+- create matching `commands/<label>.send.sh` and `commands/<label>.harvest.sh` wrappers using the same `_run-review-gpt.sh send|harvest` contract as discovery seams
+- then run `send`, wait, and `harvest` normally
+
 Timing expectations:
 
 - Research runs are allowed to take a long time.
@@ -70,6 +77,12 @@ For each research workspace, expect:
 - `scripts/package-research-context.sh`
 
 Research runs should use the workspace-specific config and isolated research browser profile, not the default personal `review:gpt` browser session.
+
+If you need another parallel browser lane, a shared profile bundle under `output-packages/review-gpt-profiles/<name>/` is a valid pattern. The useful pieces are:
+
+- `open-chatgpt.sh` to open ChatGPT in that profile for manual sign-in
+- `review-gpt.<name>.config.sh` plus `review-gpt.sh` for direct `review:gpt` use on that lane
+- `run-research.sh` to prefix workspace `commands/*.send.sh` or `*.harvest.sh` with the right `RESEARCH_MANAGED_BROWSER_*` overrides
 
 Important current behavior:
 
