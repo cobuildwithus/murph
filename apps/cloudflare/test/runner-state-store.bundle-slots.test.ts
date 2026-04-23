@@ -87,13 +87,19 @@ class SqliteDurableObjectSqlStorage {
   }
 }
 
-function createDurableObjectState(db: DatabaseSync): DurableObjectStateLike {
+function createDurableObjectState(
+  db: DatabaseSync,
+  values: Map<string, unknown> = new Map(),
+): DurableObjectStateLike {
   return {
     storage: {
+      delete: async (key) => values.delete(key),
       deleteAlarm: async () => {},
-      get: async () => undefined,
+      get: async <T,>(key: string) => values.get(key) as T | undefined,
       getAlarm: async () => null,
-      put: async () => {},
+      put: async (key, value) => {
+        values.set(key, value);
+      },
       setAlarm: async () => {},
       sql: new SqliteDurableObjectSqlStorage(db),
     },
@@ -102,19 +108,26 @@ function createDurableObjectState(db: DatabaseSync): DurableObjectStateLike {
 
 function createRunnerStateStoreHarness(setup?: (db: DatabaseSync) => void): {
   db: DatabaseSync;
+  storageValues: Map<string, unknown>;
   store: RunnerStateStore;
 } {
   const db = new DatabaseSync(":memory:");
+  const storageValues = new Map<string, unknown>();
   setup?.(db);
 
   return {
     db,
-    store: new RunnerStateStore(createDurableObjectState(db)),
+    storageValues,
+    store: new RunnerStateStore(createDurableObjectState(db, storageValues)),
   };
 }
 
 function createRunnerStateStoreFromDb(db: DatabaseSync): RunnerStateStore {
   return new RunnerStateStore(createDurableObjectState(db));
+}
+
+function pendingRunCleanupStorageKey(runId: string): string {
+  return `runner:pending-cleanup:${runId}`;
 }
 
 function makeBundleRef(key: string): HostedExecutionBundleRef {
@@ -217,5 +230,28 @@ describe("RunnerStateStore bundle cache", () => {
       active_run_attempt: null,
       active_run_started_at: null,
     });
+  });
+});
+
+describe("RunnerStateStore pending cleanup sidecar", () => {
+  it("deletes the stored cleanup key instead of leaving a null tombstone", async () => {
+    const { storageValues, store } = createRunnerStateStoreHarness();
+    const runId = "run-cleanup";
+
+    await store.writePendingRunCleanup(runId, {
+      emailMessages: [],
+      linqMessageIds: ["linq-1"],
+      telegramMessages: [],
+    });
+    expect(storageValues.get(pendingRunCleanupStorageKey(runId))).toEqual({
+      emailMessages: [],
+      linqMessageIds: ["linq-1"],
+      telegramMessages: [],
+    });
+
+    await store.clearPendingRunCleanup(runId);
+
+    expect(storageValues.has(pendingRunCleanupStorageKey(runId))).toBe(false);
+    await expect(store.readPendingRunCleanup(runId)).resolves.toBeNull();
   });
 });

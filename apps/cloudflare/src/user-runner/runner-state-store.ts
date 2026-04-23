@@ -277,7 +277,7 @@ export class RunnerStateStore {
   }
 
   async clearPendingRunCleanup(runId: string): Promise<void> {
-    await this.state.storage.put(pendingRunCleanupStorageKey(runId), null);
+    await this.state.storage.delete(pendingRunCleanupStorageKey(runId));
   }
 
   private readStateSync(): RunnerStateRecord {
