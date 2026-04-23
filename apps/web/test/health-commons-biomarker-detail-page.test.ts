@@ -1,6 +1,6 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   healthCommonsCatalogSchema,
   type HealthCommonsCatalog,
@@ -54,10 +54,61 @@ function createFixtureCatalog(): HealthCommonsCatalog {
 }
 
 describe("BiomarkerPage", () => {
-  it("publishes only the production-ready RHR biomarker route", () => {
+  beforeEach(() => {
+    mocks.biomarkerPageClient.mockClear();
+    mocks.notFound.mockClear();
+  });
+
+  it("publishes the production-ready biomarker routes", () => {
     expect(generateStaticParams()).toEqual([
+      { biomarkerId: "rem-sleep-minutes" },
       { biomarkerId: "resting-heart-rate" },
     ]);
+  });
+
+  it("resolves the REM sleep biomarker page model", async () => {
+    const element = await BiomarkerPage({
+      params: Promise.resolve({
+        biomarkerId: "rem-sleep-minutes",
+      }),
+    });
+    const markup = renderToStaticMarkup(element);
+
+    expect(mocks.biomarkerPageClient).toHaveBeenCalledTimes(1);
+    const clientBiomarker = mocks.biomarkerPageClient.mock.calls.at(-1)?.[0]
+      ?.biomarker as BiomarkerPageModel;
+
+    expect(clientBiomarker).toEqual(expect.objectContaining({
+      key: "biomarker:rem-sleep-minutes",
+      routeId: "rem-sleep-minutes",
+      shortName: "REM",
+      title: "REM Sleep Minutes",
+    }));
+    expect(clientBiomarker.privateMetricBindings).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        domain: "sleep",
+        metric: "remMinutes",
+        preferred: true,
+        source: "browser_vault_metric",
+      }),
+    ]));
+    expect(clientBiomarker.protocolRankings).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        href: "/experiments/red-light-glasses-before-bed",
+        title: "Red-Light Glasses Before Bed",
+      }),
+      expect.objectContaining({
+        href: "/experiments/finnish-sauna",
+        title: "Finnish Dry Sauna",
+      }),
+      expect.objectContaining({
+        href: "/experiments/norwegian-4x4",
+        title: "Norwegian 4x4 Intervals",
+      }),
+    ]));
+    expect(markup).toContain('data-biomarker-id="rem-sleep-minutes"');
+    expect(markup).toContain('data-biomarker-key="biomarker:rem-sleep-minutes"');
+    expect(markup).toContain("REM Sleep Minutes");
   });
 
   it("resolves the resting-heart-rate biomarker page model", async () => {
@@ -203,7 +254,10 @@ describe("BiomarkerPage", () => {
 
     const reader = createHealthCommonsCatalogReader(catalog);
 
-    expect(listHealthCommonsBiomarkerRoutes(reader)).toEqual(["resting-heart-rate"]);
+    expect(listHealthCommonsBiomarkerRoutes(reader)).toEqual([
+      "rem-sleep-minutes",
+      "resting-heart-rate",
+    ]);
     expect(resolveHealthCommonsBiomarkerDetail("incomplete-rhr-fixture", reader)).toBeNull();
   });
 });

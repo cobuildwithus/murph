@@ -827,6 +827,34 @@
         "source_artifact:pmid-30376749",
         "source_artifact:pmid-39256000"
       ]
+    },
+    {
+      "affectedFields": [
+        "biomarker",
+        "relations",
+        "protocolRanking",
+        "communityOutcomeSummary",
+        "sources/rem-sleep",
+        "generated.catalog"
+      ],
+      "changeId": "chg_2026_04_23_rem_sleep_minutes_biomarker_seed",
+      "changeType": "seed",
+      "editSummary": "Seeded a REM sleep minutes biomarker page with wearable REM interpretation guidance, private metric bindings, protocol ranking, community-outcome placeholder, and source-backed measurement caveats.",
+      "entityKey": "biomarker:rem-sleep-minutes",
+      "minor": false,
+      "rationale": "REM sleep appears in wearable sleep dashboards and Murph sleep experiments, but it needs conservative, source-backed interpretation because PSG-defined REM is biologically real while consumer REM-stage estimates are noisy.",
+      "reviewStatus": "proposed",
+      "schemaVersion": "murph.commons.change.v1",
+      "sourceKeys": [
+        "source_artifact:aasm-scoring-manual-v3",
+        "source_artifact:ncbi-sleep-physiology-rem",
+        "source_artifact:pmid-33378539",
+        "source_artifact:pmid-37917155",
+        "source_artifact:pmid-38276327",
+        "source_artifact:pmid-39460013",
+        "source_artifact:pmid-32628261",
+        "source_artifact:doi-10.3389-fcvm.2022.771280"
+      ]
     }
   ]
 }

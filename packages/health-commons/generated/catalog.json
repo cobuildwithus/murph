@@ -1576,7 +1576,7 @@
       "schemaVersion": "murph.commons.artifact-manifest.v1"
     }
   ],
-  "catalogHash": "sha256:5dbea613227c0f71063666ae608b6525ef5f1bfea66be9ebbbba85d0ef13dae4",
+  "catalogHash": "sha256:f0b6e1b386e5c4ab65bc825514d2cafd197739e989d4e7755ea7d86ecf46e2b0",
   "changes": [
     {
       "affectedFields": [
@@ -2405,6 +2405,34 @@
         "source_artifact:pmid-30376749",
         "source_artifact:pmid-39256000"
       ]
+    },
+    {
+      "affectedFields": [
+        "biomarker",
+        "relations",
+        "protocolRanking",
+        "communityOutcomeSummary",
+        "sources/rem-sleep",
+        "generated.catalog"
+      ],
+      "changeId": "chg_2026_04_23_rem_sleep_minutes_biomarker_seed",
+      "changeType": "seed",
+      "editSummary": "Seeded a REM sleep minutes biomarker page with wearable REM interpretation guidance, private metric bindings, protocol ranking, community-outcome placeholder, and source-backed measurement caveats.",
+      "entityKey": "biomarker:rem-sleep-minutes",
+      "minor": false,
+      "rationale": "REM sleep appears in wearable sleep dashboards and Murph sleep experiments, but it needs conservative, source-backed interpretation because PSG-defined REM is biologically real while consumer REM-stage estimates are noisy.",
+      "reviewStatus": "proposed",
+      "schemaVersion": "murph.commons.change.v1",
+      "sourceKeys": [
+        "source_artifact:aasm-scoring-manual-v3",
+        "source_artifact:ncbi-sleep-physiology-rem",
+        "source_artifact:pmid-33378539",
+        "source_artifact:pmid-37917155",
+        "source_artifact:pmid-38276327",
+        "source_artifact:pmid-39460013",
+        "source_artifact:pmid-32628261",
+        "source_artifact:doi-10.3389-fcvm.2022.771280"
+      ]
     }
   ],
   "entities": [
@@ -2617,6 +2645,230 @@
       "summary": "An optional home blood-pressure marker that can add real signal to the dry-sauna experiment when the same cuff, posture, and timing are used consistently.",
       "title": "Morning Blood Pressure",
       "unit": "mmHg"
+    },
+    {
+      "aliases": [
+        "REM sleep",
+        "rapid eye movement sleep",
+        "REM duration",
+        "REM minutes"
+      ],
+      "biomarker": {
+        "direction": {
+          "desired": "mixed_or_contextual",
+          "label": "Enough REM opportunity matters; more is not automatically better.",
+          "nuance": "REM is concentrated later in the night, so low REM often reflects curtailed sleep, early wake time, fragmentation, alcohol, medications, sleep apnea, circadian disruption, or device classification changes rather than a simple deficit to hack."
+        },
+        "displayName": "REM Sleep Minutes",
+        "explainerCards": [
+          {
+            "body": "REM sleep is a recurring sleep stage marked in the lab by rapid eye movements, low muscle tone, and an activated EEG pattern. Consumer wearables usually report an inferred REM duration for each sleep episode.",
+            "title": "What it is"
+          },
+          {
+            "body": "REM is tied to dreaming, emotion processing, memory-related physiology, and autonomic changes. Cohort studies link lower PSG-measured REM percentage with adverse outcomes, but those findings are associations, not proof that chasing a higher wearable REM number improves health.",
+            "title": "Why people care"
+          },
+          {
+            "body": "Read REM alongside total sleep time, sleep efficiency, awakenings, bedtime, wake time, and subjective sleep quality. A stable multi-night shift is more meaningful than a single low or high REM night.",
+            "title": "How to read it"
+          },
+          {
+            "body": "Short sleep opportunity, early alarms, alcohol, some medications, sleep apnea, CPAP initiation, withdrawal from REM-suppressing substances, stress, circadian disruption, illness, and device algorithm changes can all move the number.",
+            "title": "What moves it"
+          }
+        ],
+        "measurement": {
+          "bestContext": "Use the same wearable across a baseline and intervention window, preferably with at least a week of nights and notes on sleep opportunity, alcohol, medications, travel, illness, and sleep-disordered-breathing context.",
+          "confounders": [
+            "short sleep opportunity",
+            "early alarm",
+            "alcohol",
+            "cannabis or substance withdrawal",
+            "antidepressants or REM-suppressing medications",
+            "sleep apnea or breathing disruption",
+            "CPAP initiation",
+            "stress",
+            "circadian misalignment",
+            "travel or jet lag",
+            "illness or fever",
+            "fragmented sleep",
+            "naps",
+            "device or algorithm change"
+          ],
+          "howToMeasure": [
+            "Keep the same device, firmware family, and dominant sleep record source when comparing baseline to intervention windows.",
+            "Prefer 7-to-30-day medians over one-night values because REM is later-night weighted and sensitive to fragmentation.",
+            "Interpret REM minutes together with total sleep minutes and REM percent; a higher REM total after simply sleeping longer is different from a cleaner sleep-architecture shift.",
+            "Flag nights with alcohol, unusual medication changes, cannabis or sedative changes, CPAP changes, illness, travel, shift work, naps, or very early alarms.",
+            "Treat persistent very low REM, dream-enactment behavior, severe snoring, witnessed apneas, or disabling sleepiness as reasons to discuss clinical sleep evaluation rather than self-optimizing from wearable data."
+          ]
+        },
+        "privateMetricBindings": [
+          {
+            "domain": "sleep",
+            "metric": "remMinutes",
+            "preferred": true,
+            "source": "browser_vault_metric",
+            "unit": "minutes"
+          },
+          {
+            "accessor": "sleep.remMinutes",
+            "source": "browser_vault_signal_summary",
+            "unit": "minutes"
+          }
+        ],
+        "shortName": "REM",
+        "trendDefaults": {
+          "aggregation": "median",
+          "comparisonWindowDays": 30,
+          "latestWindowDays": 7,
+          "minimumPoints": 5
+        },
+        "unit": "minutes",
+        "valuePrecision": 0
+      },
+      "body": "REM sleep minutes are useful because they give a simple view of one part of sleep architecture that many people already see in their wearable dashboards.\n\nMurph should keep this marker intentionally conservative. REM is biologically real when scored from polysomnography, but consumer devices infer it. The practical question is not “did I maximize REM last night?” The better question is whether an intervention produced a repeatable, context-aware change in REM opportunity without worsening total sleep, sleep continuity, recovery, or daytime function.\n\nA useful REM read usually looks like this:\n\n- compare a stable **baseline window** against a clearly defined **intervention window**,\n- keep total sleep time and wake time visible because REM tends to be concentrated later in the sleep episode,\n- flag alcohol, medication changes, CPAP changes, travel, illness, unusual stress, and very early alarms,\n- avoid treating a single low-REM night as failure or a single high-REM night as success,\n- escalate possible clinical patterns — dream enactment, severe snoring, witnessed apneas, or persistent disabling sleepiness — to proper sleep evaluation.\n\nFor Murph experiments, REM should usually be a **secondary context marker**. It can strengthen a sleep story when it moves alongside better sleep duration, efficiency, subjective restfulness, and daytime function, but it should not carry the whole verdict by itself.",
+      "categories": [
+        "sleep",
+        "wearable-metric",
+        "sleep-architecture"
+      ],
+      "communityOutcomeSummary": {
+        "minimumCohortSize": 20,
+        "placeholder": "Early Murph outcome summaries will appear here once enough opted-in runs include consistent REM sleep estimates and contextual sleep notes.",
+        "state": "coming_soon"
+      },
+      "entityType": "biomarker",
+      "interpretationFrame": {
+        "caveat": "Consumer devices infer REM from movement, heart-rate, and related sensor patterns; validation studies show useful sleep/wake detection but substantially weaker agreement for stage totals such as REM.",
+        "principle": "Treat REM minutes as a trend-with-context marker, not a target to maximize every night."
+      },
+      "key": "biomarker:rem-sleep-minutes",
+      "measurementContexts": [
+        "overnight_wearable",
+        "polysomnography",
+        "sleep_diary_context"
+      ],
+      "protocolRanking": {
+        "candidates": [
+          {
+            "display": {
+              "burdenLabel": "Low",
+              "cautionLabel": "Low",
+              "confidence": "medium"
+            },
+            "expectedDirection": "up_or_stable",
+            "mechanism": "Evening light reduction may improve circadian timing and sleep opportunity. REM is later-night weighted, so the most plausible benefit is indirect; more consistent bedtime, fewer late-night light delays, or less curtailed final-cycle sleep.",
+            "protocolKey": "protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed",
+            "relationship": "secondary_biomarker",
+            "scoring": {
+              "biomarkerRelevance": 3,
+              "burdenPenalty": 1,
+              "evidenceWeight": 3,
+              "safetyCautionPenalty": 1,
+              "wearableMeasurability": 5
+            }
+          },
+          {
+            "display": {
+              "burdenLabel": "Moderate",
+              "cautionLabel": "Moderate",
+              "confidence": "low"
+            },
+            "expectedDirection": "mixed_or_contextual",
+            "mechanism": "Heat exposure may change relaxation, thermoregulation, and sleep continuity for some people, but REM minutes are not the direct target and can move in either direction if total sleep, wake time, or fragmentation changes.",
+            "protocolKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+            "relationship": "secondary_biomarker",
+            "scoring": {
+              "biomarkerRelevance": 2,
+              "burdenPenalty": 2,
+              "evidenceWeight": 2,
+              "safetyCautionPenalty": 2,
+              "wearableMeasurability": 5
+            }
+          },
+          {
+            "display": {
+              "burdenLabel": "High",
+              "cautionLabel": "Higher",
+              "confidence": "low"
+            },
+            "expectedDirection": "mixed_or_contextual",
+            "mechanism": "High-intensity training may support sleep through fitness and stress regulation when recovery is adequate, but it can also suppress or fragment sleep when dose, timing, or fatigue are poorly matched. Use REM as a recovery-context signal, not the success metric.",
+            "protocolKey": "protocol_variant:norwegian-4x4/norwegian-4x4",
+            "relationship": "related_protocol",
+            "scoring": {
+              "biomarkerRelevance": 1,
+              "burdenPenalty": 4,
+              "evidenceWeight": 2,
+              "safetyCautionPenalty": 3,
+              "wearableMeasurability": 5
+            }
+          }
+        ],
+        "scoreFormula": "evidenceWeight * 3 + biomarkerRelevance * 3 + wearableMeasurability * 2 - burdenPenalty - safetyCautionPenalty + communityOutcomeConfidence",
+        "version": "deterministic-v0"
+      },
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed",
+          "type": "related_protocol"
+        },
+        {
+          "target": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "type": "related_protocol"
+        },
+        {
+          "target": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "type": "related_protocol"
+        },
+        {
+          "target": "source_artifact:aasm-scoring-manual-v3",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:ncbi-sleep-physiology-rem",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-33378539",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-37917155",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-38276327",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-39460013",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-32628261",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:doi-10.3389-fcvm.2022.771280",
+          "type": "cites"
+        }
+      ],
+      "relativePath": "biomarkers/rem-sleep-minutes.md",
+      "revision": {
+        "pageRevisionId": "sha256:a516d3d9e5f0ca1178f54ce7a1d7e62f450d39943530babd7c3d407352c95b9c",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "biomarkers/rem-sleep-minutes",
+      "status": "field-testing",
+      "summary": "A wearable-estimated REM-stage duration signal best treated as sleep-architecture context; useful for personal trends, too noisy to treat as a standalone nightly score.",
+      "title": "REM Sleep Minutes",
+      "unit": "minutes"
     },
     {
       "aliases": [
@@ -7287,6 +7539,57 @@
       ]
     },
     {
+      "body": "This source anchors REM sleep to formal sleep-stage scoring. For Murph, the important product implication is that REM minutes have a clinical meaning when scored under sleep-lab rules, while wearable REM minutes are an inferred approximation of that lab-defined state.",
+      "categories": [
+        "rem-sleep",
+        "sleep-scoring",
+        "clinical-reference"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Clinical scoring standard",
+      "key": "source_artifact:aasm-scoring-manual-v3",
+      "murphTakeaway": "Use PSG-scored REM as the meaning anchor; consumer wearable REM should be treated as an estimate layered on top of that reference standard.",
+      "potentialMurphEndpoints": [
+        "REM sleep minutes",
+        "REM sleep percentage",
+        "PSG sleep stage scoring"
+      ],
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "biomarker:rem-sleep-minutes",
+          "type": "measures"
+        }
+      ],
+      "relativePath": "sources/rem-sleep/aasm-scoring-manual-v3.md",
+      "researchEvidence": {
+        "aggregateRole": "context",
+        "aggregationNote": "Standard reference for scoring rules rather than an intervention or validation cohort.",
+        "designKind": "guideline",
+        "designLabel": "Sleep-stage scoring reference",
+        "populationLabel": "Polysomnography and home sleep apnea test interpretation"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:2aa1af9bd3c58cedbe00e2d9e3b781423a249d640c99a147323f1b0882808a58",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/rem-sleep/aasm-scoring-manual-v3",
+      "source": {
+        "authors": "American Academy of Sleep Medicine",
+        "citation": "American Academy of Sleep Medicine. AASM Manual for the Scoring of Sleep and Associated Events: Rules, Terminology and Technical Specifications, Version 3.",
+        "kind": "guideline",
+        "title": "AASM Manual for the Scoring of Sleep and Associated Events: Rules, Terminology and Technical Specifications, Version 3",
+        "url": "https://shop.aasm.org/products/aasm-scoring-manual-3-bundle-1",
+        "year": 2023
+      },
+      "status": "draft",
+      "summary": "Official AASM scoring reference for polysomnography and home sleep apnea test rules, including sleep-stage scoring.",
+      "title": "AASM Manual for the Scoring of Sleep and Associated Events, Version 3",
+      "whyItMatters": "Establishes laboratory sleep-stage scoring as the reference frame for interpreting REM sleep."
+    },
+    {
       "aliases": [
         "bryan johnson morning routine 2026 sauna"
       ],
@@ -8034,6 +8337,62 @@
       "whyItMatters": "Prevents the copy from implying that blue light is universally harmful; timing and context are the point."
     },
     {
+      "body": "This source gives Murph cardiovascular context for REM sleep without turning REM minutes into a treatment target. It is most useful for the page’s “why people care” and “do not overclaim” copy.",
+      "categories": [
+        "rem-sleep",
+        "sleep-architecture",
+        "cardiovascular-risk"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Outcome association",
+      "key": "source_artifact:doi-10.3389-fcvm.2022.771280",
+      "murphTakeaway": "REM sleep may be an informative sleep-architecture marker in cohort risk models, but Murph should treat wearable REM as supportive context rather than a standalone cardiovascular endpoint.",
+      "potentialMurphEndpoints": [
+        "PSG REM percentage",
+        "total REM sleep time",
+        "incident heart failure"
+      ],
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "biomarker:rem-sleep-minutes",
+          "type": "measures"
+        }
+      ],
+      "relativePath": "sources/rem-sleep/doi-10.3389-fcvm.2022.771280.md",
+      "researchEvidence": {
+        "aggregateRole": "context",
+        "aggregationNote": "Association evidence from a single baseline PSG night; not an intervention trial.",
+        "designKind": "prospective_cohort",
+        "designLabel": "Community cohort analysis",
+        "durationLabel": "Median follow-up after baseline PSG in Sleep Heart Health Study participants",
+        "participantCount": 4490,
+        "participantCountKind": "reported",
+        "populationLabel": "Middle-aged and older adults without baseline heart failure"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:19fd577f52d362ee08065df4fd80d0ebfa38504164e6e2f51b0dacc9461d8b8c",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/rem-sleep/doi-10.3389-fcvm.2022.771280",
+      "source": {
+        "authors": "Zhao X; et al.",
+        "citation": "Zhao X, et al. Increased Rapid Eye Movement Sleep Is Associated With a Reduced Risk of Heart Failure in Middle-Aged and Older Adults. Front Cardiovasc Med. 2022;9:771280.",
+        "doi": "10.3389/fcvm.2022.771280",
+        "journal": "Frontiers in Cardiovascular Medicine",
+        "kind": "journal_article",
+        "title": "Increased Rapid Eye Movement Sleep Is Associated With a Reduced Risk of Heart Failure in Middle-Aged and Older Adults",
+        "url": "https://www.frontiersin.org/journals/cardiovascular-medicine/articles/10.3389/fcvm.2022.771280/full",
+        "year": 2022
+      },
+      "status": "draft",
+      "summary": "Sleep Heart Health Study analysis associating higher PSG-measured REM sleep percentage and total REM time with lower incident heart failure risk.",
+      "title": "Increased REM Sleep and Reduced Heart Failure Risk",
+      "whyItMatters": "Adds cardiovascular-outcome context for REM sleep while preserving the limitation that association does not establish causality."
+    },
+    {
       "body": "This source is included for **Intervention design / reality checks**.\n\n**Findings:** This blinded randomized study tested a four-week 100 °C sauna program combined with resistance training. The main finding is that very high heat plus training is a distinct, higher-burden intervention that may affect strength or body-composition context.\n\n**Why it matters:** Adds a newer randomized dry-sauna training study and defines an upper-bound intensity that is far more aggressive than most consumer protocols.\n\n**Potential experiment signals:** Strength performance, body mass, training logs, soreness, recovery ratings\n\n**Protocol takeaway:** Use it as a boundary case for heat dose, not as a default consumer protocol; most first tests should be milder and more adherable.",
       "categories": [
         "sauna",
@@ -8532,6 +8891,57 @@
       "summary": "This narrative review synthesizes cardiovascular, inflammatory, and mortality evidence for sauna bathing. The main finding is a coherent mechanism-and-outcomes story, especially around cardiovascular stress, vascular function, and long-term associations. For Murph, it is rationale and mechanism context, not a substitute for protocol-specific intervention data.",
       "title": "Cardiovascular and other health benefits of sauna bathing: a review of the evidence",
       "whyItMatters": "Strong narrative synthesis focused on cardiovascular mechanisms and outcomes"
+    },
+    {
+      "body": "This physiology reference supports the page’s context-first interpretation. REM minutes are not just a nightly score; they reflect where a person is in the NREM/REM cycle, how much sleep opportunity they had, and whether the later part of the sleep period was preserved.",
+      "categories": [
+        "rem-sleep",
+        "sleep-architecture",
+        "physiology"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Physiology context",
+      "key": "source_artifact:ncbi-sleep-physiology-rem",
+      "murphTakeaway": "REM is normally later-night weighted and roughly one-fifth to one-quarter of total sleep in healthy adults, so early wake times and curtailed sleep can depress REM totals.",
+      "potentialMurphEndpoints": [
+        "REM sleep minutes",
+        "REM percentage",
+        "sleep-stage distribution"
+      ],
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "biomarker:rem-sleep-minutes",
+          "type": "measures"
+        }
+      ],
+      "relativePath": "sources/rem-sleep/ncbi-sleep-physiology-rem.md",
+      "researchEvidence": {
+        "aggregateRole": "context",
+        "aggregationNote": "Background reference for sleep-stage physiology and normal architecture, not an intervention study.",
+        "designKind": "narrative_review",
+        "designLabel": "Physiology reference chapter",
+        "populationLabel": "General adult sleep physiology"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:28e4321165b85a20505b2f4b1ab7b878e9b7b489af7a514a9b03f5ed2fbd9f20",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/rem-sleep/ncbi-sleep-physiology-rem",
+      "source": {
+        "authors": "Colten HR; Altevogt BM; Institute of Medicine Committee on Sleep Medicine and Research",
+        "citation": "Institute of Medicine. Sleep Disorders and Sleep Deprivation: An Unmet Public Health Problem. Washington (DC): National Academies Press; 2006. Chapter: Sleep Physiology.",
+        "kind": "book",
+        "title": "Sleep Physiology",
+        "url": "https://www.ncbi.nlm.nih.gov/books/NBK19956/",
+        "year": 2006
+      },
+      "status": "draft",
+      "summary": "NCBI Bookshelf physiology chapter describing normal NREM/REM cycling, REM timing, REM physiology, and REM proportion of total sleep.",
+      "title": "Sleep Physiology and REM Sleep Architecture",
+      "whyItMatters": "Explains why REM minutes are sensitive to sleep timing, sleep duration, and later-night sleep opportunity."
     },
     {
       "body": "## What this is\n\nThis page represents the structured Norwegian 4x4 research corpus behind the bounded interval experiment. It is a curation artifact, not a primary study.\n\n## Corpus at a glance\n\n- 51 refined pass-2 records\n- 29 records landed into the local machine-readable corpus draft\n- 6 records marked as directly supporting the practical protocol recipe or variant-separation decision\n- 6 clinical-lineage records that explain the CERG/Norwegian 4x4 disease-population evidence base without becoming unscreened self-treatment evidence\n- 2 clinical synthesis/review records used as overclaim guardrails\n- 9 records primarily used for safety and contraindication language\n- 3 larger clinical mixed/null records that prevent overclaiming superiority\n- 4 adjacent-variant records that should probably become separate pages\n\n## Evidence backbone\n\n- `source_artifact:pmid-17414804` — direct healthy-adult 4x4 RCT.\n- `source_artifact:pmid-26440134` — direct 4HIIT versus 1HIIT versus MICT comparison supporting 4x4/1x4 separation and the 6-week window.\n- `source_artifact:pmid-30733142` — HIIT protocol/VO2max meta-analysis supporting long-interval programming.\n- `source_artifact:pmid-24066036` — VO2max trainability and response-variability context.\n- `source_artifact:ntnu-cerg-norwegian-4x4` — public protocol-dose description.\n- `source_artifact:doi-10.3390-ijerph17145103` — heart-rate response and target-zone fidelity.\n- `source_artifact:pmid-23988787` — RPE-only guidance can miss the intended target intensity.\n\n## Clinical lineage and population mismatch\n\nThese sources explain why Norwegian 4x4 is heavily represented in cardiometabolic and cardiac-rehabilitation literature, but they should not be used as direct evidence for unscreened self-treatment:\n\n- `source_artifact:pmid-15179103` — stable coronary artery disease trial.\n- `source_artifact:pmid-17548726` — stable post-infarction heart-failure trial.\n- `source_artifact:pmid-18606913` — metabolic-syndrome pilot trial.\n- `source_artifact:pmid-18673303` — overweight-adolescent trial.\n- `source_artifact:pmid-19958872` — post-CABG rehabilitation trial.\n- `source_artifact:pmid-21450580` — essential-hypertension trial.\n\n## Safety and contraindications\n\nSafety claims should use `source_artifact:pmid-22879367`, `source_artifact:pmid-30376749`, `source_artifact:pmid-29416382`, `source_artifact:pmid-32860412`, and `source_artifact:pmid-32100573`. These are safety-only or guideline/context sources and should not be used to imply that unscreened home HIIT is risk-free.\n\n## Mixed, null, and clinical synthesis evidence\n\nThe protocol must visibly include `source_artifact:pmid-25464446`, `source_artifact:pmid-28082387`, and `source_artifact:pmid-33560320` because they prevent overclaiming from earlier small positive trials. Use `source_artifact:pmid-29502328` and `source_artifact:pmid-28385556` as synthesis and implementation context, not as replacements for primary trial evidence.\n\n## Adjacent variants to split\n\nLow-volume 1 x 4 HIIT, sprint-interval training, athlete-performance 4x4, disease-treatment cardiac rehabilitation, metabolic-syndrome/diabetes HIIT, and pediatric/adolescent cardiometabolic-risk protocols should not be collapsed into this interval experiment.\n\n## Selected sources\n\n- `source_artifact:pmid-17414804` — Evidence backbone; claimUse `supports-protocol`; Canonical small RCT supporting the Norwegian 4x4 dose as a VO2max-oriented aerobic interval protocol.\n- `source_artifact:pmid-26440134` — Protocol dose and variant separation; claimUse `supports-protocol`; Direct 6-week comparison showing the standard 4x4 dose should not be collapsed into 1x4 HIIT or moderate continuous training.\n- `source_artifact:ntnu-cerg-norwegian-4x4` — Protocol dose and design; claimUse `supports-protocol`; Public-facing source for the commonly cited Norwegian 4x4 session structure.\n- `source_artifact:pmid-30733142` — Protocol dose and design; claimUse `supports-protocol`; Meta-analysis used to justify long-interval HIIT as a plausible VO2max-oriented design class.\n- `source_artifact:pmid-24066036` — Context-only rationale; claimUse `context-only`; Open-access meta-analysis supporting the general concept of VO2max trainability from HIIT while showing response variability.\n- `source_artifact:doi-10.3390-ijerph17145103` — Wearable or testable signals; claimUse `supports-protocol`; Acute implementation source showing how heart rate behaves during a 4x4 session and why target-zone fidelity needs to be logged.\n- `source_artifact:pmid-23988787` — Wearable or testable signals; claimUse `supports-protocol`; Implementation caution source: RPE-only guidance can miss the intended HR target during interval training.\n- `source_artifact:pmid-15179103` — Clinical lineage and population mismatch; claimUse `context-only`; Early supervised CAD trial that belongs in the clinical lineage, not the unsupervised wellness claim base.\n- `source_artifact:pmid-17548726` — Clinical lineage and population mismatch; claimUse `context-only`; Classic supervised heart-failure 4x4-lineage trial.\n- `source_artifact:pmid-18606913` — Clinical lineage and population mismatch; claimUse `context-only`; Metabolic-syndrome pilot trial from the CERG/Norwegian 4x4 lineage.\n- `source_artifact:pmid-18673303` — Clinical lineage and population mismatch; claimUse `context-only`; Overweight-adolescent 4x4-style trial that should stay population-bounded.\n- `source_artifact:pmid-19958872` — Clinical lineage and population mismatch; claimUse `context-only`; Post-CABG supervised rehabilitation trial.\n- `source_artifact:pmid-21450580` — Clinical lineage and population mismatch; claimUse `context-only`; Hypertension trial used for blood-pressure context and clinician-boundary language.\n- `source_artifact:pmid-25464446` — Mixed and null clinical evidence; claimUse `context-only`; Larger CAD trial that prevents overclaiming HIIT superiority over moderate continuous training.\n- `source_artifact:pmid-28082387` — Mixed and null clinical evidence; claimUse `context-only`; Larger HFrEF trial that did not confirm clear HIIT superiority and highlighted intensity-fidelity issues.\n- `source_artifact:pmid-33560320` — Mixed and null clinical evidence; claimUse `context-only`; HFpEF clinical trial showing no significant primary peak-VO2 advantage for HIIT over comparators.\n- `source_artifact:pmid-28385556` — Clinical synthesis and implementation context; claimUse `context-only`; CERG-lineage narrative review for health-outcome and home/clinical HIIT framing.\n- `source_artifact:pmid-29502328` — Clinical synthesis and overclaim guardrails; claimUse `context-only`; Updated CAD/HF meta-analysis that keeps clinical claims population-bounded.\n- `source_artifact:pmid-22879367` — Safety and contraindications; claimUse `safety-only`; Quantified supervised cardiac-rehabilitation safety registry; key low-but-not-zero risk framing.\n- `source_artifact:pmid-30376749` — Safety and contraindications; claimUse `safety-only`; Systematic review of HIIT safety in cardiovascular disease populations.\n- `source_artifact:pmid-29416382` — Safety and contraindications; claimUse `safety-only`; Cardiac-rehabilitation meta-analysis supporting efficacy and safety context under supervision.\n- `source_artifact:pmid-32860412` — Safety and contraindications; claimUse `safety-only`; Backbone guideline for cardiovascular disease, exercise eligibility, and clinician-clearance boundaries.\n- `source_artifact:pmid-32100573` — Safety and contraindications; claimUse `safety-only`; AHA scientific statement for acute cardiovascular event risk and progression language.\n- `source_artifact:pmid-33239350` — Public health context; claimUse `context-only`; Public-health context showing vigorous aerobic exercise as one option within weekly activity guidance.\n- `source_artifact:pmid-30293954` — Wearable or testable signals; claimUse `context-only`; HRV/autonomic-control synthesis; useful for setting cautious expectations around HRV.\n- `source_artifact:pmid-28846513` — Adjacent variants to split; claimUse `context-only`; Low-volume 1x4 HIIT evidence that should not be treated as the same as standard 4x4.\n- `source_artifact:pmid-39256000` — Adjacent variants to split; claimUse `context-only`; Recent metabolic-syndrome HIIT synthesis; useful to separate metabolic HIIT and low-volume variants from standard 4x4.\n- `source_artifact:pmid-36314990` — Adjacent variants to split; claimUse `context-only`; Athlete trial comparing 4x4-style intervals with sprint-interval training; supports not merging SIT with Norwegian 4x4.\n- `source_artifact:pmid-37608507` — Adjacent variants to split; claimUse `context-only`; Female athlete comparison source supporting separation of 4x4 from supramaximal sprint-interval training.\n\n## Use rule\n\nUse this page to understand why the practical version is a **2x/week, 6-week, wearable-guided experiment** rather than a maximal training prescription. Do not cite this bibliography in place of primary intervention evidence, safety guidance, or variant-specific source pages.",
@@ -15603,6 +16013,63 @@
       "whyItMatters": "Adds a clinically relevant acute vascular response paper without implying that a brief self-experiment should promise durable vascular change."
     },
     {
+      "body": "This source supports a balanced “why people care” section. It gives REM sleep enough epidemiologic importance to justify a page, while making it important to avoid causal language in the UI.",
+      "categories": [
+        "rem-sleep",
+        "sleep-architecture",
+        "cohort-study"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Outcome association",
+      "key": "source_artifact:pmid-32628261",
+      "murphTakeaway": "Lower PSG REM can be a meaningful risk marker in cohort data, but Murph should not imply that maximizing wearable REM minutes is a proven longevity intervention.",
+      "potentialMurphEndpoints": [
+        "PSG REM percentage",
+        "REM sleep minutes",
+        "all-cause mortality"
+      ],
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "biomarker:rem-sleep-minutes",
+          "type": "measures"
+        }
+      ],
+      "relativePath": "sources/rem-sleep/pmid-32628261.md",
+      "researchEvidence": {
+        "aggregateRole": "context",
+        "aggregationNote": "Association evidence; not proof that increasing REM through an intervention improves survival.",
+        "designKind": "prospective_cohort",
+        "designLabel": "Two-cohort observational survival analysis",
+        "durationLabel": "Longitudinal follow-up after baseline polysomnography",
+        "participantCount": 4050,
+        "participantCountKind": "reported",
+        "populationLabel": "Middle-aged and older adults"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:8d9899e6c938596850f4749cb9c2592febcbb229b992a1b2b73d2e6c6f54b481",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/rem-sleep/pmid-32628261",
+      "source": {
+        "authors": "Leary EB; Watson KT; Ancoli-Israel S; Redline S; Yaffe K; Ravelo LA; et al.",
+        "citation": "Leary EB, Watson KT, Ancoli-Israel S, et al. Association of Rapid Eye Movement Sleep With Mortality in Middle-aged and Older Adults. JAMA Neurol. 2020;77(10):1241-1251.",
+        "doi": "10.1001/jamaneurol.2020.2108",
+        "journal": "JAMA Neurology",
+        "kind": "journal_article",
+        "pmid": "32628261",
+        "title": "Association of Rapid Eye Movement Sleep With Mortality in Middle-aged and Older Adults",
+        "url": "https://jamanetwork.com/journals/jamaneurology/fullarticle/2767713",
+        "year": 2020
+      },
+      "status": "draft",
+      "summary": "Two-cohort observational analysis linking lower PSG-measured REM percentage with higher all-cause mortality, while emphasizing that REM may be a marker rather than a causal target.",
+      "title": "Association of REM Sleep With Mortality in Middle-aged and Older Adults",
+      "whyItMatters": "Shows why REM sleep deserves attention, while preserving the causal caveat needed for product copy."
+    },
+    {
       "aliases": [
         "guarana 2021 occupational field studies",
         "blue-light filtration sleep and work outcomes"
@@ -16073,6 +16540,63 @@
       "summary": "Public-health context showing vigorous aerobic exercise as one option within weekly activity guidance.",
       "title": "World Health Organization 2020 guidelines on physical activity and sedentary behaviour",
       "whyItMatters": "Public-health context showing vigorous aerobic exercise as one option within weekly activity guidance."
+    },
+    {
+      "body": "For Murph, this paper is a guardrail against over-reading a single wearable REM number. The validation pattern supports using REM sleep minutes as a secondary experiment marker, especially when paired with total sleep time, sleep efficiency, and subjective sleep quality.",
+      "categories": [
+        "rem-sleep",
+        "wearable-validation",
+        "polysomnography"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Wearable validation",
+      "key": "source_artifact:pmid-33378539",
+      "murphTakeaway": "Consumer trackers can be good enough for personal sleep/wake trends, but REM-stage totals need conservative interpretation and multi-night context.",
+      "potentialMurphEndpoints": [
+        "wearable REM minutes",
+        "wearable sleep stages",
+        "PSG sleep stages"
+      ],
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "biomarker:rem-sleep-minutes",
+          "type": "measures"
+        }
+      ],
+      "relativePath": "sources/rem-sleep/pmid-33378539.md",
+      "researchEvidence": {
+        "aggregateRole": "context",
+        "aggregationNote": "Useful for consumer-device guardrails; the study was not designed to test a REM-improving intervention.",
+        "designKind": "cross_sectional",
+        "designLabel": "PSG comparison study",
+        "durationLabel": "Three consecutive laboratory nights, including normal and disrupted sleep conditions",
+        "participantCount": 34,
+        "participantCountKind": "reported",
+        "populationLabel": "Healthy young adults"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:eb05056c4b12e8425e264d0a264b0751690e38f92cac2e8a00beff3596d47a04",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/rem-sleep/pmid-33378539",
+      "source": {
+        "authors": "Chinoy ED; Cuellar JA; Huwa KE; Jameson JT; Watson CH; Bessman SC; Hirsch DA; Cooper AD; Drummond SPA; Markwald RR",
+        "citation": "Chinoy ED, Cuellar JA, Huwa KE, et al. Performance of seven consumer sleep-tracking devices compared with polysomnography. Sleep. 2021;44(5):zsaa291.",
+        "doi": "10.1093/sleep/zsaa291",
+        "journal": "Sleep",
+        "kind": "journal_article",
+        "pmid": "33378539",
+        "title": "Performance of seven consumer sleep-tracking devices compared with polysomnography",
+        "url": "https://academic.oup.com/sleep/article/44/5/zsaa291/6055610",
+        "year": 2021
+      },
+      "status": "draft",
+      "summary": "Laboratory validation study comparing seven consumer sleep trackers with PSG across normal and disrupted sleep conditions; sleep/wake detection was strong, but sleep-stage estimates were more inconsistent.",
+      "title": "Performance of Seven Consumer Sleep-Tracking Devices Compared With Polysomnography",
+      "whyItMatters": "Supports treating consumer REM minutes as a trendable estimate rather than a precise sleep-stage measurement."
     },
     {
       "body": "This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.\n\n**Findings:** This mechanistic review frames sauna exposure for cardiometabolic health in high-stress occupations. The main finding is a plausible stress, cardiovascular, and metabolic rationale, but not a direct protocol trial.\n\n**Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a cardiometabolic record marked medium priority for Murph v1 interpretation.\n\n**Potential Murph endpoints/context:** blood pressure context, resting heart rate context\n\n**Protocol takeaway:** Use as cardiovascular context around heat exposure, not as a guaranteed 21-day result-card endpoint.",
@@ -18612,6 +19136,63 @@
       "whyItMatters": "Expands the audited Finnish dry-sauna evidence corpus with a safety / physiology record marked lower priority for Murph v1 interpretation."
     },
     {
+      "body": "This study broadens the consumer-device evidence base beyond wrist-only wearables. It reinforces that Murph should avoid presenting REM sleep minutes as a clinical-grade measurement unless the data source is actually PSG or another clinically scored system.",
+      "categories": [
+        "rem-sleep",
+        "wearable-validation",
+        "polysomnography"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Wearable validation",
+      "key": "source_artifact:pmid-37917155",
+      "murphTakeaway": "REM minutes can be used in Murph, but the page should emphasize device consistency, repeated nights, and context rather than one-night precision.",
+      "potentialMurphEndpoints": [
+        "wearable REM minutes",
+        "sleep-stage macro F1",
+        "PSG sleep stages"
+      ],
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "biomarker:rem-sleep-minutes",
+          "type": "measures"
+        }
+      ],
+      "relativePath": "sources/rem-sleep/pmid-37917155.md",
+      "researchEvidence": {
+        "aggregateRole": "context",
+        "aggregationNote": "Useful for consumer sleep-stage validity guardrails; not an intervention study.",
+        "designKind": "cross_sectional",
+        "designLabel": "Prospective multicenter PSG validation study",
+        "durationLabel": "One laboratory overnight session per participant",
+        "participantCount": 75,
+        "participantCountKind": "reported",
+        "populationLabel": "Adults across three validation sites"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:a413b69c24a62c784b0561ae52bc6decbf4c9356c462b4dd915a29cc4688ff39",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/rem-sleep/pmid-37917155",
+      "source": {
+        "authors": "Lee XK; Chee NIYN; Ong JL; Teo TB; van Rijn E; Lo JC; Chee MWL",
+        "citation": "Lee XK, Chee NIYN, Ong JL, et al. Accuracy of 11 Wearable, Nearable, and Airable Consumer Sleep Trackers: Prospective Multicenter Validation Study. JMIR Mhealth Uhealth. 2023;11:e50983.",
+        "doi": "10.2196/50983",
+        "journal": "JMIR mHealth and uHealth",
+        "kind": "journal_article",
+        "pmid": "37917155",
+        "title": "Accuracy of 11 Wearable, Nearable, and Airable Consumer Sleep Trackers: Prospective Multicenter Validation Study",
+        "url": "https://mhealth.jmir.org/2023/1/e50983",
+        "year": 2023
+      },
+      "status": "draft",
+      "summary": "Prospective PSG validation study of 11 consumer sleep trackers showing substantial variability in sleep-stage classification performance.",
+      "title": "Accuracy of 11 Wearable, Nearable, and Airable Consumer Sleep Trackers",
+      "whyItMatters": "Shows that consumer sleep-stage classification varies widely across devices, which is central to REM-minute interpretation."
+    },
+    {
       "body": "This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.\n\n**Findings:** This acute study examined neural changes associated with the Japanese totonou state after sauna bathing. The main finding is an exploratory neural and subjective-state signal, not a core wearable endpoint.\n\n**Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a neuro / mental record marked lower priority for Murph v1 interpretation.\n\n**Potential Murph endpoints/context:** safety screening, session tolerance, illness and respiratory context\n\n**Protocol takeaway:** Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes.",
       "categories": [
         "sauna",
@@ -18689,6 +19270,63 @@
       "summary": "This acute study examined neural changes associated with the Japanese totonou state after sauna bathing. The main finding is an exploratory neural and subjective-state signal, not a core wearable endpoint. For Murph, it belongs in mechanism context and optional subjective notes.",
       "title": "A study on neural changes induced by sauna bathing: Neural basis of the \\\"totonou\\\" state",
       "whyItMatters": "Expands the audited Finnish dry-sauna evidence corpus with a neuro / mental record marked lower priority for Murph v1 interpretation."
+    },
+    {
+      "body": "This source supports the page’s warning that device-to-device comparisons are risky. In Murph, REM sleep minutes should be interpreted within one data stream and one experiment design, not as a universal benchmark.",
+      "categories": [
+        "rem-sleep",
+        "wearable-validation",
+        "polysomnography"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Wearable validation",
+      "key": "source_artifact:pmid-38276327",
+      "murphTakeaway": "A higher wearable REM number may reflect device bias or classification drift; compare within-person trends on the same device rather than across devices.",
+      "potentialMurphEndpoints": [
+        "wearable REM minutes",
+        "PSG REM minutes",
+        "sleep-stage agreement"
+      ],
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "biomarker:rem-sleep-minutes",
+          "type": "measures"
+        }
+      ],
+      "relativePath": "sources/rem-sleep/pmid-38276327.md",
+      "researchEvidence": {
+        "aggregateRole": "context",
+        "aggregationNote": "Useful for interpreting stage-specific bias in consumer sleep trackers.",
+        "designKind": "cross_sectional",
+        "designLabel": "PSG and actigraphy validation study",
+        "durationLabel": "Laboratory validation night with simultaneous PSG, actigraphy, and consumer devices",
+        "participantCount": 53,
+        "participantCountKind": "reported",
+        "populationLabel": "Adults in a controlled sleep-recording setting"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:6571be4a4b88f71d5f40a854b924f5c500b0a11f1ec88d49b64a6173aaf6f466",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/rem-sleep/pmid-38276327",
+      "source": {
+        "authors": "Kainec KA; Caccavaro J; Barnes CM; Wirz-Justice A; Cajochen C; Scheer FAJL; et al.",
+        "citation": "Kainec KA, Caccavaro J, Barnes CM, et al. Evaluating Accuracy in Five Commercial Sleep-Tracking Devices Compared to Research-Grade Actigraphy and Polysomnography. Sensors. 2024;24(2):635.",
+        "doi": "10.3390/s24020635",
+        "journal": "Sensors",
+        "kind": "journal_article",
+        "pmid": "38276327",
+        "title": "Evaluating Accuracy in Five Commercial Sleep-Tracking Devices Compared to Research-Grade Actigraphy and Polysomnography",
+        "url": "https://www.mdpi.com/1424-8220/24/2/635",
+        "year": 2024
+      },
+      "status": "draft",
+      "summary": "PSG and actigraphy comparison study reporting low agreement for stage totals, including consistent REM overestimation across devices.",
+      "title": "Evaluating Accuracy in Five Commercial Sleep-Tracking Devices Compared to Actigraphy and Polysomnography",
+      "whyItMatters": "Highlights that REM minutes can be systematically biased upward by some consumer devices."
     },
     {
       "body": "This source is included for **safety and dose reality checks**.\n\n**Findings:** Extreme-temperature sauna study used to reinforce that very high heat is a separate safety problem, especially for sporadic sauna users. Separates ordinary high-temperature dry sauna from extreme heat exposure and supports conservative entry dosing for sporadic users.\n\n**Why it matters:** It gives concrete evidence that extreme sauna temperatures can create heat-stress symptoms and should not be normalized for sporadic users.\n\n**Potential Murph endpoints/context:** heat distress symptoms, perceived strain, session heart rate, stop-condition design\n\n**Protocol takeaway:** High-heat sauna variants need conservative onboarding, explicit stop conditions, and careful separation from ordinary dry-sauna experiments.",
@@ -19182,6 +19820,63 @@
       "summary": "This cross-sectional MONICA study describes sauna bathing patterns and health context in northern Sweden. The main finding is population context, not an efficacy result. For Murph, it supports cultural and real-world-use framing while avoiding short-term outcome claims.",
       "title": "Sauna bathing in northern Sweden: results from the MONICA study 2022",
       "whyItMatters": "Expands the audited Finnish dry-sauna evidence corpus with a general / mixed record marked lower priority for Murph v1 interpretation."
+    },
+    {
+      "body": "This paper is especially useful for user messaging: a device can look reasonable on group averages while still being unreliable for a particular person’s nightly REM-stage total. That distinction belongs on the REM biomarker page.",
+      "categories": [
+        "rem-sleep",
+        "wearable-validation",
+        "polysomnography"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Wearable validation",
+      "key": "source_artifact:pmid-39460013",
+      "murphTakeaway": "Consumer devices may estimate average REM minutes near PSG while still showing weak individual-level concordance, so repeated within-person trends are safer than one-night judgments.",
+      "potentialMurphEndpoints": [
+        "wearable REM minutes",
+        "PSG REM minutes",
+        "sleep/wake sensitivity"
+      ],
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "biomarker:rem-sleep-minutes",
+          "type": "measures"
+        }
+      ],
+      "relativePath": "sources/rem-sleep/pmid-39460013.md",
+      "researchEvidence": {
+        "aggregateRole": "context",
+        "aggregationNote": "Useful for sleep/wake versus sleep-stage distinction in consumer sleep tracker interpretation.",
+        "designKind": "cross_sectional",
+        "designLabel": "PSG validation study",
+        "durationLabel": "One overnight PSG session with simultaneous commercial devices",
+        "participantCount": 35,
+        "participantCountKind": "reported",
+        "populationLabel": "Healthy adults"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:1d338f80ba2aa116f08e6f2b82bb908fe949845ba0cb5464c9c63e957a6a12bc",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/rem-sleep/pmid-39460013",
+      "source": {
+        "authors": "Robbins R; Seixas A; Masters LW; Jean-Louis G; Czeisler CA; et al.",
+        "citation": "Robbins R, Seixas A, Masters LW, et al. Accuracy of Three Commercial Wearable Devices for Sleep Tracking in Healthy Adults. Sensors. 2024;24(20):6532.",
+        "doi": "10.3390/s24206532",
+        "journal": "Sensors",
+        "kind": "journal_article",
+        "pmid": "39460013",
+        "title": "Accuracy of Three Commercial Wearable Devices for Sleep Tracking in Healthy Adults",
+        "url": "https://www.mdpi.com/1424-8220/24/20/6532",
+        "year": 2024
+      },
+      "status": "draft",
+      "summary": "PSG validation study of Oura Ring Gen 3, Fitbit Sense 2, and Apple Watch 8 showing strong sleep/wake sensitivity but poor concordance for REM-stage duration.",
+      "title": "Accuracy of Three Commercial Wearable Devices for Sleep Tracking in Healthy Adults",
+      "whyItMatters": "Shows why Murph can use consumer REM minutes as a personal signal while avoiding clinical-strength claims."
     },
     {
       "aliases": [
