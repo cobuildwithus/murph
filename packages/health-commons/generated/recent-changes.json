@@ -948,6 +948,83 @@
         "source_artifact:pmid-32628261",
         "source_artifact:doi-10.3389-fcvm.2022.771280"
       ]
+    },
+    {
+      "affectedFields": [
+        "biomarkers/blood-oxygen-spo2",
+        "sources/spo2",
+        "redirects",
+        "apps/web/biomarker-trend-thresholds"
+      ],
+      "changeId": "chg_2026_04_23_spo2_biomarker_page",
+      "changeType": "seed",
+      "editSummary": "Added the Blood Oxygen Saturation (SpO₂) biomarker page with browser-vault SpO₂ bindings, measurement caveats, protocol rankings, and source-backed interpretation boundaries.",
+      "entityKey": "biomarker:blood-oxygen-spo2",
+      "minor": false,
+      "rationale": "SpO₂ is already imported from wearable providers and should have a Health Commons page that treats it as a respiratory and sleep safety-context signal rather than an optimization target.",
+      "reviewStatus": "proposed",
+      "schemaVersion": "murph.commons.change.v1",
+      "sourceKeys": [
+        "source_artifact:fda-pulse-oximeter-basics-2025",
+        "source_artifact:fda-pulse-oximeter-skin-tone-guidance-2025",
+        "source_artifact:pmid-29262014",
+        "source_artifact:mayo-hypoxemia-pulse-oximetry",
+        "source_artifact:cleveland-clinic-blood-oxygen-level",
+        "source_artifact:pmid-28162150"
+      ]
+    },
+    {
+      "affectedFields": [
+        "content/biomarkers/blood-oxygen-spo2.md",
+        "apps/web/app/biomarkers/[biomarkerId]/biomarker-page-client.tsx",
+        "apps/web/test/health-commons-biomarker-detail-page.test.ts",
+        "apps/web/test/health-commons-biomarker-page-client.test.ts"
+      ],
+      "changeId": "chg_2026_04_23_spo2_claims_and_delta_copy",
+      "changeType": "evidence_change",
+      "editSummary": "Added explicit SpO₂ evidence claims and clarified percentage-point delta copy in the biomarker trend card.",
+      "entityKey": "biomarker:blood-oxygen-spo2",
+      "minor": true,
+      "rationale": "The initial SpO₂ landing cites the right sources but renders no evidence cards, and the trend delta copy can read like a relative percent instead of an absolute percentage-point change.",
+      "reviewStatus": "proposed",
+      "schemaVersion": "murph.commons.change.v1",
+      "sourceKeys": [
+        "source_artifact:fda-pulse-oximeter-basics-2025",
+        "source_artifact:fda-pulse-oximeter-skin-tone-guidance-2025",
+        "source_artifact:pmid-29262014",
+        "source_artifact:mayo-hypoxemia-pulse-oximetry",
+        "source_artifact:cleveland-clinic-blood-oxygen-level",
+        "source_artifact:pmid-28162150"
+      ]
+    },
+    {
+      "affectedFields": [
+        "biomarkers/estimated-vo2max.biomarker",
+        "biomarkers/estimated-vo2max.claims",
+        "biomarkers/estimated-vo2max.protocolRanking",
+        "sources/vo2-max",
+        "apps/web.biomarker_claims",
+        "query.browser_vault.estimatedVo2Max"
+      ],
+      "changeId": "chg_2026_04_23_vo2max_biomarker_page",
+      "changeType": "evidence_change",
+      "editSummary": "Expanded the existing estimated VO2max biomarker into a publishable VO₂ Max page with measurement guidance, private browser-vault metric bindings, evidence-backed claims, protocol ranking, and new VO₂ max source artifacts.",
+      "entityKey": "biomarker:estimated-vo2max",
+      "minor": false,
+      "rationale": "The biomarker route already existed as biomarker:estimated-vo2max and is referenced by Norwegian 4x4 sources; enriching that page preserves existing graph links while making the biomarker available in apps/web with cautious lab-versus-wearable interpretation.",
+      "reviewStatus": "proposed",
+      "schemaVersion": "murph.commons.change.v1",
+      "sourceKeys": [
+        "source_artifact:pmid-27881567",
+        "source_artifact:pmid-26455884",
+        "source_artifact:pmid-28153947",
+        "source_artifact:pmid-35072942",
+        "source_artifact:pmid-38599681",
+        "source_artifact:pmid-41477023",
+        "source_artifact:pmid-17414804",
+        "source_artifact:pmid-30733142",
+        "source_artifact:pmid-24066036"
+      ]
     }
   ]
 }

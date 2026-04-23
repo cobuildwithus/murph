@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 
 import {
   listHealthCommonsBiomarkerRoutes,
@@ -39,6 +39,10 @@ export default async function BiomarkerPage({
 
   if (!biomarker) {
     notFound();
+  }
+
+  if (biomarker.routeId !== biomarkerId) {
+    redirect(`/biomarkers/${biomarker.routeId}`);
   }
 
   return <BiomarkerPageClient key={biomarker.pageRevisionId} biomarker={biomarker} />;
