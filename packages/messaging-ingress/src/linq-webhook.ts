@@ -447,7 +447,7 @@ function pickMinimizedLinqWebhookEvent(event: LinqWebhookEvent): Record<string, 
     webhook_version: event.webhook_version,
     trace_id: event.trace_id,
     partner_id: event.partner_id,
-    data: messageEvent ? pickLinqMessageReceivedData(messageEvent.data) : undefined,
+    data: messageEvent ? pickLinqMessageReceivedData(messageEvent.data) : event.data,
   });
 }
 

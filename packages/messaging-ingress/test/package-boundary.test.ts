@@ -45,6 +45,7 @@ describe("@murphai/messaging-ingress package boundary", () => {
     await expect(importBySpecifier("@murphai/messaging-ingress/telegram-webhook-payload")).resolves.toMatchObject({
       minimizeTelegramUpdate: expect.any(Function),
       parseTelegramWebhookUpdate: expect.any(Function),
+      verifyAndParseTelegramWebhookRequest: expect.any(Function),
     });
   });
 });

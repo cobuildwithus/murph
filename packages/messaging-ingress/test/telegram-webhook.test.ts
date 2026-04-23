@@ -9,8 +9,12 @@ import {
   summarizeTelegramUpdate,
 } from "../src/telegram-webhook.ts";
 import {
+  assertTelegramWebhookSecretToken,
   minimizeTelegramUpdate,
   parseTelegramWebhookUpdate,
+  readTelegramWebhookHeader,
+  readTelegramWebhookSecretToken,
+  verifyAndParseTelegramWebhookRequest,
 } from "../src/telegram-webhook-payload.ts";
 
 test("parseTelegramWebhookUpdate validates supported message fields", () => {
@@ -55,6 +59,96 @@ test("parseTelegramWebhookUpdate validates supported message fields", () => {
   assert.equal(update.update_id, 321);
   assert.equal(update.message?.direct_messages_topic?.topic_id, 7);
   assert.equal(update.message?.reply_to_message?.direct_messages_topic?.topic_id, 6);
+});
+
+test("verifyAndParseTelegramWebhookRequest validates the Telegram secret-token header before parsing", () => {
+  const update = verifyAndParseTelegramWebhookRequest({
+    headers: new Headers({
+      "X-Telegram-Bot-Api-Secret-Token": "telegram-secret",
+    }),
+    rawBody: JSON.stringify({
+      message: {
+        chat: {
+          id: 123,
+          type: "private",
+        },
+        date: 1_774_522_600,
+        message_id: 1,
+        text: "hello",
+      },
+      update_id: 321,
+    }),
+    webhookSecret: "telegram-secret",
+  });
+
+  assert.equal(update.update_id, 321);
+  assert.equal(readTelegramWebhookSecretToken({
+    "x-telegram-bot-api-secret-token": ["telegram-secret"],
+  }), "telegram-secret");
+  assert.equal(
+    readTelegramWebhookHeader(
+      { "X-Telegram-Bot-Api-Secret-Token": "telegram-secret" },
+      "x-telegram-bot-api-secret-token",
+    ),
+    "telegram-secret",
+  );
+});
+
+test("verifyAndParseTelegramWebhookRequest rejects missing or mismatched secret tokens", () => {
+  const rawBody = JSON.stringify({
+    message: {
+      chat: {
+        id: 123,
+        type: "private",
+      },
+      message_id: 1,
+      text: "hello",
+    },
+    update_id: 321,
+  });
+
+  assert.throws(
+    () =>
+      verifyAndParseTelegramWebhookRequest({
+        headers: {},
+        rawBody,
+        webhookSecret: "telegram-secret",
+      }),
+    /Invalid Telegram webhook secret token/u,
+  );
+
+  assert.throws(
+    () =>
+      verifyAndParseTelegramWebhookRequest({
+        headers: {
+          "x-telegram-bot-api-secret-token": "wrong-secret",
+        },
+        rawBody: new TextEncoder().encode(rawBody).buffer,
+        webhookSecret: "telegram-secret",
+      }),
+    /Invalid Telegram webhook secret token/u,
+  );
+
+  assert.throws(
+    () =>
+      verifyAndParseTelegramWebhookRequest({
+        headers: {
+          "x-telegram-bot-api-secret-token": " telegram-secret ",
+        },
+        rawBody,
+        webhookSecret: "telegram-secret",
+      }),
+    /Invalid Telegram webhook secret token/u,
+  );
+
+  assert.throws(
+    () =>
+      assertTelegramWebhookSecretToken({
+        secretToken: "telegram-secret",
+        webhookSecret: "",
+      }),
+    /Telegram webhook secret is required/u,
+  );
 });
 
 test("parseTelegramWebhookUpdate rejects invalid direct message topics", () => {
