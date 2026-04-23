@@ -81,6 +81,7 @@ Important current behavior:
 - Generated seam commands are split into `*.send.sh` and `*.harvest.sh`.
 - `*.send.sh` should only submit and persist the thread URL.
 - `*.harvest.sh` should run `thread wake`, normalize required artifacts, validate them, and recover inline response text only when that seam actually needs a prose file.
+- For independent seams, prefer running harvests in parallel. Do not serialize a whole discovery fanout behind one seam unless the user explicitly wants that.
 
 ## End-To-End Workflow
 
@@ -134,6 +135,13 @@ For discovery seams:
 - run `commands/<label>.send.sh`
 - wait for the thread to finish
 - run `commands/<label>.harvest.sh`
+
+Harvest guidance:
+
+- After the discovery shard sends are out, harvest independent shards in parallel where possible.
+- `*.harvest.sh` is the wake/export/download step; it should poll the saved thread URL, export the assistant text snapshot, download any returned attachments, normalize required artifacts, and validate them locally.
+- Do not block all remaining discovery harvests on the slowest single thread. If one shard is still cooking, let the other harvests run.
+- For a large shard set, batch or parallel harvests are preferred over one-at-a-time polling loops.
 
 Do not leave a long interactive shell attached to the send command. The send path should finish quickly after it records the chat URL.
 
