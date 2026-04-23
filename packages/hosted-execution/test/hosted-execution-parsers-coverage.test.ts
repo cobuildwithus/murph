@@ -399,6 +399,34 @@ describe("hosted execution parsers coverage", () => {
       });
     });
 
+    it("rejects removed legacy pending wake counts on user status", () => {
+      expect(() =>
+        parseHostedExecutionUserStatus({
+          bundleRef: null,
+          inFlight: false,
+          lastError: null,
+          lastEventId: null,
+          lastRunAt: null,
+          nextWakeAt: null,
+          pendingWakeCount: 1,
+          userId: "user_123",
+        }),
+      ).toThrow(/pendingIngressEventCount/u);
+      expect(() =>
+        parseHostedExecutionUserStatus({
+          bundleRef: null,
+          inFlight: false,
+          lastError: null,
+          lastEventId: null,
+          lastRunAt: null,
+          nextWakeAt: null,
+          pendingIngressEventCount: 1,
+          pendingWakeCount: 1,
+          userId: "user_123",
+        }),
+      ).toThrow(/pendingWakeCount/u);
+    });
+
     it("parses dedicated wake drain results", () => {
       expect(parseHostedRunDrainResult({
         committedSeq: "24",
@@ -490,7 +518,7 @@ describe("hosted execution parsers coverage", () => {
             kind: "provider.fetch",
             maxAttempts: 5,
             payload: {
-              resource: "sleep",
+              resourceId: "sleep",
             },
             priority: 4,
           }],

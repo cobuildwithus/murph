@@ -106,7 +106,7 @@ describe("parseHostedExecutionEvent", () => {
               kind: "reconcile",
               maxAttempts: 3,
               payload: {
-                page: 1,
+                resourceId: "sleep_123",
               },
               priority: 2,
             },
@@ -133,18 +133,18 @@ describe("parseHostedExecutionEvent", () => {
         eventType: "sleep.updated",
         jobs: [
           {
-            availableAt: "2026-04-09T00:00:00Z",
+            availableAt: "2026-04-09T00:00:00.000Z",
             dedupeKey: null,
             kind: "reconcile",
             maxAttempts: 3,
             payload: {
-              page: 1,
+              resourceId: "sleep_123",
             },
             priority: 2,
           },
         ],
-        nextReconcileAt: "2026-04-09T01:00:00Z",
-        occurredAt: "2026-04-09T00:00:00Z",
+        nextReconcileAt: "2026-04-09T01:00:00.000Z",
+        occurredAt: "2026-04-09T00:00:00.000Z",
         reason: "webhook",
         resourceCategory: "sleep",
         revokeWarning: {
@@ -178,8 +178,8 @@ describe("parseHostedExecutionEvent", () => {
     ).toEqual({
       connectionId: "connection-1",
       hint: {
-        nextReconcileAt: "2026-04-09T01:00:00Z",
-        occurredAt: "2026-04-09T00:00:00Z",
+        nextReconcileAt: "2026-04-09T01:00:00.000Z",
+        occurredAt: "2026-04-09T00:00:00.000Z",
         reason: "scheduled-reconcile",
       },
       kind: "device-sync.wake",
