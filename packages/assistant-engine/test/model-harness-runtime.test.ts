@@ -5,6 +5,7 @@ import { z } from 'zod'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { InboxServices } from '@murphai/inbox-services'
+import type { AssistantExecutionDriver } from '@murphai/operator-config/assistant-cli-contracts'
 import type { InboxShowResult } from '@murphai/operator-config/inbox-cli-contracts'
 import type { AssistantToolSpec } from '../src/inbox-model-contracts.ts'
 
@@ -64,12 +65,15 @@ import {
   shouldBypassParserWaitForRouting,
 } from '../src/inbox-routing-vision.ts'
 import {
+  ASSISTANT_MODEL_CONFIG_INVALID_CODE,
   CliBackedCapabilityHost,
   NativeLocalCapabilityHost,
+  assertAssistantModelSpecReadyForExecution,
   createAssistantCapabilityRegistry,
   createAssistantToolCatalogFromCapabilities,
   defineAssistantCapability,
   generateAssistantObject,
+  isAssistantModelConfigurationError,
   resolveAssistantLanguageModel,
 } from '../src/model-harness.ts'
 import { createTempVaultContext, restoreEnvironmentVariable } from './test-helpers.js'
@@ -233,6 +237,87 @@ describe('model harness runtime helpers', () => {
         name: 'murph-assistant',
       }),
     )
+  })
+
+  it('preserves invalid assistant model configuration errors across readiness checks and resolution', () => {
+    const invalidSpecs = [
+      {
+        context: {
+          executionDriver: 'responses',
+        },
+        message:
+          'Assistant model configuration is invalid: model id is required.',
+        spec: {
+          executionDriver: 'responses' as const,
+          model: '   ',
+        },
+      },
+      {
+        context: {
+          executionDriver: 'codex-app-server',
+        },
+        message:
+          'Assistant model configuration is invalid: Codex app-server models cannot be resolved through the AI SDK model harness.',
+        spec: {
+          executionDriver: 'codex-app-server' as const,
+          model: 'gpt-5.4',
+        },
+      },
+      {
+        context: {
+          executionDriver: 'openai-compatible',
+        },
+        message:
+          'Assistant model configuration is invalid: OpenAI-compatible routing requires a base URL.',
+        spec: {
+          executionDriver: 'openai-compatible' as const,
+          model: 'router-model',
+        },
+      },
+    ]
+
+    for (const { context, message, spec } of invalidSpecs) {
+      for (const invoke of [
+        () => assertAssistantModelSpecReadyForExecution(spec),
+        () => resolveAssistantLanguageModel(spec),
+      ]) {
+        try {
+          invoke()
+          throw new Error(`Expected invalid assistant model config error: ${message}`)
+        } catch (error) {
+          expect(isAssistantModelConfigurationError(error)).toBe(true)
+          expect(error).toMatchObject({
+            code: ASSISTANT_MODEL_CONFIG_INVALID_CODE,
+            context,
+            message,
+          })
+        }
+      }
+    }
+  })
+
+  it('defers unknown execution-driver base URL validation until resolution', () => {
+    const spec = {
+      executionDriver: 'custom-router' as AssistantExecutionDriver,
+      model: 'router-model',
+    }
+
+    expect(() => assertAssistantModelSpecReadyForExecution(spec)).not.toThrow()
+
+    try {
+      resolveAssistantLanguageModel(spec)
+      throw new Error('Expected resolveAssistantLanguageModel to reject a missing base URL.')
+    } catch (error) {
+      expect(isAssistantModelConfigurationError(error)).toBe(true)
+      expect(error).toMatchObject({
+        code: ASSISTANT_MODEL_CONFIG_INVALID_CODE,
+        context: {
+          executionDriver: 'custom-router',
+        },
+        message:
+          'Assistant model configuration is invalid: OpenAI-compatible routing requires a base URL.',
+      })
+    }
   })
 
   it('injects OpenAI responses compaction metadata on compatible responses requests', async () => {

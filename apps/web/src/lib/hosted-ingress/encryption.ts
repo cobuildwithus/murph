@@ -1,13 +1,12 @@
-import { Buffer } from "node:buffer";
-
 import {
   buildHostedSecretAad,
-  createHostedSecretCodec,
-  decodeHostedEncryptionKey,
-  decodeHostedEncryptionKeyring,
   type HostedSecretCodec,
 } from "../device-sync/crypto";
-import { normalizeNullableString } from "../primitives";
+import {
+  createHostedNullableStringEncryption,
+  getOrCreateHostedSecretCodec,
+  readHostedEncryptionEnvironment,
+} from "../hosted-encryption-shared";
 
 const HOSTED_WAKE_ENCRYPTION_KEY_ENV_KEYS = [
   "HOSTED_WAKE_ENCRYPTION_KEY",
@@ -18,12 +17,6 @@ const HOSTED_WAKE_ENCRYPTION_KEY_VERSION_ENV_KEYS = [
 const HOSTED_WAKE_ENCRYPTION_KEYRING_JSON_ENV_KEYS = [
   "HOSTED_WAKE_ENCRYPTION_KEYRING_JSON",
 ] as const;
-
-interface HostedIngressEncryptionEnvironment {
-  encryptionKey: Buffer;
-  encryptionKeyVersion: string;
-  encryptionKeysByVersion: Readonly<Record<string, Buffer>>;
-}
 
 interface HostedIngressConfigurationErrorInput {
   code: string;
@@ -60,39 +53,36 @@ export function isHostedIngressConfigurationError(
 }
 
 export function getHostedIngressEncryptionCodec(): HostedSecretCodec {
-  if (globalForHostedIngressEncryption.__murphHostedIngressEncryptionCodec) {
-    return globalForHostedIngressEncryption.__murphHostedIngressEncryptionCodec;
-  }
-
-  const environment = readHostedIngressEncryptionEnvironment();
-  const codec = createHostedSecretCodec({
-    key: environment.encryptionKey,
-    keyVersion: environment.encryptionKeyVersion,
-    keysByVersion: environment.encryptionKeysByVersion,
+  return getOrCreateHostedSecretCodec({
+    cachedCodec: globalForHostedIngressEncryption.__murphHostedIngressEncryptionCodec,
+    readEnvironment: readHostedIngressEncryptionEnvironment,
+    setCachedCodec(codec) {
+      globalForHostedIngressEncryption.__murphHostedIngressEncryptionCodec = codec;
+    },
+    shouldCache: process.env.NODE_ENV !== "test",
   });
-
-  if (process.env.NODE_ENV !== "test") {
-    globalForHostedIngressEncryption.__murphHostedIngressEncryptionCodec = codec;
-  }
-
-  return codec;
 }
+
+const hostedIngressNullableStringEncryption = createHostedNullableStringEncryption<{
+  field: string;
+  userId: string;
+  value: string | null | undefined;
+}>({
+  buildCipherOptions(input) {
+    return buildHostedIngressFieldCipherOptions({
+      field: input.field,
+      memberId: input.userId,
+    });
+  },
+  getCodec: getHostedIngressEncryptionCodec,
+});
 
 export function encryptHostedIngressNullableString(input: {
   field: string;
   userId: string;
   value: string | null | undefined;
 }): string | null {
-  const normalized = normalizeNullableString(input.value);
-
-  if (!normalized) {
-    return null;
-  }
-
-  return getHostedIngressEncryptionCodec().encrypt(
-    normalized,
-    buildHostedIngressFieldCipherOptions(input),
-  );
+  return hostedIngressNullableStringEncryption.encryptNullableString(input);
 }
 
 export function decryptHostedIngressNullableString(input: {
@@ -100,25 +90,17 @@ export function decryptHostedIngressNullableString(input: {
   userId: string;
   value: string | null | undefined;
 }): string | null {
-  const normalized = normalizeNullableString(input.value);
-
-  if (!normalized) {
-    return null;
-  }
-
-  return normalizeNullableString(
-    getHostedIngressEncryptionCodec().decrypt(normalized, buildHostedIngressFieldCipherOptions(input)),
-  );
+  return hostedIngressNullableStringEncryption.decryptNullableString(input);
 }
 
 function buildHostedIngressFieldCipherOptions(input: {
   field: string;
-  userId: string;
+  memberId: string;
 }) {
   return {
     aad: buildHostedSecretAad({
       field: input.field,
-      memberId: input.userId,
+      memberId: input.memberId,
       purpose: "hosted-ingress-payload",
     }),
     keyScope: `hosted-ingress-payload:${input.field}`,
@@ -127,26 +109,18 @@ function buildHostedIngressFieldCipherOptions(input: {
 
 function readHostedIngressEncryptionEnvironment(
   source: NodeJS.ProcessEnv = process.env,
-): HostedIngressEncryptionEnvironment {
+) {
   try {
-    const encryptionKeyValue = readEnv(source, HOSTED_WAKE_ENCRYPTION_KEY_ENV_KEYS);
-    const encryptionKeyVersion =
-      readEnv(source, HOSTED_WAKE_ENCRYPTION_KEY_VERSION_ENV_KEYS) ?? "v1";
-    const encryptionKeyringJson = readEnv(source, HOSTED_WAKE_ENCRYPTION_KEYRING_JSON_ENV_KEYS);
-    const encryptionKey = encryptionKeyValue
-      ? decodeHostedEncryptionKey(encryptionKeyValue)
-      : readRequiredHostedIngressEncryptionKey();
-
-    return {
-      encryptionKey,
-      encryptionKeyVersion,
-      encryptionKeysByVersion: decodeHostedEncryptionKeyring({
-        currentKey: encryptionKey,
-        currentKeyVersion: encryptionKeyVersion,
-        keyringJson: encryptionKeyringJson,
-        label: "HOSTED_WAKE_ENCRYPTION_KEYRING_JSON",
-      }),
-    };
+    return readHostedEncryptionEnvironment({
+      envKeys: {
+        encryptionKey: HOSTED_WAKE_ENCRYPTION_KEY_ENV_KEYS,
+        encryptionKeyVersion: HOSTED_WAKE_ENCRYPTION_KEY_VERSION_ENV_KEYS,
+        encryptionKeyringJson: HOSTED_WAKE_ENCRYPTION_KEYRING_JSON_ENV_KEYS,
+      },
+      keyringLabel: "HOSTED_WAKE_ENCRYPTION_KEYRING_JSON",
+      readRequiredEncryptionKey: readRequiredHostedIngressEncryptionKey,
+      source,
+    });
   } catch (error) {
     throw toHostedIngressConfigurationError(error);
   }
@@ -158,21 +132,6 @@ function readRequiredHostedIngressEncryptionKey(): never {
     httpStatus: 500,
     message: "HOSTED_WAKE_ENCRYPTION_KEY must be configured for hosted ingress payload encryption.",
   });
-}
-
-function readEnv(
-  source: NodeJS.ProcessEnv,
-  keys: readonly string[],
-): string | null {
-  for (const key of keys) {
-    const value = normalizeNullableString(source[key]);
-
-    if (value) {
-      return value;
-    }
-  }
-
-  return null;
 }
 
 function toHostedIngressConfigurationError(error: unknown): HostedIngressConfigurationError | never {

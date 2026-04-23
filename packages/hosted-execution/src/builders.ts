@@ -71,6 +71,34 @@ function cloneConversationMessagePayload(
   }
 }
 
+type HostedExecutionMemberOwnedWake =
+  | HostedExecutionAssistantNotificationRequestedWake
+  | HostedExecutionMemberActivatedWake
+  | HostedExecutionMemberChannelsUpdatedWake
+  | HostedExecutionVaultShareAcceptedWake
+  | HostedExecutionVaultSyncImportWake;
+
+function buildHostedExecutionMemberOwnedWakeBase<
+  TKind extends HostedExecutionMemberOwnedWake["kind"],
+>(input: {
+  eventId: string;
+  kind: TKind;
+  memberId: string;
+  occurredAt: string;
+}): {
+  eventId: string;
+  kind: TKind;
+  occurredAt: string;
+  userId: string;
+} {
+  return {
+    eventId: input.eventId,
+    kind: input.kind,
+    occurredAt: input.occurredAt,
+    userId: input.memberId,
+  };
+}
+
 export function buildHostedExecutionConversationMessageWake(input: {
   eventId: string;
   message: HostedExecutionConversationMessagePayload;
@@ -159,11 +187,13 @@ export function buildHostedExecutionMemberActivatedWake(input: {
   occurredAt: string;
 }): HostedExecutionMemberActivatedWake {
   return {
-    eventId: input.eventId,
-    kind: "member.activated",
+    ...buildHostedExecutionMemberOwnedWakeBase({
+      eventId: input.eventId,
+      kind: "member.activated",
+      memberId: input.memberId,
+      occurredAt: input.occurredAt,
+    }),
     memberChannels: { ...input.memberChannels },
-    occurredAt: input.occurredAt,
-    userId: input.memberId,
   };
 }
 
@@ -201,11 +231,13 @@ export function buildHostedExecutionAssistantNotificationRequestedWake(input: {
   occurredAt: string;
 }): HostedExecutionAssistantNotificationRequestedWake {
   return {
-    eventId: input.eventId,
-    kind: "assistant.notification.requested",
+    ...buildHostedExecutionMemberOwnedWakeBase({
+      eventId: input.eventId,
+      kind: "assistant.notification.requested",
+      memberId: input.memberId,
+      occurredAt: input.occurredAt,
+    }),
     notification: cloneAssistantNotificationPayload(input.notification),
-    occurredAt: input.occurredAt,
-    userId: input.memberId,
   };
 }
 
@@ -216,11 +248,13 @@ export function buildHostedExecutionMemberChannelsUpdatedWake(input: {
   occurredAt: string;
 }): HostedExecutionMemberChannelsUpdatedWake {
   return {
-    eventId: input.eventId,
-    kind: "member.channels.updated",
+    ...buildHostedExecutionMemberOwnedWakeBase({
+      eventId: input.eventId,
+      kind: "member.channels.updated",
+      memberId: input.memberId,
+      occurredAt: input.occurredAt,
+    }),
     memberChannels: { ...input.memberChannels },
-    occurredAt: input.occurredAt,
-    userId: input.memberId,
   };
 }
 
@@ -282,11 +316,13 @@ export function buildHostedExecutionVaultShareAcceptedWake(input: {
   share: HostedExecutionVaultShareAcceptedEvent["share"];
 }): HostedExecutionVaultShareAcceptedWake {
   return {
-    eventId: input.eventId,
-    kind: "vault.share.accepted",
-    occurredAt: input.occurredAt,
+    ...buildHostedExecutionMemberOwnedWakeBase({
+      eventId: input.eventId,
+      kind: "vault.share.accepted",
+      memberId: input.memberId,
+      occurredAt: input.occurredAt,
+    }),
     share: input.share,
-    userId: input.memberId,
   };
 }
 
@@ -297,10 +333,12 @@ export function buildHostedExecutionVaultSyncImportWake(input: {
   vaultSync: HostedExecutionVaultSyncImportEvent["vaultSync"];
 }): HostedExecutionVaultSyncImportWake {
   return {
-    eventId: input.eventId,
-    kind: "vault.sync.import",
-    occurredAt: input.occurredAt,
-    userId: input.memberId,
+    ...buildHostedExecutionMemberOwnedWakeBase({
+      eventId: input.eventId,
+      kind: "vault.sync.import",
+      memberId: input.memberId,
+      occurredAt: input.occurredAt,
+    }),
     vaultSync: {
       localManifestHash: input.vaultSync.localManifestHash,
       sessionId: input.vaultSync.sessionId,

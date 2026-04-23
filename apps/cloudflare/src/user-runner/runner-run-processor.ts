@@ -1691,9 +1691,3 @@ function createMissingHostedSharePackError(input: {
   error.code = "HOSTED_SHARE_PACK_NOT_FOUND";
   return error;
 }
-
-function isMissingHostedSharePackError(error: unknown): error is Error & { code: string } {
-  return error instanceof Error
-    && "code" in error
-    && error.code === "HOSTED_SHARE_PACK_NOT_FOUND";
-}

@@ -145,15 +145,19 @@ export interface InputFileCommandConfig<TResult> {
 
 export interface CommonListCommandConfig<
   TResult,
-  TInput extends CommandContext,
+  TInput extends CommandContext & CommonListOptions = CommandContext & CommonListOptions,
 > {
   description: string
   examples?: CommandExamples
   hint?: string
   optionNames?: Partial<CommonListOptionNames>
   options?: CommonListOptionsConfig
+  extraOptions?: CommandOptionShape
   output: z.ZodType<TResult>
-  buildInput?(input: CommandContext & CommonListOptions): TInput
+  buildInput?(
+    input: CommandContext & CommonListOptions,
+    options: Record<string, unknown>,
+  ): TInput
   run(input: TInput): Promise<TResult>
 }
 
@@ -309,7 +313,7 @@ export function createInputFileFactoryCommand<TResult>(
 
 export function createCommonListCommand<
   TResult,
-  TInput extends CommandContext,
+  TInput extends CommandContext & CommonListOptions = CommandContext & CommonListOptions,
 >(
   config: CommonListCommandConfig<TResult, TInput>,
 ): FactoryCommandConfig<TResult> {
@@ -327,7 +331,10 @@ export function createCommonListCommand<
     description: config.description,
     examples: config.examples,
     hint: config.hint,
-    options: buildCommonListOptionShape(config.options ?? {}, optionNames),
+    options: {
+      ...buildCommonListOptionShape(config.options ?? {}, optionNames),
+      ...(config.extraOptions ?? {}),
+    },
     output: config.output,
     async run({ options, requestId }) {
       return config.run(
@@ -335,7 +342,7 @@ export function createCommonListCommand<
           ...readCommonListOptions(options, optionNames),
           requestId,
           vault: options.vault,
-        }),
+        }, options),
       )
     },
   }

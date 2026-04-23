@@ -1328,15 +1328,6 @@ function attachAssistantFailoverExhaustionContext(input: {
   })
 }
 
-function truncateAssistantContinuityText(text: string): string {
-  const normalized = text.replace(/\s+/gu, ' ').trim()
-  if (normalized.length <= 400) {
-    return normalized
-  }
-
-  return `${normalized.slice(0, 397)}...`
-}
-
 function providerUsesFlatPrompt(
   capabilities: ReturnType<typeof resolveAssistantProviderTargetExecutionCapabilities>,
 ): boolean {

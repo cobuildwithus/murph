@@ -631,16 +631,6 @@ function resolveOpenAiCompatibleGatewayProviderOptions(input: {
   return Object.keys(gatewayOptions).length > 0 ? gatewayOptions : null
 }
 
-function isOpenAiCompatibleVercelAiGatewayConfig(
-  providerConfig: AssistantProviderConfig,
-): boolean {
-  if (!isAssistantOpenAICompatibleTargetConfig(providerConfig)) {
-    return false
-  }
-
-  return isOpenAiCompatibleVercelAiGatewayTarget(providerConfig.target)
-}
-
 export function isOpenAiCompatibleVercelAiGatewayTarget(
   target: OpenAiCompatibleTargetIdentity,
 ): boolean {

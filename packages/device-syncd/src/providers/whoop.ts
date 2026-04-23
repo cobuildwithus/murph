@@ -234,10 +234,6 @@ function tokenResponseToAuthTokens(payload: WhoopTokenResponse): ProviderAuthTok
   );
 }
 
-function hasWhoopScopeValue(scopes: readonly string[], scope: string): boolean {
-  return scopes.includes(scope);
-}
-
 function constantTimeBase64Equals(expected: string, actual: string): boolean {
   const expectedBuffer = Buffer.from(expected, "utf8");
   const actualBuffer = Buffer.from(actual, "utf8");

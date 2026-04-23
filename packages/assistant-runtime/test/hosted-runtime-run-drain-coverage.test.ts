@@ -628,9 +628,6 @@ describe("executeHostedRunDrainForCommit", () => {
       });
 
       expect(result.committedResult.result.redactedDetails).toEqual({
-        vaultSyncImport: expect.objectContaining({
-          sessionId: "vsi_first",
-        }),
         vaultSyncImports: [
           expect.objectContaining({
             conflictCount: 0,

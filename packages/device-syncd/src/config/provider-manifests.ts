@@ -164,15 +164,6 @@ function booleanJobField(
   };
 }
 
-function numberJobField(
-  options: Pick<DeviceSyncJobPayloadFieldSpec, "includeInHostedHint" | "required"> = {},
-): DeviceSyncJobPayloadFieldSpec {
-  return {
-    kind: "number",
-    ...options,
-  };
-}
-
 function stringJobField(
   options: Pick<DeviceSyncJobPayloadFieldSpec, "includeInHostedHint" | "required"> = {},
 ): DeviceSyncJobPayloadFieldSpec {

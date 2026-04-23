@@ -26,6 +26,8 @@ import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   commonDateRangeOptionDescriptions,
   commonListLimitOptionSchema,
+  createCommonListCommand,
+  registerFactoryCommand,
 } from './command-factory-primitives.js'
 import { normalizeOccurredAtOption } from './occurred-at-option.js'
 
@@ -210,32 +212,32 @@ export function registerMeasurementCommands(
     },
   })
 
-  measurement.command('list', {
-    description: measurementCommandDescriptions.list,
-    args: z.object({}),
-    options: withBaseOptions({
-      from: z
-        .string()
-        .regex(/^\d{4}-\d{2}-\d{2}$/u)
-        .optional()
-        .describe(commonDateRangeOptionDescriptions.from),
-      to: z
-        .string()
-        .regex(/^\d{4}-\d{2}-\d{2}$/u)
-        .optional()
-        .describe(commonDateRangeOptionDescriptions.to),
-      limit: commonListLimitOptionSchema,
+  registerFactoryCommand(
+    measurement,
+    createCommonListCommand({
+      description: measurementCommandDescriptions.list,
+      options: {
+        from: {
+          description: commonDateRangeOptionDescriptions.from,
+          name: 'from',
+        },
+        to: {
+          description: commonDateRangeOptionDescriptions.to,
+          name: 'to',
+        },
+        limit: commonListLimitOptionSchema,
+      },
+      output: listResultSchema,
+      run(input) {
+        return listMeasurementRecords({
+          vault: input.vault,
+          from: input.from,
+          to: input.to,
+          limit: input.limit,
+        })
+      },
     }),
-    output: listResultSchema,
-    async run({ options }) {
-      return listMeasurementRecords({
-        vault: options.vault,
-        from: typeof options.from === 'string' ? options.from : undefined,
-        to: typeof options.to === 'string' ? options.to : undefined,
-        limit: typeof options.limit === 'number' ? options.limit : undefined,
-      })
-    },
-  })
+  )
 
   measurement.command('manifest', {
     description: measurementCommandDescriptions.manifest,
