@@ -496,6 +496,28 @@ describe("RunnerRunProcessor.executeRunDrain", () => {
     expect(ensureRunnerStores).not.toHaveBeenCalled();
   });
 
+  it("keeps loopback Linq typing endpoints in the runner-owned messaging activity env", async () => {
+    const { processor } = createInvokeRunnerProcessor({
+      forwardedEnvSource: {
+        HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://host.docker.internal:8787",
+        HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "linq",
+        LINQ_API_BASE_URL: "http://127.0.0.1:4011",
+      },
+    });
+
+    const runtimeEnv = await Reflect.get(
+      processor,
+      "resolveRunnerMessagingActivityRuntimeEnv",
+    ).call(processor, "user_123");
+
+    expect(runtimeEnv).toEqual(expect.objectContaining({
+      HOSTED_EMAIL_INGRESS_READY: "false",
+      HOSTED_EMAIL_SEND_READY: "false",
+      LINQ_API_BASE_URL: "http://127.0.0.1:4011",
+      NODE_ENV: "production",
+    }));
+  });
+
   it("always requires finalize for prepared snapshots, even without delivery effects", async () => {
     const beginRun = vi.fn().mockResolvedValue(undefined);
     const completeRun = vi.fn().mockResolvedValue(undefined);

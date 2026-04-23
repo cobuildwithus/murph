@@ -145,7 +145,9 @@ describe("hosted local Linq first-contact e2e", () => {
     const materializedChatId = requireLinqStub().requireObservedChatId(directReplyUserId);
     const expectedDirectReplyChatPath =
       `/chats/${encodeURIComponent(materializedChatId)}/messages`;
+    const expectedTypingPath = `/chats/${encodeURIComponent(materializedChatId)}/typing`;
     const outboundCountBeforeReply = requireLinqStub().countObservedSends(expectedDirectReplyChatPath);
+    const requestCountBeforeReply = requireLinqStub().observedRequests.length;
     const webhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
       directReplyUserId,
       materializedChatId,
@@ -168,7 +170,22 @@ describe("hosted local Linq first-contact e2e", () => {
       scenario: requireScenario(),
       userId: directReplyUserId,
     });
+    const requestsAfterInbound = requireLinqStub().observedRequests.slice(requestCountBeforeReply);
+    const typingRequestsAfterInbound = requestsAfterInbound.filter((request) =>
+      request.method === "POST" && request.url === expectedTypingPath
+    );
+
     expect(replySend.method).toBe("POST");
+    expect(typingRequestsAfterInbound.length).toBeGreaterThanOrEqual(1);
+
+    const sendIndex = requestsAfterInbound.indexOf(replySend);
+    const typingIndices = typingRequestsAfterInbound.map((request) =>
+      requestsAfterInbound.indexOf(request)
+    );
+
+    expect(sendIndex).toBeGreaterThanOrEqual(0);
+    expect(typingIndices[0]).toBeGreaterThanOrEqual(0);
+    expect(sendIndex).toBeGreaterThan(typingIndices[0]);
     expect(requireLinqStub().readObservedMessageText(replySend)).toBe(
       HOSTED_LINQ_DEFAULT_ASSISTANT_REPLY_TEXT,
     );
