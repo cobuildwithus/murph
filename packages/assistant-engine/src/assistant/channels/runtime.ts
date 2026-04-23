@@ -43,6 +43,10 @@ const TELEGRAM_SEND_TIMEOUT_MS = 30_000
 const LINQ_TYPING_REFRESH_MS = 4_000
 
 type TelegramParsedTarget = TelegramThreadTarget
+interface TelegramCleanupMessage {
+  messageId: string
+  target: string
+}
 
 type TelegramSendAttemptResult =
   | {
@@ -76,6 +80,8 @@ type TelegramSendAttemptOutcome =
     }
 
 interface TelegramAmbiguousDeliveryFailure extends VaultCliError {
+  cleanupMessages?: TelegramCleanupMessage[]
+  cleanupTargetAliases?: string[]
   deliveryMayHaveSucceeded: true
   providerMessageId: string | null
   providerMessageIds: string[]
@@ -91,6 +97,8 @@ export async function sendTelegramMessage(
   },
   dependencies: TelegramRuntimeDependencies = {},
 ): Promise<{
+  cleanupMessages?: TelegramCleanupMessage[]
+  cleanupTargetAliases?: string[]
   providerMessageId: string | null
   providerMessageIds?: string[]
   target: string
@@ -439,6 +447,8 @@ async function sendTelegramMessageDetailed(
   },
   dependencies: TelegramRuntimeDependencies = {},
 ): Promise<{
+  cleanupMessages?: TelegramCleanupMessage[]
+  cleanupTargetAliases?: string[]
   providerMessageId: string | null
   providerMessageIds?: string[]
   target: string
@@ -468,6 +478,8 @@ async function sendTelegramMessageDetailed(
   let target = parseTelegramTargetOrThrow(input.target)
   let targetLabel = serializeTelegramThreadTarget(target)
   let lastProviderMessageId: string | null = null
+  const cleanupMessages: TelegramCleanupMessage[] = []
+  const cleanupTargetAliases = new Set<string>()
   const providerMessageIds: string[] = []
   let replyToMessageId = normalizeTelegramReplyToMessageId(input.replyToMessageId)
 
@@ -486,7 +498,14 @@ async function sendTelegramMessageDetailed(
       target = delivered.target
       targetLabel = delivered.targetLabel
       lastProviderMessageId = delivered.providerMessageId
+      for (const alias of delivered.cleanupTargetAliases ?? []) {
+        cleanupTargetAliases.add(alias)
+      }
       if (delivered.providerMessageId) {
+        cleanupMessages.push({
+          messageId: delivered.providerMessageId,
+          target: delivered.targetLabel,
+        })
         providerMessageIds.push(delivered.providerMessageId)
       }
       replyToMessageId = null
@@ -496,16 +515,17 @@ async function sendTelegramMessageDetailed(
       }
 
       const rollbackError = await rollbackTelegramPartialDelivery({
+        cleanupMessages,
         env,
         fetchImplementation,
-        providerMessageIds,
-        target: targetLabel,
       })
       if (!rollbackError) {
         throw error
       }
 
       throw createTelegramAmbiguousDeliveryFailure({
+        cleanupMessages,
+        cleanupTargetAliases: [...cleanupTargetAliases],
         error,
         providerMessageIds,
         rollbackError,
@@ -515,6 +535,16 @@ async function sendTelegramMessageDetailed(
   }
 
   return {
+    ...(cleanupMessages.length > 0
+      ? {
+          cleanupMessages,
+        }
+      : {}),
+    ...(cleanupTargetAliases.size > 0
+      ? {
+          cleanupTargetAliases: [...cleanupTargetAliases],
+        }
+      : {}),
     providerMessageId: lastProviderMessageId,
     ...(providerMessageIds.length > 1 ? { providerMessageIds } : {}),
     target: targetLabel,
@@ -522,22 +552,23 @@ async function sendTelegramMessageDetailed(
 }
 
 async function rollbackTelegramPartialDelivery(input: {
+  cleanupMessages: readonly TelegramCleanupMessage[]
   env: NodeJS.ProcessEnv
   fetchImplementation: TelegramFetchImplementation
-  providerMessageIds: readonly string[]
-  target: string
 }): Promise<unknown | null> {
   try {
-    await deleteTelegramMessages(
-      {
-        messageIds: input.providerMessageIds,
-        target: input.target,
-      },
-      {
-        env: input.env,
-        fetchImplementation: input.fetchImplementation,
-      },
-    )
+    for (const [target, messageIds] of groupTelegramCleanupMessagesByTarget(input.cleanupMessages)) {
+      await deleteTelegramMessages(
+        {
+          messageIds,
+          target,
+        },
+        {
+          env: input.env,
+          fetchImplementation: input.fetchImplementation,
+        },
+      )
+    }
     return null
   } catch (error) {
     return error
@@ -545,11 +576,21 @@ async function rollbackTelegramPartialDelivery(input: {
 }
 
 function createTelegramAmbiguousDeliveryFailure(input: {
+  cleanupMessages?: readonly TelegramCleanupMessage[]
+  cleanupTargetAliases?: readonly string[]
   error: unknown
   providerMessageIds: readonly string[]
   rollbackError: unknown
   target: string
 }): TelegramAmbiguousDeliveryFailure {
+  const cleanupMessages = normalizeTelegramCleanupMessages(input.cleanupMessages ?? [])
+  const cleanupTargetAliases = Array.from(
+    new Set(
+      (input.cleanupTargetAliases ?? [])
+        .map((value) => value.trim())
+        .filter((value) => value.length > 0),
+    ),
+  )
   const providerMessageIds = [...input.providerMessageIds]
   const originalFailure = normalizeOptionalText(describeUnknownError(input.error))
   const rollbackFailure = normalizeOptionalText(describeUnknownError(input.rollbackError))
@@ -560,7 +601,9 @@ function createTelegramAmbiguousDeliveryFailure(input: {
     'ASSISTANT_TELEGRAM_DELIVERY_AMBIGUOUS',
     message,
     {
+      ...(cleanupMessages.length > 0 ? { cleanupMessages } : {}),
       originalFailure,
+      ...(cleanupTargetAliases.length > 0 ? { cleanupTargetAliases } : {}),
       providerMessageIds,
       rollbackFailure,
       target: input.target,
@@ -568,11 +611,55 @@ function createTelegramAmbiguousDeliveryFailure(input: {
   )
 
   return Object.assign(error, {
+    ...(cleanupMessages.length > 0 ? { cleanupMessages } : {}),
+    ...(cleanupTargetAliases.length > 0 ? { cleanupTargetAliases } : {}),
     deliveryMayHaveSucceeded: true as const,
     providerMessageId: providerMessageIds.at(-1) ?? null,
     providerMessageIds,
     target: input.target,
   })
+}
+
+function normalizeTelegramCleanupMessages(
+  cleanupMessages: readonly TelegramCleanupMessage[],
+): TelegramCleanupMessage[] {
+  const normalized: TelegramCleanupMessage[] = []
+  const seen = new Set<string>()
+
+  for (const cleanupMessage of cleanupMessages) {
+    const messageId = cleanupMessage.messageId.trim()
+    const target = cleanupMessage.target.trim()
+    if (messageId.length === 0 || target.length === 0) {
+      continue
+    }
+
+    const key = `${target}\u0000${messageId}`
+    if (seen.has(key)) {
+      continue
+    }
+
+    seen.add(key)
+    normalized.push({
+      messageId,
+      target,
+    })
+  }
+
+  return normalized
+}
+
+function groupTelegramCleanupMessagesByTarget(
+  cleanupMessages: readonly TelegramCleanupMessage[],
+): Map<string, string[]> {
+  const grouped = new Map<string, string[]>()
+
+  for (const cleanupMessage of normalizeTelegramCleanupMessages(cleanupMessages)) {
+    const bucket = grouped.get(cleanupMessage.target) ?? []
+    bucket.push(cleanupMessage.messageId)
+    grouped.set(cleanupMessage.target, bucket)
+  }
+
+  return grouped
 }
 
 function resolveAgentmailThreadReplyMessageId(input: {
@@ -606,10 +693,12 @@ async function sendTelegramTextChunk(input: {
   text: string
   token: string
 }): Promise<{
+  cleanupTargetAliases?: string[]
   providerMessageId: string | null
   target: TelegramParsedTarget
   targetLabel: string
 }> {
+  const cleanupTargetAliases = new Set<string>()
   let retryCount = 0
   let target = input.target
   let targetLabel = input.targetLabel
@@ -631,6 +720,11 @@ async function sendTelegramTextChunk(input: {
 
     if (outcome.kind === 'delivered') {
       return {
+        ...(cleanupTargetAliases.size > 0
+          ? {
+              cleanupTargetAliases: [...cleanupTargetAliases],
+            }
+          : {}),
         providerMessageId: outcome.providerMessageId,
         target,
         targetLabel,
@@ -638,6 +732,7 @@ async function sendTelegramTextChunk(input: {
     }
 
     if (outcome.kind === 'migrated') {
+      cleanupTargetAliases.add(targetLabel)
       target = outcome.target
       targetLabel = outcome.targetLabel
       continue

@@ -574,8 +574,28 @@ export class RunnerRunProcessor {
     userId?: string | null;
     wakes: readonly HostedIngressEnvelope[];
   }): Promise<void> {
-    const pendingCleanup =
-      input.runId ? await this.dependencies.stateStore.readPendingRunCleanup(input.runId) : null;
+    let pendingCleanup: RunnerPendingCleanupState | null = null;
+    let canClearPendingCleanup = input.runId == null;
+    if (input.runId) {
+      try {
+        pendingCleanup = await this.dependencies.stateStore.readPendingRunCleanup(input.runId);
+        canClearPendingCleanup = true;
+      } catch (error) {
+        emitHostedExecutionStructuredLog({
+          component: "runner",
+          details: {
+            runId: input.runId,
+          },
+          error,
+          eventId: input.wakes[0]?.eventId ?? "hosted-run:cleanup",
+          level: "warn",
+          message: "Hosted pending cleanup sidecar read failed; continuing with in-memory cleanup inputs only.",
+          phase: "completed",
+          run: null,
+          userId: input.userId ?? input.wakes[0]?.userId ?? "unknown",
+        });
+      }
+    }
     if (
       input.wakes.length === 0
       && (!input.assistantDeliveryOutcomes || input.assistantDeliveryOutcomes.length === 0)
@@ -604,8 +624,24 @@ export class RunnerRunProcessor {
       wakes: input.wakes,
     });
 
-    if (input.runId) {
-      await this.dependencies.stateStore.clearPendingRunCleanup(input.runId);
+    if (input.runId && canClearPendingCleanup) {
+      try {
+        await this.dependencies.stateStore.clearPendingRunCleanup(input.runId);
+      } catch (error) {
+        emitHostedExecutionStructuredLog({
+          component: "runner",
+          details: {
+            runId: input.runId,
+          },
+          error,
+          eventId: input.wakes[0]?.eventId ?? "hosted-run:cleanup",
+          level: "warn",
+          message: "Hosted pending cleanup sidecar clear failed; continuing after best-effort cleanup.",
+          phase: "completed",
+          run: null,
+          userId: input.userId ?? input.wakes[0]?.userId ?? "unknown",
+        });
+      }
     }
   }
 
@@ -703,7 +739,7 @@ export class RunnerRunProcessor {
     }
 
     for (const outcome of input.assistantDeliveryOutcomes) {
-      if (outcome.deliveryStatus !== "sent" || outcome.deliveryChannel !== "linq") {
+      if (!shouldUseHostedDeliveryOutcomeForCleanup(outcome, "linq")) {
         continue;
       }
 
@@ -749,65 +785,49 @@ export class RunnerRunProcessor {
     wakes: readonly HostedIngressEnvelope[];
   }): Promise<void> {
     const groupedMessageIds = new Map<string, Set<string>>();
-    const cleanupTargets = new Set<string>();
-    const sentTargets = new Set<string>();
+    const cleanupTargetAliases = buildHostedTelegramCleanupTargetAliasMap(
+      input.assistantDeliveryOutcomes,
+    );
     const cleanupWakeMessages: Array<{ messageId: string; target: string }> = [];
     const persistedCleanupMessages = [...(input.pendingCleanup?.telegramMessages ?? [])];
-
-    for (const outcome of input.assistantDeliveryOutcomes) {
-      if (outcome.deliveryStatus === "sent" && outcome.deliveryChannel === "telegram" && outcome.target) {
-        sentTargets.add(outcome.target);
-      }
-    }
 
     for (const wake of input.wakes) {
       if (wake.kind !== "conversation.message" || wake.message.channel !== "telegram") {
         continue;
       }
 
-      const target = wake.message.telegramMessage.threadId;
-      cleanupTargets.add(target);
       cleanupWakeMessages.push({
         messageId: wake.message.telegramMessage.messageId,
-        target,
+        target: wake.message.telegramMessage.threadId,
       });
     }
-    for (const message of persistedCleanupMessages) {
-      cleanupTargets.add(message.target);
-    }
-
-    const allowPlainChatRetarget = cleanupTargets.size === 1 && sentTargets.size === 1;
 
     for (const message of cleanupWakeMessages) {
       addHostedProviderMessageId(
         groupedMessageIds,
-        resolveHostedTelegramCleanupTarget(
-          message.target,
-          sentTargets,
-          allowPlainChatRetarget,
-        ),
+        resolveHostedTelegramCleanupTarget(message.target, cleanupTargetAliases),
         message.messageId,
       );
     }
     for (const message of persistedCleanupMessages) {
       addHostedProviderMessageId(
         groupedMessageIds,
-        resolveHostedTelegramCleanupTarget(
-          message.target,
-          sentTargets,
-          allowPlainChatRetarget,
-        ),
+        resolveHostedTelegramCleanupTarget(message.target, cleanupTargetAliases),
         message.messageId,
       );
     }
 
     for (const outcome of input.assistantDeliveryOutcomes) {
-      if (outcome.deliveryStatus !== "sent" || outcome.deliveryChannel !== "telegram" || !outcome.target) {
+      if (!isHostedTelegramCleanupTargetOutcome(outcome)) {
         continue;
       }
 
-      for (const messageId of readHostedProviderMessageIds(outcome)) {
-        addHostedProviderMessageId(groupedMessageIds, outcome.target, messageId);
+      for (const cleanupMessage of readHostedCleanupMessages(outcome)) {
+        addHostedProviderMessageId(
+          groupedMessageIds,
+          cleanupMessage.target,
+          cleanupMessage.messageId,
+        );
       }
     }
 
@@ -1303,6 +1323,62 @@ function readHostedProviderMessageIds(
   return outcome.providerMessageId ? [outcome.providerMessageId] : [];
 }
 
+function readHostedCleanupTargetAliases(
+  outcome: HostedAssistantDeliveryOutcome,
+): string[] {
+  if (!Array.isArray(outcome.cleanupTargetAliases) || outcome.cleanupTargetAliases.length === 0) {
+    return [];
+  }
+
+  return Array.from(
+    new Set(
+      outcome.cleanupTargetAliases
+        .map((value) => typeof value === "string" ? value.trim() : "")
+        .filter((value) => value.length > 0),
+    ),
+  );
+}
+
+function readHostedCleanupMessages(
+  outcome: HostedAssistantDeliveryOutcome,
+): Array<{ messageId: string; target: string }> {
+  if (Array.isArray(outcome.cleanupMessages) && outcome.cleanupMessages.length > 0) {
+    return Array.from(
+      new Map(
+        outcome.cleanupMessages.flatMap((entry) => {
+          if (!entry || typeof entry !== "object") {
+            return [];
+          }
+
+          const messageId =
+            "messageId" in entry && typeof entry.messageId === "string"
+              ? entry.messageId.trim()
+              : "";
+          const target =
+            "target" in entry && typeof entry.target === "string"
+              ? entry.target.trim()
+              : "";
+          if (messageId.length === 0 || target.length === 0) {
+            return [];
+          }
+
+          return [[`${target}\u0000${messageId}`, { messageId, target }] as const];
+        }),
+      ).values(),
+    );
+  }
+
+  if (typeof outcome.target !== "string" || outcome.target.length === 0) {
+    return [];
+  }
+
+  const target = outcome.target;
+  return readHostedProviderMessageIds(outcome).map((messageId) => ({
+    messageId,
+    target,
+  }));
+}
+
 function addHostedProviderMessageId(
   groupedMessageIds: Map<string, Set<string>>,
   target: string,
@@ -1311,6 +1387,24 @@ function addHostedProviderMessageId(
   const bucket = groupedMessageIds.get(target) ?? new Set<string>();
   bucket.add(messageId);
   groupedMessageIds.set(target, bucket);
+}
+
+function shouldUseHostedDeliveryOutcomeForCleanup(
+  outcome: HostedAssistantDeliveryOutcome,
+  channel: string,
+): boolean {
+  return outcome.deliveryChannel === channel
+    && (outcome.deliveryStatus === "sent" || outcome.deliveryStatus === "failed_ambiguous")
+    && readHostedProviderMessageIds(outcome).length > 0;
+}
+
+function isHostedTelegramCleanupTargetOutcome(
+  outcome: HostedAssistantDeliveryOutcome,
+): outcome is HostedAssistantDeliveryOutcome & { target: string } {
+  return outcome.deliveryChannel === "telegram"
+    && (outcome.deliveryStatus === "sent" || outcome.deliveryStatus === "failed_ambiguous")
+    && typeof outcome.target === "string"
+    && outcome.target.length > 0;
 }
 
 function buildRunnerPendingCleanupState(
@@ -1358,155 +1452,44 @@ function buildRunnerPendingCleanupState(
 
 function resolveHostedTelegramCleanupTarget(
   target: string,
-  sentTargets: ReadonlySet<string>,
-  allowPlainChatRetarget: boolean,
+  cleanupTargetAliases: ReadonlyMap<string, string | null>,
 ): string {
-  if (sentTargets.has(target)) {
-    return target;
-  }
+  const replacement = cleanupTargetAliases.get(target);
+  return replacement ?? target;
+}
 
-  const parsedTarget = parseHostedTelegramCleanupTarget(target);
-  if (!parsedTarget) {
-    return target;
-  }
+function buildHostedTelegramCleanupTargetAliasMap(
+  outcomes: readonly HostedAssistantDeliveryOutcome[],
+): Map<string, string | null> {
+  const aliases = new Map<string, string | null>();
 
-  let compatibleReplacement: string | null = null;
-  for (const sentTarget of sentTargets) {
-    const parsedSentTarget = parseHostedTelegramCleanupTarget(sentTarget);
-    if (
-      !parsedSentTarget ||
-      !areHostedTelegramCleanupTargetsCompatible(
-        parsedTarget,
-        parsedSentTarget,
-        allowPlainChatRetarget,
-      )
-    ) {
+  for (const outcome of outcomes) {
+    if (!shouldUseHostedDeliveryOutcomeForCleanup(outcome, "telegram")) {
       continue;
     }
 
-    if (compatibleReplacement && compatibleReplacement !== sentTarget) {
-      return target;
+    if (typeof outcome.target !== "string" || outcome.target.length === 0) {
+      continue;
     }
 
-    compatibleReplacement = sentTarget;
-  }
-
-  return compatibleReplacement ?? target;
-}
-
-interface HostedTelegramCleanupTarget {
-  businessConnectionId: string | null;
-  chatId: string;
-  directMessagesTopicId: number | null;
-  messageThreadId: number | null;
-}
-
-function areHostedTelegramCleanupTargetsCompatible(
-  current: HostedTelegramCleanupTarget,
-  replacement: HostedTelegramCleanupTarget,
-  allowPlainChatRetarget: boolean,
-): boolean {
-  const hasExplicitRoutingScope = current.businessConnectionId != null
-    || current.directMessagesTopicId != null
-    || current.messageThreadId != null;
-
-  return current.chatId !== replacement.chatId
-    && current.businessConnectionId === replacement.businessConnectionId
-    && current.directMessagesTopicId === replacement.directMessagesTopicId
-    && current.messageThreadId === replacement.messageThreadId
-    && (hasExplicitRoutingScope || allowPlainChatRetarget);
-}
-
-function parseHostedTelegramCleanupTarget(
-  target: string,
-): HostedTelegramCleanupTarget | null {
-  const normalizedTarget = target.trim();
-  if (normalizedTarget.length === 0) {
-    return null;
-  }
-
-  const segments = normalizedTarget.split(":");
-  const chatId = segments.shift()?.trim();
-  if (!chatId) {
-    return null;
-  }
-
-  const parsed: HostedTelegramCleanupTarget = {
-    businessConnectionId: null,
-    chatId,
-    directMessagesTopicId: null,
-    messageThreadId: null,
-  };
-
-  while (segments.length > 0) {
-    const key = segments.shift();
-    const value = segments.shift();
-    if (!key || value === undefined) {
-      return null;
-    }
-
-    if (key === "topic") {
-      const topicId = parseHostedTelegramCleanupPositiveInteger(value);
-      if (
-        topicId === null ||
-        parsed.messageThreadId != null ||
-        parsed.directMessagesTopicId != null
-      ) {
-        return null;
+    for (const alias of readHostedCleanupTargetAliases(outcome)) {
+      if (alias === outcome.target) {
+        continue;
       }
-      parsed.messageThreadId = topicId;
-      continue;
-    }
 
-    if (key === "business") {
-      const businessConnectionId = decodeHostedTelegramCleanupBusinessConnectionId(value);
-      if (!businessConnectionId || parsed.businessConnectionId != null) {
-        return null;
+      const existing = aliases.get(alias);
+      if (existing === undefined) {
+        aliases.set(alias, outcome.target);
+        continue;
       }
-      parsed.businessConnectionId = businessConnectionId;
-      continue;
-    }
 
-    if (key === "dm-topic") {
-      const directMessagesTopicId = parseHostedTelegramCleanupPositiveInteger(value);
-      if (
-        directMessagesTopicId === null ||
-        parsed.directMessagesTopicId != null ||
-        parsed.messageThreadId != null
-      ) {
-        return null;
+      if (existing !== outcome.target) {
+        aliases.set(alias, null);
       }
-      parsed.directMessagesTopicId = directMessagesTopicId;
-      continue;
     }
-
-    return null;
   }
 
-  return parsed;
-}
-
-function decodeHostedTelegramCleanupBusinessConnectionId(
-  value: string,
-): string | null {
-  try {
-    const decoded = decodeURIComponent(value);
-    return decoded.trim().length > 0 ? decoded : null;
-  } catch {
-    return null;
-  }
-}
-
-function parseHostedTelegramCleanupPositiveInteger(
-  value: string,
-): number | null {
-  const normalized = value.trim();
-  if (!/^[1-9]\d*$/u.test(normalized)) {
-    return null;
-  }
-
-  const parsed = Number.parseInt(normalized, 10);
-  return Number.isSafeInteger(parsed) ? parsed : null;
+  return aliases;
 }
 
 export function summarizeHostedAssistantDeliveryOutcomes(
