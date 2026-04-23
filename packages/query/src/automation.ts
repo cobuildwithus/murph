@@ -5,7 +5,6 @@ import {
   automationScheduleKindValues,
   automationStatusValues,
   VAULT_LAYOUT,
-  isValidIanaTimeZone,
   type AutomationContinuityPolicy,
   type AutomationRoute,
   type AutomationSchedule,
@@ -88,24 +87,10 @@ function requireStringValue(value: unknown, fieldName: string): string {
   return normalized;
 }
 
-function requireValidTimeZone(value: unknown, fieldName: string): string {
-  const timeZone = requireStringValue(value, fieldName);
-  if (!isValidIanaTimeZone(timeZone)) {
-    throw new Error(`${fieldName} must be a valid IANA timezone.`);
+function rejectRecurringScheduleTimeZone(object: Record<string, unknown>): void {
+  if (Object.hasOwn(object, "timeZone")) {
+    throw new Error("schedule.timeZone is not supported for canonical automation schedules.");
   }
-
-  return timeZone;
-}
-
-function normalizeOptionalRecurringTimeZone(
-  value: unknown,
-  fieldName: string,
-): string | undefined {
-  if (value === undefined || value === null) {
-    return undefined;
-  }
-
-  return requireValidTimeZone(value, fieldName);
 }
 
 function normalizeAutomationStatus(value: unknown): AutomationStatus {
@@ -157,7 +142,7 @@ function normalizeAutomationSchedule(value: unknown): AutomationSchedule {
       };
     }
     case "cron":
-      normalizeOptionalRecurringTimeZone(object.timeZone, "schedule.timeZone");
+      rejectRecurringScheduleTimeZone(object);
       return {
         kind,
         expression: requireStringValue(object.expression, "schedule.expression"),
@@ -168,7 +153,7 @@ function normalizeAutomationSchedule(value: unknown): AutomationSchedule {
         throw new Error("schedule.localTime must use HH:MM format.");
       }
 
-      normalizeOptionalRecurringTimeZone(object.timeZone, "schedule.timeZone");
+      rejectRecurringScheduleTimeZone(object);
 
       return {
         kind,

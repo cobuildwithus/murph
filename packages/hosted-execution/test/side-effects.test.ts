@@ -13,15 +13,10 @@ import {
   sameHostedAssistantDeliveryFailure,
   sameHostedAssistantDeliveryReceipt,
   sameHostedAssistantDeliverySideEffectIdentity,
-  sameHostedExecutionAssistantDelivery,
-  sameHostedExecutionSideEffectIdentity,
   hostedAssistantDeliveryTargetKindValues,
   parseHostedAssistantDeliveryRecord,
   parseHostedAssistantDeliverySideEffect,
   parseHostedAssistantDeliverySideEffects,
-  parseHostedExecutionSideEffect,
-  parseHostedExecutionSideEffectRecord,
-  parseHostedExecutionSideEffects,
 } from "../src/side-effects.ts";
 
 function createHostedAssistantDeliveryPayload(
@@ -104,7 +99,6 @@ describe("hosted assistant delivery contracts", () => {
     }];
 
     expect(parseHostedAssistantDeliverySideEffects(payload)).toEqual(payload);
-    expect(parseHostedExecutionSideEffects(payload)).toEqual(payload);
   });
 
   it("builds canonical effects and sending records with only the canonical effect id", () => {
@@ -220,7 +214,6 @@ describe("hosted assistant delivery contracts", () => {
     expect(parseHostedAssistantDeliveryRecord(sent)).toEqual(sent);
     expect(parseHostedAssistantDeliveryRecord(failed)).toEqual(failed);
     expect(parseHostedAssistantDeliveryRecord(ambiguous)).toEqual(ambiguous);
-    expect(parseHostedExecutionSideEffectRecord(sent)).toEqual(sent);
   });
 
   it("rejects removed prepared assistant delivery records", () => {
@@ -243,15 +236,14 @@ describe("hosted assistant delivery contracts", () => {
     });
 
     expect(parseHostedAssistantDeliverySideEffect(effect)).toEqual(effect);
-    expect(parseHostedExecutionSideEffect(effect)).toEqual(effect);
     expect(() =>
-      parseHostedExecutionSideEffect({
+      parseHostedAssistantDeliverySideEffect({
         effectId: "intent-1",
         fingerprint: "dedupe-1",
         kind: "unsupported.kind",
         payload: createHostedAssistantDeliveryPayload(),
       }),
-    ).toThrow("Unsupported hosted execution side effect kind");
+    ).toThrow("Unsupported hosted assistant delivery kind");
   });
 
   it("compares hosted side-effect identities, attempts, failures, and receipts", () => {
@@ -289,16 +281,12 @@ describe("hosted assistant delivery contracts", () => {
     });
 
     expect(sameHostedAssistantDeliverySideEffectIdentity(effect, sameEffect)).toBe(true);
-    expect(sameHostedExecutionSideEffectIdentity(effect, sameEffect)).toBe(true);
     expect(sameHostedAssistantDeliverySideEffectIdentity(effect, differentEffect)).toBe(false);
-    expect(sameHostedExecutionSideEffectIdentity(effect, differentEffect)).toBe(false);
     expect(sameHostedAssistantDeliveryAttempt(attempt, sameAttempt)).toBe(true);
     expect(sameHostedAssistantDeliveryAttempt(attempt, differentAttempt)).toBe(false);
     expect(sameHostedAssistantDeliveryFailure(failure, sameFailure)).toBe(true);
     expect(sameHostedAssistantDeliveryFailure(failure, differentFailure)).toBe(false);
     expect(sameHostedAssistantDeliveryReceipt(receipt, sameReceipt)).toBe(true);
     expect(sameHostedAssistantDeliveryReceipt(receipt, differentReceipt)).toBe(false);
-    expect(sameHostedExecutionAssistantDelivery(receipt, sameReceipt)).toBe(true);
-    expect(sameHostedExecutionAssistantDelivery(receipt, differentReceipt)).toBe(false);
   });
 });

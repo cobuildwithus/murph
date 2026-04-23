@@ -1,6 +1,6 @@
 {
   "name": "@murphai/inboxd",
-  "version": "0.1.16",
+  "version": "1.0.0",
   "private": true,
   "description": "Local inbox ingestion runtime for Murph.",
   "license": "Apache-2.0",

@@ -226,13 +226,13 @@ describe('assistant CLI delivery contracts', () => {
 })
 
 describe('assistant CLI automation shape ownership', () => {
-  it('keeps non-recurring schedules on the canonical owners while making recurring schedules vault-local', () => {
+  it('keeps assistant cron schedules on the canonical automation owners', () => {
     expect(assistantCronScheduleKindValues).toBe(automationScheduleKindValues)
     expect(assistantCronAtScheduleSchema).toBe(automationScheduleAtSchema)
     expect(assistantCronEveryScheduleSchema).toBe(automationScheduleEverySchema)
-    expect(assistantCronExpressionScheduleSchema).not.toBe(automationScheduleCronSchema)
-    expect(assistantCronDailyLocalScheduleSchema).not.toBe(automationScheduleDailyLocalSchema)
-    expect(assistantCronScheduleSchema).not.toBe(automationScheduleSchema)
+    expect(assistantCronExpressionScheduleSchema).toBe(automationScheduleCronSchema)
+    expect(assistantCronDailyLocalScheduleSchema).toBe(automationScheduleDailyLocalSchema)
+    expect(assistantCronScheduleSchema).toBe(automationScheduleSchema)
 
     expect(
       assistantCronExpressionScheduleSchema.parse({
@@ -359,19 +359,13 @@ describe('assistant CLI automation shape ownership', () => {
       }),
     ).toThrow()
 
-    expect(
+    expect(() =>
       automationScheduleSchema.parse({
         kind: 'cron',
         expression: '0 9 * * *',
         timeZone: 'America/Los_Angeles',
       }),
-    ).toEqual(
-      automationScheduleSchema.parse({
-        kind: 'cron',
-        expression: '0 9 * * *',
-        timeZone: 'America/Los_Angeles',
-      }),
-    )
+    ).toThrow()
 
     expect(() =>
       assistantCronDailyLocalScheduleSchema.parse({

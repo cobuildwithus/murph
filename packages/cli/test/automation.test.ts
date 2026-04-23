@@ -76,8 +76,8 @@ test("automation record schema accepts the canonical automation shape", () => {
   assert.equal(parsed.schedule.kind, "cron");
 });
 
-test("automation record schema still accepts legacy recurring schedules with timeZone", () => {
-  const parsed = automationRecordSchema.parse({
+test("automation record schema rejects recurring schedules with timeZone", () => {
+  assert.throws(() => automationRecordSchema.parse({
     automationId: "automation_01HZXW2Y6Y8QWQ8QWQ8QWQ8QWX",
     slug: "legacy-weekly-check-in",
     title: "Legacy weekly check-in",
@@ -102,10 +102,7 @@ test("automation record schema still accepts legacy recurring schedules with tim
     instructions: "Write the scheduled assistant instructions here.",
     relativePath: "bank/automations/legacy-weekly-check-in.md",
     markdown: "---\n...\n---\nWrite the scheduled assistant instructions here.\n",
-  });
-
-  assert.equal(parsed.schedule.kind, "cron");
-  assert.equal(parsed.schedule.timeZone, "Australia/Sydney");
+  }), /timeZone/u);
 });
 
 test("automation record schema rejects invalid slugs", () => {

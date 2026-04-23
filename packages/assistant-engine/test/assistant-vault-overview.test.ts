@@ -201,7 +201,6 @@ it('builds a navigation-only overview from canonical, raw, and source-root cover
     schedule: {
       kind: 'cron',
       expression: '0 9 * * 1',
-      timeZone: 'Australia/Sydney',
     },
     route: {
       channel: 'telegram',

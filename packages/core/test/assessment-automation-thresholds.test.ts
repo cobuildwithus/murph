@@ -286,7 +286,7 @@ test("automation schedule normalization rejects malformed schedule shapes", asyn
         expression: "0 9 * * 1",
         timeZone: "Invalid/Timezone",
       },
-      message: "schedule.timeZone must be a valid IANA timezone.",
+      message: "schedule.timeZone is not supported for canonical automation schedules.",
     },
     {
       schedule: {
@@ -322,7 +322,53 @@ test("automation schedule normalization rejects malformed schedule shapes", asyn
   }
 });
 
-test("automation reads legacy recurring schedule timezones and rewrites the canonical shape without them", async () => {
+test("automation rejects legacy schema names and recurring schedule timezones", async () => {
+  const legacySchemaVaultRoot = await makeTempDirectory("murph-core-automation-legacy-schema");
+  await initializeVault({ vaultRoot: legacySchemaVaultRoot });
+
+  const legacySchemaRelativePath = path.join("bank", "automations", "legacy-weekly-check.md");
+  await fs.writeFile(
+    path.join(legacySchemaVaultRoot, legacySchemaRelativePath),
+    [
+      "---",
+      "schemaVersion: vault-automation.v1",
+      "docType: automation",
+      "automationId: automation_01JNW7YJ7MNE7M9Q2QWQK4Z3FH",
+      "slug: legacy-weekly-check",
+      "title: Legacy weekly check",
+      "status: active",
+      "schedule:",
+      "  kind: cron",
+      "  expression: 0 9 * * 1",
+      "route:",
+      "  channel: telegram",
+      "  deliveryTarget: null",
+      "  identityId: null",
+      "  participantId: null",
+      "  threadId: null",
+      "continuityPolicy: preserve",
+      "createdAt: 2026-04-08T00:00:00.000Z",
+      "updatedAt: 2026-04-08T00:00:00.000Z",
+      "---",
+      "",
+      "Write the weekly check.",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+
+  await assert.rejects(
+    () =>
+      readAutomation({
+        vaultRoot: legacySchemaVaultRoot,
+        automationId: "automation_01JNW7YJ7MNE7M9Q2QWQK4Z3FH",
+      }),
+    (error: unknown) =>
+      error instanceof VaultError &&
+      error.code === "VAULT_INVALID_AUTOMATION" &&
+      error.message === "Automation registry document has an unexpected shape.",
+  );
+
   const vaultRoot = await makeTempDirectory("murph-core-automation-legacy-timezone");
   await initializeVault({ vaultRoot });
 
@@ -331,7 +377,7 @@ test("automation reads legacy recurring schedule timezones and rewrites the cano
     path.join(vaultRoot, relativePath),
     [
       "---",
-      "schemaVersion: vault-automation.v1",
+      "schemaVersion: murph.frontmatter.automation.v1",
       "docType: automation",
       "automationId: automation_01JNW7YJ7MNE7M9Q2QWQK4Z3FH",
       "slug: legacy-weekly-check",
@@ -358,40 +404,17 @@ test("automation reads legacy recurring schedule timezones and rewrites the cano
     "utf8",
   );
 
-  const legacyRecord = await readAutomation({
-    vaultRoot,
-    automationId: "automation_01JNW7YJ7MNE7M9Q2QWQK4Z3FH",
-  });
-  assert.deepEqual(legacyRecord.schedule, {
-    kind: "cron",
-    expression: "0 9 * * 1",
-  });
-
-  const updated = await upsertAutomation({
-    vaultRoot,
-    automationId: legacyRecord.automationId,
-    slug: legacyRecord.slug,
-    now: new Date("2026-04-08T00:30:00.000Z"),
-    title: legacyRecord.title,
-    status: legacyRecord.status,
-    continuityPolicy: legacyRecord.continuityPolicy,
-    instructions: legacyRecord.instructions,
-    schedule: legacyRecord.schedule,
-    route: legacyRecord.route,
-    summary: legacyRecord.summary ?? undefined,
-    tags: legacyRecord.tags,
-  });
-
-  assert.deepEqual(updated.record.schedule, {
-    kind: "cron",
-    expression: "0 9 * * 1",
-  });
-
-  const parsed = parseFrontmatterDocument(updated.record.markdown);
-  assert.deepEqual(parsed.attributes.schedule, {
-    kind: "cron",
-    expression: "0 9 * * 1",
-  });
+  await assert.rejects(
+    () =>
+      readAutomation({
+        vaultRoot,
+        automationId: "automation_01JNW7YJ7MNE7M9Q2QWQK4Z3FH",
+      }),
+    (error: unknown) =>
+      error instanceof VaultError &&
+      error.code === "VAULT_INVALID_INPUT" &&
+      error.message === "schedule.timeZone is not supported for canonical automation schedules.",
+  );
 });
 
 test("automation list and read lookups keep filters, blanks, and misses deterministic", async () => {

@@ -211,12 +211,12 @@ This patch removes the identity-service wrapper and has the Linq webhook planner
 
 ### 13. Narrow hosted assistant-delivery journal APIs to the only effect they serve today
 
-**Seam:** `packages/hosted-execution/src/side-effects.ts`, `packages/assistant-runtime/src/hosted-runtime/{platform,callbacks}.ts`, `apps/cloudflare/src/{runtime-platform.ts,runner-outbound/results.ts,side-effect-journal.ts}`
+**Seam:** `packages/hosted-execution/src/side-effects.ts`, `packages/assistant-runtime/src/hosted-runtime/{platform,callbacks}.ts`, `apps/cloudflare/src/{runtime-platform.ts,runner-outbound/results.ts}`
 
-The hosted runner's read/delete journal path still carried a generic `kind` query parameter and a generically named Cloudflare journal store even though the only supported effect kind is `assistant.delivery`.
+The hosted runner's read/delete journal path still carried a generic `kind` query parameter even though the only supported effect kind is `assistant.delivery`.
 The assistant runtime and Cloudflare worker were already specialized to assistant delivery in practice, but the internal API still looked multi-kind.
 
-This patch adds assistant-delivery-specific parser/type aliases at the shared owner, narrows the assistant-runtime effects port to assistant-delivery records, removes the redundant `kind` query parameter from the internal read/delete route, and renames the Cloudflare journal store/error surface to assistant-delivery-specific names.
+This patch adds assistant-delivery-specific parser/type aliases at the shared owner, narrows the assistant-runtime effects port to assistant-delivery records, removes the redundant `kind` query parameter from the internal read/delete route, and keeps Cloudflare runtime/result helpers on assistant-delivery-specific names.
 
 **Why this is simpler:** the current hosted journal no longer pretends to compose arbitrary side-effect families. One effect kind is represented once in the payload itself instead of also being repeated in the internal route contract and journal query surface.
 
@@ -261,20 +261,20 @@ Do not pull assistant policy, hosted callback rules, or CLI-only behavior into g
 
 ### 15. Collapse active hosted side-effect paths to the assistant-delivery-specific surface they already use
 
-**Seam:** `packages/hosted-execution/src/side-effects.ts`, `packages/assistant-runtime/src/hosted-runtime/{models,parsers,platform,callbacks}.ts`, `apps/cloudflare/src/{execution-journal.ts,runtime-platform.ts,runner-outbound/results.ts,side-effect-journal.ts}`
+**Seam:** `packages/hosted-execution/src/side-effects.ts`, `packages/assistant-runtime/src/hosted-runtime/{models,parsers,platform,callbacks}.ts`, `apps/cloudflare/src/{runtime-platform.ts,runner-outbound/results.ts}`
 
-The only real hosted side effect in the live tree is still `assistant.delivery`, but assistant-runtime and Cloudflare were continuing to read and write it through generic `HostedExecutionSideEffect*` names.
-That made the active path look more composable than it really is and forced maintainers to reason about a generic framework even when the product behavior was simply “track assistant delivery confirmation.”
+The only real hosted side effect in the live tree is still `assistant.delivery`.
+Assistant-runtime and Cloudflare should read and write it through `HostedAssistantDelivery*` names rather than older generic side-effect aliases.
 
-This landing keeps the wire field names and compatibility aliases stable, but makes the assistant-delivery-specific model the primary owner again:
+This landing keeps the wire field names stable, but makes the assistant-delivery-specific model the only public owner again:
 
-- `packages/hosted-execution/src/side-effects.ts` now treats assistant-delivery-specific types, comparators, and target-kind aliases as the main owner surface while leaving the generic `HostedExecutionSideEffect*` exports in place as compatibility aliases
+- `packages/hosted-execution/src/side-effects.ts` now exposes assistant-delivery-specific types, parsers, comparators, and target-kind helpers without generic side-effect compatibility aliases
 - `packages/assistant-runtime/src/hosted-runtime/{models,parsers}.ts` now type committed side effects and resume parsing as `HostedAssistantDeliverySideEffect[]`
-- `packages/assistant-runtime/src/hosted-runtime/{platform,callbacks}.ts` now prefer assistant-delivery-specific journal method names while retaining compatibility with the older generic method names
-- `apps/cloudflare/src/{execution-journal.ts,runner-outbound/results.ts}` now parse committed journal payloads through `parseHostedAssistantDeliverySideEffects(...)`
-- `apps/cloudflare/src/side-effect-journal.ts` now uses the assistant-delivery-specific receipt comparator
+- `packages/assistant-runtime/src/hosted-runtime/{platform,callbacks}.ts` now expose and consume only the assistant-delivery-specific `readAssistantDeliveryRecord(...)` and `writeAssistantDeliveryRecord(...)` journal methods
+- `apps/cloudflare/src/runner-outbound/results.ts` now parses committed journal payloads through `parseHostedAssistantDeliverySideEffects(...)`
+- `apps/cloudflare/src/runtime-platform.ts` now uses the assistant-delivery-specific receipt comparator
 
-**Why this is simpler:** the active runtime path now names the one side-effect family it actually handles, while the shared hosted-execution package still keeps compatibility aliases so the refactor does not widen into a trust-boundary or transport rewrite.
+**Why this is simpler:** the active runtime path now names the one side-effect family it actually handles, without preserving a generic public model for behavior that does not exist yet.
 
 **Main refactor risk:** if a second durable side-effect family appears later, re-generalize intentionally from two real cases instead of copy-pasting generic names back into one-effect code paths.
 
@@ -347,14 +347,14 @@ Do not move hosted dispatch ids, event kinds, or transport policy into `device-s
 This patch:
 
 - keeps `effectId` as the canonical hosted assistant-delivery identity and removes the duplicate `intentId` field from the shared effect/record shapes
-- keeps the parser tolerant of older payloads/records that still include `intentId`, but now requires it to match `effectId` when present
+- rejects older hosted assistant-delivery payloads/records that still persist `intentId` on the hosted side-effect shape
 - maps assistant outbox `intentId` to hosted `effectId` only at the assistant-runtime adapter edge instead of persisting both names through the hosted stack
 - removes the duplicate generic journal method names from `HostedRuntimeEffectsPort` and the matching duplicate Cloudflare runtime implementation branches
 - removes the dead runner-outbound alias so the hosted journal has one public path shape
 
 **Why this is simpler:** one assistant-delivery effect now has one durable identity and one journal API. Adding another assistant-delivery field or changing journal behavior no longer requires keeping duplicated ids, duplicated method names, and duplicated route aliases aligned across hosted-execution, assistant-runtime, and Cloudflare.
 
-**Main refactor risk:** callers outside this repo that depend on the published `@murphai/hosted-execution` or `@murphai/assistant-runtime` surfaces may need coordinated updates if they were still reading `intentId` from hosted assistant-delivery payloads or implementing the legacy generic journal method names. The legacy parser tolerance should stay boundary-only rather than creeping back into the canonical write shape.
+**Main refactor risk:** callers outside this repo that depend on the published `@murphai/hosted-execution` or `@murphai/assistant-runtime` surfaces may need coordinated updates if they were still reading `intentId` from hosted assistant-delivery payloads or implementing the legacy generic journal method names. Do not reintroduce parser tolerance for those old hosted side-effect shapes unless a new public compatibility policy explicitly requires it.
 
 ### 20. Keep event-source vocabulary owned by contracts instead of restating it in CLI and workflow façades
 

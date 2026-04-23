@@ -1,6 +1,6 @@
 # Murph Agent Docs Index
 
-Last verified: 2026-04-22
+Last verified: 2026-04-23
 
 ## Purpose
 
@@ -65,4 +65,5 @@ It intentionally lists live architecture, product, verification, and package-bou
 
 - Keep this index focused on live docs that describe the current repo state.
 - Do not list point-in-time architecture reviews, migration guides, or historical cleanup audits here.
+- Keep current external compatibility references such as the device-provider compatibility matrix when they describe active planning or provider requirements.
 - Update this index whenever canonical docs are added, removed, moved, or materially repurposed.

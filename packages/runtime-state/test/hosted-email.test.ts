@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { test } from "vitest";
 
 import {
+  HOSTED_EMAIL_THREAD_TARGET_SCHEMA,
   appendHostedEmailReferenceChain,
   createHostedEmailThreadTarget,
   ensureHostedEmailReplySubject,
@@ -49,20 +50,35 @@ test("hosted email thread targets serialize, normalize, and parse deterministica
     subject: "  Status update ",
     to: ["Friend@example.test", "Friend@example.test", "Team <team@example.test>"],
   });
+  const parsed = parseHostedEmailThreadTarget(serialized);
 
-  assert.deepEqual(parseHostedEmailThreadTarget(serialized), createHostedEmailThreadTarget({
+  assert.deepEqual(parsed, createHostedEmailThreadTarget({
     cc: ["owner@example.test"],
     lastMessageId: "<last@example.test>",
     references: ["<older@example.test>", "<last@example.test>"],
     subject: "Status update",
     to: ["friend@example.test", "team@example.test"],
   }));
+  assert.equal(parsed?.schema, HOSTED_EMAIL_THREAD_TARGET_SCHEMA);
   assert.equal(parseHostedEmailThreadTarget(""), null);
   assert.equal(parseHostedEmailThreadTarget("not-a-target"), null);
   assert.equal(parseHostedEmailThreadTarget("hostedmail:not-json"), null);
   assert.equal(
     parseHostedEmailThreadTarget(
       "hostedmail:eyJzY2hlbWEiOiJ3cm9uZyIsInRvIjpbIm93bmVyQGV4YW1wbGUudGVzdCJdLCJjYyI6W10sInJlZmVyZW5jZXMiOltdLCJsYXN0TWVzc2FnZUlkIjpudWxsLCJyZXBseUFsaWFzQWRkcmVzcyI6bnVsbCwic3ViamVjdCI6bnVsbH0",
+    ),
+    null,
+  );
+  assert.equal(
+    parseHostedEmailThreadTarget(
+      `hostedmail:${Buffer.from(JSON.stringify({
+        cc: [],
+        lastMessageId: null,
+        references: [],
+        schema: "murph.hosted-email-thread-target.v2",
+        subject: null,
+        to: ["owner@example.test"],
+      })).toString("base64url")}`,
     ),
     null,
   );

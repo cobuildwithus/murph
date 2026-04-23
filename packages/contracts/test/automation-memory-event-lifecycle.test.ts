@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  AUTOMATION_SCHEMA_VERSION,
   automationScheduleSchema,
   automationScaffoldPayloadSchema,
 } from "../src/automation.ts";
@@ -22,6 +23,10 @@ import { foodUpsertPayloadSchema } from "../src/shares.ts";
 import { eventRecordSchema } from "../src/zod.ts";
 
 describe("automation contract seams", () => {
+  it("uses the canonical Murph automation frontmatter schema", () => {
+    expect(AUTOMATION_SCHEMA_VERSION).toBe("murph.frontmatter.automation.v1");
+  });
+
   it("applies scaffold defaults while preserving parsed schedule and route fields", () => {
     const parsed = automationScaffoldPayloadSchema.parse({
       instructions: "Summarize the day",
@@ -55,17 +60,17 @@ describe("automation contract seams", () => {
     });
   });
 
-  it("rejects invalid automation time zones during schedule parsing", () => {
+  it("rejects recurring automation schedule time zones", () => {
     expect(() =>
       automationScheduleSchema.parse({
         expression: "0 8 * * *",
         kind: "cron",
         timeZone: "Mars/Olympus",
       }),
-    ).toThrow(/IANA timezone/u);
+    ).toThrow(/Unrecognized key/u);
   });
 
-  it("accepts recurring schedules with and without a legacy timezone field", () => {
+  it("accepts canonical recurring schedules without a time zone field", () => {
     expect(
       automationScheduleSchema.parse({
         expression: "0 8 * * *",
@@ -76,17 +81,13 @@ describe("automation contract seams", () => {
       kind: "cron",
     });
 
-    expect(
+    expect(() =>
       automationScheduleSchema.parse({
         kind: "dailyLocal",
         localTime: "08:30",
         timeZone: "UTC",
       }),
-    ).toEqual({
-      kind: "dailyLocal",
-      localTime: "08:30",
-      timeZone: "UTC",
-    });
+    ).toThrow(/Unrecognized key/u);
   });
 });
 

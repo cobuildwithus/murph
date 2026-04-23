@@ -1,4 +1,4 @@
-export const HOSTED_EMAIL_THREAD_TARGET_SCHEMA = "murph.hosted-email-thread-target.v2";
+export const HOSTED_EMAIL_THREAD_TARGET_SCHEMA = "murph.hosted-email-thread-target.v1";
 export const HOSTED_EMAIL_THREAD_TARGET_PREFIX = "hostedmail:";
 
 export interface HostedEmailThreadTarget {

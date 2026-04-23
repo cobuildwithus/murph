@@ -133,17 +133,17 @@ describe('assistant cron canonical runtime store seams', () => {
 
     await expect(readAssistantCronCanonicalRuntimeStore(paths)).resolves.toEqual({
       jobs: [],
-      version: 2,
+      version: 1,
     })
     expect(
-      findAssistantCronCanonicalRuntimeRecord({ jobs: [], version: 2 }, 'job-a'),
+      findAssistantCronCanonicalRuntimeRecord({ jobs: [], version: 1 }, 'job-a'),
     ).toBeNull()
   })
 
   it('creates records, upserts them in sorted order, and removes entries by job id', () => {
     const store: Awaited<ReturnType<typeof readAssistantCronCanonicalRuntimeStore>> = {
       jobs: [],
-      version: 2 as const,
+      version: 1 as const,
     }
     const betaRecord = createAssistantCronCanonicalRuntimeRecord({
       alias: 'beta-alias',
@@ -172,6 +172,7 @@ describe('assistant cron canonical runtime store seams', () => {
       alias: 'beta-alias',
       createdAt: '2026-04-08T12:00:00.000Z',
       jobId: 'beta',
+      schema: 'murph.assistant-canonical-cron-runtime-state.v1',
       sessionId: 'session-beta',
       state: {
         activatedAt: '2026-04-08T12:00:00.000Z',
@@ -190,6 +191,7 @@ describe('assistant cron canonical runtime store seams', () => {
     expect(alphaRecord).toMatchObject({
       alias: null,
       jobId: 'alpha',
+      schema: 'murph.assistant-canonical-cron-runtime-state.v1',
       sessionId: null,
       state: {
         activatedAt: '2026-04-08T11:00:00.000Z',
@@ -226,7 +228,7 @@ describe('assistant cron canonical runtime store seams', () => {
 
     await writeAssistantCronCanonicalRuntimeStore(paths, {
       jobs: [betaRecord, alphaRecord],
-      version: 2,
+      version: 1,
     })
 
     expect(JSON.parse(await readFile(paths.cronAutomationStatePath, 'utf8'))).toEqual({
@@ -234,11 +236,11 @@ describe('assistant cron canonical runtime store seams', () => {
         alphaRecord,
         betaRecord,
       ],
-      version: 2,
+      version: 1,
     })
     await expect(readAssistantCronCanonicalRuntimeStore(paths)).resolves.toEqual({
       jobs: [alphaRecord, betaRecord],
-      version: 2,
+      version: 1,
     })
   })
 
@@ -252,7 +254,7 @@ describe('assistant cron canonical runtime store seams', () => {
 
     await expect(readAssistantCronCanonicalRuntimeStore(paths)).resolves.toEqual({
       jobs: [],
-      version: 2,
+      version: 1,
     })
     await expect(readFile(paths.cronAutomationStatePath, 'utf8')).rejects.toMatchObject({
       code: 'ENOENT',
@@ -318,7 +320,7 @@ describe('assistant cron canonical runtime store seams', () => {
 
     await expect(readAssistantCronCanonicalRuntimeStore(paths)).resolves.toEqual({
       jobs: [],
-      version: 2,
+      version: 1,
     })
     await expect(readFile(paths.cronAutomationStatePath, 'utf8')).rejects.toMatchObject({
       code: 'ENOENT',

@@ -8,9 +8,9 @@ import {
   writeJsonFileAtomic,
 } from '../shared.js'
 
-const ASSISTANT_CRON_CANONICAL_RUNTIME_STORE_VERSION = 2
+const ASSISTANT_CRON_CANONICAL_RUNTIME_STORE_VERSION = 1
 const ASSISTANT_CRON_CANONICAL_RUNTIME_RECORD_SCHEMA =
-  'murph.assistant-canonical-cron-runtime-state.v2'
+  'murph.assistant-canonical-cron-runtime-state.v1'
 
 const assistantCronCanonicalRuntimeStateSchema = z
   .object({

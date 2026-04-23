@@ -112,6 +112,10 @@ afterEach(async () => {
   activeCleanups.clear();
 });
 
+test("pins the experiment protocol contract to greenfield v1", () => {
+  expect(CURRENT_EXPERIMENT_PROTOCOL_CONTRACT_VERSION).toBe(1);
+});
+
 test("refreshes instead of hydrating the new protocol UI against a stale contract payload", async () => {
   const view = await renderExperimentDetailClient({
     protocol: createProtocol({
