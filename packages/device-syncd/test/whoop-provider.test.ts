@@ -234,7 +234,7 @@ test("WHOOP provider avoids persisting connect-time profile or body measurement 
   ]);
 });
 
-test("WHOOP provider keeps the stored refresh token when refresh omits a replacement", async () => {
+test("WHOOP provider rejects refresh responses that omit the rotated refresh token", async () => {
   let requestBody: string | null = null;
   const provider = createWhoopDeviceSyncProvider({
     clientId: "whoop-client-id",
@@ -254,14 +254,17 @@ test("WHOOP provider keeps the stored refresh token when refresh omits a replace
     },
   });
 
-  const tokens = await provider.refreshTokens(
-    createAccount(["offline"], {
-      refreshToken: "persisted-refresh-token",
-    }),
+  await assert.rejects(
+    provider.refreshTokens(
+      createAccount(["offline"], {
+        refreshToken: "persisted-refresh-token",
+      }),
+    ),
+    (error) =>
+      error instanceof DeviceSyncError &&
+      error.code === "WHOOP_REFRESH_TOKEN_MISSING" &&
+      error.accountStatus === "reauthorization_required",
   );
-
-  assert.equal(tokens.accessToken, "refreshed-access-token");
-  assert.equal(tokens.refreshToken, "persisted-refresh-token");
   assert.equal(new URLSearchParams(requestBody ?? "").get("grant_type"), "refresh_token");
   assert.equal(new URLSearchParams(requestBody ?? "").get("refresh_token"), "persisted-refresh-token");
   assert.equal(new URLSearchParams(requestBody ?? "").get("scope"), "offline");
