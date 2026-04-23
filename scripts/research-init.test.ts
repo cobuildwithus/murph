@@ -16,6 +16,7 @@ import { describe, expect, it } from "vitest";
 const repoRoot = path.resolve(import.meta.dirname, "..");
 const initScriptPath = path.join(repoRoot, "scripts", "research-init.mjs");
 const materializeScriptPath = path.join(repoRoot, "scripts", "research-materialize.mjs");
+const runScriptPath = path.join(repoRoot, "scripts", "research-run.mjs");
 
 function runResearchInit(...args: string[]) {
   return spawnSync("node", [initScriptPath, ...args], {
@@ -34,6 +35,14 @@ function runResearchMaterialize(...args: string[]) {
     env: {
       ...process.env,
     },
+  });
+}
+
+function runResearchRun(args: string[], env: NodeJS.ProcessEnv = process.env) {
+  return spawnSync("node", [runScriptPath, ...args], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    env,
   });
 }
 
@@ -211,6 +220,251 @@ describe("research init scaffold", () => {
     expect(packageJson.scripts?.["research:materialize"]).toBe(
       "node scripts/research-materialize.mjs",
     );
+    expect(packageJson.scripts?.["research:run"]).toBe("node scripts/research-run.mjs");
+  });
+
+  it("runs generated seam commands through a named lane and reuses it for harvest", () => {
+    mkdirSync(researchOutputRoot, { recursive: true });
+    const tempRoot = mkdtempSync(path.join(researchOutputRoot, "tmp-research-run-"));
+    const outDir = path.join(tempRoot, "lane-state");
+
+    try {
+      expect(runResearchInit("cold plunge", "--out-dir", outDir).status).toBe(0);
+
+      const profileHelperPath = path.join(tempRoot, "profile-helper.sh");
+      writeTextFileSync(
+        profileHelperPath,
+        `#!/usr/bin/env bash
+set -euo pipefail
+
+case "\${1:-}" in
+  browser-endpoint)
+    printf '%s\\n' 'http://127.0.0.1:17777'
+    ;;
+  research)
+    lane="$2"
+    shift 2
+    export RESEARCH_MANAGED_BROWSER_LANE="$lane"
+    export RESEARCH_MANAGED_BROWSER_ENDPOINT='http://127.0.0.1:17777'
+    export RESEARCH_THREAD_EXPORT_BROWSER_ENDPOINT='http://127.0.0.1:17777'
+    exec "$@"
+    ;;
+  *)
+    echo "unexpected profile helper args: $*" >&2
+    exit 64
+    ;;
+esac
+`,
+      );
+      chmodSync(profileHelperPath, 0o755);
+
+      const stubBinDir = path.join(tempRoot, "bin");
+      mkdirSync(stubBinDir, { recursive: true });
+      const stubPnpmPath = path.join(stubBinDir, "pnpm");
+      writeTextFileSync(
+        stubPnpmPath,
+        `#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "$#" -ge 3 && "$1" == "exec" && "$2" == "cobuild-review-gpt" ]]; then
+  if [[ "\${3:-}" == "thread" && "\${4:-}" == "wake" ]]; then
+    output_dir=""
+    chat_url=""
+    browser_endpoint=""
+    while [[ "$#" -gt 0 ]]; do
+      case "$1" in
+        --output-dir)
+          output_dir="$2"
+          shift 2
+          ;;
+        --chat-url)
+          chat_url="$2"
+          shift 2
+          ;;
+        --browser-endpoint)
+          browser_endpoint="$2"
+          shift 2
+          ;;
+        *)
+          shift
+          ;;
+      esac
+    done
+
+    mkdir -p "$output_dir"
+    run_dir="$(cd "$output_dir/../.." && pwd)"
+    printf '%s\\n' "\${RESEARCH_MANAGED_BROWSER_LANE:-missing}" >"$run_dir/state/harvest-lane.txt"
+    printf '%s\\n' "\${RESEARCH_THREAD_EXPORT_BROWSER_ENDPOINT:-missing}" >"$run_dir/state/harvest-endpoint.txt"
+    printf '%s\\n' "$browser_endpoint" >"$run_dir/state/harvest-browser-endpoint-arg.txt"
+    cat >"$output_dir/thread.json" <<JSON
+{
+  "chatUrl": "$chat_url",
+  "browserEndpoint": "$browser_endpoint",
+  "assistantSnapshots": [
+    {
+      "text": "Recovered charter response"
+    }
+  ]
+}
+JSON
+    cat >"$output_dir/status.json" <<JSON
+{"chatUrl":"$chat_url","downloadedArtifacts":[]}
+JSON
+    exit 0
+  fi
+
+  prompt_file=""
+  while [[ "$#" -gt 0 ]]; do
+    case "$1" in
+      --prompt-file)
+        prompt_file="$2"
+        shift 2
+        ;;
+      *)
+        shift
+        ;;
+    esac
+  done
+
+  run_dir="$(cd "$(dirname "$prompt_file")/.." && pwd)"
+  printf '%s\\n' "\${RESEARCH_MANAGED_BROWSER_LANE:-missing}" >"$run_dir/state/send-lane.txt"
+  printf '%s\\n' "\${RESEARCH_THREAD_EXPORT_BROWSER_ENDPOINT:-missing}" >"$run_dir/state/send-endpoint.txt"
+  printf '%s\\n' '{"status":"sent"}'
+  printf '%s\\n' 'ChatGPT conversation URL: https://chatgpt.com/c/research-run-test' >&2
+  exit 0
+fi
+
+echo "unexpected pnpm args: $*" >&2
+exit 64
+`,
+      );
+      chmodSync(stubPnpmPath, 0o755);
+
+      const env = {
+        ...process.env,
+        MURPH_RESEARCH_PROFILE_HELPER: profileHelperPath,
+        PATH: `${stubBinDir}${path.delimiter}${process.env.PATH ?? ""}`,
+      };
+      const workspaceArg = path.relative(repoRoot, outDir).split(path.sep).join(path.posix.sep);
+      const sendResult = runResearchRun(
+        [
+          "--workspace",
+          workspaceArg,
+          "--seam",
+          "01-charter",
+          "--action",
+          "send",
+          "--lane",
+          "Phlebas",
+        ],
+        env,
+      );
+
+      expect(sendResult.status).toBe(0);
+      expect(sendResult.stderr).toBe("");
+      expect(readFileSync(path.join(outDir, "state", "send-lane.txt"), "utf8")).toBe("phlebas\n");
+      expect(readFileSync(path.join(outDir, "state", "send-endpoint.txt"), "utf8")).toBe(
+        "http://127.0.0.1:17777\n",
+      );
+
+      const seamStatePath = path.join(outDir, "state", "seams", "01-charter.json");
+      const sendState = JSON.parse(readFileSync(seamStatePath, "utf8")) as {
+        browserEndpoint: string;
+        chatUrl: string;
+        lane: string;
+        schemaVersion: string;
+        send: { command: string; exitCode: number; lane: string; status: string };
+      };
+      expect(sendState.schemaVersion).toBe("murph.research.seam-run.v1");
+      expect(sendState.lane).toBe("phlebas");
+      expect(sendState.browserEndpoint).toBe("http://127.0.0.1:17777");
+      expect(sendState.chatUrl).toBe("https://chatgpt.com/c/research-run-test");
+      expect(sendState.send.command).toBe(`${workspaceArg}/commands/01-charter.send.sh`);
+      expect(sendState.send.status).toBe("completed");
+      expect(sendState.send.exitCode).toBe(0);
+
+      const harvestResult = runResearchRun(
+        ["--workspace", workspaceArg, "--seam", "01-charter", "--action", "harvest"],
+        env,
+      );
+
+      expect(harvestResult.status).toBe(0);
+      expect(harvestResult.stderr).toBe("");
+      expect(readFileSync(path.join(outDir, "state", "harvest-lane.txt"), "utf8")).toBe(
+        "phlebas\n",
+      );
+      expect(readFileSync(path.join(outDir, "state", "harvest-endpoint.txt"), "utf8")).toBe(
+        "http://127.0.0.1:17777\n",
+      );
+      expect(
+        readFileSync(path.join(outDir, "state", "harvest-browser-endpoint-arg.txt"), "utf8"),
+      ).toBe("http://127.0.0.1:17777\n");
+
+      const harvestState = JSON.parse(readFileSync(seamStatePath, "utf8")) as {
+        harvest: { exitCode: number; lane: string; status: string };
+      };
+      expect(harvestState.harvest.lane).toBe("phlebas");
+      expect(harvestState.harvest.status).toBe("completed");
+      expect(harvestState.harvest.exitCode).toBe(0);
+      expect(readFileSync(path.join(outDir, "responses", "01-charter.md"), "utf8")).toContain(
+        "Recovered charter response",
+      );
+
+      const resendResult = runResearchRun(
+        [
+          "--workspace",
+          workspaceArg,
+          "--seam",
+          "01-charter",
+          "--action",
+          "send",
+          "--lane",
+          "phlebas",
+        ],
+        env,
+      );
+
+      expect(resendResult.status).toBe(0);
+      const resendState = JSON.parse(readFileSync(seamStatePath, "utf8")) as {
+        harvest?: unknown;
+        harvestedAt?: string;
+        send: { status: string };
+      };
+      expect(resendState.send.status).toBe("completed");
+      expect("harvest" in resendState).toBe(false);
+      expect("harvestedAt" in resendState).toBe(false);
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("requires a lane for the first seam send", () => {
+    mkdirSync(researchOutputRoot, { recursive: true });
+    const tempRoot = mkdtempSync(path.join(researchOutputRoot, "tmp-research-run-lane-"));
+    const outDir = path.join(tempRoot, "missing-lane");
+
+    try {
+      mkdirSync(path.join(outDir, "commands"), { recursive: true });
+      writeTextFileSync(
+        path.join(outDir, "commands", "01-charter.send.sh"),
+        "#!/usr/bin/env bash\n",
+      );
+      chmodSync(path.join(outDir, "commands", "01-charter.send.sh"), 0o755);
+
+      const result = runResearchRun([
+        "--workspace",
+        path.relative(repoRoot, outDir).split(path.sep).join(path.posix.sep),
+        "--seam",
+        "01-charter",
+        "--action",
+        "send",
+      ]);
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain("--lane is required for send");
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
   });
 
   it("creates a charter-only scaffold and materializes later seams from the charter response", () => {
@@ -225,8 +479,11 @@ describe("research init scaffold", () => {
       expect(initResult.stderr).toBe("");
       expect(initResult.stdout).toContain("Initialized research orchestrator scaffold");
       expect(initResult.stdout).toContain("pnpm research:materialize --workspace");
-      expect(initResult.stdout).toContain("commands/01-charter.send.sh");
-      expect(initResult.stdout).toContain("commands/01-charter.harvest.sh");
+      expect(initResult.stdout).toContain(
+        "pnpm research:run --workspace",
+      );
+      expect(initResult.stdout).toContain("--seam 01-charter --action send --lane eragon");
+      expect(initResult.stdout).toContain("--seam 01-charter --action harvest");
       expect(existsSync(path.join(outDir, "README.md"))).toBe(true);
       expect(existsSync(path.join(outDir, "workflow.json"))).toBe(true);
       expect(existsSync(path.join(outDir, "prompts", "01-charter.md"))).toBe(true);
@@ -314,8 +571,13 @@ describe("research init scaffold", () => {
 
       const initReadme = readFileSync(path.join(outDir, "README.md"), "utf8");
       expect(initReadme).toContain("Only the charter send/harvest pair is runnable right now.");
-      expect(initReadme).toContain("bash commands/01-charter.send.sh");
-      expect(initReadme).toContain("bash commands/01-charter.harvest.sh");
+      expect(initReadme).toContain(
+        `pnpm research:run --workspace ${path.relative(repoRoot, outDir).split(path.sep).join(path.posix.sep)} --seam 01-charter --action send --lane eragon`,
+      );
+      expect(initReadme).toContain(
+        `pnpm research:run --workspace ${path.relative(repoRoot, outDir).split(path.sep).join(path.posix.sep)} --seam 01-charter --action harvest`,
+      );
+      expect(initReadme).toContain("state/seams/<label>.json");
       expect(initReadme).toContain(`pnpm research:materialize --workspace ${path.relative(repoRoot, outDir).split(path.sep).join(path.posix.sep)}`);
 
       writeTextFileSync(path.join(outDir, "prompts", "02-discovery-stale.md"), "stale\n");
@@ -360,8 +622,12 @@ describe("research init scaffold", () => {
       expect(materializeResult.status).toBe(0);
       expect(materializeResult.stderr).toBe("");
       expect(materializeResult.stdout).toContain("Materialized post-charter prompts");
-      expect(materializeResult.stdout).toContain("commands/02-discovery-direct-cwi.send.sh");
-      expect(materializeResult.stdout).toContain("commands/02-discovery-direct-cwi.harvest.sh");
+      expect(materializeResult.stdout).toContain(
+        "--seam 02-discovery-direct-cwi --action send --lane eragon",
+      );
+      expect(materializeResult.stdout).toContain(
+        "--seam 02-discovery-direct-cwi --action harvest",
+      );
       expect(existsSync(path.join(outDir, "commands", "02-discovery-direct-cwi.send.sh"))).toBe(true);
       expect(existsSync(path.join(outDir, "commands", "02-discovery-direct-cwi.harvest.sh"))).toBe(true);
       expect(
@@ -583,8 +849,13 @@ describe("research init scaffold", () => {
 
       const materializedReadme = readFileSync(path.join(outDir, "README.md"), "utf8");
       expect(materializedReadme).toContain("materialized from the charter response");
-      expect(materializedReadme).toContain("commands/02-discovery-direct-cwi.send.sh");
-      expect(materializedReadme).toContain("commands/02-discovery-direct-cwi.harvest.sh");
+      expect(materializedReadme).toContain(
+        `pnpm research:run --workspace ${path.relative(repoRoot, outDir).split(path.sep).join(path.posix.sep)} --seam 02-discovery-direct-cwi --action send --lane eragon`,
+      );
+      expect(materializedReadme).toContain(
+        `pnpm research:run --workspace ${path.relative(repoRoot, outDir).split(path.sep).join(path.posix.sep)} --seam 02-discovery-direct-cwi --action harvest`,
+      );
+      expect(materializedReadme).toContain("commands/<label>.send.sh");
       expect(materializedReadme).toContain("Template-Only Later Stages");
       expect(materializedReadme).toContain("downloads/<label>/...");
 
@@ -877,6 +1148,99 @@ exit 17
       expect(readFileSync(responsePath, "utf8")).toContain("Recovered final thread snapshot");
       expect(readFileSync(responsePath, "utf8")).not.toContain("Recovered intermediary thread snapshot");
       expect(readFileSync(responsePath, "utf8")).not.toContain("stale response");
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("prefers an explicit profile endpoint over a stale per-label result endpoint during harvest", () => {
+    mkdirSync(researchOutputRoot, { recursive: true });
+    const tempRoot = mkdtempSync(path.join(researchOutputRoot, "tmp-research-endpoint-"));
+    const outDir = path.join(tempRoot, "endpoint-precedence");
+
+    try {
+      const initResult = runResearchInit("cold plunge", "--out-dir", outDir);
+      expect(initResult.status).toBe(0);
+
+      const stubBinDir = path.join(tempRoot, "bin");
+      mkdirSync(stubBinDir, { recursive: true });
+
+      const stubPnpmPath = path.join(stubBinDir, "pnpm");
+      writeTextFileSync(
+        stubPnpmPath,
+        `#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "$#" -ge 4 && "$1" == "exec" && "$2" == "cobuild-review-gpt" && "$3" == "thread" && "$4" == "wake" ]]; then
+  output_dir=""
+  chat_url=""
+  browser_endpoint=""
+  while [[ "$#" -gt 0 ]]; do
+    case "$1" in
+      --output-dir)
+        output_dir="$2"
+        shift 2
+        ;;
+      --chat-url)
+        chat_url="$2"
+        shift 2
+        ;;
+      --browser-endpoint)
+        browser_endpoint="$2"
+        shift 2
+        ;;
+      *)
+        shift
+        ;;
+    esac
+  done
+
+  mkdir -p "$output_dir"
+  cat >"$output_dir/thread.json" <<JSON
+{
+  "chatUrl": "$chat_url",
+  "browserEndpoint": "$browser_endpoint",
+  "assistantSnapshots": []
+}
+JSON
+  cat >"$output_dir/status.json" <<JSON
+{"chatUrl":"$chat_url","downloadedArtifacts":[]}
+JSON
+  exit 0
+fi
+
+exit 64
+`,
+      );
+      chmodSync(stubPnpmPath, 0o755);
+
+      const helperLabel = "99-endpoint-check";
+      const chatUrlPath = path.join(outDir, "state", "chat-urls", `${helperLabel}.txt`);
+      const staleResultPath = path.join(outDir, "logs", `${helperLabel}.send.result.json`);
+      mkdirSync(path.dirname(chatUrlPath), { recursive: true });
+      mkdirSync(path.dirname(staleResultPath), { recursive: true });
+      writeTextFileSync(chatUrlPath, "https://chatgpt.com/c/endpoint-check\n");
+      writeTextFileSync(staleResultPath, "Managed browser endpoint: http://127.0.0.1:9444\n");
+
+      const helperResult = runGeneratedReviewGptHarvest(
+        path.join(outDir, "commands", "_run-review-gpt.sh"),
+        helperLabel,
+        null,
+        {
+          ...process.env,
+          PATH: `${stubBinDir}${path.delimiter}${process.env.PATH ?? ""}`,
+          RESEARCH_THREAD_EXPORT_BROWSER_ENDPOINT: "http://127.0.0.1:17777",
+        },
+      );
+
+      expect(helperResult.status).toBe(0);
+      expect(helperResult.stderr).toBe("");
+      expect(
+        readFileSync(
+          path.join(outDir, "state", "thread-exports", `${helperLabel}.thread.json`),
+          "utf8",
+        ),
+      ).toContain('"browserEndpoint": "http://127.0.0.1:17777"');
     } finally {
       rmSync(tempRoot, { recursive: true, force: true });
     }

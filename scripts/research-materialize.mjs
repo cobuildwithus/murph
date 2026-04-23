@@ -593,7 +593,7 @@ function buildRunbook({
   const commandList = discoveryShards
     .map((shard, index) => {
       const baseName = buildDiscoveryStepLabel(index, shard.fileId);
-      return `- \`${baseName}\`: send with \`bash commands/${baseName}.send.sh\`, then harvest with \`bash commands/${baseName}.harvest.sh\``;
+      return `- \`${baseName}\`: send with \`pnpm research:run --workspace ${outDirRelative} --seam ${baseName} --action send --lane eragon\`, then harvest with \`pnpm research:run --workspace ${outDirRelative} --seam ${baseName} --action harvest\``;
     })
     .join("\n");
   const templateList = templateOnlyPrompts
@@ -626,8 +626,9 @@ ${commandList}
 
 Each seam now has two commands:
 
-- \`commands/<label>.send.sh\` submits the prompt and saves \`state/chat-urls/<label>.txt\`
-- \`commands/<label>.harvest.sh\` wake-harvests the saved thread into \`downloads/<label>/...\` and \`state/thread-exports/<label>.thread.json\`
+- \`pnpm research:run --workspace ${outDirRelative} --seam <label> --action send --lane eragon\` submits the prompt through a named browser lane and records \`state/seams/<label>.json\`
+- \`pnpm research:run --workspace ${outDirRelative} --seam <label> --action harvest\` reuses the recorded lane and wake-harvests into \`downloads/<label>/...\` and \`state/thread-exports/<label>.thread.json\`
+- \`commands/<label>.send.sh\` and \`commands/<label>.harvest.sh\` remain low-level wrappers for recovery when you intentionally need them
 - inline seams can also recover \`responses/<label>.md\`; artifact seams should treat normalized downloads as the source of truth
 
 ## Template-Only Later Stages
@@ -818,8 +819,8 @@ function main(argv) {
   console.log(`Materialized post-charter prompts at ${outDirRelative}`);
   if (charterArtifacts.discoveryShards.length > 0) {
     const firstDiscoveryLabel = buildDiscoveryStepLabel(0, charterArtifacts.discoveryShards[0].fileId);
-    console.log(`Run next: bash ${path.posix.join(outDirRelative, `commands/${firstDiscoveryLabel}.send.sh`)}`);
-    console.log(`Then harvest it with: bash ${path.posix.join(outDirRelative, `commands/${firstDiscoveryLabel}.harvest.sh`)}`);
+    console.log(`Run next: pnpm research:run --workspace ${outDirRelative} --seam ${firstDiscoveryLabel} --action send --lane eragon`);
+    console.log(`Then harvest it with: pnpm research:run --workspace ${outDirRelative} --seam ${firstDiscoveryLabel} --action harvest`);
   }
 }
 
