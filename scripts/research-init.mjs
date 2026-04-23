@@ -7,8 +7,9 @@ import {
   ORCHESTRATOR_SCHEMA_VERSION,
   buildResearchArtifactContracts,
   buildCommandHelperScript,
-  buildCommandWrapper,
+  buildHarvestCommandWrapper,
   buildProtocolMetadata,
+  buildSendCommandWrapper,
   buildSharedPromptHeader,
   ensureRepoLocalOutputDir,
   formatBulletList,
@@ -40,7 +41,7 @@ Options:
 
 Environment used by generated command wrappers:
   RESEARCH_MODEL         Defaults to gpt-5.4-pro
-  RESEARCH_WAIT_TIMEOUT  Defaults to 200m
+  RESEARCH_POLL_TIMEOUT  Defaults to 200m
   RESEARCH_TIMEOUT       Defaults to 210m
 `);
   process.exit(exitCode);
@@ -141,7 +142,7 @@ function buildWorkflowObject({ generatedAt, outDirRelative, spec }) {
     discoveryShards: [],
     sectionSeams: [],
     promptFiles: ["prompts/01-charter.md"],
-    runnableCommands: ["commands/01-charter.sh"],
+    runnableCommands: ["commands/01-charter.send.sh", "commands/01-charter.harvest.sh"],
   };
 }
 
@@ -153,7 +154,7 @@ It scaffolds the charter-first review:gpt research flow for **${spec.protocolNam
 
 ## Current State
 
-Only the charter stage is runnable right now. The later discovery shards, section seams, and template prompts are generated after the charter response exists.
+Only the charter send/harvest pair is runnable right now. The later discovery shards, section seams, and template prompts are generated after the charter response exists.
 
 ## Provisional Identity
 
@@ -167,15 +168,18 @@ These identity fields are only starting hints for the charter. The charter manif
 
 ## Run Now
 
-1. \`bash commands/01-charter.sh\`
+1. \`bash commands/01-charter.send.sh\`
+2. Once the thread has answered, \`bash commands/01-charter.harvest.sh\`
 
-That command writes:
+Those commands write:
 
-- \`responses/01-charter.md\`
-- \`logs/01-charter.result.json\`
-- \`logs/01-charter.stderr.log\`
-- \`state/chat-urls/01-charter.txt\` when a ChatGPT thread URL is detected
-- \`state/thread-exports/01-charter.thread.json\` when thread export succeeds
+- \`logs/01-charter.send.result.json\`
+- \`logs/01-charter.send.stderr.log\`
+- \`logs/01-charter.harvest.result.json\`
+- \`logs/01-charter.harvest.stderr.log\`
+- \`state/chat-urls/01-charter.txt\` after send succeeds
+- \`state/thread-exports/01-charter.thread.json\` after harvest succeeds
+- \`responses/01-charter.md\` after harvest recovers the inline charter response
 
 ## After The Charter Finishes
 
@@ -186,7 +190,7 @@ That command writes:
 ## Environment Knobs
 
 - \`RESEARCH_MODEL\`: defaults to \`gpt-5.4-pro\`
-- \`RESEARCH_WAIT_TIMEOUT\`: defaults to \`200m\`
+- \`RESEARCH_POLL_TIMEOUT\`: defaults to \`200m\`
 - \`RESEARCH_TIMEOUT\`: defaults to \`210m\`
 
 ## Notes
@@ -260,8 +264,12 @@ function main(argv) {
   );
   writeResearchReviewGptSupportFiles(outDir);
   writeExecutable(
-    path.join(outDir, "commands", "01-charter.sh"),
-    buildCommandWrapper("01-charter", "prompts/01-charter.md"),
+    path.join(outDir, "commands", "01-charter.send.sh"),
+    buildSendCommandWrapper("01-charter", "prompts/01-charter.md"),
+  );
+  writeExecutable(
+    path.join(outDir, "commands", "01-charter.harvest.sh"),
+    buildHarvestCommandWrapper("01-charter", "responses/01-charter.md"),
   );
 
   const outDirRelative = toPosixRelative(outDir);
@@ -280,7 +288,8 @@ function main(argv) {
   writeTextFile(path.join(outDir, "README.md"), buildRunbook({ outDirRelative, spec }));
 
   console.log(`Initialized research orchestrator scaffold at ${outDirRelative}`);
-  console.log(`Run next: bash ${path.posix.join(outDirRelative, "commands/01-charter.sh")}`);
+  console.log(`Run next: bash ${path.posix.join(outDirRelative, "commands/01-charter.send.sh")}`);
+  console.log(`Then harvest the charter with: bash ${path.posix.join(outDirRelative, "commands/01-charter.harvest.sh")}`);
   console.log(`Then materialize later seams with: pnpm research:materialize --workspace ${outDirRelative}`);
 }
 

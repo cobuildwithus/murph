@@ -296,14 +296,41 @@ export function buildCommandHelperScript() {
   return `#!/usr/bin/env bash
 set -euo pipefail
 
-if [[ $# -ne 3 ]]; then
-  echo "Usage: $0 <label> <prompt-file> <response-file>" >&2
+usage() {
+  cat >&2 <<'EOF'
+Usage:
+  $0 send <label> <prompt-file>
+  $0 harvest <label> [response-file|-]
+EOF
   exit 2
+}
+
+if [[ $# -lt 2 ]]; then
+  usage
 fi
 
-label="$1"
-prompt_file="$2"
-response_file="$3"
+mode="$1"
+label="$2"
+prompt_file=""
+response_file=""
+
+case "\${mode}" in
+  send)
+    if [[ $# -ne 3 ]]; then
+      usage
+    fi
+    prompt_file="$3"
+    ;;
+  harvest)
+    if [[ $# -gt 3 ]]; then
+      usage
+    fi
+    response_file="\${3:--}"
+    ;;
+  *)
+    usage
+    ;;
+esac
 
 script_dir="$(cd "$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
 run_dir="$(cd "\${script_dir}/.." && pwd)"
@@ -327,8 +354,14 @@ repo_dir="$(find_repo_dir "$run_dir")" || {
 
 mkdir -p "\${run_dir}/responses" "\${run_dir}/logs" "\${run_dir}/downloads" "\${run_dir}/state/chat-urls" "\${run_dir}/state/thread-exports"
 
-result_file="\${run_dir}/logs/\${label}.result.json"
-stderr_file="\${run_dir}/logs/\${label}.stderr.log"
+response_required=0
+if [[ -n "\${response_file}" && "\${response_file}" != "-" ]]; then
+  response_required=1
+fi
+
+result_file="\${run_dir}/logs/\${label}.\${mode}.result.json"
+stderr_file="\${run_dir}/logs/\${label}.\${mode}.stderr.log"
+send_result_file="\${run_dir}/logs/\${label}.send.result.json"
 chat_url_file="\${run_dir}/state/chat-urls/\${label}.txt"
 thread_export_file="\${run_dir}/state/thread-exports/\${label}.thread.json"
 wake_output_dir="\${run_dir}/downloads/\${label}"
@@ -341,8 +374,21 @@ work_profile_config_file="\${run_dir}/config/review-gpt-work-profile.sh"
 review_gpt_config="\${RESEARCH_REVIEW_GPT_CONFIG:-}"
 required_artifacts_json="[]"
 
-rm -f "\${result_file}" "\${stderr_file}" "\${chat_url_file}" "\${thread_export_file}" "\${response_file}" "\${artifact_contract_status_file}"
-rm -rf "\${wake_output_dir}"
+rm -f "\${result_file}" "\${stderr_file}" "\${artifact_contract_status_file}"
+
+if [[ "\${mode}" == "send" ]]; then
+  rm -f "\${chat_url_file}" "\${thread_export_file}"
+  rm -rf "\${wake_output_dir}"
+fi
+
+if [[ "\${mode}" == "harvest" ]]; then
+  rm -f "\${thread_export_file}"
+  rm -rf "\${wake_output_dir}"
+fi
+
+if [[ "\${response_required}" -eq 1 ]]; then
+  rm -f "\${response_file}"
+fi
 
 if [[ -z "\${review_gpt_config}" ]]; then
   if [[ -f "\${work_profile_config_file}" ]]; then
@@ -726,22 +772,26 @@ NODE
 
 resolve_browser_endpoint() {
   local endpoint_from_result=""
-  if [[ -f "\${result_file}" ]]; then
+  local candidate_result_file=""
+  for candidate_result_file in "\${result_file}" "\${send_result_file}"; do
+    if [[ ! -f "\${candidate_result_file}" ]]; then
+      continue
+    fi
     endpoint_from_result="$(
-      sed -n 's/^Managed browser endpoint: \\(.*\\)$/\\1/p' "\${result_file}" | tail -n 1
+      sed -n 's/^Managed browser endpoint: \\(.*\\)$/\\1/p' "\${candidate_result_file}" | tail -n 1
     )"
-  fi
-  if [[ -n "\${endpoint_from_result}" ]]; then
-    case "\${endpoint_from_result}" in
-      http://*|https://*)
-        printf '%s\\n' "\${endpoint_from_result}"
-        ;;
-      *)
-        printf 'http://%s\\n' "\${endpoint_from_result}"
-        ;;
-    esac
-    return 0
-  fi
+    if [[ -n "\${endpoint_from_result}" ]]; then
+      case "\${endpoint_from_result}" in
+        http://*|https://*)
+          printf '%s\\n' "\${endpoint_from_result}"
+          ;;
+        *)
+          printf 'http://%s\\n' "\${endpoint_from_result}"
+          ;;
+      esac
+      return 0
+    fi
+  done
 
   if [[ -n "\${RESEARCH_MANAGED_BROWSER_ENDPOINT:-}" ]]; then
     printf '%s\\n' "\${RESEARCH_MANAGED_BROWSER_ENDPOINT}"
@@ -858,6 +908,10 @@ copy_thread_export_from_wake() {
 }
 
 recover_response_from_thread_export() {
+  if [[ "\${response_required}" -ne 1 ]]; then
+    return 0
+  fi
+
   node - "\${thread_export_file}" "\${response_file}" "\${wake_status_file}" <<'NODE'
 const fs = require("node:fs");
 const path = require("node:path");
@@ -942,47 +996,67 @@ NODE
 
 cd "\${repo_dir}"
 
-set +e
-pnpm exec cobuild-review-gpt \\
-  --config "\${review_gpt_config}" \\
-  --send \\
-  --format json \\
-  --model "\${RESEARCH_MODEL:-gpt-5.4-pro}" \\
-  --timeout "\${RESEARCH_TIMEOUT:-210m}" \\
-  --prompt-file "\${prompt_file}" \\
-  >"\${result_file}" 2>"\${stderr_file}"
-send_status=$?
-set -e
-
-capture_chat_url
+send_status=0
 wake_status=0
 artifact_contract_status=0
-if [[ -f "\${chat_url_file}" ]]; then
-  set +e
-  run_thread_wake
-  wake_status=$?
-  set -e
-  copy_thread_export_from_wake
-  if [[ "\${wake_status}" -eq 0 ]]; then
-    set +e
-    normalize_required_artifacts_from_wake
-    artifact_contract_status=$?
-    set -e
-  fi
-  recover_response_from_thread_export
-fi
 
-if [[ "\${send_status}" -ne 0 && ! -f "\${chat_url_file}" ]]; then
-  cat "\${stderr_file}" >&2
-  echo "research step \${label} failed" >&2
-  exit "\${send_status}"
+if [[ "\${mode}" == "send" ]]; then
+  if [[ -z "\${prompt_file}" ]]; then
+    echo "Missing prompt file for research step \${label}" >&2
+    exit 2
+  fi
+
+  set +e
+  pnpm exec cobuild-review-gpt \\
+    --config "\${review_gpt_config}" \\
+    --send \\
+    --format json \\
+    --model "\${RESEARCH_MODEL:-gpt-5.4-pro}" \\
+    --timeout "\${RESEARCH_TIMEOUT:-210m}" \\
+    --prompt-file "\${prompt_file}" \\
+    >"\${result_file}" 2>"\${stderr_file}"
+  send_status=$?
+  set -e
+
+  capture_chat_url
+
+  if [[ "\${send_status}" -ne 0 && ! -f "\${chat_url_file}" ]]; then
+    cat "\${stderr_file}" >&2
+    echo "research step \${label} failed" >&2
+    exit "\${send_status}"
+  fi
+
+  if [[ ! -f "\${chat_url_file}" ]]; then
+    cat "\${stderr_file}" >&2
+    echo "No ChatGPT thread URL detected for research step \${label}" >&2
+    exit 65
+  fi
+
+  echo "Result log: \${result_file}"
+  echo "Chat URL: \$(cat "\${chat_url_file}")"
+  if [[ "\${send_status}" -ne 0 ]]; then
+    echo "Recovered after send failure: yes"
+  fi
+  exit 0
 fi
 
 if [[ ! -f "\${chat_url_file}" ]]; then
-  cat "\${stderr_file}" >&2
-  echo "No ChatGPT thread URL detected for research step \${label}" >&2
+  echo "Missing saved ChatGPT thread URL for research step \${label}: \${chat_url_file}" >&2
   exit 65
 fi
+
+set +e
+run_thread_wake
+wake_status=$?
+set -e
+copy_thread_export_from_wake
+if [[ "\${wake_status}" -eq 0 ]]; then
+  set +e
+  normalize_required_artifacts_from_wake
+  artifact_contract_status=$?
+  set -e
+fi
+recover_response_from_thread_export
 
 if [[ "\${wake_status}" -ne 0 ]]; then
   cat "\${stderr_file}" >&2
@@ -1005,12 +1079,14 @@ if [[ ! -f "\${thread_export_file}" ]]; then
   exit 66
 fi
 
-if [[ ! -f "\${response_file}" ]]; then
+if [[ "\${response_required}" -eq 1 && ! -f "\${response_file}" ]]; then
   echo "Recovered response missing after thread wake: \${response_file}" >&2
   exit 67
 fi
 
-echo "Response: \${response_file}"
+if [[ "\${response_required}" -eq 1 ]]; then
+  echo "Response: \${response_file}"
+fi
 echo "Result log: \${result_file}"
 echo "Wake output: \${wake_output_dir}"
 if [[ -f "\${artifact_contract_status_file}" ]]; then
@@ -1021,9 +1097,6 @@ if [[ -f "\${chat_url_file}" ]]; then
 fi
 if [[ -f "\${thread_export_file}" ]]; then
   echo "Thread export: \${thread_export_file}"
-fi
-if [[ "\${send_status}" -ne 0 ]]; then
-  echo "Recovered after send failure: yes"
 fi
 `;
 }
@@ -1295,14 +1368,26 @@ export function writeResearchReviewGptSupportFiles(workspaceDir) {
   );
 }
 
-export function buildCommandWrapper(label, promptRelativePath) {
+export function buildSendCommandWrapper(label, promptRelativePath) {
   return `#!/usr/bin/env bash
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
 run_dir="$(cd "\${script_dir}/.." && pwd)"
 
-exec "\${script_dir}/_run-review-gpt.sh" "${label}" "\${run_dir}/${promptRelativePath}" "\${run_dir}/responses/${label}.md"
+exec "\${script_dir}/_run-review-gpt.sh" send "${label}" "\${run_dir}/${promptRelativePath}"
+`;
+}
+
+export function buildHarvestCommandWrapper(label, responseRelativePath = null) {
+  const responseArg = responseRelativePath ? `"\${run_dir}/${responseRelativePath}"` : '"-"';
+  return `#!/usr/bin/env bash
+set -euo pipefail
+
+script_dir="$(cd "$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
+run_dir="$(cd "\${script_dir}/.." && pwd)"
+
+exec "\${script_dir}/_run-review-gpt.sh" harvest "${label}" ${responseArg}
 `;
 }
 
