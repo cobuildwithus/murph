@@ -16,7 +16,6 @@ export async function instantiateConnector(input: {
   loadInbox: () => Promise<InboxRuntimeModule>
   loadTelegramDriver: (config: InboxConnectorConfig) => Promise<TelegramDriver>
   loadEmailDriver?: (config: InboxConnectorConfig) => Promise<EmailDriver>
-  linqWebhookSecret: string | null
 }): Promise<PollConnector> {
   switch (input.connector.source) {
     case 'telegram': {
@@ -51,30 +50,8 @@ export async function instantiateConnector(input: {
           500,
       })
     }
-    case 'linq': {
-      const inboxd = await input.loadInbox()
-      const webhookSecret = requireLinqWebhookSecret(input.linqWebhookSecret)
-      return inboxd.createLinqWebhookConnector({
-        id: input.connector.id,
-        accountId: input.connector.accountId,
-        host: input.connector.options.linqWebhookHost ?? undefined,
-        path: input.connector.options.linqWebhookPath ?? undefined,
-        port: input.connector.options.linqWebhookPort ?? undefined,
-        webhookSecret,
-        downloadAttachments: true,
-      })
-    }
     default: {
       throw new Error(`Unsupported inbox connector source: ${input.connector.source}`)
     }
   }
-}
-
-function requireLinqWebhookSecret(value: string | null | undefined): string {
-  const normalized = typeof value === 'string' ? value.trim() : ''
-  if (!normalized) {
-    throw new Error('Linq webhook secret is required before the local Linq listener can start.')
-  }
-
-  return normalized
 }

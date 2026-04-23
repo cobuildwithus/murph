@@ -209,7 +209,7 @@
                           "minLength": 1
                         },
                         "channel": {
-                          "description": "Optional channel label such as telegram, linq, or email.",
+                          "description": "Optional channel label such as telegram or email.",
                           "type": "string",
                           "minLength": 1
                         },
@@ -294,7 +294,7 @@
                           "type": "boolean"
                         },
                         "deliveryTarget": {
-                          "description": "Optional one-send outbound destination in the transport-native send format. For Telegram use a chat id or `<chatId>:topic:<messageThreadId>`; for Linq use a chat id; for email use a recipient address. Reply-in-place sessions can often omit this and reuse the saved thread.",
+                          "description": "Optional one-send outbound destination in the transport-native send format. For Telegram use a chat id or `<chatId>:topic:<messageThreadId>`; for email use a recipient address. Reply-in-place sessions can often omit this and reuse the saved thread.",
                           "type": "string",
                           "minLength": 1
                         }
@@ -332,7 +332,7 @@
                           "minLength": 1
                         },
                         "channel": {
-                          "description": "Optional channel label such as telegram, linq, or email.",
+                          "description": "Optional channel label such as telegram or email.",
                           "type": "string",
                           "minLength": 1
                         },
@@ -446,7 +446,7 @@
                           "minLength": 1
                         },
                         "channel": {
-                          "description": "Optional channel label such as telegram, linq, or email.",
+                          "description": "Optional channel label such as telegram or email.",
                           "type": "string",
                           "minLength": 1
                         },
@@ -466,7 +466,7 @@
                           "minLength": 1
                         },
                         "deliveryTarget": {
-                          "description": "Optional one-send outbound destination in the transport-native send format. For Telegram use a chat id or `<chatId>:topic:<messageThreadId>`; for Linq use a chat id; for email use a recipient address. Reply-in-place sessions can often omit this and reuse the saved thread.",
+                          "description": "Optional one-send outbound destination in the transport-native send format. For Telegram use a chat id or `<chatId>:topic:<messageThreadId>`; for email use a recipient address. Reply-in-place sessions can often omit this and reuse the saved thread.",
                           "type": "string",
                           "minLength": 1
                         }
@@ -622,7 +622,7 @@
                                   "minLength": 1
                                 },
                                 "deliveryTarget": {
-                                  "description": "Optional saved outbound destination in the transport-native send format. For Telegram use a chat id or `<chatId>:topic:<messageThreadId>`; for Linq use a chat id; for email use a recipient address.",
+                                  "description": "Optional saved outbound destination in the transport-native send format. For Telegram use a chat id or `<chatId>:topic:<messageThreadId>`; for email use a recipient address.",
                                   "type": "string",
                                   "minLength": 1
                                 }
@@ -921,7 +921,7 @@
                   "minLength": 1
                 },
                 "channel": {
-                  "description": "Optional channel label such as telegram, linq, or email.",
+                  "description": "Optional channel label such as telegram or email.",
                   "type": "string",
                   "minLength": 1
                 },
@@ -1836,6 +1836,21 @@
                           "type": "string",
                           "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
                         },
+                        "tag": {
+                          "description": "Optional tag filter. Repeat --tag for multiple tags; all requested tags must match.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "limit": {
+                          "default": 50,
+                          "description": "Maximum number of results to return.",
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 200
+                        },
                         "label": {
                           "description": "Optional stable capture label filter.",
                           "type": "string",
@@ -1853,21 +1868,6 @@
                           "type": "string",
                           "minLength": 1,
                           "maxLength": 160
-                        },
-                        "tag": {
-                          "description": "Optional tag filter. Repeat --tag for multiple tags; all requested tags must match.",
-                          "type": "array",
-                          "items": {
-                            "type": "string",
-                            "minLength": 1
-                          }
-                        },
-                        "limit": {
-                          "default": 50,
-                          "description": "Maximum number of results to return.",
-                          "type": "integer",
-                          "exclusiveMinimum": 0,
-                          "maximum": 200
                         }
                       }
                     }
@@ -7514,7 +7514,7 @@
                                   "description": "Runtime connector id."
                                 },
                                 "account": {
-                                  "description": "Optional account identity for the connector. Defaults to `bot` for Telegram, `default` for Linq, and should be an AgentMail inbox id for email unless `--provision` is used; for AgentMail this is often the inbox id or inbox email address.",
+                                  "description": "Optional account identity for the connector. Defaults to `bot` for Telegram and should be an AgentMail inbox id for email unless `--provision` is used; for AgentMail this is often the inbox id or inbox email address.",
                                   "type": "string",
                                   "minLength": 1
                                 },
@@ -7553,22 +7553,6 @@
                                   "description": "Optional AgentMail client id to associate when provisioning a new inbox.",
                                   "type": "string",
                                   "minLength": 1
-                                },
-                                "linqWebhookHost": {
-                                  "description": "Optional local bind host for the Linq webhook listener. Defaults to 0.0.0.0.",
-                                  "type": "string",
-                                  "minLength": 1
-                                },
-                                "linqWebhookPath": {
-                                  "description": "Optional local path for the Linq webhook listener. Defaults to /linq-webhook.",
-                                  "type": "string",
-                                  "minLength": 1
-                                },
-                                "linqWebhookPort": {
-                                  "description": "Optional local port for the Linq webhook listener. Defaults to 8789.",
-                                  "type": "integer",
-                                  "exclusiveMinimum": 0,
-                                  "maximum": 65535
                                 },
                                 "enableAutoReply": {
                                   "description": "Enable assistant auto-reply for this connector channel after the source is added.",

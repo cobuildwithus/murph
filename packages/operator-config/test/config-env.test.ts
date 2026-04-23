@@ -87,14 +87,11 @@ async function withTemporaryProcessEnv(
 test('setup env helpers trim values, report missing keys, and surface channel readiness', () => {
   const env: NodeJS.ProcessEnv = {
     AGENTMAIL_API_KEY: '  agentmail-key  ',
-    LINQ_API_TOKEN: '  linq-token  ',
-    LINQ_WEBHOOK_SECRET: '   ',
     TELEGRAM_BOT_TOKEN: '   telegram-bot-token   ',
   }
 
   assert.equal(readEnvValue(env, ['TELEGRAM_BOT_TOKEN', 'AGENTMAIL_API_KEY']), 'telegram-bot-token')
   assert.deepEqual(resolveSetupChannelMissingEnv('telegram', env), [])
-  assert.deepEqual(resolveSetupChannelMissingEnv('linq', env), ['LINQ_WEBHOOK_SECRET'])
   assert.deepEqual(resolveSetupChannelMissingEnv('email', env), [])
   assert.deepEqual(describeSetupChannelStatus('telegram', env, 'darwin'), {
     badge: 'ready',
@@ -232,6 +229,20 @@ test('command helpers normalize top-level tokens, request ids, and JSON headers'
   })
   assert.throws(
     () => parseHeadersJsonOption('{"Authorization":"credential"}'),
+    (error: unknown) =>
+      error instanceof VaultCliError &&
+      error.code === 'invalid_payload' &&
+      /credential headers/u.test(error.message),
+  )
+  assert.throws(
+    () => parseHeadersJsonOption('{"X-Api-Key":"credential"}'),
+    (error: unknown) =>
+      error instanceof VaultCliError &&
+      error.code === 'invalid_payload' &&
+      /credential headers/u.test(error.message),
+  )
+  assert.throws(
+    () => parseHeadersJsonOption('{"X-Trace":"Bearer secret-token-1234"}'),
     (error: unknown) =>
       error instanceof VaultCliError &&
       error.code === 'invalid_payload' &&
@@ -388,7 +399,7 @@ test('assistant backend targets trim config input and strip sensitive headers be
       'X-Trace': 'trace-id',
     },
     model: 'gpt-4o',
-    presetId: 'openai',
+    presetId: null,
     providerName: 'Example Provider',
     reasoningEffort: 'high',
     webSearch: null,
@@ -499,18 +510,18 @@ test('representative contract schemas stay wired to the owned setup/operator sea
     approvalPolicy: null,
     baseUrl: 'https://api.example.test/v1',
     continuityFingerprint: openAiCompatibleRuntime.continuityFingerprint,
-    executionDriver: 'responses',
+    executionDriver: 'openai-compatible',
     headers: {
       'X-Trace-Id': 'trace',
     },
     model: 'gpt-5.4',
     oss: false,
-    presetId: 'openai',
+    presetId: null,
     profile: null,
     provider: 'openai-compatible',
     providerName: 'Example',
     reasoningEffort: 'high',
-    resumeKind: 'openai-response-id',
+    resumeKind: null,
     sandbox: null,
   })
   assert.deepEqual(
@@ -641,7 +652,7 @@ test('hosted assistant config normalization keeps the active profile ready and s
     profiles: [
       {
         id: 'platform-profile',
-        label: 'OpenAI',
+        label: 'api.example.com',
         managedBy: 'platform',
         target: {
           adapter: 'openai-compatible',
@@ -651,7 +662,7 @@ test('hosted assistant config normalization keeps the active profile ready and s
             'X-Trace': 'trace-id',
           },
           model: 'gpt-4o',
-          presetId: 'openai',
+          presetId: null,
           providerName: null,
           reasoningEffort: 'high',
           webSearch: null,
@@ -683,7 +694,7 @@ test('hosted assistant config normalization keeps the active profile ready and s
       'X-Trace': 'trace-id',
     },
     model: 'gpt-4o',
-    presetId: 'openai',
+    presetId: null,
     provider: 'openai-compatible',
     providerName: null,
     reasoningEffort: 'high',

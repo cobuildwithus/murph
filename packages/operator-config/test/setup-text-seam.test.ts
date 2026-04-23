@@ -78,19 +78,6 @@ test('setup runtime resolver clones process env and surfaces ready channel and w
     ready: true,
   })
   assert.deepEqual(
-    describeSetupChannelStatus('linq', {
-      LINQ_API_TOKEN: 'token',
-      LINQ_WEBHOOK_SECRET: 'secret',
-    }),
-    {
-      badge: 'ready',
-      detail:
-        'Linq API token and webhook secret are available for local webhook verification and outbound chat delivery in the current environment.',
-      missingEnv: [],
-      ready: true,
-    },
-  )
-  assert.deepEqual(
     describeSetupChannelStatus('email', {
       AGENTMAIL_API_KEY: 'agentmail-key',
     }),
@@ -107,13 +94,6 @@ test('setup runtime resolver clones process env and surfaces ready channel and w
     detail:
       'Add TELEGRAM_BOT_TOKEN to the current environment to enable Telegram auto-reply.',
     missingEnv: ['TELEGRAM_BOT_TOKEN'],
-    ready: false,
-  })
-  assert.deepEqual(describeSetupChannelStatus('linq', {}), {
-    badge: 'needs keys',
-    detail:
-      'Add LINQ_API_TOKEN and LINQ_WEBHOOK_SECRET to the current environment to enable the Linq channel.',
-    missingEnv: ['LINQ_API_TOKEN', 'LINQ_WEBHOOK_SECRET'],
     ready: false,
   })
   assert.deepEqual(describeSetupChannelStatus('email', {}), {

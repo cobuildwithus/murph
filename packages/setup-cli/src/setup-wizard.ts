@@ -82,7 +82,6 @@ export interface SetupWizardInput {
   initialChannels?: readonly SetupChannel[]
   initialScheduledUpdates?: readonly string[]
   initialWearables?: readonly SetupWearable[]
-  linqLocalWebhookUrl?: string | null
   platform?: NodeJS.Platform
   publicBaseUrl?: string | null
   vault: string
@@ -139,7 +138,6 @@ export async function runSetupWizard(
         initialChannels,
         initialScheduledUpdates,
         initialWearables,
-        linqLocalWebhookUrl: input.linqLocalWebhookUrl,
         onCancel: (error) => {
           completion.fail(error)
         },

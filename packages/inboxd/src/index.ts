@@ -101,12 +101,6 @@ export type {
   AgentmailThreadLike,
 } from "./connectors/email/types.ts";
 export {
-  createLinqWebhookConnector,
-} from "./connectors/linq/connector.ts";
-export type {
-  LinqWebhookConnectorOptions,
-} from "./connectors/linq/connector.ts";
-export {
   normalizeHostedLinqConversationMessage,
   normalizeLinqWebhookEvent,
   toLinqChatMessage,

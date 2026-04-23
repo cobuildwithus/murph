@@ -344,7 +344,6 @@ test('connector helpers instantiate every supported source and reject missing pr
   const calls: string[] = []
   const telegramConnector = createPollConnector('telegram:bot')
   const emailConnector = createPollConnector('email:primary')
-  const linqConnector = createPollConnector('linq:default')
   const telegramDriver = {
     downloadFile: async () => new Uint8Array(),
     getFile: async () => ({}),
@@ -360,7 +359,6 @@ test('connector helpers instantiate every supported source and reject missing pr
   }
   let telegramInput: unknown
   let emailInput: unknown
-  let linqInput: unknown
   const inboxd = {
     createTelegramPollConnector(input: unknown) {
       calls.push('telegram')
@@ -371,11 +369,6 @@ test('connector helpers instantiate every supported source and reject missing pr
       calls.push('email')
       emailInput = input
       return emailConnector
-    },
-    createLinqWebhookConnector(input: unknown) {
-      calls.push('linq')
-      linqInput = input
-      return linqConnector
     },
   }
   const telegram = await instantiateConnector({
@@ -392,7 +385,6 @@ test('connector helpers instantiate every supported source and reject missing pr
     async loadTelegramDriver() {
       return telegramDriver as never
     },
-    linqWebhookSecret: null,
   })
   assert.equal(telegram, telegramConnector)
   assert.deepEqual(telegramInput, {
@@ -421,7 +413,6 @@ test('connector helpers instantiate every supported source and reject missing pr
     async loadEmailDriver() {
       return emailDriver as never
     },
-    linqWebhookSecret: null,
   })
   assert.equal(email, emailConnector)
   assert.deepEqual(emailInput, {
@@ -430,37 +421,6 @@ test('connector helpers instantiate every supported source and reject missing pr
     backfillLimit: 500,
     driver: emailDriver,
     id: 'email:primary',
-  })
-
-  const linq = await instantiateConnector({
-    connector: {
-      id: 'linq:default',
-      source: 'linq',
-      enabled: true,
-      accountId: 'line-1',
-      options: {
-        linqWebhookHost: '127.0.0.1',
-        linqWebhookPath: '/webhook',
-        linqWebhookPort: 9000,
-      },
-    },
-    async loadInbox() {
-      return inboxd as never
-    },
-    async loadTelegramDriver() {
-      throw new Error('unexpected telegram driver load')
-    },
-    linqWebhookSecret: '  secret  ',
-  })
-  assert.equal(linq, linqConnector)
-  assert.deepEqual(linqInput, {
-    accountId: 'line-1',
-    downloadAttachments: true,
-    host: '127.0.0.1',
-    id: 'linq:default',
-    path: '/webhook',
-    port: 9000,
-    webhookSecret: 'secret',
   })
 
   await assert.rejects(
@@ -479,7 +439,6 @@ test('connector helpers instantiate every supported source and reject missing pr
         async loadTelegramDriver() {
           throw new Error('unexpected telegram driver load')
         },
-        linqWebhookSecret: null,
       }),
     /loadEmailDriver/,
   )
@@ -500,9 +459,8 @@ test('connector helpers instantiate every supported source and reject missing pr
         async loadTelegramDriver() {
           throw new Error('unexpected telegram driver load')
         },
-        linqWebhookSecret: '   ',
       }),
-    /Linq webhook secret is required/,
+    /Unsupported inbox connector source: linq/,
   )
 
   await assert.rejects(
@@ -521,7 +479,6 @@ test('connector helpers instantiate every supported source and reject missing pr
         async loadTelegramDriver() {
           return telegramDriver as never
         },
-        linqWebhookSecret: null,
       }),
     /Unsupported inbox connector source: unsupported/,
   )

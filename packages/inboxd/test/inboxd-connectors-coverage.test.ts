@@ -18,7 +18,6 @@ import {
   createAgentmailApiPollDriver,
   createEmailPollConnector,
   createInboundCaptureFromChatMessage,
-  createLinqWebhookConnector,
   createNormalizedChatPollConnector,
   createTelegramPollConnector,
   normalizeLinqWebhookEvent,
@@ -1032,36 +1031,6 @@ test("normalizeTelegramUpdate collects non-photo attachment specs without downlo
   assert.equal(
     capture.attachments.every((attachment) => attachment.data === undefined),
     true,
-  );
-});
-
-test("createLinqWebhookConnector normalizes constructor inputs and keeps backfill pure", async () => {
-  const connector = createLinqWebhookConnector({
-    source: " linq-alt ",
-    accountId: " acct-1 ",
-    host: "127.0.0.1",
-    path: "hooks/linq",
-    port: 8789,
-    webhookSecret: "secret-123",
-    downloadAttachments: false,
-  });
-
-  assert.equal(connector.id, "linq-alt:acct-1:8789");
-  assert.equal(connector.source, "linq-alt");
-  assert.equal(connector.accountId, "acct-1");
-  assert.deepEqual(connector.capabilities, {
-    backfill: false,
-    watch: true,
-    webhooks: true,
-    attachments: true,
-    ownMessages: true,
-  });
-  assert.deepEqual(
-    await connector.backfill(
-      { seen: "cursor-1" },
-      async (capture) => createPersistedCapture(capture),
-    ),
-    { seen: "cursor-1" },
   );
 });
 

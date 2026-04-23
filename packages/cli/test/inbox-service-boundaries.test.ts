@@ -21,85 +21,7 @@ import {
   readPromotionsByCapture,
 } from '@murphai/inbox-services/testing'
 
-test('instantiateConnector delegates Linq webhook options through the connector factory', async () => {
-  let received: {
-    accountId?: string | null
-    downloadAttachments?: boolean
-    host?: string
-    id?: string
-    path?: string
-    port?: number
-    webhookSecret?: string
-  } | null = null
-
-  const connector = await instantiateConnector({
-    connector: {
-      id: 'linq:default',
-      source: 'linq',
-      enabled: true,
-      accountId: 'default',
-      options: {
-        linqWebhookHost: '127.0.0.1',
-        linqWebhookPath: '/hooks/linq',
-        linqWebhookPort: 9911,
-      },
-    },
-    linqWebhookSecret: 'secret-123',
-    async loadInbox() {
-      return createStubInboxRuntimeModule({
-        createLinqWebhookConnector: (options: {
-          accountId?: string | null
-          downloadAttachments?: boolean
-          host?: string
-          id?: string
-          path?: string
-          port?: number
-          webhookSecret: string
-        }) => {
-          received = options
-          return {
-            id: options.id ?? 'linq:default',
-            source: 'linq',
-            accountId: options.accountId ?? null,
-            kind: 'poll',
-            capabilities: {
-              attachments: true,
-              backfill: false,
-              ownMessages: true,
-              watch: true,
-              webhooks: true,
-            },
-            async backfill() {
-              return null
-            },
-            async watch() {},
-          }
-        },
-      })
-    },
-    async loadTelegramDriver() {
-      throw new Error('unreachable')
-    },
-  })
-
-  assert.equal(connector.id, 'linq:default')
-  if (!received) {
-    throw new Error('expected Linq connector options to be captured')
-  }
-  assert.deepEqual(received, {
-    accountId: 'default',
-    downloadAttachments: true,
-    host: '127.0.0.1',
-    id: 'linq:default',
-    path: '/hooks/linq',
-    port: 9911,
-    webhookSecret: 'secret-123',
-  })
-})
-
-test('instantiateConnector fails closed for Linq when the local webhook secret is missing', async () => {
-  let created = false
-
+test('instantiateConnector rejects local Linq connectors', async () => {
   await assert.rejects(
     () =>
       instantiateConnector({
@@ -114,11 +36,35 @@ test('instantiateConnector fails closed for Linq when the local webhook secret i
             linqWebhookPort: 9911,
           },
         },
-        linqWebhookSecret: null,
+        async loadInbox() {
+          return createStubInboxRuntimeModule()
+        },
+        async loadTelegramDriver() {
+          throw new Error('unreachable')
+        },
+      }),
+    /Unsupported inbox connector source: linq/u,
+  )
+})
+
+test('instantiateConnector fails closed for unsupported Linq connectors before loading factories', async () => {
+  await assert.rejects(
+    () =>
+      instantiateConnector({
+        connector: {
+          id: 'linq:default',
+          source: 'linq',
+          enabled: true,
+          accountId: 'default',
+          options: {
+            linqWebhookHost: '127.0.0.1',
+            linqWebhookPath: '/hooks/linq',
+            linqWebhookPort: 9911,
+          },
+        },
         async loadInbox() {
           return createStubInboxRuntimeModule({
             createLinqWebhookConnector: () => {
-              created = true
               throw new Error('unreachable')
             },
           })
@@ -127,10 +73,8 @@ test('instantiateConnector fails closed for Linq when the local webhook secret i
           throw new Error('unreachable')
         },
       }),
-    /local Linq listener can start/u,
+    /Unsupported inbox connector source: linq/u,
   )
-
-  assert.equal(created, false)
 })
 
 test('instantiateConnector delegates Telegram polling through the explicit takeover transport mode', async () => {
@@ -186,7 +130,6 @@ test('instantiateConnector delegates Telegram polling through the explicit takeo
     async loadTelegramDriver() {
       return createUnreachableTelegramDriver()
     },
-    linqWebhookSecret: null,
   })
 
   assert.equal(connector.id, 'telegram:bot')

@@ -4,7 +4,6 @@ import type {
   InboxAppEnvironment,
   InboxServices,
 } from './types.js'
-import { describeLinqConnectorEndpoint } from './linq-endpoint.js'
 import {
   normalizeBackfillLimit,
   normalizeConnectorAccountId,
@@ -18,34 +17,6 @@ import {
   sortConnectors,
   writeConfig,
 } from '../inbox-services/state.js'
-
-function normalizeOptionalLinqWebhookPath(
-  value: string | null | undefined,
-): string | undefined {
-  const normalized = normalizeNullableString(value)
-  if (!normalized) {
-    return undefined
-  }
-
-  return normalized.startsWith('/') ? normalized : `/${normalized}`
-}
-
-function normalizeOptionalLinqWebhookPort(
-  value: number | undefined,
-): number | undefined {
-  if (value === undefined) {
-    return undefined
-  }
-
-  if (!Number.isInteger(value) || value < 1 || value > 65535) {
-    throw new VaultCliError(
-      'INBOX_LINQ_WEBHOOK_PORT_INVALID',
-      'Linq webhook port must be an integer between 1 and 65535.',
-    )
-  }
-
-  return value
-}
 
 export function createInboxSourceOps(
   env: Pick<
@@ -71,13 +42,17 @@ export function createInboxSourceOps(
         )
       }
 
+      if (input.source === 'linq') {
+        throw new VaultCliError(
+          'INBOX_SOURCE_LOCAL_LINQ_REMOVED',
+          'Local Linq inbox connectors are no longer supported. Existing Linq sources can still be listed or removed.',
+        )
+      }
+
       let provisionedMailbox = null
       let reusedMailbox = null
       let accountId = normalizeConnectorAccountId(input.source, input.account)
       let emailAddress = normalizeNullableString(input.address)
-      const linqWebhookHost = normalizeNullableString(input.linqWebhookHost)
-      const linqWebhookPath = normalizeOptionalLinqWebhookPath(input.linqWebhookPath)
-      const linqWebhookPort = normalizeOptionalLinqWebhookPort(input.linqWebhookPort)
 
       if (input.source === 'email') {
         if (input.provision) {
@@ -108,33 +83,6 @@ export function createInboxSourceOps(
         })
       }
 
-      if (input.source === 'linq') {
-        const nextEndpoint = {
-          host: linqWebhookHost ?? '0.0.0.0',
-          path: linqWebhookPath ?? '/linq-webhook',
-          port: linqWebhookPort ?? 8789,
-        }
-        const conflictingConnector = config.connectors.find((connector) => {
-          if (connector.source !== 'linq') {
-            return false
-          }
-
-          const endpoint = describeLinqConnectorEndpoint(connector)
-          return (
-            endpoint.host === nextEndpoint.host &&
-            endpoint.path === nextEndpoint.path &&
-            endpoint.port === nextEndpoint.port
-          )
-        })
-
-        if (conflictingConnector) {
-          throw new VaultCliError(
-            'INBOX_LINQ_WEBHOOK_CONFLICT',
-            `Linq webhook endpoint ${nextEndpoint.host}:${nextEndpoint.port}${nextEndpoint.path} is already assigned to connector "${conflictingConnector.id}".`,
-          )
-        }
-      }
-
       const connector: InboxConnectorConfig = {
         id: input.id,
         source: input.source,
@@ -143,9 +91,6 @@ export function createInboxSourceOps(
         options: {
           backfillLimit: normalizeBackfillLimit(input.backfillLimit),
           emailAddress: input.source === 'email' ? emailAddress : undefined,
-          linqWebhookHost: input.source === 'linq' ? linqWebhookHost ?? undefined : undefined,
-          linqWebhookPath: input.source === 'linq' ? linqWebhookPath ?? undefined : undefined,
-          linqWebhookPort: input.source === 'linq' ? linqWebhookPort ?? undefined : undefined,
         },
       }
       ensureConnectorNamespaceAvailable(config, connector)

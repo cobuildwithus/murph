@@ -5,7 +5,6 @@ import type {
 import { sortSetupWizardWearables } from './setup-wizard-options.js'
 
 const DEFAULT_SETUP_DEVICE_SYNC_LOCAL_BASE_URL = 'http://localhost:8788'
-const DEFAULT_SETUP_LINQ_WEBHOOK_URL = 'http://127.0.0.1:8789/linq-webhook'
 const SETUP_PUBLIC_URL_PLACEHOLDER_HOST = 'https://<your-public-host>'
 const DEFAULT_SETUP_DEVICE_SYNC_TUNNEL_COMMANDS = [
   'ngrok http 8788',
@@ -83,18 +82,13 @@ export function buildSetupWizardPublicUrlReview(input: {
   wearables: readonly SetupWearable[]
   publicBaseUrl?: string | null
   deviceSyncLocalBaseUrl?: string | null
-  linqLocalWebhookUrl?: string | null
 }): SetupWizardPublicUrlReview {
   const publicBaseUrl = normalizeSetupWizardText(input.publicBaseUrl)
-  const hasLinq = input.channels.includes('linq')
   const selectedWearables = sortSetupWizardWearables(input.wearables)
-  const needsPublicStrategy = hasLinq || selectedWearables.length > 0
+  const needsPublicStrategy = selectedWearables.length > 0
   const deviceSyncLocalBaseUrl =
     normalizeSetupWizardText(input.deviceSyncLocalBaseUrl) ??
     DEFAULT_SETUP_DEVICE_SYNC_LOCAL_BASE_URL
-  const linqLocalWebhookUrl =
-    normalizeSetupWizardText(input.linqLocalWebhookUrl) ??
-    DEFAULT_SETUP_LINQ_WEBHOOK_URL
 
   if (!needsPublicStrategy || isConfiguredPublicBaseUrl(publicBaseUrl)) {
     return {
@@ -113,14 +107,11 @@ export function buildSetupWizardPublicUrlReview(input: {
     recommendedStrategy:
       selectedWearables.length > 0 ? 'hosted' : 'tunnel',
     summary: describeSetupWizardPublicUrlSummary({
-      hasLinq,
       wearables: selectedWearables,
     }),
     targets: buildSetupWizardPublicUrlTargets({
-      hasLinq,
       wearables: selectedWearables,
       deviceSyncLocalBaseUrl,
-      linqLocalWebhookUrl,
     }),
     tunnelCommands:
       selectedWearables.length > 0
@@ -138,17 +129,10 @@ export function describeSetupWizardPublicUrlStrategyChoice(input: {
   }
 
   if (input.strategy === 'hosted') {
-    const hasLinq = input.review.targets.some((target) => target.label === 'Linq webhook')
-    return hasLinq
-      ? 'Use hosted `apps/web` for Garmin/WHOOP/Oura/Strava, but keep Linq on the local webhook path for now.'
-      : 'Use hosted `apps/web` for Garmin/WHOOP/Oura/Strava so callbacks stay on one stable public base.'
+    return 'Use hosted `apps/web` for Garmin/WHOOP/Oura/Strava so callbacks stay on one stable public base.'
   }
 
-  if (hasSetupWizardWearablePublicUrlTargets(input.review.targets)) {
-    return 'Expose the local callback routes through a tunnel. Keep Murph listening on localhost, then paste the public HTTPS tunnel URL into each provider.'
-  }
-
-  return 'Expose the local Linq webhook through a tunnel. Hosted `apps/web` does not replace this Linq webhook yet.'
+  return 'Expose the local callback routes through a tunnel. Keep Murph listening on localhost, then paste the public HTTPS tunnel URL into each provider.'
 }
 
 export function formatSetupPublicUrlStrategy(strategy: SetupPublicUrlStrategy): string {
@@ -206,25 +190,18 @@ export function buildSetupWizardPublicUrlHelpText(input: {
 }
 
 function describeSetupWizardPublicUrlSummary(input: {
-  hasLinq: boolean
   wearables: readonly SetupWearable[]
 }): string {
-  if (input.wearables.length > 0 && input.hasLinq) {
-    return 'Garmin/WHOOP/Oura/Strava are easiest through hosted `apps/web`, while Linq still needs the local inbox webhook today.'
-  }
-
   if (input.wearables.length > 0) {
     return 'Garmin/WHOOP/Oura/Strava need a public callback URL. Hosted `apps/web` is the easiest stable base.'
   }
 
-  return 'Linq still uses the local inbox webhook today, so a tunnel to your machine is the simplest public path.'
+  return ''
 }
 
 function buildSetupWizardPublicUrlTargets(input: {
-  hasLinq: boolean
   wearables: readonly SetupWearable[]
   deviceSyncLocalBaseUrl: string
-  linqLocalWebhookUrl: string
 }): SetupWizardPublicUrlTarget[] {
   const targets: SetupWizardPublicUrlTarget[] = []
 
@@ -327,17 +304,6 @@ function buildSetupWizardPublicUrlTargets(input: {
     })
   }
 
-  if (input.hasLinq) {
-    targets.push({
-      detail:
-        'Required if you enable Linq. Point Linq at the public tunnel URL that forwards here. Hosted `apps/web` does not replace this Linq webhook yet.',
-      label: 'Linq webhook',
-      localReceiverUrl: input.linqLocalWebhookUrl,
-      providerUrl: buildSetupWizardPublicProviderUrl(input.linqLocalWebhookUrl),
-      requirement: 'required',
-    })
-  }
-
   return targets
 }
 
@@ -363,7 +329,7 @@ function buildSetupWizardProviderDocs(
 function hasSetupWizardWearablePublicUrlTargets(
   targets: readonly SetupWizardPublicUrlTarget[],
 ): boolean {
-  return targets.some((target) => target.label !== 'Linq webhook')
+  return targets.length > 0
 }
 
 function isConfiguredPublicBaseUrl(value: string | null): boolean {

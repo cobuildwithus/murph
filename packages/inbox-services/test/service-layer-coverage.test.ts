@@ -358,7 +358,6 @@ test('service-layer helpers cover connector, query, state, daemon, and vault pat
   const telegramConnector = await instantiateConnector({
     connector,
     inputLimit: 25,
-    linqWebhookSecret: null,
     loadInbox: async () => ({
       createAgentmailApiPollDriver() {
         throw new Error('unused')
@@ -400,11 +399,10 @@ test('service-layer helpers cover connector, query, state, daemon, and vault pat
           id: 'linq:default',
           source: 'linq',
         }),
-        linqWebhookSecret: '   ',
         loadInbox: async () => ({}) as InboxRuntimeModule,
         loadTelegramDriver: async () => ({}) as TelegramDriver,
       }),
-    /Linq webhook secret is required/,
+    /Unsupported inbox connector source: linq/,
   )
 
   const emailConnector = await instantiateConnector({
@@ -413,7 +411,6 @@ test('service-layer helpers cover connector, query, state, daemon, and vault pat
       source: 'email',
       options: { emailAddress: 'ada@example.com' },
     }),
-    linqWebhookSecret: null,
     loadEmailDriver: async () => ({}) as EmailDriver,
     loadInbox: async () => ({
       createAgentmailApiPollDriver() {
