@@ -14,11 +14,7 @@ type MockChildProcess = EventEmitter & {
   stderr: EventEmitter & {
     setEncoding: (encoding: BufferEncoding) => void
   }
-  stdin: {
-    end: () => void
-    writes: string[]
-    write: (chunk: string) => void
-  }
+  stdin: MockStdin
   stdout: PassThrough
 }
 
@@ -56,7 +52,46 @@ afterEach(() => {
   vi.clearAllMocks()
 })
 
-function createMockChild(lines: string[]): MockChildProcess {
+class MockStdin extends EventEmitter {
+  emitErrorOnEnd: Error | null = null
+  emitErrorOnWrite: Error | null = null
+  throwOnEnd: Error | null = null
+  throwOnWrite: Error | null = null
+  readonly writes: string[] = []
+
+  write(chunk: string): void {
+    if (this.throwOnWrite) {
+      throw this.throwOnWrite
+    }
+
+    this.writes.push(chunk)
+
+    if (this.emitErrorOnWrite) {
+      queueMicrotask(() => {
+        this.emit('error', this.emitErrorOnWrite)
+      })
+    }
+  }
+
+  end(): void {
+    if (this.throwOnEnd) {
+      throw this.throwOnEnd
+    }
+
+    if (this.emitErrorOnEnd) {
+      queueMicrotask(() => {
+        this.emit('error', this.emitErrorOnEnd)
+      })
+    }
+  }
+}
+
+function createMockChild(
+  lines: string[],
+  options: {
+    emitSpawn?: boolean
+  } = {},
+): MockChildProcess {
   const child = new EventEmitter() as MockChildProcess
   child.exitCode = null
   child.signalCode = null
@@ -65,17 +100,22 @@ function createMockChild(lines: string[]): MockChildProcess {
   child.stderr = Object.assign(new EventEmitter(), {
     setEncoding() {},
   })
-  child.stdin = {
-    writes: [],
-    write(chunk: string) {
-      this.writes.push(chunk)
-    },
-    end() {},
-  }
+  child.stdin = new MockStdin()
   child.kill = () => {
     child.killed = true
     child.exitCode = 0
     child.emit('exit', 0, null)
+  }
+  child.emit = function emit(event: string | symbol, ...args: unknown[]) {
+    if (event === 'exit' || event === 'close') {
+      child.exitCode =
+        typeof args[0] === 'number' || args[0] === null ? (args[0] as number | null) : null
+      child.signalCode =
+        typeof args[1] === 'string' || args[1] === null
+          ? (args[1] as NodeJS.Signals | null)
+          : null
+    }
+    return EventEmitter.prototype.emit.call(this, event, ...args)
   }
   child.once = function once(event: string, listener: (...args: any[]) => void) {
     EventEmitter.prototype.once.call(this, event, listener)
@@ -86,14 +126,25 @@ function createMockChild(lines: string[]): MockChildProcess {
     return this
   }
 
-  queueMicrotask(() => {
-    child.emit('spawn')
-    for (const line of lines) {
-      child.stdout.write(`${line}\n`)
-    }
-  })
+  if (options.emitSpawn !== false) {
+    queueMicrotask(() => {
+      child.emit('spawn')
+      for (const line of lines) {
+        child.stdout.write(`${line}\n`)
+      }
+    })
+  }
 
   return child
+}
+
+function createErrnoException(
+  code: string,
+  message: string,
+): NodeJS.ErrnoException {
+  const error = new Error(message) as NodeJS.ErrnoException
+  error.code = code
+  return error
 }
 
 test('default codex RPC account probe merges quota windows and auth fallback details', async () => {
@@ -197,34 +248,9 @@ test('default codex RPC account probe merges quota windows and auth fallback det
 
 test('default codex RPC probe falls back to auth snapshot when the app-server probe fails', async () => {
   mockState.childFactory = () => {
-    const child = new EventEmitter() as MockChildProcess
-    child.exitCode = null
-    child.signalCode = null
-    child.killed = false
-    child.stdout = new PassThrough()
-    child.stderr = Object.assign(new EventEmitter(), {
-      setEncoding() {},
+    const child = createMockChild([], {
+      emitSpawn: false,
     })
-    child.stdin = {
-      writes: [],
-      write(chunk: string) {
-        this.writes.push(chunk)
-      },
-      end() {},
-    }
-    child.kill = () => {
-      child.killed = true
-      child.exitCode = 0
-      child.emit('exit', 0, null)
-    }
-    child.once = function once(event: string, listener: (...args: any[]) => void) {
-      EventEmitter.prototype.once.call(this, event, listener)
-      return this
-    }
-    child.off = function off(event: string, listener: (...args: any[]) => void) {
-      EventEmitter.prototype.off.call(this, event, listener)
-      return this
-    }
     queueMicrotask(() => {
       child.stderr.emit('data', 'rpc startup failed')
       child.emit('error', new Error('spawn failed'))
@@ -270,6 +296,115 @@ test('default codex RPC probe falls back to auth snapshot when the app-server pr
     planName: null,
     quota: null,
   })
+})
+
+test('default codex RPC probe falls back to auth snapshot when the child exits before initialize', async () => {
+  let child: MockChildProcess | null = null
+  mockState.childFactory = () => {
+    child = createMockChild([], {
+      emitSpawn: false,
+    })
+    child.stdin.throwOnWrite = createErrnoException('EPIPE', 'write EPIPE')
+    queueMicrotask(() => {
+      child?.emit('spawn')
+      child?.emit('exit', 0, null)
+      child?.stdout.end()
+    })
+    return child
+  }
+  mockState.onceImpl = async (_emitter, event) => [event]
+
+  const resolver = createSetupAssistantAccountResolver({
+    env: () => ({}),
+    getHomeDirectory: () => '/tmp/home',
+    readTextFile: async () =>
+      JSON.stringify({
+        openai_api_key: 'sk-from-auth',
+      }),
+  })
+
+  const account = await resolver.resolve({
+    assistant: {
+      preset: 'codex',
+      enabled: true,
+      provider: 'codex-cli',
+      model: 'gpt-5.4',
+      baseUrl: null,
+      apiKeyEnv: null,
+      providerName: null,
+      codexCommand: null,
+      codexHome: null,
+      profile: null,
+      reasoningEffort: 'medium',
+      sandbox: 'danger-full-access',
+      approvalPolicy: 'never',
+      oss: false,
+      account: null,
+      detail: 'Codex',
+    },
+  })
+
+  assert.deepEqual(account, {
+    source: 'codex-auth-json',
+    kind: 'api-key',
+    planCode: null,
+    planName: null,
+    quota: null,
+  })
+  assert.equal(child!.killed, false)
+})
+
+test('default codex RPC probe falls back to auth snapshot when stdin emits EPIPE during initialize', async () => {
+  let child: MockChildProcess | null = null
+  mockState.childFactory = () => {
+    child = createMockChild([])
+    child.stdin.emitErrorOnWrite = createErrnoException('EPIPE', 'write EPIPE')
+    child.stdin.once('error', () => {
+      child?.stdout.end()
+      child?.emit('exit', 0, null)
+    })
+    return child
+  }
+  mockState.onceImpl = async (_emitter, event) => [event]
+
+  const resolver = createSetupAssistantAccountResolver({
+    env: () => ({}),
+    getHomeDirectory: () => '/tmp/home',
+    readTextFile: async () =>
+      JSON.stringify({
+        openai_api_key: 'sk-from-auth',
+      }),
+  })
+
+  const account = await resolver.resolve({
+    assistant: {
+      preset: 'codex',
+      enabled: true,
+      provider: 'codex-cli',
+      model: 'gpt-5.4',
+      baseUrl: null,
+      apiKeyEnv: null,
+      providerName: null,
+      codexCommand: null,
+      codexHome: null,
+      profile: null,
+      reasoningEffort: 'medium',
+      sandbox: 'danger-full-access',
+      approvalPolicy: 'never',
+      oss: false,
+      account: null,
+      detail: 'Codex',
+    },
+  })
+
+  assert.deepEqual(account, {
+    source: 'codex-auth-json',
+    kind: 'api-key',
+    planCode: null,
+    planName: null,
+    quota: null,
+  })
+  assert.equal(child!.stdin.writes.length, 1)
 })
 
 test('default codex RPC probe ignores RPC error responses and returns null when no auth snapshot exists', async () => {
@@ -390,4 +525,206 @@ test('default codex RPC probe tolerates blank rate-limit fields and API key acco
       secondaryWindow: null,
     },
   })
+})
+
+test('default codex RPC probe ignores cleanup-time stdin EPIPE after a successful probe', async () => {
+  let child: MockChildProcess | null = null
+  mockState.childFactory = () => {
+    child = createMockChild([
+      JSON.stringify({ id: 1, result: { ok: true } }),
+      JSON.stringify({
+        id: 2,
+        result: {
+          account: {
+            planType: 'pro',
+            type: 'chatgpt',
+          },
+        },
+      }),
+      JSON.stringify({
+        id: 3,
+        result: {
+          rateLimits: {},
+        },
+      }),
+    ])
+    child.stdin.emitErrorOnEnd = createErrnoException('EPIPE', 'write EPIPE')
+    return child
+  }
+  mockState.onceImpl = async (_emitter, event) => [event]
+
+  const resolver = createSetupAssistantAccountResolver({
+    env: () => ({}),
+    getHomeDirectory: () => '/tmp/home',
+    readTextFile: async () => {
+      throw new Error('missing')
+    },
+  })
+
+  const account = await resolver.resolve({
+    assistant: {
+      preset: 'codex',
+      enabled: true,
+      provider: 'codex-cli',
+      model: 'gpt-5.4',
+      baseUrl: null,
+      apiKeyEnv: null,
+      providerName: null,
+      codexCommand: null,
+      codexHome: null,
+      profile: null,
+      reasoningEffort: 'medium',
+      sandbox: 'danger-full-access',
+      approvalPolicy: 'never',
+      oss: false,
+      account: null,
+      detail: 'Codex',
+    },
+  })
+
+  assert.deepEqual(account, {
+    source: 'codex-rpc',
+    kind: 'account',
+    planCode: 'pro',
+    planName: 'Pro',
+    quota: null,
+  })
+  assert.equal(child!.stdin.writes.length, 4)
+})
+
+test('default codex RPC probe falls back to auth snapshot when cleanup-time stdin errors are non-ignorable', async () => {
+  let child: MockChildProcess | null = null
+  mockState.childFactory = () => {
+    child = createMockChild([
+      JSON.stringify({ id: 1, result: { ok: true } }),
+      JSON.stringify({
+        id: 2,
+        result: {
+          account: {
+            planType: 'pro',
+            type: 'chatgpt',
+          },
+        },
+      }),
+      JSON.stringify({
+        id: 3,
+        result: {
+          rateLimits: {},
+        },
+      }),
+    ])
+    child.stdin.emitErrorOnEnd = createErrnoException(
+      'ERR_STREAM_DESTROYED',
+      'stream destroyed',
+    )
+    return child
+  }
+  mockState.onceImpl = async (_emitter, event) => [event]
+
+  const resolver = createSetupAssistantAccountResolver({
+    env: () => ({}),
+    getHomeDirectory: () => '/tmp/home',
+    readTextFile: async () =>
+      JSON.stringify({
+        openai_api_key: 'sk-from-auth',
+      }),
+  })
+
+  const account = await resolver.resolve({
+    assistant: {
+      preset: 'codex',
+      enabled: true,
+      provider: 'codex-cli',
+      model: 'gpt-5.4',
+      baseUrl: null,
+      apiKeyEnv: null,
+      providerName: null,
+      codexCommand: null,
+      codexHome: null,
+      profile: null,
+      reasoningEffort: 'medium',
+      sandbox: 'danger-full-access',
+      approvalPolicy: 'never',
+      oss: false,
+      account: null,
+      detail: 'Codex',
+    },
+  })
+
+  assert.deepEqual(account, {
+    source: 'codex-auth-json',
+    kind: 'api-key',
+    planCode: null,
+    planName: null,
+    quota: null,
+  })
+  assert.equal(child!.stdin.writes.length, 4)
+})
+
+test('default codex RPC probe ignores cleanup-time stdin ERR_STREAM_WRITE_AFTER_END after a successful probe', async () => {
+  let child: MockChildProcess | null = null
+  mockState.childFactory = () => {
+    child = createMockChild([
+      JSON.stringify({ id: 1, result: { ok: true } }),
+      JSON.stringify({
+        id: 2,
+        result: {
+          account: {
+            planType: 'pro',
+            type: 'chatgpt',
+          },
+        },
+      }),
+      JSON.stringify({
+        id: 3,
+        result: {
+          rateLimits: {},
+        },
+      }),
+    ])
+    child.stdin.emitErrorOnEnd = createErrnoException(
+      'ERR_STREAM_WRITE_AFTER_END',
+      'write after end',
+    )
+    return child
+  }
+  mockState.onceImpl = async (_emitter, event) => [event]
+
+  const resolver = createSetupAssistantAccountResolver({
+    env: () => ({}),
+    getHomeDirectory: () => '/tmp/home',
+    readTextFile: async () => {
+      throw new Error('missing')
+    },
+  })
+
+  const account = await resolver.resolve({
+    assistant: {
+      preset: 'codex',
+      enabled: true,
+      provider: 'codex-cli',
+      model: 'gpt-5.4',
+      baseUrl: null,
+      apiKeyEnv: null,
+      providerName: null,
+      codexCommand: null,
+      codexHome: null,
+      profile: null,
+      reasoningEffort: 'medium',
+      sandbox: 'danger-full-access',
+      approvalPolicy: 'never',
+      oss: false,
+      account: null,
+      detail: 'Codex',
+    },
+  })
+
+  assert.deepEqual(account, {
+    source: 'codex-rpc',
+    kind: 'account',
+    planCode: 'pro',
+    planName: 'Pro',
+    quota: null,
+  })
+  assert.equal(child!.stdin.writes.length, 4)
 })

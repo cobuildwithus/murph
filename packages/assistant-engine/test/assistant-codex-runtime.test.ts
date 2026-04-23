@@ -169,7 +169,7 @@ describe('assistant codex runtime', () => {
               approvalPolicy: 'never',
               cwd: expectedWorkingDirectory,
               model: 'gpt-5',
-              sandbox: 'workspace-write',
+              sandbox: 'workspaceWrite',
               serviceName: 'murph',
             },
           })
@@ -737,147 +737,154 @@ describe('assistant codex runtime', () => {
     }
   })
 
-  it('reuses the same thread context on thread/start and thread/resume, with serviceName only on thread/start', async () => {
-    const workingDirectory = await createTempDir('assistant-codex-thread-context-')
-    const expectedThreadContext = {
-      approvalPolicy: 'never',
-      cwd: path.resolve(workingDirectory),
-      model: 'gpt-5',
-      sandbox: 'workspace-write',
-    }
-    const threadRequests: Record<string, unknown>[] = []
-    const turnRequests: Record<string, unknown>[] = []
-
-    const queueSuccessfulTurn = (input: {
-      child: MockChildProcess
-      expectedPrompt: string
-      responseThreadId: string
-      threadMethod: 'thread/start' | 'thread/resume'
-    }) => {
-      queueMicrotask(() => {
-        void (async () => {
-          await waitForRpcMethod(input.child, 'initialize')
-          input.child.stdout.write(jsonLine({ id: 1, result: {} }))
-
-          const threadRequest = await waitForRpcMethod(input.child, input.threadMethod)
-          threadRequests.push(threadRequest)
-          input.child.stdout.write(
-            jsonLine({
-              id: 2,
-              result: {
-                thread: {
-                  id: input.responseThreadId,
-                },
-              },
-            }),
-          )
-
-          const turnRequest = await waitForRpcMethod(input.child, 'turn/start')
-          turnRequests.push(turnRequest)
-          input.child.stdout.write(
-            jsonLine({
-              id: 3,
-              result: {
-                turn: {
-                  id: `turn-${input.responseThreadId}`,
-                },
-              },
-            }),
-          )
-          input.child.stdout.write(
-            jsonLine({
-              method: 'turn/completed',
-              params: {
-                turn: {
-                  id: `turn-${input.responseThreadId}`,
-                  status: 'completed',
-                },
-              },
-            }),
-          )
-          input.child.emit('exit', 0, null)
-          input.child.emit('close', 0, null)
-
-          const turnInputItems = readTurnStartInputItems(turnRequest)
-          expect(turnInputItems).toEqual([
-            {
-              type: 'text',
-              text: input.expectedPrompt,
-            },
-          ])
-        })()
-      })
-    }
-
-    codexMocks.spawn
-      .mockImplementationOnce(() => {
-        const child = new MockChildProcess()
-        queueSuccessfulTurn({
-          child,
-          expectedPrompt: 'fresh prompt',
-          responseThreadId: 'thread-fresh',
-          threadMethod: 'thread/start',
-        })
-        return child
-      })
-      .mockImplementationOnce(() => {
-        const child = new MockChildProcess()
-        queueSuccessfulTurn({
-          child,
-          expectedPrompt: 'resume prompt',
-          responseThreadId: 'thread-resumed',
-          threadMethod: 'thread/resume',
-        })
-        return child
-      })
-
-    await expect(
-      executeCodexAppServerTurn({
+  it.each([
+    ['read-only', 'readOnly'],
+    ['workspace-write', 'workspaceWrite'],
+    ['danger-full-access', 'dangerFullAccess'],
+  ] as const)(
+    'maps sandbox %s to protocol sandbox %s on thread/start and thread/resume',
+    async (sandbox, expectedSandbox) => {
+      const workingDirectory = await createTempDir('assistant-codex-thread-context-')
+      const expectedThreadContext = {
         approvalPolicy: 'never',
+        cwd: path.resolve(workingDirectory),
         model: 'gpt-5',
-        prompt: 'fresh prompt',
-        reasoningEffort: 'high',
-        sandbox: 'workspace-write',
-        workingDirectory,
-      }),
-    ).resolves.toMatchObject({
-      sessionId: 'thread-fresh',
-    })
+        sandbox: expectedSandbox,
+      }
+      const threadRequests: Record<string, unknown>[] = []
+      const turnRequests: Record<string, unknown>[] = []
 
-    await expect(
-      executeCodexAppServerTurn({
-        approvalPolicy: 'never',
-        model: 'gpt-5',
-        prompt: 'resume prompt',
-        reasoningEffort: 'high',
-        resumeSessionId: 'thread-resume-request',
-        sandbox: 'workspace-write',
-        workingDirectory,
-      }),
-    ).resolves.toMatchObject({
-      sessionId: 'thread-resumed',
-    })
+      const queueSuccessfulTurn = (input: {
+        child: MockChildProcess
+        expectedPrompt: string
+        responseThreadId: string
+        threadMethod: 'thread/start' | 'thread/resume'
+      }) => {
+        queueMicrotask(() => {
+          void (async () => {
+            await waitForRpcMethod(input.child, 'initialize')
+            input.child.stdout.write(jsonLine({ id: 1, result: {} }))
 
-    expect(asRecord(threadRequests[0]?.params)).toEqual({
-      ...expectedThreadContext,
-      serviceName: 'murph',
-    })
-    expect(asRecord(threadRequests[1]?.params)).toEqual({
-      ...expectedThreadContext,
-      threadId: 'thread-resume-request',
-    })
+            const threadRequest = await waitForRpcMethod(input.child, input.threadMethod)
+            threadRequests.push(threadRequest)
+            input.child.stdout.write(
+              jsonLine({
+                id: 2,
+                result: {
+                  thread: {
+                    id: input.responseThreadId,
+                  },
+                },
+              }),
+            )
 
-    for (const [index, expectedThreadId] of ['thread-fresh', 'thread-resumed'].entries()) {
-      const turnParams = asRecord(turnRequests[index]?.params)
-      expect(turnParams).toMatchObject({
-        effort: 'high',
-        threadId: expectedThreadId,
+            const turnRequest = await waitForRpcMethod(input.child, 'turn/start')
+            turnRequests.push(turnRequest)
+            input.child.stdout.write(
+              jsonLine({
+                id: 3,
+                result: {
+                  turn: {
+                    id: `turn-${input.responseThreadId}`,
+                  },
+                },
+              }),
+            )
+            input.child.stdout.write(
+              jsonLine({
+                method: 'turn/completed',
+                params: {
+                  turn: {
+                    id: `turn-${input.responseThreadId}`,
+                    status: 'completed',
+                  },
+                },
+              }),
+            )
+            input.child.emit('exit', 0, null)
+            input.child.emit('close', 0, null)
+
+            const turnInputItems = readTurnStartInputItems(turnRequest)
+            expect(turnInputItems).toEqual([
+              {
+                type: 'text',
+                text: input.expectedPrompt,
+              },
+            ])
+          })()
+        })
+      }
+
+      codexMocks.spawn
+        .mockImplementationOnce(() => {
+          const child = new MockChildProcess()
+          queueSuccessfulTurn({
+            child,
+            expectedPrompt: 'fresh prompt',
+            responseThreadId: 'thread-fresh',
+            threadMethod: 'thread/start',
+          })
+          return child
+        })
+        .mockImplementationOnce(() => {
+          const child = new MockChildProcess()
+          queueSuccessfulTurn({
+            child,
+            expectedPrompt: 'resume prompt',
+            responseThreadId: 'thread-resumed',
+            threadMethod: 'thread/resume',
+          })
+          return child
+        })
+
+      await expect(
+        executeCodexAppServerTurn({
+          approvalPolicy: 'never',
+          model: 'gpt-5',
+          prompt: 'fresh prompt',
+          reasoningEffort: 'high',
+          sandbox,
+          workingDirectory,
+        }),
+      ).resolves.toMatchObject({
+        sessionId: 'thread-fresh',
       })
-      expect(turnParams.approvalPolicy).toBeUndefined()
-      expect(turnParams.cwd).toBeUndefined()
-      expect(turnParams.model).toBeUndefined()
-    }
-  })
+
+      await expect(
+        executeCodexAppServerTurn({
+          approvalPolicy: 'never',
+          model: 'gpt-5',
+          prompt: 'resume prompt',
+          reasoningEffort: 'high',
+          resumeSessionId: 'thread-resume-request',
+          sandbox,
+          workingDirectory,
+        }),
+      ).resolves.toMatchObject({
+        sessionId: 'thread-resumed',
+      })
+
+      expect(asRecord(threadRequests[0]?.params)).toEqual({
+        ...expectedThreadContext,
+        serviceName: 'murph',
+      })
+      expect(asRecord(threadRequests[1]?.params)).toEqual({
+        ...expectedThreadContext,
+        threadId: 'thread-resume-request',
+      })
+
+      for (const [index, expectedThreadId] of ['thread-fresh', 'thread-resumed'].entries()) {
+        const turnParams = asRecord(turnRequests[index]?.params)
+        expect(turnParams).toMatchObject({
+          effort: 'high',
+          threadId: expectedThreadId,
+        })
+        expect(turnParams.approvalPolicy).toBeUndefined()
+        expect(turnParams.cwd).toBeUndefined()
+        expect(turnParams.model).toBeUndefined()
+      }
+    },
+  )
 
   it('fails closed on unexpected app-server requests under approvalPolicy=never', async () => {
     const workingDirectory = await createTempDir('assistant-codex-server-request-')

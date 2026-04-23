@@ -53,6 +53,11 @@ interface CodexRpcAccountProbeResult {
   secondaryWindow: CodexRpcRateWindow | null
 }
 
+type CodexRpcProbeError = Error & {
+  cause?: unknown
+  code: 'SETUP_CODEX_RPC_PROBE_FAILED'
+}
+
 export interface SetupAssistantAccountResolver {
   resolve(input: { assistant: SetupConfiguredAssistant }): Promise<SetupAssistantAccount | null>
 }
@@ -338,9 +343,45 @@ async function runCodexRpcAccountProbe(input: {
   )
 
   let stderr = ''
+  let shuttingDown = false
+  let stdinFailure: CodexRpcProbeError | null = null
   child.stderr.setEncoding('utf8')
   child.stderr.on('data', (chunk: string) => {
     stderr += chunk
+  })
+
+  const handleProbeStdinError = (error: unknown): CodexRpcProbeError | null => {
+    if (isIgnorableProbeStdinError(error, shuttingDown)) {
+      return null
+    }
+
+    const failure =
+      stdinFailure ??
+      createCodexRpcProbeError(
+        readProbeFailureMessage(error) ?? 'Codex RPC probe failed.',
+        error,
+      )
+    stdinFailure = failure
+    return failure
+  }
+
+  const tryWriteRpcMessage = (payload: Record<string, unknown>): void => {
+    if (stdinFailure) {
+      throw stdinFailure
+    }
+
+    try {
+      writeCodexRpcMessage(child, payload)
+    } catch (error) {
+      throw (
+        handleProbeStdinError(error) ??
+        createCodexRpcProbeError('Codex RPC probe failed.', error)
+      )
+    }
+  }
+
+  child.stdin.on('error', (error) => {
+    void handleProbeStdinError(error)
   })
 
   const lineReader = readline.createInterface({
@@ -351,10 +392,13 @@ async function runCodexRpcAccountProbe(input: {
 
   const cleanup = async () => {
     lineReader.close()
-    try {
-      child.stdin.end()
-    } catch {
-      // Best-effort cleanup only.
+    shuttingDown = true
+    if (stdinFailure === null) {
+      try {
+        child.stdin.end()
+      } catch (error) {
+        void handleProbeStdinError(error)
+      }
     }
     if (child.exitCode === null && child.signalCode === null && !child.killed) {
       child.kill()
@@ -363,6 +407,9 @@ async function runCodexRpcAccountProbe(input: {
       await once(child, 'exit')
     }
   }
+
+  let probeResult: CodexRpcAccountProbeResult | null = null
+  let probeError: unknown = null
 
   try {
     await new Promise<void>((resolve, reject) => {
@@ -379,9 +426,9 @@ async function runCodexRpcAccountProbe(input: {
       child.once('error', handleError)
     })
 
-    return await runWithTimeout(async () => {
+    probeResult = await runWithTimeout(async () => {
       const initializeId = 1
-      writeCodexRpcMessage(child, {
+      tryWriteRpcMessage({
         id: initializeId,
         method: 'initialize',
         params: {
@@ -393,13 +440,13 @@ async function runCodexRpcAccountProbe(input: {
       })
       await readCodexRpcResult(iterator, initializeId)
 
-      writeCodexRpcMessage(child, {
+      tryWriteRpcMessage({
         method: 'initialized',
         params: {},
       })
 
       const accountReadId = 2
-      writeCodexRpcMessage(child, {
+      tryWriteRpcMessage({
         id: accountReadId,
         method: 'account/read',
         params: {},
@@ -407,7 +454,7 @@ async function runCodexRpcAccountProbe(input: {
       const accountResult = asRecord(await readCodexRpcResult(iterator, accountReadId))
 
       const rateLimitsReadId = 3
-      writeCodexRpcMessage(child, {
+      tryWriteRpcMessage({
         id: rateLimitsReadId,
         method: 'account/rateLimits/read',
         params: {},
@@ -438,14 +485,30 @@ async function runCodexRpcAccountProbe(input: {
       }
     }, CODEX_APP_SERVER_TIMEOUT_MS)
   } catch (error) {
-    const reason =
-      error instanceof Error && normalizeNullableString(error.message)
-        ? error.message
-        : stderr.trim()
-    throw new Error(reason ?? 'Codex RPC probe failed.')
-  } finally {
-    await cleanup()
+    probeError = error
   }
+
+  await cleanup()
+
+  if (probeError !== null) {
+    const failure =
+      stdinFailure ?? (isCodexRpcProbeError(probeError) ? probeError : null)
+    const reason = readProbeFailureMessage(failure ?? probeError) ?? stderr.trim()
+    throw (
+      failure ??
+      createCodexRpcProbeError(reason ?? 'Codex RPC probe failed.', probeError)
+    )
+  }
+
+  if (stdinFailure !== null) {
+    throw stdinFailure
+  }
+
+  if (probeResult === null) {
+    throw createCodexRpcProbeError('Codex RPC probe failed.')
+  }
+
+  return probeResult
 }
 
 function writeCodexRpcMessage(
@@ -561,6 +624,40 @@ function clampPercent(value: number): number {
   return Math.max(0, Math.min(100, value))
 }
 
+function createCodexRpcProbeError(
+  message: string,
+  cause?: unknown,
+): CodexRpcProbeError {
+  const error = new Error(message) as CodexRpcProbeError
+  error.name = 'CodexRpcProbeError'
+  error.code = 'SETUP_CODEX_RPC_PROBE_FAILED'
+  if (cause !== undefined) {
+    error.cause = cause
+  }
+  return error
+}
+
+function isIgnorableProbeStdinError(
+  error: unknown,
+  shuttingDown: boolean,
+): boolean {
+  if (!shuttingDown) {
+    return false
+  }
+
+  const code = readNodeErrorCode(error)
+  if (code === 'EPIPE' || code === 'ERR_STREAM_WRITE_AFTER_END') {
+    return true
+  }
+
+  const message = readProbeFailureMessage(error)?.toLowerCase() ?? null
+  return message?.includes('write after end') ?? false
+}
+
+function isCodexRpcProbeError(error: unknown): error is CodexRpcProbeError {
+  return readNodeErrorCode(error) === 'SETUP_CODEX_RPC_PROBE_FAILED'
+}
+
 function normalizePlanCode(value: string | null): string | null {
   const normalized = normalizeNullableString(value)
   if (normalized === null) {
@@ -580,6 +677,21 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 function asString(value: unknown): string | null {
   return typeof value === 'string' ? value : null
+}
+
+function readNodeErrorCode(error: unknown): string | null {
+  if (typeof error !== 'object' || error === null) {
+    return null
+  }
+
+  const code = Reflect.get(error, 'code')
+  return typeof code === 'string' ? code : null
+}
+
+function readProbeFailureMessage(error: unknown): string | null {
+  return error instanceof Error
+    ? normalizeNullableString(error.message)
+    : null
 }
 
 async function runWithTimeout<T>(
