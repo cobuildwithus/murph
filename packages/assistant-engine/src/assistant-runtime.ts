@@ -24,4 +24,18 @@ export * from './assistant/conversation-policy.js'
 export * from './assistant/conversation-ref.js'
 export * from './assistant/quarantine.js'
 export * from './assistant/redaction.js'
-export * from './assistant/shared.js'
+export {
+  appendTextFile,
+  auditAssistantStatePermissions,
+  ensureAssistantStateDirectory,
+  isJsonSyntaxError,
+  isMissingFileError,
+  normalizeAssistantProviderOptionKey,
+  normalizeRequiredText,
+  parseAssistantJsonLinesWithTailSalvage,
+  readAssistantJsonFile,
+  resolveTimestamp,
+  warnAssistantBestEffortFailure,
+  writeJsonFileAtomic,
+  writeTextFileAtomic,
+} from './assistant/shared.js'

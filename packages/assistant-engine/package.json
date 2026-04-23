@@ -71,21 +71,9 @@
       "types": "./dist/gateway-local-adapter.d.ts",
       "default": "./dist/gateway-local-adapter.js"
     },
-    "./inbox-model-contracts": {
-      "types": "./dist/inbox-model-contracts.d.ts",
-      "default": "./dist/inbox-model-contracts.js"
-    },
-    "./inbox-model-harness": {
-      "types": "./dist/inbox-model-harness.d.ts",
-      "default": "./dist/inbox-model-harness.js"
-    },
     "./knowledge": {
       "types": "./dist/knowledge.d.ts",
       "default": "./dist/knowledge.js"
-    },
-    "./model-harness": {
-      "types": "./dist/model-harness.d.ts",
-      "default": "./dist/model-harness.js"
     },
     "./outbound-channel": {
       "types": "./dist/outbound-channel.d.ts",

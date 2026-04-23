@@ -13,6 +13,11 @@ import {
 } from '@murphai/operator-config/vault-cli-contracts'
 import type { InboxServices } from '@murphai/inbox-services'
 import type { VaultServices } from '@murphai/vault-usecases'
+import type {
+  CliVaultServices,
+  DeviceSyncServices,
+} from './device-services.js'
+import { ensureCliVaultServices } from './device-services.js'
 import { registerAssistantCommands } from '@murphai/assistant-cli/commands/assistant'
 import { registerAuditCommands } from './commands/audit.js'
 import { registerAutomationCommands } from './commands/automation.js'
@@ -82,12 +87,18 @@ import {
   wearablesSourcesListResultSchema,
 } from './commands/wearables.js'
 
-type VaultServiceGroupName = Extract<keyof VaultServices, string>
+type VaultServiceGroups = {
+  core: VaultServices['core']
+  importers: VaultServices['importers']
+  query: VaultServices['query']
+  devices: DeviceSyncServices
+}
+type VaultServiceGroupName = Extract<keyof VaultServiceGroups, string>
 type InboxServiceMethodName = Extract<keyof InboxServices, string>
 type CommandExample = Readonly<Record<string, unknown>>
 type DirectVaultServiceBindings = {
   [TGroupName in VaultServiceGroupName]?: ReadonlyArray<
-    Extract<keyof VaultServices[TGroupName], string>
+    Extract<keyof VaultServiceGroups[TGroupName], string>
   >
 }
 
@@ -105,7 +116,7 @@ interface BaseVaultCliCommandDescriptor {
   leafCommands?: readonly VaultCliLeafCommandDescriptor[]
   register(input: {
     cli: Cli.Cli
-    services: VaultServices
+    services: CliVaultServices
     inboxServices: InboxServices
   }): void
 }
@@ -128,7 +139,7 @@ export interface CollectedVaultCliDirectServiceBindings {
   inbox: readonly InboxServiceMethodName[]
   vault: {
     [TGroupName in VaultServiceGroupName]: ReadonlyArray<
-      Extract<keyof VaultServices[TGroupName], string>
+      Extract<keyof VaultServiceGroups[TGroupName], string>
     >
   }
 }
@@ -421,7 +432,7 @@ export const vaultCliCommandDescriptors = [
       ],
     },
     register({ cli, services }) {
-      registerDeviceCommands(cli, services)
+      registerDeviceCommands(cli, services.devices)
     },
   },
   {
@@ -1249,11 +1260,16 @@ const ROOT_COMMAND_NAMES_EXEMPT_FROM_VAULT = new Set(['model', 'route'])
 
 export function registerVaultCliCommandDescriptors(input: {
   cli: Cli.Cli
-  services: VaultServices
+  services: VaultServices | CliVaultServices
   inboxServices: InboxServices
 }) {
+  const descriptorInput = {
+    ...input,
+    services: ensureCliVaultServices(input.services),
+  }
+
   for (const descriptor of vaultCliCommandDescriptors) {
-    descriptor.register(input)
+    descriptor.register(descriptorInput)
   }
 }
 
@@ -1308,15 +1324,15 @@ export function collectVaultCliDirectServiceBindings(): CollectedVaultCliDirectS
   return {
     inbox: orderedUniqueStrings(inboxBindings),
     vault: {
-      core: vaultBindings.core as Array<Extract<keyof VaultServices['core'], string>>,
+      core: vaultBindings.core as Array<Extract<keyof VaultServiceGroups['core'], string>>,
       importers:
         vaultBindings.importers as Array<
-          Extract<keyof VaultServices['importers'], string>
+          Extract<keyof VaultServiceGroups['importers'], string>
         >,
-      query: vaultBindings.query as Array<Extract<keyof VaultServices['query'], string>>,
+      query: vaultBindings.query as Array<Extract<keyof VaultServiceGroups['query'], string>>,
       devices:
         vaultBindings.devices as Array<
-          Extract<keyof VaultServices['devices'], string>
+          Extract<keyof VaultServiceGroups['devices'], string>
         >,
     },
   }

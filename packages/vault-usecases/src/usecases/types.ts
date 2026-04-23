@@ -1,14 +1,3 @@
-import type {
-  DeviceAccountDisconnectResult,
-  DeviceAccountListResult,
-  DeviceAccountReconcileResult,
-  DeviceAccountShowResult,
-  DeviceConnectResult,
-  DeviceDaemonStartResult,
-  DeviceDaemonStatusResult,
-  DeviceDaemonStopResult,
-  DeviceProviderListResult,
-} from "@murphai/operator-config/device-cli-contracts"
 import type { ExperimentStatus, MealNutrition } from "@murphai/contracts"
 import type {
   DocumentImportResult,
@@ -983,57 +972,10 @@ export interface QueryServices extends HealthQueryServiceMethods {
   ): Promise<ExportPackResult>
 }
 
-export interface DeviceSyncServices {
-  listProviders(input: {
-    vault?: string
-    baseUrl?: string
-  }): Promise<DeviceProviderListResult>
-  connect(input: {
-    vault?: string
-    provider: string
-    baseUrl?: string
-    returnTo?: string
-    open?: boolean
-  }): Promise<DeviceConnectResult>
-  listAccounts(input: {
-    vault?: string
-    baseUrl?: string
-    provider?: string
-  }): Promise<DeviceAccountListResult>
-  showAccount(input: {
-    vault?: string
-    baseUrl?: string
-    accountId: string
-  }): Promise<DeviceAccountShowResult>
-  reconcileAccount(input: {
-    vault?: string
-    baseUrl?: string
-    accountId: string
-  }): Promise<DeviceAccountReconcileResult>
-  disconnectAccount(input: {
-    vault?: string
-    baseUrl?: string
-    accountId: string
-  }): Promise<DeviceAccountDisconnectResult>
-  daemonStatus(input: {
-    vault: string
-    baseUrl?: string
-  }): Promise<DeviceDaemonStatusResult>
-  daemonStart(input: {
-    vault: string
-    baseUrl?: string
-  }): Promise<DeviceDaemonStartResult>
-  daemonStop(input: {
-    vault: string
-    baseUrl?: string
-  }): Promise<DeviceDaemonStopResult>
-}
-
 export interface VaultServices {
   core: CoreWriteServices
   importers: ImporterServices
   query: QueryServices
-  devices: DeviceSyncServices
 }
 
 export interface CoreRuntimeModule extends HealthCoreRuntimeMethods {

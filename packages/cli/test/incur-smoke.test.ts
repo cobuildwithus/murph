@@ -16,6 +16,7 @@ import {
   collectVaultCliDirectServiceBindings,
   vaultCliCommandDescriptors,
 } from '../src/vault-cli-command-manifest.js'
+import { createUnwiredCliVaultServices } from '../src/device-services.js'
 import { incurErrorBridge } from '../src/incur-error-bridge.js'
 import { createIntegratedInboxServices } from '@murphai/inbox-services'
 import { createUnwiredVaultServices } from '@murphai/vault-usecases'
@@ -406,7 +407,7 @@ test('capture descriptor exposes the add, show, list, and manifest leaves', () =
 
 test('descriptor direct service bindings resolve against the declared service surfaces', () => {
   const descriptorBindings = collectVaultCliDirectServiceBindings()
-  const vaultServices = createUnwiredVaultServices()
+  const vaultServices = createUnwiredCliVaultServices(createUnwiredVaultServices())
   const inboxServices = createIntegratedInboxServices()
 
   for (const descriptor of vaultCliCommandDescriptors) {

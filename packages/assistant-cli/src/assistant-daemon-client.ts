@@ -33,7 +33,7 @@ import type {
   SetAssistantCronJobTargetInput,
 } from './assistant/cron.js'
 import type { AssistantOutboxDispatchMode } from './assistant/outbox.js'
-import { normalizeNullableString } from '@murphai/assistant-engine/assistant-runtime'
+import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 
 export {
   resolveAssistantDaemonClientConfig,

@@ -46,13 +46,13 @@ export async function verifyTsconfigPathMappings(failures) {
 
         if (
           targetMember !== null
-          && await specifierDoesNotAllowRootFallbackAlias({
+          && await specifierUsesUndeclaredRootAlias({
             specifier,
             targetMember,
           })
         ) {
           failures.push(
-            `${path.relative(repoRoot, tsconfigPath)} maps ${specifier} to ${path.relative(repoRoot, resolvedTarget)}, but ${targetMember} is a subpath-only workspace package; keep source path mappings on its declared public subpaths instead of a root alias.`,
+            `${path.relative(repoRoot, tsconfigPath)} maps ${specifier} to ${path.relative(repoRoot, resolvedTarget)}, but ${targetMember} does not export "."; keep source path mappings on its declared public subpaths instead of a root alias.`,
           );
         }
       }
@@ -206,7 +206,7 @@ function workspacePackageAllowsRootSpecifier(packageJson) {
   return Object.hasOwn(exportsField, ".");
 }
 
-async function specifierDoesNotAllowRootFallbackAlias({
+async function specifierUsesUndeclaredRootAlias({
   specifier,
   targetMember,
 }) {
@@ -221,16 +221,8 @@ async function specifierDoesNotAllowRootFallbackAlias({
   }
 
   return (
-    isSubpathOnlyRootFallbackPackage(packageJson.name)
-    && specifier === packageJson.name
+    specifier === packageJson.name
     && !workspacePackageAllowsRootSpecifier(packageJson)
-  );
-}
-
-function isSubpathOnlyRootFallbackPackage(packageName) {
-  return (
-    packageName === "@murphai/messaging-ingress"
-    || packageName === "@murphai/cloudflare-hosted-control"
   );
 }
 

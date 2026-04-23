@@ -1678,7 +1678,6 @@ function createVaultServicesStub(input: {
 
   return assumeVaultServices({
     core,
-    devices: {},
     importers: {
       importAssessmentResponse: makeImporterMethod('importAssessmentResponse'),
       importDocument: makeImporterMethod('importDocument'),

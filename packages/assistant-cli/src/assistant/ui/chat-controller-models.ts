@@ -7,7 +7,7 @@ import {
   resolveAssistantProviderDefaults,
   saveAssistantOperatorDefaultsPatch,
 } from '@murphai/operator-config/operator-config'
-import { normalizeNullableString } from '@murphai/assistant-engine/assistant-runtime'
+import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 
 import {
   discoverAssistantProviderModels,

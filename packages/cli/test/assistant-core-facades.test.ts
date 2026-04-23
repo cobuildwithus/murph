@@ -7,6 +7,8 @@ interface PackageManifest {
   bundleDependencies?: string[]
   dependencies?: Record<string, string>
   exports?: Record<string, unknown>
+  main?: string
+  types?: string
 }
 
 interface TsConfigShape {
@@ -25,6 +27,9 @@ test('cli and split owner packages publish the expected owner dependencies', asy
   ) as PackageManifest
   const assistantEngineManifest = JSON.parse(
     await readFile(new URL('../../assistant-engine/package.json', import.meta.url), 'utf8'),
+  ) as PackageManifest
+  const assistantdManifest = JSON.parse(
+    await readFile(new URL('../../assistantd/package.json', import.meta.url), 'utf8'),
   ) as PackageManifest
   const vaultUsecasesManifest = JSON.parse(
     await readFile(new URL('../../vault-usecases/package.json', import.meta.url), 'utf8'),
@@ -63,6 +68,9 @@ test('cli and split owner packages publish the expected owner dependencies', asy
   assert.equal(assistantCliManifest.dependencies?.['@murphai/assistant-engine'], 'workspace:*')
   assert.equal(assistantCliManifest.dependencies?.['@murphai/operator-config'], 'workspace:*')
   assert.equal(assistantCliManifest.dependencies?.['@murphai/vault-usecases'], 'workspace:*')
+  assert.equal(assistantCliManifest.main, undefined)
+  assert.equal(assistantCliManifest.types, undefined)
+  assert.equal(assistantCliManifest.exports?.['.'], undefined)
   assert.equal(assistantCliManifest.exports?.['./assistant-runtime'], undefined)
   assert.equal(assistantCliManifest.exports?.['./assistant-chat-ink'], undefined)
   assert.equal(assistantCliManifest.exports?.['./assistant-daemon-client'], undefined)
@@ -73,10 +81,19 @@ test('cli and split owner packages publish the expected owner dependencies', asy
   assert.equal(assistantCliManifest.exports?.['./commands/assistant'] !== undefined, true)
   assert.equal(assistantCliManifest.exports?.['./run-terminal-logging'] !== undefined, true)
 
+  assert.equal(assistantdManifest.main, undefined)
+  assert.equal(assistantdManifest.types, undefined)
+  assert.equal(assistantdManifest.exports?.['.'], undefined)
   assert.equal(setupCliManifest.dependencies?.['@murphai/assistant-engine'], 'workspace:*')
   assert.equal(setupCliManifest.dependencies?.['@murphai/operator-config'], 'workspace:*')
   assert.equal(setupCliManifest.dependencies?.['@murphai/vault-usecases'], 'workspace:*')
   assert.equal(setupCliManifest.dependencies?.['@murphai/vault-inbox'], undefined)
+  assert.equal(setupCliManifest.main, undefined)
+  assert.equal(setupCliManifest.types, undefined)
+  assert.equal(setupCliManifest.exports?.['.'], undefined)
+  assert.equal(operatorConfigManifest.main, undefined)
+  assert.equal(operatorConfigManifest.types, undefined)
+  assert.equal(operatorConfigManifest.exports?.['.'], undefined)
   assert.equal(assistantEngineManifest.exports?.['./assistant-backend'], undefined)
   assert.equal(assistantEngineManifest.exports?.['./assistant-cli-contracts'], undefined)
   assert.equal(assistantEngineManifest.exports?.['./assistant-cli-access'], undefined)
@@ -87,12 +104,14 @@ test('cli and split owner packages publish the expected owner dependencies', asy
   assert.equal(assistantEngineManifest.exports?.['./health-registry-command-metadata'], undefined)
   assert.equal(assistantEngineManifest.exports?.['./inbox-app/reads'], undefined)
   assert.equal(assistantEngineManifest.exports?.['./inbox-app/sources'], undefined)
+  assert.equal(assistantEngineManifest.exports?.['./inbox-model-contracts'], undefined)
+  assert.equal(assistantEngineManifest.exports?.['./inbox-model-harness'], undefined)
   assert.equal(assistantEngineManifest.exports?.['./inbox-services/connectors'], undefined)
   assert.equal(assistantEngineManifest.exports?.['./inbox-services/daemon'], undefined)
   assert.equal(assistantEngineManifest.exports?.['./inbox-services/promotions'], undefined)
   assert.equal(assistantEngineManifest.exports?.['./inbox-services/*'], undefined)
   assert.equal(assistantEngineManifest.exports?.['./knowledge/*'], undefined)
-  assert.equal(assistantEngineManifest.exports?.['./model-harness'] !== undefined, true)
+  assert.equal(assistantEngineManifest.exports?.['./model-harness'], undefined)
   assert.equal(assistantEngineManifest.exports?.['./usecases/*'], undefined)
   assert.equal(assistantEngineManifest.exports?.['./usecases/document-meal-read'], undefined)
   assert.equal(assistantEngineManifest.exports?.['./usecases/event-record-mutations'], undefined)
@@ -132,6 +151,10 @@ test('cli and split owner packages publish the expected owner dependencies', asy
   assert.deepEqual(repoTsconfigBase.compilerOptions?.paths?.['@murphai/assistant-engine/*'], [
     'packages/assistant-engine/src/*',
   ])
+  assert.equal(repoTsconfigBase.compilerOptions?.paths?.['@murphai/assistant-cli'], undefined)
+  assert.equal(repoTsconfigBase.compilerOptions?.paths?.['@murphai/assistantd'], undefined)
+  assert.equal(repoTsconfigBase.compilerOptions?.paths?.['@murphai/operator-config'], undefined)
+  assert.equal(repoTsconfigBase.compilerOptions?.paths?.['@murphai/setup-cli'], undefined)
   assert.deepEqual(repoTsconfigBase.compilerOptions?.paths?.['@murphai/vault-usecases/*'], [
     'packages/vault-usecases/src/*',
   ])

@@ -7,7 +7,7 @@ const WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
   "@murphai/core": "../core/src/index.ts",
   "@murphai/device-syncd": "../device-syncd/src/index.ts",
   "@murphai/importers": "../importers/src/index.ts",
-  "@murphai/operator-config": "../operator-config/src/index.ts",
+  "@murphai/operator-config": "../operator-config/package.json",
   "@murphai/query": "../query/src/index.ts",
   "@murphai/runtime-state": "../runtime-state/src/index.ts",
 } as const;

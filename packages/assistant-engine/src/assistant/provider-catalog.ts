@@ -17,7 +17,7 @@ import {
   type AssistantModelDiscoveryResult,
   type AssistantProviderCapabilities,
 } from '../assistant-provider.js'
-import { normalizeNullableString } from '../assistant-runtime.js'
+import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 
 export type {
   AssistantCatalogModel,

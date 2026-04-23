@@ -1,5 +1,5 @@
 import type { AssistantSession } from '@murphai/operator-config/assistant-cli-contracts'
-import { normalizeNullableString } from '@murphai/assistant-engine/assistant-runtime'
+import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 
 export interface AssistantPromptQueueState {
   prompts: readonly string[]

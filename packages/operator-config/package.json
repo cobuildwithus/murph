@@ -8,8 +8,6 @@
     "type": "git",
     "url": "https://github.com/cobuildwithus/murph"
   },
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
   "exports": {
     "./assistant-cli-contracts": {
       "types": "./dist/assistant-cli-contracts.d.ts",

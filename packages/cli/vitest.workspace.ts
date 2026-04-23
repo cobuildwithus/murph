@@ -33,11 +33,11 @@ const cliVitestCoverageThresholds = {
   statements: 80,
 } as const;
 const WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
-  "@murphai/assistantd": "../assistantd/src/index.ts",
-  "@murphai/assistant-cli": "../assistant-cli/src/index.ts",
+  "@murphai/assistantd": "../assistantd/package.json",
+  "@murphai/assistant-cli": "../assistant-cli/package.json",
   "@murphai/assistant-engine": "../assistant-engine/src/index.ts",
-  "@murphai/operator-config": "../operator-config/src/index.ts",
-  "@murphai/setup-cli": "../setup-cli/src/index.ts",
+  "@murphai/operator-config": "../operator-config/package.json",
+  "@murphai/setup-cli": "../setup-cli/package.json",
   "@murphai/contracts": "../contracts/src/index.ts",
   "@murphai/core": "../core/src/index.ts",
   "@murphai/device-syncd": "../device-syncd/src/index.ts",

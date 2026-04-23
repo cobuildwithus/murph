@@ -9,6 +9,10 @@ import {
   createDefaultVaultServices,
   createVaultCliShell,
 } from './vault-cli-bootstrap.js'
+import {
+  ensureCliVaultServices,
+  type CliVaultServices,
+} from './device-services.js'
 import { registerVaultCliCommandDescriptors } from './vault-cli-command-manifest.js'
 
 export { CLI_DESCRIPTION } from './vault-cli-bootstrap.js'
@@ -16,7 +20,7 @@ export { CLI_DESCRIPTION } from './vault-cli-bootstrap.js'
 export interface CreateVaultCliOptions {
   commandName?: string
   inboxServices?: InboxServices
-  services?: VaultServices
+  services?: VaultServices | CliVaultServices
 }
 
 function createDefaultInboxServices(): InboxServices {
@@ -32,7 +36,10 @@ function createDefaultInboxServices(): InboxServices {
 export function createVaultCliWithOptions(
   input: CreateVaultCliOptions = {},
 ): Cli.Cli {
-  const services = input.services ?? createDefaultVaultServices()
+  const services =
+    input.services === undefined
+      ? createDefaultVaultServices()
+      : ensureCliVaultServices(input.services)
   const inboxServices = input.inboxServices ?? createDefaultInboxServices()
   const cli = createVaultCliShell(input.commandName)
 
@@ -46,7 +53,7 @@ export function createVaultCliWithOptions(
 }
 
 export function createVaultCli(
-  services: VaultServices = createDefaultVaultServices(),
+  services: VaultServices | CliVaultServices = createDefaultVaultServices(),
   inboxServices: InboxServices = createDefaultInboxServices(),
 ): Cli.Cli {
   return createVaultCliWithOptions({

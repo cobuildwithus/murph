@@ -21,7 +21,7 @@ vi.mock('@murphai/assistantd/client', () => ({
     assistantdClientMocks.resolveAssistantDaemonClientConfig,
 }))
 
-vi.mock('@murphai/assistant-engine/assistant-runtime', () => ({
+vi.mock('@murphai/operator-config/text/shared', () => ({
   normalizeNullableString: assistantRuntimeMocks.normalizeNullableString,
 }))
 
