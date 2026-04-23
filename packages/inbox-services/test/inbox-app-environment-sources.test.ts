@@ -202,9 +202,6 @@ function createInboxRuntimeModule(): InboxRuntimeModule {
     createEmailPollConnector() {
       return createPollConnector('email', 'email:primary', false)
     },
-    createLinqWebhookConnector() {
-      return createPollConnector('linq', 'linq:primary', true)
-    },
     createTelegramBotApiPollDriver() {
       return createTelegramDriver()
     },

@@ -212,9 +212,6 @@ function createInboxRuntimeModule(runtime: RuntimeStore): InboxRuntimeModule {
     createEmailPollConnector() {
       throw new Error('createEmailPollConnector not used in promotions tests')
     },
-    createLinqWebhookConnector() {
-      throw new Error('createLinqWebhookConnector not used in promotions tests')
-    },
     createTelegramBotApiPollDriver() {
       throw new Error('createTelegramBotApiPollDriver not used in promotions tests')
     },

@@ -113,9 +113,6 @@ function createInboxModule(
     createEmailPollConnector() {
       throw new Error('unused')
     },
-    createLinqWebhookConnector() {
-      throw new Error('unused')
-    },
     createTelegramBotApiPollDriver() {
       return createTelegramDriver()
     },

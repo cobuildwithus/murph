@@ -63,11 +63,7 @@ test('instantiateConnector fails closed for unsupported Linq connectors before l
           },
         },
         async loadInbox() {
-          return createStubInboxRuntimeModule({
-            createLinqWebhookConnector: () => {
-              throw new Error('unreachable')
-            },
-          })
+          return createStubInboxRuntimeModule()
         },
         async loadTelegramDriver() {
           throw new Error('unreachable')
@@ -298,13 +294,6 @@ function createStubInboxRuntimeModule(
       return createStubPollConnector({
         id: input.id ?? 'email:default',
         source: 'email',
-        accountId: input.accountId ?? null,
-      })
-    },
-    createLinqWebhookConnector(input) {
-      return createStubPollConnector({
-        id: input.id ?? 'linq:default',
-        source: 'linq',
         accountId: input.accountId ?? null,
       })
     },

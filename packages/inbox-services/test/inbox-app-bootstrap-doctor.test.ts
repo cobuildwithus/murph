@@ -226,9 +226,6 @@ function createInboxRuntimeModule(
     createEmailPollConnector() {
       throw new Error('not used in bootstrap tests')
     },
-    createLinqWebhookConnector() {
-      throw new Error('not used in bootstrap tests')
-    },
     createTelegramBotApiPollDriver() {
       throw new Error('not used in bootstrap tests')
     },

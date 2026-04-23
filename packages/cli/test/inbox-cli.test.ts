@@ -365,28 +365,6 @@ function createFakeInboxRuntimeModule(input?: {
         async close() {},
       }
     },
-    createLinqWebhookConnector(options: {
-      id?: string
-      accountId?: string | null
-    }) {
-      return {
-        id: options.id ?? 'linq:default',
-        source: 'linq',
-        accountId: options.accountId ?? 'default',
-        kind: 'poll' as const,
-        capabilities: {
-          attachments: true,
-          backfill: false,
-          watch: true,
-          webhooks: true,
-        },
-        async backfill() {
-          return null
-        },
-        async watch() {},
-        async close() {},
-      }
-    },
     createTelegramBotApiPollDriver() {
       return createFakeTelegramDriver()
     },

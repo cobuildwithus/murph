@@ -222,15 +222,6 @@ export interface InboxRuntimeModule {
     backfillLimit?: number
     pollIntervalMs?: number
   }): PollConnector
-  createLinqWebhookConnector(input: {
-    id?: string
-    accountId?: string | null
-    host?: string
-    path?: string
-    port?: number
-    webhookSecret: string
-    downloadAttachments?: boolean
-  }): PollConnector
   createTelegramBotApiPollDriver(input: {
     token: string
     allowedUpdates?: string[] | null

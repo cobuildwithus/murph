@@ -54,7 +54,6 @@ vi.mock('../src/runtime-import.ts', () => ({
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 import { createInboxAppEnvironment } from '../src/inbox-app/environment.ts'
-import { describeLinqConnectorEndpoint } from '../src/inbox-app/linq-endpoint.ts'
 import type {
   EmailDriver,
   InboxConnectorConfig,
@@ -106,29 +105,6 @@ beforeEach(() => {
   loadRuntimeModuleMock.mockImplementation(async (specifier: string) => ({
     specifier,
   }))
-})
-
-test('describeLinqConnectorEndpoint covers both configured and default endpoint branches', () => {
-  assert.deepEqual(describeLinqConnectorEndpoint({ options: {} }), {
-    host: '0.0.0.0',
-    path: '/linq-webhook',
-    port: 8789,
-  })
-
-  assert.deepEqual(
-    describeLinqConnectorEndpoint({
-      options: {
-        linqWebhookHost: '127.0.0.1',
-        linqWebhookPath: '/custom-hook',
-        linqWebhookPort: 9001,
-      },
-    }),
-    {
-      host: '127.0.0.1',
-      path: '/custom-hook',
-      port: 9001,
-    },
-  )
 })
 
 test('default helper methods expose live process values and the no-op auto-reply default', async () => {
