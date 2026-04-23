@@ -55,6 +55,7 @@ export const exportPackManifestSchema = z
 
 type ExportPackManifest = z.infer<typeof exportPackManifestSchema>
 const EXPORTS_ROOT = 'exports/packs'
+const LEGACY_RAW_MANIFEST_BASENAME = 'manifest.json'
 
 let queryRuntimePromise: Promise<QueryRuntimeModule> | null = null
 
@@ -163,8 +164,59 @@ function resolveAssessmentRawFile(record: AssessmentEntity) {
   return rawFile
 }
 
-function resolveAssessmentManifestFile(record: AssessmentEntity) {
-  return path.posix.join(path.posix.dirname(resolveAssessmentRawFile(record)), 'manifest.json')
+function isRawManifestFileName(fileName: string) {
+  return (
+    fileName === LEGACY_RAW_MANIFEST_BASENAME
+    || (fileName.startsWith('manifest.') && fileName.endsWith('.json'))
+  )
+}
+
+async function resolveStoredRawManifestFile(
+  vaultRoot: string,
+  rawDirectory: string,
+) {
+  const absoluteDirectory = await resolveVaultRelativePath(vaultRoot, rawDirectory)
+  let entries: Dirent[]
+
+  try {
+    entries = await readdir(absoluteDirectory, { withFileTypes: true })
+  } catch (error) {
+    throw new VaultCliError(
+      'manifest_missing',
+      `Raw import directory "${rawDirectory}" is missing from the vault.`,
+      {
+        cause: error instanceof Error ? error.message : String(error),
+      },
+    )
+  }
+
+  const manifestNames = entries
+    .filter((entry) => entry.isFile() && isRawManifestFileName(entry.name))
+    .map((entry) => entry.name)
+    .sort((left, right) => left.localeCompare(right))
+
+  const manifestName =
+    manifestNames.find((name) => name === LEGACY_RAW_MANIFEST_BASENAME)
+    ?? manifestNames.at(-1)
+
+  if (!manifestName) {
+    throw new VaultCliError(
+      'manifest_missing',
+      `Raw import directory "${rawDirectory}" does not contain a raw import manifest.`,
+    )
+  }
+
+  return path.posix.join(rawDirectory, manifestName)
+}
+
+async function resolveAssessmentManifestFile(
+  vaultRoot: string,
+  record: AssessmentEntity,
+) {
+  return resolveStoredRawManifestFile(
+    vaultRoot,
+    path.posix.dirname(resolveAssessmentRawFile(record)),
+  )
 }
 
 function toExportPackSummary(
@@ -421,7 +473,7 @@ export async function pruneStoredExportPack(vaultRoot: string, packId: string) {
 
 export async function showAssessmentManifest(vaultRoot: string, assessmentId: string) {
   const record = await loadAssessmentRecord(vaultRoot, assessmentId)
-  const manifestFile = resolveAssessmentManifestFile(record)
+  const manifestFile = await resolveAssessmentManifestFile(vaultRoot, record)
   const manifest = await readJsonRelativeFile(
     vaultRoot,
     manifestFile,

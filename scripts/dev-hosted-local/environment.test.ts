@@ -17,6 +17,7 @@ import type {
 } from "./types.ts";
 
 const localConfig: HostedLocalDevConfig = {
+  forceResetLocalDatabase: false,
   skipWeb: false,
   skipPrismaMigrate: false,
   skipStripeListen: false,

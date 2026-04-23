@@ -3,6 +3,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import type { HostedLocalDevConfig } from "../../../../scripts/dev-hosted-local/types.ts";
 
 const hostedLocalDevConfig: HostedLocalDevConfig = {
+  forceResetLocalDatabase: false,
   skipPrismaMigrate: true,
   skipStripeListen: true,
   skipWeb: false,

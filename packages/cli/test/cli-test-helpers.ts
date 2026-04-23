@@ -409,6 +409,26 @@ export function commandOutputFromError(error: unknown): string | null {
   return decodeCommandOutput(maybeOutput.stdout) ?? decodeCommandOutput(maybeOutput.stderr)
 }
 
+export function retryableCliRuntimeArtifactOutputFromError(
+  error: unknown,
+): string | null {
+  const output = commandOutputFromError(error)
+  if (output !== null) {
+    return output
+  }
+
+  if (error instanceof Error) {
+    return error.message
+  }
+
+  if (!error || typeof error !== 'object' || !('message' in error)) {
+    return null
+  }
+
+  const message = (error as { message?: unknown }).message
+  return typeof message === 'string' ? message : null
+}
+
 export async function ensureCliRuntimeArtifacts(): Promise<void> {
   return ensureCliRuntimeArtifactsWithOptions()
 }
@@ -874,7 +894,9 @@ async function waitForCliRuntimeArtifacts(): Promise<boolean> {
 }
 
 function shouldRetryCliExecution(error: unknown): boolean {
-  return isRetryableCliRuntimeArtifactError(commandOutputFromError(error))
+  return isRetryableCliRuntimeArtifactError(
+    retryableCliRuntimeArtifactOutputFromError(error),
+  )
 }
 
 function shouldRetryCliEnvelope(result: CliEnvelope<unknown>): boolean {

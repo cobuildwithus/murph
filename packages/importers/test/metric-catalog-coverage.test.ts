@@ -1,0 +1,103 @@
+import assert from "node:assert/strict";
+
+import { test } from "vitest";
+
+import {
+  normalizeWearableMetricValue,
+  resolveWearableCanonicalMetricKey,
+  resolveWearableMetricCatalogEntry,
+  resolveWearableMetricTolerance,
+} from "../src/device-providers/metric-catalog.ts";
+
+test("metric catalog resolves aliases and returns catalog metadata", () => {
+  assert.equal(resolveWearableCanonicalMetricKey(" active_calories "), "activeCalories");
+  assert.equal(resolveWearableCanonicalMetricKey("temperature-deviation"), "temperatureDeviation");
+  assert.equal(resolveWearableCanonicalMetricKey("not-a-real-metric"), null);
+
+  assert.deepEqual(resolveWearableMetricCatalogEntry("session_minutes"), {
+    aliases: ["duration", "session_minutes"],
+    defaultRecordKind: "activity_session",
+    defaultUnit: "minutes",
+    key: "sessionMinutes",
+    tolerance: 5,
+  });
+  assert.equal(resolveWearableMetricCatalogEntry("not-a-real-metric"), null);
+  assert.equal(resolveWearableMetricTolerance("weight"), 0.2);
+  assert.equal(resolveWearableMetricTolerance("not-a-real-metric"), 0);
+});
+
+test("metric catalog normalizes unit conversions across importer-supported branches", () => {
+  assert.equal(normalizeWearableMetricValue("active_calories", 90, "kcal")?.value, 90);
+  assert.equal(normalizeWearableMetricValue("active_calories", 90, null)?.value, 90);
+  assert.equal(normalizeWearableMetricValue("active_calories", 90, "joules"), null);
+
+  assert.deepEqual(normalizeWearableMetricValue("distance", 1000, "meter"), {
+    key: "distanceKm",
+    unit: "km",
+    value: 1,
+  });
+  assert.deepEqual(normalizeWearableMetricValue("distance", 2, "miles"), {
+    key: "distanceKm",
+    unit: "km",
+    value: 3.2187,
+  });
+  assert.deepEqual(normalizeWearableMetricValue("distance", 5, "km"), {
+    key: "distanceKm",
+    unit: "km",
+    value: 5,
+  });
+
+  assert.deepEqual(normalizeWearableMetricValue("body_temperature", 98.6, "fahrenheit"), {
+    key: "temperature",
+    unit: "celsius",
+    value: 37,
+  });
+  assert.deepEqual(normalizeWearableMetricValue("temperature_delta", 0.4, "celsius"), {
+    key: "temperatureDeviation",
+    unit: "celsius",
+    value: 0.4,
+  });
+
+  assert.deepEqual(normalizeWearableMetricValue("weight", 180, "pounds"), {
+    key: "weightKg",
+    unit: "kg",
+    value: 81.6466,
+  });
+  assert.deepEqual(normalizeWearableMetricValue("weight", 70, null), {
+    key: "weightKg",
+    unit: "kg",
+    value: 70,
+  });
+  assert.equal(normalizeWearableMetricValue("weight", 70, "stone"), null);
+
+  assert.deepEqual(normalizeWearableMetricValue("altitude_gain", 1.5, "kilometers"), {
+    key: "totalElevationGainMeters",
+    unit: "meter",
+    value: 1500,
+  });
+  assert.deepEqual(normalizeWearableMetricValue("altitude_change", 10, "feet"), {
+    key: "altitudeChangeMeters",
+    unit: "meter",
+    value: 3.048,
+  });
+  assert.deepEqual(normalizeWearableMetricValue("altitude_change", 1, "miles"), {
+    key: "altitudeChangeMeters",
+    unit: "meter",
+    value: 1609.344,
+  });
+  assert.deepEqual(normalizeWearableMetricValue("altitude_change", 12, "yards"), {
+    key: "altitudeChangeMeters",
+    unit: "meter",
+    value: 12,
+  });
+});
+
+test("metric catalog rejects unsupported metrics and non-finite values", () => {
+  assert.equal(normalizeWearableMetricValue("unknown_metric", 10, "count"), null);
+  assert.equal(normalizeWearableMetricValue("steps", Number.NaN, "count"), null);
+  assert.deepEqual(normalizeWearableMetricValue("steps", 1234, "count"), {
+    key: "steps",
+    unit: "count",
+    value: 1234,
+  });
+});

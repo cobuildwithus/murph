@@ -61,7 +61,7 @@ test("HistoryPage renders recent timeline entries", () => {
 test("ExperimentsPage renders the public library with private browser-vault overlays", () => {
   const markup = renderToStaticMarkup(createElement(ExperimentsPage));
 
-  assert.match(markup, /Library · 4 experiments/);
+  assert.match(markup, /Library · 5 experiments/);
   assert.match(markup, /Browse the public library\. When Murph has browser-vault data, your private run state appears on the matching cards\./);
   assert.match(markup, /Finnish Dry Sauna/);
   assert.match(markup, /Morning walk/);
@@ -83,7 +83,7 @@ test("ExperimentsPage keeps the public library visible when browser-vault is una
 
   const markup = renderToStaticMarkup(createElement(ExperimentsPage));
 
-  assert.match(markup, /Library · 4 experiments/);
+  assert.match(markup, /Library · 5 experiments/);
   assert.match(markup, /Finnish Dry Sauna/);
   assert.match(markup, /Red-Light Glasses Before Bed/);
   const featuredMarkup = markup.split("Browse all").at(0) ?? markup;

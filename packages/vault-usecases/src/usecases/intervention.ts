@@ -121,7 +121,12 @@ export async function addInterventionRecord(
     ...(protocolId
       ? {
           protocolId,
-          relatedIds: [protocolId],
+          links: [
+            {
+              type: 'related_to',
+              targetId: protocolId,
+            },
+          ],
         }
       : {}),
     note,

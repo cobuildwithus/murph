@@ -232,7 +232,15 @@ export async function startHostedLocalDevStack(input: {
 
     if (!config.skipPrismaMigrate) {
       if (shouldSyncLocalDatabaseSchema(runtimeEnv.DATABASE_URL)) {
-        await runCommand("pnpm", ["--dir", "apps/web", "exec", "prisma", "db", "push", "--accept-data-loss"], {
+        await runCommand("pnpm", [
+          "--dir",
+          "apps/web",
+          "exec",
+          "prisma",
+          "db",
+          "push",
+          config.forceResetLocalDatabase ? "--force-reset" : "--accept-data-loss",
+        ], {
           cwd: repoRoot,
           env: runtimeEnv,
           name: "setup",

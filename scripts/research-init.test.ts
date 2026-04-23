@@ -871,7 +871,7 @@ exit 17
       expect(readFileSync(chatUrlPath, "utf8")).toBe("https://chatgpt.com/c/test-thread-123\n");
       expect(existsSync(threadExportPath)).toBe(true);
       expect(readFileSync(threadExportPath, "utf8")).toContain("Recovered final thread snapshot");
-      expect(readFileSync(threadExportPath, "utf8")).toContain("http://127.0.0.1:9224");
+      expect(readFileSync(threadExportPath, "utf8")).toContain("http://127.0.0.1:9448");
       expect(existsSync(wakeThreadPath)).toBe(true);
       expect(existsSync(wakeStatusPath)).toBe(true);
       expect(readFileSync(responsePath, "utf8")).toContain("Recovered final thread snapshot");
@@ -1516,7 +1516,9 @@ function assertResearchReviewGptSupportFiles(outDir: string) {
 
   const workProfileConfig = readFileSync(workProfileConfigPath, "utf8");
   expect(workProfileConfig).toContain('. "${script_dir}/review-gpt-research.config.sh"');
-  expect(workProfileConfig).toContain('managed_browser_port="${RESEARCH_MANAGED_BROWSER_PORT:-9224}"');
+  expect(workProfileConfig).toContain('default_browser_binary="/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"');
+  expect(workProfileConfig).toContain('default_browser_user_data_dir="$HOME/Library/Application Support/MurphReviewGPT/Eragon"');
+  expect(workProfileConfig).toContain('managed_browser_port="${RESEARCH_MANAGED_BROWSER_PORT:-9448}"');
   expect(workProfileConfig).toContain('research_thread_export_browser_endpoint="${RESEARCH_THREAD_EXPORT_BROWSER_ENDPOINT:-http://127.0.0.1:${managed_browser_port}}"');
   expect(workProfileConfig).not.toContain('scripts/review-gpt.config.sh');
 

@@ -9,7 +9,12 @@ import {
 } from '../commands/query-record-command-helpers.js'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { pathSchema } from '@murphai/operator-config/vault-cli-contracts'
-import { asListEnvelope, readRawImportManifest, toListEntity } from './shared.js'
+import {
+  asListEnvelope,
+  readRawImportManifest,
+  resolveRawImportManifestFile,
+  toListEntity,
+} from './shared.js'
 import {
   relativePathEntries,
   relativePathStrings,
@@ -38,7 +43,10 @@ function uniqueStrings(values: readonly string[]): string[] {
   return [...new Set(values.map((value) => value.trim()).filter((value) => value.length > 0))]
 }
 
-function resolveManifestFile(record: QueryRecord): string {
+async function resolveManifestFile(
+  vault: string,
+  record: QueryRecord,
+): Promise<string> {
   const workoutAttributes = isJsonObject(record.attributes.workout) ? record.attributes.workout : null
   const rawRefs = uniqueStrings([
     ...relativePathEntries(record.attributes.attachments),
@@ -63,7 +71,7 @@ function resolveManifestFile(record: QueryRecord): string {
     )
   }
 
-  return path.posix.join(directories[0]!, 'manifest.json')
+  return resolveRawImportManifestFile(vault, directories[0]!)
 }
 
 async function loadTrackedWorkoutRecord(
@@ -124,7 +132,7 @@ async function showTrackedWorkoutManifest(
   label: string,
 ) {
   const record = await loadTrackedWorkoutRecord(vault, lookup, allowedKinds, label)
-  const manifestFile = resolveManifestFile(record)
+  const manifestFile = await resolveManifestFile(vault, record)
   const manifest = await readRawImportManifest(vault, manifestFile)
 
   return {

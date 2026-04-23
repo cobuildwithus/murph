@@ -461,7 +461,9 @@ export async function resolveInitialSetupWizardWearables(
 ): Promise<SetupWearable[]> {
   const preferences = await showWearablePreferences(vault)
 
-  return normalizeSetupWearables(preferences.wearablePreferences.desiredProviders)
+  return normalizeSetupWearables(
+    preferences.wearablePreferences?.desiredProviders,
+  )
 }
 
 async function readInitialSetupWizardAutomationState(vault: string) {

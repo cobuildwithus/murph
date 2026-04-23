@@ -174,7 +174,7 @@ describe('assistant session resolution', () => {
       sandbox: null,
       approvalPolicy: null,
       oss: false,
-      presetId: 'openai',
+      presetId: null,
       profile: null,
       baseUrl: 'https://gateway.example.com/v1',
       apiKeyEnv: 'OPENAI_API_KEY',

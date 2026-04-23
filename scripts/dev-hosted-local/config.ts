@@ -12,6 +12,7 @@ export function resolveHostedLocalDevConfig(
   env: NodeJS.ProcessEnv,
 ): HostedLocalDevConfig {
   return {
+    forceResetLocalDatabase: env.MURPH_DEV_FORCE_RESET_LOCAL_DB === "1",
     skipPrismaMigrate: env.MURPH_DEV_SKIP_PRISMA_MIGRATE === "1",
     skipStripeListen: env.MURPH_DEV_SKIP_STRIPE_LISTEN === "1",
     skipWeb: env.MURPH_DEV_SKIP_WEB === "1",
@@ -61,6 +62,7 @@ export function printHelp(): void {
       "  pnpm dev",
       "",
       "Optional environment overrides:",
+      "  MURPH_DEV_FORCE_RESET_LOCAL_DB=1    Reset a local loopback Postgres database before `prisma db push` (used by hosted-local e2e)",
       "  MURPH_DEV_SKIP_VERCEL_PULL=1        Reuse the current shell env instead of pulling Vercel development env",
       "  MURPH_DEV_SKIP_PRISMA_MIGRATE=1     Skip prisma migrate deploy before startup",
       "  MURPH_DEV_SKIP_STRIPE_LISTEN=1      Skip the auto-launched `stripe listen` forwarder for hosted onboarding webhooks",

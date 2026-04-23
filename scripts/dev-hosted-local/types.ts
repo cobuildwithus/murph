@@ -1,4 +1,5 @@
 export interface HostedLocalDevConfig {
+  forceResetLocalDatabase: boolean;
   skipPrismaMigrate: boolean;
   skipStripeListen: boolean;
   skipWeb: boolean;

@@ -18,7 +18,12 @@ import {
   deleteEventRecord,
   editEventRecord,
 } from './event-record-mutations.js'
-import { asListEnvelope, readRawImportManifest, toListEntity } from './shared.js'
+import {
+  asListEnvelope,
+  readRawImportManifest,
+  resolveRawImportManifestFile,
+  toListEntity,
+} from './shared.js'
 
 type DocumentMealKind = 'document' | 'meal'
 
@@ -74,7 +79,11 @@ function resolveManifestArtifactPaths(record: QueryRecord): string[] {
   ])
 }
 
-function resolveManifestFile(record: QueryRecord, expectedKind: DocumentMealKind): string {
+async function resolveManifestFile(
+  vault: string,
+  record: QueryRecord,
+  expectedKind: DocumentMealKind,
+): Promise<string> {
   const artifactPaths = resolveManifestArtifactPaths(record)
 
   if (artifactPaths.length === 0) {
@@ -98,7 +107,7 @@ function resolveManifestFile(record: QueryRecord, expectedKind: DocumentMealKind
     )
   }
 
-  return path.posix.join(directories[0], 'manifest.json')
+  return resolveRawImportManifestFile(vault, directories[0]!)
 }
 
 async function loadOwnedRecord(
@@ -167,7 +176,7 @@ async function showOwnedManifest(
   expectedKind: DocumentMealKind,
 ) {
   const record = await loadOwnedRecord(vault, lookup, expectedKind)
-  const manifestFile = resolveManifestFile(record, expectedKind)
+  const manifestFile = await resolveManifestFile(vault, record, expectedKind)
   const manifest = await readRawImportManifest(vault, manifestFile)
 
   return {

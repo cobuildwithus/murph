@@ -5,12 +5,12 @@ import { DEVICE_SYNC_DB_RELATIVE_PATH } from "@murphai/runtime-state/node/runtim
 import {
   createDeviceSyncService,
   SqliteDeviceSyncStore,
-} from "@murphai/device-syncd";
+} from "@murphai/device-syncd/service";
 
 import type {
   CreateDeviceSyncServiceInput,
   DeviceSyncService,
-} from "@murphai/device-syncd";
+} from "@murphai/device-syncd/service";
 
 const storeByService = new WeakMap<DeviceSyncService, SqliteDeviceSyncStore>();
 

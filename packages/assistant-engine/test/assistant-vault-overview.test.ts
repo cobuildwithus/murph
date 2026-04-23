@@ -235,9 +235,7 @@ it('builds a navigation-only overview from canonical, raw, and source-root cover
   expect(overview).toContain(
     'Scheduled assistant automations are present.',
   )
-  expect(overview).toContain(
-    'Raw meal import coverage includes 2 manifests under `raw/meals`.',
-  )
+  expect(overview).not.toContain('Raw meal import coverage includes')
   expect(overview).toContain(
     'Bank coverage includes 1 protocol record, including 1 supplement.',
   )

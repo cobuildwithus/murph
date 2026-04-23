@@ -181,7 +181,7 @@ test('canonical measurement capture and workout unit preferences round-trip thro
   assert.equal(measurement.occurredAt, '2026-03-12T19:00:00.000Z')
   assert.match(
     measurement.manifestFile ?? '',
-    /^raw\/measurements\/2026\/03\/evt[_A-Z0-9]+\/manifest\.json$/u,
+    /^raw\/measurements\/2026\/03\/evt[_A-Z0-9]+\/manifest(?:\.[^/]+)*\.json$/u,
   )
   assert.equal(measurement.note, 'Post-cut check-in.')
   assert.deepEqual(measurement.measurements, [

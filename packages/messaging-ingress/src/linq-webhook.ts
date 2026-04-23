@@ -553,9 +553,9 @@ function readLinqWebhookHeaderValues(
   const values: string[] = [];
 
   if (headers instanceof Headers) {
-    for (const [candidateName, value] of headers.entries()) {
+    headers.forEach((value, candidateName) => {
       if (candidateName.toLowerCase() !== expectedHeader) {
-        continue;
+        return;
       }
 
       rawValueCount += 1;
@@ -563,7 +563,7 @@ function readLinqWebhookHeaderValues(
       if (normalized) {
         values.push(normalized);
       }
-    }
+    });
 
     return {
       rawValueCount,

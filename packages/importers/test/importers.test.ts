@@ -631,7 +631,10 @@ test("importDocument with the real core runtime writes an immutable raw manifest
     { corePort: coreRuntime },
   );
 
-  assert.match(result.manifestPath, /^raw\/documents\/.+\/manifest\.json$/u);
+  assert.match(
+    result.manifestPath,
+    new RegExp(String.raw`^raw/documents/.+/manifest\.${result.documentId}\.[^/]+\.json$`, "u"),
+  );
 
   const manifest = JSON.parse(
     await readFile(join(vaultRoot, result.manifestPath), "utf8"),
@@ -681,7 +684,13 @@ test("importCsvSamples with the real core runtime writes a batch manifest with r
   assert.equal(result.lookupIds.length, 2);
   assert.equal(result.imports.length, 1);
   assert.match(String(result.imports[0]?.transformId), /^xfm_/u);
-  assert.match(String(result.imports[0]?.manifestPath), /^raw\/samples\/heart_rate\/.+\/manifest\.json$/u);
+  assert.match(
+    String(result.imports[0]?.manifestPath),
+    new RegExp(
+      String.raw`^raw/samples/heart_rate/.+/manifest\.${String(result.imports[0]?.transformId)}\.[^/]+\.json$`,
+      "u",
+    ),
+  );
 
   const manifest = JSON.parse(
     await readFile(join(vaultRoot, result.imports[0]?.manifestPath ?? ""), "utf8"),

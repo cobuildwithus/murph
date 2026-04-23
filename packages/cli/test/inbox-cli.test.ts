@@ -300,25 +300,32 @@ function createFakeInboxRuntimeModule(input?: {
     }): string
   }
 
+  async function createPipeline(): Promise<InboxPipeline> {
+    return {
+      runtime,
+      async processCapture() {
+        return {
+          captureId: 'capture-created',
+          createdAt: '2026-03-13T08:00:03.000Z',
+          deduped: false,
+          envelopePath: 'raw/inbox/telegram/bot/capture-created/envelope.json',
+          eventId: 'event-created',
+        }
+      },
+      close() {},
+    }
+  }
+
   return {
     async ensureInboxVault() {},
     async openInboxRuntime() {
       return runtime
     },
     async createInboxPipeline(): Promise<InboxPipeline> {
-      return {
-        runtime,
-        async processCapture() {
-          return {
-            captureId: 'capture-created',
-            createdAt: '2026-03-13T08:00:03.000Z',
-            deduped: false,
-            envelopePath: 'raw/inbox/telegram/bot/capture-created/envelope.json',
-            eventId: 'event-created',
-          }
-        },
-        close() {},
-      }
+      return await createPipeline()
+    },
+    async createParsedInboxPipeline(): Promise<InboxPipeline> {
+      return await createPipeline()
     },
     createTelegramPollConnector(options: {
       id?: string
@@ -373,6 +380,11 @@ function createFakeInboxRuntimeModule(input?: {
     },
     async rebuildRuntimeFromVault() {},
     async runInboxDaemon() {},
+    async runPollConnectorBackfill() {
+      return {
+        cursor: null,
+      }
+    },
     async runInboxDaemonWithParsers() {},
   }
 }

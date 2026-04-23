@@ -1117,14 +1117,46 @@ export function buildResearchWorkProfileConfig() {
   return `#!/usr/bin/env bash
 
 script_dir="$(cd "$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
+workspace_dir="$(cd "\${script_dir}/.." && pwd)"
 
 # shellcheck source=/dev/null
 . "\${script_dir}/review-gpt-research.config.sh"
 
-browser_binary_path="\${browser_binary_path:-/Applications/Google Chrome.app/Contents/MacOS/Google Chrome}"
-managed_browser_user_data_dir="\${RESEARCH_MANAGED_BROWSER_USER_DATA_DIR:-$HOME/.review-gpt-work/murph-research-chrome}"
+find_repo_dir() {
+  local dir="$1"
+  while [[ "$dir" != "/" ]]; do
+    if [[ -f "$dir/package.json" ]] && grep -q '"name"[[:space:]]*:[[:space:]]*"murph-workspace"' "$dir/package.json"; then
+      printf '%s\\n' "$dir"
+      return 0
+    fi
+    dir="$(dirname "$dir")"
+  done
+  return 1
+}
+
+repo_dir="$(find_repo_dir "\${workspace_dir}")" || repo_dir=""
+default_browser_binary="/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"
+default_browser_user_data_dir="$HOME/Library/Application Support/MurphReviewGPT/Eragon"
+profile_helper=""
+
+if [[ -n "\${repo_dir}" ]]; then
+  profile_helper="\${repo_dir}/scripts/review-gpt-browser-profile.sh"
+  if [[ -x "\${profile_helper}" ]]; then
+    eragon_browser_binary="$("\${profile_helper}" browser-binary eragon 2>/dev/null || true)"
+    eragon_user_data_dir="$("\${profile_helper}" user-data-dir eragon 2>/dev/null || true)"
+    if [[ -n "\${eragon_browser_binary}" ]]; then
+      default_browser_binary="\${eragon_browser_binary}"
+    fi
+    if [[ -n "\${eragon_user_data_dir}" ]]; then
+      default_browser_user_data_dir="\${eragon_user_data_dir}"
+    fi
+  fi
+fi
+
+browser_binary_path="\${browser_binary_path:-\${default_browser_binary}}"
+managed_browser_user_data_dir="\${RESEARCH_MANAGED_BROWSER_USER_DATA_DIR:-\${default_browser_user_data_dir}}"
 managed_browser_profile="\${RESEARCH_MANAGED_BROWSER_PROFILE:-Default}"
-managed_browser_port="\${RESEARCH_MANAGED_BROWSER_PORT:-9224}"
+managed_browser_port="\${RESEARCH_MANAGED_BROWSER_PORT:-9448}"
 research_thread_export_browser_endpoint="\${RESEARCH_THREAD_EXPORT_BROWSER_ENDPOINT:-http://127.0.0.1:\${managed_browser_port}}"
 `;
 }
