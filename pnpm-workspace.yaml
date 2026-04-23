@@ -12,14 +12,7 @@ engineStrict: true
 managePackageManagerVersions: true
 minimumReleaseAge: 1440
 minimumReleaseAgeExclude:
-  - '@cobuild/review-gpt@0.5.74'
-  - '@cobuild/review-gpt@0.5.73'
-  - '@cobuild/review-gpt@0.5.72'
-  - '@cobuild/review-gpt@0.5.71'
-  - '@cobuild/review-gpt@0.5.70'
-  - '@cobuild/review-gpt@0.5.69'
-  - '@cobuild/review-gpt@0.5.66'
-  - '@cobuild/review-gpt@0.5.65'
+  - '@cobuild/review-gpt@0.5.75'
   - next@16.2.2
   - '@next/env@16.2.2'
   - '@next/swc-darwin-arm64@16.2.2'

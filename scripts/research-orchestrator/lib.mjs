@@ -996,6 +996,7 @@ script_dir="$(cd "$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
 workspace_dir="$(cd "\${script_dir}/.." && pwd)"
 
 package_script="\${workspace_dir}/scripts/package-research-context.sh"
+repomix_attachment_format="\${RESEARCH_REPOMIX_ATTACHMENT_FORMAT:-none}"
 research_thread_export_browser_endpoint="\${RESEARCH_THREAD_EXPORT_BROWSER_ENDPOINT:-}"
 `;
 }

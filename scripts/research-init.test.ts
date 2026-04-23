@@ -1195,6 +1195,7 @@ function assertResearchReviewGptSupportFiles(outDir: string) {
 
   const researchConfig = readFileSync(configPath, "utf8");
   expect(researchConfig).toContain('package_script="${workspace_dir}/scripts/package-research-context.sh"');
+  expect(researchConfig).toContain('repomix_attachment_format="${RESEARCH_REPOMIX_ATTACHMENT_FORMAT:-none}"');
   expect(researchConfig).toContain('research_thread_export_browser_endpoint="${RESEARCH_THREAD_EXPORT_BROWSER_ENDPOINT:-}"');
   expect(researchConfig).not.toContain('scripts/review-gpt.config.sh');
 
