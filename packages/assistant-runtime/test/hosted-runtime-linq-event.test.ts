@@ -12,6 +12,7 @@ import {
 const originalFetch = globalThis.fetch;
 const originalLinqApiBaseUrl = process.env.LINQ_API_BASE_URL;
 const originalLinqApiToken = process.env.LINQ_API_TOKEN;
+const originalLinqAttachmentCdnBaseUrl = process.env.LINQ_ATTACHMENT_CDN_BASE_URL;
 
 function restoreFetch() {
   Object.defineProperty(globalThis, "fetch", {
@@ -44,6 +45,12 @@ afterEach(() => {
   } else {
     process.env.LINQ_API_TOKEN = originalLinqApiToken;
   }
+
+  if (originalLinqAttachmentCdnBaseUrl === undefined) {
+    delete process.env.LINQ_ATTACHMENT_CDN_BASE_URL;
+  } else {
+    process.env.LINQ_ATTACHMENT_CDN_BASE_URL = originalLinqAttachmentCdnBaseUrl;
+  }
 });
 
 describe("normalizeHostedLinqAttachmentUrl", () => {
@@ -56,6 +63,36 @@ describe("normalizeHostedLinqAttachmentUrl", () => {
     assert.equal(normalizeHostedLinqAttachmentUrl("http://cdn.linqapp.com/file"), null);
     assert.equal(normalizeHostedLinqAttachmentUrl("https://example.com/file"), null);
     assert.equal(normalizeHostedLinqAttachmentUrl(null), null);
+  });
+
+  it("accepts an explicit local CDN base override for hosted-local attachment proof", () => {
+    process.env.LINQ_ATTACHMENT_CDN_BASE_URL = "http://127.0.0.1:4011/attachment-downloads";
+
+    assert.equal(
+      normalizeHostedLinqAttachmentUrl("http://127.0.0.1:4011/attachment-downloads/att_voice.wav"),
+      "http://127.0.0.1:4011/attachment-downloads/att_voice.wav",
+    );
+    assert.equal(
+      normalizeHostedLinqAttachmentUrl("http://127.0.0.1:4011/other/att_voice.wav"),
+      null,
+    );
+    assert.equal(
+      normalizeHostedLinqAttachmentUrl("https://cdn.linqapp.com/uploads/photo.jpg"),
+      null,
+    );
+  });
+
+  it("ignores non-local CDN override values and keeps the default hosted CDN gate", () => {
+    process.env.LINQ_ATTACHMENT_CDN_BASE_URL = "https://example.com/attachment-downloads";
+
+    assert.equal(
+      normalizeHostedLinqAttachmentUrl("https://example.com/attachment-downloads/att_voice.wav"),
+      null,
+    );
+    assert.equal(
+      normalizeHostedLinqAttachmentUrl("https://cdn.linqapp.com/uploads/photo.jpg"),
+      "https://cdn.linqapp.com/uploads/photo.jpg",
+    );
   });
 });
 
@@ -149,6 +186,91 @@ describe("createHostedLinqAttachmentDownloadDriver", () => {
       type: "voice_memo",
       url: "https://cdn.linqapp.com/files/stale-voice.m4a",
     }, undefined)).resolves.toEqual(Uint8Array.from([4, 5, 6]));
+  });
+
+  it("downloads hosted voice memos from an explicit local CDN override after metadata lookup", async () => {
+    process.env.LINQ_API_BASE_URL = "https://api.linqapp.com/api/partner/v3";
+    process.env.LINQ_API_TOKEN = "linq-token";
+    process.env.LINQ_ATTACHMENT_CDN_BASE_URL = "http://127.0.0.1:4011/attachment-downloads";
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+
+      if (url === "https://api.linqapp.com/api/partner/v3/attachments/att_voice_local") {
+        assert.equal(
+          (init?.headers as Record<string, string> | undefined)?.authorization,
+          "Bearer linq-token",
+        );
+        return new Response(JSON.stringify({
+          download_url: "http://127.0.0.1:4011/attachment-downloads/att_voice_local.wav",
+        }), {
+          status: 200,
+          headers: {
+            "content-type": "application/json",
+          },
+        });
+      }
+
+      if (url === "http://127.0.0.1:4011/attachment-downloads/att_voice_local.wav") {
+        return new Response(Uint8Array.from([10, 11, 12]), { status: 200 });
+      }
+
+      throw new Error(`Unexpected fetch url: ${url}`);
+    });
+    setFetch(fetchMock as typeof globalThis.fetch);
+
+    const driver = createHostedLinqAttachmentDownloadDriver();
+    assert.ok(driver);
+    assert.ok(driver.downloadPart);
+
+    await expect(driver.downloadPart?.({
+      attachmentId: "att_voice_local",
+      mimeType: "audio/wav",
+      type: "voice_memo",
+    }, undefined)).resolves.toEqual(Uint8Array.from([10, 11, 12]));
+  });
+
+  it("accepts trusted local metadata download urls that share the Linq API origin", async () => {
+    process.env.LINQ_API_BASE_URL = "http://host.docker.internal:4011";
+    process.env.LINQ_API_TOKEN = "linq-token";
+    delete process.env.LINQ_ATTACHMENT_CDN_BASE_URL;
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+
+      if (url === "http://host.docker.internal:4011/attachments/att_voice_local_origin") {
+        assert.equal(
+          (init?.headers as Record<string, string> | undefined)?.authorization,
+          "Bearer linq-token",
+        );
+        return new Response(JSON.stringify({
+          download_url:
+            "http://host.docker.internal:4011/attachment-downloads/att_voice_local_origin.wav",
+        }), {
+          status: 200,
+          headers: {
+            "content-type": "application/json",
+          },
+        });
+      }
+
+      if (url === "http://host.docker.internal:4011/attachment-downloads/att_voice_local_origin.wav") {
+        return new Response(Uint8Array.from([13, 14, 15]), { status: 200 });
+      }
+
+      throw new Error(`Unexpected fetch url: ${url}`);
+    });
+    setFetch(fetchMock as typeof globalThis.fetch);
+
+    const driver = createHostedLinqAttachmentDownloadDriver();
+    assert.ok(driver);
+    assert.ok(driver.downloadPart);
+
+    await expect(driver.downloadPart?.({
+      attachmentId: "att_voice_local_origin",
+      mimeType: "audio/wav",
+      type: "voice_memo",
+    }, undefined)).resolves.toEqual(Uint8Array.from([13, 14, 15]));
   });
 
   it("gives hosted voice memo downloads enough time to finish", async () => {

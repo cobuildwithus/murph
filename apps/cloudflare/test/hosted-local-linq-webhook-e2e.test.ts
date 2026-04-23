@@ -1,4 +1,7 @@
 import { createHmac } from "node:crypto";
+import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
@@ -31,12 +34,22 @@ import {
 } from "./helpers/hosted-local-linq-support.js";
 
 const webhookUserId = `member_local_linq_webhook_${Date.now()}`;
+const voiceMemoWebhookUserId = `${webhookUserId}_voice_memo`;
 const linqWebhookSecret = "linq-local-webhook-secret";
+const hostedLinqVoiceMemoTranscript =
+  "You can call me Rocket Man. I want to improve my endurance.";
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
 const localDatabaseUrl = process.env.DATABASE_URL?.trim() || DEFAULT_DATABASE_URL;
 
+interface FakeWhisperFixture {
+  commandPath: string;
+  directory: string;
+  modelPath: string;
+}
+
+let fakeWhisperFixture: FakeWhisperFixture | null = null;
 let linqStub: HostedLocalLinqStub | null = null;
 let scenario: HostedLocalFullStackScenario | null = null;
 
@@ -52,6 +65,10 @@ describe("hosted local Linq webhook e2e", () => {
     scenario = null;
     await linqStub?.stop();
     linqStub = null;
+    if (fakeWhisperFixture) {
+      await rm(fakeWhisperFixture.directory, { force: true, recursive: true });
+      fakeWhisperFixture = null;
+    }
   });
 
   it("routes a signed Linq webhook through apps/web and delivers the follow-up reply", async () => {
@@ -200,6 +217,116 @@ describe("hosted local Linq webhook e2e", () => {
     );
     expect(groupedReplyText).not.toContain("Hey, I'm Murph");
   }, 300_000);
+
+  it("hydrates a metadata-only Linq voice memo through the local attachment API and replies from the transcript", async () => {
+    const whisperFixture = await createFakeWhisperFixture(hostedLinqVoiceMemoTranscript);
+    await startLinqScenario((linq) => ({
+      LINQ_ATTACHMENT_CDN_BASE_URL: linq.attachmentDownloadBaseUrl,
+      WHISPER_COMMAND: whisperFixture.commandPath,
+      WHISPER_MODEL_PATH: whisperFixture.modelPath,
+    }));
+    await requireScenario().seedActiveHostedLinqMember({
+      homePhone: buildLinqHomePhoneNumber(voiceMemoWebhookUserId),
+      memberId: voiceMemoWebhookUserId,
+      memberPhone: buildLinqRecipientPhoneNumber(voiceMemoWebhookUserId),
+    });
+
+    await requireScenario().runWake(buildActivationWake(voiceMemoWebhookUserId), voiceMemoWebhookUserId);
+    await requireScenario().waitForHostedCompletion(voiceMemoWebhookUserId);
+    requireScenario().queueAssistantResponses([
+      buildHostedAssistantNotificationDecisionResponse({
+        privateSummary: "deliver signup welcome",
+        text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
+      }),
+    ]);
+    await requireScenario().runWake(
+      buildHostedLinqSignupWelcomeWake({
+        eventId:
+          `assistant.notification.requested:local:${voiceMemoWebhookUserId}:evt_linq_webhook_voice`,
+        userId: voiceMemoWebhookUserId,
+      }),
+      voiceMemoWebhookUserId,
+    );
+    await requireScenario().waitForHostedCompletion(voiceMemoWebhookUserId);
+    await requireLinqStub().waitForSend({
+      expectedPath: requireLinqStub().createChatPath,
+      matchRequest: requireLinqStub().createCreateChatRequestMatcher(voiceMemoWebhookUserId),
+      scenario: requireScenario(),
+      userId: voiceMemoWebhookUserId,
+    });
+
+    const materializedChatId = requireLinqStub().requireObservedChatId(voiceMemoWebhookUserId);
+    const expectedReplyChatPath = `/chats/${encodeURIComponent(materializedChatId)}/messages`;
+    const outboundCountBeforeReply = requireLinqStub().countObservedSends(expectedReplyChatPath);
+    const attachmentId = `att_voice_${voiceMemoWebhookUserId}`;
+    const expectedAttachmentMetadataPath = `/attachments/${encodeURIComponent(attachmentId)}`;
+    const expectedAttachmentDownloadPath =
+      `/attachment-downloads/${encodeURIComponent(attachmentId)}.wav`;
+    const attachmentMetadataCountBeforeReply = requireLinqStub().countObservedRequests({
+      expectedMethod: "GET",
+      expectedPath: expectedAttachmentMetadataPath,
+    });
+    const attachmentDownloadCountBeforeReply = requireLinqStub().countObservedRequests({
+      expectedMethod: "GET",
+      expectedPath: expectedAttachmentDownloadPath,
+    });
+    const assistantProviderCountBeforeReply = requireScenario().assistantProviderRequests.length;
+    const webhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
+      voiceMemoWebhookUserId,
+      materializedChatId,
+      {
+        eventId: `evt_voice_memo_${voiceMemoWebhookUserId}`,
+        messageId: `msg_voice_memo_${voiceMemoWebhookUserId}`,
+        parts: [
+          {
+            attachmentId,
+            fileName: `${attachmentId}.wav`,
+            mimeType: "audio/wav",
+            type: "voice_memo",
+          },
+        ],
+      },
+    ));
+    expect(webhookResponse.status).toBe(202);
+    await expect(webhookResponse.json()).resolves.toMatchObject({
+      ok: true,
+      reason: "wake-appended-active-member",
+    });
+
+    requireScenario().queueAssistantResponses([HOSTED_LINQ_ROCKET_MAN_ASSISTANT_REPLY_TEXT]);
+    await requireScenario().waitForLatestPendingWake(voiceMemoWebhookUserId);
+    await requireLinqStub().waitForAdditionalRequest({
+      baselineCount: attachmentMetadataCountBeforeReply,
+      expectedMethod: "GET",
+      expectedPath: expectedAttachmentMetadataPath,
+      scenario: requireScenario(),
+      userId: voiceMemoWebhookUserId,
+    });
+    await requireLinqStub().waitForAdditionalRequest({
+      baselineCount: attachmentDownloadCountBeforeReply,
+      expectedMethod: "GET",
+      expectedPath: expectedAttachmentDownloadPath,
+      scenario: requireScenario(),
+      userId: voiceMemoWebhookUserId,
+    });
+    await requireScenario().waitForHostedCompletion(voiceMemoWebhookUserId);
+
+    const replySend = await requireLinqStub().waitForAdditionalSend({
+      baselineCount: outboundCountBeforeReply,
+      expectedPath: expectedReplyChatPath,
+      scenario: requireScenario(),
+      userId: voiceMemoWebhookUserId,
+    });
+    expect(requireLinqStub().readObservedMessageText(replySend)).toBe(
+      HOSTED_LINQ_ROCKET_MAN_ASSISTANT_REPLY_TEXT,
+    );
+
+    const assistantProviderRequests = requireScenario().assistantProviderRequests.slice(
+      assistantProviderCountBeforeReply,
+    );
+    expect(assistantProviderRequests).toHaveLength(1);
+    expect(assistantProviderRequests[0]?.body).toContain(hostedLinqVoiceMemoTranscript);
+  }, 300_000);
 });
 
 function buildActivationWake(userId: string) {
@@ -255,13 +382,20 @@ function requireScenario(): HostedLocalFullStackScenario {
   return scenario;
 }
 
-async function startLinqScenario(): Promise<void> {
+async function startLinqScenario(
+  additionalEnv:
+    | NodeJS.ProcessEnv
+    | ((linqStub: HostedLocalLinqStub) => NodeJS.ProcessEnv) = {},
+): Promise<void> {
   linqStub = await startHostedLocalLinqStub();
+  const resolvedAdditionalEnv =
+    typeof additionalEnv === "function" ? additionalEnv(requireLinqStub()) : additionalEnv;
   scenario = await startHostedLocalFullStackScenario({
     additionalEnv: {
       LINQ_API_BASE_URL: requireLinqStub().baseUrl,
       LINQ_API_TOKEN: "linq-local-test-token",
       LINQ_WEBHOOK_SECRET: linqWebhookSecret,
+      ...resolvedAdditionalEnv,
     },
     localDatabaseUrl,
     persistDirOverride: workerPersistDirOverride,
@@ -270,4 +404,28 @@ async function startLinqScenario(): Promise<void> {
     scenarioLabel: "Local hosted Linq webhook e2e",
     streamLogs: streamDevLogs,
   });
+}
+
+async function createFakeWhisperFixture(transcriptText: string): Promise<FakeWhisperFixture> {
+  const directory = await mkdtemp(path.join(tmpdir(), "murph-local-whisper-"));
+  const commandPath = path.join(directory, "fake-whisper");
+  const modelPath = path.join(directory, "fake-model.bin");
+  const executableSource = [
+    "#!/usr/bin/env node",
+    "const fs = require('node:fs');",
+    "const args = process.argv.slice(2);",
+    "const outputBase = args[args.indexOf('-of') + 1];",
+    `fs.writeFileSync(\`${"${outputBase}"}.txt\`, ${JSON.stringify(`${transcriptText}\n`)}, "utf8");`,
+  ].join("\n");
+
+  await writeFile(commandPath, executableSource, "utf8");
+  await chmod(commandPath, 0o755);
+  await writeFile(modelPath, "fake-whisper-model", "utf8");
+
+  fakeWhisperFixture = {
+    commandPath,
+    directory,
+    modelPath,
+  };
+  return fakeWhisperFixture;
 }
