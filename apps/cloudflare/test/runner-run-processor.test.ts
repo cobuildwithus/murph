@@ -352,6 +352,95 @@ describe("RunnerRunProcessor.cleanupTransientWakeDataBestEffortForRunDrain", () 
     });
   });
 
+  it("does not retarget Telegram cleanup across unrelated chats when only one delivery succeeds", async () => {
+    const { processor } = createInvokeRunnerProcessor({
+      forwardedEnvSource: {
+        HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "telegram",
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+      },
+    });
+    const deleteHostedTelegramMessages = vi.spyOn(
+      hostedRuntimeContractsModule,
+      "deleteHostedTelegramMessages",
+    ).mockResolvedValue(undefined);
+
+    await processor.cleanupTransientWakeDataBestEffortForRunDrain({
+      assistantDeliveryOutcomes: [
+        {
+          deliveryChannel: "telegram",
+          deliveryErrorCode: null,
+          deliveryErrorMessage: null,
+          deliveryStatus: "sent",
+          effectFingerprint: "fingerprint-telegram-success",
+          effectId: "effect-telegram-success",
+          journalMethod: null,
+          journalStatus: null,
+          providerMessageId: "9002",
+          providerMessageIds: ["9001", "9002"],
+          providerThreadId: null,
+          retryable: false,
+          target: "chat-success",
+          targetKind: "thread",
+        },
+        {
+          deliveryChannel: "telegram",
+          deliveryErrorCode: "ASSISTANT_TELEGRAM_DELIVERY_FAILED",
+          deliveryErrorMessage: "chat-failed delivery failed",
+          deliveryStatus: "failed",
+          effectFingerprint: "fingerprint-telegram-failed",
+          effectId: "effect-telegram-failed",
+          journalMethod: null,
+          journalStatus: null,
+          providerMessageId: null,
+          providerThreadId: null,
+          retryable: false,
+          target: "chat-failed",
+          targetKind: "thread",
+        },
+      ],
+      runId: "run-cleanup",
+      wakes: [
+        buildHostedExecutionTelegramConversationMessageWake({
+          eventId: "telegram-wake-success",
+          occurredAt: "2026-04-20T09:00:00.000Z",
+          telegramMessage: {
+            messageId: "700-success",
+            schema: "murph.hosted-telegram-message.v1",
+            text: "hello from success chat",
+            threadId: "chat-success",
+          },
+          userId: "user_123",
+        }),
+        buildHostedExecutionTelegramConversationMessageWake({
+          eventId: "telegram-wake-failed",
+          occurredAt: "2026-04-20T09:00:00.000Z",
+          telegramMessage: {
+            messageId: "700-failed",
+            schema: "murph.hosted-telegram-message.v1",
+            text: "hello from failed chat",
+            threadId: "chat-failed",
+          },
+          userId: "user_123",
+        }),
+      ],
+    });
+
+    expect(deleteHostedTelegramMessages).toHaveBeenCalledTimes(2);
+    expect(deleteHostedTelegramMessages.mock.calls.map(([input]) => ({
+      messageIds: [...input.messageIds].sort(),
+      target: input.target,
+    }))).toEqual([
+      {
+        messageIds: ["700-success", "9001", "9002"],
+        target: "chat-success",
+      },
+      {
+        messageIds: ["700-failed"],
+        target: "chat-failed",
+      },
+    ]);
+  });
+
   it("keeps cleanup best-effort when one provider delete fails", async () => {
     const { processor } = createInvokeRunnerProcessor({
       forwardedEnvSource: {
@@ -592,6 +681,105 @@ describe("RunnerRunProcessor.cleanupTransientWakeDataBestEffortForRunDrain", () 
       messageIds: ["7001234567", "9001", "9002"],
       target: "6007654321",
     });
+  });
+
+  it("rewrites persisted Telegram cleanup targets only for exactly one compatible migrated target", async () => {
+    const { processor } = createInvokeRunnerProcessor({
+      forwardedEnvSource: {
+        HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "telegram",
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+      },
+    });
+    const deleteHostedTelegramMessages = vi.spyOn(
+      hostedRuntimeContractsModule,
+      "deleteHostedTelegramMessages",
+    ).mockResolvedValue(undefined);
+
+    await processor.persistPendingRunCleanupData({
+      runId: "run-cleanup",
+      wakes: [
+        buildHostedExecutionTelegramConversationMessageWake({
+          eventId: "telegram-wake-migrate-old",
+          occurredAt: "2026-04-20T09:00:00.000Z",
+          telegramMessage: {
+            messageId: "700-migrate-old",
+            schema: "murph.hosted-telegram-message.v1",
+            text: "old migrated chat",
+            threadId: "-1001234567890:topic:42",
+          },
+          userId: "user_123",
+        }),
+        buildHostedExecutionTelegramConversationMessageWake({
+          eventId: "telegram-wake-stay-old",
+          occurredAt: "2026-04-20T09:00:00.000Z",
+          telegramMessage: {
+            messageId: "700-stay-old",
+            schema: "murph.hosted-telegram-message.v1",
+            text: "old incompatible chat",
+            threadId: "-1002222222222:topic:7",
+          },
+          userId: "user_123",
+        }),
+      ],
+    });
+
+    await processor.cleanupTransientWakeDataBestEffortForRunDrain({
+      assistantDeliveryOutcomes: [
+        {
+          deliveryChannel: "telegram",
+          deliveryErrorCode: null,
+          deliveryErrorMessage: null,
+          deliveryStatus: "sent",
+          effectFingerprint: "fingerprint-telegram-migrated",
+          effectId: "effect-telegram-migrated",
+          journalMethod: null,
+          journalStatus: null,
+          providerMessageId: "9002",
+          providerMessageIds: ["9001", "9002"],
+          providerThreadId: null,
+          retryable: false,
+          target: "-1009876543210:topic:42",
+          targetKind: "thread",
+        },
+        {
+          deliveryChannel: "telegram",
+          deliveryErrorCode: null,
+          deliveryErrorMessage: null,
+          deliveryStatus: "sent",
+          effectFingerprint: "fingerprint-telegram-unrelated",
+          effectId: "effect-telegram-unrelated",
+          journalMethod: null,
+          journalStatus: null,
+          providerMessageId: "9010",
+          providerThreadId: null,
+          retryable: false,
+          target: "-1003333333333:topic:99",
+          targetKind: "thread",
+        },
+      ],
+      runId: "run-cleanup",
+      userId: "user_123",
+      wakes: [],
+    });
+
+    expect(deleteHostedTelegramMessages).toHaveBeenCalledTimes(3);
+    expect(deleteHostedTelegramMessages.mock.calls.map(([input]) => ({
+      messageIds: [...input.messageIds].sort(),
+      target: input.target,
+    }))).toEqual([
+      {
+        messageIds: ["700-migrate-old", "9001", "9002"],
+        target: "-1009876543210:topic:42",
+      },
+      {
+        messageIds: ["700-stay-old"],
+        target: "-1002222222222:topic:7",
+      },
+      {
+        messageIds: ["9010"],
+        target: "-1003333333333:topic:99",
+      },
+    ]);
   });
 });
 
