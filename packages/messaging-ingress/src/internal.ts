@@ -1,8 +1,48 @@
-const USER_PATH_PATTERNS = [
-  /^\/Users\/[^/]+/u,
-  /^\/home\/[^/]+/u,
-  /^[A-Za-z]:\\Users\\[^\\]+/u,
-];
+const LOCAL_UNIX_PATH_ROOTS = [
+  "Users",
+  "Volumes",
+  "dev",
+  "etc",
+  "home",
+  "media",
+  "mnt",
+  "opt",
+  "private",
+  "root",
+  "srv",
+  "tmp",
+  "usr",
+  "var",
+] as const;
+const LOCAL_UNIX_PATH_SUBSTRING_PATTERN = new RegExp(
+  `(^|[^A-Za-z0-9+.-])((?:\\/(?:${LOCAL_UNIX_PATH_ROOTS.join("|")}))(?:\\/[^\\r\\n"'<>|]*)?)`,
+  "gu",
+);
+const LOCAL_WINDOWS_PATH_SUBSTRING_PATTERN =
+  /(^|[^A-Za-z0-9+.-])([A-Za-z]:\\(?:[^\r\n"'<>|]*))/gu;
+const LOCAL_PATH_TRAILING_PUNCTUATION_PATTERN = /[.,;:!?)}\]]+$/u;
+const NON_PATH_TAIL_LEAD_WORDS = new Set([
+  "after",
+  "and",
+  "as",
+  "at",
+  "before",
+  "because",
+  "by",
+  "for",
+  "from",
+  "in",
+  "into",
+  "of",
+  "on",
+  "or",
+  "since",
+  "then",
+  "to",
+  "via",
+  "while",
+  "with",
+]);
 const REDACTED_PATH = "<REDACTED_PATH>";
 const REDACTED_SECRET = "<REDACTED_SECRET>";
 const SENSITIVE_EXACT_RAW_KEYS = new Set([
@@ -137,9 +177,7 @@ function sanitizeRawMetadataValue(value: unknown): unknown {
       return REDACTED_SECRET;
     }
 
-    return USER_PATH_PATTERNS.some((pattern) => pattern.test(value))
-      ? REDACTED_PATH
-      : value;
+    return redactLocalPathSubstrings(value);
   }
 
   if (value === undefined) {
@@ -190,6 +228,83 @@ function isSensitiveRawKey(key: string): boolean {
 
 function looksSensitiveStringValue(value: string): boolean {
   return SENSITIVE_STRING_PATTERNS.some((pattern) => pattern.test(value.trim()));
+}
+
+function redactLocalPathSubstrings(value: string): string {
+  return redactMatchedLocalPaths(
+    redactMatchedLocalPaths(value, LOCAL_UNIX_PATH_SUBSTRING_PATTERN, "/"),
+    LOCAL_WINDOWS_PATH_SUBSTRING_PATTERN,
+    "\\",
+  );
+}
+
+function redactMatchedLocalPaths(value: string, pattern: RegExp, separator: "/" | "\\"): string {
+  let redacted = value;
+
+  while (true) {
+    pattern.lastIndex = 0;
+    const next = redacted.replace(pattern, (_match, prefix: string, candidate: string) => {
+      const { path, suffix } = splitLocalPathCandidate(candidate, separator);
+      return path ? `${prefix}${REDACTED_PATH}${suffix}` : `${prefix}${candidate}`;
+    });
+
+    if (next === redacted) {
+      return redacted;
+    }
+
+    redacted = next;
+  }
+}
+
+function splitLocalPathCandidate(
+  candidate: string,
+  separator: "/" | "\\",
+): { path: string; suffix: string } {
+  const punctuationMatch = candidate.match(LOCAL_PATH_TRAILING_PUNCTUATION_PATTERN);
+  const trailingPunctuation = punctuationMatch ? punctuationMatch[0] : "";
+  const coreCandidate = trailingPunctuation
+    ? candidate.slice(0, -trailingPunctuation.length)
+    : candidate;
+  let path = coreCandidate;
+  let suffix = trailingPunctuation;
+  let searchIndex = 0;
+
+  while (true) {
+    const spaceIndex = path.indexOf(" ", searchIndex);
+
+    if (spaceIndex === -1) {
+      return { path, suffix };
+    }
+
+    const remainder = path.slice(spaceIndex + 1);
+    if (!remainder.includes(separator) && shouldSplitLocalPathRemainder(remainder)) {
+      return {
+        path: path.slice(0, spaceIndex),
+        suffix: `${path.slice(spaceIndex)}${suffix}`,
+      };
+    }
+
+    searchIndex = spaceIndex + 1;
+  }
+}
+
+function shouldSplitLocalPathRemainder(remainder: string): boolean {
+  const trimmed = remainder.trimStart();
+
+  if (!trimmed) {
+    return false;
+  }
+
+  const firstWord = trimmed.split(/\s+/u, 1)[0]?.toLowerCase() ?? "";
+  if (NON_PATH_TAIL_LEAD_WORDS.has(firstWord)) {
+    return true;
+  }
+
+  if (/[._()[\]-]/u.test(trimmed) || /[A-Z0-9]/u.test(trimmed)) {
+    return false;
+  }
+
+  return trimmed.split(/\s+/u).filter(Boolean).length > 1;
 }
 
 function collapseRawKey(key: string): string {
