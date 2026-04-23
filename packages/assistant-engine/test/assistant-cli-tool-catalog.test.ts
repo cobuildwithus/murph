@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { InboxServices } from '@murphai/inbox-services'
 import type { VaultServices } from '@murphai/vault-usecases/vault-services'
@@ -112,6 +112,10 @@ describe('assistant CLI tool catalogs', () => {
         hosted: {
           memberId: 'member-1',
           userEnvKeys: [],
+          deviceConnectProviders: [
+            { label: 'Oura', provider: 'oura' },
+            { label: 'WHOOP', provider: 'whoop' },
+          ],
           issueDeviceConnectLink: async ({ provider }) => ({
             authorizationUrl: `https://example.com/connect/${provider}`,
             expiresAt: '2026-04-09T00:00:00.000Z',
@@ -130,6 +134,87 @@ describe('assistant CLI tool catalogs', () => {
       'murph.device.connect',
       'vault.share.createLink',
     ])
+  })
+
+  it('rejects unsupported hosted device providers before calling the hosted API', async () => {
+    const issueDeviceConnectLink = vi.fn(async ({ provider }: { provider: string }) => ({
+      authorizationUrl: `https://example.com/connect/${provider}`,
+      expiresAt: '2026-04-09T00:00:00.000Z',
+      provider,
+      providerLabel: provider,
+    }))
+    const catalog = createAssistantToolCatalogFromCapabilities(
+      createOutwardSideEffectToolDefinitions({
+        ...createToolContext(),
+        executionContext: {
+          hosted: {
+            memberId: 'member-1',
+            userEnvKeys: [],
+            deviceConnectProviders: [
+              { label: 'Oura', provider: 'oura' },
+              { label: 'WHOOP', provider: 'whoop' },
+            ],
+            issueDeviceConnectLink,
+          },
+        },
+      }),
+      [new NativeLocalCapabilityHost()],
+    )
+
+    const [unsupported, supported] = await catalog.executeCalls({
+      calls: [
+        {
+          tool: 'murph.device.connect',
+          input: {
+            provider: 'ottoai',
+          },
+        },
+        {
+          tool: 'murph.device.connect',
+          input: {
+            provider: 'Oura',
+          },
+        },
+      ],
+      mode: 'apply',
+    })
+
+    expect(unsupported).toMatchObject({
+      errorCode: 'ASSISTANT_UNSUPPORTED_HOSTED_DEVICE_PROVIDER',
+      errorMessage: expect.stringContaining(
+        'Hosted device connection is currently supported only for Oura (`oura`) and WHOOP (`whoop`).',
+      ),
+      status: 'failed',
+      tool: 'murph.device.connect',
+    })
+    expect(supported).toMatchObject({
+      result: {
+        authorizationUrl: 'https://example.com/connect/oura',
+        provider: 'oura',
+      },
+      status: 'succeeded',
+      tool: 'murph.device.connect',
+    })
+    expect(issueDeviceConnectLink).toHaveBeenCalledTimes(1)
+    expect(issueDeviceConnectLink).toHaveBeenCalledWith({ provider: 'oura' })
+  })
+
+  it('omits murph.device.connect when no hosted device providers are configured', () => {
+    const outwardNames = createOutwardSideEffectToolDefinitions({
+      ...createToolContext(),
+      executionContext: {
+        hosted: {
+          memberId: 'member-1',
+          userEnvKeys: [],
+          deviceConnectProviders: [],
+          issueDeviceConnectLink: async () => {
+            throw new Error('should not be called')
+          },
+        },
+      },
+    }).map((tool) => tool.name)
+
+    expect(outwardNames).toEqual([])
   })
 
   it('assembles default, inbox-routing, and provider-turn catalogs with the expected tool mix', () => {

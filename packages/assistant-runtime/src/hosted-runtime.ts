@@ -9,6 +9,9 @@ import {
 import {
   listConfiguredDeviceSyncProviderNames,
 } from "@murphai/device-syncd/config";
+import {
+  formatDeviceSyncProviderLabel,
+} from "@murphai/device-syncd/provider-label";
 import type {
   HostedExecutionRunnerResult,
   HostedExecutionStructuredLogDetails,
@@ -234,11 +237,14 @@ export async function runHostedAssistantRuntimeJobInProcessDetailed(
             userEnv: runtime.userEnv,
             wake,
           });
+          const deviceConnectProviders = resolveHostedDeviceConnectProviders(runtime);
           const executionContext: AssistantExecutionContext = {
             hosted: {
+              deviceConnectProviders,
               issueDeviceConnectLink: createHostedDeviceConnectLinkIssuer({
                 boundUserId: wake.userId,
                 platform: runtime.platform,
+                supportedProviders: deviceConnectProviders.map((entry) => entry.provider),
               }),
               memberId: wake.userId,
               stripeCustomerId,
@@ -297,7 +303,10 @@ export async function runHostedAssistantRuntimeJobInProcessDetailed(
 function createHostedDeviceConnectLinkIssuer(input: {
   boundUserId: string;
   platform: HostedRuntimePlatform;
+  supportedProviders: readonly string[];
 }) {
+  const supportedProviders = new Set(input.supportedProviders);
+
   return async ({ provider }: { provider: string }) => {
     const client = input.platform.deviceSyncPort ?? null;
 
@@ -308,10 +317,32 @@ function createHostedDeviceConnectLinkIssuer(input: {
       );
     }
 
+    const normalizedProvider = provider.trim().toLowerCase();
+    if (!supportedProviders.has(normalizedProvider)) {
+      throw new HostedAssistantConfigurationError(
+        "HOSTED_ASSISTANT_CONFIG_INVALID",
+        "Hosted device connect links are unavailable for that provider because it is not configured in this hosted environment.",
+      );
+    }
+
     return client.createConnectLink({
-      provider,
+      provider: normalizedProvider,
     });
   };
+}
+
+function resolveHostedDeviceConnectProviders(
+  runtime: ReturnType<typeof normalizeHostedAssistantRuntimeConfig>,
+): Array<{ label: string; provider: string }> {
+  const providerConfigs = runtime.resolvedConfig.deviceSync?.providerConfigs ?? null;
+  if (!providerConfigs) {
+    return [];
+  }
+
+  return listConfiguredDeviceSyncProviderNames(providerConfigs).map((provider) => ({
+    label: formatDeviceSyncProviderLabel(provider),
+    provider,
+  }));
 }
 
 function buildHostedRuntimeStartDetails(

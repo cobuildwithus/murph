@@ -10,6 +10,10 @@ import {
   buildAssistantExecutionBehaviorText,
   type AssistantModelBehaviorProfile,
 } from "./model-behavior.js";
+import {
+  formatAssistantHostedDeviceConnectProviderList,
+  type AssistantHostedDeviceConnectProvider,
+} from "./execution-context.js";
 
 export interface AssistantSystemPromptInput {
   activeExperimentContext?: string | null;
@@ -17,6 +21,7 @@ export interface AssistantSystemPromptInput {
   allowSensitiveHealthContext: boolean;
   assistantCommandAccessMode: AssistantMurphCommandAccessMode;
   assistantHostedDeviceConnectAvailable?: boolean;
+  assistantHostedDeviceConnectProviders?: readonly AssistantHostedDeviceConnectProvider[];
   assistantKnowledgeToolsAvailable?: boolean;
   channel: string | null;
   cliAccess: Pick<AssistantCliAccessContext, "rawCommand" | "setupCommand">;
@@ -31,6 +36,8 @@ export interface AssistantSystemPromptInput {
 export interface AssistantNotificationDecisionSystemPromptInput {
   activeExperimentContext?: string | null;
   allowSensitiveHealthContext: boolean;
+  assistantHostedDeviceConnectAvailable?: boolean;
+  assistantHostedDeviceConnectProviders?: readonly AssistantHostedDeviceConnectProvider[];
   channel: string | null;
   currentLocalDate: string;
   currentTimeZone: string;
@@ -64,6 +71,8 @@ export function buildAssistantSystemPrompt(
       assistantCommandAccessMode: input.assistantCommandAccessMode,
       assistantHostedDeviceConnectAvailable:
         input.assistantHostedDeviceConnectAvailable ?? false,
+      assistantHostedDeviceConnectProviders:
+        input.assistantHostedDeviceConnectProviders ?? [],
     }),
     buildAssistantExperimentOnboardingGuidanceText({
       assistantCommandAccessMode: input.assistantCommandAccessMode,
@@ -106,6 +115,12 @@ export function buildAssistantNotificationDecisionSystemPrompt(
     }),
     buildAssistantProductPrinciplesText(),
     buildAssistantHealthReasoningText(),
+    buildAssistantHostedDeviceConnectGuidanceText({
+      assistantHostedDeviceConnectAvailable:
+        input.assistantHostedDeviceConnectAvailable ?? false,
+      assistantHostedDeviceConnectProviders:
+        input.assistantHostedDeviceConnectProviders ?? [],
+    }),
     input.vaultOverview ?? null,
     input.activeExperimentContext ?? null,
     buildAssistantAudienceSafetyText(input.allowSensitiveHealthContext),
@@ -158,12 +173,15 @@ function buildAssistantHealthReasoningText(): string {
 function buildAssistantVaultNavigationText(input: {
   assistantCommandAccessMode: AssistantMurphCommandAccessMode;
   assistantHostedDeviceConnectAvailable: boolean;
+  assistantHostedDeviceConnectProviders: readonly AssistantHostedDeviceConnectProvider[];
 }): string {
   const usesBoundTools = input.assistantCommandAccessMode === "bound-tools";
   const usesDirectCli = input.assistantCommandAccessMode === "direct-cli";
 
-  const hostedDeviceConnectLine = input.assistantHostedDeviceConnectAvailable
-    ? "- When the user wants help connecting a hosted wearable provider such as Garmin, Oura, Strava, or WHOOP, use `murph.device.connect` first so you can return a clickable hosted authorization link. Do not route that hosted connect flow through local `device connect` CLI commands.\n"
+  const hostedDeviceConnectGuidance =
+    buildAssistantHostedDeviceConnectGuidanceText(input);
+  const hostedDeviceConnectLine = hostedDeviceConnectGuidance
+    ? `${hostedDeviceConnectGuidance} Do not route supported hosted connect flows through local \`device connect\` CLI commands.\n`
     : "";
 
   const canonicalRuntimeSurfaceLine = usesBoundTools
@@ -189,6 +207,24 @@ ${routeEstimateLine}${boundToolResultLine}
 - For common wearable questions, prefer the normalized first reads first: \`vault-cli wearables latest\` for recent nightly summaries, \`vault-cli wearables metric latest <metric>\` for one metric's freshest reading, \`vault-cli wearables metric trend <metric>\` for recent direction, and \`vault-cli wearables drift\` for "what changed?" explanations. Use \`vault-cli wearables day\` or the relevant \`vault-cli wearables sleep|activity|recovery|body|sources list\` command when the question is date-specific or you need one summary family in more detail. Inspect raw events or samples only when those normalized surfaces still do not answer the question or the user explicitly asks for raw evidence.
 - Use targeted local file reads only when the CLI/query surface does not expose the needed detail or the user explicitly asks for file-level inspection.
 - Use the matching write surface directly for straightforward captures and memory updates. Shared health data like meals, journals, blood tests, medications, supplements, and symptoms counts as permission to use the matching write surface. Treat a successful save receipt as confirmation the requested write completed. If the result says nothing changed, do not claim that something new was saved. Slow down only when the target record or command is unclear.`;
+}
+
+function buildAssistantHostedDeviceConnectGuidanceText(input: {
+  assistantHostedDeviceConnectAvailable: boolean;
+  assistantHostedDeviceConnectProviders: readonly AssistantHostedDeviceConnectProvider[];
+}): string | null {
+  if (!input.assistantHostedDeviceConnectAvailable) {
+    return null;
+  }
+
+  const providerList = formatAssistantHostedDeviceConnectProviderList(
+    input.assistantHostedDeviceConnectProviders
+  );
+  if (providerList === "none") {
+    return null;
+  }
+
+  return `- Hosted wearable connection is currently supported only for ${providerList}. Use \`murph.device.connect\` for those providers only; for other apps or devices, say automatic connection is not available and offer manual logging, screenshots, or a supported provider.`;
 }
 
 function buildAssistantExperimentOnboardingGuidanceText(input: {

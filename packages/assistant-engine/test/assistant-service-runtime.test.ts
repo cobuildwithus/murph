@@ -1190,6 +1190,11 @@ describe("assistant execution context normalization", () => {
       normalizeAssistantExecutionContext({
         hosted: {
           defaultTarget,
+          deviceConnectProviders: [
+            { label: " Oura ", provider: " OURA " },
+            { label: "duplicate", provider: "oura" },
+            { label: "bad", provider: "not allowed!" },
+          ],
           issueDeviceConnectLink,
           issueShareLink,
           memberId: " member-1 ",
@@ -1200,6 +1205,9 @@ describe("assistant execution context normalization", () => {
     ).toEqual({
       hosted: {
         defaultTarget,
+        deviceConnectProviders: [
+          { label: "Oura", provider: "oura" },
+        ],
         issueDeviceConnectLink,
         issueShareLink,
         memberId: "member-1",
