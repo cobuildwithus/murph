@@ -62,8 +62,23 @@ compose_hosted_wake_encryption_key_version_for_build() {
   printf '%s\n' "${HOSTED_WAKE_ENCRYPTION_KEY_VERSION:-$hosted_web_default_hosted_key_version}"
 }
 
-verify_step_parallel="${MURPH_VERIFY_STEP_PARALLEL:-0}"
+verify_step_parallel_default="$([[ -n "${CI:-}" ]] && echo 0 || echo 1)"
+verify_step_parallel="${MURPH_VERIFY_STEP_PARALLEL:-$verify_step_parallel_default}"
 tracked_background_pids=()
+
+verify_log() {
+  printf '[apps/web verify] %s\n' "$*" >&2
+}
+
+run_timed_step() {
+  local label="$1"
+  shift
+  local started_at="$SECONDS"
+
+  verify_log "start ${label}"
+  "$@"
+  verify_log "done ${label} ($((SECONDS - started_at))s step)"
+}
 
 register_background_pid() {
   tracked_background_pids+=("$1")
@@ -98,11 +113,56 @@ terminate_background_pid() {
     return
   fi
 
+  terminate_pid_tree_with_signal "$pid" TERM
+  sleep 1
+  terminate_pid_tree_with_signal "$pid" KILL
+}
+
+terminate_pid_tree_with_signal() {
+  local pid="$1"
+  local signal="$2"
+  local descendant_pid
+
+  for descendant_pid in $(list_descendant_pids "$pid"); do
+    kill "-$signal" "$descendant_pid" 2>/dev/null || true
+  done
+
   if [[ "$pid" -gt 0 && "${OSTYPE:-}" != msys* && "${OSTYPE:-}" != cygwin* ]]; then
-    kill "-$pid" 2>/dev/null || true
+    kill "-$signal" "-$pid" 2>/dev/null || true
   fi
 
-  kill "$pid" 2>/dev/null || true
+  kill "-$signal" "$pid" 2>/dev/null || true
+}
+
+list_descendant_pids() {
+  local root_pid="$1"
+
+  ps -axo pid=,ppid= | awk -v root_pid="$root_pid" '
+    {
+      pid = $1
+      ppid = $2
+      children[ppid] = children[ppid] " " pid
+    }
+    END {
+      queue[1] = root_pid
+      head = 1
+      tail = 1
+      while (head <= tail) {
+        parent = queue[head]
+        head++
+        child_count = split(children[parent], child_pids, " ")
+        for (index = 1; index <= child_count; index++) {
+          child_pid = child_pids[index]
+          if (child_pid == "") {
+            continue
+          }
+          print child_pid
+          tail++
+          queue[tail] = child_pid
+        }
+      }
+    }
+  '
 }
 
 cleanup_background_jobs() {
@@ -158,12 +218,21 @@ wait_for_background_jobs() {
   return 0
 }
 
-pnpm prisma:generate
-
-if [[ "$verify_step_parallel" != "1" ]]; then
-  pnpm test
-  pnpm lint
+run_dev_smoke() {
   MURPH_HOSTED_WEB_SMOKE_USE_LOCAL_ENV=1 pnpm dev:smoke
+}
+
+run_next_build() {
+  local next_build_node_options
+  local build_database_url
+  local build_contact_privacy_current_key_version
+  local build_contact_privacy_keys
+  local build_hosted_web_encryption_key
+  local build_hosted_web_encryption_key_version
+  local build_hosted_wake_encryption_key
+  local build_hosted_wake_encryption_key_version
+  local build_privy_app_id
+
   next_build_node_options="$(compose_node_options_with_sqlite_warning_filter)"
   build_database_url="$(compose_database_url_for_build)"
   build_contact_privacy_current_key_version="$(compose_hosted_contact_privacy_current_key_version_for_build)"
@@ -173,6 +242,7 @@ if [[ "$verify_step_parallel" != "1" ]]; then
   build_hosted_wake_encryption_key="$(compose_hosted_wake_encryption_key_for_build)"
   build_hosted_wake_encryption_key_version="$(compose_hosted_wake_encryption_key_version_for_build)"
   build_privy_app_id="$(compose_privy_app_id_for_build)"
+
   DATABASE_URL="$build_database_url" \
     HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION="$build_contact_privacy_current_key_version" \
     HOSTED_CONTACT_PRIVACY_KEYS="$build_contact_privacy_keys" \
@@ -183,6 +253,15 @@ if [[ "$verify_step_parallel" != "1" ]]; then
     NEXT_PUBLIC_PRIVY_APP_ID="$build_privy_app_id" \
     NODE_OPTIONS="$next_build_node_options" \
     next build
+}
+
+run_timed_step "prisma generate" pnpm prisma:generate
+
+if [[ "$verify_step_parallel" != "1" ]]; then
+  run_timed_step "test" pnpm test
+  run_timed_step "lint" pnpm lint
+  run_timed_step "dev smoke" run_dev_smoke
+  run_timed_step "next build" run_next_build
   exit 0
 fi
 
@@ -191,30 +270,15 @@ trap 'handle_termination_signal INT' INT
 trap 'handle_termination_signal TERM' TERM
 trap 'handle_termination_signal HUP' HUP
 
-pnpm test &
+run_timed_step "dev smoke" run_dev_smoke
+
+run_timed_step "next build" run_next_build &
+build_pid="$!"
+register_background_pid "$build_pid"
+run_timed_step "test" pnpm test &
 test_pid="$!"
 register_background_pid "$test_pid"
-pnpm lint &
+run_timed_step "lint" pnpm lint &
 lint_pid="$!"
 register_background_pid "$lint_pid"
-MURPH_HOSTED_WEB_SMOKE_USE_LOCAL_ENV=1 pnpm dev:smoke
-next_build_node_options="$(compose_node_options_with_sqlite_warning_filter)"
-build_database_url="$(compose_database_url_for_build)"
-build_contact_privacy_current_key_version="$(compose_hosted_contact_privacy_current_key_version_for_build)"
-build_contact_privacy_keys="$(compose_hosted_contact_privacy_keys_for_build)"
-build_hosted_web_encryption_key="$(compose_hosted_web_encryption_key_for_build)"
-build_hosted_web_encryption_key_version="$(compose_hosted_web_encryption_key_version_for_build)"
-build_hosted_wake_encryption_key="$(compose_hosted_wake_encryption_key_for_build)"
-build_hosted_wake_encryption_key_version="$(compose_hosted_wake_encryption_key_version_for_build)"
-build_privy_app_id="$(compose_privy_app_id_for_build)"
-DATABASE_URL="$build_database_url" \
-  HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION="$build_contact_privacy_current_key_version" \
-  HOSTED_CONTACT_PRIVACY_KEYS="$build_contact_privacy_keys" \
-  HOSTED_WEB_ENCRYPTION_KEY="$build_hosted_web_encryption_key" \
-  HOSTED_WEB_ENCRYPTION_KEY_VERSION="$build_hosted_web_encryption_key_version" \
-  HOSTED_WAKE_ENCRYPTION_KEY="$build_hosted_wake_encryption_key" \
-  HOSTED_WAKE_ENCRYPTION_KEY_VERSION="$build_hosted_wake_encryption_key_version" \
-  NEXT_PUBLIC_PRIVY_APP_ID="$build_privy_app_id" \
-  NODE_OPTIONS="$next_build_node_options" \
-  next build
-wait_for_background_jobs "$test_pid" "$lint_pid"
+wait_for_background_jobs "$build_pid" "$test_pid" "$lint_pid"
