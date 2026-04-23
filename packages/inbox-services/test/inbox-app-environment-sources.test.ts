@@ -212,8 +212,14 @@ function createInboxRuntimeModule(): InboxRuntimeModule {
     async openInboxRuntime() {
       return createRuntimeStore()
     },
+    async createParsedInboxPipeline() {
+      throw new Error('not used in this test')
+    },
     async rebuildRuntimeFromVault() {},
     async runInboxDaemon() {},
+    async runPollConnectorBackfill() {
+      throw new Error('not used in this test')
+    },
     async runInboxDaemonWithParsers() {},
   }
 }

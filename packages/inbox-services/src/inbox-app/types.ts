@@ -254,6 +254,7 @@ export interface InboxRuntimeModule {
       commandCandidates?: string[]
       allowSystemLookup?: boolean
     }
+    drainParsersOnDeduped?: boolean
     onParserDrain?: (results: ParserRuntimeDrainResult[]) => Promise<void> | void
   }): Promise<InboxPipeline>
   runPollConnectorBackfill(input: {

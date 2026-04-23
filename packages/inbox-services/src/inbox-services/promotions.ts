@@ -85,6 +85,7 @@ export async function persistPromotionEntry(input: {
   lookupId: string
   promotedAt: string
   relatedId: string
+  captureEventId?: string | null
   note: string | null
 }): Promise<void> {
   upsertPromotionEntry(input.promotionStore, {
@@ -94,6 +95,7 @@ export async function persistPromotionEntry(input: {
     note: input.note,
     promotedAt: input.promotedAt,
     relatedId: input.relatedId,
+    captureEventId: input.captureEventId ?? null,
   })
   await writePromotionStore(input.paths, input.promotionStore)
 }
@@ -408,7 +410,8 @@ export function requireExperimentPromotionEntry(
   }>,
   lookupId: string | null,
   relatedId: string | null,
-  capture: RuntimeCaptureRecord,
+  captureEventId: string | null | undefined,
+  capture: Pick<RuntimeCaptureRecord, 'captureId' | 'eventId'>,
 ) {
   if (!lookupId || !relatedId) {
     throw new VaultCliError(
@@ -417,7 +420,8 @@ export function requireExperimentPromotionEntry(
     )
   }
 
-  if (relatedId !== capture.eventId) {
+  const storedCaptureEventId = captureEventId ?? relatedId
+  if (storedCaptureEventId !== capture.eventId) {
     throw new VaultCliError(
       'INBOX_PROMOTION_STATE_INVALID',
       'Stored experiment-note promotion state does not match the capture event.',
@@ -835,6 +839,7 @@ function upsertPromotionEntry(
     note: string | null
     promotedAt: string
     relatedId: string
+    captureEventId: string | null
   },
 ): void {
   const existingIndex = store.entries.findIndex(
@@ -847,6 +852,7 @@ function upsertPromotionEntry(
     promotedAt: input.promotedAt,
     lookupId: input.lookupId,
     relatedId: input.relatedId,
+    captureEventId: input.captureEventId,
     note: input.note,
   } satisfies InboxPromotionEntry
 
@@ -905,6 +911,7 @@ async function reconcileCanonicalImportPromotion(input: {
       lookupId: input.canonicalPromotion.lookupId,
       promotedAt: input.canonicalPromotion.promotedAt,
       relatedId: input.canonicalPromotion.relatedId,
+      captureEventId: input.capture.eventId,
       note: input.note,
     })
 
@@ -928,6 +935,7 @@ async function reconcileCanonicalImportPromotion(input: {
     lookupId: createdPromotion.lookupId,
     promotedAt: input.clock().toISOString(),
     relatedId: createdPromotion.relatedId,
+    captureEventId: input.capture.eventId,
     note: input.note,
   })
 

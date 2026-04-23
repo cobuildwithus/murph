@@ -18,6 +18,7 @@ export interface CreateParsedInboxPipelineInput
   extends CreateInboxPipelineInput,
     Omit<CreateInboxParserServiceInput, "runtime" | "vaultRoot"> {
   onParserDrain?: (results: ParsedInboxPipelineDrainResults) => Promise<void> | void;
+  drainParsersOnDeduped?: boolean;
 }
 
 type ParsedInboxPipelineDrainResults = Awaited<
@@ -40,12 +41,16 @@ export async function createParsedInboxPipeline(
 ): Promise<ParsedInboxPipeline> {
   const pipeline = await createInboxPipeline(input);
   const parserService = createInboxParserService(input);
+  const drainParsersOnDeduped = input.drainParsersOnDeduped ?? true;
 
   return {
     runtime: pipeline.runtime,
     parserService,
     async processCapture(capture) {
       const persisted = await pipeline.processCapture(capture);
+      if (persisted.deduped && !drainParsersOnDeduped) {
+        return persisted;
+      }
       const results = await parserService.drain({
         captureId: persisted.captureId,
       });

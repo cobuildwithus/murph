@@ -219,8 +219,8 @@ export function createInboxPromotionOps(
         }) => {
           if (
             existing &&
-            ((existing.lookupId && existing.lookupId !== derived.lookupId) ||
-              (existing.relatedId && existing.relatedId !== capture.eventId))
+            existing.lookupId &&
+            existing.lookupId !== derived.lookupId
           ) {
             throw new VaultCliError(
               'INBOX_PROMOTION_STATE_INVALID',
@@ -244,9 +244,10 @@ export function createInboxPromotionOps(
             promotionStore,
             captureId: input.captureId,
             target: 'journal',
-            lookupId: derived.lookupId,
+            lookupId: result.lookupId,
             promotedAt: env.clock().toISOString(),
-            relatedId: capture.eventId,
+            relatedId: result.relatedId,
+            captureEventId: capture.eventId,
             note: capture.text ?? null,
           })
 
@@ -254,8 +255,8 @@ export function createInboxPromotionOps(
             vault: paths.absoluteVaultRoot,
             captureId: input.captureId,
             target: 'journal',
-            lookupId: derived.lookupId,
-            relatedId: capture.eventId,
+            lookupId: result.lookupId,
+            relatedId: result.relatedId,
             journalPath: result.journalPath,
             created: result.created,
             appended: result.appended,
@@ -291,6 +292,7 @@ export function createInboxPromotionOps(
                 experimentEntries,
                 existing.lookupId,
                 existing.relatedId,
+                existing.captureEventId,
                 capture,
               )
             : resolveExperimentPromotionTarget(experimentEntries)
@@ -313,7 +315,8 @@ export function createInboxPromotionOps(
             target: 'experiment-note',
             lookupId: result.experimentId,
             promotedAt: env.clock().toISOString(),
-            relatedId: capture.eventId,
+            relatedId: result.relatedId,
+            captureEventId: capture.eventId,
             note: capture.text ?? null,
           })
 
@@ -322,7 +325,7 @@ export function createInboxPromotionOps(
             captureId: input.captureId,
             target: 'experiment-note',
             lookupId: result.experimentId,
-            relatedId: capture.eventId,
+            relatedId: result.relatedId,
             experimentPath: result.experimentPath,
             experimentSlug: result.experimentSlug,
             appended: result.appended,

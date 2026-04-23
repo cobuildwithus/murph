@@ -3,7 +3,11 @@ import { test } from "vitest";
 
 import type { InboundCapture, PersistedCapture } from "../src/contracts/capture.ts";
 import type { PollConnector } from "../src/connectors/types.ts";
-import { runInboxDaemon, runPollConnector } from "../src/kernel/daemon.ts";
+import {
+  runInboxDaemon,
+  runPollConnector,
+  runPollConnectorBackfill,
+} from "../src/kernel/daemon.ts";
 import type { InboxPipeline } from "../src/kernel/pipeline.ts";
 import { createConnectorRegistry } from "../src/kernel/registry.ts";
 
@@ -243,6 +247,94 @@ test("runPollConnector uses connector-supplied checkpoints when emitting capture
   });
 
   assert.deepEqual(cursorWrites, [{ updateId: 42 }, { updateId: 42 }]);
+});
+
+test("runPollConnectorBackfill preserves the latest emitted checkpoint when the connector omits a terminal cursor", async () => {
+  const cursorWrites: Array<Record<string, unknown> | null> = [];
+
+  const result = await runPollConnectorBackfill({
+    connector: createStubPollConnector({
+      id: "email:agentmail",
+      source: "email",
+      accountId: "agentmail",
+      async backfill(cursor, emit) {
+        assert.equal(cursor, null);
+
+        await emit(
+          {
+            source: "email",
+            externalId: "email:msg-1",
+            accountId: "agentmail",
+            thread: {
+              id: "thread-1",
+            },
+            actor: {
+              isSelf: false,
+            },
+            occurredAt: "2026-03-13T09:00:00.000Z",
+            text: "historical backfill",
+            attachments: [],
+            raw: {},
+          },
+          { messageId: "msg-1" },
+        );
+
+        return null;
+      },
+    }),
+    pipeline: {
+      runtime: {
+        databasePath: ":memory:",
+        close() {},
+        getCursor() {
+          return null;
+        },
+        setCursor(_source, _accountId, cursor) {
+          cursorWrites.push(cursor);
+        },
+        findByExternalId() {
+          return null;
+        },
+        upsertCaptureIndex(input) {
+          return input.captureId;
+        },
+        enqueueDerivedJobs() {},
+        listAttachmentParseJobs() {
+          return [];
+        },
+        claimNextAttachmentParseJob() {
+          return null;
+        },
+        requeueAttachmentParseJobs() {
+          return 0;
+        },
+        completeAttachmentParseJob() {
+          throw new Error("completeAttachmentParseJob should not be called");
+        },
+        failAttachmentParseJob() {
+          throw new Error("failAttachmentParseJob should not be called");
+        },
+        listCaptures() {
+          return [];
+        },
+        searchCaptures() {
+          return [];
+        },
+        getCapture() {
+          return null;
+        },
+      },
+      async processCapture(input) {
+        return createPersistedCapture(input);
+      },
+      close() {},
+    },
+  });
+
+  assert.deepEqual(result, {
+    cursor: { messageId: "msg-1" },
+  });
+  assert.deepEqual(cursorWrites, [{ messageId: "msg-1" }, { messageId: "msg-1" }]);
 });
 
 test("runPollConnector retries watch failures from the latest emitted cursor when restart is enabled", async () => {
