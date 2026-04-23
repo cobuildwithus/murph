@@ -11,7 +11,7 @@ Default stance:
 
 - Treat `review:gpt` as the execution substrate.
 - Treat the research workspace under `output-packages/research/**` as the source of truth.
-- Treat ChatGPT threads, thread exports, and downloaded artifacts as more trustworthy than `responses/*.md` when a long run behaves oddly.
+- Treat normalized downloads and thread exports as more trustworthy than `responses/*.md` when a long run behaves oddly.
 - Continue phase by phase until the workflow is finished unless the user explicitly wants a pause.
 
 ## Before Starting
@@ -44,6 +44,14 @@ The current repo flow is:
 
 The scaffold currently automates the early phases best. Later phases may still require the agent to materialize concrete prompt files and command wrappers from templates already present in the workspace.
 
+Timing expectations:
+
+- Research runs are allowed to take a long time.
+- `RESEARCH_WAIT_TIMEOUT` defaults to about 200 minutes and `RESEARCH_TIMEOUT` defaults slightly above that.
+- Even the initial charter can legitimately take 60 to 120 minutes.
+- Do not rush a thread just because the first assistant turn looks slow or the wake loop stays in `waiting` for a while.
+- Do not replace the workspace-managed wait with an ad hoc shorter wake such as 30 minutes. If a manual wake is truly needed, match the workspace's long timeout budget or exceed it.
+
 ## Workspace Rules
 
 For each research workspace, expect:
@@ -60,6 +68,14 @@ For each research workspace, expect:
 - `scripts/package-research-context.sh`
 
 Research runs should use the workspace-specific config and isolated Chrome profile, not the default personal `review:gpt` browser session.
+
+Important current behavior:
+
+- Generated research configs are self-contained. Research workspaces no longer inherit the repo-root `review:gpt` packaging config.
+- `config/review-gpt-research.config.sh` points directly at that workspace's `scripts/package-research-context.sh`.
+- `config/review-gpt-work-profile.sh` layers browser/profile settings on top of the workspace-specific research config.
+- Artifact-producing seams declare their required machine-readable outputs under `workflow.json -> artifactContracts`.
+- Murph now expects `@cobuild/review-gpt >= 0.5.76`, whose `thread export` preserves full assistant-turn text instead of clipping long inline replies at 20k characters.
 
 ## End-To-End Workflow
 
@@ -103,8 +119,11 @@ Run discovery shards one by one or in a measured fanout. For browser stability, 
 Discovery completion target:
 
 - `SOURCE_CANDIDATES_V1`
+- downloadable file `source_candidates_v1.json`
 
-If a local `responses/*.md` file is weak but the thread finished, recover from the thread export or downloaded artifact instead of immediately rerunning.
+The current runner reads `workflow.json`, normalizes the returned file into `downloads/<label>/source_candidates_v1.json`, validates the JSON shape, and fails the seam if the file is missing or malformed.
+
+If a local `responses/*.md` file is weak but the thread finished, recover from the thread export or downloaded artifact instead of immediately rerunning. For discovery seams, prose alone does not count as completion.
 
 ### 4. Snowball / Gap Fill
 
@@ -131,8 +150,16 @@ Reducer completion targets:
 
 - `CANONICAL_SOURCE_LEDGER_V1`
 - `SOURCE_EXTRACTION_BATCHES_V1`
+- downloadable files `canonical_source_ledger_v1.json` and `source_extraction_batches_v1.json`
 
 This phase decides the actual corpus and splits it into extraction batches. Do not skip it for overloaded modalities.
+
+The current runner normalizes those files into:
+
+- `downloads/11-source-ledger-reducer/canonical_source_ledger_v1.json`
+- `downloads/11-source-ledger-reducer/source_extraction_batches_v1.json`
+
+and fails closed if either file is missing or has the wrong JSON structure.
 
 ### 6. Source Extraction Batches
 
@@ -207,10 +234,13 @@ The final reducer should consolidate the builder plus QA outputs into the final 
 
 When a long run behaves strangely, trust outputs in this order:
 
-1. downloaded assistant artifacts
-2. thread export JSON
-3. thread URL visible in ChatGPT
-4. local `responses/*.md`
+1. normalized local downloads required by `workflow.json -> artifactContracts`
+2. raw downloaded assistant artifacts
+3. thread export JSON
+4. thread URL visible in ChatGPT
+5. local `responses/*.md`
+
+Use `thread export` for inline-text seams such as charter, snowball, synthesis, QA, or other no-attachment responses. Use `thread download` only when the assistant actually returned attachment controls.
 
 ### If a run “failed” after send
 
@@ -221,8 +251,10 @@ Do this:
 1. capture or recover the thread URL
 2. run `thread wake --skip-resume`
 3. export the thread
-4. download artifacts
+4. download artifacts if the assistant returned any
 5. backfill local files from recovered outputs
+
+With `@cobuild/review-gpt >= 0.5.76`, a normal `thread export` should be enough to recover long inline charters or reducers without dropping to ad hoc DOM scraping.
 
 ### If a shard looks partial locally
 
@@ -234,6 +266,8 @@ Instead:
 2. wait for the thread to finish
 3. export/download
 4. backfill the local response
+
+For artifact seams, also confirm the required normalized files exist under `downloads/<label>/...`. If they do not, treat the seam as incomplete even if the prose response looks plausible.
 
 ### If the model says the workspace is missing
 
@@ -252,20 +286,25 @@ Do not let repomix exclude `output-packages/**`.
 
 ## Packaging Rules
 
-- `repo.snapshot.zip` is authoritative for staged research workspace files.
-- Repomix should mirror the staged manifest, not silently re-filter it through repo ignore files.
-- Repo-owned repomix ignore patterns should exclude obvious junk and sensitive paths, not research workspaces.
-- If Murph is temporarily pinned to an older `@cobuild/review-gpt` release, be aware that repomix may lag the source fix; in that case, rely on `repo.snapshot.zip` first.
+- The workspace package script is the packaging authority for research runs. The send helper now refuses to start if the active config resolves to some other package script.
+- `repo.snapshot.zip` inside the produced bundle is authoritative for staged research workspace files.
+- Research packaging must include the active workspace files plus prior responses, downloads, chat URLs, thread exports, and the curated reference pack.
+- If bundled download names drift, rely on the normalized local files under `downloads/<label>/...` after wake rather than the attachment label shown in ChatGPT.
 
 ## Operational Rules
 
 - Use the workspace-specific isolated browser profile for research.
 - Keep launches measured; fast fanout is good, but broken uploads are wasted time.
+- Expect long waits. Let the normal wake loop do its job unless there is concrete evidence the run is wedged.
+- The workspace command wrappers already carry the intended long wait budget. Prefer those wrappers over manually assembled `thread wake` commands.
 - Persist thread URLs immediately.
 - Export and download after every meaningful run.
 - Backfill local workspace files as soon as recovered outputs exist.
+- For discovery and reducer seams, treat required normalized artifacts as the success contract; prose recovery is secondary evidence only.
 - Prefer continuing from an existing good thread over spawning duplicates.
 - Use `thread wake` rather than long brittle local `--wait` capture as the main completion primitive for heavy runs.
+- Avoid manual thread intervention during the expected wait window, including charters that sit active for an hour or two.
+- If a detached manual wake becomes necessary because the parent session may die, keep the timeout in the same long-running range as the workspace defaults instead of shrinking it.
 
 ## Autonomy Contract
 
