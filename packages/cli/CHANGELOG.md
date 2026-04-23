@@ -2,6 +2,758 @@
 
 All notable changes to `@murphai/murph` will be documented in this file.
 
+## [1.0.0] - 2026-04-23
+
+### Added
+- rebuild dashboard sidebar with shadcn
+- add normalized query surfaces
+- delegate Vercel Stripe metering
+- add additive wearables read commands
+- prefer normalized wearable query surfaces
+- add canonical wearable envelope layer
+- add Bryan Johnson sauna onboarding contract
+- improve Norwegian 4x4 research framing
+- add repo-local GitHub task skill
+- add Finnish sauna onboarding
+- add privacy-safe ai usage attribution
+- refresh red-light research copy
+- add red-light onboarding
+- recover Finnish sauna source appraisals
+- add scheduled log support
+- expand bryan johnson sauna evidence
+- polish experiment research group cards
+- land finnish sauna tranche1 appraisals
+- add generic capture primitive
+- auto-manage Stripe webhook listener from pnpm dev
+- land norwegian 4x4 research landscape
+- add source findings takeaways
+- use dedicated finnish sauna artwork
+- use dedicated bryan johnson artwork
+- use dedicated red light artwork
+- use dedicated norwegian 4x4 artwork
+- land merged local research updates
+- merge pro helper research updates
+- expand study card summaries
+- expand norwegian 4x4 research corpus
+- add source-person profile images
+- add research evidence metadata
+- add red-light evidence metadata
+- refine experiment signal prominence copy
+- reuse experiment protocol timeline summary
+- add hosted vault sync import
+- restructure protocol details
+- expand finnish sauna corpus
+- refresh user-facing experiment copy
+- add norwegian 4x4 landing package
+- dedupe red light glasses pass4
+- add red light glasses landing
+- add research pass resume support
+- add research workflow script
+- source experiment detail from health commons
+- add run release-finalize seam
+- expand sauna research corpus
+- source bryan johnson sauna routine
+- cut over dry-sauna commons seed
+- add hosted run breadcrumb logs
+- add initial health commons package
+- add hosted-run control plane
+- add runner observability logs
+- support best-effort multi-stream csv imports
+- make csv sample imports more permissive
+- add copy button to homepage install terminal
+- materialize due wakes before alarm drain
+- add hosted launch pricing plans
+- prefill hosted phone country from geo hints
+- redesign Connect card and update homepage copy
+- land hard-cut migration batch 1
+- hard-cut hosted wake docs and harness
+- merge how-it-works + experiments into one narrative section
+- tone join stages with danger eyebrow, lift form surfaces
+- dev-only ?preview=<stage> for /join UI review
+- rework /join shell to narrow split-panel layout
+- polish FAQ, OTP slots, and LP auth CTA
+- tidy dashboard sidebar and make LP logo clickable
+- add mobile top-bar nav to dashboard layout
+- unify /join stages on new design system shell
+- roll out new design system to settings, OTP input, FAQ privacy Q
+- land native wake executor and payload spill
+- land final cutover phases
+- cut over live runner wake drains
+- stage hosted wake substrate
+- land hosted browser snapshot flow
+- add email delivery subjects
+- add Strava integration
+- enable privy captcha on hosted onboarding auth
+- expand hosted phone auth countries for byo twilio
+- add hosted onboarding playwright stress helper
+- narrow outbox mirror authority
+- make hosted delivery journal authoritative
+- add landing-page signup cta
+- add quick start to landing page
+- promote landing page to root
+- add explicit food unschedule command
+- land greenfield control-plane cutover
+- add OG/Twitter metatags to LP and replace nav logo with SVG
+- unified /design page with Brand and Components tabs
+- add dynamic OG image generation
+- add SVG logo and favicon
+- auto-scan image qr and barcodes
+- add landing page with hero and sticky nav
+- add shadcn chart component with recharts
+- implement dashboard app shell with experiment pages
+- set up design system with shadcn base-ui components
+
+### Fixed
+- harden research thread url capture
+- harden cli validation and model recovery
+- harden research workspace packaging
+- align hosted deploy env workflow
+- move sidebar gradient constant to server-safe module
+- center mobile header logo
+- use logo wordmark in mobile dashboard header
+- sidebar spacing and drop logout icon
+- align wearable latest summaries
+- align experiment prompt guidance
+- extend shard wait timeout
+- tighten scheduled-log follow-up handling
+- ignore nested agent skill directories
+- restore main release and hosted e2e checks
+- improve local onboarding public-link guidance
+- land Finnish sauna detail cleanup and refresh CLI artifacts
+- tighten Norwegian 4x4 onboarding guidance
+- drop stale review-gpt flag
+- separate typing ownership from cleanup handles
+- tighten telegram and linq abort handling
+- persist safe notification run logs
+- repair local e2e lane
+- restore assistant-cli subpath source resolution
+- split capture add lookup handles
+- tighten capture batch handling
+- harden cold-start typing ownership
+- capture Stripe whsec from stderr too
+- add retry safeguards
+- preserve provider continuity on resume
+- pair usage prices with launch checkout
+- preserve native resume during onboarding
+- preserve normalized preset and explicit false zdr
+- hard-cut provider callers to target policy
+- set image sizes and priority on experiment cards
+- pass vercel ai key to hosted deploy
+- reconcile hosted Stripe webhooks inline
+- use authored study findings
+- fix hosted local e2e startup
+- simplify study card collapsed state
+- make the full study row collapsible
+- require authored study summaries
+- add red-light source findings
+- tighten experiments page header copy
+- tighten bryan johnson sauna copy and study metadata
+- restore study card and enable dev cache
+- prefer recent experiment sources on tied n
+- validate import manifest from bundle
+- prioritize study findings in experiment cards
+- inherit homepage opengraph image on join
+- swap experiment source sample badges
+- pin sauna and 4x4 featured cards
+- tighten signal uncertainty copy
+- move study sample counts
+- explain research stat labels
+- tweak signal uncertainty copy
+- remove background signal helper copy
+- clarify experiment signal hierarchy
+- remove protocol signal helper copy
+- clarify experiment protocol copy
+- show protocol days excluding baseline
+- show study years in source badges
+- tighten norwegian 4x4 steps
+- trim baseline protocol steps
+- simplify protocol UI
+- trim bryan johnson experiment copy
+- clean up source person expert cards
+- return structured bound tool failures
+- share hosted run messaging activity
+- split container runtime loaders
+- remove reply sanitizer
+- key onboarding to first session
+- defer hosted stripe webhook reconciliation
+- restore experiments catalog
+- remove remaining bank seam casts
+- harden sqlite row decoders
+- remove telegram connector api casts
+- simplify research artifact handling
+- require downloadable smoke artifacts
+- scope research artifact detection to latest turn
+- export failed research turns
+- harden research smoke workflow
+- harden runtime issue privacy path
+- land run-centric ingress protocol seam
+- refine first-turn onboarding guidance
+- green clean release checks
+- consume dashboard snapshot directly
+- tighten privacy retention across hosted ingress and runtime
+- restore hosted-local e2e hard-cut lanes
+- fail closed on ingress and stale outbox resend
+- remove durable do bundle cache
+- stop renewing agent token export sessions
+- drain hosted run follow-up work locally
+- always finalize prepared run drains
+- preserve direct hosted-run retry arm
+- align runtime timer run-drain verification
+- land sauna docs cleanup patch
+- harden hosted email drain and agent session retries
+- fence stale job failures
+- land greenfield cutover
+- deprecate persisted assistant cron tick ingress
+- align run-shaped runner request tests
+- hard-close run-drain timer wake seam
+- hard-cut hosted jobs to runDrain
+- reject partial acquired commits
+- require runDrain for runner wake invokes
+- isolate write-batch commit boundary
+- clear hosted tokens on disconnect
+- hard-cut subpath-only root fallbacks
+- remove empty workspace import
+- stabilize assistant cli and hosted runtime specs
+- keep setup shim bin ownership in packages/cli
+- prevent hosted local linq cleanup replay
+- relax homepage hero wrapping on mobile
+- finish legacy hard-cut cleanups
+- expand durable runner observability
+- handle equals-style root flags
+- add safe observability logs
+- hard-cut workout measurement alias
+- remove assistant outbox and device-sync legacy shims
+- remove supplement legacy ingredient fallback
+- expose container decode diagnostics
+- restore canonical next font loading
+- restore deploy migration history
+- update hosted onboarding launch pricing
+- decouple hosted-web prisma from verify
+- restore hosted local e2e lanes
+- stabilize verification lanes
+- restore duplicate commit e2e lane
+- narrow hosted-local runner bundle closure
+- stabilize measurement verification fixtures
+- prefer PATH vault-cli stubs
+- drop typecheck project references
+- remove stale assistant-engine helper exports
+- preserve local bridge loopback bootstrap
+- get verify green again
+- fail closed for root chat raw-mode input
+- close greenfield cutover gaps
+- use static fonts for og image
+- self-host hosted fonts
+- restore hosted-wake Vercel build
+- hard-cut materialization and clean stale docs
+- tolerate missing prisma env files
+- preserve provider normalization inference
+- require finalize proof for snapshot publish
+- unify quarantined lifecycle vocabulary
+- retry alarm-driven hosted wake drains
+- remove legacy route callbacks
+- move alias routing ownership to web
+- require hosted runtime mutation fences
+- require wakeEventId in fetch proofs
+- sync loopback prisma schemas with db push
+- refetch after quarantine invalidation
+- align hosted env wiring
+- refetch hosted wake batch after cursor advance
+- roll hosted wake quarantine fence
+- make terminal prompt prefix non-selectable
+- harden wake proof rollout and stale hint refresh
+- tighten hosted wake proof fixtures and snapshot refs
+- tighten hosted wake terminal proofing
+- keep runner authority in the supervisor
+- tighten wake boundary contracts
+- tighten hosted callback surfaces
+- harden hosted wake proof boundaries
+- tighten proof and materialization boundaries
+- finalize hosted wakes after cursor commit
+- scope external event identity by owner
+- derive hosted device-sync wake materialization from postgres
+- fail closed on runtime root-key repair
+- close hosted wake cutover proof lanes
+- allow generated next-env review-gpt stubs
+- fence stale coalesced wake receipts
+- trim dead wake wrappers
+- narrow hosted cursor CAS patch
+- allow snapshot-only hosted cursor CAS
+- land hosted wake and webhook follow-ups
+- fail closed on manifest path traversal
+- hard-cut cron runtime compat
+- fence hosted wake cursor snapshot refs
+- reconcile replaced hosted wakes
+- harden runner outbound bootstrap stub
+- preserve coalesced event identity
+- unify deploy boolean env parsing
+- fail closed hosted-email public ingress callback errors
+- unify encrypted wake payload shape
+- split hosted secret ownership
+- normalize hosted linq wake payload
+- harden hosted Privy verifier config
+- enforce single-step hosted wake cursor commits
+- verify hosted Privy tokens directly
+- trust successful save receipts
+- align hard-cut wake parity
+- stop treating missing hosted wakes as queued
+- remove execution outbox from hosted baseline
+- trust Privy identity-token member ids
+- keep wake cleanup aligned with v2 cutover
+- avoid member lookup on invite-status polls
+- make invite status polling single-flight
+- prefer outbox mirror for hosted delivery recovery
+- drop gateway projection journal snapshots
+- prefer direct final wake bundle commits
+- cut over active-member Linq webhook replies
+- hard-cut hosted ingress wake ownership
+- ignore next smoke review artifacts
+- drop telegram webhook receipt ownership
+- align hosted wake payload schema export
+- update hosted annual launch price to 150
+- update hosted annual launch pricing
+- update hosted launch monthly pricing
+- stabilize local hosted wake suites
+- stabilize hosted local e2e after wake cutover
+- harden murph install smoke path
+- commit prisma client link helper
+- align hosted runtime with dispatch-first request
+- remove hosted crypto test fallbacks
+- remove observability vitest fallback
+- move missing Privy fallback into test harnesses
+- refine homepage hero and hosted auth smoke fallback
+- derive shim dispatch fallback from hosted status
+- keep quarantined rows terminal
+- clean up phone and messaging-setup cards
+- shrink oversized primary buttons on /join verify and checkout
+- make hosted wake handoff fully best effort
+- prune audit bundle binaries
+- address frontend-review findings on otp input and sidebar
+- restore acceptance green
+- drop unreachable hosted email participant guard
+- pack runner workspace deps with npm
+- pass TSX tsconfig through hosted local launcher
+- harden browser-safe query boundaries
+- tighten session contract parsing
+- restore Linq webhook reply continuity
+- harden hosted wake scheduling
+- include snapshot aad in session
+- fail closed on invalid email subjects
+- serialize hosted runner lease claims
+- fail closed device-sync runtime config
+- normalize hosted email routing
+- inline-drain hosted linq webhook dispatch
+- preserve active lease on stale finalize retries
+- keep hosted email replies owner-only
+- harden hosted runtime config handoff
+- restore strava release coverage
+- preserve hosted-local rapid-turn continuity
+- fail closed on missing linux runner alias
+- stabilize linux hosted local messaging e2e
+- prebuild hosted local runner bundle
+- skip vercel link when oidc token is provided
+- use workspace tsconfig for hosted dev
+- bootstrap hosted dev source resolution
+- harden hosted rapid-turn e2e auth
+- preserve assistant continuity across rapid turns
+- hard-cut hosted runner config surface
+- use hosted email send binding
+- centralize hosted runtime provider config
+- remove duplicate homepage code
+- canonicalize homepage route
+- update homepage signup headline
+- tighten homepage signup cta
+- remove hosted phone country setup notices
+- finalize hosted cleanup shape
+- tolerate runner cleanup destroy races
+- enforce proxy auth and drain legacy outbox refs
+- restore typecheck path resolution
+- refine linq first-contact routing
+- clean hosted callback boundary
+- prevent repeated linq first-contact retries
+- forward isolated runner child logs
+- restore release check
+- add hosted delivery debug logs
+- preserve raw linq reply anchors
+- recover stale linq chats and surface delivery errors
+- canonicalize hosted webhook dispatch transaction ownership
+- recover invalid assistant config from env
+- extend runner warm idle ttl
+- bound telegram webhook inline drain
+- unblock telegram webhook ingress
+- fence stale hosted runner results
+- suppress phone auth banner during alternate auth
+- remove inline device-sync wake state
+- align hosted phone entry input sizing
+- clarify attachment parse and decode surfaces
+- remove /lp hero sign-in button
+- replace /lp auth dead links
+- backfill parse jobs on deduped captures
+- restore repo verification green
+- stabilize first-contact e2e script
+- tighten cleanup follow-ups
+- restore green verification
+- preserve linq reply state and target defaults
+- make meal schema and list surface truthful
+- harden linq reply delivery
+- remove hosted runtime dead path
+- resolve live cutover merge
+- self-heal linq replies and preserve proxy base urls
+- restore hosted local runner env parity
+- restore pre-activation user env control
+- index frontend agent guidance
+- ignore cloudflare dry-run artifacts
+- log hosted delivery failures
+- add worker-safe contracts subpath
+- avoid sqlite in worker bundle
+
+### Changed
+- cover device cli contracts
+- Fix hosted device connect provider guard
+- bump review-gpt to 0.5.74
+- Update system-prompt.ts
+- land greenfield v1 cleanup batch
+- Add conservative Cloudflare container rollout defaults
+- Add Vercel Gateway provider filter config
+- cover hosted turn input refresh
+- Add hosted late input turn adoption
+- align cloudflare deploy workflow env surface
+- cf
+- fix acceptance coverage and artifacts
+- inline sidebar gradient instead of extracting to a module
+- Add active experiment prompt context
+- extract sidebar brand gradient constant
+- unify sidebar footer and use logo wordmark
+- Fix research scaffold review-gpt packaging
+- sidebar guideline cleanup
+- clear wearables lane ledger row
+- finish Vercel Stripe setup notes
+- Land canonical experiment run progress and outcome surfaces
+- fix turn-input landing coverage
+- Make device-sync manifests own job schemas
+- Land assistant turn-input local-runtime seam
+- cover experiment progress and outcome CLI flow
+- Land device-sync provider manifest registry
+- hosted runtime delegated billing port slice
+- Add biomarker dashboard navigation
+- apps/web persist delegated hosted billing source
+- cover delegated billing fail-closed paths
+- Add resting heart rate biomarker page
+- Fix hosted AI usage reporting secret boundary
+- Relax commit helper message requirement
+- close GitHub task skill ledger row
+- refresh Murph thesis docs
+- make init charter-first
+- add research init scaffold
+- Add Norwegian 4x4 experiment onboarding
+- Land Norwegian 4x4 study-card and source refresh
+- clarify worktree and audit subagent policy
+- bump review-gpt to 0.5.73
+- add new research
+- hard-cut normalized provider config
+- read provider target and policy directly
+- enable smart placement
+- clear completed cloudflare key workflow row
+- simplify experiment artwork resolver
+- clear landed wake residue
+- note generated artifact landing policy
+- note generated artifact landing policy
+- isolate cloudflare node runner env
+- speed up verify acceptance reuse
+- handle Telegram typing fetch in cloudflare runner test
+- Update experiment-header.tsx
+- parallelize workspace preflight
+- add Finnish sauna research evidence metadata
+- clarify experiment mechanisms
+- Clean up orphaned hosted web dev servers
+- Fix experiment source labels
+- align stale hosted expectations
+- forward hosted assistant zero-data-retention
+- rename early-session onboarding seams
+- tighten hosted local e2e stubs
+- remove dead hosted run nudge defer plumbing
+- tighten unsafe assertion seams
+- remove unsafe linq dispatch assertions
+- remove remaining owned seam assertions
+- rm loading
+- trim review-gpt wrapper surface
+- tighten hosted local helper assertions
+- simplify review-gpt wrapper
+- remove unsafe connector seam assertions
+- tighten assertion boundaries
+- remove remaining unknown assertions
+- remove hosted web unsafe assertions
+- remove local review-gpt diagnostics wrapper
+- remove redundant JSON boundary unknown casts
+- remove redundant json parse unknown casts
+- remove redundant assistant-engine json boundary casts
+- wake final research pass
+- tighten typed test fixtures
+- tighten service mock typing
+- ignore review-stage scratch files
+- bump review-gpt to 0.5.72
+- finish signup welcome notification migration
+- update notification delivery expectations
+- capture hosted cleanup artifacts
+- close hosted run-drain cleanup lane
+- close hosted security follow-up lane
+- finish hard-cut cleanup and proof coverage
+- clear browser-vault hard-cut ledger row
+- hard-cut replica session flow
+- update browser vault replica coverage
+- update browser vault hard-cut tests
+- update browser vault session client test
+- split experiment protocol and private run detail
+- hard cut dashboard snapshot contract
+- Fail closed hosted-run commits on incomplete event results
+- fix browser snapshot coverage assertions
+- use prepared bundle for local e2e
+- align browser vault snapshot fixtures
+- hard cut remaining wake naming
+- finish greenfield shape cleanups
+- hard-cut compatibility residue
+- share serialized lock helper
+- bump review-gpt to 0.5.71
+- remove stale device-sync ingress residue
+- share package vitest config setup
+- hard-cut private subpath export
+- simplify runner env seams
+- trim private subpath exports
+- dedupe hosted user crypto context lookup
+- simplify assistant cron stale branches
+- Reject missing hosted run finalizeRequired in Cloudflare
+- drop stale connect-start test bucket
+- Make hosted run finalizeRequired explicit
+- add hosted-run stale-residue guard
+- Preserve hosted device sync wake ingress hints
+- remove dead device sync connect start helper
+- Rename hosted run wakeIdsJson field
+- restore green repo verification
+- centralize invite phone auth flow
+- delete dead duplicate ui root
+- finish hosted hard-cut doc cleanup
+- remove local user-runner wake residue
+- clean hosted run doc residue
+- drop abandoned ui lane registration
+- land non-ui route and storage cleanup
+- finish simplification cleanup follow-ups
+- split parser modules
+- dedupe hosted run elapsed helper
+- simplify runner outbound helpers
+- share raw import manifest reader
+- rename ingress and run boundary
+- Wire hosted run phase logs into web observability
+- hard-cut hosted execution docs
+- Simplify hosted run durable statuses
+- hard-cut legacy wake lane
+- align hosted-run recovery wording
+- hard cut legacy hosted-wake surface
+- Update system-prompt.ts
+- remove file-shaped assistant exports
+- split assistant CLI capability definitions
+- trim stale tsconfig refs
+- split workspace boundary verifier rules
+- split config parsing seams
+- align onboarding prompt expectations
+- align runner capacity defaults
+- remove completed legacy cleanup lane
+- Refactor hosted wake handoff to nudge semantics
+- final
+- close cloudflare e2e ledger row
+- final shape
+- add hosted-local linq later-reply drain proof
+- clear closed linq reply ledger row
+- stabilize cli verification suite
+- narrow public subpaths and remove brittle chat duplicate
+- align assistant core facade export assertions
+- add hosted wake pending-commit recovery proof
+- harden migration guard parser
+- align assistant tests with greenfield contracts
+- refresh config schema
+- finish greenfield compatibility cleanup
+- drop providerBinding test fixtures
+- hard-cut threadId in automation self-delivery slice
+- require explicit providers and canonical cron thread ids
+- Hard-cut hosted wake proof and runner route leftovers
+- resolve workspace public subpaths from source exports
+- hard-cut greenfield callback and thread target seams
+- hard-cut hosted execution compatibility seams
+- hard-cut poisoned runtime vocabulary
+- simplify hosted wake retry exits
+- trim hosted migration wording
+- Remove generic hosted wake append seam
+- Handle stale hosted wake terminal fences
+- hard-cut hosted runner callback routes
+- Harden hosted email ingress wake append
+- hard-cut leftover terminal and runner concepts
+- add hosted wake quarantine legacy-proof rejection
+- close landed hosted wake cleanup plans
+- clarify hosted wake behavior contract
+- Update hero-section.tsx
+- align cron reason assertion
+- condense hosted-web prisma migrations
+- align hosted wake refetch tests
+- fence hosted wake test proofs
+- align release-script audit expectations
+- align cloudflare node-runner assertions
+- cover quarantined hosted wake terminal route
+- align hosted wake proof coverage
+- trim hosted boundary tooling residue
+- dedupe hosted cutover follow-up plans
+- tighten cutover truth in live docs
+- dedupe hosted cutover active state
+- archive stale hosted cutover prompts
+- remove dead hosted parser maintenance seams
+- remove hosted runner wake wrapper row
+- guard hosted wake enqueue wrappers
+- remove dead edge-triggered behavior
+- Require hosted wake target confirmation for inline handoff
+- cover cleanup after cursor commit
+- Harden hosted wake cursor commits
+- rename gateway projection cache
+- hard-cut local internal proxy auth
+- extract cron food auto-log helpers
+- clarify wake start modes
+- split runner outbound codec helpers
+- Emit canonical wake materialization hints after system wakes
+- apps/cloudflare: fail closed on malformed runner bundle refs
+- make hosted device-sync SQL error omission explicit
+- drop runner state ready promise
+- fix payload unification fixtures
+- Fix hosted wake alarm read retry
+- split hosted Privy auth helpers
+- cover hosted wake finalize CAS conflicts
+- bump review-gpt to 0.5.70
+- Harden hosted wake cleanup cursor CAS
+- split hosted system wake lanes
+- clarify hosted wake message contract
+- hard-cut compatibility seams
+- align thin-runner pending commit fixtures
+- align hosted runtime parity expectations
+- bump review-gpt to 0.5.69
+- close completed Privy auth lane
+- switch review-gpt delay to upstream cli
+- hard-cut hosted webhook receipt coverage
+- simplify onboarding and split oversized modules
+- tighten assistant delivery record test stubs
+- finish hosted stateless cutover
+- remove obsolete journal scaffolding
+- remove hosted effects seam references
+- update committed fallback log expectation
+- relax post-commit export failures
+- fold bundle cache into runner meta
+- prefer single-pass hosted completion
+- simplify hosted conversation wake normalization
+- remove unused review-gpt presets
+- harden wake payload transport
+- stop review-gpt presets from requesting patches
+- more hard cut cleanups and fixes
+- hard-cut wake-native status cleanup
+- cut conversation wake follow-up
+- clear hosted hard-cut ledger rows
+- finalize hard-cut integration
+- hard-cut hosted runner wake/state lane
+- tighten hosted wake seams
+- drop linq control-plane webhook receipts
+- remove hosted dispatch-payload scope
+- trim wake naming residue
+- close hosted local e2e harness lane
+- stabilize hosted local e2e harness
+- finalize greenfield wake cleanup
+- remove dispatch-lifecycle shim usage
+- drop wake status dispatch alias
+- drop redundant wake finalize alias
+- isolate conversation wake seam
+- unify hosted local scenario helpers
+- add Privy logo asset
+- trim hosted wake dispatch residue
+- extract hosted local dev stack launcher
+- drop legacy wake compatibility
+- Split hosted local full-stack and worker-only e2e lanes
+- tighten hosted wake lifecycle seam
+- make hosted wake followup explicit
+- update homepage
+- ignore isolated next smoke outputs
+- align wake-first hosted tests
+- clear hosted hard-cut ledger row
+- finish wake-first hard cut
+- fix hosted hard-cut webhook fixture
+- remove dispatch compatibility
+- Hard-cut Cloudflare runner to wake-native flow
+- Update site-footer.tsx
+- align hard-cut cleanup with wake-first reality
+- finish hard-cut batch 3 cleanup
+- finish hard-cut batch 2
+- simplify hosted phone geo prefill
+- hard-cut thin runner dispatch shims
+- remove node-runner test globals
+- hard-cut hosted wake append inputs
+- clear completed thin-shim ledger row
+- align thin-shim dispatch outcome assertions
+- remove legacy hosted wake dispatch schema
+- hard-cut native wake dispatch shims
+- split hosted wake message lane
+- hard-cut wake helper lifecycle
+- cut provider webhooks to direct hosted wakes
+- apply frontend-review fixes on /join
+- note ?preview dev aid and reconcile lucide guidance
+- tighten invite shortcut verification card copy and layout
+- rewrite active-state feature cards around experiments
+- tighten /join copy, drop duplicate setup phrasing
+- swap Murph signup badge for mono eyebrow on /join
+- clear completed audit-bundle ledger row
+- hard-cut wake dispatch cleanup
+- discover
+- cover long finalize lease handoff
+- bump to v0.5.66
+- remove prompt-only mode
+- add email delivery guard proofs
+- cover hosted overlap lease race
+- drop stale hosted email workflow envs
+- bump review-gpt to 0.5.65
+- add failure diagnostics
+- bump review-gpt to 0.5.64
+- add local smoke duplicate-commit regression
+- review hosted inbound target plan
+- bump review-gpt to 0.5.63
+- split homepage into sections
+- lock device sync provider readiness path
+- hard-cut final device-sync integration cleanup
+- hard-cut webhook preflight seam
+- lock provider seam guardrails
+- remove temporary Playwright stress helper
+- de-oura webhook admin config
+- Hard-cut hosted device-sync provider assembly
+- remove final dispatch compatibility seams
+- add phone wallet refresh plan
+- unblock release check
+- remove completed outbox cleanup ledger row
+- remove execution outbox transport status
+- add local telegram hosted e2e
+- add Cloudflare deploy shortcut
+- hard-cut delivery journal authority
+- drop legacy outbox compat path
+- Align hosted Privy auth completion flows
+- clear release fix ledger row
+- narrow hosted webhook receipt boundary
+- add assistant bootstrap diagnostics
+- hard cut hosted execution plane
+- share hosted local e2e harness
+- narrow hosted execution lifecycle reads
+- extract duplicate commit worker fixture
+- expand hosted e2e lane
+- add hosted first-contact e2e lane
+- trim runtime cleanup noise
+- close meal cli ledger row
+- close hosted texting repro ledger row
+- keep hosted local repro worker-only
+- trim linq repro leftovers
+- tee up hosted cutover worker pack
+- update brand assets, frontend refs, and remove visual-identity.md
+- add frontend review audit
+- collapse managed crypto ownership
+- reduce hosted billing checkout latency
+- update design system showcase and add TODOS
+
 ## [0.2.13] - 2026-04-15
 
 ### Added
