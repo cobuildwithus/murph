@@ -43,11 +43,26 @@ export interface HostedBundleRestoreRootMap {
 export async function snapshotHostedBundleRoots(input: {
   externalizeFile?: (input: HostedBundleArtifactSnapshotInput) => Promise<HostedBundleArtifactRef | null>;
   kind: HostedExecutionBundleKind;
+  materializedPreservedArtifactPaths?: ReadonlySet<string>;
   preservedArtifacts?: readonly HostedBundleArtifactLocation[];
   roots: readonly HostedBundleSnapshotRootInput[];
+  shouldIncludePreservedArtifact?: (
+    input: HostedBundleArtifactLocation,
+  ) => boolean | Promise<boolean>;
 }): Promise<Uint8Array | null> {
   const files: HostedBundleArchiveFile[] = [];
   let includedRootCount = 0;
+  const configuredRootsByKey = new Map<string, HostedBundleSnapshotRootInput[]>();
+  const includedRootsByKey = new Map<string, HostedBundleSnapshotRootInput[]>();
+
+  for (const root of input.roots) {
+    const configuredRoots = configuredRootsByKey.get(root.rootKey);
+    if (configuredRoots) {
+      configuredRoots.push(root);
+    } else {
+      configuredRootsByKey.set(root.rootKey, [root]);
+    }
+  }
 
   for (const root of input.roots) {
     if (!(await directoryExists(root.root))) {
@@ -59,6 +74,12 @@ export async function snapshotHostedBundleRoots(input: {
     }
 
     includedRootCount += 1;
+    const includedRoots = includedRootsByKey.get(root.rootKey);
+    if (includedRoots) {
+      includedRoots.push(root);
+    } else {
+      includedRootsByKey.set(root.rootKey, [root]);
+    }
     files.push(
       ...(await collectBundleFiles({
         externalizeFile: input.externalizeFile,
@@ -74,15 +95,41 @@ export async function snapshotHostedBundleRoots(input: {
   }
 
   const includedPaths = new Set(files.map((file) => `${file.root}:${file.path}`));
+  const materializedPreservedArtifactPaths = input.materializedPreservedArtifactPaths ?? new Set<string>();
   for (const artifact of input.preservedArtifacts ?? []) {
-    const preservedPathKey = `${artifact.root}:${normalizeBundlePath(artifact.path)}`;
+    if (!configuredRootsByKey.has(artifact.root)) {
+      throw new Error(`Hosted bundle preserved artifact root "${artifact.root}" is not configured for snapshot.`);
+    }
+
+    const normalizedPath = normalizeBundlePath(artifact.path);
+    const preservedPathKey = `${artifact.root}:${normalizedPath}`;
     if (includedPaths.has(preservedPathKey)) {
+      continue;
+    }
+
+    if (input.shouldIncludePreservedArtifact) {
+      const shouldIncludePreservedArtifact = await input.shouldIncludePreservedArtifact({
+        ...artifact,
+        path: normalizedPath,
+      });
+      if (!shouldIncludePreservedArtifact) {
+        continue;
+      }
+    }
+
+    if (
+      materializedPreservedArtifactPaths.has(preservedPathKey)
+      && !(await hasLiveBundledFilePath({
+        relativePath: normalizedPath,
+        roots: includedRootsByKey.get(artifact.root) ?? [],
+      }))
+    ) {
       continue;
     }
 
     files.push({
       artifact: artifact.ref,
-      path: normalizeBundlePath(artifact.path),
+      path: normalizedPath,
       root: artifact.root,
     });
     includedPaths.add(preservedPathKey);
@@ -277,6 +324,63 @@ async function directoryExists(directoryPath: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+async function hasLiveBundledFilePath(input: {
+  relativePath: string;
+  roots: readonly HostedBundleSnapshotRootInput[];
+}): Promise<boolean> {
+  for (const root of input.roots) {
+    const shouldIncludeRelativePath = root.shouldIncludeRelativePath ?? (() => true);
+    if (!shouldIncludeRelativePath(input.relativePath)) {
+      continue;
+    }
+
+    if (await isBundledRegularFilePath(root.root, input.relativePath)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+async function isBundledRegularFilePath(root: string, relativePath: string): Promise<boolean> {
+  const segments = normalizeBundlePath(relativePath).split(path.posix.sep).filter(Boolean);
+  if (segments.length === 0) {
+    return false;
+  }
+
+  let currentPath = root;
+
+  for (const [index, segment] of segments.entries()) {
+    const nextPath = path.join(currentPath, segment);
+
+    try {
+      const entry = await lstat(nextPath);
+
+      if (entry.isSymbolicLink()) {
+        return false;
+      }
+
+      if (index === segments.length - 1) {
+        return entry.isFile();
+      }
+
+      if (!entry.isDirectory()) {
+        return false;
+      }
+    } catch (error) {
+      if (isMissingPathError(error)) {
+        return false;
+      }
+
+      throw error;
+    }
+
+    currentPath = nextPath;
+  }
+
+  return false;
 }
 
 async function assertHostedBundleRestorePathHasNoSymlinks(

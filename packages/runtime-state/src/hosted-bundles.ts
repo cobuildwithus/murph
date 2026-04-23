@@ -20,6 +20,10 @@ import {
 } from "./hosted-bundle-node.ts";
 
 const WORKSPACE_OPERATOR_HOME_ROOT = "operator-home";
+const WORKSPACE_SNAPSHOT_ROOT_KEYS = new Set<string>([
+  WORKSPACE_OPERATOR_HOME_ROOT,
+  "vault",
+]);
 const RAW_ARTIFACT_EXTERNALIZE_THRESHOLD_BYTES = 256 * 1024;
 
 export interface HostedWorkspaceArtifactPersistInput extends HostedBundleArtifactSnapshotInput {
@@ -32,6 +36,7 @@ export type HostedWorkspaceArtifactResolver = (
 
 export async function snapshotHostedExecutionContext(input: {
   artifactSink?: (input: HostedWorkspaceArtifactPersistInput) => Promise<void>;
+  materializedArtifactPaths?: ReadonlySet<string>;
   operatorHomeRoot?: string | null;
   preservedArtifacts?: readonly HostedBundleArtifactRestoreInput[];
   vaultRoot: string;
@@ -60,6 +65,11 @@ export async function snapshotHostedExecutionContext(input: {
         })()
       : undefined,
     kind: "vault",
+    materializedPreservedArtifactPaths: new Set(
+      [...(input.materializedArtifactPaths ?? [])]
+        .map((relativePath) => normalizeWorkspaceSnapshotArtifactPathKey(relativePath))
+        .filter((artifactPathKey): artifactPathKey is string => artifactPathKey !== null),
+    ),
     preservedArtifacts: input.preservedArtifacts,
     roots: [
       {
@@ -82,6 +92,9 @@ export async function snapshotHostedExecutionContext(input: {
           ]
         : []),
     ],
+    shouldIncludePreservedArtifact(artifact) {
+      return shouldPreserveWorkspaceSnapshotArtifact(artifact);
+    },
   });
 
   if (vaultBundle === null) {
@@ -188,6 +201,21 @@ function shouldIncludeWorkspaceSnapshotVaultRelativePath(relativePath: string): 
   );
 }
 
+function shouldPreserveWorkspaceSnapshotArtifact(input: {
+  path: string;
+  root: string;
+}): boolean {
+  if (input.root !== "vault") {
+    return false;
+  }
+
+  const normalizedRelativePath = normalizeWorkspaceSnapshotRelativePath(input.path);
+  return (
+    shouldIncludeWorkspaceSnapshotVaultRelativePath(normalizedRelativePath)
+    && normalizedRelativePath.startsWith(`raw${path.posix.sep}`)
+  );
+}
+
 function isVaultRuntimeRelativePath(relativePath: string): boolean {
   return relativePath === RUNTIME_ROOT_RELATIVE_PATH
     || relativePath.startsWith(`${RUNTIME_ROOT_RELATIVE_PATH}${path.posix.sep}`);
@@ -217,6 +245,52 @@ function normalizeWorkspaceSnapshotRelativePath(relativePath: string): string {
     .replace(/\/+/gu, "/")
     .replace(/^\.\//u, "")
     .replace(/^\/+|\/+$/gu, "");
+}
+
+function normalizeWorkspaceSnapshotArtifactPathKey(relativePath: string): string | null {
+  const normalizedRelativePath = normalizeWorkspaceSnapshotRelativePath(relativePath);
+  if (normalizedRelativePath.length === 0) {
+    return null;
+  }
+
+  const delimitedPath = parseWorkspaceSnapshotArtifactPath(normalizedRelativePath);
+  if (delimitedPath) {
+    return `${delimitedPath.root}:${normalizeWorkspaceSnapshotRelativePath(delimitedPath.path)}`;
+  }
+
+  if (normalizedRelativePath.startsWith(`vault${path.posix.sep}`)) {
+    return `vault:${normalizeWorkspaceSnapshotRelativePath(
+      normalizedRelativePath.slice(`vault${path.posix.sep}`.length),
+    )}`;
+  }
+
+  if (normalizedRelativePath.startsWith(`${WORKSPACE_OPERATOR_HOME_ROOT}${path.posix.sep}`)) {
+    return `${WORKSPACE_OPERATOR_HOME_ROOT}:${normalizeWorkspaceSnapshotRelativePath(
+      normalizedRelativePath.slice(`${WORKSPACE_OPERATOR_HOME_ROOT}${path.posix.sep}`.length),
+    )}`;
+  }
+
+  return `vault:${normalizedRelativePath}`;
+}
+
+function parseWorkspaceSnapshotArtifactPath(relativePath: string): {
+  path: string;
+  root: string;
+} | null {
+  const delimiterIndex = relativePath.indexOf(":");
+  if (delimiterIndex <= 0 || delimiterIndex >= relativePath.length - 1) {
+    return null;
+  }
+
+  const root = relativePath.slice(0, delimiterIndex);
+  if (!WORKSPACE_SNAPSHOT_ROOT_KEYS.has(root)) {
+    return null;
+  }
+
+  return {
+    path: relativePath.slice(delimiterIndex + 1),
+    root,
+  };
 }
 
 function shouldIncludeHostedOperatorHomeRelativePath(relativePath: string): boolean {

@@ -22,20 +22,29 @@ export async function exportHostedPendingAssistantRuntimeIssues(input: {
   issueExportPort?: HostedRuntimeIssueExportPort | null;
   vaultRoot: string;
 }): Promise<HostedPendingAssistantIssueExportResult> {
+  let invalidPendingRecordCount = 0;
   const pendingRecords = await listPendingAssistantRuntimeIssueRecords({
+    onInvalidRecord: ({ error, fileName }) => {
+      invalidPendingRecordCount += 1;
+      console.warn(
+        `Skipping malformed pending assistant runtime issue file ${fileName}; leaving it pending: ${summarizeHostedExecutionError(error)}`,
+      );
+    },
+    skipInvalidRecords: true,
     vault: input.vaultRoot,
   });
+  const totalPendingRecords = pendingRecords.length + invalidPendingRecordCount;
 
   if (!input.issueExportPort || pendingRecords.length === 0) {
     return {
       exported: 0,
-      failed: 0,
-      pending: pendingRecords.length,
+      failed: input.issueExportPort ? invalidPendingRecordCount : 0,
+      pending: totalPendingRecords,
     };
   }
 
   let exported = 0;
-  let failed = 0;
+  let failed = invalidPendingRecordCount;
 
   for (const batch of chunkPendingIssueRecords(pendingRecords, HOSTED_ISSUE_EXPORT_BATCH_LIMIT)) {
     try {
@@ -81,7 +90,7 @@ export async function exportHostedPendingAssistantRuntimeIssues(input: {
   return {
     exported,
     failed,
-    pending: pendingRecords.length - exported,
+    pending: totalPendingRecords - exported,
   };
 }
 

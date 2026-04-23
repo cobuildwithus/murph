@@ -8,8 +8,13 @@ import {
   resolveAssistantStatePaths,
   type AssistantStatePaths,
 } from "./assistant-state.ts";
+import {
+  createVersionedJsonStateEnvelope,
+  parseVersionedJsonStateEnvelope,
+} from "./versioned-json-state.ts";
 
 export const ASSISTANT_RUNTIME_ISSUE_SCHEMA = "murph.assistant-runtime-issue.v1";
+const ASSISTANT_RUNTIME_ISSUE_FILE_SCHEMA_VERSION = 1;
 
 export type AssistantRuntimeIssueEnvironment = "hosted" | "local";
 export type AssistantRuntimeIssuePhase =
@@ -45,6 +50,11 @@ export interface AssistantRuntimeIssueRecord {
   severity: AssistantRuntimeIssueSeverity;
   summary: string;
   surface: string | null;
+}
+
+export interface PendingAssistantRuntimeIssueRecordParseFailure {
+  error: unknown;
+  fileName: string;
 }
 
 const FIELD_MAX_LENGTH = 96;
@@ -90,7 +100,7 @@ export function resolvePendingAssistantRuntimeIssuePath(
 ): string {
   return path.join(
     paths.issuesPendingDirectory,
-    `${normalizeRequiredString(issueId, "issueId")}.json`,
+    `${normalizeIssueId(issueId)}.json`,
   );
 }
 
@@ -102,27 +112,51 @@ export async function writePendingAssistantRuntimeIssueRecord(input: {
   const paths = resolveAssistantRuntimeIssuePaths(input.vault, input.paths);
   const record = parseAssistantRuntimeIssueRecord(input.record);
   await ensureAssistantStateDirectory(paths.issuesPendingDirectory);
-  await writeJsonFileAtomic(resolvePendingAssistantRuntimeIssuePath(paths, record.issueId), record);
+  await writeJsonFileAtomic(
+    resolvePendingAssistantRuntimeIssuePath(paths, record.issueId),
+    createVersionedJsonStateEnvelope({
+      schema: ASSISTANT_RUNTIME_ISSUE_SCHEMA,
+      schemaVersion: ASSISTANT_RUNTIME_ISSUE_FILE_SCHEMA_VERSION,
+      value: record,
+    }),
+  );
 }
 
 export async function listPendingAssistantRuntimeIssueRecords(input: {
+  onInvalidRecord?: ((failure: PendingAssistantRuntimeIssueRecordParseFailure) => void) | null;
   paths?: AssistantStatePaths;
+  skipInvalidRecords?: boolean;
   vault?: string;
 }): Promise<AssistantRuntimeIssueRecord[]> {
   const paths = resolveAssistantRuntimeIssuePaths(input.vault, input.paths);
+  const onInvalidRecord = input.onInvalidRecord ?? null;
+  const skipInvalidRecords = input.skipInvalidRecords ?? false;
 
   try {
     const entries = await readdir(paths.issuesPendingDirectory, {
       withFileTypes: true,
     });
-    const records = await Promise.all(
-      entries
-        .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
-        .map(async (entry) => {
-          const raw = await readFile(path.join(paths.issuesPendingDirectory, entry.name), "utf8");
-          return parseAssistantRuntimeIssueRecord(JSON.parse(raw));
-        }),
-    );
+    const records: AssistantRuntimeIssueRecord[] = [];
+
+    for (const entry of entries) {
+      if (!entry.isFile() || !entry.name.endsWith(".json")) {
+        continue;
+      }
+
+      try {
+        const raw = await readFile(path.join(paths.issuesPendingDirectory, entry.name), "utf8");
+        records.push(parsePendingAssistantRuntimeIssueFile(JSON.parse(raw)));
+      } catch (error) {
+        if (!skipInvalidRecords) {
+          throw error;
+        }
+
+        onInvalidRecord?.({
+          error,
+          fileName: entry.name,
+        });
+      }
+    }
 
     return records.sort((left, right) => {
       const occurredAtOrder = left.occurredAt.localeCompare(right.occurredAt);
@@ -198,6 +232,34 @@ function resolveAssistantRuntimeIssuePaths(
   }
 
   return resolveAssistantStatePaths(vault);
+}
+
+function parsePendingAssistantRuntimeIssueFile(value: unknown): AssistantRuntimeIssueRecord {
+  if (hasVersionedJsonEnvelope(value)) {
+    return parseVersionedJsonStateEnvelope(value, {
+      label: "pending assistant runtime issue record",
+      parseValue: parseAssistantRuntimeIssueRecord,
+      schema: ASSISTANT_RUNTIME_ISSUE_SCHEMA,
+      schemaVersion: ASSISTANT_RUNTIME_ISSUE_FILE_SCHEMA_VERSION,
+    });
+  }
+
+  return parseAssistantRuntimeIssueRecord(value);
+}
+
+function hasVersionedJsonEnvelope(value: unknown): value is {
+  schema: unknown;
+  schemaVersion: unknown;
+  value: unknown;
+} {
+  return Boolean(
+    value
+    && typeof value === "object"
+    && !Array.isArray(value)
+    && "schema" in value
+    && "schemaVersion" in value
+    && "value" in value,
+  );
 }
 
 function normalizeIssueSchema(value: unknown): typeof ASSISTANT_RUNTIME_ISSUE_SCHEMA {

@@ -28,6 +28,7 @@ import { createDeviceSyncService } from "@murphai/device-syncd/service";
 import { exportGatewayProjectionSnapshotLocal } from "@murphai/gateway-local";
 
 import { createHostedArtifactUploadSink } from "./artifacts.ts";
+import { toHostedArtifactPathKey } from "./artifact-paths.ts";
 import {
   collectHostedAssistantDeliverySideEffects,
   drainHostedCommittedAssistantDeliveriesAfterCommit,
@@ -74,7 +75,7 @@ export async function executeHostedRunDrainForCommit(input: {
   restored: HostedRestoredExecutionContext;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
-    "commitTimeoutMs" | "platform" | "resolvedConfig" | "userEnv"
+    "commitTimeoutMs" | "forwardedEnv" | "platform" | "platformEnv" | "resolvedConfig" | "userEnv"
   >;
   runtimeEnv: Readonly<Record<string, string>>;
 }): Promise<HostedCommittedExecutionState> {
@@ -209,6 +210,7 @@ export async function executeHostedRunDrainForCommit(input: {
         decodeHostedBundleBase64(input.request.bundle),
       ),
     }),
+    materializedArtifactPaths: input.materializedArtifactPaths ?? new Set(),
     operatorHomeRoot: input.restored.operatorHomeRoot,
     preservedArtifacts: collectPreservedHostedArtifacts({
       bytes: decodeHostedBundleBase64(input.request.bundle),
@@ -276,7 +278,7 @@ export async function completeHostedRunDrainAfterCommit(input: {
   run?: HostedExecutionRunContext | null;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
-    "commitTimeoutMs" | "forwardedEnv" | "platform" | "resolvedConfig" | "userEnv"
+    "commitTimeoutMs" | "forwardedEnv" | "platform" | "platformEnv" | "resolvedConfig" | "userEnv"
   >;
   restored: HostedRestoredExecutionContext;
   request: HostedAssistantRuntimeJobRequest;
@@ -325,7 +327,6 @@ function createHostedRunDrainMetrics(): HostedRunDrainMetrics {
     redactedLogEntries: [],
     shareImportResult: null,
     shareImportTitle: null,
-    vaultSyncImportResult: null,
     vaultSyncImportResults: [],
   };
 }
@@ -366,7 +367,6 @@ function mergeHostedRunDrainWakeMetrics(
   }
 
   if (metrics.vaultSyncImportResult) {
-    target.vaultSyncImportResult = metrics.vaultSyncImportResult;
     target.vaultSyncImportResults.push(metrics.vaultSyncImportResult);
   }
 }
@@ -388,7 +388,7 @@ async function drainHostedImmediateMaintenanceUntilIdleOrBudget(input: {
   runDrain: HostedRuntimeDrainRequest;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
-    "commitTimeoutMs" | "platform" | "resolvedConfig"
+    "commitTimeoutMs" | "forwardedEnv" | "platform" | "platformEnv" | "resolvedConfig"
   >;
   vaultRoot: string;
   wake: HostedRuntimeEvent;
@@ -411,7 +411,9 @@ async function drainHostedImmediateMaintenanceUntilIdleOrBudget(input: {
         executionContext: input.executionContext,
         requestId: `${input.runDrain.runId}:assistant`,
         runtime: {
+          forwardedEnv: input.runtime.forwardedEnv,
           platform: input.runtime.platform,
+          platformEnv: input.runtime.platformEnv,
         },
         vaultRoot: input.vaultRoot,
         wake: input.wake,
@@ -487,20 +489,19 @@ function hasHostedImmediateMaintenanceWork(
 function buildHostedRunDrainRedactedDetails(
   metrics: HostedRunDrainMetrics,
 ): Record<string, unknown> | null {
-  const details: Record<string, unknown> = {};
+  if (metrics.vaultSyncImportResults.length === 0) {
+    return null;
+  }
 
-  if (metrics.vaultSyncImportResults.length > 0) {
-    const vaultSyncImports = metrics.vaultSyncImportResults.map((result) => ({
+  return {
+    vaultSyncImports: metrics.vaultSyncImportResults.map((result) => ({
       conflictCount: result.conflicts.length,
       conflictManifestPath: result.conflictManifestPath,
       imported: result.imported,
       sessionId: result.sessionId,
       skipped: result.skipped,
-    }));
-    details.vaultSyncImports = vaultSyncImports;
-  }
-
-  return Object.keys(details).length > 0 ? details : null;
+    })),
+  };
 }
 
 function summarizeHostedRunDrain(
@@ -711,7 +712,7 @@ async function finalizeHostedCommittedRunAfterCommit(input: {
   run?: HostedExecutionRunContext | null;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
-    "commitTimeoutMs" | "forwardedEnv" | "platform" | "resolvedConfig" | "userEnv"
+    "commitTimeoutMs" | "forwardedEnv" | "platform" | "platformEnv" | "resolvedConfig" | "userEnv"
   >;
   restored: HostedRestoredExecutionContext;
   committedExecution: HostedCommittedExecutionState;
@@ -734,6 +735,8 @@ async function finalizeHostedCommittedRunAfterCommit(input: {
   const assistantDeliveryOutcomes = await drainHostedCommittedAssistantDeliveriesAfterCommit({
     effectsPort: input.runtime.platform.effectsPort,
     assistantDeliveryEffects: input.committedExecution.committedAssistantDeliveryEffects,
+    forwardedEnv: input.runtime.forwardedEnv,
+    platformEnv: input.runtime.platformEnv,
     vaultRoot: input.restored.vaultRoot,
     wake: input.wake,
   });
@@ -820,6 +823,7 @@ async function finalizeHostedCommittedRunAfterCommit(input: {
         decodeHostedBundleBase64(input.committedExecution.committedResult.bundle),
       ),
     }),
+    materializedArtifactPaths: input.materializedArtifactPaths ?? new Set(),
     operatorHomeRoot: input.restored.operatorHomeRoot,
     preservedArtifacts: collectPreservedHostedArtifacts({
       bytes: decodeHostedBundleBase64(input.committedExecution.committedResult.bundle),
@@ -918,10 +922,15 @@ function collectPreservedHostedArtifacts(input: {
   }
 
   try {
+    const materializedArtifactPathKeys = new Set(
+      [...input.materializedArtifactPaths].map((artifactPath) =>
+        toHostedArtifactPathKey({ path: artifactPath })
+      ),
+    );
     return listHostedBundleArtifacts({
       bytes: input.bytes,
       expectedKind: "vault",
-    }).filter((artifact) => !input.materializedArtifactPaths.has(artifact.path));
+    }).filter((artifact) => !materializedArtifactPathKeys.has(toHostedArtifactPathKey(artifact)));
   } catch {
     return [];
   }

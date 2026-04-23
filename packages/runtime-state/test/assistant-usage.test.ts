@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "vitest";
@@ -11,7 +11,9 @@ import {
   deletePendingAssistantUsageRecord,
   listPendingAssistantUsageRecords,
   parseAssistantUsageRecord,
+  resolveAssistantStatePaths,
   resolveAssistantUsageCredentialSource,
+  resolvePendingAssistantUsagePath,
   writePendingAssistantUsageRecord,
 } from "../src/node/index.ts";
 
@@ -95,6 +97,17 @@ test("assistant usage records round-trip through pending storage and sort by occ
     });
 
     assert.deepEqual(records, [earlierRecord, laterRecord]);
+    assert.deepEqual(
+      JSON.parse(await readFile(
+        resolvePendingAssistantUsagePath(resolveAssistantStatePaths(vaultRoot), laterRecord.usageId),
+        "utf8",
+      )),
+      {
+        schema: ASSISTANT_USAGE_SCHEMA,
+        schemaVersion: 1,
+        value: laterRecord,
+      },
+    );
 
     await deletePendingAssistantUsageRecord({
       usageId: earlierRecord.usageId,
@@ -106,6 +119,188 @@ test("assistant usage records round-trip through pending storage and sort by occ
     });
 
     assert.deepEqual(remaining, [laterRecord]);
+  } finally {
+    await rm(parent, { force: true, recursive: true });
+  }
+});
+
+test("assistant usage listing accepts legacy raw pending files while new writes use versioned envelopes", async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), "murph-assistant-usage-"));
+  const vaultRoot = path.join(parent, "vault");
+  const paths = resolveAssistantStatePaths(vaultRoot);
+  const record: AssistantUsageRecord = {
+    apiKeyEnv: null,
+    attemptCount: 1,
+    baseUrl: null,
+    cacheWriteTokens: null,
+    cachedInputTokens: null,
+    credentialSource: "platform",
+    featureKey: null,
+    gatewayTags: [],
+    inputTokens: 10,
+    memberId: "member_legacy",
+    occurredAt: "2026-03-29T12:00:00.000Z",
+    outputTokens: 5,
+    provider: "codex-cli",
+    providerName: null,
+    reasoningTokens: null,
+    reportingUserId: null,
+    requestedModel: null,
+    routeId: null,
+    schema: ASSISTANT_USAGE_SCHEMA,
+    servedModel: null,
+    sessionId: "asst_legacy",
+    stripeMeterSource: "murph",
+    surface: null,
+    totalTokens: 15,
+    triggerKind: null,
+    turnId: "turn_legacy",
+    usageId: createAssistantUsageId({
+      attemptCount: 1,
+      turnId: "turn_legacy",
+    }),
+  };
+
+  try {
+    await mkdir(paths.usagePendingDirectory, { recursive: true });
+    await writeFile(
+      resolvePendingAssistantUsagePath(paths, record.usageId),
+      `${JSON.stringify(record)}\n`,
+      "utf8",
+    );
+
+    assert.deepEqual(
+      await listPendingAssistantUsageRecords({
+        paths,
+      }),
+      [record],
+    );
+  } finally {
+    await rm(parent, { force: true, recursive: true });
+  }
+});
+
+test("assistant usage listing skips forward-versioned pending files when requested", async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), "murph-assistant-usage-"));
+  const vaultRoot = path.join(parent, "vault");
+  const paths = resolveAssistantStatePaths(vaultRoot);
+  const usageId = createAssistantUsageId({
+    attemptCount: 1,
+    turnId: "turn_forward_version",
+  });
+  const invalidFiles: string[] = [];
+
+  try {
+    await mkdir(paths.usagePendingDirectory, { recursive: true });
+    await writeFile(
+      resolvePendingAssistantUsagePath(paths, usageId),
+      `${JSON.stringify({
+        schema: ASSISTANT_USAGE_SCHEMA,
+        schemaVersion: 2,
+        value: {
+          apiKeyEnv: null,
+          attemptCount: 1,
+          baseUrl: null,
+          cacheWriteTokens: null,
+          cachedInputTokens: null,
+          credentialSource: "platform",
+          featureKey: null,
+          gatewayTags: [],
+          inputTokens: 10,
+          memberId: "member_forward",
+          occurredAt: "2026-03-29T12:00:00.000Z",
+          outputTokens: 5,
+          provider: "codex-cli",
+          providerName: null,
+          reasoningTokens: null,
+          reportingUserId: null,
+          requestedModel: null,
+          routeId: null,
+          schema: ASSISTANT_USAGE_SCHEMA,
+          servedModel: null,
+          sessionId: "asst_forward",
+          stripeMeterSource: "murph",
+          surface: null,
+          totalTokens: 15,
+          triggerKind: null,
+          turnId: "turn_forward_version",
+          usageId,
+        },
+      })}\n`,
+      "utf8",
+    );
+
+    assert.deepEqual(
+      await listPendingAssistantUsageRecords({
+        onInvalidRecord: ({ fileName }) => {
+          invalidFiles.push(fileName);
+        },
+        paths,
+        skipInvalidRecords: true,
+      }),
+      [],
+    );
+    assert.deepEqual(invalidFiles, [path.basename(resolvePendingAssistantUsagePath(paths, usageId))]);
+  } finally {
+    await rm(parent, { force: true, recursive: true });
+  }
+});
+
+test("assistant usage listing fails closed on forward-versioned pending files by default", async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), "murph-assistant-usage-"));
+  const vaultRoot = path.join(parent, "vault");
+  const paths = resolveAssistantStatePaths(vaultRoot);
+  const usageId = createAssistantUsageId({
+    attemptCount: 1,
+    turnId: "turn_forward_version_strict",
+  });
+
+  try {
+    await mkdir(paths.usagePendingDirectory, { recursive: true });
+    await writeFile(
+      resolvePendingAssistantUsagePath(paths, usageId),
+      `${JSON.stringify({
+        schema: ASSISTANT_USAGE_SCHEMA,
+        schemaVersion: 2,
+        value: {
+          apiKeyEnv: null,
+          attemptCount: 1,
+          baseUrl: null,
+          cacheWriteTokens: null,
+          cachedInputTokens: null,
+          credentialSource: "platform",
+          featureKey: null,
+          gatewayTags: [],
+          inputTokens: 10,
+          memberId: "member_forward_strict",
+          occurredAt: "2026-03-29T12:00:00.000Z",
+          outputTokens: 5,
+          provider: "codex-cli",
+          providerName: null,
+          reasoningTokens: null,
+          reportingUserId: null,
+          requestedModel: null,
+          routeId: null,
+          schema: ASSISTANT_USAGE_SCHEMA,
+          servedModel: null,
+          sessionId: "asst_forward_strict",
+          stripeMeterSource: "murph",
+          surface: null,
+          totalTokens: 15,
+          triggerKind: null,
+          turnId: "turn_forward_version_strict",
+          usageId,
+        },
+      })}\n`,
+      "utf8",
+    );
+
+    await assert.rejects(
+      () => listPendingAssistantUsageRecords({
+        paths,
+      }),
+      /pending assistant usage record schemaVersion must be 1\./u,
+    );
   } finally {
     await rm(parent, { force: true, recursive: true });
   }
@@ -154,6 +349,23 @@ test("assistant usage parsing preserves a missing totalTokens value", () => {
       turnId: "turn_123",
       usageId: "turn_123.attempt-1",
     },
+  );
+});
+
+test("assistant usage parsing rejects non-canonical usage ids", () => {
+  assert.throws(
+    () =>
+      parseAssistantUsageRecord({
+        attemptCount: 1,
+        credentialSource: "platform",
+        occurredAt: "2026-03-29T12:00:00.000Z",
+        provider: "codex-cli",
+        schema: ASSISTANT_USAGE_SCHEMA,
+        sessionId: "asst_123",
+        turnId: "turn_123",
+        usageId: "turn_123.unexpected-1",
+      }),
+    /usageId must match the canonical turnId\/attemptCount-derived value turn_123\.attempt-1/u,
   );
 });
 
@@ -244,6 +456,9 @@ test("assistant usage credential source resolves against the hosted user env sna
   assert.equal(
     resolveAssistantUsageCredentialSource({
       apiKeyEnv: "OPENAI_API_KEY",
+      effectiveEnv: {
+        OPENAI_API_KEY: "sk-user",
+      },
       provider: "openai-compatible",
       userEnvKeys: ["OPENAI_API_KEY"],
     }),
@@ -283,6 +498,39 @@ test("assistant usage credential source resolves against the hosted user env sna
   );
   assert.equal(
     resolveAssistantUsageCredentialSource({
+      apiKeyEnv: null,
+      headers: {
+        "X-Api-Key": "member-header-secret",
+      },
+      provider: "openai-compatible",
+      userEnvKeys: [],
+    }),
+    "member",
+  );
+  assert.equal(
+    resolveAssistantUsageCredentialSource({
+      apiKeyEnv: "PLATFORM_API_KEY",
+      headers: {
+        "X-Trace-Id": "Bearer member-header-secret-1234",
+      },
+      provider: "openai-compatible",
+      userEnvKeys: [],
+    }),
+    "member",
+  );
+  assert.equal(
+    resolveAssistantUsageCredentialSource({
+      apiKeyEnv: null,
+      headers: {
+        "X-Trace-Id": "trace-123",
+      },
+      provider: "openai-compatible",
+      userEnvKeys: [],
+    }),
+    "platform",
+  );
+  assert.equal(
+    resolveAssistantUsageCredentialSource({
       apiKeyEnv: " OPENAI_API_KEY ",
       provider: "openai-compatible",
       userEnvKeys: ["OPENAI_API_KEY"],
@@ -297,5 +545,38 @@ test("assistant usage credential source resolves against the hosted user env sna
         userEnvKeys: [123],
       }]),
     /userEnvKey must be a string when provided/u,
+  );
+});
+
+test("assistant usage credential source treats blank effective env overrides as non-member keys", () => {
+  assert.equal(
+    resolveAssistantUsageCredentialSource({
+      apiKeyEnv: "OPENAI_API_KEY",
+      effectiveEnv: {
+        OPENAI_API_KEY: "   ",
+      },
+      provider: "openai-compatible",
+      userEnvKeys: ["OPENAI_API_KEY"],
+    }),
+    "platform",
+  );
+  assert.equal(
+    resolveAssistantUsageCredentialSource({
+      apiKeyEnv: null,
+      effectiveEnv: {
+        OPENAI_API_KEY: " ",
+      },
+      provider: "codex-cli",
+      userEnvKeys: ["OPENAI_API_KEY"],
+    }),
+    "platform",
+  );
+  assert.equal(
+    resolveAssistantUsageCredentialSource({
+      apiKeyEnv: "OPENAI_API_KEY",
+      provider: "openai-compatible",
+      userEnvKeys: ["OPENAI_API_KEY"],
+    }),
+    "member",
   );
 });

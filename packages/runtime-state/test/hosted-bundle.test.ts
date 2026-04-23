@@ -359,6 +359,216 @@ test("hosted bundle node helpers cover preserved artifacts, ignored roots, and r
   }
 });
 
+test("hosted execution snapshots do not resurrect deleted materialized preserved artifacts", async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-preserved-delete-"));
+  const artifacts = new Map<string, Uint8Array>();
+
+  try {
+    const vaultRoot = path.join(workspaceRoot, "vault");
+    const rawAttachmentPath = path.join(vaultRoot, "raw", "captures", "report.pdf");
+
+    await mkdir(path.dirname(rawAttachmentPath), { recursive: true });
+    await writeFile(path.join(vaultRoot, "vault.json"), "{\"schema\":\"vault\"}\n");
+    await writeFile(rawAttachmentPath, Buffer.from("pdf-binary-artifact\n", "utf8"));
+
+    const initialSnapshot = await snapshotHostedExecutionContext({
+      artifactSink: async (artifact) => {
+        artifacts.set(artifact.ref.sha256, artifact.bytes);
+      },
+      materializedArtifactPaths: new Set(["raw/captures/report.pdf"]),
+      vaultRoot,
+    });
+
+    await rm(rawAttachmentPath);
+
+    const nextSnapshot = await snapshotHostedExecutionContext({
+      artifactSink: async () => {},
+      materializedArtifactPaths: new Set(["vault/raw/captures/report.pdf"]),
+      preservedArtifacts: listHostedBundleArtifacts({
+        bytes: initialSnapshot.bundle,
+        expectedKind: "vault",
+      }),
+      vaultRoot,
+    });
+
+    assert.equal(
+      hasHostedBundleArtifactPath({
+        bytes: nextSnapshot.bundle,
+        expectedKind: "vault",
+        path: "raw/captures/report.pdf",
+        root: "vault",
+      }),
+      false,
+    );
+    assert.deepEqual(
+      listHostedBundleArtifacts({
+        bytes: nextSnapshot.bundle,
+        expectedKind: "vault",
+      }),
+      [],
+    );
+    assert.equal(artifacts.size, 1);
+  } finally {
+    await rm(workspaceRoot, { force: true, recursive: true });
+  }
+});
+
+test("hosted execution snapshots do not misparse colon-bearing materialized artifact filenames", async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-preserved-colon-"));
+
+  try {
+    const vaultRoot = path.join(workspaceRoot, "vault");
+    const rawAttachmentPath = path.join(vaultRoot, "raw", "captures", "report:v1.pdf");
+
+    await mkdir(path.dirname(rawAttachmentPath), { recursive: true });
+    await writeFile(path.join(vaultRoot, "vault.json"), "{\"schema\":\"vault\"}\n");
+    await writeFile(rawAttachmentPath, Buffer.from("pdf-binary-artifact\n", "utf8"));
+
+    const initialSnapshot = await snapshotHostedExecutionContext({
+      artifactSink: async () => {},
+      materializedArtifactPaths: new Set(["vault/raw/captures/report:v1.pdf"]),
+      vaultRoot,
+    });
+
+    await rm(rawAttachmentPath);
+
+    const nextSnapshot = await snapshotHostedExecutionContext({
+      artifactSink: async () => {},
+      materializedArtifactPaths: new Set(["vault/raw/captures/report:v1.pdf"]),
+      preservedArtifacts: listHostedBundleArtifacts({
+        bytes: initialSnapshot.bundle,
+        expectedKind: "vault",
+      }),
+      vaultRoot,
+    });
+
+    assert.equal(
+      hasHostedBundleArtifactPath({
+        bytes: nextSnapshot.bundle,
+        expectedKind: "vault",
+        path: "raw/captures/report:v1.pdf",
+        root: "vault",
+      }),
+      false,
+    );
+  } finally {
+    await rm(workspaceRoot, { force: true, recursive: true });
+  }
+});
+
+test("hosted execution snapshots revalidate preserved artifact refs against the workspace artifact policy", async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-preserved-policy-"));
+
+  try {
+    const vaultRoot = path.join(workspaceRoot, "vault");
+    const operatorHomeRoot = path.join(workspaceRoot, "home");
+
+    await mkdir(path.join(vaultRoot, ".runtime", "operations", "device-sync"), { recursive: true });
+    await mkdir(path.join(operatorHomeRoot, ".murph", "hosted"), { recursive: true });
+    await writeFile(path.join(vaultRoot, "vault.json"), "{\"schema\":\"vault\"}\n");
+    await writeFile(path.join(vaultRoot, ".env.local"), "secret=true\n");
+    await writeFile(path.join(vaultRoot, ".runtime", "operations", "device-sync", "state.sqlite"), "sqlite\n");
+    await writeFile(path.join(operatorHomeRoot, ".murph", "config.json"), "{\"schema\":\"cfg\"}\n");
+    await writeFile(path.join(operatorHomeRoot, ".murph", "hosted", "user-env.json"), "{\"secret\":true}\n");
+
+    const snapshot = await snapshotHostedExecutionContext({
+      operatorHomeRoot,
+      preservedArtifacts: [
+        {
+          path: ".env.local",
+          ref: {
+            byteSize: 6,
+            sha256: sha256HostedBundleHex(Buffer.from("secret")),
+          },
+          root: "vault",
+        },
+        {
+          path: ".runtime/operations/device-sync/state.sqlite",
+          ref: {
+            byteSize: 6,
+            sha256: sha256HostedBundleHex(Buffer.from("sqlite")),
+          },
+          root: "vault",
+        },
+        {
+          path: ".murph/config.json",
+          ref: {
+            byteSize: 6,
+            sha256: sha256HostedBundleHex(Buffer.from("config")),
+          },
+          root: "operator-home",
+        },
+        {
+          path: ".murph/hosted/user-env.json",
+          ref: {
+            byteSize: 6,
+            sha256: sha256HostedBundleHex(Buffer.from("userenv")),
+          },
+          root: "operator-home",
+        },
+      ],
+      vaultRoot,
+    });
+
+    assert.equal(
+      readHostedBundleTextFile({
+        bytes: snapshot.bundle,
+        expectedKind: "vault",
+        path: "vault.json",
+        root: "vault",
+      }),
+      "{\"schema\":\"vault\"}\n",
+    );
+    assert.equal(
+      readHostedBundleTextFile({
+        bytes: snapshot.bundle,
+        expectedKind: "vault",
+        path: ".murph/config.json",
+        root: "operator-home",
+      }),
+      "{\"schema\":\"cfg\"}\n",
+    );
+    assert.deepEqual(
+      listHostedBundleArtifacts({
+        bytes: snapshot.bundle,
+        expectedKind: "vault",
+      }),
+      [],
+    );
+  } finally {
+    await rm(workspaceRoot, { force: true, recursive: true });
+  }
+});
+
+test("hosted execution snapshots reject preserved artifacts for unknown roots", async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-preserved-root-"));
+
+  try {
+    const vaultRoot = path.join(workspaceRoot, "vault");
+    await mkdir(vaultRoot, { recursive: true });
+    await writeFile(path.join(vaultRoot, "vault.json"), "{\"schema\":\"vault\"}\n");
+
+    await assert.rejects(
+      snapshotHostedExecutionContext({
+        preservedArtifacts: [
+          {
+            path: "raw/captures/report.pdf",
+            ref: {
+              byteSize: 3,
+              sha256: sha256HostedBundleHex(Buffer.from("pdf")),
+            },
+            root: "unknown-root",
+          },
+        ],
+        vaultRoot,
+      }),
+      /preserved artifact root "unknown-root" is not configured/u,
+    );
+  } finally {
+    await rm(workspaceRoot, { force: true, recursive: true });
+  }
+});
+
 test("hosted execution snapshots collapse into one workspace bundle and externalize raw artifacts", async () => {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-context-"));
   const restoreRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-context-restore-"));

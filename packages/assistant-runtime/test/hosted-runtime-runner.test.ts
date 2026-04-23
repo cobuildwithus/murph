@@ -275,6 +275,7 @@ beforeEach(() => {
     commitTimeoutMs: runtime?.commitTimeoutMs ?? null,
     forwardedEnv: { ...(runtime?.forwardedEnv ?? {}) },
     platform,
+    platformEnv: { ...(runtime?.platformEnv ?? {}) },
     resolvedConfig: createHostedRuntimeResolvedConfig(runtime?.resolvedConfig ?? {}),
     userEnv: { ...(runtime?.userEnv ?? {}) },
   }));
@@ -515,25 +516,25 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
     );
     expect(
       mocks.materializeHostedExecutionArtifacts.mock.calls[0]?.[0].shouldRestoreArtifact({
-        path: "vault/raw/a.bin",
+        path: "raw/a.bin",
         root: "vault",
       }),
     ).toBe(true);
     expect(
       mocks.materializeHostedExecutionArtifacts.mock.calls[0]?.[0].shouldRestoreArtifact({
-        path: "vault/raw/c.bin",
+        path: "raw/c.bin",
         root: "vault",
       }),
     ).toBe(false);
     expect(
       mocks.materializeHostedExecutionArtifacts.mock.calls[0]?.[0].shouldRestoreArtifact({
-        path: "vault/raw/a.bin",
+        path: "raw/a.bin",
         root: "operator-home",
       }),
     ).toBe(false);
     expect(
       mocks.restoreHostedExecutionContext.mock.calls[0]?.[0].shouldRestoreArtifact({
-        path: "vault/raw/a.bin",
+        path: "raw/a.bin",
         root: "vault",
       }),
     ).toBe(false);
@@ -783,6 +784,55 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
 
     assert.deepEqual(result, committedFirstPassResult);
     expect(billingPort.resolveVercelAiGatewayStripeCustomerId).not.toHaveBeenCalled();
+  });
+
+  it("treats blank delegated billing API-key overrides as platform-funded Vercel AI Gateway runs", async () => {
+    const billingPort = {
+      resolveVercelAiGatewayStripeCustomerId: vi.fn(async () => ({
+        stripeCustomerId: "cus_platform_123",
+      })),
+    };
+    mocks.executeHostedRunDrainForCommit.mockImplementationOnce(async (input) => {
+      expect(input.executionContext.hosted?.stripeCustomerId).toBe("cus_platform_123");
+      return committedExecution;
+    });
+
+    const result = await runHostedAssistantRuntimeJobInProcessDetailed(
+      {
+        request: {
+          bundle: "incoming-bundle",
+          run: HOSTED_RUN_CONTEXT,
+          runDrain: createSingleWakeRunDrain(buildMemberActivatedWake("evt_billing_blank_override")),
+        },
+        runtime: {
+          forwardedEnv: {
+            HOSTED_ASSISTANT_API_KEY_ENV: "VERCEL_AI_API_KEY",
+            HOSTED_ASSISTANT_BASE_URL: "https://ai-gateway.vercel.sh/v1",
+            HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+            HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY: "rk_test_123",
+            HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED: "true",
+          },
+          userEnv: {
+            VERCEL_AI_API_KEY: "   ",
+          },
+        },
+      },
+      {
+        platform: {
+          artifactStore: {
+            async get() {
+              return null;
+            },
+            async put() {},
+          },
+          billingPort,
+          effectsPort: createHostedRuntimeEffectsPortStub(),
+        },
+      },
+    );
+
+    assert.deepEqual(result, committedFirstPassResult);
+    expect(billingPort.resolveVercelAiGatewayStripeCustomerId).toHaveBeenCalledTimes(1);
   });
 
   it("still emits a failure log when runtime normalization fails before startup telemetry can be recorded", async () => {
@@ -1312,7 +1362,7 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
           })),
         },
         runtime: {
-          forwardedEnv: {
+          platformEnv: {
             TELEGRAM_BOT_TOKEN: "telegram-token",
           },
         },
@@ -1382,7 +1432,7 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
           ),
         },
         runtime: {
-          forwardedEnv: {
+          platformEnv: {
             TELEGRAM_BOT_TOKEN: "telegram-token",
           },
         },
