@@ -112,7 +112,7 @@ declare module 'incur' {
       'inbox init': { args: {}; options: { vault: string; requestId?: string; rebuild?: boolean } }
       'inbox list': { args: {}; options: { vault: string; requestId?: string; source?: string; limit: number } }
       'inbox model bundle': { args: { captureId: string }; options: { vault: string; requestId?: string } }
-      'inbox model route': { args: { captureId: string }; options: { vault: string; requestId?: string; model: string; baseUrl?: string; apiKey?: string; apiKeyEnv?: string; providerName?: string; headersJson?: string; apply?: boolean } }
+      'inbox model route': { args: { captureId: string }; options: { vault: string; requestId?: string; model: string; baseUrl: string; apiKey?: string; apiKeyEnv?: string; providerName?: string; headersJson?: string; apply?: boolean } }
       'inbox parse': { args: {}; options: { vault: string; requestId?: string; captureId?: string; limit?: number } }
       'inbox promote document': { args: { captureId: string }; options: { vault: string; requestId?: string } }
       'inbox promote experiment-note': { args: { captureId: string }; options: { vault: string; requestId?: string } }

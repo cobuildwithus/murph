@@ -10,6 +10,7 @@ import {
   inboxShowResultSchema,
   type InboxShowResult,
 } from '@murphai/operator-config/inbox-cli-contracts'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { assistantTurnReceiptSchema } from '@murphai/operator-config/assistant-cli-contracts'
 import type { InboxServices } from '@murphai/inbox-services'
 import type { AssistantTurnConversationCaptureQuery } from '../src/assistant/turn-input.ts'
@@ -1107,6 +1108,39 @@ describe('assistant inbox routing', () => {
     })
   })
 
+  it('keeps the inbox cursor retryable for invalid model configuration errors', async () => {
+    routingMocks.routeInboxCaptureWithModel.mockRejectedValue(
+      new VaultCliError(
+        'assistant_model_config_invalid',
+        'Assistant model configuration is invalid: OpenAI-compatible routing requires a base URL.',
+      ),
+    )
+    const inboxServices = createInboxServices({
+      show: vi.fn().mockResolvedValue(
+        createShowResult(createCaptureDetail()),
+      ),
+    })
+    const routing = await vi.importActual<typeof import('../src/assistant/automation/routing.ts')>(
+      '../src/assistant/automation/routing.ts',
+    )
+
+    const outcome = await routing.routeAssistantInboxCapture({
+      capture: createCaptureSummary(),
+      inboxServices,
+      modelSpec: {
+        model: 'gpt-5.4',
+      },
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(outcome).toEqual({
+      advanceCursor: false,
+      details: 'Assistant model configuration is invalid: OpenAI-compatible routing requires a base URL.',
+      nextWakeAt: expect.any(String),
+      status: 'failed',
+    })
+  })
+
   it('scans captures in sorted order and applies outcome events', async () => {
     routingMocks.routeInboxCaptureWithModel.mockResolvedValue({
       plan: {
@@ -1174,11 +1208,59 @@ describe('assistant inbox routing', () => {
     })
     expect(cursorUpdates).toEqual([
       {
-        captureId: 'capture-2',
+        captureId: 'capture-1',
         createdAt: '2026-04-08T00:00:01.000Z',
-        occurredAt: '2026-04-08T00:02:00.000Z',
+        occurredAt: '2026-04-08T00:01:00.000Z',
       },
     ])
+  })
+
+  it('does not advance the scan cursor past retryable model configuration failures', async () => {
+    routingMocks.routeInboxCaptureWithModel.mockRejectedValue(
+      new VaultCliError(
+        'assistant_model_config_invalid',
+        'Assistant model configuration is invalid: OpenAI-compatible routing requires a base URL.',
+      ),
+    )
+    const later = createCaptureSummary({
+      captureId: 'capture-2',
+      occurredAt: '2026-04-08T00:02:00.000Z',
+    })
+    const earlier = createCaptureSummary({
+      captureId: 'capture-1',
+      occurredAt: '2026-04-08T00:01:00.000Z',
+    })
+    const inboxServices = createInboxServices({
+      list: vi.fn().mockResolvedValue(createListResult([later, earlier])),
+      show: vi.fn().mockResolvedValue(createShowResult(createCaptureDetail())),
+    })
+    const routing = await vi.importActual<typeof import('../src/assistant/automation/routing.ts')>(
+      '../src/assistant/automation/routing.ts',
+    )
+    const cursorUpdates: Array<AssistantAutomationCursor | null> = []
+
+    const result = await routing.scanAssistantInboxOnce({
+      afterCursor: null,
+      inboxServices,
+      modelSpec: {
+        model: 'gpt-5.4',
+      },
+      onCursorProgress: async (cursor) => {
+        cursorUpdates.push(cursor)
+      },
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result).toMatchObject({
+      considered: 2,
+      failed: 1,
+      nextWakeAt: expect.any(String),
+      noAction: 0,
+      routed: 0,
+      skipped: 0,
+    })
+    expect(cursorUpdates).toEqual([null])
+    expect(routingMocks.routeInboxCaptureWithModel).toHaveBeenCalledTimes(1)
   })
 
   it('applies each routing outcome status to the scan summary', async () => {

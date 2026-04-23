@@ -36,6 +36,81 @@ export function requestIdFromOptions(
   return typeof options.requestId === 'string' ? options.requestId : null
 }
 
+const httpHeaderNamePattern = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/u
+const httpHeaderValueControlPattern = /[\u0000-\u0008\u000A-\u001F\u007F]/u
+const forbiddenHeadersJsonNames = new Set([
+  'authorization',
+  'cookie',
+  'proxy-authorization',
+  'set-cookie',
+])
+
+const httpUrlInvalidMessage =
+  'Expected an http or https URL without embedded credentials.'
+const httpBaseUrlInvalidMessage =
+  'Expected an http or https base URL without embedded credentials, query parameters, or fragments.'
+
+export function normalizeHttpUrlOption(value: string): string | null {
+  const trimmed = value.trim()
+  if (!trimmed) {
+    return null
+  }
+
+  let parsed: URL
+  try {
+    parsed = new URL(trimmed)
+  } catch {
+    return null
+  }
+
+  if (
+    (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') ||
+    parsed.username.length > 0 ||
+    parsed.password.length > 0
+  ) {
+    return null
+  }
+
+  return trimmed
+}
+
+export function normalizeHttpBaseUrlOption(value: string): string | null {
+  const normalized = normalizeHttpUrlOption(value)
+  if (!normalized) {
+    return null
+  }
+
+  const parsed = new URL(normalized)
+  if (parsed.search.length > 0 || parsed.hash.length > 0) {
+    return null
+  }
+
+  parsed.pathname = parsed.pathname.replace(/\/+$/u, '')
+  return parsed.toString().replace(/\/$/u, '')
+}
+
+export const httpUrlSchema = z
+  .string()
+  .min(1)
+  .refine((value) => value === value.trim() && normalizeHttpUrlOption(value) !== null, {
+    message: httpUrlInvalidMessage,
+  })
+
+export const httpBaseUrlSchema = z
+  .string()
+  .min(1)
+  .refine((value) => value === value.trim() && normalizeHttpBaseUrlOption(value) !== null, {
+    message: httpBaseUrlInvalidMessage,
+  })
+
+export const apiKeyEnvNameSchema = z
+  .string()
+  .min(1)
+  .refine(
+    (value) => /^[A-Za-z_][A-Za-z0-9_]*$/u.test(value),
+    'Expected an environment variable name like OPENAI_API_KEY.',
+  )
+
 export function parseHeadersJsonOption(value?: string) {
   if (!value) {
     return undefined
@@ -63,6 +138,7 @@ export function parseHeadersJsonOption(value?: string) {
   }
 
   const headers: Record<string, string> = {}
+  const normalizedNames = new Set<string>()
   for (const [key, candidate] of Object.entries(parsed)) {
     if (typeof candidate !== 'string') {
       throw new VaultCliError(
@@ -70,6 +146,37 @@ export function parseHeadersJsonOption(value?: string) {
         'headersJson must be a JSON object with string values.',
       )
     }
+
+    if (key.length === 0 || key !== key.trim() || !httpHeaderNamePattern.test(key)) {
+      throw new VaultCliError(
+        'invalid_payload',
+        'headersJson contains an invalid HTTP header name.',
+      )
+    }
+
+    const normalizedName = key.toLowerCase()
+    if (forbiddenHeadersJsonNames.has(normalizedName)) {
+      throw new VaultCliError(
+        'invalid_payload',
+        'headersJson may not include credential headers. Use apiKey or apiKeyEnv for model credentials.',
+      )
+    }
+
+    if (normalizedNames.has(normalizedName)) {
+      throw new VaultCliError(
+        'invalid_payload',
+        `headersJson contains duplicate header name "${key}".`,
+      )
+    }
+
+    if (httpHeaderValueControlPattern.test(candidate)) {
+      throw new VaultCliError(
+        'invalid_payload',
+        `headersJson contains an invalid value for "${key}".`,
+      )
+    }
+
+    normalizedNames.add(normalizedName)
     headers[key] = candidate
   }
 

@@ -127,6 +127,32 @@ test.sequential('device daemon commands stay in the generated CLI schema', async
   }
 })
 
+test('device provider inputs reject unsupported provider keys before daemon routing', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-device-provider-guard-'))
+
+  try {
+    const result = await runCli([
+      'device',
+      'connect',
+      'ottoai',
+      '--vault',
+      vaultRoot,
+    ], {
+      env: {
+        MURPH_CLI_TEST_PERSISTENT_HARNESS: '0',
+      },
+    })
+
+    assert.equal(result.ok, false)
+    if (!result.ok) {
+      assert.match(result.error.message ?? '', /Unsupported device-sync provider/u)
+      assert.match(result.error.message ?? '', /garmin, oura, whoop, strava/u)
+    }
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
 const deviceControlPlaneTest = supportsLoopbackListen ? test.sequential : test.skip
 
 deviceControlPlaneTest(

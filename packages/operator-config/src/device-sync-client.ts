@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process'
+import { z } from 'zod'
 import {
   createDeviceSyncJsonRequester as createSharedDeviceSyncJsonRequester,
   DEFAULT_DEVICE_SYNC_BASE_URL,
@@ -13,7 +14,18 @@ import {
   type DeviceSyncProviderDescriptor,
 } from '@murphai/device-syncd/client'
 
+import { httpUrlSchema } from './command-helpers.js'
+import { isoTimestampSchema } from './vault-cli-contracts.js'
 import { VaultCliError } from './vault-cli-errors.js'
+
+const deviceSyncBeginConnectionResponseSchema = z
+  .object({
+    provider: z.string().min(1),
+    state: z.string().min(1),
+    expiresAt: isoTimestampSchema,
+    authorizationUrl: httpUrlSchema,
+  })
+  .strict()
 
 export interface DeviceSyncClientOptions {
   baseUrl?: string | null
@@ -108,20 +120,34 @@ export function createDeviceSyncClient(input: DeviceSyncClientOptions = {}) {
       authorizationUrl: string
       openedBrowser: boolean
     }> {
-      const payload = await requestJson<{
-        provider: string
-        state: string
-        expiresAt: string
-        authorizationUrl: string
-      }>(`/providers/${encodeURIComponent(input.provider)}/connect`, {
+      const path = `/providers/${encodeURIComponent(input.provider)}/connect`
+      const responsePayload = await requestJson<unknown>(path, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json; charset=utf-8',
         },
-        body: JSON.stringify(
-          input.returnTo ? { returnTo: input.returnTo } : {},
-        ),
+        body: JSON.stringify(input.returnTo ? { returnTo: input.returnTo } : {}),
       })
+      const parsedPayload =
+        deviceSyncBeginConnectionResponseSchema.safeParse(responsePayload)
+
+      if (!parsedPayload.success) {
+        throw new VaultCliError(
+          'device_sync_invalid_response',
+          'Device sync service returned an invalid JSON payload.',
+          {
+            baseUrl,
+            path,
+            issues: parsedPayload.error.issues.map((issue) => ({
+              code: issue.code,
+              message: issue.message,
+              path: issue.path,
+            })),
+          },
+        )
+      }
+
+      const payload = parsedPayload.data
 
       return {
         ...payload,

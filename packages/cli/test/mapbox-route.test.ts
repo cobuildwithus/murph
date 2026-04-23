@@ -1071,4 +1071,75 @@ describe('estimateMapboxRoute', () => {
       }),
     ).rejects.toThrow('Mapbox did not return a route for these points.')
   })
+
+  it('rejects directions responses that omit required route totals', async () => {
+    const fetchImpl: typeof fetch = async (input) => {
+      const url = toUrl(input)
+
+      if (url.pathname === '/directions/v5/mapbox/walking/144.9631,-37.8136;144.978,-37.864') {
+        return jsonResponse({
+          code: 'Ok',
+          routes: [
+            {
+              duration: 120,
+            },
+          ],
+        })
+      }
+
+      throw new Error(`Unexpected request: ${url}`)
+    }
+
+    await expect(
+      estimateMapboxRoute({
+        origin: '144.9631,-37.8136',
+        destination: '144.978,-37.864',
+      }, {
+        env: {
+          MAPBOX_ACCESS_TOKEN: 'test-token',
+        },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('Mapbox returned an invalid directions response.')
+  })
+
+  it('rejects directions responses with malformed route geometry', async () => {
+    const fetchImpl: typeof fetch = async (input) => {
+      const url = toUrl(input)
+
+      if (url.pathname === '/directions/v5/mapbox/walking/144.9631,-37.8136;144.978,-37.864') {
+        return jsonResponse({
+          code: 'Ok',
+          routes: [
+            {
+              distance: 2400,
+              duration: 1200,
+              geometry: {
+                type: 'LineString',
+                coordinates: [
+                  [144.9631, -37.8136],
+                  ['144.978', -37.864],
+                ],
+              },
+            },
+          ],
+        })
+      }
+
+      throw new Error(`Unexpected request: ${url}`)
+    }
+
+    await expect(
+      estimateMapboxRoute({
+        origin: '144.9631,-37.8136',
+        destination: '144.978,-37.864',
+        includeGeometry: true,
+      }, {
+        env: {
+          MAPBOX_ACCESS_TOKEN: 'test-token',
+        },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('Mapbox returned an invalid directions response.')
+  })
 })

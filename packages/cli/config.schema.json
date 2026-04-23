@@ -2075,7 +2075,7 @@
                         "baseUrl": {
                           "description": "Override the reachable device sync control-plane URL. When omitted, Murph manages the local daemon for the selected vault. When set, Murph talks to the explicit control-plane target instead.",
                           "type": "string",
-                          "format": "uri"
+                          "minLength": 1
                         },
                         "returnTo": {
                           "description": "Optional post-connect redirect. Accepts a root-relative path like /settings/devices or an absolute URL; device-syncd still rejects absolute URLs outside its allowed origin list.",
@@ -2120,7 +2120,7 @@
                                 "baseUrl": {
                                   "description": "Override the reachable device sync control-plane URL. When omitted, Murph manages the local daemon for the selected vault. When set, Murph talks to the explicit control-plane target instead.",
                                   "type": "string",
-                                  "format": "uri"
+                                  "minLength": 1
                                 }
                               }
                             }
@@ -2160,7 +2160,7 @@
                                 "baseUrl": {
                                   "description": "Override the reachable device sync control-plane URL. When omitted, Murph manages the local daemon for the selected vault. When set, Murph talks to the explicit control-plane target instead.",
                                   "type": "string",
-                                  "format": "uri"
+                                  "minLength": 1
                                 },
                                 "provider": {
                                   "type": "string",
@@ -2193,7 +2193,7 @@
                                 "baseUrl": {
                                   "description": "Override the reachable device sync control-plane URL. When omitted, Murph manages the local daemon for the selected vault. When set, Murph talks to the explicit control-plane target instead.",
                                   "type": "string",
-                                  "format": "uri"
+                                  "minLength": 1
                                 }
                               }
                             }
@@ -2221,7 +2221,7 @@
                                 "baseUrl": {
                                   "description": "Override the reachable device sync control-plane URL. When omitted, Murph manages the local daemon for the selected vault. When set, Murph talks to the explicit control-plane target instead.",
                                   "type": "string",
-                                  "format": "uri"
+                                  "minLength": 1
                                 }
                               }
                             }
@@ -2249,7 +2249,7 @@
                                 "baseUrl": {
                                   "description": "Override the reachable device sync control-plane URL. When omitted, Murph manages the local daemon for the selected vault. When set, Murph talks to the explicit control-plane target instead.",
                                   "type": "string",
-                                  "format": "uri"
+                                  "minLength": 1
                                 }
                               }
                             }
@@ -2289,7 +2289,7 @@
                                 "baseUrl": {
                                   "description": "Override the loopback control-plane URL that Murph should manage for this vault.",
                                   "type": "string",
-                                  "format": "uri"
+                                  "minLength": 1
                                 }
                               }
                             }
@@ -2317,7 +2317,7 @@
                                 "baseUrl": {
                                   "description": "Override the loopback control-plane URL that Murph should manage for this vault.",
                                   "type": "string",
-                                  "format": "uri"
+                                  "minLength": 1
                                 }
                               }
                             }
@@ -2345,7 +2345,7 @@
                                 "baseUrl": {
                                   "description": "Override the loopback control-plane URL that Murph should manage for this vault.",
                                   "type": "string",
-                                  "format": "uri"
+                                  "minLength": 1
                                 }
                               }
                             }
@@ -8221,9 +8221,9 @@
                                   "description": "Model id to use, such as anthropic/claude-sonnet-4.5 or a local model id."
                                 },
                                 "baseUrl": {
-                                  "description": "Optional OpenAI-compatible base URL for local or custom model endpoints.",
                                   "type": "string",
-                                  "minLength": 1
+                                  "minLength": 1,
+                                  "description": "OpenAI-compatible base URL for local or custom model endpoints."
                                 },
                                 "apiKey": {
                                   "description": "Optional explicit API key for OpenAI-compatible model endpoints.",

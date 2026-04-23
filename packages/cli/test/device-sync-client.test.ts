@@ -71,6 +71,36 @@ test("createDeviceSyncClient surfaces invalid JSON responses from the daemon", a
   );
 });
 
+test("createDeviceSyncClient validates connection authorization URLs before opening a browser", async () => {
+  let openedUrl: string | null = null;
+  const client = createDeviceSyncClient({
+    baseUrl: "http://127.0.0.1:8788",
+    fetchImpl: async () =>
+      new Response(
+        JSON.stringify({
+          provider: "oura",
+          state: "state_01",
+          expiresAt: "2026-04-23T12:00:00.000Z",
+          authorizationUrl: "javascript:alert(1)",
+        }),
+        { status: 200 },
+      ),
+    openBrowser: async (url) => {
+      openedUrl = url;
+      return true;
+    },
+  });
+
+  await assert.rejects(
+    () => client.beginConnection({ provider: "oura", open: true }),
+    (error) =>
+      error instanceof VaultCliError &&
+      error.code === "device_sync_invalid_response" &&
+      error.context?.path === "/providers/oura/connect",
+  );
+  assert.equal(openedUrl, null);
+});
+
 test("createDeviceSyncClient rejects non-loopback base URLs when a control-plane bearer is configured", () => {
   assert.throws(
     () =>

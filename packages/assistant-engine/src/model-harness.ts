@@ -23,6 +23,7 @@ import {
   type AssistantToolSpec,
 } from './inbox-model-contracts.js'
 import { errorMessage } from '@murphai/operator-config/text/shared'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type { AssistantExecutionDriver } from '@murphai/operator-config/assistant-cli-contracts'
 
 export type JsonRecord = Record<string, unknown>
@@ -482,6 +483,54 @@ export interface AssistantModelSpec {
   responsesRequestPolicy?: AssistantResponsesRequestPolicy
 }
 
+export const ASSISTANT_MODEL_CONFIG_INVALID_CODE =
+  'assistant_model_config_invalid' as const
+
+export function isAssistantModelConfigurationError(
+  error: unknown,
+): error is VaultCliError {
+  return (
+    error instanceof VaultCliError &&
+    error.code === ASSISTANT_MODEL_CONFIG_INVALID_CODE
+  )
+}
+
+export function assertAssistantModelSpecReadyForExecution(
+  spec: AssistantModelSpec,
+): void {
+  const executionDriver = spec.executionDriver ?? 'openai-compatible'
+
+  if (spec.model.trim().length === 0) {
+    throw new VaultCliError(
+      ASSISTANT_MODEL_CONFIG_INVALID_CODE,
+      'Assistant model configuration is invalid: model id is required.',
+      {
+        executionDriver,
+      },
+    )
+  }
+
+  if (executionDriver === 'codex-cli') {
+    throw new VaultCliError(
+      ASSISTANT_MODEL_CONFIG_INVALID_CODE,
+      'Assistant model configuration is invalid: Codex CLI models cannot be resolved through the AI SDK model harness.',
+      {
+        executionDriver,
+      },
+    )
+  }
+
+  if (executionDriver === 'openai-compatible' && !spec.baseUrl) {
+    throw new VaultCliError(
+      ASSISTANT_MODEL_CONFIG_INVALID_CODE,
+      'Assistant model configuration is invalid: OpenAI-compatible routing requires a base URL.',
+      {
+        executionDriver,
+      },
+    )
+  }
+}
+
 export interface GenerateAssistantObjectInput<TSchema extends z.ZodTypeAny> {
   maxSteps?: number
   messages?: AssistantModelMessage[]
@@ -669,6 +718,8 @@ export async function generateAssistantObject<TSchema extends z.ZodTypeAny>(
 export function resolveAssistantLanguageModel(
   spec: AssistantModelSpec,
 ): LanguageModel {
+  assertAssistantModelSpecReadyForExecution(spec)
+
   switch (spec.executionDriver ?? 'openai-compatible') {
     case 'responses': {
       const provider = createOpenAI({
@@ -683,20 +734,25 @@ export function resolveAssistantLanguageModel(
     }
 
     case 'codex-cli':
-      throw new Error('Codex models do not resolve through the AI SDK model harness.')
+      throw new VaultCliError(
+        ASSISTANT_MODEL_CONFIG_INVALID_CODE,
+        'Assistant model configuration is invalid: Codex CLI models cannot be resolved through the AI SDK model harness.',
+      )
 
     case 'openai-compatible':
     default: {
-      if (!spec.baseUrl) {
-        throw new Error(
-          'OpenAI-compatible models require a base URL in the resolved model spec.',
+      const baseUrl = spec.baseUrl
+      if (!baseUrl) {
+        throw new VaultCliError(
+          ASSISTANT_MODEL_CONFIG_INVALID_CODE,
+          'Assistant model configuration is invalid: OpenAI-compatible routing requires a base URL.',
         )
       }
 
       const provider = createOpenAICompatible({
         name: normalizeAssistantProviderName(spec.providerName),
         apiKey: resolveAssistantApiKey(spec),
-        baseURL: spec.baseUrl,
+        baseURL: baseUrl,
         ...(spec.headers ? { headers: spec.headers } : {}),
       })
 
