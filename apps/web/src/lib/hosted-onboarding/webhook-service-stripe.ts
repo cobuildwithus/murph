@@ -1,4 +1,4 @@
-import type { PrismaClient } from "@prisma/client";
+import { HostedStripeEventStatus, type PrismaClient } from "@prisma/client";
 import type Stripe from "stripe";
 
 import { getPrisma } from "../prisma";
@@ -53,12 +53,11 @@ export async function handleHostedStripeWebhook(input: {
     prisma,
   });
 
-  if (!recorded.duplicate) {
-    await reconcileHostedStripeWebhookEvent({
-      eventId: event.id,
-      prisma,
-    });
-  }
+  await reconcileHostedStripeWebhookEvent({
+    duplicate: recorded.duplicate,
+    eventId: event.id,
+    prisma,
+  });
 
   return {
     duplicate: recorded.duplicate || undefined,
@@ -68,20 +67,50 @@ export async function handleHostedStripeWebhook(input: {
 }
 
 async function reconcileHostedStripeWebhookEvent(input: {
+  duplicate: boolean;
   eventId: string;
   prisma: PrismaClient;
 }): Promise<void> {
-  const reconciled = await reconcileHostedStripeEventById({
-    eventId: input.eventId,
-    prisma: input.prisma,
-  });
+  if (input.duplicate) {
+    const shouldSkip = await prepareDuplicateHostedStripeWebhookEventForInlineRetry(
+      input.eventId,
+      input.prisma,
+    );
 
-  if (reconciled?.createdOrUpdatedRevnetIssuance) {
+    if (shouldSkip) {
+      return;
+    }
+  }
+
+  let reconciled;
+
+  try {
+    reconciled = await reconcileHostedStripeEventById({
+      eventId: input.eventId,
+      prisma: input.prisma,
+    });
+  } catch (error) {
+    throw buildHostedStripeWebhookReconcileError(input.eventId, error);
+  }
+
+  if (!reconciled) {
+    if (await shouldAcknowledgeHostedStripeWebhookDuplicate(input.eventId, input.prisma)) {
+      return;
+    }
+
+    throw buildHostedStripeWebhookReconcileError(input.eventId);
+  }
+
+  if (reconciled.status !== "completed") {
+    throw buildHostedStripeWebhookReconcileError(input.eventId);
+  }
+
+  if (reconciled.createdOrUpdatedRevnetIssuance) {
     await drainHostedRevnetIssuanceSubmissionQueueBestEffort(input.prisma);
   }
 
-  const hostedExecutionEventId = reconciled?.hostedExecutionEventId ?? null;
-  const hostedExecutionMemberId = reconciled?.activatedMemberId ?? null;
+  const hostedExecutionEventId = reconciled.hostedExecutionEventId ?? null;
+  const hostedExecutionMemberId = reconciled.activatedMemberId ?? null;
 
   if (!hostedExecutionEventId || !hostedExecutionMemberId) {
     return;
@@ -91,6 +120,149 @@ async function reconcileHostedStripeWebhookEvent(input: {
     context: "stripe.webhook",
     userId: hostedExecutionMemberId,
   });
+}
+
+async function prepareDuplicateHostedStripeWebhookEventForInlineRetry(
+  eventId: string,
+  prisma: PrismaClient,
+): Promise<boolean> {
+  const now = new Date();
+  const storedEvent = await readHostedStripeWebhookEventReceipt(eventId, prisma);
+
+  if (!storedEvent) {
+    return false;
+  }
+
+  if (shouldAcknowledgeHostedStripeWebhookDuplicateReceipt(storedEvent, now)) {
+    return true;
+  }
+
+  if (!requiresHostedStripeWebhookInlineRetryReset(storedEvent, now)) {
+    return false;
+  }
+
+  const reset = await prisma.hostedStripeEvent.updateMany({
+    data: buildHostedStripeWebhookInlineRetryReset(storedEvent.status, now),
+    where: {
+      eventId,
+      updatedAt: storedEvent.updatedAt,
+    },
+  });
+
+  if (reset.count === 1) {
+    return false;
+  }
+
+  const refreshedEvent = await readHostedStripeWebhookEventReceipt(eventId, prisma);
+
+  return Boolean(
+    refreshedEvent
+    && shouldAcknowledgeHostedStripeWebhookDuplicateReceipt(refreshedEvent, new Date()),
+  );
+}
+
+async function shouldAcknowledgeHostedStripeWebhookDuplicate(
+  eventId: string,
+  prisma: PrismaClient,
+): Promise<boolean> {
+  const storedEvent = await readHostedStripeWebhookEventReceipt(eventId, prisma);
+
+  return Boolean(
+    storedEvent
+    && shouldAcknowledgeHostedStripeWebhookDuplicateReceipt(storedEvent, new Date()),
+  );
+}
+
+async function readHostedStripeWebhookEventReceipt(
+  eventId: string,
+  prisma: PrismaClient,
+) {
+  return prisma.hostedStripeEvent.findUnique({
+    select: {
+      claimExpiresAt: true,
+      nextAttemptAt: true,
+      status: true,
+      updatedAt: true,
+    },
+    where: {
+      eventId,
+    },
+  });
+}
+
+function shouldAcknowledgeHostedStripeWebhookDuplicateReceipt(
+  storedEvent: NonNullable<
+    Awaited<ReturnType<typeof readHostedStripeWebhookEventReceipt>>
+  >,
+  now: Date,
+): boolean {
+  return storedEvent.status === HostedStripeEventStatus.completed
+    || isHostedStripeWebhookReceiptFreshlyProcessing(storedEvent, now);
+}
+
+function isHostedStripeWebhookReceiptFreshlyProcessing(
+  storedEvent: NonNullable<
+    Awaited<ReturnType<typeof readHostedStripeWebhookEventReceipt>>
+  >,
+  now: Date,
+): boolean {
+  return storedEvent.status === HostedStripeEventStatus.processing
+    && storedEvent.claimExpiresAt instanceof Date
+    && storedEvent.claimExpiresAt.getTime() > now.getTime();
+}
+
+function requiresHostedStripeWebhookInlineRetryReset(
+  storedEvent: NonNullable<
+    Awaited<ReturnType<typeof readHostedStripeWebhookEventReceipt>>
+  >,
+  now: Date,
+): boolean {
+  switch (storedEvent.status) {
+    case HostedStripeEventStatus.pending:
+    case HostedStripeEventStatus.failed:
+      return storedEvent.nextAttemptAt.getTime() > now.getTime();
+    case HostedStripeEventStatus.processing:
+      return storedEvent.claimExpiresAt === null;
+    case HostedStripeEventStatus.poisoned:
+      return true;
+    default:
+      return false;
+  }
+}
+
+function buildHostedStripeWebhookInlineRetryReset(
+  status: HostedStripeEventStatus,
+  now: Date,
+) {
+  return {
+    claimExpiresAt: null,
+    nextAttemptAt: now,
+    ...(status === HostedStripeEventStatus.poisoned
+      || status === HostedStripeEventStatus.processing
+      ? { status: HostedStripeEventStatus.failed }
+      : {}),
+  };
+}
+
+function buildHostedStripeWebhookReconcileError(
+  eventId: string,
+  cause?: unknown,
+) {
+  const error = hostedOnboardingError({
+    code: "STRIPE_WEBHOOK_RECONCILE_FAILED",
+    details: {
+      eventId,
+    },
+    httpStatus: 500,
+    message: "Stripe webhook reconciliation did not complete. Retry later.",
+    retryable: true,
+  });
+
+  if (cause !== undefined) {
+    error.cause = cause;
+  }
+
+  return error;
 }
 
 function constructStripeWebhookEvent(input: {
