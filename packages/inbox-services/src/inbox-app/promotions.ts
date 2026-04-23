@@ -157,14 +157,16 @@ export function createInboxPromotionOps(
                 : null,
           }
         },
-        createPromotion: async ({ paths, capture, prepared, attachment }) => {
+        createPromotion: async ({
+          paths,
+          capture,
+          prepared,
+          attachment,
+          metadata,
+        }) => {
           const title =
             typeof attachment.fileName === 'string' && attachment.fileName.trim()
               ? attachment.fileName.trim()
-              : undefined
-          const note =
-            typeof capture.text === 'string' && capture.text.trim()
-              ? capture.text.trim()
               : undefined
           const result = await prepared.importers.importDocument({
             filePath: await resolvePromotionAttachmentFilePath(
@@ -173,10 +175,10 @@ export function createInboxPromotionOps(
               attachment,
             ),
             vaultRoot: paths.absoluteVaultRoot,
-            occurredAt: capture.occurredAt,
+            occurredAt: metadata.occurredAt ?? undefined,
             title,
-            note,
-            source: 'import',
+            note: metadata.note ?? undefined,
+            source: metadata.source ?? undefined,
           })
 
           return {

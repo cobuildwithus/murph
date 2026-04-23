@@ -659,6 +659,7 @@ test('direct promotion helpers cover canonical matching and stale-state reconcil
 
   const createdPaths = await createTempVault()
   const createdCapture = createCapture('capture-created', {
+    text: 'created capture note',
     attachments: [
       createAttachment({
         ordinal: 1,
@@ -679,11 +680,19 @@ test('direct promotion helpers cover canonical matching and stale-state reconcil
     '{not-valid-json',
   )
   let createClosed = 0
+  let createMetadata: {
+    note: string | null
+    occurredAt: string | null
+    source: string | null
+  } | null = null
   const createdResult = await promoteCanonicalAttachmentImport({
     input: {
       vault: createdPaths.absoluteVaultRoot,
       captureId: createdCapture.captureId,
       requestId: null,
+      note: 'override note',
+      occurredAt: '2026-04-08T12:11:00.000Z',
+      source: 'manual',
     },
     target: 'document',
     clock: () => new Date('2026-04-08T12:10:00.000Z'),
@@ -710,13 +719,21 @@ test('direct promotion helpers cover canonical matching and stale-state reconcil
       ),
       title: attachment.fileName?.trim() ?? null,
     }),
-    createPromotion: async () => ({
-      lookupId: 'document-created',
-      relatedId: 'document-created',
-    }),
+    createPromotion: async ({ metadata }) => {
+      createMetadata = metadata
+      return {
+        lookupId: 'document-created',
+        relatedId: 'document-created',
+      }
+    },
   })
   assert.equal(createdResult.created, true)
   assert.equal(createClosed, 1)
+  assert.deepEqual(createMetadata, {
+    note: 'override note',
+    occurredAt: '2026-04-08T12:11:00.000Z',
+    source: 'manual',
+  })
 
   const stalePaths = await createTempVault()
   const staleCapture = createCapture('capture-stale', {
@@ -1245,6 +1262,29 @@ test('app promotion ops exercise meal, document, journal, and experiment flows',
         }),
       ],
     }),
+    createCapture('capture-document-overrides', {
+      text: 'document override fallback',
+      attachments: [
+        createAttachment({
+          ordinal: 1,
+          kind: 'document',
+          storedPath: 'raw/inbox/email/capture-document-overrides/attachments/manual.pdf',
+          fileName: ' Manual.pdf ',
+        }),
+      ],
+    }),
+    createCapture('capture-document-overrides-retry', {
+      text: 'document override retry fallback',
+      attachments: [
+        createAttachment({
+          ordinal: 1,
+          kind: 'document',
+          storedPath:
+            'raw/inbox/email/capture-document-overrides-retry/attachments/manual.pdf',
+          fileName: ' Manual.pdf ',
+        }),
+      ],
+    }),
     createCapture('capture-document-empty', {
       text: '   ',
       attachments: [
@@ -1315,6 +1355,16 @@ test('app promotion ops exercise meal, document, journal, and experiment flows',
   )
   await writeTextFile(
     paths.absoluteVaultRoot,
+    'raw/inbox/email/capture-document-overrides/attachments/manual.pdf',
+    'manual document draft body',
+  )
+  await writeTextFile(
+    paths.absoluteVaultRoot,
+    'raw/inbox/email/capture-document-overrides-retry/attachments/manual.pdf',
+    'manual document body',
+  )
+  await writeTextFile(
+    paths.absoluteVaultRoot,
     'raw/inbox/email/capture-document-empty/attachments/blank.pdf',
     'blank body',
   )
@@ -1350,6 +1400,25 @@ test('app promotion ops exercise meal, document, journal, and experiment flows',
         occurredAt: '2026-04-08T12:15:00.000Z',
         note: 'Only ate the sweet potatoes and green beans.',
         lookupId: 'meal-overrides-existing',
+      },
+    },
+  )
+  await writeJsonFile(
+    paths.absoluteVaultRoot,
+    'raw/documents/overrides-existing/manifest.json',
+    {
+      importId: 'document-overrides-existing',
+      importKind: 'document',
+      importedAt: '2026-04-08T07:06:00.000Z',
+      source: 'manual',
+      artifacts: [
+        { role: 'source_document', sha256: sha256('manual document body') },
+      ],
+      provenance: {
+        occurredAt: '2026-04-08T14:20:00.000Z',
+        note: 'Manual document note.',
+        lookupId: 'document-overrides-existing',
+        title: 'Manual.pdf',
       },
     },
   )
@@ -1518,6 +1587,43 @@ test('app promotion ops exercise meal, document, journal, and experiment flows',
   const createdDocumentImport = importedFiles.at(-1)
   assert.equal(createdDocumentImport?.title, 'Report.pdf')
   assert.equal(createdDocumentImport?.note, 'document note')
+  assert.equal(createdDocumentImport?.occurredAt, '2026-04-08T11:22:33.000Z')
+  assert.equal(createdDocumentImport?.source, 'import')
+
+  const overriddenDocument = await ops.promoteDocument({
+    vault: paths.absoluteVaultRoot,
+    captureId: 'capture-document-overrides',
+    requestId: null,
+    note: 'Manual document note.',
+    occurredAt: '2026-04-08T14:20:00.000Z',
+    source: 'manual',
+  })
+  assert.equal(overriddenDocument.created, true)
+  const overriddenDocumentImport = importedFiles.at(-1)
+  assert.equal(overriddenDocumentImport?.title, 'Manual.pdf')
+  assert.equal(overriddenDocumentImport?.note, 'Manual document note.')
+  assert.equal(
+    overriddenDocumentImport?.occurredAt,
+    '2026-04-08T14:20:00.000Z',
+  )
+  assert.equal(overriddenDocumentImport?.source, 'manual')
+  assert.match(
+    overriddenDocumentImport?.filePath ?? '',
+    /capture-document-overrides\/attachments\/manual\.pdf$/,
+  )
+  const documentImportsBeforeRetry = importedFiles.length
+  const retriedOverriddenDocument = await ops.promoteDocument({
+    vault: paths.absoluteVaultRoot,
+    captureId: 'capture-document-overrides-retry',
+    requestId: null,
+    note: 'Manual document note.',
+    occurredAt: '2026-04-08T14:20:00.000Z',
+    source: 'manual',
+  })
+  assert.equal(retriedOverriddenDocument.created, false)
+  assert.equal(retriedOverriddenDocument.lookupId, 'document-overrides-existing')
+  assert.equal(retriedOverriddenDocument.relatedId, 'document-overrides-existing')
+  assert.equal(importedFiles.length, documentImportsBeforeRetry)
 
   const emptyDocument = await ops.promoteDocument({
     vault: paths.absoluteVaultRoot,
