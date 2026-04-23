@@ -3,7 +3,7 @@ import {
   resolveAssistantLanguageModel,
   type AssistantModelSpec,
   type AssistantAiSdkToolEvent,
-} from '../../model-harness.js'
+} from '../model-harness.js'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   createCatalogModel,
@@ -23,6 +23,10 @@ import {
   normalizeAssistantProviderOptionKey,
   normalizeNullableString,
 } from '../shared.js'
+import {
+  isAssistantOpenAIBaseUrl,
+  isAssistantVercelAIGatewayBaseUrl,
+} from '@murphai/operator-config/assistant/shared'
 import {
   createAssistantProviderToolProgressEvent,
 } from '../provider-progress.js'
@@ -223,6 +227,7 @@ export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
 
     const toolEvents: unknown[] = []
     let executedToolCount = 0
+    const providerActionToolCallIds = new Set<string>()
     const tools = resolveOpenAiCompatibleAiSdkTools({
       input,
       languageModelSpec,
@@ -274,6 +279,12 @@ export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
         maxRetries: tools ? 0 : OPENAI_COMPATIBLE_PROVIDER_MAX_RETRIES,
         messages,
         model: resolveAssistantLanguageModel(languageModelSpec),
+        onStepFinish: (stepResult) => {
+          recordOpenAiCompatibleProviderActionResult(
+            providerActionToolCallIds,
+            stepResult,
+          )
+        },
         ...(tools
           ? {
               stopWhen: stepCountIs(OPENAI_COMPATIBLE_PROVIDER_MAX_TOOL_STEPS),
@@ -288,12 +299,16 @@ export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
         system: normalizeNullableString(input.systemPrompt) ?? undefined,
         timeout: OPENAI_COMPATIBLE_PROVIDER_TIMEOUT_MS,
       })
+      recordOpenAiCompatibleProviderActionResult(
+        providerActionToolCallIds,
+        result,
+      )
 
       return {
         metadata: {
           activityLabels: [],
           executedToolCount,
-          providerActionCount: 0,
+          providerActionCount: providerActionToolCallIds.size,
           rawToolEvents: toolEvents,
         },
         ok: true,
@@ -322,7 +337,7 @@ export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
         metadata: {
           activityLabels: [],
           executedToolCount,
-          providerActionCount: 0,
+          providerActionCount: providerActionToolCallIds.size,
           rawToolEvents: toolEvents,
         },
         ok: false,
@@ -430,12 +445,23 @@ function resolveOpenAiCompatibleAiSdkTools(input: {
   onToolEvent: (event: AssistantAiSdkToolEvent) => void
   providerConfig: AssistantProviderConfig
 }) {
-  const useMurphWebSearch = shouldAssistantProviderUseMurphWebSearch(
-    input.providerConfig,
-  )
-  const requestedNativeWebSearch =
-    shouldAssistantProviderUseProviderWebSearch(input.providerConfig) ||
+  const providerTarget = isAssistantOpenAICompatibleTargetConfig(input.providerConfig)
+    ? input.providerConfig.target
+    : {}
+  const requestedProviderWebSearch =
+    shouldAssistantProviderUseProviderWebSearch(input.providerConfig)
+  const requestedGatewayWebSearch =
     shouldAssistantProviderUseGatewayWebSearch(input.providerConfig)
+  const useNativeWebSearch =
+    (requestedGatewayWebSearch &&
+      isOpenAiCompatibleVercelAiGatewayTarget(providerTarget)) ||
+    (requestedProviderWebSearch &&
+      (isOpenAiCompatibleOpenAiWebSearchTarget(providerTarget) ||
+        isOpenAiCompatibleVercelAiGatewayTarget(providerTarget)))
+  const useMurphWebSearch =
+    shouldAssistantProviderUseMurphWebSearch(input.providerConfig) ||
+    ((requestedProviderWebSearch || requestedGatewayWebSearch) &&
+      !useNativeWebSearch)
   const murphTools = filterOpenAiCompatibleMurphAiSdkTools({
     tools:
       input.input.toolRuntime?.toolCatalog?.createAiSdkTools('apply', {
@@ -447,7 +473,7 @@ function resolveOpenAiCompatibleAiSdkTools(input: {
     ...remapOpenAiCompatibleToolNames(murphTools),
   }
   const nativeWebSearchTool =
-    requestedNativeWebSearch && !useMurphWebSearch
+    useNativeWebSearch && !useMurphWebSearch
       ? createOpenAiCompatibleNativeWebSearchTool({
           languageModelSpec: input.languageModelSpec,
         })
@@ -474,6 +500,54 @@ function createOpenAiCompatibleNativeWebSearchTool(input: {
     description: 'Native OpenAI web search tool',
     inputSchema: z.never(),
   })
+}
+
+function recordOpenAiCompatibleProviderActionResult(
+  actionToolCallIds: Set<string>,
+  result: {
+    toolCalls?: ReadonlyArray<{
+      providerExecuted?: boolean
+      toolCallId?: string
+    }>
+    toolResults?: ReadonlyArray<{
+      providerExecuted?: boolean
+      toolCallId?: string
+    }>
+  },
+): void {
+  for (const toolCall of result.toolCalls ?? []) {
+    recordOpenAiCompatibleProviderActionToolCall(actionToolCallIds, toolCall)
+  }
+
+  for (const toolResult of result.toolResults ?? []) {
+    recordOpenAiCompatibleProviderActionToolCall(actionToolCallIds, toolResult)
+  }
+}
+
+function recordOpenAiCompatibleProviderActionToolCall(
+  actionToolCallIds: Set<string>,
+  toolCall:
+    | {
+        providerExecuted?: boolean
+        toolCallId?: string
+      }
+    | null
+    | undefined,
+): void {
+  if (!toolCall || toolCall.providerExecuted !== true) {
+    return
+  }
+
+  const toolCallId =
+    typeof toolCall.toolCallId === 'string' &&
+    toolCall.toolCallId.trim().length > 0
+      ? toolCall.toolCallId
+      : null
+  if (!toolCallId) {
+    return
+  }
+
+  actionToolCallIds.add(toolCallId)
 }
 
 function filterOpenAiCompatibleMurphAiSdkTools(input: {
@@ -634,13 +708,7 @@ function resolveOpenAiCompatibleGatewayProviderOptions(input: {
 export function isOpenAiCompatibleVercelAiGatewayTarget(
   target: OpenAiCompatibleTargetIdentity,
 ): boolean {
-  const presetId = normalizeNullableString(target.presetId)
-  const providerName = normalizeNullableString(target.providerName)
-  return (
-    presetId === 'vercel-ai-gateway' ||
-    providerName?.toLowerCase() === 'vercel-ai-gateway' ||
-    isVercelAiGatewayBaseUrl(target.baseUrl)
-  )
+  return isVercelAiGatewayBaseUrl(target.baseUrl)
 }
 
 export function resolveOpenAiCompatibleVercelStripeBillingHeaders(input: {
@@ -673,18 +741,20 @@ export function resolveOpenAiCompatibleVercelStripeBillingHeaders(input: {
 }
 
 function isVercelAiGatewayBaseUrl(value: string | null | undefined): boolean {
-  const normalized = normalizeNullableString(value)
+  return isAssistantVercelAIGatewayBaseUrl(value)
+}
 
-  if (!normalized) {
-    return false
+function isOpenAiCompatibleOpenAiWebSearchTarget(
+  target: OpenAiCompatibleTargetIdentity,
+): boolean {
+  const normalizedBaseUrl = normalizeNullableString(target.baseUrl)
+  if (normalizedBaseUrl) {
+    return isAssistantOpenAIBaseUrl(normalizedBaseUrl)
   }
 
-  try {
-    const url = new URL(normalized)
-    return url.protocol === 'https:' && url.hostname.toLowerCase() === 'ai-gateway.vercel.sh'
-  } catch {
-    return false
-  }
+  const presetId = normalizeNullableString(target.presetId)
+  const providerName = normalizeNullableString(target.providerName)?.toLowerCase()
+  return presetId === 'openai' || providerName === 'openai'
 }
 
 function normalizeStripeCustomerId(value: string | null | undefined): string | null {

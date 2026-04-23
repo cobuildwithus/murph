@@ -3,8 +3,9 @@ import { Cli } from 'incur'
 import { createAssistantFoodAutoLogHooks } from '@murphai/assistant-engine/assistant-cron'
 import {
   createIntegratedVaultServices,
-  type VaultServices,
 } from '@murphai/vault-usecases'
+import type { CliVaultServices } from './device-services.js'
+import { ensureCliVaultServices } from './device-services.js'
 import { incurErrorBridge } from './incur-error-bridge.js'
 
 const require = createRequire(import.meta.url)
@@ -21,10 +22,12 @@ const CLI_SYNC_SUGGESTIONS = [
 
 const CLI_CONFIG_FILES = ['~/.config/murph/config.json'] as const
 
-export function createDefaultVaultServices(): VaultServices {
-  return createIntegratedVaultServices({
-    foodAutoLogHooks: createAssistantFoodAutoLogHooks(),
-  })
+export function createDefaultVaultServices(): CliVaultServices {
+  return ensureCliVaultServices(
+    createIntegratedVaultServices({
+      foodAutoLogHooks: createAssistantFoodAutoLogHooks(),
+    }),
+  )
 }
 
 export function createVaultCliShell(commandName = 'vault-cli'): Cli.Cli {

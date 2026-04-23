@@ -11,9 +11,9 @@ const routeHarnessMocks = vi.hoisted(() => ({
   resolveAssistantLanguageModel: vi.fn(() => ({ provider: 'mock-model' })),
 }))
 
-vi.mock('@murphai/assistant-engine/model-harness', async () => {
-  const actual = await vi.importActual<typeof import('@murphai/assistant-engine/model-harness')>(
-    '@murphai/assistant-engine/model-harness',
+vi.mock('../src/inbox-model-runtime.ts', async () => {
+  const actual = await vi.importActual<typeof import('../src/inbox-model-runtime.ts')>(
+    '../src/inbox-model-runtime.ts',
   )
 
   return {
@@ -23,7 +23,7 @@ vi.mock('@murphai/assistant-engine/model-harness', async () => {
   }
 })
 
-import { routeInboxCaptureWithModel } from '@murphai/assistant-engine/inbox-model-harness'
+import { routeInboxCaptureWithModel } from '../src/inbox-model-harness.ts'
 
 afterEach(() => {
   routeHarnessMocks.generateAssistantObject.mockReset()

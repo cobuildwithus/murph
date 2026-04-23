@@ -15,12 +15,12 @@ import type {
   DeviceDaemonStopResult,
   DeviceProviderListResult,
 } from '@murphai/operator-config/device-cli-contracts'
-import {
-  createIntegratedVaultServices,
-  type VaultServices,
-} from '@murphai/vault-usecases'
 
 import { registerDeviceCommands } from '../src/commands/device.js'
+import {
+  createIntegratedDeviceSyncServices,
+  type DeviceSyncServices,
+} from '../src/device-services.js'
 import type {
   KnowledgeGetResult as KnowledgeShowResult,
   KnowledgeIndexRebuildResult,
@@ -75,25 +75,25 @@ const connectedAccount: DeviceAccountShowResult['account'] = {
 }
 
 function createDeviceCommandServices() {
-  const services = createIntegratedVaultServices()
+  const services = createIntegratedDeviceSyncServices()
   const calls = {
-    connect: null as Parameters<VaultServices['devices']['connect']>[0] | null,
+    connect: null as Parameters<DeviceSyncServices['connect']>[0] | null,
     daemonStart:
-      null as Parameters<VaultServices['devices']['daemonStart']>[0] | null,
+      null as Parameters<DeviceSyncServices['daemonStart']>[0] | null,
     daemonStatus:
-      null as Parameters<VaultServices['devices']['daemonStatus']>[0] | null,
+      null as Parameters<DeviceSyncServices['daemonStatus']>[0] | null,
     daemonStop:
-      null as Parameters<VaultServices['devices']['daemonStop']>[0] | null,
+      null as Parameters<DeviceSyncServices['daemonStop']>[0] | null,
     disconnectAccount:
-      null as Parameters<VaultServices['devices']['disconnectAccount']>[0] | null,
+      null as Parameters<DeviceSyncServices['disconnectAccount']>[0] | null,
     listAccounts:
-      null as Parameters<VaultServices['devices']['listAccounts']>[0] | null,
+      null as Parameters<DeviceSyncServices['listAccounts']>[0] | null,
     listProviders:
-      null as Parameters<VaultServices['devices']['listProviders']>[0] | null,
+      null as Parameters<DeviceSyncServices['listProviders']>[0] | null,
     reconcileAccount:
-      null as Parameters<VaultServices['devices']['reconcileAccount']>[0] | null,
+      null as Parameters<DeviceSyncServices['reconcileAccount']>[0] | null,
     showAccount:
-      null as Parameters<VaultServices['devices']['showAccount']>[0] | null,
+      null as Parameters<DeviceSyncServices['showAccount']>[0] | null,
   }
 
   const providerListResult: DeviceProviderListResult = {
@@ -195,8 +195,8 @@ function createDeviceCommandServices() {
     message: 'Device daemon stopped.',
   }
 
-  services.devices = {
-    ...services.devices,
+  const stubbedServices: DeviceSyncServices = {
+    ...services,
     async connect(input) {
       calls.connect = input
       return connectResult
@@ -237,7 +237,7 @@ function createDeviceCommandServices() {
 
   return {
     calls,
-    services,
+    services: stubbedServices,
   }
 }
 

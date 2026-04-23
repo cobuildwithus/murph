@@ -19,7 +19,7 @@ export const cloudflareVitestAliases = [
   ...createVitestWorkspaceRuntimeAliases(
     resolveWorkspaceSourceEntries(repoRoot, {
       "@murphai/assistant-engine": "packages/assistant-engine/src/index.ts",
-      "@murphai/operator-config": "packages/operator-config/src/index.ts",
+      "@murphai/operator-config": "packages/operator-config/package.json",
       "@murphai/assistant-runtime": "packages/assistant-runtime/src/index.ts",
       "@murphai/cloudflare-hosted-control": "packages/cloudflare-hosted-control/package.json",
       "#hosted-web-testing": "apps/web/src/testing.ts",

@@ -4,13 +4,6 @@ import {
   VAULT_LAYOUT,
 } from "@murphai/contracts"
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors"
-import {
-  ensureManagedDeviceSyncControlPlane,
-  getManagedDeviceSyncDaemonStatus,
-  startManagedDeviceSyncDaemon,
-  stopManagedDeviceSyncDaemon,
-} from "@murphai/operator-config/device-daemon"
-import { createDeviceSyncClient } from "@murphai/operator-config/device-sync-client"
 import { ALL_QUERY_ENTITY_FAMILIES } from "@murphai/query/entity-families"
 
 import type {
@@ -22,7 +15,6 @@ import type {
 } from "../health-cli-method-types.js"
 import type {
   CoreWriteServices,
-  DeviceSyncServices,
   ImporterServices,
   ProjectAssessmentInput,
   QueryEntity,
@@ -1154,110 +1146,6 @@ function normalizeOptionalString(value: string | undefined): string | undefined 
   return typeof value === 'string' && value.trim() ? value.trim() : undefined
 }
 
-function createIntegratedDeviceSyncServices(): DeviceSyncServices {
-  async function createControlPlaneClient(input: {
-    vault?: string
-    baseUrl?: string
-  }) {
-    const controlPlane = await ensureManagedDeviceSyncControlPlane({
-      vault: input.vault,
-      baseUrl: input.baseUrl,
-    })
-
-    return createDeviceSyncClient({
-      baseUrl: controlPlane.baseUrl,
-      controlToken: controlPlane.controlToken,
-    })
-  }
-
-  return {
-    async listProviders(input) {
-      const client = await createControlPlaneClient(input)
-      const result = await client.listProviders()
-
-      return {
-        baseUrl: client.baseUrl,
-        providers: result.providers,
-      }
-    },
-    async connect(input) {
-      const client = await createControlPlaneClient(input)
-      const result = await client.beginConnection({
-        provider: input.provider,
-        returnTo: input.returnTo,
-        open: input.open,
-      })
-
-      return {
-        baseUrl: client.baseUrl,
-        provider: result.provider,
-        state: result.state,
-        expiresAt: result.expiresAt,
-        authorizationUrl: result.authorizationUrl,
-        openedBrowser: result.openedBrowser,
-      }
-    },
-    async listAccounts(input) {
-      const client = await createControlPlaneClient(input)
-      const result = await client.listAccounts({
-        provider: input.provider,
-      })
-
-      return {
-        baseUrl: client.baseUrl,
-        provider: input.provider ?? null,
-        accounts: result.accounts,
-      }
-    },
-    async showAccount(input) {
-      const client = await createControlPlaneClient(input)
-      const result = await client.showAccount(input.accountId)
-
-      return {
-        baseUrl: client.baseUrl,
-        account: result.account,
-      }
-    },
-    async reconcileAccount(input) {
-      const client = await createControlPlaneClient(input)
-      const result = await client.reconcileAccount(input.accountId)
-
-      return {
-        baseUrl: client.baseUrl,
-        account: result.account,
-        job: result.job,
-      }
-    },
-    async disconnectAccount(input) {
-      const client = await createControlPlaneClient(input)
-      const result = await client.disconnectAccount(input.accountId)
-
-      return {
-        baseUrl: client.baseUrl,
-        account: result.account,
-      }
-    },
-    async daemonStatus(input) {
-      return await getManagedDeviceSyncDaemonStatus({
-        vault: input.vault,
-        baseUrl: input.baseUrl,
-      })
-    },
-    async daemonStart(input) {
-      return await startManagedDeviceSyncDaemon({
-        vault: input.vault,
-        baseUrl: input.baseUrl,
-      })
-    },
-    async daemonStop(input) {
-      return await stopManagedDeviceSyncDaemon({
-        vault: input.vault,
-        baseUrl: input.baseUrl,
-      })
-    },
-  } satisfies DeviceSyncServices
-}
-
 function createIntegratedVaultServiceGroups(
   dependencies: IntegratedVaultServiceDependencies = {},
 ): VaultServices {
@@ -1265,7 +1153,6 @@ function createIntegratedVaultServiceGroups(
     core: createIntegratedCoreServices(dependencies),
     importers: createIntegratedImporterServices(),
     query: createIntegratedQueryServices(),
-    devices: createIntegratedDeviceSyncServices(),
   }
 }
 
@@ -1303,6 +1190,5 @@ export function createUnwiredVaultServices(
     core: createUnwiredServiceGroup("core", integratedServices.core),
     importers: createUnwiredServiceGroup("importers", integratedServices.importers),
     query: createUnwiredServiceGroup("query", integratedServices.query),
-    devices: createUnwiredServiceGroup("devices", integratedServices.devices),
   }
 }

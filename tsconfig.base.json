@@ -136,9 +136,6 @@
       "@murphai/parsers/*": [
         "packages/parsers/src/*"
       ],
-      "@murphai/assistant-cli": [
-        "packages/assistant-cli/src/index.ts"
-      ],
       "@murphai/assistant-cli/commands/assistant": [
         "packages/assistant-cli/src/commands/assistant.ts"
       ],
@@ -147,9 +144,6 @@
       ],
       "@murphai/assistant-cli/*": [
         "packages/assistant-cli/src/*"
-      ],
-      "@murphai/setup-cli": [
-        "packages/setup-cli/src/index.ts"
       ],
       "@murphai/setup-cli/*": [
         "packages/setup-cli/src/*"
@@ -160,17 +154,11 @@
       "@murphai/assistant-runtime/*": [
         "packages/assistant-runtime/src/*"
       ],
-      "@murphai/assistantd": [
-        "packages/assistantd/src/index.ts"
-      ],
       "@murphai/assistantd/client": [
         "packages/assistantd/src/client.ts"
       ],
       "@murphai/assistantd/*": [
         "packages/assistantd/src/*"
-      ],
-      "@murphai/operator-config": [
-        "packages/operator-config/src/index.ts"
       ],
       "@murphai/operator-config/hosted-assistant-config-constants": [
         "packages/operator-config/src/hosted-assistant-config-constants.ts"

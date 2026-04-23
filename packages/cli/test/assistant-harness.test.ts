@@ -53,7 +53,7 @@ import {
   createAssistantToolCatalogFromCapabilities,
   defineAssistantCapability,
   resolveAssistantLanguageModel,
-} from '@murphai/assistant-engine/model-harness'
+} from '@murphai/assistant-engine/assistant/model-harness'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 const TEST_API_KEY_ENV = 'ASSISTANT_TEST_KEY'

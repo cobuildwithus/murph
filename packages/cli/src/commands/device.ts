@@ -14,7 +14,7 @@ import {
   deviceSyncProviderKeySchema,
   normalizeDeviceSyncProviderKey,
 } from '@murphai/operator-config/device-cli-contracts'
-import type { VaultServices } from '@murphai/vault-usecases'
+import type { DeviceSyncServices } from '../device-services.js'
 
 const providerNameSchema = deviceSyncProviderKeySchema
   .describe('Live device-sync provider key such as garmin, whoop, or oura.')
@@ -71,7 +71,7 @@ const deviceDaemonOptionsSchema = withBaseOptions({
 
 export function registerDeviceCommands(
   cli: Cli.Cli,
-  services: VaultServices,
+  services: DeviceSyncServices,
 ) {
   const device = Cli.create('device', {
     description:
@@ -90,7 +90,7 @@ export function registerDeviceCommands(
     options: deviceControlOptionsSchema,
     output: deviceProviderListResultSchema,
     async run({ options }) {
-      return services.devices.listProviders({
+      return services.listProviders({
         vault: options.vault,
         baseUrl: options.baseUrl,
       })
@@ -124,7 +124,7 @@ export function registerDeviceCommands(
     }),
     output: deviceConnectResultSchema,
     async run({ args, options }) {
-      return services.devices.connect({
+      return services.connect({
         vault: options.vault,
         provider: normalizeProviderName(args.provider),
         baseUrl: options.baseUrl,
@@ -148,7 +148,7 @@ export function registerDeviceCommands(
     }),
     output: deviceAccountListResultSchema,
     async run({ options }) {
-      return services.devices.listAccounts({
+      return services.listAccounts({
         vault: options.vault,
         baseUrl: options.baseUrl,
         provider: options.provider ? normalizeProviderName(options.provider) : undefined,
@@ -164,7 +164,7 @@ export function registerDeviceCommands(
     options: deviceControlOptionsSchema,
     output: deviceAccountShowResultSchema,
     async run({ args, options }) {
-      return services.devices.showAccount({
+      return services.showAccount({
         vault: options.vault,
         baseUrl: options.baseUrl,
         accountId: args.accountId,
@@ -181,7 +181,7 @@ export function registerDeviceCommands(
     options: deviceControlOptionsSchema,
     output: deviceAccountReconcileResultSchema,
     async run({ args, options }) {
-      return services.devices.reconcileAccount({
+      return services.reconcileAccount({
         vault: options.vault,
         baseUrl: options.baseUrl,
         accountId: args.accountId,
@@ -198,7 +198,7 @@ export function registerDeviceCommands(
     options: deviceControlOptionsSchema,
     output: deviceAccountDisconnectResultSchema,
     async run({ args, options }) {
-      return services.devices.disconnectAccount({
+      return services.disconnectAccount({
         vault: options.vault,
         baseUrl: options.baseUrl,
         accountId: args.accountId,
@@ -218,7 +218,7 @@ export function registerDeviceCommands(
     options: deviceDaemonOptionsSchema,
     output: deviceDaemonStatusResultSchema,
     async run({ options }) {
-      return await services.devices.daemonStatus({
+      return await services.daemonStatus({
         vault: options.vault,
         baseUrl: options.baseUrl,
       })
@@ -232,7 +232,7 @@ export function registerDeviceCommands(
     options: deviceDaemonOptionsSchema,
     output: deviceDaemonStartResultSchema,
     async run({ options }) {
-      return await services.devices.daemonStart({
+      return await services.daemonStart({
         vault: options.vault,
         baseUrl: options.baseUrl,
       })
@@ -246,7 +246,7 @@ export function registerDeviceCommands(
     options: deviceDaemonOptionsSchema,
     output: deviceDaemonStopResultSchema,
     async run({ options }) {
-      return await services.devices.daemonStop({
+      return await services.daemonStop({
         vault: options.vault,
         baseUrl: options.baseUrl,
       })

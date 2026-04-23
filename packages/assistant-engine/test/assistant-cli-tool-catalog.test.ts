@@ -406,7 +406,6 @@ function createVaultServicesStub(): VaultServices {
       projectAssessment: async () => ({ projected: true }),
       stopProtocol: async () => ({ protocolId: 'prot-1' }),
     },
-    devices: {},
     importers: {
       importAssessmentResponse: async () => ({ assessmentId: 'assessment-1' }),
       importDocument: async () => ({ documentId: 'document-1' }),

@@ -26,7 +26,7 @@ export async function verifyWorkspacePackageExports(failures) {
     }
 
     if (
-      isSubpathOnlyRootFallbackPackage(packageJson.name)
+      typeof packageJson.name === "string"
       && !workspacePackageAllowsRootSpecifier(packageJson)
       && ("main" in packageJson || "types" in packageJson)
     ) {
@@ -187,13 +187,6 @@ function workspacePackageAllowsRootSpecifier(packageJson) {
   }
 
   return Object.hasOwn(exportsField, ".");
-}
-
-function isSubpathOnlyRootFallbackPackage(packageName) {
-  return (
-    packageName === "@murphai/messaging-ingress"
-    || packageName === "@murphai/cloudflare-hosted-control"
-  );
 }
 
 function listWorkspaceExportTargets(exportsField) {

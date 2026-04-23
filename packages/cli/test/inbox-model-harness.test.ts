@@ -11,15 +11,10 @@ import {
 import type { AssistantAskResult } from '@murphai/operator-config/assistant-cli-contracts'
 import { writeAssistantChatResultArtifacts } from '@murphai/assistant-engine/assistant/automation/artifacts'
 import {
-  createDefaultAssistantCapabilityRegistry,
   createDefaultAssistantToolCatalog,
   createInboxRoutingAssistantToolCatalog,
 } from '@murphai/assistant-engine'
-import { materializeInboxModelBundle } from '@murphai/assistant-engine/inbox-model-harness'
-import {
-  CliBackedCapabilityHost,
-  NativeLocalCapabilityHost,
-} from '@murphai/assistant-engine/model-harness'
+import { materializeInboxModelBundle } from '../src/inbox-model-harness.ts'
 import type { InboxServices } from '@murphai/inbox-services'
 import type { VaultServices } from '@murphai/vault-usecases'
 import { resolveAssistantStatePaths } from '@murphai/runtime-state/node'
@@ -52,7 +47,6 @@ interface StubVaultServicesOverrides {
   core?: Partial<VaultServices['core']>
   importers?: Partial<VaultServices['importers']>
   query?: Partial<VaultServices['query']>
-  devices?: Partial<VaultServices['devices']>
 }
 
 function createStubVaultServices(
@@ -62,7 +56,6 @@ function createStubVaultServices(
     core: { ...(overrides.core ?? {}) } as VaultServices['core'],
     importers: { ...(overrides.importers ?? {}) } as VaultServices['importers'],
     query: { ...(overrides.query ?? {}) } as VaultServices['query'],
-    devices: { ...(overrides.devices ?? {}) } as VaultServices['devices'],
   }
 }
 
@@ -1103,24 +1096,15 @@ test('materializeInboxModelBundle ignores derived manifests from another capture
 })
 
 test('createDefaultAssistantToolCatalog exposes the current assistant runtime, recipe, and food tools', () => {
-  const registry = createDefaultAssistantCapabilityRegistry({
-    vault: '/tmp/murph-vault',
-    vaultServices: createStubVaultServices(),
-  })
   const catalog = createDefaultAssistantToolCatalog({
     vault: '/tmp/murph-vault',
     vaultServices: createStubVaultServices(),
   })
-  const registryCatalog = registry.createToolCatalog([
-    new CliBackedCapabilityHost(),
-    new NativeLocalCapabilityHost(),
-  ])
   const tools = catalog.listTools()
   const readTextTool = tools.find((tool) => tool.name === 'vault.fs.readText')
   const goalUpsertTool = tools.find((tool) => tool.name === 'vault.goal.upsert')
   const shareLinkTool = tools.find((tool) => tool.name === 'vault.share.createLink')
   const toolNames = tools.map((tool) => tool.name).sort()
-  const registryToolNames = registryCatalog.listTools().map((tool) => tool.name).sort()
 
   assert.equal(catalog.hasTool('assistant.state.show'), false)
   assert.equal(catalog.hasTool('assistant.memory.search'), false)
@@ -1155,7 +1139,8 @@ test('createDefaultAssistantToolCatalog exposes the current assistant runtime, r
   assert.equal(goalUpsertTool?.riskClass, 'high')
   assert.equal(goalUpsertTool?.preferredHostKind, 'native-local')
   assert.equal(shareLinkTool, undefined)
-  assert.deepEqual(toolNames, registryToolNames)
+  assert.ok(toolNames.includes('vault.goal.upsert'))
+  assert.ok(toolNames.includes('vault.fs.readText'))
 })
 
 test('createDefaultAssistantToolCatalog can upsert and read derived knowledge pages directly', async () => {

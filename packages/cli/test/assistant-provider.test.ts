@@ -34,10 +34,10 @@ vi.mock('@murphai/assistant-engine/assistant-codex', () => ({
   executeCodexAppServerTurn: providerMocks.executeCodexPrompt,
 }))
 
-vi.mock('@murphai/assistant-engine/model-harness', async () => {
-  const actual = await vi.importActual<typeof import('@murphai/assistant-engine/model-harness')>(
-    '@murphai/assistant-engine/model-harness',
-  )
+vi.mock('@murphai/assistant-engine/assistant/model-harness', async () => {
+  const actual = await vi.importActual<
+    typeof import('@murphai/assistant-engine/assistant/model-harness')
+  >('@murphai/assistant-engine/assistant/model-harness')
 
   return {
     ...actual,
@@ -558,7 +558,7 @@ test('executeAssistantProviderTurn defaults absent Codex reasoning to the Murph-
   assert.equal(call?.model, undefined)
   assert.equal(call?.reasoningEffort, DEFAULT_SETUP_CODEX_REASONING_EFFORT)
   assert.equal(call?.sandbox, undefined)
-  assert.equal(call?.approvalPolicy, undefined)
+  assert.equal(call?.approvalPolicy, 'never')
   assert.equal(call?.profile, undefined)
   assert.equal(call?.oss, false)
 })
@@ -838,6 +838,7 @@ test('executeAssistantProviderTurn dispatches to the OpenAI-compatible adapter w
     {
       apiKey: 'secret-token',
       apiKeyEnv: 'OLLAMA_API_KEY',
+      apiKeyEnvValue: 'secret-token',
       baseUrl: 'http://127.0.0.1:11434/v1',
       executionDriver: 'openai-compatible',
       headers: {
@@ -1491,6 +1492,7 @@ test('executeAssistantProviderTurn infers the OpenAI-compatible provider when en
     providerMocks.resolveAssistantLanguageModel.mock.calls[0]?.[0],
     {
       apiKeyEnv: 'OLLAMA_API_KEY',
+      apiKeyEnvValue: null,
       baseUrl: 'http://127.0.0.1:11434/v1',
       executionDriver: 'openai-compatible',
       headers: {

@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict'
 import { afterEach, vi } from 'vitest'
 import { localParallelCliTest as test } from './local-parallel-test.js'
+import { createUnwiredVaultServices } from '@murphai/vault-usecases'
+import {
+  createUnwiredCliVaultServices,
+  ensureCliVaultServices,
+  isCliVaultServices,
+} from '../src/device-services.js'
 
 afterEach(async () => {
   vi.restoreAllMocks()
@@ -99,4 +105,26 @@ test('createVaultCli uses the default integrated inbox services wiring', async (
   }]])
   assert.equal(registerVaultCliCommandDescriptors.mock.calls.length, 1)
   assert.equal(createVaultCliShell.mock.calls.length, 1)
+})
+
+test('cli-owned vault services compose device sync on top of neutral vault services', () => {
+  const neutralVaultServices = createUnwiredVaultServices()
+
+  assert.equal(Object.hasOwn(neutralVaultServices, 'devices'), false)
+  assert.equal(isCliVaultServices(neutralVaultServices), false)
+
+  const cliVaultServices = ensureCliVaultServices(neutralVaultServices)
+
+  assert.equal(Object.hasOwn(cliVaultServices, 'devices'), true)
+  assert.equal(typeof cliVaultServices.devices.listProviders, 'function')
+  assert.equal(typeof cliVaultServices.devices.connect, 'function')
+  assert.equal(typeof cliVaultServices.devices.daemonStart, 'function')
+  assert.equal(isCliVaultServices(cliVaultServices), true)
+
+  const unwiredCliVaultServices = createUnwiredCliVaultServices(neutralVaultServices)
+
+  assert.equal(Object.hasOwn(unwiredCliVaultServices, 'devices'), true)
+  assert.equal(typeof unwiredCliVaultServices.devices.listProviders, 'function')
+  assert.equal(typeof unwiredCliVaultServices.devices.connect, 'function')
+  assert.equal(typeof unwiredCliVaultServices.devices.daemonStart, 'function')
 })

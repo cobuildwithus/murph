@@ -6,7 +6,7 @@ import {
   resolveAssistantOperatorDefaults,
   resolveAssistantProviderDefaults,
 } from '@murphai/operator-config/operator-config'
-import { normalizeNullableString } from '@murphai/assistant-engine/assistant-runtime'
+import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 import { type AssistantChatInput } from '../service.js'
 import { listAssistantTranscriptEntries } from '../store.js'
 import {

@@ -9,7 +9,7 @@ import {
   type AssistantModelOption,
   type AssistantReasoningOption,
 } from '@murphai/assistant-engine/assistant-provider-catalog'
-import { normalizeNullableString } from '@murphai/assistant-engine/assistant-runtime'
+import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 
 export type InkChatTraceKind =
   | 'command'
