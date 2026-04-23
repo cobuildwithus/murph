@@ -797,13 +797,13 @@ test("device sync store rejects pre-cutover sqlite user_version values", async (
   const tempDir = await makeTempDirectory("murph-device-syncd-store-version");
   const databasePath = path.join(tempDir, "state.sqlite");
   const database = openSqliteRuntimeDatabase(databasePath);
-  database.exec("PRAGMA user_version = 2;");
+  database.exec("PRAGMA user_version = 99;");
   database.close();
 
   try {
     assert.throws(
       () => new SqliteDeviceSyncStore(databasePath),
-      /device sync runtime database schema version 2 is newer than supported version 1/u,
+      /device sync runtime database schema version 99 is newer than supported version 1/u,
     );
   } finally {
     await rm(tempDir, {
