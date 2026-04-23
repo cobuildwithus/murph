@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { promises as fs } from "node:fs";
 import type { DatabaseSync } from "node:sqlite";
-import { test } from "vitest";
+import { test, vi } from "vitest";
 
 import {
   initializeVault,
@@ -17,12 +17,14 @@ import {
 import { resolveRuntimePaths } from "@murphai/runtime-state/node";
 
 import {
-  createInboxPipeline,
   openInboxRuntime,
+} from "../src/kernel/sqlite.ts";
+import { createInboxPipeline } from "../src/kernel/pipeline.ts";
+import {
+  findStoredCaptureEnvelope,
   persistCanonicalInboxCapture,
   rebuildRuntimeFromVault,
-} from "../src/index.ts";
-import { findStoredCaptureEnvelope } from "../src/indexing/persist.ts";
+} from "../src/indexing/persist.ts";
 import { createDeterministicInboxCaptureId, walkNamedFiles } from "../src/shared.ts";
 import type { InboundCapture } from "../src/contracts/capture.ts";
 
@@ -109,7 +111,22 @@ async function markInboxCapturePersistOperationInterrupted(input: {
   vaultRoot: string;
   capturePath: string;
 }): Promise<void> {
-  const persistedOperation = await findOperationByType(input.vaultRoot, "inbox_capture_persist");
+  const operationPaths = await listWriteOperationMetadataPaths(input.vaultRoot);
+  const operations = await Promise.all(
+    operationPaths.map(async (relativePath) => ({
+      relativePath,
+      operation: await readStoredWriteOperation(input.vaultRoot, relativePath),
+    })),
+  );
+  const persistedOperation = operations.find(
+    (entry) =>
+      entry.operation.operationType === "inbox_capture_persist" &&
+      entry.operation.actions.some(
+        (action) =>
+          action.kind === "jsonl_append" &&
+          action.targetRelativePath === input.capturePath,
+      ),
+  ) ?? null;
   assert.ok(persistedOperation);
 
   const operationAbsolutePath = path.join(input.vaultRoot, persistedOperation.relativePath);
@@ -217,6 +234,7 @@ test("persistCanonicalInboxCapture stores in-memory attachment bytes without inl
         mime: "image/jpeg",
         data: attachmentBytes,
         fileName: "photo.jpg",
+        byteSize: attachmentBytes.byteLength + 9,
       },
     ],
     raw: {
@@ -270,6 +288,90 @@ test("persistCanonicalInboxCapture stores in-memory attachment bytes without inl
     }
 
     assert.equal("committedPayloadReceipt" in action, false);
+  }
+});
+
+test("persistCanonicalInboxCapture snapshots file-backed attachment bytes before staging and stores measured size", async () => {
+  const vaultRoot = await makeTempDirectory("murph-inbox-file-snapshot-vault");
+  const sourceRoot = await makeTempDirectory("murph-inbox-file-snapshot-source");
+  const originalBytes = Buffer.from("original attachment bytes");
+  const mutatedBytes = Buffer.from("mutated attachment bytes after metadata");
+  const sourcePath = path.join(sourceRoot, "snapshot.txt");
+  await fs.writeFile(sourcePath, originalBytes);
+
+  vi.resetModules();
+  vi.doMock("@murphai/core", async () => {
+    const actual = await vi.importActual<typeof import("@murphai/core")>("@murphai/core");
+    let mutated = false;
+
+    return {
+      ...actual,
+      applyCanonicalWriteBatch: async (
+        input: Parameters<typeof actual.applyCanonicalWriteBatch>[0],
+      ) => {
+        if (!mutated) {
+          mutated = true;
+          await fs.writeFile(sourcePath, mutatedBytes);
+        }
+
+        return await actual.applyCanonicalWriteBatch(input);
+      },
+    };
+  });
+
+  try {
+    const core = await import("@murphai/core");
+    const persistSurface = await import("../src/indexing/persist.ts");
+    await core.initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+
+    const inbound = createCapture({
+      externalId: "msg-file-snapshot",
+      occurredAt: "2026-03-13T10:24:00.000Z",
+      attachments: [
+        {
+          externalId: "att-file-snapshot",
+          kind: "document",
+          mime: "text/plain",
+          originalPath: sourcePath,
+          fileName: "snapshot.txt",
+          byteSize: originalBytes.byteLength + 99,
+        },
+      ],
+    });
+    const captureId = createDeterministicInboxCaptureId(inbound);
+
+    const persisted = await persistSurface.persistCanonicalInboxCapture({
+      vaultRoot,
+      captureId,
+      eventId: "evt_01HQW7K0M9N8P7Q6R5S4T3V2WD",
+      input: inbound,
+      storedAt: "2026-03-13T10:25:00.000Z",
+    });
+    const attachment = persisted.stored.attachments[0];
+
+    assert.ok(attachment);
+    assert.equal(attachment.byteSize, originalBytes.byteLength);
+    assert.equal(attachment.sha256, createHash("sha256").update(originalBytes).digest("hex"));
+
+    const storedBytes = await fs.readFile(path.join(vaultRoot, attachment.storedPath ?? ""));
+    assert.deepEqual(storedBytes, originalBytes);
+
+    const envelope = await persistSurface.findStoredCaptureEnvelope({
+      vaultRoot,
+      inbound,
+      captureId,
+    });
+    assert.ok(envelope);
+    assert.equal(envelope.stored.attachments[0]?.byteSize, originalBytes.byteLength);
+    assert.equal(
+      envelope.stored.attachments[0]?.sha256,
+      createHash("sha256").update(originalBytes).digest("hex"),
+    );
+
+    assert.deepEqual(await fs.readFile(sourcePath), mutatedBytes);
+  } finally {
+    vi.doUnmock("@murphai/core");
+    vi.resetModules();
   }
 });
 
@@ -433,6 +535,126 @@ test("rebuildRuntimeFromVault restores deterministic raw inbox envelopes that ar
   assert.equal((await readJsonlRecordsIfPresent(vaultRoot, "ledger/inbox-captures/2026/2026-03.jsonl")).length, 1);
 
   runtime.close();
+});
+
+test("processCapture reuses raw-only inbox evidence when retry occurredAt drifts to a different shard", async () => {
+  const vaultRoot = await makeTempDirectory("murph-inbox-raw-only-drift-vault");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+  const sourceRoot = await makeTempDirectory("murph-inbox-raw-only-drift-source");
+
+  const inbound = createCapture({
+    externalId: "msg-raw-only-drift",
+    occurredAt: "2026-03-13T11:15:00.000Z",
+    text: "Raw-only before retry normalization",
+    attachments: [
+      {
+        externalId: "att-raw-only-drift",
+        kind: "document",
+        mime: "text/plain",
+        originalPath: await writeExternalFile(sourceRoot, "raw-only-drift.txt", "original raw-only"),
+        fileName: "raw-only-drift.txt",
+      },
+    ],
+  });
+  const captureId = createDeterministicInboxCaptureId(inbound);
+  const eventId = "evt_01HQW7K0M9N8P7Q6R5S4T3V2WE";
+  await persistCanonicalInboxCapture({
+    vaultRoot,
+    captureId,
+    eventId,
+    input: inbound,
+    storedAt: "2026-03-13T11:16:00.000Z",
+  });
+  await removeInboxCaptureLedgerForOccurredAt(vaultRoot, inbound.occurredAt);
+  await markInboxCapturePersistOperationInterrupted({
+    vaultRoot,
+    capturePath: "ledger/inbox-captures/2026/2026-03.jsonl",
+  });
+
+  const retryInbound = createCapture({
+    ...inbound,
+    occurredAt: "2026-04-01T00:15:00.000Z",
+    receivedAt: "2026-04-01T00:15:05.000Z",
+  });
+  const runtime = await openInboxRuntime({ vaultRoot });
+  const pipeline = await createInboxPipeline({ vaultRoot, runtime });
+  const replayed = await pipeline.processCapture(retryInbound);
+
+  assert.equal(replayed.deduped, true);
+  assert.equal(replayed.captureId, captureId);
+  assert.equal(replayed.eventId, eventId);
+  assert.equal(countRows(runtime.databasePath, "capture"), 1);
+  assert.equal(countRows(runtime.databasePath, "attachment_parse_job"), 1);
+
+  const envelopeFiles = await walkNamedFiles(path.join(vaultRoot, "raw", "inbox"), "envelope.json", {
+    skipDirectories: ["attachments"],
+  });
+  assert.equal(envelopeFiles.length, 1);
+  assert.equal((await readJsonlRecordsIfPresent(vaultRoot, "ledger/inbox-captures/2026/2026-03.jsonl")).length, 1);
+  assert.equal((await readJsonlRecordsIfPresent(vaultRoot, "ledger/inbox-captures/2026/2026-04.jsonl")).length, 0);
+
+  pipeline.close();
+});
+
+test("processCapture ignores malformed unrelated recoverable envelopes while reusing matching raw-only evidence", async () => {
+  const vaultRoot = await makeTempDirectory("murph-inbox-raw-only-malformed-vault");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+
+  const unrelatedInbound = createCapture({
+    externalId: "msg-raw-only-malformed-unrelated",
+    occurredAt: "2026-02-13T11:20:00.000Z",
+    text: "Broken unrelated raw-only capture",
+  });
+  const unrelatedCaptureId = createDeterministicInboxCaptureId(unrelatedInbound);
+  const unrelatedPersisted = await persistCanonicalInboxCapture({
+    vaultRoot,
+    captureId: unrelatedCaptureId,
+    eventId: "evt_01HQW7K0M9N8P7Q6R5S4T3V2WF",
+    input: unrelatedInbound,
+    storedAt: "2026-02-13T11:21:00.000Z",
+  });
+  await removeInboxCaptureLedgerForOccurredAt(vaultRoot, unrelatedInbound.occurredAt);
+  await markInboxCapturePersistOperationInterrupted({
+    vaultRoot,
+    capturePath: unrelatedPersisted.capture.relativePath,
+  });
+  await fs.writeFile(
+    path.join(vaultRoot, unrelatedPersisted.stored.envelopePath),
+    "{\"captureId\":\"broken-unrelated\"}\n",
+    "utf8",
+  );
+
+  const targetInbound = createCapture({
+    externalId: "msg-raw-only-malformed-target",
+    occurredAt: "2026-03-13T11:25:00.000Z",
+    text: "Valid raw-only capture",
+  });
+  const targetCaptureId = createDeterministicInboxCaptureId(targetInbound);
+  const targetEventId = "evt_01HQW7K0M9N8P7Q6R5S4T3V2WG";
+  const targetPersisted = await persistCanonicalInboxCapture({
+    vaultRoot,
+    captureId: targetCaptureId,
+    eventId: targetEventId,
+    input: targetInbound,
+    storedAt: "2026-03-13T11:26:00.000Z",
+  });
+  await removeInboxCaptureLedgerForOccurredAt(vaultRoot, targetInbound.occurredAt);
+  await markInboxCapturePersistOperationInterrupted({
+    vaultRoot,
+    capturePath: targetPersisted.capture.relativePath,
+  });
+
+  const runtime = await openInboxRuntime({ vaultRoot });
+  const pipeline = await createInboxPipeline({ vaultRoot, runtime });
+  const replayed = await pipeline.processCapture(targetInbound);
+
+  assert.equal(replayed.deduped, true);
+  assert.equal(replayed.captureId, targetCaptureId);
+  assert.equal(replayed.eventId, targetEventId);
+  assert.equal(countRows(runtime.databasePath, "capture"), 1);
+  assert.equal(runtime.getCapture(targetCaptureId)?.text, "Valid raw-only capture");
+
+  pipeline.close();
 });
 
 test("processCapture backfills missing parse jobs for a recovered capture that already exists in runtime", async () => {

@@ -260,7 +260,7 @@ test("processCapture stores redacted raw evidence, one canonical intake record, 
         actor: "core",
         changes: [
           {
-            op: "copy",
+            op: "create",
             path: capture.attachments[0]?.storedPath,
           },
           {

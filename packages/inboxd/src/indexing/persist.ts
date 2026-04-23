@@ -34,7 +34,6 @@ import {
   resolveVaultPath,
   sanitizeFileName,
   sanitizeSegment,
-  sha256File,
 } from "../shared.ts";
 import type { InboxRuntimeStore } from "../kernel/sqlite.ts";
 import {
@@ -204,10 +203,11 @@ async function prepareRawCapturePersistence({
       ),
     );
     if (attachment.data) {
-      const sha256 = createHash("sha256").update(attachment.data).digest("hex");
+      const snapshotBytes = Uint8Array.from(attachment.data);
+      const sha256 = createHash("sha256").update(snapshotBytes).digest("hex");
       rawContents.push({
         targetRelativePath: relativePath,
-        content: attachment.data,
+        content: snapshotBytes,
         originalFileName: safeName,
         mediaType: attachment.mime ?? "application/octet-stream",
         allowExistingMatch: true,
@@ -218,7 +218,7 @@ async function prepareRawCapturePersistence({
         ordinal,
         storedPath: relativePath,
         fileName: attachment.fileName ?? safeName,
-        byteSize: attachment.byteSize ?? attachment.data.byteLength,
+        byteSize: snapshotBytes.byteLength,
         sha256,
         originalPath: null,
       });
@@ -248,11 +248,12 @@ async function prepareRawCapturePersistence({
           continue;
         }
 
-        const sha256 = await sha256File(sourceAbsolutePath);
+        const snapshotBytes = await readFile(sourceAbsolutePath);
+        const sha256 = createHash("sha256").update(snapshotBytes).digest("hex");
 
-        rawCopies.push({
-          sourcePath: sourceAbsolutePath,
+        rawContents.push({
           targetRelativePath: relativePath,
+          content: snapshotBytes,
           originalFileName: safeName,
           mediaType: attachment.mime ?? "application/octet-stream",
           allowExistingMatch: true,
@@ -263,7 +264,7 @@ async function prepareRawCapturePersistence({
           ordinal,
           storedPath: relativePath,
           fileName: attachment.fileName ?? safeName,
-          byteSize: attachment.byteSize ?? sourceStats.size,
+          byteSize: snapshotBytes.byteLength,
           sha256,
           originalPath: null,
         });
@@ -391,18 +392,12 @@ export async function findStoredCaptureEnvelope(input: {
     return inboxCaptureRecordToStoredCaptureEnvelope(storedRecord);
   }
 
-  const expectedEnvelopePath = buildInboxEnvelopePath(input.inbound, captureId);
-  const expectedCapturePath = buildInboxCaptureLedgerPathForOccurredAt(input.inbound.occurredAt);
   const recoverableOperations = await listRecoverableInboxCaptureOperations(input.vaultRoot);
-  const recoverableOperation = recoverableOperations.get(expectedEnvelopePath);
-
-  if (!recoverableOperation || recoverableOperation.capturePath !== expectedCapturePath) {
-    return null;
-  }
-
-  return await readStoredCaptureEnvelope({
+  return await findRecoverableRawCaptureEnvelope({
     vaultRoot: input.vaultRoot,
-    relativePath: expectedEnvelopePath,
+    inbound: input.inbound,
+    captureId,
+    recoverableOperations,
   });
 }
 
@@ -661,7 +656,7 @@ async function listRecoverableRawCaptureEnvelopes(
   const selectedByIdentityKey = new Map<string, EnvelopeEntry>();
 
   for (const relativePath of [...recoverableOperations.keys()].sort()) {
-    const envelope = await readStoredCaptureEnvelope({ vaultRoot, relativePath });
+    const envelope = await readRecoverableStoredCaptureEnvelope({ vaultRoot, relativePath });
 
     if (!envelope) {
       continue;
@@ -681,6 +676,56 @@ async function listRecoverableRawCaptureEnvelopes(
   }
 
   return [...selectedByIdentityKey.values()].sort(compareEnvelopeEntries).map((entry) => entry.envelope);
+}
+
+async function findRecoverableRawCaptureEnvelope(input: {
+  vaultRoot: string;
+  inbound: InboundCapture;
+  captureId: string;
+  recoverableOperations: ReadonlyMap<string, RecoverableInboxCaptureOperation>;
+}): Promise<StoredCaptureEnvelope | null> {
+  const identityKey = createInboxCaptureIdentityKey(input.inbound);
+  let selected: EnvelopeEntry | null = null;
+
+  for (const relativePath of [...input.recoverableOperations.keys()].sort()) {
+    const envelope = await readRecoverableStoredCaptureEnvelope({
+      vaultRoot: input.vaultRoot,
+      relativePath,
+    });
+
+    if (!envelope) {
+      continue;
+    }
+
+    if (
+      envelope.captureId !== input.captureId &&
+      createInboxCaptureIdentityKey(envelope.input) !== identityKey
+    ) {
+      continue;
+    }
+
+    const candidate = { relativePath, envelope };
+    if (!selected || compareEnvelopeEntries(candidate, selected) < 0) {
+      selected = candidate;
+    }
+  }
+
+  return selected?.envelope ?? null;
+}
+
+async function readRecoverableStoredCaptureEnvelope(input: {
+  vaultRoot: string;
+  relativePath: string;
+}): Promise<StoredCaptureEnvelope | null> {
+  try {
+    return await readStoredCaptureEnvelope(input);
+  } catch (error) {
+    if (error instanceof SyntaxError || error instanceof TypeError) {
+      return null;
+    }
+
+    throw error;
+  }
 }
 
 async function listRecoverableInboxCaptureOperations(
