@@ -246,6 +246,23 @@ export interface InboxRuntimeModule {
     continueOnConnectorFailure?: boolean
     connectorRestartPolicy?: ConnectorRestartPolicy
   }): Promise<void>
+  createParsedInboxPipeline(input: {
+    vaultRoot: string
+    runtime: RuntimeStore
+    registry: unknown
+    ffmpeg?: {
+      commandCandidates?: string[]
+      allowSystemLookup?: boolean
+    }
+    onParserDrain?: (results: ParserRuntimeDrainResult[]) => Promise<void> | void
+  }): Promise<InboxPipeline>
+  runPollConnectorBackfill(input: {
+    connector: PollConnector
+    pipeline: InboxPipeline
+    accountId?: string | null
+  }): Promise<{
+    cursor: Record<string, unknown> | null
+  }>
   runInboxDaemonWithParsers(input: {
     vaultRoot: string
     runtime: RuntimeStore
@@ -521,6 +538,7 @@ export interface DoctorContext {
 export type DoctorTargetResolution =
   | {
       kind: 'all'
+      connectors: InboxConnectorConfig[]
     }
   | {
       kind: 'missing'

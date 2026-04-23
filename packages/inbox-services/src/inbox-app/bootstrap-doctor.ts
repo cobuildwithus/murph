@@ -305,6 +305,7 @@ export function createInboxBootstrapDoctorOps(
 
       return {
         kind: 'all',
+        connectors: context.config.connectors,
       }
     }
 
@@ -341,6 +342,24 @@ export function createInboxBootstrapDoctorOps(
   const hasDoctorStrategy = (
     source: string,
   ): source is keyof typeof DOCTOR_STRATEGIES => source in DOCTOR_STRATEGIES
+
+  const hasSupportedDoctorStrategy = (
+    connector: InboxConnectorConfig,
+  ): connector is InboxConnectorConfig & {
+    source: keyof typeof DOCTOR_STRATEGIES
+  } => hasDoctorStrategy(connector.source)
+
+  const describeConnector = (
+    connector: InboxConnectorConfig,
+  ) =>
+    passCheck(
+      'connector',
+      `Connector "${connector.id}" is configured and ${connector.enabled ? 'enabled' : 'disabled'}.`,
+      {
+        source: connector.source,
+        accountId: connector.accountId ?? null,
+      },
+    )
 
   const runRuntimeRebuildDoctorCheck = async (
     context: DoctorContext,
@@ -387,10 +406,19 @@ export function createInboxBootstrapDoctorOps(
     }
 
     const target = resolveDoctorTarget(context)
-    if (target.kind === 'all' && context.config) {
-      const unsupportedConnectors = context.config.connectors.filter(
+    if (target.kind === 'missing') {
+      return finalizeDoctorResult(context)
+    }
+
+    await runRuntimeRebuildDoctorCheck(context)
+
+    if (target.kind === 'all') {
+      const supportedConnectors =
+        target.connectors.filter(hasSupportedDoctorStrategy)
+      const unsupportedConnectors = target.connectors.filter(
         (connector) => !hasDoctorStrategy(connector.source),
       )
+
       if (unsupportedConnectors.length > 0) {
         context.checks.push(
           failCheck(
@@ -399,13 +427,18 @@ export function createInboxBootstrapDoctorOps(
           ),
         )
       }
-      return finalizeDoctorResult(context)
-    }
-    if (target.kind !== 'connector') {
-      return finalizeDoctorResult(context)
-    }
 
-    await runRuntimeRebuildDoctorCheck(context)
+      for (const connector of supportedConnectors) {
+        context.checks.push(describeConnector(connector))
+        const strategy = DOCTOR_STRATEGIES[connector.source]
+        await strategy(context, connector, {
+          env,
+          runDoctorCheck,
+        })
+      }
+
+      return finalizeDoctorResult(context)
+    }
 
     if (!hasDoctorStrategy(target.connector.source)) {
       context.checks.push(
