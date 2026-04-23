@@ -37,3 +37,6 @@ Close the hosted-wake execution seam where web can still mint executable fetch p
 
 - The required regression proof is: committed seq `0`, wake seq `1` and `2` exist, and an execution fetch request with `afterSeq=1` must not receive an executable fetch proof for seq `2`.
 - The clean end shape is a contract cut: execution fetch no longer accepts caller cursor state at all, and proof minting depends only on web's current committed cursor.
+Status: completed
+Updated: 2026-04-24
+Completed: 2026-04-24

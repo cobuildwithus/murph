@@ -48,6 +48,7 @@ Then load only the task-relevant docs listed below.
 - Required completion-workflow audit subagent passes are mandatory for the repo task classes that require them. Treat this workflow doc plus `AGENTS.md` as standing user approval and explicit repo instruction to spawn those required local Codex audit subagents when a repo task reaches that workflow, even if general agent guidance says not to spawn subagents without an explicit user request. Do not stop after implementation, verification, or commit, and do not pause only to ask for a second explicit "use subagents" instruction.
 - For user-facing `apps/web` UI changes, the completion workflow's `frontend-review` pass is a mandatory audit alongside any other required passes for the task class.
 - `scripts/finish-task` resolves the file/directory paths you pass into exact changed file paths, removes the one coordination-ledger row whose `Plan` cell exactly matches the active plan path, closes the active plan, moves it to `agent-docs/exec-plans/completed/`, and creates a scoped commit containing the closed-plan artifact plus those resolved paths. It fails closed if that ledger match is missing or ambiguous.
+- If a plan-bearing task cannot safely create a scoped commit because overlapping dirty files would force an unsafe partial stage, do not leave the plan under `active/`; clear the matching ledger row and archive it with `scripts/close-exec-plan.sh` before handoff.
 
 ## Quick Path
 

@@ -2,7 +2,7 @@
 
 Status: completed
 Created: 2026-04-21
-Updated: 2026-04-21
+Updated: 2026-04-24
 
 ## Goal
 
@@ -46,3 +46,4 @@ Updated: 2026-04-21
 - `pnpm exec vitest run --config apps/web/vitest.workspace.ts apps/web/test/health-commons-experiment-detail-page.test.ts`
 - `pnpm typecheck`
 - `bash scripts/workspace-verify.sh test:diff apps/web/src/lib/health-commons/experiment-detail.ts apps/web/test/health-commons-experiment-detail-page.test.ts packages/health-commons/content/sources/sauna/x-bryan-johnson-comprehensive-sauna-guide-2025-12-06.md packages/health-commons/content/sources/sauna/x-bryan-johnson-most-people-sauna-wrong-2025-11-12.md packages/health-commons/content/sources/sauna/x-bryan-johnson-fired-review-2026-04-06.md packages/health-commons/content/sources/sauna/x-bryan-johnson-core-temp-update-2026-04-03.md packages/health-commons/content/sources/sauna/x-bryan-johnson-core-temp-2026-04-16.md packages/health-commons/content/sources/sauna/x-bryan-johnson-ice-balls-2026-04-09.md packages/health-commons/generated/catalog.hash packages/health-commons/generated/catalog.json packages/health-commons/generated/entities.ndjson`
+Completed: 2026-04-24

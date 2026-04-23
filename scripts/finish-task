@@ -3,6 +3,7 @@ set -euo pipefail
 
 usage() {
   echo "Usage: $(basename "$0") <active-plan-path> \"commit message\" <path> [path ...]" >&2
+  echo "Closes the matching active plan, removes its exact ledger row, archives it under agent-docs/exec-plans/completed/, and then creates a scoped commit." >&2
   exit 2
 }
 

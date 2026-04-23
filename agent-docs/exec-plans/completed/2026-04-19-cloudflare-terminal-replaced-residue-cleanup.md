@@ -28,3 +28,6 @@ Delete dead Cloudflare-side `replaced` handling that no longer matches the termi
 - The completed hosted-wake concept cleanup already removed terminal `replaced` from the shared contract and web route.
 - The remaining Cloudflare cleanup should target only dead terminal-flow residue, not valid lifecycle/status references such as `wakeState: "replaced"` on stale fetch-proof recovery paths.
 - `test-hosted-wake-control.ts` already has overlapping dirty-tree edits from another hosted-wake lane; only the dead `isCommitEligibleStoredWakeState("replaced")` branch is part of this cleanup.
+Status: completed
+Updated: 2026-04-24
+Completed: 2026-04-24

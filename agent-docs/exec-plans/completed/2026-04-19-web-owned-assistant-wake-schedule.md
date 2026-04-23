@@ -38,3 +38,6 @@ Remove the remaining Durable Object ownership of assistant future due-work so `/
 - Cloudflare may still keep local alarm timing as an acceleration cache, but missing or stale DO hints must not lose due private runtime work.
 - The projection represents the whole private runtime wake lane, not only assistant cron jobs, because assistant retries, device-sync work, and recovery can all feed the same due-time hint.
 - The current run-centric stack forwards the runtime wake projection through both commit and finalize so the canonical cursor stays authoritative after bundle finalization.
+Status: completed
+Updated: 2026-04-24
+Completed: 2026-04-24

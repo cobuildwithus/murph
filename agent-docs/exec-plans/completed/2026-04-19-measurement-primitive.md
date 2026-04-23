@@ -57,3 +57,6 @@ Replace the current split between closed-enum `body_measurement` writes and gene
 - `workout measurement` now acts as a compatibility alias that still writes canonical `measurement` events.
 - Final cleanup tightened the CLI vocabulary so `measurement` is the clearly primary path, centralized measurement command descriptions so the manifest and live help cannot drift, and reused the shared list-option primitives for measurement list surfaces.
 - Direct verification remains green; required repo audit-worker passes are still pending before commit.
+Status: completed
+Updated: 2026-04-24
+Completed: 2026-04-24
