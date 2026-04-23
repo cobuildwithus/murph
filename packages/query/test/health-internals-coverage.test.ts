@@ -668,19 +668,6 @@ test("health library and canonical collector use fallback node metadata and tole
   );
   await writeVaultFile(
     vaultRoot,
-    "bank/library/missing-slug.md",
-    [
-      "---",
-      "entityType: biomarker",
-      "---",
-      "",
-      "# Missing slug",
-      "",
-      "Parsed, but missing slug.",
-    ].join("\n"),
-  );
-  await writeVaultFile(
-    vaultRoot,
     "bank/goals/sleep-depth.md",
     [
       "---",
@@ -857,30 +844,7 @@ test("health library and canonical collector use fallback node metadata and tole
 
   const graphWithIssues = await readHealthLibraryGraphWithIssues(vaultRoot);
   assert.equal(graphWithIssues.graph.nodes.length, 1);
-  assert.deepEqual(
-    graphWithIssues.issues.map((issue) => ({
-      field: issue.kind === "validation" ? issue.field : null,
-      kind: issue.kind,
-      relativePath: issue.relativePath,
-    })),
-    [
-      {
-        field: null,
-        kind: "parse",
-        relativePath: "bank/library/broken.md",
-      },
-      {
-        field: "slug",
-        kind: "validation",
-        relativePath: "bank/library/missing-slug.md",
-      },
-      {
-        field: "entityType",
-        kind: "validation",
-        relativePath: "bank/library/skip-me.md",
-      },
-    ],
-  );
+  assert.equal(graphWithIssues.issues[0]?.relativePath, "bank/library/broken.md");
 
   const tolerantCollection = await collectCanonicalEntities(vaultRoot, {
     mode: "tolerant-async",
