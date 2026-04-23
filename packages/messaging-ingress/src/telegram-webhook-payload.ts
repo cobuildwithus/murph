@@ -1,8 +1,11 @@
 /**
- * Owns raw Telegram webhook payload parsing and sparse raw minimization so the
- * public telegram-webhook entrypoint can stay focused on thread targeting and
- * ingress summary behavior.
+ * Owns Telegram webhook secret-token verification, already-authenticated
+ * payload parsing, and sparse raw minimization so the public telegram-webhook
+ * entrypoint can stay focused on thread targeting and ingress summary
+ * behavior.
  */
+
+import { timingSafeEqual } from "node:crypto";
 
 import {
   compactRecord,
@@ -28,7 +31,62 @@ import type {
 
 const TELEGRAM_CAPTURE_RAW_SCHEMA = "murph.telegram-capture.v1";
 const TELEGRAM_REPLY_CONTEXT_PREVIEW_LIMIT = 240;
+const TELEGRAM_SECRET_TOKEN_HEADER = "x-telegram-bot-api-secret-token";
 
+type TelegramWebhookHeaders = Headers | Record<string, string | string[] | undefined>;
+
+export function readTelegramWebhookHeader(
+  headers: TelegramWebhookHeaders,
+  name: string,
+): string | null {
+  return normalizeTextValue(readTelegramWebhookRawHeader(headers, name));
+}
+
+export function readTelegramWebhookSecretToken(
+  headers: TelegramWebhookHeaders,
+): string | null {
+  return readTelegramWebhookRawHeader(headers, TELEGRAM_SECRET_TOKEN_HEADER);
+}
+
+export function assertTelegramWebhookSecretToken(input: {
+  secretToken: string | null | undefined;
+  webhookSecret: string | null | undefined;
+}): void {
+  const expectedSecret =
+    typeof input.webhookSecret === "string" && input.webhookSecret.length > 0
+      ? input.webhookSecret
+      : null;
+
+  if (!expectedSecret) {
+    throw new TypeError("Telegram webhook secret is required.");
+  }
+
+  const providedSecret =
+    typeof input.secretToken === "string" && input.secretToken.length > 0
+      ? input.secretToken
+      : null;
+  if (!providedSecret || !timingSafeEquals(expectedSecret, providedSecret)) {
+    throw new TypeError("Invalid Telegram webhook secret token.");
+  }
+}
+
+export function verifyAndParseTelegramWebhookRequest(input: {
+  headers: TelegramWebhookHeaders;
+  rawBody: Buffer | Uint8Array | ArrayBuffer | string;
+  webhookSecret: string | null | undefined;
+}): TelegramUpdateLike {
+  assertTelegramWebhookSecretToken({
+    secretToken: readTelegramWebhookSecretToken(input.headers),
+    webhookSecret: input.webhookSecret,
+  });
+
+  return parseTelegramWebhookUpdate(normalizeTelegramWebhookRawBody(input.rawBody));
+}
+
+/**
+ * Parses an already-authenticated Telegram webhook update.
+ * Use `verifyAndParseTelegramWebhookRequest()` for raw inbound webhooks.
+ */
 export function parseTelegramWebhookUpdate(rawBody: string): TelegramUpdateLike {
   let payload: unknown;
 
@@ -83,6 +141,54 @@ export function minimizeTelegramUpdate(update: TelegramUpdateLike): Record<strin
     messageId: message?.message_id,
     replyContextPreview: buildTelegramReplyContextPreview(message),
   });
+}
+
+function normalizeTelegramWebhookRawBody(
+  value: Buffer | Uint8Array | ArrayBuffer | string,
+): string {
+  if (typeof value === "string") {
+    return value;
+  }
+
+  if (value instanceof ArrayBuffer) {
+    return Buffer.from(value).toString("utf8");
+  }
+
+  return Buffer.from(value).toString("utf8");
+}
+
+function readTelegramWebhookRawHeader(
+  headers: TelegramWebhookHeaders,
+  name: string,
+): string | null {
+  if (headers instanceof Headers) {
+    return headers.get(name);
+  }
+
+  const matchedKey = Object.keys(headers).find(
+    (candidate) => candidate.toLowerCase() === name.toLowerCase(),
+  );
+  if (!matchedKey) {
+    return null;
+  }
+
+  const rawValue = headers[matchedKey];
+  if (Array.isArray(rawValue)) {
+    return rawValue.find((value) => typeof value === "string") ?? null;
+  }
+
+  return typeof rawValue === "string" ? rawValue : null;
+}
+
+function timingSafeEquals(left: string, right: string): boolean {
+  const leftBuffer = Buffer.from(left);
+  const rightBuffer = Buffer.from(right);
+
+  if (leftBuffer.byteLength !== rightBuffer.byteLength) {
+    return false;
+  }
+
+  return timingSafeEqual(leftBuffer, rightBuffer);
 }
 
 function normalizeTelegramCaptureMessageId(

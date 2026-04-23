@@ -10,10 +10,11 @@ import {
   type LinqWebhookEvent,
   minimizeLinqMessageReceivedEvent,
   minimizeLinqWebhookEvent,
-  parseCanonicalLinqMessageReceivedEvent,
+  parseLinqMessageReceivedEvent,
   parseLinqWebhookEvent,
+  readLinqRecipientLineHandle,
   readLinqWebhookHeader,
-  requireLinqMessageReceivedEvent,
+  parseRawLinqMessageReceivedEvent,
   resolveLinqWebhookOccurredAt,
   summarizeLinqMessageReceivedEvent,
   verifyAndParseLinqWebhookRequest,
@@ -250,8 +251,8 @@ test("parseLinqWebhookEvent surfaces payload errors through the exported type gu
   );
 });
 
-test("parseCanonicalLinqMessageReceivedEvent exposes summaries and minimizers", () => {
-  const event = parseCanonicalLinqMessageReceivedEvent({
+test("parseLinqMessageReceivedEvent exposes summaries and minimizers", () => {
+  const event = parseLinqMessageReceivedEvent({
     ...buildV2026MessageReceivedWebhook({
       data: {
         effect: {
@@ -429,8 +430,91 @@ test("parseCanonicalLinqMessageReceivedEvent exposes summaries and minimizers", 
   });
 });
 
-test("requireLinqMessageReceivedEvent preserves explicit recipient fields on legacy payloads", () => {
-  const event = requireLinqMessageReceivedEvent(buildV2026MessageReceivedWebhook({
+test("minimizeLinqMessageReceivedEvent sanitizes allowlisted message fields", () => {
+  const event = parseLinqMessageReceivedEvent({
+    ...buildV2026MessageReceivedWebhook({
+      data: {
+        parts: [
+          {
+            type: "text",
+            value: "Replying to: /home/example/project",
+          },
+          {
+            type: "link",
+            value: "cookie: session=secret-token",
+          },
+        ],
+        sender_handle: {
+          handle: "C:\\temp\\murph\\sender.txt",
+          id: "handle_sender_123",
+          service: "SMS",
+        },
+      },
+      eventId: "evt_sanitized_message",
+    }),
+  });
+
+  assert.deepEqual(minimizeLinqMessageReceivedEvent(event), {
+    api_version: "v3",
+    created_at: "2026-03-25T10:00:00.000Z",
+    webhook_version: "2026-02-03",
+    data: {
+      chat: {
+        id: "chat_123",
+        owner_handle: {
+          handle: "+15557654321",
+          id: "handle_owner_123",
+          is_me: true,
+          service: "SMS",
+        },
+      },
+      chat_id: "chat_123",
+      direction: "inbound",
+      from: "<REDACTED_PATH>",
+      from_handle: {
+        handle: "<REDACTED_PATH>",
+        id: "handle_sender_123",
+        service: "SMS",
+      },
+      is_from_me: false,
+      message: {
+        id: "msg_123",
+        parts: [
+          {
+            type: "text",
+            value: "Replying to: <REDACTED_PATH>",
+          },
+          {
+            type: "link",
+            value: "<REDACTED_SECRET>",
+          },
+        ],
+      },
+      received_at: "2026-03-25T09:59:59.000Z",
+      recipient_handle: {
+        handle: "+15557654321",
+        id: "handle_owner_123",
+        is_me: true,
+        service: "SMS",
+      },
+      recipient_phone: "+15557654321",
+      sender_handle: {
+        handle: "<REDACTED_PATH>",
+        id: "handle_sender_123",
+        service: "SMS",
+      },
+      sent_at: "2026-03-25T09:59:59.000Z",
+      service: "SMS",
+    },
+    event_id: "evt_sanitized_message",
+    event_type: "message.received",
+    partner_id: null,
+    trace_id: null,
+  });
+});
+
+test("parseRawLinqMessageReceivedEvent preserves explicit recipient fields on raw webhook payloads", () => {
+  const event = parseRawLinqMessageReceivedEvent(buildV2026MessageReceivedWebhook({
     data: {
       chat: {
         id: "chat_legacy_recipient",
@@ -466,8 +550,8 @@ test("requireLinqMessageReceivedEvent preserves explicit recipient fields on leg
   assert.equal(event.data.recipient_handle.service, "iMessage");
 });
 
-test("requireLinqMessageReceivedEvent falls back to an explicit legacy recipient handle without changing service fallback", () => {
-  const event = requireLinqMessageReceivedEvent(buildV2026MessageReceivedWebhook({
+test("parseRawLinqMessageReceivedEvent falls back to an explicit raw recipient handle without changing service fallback", () => {
+  const event = parseRawLinqMessageReceivedEvent(buildV2026MessageReceivedWebhook({
     data: {
       chat: {
         id: "chat_legacy_recipient_handle_only",
@@ -498,8 +582,8 @@ test("requireLinqMessageReceivedEvent falls back to an explicit legacy recipient
   assert.equal(event.data.service, "SMS");
 });
 
-test("parseCanonicalLinqMessageReceivedEvent normalizes 2026-02-03 webhook payloads", () => {
-  const event = parseCanonicalLinqMessageReceivedEvent({
+test("parseLinqMessageReceivedEvent normalizes 2026-02-03 webhook payloads", () => {
+  const event = parseLinqMessageReceivedEvent({
     api_version: "v3",
     created_at: "2026-04-04T01:02:03.000Z",
     webhook_version: "2026-02-03",
@@ -604,8 +688,8 @@ test("parseCanonicalLinqMessageReceivedEvent normalizes 2026-02-03 webhook paylo
   });
 });
 
-test("parseCanonicalLinqMessageReceivedEvent accepts canonical hosted snapshots", () => {
-  const canonical = minimizeLinqMessageReceivedEvent(parseCanonicalLinqMessageReceivedEvent({
+test("parseLinqMessageReceivedEvent accepts canonical hosted snapshots", () => {
+  const canonical = minimizeLinqMessageReceivedEvent(parseLinqMessageReceivedEvent({
     ...buildV2026MessageReceivedWebhook({
       data: {
         parts: [
@@ -620,7 +704,7 @@ test("parseCanonicalLinqMessageReceivedEvent accepts canonical hosted snapshots"
     }),
   }));
 
-  const event = parseCanonicalLinqMessageReceivedEvent(canonical as never);
+  const event = parseLinqMessageReceivedEvent(canonical as never);
 
   assert.deepEqual(summarizeLinqMessageReceivedEvent(event), {
     chatId: "chat_123",
@@ -631,8 +715,8 @@ test("parseCanonicalLinqMessageReceivedEvent accepts canonical hosted snapshots"
   });
 });
 
-test("parseCanonicalLinqMessageReceivedEvent accepts audio media parts and preserves URLs in hosted minimization", () => {
-  const event = parseCanonicalLinqMessageReceivedEvent({
+test("parseLinqMessageReceivedEvent accepts audio media parts and preserves URLs in hosted minimization", () => {
+  const event = parseLinqMessageReceivedEvent({
     ...buildV2026MessageReceivedWebhook({
       createdAt: "2026-04-02T04:00:00.000Z",
       data: {
@@ -737,8 +821,8 @@ test("parseCanonicalLinqMessageReceivedEvent accepts audio media parts and prese
   });
 });
 
-test("parseCanonicalLinqMessageReceivedEvent accepts camelCase media metadata in canonical snapshots", () => {
-  const event = parseCanonicalLinqMessageReceivedEvent({
+test("parseLinqMessageReceivedEvent accepts camelCase media metadata in canonical snapshots", () => {
+  const event = parseLinqMessageReceivedEvent({
     api_version: "v3",
     created_at: "2026-04-23T06:17:45.000Z",
     data: {
@@ -792,8 +876,8 @@ test("parseCanonicalLinqMessageReceivedEvent accepts camelCase media metadata in
   ]);
 });
 
-test("parseCanonicalLinqMessageReceivedEvent infers canonical outbound direction and hosted link minimization", () => {
-  const event = parseCanonicalLinqMessageReceivedEvent({
+test("parseLinqMessageReceivedEvent infers canonical outbound direction and hosted link minimization", () => {
+  const event = parseLinqMessageReceivedEvent({
     api_version: "v3",
     created_at: "2026-04-04T01:02:03.000Z",
     data: {
@@ -871,8 +955,42 @@ test("parseCanonicalLinqMessageReceivedEvent infers canonical outbound direction
   });
 });
 
-test("parseCanonicalLinqMessageReceivedEvent falls back to sender and sent timestamps when canonical fields are sparse", () => {
-  const event = parseCanonicalLinqMessageReceivedEvent({
+test("parseLinqMessageReceivedEvent prefers raw received_at over sent_at for occurredAt", () => {
+  const event = parseLinqMessageReceivedEvent({
+    ...buildV2026MessageReceivedWebhook({
+      createdAt: "2026-04-04T01:02:03.000Z",
+      data: {
+        received_at: "2026-04-04T01:02:01.000Z",
+        sent_at: "2026-04-04T01:01:59.000Z",
+      },
+      eventId: "evt_received_preferred",
+    }),
+  });
+
+  assert.equal(event.data.received_at, "2026-04-04T01:02:01.000Z");
+  assert.equal(event.data.sent_at, "2026-04-04T01:01:59.000Z");
+  assert.equal(resolveLinqWebhookOccurredAt(event), "2026-04-04T01:02:01.000Z");
+});
+
+test("parseLinqMessageReceivedEvent falls back to raw sent_at when received_at is missing", () => {
+  const event = parseLinqMessageReceivedEvent({
+    ...buildV2026MessageReceivedWebhook({
+      createdAt: "2026-04-04T01:02:03.000Z",
+      data: {
+        received_at: null,
+        sent_at: "2026-04-04T01:01:59.000Z",
+      },
+      eventId: "evt_sent_fallback",
+    }),
+  });
+
+  assert.equal(event.data.sent_at, "2026-04-04T01:01:59.000Z");
+  assert.equal(event.data.received_at, "2026-04-04T01:01:59.000Z");
+  assert.equal(resolveLinqWebhookOccurredAt(event), "2026-04-04T01:01:59.000Z");
+});
+
+test("parseLinqMessageReceivedEvent falls back to sender fields and sent_at when canonical timestamps are sparse", () => {
+  const event = parseLinqMessageReceivedEvent({
     api_version: "v3",
     created_at: "2026-04-04T01:02:03.000Z",
     data: {
@@ -904,12 +1022,17 @@ test("parseCanonicalLinqMessageReceivedEvent falls back to sender and sent times
   });
 
   assert.equal(event.data.direction, "outbound");
-  assert.equal(event.data.received_at, "2026-04-04T01:01:59.000Z");
   assert.ok(event.data.from_handle);
   assert.equal(event.data.from_handle.handle, "+15557654321");
   assert.equal(event.data.from_handle.id, "sender_sparse");
   assert.equal(event.data.from_handle.service, "SMS");
+  assert.equal(event.data.recipient_phone, null);
+  assert.equal(event.data.recipient_handle?.handle, "+15557654321");
+  assert.equal(readLinqRecipientLineHandle(event.data), "+15557654321");
   assert.equal(event.data.service, "SMS");
+  assert.equal(event.data.sent_at, "2026-04-04T01:01:59.000Z");
+  assert.equal(event.data.received_at, "2026-04-04T01:01:59.000Z");
+  assert.equal(resolveLinqWebhookOccurredAt(event), "2026-04-04T01:01:59.000Z");
 
   assert.throws(
     () =>
@@ -925,10 +1048,10 @@ test("parseCanonicalLinqMessageReceivedEvent falls back to sender and sent times
   );
 });
 
-test("parseCanonicalLinqMessageReceivedEvent rejects canonical snapshots missing required chat fields", () => {
+test("parseLinqMessageReceivedEvent rejects canonical snapshots missing required chat fields", () => {
   assert.throws(
     () =>
-      parseCanonicalLinqMessageReceivedEvent({
+      parseLinqMessageReceivedEvent({
         api_version: "v3",
         created_at: "2026-04-04T01:02:03.000Z",
         data: {
@@ -953,7 +1076,7 @@ test("parseCanonicalLinqMessageReceivedEvent rejects canonical snapshots missing
 
   assert.throws(
     () =>
-      parseCanonicalLinqMessageReceivedEvent({
+      parseLinqMessageReceivedEvent({
         api_version: "v3",
         created_at: "2026-04-04T01:02:03.000Z",
         data: {
@@ -976,7 +1099,41 @@ test("parseCanonicalLinqMessageReceivedEvent rejects canonical snapshots missing
   );
 });
 
-test("minimizeLinqWebhookEvent preserves non-message events without forcing message parsing", () => {
+test("minimizeLinqWebhookEvent rejects canonical-looking snapshots missing required message fields", () => {
+  assert.throws(
+    () =>
+      minimizeLinqWebhookEvent({
+        api_version: "v3",
+        created_at: "2026-04-04T01:02:03.000Z",
+        data: {
+          chat: {
+            id: "chat_missing_fields",
+            owner_handle: {
+              handle: "+15557654321",
+              id: "handle_owner_missing_fields",
+              is_me: true,
+              service: "SMS",
+            },
+          },
+          is_from_me: false,
+          message: {
+            parts: [],
+          },
+          sender_handle: {
+            handle: "+15551230000",
+            id: "sender_missing_fields",
+            service: "SMS",
+          },
+          service: "SMS",
+        },
+        event_id: "evt_missing_fields",
+        event_type: "message.received",
+      }),
+    /chat_id is required|from is required|message\.id is required/u,
+  );
+});
+
+test("minimizeLinqWebhookEvent preserves unsupported event data without forcing message parsing", () => {
   assert.deepEqual(
     minimizeLinqWebhookEvent({
       api_version: "v3",
@@ -1005,10 +1162,10 @@ test("minimizeLinqWebhookEvent preserves non-message events without forcing mess
   );
 });
 
-test("parseCanonicalLinqMessageReceivedEvent rejects unknown part types", () => {
+test("parseLinqMessageReceivedEvent rejects unknown part types", () => {
   assert.throws(
     () =>
-      parseCanonicalLinqMessageReceivedEvent({
+      parseLinqMessageReceivedEvent({
         ...buildV2026MessageReceivedWebhook({
           data: {
             chat: {
@@ -1034,10 +1191,10 @@ test("parseCanonicalLinqMessageReceivedEvent rejects unknown part types", () => 
   );
 });
 
-test("parseCanonicalLinqMessageReceivedEvent rejects payloads without message parts in either webhook shape", () => {
+test("parseLinqMessageReceivedEvent rejects payloads without message parts in either webhook shape", () => {
   assert.throws(
     () =>
-      parseCanonicalLinqMessageReceivedEvent({
+      parseLinqMessageReceivedEvent({
         ...buildV2026MessageReceivedWebhook({
           data: {
             chat: {
@@ -1058,10 +1215,10 @@ test("parseCanonicalLinqMessageReceivedEvent rejects payloads without message pa
   );
 });
 
-test("parseCanonicalLinqMessageReceivedEvent rejects non-array message parts", () => {
+test("parseLinqMessageReceivedEvent rejects non-array message parts", () => {
   assert.throws(
     () =>
-      parseCanonicalLinqMessageReceivedEvent({
+      parseLinqMessageReceivedEvent({
         ...buildV2026MessageReceivedWebhook({
           data: {
             parts: "nope",
@@ -1073,10 +1230,10 @@ test("parseCanonicalLinqMessageReceivedEvent rejects non-array message parts", (
   );
 });
 
-test("parseCanonicalLinqMessageReceivedEvent rejects missing message ids", () => {
+test("parseLinqMessageReceivedEvent rejects missing message ids", () => {
   assert.throws(
     () =>
-      parseCanonicalLinqMessageReceivedEvent({
+      parseLinqMessageReceivedEvent({
         ...buildV2026MessageReceivedWebhook({
           data: {
             id: undefined,
@@ -1088,10 +1245,10 @@ test("parseCanonicalLinqMessageReceivedEvent rejects missing message ids", () =>
   );
 });
 
-test("parseCanonicalLinqMessageReceivedEvent rejects invalid directions", () => {
+test("parseLinqMessageReceivedEvent rejects invalid directions", () => {
   assert.throws(
     () =>
-      parseCanonicalLinqMessageReceivedEvent({
+      parseLinqMessageReceivedEvent({
         ...buildV2026MessageReceivedWebhook({
           data: {
             direction: "sideways",
@@ -1104,7 +1261,7 @@ test("parseCanonicalLinqMessageReceivedEvent rejects invalid directions", () => 
 
   assert.throws(
     () =>
-      parseCanonicalLinqMessageReceivedEvent({
+      parseLinqMessageReceivedEvent({
         api_version: "v3",
         created_at: "2026-04-04T01:02:03.000Z",
         data: {
@@ -1137,7 +1294,7 @@ test("parseCanonicalLinqMessageReceivedEvent rejects invalid directions", () => 
 
   assert.throws(
     () =>
-      parseCanonicalLinqMessageReceivedEvent({
+      parseLinqMessageReceivedEvent({
         api_version: "v3",
         created_at: "2026-04-04T01:02:03.000Z",
         data: {
@@ -1172,10 +1329,10 @@ test("parseCanonicalLinqMessageReceivedEvent rejects invalid directions", () => 
   );
 });
 
-test("parseCanonicalLinqMessageReceivedEvent rejects invalid timestamps", () => {
+test("parseLinqMessageReceivedEvent rejects invalid timestamps", () => {
   assert.throws(
     () =>
-      parseCanonicalLinqMessageReceivedEvent({
+      parseLinqMessageReceivedEvent({
         ...buildV2026MessageReceivedWebhook({
           createdAt: "not-a-date",
           data: {

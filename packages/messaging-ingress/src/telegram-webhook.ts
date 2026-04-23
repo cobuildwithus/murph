@@ -1,3 +1,10 @@
+/**
+ * Telegram thread-targeting and summary helpers for already-authenticated
+ * updates. Raw inbound webhooks should go through
+ * `verifyAndParseTelegramWebhookRequest()` from `telegram-webhook-payload`
+ * before these helpers are used.
+ */
+
 import {
   normalizeTextValue,
   toIsoTimestamp,
