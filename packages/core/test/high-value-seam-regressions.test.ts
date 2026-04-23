@@ -53,22 +53,30 @@ test("vault-sync merge keeps planning reads and applyCanonicalWriteBatch inside 
   ]);
 });
 
-test("vault-sync preserves verified raw payloads from memory instead of re-reading source paths during apply", async () => {
+test("vault-sync preserves verified imported payloads from memory while keeping conflicts manifest-only", async () => {
   const source = await readSource("../src/vault-sync.ts");
+  const jsonlStart = source.indexOf("async function planJsonlMerge");
   const rawStart = source.indexOf("async function planRawMerge");
   const textStart = source.indexOf("async function planTextMerge");
   const hasPendingStart = source.indexOf("function hasPendingWrites");
+  assert.notEqual(jsonlStart, -1, "Expected planJsonlMerge in vault-sync.ts");
   assert.notEqual(rawStart, -1, "Expected planRawMerge in vault-sync.ts");
   assert.notEqual(textStart, -1, "Expected planTextMerge in vault-sync.ts");
   assert.notEqual(hasPendingStart, -1, "Expected hasPendingWrites in vault-sync.ts");
+
+  const jsonlSegment = source.slice(jsonlStart, rawStart);
+  assert.doesNotMatch(jsonlSegment, /input\.plan\.rawContents\.push\(/u);
+  assert.match(jsonlSegment, /preservedLocalPath: null/u);
 
   const rawSegment = source.slice(rawStart, textStart);
   assert.match(rawSegment, /input\.plan\.rawContents\.push\(/u);
   assert.match(rawSegment, /content: input\.localBytes/u);
   assert.doesNotMatch(rawSegment, /sourcePath:/u);
+  assert.match(rawSegment, /preservedLocalPath: null/u);
 
   const textSegment = source.slice(textStart, hasPendingStart);
-  assert.match(textSegment, /input\.plan\.rawContents\.push\(/u);
-  assert.match(textSegment, /content,/u);
+  assert.match(textSegment, /input\.plan\.textWrites\.push\(/u);
+  assert.doesNotMatch(textSegment, /input\.plan\.rawContents\.push\(/u);
   assert.doesNotMatch(textSegment, /sourcePath:/u);
+  assert.match(textSegment, /preservedLocalPath: null/u);
 });

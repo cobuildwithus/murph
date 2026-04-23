@@ -53,7 +53,9 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
   }
 
   const snapshot = await client.fetchSnapshot();
-  const state = createEmptyHostedDeviceSyncRuntimeSyncState(snapshot);
+  const state = createEmptyHostedDeviceSyncRuntimeSyncState(
+    snapshot ? { ...snapshot, connections: [] } : null,
+  );
   if (!snapshot) {
     return state;
   }
@@ -62,7 +64,6 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
   const now = input.wake.occurredAt;
 
   for (const entry of snapshot.connections) {
-    state.observedTokenVersions.set(entry.connection.id, entry.tokenBundle?.tokenVersion ?? null);
     const existing = input.service.store.getAccountByExternalAccount(
       entry.connection.provider,
       entry.connection.externalAccountId,
@@ -90,6 +91,14 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
 
     state.hostedToLocalAccountIds.set(entry.connection.id, stored.id);
     state.localToHostedAccountIds.set(stored.id, entry.connection.id);
+    state.observedTokenVersions.set(entry.connection.id, stored.hostedObservedTokenVersion ?? null);
+    state.snapshot?.connections.push(
+      buildAcceptedHostedDeviceSyncRuntimeSnapshotEntry({
+        codec,
+        entry,
+        stored,
+      }),
+    );
   }
 
   if (input.wake.kind === "device-sync.wake") {
@@ -257,26 +266,11 @@ function buildHostedDeviceSyncRuntimeConnectionUpdate(input: {
     ? resolveHostedDeviceSyncRuntimeLocalStateSnapshot(input.baseline)
     : null;
   const baselineTokenBundle = input.baseline?.tokenBundle ?? null;
-  const hasLocalTokenEscrow = input.account.accessTokenEncrypted.length > 0;
-  const tokenBundle = input.account.status === "disconnected" || !hasLocalTokenEscrow
-    ? null
-    : {
-        accessToken: input.account.accessTokenEncrypted
-          ? input.codec.decrypt(
-            input.account.accessTokenEncrypted,
-            buildStoredDeviceSyncTokenCipherOptions(input.account, "device-sync-access-token"),
-          )
-          : "",
-        accessTokenExpiresAt: input.account.accessTokenExpiresAt ?? null,
-        keyVersion: "local-runtime",
-        refreshToken: input.account.refreshTokenEncrypted
-          ? input.codec.decrypt(
-            input.account.refreshTokenEncrypted,
-            buildStoredDeviceSyncTokenCipherOptions(input.account, "device-sync-refresh-token"),
-          )
-          : null,
-        tokenVersion: input.observedTokenVersion ?? 1,
-      } satisfies HostedDeviceSyncRuntimeTokenBundle;
+  const tokenBundle = buildHostedDeviceSyncRuntimeTokenBundleFromAccount({
+    account: input.account,
+    codec: input.codec,
+    observedTokenVersion: input.observedTokenVersion,
+  });
   const update: HostedDeviceSyncRuntimeConnectionUpdate = {
     connectionId: input.hostedConnectionId,
     observedUpdatedAt: baselineConnection?.updatedAt ?? null,
@@ -386,6 +380,70 @@ function buildStoredDeviceSyncTokenCipherOptions(
   });
 }
 
+function buildHostedDeviceSyncRuntimeTokenBundleFromAccount(input: {
+  account: StoredDeviceSyncAccount;
+  codec: ReturnType<typeof createSecretCodec>;
+  keyVersion?: string;
+  observedTokenVersion: number | null;
+}): HostedDeviceSyncRuntimeTokenBundle | null {
+  const hasLocalTokenEscrow = input.account.accessTokenEncrypted.length > 0;
+
+  if (input.account.status === "disconnected" || !hasLocalTokenEscrow) {
+    return null;
+  }
+
+  return {
+    accessToken: input.codec.decrypt(
+      input.account.accessTokenEncrypted,
+      buildStoredDeviceSyncTokenCipherOptions(input.account, "device-sync-access-token"),
+    ),
+    accessTokenExpiresAt: input.account.accessTokenExpiresAt ?? null,
+    keyVersion: input.keyVersion ?? "local-runtime",
+    refreshToken: input.account.refreshTokenEncrypted
+      ? input.codec.decrypt(
+        input.account.refreshTokenEncrypted,
+        buildStoredDeviceSyncTokenCipherOptions(input.account, "device-sync-refresh-token"),
+      )
+      : null,
+    tokenVersion: input.observedTokenVersion ?? 1,
+  } satisfies HostedDeviceSyncRuntimeTokenBundle;
+}
+
+function buildAcceptedHostedDeviceSyncRuntimeSnapshotEntry(input: {
+  codec: ReturnType<typeof createSecretCodec>;
+  entry: HostedDeviceSyncRuntimeConnectionSnapshot;
+  stored: StoredDeviceSyncAccount;
+}): HostedDeviceSyncRuntimeConnectionSnapshot {
+  return {
+    connection: {
+      accessTokenExpiresAt: input.stored.accessTokenExpiresAt ?? null,
+      connectedAt: input.stored.connectedAt,
+      createdAt: input.entry.connection.createdAt,
+      displayName: input.stored.displayName ?? null,
+      externalAccountId: input.stored.externalAccountId,
+      id: input.entry.connection.id,
+      metadata: { ...input.stored.metadata },
+      provider: input.stored.provider,
+      scopes: [...input.stored.scopes],
+      status: input.stored.status,
+      ...(input.stored.hostedObservedUpdatedAt
+        ? {
+            updatedAt: input.stored.hostedObservedUpdatedAt,
+          }
+        : {}),
+    },
+    localState: {
+      ...resolveHostedDeviceSyncRuntimeLocalStateSnapshot(input.entry),
+    },
+    tokenBundle: buildHostedDeviceSyncRuntimeTokenBundleFromAccount({
+      account: input.stored,
+      codec: input.codec,
+      keyVersion: input.entry.tokenBundle?.keyVersion ?? "local-runtime",
+      observedTokenVersion: input.stored.hostedObservedTokenVersion ?? null,
+    }),
+  };
+}
+
 function buildHostedAccountHydrationInput(input: {
   codec: ReturnType<typeof createSecretCodec>;
   entry: HostedDeviceSyncRuntimeConnectionSnapshot;
@@ -395,37 +453,82 @@ function buildHostedAccountHydrationInput(input: {
   const hostedLocalState = input.entry.localState;
   const hostedTokenVersion = input.entry.tokenBundle?.tokenVersion ?? null;
   const hostedUpdatedAt = hostedConnection.updatedAt ?? null;
-  const nextHostedObservedUpdatedAt = hostedUpdatedAt ?? input.existing?.hostedObservedUpdatedAt ?? null;
-  const nextHostedObservedTokenVersion = hostedTokenVersion ?? input.existing?.hostedObservedTokenVersion ?? null;
+  const previousHostedObservedUpdatedAt = input.existing?.hostedObservedUpdatedAt ?? null;
+  const previousHostedObservedTokenVersion = input.existing?.hostedObservedTokenVersion ?? null;
+  const hostedConnectionStateStale = isStaleHostedObservedUpdatedAt(
+    previousHostedObservedUpdatedAt,
+    hostedUpdatedAt,
+  );
+  const hostedConnectionStateReplayed = isReplayedHostedObservedUpdatedAt({
+    hostedObservedConnectionRevision: input.existing?.hostedObservedConnectionRevision ?? 0,
+    localConnectionRevision: input.existing?.localConnectionRevision ?? 0,
+    nextObservedUpdatedAt: hostedUpdatedAt,
+    previousObservedUpdatedAt: previousHostedObservedUpdatedAt,
+  });
+  const hostedTokenStateStale = isStaleHostedObservedTokenVersion(
+    previousHostedObservedTokenVersion,
+    hostedTokenVersion,
+  );
+  const hostedTokenStateReplayed = isReplayedHostedObservedTokenVersion({
+    hostedObservedTokenRevision: input.existing?.hostedObservedTokenRevision ?? 0,
+    localTokenRevision: input.existing?.localTokenRevision ?? 0,
+    nextObservedTokenVersion: hostedTokenVersion,
+    previousObservedTokenVersion: previousHostedObservedTokenVersion,
+  });
+  const shouldClearTokens = input.entry.tokenBundle === null
+    && !hostedConnectionStateStale
+    && !hostedConnectionStateReplayed
+    && !hostedTokenStateStale
+    && !hostedTokenStateReplayed;
+  const nextHostedObservedUpdatedAt = hostedConnectionStateStale || hostedConnectionStateReplayed
+    ? previousHostedObservedUpdatedAt
+    : hostedUpdatedAt ?? previousHostedObservedUpdatedAt;
+  const nextHostedObservedTokenVersion = shouldClearTokens
+    ? null
+    : (hostedTokenStateStale || hostedTokenStateReplayed)
+      ? previousHostedObservedTokenVersion
+      : hostedTokenVersion ?? previousHostedObservedTokenVersion;
   const hostedStateAdvanced = didHostedStateAdvance(
-    input.existing?.hostedObservedUpdatedAt ?? null,
+    previousHostedObservedUpdatedAt,
     nextHostedObservedUpdatedAt,
   );
+  const connection = (hostedConnectionStateStale || hostedConnectionStateReplayed) && input.existing
+    ? {
+        connectedAt: input.existing.connectedAt,
+        displayName: input.existing.displayName ?? null,
+        externalAccountId: input.existing.externalAccountId,
+        metadata: { ...input.existing.metadata },
+        provider: input.existing.provider,
+        scopes: [...input.existing.scopes],
+        status: input.existing.status,
+        updatedAt: input.existing.updatedAt,
+      }
+    : {
+        connectedAt: hostedConnection.connectedAt,
+        displayName: hostedConnection.displayName ?? null,
+        externalAccountId: hostedConnection.externalAccountId,
+        metadata: { ...hostedConnection.metadata },
+        provider: hostedConnection.provider,
+        scopes: [...hostedConnection.scopes],
+        status: hostedConnection.status,
+        updatedAt: resolveHydratedHostedAccountUpdatedAt({
+          connectedAt: hostedConnection.connectedAt,
+          existing: input.existing,
+          hostedObservedUpdatedAt: nextHostedObservedUpdatedAt,
+        }),
+      };
 
   return {
-    clearTokens: input.entry.tokenBundle === null,
+    clearTokens: shouldClearTokens,
     hostedObservedTokenVersion: nextHostedObservedTokenVersion,
     hostedObservedUpdatedAt: nextHostedObservedUpdatedAt,
-    connection: {
-      connectedAt: hostedConnection.connectedAt,
-      displayName: hostedConnection.displayName ?? null,
-      externalAccountId: hostedConnection.externalAccountId,
-      metadata: { ...hostedConnection.metadata },
-      provider: hostedConnection.provider,
-      scopes: [...hostedConnection.scopes],
-      status: hostedConnection.status,
-      updatedAt: resolveHydratedHostedAccountUpdatedAt({
-        connectedAt: hostedConnection.connectedAt,
-        existing: input.existing,
-        hostedObservedUpdatedAt: nextHostedObservedUpdatedAt,
-      }),
-    },
+    connection,
     localState: resolveHydratedHostedLocalState({
       existing: input.existing,
       hostedLocalState,
       hostedStateAdvanced,
     }),
-    ...(input.entry.tokenBundle
+    ...(input.entry.tokenBundle && !hostedTokenStateStale && !hostedTokenStateReplayed
       ? {
           tokens: {
             accessToken: input.entry.tokenBundle.accessToken,
@@ -629,6 +732,61 @@ function didHostedStateAdvance(
       && nextObservedUpdatedAt !== previousObservedUpdatedAt
       && latestIsoTimestamp(previousObservedUpdatedAt, nextObservedUpdatedAt) === nextObservedUpdatedAt,
   );
+}
+
+function isStaleHostedObservedUpdatedAt(
+  previousObservedUpdatedAt: string | null,
+  nextObservedUpdatedAt: string | null,
+): boolean {
+  if (
+    !previousObservedUpdatedAt
+    || !nextObservedUpdatedAt
+    || previousObservedUpdatedAt === nextObservedUpdatedAt
+  ) {
+    return false;
+  }
+
+  const previousObservedUpdatedAtMs = parseIsoMs(previousObservedUpdatedAt);
+  const nextObservedUpdatedAtMs = parseIsoMs(nextObservedUpdatedAt);
+
+  return previousObservedUpdatedAtMs !== null
+    && nextObservedUpdatedAtMs !== null
+    && nextObservedUpdatedAtMs < previousObservedUpdatedAtMs;
+}
+
+function isReplayedHostedObservedUpdatedAt(input: {
+  hostedObservedConnectionRevision: number;
+  localConnectionRevision: number;
+  nextObservedUpdatedAt: string | null;
+  previousObservedUpdatedAt: string | null;
+}): boolean {
+  return Boolean(
+    input.previousObservedUpdatedAt
+      && input.nextObservedUpdatedAt
+      && input.previousObservedUpdatedAt === input.nextObservedUpdatedAt
+      && input.localConnectionRevision !== input.hostedObservedConnectionRevision,
+  );
+}
+
+function isStaleHostedObservedTokenVersion(
+  previousObservedTokenVersion: number | null,
+  nextObservedTokenVersion: number | null,
+): boolean {
+  return typeof previousObservedTokenVersion === "number"
+    && typeof nextObservedTokenVersion === "number"
+    && nextObservedTokenVersion < previousObservedTokenVersion;
+}
+
+function isReplayedHostedObservedTokenVersion(input: {
+  hostedObservedTokenRevision: number;
+  localTokenRevision: number;
+  nextObservedTokenVersion: number | null;
+  previousObservedTokenVersion: number | null;
+}): boolean {
+  return typeof input.previousObservedTokenVersion === "number"
+    && typeof input.nextObservedTokenVersion === "number"
+    && input.previousObservedTokenVersion === input.nextObservedTokenVersion
+    && input.localTokenRevision !== input.hostedObservedTokenRevision;
 }
 
 function resolveHydratedHostedAccountUpdatedAt(input: {

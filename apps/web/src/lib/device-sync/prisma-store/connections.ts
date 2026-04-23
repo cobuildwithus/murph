@@ -277,6 +277,7 @@ export class PrismaHostedConnectionStore {
   }
 
   async persistStoredConnectionTokenBundle(input: {
+    clearExternalAccountId?: boolean;
     connectionId: string;
     externalAccountId?: string | null;
     provider: string;
@@ -302,10 +303,11 @@ export class PrismaHostedConnectionStore {
     }
 
     const codec = requireHostedSecretCodec(this.codec);
-    const externalAccountId =
-      input.externalAccountId === undefined
-        ? readHostedStoredExternalAccountId(record, this.codec)
-        : normalizeNullableString(input.externalAccountId);
+    const existingExternalAccountId = readHostedStoredExternalAccountId(record, this.codec);
+    const requestedExternalAccountId = normalizeNullableString(input.externalAccountId);
+    const externalAccountId = input.clearExternalAccountId === true
+      ? null
+      : requestedExternalAccountId ?? existingExternalAccountId;
 
     await prisma.deviceConnection.update({
       where: {

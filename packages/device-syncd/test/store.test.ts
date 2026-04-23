@@ -255,9 +255,322 @@ test("device sync store hosted hydration preserves existing tokens until disconn
     assert.equal(disconnected?.refreshTokenEncrypted, null);
     assert.equal(disconnected?.accessTokenExpiresAt, null);
     assert.equal(disconnected?.disconnectGeneration, 1);
+    assert.equal(disconnected?.hostedObservedTokenVersion, null);
     assert.deepEqual(disconnected?.metadata, {
       reason: "disconnect",
     });
+
+    const reconnected = store.hydrateHostedAccount({
+      connection: {
+        connectedAt: "2026-04-07T04:00:00.000Z",
+        displayName: "Reconnected User",
+        externalAccountId: "oura-user-1",
+        metadata: {
+          reconnect: true,
+        },
+        provider: "oura",
+        scopes: ["daily", "sleep"],
+        status: "active",
+        updatedAt: "2026-04-07T04:00:00.000Z",
+      },
+      hostedObservedTokenVersion: 1,
+      hostedObservedUpdatedAt: "2026-04-07T04:00:00.000Z",
+      localState: {
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastSyncCompletedAt: "2026-04-07T03:30:00.000Z",
+        lastSyncErrorAt: null,
+        lastSyncStartedAt: "2026-04-07T03:20:00.000Z",
+        lastWebhookAt: "2026-04-07T03:10:00.000Z",
+        nextReconcileAt: "2026-04-07T05:00:00.000Z",
+      },
+      tokens: {
+        accessToken: "reconnected-access-token",
+        accessTokenEncrypted: "enc:reconnected-access-token",
+        accessTokenExpiresAt: "2026-04-07T06:00:00.000Z",
+        refreshToken: "reconnected-refresh-token",
+        refreshTokenEncrypted: "enc:reconnected-refresh-token",
+      },
+    });
+
+    assert.equal(reconnected?.status, "active");
+    assert.equal(reconnected?.displayName, "Reconnected User");
+    assert.equal(reconnected?.accessTokenEncrypted, "enc:reconnected-access-token");
+    assert.equal(reconnected?.refreshTokenEncrypted, "enc:reconnected-refresh-token");
+    assert.equal(reconnected?.hostedObservedTokenVersion, 1);
+  } finally {
+    store.close();
+    await rm(tempDir, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
+test("device sync store applies newer hosted connection state without replaying older token bundles", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-store-stale-hosted-token");
+  const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
+
+  try {
+    const seeded = store.upsertAccount({
+      provider: "demo",
+      externalAccountId: "demo-stale-hosted-token",
+      displayName: "Seeded",
+      scopes: ["offline"],
+      tokens: {
+        accessToken: "seed-access",
+        accessTokenEncrypted: "enc:seed-access",
+        refreshToken: "seed-refresh",
+        refreshTokenEncrypted: "enc:seed-refresh",
+      },
+      metadata: {
+        seeded: true,
+      },
+      connectedAt: "2026-04-07T00:00:00.000Z",
+      nextReconcileAt: "2026-04-07T02:00:00.000Z",
+    });
+
+    const hydrated = store.hydrateHostedAccount({
+      connection: {
+        connectedAt: "2026-04-07T00:00:00.000Z",
+        displayName: "Hosted Fresh",
+        externalAccountId: seeded.externalAccountId,
+        metadata: {
+          hosted: true,
+        },
+        provider: seeded.provider,
+        scopes: ["sleep"],
+        status: "active",
+        updatedAt: "2026-04-07T01:00:00.000Z",
+      },
+      hostedObservedTokenVersion: 7,
+      hostedObservedUpdatedAt: "2026-04-07T01:00:00.000Z",
+      localState: {
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastSyncCompletedAt: "2026-04-07T00:30:00.000Z",
+        lastSyncErrorAt: null,
+        lastSyncStartedAt: "2026-04-07T00:20:00.000Z",
+        lastWebhookAt: "2026-04-07T00:10:00.000Z",
+        nextReconcileAt: "2026-04-07T03:00:00.000Z",
+      },
+      tokens: {
+        accessToken: "hosted-access-v7",
+        accessTokenEncrypted: "enc:hosted-access-v7",
+        accessTokenExpiresAt: "2026-04-07T04:00:00.000Z",
+        refreshToken: "hosted-refresh-v7",
+        refreshTokenEncrypted: "enc:hosted-refresh-v7",
+      },
+    });
+
+    assert.ok(hydrated);
+    assert.equal(hydrated?.hostedObservedTokenVersion, 7);
+
+    const locallyRefreshed = store.updateAccountTokens(
+      hydrated!.id,
+      {
+        accessToken: "local-access-refresh",
+        accessTokenEncrypted: "enc:local-access-refresh",
+        accessTokenExpiresAt: "2026-04-07T05:00:00.000Z",
+        refreshToken: "local-refresh-refresh",
+        refreshTokenEncrypted: "enc:local-refresh-refresh",
+      },
+      hydrated!.disconnectGeneration,
+    );
+
+    assert.ok(locallyRefreshed);
+
+    const partiallyHydrated = store.hydrateHostedAccount({
+      connection: {
+        connectedAt: "2026-04-07T00:00:00.000Z",
+        displayName: "Hosted Connection Update",
+        externalAccountId: seeded.externalAccountId,
+        metadata: {
+          fresh: true,
+          nested: {
+            drop: "me",
+          },
+        },
+        provider: seeded.provider,
+        scopes: ["daily"],
+        status: "reauthorization_required",
+        updatedAt: "2026-04-07T02:00:00.000Z",
+      },
+      hostedObservedTokenVersion: 6,
+      hostedObservedUpdatedAt: "2026-04-07T02:00:00.000Z",
+      localState: {
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastSyncCompletedAt: "2026-04-07T01:30:00.000Z",
+        lastSyncErrorAt: null,
+        lastSyncStartedAt: "2026-04-07T01:20:00.000Z",
+        lastWebhookAt: "2026-04-07T01:10:00.000Z",
+        nextReconcileAt: "2026-04-07T06:00:00.000Z",
+      },
+      tokens: {
+        accessToken: "stale-hosted-access",
+        accessTokenEncrypted: "enc:stale-hosted-access",
+        accessTokenExpiresAt: "2026-04-07T03:00:00.000Z",
+        refreshToken: "stale-hosted-refresh",
+        refreshTokenEncrypted: "enc:stale-hosted-refresh",
+      },
+    });
+
+    assert.equal(partiallyHydrated?.id, seeded.id);
+    assert.equal(partiallyHydrated?.displayName, "Hosted Connection Update");
+    assert.equal(partiallyHydrated?.status, "reauthorization_required");
+    assert.deepEqual(partiallyHydrated?.metadata, {
+      fresh: true,
+    });
+    assert.deepEqual(partiallyHydrated?.scopes, ["daily"]);
+    assert.equal(partiallyHydrated?.hostedObservedUpdatedAt, "2026-04-07T02:00:00.000Z");
+    assert.equal(partiallyHydrated?.hostedObservedTokenVersion, 7);
+    assert.equal(partiallyHydrated?.accessTokenEncrypted, "enc:local-access-refresh");
+    assert.equal(partiallyHydrated?.refreshTokenEncrypted, "enc:local-refresh-refresh");
+    assert.equal(partiallyHydrated?.accessTokenExpiresAt, "2026-04-07T05:00:00.000Z");
+  } finally {
+    store.close();
+    await rm(tempDir, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
+test("device sync store rejects same-snapshot hosted replays after newer local connection and token writes even when local timestamps skew older", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-store-hosted-replay");
+  const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
+
+  try {
+    const seeded = store.upsertAccount({
+      provider: "demo",
+      externalAccountId: "demo-hosted-replay",
+      displayName: "Seeded",
+      scopes: ["offline"],
+      tokens: {
+        accessToken: "seed-access",
+        accessTokenEncrypted: "enc:seed-access",
+        refreshToken: "seed-refresh",
+        refreshTokenEncrypted: "enc:seed-refresh",
+      },
+      metadata: {
+        seeded: true,
+      },
+      connectedAt: "2026-04-07T00:00:00.000Z",
+      nextReconcileAt: "2026-04-07T02:00:00.000Z",
+    });
+
+    const hydrated = store.hydrateHostedAccount({
+      connection: {
+        connectedAt: "2026-04-07T00:00:00.000Z",
+        displayName: "Hosted Fresh",
+        externalAccountId: seeded.externalAccountId,
+        metadata: {
+          hosted: true,
+        },
+        provider: seeded.provider,
+        scopes: ["sleep"],
+        status: "active",
+        updatedAt: "2026-04-07T01:00:00.000Z",
+      },
+      hostedObservedTokenVersion: 7,
+      hostedObservedUpdatedAt: "2026-04-07T01:00:00.000Z",
+      localState: {
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastSyncCompletedAt: "2026-04-07T00:30:00.000Z",
+        lastSyncErrorAt: null,
+        lastSyncStartedAt: "2026-04-07T00:20:00.000Z",
+        lastWebhookAt: "2026-04-07T00:10:00.000Z",
+        nextReconcileAt: "2026-04-07T03:00:00.000Z",
+      },
+      tokens: {
+        accessToken: "hosted-access-v7",
+        accessTokenEncrypted: "enc:hosted-access-v7",
+        accessTokenExpiresAt: "2026-04-07T04:00:00.000Z",
+        refreshToken: "hosted-refresh-v7",
+        refreshTokenEncrypted: "enc:hosted-refresh-v7",
+      },
+    });
+
+    assert.ok(hydrated);
+
+    const locallyRefreshed = store.updateAccountTokens(
+      hydrated!.id,
+      {
+        accessToken: "local-access-refresh",
+        accessTokenEncrypted: "enc:local-access-refresh",
+        accessTokenExpiresAt: "2026-04-07T05:00:00.000Z",
+        refreshToken: "local-refresh-refresh",
+        refreshTokenEncrypted: "enc:local-refresh-refresh",
+      },
+      hydrated!.disconnectGeneration,
+    );
+
+    assert.ok(locallyRefreshed);
+
+    const locallyPatched = store.patchAccount(hydrated!.id, {
+      displayName: "Local Fresh",
+      metadata: {
+        local: true,
+      },
+      nextReconcileAt: "2026-04-07T03:30:00.000Z",
+      scopes: ["offline", "manual"],
+      status: "reauthorization_required",
+    });
+
+    assert.equal(locallyPatched.displayName, "Local Fresh");
+    assert.equal(locallyPatched.localConnectionRevision, 1);
+    assert.equal(locallyPatched.localTokenRevision, 1);
+
+    store.database.prepare(`
+      update device_connection
+      set updated_at = ?
+      where id = ?
+    `).run("2026-04-06T23:00:00.000Z", hydrated!.id);
+
+    const replayed = store.hydrateHostedAccount({
+      connection: {
+        connectedAt: "2026-04-07T00:00:00.000Z",
+        displayName: "Hosted Replayed Disconnect",
+        externalAccountId: seeded.externalAccountId,
+        metadata: {
+          replay: true,
+        },
+        provider: seeded.provider,
+        scopes: ["sleep"],
+        status: "disconnected",
+        updatedAt: "2026-04-07T01:00:00.000Z",
+      },
+      hostedObservedTokenVersion: 7,
+      hostedObservedUpdatedAt: "2026-04-07T01:00:00.000Z",
+      localState: {
+        lastErrorCode: "REPLAY_IGNORED",
+        lastErrorMessage: "same hosted snapshot",
+        lastSyncCompletedAt: "2026-04-07T01:30:00.000Z",
+        lastSyncErrorAt: "2026-04-07T01:25:00.000Z",
+        lastSyncStartedAt: "2026-04-07T01:20:00.000Z",
+        lastWebhookAt: "2026-04-07T01:10:00.000Z",
+        nextReconcileAt: "2026-04-07T06:00:00.000Z",
+      },
+      tokens: undefined,
+    });
+
+    assert.equal(replayed?.id, seeded.id);
+    assert.equal(replayed?.status, "reauthorization_required");
+    assert.equal(replayed?.displayName, "Local Fresh");
+    assert.deepEqual(replayed?.metadata, {
+      hosted: true,
+      local: true,
+    });
+    assert.deepEqual(replayed?.scopes, ["offline", "manual"]);
+    assert.equal(replayed?.hostedObservedUpdatedAt, "2026-04-07T01:00:00.000Z");
+    assert.equal(replayed?.hostedObservedTokenVersion, 7);
+    assert.equal(replayed?.accessTokenEncrypted, "enc:local-access-refresh");
+    assert.equal(replayed?.refreshTokenEncrypted, "enc:local-refresh-refresh");
+    assert.equal(replayed?.accessTokenExpiresAt, "2026-04-07T05:00:00.000Z");
+    assert.equal(replayed?.nextReconcileAt, "2026-04-07T06:00:00.000Z");
+    assert.equal(replayed?.lastErrorCode, "REPLAY_IGNORED");
   } finally {
     store.close();
     await rm(tempDir, {
@@ -484,13 +797,13 @@ test("device sync store rejects pre-cutover sqlite user_version values", async (
   const tempDir = await makeTempDirectory("murph-device-syncd-store-version");
   const databasePath = path.join(tempDir, "state.sqlite");
   const database = openSqliteRuntimeDatabase(databasePath);
-  database.exec("PRAGMA user_version = 2;");
+  database.exec("PRAGMA user_version = 3;");
   database.close();
 
   try {
     assert.throws(
       () => new SqliteDeviceSyncStore(databasePath),
-      /device sync runtime database schema version 2 is newer than supported version 1/u,
+      /device sync runtime database schema version 3 is newer than supported version 2/u,
     );
   } finally {
     await rm(tempDir, {

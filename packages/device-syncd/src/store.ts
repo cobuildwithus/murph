@@ -117,7 +117,11 @@ interface StoredAccountRow {
   refresh_token_encrypted: string | null;
   access_token_expires_at: string | null;
   hosted_observed_updated_at: string | null;
+  hosted_observed_connection_revision: number;
   hosted_observed_token_version: number | null;
+  hosted_observed_token_revision: number;
+  local_connection_revision: number;
+  local_token_revision: number;
   metadata_json: string | null;
   connected_at: string;
   last_webhook_at: string | null;
@@ -227,9 +231,25 @@ function decodeStoredAccountRow(row: SqliteRow): StoredAccountRow {
       row.hosted_observed_updated_at,
       "device_observation_state.hosted_observed_updated_at",
     ),
+    hosted_observed_connection_revision: expectNumber(
+      row.hosted_observed_connection_revision,
+      "device_observation_state.hosted_observed_connection_revision",
+    ),
     hosted_observed_token_version: expectNullableNumber(
       row.hosted_observed_token_version,
       "device_observation_state.hosted_observed_token_version",
+    ),
+    hosted_observed_token_revision: expectNumber(
+      row.hosted_observed_token_revision,
+      "device_observation_state.hosted_observed_token_revision",
+    ),
+    local_connection_revision: expectNumber(
+      row.local_connection_revision,
+      "device_observation_state.local_connection_revision",
+    ),
+    local_token_revision: expectNumber(
+      row.local_token_revision,
+      "device_observation_state.local_token_revision",
     ),
     metadata_json: expectNullableString(row.metadata_json, "device_connection.metadata_json"),
     connected_at: expectString(row.connected_at, "device_connection.connected_at"),
@@ -298,8 +318,12 @@ function mapAccountRow(row: StoredAccountRow): StoredDeviceSyncAccount {
     scopes: parseStoredStringArray(row.scopes_json, "device_connection.scopes_json"),
     disconnectGeneration: row.disconnect_generation,
     accessTokenEncrypted: row.access_token_encrypted,
+    hostedObservedConnectionRevision: row.hosted_observed_connection_revision,
+    hostedObservedTokenRevision: row.hosted_observed_token_revision,
     hostedObservedTokenVersion: row.hosted_observed_token_version,
     hostedObservedUpdatedAt: row.hosted_observed_updated_at,
+    localConnectionRevision: row.local_connection_revision,
+    localTokenRevision: row.local_token_revision,
     refreshTokenEncrypted: row.refresh_token_encrypted,
     accessTokenExpiresAt: row.access_token_expires_at,
     metadata: sanitizeStoredDeviceSyncMetadata(maybeParseJsonObject(row.metadata_json)),
@@ -348,6 +372,15 @@ function resolveHydratedHostedAccountTokens(input: {
   };
 }
 
+function parseIsoMs(value: string | null): number | null {
+  if (!value) {
+    return null;
+  }
+
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
 function latestIsoTimestamp(left: string | null, right: string | null): string | null {
   if (!left) {
     return right;
@@ -358,6 +391,61 @@ function latestIsoTimestamp(left: string | null, right: string | null): string |
   }
 
   return Date.parse(left) >= Date.parse(right) ? left : right;
+}
+
+function isStaleHostedObservedUpdatedAt(
+  previousObservedUpdatedAt: string | null,
+  nextObservedUpdatedAt: string | null,
+): boolean {
+  if (
+    !previousObservedUpdatedAt
+    || !nextObservedUpdatedAt
+    || previousObservedUpdatedAt === nextObservedUpdatedAt
+  ) {
+    return false;
+  }
+
+  const previousObservedUpdatedAtMs = parseIsoMs(previousObservedUpdatedAt);
+  const nextObservedUpdatedAtMs = parseIsoMs(nextObservedUpdatedAt);
+
+  return previousObservedUpdatedAtMs !== null
+    && nextObservedUpdatedAtMs !== null
+    && nextObservedUpdatedAtMs < previousObservedUpdatedAtMs;
+}
+
+function isReplayedHostedObservedUpdatedAt(input: {
+  localConnectionRevision: number;
+  nextObservedUpdatedAt: string | null;
+  hostedObservedConnectionRevision: number;
+  previousObservedUpdatedAt: string | null;
+}): boolean {
+  return Boolean(
+    input.previousObservedUpdatedAt
+      && input.nextObservedUpdatedAt
+      && input.previousObservedUpdatedAt === input.nextObservedUpdatedAt
+      && input.localConnectionRevision !== input.hostedObservedConnectionRevision,
+  );
+}
+
+function isStaleHostedObservedTokenVersion(
+  previousObservedTokenVersion: number | null,
+  nextObservedTokenVersion: number | null,
+): boolean {
+  return typeof previousObservedTokenVersion === "number"
+    && typeof nextObservedTokenVersion === "number"
+    && nextObservedTokenVersion < previousObservedTokenVersion;
+}
+
+function isReplayedHostedObservedTokenVersion(input: {
+  hostedObservedTokenRevision: number;
+  localTokenRevision: number;
+  nextObservedTokenVersion: number | null;
+  previousObservedTokenVersion: number | null;
+}): boolean {
+  return typeof input.previousObservedTokenVersion === "number"
+    && typeof input.nextObservedTokenVersion === "number"
+    && input.previousObservedTokenVersion === input.nextObservedTokenVersion
+    && input.localTokenRevision !== input.hostedObservedTokenRevision;
 }
 
 const ACCOUNT_ROW_SELECT = `
@@ -373,7 +461,11 @@ const ACCOUNT_ROW_SELECT = `
     credential.refresh_token_encrypted as refresh_token_encrypted,
     credential.access_token_expires_at as access_token_expires_at,
     observation.hosted_observed_updated_at as hosted_observed_updated_at,
+    observation.hosted_observed_connection_revision as hosted_observed_connection_revision,
     observation.hosted_observed_token_version as hosted_observed_token_version,
+    observation.hosted_observed_token_revision as hosted_observed_token_revision,
+    observation.local_connection_revision as local_connection_revision,
+    observation.local_token_revision as local_token_revision,
     connection.metadata_json as metadata_json,
     connection.connected_at as connected_at,
     observation.last_webhook_at as last_webhook_at,
@@ -542,6 +634,8 @@ export class SqliteDeviceSyncStore {
         this.database.prepare(`
           update device_observation_state
           set next_reconcile_at = ?,
+              local_connection_revision = ?,
+              local_token_revision = ?,
               last_sync_error_at = null,
               last_error_code = null,
               last_error_message = null,
@@ -549,6 +643,8 @@ export class SqliteDeviceSyncStore {
           where account_id = ?
         `).run(
           input.nextReconcileAt ?? null,
+          existing.localConnectionRevision + 1,
+          existing.localTokenRevision + 1,
           now,
           existing.id,
         );
@@ -605,7 +701,11 @@ export class SqliteDeviceSyncStore {
         insert into device_observation_state (
           account_id,
           hosted_observed_updated_at,
+          hosted_observed_connection_revision,
           hosted_observed_token_version,
+          hosted_observed_token_revision,
+          local_connection_revision,
+          local_token_revision,
           last_webhook_at,
           last_sync_started_at,
           last_sync_completed_at,
@@ -615,7 +715,7 @@ export class SqliteDeviceSyncStore {
           next_reconcile_at,
           created_at,
           updated_at
-        ) values (?, null, null, null, null, null, null, null, null, ?, ?, ?)
+        ) values (?, null, 0, null, 0, 0, 0, null, null, null, null, null, null, ?, ?, ?)
       `).run(
         id,
         input.nextReconcileAt ?? null,
@@ -669,6 +769,7 @@ export class SqliteDeviceSyncStore {
       this.database.prepare(`
         update device_observation_state
         set next_reconcile_at = ?,
+            local_connection_revision = ?,
             last_sync_error_at = ?,
             last_error_code = ?,
             last_error_message = ?,
@@ -676,6 +777,7 @@ export class SqliteDeviceSyncStore {
         where account_id = ?
       `).run(
         nextReconcileAt,
+        existing.localConnectionRevision + 1,
         patch.clearErrors ? null : existing.lastSyncErrorAt,
         patch.clearErrors ? null : existing.lastErrorCode,
         patch.clearErrors ? null : existing.lastErrorMessage,
@@ -692,36 +794,55 @@ export class SqliteDeviceSyncStore {
     tokens: ProviderAuthTokens & { accessTokenEncrypted: string; refreshTokenEncrypted?: string | null },
     disconnectGeneration?: number,
   ): StoredDeviceSyncAccount | null {
-    const now = toIsoTimestamp(new Date());
-    const result = this.database.prepare(`
-      update device_credential_state
-      set access_token_encrypted = ?,
-          refresh_token_encrypted = ?,
-          access_token_expires_at = ?,
-          updated_at = ?
-      where account_id = ?
-        and (? is null or exists (
-          select 1
-          from device_connection
-          where device_connection.id = device_credential_state.account_id
-            and device_connection.disconnect_generation = ?
-            and device_connection.status = 'active'
-        ))
-    `).run(
-      tokens.accessTokenEncrypted,
-      tokens.refreshTokenEncrypted ?? null,
-      tokens.accessTokenExpiresAt ?? null,
-      now,
-      accountId,
-      disconnectGeneration ?? null,
-      disconnectGeneration ?? null,
-    ) as { changes: number };
+    return withImmediateTransaction(this.database, () => {
+      const existing = this.getAccountById(accountId);
 
-    if ((result.changes ?? 0) === 0) {
-      return null;
-    }
+      if (!existing) {
+        return null;
+      }
 
-    return this.getAccountById(accountId)!;
+      const now = toIsoTimestamp(new Date());
+      const result = this.database.prepare(`
+        update device_credential_state
+        set access_token_encrypted = ?,
+            refresh_token_encrypted = ?,
+            access_token_expires_at = ?,
+            updated_at = ?
+        where account_id = ?
+          and (? is null or exists (
+            select 1
+            from device_connection
+            where device_connection.id = device_credential_state.account_id
+              and device_connection.disconnect_generation = ?
+              and device_connection.status = 'active'
+          ))
+      `).run(
+        tokens.accessTokenEncrypted,
+        tokens.refreshTokenEncrypted ?? null,
+        tokens.accessTokenExpiresAt ?? null,
+        now,
+        accountId,
+        disconnectGeneration ?? null,
+        disconnectGeneration ?? null,
+      ) as { changes: number };
+
+      if ((result.changes ?? 0) === 0) {
+        return null;
+      }
+
+      this.database.prepare(`
+        update device_observation_state
+        set local_token_revision = ?,
+            updated_at = ?
+        where account_id = ?
+      `).run(
+        existing.localTokenRevision + 1,
+        now,
+        accountId,
+      );
+
+      return this.getAccountById(accountId)!;
+    });
   }
 
   hydrateHostedAccount(input: HostedAccountHydrationInput): StoredDeviceSyncAccount | null {
@@ -735,23 +856,85 @@ export class SqliteDeviceSyncStore {
         return null;
       }
 
-      const shouldClearTokens = input.clearTokens === true
+      const connectionStateStale = isStaleHostedObservedUpdatedAt(
+        existing?.hostedObservedUpdatedAt ?? null,
+        input.hostedObservedUpdatedAt ?? null,
+      );
+      const connectionStateReplayed = isReplayedHostedObservedUpdatedAt({
+        localConnectionRevision: existing?.localConnectionRevision ?? 0,
+        nextObservedUpdatedAt: input.hostedObservedUpdatedAt ?? null,
+        hostedObservedConnectionRevision: existing?.hostedObservedConnectionRevision ?? 0,
+        previousObservedUpdatedAt: existing?.hostedObservedUpdatedAt ?? null,
+      });
+      const tokenStateStale = isStaleHostedObservedTokenVersion(
+        existing?.hostedObservedTokenVersion ?? null,
+        input.hostedObservedTokenVersion ?? null,
+      );
+      const tokenStateReplayed = isReplayedHostedObservedTokenVersion({
+        hostedObservedTokenRevision: existing?.hostedObservedTokenRevision ?? 0,
+        localTokenRevision: existing?.localTokenRevision ?? 0,
+        nextObservedTokenVersion: input.hostedObservedTokenVersion ?? null,
+        previousObservedTokenVersion: existing?.hostedObservedTokenVersion ?? null,
+      });
+      const shouldApplyConnectionState = existing === null || (!connectionStateStale && !connectionStateReplayed);
+      const requestedClearTokens = input.clearTokens === true
         || (input.connection.status === "disconnected" && input.tokens === undefined);
-      const rowUpdatedAt = latestIsoTimestamp(existing?.updatedAt ?? null, input.connection.updatedAt)
-        ?? input.connection.updatedAt;
+      const shouldApplyTokenBundle = input.tokens !== undefined && !tokenStateStale && !tokenStateReplayed;
+      const shouldApplyTokenObservation = !tokenStateStale
+        && !tokenStateReplayed
+        && input.hostedObservedTokenVersion !== null;
+      const shouldClearTokens = requestedClearTokens
+        && input.tokens === undefined
+        && !connectionStateStale
+        && !connectionStateReplayed
+        && !tokenStateStale
+        && !tokenStateReplayed;
+      const connectionUpdatedAt = shouldApplyConnectionState
+        ? input.connection.updatedAt
+        : existing?.updatedAt ?? input.connection.updatedAt;
+      const rowUpdatedAt = latestIsoTimestamp(existing?.updatedAt ?? null, connectionUpdatedAt)
+        ?? connectionUpdatedAt;
       const { accessTokenEncrypted, refreshTokenEncrypted, accessTokenExpiresAt } = resolveHydratedHostedAccountTokens({
         existing,
-        inputTokens: input.tokens,
+        inputTokens: shouldApplyTokenBundle ? input.tokens : undefined,
         shouldClearTokens,
       });
-      const hostedObservedUpdatedAt = input.hostedObservedUpdatedAt ?? existing?.hostedObservedUpdatedAt ?? null;
-      const hostedObservedTokenVersion = input.hostedObservedTokenVersion ?? existing?.hostedObservedTokenVersion ?? null;
-      const metadata = sanitizeStoredDeviceSyncMetadata(input.connection.metadata);
+      const hostedObservedUpdatedAt = shouldApplyConnectionState
+        ? input.hostedObservedUpdatedAt ?? existing?.hostedObservedUpdatedAt ?? null
+        : existing?.hostedObservedUpdatedAt ?? null;
+      const hostedObservedConnectionRevision = shouldApplyConnectionState
+        ? existing?.localConnectionRevision ?? 0
+        : existing?.hostedObservedConnectionRevision ?? 0;
+      const hostedObservedTokenVersion = shouldClearTokens
+        ? null
+        : shouldApplyTokenObservation
+          ? input.hostedObservedTokenVersion
+          : existing?.hostedObservedTokenVersion ?? null;
+      const hostedObservedTokenRevision = shouldClearTokens || shouldApplyTokenObservation
+        ? existing?.localTokenRevision ?? 0
+        : existing?.hostedObservedTokenRevision ?? 0;
+      const displayName = shouldApplyConnectionState
+        ? input.connection.displayName
+        : existing?.displayName ?? input.connection.displayName;
+      const status = shouldApplyConnectionState
+        ? input.connection.status
+        : existing?.status ?? input.connection.status;
+      const scopes = shouldApplyConnectionState
+        ? input.connection.scopes
+        : existing?.scopes ?? input.connection.scopes;
+      const metadata = sanitizeStoredDeviceSyncMetadata(
+        shouldApplyConnectionState
+          ? input.connection.metadata
+          : existing?.metadata ?? input.connection.metadata,
+      );
+      const connectedAt = shouldApplyConnectionState
+        ? input.connection.connectedAt
+        : existing?.connectedAt ?? input.connection.connectedAt;
       const disconnectGeneration = existing
-        ? input.connection.status === "disconnected" && existing.status !== "disconnected"
+        ? shouldApplyConnectionState && status === "disconnected" && existing.status !== "disconnected"
           ? existing.disconnectGeneration + 1
           : existing.disconnectGeneration
-        : input.connection.status === "disconnected"
+        : status === "disconnected"
           ? 1
           : 0;
 
@@ -767,12 +950,12 @@ export class SqliteDeviceSyncStore {
               updated_at = ?
           where id = ?
         `).run(
-          input.connection.displayName,
-          input.connection.status,
-          stringifyJson(input.connection.scopes),
+          displayName,
+          status,
+          stringifyJson(scopes),
           disconnectGeneration,
           stringifyJson(metadata),
-          input.connection.connectedAt,
+          connectedAt,
           rowUpdatedAt,
           existing.id,
         );
@@ -795,7 +978,9 @@ export class SqliteDeviceSyncStore {
         this.database.prepare(`
           update device_observation_state
           set hosted_observed_updated_at = ?,
+              hosted_observed_connection_revision = ?,
               hosted_observed_token_version = ?,
+              hosted_observed_token_revision = ?,
               last_webhook_at = ?,
               last_sync_started_at = ?,
               last_sync_completed_at = ?,
@@ -807,7 +992,9 @@ export class SqliteDeviceSyncStore {
           where account_id = ?
         `).run(
           hostedObservedUpdatedAt,
+          hostedObservedConnectionRevision,
           hostedObservedTokenVersion,
+          hostedObservedTokenRevision,
           input.localState.lastWebhookAt,
           input.localState.lastSyncStartedAt,
           input.localState.lastSyncCompletedAt,
@@ -841,12 +1028,12 @@ export class SqliteDeviceSyncStore {
         id,
         input.connection.provider,
         input.connection.externalAccountId,
-        input.connection.displayName,
-        input.connection.status,
-        stringifyJson(input.connection.scopes),
+        displayName,
+        status,
+        stringifyJson(scopes),
         disconnectGeneration,
         stringifyJson(metadata),
-        input.connection.connectedAt,
+        connectedAt,
         input.connection.updatedAt,
         rowUpdatedAt,
       );
@@ -873,7 +1060,9 @@ export class SqliteDeviceSyncStore {
         insert into device_observation_state (
           account_id,
           hosted_observed_updated_at,
+          hosted_observed_connection_revision,
           hosted_observed_token_version,
+          hosted_observed_token_revision,
           last_webhook_at,
           last_sync_started_at,
           last_sync_completed_at,
@@ -883,11 +1072,13 @@ export class SqliteDeviceSyncStore {
           next_reconcile_at,
           created_at,
           updated_at
-        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         id,
         hostedObservedUpdatedAt,
+        hostedObservedConnectionRevision,
         hostedObservedTokenVersion,
+        hostedObservedTokenRevision,
         input.localState.lastWebhookAt,
         input.localState.lastSyncStartedAt,
         input.localState.lastSyncCompletedAt,
@@ -928,6 +1119,8 @@ export class SqliteDeviceSyncStore {
             last_error_code = null,
             last_error_message = null,
             next_reconcile_at = null,
+            local_connection_revision = local_connection_revision + 1,
+            local_token_revision = local_token_revision + 1,
             updated_at = ?
         where account_id = ?
       `).run(now, accountId);
@@ -998,11 +1191,13 @@ export class SqliteDeviceSyncStore {
             last_sync_error_at = null,
             last_error_code = null,
             last_error_message = null,
+            local_connection_revision = ?,
             updated_at = ?
         where account_id = ?
       `).run(
         nextReconcileAt,
         now,
+        existing.localConnectionRevision + 1,
         now,
         accountId,
       );
@@ -1031,6 +1226,7 @@ export class SqliteDeviceSyncStore {
         set last_sync_error_at = ?,
             last_error_code = ?,
             last_error_message = ?,
+            local_connection_revision = local_connection_revision + 1,
             updated_at = ?
         where account_id = ?
       `).run(now, code, message, now, accountId);

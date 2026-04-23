@@ -158,6 +158,7 @@ export class PrismaDeviceSyncControlPlaneStore
   }
 
   async persistStoredConnectionTokenBundle(input: {
+    clearExternalAccountId?: boolean;
     connectionId: string;
     externalAccountId?: string | null;
     provider: string;

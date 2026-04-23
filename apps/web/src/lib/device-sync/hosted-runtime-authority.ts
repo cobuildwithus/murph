@@ -46,8 +46,15 @@ export async function readHostedDeviceSyncRuntimeState(input: {
         input.trustedUserId,
         record.id,
       );
+      const durableConnection = storedAccount
+        ? null
+        : await controlPlane.store.getConnectionForUser(input.trustedUserId, record.id);
 
-      return buildHostedRuntimeConnectionSnapshot(record, storedAccount);
+      return buildHostedRuntimeConnectionSnapshot(
+        record,
+        storedAccount,
+        storedAccount?.externalAccountId ?? durableConnection?.externalAccountId ?? null,
+      );
     }),
   );
 
@@ -101,7 +108,16 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
           update.connectionId,
           tx,
         );
-        const baseline = buildHostedRuntimeConnectionSnapshot(record, storedAccount);
+        const durableConnection = storedAccount
+          ? null
+          : await controlPlane.store.getConnectionForUser(input.trustedUserId, update.connectionId);
+        const durableExternalAccountId =
+          storedAccount?.externalAccountId ?? durableConnection?.externalAccountId ?? null;
+        const baseline = buildHostedRuntimeConnectionSnapshot(
+          record,
+          storedAccount,
+          durableExternalAccountId,
+        );
         const disconnectClearsTokens = update.connection?.status === "disconnected";
         const stateMutationRequested = update.connection !== undefined || update.localState !== undefined;
         const tokenMutationRequested = update.tokenBundle !== undefined || disconnectClearsTokens;
@@ -184,7 +200,7 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
         if (!versionMismatch && tokenMutationRequested) {
           await controlPlane.store.persistStoredConnectionTokenBundle({
             connectionId: update.connectionId,
-            externalAccountId: storedAccount?.externalAccountId ?? null,
+            externalAccountId: storedAccount?.externalAccountId,
             provider: record.provider,
             tokenBundle: tokenBundleToPersist ?? null,
             tx,
@@ -208,7 +224,11 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
 
         return {
           connection: refreshedRecord
-            ? buildHostedRuntimeConnectionSnapshot(refreshedRecord, refreshedStoredAccount).connection
+            ? buildHostedRuntimeConnectionSnapshot(
+                refreshedRecord,
+                refreshedStoredAccount,
+                durableExternalAccountId,
+              ).connection
             : null,
           connectionId: update.connectionId,
           status: "updated",
@@ -228,11 +248,15 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
 function buildHostedRuntimeConnectionSnapshot(
   record: HostedConnectionRecord,
   storedAccount: HostedStoredDeviceSyncAccount | null,
+  fallbackExternalAccountId: string | null = null,
 ): HostedExecutionDeviceSyncRuntimeConnectionSnapshot {
   const publicConnection = storedAccount
     ? storedAccount
     : buildHostedPublicDeviceSyncAccount({
         record: mapHostedConnectionRecord(record),
+        fallback: {
+          externalAccountId: fallbackExternalAccountId,
+        },
       });
 
   return {
