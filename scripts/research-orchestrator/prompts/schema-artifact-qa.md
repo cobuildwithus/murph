@@ -6,7 +6,8 @@ Goal:
 Check whether the package can land in Health Commons safely.
 
 Review:
-- protocol package draft from: {{PROTOCOL_PACKAGE_DRAFT_SOURCE}}
+- protocol package draft from:
+{{PROTOCOL_PACKAGE_DRAFT_SOURCE}}
 - artifact manifest draft from: {{ARTIFACT_MANIFEST_SOURCE}}
 - Markdown frontmatter shape
 - source page metadata

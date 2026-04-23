@@ -11,6 +11,7 @@ export const repoRoot = path.resolve(scriptDir, "..");
 export const promptTemplateDir = path.join(orchestratorDir, "prompts");
 export const researchOutputRoot = path.join(repoRoot, "output-packages", "research");
 export const SOURCE_LEDGER_REDUCER_LABEL = "11-source-ledger-reducer";
+export const PAGE_BUILDER_LABEL = "30-page-builder";
 
 export const RESEARCH_REFERENCE_FILE_PATHS = [
   "agent-docs/product-specs/health-commons.md",
@@ -214,9 +215,37 @@ export function buildDiscoveryStepLabel(index, fileId) {
   return `${ordinal}-discovery-${fileId}`;
 }
 
+export function buildPageBuilderRequiredArtifacts(protocolSlug, familySlug) {
+  return [
+    {
+      logicalName: "PROTOCOL_PAGE_DRAFT",
+      fileName: `${protocolSlug}.md`,
+      relativePath: `downloads/${PAGE_BUILDER_LABEL}/downloads/${protocolSlug}.md`,
+    },
+    {
+      logicalName: "FAMILY_PAGE_DRAFT",
+      fileName: `${familySlug}.md`,
+      relativePath: `downloads/${PAGE_BUILDER_LABEL}/downloads/${familySlug}.md`,
+    },
+    {
+      logicalName: "ARTIFACT_MANIFEST_DRAFT",
+      fileName: "research-artifacts.json",
+      relativePath: `downloads/${PAGE_BUILDER_LABEL}/downloads/research-artifacts.json`,
+    },
+    {
+      logicalName: "PACKAGE_DRAFT_ARCHIVE",
+      fileName: `${familySlug}-package-draft.zip`,
+      relativePath: `downloads/${PAGE_BUILDER_LABEL}/downloads/${familySlug}-package-draft.zip`,
+    },
+  ];
+}
+
 export function buildResearchArtifactContracts({
   discoveryShards = [],
   includeSourceLedgerReducer = false,
+  includePageBuilder = false,
+  protocolSlug = "",
+  familySlug = "",
 } = {}) {
   const contracts = {};
 
@@ -247,6 +276,16 @@ export function buildResearchArtifactContracts({
           relativePath: `downloads/${SOURCE_LEDGER_REDUCER_LABEL}/source_extraction_batches_v1.json`,
         },
       ],
+    };
+  }
+
+  if (includePageBuilder) {
+    if (!protocolSlug || !familySlug) {
+      throw new Error("includePageBuilder requires protocolSlug and familySlug.");
+    }
+
+    contracts[PAGE_BUILDER_LABEL] = {
+      requiredArtifacts: buildPageBuilderRequiredArtifacts(protocolSlug, familySlug),
     };
   }
 

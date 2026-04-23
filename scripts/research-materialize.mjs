@@ -13,6 +13,7 @@ import {
   buildProtocolMetadata,
   buildSharedPromptHeader,
   formatBulletList,
+  PAGE_BUILDER_LABEL,
   readWorkflow,
   renderTemplate,
   repoRoot,
@@ -489,6 +490,18 @@ function buildLaterTemplateSpecs(commonPromptTokens, sharedHeader, sectionSeams)
   return templateSpecs;
 }
 
+function buildPageBuilderDraftSourceList(outDirRelative, protocolSlug, familySlug) {
+  return formatBulletList([
+    `${outDirRelative}/downloads/${PAGE_BUILDER_LABEL}/downloads/${protocolSlug}.md`,
+    `${outDirRelative}/downloads/${PAGE_BUILDER_LABEL}/downloads/${familySlug}.md`,
+    `${outDirRelative}/downloads/${PAGE_BUILDER_LABEL}/downloads/${familySlug}-package-draft.zip`,
+  ]);
+}
+
+function buildPageBuilderArtifactManifestSource(outDirRelative) {
+  return `${outDirRelative}/downloads/${PAGE_BUILDER_LABEL}/downloads/research-artifacts.json`;
+}
+
 function buildRunbook({
   outDirRelative,
   manifest,
@@ -634,6 +647,13 @@ function main(argv) {
   }
 
   const outDirRelative = toPosixRelative(workspaceDir);
+  const pageBuilderDraftSource = buildPageBuilderDraftSourceList(
+    outDirRelative,
+    materializedSpec.protocolSlug,
+    materializedSpec.familySlug,
+  );
+  const pageBuilderArtifactManifestSource =
+    buildPageBuilderArtifactManifestSource(outDirRelative);
   const updatedWorkflow = {
     ...workflow,
     schemaVersion: ORCHESTRATOR_SCHEMA_VERSION,
@@ -654,6 +674,9 @@ function main(argv) {
     artifactContracts: buildResearchArtifactContracts({
       discoveryShards: charterArtifacts.discoveryShards,
       includeSourceLedgerReducer: true,
+      includePageBuilder: true,
+      protocolSlug: materializedSpec.protocolSlug,
+      familySlug: materializedSpec.familySlug,
     }),
     discoveryShards: charterArtifacts.discoveryShards.map(({ fileId, ...rest }) => rest),
     sectionSeams: charterArtifacts.sectionSeams.map(({ fileId, ...rest }) => rest),
@@ -676,6 +699,45 @@ function main(argv) {
       templateOnlyPrompts,
     }),
   );
+
+  // Patch the late-stage templates with the artifact-first page-builder sources so
+  // downstream manual or scripted materialization uses the stable downloads path.
+  const lateStageTemplatePatches = [
+    {
+      relativePath: "prompts/31-evidence-qa.template.md",
+      replacements: {
+        PROTOCOL_PACKAGE_DRAFT_SOURCE: pageBuilderDraftSource,
+      },
+    },
+    {
+      relativePath: "prompts/32-safety-qa.template.md",
+      replacements: {
+        PROTOCOL_PACKAGE_DRAFT_SOURCE: pageBuilderDraftSource,
+      },
+    },
+    {
+      relativePath: "prompts/33-schema-artifact-qa.template.md",
+      replacements: {
+        PROTOCOL_PACKAGE_DRAFT_SOURCE: pageBuilderDraftSource,
+        ARTIFACT_MANIFEST_SOURCE: pageBuilderArtifactManifestSource,
+      },
+    },
+    {
+      relativePath: "prompts/34-final-landing-reducer.template.md",
+      replacements: {
+        PROTOCOL_PACKAGE_DRAFT_SOURCE: pageBuilderDraftSource,
+      },
+    },
+  ];
+
+  for (const { relativePath, replacements } of lateStageTemplatePatches) {
+    const absolutePath = path.join(workspaceDir, relativePath);
+    let content = readFileSync(absolutePath, "utf8");
+    for (const [token, value] of Object.entries(replacements)) {
+      content = content.replaceAll(`TODO_${token}`, value);
+    }
+    writeTextFile(absolutePath, content);
+  }
 
   console.log(`Materialized post-charter prompts at ${outDirRelative}`);
   if (runnableCommands.length > 1) {

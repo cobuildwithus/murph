@@ -398,6 +398,28 @@ describe("research init scaffold", () => {
           relativePath: "downloads/11-source-ledger-reducer/source_extraction_batches_v1.json",
         },
       ]);
+      expect(materializedWorkflow.artifactContracts["30-page-builder"]?.requiredArtifacts).toEqual([
+        {
+          fileName: "cold-plunge.md",
+          logicalName: "PROTOCOL_PAGE_DRAFT",
+          relativePath: "downloads/30-page-builder/downloads/cold-plunge.md",
+        },
+        {
+          fileName: "cold-water-immersion.md",
+          logicalName: "FAMILY_PAGE_DRAFT",
+          relativePath: "downloads/30-page-builder/downloads/cold-water-immersion.md",
+        },
+        {
+          fileName: "research-artifacts.json",
+          logicalName: "ARTIFACT_MANIFEST_DRAFT",
+          relativePath: "downloads/30-page-builder/downloads/research-artifacts.json",
+        },
+        {
+          fileName: "cold-water-immersion-package-draft.zip",
+          logicalName: "PACKAGE_DRAFT_ARCHIVE",
+          relativePath: "downloads/30-page-builder/downloads/cold-water-immersion-package-draft.zip",
+        },
+      ]);
       expect(materializedWorkflow.discoveryShards).toHaveLength(2);
       expect(materializedWorkflow.discoveryShards[0]?.id).toBe("direct-cwi");
       expect(materializedWorkflow.sectionSeams).toHaveLength(2);
@@ -438,6 +460,25 @@ describe("research init scaffold", () => {
       );
       expect(pageBuilderPrompt).toContain("TODO_CHARTER_SOURCE");
       expect(pageBuilderPrompt).toContain("TODO_SECTION_SYNTHESIS_SOURCE");
+
+      const evidenceQaPrompt = readFileSync(
+        path.join(outDir, "prompts", "31-evidence-qa.template.md"),
+        "utf8",
+      );
+      expect(evidenceQaPrompt).toContain(
+        `- ${path.relative(repoRoot, outDir).split(path.sep).join(path.posix.sep)}/downloads/30-page-builder/downloads/cold-plunge.md`,
+      );
+      expect(evidenceQaPrompt).toContain(
+        `- ${path.relative(repoRoot, outDir).split(path.sep).join(path.posix.sep)}/downloads/30-page-builder/downloads/cold-water-immersion-package-draft.zip`,
+      );
+
+      const schemaQaPrompt = readFileSync(
+        path.join(outDir, "prompts", "33-schema-artifact-qa.template.md"),
+        "utf8",
+      );
+      expect(schemaQaPrompt).toContain(
+        `${path.relative(repoRoot, outDir).split(path.sep).join(path.posix.sep)}/downloads/30-page-builder/downloads/research-artifacts.json`,
+      );
 
       const materializedReadme = readFileSync(path.join(outDir, "README.md"), "utf8");
       expect(materializedReadme).toContain("materialized from the charter response");
@@ -928,6 +969,119 @@ exit 0
       expect(artifactStatus.normalizedArtifacts.map((entry) => entry.logicalName)).toEqual([
         "CANONICAL_SOURCE_LEDGER_V1",
         "SOURCE_EXTRACTION_BATCHES_V1",
+      ]);
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("accepts a page-builder seam from downloaded markdown and zip artifacts", () => {
+    mkdirSync(researchOutputRoot, { recursive: true });
+    const tempRoot = mkdtempSync(path.join(researchOutputRoot, "tmp-research-helper-page-builder-"));
+    const outDir = path.join(tempRoot, "helper-page-builder-success");
+
+    try {
+      expect(runResearchInit("cold plunge", "--out-dir", outDir).status).toBe(0);
+      writeFileSync(path.join(outDir, "responses", "01-charter.md"), sampleCharterResponse, "utf8");
+      expect(runResearchMaterialize("--workspace", outDir).status).toBe(0);
+
+      const stubBinDir = path.join(tempRoot, "bin");
+      mkdirSync(stubBinDir, { recursive: true });
+      const stubPnpmPath = path.join(stubBinDir, "pnpm");
+      writeFileSync(
+        stubPnpmPath,
+        `#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "$#" -ge 4 && "$1" == "exec" && "$2" == "cobuild-review-gpt" && "$3" == "thread" && "$4" == "wake" ]]; then
+  output_dir=""
+  chat_url=""
+  while [[ "$#" -gt 0 ]]; do
+    case "$1" in
+      --output-dir)
+        output_dir="$2"
+        shift 2
+        ;;
+      --chat-url)
+        chat_url="$2"
+        shift 2
+        ;;
+      *)
+        shift
+        ;;
+    esac
+  done
+
+  mkdir -p "$output_dir/downloads"
+  printf '%s\\n' '# cold plunge protocol draft' >"$output_dir/downloads/cold-plunge.md"
+  printf '%s\\n' '# cold water immersion family draft' >"$output_dir/downloads/cold-water-immersion.md"
+  cat >"$output_dir/downloads/research-artifacts.json" <<'JSON'
+{"artifacts":[]}
+JSON
+  printf '%s\\n' 'PK' >"$output_dir/downloads/cold-water-immersion-package-draft.zip"
+  cat >"$output_dir/thread.json" <<JSON
+{"chatUrl":"$chat_url","assistantSnapshots":[{"text":"Attached the package draft files."}]}
+JSON
+  cat >"$output_dir/status.json" <<JSON
+{"chatUrl":"$chat_url","downloadedArtifacts":["$output_dir/downloads/cold-plunge.md","$output_dir/downloads/cold-water-immersion.md","$output_dir/downloads/research-artifacts.json","$output_dir/downloads/cold-water-immersion-package-draft.zip"]}
+JSON
+  exit 0
+fi
+
+printf '%s\\n' '{"status":"sent"}'
+printf '%s\\n' 'ChatGPT conversation URL: https://chatgpt.com/c/test-thread-678' >&2
+exit 0
+`,
+        "utf8",
+      );
+      chmodSync(stubPnpmPath, 0o755);
+
+      const helperLabel = "30-page-builder";
+      const helperScriptPath = path.join(outDir, "commands", "_run-review-gpt.sh");
+      const promptPath = path.join(outDir, "prompts", `${helperLabel}.template.md`);
+      const responsePath = path.join(outDir, "responses", `${helperLabel}.md`);
+      const artifactStatusPath = path.join(
+        outDir,
+        "downloads",
+        helperLabel,
+        "artifact-contract-status.json",
+      );
+
+      const helperResult = runGeneratedReviewGptHelper(
+        helperScriptPath,
+        helperLabel,
+        promptPath,
+        responsePath,
+        {
+          ...process.env,
+          PATH: `${stubBinDir}${path.delimiter}${process.env.PATH ?? ""}`,
+        },
+      );
+
+      expect(helperResult.status).toBe(0);
+      expect(helperResult.stderr).toBe("");
+      expect(existsSync(path.join(outDir, "downloads", helperLabel, "downloads", "cold-plunge.md"))).toBe(true);
+      expect(existsSync(path.join(outDir, "downloads", helperLabel, "downloads", "cold-water-immersion.md"))).toBe(true);
+      expect(
+        existsSync(path.join(outDir, "downloads", helperLabel, "downloads", "research-artifacts.json")),
+      ).toBe(true);
+      expect(
+        existsSync(
+          path.join(outDir, "downloads", helperLabel, "downloads", "cold-water-immersion-package-draft.zip"),
+        ),
+      ).toBe(true);
+      expect(readFileSync(responsePath, "utf8")).toContain("Attached the package draft files.");
+
+      const artifactStatus = JSON.parse(readFileSync(artifactStatusPath, "utf8")) as {
+        missingArtifacts: Array<unknown>;
+        normalizedArtifacts: Array<{ logicalName: string }>;
+      };
+      expect(artifactStatus.missingArtifacts).toEqual([]);
+      expect(artifactStatus.normalizedArtifacts.map((entry) => entry.logicalName)).toEqual([
+        "PROTOCOL_PAGE_DRAFT",
+        "FAMILY_PAGE_DRAFT",
+        "ARTIFACT_MANIFEST_DRAFT",
+        "PACKAGE_DRAFT_ARCHIVE",
       ]);
     } finally {
       rmSync(tempRoot, { recursive: true, force: true });
