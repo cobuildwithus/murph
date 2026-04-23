@@ -2,7 +2,6 @@ import path from "node:path";
 
 import {
   buildLinqMessageText,
-  minimizeLinqWebhookEvent,
   parseCanonicalLinqMessageReceivedEvent,
   type LinqMediaPart,
   type LinqMessagePart,
@@ -19,6 +18,8 @@ import {
   relayAbort,
   toIsoTimestamp,
 } from "../../shared-runtime.ts";
+
+const LINQ_CAPTURE_RAW_SCHEMA = "murph.linq-capture.v1";
 
 export interface LinqAttachmentDownloadDriver {
   downloadUrl(url: string, signal?: AbortSignal): Promise<Uint8Array | null>;
@@ -163,7 +164,16 @@ export async function toLinqChatMessage(input: {
       signal,
       attachmentDownloadTimeoutMs,
     ),
-    raw: minimizeLinqWebhookEvent(event),
+    raw: buildLinqCaptureRawMetadata({
+      chatId,
+      eventId: normalizeTextValue(event.event_id),
+      isFromMe: data.is_from_me,
+      messageId,
+      parts: data.message.parts,
+      replyToMessageId: normalizeTextValue(data.message.reply_to?.message_id ?? null),
+      replyToPartIndex: data.message.reply_to?.part_index ?? null,
+      service: normalizeTextValue(data.service ?? null),
+    }),
   };
 }
 
@@ -195,22 +205,6 @@ async function normalizeLinqMessageReceivedEvent(input: {
       : message,
     source: input.source,
   });
-}
-
-function isCanonicalLinqWebhookEvent(value: unknown): value is LinqWebhookEvent {
-  if (typeof value !== "object" || value === null) {
-    return false;
-  }
-
-  const record = value as Record<string, unknown>;
-  return (
-    typeof record.api_version === "string"
-    && typeof record.created_at === "string"
-    && typeof record.event_id === "string"
-    && typeof record.event_type === "string"
-    && typeof record.data === "object"
-    && record.data !== null
-  );
 }
 
 async function toHostedLinqChatMessage(input: {
@@ -274,7 +268,15 @@ async function toHostedLinqChatMessage(input: {
       signal,
       attachmentDownloadTimeoutMs,
     ),
-    raw: buildHostedLinqRaw(message, parts),
+    raw: buildLinqCaptureRawMetadata({
+      chatId,
+      isFromMe: message.isFromMe,
+      messageId,
+      parts,
+      replyToMessageId: normalizeTextValue(message.replyToMessageId ?? null),
+      replyToPartIndex: message.replyToPartIndex ?? null,
+      service: normalizeTextValue(message.service ?? null),
+    }),
   };
 }
 
@@ -435,24 +437,87 @@ function buildHostedLinqThreadTitle(
   return service ? (from ? `${from} (${service})` : service) : from;
 }
 
-function buildHostedLinqRaw(
-  message: NormalizeHostedLinqConversationMessageInput["linqMessage"],
-  parts: LinqMessagePart[],
-): Record<string, unknown> {
-  return {
-    chatId: message.chatId,
-    from: message.from,
-    isFromMe: message.isFromMe,
-    messageId: message.messageId,
-    parts,
-    ...(message.replyToMessageId === undefined
-      ? {}
-      : { replyToMessageId: message.replyToMessageId }),
-    ...(message.replyToPartIndex === undefined
-      ? {}
-      : { replyToPartIndex: message.replyToPartIndex }),
-    ...(message.service === undefined ? {} : { service: message.service }),
+function buildLinqCaptureRawMetadata(input: {
+  chatId: string;
+  eventId?: string | null;
+  isFromMe: boolean;
+  messageId: string;
+  parts: ReadonlyArray<LinqMessagePart>;
+  replyToMessageId?: string | null;
+  replyToPartIndex?: number | null;
+  service?: string | null;
+}): Record<string, unknown> {
+  let textPartCount = 0;
+  let linkPartCount = 0;
+  let mediaPartCount = 0;
+  let voiceMemoPartCount = 0;
+  const attachments: Array<Record<string, unknown>> = [];
+
+  for (const part of input.parts) {
+    if (part.type === "text") {
+      textPartCount += 1;
+      continue;
+    }
+
+    if (part.type === "link") {
+      linkPartCount += 1;
+      continue;
+    }
+
+    if (part.type === "media") {
+      mediaPartCount += 1;
+    } else {
+      voiceMemoPartCount += 1;
+    }
+
+    const attachment: Record<string, unknown> = {
+      type: part.type,
+    };
+    const attachmentId = normalizeTextValue(part.attachment_id ?? null);
+    const mimeType = normalizeTextValue(part.mime_type ?? null);
+
+    if (attachmentId) {
+      attachment.attachment_id = attachmentId;
+    }
+    if (mimeType) {
+      attachment.mime_type = mimeType;
+    }
+    if (typeof part.size === "number" && Number.isFinite(part.size) && part.size >= 0) {
+      attachment.size = Math.floor(part.size);
+    }
+
+    attachments.push(attachment);
+  }
+
+  const raw: Record<string, unknown> = {
+    schema: LINQ_CAPTURE_RAW_SCHEMA,
+    event_type: "message.received",
+    chat_id: input.chatId,
+    message_id: input.messageId,
+    is_from_me: input.isFromMe,
+    text_part_count: textPartCount,
+    link_part_count: linkPartCount,
+    media_part_count: mediaPartCount,
+    voice_memo_part_count: voiceMemoPartCount,
   };
+
+  if (input.eventId) {
+    raw.event_id = input.eventId;
+  }
+  if (input.service) {
+    raw.service = input.service;
+  }
+  if (input.replyToMessageId) {
+    raw.reply_to_message_id = input.replyToMessageId;
+  }
+  if (typeof input.replyToPartIndex === "number" && Number.isSafeInteger(input.replyToPartIndex)) {
+    raw.reply_to_part_index = input.replyToPartIndex;
+  }
+  if (attachments.length > 0) {
+    raw.attachments = attachments;
+  }
+
+  return raw;
 }
 
 function inferAttachmentFileName(part: LinqMediaPart): string | null {
