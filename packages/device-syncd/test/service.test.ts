@@ -2266,14 +2266,14 @@ test("sqlite store still rejects newer schema versions even when stale legacy ta
         id text primary key
       );
     `);
-    writeSqliteRuntimeUserVersion(database, 2);
+    writeSqliteRuntimeUserVersion(database, 99);
   } finally {
     database.close();
   }
 
   assert.throws(
     () => new SqliteDeviceSyncStore(databasePath),
-    /device sync runtime database schema version 2 is newer than supported version 1/,
+    /device sync runtime database schema version 99 is newer than supported version 1/,
   );
 });
 
