@@ -496,6 +496,13 @@ export const assistantTranscriptEntrySchema = z.object({
   createdAt: isoTimestampSchema,
 })
 
+const assistantChannelCleanupMessageSchema = z
+  .object({
+    messageId: z.string().min(1),
+    target: z.string().min(1),
+  })
+  .strict()
+
 export const assistantChannelDeliverySchema = z.object({
   channel: z.string().min(1),
   idempotencyKey: z.string().min(1).nullable().default(null),
@@ -505,6 +512,8 @@ export const assistantChannelDeliverySchema = z.object({
   messageLength: z.number().int().nonnegative(),
   providerMessageId: z.string().min(1).nullable().default(null),
   providerMessageIds: z.array(z.string().min(1)).min(1).optional(),
+  cleanupMessages: z.array(assistantChannelCleanupMessageSchema).min(1).optional(),
+  cleanupTargetAliases: z.array(z.string().min(1)).min(1).optional(),
   providerThreadId: z.string().min(1).nullable().default(null),
 })
 

@@ -116,6 +116,8 @@ export interface HostedAssistantDeliveryOutcome {
   effectId: string;
   journalMethod: "DELETE" | "GET" | "PUT" | null;
   journalStatus: string | null;
+  cleanupMessages?: Array<{ messageId: string; target: string }>;
+  cleanupTargetAliases?: string[];
   providerMessageId: string | null;
   providerMessageIds?: string[];
   providerThreadId: string | null;

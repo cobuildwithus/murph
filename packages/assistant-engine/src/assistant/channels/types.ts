@@ -49,6 +49,8 @@ export interface AssistantChannelDependencies {
     target: string
   }) => Promise<
     | {
+        cleanupMessages?: Array<{ messageId: string; target: string }> | null
+        cleanupTargetAliases?: string[] | null
         providerMessageId?: string | null
         providerMessageIds?: string[] | null
         providerThreadId?: string | null

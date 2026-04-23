@@ -721,6 +721,10 @@ function buildHostedAssistantDeliveryOutcome(input: {
   effect: HostedAssistantDeliveryEffect;
   retryable: boolean;
 }): HostedAssistantDeliveryOutcome {
+  const cleanupMessages = readAssistantDeliveryCleanupMessages(input.delivery ?? null);
+  const cleanupTargetAliases = readAssistantDeliveryCleanupTargetAliases(
+    input.delivery ?? null,
+  );
   return {
     deliveryChannel: input.delivery?.channel ?? null,
     deliveryErrorCode: input.deliveryErrorCode ?? null,
@@ -730,6 +734,16 @@ function buildHostedAssistantDeliveryOutcome(input: {
     effectId: input.effect.effectId,
     journalMethod: null,
     journalStatus: null,
+    ...(cleanupMessages && cleanupMessages.length > 0
+      ? {
+          cleanupMessages: cleanupMessages.map((cleanupMessage) => ({ ...cleanupMessage })),
+        }
+      : {}),
+    ...(cleanupTargetAliases && cleanupTargetAliases.length > 0
+      ? {
+          cleanupTargetAliases: [...cleanupTargetAliases],
+        }
+      : {}),
     providerMessageId: input.delivery?.providerMessageId ?? null,
     ...(input.delivery?.providerMessageIds && input.delivery.providerMessageIds.length > 0
       ? {
@@ -741,6 +755,50 @@ function buildHostedAssistantDeliveryOutcome(input: {
     target: input.delivery?.target ?? null,
     targetKind: input.delivery?.targetKind ?? null,
   };
+}
+
+function readAssistantDeliveryCleanupMessages(
+  delivery: AssistantChannelDelivery | null,
+): Array<{ messageId: string; target: string }> | null {
+  if (!delivery || !("cleanupMessages" in delivery) || !Array.isArray(delivery.cleanupMessages)) {
+    return null;
+  }
+
+  const cleanupMessages = Array.from(
+    new Map(
+      delivery.cleanupMessages.flatMap((entry) => {
+        if (!entry || typeof entry !== "object") {
+          return [];
+        }
+
+        const messageId =
+          "messageId" in entry && typeof entry.messageId === "string"
+            ? entry.messageId.trim()
+            : "";
+        const target =
+          "target" in entry && typeof entry.target === "string"
+            ? entry.target.trim()
+            : "";
+        if (messageId.length === 0 || target.length === 0) {
+          return [];
+        }
+
+        return [[`${target}\u0000${messageId}`, { messageId, target }] as const];
+      }),
+    ).values(),
+  );
+
+  return cleanupMessages.length > 0 ? cleanupMessages : null;
+}
+
+function readAssistantDeliveryCleanupTargetAliases(
+  delivery: AssistantChannelDelivery | null,
+): readonly string[] | null {
+  if (!delivery || !("cleanupTargetAliases" in delivery) || !Array.isArray(delivery.cleanupTargetAliases)) {
+    return null;
+  }
+
+  return delivery.cleanupTargetAliases;
 }
 
 function normalizeHostedAssistantDeliveryMirrorFailure(input: {

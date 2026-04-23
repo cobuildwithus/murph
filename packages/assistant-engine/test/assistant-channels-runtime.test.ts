@@ -188,6 +188,11 @@ describe('assistant channels runtime seam', () => {
 
     await vi.runAllTimersAsync()
     await expect(deliveryPromise).resolves.toEqual({
+      cleanupMessages: [
+        { messageId: '1001', target: '456' },
+        { messageId: '1002', target: '456' },
+      ],
+      cleanupTargetAliases: ['123'],
       providerMessageId: '1002',
       providerMessageIds: ['1001', '1002'],
       target: '456',
@@ -246,6 +251,7 @@ describe('assistant channels runtime seam', () => {
         },
       ),
     ).rejects.toMatchObject({
+      cleanupMessages: [{ messageId: '1001', target: '123' }],
       code: 'ASSISTANT_TELEGRAM_DELIVERY_AMBIGUOUS',
       deliveryMayHaveSucceeded: true,
       providerMessageId: '1001',
@@ -301,6 +307,8 @@ describe('assistant channels runtime seam', () => {
         },
       ),
     ).rejects.toMatchObject({
+      cleanupMessages: [{ messageId: '1001', target: '456' }],
+      cleanupTargetAliases: ['123'],
       code: 'ASSISTANT_TELEGRAM_DELIVERY_AMBIGUOUS',
       deliveryMayHaveSucceeded: true,
       providerMessageId: '1001',
@@ -321,6 +329,69 @@ describe('assistant channels runtime seam', () => {
     expect(readJsonBody(fetchImplementation.mock.calls[3]?.[1]?.body)).toMatchObject({
       chat_id: '456',
       message_ids: [1001],
+    })
+  })
+
+  it('preserves per-target cleanup message ids when a later chunk migrates the chat', async () => {
+    const fetchImplementation = createQueuedFetch([
+      createTelegramResponse(200, {
+        ok: true,
+        result: {
+          message_id: 1001,
+        },
+      }),
+      createTelegramResponse(400, {
+        description: 'group chat migrated',
+        error_code: 400,
+        parameters: {
+          migrate_to_chat_id: '456',
+        },
+      }),
+      createTelegramResponse(200, {
+        ok: true,
+        result: {
+          message_id: '1002',
+        },
+      }),
+    ])
+
+    await expect(
+      sendTelegramMessage(
+        {
+          message: `${'a'.repeat(4096)}b`,
+          target: '123',
+        },
+        {
+          env: {
+            TELEGRAM_API_BASE_URL: 'https://telegram.test/',
+            TELEGRAM_BOT_TOKEN: 'bot-token',
+          },
+          fetchImplementation,
+        },
+      ),
+    ).resolves.toEqual({
+      cleanupMessages: [
+        { messageId: '1001', target: '123' },
+        { messageId: '1002', target: '456' },
+      ],
+      cleanupTargetAliases: ['123'],
+      providerMessageId: '1002',
+      providerMessageIds: ['1001', '1002'],
+      target: '456',
+    })
+
+    expect(fetchImplementation).toHaveBeenCalledTimes(3)
+    expect(readJsonBody(fetchImplementation.mock.calls[0][1]?.body)).toMatchObject({
+      chat_id: '123',
+      text: 'a'.repeat(4096),
+    })
+    expect(readJsonBody(fetchImplementation.mock.calls[1][1]?.body)).toMatchObject({
+      chat_id: '123',
+      text: 'b',
+    })
+    expect(readJsonBody(fetchImplementation.mock.calls[2][1]?.body)).toMatchObject({
+      chat_id: '456',
+      text: 'b',
     })
   })
 

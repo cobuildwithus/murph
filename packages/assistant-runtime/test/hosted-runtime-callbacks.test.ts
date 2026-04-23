@@ -477,6 +477,8 @@ describe("hosted runtime callbacks", () => {
     mocks.readAssistantOutboxIntentMirrorState.mockResolvedValue(
       createMirrorState({
         delivery: createDelivery({
+          cleanupMessages: [{ messageId: "1001", target: "123" }],
+          cleanupTargetAliases: ["123"],
           providerMessageIds: ["1001"],
           target: "456",
         }),
@@ -498,6 +500,8 @@ describe("hosted runtime callbacks", () => {
 
     expect(outcomes).toEqual([
       expect.objectContaining({
+        cleanupMessages: [{ messageId: "1001", target: "123" }],
+        cleanupTargetAliases: ["123"],
         deliveryStatus: "failed_ambiguous",
         providerMessageIds: ["1001"],
         retryable: false,
@@ -657,6 +661,8 @@ describe("hosted runtime callbacks", () => {
       createDispatchResult(
         {
           delivery: createDelivery({
+            cleanupMessages: [{ messageId: "1001", target: "123" }],
+            cleanupTargetAliases: ["123"],
             providerMessageIds: ["1001"],
             target: "456",
           }),
@@ -685,6 +691,8 @@ describe("hosted runtime callbacks", () => {
 
     expect(outcomes).toEqual([
       expect.objectContaining({
+        cleanupMessages: [{ messageId: "1001", target: "123" }],
+        cleanupTargetAliases: ["123"],
         deliveryStatus: "failed_ambiguous",
         providerMessageIds: ["1001"],
         retryable: false,

@@ -78,7 +78,9 @@ export function createAssistantChannelAdapter(
         replyToMessageId: normalizeOptionalText(input.replyToMessageId),
         subject: normalizeOptionalText(input.subject),
       })
+      const cleanupMessages = readDeliveredCleanupMessages(delivered)
       const providerMessageIds = readDeliveredProviderMessageIds(delivered)
+      const cleanupTargetAliases = readDeliveredCleanupTargetAliases(delivered)
 
       return assistantChannelDeliverySchema.parse({
         channel: spec.channel,
@@ -89,6 +91,8 @@ export function createAssistantChannelAdapter(
         messageLength: input.message.length,
         providerMessageId: readDeliveredProviderMessageId(delivered),
         ...(providerMessageIds ? { providerMessageIds } : {}),
+        ...(cleanupMessages ? { cleanupMessages } : {}),
+        ...(cleanupTargetAliases ? { cleanupTargetAliases } : {}),
         providerThreadId: readDeliveredProviderThreadId(delivered),
       })
     },
@@ -283,6 +287,67 @@ export function readDeliveredProviderMessageIds(
     .filter((value): value is string => value !== null)
 
   return ids.length > 0 ? ids : null
+}
+
+export function readDeliveredCleanupTargetAliases(
+  delivered: unknown,
+): string[] | null {
+  if (
+    !delivered ||
+    typeof delivered !== 'object' ||
+    !('cleanupTargetAliases' in delivered) ||
+    !Array.isArray(delivered.cleanupTargetAliases)
+  ) {
+    return null
+  }
+
+  const cleanupTargetAliases = delivered.cleanupTargetAliases
+  const aliases = Array.from(
+    new Set(
+      cleanupTargetAliases
+        .map((value: unknown) => typeof value === 'string' ? normalizeOptionalText(value) : null)
+        .filter((value): value is string => value !== null),
+    ),
+  )
+
+  return aliases.length > 0 ? aliases : null
+}
+
+export function readDeliveredCleanupMessages(
+  delivered: unknown,
+): Array<{ messageId: string; target: string }> | null {
+  if (
+    !delivered ||
+    typeof delivered !== 'object' ||
+    !('cleanupMessages' in delivered) ||
+    !Array.isArray(delivered.cleanupMessages)
+  ) {
+    return null
+  }
+
+  const cleanupMessages = Array.from(
+    new Map(
+      delivered.cleanupMessages.flatMap((entry: unknown) => {
+        if (!entry || typeof entry !== 'object') {
+          return []
+        }
+
+        const messageId = 'messageId' in entry && typeof entry.messageId === 'string'
+          ? normalizeOptionalText(entry.messageId)
+          : null
+        const target = 'target' in entry && typeof entry.target === 'string'
+          ? normalizeOptionalText(entry.target)
+          : null
+        if (!messageId || !target) {
+          return []
+        }
+
+        return [[`${target}\u0000${messageId}`, { messageId, target }] as const]
+      }),
+    ).values(),
+  )
+
+  return cleanupMessages.length > 0 ? cleanupMessages : null
 }
 
 export function readDeliveredProviderThreadId(

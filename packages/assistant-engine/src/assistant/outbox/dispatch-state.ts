@@ -305,6 +305,14 @@ function readTelegramAmbiguousDeliveryFromError(input: {
     readNonEmptyStringArray(errorRecord?.providerMessageIds) ??
     readNonEmptyStringArray(context?.providerMessageIds) ??
     null
+  const cleanupTargetAliases =
+    readNonEmptyStringArray(errorRecord?.cleanupTargetAliases) ??
+    readNonEmptyStringArray(context?.cleanupTargetAliases) ??
+    null
+  const cleanupMessages =
+    readAssistantDeliveryCleanupMessagesValue(errorRecord?.cleanupMessages) ??
+    readAssistantDeliveryCleanupMessagesValue(context?.cleanupMessages) ??
+    null
   const target =
     readNonEmptyString(errorRecord?.target) ??
     readNonEmptyString(context?.target) ??
@@ -324,6 +332,10 @@ function readTelegramAmbiguousDeliveryFromError(input: {
     sentAt: input.failedAt.toISOString(),
     target,
     targetKind,
+    ...(cleanupMessages
+      ? { cleanupMessages }
+      : { cleanupMessages: providerMessageIds.map((messageId) => ({ messageId, target })) }),
+    ...(cleanupTargetAliases ? { cleanupTargetAliases } : {}),
   })
 }
 
@@ -411,6 +423,14 @@ function sameAssistantChannelDelivery(
       left.providerMessageIds,
       right.providerMessageIds,
     ) &&
+    sameAssistantDeliveryCleanupMessages(
+      readAssistantDeliveryCleanupMessages(left),
+      readAssistantDeliveryCleanupMessages(right),
+    ) &&
+    sameAssistantDeliveryCleanupTargetAliases(
+      readAssistantDeliveryCleanupTargetAliases(left),
+      readAssistantDeliveryCleanupTargetAliases(right),
+    ) &&
     left.providerThreadId === right.providerThreadId
   )
 }
@@ -428,6 +448,85 @@ function sameAssistantDeliveryProviderMessageIds(
   }
 
   return left.every((value, index) => value === right[index])
+}
+
+function sameAssistantDeliveryCleanupTargetAliases(
+  left: readonly string[] | undefined,
+  right: readonly string[] | undefined,
+): boolean {
+  if (!left && !right) {
+    return true
+  }
+
+  if (!left || !right || left.length !== right.length) {
+    return false
+  }
+
+  return left.every((value, index) => value === right[index])
+}
+
+function sameAssistantDeliveryCleanupMessages(
+  left: ReadonlyArray<{ messageId: string; target: string }> | undefined,
+  right: ReadonlyArray<{ messageId: string; target: string }> | undefined,
+): boolean {
+  if (!left && !right) {
+    return true
+  }
+
+  if (!left || !right || left.length !== right.length) {
+    return false
+  }
+
+  return left.every(
+    (value, index) =>
+      value.messageId === right[index]?.messageId &&
+      value.target === right[index]?.target,
+  )
+}
+
+function readAssistantDeliveryCleanupMessages(
+  delivery: AssistantChannelDelivery,
+): ReadonlyArray<{ messageId: string; target: string }> | undefined {
+  if (!('cleanupMessages' in delivery)) {
+    return undefined
+  }
+
+  return readAssistantDeliveryCleanupMessagesValue(delivery.cleanupMessages) ?? undefined
+}
+
+function readAssistantDeliveryCleanupTargetAliases(
+  delivery: AssistantChannelDelivery,
+): readonly string[] | undefined {
+  if (!('cleanupTargetAliases' in delivery) || !Array.isArray(delivery.cleanupTargetAliases)) {
+    return undefined
+  }
+
+  return delivery.cleanupTargetAliases
+}
+
+function readAssistantDeliveryCleanupMessagesValue(
+  value: unknown,
+): Array<{ messageId: string; target: string }> | null {
+  if (!Array.isArray(value)) {
+    return null
+  }
+
+  const cleanupMessages = Array.from(
+    new Map(
+      value.flatMap((entry) => {
+        const record = readRecord(entry)
+        const messageId = readNonEmptyString(record?.messageId)
+        const target = readNonEmptyString(record?.target)
+        if (!messageId || !target) {
+          return []
+        }
+
+        return [[`${target}\u0000${messageId}`, { messageId, target }] as const]
+      }),
+    ).values(),
+  )
+
+  return cleanupMessages.length > 0 ? cleanupMessages : null
 }
 
 export async function markAssistantOutboxIntentMirrorSending(input: {

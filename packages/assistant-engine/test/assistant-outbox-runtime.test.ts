@@ -1154,6 +1154,8 @@ describe('assistant outbox runtime', () => {
     mockedDeliverAssistantMessageOverBinding.mockRejectedValueOnce(
       Object.assign(new Error('later chunk failed'), {
         code: 'ASSISTANT_TELEGRAM_DELIVERY_AMBIGUOUS',
+        cleanupMessages: [{ messageId: '1001', target: '123' }],
+        cleanupTargetAliases: ['123'],
         deliveryMayHaveSucceeded: true,
         providerMessageId: '1001',
         providerMessageIds: ['1001'],
@@ -1172,6 +1174,8 @@ describe('assistant outbox runtime', () => {
     expect(dispatched.intent.deliveryConfirmationPending).toBe(false)
     expect(dispatched.intent.delivery).toMatchObject({
       channel: 'telegram',
+      cleanupMessages: [{ messageId: '1001', target: '123' }],
+      cleanupTargetAliases: ['123'],
       messageLength: seeded.message.length,
       providerMessageId: '1001',
       providerMessageIds: ['1001'],
