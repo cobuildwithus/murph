@@ -214,16 +214,46 @@ murph_review_gpt_profile_activate() {
   osascript -e "tell application \"$MURPH_REVIEW_GPT_PROFILE_NAME\" to activate"
 }
 
+murph_review_gpt_profile_stop_processes() {
+  local profile_slug="$1"
+  local app_path product_dir_name pids
+  murph_review_gpt_load_profile "$profile_slug" || return 1
+
+  app_path="$MURPH_REVIEW_GPT_PROFILE_ROOT/$MURPH_REVIEW_GPT_PROFILE_NAME.app"
+  product_dir_name="$MURPH_REVIEW_GPT_PROFILE_PRODUCT_DIR_NAME"
+
+  pids="$(ps -axo pid=,command= | awk -v app="$app_path" -v product="$product_dir_name" 'index($0, app) || index($0, product) { print $1 }')"
+  if [[ -z "$pids" ]]; then
+    return 0
+  fi
+
+  kill -TERM $pids 2>/dev/null || true
+  sleep 2
+
+  pids="$(ps -axo pid=,command= | awk -v app="$app_path" -v product="$product_dir_name" 'index($0, app) || index($0, product) { print $1 }')"
+  if [[ -n "$pids" ]]; then
+    kill -KILL $pids 2>/dev/null || true
+    sleep 1
+  fi
+}
+
 murph_review_gpt_profile_run_review_gpt() {
   local profile_slug="$1"
   shift
 
-  local repo_root browser_binary user_data_dir browser_endpoint
+  local repo_root browser_binary user_data_dir browser_endpoint config_path
   repo_root="$(murph_review_gpt_repo_root)" || return 1
   browser_binary="$(murph_review_gpt_profile_browser_binary "$profile_slug")" || return 1
   user_data_dir="$(murph_review_gpt_profile_user_data_dir "$profile_slug")" || return 1
   browser_endpoint="$(murph_review_gpt_profile_browser_endpoint "$profile_slug")" || return 1
   murph_review_gpt_load_profile "$profile_slug" || return 1
+
+  config_path="$repo_root/scripts/review-gpt.config.sh"
+  if [[ -f "$MURPH_REVIEW_GPT_PROFILE_ROOT/review-gpt.$profile_slug.config.sh" ]]; then
+    config_path="$MURPH_REVIEW_GPT_PROFILE_ROOT/review-gpt.$profile_slug.config.sh"
+  fi
+
+  murph_review_gpt_profile_stop_processes "$profile_slug" || return 1
 
   cd "$repo_root"
   export browser_binary_path="$browser_binary"
@@ -232,7 +262,7 @@ murph_review_gpt_profile_run_review_gpt() {
   export managed_browser_port="$MURPH_REVIEW_GPT_PROFILE_PORT"
   export MURPH_REVIEW_GPT_BROWSER_ENDPOINT="$browser_endpoint"
 
-  exec pnpm exec cobuild-review-gpt --config scripts/review-gpt.config.sh "$@"
+  exec pnpm exec cobuild-review-gpt --config "$config_path" "$@"
 }
 
 murph_review_gpt_profile_run_research() {
@@ -244,6 +274,8 @@ murph_review_gpt_profile_run_research() {
   user_data_dir="$(murph_review_gpt_profile_user_data_dir "$profile_slug")" || return 1
   browser_endpoint="$(murph_review_gpt_profile_browser_endpoint "$profile_slug")" || return 1
   murph_review_gpt_load_profile "$profile_slug" || return 1
+
+  murph_review_gpt_profile_stop_processes "$profile_slug" || return 1
 
   export RESEARCH_MANAGED_BROWSER_USER_DATA_DIR="$user_data_dir"
   export RESEARCH_MANAGED_BROWSER_PROFILE="$MURPH_REVIEW_GPT_PROFILE_BROWSER_PROFILE"
