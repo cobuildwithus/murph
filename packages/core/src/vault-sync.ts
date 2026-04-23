@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdtemp, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { cp, mkdtemp, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -13,6 +13,11 @@ import {
 
 import { VAULT_LAYOUT, VAULT_SCHEMA_VERSION } from "./constants.ts";
 import { VaultError } from "./errors.ts";
+import {
+  acquireCanonicalWriteLock,
+  CANONICAL_WRITE_LOCK_DIRECTORY,
+  withCanonicalWriteLockScope,
+} from "./operations/canonical-write-lock.ts";
 import { normalizeOpaquePathSegment, normalizeRelativeVaultPath, resolveVaultPath } from "./path-safety.ts";
 import {
   applyCanonicalWriteBatch,
@@ -21,6 +26,7 @@ import {
   type CanonicalRawCopyInput,
   type CanonicalTextWriteInput,
 } from "./public-mutations.ts";
+import { assertValidVault } from "./vault.ts";
 
 export const VAULT_SYNC_IMPORT_MANIFEST_SCHEMA = "murph.vaultSync.importManifest.v1";
 export const VAULT_SYNC_CONFLICT_MANIFEST_SCHEMA = "murph.vaultSync.conflictManifest.v1";
@@ -862,117 +868,182 @@ function hasPendingWrites(plan: MergePlan): boolean {
     || plan.jsonlAppends.length > 0;
 }
 
+function buildMergeCanonicalWriteBatchInput(input: {
+  importedAt: Date;
+  plan: MergePlan;
+  sessionId: string;
+  vaultRoot: string;
+}) {
+  return {
+    audit: {
+      action: "document_import" as const,
+      commandName: "core.mergeVaultSyncImportIntoVault",
+      summary: `Merged local vault sync import ${input.sessionId}.`,
+    },
+    jsonlAppends: input.plan.jsonlAppends,
+    occurredAt: input.importedAt,
+    operationType: "vault_sync_import",
+    rawContents: input.plan.rawContents,
+    rawCopies: input.plan.rawCopies,
+    summary: `Merge local vault sync import ${input.sessionId}`,
+    textWrites: input.plan.textWrites,
+    vaultRoot: input.vaultRoot,
+  };
+}
+
+async function validateMergePlanAgainstCurrentVaultContracts(input: {
+  importedAt: Date;
+  plan: MergePlan;
+  sessionId: string;
+  targetVaultRoot: string;
+}): Promise<void> {
+  if (!hasPendingWrites(input.plan)) {
+    return;
+  }
+
+  const previewVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-vault-sync-merge-preview-"));
+
+  try {
+    await cp(input.targetVaultRoot, previewVaultRoot, { recursive: true });
+    await rm(path.join(previewVaultRoot, CANONICAL_WRITE_LOCK_DIRECTORY), {
+      force: true,
+      recursive: true,
+    });
+    await applyCanonicalWriteBatch(
+      buildMergeCanonicalWriteBatchInput({
+        importedAt: input.importedAt,
+        plan: input.plan,
+        sessionId: input.sessionId,
+        vaultRoot: previewVaultRoot,
+      }),
+    );
+    await assertValidVault({
+      vaultRoot: previewVaultRoot,
+      errorCode: "VAULT_SYNC_IMPORT_VALIDATION_FAILED",
+      message: "Vault sync import payload failed canonical validation before commit.",
+    });
+  } finally {
+    await rm(previewVaultRoot, { force: true, recursive: true });
+  }
+}
+
 export async function mergeVaultSyncImportIntoVault(
   input: MergeVaultSyncImportInput,
 ): Promise<MergeVaultSyncImportResult> {
   const sessionId = normalizeOpaquePathSegment(input.sessionId, "Vault sync session id");
   const importedAt = input.importedAt ?? new Date();
   const manifest = await readVaultSyncImportManifest(input.importMetaRoot);
-  const importFiles = manifest.files;
-  const plan: MergePlan = {
-    conflicts: [],
-    duplicates: 0,
-    jsonlAppends: [],
-    rawContents: [],
-    rawCopies: [],
-    textWrites: [],
-  };
-
   const excludedFiles = manifest.excluded.length;
+  return await withCanonicalWriteLockScope(input.targetVaultRoot, async () => {
+    const lock = await acquireCanonicalWriteLock(input.targetVaultRoot);
 
-  for (const file of importFiles) {
-    const relativePath = normalizeRelativeVaultPath(file.path);
-    if (!(await fileExists(path.join(input.importVaultRoot, relativePath)))) {
-      continue;
-    }
+    try {
+      const plan: MergePlan = {
+        conflicts: [],
+        duplicates: 0,
+        jsonlAppends: [],
+        rawContents: [],
+        rawCopies: [],
+        textWrites: [],
+      };
 
-    if (file.kind === "jsonl_ledger") {
-      await planJsonlMerge({
-        importVaultRoot: input.importVaultRoot,
+      for (const file of manifest.files) {
+        const relativePath = normalizeRelativeVaultPath(file.path);
+        if (!(await fileExists(path.join(input.importVaultRoot, relativePath)))) {
+          continue;
+        }
+
+        if (file.kind === "jsonl_ledger") {
+          await planJsonlMerge({
+            importVaultRoot: input.importVaultRoot,
+            plan,
+            relativePath,
+            sessionId,
+            targetVaultRoot: input.targetVaultRoot,
+          });
+          continue;
+        }
+
+        if (file.kind === "raw") {
+          await planRawMerge({
+            importVaultRoot: input.importVaultRoot,
+            plan,
+            relativePath,
+            sessionId,
+            targetVaultRoot: input.targetVaultRoot,
+          });
+          continue;
+        }
+
+        await planTextMerge({
+          importVaultRoot: input.importVaultRoot,
+          kind: file.kind,
+          plan,
+          relativePath,
+          sessionId,
+          targetVaultRoot: input.targetVaultRoot,
+        });
+      }
+
+      let conflictManifestPath: string | null = null;
+      if (plan.conflicts.length > 0) {
+        conflictManifestPath = manifestPreservationPath(sessionId);
+        const conflictManifest: VaultSyncConflictManifest = {
+          conflicts: plan.conflicts,
+          createdAt: importedAt.toISOString(),
+          schema: VAULT_SYNC_CONFLICT_MANIFEST_SCHEMA,
+          sessionId,
+          sourceVaultId: manifest.sourceVault.vaultId ?? null,
+          summary: {
+            conflictCount: plan.conflicts.length,
+            importedJsonlRecords: plan.jsonlAppends.length,
+            importedRawFiles: plan.rawCopies.filter((entry) => entry.targetRelativePath.startsWith(`${VAULT_LAYOUT.rawDirectory}/`) && !entry.targetRelativePath.startsWith(`${SYNC_IMPORT_ROOT}/${sessionId}/`)).length,
+            importedTextFiles: plan.textWrites.length,
+          },
+        };
+        plan.rawContents.push({
+          allowExistingMatch: true,
+          content: `${JSON.stringify(conflictManifest, null, 2)}\n`,
+          mediaType: "application/json",
+          originalFileName: "manifest.json",
+          targetRelativePath: conflictManifestPath,
+        });
+      }
+
+      await validateMergePlanAgainstCurrentVaultContracts({
+        importedAt,
         plan,
-        relativePath,
         sessionId,
         targetVaultRoot: input.targetVaultRoot,
       });
-      continue;
-    }
 
-    if (file.kind === "raw") {
-      await planRawMerge({
-        importVaultRoot: input.importVaultRoot,
-        plan,
-        relativePath,
+      if (hasPendingWrites(plan)) {
+        await applyCanonicalWriteBatch(
+          buildMergeCanonicalWriteBatchInput({
+            importedAt,
+            plan,
+            sessionId,
+            vaultRoot: input.targetVaultRoot,
+          }),
+        );
+      }
+
+      return {
+        conflictManifestPath,
+        conflicts: plan.conflicts,
+        imported: {
+          jsonlRecords: plan.jsonlAppends.length,
+          rawFiles: plan.rawCopies.filter((entry) => entry.targetRelativePath.startsWith(`${VAULT_LAYOUT.rawDirectory}/`) && !entry.targetRelativePath.startsWith(`${SYNC_IMPORT_ROOT}/${sessionId}/`)).length,
+          textFiles: plan.textWrites.length,
+        },
         sessionId,
-        targetVaultRoot: input.targetVaultRoot,
-      });
-      continue;
+        skipped: {
+          duplicates: plan.duplicates,
+          excludedFiles,
+        },
+      };
+    } finally {
+      await lock.release();
     }
-
-    await planTextMerge({
-      importVaultRoot: input.importVaultRoot,
-      kind: file.kind,
-      plan,
-      relativePath,
-      sessionId,
-      targetVaultRoot: input.targetVaultRoot,
-    });
-  }
-
-  let conflictManifestPath: string | null = null;
-  if (plan.conflicts.length > 0) {
-    conflictManifestPath = manifestPreservationPath(sessionId);
-    const conflictManifest: VaultSyncConflictManifest = {
-      conflicts: plan.conflicts,
-      createdAt: importedAt.toISOString(),
-      schema: VAULT_SYNC_CONFLICT_MANIFEST_SCHEMA,
-      sessionId,
-      sourceVaultId: manifest.sourceVault.vaultId ?? null,
-      summary: {
-        conflictCount: plan.conflicts.length,
-        importedJsonlRecords: plan.jsonlAppends.length,
-        importedRawFiles: plan.rawCopies.filter((entry) => entry.targetRelativePath.startsWith(`${VAULT_LAYOUT.rawDirectory}/`) && !entry.targetRelativePath.startsWith(`${SYNC_IMPORT_ROOT}/${sessionId}/`)).length,
-        importedTextFiles: plan.textWrites.length,
-      },
-    };
-    plan.rawContents.push({
-      allowExistingMatch: true,
-      content: `${JSON.stringify(conflictManifest, null, 2)}\n`,
-      mediaType: "application/json",
-      originalFileName: "manifest.json",
-      targetRelativePath: conflictManifestPath,
-    });
-  }
-
-  if (hasPendingWrites(plan)) {
-    await applyCanonicalWriteBatch({
-      audit: {
-        action: "document_import",
-        commandName: "core.mergeVaultSyncImportIntoVault",
-        summary: `Merged local vault sync import ${sessionId}.`,
-      },
-      jsonlAppends: plan.jsonlAppends,
-      occurredAt: importedAt,
-      operationType: "vault_sync_import",
-      rawContents: plan.rawContents,
-      rawCopies: plan.rawCopies,
-      summary: `Merge local vault sync import ${sessionId}`,
-      textWrites: plan.textWrites,
-      vaultRoot: input.targetVaultRoot,
-    });
-  }
-
-  return {
-    conflictManifestPath,
-    conflicts: plan.conflicts,
-    imported: {
-      jsonlRecords: plan.jsonlAppends.length,
-      rawFiles: plan.rawCopies.filter((entry) => entry.targetRelativePath.startsWith(`${VAULT_LAYOUT.rawDirectory}/`) && !entry.targetRelativePath.startsWith(`${SYNC_IMPORT_ROOT}/${sessionId}/`)).length,
-      textFiles: plan.textWrites.length,
-    },
-    sessionId,
-    skipped: {
-      duplicates: plan.duplicates,
-      excludedFiles,
-    },
-  };
+  });
 }
