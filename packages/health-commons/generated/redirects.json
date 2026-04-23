@@ -1,6 +1,11 @@
 {
   "redirects": [
     {
+      "from": "biomarker:spo2",
+      "reason": "Short biomarker shorthand now resolves to the canonical Blood Oxygen Saturation page.",
+      "to": "biomarker:blood-oxygen-spo2"
+    },
+    {
       "from": "experiment_family:sauna/finnish-dry",
       "reason": "Renamed to the user-facing dry-sauna family key.",
       "to": "experiment_family:dry-sauna"

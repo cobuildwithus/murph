@@ -1576,7 +1576,7 @@
       "schemaVersion": "murph.commons.artifact-manifest.v1"
     }
   ],
-  "catalogHash": "sha256:24c1f7fb98bf1689f5b68087e88ef0ef67caec01076a7fd92fcf1bc08079c254",
+  "catalogHash": "sha256:5ff67c6a14a2c8ac58170304dd3aad03a9f7b80d1b56337690ddceffde2d2e38",
   "changes": [
     {
       "affectedFields": [
@@ -2526,6 +2526,83 @@
         "source_artifact:pmid-32628261",
         "source_artifact:doi-10.3389-fcvm.2022.771280"
       ]
+    },
+    {
+      "affectedFields": [
+        "biomarkers/blood-oxygen-spo2",
+        "sources/spo2",
+        "redirects",
+        "apps/web/biomarker-trend-thresholds"
+      ],
+      "changeId": "chg_2026_04_23_spo2_biomarker_page",
+      "changeType": "seed",
+      "editSummary": "Added the Blood Oxygen Saturation (SpO₂) biomarker page with browser-vault SpO₂ bindings, measurement caveats, protocol rankings, and source-backed interpretation boundaries.",
+      "entityKey": "biomarker:blood-oxygen-spo2",
+      "minor": false,
+      "rationale": "SpO₂ is already imported from wearable providers and should have a Health Commons page that treats it as a respiratory and sleep safety-context signal rather than an optimization target.",
+      "reviewStatus": "proposed",
+      "schemaVersion": "murph.commons.change.v1",
+      "sourceKeys": [
+        "source_artifact:fda-pulse-oximeter-basics-2025",
+        "source_artifact:fda-pulse-oximeter-skin-tone-guidance-2025",
+        "source_artifact:pmid-29262014",
+        "source_artifact:mayo-hypoxemia-pulse-oximetry",
+        "source_artifact:cleveland-clinic-blood-oxygen-level",
+        "source_artifact:pmid-28162150"
+      ]
+    },
+    {
+      "affectedFields": [
+        "content/biomarkers/blood-oxygen-spo2.md",
+        "apps/web/app/biomarkers/[biomarkerId]/biomarker-page-client.tsx",
+        "apps/web/test/health-commons-biomarker-detail-page.test.ts",
+        "apps/web/test/health-commons-biomarker-page-client.test.ts"
+      ],
+      "changeId": "chg_2026_04_23_spo2_claims_and_delta_copy",
+      "changeType": "evidence_change",
+      "editSummary": "Added explicit SpO₂ evidence claims and clarified percentage-point delta copy in the biomarker trend card.",
+      "entityKey": "biomarker:blood-oxygen-spo2",
+      "minor": true,
+      "rationale": "The initial SpO₂ landing cites the right sources but renders no evidence cards, and the trend delta copy can read like a relative percent instead of an absolute percentage-point change.",
+      "reviewStatus": "proposed",
+      "schemaVersion": "murph.commons.change.v1",
+      "sourceKeys": [
+        "source_artifact:fda-pulse-oximeter-basics-2025",
+        "source_artifact:fda-pulse-oximeter-skin-tone-guidance-2025",
+        "source_artifact:pmid-29262014",
+        "source_artifact:mayo-hypoxemia-pulse-oximetry",
+        "source_artifact:cleveland-clinic-blood-oxygen-level",
+        "source_artifact:pmid-28162150"
+      ]
+    },
+    {
+      "affectedFields": [
+        "biomarkers/estimated-vo2max.biomarker",
+        "biomarkers/estimated-vo2max.claims",
+        "biomarkers/estimated-vo2max.protocolRanking",
+        "sources/vo2-max",
+        "apps/web.biomarker_claims",
+        "query.browser_vault.estimatedVo2Max"
+      ],
+      "changeId": "chg_2026_04_23_vo2max_biomarker_page",
+      "changeType": "evidence_change",
+      "editSummary": "Expanded the existing estimated VO2max biomarker into a publishable VO₂ Max page with measurement guidance, private browser-vault metric bindings, evidence-backed claims, protocol ranking, and new VO₂ max source artifacts.",
+      "entityKey": "biomarker:estimated-vo2max",
+      "minor": false,
+      "rationale": "The biomarker route already existed as biomarker:estimated-vo2max and is referenced by Norwegian 4x4 sources; enriching that page preserves existing graph links while making the biomarker available in apps/web with cautious lab-versus-wearable interpretation.",
+      "reviewStatus": "proposed",
+      "schemaVersion": "murph.commons.change.v1",
+      "sourceKeys": [
+        "source_artifact:pmid-27881567",
+        "source_artifact:pmid-26455884",
+        "source_artifact:pmid-28153947",
+        "source_artifact:pmid-35072942",
+        "source_artifact:pmid-38599681",
+        "source_artifact:pmid-41477023",
+        "source_artifact:pmid-17414804",
+        "source_artifact:pmid-30733142",
+        "source_artifact:pmid-24066036"
+      ]
     }
   ],
   "entities": [
@@ -2859,6 +2936,300 @@
     },
     {
       "aliases": [
+        "SpO2",
+        "SpO₂",
+        "blood oxygen",
+        "blood oxygen level",
+        "blood oxygen saturation",
+        "oxygen saturation",
+        "pulse ox",
+        "pulse oximetry"
+      ],
+      "biomarker": {
+        "direction": {
+          "desired": "stable",
+          "label": "Stable in your normal range is usually the goal.",
+          "nuance": "For many healthy sea-level adults, SpO₂ already sits near a physiological ceiling. Higher is not an experiment target; repeated lows, drops from baseline, or lows paired with shortness of breath, chest pain, confusion, bluish lips or nails, or unusual fatigue deserve medical context."
+        },
+        "displayName": "Blood Oxygen Saturation (SpO₂)",
+        "explainerCards": [
+          {
+            "body": "SpO₂ is a pulse-oximetry estimate of the percentage of hemoglobin carrying oxygen. Murph treats it as a respiratory, sleep, altitude, illness, and safety-context signal rather than a performance score.",
+            "title": "What it is"
+          },
+          {
+            "body": "SpO₂ can help contextualize sleep-disordered breathing patterns, respiratory illness, altitude exposure, recovery strain, and symptom-matched low-oxygen warnings. It is most useful when compared with your own same-device baseline.",
+            "title": "Why people care"
+          },
+          {
+            "body": "Use overnight wearable trends for repeated personal context and a medical-grade finger pulse oximeter for careful symptom-driven spot checks. Prefer medians and repeated patterns over one noisy reading.",
+            "title": "How to read it"
+          },
+          {
+            "body": "Cold hands, poor circulation, movement, sensor fit, nail polish or artificial nails, tobacco or carbon monoxide exposure, skin pigmentation, altitude, illness, and general-wellness device limits can all distort readings.",
+            "title": "What can fool it"
+          }
+        ],
+        "measurement": {
+          "bestContext": "For self-tracking, overnight wearable SpO₂ is best for repeated personal trend and desaturation context; a medical-grade finger pulse oximeter is better for symptom-driven spot checks; arterial blood gas or clinical co-oximetry remains more definitive in clinical care.",
+          "confounders": [
+            "device class",
+            "skin pigmentation",
+            "cold hands",
+            "poor circulation",
+            "low perfusion",
+            "movement artifact",
+            "sensor fit",
+            "nail polish",
+            "artificial nails",
+            "tobacco exposure",
+            "carbon monoxide exposure",
+            "methemoglobinemia or dyes",
+            "altitude",
+            "acute respiratory infection",
+            "asthma or COPD flare",
+            "pneumonia",
+            "sleep apnea",
+            "supplemental oxygen",
+            "device firmware changes"
+          ],
+          "howToMeasure": [
+            "Compare like with like: same device, same sensor placement, same time window, and the same daytime-versus-overnight context.",
+            "For a finger pulse oximeter, use a warm relaxed hand, remove nail polish or artificial nails when practical, sit still, keep the hand below heart level if instructed, and wait until the number is steady before recording it.",
+            "Record date, time, symptoms, altitude or travel, respiratory illness, fever, asthma or COPD flare, unusual fatigue, chest discomfort, shortness of breath, supplemental oxygen use, and device changes.",
+            "For overnight wearable data, separate the nightly median or average from desaturation events; a stable median can hide repeated dips, and a single dip can be movement artifact.",
+            "Do not use consumer wearable SpO₂ alone to diagnose sleep apnea, pneumonia, COPD exacerbation, heart disease, or any other condition. Use it to decide whether a symptom pattern or repeated trend deserves clinical follow-up.",
+            "Treat low readings that match concerning symptoms as safety context even if the wearable is imperfect; clinician-specific thresholds and emergency instructions override generic wellness ranges.",
+            "Do not try to optimize SpO₂ upward if it is already in your normal range. The practical goal is stable normal oxygenation and absence of repeated unexplained drops."
+          ]
+        },
+        "privateMetricBindings": [
+          {
+            "domain": "sleep",
+            "metric": "spo2",
+            "preferred": true,
+            "source": "browser_vault_metric",
+            "unit": "%"
+          },
+          {
+            "domain": "recovery",
+            "metric": "spo2",
+            "source": "browser_vault_metric",
+            "unit": "%"
+          },
+          {
+            "accessor": "sleep.spo2",
+            "source": "browser_vault_signal_summary",
+            "unit": "%"
+          }
+        ],
+        "shortName": "SpO₂",
+        "trendDefaults": {
+          "aggregation": "median",
+          "comparisonWindowDays": 30,
+          "latestWindowDays": 7,
+          "minimumPoints": 5
+        },
+        "unit": "%",
+        "valuePrecision": 1
+      },
+      "body": "SpO₂ is the pulse-oximetry estimate of arterial oxygen saturation: the percentage of hemoglobin binding sites carrying oxygen at the moment of measurement. In consumer health tracking, it is best treated as a respiratory and sleep-context biomarker, not as a score to maximize.\n\n## Practical baseline\n\nMany healthy sea-level adults will usually see readings in the mid-to-high 90s. The exact acceptable range is contextual: altitude, chronic lung disease, congenital or cardiac conditions, medication effects, recent respiratory illness, and clinician-directed oxygen targets can all change what is normal for a specific person.\n\nFor Murph, the most useful pattern is not “highest possible SpO₂.” It is whether the value remains stable in the user's own normal range and whether there are repeated unexplained lows, especially overnight or during illness.\n\n## Daytime spot checks versus overnight wearable trends\n\nA careful finger pulse-oximeter spot check is useful when the user has symptoms or wants a same-moment reading. It should be done with a warm hand, minimal movement, good sensor fit, and awareness of nail polish, skin temperature, and circulation.\n\nWearable overnight SpO₂ is better for repeated trend context. It can surface patterns that may be relevant to sleep-disordered breathing, altitude, alcohol, respiratory illness, or recovery strain. However, wrist and ring sensors are not the same thing as a diagnostic sleep study, and movement or fit artifacts can create false dips.\n\n## Interpretation rules for this page\n\nUse same-device 7-day medians against a longer personal baseline. Separate daytime readings from overnight readings. Keep symptom notes, altitude, illness, supplemental oxygen use, device changes, and sleep-quality changes visible next to the trend.\n\nA stable median does not rule out short desaturation events. A single low wearable datapoint does not diagnose disease. Repeated lows, drops from personal baseline, or lows paired with shortness of breath, chest pain, confusion, blue lips or nails, severe fatigue, or rapidly worsening illness deserve clinical context.\n\n## Why this is not an optimization target\n\nIn healthy users, SpO₂ already operates near a physiological ceiling. Exercise, sauna, sleep hygiene, and light protocols may improve other biomarkers without moving SpO₂ at all. That is not a failure. Murph should score most wellness protocols against their true primary endpoints and use SpO₂ as a guardrail, confounder, and respiratory-safety context marker.\n\n## Source posture\n\nThis page uses FDA pulse-oximeter guidance for device and home-monitoring caveats, clinical references for broad oxygen-saturation context, and sleep-medicine diagnostic guidance to avoid treating consumer overnight oxygen trends as a diagnosis of obstructive sleep apnea.",
+      "categories": [
+        "respiratory",
+        "cardiovascular",
+        "sleep",
+        "wearable-metric",
+        "safety-signal"
+      ],
+      "claims": [
+        {
+          "caveats": [
+            "Medical pulse oximeters, general-wellness wearables, and arterial blood gas testing have different validation targets and should not be collapsed into one confidence bucket."
+          ],
+          "claimId": "spo2-readings-are-estimates",
+          "sourceKeys": [
+            "source_artifact:fda-pulse-oximeter-basics-2025",
+            "source_artifact:pmid-29262014"
+          ],
+          "strength": "high",
+          "text": "Home pulse oximeters and consumer wearables estimate oxygen saturation and should be interpreted alongside symptoms, device instructions, and measurement conditions rather than as interchangeable clinical-grade verdicts.",
+          "type": "design_guardrail"
+        },
+        {
+          "caveats": [
+            "Device firmware, smoothing, and sensor placement can add extra error that is not obvious from a single displayed number."
+          ],
+          "claimId": "spo2-skin-tone-perfusion-and-motion-can-bias-readings",
+          "sourceKeys": [
+            "source_artifact:fda-pulse-oximeter-skin-tone-guidance-2025",
+            "source_artifact:fda-pulse-oximeter-basics-2025",
+            "source_artifact:pmid-29262014"
+          ],
+          "strength": "high",
+          "text": "Skin pigmentation, low perfusion, motion, nail polish, cold hands, and sensor fit can bias SpO₂ readings enough that Murph should keep measurement caveats visible next to the trend.",
+          "type": "design_guardrail"
+        },
+        {
+          "caveats": [
+            "Snoring, witnessed apneas, daytime sleepiness, morning headaches, or cardiopulmonary risk factors increase the value of clinical evaluation and validated sleep testing."
+          ],
+          "claimId": "spo2-overnight-desaturation-is-follow-up-context",
+          "sourceKeys": [
+            "source_artifact:pmid-28162150",
+            "source_artifact:fda-pulse-oximeter-basics-2025",
+            "source_artifact:pmid-29262014"
+          ],
+          "strength": "high",
+          "text": "Repeated overnight desaturation patterns can be useful follow-up context, but consumer SpO₂ data alone should not be used to diagnose obstructive sleep apnea or other causes of hypoxemia.",
+          "type": "evidence_scope"
+        },
+        {
+          "caveats": [
+            "Clinician-specific oxygen targets, high altitude, supplemental oxygen, and chronic lung or cardiac disease can change what counts as abnormal for a specific person."
+          ],
+          "claimId": "spo2-low-readings-with-symptoms-need-escalation-context",
+          "sourceKeys": [
+            "source_artifact:mayo-hypoxemia-pulse-oximetry",
+            "source_artifact:cleveland-clinic-blood-oxygen-level",
+            "source_artifact:fda-pulse-oximeter-basics-2025"
+          ],
+          "strength": "high",
+          "text": "Low or falling SpO₂ readings paired with shortness of breath, chest pain, confusion, bluish lips or nails, or rapidly worsening illness should be treated as clinical context and escalated according to the user's care plan or urgent-care instructions.",
+          "type": "safety"
+        }
+      ],
+      "communityOutcomeSummary": {
+        "minimumCohortSize": 20,
+        "placeholder": "Early Murph outcome summaries will appear here once enough opted-in experiment runs are available.",
+        "state": "coming_soon"
+      },
+      "entityType": "biomarker",
+      "interpretationFrame": {
+        "caveat": "SpO₂ is vulnerable to device class, skin pigmentation, perfusion, temperature, movement, nail polish, tobacco or carbon-monoxide exposure, altitude, illness, and sleep-disordered breathing. Compare same-device same-context trends and treat low or symptom-matched readings as medical context.",
+        "principle": "Stable personal-normal readings matter more than chasing a higher number; repeated drops or symptom-matched lows are safety signals, not optimization targets."
+      },
+      "key": "biomarker:blood-oxygen-spo2",
+      "measurementContexts": [
+        "overnight_wearable",
+        "finger_pulse_oximeter",
+        "clinical_pulse_oximeter",
+        "high_altitude_context",
+        "symptom_context"
+      ],
+      "protocolRanking": {
+        "candidates": [
+          {
+            "display": {
+              "burdenLabel": "Low",
+              "cautionLabel": "Low",
+              "confidence": "low"
+            },
+            "expectedDirection": "stable",
+            "mechanism": "Evening light reduction may improve sleep timing or continuity, but it does not treat sleep apnea or hypoxemia. SpO₂ should remain stable; repeated overnight drops would be a safety-context signal rather than proof the protocol is working.",
+            "protocolKey": "protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed",
+            "relationship": "related_protocol",
+            "scoring": {
+              "biomarkerRelevance": 1,
+              "burdenPenalty": 1,
+              "evidenceWeight": 1,
+              "safetyCautionPenalty": 1,
+              "wearableMeasurability": 5
+            }
+          },
+          {
+            "display": {
+              "burdenLabel": "Moderate",
+              "cautionLabel": "Moderate",
+              "confidence": "low"
+            },
+            "expectedDirection": "stable",
+            "mechanism": "Sauna is a heat-stress and recovery experiment, not an oxygenation intervention. Tracking SpO₂ is mainly a guardrail: stable readings are reassuring, while symptom-matched lows after heat, dehydration, illness, or respiratory strain should not be ignored.",
+            "protocolKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+            "relationship": "related_protocol",
+            "scoring": {
+              "biomarkerRelevance": 1,
+              "burdenPenalty": 2,
+              "evidenceWeight": 1,
+              "safetyCautionPenalty": 2,
+              "wearableMeasurability": 5
+            }
+          },
+          {
+            "display": {
+              "burdenLabel": "High",
+              "cautionLabel": "Higher",
+              "confidence": "low"
+            },
+            "expectedDirection": "stable",
+            "mechanism": "Aerobic interval training targets cardiorespiratory fitness and estimated VO₂max, but resting or overnight SpO₂ is tightly regulated in healthy users. Use it as a safety and illness-context check, not as the primary success marker for 4x4 training.",
+            "protocolKey": "protocol_variant:norwegian-4x4/norwegian-4x4",
+            "relationship": "related_protocol",
+            "scoring": {
+              "biomarkerRelevance": 1,
+              "burdenPenalty": 4,
+              "evidenceWeight": 1,
+              "safetyCautionPenalty": 3,
+              "wearableMeasurability": 5
+            }
+          }
+        ],
+        "scoreFormula": "evidenceWeight * 3 + biomarkerRelevance * 3 + wearableMeasurability * 2 - burdenPenalty - safetyCautionPenalty + communityOutcomeConfidence",
+        "version": "deterministic-v0"
+      },
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed",
+          "type": "related_protocol"
+        },
+        {
+          "target": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "type": "related_protocol"
+        },
+        {
+          "target": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "type": "related_protocol"
+        },
+        {
+          "target": "source_artifact:fda-pulse-oximeter-basics-2025",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:fda-pulse-oximeter-skin-tone-guidance-2025",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-29262014",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:mayo-hypoxemia-pulse-oximetry",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:cleveland-clinic-blood-oxygen-level",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-28162150",
+          "type": "cites"
+        }
+      ],
+      "relativePath": "biomarkers/blood-oxygen-spo2.md",
+      "revision": {
+        "pageRevisionId": "sha256:a168752110e063fca42feb4ea229fbfa3c40643725c4bc5b035949a4c1b75f58",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "biomarkers/blood-oxygen-spo2",
+      "status": "field-testing",
+      "summary": "A respiratory and sleep-context signal that estimates the percentage of oxygen-saturated hemoglobin in blood; useful for spotting personal baseline shifts, repeated overnight desaturation patterns, altitude or illness context, and symptom-matched safety signals.",
+      "title": "Blood Oxygen Saturation (SpO₂)",
+      "unit": "%"
+    },
+    {
+      "aliases": [
         "deep sleep",
         "slow-wave sleep",
         "SWS",
@@ -3152,31 +3523,264 @@
     },
     {
       "aliases": [
-        "wearable VO2max",
+        "VO2 max",
+        "VO₂ max",
+        "V̇O2max",
+        "maximal oxygen uptake",
+        "cardiorespiratory fitness",
+        "CRF",
+        "cardio fitness",
         "cardio fitness estimate",
+        "estimated VO2max",
+        "wearable VO2max",
+        "wearable cardio fitness",
         "estimated cardio fitness"
       ],
-      "body": "Estimated VO2max is a practical signal for Norwegian 4x4 because the intervention literature targets cardiorespiratory fitness, but most people have consumer wearable estimates rather than lab testing.\n\nInterpret this marker as a noisy proxy. A useful result should combine this estimate with session fidelity, heart-rate recovery, symptoms, and adherence.",
+      "biomarker": {
+        "direction": {
+          "desired": "higher",
+          "label": "Higher usually means better cardiorespiratory fitness.",
+          "nuance": "The number is only interpretable in context. A lower value after illness, detraining, device changes, weight change, or poor sensor data may not mean your cardiovascular system truly worsened."
+        },
+        "displayName": "VO₂ Max",
+        "explainerCards": [
+          {
+            "body": "VO₂ max is the maximal rate your body can take in, transport, and use oxygen during intense large-muscle exercise. It is usually expressed relative to body mass as ml/kg/min.",
+            "title": "What it is"
+          },
+          {
+            "body": "Cardiorespiratory fitness is one of the strongest whole-body fitness signals. The research literature links higher fitness with lower mortality and chronic-disease risk, but Murph treats this as population evidence, not a one-person verdict.",
+            "title": "Why people care"
+          },
+          {
+            "body": "A lab cardiopulmonary exercise test with gas exchange is the reference context. Consumer wearables estimate VO₂ max from signals such as heart rate, pace, power, GPS, demographics, and device-specific algorithms.",
+            "title": "Lab vs wearable"
+          },
+          {
+            "body": "Use same-device values across weeks or months. A sustained rise after well-executed aerobic training is more meaningful than a single new reading, especially because many devices update the estimate slowly.",
+            "title": "How to read a trend"
+          },
+          {
+            "body": "Aerobic interval training, endurance training, detraining, illness, heat, altitude, sensor fit, route/GPS quality, body-weight changes, medications that affect heart rate, and the specific test protocol can all change the number.",
+            "title": "What moves it"
+          }
+        ],
+        "measurement": {
+          "bestContext": "Lab CPET with respiratory gas analysis is best when a precise clinical or performance value matters. For Murph experiments, same-device wearable cardio-fitness estimates are acceptable as a private trend signal when interpreted cautiously.",
+          "confounders": [
+            "device algorithm changes",
+            "heart-rate sensor fit",
+            "GPS or pace accuracy",
+            "unsupported exercise mode",
+            "altitude",
+            "heat",
+            "recent illness",
+            "detraining",
+            "beta blockers or heart-rate medication",
+            "body-weight changes",
+            "inadequate aerobic data",
+            "lab protocol differences"
+          ],
+          "howToMeasure": [
+            "Prefer a lab cardiopulmonary exercise test when you need a true VO₂ max value, clinical-grade interpretation, or age/sex reference-standard comparison.",
+            "For wearable estimates, keep the same device, app, and measurement mode across baseline and intervention windows.",
+            "Give the device enough valid outdoor walking, running, cycling, or other supported aerobic data with reliable heart-rate and movement signals.",
+            "Compare 2-to-12-week trends rather than single readings; many consumer algorithms smooth or update slowly.",
+            "Keep illness, detraining, travel, heat, altitude, hard training blocks, body-weight changes, medication changes, and device/firmware changes visible in the experiment notes."
+          ]
+        },
+        "privateMetricBindings": [
+          {
+            "domain": "activity",
+            "metric": "estimatedVo2Max",
+            "preferred": true,
+            "source": "browser_vault_metric",
+            "unit": "ml/kg/min"
+          },
+          {
+            "accessor": "activity.estimatedVo2Max",
+            "source": "browser_vault_signal_summary",
+            "unit": "ml/kg/min"
+          }
+        ],
+        "shortName": "VO₂ max",
+        "trendDefaults": {
+          "aggregation": "median",
+          "comparisonWindowDays": 90,
+          "latestWindowDays": 14,
+          "minimumPoints": 2
+        },
+        "unit": "ml/kg/min",
+        "valuePrecision": 1
+      },
+      "body": "VO₂ max is the highest rate at which the body can use oxygen during intense, sustained, large-muscle exercise. It is one of the clearest single markers of cardiorespiratory fitness, but the measurement context matters a lot.\n\n## Bottom line for Murph\n\nUse VO₂ max as a **fitness trend marker**, not a body-ranking score. The most useful Murph question is not “is my number good enough?” It is: “did this specific protocol, run with enough fidelity and recovery, move my own cardiorespiratory-fitness signal in a plausible direction?”\n\nFor a Norwegian 4x4 experiment, VO₂ max belongs near the top of the outcome stack because the protocol is explicitly designed to stress aerobic capacity. For a sauna or recovery protocol, VO₂ max is a secondary or contextual signal; it may be interesting, but it is not the main reason to run the experiment.\n\n## Measurement hierarchy\n\n1. **Lab CPET with gas exchange** is the reference context when a precise value matters. It directly measures oxygen uptake during a graded exercise test and can be interpreted against reference standards.\n2. **Structured field tests** can be useful when lab testing is unavailable, but they estimate fitness from performance and assumptions.\n3. **Wearable cardio-fitness estimates** are the most scalable Murph signal. They are convenient and private, but they are algorithmic estimates and should be read as repeated trends.\n\n## What counts as a useful self-experiment signal\n\nA useful VO₂ max experiment read usually has:\n\n- a stable baseline window from the same device or lab method,\n- enough supported aerobic sessions for the wearable estimate to update,\n- clear session-fidelity evidence such as interval intensity, pace, power, or heart-rate zones,\n- visible context for illness, travel, altitude, heat, medication changes, and body-weight changes,\n- a follow-up window long enough for adaptation rather than a one-day bounce.\n\nFor wearable estimates, a small shift can be noise. A more trustworthy pattern is a sustained same-device increase over several weeks that lines up with better session capacity, easier submaximal efforts, or improved heart-rate recovery.\n\n## Common traps\n\nDo not compare a watch estimate to a lab result as though they are interchangeable. Do not compare two devices unless you are explicitly studying device disagreement. Do not treat a sudden device-side jump as biological proof if firmware, GPS, sensor fit, route, or training mode changed.\n\nVO₂ max is also not a complete health story. It can improve while sleep, joint pain, mood, or life-fit gets worse. Murph should keep the protocol bounded, keep safety visible, and interpret the number as one clue among several.",
       "categories": [
         "cardiovascular",
         "fitness",
-        "wearable-metric"
+        "exercise",
+        "wearable-metric",
+        "clinical-context"
       ],
+      "claims": [
+        {
+          "caveats": [
+            "Lab test validity depends on protocol quality, participant effort, equipment calibration, and test termination criteria."
+          ],
+          "claimId": "vo2max_definition_reference_standard",
+          "sourceKeys": [
+            "source_artifact:pmid-28153947"
+          ],
+          "strength": "high",
+          "text": "VO₂ max is best treated as maximal oxygen uptake during intense large-muscle exercise; direct measurement uses cardiopulmonary exercise testing with respiratory gas exchange, while VO₂peak or algorithmic estimates are not identical to a confirmed maximal test.",
+          "type": "evidence_scope"
+        },
+        {
+          "caveats": [
+            "These are population-level associations and guideline-level recommendations, not proof that a single person's wearable estimate predicts their future health."
+          ],
+          "claimId": "crf_clinical_vital_sign",
+          "sourceKeys": [
+            "source_artifact:pmid-27881567",
+            "source_artifact:pmid-38599681"
+          ],
+          "strength": "high",
+          "text": "Cardiorespiratory fitness has strong clinical prognostic value, and the American Heart Association argues it should be assessed in routine clinical practice when it can improve patient management.",
+          "type": "association_not_causation"
+        },
+        {
+          "caveats": [
+            "Reference standards depend on the tested population, exercise modality, and whether the value is measured or estimated."
+          ],
+          "claimId": "friend_reference_standards",
+          "sourceKeys": [
+            "source_artifact:pmid-26455884"
+          ],
+          "strength": "moderate",
+          "text": "CPET-derived reference standards, including FRIEND Registry work, help interpret measured cardiorespiratory fitness by age, sex, and testing context.",
+          "type": "evidence_scope"
+        },
+        {
+          "caveats": [
+            "Accuracy varies by device, population, activity mode, heart-rate sensor quality, GPS/power data, and proprietary algorithm changes."
+          ],
+          "claimId": "wearable_vo2max_proxy",
+          "sourceKeys": [
+            "source_artifact:pmid-35072942",
+            "source_artifact:pmid-41477023"
+          ],
+          "strength": "moderate",
+          "text": "Consumer wearables can estimate VO₂ max, and exercise-based algorithms tend to perform better than resting-only estimates, but individual-level error remains large enough that Murph should treat wearable VO₂ max as a trend proxy.",
+          "type": "evidence_scope"
+        },
+        {
+          "caveats": [
+            "Protocol adherence, safety screening, baseline fitness, intensity fidelity, and recovery determine whether a home experiment resembles supervised study conditions."
+          ],
+          "claimId": "norwegian_4x4_primary_outcome",
+          "sourceKeys": [
+            "source_artifact:pmid-17414804",
+            "source_artifact:pmid-30733142",
+            "source_artifact:pmid-24066036"
+          ],
+          "strength": "moderate",
+          "text": "Norwegian 4x4-style aerobic interval training is one of the clearest Murph protocol candidates for improving VO₂ max because direct interval-training trials and later syntheses commonly use VO₂ max or cardiorespiratory fitness as a primary endpoint.",
+          "type": "intervention_result"
+        }
+      ],
+      "communityOutcomeSummary": {
+        "minimumCohortSize": 30,
+        "placeholder": "VO₂ max outcome summaries will appear once enough opted-in Murph runs have same-device baseline and intervention windows with visible training adherence and confounder notes.",
+        "state": "coming_soon"
+      },
       "entityType": "biomarker",
       "interpretationFrame": {
-        "caveat": "Consumer estimates are not laboratory gas-exchange VO2max measurements and may update slowly or noisily.",
-        "principle": "Trend direction and repeated signal are more useful than a single absolute value."
+        "caveat": "Wearable VO₂ max is an algorithmic estimate, not a direct gas-exchange measurement. Device changes, algorithm updates, heart-rate accuracy, GPS quality, altitude, heat, illness, medications, training load, and body-weight changes can all move the estimate.",
+        "principle": "Compare like with like. A lab CPET value is the strongest single measurement, but for self-experiments the most useful signal is usually a repeated same-device trend against your own baseline."
       },
       "key": "biomarker:estimated-vo2max",
       "measurementContexts": [
+        "lab_cpet",
+        "graded_exercise_test",
         "wearable_cardio_fitness",
         "field_test_proxy"
       ],
-      "quality": "usable",
+      "protocolRanking": {
+        "candidates": [
+          {
+            "display": {
+              "burdenLabel": "High",
+              "cautionLabel": "Higher",
+              "confidence": "high"
+            },
+            "expectedDirection": "up",
+            "mechanism": "Norwegian 4x4 directly targets aerobic power with repeated high-intensity intervals. It is the cleanest current Murph candidate for a VO₂ max outcome, especially when session intensity and recovery are tracked.",
+            "protocolKey": "protocol_variant:norwegian-4x4/norwegian-4x4",
+            "relationship": "primary_biomarker",
+            "scoring": {
+              "biomarkerRelevance": 5,
+              "burdenPenalty": 4,
+              "communityOutcomeConfidence": 0,
+              "evidenceWeight": 5,
+              "safetyCautionPenalty": 3,
+              "wearableMeasurability": 4
+            }
+          },
+          {
+            "display": {
+              "burdenLabel": "Moderate",
+              "cautionLabel": "Moderate",
+              "confidence": "low"
+            },
+            "expectedDirection": "mixed_or_contextual",
+            "mechanism": "Repeated heat exposure can create cardiovascular strain and recovery adaptations, but it is not a direct aerobic-capacity protocol and should not outrank actual aerobic training for VO₂ max.",
+            "protocolKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+            "relationship": "secondary_biomarker",
+            "scoring": {
+              "biomarkerRelevance": 2,
+              "burdenPenalty": 2,
+              "communityOutcomeConfidence": 0,
+              "evidenceWeight": 2,
+              "safetyCautionPenalty": 2,
+              "wearableMeasurability": 4
+            }
+          }
+        ],
+        "scoreFormula": "evidenceWeight * 3 + biomarkerRelevance * 3 + wearableMeasurability * 2 - burdenPenalty - safetyCautionPenalty + communityOutcomeConfidence",
+        "version": "deterministic-v1-vo2max"
+      },
+      "quality": "reviewed",
       "relations": [
         {
           "target": "protocol_variant:norwegian-4x4/norwegian-4x4",
           "type": "related_protocol"
+        },
+        {
+          "target": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "type": "related_protocol"
+        },
+        {
+          "target": "source_artifact:pmid-27881567",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-26455884",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-28153947",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-35072942",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-38599681",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-41477023",
+          "type": "cites"
         },
         {
           "target": "source_artifact:pmid-17414804",
@@ -3193,16 +3797,16 @@
       ],
       "relativePath": "biomarkers/estimated-vo2max.md",
       "revision": {
-        "pageRevisionId": "sha256:d55eeb2f971a0e3226a3a1ec9db4837ee0f9f9ee6445be09c60c455f45a9aa77",
+        "pageRevisionId": "sha256:e09c11205431c45a12abfebe9529879d5596e0d87b9b091e3b91aae3fc04f534",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
       "schemaVersion": "murph.commons.page.v1",
       "slug": "biomarkers/estimated-vo2max",
       "status": "field-testing",
-      "summary": "A consumer-device cardio-fitness estimate that can show whether interval training is nudging fitness in the right direction, while staying noisier than a lab VO2max test.",
-      "title": "Estimated VO2max",
-      "unit": "ml/kg/min estimate"
+      "summary": "A cardiorespiratory fitness marker: lab VO₂ max is maximal oxygen uptake during intense whole-body exercise, while wearable cardio-fitness values are useful but noisier estimates for personal trend tracking.",
+      "title": "VO₂ Max",
+      "unit": "ml/kg/min"
     },
     {
       "aliases": [
@@ -9126,6 +9730,61 @@
       "whyItMatters": "Anchors common diabetes-management target examples and confirms that home monitoring context depends on individualized care plans."
     },
     {
+      "body": "This Cleveland Clinic reference is useful for practical user-facing context: normal ranges are broad, chronic lung disease and high altitude can change expectations, pulse-oximeter readings can differ from arterial saturation, and low home readings may warrant calling a provider or seeking urgent care depending on severity and symptoms.\n\nMurph should not display hard diagnostic rules, but it should make clear that symptomatic low oxygen readings are not a wellness-optimization target; they are a clinical context signal.",
+      "categories": [
+        "spo2",
+        "hypoxemia",
+        "respiratory",
+        "clinical-context"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Patient-facing safety thresholds and clinical-context caveats",
+      "key": "source_artifact:cleveland-clinic-blood-oxygen-level",
+      "modality": "Blood oxygen testing and pulse oximetry",
+      "murphTakeaway": "Use this source for conservative safety wording: clinician-specific guidance overrides generic ranges, and symptomatic low readings should not be ignored.",
+      "murphV1Priority": "Medium",
+      "potentialMurphEndpoints": [
+        "SpO₂ spot checks",
+        "respiratory symptom notes",
+        "escalation-context copy"
+      ],
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "biomarker:blood-oxygen-spo2",
+          "type": "measures"
+        }
+      ],
+      "relativePath": "sources/spo2/cleveland-clinic-blood-oxygen-level.md",
+      "researchEvidence": {
+        "aggregateRole": "context",
+        "designKind": "guideline",
+        "designLabel": "Patient clinical reference",
+        "populationLabel": "Patients looking up blood oxygen level and pulse-oximetry interpretation"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:b24cadec0ce196b12503d5d683a5d81563d222212e9e82eae2cbe9cab99fa893",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/spo2/cleveland-clinic-blood-oxygen-level",
+      "source": {
+        "authors": "Cleveland Clinic",
+        "citation": "Cleveland Clinic. Blood Oxygen Level. Last reviewed 2022-02-18.",
+        "journal": "Cleveland Clinic",
+        "kind": "web_page",
+        "title": "Blood Oxygen Level",
+        "url": "https://my.clevelandclinic.org/health/diagnostics/22447-blood-oxygen-level",
+        "year": 2022
+      },
+      "status": "field-testing",
+      "studyDesign": "Patient clinical reference",
+      "summary": "Patient-facing clinical reference explaining pulse-oximeter readings, arterial blood oxygen testing, common causes of low oxygen, and when low home readings warrant clinical contact.",
+      "title": "Cleveland Clinic blood oxygen level reference",
+      "whyItMatters": "Supports broad home-monitoring caveats: pulse-oximeter values can differ from arterial saturation, chronic conditions and altitude change context, and low readings with symptoms need clinical escalation."
+    },
+    {
       "body": "This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.\n\n**Findings:** This meta-analysis pooled small RCT and quasi-experimental studies of sauna bathing and blood pressure in healthy adults. The main finding is a blood-pressure-lowering signal, but the evidence base is small and heterogeneous.\n\n**Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a cardiovascular record marked lower priority for Murph v1 interpretation.\n\n**Potential Murph endpoints/context:** blood pressure context, resting heart rate context\n\n**Protocol takeaway:** Use as cardiovascular context around heat exposure, not as a guaranteed 21-day result-card endpoint.",
       "categories": [
         "sauna",
@@ -10044,6 +10703,117 @@
       "whyItMatters": "Prevents Murph from accepting or promoting ring-only or watch-only glucose claims as validated glucose data."
     },
     {
+      "body": "The FDA page is the practical measurement anchor for Murph's SpO₂ biomarker page.\n\nIt emphasizes that home pulse-oximeter readings should be interpreted with how the user feels, that a careful reading requires stillness and device-specific instructions, and that accuracy can be affected by perfusion, temperature, smoking exposure, fingernail polish, and skin pigmentation.\n\nIt also separates medical pulse oximeters from general-wellness or sport products that are not evaluated by FDA for clinical decision-making.",
+      "categories": [
+        "spo2",
+        "pulse-oximetry",
+        "device-accuracy",
+        "home-monitoring"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Measurement technique and consumer-device limits",
+      "key": "source_artifact:fda-pulse-oximeter-basics-2025",
+      "modality": "Pulse oximetry and home oxygen-saturation monitoring",
+      "murphTakeaway": "Use FDA technique and caveats whenever displaying SpO₂: same context, steady reading, symptom context, and explicit device-limit language.",
+      "murphV1Priority": "High",
+      "potentialMurphEndpoints": [
+        "SpO₂ spot checks",
+        "overnight SpO₂ trend context",
+        "respiratory symptoms and safety notes"
+      ],
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "biomarker:blood-oxygen-spo2",
+          "type": "measures"
+        }
+      ],
+      "relativePath": "sources/spo2/fda-pulse-oximeter-basics-2025.md",
+      "researchEvidence": {
+        "aggregateRole": "context",
+        "designKind": "guideline",
+        "designLabel": "Consumer medical-device guidance",
+        "populationLabel": "Consumers and patients using pulse oximeters at home"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:847491dde0fa6697dd5e3aca863b9d77ec838f9965f3e553a81d1d3391f4ce8b",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/spo2/fda-pulse-oximeter-basics-2025",
+      "source": {
+        "authors": "U.S. Food and Drug Administration",
+        "citation": "U.S. Food and Drug Administration. Pulse Oximeter Basics. FDA Consumer Updates. Content current as of 2025-03-26.",
+        "journal": "FDA Consumer Updates",
+        "kind": "web_page",
+        "title": "Pulse Oximeter Basics",
+        "url": "https://www.fda.gov/consumers/consumer-updates/pulse-oximeter-basics",
+        "year": 2025
+      },
+      "status": "field-testing",
+      "studyDesign": "Regulatory consumer guidance",
+      "summary": "FDA consumer guidance on home pulse-oximeter use, symptom context, measurement technique, accuracy limitations, and the distinction between medical devices and general-wellness products.",
+      "title": "FDA Pulse Oximeter Basics",
+      "whyItMatters": "Anchors Murph's home-use instructions: interpret readings alongside symptoms, measure carefully, and do not treat general-wellness devices as clinical decision tools."
+    },
+    {
+      "body": "This FDA announcement supports the skin-pigmentation caveat on the SpO₂ biomarker page.\n\nMurph should not imply that all pulse-oximeter or wearable readings have identical accuracy across all people. The practical product-language consequence is simple: trends are useful, but the device class and known accuracy limitations should stay visible.",
+      "categories": [
+        "spo2",
+        "pulse-oximetry",
+        "device-accuracy",
+        "skin-pigmentation",
+        "health-equity"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Skin-pigmentation accuracy caveat",
+      "key": "source_artifact:fda-pulse-oximeter-skin-tone-guidance-2025",
+      "modality": "Pulse oximetry device performance",
+      "murphTakeaway": "SpO₂ pages and trend cards should explicitly mention skin-pigmentation performance differences and avoid overconfident clinical interpretation.",
+      "murphV1Priority": "High",
+      "potentialMurphEndpoints": [
+        "SpO₂ trend interpretation",
+        "device-limit explanations",
+        "health-equity caveats"
+      ],
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "biomarker:blood-oxygen-spo2",
+          "type": "measures"
+        }
+      ],
+      "relativePath": "sources/spo2/fda-pulse-oximeter-skin-tone-guidance-2025.md",
+      "researchEvidence": {
+        "aggregateRole": "context",
+        "designKind": "guideline",
+        "designLabel": "Regulatory draft-guidance announcement",
+        "populationLabel": "People using pulse oximeters across diverse skin pigmentation"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:e1160c964af3f3106b75200dcc62c4e804c967fed27083f20881131bc13e8f2b",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/spo2/fda-pulse-oximeter-skin-tone-guidance-2025",
+      "source": {
+        "authors": "U.S. Food and Drug Administration",
+        "citation": "U.S. Food and Drug Administration. FDA Proposes Updated Recommendations to Help Improve Performance of Pulse Oximeters Across Skin Tones. FDA News Release. 2025-01-06.",
+        "journal": "FDA News Release",
+        "kind": "web_page",
+        "title": "FDA Proposes Updated Recommendations to Help Improve Performance of Pulse Oximeters Across Skin Tones",
+        "url": "https://www.fda.gov/news-events/press-announcements/fda-proposes-updated-recommendations-help-improve-performance-pulse-oximeters-across-skin-tones",
+        "year": 2025
+      },
+      "status": "field-testing",
+      "studyDesign": "Regulatory draft-guidance announcement",
+      "summary": "FDA 2025 announcement describing draft recommendations intended to improve pulse-oximeter performance across people with different skin pigmentation.",
+      "title": "FDA draft recommendations to improve pulse oximeter performance across skin tones",
+      "whyItMatters": "Prevents Murph from presenting pulse-oximeter readings as equally reliable across all users without a device-accuracy caveat."
+    },
+    {
       "body": "This memo supports the HRV / RMSSD biomarker page.\n\nThe source set separates four layers: measurement standards, metric interpretation, protocol evidence, and confounders. Murph should use HRV as a private contextual trend, prefer same-device repeated windows, and avoid turning a one-day value into a clinical claim.",
       "categories": [
         "hrv",
@@ -10420,6 +11190,61 @@
       "summary": "This narrative review synthesizes cardiovascular, inflammatory, and mortality evidence for sauna bathing. The main finding is a coherent mechanism-and-outcomes story, especially around cardiovascular stress, vascular function, and long-term associations. For Murph, it is rationale and mechanism context, not a substitute for protocol-specific intervention data.",
       "title": "Cardiovascular and other health benefits of sauna bathing: a review of the evidence",
       "whyItMatters": "Strong narrative synthesis focused on cardiovascular mechanisms and outcomes"
+    },
+    {
+      "body": "Mayo Clinic's hypoxemia reference is useful for user-facing language around low oxygen, arterial blood gas testing, and broad pulse-oximeter ranges.\n\nMurph should use this source to keep its copy plain-spoken: low oxygen is a clinical context signal, and a pulse oximeter is an estimate rather than a full diagnosis.",
+      "categories": [
+        "spo2",
+        "hypoxemia",
+        "respiratory",
+        "clinical-context"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Broad patient-facing reference range and hypoxemia context",
+      "key": "source_artifact:mayo-hypoxemia-pulse-oximetry",
+      "modality": "Hypoxemia and oxygen-saturation testing",
+      "murphTakeaway": "Use Mayo's patient-facing framing to keep low SpO₂ safety language clear without turning Murph into a diagnostic tool.",
+      "murphV1Priority": "Medium",
+      "potentialMurphEndpoints": [
+        "SpO₂ spot checks",
+        "respiratory symptoms",
+        "clinical follow-up prompts"
+      ],
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "biomarker:blood-oxygen-spo2",
+          "type": "measures"
+        }
+      ],
+      "relativePath": "sources/spo2/mayo-hypoxemia-pulse-oximetry.md",
+      "researchEvidence": {
+        "aggregateRole": "context",
+        "designKind": "guideline",
+        "designLabel": "Patient clinical reference",
+        "populationLabel": "Patients looking up hypoxemia and blood oxygen context"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:b11c0e65f6d6223e4a5346ac475cbd987f70ee8aa3edd3fa403ff15e41f74d83",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/spo2/mayo-hypoxemia-pulse-oximetry",
+      "source": {
+        "authors": "Mayo Clinic Staff",
+        "citation": "Mayo Clinic Staff. Low blood oxygen (hypoxemia). Mayo Clinic. Updated 2026-02-20.",
+        "journal": "Mayo Clinic",
+        "kind": "web_page",
+        "title": "Low blood oxygen (hypoxemia)",
+        "url": "https://www.mayoclinic.org/symptoms/hypoxemia/basics/definition/sym-20050930",
+        "year": 2026
+      },
+      "status": "field-testing",
+      "studyDesign": "Patient clinical reference",
+      "summary": "Patient-facing clinical reference explaining hypoxemia, pulse-oximetry context, arterial blood gas testing, and broad oxygen-saturation ranges.",
+      "title": "Mayo Clinic hypoxemia reference",
+      "whyItMatters": "Supports the broad sea-level range language and the caution that low readings are clinical context, not a self-diagnosis."
     },
     {
       "body": "This physiology reference supports the page’s context-first interpretation. REM minutes are not just a nightly score; they reflect where a person is in the NREM/REM cycle, how much sleep opportunity they had, and whether the later part of the sleep period was preserved.",
@@ -13578,6 +14403,70 @@
     },
     {
       "aliases": [
+        "pmid-26455884"
+      ],
+      "body": "This source is included for **reference-standard context**.\n\n## Quick read\n\n- **Source type:** Registry-based reference-standards paper.\n- **Role in Murph:** explains why lab CPET values can be interpreted against age/sex/testing-context standards.\n- **Most relevant Murph signals:** measured VO₂ max and METs; wearable estimates only by analogy.\n\n## Murph takeaway\n\nUse this source to keep VO₂ max interpretation grounded: reference standards belong to specific test methods and populations, not to casual device-to-device comparisons.",
+      "categories": [
+        "vo2max",
+        "cpet",
+        "reference-standards",
+        "cardiorespiratory-fitness"
+      ],
+      "claimUse": "measurement-context",
+      "entityType": "source_artifact",
+      "evidenceBucket": "VO2 max measurement and reference standards",
+      "key": "source_artifact:pmid-26455884",
+      "murphV1Priority": "High",
+      "potentialMurphEndpoints": [
+        "lab CPET VO2 max",
+        "METs",
+        "estimated VO2 max / cardio-fitness proxy"
+      ],
+      "quality": "reviewed",
+      "relations": [
+        {
+          "target": "biomarker:estimated-vo2max",
+          "type": "measures"
+        }
+      ],
+      "relativePath": "sources/vo2-max/pmid-26455884.md",
+      "researchEvidence": {
+        "aggregateRole": "context",
+        "cohortKey": "friend-registry-cpet-reference-standards",
+        "designKind": "retrospective_registry",
+        "designLabel": "FRIEND Registry CPET reference-standards analysis",
+        "notes": [
+          "Use as context for measured CPET interpretation, not as a target range for consumer wearable estimates."
+        ],
+        "participantCount": 7783,
+        "participantCountKind": "reported",
+        "populationLabel": "U.S. adults without cardiovascular disease who completed maximal treadmill CPET"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:b4986a210c9b1f91e7f6dd563605d3f7781ea1cea6de26162b41f10c9d99ae1a",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/vo2-max/pmid-26455884",
+      "source": {
+        "authors": "L A Kaminsky, R Arena, J Myers",
+        "citation": "Kaminsky LA, Arena R, Myers J. Reference Standards for Cardiorespiratory Fitness Measured With Cardiopulmonary Exercise Testing: Data From the Fitness Registry and the Importance of Exercise National Database. Mayo Clin Proc. 2015;90:1515-1523. doi:10.1016/j.mayocp.2015.07.026.",
+        "doi": "10.1016/j.mayocp.2015.07.026",
+        "journal": "Mayo Clinic Proceedings",
+        "kind": "journal_article",
+        "pmid": "26455884",
+        "title": "Reference Standards for Cardiorespiratory Fitness Measured With Cardiopulmonary Exercise Testing: Data From the Fitness Registry and the Importance of Exercise National Database",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/26455884/",
+        "year": 2015
+      },
+      "status": "draft",
+      "summary": "A U.S. FRIEND Registry reference-standards paper using cardiopulmonary exercise testing data to contextualize measured cardiorespiratory fitness.",
+      "title": "FRIEND Registry CPET reference standards for cardiorespiratory fitness",
+      "whyItMatters": "Helps separate measured lab cardiorespiratory fitness from rough consumer estimates and unsupported ranking."
+    },
+    {
+      "aliases": [
         "ayaki 2016 adult blue-light shield eyewear",
         "blue-light shield eyewear adults self-luminous devices"
       ],
@@ -13835,6 +14724,65 @@
       "whyItMatters": "Reinforces that delayed-sleep-phase protocols need their own framing and should not be merged into a general bedtime eyewear experiment."
     },
     {
+      "aliases": [
+        "pmid-27881567"
+      ],
+      "body": "This source is included for the **clinical meaning** of VO₂ max and cardiorespiratory fitness.\n\n## Quick read\n\n- **Source type:** American Heart Association scientific statement.\n- **Role in Murph:** context for why cardiorespiratory fitness deserves a biomarker page.\n- **Most relevant Murph signals:** measured VO₂ max, estimated wearable cardio fitness, METs, and exercise capacity.\n\n## Murph takeaway\n\nUse this source to explain that cardiorespiratory fitness is a strong clinical signal, while avoiding diagnostic claims from a consumer wearable value.",
+      "categories": [
+        "vo2max",
+        "cardiorespiratory-fitness",
+        "clinical-guideline",
+        "cardiovascular"
+      ],
+      "claimUse": "clinical-context",
+      "entityType": "source_artifact",
+      "evidenceBucket": "VO2 max and cardiorespiratory-fitness clinical context",
+      "key": "source_artifact:pmid-27881567",
+      "murphV1Priority": "High",
+      "potentialMurphEndpoints": [
+        "measured VO2 max",
+        "estimated VO2 max / cardio-fitness proxy",
+        "METs or exercise capacity"
+      ],
+      "quality": "reviewed",
+      "relations": [
+        {
+          "target": "biomarker:estimated-vo2max",
+          "type": "measures"
+        }
+      ],
+      "relativePath": "sources/vo2-max/pmid-27881567.md",
+      "researchEvidence": {
+        "aggregateRole": "synthesis",
+        "aggregationNote": "Synthesizes evidence for cardiorespiratory fitness as a clinical risk marker and practical assessment target.",
+        "designKind": "guideline",
+        "designLabel": "American Heart Association scientific statement",
+        "populationLabel": "Adults in clinical and preventive-health contexts"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:61a7da9c925b65b89fb4842c1527501ce58e3eec4b9f8afb3afd2d6287bfcedd",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/vo2-max/pmid-27881567",
+      "source": {
+        "authors": "R Ross, S N Blair, R Arena, T S Church, J-P Després, B A Franklin, W L Haskell, L A Kaminsky, B D Levine, C J Lavie, J Myers, J Niebauer, J Sallis, S S Sawada, X Sui, U Wisløff",
+        "citation": "Ross R, Blair SN, Arena R, Church TS, Després J-P, Franklin BA, Haskell WL, Kaminsky LA, Levine BD, Lavie CJ, Myers J, Niebauer J, Sallis J, Sawada SS, Sui X, Wisløff U. Importance of Assessing Cardiorespiratory Fitness in Clinical Practice: A Case for Fitness as a Clinical Vital Sign. Circulation. 2016;134:e653-e699. doi:10.1161/CIR.0000000000000461.",
+        "doi": "10.1161/CIR.0000000000000461",
+        "journal": "Circulation",
+        "kind": "guideline",
+        "pmid": "27881567",
+        "title": "Importance of Assessing Cardiorespiratory Fitness in Clinical Practice: A Case for Fitness as a Clinical Vital Sign: A Scientific Statement From the American Heart Association",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/27881567/",
+        "year": 2016
+      },
+      "status": "draft",
+      "summary": "AHA scientific statement arguing that cardiorespiratory fitness has strong prognostic value and should be assessed in clinical practice when it improves patient management.",
+      "title": "Fitness as a clinical vital sign: American Heart Association scientific statement",
+      "whyItMatters": "Frames cardiorespiratory fitness as clinically meaningful while keeping Murph language cautious and non-diagnostic."
+    },
+    {
       "body": "This source is included for **Long-term Finnish cohort evidence**.\n\n**Findings:** This prospective KIHD cohort paper associated sauna frequency with lower dementia and Alzheimer's disease risk in middle-aged Finnish men. The main finding is a long-term brain-health association, not a near-term cognition experiment result.\n\n**Why it matters:** Supports brain-health narrative, not immediate wearable outcomes\n\n**Potential experiment signals:** subjective cognition, sleep, long-horizon education\n\n**Protocol takeaway:** Use cautiously; not a short-term personal-result paper.",
       "categories": [
         "sauna"
@@ -14077,6 +15025,122 @@
       "summary": "Larger HFrEF trial that did not confirm clear HIIT superiority and highlighted intensity-fidelity issues.",
       "title": "High-intensity interval training in patients with heart failure with reduced ejection fraction",
       "whyItMatters": "Larger HFrEF trial that did not confirm clear HIIT superiority and highlighted intensity-fidelity issues."
+    },
+    {
+      "aliases": [
+        "pmid-28153947"
+      ],
+      "body": "This source is included for **measurement precision**.\n\n## Quick read\n\n- **Source type:** Measurement-methods review.\n- **Role in Murph:** defines why lab VO₂ max is different from a device estimate or an unverified peak value.\n- **Most relevant Murph signals:** lab CPET VO₂ max and consumer estimated VO₂ max as separate tiers.\n\n## Murph takeaway\n\nUse this source whenever the page needs to say: wearable VO₂ max can be useful, but it is not a direct maximal oxygen-uptake measurement.",
+      "categories": [
+        "vo2max",
+        "cpet",
+        "measurement-methods",
+        "exercise-physiology"
+      ],
+      "claimUse": "measurement-methods",
+      "entityType": "source_artifact",
+      "evidenceBucket": "VO2 max measurement methods",
+      "key": "source_artifact:pmid-28153947",
+      "murphV1Priority": "High",
+      "potentialMurphEndpoints": [
+        "lab CPET VO2 max",
+        "VO2peak",
+        "estimated VO2 max / cardio-fitness proxy"
+      ],
+      "quality": "reviewed",
+      "relations": [
+        {
+          "target": "biomarker:estimated-vo2max",
+          "type": "measures"
+        }
+      ],
+      "relativePath": "sources/vo2-max/pmid-28153947.md",
+      "researchEvidence": {
+        "aggregateRole": "context",
+        "aggregationNote": "Used for measurement language, not intervention efficacy.",
+        "designKind": "narrative_review",
+        "designLabel": "Exercise-physiology measurement review",
+        "populationLabel": "Exercise-testing and performance-measurement contexts"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:539798931b135bab0fa34258e7d816075d85d8367f3f3ceca21b1e528f3054be",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/vo2-max/pmid-28153947",
+      "source": {
+        "authors": "D C Poole, A M Jones",
+        "citation": "Poole DC, Jones AM. Measurement of the maximum oxygen uptake V̇O2max: V̇O2peak is no longer acceptable. J Appl Physiol. 2017;122:997-1002. doi:10.1152/japplphysiol.01063.2016.",
+        "doi": "10.1152/japplphysiol.01063.2016",
+        "journal": "Journal of Applied Physiology",
+        "kind": "review",
+        "pmid": "28153947",
+        "title": "Measurement of the maximum oxygen uptake V̇O2max: V̇O2peak is no longer acceptable",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/28153947/",
+        "year": 2017
+      },
+      "status": "draft",
+      "summary": "Methodological review emphasizing that confirmed VO₂ max measurement is a specific maximal oxygen-uptake construct, not simply any highest value or wearable estimate.",
+      "title": "Measurement of maximum oxygen uptake: VO₂max versus VO₂peak",
+      "whyItMatters": "Keeps the biomarker page from conflating measured VO₂ max, VO₂peak, field estimates, and consumer-wearable values."
+    },
+    {
+      "body": "This AASM guideline is included as a guardrail for overnight SpO₂ interpretation.\n\nConsumer wearable oxygen trends can provide a useful personal signal, especially when repeated lows align with snoring, witnessed apneas, morning headaches, daytime sleepiness, or cardiometabolic risk. They should not be presented as a diagnosis of obstructive sleep apnea. Appropriate diagnosis depends on clinical evaluation and validated sleep testing.",
+      "categories": [
+        "spo2",
+        "sleep-apnea",
+        "sleep",
+        "diagnostic-guideline"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Sleep-apnea diagnostic guardrail",
+      "key": "source_artifact:pmid-28162150",
+      "modality": "Polysomnography and home sleep apnea testing",
+      "murphTakeaway": "If overnight SpO₂ suggests repeated desaturation or the user has sleep-apnea symptoms, frame it as follow-up context for clinical evaluation, not a diagnosis.",
+      "murphV1Priority": "High",
+      "potentialMurphEndpoints": [
+        "overnight SpO₂ trend context",
+        "desaturation pattern notes",
+        "sleep-apnea referral context"
+      ],
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "biomarker:blood-oxygen-spo2",
+          "type": "measures"
+        }
+      ],
+      "relativePath": "sources/spo2/pmid-28162150.md",
+      "researchEvidence": {
+        "aggregateRole": "context",
+        "designKind": "guideline",
+        "designLabel": "Clinical practice guideline",
+        "populationLabel": "Adults with suspected obstructive sleep apnea"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:1e1af1234ae6f1f005acae3f4d88c2e34223475cefff184de1b27f08245a69ce",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/spo2/pmid-28162150",
+      "source": {
+        "authors": "V. K. Kapur, D. H. Auckley, S. Chowdhuri, K. M. Kuhlmann, R. Mehra, K. Ramar, C. G. Harrod",
+        "citation": "Kapur VK, Auckley DH, Chowdhuri S, Kuhlmann DC, Mehra R, Ramar K, Harrod CG. Clinical Practice Guideline for Diagnostic Testing for Adult Obstructive Sleep Apnea: An American Academy of Sleep Medicine Clinical Practice Guideline. J Clin Sleep Med. 2017;13(3):479-504. doi:10.5664/jcsm.6506. PMID: 28162150.",
+        "doi": "10.5664/jcsm.6506",
+        "journal": "Journal of Clinical Sleep Medicine",
+        "kind": "guideline",
+        "pmid": "28162150",
+        "title": "Clinical Practice Guideline for Diagnostic Testing for Adult Obstructive Sleep Apnea",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/28162150/",
+        "year": 2017
+      },
+      "status": "field-testing",
+      "studyDesign": "Clinical practice guideline",
+      "summary": "American Academy of Sleep Medicine guideline used as a guardrail: consumer overnight SpO₂ trends can raise sleep-breathing questions, but sleep apnea diagnosis requires appropriate clinical testing.",
+      "title": "AASM clinical practice guideline for diagnostic testing for adult obstructive sleep apnea",
+      "whyItMatters": "Prevents Murph from implying that wearable overnight oxygen data can diagnose obstructive sleep apnea."
     },
     {
       "aliases": [
@@ -14856,6 +15920,62 @@
       "summary": "This prospective KIHD cohort paper associated frequent sauna bathing with lower pneumonia risk over long follow-up. The main finding is a respiratory long-horizon signal, not an immediate experiment outcome. For Murph, it supports illness-log education while keeping the wearable protocol focused on nearer signals.",
       "title": "Frequent sauna bathing may reduce the risk of pneumonia",
       "whyItMatters": "Respiratory-risk signal from Finnish cohort"
+    },
+    {
+      "body": "This clinical review is the main general reference for how pulse oximetry works and why it can be wrong.\n\nFor Murph, the most important takeaway is that SpO₂ should be interpreted as an estimate and as a trend signal. It is useful because it is noninvasive and widely available, but it can be distorted by low perfusion, skin pigmentation, nail polish, movement, ambient light, dyshemoglobins, and other measurement conditions.",
+      "categories": [
+        "spo2",
+        "pulse-oximetry",
+        "respiratory",
+        "clinical-context"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Clinical interpretation and false-reading mechanisms",
+      "key": "source_artifact:pmid-29262014",
+      "modality": "Pulse oximetry",
+      "murphTakeaway": "Use SpO₂ as a trend and safety-context marker with explicit caveats for movement, low perfusion, skin pigmentation, nail polish, dyshemoglobins, and device class.",
+      "murphV1Priority": "High",
+      "potentialMurphEndpoints": [
+        "SpO₂ spot checks",
+        "overnight SpO₂ trend context",
+        "device accuracy caveats"
+      ],
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "biomarker:blood-oxygen-spo2",
+          "type": "measures"
+        }
+      ],
+      "relativePath": "sources/spo2/pmid-29262014.md",
+      "researchEvidence": {
+        "aggregateRole": "context",
+        "designKind": "narrative_review",
+        "designLabel": "Clinical narrative review",
+        "populationLabel": "Clinical and consumer pulse-oximetry users"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:8181d005f3f06df17ecc3da79dfd2d8214cc64852681e56b1555bfe23d3d5258",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/spo2/pmid-29262014",
+      "source": {
+        "authors": "Klaus D. Torp, Pranav Modi, Elizabeth J. Pollard, Leslie V. Simon",
+        "citation": "Torp KD, Modi P, Pollard EJ, Simon LV. Pulse Oximetry. In: StatPearls. Treasure Island (FL): StatPearls Publishing; updated 2023-07-30. PMID: 29262014.",
+        "journal": "StatPearls",
+        "kind": "review",
+        "pmid": "29262014",
+        "title": "Pulse Oximetry",
+        "url": "https://www.ncbi.nlm.nih.gov/books/NBK470348/",
+        "year": 2023
+      },
+      "status": "field-testing",
+      "studyDesign": "Narrative clinical review",
+      "summary": "Clinical review of pulse oximetry covering normal sea-level saturation context, hypoxemia interpretation, accuracy limits, and common sources of false readings.",
+      "title": "Pulse Oximetry - StatPearls",
+      "whyItMatters": "Provides the broad clinical foundation for SpO₂ reference-range language, trend-versus-single-reading interpretation, and confounder lists."
     },
     {
       "body": "This source is included for **Acute and mechanistic**.\n\n**Findings:** This acute study measured cardiovascular function before and after a single sauna session in adults with cardiovascular risk factors. The main finding is that sauna can acutely change blood pressure, heart rate, arterial stiffness, and related markers.\n\n**Why it matters:** One of the best acute Finnish-sauna physiology studies\n\n**Potential experiment signals:** SBP/DBP, pulse wave velocity, HR, biomarkers\n\n**Protocol takeaway:** Great for choosing measurable pre/post signals.",
@@ -19666,6 +20786,64 @@
       "whyItMatters": "Provides expert-context support for treating physical activity as glucose-relevant while keeping vigorous protocols safety-bounded."
     },
     {
+      "aliases": [
+        "pmid-35072942"
+      ],
+      "body": "This source is included for **consumer-wearable validation**.\n\n## Quick read\n\n- **Source type:** Systematic review, meta-analysis, and expert statement.\n- **Role in Murph:** explains why exercise-based wearable estimates are plausible but still uncertain at the individual level.\n- **Most relevant Murph signals:** wearable estimated VO₂ max and lab comparison context.\n\n## Murph takeaway\n\nUse this source to justify the page’s main product rule: same-device wearable VO₂ max is a trend proxy, not a clinical-grade measurement.",
+      "categories": [
+        "vo2max",
+        "wearables",
+        "validation",
+        "systematic-review"
+      ],
+      "claimUse": "wearable-validation",
+      "entityType": "source_artifact",
+      "evidenceBucket": "Consumer wearable VO2 max validation",
+      "key": "source_artifact:pmid-35072942",
+      "murphV1Priority": "High",
+      "potentialMurphEndpoints": [
+        "estimated VO2 max / cardio-fitness proxy",
+        "lab CPET VO2 max reference comparisons"
+      ],
+      "quality": "reviewed",
+      "relations": [
+        {
+          "target": "biomarker:estimated-vo2max",
+          "type": "measures"
+        }
+      ],
+      "relativePath": "sources/vo2-max/pmid-35072942.md",
+      "researchEvidence": {
+        "aggregateRole": "synthesis",
+        "aggregationNote": "Exercise-based wearable algorithms appear more accurate than resting-only algorithms, but individual-level error remains important.",
+        "designKind": "meta_analysis",
+        "designLabel": "Systematic review, meta-analysis, and expert statement",
+        "includedStudyCount": 14
+      },
+      "revision": {
+        "pageRevisionId": "sha256:2c523d55d66b1a1c4655241f5b7afb7373eaa0e244d707ea1acea605a017cdff",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/vo2-max/pmid-35072942",
+      "source": {
+        "authors": "P Molina-Garcia, H L Notbohm, M Schumann, R Argent, M Hetherington-Rauth, J Stang, W Bloch, S Cheng, U Ekelund, L B Sardinha, B Caulfield, J C Brønd, A Grøntved, F B Ortega",
+        "citation": "Molina-Garcia P, Notbohm HL, Schumann M, Argent R, Hetherington-Rauth M, Stang J, Bloch W, Cheng S, Ekelund U, Sardinha LB, Caulfield B, Brønd JC, Grøntved A, Ortega FB. Validity of Estimating the Maximal Oxygen Consumption by Consumer Wearables: A Systematic Review With Meta-analysis and Expert Statement of the INTERLIVE Network. Sports Med. 2022;52:1577-1597. doi:10.1007/s40279-021-01639-y.",
+        "doi": "10.1007/s40279-021-01639-y",
+        "journal": "Sports Medicine",
+        "kind": "review",
+        "pmid": "35072942",
+        "title": "Validity of Estimating the Maximal Oxygen Consumption by Consumer Wearables: A Systematic Review With Meta-analysis and Expert Statement of the INTERLIVE Network",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/35072942/",
+        "year": 2022
+      },
+      "status": "draft",
+      "summary": "Systematic review, meta-analysis, and expert statement on the validity of consumer wearable VO₂ max estimates and best-practice validation domains.",
+      "title": "INTERLIVE systematic review of consumer-wearable VO₂max estimates",
+      "whyItMatters": "Anchors Murph's language that wearable VO₂ max is useful for trend tracking but not interchangeable with lab CPET."
+    },
+    {
       "body": "This source is included for **Adjacent pregnancy sleep RCT**.\n\n**Findings:** In a related third-trimester pregnancy trial, full blue-blocking glasses did not significantly improve primary sleep outcomes versus partial blue blockers. The control lenses also blocked some blue light, which may have reduced contrast between groups. This is an adjacent null/mixed sleep result, not a general adult protocol proof.\n\n**Why it matters:** Useful contradiction: a pregnancy sleep trial did not show statistically significant effects on primary sleep outcomes.\n\n**Potential experiment signals:** total sleep time, sleep efficiency, mid-point of sleep, pregnancy sleep outcomes\n\n**Protocol takeaway:** Pregnancy is an adjacent supervised variant; do not use this as a general adult protocol proof.",
       "categories": [
         "red-light-glasses-before-bed",
@@ -21869,6 +23047,68 @@
     },
     {
       "aliases": [
+        "pmid-38599681"
+      ],
+      "body": "This source is included for **population-level outcome context**.\n\n## Quick read\n\n- **Source type:** Overview of meta-analyses.\n- **Role in Murph:** supports the importance of cardiorespiratory fitness without turning a wearable value into a personal risk score.\n- **Most relevant Murph signals:** measured or estimated cardiorespiratory fitness.\n\n## Murph takeaway\n\nUse this source to say cardiorespiratory fitness matters at the population level, while keeping Murph’s user-facing interpretation focused on self-comparison and experiment deltas.",
+      "categories": [
+        "vo2max",
+        "cardiorespiratory-fitness",
+        "epidemiology",
+        "meta-analysis"
+      ],
+      "claimUse": "population-prognosis",
+      "entityType": "source_artifact",
+      "evidenceBucket": "Cardiorespiratory fitness population outcomes",
+      "key": "source_artifact:pmid-38599681",
+      "murphV1Priority": "High",
+      "potentialMurphEndpoints": [
+        "cardiorespiratory fitness",
+        "measured VO2 max",
+        "estimated VO2 max / cardio-fitness proxy"
+      ],
+      "quality": "reviewed",
+      "relations": [
+        {
+          "target": "biomarker:estimated-vo2max",
+          "type": "measures"
+        }
+      ],
+      "relativePath": "sources/vo2-max/pmid-38599681.md",
+      "researchEvidence": {
+        "aggregateRole": "synthesis",
+        "aggregationNote": "Use as population-level prognostic context, not as individual diagnosis from a wearable value.",
+        "designKind": "systematic_review",
+        "designLabel": "Overview of meta-analyses",
+        "includedStudyCount": 199,
+        "participantCount": 20900000,
+        "participantCountKind": "approximate",
+        "populationLabel": "Adult cohort studies across morbidity and mortality outcomes"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:d9c42a2f162bd6bb71099dd49307d6250c3b5c33813e088c3b44d6d2067dab50",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/vo2-max/pmid-38599681",
+      "source": {
+        "authors": "J J Lang et al.",
+        "citation": "Lang JJ, et al. Cardiorespiratory fitness is a strong and consistent predictor of morbidity and mortality among adults: an overview of meta-analyses representing over 20.9 million observations from 199 unique cohort studies. Br J Sports Med. 2024. doi:10.1136/bjsports-2023-107849.",
+        "doi": "10.1136/bjsports-2023-107849",
+        "journal": "British Journal of Sports Medicine",
+        "kind": "review",
+        "pmid": "38599681",
+        "title": "Cardiorespiratory fitness is a strong and consistent predictor of morbidity and mortality among adults: an overview of meta-analyses representing over 20.9 million observations from 199 unique cohort studies",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/38599681/",
+        "year": 2024
+      },
+      "status": "draft",
+      "summary": "Large overview of meta-analyses linking higher cardiorespiratory fitness with lower adult mortality and incident chronic-condition risk.",
+      "title": "Cardiorespiratory fitness and adult morbidity/mortality: overview of meta-analyses",
+      "whyItMatters": "Supports why VO₂ max/cardiorespiratory fitness deserves high prominence while preserving association-not-causation language."
+    },
+    {
+      "aliases": [
         "Kunutsor 2024 sauna cardiorespiratory fitness"
       ],
       "body": "This source is included for long-term Finnish cohort context.\n\n**Findings:** KIHD study of 2,012 Finnish men evaluating cross-sectional and longitudinal associations between sauna exposure and cardiorespiratory fitness over an 11-year follow-up. Adds cardiorespiratory-fitness context to the KIHD sauna evidence base without turning sauna into an exercise substitute.\n\n**Protocol takeaway:** it belongs in rationale and future fitness-context discussions, not in the near-term wearable result promise for the first dry-sauna protocol.",
@@ -23653,6 +24893,65 @@
       "summary": "This acute Finnish-sauna and cold-water study measured cardiovascular dynamic responses in healthy normotensive women. The main finding is that sauna-plus-cold produces measurable cardiovascular load in women, so sex and cold-exposure context matter. For Murph, it supports BP/RHR safety framing and not defaulting to cold immersion.",
       "title": "Acute Finnish sauna heating and cold water immersion effects on cardiovascular dynamic response in normotensive women",
       "whyItMatters": "Expands the audited Finnish dry-sauna evidence corpus with a cardiovascular record marked high priority for Murph v1 interpretation."
+    },
+    {
+      "aliases": [
+        "pmid-41477023"
+      ],
+      "body": "This source is included for **recent wearable-validation context**.\n\n## Quick read\n\n- **Source type:** Qualitative systematic review.\n- **Role in Murph:** updates the wearable-accuracy caveat with newer validation literature.\n- **Most relevant Murph signals:** wearable estimated VO₂ max and lab graded-exercise-test comparisons.\n\n## Murph takeaway\n\nUse this source to keep the product copy careful: wearable VO₂ max may be valid enough for trends in some populations, but device-specific validation and individual-level uncertainty remain important.",
+      "categories": [
+        "vo2max",
+        "wearables",
+        "validation",
+        "systematic-review"
+      ],
+      "claimUse": "wearable-validation",
+      "entityType": "source_artifact",
+      "evidenceBucket": "Recent wearable VO2 max validation context",
+      "key": "source_artifact:pmid-41477023",
+      "murphV1Priority": "Medium",
+      "potentialMurphEndpoints": [
+        "estimated VO2 max / cardio-fitness proxy",
+        "lab graded exercise test reference comparisons"
+      ],
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "biomarker:estimated-vo2max",
+          "type": "measures"
+        }
+      ],
+      "relativePath": "sources/vo2-max/pmid-41477023.md",
+      "researchEvidence": {
+        "aggregateRole": "synthesis",
+        "aggregationNote": "Reinforces practical validity in some contexts while noting elite-athlete and longitudinal-validation limitations.",
+        "designKind": "systematic_review",
+        "designLabel": "Qualitative systematic review of wearable VO2max and lactate-threshold accuracy",
+        "includedStudyCount": 13,
+        "populationLabel": "Healthy, recreational, and professional exercise populations in wearable validation studies"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:cccbf3d846e3fae740b7e04032327a3253b030bee38fcd2761fa529de72b6b10",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/vo2-max/pmid-41477023",
+      "source": {
+        "authors": "L Železnik Mežan",
+        "citation": "Železnik Mežan L. Accuracy of wearables for determining the maximal oxygen uptake and lactate threshold: a qualitative systematic review. Front Sports Act Living. 2025;7:1707991. doi:10.3389/fspor.2025.1707991.",
+        "doi": "10.3389/fspor.2025.1707991",
+        "journal": "Frontiers in Sports and Active Living",
+        "kind": "review",
+        "pmid": "41477023",
+        "title": "Accuracy of wearables for determining the maximal oxygen uptake and lactate threshold: a qualitative systematic review",
+        "url": "https://www.frontiersin.org/journals/sports-and-active-living/articles/10.3389/fspor.2025.1707991/full",
+        "year": 2025
+      },
+      "status": "draft",
+      "summary": "2025 systematic review of wearable VO₂ max and lactate-threshold accuracy, reinforcing that wearable estimates can be useful but device/population validation still matters.",
+      "title": "Recent qualitative review of wearable VO₂max accuracy",
+      "whyItMatters": "Keeps the VO₂ max page current about wearable accuracy evidence and remaining validation gaps."
     },
     {
       "artifactNeeded": true,
@@ -26954,6 +28253,11 @@
     }
   ],
   "redirects": [
+    {
+      "from": "biomarker:spo2",
+      "reason": "Short biomarker shorthand now resolves to the canonical Blood Oxygen Saturation page.",
+      "to": "biomarker:blood-oxygen-spo2"
+    },
     {
       "from": "experiment_family:sauna/finnish-dry",
       "reason": "Renamed to the user-facing dry-sauna family key.",

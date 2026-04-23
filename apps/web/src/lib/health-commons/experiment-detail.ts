@@ -155,7 +155,7 @@ const PROTOCOL_BIOMARKER_DISPLAY_HINT_OVERRIDES: Record<
   "protocol_variant:norwegian-4x4/norwegian-4x4": {
     "biomarker:estimated-vo2max": {
       description:
-        "Hard four-minute intervals repeatedly stress oxygen delivery and use, which is the training stimulus most likely to nudge wearable cardio-fitness upward.",
+        "Hard four-minute intervals repeatedly stress oxygen delivery and use, which is the training stimulus most likely to nudge VO₂ max or same-device wearable cardio-fitness upward.",
       protocolProminence: "focus",
     },
     "biomarker:hrv-rmssd": {

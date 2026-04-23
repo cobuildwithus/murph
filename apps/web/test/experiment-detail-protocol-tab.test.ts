@@ -144,7 +144,7 @@ describe("ProtocolTab", () => {
     expect(markup).toContain("What could change");
     expect(markup).toContain("Also worth watching");
     expect(countOccurrences(markup, "data-card=")).toBe(3);
-    expect(markup).toContain('data-card="Estimated VO2max"');
+    expect(markup).toContain('data-card="VO₂ Max"');
     expect(markup).toContain('data-card="HRV / RMSSD"');
     expect(markup).toContain('data-card="Resting Heart Rate"');
     expect(markup).not.toContain('data-card="Morning Blood Pressure"');

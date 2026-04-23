@@ -2,6 +2,11 @@
   "schemaVersion": "murph.commons.redirects.v1",
   "redirects": [
     {
+      "from": "biomarker:spo2",
+      "to": "biomarker:blood-oxygen-spo2",
+      "reason": "Short biomarker shorthand now resolves to the canonical Blood Oxygen Saturation page."
+    },
+    {
       "from": "experiment_family:sauna/finnish-dry",
       "to": "experiment_family:dry-sauna",
       "reason": "Renamed to the user-facing dry-sauna family key."

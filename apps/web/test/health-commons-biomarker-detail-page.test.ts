@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -18,10 +20,14 @@ const mocks = vi.hoisted(() => ({
   notFound: vi.fn(() => {
     throw new Error("NEXT_NOT_FOUND");
   }),
+  redirect: vi.fn((href: string) => {
+    throw new Error(`NEXT_REDIRECT:${href}`);
+  }),
 }));
 
 vi.mock("next/navigation", () => ({
   notFound: mocks.notFound,
+  redirect: mocks.redirect,
 }));
 
 vi.mock("../app/biomarkers/[biomarkerId]/biomarker-page-client", () => ({
@@ -53,10 +59,19 @@ function createFixtureCatalog(): HealthCommonsCatalog {
   return structuredClone(healthCommonsCatalogSchema.parse(healthCommonsCatalogJson));
 }
 
+const repoRoot = path.resolve(import.meta.dirname, "../../..");
+const spo2PagePath = path.join(
+  repoRoot,
+  "packages/health-commons/content/biomarkers/blood-oxygen-spo2.md",
+);
+const redirectsPath = path.join(repoRoot, "packages/health-commons/content/redirects.json");
+const changesPath = path.join(repoRoot, "packages/health-commons/content/changes/2026-04.jsonl");
+
 describe("BiomarkerPage", () => {
   beforeEach(() => {
     mocks.biomarkerPageClient.mockClear();
     mocks.notFound.mockClear();
+    mocks.redirect.mockClear();
   });
 
   it("publishes the production-ready biomarker routes", () => {
@@ -171,6 +186,30 @@ describe("BiomarkerPage", () => {
         source: "browser_vault_metric",
       }),
     ]));
+    expect(clientBiomarker.claims).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        claimId: "spo2-readings-are-estimates",
+        sourceKeys: expect.arrayContaining([
+          "source_artifact:fda-pulse-oximeter-basics-2025",
+          "source_artifact:pmid-29262014",
+        ]),
+      }),
+      expect.objectContaining({
+        claimId: "spo2-low-readings-with-symptoms-need-escalation-context",
+        sourceKeys: expect.arrayContaining([
+          "source_artifact:mayo-hypoxemia-pulse-oximetry",
+          "source_artifact:cleveland-clinic-blood-oxygen-level",
+        ]),
+      }),
+    ]));
+    expect(clientBiomarker.sourceHighlights).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        key: "source_artifact:fda-pulse-oximeter-basics-2025",
+      }),
+      expect.objectContaining({
+        key: "source_artifact:pmid-28162150",
+      }),
+    ]));
     expect(
       clientBiomarker.protocolRankings.map((protocol) => ({
         href: protocol.href,
@@ -195,27 +234,36 @@ describe("BiomarkerPage", () => {
     expect(markup).toContain("Blood Oxygen Saturation (SpO₂)");
   });
 
-  it("resolves the short SpO₂ route via the Health Commons redirect", async () => {
-    const element = await BiomarkerPage({
+  it("redirects the short SpO₂ route to the canonical biomarker page", async () => {
+    await expect(BiomarkerPage({
       params: Promise.resolve({
         biomarkerId: "spo2",
       }),
-    });
-    const markup = renderToStaticMarkup(element);
+    })).rejects.toThrow("NEXT_REDIRECT:/biomarkers/blood-oxygen-spo2");
 
-    expect(mocks.biomarkerPageClient).toHaveBeenCalledTimes(1);
-    const clientBiomarker = mocks.biomarkerPageClient.mock.calls.at(-1)?.[0]
-      ?.biomarker as BiomarkerPageModel;
-
-    expect(clientBiomarker).toEqual(expect.objectContaining({
-      key: "biomarker:blood-oxygen-spo2",
-      routeId: "blood-oxygen-spo2",
-    }));
+    expect(mocks.redirect).toHaveBeenCalledWith("/biomarkers/blood-oxygen-spo2");
+    expect(mocks.biomarkerPageClient).not.toHaveBeenCalled();
     expect(resolveHealthCommonsBiomarkerDetail("spo2")).toEqual(expect.objectContaining({
       key: "biomarker:blood-oxygen-spo2",
       routeId: "blood-oxygen-spo2",
     }));
-    expect(markup).toContain('data-biomarker-key="biomarker:blood-oxygen-spo2"');
+  });
+
+  it("keeps the authored SpO₂ evidence claims and follow-up change note in repo content", () => {
+    const page = readFileSync(spo2PagePath, "utf8");
+    const redirects = readFileSync(redirectsPath, "utf8");
+    const changes = readFileSync(changesPath, "utf8");
+
+    expect(page).toContain("claims:");
+    expect(page).toContain("claimId: spo2-readings-are-estimates");
+    expect(page).toContain("claimId: spo2-skin-tone-perfusion-and-motion-can-bias-readings");
+    expect(page).toContain("claimId: spo2-overnight-desaturation-is-follow-up-context");
+    expect(page).toContain("claimId: spo2-low-readings-with-symptoms-need-escalation-context");
+    expect(page).toContain("source_artifact:fda-pulse-oximeter-basics-2025");
+    expect(page).toContain("source_artifact:pmid-28162150");
+    expect(redirects).toContain('"from": "biomarker:spo2"');
+    expect(redirects).toContain('"to": "biomarker:blood-oxygen-spo2"');
+    expect(changes).toContain('"changeId":"chg_2026_04_23_spo2_claims_and_delta_copy"');
   });
 
   it("resolves the REM sleep biomarker page model", async () => {
