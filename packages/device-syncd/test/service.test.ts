@@ -10,6 +10,7 @@ import { DeviceSyncError, deviceSyncError } from "../src/errors.ts";
 import { createDeviceSyncService } from "../src/service.ts";
 import { scopeWebhookTraceId } from "../src/shared.ts";
 import { SqliteDeviceSyncStore } from "../src/store.ts";
+import { DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION } from "../src/store/schema.ts";
 import { createJsonResponse, makeTempDirectory, readUrl } from "./helpers.ts";
 
 import type {
@@ -19,6 +20,11 @@ import type {
   DeviceSyncProvider,
   ProviderAuthTokens,
 } from "../src/types.ts";
+
+const UNSUPPORTED_SCHEMA_VERSION = DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION + 1;
+const UNSUPPORTED_SCHEMA_VERSION_RE = new RegExp(
+  `device sync runtime database schema version ${UNSUPPORTED_SCHEMA_VERSION} is newer than supported version ${DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION}`,
+);
 
 function readTableColumns(store: SqliteDeviceSyncStore, tableName: string): string[] {
   return (
@@ -2266,14 +2272,14 @@ test("sqlite store still rejects newer schema versions even when stale legacy ta
         id text primary key
       );
     `);
-    writeSqliteRuntimeUserVersion(database, 99);
+    writeSqliteRuntimeUserVersion(database, UNSUPPORTED_SCHEMA_VERSION);
   } finally {
     database.close();
   }
 
   assert.throws(
     () => new SqliteDeviceSyncStore(databasePath),
-    /device sync runtime database schema version 99 is newer than supported version 1/,
+    UNSUPPORTED_SCHEMA_VERSION_RE,
   );
 });
 
