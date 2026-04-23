@@ -791,6 +791,7 @@ async function executeAssistantProviderAttempt(input: {
       apiKeyEnv: attemptPlan.route.providerOptions.apiKeyEnv,
       providerName: attemptPlan.route.providerOptions.providerName,
       presetId: attemptPlan.route.providerOptions.presetId,
+      gatewayOnlyProviders: attemptPlan.route.providerOptions.gatewayOnlyProviders,
       headers: attemptPlan.route.providerOptions.headers,
       webSearch: attemptPlan.route.providerOptions.webSearch,
       zeroDataRetention:

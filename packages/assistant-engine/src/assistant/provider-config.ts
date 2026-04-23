@@ -2,6 +2,7 @@ import type { AssistantModelSpec } from '../model-harness.js'
 import { readAssistantEnvString } from '@murphai/operator-config/assistant/shared'
 import {
   normalizeAssistantProviderConfig,
+  normalizeAssistantGatewayOnlyProviders,
   resolveAssistantProviderRuntimeTarget,
   type AssistantProviderConfigLike,
 } from '@murphai/operator-config/assistant/provider-config'
@@ -48,13 +49,19 @@ export function resolveAssistantModelSpecFromProviderConfig(
 function resolveAssistantResponsesRequestPolicy(
   input: ReturnType<typeof normalizeAssistantProviderConfig>,
 ): AssistantModelSpec['responsesRequestPolicy'] {
-  return (
-    input.target.kind === 'responses' &&
-    input.target.via === 'vercel-ai-gateway' &&
-    input.policy.zeroDataRetention === true
+  if (input.target.kind !== 'responses' || input.target.via !== 'vercel-ai-gateway') {
+    return undefined
+  }
+
+  const gatewayOnlyProviders = normalizeAssistantGatewayOnlyProviders(
+    input.target.gatewayOnlyProviders,
   )
-    ? {
-        gatewayZeroDataRetention: true,
-      }
-    : undefined
+  const policy: NonNullable<AssistantModelSpec['responsesRequestPolicy']> = {
+    ...(gatewayOnlyProviders ? { gatewayOnlyProviders } : {}),
+    ...(input.policy.zeroDataRetention === true
+      ? { gatewayZeroDataRetention: true }
+      : {}),
+  }
+
+  return Object.keys(policy).length > 0 ? policy : undefined
 }

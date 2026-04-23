@@ -68,6 +68,9 @@ export function assistantModelTargetToProviderConfigInput(
         provider: 'openai-compatible',
         apiKeyEnv: normalizeNullableString(target.apiKeyEnv),
         baseUrl: normalizeNullableString(target.endpoint),
+        ...(target.gatewayOnlyProviders
+          ? { gatewayOnlyProviders: target.gatewayOnlyProviders }
+          : {}),
         headers: normalizeAssistantHeaders(target.headers),
         model: normalizeNullableString(target.model),
         presetId: target.presetId ?? null,
@@ -144,6 +147,9 @@ function convertAssistantProviderConfigToModelTarget(
         adapter: 'openai-compatible',
         apiKeyEnv: config.target.apiKeyEnv,
         endpoint: config.target.baseUrl,
+        ...(config.target.gatewayOnlyProviders
+          ? { gatewayOnlyProviders: [...config.target.gatewayOnlyProviders] }
+          : {}),
         headers: config.target.headers,
         model: config.target.model,
         presetId: config.target.presetId,
@@ -192,6 +198,9 @@ function hasAssistantModelTargetValues(target: AssistantModelTarget): boolean {
           target.apiKeyEnv ??
           target.presetId ??
           target.providerName ??
+          (target.gatewayOnlyProviders && target.gatewayOnlyProviders.length > 0
+            ? 'gateway-only-providers'
+            : null) ??
           (target.headers && Object.keys(target.headers).length > 0 ? 'headers' : null) ??
           target.reasoningEffort ??
           target.webSearch ??

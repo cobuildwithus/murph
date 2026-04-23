@@ -6,7 +6,10 @@ import {
   type AssistantSandbox,
 } from '../assistant-cli-contracts.js'
 import { splitAssistantHeadersForPersistence } from './redaction.js'
-import { normalizeNullableString } from './shared.js'
+import {
+  isAssistantVercelAIGatewayBaseUrl,
+  normalizeNullableString,
+} from './shared.js'
 import {
   normalizeAssistantWebSearchMode,
   resolveAssistantRuntimeTarget,
@@ -37,6 +40,7 @@ export interface AssistantResponsesTargetConfig {
   via: AssistantTargetVia
   apiKeyEnv: string | null
   baseUrl: string | null
+  gatewayOnlyProviders?: readonly string[] | null
   headers: Record<string, string> | null
   model: string | null
   presetId: SetupAssistantProviderPreset | null
@@ -47,6 +51,7 @@ export interface AssistantOpenAICompatibleTargetConfig {
   kind: 'openai-compatible'
   apiKeyEnv: string | null
   baseUrl: string | null
+  gatewayOnlyProviders?: readonly string[] | null
   headers: Record<string, string> | null
   model: string | null
   presetId: SetupAssistantProviderPreset | null
@@ -77,6 +82,7 @@ export interface AssistantProviderDefaultsConfig {
   baseUrl: string | null
   codexCommand: string | null
   codexHome: string | null
+  gatewayOnlyProviders?: readonly string[] | null
   headers: Record<string, string> | null
   model: string | null
   oss: boolean
@@ -97,6 +103,7 @@ export type AssistantProviderConfigInput = {
   baseUrl?: string | null
   codexCommand?: string | null
   codexHome?: string | null
+  gatewayOnlyProviders?: readonly string[] | null
   headers?: Record<string, string> | null
   model?: string | null
   oss?: boolean | null
@@ -120,6 +127,7 @@ const ASSISTANT_PROVIDER_CONFIG_FIELDS = [
   'baseUrl',
   'codexCommand',
   'codexHome',
+  'gatewayOnlyProviders',
   'headers',
   'model',
   'oss',
@@ -199,6 +207,7 @@ export function sanitizeAssistantProviderConfig(
   const resolved = resolveAssistantRuntimeTarget({
     apiKeyEnv: input?.apiKeyEnv,
     baseUrl: input?.baseUrl,
+    gatewayOnlyProviders: input?.gatewayOnlyProviders,
     headers: input?.headers,
     model: input?.model,
     presetId,
@@ -209,13 +218,23 @@ export function sanitizeAssistantProviderConfig(
     zeroDataRetention: policy.zeroDataRetention,
   })
 
+  const normalizedBaseUrl = normalizeNullableString(input?.baseUrl)
+  const normalizedProviderName = normalizeNullableString(input?.providerName)
+  const gatewayOnlyProviders = isAssistantGatewayOnlyProviderTarget({
+    baseUrl: normalizedBaseUrl,
+    presetId: resolved.presetId,
+    providerName: normalizedProviderName,
+  })
+    ? normalizeAssistantGatewayOnlyProviders(input?.gatewayOnlyProviders)
+    : null
   const sharedTargetFields = {
     apiKeyEnv: normalizeNullableString(input?.apiKeyEnv),
-    baseUrl: normalizeNullableString(input?.baseUrl),
+    baseUrl: normalizedBaseUrl,
+    gatewayOnlyProviders,
     headers: normalizeAssistantHeaders(input?.headers),
     model: normalizeNullableString(input?.model),
     presetId: resolved.presetId,
-    providerName: normalizeNullableString(input?.providerName),
+    providerName: normalizedProviderName,
   }
 
   const nextPolicy: AssistantProviderPolicyConfig = {
@@ -376,6 +395,10 @@ export function serializeAssistantProviderSessionOptions(
       ? { headers: normalized.target.headers }
       : {}),
     ...(isAssistantOpenAICompatibleTargetConfig(normalized) &&
+    normalized.target.gatewayOnlyProviders
+      ? { gatewayOnlyProviders: normalized.target.gatewayOnlyProviders }
+      : {}),
+    ...(isAssistantOpenAICompatibleTargetConfig(normalized) &&
     normalized.policy.webSearch
       ? { webSearch: normalized.policy.webSearch }
       : {}),
@@ -419,6 +442,10 @@ export function serializeAssistantProviderOperatorDefaults(
     headers: isAssistantOpenAICompatibleTargetConfig(normalized)
       ? normalizeAssistantPersistedHeaders(normalized.target.headers)
       : null,
+    ...(isAssistantOpenAICompatibleTargetConfig(normalized) &&
+    normalized.target.gatewayOnlyProviders
+      ? { gatewayOnlyProviders: normalized.target.gatewayOnlyProviders }
+      : {}),
     webSearch: isAssistantOpenAICompatibleTargetConfig(normalized)
       ? normalized.policy.webSearch
       : null,
@@ -436,6 +463,29 @@ export function normalizeAssistantPersistedHeaders(
   const normalizedHeaders = normalizeAssistantHeaders(headers)
 
   return splitAssistantHeadersForPersistence(normalizedHeaders).persistedHeaders
+}
+
+export function normalizeAssistantGatewayOnlyProviders(
+  providers: readonly string[] | null | undefined,
+): readonly string[] | null {
+  if (!Array.isArray(providers)) {
+    return null
+  }
+
+  const seen = new Set<string>()
+  const normalizedProviders: string[] = []
+
+  for (const provider of providers) {
+    const normalized = normalizeAssistantGatewayProviderSlug(provider)
+    if (!normalized || seen.has(normalized)) {
+      continue
+    }
+
+    seen.add(normalized)
+    normalizedProviders.push(normalized)
+  }
+
+  return normalizedProviders.length > 0 ? normalizedProviders : null
 }
 
 export function assistantProviderConfigsEqual(
@@ -543,6 +593,27 @@ function normalizeAssistantPresetId(
   return resolveOpenAICompatibleProviderPresetFromId(value)?.id ?? null
 }
 
+function normalizeAssistantGatewayProviderSlug(
+  value: string | null | undefined,
+): string | null {
+  const normalized = normalizeNullableString(value)?.toLowerCase() ?? null
+  return normalized && /^[a-z0-9][a-z0-9._-]*$/u.test(normalized)
+    ? normalized
+    : null
+}
+
+function isAssistantGatewayOnlyProviderTarget(input: {
+  baseUrl: string | null
+  presetId: SetupAssistantProviderPreset | null
+  providerName: string | null
+}): boolean {
+  return (
+    input.presetId === 'vercel-ai-gateway' ||
+    input.providerName?.toLowerCase() === 'vercel-ai-gateway' ||
+    isAssistantVercelAIGatewayBaseUrl(input.baseUrl)
+  )
+}
+
 function assistantProviderConfigToInput(
   config: AssistantProviderConfig,
 ): AssistantProviderConfigInput {
@@ -566,6 +637,9 @@ function assistantProviderConfigToInput(
         provider: 'openai-compatible',
         apiKeyEnv: config.target.apiKeyEnv,
         baseUrl: config.target.baseUrl,
+        ...(config.target.gatewayOnlyProviders
+          ? { gatewayOnlyProviders: config.target.gatewayOnlyProviders }
+          : {}),
         headers: config.target.headers,
         model: config.target.model,
         presetId: config.target.presetId,
@@ -617,6 +691,7 @@ function resolveAssistantProviderForNormalization(
     normalizeNullableString(input?.apiKeyEnv) ||
     normalizeNullableString(input?.providerName) ||
     normalizeAssistantPresetId(input?.presetId) ||
+    normalizeAssistantGatewayOnlyProviders(input?.gatewayOnlyProviders) ||
     normalizeAssistantHeaders(input?.headers) ||
     normalizeAssistantWebSearchMode(input?.webSearch) ||
     input?.zeroDataRetention === true

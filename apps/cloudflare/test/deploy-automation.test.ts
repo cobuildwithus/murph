@@ -74,6 +74,7 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "180000",
       HOSTED_EXECUTION_TEE_AUTOMATION_RECIPIENT_KEY_ID: "tee-automation:v1",
       HOSTED_WAKE_ENCRYPTION_KEY_VERSION: "wake:v2",
+      HOSTED_ASSISTANT_GATEWAY_ONLY_PROVIDERS: "openai",
       HOSTED_ASSISTANT_ZERO_DATA_RETENTION: "true",
       HOSTED_EMAIL_DEFAULT_SUBJECT: "Murph note",
       HOSTED_EMAIL_DOMAIN: "mail.example.test",
@@ -96,6 +97,8 @@ describe("hosted deploy automation helpers", () => {
           vcpu: number;
         };
         max_instances: number;
+        rollout_active_grace_period: number;
+        rollout_step_percentage: number[];
       }>;
       durable_objects: {
         bindings: Array<{
@@ -145,6 +148,8 @@ describe("hosted deploy automation helpers", () => {
         image_build_context: "..",
         instance_type: "standard-1",
         max_instances: 250,
+        rollout_active_grace_period: 300,
+        rollout_step_percentage: [5, 25, 50, 100],
       },
     ]);
     expect(config.durable_objects.bindings).toEqual([
@@ -191,6 +196,7 @@ describe("hosted deploy automation helpers", () => {
     expect(config.vars.HOSTED_EXECUTION_TEE_AUTOMATION_RECIPIENT_KEY_ID).toBe("tee-automation:v1");
     expect(config.vars.HOSTED_WAKE_ENCRYPTION_KEY_VERSION).toBe("wake:v2");
     expect(config.vars.HOSTED_WEB_CALLBACK_SIGNING_KEY_ID).toBe("callback:v2");
+    expect(config.vars.HOSTED_ASSISTANT_GATEWAY_ONLY_PROVIDERS).toBe("openai");
     expect(config.vars.HOSTED_ASSISTANT_ZERO_DATA_RETENTION).toBe("true");
     expect(config.vars.HOSTED_EXECUTION_AUTOMATION_RECIPIENT_KEY_ID).toBe("automation:v2");
     expect(config.vars.MURPH_WEB_FETCH_ENABLED).toBe("true");
@@ -229,6 +235,8 @@ describe("hosted deploy automation helpers", () => {
           vcpu: number;
         };
         max_instances: number;
+        rollout_active_grace_period?: number;
+        rollout_step_percentage?: number[];
       }>;
       durable_objects: {
         bindings: Array<{
@@ -276,6 +284,8 @@ describe("hosted deploy automation helpers", () => {
       class_name: generatedConfig.containers[0]?.class_name,
       instance_type: generatedConfig.containers[0]?.instance_type,
       max_instances: generatedConfig.containers[0]?.max_instances,
+      rollout_active_grace_period: generatedConfig.containers[0]?.rollout_active_grace_period,
+      rollout_step_percentage: generatedConfig.containers[0]?.rollout_step_percentage,
     });
     expect(checkedInConfig.durable_objects.bindings).toEqual(generatedConfig.durable_objects.bindings);
     expect(checkedInConfig.migrations).toEqual(generatedConfig.migrations);

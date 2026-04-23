@@ -289,6 +289,7 @@ test('assistant provider helpers cover null inference and empty header canonical
         kind: 'openai-compatible',
         apiKeyEnv: null,
         baseUrl: 'https://example.test/v1',
+        gatewayOnlyProviders: null,
         headers: {
           '': 'value',
         },
@@ -354,6 +355,7 @@ test('assistant provider helpers cover null inference and empty header canonical
         kind: 'openai-compatible',
         apiKeyEnv: null,
         baseUrl: null,
+        gatewayOnlyProviders: null,
         headers: null,
         model: null,
         presetId: null,

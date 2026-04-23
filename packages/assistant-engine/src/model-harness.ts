@@ -449,6 +449,7 @@ export interface AssistantModelMessage {
 }
 
 export interface AssistantResponsesRequestPolicy {
+  gatewayOnlyProviders?: readonly string[] | null
   gatewayReporting?: {
     tags?: readonly string[]
     user?: string | null
@@ -998,6 +999,13 @@ function resolveAssistantGatewayRequestOptions(
     gatewayOptions.zeroDataRetention = true
   }
 
+  const only = normalizeGatewayProviderSlugs(
+    requestPolicy?.gatewayOnlyProviders ?? [],
+  )
+  if (only.length > 0) {
+    gatewayOptions.only = only
+  }
+
   const reporting = requestPolicy?.gatewayReporting
   const user = normalizeGatewayReportingString(reporting?.user ?? null)
   const tags = normalizeGatewayReportingTags(reporting?.tags ?? [])
@@ -1011,6 +1019,27 @@ function resolveAssistantGatewayRequestOptions(
   }
 
   return Object.keys(gatewayOptions).length > 0 ? gatewayOptions : null
+}
+
+function normalizeGatewayProviderSlugs(providers: readonly string[]): string[] {
+  const seen = new Set<string>()
+  const normalizedProviders: string[] = []
+
+  for (const provider of providers) {
+    const normalized = normalizeGatewayReportingString(provider)?.toLowerCase() ?? null
+    if (
+      !normalized ||
+      !/^[a-z0-9][a-z0-9._-]*$/u.test(normalized) ||
+      seen.has(normalized)
+    ) {
+      continue
+    }
+
+    seen.add(normalized)
+    normalizedProviders.push(normalized)
+  }
+
+  return normalizedProviders
 }
 
 function normalizeGatewayReportingString(value: string | null | undefined): string | null {

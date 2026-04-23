@@ -33,6 +33,7 @@ import {
 import type { AssistantUsageCredentialSource } from '@murphai/runtime-state/node'
 import {
   isAssistantOpenAICompatibleTargetConfig,
+  normalizeAssistantGatewayOnlyProviders,
   resolveAssistantChatProviderFromConfig,
   shouldAssistantProviderUseGatewayWebSearch,
   shouldAssistantProviderUseMurphWebSearch,
@@ -57,6 +58,7 @@ type JsonPrimitive = boolean | number | string | null
 type JsonValue = JsonPrimitive | JsonObject | JsonValue[]
 type JsonObject = { [key: string]: JsonValue | undefined }
 interface GatewayProviderOptions extends JsonObject {
+  only?: string[]
   tags?: string[]
   user?: string
   zeroDataRetention?: boolean
@@ -69,6 +71,7 @@ interface AssistantStripeBillingContext {
 
 interface OpenAiCompatibleTargetIdentity {
   baseUrl?: string | null
+  gatewayOnlyProviders?: readonly string[] | null
   presetId?: string | null
   providerName?: string | null
 }
@@ -384,6 +387,9 @@ function applyOpenAiCompatibleGatewayPolicies(input: {
     ...(existingReporting?.tags ?? []),
     ...(Array.isArray(gatewayOptions.tags) ? gatewayOptions.tags : []),
   ])
+  const gatewayOnlyProviders = normalizeAssistantGatewayOnlyProviders(
+    gatewayOptions.only,
+  )
 
   return {
     ...input.languageModelSpec,
@@ -397,6 +403,11 @@ function applyOpenAiCompatibleGatewayPolicies(input: {
       ...(gatewayOptions.zeroDataRetention === true
         ? {
             gatewayZeroDataRetention: true,
+          }
+        : {}),
+      ...(gatewayOnlyProviders
+        ? {
+            gatewayOnlyProviders,
           }
         : {}),
       ...(user || tags.length > 0
@@ -588,6 +599,13 @@ function resolveOpenAiCompatibleGatewayProviderOptions(input: {
   }
 
   const gatewayOptions: GatewayProviderOptions = {}
+  const gatewayOnlyProviders = normalizeAssistantGatewayOnlyProviders(
+    input.providerTarget.gatewayOnlyProviders,
+  )
+
+  if (gatewayOnlyProviders) {
+    gatewayOptions.only = [...gatewayOnlyProviders]
+  }
 
   if (input.providerZeroDataRetention) {
     gatewayOptions.zeroDataRetention = true

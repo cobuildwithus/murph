@@ -186,6 +186,10 @@ export const assistantHeadersSchema = z.record(
   z.string(),
 )
 
+export const assistantGatewayOnlyProvidersValueSchema = z
+  .array(z.string().trim().toLowerCase().regex(/^[a-z0-9][a-z0-9._-]*$/u))
+  .nullable()
+
 export const assistantCodexModelTargetSchema = z
   .object({
     adapter: z.literal('codex-cli'),
@@ -205,6 +209,7 @@ export const assistantOpenAiCompatibleModelTargetSchema = z
     adapter: z.literal('openai-compatible'),
     apiKeyEnv: z.string().min(1).nullable().default(null),
     endpoint: z.string().min(1).nullable().default(null),
+    gatewayOnlyProviders: assistantGatewayOnlyProvidersValueSchema.optional(),
     headers: assistantHeadersSchema.nullable().default(null),
     model: z.string().min(1).nullable().default(null),
     presetId: z.enum(setupAssistantProviderPresetValues).nullable().default(null),
@@ -255,6 +260,7 @@ export const assistantProviderSessionOptionsSchema = z.object({
   executionDriver: z.enum(assistantExecutionDriverValues),
   providerName: z.string().min(1).nullable().optional(),
   presetId: z.enum(setupAssistantProviderPresetValues).nullable().optional(),
+  gatewayOnlyProviders: assistantGatewayOnlyProvidersValueSchema.optional(),
   resumeKind: z.enum(assistantResumeKindValues).nullable(),
   headers: assistantHeadersSchema.nullable().optional(),
   webSearch: z.enum(assistantWebSearchModeValues).nullable().optional(),
@@ -286,6 +292,7 @@ export const assistantProviderFailoverRouteSchema = z
     apiKeyEnv: z.string().min(1).nullable().optional(),
     providerName: z.string().min(1).nullable().optional(),
     presetId: z.enum(setupAssistantProviderPresetValues).nullable().optional(),
+    gatewayOnlyProviders: assistantGatewayOnlyProvidersValueSchema.optional(),
     headers: assistantHeadersSchema.nullable().optional(),
     webSearch: z.enum(assistantWebSearchModeValues).nullable().optional(),
     zeroDataRetention: z.boolean().optional(),
@@ -375,6 +382,7 @@ function buildAssistantRuntimeSession(
           apiKeyEnv: value.target.apiKeyEnv,
           baseUrl: value.target.endpoint,
           headers: value.target.headers,
+          gatewayOnlyProviders: value.target.gatewayOnlyProviders,
           model: value.target.model,
           presetId: value.target.presetId,
           providerName: value.target.providerName,
@@ -411,6 +419,9 @@ function buildAssistantRuntimeSession(
           ...(value.target.apiKeyEnv ? { apiKeyEnv: value.target.apiKeyEnv } : {}),
           ...(value.target.providerName
             ? { providerName: value.target.providerName }
+            : {}),
+          ...(value.target.gatewayOnlyProviders
+            ? { gatewayOnlyProviders: value.target.gatewayOnlyProviders }
             : {}),
           ...(value.target.headers ? { headers: value.target.headers } : {}),
           ...(value.target.webSearch ? { webSearch: value.target.webSearch } : {}),

@@ -216,6 +216,7 @@ describe('OpenAI-compatible native resume retention options', () => {
     const providerOptions = resolveOpenAiCompatibleProviderOptions({
       providerConfig: normalizeAssistantProviderConfig({
         baseUrl: 'https://ai-gateway.vercel.sh/v1',
+        gatewayOnlyProviders: ['openai'],
         model: 'openai/gpt-5',
         presetId: 'vercel-ai-gateway',
         provider: 'openai-compatible',
@@ -228,6 +229,7 @@ describe('OpenAI-compatible native resume retention options', () => {
     })
 
     expect(providerOptions?.gateway).toEqual({
+      only: ['openai'],
       tags: [
         'env:production',
         'feature:assistant_reply',
