@@ -8,8 +8,6 @@ import {
   writeVersionedJsonStateFile,
 } from "@murphai/runtime-state/node";
 
-import { ensureDirectory } from "../shared.js";
-
 export const PARSER_TOOLCHAIN_SCHEMA = "murph.parser-toolchain-config.v1" as const;
 export const PARSER_TOOLCHAIN_SCHEMA_VERSION = 1 as const;
 
@@ -84,7 +82,6 @@ export async function writeParserToolchainConfig(
     tools: mergedTools,
   };
 
-  await ensureDirectory(paths.parsersRoot);
   await writeVersionedJsonStateFile({
     filePath: paths.configPath,
     schema: PARSER_TOOLCHAIN_SCHEMA,

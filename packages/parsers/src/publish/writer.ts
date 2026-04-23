@@ -4,9 +4,9 @@ import { promises as fs } from "node:fs";
 import { normalizeParserArtifactIdentity } from "../contracts/artifact.js";
 import type { ParserOutput } from "../contracts/parse.js";
 import {
+  assertVaultPathOnDisk,
   normalizeRelativePath,
   removeVaultDirectoryIfExists,
-  resolveVaultRelativePath,
   resetVaultDirectory,
 } from "../shared.js";
 
@@ -42,7 +42,7 @@ export async function writeParserArtifacts(input: {
       String(input.attempt).padStart(4, "0"),
     ),
   );
-  await resetVaultDirectory(input.vaultRoot, attemptDirectoryPath);
+  const absoluteAttemptDirectoryPath = await resetVaultDirectory(input.vaultRoot, attemptDirectoryPath);
 
   const plainTextPath = normalizePublishedParserPath(path.posix.join(attemptDirectoryPath, "plain.txt"));
   const markdownPath = normalizePublishedParserPath(path.posix.join(attemptDirectoryPath, "normalized.md"));
@@ -51,34 +51,32 @@ export async function writeParserArtifacts(input: {
   const tablesPath = input.output.tables.length > 0
     ? normalizePublishedParserPath(path.posix.join(attemptDirectoryPath, "tables.json"))
     : null;
+  const absolutePlainTextPath = path.join(absoluteAttemptDirectoryPath, "plain.txt");
+  const absoluteMarkdownPath = path.join(absoluteAttemptDirectoryPath, "normalized.md");
+  const absoluteChunksPath = path.join(absoluteAttemptDirectoryPath, "chunks.jsonl");
+  const absoluteManifestPath = path.join(absoluteAttemptDirectoryPath, "manifest.json");
+  const absoluteTablesPath = tablesPath === null ? null : path.join(absoluteAttemptDirectoryPath, "tables.json");
 
   try {
-    await fs.writeFile(
-      await resolveVaultRelativePath(input.vaultRoot, plainTextPath),
-      `${input.output.text.trim()}\n`,
-      "utf8",
-    );
-    await fs.writeFile(
-      await resolveVaultRelativePath(input.vaultRoot, markdownPath),
-      `${input.output.markdown.trim()}\n`,
-      "utf8",
-    );
-    await fs.writeFile(
-      await resolveVaultRelativePath(input.vaultRoot, chunksPath),
+    await writeValidatedArtifactFile(input.vaultRoot, absolutePlainTextPath, `${input.output.text.trim()}\n`);
+    await writeValidatedArtifactFile(input.vaultRoot, absoluteMarkdownPath, `${input.output.markdown.trim()}\n`);
+    await writeValidatedArtifactFile(
+      input.vaultRoot,
+      absoluteChunksPath,
       input.output.blocks.map((block) => JSON.stringify(block)).join("\n") + (input.output.blocks.length > 0 ? "\n" : ""),
-      "utf8",
     );
 
-    if (tablesPath) {
-      await fs.writeFile(
-        await resolveVaultRelativePath(input.vaultRoot, tablesPath),
+    if (absoluteTablesPath) {
+      await writeValidatedArtifactFile(
+        input.vaultRoot,
+        absoluteTablesPath,
         `${JSON.stringify(input.output.tables, null, 2)}\n`,
-        "utf8",
       );
     }
 
-    await fs.writeFile(
-      await resolveVaultRelativePath(input.vaultRoot, manifestPath),
+    await writeValidatedArtifactFile(
+      input.vaultRoot,
+      absoluteManifestPath,
       `${JSON.stringify(
         {
           schema: "murph.parser-manifest.v1",
@@ -96,7 +94,6 @@ export async function writeParserArtifacts(input: {
         null,
         2,
       )}\n`,
-      "utf8",
     );
   } catch (error) {
     await removeVaultDirectoryIfExists(input.vaultRoot, attemptDirectoryPath);
@@ -124,4 +121,13 @@ function normalizePublishedParserPath(relativePath: string): string {
   }
 
   return normalized;
+}
+
+async function writeValidatedArtifactFile(
+  vaultRoot: string,
+  absolutePath: string,
+  content: string,
+): Promise<void> {
+  await assertVaultPathOnDisk(vaultRoot, absolutePath);
+  await fs.writeFile(absolutePath, content, "utf8");
 }
