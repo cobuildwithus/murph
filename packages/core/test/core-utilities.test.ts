@@ -5,7 +5,7 @@ import { promises as fs } from "node:fs";
 
 import { afterEach, test } from "vitest";
 
-import { canonicalizeEventRelations } from "../src/event-links.ts";
+import { normalizeCanonicalEventLinks } from "../src/event-links.ts";
 import { VaultError, isVaultError } from "../src/errors.ts";
 import { parseFrontmatterDocument, stringifyFrontmatterDocument } from "../src/frontmatter.ts";
 import {
@@ -614,9 +614,9 @@ test("markdown registry wrappers and profile reads cover the remaining branch se
   await assert.doesNotReject(() => fs.access(path.join(vaultRoot, writtenRecord.auditPath)));
 });
 
-test("event link canonicalization dedupes links, falls back from related ids, and reports invalid shapes", () => {
-  const deduped = canonicalizeEventRelations({
-    links: [
+test("event link canonicalization dedupes links and reports invalid shapes", () => {
+  const deduped = normalizeCanonicalEventLinks({
+    value: [
       {
         type: "related_to",
         targetId: "evt_01",
@@ -630,13 +630,11 @@ test("event link canonicalization dedupes links, falls back from related ids, an
         targetId: "evt_02",
       },
     ],
-    relatedIds: ["evt_99"],
-    normalizeStringList: (value) => (Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : undefined),
     errorCode: "EVENT_LINKS_INVALID",
     errorMessage: "Links are invalid.",
   });
 
-  assert.deepEqual(deduped.links, [
+  assert.deepEqual(deduped, [
     {
       type: "related_to",
       targetId: "evt_01",
@@ -646,31 +644,19 @@ test("event link canonicalization dedupes links, falls back from related ids, an
       targetId: "evt_02",
     },
   ]);
-  assert.equal("relatedIds" in deduped, false);
-
-  const fallback = canonicalizeEventRelations({
-    links: undefined,
-    relatedIds: ["evt_03", "evt_03"],
-    normalizeStringList: (value) => (Array.isArray(value) ? [...new Set(value.filter((entry): entry is string => typeof entry === "string"))] : undefined),
+  const empty = normalizeCanonicalEventLinks({
+    value: [],
     errorCode: "EVENT_LINKS_INVALID",
     errorMessage: "Links are invalid.",
   });
-  assert.deepEqual(fallback.links, [
-    {
-      type: "related_to",
-      targetId: "evt_03",
-    },
-  ]);
-  assert.equal("relatedIds" in fallback, false);
+  assert.deepEqual(empty, []);
 
   assert.equal(isVaultError(new VaultError("TEST", "Broken")), true);
   assert.equal(isVaultError(new Error("nope")), false);
   assert.throws(
     () =>
-      canonicalizeEventRelations({
-        links: [{ type: "related_to" }],
-        relatedIds: undefined,
-        normalizeStringList: () => undefined,
+      normalizeCanonicalEventLinks({
+        value: [{ type: "related_to" }],
         errorCode: "EVENT_LINKS_INVALID",
         errorMessage: "Links are invalid.",
       }),

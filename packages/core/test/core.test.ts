@@ -4554,7 +4554,7 @@ test("high-level canonical mutation ports own provider, event, and vault summary
     occurredAt: "2026-03-12T08:15:00.000Z",
     title: "Morning note",
     note: "Provider follow-up scheduled.",
-    relatedIds: [createdProvider.providerId],
+    links: [{ type: "related_to", targetId: createdProvider.providerId }],
   } satisfies Record<string, unknown>;
   const firstEvent = await upsertEvent({
     vaultRoot,

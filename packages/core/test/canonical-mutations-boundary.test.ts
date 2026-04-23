@@ -430,7 +430,11 @@ test("high-level canonical mutation ports dedupe trimmed duplicate experiment an
       title: "Boundary note",
       note: "Checking canonical duplicate trimming.",
       tags: [" focus ", "focus", "energy"],
-      relatedIds: [created.experiment.id, ` ${created.experiment.id} `, "goal_01JNW7YJ7MNE7M9Q2QWQK4Z3F8"],
+      links: [
+        { type: "related_to", targetId: created.experiment.id },
+        { type: "related_to", targetId: ` ${created.experiment.id} ` },
+        { type: "related_to", targetId: "goal_01JNW7YJ7MNE7M9Q2QWQK4Z3F8" },
+      ],
       rawRefs: [" raw/documents/a.pdf ", "raw/documents/a.pdf", "raw/documents/b.pdf"],
     } satisfies Record<string, unknown>,
   });
@@ -449,6 +453,26 @@ test("high-level canonical mutation ports dedupe trimmed duplicate experiment an
     { type: "related_to", targetId: "goal_01JNW7YJ7MNE7M9Q2QWQK4Z3F8" },
   ]);
   assert.deepEqual(eventRecord.rawRefs, ["raw/documents/a.pdf", "raw/documents/b.pdf"]);
+});
+
+test("high-level canonical event upsert rejects deprecated relatedIds payloads", async () => {
+  const vaultRoot = await makeTempDirectory("murph-core-boundary");
+  await initializeVault({ vaultRoot });
+
+  await assert.rejects(
+    () =>
+      upsertEvent({
+        vaultRoot,
+        payload: {
+          id: "evt_01JRV2E6E2H6A0A0N0D0H0B0C1",
+          kind: "note",
+          occurredAt: "2026-03-12T08:15:00.000Z",
+          title: "Legacy relation payload",
+          relatedIds: ["goal_01JNW7YJ7MNE7M9Q2QWQK4Z3F8"],
+        } satisfies Record<string, unknown>,
+      }),
+    (error: unknown) => error instanceof VaultError && error.code === "EVENT_CONTRACT_INVALID",
+  );
 });
 
 test("helper-backed journal mutation readers preserve exact invalid-frontmatter errors across callers", async () => {

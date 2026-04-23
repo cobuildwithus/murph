@@ -42,7 +42,10 @@ import {
   prepareEventAttachments,
   stagePreparedEventAttachmentsInBatch,
 } from "./event-attachments.ts";
-import { canonicalizeEventRelations } from "./event-links.ts";
+import {
+  assertNoLegacyRelatedIds,
+  normalizeCanonicalEventLinks,
+} from "./event-links.ts";
 import { VaultError } from "./errors.ts";
 import { pathExists, readUtf8File, writeVaultTextFile } from "./fs.ts";
 import { parseFrontmatterDocument, stringifyFrontmatterDocument } from "./frontmatter.ts";
@@ -216,7 +219,7 @@ interface DeviceEventInput extends LooseRecord {
   title?: string;
   note?: string;
   tags?: unknown;
-  relatedIds?: unknown;
+  links?: unknown;
   rawArtifactRoles?: unknown;
   externalRef?: unknown;
   fields?: unknown;
@@ -337,7 +340,6 @@ interface BuildEventRecordInput<K extends EventKind> {
   note?: string;
   tags?: unknown;
   links?: unknown;
-  relatedIds?: unknown;
   rawRefs?: unknown;
   externalRef?: unknown;
   fields?: LooseRecord;
@@ -695,7 +697,6 @@ function buildNormalizedEventSeed<K extends EventKind>({
   note,
   tags,
   links,
-  relatedIds,
   rawRefs,
   externalRef,
   fields = {},
@@ -720,10 +721,8 @@ function buildNormalizedEventSeed<K extends EventKind>({
   const resolvedTimeZone = normalizeTimeZone(timeZone ?? fallbackTimeZone);
   const resolvedDayKey = normalizeDayKeyInput(dayKey) ??
     toLocalDayKey(occurredTimestamp, resolvedTimeZone ?? defaultTimeZone(), "occurredAt");
-  const canonicalRelations = canonicalizeEventRelations({
-    links,
-    relatedIds,
-    normalizeStringList: uniqueTrimmedStringList,
+  const canonicalLinks = normalizeCanonicalEventLinks({
+    value: links,
     errorCode: "VAULT_INVALID_INPUT",
     errorMessage: "links entries must be objects with non-empty type and targetId fields.",
   });
@@ -738,7 +737,7 @@ function buildNormalizedEventSeed<K extends EventKind>({
     title: typeof title === "string" && title.trim() ? title.trim() : kind,
     note: typeof note === "string" && note.trim() ? note.trim() : undefined,
     tags: trimStringList(tags),
-    links: canonicalRelations.links,
+    links: canonicalLinks,
     rawRefs: trimStringList(rawRefs),
     externalRef: normalizeExternalRef(externalRef),
     fields: normalizedFields,
@@ -1054,6 +1053,11 @@ function normalizeDeviceEventInputs(
       `Device event ${index + 1} fields must be a plain object.`,
     ) ?? {};
     const rawArtifactRoles = trimStringList(eventInput.rawArtifactRoles) ?? [];
+    assertNoLegacyRelatedIds({
+      value: eventInput.relatedIds,
+      errorCode: "VAULT_INVALID_INPUT",
+      errorMessage: `Device event ${index + 1} relatedIds is no longer supported; use links.`,
+    });
     const seed = buildNormalizedEventSeed({
       kind,
       occurredAt: eventInput.occurredAt ?? eventInput.recordedAt ?? context.importedAt,
@@ -1065,7 +1069,7 @@ function normalizeDeviceEventInputs(
       title: typeof eventInput.title === "string" ? eventInput.title : undefined,
       note: eventInput.note,
       tags: eventInput.tags,
-      relatedIds: eventInput.relatedIds,
+      links: eventInput.links,
       externalRef: eventInput.externalRef,
       fields,
     });

@@ -13,13 +13,16 @@ import {
   type EventAttachmentOwnerKind,
   type EventAttachmentSourceInput,
 } from "../event-attachments.ts";
+import {
+  assertNoLegacyRelatedIds,
+  normalizeCanonicalEventLinks,
+} from "../event-links.ts";
 import { VaultError } from "../errors.ts";
 import { walkVaultFiles } from "../fs.ts";
 import { generateRecordId } from "../ids.ts";
 import { readJsonlRecords, toMonthlyShardRelativePath } from "../jsonl.ts";
 import { runCanonicalWrite } from "../operations/write-batch.ts";
 import { loadVault } from "../vault.ts";
-import { canonicalizeEventRelations } from "../event-links.ts";
 import {
   buildEventSpineEnvelope,
   buildEventSpineLifecycle,
@@ -201,7 +204,6 @@ const RESERVED_EVENT_KEYS = new Set([
   "tags",
   "experimentSlug",
   "links",
-  "relatedIds",
   "rawRefs",
   "lifecycle",
 ]);
@@ -260,13 +262,16 @@ function buildEventRecord(
     throw new VaultError("EVENT_OCCURRED_AT_MISSING", "Event payload requires occurredAt.");
   }
   const attachments = parseEventSpineAttachments(payload.attachments);
-  const canonicalLinks = canonicalizeEventRelations({
-    links: payload.links,
-    relatedIds: payload.relatedIds,
-    normalizeStringList: uniqueTrimmedStringList,
+  assertNoLegacyRelatedIds({
+    value: payload.relatedIds,
+    errorCode: "EVENT_CONTRACT_INVALID",
+    errorMessage: "Event payload relatedIds is no longer supported; use links.",
+  });
+  const canonicalLinks = normalizeCanonicalEventLinks({
+    value: payload.links,
     errorCode: "EVENT_CONTRACT_INVALID",
     errorMessage: "Event payload links must contain objects with type and targetId fields.",
-  }).links;
+  });
 
   return validateContract(
     eventRecordSchema,

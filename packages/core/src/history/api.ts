@@ -13,7 +13,10 @@ import type {
 } from "@murphai/contracts";
 import { ID_PREFIXES, VAULT_LAYOUT } from "../constants.ts";
 import { emitAuditRecord } from "../audit.ts";
-import { canonicalizeEventRelations } from "../event-links.ts";
+import {
+  assertNoLegacyRelatedIds,
+  normalizeCanonicalEventLinks,
+} from "../event-links.ts";
 import { VaultError } from "../errors.ts";
 import { readJsonlRecords, toMonthlyShardRelativePath } from "../jsonl.ts";
 import { generateRecordId } from "../ids.ts";
@@ -37,7 +40,6 @@ import {
   optionalEnum,
   optionalString,
   requireString,
-  validateSortedStringList,
 } from "./shared.ts";
 import {
   ADVERSE_EFFECT_SEVERITIES,
@@ -432,22 +434,18 @@ function buildHistoryKindFields(input: AppendHistoryEventInput): HistoryKindFiel
 
 function normalizeHistoryRelationLinks({
   links,
-  relatedIds,
   errorCode,
   errorMessage,
 }: {
   links: unknown;
-  relatedIds: unknown;
   errorCode: string;
   errorMessage: string;
 }): HistoryEventRecord["links"] {
-  return canonicalizeEventRelations({
-    links,
-    relatedIds,
-    normalizeStringList: (value) => validateSortedStringList(value, "relatedIds", "id", 32, 80),
+  return normalizeCanonicalEventLinks({
+    value: links,
     errorCode,
     errorMessage,
-  }).links as HistoryEventRecord["links"];
+  }) as HistoryEventRecord["links"];
 }
 
 function buildHistoryEventRecord(
@@ -462,9 +460,13 @@ function buildHistoryEventRecord(
   const recordedAt = normalizeTimestamp(input.recordedAt ?? occurredAt, "recordedAt");
   const eventId = normalizeId(input.eventId, "eventId", ID_PREFIXES.event) ?? generateRecordId("event");
   const timeZone = normalizeTimeZone(input.timeZone ?? fallbackTimeZone);
+  assertNoLegacyRelatedIds({
+    value: Reflect.get(input, "relatedIds"),
+    errorCode: "EVENT_INVALID",
+    errorMessage: "History event relatedIds is no longer supported; use links.",
+  });
   const relationLinks = normalizeHistoryRelationLinks({
     links: input.links,
-    relatedIds: input.relatedIds,
     errorCode: "EVENT_INVALID",
     errorMessage: "History event links must contain objects with type and targetId fields.",
   });
@@ -519,9 +521,13 @@ function parseStoredHistoryEvent(value: unknown): HistoryEventRecord | null {
     "VAULT_INVALID_HISTORY_EVENT",
     "Stored health history event has an invalid lifecycle.",
   );
+  assertNoLegacyRelatedIds({
+    value: value.relatedIds,
+    errorCode: "VAULT_INVALID_HISTORY_EVENT",
+    errorMessage: "Stored health history event uses deprecated relatedIds; use links.",
+  });
   const relationLinks = normalizeHistoryRelationLinks({
     links: value.links,
-    relatedIds: value.relatedIds,
     errorCode: "VAULT_INVALID_HISTORY_EVENT",
     errorMessage: "Stored health history event links must contain objects with type and targetId fields.",
   });

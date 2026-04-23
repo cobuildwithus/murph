@@ -72,6 +72,11 @@ export interface DeviceExternalRefPayload {
   facet?: string;
 }
 
+export interface DeviceEventLinkPayload {
+  type: string;
+  targetId: string;
+}
+
 export interface DeviceEventPayload {
   kind: string;
   occurredAt: string;
@@ -82,7 +87,7 @@ export interface DeviceEventPayload {
   title?: string;
   note?: string;
   tags?: string[];
-  relatedIds?: string[];
+  links?: DeviceEventLinkPayload[];
   rawArtifactRoles?: string[];
   externalRef?: DeviceExternalRefPayload;
   fields?: Record<string, unknown>;
