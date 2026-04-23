@@ -358,6 +358,7 @@ export class DeviceSyncService {
   async runWorkerOnce(): Promise<DeviceSyncJobRecord | null> {
     const now = toIsoTimestamp(new Date());
     const job = this.store.claimDueJob(this.workerId, now, this.workerLeaseMs);
+    const currentNow = (): string => toIsoTimestamp(new Date());
 
     if (!job) {
       return null;
@@ -369,7 +370,7 @@ export class DeviceSyncService {
       retryAt: string | null,
       retryable: boolean,
     ): boolean => {
-      const failed = this.store.failJobIfOwned(job.id, this.workerId, now, code, message, retryAt, retryable);
+      const failed = this.store.failJobIfOwned(job.id, this.workerId, currentNow(), code, message, retryAt, retryable);
 
       if (!failed) {
         this.logger.debug?.("Device sync job side effects skipped because execution was cancelled.", {
@@ -420,9 +421,16 @@ export class DeviceSyncService {
 
     const disconnectGeneration = storedAccount.disconnectGeneration;
     const ensureJobLeaseOwned = (): void => {
+      const fenceNow = currentNow();
       const currentJob = this.store.getJobById(job.id);
 
-      if (!currentJob || currentJob.status !== "running" || currentJob.leaseOwner !== this.workerId) {
+      if (
+        !currentJob
+        || currentJob.status !== "running"
+        || currentJob.leaseOwner !== this.workerId
+        || currentJob.leaseExpiresAt === null
+        || currentJob.leaseExpiresAt <= fenceNow
+      ) {
         throw new DeviceSyncJobExecutionCancelledError(storedAccount.id, job.id);
       }
     };
@@ -463,6 +471,7 @@ export class DeviceSyncService {
           refreshAccountTokens: async () => {
             ensureExecutionActive();
             const refreshed = await provider.refreshTokens(currentAccount);
+            ensureExecutionActive();
             const updated = this.store.updateAccountTokens(
               currentAccount.id,
               this.encryptTokens(currentAccount, refreshed),
@@ -496,7 +505,7 @@ export class DeviceSyncService {
       if (executionDisconnected) {
         ensureJobLeaseOwned();
 
-        if (!this.store.completeJobIfOwned(job.id, this.workerId, now)) {
+        if (!this.store.completeJobIfOwned(job.id, this.workerId, currentNow())) {
           return job;
         }
 
@@ -505,7 +514,7 @@ export class DeviceSyncService {
 
       ensureExecutionActive();
 
-      if (!this.store.completeJobIfOwned(job.id, this.workerId, now)) {
+      if (!this.store.completeJobIfOwned(job.id, this.workerId, currentNow())) {
         return job;
       }
 
@@ -531,7 +540,8 @@ export class DeviceSyncService {
       }
 
       const failure = normalizeExecutionError(error);
-      const retryAt = failure.retryable ? addMilliseconds(now, computeRetryDelayMs(job.attempts)) : null;
+      const failureNow = currentNow();
+      const retryAt = failure.retryable ? addMilliseconds(failureNow, computeRetryDelayMs(job.attempts)) : null;
       const failed = failClaimedJob(failure.code, failure.message, retryAt, failure.retryable);
 
       if (!failed) {

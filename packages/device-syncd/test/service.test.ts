@@ -1781,6 +1781,192 @@ test("device sync service does not fail jobs reclaimed by another worker after t
   service.close();
 });
 
+test("device sync service stops snapshot imports after the job lease expires and another worker reclaims it", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-stale-worker-import-fence");
+  const imports: unknown[] = [];
+  let providerStartedResolve: (() => void) | null = null;
+  let releaseProviderResolve: (() => void) | null = null;
+  const providerStarted = new Promise<void>((resolve) => {
+    providerStartedResolve = resolve;
+  });
+  const releaseProvider = new Promise<void>((resolve) => {
+    releaseProviderResolve = resolve;
+  });
+  const importer: DeviceSyncImporterPort = {
+    async importDeviceProviderSnapshot(input) {
+      imports.push(input);
+      return {
+        ok: true,
+      };
+    },
+  };
+  const service = createDeviceSyncService({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [
+      createFakeProvider({
+        async executeJob(context) {
+          providerStartedResolve?.();
+          await releaseProvider;
+          await context.importSnapshot({
+            accountId: context.account.externalAccountId,
+            importedAt: context.now,
+          });
+          return {
+            metadataPatch: {
+              shouldNotPersist: true,
+            },
+          };
+        },
+      }),
+    ],
+    importer,
+  });
+
+  const begin = await service.startConnection({
+    provider: "demo",
+  });
+  const connected = await service.handleOAuthCallback({
+    provider: "demo",
+    state: begin.state,
+    code: "stale-import",
+  });
+
+  const workerPromise = service.runWorkerOnce();
+  await providerStarted;
+
+  const initialJob = service.store.database.prepare(`
+    select id
+    from device_job
+    where account_id = ?
+    order by created_at asc, id asc
+    limit 1
+  `).get(connected.account.id) as { id?: string } | undefined;
+
+  assert.ok(initialJob?.id);
+
+  const expiredLeaseAt = new Date(Date.now() - 1_000).toISOString();
+  const reclaimAt = new Date().toISOString();
+  service.store.database.prepare(`
+    update device_job
+    set lease_expires_at = ?
+    where id = ?
+  `).run(expiredLeaseAt, initialJob.id);
+
+  const reclaimedJob = service.store.claimDueJob("worker-b", reclaimAt, 60_000);
+  assert.equal(reclaimedJob?.id, initialJob.id);
+  assert.equal(reclaimedJob?.leaseOwner, "worker-b");
+
+  requireCallback(releaseProviderResolve, "provider release callback was not initialized")();
+  await workerPromise;
+
+  const persistedJob = service.store.getJobById(initialJob.id);
+  const storedAccount = service.store.getAccountById(connected.account.id);
+
+  assert.equal(imports.length, 0);
+  assert.equal(persistedJob?.status, "running");
+  assert.equal(persistedJob?.leaseOwner, "worker-b");
+  assert.equal(persistedJob?.lastErrorCode, null);
+  assert.equal(storedAccount?.lastSyncCompletedAt, null);
+  assert.deepEqual(storedAccount?.metadata, {
+    connectedBy: "stale-import",
+  });
+
+  service.close();
+});
+
+test("device sync service does not persist refreshed tokens after the job lease expires mid-refresh", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-stale-worker-token-fence");
+  let refreshStartedResolve: (() => void) | null = null;
+  let releaseRefreshResolve: (() => void) | null = null;
+  const refreshStarted = new Promise<void>((resolve) => {
+    refreshStartedResolve = resolve;
+  });
+  const releaseRefresh = new Promise<void>((resolve) => {
+    releaseRefreshResolve = resolve;
+  });
+  const service = createDeviceSyncService({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [
+      createFakeProvider({
+        async refreshTokens(_account: DeviceSyncAccount): Promise<ProviderAuthTokens> {
+          refreshStartedResolve?.();
+          await releaseRefresh;
+          return {
+            accessToken: "access-token-after-expiry",
+            refreshToken: "refresh-token-after-expiry",
+          };
+        },
+        async executeJob(context) {
+          await context.refreshAccountTokens();
+          return {};
+        },
+      }),
+    ],
+  });
+
+  const begin = await service.startConnection({
+    provider: "demo",
+  });
+  const connected = await service.handleOAuthCallback({
+    provider: "demo",
+    state: begin.state,
+    code: "stale-refresh",
+  });
+  const tokensBefore = service.store.getAccountById(connected.account.id);
+
+  assert.ok(tokensBefore);
+
+  const workerPromise = service.runWorkerOnce();
+  await refreshStarted;
+
+  const initialJob = service.store.database.prepare(`
+    select id
+    from device_job
+    where account_id = ?
+    order by created_at asc, id asc
+    limit 1
+  `).get(connected.account.id) as { id?: string } | undefined;
+
+  assert.ok(initialJob?.id);
+
+  const expiredLeaseAt = new Date(Date.now() - 1_000).toISOString();
+  const reclaimAt = new Date().toISOString();
+  service.store.database.prepare(`
+    update device_job
+    set lease_expires_at = ?
+    where id = ?
+  `).run(expiredLeaseAt, initialJob.id);
+
+  const reclaimedJob = service.store.claimDueJob("worker-b", reclaimAt, 60_000);
+  assert.equal(reclaimedJob?.id, initialJob.id);
+  assert.equal(reclaimedJob?.leaseOwner, "worker-b");
+
+  requireCallback(releaseRefreshResolve, "refresh release callback was not initialized")();
+  await workerPromise;
+
+  const persistedJob = service.store.getJobById(initialJob.id);
+  const accountAfter = service.store.getAccountById(connected.account.id);
+
+  assert.ok(accountAfter);
+  assert.equal(accountAfter?.accessTokenEncrypted, tokensBefore.accessTokenEncrypted);
+  assert.equal(accountAfter?.refreshTokenEncrypted, tokensBefore.refreshTokenEncrypted);
+  assert.equal(persistedJob?.status, "running");
+  assert.equal(persistedJob?.leaseOwner, "worker-b");
+  assert.equal(persistedJob?.lastErrorCode, null);
+
+  service.close();
+});
+
 test("device sync service next wake tracks scheduled reconciles and queued jobs", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-next-wake");
   const service = createDeviceSyncService({

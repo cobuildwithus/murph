@@ -43,6 +43,32 @@ interface StoredJobRow {
   finished_at: string | null;
 }
 
+const EXPIRED_JOB_LEASE_ERROR_CODE = "LEASE_EXPIRED";
+const EXPIRED_JOB_LEASE_ERROR_MESSAGE = "Device sync job lease expired before completion.";
+
+function deadLetterExpiredExhaustedDeviceSyncJobs(database: DatabaseSync, now: string): void {
+  database.prepare(`
+    update device_job
+    set status = 'dead',
+        lease_owner = null,
+        lease_expires_at = null,
+        last_error_code = ?,
+        last_error_message = ?,
+        finished_at = ?,
+        updated_at = ?
+    where status = 'running'
+      and lease_expires_at is not null
+      and lease_expires_at <= ?
+      and attempts >= max_attempts
+  `).run(
+    EXPIRED_JOB_LEASE_ERROR_CODE,
+    EXPIRED_JOB_LEASE_ERROR_MESSAGE,
+    now,
+    now,
+    now,
+  );
+}
+
 function mapJobRow(row: StoredJobRow | undefined): DeviceSyncJobRecord | null {
   if (!row) {
     return null;
@@ -88,7 +114,6 @@ export function readNextDeviceSyncJobWakeAt(database: DatabaseSync): string | nu
       from device_job
       where status = 'running'
         and lease_expires_at is not null
-        and attempts < max_attempts
     )
     order by wake_at asc
     limit 1
@@ -103,6 +128,8 @@ export function claimDueDeviceSyncJob(
   leaseMs: number,
 ): DeviceSyncJobRecord | null {
   return withImmediateTransaction(database, () => {
+    deadLetterExpiredExhaustedDeviceSyncJobs(database, now);
+
     const row = database.prepare(`
       select *
       from device_job as candidate
@@ -177,7 +204,9 @@ export function completeDeviceSyncJobIfOwned(
     where id = ?
       and status = 'running'
       and lease_owner = ?
-  `).run(now, now, jobId, workerId) as { changes: number };
+      and lease_expires_at is not null
+      and lease_expires_at > ?
+  `).run(now, now, jobId, workerId, now) as { changes: number };
 
   return (result.changes ?? 0) > 0;
 }
@@ -256,6 +285,8 @@ export function failDeviceSyncJobIfOwned(
       where id = ?
         and status = 'running'
         and lease_owner = ?
+        and lease_expires_at is not null
+        and lease_expires_at > ?
         and attempts < max_attempts
     `).run(
       input.retryAt ?? input.now,
@@ -264,6 +295,7 @@ export function failDeviceSyncJobIfOwned(
       input.now,
       input.jobId,
       input.workerId,
+      input.now,
     ) as { changes: number };
 
     if ((retryResult.changes ?? 0) > 0) {
@@ -283,6 +315,8 @@ export function failDeviceSyncJobIfOwned(
     where id = ?
       and status = 'running'
       and lease_owner = ?
+      and lease_expires_at is not null
+      and lease_expires_at > ?
   `).run(
     input.code,
     input.message,
@@ -290,6 +324,7 @@ export function failDeviceSyncJobIfOwned(
     input.now,
     input.jobId,
     input.workerId,
+    input.now,
   ) as { changes: number };
 
   return (deadResult.changes ?? 0) > 0;
@@ -323,21 +358,31 @@ export function enqueueDeviceSyncJobInTransaction(
   database: DatabaseSync,
   input: DeviceSyncEnqueueJobInput,
 ): DeviceSyncJobRecord {
+  const now = toIsoTimestamp(new Date());
+
   if (input.dedupeKey) {
     const existing = database.prepare(`
       select *
       from device_job
-      where account_id = ? and provider = ? and dedupe_key = ? and status in ('queued', 'running')
+      where account_id = ?
+        and provider = ?
+        and dedupe_key = ?
+        and status in ('queued', 'running')
+        and not (
+          status = 'running'
+          and lease_expires_at is not null
+          and lease_expires_at <= ?
+          and attempts >= max_attempts
+        )
       order by created_at desc, id desc
       limit 1
-    `).get(input.accountId, input.provider, input.dedupeKey) as StoredJobRow | undefined;
+    `).get(input.accountId, input.provider, input.dedupeKey, now) as StoredJobRow | undefined;
 
     if (existing) {
       return mapJobRow(existing)!;
     }
   }
 
-  const now = toIsoTimestamp(new Date());
   const id = generatePrefixedId("dsj");
   database.prepare(`
     insert into device_job (
