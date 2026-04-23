@@ -33,6 +33,8 @@ const serviceLocalMocks = vi.hoisted(() => ({
 const storeLocalMocks = vi.hoisted(() => ({
   getAssistantSessionLocal: vi.fn(),
   listAssistantSessionsLocal: vi.fn(),
+  readAssistantAutomationStateLocal: vi.fn(),
+  saveAssistantAutomationStateLocal: vi.fn(),
 }))
 
 const outboxLocalMocks = vi.hoisted(() => ({
@@ -77,6 +79,8 @@ vi.mock('@murphai/assistant-engine/assistant-service', () => ({
 vi.mock('@murphai/assistant-engine/assistant-store', () => ({
   getAssistantSessionLocal: storeLocalMocks.getAssistantSessionLocal,
   listAssistantSessionsLocal: storeLocalMocks.listAssistantSessionsLocal,
+  readAssistantAutomationState: storeLocalMocks.readAssistantAutomationStateLocal,
+  saveAssistantAutomationState: storeLocalMocks.saveAssistantAutomationStateLocal,
 }))
 
 vi.mock('@murphai/assistant-engine/assistant-outbox', () => ({
@@ -240,6 +244,37 @@ test('service wrappers prefer daemon responses and fall back to local implementa
     }),
     { source: 'remote-update' },
   )
+})
+
+test('service wrappers reject local Linq routes before daemon or local delivery work starts', async () => {
+  storeLocalMocks.getAssistantSessionLocal.mockResolvedValueOnce({
+    binding: {
+      channel: 'linq',
+    },
+  })
+
+  await assert.rejects(
+    () =>
+      openAssistantConversation({
+        channel: 'linq',
+        vault: TEST_VAULT,
+      }),
+    /Linq routes are no longer supported/u,
+  )
+  await assert.rejects(
+    () =>
+      sendAssistantMessage({
+        prompt: 'hello',
+        sessionId: 'session_linq',
+        vault: TEST_VAULT,
+      }),
+    /Linq routes are no longer supported/u,
+  )
+
+  assert.equal(daemonMocks.maybeOpenAssistantConversationViaDaemon.mock.calls.length, 0)
+  assert.equal(daemonMocks.maybeSendAssistantMessageViaDaemon.mock.calls.length, 0)
+  assert.equal(serviceLocalMocks.openAssistantConversationLocal.mock.calls.length, 0)
+  assert.equal(serviceLocalMocks.sendAssistantMessageLocal.mock.calls.length, 0)
 })
 
 test('status wrapper normalizes string input for the daemon and preserves fallback input for local status', async () => {
@@ -494,6 +529,23 @@ test('assistant automation run loop only uses the daemon for remote-safe inputs'
   daemonMocks.maybeRunAssistantAutomationViaDaemon.mockResolvedValueOnce({
     source: 'remote-run',
   })
+  storeLocalMocks.readAssistantAutomationStateLocal.mockResolvedValue({
+    autoReply: [
+      {
+        channel: 'linq',
+        cursor: null,
+      },
+      {
+        channel: 'telegram',
+        cursor: null,
+      },
+    ],
+    inboxScanCursor: null,
+    updatedAt: '2026-04-23T00:00:00.000Z',
+  })
+  storeLocalMocks.saveAssistantAutomationStateLocal.mockImplementation(
+    async (_vault, next) => next,
+  )
   automationEngineMocks.runAssistantAutomationLocal.mockResolvedValueOnce({
     source: 'local-run',
   })
@@ -535,6 +587,18 @@ test('assistant automation run loop only uses the daemon for remote-safe inputs'
   )
   assert.equal(daemonMocks.maybeRunAssistantAutomationViaDaemon.mock.calls.length, 1)
   assert.equal(automationEngineMocks.runAssistantAutomationLocal.mock.calls.length, 1)
+  assert.equal(storeLocalMocks.readAssistantAutomationStateLocal.mock.calls.length, 1)
+  assert.deepEqual(storeLocalMocks.saveAssistantAutomationStateLocal.mock.calls[0]?.[0], TEST_VAULT)
+  assert.deepEqual(storeLocalMocks.saveAssistantAutomationStateLocal.mock.calls[0]?.[1], {
+    autoReply: [
+      {
+        channel: 'telegram',
+        cursor: null,
+      },
+    ],
+    inboxScanCursor: null,
+    updatedAt: storeLocalMocks.saveAssistantAutomationStateLocal.mock.calls[0]?.[1]?.updatedAt,
+  })
 
   assert.deepEqual(
     await runAssistantAutomation({

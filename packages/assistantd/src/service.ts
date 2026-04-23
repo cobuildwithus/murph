@@ -4,6 +4,7 @@ import {
   getAssistantCronJobTarget,
   getAssistantCronStatus,
   getAssistantSession,
+  readAssistantAutomationState,
   getAssistantStatus,
   listAssistantCronJobs,
   listAssistantCronRuns,
@@ -13,6 +14,7 @@ import {
   processDueAssistantCronJobs,
   readAssistantOutboxIntent,
   runAssistantAutomation,
+  saveAssistantAutomationState,
   sendAssistantMessage,
   setAssistantCronJobTarget,
   updateAssistantSessionOptions,
@@ -30,6 +32,8 @@ import { createLocalGatewayService } from '@murphai/gateway-local'
 import type { GatewayService } from '@murphai/gateway-core'
 
 const ASSISTANTD_DISABLE_CLIENT_ENV = 'MURPH_ASSISTANTD_DISABLE_CLIENT'
+const LOCAL_ASSISTANT_LINQ_ERROR =
+  'Local assistant Linq routes are no longer supported. Hosted/shared assistant-engine Linq support remains available.'
 
 type AssistantLocalOpenConversationInput = Omit<
   Parameters<typeof openAssistantConversation>[0],
@@ -142,6 +146,58 @@ export interface AssistantLocalService {
   vault: string
 }
 
+function normalizeAssistantChannel(channel?: string | null): string | null {
+  if (typeof channel !== 'string') {
+    return null
+  }
+  const normalized = channel.trim().toLowerCase()
+  return normalized.length > 0 ? normalized : null
+}
+
+function throwLocalAssistantLinqUnsupported(): never {
+  throw Object.assign(new Error(LOCAL_ASSISTANT_LINQ_ERROR), {
+    code: 'invalid_option' as const,
+  })
+}
+
+async function assertLocalAssistantLinqRouteAllowed(input: {
+  channel?: string | null
+  conversation?: { channel?: string | null } | null
+  sessionId?: string | null
+  vault: string
+}): Promise<void> {
+  if (
+    normalizeAssistantChannel(input.channel) === 'linq' ||
+    normalizeAssistantChannel(input.conversation?.channel) === 'linq'
+  ) {
+    throwLocalAssistantLinqUnsupported()
+  }
+
+  if (!input.sessionId) {
+    return
+  }
+
+  const session = await getAssistantSession(input.vault, input.sessionId)
+  if (normalizeAssistantChannel(session.binding.channel) === 'linq') {
+    throwLocalAssistantLinqUnsupported()
+  }
+}
+
+async function dropLegacyLocalLinqAutoReplyState(vault: string): Promise<void> {
+  const state = await readAssistantAutomationState(vault)
+  const nextAutoReply = state.autoReply.filter((entry) => entry.channel !== 'linq')
+
+  if (nextAutoReply.length === state.autoReply.length) {
+    return
+  }
+
+  await saveAssistantAutomationState(vault, {
+    ...state,
+    autoReply: nextAutoReply,
+    updatedAt: new Date().toISOString(),
+  })
+}
+
 export function createAssistantLocalService(vaultRoot: string): AssistantLocalService {
   ensureAssistantDaemonClientDisabled()
 
@@ -241,9 +297,16 @@ export function createAssistantLocalService(vaultRoot: string): AssistantLocalSe
       ),
     openConversation: async (input) =>
       runAssistantdLocalCall(async () => {
+        const vault = resolveAssistantdRequestVault(input.vault, vaultRoot)
+        await assertLocalAssistantLinqRouteAllowed({
+          channel: input.channel,
+          conversation: input.conversation,
+          sessionId: input.sessionId,
+          vault,
+        })
         const resolved = await openAssistantConversation({
           ...input,
-          vault: resolveAssistantdRequestVault(input.vault, vaultRoot),
+          vault,
         })
         return {
           created: resolved.created,
@@ -262,8 +325,11 @@ export function createAssistantLocalService(vaultRoot: string): AssistantLocalSe
         }),
       ),
     setCronTarget: (input) =>
-      runAssistantdLocalCall(() =>
-        setAssistantCronJobTarget({
+      runAssistantdLocalCall(() => {
+        if (normalizeAssistantChannel(input.channel) === 'linq') {
+          throwLocalAssistantLinqUnsupported()
+        }
+        return setAssistantCronJobTarget({
           channel: input.channel ?? undefined,
           deliveryTarget: input.deliveryTarget ?? undefined,
           dryRun: input.dryRun,
@@ -273,11 +339,13 @@ export function createAssistantLocalService(vaultRoot: string): AssistantLocalSe
           resetContinuity: input.resetContinuity,
           threadId: input.threadId ?? undefined,
           vault: resolveAssistantdRequestVault(input.vault, vaultRoot),
-        }),
-      ),
+        })
+      }),
     runAutomationOnce: (input) =>
-      runAssistantdLocalCall(() =>
-        runAssistantAutomation({
+      runAssistantdLocalCall(async () => {
+        const vault = resolveAssistantdRequestVault(input?.vault, vaultRoot)
+        await dropLegacyLocalLinqAutoReplyState(vault)
+        return runAssistantAutomation({
           allowSelfAuthored: input?.allowSelfAuthored,
           deliveryDispatchMode: input?.deliveryDispatchMode,
           drainOutbox: input?.drainOutbox,
@@ -290,17 +358,24 @@ export function createAssistantLocalService(vaultRoot: string): AssistantLocalSe
           startDaemon:
             input?.startDaemon ??
             ((input?.once ?? true) ? false : true),
-          vault: resolveAssistantdRequestVault(input?.vault, vaultRoot),
+          vault,
           vaultServices,
-        }),
-      ),
+        })
+      }),
     sendMessage: (input) =>
-      runAssistantdLocalCall(() =>
-        sendAssistantMessage({
+      runAssistantdLocalCall(async () => {
+        const vault = resolveAssistantdRequestVault(input.vault, vaultRoot)
+        await assertLocalAssistantLinqRouteAllowed({
+          channel: input.channel,
+          conversation: input.conversation,
+          sessionId: input.sessionId,
+          vault,
+        })
+        return sendAssistantMessage({
           ...input,
-          vault: resolveAssistantdRequestVault(input.vault, vaultRoot),
-        }),
-      ),
+          vault,
+        })
+      }),
     updateSessionOptions: (input) =>
       runAssistantdLocalCall(() =>
         updateAssistantSessionOptions({
