@@ -263,6 +263,98 @@ if [[ ! -f "\${review_gpt_config}" ]]; then
   review_gpt_config="\${repo_dir}/scripts/review-gpt.config.sh"
 fi
 
+normalize_path() {
+  local target="$1"
+  if [[ -z "\${target}" ]]; then
+    return 1
+  fi
+
+  local absolute_target="\${target}"
+  if [[ "\${absolute_target}" != /* ]]; then
+    absolute_target="\${repo_dir}/\${absolute_target}"
+  fi
+
+  if [[ -d "\${absolute_target}" ]]; then
+    (
+      cd "\${absolute_target}"
+      pwd -P
+    )
+    return 0
+  fi
+
+  local dir_name
+  dir_name="$(dirname "\${absolute_target}")"
+  if [[ ! -d "\${dir_name}" ]]; then
+    printf '%s\\n' "\${absolute_target}"
+    return 0
+  fi
+
+  (
+    cd "\${dir_name}"
+    printf '%s/%s\\n' "$(pwd -P)" "$(basename "\${absolute_target}")"
+  )
+}
+
+resolve_package_script_from_config() {
+  local configured_package_script=""
+  configured_package_script="$(
+    REVIEW_GPT_CONFIG_PATH="\${review_gpt_config}" RUN_DIR="\${run_dir}" bash <<'BASH'
+set -euo pipefail
+
+review_gpt_config="\${REVIEW_GPT_CONFIG_PATH}"
+run_dir="\${RUN_DIR}"
+workspace_dir="\${run_dir}"
+
+if [[ ! -f "\${review_gpt_config}" ]]; then
+  exit 0
+fi
+
+script_dir="$(cd "$(dirname "\${review_gpt_config}")" && pwd)"
+
+# shellcheck source=/dev/null
+. "\${review_gpt_config}" >/dev/null 2>&1
+
+printf '%s\\n' "\${package_script:-}"
+BASH
+  )" || true
+
+  if [[ -z "\${configured_package_script}" ]]; then
+    return 0
+  fi
+
+  printf '%s\\n' "\${configured_package_script}"
+}
+
+assert_workspace_package_script() {
+  local expected_package_script="\${run_dir}/scripts/package-research-context.sh"
+  local resolved_package_script=""
+  resolved_package_script="$(resolve_package_script_from_config)"
+
+  if [[ -z "\${resolved_package_script}" ]]; then
+    return 0
+  fi
+
+  local expected_normalized=""
+  local resolved_normalized=""
+  expected_normalized="$(normalize_path "\${expected_package_script}" || true)"
+  resolved_normalized="$(normalize_path "\${resolved_package_script}" || true)"
+
+  if [[ -z "\${expected_normalized}" || -z "\${resolved_normalized}" ]]; then
+    return 0
+  fi
+
+  if [[ "\${expected_normalized}" != "\${resolved_normalized}" ]]; then
+    echo "review:gpt config resolves to a different research package script." >&2
+    echo "Config: \${review_gpt_config}" >&2
+    echo "Expected package script: \${expected_normalized}" >&2
+    echo "Resolved package script: \${resolved_normalized}" >&2
+    echo "Refusing to send because this would attach the wrong research workspace bundle." >&2
+    exit 64
+  fi
+}
+
+assert_workspace_package_script
+
 capture_chat_url() {
   node - "\${result_file}" "\${chat_url_file}" <<'NODE'
 const fs = require("node:fs");
@@ -427,6 +519,26 @@ research_thread_export_browser_endpoint="\${RESEARCH_THREAD_EXPORT_BROWSER_ENDPO
 `;
 }
 
+export function buildResearchWorkProfileConfig() {
+  return `#!/usr/bin/env bash
+
+# Inherit the repo's normal review:gpt presets and packaging defaults, but isolate
+# browser auth into a separate managed Chrome profile for research work.
+script_dir="$(cd "$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
+repo_dir="$(cd "\${script_dir}/../../../.." && pwd)"
+
+# shellcheck source=/dev/null
+. "\${repo_dir}/scripts/review-gpt.config.sh"
+
+package_script="\${workspace_dir:-$(cd "\${script_dir}/.." && pwd)}/scripts/package-research-context.sh"
+
+browser_binary_path="\${browser_binary_path:-/Applications/Google Chrome.app/Contents/MacOS/Google Chrome}"
+managed_browser_user_data_dir="\${RESEARCH_MANAGED_BROWSER_USER_DATA_DIR:-$HOME/.review-gpt-work/murph-research-chrome}"
+managed_browser_profile="\${RESEARCH_MANAGED_BROWSER_PROFILE:-Default}"
+managed_browser_port="\${RESEARCH_MANAGED_BROWSER_PORT:-9224}"
+`;
+}
+
 export function buildResearchPackageScript() {
   const referenceFilesLiteral = RESEARCH_REFERENCE_FILE_PATHS.map(
     (relativePath) => `  "${relativePath}"`,
@@ -480,6 +592,10 @@ Options:
   --zip                      Create only a .zip archive (default)
   --out-dir <dir>            Output directory (default: audit-packages)
   --name <prefix>            Output filename prefix (default: murph-research-context)
+  --with-tests               Accepted for compatibility; no effect.
+  --no-tests                 Accepted for compatibility; no effect.
+  --with-docs                Accepted for compatibility; no effect.
+  --no-docs                  Accepted for compatibility; no effect.
   -h, --help                 Show this help message
 USAGE
   exit "\${exit_code}"
@@ -487,7 +603,7 @@ USAGE
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --zip)
+    --zip|--with-tests|--no-tests|--with-docs|--no-docs)
       shift
       ;;
     --out-dir)
@@ -651,6 +767,10 @@ export function writeResearchReviewGptSupportFiles(workspaceDir) {
   writeTextFile(
     path.join(workspaceDir, "config", "review-gpt-research.config.sh"),
     buildResearchReviewGptConfig(),
+  );
+  writeTextFile(
+    path.join(workspaceDir, "config", "review-gpt-work-profile.sh"),
+    buildResearchWorkProfileConfig(),
   );
   writeExecutable(
     path.join(workspaceDir, "scripts", "package-research-context.sh"),
