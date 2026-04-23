@@ -49,3 +49,6 @@ Prevent Cloudflare from decrypting or executing a fetched wake after web has alr
 ## Notes
 
 - The direct regression proof is: fetch wake A, rewrite/coalesce to wake B before execution, then Cloudflare must reject A before runtime invocation and refetch without leaving a pending commit.
+Status: completed
+Updated: 2026-04-24
+Completed: 2026-04-24

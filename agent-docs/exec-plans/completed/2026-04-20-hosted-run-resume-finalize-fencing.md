@@ -29,3 +29,6 @@ Make resumable finalize recovery single-owner: acquiring a resumable finalize ru
 
 - Today `acquireHostedRunTx` can resume a finalize run by rewriting `runTokenHash` while leaving the row in `committed_needs_finalize`, which allows a later overlapping acquire to invalidate the first executor's token.
 - `finalizeHostedRunTx` still accepts `committed_needs_finalize`, so stale finalize recovery must fence on status as well as token rotation.
+Status: completed
+Updated: 2026-04-24
+Completed: 2026-04-24

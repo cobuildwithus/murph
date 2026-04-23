@@ -30,3 +30,6 @@ Unblock the hosted local cross-app proof by giving `apps/web` a stable low-depen
 
 - The explicit problem is startup brittleness: local hosted E2E should not fail just because the homepage imports a dependency that the execution path does not need.
 - The route should be explicit enough that future hosted-local startup failures point at web-process health rather than unrelated landing-page rendering.
+Status: completed
+Updated: 2026-04-24
+Completed: 2026-04-24

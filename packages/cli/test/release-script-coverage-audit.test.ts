@@ -1,5 +1,14 @@
 import { execFileSync, spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -148,6 +157,55 @@ function readWorkspaceDiffScope(...changedFiles: string[]) {
   }
 }
 
+function parseCoordinationLedgerRows(ledgerText: string) {
+  const lines = ledgerText.split(/\r?\n/u)
+  const headerIndex = lines.findIndex((line) => line.startsWith('| Agent |'))
+
+  if (headerIndex === -1) {
+    throw new Error('Coordination ledger header not found.')
+  }
+
+  const headerColumns = lines[headerIndex]
+    .split('|')
+    .slice(1, -1)
+    .map((part) => part.trim())
+  const planColumnIndex = headerColumns.indexOf('Plan')
+  const statusColumnIndex = headerColumns.indexOf('Status')
+
+  if (planColumnIndex === -1 || statusColumnIndex === -1) {
+    throw new Error('Coordination ledger is missing the Plan or Status column.')
+  }
+
+  return lines
+    .slice(headerIndex + 2)
+    .filter((line) => line.startsWith('|') && !line.startsWith('| ---'))
+    .map((line) => {
+      const columns = line
+        .split('|')
+        .slice(1, -1)
+        .map((part) => part.trim().replace(/^`([^`]+)`$/u, '$1'))
+
+      return {
+        plan: columns[planColumnIndex] ?? '',
+        status: columns[statusColumnIndex] ?? '',
+      }
+    })
+}
+
+function writeHarnessFile(
+  harnessRoot: string,
+  relativePath: string,
+  contents: string,
+  executable = false,
+) {
+  const targetPath = path.join(harnessRoot, relativePath)
+  mkdirSync(path.dirname(targetPath), { recursive: true })
+  writeFileSync(targetPath, contents, 'utf8')
+  if (executable) {
+    chmodSync(targetPath, 0o755)
+  }
+}
+
 describe('monorepo release flow coverage audit', () => {
   it('exposes root-owned release scripts', () => {
     expect(rootPackageJson.name).toBe('murph-workspace')
@@ -246,6 +304,212 @@ describe('monorepo release flow coverage audit', () => {
 
     expect(summary.repoInternalFastPath).toBe(true)
     expect(summary.runVerifyCli).toBe(true)
+  })
+
+  it('keeps active execution plans aligned with live coordination-ledger state', () => {
+    const activePlansDir = path.join(repoRoot, 'agent-docs', 'exec-plans', 'active')
+    const ledgerRows = parseCoordinationLedgerRows(
+      readFileSync(path.join(activePlansDir, 'COORDINATION_LEDGER.md'), 'utf8'),
+    )
+    const activePlans = readdirSync(activePlansDir)
+      .filter((entry) => entry.endsWith('.md'))
+      .filter((entry) => entry !== 'README.md' && entry !== 'COORDINATION_LEDGER.md')
+
+    for (const planName of activePlans) {
+      const relativePlanPath = `agent-docs/exec-plans/active/${planName}`
+      const matchingRows = ledgerRows.filter((row) => row.plan === relativePlanPath)
+      const planText = readFileSync(path.join(activePlansDir, planName), 'utf8')
+      const planStatus = planText.match(/^Status:\s*(.+)$/mu)?.[1].trim().toLowerCase() ?? ''
+
+      expect(
+        matchingRows,
+        `${relativePlanPath} must have exactly one matching coordination-ledger row while it lives under active/.`,
+      ).toHaveLength(1)
+      expect(
+        matchingRows[0]?.status.toLowerCase(),
+        `${relativePlanPath} must not keep a completed ledger row under active/.`,
+      ).not.toBe('completed')
+      expect(
+        planStatus.includes('completed'),
+        `${relativePlanPath} must not remain under active/ once its plan status is completed.`,
+      ).toBe(false)
+      expect(
+        planStatus.includes('implementation complete'),
+        `${relativePlanPath} must not remain under active/ once implementation is complete.`,
+      ).toBe(false)
+    }
+  })
+
+  it('archives the active plan and clears the matching ledger row before invoking committer', () => {
+    const harnessRoot = mkdtempSync(path.join(os.tmpdir(), 'murph-finish-task-harness-'))
+
+    try {
+      writeHarnessFile(
+        harnessRoot,
+        'node_modules/@cobuild/repo-tools/src/consumer-shell.sh',
+        `#!/usr/bin/env bash
+repo_tools_join_lines() {
+  local var_name="$1"
+  shift
+  local joined=""
+  local item
+  for item in "$@"; do
+    if [[ -n "$joined" ]]; then
+      joined+=$'\\n'
+    fi
+    joined+="$item"
+  done
+  printf -v "$var_name" '%s' "$joined"
+  export "$var_name"
+}
+
+cobuild_repo_tool_bin() {
+  printf '%s\\n' "$COBUILD_REPO_ROOT/.fake-tools/$1"
+}
+`,
+        true,
+      )
+
+      for (const relativePath of [
+        'scripts/repo-tools.config.sh',
+        'scripts/finish-task',
+        'scripts/close-exec-plan.sh',
+        'scripts/committer',
+      ]) {
+        writeHarnessFile(
+          harnessRoot,
+          relativePath,
+          readFileSync(path.join(repoRoot, relativePath), 'utf8'),
+          true,
+        )
+      }
+
+      writeHarnessFile(
+        harnessRoot,
+        '.fake-tools/cobuild-close-exec-plan',
+        `#!/usr/bin/env bash
+set -euo pipefail
+plan_path="$1"
+completed_path="agent-docs/exec-plans/completed/$(basename "$plan_path")"
+mkdir -p "$(dirname "$completed_path")"
+mv "$plan_path" "$completed_path"
+printf '%s\\n' "$plan_path" "$completed_path" > .fake-tools/close-exec-plan.args
+`,
+        true,
+      )
+      writeHarnessFile(
+        harnessRoot,
+        '.fake-tools/cobuild-committer',
+        `#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' "$@" > .fake-tools/committer.args
+`,
+        true,
+      )
+      writeHarnessFile(
+        harnessRoot,
+        'agent-docs/exec-plans/active/COORDINATION_LEDGER.md',
+        `# Coordination Ledger
+
+| Agent | Scope | Plan | Files | Symbols | Status | Notes |
+| --- | --- | --- | --- | --- | --- | --- |
+| Codex | Harness | \`agent-docs/exec-plans/active/2026-04-24-harness.md\` | \`docs/touched.md\` | finish-task harness | in_progress | Harness row |
+`,
+      )
+      writeHarnessFile(
+        harnessRoot,
+        'agent-docs/exec-plans/active/2026-04-24-harness.md',
+        `# Harness Plan
+
+Status: active
+Created: 2026-04-24
+Updated: 2026-04-24
+`,
+      )
+      writeHarnessFile(harnessRoot, 'agent-docs/exec-plans/completed/README.md', '# Completed\n')
+      writeHarnessFile(harnessRoot, 'docs/touched.md', '# Before\n')
+
+      for (const command of [
+        ['init'],
+        ['config', 'user.name', 'Harness'],
+        ['config', 'user.email', '123456+murph-harness@users.noreply.github.com'],
+        ['add', '.'],
+        ['commit', '-m', 'baseline'],
+      ]) {
+        const result = spawnSync('git', command, {
+          cwd: harnessRoot,
+          encoding: 'utf8',
+          env: withoutNodeV8Coverage(),
+        })
+
+        if (result.status !== 0) {
+          throw new Error(
+            `Harness git command failed (${command.join(' ')}):\nSTDOUT:\n${result.stdout}\nSTDERR:\n${result.stderr}`,
+          )
+        }
+      }
+
+      writeHarnessFile(harnessRoot, 'docs/touched.md', '# Before\n\nAfter\n')
+
+      const result = spawnSync(
+        'bash',
+        [
+          'scripts/finish-task',
+          'agent-docs/exec-plans/active/2026-04-24-harness.md',
+          'close harness plan',
+          'docs/touched.md',
+        ],
+        {
+          cwd: harnessRoot,
+          encoding: 'utf8',
+          env: withoutNodeV8Coverage(),
+        },
+      )
+
+      if (result.status !== 0) {
+        throw new Error(
+          `finish-task harness failed:\nSTDOUT:\n${result.stdout}\nSTDERR:\n${result.stderr}`,
+        )
+      }
+
+      expect(
+        existsSync(path.join(harnessRoot, 'agent-docs/exec-plans/active/2026-04-24-harness.md')),
+      ).toBe(false)
+      expect(
+        existsSync(path.join(harnessRoot, 'agent-docs/exec-plans/completed/2026-04-24-harness.md')),
+      ).toBe(true)
+      expect(
+        readFileSync(path.join(harnessRoot, 'agent-docs/exec-plans/active/COORDINATION_LEDGER.md'), 'utf8'),
+      ).not.toContain('agent-docs/exec-plans/active/2026-04-24-harness.md')
+
+      const closeArgs = readFileSync(
+        path.join(harnessRoot, '.fake-tools', 'close-exec-plan.args'),
+        'utf8',
+      )
+        .trim()
+        .split(/\r?\n/u)
+      const commitArgs = readFileSync(
+        path.join(harnessRoot, '.fake-tools', 'committer.args'),
+        'utf8',
+      )
+        .trim()
+        .split(/\r?\n/u)
+
+      expect(closeArgs).toEqual([
+        'agent-docs/exec-plans/active/2026-04-24-harness.md',
+        'agent-docs/exec-plans/completed/2026-04-24-harness.md',
+      ])
+      expect(commitArgs).toEqual(
+        expect.arrayContaining([
+          'close harness plan',
+          'agent-docs/exec-plans/active/2026-04-24-harness.md',
+          'agent-docs/exec-plans/completed/2026-04-24-harness.md',
+          'docs/touched.md',
+        ]),
+      )
+    } finally {
+      rmSync(harnessRoot, { recursive: true, force: true })
+    }
   })
 
   it('keeps the lean and full review-gpt wrappers wired to the expected package scripts', () => {
