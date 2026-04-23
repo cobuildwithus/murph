@@ -8,7 +8,7 @@ import {
 } from "../scripts/deploy-automation.js";
 
 const EXPECTED_CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD = 300;
-const EXPECTED_CONTAINER_ROLLOUT_STEP_PERCENTAGE = [5, 25, 50, 100];
+const EXPECTED_CONTAINER_ROLLOUT_STEP_PERCENTAGE = [10, 25, 50, 100];
 
 function parseJsoncObject(rawConfig: string): Record<string, unknown> {
   return JSON.parse(
