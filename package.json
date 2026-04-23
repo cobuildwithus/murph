@@ -59,6 +59,7 @@
     "research": "bash scripts/research.sh",
     "research:init": "node scripts/research-init.mjs",
     "research:materialize": "node scripts/research-materialize.mjs",
+    "research:run": "node scripts/research-run.mjs",
     "chatgpt:thread:export": "bash scripts/review-gpt-browser-profile.sh thread phlebas export --format json --filter-output exportPath",
     "chatgpt:thread:download": "bash scripts/review-gpt-browser-profile.sh thread phlebas download --format json --filter-output downloadedFile",
     "chatgpt:thread:watch": "bash scripts/review-gpt-browser-profile.sh thread phlebas wake --no-poll-until-complete --format json",

@@ -474,8 +474,10 @@ murph_review_gpt_profile_run_research() {
 
   murph_review_gpt_profile_prepare_browser_env "$profile_slug" || return 1
 
+  export RESEARCH_MANAGED_BROWSER_LANE="$profile_slug"
   export RESEARCH_MANAGED_BROWSER_USER_DATA_DIR="$managed_browser_user_data_dir"
   export RESEARCH_MANAGED_BROWSER_PROFILE="$managed_browser_profile"
+  export RESEARCH_MANAGED_BROWSER_ENDPOINT="$MURPH_REVIEW_GPT_BROWSER_ENDPOINT"
   export RESEARCH_MANAGED_BROWSER_PORT="$managed_browser_port"
   export RESEARCH_THREAD_EXPORT_BROWSER_ENDPOINT="$MURPH_REVIEW_GPT_BROWSER_ENDPOINT"
 

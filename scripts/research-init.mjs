@@ -168,8 +168,8 @@ These identity fields are only starting hints for the charter. The charter manif
 
 ## Run Now
 
-1. \`bash commands/01-charter.send.sh\`
-2. Once the thread has answered, \`bash commands/01-charter.harvest.sh\`
+1. \`pnpm research:run --workspace ${outDirRelative} --seam 01-charter --action send --lane eragon\`
+2. Once the thread has answered, \`pnpm research:run --workspace ${outDirRelative} --seam 01-charter --action harvest\`
 
 Those commands write:
 
@@ -195,6 +195,7 @@ Those commands write:
 
 ## Notes
 
+- \`pnpm research:run\` records the named browser lane in \`state/seams/<label>.json\`; later harvests reuse it unless you pass \`--lane\` again.
 - The generated command wrapper discovers the repo root dynamically at runtime and does not hardcode absolute local paths.
 - The legacy \`pnpm research\` runner remains unchanged. This scaffold is a new charter-first orchestrator path alongside it.
 - \`pnpm research:materialize\` replaces generated post-charter prompts and commands inside this workspace when the charter output changes.
@@ -288,8 +289,8 @@ function main(argv) {
   writeTextFile(path.join(outDir, "README.md"), buildRunbook({ outDirRelative, spec }));
 
   console.log(`Initialized research orchestrator scaffold at ${outDirRelative}`);
-  console.log(`Run next: bash ${path.posix.join(outDirRelative, "commands/01-charter.send.sh")}`);
-  console.log(`Then harvest the charter with: bash ${path.posix.join(outDirRelative, "commands/01-charter.harvest.sh")}`);
+  console.log(`Run next: pnpm research:run --workspace ${outDirRelative} --seam 01-charter --action send --lane eragon`);
+  console.log(`Then harvest the charter with: pnpm research:run --workspace ${outDirRelative} --seam 01-charter --action harvest`);
   console.log(`Then materialize later seams with: pnpm research:materialize --workspace ${outDirRelative}`);
 }
 

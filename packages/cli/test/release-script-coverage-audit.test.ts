@@ -237,6 +237,7 @@ describe('monorepo release flow coverage audit', () => {
       'bash scripts/review-gpt-browser-profile.sh review-gpt phlebas delay',
     )
     expect(rootPackageJson.scripts?.['review:gpt:data']).toBe('bash scripts/review-gpt-data.sh')
+    expect(rootPackageJson.scripts?.['research:run']).toBe('node scripts/research-run.mjs')
     expect(rootPackageJson.scripts?.['chatgpt:thread:export']).toBe(
       'bash scripts/review-gpt-browser-profile.sh thread phlebas export --format json --filter-output exportPath',
     )

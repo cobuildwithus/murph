@@ -771,6 +771,21 @@ NODE
 }
 
 resolve_browser_endpoint() {
+  if [[ -n "\${RESEARCH_THREAD_EXPORT_BROWSER_ENDPOINT:-}" ]]; then
+    printf '%s\\n' "\${RESEARCH_THREAD_EXPORT_BROWSER_ENDPOINT}"
+    return 0
+  fi
+
+  if [[ -n "\${RESEARCH_MANAGED_BROWSER_ENDPOINT:-}" ]]; then
+    printf '%s\\n' "\${RESEARCH_MANAGED_BROWSER_ENDPOINT}"
+    return 0
+  fi
+
+  if [[ -n "\${RESEARCH_MANAGED_BROWSER_PORT:-}" ]]; then
+    printf 'http://127.0.0.1:%s\\n' "\${RESEARCH_MANAGED_BROWSER_PORT}"
+    return 0
+  fi
+
   local endpoint_from_result=""
   local candidate_result_file=""
   for candidate_result_file in "\${result_file}" "\${send_result_file}"; do
@@ -792,16 +807,6 @@ resolve_browser_endpoint() {
       return 0
     fi
   done
-
-  if [[ -n "\${RESEARCH_MANAGED_BROWSER_ENDPOINT:-}" ]]; then
-    printf '%s\\n' "\${RESEARCH_MANAGED_BROWSER_ENDPOINT}"
-    return 0
-  fi
-
-  if [[ -n "\${RESEARCH_MANAGED_BROWSER_PORT:-}" ]]; then
-    printf 'http://127.0.0.1:%s\\n' "\${RESEARCH_MANAGED_BROWSER_PORT}"
-    return 0
-  fi
 
   if [[ ! -f "\${review_gpt_config}" ]]; then
     return 0
