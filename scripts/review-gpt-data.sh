@@ -4,11 +4,14 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-thread_browser_endpoint="${MURPH_REVIEW_GPT_BROWSER_ENDPOINT:-http://127.0.0.1:${managed_browser_port:-9442}}"
+PROFILE_HELPER="${ROOT_DIR}/scripts/review-gpt-browser-profile.sh"
+# shellcheck source=/dev/null
+source "$PROFILE_HELPER"
 
 vault_override=""
 has_send_override=0
 chat_url=""
+thread_browser_endpoint=""
 declare -a forward_args=()
 
 while [[ $# -gt 0 ]]; do
@@ -59,6 +62,11 @@ if [[ "$has_send_override" == "0" ]]; then
   forward_args=(--send "${forward_args[@]}")
 fi
 
+if ! murph_review_gpt_args_skip_browser_prepare "${forward_args[@]}"; then
+  murph_review_gpt_profile_prepare_browser_env phlebas
+  thread_browser_endpoint="${MURPH_REVIEW_GPT_BROWSER_ENDPOINT}"
+fi
+
 tmp_log_path="$(mktemp "${TMPDIR:-/tmp}/review-gpt-data.XXXXXX")"
 declare -a review_gpt_command=(pnpm exec cobuild-review-gpt)
 
@@ -67,7 +75,7 @@ set +e
 command_status="${PIPESTATUS[0]}"
 set -e
 
-if [[ "$command_status" -ne 0 && -n "$chat_url" ]]; then
+if [[ "$command_status" -ne 0 && -n "$chat_url" && -n "$thread_browser_endpoint" ]]; then
   set +e
   diagnostics_dir="$(
     "${review_gpt_command[@]}" thread diagnose \
