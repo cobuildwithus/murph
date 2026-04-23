@@ -8,6 +8,7 @@ import type { HostedAssistantDeliveryRecord } from "@murphai/hosted-execution/si
 
 import type { HostedRuntimePlatform } from "../src/hosted-runtime/platform.ts";
 import {
+  buildHostedPlatformBackedRuntimeEnv,
   createHostedRuntimeChildLauncherDirectories,
   createHostedRuntimeChildProcessEnv,
   normalizeHostedAssistantRuntimeConfig,
@@ -50,6 +51,7 @@ function createHostedRuntimePlatformStub(): HostedRuntimePlatform {
 test("hosted runtime config copies user and forwarded env maps", () => {
   const platform = createHostedRuntimePlatformStub();
   const forwardedEnv = { OPENAI_API_KEY: "secret" };
+  const platformEnv = { TELEGRAM_BOT_TOKEN: "telegram-token" };
   const resolvedConfig = createHostedRuntimeResolvedConfig();
   const userEnv = { ANTHROPIC_API_KEY: "anthropic-secret" };
 
@@ -57,6 +59,7 @@ test("hosted runtime config copies user and forwarded env maps", () => {
     {
       commitTimeoutMs: 45_000,
       forwardedEnv,
+      platformEnv,
       resolvedConfig,
       userEnv,
     },
@@ -67,10 +70,119 @@ test("hosted runtime config copies user and forwarded env maps", () => {
   assert.equal(normalized.commitTimeoutMs, 45_000);
   assert.deepEqual(normalized.forwardedEnv, forwardedEnv);
   assert.notEqual(normalized.forwardedEnv, forwardedEnv);
+  assert.deepEqual(normalized.platformEnv, platformEnv);
+  assert.notEqual(normalized.platformEnv, platformEnv);
   assert.deepEqual(normalized.resolvedConfig, resolvedConfig);
   assert.notEqual(normalized.resolvedConfig, resolvedConfig);
   assert.deepEqual(normalized.userEnv, userEnv);
   assert.notEqual(normalized.userEnv, userEnv);
+});
+
+test("hosted platform-backed env merges non-secret forwarded env with platform-only secrets", () => {
+  assert.deepEqual(
+    buildHostedPlatformBackedRuntimeEnv({
+      forwardedEnv: {
+        OPENAI_API_KEY: "openai-secret",
+      },
+      platformEnv: {
+        TELEGRAM_API_BASE_URL: "https://api.telegram.test",
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+        TELEGRAM_FILE_BASE_URL: "https://files.telegram.test",
+      },
+    }),
+    {
+      OPENAI_API_KEY: "openai-secret",
+      TELEGRAM_API_BASE_URL: "https://api.telegram.test",
+      TELEGRAM_BOT_TOKEN: "telegram-token",
+      TELEGRAM_FILE_BASE_URL: "https://files.telegram.test",
+    },
+  );
+});
+
+test("hosted platform-backed env keeps platform Telegram values when forwarded env collides", () => {
+  assert.deepEqual(
+    buildHostedPlatformBackedRuntimeEnv({
+      forwardedEnv: {
+        OPENAI_API_KEY: "openai-secret",
+        TELEGRAM_API_BASE_URL: "https://evil.telegram.test",
+        TELEGRAM_BOT_TOKEN: "evil-telegram-token",
+        TELEGRAM_FILE_BASE_URL: "https://evil-files.telegram.test",
+      },
+      platformEnv: {
+        TELEGRAM_API_BASE_URL: "https://api.telegram.test",
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+        TELEGRAM_FILE_BASE_URL: "https://files.telegram.test",
+      },
+    }),
+    {
+      OPENAI_API_KEY: "openai-secret",
+      TELEGRAM_API_BASE_URL: "https://api.telegram.test",
+      TELEGRAM_BOT_TOKEN: "telegram-token",
+      TELEGRAM_FILE_BASE_URL: "https://files.telegram.test",
+    },
+  );
+});
+
+test("hosted runtime config strips ingress-only secrets from forwarded env", () => {
+  const platform = createHostedRuntimePlatformStub();
+
+  const normalized = normalizeHostedAssistantRuntimeConfig(
+    {
+      forwardedEnv: {
+        LINQ_API_TOKEN: "linq-token",
+        LINQ_WEBHOOK_SECRET: "linq-webhook-secret",
+      },
+      userEnv: {
+        LINQ_WEBHOOK_SECRET: "linq-webhook-secret",
+        OPENAI_API_KEY: "openai-secret",
+      },
+    },
+    platform,
+  );
+
+  assert.deepEqual(normalized.forwardedEnv, {
+    LINQ_API_TOKEN: "linq-token",
+  });
+  assert.deepEqual(normalized.userEnv, {
+    OPENAI_API_KEY: "openai-secret",
+  });
+});
+
+test("hosted runtime config strips platform-only Telegram vars from forwarded and user env", () => {
+  const platform = createHostedRuntimePlatformStub();
+
+  const normalized = normalizeHostedAssistantRuntimeConfig(
+    {
+      forwardedEnv: {
+        OPENAI_API_KEY: "openai-secret",
+        TELEGRAM_API_BASE_URL: "https://evil.telegram.example",
+      },
+      platformEnv: {
+        TELEGRAM_API_BASE_URL: "https://api.telegram.example",
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+        TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
+      },
+      userEnv: {
+        OPENAI_API_KEY: "user-openai-secret",
+        TELEGRAM_API_BASE_URL: "https://user.telegram.example",
+        TELEGRAM_BOT_TOKEN: "user-telegram-token",
+        TELEGRAM_FILE_BASE_URL: "https://user-files.telegram.example",
+      },
+    },
+    platform,
+  );
+
+  assert.deepEqual(normalized.forwardedEnv, {
+    OPENAI_API_KEY: "openai-secret",
+  });
+  assert.deepEqual(normalized.platformEnv, {
+    TELEGRAM_API_BASE_URL: "https://api.telegram.example",
+    TELEGRAM_BOT_TOKEN: "telegram-token",
+    TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
+  });
+  assert.deepEqual(normalized.userEnv, {
+    OPENAI_API_KEY: "user-openai-secret",
+  });
 });
 
 test("hosted runtime config deep-clones resolved device-sync provider config", () => {
@@ -199,6 +311,7 @@ test("hosted child process env forwards only allowlisted ambient keys and normal
       TZ: "UTC",
     },
     forwardedEnv: {
+      LINQ_WEBHOOK_SECRET: "linq-webhook-secret",
       OPENAI_API_KEY: "secret",
       PATH: "/custom/bin",
     },
