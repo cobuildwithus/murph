@@ -151,6 +151,90 @@ test("history links round-trip through write, storage, read, and list surfaces",
   ]);
 });
 
+test("health history append rejects explicit duplicate event ids", async () => {
+  const vaultRoot = await makeTempDirectory("murph-history-duplicate-event-id");
+  await initializeVault({ vaultRoot });
+
+  await appendHistoryEvent({
+    vaultRoot,
+    eventId: "evt_01JQ9R7WF97M1WAB2B4QF2Q1D2",
+    kind: "encounter",
+    occurredAt: "2026-03-03T12:00:00.000Z",
+    title: "Original visit",
+    encounterType: "office_visit",
+  });
+
+  await assert.rejects(
+    () =>
+      appendHistoryEvent({
+        vaultRoot,
+        eventId: "evt_01JQ9R7WF97M1WAB2B4QF2Q1D2",
+        kind: "encounter",
+        occurredAt: "2026-03-03T12:05:00.000Z",
+        title: "Accidental duplicate visit",
+        encounterType: "office_visit",
+      }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "VAULT_ALREADY_EXISTS",
+  );
+
+  const listed = await listHistoryEvents({
+    vaultRoot,
+    kinds: ["encounter"],
+  });
+
+  assert.equal(listed.length, 1);
+  assert.equal(listed[0]?.title, "Original visit");
+  assert.equal(listed[0]?.lifecycle?.revision, 1);
+});
+
+test("health history append only rejects explicit ids that already exist, not unrelated malformed rows", async () => {
+  const vaultRoot = await makeTempDirectory("murph-history-unique-event-id-amid-malformed-row");
+  await initializeVault({ vaultRoot });
+
+  const original = await appendHistoryEvent({
+    vaultRoot,
+    eventId: "evt_01JQ9R7WF97M1WAB2B4QF2Q1D3",
+    kind: "encounter",
+    occurredAt: "2026-03-03T12:00:00.000Z",
+    title: "Original visit",
+    encounterType: "office_visit",
+  });
+
+  await appendJsonlRecord({
+    vaultRoot,
+    relativePath: original.relativePath,
+    record: {
+      ...original.record,
+      id: "evt_01JQ9R7WF97M1WAB2B4QF2Q1D4",
+      recordedAt: "2026-03-03T12:05:00.000Z",
+      dayKey: "2026-3-3",
+      lifecycle: {
+        revision: 1,
+      },
+    },
+  });
+
+  const appended = await appendHistoryEvent({
+    vaultRoot,
+    eventId: "evt_01JQ9R7WF97M1WAB2B4QF2Q1D5",
+    kind: "encounter",
+    occurredAt: "2026-03-03T12:10:00.000Z",
+    title: "Later visit",
+    encounterType: "office_visit",
+  });
+  const stored = await readJsonlRecords({
+    vaultRoot,
+    relativePath: original.relativePath,
+  });
+
+  assert.equal(appended.record.id, "evt_01JQ9R7WF97M1WAB2B4QF2Q1D5");
+  assert.equal(
+    stored.filter((record) => (record as { id?: string }).id === appended.record.id).length,
+    1,
+  );
+});
+
 test("health history writes store the vault-local dayKey and timezone when UTC crosses midnight", async () => {
   const vaultRoot = await makeTempDirectory("murph-history-local-day");
   await initializeVault({

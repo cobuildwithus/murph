@@ -2241,7 +2241,7 @@ test("validateVault checks raw manifests and referenced artifacts", async () => 
     validation.issues.some(
       (issue) =>
         issue.code === "RAW_MANIFEST_INVALID" &&
-        issue.path === documentImport.manifestPath,
+        issue.path === path.posix.dirname(documentImport.manifestPath),
     ),
   );
 });
@@ -3085,7 +3085,7 @@ test("validateVault reports unresolved write operations", async () => {
   );
 });
 
-test("validateVault reports raw artifact directories that are missing manifest.json", async () => {
+test("validateVault reports raw artifact directories that are missing a raw import manifest", async () => {
   const vaultRoot = await makeTempDirectory("murph-vault");
   const sourceRoot = await makeTempDirectory("murph-source");
   await initializeVault({ vaultRoot });
@@ -3107,8 +3107,8 @@ test("validateVault reports raw artifact directories that are missing manifest.j
     validation.issues.some(
       (issue) =>
         issue.code === "RAW_MANIFEST_INVALID" &&
-        issue.message.includes('missing manifest.json') &&
-        issue.path === imported.manifestPath,
+        issue.message.includes("missing a raw import manifest") &&
+        issue.path === path.posix.dirname(imported.manifestPath),
     ),
   );
 });

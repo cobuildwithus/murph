@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { promises as fs } from "node:fs";
 
-import { afterEach, test } from "vitest";
+import { afterEach, test, vi } from "vitest";
 
 import {
   addActivitySession,
@@ -784,6 +784,93 @@ test("attachment-backed event writes cover raw-import and rewrite branches", asy
 
   assert.equal(secondMeasurement.created, false);
   assert.equal(secondMeasurementRecords.filter((record) => record.id === measurementId).length, 2);
+});
+
+test("attachment-backed event retries write immutable manifests for reused raw files", async () => {
+  const vaultRoot = await makeTempDirectory("murph-core-attachment-manifest-retry");
+  const sourceRoot = await makeTempDirectory("murph-core-attachment-manifest-retry-source");
+  await initializeVault({ vaultRoot });
+
+  const activityId = "evt_01JQ9R7WF97M1WAB2B4QF2Q1AC";
+  const activityPhoto = await writeExternalFile(sourceRoot, "activity-photo.jpg", "activity-photo");
+
+  vi.useFakeTimers();
+
+  try {
+    vi.setSystemTime(new Date("2026-03-14T06:05:00.000Z"));
+
+    const first = await addActivitySession({
+      vaultRoot,
+      draft: buildActivitySessionEventDraft({
+        id: activityId,
+        occurredAt: "2026-03-14T06:00:00.000Z",
+        title: "Morning workout",
+        activityType: "strength-training",
+        durationMinutes: 55,
+        workout: {
+          exercises: [],
+        },
+      }),
+      attachments: [
+        {
+          role: "media_1",
+          sourcePath: activityPhoto,
+          allowExistingMatch: true,
+        },
+      ],
+    });
+
+    vi.setSystemTime(new Date("2026-03-14T06:06:00.000Z"));
+
+    const second = await addActivitySession({
+      vaultRoot,
+      draft: buildActivitySessionEventDraft({
+        id: activityId,
+        occurredAt: "2026-03-14T06:30:00.000Z",
+        title: "Morning workout retry",
+        activityType: "strength-training",
+        durationMinutes: 56,
+        workout: {
+          exercises: [],
+        },
+      }),
+      attachments: [
+        {
+          role: "media_1",
+          sourcePath: activityPhoto,
+          allowExistingMatch: true,
+        },
+      ],
+    });
+
+    assert.ok(first.manifestPath);
+    assert.ok(second.manifestPath);
+    if (!first.manifestPath || !second.manifestPath) {
+      throw new Error("Expected attachment-backed event writes to return manifest paths.");
+    }
+
+    assert.notEqual(first.manifestPath, second.manifestPath);
+    assert.equal(path.posix.dirname(first.manifestPath), path.posix.dirname(second.manifestPath));
+
+    const firstManifest = JSON.parse(
+      await fs.readFile(path.join(vaultRoot, first.manifestPath), "utf8"),
+    ) as { importedAt?: string };
+    const secondManifest = JSON.parse(
+      await fs.readFile(path.join(vaultRoot, second.manifestPath), "utf8"),
+    ) as { importedAt?: string };
+    const shardRecords = await readJsonlRecords({
+      vaultRoot,
+      relativePath: second.ledgerFile,
+    });
+    const validation = await validateVault({ vaultRoot });
+
+    assert.equal(firstManifest.importedAt, "2026-03-14T06:05:00.000Z");
+    assert.equal(secondManifest.importedAt, "2026-03-14T06:06:00.000Z");
+    assert.equal(shardRecords.filter((record) => record.id === activityId).length, 2);
+    assert.equal(validation.valid, true);
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 test("promotion blocks preserve actor id fallbacks and attachment label fallbacks", async () => {

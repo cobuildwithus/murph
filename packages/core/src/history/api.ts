@@ -18,7 +18,7 @@ import { readJsonlRecords, toMonthlyShardRelativePath } from "../jsonl.ts";
 import { generateRecordId } from "../ids.ts";
 import { runCanonicalWrite } from "../operations/index.ts";
 import { normalizeTimeZone } from "../time.ts";
-import { walkVaultFiles } from "../fs.ts";
+import { readUtf8File, walkVaultFiles } from "../fs.ts";
 import { loadVault } from "../vault.ts";
 import {
   buildEventSpineEnvelope,
@@ -560,6 +560,37 @@ async function loadStoredHistoryEntries(vaultRoot: string): Promise<StoredHistor
   return entries;
 }
 
+async function historyEventIdExists(vaultRoot: string, eventId: string): Promise<boolean> {
+  const shardPaths = await walkVaultFiles(vaultRoot, VAULT_LAYOUT.eventLedgerDirectory, {
+    extension: ".jsonl",
+  });
+
+  for (const relativePath of shardPaths) {
+    const lines = (await readUtf8File(vaultRoot, relativePath)).split("\n").filter(Boolean);
+
+    for (const line of lines) {
+      let parsed: unknown;
+
+      try {
+        parsed = JSON.parse(line);
+      } catch {
+        continue;
+      }
+
+      if (
+        isPlainRecord(parsed)
+        && parsed.id === eventId
+        && typeof parsed.kind === "string"
+        && HISTORY_KIND_SET.has(parsed.kind as HistoryEventKind)
+      ) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
 function normalizeOrder(order: HistoryEventOrder | undefined): HistoryEventOrder {
   return optionalEnum(order ?? "desc", HISTORY_EVENT_ORDER, "order") ?? "desc";
 }
@@ -610,7 +641,11 @@ export async function appendHistoryEvent(
   input: AppendHistoryEventInput,
 ): Promise<AppendHistoryEventResult> {
   const vault = await loadVault({ vaultRoot: input.vaultRoot });
-  const record = buildHistoryEventRecord(input, vault.metadata.timezone);
+  const requestedEventId = normalizeId(input.eventId, "eventId", ID_PREFIXES.event);
+  const record = buildHistoryEventRecord(
+    requestedEventId ? { ...input, eventId: requestedEventId } : input,
+    vault.metadata.timezone,
+  );
   const relativePath = toMonthlyShardRelativePath(
     VAULT_LAYOUT.eventLedgerDirectory,
     record.occurredAt,
@@ -622,6 +657,13 @@ export async function appendHistoryEvent(
     summary: `Append history event ${record.id}`,
     occurredAt: record.recordedAt,
     mutate: async ({ batch }) => {
+      if (requestedEventId && (await historyEventIdExists(input.vaultRoot, requestedEventId))) {
+        throw new VaultError(
+          "VAULT_ALREADY_EXISTS",
+          `History event "${requestedEventId}" already exists.`,
+        );
+      }
+
       await batch.stageJsonlAppend(relativePath, `${JSON.stringify(record)}\n`);
       const audit = await emitAuditRecord({
         vaultRoot: input.vaultRoot,
