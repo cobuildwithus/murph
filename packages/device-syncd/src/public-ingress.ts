@@ -18,6 +18,7 @@ import {
 import type {
   BeginConnectionResult,
   CompleteConnectionResult,
+  DeviceSyncAccount,
   DeviceSyncIngressWebhook,
   DeviceSyncLogger,
   DeviceSyncProvider,
@@ -27,6 +28,7 @@ import type {
   DeviceSyncRegistry,
   HandleOAuthCallbackInput,
   HandleWebhookResult,
+  ProviderConnectionResult,
   PublicProviderDescriptor,
   StartConnectionInput,
 } from "./types.ts";
@@ -176,6 +178,8 @@ export class DeviceSyncPublicIngress {
 
     const stateRecord = stateResult.record;
     const returnTo = this.sanitizeStoredReturnTo(stateRecord.returnTo ?? null);
+    let connection: ProviderConnectionResult | null = null;
+    let connectionPersisted = false;
 
     try {
       const callbackError = normalizeString(input.error);
@@ -207,7 +211,7 @@ export class DeviceSyncPublicIngress {
 
       const grantedScopes = splitScopeList(input.scope);
 
-      const connection = await provider.exchangeAuthorizationCode(
+      connection = await provider.exchangeAuthorizationCode(
         {
           callbackUrl: descriptor.callbackUrl,
           state,
@@ -238,6 +242,7 @@ export class DeviceSyncPublicIngress {
         connectedAt: now,
         nextReconcileAt: connection.nextReconcileAt ?? null,
       });
+      connectionPersisted = true;
 
       await this.hooks.onConnectionEstablished?.({
         account,
@@ -254,6 +259,10 @@ export class DeviceSyncPublicIngress {
         returnTo,
       };
     } catch (error) {
+      if (connection && !connectionPersisted) {
+        await this.cleanupFailedOAuthConnection(provider, connection, now);
+      }
+
       throw attachOAuthCallbackContext(error, {
         provider: provider.provider,
         returnTo,
@@ -476,6 +485,26 @@ export class DeviceSyncPublicIngress {
 
     return resolved;
   }
+
+  private async cleanupFailedOAuthConnection(
+    provider: DeviceSyncProvider,
+    connection: ProviderConnectionResult,
+    now: string,
+  ): Promise<void> {
+    if (!provider.revokeAccess) {
+      return;
+    }
+
+    try {
+      await provider.revokeAccess(buildPendingOAuthCleanupAccount(provider.provider, connection, now));
+    } catch (error) {
+      this.logger.warn?.("Failed to revoke provider access after OAuth callback setup failed.", {
+        provider: provider.provider,
+        externalAccountIdHash: hashExternalAccountIdForLogs(connection.externalAccountId),
+        error: summarizePublicIngressError(error),
+      });
+    }
+  }
 }
 
 export function createDeviceSyncPublicIngress(input: CreateDeviceSyncPublicIngressInput): DeviceSyncPublicIngress {
@@ -484,6 +513,49 @@ export function createDeviceSyncPublicIngress(input: CreateDeviceSyncPublicIngre
 
 function hashExternalAccountIdForLogs(value: string): string {
   return sha256Text(value);
+}
+
+function buildPendingOAuthCleanupAccount(
+  provider: string,
+  connection: ProviderConnectionResult,
+  now: string,
+): DeviceSyncAccount {
+  return {
+    id: `pending-oauth:${provider}:${connection.externalAccountId}`,
+    provider,
+    externalAccountId: connection.externalAccountId,
+    disconnectGeneration: 0,
+    displayName: connection.displayName ?? null,
+    status: "active",
+    scopes: [...(connection.scopes ?? [])],
+    accessTokenExpiresAt: connection.tokens.accessTokenExpiresAt ?? null,
+    metadata: { ...(connection.metadata ?? {}) },
+    connectedAt: now,
+    lastWebhookAt: null,
+    lastSyncStartedAt: null,
+    lastSyncCompletedAt: null,
+    lastSyncErrorAt: null,
+    lastErrorCode: null,
+    lastErrorMessage: null,
+    nextReconcileAt: connection.nextReconcileAt ?? null,
+    createdAt: now,
+    updatedAt: now,
+    accessToken: connection.tokens.accessToken,
+    refreshToken: connection.tokens.refreshToken ?? null,
+  };
+}
+
+function summarizePublicIngressError(error: unknown): Record<string, unknown> {
+  if (error instanceof Error) {
+    return {
+      name: error.name,
+      message: sanitizeHostedRuntimeErrorText(error.message) ?? "[redacted]",
+    };
+  }
+
+  return {
+    value: sanitizeHostedRuntimeErrorText(String(error)) ?? "[redacted]",
+  };
 }
 
 function attachOAuthCallbackContext(

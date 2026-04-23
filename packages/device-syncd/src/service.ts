@@ -141,8 +141,9 @@ export class DeviceSyncService {
         markWebhookReceived: (accountId, now) => this.store.markWebhookReceived(accountId, now),
       },
       hooks: {
-        onConnectionEstablished: async ({ account, connection }) => {
+        onConnectionEstablished: async ({ account, connection, provider }) => {
           this.enqueueJobs(account, connection.initialJobs ?? []);
+          await this.ensureWebhookAdminUpkeepAfterConnectionEstablished(provider);
         },
         onWebhookAccepted: async ({ account, traceId, webhook }) => {
           this.store.enqueueJobsAndCompleteWebhookTrace({
@@ -712,6 +713,30 @@ export class DeviceSyncService {
         dedupeKey: normalizedJob.dedupeKey,
       });
     });
+  }
+
+  private async ensureWebhookAdminUpkeepAfterConnectionEstablished(provider: DeviceSyncProvider): Promise<void> {
+    if (provider.provider !== "oura") {
+      return;
+    }
+
+    const ensureSubscriptions = provider.webhookAdmin?.ensureSubscriptions;
+
+    if (!ensureSubscriptions) {
+      return;
+    }
+
+    try {
+      await ensureSubscriptions({
+        publicBaseUrl: this.publicBaseUrl,
+      });
+    } catch (error) {
+      this.logger.warn?.("Failed to ensure device-sync webhook admin upkeep after connection establishment.", {
+        provider: provider.provider,
+        reason: "connection-established",
+        error: summarizeError(error),
+      });
+    }
   }
 }
 

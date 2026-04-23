@@ -369,7 +369,7 @@ export const OURA_DEVICE_PROVIDER_DESCRIPTOR = {
       reconcileIntervalMs: 6 * 60 * 60_000,
     },
     jobKinds: ["backfill", "reconcile", "resource", "delete"],
-    supportsRemoteDisconnect: false,
+    supportsRemoteDisconnect: true,
     supportsTokenRefresh: true,
   },
   normalization: {

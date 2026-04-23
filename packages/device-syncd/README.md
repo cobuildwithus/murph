@@ -145,7 +145,7 @@ Oura settings:
 - `OURA_RECONCILE_DAYS`
 - `OURA_RECONCILE_INTERVAL_MS`
 - `OURA_REQUEST_TIMEOUT_MS`
-- `OURA_WEBHOOK_VERIFICATION_TOKEN` when you want the Oura provider config to answer webhook preflight challenges and maintain Oura webhook subscriptions
+- `OURA_WEBHOOK_VERIFICATION_TOKEN` when you want the Oura provider config to answer webhook preflight challenges and run connect-time Oura webhook subscription upkeep
 
 Strava settings:
 - `STRAVA_CLIENT_ID`

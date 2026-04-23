@@ -236,6 +236,168 @@ test("device sync service connects, imports, and deduplicates webhook traces", a
   service.close();
 });
 
+test("device sync service keeps connection-established webhook admin upkeep best-effort", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-webhook-admin-upkeep");
+  const warnEvents: Array<{ context?: Record<string, unknown>; message: string }> = [];
+  let upkeepInput: { publicBaseUrl: string } | null = null;
+  const ensureSubscriptions = vi.fn(async (input: { publicBaseUrl: string }) => {
+    upkeepInput = input;
+    throw new Error("upkeep unavailable");
+  });
+  const baseProvider = createFakeProvider();
+  const webhookDescriptor = baseProvider.descriptor.webhook;
+  assert.ok(webhookDescriptor);
+  const service = createDeviceSyncService({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+      log: {
+        warn(message, context) {
+          warnEvents.push({
+            context: context as Record<string, unknown> | undefined,
+            message,
+          });
+        },
+      },
+    },
+    providers: [
+      createFakeProvider({
+        provider: "oura",
+        descriptor: {
+          ...baseProvider.descriptor,
+          provider: "oura",
+          displayName: "Oura",
+          oauth: {
+            callbackPath: "/oauth/oura/callback",
+            defaultScopes: ["offline", "read:data"],
+          },
+          webhook: {
+            ...webhookDescriptor,
+            path: "/webhooks/oura",
+            supportsAdmin: true,
+          },
+        },
+        async exchangeAuthorizationCode(_context, code) {
+          return {
+            externalAccountId: `oura-${code}`,
+            displayName: "Oura",
+            scopes: ["personal", "daily"],
+            tokens: {
+              accessToken: "access-token",
+              refreshToken: "refresh-token",
+            },
+            initialJobs: [],
+            nextReconcileAt: "2026-03-17T12:00:00.000Z",
+          };
+        },
+        webhookAdmin: {
+          ensureSubscriptions,
+        },
+      }),
+    ],
+  });
+
+  const begin = await service.startConnection({
+    provider: "oura",
+  });
+  const connected = await service.handleOAuthCallback({
+    provider: "oura",
+    state: begin.state,
+    code: "webhook-admin",
+  });
+  const queuedJobs = service.store.database.prepare(`
+    select count(*) as total
+    from device_job
+    where account_id = ?
+  `).get(connected.account.id) as { total: number };
+
+  assert.equal(connected.account.externalAccountId, "oura-webhook-admin");
+  assert.equal(queuedJobs.total, 0);
+  assert.equal(ensureSubscriptions.mock.calls.length, 1);
+  assert.deepEqual(upkeepInput, {
+    publicBaseUrl: "https://sync.example.test/device-sync",
+  });
+  assert.equal(warnEvents.length, 1);
+  assert.equal(
+    warnEvents[0]?.message,
+    "Failed to ensure device-sync webhook admin upkeep after connection establishment.",
+  );
+  assert.deepEqual(warnEvents[0]?.context?.error, {
+    message: "upkeep unavailable",
+    name: "Error",
+  });
+  assert.equal(warnEvents[0]?.context?.provider, "oura");
+  assert.equal(warnEvents[0]?.context?.reason, "connection-established");
+
+  service.close();
+});
+
+test("device sync service does not run connection-established webhook admin upkeep for non-Oura providers", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-non-oura-webhook-admin");
+  const ensureSubscriptions = vi.fn(async () => {});
+  const baseProvider = createFakeProvider();
+  const webhookDescriptor = baseProvider.descriptor.webhook;
+  assert.ok(webhookDescriptor);
+  const service = createDeviceSyncService({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [
+      createFakeProvider({
+        provider: "strava",
+        descriptor: {
+          ...baseProvider.descriptor,
+          provider: "strava",
+          displayName: "Strava",
+          oauth: {
+            callbackPath: "/oauth/strava/callback",
+            defaultScopes: ["offline", "activity:read_all"],
+          },
+          webhook: {
+            ...webhookDescriptor,
+            path: "/webhooks/strava",
+            supportsAdmin: true,
+          },
+        },
+        async exchangeAuthorizationCode(_context, code) {
+          return {
+            externalAccountId: `strava-${code}`,
+            displayName: "Strava",
+            scopes: ["activity:read_all"],
+            tokens: {
+              accessToken: "access-token",
+              refreshToken: "refresh-token",
+            },
+            initialJobs: [],
+            nextReconcileAt: "2026-03-17T12:00:00.000Z",
+          };
+        },
+        webhookAdmin: {
+          ensureSubscriptions,
+        },
+      }),
+    ],
+  });
+
+  const begin = await service.startConnection({
+    provider: "strava",
+  });
+  await service.handleOAuthCallback({
+    provider: "strava",
+    state: begin.state,
+    code: "strava-webhook-admin",
+  });
+
+  assert.equal(ensureSubscriptions.mock.calls.length, 0);
+
+  service.close();
+});
+
 test("device sync service redacts connection metadata from public account responses while retaining internal provider state", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-public-redaction");
   let seenMetadata: Record<string, unknown> | null = null;
