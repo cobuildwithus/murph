@@ -17,7 +17,9 @@ import {
 import { resolveRuntimePaths } from "@murphai/runtime-state/node";
 
 import {
+  listInboxCaptureMutations,
   openInboxRuntime,
+  readInboxCaptureMutationHead,
 } from "../src/kernel/sqlite.ts";
 import { createInboxPipeline } from "../src/kernel/pipeline.ts";
 import {
@@ -60,7 +62,10 @@ function createCapture(overrides: Partial<InboundCapture> = {}): InboundCapture 
   };
 }
 
-function countRows(databasePath: string, table: "attachment_parse_job" | "capture"): number {
+function countRows(
+  databasePath: string,
+  table: "attachment_parse_job" | "capture" | "capture_mutation_tombstone",
+): number {
   const database = openDatabaseSync(databasePath);
 
   try {
@@ -208,6 +213,72 @@ test("processCapture recovers from a crash after raw inbox evidence is written b
     skipDirectories: ["attachments"],
   });
   assert.equal(envelopeFiles.length, 1);
+
+  const captureRecords = await readJsonlRecords({
+    vaultRoot,
+    relativePath: "ledger/inbox-captures/2026/2026-03.jsonl",
+  });
+  assert.equal(captureRecords.length, 1);
+  assert.equal(captureRecords[0]?.captureId, captureId);
+
+  pipeline.close();
+});
+
+test("processCapture persists canonical evidence even when a stale runtime row already claims the external id", async () => {
+  const vaultRoot = await makeTempDirectory("murph-inbox-runtime-only-dedupe-vault");
+  const sourceRoot = await makeTempDirectory("murph-inbox-runtime-only-dedupe-source");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+
+  const attachmentPath = await writeExternalFile(sourceRoot, "canonical.pdf", "canonical attachment");
+  const inbound = createCapture({
+    externalId: "msg-runtime-only-dedupe",
+    occurredAt: "2026-03-13T10:12:00.000Z",
+    text: "Canonical capture",
+    attachments: [
+      {
+        externalId: "att-runtime-only-dedupe",
+        kind: "document",
+        mime: "application/pdf",
+        originalPath: attachmentPath,
+        fileName: "canonical.pdf",
+      },
+    ],
+  });
+  const runtime = await openInboxRuntime({ vaultRoot });
+  const staleCaptureId = "cap_runtime_only_stale";
+  const staleEventId = "evt_01HQW7K0M9N8P7Q6R5S4T3V2ST";
+
+  runtime.upsertCaptureIndex({
+    captureId: staleCaptureId,
+    eventId: staleEventId,
+    input: {
+      ...inbound,
+      text: "stale runtime row",
+      attachments: [],
+    },
+    stored: {
+      captureId: staleCaptureId,
+      eventId: staleEventId,
+      storedAt: "2026-03-13T10:12:30.000Z",
+      sourceDirectory: "raw/inbox/email/self/2026/03/cap_runtime_only_stale",
+      envelopePath: "raw/inbox/email/self/2026/03/cap_runtime_only_stale/envelope.json",
+      attachments: [],
+    },
+  });
+
+  assert.equal(runtime.findByExternalId(inbound.source, inbound.accountId, inbound.externalId)?.captureId, staleCaptureId);
+
+  const pipeline = await createInboxPipeline({ vaultRoot, runtime });
+  const persisted = await pipeline.processCapture(inbound);
+  const captureId = createDeterministicInboxCaptureId(inbound);
+
+  assert.equal(persisted.deduped, false);
+  assert.equal(persisted.captureId, captureId);
+  assert.equal(runtime.getCapture(staleCaptureId), null);
+  assert.equal(runtime.getCapture(captureId)?.text, "Canonical capture");
+  assert.equal(countRows(runtime.databasePath, "capture"), 1);
+  assert.equal(countRows(runtime.databasePath, "attachment_parse_job"), 1);
+  assert.equal(runtime.listAttachmentParseJobs({ captureId, limit: 10 })[0]?.state, "pending");
 
   const captureRecords = await readJsonlRecords({
     vaultRoot,
@@ -533,6 +604,122 @@ test("rebuildRuntimeFromVault restores deterministic raw inbox envelopes that ar
   assert.equal(countRows(runtime.databasePath, "capture"), 1);
   assert.equal(countRows(runtime.databasePath, "attachment_parse_job"), 1);
   assert.equal((await readJsonlRecordsIfPresent(vaultRoot, "ledger/inbox-captures/2026/2026-03.jsonl")).length, 1);
+
+  runtime.close();
+});
+
+test("rebuildRuntimeFromVault replaces stale runtime projection rows, resets parser state, and preserves cursors", async () => {
+  const vaultRoot = await makeTempDirectory("murph-inbox-rebuild-reset-vault");
+  const sourceRoot = await makeTempDirectory("murph-inbox-rebuild-reset-source");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+
+  const documentPath = await writeExternalFile(sourceRoot, "rebuild-reset.pdf", "authoritative capture");
+  const inbound = createCapture({
+    externalId: "msg-rebuild-reset",
+    occurredAt: "2026-03-13T11:07:00.000Z",
+    text: "Authoritative capture",
+    attachments: [
+      {
+        externalId: "att-rebuild-reset",
+        kind: "document",
+        mime: "application/pdf",
+        originalPath: documentPath,
+        fileName: "rebuild-reset.pdf",
+      },
+    ],
+  });
+  const captureId = createDeterministicInboxCaptureId(inbound);
+  const eventId = "evt_01HQW7K0M9N8P7Q6R5S4T3V2RB";
+  const persisted = await persistCanonicalInboxCapture({
+    vaultRoot,
+    captureId,
+    eventId,
+    input: inbound,
+    storedAt: "2026-03-13T11:08:00.000Z",
+  });
+
+  const runtime = await openInboxRuntime({ vaultRoot });
+  runtime.setCursor("email", "self", { messageId: "msg-rebuild-reset" });
+  runtime.upsertCaptureIndex({
+    captureId,
+    eventId,
+    input: inbound,
+    stored: persisted.stored,
+  });
+  runtime.enqueueDerivedJobs({
+    captureId,
+    stored: persisted.stored,
+  });
+
+  const staleJob = runtime.claimNextAttachmentParseJob({ captureId });
+  assert.ok(staleJob);
+  runtime.completeAttachmentParseJob({
+    jobId: staleJob.jobId,
+    attempt: staleJob.attempts,
+    providerId: "stale-parser",
+    resultPath: "derived/inbox/stale-parser.json",
+    extractedText: "Glucose 88 mg/dL",
+  });
+  assert.equal(runtime.searchCaptures({ text: "glucose", limit: 10 }).length, 1);
+
+  const staleCaptureId = "cap_runtime_projection_stale";
+  runtime.upsertCaptureIndex({
+    captureId: staleCaptureId,
+    eventId: "evt_01HQW7K0M9N8P7Q6R5S4T3V2RC",
+    input: createCapture({
+      externalId: "msg-stale-runtime-projection",
+      occurredAt: "2026-03-13T11:06:00.000Z",
+      text: "Stale runtime projection row",
+    }),
+    stored: {
+      captureId: staleCaptureId,
+      eventId: "evt_01HQW7K0M9N8P7Q6R5S4T3V2RC",
+      storedAt: "2026-03-13T11:06:30.000Z",
+      sourceDirectory: "raw/inbox/email/self/2026/03/cap_runtime_projection_stale",
+      envelopePath: "raw/inbox/email/self/2026/03/cap_runtime_projection_stale/envelope.json",
+      attachments: [],
+    },
+  });
+
+  const headBefore = await readInboxCaptureMutationHead(vaultRoot);
+  assert.ok(headBefore > 0);
+  assert.equal(countRows(runtime.databasePath, "capture"), 2);
+  assert.equal(runtime.getCapture(captureId)?.attachments[0]?.parseState, "succeeded");
+
+  await rebuildRuntimeFromVault({ vaultRoot, runtime });
+
+  const rebuilt = runtime.getCapture(captureId);
+  assert.ok(rebuilt);
+  assert.deepEqual(runtime.getCursor("email", "self"), { messageId: "msg-rebuild-reset" });
+  assert.equal(runtime.getCapture(staleCaptureId), null);
+  assert.equal(countRows(runtime.databasePath, "capture"), 1);
+  assert.equal(countRows(runtime.databasePath, "attachment_parse_job"), 1);
+  assert.equal(countRows(runtime.databasePath, "capture_mutation_tombstone"), 1);
+  assert.equal(rebuilt.attachments[0]?.parseState, "pending");
+  assert.equal(rebuilt.attachments[0]?.parserProviderId ?? null, null);
+  assert.equal(rebuilt.attachments[0]?.derivedPath ?? null, null);
+  assert.equal(rebuilt.attachments[0]?.extractedText ?? null, null);
+  assert.equal(runtime.searchCaptures({ text: "glucose", limit: 10 }).length, 0);
+
+  const headAfter = await readInboxCaptureMutationHead(vaultRoot);
+  assert.ok(headAfter > headBefore);
+  assert.deepEqual(
+    await listInboxCaptureMutations({
+      vaultRoot,
+      afterCursor: headBefore,
+      limit: 10,
+    }),
+    [
+      {
+        captureId,
+        cursor: headAfter - 1,
+      },
+      {
+        captureId: staleCaptureId,
+        cursor: headAfter,
+      },
+    ],
+  );
 
   runtime.close();
 });
