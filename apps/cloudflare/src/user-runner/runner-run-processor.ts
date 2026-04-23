@@ -53,6 +53,7 @@ import {
   invokeHostedExecutionContainerRunner,
 } from "../runner-container.js";
 import {
+  buildHostedRunnerAmbientEnv,
   buildHostedRunnerContainerEnv,
   buildHostedRunnerJobRuntimeConfig,
 } from "../runner-env.ts";
@@ -599,7 +600,7 @@ export class RunnerRunProcessor {
       userId,
     );
     const runnerSecrets = await runnerSecretsService.readRunnerSecrets(userId);
-    const forwardedEnv = buildHostedRunnerContainerEnv(
+    const forwardedEnv = buildHostedRunnerAmbientEnv(
       this.dependencies.runnerRuntimeEnvSource,
     );
     const runtimeConfig = buildHostedRunnerJobRuntimeConfig({
