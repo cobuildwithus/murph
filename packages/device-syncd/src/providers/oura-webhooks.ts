@@ -111,11 +111,6 @@ function normalizeOuraWebhookCallbackUrl(value: string): string {
   return url.toString();
 }
 
-function normalizeOuraWebhookCallbackPath(value: string): string {
-  const pathname = new URL(value).pathname.replace(/\/+$/u, "");
-  return pathname || "/";
-}
-
 function createOuraWebhookSubscriptionKey(input: {
   callbackUrl: string;
   eventType: OuraWebhookOperation;
@@ -182,8 +177,8 @@ function choosePrimarySubscription(
   })[0]!;
 }
 
-function hasManagedCallbackPath(subscription: OuraWebhookSubscription, callbackUrl: string): boolean {
-  return normalizeOuraWebhookCallbackPath(subscription.callbackUrl) === normalizeOuraWebhookCallbackPath(callbackUrl);
+function hasManagedCallbackUrl(subscription: OuraWebhookSubscription, callbackUrl: string): boolean {
+  return normalizeOuraWebhookCallbackUrl(subscription.callbackUrl) === normalizeOuraWebhookCallbackUrl(callbackUrl);
 }
 
 function shouldRenewSubscription(subscription: OuraWebhookSubscription, renewIfExpiringWithinMs: number): boolean {
@@ -548,7 +543,7 @@ export function createOuraWebhookSubscriptionClient(
       const managedByKey = new Map<string, OuraWebhookSubscription[]>();
 
       for (const subscription of current) {
-        if (!hasManagedCallbackPath(subscription, callbackUrl)) {
+        if (!hasManagedCallbackUrl(subscription, callbackUrl)) {
           continue;
         }
 

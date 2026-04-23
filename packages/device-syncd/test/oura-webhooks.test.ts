@@ -125,7 +125,7 @@ test("Oura webhook subscription ensure creates missing subscriptions with client
   );
 });
 
-test("Oura webhook subscription ensure re-lists after create and prunes stale managed callbacks across origins", async () => {
+test("Oura webhook subscription ensure prunes only same-callback duplicates and stale subscriptions", async () => {
   const callbackUrl = "https://sync.example.test/api/device-sync/webhooks/oura";
   const otherCallbackUrl = "https://preview.example.test/api/device-sync/webhooks/oura";
   const soon = new Date(Date.now() + 60_000).toISOString();
@@ -244,13 +244,9 @@ test("Oura webhook subscription ensure re-lists after create and prunes stale ma
         });
       }
 
-      if (
-        (url === "https://api.ouraring.com/v2/webhook/subscription/sub-create-b-duplicate" ||
-          url === "https://api.ouraring.com/v2/webhook/subscription/sub-other-callback") &&
-        method === "DELETE"
-      ) {
+      if (url === "https://api.ouraring.com/v2/webhook/subscription/sub-create-b-duplicate" && method === "DELETE") {
         return new Response(null, {
-          status: url.endsWith("/sub-other-callback") ? 404 : 204,
+          status: 204,
         });
       }
 
@@ -284,7 +280,7 @@ test("Oura webhook subscription ensure re-lists after create and prunes stale ma
   );
   assert.deepEqual(
     result.deleted.map((subscription) => subscription.id).sort(),
-    ["sub-create-b-duplicate", "sub-other-callback"],
+    ["sub-create-b-duplicate"],
   );
   assert.deepEqual(operations, [
     "GET https://api.ouraring.com/v2/webhook/subscription",
@@ -292,7 +288,6 @@ test("Oura webhook subscription ensure re-lists after create and prunes stale ma
     "POST https://api.ouraring.com/v2/webhook/subscription",
     "GET https://api.ouraring.com/v2/webhook/subscription",
     "DELETE https://api.ouraring.com/v2/webhook/subscription/sub-create-b-duplicate",
-    "DELETE https://api.ouraring.com/v2/webhook/subscription/sub-other-callback",
   ]);
 });
 
@@ -417,6 +412,84 @@ test("Oura webhook subscription ensure does not prune managed subscriptions on a
   ]);
 });
 
+test("Oura webhook subscription ensure prunes stale subscriptions for the same exact callback URL", async () => {
+  const callbackUrl = "https://sync.example.test/api/device-sync/webhooks/oura";
+  const otherCallbackUrl = "https://preview.example.test/api/device-sync/webhooks/oura";
+  const later = new Date(Date.now() + 30 * 24 * 60 * 60_000).toISOString();
+  const operations: string[] = [];
+  const client = createOuraWebhookSubscriptionClient({
+    clientId: "oura-client-id",
+    clientSecret: "oura-client-secret",
+    fetchImpl: async (input, init) => {
+      const url = resolveUrl(input);
+      const method = init?.method ?? "GET";
+      operations.push(`${method} ${url}`);
+
+      if (url === "https://api.ouraring.com/v2/webhook/subscription" && method === "GET") {
+        return createJsonResponse({
+          data: [
+            {
+              id: "sub-retained-current-callback",
+              callback_url: callbackUrl,
+              event_type: "update",
+              data_type: "workout",
+              expiration_time: later,
+            },
+            {
+              id: "sub-stale-current-callback",
+              callback_url: callbackUrl,
+              event_type: "delete",
+              data_type: "session",
+              expiration_time: later,
+            },
+            {
+              id: "sub-other-origin-same-path",
+              callback_url: otherCallbackUrl,
+              event_type: "delete",
+              data_type: "session",
+              expiration_time: later,
+            },
+          ],
+        });
+      }
+
+      if (url === "https://api.ouraring.com/v2/webhook/subscription/sub-stale-current-callback" && method === "DELETE") {
+        return new Response(null, {
+          status: 204,
+        });
+      }
+
+      throw new Error(`Unexpected request: ${method} ${url}`);
+    },
+  });
+
+  const result = await client.ensure({
+    callbackUrl,
+    verificationToken: "verify-token-for-tests",
+    desired: [
+      { eventType: "update", dataType: "workout" },
+    ],
+    pruneDuplicates: true,
+    renewIfExpiringWithinMs: 0,
+  });
+
+  assert.deepEqual(
+    result.retained.map((subscription) => subscription.id),
+    ["sub-retained-current-callback"],
+  );
+  assert.deepEqual(result.created, []);
+  assert.deepEqual(result.renewed, []);
+  assert.deepEqual(
+    result.deleted.map((subscription) => subscription.id),
+    ["sub-stale-current-callback"],
+  );
+  assert.deepEqual(operations, [
+    "GET https://api.ouraring.com/v2/webhook/subscription",
+    "GET https://api.ouraring.com/v2/webhook/subscription",
+    "DELETE https://api.ouraring.com/v2/webhook/subscription/sub-stale-current-callback",
+  ]);
+});
+
 test("Oura webhook subscription client normalizes nested list payloads and callback URLs", async () => {
   const client = createOuraWebhookSubscriptionClient({
     clientId: "oura-client-id",
@@ -513,7 +586,7 @@ test("Oura webhook subscription client validates invalid inputs and malformed re
   );
 });
 
-test("Oura webhook subscription client rejects missing ensure tokens, surfaces delete failures, and prunes stale managed subscriptions", async () => {
+test("Oura webhook subscription client rejects missing ensure tokens, preserves other-origin subscriptions, and surfaces delete failures", async () => {
   const operations: string[] = [];
   const client = createOuraWebhookSubscriptionClient({
     clientId: "oura-client-id",
@@ -544,10 +617,6 @@ test("Oura webhook subscription client rejects missing ensure tokens, surfaces d
         });
       }
 
-      if (url === "https://api.ouraring.com/v2/webhook/subscription/sub-stale" && method === "DELETE") {
-        return new Response(null, { status: 204 });
-      }
-
       if (url === "https://api.ouraring.com/v2/webhook/subscription/sub-delete-error" && method === "DELETE") {
         return createJsonResponse({ error: "boom" }, 500);
       }
@@ -575,7 +644,7 @@ test("Oura webhook subscription client rejects missing ensure tokens, surfaces d
   });
 
   assert.deepEqual(pruned.retained.map((subscription) => subscription.id), ["sub-keep"]);
-  assert.deepEqual(pruned.deleted.map((subscription) => subscription.id), ["sub-stale"]);
+  assert.deepEqual(pruned.deleted, []);
 
   await assert.rejects(
     () => client.delete("sub-delete-error"),
@@ -584,7 +653,6 @@ test("Oura webhook subscription client rejects missing ensure tokens, surfaces d
   assert.deepEqual(operations, [
     "GET https://api.ouraring.com/v2/webhook/subscription",
     "GET https://api.ouraring.com/v2/webhook/subscription",
-    "DELETE https://api.ouraring.com/v2/webhook/subscription/sub-stale",
     "DELETE https://api.ouraring.com/v2/webhook/subscription/sub-delete-error",
   ]);
 });
