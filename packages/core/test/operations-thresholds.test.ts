@@ -46,6 +46,7 @@ import {
   writeTextFileAtomic,
   writeTextFileAtomicExclusive,
 } from "../src/atomic-write.ts";
+import { pathExists } from "../src/fs.ts";
 import { parseRawImportManifest, stageRawImportManifest } from "../src/operations/raw-manifests.ts";
 import { WriteBatch, WRITE_OPERATION_SCHEMA_VERSION } from "../src/operations/write-batch.ts";
 import {
@@ -53,6 +54,7 @@ import {
   applyJsonlAppendTarget,
   applyTextWriteTarget,
   assertWriteTargetPolicy,
+  prepareVerifiedDeleteTarget,
   prepareVerifiedWriteTarget,
 } from "../src/write-policy.ts";
 
@@ -151,7 +153,7 @@ test("atomic writes surface non-ENOENT mode preservation errors", async () => {
   assert.equal(await fs.readFile(targetAbsolutePath, "utf8"), "original\n");
 });
 
-test("write-policy rejects forbidden targets and distinguishes reuse, update, and append outcomes", async () => {
+test("write-policy prepares targets by operation kind and distinguishes reuse, update, and append outcomes", async () => {
   const vaultRoot = await makeTempDirectory("murph-core-operations-thresholds-policy");
   const reusableTarget = await prepareVerifiedWriteTarget(vaultRoot, "bank/reuse.txt", {
     kind: "text",
@@ -162,6 +164,11 @@ test("write-policy rejects forbidden targets and distinguishes reuse, update, an
   const appendTarget = await prepareVerifiedWriteTarget(vaultRoot, "ledger/events/2026-04.jsonl", {
     kind: "jsonl_append",
   });
+  const createPreparedDirectory = path.join(vaultRoot, "bank");
+  const deleteTarget = await prepareVerifiedDeleteTarget(vaultRoot, "derived/missing/delete.txt", {
+    kind: "delete",
+  });
+  const deletePreparedDirectory = path.join(vaultRoot, "derived", "missing");
 
   assert.throws(
     () =>
@@ -184,6 +191,46 @@ test("write-policy rejects forbidden targets and distinguishes reuse, update, an
       }),
     (error: unknown) => error instanceof VaultError && error.code === "VAULT_APPEND_ONLY_PATH",
   );
+  assert.throws(
+    () =>
+      assertWriteTargetPolicy(
+        "Ledger/events/2026-04.JSONL",
+        {
+          kind: "text",
+        },
+        {
+          caseInsensitive: true,
+        },
+      ),
+    (error: unknown) => error instanceof VaultError && error.code === "VAULT_APPEND_ONLY_PATH",
+  );
+  assert.throws(
+    () =>
+      assertWriteTargetPolicy(
+        "Raw/documents/2026/04/raw-note.txt",
+        {
+          kind: "text",
+        },
+        {
+          caseInsensitive: true,
+        },
+      ),
+    (error: unknown) => error instanceof VaultError && error.code === "VAULT_RAW_IMMUTABLE",
+  );
+  assert.doesNotThrow(() =>
+    assertWriteTargetPolicy(
+      "Raw/documents/2026/04/raw-note.txt",
+      {
+        kind: "raw",
+      },
+      {
+        caseInsensitive: true,
+      },
+    ),
+  );
+  assert.equal(await pathExists(createPreparedDirectory), true);
+  assert.equal(deleteTarget.relativePath, "derived/missing/delete.txt");
+  assert.equal(await pathExists(deletePreparedDirectory), false);
 
   const reused = await applyImmutableWriteTarget({
     allowExistingMatch: true,
@@ -806,6 +853,204 @@ test("applyCanonicalWriteBatch rolls back deletes through their backups", async 
   assert.equal(rollbackOperation?.operation.actions[0]?.state, "rolled_back");
   assert.equal(typeof rollbackOperation?.operation.actions[0]?.backupRelativePath, "string");
   assert.equal(rollbackOperation?.operation.actions[1]?.state, "staged");
+});
+
+test("applyCanonicalWriteBatch treats deletes of missing files as no-ops without creating parent directories", async () => {
+  const vaultRoot = await makeTempDirectory("murph-core-operations-thresholds-delete-missing");
+  await initializeVault({ vaultRoot });
+
+  const missingPath = "bank/thresholds/missing/delete-me.md";
+  const missingAbsolutePath = resolveVaultPath(vaultRoot, missingPath).absolutePath;
+  const missingParentAbsolutePath = path.dirname(missingAbsolutePath);
+
+  const batch = await WriteBatch.create({
+    vaultRoot,
+    operationType: "delete_missing",
+    summary: "delete missing file",
+  });
+  await batch.stageDelete(missingPath);
+  await batch.commit();
+
+  assert.equal(await pathExists(missingAbsolutePath), false);
+  assert.equal(await pathExists(missingParentAbsolutePath), false);
+
+  const missingDeleteOperation = (
+    await Promise.all(
+      (await listWriteOperationMetadataPaths(vaultRoot)).map(async (relativePath) => ({
+        relativePath,
+        operation: await readStoredWriteOperation(vaultRoot, relativePath),
+      })),
+    )
+  ).find(({ operation }) => operation.operationType === "delete_missing");
+
+  assert.ok(missingDeleteOperation);
+  assert.equal(missingDeleteOperation?.operation.status, "committed");
+  assert.equal(missingDeleteOperation?.operation.actions[0]?.kind, "delete");
+  assert.equal(missingDeleteOperation?.operation.actions[0]?.state, "reused");
+  assert.equal(missingDeleteOperation?.operation.actions[0]?.effect, "delete");
+  assert.equal(missingDeleteOperation?.operation.actions[0]?.existedBefore, false);
+});
+
+test("applyCanonicalWriteBatch reports resume conflicts when overwrite targets disappear after backup preparation", async () => {
+  const vaultRoot = await makeTempDirectory("murph-core-operations-thresholds-resume-conflict");
+  await initializeVault({ vaultRoot });
+
+  const targetPath = "bank/thresholds/resume-conflict.md";
+  const targetAbsolutePath = resolveVaultPath(vaultRoot, targetPath).absolutePath;
+  await fs.mkdir(path.dirname(targetAbsolutePath), { recursive: true });
+  await fs.writeFile(targetAbsolutePath, "before\n", "utf8");
+
+  const batch = await WriteBatch.create({
+    vaultRoot,
+    operationType: "resume_conflict",
+    summary: "overwrite target disappeared after backup preparation",
+  });
+  await batch.stageTextWrite(targetPath, "after\n", {
+    overwrite: true,
+  });
+
+  const batchState = batch as unknown as {
+    operationId: string;
+    record: {
+      actions: Array<{
+        backupRelativePath?: string;
+        existedBefore?: boolean;
+        kind: string;
+      }>;
+    };
+  };
+  const stagedAction = batchState.record.actions[0];
+  assert.equal(stagedAction?.kind, "text_write");
+
+  const backupRelativePath = `.runtime/operations/${batchState.operationId}/backups/0000.bak`;
+  const backupAbsolutePath = resolveVaultPath(vaultRoot, backupRelativePath).absolutePath;
+  await fs.mkdir(path.dirname(backupAbsolutePath), { recursive: true });
+  await fs.writeFile(backupAbsolutePath, "before\n", "utf8");
+
+  stagedAction.existedBefore = true;
+  stagedAction.backupRelativePath = backupRelativePath;
+  await fs.unlink(targetAbsolutePath);
+
+  await assert.rejects(
+    () => batch.commit(),
+    (error: unknown) => error instanceof VaultError && error.code === "OPERATION_RESUME_CONFLICT",
+  );
+
+  assert.equal(await pathExists(targetAbsolutePath), false);
+
+  const resumeConflictOperation = (
+    await Promise.all(
+      (await listWriteOperationMetadataPaths(vaultRoot)).map(async (relativePath) => ({
+        relativePath,
+        operation: await readStoredWriteOperation(vaultRoot, relativePath),
+      })),
+    )
+  ).find(({ operation }) => operation.operationType === "resume_conflict");
+
+  assert.ok(resumeConflictOperation);
+  assert.equal(resumeConflictOperation?.operation.status, "rolled_back");
+  assert.equal(resumeConflictOperation?.operation.error?.code, "OPERATION_RESUME_CONFLICT");
+});
+
+test("applyCanonicalWriteBatch resumes same-content non-overwrite writes as reuse without backup metadata", async () => {
+  const vaultRoot = await makeTempDirectory("murph-core-operations-thresholds-resume-reuse");
+  await initializeVault({ vaultRoot });
+
+  const targetPath = "bank/thresholds/resume-reuse.md";
+  const targetAbsolutePath = resolveVaultPath(vaultRoot, targetPath).absolutePath;
+  await fs.mkdir(path.dirname(targetAbsolutePath), { recursive: true });
+  await fs.writeFile(targetAbsolutePath, "same\n", "utf8");
+
+  const batch = await WriteBatch.create({
+    vaultRoot,
+    operationType: "resume_reuse",
+    summary: "resume same-content non-overwrite write",
+  });
+  await batch.stageTextWrite(targetPath, "same\n", {
+    allowExistingMatch: true,
+    overwrite: false,
+  });
+
+  const batchState = batch as unknown as {
+    record: {
+      actions: Array<{
+        existedBefore?: boolean;
+        kind: string;
+      }>;
+    };
+  };
+  const stagedAction = batchState.record.actions[0];
+  assert.equal(stagedAction?.kind, "text_write");
+  stagedAction.existedBefore = true;
+
+  await batch.commit();
+
+  const resumeReuseOperation = (
+    await Promise.all(
+      (await listWriteOperationMetadataPaths(vaultRoot)).map(async (relativePath) => ({
+        relativePath,
+        operation: await readStoredWriteOperation(vaultRoot, relativePath),
+      })),
+    )
+  ).find(({ operation }) => operation.operationType === "resume_reuse");
+
+  assert.ok(resumeReuseOperation);
+  assert.equal(resumeReuseOperation?.operation.status, "committed");
+  assert.equal(resumeReuseOperation?.operation.actions[0]?.state, "reused");
+  assert.equal(resumeReuseOperation?.operation.actions[0]?.effect, "reuse");
+  assert.equal(await fs.readFile(targetAbsolutePath, "utf8"), "same\n");
+});
+
+test("applyCanonicalWriteBatch reports resume conflicts when delete backups are missing", async () => {
+  const vaultRoot = await makeTempDirectory("murph-core-operations-thresholds-delete-backup-missing");
+  await initializeVault({ vaultRoot });
+
+  const targetPath = "bank/thresholds/delete-backup-missing.md";
+  const targetAbsolutePath = resolveVaultPath(vaultRoot, targetPath).absolutePath;
+  await fs.mkdir(path.dirname(targetAbsolutePath), { recursive: true });
+  await fs.writeFile(targetAbsolutePath, "before\n", "utf8");
+
+  const batch = await WriteBatch.create({
+    vaultRoot,
+    operationType: "delete_backup_missing",
+    summary: "delete backup missing during resume",
+  });
+  await batch.stageDelete(targetPath);
+
+  const batchState = batch as unknown as {
+    operationId: string;
+    record: {
+      actions: Array<{
+        backupRelativePath?: string;
+        existedBefore?: boolean;
+        kind: string;
+      }>;
+    };
+  };
+  const stagedAction = batchState.record.actions[0];
+  assert.equal(stagedAction?.kind, "delete");
+
+  stagedAction.existedBefore = true;
+  stagedAction.backupRelativePath = `.runtime/operations/${batchState.operationId}/backups/0000.bak`;
+  await fs.unlink(targetAbsolutePath);
+
+  await assert.rejects(
+    () => batch.commit(),
+    (error: unknown) => error instanceof VaultError && error.code === "OPERATION_RESUME_CONFLICT",
+  );
+
+  const deleteBackupMissingOperation = (
+    await Promise.all(
+      (await listWriteOperationMetadataPaths(vaultRoot)).map(async (relativePath) => ({
+        relativePath,
+        operation: await readStoredWriteOperation(vaultRoot, relativePath),
+      })),
+    )
+  ).find(({ operation }) => operation.operationType === "delete_backup_missing");
+
+  assert.ok(deleteBackupMissingOperation);
+  assert.equal(deleteBackupMissingOperation?.operation.status, "rolled_back");
+  assert.equal(deleteBackupMissingOperation?.operation.error?.code, "OPERATION_RESUME_CONFLICT");
 });
 
 test("validateVault reports missing metadata and missing required directories", async () => {

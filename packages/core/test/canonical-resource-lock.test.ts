@@ -94,7 +94,76 @@ test("canonical resource locks wait for same-resource contention and allow disjo
   await waitingHandle.release();
 });
 
+test("canonical path resources fold case-insensitive aliases into one key when requested", async () => {
+  const { canonicalPathResource, dedupeCanonicalResources } = await loadCoreIndex();
+
+  const upperAlias = canonicalPathResource("Bank/Memory.md", {
+    caseInsensitive: true,
+  });
+  const lowerAlias = canonicalPathResource("bank/memory.md", {
+    caseInsensitive: true,
+  });
+
+  assert.equal(upperAlias.key, lowerAlias.key);
+  assert.equal(upperAlias.label, "Bank/Memory.md");
+  assert.deepEqual(dedupeCanonicalResources([upperAlias, lowerAlias]), [upperAlias]);
+});
+
 test("canonical resource lock scopes re-enter the same resource without deadlocking", async () => {
+  const vaultRoot = await makeVaultRoot();
+  const {
+    acquireCanonicalResourceLock,
+    canonicalPathResource,
+    withCanonicalResourceLocks,
+  } = await loadCoreIndex();
+
+  await withCanonicalResourceLocks({
+    vaultRoot,
+    resources: [canonicalPathResource("bank/memory.md")],
+    run: async () => {
+      const innerResource = canonicalPathResource("derived/knowledge/index.md");
+      const outerHandle = await acquireCanonicalResourceLock({
+        vaultRoot,
+        resource: innerResource,
+        timeoutMs: 1_000,
+      });
+      const innerHandle = await acquireCanonicalResourceLock({
+        vaultRoot,
+        resource: innerResource,
+        timeoutMs: 1_000,
+      });
+
+      await outerHandle.release();
+
+      let acquiredWhileInnerHandleActive = false;
+      const waitingLockPromise = acquireCanonicalResourceLock({
+        ownerToken: "foreign-owner",
+        vaultRoot,
+        resource: innerResource,
+        timeoutMs: 1_000,
+      }).then((handle) => {
+        acquiredWhileInnerHandleActive = true;
+        return handle;
+      });
+
+      await sleep(75);
+      assert.equal(acquiredWhileInnerHandleActive, false);
+
+      await innerHandle.release();
+      const waitingHandle = await waitingLockPromise;
+      assert.equal(acquiredWhileInnerHandleActive, true);
+      await waitingHandle.release();
+
+      await withCanonicalResourceLocks({
+        vaultRoot,
+        resources: [canonicalPathResource("bank/memory.md")],
+        run: async () => {},
+      });
+    },
+  });
+});
+
+test("canonical resource lock scopes compose only in global sorted order", async () => {
   const vaultRoot = await makeVaultRoot();
   const {
     canonicalPathResource,
@@ -107,9 +176,128 @@ test("canonical resource lock scopes re-enter the same resource without deadlock
     run: async () => {
       await withCanonicalResourceLocks({
         vaultRoot,
-        resources: [canonicalPathResource("bank/memory.md")],
+        resources: [canonicalPathResource("derived/knowledge/index.md")],
         run: async () => {},
       });
+    },
+  });
+
+  await assert.rejects(
+    () =>
+      withCanonicalResourceLocks({
+        vaultRoot,
+        resources: [canonicalPathResource("derived/knowledge/index.md")],
+        run: async () =>
+          await withCanonicalResourceLocks({
+            vaultRoot,
+            resources: [canonicalPathResource("bank/memory.md")],
+            run: async () => {},
+          }),
+      }),
+    (error: unknown) => {
+      assert.equal((error as { name?: string }).name, "VaultError");
+      const lockError = error as {
+        code?: string;
+        details?: {
+          highestHeldResourceKey?: string;
+          heldResourceKeys?: string[];
+          resourceKey?: string;
+        };
+        message: string;
+      };
+      assert.equal(lockError.code, "CANONICAL_RESOURCE_LOCK_ORDER");
+      assert.match(lockError.message, /Acquire canonical resources together in sorted order/u);
+      assert.equal(lockError.details?.resourceKey, "path:bank/memory.md");
+      assert.equal(lockError.details?.highestHeldResourceKey, "path:derived/knowledge/index.md");
+      assert.deepEqual(lockError.details?.heldResourceKeys, ["path:derived/knowledge/index.md"]);
+      return true;
+    },
+  );
+});
+
+test("canonical resource lock scopes serialize sibling acquisitions while a higher key is pending", async () => {
+  const actualRuntimeState = await vi.importActual<typeof import("@murphai/runtime-state/node")>(
+    "@murphai/runtime-state/node",
+  );
+  let delayHigherLock = true;
+  vi.doMock("@murphai/runtime-state/node", async () => ({
+    ...actualRuntimeState,
+    acquireDirectoryLock: async (input: Parameters<typeof actualRuntimeState.acquireDirectoryLock>[0]) => {
+      const metadata = input.metadata as { resourceKey?: string } | null;
+      if (delayHigherLock && metadata?.resourceKey === "path:derived/knowledge/index.md") {
+        delayHigherLock = false;
+        await sleep(75);
+      }
+
+      return await actualRuntimeState.acquireDirectoryLock(input);
+    },
+  }));
+
+  const { initializeVault } = await loadCoreIndex();
+  const {
+    canonicalPathResource,
+    withCanonicalResourceLocks,
+  } = await loadCanonicalResourceLockModule();
+  const vaultRoot = await makeScratchRoot("murph-core-resource-lock-scope-queue-");
+  await initializeVault({ vaultRoot });
+  const higherResource = canonicalPathResource("derived/knowledge/index.md");
+  const lowerResource = canonicalPathResource("bank/preferences.json");
+  let higherAcquired = false;
+  let releaseHigher!: () => void;
+  const holdHigher = new Promise<void>((resolve) => {
+    releaseHigher = resolve;
+  });
+
+  await withCanonicalResourceLocks({
+    vaultRoot,
+    resources: [canonicalPathResource("bank/memory.md")],
+    run: async () => {
+      const higherLock = withCanonicalResourceLocks({
+        vaultRoot,
+        resources: [higherResource],
+        run: async () => {
+          higherAcquired = true;
+          await holdHigher;
+        },
+      });
+
+      await sleep(10);
+
+      let lowerResourceAcquired = false;
+      let lowerLockSettled = false;
+      const lowerLockResult = withCanonicalResourceLocks({
+        vaultRoot,
+        resources: [lowerResource],
+        run: async () => {
+          lowerResourceAcquired = true;
+        },
+      }).then(
+        () => ({
+          status: "fulfilled" as const,
+        }),
+        (error: unknown) => ({
+          error,
+          status: "rejected" as const,
+        }),
+      );
+      lowerLockResult.finally(() => {
+        lowerLockSettled = true;
+      });
+
+      await sleep(40);
+      assert.equal(higherAcquired, false);
+      assert.equal(lowerResourceAcquired, false);
+      assert.equal(lowerLockSettled, false);
+
+      await sleep(60);
+      assert.equal(higherAcquired, true);
+      const lowerResult = await lowerLockResult;
+      assert.equal(lowerResourceAcquired, false);
+      assert.equal(lowerResult.status, "rejected");
+      assert.equal((lowerResult.error as { code?: string }).code, "CANONICAL_RESOURCE_LOCK_ORDER");
+
+      releaseHigher();
+      await higherLock;
     },
   });
 });
