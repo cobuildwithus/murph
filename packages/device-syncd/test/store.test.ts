@@ -6,9 +6,15 @@ import { test } from "vitest";
 import { openSqliteRuntimeDatabase } from "@murphai/runtime-state/node";
 
 import { SqliteDeviceSyncStore } from "../src/store.ts";
+import { DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION } from "../src/store/schema.ts";
 import { makeTempDirectory } from "./helpers.ts";
 
 const MINIMIZED_WEBHOOK_TRACE_EXTERNAL_ACCOUNT_ID = "_minimized_";
+const UNSUPPORTED_SCHEMA_VERSION = DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION + 1;
+const UNSUPPORTED_SCHEMA_VERSION_RE = new RegExp(
+  `device sync runtime database schema version ${UNSUPPORTED_SCHEMA_VERSION} is newer than supported version ${DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION}`,
+  "u",
+);
 
 interface WebhookTraceRow {
   external_account_id: string;
@@ -797,13 +803,13 @@ test("device sync store rejects pre-cutover sqlite user_version values", async (
   const tempDir = await makeTempDirectory("murph-device-syncd-store-version");
   const databasePath = path.join(tempDir, "state.sqlite");
   const database = openSqliteRuntimeDatabase(databasePath);
-  database.exec("PRAGMA user_version = 99;");
+  database.exec(`PRAGMA user_version = ${UNSUPPORTED_SCHEMA_VERSION};`);
   database.close();
 
   try {
     assert.throws(
       () => new SqliteDeviceSyncStore(databasePath),
-      /device sync runtime database schema version 99 is newer than supported version 1/u,
+      UNSUPPORTED_SCHEMA_VERSION_RE,
     );
   } finally {
     await rm(tempDir, {
