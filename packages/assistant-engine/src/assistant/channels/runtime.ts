@@ -82,7 +82,11 @@ export async function sendTelegramMessage(
     target: string
   },
   dependencies: TelegramRuntimeDependencies = {},
-): Promise<{ providerMessageId: string | null; target: string }> {
+): Promise<{
+  providerMessageId: string | null
+  providerMessageIds?: string[]
+  target: string
+}> {
   return sendTelegramMessageDetailed(input, dependencies)
 }
 
@@ -426,7 +430,11 @@ async function sendTelegramMessageDetailed(
     target: string
   },
   dependencies: TelegramRuntimeDependencies = {},
-): Promise<{ providerMessageId: string | null; target: string }> {
+): Promise<{
+  providerMessageId: string | null
+  providerMessageIds?: string[]
+  target: string
+}> {
   const env = dependencies.env ?? process.env
   const token = resolveTelegramBotToken(env)
   if (!token) {
@@ -452,6 +460,7 @@ async function sendTelegramMessageDetailed(
   let target = parseTelegramTargetOrThrow(input.target)
   let targetLabel = serializeTelegramThreadTarget(target)
   let lastProviderMessageId: string | null = null
+  const providerMessageIds: string[] = []
   let replyToMessageId = normalizeTelegramReplyToMessageId(input.replyToMessageId)
 
   const chunks = splitTelegramMessageText(input.message)
@@ -468,11 +477,15 @@ async function sendTelegramMessageDetailed(
     target = delivered.target
     targetLabel = delivered.targetLabel
     lastProviderMessageId = delivered.providerMessageId
+    if (delivered.providerMessageId) {
+      providerMessageIds.push(delivered.providerMessageId)
+    }
     replyToMessageId = null
   }
 
   return {
     providerMessageId: lastProviderMessageId,
+    ...(providerMessageIds.length > 1 ? { providerMessageIds } : {}),
     target: targetLabel,
   }
 }

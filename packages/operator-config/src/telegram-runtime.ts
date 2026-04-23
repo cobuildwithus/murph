@@ -13,6 +13,7 @@ import { VaultCliError } from './vault-cli-errors.js'
 
 const TELEGRAM_SEND_TIMEOUT_MS = 30_000
 const TELEGRAM_TYPING_REFRESH_MS = 4_000
+const TELEGRAM_DELETE_BATCH_LIMIT = 100
 
 export type TelegramFetchResponse = {
   json(): Promise<unknown>
@@ -128,6 +129,79 @@ export async function startTelegramTypingSession(
         throw failure
       }
     },
+  }
+}
+
+export async function deleteTelegramMessages(
+  input: {
+    messageIds: readonly string[]
+    target: TelegramThreadTarget | string
+  },
+  dependencies: {
+    env?: NodeJS.ProcessEnv
+    fetchImplementation?: TelegramFetchImplementation
+    signal?: AbortSignal
+  } = {},
+): Promise<void> {
+  const env = dependencies.env ?? process.env
+  const token = resolveTelegramBotToken(env)
+  if (!token) {
+    throw new VaultCliError(
+      'ASSISTANT_TELEGRAM_TOKEN_REQUIRED',
+      'Outbound Telegram delivery requires TELEGRAM_BOT_TOKEN.',
+    )
+  }
+
+  const fetchImplementation =
+    dependencies.fetchImplementation ?? globalThis.fetch?.bind(globalThis)
+  if (typeof fetchImplementation !== 'function') {
+    throw new VaultCliError(
+      'ASSISTANT_TELEGRAM_UNAVAILABLE',
+      'Outbound Telegram delivery requires fetch support in the current Node.js runtime.',
+    )
+  }
+
+  const target =
+    typeof input.target === 'string'
+      ? parseTelegramTargetOrThrow(input.target)
+      : input.target
+  const messageIds = normalizeTelegramMessageIds(input.messageIds)
+  const baseUrl = (resolveTelegramApiBaseUrl(env) ?? 'https://api.telegram.org').replace(
+    /\/$/u,
+    '',
+  )
+
+  for (let index = 0; index < messageIds.length; index += TELEGRAM_DELETE_BATCH_LIMIT) {
+    const batch = messageIds.slice(index, index + TELEGRAM_DELETE_BATCH_LIMIT)
+    const response = await sendTelegramBotApiRequest({
+      baseUrl,
+      fetchImplementation,
+      method: 'POST',
+      operation: 'deleteMessages',
+      payload: {
+        chat_id: target.chatId,
+        message_ids: batch,
+      },
+      signal: dependencies.signal,
+      token,
+    })
+    const payload = await readTelegramResponsePayload(response)
+    if (response.ok && isTelegramSuccessResponse(payload)) {
+      continue
+    }
+
+    const errorContext = extractTelegramErrorContext(payload)
+    throw new VaultCliError(
+      'ASSISTANT_TELEGRAM_DELETE_FAILED',
+      errorContext.description ??
+        `Telegram Bot API deleteMessages failed with HTTP ${response.status}.`,
+      {
+        errorCode: errorContext.errorCode,
+        messageIdCount: batch.length,
+        status: response.status,
+        target: serializeTelegramThreadTarget(target),
+      },
+    )
   }
 }
 
@@ -266,7 +340,7 @@ async function sendTelegramBotApiRequest(input: {
   baseUrl: string
   fetchImplementation: TelegramFetchImplementation
   method: 'POST'
-  operation: 'sendChatAction'
+  operation: 'deleteMessages' | 'sendChatAction'
   payload: Record<string, unknown>
   signal?: AbortSignal
   token: string
@@ -405,4 +479,40 @@ function describeUnknownError(error: unknown): {
     message: String(error),
     name: 'Error',
   }
+}
+
+function normalizeTelegramMessageIds(messageIds: readonly string[]): number[] {
+  const normalized = [...new Set(messageIds.map((value) => normalizeTelegramMessageId(value)))]
+
+  if (normalized.length === 0) {
+    throw new VaultCliError(
+      'ASSISTANT_TELEGRAM_MESSAGE_ID_REQUIRED',
+      'Telegram deletion requires at least one message id.',
+    )
+  }
+
+  return normalized
+}
+
+function normalizeTelegramMessageId(value: string): number {
+  const normalized = normalizeNullableString(value)
+  if (!normalized) {
+    throw new VaultCliError(
+      'ASSISTANT_TELEGRAM_MESSAGE_ID_INVALID',
+      'Telegram message ids must be non-empty integers.',
+    )
+  }
+
+  const parsed = Number.parseInt(normalized, 10)
+  if (!Number.isSafeInteger(parsed) || parsed <= 0 || String(parsed) !== normalized) {
+    throw new VaultCliError(
+      'ASSISTANT_TELEGRAM_MESSAGE_ID_INVALID',
+      'Telegram message ids must be non-empty integers.',
+      {
+        messageId: normalized,
+      },
+    )
+  }
+
+  return parsed
 }

@@ -45,6 +45,10 @@ export {
   startHostedRunMessagingActivity,
   stopHostedRunMessagingActivity,
 } from "./hosted-runtime/typing.ts";
+export {
+  deleteHostedLinqMessages,
+  deleteHostedTelegramMessages,
+} from "./hosted-runtime/message-cleanup.ts";
 export type {
   HostedMessagingActivityComponent,
   HostedRunMessagingActivityHandle,

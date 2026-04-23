@@ -54,6 +54,23 @@ export interface RunnerStateRecord {
   userId: string;
 }
 
+export interface RunnerPendingCleanupEmailRef {
+  eventId: string;
+  rawMessageKey: string;
+  userId: string;
+}
+
+export interface RunnerPendingCleanupTelegramRef {
+  messageId: string;
+  target: string;
+}
+
+export interface RunnerPendingCleanupState {
+  emailMessages: RunnerPendingCleanupEmailRef[];
+  linqMessageIds: string[];
+  telegramMessages: RunnerPendingCleanupTelegramRef[];
+}
+
 export const COMMITTED_RESULT_FRESH_WINDOW_MS = 7 * 24 * 60 * 60_000;
 export const MAX_RUN_TIMELINE_ENTRIES = 24;
 export const RETRY_MAX_DELAY_MS = 5 * 60_000;

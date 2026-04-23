@@ -504,6 +504,7 @@ export const assistantChannelDeliverySchema = z.object({
   sentAt: isoTimestampSchema,
   messageLength: z.number().int().nonnegative(),
   providerMessageId: z.string().min(1).nullable().default(null),
+  providerMessageIds: z.array(z.string().min(1)).min(1).optional(),
   providerThreadId: z.string().min(1).nullable().default(null),
 })
 

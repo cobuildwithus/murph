@@ -78,6 +78,7 @@ export function createAssistantChannelAdapter(
         replyToMessageId: normalizeOptionalText(input.replyToMessageId),
         subject: normalizeOptionalText(input.subject),
       })
+      const providerMessageIds = readDeliveredProviderMessageIds(delivered)
 
       return assistantChannelDeliverySchema.parse({
         channel: spec.channel,
@@ -87,6 +88,7 @@ export function createAssistantChannelAdapter(
         sentAt: new Date().toISOString(),
         messageLength: input.message.length,
         providerMessageId: readDeliveredProviderMessageId(delivered),
+        ...(providerMessageIds ? { providerMessageIds } : {}),
         providerThreadId: readDeliveredProviderThreadId(delivered),
       })
     },
@@ -263,6 +265,24 @@ export function readDeliveredProviderMessageId(
   return delivered && typeof delivered === 'object'
     ? normalizeOptionalText(delivered.providerMessageId)
     : null
+}
+
+export function readDeliveredProviderMessageIds(
+  delivered:
+    | {
+        providerMessageIds?: readonly string[] | null
+      }
+    | void,
+): string[] | null {
+  if (!delivered || typeof delivered !== 'object' || !Array.isArray(delivered.providerMessageIds)) {
+    return null
+  }
+
+  const ids = delivered.providerMessageIds
+    .map((value) => normalizeOptionalText(value))
+    .filter((value): value is string => value !== null)
+
+  return ids.length > 0 ? ids : null
 }
 
 export function readDeliveredProviderThreadId(

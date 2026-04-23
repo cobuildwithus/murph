@@ -14,6 +14,7 @@ import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   createAssistantChannelAdapter,
   readDeliveredProviderMessageId,
+  readDeliveredProviderMessageIds,
   readDeliveredProviderThreadId,
   readDeliveredTarget,
 } from './helpers.js'
@@ -62,6 +63,7 @@ const TELEGRAM_CHANNEL_ADAPTER = createAssistantChannelAdapter({
     return {
       target: readDeliveredTarget(delivered) ?? candidate.target,
       providerMessageId: readDeliveredProviderMessageId(delivered),
+      providerMessageIds: readDeliveredProviderMessageIds(delivered),
     }
   },
 })

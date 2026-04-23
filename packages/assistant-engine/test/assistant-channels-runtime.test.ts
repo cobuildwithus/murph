@@ -189,6 +189,7 @@ describe('assistant channels runtime seam', () => {
     await vi.runAllTimersAsync()
     await expect(deliveryPromise).resolves.toEqual({
       providerMessageId: '1002',
+      providerMessageIds: ['1001', '1002'],
       target: '456',
     })
 

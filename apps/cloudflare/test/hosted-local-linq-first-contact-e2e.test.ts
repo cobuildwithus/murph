@@ -150,6 +150,8 @@ describe("hosted local Linq first-contact e2e", () => {
     const expectedDirectReplyChatPath =
       `/chats/${encodeURIComponent(materializedChatId)}/messages`;
     const expectedTypingPath = `/chats/${encodeURIComponent(materializedChatId)}/typing`;
+    const observedMessageIdsBeforeReply =
+      requireLinqStub().listObservedMessageIds(materializedChatId).length;
     const outboundCountBeforeReply = requireLinqStub().countObservedSends(expectedDirectReplyChatPath);
     const typingStopCountBeforeReply = countObservedLinqRequests({
       expectedMethod: "DELETE",
@@ -216,9 +218,26 @@ describe("hosted local Linq first-contact e2e", () => {
     expect(requireLinqStub().readObservedMessageText(replySend)).toBe(
       HOSTED_LINQ_DEFAULT_ASSISTANT_REPLY_TEXT,
     );
+    const outboundReplyMessageId =
+      requireLinqStub().listObservedMessageIds(materializedChatId)[observedMessageIdsBeforeReply] ?? null;
+    expect(outboundReplyMessageId).not.toBeNull();
     const finalStatus = await completionPromise;
     expect(finalStatus.pendingIngressEventCount).toBe(0);
     expect(finalStatus.lastError).toBeNull();
+    await requireLinqStub().waitForMatchingRequestCount({
+      expectedCount: 1,
+      expectedMethod: "DELETE",
+      expectedPath: `/messages/${encodeURIComponent(`msg_direct_reply_${directReplyUserId}`)}`,
+      scenario: requireScenario(),
+      userId: directReplyUserId,
+    });
+    await requireLinqStub().waitForMatchingRequestCount({
+      expectedCount: 1,
+      expectedMethod: "DELETE",
+      expectedPath: `/messages/${encodeURIComponent(outboundReplyMessageId!)}`,
+      scenario: requireScenario(),
+      userId: directReplyUserId,
+    });
   }, 300_000);
 
   it("keeps Linq context when two messages arrive before hosted completion catches up", async () => {

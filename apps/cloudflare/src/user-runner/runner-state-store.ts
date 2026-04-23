@@ -21,6 +21,7 @@ import {
 import {
   MAX_RUN_TIMELINE_ENTRIES,
   type DurableObjectStateLike,
+  type RunnerPendingCleanupState,
   type RunnerStateRecord,
 } from "./types.js";
 
@@ -261,6 +262,24 @@ export class RunnerStateStore {
     return this.readStateFromMetaSync(meta);
   }
 
+  async readPendingRunCleanup(
+    runId: string,
+  ): Promise<RunnerPendingCleanupState | null> {
+    const value = await this.state.storage.get<unknown>(pendingRunCleanupStorageKey(runId));
+    return normalizeRunnerPendingCleanupState(value);
+  }
+
+  async writePendingRunCleanup(
+    runId: string,
+    cleanup: RunnerPendingCleanupState | null,
+  ): Promise<void> {
+    await this.state.storage.put(pendingRunCleanupStorageKey(runId), cleanup);
+  }
+
+  async clearPendingRunCleanup(runId: string): Promise<void> {
+    await this.state.storage.put(pendingRunCleanupStorageKey(runId), null);
+  }
+
   private readStateSync(): RunnerStateRecord {
     return this.readStateFromMetaSync(this.requireMetaRowSync());
   }
@@ -499,4 +518,73 @@ function sameHostedExecutionRun(
   return left.attempt === right.attempt
     && left.runId === right.runId
     && left.startedAt === right.startedAt;
+}
+
+function pendingRunCleanupStorageKey(runId: string): string {
+  return `runner:pending-cleanup:${runId}`;
+}
+
+function normalizeRunnerPendingCleanupState(value: unknown): RunnerPendingCleanupState | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const record = value as {
+    emailMessages?: unknown;
+    linqMessageIds?: unknown;
+    telegramMessages?: unknown;
+  };
+  const emailMessages = Array.isArray(record.emailMessages)
+    ? record.emailMessages.flatMap((entry) => {
+      if (!entry || typeof entry !== "object") {
+        return [];
+      }
+
+      const candidate = entry as {
+        eventId?: unknown;
+        rawMessageKey?: unknown;
+        userId?: unknown;
+      };
+      return typeof candidate.eventId === "string"
+        && typeof candidate.rawMessageKey === "string"
+        && typeof candidate.userId === "string"
+        ? [{
+            eventId: candidate.eventId,
+            rawMessageKey: candidate.rawMessageKey,
+            userId: candidate.userId,
+          }]
+        : [];
+    })
+    : [];
+  const linqMessageIds = Array.isArray(record.linqMessageIds)
+    ? record.linqMessageIds.filter((messageId): messageId is string => typeof messageId === "string")
+    : [];
+  const telegramMessages = Array.isArray(record.telegramMessages)
+    ? record.telegramMessages.flatMap((entry) => {
+      if (!entry || typeof entry !== "object") {
+        return [];
+      }
+
+      const candidate = entry as {
+        messageId?: unknown;
+        target?: unknown;
+      };
+      return typeof candidate.messageId === "string" && typeof candidate.target === "string"
+        ? [{
+            messageId: candidate.messageId,
+            target: candidate.target,
+          }]
+        : [];
+    })
+    : [];
+
+  if (emailMessages.length === 0 && linqMessageIds.length === 0 && telegramMessages.length === 0) {
+    return null;
+  }
+
+  return {
+    emailMessages,
+    linqMessageIds,
+    telegramMessages,
+  };
 }

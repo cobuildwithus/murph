@@ -17,6 +17,7 @@ import type { GatewayProjectionSnapshot } from "@murphai/gateway-core";
 import {
   createRuntimeTimerSyntheticWake,
   emitHostedExecutionStructuredLog,
+  isHostedRuntimeTimerWake,
 } from "@murphai/hosted-execution";
 import {
   parseHostedExecutionCursorSnapshotRef,
@@ -38,6 +39,9 @@ import {
 import {
   decryptHostedIngressPayloadCiphertext,
 } from "./hosted-ingress-encryption.ts";
+import type {
+  HostedRunMessagingActivityHandle,
+} from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
   type HostedExecutionContainerNamespaceLike,
 } from "./runner-container.js";
@@ -100,6 +104,11 @@ export class HostedUserRunner {
   private readonly runnerContainerNamespace: HostedExecutionContainerNamespaceLike | null;
   private readonly runtimeAlarmScheduler: RunnerRuntimeAlarmScheduler;
   private readonly userKeyStore: ReturnType<typeof createHostedUserKeyStoreFromEnvironment>;
+  private activeMessagingActivity: {
+    handle: HostedRunMessagingActivityHandle;
+    runId: string;
+    stopPromise: Promise<void> | null;
+  } | null = null;
   private runnerStores: RunnerUserStores | null = null;
   private userKeyEnvelopeLock: Promise<void> | null = null;
   private runDrainLock: Promise<void> | null = null;
@@ -436,6 +445,9 @@ export class HostedUserRunner {
         triggerKind: run.triggerKind,
         userId: input.userId,
       });
+    const cleanupWakes = resolved.events
+      .map((event) => event.wake)
+      .filter((wake): wake is HostedIngressEnvelope => !isHostedRuntimeTimerWake(wake));
 
     if (resolved.events.length === 0 && input.acquired.events.length > 0) {
       this.recordHostedRunBreadcrumb({
@@ -499,14 +511,14 @@ export class HostedUserRunner {
       events: resolved.events,
       run,
     });
-    let messagingActivityStopped = false;
+    await this.bindRunMessagingActivity({
+      handle: messagingActivity,
+      runId: run.id,
+    });
     const stopMessagingActivity = async () => {
-      if (messagingActivityStopped || !messagingActivity) {
-        return;
-      }
-
-      messagingActivityStopped = true;
-      await messagingActivity.stop();
+      await this.stopActiveMessagingActivity({
+        runId: run.id,
+      });
     };
 
     try {
@@ -599,9 +611,14 @@ export class HostedUserRunner {
         };
       }
 
+      let cleanupCompleted = false;
       let cursor = commit.cursor;
 
       if (commit.needsFinalize) {
+        await this.runProcessor.persistPendingRunCleanupData({
+          runId: run.id,
+          wakes: cleanupWakes,
+        });
         await this.syncRunnerBundleCacheToCursor(cursor.snapshotRef);
         const resumeFinalizeAcquire = await acquireHostedRunFromWeb({
           baseUrl: this.readHostedWebControlBaseUrl(),
@@ -628,6 +645,7 @@ export class HostedUserRunner {
         }
         const finalized = await this.finalizeAcquiredHostedRun({
           acquired: resumeFinalizeAcquire,
+          cleanupWakes,
           messagingActivityOwnedByExecutor: messagingActivity?.ownsRuntimeActivity === true,
           onRuntimeDeliveryFinished: stopMessagingActivity,
           userId: input.userId,
@@ -636,15 +654,16 @@ export class HostedUserRunner {
         if (finalized.state !== "completed") {
           return finalized;
         }
+        cleanupCompleted = true;
       }
 
-      for (const event of resolved.events) {
-        if (event.wake.kind === "runtime.timer") {
-          continue;
-        }
-        await this.runProcessor.cleanupTransientWakeDataBestEffortForRunDrain(
-          event.wake,
-        );
+      if (!cleanupCompleted) {
+        await this.runProcessor.cleanupTransientWakeDataBestEffortForRunDrain({
+          assistantDeliveryOutcomes: execution.assistantDeliveryOutcomes ?? [],
+          runId: run.id,
+          userId: input.userId,
+          wakes: cleanupWakes,
+        });
       }
 
       return {
@@ -658,6 +677,7 @@ export class HostedUserRunner {
 
   private async finalizeAcquiredHostedRun(input: {
     acquired: HostedRunAcquireResponse;
+    cleanupWakes?: readonly HostedIngressEnvelope[];
     messagingActivityOwnedByExecutor?: boolean;
     onRuntimeDeliveryFinished?: () => Promise<void>;
     userId: string;
@@ -754,6 +774,15 @@ export class HostedUserRunner {
       runToken,
       userId: input.userId,
     });
+
+    if (finalized.finalized) {
+      await this.runProcessor.cleanupTransientWakeDataBestEffortForRunDrain({
+        assistantDeliveryOutcomes: execution.assistantDeliveryOutcomes ?? [],
+        runId: run.id,
+        userId: input.userId,
+        wakes: input.cleanupWakes ?? [],
+      });
+    }
 
     return {
       cursor: finalized.cursor,
@@ -1321,6 +1350,62 @@ export class HostedUserRunner {
     await this.runtimeAlarmScheduler.syncNextWake({
       preferredWakeAt: new Date(Date.now() + HOSTED_WAKE_NUDGE_RETRY_DELAY_MS).toISOString(),
     });
+  }
+
+  private async bindRunMessagingActivity(input: {
+    handle: HostedRunMessagingActivityHandle | null;
+    runId: string;
+  }): Promise<void> {
+    if (!input.handle) {
+      return;
+    }
+
+    const active = this.activeMessagingActivity;
+    if (active && active.runId !== input.runId) {
+      await this.stopActiveMessagingActivity({});
+    }
+
+    this.activeMessagingActivity = {
+      handle: input.handle,
+      runId: input.runId,
+      stopPromise: null,
+    };
+  }
+
+  private async stopActiveMessagingActivity(input: {
+    runId?: string;
+  }): Promise<{
+    stopped: boolean;
+  }> {
+    const active = this.activeMessagingActivity;
+    if (!active) {
+      return {
+        stopped: false,
+      };
+    }
+
+    if (input.runId && active.runId !== input.runId) {
+      return {
+        stopped: false,
+      };
+    }
+
+    if (!active.stopPromise) {
+      active.stopPromise = (async () => {
+        try {
+          await active.handle.stop();
+        } finally {
+          if (this.activeMessagingActivity === active) {
+            this.activeMessagingActivity = null;
+          }
+        }
+      })();
+    }
+
+    await active.stopPromise;
+    return {
+      stopped: true,
+    };
   }
 
   private quarantineHostedRunWake(input: {

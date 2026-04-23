@@ -321,8 +321,27 @@ function sameAssistantChannelDelivery(
     left.sentAt === right.sentAt &&
     left.messageLength === right.messageLength &&
     left.providerMessageId === right.providerMessageId &&
+    sameAssistantDeliveryProviderMessageIds(
+      left.providerMessageIds,
+      right.providerMessageIds,
+    ) &&
     left.providerThreadId === right.providerThreadId
   )
+}
+
+function sameAssistantDeliveryProviderMessageIds(
+  left: readonly string[] | undefined,
+  right: readonly string[] | undefined,
+): boolean {
+  if (!left && !right) {
+    return true
+  }
+
+  if (!left || !right || left.length !== right.length) {
+    return false
+  }
+
+  return left.every((value, index) => value === right[index])
 }
 
 export async function markAssistantOutboxIntentMirrorSending(input: {

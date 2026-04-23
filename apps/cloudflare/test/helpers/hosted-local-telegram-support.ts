@@ -107,6 +107,21 @@ export async function startHostedLocalTelegramStub(input: {
       return;
     }
 
+    if (request.method === "POST" && request.url === `/bot${input.botToken}/deleteMessages`) {
+      if (!isValidTelegramDeleteMessagesPayload(parseObservedTelegramJson(body))) {
+        writeJsonResponse(response, 400, {
+          error: "Expected a Telegram deleteMessages payload with chat_id and message_ids.",
+        });
+        return;
+      }
+
+      writeJsonResponse(response, 200, {
+        ok: true,
+        result: true,
+      });
+      return;
+    }
+
     writeJsonResponse(response, 404, {
       error: `Unhandled Telegram stub route: ${request.method ?? "GET"} ${request.url ?? "/"}`,
     });
@@ -340,6 +355,21 @@ function isValidTelegramSendMessagePayload(
     && typeof payload.chat_id === "string"
     && typeof payload.text === "string"
     && payload.text.trim().length > 0,
+  );
+}
+
+function isValidTelegramDeleteMessagesPayload(
+  payload: Record<string, unknown> | null,
+): payload is Record<string, unknown> & {
+  chat_id: string;
+  message_ids: number[];
+} {
+  return Boolean(
+    payload
+    && typeof payload.chat_id === "string"
+    && Array.isArray(payload.message_ids)
+    && payload.message_ids.length > 0
+    && payload.message_ids.every((value) => typeof value === "number"),
   );
 }
 
