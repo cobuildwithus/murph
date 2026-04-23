@@ -3,6 +3,7 @@ import {
   normalizeAssistantProviderConfig,
 } from '@murphai/operator-config/assistant/provider-config'
 import {
+  resolveAssistantOnboardingCompletionFallbackReason,
   resolveAssistantProviderTurnContinuityPlan,
 } from '../src/assistant/provider-turn-runner.js'
 import {
@@ -20,33 +21,33 @@ import {
   createAssistantUsageAttribution,
 } from '../src/assistant/usage-attribution.js'
 import {
-  resolveAssistantEarlySessionOnboardingEligibility,
+  resolveAssistantOnboardingGuidanceOpen,
 } from '../src/assistant/turn-plan.js'
 
 describe('assistant provider continuity planning', () => {
-  it('keeps native resume ahead of onboarding/bootstrap overlays', () => {
+  it('keeps native resume ahead of bootstrap overlays while leaving onboarding guidance on', () => {
     expect(
       resolveAssistantProviderTurnContinuityPlan({
         candidateResumeProviderSessionId: 'provider-session-1',
-        earlySessionOnboardingEligible: true,
+        onboardingGuidanceOpen: true,
         promptProfile: 'conversation',
       }),
     ).toEqual({
-      earlySessionOnboardingInjected: false,
+      onboardingGuidanceInjected: true,
       resumeProviderSessionId: 'provider-session-1',
       shouldInjectBootstrapContext: false,
     })
   })
 
-  it('injects onboarding only on conversation bootstrap turns', () => {
+  it('injects onboarding guidance on conversation turns without coupling it to bootstrap', () => {
     expect(
       resolveAssistantProviderTurnContinuityPlan({
         candidateResumeProviderSessionId: null,
-        earlySessionOnboardingEligible: true,
+        onboardingGuidanceOpen: true,
         promptProfile: 'conversation',
       }),
     ).toEqual({
-      earlySessionOnboardingInjected: true,
+      onboardingGuidanceInjected: true,
       resumeProviderSessionId: null,
       shouldInjectBootstrapContext: true,
     })
@@ -54,33 +55,83 @@ describe('assistant provider continuity planning', () => {
     expect(
       resolveAssistantProviderTurnContinuityPlan({
         candidateResumeProviderSessionId: null,
-        earlySessionOnboardingEligible: true,
+        onboardingGuidanceOpen: true,
         promptProfile: 'notification-decision',
-      }).earlySessionOnboardingInjected,
+      }).onboardingGuidanceInjected,
     ).toBe(false)
   })
 
-  it('treats onboarding as gated by onboarding-open state', () => {
+  it('treats onboarding guidance as gated by onboarding-open state', () => {
     expect(
-      resolveAssistantEarlySessionOnboardingEligibility({
-        includeEarlySessionOnboarding: true,
+      resolveAssistantOnboardingGuidanceOpen({
+        includeOnboardingGuidance: true,
         onboardingOpen: true,
       }),
     ).toBe(true)
 
     expect(
-      resolveAssistantEarlySessionOnboardingEligibility({
-        includeEarlySessionOnboarding: true,
+      resolveAssistantOnboardingGuidanceOpen({
+        includeOnboardingGuidance: true,
         onboardingOpen: false,
       }),
     ).toBe(false)
 
     expect(
-      resolveAssistantEarlySessionOnboardingEligibility({
-        includeEarlySessionOnboarding: false,
+      resolveAssistantOnboardingGuidanceOpen({
+        includeOnboardingGuidance: false,
         onboardingOpen: true,
       }),
     ).toBe(false)
+  })
+
+  it('settles clear onboarding-complete turns when no command surface is available', () => {
+    expect(
+      resolveAssistantOnboardingCompletionFallbackReason({
+        assistantCommandAccessMode: 'none',
+        onboardingGuidanceInjected: true,
+        prompt: 'Can you help me understand my sleep debt?',
+      }),
+    ).toBe('concrete_request')
+
+    expect(
+      resolveAssistantOnboardingCompletionFallbackReason({
+        assistantCommandAccessMode: 'none',
+        onboardingGuidanceInjected: true,
+        prompt: "Call me Sam. I've been dealing with low energy lately.",
+      }),
+    ).toBe('user_answered')
+
+    expect(
+      resolveAssistantOnboardingCompletionFallbackReason({
+        assistantCommandAccessMode: 'none',
+        onboardingGuidanceInjected: true,
+        prompt: 'No thanks, skip that for now.',
+      }),
+    ).toBe('user_declined')
+
+    expect(
+      resolveAssistantOnboardingCompletionFallbackReason({
+        assistantCommandAccessMode: 'none',
+        onboardingGuidanceInjected: true,
+        prompt: 'Yea!',
+      }),
+    ).toBeNull()
+
+    expect(
+      resolveAssistantOnboardingCompletionFallbackReason({
+        assistantCommandAccessMode: 'none',
+        onboardingGuidanceInjected: true,
+        prompt: 'What?',
+      }),
+    ).toBeNull()
+
+    expect(
+      resolveAssistantOnboardingCompletionFallbackReason({
+        assistantCommandAccessMode: 'none',
+        onboardingGuidanceInjected: true,
+        prompt: "I'm curious.",
+      }),
+    ).toBeNull()
   })
 })
 

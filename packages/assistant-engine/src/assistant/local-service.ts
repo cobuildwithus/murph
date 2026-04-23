@@ -237,8 +237,10 @@ export async function sendAssistantMessageLocal(
         })
 
         await finalizeDeliveredAssistantTurn({
-          earlySessionOnboardingInjected:
-            providerResult.earlySessionOnboardingInjected,
+          onboardingCompletionFallbackReason:
+            providerResult.onboardingCompletionFallbackReason,
+          onboardingGuidanceInjected:
+            providerResult.onboardingGuidanceInjected,
           firstContactStateDocIds: sharedPlan.firstContactStateDocIds,
           outcome: deliveryOutcome,
           response: providerResult.response,

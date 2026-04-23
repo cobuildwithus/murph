@@ -4,6 +4,7 @@ import type {
   AssistantChatProvider,
   AssistantBindingDeliveryKind,
   AssistantDeliveryError,
+  AssistantOnboardingCompletionReason,
   AssistantDeliverySource,
   AssistantProviderFailoverRoute,
   AssistantProviderSessionOptions,
@@ -103,7 +104,7 @@ export interface AssistantTurnSharedPlan {
   allowSensitiveHealthContext: boolean
   cliAccess: AssistantCliAccessContext
   conversationPolicy: import('./conversation-policy.js').AssistantConversationPolicy
-  earlySessionOnboardingEligible: boolean
+  onboardingGuidanceOpen: boolean
   firstContactStateDocIds: string[]
   operatorAuthority: AssistantOperatorAuthority
   persistUserPromptOnFailure: boolean
@@ -135,7 +136,8 @@ export interface PersistedUserTurn {
 
 export interface ExecutedAssistantProviderTurnResult extends AssistantProviderTurnExecutionResult {
   attemptCount: number
-  earlySessionOnboardingInjected?: boolean
+  onboardingCompletionFallbackReason?: AssistantOnboardingCompletionReason | null
+  onboardingGuidanceInjected?: boolean
   providerOptions: AssistantProviderSessionOptions
   route: ResolvedAssistantFailoverRoute
   session: AssistantSession

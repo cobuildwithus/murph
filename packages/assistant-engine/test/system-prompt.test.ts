@@ -12,7 +12,7 @@ function buildPrompt(
     activeExperimentContext?: string | null
     assistantHostedDeviceConnectAvailable?: boolean
     assistantHostedDeviceConnectProviders?: Array<{ label: string; provider: string }>
-    earlySessionOnboarding?: boolean
+    onboardingGuidance?: boolean
   },
 ) {
   return buildAssistantSystemPrompt({
@@ -32,7 +32,7 @@ function buildPrompt(
     },
     currentLocalDate: '2026-04-10',
     currentTimeZone: 'Australia/Sydney',
-    earlySessionOnboarding: options?.earlySessionOnboarding ?? false,
+    onboardingGuidance: options?.onboardingGuidance ?? false,
     modelBehaviorProfile: 'default',
     turnTrigger,
     vaultOverview: null,
@@ -190,10 +190,10 @@ describe('buildAssistantSystemPrompt', () => {
     )
   })
 
-  it('uses the gradual early-session onboarding guidance when the first-contact flow is enabled', () => {
-    const prompt = buildPrompt('bound-tools', null, { earlySessionOnboarding: true })
+  it('uses the gradual conversation onboarding guidance when the first-contact flow is enabled', () => {
+    const prompt = buildPrompt('bound-tools', null, { onboardingGuidance: true })
 
-    expect(prompt).toContain('Early-session onboarding guidance:')
+    expect(prompt).toContain('Conversation onboarding guidance:')
     expect(prompt).toContain(`Hey, I'm Murph — your personal health assistant.
 
 Send me things as they happen: meals, workouts, supplements, labs, symptoms, whatever. I'll keep track of it all and help you spot patterns, answer questions, and stay on top of your goals.
@@ -228,6 +228,15 @@ Ready to get started?`)
     expect(prompt).toContain(
       'If the user mentions urgent, severe, or safety-sensitive symptoms, do not stay in onboarding;',
     )
+  })
+
+  it('explains the narrow no-command onboarding fallback without claiming completion', () => {
+    const prompt = buildPrompt('none', null, { onboardingGuidance: true })
+
+    expect(prompt).toContain(
+      'the runtime will settle only clear onboarding-complete turns automatically',
+    )
+    expect(prompt).toContain('do not claim onboarding was marked complete')
   })
 
   it('includes the protocol experiment onboarding guidance for planning and setup flows', () => {

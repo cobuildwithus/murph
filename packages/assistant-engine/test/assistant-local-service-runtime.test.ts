@@ -159,6 +159,53 @@ test('sendAssistantMessageLocal prefers the hosted execution default target when
   )
 })
 
+test('sendAssistantMessageLocal forwards onboarding fallback completion metadata to finalization', async () => {
+  const session = createAssistantSession({
+    sessionId: 'session-onboarding-fallback',
+  })
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    session,
+    providerOutcome: {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingCompletionFallbackReason: 'user_answered',
+        onboardingGuidanceInjected: true,
+        response: 'Thanks, that helps.',
+        session,
+      },
+    },
+  })
+
+  await sendAssistantMessageLocal({
+    deliverResponse: true,
+    prompt: "Call me Sam. I've been dealing with low energy lately.",
+    vault: '/vaults/test',
+  })
+
+  assert.equal(mocks.finalizeDeliveredAssistantTurn.mock.calls.length, 1)
+  const [firstFinalizationCall] = mocks.finalizeDeliveredAssistantTurn.mock.calls
+  const [finalizationInput] = firstFinalizationCall ?? []
+  assert.deepEqual(finalizationInput, {
+    firstContactStateDocIds: ['doc-1'],
+    onboardingCompletionFallbackReason: 'user_answered',
+    onboardingGuidanceInjected: true,
+    outcome: {
+      delivery: {
+        channel: 'telegram',
+        sentAt: '2026-04-08T12:00:05.000Z',
+        target: 'thread-1',
+        targetKind: 'thread',
+      },
+      intentId: 'intent-1',
+      kind: 'sent',
+      session,
+    },
+    response: 'Thanks, that helps.',
+    turnId: 'turn-1',
+    vault: '/vaults/test',
+  })
+})
+
 test('sendAssistantMessageLocal marks delivery as blocked when a late capture requires revision', async () => {
   const lateCapture: InboxListResult['items'][number] = {
     captureId: 'capture-late',
@@ -219,7 +266,7 @@ test('sendAssistantMessageLocal marks delivery as blocked when a late capture re
     providerOutcome: {
       kind: 'succeeded',
       providerTurn: {
-        earlySessionOnboardingInjected: true,
+        onboardingGuidanceInjected: true,
         response: 'draft response',
         session: createAssistantSession({
           sessionId: 'session-revision',
@@ -840,7 +887,8 @@ async function loadLocalServiceModule(input?: {
     | {
         kind: 'succeeded'
         providerTurn: {
-          earlySessionOnboardingInjected: boolean
+          onboardingCompletionFallbackReason?: 'concrete_request' | 'user_answered' | 'user_declined' | 'manual' | null
+          onboardingGuidanceInjected: boolean
           response: string
           session: AssistantSession
         }
@@ -879,7 +927,7 @@ async function loadLocalServiceModule(input?: {
     input?.providerOutcome ?? {
       kind: 'succeeded' as const,
       providerTurn: {
-        earlySessionOnboardingInjected: true,
+        onboardingGuidanceInjected: true,
         response: 'assistant response',
         session,
       },
@@ -932,7 +980,13 @@ async function loadLocalServiceModule(input?: {
         >[0],
       ) => undefined,
     ),
-    finalizeDeliveredAssistantTurn: vi.fn(async () => undefined),
+    finalizeDeliveredAssistantTurn: vi.fn(
+      async (
+        _input: Parameters<
+          typeof import('../src/assistant/delivery-service.js').finalizeAssistantTurnFromDeliveryOutcome
+        >[0],
+      ) => undefined,
+    ),
     getAssistantChannelAdapter: vi.fn((_channel: string | null) => input?.adapter ?? null),
     normalizeAssistantAskResultForReturn: vi.fn((value) => value),
     normalizeAssistantDeliveryError: vi.fn((error: Error) => ({
@@ -1276,7 +1330,7 @@ function createSharedPlan(): AssistantTurnSharedPlan {
       allowSensitiveHealthContext: false,
       operatorAuthority: 'direct-operator',
     },
-    earlySessionOnboardingEligible: false,
+    onboardingGuidanceOpen: false,
     firstContactStateDocIds: ['doc-1'],
     operatorAuthority: 'direct-operator',
     persistUserPromptOnFailure: true,

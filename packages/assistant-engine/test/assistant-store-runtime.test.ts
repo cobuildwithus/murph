@@ -797,7 +797,7 @@ describe('assistant turn shared plan', () => {
         },
         operatorAuthority: 'direct-operator',
       },
-      earlySessionOnboardingEligible: false,
+      onboardingGuidanceOpen: false,
       firstContactStateDocIds: [],
       operatorAuthority: 'direct-operator',
       persistUserPromptOnFailure: true,
@@ -874,7 +874,7 @@ describe('assistant turn shared plan', () => {
       '/tmp/turn-plan-vault',
     )
     expect(runtimeStateMocks.listAssistantSessions).not.toHaveBeenCalled()
-    expect(eligiblePlan.earlySessionOnboardingEligible).toBe(true)
+    expect(eligiblePlan.onboardingGuidanceOpen).toBe(true)
     expect(eligiblePlan.firstContactStateDocIds).toEqual([
       'onboarding/first-contact/doc-1',
     ])
@@ -952,7 +952,7 @@ describe('assistant turn shared plan', () => {
       '/tmp/turn-plan-vault',
     )
     expect(runtimeStateMocks.listAssistantSessions).not.toHaveBeenCalled()
-    expect(plan.earlySessionOnboardingEligible).toBe(true)
+    expect(plan.onboardingGuidanceOpen).toBe(true)
     expect(plan.firstContactStateDocIds).toEqual([])
   })
 
@@ -1004,7 +1004,7 @@ describe('assistant turn shared plan', () => {
       '/tmp/turn-plan-vault',
     )
     expect(runtimeStateMocks.listAssistantSessions).not.toHaveBeenCalled()
-    expect(plan.earlySessionOnboardingEligible).toBe(false)
+    expect(plan.onboardingGuidanceOpen).toBe(false)
   })
 })
 
