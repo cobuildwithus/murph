@@ -12,6 +12,8 @@ import {
   readNullableStringValue,
 } from "./assertions.ts";
 
+const HOSTED_TELEGRAM_REPLY_CONTEXT_PREVIEW_LIMIT = 240;
+
 export function parseHostedExecutionTelegramMessage(
   value: unknown,
 ): HostedExecutionTelegramMessage {
@@ -44,6 +46,16 @@ export function parseHostedExecutionTelegramMessage(
       record.messageId,
       "Hosted execution Telegram message telegramMessage.messageId",
     ),
+    ...(record.replyContextPreview === undefined
+      ? {}
+      : {
+          replyContextPreview: normalizeHostedTelegramReplyContextPreview(
+            readNullableStringValue(
+              record.replyContextPreview,
+              "Hosted execution Telegram message telegramMessage.replyContextPreview",
+            ),
+          ),
+        }),
     schema: parseHostedExecutionTelegramMessageSchema(record.schema),
     ...(record.text === undefined
       ? {}
@@ -134,4 +146,16 @@ function parseHostedExecutionTelegramMessageSchema(
   }
 
   throw new TypeError("Hosted execution Telegram message telegramMessage.schema is unsupported.");
+}
+
+function normalizeHostedTelegramReplyContextPreview(
+  value: string | null,
+): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  return value.length > HOSTED_TELEGRAM_REPLY_CONTEXT_PREVIEW_LIMIT
+    ? `${value.slice(0, HOSTED_TELEGRAM_REPLY_CONTEXT_PREVIEW_LIMIT - 3)}...`
+    : value;
 }

@@ -186,6 +186,23 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
             id: 456,
           },
           message_id: 1,
+          quote: {
+            text: "quoted",
+          },
+          reply_to_message: {
+            chat: {
+              id: 123,
+              type: "private",
+            },
+            date: 1_774_522_599,
+            from: {
+              first_name: "Casey",
+              id: 457,
+              username: "casey",
+            },
+            message_id: 0,
+            text: "Earlier message",
+          },
           text: "hello",
         },
         update_id: 321,
@@ -204,6 +221,13 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
           kind: "conversation.message",
           message: expect.objectContaining({
             channel: "telegram",
+            telegramMessage: expect.objectContaining({
+              messageId: "1",
+              replyContextPreview: "Replying to: Earlier message\nQuoted text: quoted",
+              schema: "murph.hosted-telegram-message.v1",
+              text: "hello",
+              threadId: "123",
+            }),
           }),
           userId: "member_telegram_123",
         }),
@@ -217,6 +241,85 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     expect(hostedWebhookReceiptCreate).not.toHaveBeenCalled();
     expect(hostedWebhookReceiptUpdateMany).not.toHaveBeenCalled();
     expect(readHostedWebhookSideEffectUpsertCalls(prisma)).toEqual([]);
+  });
+
+  it("bounds hosted Telegram replyContextPreview before writing the hosted wake payload", async () => {
+    mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
+    const prisma = withPrismaTransaction({
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventPayload: {
+              updateId: 322,
+            },
+            receiptState: {
+              attemptCount: 1,
+              status: "processing",
+            },
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMemberRouting: {
+        findUnique: vi.fn().mockResolvedValue({
+          member: {
+            billingStatus: HostedBillingStatus.active,
+            id: "member_telegram_123",
+            suspendedAt: null,
+          },
+        }),
+      },
+    });
+
+    await handleHostedOnboardingTelegramWebhook({
+      prisma,
+      rawBody: JSON.stringify({
+        message: {
+          chat: {
+            id: 123,
+            type: "private",
+          },
+          date: 1_774_522_601,
+          from: {
+            first_name: "Alice",
+            id: 456,
+          },
+          message_id: 2,
+          quote: {
+            text: "Q".repeat(220),
+          },
+          reply_to_message: {
+            chat: {
+              id: 123,
+              type: "private",
+            },
+            date: 1_774_522_600,
+            message_id: 1,
+            text: "R".repeat(220),
+          },
+          text: "hello",
+        },
+        update_id: 322,
+      }),
+      secretToken: "telegram-secret",
+    });
+
+    const enqueueCall = mocks.enqueueHostedExecutionOutbox.mock.calls.at(-1)?.[0] as {
+      wake?: {
+        message?: {
+          telegramMessage?: {
+            replyContextPreview?: unknown;
+          };
+        };
+      };
+    } | undefined;
+    const preview = enqueueCall?.wake?.message?.telegramMessage?.replyContextPreview;
+
+    expect(typeof preview).toBe("string");
+    expect(preview).toHaveLength(240);
+    expect(preview).toMatch(/^Replying to: /u);
+    expect(preview).toMatch(/\.\.\.$/u);
   });
 
   it("does not wait for the hosted execution dispatch nudge when one is deferred", async () => {
