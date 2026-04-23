@@ -14,7 +14,6 @@ import type {
   RuntimeCaptureRecord,
   RuntimeStore,
 } from '../src/index.ts'
-import { describeLinqConnectorEndpoint } from '../src/linq-endpoint.ts'
 import {
   resolveAssistantInboxArtifactPath,
   resolveAssistantVaultPath,
@@ -1125,15 +1124,6 @@ test('daemon, process, and assistant vault-path helpers handle stale and invalid
           'SIGTERM',
         ),
       /boom/,
-    )
-
-    assert.deepEqual(
-      describeLinqConnectorEndpoint({ options: {} }),
-      {
-        host: '0.0.0.0',
-        path: '/linq-webhook',
-        port: 8789,
-      },
     )
 
     const relativePath = await resolveAssistantVaultPath(tempDir, 'derived/inbox/capture-1')

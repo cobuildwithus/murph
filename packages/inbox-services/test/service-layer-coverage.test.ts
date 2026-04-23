@@ -16,7 +16,6 @@ import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { afterEach, test, vi } from 'vitest'
 
 import { createIntegratedInboxServices } from '../src/index.ts'
-import { describeLinqConnectorEndpoint as describeAppLinqEndpoint } from '../src/inbox-app/linq-endpoint.ts'
 import {
   buildDaemonState,
   createProcessSignalBridge,
@@ -69,7 +68,6 @@ import {
   sortConnectors,
   writeConfig,
 } from '../src/inbox-services/state.ts'
-import { describeLinqConnectorEndpoint } from '../src/linq-endpoint.ts'
 import {
   normalizeAssistantCaptureId,
   resolveAssistantInboxArtifactPath,
@@ -240,27 +238,6 @@ function createRuntimeStore(
 test('service-layer helpers cover connector, query, state, daemon, and vault path branches', async () => {
   assert.equal(typeof createIntegratedInboxServices, 'function')
 
-  const defaultEndpoint = describeLinqConnectorEndpoint({ options: {} })
-  assert.deepEqual(defaultEndpoint, {
-    host: '0.0.0.0',
-    path: '/linq-webhook',
-    port: 8789,
-  })
-  assert.deepEqual(
-    describeAppLinqEndpoint({
-      options: {
-        linqWebhookHost: '127.0.0.1',
-        linqWebhookPath: '/hook',
-        linqWebhookPort: 9000,
-      },
-    }),
-    {
-      host: '127.0.0.1',
-      path: '/hook',
-      port: 9000,
-    },
-  )
-
   let killed = false
   tryKillProcess(
     () => {
@@ -368,9 +345,6 @@ test('service-layer helpers cover connector, query, state, daemon, and vault pat
       createEmailPollConnector() {
         throw new Error('unused')
       },
-      createLinqWebhookConnector() {
-        throw new Error('unused')
-      },
       createTelegramBotApiPollDriver() {
         throw new Error('unused')
       },
@@ -422,9 +396,6 @@ test('service-layer helpers cover connector, query, state, daemon, and vault pat
       createEmailPollConnector(input) {
         assert.equal(input.accountAddress, 'ada@example.com')
         return createPollConnector('email', 'email:primary')
-      },
-      createLinqWebhookConnector() {
-        throw new Error('unused')
       },
       createTelegramBotApiPollDriver() {
         throw new Error('unused')
@@ -596,9 +567,6 @@ test('service-layer helpers cover connector, query, state, daemon, and vault pat
         throw new Error('unused')
       },
       createEmailPollConnector() {
-        throw new Error('unused')
-      },
-      createLinqWebhookConnector() {
         throw new Error('unused')
       },
       createTelegramBotApiPollDriver() {

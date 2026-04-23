@@ -399,9 +399,6 @@ function createInboxModule(
     createEmailPollConnector() {
       throw new Error('not used in reads/runtime tests')
     },
-    createLinqWebhookConnector() {
-      throw new Error('not used in reads/runtime tests')
-    },
     createTelegramBotApiPollDriver() {
       throw new Error('not used in reads/runtime tests')
     },

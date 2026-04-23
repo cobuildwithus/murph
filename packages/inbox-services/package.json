@@ -14,10 +14,6 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
-    },
-    "./linq-endpoint": {
-      "types": "./dist/linq-endpoint.d.ts",
-      "default": "./dist/linq-endpoint.js"
     }
   },
   "files": [
