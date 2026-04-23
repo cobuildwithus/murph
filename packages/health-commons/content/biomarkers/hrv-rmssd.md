@@ -4,47 +4,316 @@ entityType: biomarker
 key: biomarker:hrv-rmssd
 slug: biomarkers/hrv-rmssd
 title: HRV / RMSSD
-summary: A recovery and autonomic signal that can be interesting when it repeats, but is noisy enough to treat as context rather than proof.
+summary: "A recovery and autonomic-balance signal based on beat-to-beat timing variation. Useful for personal trend monitoring, but noisy enough that Murph treats it as context, not a diagnosis or a one-day verdict."
 status: field-testing
-quality: usable
+quality: reviewed
 aliases:
   - HRV
   - RMSSD
+  - heart rate variability
+  - overnight HRV
+  - vagal HRV
+  - pulse rate variability
 categories:
   - recovery
   - autonomic
+  - cardiovascular
+  - sleep
   - wearable-metric
+measurementContexts:
+  - overnight_wearable
+  - morning_resting_manual
+  - short_term_ecg_or_chest_strap
+unit: ms
+interpretationFrame:
+  principle: "Compare HRV against your own same-device baseline, using repeated readings and stable windows rather than one dramatic morning."
+  caveat: "HRV is sensitive to sleep, alcohol, illness, inflammation, psychological stress, training load, breathing, posture, timing, arrhythmias, ectopy, device placement, and proprietary wearable algorithms."
+biomarker:
+  shortName: HRV
+  displayName: Heart Rate Variability (RMSSD)
+  unit: ms
+  valuePrecision: 0
+  direction:
+    desired: higher_or_stable
+    label: Higher or stable can be better, but context matters.
+    nuance: "A rising personal baseline can reflect improved recovery capacity or aerobic adaptation, while acute drops can reflect strain. Very high, very low, or abrupt values still need context and signal-quality checks."
+  privateMetricBindings:
+    -
+      source: browser_vault_metric
+      domain: recovery
+      metric: hrv
+      unit: ms
+      preferred: true
+    -
+      source: browser_vault_metric
+      domain: sleep
+      metric: hrv
+      unit: ms
+    -
+      source: browser_vault_signal_summary
+      accessor: recovery.hrv
+      unit: ms
+    -
+      source: browser_vault_signal_summary
+      accessor: sleep.hrv
+      unit: ms
+  trendDefaults:
+    latestWindowDays: 7
+    comparisonWindowDays: 30
+    minimumPoints: 7
+    aggregation: median
+  explainerCards:
+    -
+      title: What it is
+      body: HRV is variation in the timing between consecutive heartbeats. RMSSD is a time-domain HRV metric that emphasizes short-term beat-to-beat variation and is commonly used as a vagal or recovery-oriented signal.
+    -
+      title: Why people care
+      body: People track HRV because it can reflect autonomic regulation, recovery strain, sleep disruption, alcohol, stress, illness, and adaptation to training. Murph treats it as a contextual trend, not a medical diagnosis.
+    -
+      title: How to measure it
+      body: Use the same device, timing, and context. Overnight wearable HRV or a quiet morning resting reading is more useful than mixing devices, post-workout readings, or different posture and breathing conditions.
+    -
+      title: What moves it
+      body: Aerobic training can lift baseline HRV in some people, while poor sleep, alcohol, infection, psychological stress, dehydration, hard training, heat load, and device changes can all shift the signal.
+  measurement:
+    bestContext: "Use overnight wearable HRV or a consistent quiet morning resting measurement, then compare 7-day medians against a prior 30-day same-device baseline."
+    howToMeasure:
+      - Use the same wearable, chest strap, app, and metric label when comparing baseline and intervention windows; do not mix RMSSD with SDNN, LF/HF, or a device recovery score.
+      - Prefer overnight readings or immediately-on-waking resting readings before caffeine, exercise, screens, or stressful work.
+      - Compare a 7-day median with the prior 30-day baseline, and require enough points before calling a direction.
+      - Keep resting heart rate, sleep duration, sleep efficiency, alcohol, illness symptoms, unusual stress, travel, heat exposure, and training load visible on the same timeline.
+      - Label or exclude days with poor optical signal, device changes, arrhythmia flags, ectopic-beat artifacts, unusually short sleep, or nonstandard measurement posture.
+      - Treat consumer-wearable HRV as a personal trend signal; for clinical decisions, use validated ECG or clinician-guided measurement.
+    confounders:
+      - poor sleep
+      - alcohol
+      - illness
+      - inflammation
+      - psychological stress
+      - hard training
+      - heat exposure
+      - dehydration
+      - travel
+      - caffeine timing
+      - breathing pattern
+      - posture
+      - measurement timing
+      - arrhythmia or ectopy
+      - device changes
+      - signal quality
 relations:
   -
     type: related_protocol
+    target: protocol_variant:norwegian-4x4/norwegian-4x4
+  -
+    type: related_protocol
     target: protocol_variant:dry-sauna/murph-finnish-standard-3x-week
+  -
+    type: related_protocol
+    target: protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed
+  -
+    type: related_protocol
+    target: protocol_variant:dry-sauna/bryan-johnson-blueprint
+  -
+    type: cites
+    target: source_artifact:hrv-bibliography-2026-04-23
+  -
+    type: cites
+    target: source_artifact:pmid-8598068
+  -
+    type: cites
+    target: source_artifact:pmid-29034226
+  -
+    type: cites
+    target: source_artifact:pmid-39351472
+  -
+    type: cites
+    target: source_artifact:pmid-30852243
+  -
+    type: cites
+    target: source_artifact:pmid-39955401
+  -
+    type: cites
+    target: source_artifact:pmid-39015867
+  -
+    type: cites
+    target: source_artifact:pmid-39077654
+  -
+    type: cites
+    target: source_artifact:pmid-40834291
+  -
+    type: cites
+    target: source_artifact:pmid-40285070
+  -
+    type: cites
+    target: source_artifact:pmid-29486547
+  -
+    type: cites
+    target: source_artifact:pmid-29549064
+  -
+    type: cites
+    target: source_artifact:pmid-33262801
   -
     type: cites
     target: source_artifact:pmid-31331560
   -
     type: cites
-    target: source_artifact:pmid-25432420
-  -
-    type: cites
-    target: source_artifact:pmid-34622026
-  -
-    type: cites
     target: source_artifact:pmid-40611569
-measurementContexts:
-  - overnight_wearable
-  - morning_resting_manual
-unit: ms
-interpretationFrame:
-  principle: Personal baseline matters more than cross-person comparison.
-  caveat: HRV is sensitive to sleep, illness, alcohol, stress, measurement timing, training load, and device algorithms.
+claims:
+  -
+    claimId: hrv_definition_and_metric_scope
+    type: evidence_scope
+    text: "HRV is a family of beat-to-beat variability measures; this Murph page scopes the consumer biomarker to RMSSD-style millisecond values rather than frequency-domain ratios or proprietary recovery scores."
+    strength: high
+    sourceKeys:
+      - source_artifact:pmid-8598068
+      - source_artifact:pmid-29034226
+    caveats:
+      - Different devices may report different HRV windows, artifact filters, and sleep-stage selections under the same HRV label.
+  -
+    claimId: hrv_measurement_standardization
+    type: design_guardrail
+    text: "HRV interpretation depends strongly on measurement context, so Murph should prefer same-device, same-window, repeated measurements and keep posture, breathing, timing, signal quality, and artifacts visible."
+    strength: high
+    sourceKeys:
+      - source_artifact:pmid-39351472
+      - source_artifact:pmid-30852243
+      - source_artifact:pmid-39955401
+  -
+    claimId: hrv_exercise_training_baseline
+    type: intervention_result
+    text: "Structured exercise training, especially aerobic or interval-oriented programs, can improve RMSSD and other HRV markers in pooled adult trials, but acute hard sessions can temporarily suppress recovery signals."
+    strength: moderate
+    sourceKeys:
+      - source_artifact:pmid-39015867
+      - source_artifact:pmid-39077654
+  -
+    claimId: hrv_wearable_validation_mixed
+    type: mixed_evidence
+    text: "Consumer devices can be useful for personal nocturnal trend tracking, but agreement with ECG varies by product, algorithm, context, and HRV feature."
+    strength: moderate
+    sourceKeys:
+      - source_artifact:pmid-40834291
+      - source_artifact:pmid-40285070
+  -
+    claimId: hrv_stress_sleep_alcohol_context
+    type: association_not_causation
+    text: "Stress, alcohol intake, and sleep timing or quality can shift HRV enough to confound short self-experiments, so Murph should not attribute an HRV change to a protocol until these context variables are checked."
+    strength: moderate
+    sourceKeys:
+      - source_artifact:pmid-29486547
+      - source_artifact:pmid-29549064
+      - source_artifact:pmid-33262801
+protocolRanking:
+  version: deterministic-v0
+  scoreFormula: evidenceWeight * 3 + biomarkerRelevance * 3 + wearableMeasurability * 2 - burdenPenalty - safetyCautionPenalty + communityOutcomeConfidence
+  candidates:
+    -
+      protocolKey: protocol_variant:norwegian-4x4/norwegian-4x4
+      expectedDirection: up_or_stable
+      relationship: secondary_biomarker
+      mechanism: "Aerobic and high-intensity interval training are the most plausible Murph protocols for increasing a personal HRV baseline over weeks, although hard sessions can transiently lower HRV when recovery is insufficient."
+      scoring:
+        evidenceWeight: 4
+        biomarkerRelevance: 4
+        wearableMeasurability: 5
+        burdenPenalty: 4
+        safetyCautionPenalty: 3
+      display:
+        confidence: medium
+        burdenLabel: High
+        cautionLabel: Higher
+    -
+      protocolKey: protocol_variant:dry-sauna/murph-finnish-standard-3x-week
+      expectedDirection: mixed_or_contextual
+      relationship: secondary_biomarker
+      mechanism: "Dry sauna can acutely shift autonomic recovery markers and may be relevant to heat-acclimation tolerance, but direct multi-week HRV improvement evidence is mixed, so HRV should be a tolerance and context signal rather than the primary success criterion."
+      scoring:
+        evidenceWeight: 3
+        biomarkerRelevance: 3
+        wearableMeasurability: 5
+        burdenPenalty: 2
+        safetyCautionPenalty: 2
+      display:
+        confidence: low
+        burdenLabel: Moderate
+        cautionLabel: Moderate
+    -
+      protocolKey: protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed
+      expectedDirection: mixed_or_contextual
+      relationship: secondary_biomarker
+      mechanism: "Evening light reduction could indirectly improve overnight HRV if it improves sleep timing or reduces bedtime arousal, but HRV is not a direct or primary endpoint for this protocol."
+      scoring:
+        evidenceWeight: 2
+        biomarkerRelevance: 2
+        wearableMeasurability: 5
+        burdenPenalty: 1
+        safetyCautionPenalty: 1
+      display:
+        confidence: low
+        burdenLabel: Low
+        cautionLabel: Low
+    -
+      protocolKey: protocol_variant:dry-sauna/bryan-johnson-blueprint
+      expectedDirection: mixed_or_contextual
+      relationship: secondary_biomarker
+      mechanism: "The source-attributed Blueprint sauna routine is a higher-burden heat load stacked around workouts, so HRV is best used as a strain and recovery-tolerance monitor, not as proof that the external routine is improving autonomic health."
+      scoring:
+        evidenceWeight: 2
+        biomarkerRelevance: 3
+        wearableMeasurability: 5
+        burdenPenalty: 4
+        safetyCautionPenalty: 3
+      display:
+        confidence: low
+        burdenLabel: High
+        cautionLabel: Higher
+communityOutcomeSummary:
+  state: coming_soon
+  minimumCohortSize: 20
+  placeholder: Early Murph HRV outcome summaries will appear here once enough opted-in experiment runs are available with stable same-device baseline and intervention windows.
 ---
 
-HRV can be interesting for dry sauna, but it works better as an **exploratory secondary marker** than as the main verdict.
+## Bottom line
 
-Why the caution:
+HRV is a useful **recovery-context biomarker** when it is read as a personal trend. It is much weaker when it is treated as a universal score, a diagnosis, or a one-morning verdict. Murph should use HRV to ask, "Is this protocol adding strain, improving my recovery baseline, or being confounded by sleep, alcohol, illness, stress, or measurement changes?"
 
-- some acute physiology papers make HRV look promising,
-- repeated heat-acclimation work suggests adaptation can happen over weeks,
-- but a modern multi-arm randomized trial showed **no reliable HRV improvement** from regular post-exercise sauna bathing.
+For this page, HRV means **RMSSD-style heart rate variability in milliseconds**. RMSSD emphasizes short-term beat-to-beat variation and is the consumer-wearable HRV metric most likely to appear in recovery dashboards. It should not be merged with SDNN, LF/HF, proprietary readiness scores, or app-specific normalized HRV values.
 
-That means a null HRV result should not automatically count as a protocol failure, and a positive HRV result should be checked against confounders before it is promoted into a stronger claim.
+## What HRV / RMSSD measures
+
+A steady pulse does not mean every heartbeat arrives on an identical schedule. HRV describes variation in the time between normal beats. RMSSD is calculated from successive beat-to-beat differences, so it is especially sensitive to short-term parasympathetic or vagal modulation.
+
+For Murph, the practical interpretation is narrower than the physiology. HRV can be a window into autonomic state, but the product experience should avoid pretending that a wearable HRV value cleanly separates "healthy" from "unhealthy." A useful HRV read asks whether the user's own baseline is stable, rising, or falling under comparable conditions.
+
+## Best measurement approach
+
+The cleanest consumer workflow is **same device, same context, repeated windows**. Overnight HRV can be convenient because it is passive and frequent. Morning resting HRV can be cleaner if the user takes it consistently before caffeine, exercise, screens, and stressful tasks. Either can work; mixing them breaks interpretability.
+
+Murph should prefer the 7-day median against the prior 30-day baseline. Daily values are still shown privately, but the interpretation should wait for repeated points. HRV is noisy enough that one low morning after alcohol, poor sleep, a late workout, travel, or a stressful day should be treated as a context flag, not a protocol conclusion.
+
+## What can move HRV
+
+Patterns that can plausibly raise a personal HRV baseline include improved aerobic fitness, steadier sleep, reduced alcohol, better recovery spacing, lower chronic stress load, and more consistent routines. Patterns that can acutely lower HRV include illness, inflammation, alcohol, insufficient sleep, unusually hard training, heat stress, dehydration, travel, psychological stress, and poor measurement quality.
+
+Some protocols create both effects. A hard interval protocol may improve autonomic fitness over weeks but suppress HRV the day after a difficult workout. A sauna protocol may create acute heat strain, then a rebound or adaptation signal, but direct multi-week HRV improvement should remain a cautious claim. A sleep-light protocol may only move HRV if it actually improves sleep timing, sleep continuity, or bedtime arousal.
+
+## Protocol ranking logic
+
+Norwegian 4x4 ranks first because structured exercise has the strongest general evidence path for improving HRV-related autonomic markers, and HRV is easy to measure during a 6-week training block. The caution is recovery: if the workload is too aggressive, HRV may fall even while the protocol is physiologically plausible.
+
+Finnish dry sauna ranks next because heat exposure is autonomically active and existing Health Commons sauna sources already connect it to recovery markers. The HRV claim stays contextual because direct intervention evidence is mixed and a modern trial did not clearly confirm HRV improvement from regular post-exercise sauna bathing.
+
+Red-light glasses before bed are indirect. They may help HRV only through better sleep timing, less bedtime arousal, or improved sleep continuity. The external Bryan Johnson sauna routine is also contextual: it is a higher-burden heat protocol, so HRV is most useful as a safety and recovery-tolerance signal.
+
+## How Murph should interpret your trend
+
+A stronger positive HRV pattern is a stable or rising 7-day median, similar or lower resting heart rate, no obvious illness or alcohol confounder, adequate sleep, and no major device or timing change. A weaker pattern is a single-day spike, a change after switching devices, or a rise paired with poor sleep and a large resting-heart-rate increase.
+
+A concerning or cautionary pattern is a repeated HRV drop below baseline paired with higher resting heart rate, poor sleep, unusual fatigue, illness symptoms, palpitations, dizziness, or a protocol that recently became more intense. Murph should respond by surfacing context, not by diagnosing disease.
+
+## What not to claim
+
+Do not claim that higher HRV is always better. Do not claim that a protocol "worked" because HRV rose for one night. Do not compare users against each other unless a future community summary has strong privacy thresholds and enough same-device runs. Do not mix RMSSD, SDNN, LF/HF, and proprietary readiness scores into a single HRV outcome.
+
+The right claim is more modest and more useful: HRV / RMSSD is a high-signal contextual biomarker for bounded self-experiments when it is measured consistently, interpreted against a personal baseline, and checked against sleep, alcohol, stress, illness, training load, and signal quality.
