@@ -126,6 +126,12 @@ interface ValidateVaultResult {
   metadata: VaultMetadata | null;
 }
 
+interface AssertValidVaultInput {
+  vaultRoot?: string;
+  errorCode?: string;
+  message?: string;
+}
+
 function assertContractShape<T>(
   schema: ContractSchema<T>,
   value: unknown,
@@ -538,6 +544,10 @@ function rawManifestPathForArtifact(relativePath: string): string {
   return path.posix.join(path.posix.dirname(relativePath), "manifest.json");
 }
 
+function isVaultSyncImportRawPath(relativePath: string): boolean {
+  return relativePath.startsWith(`${VAULT_LAYOUT.rawDirectory}/sync-imports/`);
+}
+
 function isEnvelopeBasedInboxRawPath(relativePath: string): boolean {
   return relativePath.startsWith(`${VAULT_LAYOUT.rawInboxDirectory}/`);
 }
@@ -800,6 +810,10 @@ async function validateRawImportManifests(vaultRoot: string): Promise<Validation
   const manifestFiles: string[] = [];
 
   for (const relativePath of rawFiles) {
+    if (isVaultSyncImportRawPath(relativePath)) {
+      continue;
+    }
+
     const inboxCaptureDirectory = inboxCaptureRootForRawPath(relativePath);
 
     if (inboxCaptureDirectory !== null) {
@@ -975,4 +989,20 @@ export async function validateVault({ vaultRoot }: LoadVaultInput = {}): Promise
     issues,
     metadata,
   };
+}
+
+export async function assertValidVault({
+  vaultRoot,
+  errorCode = "VAULT_VALIDATION_FAILED",
+  message = "Vault failed canonical validation.",
+}: AssertValidVaultInput = {}): Promise<ValidateVaultResult> {
+  const result = await validateVault({ vaultRoot });
+
+  if (!result.valid) {
+    throw new VaultError(errorCode, message, {
+      issues: result.issues.map((issue) => ({ ...issue })),
+    });
+  }
+
+  return result;
 }

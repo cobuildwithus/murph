@@ -12,6 +12,7 @@ import {
   mergeVaultSyncImportIntoVault,
   readVaultSyncImportManifest,
   restoreVaultSyncImportPack,
+  validateVault,
   VAULT_LAYOUT,
 } from "../src/index.ts";
 
@@ -32,6 +33,68 @@ async function writeVaultFile(vaultRoot: string, relativePath: string, contents:
   const absolutePath = path.join(vaultRoot, relativePath);
   await mkdir(path.dirname(absolutePath), { recursive: true });
   await writeFile(absolutePath, contents, "utf8");
+}
+
+function buildEncounterEvent(input: {
+  id: string;
+  title: string;
+  encounterType?: string;
+  location?: string;
+  revision?: number;
+}) {
+  return {
+    schemaVersion: "murph.event.v1",
+    id: input.id,
+    kind: "encounter",
+    occurredAt: "2026-04-21T00:00:00.000Z",
+    recordedAt: "2026-04-21T00:05:00.000Z",
+    dayKey: "2026-04-21",
+    source: "import",
+    title: input.title,
+    encounterType: input.encounterType ?? "follow-up",
+    location: input.location ?? "Clinic",
+    lifecycle: input.revision ? { revision: input.revision } : undefined,
+  };
+}
+
+async function writeRawImportManifest(input: {
+  artifactRelativePath: string;
+  importId: string;
+  importKind: string;
+  vaultRoot: string;
+}): Promise<void> {
+  const rawDirectory = path.posix.dirname(input.artifactRelativePath);
+  const manifestRelativePath = `${rawDirectory}/manifest.json`;
+  const artifactBytes = await readFile(path.join(input.vaultRoot, input.artifactRelativePath));
+  await writeVaultFile(
+    input.vaultRoot,
+    manifestRelativePath,
+    `${JSON.stringify({
+      schemaVersion: "murph.raw-import-manifest.v1",
+      importId: input.importId,
+      importKind: input.importKind,
+      importedAt: "2026-04-21T00:00:00.000Z",
+      source: "import",
+      owner: {
+        kind: "document",
+        id: input.importId,
+      },
+      rawDirectory,
+      artifacts: [
+        {
+          role: "source",
+          relativePath: input.artifactRelativePath,
+          originalFileName: path.posix.basename(input.artifactRelativePath),
+          mediaType: "text/plain",
+          byteSize: artifactBytes.byteLength,
+          sha256: "1111111111111111111111111111111111111111111111111111111111111111",
+        },
+      ],
+      provenance: {
+        sourceFileName: path.posix.basename(input.artifactRelativePath),
+      },
+    }, null, 2)}\n`,
+  );
 }
 
 afterEach(async () => {
@@ -127,19 +190,23 @@ describe("vault sync merge", () => {
     const hosted = await createTempVault("Hosted vault");
     const local = await createTempVault("Local vault");
     const eventLedger = `${VAULT_LAYOUT.eventLedgerDirectory}/2026/2026-04.jsonl`;
-    const rawFile = `${VAULT_LAYOUT.rawDirectory}/sync-fixtures/local.txt`;
+    const rawFile = `${VAULT_LAYOUT.rawDirectory}/documents/2026/04/doc_01JNV41Q9MN0S1R6ZMW7FGD9DG/local.txt`;
 
     await appendJsonlRecord({
       vaultRoot: local,
       relativePath: eventLedger,
-      record: {
-        id: "evt_local_merge_1",
-        kind: "note",
-        occurredAt: "2026-04-21T00:00:00.000Z",
-        text: "local merge note",
-      },
+      record: buildEncounterEvent({
+        id: "evt_01JQ7AHM7QKZKWF0D8TG7ZW99A",
+        title: "Local merge encounter",
+      }),
     });
     await writeVaultFile(local, rawFile, "raw local evidence\n");
+    await writeRawImportManifest({
+      artifactRelativePath: rawFile,
+      importId: "doc_01JNV41Q9MN0S1R6ZMW7FGD9DG",
+      importKind: "document",
+      vaultRoot: local,
+    });
 
     const hostedCoreBefore = await readFile(path.join(hosted, VAULT_LAYOUT.coreDocument), "utf8");
     const pack = await buildVaultSyncImportPack({ vaultRoot: local });
@@ -154,13 +221,15 @@ describe("vault sync merge", () => {
     });
 
     await expect(readFile(path.join(hosted, eventLedger), "utf8"))
-      .resolves.toContain("evt_local_merge_1");
+      .resolves.toContain("evt_01JQ7AHM7QKZKWF0D8TG7ZW99A");
     await expect(readFile(path.join(hosted, rawFile), "utf8"))
       .resolves.toBe("raw local evidence\n");
+    await expect(readFile(path.join(hosted, path.posix.dirname(rawFile), "manifest.json"), "utf8"))
+      .resolves.toContain("\"rawDirectory\"");
     await expect(readFile(path.join(hosted, VAULT_LAYOUT.coreDocument), "utf8"))
       .resolves.toBe(hostedCoreBefore);
     expect(result.imported.jsonlRecords).toBe(1);
-    expect(result.imported.rawFiles).toBe(1);
+    expect(result.imported.rawFiles).toBe(2);
     expect(result.conflicts.some((conflict) => conflict.path === VAULT_LAYOUT.coreDocument)).toBe(true);
     expect(result.conflictManifestPath).toBeTruthy();
   });
@@ -169,32 +238,40 @@ describe("vault sync merge", () => {
     const hosted = await createTempVault("Hosted vault");
     const local = await createTempVault("Local vault");
     const eventLedger = `${VAULT_LAYOUT.eventLedgerDirectory}/2026/2026-04.jsonl`;
-    const rawFile = `${VAULT_LAYOUT.rawDirectory}/sync-fixtures/conflict.txt`;
+    const rawFile = `${VAULT_LAYOUT.rawDirectory}/documents/2026/04/doc_01JNV41Q9MN0S1R6ZMW7FGD9DG/conflict.txt`;
 
     await appendJsonlRecord({
       vaultRoot: hosted,
       relativePath: eventLedger,
-      record: {
-        id: "evt_conflict",
-        kind: "note",
-        lifecycle: { revision: 1 },
-        occurredAt: "2026-04-21T00:00:00.000Z",
-        text: "hosted",
-      },
+      record: buildEncounterEvent({
+        id: "evt_01JQ7AHY3W3W73Q9CKP2WR18MM",
+        revision: 1,
+        title: "Hosted encounter",
+      }),
     });
     await appendJsonlRecord({
       vaultRoot: local,
       relativePath: eventLedger,
-      record: {
-        id: "evt_conflict",
-        kind: "note",
-        lifecycle: { revision: 1 },
-        occurredAt: "2026-04-21T00:00:00.000Z",
-        text: "local",
-      },
+      record: buildEncounterEvent({
+        id: "evt_01JQ7AHY3W3W73Q9CKP2WR18MM",
+        revision: 1,
+        title: "Local encounter",
+      }),
     });
     await writeVaultFile(hosted, rawFile, "hosted raw\n");
     await writeVaultFile(local, rawFile, "local raw\n");
+    await writeRawImportManifest({
+      artifactRelativePath: rawFile,
+      importId: "doc_01JNV41Q9MN0S1R6ZMW7FGD9DG",
+      importKind: "document",
+      vaultRoot: hosted,
+    });
+    await writeRawImportManifest({
+      artifactRelativePath: rawFile,
+      importId: "doc_01JNV41Q9MN0S1R6ZMW7FGD9DG",
+      importKind: "document",
+      vaultRoot: local,
+    });
 
     const pack = await buildVaultSyncImportPack({ vaultRoot: local });
     const restored = await restoreVaultSyncImportPack({ bundle: pack.bundle });
@@ -208,7 +285,7 @@ describe("vault sync merge", () => {
     });
 
     await expect(readFile(path.join(hosted, eventLedger), "utf8"))
-      .resolves.toContain("\"text\":\"hosted\"");
+      .resolves.toContain("\"title\":\"Hosted encounter\"");
     await expect(readFile(path.join(hosted, rawFile), "utf8"))
       .resolves.toBe("hosted raw\n");
     expect(result.conflicts.some((conflict) => conflict.kind === "jsonl")).toBe(true);
@@ -241,5 +318,70 @@ describe("vault sync merge", () => {
     })).rejects.toSatisfy((error: unknown) =>
       isVaultError(error) && error.code === "VAULT_SYNC_INVALID_JSONL"
     );
+  });
+
+  it("rejects contract-invalid imported JSONL before mutating the hosted vault", async () => {
+    const hosted = await createTempVault("Hosted vault");
+    const local = await createTempVault("Local vault");
+    const captureLedger = `${VAULT_LAYOUT.inboxCaptureLedgerDirectory}/2026/2026-04.jsonl`;
+
+    await writeVaultFile(local, captureLedger, "{}\n");
+
+    const pack = await buildVaultSyncImportPack({ vaultRoot: local });
+    const restored = await restoreVaultSyncImportPack({ bundle: pack.bundle });
+    tempRoots.push(restored.workspaceRoot);
+
+    await expect(mergeVaultSyncImportIntoVault({
+      importMetaRoot: restored.metaRoot,
+      importVaultRoot: restored.vaultRoot,
+      sessionId: "vsi_invalid_contract_jsonl",
+      targetVaultRoot: hosted,
+    })).rejects.toSatisfy((error: unknown) => (
+      isVaultError(error) &&
+      error.code === "VAULT_SYNC_IMPORT_VALIDATION_FAILED" &&
+      Array.isArray(error.details.issues) &&
+      error.details.issues.some((issue) =>
+        typeof issue === "object" &&
+        issue !== null &&
+        (issue as { path?: unknown }).path === captureLedger
+      )
+    ));
+
+    await expect(readFile(path.join(hosted, captureLedger), "utf8")).rejects.toThrow();
+    await expect(validateVault({ vaultRoot: hosted })).resolves.toMatchObject({ valid: true });
+  });
+
+  it("blocks merged-vault writes when an imported canonical file would fail validation", async () => {
+    const hosted = await createTempVault("Hosted vault");
+    const local = await createTempVault("Local vault");
+    const journalDay = `${VAULT_LAYOUT.journalDirectory}/2026-04-21.md`;
+
+    await writeVaultFile(local, journalDay, "not frontmatter\n");
+
+    const pack = await buildVaultSyncImportPack({ vaultRoot: local });
+    const restored = await restoreVaultSyncImportPack({ bundle: pack.bundle });
+    tempRoots.push(restored.workspaceRoot);
+
+    await expect(mergeVaultSyncImportIntoVault({
+      importMetaRoot: restored.metaRoot,
+      importVaultRoot: restored.vaultRoot,
+      sessionId: "vsi_invalid_preferences",
+      targetVaultRoot: hosted,
+    })).rejects.toSatisfy((error: unknown) => (
+      isVaultError(error) &&
+      error.code === "VAULT_SYNC_IMPORT_VALIDATION_FAILED" &&
+      Array.isArray(error.details.issues) &&
+      error.details.issues.some((issue) =>
+        typeof issue === "object" &&
+        issue !== null &&
+        (issue as { path?: unknown }).path === journalDay
+      )
+    ));
+
+    await expect(readFile(path.join(hosted, journalDay), "utf8")).rejects.toThrow();
+    await expect(
+      readFile(path.join(hosted, "raw/sync-imports/vsi_invalid_preferences/manifest.json"), "utf8"),
+    ).rejects.toThrow();
+    await expect(validateVault({ vaultRoot: hosted })).resolves.toMatchObject({ valid: true });
   });
 });
