@@ -1,6 +1,7 @@
 const KNOWLEDGE_SUMMARY_MAX_CHARS = 220
 
 export const DERIVED_KNOWLEDGE_SEARCH_RESULT_FORMAT = 'murph.knowledge-search.v1' as const
+export const KNOWLEDGE_SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u
 
 export function orderedUniqueStrings(values: readonly string[]): string[] {
   const seen = new Set<string>()
@@ -27,6 +28,10 @@ export function normalizeKnowledgeSlug(value: string): string {
   return slug
 }
 
+export function isKnowledgeSlug(value: string): boolean {
+  return KNOWLEDGE_SLUG_PATTERN.test(value)
+}
+
 export function normalizeKnowledgeTag(
   value: string | null | undefined,
 ): string | null {
@@ -47,12 +52,12 @@ export function extractKnowledgeRelatedSlugs(
   body: string,
   currentSlug: string,
 ): string[] {
-  const matches = String(body ?? '').matchAll(/\[\[([a-z0-9]+(?:-[a-z0-9]+)*)\]\]/gu)
+  const matches = String(body ?? '').matchAll(/\[\[([^[\]]+)\]\]/gu)
   const relatedSlugs: string[] = []
 
   for (const match of matches) {
     const slug = match[1]?.trim()
-    if (!slug || slug === currentSlug) {
+    if (!slug || slug === currentSlug || !isKnowledgeSlug(slug)) {
       continue
     }
 

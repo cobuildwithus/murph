@@ -7,6 +7,8 @@ describe('query knowledge contract root surface', () => {
   it('re-exports the knowledge result schemas from the owner root barrel', () => {
     const schemaPairs = [
       ['knowledgeGetResultSchema', query.knowledgeGetResultSchema, knowledgeContracts.knowledgeGetResultSchema],
+      ['knowledgeGraphSearchHitSchema', query.knowledgeGraphSearchHitSchema, knowledgeContracts.knowledgeGraphSearchHitSchema],
+      ['knowledgeGraphSearchResultSchema', query.knowledgeGraphSearchResultSchema, knowledgeContracts.knowledgeGraphSearchResultSchema],
       ['knowledgeIndexRebuildResultSchema', query.knowledgeIndexRebuildResultSchema, knowledgeContracts.knowledgeIndexRebuildResultSchema],
       ['knowledgeLintProblemSchema', query.knowledgeLintProblemSchema, knowledgeContracts.knowledgeLintProblemSchema],
       ['knowledgeLintResultSchema', query.knowledgeLintResultSchema, knowledgeContracts.knowledgeLintResultSchema],

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   DERIVED_KNOWLEDGE_SEARCH_RESULT_FORMAT,
   knowledgeGetResultSchema,
+  knowledgeGraphSearchResultSchema,
   knowledgeIndexRebuildResultSchema,
   knowledgeLintResultSchema,
   knowledgeLogTailResultSchema,
@@ -28,7 +29,7 @@ describe("knowledge contracts", () => {
   it("parses the shared page and search result shapes from the public query entrypoint", () => {
     expect(knowledgePageReferenceSchema.parse(reference)).toEqual(reference);
 
-    const searchResult = knowledgeSearchResultSchema.parse({
+    const graphSearchResult = knowledgeGraphSearchResultSchema.parse({
       format: DERIVED_KNOWLEDGE_SEARCH_RESULT_FORMAT,
       hits: [
         {
@@ -38,15 +39,42 @@ describe("knowledge contracts", () => {
           snippet: "Example snippet.",
         },
       ],
-      pageType: "guide",
       query: "example",
-      status: "published",
       total: 1,
+    });
+
+    expect(graphSearchResult.hits[0]?.slug).toBe("example");
+
+    const searchResult = knowledgeSearchResultSchema.parse({
+      ...graphSearchResult,
+      pageType: "guide",
+      status: "published",
       vault: "/vault",
     });
 
     expect(searchResult.hits[0]?.slug).toBe("example");
     expect(searchResult.format).toBe(DERIVED_KNOWLEDGE_SEARCH_RESULT_FORMAT);
+  });
+
+  it("rejects invalid page slugs while keeping library and related slug arrays independently typed", () => {
+    expect(() =>
+      knowledgePageReferenceSchema.parse({
+        ...reference,
+        slug: "Invalid Slug",
+      }),
+    ).toThrow();
+
+    expect(
+      knowledgePageReferenceSchema.parse({
+        ...reference,
+        librarySlugs: ["Sleep Architecture"],
+        relatedSlugs: ["Sleep Quality"],
+      }),
+    ).toEqual({
+      ...reference,
+      librarySlugs: ["Sleep Architecture"],
+      relatedSlugs: ["Sleep Quality"],
+    });
   });
 
   it("parses the shared get, upsert, rebuild, log, and lint result shapes", () => {

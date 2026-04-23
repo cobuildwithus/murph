@@ -138,10 +138,16 @@ export async function upsertKnowledgePage(
     title: input.title,
   })
   const slug = normalizeKnowledgeSlug(input.slug ?? initialTitle)
+  const initialGraph = await readDerivedKnowledgeGraphWithIssues(input.vault)
+  const initialPage = requireUniqueKnowledgePageBySlug(
+    initialGraph.graph,
+    slug,
+    'upsert',
+  )
 
   return await withCanonicalResourceLocks({
     vaultRoot: input.vault,
-    resources: knowledgeUpsertResources(slug),
+    resources: knowledgeUpsertResources(slug, initialPage?.relativePath ?? null),
     run: async () => {
       const { graph } = await readDerivedKnowledgeGraphWithIssues(input.vault)
       const existingPage = requireUniqueKnowledgePageBySlug(graph, slug, 'upsert')
@@ -200,7 +206,8 @@ export async function upsertKnowledgePage(
         summary: summarizeKnowledgeBody(normalizedBody),
         title,
       })
-      const pageRelativePath = buildKnowledgePageRelativePath(slug)
+      const pageRelativePath =
+        existingPage?.relativePath ?? buildKnowledgePageRelativePath(slug)
 
       await saveText({
         vault: input.vault,
@@ -758,9 +765,19 @@ async function appendKnowledgeLogEntry(
   })
 }
 
-function knowledgeUpsertResources(slug: string) {
+function knowledgeUpsertResources(
+  slug: string,
+  existingPagePath: string | null,
+) {
+  const slugPath = buildKnowledgePageRelativePath(slug)
+  const pageResources = [canonicalPathResource(slugPath)]
+
+  if (existingPagePath && existingPagePath !== slugPath) {
+    pageResources.push(canonicalPathResource(existingPagePath))
+  }
+
   return [
-    canonicalPathResource(buildKnowledgePageRelativePath(slug)),
+    ...pageResources,
     canonicalPathResource(DERIVED_KNOWLEDGE_INDEX_PATH),
     canonicalPathResource(DERIVED_KNOWLEDGE_LOG_PATH),
   ]

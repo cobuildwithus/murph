@@ -4,37 +4,18 @@ import {
 } from './knowledge-model.ts'
 import { readDerivedKnowledgeGraph } from './knowledge-graph.ts'
 import type {
+  KnowledgeGraphSearchHit,
+  KnowledgeGraphSearchResult,
+} from './knowledge-contracts.ts'
+import type {
   DerivedKnowledgeGraph,
   DerivedKnowledgeNode,
 } from './knowledge-graph.ts'
 
-export interface DerivedKnowledgeSearchFilters {
+export interface KnowledgeGraphSearchFilters {
   limit?: number
   pageType?: string | null
   status?: string | null
-}
-
-export interface DerivedKnowledgeSearchHit {
-  compiledAt: string | null
-  librarySlugs: string[]
-  matchedTerms: string[]
-  pagePath: string
-  pageType: string | null
-  relatedSlugs: string[]
-  score: number
-  slug: string
-  snippet: string
-  sourcePaths: string[]
-  status: string | null
-  summary: string | null
-  title: string
-}
-
-export interface DerivedKnowledgeSearchResult {
-  format: typeof DERIVED_KNOWLEDGE_SEARCH_RESULT_FORMAT
-  hits: DerivedKnowledgeSearchHit[]
-  query: string
-  total: number
 }
 
 const DEFAULT_KNOWLEDGE_SEARCH_LIMIT = 20
@@ -68,8 +49,8 @@ interface DerivedKnowledgeSearchFieldScore {
 export function searchDerivedKnowledgeGraph(
   graph: DerivedKnowledgeGraph,
   query: string,
-  filters: DerivedKnowledgeSearchFilters = {},
-): DerivedKnowledgeSearchResult {
+  filters: KnowledgeGraphSearchFilters = {},
+): KnowledgeGraphSearchResult {
   const normalizedQuery = query.trim()
   const terms = tokenize(normalizedQuery)
 
@@ -89,7 +70,7 @@ export function searchDerivedKnowledgeGraph(
     .filter((node) => matchesKnowledgeSearchFilter(node.status, status))
     .map(materializeKnowledgeSearchDocument)
     .map((candidate) => scoreKnowledgeSearchDocument(candidate, normalizedQuery, terms))
-    .filter((entry): entry is DerivedKnowledgeSearchHit => entry !== null)
+    .filter((entry): entry is KnowledgeGraphSearchHit => entry !== null)
     .sort(compareKnowledgeSearchHits)
 
   return {
@@ -103,8 +84,8 @@ export function searchDerivedKnowledgeGraph(
 export async function searchDerivedKnowledgeVault(
   vaultRoot: string,
   query: string,
-  filters: DerivedKnowledgeSearchFilters = {},
-): Promise<DerivedKnowledgeSearchResult> {
+  filters: KnowledgeGraphSearchFilters = {},
+): Promise<KnowledgeGraphSearchResult> {
   const graph = await readDerivedKnowledgeGraph(vaultRoot)
   return searchDerivedKnowledgeGraph(graph, query, filters)
 }
@@ -147,7 +128,7 @@ function scoreKnowledgeSearchDocument(
   candidate: DerivedKnowledgeSearchableDocument,
   normalizedQuery: string,
   terms: readonly string[],
-): DerivedKnowledgeSearchHit | null {
+): KnowledgeGraphSearchHit | null {
   const normalizedPhrase = normalizedQuery.toLowerCase()
   const matchedTerms = new Set<string>()
   let score = 0
@@ -196,8 +177,8 @@ function scoreKnowledgeSearchDocument(
 }
 
 function compareKnowledgeSearchHits(
-  left: DerivedKnowledgeSearchHit,
-  right: DerivedKnowledgeSearchHit,
+  left: KnowledgeGraphSearchHit,
+  right: KnowledgeGraphSearchHit,
 ): number {
   if (left.score !== right.score) {
     return right.score - left.score

@@ -14,6 +14,7 @@ import {
 import {
   extractKnowledgeFirstHeading,
   humanizeKnowledgeTag,
+  isKnowledgeSlug,
   orderedUniqueStrings,
   summarizeKnowledgeBody,
 } from './knowledge-model.ts'
@@ -168,7 +169,7 @@ export function renderDerivedKnowledgeIndex(
 
     for (const node of nodes) {
       lines.push(
-        `- [${node.title}](pages/${path.posix.basename(node.relativePath)})${node.summary ? ` — ${node.summary}` : ''}`,
+        `- [${node.title}](${renderDerivedKnowledgePageHref(node.relativePath)})${node.summary ? ` — ${node.summary}` : ''}`,
       )
       const details: string[] = []
 
@@ -279,9 +280,9 @@ function renderDerivedKnowledgePageLink(
     return `\`${slug}\``
   }
 
-  return `[${target.title}](pages/${path.posix.basename(target.relativePath)})`
+  return `[${target.title}](${renderDerivedKnowledgePageHref(target.relativePath)})`
 }
 
-function isKnowledgeSlug(value: string): boolean {
-  return /^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(value)
+function renderDerivedKnowledgePageHref(relativePath: string): string {
+  return path.posix.relative(DERIVED_KNOWLEDGE_ROOT, relativePath)
 }
