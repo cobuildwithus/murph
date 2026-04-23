@@ -22,6 +22,7 @@ import type {
 import type { PollConnector } from "../src/connectors/types.ts";
 import { runInboxDaemon, runPollConnector } from "../src/kernel/daemon.ts";
 import type { InboxPipeline } from "../src/kernel/pipeline.ts";
+import { buildAttachmentId } from "../src/shared.ts";
 
 test("runtime and package barrels expose the same inbox runtime seam", async () => {
   assert.equal(runtimeSurface.openInboxRuntime, indexSurface.openInboxRuntime);
@@ -65,7 +66,7 @@ test("sqlite runtime mutation head follows the latest capture state and created-
       text: "alpha",
       attachments: [
         {
-          attachmentId: "att-cap-alpha-01",
+          attachmentId: buildAttachmentId("cap-alpha", 1),
           ordinal: 1,
           kind: "document",
           mime: "application/pdf",
@@ -225,6 +226,136 @@ test("canonical inbox record builders sanitize attachment paths and keep raw ref
     buildInboxCaptureLedgerPath({ input: inbound }),
     "ledger/inbox-captures/2026/2026-03.jsonl",
   );
+});
+
+test("sqlite runtime replay replaces stale external-id rows with the canonical captureId and ignores unchanged replays", async () => {
+  const vaultRoot = await makeTempDirectory("murph-inbox-runtime-replay-identity");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+
+  const runtime = await runtimeSurface.openInboxRuntime({ vaultRoot });
+  try {
+    const stale = createIndexedCaptureFixture({
+      captureId: "cap-stale",
+      source: "telegram",
+      accountId: "bot",
+      externalId: "update:collision",
+      occurredAt: "2026-03-13T09:00:00.000Z",
+      text: "stale runtime row",
+      attachments: [
+        {
+          attachmentId: buildAttachmentId("cap-stale", 1),
+          ordinal: 1,
+          kind: "document",
+          mime: "application/pdf",
+          fileName: "stale.pdf",
+          storedPath: "raw/inbox/telegram/bot/stale.pdf",
+          sha256: "stale-sha",
+          byteSize: 5,
+        },
+      ],
+    });
+    const canonical = createIndexedCaptureFixture({
+      captureId: "cap-canonical",
+      source: "telegram",
+      accountId: "bot",
+      externalId: "update:collision",
+      occurredAt: "2026-03-13T09:00:00.000Z",
+      text: "canonical replay row",
+      attachments: [
+        {
+          attachmentId: buildAttachmentId("cap-canonical", 1),
+          ordinal: 1,
+          kind: "document",
+          mime: "application/pdf",
+          fileName: "canonical.pdf",
+          storedPath: "raw/inbox/telegram/bot/canonical.pdf",
+          sha256: "canonical-sha",
+          byteSize: 9,
+        },
+      ],
+    });
+
+    runtime.upsertCaptureIndex(stale);
+    const staleHead = await runtimeSurface.readInboxCaptureMutationHead(vaultRoot);
+    assert.ok(staleHead > 0);
+    assert.equal(runtime.findByExternalId("telegram", "bot", "update:collision")?.captureId, "cap-stale");
+
+    runtime.upsertCaptureIndex(canonical);
+    const repairedHead = await runtimeSurface.readInboxCaptureMutationHead(vaultRoot);
+    assert.ok(repairedHead > staleHead);
+    assert.equal(runtime.getCapture("cap-stale"), null);
+
+    const repaired = runtime.getCapture("cap-canonical");
+    assert.ok(repaired);
+    assert.equal(repaired.captureId, "cap-canonical");
+    assert.equal(repaired.text, "canonical replay row");
+    assert.deepEqual(
+      repaired.attachments.map((attachment) => attachment.attachmentId),
+      [buildAttachmentId("cap-canonical", 1)],
+    );
+    assert.equal(
+      runtime.findByExternalId("telegram", "bot", "update:collision")?.captureId,
+      "cap-canonical",
+    );
+    assert.deepEqual(
+      runtime.listCaptures({
+        source: "telegram",
+        accountId: "bot",
+        limit: 10,
+      }).map((capture) => capture.captureId),
+      ["cap-canonical"],
+    );
+
+    runtime.upsertCaptureIndex(canonical);
+    const noOpHead = await runtimeSurface.readInboxCaptureMutationHead(vaultRoot);
+    assert.equal(noOpHead, repairedHead);
+    assert.deepEqual(
+      await runtimeSurface.listInboxCaptureMutations({
+        vaultRoot,
+        afterCursor: repairedHead,
+        limit: 10,
+      }),
+      [],
+    );
+  } finally {
+    runtime.close();
+  }
+});
+
+test("sqlite runtime rejects attachment ids that do not belong to the chosen capture id", async () => {
+  const vaultRoot = await makeTempDirectory("murph-inbox-runtime-attachment-identity");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+
+  const runtime = await runtimeSurface.openInboxRuntime({ vaultRoot });
+  try {
+    const capture = createIndexedCaptureFixture({
+      captureId: "cap-owning",
+      source: "telegram",
+      accountId: "bot",
+      externalId: "update:bad-attachment-id",
+      occurredAt: "2026-03-13T09:30:00.000Z",
+      text: "bad attachment id",
+      attachments: [
+        {
+          attachmentId: buildAttachmentId("cap-other", 1),
+          ordinal: 1,
+          kind: "document",
+          mime: "application/pdf",
+          fileName: "bad.pdf",
+          storedPath: "raw/inbox/telegram/bot/bad.pdf",
+          sha256: "bad-sha",
+          byteSize: 7,
+        },
+      ],
+    });
+
+    assert.throws(
+      () => runtime.upsertCaptureIndex(capture),
+      /Inbox runtime requires attachment ids derived from capture "cap-owning"/,
+    );
+  } finally {
+    runtime.close();
+  }
 });
 
 test("runPollConnector returns an aggregate error when restart cleanup fails after a watch error", async () => {
