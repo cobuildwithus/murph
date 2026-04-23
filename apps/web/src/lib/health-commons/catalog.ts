@@ -4,7 +4,7 @@ import {
   type HealthCommonsCatalogEntity,
   type HealthCommonsEntityType,
   type HealthCommonsRelationType,
-} from "@murphai/contracts/health-commons";
+} from "@murphai/contracts";
 import healthCommonsCatalogJson from "@murphai/health-commons/generated/catalog.json";
 
 export type HealthCommonsEntity = HealthCommonsCatalogEntity;

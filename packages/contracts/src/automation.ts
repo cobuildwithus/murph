@@ -1,9 +1,9 @@
 import * as z from "zod";
 
-import { CONTRACT_SCHEMA_VERSION } from "./constants.ts";
+import { CONTRACT_SCHEMA_VERSION, FRONTMATTER_DOC_TYPES } from "./constants.ts";
 
 export const AUTOMATION_SCHEMA_VERSION = CONTRACT_SCHEMA_VERSION.automationFrontmatter;
-export const AUTOMATION_DOC_TYPE = "automation" as const;
+export const AUTOMATION_DOC_TYPE = FRONTMATTER_DOC_TYPES.automation;
 
 export const automationStatusValues = [
   "active",

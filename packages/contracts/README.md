@@ -9,8 +9,9 @@ Owns the frozen vault contracts for the Murph baseline:
 
 Surface split:
 
-- `@murphai/contracts` exports the canonical Zod-first runtime surface.
-- `@murphai/contracts/schemas` exports the derived JSON Schema objects for artifact consumers.
+- `@murphai/contracts` is the primary JS API and exports the canonical Zod-first runtime surface.
+- `@murphai/contracts/schemas` remains the dedicated artifact-consumer subpath for derived JSON Schema objects.
+- `@murphai/contracts/generated/*` exposes the emitted schema artifact files.
 
 Package-local commands:
 

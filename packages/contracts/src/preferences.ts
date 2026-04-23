@@ -31,6 +31,7 @@ export const preferencesDocumentSchema = z
   })
   .strict();
 
+/** @deprecated Use preferencesDocumentSchema. */
 export const validPreferencesDocumentSchema = preferencesDocumentSchema;
 
 export type WorkoutUnitPreferences = z.infer<typeof workoutUnitPreferencesSchema>;

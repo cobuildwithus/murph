@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   healthCommonsCatalogSchema,
   type HealthCommonsCatalog,
-} from "@murphai/contracts/health-commons";
+} from "@murphai/contracts";
 import healthCommonsCatalogJson from "@murphai/health-commons/generated/catalog.json";
 
 import {
