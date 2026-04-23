@@ -1,13 +1,18 @@
 import { describe, expect, it } from "vitest";
 
-import { CONTRACT_SCHEMA_VERSION } from "../src/constants.ts";
+import {
+  CONTRACT_SCHEMA_VERSION,
+  FRONTMATTER_DOC_TYPES,
+} from "../src/constants.ts";
 import {
   createDefaultMemoryFrontmatter,
   createEmptyMemoryDocument,
+  createMemoryRecordId,
   parseMemoryDocument,
   renderMemoryDocument,
   upsertMemoryRecord,
 } from "../src/memory.ts";
+import { isContractId } from "../src/ids.ts";
 import {
   goalUpsertPayloadSchema,
   protocolUpsertPayloadSchema,
@@ -52,11 +57,12 @@ describe("memory parse and render coverage", () => {
     });
 
     expect(parsed.frontmatter).toEqual({
-      docType: "murph.memory.v1",
-      schemaVersion: 1,
+      docType: FRONTMATTER_DOC_TYPES.memory,
+      schemaVersion: CONTRACT_SCHEMA_VERSION.memoryFrontmatter,
       title: "Memory notes",
       updatedAt: "2026-04-08T02:05:00.000Z",
     });
+    expect(parsed.records.every((record) => isContractId(record.id, "mem"))).toBe(true);
     expect(parsed.records).toEqual([
       expect.objectContaining({
         section: "Identity",
@@ -71,6 +77,32 @@ describe("memory parse and render coverage", () => {
         sourcePath: "bank/memory.md",
       }),
     ]);
+  });
+
+  it("normalizes legacy memory frontmatter into the shared canonical dialect on read", () => {
+    const parsed = parseMemoryDocument({
+      sourcePath: "bank/memory.md",
+      text: [
+        "---",
+        "docType: murph.memory.v1",
+        "schemaVersion: 1",
+        "title: Memory",
+        "updatedAt: 2026-04-08T03:00:00.000Z",
+        "---",
+        "# Memory",
+        "",
+        "## Identity",
+        '- Uses Murph daily <!-- murph-memory:{"id":"mem_0123456789ABCDEFGHJKMNPQRS","createdAt":"2026-04-08T02:55:00.000Z","updatedAt":"2026-04-08T03:00:00.000Z"} -->',
+      ].join("\n"),
+    });
+
+    expect(parsed.frontmatter).toEqual({
+      docType: FRONTMATTER_DOC_TYPES.memory,
+      schemaVersion: CONTRACT_SCHEMA_VERSION.memoryFrontmatter,
+      title: "Memory",
+      updatedAt: "2026-04-08T03:00:00.000Z",
+    });
+    expect(parsed.records[0]?.id).toBe("mem_0123456789ABCDEFGHJKMNPQRS");
   });
 
   it("parses CRLF documents, ignores invalid metadata, and rejects invalid sections or blank memory text", () => {
@@ -105,6 +137,10 @@ describe("memory parse and render coverage", () => {
         sourcePath: "vault/custom-memory.md",
       }),
     ]);
+    expect(isContractId(createMemoryRecordId({
+      section: "Preferences",
+      text: "Prefers direct answers",
+    }), "mem")).toBe(true);
     expect(parsed.records[0]?.id).toMatch(/^mem_[0-9a-f]{16}$/u);
 
     expect(() =>
@@ -112,8 +148,8 @@ describe("memory parse and render coverage", () => {
         sourcePath: "bank/memory.md",
         text: [
           "---",
-          "docType: murph.memory.v1",
-          "schemaVersion: 1",
+          `docType: ${FRONTMATTER_DOC_TYPES.memory}`,
+          `schemaVersion: ${CONTRACT_SCHEMA_VERSION.memoryFrontmatter}`,
           "title: Memory",
           "updatedAt: 2026-04-08T03:00:00.000Z",
           "---",
@@ -124,6 +160,14 @@ describe("memory parse and render coverage", () => {
         ].join("\n"),
       }),
     ).toThrow('Unknown memory section "Unknown".');
+
+    expect(() =>
+      upsertMemoryRecord(createEmptyMemoryDocument(), {
+        recordId: "mem_0123456789abcdef",
+        section: "Context",
+        text: "Should stay canonical",
+      }),
+    ).toThrow("Memory record id must match mem_<ULID>.");
 
     expect(() =>
       upsertMemoryRecord(createEmptyMemoryDocument(), {

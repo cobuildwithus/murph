@@ -189,7 +189,7 @@ The placeholder grammar above applies to the frozen health nouns listed below wh
 
 ## Capability Bundles
 
-The command surface is organized around reusable capability bundles, not a payload-first grammar plus a growing exception list. The shared capability taxonomy lives in `packages/contracts/src/command-capabilities.ts`.
+The command surface is organized around reusable capability bundles, not a payload-first grammar plus a growing exception list. The shared bundle, noun, and top-level alias taxonomy summarized in this section lives in `packages/contracts/src/command-capabilities.ts`.
 
 - `readable`: `show | list`
 - `payloadCrud`: `scaffold | upsert | show | list`
@@ -209,20 +209,20 @@ The command surface is organized around reusable capability bundles, not a paylo
 - `protocol` is primarily payload CRUD and also exposes `stop` as an id-preserving lifecycle helper.
 - `blood-test` is a dedicated user-facing payload-CRUD noun backed by canonical `kind: "test"` records on the shared `ledger/events` seam; it remains a projected event view rather than a separate query/storage family.
 - `supplement` is a protocol-backed payload-CRUD noun for branded supplement products and also exposes `stop` plus a derived `compound` ledger that rolls overlapping active ingredients into canonical compound rows.
-- `document` and `meal` are artifact-import nouns.
+- `document` exposes `import | edit | show | list | manifest`, and `meal` exposes `add | edit | show | list | manifest`.
 - `workout` is a quick-capture noun layered on top of canonical `activity_session` events; `workout format` adds only a thin saved-defaults layer under `bank/workout-formats/*.md` and still feeds the same canonical event path rather than introducing a competing workout subsystem.
 - `intervention` is a quick-capture noun layered on top of canonical `intervention_session` events; it intentionally does not introduce a separate intervention record family or follow-up read grammar.
-- `intake` is an artifact-import noun that also exposes `raw` and `project`.
-- `samples` composes artifact import with batch inspection.
+- `intake` exposes `import | show | list | manifest | raw | project`.
+- `samples` exposes `add | import-csv | show | list | batch show | batch list`.
 - `experiment` is a lifecycle noun.
 - `journal` is a date-addressed document noun.
-- `vault` composes readable and derived/admin capabilities, plus `update` for metadata mutation.
-- `export` composes readable and derived/admin capabilities.
-- `audit` is a readable noun with `tail` as its stream-style follow-up.
+- `vault` exposes `show | stats | repair | update`.
+- `export` exposes `create | show | list | materialize | prune`.
+- `audit` exposes `show | list | tail`.
 - `inbox` is a runtime-control noun, including attachment inspection, deterministic promotion flows, and audited model-routing helpers.
 - `assistant` is a provider-backed orchestration noun for local chat turns, outbound delivery, session inspection, runtime diagnostics, and always-on inbox triage; it stores only runtime metadata under `vault/.runtime/operations/assistant/**`, uses explicit conversation bindings for session reuse, coalesces adjacent pending inbound messages from the same conversation lane into one auto-reply turn before advancing the reply cursor, can opt into self-authored auto-reply plus age-based session rollover for dedicated self-chat threads, treats `--deliveryTarget` as a one-send override, only fires due canonical automations while `assistant run` is active for the vault, and delegates canonical promotions back through inbox/core boundaries.
-- `memory` is a canonical product noun backed by the single curated `bank/memory.md` document; operators inspect the whole document with `show` and mutate individual records with `upsert` or `forget`.
-- `automation` is a canonical product noun backed by `bank/automations/*.md`.
+- `memory` is a canonical product noun backed by the single curated `bank/memory.md` document; operators inspect the whole document with `show` and mutate individual records with `upsert`, `update`, or `forget`. Canonical `memoryId` arguments use `mem_<ULID>` ids, while legacy hash-shaped ids remain readable for existing persisted memory comments.
+- `automation` is a canonical product noun backed by `bank/automations/*.md` and exposes the same payload-CRUD shape as other scaffold/upsert/show/list nouns.
 - Top-level `chat` is a shorthand alias for `assistant chat`; it shares the same prompt/options/output contract so installed `murph chat` discovery stays truthful.
 - Top-level `status` is a shorthand alias for `assistant status`; it shares the same option/output contract so installed `murph status` discovery stays truthful.
 - Top-level `doctor` is a shorthand alias for `assistant doctor`; it shares the same option/output contract so installed `murph doctor` discovery stays truthful.

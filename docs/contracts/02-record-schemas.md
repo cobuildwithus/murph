@@ -8,6 +8,7 @@ Canonical Zod contract sources live in `packages/contracts/src/zod.ts`. The JSON
 
 Canonical record ids and importer batch ids use one format: `<prefix>_<ULID>`.
 Derived export-pack directories use a path-safe pack name and are not canonical vault record ids.
+Legacy `bank/memory.md` comment metadata may still contain historical `mem_<16 lowercase hex>` ids on read, but new canonical memory ids emitted by write helpers remain `mem_<ULID>`.
 
 | Family | Prefix | Notes |
 | --- | --- | --- |
@@ -111,7 +112,8 @@ Sample records may also carry optional `externalRef` provenance with the same sh
 - Workout-format frontmatter (vault-local saved defaults, not a canonical event family):
   `schemaVersion`, `docType`, `workoutFormatId`, `slug`, `title`, `status`, `activityType`, required `template`, optional `durationMinutes`, optional `distanceKm`, optional `templateText`
 - Memory frontmatter:
-  `docType`, `schemaVersion`, `title`, `updatedAt`
+  `docType: "memory"`, `schemaVersion: "murph.frontmatter.memory.v1"`, `title`, `updatedAt`
+  Legacy `docType: "murph.memory.v1"` plus `schemaVersion: 1` remain read-compatible only.
 - Goal frontmatter:
   `schemaVersion`, `docType`, `goalId`, `slug`, `status`, `title`
 - Condition frontmatter:
