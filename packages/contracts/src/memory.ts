@@ -2,11 +2,21 @@ import { createHash } from "node:crypto";
 
 import { z } from "zod";
 
+import {
+  CONTRACT_SCHEMA_VERSION,
+  FRONTMATTER_DOC_TYPES,
+  ID_PREFIXES,
+} from "./constants.ts";
 import { parseFrontmatterDocument } from "./frontmatter.ts";
+import {
+  generateContractId,
+  isContractId,
+} from "./ids.ts";
+import { withContractMetadata } from "./schema-metadata.ts";
 
 export const memoryDocumentRelativePath = "bank/memory.md";
-export const memoryDocumentDocType = "murph.memory.v1";
-export const memoryDocumentSchemaVersion = 1;
+export const memoryDocumentDocType = FRONTMATTER_DOC_TYPES.memory;
+export const memoryDocumentSchemaVersion = CONTRACT_SCHEMA_VERSION.memoryFrontmatter;
 
 export const memorySectionValues = [
   "Identity",
@@ -17,26 +27,63 @@ export const memorySectionValues = [
 
 export const memorySectionSchema = z.enum(memorySectionValues);
 
+const LEGACY_MEMORY_DOCUMENT_DOC_TYPE = "murph.memory.v1";
+const LEGACY_MEMORY_DOCUMENT_SCHEMA_VERSION = 1;
+const LEGACY_MEMORY_RECORD_ID_REGEX = /^mem_[0-9a-f]{16}$/u;
+
+const canonicalMemoryRecordIdSchema = z.string().refine(
+  (value) => isContractId(value, ID_PREFIXES.memory),
+  {
+    message: "Memory record id must match mem_<ULID>.",
+  },
+);
+
+const readableMemoryRecordIdSchema = z.string().refine(
+  (value) =>
+    isContractId(value, ID_PREFIXES.memory) || LEGACY_MEMORY_RECORD_ID_REGEX.test(value),
+  {
+    message: "Memory record id must match mem_<ULID> or the legacy mem_<16 lowercase hex> format.",
+  },
+);
+
 export const memoryRecordMetadataSchema = z
   .object({
-    id: z.string().min(1),
+    id: readableMemoryRecordIdSchema,
     createdAt: z.string().min(1).nullable().default(null),
     updatedAt: z.string().min(1).nullable().default(null),
   })
   .strict();
 
-export const memoryDocumentFrontmatterSchema = z
+export const memoryDocumentFrontmatterSchema = withContractMetadata(
+  z
+    .object({
+      docType: z.literal(memoryDocumentDocType),
+      schemaVersion: z.literal(memoryDocumentSchemaVersion),
+      title: z.string().min(1).default("Memory"),
+      updatedAt: z.string().min(1),
+    })
+    .strict(),
+  "@murphai/contracts/frontmatter-memory.schema.json",
+  "Murph Memory Frontmatter",
+);
+
+const legacyMemoryDocumentFrontmatterSchema = z
   .object({
-    docType: z.literal(memoryDocumentDocType),
-    schemaVersion: z.literal(memoryDocumentSchemaVersion),
+    docType: z.literal(LEGACY_MEMORY_DOCUMENT_DOC_TYPE),
+    schemaVersion: z.literal(LEGACY_MEMORY_DOCUMENT_SCHEMA_VERSION),
     title: z.string().min(1).default("Memory"),
     updatedAt: z.string().min(1),
   })
   .strict();
 
+const readableMemoryDocumentFrontmatterSchema = z.union([
+  memoryDocumentFrontmatterSchema,
+  legacyMemoryDocumentFrontmatterSchema,
+]);
+
 export const memoryRecordSchema = z
   .object({
-    id: z.string().min(1),
+    id: readableMemoryRecordIdSchema,
     section: memorySectionSchema,
     text: z.string().min(1),
     createdAt: z.string().min(1).nullable(),
@@ -112,7 +159,9 @@ export function createEmptyMemoryDocument(now = new Date()): MemoryDocument {
 
 export function parseMemoryDocument(input: ParseMemoryDocumentInput): MemoryDocument {
   const parsed = parseFrontmatterDocument(input.text);
-  const frontmatter = memoryDocumentFrontmatterSchema.parse(parsed.attributes);
+  const frontmatter = normalizeMemoryFrontmatter(
+    readableMemoryDocumentFrontmatterSchema.parse(parsed.attributes),
+  );
   const records = parseMemoryDocumentBody(parsed.body, input.sourcePath ?? "bank/memory.md");
 
   return {
@@ -131,8 +180,10 @@ export function renderMemoryDocument(input: RenderMemoryDocumentInput): string {
 export function createMemoryRecordId(
   input: Pick<UpsertMemoryRecordInput, "section" | "text">,
 ): string {
-  const normalized = [input.section, normalizeMemoryText(input.text)].join("\u0000");
-  return `mem_${createHash("sha1").update(normalized).digest("hex").slice(0, 16)}`;
+  memorySectionSchema.parse(input.section);
+  normalizeMemoryText(input.text);
+
+  return generateContractId(ID_PREFIXES.memory);
 }
 
 export function upsertMemoryRecord(
@@ -144,7 +195,8 @@ export function upsertMemoryRecord(
   record: MemoryRecord;
 } {
   const now = (next.now ?? new Date()).toISOString();
-  const nextRecordId = normalizeMemoryRecordId(next.recordId ?? null) ?? createMemoryRecordId(next);
+  const nextRecordId =
+    normalizeMemoryRecordId(input.records, next.recordId ?? null) ?? createMemoryRecordId(next);
   const existingIndex = input.records.findIndex((record) => record.id === nextRecordId);
   const existingRecord = existingIndex >= 0 ? input.records[existingIndex] ?? null : null;
   const record: MemoryRecord = memoryRecordSchema.parse({
@@ -277,7 +329,7 @@ function parseMemoryRecordLine(input: {
 
   const text = normalizeMemoryText(match.groups.text);
   const metadata = match.groups.metadata ? parseMemoryRecordMetadata(match.groups.metadata) : null;
-  const id = metadata?.id ?? createMemoryRecordId({
+  const id = metadata?.id ?? createLegacyMemoryRecordId({
     section: input.section,
     text,
   });
@@ -360,9 +412,20 @@ function normalizeMemorySection(value: string): MemorySection {
   throw new Error(`Unknown memory section "${value}".`);
 }
 
-function normalizeMemoryRecordId(value: string | null): string | null {
+function normalizeMemoryRecordId(
+  records: readonly MemoryRecord[],
+  value: string | null,
+): string | null {
   const normalized = value?.trim() ?? "";
-  return normalized.length > 0 ? normalized : null;
+  if (normalized.length === 0) {
+    return null;
+  }
+
+  if (records.some((record) => record.id === normalized)) {
+    return readableMemoryRecordIdSchema.parse(normalized);
+  }
+
+  return canonicalMemoryRecordIdSchema.parse(normalized);
 }
 
 function normalizeMemoryText(value: string): string {
@@ -389,4 +452,28 @@ function findMemoryInsertionIndex(
   }
 
   return insertionIndex;
+}
+
+function normalizeMemoryFrontmatter(
+  frontmatter: z.infer<typeof readableMemoryDocumentFrontmatterSchema>,
+): MemoryDocumentFrontmatter {
+  if (
+    frontmatter.docType === memoryDocumentDocType &&
+    frontmatter.schemaVersion === memoryDocumentSchemaVersion
+  ) {
+    return frontmatter;
+  }
+
+  return memoryDocumentFrontmatterSchema.parse({
+    ...frontmatter,
+    docType: memoryDocumentDocType,
+    schemaVersion: memoryDocumentSchemaVersion,
+  });
+}
+
+function createLegacyMemoryRecordId(
+  input: Pick<UpsertMemoryRecordInput, "section" | "text">,
+): string {
+  const normalized = [input.section, normalizeMemoryText(input.text)].join("\u0000");
+  return `${ID_PREFIXES.memory}_${createHash("sha1").update(normalized).digest("hex").slice(0, 16)}`;
 }

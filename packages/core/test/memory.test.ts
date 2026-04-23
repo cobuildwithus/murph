@@ -1,6 +1,11 @@
 import os from "node:os";
 import path from "node:path";
-import { mkdtemp, rm } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 
 import { afterEach, describe, expect, test, vi } from "vitest";
 
@@ -16,8 +21,10 @@ import {
   upsertMemory,
 } from "../src/memory.ts";
 import {
+  CONTRACT_SCHEMA_VERSION,
+  FRONTMATTER_DOC_TYPES,
   createEmptyMemoryDocument,
-  createMemoryRecordId,
+  isContractId,
   renderMemoryDocument,
 } from "@murphai/contracts";
 import * as fsModule from "../src/fs.ts";
@@ -59,8 +66,8 @@ describe("core memory package wrapper", () => {
         sourcePath: "bank/memory.md",
         updatedAt: null,
         frontmatter: {
-          docType: "murph.memory.v1",
-          schemaVersion: 1,
+          docType: FRONTMATTER_DOC_TYPES.memory,
+          schemaVersion: CONTRACT_SCHEMA_VERSION.memoryFrontmatter,
           title: "Memory",
           updatedAt: now.toISOString(),
         },
@@ -116,12 +123,10 @@ describe("core memory package wrapper", () => {
       section: "Context",
       text: "  Prefers concise answers  ",
     });
-    const expectedRecordId = createMemoryRecordId({
-      section: "Context",
-      text: "Prefers concise answers",
-    });
+    const expectedRecordId = inserted.record.id;
 
     expect(inserted.created).toBe(true);
+    expect(isContractId(expectedRecordId, "mem")).toBe(true);
     expect(inserted.record).toMatchObject({
       createdAt: createdAt.toISOString(),
       id: expectedRecordId,
@@ -264,30 +269,95 @@ describe("core memory package wrapper", () => {
     ).rejects.toThrow('Memory record "mem_missing" does not exist.');
   });
 
+  test("reads legacy on-disk memory docs and preserves legacy ids through update and forget", async () => {
+    const vaultRoot = await makeVaultRoot();
+    const legacyRecordId = "mem_0123456789abcdef";
+    const legacyDocumentPath = path.join(vaultRoot, "bank/memory.md");
+
+    await mkdir(path.dirname(legacyDocumentPath), { recursive: true });
+    await writeFile(
+      legacyDocumentPath,
+      [
+        "---",
+        "docType: murph.memory.v1",
+        "schemaVersion: 1",
+        "title: Memory",
+        "updatedAt: 2026-04-08T00:00:00.000Z",
+        "---",
+        "# Memory",
+        "",
+        "## Preferences",
+        `- Prefers direct answers <!-- murph-memory:{\"id\":\"${legacyRecordId}\",\"createdAt\":\"2026-04-08T00:00:00.000Z\",\"updatedAt\":\"2026-04-08T00:00:00.000Z\"} -->`,
+      ].join("\n"),
+      "utf8",
+    );
+
+    const snapshot = await readMemoryDocument(vaultRoot);
+    expect(snapshot.frontmatter).toMatchObject({
+      docType: FRONTMATTER_DOC_TYPES.memory,
+      schemaVersion: CONTRACT_SCHEMA_VERSION.memoryFrontmatter,
+    });
+    expect(snapshot.records).toHaveLength(1);
+    expect(snapshot.records[0]?.id).toBe(legacyRecordId);
+
+    const updated = await updateMemory(vaultRoot, {
+      now: new Date("2026-04-08T00:05:00.000Z"),
+      recordId: legacyRecordId,
+      section: "Identity",
+      text: "Uses Murph daily",
+    });
+
+    expect(updated.record).toMatchObject({
+      id: legacyRecordId,
+      section: "Identity",
+      text: "Uses Murph daily",
+      updatedAt: "2026-04-08T00:05:00.000Z",
+    });
+    expect(updated.document.markdown).toContain("docType: memory");
+    expect(updated.document.markdown).toContain(
+      "schemaVersion: murph.frontmatter.memory.v1",
+    );
+
+    const forgotten = await forgetMemory(vaultRoot, {
+      recordId: legacyRecordId,
+    });
+    expect(forgotten.existed).toBe(true);
+    expect(forgotten.record?.id).toBe(legacyRecordId);
+    expect(await getMemoryRecord(vaultRoot, legacyRecordId)).toBeNull();
+  });
+
   test("fails closed when post-write read-back omits the upserted memory record", async () => {
     const vaultRoot = await makeVaultRoot();
     const now = new Date("2026-04-08T01:15:00.000Z");
     const section = "Context";
     const text = "Remember the resource lock runtime.";
-    const recordId = createMemoryRecordId({ section, text });
     const readSpy = vi
       .spyOn(fsModule, "readUtf8File")
       .mockResolvedValue(renderMemoryDocument({ document: createEmptyMemoryDocument(now) }));
 
+    let error: Error | null = null;
     try {
-      await expect(
-        upsertMemory(vaultRoot, {
-          now,
-          section,
-          text,
-        }),
-      ).rejects.toThrow(`Memory record "${recordId}" was not found after upsert.`);
+      await upsertMemory(vaultRoot, {
+        now,
+        section,
+        text,
+      });
+    } catch (caught) {
+      error = caught instanceof Error ? caught : new Error(String(caught));
     } finally {
       readSpy.mockRestore();
     }
 
-    expect(await getMemoryRecord(vaultRoot, recordId)).toMatchObject({
-      id: recordId,
+    expect(error).not.toBeNull();
+    const persistedSnapshot = await readMemoryDocument(vaultRoot);
+    const persistedRecord = persistedSnapshot.records[0] ?? null;
+    expect(persistedRecord).not.toBeNull();
+    expect(isContractId(persistedRecord?.id ?? "", "mem")).toBe(true);
+    expect(error?.message).toBe(
+      `Memory record "${persistedRecord?.id ?? ""}" was not found after upsert.`,
+    );
+
+    expect(persistedRecord).toMatchObject({
       section,
       text,
     });

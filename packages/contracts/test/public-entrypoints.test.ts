@@ -173,10 +173,11 @@ describe("@murphai/contracts public entrypoint", () => {
       section: "Context",
       text: "  Structured answers only  ",
     });
-    expect(createMemoryRecordId({
+    expect(contracts.isContractId(inserted.record.id, "mem")).toBe(true);
+    expect(contracts.isContractId(createMemoryRecordId({
       section: "Context",
       text: "Structured answers only",
-    })).toBe(inserted.record.id);
+    }), "mem")).toBe(true);
     expect(buildMemoryPromptBlock(inserted.document)).toContain("Context:");
     expect(renderMemoryDocument({ document: inserted.document })).toContain("# Memory");
     expect(parseMemoryDocument({

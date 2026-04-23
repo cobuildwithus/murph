@@ -12,6 +12,7 @@ import {
   hasInvalidEventLifecycle,
   parseEventLifecycle,
 } from "../src/event-lifecycle.ts";
+import { isContractId } from "../src/ids.ts";
 import {
   buildMemoryPromptBlock,
   createEmptyMemoryDocument,
@@ -92,7 +93,7 @@ describe("automation contract seams", () => {
 });
 
 describe("memory contract seams", () => {
-  it("upserts records deterministically, preserves createdAt, and renders prompt sections in canonical order", () => {
+  it("upserts records with canonical ids, preserves createdAt, and renders prompt sections in canonical order", () => {
     const createdAt = new Date("2026-04-08T00:00:00.000Z");
     const revisedAt = new Date("2026-04-08T00:05:00.000Z");
     const instructionsAt = new Date("2026-04-08T00:10:00.000Z");
@@ -103,15 +104,15 @@ describe("memory contract seams", () => {
       section: "Context",
       text: "  Likes   concise  answers  ",
     });
-    const expectedFirstRecordId = createMemoryRecordId({
-      section: "Context",
-      text: "Likes concise answers",
-    });
 
     expect(firstInsert.created).toBe(true);
+    expect(isContractId(firstInsert.record.id, "mem")).toBe(true);
+    expect(isContractId(createMemoryRecordId({
+      section: "Context",
+      text: "Likes concise answers",
+    }), "mem")).toBe(true);
     expect(firstInsert.record).toMatchObject({
       createdAt: "2026-04-08T00:00:00.000Z",
-      id: expectedFirstRecordId,
       section: "Context",
       sourceLine: 1,
       sourcePath: "bank/memory.md",
@@ -129,7 +130,7 @@ describe("memory contract seams", () => {
     expect(revisedInsert.created).toBe(false);
     expect(revisedInsert.record).toMatchObject({
       createdAt: "2026-04-08T00:00:00.000Z",
-      id: expectedFirstRecordId,
+      id: firstInsert.record.id,
       section: "Identity",
       sourceLine: 1,
       sourcePath: "bank/memory.md",

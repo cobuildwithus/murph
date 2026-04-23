@@ -7,6 +7,8 @@ import {
   contractIdMaxLength,
   GENERIC_CONTRACT_ID_REGEX,
   GENERIC_CONTRACT_ID_PATTERN,
+  generateContractId,
+  generateUlid,
   idPattern,
   isContractId,
   ULID_BODY_LENGTH,
@@ -45,4 +47,13 @@ test("assertContractId returns valid ids and throws prefix-aware errors for inva
     () => assertContractId(42, undefined, "recordId"),
     /recordId must match prefix_ulid/u,
   );
+});
+
+test("id generation helpers emit canonical ULID-backed contract ids", () => {
+  const ulid = generateUlid(1_711_000_000_000);
+  const memoryId = generateContractId("mem", 1_711_000_000_000);
+
+  assert.equal(ULID_BODY_REGEX.test(ulid), true);
+  assert.equal(isContractId(memoryId, "mem"), true);
+  assert.equal(memoryId.startsWith("mem_"), true);
 });
