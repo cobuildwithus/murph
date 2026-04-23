@@ -77,7 +77,7 @@ describe('assistant onboarding prompt injection', () => {
     )
 
     expect(plan.firstContactStateDocIds).toEqual(stateDocIds)
-    expect(plan.earlySessionOnboardingEligible).toBe(true)
+    expect(plan.onboardingGuidanceOpen).toBe(true)
   })
 
   it('keeps onboarding eligible for a later session in the same vault until it is completed', async () => {
@@ -112,7 +112,7 @@ describe('assistant onboarding prompt injection', () => {
     )
 
     expect(plan.firstContactStateDocIds.length).toBeGreaterThan(0)
-    expect(plan.earlySessionOnboardingEligible).toBe(true)
+    expect(plan.onboardingGuidanceOpen).toBe(true)
   })
 
   it('stops onboarding eligibility once the shared onboarding state is completed', async () => {
@@ -141,29 +141,29 @@ describe('assistant onboarding prompt injection', () => {
       resolved,
     )
 
-    expect(plan.earlySessionOnboardingEligible).toBe(false)
+    expect(plan.onboardingGuidanceOpen).toBe(false)
   })
 
-  it('preserves native resume even when the first-session onboarding gate is otherwise eligible', () => {
+  it('preserves native resume while keeping onboarding guidance open on conversation turns', () => {
     expect(
       resolveAssistantProviderTurnContinuityPlan({
         candidateResumeProviderSessionId: 'provider-session-1',
-        earlySessionOnboardingEligible: true,
+        onboardingGuidanceOpen: true,
         promptProfile: 'conversation',
       }),
     ).toEqual({
-      earlySessionOnboardingInjected: false,
+      onboardingGuidanceInjected: true,
       resumeProviderSessionId: 'provider-session-1',
       shouldInjectBootstrapContext: false,
     })
     expect(
       resolveAssistantProviderTurnContinuityPlan({
         candidateResumeProviderSessionId: 'provider-session-1',
-        earlySessionOnboardingEligible: true,
+        onboardingGuidanceOpen: true,
         promptProfile: 'notification-decision',
       }),
     ).toEqual({
-      earlySessionOnboardingInjected: false,
+      onboardingGuidanceInjected: false,
       resumeProviderSessionId: 'provider-session-1',
       shouldInjectBootstrapContext: false,
     })

@@ -1,7 +1,9 @@
 import type {
+  AssistantOnboardingCompletionReason,
   AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { markAssistantFirstContactSeen } from './first-contact.js'
+import { completeAssistantOnboarding } from './onboarding-state.js'
 import { normalizeAssistantDeliveryError } from './outbox.js'
 import { createAssistantRuntimeStateService } from './runtime-state-service.js'
 import type {
@@ -84,7 +86,8 @@ export async function deliverAssistantReply(input: {
 }
 
 export async function finalizeAssistantTurnFromDeliveryOutcome(input: {
-  earlySessionOnboardingInjected?: boolean
+  onboardingCompletionFallbackReason?: AssistantOnboardingCompletionReason | null
+  onboardingGuidanceInjected?: boolean
   firstContactStateDocIds?: readonly string[]
   outcome: AssistantDeliveryOutcome
   response: string
@@ -101,7 +104,14 @@ export async function finalizeAssistantTurnFromDeliveryOutcome(input: {
   const state = createAssistantRuntimeStateService(input.vault)
   await state.turns.finalizeReceipt(plan.receipt)
   await state.diagnostics.recordEvent(plan.diagnostic)
-  if (input.earlySessionOnboardingInjected === true && input.outcome.kind === 'sent') {
+  if (input.onboardingCompletionFallbackReason) {
+    await completeAssistantOnboarding({
+      completedAt,
+      reason: input.onboardingCompletionFallbackReason,
+      vault: input.vault,
+    })
+  }
+  if (input.onboardingGuidanceInjected === true && input.outcome.kind === 'sent') {
     await markAssistantFirstContactSeen({
       docIds: input.firstContactStateDocIds ?? [],
       seenAt: completedAt,

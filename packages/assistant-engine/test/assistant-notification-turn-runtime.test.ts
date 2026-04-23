@@ -1168,7 +1168,7 @@ function createSharedPlan(): AssistantTurnSharedPlan {
       },
       operatorAuthority: 'direct-operator',
     },
-    earlySessionOnboardingEligible: false,
+    onboardingGuidanceOpen: false,
     firstContactStateDocIds: [],
     operatorAuthority: 'direct-operator',
     persistUserPromptOnFailure: false,

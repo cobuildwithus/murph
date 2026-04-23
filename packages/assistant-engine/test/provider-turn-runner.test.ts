@@ -5,7 +5,10 @@ import {
   type AssistantProviderSessionOptions,
   type AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
-import type { AssistantMessageInput } from '../src/assistant/service-contracts.ts'
+import type {
+  AssistantMessageInput,
+  AssistantTurnSharedPlan,
+} from '../src/assistant/service-contracts.ts'
 import type { ResolvedAssistantFailoverRoute } from '../src/assistant/failover.ts'
 
 const runnerMocks = vi.hoisted(() => ({
@@ -178,11 +181,11 @@ describe('executeProviderTurnWithRecovery', () => {
       .mockReset()
       .mockImplementation((input: {
         channel: string | null
-        earlySessionOnboarding: boolean
+        onboardingGuidance: boolean
         assistantCliContract: string | null
         vaultOverview?: string | null
       }) =>
-        `prompt:${input.channel ?? 'none'}:${input.earlySessionOnboarding ? 'first' : 'later'}:${input.assistantCliContract ?? 'no-bootstrap'}:${input.vaultOverview ?? 'no-overview'}`,
+        `prompt:${input.channel ?? 'none'}:${input.onboardingGuidance ? 'first' : 'later'}:${input.assistantCliContract ?? 'no-bootstrap'}:${input.vaultOverview ?? 'no-overview'}`,
       )
     runnerMocks.buildAssistantActiveExperimentContextBlock
       .mockReset()
@@ -323,7 +326,7 @@ describe('executeProviderTurnWithRecovery', () => {
       }),
       plan: createTurnPlan({
         allowSensitiveHealthContext: true,
-        earlySessionOnboardingEligible: true,
+        onboardingGuidanceOpen: true,
       }),
       resolvedSession: session,
       routes: [primaryRoute, backupRoute],
@@ -335,7 +338,7 @@ describe('executeProviderTurnWithRecovery', () => {
       kind: 'succeeded',
       providerTurn: {
         attemptCount: 1,
-        earlySessionOnboardingInjected: true,
+        onboardingGuidanceInjected: true,
         route: backupRoute,
         session,
         workingDirectory: '/tmp/provider-turn-runner-tests',
@@ -370,7 +373,7 @@ describe('executeProviderTurnWithRecovery', () => {
         channel: 'chat',
         currentLocalDate: '2026-04-08',
         currentTimeZone: 'America/Los_Angeles',
-        earlySessionOnboarding: true,
+        onboardingGuidance: true,
         modelBehaviorProfile: 'default',
         turnTrigger: null,
         vaultOverview:
@@ -438,7 +441,7 @@ describe('executeProviderTurnWithRecovery', () => {
       }),
       plan: createTurnPlan({
         allowSensitiveHealthContext: true,
-        earlySessionOnboardingEligible: false,
+        onboardingGuidanceOpen: false,
       }),
       resolvedSession: createAssistantSession(),
       routes: [route],
@@ -495,7 +498,7 @@ describe('executeProviderTurnWithRecovery', () => {
       }),
       plan: createTurnPlan({
         allowSensitiveHealthContext: true,
-        earlySessionOnboardingEligible: true,
+        onboardingGuidanceOpen: true,
       }),
       profile: {
         nativeResumePolicy: 'disabled',
@@ -511,7 +514,7 @@ describe('executeProviderTurnWithRecovery', () => {
     expect(outcome).toMatchObject({
       kind: 'succeeded',
       providerTurn: {
-        earlySessionOnboardingInjected: false,
+        onboardingGuidanceInjected: false,
         route,
       },
     })
@@ -613,7 +616,7 @@ describe('executeProviderTurnWithRecovery', () => {
         prompt: 'Newest prompt',
       }),
       plan: createTurnPlan({
-        earlySessionOnboardingEligible: true,
+        onboardingGuidanceOpen: true,
       }),
       resolvedSession: session,
       routes: [route],
@@ -683,7 +686,7 @@ describe('executeProviderTurnWithRecovery', () => {
       }),
       plan: createTurnPlan({
         allowSensitiveHealthContext: true,
-        earlySessionOnboardingEligible: false,
+        onboardingGuidanceOpen: false,
       }),
       resolvedSession: session,
       routes: [route],
@@ -695,7 +698,7 @@ describe('executeProviderTurnWithRecovery', () => {
       kind: 'succeeded',
       providerTurn: {
         attemptCount: 1,
-        earlySessionOnboardingInjected: false,
+        onboardingGuidanceInjected: false,
       },
     })
     expect(runnerMocks.resolveAssistantCliSurfaceBootstrapContext).not.toHaveBeenCalled()
@@ -710,7 +713,7 @@ describe('executeProviderTurnWithRecovery', () => {
         assistantKnowledgeToolsAvailable: false,
         currentLocalDate: '2026-04-08',
         currentTimeZone: 'America/Los_Angeles',
-        earlySessionOnboarding: false,
+        onboardingGuidance: false,
         activeExperimentContext:
           'Active experiment context for navigation only:\n- Sauna RHR (`sauna-rhr`, exp_test): started 2026-04-01.',
         vaultOverview: null,
@@ -751,7 +754,7 @@ describe('executeProviderTurnWithRecovery', () => {
       }),
       plan: createTurnPlan({
         allowSensitiveHealthContext: false,
-        earlySessionOnboardingEligible: true,
+        onboardingGuidanceOpen: true,
       }),
       resolvedSession: session,
       routes: [route],
@@ -811,7 +814,7 @@ describe('executeProviderTurnWithRecovery', () => {
         prompt: 'Current prompt',
       }),
       plan: createTurnPlan({
-        earlySessionOnboardingEligible: false,
+        onboardingGuidanceOpen: false,
       }),
       resolvedSession: session,
       routes: [route],
@@ -853,7 +856,7 @@ describe('executeProviderTurnWithRecovery', () => {
     ).toHaveLength(25)
   })
 
-  it('preserves native resume and skips bootstrap overlays when onboarding stays eligible', async () => {
+  it('preserves native resume and skips bootstrap overlays while still injecting onboarding guidance', async () => {
     const session = createAssistantSession({
       providerSessionId: 'provider-session-primary',
       resumeRouteId: 'route-primary',
@@ -885,12 +888,12 @@ describe('executeProviderTurnWithRecovery', () => {
       }),
     )
 
-    await executeProviderTurnWithRecovery({
+    const outcome = await executeProviderTurnWithRecovery({
       input: createMessageInput({
         prompt: 'Yea!',
       }),
       plan: createTurnPlan({
-        earlySessionOnboardingEligible: true,
+        onboardingGuidanceOpen: true,
       }),
       resolvedSession: session,
       routes: [route],
@@ -898,14 +901,61 @@ describe('executeProviderTurnWithRecovery', () => {
       turnId: 'turn-onboarding-overrides-native-resume',
     })
 
+    expect(outcome).toMatchObject({
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: true,
+      },
+    })
     expect(runnerMocks.resolveAssistantCliSurfaceBootstrapContext).not.toHaveBeenCalled()
     expect(runnerMocks.buildAssistantVaultOverviewBlock).not.toHaveBeenCalled()
     expect(runnerMocks.executeAssistantProviderTurnAttempt).toHaveBeenCalledWith(
       expect.objectContaining({
         resumeProviderSessionId: 'provider-session-primary',
-        systemPrompt: 'prompt:none:later:no-bootstrap:no-overview',
+        systemPrompt: 'prompt:none:first:no-bootstrap:no-overview',
       }),
     )
+  })
+
+  it('settles a narrow onboarding completion fallback when no command surface is available', async () => {
+    const route = createRoute({
+      routeId: 'route-no-command-surface',
+    })
+    const session = createAssistantSession()
+
+    runnerMocks.resolveAssistantProviderTargetExecutionCapabilities.mockReturnValue({
+      murphCommandSurface: 'bound-tools',
+      requestFormat: 'messages',
+      supportsNativeResume: false,
+      supportsToolRuntime: false,
+    })
+    runnerMocks.executeAssistantProviderTurnAttempt.mockResolvedValue(
+      createSuccessfulAttemptResult({
+        providerSessionId: null,
+        response: 'Sleep debt summary',
+      }),
+    )
+
+    const outcome = await executeProviderTurnWithRecovery({
+      input: createMessageInput({
+        prompt: 'Can you help me understand my sleep debt?',
+      }),
+      plan: createTurnPlan({
+        onboardingGuidanceOpen: true,
+      }),
+      resolvedSession: session,
+      routes: [route],
+      turnCreatedAt: '2026-04-08T00:00:00.000Z',
+      turnId: 'turn-no-command-onboarding-fallback',
+    })
+
+    expect(outcome).toMatchObject({
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingCompletionFallbackReason: 'concrete_request',
+        onboardingGuidanceInjected: true,
+      },
+    })
   })
 
   it('passes automation-cron turn trigger into the system prompt builder', async () => {
@@ -930,7 +980,7 @@ describe('executeProviderTurnWithRecovery', () => {
       }),
       plan: createTurnPlan({
         allowSensitiveHealthContext: true,
-        earlySessionOnboardingEligible: false,
+        onboardingGuidanceOpen: false,
       }),
       resolvedSession: session,
       routes: [route],
@@ -970,7 +1020,7 @@ describe('executeProviderTurnWithRecovery', () => {
         prompt: 'What is already in here?',
       }),
       plan: createTurnPlan({
-        earlySessionOnboardingEligible: true,
+        onboardingGuidanceOpen: true,
       }),
       resolvedSession: session,
       routes: [route],
@@ -1020,7 +1070,7 @@ describe('executeProviderTurnWithRecovery', () => {
       }),
       plan: createTurnPlan({
         allowSensitiveHealthContext: true,
-        earlySessionOnboardingEligible: true,
+        onboardingGuidanceOpen: true,
       }),
       resolvedSession: session,
       routes: [route],
@@ -1534,11 +1584,14 @@ function createMessageInput(
 
 function createTurnPlan(input: {
   allowSensitiveHealthContext?: boolean
-  earlySessionOnboardingEligible?: boolean
+  onboardingGuidanceOpen?: boolean
   cliAccessEnv?: Record<string, string>
-}) {
+}): AssistantTurnSharedPlan {
+  const allowSensitiveHealthContext =
+    input.allowSensitiveHealthContext ?? false
+
   return {
-    allowSensitiveHealthContext: input.allowSensitiveHealthContext ?? false,
+    allowSensitiveHealthContext,
     cliAccess: {
       env: input.cliAccessEnv ?? {
         CLI_TOKEN: 'test-cli-token',
@@ -1546,8 +1599,26 @@ function createTurnPlan(input: {
       rawCommand: 'vault-cli' as const,
       setupCommand: 'murph' as const,
     },
-    earlySessionOnboardingEligible: input.earlySessionOnboardingEligible ?? false,
+    conversationPolicy: {
+      allowSensitiveHealthContext,
+      audience: {
+        actorId: null,
+        bindingDelivery: null,
+        channel: null,
+        deliveryPolicy: 'not-requested',
+        effectiveThreadIsDirect: null,
+        explicitTarget: null,
+        identityId: null,
+        replyToMessageId: null,
+        threadId: null,
+        threadIsDirect: null,
+      },
+      operatorAuthority: 'direct-operator',
+    },
+    onboardingGuidanceOpen: input.onboardingGuidanceOpen ?? false,
     firstContactStateDocIds: [],
+    operatorAuthority: 'direct-operator',
+    persistUserPromptOnFailure: false,
     requestedWorkingDirectory: '/tmp/provider-turn-runner-tests',
   }
 }

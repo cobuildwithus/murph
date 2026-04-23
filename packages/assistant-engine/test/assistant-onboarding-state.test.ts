@@ -1,10 +1,11 @@
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   completeAssistantOnboarding,
   readAssistantOnboardingState,
+  resolveAssistantOnboardingStatePath,
   reopenAssistantOnboarding,
 } from '../src/assistant/onboarding-state.js'
 
@@ -67,6 +68,78 @@ describe('assistant onboarding state', () => {
       schemaVersion: 'murph.assistant-onboarding.v1',
       status: 'open',
       createdAt: '2026-04-23T00:05:00.000Z',
+      updatedAt: '2026-04-23T00:10:00.000Z',
+      completedAt: null,
+      completedReason: null,
+    })
+  })
+
+  it('does not silently reopen onboarding when the persisted state is malformed', async () => {
+    const vault = await createTempVault()
+    const statePath = resolveAssistantOnboardingStatePath(vault)
+
+    await mkdir(path.dirname(statePath), { recursive: true })
+    await writeFile(statePath, '{"schemaVersion":', 'utf8')
+
+    await expect(readAssistantOnboardingState(vault)).rejects.toMatchObject({
+      name: 'AssistantOnboardingStateReadError',
+      reason: 'invalid-json',
+    })
+  })
+
+  it('does not silently reopen onboarding when the persisted state has the wrong schema', async () => {
+    const vault = await createTempVault()
+    const statePath = resolveAssistantOnboardingStatePath(vault)
+
+    await mkdir(path.dirname(statePath), { recursive: true })
+    await writeFile(
+      statePath,
+      JSON.stringify({
+        schemaVersion: 'murph.assistant-onboarding.v1',
+        createdAt: '2026-04-23T00:00:00.000Z',
+        updatedAt: '2026-04-23T00:00:00.000Z',
+        completedAt: null,
+      }),
+      'utf8',
+    )
+
+    await expect(readAssistantOnboardingState(vault)).rejects.toMatchObject({
+      name: 'AssistantOnboardingStateReadError',
+      reason: 'invalid-schema',
+    })
+  })
+
+  it('surfaces read failures instead of silently reopening onboarding', async () => {
+    const vault = await createTempVault()
+    const statePath = resolveAssistantOnboardingStatePath(vault)
+
+    await mkdir(statePath, { recursive: true })
+
+    await expect(readAssistantOnboardingState(vault)).rejects.toMatchObject({
+      message: expect.stringContaining(
+        '.runtime/operations/assistant/state/onboarding/conversation.json could not be read',
+      ),
+      name: 'AssistantOnboardingStateReadError',
+      reason: 'read-failed',
+    })
+  })
+
+  it('lets an explicit reopen overwrite malformed onboarding state', async () => {
+    const vault = await createTempVault()
+    const statePath = resolveAssistantOnboardingStatePath(vault)
+
+    await mkdir(path.dirname(statePath), { recursive: true })
+    await writeFile(statePath, '{"schemaVersion":', 'utf8')
+
+    await expect(
+      reopenAssistantOnboarding({
+        reopenedAt: '2026-04-23T00:10:00.000Z',
+        vault,
+      }),
+    ).resolves.toEqual({
+      schemaVersion: 'murph.assistant-onboarding.v1',
+      status: 'open',
+      createdAt: '2026-04-23T00:10:00.000Z',
       updatedAt: '2026-04-23T00:10:00.000Z',
       completedAt: null,
       completedReason: null,

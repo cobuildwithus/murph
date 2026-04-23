@@ -13,6 +13,7 @@ export async function resolveAssistantTurnSharedPlan(
   input: AssistantMessageInput,
   resolved: ResolvedAssistantSession,
 ): Promise<AssistantTurnSharedPlan> {
+  const includeOnboardingGuidance = input.includeEarlySessionOnboarding === true
   const cliAccess = resolveAssistantCliAccessContext()
   const requestedWorkingDirectory = input.workingDirectory ?? input.vault
   const conversationPolicy = resolveAssistantConversationPolicy({
@@ -28,7 +29,7 @@ export async function resolveAssistantTurnSharedPlan(
     session: resolved.session,
   })
   const firstContactStateDocIds =
-    input.includeEarlySessionOnboarding === true
+    includeOnboardingGuidance
       ? resolveAssistantFirstContactStateDocIds({
           actorId: conversationPolicy.audience.actorId ?? resolved.session.binding.actorId,
           channel: conversationPolicy.audience.channel ?? resolved.session.binding.channel,
@@ -38,16 +39,16 @@ export async function resolveAssistantTurnSharedPlan(
             conversationPolicy.audience.threadIsDirect ?? resolved.session.binding.threadIsDirect,
         })
       : []
-  const earlySessionOnboardingEligible =
-    await resolveAssistantEarlySessionOnboardingEligible({
-      includeEarlySessionOnboarding: input.includeEarlySessionOnboarding === true,
+  const onboardingGuidanceOpen =
+    await resolveAssistantOnboardingGuidanceOpenForVault({
+      includeOnboardingGuidance,
       vault: input.vault,
     })
   return {
     allowSensitiveHealthContext: conversationPolicy.allowSensitiveHealthContext,
     cliAccess,
     conversationPolicy,
-    earlySessionOnboardingEligible,
+    onboardingGuidanceOpen,
     firstContactStateDocIds,
     operatorAuthority: resolveAssistantOperatorAuthority(input.operatorAuthority),
     persistUserPromptOnFailure: input.persistUserPromptOnFailure ?? true,
@@ -55,23 +56,23 @@ export async function resolveAssistantTurnSharedPlan(
   }
 }
 
-export async function resolveAssistantEarlySessionOnboardingEligible(input: {
-  includeEarlySessionOnboarding: boolean
+export async function resolveAssistantOnboardingGuidanceOpenForVault(input: {
+  includeOnboardingGuidance: boolean
   vault: string
 }): Promise<boolean> {
-  if (!input.includeEarlySessionOnboarding) {
+  if (!input.includeOnboardingGuidance) {
     return false
   }
 
-  return resolveAssistantEarlySessionOnboardingEligibility({
-    includeEarlySessionOnboarding: input.includeEarlySessionOnboarding,
+  return resolveAssistantOnboardingGuidanceOpen({
+    includeOnboardingGuidance: input.includeOnboardingGuidance,
     onboardingOpen: await isAssistantOnboardingOpen(input.vault),
   })
 }
 
-export function resolveAssistantEarlySessionOnboardingEligibility(input: {
-  includeEarlySessionOnboarding: boolean
+export function resolveAssistantOnboardingGuidanceOpen(input: {
+  includeOnboardingGuidance: boolean
   onboardingOpen: boolean
 }): boolean {
-  return input.includeEarlySessionOnboarding && input.onboardingOpen
+  return input.includeOnboardingGuidance && input.onboardingOpen
 }

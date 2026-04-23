@@ -27,7 +27,7 @@ export interface AssistantSystemPromptInput {
   cliAccess: Pick<AssistantCliAccessContext, "rawCommand" | "setupCommand">;
   currentLocalDate: string;
   currentTimeZone: string;
-  earlySessionOnboarding: boolean;
+  onboardingGuidance: boolean;
   modelBehaviorProfile: AssistantModelBehaviorProfile;
   turnTrigger?: AssistantTurnTrigger | null;
   vaultOverview?: string | null;
@@ -88,9 +88,9 @@ export function buildAssistantSystemPrompt(
     buildAssistantExecutionContextText({
       turnTrigger: input.turnTrigger ?? null,
     }),
-    buildAssistantEarlySessionOnboardingGuidanceText({
+    buildAssistantOnboardingGuidanceText({
       assistantCommandAccessMode: input.assistantCommandAccessMode,
-      enabled: input.earlySessionOnboarding,
+      enabled: input.onboardingGuidance,
     }),
     buildAssistantKnowledgeGuidanceText({
       assistantCommandAccessMode: input.assistantCommandAccessMode,
@@ -334,7 +334,7 @@ function buildAssistantExecutionContextText(input: {
 - Treat the user prompt as the execution instructions for this scheduled run.`;
 }
 
-function buildAssistantEarlySessionOnboardingGuidanceText(input: {
+function buildAssistantOnboardingGuidanceText(input: {
   assistantCommandAccessMode: AssistantMurphCommandAccessMode;
   enabled: boolean;
 }): string | null {
@@ -347,9 +347,9 @@ function buildAssistantEarlySessionOnboardingGuidanceText(input: {
       ? "Use `vault.cli.run` to execute `vault-cli assistant onboarding complete --reason <user_answered|user_declined|concrete_request>`."
       : input.assistantCommandAccessMode === "direct-cli"
         ? "Use `vault-cli assistant onboarding complete --reason <user_answered|user_declined|concrete_request>`."
-        : "If no assistant command surface is available in this route, do not claim onboarding was marked complete.";
+        : "If no assistant command surface is available in this route, do not claim onboarding was marked complete; the runtime will settle only clear onboarding-complete turns automatically.";
 
-  return `Early-session onboarding guidance:
+  return `Conversation onboarding guidance:
 
 Intent:
 - Use onboarding to make a brand-new user feel oriented, not interviewed.

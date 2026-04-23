@@ -20,6 +20,7 @@ import type {
 const seamMocks = vi.hoisted(() => ({
   buildAssistantCliGuidanceText: vi.fn(),
   buildResolveAssistantSessionInput: vi.fn(),
+  completeAssistantOnboarding: vi.fn(),
   createAssistantRuntimeStateService: vi.fn(),
   createAssistantUsageId: vi.fn(),
   isAssistantSessionNotFoundError: vi.fn(),
@@ -88,6 +89,10 @@ vi.mock("../src/assistant/first-contact.js", () => ({
   markAssistantFirstContactSeen: seamMocks.markAssistantFirstContactSeen,
 }));
 
+vi.mock("../src/assistant/onboarding-state.js", () => ({
+  completeAssistantOnboarding: seamMocks.completeAssistantOnboarding,
+}));
+
 vi.mock("../src/assistant/outbox.js", async () => {
   const actual = await vi.importActual<
     typeof import("../src/assistant/outbox.ts")
@@ -142,6 +147,16 @@ beforeEach(() => {
     sessionId: "session-from-builder",
     vault: "/vault",
   });
+  seamMocks.completeAssistantOnboarding
+    .mockReset()
+    .mockResolvedValue({
+      completedAt: "2026-04-08T12:30:00.000Z",
+      completedReason: "concrete_request",
+      createdAt: "2026-04-08T12:30:00.000Z",
+      schemaVersion: "murph.assistant-onboarding.v1",
+      status: "completed",
+      updatedAt: "2026-04-08T12:30:00.000Z",
+    });
   seamMocks.createAssistantUsageId
     .mockReset()
     .mockImplementation(
@@ -1090,12 +1105,13 @@ describe("assistant delivery orchestration seam", () => {
     });
   });
 
-  it("finalizes receipts and marks first contact only for injected sent turns", async () => {
+  it("finalizes receipts, settles no-command onboarding completion, and marks first contact only for injected sent turns", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-08T12:30:00.000Z"));
 
     await finalizeAssistantTurnFromDeliveryOutcome({
-      earlySessionOnboardingInjected: true,
+      onboardingCompletionFallbackReason: "concrete_request",
+      onboardingGuidanceInjected: true,
       firstContactStateDocIds: ["doc-1", "doc-2"],
       outcome: {
         delivery: {
@@ -1136,16 +1152,22 @@ describe("assistant delivery orchestration seam", () => {
         turnId: "turn-finalize",
       })
     );
+    expect(seamMocks.completeAssistantOnboarding).toHaveBeenCalledWith({
+      completedAt: "2026-04-08T12:30:00.000Z",
+      reason: "concrete_request",
+      vault: "/vault",
+    });
     expect(seamMocks.markAssistantFirstContactSeen).toHaveBeenCalledWith({
       docIds: ["doc-1", "doc-2"],
       seenAt: "2026-04-08T12:30:00.000Z",
       vault: "/vault",
     });
 
+    seamMocks.completeAssistantOnboarding.mockClear();
     seamMocks.markAssistantFirstContactSeen.mockClear();
 
     await finalizeAssistantTurnFromDeliveryOutcome({
-      earlySessionOnboardingInjected: true,
+      onboardingGuidanceInjected: true,
       firstContactStateDocIds: ["doc-1"],
       outcome: {
         error: null,
@@ -1160,6 +1182,7 @@ describe("assistant delivery orchestration seam", () => {
       vault: "/vault",
     });
 
+    expect(seamMocks.completeAssistantOnboarding).not.toHaveBeenCalled();
     expect(seamMocks.markAssistantFirstContactSeen).not.toHaveBeenCalled();
   });
 });
@@ -1751,7 +1774,7 @@ function createSharedPlan(input?: {
         },
       operatorAuthority: "direct-operator",
     },
-    earlySessionOnboardingEligible: false,
+    onboardingGuidanceOpen: false,
     firstContactStateDocIds: [],
     operatorAuthority: "direct-operator",
     persistUserPromptOnFailure: input?.persistUserPromptOnFailure ?? false,

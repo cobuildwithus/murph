@@ -61,7 +61,7 @@ describe('assistant GPT-5 execution prompt overlay', () => {
       },
       currentLocalDate: '2026-04-15',
       currentTimeZone: 'Asia/Kuala_Lumpur',
-      earlySessionOnboarding: false,
+      onboardingGuidance: false,
       modelBehaviorProfile: 'gpt5-agentic',
       turnTrigger: null,
       vaultOverview: null,

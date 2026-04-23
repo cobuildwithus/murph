@@ -1,4 +1,5 @@
 import type {
+  AssistantOnboardingCompletionReason,
   AssistantChatProvider,
   AssistantProviderSessionOptions,
   AssistantSession,
@@ -23,7 +24,6 @@ import {
   executeAssistantProviderTurnAttempt,
   resolveAssistantProviderTargetExecutionCapabilities,
   type AssistantProviderAttemptMetadata,
-  type AssistantProviderTurnExecutionResult,
 } from '../assistant-provider.js'
 import type {
   AssistantMurphCommandAccessMode,
@@ -88,16 +88,14 @@ import {
   resolveAssistantUsageTriggerKind,
   type AssistantUsageAttribution,
 } from './usage-attribution.js'
-import type { AssistantMessageInput } from './service-contracts.js'
-
-interface AssistantTurnSharedPlan {
-  allowSensitiveHealthContext: boolean
-  cliAccess: ReturnType<typeof resolveAssistantCliAccessContext>
-  earlySessionOnboardingEligible: boolean
-  requestedWorkingDirectory: string
-}
+import type {
+  AssistantMessageInput,
+  AssistantTurnSharedPlan,
+  ExecutedAssistantProviderTurnResult,
+} from './service-contracts.js'
 
 interface AssistantRouteTurnPlan {
+  assistantCommandAccessMode: AssistantMurphCommandAccessMode
   assistantCliContract: string | null
   cliEnv: NodeJS.ProcessEnv
   conversationMessages?: ReadonlyArray<{
@@ -106,7 +104,8 @@ interface AssistantRouteTurnPlan {
   }>
   continuityContext: string | null
   diagnosticsPolicy: AssistantDiagnosticsPolicy
-  earlySessionOnboardingInjected: boolean
+  onboardingCompletionFallbackReason: AssistantOnboardingCompletionReason | null
+  onboardingGuidanceInjected: boolean
   resumeProviderSessionId: string | null
   sessionContext?: {
     binding: AssistantSession['binding']
@@ -146,25 +145,24 @@ export interface AssistantProviderTurnExecutionProfile {
 }
 
 export interface AssistantProviderTurnContinuityPlan {
-  earlySessionOnboardingInjected: boolean
+  onboardingGuidanceInjected: boolean
   resumeProviderSessionId: string | null
   shouldInjectBootstrapContext: boolean
 }
 
 export function resolveAssistantProviderTurnContinuityPlan(input: {
   candidateResumeProviderSessionId: string | null
-  earlySessionOnboardingEligible: boolean
+  onboardingGuidanceOpen: boolean
   promptProfile: AssistantProviderTurnPromptProfile
 }): AssistantProviderTurnContinuityPlan {
   const resumeProviderSessionId = input.candidateResumeProviderSessionId
   const shouldInjectBootstrapContext = resumeProviderSessionId === null
-  const earlySessionOnboardingInjected =
+  const onboardingGuidanceInjected =
     input.promptProfile === 'conversation' &&
-    input.earlySessionOnboardingEligible &&
-    shouldInjectBootstrapContext
+    input.onboardingGuidanceOpen
 
   return {
-    earlySessionOnboardingInjected,
+    onboardingGuidanceInjected,
     resumeProviderSessionId,
     shouldInjectBootstrapContext,
   }
@@ -180,17 +178,6 @@ function resolveAssistantProviderTurnExecutionProfile(
     promptProfile: profile?.promptProfile ?? 'conversation',
     toolProfile: profile?.toolProfile ?? 'provider-turn',
   }
-}
-
-export interface ExecutedAssistantProviderTurnResult
-  extends AssistantProviderTurnExecutionResult {
-  attemptCount: number
-  earlySessionOnboardingInjected?: boolean
-  providerOptions: AssistantProviderSessionOptions
-  route: ResolvedAssistantFailoverRoute
-  session: AssistantSession
-  usageAttribution?: AssistantUsageAttribution | null
-  workingDirectory: string
 }
 
 type AssistantProviderFailoverState = Awaited<
@@ -452,7 +439,7 @@ async function resolveAssistantRouteTurnPlan(input: {
       : null
   const continuityPlan = resolveAssistantProviderTurnContinuityPlan({
     candidateResumeProviderSessionId,
-    earlySessionOnboardingEligible: input.sharedPlan.earlySessionOnboardingEligible,
+    onboardingGuidanceOpen: input.sharedPlan.onboardingGuidanceOpen,
     promptProfile: input.profile.promptProfile,
   })
   const resumeProviderSessionId = continuityPlan.resumeProviderSessionId
@@ -466,8 +453,8 @@ async function resolveAssistantRouteTurnPlan(input: {
     channel: resolvedChannel,
     executionContext: input.input.executionContext,
   })
-  const shouldInjectEarlySessionOnboarding =
-    continuityPlan.earlySessionOnboardingInjected
+  const shouldInjectOnboardingGuidance =
+    continuityPlan.onboardingGuidanceInjected
   const providerCapabilities = routeProviderCapabilities
   const transcriptReplayLimit = shouldPrepareBootstrapContext
     ? ASSISTANT_BOOTSTRAP_TRANSCRIPT_REPLAY_MESSAGE_LIMIT
@@ -487,6 +474,8 @@ async function resolveAssistantRouteTurnPlan(input: {
     providerCapabilities,
     toolCatalog: input.toolCatalog,
   })
+  const assistantCommandAccessMode =
+    promptCapabilityAvailability.assistantCommandAccessMode
   const assistantCliContract =
     shouldPrepareBootstrapContext && input.profile.promptProfile === 'conversation'
       ? await resolveAssistantCliSurfaceBootstrapContext({
@@ -505,12 +494,19 @@ async function resolveAssistantRouteTurnPlan(input: {
     : null
 
   return {
+    assistantCommandAccessMode,
     assistantCliContract,
     cliEnv: input.sharedPlan.cliAccess.env,
     conversationMessages,
     continuityContext: null,
     diagnosticsPolicy,
-    earlySessionOnboardingInjected: shouldInjectEarlySessionOnboarding,
+    onboardingCompletionFallbackReason:
+      resolveAssistantOnboardingCompletionFallbackReason({
+        assistantCommandAccessMode,
+        onboardingGuidanceInjected: shouldInjectOnboardingGuidance,
+        prompt: input.input.prompt,
+      }),
+    onboardingGuidanceInjected: shouldInjectOnboardingGuidance,
     resumeProviderSessionId,
     sessionContext: shouldPrepareBootstrapContext
       ? {
@@ -548,7 +544,7 @@ async function resolveAssistantRouteTurnPlan(input: {
             channel: resolvedChannel,
             currentLocalDate: input.promptTimeContext.currentLocalDate,
             currentTimeZone: input.promptTimeContext.currentTimeZone,
-            earlySessionOnboarding: shouldInjectEarlySessionOnboarding,
+            onboardingGuidance: shouldInjectOnboardingGuidance,
             modelBehaviorProfile: resolveAssistantModelBehaviorProfile(
               input.route.providerOptions,
             ),
@@ -664,6 +660,73 @@ function resolveAssistantCommandAccessMode(input: {
     default:
       return 'none'
   }
+}
+
+const ASSISTANT_ONBOARDING_DECLINE_PATTERN =
+  /\b(?:no thanks|no thank you|skip (?:it|this)|rather not|don['’]t want to|do not want to|not right now)\b/u
+const ASSISTANT_ONBOARDING_CONCRETE_REQUEST_PREFIX_PATTERN =
+  /^(?:can|could|would|will|should|what|why|how|when|where|who|help|tell|explain|give|show|check|look|find|summarize|analyse|analyze|compare|review|log|track|estimate|recommend|plan)\b/u
+const ASSISTANT_ONBOARDING_CONCRETE_REQUEST_PHRASE_PATTERN =
+  /\b(?:help me|i need help|i want help|can you|could you|would you|what should i|should i|i want to know|i need to know)\b/u
+const ASSISTANT_ONBOARDING_CONTEXT_ANSWER_PATTERN =
+  /\b(?:sleep|energy|stress|pain|fatigue|anxiety|mood|digestion|labs?|supplements?|meds?|medications?|workout|workouts|exercise|glucose|cholesterol|blood pressure|migraine|symptom|symptoms|knee|back|headache|period|menstrual|recovery)\b/u
+const ASSISTANT_ONBOARDING_NAME_PATTERN =
+  /\b(?:my name is|call me)\b/u
+
+export function resolveAssistantOnboardingCompletionFallbackReason(input: {
+  assistantCommandAccessMode: AssistantMurphCommandAccessMode
+  onboardingGuidanceInjected: boolean
+  prompt: string
+}): AssistantOnboardingCompletionReason | null {
+  if (
+    !input.onboardingGuidanceInjected ||
+    input.assistantCommandAccessMode !== 'none'
+  ) {
+    return null
+  }
+
+  const normalizedPrompt = normalizePromptForOnboardingFallback(input.prompt)
+  if (!normalizedPrompt) {
+    return null
+  }
+
+  if (ASSISTANT_ONBOARDING_DECLINE_PATTERN.test(normalizedPrompt)) {
+    return 'user_declined'
+  }
+
+  if (looksLikeConcreteOnboardingRequest(normalizedPrompt)) {
+    return 'concrete_request'
+  }
+
+  if (looksLikeMeaningfulOnboardingAnswer(normalizedPrompt)) {
+    return 'user_answered'
+  }
+
+  return null
+}
+
+function normalizePromptForOnboardingFallback(prompt: string): string {
+  return prompt.trim().replace(/\s+/gu, ' ').toLowerCase()
+}
+
+function looksLikeConcreteOnboardingRequest(normalizedPrompt: string): boolean {
+  return (
+    (ASSISTANT_ONBOARDING_CONCRETE_REQUEST_PREFIX_PATTERN.test(normalizedPrompt) &&
+      countOnboardingFallbackWords(normalizedPrompt) >= 3) ||
+    ASSISTANT_ONBOARDING_CONCRETE_REQUEST_PHRASE_PATTERN.test(normalizedPrompt)
+  )
+}
+
+function looksLikeMeaningfulOnboardingAnswer(normalizedPrompt: string): boolean {
+  return (
+    ASSISTANT_ONBOARDING_NAME_PATTERN.test(normalizedPrompt) ||
+    (ASSISTANT_ONBOARDING_CONTEXT_ANSWER_PATTERN.test(normalizedPrompt) &&
+      countOnboardingFallbackWords(normalizedPrompt) >= 2)
+  )
+}
+
+function countOnboardingFallbackWords(normalizedPrompt: string): number {
+  return normalizedPrompt.match(/\b[\p{L}\p{N}']+\b/gu)?.length ?? 0
 }
 
 
@@ -852,7 +915,9 @@ async function executeAssistantProviderAttempt(input: {
       result: {
         ...result,
         attemptCount: attemptPlan.attemptCount,
-        earlySessionOnboardingInjected: attemptPlan.routePlan.earlySessionOnboardingInjected,
+        onboardingCompletionFallbackReason:
+          attemptPlan.routePlan.onboardingCompletionFallbackReason,
+        onboardingGuidanceInjected: attemptPlan.routePlan.onboardingGuidanceInjected,
         providerOptions: attemptPlan.route.providerOptions,
         route: attemptPlan.route,
         session: attemptPlan.session,

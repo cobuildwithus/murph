@@ -19,6 +19,8 @@ import { resolveAssistantStateDocumentPath } from './state.js'
 const ASSISTANT_ONBOARDING_STATE_DOC_ID = 'onboarding/conversation'
 const ASSISTANT_ONBOARDING_STATE_SCHEMA_VERSION =
   'murph.assistant-onboarding.v1' as const
+const ASSISTANT_ONBOARDING_STATE_RELATIVE_PATH =
+  '.runtime/operations/assistant/state/onboarding/conversation.json' as const
 
 const assistantPersistedOnboardingStateSchema = z
   .object({
@@ -36,6 +38,33 @@ type AssistantPersistedOnboardingState = z.infer<
   typeof assistantPersistedOnboardingStateSchema
 >
 
+type AssistantOnboardingStateReadFailureReason =
+  | 'invalid-json'
+  | 'invalid-schema'
+  | 'read-failed'
+
+export class AssistantOnboardingStateReadError extends Error {
+  readonly relativeStatePath = ASSISTANT_ONBOARDING_STATE_RELATIVE_PATH
+  readonly reason: AssistantOnboardingStateReadFailureReason
+
+  constructor(input: {
+    cause: unknown
+    reason: AssistantOnboardingStateReadFailureReason
+  }) {
+    super(buildAssistantOnboardingStateReadErrorMessage(input.reason), {
+      cause: input.cause,
+    })
+    this.name = 'AssistantOnboardingStateReadError'
+    this.reason = input.reason
+  }
+}
+
+export function isAssistantOnboardingStateReadError(
+  error: unknown,
+): error is AssistantOnboardingStateReadError {
+  return error instanceof AssistantOnboardingStateReadError
+}
+
 export function resolveAssistantOnboardingStatePath(vault: string): string {
   return resolveAssistantStateDocumentPath(resolveAssistantStatePaths(vault), ASSISTANT_ONBOARDING_STATE_DOC_ID)
 }
@@ -50,14 +79,21 @@ export async function readAssistantOnboardingState(vault: string): Promise<Assis
   try {
     const raw = await readFile(statePath, 'utf8')
     return normalizeAssistantOnboardingState(
-      assistantPersistedOnboardingStateSchema.parse(JSON.parse(raw)),
+      parsePersistedAssistantOnboardingState(raw),
     )
   } catch (error) {
     if (isMissingFileError(error)) {
       return createDefaultAssistantOnboardingState()
     }
 
-    return createDefaultAssistantOnboardingState()
+    if (isAssistantOnboardingStateReadError(error)) {
+      throw error
+    }
+
+    throw new AssistantOnboardingStateReadError({
+      cause: error,
+      reason: 'read-failed',
+    })
   }
 }
 
@@ -67,7 +103,7 @@ export async function completeAssistantOnboarding(input: {
   vault: string
 }): Promise<AssistantOnboardingState> {
   const completedAt = input.completedAt ?? new Date().toISOString()
-  const existing = await readAssistantOnboardingState(input.vault)
+  const existing = await readAssistantOnboardingStateForExplicitWrite(input.vault)
   const persisted = buildPersistedAssistantOnboardingState({
     completedAt,
     createdAt: existing.createdAt ?? completedAt,
@@ -82,7 +118,7 @@ export async function reopenAssistantOnboarding(input: {
   vault: string
 }): Promise<AssistantOnboardingState> {
   const reopenedAt = input.reopenedAt ?? new Date().toISOString()
-  const existing = await readAssistantOnboardingState(input.vault)
+  const existing = await readAssistantOnboardingStateForExplicitWrite(input.vault)
   const persisted = buildPersistedAssistantOnboardingState({
     completedAt: null,
     createdAt: existing.createdAt ?? reopenedAt,
@@ -95,6 +131,23 @@ export async function reopenAssistantOnboarding(input: {
 
 export async function isAssistantOnboardingOpen(vault: string): Promise<boolean> {
   return (await readAssistantOnboardingState(vault)).status === 'open'
+}
+
+async function readAssistantOnboardingStateForExplicitWrite(
+  vault: string,
+): Promise<AssistantOnboardingState> {
+  try {
+    return await readAssistantOnboardingState(vault)
+  } catch (error) {
+    if (
+      isAssistantOnboardingStateReadError(error) &&
+      (error.reason === 'invalid-json' || error.reason === 'invalid-schema')
+    ) {
+      return createDefaultAssistantOnboardingState()
+    }
+
+    throw error
+  }
 }
 
 function createDefaultAssistantOnboardingState(): AssistantOnboardingState {
@@ -118,6 +171,44 @@ function normalizeAssistantOnboardingState(
     updatedAt: value.updatedAt,
     completedAt: value.completedAt,
     completedReason: value.completedReason,
+  }
+}
+
+function parsePersistedAssistantOnboardingState(
+  raw: string,
+): AssistantPersistedOnboardingState {
+  let parsedJson: unknown
+
+  try {
+    parsedJson = JSON.parse(raw)
+  } catch (error) {
+    throw new AssistantOnboardingStateReadError({
+      cause: error,
+      reason: 'invalid-json',
+    })
+  }
+
+  const parsed = assistantPersistedOnboardingStateSchema.safeParse(parsedJson)
+  if (!parsed.success) {
+    throw new AssistantOnboardingStateReadError({
+      cause: parsed.error,
+      reason: 'invalid-schema',
+    })
+  }
+
+  return parsed.data
+}
+
+function buildAssistantOnboardingStateReadErrorMessage(
+  reason: AssistantOnboardingStateReadFailureReason,
+): string {
+  switch (reason) {
+    case 'invalid-json':
+      return `Assistant onboarding state at ${ASSISTANT_ONBOARDING_STATE_RELATIVE_PATH} is not valid JSON. Repair it or run \`vault-cli assistant onboarding reopen\` to overwrite it explicitly.`
+    case 'invalid-schema':
+      return `Assistant onboarding state at ${ASSISTANT_ONBOARDING_STATE_RELATIVE_PATH} does not match the expected schema. Repair it or run \`vault-cli assistant onboarding reopen\` to overwrite it explicitly.`
+    case 'read-failed':
+      return `Assistant onboarding state at ${ASSISTANT_ONBOARDING_STATE_RELATIVE_PATH} could not be read. Fix the runtime-state permissions or repair the file before continuing.`
   }
 }
 
