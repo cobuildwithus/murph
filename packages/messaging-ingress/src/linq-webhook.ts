@@ -124,8 +124,10 @@ export interface LinqListPhoneNumbersResponse {
   }> | null;
 }
 
+type LinqWebhookHeaders = Headers | IncomingHttpHeaders | Record<string, string | string[] | undefined>;
+
 export interface VerifyAndParseLinqWebhookRequestInput {
-  headers: Headers | IncomingHttpHeaders | Record<string, string | string[] | undefined>;
+  headers: LinqWebhookHeaders;
   now?: Date | number;
   rawBody: Buffer | Uint8Array | ArrayBuffer | string;
   timestampToleranceMs?: number | null;
@@ -139,6 +141,9 @@ export interface LinqMessageReceivedSummary {
   phoneNumber: string;
   text: string | null;
 }
+
+const DEFAULT_LINQ_WEBHOOK_TIMESTAMP_TOLERANCE_MS = 5 * 60_000;
+const LINQ_WEBHOOK_SIGNATURE_HEX_PATTERN = /^[a-f0-9]{64}$/iu;
 
 export class LinqWebhookVerificationError extends Error {
   constructor(message: string) {
@@ -172,8 +177,8 @@ export function verifyAndParseLinqWebhookRequest(
     throw new LinqWebhookVerificationError("Linq webhook secret is required.");
   }
 
-  const timestamp = readLinqWebhookHeader(input.headers, "x-webhook-timestamp");
-  const signature = readLinqWebhookHeader(input.headers, "x-webhook-signature");
+  const timestamp = readSingleLinqWebhookHeader(input.headers, "x-webhook-timestamp");
+  const signature = readSingleLinqWebhookHeader(input.headers, "x-webhook-signature");
 
   if (!timestamp || !signature) {
     throw new LinqWebhookVerificationError("Missing Linq webhook signature headers.");
@@ -185,7 +190,7 @@ export function verifyAndParseLinqWebhookRequest(
 
   assertLinqWebhookTimestampFresh(timestamp, {
     now: input.now,
-    toleranceMs: input.timestampToleranceMs,
+    toleranceMs: resolveLinqWebhookTimestampToleranceMs(input.timestampToleranceMs),
   });
 
   return parseLinqWebhookEvent(rawBody);
@@ -232,16 +237,23 @@ export function verifyLinqWebhookSignature(
   signature: string,
 ): boolean {
   const normalizedPayload = normalizeLinqWebhookRawBody(payload);
+  const normalizedSignature = normalizeLinqWebhookSignature(signature);
+
+  if (!normalizedSignature) {
+    return false;
+  }
+
   const expected = createHmac("sha256", secret)
     .update(`${timestamp}.${normalizedPayload}`)
     .digest("hex");
-  const normalizedSignature = signature.replace(/^sha256=/iu, "").trim().toLowerCase();
+  const expectedDigest = Buffer.from(expected, "hex");
+  const providedDigest = Buffer.from(normalizedSignature, "hex");
 
-  try {
-    return timingSafeEqual(Buffer.from(expected, "hex"), Buffer.from(normalizedSignature, "hex"));
-  } catch {
+  if (expectedDigest.byteLength !== providedDigest.byteLength) {
     return false;
   }
+
+  return timingSafeEqual(expectedDigest, providedDigest);
 }
 
 export function assertLinqWebhookTimestampFresh(
@@ -269,27 +281,10 @@ export function assertLinqWebhookTimestampFresh(
 }
 
 export function readLinqWebhookHeader(
-  headers: Headers | IncomingHttpHeaders | Record<string, string | string[] | undefined>,
+  headers: LinqWebhookHeaders,
   headerName: string,
 ): string | null {
-  if (headers instanceof Headers) {
-    return normalizeNullableString(headers.get(headerName));
-  }
-
-  const expectedHeader = headerName.toLowerCase();
-  for (const [candidateName, value] of Object.entries(headers)) {
-    if (candidateName.toLowerCase() !== expectedHeader) {
-      continue;
-    }
-
-    if (Array.isArray(value)) {
-      return normalizeNullableString(value[0]);
-    }
-
-    return normalizeNullableString(value);
-  }
-
-  return null;
+  return readLinqWebhookHeaderValues(headers, headerName).values[0] ?? null;
 }
 
 export function parseRawLinqMessageReceivedEvent(
@@ -514,6 +509,95 @@ function normalizeTimestampToleranceMs(value: number): number {
   }
 
   return value;
+}
+
+function normalizeLinqWebhookSignature(signature: string): string | null {
+  const normalized = signature.trim().replace(/^sha256=/iu, "").trim().toLowerCase();
+  return LINQ_WEBHOOK_SIGNATURE_HEX_PATTERN.test(normalized) ? normalized : null;
+}
+
+function resolveLinqWebhookTimestampToleranceMs(value: number | null | undefined): number | null {
+  if (value === null) {
+    return null;
+  }
+
+  return value ?? DEFAULT_LINQ_WEBHOOK_TIMESTAMP_TOLERANCE_MS;
+}
+
+function readSingleLinqWebhookHeader(
+  headers: LinqWebhookHeaders,
+  headerName: string,
+): string | null {
+  const { rawValueCount, values } = readLinqWebhookHeaderValues(headers, headerName);
+
+  if (rawValueCount === 0) {
+    return null;
+  }
+
+  if (rawValueCount > 1 || values[0]?.includes(",")) {
+    throw new LinqWebhookVerificationError(`Duplicate Linq webhook ${headerName} header.`);
+  }
+
+  return values[0] ?? null;
+}
+
+function readLinqWebhookHeaderValues(
+  headers: LinqWebhookHeaders,
+  headerName: string,
+): {
+  rawValueCount: number;
+  values: string[];
+} {
+  const expectedHeader = headerName.toLowerCase();
+  let rawValueCount = 0;
+  const values: string[] = [];
+
+  if (headers instanceof Headers) {
+    for (const [candidateName, value] of headers.entries()) {
+      if (candidateName.toLowerCase() !== expectedHeader) {
+        continue;
+      }
+
+      rawValueCount += 1;
+      const normalized = normalizeNullableString(value);
+      if (normalized) {
+        values.push(normalized);
+      }
+    }
+
+    return {
+      rawValueCount,
+      values,
+    };
+  }
+
+  for (const [candidateName, value] of Object.entries(headers)) {
+    if (candidateName.toLowerCase() !== expectedHeader) {
+      continue;
+    }
+
+    if (Array.isArray(value)) {
+      for (const entry of value) {
+        rawValueCount += 1;
+        const normalized = normalizeNullableString(entry);
+        if (normalized) {
+          values.push(normalized);
+        }
+      }
+      continue;
+    }
+
+    rawValueCount += 1;
+    const normalized = normalizeNullableString(value);
+    if (normalized) {
+      values.push(normalized);
+    }
+  }
+
+  return {
+    rawValueCount,
+    values,
+  };
 }
 
 function toLinqObjectRecord(value: unknown, label: string): Record<string, unknown> {
