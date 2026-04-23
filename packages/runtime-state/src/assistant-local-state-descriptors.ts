@@ -116,7 +116,11 @@ export const assistantLocalStateDescriptors: readonly VaultLocalStatePathDescrip
   ),
   definePortableAssistantDirectory(
     ".runtime/operations/assistant/state/onboarding",
-    "Assistant onboarding state container used for portable first-contact continuity descendants.",
+    "Assistant onboarding state container used for portable conversation lifecycle and first-contact continuity descendants.",
+  ),
+  definePortableAssistantFile(
+    ".runtime/operations/assistant/state/onboarding/conversation.json",
+    "Assistant conversation-onboarding lifecycle state that must move with hosted resume.",
   ),
   definePortableAssistantSubtree(
     ".runtime/operations/assistant/state/onboarding/first-contact",

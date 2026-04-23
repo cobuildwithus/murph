@@ -57,7 +57,7 @@ const diagnosticsMocks = vi.hoisted(() => ({
 }))
 
 const turnPlanMocks = vi.hoisted(() => ({
-  hasAssistantSeenFirstContact: vi.fn(),
+  isAssistantOnboardingOpen: vi.fn(),
   resolveAssistantCliAccessContext: vi.fn(),
   resolveAssistantConversationPolicy: vi.fn(),
   resolveAssistantFirstContactStateDocIds: vi.fn(),
@@ -170,9 +170,19 @@ vi.mock('../src/assistant/first-contact.js', async () => {
 
   return {
     ...actual,
-    hasAssistantSeenFirstContact: turnPlanMocks.hasAssistantSeenFirstContact,
     resolveAssistantFirstContactStateDocIds:
       turnPlanMocks.resolveAssistantFirstContactStateDocIds,
+  }
+})
+
+vi.mock('../src/assistant/onboarding-state.js', async () => {
+  const actual = await vi.importActual<
+    typeof import('../src/assistant/onboarding-state.ts')
+  >('../src/assistant/onboarding-state.ts')
+
+  return {
+    ...actual,
+    isAssistantOnboardingOpen: turnPlanMocks.isAssistantOnboardingOpen,
   }
 })
 
@@ -794,8 +804,8 @@ describe('assistant turn shared plan', () => {
       requestedWorkingDirectory: '/tmp/turn-plan-vault',
     })
     expect(turnPlanMocks.resolveAssistantFirstContactStateDocIds).not.toHaveBeenCalled()
-    expect(turnPlanMocks.hasAssistantSeenFirstContact).not.toHaveBeenCalled()
     expect(runtimeStateMocks.listAssistantSessions).not.toHaveBeenCalled()
+    expect(turnPlanMocks.isAssistantOnboardingOpen).not.toHaveBeenCalled()
   })
 
   it('derives first-contact state doc ids from the conversation policy audience and session binding fallbacks', async () => {
@@ -823,20 +833,10 @@ describe('assistant turn shared plan', () => {
     turnPlanMocks.resolveAssistantFirstContactStateDocIds.mockReturnValue([
       'onboarding/first-contact/doc-1',
     ])
+    turnPlanMocks.isAssistantOnboardingOpen.mockResolvedValue(true)
     turnPlanMocks.resolveAssistantOperatorAuthority.mockReturnValue(
       'accepted-inbound-message',
     )
-    runtimeStateMocks.listAssistantSessions.mockResolvedValue([
-      createSession({
-        actorId: 'bound-actor',
-        alias: 'turn-plan',
-        channel: 'telegram',
-        identityId: 'bound-identity',
-        sessionId: 'asst_turn_plan_binding',
-        threadId: 'bound-thread',
-        threadIsDirect: true,
-      }),
-    ])
 
     const resolved = {
       created: false,
@@ -870,13 +870,10 @@ describe('assistant turn shared plan', () => {
       threadId: 'bound-thread',
       threadIsDirect: true,
     })
-    expect(runtimeStateMocks.listAssistantSessions).toHaveBeenCalledWith(
+    expect(turnPlanMocks.isAssistantOnboardingOpen).toHaveBeenCalledWith(
       '/tmp/turn-plan-vault',
     )
-    expect(turnPlanMocks.hasAssistantSeenFirstContact).toHaveBeenCalledWith({
-      docIds: ['onboarding/first-contact/doc-1'],
-      vault: '/tmp/turn-plan-vault',
-    })
+    expect(runtimeStateMocks.listAssistantSessions).not.toHaveBeenCalled()
     expect(eligiblePlan.earlySessionOnboardingEligible).toBe(true)
     expect(eligiblePlan.firstContactStateDocIds).toEqual([
       'onboarding/first-contact/doc-1',
@@ -909,29 +906,8 @@ describe('assistant turn shared plan', () => {
       operatorAuthority: 'direct-operator',
     })
     turnPlanMocks.resolveAssistantFirstContactStateDocIds.mockReturnValue([])
+    turnPlanMocks.isAssistantOnboardingOpen.mockResolvedValue(true)
     turnPlanMocks.resolveAssistantOperatorAuthority.mockReturnValue('direct-operator')
-    runtimeStateMocks.listAssistantSessions.mockResolvedValue([
-      parseAssistantSessionRecord({
-        alias: 'local',
-        binding: {
-          actorId: null,
-          channel: null,
-          conversationKey: null,
-          delivery: null,
-          identityId: null,
-          threadId: null,
-          threadIsDirect: null,
-        },
-        createdAt: '2026-04-08T00:00:00.000Z',
-        lastTurnAt: null,
-        resumeState: null,
-        schema: 'murph.assistant-session.v1',
-        sessionId: 'asst_turn_plan_local',
-        target: createTarget(),
-        turnCount: 0,
-        updatedAt: '2026-04-08T00:00:00.000Z',
-      }),
-    ])
 
     const plan = await resolveAssistantTurnSharedPlan(
       {
@@ -972,15 +948,15 @@ describe('assistant turn shared plan', () => {
       threadId: null,
       threadIsDirect: null,
     })
-    expect(turnPlanMocks.hasAssistantSeenFirstContact).not.toHaveBeenCalled()
-    expect(runtimeStateMocks.listAssistantSessions).toHaveBeenCalledWith(
+    expect(turnPlanMocks.isAssistantOnboardingOpen).toHaveBeenCalledWith(
       '/tmp/turn-plan-vault',
     )
+    expect(runtimeStateMocks.listAssistantSessions).not.toHaveBeenCalled()
     expect(plan.earlySessionOnboardingEligible).toBe(true)
     expect(plan.firstContactStateDocIds).toEqual([])
   })
 
-  it('treats equal createdAt values as ambiguous and keeps onboarding eligible when first contact is still unseen', async () => {
+  it('stops onboarding eligibility when the shared onboarding lifecycle is already completed', async () => {
     turnPlanMocks.resolveAssistantCliAccessContext.mockReturnValue({
       env: {},
       rawCommand: 'vault-cli',
@@ -1005,17 +981,8 @@ describe('assistant turn shared plan', () => {
     turnPlanMocks.resolveAssistantFirstContactStateDocIds.mockReturnValue([
       'onboarding/first-contact/doc-1',
     ])
+    turnPlanMocks.isAssistantOnboardingOpen.mockResolvedValue(false)
     turnPlanMocks.resolveAssistantOperatorAuthority.mockReturnValue('direct-operator')
-    runtimeStateMocks.listAssistantSessions.mockResolvedValue([
-      createSession({
-        createdAt: '2026-04-08T00:00:00.000Z',
-        sessionId: 'asst_same_timestamp_later',
-      }),
-      createSession({
-        createdAt: '2026-04-08T00:00:00.000Z',
-        sessionId: 'asst_same_timestamp_first',
-      }),
-    ])
 
     const plan = await resolveAssistantTurnSharedPlan(
       {
@@ -1033,14 +1000,11 @@ describe('assistant turn shared plan', () => {
       },
     )
 
-    expect(runtimeStateMocks.listAssistantSessions).toHaveBeenCalledWith(
+    expect(turnPlanMocks.isAssistantOnboardingOpen).toHaveBeenCalledWith(
       '/tmp/turn-plan-vault',
     )
-    expect(turnPlanMocks.hasAssistantSeenFirstContact).toHaveBeenCalledWith({
-      docIds: ['onboarding/first-contact/doc-1'],
-      vault: '/tmp/turn-plan-vault',
-    })
-    expect(plan.earlySessionOnboardingEligible).toBe(true)
+    expect(runtimeStateMocks.listAssistantSessions).not.toHaveBeenCalled()
+    expect(plan.earlySessionOnboardingEligible).toBe(false)
   })
 })
 

@@ -429,6 +429,10 @@ test("hosted execution snapshots collapse into one workspace bundle and external
     await writeFile(path.join(assistantRuntimeRoot, "outbox", ".quarantine", "ignored.json"), "{\"ignored\":true}\n");
     await writeFile(path.join(assistantRuntimeRoot, "receipts", "turn_1.json"), "{\"receipt\":\"saved\"}\n");
     await writeFile(path.join(assistantRuntimeRoot, "sessions", "session_1.json"), "{\"session\":\"saved\"}\n");
+    await writeFile(
+      path.join(assistantRuntimeRoot, "state", "onboarding", "conversation.json"),
+      "{\"schemaVersion\":\"murph.assistant-onboarding.v1\",\"createdAt\":\"2026-04-23T00:00:00.000Z\",\"updatedAt\":\"2026-04-23T00:05:00.000Z\",\"completedAt\":\"2026-04-23T00:05:00.000Z\",\"completedReason\":\"user_answered\"}\n",
+    );
     await writeFile(path.join(assistantRuntimeRoot, "state", "onboarding", "first-contact", "bootstrap.json"), "{\"state\":\"scratch\"}\n");
     await writeFile(path.join(assistantRuntimeRoot, "status.json"), "{\"status\":\"running\"}\n");
     await writeFile(path.join(assistantRuntimeRoot, "transcripts", "session_1.jsonl"), "{\"role\":\"assistant\"}\n");
@@ -506,6 +510,12 @@ test("hosted execution snapshots collapse into one workspace bundle and external
       { expected: null, path: ".runtime/operations/assistant/diagnostics/events.jsonl", root: "vault" },
       { expected: null, path: ".runtime/operations/assistant/diagnostics/snapshot.json", root: "vault" },
       { expected: null, path: ".runtime/operations/assistant/cron/runs/cronrun_1.jsonl", root: "vault" },
+      {
+        expected:
+          "{\"schemaVersion\":\"murph.assistant-onboarding.v1\",\"createdAt\":\"2026-04-23T00:00:00.000Z\",\"updatedAt\":\"2026-04-23T00:05:00.000Z\",\"completedAt\":\"2026-04-23T00:05:00.000Z\",\"completedReason\":\"user_answered\"}\n",
+        path: ".runtime/operations/assistant/state/onboarding/conversation.json",
+        root: "vault",
+      },
       {
         expected: "{\"state\":\"scratch\"}\n",
         path: ".runtime/operations/assistant/state/onboarding/first-contact/bootstrap.json",
@@ -766,6 +776,10 @@ test("runtime-state portability defaults operational paths to machine-local unle
     portability: "portable",
   });
   expect(describeVaultLocalStateRelativePath(".runtime/operations/assistant/state/onboarding")).toMatchObject({
+    classification: "operational",
+    portability: "portable",
+  });
+  expect(describeVaultLocalStateRelativePath(".runtime/operations/assistant/state/onboarding/conversation.json")).toMatchObject({
     classification: "operational",
     portability: "portable",
   });

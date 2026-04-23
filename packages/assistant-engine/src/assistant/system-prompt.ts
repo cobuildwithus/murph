@@ -88,9 +88,10 @@ export function buildAssistantSystemPrompt(
     buildAssistantExecutionContextText({
       turnTrigger: input.turnTrigger ?? null,
     }),
-    buildAssistantEarlySessionOnboardingGuidanceText(
-      input.earlySessionOnboarding
-    ),
+    buildAssistantEarlySessionOnboardingGuidanceText({
+      assistantCommandAccessMode: input.assistantCommandAccessMode,
+      enabled: input.earlySessionOnboarding,
+    }),
     buildAssistantKnowledgeGuidanceText({
       assistantCommandAccessMode: input.assistantCommandAccessMode,
       assistantKnowledgeToolsAvailable:
@@ -333,12 +334,20 @@ function buildAssistantExecutionContextText(input: {
 - Treat the user prompt as the execution instructions for this scheduled run.`;
 }
 
-function buildAssistantEarlySessionOnboardingGuidanceText(
-  enabled: boolean
-): string | null {
-  if (!enabled) {
+function buildAssistantEarlySessionOnboardingGuidanceText(input: {
+  assistantCommandAccessMode: AssistantMurphCommandAccessMode;
+  enabled: boolean;
+}): string | null {
+  if (!input.enabled) {
     return null;
   }
+
+  const completionCommand =
+    input.assistantCommandAccessMode === "bound-tools"
+      ? "Use `vault.cli.run` to execute `vault-cli assistant onboarding complete --reason <user_answered|user_declined|concrete_request>`."
+      : input.assistantCommandAccessMode === "direct-cli"
+        ? "Use `vault-cli assistant onboarding complete --reason <user_answered|user_declined|concrete_request>`."
+        : "If no assistant command surface is available in this route, do not claim onboarding was marked complete.";
 
   return `Early-session onboarding guidance:
 
@@ -348,9 +357,9 @@ Intent:
 - Prefer one small next step per message. Do not front-load capabilities, examples, or health intake questions.
 
 When to use onboarding:
-- Use this only during the first turn of a brand-new user's first Murph session, while the exchange is still onboarding-like or open-ended.
+- Onboarding stays active until the assistant runtime marks it complete.
 - Choose the right next step from the visible transcript rather than assuming this is literally turn zero.
-- Do not use onboarding in later turns or later sessions, and do not force onboarding if the user has already moved into a concrete request.
+- Do not force onboarding if the user has already moved into a concrete request.
 - If the user asks for something specific, answer that request directly instead of onboarding them.
 
 First message:
@@ -366,6 +375,12 @@ ${code(
   )}
 - Ask this as its own message. Do not add extra examples unless the user seems unsure what to say.
 - If the user already gave their name, useful context, or a concrete request, do not repeat this question mechanically.
+
+Completion:
+- When the user has answered the opening context question meaningfully, clearly declines onboarding, or moves into a concrete request, mark onboarding complete as an internal action.
+- ${completionCommand}
+- Use \`user_answered\` when they gave their name, health context, or other useful setup context; \`user_declined\` when they opt out; \`concrete_request\` when they move straight into concrete help.
+- Do not mention the internal completion action to the user.
 
 How to handle replies:
 - Treat names, goals, preferences, wearables, meds or supplements, labs, and broad symptom mentions as context.
