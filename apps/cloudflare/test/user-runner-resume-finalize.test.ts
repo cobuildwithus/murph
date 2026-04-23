@@ -245,6 +245,7 @@ function createDurableObjectStateHarness(): DurableObjectStateLike {
 
   return {
     storage: {
+      delete: async (key: string): Promise<boolean> => storageValues.delete(key),
       deleteAlarm: async () => {},
       get: async <T,>(key: string): Promise<T | undefined> => (
         storageValues.get(key) as T | undefined

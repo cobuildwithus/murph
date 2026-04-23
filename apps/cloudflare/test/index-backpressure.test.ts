@@ -214,6 +214,9 @@ function createStorage() {
     },
     state: {
       storage: {
+        async delete(key: string): Promise<boolean> {
+          return values.delete(key);
+        },
         async deleteAlarm(): Promise<void> {},
         async get<T>(key: string): Promise<T | undefined> {
           return values.get(key) as T | undefined;
