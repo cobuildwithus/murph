@@ -32,6 +32,7 @@ import { VaultError } from "./errors.ts";
 import { parseFrontmatterDocument, stringifyFrontmatterDocument } from "./frontmatter.ts";
 import { generateRecordId } from "./ids.ts";
 import { addMeal } from "./mutations.ts";
+import { acquireCanonicalWriteLock, withCanonicalWriteLockScope } from "./operations/canonical-write-lock.ts";
 import {
   loadMarkdownRegistryDocuments,
   readRegistryRecord,
@@ -591,41 +592,55 @@ async function executeScheduledLogAction(input: {
 
 export async function executeScheduledLogOccurrence(input: ExecuteScheduledLogOccurrenceInput): Promise<ExecuteScheduledLogOccurrenceResult> {
   const occurrenceAt = normalizeOccurrenceAt(input.occurrenceAt);
-  const record = await readScheduledLog({ vaultRoot: input.vaultRoot, scheduledLogId: input.scheduledLogId });
-  const externalRef = buildScheduledLogExternalRef({ occurrenceAt, scheduledLogId: record.scheduledLogId });
-  const existing = await findEventByExternalRef({ vaultRoot: input.vaultRoot, ...externalRef });
-  if (existing) {
-    return {
-      actionKind: record.action.kind,
-      eventId: existing.id,
-      eventKind: existing.kind,
-      idempotent: true,
-      message: `Skipped scheduled log "${record.title}" because occurrence ${occurrenceAt} is already logged as ${existing.kind} ${existing.id}.`,
-      scheduledLogId: record.scheduledLogId,
-      skipped: true,
-    };
-  }
+  return await withCanonicalWriteLockScope(input.vaultRoot, async () => {
+    const lock = await acquireCanonicalWriteLock(input.vaultRoot);
 
-  if (record.status !== "active") {
-    return {
-      actionKind: record.action.kind,
-      eventId: null,
-      eventKind: null,
-      idempotent: false,
-      message: `Skipped scheduled log "${record.title}" because it is ${record.status}.`,
-      scheduledLogId: record.scheduledLogId,
-      skipped: true,
-    };
-  }
+    try {
+      const record = await readScheduledLog({ vaultRoot: input.vaultRoot, scheduledLogId: input.scheduledLogId });
+      const externalRef = buildScheduledLogExternalRef({ occurrenceAt, scheduledLogId: record.scheduledLogId });
+      const existing = await findEventByExternalRef({ vaultRoot: input.vaultRoot, ...externalRef });
+      if (existing) {
+        return {
+          actionKind: record.action.kind,
+          eventId: existing.id,
+          eventKind: existing.kind,
+          idempotent: true,
+          message: `Skipped scheduled log "${record.title}" because occurrence ${occurrenceAt} is already logged as ${existing.kind} ${existing.id}.`,
+          scheduledLogId: record.scheduledLogId,
+          skipped: true,
+        };
+      }
 
-  const written = await executeScheduledLogAction({ action: record.action, externalRef, occurrenceAt, scheduledLogId: record.scheduledLogId, vaultRoot: input.vaultRoot });
-  return {
-    actionKind: record.action.kind,
-    eventId: written.eventId,
-    eventKind: written.eventKind,
-    idempotent: false,
-    message: `Auto-logged scheduled log "${record.title}" as ${written.eventKind} ${written.eventId}.`,
-    scheduledLogId: record.scheduledLogId,
-    skipped: false,
-  };
+      if (record.status !== "active") {
+        return {
+          actionKind: record.action.kind,
+          eventId: null,
+          eventKind: null,
+          idempotent: false,
+          message: `Skipped scheduled log "${record.title}" because it is ${record.status}.`,
+          scheduledLogId: record.scheduledLogId,
+          skipped: true,
+        };
+      }
+
+      const written = await executeScheduledLogAction({
+        action: record.action,
+        externalRef,
+        occurrenceAt,
+        scheduledLogId: record.scheduledLogId,
+        vaultRoot: input.vaultRoot,
+      });
+      return {
+        actionKind: record.action.kind,
+        eventId: written.eventId,
+        eventKind: written.eventKind,
+        idempotent: false,
+        message: `Auto-logged scheduled log "${record.title}" as ${written.eventKind} ${written.eventId}.`,
+        scheduledLogId: record.scheduledLogId,
+        skipped: false,
+      };
+    } finally {
+      await lock.release();
+    }
+  });
 }
