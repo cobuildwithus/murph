@@ -806,8 +806,9 @@ export async function writeExperimentOutcomeRecord(input: {
   return {
     ...analysis,
     outcome: {
-      ...validatedOutcome,
+      ...analysis.outcome,
       outcomeId,
+      generatedAt,
       schema: validatedOutcome.schema ?? validatedOutcome.schemaVersion,
     },
     outcomePath,

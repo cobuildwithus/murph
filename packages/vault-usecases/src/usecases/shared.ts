@@ -9,7 +9,6 @@ import {
   type RawImportManifest,
   type JsonObject,
 } from "@murphai/contracts"
-import { parseRawImportManifest } from "@murphai/core"
 
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors"
 import {
@@ -17,11 +16,13 @@ import {
   isHealthQueryableRecordId,
 } from "../health-cli-descriptors.js"
 import { loadJsonInputObject } from "../json-input.js"
+import { loadRuntimeModule } from "../runtime-import.js"
+import { createRuntimeUnavailableError } from "../runtime-errors.js"
 import {
   describeQueryLookupConstraint,
   inferQueryIdEntityKind,
   isQueryableQueryLookupId,
-} from "../query-runtime.js"
+} from "../query-id-families.js"
 import {
   applyRecordPatch,
   type JsonObject as RecordMutationJsonObject,
@@ -43,6 +44,26 @@ const DEFAULT_GENERIC_LIST_EXCLUDED_FAMILIES = new Set([
   "core",
 ])
 const BLOOD_TEST_SPECIMEN_TYPE_SET = new Set<string>(BLOOD_TEST_SPECIMEN_TYPES)
+
+interface SharedCoreRuntime {
+  parseRawImportManifest(value: unknown): RawImportManifest
+}
+
+function isSharedCoreRuntime(value: unknown): value is SharedCoreRuntime {
+  return (
+    typeof value === "object"
+    && value !== null
+    && typeof Reflect.get(value, "parseRawImportManifest") === "function"
+  )
+}
+
+async function loadSharedCoreRuntime(): Promise<SharedCoreRuntime> {
+  const runtime = await loadRuntimeModule<unknown>("@murphai/core")
+  if (!isSharedCoreRuntime(runtime)) {
+    throw new TypeError("Core runtime package did not match the expected module shape.")
+  }
+  return runtime
+}
 
 function isBloodTestEntity(entity: QueryEntity) {
   if (
@@ -184,6 +205,13 @@ export async function readRawImportManifest(
     )
   }
 
+  let parseRawImportManifest: SharedCoreRuntime["parseRawImportManifest"]
+  try {
+    ({ parseRawImportManifest } = await loadSharedCoreRuntime())
+  } catch (error) {
+    throw createRuntimeUnavailableError("raw import manifest reads", error)
+  }
+
   try {
     return parseRawImportManifest(manifest)
   } catch (error) {
@@ -282,16 +310,6 @@ export function requirePayloadObjectField(payload: JsonObject, fieldName: string
 
   return value
 }
-
-export { applyRecordPatch } from "./record-mutations.js"
-export {
-  appendJournalText,
-  checkpointExperimentRecord,
-} from "./experiment-journal-vault.js"
-export {
-  createExplicitHealthCoreServices,
-  createExplicitHealthQueryServices,
-} from "./explicit-health-family-services.js"
 
 export function asEntityEnvelope(
   vault: string,

@@ -1,48 +1,38 @@
-import {
-  type BuildExportPackOptions as SharedBuildExportPackOptions,
-  type CanonicalEntity as SharedCanonicalEntity,
-  type CanonicalEntityFamily as SharedCanonicalEntityFamily,
-  type EntityFilter as SharedEntityFilter,
-  type ExportPack as SharedExportPack,
-  type ExportPackFile as SharedExportPackFile,
-  type MealNutritionDayTotal as SharedMealNutritionDayTotal,
-  type MealNutritionMetricTotal as SharedMealNutritionMetricTotal,
-  type MealNutritionTotals as SharedMealNutritionTotals,
-  type MealNutritionTotalsOptions as SharedMealNutritionTotalsOptions,
-  type MealNutritionTotalsResult as SharedMealNutritionTotalsResult,
-  type QueryProjectionStatus as SharedQueryProjectionStatus,
-  type RebuildQueryProjectionResult as SharedQueryProjectionRebuildResult,
-  type SearchCitation as SharedSearchCitation,
-  type SearchFilters as SharedSearchFilters,
-  type SearchHit as SharedSearchHit,
-  type SearchResult as SharedSearchResult,
-  type TimelineEntry as SharedTimelineEntry,
-  type TimelineFilters as SharedTimelineFilters,
-  type VaultEntitiesByFamily as SharedVaultEntitiesByFamily,
-  type VaultReadModel as SharedVaultReadModel,
-  type WearableActivitySummary as WearableActivitySummaryShape,
-  type WearableBodyStateSummary as WearableBodyStateSummaryShape,
-  type WearableDriftSummary as WearableDriftSummaryShape,
-  type WearableDaySummary as WearableDaySummaryShape,
-  type WearableLatestSummary as WearableLatestSummaryShape,
-  type WearableRecoverySummary as WearableRecoverySummaryShape,
-  type WearableSleepSummary as WearableSleepSummaryShape,
-  type WearableMetricLatestSummary as WearableMetricLatestSummaryShape,
-  type WearableMetricSummaryFilters as WearableMetricSummaryFiltersShape,
-  type WearableMetricTrendSummary as WearableMetricTrendSummaryShape,
-  type WearableSourceHealthSummary as WearableSourceHealthSummaryShape,
-  type WearableSummaryFilters as WearableSummaryFiltersShape,
-} from '@murphai/query'
 import type {
-  ExperimentProgressMetricSignal,
-  ExperimentProtocolRef,
-  ExperimentStatus,
-} from '@murphai/contracts'
-import {
-  describeLookupConstraint as describeSharedLookupConstraint,
-  inferIdEntityKind as inferSharedIdEntityKind,
-  isQueryableLookupId as isSharedQueryableLookupId,
-} from '@murphai/query/id-families'
+  BuildExportPackOptions as SharedBuildExportPackOptions,
+  CanonicalEntity as SharedCanonicalEntity,
+  CanonicalEntityFamily as SharedCanonicalEntityFamily,
+  EntityFilter as SharedEntityFilter,
+  ExportPack as SharedExportPack,
+  ExportPackFile as SharedExportPackFile,
+  MealNutritionDayTotal as SharedMealNutritionDayTotal,
+  MealNutritionMetricTotal as SharedMealNutritionMetricTotal,
+  MealNutritionTotals as SharedMealNutritionTotals,
+  MealNutritionTotalsOptions as SharedMealNutritionTotalsOptions,
+  MealNutritionTotalsResult as SharedMealNutritionTotalsResult,
+  QueryProjectionStatus as SharedQueryProjectionStatus,
+  RebuildQueryProjectionResult as SharedQueryProjectionRebuildResult,
+  SearchCitation as SharedSearchCitation,
+  SearchFilters as SharedSearchFilters,
+  SearchHit as SharedSearchHit,
+  SearchResult as SharedSearchResult,
+  TimelineEntry as SharedTimelineEntry,
+  TimelineFilters as SharedTimelineFilters,
+  VaultEntitiesByFamily as SharedVaultEntitiesByFamily,
+  VaultReadModel as SharedVaultReadModel,
+  WearableActivitySummary as WearableActivitySummaryShape,
+  WearableBodyStateSummary as WearableBodyStateSummaryShape,
+  WearableDriftSummary as WearableDriftSummaryShape,
+  WearableDaySummary as WearableDaySummaryShape,
+  WearableLatestSummary as WearableLatestSummaryShape,
+  WearableRecoverySummary as WearableRecoverySummaryShape,
+  WearableSleepSummary as WearableSleepSummaryShape,
+  WearableMetricLatestSummary as WearableMetricLatestSummaryShape,
+  WearableMetricSummaryFilters as WearableMetricSummaryFiltersShape,
+  WearableMetricTrendSummary as WearableMetricTrendSummaryShape,
+  WearableSourceHealthSummary as WearableSourceHealthSummaryShape,
+  WearableSummaryFilters as WearableSummaryFiltersShape,
+} from '@murphai/query'
 import { loadRuntimeModule } from './runtime-import.js'
 
 export type QueryEntityFamily = SharedCanonicalEntityFamily
@@ -67,112 +57,6 @@ export type QueryMealNutritionTotals = SharedMealNutritionTotals
 export type QueryMealNutritionDayTotal = SharedMealNutritionDayTotal
 export type QueryMealNutritionTotalsOptions = SharedMealNutritionTotalsOptions
 export type QueryMealNutritionTotalsResult = SharedMealNutritionTotalsResult
-export interface QueryExperimentMetricPeriodSummary {
-  daysWithData: number
-  mean: number | null
-  totalDays: number
-  unit: string | null
-}
-export interface QueryExperimentMetricResult {
-  baselineDayCount: number
-  baselineMean: number | null
-  baseline?: QueryExperimentMetricPeriodSummary
-  biomarkerKey: string
-  completeness: "insufficient" | "partial" | "good"
-  deltaAbs: number | null
-  deltaPct: number | null
-  expectedDirection: "increase" | "decrease" | "stabilize" | null
-  interventionDayCount: number
-  interventionMean: number | null
-  intervention?: QueryExperimentMetricPeriodSummary
-  label: string
-  movedAsExpected: boolean | null
-  unit: string | null
-}
-export interface QueryExperimentWindows {
-  baselineEnd: string | null
-  baselineStart: string | null
-  interventionEnd: string | null
-  interventionStart: string | null
-}
-export interface QueryExperimentProgressSummary {
-  schemaVersion: "murph.experiment-progress.v1"
-  schema: "murph.experiment-progress.v1"
-  asOf: string
-  adherence: {
-    completedSessions: number
-    expectedSessionsByNow: number | null
-    minimumUsefulSessions: number | null
-    sessionEventIds?: string[]
-    status: "not_started" | "behind" | "on_track" | "met_minimum" | "met_target" | "unknown"
-    targetSessions: number | null
-  }
-  confounders: string[]
-  dataCoverage: {
-    baselineDaysAvailable: number
-    interventionDaysAvailable: number
-    primaryBiomarkerKey?: string | null
-    primaryMetricDaysAvailable: number
-    status:
-      | "no_wearable_data"
-      | "insufficient"
-      | "partial"
-      | "sufficient_for_progress"
-      | "ready_for_review"
-    wearableProviders: string[]
-  }
-  dayInRun: number | null
-  experiment: {
-    id: string
-    slug: string
-    status: ExperimentStatus
-    title: string
-  }
-  phase: "planned" | "baseline" | "intervention" | "review_due" | "completed" | "paused" | "abandoned"
-  protocolRef: ExperimentProtocolRef | null
-  recommendation: {
-    action: "skip" | "remind" | "summary" | "review"
-    reason: string
-    shouldNotifyUser: boolean
-  }
-  earlySignals?: ExperimentProgressMetricSignal[]
-  signals: QueryExperimentMetricResult[]
-  windows: QueryExperimentWindows
-}
-export interface QueryExperimentOutcomeSummary {
-  schemaVersion: "murph.experiment-outcome.v1"
-  schema: "murph.experiment-outcome.v1"
-  outcomeId?: string
-  generatedAt?: string
-  adherenceSummary: {
-    adherenceLevel?: "unknown" | "low" | "partial" | "good"
-    completedSessions: number
-    minimumUsefulSessions: number | null
-    status: "not_started" | "behind" | "on_track" | "met_minimum" | "met_target" | "unknown"
-    targetSessions: number | null
-  }
-  asOf: string
-  conclusion: {
-    caveats: string[]
-    headline: string
-    plainLanguage: string
-  }
-  confidence: {
-    level: "low" | "medium" | "high"
-    reasons: string[]
-  }
-  confounders: string[]
-  experiment: {
-    id: string
-    slug: string
-    status: ExperimentStatus
-    title: string
-  }
-  metricResults: QueryExperimentMetricResult[]
-  protocolRef: ExperimentProtocolRef | null
-  runRef?: ExperimentProtocolRef
-  windows: QueryExperimentWindows
-}
 
 export type QueryWearableSummaryFilters = WearableSummaryFiltersShape
 export type QueryWearableMetricSummaryFilters = WearableMetricSummaryFiltersShape
@@ -187,65 +71,18 @@ export type QueryWearableDriftSummary = WearableDriftSummaryShape
 export type QueryWearableRecoverySummary = WearableRecoverySummaryShape
 export type QueryWearableSourceHealthSummary = WearableSourceHealthSummaryShape
 
-type SharedQueryRuntimeModule = typeof import('@murphai/query')
+type OwnerQueryRuntimeModule = typeof import('@murphai/query')
 
-type SharedQueryRuntimeBaseModule = Pick<
-  SharedQueryRuntimeModule,
-  | 'buildExportPack'
-  | 'buildTimeline'
-  | 'describeLookupConstraint'
-  | 'getQueryProjectionStatus'
-  | 'inferIdEntityKind'
-  | 'isQueryableLookupId'
-  | 'listEntities'
-  | 'listSupplements'
-  | 'lookupEntityById'
-  | 'readVault'
-  | 'readVaultTolerant'
-  | 'rebuildQueryProjection'
-  | 'searchVaultRuntime'
-  | 'showSupplement'
-  | 'showSupplementCompound'
-  | 'summarizeWearableActivity'
-  | 'summarizeWearableBodyState'
-  | 'summarizeWearableDay'
-  | 'summarizeWearableLatest'
-  | 'summarizeWearableMetricLatest'
-  | 'summarizeWearableMetricTrend'
-  | 'summarizeWearableRecovery'
-  | 'summarizeWearableSleep'
-  | 'summarizeWearableSourceHealth'
-  | 'explainWearableDrift'
->
-
-export interface QueryRuntimeModule extends SharedQueryRuntimeBaseModule {
-  analyzeExperimentOutcome(
-    vault: QueryVaultReadModel,
-    slug: string,
-    options?: { asOf?: string },
-  ): QueryExperimentOutcomeSummary
-  readMealNutritionTotals(
-    vaultRoot: string,
-    options?: QueryMealNutritionTotalsOptions,
-  ): Promise<QueryMealNutritionTotalsResult>
-  summarizeExperimentProgress(
-    vault: QueryVaultReadModel,
-    slug: string,
-    options?: { asOf?: string },
-  ): QueryExperimentProgressSummary
-}
-
-export function inferQueryIdEntityKind(id: string): string {
-  return inferSharedIdEntityKind(id)
-}
-
-export function isQueryableQueryLookupId(id: string): boolean {
-  return isSharedQueryableLookupId(id)
-}
-
-export function describeQueryLookupConstraint(id: string): string | null {
-  return describeSharedLookupConstraint(id)
-}
+export type QueryRuntimeModule = OwnerQueryRuntimeModule
+export type QueryExperimentProgressSummary =
+  ReturnType<QueryRuntimeModule['summarizeExperimentProgress']>
+export type QueryExperimentOutcomeSummary =
+  ReturnType<QueryRuntimeModule['analyzeExperimentOutcome']>
+export type QueryExperimentMetricResult =
+  QueryExperimentOutcomeSummary['metricResults'][number]
+export type QueryExperimentMetricPeriodSummary =
+  NonNullable<QueryExperimentMetricResult['baseline']>
+export type QueryExperimentWindows = QueryExperimentProgressSummary['windows']
 
 export async function loadQueryRuntime(): Promise<QueryRuntimeModule> {
   return loadRuntimeModule<QueryRuntimeModule>('@murphai/query')

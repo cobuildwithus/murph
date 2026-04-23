@@ -184,4 +184,68 @@ describe("health registry family seams", () => {
       await rm(vaultRoot, { force: true, recursive: true });
     }
   });
+
+  it("lets the core writer derive a supplement slug unless the caller explicitly supplies one", async () => {
+    const upsertCalls: Array<Record<string, unknown>> = [];
+    const services = createExplicitHealthCoreServices(async () => ({
+      core: {
+        async readProtocolItem() {
+          return {
+            entity: {
+              protocolId: "prot_01JSHARED000000000000000010",
+              kind: "supplement",
+              title: "Old title",
+              status: "active",
+              startedOn: "2026-03-12",
+              stoppedOn: null,
+              substance: null,
+              dose: null,
+              unit: null,
+              schedule: null,
+              brand: null,
+              manufacturer: null,
+              servingSize: null,
+              ingredients: [],
+              relatedGoalIds: [],
+              relatedConditionIds: [],
+              group: "supplements",
+            },
+          };
+        },
+        async upsertProtocolItem(input: Record<string, unknown>) {
+          upsertCalls.push(input);
+
+          return {
+            record: {
+              entity: {
+                protocolId: "prot_01JSHARED000000000000000010",
+              },
+              document: {
+                relativePath: "bank/protocols/supplements/magnesium-glycinate.md",
+              },
+            },
+            created: false,
+          };
+        },
+      } as never,
+    }));
+
+    await services.renameSupplement({
+      lookup: "prot_01JSHARED000000000000000010",
+      requestId: null,
+      title: "Magnesium Glycinate",
+      vault: "./vault",
+    });
+    await services.renameSupplement({
+      lookup: "prot_01JSHARED000000000000000010",
+      requestId: null,
+      slug: "custom-slug",
+      title: "Magnesium Glycinate",
+      vault: "./vault",
+    });
+
+    expect(upsertCalls).toHaveLength(2);
+    expect(Object.hasOwn(upsertCalls[0] ?? {}, "slug")).toBe(false);
+    expect(upsertCalls[1]?.slug).toBe("custom-slug");
+  });
 });

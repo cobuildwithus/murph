@@ -9,6 +9,8 @@ import type {
   EntityLookupInput,
   HealthCoreServiceMethods,
   HealthListInput,
+  HealthQueryRuntimeListMethodName,
+  HealthQueryRuntimeShowMethodName,
   HealthQueryServiceMethods,
   JsonFileInput,
 } from "../health-cli-method-types.js";
@@ -65,12 +67,12 @@ interface RegistryDocFamilyConfig<TIdField extends string> {
     created?: boolean;
   }>;
   upsertServiceMethod: ExplicitHealthCoreServiceMethodName;
-  show(query: QueryRuntimeModule, vaultRoot: string, lookup: string): Promise<JsonObject | null>;
+  show(query: QueryRuntimeModule, vaultRoot: string, lookup: string): Promise<object | null>;
   list(
     query: QueryRuntimeModule,
     vaultRoot: string,
     options: { limit?: number; status?: string },
-  ): Promise<JsonObject[]>;
+  ): Promise<object[]>;
 }
 
 const REGISTRY_DOC_ENTITY_OMIT_KEYS = new Set([
@@ -157,17 +159,17 @@ function callRegistryRuntimeUpsert(
 
 function callRegistryRuntimeShow(
   query: QueryRuntimeModule,
-  methodName: string,
+  methodName: HealthQueryRuntimeShowMethodName,
   vaultRoot: string,
   lookup: string,
-): Promise<JsonObject | null> {
-  const method = query[methodName as keyof QueryRuntimeModule];
+): Promise<object | null> {
+  const method = query[methodName];
 
   if (typeof method !== "function") {
     throw new Error(`Health query runtime method "${methodName}" is not available.`);
   }
 
-  return (method as (vaultRoot: string, lookup: string) => Promise<JsonObject | null>)(
+  return (method as (vaultRoot: string, lookup: string) => Promise<object | null>)(
     vaultRoot,
     lookup,
   );
@@ -175,11 +177,11 @@ function callRegistryRuntimeShow(
 
 function callRegistryRuntimeList(
   query: QueryRuntimeModule,
-  methodName: string,
+  methodName: HealthQueryRuntimeListMethodName,
   vaultRoot: string,
   options: { limit?: number; status?: string },
-): Promise<JsonObject[]> {
-  const method = query[methodName as keyof QueryRuntimeModule];
+): Promise<object[]> {
+  const method = query[methodName];
 
   if (typeof method !== "function") {
     throw new Error(`Health query runtime method "${methodName}" is not available.`);
@@ -188,7 +190,7 @@ function callRegistryRuntimeList(
   return (method as (
     vaultRoot: string,
     options: { limit?: number; status?: string },
-  ) => Promise<JsonObject[]>)(vaultRoot, options);
+  ) => Promise<object[]>)(vaultRoot, options);
 }
 
 function buildSharedRegistryDocFamilyConfig(
@@ -212,10 +214,20 @@ function buildSharedRegistryDocFamilyConfig(
     },
     upsertServiceMethod: command.upsertServiceMethod as ExplicitHealthCoreServiceMethodName,
     show(query, vaultRoot, lookup) {
-      return callRegistryRuntimeShow(query, command.runtimeShowMethod, vaultRoot, lookup);
+      return callRegistryRuntimeShow(
+        query,
+        command.runtimeShowMethod as HealthQueryRuntimeShowMethodName,
+        vaultRoot,
+        lookup,
+      );
     },
     list(query, vaultRoot, options) {
-      return callRegistryRuntimeList(query, command.runtimeListMethod, vaultRoot, options);
+      return callRegistryRuntimeList(
+        query,
+        command.runtimeListMethod as HealthQueryRuntimeListMethodName,
+        vaultRoot,
+        options,
+      );
     },
   };
 }
@@ -224,11 +236,11 @@ const registryDocFamilyConfigs: readonly RegistryDocFamilyConfig<string>[] =
   healthRegistryFamilies.map((family) => buildSharedRegistryDocFamilyConfig(family));
 
 function firstNonEmptyString(
-  record: JsonObject,
+  record: object,
   keys: readonly string[],
 ): string | null {
   for (const key of keys) {
-    const value = record[key];
+    const value = Reflect.get(record, key);
     if (typeof value === "string" && value.trim().length > 0) {
       return value.trim();
     }
@@ -238,11 +250,11 @@ function firstNonEmptyString(
 }
 
 function firstRawString(
-  record: JsonObject,
+  record: object,
   keys: readonly string[],
 ): string | null {
   for (const key of keys) {
-    const value = record[key];
+    const value = Reflect.get(record, key);
     if (typeof value === "string" && value.trim().length > 0) {
       return value;
     }
@@ -255,6 +267,10 @@ function stringArray(value: unknown) {
   return Array.isArray(value)
     ? value.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
     : [];
+}
+
+function toKeyedRecord(value: object): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(value))
 }
 
 function requireScaffoldTemplate(
@@ -281,7 +297,7 @@ function buildEventLedgerUpsertResult(
   };
 }
 
-function toRegistryDocEntityData(record: JsonObject) {
+function toRegistryDocEntityData(record: object) {
   const dataSource = readRegistryRecordEntity(record);
 
   return Object.fromEntries(
@@ -294,7 +310,7 @@ function toRegistryDocEntityData(record: JsonObject) {
 
 function toRegistryDocReadEntity(
   config: Pick<RegistryDocFamilyConfig<string>, "kind" | "readEntityIdKeys">,
-  record: JsonObject,
+  record: object,
 ) {
   const data = toRegistryDocEntityData(record);
   const entity = readRegistryRecordEntity(record);
@@ -323,7 +339,7 @@ function toRegistryDocReadEntity(
 
 function toRegistryDocListEntity(
   config: Pick<RegistryDocFamilyConfig<string>, "kind" | "readEntityIdKeys">,
-  record: JsonObject,
+  record: object,
 ) {
   const data = toRegistryDocEntityData(record)
   const entity = readRegistryRecordEntity(record)
@@ -350,7 +366,7 @@ function toRegistryDocListEntity(
   })
 }
 
-function toAssessmentReadEntity(record: JsonObject) {
+function toAssessmentReadEntity(record: object) {
   const data = toRegistryDocEntityData(record);
 
   return {
@@ -363,12 +379,12 @@ function toAssessmentReadEntity(record: JsonObject) {
     data,
     links: buildEntityLinks({
       data,
-      relatedIds: stringArray(record.relatedIds),
+      relatedIds: stringArray(Reflect.get(record, "relatedIds")),
     }),
   };
 }
 
-function toAssessmentListEntity(record: JsonObject) {
+function toAssessmentListEntity(record: object) {
   const data = toRegistryDocEntityData(record)
 
   return toListEntity({
@@ -381,16 +397,17 @@ function toAssessmentListEntity(record: JsonObject) {
     data,
     links: buildEntityLinks({
       data,
-      relatedIds: stringArray(record.relatedIds),
+      relatedIds: stringArray(Reflect.get(record, "relatedIds")),
     }),
   })
 }
 
-function toNestedHealthEntityData(record: JsonObject) {
+function toNestedHealthEntityData(record: object) {
+  const rawData = Reflect.get(record, "data")
   const dataSource =
-    typeof record.data === "object" && record.data !== null && !Array.isArray(record.data)
-      ? (record.data as JsonObject)
-      : record;
+    typeof rawData === "object" && rawData !== null && !Array.isArray(rawData)
+      ? toKeyedRecord(rawData)
+      : record
 
   return Object.fromEntries(
     Object.entries(dataSource).filter(
@@ -400,19 +417,21 @@ function toNestedHealthEntityData(record: JsonObject) {
   );
 }
 
-function readRegistryRecordEntity(record: JsonObject): JsonObject {
-  return typeof record.entity === "object" && record.entity !== null && !Array.isArray(record.entity)
-    ? (record.entity as JsonObject)
-    : record;
+function readRegistryRecordEntity(record: object): Record<string, unknown> {
+  const entity = Reflect.get(record, "entity")
+  return typeof entity === "object" && entity !== null && !Array.isArray(entity)
+    ? toKeyedRecord(entity)
+    : toKeyedRecord(record)
 }
 
-function readRegistryRecordDocument(record: JsonObject): JsonObject {
-  return typeof record.document === "object" && record.document !== null && !Array.isArray(record.document)
-    ? (record.document as JsonObject)
-    : record;
+function readRegistryRecordDocument(record: object): Record<string, unknown> {
+  const document = Reflect.get(record, "document")
+  return typeof document === "object" && document !== null && !Array.isArray(document)
+    ? toKeyedRecord(document)
+    : toKeyedRecord(record)
 }
 
-function toBloodTestReadEntity(record: JsonObject) {
+function toBloodTestReadEntity(record: object) {
   const data = toNestedHealthEntityData(record);
 
   return {
@@ -431,12 +450,12 @@ function toBloodTestReadEntity(record: JsonObject) {
     data,
     links: buildEntityLinks({
       data,
-      relatedIds: stringArray(record.relatedIds),
+      relatedIds: stringArray(Reflect.get(record, "relatedIds")),
     }),
   };
 }
 
-function toBloodTestListEntity(record: JsonObject) {
+function toBloodTestListEntity(record: object) {
   const data = toNestedHealthEntityData(record)
 
   return toListEntity({
@@ -455,21 +474,13 @@ function toBloodTestListEntity(record: JsonObject) {
     data,
     links: buildEntityLinks({
       data,
-      relatedIds: stringArray(record.relatedIds),
+      relatedIds: stringArray(Reflect.get(record, "relatedIds")),
     }),
   })
 }
 
-function slugifyLookup(value: string): string {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/gu, "-")
-    .replace(/^-+|-+$/gu, "");
-}
-
 function toSupplementEntityData(record: object) {
-  const rawRecord = readRegistryRecordEntity(record as JsonObject);
+  const rawRecord = readRegistryRecordEntity(record);
 
   return Object.fromEntries(
     Object.entries(rawRecord).filter(
@@ -480,8 +491,8 @@ function toSupplementEntityData(record: object) {
 }
 
 function toSupplementReadEntity(record: object) {
-  const rawRecord = readRegistryRecordEntity(record as JsonObject);
-  const rawDocument = readRegistryRecordDocument(record as JsonObject);
+  const rawRecord = readRegistryRecordEntity(record);
+  const rawDocument = readRegistryRecordDocument(record);
   const data = toSupplementEntityData(record);
   const id =
     firstRawString(rawRecord, ["id"]) ??
@@ -503,8 +514,8 @@ function toSupplementReadEntity(record: object) {
 }
 
 function toSupplementListEntity(record: object) {
-  const rawRecord = readRegistryRecordEntity(record as JsonObject)
-  const rawDocument = readRegistryRecordDocument(record as JsonObject)
+  const rawRecord = readRegistryRecordEntity(record)
+  const rawDocument = readRegistryRecordDocument(record)
   const data = toSupplementEntityData(record)
   const id =
     firstRawString(rawRecord, ["id"]) ??
@@ -535,14 +546,12 @@ async function renameSupplementRecord(
 ) {
   const lookup = input.lookup.trim();
   const title = input.title.trim();
-  const slugInput =
+  const slug =
     typeof input.slug === "string" ? input.slug.trim() || undefined : undefined;
 
   if (!title) {
     throw new VaultCliError("contract_invalid", "title must be a non-empty string.");
   }
-
-  const slug = slugInput ?? slugifyLookup(title);
   const { core } = await loadRuntime();
 
   try {
@@ -560,7 +569,7 @@ async function renameSupplementRecord(
     const result = await core.upsertProtocolItem({
       vaultRoot: input.vault,
       protocolId: existing.entity.protocolId,
-      slug,
+      ...(slug ? { slug } : {}),
       allowSlugRename: true,
       title,
       kind: existing.entity.kind,

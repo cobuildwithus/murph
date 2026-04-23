@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -27,7 +27,7 @@ import {
   describeQueryLookupConstraint,
   inferQueryIdEntityKind,
   isQueryableQueryLookupId,
-} from "../src/query-runtime.ts";
+} from "../src/query-id-families.ts";
 import { importWithMocks } from "./mock-import.ts";
 
 import type { QueryEntity } from "../src/query-runtime.ts";
@@ -275,6 +275,45 @@ describe("query helper primitives", () => {
         name: "VaultCliError",
         code: "invalid_json",
         message: "payload must contain a JSON object.",
+      });
+    } finally {
+      await rm(tempDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it("reports raw import manifest runtime wiring failures separately from manifest validation", async () => {
+    const tempDirectory = await mkdtemp(path.join(tmpdir(), "vault-usecases-manifest-runtime-"));
+    const manifestRelativePath = "raw/documents/2026/04/doc_loader/manifest.json";
+    const manifestAbsolutePath = path.join(tempDirectory, manifestRelativePath);
+
+    await mkdir(path.dirname(manifestAbsolutePath), { recursive: true });
+    await writeFile(
+      manifestAbsolutePath,
+      JSON.stringify({
+        importId: "xfm_loader",
+      }),
+      "utf8",
+    );
+
+    const sharedModule = await importWithMocks<typeof import("../src/usecases/shared.ts")>(
+      "../src/usecases/shared.ts",
+      {
+        "@murphai/core": async () => {
+          const actual = await vi.importActual<Record<string, unknown>>("@murphai/core");
+          return {
+            ...actual,
+            parseRawImportManifest: undefined,
+          };
+        },
+      },
+    );
+
+    try {
+      await expect(
+        sharedModule.readRawImportManifest(tempDirectory, manifestRelativePath),
+      ).rejects.toMatchObject({
+        name: "VaultCliError",
+        code: "runtime_unavailable",
       });
     } finally {
       await rm(tempDirectory, { recursive: true, force: true });
