@@ -82,6 +82,9 @@ async function runAttachmentParseJobAttempt(
     return null;
   }
 
+  let publishedAttemptDirectoryPath: string | null = null;
+  let keepPublishedAttempt = false;
+
   try {
     const artifact = await resolveAttachmentArtifact({
       vaultRoot: input.vaultRoot,
@@ -100,6 +103,7 @@ async function runAttachmentParseJobAttempt(
       vaultRoot: input.vaultRoot,
       output: parsed.output,
     });
+    publishedAttemptDirectoryPath = published.attemptDirectoryPath;
     const transcriptOnly = isTranscriptOnlyArtifact(artifact.kind);
     const completedJob = input.runtime.completeAttachmentParseJob({
       attempt: job.attempts,
@@ -110,9 +114,9 @@ async function runAttachmentParseJobAttempt(
       transcriptText: transcriptOnly ? parsed.output.text : null,
     });
     if (!completedJob.applied) {
-      await removePublishedArtifacts(input.vaultRoot, published.attemptDirectoryPath);
       return STALE_PARSE_ATTEMPT;
     }
+    keepPublishedAttempt = true;
 
     return {
       status: "succeeded",
@@ -139,6 +143,10 @@ async function runAttachmentParseJobAttempt(
       errorCode,
       errorMessage,
     };
+  } finally {
+    if (publishedAttemptDirectoryPath && !keepPublishedAttempt) {
+      await removePublishedArtifacts(input.vaultRoot, publishedAttemptDirectoryPath);
+    }
   }
 }
 

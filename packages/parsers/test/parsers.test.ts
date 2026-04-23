@@ -53,11 +53,21 @@ async function makeTempDirectory(name: string): Promise<string> {
 
 async function writeExternalFile(directory: string, fileName: string, content: string): Promise<string> {
   const filePath = path.join(directory, fileName);
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
   await fs.writeFile(filePath, content, "utf8");
   return filePath;
 }
 
 async function writeExecutableFile(directory: string, fileName: string, content: string): Promise<string> {
+  if (process.platform === "win32" && path.extname(fileName) === "") {
+    await writeExternalFile(directory, `${fileName}.js`, content);
+    return writeExternalFile(
+      directory,
+      `${fileName}.cmd`,
+      `@echo off\r\n"${process.execPath}" "%~dpn0.js" %*\r\n`,
+    );
+  }
+
   const filePath = await writeExternalFile(directory, fileName, content);
   await fs.chmod(filePath, 0o755);
   return filePath;
@@ -104,7 +114,12 @@ test("audio preparation accepts WAV directly and requires ffmpeg for other audio
 
 test("shared executable helpers preserve lazy resolution, availability, and missing-tool errors", async () => {
   const directory = await makeTempDirectory("murph-parser-executable");
-  const executablePath = await writeExternalFile(directory, "fake-tool", "tool-placeholder");
+  const executablePath = await writeExecutableFile(
+    directory,
+    "fake-tool",
+    "#!/usr/bin/env node\nprocess.exit(0);\n",
+  );
+  const nonExecutablePath = await writeExternalFile(directory, "fake-tool.txt", "tool-placeholder");
   const previousCommand = process.env.TEST_COMMAND;
 
   try {
@@ -128,6 +143,13 @@ test("shared executable helpers preserve lazy resolution, availability, and miss
     });
 
     process.env.TEST_COMMAND = "";
+    assert.equal(
+      await resolveConfiguredExecutable({
+        envValue: () => process.env.TEST_COMMAND,
+      }),
+      null,
+    );
+    process.env.TEST_COMMAND = nonExecutablePath;
     assert.equal(
       await resolveConfiguredExecutable({
         envValue: () => process.env.TEST_COMMAND,
@@ -254,9 +276,191 @@ test("parser toolchain doctor reports missing whisper model files clearly", asyn
     source: "config",
     reason: "Whisper model path does not exist.",
   });
+  const configured = await createConfiguredParserRegistry({ vaultRoot });
+  assert.deepEqual(configured.doctor.tools.whisper, doctor.tools.whisper);
+  const whisperProvider = configured.registry.providers.find((provider) => provider.id === "whisper.cpp");
+  assert.ok(whisperProvider);
+  assert.deepEqual(await whisperProvider.discover(), {
+    available: false,
+    reason: "Whisper model path does not exist.",
+    executablePath: fakeToolPath,
+  });
+  const audioPath = await writeExternalFile(vaultRoot, "missing-model.wav", "wav-placeholder");
+  await assert.rejects(
+    configured.registry.select({
+      intent: "attachment_text",
+      artifact: {
+        captureId: "cap_whisper_missing_model",
+        attachmentId: "att_whisper_missing_model",
+        kind: "audio",
+        fileName: "missing-model.wav",
+        mime: "audio/wav",
+        storedPath: "raw/inbox/example/missing-model.wav",
+        absolutePath: audioPath,
+      },
+      inputPath: audioPath,
+      scratchDirectory: vaultRoot,
+    }),
+    /No parser provider available for artifact att_whisper_missing_model/u,
+  );
 
   await fs.rm(vaultRoot, { recursive: true, force: true });
   await fs.rm(toolsDirectory, { recursive: true, force: true });
+});
+
+test("configured parser registry keeps the discovered whisper command snapshot pinned", async () => {
+  const vaultRoot = await makeTempDirectory("murph-parser-toolchain-command-snapshot");
+  const discoveredCommandDirectory = await makeTempDirectory("murph-parser-toolchain-command-discovered");
+  const driftedCommandDirectory = await makeTempDirectory("murph-parser-toolchain-command-drifted");
+  const modelPath = path.join(vaultRoot, "models", "runtime.bin");
+  await fs.mkdir(path.dirname(modelPath), { recursive: true });
+  await fs.writeFile(modelPath, "model", "utf8");
+  const discoveredCommandPath = await writeExecutableFile(
+    discoveredCommandDirectory,
+    "fake-whisper-discovered",
+    [
+      "#!/usr/bin/env node",
+      "const fs = require('node:fs');",
+      "const args = process.argv.slice(2);",
+      "const outputBase = args[args.indexOf('-of') + 1];",
+      "fs.writeFileSync(`${outputBase}.txt`, 'discovered command pinned\\n', 'utf8');",
+    ].join("\n"),
+  );
+  const driftedCommandPath = await writeExecutableFile(
+    driftedCommandDirectory,
+    "fake-whisper-drifted",
+    [
+      "#!/usr/bin/env node",
+      "const fs = require('node:fs');",
+      "const args = process.argv.slice(2);",
+      "const outputBase = args[args.indexOf('-of') + 1];",
+      "fs.writeFileSync(`${outputBase}.txt`, 'drifted command used\\n', 'utf8');",
+    ].join("\n"),
+  );
+  const audioPath = await writeExternalFile(discoveredCommandDirectory, "voice.wav", "wav-placeholder");
+  const previousWhisperCommand = process.env.WHISPER_COMMAND;
+
+  await initializeVault({
+    vaultRoot,
+    createdAt: "2026-03-13T12:00:00.000Z",
+  });
+  await writeParserToolchainConfig({
+    vaultRoot,
+    tools: {
+      whisper: {
+        modelPath: "./models/runtime.bin",
+      },
+    },
+  });
+
+  try {
+    process.env.WHISPER_COMMAND = discoveredCommandPath;
+    const configured = await createConfiguredParserRegistry({ vaultRoot });
+    assert.equal(configured.doctor.tools.whisper.command, discoveredCommandPath);
+    process.env.WHISPER_COMMAND = driftedCommandPath;
+
+    const run = await configured.registry.run({
+      intent: "attachment_text",
+      artifact: {
+        captureId: "cap_whisper_command_snapshot",
+        attachmentId: "att_whisper_command_snapshot",
+        kind: "audio",
+        fileName: "voice.wav",
+        mime: "audio/wav",
+        storedPath: "raw/inbox/example/voice.wav",
+        absolutePath: audioPath,
+      },
+      inputPath: audioPath,
+      scratchDirectory: driftedCommandDirectory,
+    });
+
+    assert.equal(run.selection.provider.id, "whisper.cpp");
+    assert.equal(run.selection.availability.executablePath, discoveredCommandPath);
+    assert.equal(run.result.text, "discovered command pinned");
+  } finally {
+    if (previousWhisperCommand === undefined) {
+      delete process.env.WHISPER_COMMAND;
+    } else {
+      process.env.WHISPER_COMMAND = previousWhisperCommand;
+    }
+    await fs.rm(vaultRoot, { recursive: true, force: true });
+    await fs.rm(discoveredCommandDirectory, { recursive: true, force: true });
+    await fs.rm(driftedCommandDirectory, { recursive: true, force: true });
+  }
+});
+
+test("configured parser registry keeps the discovered whisper model snapshot pinned", async () => {
+  const vaultRoot = await makeTempDirectory("murph-parser-toolchain-model-snapshot");
+  const toolsDirectory = await makeTempDirectory("murph-parser-toolchain-model-snapshot-bin");
+  const discoveredModelPath = path.join(vaultRoot, "models", "discovered.bin");
+  const driftedModelPath = path.join(vaultRoot, "models", "drifted.bin");
+  await fs.mkdir(path.dirname(discoveredModelPath), { recursive: true });
+  await fs.writeFile(discoveredModelPath, "model", "utf8");
+  await fs.writeFile(driftedModelPath, "drifted-model", "utf8");
+  const commandPath = await writeExecutableFile(
+    toolsDirectory,
+    "fake-whisper-model-snapshot",
+    [
+      "#!/usr/bin/env node",
+      "const fs = require('node:fs');",
+      "const args = process.argv.slice(2);",
+      "const modelPath = args[args.indexOf('-m') + 1];",
+      `if (modelPath !== ${JSON.stringify(discoveredModelPath)}) {`,
+      "  console.error(`unexpected model path: ${modelPath}`);",
+      "  process.exit(1);",
+      "}",
+      "const outputBase = args[args.indexOf('-of') + 1];",
+      "fs.writeFileSync(`${outputBase}.txt`, 'discovered model pinned\\n', 'utf8');",
+    ].join("\n"),
+  );
+  const audioPath = await writeExternalFile(toolsDirectory, "voice.wav", "wav-placeholder");
+  const previousWhisperCommand = process.env.WHISPER_COMMAND;
+  const previousWhisperModelPath = process.env.WHISPER_MODEL_PATH;
+
+  await initializeVault({
+    vaultRoot,
+    createdAt: "2026-03-13T12:00:00.000Z",
+  });
+
+  try {
+    process.env.WHISPER_COMMAND = commandPath;
+    process.env.WHISPER_MODEL_PATH = discoveredModelPath;
+    const configured = await createConfiguredParserRegistry({ vaultRoot });
+    assert.equal(configured.doctor.tools.whisper.modelPath, discoveredModelPath);
+    process.env.WHISPER_MODEL_PATH = driftedModelPath;
+
+    const run = await configured.registry.run({
+      intent: "attachment_text",
+      artifact: {
+        captureId: "cap_whisper_model_snapshot",
+        attachmentId: "att_whisper_model_snapshot",
+        kind: "audio",
+        fileName: "voice.wav",
+        mime: "audio/wav",
+        storedPath: "raw/inbox/example/voice.wav",
+        absolutePath: audioPath,
+      },
+      inputPath: audioPath,
+      scratchDirectory: toolsDirectory,
+    });
+
+    assert.equal(run.selection.provider.id, "whisper.cpp");
+    assert.equal(run.selection.availability.details?.modelPath, discoveredModelPath);
+    assert.equal(run.result.text, "discovered model pinned");
+  } finally {
+    if (previousWhisperCommand === undefined) {
+      delete process.env.WHISPER_COMMAND;
+    } else {
+      process.env.WHISPER_COMMAND = previousWhisperCommand;
+    }
+    if (previousWhisperModelPath === undefined) {
+      delete process.env.WHISPER_MODEL_PATH;
+    } else {
+      process.env.WHISPER_MODEL_PATH = previousWhisperModelPath;
+    }
+    await fs.rm(vaultRoot, { recursive: true, force: true });
+    await fs.rm(toolsDirectory, { recursive: true, force: true });
+  }
 });
 
 test("configured parser registry resolves config-relative whisper model paths against the vault root", async () => {
@@ -322,6 +526,139 @@ test("configured parser registry resolves config-relative whisper model paths ag
     process.chdir(previousCwd);
     await fs.rm(vaultRoot, { recursive: true, force: true });
     await fs.rm(toolsDirectory, { recursive: true, force: true });
+    await fs.rm(outsideDirectory, { recursive: true, force: true });
+  }
+});
+
+test("parser toolchain discovery resolves config-relative commands from the vault root and rejects non-executable overrides", async () => {
+  const vaultRoot = await makeTempDirectory("murph-parser-toolchain-relative-command");
+  const outsideDirectory = await makeTempDirectory("murph-parser-toolchain-relative-command-cwd");
+  const modelPath = path.join(vaultRoot, "models", "relative.bin");
+  await fs.mkdir(path.dirname(modelPath), { recursive: true });
+  await fs.writeFile(modelPath, "model", "utf8");
+  const ffmpegPath = await writeExecutableFile(
+    vaultRoot,
+    path.join("tools", "ffmpeg-local"),
+    "#!/usr/bin/env node\nprocess.exit(0);\n",
+  );
+  const whisperPath = await writeExecutableFile(
+    vaultRoot,
+    path.join("tools", "whisper-local"),
+    [
+      `#!${process.execPath}`,
+      "const fs = require('node:fs');",
+      "const args = process.argv.slice(2);",
+      "const outputBase = args[args.indexOf('-of') + 1];",
+      "fs.writeFileSync(`${outputBase}.txt`, 'relative command ok\\n', 'utf8');",
+    ].join("\n"),
+  );
+  await writeExternalFile(
+    vaultRoot,
+    path.join("tools", "not-executable.txt"),
+    "not executable",
+  );
+  const invalidDirectoryPath = path.join(vaultRoot, "tools", "not-a-command");
+  await fs.mkdir(invalidDirectoryPath, { recursive: true });
+  const audioPath = await writeExternalFile(outsideDirectory, "voice.wav", "wav-placeholder");
+  const previousCwd = process.cwd();
+  const previousFfmpegCommand = process.env.FFMPEG_COMMAND;
+  const previousWhisperCommand = process.env.WHISPER_COMMAND;
+  const previousPath = process.env.PATH;
+
+  await initializeVault({
+    vaultRoot,
+    createdAt: "2026-03-13T12:00:00.000Z",
+  });
+
+  try {
+    process.env.PATH = "";
+    await writeParserToolchainConfig({
+      vaultRoot,
+      tools: {
+        ffmpeg: {
+          command: process.platform === "win32" ? ".\\tools\\ffmpeg-local.cmd" : ".\\tools\\ffmpeg-local",
+        },
+        whisper: {
+          command: process.platform === "win32" ? ".\\tools\\whisper-local.cmd" : "./tools/whisper-local",
+          modelPath: "models/relative.bin",
+        },
+      },
+    });
+
+    process.chdir(outsideDirectory);
+    const doctor = await discoverParserToolchain({ vaultRoot });
+    assert.equal(doctor.tools.ffmpeg.available, true);
+    assert.equal(doctor.tools.ffmpeg.command, ffmpegPath);
+    assert.equal(doctor.tools.ffmpeg.source, "config");
+    assert.equal(doctor.tools.whisper.available, true);
+    assert.equal(doctor.tools.whisper.command, whisperPath);
+    assert.equal(doctor.tools.whisper.modelPath, "models/relative.bin");
+    assert.equal(doctor.tools.whisper.source, "config");
+
+    const configured = await createConfiguredParserRegistry({ vaultRoot });
+    const run = await configured.registry.run({
+      intent: "attachment_text",
+      artifact: {
+        captureId: "cap_whisper_relative",
+        attachmentId: "att_whisper_relative",
+        kind: "audio",
+        fileName: "voice.wav",
+        mime: "audio/wav",
+        storedPath: "raw/inbox/example/voice.wav",
+        absolutePath: audioPath,
+      },
+      inputPath: audioPath,
+      scratchDirectory: outsideDirectory,
+    });
+    assert.equal(run.selection.provider.id, "whisper.cpp");
+    assert.equal(run.result.text, "relative command ok");
+
+    await writeParserToolchainConfig({
+      vaultRoot,
+      tools: {
+        ffmpeg: {
+          command: "./tools/not-executable.txt",
+        },
+        whisper: {
+          command: "./tools/not-a-command",
+        },
+      },
+    });
+    const invalidDoctor = await discoverParserToolchain({ vaultRoot });
+    assert.deepEqual(invalidDoctor.tools.ffmpeg, {
+      available: false,
+      command: null,
+      source: "config",
+      reason: "ffmpeg CLI not found.",
+    });
+    assert.deepEqual(invalidDoctor.tools.whisper, {
+      available: false,
+      command: null,
+      modelPath: "models/relative.bin",
+      source: "config",
+      reason: "whisper.cpp CLI executable not found.",
+    });
+
+    process.env.FFMPEG_COMMAND = ffmpegPath;
+    process.env.WHISPER_COMMAND = whisperPath;
+    process.env.PATH = path.dirname(whisperPath);
+    const envShadowedDoctor = await discoverParserToolchain({ vaultRoot });
+    assert.deepEqual(envShadowedDoctor.tools.ffmpeg, invalidDoctor.tools.ffmpeg);
+    assert.deepEqual(envShadowedDoctor.tools.whisper, invalidDoctor.tools.whisper);
+  } finally {
+    process.chdir(previousCwd);
+    if (previousFfmpegCommand === undefined) {
+      delete process.env.FFMPEG_COMMAND;
+    } else {
+      process.env.FFMPEG_COMMAND = previousFfmpegCommand;
+    }
+    if (previousWhisperCommand === undefined) {
+      delete process.env.WHISPER_COMMAND;
+    } else {
+      process.env.WHISPER_COMMAND = previousWhisperCommand;
+    }
+    process.env.PATH = previousPath;
+    await fs.rm(vaultRoot, { recursive: true, force: true });
     await fs.rm(outsideDirectory, { recursive: true, force: true });
   }
 });
@@ -1506,6 +1843,197 @@ test("stale running parser attempts do not overwrite a requeued rerun", async ()
         capture.captureId,
         "attachments",
         refreshed.attachments[0]?.attachmentId ?? "",
+        "attempts",
+        "0001",
+      ),
+    ),
+  );
+
+  pipeline.close();
+});
+
+test("attachment parse worker removes published attempts when completion fails after publish", async () => {
+  const vaultRoot = await makeTempDirectory("murph-parser-worker-post-publish-failure-vault");
+  const sourceRoot = await makeTempDirectory("murph-parser-worker-post-publish-failure-source");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+
+  const imagePath = await writeExternalFile(sourceRoot, "completion-error.pdf", "document-placeholder");
+  const runtime = await openInboxRuntime({ vaultRoot });
+  const pipeline = await createInboxPipeline({ vaultRoot, runtime });
+
+  const capture = await pipeline.processCapture({
+    source: "telegram",
+    externalId: "completion-error-1",
+    accountId: "self",
+    thread: {
+      id: "chat-completion-error-1",
+    },
+    actor: {
+      isSelf: false,
+    },
+    occurredAt: "2026-03-13T11:10:00.000Z",
+    text: null,
+    attachments: [
+      {
+        kind: "document",
+        mime: "application/pdf",
+        originalPath: imagePath,
+        fileName: "completion-error.pdf",
+      },
+    ],
+    raw: {},
+  });
+  const storedCapture = runtime.getCapture(capture.captureId);
+  assert.ok(storedCapture);
+  const attachmentId = storedCapture.attachments[0]?.attachmentId;
+  assert.ok(attachmentId);
+
+  runtime.completeAttachmentParseJob = () => {
+    throw new Error("completion finalization exploded");
+  };
+
+  const results = await runAttachmentParseWorker({
+    vaultRoot,
+    runtime,
+    registry: createParserRegistry([
+      {
+        id: "post-publish-provider",
+        locality: "local",
+        openness: "open_source",
+        runtime: "node",
+        priority: 500,
+        async discover() {
+          return {
+            available: true,
+            reason: "available for post-publish cleanup test",
+          };
+        },
+        supports(request) {
+          return (request.preparedKind ?? request.artifact.kind) === "document";
+        },
+        async run() {
+          return {
+            text: "cleanup after failure",
+          };
+        },
+      },
+    ]),
+    maxJobs: 1,
+  });
+
+  assert.equal(results.length, 1);
+  assert.equal(results[0]?.status, "failed");
+  assert.equal(results[0]?.errorCode, "parser_failed");
+  assert.match(results[0]?.errorMessage ?? "", /completion finalization exploded/u);
+  const refreshed = runtime.getCapture(capture.captureId);
+  assert.ok(refreshed);
+  assert.equal(refreshed.attachments[0]?.parseState, "failed");
+  assert.equal(refreshed.attachments[0]?.derivedPath ?? null, null);
+  assert.equal(refreshed.attachments[0]?.extractedText ?? null, null);
+  assert.equal(
+    runtime.listAttachmentParseJobs({ captureId: capture.captureId, limit: 10 })[0]?.state,
+    "failed",
+  );
+  await assert.rejects(
+    fs.access(
+      path.join(
+        vaultRoot,
+        "derived",
+        "inbox",
+        capture.captureId,
+        "attachments",
+        attachmentId,
+        "attempts",
+        "0001",
+      ),
+    ),
+  );
+
+  pipeline.close();
+});
+
+test("attachment parse worker removes published attempts when failure finalization throws", async () => {
+  const vaultRoot = await makeTempDirectory("murph-parser-worker-failure-finalize-vault");
+  const sourceRoot = await makeTempDirectory("murph-parser-worker-failure-finalize-source");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+
+  const imagePath = await writeExternalFile(sourceRoot, "failure-finalize.pdf", "document-placeholder");
+  const runtime = await openInboxRuntime({ vaultRoot });
+  const pipeline = await createInboxPipeline({ vaultRoot, runtime });
+
+  const capture = await pipeline.processCapture({
+    source: "telegram",
+    externalId: "failure-finalize-1",
+    accountId: "self",
+    thread: {
+      id: "chat-failure-finalize-1",
+    },
+    actor: {
+      isSelf: false,
+    },
+    occurredAt: "2026-03-13T11:11:00.000Z",
+    text: null,
+    attachments: [
+      {
+        kind: "document",
+        mime: "application/pdf",
+        originalPath: imagePath,
+        fileName: "failure-finalize.pdf",
+      },
+    ],
+    raw: {},
+  });
+  const storedCapture = runtime.getCapture(capture.captureId);
+  assert.ok(storedCapture);
+  const attachmentId = storedCapture.attachments[0]?.attachmentId;
+  assert.ok(attachmentId);
+
+  runtime.completeAttachmentParseJob = () => {
+    throw new Error("completion finalization exploded");
+  };
+  runtime.failAttachmentParseJob = () => {
+    throw new Error("failure finalization exploded");
+  };
+
+  await assert.rejects(
+    runAttachmentParseJobOnce({
+      vaultRoot,
+      runtime,
+      registry: createParserRegistry([
+        {
+          id: "post-publish-provider",
+          locality: "local",
+          openness: "open_source",
+          runtime: "node",
+          priority: 500,
+          async discover() {
+            return {
+              available: true,
+              reason: "available for failure-finalization cleanup test",
+            };
+          },
+          supports(request) {
+            return (request.preparedKind ?? request.artifact.kind) === "document";
+          },
+          async run() {
+            return {
+              text: "cleanup after thrown finalizer",
+            };
+          },
+        },
+      ]),
+    }),
+    /failure finalization exploded/u,
+  );
+  await assert.rejects(
+    fs.access(
+      path.join(
+        vaultRoot,
+        "derived",
+        "inbox",
+        capture.captureId,
+        "attachments",
+        attachmentId,
         "attempts",
         "0001",
       ),

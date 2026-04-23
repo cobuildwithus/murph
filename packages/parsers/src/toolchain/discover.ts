@@ -39,6 +39,10 @@ interface ParserToolchainContext {
   configPath: string;
 }
 
+interface ResolvedWhisperToolDiscovery extends ParserToolDiscovery {
+  absoluteModelPath: string | null;
+}
+
 export async function discoverParserToolchain(input: {
   vaultRoot: string;
 }): Promise<ParserDoctorReport> {
@@ -56,19 +60,38 @@ async function discoverParserToolchainFromContext(input: {
   configPath: string;
   vaultRoot: string;
 }): Promise<ParserDoctorReport> {
+  const state = await discoverParserToolchainStateFromContext(input);
+  return state.doctor;
+}
+
+async function discoverParserToolchainStateFromContext(input: {
+  config: ParserToolchainConfig | null;
+  configPath: string;
+  vaultRoot: string;
+}): Promise<{
+  doctor: ParserDoctorReport;
+  whisper: ResolvedWhisperToolDiscovery;
+}> {
+  const ffmpeg = await discoverCommandTool({
+    config: input.config?.tools.ffmpeg,
+    vaultRoot: input.vaultRoot,
+    envValue: readConfiguredEnvValue(process.env, ["FFMPEG_COMMAND"]),
+    fallbackCommands: ["ffmpeg"],
+    availableReason: "ffmpeg CLI available.",
+    missingReason: "ffmpeg CLI not found.",
+  });
+  const whisper = await discoverWhisperTool(input.config, input.vaultRoot);
+
   return {
-    configPath: input.configPath,
-    discoveredAt: new Date().toISOString(),
-    tools: {
-      ffmpeg: await discoverCommandTool({
-        config: input.config?.tools.ffmpeg,
-        envValue: readConfiguredEnvValue(process.env, ["FFMPEG_COMMAND"]),
-        fallbackCommands: ["ffmpeg"],
-        availableReason: "ffmpeg CLI available.",
-        missingReason: "ffmpeg CLI not found.",
-      }),
-      whisper: await discoverWhisperTool(input.config, input.vaultRoot),
+    doctor: {
+      configPath: input.configPath,
+      discoveredAt: new Date().toISOString(),
+      tools: {
+        ffmpeg,
+        whisper: toPublicWhisperToolDiscovery(whisper),
+      },
     },
+    whisper,
   };
 }
 
@@ -80,31 +103,22 @@ export async function createConfiguredParserRegistry(input: {
   ffmpeg: FfmpegToolOptions | undefined;
 }> {
   const context = await loadParserToolchainContext(input.vaultRoot);
-  const doctor = await discoverParserToolchainFromContext({
+  const state = await discoverParserToolchainStateFromContext({
     config: context.config,
     configPath: context.configPath,
     vaultRoot: input.vaultRoot,
   });
-  const whisperModelResolution = resolveModelPath(
-    context.config?.tools.whisper?.modelPath,
-    readConfiguredEnvValue(process.env, ["WHISPER_MODEL_PATH"]),
-  );
 
   return {
-    doctor,
+    doctor: state.doctor,
     registry: createParserRegistry([
       createTextFileProvider(),
       createZxingWasmProvider(),
-      createWhisperCppProvider({
-        commandCandidates: toCommandCandidates(
-          context.config?.tools.whisper?.command,
-        ),
-        modelPath: whisperModelResolution.modelPath
-          ? resolveModelPathAbsolute(input.vaultRoot, whisperModelResolution)
-          : undefined,
-      }),
+      createWhisperCppProvider(
+        whisperProviderOptionsFromDiscovery(state.whisper),
+      ),
     ]),
-    ffmpeg: ffmpegOptionsFromDoctor(doctor),
+    ffmpeg: ffmpegOptionsFromDoctor(state.doctor),
   };
 }
 
@@ -137,10 +151,11 @@ export function ffmpegOptionsFromDoctor(
 async function discoverWhisperTool(
   config: ParserToolchainConfig | null,
   vaultRoot: string,
-): Promise<ParserToolDiscovery> {
+): Promise<ResolvedWhisperToolDiscovery> {
   const toolConfig = config?.tools.whisper;
   const commandResolution = await resolveCommand({
     configCommand: toolConfig?.command,
+    vaultRoot,
     envValue: readConfiguredEnvValue(process.env, ["WHISPER_COMMAND"]),
     fallbackCommands: ["whisper-cli", "whisper-cpp"],
   });
@@ -149,12 +164,16 @@ async function discoverWhisperTool(
     readConfiguredEnvValue(process.env, ["WHISPER_MODEL_PATH"]),
   );
   const source = selectCompositeSource(commandResolution.source, modelResolution.source);
+  const absoluteModelPath = modelResolution.modelPath
+    ? resolveModelPathAbsolute(vaultRoot, modelResolution)
+    : null;
 
   if (!commandResolution.command) {
     return {
       available: false,
       command: null,
       modelPath: modelResolution.modelPath,
+      absoluteModelPath,
       source,
       reason: "whisper.cpp CLI executable not found.",
     };
@@ -165,16 +184,18 @@ async function discoverWhisperTool(
       available: false,
       command: commandResolution.command,
       modelPath: null,
+      absoluteModelPath: null,
       source,
       reason: "Whisper model path is not configured.",
     };
   }
 
-  if (!(await fileExists(resolveModelPathAbsolute(vaultRoot, modelResolution)))) {
+  if (!absoluteModelPath || !(await fileExists(absoluteModelPath))) {
     return {
       available: false,
       command: commandResolution.command,
       modelPath: modelResolution.modelPath,
+      absoluteModelPath,
       source,
       reason: "Whisper model path does not exist.",
     };
@@ -184,6 +205,7 @@ async function discoverWhisperTool(
     available: true,
     command: commandResolution.command,
     modelPath: modelResolution.modelPath,
+    absoluteModelPath,
     source,
     reason: "whisper.cpp CLI and model path configured.",
   };
@@ -191,6 +213,7 @@ async function discoverWhisperTool(
 
 async function discoverCommandTool(input: {
   config?: ParserToolchainToolConfig;
+  vaultRoot: string;
   envValue?: string | null;
   fallbackCommands: string[];
   availableReason: string;
@@ -198,6 +221,7 @@ async function discoverCommandTool(input: {
 }): Promise<ParserToolDiscovery> {
   const resolution = await resolveCommand({
     configCommand: input.config?.command,
+    vaultRoot: input.vaultRoot,
     envValue: input.envValue,
     fallbackCommands: input.fallbackCommands,
   });
@@ -212,18 +236,18 @@ async function discoverCommandTool(input: {
 
 async function resolveCommand(input: {
   configCommand?: string | null;
+  vaultRoot: string;
   envValue?: string | null;
   fallbackCommands: string[];
 }): Promise<{ command: string | null; source: ParserToolDiscoverySource }> {
   const normalizedConfigCommand = normalizeNullableString(input.configCommand);
   if (normalizedConfigCommand) {
-    const command = await resolveExecutable([normalizedConfigCommand]);
-    if (command) {
-      return {
-        command,
-        source: "config",
-      };
-    }
+    return {
+      command: await resolveExecutable([
+      resolveConfigCommandCandidate(input.vaultRoot, normalizedConfigCommand),
+      ]),
+      source: "config",
+    };
   }
 
   const normalizedEnvValue = normalizeNullableString(input.envValue);
@@ -310,9 +334,53 @@ function selectCompositeSource(
   return "missing";
 }
 
-function toCommandCandidates(command: string | null | undefined): string[] | undefined {
-  const normalized = normalizeNullableString(command);
-  return normalized ? [normalized] : undefined;
+function toPublicWhisperToolDiscovery(
+  whisper: ResolvedWhisperToolDiscovery,
+): ParserToolDiscovery {
+  return {
+    available: whisper.available,
+    command: whisper.command,
+    modelPath: whisper.modelPath,
+    source: whisper.source,
+    reason: whisper.reason,
+  };
+}
+
+function whisperProviderOptionsFromDiscovery(
+  whisper: ResolvedWhisperToolDiscovery,
+) {
+  return {
+    resolvedToolState: {
+      available: whisper.available,
+      reason: whisper.reason,
+      commandPath: whisper.command,
+      modelPath: whisper.absoluteModelPath,
+    },
+  };
+}
+
+function resolveConfigCommandCandidate(
+  vaultRoot: string,
+  command: string,
+): string {
+  if (!isPathLikeCommandCandidate(command)) {
+    return command;
+  }
+
+  const normalizedPath = command.replace(/[\\/]/gu, path.sep);
+  if (path.isAbsolute(normalizedPath)) {
+    return normalizedPath;
+  }
+
+  return path.resolve(vaultRoot, normalizedPath);
+}
+
+function isPathLikeCommandCandidate(command: string): boolean {
+  return (
+    command.includes("/") ||
+    command.includes("\\") ||
+    path.isAbsolute(command)
+  );
 }
 
 function normalizeNullableString(value: string | null | undefined): string | null {
