@@ -72,8 +72,22 @@ export async function startHostedRunMessagingActivity(input: {
     return null;
   }
 
+  const startTimeoutMs = normalizeHostedMessagingActivityStartTimeoutMs(input.startTimeoutMs);
   const startRequestedAtMs = Date.now();
   const startAbortController = new AbortController();
+
+  emitHostedExecutionStructuredLog({
+    component,
+    details: {
+      ...target.logDetails,
+      runElapsedMs: computeHostedRunElapsedMs(input.run),
+      startTimeoutMs,
+    },
+    message: `Hosted ${formatHostedMessagingActivityChannelLabel(target.channel)} typing indicator start requested.`,
+    phase: "wake.running",
+    run: input.run,
+    wake: target.wake,
+  });
 
   try {
     const activity = await confirmHostedRunMessagingActivityStarted({
@@ -92,7 +106,7 @@ export async function startHostedRunMessagingActivity(input: {
         }),
       ),
       startRequestedAtMs,
-      startTimeoutMs: normalizeHostedMessagingActivityStartTimeoutMs(input.startTimeoutMs),
+      startTimeoutMs,
       target,
     });
 
@@ -107,6 +121,7 @@ export async function startHostedRunMessagingActivity(input: {
           ...target.logDetails,
           runElapsedMs: computeHostedRunElapsedMs(input.run),
           startLatencyMs: Date.now() - startRequestedAtMs,
+          startTimeoutMs,
         },
         wake: target.wake,
         message: `Hosted ${formatHostedMessagingActivityChannelLabel(target.channel)} typing indicator started.`,
@@ -123,6 +138,7 @@ export async function startHostedRunMessagingActivity(input: {
         ...target.logDetails,
         runElapsedMs: computeHostedRunElapsedMs(input.run),
         startLatencyMs: Date.now() - startRequestedAtMs,
+        startTimeoutMs,
       },
       error,
       level: "warn",

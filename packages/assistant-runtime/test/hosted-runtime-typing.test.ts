@@ -318,7 +318,22 @@ describe("hosted runtime messaging activity helpers", () => {
             provider: "linq",
             runElapsedMs: expect.any(Number),
             sourceSeq: "007",
+            startTimeoutMs: 2_000,
+          }),
+          message: "Hosted Linq typing indicator start requested.",
+          phase: "wake.running",
+        }),
+      );
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          component: "runtime",
+          details: expect.objectContaining({
+            chatIdPresent: true,
+            provider: "linq",
+            runElapsedMs: expect.any(Number),
+            sourceSeq: "007",
             startLatencyMs: expect.any(Number),
+            startTimeoutMs: 2_000,
           }),
           message: "Hosted Linq typing indicator started.",
           phase: "wake.running",
