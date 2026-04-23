@@ -18,10 +18,11 @@ export function readHostedPublicBaseUrl(
   source: EnvSource = process.env,
 ): string | null {
   return (
-    normalizeConfiguredBaseUrl(source.HOSTED_ONBOARDING_PUBLIC_BASE_URL)
-    ?? normalizeConfiguredBaseUrl(source.HOSTED_WEB_BASE_URL)
+    normalizeConfiguredPublicBaseUrl(source.HOSTED_ONBOARDING_PUBLIC_BASE_URL)
+    ?? normalizeConfiguredPublicBaseUrl(source.HOSTED_WEB_BASE_URL)
     ?? readHostedWebVercelProductionBaseUrl(source, {
       allowHttpLocalhost: true,
+      requireOriginOnly: true,
     })
   );
 }
@@ -83,6 +84,19 @@ function normalizeConfiguredBaseUrl(value: string | null | undefined): string | 
 
   return normalizeHostedExecutionBaseUrl(normalized, {
     allowHttpLocalhost: true,
+  });
+}
+
+function normalizeConfiguredPublicBaseUrl(value: string | null | undefined): string | null {
+  const normalized = normalizeNullableString(value);
+
+  if (!normalized) {
+    return null;
+  }
+
+  return normalizeHostedExecutionBaseUrl(normalized, {
+    allowHttpLocalhost: true,
+    requireOriginOnly: true,
   });
 }
 

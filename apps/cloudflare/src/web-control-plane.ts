@@ -44,9 +44,10 @@ export function normalizeHostedWebControlBaseUrl(
 ): string | null {
   const normalized = normalizeHostedExecutionBaseUrl(value, {
     allowHttpLocalhost: true,
+    requireOriginOnly: true,
   });
 
-  return normalized ? new URL(normalized).origin : null;
+  return normalized ?? null;
 }
 
 export async function fetchHostedExecutionWebControlPlaneResponse(input: {

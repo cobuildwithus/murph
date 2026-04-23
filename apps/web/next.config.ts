@@ -391,6 +391,12 @@ function normalizeConfiguredBaseUrl(
     throw new TypeError("Hosted public base URLs must not include embedded credentials.");
   }
 
+  if (parsed.pathname !== "" && parsed.pathname !== "/") {
+    throw new TypeError(
+      "Hosted public base URLs must not include a path; configure only the origin.",
+    );
+  }
+
   parsed.hash = "";
   parsed.search = "";
   return parsed.toString().replace(/\/$/u, "");

@@ -1,8 +1,16 @@
 type EnvSource = Readonly<Record<string, string | undefined>>;
+const HOSTED_EXECUTION_ABSOLUTE_URL_SCHEME_PATTERN = /^[a-z][a-z\d+.-]*:\/\//iu;
+const HOSTED_EXECUTION_LOOPBACK_HOSTS = new Set([
+  "localhost",
+  "127.0.0.1",
+  "::1",
+  "[::1]",
+]);
 
 export interface HostedExecutionBaseUrlNormalizationOptions {
   allowHttpHosts?: readonly string[];
   allowHttpLocalhost?: boolean;
+  requireOriginOnly?: boolean;
 }
 
 export function normalizeHostedExecutionBaseUrl(
@@ -15,7 +23,11 @@ export function normalizeHostedExecutionBaseUrl(
     return null;
   }
 
-  const url = new URL(normalized);
+  const url = new URL(
+    HOSTED_EXECUTION_ABSOLUTE_URL_SCHEME_PATTERN.test(normalized)
+      ? normalized
+      : `https://${normalized}`,
+  );
   const protocol = url.protocol.toLowerCase();
   const hostname = url.hostname.toLowerCase();
   const allowHttpHosts = new Set((options?.allowHttpHosts ?? []).map((entry) => entry.toLowerCase()));
@@ -36,6 +48,12 @@ export function normalizeHostedExecutionBaseUrl(
     throw new TypeError("Hosted execution base URLs must not include embedded credentials.");
   }
 
+  if (options?.requireOriginOnly === true && url.pathname !== "" && url.pathname !== "/") {
+    throw new TypeError(
+      "Hosted execution origin base URLs must not include a path; configure only the origin.",
+    );
+  }
+
   url.hash = "";
   url.search = "";
   return url.toString().replace(/\/$/u, "");
@@ -51,5 +69,5 @@ export function normalizeHostedExecutionString(value: string | null | undefined)
 }
 
 function isHostedExecutionLoopbackHost(hostname: string): boolean {
-  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+  return HOSTED_EXECUTION_LOOPBACK_HOSTS.has(hostname);
 }
