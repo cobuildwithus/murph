@@ -1,9 +1,7 @@
-import {
-  isVaultError,
-  normalizeRelativeVaultPath,
-  resolveVaultPathOnDisk,
-} from '@murphai/core'
+import path from 'node:path'
+
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import { loadRuntimeModule } from '../runtime-import.js'
 import {
   inferEntityKind,
   isQueryableRecordId,
@@ -11,6 +9,80 @@ import {
 
 const ISO_TIMESTAMP_WITH_OFFSET_PATTERN =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/u
+const WINDOWS_DRIVE_PREFIX_PATTERN = /^[A-Za-z]:/
+
+interface VaultPathRuntime {
+  resolveVaultPathOnDisk(inputVaultRoot: string, relativePath: string): Promise<{
+    absolutePath: string
+  }>
+}
+
+async function loadVaultPathRuntime(): Promise<VaultPathRuntime> {
+  return loadRuntimeModule<VaultPathRuntime>('@murphai/core')
+}
+
+function createVaultLikeError(
+  code: string,
+  message: string,
+  details: Record<string, unknown> = {},
+) {
+  const error = new Error(message) as Error & {
+    code: string
+    details: Record<string, unknown>
+  }
+  error.name = 'VaultError'
+  error.code = code
+  error.details = details
+  return error
+}
+
+function normalizeRelativeVaultPath(value: unknown): string {
+  const candidate = String(value ?? '').trim().replace(/\\/g, '/')
+
+  if (!candidate) {
+    throw createVaultLikeError('VAULT_INVALID_PATH', 'Vault-relative path is required.')
+  }
+
+  if (candidate.includes('\u0000')) {
+    throw createVaultLikeError(
+      'VAULT_INVALID_PATH',
+      'Vault-relative path may not contain NUL bytes.',
+      {
+        relativePath: String(value ?? ''),
+      },
+    )
+  }
+
+  if (WINDOWS_DRIVE_PREFIX_PATTERN.test(candidate) || candidate.startsWith('/')) {
+    throw createVaultLikeError(
+      'VAULT_INVALID_PATH',
+      'Vault-relative path must not be absolute.',
+      {
+        relativePath: String(value ?? ''),
+      },
+    )
+  }
+
+  const normalized = path.posix.normalize(candidate)
+
+  if (
+    normalized === '.' ||
+    normalized === '..' ||
+    normalized.startsWith('../') ||
+    normalized.includes('/../')
+  ) {
+    throw createVaultLikeError(
+      'VAULT_INVALID_PATH',
+      'Vault-relative path may not escape the vault root.',
+      {
+        relativePath: String(value ?? ''),
+        normalized,
+      },
+    )
+  }
+
+  return normalized
+}
 export function inferVaultLinkKind(
   id: string,
   options: {
@@ -129,6 +201,7 @@ export async function resolveVaultRelativePath(
   relativePath: string,
 ) {
   try {
+    const { resolveVaultPathOnDisk } = await loadVaultPathRuntime()
     const resolved = await resolveVaultPathOnDisk(vaultRoot, relativePath)
     return resolved.absolutePath
   } catch (error) {
@@ -260,14 +333,11 @@ interface VaultLikeError extends Error {
 
 function isVaultLikeError(error: unknown): error is VaultLikeError {
   return Boolean(
-    isVaultError(error) ||
-      (
-        error &&
-        typeof error === 'object' &&
-        error instanceof Error &&
-        'code' in error &&
-        typeof error.code === 'string' &&
-        error.name === 'VaultError'
-      ),
+    error &&
+      typeof error === 'object' &&
+      error instanceof Error &&
+      'code' in error &&
+      typeof error.code === 'string' &&
+      error.name === 'VaultError',
   )
 }

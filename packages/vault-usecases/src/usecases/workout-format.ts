@@ -3,13 +3,8 @@ import {
   type WorkoutFormatUpsertPayload,
   workoutFormatUpsertPayloadSchema,
 } from '@murphai/contracts'
-import {
-  listWorkoutFormats as listCoreWorkoutFormats,
-  readWorkoutFormat as readCoreWorkoutFormat,
-  upsertWorkoutFormat,
-  type WorkoutFormatRecord,
-} from '@murphai/core'
 import { loadJsonInputObject } from '../json-input.js'
+import { loadRuntimeModule } from '../runtime-import.js'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { asListEnvelope, toListEntity } from './shared.js'
 import {
@@ -26,6 +21,42 @@ import {
   buildWorkoutTemplateFromSummary,
 } from './workout-model.js'
 
+interface WorkoutFormatRecord {
+  workoutFormatId: string
+  slug: string
+  title: string
+  relativePath: string
+  markdown: string | null
+  status: string
+  summary: string | null
+  activityType: string | null
+  durationMinutes: number | null
+  distanceKm: number | null
+  template: WorkoutFormatUpsertPayload['template']
+  tags: string[]
+  note: string | null
+  templateText: string | null
+}
+
+interface WorkoutFormatUpsertResult {
+  created: boolean
+  record: WorkoutFormatRecord
+}
+
+interface WorkoutFormatCoreRuntime {
+  listWorkoutFormats(vaultRoot: string): Promise<WorkoutFormatRecord[]>
+  readWorkoutFormat(input: {
+    vaultRoot: string
+    workoutFormatId: string
+  }): Promise<WorkoutFormatRecord>
+  upsertWorkoutFormat(input: WorkoutFormatUpsertPayload & {
+    vaultRoot: string
+  }): Promise<WorkoutFormatUpsertResult>
+}
+
+async function loadWorkoutFormatCoreRuntime(): Promise<WorkoutFormatCoreRuntime> {
+  return loadRuntimeModule<WorkoutFormatCoreRuntime>('@murphai/core')
+}
 
 export interface SaveWorkoutFormatInput {
   vault: string
@@ -117,7 +148,8 @@ function toWorkoutFormatListEntity(record: WorkoutFormatRecord) {
 
 async function loadWorkoutFormats(vault: string): Promise<WorkoutFormatRecord[]> {
   try {
-    return await listCoreWorkoutFormats(vault)
+    const { listWorkoutFormats } = await loadWorkoutFormatCoreRuntime()
+    return await listWorkoutFormats(vault)
   } catch (error) {
     throw toWorkoutFormatCliError(error)
   }
@@ -131,7 +163,8 @@ async function resolveWorkoutFormat(vault: string, lookup: string): Promise<Work
 
   if (/^wfmt_[0-9A-Za-z]+$/u.test(normalizedLookup)) {
     try {
-      return await readCoreWorkoutFormat({
+      const { readWorkoutFormat } = await loadWorkoutFormatCoreRuntime()
+      return await readWorkoutFormat({
         vaultRoot: vault,
         workoutFormatId: normalizedLookup,
       })
@@ -245,9 +278,10 @@ export async function saveWorkoutFormat(input: SaveWorkoutFormatInput) {
     }
   }
 
-  let result: Awaited<ReturnType<typeof upsertWorkoutFormat>>
+  let result: WorkoutFormatUpsertResult
 
   try {
+    const { upsertWorkoutFormat } = await loadWorkoutFormatCoreRuntime()
     result = await upsertWorkoutFormat({
       vaultRoot: input.vault,
       workoutFormatId: payload.workoutFormatId,
@@ -318,15 +352,15 @@ export async function logWorkoutFormat(input: LogWorkoutFormatInput) {
     durationMinutes:
       typeof input.durationMinutes === 'number'
         ? input.durationMinutes
-        : record.durationMinutes,
+        : record.durationMinutes ?? undefined,
     activityType:
       typeof input.activityType === 'string'
         ? input.activityType
-        : record.activityType,
+        : record.activityType ?? undefined,
     distanceKm:
       typeof input.distanceKm === 'number'
         ? input.distanceKm
-        : record.distanceKm,
+        : record.distanceKm ?? undefined,
     occurredAt: input.occurredAt,
     source: input.source,
     mediaPaths: input.mediaPaths,

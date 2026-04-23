@@ -9,13 +9,61 @@ import {
   type WorkoutSet,
   type WorkoutSetType,
 } from '@murphai/contracts'
-import { applyCanonicalWriteBatch, buildRawImportManifest, resolveRawAssetDirectory } from '@murphai/core'
-import { parseDelimitedRows } from '@murphai/importers'
-import { generateUlid } from '@murphai/runtime-state'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import { loadRuntimeModule } from '../runtime-import.js'
 import { compactObject, normalizeOptionalText, toEventUpsertVaultCliError } from './vault-usecase-helpers.js'
 import { buildStructuredWorkoutActivitySessionDraft } from './workout.js'
 import { loadWorkoutCoreRuntime } from './workout-core.js'
+
+interface WorkoutImportCoreRuntime {
+  applyCanonicalWriteBatch(input: {
+    vaultRoot: string
+    operationType: string
+    summary: string
+    audit: {
+      action: string
+      commandName: string
+      summary: string
+      targetIds?: string[]
+    }
+    rawContents: Array<{
+      targetRelativePath: string
+      content: string
+      originalFileName: string
+      mediaType: string
+      allowExistingMatch?: boolean
+    }>
+  }): Promise<unknown>
+  buildRawImportManifest(input: Record<string, unknown>): Record<string, unknown>
+  resolveRawAssetDirectory(input: {
+    owner: {
+      kind: string
+      id: string
+      partition?: string
+    }
+    occurredAt: string
+  }): string
+}
+
+interface WorkoutImportersRuntime {
+  parseDelimitedRows(text: string, delimiter: string): string[][]
+}
+
+interface WorkoutImportStateRuntime {
+  generateUlid(): string
+}
+
+async function loadWorkoutImportCoreRuntime(): Promise<WorkoutImportCoreRuntime> {
+  return loadRuntimeModule<WorkoutImportCoreRuntime>('@murphai/core')
+}
+
+async function loadWorkoutImportersRuntime(): Promise<WorkoutImportersRuntime> {
+  return loadRuntimeModule<WorkoutImportersRuntime>('@murphai/importers')
+}
+
+async function loadWorkoutImportStateRuntime(): Promise<WorkoutImportStateRuntime> {
+  return loadRuntimeModule<WorkoutImportStateRuntime>('@murphai/runtime-state')
+}
 
 const DEFAULT_SOURCE = 'strong'
 const DEFAULT_DELIMITER = ','
@@ -323,13 +371,14 @@ function detectSource(headers: readonly string[]): string | null {
   return null
 }
 
-function inspectWorkoutCsv(input: {
+async function inspectWorkoutCsv(input: {
   file: string
   source?: string
   delimiter?: string
   text: string
-}): CsvInspection {
+}): Promise<CsvInspection> {
   const delimiter = input.delimiter ?? DEFAULT_DELIMITER
+  const { parseDelimitedRows } = await loadWorkoutImportersRuntime()
   const rows = parseDelimitedRows(input.text, delimiter)
 
   if (rows.length === 0) {
@@ -545,7 +594,7 @@ export async function inspectWorkoutCsvImport(input: {
   delimiter?: string
 }) {
   const text = await readFile(input.file, 'utf8')
-  const inspection = inspectWorkoutCsv({
+  const inspection = await inspectWorkoutCsv({
     file: input.file,
     source: input.source,
     delimiter: input.delimiter,
@@ -574,12 +623,21 @@ export async function importWorkoutCsv(input: {
   storeRawOnly?: boolean
 }) {
   const text = await readFile(input.file, 'utf8')
-  const inspection = inspectWorkoutCsv({
+  const inspection = await inspectWorkoutCsv({
     file: input.file,
     source: input.source,
     delimiter: input.delimiter,
     text,
   })
+  const [{ generateUlid }, coreRuntime] = await Promise.all([
+    loadWorkoutImportStateRuntime(),
+    loadWorkoutImportCoreRuntime(),
+  ])
+  const {
+    applyCanonicalWriteBatch,
+    buildRawImportManifest,
+    resolveRawAssetDirectory,
+  } = coreRuntime
   const importId = `${ID_PREFIXES.transform}_${generateUlid()}`
   const importedAt = new Date().toISOString()
   const safeSource = sanitizePathSegment(inspection.source, DEFAULT_SOURCE)

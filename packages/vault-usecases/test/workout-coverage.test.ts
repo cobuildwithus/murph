@@ -46,6 +46,7 @@ import { importWithMocks, mockActualModule } from "./mock-import.ts";
 
 const mockedModuleSpecifiers = [
   "../src/json-input.js",
+  "../src/runtime-import.js",
   "../src/usecases/workout-core.js",
   "../src/usecases/workout-read.js",
   "../src/usecases/event-record-mutations.js",
