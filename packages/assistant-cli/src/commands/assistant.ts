@@ -1,6 +1,5 @@
 import { Cli, z } from 'incur'
 import {
-  assistantApprovalPolicyValues,
   assistantAskResultSchema,
   assistantChatProviderValues,
   assistantChannelNameSchema,
@@ -172,12 +171,9 @@ const assistantProviderOptionFields = {
     .describe(
       'Codex sandbox mode for local assistant chat. Codex runs as a privileged local adapter by default, so leaving this unset keeps its normal unsandboxed behavior.',
     ),
-  approvalPolicy: z
-    .enum(assistantApprovalPolicyValues)
-    .optional()
-    .describe(
-      'Codex approval policy for local assistant chat. Murph noninteractive assistant turns currently support only never; other modes fail closed.',
-    ),
+  approvalPolicy: z.literal('never').optional().describe(
+    'Codex approval policy for local assistant chat. Murph noninteractive assistant turns accept only never; interactive approval modes are rejected before provider launch.',
+  ),
   profile: optionalNonEmptyStringOption('Optional Codex config profile name.'),
   oss: z
     .boolean()

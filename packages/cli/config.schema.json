@@ -276,13 +276,9 @@
                           ]
                         },
                         "approvalPolicy": {
-                          "description": "Codex approval policy for local assistant chat. Murph noninteractive assistant turns currently support only never; other modes fail closed.",
+                          "description": "Codex approval policy for local assistant chat. Murph noninteractive assistant turns accept only never; interactive approval modes are rejected before provider launch.",
                           "type": "string",
-                          "enum": [
-                            "untrusted",
-                            "on-request",
-                            "never"
-                          ]
+                          "const": "never"
                         },
                         "profile": {
                           "description": "Optional Codex config profile name.",
@@ -403,13 +399,9 @@
                           ]
                         },
                         "approvalPolicy": {
-                          "description": "Codex approval policy for local assistant chat. Murph noninteractive assistant turns currently support only never; other modes fail closed.",
+                          "description": "Codex approval policy for local assistant chat. Murph noninteractive assistant turns accept only never; interactive approval modes are rejected before provider launch.",
                           "type": "string",
-                          "enum": [
-                            "untrusted",
-                            "on-request",
-                            "never"
-                          ]
+                          "const": "never"
                         },
                         "profile": {
                           "description": "Optional Codex config profile name.",
@@ -996,13 +988,9 @@
                   ]
                 },
                 "approvalPolicy": {
-                  "description": "Codex approval policy for local assistant chat. Murph noninteractive assistant turns currently support only never; other modes fail closed.",
+                  "description": "Codex approval policy for local assistant chat. Murph noninteractive assistant turns accept only never; interactive approval modes are rejected before provider launch.",
                   "type": "string",
-                  "enum": [
-                    "untrusted",
-                    "on-request",
-                    "never"
-                  ]
+                  "const": "never"
                 },
                 "profile": {
                   "description": "Optional Codex config profile name.",

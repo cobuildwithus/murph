@@ -8,6 +8,9 @@ import {
   isAssistantCodexTargetConfig,
   resolveAssistantChatProviderFromConfig,
 } from '@murphai/operator-config/assistant/provider-config'
+import type {
+  AssistantApprovalPolicy,
+} from '@murphai/operator-config/assistant-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   DEFAULT_CODEX_MODELS,
@@ -58,10 +61,12 @@ export const codexCliProviderDefinition: AssistantProviderDefinition = {
         'Codex app-server execution requires a Codex provider config.',
       )
     }
+    const approvalPolicy = providerConfig.policy.approvalPolicy ?? 'never'
+    assertSupportedCodexAppServerApprovalPolicy(approvalPolicy)
 
     const baseAppServerInput = {
       abortSignal: input.abortSignal,
-      approvalPolicy: providerConfig.policy.approvalPolicy ?? undefined,
+      approvalPolicy,
       codexCommand: providerConfig.target.codexCommand ?? undefined,
       codexHome: providerConfig.target.codexHome ?? undefined,
       configOverrides: mergeCodexConfigOverrides({
@@ -135,6 +140,23 @@ export const codexCliProviderDefinition: AssistantProviderDefinition = {
   resolveStaticModels() {
     return DEFAULT_CODEX_MODELS
   },
+}
+
+function assertSupportedCodexAppServerApprovalPolicy(
+  approvalPolicy: AssistantApprovalPolicy | null | undefined,
+): void {
+  if (approvalPolicy === 'never') {
+    return
+  }
+
+  throw new VaultCliError(
+    'ASSISTANT_CODEX_APPROVAL_POLICY_UNSUPPORTED',
+    `Codex app-server approval policy "${approvalPolicy}" is not supported in noninteractive assistant turns. Use approvalPolicy=never.`,
+    {
+      approvalPolicy,
+      retryable: false,
+    },
+  )
 }
 
 function extractCodexAppServerUserMessageImages(
