@@ -171,6 +171,26 @@ export interface HostedExecutionDeviceSyncWakeEventLike {
   provider?: string | null;
 }
 
+type HostedExecutionDeviceSyncHintPayloadFieldKind = "boolean" | "isoTimestamp" | "string";
+
+// Keep this generic wake-hint seam aligned with the current manifest-owned hosted-hint fields
+// until hosted wake parsing becomes provider-aware at this boundary.
+const HOSTED_EXECUTION_DEVICE_SYNC_HINT_PAYLOAD_FIELD_KINDS: Readonly<
+  Record<string, HostedExecutionDeviceSyncHintPayloadFieldKind>
+> = Object.freeze({
+  dataType: "string",
+  eventType: "string",
+  includePersonalInfo: "boolean",
+  includeProfile: "boolean",
+  objectId: "string",
+  occurredAt: "isoTimestamp",
+  resourceId: "string",
+  resourceType: "string",
+  sourceEventType: "string",
+  windowEnd: "isoTimestamp",
+  windowStart: "isoTimestamp",
+});
+
 export function buildHostedExecutionDeviceSyncConnectLinkPath(provider: string): string {
   return `/api/internal/device-sync/providers/${encodeURIComponent(provider)}/connect-link`;
 }
@@ -331,14 +351,14 @@ export function parseHostedExecutionDeviceSyncWakeHint(
   }
 
   if (record.nextReconcileAt !== undefined) {
-    next.nextReconcileAt = readNullableStringValue(
+    next.nextReconcileAt = readNullableIsoTimestamp(
       record.nextReconcileAt,
       "Hosted execution device-sync.wake hint nextReconcileAt",
     );
   }
 
   if (record.occurredAt !== undefined) {
-    next.occurredAt = readNullableStringValue(
+    next.occurredAt = readNullableIsoTimestamp(
       record.occurredAt,
       "Hosted execution device-sync.wake hint occurredAt",
     );
@@ -395,7 +415,7 @@ function parseHostedExecutionDeviceSyncJobHint(
   };
 
   if (record.availableAt !== undefined) {
-    next.availableAt = requireString(
+    next.availableAt = requireIsoTimestamp(
       record.availableAt,
       `Hosted execution device-sync.wake hint jobs[${index}].availableAt`,
     );
@@ -416,10 +436,7 @@ function parseHostedExecutionDeviceSyncJobHint(
   }
 
   if (record.payload !== undefined) {
-    next.payload = requireObject(
-      record.payload,
-      `Hosted execution device-sync.wake hint jobs[${index}].payload`,
-    );
+    next.payload = parseHostedExecutionDeviceSyncJobHintPayload(record.payload, index);
   }
 
   if (record.priority !== undefined) {
@@ -430,6 +447,46 @@ function parseHostedExecutionDeviceSyncJobHint(
   }
 
   return next;
+}
+
+function parseHostedExecutionDeviceSyncJobHintPayload(
+  value: unknown,
+  index: number,
+): Record<string, unknown> {
+  const label = `Hosted execution device-sync.wake hint jobs[${index}].payload`;
+  const record = requireObject(value, label);
+  const next: Record<string, unknown> = {};
+
+  for (const [field, rawValue] of Object.entries(record)) {
+    const kind = HOSTED_EXECUTION_DEVICE_SYNC_HINT_PAYLOAD_FIELD_KINDS[field];
+
+    if (!kind) {
+      throw new TypeError(`${label}.${field} is not supported.`);
+    }
+
+    next[field] = parseHostedExecutionDeviceSyncJobHintPayloadField(
+      rawValue,
+      kind,
+      `${label}.${field}`,
+    );
+  }
+
+  return next;
+}
+
+function parseHostedExecutionDeviceSyncJobHintPayloadField(
+  value: unknown,
+  kind: HostedExecutionDeviceSyncHintPayloadFieldKind,
+  label: string,
+): boolean | string {
+  switch (kind) {
+    case "boolean":
+      return requireBoolean(value, label);
+    case "isoTimestamp":
+      return requireIsoTimestamp(value, label);
+    case "string":
+      return requireString(value, label);
+  }
 }
 
 function parseHostedExecutionDeviceSyncRevokeWarning(
@@ -638,12 +695,12 @@ function parseHostedExecutionDeviceSyncRuntimeConnectionUpdate(
       );
 
   assertHostedExecutionDeviceSyncRuntimeMutationFences({
-    connection: connection !== undefined,
+    connection: connection !== undefined || seed !== undefined,
     index,
-    localState: localState !== undefined,
+    localState: localState !== undefined || seed !== undefined,
     observedTokenVersion,
     observedUpdatedAt,
-    tokenBundle: tokenBundle !== undefined,
+    tokenBundle: tokenBundle !== undefined || seed !== undefined,
   });
 
   return {

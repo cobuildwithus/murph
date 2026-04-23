@@ -286,6 +286,7 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
             lastErrorMessage:
               "authorization=Bearer secret-token refresh_token=refresh-secret eyJhbGciOiJIUzI1NiJ9.payload.signature",
           },
+          observedTokenVersion: null,
           observedUpdatedAt: null,
           seed: {
             connection: {
@@ -325,6 +326,7 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
             lastErrorCode: "access_token=[redacted]",
             lastErrorMessage: "authorization=[redacted] refresh_token=[redacted] [redacted.jwt]",
           },
+          observedTokenVersion: null,
           observedUpdatedAt: null,
           seed: {
             localState: {
@@ -671,6 +673,56 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
       }),
     ).toThrowError(/observedTokenVersion is required when tokenBundle mutations are present/u);
 
+    const seed = {
+      connection: {
+        accessTokenExpiresAt: null,
+        connectedAt: "2026-04-07T00:00:00.000Z",
+        createdAt: "2026-04-07T00:00:00.000Z",
+        displayName: "Seed User",
+        externalAccountId: "ext_seed",
+        id: "conn_seed",
+        metadata: {},
+        provider: "oura",
+        scopes: ["daily"],
+        status: "active" as const,
+      },
+      localState: {
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastSyncCompletedAt: null,
+        lastSyncErrorAt: null,
+        lastSyncStartedAt: null,
+        lastWebhookAt: null,
+        nextReconcileAt: null,
+      },
+      tokenBundle: null,
+    };
+
+    expect(() =>
+      parseHostedExecutionDeviceSyncRuntimeApplyRequest({
+        updates: [
+          {
+            connectionId: "conn_seed",
+            seed,
+          },
+        ],
+        userId: "user_123",
+      }),
+    ).toThrowError(/observedUpdatedAt is required when connection or localState mutations are present/u);
+
+    expect(() =>
+      parseHostedExecutionDeviceSyncRuntimeApplyRequest({
+        updates: [
+          {
+            connectionId: "conn_seed",
+            observedUpdatedAt: null,
+            seed,
+          },
+        ],
+        userId: "user_123",
+      }),
+    ).toThrowError(/observedTokenVersion is required when tokenBundle mutations are present/u);
+
     expect(() =>
       parseHostedExecutionDeviceSyncRuntimeApplyRequest({
         updates: [
@@ -851,6 +903,8 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
           maxAttempts: 3,
           payload: {
             dataType: "sleep",
+            occurredAt: "2026-04-09T00:00:30Z",
+            resourceId: "sleep_123",
           },
           priority: 10,
         },
@@ -871,18 +925,20 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
       eventType: "sleep.updated",
       jobs: [
         {
-          availableAt: "2026-04-09T00:00:00Z",
+          availableAt: "2026-04-09T00:00:00.000Z",
           dedupeKey: null,
           kind: "resource",
           maxAttempts: 3,
           payload: {
             dataType: "sleep",
+            occurredAt: "2026-04-09T00:00:30.000Z",
+            resourceId: "sleep_123",
           },
           priority: 10,
         },
       ],
       nextReconcileAt: null,
-      occurredAt: "2026-04-09T00:01:00Z",
+      occurredAt: "2026-04-09T00:01:00.000Z",
       reason: "webhook_hint",
       resourceCategory: "sleep",
       revokeWarning: {
@@ -902,6 +958,7 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
           kind: "resource",
           payload: {
             resourceId: "abc",
+            windowStart: "2026-04-08T00:00:00Z",
           },
         },
       ],
@@ -909,16 +966,17 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
 
     expect(normalizeHostedDeviceSyncJobHints(hint)).toEqual([
       {
-        availableAt: "2026-04-09T00:00:00Z",
+        availableAt: "2026-04-09T00:00:00.000Z",
         kind: "resource",
         payload: {
           resourceId: "abc",
+          windowStart: "2026-04-08T00:00:00.000Z",
         },
       },
     ]);
   });
 
-  it("rejects invalid hosted wake job payloads", () => {
+  it("rejects invalid hosted wake job payloads, payload keys, and schedule timestamps", () => {
     expect(() =>
       parseHostedExecutionDeviceSyncWakeHint({
         jobs: [
@@ -929,5 +987,41 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
         ],
       })
     ).toThrow(/payload/i);
+
+    expect(() =>
+      parseHostedExecutionDeviceSyncWakeHint({
+        jobs: [
+          {
+            kind: "resource",
+            payload: {
+              refreshToken: "secret",
+            },
+          },
+        ],
+      }),
+    ).toThrow(/payload\.refreshToken is not supported/i);
+
+    expect(() =>
+      parseHostedExecutionDeviceSyncWakeHint({
+        nextReconcileAt: "tomorrow",
+      }),
+    ).toThrow(/nextReconcileAt must be an ISO timestamp/i);
+
+    expect(() =>
+      parseHostedExecutionDeviceSyncWakeHint({
+        nextReconcileAt: "2026-04-09T00:00:00.000+25:00",
+      }),
+    ).toThrow(/nextReconcileAt must be an ISO timestamp/i);
+
+    expect(() =>
+      parseHostedExecutionDeviceSyncWakeHint({
+        jobs: [
+          {
+            availableAt: "not-a-timestamp",
+            kind: "resource",
+          },
+        ],
+      }),
+    ).toThrow(/availableAt must be an ISO timestamp/i);
   });
 });

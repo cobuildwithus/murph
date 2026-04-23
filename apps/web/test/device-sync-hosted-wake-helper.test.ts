@@ -44,7 +44,7 @@ describe("buildHostedDeviceSyncWakeFromSignal", () => {
         eventType: "webhook",
         jobs: [
           {
-            availableAt: "2026-04-09T00:00:00Z",
+            availableAt: "2026-04-09T00:00:00.000Z",
             dedupeKey: null,
             kind: "resource",
             maxAttempts: 5,
@@ -54,8 +54,8 @@ describe("buildHostedDeviceSyncWakeFromSignal", () => {
             priority: 4,
           },
         ],
-        nextReconcileAt: "2026-04-09T01:00:00Z",
-        occurredAt: "2026-04-09T00:00:30Z",
+        nextReconcileAt: "2026-04-09T01:00:00.000Z",
+        occurredAt: "2026-04-09T00:00:30.000Z",
         reason: "webhook_hint",
         resourceCategory: "sleep",
         revokeWarning: {
