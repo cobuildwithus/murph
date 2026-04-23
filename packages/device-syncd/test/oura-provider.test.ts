@@ -264,11 +264,13 @@ test("Oura provider revokes access tokens through the OAuth revoke endpoint", as
 });
 
 test("Oura provider rejects auth exchanges without a refresh token and personal-info ids", async () => {
+  const missingRefreshRequests: string[] = [];
   const missingRefreshProvider = createOuraDeviceSyncProvider({
     clientId: "oura-client-id",
     clientSecret: "oura-client-secret",
-    fetchImpl: async (input) => {
+    fetchImpl: async (input, init) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      missingRefreshRequests.push(`${init?.method ?? "GET"} ${url}`);
 
       if (url === "https://api.ouraring.com/oauth/token") {
         return createJsonResponse({
@@ -276,6 +278,10 @@ test("Oura provider rejects auth exchanges without a refresh token and personal-
           expires_in: 3600,
           scope: "extapi:personal",
         });
+      }
+
+      if (url === "https://api.ouraring.com/oauth/revoke?access_token=access-token") {
+        return new Response(null, { status: 204 });
       }
 
       throw new Error(`Unexpected request: ${url}`);
@@ -298,6 +304,10 @@ test("Oura provider rejects auth exchanges without a refresh token and personal-
       error.code === "OURA_REFRESH_TOKEN_MISSING" &&
       error.httpStatus === 502,
   );
+  assert.deepEqual(missingRefreshRequests, [
+    "POST https://api.ouraring.com/oauth/token",
+    "GET https://api.ouraring.com/oauth/revoke?access_token=access-token",
+  ]);
 
   const missingProfileIdProvider = createOuraDeviceSyncProvider({
     clientId: "oura-client-id",

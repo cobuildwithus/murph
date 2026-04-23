@@ -22,7 +22,6 @@ import {
   buildProviderApiError,
   buildScheduledReconcileJobs,
   createRefreshingApiSession,
-  exchangeOAuthAuthorizationCode,
   fetchBearerJson,
   parseResponseBody,
   postOAuthTokenRequest,
@@ -949,14 +948,17 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
       });
     },
     async exchangeAuthorizationCode(context: ProviderCallbackContext, code: string): Promise<ProviderConnectionResult> {
-      const { tokenPayload, tokens } = await exchangeOAuthAuthorizationCode({
-        postTokenRequest,
-        clientId: config.clientId,
-        clientSecret: config.clientSecret,
-        callbackUrl: context.callbackUrl,
+      const tokenPayload = await postTokenRequest({
+        grant_type: "authorization_code",
+        client_id: config.clientId,
+        client_secret: config.clientSecret,
+        redirect_uri: context.callbackUrl,
         code,
-        tokenResponseToAuthTokens,
-        buildMissingRefreshTokenError: () =>
+      });
+      const tokens = tokenResponseToAuthTokens(tokenPayload);
+
+      try {
+        tokens.refreshToken = requireRefreshToken(tokens.refreshToken, () =>
           deviceSyncError({
             code: "OURA_REFRESH_TOKEN_MISSING",
             message:
@@ -964,9 +966,8 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
             retryable: false,
             httpStatus: 502,
           }),
-      });
+        );
 
-      try {
         const grantedScopesFromToken = normalizeGrantedScopes(tokenPayload.scope);
         const grantedScopes =
           grantedScopesFromToken.length > 0

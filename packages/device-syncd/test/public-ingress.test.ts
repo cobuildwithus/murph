@@ -1354,6 +1354,109 @@ test("public ingress preserves callback redirect context on OAuth callback failu
   );
 });
 
+test("public ingress best-effort revokes pending provider access when OAuth persistence fails", async () => {
+  const persistError = new Error("persist failed before connection storage");
+  const revokeCalls: Array<{ accessToken: string; externalAccountId: string }> = [];
+  const warnEvents: Array<{ context?: Record<string, unknown>; message: string }> = [];
+
+  class FailingUpsertStore extends InMemoryPublicIngressStore {
+    override upsertConnection(_input: UpsertPublicDeviceSyncConnectionInput): PublicDeviceSyncAccount {
+      throw persistError;
+    }
+  }
+
+  const store = new FailingUpsertStore();
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([
+      createFakeProvider({
+        async revokeAccess(account) {
+          revokeCalls.push({
+            accessToken: account.accessToken,
+            externalAccountId: account.externalAccountId,
+          });
+          throw new Error("cleanup revoke failed");
+        },
+      }),
+    ]),
+    store,
+    log: {
+      warn(message, context) {
+        warnEvents.push({
+          context: context as Record<string, unknown> | undefined,
+          message,
+        });
+      },
+    },
+  });
+
+  const begin = await ingress.startConnection({ provider: "demo" });
+
+  await assert.rejects(
+    () =>
+      ingress.handleOAuthCallback({
+        provider: "demo",
+        state: begin.state,
+        code: "abc",
+      }),
+    (error: unknown) => error === persistError,
+  );
+
+  assert.deepEqual(revokeCalls, [
+    {
+      accessToken: "access-token",
+      externalAccountId: "demo-abc",
+    },
+  ]);
+  assert.equal(warnEvents.length, 1);
+  assert.equal(warnEvents[0]?.message, "Failed to revoke provider access after OAuth callback setup failed.");
+  assert.deepEqual(warnEvents[0]?.context?.error, {
+    message: "cleanup revoke failed",
+    name: "Error",
+  });
+  assert.equal(warnEvents[0]?.context?.provider, "demo");
+  assert.equal(store.hasOAuthState(begin.state), false);
+  assert.equal(store.getConnectionByExternalAccount("demo", "demo-abc"), null);
+});
+
+test("public ingress does not revoke provider access after the connection has already been stored", async () => {
+  const store = new InMemoryPublicIngressStore();
+  const revokeCalls: string[] = [];
+  const hookError = new Error("post-persist hook failure");
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([
+      createFakeProvider({
+        async revokeAccess(account) {
+          revokeCalls.push(account.externalAccountId);
+        },
+      }),
+    ]),
+    store,
+    hooks: {
+      onConnectionEstablished() {
+        throw hookError;
+      },
+    },
+  });
+
+  const begin = await ingress.startConnection({ provider: "demo" });
+
+  await assert.rejects(
+    () =>
+      ingress.handleOAuthCallback({
+        provider: "demo",
+        state: begin.state,
+        code: "persisted",
+      }),
+    (error: unknown) => error === hookError,
+  );
+
+  assert.deepEqual(revokeCalls, []);
+  assert.equal(store.hasOAuthState(begin.state), false);
+  assert.equal(store.getConnectionByExternalAccount("demo", "demo-persisted")?.id, "acct_01");
+});
+
 test("public ingress does not burn valid oauth state on provider mismatch", async () => {
   const store = new InMemoryPublicIngressStore();
   const whoopBase = createFakeProvider();
