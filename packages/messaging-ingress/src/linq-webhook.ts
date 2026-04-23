@@ -302,7 +302,8 @@ export function requireLinqMessageReceivedEvent(
   const data = toLinqObjectRecord(event.data, "Linq message.received data");
   const chat = parseRequiredChatInfo(data.chat);
   const senderHandle = parseRequiredChatHandle(data.sender_handle, "Linq message.received sender_handle");
-  const recipientHandle = chat.owner_handle ?? undefined;
+  const ownerHandle = chat.owner_handle ?? undefined;
+  const recipientHandle = parseOptionalChatHandle(data.recipient_handle) ?? ownerHandle;
   const parts = data.parts;
 
   if (!Array.isArray(parts)) {
@@ -312,13 +313,15 @@ export function requireLinqMessageReceivedEvent(
   const createdAt = normalizeRequiredTimestamp(event.created_at, "Linq webhook created_at");
   const chatId = chat.id;
   const senderAddress = senderHandle.handle;
-  const recipientPhone = normalizeNullableString(recipientHandle?.handle);
+  const recipientPhone =
+    normalizeNullableString(data.recipient_phone)
+    ?? normalizeNullableString(recipientHandle?.handle);
   const direction = normalizeRequiredDirection(data.direction, "Linq message.received direction");
   const isFromMe = direction === "outbound";
   const service =
     normalizeNullableString(data.service)
     ?? normalizeNullableString(senderHandle.service)
-    ?? normalizeNullableString(recipientHandle?.service)
+    ?? normalizeNullableString(ownerHandle?.service)
     ?? normalizeRequiredString(data.service, "Linq message.received service");
   const preferredService = normalizeNullableString(data.preferred_service) ?? undefined;
   const occurredAt =

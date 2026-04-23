@@ -13,6 +13,7 @@ import {
   parseCanonicalLinqMessageReceivedEvent,
   parseLinqWebhookEvent,
   readLinqWebhookHeader,
+  requireLinqMessageReceivedEvent,
   resolveLinqWebhookOccurredAt,
   summarizeLinqMessageReceivedEvent,
   verifyAndParseLinqWebhookRequest,
@@ -426,6 +427,75 @@ test("parseCanonicalLinqMessageReceivedEvent exposes summaries and minimizers", 
     partner_id: null,
     trace_id: null,
   });
+});
+
+test("requireLinqMessageReceivedEvent preserves explicit recipient fields on legacy payloads", () => {
+  const event = requireLinqMessageReceivedEvent(buildV2026MessageReceivedWebhook({
+    data: {
+      chat: {
+        id: "chat_legacy_recipient",
+        owner_handle: {
+          handle: "+15550000000",
+          id: "handle_owner_legacy",
+          is_me: true,
+          service: "SMS",
+        },
+      },
+      recipient_handle: {
+        handle: "+15557654321",
+        id: "handle_recipient_legacy",
+        is_me: true,
+        service: "iMessage",
+      },
+      recipient_phone: "+15557654321",
+      sender_handle: {
+        handle: "+15551234567",
+        id: "handle_sender_legacy",
+        service: "iMessage",
+      },
+      service: "iMessage",
+    },
+    eventId: "evt_legacy_recipient",
+  }));
+
+  assert.equal(event.data.recipient_phone, "+15557654321");
+  assert.ok(event.data.recipient_handle);
+  assert.equal(event.data.recipient_handle.handle, "+15557654321");
+  assert.equal(event.data.recipient_handle.id, "handle_recipient_legacy");
+  assert.equal(event.data.recipient_handle.is_me, true);
+  assert.equal(event.data.recipient_handle.service, "iMessage");
+});
+
+test("requireLinqMessageReceivedEvent falls back to an explicit legacy recipient handle without changing service fallback", () => {
+  const event = requireLinqMessageReceivedEvent(buildV2026MessageReceivedWebhook({
+    data: {
+      chat: {
+        id: "chat_legacy_recipient_handle_only",
+        owner_handle: {
+          handle: "+15550000000",
+          id: "handle_owner_legacy_service",
+          is_me: true,
+          service: "SMS",
+        },
+      },
+      recipient_handle: {
+        handle: "+15557654321",
+        id: "handle_recipient_legacy_only",
+        is_me: true,
+        service: "iMessage",
+      },
+      sender_handle: {
+        handle: "+15551234567",
+        id: "handle_sender_legacy_only",
+      },
+    },
+    eventId: "evt_legacy_recipient_handle_only",
+  }));
+
+  assert.equal(event.data.recipient_phone, "+15557654321");
+  assert.ok(event.data.recipient_handle);
+  assert.equal(event.data.recipient_handle.handle, "+15557654321");
+  assert.equal(event.data.service, "SMS");
 });
 
 test("parseCanonicalLinqMessageReceivedEvent normalizes 2026-02-03 webhook payloads", () => {
