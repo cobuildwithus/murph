@@ -9,8 +9,9 @@ import {
   buildDiscoveryStepLabel,
   buildResearchArtifactContracts,
   buildCommandHelperScript,
-  buildCommandWrapper,
+  buildHarvestCommandWrapper,
   buildProtocolMetadata,
+  buildSendCommandWrapper,
   buildSharedPromptHeader,
   formatBulletList,
   PAGE_BUILDER_LABEL,
@@ -339,7 +340,8 @@ function removeWorkspaceRelativeFile(workspaceDir, relativePath) {
 function cleanupGeneratedPostCharterFiles(workspaceDir, workflow) {
   const keepPaths = new Set([
     "prompts/01-charter.md",
-    "commands/01-charter.sh",
+    "commands/01-charter.send.sh",
+    "commands/01-charter.harvest.sh",
     "commands/_run-review-gpt.sh",
   ]);
   const ownedGeneratedPaths = new Set(
@@ -352,7 +354,6 @@ function cleanupGeneratedPostCharterFiles(workspaceDir, workflow) {
     for (const relativePath of ownedGeneratedPaths) {
       removeWorkspaceRelativeFile(workspaceDir, relativePath);
     }
-    return;
   }
 
   const promptDir = path.join(workspaceDir, "prompts");
@@ -371,7 +372,10 @@ function cleanupGeneratedPostCharterFiles(workspaceDir, workflow) {
 
   if (existsSync(commandDir)) {
     for (const entry of readdirSync(commandDir)) {
-      if (!["_run-review-gpt.sh", "01-charter.sh"].includes(entry) && removableCommandPattern.test(entry)) {
+      if (
+        !["_run-review-gpt.sh", "01-charter.send.sh", "01-charter.harvest.sh"].includes(entry) &&
+        removableCommandPattern.test(entry)
+      ) {
         removeWorkspaceRelativeFile(workspaceDir, path.posix.join("commands", entry));
       }
     }
@@ -492,12 +496,13 @@ function buildRunbook({
   manifest,
   charterSourceRelative,
   discoveryShards,
-  runnableCommands,
   templateOnlyPrompts,
 }) {
-  const commandList = runnableCommands
-    .slice(1)
-    .map((command, index) => `${index + 1}. \`bash ${command}\``)
+  const commandList = discoveryShards
+    .map((shard, index) => {
+      const baseName = buildDiscoveryStepLabel(index, shard.fileId);
+      return `- \`${baseName}\`: send with \`bash commands/${baseName}.send.sh\`, then harvest with \`bash commands/${baseName}.harvest.sh\``;
+    })
     .join("\n");
   const templateList = templateOnlyPrompts
     .map((promptPath) => `- \`${promptPath}\``)
@@ -527,13 +532,11 @@ The discovery tranche is now runnable from the repo root:
 
 ${commandList}
 
-Each command writes:
+Each seam now has two commands:
 
-- \`responses/<label>.md\`
-- \`logs/<label>.result.json\`
-- \`logs/<label>.stderr.log\`
-- \`state/chat-urls/<label>.txt\` when a ChatGPT thread URL is detected
-- the canonical machine-readable seam artifact under \`downloads/<label>/...\` when the prompt requests one
+- \`commands/<label>.send.sh\` submits the prompt and saves \`state/chat-urls/<label>.txt\`
+- \`commands/<label>.harvest.sh\` wake-harvests the saved thread into \`downloads/<label>/...\` and \`state/thread-exports/<label>.thread.json\`
+- inline seams can also recover \`responses/<label>.md\`; artifact seams should treat normalized downloads as the source of truth
 
 ## Template-Only Later Stages
 
@@ -586,7 +589,7 @@ function main(argv) {
   };
 
   const promptFiles = ["prompts/01-charter.md"];
-  const runnableCommands = ["commands/01-charter.sh"];
+  const runnableCommands = ["commands/01-charter.send.sh", "commands/01-charter.harvest.sh"];
   const templateOnlyPrompts = [];
 
   charterArtifacts.discoveryShards.forEach((shard, index) => {
@@ -608,12 +611,17 @@ function main(argv) {
     );
     promptFiles.push(promptRelativePath);
 
-    const commandRelativePath = `commands/${baseName}.sh`;
+    const sendCommandRelativePath = `commands/${baseName}.send.sh`;
+    const harvestCommandRelativePath = `commands/${baseName}.harvest.sh`;
     writeExecutable(
-      path.join(workspaceDir, commandRelativePath),
-      buildCommandWrapper(baseName, promptRelativePath),
+      path.join(workspaceDir, sendCommandRelativePath),
+      buildSendCommandWrapper(baseName, promptRelativePath),
     );
-    runnableCommands.push(commandRelativePath);
+    writeExecutable(
+      path.join(workspaceDir, harvestCommandRelativePath),
+      buildHarvestCommandWrapper(baseName),
+    );
+    runnableCommands.push(sendCommandRelativePath, harvestCommandRelativePath);
   });
 
   const templateSpecs = buildLaterTemplateSpecs(
@@ -678,7 +686,6 @@ function main(argv) {
       manifest: charterArtifacts.manifest,
       charterSourceRelative: toPosixRelative(charterResponsePath),
       discoveryShards: charterArtifacts.discoveryShards,
-      runnableCommands,
       templateOnlyPrompts,
     }),
   );
@@ -716,8 +723,10 @@ function main(argv) {
   }
 
   console.log(`Materialized post-charter prompts at ${outDirRelative}`);
-  if (runnableCommands.length > 1) {
-    console.log(`Run next: bash ${path.posix.join(outDirRelative, runnableCommands[1])}`);
+  if (charterArtifacts.discoveryShards.length > 0) {
+    const firstDiscoveryLabel = buildDiscoveryStepLabel(0, charterArtifacts.discoveryShards[0].fileId);
+    console.log(`Run next: bash ${path.posix.join(outDirRelative, `commands/${firstDiscoveryLabel}.send.sh`)}`);
+    console.log(`Then harvest it with: bash ${path.posix.join(outDirRelative, `commands/${firstDiscoveryLabel}.harvest.sh`)}`);
   }
 }
 

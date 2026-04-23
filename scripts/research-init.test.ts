@@ -58,16 +58,36 @@ function runResearchPackageScript(
 
 function runGeneratedReviewGptHelper(
   helperScriptPath: string,
-  label: string,
-  promptFile: string,
-  responseFile: string,
+  args: string[],
   env: NodeJS.ProcessEnv,
 ) {
-  return spawnSync("bash", [helperScriptPath, label, promptFile, responseFile], {
+  return spawnSync("bash", [helperScriptPath, ...args], {
     cwd: repoRoot,
     encoding: "utf8",
     env,
   });
+}
+
+function runGeneratedReviewGptSend(
+  helperScriptPath: string,
+  label: string,
+  promptFile: string,
+  env: NodeJS.ProcessEnv,
+) {
+  return runGeneratedReviewGptHelper(helperScriptPath, ["send", label, promptFile], env);
+}
+
+function runGeneratedReviewGptHarvest(
+  helperScriptPath: string,
+  label: string,
+  responseFile: string | null,
+  env: NodeJS.ProcessEnv,
+) {
+  return runGeneratedReviewGptHelper(
+    helperScriptPath,
+    responseFile ? ["harvest", label, responseFile] : ["harvest", label],
+    env,
+  );
 }
 
 function parseZipPathFromOutput(output: string) {
@@ -205,11 +225,20 @@ describe("research init scaffold", () => {
       expect(initResult.stderr).toBe("");
       expect(initResult.stdout).toContain("Initialized research orchestrator scaffold");
       expect(initResult.stdout).toContain("pnpm research:materialize --workspace");
+      expect(initResult.stdout).toContain("commands/01-charter.send.sh");
+      expect(initResult.stdout).toContain("commands/01-charter.harvest.sh");
       expect(existsSync(path.join(outDir, "README.md"))).toBe(true);
       expect(existsSync(path.join(outDir, "workflow.json"))).toBe(true);
       expect(existsSync(path.join(outDir, "prompts", "01-charter.md"))).toBe(true);
-      expect(existsSync(path.join(outDir, "commands", "01-charter.sh"))).toBe(true);
+      expect(existsSync(path.join(outDir, "commands", "01-charter.send.sh"))).toBe(true);
+      expect(existsSync(path.join(outDir, "commands", "01-charter.harvest.sh"))).toBe(true);
       expect(existsSync(path.join(outDir, "commands", "02-discovery-direct-cwi.sh"))).toBe(false);
+      expect(
+        readFileSync(path.join(outDir, "commands", "01-charter.send.sh"), "utf8"),
+      ).toContain('_run-review-gpt.sh" send "01-charter"');
+      expect(
+        readFileSync(path.join(outDir, "commands", "01-charter.harvest.sh"), "utf8"),
+      ).toContain('_run-review-gpt.sh" harvest "01-charter"');
 
       const initWorkflow = JSON.parse(
         readFileSync(path.join(outDir, "workflow.json"), "utf8"),
@@ -242,7 +271,10 @@ describe("research init scaffold", () => {
       expect(initWorkflow.protocol.provisional).toBe(true);
       expect(initWorkflow.artifactContracts).toEqual({});
       expect(initWorkflow.promptFiles).toEqual(["prompts/01-charter.md"]);
-      expect(initWorkflow.runnableCommands).toEqual(["commands/01-charter.sh"]);
+      expect(initWorkflow.runnableCommands).toEqual([
+        "commands/01-charter.send.sh",
+        "commands/01-charter.harvest.sh",
+      ]);
 
       const charterPrompt = readFileSync(
         path.join(outDir, "prompts", "01-charter.md"),
@@ -272,6 +304,8 @@ describe("research init scaffold", () => {
       expect(helperScript).toContain("thread wake");
       expect(helperScript).toContain("--skip-resume");
       expect(helperScript).toContain("murph-workspace");
+      expect(helperScript).toContain('$0 send <label> <prompt-file>');
+      expect(helperScript).toContain('$0 harvest <label> [response-file|-]');
       expect(helperScript).toContain('match(/https:\\/\\/chatgpt\\.com\\/c\\/\\S+/u)');
       expect(helperScript).toContain('matchAll(/https:\\/\\/chatgpt\\.com\\/c\\/\\S+/gu)');
       expect(helperScript).toContain('managed_browser_port');
@@ -279,8 +313,9 @@ describe("research init scaffold", () => {
       assertResearchReviewGptSupportFiles(outDir);
 
       const initReadme = readFileSync(path.join(outDir, "README.md"), "utf8");
-      expect(initReadme).toContain("Only the charter stage is runnable right now.");
-      expect(initReadme).toContain("bash commands/01-charter.sh");
+      expect(initReadme).toContain("Only the charter send/harvest pair is runnable right now.");
+      expect(initReadme).toContain("bash commands/01-charter.send.sh");
+      expect(initReadme).toContain("bash commands/01-charter.harvest.sh");
       expect(initReadme).toContain(`pnpm research:materialize --workspace ${path.relative(repoRoot, outDir).split(path.sep).join(path.posix.sep)}`);
 
       writeTextFileSync(path.join(outDir, "prompts", "02-discovery-stale.md"), "stale\n");
@@ -299,7 +334,12 @@ describe("research init scaffold", () => {
           "prompts/02-discovery-stale.md",
           "prompts/20-section-synthesis-stale.template.md",
         ],
-        runnableCommands: ["commands/01-charter.sh", "commands/02-discovery-stale.sh"],
+        runnableCommands: [
+          "commands/01-charter.send.sh",
+          "commands/01-charter.harvest.sh",
+          "commands/02-discovery-stale.send.sh",
+          "commands/02-discovery-stale.harvest.sh",
+        ],
       };
       writeFileSync(
         path.join(outDir, "workflow.json"),
@@ -320,9 +360,21 @@ describe("research init scaffold", () => {
       expect(materializeResult.status).toBe(0);
       expect(materializeResult.stderr).toBe("");
       expect(materializeResult.stdout).toContain("Materialized post-charter prompts");
-      expect(existsSync(path.join(outDir, "commands", "02-discovery-direct-cwi.sh"))).toBe(true);
+      expect(materializeResult.stdout).toContain("commands/02-discovery-direct-cwi.send.sh");
+      expect(materializeResult.stdout).toContain("commands/02-discovery-direct-cwi.harvest.sh");
+      expect(existsSync(path.join(outDir, "commands", "02-discovery-direct-cwi.send.sh"))).toBe(true);
+      expect(existsSync(path.join(outDir, "commands", "02-discovery-direct-cwi.harvest.sh"))).toBe(true);
       expect(
-        existsSync(path.join(outDir, "commands", "03-discovery-cardiovascular-safety.sh")),
+        readFileSync(path.join(outDir, "commands", "02-discovery-direct-cwi.send.sh"), "utf8"),
+      ).toContain('_run-review-gpt.sh" send "02-discovery-direct-cwi"');
+      expect(
+        readFileSync(path.join(outDir, "commands", "02-discovery-direct-cwi.harvest.sh"), "utf8"),
+      ).toContain('_run-review-gpt.sh" harvest "02-discovery-direct-cwi" "-"');
+      expect(
+        existsSync(path.join(outDir, "commands", "03-discovery-cardiovascular-safety.send.sh")),
+      ).toBe(true);
+      expect(
+        existsSync(path.join(outDir, "commands", "03-discovery-cardiovascular-safety.harvest.sh")),
       ).toBe(true);
       expect(existsSync(path.join(outDir, "prompts", "02-discovery-direct-cwi.md"))).toBe(true);
       expect(existsSync(path.join(outDir, "prompts", "10-snowball-gap-fill.template.md"))).toBe(
@@ -429,7 +481,8 @@ describe("research init scaffold", () => {
       expect(materializedWorkflow.initialFilePlan.files[0]?.path).toBe(
         "packages/health-commons/content/protocols/cold-water-immersion/cold-plunge.md",
       );
-      expect(materializedWorkflow.runnableCommands).toContain("commands/02-discovery-direct-cwi.sh");
+      expect(materializedWorkflow.runnableCommands).toContain("commands/02-discovery-direct-cwi.send.sh");
+      expect(materializedWorkflow.runnableCommands).toContain("commands/02-discovery-direct-cwi.harvest.sh");
       expect(materializedWorkflow.promptFiles).not.toContain(
         "prompts/33-schema-artifact-qa.template.md",
       );
@@ -493,7 +546,8 @@ describe("research init scaffold", () => {
 
       const materializedReadme = readFileSync(path.join(outDir, "README.md"), "utf8");
       expect(materializedReadme).toContain("materialized from the charter response");
-      expect(materializedReadme).toContain("commands/02-discovery-direct-cwi.sh");
+      expect(materializedReadme).toContain("commands/02-discovery-direct-cwi.send.sh");
+      expect(materializedReadme).toContain("commands/02-discovery-direct-cwi.harvest.sh");
       expect(materializedReadme).toContain("Template-Only Later Stages");
       expect(materializedReadme).toContain("downloads/<label>/...");
 
@@ -739,10 +793,26 @@ exit 17
       writeTextFileSync(responsePath, "stale response\n");
       writeTextFileSync(path.join(wakeOutputDir, "status.json"), '{"downloadedArtifacts":["stale.json"]}\n');
 
-      const helperResult = runGeneratedReviewGptHelper(
+      const helperSendResult = runGeneratedReviewGptSend(
         helperScriptPath,
         helperLabel,
         promptPath,
+        {
+          ...process.env,
+          PATH: `${stubBinDir}${path.delimiter}${process.env.PATH ?? ""}`,
+        },
+      );
+
+      expect(helperSendResult.status).toBe(0);
+      expect(helperSendResult.stderr).toBe("");
+      expect(helperSendResult.stdout).toContain(
+        `Result log: ${path.join(outDir, "logs", `${helperLabel}.send.result.json`)}`,
+      );
+      expect(helperSendResult.stdout).toContain("Recovered after send failure: yes");
+
+      const helperHarvestResult = runGeneratedReviewGptHarvest(
+        helperScriptPath,
+        helperLabel,
         responsePath,
         {
           ...process.env,
@@ -750,13 +820,12 @@ exit 17
         },
       );
 
-      expect(helperResult.status).toBe(0);
-      expect(helperResult.stderr).toBe("");
-      expect(helperResult.stdout).toContain(`Response: ${responsePath}`);
-      expect(helperResult.stdout).toContain(
+      expect(helperHarvestResult.status).toBe(0);
+      expect(helperHarvestResult.stderr).toBe("");
+      expect(helperHarvestResult.stdout).toContain(`Response: ${responsePath}`);
+      expect(helperHarvestResult.stdout).toContain(
         `Wake output: ${path.join(outDir, "downloads", helperLabel)}`,
       );
-      expect(helperResult.stdout).toContain("Recovered after send failure: yes");
 
       const wakeThreadPath = path.join(outDir, "downloads", helperLabel, "thread.json");
       const wakeStatusPath = path.join(outDir, "downloads", helperLabel, "status.json");
@@ -851,21 +920,32 @@ exit 0
         "artifact-contract-status.json",
       );
 
-      const helperResult = runGeneratedReviewGptHelper(
+      const helperSendResult = runGeneratedReviewGptSend(
         helperScriptPath,
         helperLabel,
         promptPath,
-        responsePath,
+        {
+          ...process.env,
+          PATH: `${stubBinDir}${path.delimiter}${process.env.PATH ?? ""}`,
+        },
+      );
+      expect(helperSendResult.status).toBe(0);
+
+      const helperHarvestResult = runGeneratedReviewGptHarvest(
+        helperScriptPath,
+        helperLabel,
+        null,
         {
           ...process.env,
           PATH: `${stubBinDir}${path.delimiter}${process.env.PATH ?? ""}`,
         },
       );
 
-      expect(helperResult.status).toBe(0);
-      expect(helperResult.stderr).toBe("");
-      expect(helperResult.stdout).toContain(`Artifact status: ${artifactStatusPath}`);
+      expect(helperHarvestResult.status).toBe(0);
+      expect(helperHarvestResult.stderr).toBe("");
+      expect(helperHarvestResult.stdout).toContain(`Artifact status: ${artifactStatusPath}`);
       expect(existsSync(canonicalArtifactPath)).toBe(true);
+      expect(existsSync(responsePath)).toBe(false);
       expect(readFileSync(canonicalArtifactPath, "utf8")).toContain('"candidateId":"candidate:direct-cwi:001"');
 
       const artifactStatus = JSON.parse(readFileSync(artifactStatusPath, "utf8")) as {
@@ -946,7 +1026,6 @@ exit 0
       const helperLabel = "11-source-ledger-reducer";
       const helperScriptPath = path.join(outDir, "commands", "_run-review-gpt.sh");
       const promptPath = path.join(outDir, "prompts", `${helperLabel}.template.md`);
-      const responsePath = path.join(outDir, "responses", `${helperLabel}.md`);
       const artifactStatusPath = path.join(
         outDir,
         "downloads",
@@ -954,19 +1033,29 @@ exit 0
         "artifact-contract-status.json",
       );
 
-      const helperResult = runGeneratedReviewGptHelper(
+      const helperSendResult = runGeneratedReviewGptSend(
         helperScriptPath,
         helperLabel,
         promptPath,
-        responsePath,
+        {
+          ...process.env,
+          PATH: `${stubBinDir}${path.delimiter}${process.env.PATH ?? ""}`,
+        },
+      );
+      expect(helperSendResult.status).toBe(0);
+
+      const helperHarvestResult = runGeneratedReviewGptHarvest(
+        helperScriptPath,
+        helperLabel,
+        null,
         {
           ...process.env,
           PATH: `${stubBinDir}${path.delimiter}${process.env.PATH ?? ""}`,
         },
       );
 
-      expect(helperResult.status).toBe(0);
-      expect(helperResult.stderr).toBe("");
+      expect(helperHarvestResult.status).toBe(0);
+      expect(helperHarvestResult.stderr).toBe("");
       expect(existsSync(path.join(outDir, "downloads", helperLabel, "canonical_source_ledger_v1.json"))).toBe(true);
       expect(
         existsSync(path.join(outDir, "downloads", helperLabel, "source_extraction_batches_v1.json")),
@@ -1050,7 +1139,6 @@ exit 0
       const helperLabel = "30-page-builder";
       const helperScriptPath = path.join(outDir, "commands", "_run-review-gpt.sh");
       const promptPath = path.join(outDir, "prompts", `${helperLabel}.template.md`);
-      const responsePath = path.join(outDir, "responses", `${helperLabel}.md`);
       const artifactStatusPath = path.join(
         outDir,
         "downloads",
@@ -1058,19 +1146,29 @@ exit 0
         "artifact-contract-status.json",
       );
 
-      const helperResult = runGeneratedReviewGptHelper(
+      const helperSendResult = runGeneratedReviewGptSend(
         helperScriptPath,
         helperLabel,
         promptPath,
-        responsePath,
+        {
+          ...process.env,
+          PATH: `${stubBinDir}${path.delimiter}${process.env.PATH ?? ""}`,
+        },
+      );
+      expect(helperSendResult.status).toBe(0);
+
+      const helperHarvestResult = runGeneratedReviewGptHarvest(
+        helperScriptPath,
+        helperLabel,
+        null,
         {
           ...process.env,
           PATH: `${stubBinDir}${path.delimiter}${process.env.PATH ?? ""}`,
         },
       );
 
-      expect(helperResult.status).toBe(0);
-      expect(helperResult.stderr).toBe("");
+      expect(helperHarvestResult.status).toBe(0);
+      expect(helperHarvestResult.stderr).toBe("");
       expect(existsSync(path.join(outDir, "downloads", helperLabel, "downloads", "cold-plunge.md"))).toBe(true);
       expect(existsSync(path.join(outDir, "downloads", helperLabel, "downloads", "cold-water-immersion.md"))).toBe(true);
       expect(
@@ -1081,7 +1179,6 @@ exit 0
           path.join(outDir, "downloads", helperLabel, "downloads", "cold-water-immersion-package-draft.zip"),
         ),
       ).toBe(true);
-      expect(readFileSync(responsePath, "utf8")).toContain("Attached the package draft files.");
 
       const artifactStatus = JSON.parse(readFileSync(artifactStatusPath, "utf8")) as {
         missingArtifacts: Array<unknown>;
@@ -1158,7 +1255,6 @@ exit 0
       const helperLabel = "02-discovery-direct-cwi";
       const helperScriptPath = path.join(outDir, "commands", "_run-review-gpt.sh");
       const promptPath = path.join(outDir, "prompts", `${helperLabel}.md`);
-      const responsePath = path.join(outDir, "responses", `${helperLabel}.md`);
       const artifactStatusPath = path.join(
         outDir,
         "downloads",
@@ -1166,18 +1262,28 @@ exit 0
         "artifact-contract-status.json",
       );
 
-      const helperResult = runGeneratedReviewGptHelper(
+      const helperSendResult = runGeneratedReviewGptSend(
         helperScriptPath,
         helperLabel,
         promptPath,
-        responsePath,
+        {
+          ...process.env,
+          PATH: `${stubBinDir}${path.delimiter}${process.env.PATH ?? ""}`,
+        },
+      );
+      expect(helperSendResult.status).toBe(0);
+
+      const helperHarvestResult = runGeneratedReviewGptHarvest(
+        helperScriptPath,
+        helperLabel,
+        null,
         {
           ...process.env,
           PATH: `${stubBinDir}${path.delimiter}${process.env.PATH ?? ""}`,
         },
       );
 
-      expect(helperResult.status).toBe(68);
+      expect(helperHarvestResult.status).toBe(68);
       expect(existsSync(artifactStatusPath)).toBe(true);
 
       const artifactStatus = JSON.parse(readFileSync(artifactStatusPath, "utf8")) as {
@@ -1247,7 +1353,6 @@ exit 0
       const helperLabel = "02-discovery-direct-cwi";
       const helperScriptPath = path.join(outDir, "commands", "_run-review-gpt.sh");
       const promptPath = path.join(outDir, "prompts", `${helperLabel}.md`);
-      const responsePath = path.join(outDir, "responses", `${helperLabel}.md`);
       const artifactStatusPath = path.join(
         outDir,
         "downloads",
@@ -1255,19 +1360,29 @@ exit 0
         "artifact-contract-status.json",
       );
 
-      const helperResult = runGeneratedReviewGptHelper(
+      const helperSendResult = runGeneratedReviewGptSend(
         helperScriptPath,
         helperLabel,
         promptPath,
-        responsePath,
+        {
+          ...process.env,
+          PATH: `${stubBinDir}${path.delimiter}${process.env.PATH ?? ""}`,
+        },
+      );
+      expect(helperSendResult.status).toBe(0);
+
+      const helperHarvestResult = runGeneratedReviewGptHarvest(
+        helperScriptPath,
+        helperLabel,
+        null,
         {
           ...process.env,
           PATH: `${stubBinDir}${path.delimiter}${process.env.PATH ?? ""}`,
         },
       );
 
-      expect(helperResult.status).toBe(68);
-      expect(helperResult.stderr).toContain(
+      expect(helperHarvestResult.status).toBe(68);
+      expect(helperHarvestResult.stderr).toContain(
         "research step 02-discovery-direct-cwi is missing required local artifacts after thread wake",
       );
       expect(existsSync(artifactStatusPath)).toBe(true);
@@ -1320,12 +1435,10 @@ exit 99
       const helperLabel = "98-config-mismatch";
       const helperScriptPath = path.join(outDir, "commands", "_run-review-gpt.sh");
       const promptPath = path.join(outDir, "prompts", "01-charter.md");
-      const responsePath = path.join(outDir, "responses", `${helperLabel}.md`);
-      const helperResult = runGeneratedReviewGptHelper(
+      const helperResult = runGeneratedReviewGptSend(
         helperScriptPath,
         helperLabel,
         promptPath,
-        responsePath,
         {
           ...process.env,
           PATH: `${stubBinDir}${path.delimiter}${process.env.PATH ?? ""}`,

@@ -31,23 +31,25 @@ Examples:
 The current repo flow is:
 
 1. `pnpm research:init "<topic>"`
-2. run `commands/01-charter.sh`
-3. `pnpm research:materialize --workspace <workspace>`
-4. run discovery shards
-5. run snowball/gap-fill
-6. run source-ledger reducer
-7. run extraction batches
-8. run section synthesis seams
-9. run page builder
-10. run evidence QA and safety QA
-11. run final landing reducer
+2. run `commands/01-charter.send.sh`
+3. when the thread is ready, run `commands/01-charter.harvest.sh`
+4. `pnpm research:materialize --workspace <workspace>`
+5. run discovery shard `*.send.sh` commands
+6. run discovery shard `*.harvest.sh` commands
+7. run snowball/gap-fill
+8. run source-ledger reducer
+9. run extraction batches
+10. run section synthesis seams
+11. run page builder
+12. run evidence QA and safety QA
+13. run final landing reducer
 
 The scaffold currently automates the early phases best. Later phases may still require the agent to materialize concrete prompt files and command wrappers from templates already present in the workspace.
 
 Timing expectations:
 
 - Research runs are allowed to take a long time.
-- `RESEARCH_WAIT_TIMEOUT` defaults to about 200 minutes and `RESEARCH_TIMEOUT` defaults slightly above that.
+- `RESEARCH_POLL_TIMEOUT` defaults to about 200 minutes and `RESEARCH_TIMEOUT` defaults slightly above that.
 - Even the initial charter can legitimately take 60 to 120 minutes.
 - Do not rush a thread just because the first assistant turn looks slow or the wake loop stays in `waiting` for a while.
 - Do not replace the workspace-managed wait with an ad hoc shorter wake such as 30 minutes. If a manual wake is truly needed, match the workspace's long timeout budget or exceed it.
@@ -67,7 +69,7 @@ For each research workspace, expect:
 - `config/review-gpt-work-profile.sh`
 - `scripts/package-research-context.sh`
 
-Research runs should use the workspace-specific config and isolated Chrome profile, not the default personal `review:gpt` browser session.
+Research runs should use the workspace-specific config and isolated research browser profile, not the default personal `review:gpt` browser session.
 
 Important current behavior:
 
@@ -76,6 +78,9 @@ Important current behavior:
 - `config/review-gpt-work-profile.sh` layers browser/profile settings on top of the workspace-specific research config.
 - Artifact-producing seams declare their required machine-readable outputs under `workflow.json -> artifactContracts`.
 - Murph now expects `@cobuild/review-gpt >= 0.5.76`, whose `thread export` preserves full assistant-turn text instead of clipping long inline replies at 20k characters.
+- Generated seam commands are split into `*.send.sh` and `*.harvest.sh`.
+- `*.send.sh` should only submit and persist the thread URL.
+- `*.harvest.sh` should run `thread wake`, normalize required artifacts, validate them, and recover inline response text only when that seam actually needs a prose file.
 
 ## End-To-End Workflow
 
@@ -85,7 +90,8 @@ Run:
 
 ```bash
 pnpm research:init "<topic>"
-bash output-packages/research/<workspace>/commands/01-charter.sh
+bash output-packages/research/<workspace>/commands/01-charter.send.sh
+bash output-packages/research/<workspace>/commands/01-charter.harvest.sh
 ```
 
 The charter must define:
@@ -114,16 +120,24 @@ This should generate discovery commands plus later-stage templates.
 
 ### 3. Discovery Fanout
 
-Run discovery shards one by one or in a measured fanout. For browser stability, stagger starts by at least 20 seconds. For very heavy uploads, 60 seconds is safer.
+Run discovery shard sends one by one or in a measured fanout. For browser stability, stagger starts by at least 20 seconds. For very heavy uploads, 60 seconds is safer.
 
 Discovery completion target:
 
 - `SOURCE_CANDIDATES_V1`
 - downloadable file `source_candidates_v1.json`
 
-The current runner reads `workflow.json`, normalizes the returned file into `downloads/<label>/source_candidates_v1.json`, validates the JSON shape, and fails the seam if the file is missing or malformed.
+The current harvest runner reads `workflow.json`, normalizes the returned file into `downloads/<label>/source_candidates_v1.json`, validates the JSON shape, and fails the seam if the file is missing or malformed.
 
-If a local `responses/*.md` file is weak but the thread finished, recover from the thread export or downloaded artifact instead of immediately rerunning. For discovery seams, prose alone does not count as completion.
+For discovery seams:
+
+- run `commands/<label>.send.sh`
+- wait for the thread to finish
+- run `commands/<label>.harvest.sh`
+
+Do not leave a long interactive shell attached to the send command. The send path should finish quickly after it records the chat URL.
+
+If a local `responses/*.md` file is weak but the thread finished, recover from the thread export or downloaded artifact instead of immediately rerunning. For discovery seams, prose alone does not count as completion, and `responses/*.md` is optional.
 
 ### 4. Snowball / Gap Fill
 
@@ -154,7 +168,7 @@ Reducer completion targets:
 
 This phase decides the actual corpus and splits it into extraction batches. Do not skip it for overloaded modalities.
 
-The current runner normalizes those files into:
+The current harvest runner normalizes those files into:
 
 - `downloads/11-source-ledger-reducer/canonical_source_ledger_v1.json`
 - `downloads/11-source-ledger-reducer/source_extraction_batches_v1.json`
@@ -238,6 +252,10 @@ When a long run behaves strangely, trust outputs in this order:
 3. thread export JSON
 4. thread URL visible in ChatGPT
 5. local `responses/*.md`
+
+For artifact seams, `responses/*.md` is a convenience log, not the source of truth.
+
+For inline seams such as charter, synthesis, and QA, `responses/*.md` remains the primary recovered prose file.
 
 Use `thread export` for inline-text seams such as charter, snowball, synthesis, QA, or other no-attachment responses. Use `thread download` only when the assistant actually returned attachment controls.
 
