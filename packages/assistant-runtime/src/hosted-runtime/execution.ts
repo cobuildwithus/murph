@@ -54,6 +54,7 @@ import type {
 import { exportHostedPendingAssistantRuntimeIssues } from "./issues.ts";
 import { exportHostedPendingAssistantUsage } from "./usage.ts";
 import { exportHostedBrowserVaultReplica } from "./browser-vault.ts";
+import { stopExecutorOwnedHostedRunMessagingActivityAfterDelivery } from "./typing.ts";
 import { computeHostedRunElapsedMs, resolveHostedWake } from "./utils.ts";
 
 const HOSTED_IMMEDIATE_MAINTENANCE_PASS_BUDGET = 8;
@@ -275,7 +276,7 @@ export async function completeHostedRunDrainAfterCommit(input: {
   run?: HostedExecutionRunContext | null;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
-    "commitTimeoutMs" | "platform" | "resolvedConfig" | "userEnv"
+    "commitTimeoutMs" | "forwardedEnv" | "platform" | "resolvedConfig" | "userEnv"
   >;
   restored: HostedRestoredExecutionContext;
   request: HostedAssistantRuntimeJobRequest;
@@ -711,7 +712,7 @@ async function finalizeHostedCommittedRunAfterCommit(input: {
   run?: HostedExecutionRunContext | null;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
-    "commitTimeoutMs" | "platform" | "resolvedConfig" | "userEnv"
+    "commitTimeoutMs" | "forwardedEnv" | "platform" | "resolvedConfig" | "userEnv"
   >;
   restored: HostedRestoredExecutionContext;
   committedExecution: HostedCommittedExecutionState;
@@ -735,6 +736,15 @@ async function finalizeHostedCommittedRunAfterCommit(input: {
     effectsPort: input.runtime.platform.effectsPort,
     assistantDeliveryEffects: input.committedExecution.committedAssistantDeliveryEffects,
     vaultRoot: input.restored.vaultRoot,
+    wake: input.wake,
+  });
+  await stopExecutorOwnedHostedRunMessagingActivityAfterDelivery({
+    component: "runtime",
+    runtimeEnv: {
+      ...input.runtime.forwardedEnv,
+      ...input.runtime.userEnv,
+    },
+    run: input.run ?? null,
     wake: input.wake,
   });
   await exportHostedPendingAssistantUsage({

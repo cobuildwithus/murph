@@ -41,6 +41,7 @@ const mocks = vi.hoisted(() => ({
   runHostedDeviceSyncWakeLane: vi.fn(),
   runHostedNoopSystemWakeLane: vi.fn(),
   snapshotHostedExecutionContext: vi.fn(),
+  stopLinqChatTypingIndicator: vi.fn(),
 }));
 
 vi.mock("@murphai/runtime-state/node", async () => {
@@ -69,6 +70,16 @@ vi.mock("@murphai/hosted-execution", async () => {
 vi.mock("@murphai/assistant-engine", () => ({
   refreshAssistantStatusSnapshot: mocks.refreshAssistantStatusSnapshot,
 }));
+
+vi.mock("@murphai/operator-config/linq-runtime", async () => {
+  const actual = await vi.importActual<typeof import("@murphai/operator-config/linq-runtime")>(
+    "@murphai/operator-config/linq-runtime",
+  );
+  return {
+    ...actual,
+    stopLinqChatTypingIndicator: mocks.stopLinqChatTypingIndicator,
+  };
+});
 
 vi.mock("@murphai/device-syncd/config", () => ({
   createConfiguredDeviceSyncProvidersFromConfigs:
@@ -164,6 +175,7 @@ function createRuntime(overrides: {
 
   return {
     commitTimeoutMs: 45_000,
+    forwardedEnv: {},
     platform: {
       artifactStore,
       deviceSyncPort: null,
@@ -580,6 +592,93 @@ describe("assistant-runtime execution coverage", () => {
         target: "chat_123",
         targetKind: "participant",
       },
+    ]);
+  });
+
+  it("stops executor-owned Linq typing before post-send exports continue", async () => {
+    const steps: string[] = [];
+    const runtime = createRuntime();
+    runtime.forwardedEnv = {
+      HOSTED_RUN_MESSAGING_ACTIVITY_OWNER: "executor",
+      LINQ_API_TOKEN: "linq-token",
+    };
+    mocks.drainHostedCommittedAssistantDeliveriesAfterCommit.mockImplementationOnce(async () => {
+      steps.push("drain");
+      return [
+        {
+          deliveryChannel: "linq",
+          deliveryErrorCode: null,
+          deliveryStatus: "sent",
+          effectFingerprint: hostedDeliveryEffect.fingerprint,
+          effectId: hostedDeliveryEffect.effectId,
+          providerMessageId: "linq_message_123",
+          providerThreadId: "chat_123",
+          retryable: false,
+          target: "chat_123",
+          targetKind: "participant" as const,
+        },
+      ];
+    });
+    mocks.stopLinqChatTypingIndicator.mockImplementationOnce(async ({ chatId }) => {
+      steps.push(`stop:${chatId}`);
+    });
+    mocks.exportHostedPendingAssistantUsage.mockImplementationOnce(async () => {
+      steps.push("usage");
+      return {
+        exported: 1,
+        failed: 0,
+        pending: 0,
+      };
+    });
+
+    await completeHostedRunDrainAfterCommit({
+      run: HOSTED_RUN_CONTEXT,
+      request: {
+        bundle: "committed-bundle",
+        run: HOSTED_RUN_CONTEXT,
+        runDrain: {
+          acquiredAt: "2026-04-08T00:00:00.000Z",
+          events: [],
+          inputCommittedSeq: "24",
+          inputCursorVersion: "4",
+          runId: "run_123",
+          triggerKind: "runtime_timer",
+          userId: "member_123",
+          resumeFinalize: true,
+        },
+      },
+      restored: createRestored(),
+      runtime,
+      wake: buildHostedExecutionLinqConversationMessageWake({
+        eventId: "evt_delivery_finished_callback",
+        linqMessage: {
+          chatId: "chat_123",
+          from: "+15551234567",
+          isFromMe: false,
+          messageId: "linq_message_123",
+          parts: [{ type: "text", value: "hello" }],
+        },
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        phoneLookupKey: "15551234567",
+        userId: "member_123",
+      }),
+    });
+
+    expect(mocks.stopLinqChatTypingIndicator).toHaveBeenCalledWith(
+      {
+        chatId: "chat_123",
+      },
+      {
+        env: expect.objectContaining({
+          HOSTED_RUN_MESSAGING_ACTIVITY_OWNER: "executor",
+          LINQ_API_TOKEN: "linq-token",
+        }),
+      },
+    );
+    expect(steps).toEqual([
+      "drain",
+      "stop:chat_123",
+      "usage",
     ]);
   });
 

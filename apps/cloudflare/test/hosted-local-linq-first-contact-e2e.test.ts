@@ -27,6 +27,7 @@ import {
   HOSTED_LINQ_DEFAULT_ASSISTANT_REPLY_TEXT,
   HOSTED_LINQ_GROUPED_ASSISTANT_REPLY_TEXT,
   startHostedLocalLinqStub,
+  type ObservedLinqRequest,
   type HostedLocalLinqStub,
 } from "./helpers/hosted-local-linq-support.js";
 
@@ -38,6 +39,7 @@ const linqWebhookSecret = "linq-local-webhook-secret";
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
 const localDatabaseUrl = process.env.DATABASE_URL?.trim() || DEFAULT_DATABASE_URL;
+const postSendFinalizeDelayMs = 2_000;
 
 let linqStub: HostedLocalLinqStub | null = null;
 let scenario: HostedLocalFullStackScenario | null = null;
@@ -109,7 +111,9 @@ describe("hosted local Linq first-contact e2e", () => {
   }, 300_000);
 
   it("sends a Linq reply after a later inbound Linq message", async () => {
-    await startLinqScenario();
+    await startLinqScenario({
+      MURPH_E2E_HOSTED_USAGE_RECORD_DELAY_MS: String(postSendFinalizeDelayMs),
+    });
     await requireScenario().seedActiveHostedLinqMember({
       homePhone: buildLinqHomePhoneNumber(directReplyUserId),
       memberId: directReplyUserId,
@@ -147,6 +151,10 @@ describe("hosted local Linq first-contact e2e", () => {
       `/chats/${encodeURIComponent(materializedChatId)}/messages`;
     const expectedTypingPath = `/chats/${encodeURIComponent(materializedChatId)}/typing`;
     const outboundCountBeforeReply = requireLinqStub().countObservedSends(expectedDirectReplyChatPath);
+    const typingStopCountBeforeReply = countObservedLinqRequests({
+      expectedMethod: "DELETE",
+      expectedPath: expectedTypingPath,
+    });
     const requestCountBeforeReply = requireLinqStub().observedRequests.length;
     const webhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
       directReplyUserId,
@@ -164,31 +172,53 @@ describe("hosted local Linq first-contact e2e", () => {
 
     requireScenario().queueAssistantResponses([HOSTED_LINQ_DEFAULT_ASSISTANT_REPLY_TEXT]);
     await requireScenario().waitForLatestPendingWake(directReplyUserId);
+    let completionResolved = false;
+    const completionPromise = requireScenario()
+      .waitForHostedCompletion(directReplyUserId)
+      .then((status) => {
+        completionResolved = true;
+        return status;
+      });
     const replySend = await requireLinqStub().waitForAdditionalSend({
       baselineCount: outboundCountBeforeReply,
       expectedPath: expectedDirectReplyChatPath,
       scenario: requireScenario(),
       userId: directReplyUserId,
     });
+    const typingStop = await waitForAdditionalObservedLinqRequest({
+      baselineCount: typingStopCountBeforeReply,
+      expectedMethod: "DELETE",
+      expectedPath: expectedTypingPath,
+      userId: directReplyUserId,
+    });
     const requestsAfterInbound = requireLinqStub().observedRequests.slice(requestCountBeforeReply);
     const typingRequestsAfterInbound = requestsAfterInbound.filter((request) =>
       request.method === "POST" && request.url === expectedTypingPath
     );
-
+    const typingStopRequestsAfterInbound = requestsAfterInbound.filter((request) =>
+      request.method === "DELETE" && request.url === expectedTypingPath
+    );
     expect(replySend.method).toBe("POST");
     expect(typingRequestsAfterInbound.length).toBeGreaterThanOrEqual(1);
+    expect(typingStopRequestsAfterInbound.length).toBeGreaterThanOrEqual(1);
+    expect(completionResolved).toBe(false);
 
     const sendIndex = requestsAfterInbound.indexOf(replySend);
     const typingIndices = typingRequestsAfterInbound.map((request) =>
       requestsAfterInbound.indexOf(request)
     );
+    const typingStopIndex = requestsAfterInbound.indexOf(typingStop);
 
     expect(sendIndex).toBeGreaterThanOrEqual(0);
     expect(typingIndices[0]).toBeGreaterThanOrEqual(0);
     expect(sendIndex).toBeGreaterThan(typingIndices[0]);
+    expect(typingStopIndex).toBeGreaterThan(sendIndex);
     expect(requireLinqStub().readObservedMessageText(replySend)).toBe(
       HOSTED_LINQ_DEFAULT_ASSISTANT_REPLY_TEXT,
     );
+    const finalStatus = await completionPromise;
+    expect(finalStatus.pendingIngressEventCount).toBe(0);
+    expect(finalStatus.lastError).toBeNull();
   }, 300_000);
 
   it("keeps Linq context when two messages arrive before hosted completion catches up", async () => {
@@ -348,13 +378,81 @@ function requireScenario(): HostedLocalFullStackScenario {
   return scenario;
 }
 
-async function startLinqScenario(): Promise<void> {
+function countObservedLinqRequests(input: {
+  expectedMethod: string;
+  expectedPath: string;
+}): number {
+  return requireLinqStub().observedRequests.filter((request) =>
+    isMatchingObservedLinqRequest(request, input)
+  ).length;
+}
+
+async function waitForAdditionalObservedLinqRequest(input: {
+  baselineCount: number;
+  expectedMethod: string;
+  expectedPath: string;
+  userId: string;
+}): Promise<ObservedLinqRequest> {
+  const matchingRequests = await waitForObservedLinqRequestCount({
+    expectedCount: input.baselineCount + 1,
+    expectedMethod: input.expectedMethod,
+    expectedPath: input.expectedPath,
+    userId: input.userId,
+  });
+
+  return matchingRequests.at(-1)!;
+}
+
+async function waitForObservedLinqRequestCount(input: {
+  expectedCount: number;
+  expectedMethod: string;
+  expectedPath: string;
+  userId: string;
+}): Promise<ObservedLinqRequest[]> {
+  const startedAt = Date.now();
+
+  while ((Date.now() - startedAt) < 60_000) {
+    const matchingRequests = requireLinqStub().observedRequests.filter((request) =>
+      isMatchingObservedLinqRequest(request, input)
+    );
+
+    if (matchingRequests.length >= input.expectedCount) {
+      return matchingRequests;
+    }
+
+    await sleep(250);
+  }
+
+  throw new Error(
+    await requireScenario().buildFailureMessage(input.userId, [
+      `Timed out waiting for ${input.expectedCount} Linq request(s) for ${input.userId}.`,
+      `expected method: ${input.expectedMethod}`,
+      `expected path: ${input.expectedPath}`,
+      `observed requests: ${JSON.stringify(requireLinqStub().observedRequests)}`,
+    ]),
+  );
+}
+
+function isMatchingObservedLinqRequest(
+  request: ObservedLinqRequest,
+  input: {
+    expectedMethod: string;
+    expectedPath: string;
+  },
+): boolean {
+  return request.method === input.expectedMethod && request.url === input.expectedPath;
+}
+
+async function startLinqScenario(
+  additionalEnv: NodeJS.ProcessEnv = {},
+): Promise<void> {
   linqStub = await startHostedLocalLinqStub();
   scenario = await startHostedLocalFullStackScenario({
     additionalEnv: {
       LINQ_API_BASE_URL: requireLinqStub().baseUrl,
       LINQ_API_TOKEN: "linq-local-test-token",
       LINQ_WEBHOOK_SECRET: linqWebhookSecret,
+      ...additionalEnv,
     },
     localDatabaseUrl,
     persistDirOverride: workerPersistDirOverride,
@@ -363,4 +461,8 @@ async function startLinqScenario(): Promise<void> {
     scenarioLabel: "Local hosted Linq e2e",
     streamLogs: streamDevLogs,
   });
+}
+
+async function sleep(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
 }
