@@ -147,16 +147,6 @@ function buildHostedConnection(
   };
 }
 
-function buildBrowserConnection(
-  overrides: Parameters<typeof buildHostedConnection>[0] = {},
-): Omit<ReturnType<typeof buildHostedConnection>, "externalAccountId"> {
-  const connection = Object.fromEntries(
-    Object.entries(buildHostedConnection(overrides)).filter(([key]) => key !== "externalAccountId"),
-  );
-
-  return connection as Omit<ReturnType<typeof buildHostedConnection>, "externalAccountId">;
-}
-
 function buildStoredConnection(
   overrides: Parameters<typeof buildHostedConnection>[0] = {},
 ) {
@@ -661,7 +651,9 @@ describe("appendHostedDeviceSyncWake", () => {
       new Request("https://control.example.test/api/settings/device-sync"),
     );
     mocks.listConnectionsForUser.mockResolvedValue([
-      buildBrowserConnection(),
+      buildHostedConnection({
+        displayName: "Oura acct_sensitive",
+      }),
     ]);
 
     await expect(controlPlane.listConnections("user-123")).resolves.toEqual({
@@ -695,7 +687,9 @@ describe("appendHostedDeviceSyncWake", () => {
       new Request("https://control.example.test/api/settings/device-sync/connections/dspc_demo/status"),
     );
     mocks.listConnectionsForUser.mockResolvedValue([
-      buildBrowserConnection(),
+      buildHostedConnection({
+        displayName: "Oura acct_sensitive",
+      }),
     ]);
     const publicConnectionId = buildPublicConnectionId("dsc_123");
 

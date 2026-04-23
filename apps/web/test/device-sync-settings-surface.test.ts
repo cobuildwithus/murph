@@ -113,6 +113,44 @@ describe("buildHostedDeviceSyncSettingsSources", () => {
     });
   });
 
+  it("hides generic provider labels from the rendered display name", () => {
+    const [source] = buildHostedDeviceSyncSettingsSources({
+      connections: [buildConnection({
+        displayName: "Oura",
+      })],
+      providers: [OURA_PROVIDER],
+    });
+
+    expect(source?.displayName).toBeNull();
+  });
+
+  it("adds a safe disambiguator when multiple same-provider connections would otherwise hide their labels", () => {
+    const sources = buildHostedDeviceSyncSettingsSources({
+      connections: [
+        buildConnection({
+          id: "dspc_oura_older",
+          displayName: "Oura",
+          connectedAt: "2026-04-01T08:00:00.000Z",
+          updatedAt: "2026-04-01T08:00:00.000Z",
+        }),
+        buildConnection({
+          id: "dspc_oura_newer",
+          displayName: "Oura",
+          connectedAt: "2026-04-01T08:00:00.000Z",
+          updatedAt: "2026-04-01T08:00:30.000Z",
+        }),
+      ],
+      providers: [OURA_PROVIDER],
+    });
+
+    expect(sources).toHaveLength(2);
+    expect(sources[0]?.displayName).toContain("Connected");
+    expect(sources[1]?.displayName).toContain("Connected");
+    expect(sources[0]?.displayName).toContain("(#1)");
+    expect(sources[1]?.displayName).toContain("(#2)");
+    expect(sources[0]?.displayName).not.toBe(sources[1]?.displayName);
+  });
+
   it("recommends reconnect when the provider requires reauthorization", () => {
     const [source] = buildHostedDeviceSyncSettingsSources({
       connections: [buildConnection({
