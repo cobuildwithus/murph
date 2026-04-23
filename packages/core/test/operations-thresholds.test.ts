@@ -407,7 +407,12 @@ test("raw manifest staging composes operator metadata and parses the current man
 
   await batch.commit();
 
-  assert.equal(manifestPath, `${rawDirectory}/manifest.json`);
+  assert.equal(manifestPath, resolveRawManifestPath({
+    artifacts: [],
+    rawDirectory,
+    importId: owner.id,
+    importedAt: FIXED_TIME,
+  }));
   const manifest = JSON.parse(
     await fs.readFile(resolveVaultPath(vaultRoot, manifestPath).absolutePath, "utf8"),
   ) as {
@@ -424,7 +429,12 @@ test("raw manifest staging composes operator metadata and parses the current man
 
   assert.equal(parsedManifest.schemaVersion, CONTRACT_SCHEMA_VERSION.rawImportManifest);
   assert.deepEqual(parsedManifest.owner, owner);
-  assert.equal(resolveRawManifestPath({ artifacts: parsedManifest.artifacts }), `${rawDirectory}/manifest.json`);
+  assert.equal(resolveRawManifestPath({
+    artifacts: parsedManifest.artifacts,
+    rawDirectory: parsedManifest.rawDirectory,
+    importId: parsedManifest.importId,
+    importedAt: parsedManifest.importedAt,
+  }), manifestPath);
 });
 
 test("validateVault ignores unrelated raw inbox files and non-attachment manifest placeholders", async () => {

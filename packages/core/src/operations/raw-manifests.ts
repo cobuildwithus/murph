@@ -14,8 +14,9 @@ import {
 } from "@murphai/contracts";
 
 import type { WriteBatch } from "./write-batch.ts";
-import { normalizeRelativeVaultPath } from "../path-safety.ts";
+import { normalizeOpaquePathSegment, normalizeRelativeVaultPath } from "../path-safety.ts";
 import { rawDirectoryMatchesOwner } from "../raw.ts";
+import { toIsoTimestamp } from "../time.ts";
 
 interface RawArtifactLike {
   relativePath: string;
@@ -52,6 +53,37 @@ export interface BuildRawImportManifestInput {
 }
 
 const RAW_MANIFEST_OPERATOR_METADATA_KEY = "operatorMetadata";
+const LEGACY_RAW_MANIFEST_BASENAME = "manifest.json";
+
+function normalizeRawManifestImportKey(importId: string): string {
+  return normalizeOpaquePathSegment(importId, "Raw import manifest importId")
+    .replace(/[^A-Za-z0-9_-]+/gu, "-")
+    .replace(/-+/gu, "-");
+}
+
+function normalizeRawManifestTimestampKey(importedAt: string): string {
+  return toIsoTimestamp(importedAt, "importedAt")
+    .replace(/[-:.]/gu, "")
+    .replace(/[^A-Za-z0-9_-]+/gu, "-");
+}
+
+export function isRawManifestFileName(fileName: string): boolean {
+  return (
+    fileName === LEGACY_RAW_MANIFEST_BASENAME
+    || (fileName.startsWith("manifest.") && fileName.endsWith(".json"))
+  );
+}
+
+export function resolveRawManifestBasename(input: {
+  importId?: string;
+  importedAt?: string;
+}): string {
+  if (!input.importId || !input.importedAt) {
+    return LEGACY_RAW_MANIFEST_BASENAME;
+  }
+
+  return `manifest.${normalizeRawManifestImportKey(input.importId)}.${normalizeRawManifestTimestampKey(input.importedAt)}.json`;
+}
 
 export async function describeRawArtifact(
   artifact: RawArtifactLike,
@@ -110,10 +142,15 @@ function resolveRawArtifactDirectory(
 export function resolveRawManifestPath(input: {
   artifacts: readonly { relativePath: string }[];
   rawDirectory?: string;
+  importId?: string;
+  importedAt?: string;
 }): string {
   return path.posix.join(
     resolveRawArtifactDirectory(input.artifacts, input.rawDirectory),
-    "manifest.json",
+    resolveRawManifestBasename({
+      importId: input.importId,
+      importedAt: input.importedAt,
+    }),
   );
 }
 
@@ -230,6 +267,8 @@ export async function stageRawImportManifest({
   const manifestPath = resolveRawManifestPath({
     artifacts: manifest.artifacts,
     rawDirectory: manifest.rawDirectory,
+    importId: manifest.importId,
+    importedAt: manifest.importedAt,
   });
 
   await batch.stageTextWrite(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, {

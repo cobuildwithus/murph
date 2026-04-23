@@ -34,6 +34,7 @@ import { parseFrontmatterDocument } from "./frontmatter.ts";
 import { generateVaultId } from "./ids.ts";
 import { readJsonlRecords } from "./jsonl.ts";
 import { stageMarkdownDocumentWrite } from "./markdown-documents.ts";
+import { isRawManifestFileName } from "./operations/raw-manifests.ts";
 import { normalizeVaultRoot, resolveVaultPath } from "./path-safety.ts";
 import { rawDirectoryMatchesOwner } from "./raw.ts";
 import {
@@ -563,8 +564,8 @@ function resolveJsonlFamilyPostValidator(
   }
 }
 
-function rawManifestPathForArtifact(relativePath: string): string {
-  return path.posix.join(path.posix.dirname(relativePath), "manifest.json");
+function rawManifestDirectoryForArtifact(relativePath: string): string {
+  return path.posix.dirname(relativePath);
 }
 
 function isVaultSyncImportRawPath(relativePath: string): boolean {
@@ -596,6 +597,33 @@ function inboxCaptureRootForRawPath(relativePath: string): string | null {
 
 function inboxAttachmentManifestPathForCaptureDirectory(captureDirectory: string): string {
   return path.posix.join(captureDirectory, "attachments", "manifest.json");
+}
+
+async function listRawManifestPathsForDirectory(
+  vaultRoot: string,
+  rawDirectory: string,
+): Promise<string[]> {
+  const rawFiles = await walkVaultFiles(vaultRoot, rawDirectory);
+
+  return rawFiles.filter((relativePath) =>
+    path.posix.dirname(relativePath) === rawDirectory
+    && isRawManifestFileName(path.posix.basename(relativePath)),
+  );
+}
+
+async function validateRawManifestDirectory(
+  vaultRoot: string,
+  rawDirectory: string,
+  code: string,
+  message: string,
+): Promise<ValidationIssue[]> {
+  const manifestPaths = await listRawManifestPathsForDirectory(vaultRoot, rawDirectory);
+
+  if (manifestPaths.length > 0) {
+    return [];
+  }
+
+  return [validationIssue(code, message, rawDirectory)];
 }
 
 async function validateExistingVaultFile(
@@ -635,11 +663,11 @@ async function validateAssessmentRecordReferences(
   );
 
   issues.push(
-    ...(await validateExistingVaultFile(
+    ...(await validateRawManifestDirectory(
       vaultRoot,
-      rawManifestPathForArtifact(record.rawPath),
+      rawManifestDirectoryForArtifact(record.rawPath),
       "RAW_MANIFEST_INVALID",
-      `Raw import manifest is missing for "${record.rawPath}".`,
+      `Raw import directory "${rawManifestDirectoryForArtifact(record.rawPath)}" is missing a raw import manifest.`,
     )),
   );
 
@@ -682,7 +710,7 @@ async function validateEventRecordReferences(
   }
 
   const issues: ValidationIssue[] = [];
-  const manifestPaths = new Set<string>();
+  const manifestDirectories = new Set<string>();
 
   for (const referencedPath of [...referencedPaths].sort()) {
     issues.push(
@@ -698,17 +726,17 @@ async function validateEventRecordReferences(
       referencedPath.startsWith(`${VAULT_LAYOUT.rawDirectory}/`) &&
       !isEnvelopeBasedInboxRawPath(referencedPath)
     ) {
-      manifestPaths.add(rawManifestPathForArtifact(referencedPath));
+      manifestDirectories.add(rawManifestDirectoryForArtifact(referencedPath));
     }
   }
 
-  for (const manifestPath of [...manifestPaths].sort()) {
+  for (const rawDirectory of [...manifestDirectories].sort()) {
     issues.push(
-      ...(await validateExistingVaultFile(
+      ...(await validateRawManifestDirectory(
         vaultRoot,
-        manifestPath,
+        rawDirectory,
         "RAW_MANIFEST_INVALID",
-        `Raw import manifest is missing for "${manifestPath}".`,
+        `Raw import directory "${rawDirectory}" is missing a raw import manifest.`,
       )),
     );
   }
@@ -831,6 +859,7 @@ async function validateRawImportManifests(vaultRoot: string): Promise<Validation
   const inboxCaptureDirectories = new Set<string>();
   const inboxAttachmentManifestFiles = new Set<string>();
   const manifestFiles: string[] = [];
+  const manifestDirectories = new Set<string>();
 
   for (const relativePath of rawFiles) {
     if (isVaultSyncImportRawPath(relativePath)) {
@@ -843,7 +872,7 @@ async function validateRawImportManifests(vaultRoot: string): Promise<Validation
       inboxCaptureDirectories.add(inboxCaptureDirectory);
     }
 
-    if (path.posix.basename(relativePath) === "manifest.json") {
+    if (isRawManifestFileName(path.posix.basename(relativePath))) {
       if (isEnvelopeBasedInboxRawPath(relativePath)) {
         if (relativePath === inboxAttachmentManifestPathForCaptureDirectory(path.posix.dirname(path.posix.dirname(relativePath)))) {
           inboxAttachmentManifestFiles.add(relativePath);
@@ -853,6 +882,7 @@ async function validateRawImportManifests(vaultRoot: string): Promise<Validation
       }
 
       manifestFiles.push(relativePath);
+      manifestDirectories.add(path.posix.dirname(relativePath));
       continue;
     }
 
@@ -888,14 +918,12 @@ async function validateRawImportManifests(vaultRoot: string): Promise<Validation
   }
 
   for (const directory of [...artifactDirectories].sort()) {
-    const manifestPath = path.posix.join(directory, "manifest.json");
-
-    if (!(await pathExists(resolveVaultPath(vaultRoot, manifestPath).absolutePath))) {
+    if (!manifestDirectories.has(directory)) {
       issues.push(
         validationIssue(
           "RAW_MANIFEST_INVALID",
-          `Raw import directory "${directory}" is missing manifest.json.`,
-          manifestPath,
+          `Raw import directory "${directory}" is missing a raw import manifest.`,
+          directory,
         ),
       );
     }
