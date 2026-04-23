@@ -237,7 +237,7 @@
                           ]
                         },
                         "codexCommand": {
-                          "description": "Optional Codex CLI executable path. Defaults to `codex`.",
+                          "description": "Optional Codex executable path used to launch `codex app-server`. Defaults to `codex`.",
                           "type": "string",
                           "minLength": 1
                         },
@@ -364,7 +364,7 @@
                           ]
                         },
                         "codexCommand": {
-                          "description": "Optional Codex CLI executable path. Defaults to `codex`.",
+                          "description": "Optional Codex executable path used to launch `codex app-server`. Defaults to `codex`.",
                           "type": "string",
                           "minLength": 1
                         },
@@ -746,6 +746,97 @@
                     }
                   }
                 },
+                "onboarding": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "commands": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "status": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "options": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "properties": {
+                                "vault": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "description": "Vault root to operate against."
+                                },
+                                "requestId": {
+                                  "description": "Optional caller-supplied request id for audit correlation.",
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 128
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "complete": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "options": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "properties": {
+                                "vault": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "description": "Vault root to operate against."
+                                },
+                                "requestId": {
+                                  "description": "Optional caller-supplied request id for audit correlation.",
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 128
+                                },
+                                "reason": {
+                                  "type": "string",
+                                  "enum": [
+                                    "user_answered",
+                                    "user_declined",
+                                    "concrete_request",
+                                    "manual"
+                                  ],
+                                  "description": "Why onboarding is done: user_answered, user_declined, concrete_request, or manual."
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "reopen": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "options": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "properties": {
+                                "vault": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "description": "Vault root to operate against."
+                                },
+                                "requestId": {
+                                  "description": "Optional caller-supplied request id for audit correlation.",
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 128
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
                 "session": {
                   "type": "object",
                   "additionalProperties": false,
@@ -866,7 +957,7 @@
                   ]
                 },
                 "codexCommand": {
-                  "description": "Optional Codex CLI executable path. Defaults to `codex`.",
+                  "description": "Optional Codex executable path used to launch `codex app-server`. Defaults to `codex`.",
                   "type": "string",
                   "minLength": 1
                 },

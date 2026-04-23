@@ -118,6 +118,13 @@ export const assistantTurnTimelineEventKindValues = [
   'turn.deferred',
 ] as const
 export const assistantAskResultStatusValues = ['completed'] as const
+export const assistantOnboardingStatusValues = ['open', 'completed'] as const
+export const assistantOnboardingCompletionReasonValues = [
+  'user_answered',
+  'user_declined',
+  'concrete_request',
+  'manual',
+] as const
 export const assistantOutboxStatusValues = [
   'pending',
   'sending',
@@ -820,6 +827,28 @@ export const assistantDoctorResultSchema = z
   })
   .strict()
 
+export const assistantOnboardingStateSchema = z
+  .object({
+    schemaVersion: z.literal('murph.assistant-onboarding.v1'),
+    status: z.enum(assistantOnboardingStatusValues),
+    createdAt: isoTimestampSchema.nullable(),
+    updatedAt: isoTimestampSchema.nullable(),
+    completedAt: isoTimestampSchema.nullable(),
+    completedReason: z
+      .enum(assistantOnboardingCompletionReasonValues)
+      .nullable(),
+  })
+  .strict()
+
+export const assistantOnboardingResultSchema = z
+  .object({
+    vault: pathSchema,
+    stateRoot: pathSchema,
+    statePath: pathSchema,
+    onboarding: assistantOnboardingStateSchema,
+  })
+  .strict()
+
 export const assistantCronAtScheduleSchema = automationScheduleAtSchema
 
 export const assistantCronEveryScheduleSchema = automationScheduleEverySchema
@@ -1315,6 +1344,14 @@ export type AssistantSelfDeliveryTargetClearResult = z.infer<
 >
 export type AssistantRunResult = z.infer<typeof assistantRunResultSchema>
 export type AssistantStopResult = z.infer<typeof assistantStopResultSchema>
+export type AssistantOnboardingCompletionReason =
+  (typeof assistantOnboardingCompletionReasonValues)[number]
+export type AssistantOnboardingState = z.infer<
+  typeof assistantOnboardingStateSchema
+>
+export type AssistantOnboardingResult = z.infer<
+  typeof assistantOnboardingResultSchema
+>
 export type AssistantStatusRunLock = z.infer<
   typeof assistantStatusRunLockSchema
 >

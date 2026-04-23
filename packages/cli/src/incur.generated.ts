@@ -9,6 +9,9 @@ declare module 'incur' {
       'assistant chat': { args: { prompt?: string }; options: { vault: string; requestId?: string; session?: string; alias?: string; channel?: string; identity?: string; participant?: string; thread?: string; provider?: "codex-cli" | "openai-compatible"; codexCommand?: string; model?: string; baseUrl?: string; apiKeyEnv?: string; providerName?: string; headersJson?: string; sandbox?: "read-only" | "workspace-write" | "danger-full-access"; approvalPolicy?: "untrusted" | "on-request" | "never"; profile?: string; oss?: boolean } }
       'assistant deliver': { args: { message: string }; options: { vault: string; requestId?: string; session?: string; alias?: string; channel?: string; identity?: string; participant?: string; thread?: string; deliveryTarget?: string } }
       'assistant doctor': { args: {}; options: { vault: string; requestId?: string; repair: boolean } }
+      'assistant onboarding complete': { args: {}; options: { vault: string; requestId?: string; reason: "user_answered" | "user_declined" | "concrete_request" | "manual" } }
+      'assistant onboarding reopen': { args: {}; options: { vault: string; requestId?: string } }
+      'assistant onboarding status': { args: {}; options: { vault: string; requestId?: string } }
       'assistant run': { args: {}; options: { vault: string; requestId?: string; model?: string; baseUrl?: string; apiKey?: string; apiKeyEnv?: string; providerName?: string; headersJson?: string; maxPerScan: number; allowSelfAuthored?: boolean; sessionRolloverHours?: number; once?: boolean } }
       'assistant self-target clear': { args: { channel?: string }; options: { requestId?: string } }
       'assistant self-target list': { args: {}; options: { requestId?: string } }

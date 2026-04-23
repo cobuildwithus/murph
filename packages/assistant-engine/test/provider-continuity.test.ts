@@ -60,31 +60,25 @@ describe('assistant provider continuity planning', () => {
     ).toBe(false)
   })
 
-  it('treats onboarding as first-turn and first-contact only', () => {
+  it('treats onboarding as gated by onboarding-open state', () => {
     expect(
       resolveAssistantEarlySessionOnboardingEligibility({
-        firstContactAlreadySeen: false,
         includeEarlySessionOnboarding: true,
-        isFirstSessionForOnboarding: true,
-        sessionTurnCount: 0,
+        onboardingOpen: true,
       }),
     ).toBe(true)
 
     expect(
       resolveAssistantEarlySessionOnboardingEligibility({
-        firstContactAlreadySeen: false,
         includeEarlySessionOnboarding: true,
-        isFirstSessionForOnboarding: true,
-        sessionTurnCount: 1,
+        onboardingOpen: false,
       }),
     ).toBe(false)
 
     expect(
       resolveAssistantEarlySessionOnboardingEligibility({
-        firstContactAlreadySeen: true,
-        includeEarlySessionOnboarding: true,
-        isFirstSessionForOnboarding: true,
-        sessionTurnCount: 0,
+        includeEarlySessionOnboarding: false,
+        onboardingOpen: true,
       }),
     ).toBe(false)
   })

@@ -220,6 +220,12 @@ Ready to get started?`)
       'Do not append a capability paragraph, examples, or intake questions to it.',
     )
     expect(prompt).toContain(
+      'Onboarding stays active until the assistant runtime marks it complete.',
+    )
+    expect(prompt).toContain(
+      'Use `vault.cli.run` to execute `vault-cli assistant onboarding complete --reason <user_answered|user_declined|concrete_request>`.',
+    )
+    expect(prompt).toContain(
       'If the user mentions urgent, severe, or safety-sensitive symptoms, do not stay in onboarding;',
     )
   })

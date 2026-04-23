@@ -10,6 +10,9 @@ import {
   resolveAssistantFirstContactStateDocIds,
 } from '../src/assistant/first-contact.js'
 import {
+  completeAssistantOnboarding,
+} from '../src/assistant/onboarding-state.js'
+import {
   resolveAssistantSession,
   saveAssistantSession,
 } from '../src/assistant/store.js'
@@ -17,7 +20,6 @@ import {
   resolveAssistantProviderTurnContinuityPlan,
 } from '../src/assistant/provider-turn-runner.js'
 import {
-  isAssistantSessionFreshForOnboarding,
   resolveAssistantTurnSharedPlan,
 } from '../src/assistant/turn-plan.js'
 import type {
@@ -38,7 +40,7 @@ afterEach(async () => {
 })
 
 describe('assistant onboarding prompt injection', () => {
-  it('ends onboarding eligibility after the first turn once first-contact state is seen', async () => {
+  it('keeps onboarding eligible after first-contact dedupe while onboarding stays open', async () => {
     const vault = await createTempVault()
     const route = {
       actorId: 'actor-first',
@@ -75,10 +77,10 @@ describe('assistant onboarding prompt injection', () => {
     )
 
     expect(plan.firstContactStateDocIds).toEqual(stateDocIds)
-    expect(plan.earlySessionOnboardingEligible).toBe(false)
+    expect(plan.earlySessionOnboardingEligible).toBe(true)
   })
 
-  it('does not inject onboarding for a later session in the same vault', async () => {
+  it('keeps onboarding eligible for a later session in the same vault until it is completed', async () => {
     const vault = await createTempVault()
     await resolveAssistantSession({
       vault,
@@ -110,6 +112,35 @@ describe('assistant onboarding prompt injection', () => {
     )
 
     expect(plan.firstContactStateDocIds.length).toBeGreaterThan(0)
+    expect(plan.earlySessionOnboardingEligible).toBe(true)
+  })
+
+  it('stops onboarding eligibility once the shared onboarding state is completed', async () => {
+    const vault = await createTempVault()
+    const route = {
+      actorId: 'actor-first',
+      channel: 'linq',
+      identityId: 'member-first',
+      threadId: 'thread-first',
+      threadIsDirect: true,
+    } as const
+    const resolved = await resolveAssistantSession({
+      vault,
+      target,
+      ...route,
+      now: new Date('2026-04-21T12:00:00.000Z'),
+    })
+
+    await completeAssistantOnboarding({
+      reason: 'user_answered',
+      vault,
+    })
+
+    const plan = await resolveAssistantTurnSharedPlan(
+      createMessageInput(vault, route, 'tell me about sleep debt'),
+      resolved,
+    )
+
     expect(plan.earlySessionOnboardingEligible).toBe(false)
   })
 
@@ -136,11 +167,6 @@ describe('assistant onboarding prompt injection', () => {
       resumeProviderSessionId: 'provider-session-1',
       shouldInjectBootstrapContext: false,
     })
-  })
-
-  it('treats only zero-turn sessions as fresh enough for onboarding', () => {
-    expect(isAssistantSessionFreshForOnboarding({ turnCount: 0 })).toBe(true)
-    expect(isAssistantSessionFreshForOnboarding({ turnCount: 1 })).toBe(false)
   })
 })
 
