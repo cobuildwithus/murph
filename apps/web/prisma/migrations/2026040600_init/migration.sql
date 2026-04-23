@@ -439,6 +439,41 @@ CREATE TABLE "hosted_share_payload" (
 );
 
 -- CreateTable
+CREATE TABLE "hosted_vault_sync_session" (
+    "id" TEXT NOT NULL,
+    "member_id" TEXT NOT NULL,
+    "direction" TEXT NOT NULL DEFAULT 'local_to_hosted',
+    "status" TEXT NOT NULL DEFAULT 'pending',
+    "pairing_code_hash" TEXT,
+    "agent_token_hash" TEXT,
+    "source_vault_id" TEXT,
+    "source_vault_title" TEXT,
+    "source_schema_version" TEXT,
+    "local_manifest_hash" TEXT,
+    "queued_ingress_event_id" TEXT,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL,
+    "expires_at" TIMESTAMP(3) NOT NULL,
+    "uploaded_at" TIMESTAMP(3),
+    "queued_at" TIMESTAMP(3),
+    "revoked_at" TIMESTAMP(3),
+
+    CONSTRAINT "hosted_vault_sync_session_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "hosted_vault_sync_payload" (
+    "session_id" TEXT NOT NULL,
+    "member_id" TEXT NOT NULL,
+    "payload_schema" TEXT NOT NULL DEFAULT 'murph.hosted-vault-sync-payload.v1',
+    "payload_encrypted" TEXT NOT NULL,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "hosted_vault_sync_payload_pkey" PRIMARY KEY ("session_id")
+);
+
+-- CreateTable
 CREATE TABLE "hosted_ai_usage" (
     "id" TEXT NOT NULL,
     "member_id" TEXT NOT NULL,
@@ -454,6 +489,12 @@ CREATE TABLE "hosted_ai_usage" (
     "base_url" TEXT,
     "api_key_env" TEXT,
     "credential_source" TEXT,
+    "feature_key" TEXT,
+    "surface" TEXT,
+    "trigger_kind" TEXT,
+    "reporting_user_id" TEXT,
+    "gateway_tags_json" JSONB,
+    "stripe_meter_source" TEXT NOT NULL DEFAULT 'murph',
     "input_tokens" INTEGER,
     "output_tokens" INTEGER,
     "reasoning_tokens" INTEGER,
@@ -461,6 +502,9 @@ CREATE TABLE "hosted_ai_usage" (
     "cache_write_tokens" INTEGER,
     "total_tokens" INTEGER,
     "stripe_meter_status" TEXT NOT NULL DEFAULT 'pending',
+    "stripe_meter_attempt_count" INTEGER NOT NULL DEFAULT 0,
+    "stripe_meter_last_attempted_at" TIMESTAMP(3),
+    "stripe_meter_next_attempt_at" TIMESTAMP(3),
     "stripe_metered_at" TIMESTAMP(3),
     "stripe_meter_identifier" TEXT,
     "stripe_meter_error" TEXT,
@@ -776,10 +820,40 @@ CREATE INDEX "hosted_share_link_consumed_by_member_id_consumed_at_idx" ON "hoste
 CREATE UNIQUE INDEX "hosted_share_payload_share_id_key" ON "hosted_share_payload"("share_id");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "hosted_vault_sync_session_pairing_code_hash_key" ON "hosted_vault_sync_session"("pairing_code_hash");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "hosted_vault_sync_session_agent_token_hash_key" ON "hosted_vault_sync_session"("agent_token_hash");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "hosted_vault_sync_session_queued_ingress_event_id_key" ON "hosted_vault_sync_session"("queued_ingress_event_id");
+
+-- CreateIndex
+CREATE INDEX "hosted_vault_sync_session_member_id_created_at_idx" ON "hosted_vault_sync_session"("member_id", "created_at");
+
+-- CreateIndex
+CREATE INDEX "hosted_vault_sync_session_member_id_status_created_at_idx" ON "hosted_vault_sync_session"("member_id", "status", "created_at");
+
+-- CreateIndex
+CREATE INDEX "hosted_vault_sync_session_expires_at_idx" ON "hosted_vault_sync_session"("expires_at");
+
+-- CreateIndex
+CREATE INDEX "hosted_vault_sync_payload_member_id_created_at_idx" ON "hosted_vault_sync_payload"("member_id", "created_at");
+
+-- CreateIndex
+CREATE INDEX "hosted_ai_usage_feature_key_created_at_idx" ON "hosted_ai_usage"("feature_key", "created_at");
+
+-- CreateIndex
 CREATE INDEX "hosted_ai_usage_member_id_occurred_at_idx" ON "hosted_ai_usage"("member_id", "occurred_at");
 
 -- CreateIndex
-CREATE INDEX "hosted_ai_usage_stripe_meter_status_occurred_at_idx" ON "hosted_ai_usage"("stripe_meter_status", "occurred_at");
+CREATE INDEX "hosted_ai_usage_reporting_user_id_created_at_idx" ON "hosted_ai_usage"("reporting_user_id", "created_at");
+
+-- CreateIndex
+CREATE INDEX "hosted_ai_usage_stripe_meter_due_idx" ON "hosted_ai_usage"("stripe_meter_status", "stripe_meter_next_attempt_at", "occurred_at");
+
+-- CreateIndex
+CREATE INDEX "hosted_ai_usage_surface_created_at_idx" ON "hosted_ai_usage"("surface", "created_at");
 
 -- CreateIndex
 CREATE INDEX "hosted_ai_usage_turn_id_attempt_count_idx" ON "hosted_ai_usage"("turn_id", "attempt_count");
@@ -882,6 +956,15 @@ ALTER TABLE "hosted_revnet_issuance" ADD CONSTRAINT "hosted_revnet_issuance_memb
 
 -- AddForeignKey
 ALTER TABLE "hosted_share_payload" ADD CONSTRAINT "hosted_share_payload_share_id_fkey" FOREIGN KEY ("share_id") REFERENCES "hosted_share_link"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "hosted_vault_sync_session" ADD CONSTRAINT "hosted_vault_sync_session_member_id_fkey" FOREIGN KEY ("member_id") REFERENCES "hosted_member"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "hosted_vault_sync_payload" ADD CONSTRAINT "hosted_vault_sync_payload_member_id_fkey" FOREIGN KEY ("member_id") REFERENCES "hosted_member"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "hosted_vault_sync_payload" ADD CONSTRAINT "hosted_vault_sync_payload_session_id_fkey" FOREIGN KEY ("session_id") REFERENCES "hosted_vault_sync_session"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "hosted_ai_usage" ADD CONSTRAINT "hosted_ai_usage_member_id_fkey" FOREIGN KEY ("member_id") REFERENCES "hosted_member"("id") ON DELETE CASCADE ON UPDATE CASCADE;
