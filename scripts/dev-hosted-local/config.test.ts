@@ -10,6 +10,7 @@ import {
 describe("resolveHostedLocalDevConfig", () => {
   it("returns the documented defaults", () => {
     expect(resolveHostedLocalDevConfig({})).toEqual({
+      forceResetLocalDatabase: false,
       skipPrismaMigrate: false,
       skipStripeListen: false,
       skipWeb: false,
@@ -26,6 +27,7 @@ describe("resolveHostedLocalDevConfig", () => {
   it("parses explicit local overrides", () => {
     expect(
       resolveHostedLocalDevConfig({
+        MURPH_DEV_FORCE_RESET_LOCAL_DB: "1",
         MURPH_DEV_SKIP_PRISMA_MIGRATE: "1",
         MURPH_DEV_SKIP_STRIPE_LISTEN: "1",
         MURPH_DEV_SKIP_WEB: "1",
@@ -38,6 +40,7 @@ describe("resolveHostedLocalDevConfig", () => {
         MURPH_DEV_CF_PERSIST_DIR: ".wrangler/state/custom-dev",
       }),
     ).toEqual({
+      forceResetLocalDatabase: true,
       skipPrismaMigrate: true,
       skipStripeListen: true,
       skipWeb: true,
@@ -68,6 +71,7 @@ describe("printHelp", () => {
     }
 
     const output = writes.join("");
+    expect(output).toContain("MURPH_DEV_FORCE_RESET_LOCAL_DB=1");
     expect(output).toContain("MURPH_DEV_SKIP_STRIPE_LISTEN=1");
     expect(output).toContain("stripe listen");
   });

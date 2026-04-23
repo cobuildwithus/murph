@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({
   SqliteDeviceSyncStore: vi.fn(),
 }));
 
-vi.mock("@murphai/device-syncd", () => ({
+vi.mock("@murphai/device-syncd/service", () => ({
   createDeviceSyncService: mocks.createDeviceSyncService,
   SqliteDeviceSyncStore: mocks.SqliteDeviceSyncStore,
 }));

@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises"
+import { mkdir, readdir, readFile, writeFile } from "node:fs/promises"
 import path from "node:path"
 
 import {
@@ -44,6 +44,7 @@ const DEFAULT_GENERIC_LIST_EXCLUDED_FAMILIES = new Set([
   "core",
 ])
 const BLOOD_TEST_SPECIMEN_TYPE_SET = new Set<string>(BLOOD_TEST_SPECIMEN_TYPES)
+const LEGACY_RAW_MANIFEST_BASENAME = "manifest.json"
 
 interface SharedCoreRuntime {
   parseRawImportManifest(value: unknown): RawImportManifest
@@ -223,6 +224,57 @@ export async function readRawImportManifest(
       },
     )
   }
+}
+
+function isRawManifestFileName(fileName: string) {
+  return (
+    fileName === LEGACY_RAW_MANIFEST_BASENAME
+    || (fileName.startsWith("manifest.") && fileName.endsWith(".json"))
+  )
+}
+
+export async function resolveRawImportManifestFile(
+  vault: string,
+  rawDirectory: string,
+): Promise<string> {
+  const { resolveVaultRelativePath } = await import("./vault-usecase-helpers.js")
+  const absoluteDirectory = await resolveVaultRelativePath(vault, rawDirectory)
+  let manifestNames: string[]
+
+  try {
+    manifestNames = (await readdir(absoluteDirectory, { withFileTypes: true }))
+      .filter((entry) => entry.isFile() && isRawManifestFileName(entry.name))
+      .map((entry) => entry.name)
+      .sort((left, right) => left.localeCompare(right))
+  } catch (error) {
+    throw new VaultCliError(
+      "manifest_missing",
+      `Raw import directory "${rawDirectory}" is missing from the vault.`,
+      {
+        cause: error instanceof Error ? error.message : String(error),
+      },
+    )
+  }
+
+  if (manifestNames.length === 0) {
+    throw new VaultCliError(
+      "manifest_missing",
+      `Raw import directory "${rawDirectory}" does not contain a raw import manifest.`,
+    )
+  }
+
+  const manifestName =
+    manifestNames.find((name) => name === LEGACY_RAW_MANIFEST_BASENAME)
+    ?? manifestNames.at(-1)
+
+  if (!manifestName) {
+    throw new VaultCliError(
+      "manifest_missing",
+      `Raw import directory "${rawDirectory}" does not contain a raw import manifest.`,
+    )
+  }
+
+  return path.posix.join(rawDirectory, manifestName)
 }
 
 export async function loadJsonInputFile(

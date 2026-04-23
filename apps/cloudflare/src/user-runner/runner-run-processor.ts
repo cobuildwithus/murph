@@ -658,7 +658,6 @@ export class RunnerRunProcessor {
     const runtimeConfig = buildHostedRunnerJobRuntimeConfig({
       configSource: this.dependencies.readRunnerRuntimeConfigSource(),
       forwardedEnv,
-      rewritePlatformUrlsForContainer: true,
       runnerSecrets,
     });
 
@@ -700,6 +699,7 @@ export class RunnerRunProcessor {
     const runtimeConfig = buildHostedRunnerJobRuntimeConfig({
       configSource: this.dependencies.readRunnerRuntimeConfigSource(),
       forwardedEnv,
+      rewritePlatformUrlsForContainer: true,
       runnerSecrets,
     });
     const job: HostedAssistantRuntimeJobInput = {

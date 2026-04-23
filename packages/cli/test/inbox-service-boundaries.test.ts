@@ -275,12 +275,15 @@ function createUnreachableEmailDriver(): EmailDriver {
 function createStubInboxRuntimeModule(
   overrides: Partial<InboxRuntimeModule> = {},
 ): InboxRuntimeModule {
-  return {
+  const runtimeModule: InboxRuntimeModule = {
     async ensureInboxVault() {},
     async openInboxRuntime() {
       throw new Error('unreachable')
     },
     async createInboxPipeline() {
+      throw new Error('unreachable')
+    },
+    async createParsedInboxPipeline() {
       throw new Error('unreachable')
     },
     createTelegramPollConnector(input) {
@@ -305,9 +308,13 @@ function createStubInboxRuntimeModule(
     },
     async rebuildRuntimeFromVault() {},
     async runInboxDaemon() {},
+    async runPollConnectorBackfill() {
+      throw new Error('unreachable')
+    },
     async runInboxDaemonWithParsers() {},
-    ...overrides,
   }
+
+  return Object.assign(runtimeModule, overrides)
 }
 
 test.sequential('readPromotionsByCapture groups promotion entries by capture id', async () => {

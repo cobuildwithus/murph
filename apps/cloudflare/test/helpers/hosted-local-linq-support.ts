@@ -167,8 +167,12 @@ export async function startHostedLocalLinqStub(): Promise<HostedLocalLinqStub> {
       observedMessageIds.push(messageId);
       observedMessageIdsByChat.set(chatId, observedMessageIds);
       writeJsonResponse(response, 200, {
+        chat_id: chatId,
         data: {
           chat_id: chatId,
+          id: messageId,
+        },
+        message: {
           id: messageId,
         },
       });

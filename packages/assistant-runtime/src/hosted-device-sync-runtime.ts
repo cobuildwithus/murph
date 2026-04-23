@@ -1,8 +1,5 @@
 import { buildDeviceSyncTokenCipherOptions, createSecretCodec } from "@murphai/device-syncd/crypto";
-import type {
-  DeviceSyncService,
-  SqliteDeviceSyncStore,
-} from "@murphai/device-syncd";
+import type { DeviceSyncService } from "@murphai/device-syncd/service";
 import type {
   DeviceSyncJobInput,
   StoredDeviceSyncAccount,
@@ -36,7 +33,8 @@ export interface HostedDeviceSyncRuntimeSyncState {
   snapshot: HostedDeviceSyncRuntimeSnapshotResponse | null;
 }
 
-type HostedAccountHydrationInput = Parameters<SqliteDeviceSyncStore["hydrateHostedAccount"]>[0];
+type HostedRuntimeDeviceSyncStore = ReturnType<typeof requireHostedRuntimeDeviceSyncStore>;
+type HostedAccountHydrationInput = Parameters<HostedRuntimeDeviceSyncStore["hydrateHostedAccount"]>[0];
 type HostedDeviceSyncRuntimeClient = HostedRuntimeDeviceSyncPort | null;
 
 export async function syncHostedDeviceSyncControlPlaneState(input: {

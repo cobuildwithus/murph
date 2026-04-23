@@ -94,6 +94,49 @@ test("browser vault query clients parse full replicas and apply entity, metric, 
   assert.equal(signals.sourceHealth[0]?.providerDisplayName, "Garmin");
 });
 
+test("browser vault query clients reject non-matching filter combinations across query helpers", () => {
+  const client = createBrowserVaultQueryClient(parseBrowserVaultReplica(createReplicaFixture()));
+
+  assert.deepEqual(client.entities.list({ ids: ["missing"] }).map((entity) => entity.id), []);
+  assert.deepEqual(
+    client.entities.list({ families: ["journal"], kinds: ["experiment_entry"] }).map((entity) => entity.id),
+    [],
+  );
+  assert.deepEqual(client.entities.list({ statuses: ["active"], families: ["journal"] }), []);
+  assert.deepEqual(client.entities.list({ tags: ["focus"], families: ["journal"] }), []);
+  assert.deepEqual(client.entities.list({ from: "2026-04-21" }), []);
+  assert.deepEqual(client.entities.list({ to: "2026-04-18" }), []);
+
+  assert.equal(
+    client.metrics.latest({
+      domain: "activity",
+      from: "2026-04-21",
+      metric: "steps",
+    }),
+    null,
+  );
+  assert.deepEqual(
+    client.metrics.list({ domain: "activity", metric: "sleepScore" }).map((row) => row.id),
+    [],
+  );
+  assert.deepEqual(
+    client.metricDays.list({ domain: "activity", metric: "sleepScore" }).map((row) => row.id),
+    [],
+  );
+
+  assert.deepEqual(client.search("steady", { families: ["journal"] }).map((row) => row.id), []);
+
+  assert.deepEqual(
+    client.timeline.list({ families: ["event"], kinds: ["journal_entry"] }).map((row) => row.id),
+    [],
+  );
+  assert.deepEqual(
+    client.timeline.list({ tags: ["sleep", "movement"] }).map((row) => row.id),
+    [],
+  );
+  assert.deepEqual(client.timeline.list({ from: "2026-04-21" }).map((row) => row.id), []);
+});
+
 test("browser vault replica creation projects safe fields, filters excluded families, and emits signal rows", async () => {
   const longBody = Array.from({ length: 90 }, (_, index) => `Paragraph ${index + 1}`).join("\n\n");
   const replica = await createBrowserVaultReplica({

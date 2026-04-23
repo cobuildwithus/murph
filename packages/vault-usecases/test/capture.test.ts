@@ -438,7 +438,10 @@ describe('capture usecases', () => {
       schemaVersion: 'murph.raw-import.v1',
       source: null,
     }
+    const manifestFile =
+      'raw/captures/2026/04/evt_capture_1/manifest.evt_capture_1.20260408T120000000Z.json'
     const readRawImportManifest = vi.fn(async () => manifest)
+    const resolveRawImportManifestFile = vi.fn(async () => manifestFile)
 
     const capturesModule = await importWithMocks<typeof import('../src/captures.ts')>(
       '../src/captures.ts',
@@ -465,6 +468,7 @@ describe('capture usecases', () => {
           return {
             ...actual,
             readRawImportManifest,
+            resolveRawImportManifestFile,
           }
         },
       },
@@ -491,13 +495,17 @@ describe('capture usecases', () => {
     })
     expect(readRawImportManifest).toHaveBeenCalledWith(
       '/vault',
-      'raw/captures/2026/04/evt_capture_1/manifest.json',
+      manifestFile,
+    )
+    expect(resolveRawImportManifestFile).toHaveBeenCalledWith(
+      '/vault',
+      'raw/captures/2026/04/evt_capture_1',
     )
     expect(manifestResult).toMatchObject({
       entityId: 'evt_capture_1',
       kind: 'capture',
       lookupId: 'evt_capture_1',
-      manifestFile: 'raw/captures/2026/04/evt_capture_1/manifest.json',
+      manifestFile,
       manifest,
     })
   })

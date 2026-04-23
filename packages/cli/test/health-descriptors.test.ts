@@ -15,7 +15,7 @@ import {
 import {
   createExplicitHealthCoreServices,
   createExplicitHealthQueryServices,
-} from "@murphai/vault-usecases/helpers";
+} from "@murphai/vault-usecases/testing";
 
 test("CLI health descriptors reuse shared taxonomy lookup metadata and scaffold templates", () => {
   for (const definition of healthEntityDefinitions) {

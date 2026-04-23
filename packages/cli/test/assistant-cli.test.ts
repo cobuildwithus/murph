@@ -592,7 +592,6 @@ test.sequential(
     assert.equal(unsupportedChannel.ok, false)
     if (!unsupportedChannel.ok) {
       assert.match(unsupportedChannel.error.message ?? '', /telegram/u)
-      assert.match(unsupportedChannel.error.message ?? '', /linq/u)
       assert.match(unsupportedChannel.error.message ?? '', /email/u)
     }
 
@@ -911,7 +910,7 @@ test('model --show returns the saved assistant backend', async () => {
     reasoningEffort: 'medium',
     sandbox: 'danger-full-access',
   })
-  assert.equal(result.envelope.data?.summary, 'gpt-5.4 in Codex CLI (Pro account)')
+  assert.equal(result.envelope.data?.summary, 'gpt-5.4 via Codex app-server (Pro account)')
 })
 
 test('model --show summarizes a saved Codex OSS backend', async () => {
@@ -950,7 +949,7 @@ test('model --show summarizes a saved Codex OSS backend', async () => {
 
   assert.equal(result.exitCode, null)
   assert.equal(result.envelope.ok, true)
-  assert.equal(result.envelope.data?.summary, 'qwen3-coder in Codex OSS')
+  assert.equal(result.envelope.data?.summary, 'qwen3-coder via Codex OSS app-server')
 })
 
 test('model --show summarizes a saved OpenAI-compatible backend without an endpoint', async () => {

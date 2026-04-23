@@ -349,6 +349,53 @@ describe("RunnerRunProcessor.cleanupTransientWakeDataBestEffortForRunDrain", () 
     }));
   });
 
+  it("uses worker-reachable Telegram platform URLs for cleanup", async () => {
+    const { processor } = createInvokeRunnerProcessor({
+      configSource: {
+        HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://host.docker.internal:8787",
+        TELEGRAM_API_BASE_URL: "http://127.0.0.1:4012",
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+        TELEGRAM_FILE_BASE_URL: "http://127.0.0.1:4013",
+      },
+      forwardedEnvSource: {
+        HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "telegram",
+      },
+    });
+    const deleteHostedTelegramMessages = vi.spyOn(
+      hostedRuntimeContractsModule,
+      "deleteHostedTelegramMessages",
+    ).mockResolvedValue(undefined);
+
+    await processor.cleanupTransientWakeDataBestEffortForRunDrain({
+      assistantDeliveryOutcomes: [],
+      runId: "run-telegram-worker-cleanup-env",
+      userId: "user_123",
+      wakes: [
+        buildHostedExecutionTelegramConversationMessageWake({
+          eventId: "telegram-wake",
+          occurredAt: "2026-04-20T09:00:00.000Z",
+          telegramMessage: {
+            messageId: "7001234567",
+            schema: "murph.hosted-telegram-message.v1",
+            text: "yo",
+            threadId: "6001234567",
+          },
+          userId: "user_123",
+        }),
+      ],
+    });
+
+    expect(deleteHostedTelegramMessages).toHaveBeenCalledWith(expect.objectContaining({
+      env: expect.objectContaining({
+        TELEGRAM_API_BASE_URL: "http://127.0.0.1:4012",
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+        TELEGRAM_FILE_BASE_URL: "http://127.0.0.1:4013",
+      }),
+      messageIds: ["7001234567"],
+      target: "6001234567",
+    }));
+  });
+
   it("does not retarget Telegram cleanup across unrelated chats when only one delivery succeeds", async () => {
     const { processor } = createInvokeRunnerProcessor({
       forwardedEnvSource: {
@@ -2106,6 +2153,72 @@ describe("RunnerRunProcessor.executeRunDrain", () => {
             [HOSTED_RUN_MESSAGING_ACTIVITY_OWNER_ENV]:
               HOSTED_RUN_MESSAGING_ACTIVITY_OWNER_EXECUTOR,
           }),
+        }),
+      }),
+    }));
+  });
+
+  it("rewrites Telegram platform URLs for container runner jobs", async () => {
+    const { processor } = createInvokeRunnerProcessor({
+      configSource: {
+        HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://host.docker.internal:8787",
+        TELEGRAM_API_BASE_URL: "http://127.0.0.1:4012",
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+        TELEGRAM_FILE_BASE_URL: "http://127.0.0.1:4013",
+      },
+    });
+    const invokeRunner = Reflect.get(processor, "invokeRunner").bind(processor) as (
+      userId: string,
+      currentBundleRef: null,
+      wake: HostedExecutionRuntimeTimerWake,
+      run: ReturnType<typeof createRunContext>,
+      runDrain: HostedRuntimeDrainRequest,
+      runToken?: string | null,
+      options?: {
+        messagingActivityOwnedByExecutor?: boolean;
+      },
+    ) => Promise<unknown>;
+    const invokeHostedExecutionContainerRunner = vi.spyOn(
+      runnerContainerModule,
+      "invokeHostedExecutionContainerRunner",
+    ).mockResolvedValue({
+      assistantDeliveryOutcomes: [],
+      browserVaultReplica: null,
+      finalGatewayProjectionSnapshot: null,
+      phase: "completed",
+      result: {
+        bundle: null,
+        result: {
+          eventsHandled: 0,
+          nextWakeAt: null,
+          summary: "Completed hosted run.",
+        },
+      },
+    });
+
+    await invokeRunner(
+      "user_123",
+      null,
+      createRuntimeTimerWake(),
+      createRunContext("run-telegram-platform-env"),
+      createRunDrainRequest("run-telegram-platform-env"),
+      "run-token",
+    );
+
+    expect(invokeHostedExecutionContainerRunner).toHaveBeenCalledTimes(1);
+    expect(invokeHostedExecutionContainerRunner.mock.calls[0]?.[0]).toEqual(expect.objectContaining({
+      job: expect.objectContaining({
+        runtime: expect.objectContaining({
+          forwardedEnv: expect.not.objectContaining({
+            TELEGRAM_API_BASE_URL: expect.any(String),
+            TELEGRAM_BOT_TOKEN: expect.any(String),
+            TELEGRAM_FILE_BASE_URL: expect.any(String),
+          }),
+          platformEnv: {
+            TELEGRAM_API_BASE_URL: "http://host.docker.internal:4012/",
+            TELEGRAM_BOT_TOKEN: "telegram-token",
+            TELEGRAM_FILE_BASE_URL: "http://host.docker.internal:4013/",
+          },
         }),
       }),
     }));

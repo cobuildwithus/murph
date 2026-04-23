@@ -26,6 +26,7 @@ class CapturingWritable extends Writable {
 }
 
 const defaultConfig: HostedLocalDevConfig = {
+  forceResetLocalDatabase: false,
   skipPrismaMigrate: false,
   skipStripeListen: true,
   skipWeb: false,
@@ -285,6 +286,37 @@ describe("hosted local dev stack", () => {
     expect(runCommand).toHaveBeenCalledWith(
       "pnpm",
       ["--dir", "apps/web", "prisma:migrate:deploy"],
+      expect.any(Object),
+    );
+    expect(runCommand).not.toHaveBeenCalledWith(
+      "pnpm",
+      ["--dir", "apps/web", "exec", "prisma", "db", "push", "--accept-data-loss"],
+      expect.any(Object),
+    );
+  });
+
+  it("can force-reset the local Postgres target before db push when explicitly requested", async () => {
+    spawnChildProcess
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 113 }))
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 114 }));
+
+    const configModule = await import("./config.ts");
+    vi.mocked(configModule.resolveHostedLocalDevConfig).mockReturnValueOnce({
+      ...defaultConfig,
+      forceResetLocalDatabase: true,
+    });
+
+    const { startHostedLocalDevStack } = await import("./stack.ts");
+
+    const stack = await startHostedLocalDevStack({
+      env: process.env,
+    });
+    await stack.ready;
+    await stack.stop();
+
+    expect(runCommand).toHaveBeenCalledWith(
+      "pnpm",
+      ["--dir", "apps/web", "exec", "prisma", "db", "push", "--force-reset"],
       expect.any(Object),
     );
     expect(runCommand).not.toHaveBeenCalledWith(

@@ -138,11 +138,11 @@ describe('assistant store persistence seams', () => {
     expect(roundTrippedSession.providerOptions).toMatchObject({
       apiKeyEnv: 'OPENAI_API_KEY',
       baseUrl: 'https://api.example.com/v1',
-      executionDriver: 'responses',
+      executionDriver: 'openai-compatible',
       model: 'gpt-5.4',
       providerName: 'murph-openai',
       reasoningEffort: 'medium',
-      resumeKind: 'openai-response-id',
+      resumeKind: null,
     })
     expect(roundTrippedSession.providerOptions.continuityFingerprint).toEqual(
       expect.any(String),

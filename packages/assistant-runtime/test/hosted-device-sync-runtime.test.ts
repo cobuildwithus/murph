@@ -12,7 +12,7 @@ import {
   type DeviceSyncProvider,
   type ProviderAuthTokens,
 } from "@murphai/device-syncd/types";
-import type { DeviceSyncService } from "@murphai/device-syncd";
+import type { DeviceSyncService } from "@murphai/device-syncd/service";
 import type {
   HostedExecutionDeviceSyncRuntimeApplyResponse,
   HostedExecutionDeviceSyncRuntimeSnapshotResponse,

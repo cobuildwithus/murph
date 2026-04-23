@@ -228,7 +228,7 @@ describe('monorepo release flow coverage audit', () => {
       'pnpm exec cobuild-review-gpt --config scripts/review-gpt-full.config.sh',
     )
     expect(rootPackageJson.scripts?.['review:gpt:diagnose']).toBe(
-      'pnpm exec cobuild-review-gpt thread diagnose',
+      'pnpm exec cobuild-review-gpt thread diagnose --browser-endpoint ${MURPH_REVIEW_GPT_BROWSER_ENDPOINT:-http://127.0.0.1:9442}',
     )
     expect(rootPackageJson.scripts?.['review:gpt:delay']).toBe(
       'pnpm exec cobuild-review-gpt delay --config scripts/review-gpt.config.sh',
@@ -238,16 +238,16 @@ describe('monorepo release flow coverage audit', () => {
     )
     expect(rootPackageJson.scripts?.['review:gpt:data']).toBe('bash scripts/review-gpt-data.sh')
     expect(rootPackageJson.scripts?.['chatgpt:thread:export']).toBe(
-      'pnpm exec cobuild-review-gpt thread export --format json --filter-output exportPath',
+      'pnpm exec cobuild-review-gpt thread export --browser-endpoint ${MURPH_REVIEW_GPT_BROWSER_ENDPOINT:-http://127.0.0.1:9442} --format json --filter-output exportPath',
     )
     expect(rootPackageJson.scripts?.['chatgpt:thread:download']).toBe(
-      'pnpm exec cobuild-review-gpt thread download --format json --filter-output downloadedFile',
+      'pnpm exec cobuild-review-gpt thread download --browser-endpoint ${MURPH_REVIEW_GPT_BROWSER_ENDPOINT:-http://127.0.0.1:9442} --format json --filter-output downloadedFile',
     )
     expect(rootPackageJson.scripts?.['chatgpt:thread:watch']).toBe(
-      'pnpm exec cobuild-review-gpt thread wake --no-poll-until-complete --format json',
+      'pnpm exec cobuild-review-gpt thread wake --browser-endpoint ${MURPH_REVIEW_GPT_BROWSER_ENDPOINT:-http://127.0.0.1:9442} --no-poll-until-complete --format json',
     )
     expect(rootPackageJson.scripts?.['chatgpt:thread:wake']).toBe(
-      'pnpm exec cobuild-review-gpt thread wake --no-poll-until-complete --format json',
+      'pnpm exec cobuild-review-gpt thread wake --browser-endpoint ${MURPH_REVIEW_GPT_BROWSER_ENDPOINT:-http://127.0.0.1:9442} --no-poll-until-complete --format json',
     )
     expect(rootPackageJson.scripts?.['verify:workspace-package-cycles']).toBe(
       'node scripts/check-workspace-package-cycles.mjs',

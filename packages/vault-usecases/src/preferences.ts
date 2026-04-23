@@ -1,12 +1,13 @@
-import { type WearablePreferenceProvider } from "@murphai/contracts";
+import {
+  type WearablePreferenceProvider,
+  type WearablePreferences,
+} from "@murphai/contracts";
 import { loadRuntimeModule } from "./runtime-import.js"
 
 interface PreferencesDocument {
   sourcePath: string
-  updatedAt: string
-  wearablePreferences: {
-    desiredProviders?: readonly WearablePreferenceProvider[]
-  } | null
+  updatedAt: string | null
+  wearablePreferences: WearablePreferences
 }
 
 interface PreferencesCoreRuntime {

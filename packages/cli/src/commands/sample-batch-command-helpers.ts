@@ -40,6 +40,8 @@ export interface SampleBatchDetails {
   manifest: JsonObject
 }
 
+const LEGACY_RAW_MANIFEST_BASENAME = 'manifest.json'
+
 export interface SampleBatchListOptions {
   from?: string
   to?: string
@@ -168,12 +170,19 @@ async function walkRelativeFiles(
       continue
     }
 
-    if (entry.isFile() && entry.name === 'manifest.json') {
+    if (entry.isFile() && isRawManifestFileName(entry.name)) {
       files.push(relativePath)
     }
   }
 
   return files.sort()
+}
+
+function isRawManifestFileName(fileName: string) {
+  return (
+    fileName === LEGACY_RAW_MANIFEST_BASENAME
+    || (fileName.startsWith('manifest.') && fileName.endsWith('.json'))
+  )
 }
 
 function inferSampleStream(

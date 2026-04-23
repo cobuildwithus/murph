@@ -1,6 +1,6 @@
 # Get repo checks green and land the remaining worktree
 
-Status: active
+Status: completed
 Created: 2026-04-24
 Updated: 2026-04-24
 
@@ -51,7 +51,8 @@ Updated: 2026-04-24
 
 ## Decisions
 
-- None yet.
+- Treat the current dirty tree as an umbrella landing and fix blocker chains in place instead of splitting the remaining authored work across additional partial landings.
+- Keep the CLI acceptance fix minimal in the helper retry path and treat the `apps/web` dashboard count mismatch as stale data-driven expectations.
 
 ## Verification
 
@@ -60,3 +61,10 @@ Updated: 2026-04-24
   - any narrower truthful checks needed while iterating on blockers
 - Expected outcomes:
   - The repo acceptance baseline is green before landing unless a final blocker is credibly unrelated and documented.
+- Outcomes:
+  - `pnpm verify:acceptance` passed.
+  - `pnpm exec vitest run --config packages/cli/vitest.workspace.ts packages/cli/test/cli-test-helpers.test.ts --no-coverage` passed.
+  - `pnpm exec vitest run --config apps/web/vitest.workspace.ts apps/web/test/browser-vault-dashboard-pages.test.tsx --no-coverage` passed.
+  - `CF_WORKER_NAME=stub CF_BUNDLES_BUCKET=stub CF_BUNDLES_PREVIEW_BUCKET=stub pnpm --dir apps/cloudflare deploy:preflight` passed.
+
+Completed: 2026-04-24

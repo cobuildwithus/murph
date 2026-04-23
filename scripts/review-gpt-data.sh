@@ -4,6 +4,8 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
+thread_browser_endpoint="${MURPH_REVIEW_GPT_BROWSER_ENDPOINT:-http://127.0.0.1:${managed_browser_port:-9442}}"
+
 vault_override=""
 has_send_override=0
 chat_url=""
@@ -69,6 +71,7 @@ if [[ "$command_status" -ne 0 && -n "$chat_url" ]]; then
   set +e
   diagnostics_dir="$(
     "${review_gpt_command[@]}" thread diagnose \
+      --browser-endpoint "$thread_browser_endpoint" \
       --chat-url "$chat_url" \
       --command-label review:gpt:data \
       --exit-code "$command_status" \

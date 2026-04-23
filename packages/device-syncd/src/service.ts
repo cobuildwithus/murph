@@ -48,6 +48,8 @@ import type {
   StoredDeviceSyncAccount,
 } from "./types.ts";
 
+export { SqliteDeviceSyncStore } from "./store.ts";
+
 class DeviceSyncJobExecutionCancelledError extends Error {
   constructor(readonly accountId: string, readonly jobId: string) {
     super(`Device sync job ${jobId} is no longer active for account ${accountId}.`);
