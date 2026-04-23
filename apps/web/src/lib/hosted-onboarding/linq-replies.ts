@@ -7,7 +7,7 @@ export function buildHostedInviteReply(input: {
 
 Sign in here:
 ${input.joinUrl}`
-    : `Welcome to Murph.
+    : `Welcome to Murph, your personal health assistant for running small experiments and seeing what actually changed.
 
 Verify your phone to finish signup here:
 ${input.joinUrl}`;
