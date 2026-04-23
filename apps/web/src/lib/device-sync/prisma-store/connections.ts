@@ -15,6 +15,7 @@ import {
   omitHostedSqlErrorText,
   generateHostedRandomPrefixedId,
 } from "../shared";
+import type { HostedLocalHeartbeatStateUpdate } from "../local-heartbeat";
 import type { HostedPrismaTransactionClient } from "./types";
 import {
   hostedConnectionRecordArgs,
@@ -250,13 +251,36 @@ export class PrismaHostedConnectionStore {
     });
   }
 
+  async syncDurableConnectionLocalHeartbeatState(
+    account: Pick<PublicDeviceSyncAccount, "externalAccountId" | "id">,
+    localState: HostedLocalHeartbeatStateUpdate,
+    tx?: HostedPrismaTransactionClient,
+  ): Promise<PublicDeviceSyncAccount> {
+    const prisma = tx ?? this.prisma;
+    const record = await prisma.deviceConnection.update({
+      where: {
+        id: account.id,
+      },
+      data: buildHostedLocalHeartbeatUpdateData(localState),
+      ...hostedConnectionRecordArgs,
+    });
+
+    return this.buildDurableConnectionRecord(record, {
+      externalAccountId: account.externalAccountId,
+    });
+  }
+
   async listConnectionsForUser(userId: string): Promise<PublicDeviceSyncAccount[]> {
     const records = await this.listConnectionRecordsForUser(userId);
     return records.map((record) => this.buildDurableConnectionRecord(record));
   }
 
-  async getConnectionForUser(userId: string, connectionId: string): Promise<PublicDeviceSyncAccount | null> {
-    const record = await this.getConnectionRecordForUser(userId, connectionId);
+  async getConnectionForUser(
+    userId: string,
+    connectionId: string,
+    tx?: HostedPrismaTransactionClient,
+  ): Promise<PublicDeviceSyncAccount | null> {
+    const record = await this.getConnectionRecordForUser(userId, connectionId, tx);
     return record ? this.buildDurableConnectionRecord(record) : null;
   }
 
@@ -371,8 +395,14 @@ export class PrismaHostedConnectionStore {
     });
   }
 
-  async getConnectionRecordForUser(userId: string, connectionId: string): Promise<HostedConnectionRecord | null> {
-    return this.prisma.deviceConnection.findFirst({
+  async getConnectionRecordForUser(
+    userId: string,
+    connectionId: string,
+    tx?: HostedPrismaTransactionClient,
+  ): Promise<HostedConnectionRecord | null> {
+    const prisma = tx ?? this.prisma;
+
+    return prisma.deviceConnection.findFirst({
       where: {
         id: connectionId,
         userId,
@@ -440,4 +470,32 @@ export class PrismaHostedConnectionStore {
       tokenVersion: tokenBundle.tokenVersion,
     } satisfies HostedStoredDeviceSyncAccount;
   }
+}
+
+function buildHostedLocalHeartbeatUpdateData(
+  localState: HostedLocalHeartbeatStateUpdate,
+): {
+  lastErrorCode?: string | null;
+  lastErrorMessage?: string | null;
+  lastSyncCompletedAt?: Date | null;
+  lastSyncErrorAt?: Date | null;
+  lastSyncStartedAt?: Date | null;
+} {
+  return {
+    ...("lastSyncStartedAt" in localState
+      ? { lastSyncStartedAt: maybeDate(localState.lastSyncStartedAt ?? null) }
+      : {}),
+    ...("lastSyncCompletedAt" in localState
+      ? { lastSyncCompletedAt: maybeDate(localState.lastSyncCompletedAt ?? null) }
+      : {}),
+    ...("lastSyncErrorAt" in localState
+      ? { lastSyncErrorAt: maybeDate(localState.lastSyncErrorAt ?? null) }
+      : {}),
+    ...("lastErrorCode" in localState
+      ? { lastErrorCode: normalizeNullableString(localState.lastErrorCode ?? null) }
+      : {}),
+    ...("lastErrorMessage" in localState
+      ? { lastErrorMessage: omitHostedSqlErrorText(localState.lastErrorMessage ?? null) }
+      : {}),
+  };
 }

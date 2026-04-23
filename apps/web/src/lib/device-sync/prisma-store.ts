@@ -242,7 +242,10 @@ export class PrismaDeviceSyncControlPlaneStore
     connectionId: string,
     patch: HostedLocalHeartbeatPatch,
   ): Promise<PublicDeviceSyncAccount | null> {
-    return this.localHeartbeats.updateConnectionFromLocalHeartbeat(userId, connectionId, patch);
+    return this.withConnectionRefreshLock(
+      connectionId,
+      async (tx) => this.localHeartbeats.updateConnectionFromLocalHeartbeat(userId, connectionId, patch, tx),
+    );
   }
 
   async withConnectionRefreshLock<TResult>(
