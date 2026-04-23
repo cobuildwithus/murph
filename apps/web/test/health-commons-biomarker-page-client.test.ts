@@ -19,7 +19,13 @@ vi.mock("@/src/lib/browser-vault/context", () => ({
   useBrowserVault: mocks.useBrowserVault,
 }));
 
-import { BiomarkerPageClient } from "../app/biomarkers/[biomarkerId]/biomarker-page-client";
+import {
+  BiomarkerPageClient,
+  buildTrendComparison,
+  formatTrendDeltaSummary,
+  formatTrendDeltaUnit,
+  nearFlatThresholdForUnit,
+} from "../app/biomarkers/[biomarkerId]/biomarker-page-client";
 import { resolveHealthCommonsBiomarkerDetail } from "../src/lib/health-commons/biomarker-detail";
 
 test("renders the RHR biomarker page with privacy-safe copy and one protocol CTA per ranked card", () => {
@@ -113,8 +119,75 @@ test("treats modest percent changes as flat for the SpO₂ biomarker trend card"
     createElement(BiomarkerPageClient, { biomarker }),
   );
 
-  assert.match(markup, /flat 0\.3 %/);
-  assert.doesNotMatch(markup, /up 0\.3 %/);
+  assert.match(markup, /What the research supports/);
+  assert.match(markup, /Evidence-backed interpretation/);
+  assert.match(markup, /Home pulse oximeters and consumer wearables estimate oxygen saturation/);
+  assert.match(markup, /within 0\.3 percentage points of baseline/);
+  assert.doesNotMatch(markup, /up 0\.3 percentage points/);
+  assert.doesNotMatch(markup, /flat 0\.3 %/);
+});
+
+test("classifies percent deltas from the raw value rather than the rounded display value", () => {
+  const biomarker = resolveHealthCommonsBiomarkerDetail("blood-oxygen-spo2");
+
+  assert.ok(biomarker);
+  mocks.useBrowserVault.mockReturnValue({
+    client: {
+      metrics: {
+        series: () => [
+          { confidence: "high", date: "2026-04-09", sourceKind: "wearable", value: 96.0 },
+          { confidence: "high", date: "2026-04-10", sourceKind: "wearable", value: 96.0 },
+          { confidence: "high", date: "2026-04-11", sourceKind: "wearable", value: 96.0 },
+          { confidence: "high", date: "2026-04-12", sourceKind: "wearable", value: 96.0 },
+          { confidence: "high", date: "2026-04-13", sourceKind: "wearable", value: 96.0 },
+          { confidence: "high", date: "2026-04-14", sourceKind: "wearable", value: 96.54 },
+          { confidence: "high", date: "2026-04-15", sourceKind: "wearable", value: 96.54 },
+          { confidence: "high", date: "2026-04-16", sourceKind: "wearable", value: 96.54 },
+          { confidence: "high", date: "2026-04-17", sourceKind: "wearable", value: 96.54 },
+          { confidence: "high", date: "2026-04-18", sourceKind: "wearable", value: 96.54 },
+          { confidence: "high", date: "2026-04-19", sourceKind: "wearable", value: 96.54 },
+          { confidence: "high", date: "2026-04-20", sourceKind: "wearable", value: 96.54 },
+        ],
+      },
+    },
+    dataVersion: "fixture-version",
+    error: null,
+    ref: null,
+    refresh: async () => {},
+    status: "ready",
+  });
+
+  const markup = renderToStaticMarkup(
+    createElement(BiomarkerPageClient, { biomarker }),
+  );
+
+  assert.match(markup, /up 0\.5 percentage points/);
+  assert.doesNotMatch(markup, /within 0\.5 percentage points of baseline/);
+  assert.doesNotMatch(markup, /up 0\.5 %/);
+});
+
+test("exports percentage-aware delta helpers for direct SpO₂ coverage", () => {
+  const biomarker = resolveHealthCommonsBiomarkerDetail("blood-oxygen-spo2");
+
+  assert.ok(biomarker);
+  const comparison = buildTrendComparison(
+    buildDailyRows({ baselineValue: 96.7, currentValue: 97.1 }),
+    biomarker,
+  );
+
+  assert.ok(comparison);
+  assert.equal(comparison.direction, "flat");
+  assert.equal(
+    formatTrendDeltaSummary({
+      comparison,
+      precision: biomarker.valuePrecision,
+      unit: biomarker.unit,
+    }),
+    "within 0.4 percentage points of baseline",
+  );
+  assert.equal(formatTrendDeltaUnit("%"), "percentage points");
+  assert.equal(formatTrendDeltaUnit("percent"), "percentage points");
+  assert.equal(nearFlatThresholdForUnit("%"), 0.5);
 });
 
 test("renders VO₂ max evidence cards and treats modest cardio-fitness changes as flat", () => {
@@ -285,3 +358,28 @@ test("renders HRV research notes from the biomarker body", () => {
   assert.doesNotMatch(markup, /Protocol ranking logic/);
   assert.doesNotMatch(markup, /How Murph should interpret your trend/);
 });
+
+function buildDailyRows(
+  input: { baselineValue: number; currentValue: number },
+): Array<Parameters<typeof buildTrendComparison>[0][number]> {
+  const latest = new Date("2026-04-23T00:00:00.000Z");
+
+  return Array.from({ length: 37 }, (_, index) => {
+    const date = new Date(latest);
+    const daysBeforeLatest = 36 - index;
+    date.setUTCDate(date.getUTCDate() - daysBeforeLatest);
+
+    return {
+      confidence: "high",
+      date: date.toISOString().slice(0, 10),
+      domain: "sleep",
+      id: `row-${index}`,
+      metric: "spo2",
+      recordIds: [`record-${index}`],
+      sourceFamily: "wearable",
+      sourceKind: "wearable",
+      unit: "%",
+      value: index < 30 ? input.baselineValue : input.currentValue,
+    };
+  });
+}

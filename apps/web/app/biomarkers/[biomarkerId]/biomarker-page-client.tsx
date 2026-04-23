@@ -299,20 +299,13 @@ function TrendDeltaRow({
   precision: number;
   unit: string;
 }) {
-  const absoluteDelta = Math.abs(roundMetricValue(comparison.delta, precision));
-  const directionLabel = comparison.direction === "flat"
-    ? "flat"
-    : comparison.direction === "down"
-      ? "down"
-      : "up";
+  const deltaSummary = formatTrendDeltaSummary({ comparison, precision, unit });
 
   return (
     <div className="grid gap-3 rounded-xl border border-border/60 bg-background/80 p-3 text-sm">
       <div className="flex items-center justify-between gap-3">
         <span className="text-muted-foreground">{comparison.label}</span>
-        <span className="font-medium text-foreground">
-          {directionLabel} {formatMetricValue(absoluteDelta, precision)} {unit}
-        </span>
+        <span className="font-medium text-foreground">{deltaSummary}</span>
       </div>
       <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
         <span>Recent: {formatMetricValue(comparison.currentValue, precision)} {unit}</span>
@@ -1006,7 +999,7 @@ function resolvePrivateTrend(input: {
   };
 }
 
-function buildTrendComparison(
+export function buildTrendComparison(
   rows: BrowserVaultMetricRowWithValue[],
   biomarker: BiomarkerPageModel,
 ): TrendComparison | null {
@@ -1028,11 +1021,13 @@ function buildTrendComparison(
   const currentValue = aggregateMetricRows(currentRows, biomarker.trendDefaults.aggregation);
   const baselineValue = aggregateMetricRows(baselineRows, biomarker.trendDefaults.aggregation);
   const delta = currentValue - baselineValue;
-  const roundedDelta = roundMetricValue(delta, biomarker.valuePrecision);
+  const directionDelta = isPercentageUnit(biomarker.unit)
+    ? delta
+    : roundMetricValue(delta, biomarker.valuePrecision);
   const nearFlatThreshold = nearFlatThresholdForUnit(biomarker.unit);
-  const direction = Math.abs(roundedDelta) <= nearFlatThreshold + 1e-9
+  const direction = Math.abs(directionDelta) <= nearFlatThreshold + 1e-9
     ? "flat"
-    : roundedDelta < 0
+    : directionDelta < 0
       ? "down"
       : "up";
 
@@ -1049,7 +1044,31 @@ function hasNumericMetricValue(row: BrowserVaultMetricRow): row is BrowserVaultM
   return typeof row.value === "number" && Number.isFinite(row.value);
 }
 
-function nearFlatThresholdForUnit(unit: string): number {
+export function formatTrendDeltaSummary(input: {
+  comparison: TrendComparison;
+  precision: number;
+  unit: string;
+}): string {
+  const absoluteDelta = Math.abs(roundMetricValue(input.comparison.delta, input.precision));
+  const deltaUnit = formatTrendDeltaUnit(input.unit);
+  const percentageUnit = isPercentageUnit(input.unit);
+
+  if (input.comparison.direction === "flat") {
+    if (percentageUnit) {
+      return `within ${formatMetricValue(absoluteDelta, input.precision)} ${deltaUnit} of baseline`;
+    }
+
+    return `flat ${formatMetricValue(absoluteDelta, input.precision)} ${deltaUnit}`;
+  }
+
+  return `${input.comparison.direction} ${formatMetricValue(absoluteDelta, input.precision)} ${deltaUnit}`;
+}
+
+export function formatTrendDeltaUnit(unit: string): string {
+  return isPercentageUnit(unit) ? "percentage points" : unit;
+}
+
+export function nearFlatThresholdForUnit(unit: string): number {
   const normalized = unit.trim().toLowerCase();
 
   if (normalized === "bpm") {
@@ -1060,7 +1079,7 @@ function nearFlatThresholdForUnit(unit: string): number {
     return 0.1;
   }
 
-  if (normalized === "%" || normalized === "percent" || normalized.includes("percentage")) {
+  if (isPercentageUnit(unit)) {
     return 0.5;
   }
 
@@ -1069,6 +1088,11 @@ function nearFlatThresholdForUnit(unit: string): number {
   }
 
   return 0.01;
+}
+
+function isPercentageUnit(unit: string): boolean {
+  const normalized = unit.trim().toLowerCase();
+  return normalized === "%" || normalized === "percent" || normalized.includes("percentage");
 }
 
 function aggregateMetricRows(
