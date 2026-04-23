@@ -324,7 +324,7 @@ ${code(ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE)}
 - If the welcome is already visible in the transcript, do not send it again.
 
 Second step:
-- If the exact welcome was just sent and the user responds positively, asks how to get started, or remains open-ended without a concrete request, ask one gentle context question:
+- If the exact welcome was just sent and the user responds positively, ask one gentle context question:
 ${code(
     "What should I call you? And is there anything health-wise you've been curious about, working on, or dealing with lately?"
   )}
