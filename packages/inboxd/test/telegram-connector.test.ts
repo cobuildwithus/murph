@@ -360,59 +360,14 @@ test("normalizeTelegramUpdate allowlists raw update metadata and drops secret-be
     },
   });
 
-  assert.equal(capture.raw.update_id, 124);
+  assert.equal(capture.text, "Secret-free update");
   assert.equal("authorization" in capture.raw, false);
-  const messageRaw = capture.raw.message as Record<string, unknown>;
-  assert.ok(messageRaw);
-  assert.equal(messageRaw.text, "Secret-free update");
-  assert.equal("cookie" in messageRaw, false);
-  assert.equal(messageRaw.business_connection_id, "biz-42");
-  assert.equal(messageRaw.media_group_id, "album-7");
-  assert.deepEqual(messageRaw.direct_messages_topic, {
-    topic_id: 8,
-    title: "Priority",
-  });
-  assert.deepEqual(messageRaw.chat, {
-    id: 42,
-    type: "private",
-    first_name: "Alice",
-  });
-  assert.deepEqual(messageRaw.from, {
-    id: 111,
-    first_name: "Alice",
-  });
-  assert.deepEqual(messageRaw.photo, [
-    {
-      file_id: "photo-2",
-      file_unique_id: "photo-unique-2",
-      file_size: 64,
-      width: 64,
-      height: 64,
-    },
-  ]);
-  assert.deepEqual(messageRaw.reply_to_message, {
-    message_id: 17,
-    text: "Earlier message",
-    direct_messages_topic: {
-      topic_id: 7,
-      title: "Nested topic",
-    },
-    chat: {
-      id: 42,
-      type: "private",
-      first_name: "Alice",
-    },
-    from: {
-      id: 111,
-      first_name: "Alice",
-    },
-    sender_chat: null,
-    sender_business_bot: null,
-    quote: null,
-    contact: null,
-    location: null,
-    venue: null,
-    poll: null,
+  assert.equal("message" in capture.raw, false);
+  assert.deepEqual(capture.raw, {
+    media_group_id: "album-7",
+    message_id: 18,
+    reply_context_preview: "Replying to: Earlier message",
+    schema: "murph.telegram-capture.v1",
   });
 });
 

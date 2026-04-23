@@ -146,7 +146,7 @@ test("summarizeTelegramUpdate infers hosted bot identity only when asked", () =>
   assert.equal(hostedSummary?.actor.isSelf, true);
 });
 
-test("minimizeTelegramUpdate preserves allowlisted nested reply metadata", () => {
+test("minimizeTelegramUpdate stores only minimal telegram capture metadata with reply previews", () => {
   const update = parseTelegramWebhookUpdate(JSON.stringify({
     business_message: {
       business_connection_id: "biz_123",
@@ -191,30 +191,124 @@ test("minimizeTelegramUpdate preserves allowlisted nested reply metadata", () =>
   }));
 
   const minimized = minimizeTelegramUpdate(update);
-  const businessMessage =
-    minimized.business_message && typeof minimized.business_message === "object"
-      ? (minimized.business_message as Record<string, unknown>)
-      : null;
-  const replyToMessage =
-    businessMessage?.reply_to_message && typeof businessMessage.reply_to_message === "object"
-      ? (businessMessage.reply_to_message as Record<string, unknown>)
-      : null;
 
-  assert.equal(minimized.update_id, 321);
-  assert.equal(minimized.message, null);
-  assert.equal(businessMessage?.business_connection_id, "biz_123");
-  assert.equal(businessMessage?.caption, "album caption");
-  assert.equal(businessMessage?.media_group_id, "album_123");
-  assert.deepEqual(businessMessage?.direct_messages_topic, {
-    title: "Business DM",
-    topic_id: 7,
+  assert.deepEqual(minimized, {
+    media_group_id: "album_123",
+    message_id: 5,
+    reply_context_preview: "Replying to: Earlier message",
+    schema: "murph.telegram-capture.v1",
   });
-  assert.deepEqual(replyToMessage?.direct_messages_topic, {
-    title: "Earlier DM",
-    topic_id: 6,
+});
+
+test("minimizeTelegramUpdate keeps poll context without persisting actor identity", () => {
+  const update = parseTelegramWebhookUpdate(JSON.stringify({
+    message: {
+      chat: {
+        id: 123,
+        type: "private",
+      },
+      message_id: 6,
+      quote: {
+        text: " Which option did you mean? ",
+      },
+      reply_to_message: {
+        chat: {
+          id: 123,
+          type: "private",
+        },
+        from: {
+          first_name: "Casey",
+          username: "casey",
+          id: 456,
+        },
+        message_id: 5,
+        poll: {
+          options: [{ text: "Sushi" }, { text: "Soup" }],
+          question: "Lunch?",
+        },
+      },
+    },
+    update_id: 322,
+  }));
+
+  assert.deepEqual(minimizeTelegramUpdate(update), {
+    message_id: 6,
+    reply_context_preview:
+      "Replying to: Poll Lunch? [Sushi | Soup]\nQuoted text: Which option did you mean?",
+    schema: "murph.telegram-capture.v1",
   });
-  assert.equal(replyToMessage?.business_connection_id, "biz_123");
-  assert.equal(replyToMessage?.text, "Earlier message");
+});
+
+test("minimizeTelegramUpdate sanitizes venue reply context without leaking address details", () => {
+  const update = parseTelegramWebhookUpdate(JSON.stringify({
+    message: {
+      chat: {
+        id: 123,
+        type: "private",
+      },
+      message_id: 7,
+      reply_to_message: {
+        chat: {
+          id: 123,
+          type: "private",
+        },
+        message_id: 6,
+        venue: {
+          address: "123 Main St",
+          location: {
+            latitude: 40.7128,
+            longitude: -74.006,
+          },
+          title: "Cafe 123",
+        },
+      },
+    },
+    update_id: 323,
+  }));
+
+  assert.deepEqual(minimizeTelegramUpdate(update), {
+    message_id: 7,
+    reply_context_preview: "Replying to: Shared venue Cafe 123",
+    schema: "murph.telegram-capture.v1",
+  });
+});
+
+test("minimizeTelegramUpdate caps the final assembled reply preview", () => {
+  const update = parseTelegramWebhookUpdate(JSON.stringify({
+    message: {
+      chat: {
+        id: 123,
+        type: "private",
+      },
+      message_id: 8,
+      quote: {
+        text: "Q".repeat(220),
+      },
+      reply_to_message: {
+        chat: {
+          id: 123,
+          type: "private",
+        },
+        message_id: 7,
+        poll: {
+          options: Array.from({ length: 6 }, (_, index) => ({
+            text: `Option ${index + 1} ${"X".repeat(60)}`,
+          })),
+          question: `Lunch ${"Y".repeat(80)}?`,
+        },
+      },
+    },
+    update_id: 324,
+  }));
+
+  const minimized = minimizeTelegramUpdate(update);
+  assert.equal(minimized.schema, "murph.telegram-capture.v1");
+  assert.equal(minimized.message_id, 8);
+  const preview = minimized.reply_context_preview;
+  assert.equal(typeof preview, "string");
+  assert.equal((preview as string).length, 240);
+  assert.ok((preview as string).startsWith("Replying to: Poll Lunch "));
+  assert.ok((preview as string).endsWith("..."));
 });
 
 test("parseTelegramWebhookUpdate validates rich optional Telegram message fields", () => {
@@ -332,45 +426,13 @@ test("parseTelegramWebhookUpdate validates rich optional Telegram message fields
   }));
 
   const minimized = minimizeTelegramUpdate(update);
-  const businessMessage =
-    minimized.business_message && typeof minimized.business_message === "object"
-      ? (minimized.business_message as Record<string, unknown>)
-      : null;
 
   assert.equal(update.business_message?.photo?.[0]?.width, 200);
   assert.equal(update.business_message?.poll?.options?.[1]?.text, "No");
-  assert.deepEqual(businessMessage?.venue, {
-    address: "1 Main St",
-    location: {
-      latitude: 40.7128,
-      longitude: -74.006,
-    },
-    title: "Cafe 123",
-  });
-  assert.deepEqual(businessMessage?.poll, {
-    options: [{ text: "Yes" }, { text: "No" }],
-    question: "Lunch?",
-  });
-  assert.deepEqual(businessMessage?.quote, {
-    text: "quoted",
-  });
-  assert.deepEqual(businessMessage?.photo, [
-    {
-      file_id: "photo_1",
-      file_name: "photo.jpg",
-      file_size: 256,
-      file_unique_id: "photo_u1",
-      height: 100,
-      mime_type: "image/jpeg",
-      width: 200,
-    },
-  ]);
-  assert.deepEqual(businessMessage?.voice, {
-    file_id: "voice_1",
-    file_name: null,
-    file_size: 256,
-    file_unique_id: "voice_u1",
-    mime_type: "audio/ogg",
+  assert.deepEqual(minimized, {
+    message_id: 77,
+    reply_context_preview: "Quoted text: quoted",
+    schema: "murph.telegram-capture.v1",
   });
 });
 

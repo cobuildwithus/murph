@@ -195,7 +195,10 @@ function readMinimalTelegramMetadata(
         ? normalizeNullableString(raw.media_group_id)
         : null,
     messageId: parseTelegramMessageId(raw.message_id),
-    replyContext: null,
+    replyContext:
+      typeof raw.reply_context_preview === 'string'
+        ? normalizeNullableString(raw.reply_context_preview)
+        : null,
   }
 }
 

@@ -224,6 +224,30 @@ describe('buildAssistantAutoReplyPrompt', () => {
     })
   })
 
+  it('keeps telegram reply context as sufficient textual evidence on its own', () => {
+    const result = buildAssistantAutoReplyPrompt([
+      createPromptCapture({
+        captureOverrides: {
+          text: null,
+        },
+        telegramMetadata: {
+          mediaGroupId: null,
+          messageId: '123',
+          replyContext: 'Replying to: Poll Lunch? [Pizza | Salad]',
+        },
+      }),
+    ])
+
+    expect(result.kind).toBe('ready')
+    if (result.kind !== 'ready') {
+      throw new Error('Expected a ready prompt result.')
+    }
+    expect(result.prompt).toContain(
+      'Reply context:\nReplying to: Poll Lunch? [Pizza | Salad]',
+    )
+    expect(result.prompt).not.toContain('Message text:')
+  })
+
   it('builds grouped prompt text with reply context and attachment excerpts', () => {
     const transcript = 'T'.repeat(2_005)
     const result = buildAssistantAutoReplyPrompt([
@@ -494,7 +518,7 @@ describe('loadTelegramAutoReplyMetadata', () => {
     ).resolves.toBeNull()
   })
 
-  it('prefers minimal telegram capture metadata when present', async () => {
+  it('prefers minimized telegram capture metadata and sanitized reply previews when present', async () => {
     const { vaultRoot } = await createTempVaultContext('assistant-engine-prompt-builder-')
     const relativeEnvelopePath = 'minimal-envelope.json'
     const absoluteEnvelopePath = path.join(vaultRoot, relativeEnvelopePath)
@@ -504,6 +528,17 @@ describe('loadTelegramAutoReplyMetadata', () => {
       JSON.stringify({
         input: {
           raw: {
+            business_message: {
+              message_id: 444,
+              reply_to_message: {
+                contact: {
+                  first_name: 'Pat',
+                  phone_number: '+15551212',
+                },
+              },
+            },
+            reply_context_preview:
+              ' Replying to: Shared contact card\nQuoted text: Need the file when you can. ',
             schema: 'murph.telegram-capture.v1',
             media_group_id: ' media-group-42 ',
             message_id: ' 98765 ',
@@ -518,7 +553,8 @@ describe('loadTelegramAutoReplyMetadata', () => {
     ).resolves.toEqual({
       mediaGroupId: 'media-group-42',
       messageId: '98765',
-      replyContext: null,
+      replyContext:
+        'Replying to: Shared contact card\nQuoted text: Need the file when you can.',
     })
   })
 
