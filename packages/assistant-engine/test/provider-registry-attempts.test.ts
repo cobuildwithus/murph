@@ -27,7 +27,7 @@ afterEach(() => {
 describe('assistant provider registry attempts', () => {
   it('resolves target labels, capabilities, and static models from inferred configs', () => {
     expect(resolveAssistantProviderLabel({ oss: true, profile: 'daily' })).toBe(
-      'Codex OSS',
+      'Codex OSS app-server',
     )
     expect(resolveAssistantProviderTargetCapabilities({ oss: true })).toEqual({
       supportedUserMessageContentTypes: ['text', 'image'],
@@ -122,6 +122,7 @@ describe('assistant provider registry attempts', () => {
             activityLabels: ['  Existing Label  ', 'Refresh Session'],
             executedToolCount: 2,
             rawToolEvents: [{ type: 'raw-tool-event' }],
+            providerActionCount: 0,
           },
           ok: false,
         }
@@ -145,6 +146,7 @@ describe('assistant provider registry attempts', () => {
         activityLabels: ['Existing Label', 'Refresh Session', 'Use Calendar'],
         executedToolCount: 2,
         rawToolEvents: [{ type: 'raw-tool-event' }],
+        providerActionCount: 0,
       },
       ok: false,
     })
@@ -193,6 +195,7 @@ describe('assistant provider registry attempts', () => {
         activityLabels: ['Search Web'],
         executedToolCount: 0,
         rawToolEvents: [],
+        providerActionCount: 0,
       },
       ok: true,
       result: {
@@ -233,6 +236,7 @@ describe('assistant provider registry attempts', () => {
         activityLabels: [],
         executedToolCount: 0,
         rawToolEvents: [],
+        providerActionCount: 0,
       },
       ok: false,
     })
@@ -247,6 +251,7 @@ describe('assistant provider registry attempts', () => {
         activityLabels: ['Attempted OpenAI-compatible call'],
         executedToolCount: 0,
         rawToolEvents: [],
+        providerActionCount: 0,
       },
       ok: false,
     })
@@ -292,6 +297,7 @@ describe('assistant provider registry attempts', () => {
         activityLabels: [],
         executedToolCount: 0,
         rawToolEvents: [],
+        providerActionCount: 0,
       },
       ok: false,
     })
@@ -317,6 +323,7 @@ describe('assistant provider registry attempts', () => {
             activityLabels: [],
             executedToolCount: 0,
             rawToolEvents: [],
+            providerActionCount: 0,
           },
           ok: true,
           result: executionResult,
@@ -338,6 +345,7 @@ describe('assistant provider registry attempts', () => {
         activityLabels: [],
         executedToolCount: 0,
         rawToolEvents: [],
+        providerActionCount: 0,
       },
       ok: true,
       result: executionResult,
@@ -374,6 +382,7 @@ describe('assistant provider registry attempts', () => {
             activityLabels: [],
             executedToolCount: 0,
             rawToolEvents: [],
+            providerActionCount: 0,
           },
           ok: true,
           result: executionResult,
@@ -437,6 +446,7 @@ describe('assistant provider registry attempts', () => {
         activityLabels: [],
         executedToolCount: 0,
         rawToolEvents: [],
+        providerActionCount: 0,
       },
       ok: true,
       result: {
@@ -467,5 +477,6 @@ function createAttemptMetadata() {
     activityLabels: [],
     executedToolCount: 0,
     rawToolEvents: [],
+    providerActionCount: 0,
   }
 }

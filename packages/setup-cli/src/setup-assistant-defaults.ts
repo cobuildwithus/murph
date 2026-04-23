@@ -80,13 +80,13 @@ export function formatAssistantDefaultsSummary(
 
   if (assistant.oss) {
     return appendAssistantAccountSummary(
-      `${assistant.model ?? 'the configured local model'} in Codex OSS`,
+      `${assistant.model ?? 'the configured local model'} via Codex OSS app-server`,
       assistant.account ?? null,
     )
   }
 
   return appendAssistantAccountSummary(
-    `${assistant.model ?? 'the configured model'} in Codex CLI`,
+    `${assistant.model ?? 'the configured model'} via Codex app-server`,
     assistant.account ?? null,
   )
 }
@@ -111,8 +111,8 @@ export function formatSavedAssistantDefaultsSummary(
     default:
       return appendAssistantAccountSummary(
         backend.oss
-          ? `${backend.model ?? 'the configured local model'} in Codex OSS`
-          : `${backend.model ?? 'the configured model'} in Codex CLI`,
+          ? `${backend.model ?? 'the configured local model'} via Codex OSS app-server`
+          : `${backend.model ?? 'the configured model'} via Codex app-server`,
         defaults?.account ?? null,
       )
   }

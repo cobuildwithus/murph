@@ -730,6 +730,7 @@ async function executeAssistantProviderAttempt(input: {
   let attemptMetadata: AssistantProviderAttemptMetadata = {
     activityLabels: [] as readonly string[],
     executedToolCount: 0,
+    providerActionCount: 0,
     rawToolEvents: [] as readonly unknown[],
   }
 
@@ -900,7 +901,10 @@ async function executeAssistantProviderAttempt(input: {
     const outcomeKind = classifyAssistantProviderAttemptFailure({
       abortSignal: executionPlan.input.abortSignal,
       error,
-      executedBoundAssistantTool: attemptMetadata.executedToolCount > 0,
+      nonReplayableProviderWork:
+        attemptMetadata.executedToolCount > 0 ||
+        attemptMetadata.providerActionCount > 0 ||
+        readAssistantProviderErrorActionCount(error) > 0,
       nextRoute,
     })
 
@@ -934,10 +938,10 @@ async function executeAssistantProviderAttempt(input: {
 function classifyAssistantProviderAttemptFailure(input: {
   abortSignal?: AbortSignal
   error: unknown
-  executedBoundAssistantTool: boolean
+  nonReplayableProviderWork: boolean
   nextRoute: ResolvedAssistantFailoverRoute | null
 }): 'failed_terminal' | 'retry_next_route' {
-  if (input.executedBoundAssistantTool) {
+  if (input.nonReplayableProviderWork) {
     return 'failed_terminal'
   }
 
@@ -1215,6 +1219,22 @@ function readAssistantErrorCode(error: unknown): string | null {
 
   const code = (error as { code?: unknown }).code
   return typeof code === 'string' && code.trim().length > 0 ? code : null
+}
+
+function readAssistantProviderErrorActionCount(error: unknown): number {
+  if (!error || typeof error !== 'object' || !('context' in error)) {
+    return 0
+  }
+
+  const context = (error as { context?: unknown }).context
+  if (!context || typeof context !== 'object' || Array.isArray(context)) {
+    return 0
+  }
+
+  const value = (context as { providerActionCount?: unknown }).providerActionCount
+  return typeof value === 'number' && Number.isFinite(value) && value > 0
+    ? value
+    : 0
 }
 
 function attachAssistantFailoverExhaustionContext(input: {

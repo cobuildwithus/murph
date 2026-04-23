@@ -5,13 +5,13 @@ import {
 import { normalizeNullableString } from './shared.js'
 
 export const assistantExecutionDriverValues = [
-  'codex-cli',
+  'codex-app-server',
   'responses',
   'openai-compatible',
 ] as const
 
 export const assistantResumeKindValues = [
-  'codex-session',
+  'codex-thread',
   'openai-response-id',
 ] as const
 
@@ -165,9 +165,9 @@ export function resolveAssistantRuntimeTarget(
 
     return {
       continuityFingerprint,
-      executionDriver: 'codex-cli',
+      executionDriver: 'codex-app-server',
       presetId: null,
-      resumeKind: 'codex-session',
+      resumeKind: 'codex-thread',
       supportsGatewayWebSearch: false,
       supportsNativeResume: true,
       supportsProviderWebSearch: false,
@@ -362,6 +362,8 @@ function buildAssistantContinuityFingerprint(
 ): string {
   return JSON.stringify({
     provider: input.provider,
+    executionDriver:
+      input.provider === 'codex-cli' ? 'codex-app-server' : undefined,
     presetId: input.presetId ?? null,
     model: normalizeNullableString(input.model),
     reasoningEffort: normalizeNullableString(input.reasoningEffort),

@@ -2,7 +2,7 @@ import {
   prepareAssistantDirectCliEnv,
 } from '../../assistant-cli-access.js'
 import {
-  executeCodexPrompt,
+  executeCodexAppServerTurn,
 } from '../../assistant-codex.js'
 import {
   isAssistantCodexTargetConfig,
@@ -25,7 +25,7 @@ import type {
   AssistantModelImagePart,
   AssistantUserMessageContentPart,
 } from '../../model-harness.js'
-import type { CodexExecImageInput } from '../../assistant-codex.js'
+import type { CodexAppServerImageInput } from '../../assistant-codex.js'
 import { fileURLToPath } from 'node:url'
 
 export const codexCliProviderDefinition: AssistantProviderDefinition = {
@@ -47,7 +47,7 @@ export const codexCliProviderDefinition: AssistantProviderDefinition = {
     return {
       models: [],
       status: 'unsupported',
-      message: 'Codex model discovery is not available from the local CLI adapter.',
+      message: 'Codex app-server model discovery is not wired into Murph yet.',
     }
   },
   async executeTurn(input) {
@@ -55,11 +55,11 @@ export const codexCliProviderDefinition: AssistantProviderDefinition = {
     if (!isAssistantCodexTargetConfig(providerConfig)) {
       throw new VaultCliError(
         'ASSISTANT_PROVIDER_UNSUPPORTED',
-        'Codex CLI execution requires a Codex provider config.',
+        'Codex app-server execution requires a Codex provider config.',
       )
     }
 
-    const baseExecInput = {
+    const baseAppServerInput = {
       abortSignal: input.abortSignal,
       approvalPolicy: providerConfig.policy.approvalPolicy ?? undefined,
       codexCommand: providerConfig.target.codexCommand ?? undefined,
@@ -73,7 +73,7 @@ export const codexCliProviderDefinition: AssistantProviderDefinition = {
       onTraceEvent: input.onTraceEvent,
       oss: providerConfig.target.oss,
       profile: providerConfig.target.profile ?? undefined,
-      images: extractCodexUserMessageImages(input.userMessageContent),
+      images: extractCodexAppServerUserMessageImages(input.userMessageContent),
       reasoningEffort: providerConfig.policy.reasoningEffort ?? undefined,
       sandbox: providerConfig.policy.sandbox ?? undefined,
       workingDirectory: input.workingDirectory,
@@ -81,8 +81,8 @@ export const codexCliProviderDefinition: AssistantProviderDefinition = {
 
     let result
     try {
-      result = await executeCodexPrompt({
-        ...baseExecInput,
+      result = await executeCodexAppServerTurn({
+        ...baseAppServerInput,
         prompt: resolveAssistantProviderPrompt(input),
         resumeSessionId: input.resumeProviderSessionId,
       })
@@ -92,8 +92,8 @@ export const codexCliProviderDefinition: AssistantProviderDefinition = {
         error instanceof VaultCliError &&
         error.code === 'ASSISTANT_CODEX_RESUME_STALE'
       ) {
-        result = await executeCodexPrompt({
-          ...baseExecInput,
+        result = await executeCodexAppServerTurn({
+          ...baseAppServerInput,
           prompt: resolveAssistantProviderPrompt({
             ...input,
             resumeProviderSessionId: null,
@@ -109,6 +109,7 @@ export const codexCliProviderDefinition: AssistantProviderDefinition = {
       metadata: {
         activityLabels: [],
         executedToolCount: 0,
+        providerActionCount: result.providerActionCount,
         rawToolEvents: [],
       },
       ok: true,
@@ -128,18 +129,18 @@ export const codexCliProviderDefinition: AssistantProviderDefinition = {
   },
   resolveLabel(config) {
     return config.target.kind === 'codex-cli' && config.target.oss
-      ? 'Codex OSS'
-      : 'Codex CLI'
+      ? 'Codex OSS app-server'
+      : 'Codex app-server'
   },
   resolveStaticModels() {
     return DEFAULT_CODEX_MODELS
   },
 }
 
-function extractCodexUserMessageImages(
+function extractCodexAppServerUserMessageImages(
   userMessageContent: readonly AssistantUserMessageContentPart[] | null | undefined,
-) : readonly CodexExecImageInput[] | undefined {
-  const images: CodexExecImageInput[] = []
+): readonly CodexAppServerImageInput[] | undefined {
+  const images: CodexAppServerImageInput[] = []
 
   for (const part of userMessageContent ?? []) {
     if (part.type !== 'image') {
@@ -147,7 +148,7 @@ function extractCodexUserMessageImages(
     }
 
     images.push(
-      toCodexExecImageInput({
+      toCodexAppServerImageInput({
         image: part.image,
         mimeType: part.mimeType ?? part.mediaType ?? null,
       }),
@@ -157,10 +158,10 @@ function extractCodexUserMessageImages(
   return images.length > 0 ? images : undefined
 }
 
-function toCodexExecImageInput(input: {
+function toCodexAppServerImageInput(input: {
   image: AssistantModelImagePart['image']
   mimeType: string | null
-}): CodexExecImageInput {
+}): CodexAppServerImageInput {
   if (typeof input.image === 'string') {
     if (input.image.startsWith('data:')) {
       return {
@@ -192,7 +193,7 @@ function toCodexExecImageInput(input: {
 
     throw new VaultCliError(
       'ASSISTANT_CODEX_IMAGE_INVALID',
-      `Codex CLI image input does not support URL scheme "${input.image.protocol}".`,
+      `Codex app-server image input does not support URL scheme "${input.image.protocol}".`,
     )
   }
 
@@ -214,7 +215,7 @@ function decodeCodexDataUrlToBytes(dataUrl: string): Uint8Array {
   if (!match) {
     throw new VaultCliError(
       'ASSISTANT_CODEX_IMAGE_INVALID',
-      'Codex CLI image input data URL is malformed.',
+      'Codex app-server image input data URL is malformed.',
     )
   }
 
@@ -231,6 +232,6 @@ function decodeCodexDataUrlToBytes(dataUrl: string): Uint8Array {
 
   throw new VaultCliError(
     'ASSISTANT_CODEX_IMAGE_INVALID',
-    'Codex CLI image input data URLs must use base64 encoding.',
+    'Codex app-server image input data URLs must use base64 encoding.',
   )
 }

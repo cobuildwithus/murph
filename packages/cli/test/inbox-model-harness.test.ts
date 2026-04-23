@@ -182,9 +182,9 @@ function createStubAssistantResult(vault: string): AssistantAskResult {
         oss: false,
         baseUrl: undefined,
         apiKeyEnv: undefined,
-        executionDriver: 'codex-cli',
+        executionDriver: 'codex-app-server',
         providerName: undefined,
-        resumeKind: 'codex-session',
+        resumeKind: 'codex-thread',
       },
       alias: null,
       binding: {

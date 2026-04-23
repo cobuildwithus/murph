@@ -491,8 +491,8 @@ test(
         profile: null,
         oss: false,
         codexHome: '/tmp/codex-home',
-        executionDriver: 'codex-cli',
-        resumeKind: 'codex-session',
+        executionDriver: 'codex-app-server',
+        resumeKind: 'codex-thread',
       },
     }
 

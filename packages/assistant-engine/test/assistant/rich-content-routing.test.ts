@@ -148,7 +148,8 @@ function createProviderOptions(
     approvalPolicy: null,
     profile: null,
     oss: false,
-    executionDriver: provider === 'codex-cli' ? 'codex-cli' : 'openai-compatible',
+    executionDriver:
+      provider === 'codex-cli' ? 'codex-app-server' : 'openai-compatible',
     resumeKind: null,
   }
 }

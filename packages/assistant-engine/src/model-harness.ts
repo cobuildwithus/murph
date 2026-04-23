@@ -498,7 +498,10 @@ export function isAssistantModelConfigurationError(
 export function assertAssistantModelSpecReadyForExecution(
   spec: AssistantModelSpec,
 ): void {
-  const executionDriver = spec.executionDriver ?? 'openai-compatible'
+  const executionDriver =
+    typeof spec.executionDriver === 'string' && spec.executionDriver.trim().length > 0
+      ? spec.executionDriver.trim()
+      : 'openai-compatible'
 
   if (spec.model.trim().length === 0) {
     throw new VaultCliError(
@@ -510,10 +513,10 @@ export function assertAssistantModelSpecReadyForExecution(
     )
   }
 
-  if (executionDriver === 'codex-cli') {
+  if (executionDriver === 'codex-app-server') {
     throw new VaultCliError(
       ASSISTANT_MODEL_CONFIG_INVALID_CODE,
-      'Assistant model configuration is invalid: Codex CLI models cannot be resolved through the AI SDK model harness.',
+      'Assistant model configuration is invalid: Codex app-server models cannot be resolved through the AI SDK model harness.',
       {
         executionDriver,
       },
@@ -720,7 +723,12 @@ export function resolveAssistantLanguageModel(
 ): LanguageModel {
   assertAssistantModelSpecReadyForExecution(spec)
 
-  switch (spec.executionDriver ?? 'openai-compatible') {
+  const executionDriver =
+    typeof spec.executionDriver === 'string' && spec.executionDriver.trim().length > 0
+      ? spec.executionDriver.trim()
+      : 'openai-compatible'
+
+  switch (executionDriver) {
     case 'responses': {
       const provider = createOpenAI({
         name: normalizeAssistantProviderName(spec.providerName),
@@ -733,10 +741,10 @@ export function resolveAssistantLanguageModel(
       return provider.responses(spec.model)
     }
 
-    case 'codex-cli':
+    case 'codex-app-server':
       throw new VaultCliError(
         ASSISTANT_MODEL_CONFIG_INVALID_CODE,
-        'Assistant model configuration is invalid: Codex CLI models cannot be resolved through the AI SDK model harness.',
+        'Assistant model configuration is invalid: Codex app-server models cannot be resolved through the AI SDK model harness.',
       )
 
     case 'openai-compatible':

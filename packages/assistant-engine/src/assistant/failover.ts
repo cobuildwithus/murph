@@ -233,7 +233,19 @@ export function shouldAttemptAssistantProviderFailover(input: {
     return true
   }
 
-  return !new Set(['ASSISTANT_PROMPT_REQUIRED', 'invalid_payload']).has(code)
+  return !new Set([
+    'ASSISTANT_PROMPT_REQUIRED',
+    'ASSISTANT_CODEX_APP_SERVER_FAILED',
+    'ASSISTANT_CODEX_APP_SERVER_RPC_FAILED',
+    'ASSISTANT_CODEX_APP_SERVER_TIMEOUT',
+    'ASSISTANT_CODEX_APPROVAL_POLICY_UNSUPPORTED',
+    'ASSISTANT_CODEX_FAILED',
+    'ASSISTANT_CODEX_HOME_INVALID',
+    'ASSISTANT_CODEX_IMAGE_INVALID',
+    'ASSISTANT_CODEX_NOT_FOUND',
+    'ASSISTANT_CODEX_RESUME_STALE',
+    'invalid_payload',
+  ]).has(code)
 }
 
 function readAssistantProviderFailoverTraits(error: unknown): {

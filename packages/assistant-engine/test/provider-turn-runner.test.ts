@@ -776,7 +776,7 @@ describe('executeProviderTurnWithRecovery', () => {
     })
     const route = createRoute({
       providerOptions: {
-        resumeKind: 'codex-session',
+        resumeKind: 'codex-thread',
       },
       routeId: 'route-primary',
     })
@@ -1182,6 +1182,62 @@ describe('executeProviderTurnWithRecovery', () => {
     )
   })
 
+  it('returns a recovered session on terminal failures when Codex app-server actions already executed', async () => {
+    const primaryRoute = createRoute({
+      label: 'Primary',
+      routeId: 'route-primary',
+    })
+    const backupRoute = createRoute({
+      label: 'Backup',
+      routeId: 'route-backup',
+    })
+    const recoveredSession = createAssistantSession({
+      providerSessionId: 'provider-session-recovered',
+      resumeRouteId: 'route-primary',
+      updatedAt: '2026-04-08T00:03:00.000Z',
+    })
+    const appServerError = createError('app-server action failed', 'APP_SERVER_FAILURE')
+
+    runnerMocks.executeAssistantProviderTurnAttempt.mockResolvedValue(
+      createFailedAttemptResult({
+        error: appServerError,
+        executedToolCount: 0,
+        providerActionCount: 1,
+      }),
+    )
+    runnerMocks.recoverAssistantSessionAfterProviderFailure.mockResolvedValue(
+      recoveredSession,
+    )
+
+    const outcome = await executeProviderTurnWithRecovery({
+      input: createMessageInput({
+        prompt: 'Use the app-server action',
+      }),
+      plan: createTurnPlan({}),
+      resolvedSession: createAssistantSession(),
+      routes: [primaryRoute, backupRoute],
+      turnCreatedAt: '2026-04-08T00:00:00.000Z',
+      turnId: 'turn-terminal-app-server-action',
+    })
+
+    expect(outcome).toEqual({
+      kind: 'failed_terminal',
+      error: appServerError,
+      route: primaryRoute,
+      session: recoveredSession,
+    })
+    expect(runnerMocks.recordAssistantFailoverRouteFailure).toHaveBeenCalledTimes(1)
+    expect(extractReceiptKinds()).toEqual([
+      'provider.attempt.started',
+      'provider.attempt.failed',
+    ])
+    expect(runnerMocks.recordAssistantDiagnosticEvent).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'provider.failover.applied',
+      }),
+    )
+  })
+
   it('fails cleanly when no provider routes are available', async () => {
     const session = createAssistantSession()
 
@@ -1311,11 +1367,13 @@ function createFailedAttemptResult(input: {
   activityLabels?: readonly string[]
   error: unknown
   executedToolCount: number
+  providerActionCount?: number
 }) {
   return {
     metadata: {
       activityLabels: input.activityLabels ?? [],
       executedToolCount: input.executedToolCount,
+      providerActionCount: input.providerActionCount ?? 0,
       rawToolEvents: [],
     },
     ok: false as const,

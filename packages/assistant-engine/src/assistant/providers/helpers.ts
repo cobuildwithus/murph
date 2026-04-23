@@ -65,7 +65,7 @@ export function buildAssistantProviderLabel(config: AssistantProviderConfig): st
   }
 
   if (isAssistantCodexTargetConfig(config)) {
-    return config.target.oss ? 'Codex OSS' : 'Codex CLI'
+    return config.target.oss ? 'Codex OSS app-server' : 'Codex app-server'
   }
   if (!isAssistantOpenAICompatibleTargetConfig(config)) {
     return 'OpenAI-compatible endpoint'
@@ -485,10 +485,18 @@ export function extractCodexAssistantProviderUsage(input: {
 }): AssistantProviderUsage {
   const completionEvent = findAssistantCodexCompletionEvent(input.rawEvents)
   const completionRecord = completionEvent ? readAssistantProviderRecord(completionEvent) : null
+  const completionParams = readAssistantProviderRecord(completionRecord?.params)
+  const completionTurn =
+    readAssistantProviderRecord(completionParams?.turn) ??
+    readAssistantProviderRecord(completionRecord?.turn)
+  const completionMetrics =
+    readAssistantProviderRecord(completionParams?.metrics) ??
+    readAssistantProviderRecord(completionRecord?.metrics)
   const usageRecord =
+    readAssistantProviderRecord(completionParams?.usage) ??
+    readAssistantProviderRecord(completionTurn?.usage) ??
+    readAssistantProviderRecord(completionMetrics?.usage) ??
     readAssistantProviderRecord(completionRecord?.usage) ??
-    readAssistantProviderRecord(readAssistantProviderRecord(completionRecord?.turn)?.usage) ??
-    readAssistantProviderRecord(readAssistantProviderRecord(completionRecord?.metrics)?.usage) ??
     null
   const inputTokens = readAssistantProviderInteger(
     usageRecord ?? completionRecord,
@@ -521,6 +529,7 @@ export function extractCodexAssistantProviderUsage(input: {
     providerRequestId: readAssistantProviderString(
       completionRecord?.request_id,
       completionRecord?.requestId,
+      completionTurn?.id,
       completionRecord?.id,
     ),
     rawUsageJson: usageRecord ?? completionRecord ?? null,
@@ -531,6 +540,7 @@ export function extractCodexAssistantProviderUsage(input: {
     ),
     requestedModel: input.providerConfig.target.model,
     servedModel: readAssistantProviderString(
+      completionTurn?.model,
       completionRecord?.model,
       completionRecord?.model_id,
       completionRecord?.modelId,
@@ -549,9 +559,16 @@ function findAssistantCodexCompletionEvent(
 ): Record<string, unknown> | null {
   for (let index = rawEvents.length - 1; index >= 0; index -= 1) {
     const record = readAssistantProviderRecord(rawEvents[index])
-    const eventType = readAssistantProviderString(record?.type, record?.event)
+    const eventType = readAssistantProviderString(
+      record?.type,
+      record?.event,
+      record?.method,
+    )
 
-    if (eventType === 'turn.completed' || eventType === 'turn/completed') {
+    if (
+      eventType === 'turn.completed' ||
+      eventType === 'turn/completed'
+    ) {
       return record ?? null
     }
   }
