@@ -40,6 +40,7 @@ test("verifyAndParseLinqWebhookRequest validates the Linq signature envelope", (
       "x-webhook-signature": signature,
       "x-webhook-timestamp": timestamp,
     }),
+    now: 1711360800_000,
     rawBody: payload,
     webhookSecret: "secret-123",
   });
@@ -83,6 +84,180 @@ test("verifyAndParseLinqWebhookRequest rejects invalid signatures", () => {
       }),
     /Invalid Linq webhook signature/u,
   );
+});
+
+test("verifyAndParseLinqWebhookRequest rejects signatures with trailing junk after a valid digest", () => {
+  const payload = JSON.stringify(buildV2026MessageReceivedWebhook({
+    eventId: "evt_trailing_junk",
+  }));
+  const timestamp = "1711360800";
+  const signature = `${signLinqWebhook("secret-123", payload, timestamp)}zz`;
+
+  assert.throws(
+    () =>
+      verifyAndParseLinqWebhookRequest({
+        headers: {
+          "x-webhook-signature": signature,
+          "x-webhook-timestamp": timestamp,
+        },
+        now: 1711360800_000,
+        rawBody: payload,
+        webhookSecret: "secret-123",
+      }),
+    /Invalid Linq webhook signature/u,
+  );
+});
+
+test("verifyAndParseLinqWebhookRequest rejects signatures with a dangling final nibble", () => {
+  const payload = JSON.stringify(buildV2026MessageReceivedWebhook({
+    eventId: "evt_dangling_nibble",
+  }));
+  const timestamp = "1711360800";
+  const signature = `${signLinqWebhook("secret-123", payload, timestamp)}f`;
+
+  assert.throws(
+    () =>
+      verifyAndParseLinqWebhookRequest({
+        headers: {
+          "x-webhook-signature": signature,
+          "x-webhook-timestamp": timestamp,
+        },
+        now: 1711360800_000,
+        rawBody: payload,
+        webhookSecret: "secret-123",
+      }),
+    /Invalid Linq webhook signature/u,
+  );
+});
+
+test("verifyAndParseLinqWebhookRequest rejects duplicate signature headers instead of guessing", () => {
+  const payload = JSON.stringify(buildV2026MessageReceivedWebhook({
+    eventId: "evt_duplicate_signature",
+  }));
+  const timestamp = "1711360800";
+  const signature = signLinqWebhook("secret-123", payload, timestamp);
+
+  assert.throws(
+    () =>
+      verifyAndParseLinqWebhookRequest({
+        headers: {
+          "x-webhook-signature": [signature, signature],
+          "x-webhook-timestamp": timestamp,
+        },
+        now: 1711360800_000,
+        rawBody: payload,
+        webhookSecret: "secret-123",
+      }),
+    /Duplicate Linq webhook x-webhook-signature header/u,
+  );
+});
+
+test("verifyAndParseLinqWebhookRequest rejects duplicate signature arrays even when one entry is blank", () => {
+  const payload = JSON.stringify(buildV2026MessageReceivedWebhook({
+    eventId: "evt_duplicate_signature_blank",
+  }));
+  const timestamp = "1711360800";
+  const signature = signLinqWebhook("secret-123", payload, timestamp);
+
+  assert.throws(
+    () =>
+      verifyAndParseLinqWebhookRequest({
+        headers: {
+          "x-webhook-signature": [" ", signature],
+          "x-webhook-timestamp": timestamp,
+        },
+        now: 1711360800_000,
+        rawBody: payload,
+        webhookSecret: "secret-123",
+      }),
+    /Duplicate Linq webhook x-webhook-signature header/u,
+  );
+});
+
+test("verifyAndParseLinqWebhookRequest rejects duplicate timestamp headers instead of guessing", () => {
+  const payload = JSON.stringify(buildV2026MessageReceivedWebhook({
+    eventId: "evt_duplicate_timestamp",
+  }));
+  const timestamp = "1711360800";
+  const signature = signLinqWebhook("secret-123", payload, timestamp);
+  const headers = new Headers();
+  headers.append("x-webhook-signature", signature);
+  headers.append("x-webhook-timestamp", timestamp);
+  headers.append("x-webhook-timestamp", timestamp);
+
+  assert.throws(
+    () =>
+      verifyAndParseLinqWebhookRequest({
+        headers,
+        now: 1711360800_000,
+        rawBody: payload,
+        webhookSecret: "secret-123",
+      }),
+    /Duplicate Linq webhook x-webhook-timestamp header/u,
+  );
+});
+
+test("verifyAndParseLinqWebhookRequest rejects duplicate timestamp arrays even when one entry is blank", () => {
+  const payload = JSON.stringify(buildV2026MessageReceivedWebhook({
+    eventId: "evt_duplicate_timestamp_blank",
+  }));
+  const timestamp = "1711360800";
+  const signature = signLinqWebhook("secret-123", payload, timestamp);
+
+  assert.throws(
+    () =>
+      verifyAndParseLinqWebhookRequest({
+        headers: {
+          "x-webhook-signature": signature,
+          "x-webhook-timestamp": [" ", timestamp],
+        },
+        now: 1711360800_000,
+        rawBody: payload,
+        webhookSecret: "secret-123",
+      }),
+    /Duplicate Linq webhook x-webhook-timestamp header/u,
+  );
+});
+
+test("verifyAndParseLinqWebhookRequest rejects stale timestamps by default when tolerance is omitted", () => {
+  const payload = JSON.stringify(buildV2026MessageReceivedWebhook({
+    eventId: "evt_default_stale",
+  }));
+  const timestamp = "1711360800";
+
+  assert.throws(
+    () =>
+      verifyAndParseLinqWebhookRequest({
+        headers: {
+          "x-webhook-signature": signLinqWebhook("secret-123", payload, timestamp),
+          "x-webhook-timestamp": timestamp,
+        },
+        now: 1711361400_000,
+        rawBody: payload,
+        webhookSecret: "secret-123",
+      }),
+    /allowed tolerance window/u,
+  );
+});
+
+test("verifyAndParseLinqWebhookRequest treats null timestamp tolerance as an explicit freshness opt-out", () => {
+  const payload = JSON.stringify(buildV2026MessageReceivedWebhook({
+    eventId: "evt_stale_opt_out",
+  }));
+  const timestamp = "1711360800";
+
+  const event = verifyAndParseLinqWebhookRequest({
+    headers: {
+      "x-webhook-signature": signLinqWebhook("secret-123", payload, timestamp),
+      "x-webhook-timestamp": timestamp,
+    },
+    now: 1711361400_000,
+    rawBody: payload,
+    timestampToleranceMs: null,
+    webhookSecret: "secret-123",
+  });
+
+  assert.equal(event.event_id, "evt_stale_opt_out");
 });
 
 test("verifyAndParseLinqWebhookRequest rejects stale timestamps when a tolerance is configured", () => {
@@ -215,6 +390,7 @@ test("verifyAndParseLinqWebhookRequest accepts array-backed headers and ArrayBuf
       "X-Webhook-Signature": [signLinqWebhook("secret-123", payload, timestamp)],
       "x-webhook-timestamp": [timestamp],
     },
+    now: 1711360800_000,
     rawBody: new TextEncoder().encode(payload).buffer,
     webhookSecret: "secret-123",
   });
