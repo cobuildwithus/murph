@@ -45,7 +45,7 @@ describe("hosted execution wake builders", () => {
       instructions: "Send the Murph signup welcome.",
       responsePolicy: {
         kind: "require_send_exact_text" as const,
-        text: "Welcome to Murph.",
+        text: "Welcome to Murph, your personal health assistant.",
       },
       route: {
         actorId: "+15551234567",
@@ -87,7 +87,7 @@ describe("hosted execution wake builders", () => {
         instructions: "Send the Murph signup welcome.",
         responsePolicy: {
           kind: "require_send_exact_text",
-          text: "Welcome to Murph.",
+          text: "Welcome to Murph, your personal health assistant.",
         },
         route: {
           actorId: "+15551234567",

@@ -125,7 +125,7 @@ describe("executeHostedIngressEvent", () => {
         instructions: "Send exactly the signup welcome.",
         responsePolicy: {
           kind: "require_send_exact_text",
-          text: "Welcome to Murph.",
+          text: "Welcome to Murph, your personal health assistant.",
         },
         route: {
           actorId: "+15550002222",
@@ -178,7 +178,7 @@ describe("executeHostedIngressEvent", () => {
       instructions: "Send exactly the signup welcome.",
       responsePolicy: {
         kind: "require_send_exact_text",
-        text: "Welcome to Murph.",
+        text: "Welcome to Murph, your personal health assistant.",
       },
       threadId: "thread_123",
       threadIsDirect: true,
@@ -347,7 +347,7 @@ describe("executeHostedIngressEvent", () => {
         instructions: "Send exactly the signup welcome.",
         responsePolicy: {
           kind: "require_send_exact_text",
-          text: "Welcome to Murph.",
+          text: "Welcome to Murph, your personal health assistant.",
         },
         route: {
           actorId: "+15550002222",

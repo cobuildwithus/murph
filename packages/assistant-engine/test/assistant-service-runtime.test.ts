@@ -257,9 +257,9 @@ describe("assistant service wrapper seam", () => {
       decision: {
         kind: "send_message",
         privateSummary: "sent",
-        text: "Welcome to Murph.",
+        text: "Welcome to Murph, your personal health assistant.",
       },
-      response: "Welcome to Murph.",
+      response: "Welcome to Murph, your personal health assistant.",
       session: createAssistantSession(),
     };
     const updatedSession = createAssistantSession({

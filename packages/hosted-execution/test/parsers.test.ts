@@ -39,7 +39,7 @@ describe("parseHostedExecutionEvent", () => {
           instructions: "Send exactly the signup welcome.",
           responsePolicy: {
             kind: "require_send_exact_text",
-            text: "Welcome to Murph.",
+            text: "Welcome to Murph, your personal health assistant.",
           },
           route: {
             actorId: "+15550002222",
@@ -71,7 +71,7 @@ describe("parseHostedExecutionEvent", () => {
         instructions: "Send exactly the signup welcome.",
         responsePolicy: {
           kind: "require_send_exact_text",
-          text: "Welcome to Murph.",
+          text: "Welcome to Murph, your personal health assistant.",
         },
         route: {
           actorId: "+15550002222",
