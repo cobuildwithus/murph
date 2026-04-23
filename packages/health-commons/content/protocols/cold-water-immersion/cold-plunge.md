@@ -18,6 +18,12 @@ categories:
   - recovery
   - stress
   - murph-canonical
+media:
+  -
+    kind: image
+    relativePath: design-assets/cold-plunge-tub.jpeg
+    mediaType: image/jpeg
+    caption: Cold plunge tub
 relations:
   -
     type: parent_family

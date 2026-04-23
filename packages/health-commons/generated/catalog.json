@@ -2298,7 +2298,7 @@
       "schemaVersion": "murph.commons.artifact-manifest.v1"
     }
   ],
-  "catalogHash": "sha256:8b67a7911958e71bc286925fd494cadeeed860f1a9a00b9a737234c24b5186ad",
+  "catalogHash": "sha256:3173b2d758f2f6835a4aa3877971d19f162de641e74b90888b25bff3aadf8f23",
   "changes": [
     {
       "affectedFields": [
@@ -6768,6 +6768,14 @@
         "rationale": "Murph root variant for deliberate controlled tub or plunge immersion. Post-exercise CWI, winter swimming, cold showering, cryotherapy, contrast therapy, and external named protocols remain separate evidence buckets.",
         "relationship": "root"
       },
+      "media": [
+        {
+          "caption": "Cold plunge tub",
+          "kind": "image",
+          "mediaType": "image/jpeg",
+          "relativePath": "design-assets/cold-plunge-tub.jpeg"
+        }
+      ],
       "protocol": {
         "doseSignature": "3x/week · start 1–3 min, progress only toward 5 min if well tolerated · 10–15 °C head-out sessions · 14-day intervention after 7-day baseline",
         "durationMinutes": {
@@ -7098,7 +7106,7 @@
         "primaryClaim": "A conservative, controlled head-out plunge is reasonable to test for later-same-day stress or mood change, but the evidence does not justify broad benefit promises or extreme dosing."
       },
       "revision": {
-        "pageRevisionId": "sha256:9dbcaae7f149f096030dfdf71d16a48938b49443b60bb8b8bb6d3a5eae7e2906",
+        "pageRevisionId": "sha256:5bd5d79d25f26bec78aa5fcf2b6ff2dab782824972bbeb3b8b097aff9f02ead8",
         "recipeHash": "sha256:ff6d09f2ae079b7b70e5675f06a0de218dfd62090496b3656b06adc5e11778d7",
         "runSpecRevisionId": "sha256:d1299b6ea2fe05daf6e5d191fa6434432609b9ce63684e8270e56043ec3d919f"
       },
