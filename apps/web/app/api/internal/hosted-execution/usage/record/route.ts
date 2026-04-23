@@ -18,6 +18,15 @@ export const POST = withJsonError(async (request: Request) => {
     usage,
   });
 
+  const testDelayMs = Number.parseInt(
+    process.env.MURPH_E2E_HOSTED_USAGE_RECORD_DELAY_MS ?? "",
+    10,
+  );
+  if (Number.isFinite(testDelayMs) && testDelayMs > 0) {
+    // Test-only hook used by hosted-local e2e to widen the post-send finalize window.
+    await new Promise((resolve) => setTimeout(resolve, testDelayMs));
+  }
+
   return jsonOk({
     recorded: result.recordedIds.length,
     usageIds: result.recordedIds,

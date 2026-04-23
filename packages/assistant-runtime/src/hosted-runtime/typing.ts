@@ -6,10 +6,14 @@ import {
   type AssistantChannelDependencies,
 } from "@murphai/assistant-engine/assistant-channel-adapters";
 import {
+  stopLinqChatTypingIndicator,
+} from "@murphai/operator-config/linq-runtime";
+import {
   emitHostedExecutionStructuredLog,
   isHostedLinqConversationMessageWake,
   isHostedTelegramConversationMessageWake,
   type HostedExecutionConversationMessageWake,
+  type HostedRuntimeEvent,
   type HostedRuntimeDrainEvent,
 } from "@murphai/hosted-execution";
 import {
@@ -155,6 +159,62 @@ export async function stopHostedRunMessagingActivity(input: {
   activity: HostedRunMessagingActivityHandle | null;
 }): Promise<void> {
   await input.activity?.stop();
+}
+
+export async function stopExecutorOwnedHostedRunMessagingActivityAfterDelivery(input: {
+  component?: HostedMessagingActivityComponent;
+  runtimeEnv: Readonly<Record<string, string>>;
+  run: HostedAssistantRuntimeJobInput["request"]["run"] | null;
+  wake: HostedRuntimeEvent;
+}): Promise<void> {
+  if (shouldStartRuntimeHostedRunMessagingActivity(input.runtimeEnv)) {
+    return;
+  }
+
+  const target = resolveHostedMessagingActivityTarget(input.wake, "post-commit-delivery");
+  if (!target || target.channel !== "linq") {
+    return;
+  }
+
+  const component = input.component ?? "runtime";
+
+  try {
+    await stopLinqChatTypingIndicator(
+      {
+        chatId: target.explicitTarget,
+      },
+      {
+        env: input.runtimeEnv,
+      },
+    );
+
+    emitHostedExecutionStructuredLog({
+      component,
+      details: {
+        ...target.logDetails,
+        runElapsedMs: computeHostedRunElapsedMs(input.run),
+      },
+      message: "Hosted Linq typing indicator stopped immediately after committed assistant delivery.",
+      phase: "side-effects.draining",
+      run: input.run,
+      wake: target.wake,
+    });
+  } catch (error) {
+    emitHostedExecutionStructuredLog({
+      component,
+      details: {
+        ...target.logDetails,
+        runElapsedMs: computeHostedRunElapsedMs(input.run),
+      },
+      error,
+      level: "warn",
+      message:
+        "Hosted Linq typing indicator could not be stopped immediately after committed assistant delivery.",
+      phase: "side-effects.draining",
+      run: input.run,
+      wake: target.wake,
+    });
+  }
 }
 
 export function selectHostedRunMessagingActivityTarget(
