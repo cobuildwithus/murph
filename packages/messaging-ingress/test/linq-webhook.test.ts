@@ -1133,7 +1133,7 @@ test("minimizeLinqWebhookEvent rejects canonical-looking snapshots missing requi
   );
 });
 
-test("minimizeLinqWebhookEvent preserves unsupported event data without forcing message parsing", () => {
+test("minimizeLinqWebhookEvent omits unsupported event data without forcing message parsing", () => {
   assert.deepEqual(
     minimizeLinqWebhookEvent({
       api_version: "v3",
@@ -1150,9 +1150,6 @@ test("minimizeLinqWebhookEvent preserves unsupported event data without forcing 
     {
       api_version: "v3",
       created_at: "2026-04-04T01:02:03.000Z",
-      data: {
-        note: "keep",
-      },
       event_id: "evt_passthrough",
       event_type: "conversation.updated",
       partner_id: null,
