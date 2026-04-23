@@ -255,6 +255,8 @@ describe("research init scaffold", () => {
       expect(helperScript).toContain("--send");
       expect(helperScript).toContain("--wait");
       expect(helperScript).toContain("murph-workspace");
+      expect(helperScript).toContain('match(/https:\\/\\/chatgpt\\.com\\/c\\/\\S+/u)');
+      expect(helperScript).toContain('matchAll(/https:\\/\\/chatgpt\\.com\\/c\\/\\S+/gu)');
 
       assertResearchReviewGptSupportFiles(outDir);
 
