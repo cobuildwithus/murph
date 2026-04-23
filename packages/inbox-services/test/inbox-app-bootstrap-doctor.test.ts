@@ -220,6 +220,9 @@ function createInboxRuntimeModule(
     async createInboxPipeline() {
       throw new Error('not used in bootstrap tests')
     },
+    async createParsedInboxPipeline() {
+      throw new Error('not used in bootstrap tests')
+    },
     createTelegramPollConnector() {
       throw new Error('not used in bootstrap tests')
     },
@@ -234,6 +237,9 @@ function createInboxRuntimeModule(
     },
     async rebuildRuntimeFromVault() {},
     async runInboxDaemon() {
+      throw new Error('not used in bootstrap tests')
+    },
+    async runPollConnectorBackfill() {
       throw new Error('not used in bootstrap tests')
     },
     async runInboxDaemonWithParsers() {
@@ -393,6 +399,28 @@ test('bootstrap initializes runtime, writes parser config, and optionally enforc
   })
   rebuildRuntimeMock.mockResolvedValue(4)
 
+  const telegramDriver: TelegramDriver = {
+    async deleteWebhook() {},
+    async downloadFile() {
+      return new Uint8Array()
+    },
+    async getFile() {
+      return {}
+    },
+    async getMe() {
+      return { username: 'murphbot' }
+    },
+    async getMessages() {
+      return []
+    },
+    async getWebhookInfo() {
+      return { url: '' }
+    },
+    async startWatching() {
+      return undefined
+    },
+  }
+
   const openInboxRuntime = vi.fn(async () => createRuntimeStore())
   const writeParserToolchainConfig = vi.fn(async (input: {
     vaultRoot: string
@@ -406,10 +434,14 @@ test('bootstrap initializes runtime, writes parser config, and optionally enforc
   const discoverParserToolchain = vi.fn(async () => createParserDoctor())
 
   const env = createEnvironment({
+    getEnvironment: () => ({
+      TELEGRAM_BOT_TOKEN: 'telegram-token',
+    }),
     loadInbox: async () =>
       createInboxRuntimeModule({
         openInboxRuntime,
       }),
+    loadConfiguredTelegramDriver: async () => telegramDriver,
     loadParsers: async () =>
       createParsersModule({
         discoverParserToolchain,
@@ -465,6 +497,44 @@ test('bootstrap initializes runtime, writes parser config, and optionally enforc
   )
   assert.equal(openInboxRuntime.mock.calls.length > 0, true)
   assert.equal(discoverParserToolchain.mock.calls.length > 0, true)
+})
+
+test('bootstrap reports unhealthy configured connectors in doctor output and strict mode rejects them', async () => {
+  readConfigMock.mockResolvedValue({
+    connectors: [createConnector('telegram', 'telegram:bot')],
+  })
+
+  assertBootstrapStrictReadyMock.mockImplementation((result: { ok: boolean }) => {
+    if (!result.ok) {
+      throw new Error('strict bootstrap failed')
+    }
+  })
+
+  const ops = createInboxBootstrapDoctorOps(createEnvironment())
+
+  const nonStrict = await ops.bootstrap({
+    requestId: null,
+    vault: '/vault',
+  })
+  assert.equal(nonStrict.doctor.ok, false)
+  assert.equal(
+    nonStrict.doctor.checks.some(
+      (check) => check.name === 'token' && check.status === 'fail',
+    ),
+    true,
+  )
+
+  await assert.rejects(
+    () =>
+      ops.bootstrap({
+        requestId: null,
+        strict: true,
+        vault: '/vault',
+      }),
+    /strict bootstrap failed/u,
+  )
+  assert.equal(assertBootstrapStrictReadyMock.mock.calls.length, 1)
+  assert.equal(assertBootstrapStrictReadyMock.mock.calls[0]?.[0]?.ok, false)
 })
 
 test('doctor stops after a vault failure and keeps missing config and database paths null', async () => {
@@ -638,6 +708,156 @@ test('doctor rebuilds runtime and runs the telegram strategy for a configured co
       (check) => check.name === 'webhook' && check.status === 'warn',
     ),
     true,
+  )
+})
+
+test('doctor runs rebuild once and executes supported connector strategies in all-connectors mode', async () => {
+  readConfigMock.mockResolvedValue({
+    connectors: [
+      createConnector('telegram', 'telegram:bot'),
+      createConnector('email', 'email:primary', {
+        accountId: 'mailbox-1',
+      }),
+      createConnector('linq', 'linq:primary'),
+    ],
+  })
+  rebuildRuntimeMock.mockResolvedValue(2)
+
+  const loadConfiguredTelegramDriver = vi.fn(async () => ({
+    async deleteWebhook() {},
+    async downloadFile() {
+      return new Uint8Array()
+    },
+    async getFile() {
+      return {}
+    },
+    async getMe() {
+      return { username: 'murphbot' }
+    },
+    async getMessages() {
+      return []
+    },
+    async getWebhookInfo() {
+      return { url: '' }
+    },
+    async startWatching() {
+      return undefined
+    },
+  }))
+  const loadConfiguredEmailDriver = vi.fn(async () => ({
+    inboxId: 'mailbox-1',
+    async downloadAttachment() {
+      return null
+    },
+    async listUnreadMessages() {
+      return [{ id: 'message-1' }]
+    },
+    async markProcessed() {},
+  }))
+
+  const ops = createInboxBootstrapDoctorOps(
+    createEnvironment({
+      getEnvironment: () => ({
+        AGENTMAIL_API_KEY: 'agentmail-key',
+        TELEGRAM_BOT_TOKEN: 'telegram-token',
+      }),
+      loadConfiguredEmailDriver,
+      loadConfiguredTelegramDriver,
+    }),
+  )
+
+  const result = await ops.doctor({
+    requestId: null,
+    vault: '/vault',
+  })
+
+  assert.equal(result.target, null)
+  assert.equal(result.ok, false)
+  assert.equal(rebuildRuntimeMock.mock.calls.length, 1)
+  assert.equal(loadConfiguredTelegramDriver.mock.calls.length, 1)
+  assert.equal(loadConfiguredEmailDriver.mock.calls.length, 1)
+  assert.equal(findCheck(result, 'connectors')?.status, 'pass')
+  assert.equal(findCheck(result, 'unsupported-connectors')?.status, 'fail')
+  assert.equal(
+    result.checks.filter((check) => check.name === 'connector').length,
+    2,
+  )
+  assert.equal(
+    result.checks.filter(
+      (check) => check.name === 'probe' && check.status === 'pass',
+    ).length,
+    2,
+  )
+})
+
+test('doctor continues all-connectors strategy checks when rebuild fails', async () => {
+  readConfigMock.mockResolvedValue({
+    connectors: [
+      createConnector('telegram', 'telegram:bot'),
+      createConnector('email', 'email:primary', {
+        accountId: 'mailbox-1',
+      }),
+    ],
+  })
+  rebuildRuntimeMock.mockRejectedValue(new Error('rebuild failed'))
+
+  const loadConfiguredTelegramDriver = vi.fn(async () => ({
+    async deleteWebhook() {},
+    async downloadFile() {
+      return new Uint8Array()
+    },
+    async getFile() {
+      return {}
+    },
+    async getMe() {
+      return { username: 'murphbot' }
+    },
+    async getMessages() {
+      return []
+    },
+    async getWebhookInfo() {
+      return { url: '' }
+    },
+    async startWatching() {
+      return undefined
+    },
+  }))
+  const loadConfiguredEmailDriver = vi.fn(async () => ({
+    inboxId: 'mailbox-1',
+    async downloadAttachment() {
+      return null
+    },
+    async listUnreadMessages() {
+      return [{ id: 'message-1' }]
+    },
+    async markProcessed() {},
+  }))
+
+  const ops = createInboxBootstrapDoctorOps(
+    createEnvironment({
+      getEnvironment: () => ({
+        AGENTMAIL_API_KEY: 'agentmail-key',
+        TELEGRAM_BOT_TOKEN: 'telegram-token',
+      }),
+      loadConfiguredEmailDriver,
+      loadConfiguredTelegramDriver,
+    }),
+  )
+
+  const result = await ops.doctor({
+    requestId: null,
+    vault: '/vault',
+  })
+
+  assert.equal(result.ok, false)
+  assert.equal(findCheck(result, 'rebuild')?.status, 'fail')
+  assert.equal(loadConfiguredTelegramDriver.mock.calls.length, 1)
+  assert.equal(loadConfiguredEmailDriver.mock.calls.length, 1)
+  assert.equal(
+    result.checks.filter(
+      (check) => check.name === 'probe' && check.status === 'pass',
+    ).length,
+    2,
   )
 })
 
