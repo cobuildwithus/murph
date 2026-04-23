@@ -1,7 +1,4 @@
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
-import {
-  resolveLinqWebhookSecret,
-} from '@murphai/operator-config/linq-runtime'
 import type {
   InboxAppEnvironment,
   InboxServices,
@@ -149,7 +146,7 @@ function instrumentConnectorForRunEvents(
 }
 
 function isSupportedRuntimeSource(source: string): boolean {
-  return source === 'telegram' || source === 'email' || source === 'linq'
+  return source === 'telegram' || source === 'email'
 }
 
 function emitParserDrainEvent(
@@ -300,7 +297,6 @@ export function createInboxRuntimeOps(
           loadInbox: env.loadInbox,
           loadTelegramDriver: env.loadConfiguredTelegramDriver,
           loadEmailDriver: env.loadConfiguredEmailDriver,
-          linqWebhookSecret: resolveLinqWebhookSecret(env.getEnvironment()),
         })
         let importedCount = 0
         let dedupedCount = 0
@@ -396,15 +392,12 @@ export function createInboxRuntimeOps(
         vaultRoot: paths.absoluteVaultRoot,
       })
       const instrumentedConnectors: PollConnector[] = []
-      const linqWebhookSecret = resolveLinqWebhookSecret(env.getEnvironment())
-
       for (const connector of activeConnectorConfigs) {
         const instantiated = await instantiateConnector({
           connector,
           loadInbox: env.loadInbox,
           loadTelegramDriver: env.loadConfiguredTelegramDriver,
           loadEmailDriver: env.loadConfiguredEmailDriver,
-          linqWebhookSecret,
         })
         instrumentedConnectors.push(
           instrumentConnectorForRunEvents(instantiated, options?.onEvent),
@@ -414,7 +407,7 @@ export function createInboxRuntimeOps(
       if (instrumentedConnectors.length === 0) {
         throw new VaultCliError(
           'INBOX_NO_SUPPORTED_SOURCES',
-          'No supported inbox sources are enabled. Enable a Telegram, Linq, or email connector first.',
+          'No supported inbox sources are enabled. Enable a Telegram or email connector first.',
           {
             connectorIds: enabledConnectors.map((connector) => connector.id),
             unsupportedConnectorIds: enabledConnectors

@@ -103,7 +103,6 @@ export interface SetupWizardAppProps {
   initialChannels: SetupChannel[]
   initialScheduledUpdates: string[]
   initialWearables: SetupWearable[]
-  linqLocalWebhookUrl?: string | null
   onCancel: (error: unknown) => void
   onComplete: (result: SetupWizardAppResult) => void
   publicBaseUrl?: string | null
@@ -190,7 +189,6 @@ export function SetupWizardApp(
     wearables: selectedWearables,
     publicBaseUrl: input.publicBaseUrl,
     deviceSyncLocalBaseUrl: input.deviceSyncLocalBaseUrl,
-    linqLocalWebhookUrl: input.linqLocalWebhookUrl,
   })
   const includePublicUrlStep = publicUrlReview.enabled
   const includeAssistantMethodStep = doesSetupWizardAssistantProviderRequireMethod(
@@ -795,7 +793,7 @@ export function SetupWizardApp(
                   'public-url-recommended',
                 ),
                 createElement(Text, null, ''),
-                publicUrlReview.targets.some((target) => target.label !== 'Linq webhook')
+                publicUrlReview.targets.length > 0
                   ? createSetupWizardBulletRow(
                       {
                         body:

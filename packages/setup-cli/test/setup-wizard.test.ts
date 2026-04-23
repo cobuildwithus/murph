@@ -302,18 +302,18 @@ test('setup wizard runtime-status helpers preserve defaulting, detail copy, and 
 
   const needsEnvStatus = resolveSetupWizardChannelStatus(
     {
-      linq: {
+      telegram: {
         badge: 'needs env',
-        detail: 'Missing webhook credentials.',
-        missingEnv: ['LINQ_API_TOKEN', 'LINQ_WEBHOOK_SECRET'],
+        detail: 'Missing bot token.',
+        missingEnv: ['TELEGRAM_BOT_TOKEN'],
         ready: false,
       },
     },
-    'linq',
+    'telegram',
   )
   assert.equal(
     describeSetupWizardRuntimeStatus(needsEnvStatus),
-    'Needs LINQ_API_TOKEN, LINQ_WEBHOOK_SECRET before this can connect.',
+    'Needs TELEGRAM_BOT_TOKEN before this can connect.',
   )
   assert.deepEqual(buildSetupWizardRuntimeBadges(needsEnvStatus), [
     { label: 'needs env', tone: 'warn' },
@@ -396,11 +396,10 @@ test.sequential('setup wizard uses endpoint-specific method copy and confirm rev
 
 test('setup wizard public URL guidance stays disabled when a public base URL is already set', () => {
   const review = buildSetupWizardPublicUrlReview({
-    channels: ['linq'],
+    channels: [],
     wearables: ['oura'],
     publicBaseUrl: 'https://murph.example',
     deviceSyncLocalBaseUrl: ' http://127.0.0.1:8788 ',
-    linqLocalWebhookUrl: ' http://127.0.0.1:8789/linq-webhook ',
   })
 
   assert.equal(review.enabled, false)
@@ -416,18 +415,16 @@ test('setup wizard public URL guidance stays disabled when a public base URL is 
   )
 })
 
-test('setup wizard public URL guidance recommends hosted web for wearables and keeps Linq local', () => {
+test('setup wizard public URL guidance recommends hosted web for wearables', () => {
   const review = buildSetupWizardPublicUrlReview({
-    channels: ['linq'],
+    channels: [],
     wearables: ['garmin', 'oura'],
     deviceSyncLocalBaseUrl: ' http://127.0.0.1:8788 ',
-    linqLocalWebhookUrl: ' http://127.0.0.1:8789/linq-webhook ',
   })
 
   assert.equal(review.enabled, true)
   assert.equal(review.recommendedStrategy, 'hosted')
-  assert.match(review.summary, /hosted `apps\/web`/u)
-  assert.match(review.summary, /Linq still needs the local inbox webhook/u)
+  assert.match(review.summary, /Hosted `apps\/web`/u)
   assert.deepEqual(
     review.targets.map((target) => [
       target.label,
@@ -454,12 +451,6 @@ test('setup wizard public URL guidance recommends hosted web for wearables and k
         'https://<your-public-host>/webhooks/oura',
         'optional',
       ],
-      [
-        'Linq webhook',
-        'http://127.0.0.1:8789/linq-webhook',
-        'https://<your-public-host>/linq-webhook',
-        'required',
-      ],
     ],
   )
   assert.deepEqual(review.providerDocs.map((link) => link.label), [
@@ -475,51 +466,7 @@ test('setup wizard public URL guidance recommends hosted web for wearables and k
       review,
       strategy: 'hosted',
     }),
-    'Use hosted `apps/web` for Garmin/WHOOP/Oura/Strava, but keep Linq on the local webhook path for now.',
-  )
-  assert.equal(
-    describeSetupWizardPublicUrlStrategyChoice({
-      review,
-      strategy: 'tunnel',
-    }),
-    'Expose the local callback routes through a tunnel. Keep Murph listening on localhost, then paste the public HTTPS tunnel URL into each provider.',
-  )
-})
-
-test('setup wizard public URL guidance recommends a tunnel for Linq-only setups', () => {
-  const review = buildSetupWizardPublicUrlReview({
-    channels: ['linq'],
-    wearables: [],
-  })
-
-  assert.equal(review.enabled, true)
-  assert.equal(review.recommendedStrategy, 'tunnel')
-  assert.match(review.summary, /local inbox webhook/u)
-  assert.deepEqual(review.targets, [
-    {
-      detail:
-        'Required if you enable Linq. Point Linq at the public tunnel URL that forwards here. Hosted `apps/web` does not replace this Linq webhook yet.',
-      label: 'Linq webhook',
-      localReceiverUrl: 'http://127.0.0.1:8789/linq-webhook',
-      providerUrl: 'https://<your-public-host>/linq-webhook',
-      requirement: 'required',
-    },
-  ])
-  assert.deepEqual(review.providerDocs, [])
-  assert.deepEqual(review.tunnelCommands, [])
-  assert.equal(
-    describeSetupWizardPublicUrlStrategyChoice({
-      review,
-      strategy: 'hosted',
-    }),
-    'Use hosted `apps/web` for Garmin/WHOOP/Oura/Strava, but keep Linq on the local webhook path for now.',
-  )
-  assert.equal(
-    describeSetupWizardPublicUrlStrategyChoice({
-      review,
-      strategy: 'tunnel',
-    }),
-    'Expose the local Linq webhook through a tunnel. Hosted `apps/web` does not replace this Linq webhook yet.',
+    'Use hosted `apps/web` for Garmin/WHOOP/Oura/Strava so callbacks stay on one stable public base.',
   )
 })
 
@@ -555,13 +502,6 @@ test('setup wizard public URL help text renders warnings, docs, and provider-les
           providerUrl: 'https://murph.example/oauth/whoop/callback',
           requirement: 'required',
         },
-        {
-          detail: 'Paste the tunnel URL into Linq when you are ready.',
-          label: 'Linq webhook',
-          localReceiverUrl: 'http://127.0.0.1:8789/linq-webhook',
-          providerUrl: null,
-          requirement: 'required',
-        },
       ],
       tunnelCommands: ['ngrok http 8788'],
     },
@@ -579,10 +519,6 @@ test('setup wizard public URL help text renders warnings, docs, and provider-les
     '  Local receiver: http://127.0.0.1:8788/oauth/whoop/callback',
     '  Paste into provider: https://murph.example/oauth/whoop/callback',
     '  Register this redirect URL in the WHOOP dashboard.',
-    '',
-    'Linq webhook (required)',
-    '  Local receiver: http://127.0.0.1:8789/linq-webhook',
-    '  Paste the tunnel URL into Linq when you are ready.',
     '',
     'Provider setup docs:',
     '  WHOOP OAuth docs: https://developer.whoop.com/docs/developing/oauth/',
@@ -611,7 +547,6 @@ test('setup wizard public URL guidance trims local endpoints and lists WHOOP tar
     wearables: ['whoop'],
     publicBaseUrl: '   ',
     deviceSyncLocalBaseUrl: ' http://127.0.0.1:9797/base/ ',
-    linqLocalWebhookUrl: '   ',
   })
 
   assert.equal(review.enabled, true)
@@ -720,20 +655,19 @@ test('setup wizard public URL guidance stays enabled when the configured public 
 
 test('setup wizard public URL guidance handles invalid public URLs and tunnel command edge cases', () => {
   const invalidPublicBaseReview = buildSetupWizardPublicUrlReview({
-    channels: ['linq'],
-    wearables: [],
+    channels: [],
+    wearables: ['garmin'],
     publicBaseUrl: 'ftp://murph.example',
-    linqLocalWebhookUrl: '/linq-webhook',
   })
   assert.equal(invalidPublicBaseReview.enabled, true)
   assert.equal(
     invalidPublicBaseReview.targets[0]?.providerUrl,
-    'https://<your-public-host>/linq-webhook',
+    'https://<your-public-host>/oauth/garmin/callback',
   )
 
   const ipv6LoopbackReview = buildSetupWizardPublicUrlReview({
-    channels: ['linq'],
-    wearables: [],
+    channels: [],
+    wearables: ['oura'],
     publicBaseUrl: 'https://[::1]:8788',
   })
   assert.equal(ipv6LoopbackReview.enabled, true)
@@ -772,14 +706,7 @@ test('setup wizard public URL guidance handles invalid public URLs and tunnel co
 test.sequential('setup wizard runs the public-link flow, preserves explicit opt-outs, and returns sorted selections', async () => {
   await withMockProcessTty(async ({ flush, readOutput, writeInput }) => {
     const wizardResultPromise = runSetupWizard({
-      channelStatuses: {
-        linq: {
-          badge: 'needs env',
-          detail: 'Missing webhook credentials.',
-          missingEnv: ['LINQ_API_TOKEN', 'LINQ_WEBHOOK_SECRET'],
-          ready: false,
-        },
-      },
+      channelStatuses: {},
       initialAssistantPreset: 'skip',
       initialChannels: [],
       initialScheduledUpdates: [],
@@ -803,10 +730,6 @@ test.sequential('setup wizard runs the public-link flow, preserves explicit opt-
     await waitForRenderedText(flush, readOutput, /Auto updates/u)
     await writeInput('\r')
     await waitForRenderedText(flush, readOutput, /Chat channels/u)
-    await writeInput('\u001B[A')
-    await writeInput('\u001B[A')
-    await waitForRenderedText(flush, readOutput, /› □ Linq/u)
-    await writeInput(' ')
     await writeInput('\r')
     await waitForRenderedText(flush, readOutput, /Health data/u)
     await writeInput('\u001B[A')
@@ -821,7 +744,6 @@ test.sequential('setup wizard runs the public-link flow, preserves explicit opt-
     assert.match(publicLinkOutput, /Public links/u)
     assert.match(publicLinkOutput, /WHOOP callback \(required\)/u)
     assert.match(publicLinkOutput, /WHOOP webhook \(optional\)/u)
-    assert.match(publicLinkOutput, /Linq webhook/u)
     assert.match(
       publicLinkOutput,
       /Local receiver: http:\/\/localhost:8788\/oauth\/whoop\/callback/u,
@@ -856,7 +778,7 @@ test.sequential('setup wizard runs the public-link flow, preserves explicit opt-
       assistantOss: null,
       assistantPreset: 'skip',
       assistantProviderName: null,
-      channels: ['linq'],
+      channels: [],
       scheduledUpdates: [],
       wearables: ['whoop'],
     })
@@ -973,14 +895,7 @@ test.sequential('setup wizard surfaces cancellation when the operator presses es
 test.sequential('setup wizard accepts wrapped selection navigation plus space-based public-link and confirm actions', async () => {
   await withMockProcessTty(async ({ flush, readOutput, writeInput }) => {
     const wizardResultPromise = runSetupWizard({
-      channelStatuses: {
-        linq: {
-          badge: 'needs env',
-          detail: 'Missing webhook credentials.',
-          missingEnv: ['LINQ_API_TOKEN'],
-          ready: false,
-        },
-      },
+      channelStatuses: {},
       initialAssistantPreset: 'skip',
       initialChannels: [],
       initialScheduledUpdates: [],
@@ -1031,7 +946,7 @@ test.sequential('setup wizard accepts wrapped selection navigation plus space-ba
       assistantOss: null,
       assistantPreset: 'skip',
       assistantProviderName: null,
-      channels: ['email'],
+      channels: ['telegram'],
       scheduledUpdates: [],
       wearables: ['whoop'],
     })

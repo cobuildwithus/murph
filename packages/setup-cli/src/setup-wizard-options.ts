@@ -32,11 +32,6 @@ export const setupWizardChannelOptions: readonly SetupWizardChannelOption[] = [
     title: 'Telegram',
   },
   {
-    channel: 'linq',
-    description: 'Reply by SMS or RCS through Linq.',
-    title: 'Linq',
-  },
-  {
     channel: 'email',
     description: 'Read and reply in email.',
     title: 'Email',
@@ -192,8 +187,6 @@ export function formatSetupChannel(channel: SetupChannel): string {
   switch (channel) {
     case 'telegram':
       return 'Telegram'
-    case 'linq':
-      return 'Linq'
     case 'email':
       return 'Email'
   }

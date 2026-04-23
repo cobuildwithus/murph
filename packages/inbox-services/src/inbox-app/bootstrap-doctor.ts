@@ -338,6 +338,10 @@ export function createInboxBootstrapDoctorOps(
     }
   }
 
+  const hasDoctorStrategy = (
+    source: string,
+  ): source is keyof typeof DOCTOR_STRATEGIES => source in DOCTOR_STRATEGIES
+
   const runRuntimeRebuildDoctorCheck = async (
     context: DoctorContext,
   ): Promise<void> => {
@@ -383,12 +387,35 @@ export function createInboxBootstrapDoctorOps(
     }
 
     const target = resolveDoctorTarget(context)
+    if (target.kind === 'all' && context.config) {
+      const unsupportedConnectors = context.config.connectors.filter(
+        (connector) => !hasDoctorStrategy(connector.source),
+      )
+      if (unsupportedConnectors.length > 0) {
+        context.checks.push(
+          failCheck(
+            'unsupported-connectors',
+            `Local doctor no longer supports these inbox sources: ${unsupportedConnectors.map((connector) => `"${connector.id}" (${connector.source})`).join(', ')}. Existing connectors can still be listed or removed, but local runtime operations are disabled for them.`,
+          ),
+        )
+      }
+      return finalizeDoctorResult(context)
+    }
     if (target.kind !== 'connector') {
       return finalizeDoctorResult(context)
     }
 
     await runRuntimeRebuildDoctorCheck(context)
 
+    if (!hasDoctorStrategy(target.connector.source)) {
+      context.checks.push(
+        failCheck(
+          'source-unsupported',
+          `Local doctor no longer supports the "${target.connector.source}" inbox source. Existing connectors can still be listed or removed, but local ${target.connector.source} runtime operations are disabled.`,
+        ),
+      )
+      return finalizeDoctorResult(context, target.connector)
+    }
     const strategy = DOCTOR_STRATEGIES[target.connector.source]
     await strategy(context, target.connector, {
       env,

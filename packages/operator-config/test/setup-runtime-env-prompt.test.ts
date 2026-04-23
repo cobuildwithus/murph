@@ -25,7 +25,6 @@ test('setup runtime resolver prompts for missing keys in deterministic order and
   const stderrWrites: string[] = []
   const answers = [
     ' telegram-token ',
-    '',
     ' garmin-id ',
     ' garmin-secret ',
     ' openai-key ',
@@ -49,16 +48,13 @@ test('setup runtime resolver prompts for missing keys in deterministic order and
 
   const overrides = await resolver.promptForMissing({
     assistantApiKeyEnv: ' OPENAI_API_KEY ',
-    channels: ['telegram', 'linq', 'telegram'],
-    env: {
-      LINQ_API_TOKEN: 'linq-token',
-    },
+    channels: ['telegram', 'telegram'],
+    env: {},
     wearables: ['garmin', 'garmin'],
   })
 
   assert.deepEqual(prompts, [
     'Enter TELEGRAM_BOT_TOKEN for this setup run (leave blank to skip): ',
-    'Enter LINQ_WEBHOOK_SECRET for this setup run (leave blank to skip): ',
     'Enter GARMIN_CLIENT_ID for this setup run (leave blank to skip): ',
     'Enter GARMIN_CLIENT_SECRET for this setup run (leave blank to skip): ',
     'Enter OPENAI_API_KEY for this setup run (leave blank to skip): ',

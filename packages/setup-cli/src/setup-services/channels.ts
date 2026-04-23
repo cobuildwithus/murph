@@ -1,7 +1,6 @@
 import { reconcileManagedAssistantAutoReplyChannelsLocal } from '@murphai/assistant-engine/assistant-state'
 import { resolveAgentmailApiKey } from '@murphai/operator-config/agentmail-runtime'
 import { getAssistantChannelAdapter } from '@murphai/assistant-engine/assistant-runtime'
-import { describeLinqConnectorEndpoint as describeLinqEndpoint } from '@murphai/inbox-services/linq-endpoint'
 import type { InboxServices } from '@murphai/inbox-services'
 import type {
   SetupAgentmailInboxSelection,
@@ -23,13 +22,10 @@ import { createStep } from './steps.js'
 
 const TELEGRAM_SETUP_CONNECTOR_ID = 'telegram:bot'
 const TELEGRAM_SETUP_ACCOUNT_ID = 'bot'
-const LINQ_SETUP_CONNECTOR_ID = 'linq:default'
-const LINQ_SETUP_ACCOUNT_ID = 'default'
 const EMAIL_SETUP_CONNECTOR_ID = 'email:agentmail'
 const EMAIL_SETUP_DISPLAY_NAME = 'Murph'
 const SETUP_CHANNEL_ORDER = [
   'telegram',
-  'linq',
   'email',
 ] as const satisfies readonly SetupChannel[]
 
@@ -218,27 +214,6 @@ function isTelegramSetupConnector(connector: SetupListedConnector): boolean {
   )
 }
 
-function isLinqSetupConnector(connector: SetupListedConnector): boolean {
-  return (
-    connector.id === LINQ_SETUP_CONNECTOR_ID ||
-    (connector.source === 'linq' && connector.accountId === LINQ_SETUP_ACCOUNT_ID)
-  )
-}
-
-function findReusableLinqSetupConnector(
-  connectors: readonly SetupListedConnector[],
-): SetupListedConnector | null {
-  return (
-    connectors.find((connector) => connector.id === LINQ_SETUP_CONNECTOR_ID) ??
-    connectors.find(
-      (connector) =>
-        connector.source === 'linq' && connector.accountId === LINQ_SETUP_ACCOUNT_ID,
-    ) ??
-    connectors.find((connector) => connector.source === 'linq') ??
-    null
-  )
-}
-
 function isEmailSetupConnector(connector: SetupListedConnector): boolean {
   return connector.id === EMAIL_SETUP_CONNECTOR_ID || connector.source === 'email'
 }
@@ -247,23 +222,6 @@ function isSetupAddedEmailConnectorResult(
   value: SetupChannelAddedResult,
 ): value is SetupAddedEmailConnectorResult {
   return 'selectedInbox' in value
-}
-
-function describeLinqConnectorEndpoint(input: {
-  options: {
-    linqWebhookHost?: string | null
-    linqWebhookPath?: string | null
-    linqWebhookPort?: number | null
-  }
-}): string {
-  const endpoint = describeLinqEndpoint({
-    options: {
-      linqWebhookHost: input.options.linqWebhookHost,
-      linqWebhookPath: input.options.linqWebhookPath,
-      linqWebhookPort: input.options.linqWebhookPort ?? undefined,
-    },
-  })
-  return `${endpoint.host}:${endpoint.port}${endpoint.path}`
 }
 
 function describeConfiguredEmailAction(input: {
@@ -355,80 +313,6 @@ const CHANNEL_SPECS = {
       }
     },
     matchesConfiguredConnector: isTelegramSetupConnector,
-  },
-  linq: {
-    channel: 'linq',
-    title: 'Linq channel',
-    stepId: 'channel-linq',
-    runtimeUnavailableMessage:
-      'Murph setup cannot configure Linq because the inbox source management services are unavailable in this build.',
-    readiness: {
-      fallbackReason: 'Linq readiness probe failed',
-      kind: 'doctor-probe',
-    },
-    plan(context) {
-      const readyForSetup =
-        getAssistantChannelAdapter('linq')?.isReadyForSetup(context.env) ?? false
-      const missingEnv = resolveSetupChannelMissingEnv('linq', context.env)
-
-      return {
-        supported: true,
-        connectorId: LINQ_SETUP_CONNECTOR_ID,
-        dryRunDetail: readyForSetup
-          ? 'Would configure the Linq webhook connector and enable assistant auto-reply for Linq direct chats.'
-          : `Linq needs both LINQ_API_TOKEN and LINQ_WEBHOOK_SECRET in the current environment before setup can enable the channel. ${SETUP_RUNTIME_ENV_NOTICE}`,
-        dryRunStepDetail: readyForSetup
-          ? 'Would verify the Linq API token, add or reuse the linq:default inbox connector, and enable assistant auto-reply for Linq direct chats.'
-          : 'Would configure Linq once LINQ_API_TOKEN and LINQ_WEBHOOK_SECRET are available in the shell or local `.env`.',
-        missingEnv,
-        readyForSetup,
-      }
-    },
-    findExistingConnector(connectors) {
-      return findReusableLinqSetupConnector(connectors)
-    },
-    async addConnector(context, sourceAdd) {
-      return sourceAdd({
-        account: LINQ_SETUP_ACCOUNT_ID,
-        id: LINQ_SETUP_CONNECTOR_ID,
-        requestId: context.requestId,
-        source: 'linq',
-        vault: context.vault,
-      })
-    },
-    describeMissingEnv({ existingConnector }) {
-      return {
-        stepDetail: existingConnector
-          ? `Reused the Linq inbox connector "${existingConnector.id}", but did not enable assistant auto-reply because LINQ_API_TOKEN and LINQ_WEBHOOK_SECRET were not both available in the shell or local \`.env\`.`
-          : 'Linq was selected, but setup did not add the connector because LINQ_API_TOKEN and LINQ_WEBHOOK_SECRET were not both available in the shell or local `.env`.',
-        detail: existingConnector
-          ? `Reused the Linq connector "${existingConnector.id}", but skipped assistant auto-reply until both a Linq API token and webhook secret are available in the current environment. ${SETUP_RUNTIME_ENV_NOTICE}`
-          : `Linq needs LINQ_API_TOKEN and LINQ_WEBHOOK_SECRET in the current environment before setup can add the connector and enable assistant auto-reply. ${SETUP_RUNTIME_ENV_NOTICE}`,
-      }
-    },
-    describeReused({ connector, readiness }) {
-      const endpoint = describeLinqConnectorEndpoint(connector)
-      return {
-        stepDetail: readiness.ready
-          ? `Reusing the Linq inbox connector "${connector.id}" at ${endpoint} and enabling assistant auto-reply for Linq direct chats.`
-          : `Reused the Linq inbox connector "${connector.id}" at ${endpoint}, but did not enable assistant auto-reply because the API token could not authenticate${readiness.reason ? ` (${readiness.reason})` : ''}.`,
-        detail: readiness.ready
-          ? `Reused the Linq connector "${connector.id}" at ${endpoint} and enabled assistant auto-reply for Linq direct chats.`
-          : `Reused the Linq connector "${connector.id}" at ${endpoint}, but skipped assistant auto-reply until the Linq API token authenticates successfully${readiness.reason ? ` (${readiness.reason})` : ''}.`,
-      }
-    },
-    describeAdded({ added, readiness }) {
-      const endpoint = describeLinqConnectorEndpoint(added.connector)
-      return {
-        stepDetail: readiness.ready
-          ? `Added the Linq inbox connector "${added.connector.id}" at ${endpoint} and enabled assistant auto-reply for Linq direct chats.`
-          : `Added the Linq inbox connector "${added.connector.id}" at ${endpoint}, but did not enable assistant auto-reply because the API token could not authenticate${readiness.reason ? ` (${readiness.reason})` : ''}.`,
-        detail: readiness.ready
-          ? `Configured the Linq connector "${added.connector.id}" at ${endpoint} and enabled assistant auto-reply for Linq direct chats.`
-          : `Configured the Linq connector "${added.connector.id}" at ${endpoint}, but skipped assistant auto-reply until the Linq API token authenticates successfully${readiness.reason ? ` (${readiness.reason})` : ''}.`,
-      }
-    },
-    matchesConfiguredConnector: isLinqSetupConnector,
   },
   email: {
     channel: 'email',
@@ -534,7 +418,6 @@ const CHANNEL_SPECS = {
 
 const CHANNEL_CONFIGURERS = {
   telegram: configureTelegramChannel,
-  linq: configureLinqChannel,
   email: configureEmailChannel,
 } satisfies Record<
   SetupChannel,
@@ -602,12 +485,6 @@ async function configureTelegramChannel(
   context: SetupChannelContext,
 ): Promise<SetupConfiguredChannel> {
   return configureSetupChannel(CHANNEL_SPECS.telegram, context)
-}
-
-async function configureLinqChannel(
-  context: SetupChannelContext,
-): Promise<SetupConfiguredChannel> {
-  return configureSetupChannel(CHANNEL_SPECS.linq, context)
 }
 
 async function configureEmailChannel(

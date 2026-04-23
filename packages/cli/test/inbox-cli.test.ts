@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { test } from 'vitest'
@@ -844,8 +844,8 @@ test.sequential('source add --enableAutoReply updates assistant automation state
   }
 })
 
-test.sequential('source add defaults the Linq account identity to default when omitted', async () => {
-  const fixture = await makeVaultFixture('murph-inbox-linq-default-account')
+test.sequential('source add rejects local Linq connectors', async () => {
+  const fixture = await makeVaultFixture('murph-inbox-linq-removed')
   const services = createIntegratedInboxServices({
     loadInboxModule: async () => createFakeInboxRuntimeModule(),
   })
@@ -856,17 +856,15 @@ test.sequential('source add defaults the Linq account identity to default when o
       requestId: null,
     })
 
-    const added = await services.sourceAdd({
-      vault: fixture.vaultRoot,
-      requestId: null,
-      source: 'linq',
-      id: 'linq:default',
-      linqWebhookPath: 'custom-linq',
-      linqWebhookPort: 9911,
-    })
-    assert.equal(added.connector.accountId, 'default')
-    assert.equal(added.connector.options.linqWebhookPath, '/custom-linq')
-    assert.equal(added.connector.options.linqWebhookPort, 9911)
+    await expectVaultCliError(
+      services.sourceAdd({
+        vault: fixture.vaultRoot,
+        requestId: null,
+        source: 'linq',
+        id: 'linq:default',
+      }),
+      'INBOX_SOURCE_LOCAL_LINQ_REMOVED',
+    )
   } finally {
     await rm(fixture.vaultRoot, { recursive: true, force: true })
   }
@@ -1122,12 +1120,9 @@ test.sequential('doctor reports Telegram diagnostics without consuming updates',
   }
 })
 
-test.sequential('doctor fails Linq webhook-secret checks before probing when LINQ_WEBHOOK_SECRET is missing', async () => {
-  const fixture = await makeVaultFixture('murph-inbox-linq-doctor')
+test.sequential('doctor reports local Linq connectors as unsupported', async () => {
+  const fixture = await makeVaultFixture('murph-inbox-linq-doctor-unsupported')
   const services = createIntegratedInboxServices({
-    getEnvironment: () => ({
-      LINQ_API_TOKEN: 'linq-token',
-    }),
     loadInboxModule: async () => createFakeInboxRuntimeModule(),
   })
 
@@ -1136,12 +1131,25 @@ test.sequential('doctor fails Linq webhook-secret checks before probing when LIN
       vault: fixture.vaultRoot,
       requestId: null,
     })
-    await services.sourceAdd({
-      vault: fixture.vaultRoot,
-      requestId: null,
-      source: 'linq',
-      id: 'linq:default',
-    })
+    await writeFile(
+      path.join(fixture.vaultRoot, '.runtime', 'operations', 'inbox', 'config.json'),
+      JSON.stringify({
+        schema: 'murph.inbox-runtime-config.v1',
+        schemaVersion: 1,
+        value: {
+          connectors: [
+            {
+              accountId: 'default',
+              enabled: true,
+              id: 'linq:default',
+              options: {},
+              source: 'linq',
+            },
+          ],
+        },
+      }),
+      'utf8',
+    )
 
     const doctor = await services.doctor({
       vault: fixture.vaultRoot,
@@ -1150,14 +1158,11 @@ test.sequential('doctor fails Linq webhook-secret checks before probing when LIN
     })
     assert.equal(doctor.ok, false)
     assert.equal(
-      doctor.checks.some((check) => check.name === 'token' && check.status === 'pass'),
+      doctor.checks.some(
+        (check) => check.name === 'source-unsupported' && check.status === 'fail',
+      ),
       true,
     )
-    assert.equal(
-      doctor.checks.some((check) => check.name === 'webhook-secret' && check.status === 'fail'),
-      true,
-    )
-    assert.equal(doctor.checks.some((check) => check.name === 'probe'), false)
   } finally {
     await rm(fixture.vaultRoot, { recursive: true, force: true })
   }

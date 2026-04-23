@@ -113,7 +113,7 @@ test("@murphai/inboxd root barrel no longer exposes removed compatibility or raw
     "-e",
     [
       `const mod = await import(${JSON.stringify(modulePath)});`,
-      `for (const key of ["appendImportAudit", "appendInboxCaptureEvent", "createImessageConnector", "loadImessageKitDriver", "normalizeImessageAttachment", "normalizeImessageMessage", "persistRawCapture"]) {`,
+      `for (const key of ["appendImportAudit", "appendInboxCaptureEvent", "createImessageConnector", "createLinqWebhookConnector", "loadImessageKitDriver", "normalizeImessageAttachment", "normalizeImessageMessage", "persistRawCapture"]) {`,
       "  if (key in mod) {",
       '    throw new Error(`unexpected removed export: ${key}`);',
       "  }",

@@ -37,11 +37,11 @@ import {
 import {
   inboxModelBundleResultSchema,
   inboxModelRouteResultSchema,
-} from '@murphai/assistant-engine/inbox-model-contracts'
+} from '../inbox-model-contracts.js'
 import {
   materializeInboxModelBundle,
   routeInboxCaptureWithModel,
-} from '@murphai/assistant-engine/inbox-model-harness'
+} from '../inbox-model-harness.js'
 import type { InboxServices } from '@murphai/inbox-services'
 import {
   formatForegroundLogLine,
@@ -75,7 +75,7 @@ const inboxSetupOptionFields = {
     .describe('Optional explicit whisper model path to persist.'),
 }
 
-const inboxSourceAddValues = ['telegram', 'linq', 'email'] as const
+const inboxSourceAddValues = ['telegram', 'email'] as const
 
 export function registerInboxCommands(
   cli: Cli.Cli,
@@ -97,15 +97,6 @@ export function registerInboxCommands(
           options: {
             id: 'telegram:bot',
             account: 'bot',
-            vault: true,
-          },
-        },
-        {
-          command: 'vault-cli inbox source add linq',
-          description: 'Add a Linq webhook connector.',
-          options: {
-            id: 'linq:default',
-            account: 'default',
             vault: true,
           },
         },
@@ -255,19 +246,6 @@ export function registerInboxCommands(
         description: 'Configure a Telegram bot source for local long polling.',
       },
       {
-        args: { source: 'linq' },
-        options: {
-          id: 'linq:default',
-          account: 'default',
-          linqWebhookPort: 8789,
-          linqWebhookPath: '/linq-webhook',
-          enableAutoReply: true,
-          vault: './vault',
-        },
-        description:
-          'Configure a Linq webhook connector so the local inbox daemon can receive inbound Linq messages and assistant replies can send back into the same direct chat.',
-      },
-      {
         args: { source: 'email' },
         options: {
           id: 'email:agentmail',
@@ -281,14 +259,14 @@ export function registerInboxCommands(
       },
     ],
     hint:
-      'Use a stable runtime id such as `telegram:bot`, `linq:default`, or `email:agentmail`; each connector id must map to a unique source/account runtime namespace, while cursor state stays in SQLite.',
+      'Use a stable runtime id such as `telegram:bot` or `email:agentmail`; each connector id must map to a unique source/account runtime namespace, while cursor state stays in SQLite.',
     options: withBaseOptions({
       id: z.string().min(1).describe('Runtime connector id.'),
       account: z
         .string()
         .min(1)
         .optional()
-        .describe('Optional account identity for the connector. Defaults to `bot` for Telegram, `default` for Linq, and should be an AgentMail inbox id for email unless `--provision` is used; for AgentMail this is often the inbox id or inbox email address.'),
+        .describe('Optional account identity for the connector. Defaults to `bot` for Telegram and should be an AgentMail inbox id for email unless `--provision` is used; for AgentMail this is often the inbox id or inbox email address.'),
       address: z
         .string()
         .min(1)
@@ -325,23 +303,6 @@ export function registerInboxCommands(
         .min(1)
         .optional()
         .describe('Optional AgentMail client id to associate when provisioning a new inbox.'),
-      linqWebhookHost: z
-        .string()
-        .min(1)
-        .optional()
-        .describe('Optional local bind host for the Linq webhook listener. Defaults to 0.0.0.0.'),
-      linqWebhookPath: z
-        .string()
-        .min(1)
-        .optional()
-        .describe('Optional local path for the Linq webhook listener. Defaults to /linq-webhook.'),
-      linqWebhookPort: z
-        .number()
-        .int()
-        .positive()
-        .max(65535)
-        .optional()
-        .describe('Optional local port for the Linq webhook listener. Defaults to 8789.'),
       enableAutoReply: z
         .boolean()
         .optional()
@@ -362,9 +323,6 @@ export function registerInboxCommands(
         emailUsername: context.options.emailUsername,
         emailDomain: context.options.emailDomain,
         emailClientId: context.options.emailClientId,
-        linqWebhookHost: context.options.linqWebhookHost,
-        linqWebhookPath: context.options.linqWebhookPath,
-        linqWebhookPort: context.options.linqWebhookPort,
         enableAutoReply: context.options.enableAutoReply,
       })
 

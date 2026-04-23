@@ -384,7 +384,7 @@ test('createInboxAppEnvironment throws when Telegram bot token is missing', asyn
   )
 })
 
-test('integrated services can init, setup, and manage Linq connectors in a temp vault', async () => {
+test('integrated services reject local Linq connector adds in a temp vault', async () => {
   await withTempVault(async (vault) => {
     const inboxd = createInboxRuntimeModule()
     const services = createIntegratedInboxServices({
@@ -418,59 +418,23 @@ test('integrated services can init, setup, and manage Linq connectors in a temp 
     assert.equal(setupResult.tools.ffmpeg.available, true)
     assert.equal(setupResult.tools.whisper.modelPath, '/tmp/model.bin')
 
-    const added = await services.sourceAdd({
-      requestId: null,
-      vault,
-      id: 'linq:primary',
-      source: 'linq',
-      linqWebhookHost: '127.0.0.1',
-      linqWebhookPath: 'webhook',
-      linqWebhookPort: 9001,
-    })
-
-    assert.equal(added.connector.options.linqWebhookPath, '/webhook')
-    assert.equal(added.connectorCount, 1)
-
-    const listed = await services.sourceList({
-      requestId: null,
-      vault,
-    })
-    assert.equal(listed.connectors.length, 1)
-    assert.equal(listed.connectors[0]?.id, 'linq:primary')
-
     await assert.rejects(
       () =>
         services.sourceAdd({
           requestId: null,
           vault,
-          id: 'linq:secondary',
+          id: 'linq:primary',
           source: 'linq',
           linqWebhookHost: '127.0.0.1',
-          linqWebhookPath: '/webhook',
+          linqWebhookPath: 'webhook',
           linqWebhookPort: 9001,
         }),
       (error: unknown) => {
         assert.ok(error instanceof VaultCliError)
-        assert.equal(error.code, 'INBOX_LINQ_WEBHOOK_CONFLICT')
+        assert.equal(error.code, 'INBOX_SOURCE_LOCAL_LINQ_REMOVED')
         return true
       },
     )
-
-    const disabled = await services.sourceSetEnabled({
-      requestId: null,
-      vault,
-      connectorId: 'linq:primary',
-      enabled: false,
-    })
-    assert.equal(disabled.connector.enabled, false)
-
-    const removed = await services.sourceRemove({
-      requestId: null,
-      vault,
-      connectorId: 'linq:primary',
-    })
-    assert.equal(removed.removed, true)
-    assert.equal(removed.connectorCount, 0)
   })
 })
 

@@ -315,7 +315,7 @@ test('configureSetupScheduledUpdates describes a single deferred update outside 
 test('configureSetupChannels covers dry-run, missing-env, readiness, reconciliation, and automation state updates', async () => {
   const dryRunSteps: SetupStepResult[] = []
   const dryRunChannels = await configureSetupChannels({
-    channels: ['telegram', 'linq', 'email'],
+    channels: ['telegram', 'email'],
     dryRun: true,
     env: {},
     inboxServices: {
@@ -334,12 +334,9 @@ test('configureSetupChannels covers dry-run, missing-env, readiness, reconciliat
   assert.deepEqual(dryRunChannels[0]?.missingEnv, ['TELEGRAM_BOT_TOKEN'])
   assert.equal(dryRunChannels[0]?.enabled, true)
   assert.equal(dryRunSteps[0]?.status, 'planned')
-  assert.equal(dryRunChannels[1]?.channel, 'linq')
-  assert.deepEqual(dryRunChannels[1]?.missingEnv, ['LINQ_API_TOKEN', 'LINQ_WEBHOOK_SECRET'])
+  assert.equal(dryRunChannels[1]?.channel, 'email')
+  assert.deepEqual(dryRunChannels[1]?.missingEnv, ['AGENTMAIL_API_KEY'])
   assert.equal(dryRunSteps[1]?.status, 'planned')
-  assert.equal(dryRunChannels[2]?.channel, 'email')
-  assert.deepEqual(dryRunChannels[2]?.missingEnv, ['AGENTMAIL_API_KEY'])
-  assert.equal(dryRunSteps[2]?.status, 'planned')
 
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'setup-cli-channel-state-'))
   const automationStatePath = resolveAssistantStatePaths(vaultRoot).automationStatePath
@@ -351,7 +348,6 @@ test('configureSetupChannels covers dry-run, missing-env, readiness, reconciliat
       inboxScanCursor: null,
       autoReply: [
         { channel: 'email', cursor: null },
-        { channel: 'linq', cursor: null },
       ],
       updatedAt: '2026-04-08T00:00:00.000Z',
     }),
@@ -652,96 +648,10 @@ test('configureSetupChannels preserves unmanaged auto-reply entries when enablin
   }
 })
 
-test('configureSetupChannels covers Linq reuse fallback, email inbox reuse, and runtime unavailability', async () => {
+test('configureSetupChannels covers email inbox reuse and runtime unavailability', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'setup-cli-channel-branches-'))
 
   try {
-    const linqConfigured = await configureSetupChannels({
-      channels: ['linq'],
-      dryRun: false,
-      env: {
-        LINQ_API_TOKEN: 'linq-token',
-        LINQ_WEBHOOK_SECRET: 'linq-secret',
-      },
-      inboxServices: {
-        async bootstrap() {
-          throw new Error('bootstrap should not run in this test')
-        },
-        async doctor() {
-          return {
-            vault: vaultRoot,
-            configPath: null,
-            databasePath: null,
-            target: null,
-            ok: false,
-            connectors: [],
-            checks: [
-              {
-                name: 'probe',
-                status: 'fail',
-                message: 'Linq token rejected',
-              },
-            ],
-          }
-        },
-        async sourceList() {
-          return {
-            vault: vaultRoot,
-            configPath: path.join(vaultRoot, '.runtime', 'config.json'),
-            connectors: [
-              {
-                id: 'linq-custom',
-                source: 'linq',
-                accountId: 'other',
-                enabled: true,
-                options: {
-                  linqWebhookHost: '127.0.0.1',
-                  linqWebhookPath: '/custom-webhook',
-                  linqWebhookPort: 9999,
-                },
-              },
-            ],
-          }
-        },
-        async sourceAdd() {
-          throw new Error('sourceAdd should not run when a Linq connector already exists')
-        },
-        async sourceSetEnabled() {
-          return makeInboxSourceSetEnabledResult(
-            vaultRoot,
-            makeInboxConnector({
-              accountId: 'other',
-              enabled: true,
-              id: 'linq-custom',
-              options: {
-                linqWebhookHost: '127.0.0.1',
-                linqWebhookPath: '/custom-webhook',
-                linqWebhookPort: 9999,
-              },
-              source: 'linq',
-            }),
-          )
-        },
-      },
-      platform: 'linux',
-      requestId: 'req-linq',
-      steps: [],
-      vault: vaultRoot,
-    })
-
-    assert.deepEqual(linqConfigured, [
-      {
-        autoReply: false,
-        channel: 'linq',
-        configured: false,
-        connectorId: 'linq-custom',
-        detail:
-          'Reused the Linq connector "linq-custom" at 127.0.0.1:9999/custom-webhook, but skipped assistant auto-reply until the Linq API token authenticates successfully (Linq token rejected).',
-        enabled: true,
-        missingEnv: [],
-      },
-    ])
-
     let inboxSelectionCalls = 0
     const emailConfigured = await configureSetupChannels({
       channels: ['email'],
@@ -1036,7 +946,7 @@ test('configureSetupChannels leaves empty automation state untouched when nothin
   }
 })
 
-test('configureSetupChannels covers added Telegram, Linq, and provisioned email outcomes', async () => {
+test('configureSetupChannels covers added Telegram and provisioned email outcomes', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'setup-cli-channel-added-'))
 
   try {
@@ -1077,54 +987,6 @@ test('configureSetupChannels covers added Telegram, Linq, and provisioned email 
         connectorId: 'telegram:bot',
         detail:
           'Configured the Telegram connector "telegram:bot" and enabled assistant auto-reply for Telegram direct chats.',
-        enabled: true,
-        missingEnv: [],
-      },
-    ])
-
-    const linqConfigured = await configureSetupChannels({
-      channels: ['linq'],
-      dryRun: false,
-      env: {
-        LINQ_API_TOKEN: 'linq-token',
-        LINQ_WEBHOOK_SECRET: 'linq-secret',
-      },
-      inboxServices: {
-        async bootstrap() {
-          throw new Error('bootstrap should not run in this test')
-        },
-        async sourceList() {
-          return makeInboxSourceListResult(vaultRoot, [])
-        },
-        async sourceAdd(input) {
-          return makeInboxSourceAddResult(
-            vaultRoot,
-            makeInboxConnector({
-              accountId: input.account ?? 'default',
-              id: input.id,
-              options: {
-                linqWebhookHost: '127.0.0.1',
-                linqWebhookPath: '/linq-webhook',
-                linqWebhookPort: 8789,
-              },
-              source: 'linq',
-            }),
-          )
-        },
-      },
-      platform: 'linux',
-      requestId: 'req-linq-add',
-      steps: [],
-      vault: vaultRoot,
-    })
-    assert.deepEqual(linqConfigured, [
-      {
-        autoReply: true,
-        channel: 'linq',
-        configured: true,
-        connectorId: 'linq:default',
-        detail:
-          'Configured the Linq connector "linq:default" at 127.0.0.1:8789/linq-webhook and enabled assistant auto-reply for Linq direct chats.',
         enabled: true,
         missingEnv: [],
       },
@@ -1243,59 +1105,10 @@ test('configureSetupChannels covers added Telegram, Linq, and provisioned email 
   }
 })
 
-test('configureSetupChannels reuses Linq connectors when env is missing and preserves matching email backlog timestamps', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'setup-cli-channel-linq-email-'))
+test('configureSetupChannels preserves matching email backlog timestamps', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'setup-cli-channel-email-backlog-'))
 
   try {
-    const linqConfigured = await configureSetupChannels({
-      channels: ['linq'],
-      dryRun: false,
-      env: {},
-      inboxServices: {
-        async bootstrap() {
-          throw new Error('bootstrap should not run in this test')
-        },
-        async sourceList() {
-          return makeInboxSourceListResult(vaultRoot, [
-            makeInboxConnector({
-              accountId: 'default',
-              id: 'linq:default',
-              options: {
-                linqWebhookHost: '127.0.0.1',
-                linqWebhookPath: '/linq-webhook',
-                linqWebhookPort: 8789,
-              },
-              source: 'linq',
-            }),
-          ])
-        },
-        async sourceAdd() {
-          throw new Error('sourceAdd should not run when Linq env is missing')
-        },
-      },
-      platform: 'linux',
-      requestId: 'req-linq-missing-env',
-      steps: [],
-      vault: vaultRoot,
-    })
-
-    assert.equal(linqConfigured[0]?.autoReply, false)
-    assert.equal(linqConfigured[0]?.channel, 'linq')
-    assert.equal(linqConfigured[0]?.configured, true)
-    assert.equal(linqConfigured[0]?.connectorId, 'linq:default')
-    assert.deepEqual(linqConfigured[0]?.missingEnv, [
-      'LINQ_API_TOKEN',
-      'LINQ_WEBHOOK_SECRET',
-    ])
-    assert.match(
-      linqConfigured[0]?.detail ?? '',
-      /Reused the Linq connector "linq:default"/u,
-    )
-    assert.match(
-      linqConfigured[0]?.detail ?? '',
-      /skipped assistant auto-reply until both a Linq API token and webhook secret are available/u,
-    )
-
     await saveAssistantAutomationState(vaultRoot, {
       version: 1,
       inboxScanCursor: null,
@@ -1431,36 +1244,6 @@ test('configureSetupChannels skips missing-env channels cleanly when no connecto
       },
     ])
     assert.equal(telegramSteps[0]?.status, 'skipped')
-
-    const linqSteps: SetupStepResult[] = []
-    const linqConfigured = await configureSetupChannels({
-      channels: ['linq'],
-      dryRun: false,
-      env: {},
-      inboxServices: {
-        async bootstrap() {
-          throw new Error('bootstrap should not run in this test')
-        },
-        sourceAdd,
-        sourceList,
-      },
-      platform: 'linux',
-      requestId: 'req-linq-missing-new',
-      steps: linqSteps,
-      vault: vaultRoot,
-    })
-    assert.deepEqual(linqConfigured, [
-      {
-        autoReply: false,
-        channel: 'linq',
-        configured: false,
-        connectorId: null,
-        detail: `Linq needs LINQ_API_TOKEN and LINQ_WEBHOOK_SECRET in the current environment before setup can add the connector and enable assistant auto-reply. ${SETUP_RUNTIME_ENV_NOTICE}`,
-        enabled: true,
-        missingEnv: ['LINQ_API_TOKEN', 'LINQ_WEBHOOK_SECRET'],
-      },
-    ])
-    assert.equal(linqSteps[0]?.status, 'skipped')
 
     const emailSteps: SetupStepResult[] = []
     const emailConfigured = await configureSetupChannels({

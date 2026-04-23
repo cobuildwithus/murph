@@ -8,7 +8,6 @@ const {
   ensureDirectoryMock,
   fileExistsMock,
   findConnectorMock,
-  probeLinqApiMock,
   readConfigMock,
   rebuildRuntimeMock,
   resolveRuntimePathsMock,
@@ -20,7 +19,6 @@ const {
   ensureDirectoryMock: vi.fn(),
   fileExistsMock: vi.fn(),
   findConnectorMock: vi.fn(),
-  probeLinqApiMock: vi.fn(),
   readConfigMock: vi.fn(),
   rebuildRuntimeMock: vi.fn(),
   resolveRuntimePathsMock: vi.fn(),
@@ -52,15 +50,6 @@ vi.mock('../src/inbox-services/shared.ts', async (importActual) => {
   return {
     ...actual,
     fileExists: fileExistsMock,
-  }
-})
-
-vi.mock('@murphai/operator-config/linq-runtime', async (importActual) => {
-  const actual =
-    await importActual<typeof import('@murphai/operator-config/linq-runtime')>()
-  return {
-    ...actual,
-    probeLinqApi: probeLinqApiMock,
   }
 })
 
@@ -399,9 +388,6 @@ beforeEach(() => {
     passCheck('parser-ffmpeg', 'ffmpeg configured'),
     warnCheck('parser-whisper', 'whisper configured but optional'),
   ])
-  probeLinqApiMock.mockResolvedValue({
-    phoneNumbers: ['+15551234567'],
-  })
 })
 
 test('bootstrap initializes runtime, writes parser config, and optionally enforces strict readiness', async () => {
@@ -884,84 +870,43 @@ test('email strategy covers missing configuration, delegated drivers, and unread
   assert.equal(findCheck(successEmailContext, 'probe')?.status, 'pass')
 })
 
-test('linq strategy covers missing credentials plus successful, empty, and failing probes', async () => {
-  const linqConnector = createConnector('linq', 'linq:primary', {
-    options: {
-      linqWebhookHost: '127.0.0.1',
-      linqWebhookPath: '/hooks/linq',
-      linqWebhookPort: 9010,
-    },
+test('doctor reports unsupported local sources without invoking a strategy', async () => {
+  readConfigMock.mockResolvedValue({
+    connectors: [createConnector('linq', 'linq:primary')],
   })
 
-  const missingCredentialsContext = createDoctorContext({
-    sourceId: linqConnector.id,
+  const doctor = createInboxBootstrapDoctorOps(createEnvironment())
+
+  const result = await doctor.doctor({
+    requestId: null,
+    sourceId: 'linq:primary',
+    vault: '/vault',
   })
-  await DOCTOR_STRATEGIES.linq(missingCredentialsContext, linqConnector, {
-    env: createEnvironment(),
-    runDoctorCheck,
-  })
-  assert.equal(findCheck(missingCredentialsContext, 'token')?.status, 'fail')
-  assert.equal(
-    findCheck(missingCredentialsContext, 'webhook-secret')?.status,
-    'fail',
+
+  assert.equal(result.ok, false)
+  assert.equal(findCheck(result, 'source-unsupported')?.status, 'fail')
+  assert.match(
+    findCheck(result, 'source-unsupported')?.message ?? '',
+    /no longer supports the "linq" inbox source/u,
   )
-  assert.equal(
-    findCheck(missingCredentialsContext, 'webhook-listener')?.status,
-    'fail',
+})
+
+test('doctor reports unsupported local sources in all-connectors mode', async () => {
+  readConfigMock.mockResolvedValue({
+    connectors: [createConnector('linq', 'linq:primary')],
+  })
+
+  const doctor = createInboxBootstrapDoctorOps(createEnvironment())
+
+  const result = await doctor.doctor({
+    requestId: null,
+    vault: '/vault',
+  })
+
+  assert.equal(result.ok, false)
+  assert.equal(findCheck(result, 'unsupported-connectors')?.status, 'fail')
+  assert.match(
+    findCheck(result, 'unsupported-connectors')?.message ?? '',
+    /"linq:primary" \(linq\)/u,
   )
-  assert.equal(findCheck(missingCredentialsContext, 'probe'), null)
-
-  const successContext = createDoctorContext({
-    sourceId: linqConnector.id,
-  })
-  probeLinqApiMock.mockResolvedValueOnce({
-    phoneNumbers: ['+15551234567'],
-  })
-  await DOCTOR_STRATEGIES.linq(successContext, linqConnector, {
-    env: createEnvironment({
-      getEnvironment: () => ({
-        LINQ_API_TOKEN: 'linq-token',
-        LINQ_WEBHOOK_SECRET: 'linq-secret',
-      }),
-    }),
-    runDoctorCheck,
-  })
-  assert.equal(findCheck(successContext, 'token')?.status, 'pass')
-  assert.equal(
-    findCheck(successContext, 'webhook-listener')?.status,
-    'pass',
-  )
-  assert.equal(findCheck(successContext, 'probe')?.status, 'pass')
-
-  const emptyContext = createDoctorContext({
-    sourceId: linqConnector.id,
-  })
-  probeLinqApiMock.mockResolvedValueOnce({
-    phoneNumbers: [],
-  })
-  await DOCTOR_STRATEGIES.linq(emptyContext, linqConnector, {
-    env: createEnvironment({
-      getEnvironment: () => ({
-        LINQ_API_TOKEN: 'linq-token',
-        LINQ_WEBHOOK_SECRET: 'linq-secret',
-      }),
-    }),
-    runDoctorCheck,
-  })
-  assert.equal(findCheck(emptyContext, 'probe')?.status, 'warn')
-
-  const failureContext = createDoctorContext({
-    sourceId: linqConnector.id,
-  })
-  probeLinqApiMock.mockRejectedValueOnce(new Error('probe failed'))
-  await DOCTOR_STRATEGIES.linq(failureContext, linqConnector, {
-    env: createEnvironment({
-      getEnvironment: () => ({
-        LINQ_API_TOKEN: 'linq-token',
-        LINQ_WEBHOOK_SECRET: 'linq-secret',
-      }),
-    }),
-    runDoctorCheck,
-  })
-  assert.equal(findCheck(failureContext, 'probe')?.status, 'fail')
 })

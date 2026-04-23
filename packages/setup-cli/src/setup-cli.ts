@@ -121,7 +121,6 @@ export interface SetupWizardRunner {
     initialChannels: readonly SetupChannel[]
     initialScheduledUpdates: readonly string[]
     initialWearables: readonly SetupWearable[]
-    linqLocalWebhookUrl?: string | null
     platform?: NodeJS.Platform
     publicBaseUrl?: string | null
     vault: string
@@ -217,7 +216,6 @@ export function createSetupCli(options: SetupCliOptions = {}): Cli.Cli {
         initialWearables: await resolveInitialSetupWizardWearables(
           context.options.vault,
         ),
-        linqLocalWebhookUrl: resolveSetupWizardLinqLocalWebhookUrl(),
         platform: getPlatform(),
         publicBaseUrl: resolveSetupWizardPublicBaseUrl(currentEnv),
         vault: context.options.vault,
@@ -252,7 +250,6 @@ export function createSetupCli(options: SetupCliOptions = {}): Cli.Cli {
           publicBaseUrl: resolveSetupWizardPublicBaseUrl(currentEnv),
           deviceSyncLocalBaseUrl:
             resolveSetupWizardDeviceSyncLocalBaseUrl(currentEnv),
-          linqLocalWebhookUrl: resolveSetupWizardLinqLocalWebhookUrl(),
         }),
       })
       envOverrides = await runtimeEnv.promptForMissing({
@@ -543,7 +540,7 @@ function buildSetupCtaCommands(result: SetupResult): Array<{
     commands.push({
       command: 'assistant run',
       description:
-        'Start the assistant automation loop so configured Telegram, Linq, or email channels can receive automatic replies.',
+        'Start the assistant automation loop so configured Telegram or email channels can receive automatic replies.',
     })
   }
 
@@ -577,15 +574,6 @@ function buildSetupCtaCommands(result: SetupResult): Array<{
       command: 'inbox source add telegram --id telegram:bot --account bot',
       description:
         'Add the Telegram poll connector after setting TELEGRAM_BOT_TOKEN in the shell or local `.env`.',
-    })
-  }
-
-  if (!result.channels.some((channel) => channel.channel === 'linq' && channel.configured)) {
-    commands.push({
-      command:
-        'inbox source add linq --id linq:default --account default --linqWebhookPort 8789 --linqWebhookPath /linq-webhook',
-      description:
-        'Add the Linq webhook connector after setting LINQ_API_TOKEN and LINQ_WEBHOOK_SECRET in the shell or local `.env`, then point Linq at the local listener or a tunnel that forwards to it.',
     })
   }
 
@@ -671,10 +659,6 @@ function resolveSetupWizardDeviceSyncLocalBaseUrl(
     readSetupEnvValue(env, ['DEVICE_SYNC_BASE_URL']) ??
     'http://localhost:8788'
   )
-}
-
-function resolveSetupWizardLinqLocalWebhookUrl(): string {
-  return 'http://127.0.0.1:8789/linq-webhook'
 }
 
 function readSetupEnvValue(

@@ -280,7 +280,6 @@ test('onboard CLI builds setup CTAs from configured channels, updates, wearables
       'murph assistant chat',
       'murph inbox doctor',
       'murph inbox source add telegram --id telegram:bot --account bot',
-      'murph inbox source add linq --id linq:default --account default --linqWebhookPort 8789 --linqWebhookPath /linq-webhook',
       'murph device connect oura --open',
       'murph export AGENTMAIL_API_KEY=...',
       'murph export OURA_CLIENT_ID=...',
@@ -360,7 +359,6 @@ test('interactive onboard uses wizard defaults, runtime env hints, and setupHost
               initialChannels: [...input.initialChannels],
               initialScheduledUpdates: [...input.initialScheduledUpdates],
               initialWearables: [...input.initialWearables],
-              linqLocalWebhookUrl: input.linqLocalWebhookUrl,
               platform: input.platform,
               publicBaseUrl: input.publicBaseUrl,
               vault: input.vault,
@@ -369,7 +367,7 @@ test('interactive onboard uses wizard defaults, runtime env hints, and setupHost
 
             return {
               assistantPreset: 'skip',
-              channels: ['linq'],
+              channels: [],
               scheduledUpdates: ['weekly-health-snapshot'],
               wearables: ['oura'],
             }
@@ -390,7 +388,6 @@ test('interactive onboard uses wizard defaults, runtime env hints, and setupHost
         'weekly-health-snapshot',
       ],
       initialWearables: [],
-      linqLocalWebhookUrl: 'http://127.0.0.1:8789/linq-webhook',
       platform: 'linux',
       publicBaseUrl: 'https://public.example',
       vault: './wizard-vault',
@@ -399,7 +396,7 @@ test('interactive onboard uses wizard defaults, runtime env hints, and setupHost
     assert.deepEqual(promptCalls, [
       {
         assistantApiKeyEnv: undefined,
-        channels: ['linq'],
+        channels: [],
         env: {
           DEVICE_SYNC_BASE_URL: ' http://127.0.0.1:9000 ',
           DEVICE_SYNC_PUBLIC_BASE_URL: ' https://public.example ',
@@ -429,7 +426,7 @@ test('interactive onboard uses wizard defaults, runtime env hints, and setupHost
           reasoningEffort: null,
           sandbox: null,
         },
-        channels: ['linq'],
+        channels: [],
         envOverrides: {
           OURA_CLIENT_ID: 'oura-client',
         },
@@ -853,7 +850,7 @@ test('setup CLI initial wizard channels reuse saved state, fall back to inbox co
 
   assert.deepEqual(
     await resolveInitialSetupWizardChannels(vaultRoot, 'linux'),
-    ['telegram', 'linq'],
+    ['telegram'],
   )
 
   await writeFile(

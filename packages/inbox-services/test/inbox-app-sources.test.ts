@@ -221,30 +221,14 @@ test('sourceAdd requires an email account when provisioning is disabled', async 
   )
 })
 
-test('sourceAdd rejects conflicting Linq webhook endpoints', async () => {
-  readConfigMock.mockResolvedValue(
-    createConfig([
-      {
-        id: 'linq:primary',
-        source: 'linq',
-        enabled: true,
-        accountId: null,
-        options: {
-          linqWebhookHost: '0.0.0.0',
-          linqWebhookPath: '/linq-webhook',
-          linqWebhookPort: 8789,
-        },
-      },
-    ]),
-  )
-
+test('sourceAdd rejects local Linq connector creation', async () => {
   const ops = createInboxSourceOps(createEnv())
 
   await assert.rejects(
     () =>
       ops.sourceAdd({
         ...commandContext(),
-        id: 'linq:secondary',
+        id: 'linq:primary',
         source: 'linq',
         account: null,
         address: null,
@@ -258,7 +242,7 @@ test('sourceAdd rejects conflicting Linq webhook endpoints', async () => {
       }),
     (error: unknown) => {
       assert.ok(error instanceof VaultCliError)
-      assert.equal(error.code, 'INBOX_LINQ_WEBHOOK_CONFLICT')
+      assert.equal(error.code, 'INBOX_SOURCE_LOCAL_LINQ_REMOVED')
       return true
     },
   )
@@ -319,31 +303,6 @@ test('sourceAdd provisions email connectors and enables auto reply when requeste
   assert.equal(enableAssistantAutoReplyChannel.mock.calls[0]?.[1], 'email')
   assert.equal(sortConnectorsMock.mock.calls.length, 1)
   assert.equal(writeConfigMock.mock.calls.length, 1)
-})
-
-test('sourceAdd normalizes Linq webhook settings before writing config', async () => {
-  const config = createConfig()
-  readConfigMock.mockResolvedValue(config)
-  const ops = createInboxSourceOps(createEnv())
-
-  const result = await ops.sourceAdd({
-    ...commandContext(),
-    id: 'linq:primary',
-    source: 'linq',
-    account: null,
-    address: null,
-    backfillLimit: 10,
-    provision: false,
-    enableAutoReply: false,
-    includeOwn: false,
-    linqWebhookHost: null,
-    linqWebhookPath: 'hook',
-    linqWebhookPort: 9000,
-  })
-
-  assert.equal(result.connector.options.linqWebhookHost, undefined)
-  assert.equal(result.connector.options.linqWebhookPath, '/hook')
-  assert.equal(result.connector.options.linqWebhookPort, 9000)
 })
 
 test('sourceList returns the current config connectors', async () => {

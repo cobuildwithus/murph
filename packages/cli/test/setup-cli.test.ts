@@ -363,44 +363,26 @@ test('public URL review recommends hosted apps/web for wearable ingress when no 
   )
 })
 
-test('public URL review recommends tunnel mode for Linq-only ingress and keeps the local webhook target explicit', () => {
+test('public URL review stays hidden when no public callbacks are needed', () => {
   const review = buildSetupWizardPublicUrlReview({
-    channels: ['linq'],
+    channels: [],
     wearables: [],
   })
 
-  assert.equal(review.enabled, true)
-  assert.equal(review.recommendedStrategy, 'tunnel')
-  assert.match(review.summary, /local inbox webhook/u)
-  assert.deepEqual(review.targets, [
-    {
-      detail:
-        'Required if you enable Linq. Point Linq at the public tunnel URL that forwards here. Hosted `apps/web` does not replace this Linq webhook yet.',
-      label: 'Linq webhook',
-      localReceiverUrl: 'http://127.0.0.1:8789/linq-webhook',
-      providerUrl: 'https://<your-public-host>/linq-webhook',
-      requirement: 'required',
-    },
-  ])
-  assert.match(
-    describeSetupWizardPublicUrlStrategyChoice({
-      review,
-      strategy: 'tunnel',
-    }),
-    /does not replace this Linq webhook yet/u,
-  )
+  assert.equal(review.enabled, false)
+  assert.equal(review.summary, '')
+  assert.deepEqual(review.targets, [])
 })
 
-test('public URL review keeps hosted wearable guidance while preserving the local Linq webhook when both are selected', () => {
+test('public URL review keeps hosted wearable guidance for wearable callbacks only', () => {
   const review = buildSetupWizardPublicUrlReview({
-    channels: ['linq'],
+    channels: [],
     wearables: ['garmin', 'oura', 'whoop'],
   })
 
   assert.equal(review.enabled, true)
   assert.equal(review.recommendedStrategy, 'hosted')
-  assert.match(review.summary, /hosted `apps\/web`/u)
-  assert.match(review.summary, /local inbox webhook/u)
+  assert.match(review.summary, /Hosted `apps\/web`/u)
   assert.deepEqual(
     review.targets.map((target) => `${target.label}:${target.requirement}`),
     [
@@ -409,21 +391,20 @@ test('public URL review keeps hosted wearable guidance while preserving the loca
       'WHOOP webhook:optional',
       'Oura callback:required',
       'Oura webhook:optional',
-      'Linq webhook:required',
     ],
   )
-  assert.match(
+  assert.equal(
     describeSetupWizardPublicUrlStrategyChoice({
       review,
       strategy: 'hosted',
     }),
-    /keep Linq on the local webhook path/u,
+    'Use hosted `apps/web` for Garmin/WHOOP/Oura/Strava so callbacks stay on one stable public base.',
   )
 })
 
 test('public URL review stays hidden when a public device-sync base is already configured', () => {
   const review = buildSetupWizardPublicUrlReview({
-    channels: ['linq'],
+    channels: [],
     wearables: ['whoop'],
     publicBaseUrl: 'https://health.example.test/api/device-sync',
   })
@@ -474,7 +455,7 @@ test('interactive onboarding treats public URL guidance as informational and nev
     wizard: {
       async run() {
         return {
-          channels: ['linq'],
+          channels: [],
           publicUrlStrategy: 'hosted',
           scheduledUpdates: [],
           wearables: ['whoop'],
@@ -492,7 +473,7 @@ test('interactive onboarding treats public URL guidance as informational and nev
 
     assert.deepEqual(receivedInputs, [
       {
-        channels: ['linq'],
+        channels: [],
         publicUrlStrategy: null,
         scheduledUpdatePresetIds: [],
         wearables: ['whoop'],
@@ -1452,19 +1433,9 @@ test('runtime env helpers honor channel aliases and require explicit wearable cl
     [],
   )
   assert.deepEqual(
-    resolveSetupChannelMissingEnv('linq', {
-      LINQ_API_TOKEN: 'linq-token',
-      LINQ_WEBHOOK_SECRET: 'linq-secret',
-    }),
-    [],
+    resolveSetupChannelMissingEnv('telegram', {}),
+    ['TELEGRAM_BOT_TOKEN'],
   )
-  assert.deepEqual(resolveSetupChannelMissingEnv('telegram', {}), [
-    'TELEGRAM_BOT_TOKEN',
-  ])
-  assert.deepEqual(resolveSetupChannelMissingEnv('linq', {}), [
-    'LINQ_API_TOKEN',
-    'LINQ_WEBHOOK_SECRET',
-  ])
   assert.deepEqual(
     resolveSetupWearableMissingEnv('garmin', {
       GARMIN_CLIENT_ID: 'garmin-client',

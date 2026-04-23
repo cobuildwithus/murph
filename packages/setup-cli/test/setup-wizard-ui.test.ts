@@ -131,21 +131,21 @@ test('setup wizard answered, detail, and hint rows render the expected labels an
   assert.equal(collectElementText(keyValue), 'Assistant: Codex')
 
   const publicUrl = createSetupWizardPublicUrlTargetRow({
-    detail: 'Required. Point Linq at the public tunnel URL that forwards here.',
-    label: 'Linq webhook',
-    localReceiverUrl: 'http://127.0.0.1:8789/linq-webhook',
-    providerUrl: 'https://<your-public-host>/linq-webhook',
+    detail: 'Required. Register this redirect URL in the Garmin dashboard.',
+    label: 'Garmin callback',
+    localReceiverUrl: 'http://127.0.0.1:8788/oauth/garmin/callback',
+    providerUrl: 'https://<your-public-host>/oauth/garmin/callback',
     requirement: 'required',
   })
   assert.equal(
     collectElementText(publicUrl),
     [
-      'Linq webhook (required)',
+      'Garmin callback (required)',
       '  Local receiver: ',
-      'http://127.0.0.1:8789/linq-webhook',
+      'http://127.0.0.1:8788/oauth/garmin/callback',
       '  Paste into provider: ',
-      'https://<your-public-host>/linq-webhook',
-      '  Required. Point Linq at the public tunnel URL that forwards here.',
+      'https://<your-public-host>/oauth/garmin/callback',
+      '  Required. Register this redirect URL in the Garmin dashboard.',
     ].join(''),
   )
 
