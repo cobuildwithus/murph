@@ -4,7 +4,9 @@ import { test } from "vitest";
 
 import {
   HOSTED_WEB_SMOKE_HEALTH_PATH,
+  isHostedWebSmokeArtifactFresh,
   resolveHostedWebSmokeDevCommand,
+  shouldPruneHostedWebSmokeCache,
 } from "../scripts/dev-smoke";
 import { createHostedWebSmokeEnvironment } from "../next-artifacts";
 
@@ -45,6 +47,47 @@ test("hosted web smoke accepts an explicit local-env override", () => {
     })),
     "dev:local-env",
   );
+});
+
+test("hosted web smoke keeps the Turbopack cache locally by default", () => {
+  assert.equal(
+    shouldPruneHostedWebSmokeCache(createEnv({
+      CI: "false",
+    })),
+    false,
+  );
+});
+
+test("hosted web smoke prunes the Turbopack cache in CI", () => {
+  assert.equal(
+    shouldPruneHostedWebSmokeCache(createEnv({
+      CI: "true",
+    })),
+    true,
+  );
+});
+
+test("hosted web smoke accepts explicit cache-prune overrides", () => {
+  assert.equal(
+    shouldPruneHostedWebSmokeCache(createEnv({
+      CI: "true",
+      MURPH_HOSTED_WEB_SMOKE_PRUNE_CACHE: "0",
+    })),
+    false,
+  );
+  assert.equal(
+    shouldPruneHostedWebSmokeCache(createEnv({
+      CI: "false",
+      MURPH_HOSTED_WEB_SMOKE_PRUNE_CACHE: "1",
+    })),
+    true,
+  );
+});
+
+test("hosted web smoke artifact freshness allows current-run mtimes", () => {
+  assert.equal(isHostedWebSmokeArtifactFresh({ mtimeMs: 10_000 }, 10_000), true);
+  assert.equal(isHostedWebSmokeArtifactFresh({ mtimeMs: 8_500 }, 10_000), true);
+  assert.equal(isHostedWebSmokeArtifactFresh({ mtimeMs: 7_999 }, 10_000), false);
 });
 
 test("hosted web smoke falls back to the local database url when none is configured", () => {

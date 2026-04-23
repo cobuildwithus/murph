@@ -1,5 +1,6 @@
 import { spawn, type ChildProcessByStdio } from "node:child_process";
-import { access, readFile, readdir, rm } from "node:fs/promises";
+import { access, readFile, readdir, rm, stat } from "node:fs/promises";
+import type { Stats } from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import type { Readable } from "node:stream";
@@ -17,7 +18,9 @@ const serverReadyPollIntervalMs = 250;
 const childShutdownTimeoutMs = 5_000;
 const staleLockWaitTimeoutMs = 15_000;
 const staleLockWaitPollIntervalMs = 250;
+const artifactFreshnessToleranceMs = 2_000;
 const hostedWebSmokeLocalEnvEnvVarName = "MURPH_HOSTED_WEB_SMOKE_USE_LOCAL_ENV";
+const hostedWebSmokePruneCacheEnvVarName = "MURPH_HOSTED_WEB_SMOKE_PRUNE_CACHE";
 export const HOSTED_WEB_SMOKE_HEALTH_PATH = "/api/internal/health";
 
 type HostedWebSmokeChildProcess = ChildProcessByStdio<null, Readable, Readable>;
@@ -34,6 +37,18 @@ export function resolveHostedWebSmokeDevCommand(
   return ci === "1" || ci === "true" ? "dev:local-env" : "dev";
 }
 
+export function shouldPruneHostedWebSmokeCache(
+  environment: NodeJS.ProcessEnv = process.env,
+): boolean {
+  const override = parseBooleanEnvironmentValue(environment[hostedWebSmokePruneCacheEnvVarName]);
+
+  if (override !== null) {
+    return override;
+  }
+
+  return parseBooleanEnvironmentValue(environment.CI) === true;
+}
+
 async function main(): Promise<void> {
   const scriptDir = path.dirname(fileURLToPath(import.meta.url));
   const packageDir = path.resolve(scriptDir, "..");
@@ -43,7 +58,10 @@ async function main(): Promise<void> {
   const port = await reserveTcpPort();
   const smokeDevCommand = resolveHostedWebSmokeDevCommand(process.env);
   await clearStaleHostedWebSmokeLocks(nextLockPath);
-  await pruneTurbopackCache(distDir);
+  if (shouldPruneHostedWebSmokeCache(process.env)) {
+    await pruneTurbopackCache(distDir);
+  }
+  const smokeStartedAtMs = Date.now();
   const child = spawn(
     resolvePnpmCommand(),
     [
@@ -82,7 +100,7 @@ async function main(): Promise<void> {
   try {
     await waitForHealthyServer(port, child, () => combinedOutput);
     await assertRequestStatus(port, "GET", HOSTED_WEB_SMOKE_HEALTH_PATH);
-    await assertDevArtifacts(distDir);
+    await assertDevArtifacts(distDir, smokeStartedAtMs);
   } finally {
     removeSignalCleanup();
     removeExitCleanup();
@@ -129,37 +147,94 @@ async function assertRequestStatus(
   }
 }
 
-async function assertDevArtifacts(distDir: string): Promise<void> {
+async function assertDevArtifacts(distDir: string, smokeStartedAtMs: number): Promise<void> {
   await access(distDir);
-  const artifactPaths = await listRelativePaths(distDir);
-  const hasRouteTypes = artifactPaths.some((entry) => entry.endsWith("types/routes.d.ts"));
-  const hasTurbopackCache = artifactPaths.some((entry) => entry.includes("turbopack"));
+  const routeTypesPath = path.join(distDir, "dev", "types", "routes.d.ts");
+  const routeTypesStats = await readPathStats(routeTypesPath);
 
-  if (!hasRouteTypes) {
+  if (!routeTypesStats || !isHostedWebSmokeArtifactFresh(routeTypesStats, smokeStartedAtMs)) {
     throw new Error(`apps/web dev smoke did not materialize route types under ${distDir}`);
   }
 
-  if (isHostedWebDevFileSystemCacheEnabled(process.env) && !hasTurbopackCache) {
+  if (
+    isHostedWebDevFileSystemCacheEnabled(process.env)
+    && !await hasFreshTurbopackCache(distDir, smokeStartedAtMs)
+  ) {
     throw new Error(`apps/web dev smoke did not materialize a Turbopack cache under ${distDir}`);
   }
 }
 
-async function listRelativePaths(rootDir: string, currentDir = rootDir): Promise<string[]> {
-  const entries = await readdir(currentDir, { withFileTypes: true });
-  const relativePaths: string[] = [];
+async function hasFreshTurbopackCache(
+  distDir: string,
+  smokeStartedAtMs: number,
+): Promise<boolean> {
+  const cacheRoots = [
+    path.join(distDir, "dev", "cache", "turbopack"),
+    path.join(distDir, "cache", "turbopack"),
+  ];
 
-  for (const entry of entries) {
-    const absolutePath = path.join(currentDir, entry.name);
-    const relativePath = path.relative(rootDir, absolutePath).replace(/\\/g, "/");
-
-    relativePaths.push(relativePath);
-
-    if (entry.isDirectory()) {
-      relativePaths.push(...await listRelativePaths(rootDir, absolutePath));
+  for (const cacheRoot of cacheRoots) {
+    if (await hasFreshTurbopackCacheRoot(cacheRoot, smokeStartedAtMs)) {
+      return true;
     }
   }
 
-  return relativePaths;
+  return false;
+}
+
+async function hasFreshTurbopackCacheRoot(
+  cacheRoot: string,
+  smokeStartedAtMs: number,
+): Promise<boolean> {
+  const cacheRootStats = await readPathStats(cacheRoot);
+  if (!cacheRootStats) {
+    return false;
+  }
+
+  if (isHostedWebSmokeArtifactFresh(cacheRootStats, smokeStartedAtMs)) {
+    return true;
+  }
+
+  let entries;
+  try {
+    entries = await readdir(cacheRoot, { withFileTypes: true });
+  } catch (error) {
+    if (isMissingPathError(error)) {
+      return false;
+    }
+
+    throw error;
+  }
+
+  for (const entry of entries) {
+    const entryStats = await readPathStats(path.join(cacheRoot, entry.name));
+    if (entryStats && isHostedWebSmokeArtifactFresh(entryStats, smokeStartedAtMs)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+export function isHostedWebSmokeArtifactFresh(
+  stats: Pick<Stats, "mtimeMs">,
+  smokeStartedAtMs: number,
+): boolean {
+  return (
+    stats.mtimeMs + artifactFreshnessToleranceMs >= smokeStartedAtMs
+  );
+}
+
+async function readPathStats(targetPath: string): Promise<Stats | null> {
+  try {
+    return await stat(targetPath);
+  } catch (error) {
+    if (isMissingPathError(error)) {
+      return null;
+    }
+
+    throw error;
+  }
 }
 
 async function request(
@@ -486,6 +561,27 @@ async function pruneTurbopackCache(distDir: string): Promise<void> {
 
 function isJsonObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function parseBooleanEnvironmentValue(value: string | undefined): boolean | null {
+  if (value === undefined) {
+    return null;
+  }
+
+  switch (value.trim().toLowerCase()) {
+    case "1":
+    case "true":
+    case "yes":
+    case "on":
+      return true;
+    case "0":
+    case "false":
+    case "no":
+    case "off":
+      return false;
+    default:
+      return null;
+  }
 }
 
 function isMissingPathError(error: unknown): boolean {
