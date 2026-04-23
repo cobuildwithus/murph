@@ -41,14 +41,19 @@ function runResearchPackageScript(
   packageScriptPath: string,
   outDir: string,
   prefix: string,
+  extraArgs: string[] = [],
 ) {
-  return spawnSync("bash", [packageScriptPath, "--zip", "--out-dir", outDir, "--name", prefix], {
-    cwd: repoRoot,
-    encoding: "utf8",
-    env: {
-      ...process.env,
+  return spawnSync(
+    "bash",
+    [packageScriptPath, "--zip", "--out-dir", outDir, "--name", prefix, ...extraArgs],
+    {
+      cwd: repoRoot,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+      },
     },
-  });
+  );
 }
 
 function runGeneratedReviewGptHelper(
@@ -244,6 +249,7 @@ describe("research init scaffold", () => {
       expect(charterPrompt).toContain("## SECTION_SEAMS_V1");
       expect(charterPrompt).toContain("## SOURCE_EXTRACTION_SCHEMA_V1");
       expect(charterPrompt).toContain("## INITIAL_FILE_PLAN_V1");
+      expect(charterPrompt).toContain("Treat `repo.snapshot.zip` as the authoritative source");
 
       const helperScript = readFileSync(
         path.join(outDir, "commands", "_run-review-gpt.sh"),
@@ -252,6 +258,8 @@ describe("research init scaffold", () => {
       expect(helperScript).toContain("pnpm exec cobuild-review-gpt");
       expect(helperScript).toContain('--config "${review_gpt_config}"');
       expect(helperScript).toContain('config/review-gpt-research.config.sh');
+      expect(helperScript).toContain('assert_workspace_package_script');
+      expect(helperScript).toContain('resolve_package_script_from_config');
       expect(helperScript).toContain("--send");
       expect(helperScript).toContain("--wait");
       expect(helperScript).toContain("murph-workspace");
@@ -438,6 +446,17 @@ describe("research init scaffold", () => {
         "packages/health-commons/content/artifacts/norwegian-4x4/research-artifacts.json",
       );
       expect(zipEntries).not.toContain("packages/health-commons/content/sources/sauna/pmid-37029766.md");
+
+      const compatPackageResult = runResearchPackageScript(
+        path.join(outDir, "scripts", "package-research-context.sh"),
+        packageOutDir,
+        "cold-plunge-research-context-compat",
+        ["--no-docs", "--with-tests"],
+      );
+
+      expect(compatPackageResult.status).toBe(0);
+      expect(compatPackageResult.stderr).toBe("");
+      expect(compatPackageResult.stdout).toContain("Research workspace root:");
     } finally {
       rmSync(tempRoot, { recursive: true, force: true });
     }
@@ -632,6 +651,66 @@ exit 17
       rmSync(tempRoot, { recursive: true, force: true });
     }
   });
+
+  it("refuses to send when an override config resolves to a different workspace package script", () => {
+    mkdirSync(researchOutputRoot, { recursive: true });
+    const tempRoot = mkdtempSync(path.join(researchOutputRoot, "tmp-research-helper-mismatch-"));
+    const outDir = path.join(tempRoot, "helper-config-mismatch");
+
+    try {
+      const initResult = runResearchInit("cold plunge", "--out-dir", outDir);
+      expect(initResult.status).toBe(0);
+
+      const wrongConfigPath = path.join(tempRoot, "wrong-review-gpt.config.sh");
+      writeFileSync(
+        wrongConfigPath,
+        `#!/usr/bin/env bash
+package_script="${path.join(tempRoot, "other-workspace", "scripts", "package-research-context.sh")}"
+`,
+        "utf8",
+      );
+
+      const stubBinDir = path.join(tempRoot, "bin");
+      mkdirSync(stubBinDir, { recursive: true });
+      const pnpmTouchedPath = path.join(tempRoot, "pnpm-touched");
+      const stubPnpmPath = path.join(stubBinDir, "pnpm");
+      writeFileSync(
+        stubPnpmPath,
+        `#!/usr/bin/env bash
+set -euo pipefail
+printf 'pnpm should not run\\n' >"${pnpmTouchedPath}"
+exit 99
+`,
+        "utf8",
+      );
+      chmodSync(stubPnpmPath, 0o755);
+
+      const helperLabel = "98-config-mismatch";
+      const helperScriptPath = path.join(outDir, "commands", "_run-review-gpt.sh");
+      const promptPath = path.join(outDir, "prompts", "01-charter.md");
+      const responsePath = path.join(outDir, "responses", `${helperLabel}.md`);
+      const helperResult = runGeneratedReviewGptHelper(
+        helperScriptPath,
+        helperLabel,
+        promptPath,
+        responsePath,
+        {
+          ...process.env,
+          PATH: `${stubBinDir}${path.delimiter}${process.env.PATH ?? ""}`,
+          RESEARCH_REVIEW_GPT_CONFIG: wrongConfigPath,
+        },
+      );
+
+      expect(helperResult.status).toBe(64);
+      expect(helperResult.stderr).toContain(
+        "review:gpt config resolves to a different research package script.",
+      );
+      expect(helperResult.stderr).toContain("Refusing to send because this would attach the wrong research workspace bundle.");
+      expect(existsSync(pnpmTouchedPath)).toBe(false);
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
 });
 
 function writeTextFileSync(filePath: string, content: string) {
@@ -640,15 +719,22 @@ function writeTextFileSync(filePath: string, content: string) {
 
 function assertResearchReviewGptSupportFiles(outDir: string) {
   const configPath = path.join(outDir, "config", "review-gpt-research.config.sh");
+  const workProfileConfigPath = path.join(outDir, "config", "review-gpt-work-profile.sh");
   const packageScriptPath = path.join(outDir, "scripts", "package-research-context.sh");
 
   expect(existsSync(configPath)).toBe(true);
+  expect(existsSync(workProfileConfigPath)).toBe(true);
   expect(existsSync(packageScriptPath)).toBe(true);
 
   const researchConfig = readFileSync(configPath, "utf8");
   expect(researchConfig).toContain('scripts/review-gpt.config.sh');
   expect(researchConfig).toContain('package_script="${workspace_dir}/scripts/package-research-context.sh"');
   expect(researchConfig).toContain('research_thread_export_browser_endpoint="${RESEARCH_THREAD_EXPORT_BROWSER_ENDPOINT:-}"');
+
+  const workProfileConfig = readFileSync(workProfileConfigPath, "utf8");
+  expect(workProfileConfig).toContain('scripts/review-gpt.config.sh');
+  expect(workProfileConfig).toContain('package_script="${workspace_dir:-$(cd "${script_dir}/.." && pwd)}/scripts/package-research-context.sh"');
+  expect(workProfileConfig).toContain('managed_browser_port="${RESEARCH_MANAGED_BROWSER_PORT:-9224}"');
 
   const packageScript = readFileSync(packageScriptPath, "utf8");
   expect(packageScript).toContain('add_file_if_exists "${workspace_relative}/workflow.json"');

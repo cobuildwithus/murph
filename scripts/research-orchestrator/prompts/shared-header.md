@@ -11,6 +11,11 @@ Protocol target:
 - Source directory: packages/health-commons/content/sources/{{FAMILY_SLUG}}
 - Artifact manifest path: packages/health-commons/content/artifacts/{{FAMILY_SLUG}}/research-artifacts.json
 
+Attached context note:
+- For research runs, `repo.repomix.xml` may exclude `output-packages/**` and other generated workspace files.
+- Treat `repo.snapshot.zip` as the authoritative source for any paths under `output-packages/research/**`, including prompts, responses, downloads, chat URLs, and thread exports.
+- Do not infer that a listed research input is missing just because it is absent from repomix.
+
 Research rules:
 - Maximize source recall before synthesizing.
 - Never invent DOI, PMID, PMCID, sample size, author, year, result, effect size, or adverse event.
