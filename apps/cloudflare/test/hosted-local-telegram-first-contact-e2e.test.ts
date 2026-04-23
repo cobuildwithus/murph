@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   buildHostedExecutionMemberActivatedWake,
@@ -41,15 +41,18 @@ it("derives stable numeric suffixes from the full Telegram user id", () => {
 });
 
 describe("hosted local Telegram auto-reply e2e", () => {
-  afterEach(async () => {
+  beforeAll(async () => {
+    await startTelegramScenario();
+  }, 300_000);
+
+  afterAll(async () => {
     await scenario?.stop();
     scenario = null;
     await telegramStub?.stop();
     telegramStub = null;
-  });
+  }, 120_000);
 
   it("sends Telegram typing and a reply after an inbound Telegram message", async () => {
-    await startTelegramScenario();
     await requireScenario().seedActiveHostedMember({ memberId: userId });
     await requireScenario().runWake(buildActivationWake(userId), userId);
 
@@ -120,7 +123,6 @@ describe("hosted local Telegram auto-reply e2e", () => {
   }, 300_000);
 
   it("keeps Telegram context when two messages arrive before hosted completion catches up", async () => {
-    await startTelegramScenario();
     await requireScenario().seedActiveHostedMember({ memberId: fastReplyUserId });
     await requireScenario().runWake(buildActivationWake(fastReplyUserId), fastReplyUserId);
 

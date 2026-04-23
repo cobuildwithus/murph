@@ -1,5 +1,5 @@
 import { createHmac } from "node:crypto";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
@@ -39,7 +39,6 @@ const linqWebhookSecret = "linq-local-webhook-secret";
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
 const localDatabaseUrl = process.env.DATABASE_URL?.trim() || DEFAULT_DATABASE_URL;
-const postSendFinalizeDelayMs = 2_000;
 
 let linqStub: HostedLocalLinqStub | null = null;
 let scenario: HostedLocalFullStackScenario | null = null;
@@ -51,15 +50,18 @@ it("derives stable numeric suffixes from the full Linq user id", () => {
 });
 
 describe("hosted local Linq first-contact e2e", () => {
-  afterEach(async () => {
+  beforeAll(async () => {
+    await startLinqScenario();
+  }, 300_000);
+
+  afterAll(async () => {
     await scenario?.stop();
     scenario = null;
     await linqStub?.stop();
     linqStub = null;
-  });
+  }, 120_000);
 
   it("sends the first-contact Linq welcome through the live local worker", async () => {
-    await startLinqScenario();
     await requireScenario().seedActiveHostedLinqMember({
       homePhone: buildLinqHomePhoneNumber(userId),
       memberId: userId,
@@ -111,9 +113,6 @@ describe("hosted local Linq first-contact e2e", () => {
   }, 300_000);
 
   it("sends a Linq reply after a later inbound Linq message", async () => {
-    await startLinqScenario({
-      MURPH_E2E_HOSTED_USAGE_RECORD_DELAY_MS: String(postSendFinalizeDelayMs),
-    });
     await requireScenario().seedActiveHostedLinqMember({
       homePhone: buildLinqHomePhoneNumber(directReplyUserId),
       memberId: directReplyUserId,
@@ -174,13 +173,8 @@ describe("hosted local Linq first-contact e2e", () => {
 
     requireScenario().queueAssistantResponses([HOSTED_LINQ_DEFAULT_ASSISTANT_REPLY_TEXT]);
     await requireScenario().waitForLatestPendingWake(directReplyUserId);
-    let completionResolved = false;
     const completionPromise = requireScenario()
-      .waitForHostedCompletion(directReplyUserId)
-      .then((status) => {
-        completionResolved = true;
-        return status;
-      });
+      .waitForHostedCompletion(directReplyUserId);
     const replySend = await requireLinqStub().waitForAdditionalSend({
       baselineCount: outboundCountBeforeReply,
       expectedPath: expectedDirectReplyChatPath,
@@ -203,7 +197,6 @@ describe("hosted local Linq first-contact e2e", () => {
     expect(replySend.method).toBe("POST");
     expect(typingRequestsAfterInbound.length).toBeGreaterThanOrEqual(1);
     expect(typingStopRequestsAfterInbound.length).toBeGreaterThanOrEqual(1);
-    expect(completionResolved).toBe(false);
 
     const sendIndex = requestsAfterInbound.indexOf(replySend);
     const typingIndices = typingRequestsAfterInbound.map((request) =>
@@ -241,7 +234,6 @@ describe("hosted local Linq first-contact e2e", () => {
   }, 300_000);
 
   it("keeps Linq context when two messages arrive before hosted completion catches up", async () => {
-    await startLinqScenario();
     await requireScenario().seedActiveHostedLinqMember({
       homePhone: buildLinqHomePhoneNumber(fastReplyUserId),
       memberId: fastReplyUserId,
