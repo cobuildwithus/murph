@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   markAssistantOutboxIntentMirrorTerminalById: vi.fn(),
   normalizeAssistantDeliveryError: vi.fn(),
   readAssistantOutboxIntentMirrorState: vi.fn(),
+  sendTelegramMessage: vi.fn(),
   shouldDispatchAssistantOutboxIntent: vi.fn(),
 }));
 
@@ -42,6 +43,7 @@ vi.mock("@murphai/assistant-engine", () => ({
   normalizeAssistantDeliveryError: mocks.normalizeAssistantDeliveryError,
   readAssistantOutboxIntentMirrorState:
     mocks.readAssistantOutboxIntentMirrorState,
+  sendTelegramMessage: mocks.sendTelegramMessage,
   shouldDispatchAssistantOutboxIntent: mocks.shouldDispatchAssistantOutboxIntent,
 }));
 
@@ -539,6 +541,65 @@ describe("hosted runtime callbacks", () => {
         retryable: false,
       }),
     );
+  });
+
+  it("routes Telegram deliveries through the shared Telegram runtime with platform-backed env", async () => {
+    const effect = createEffect();
+    mocks.sendTelegramMessage.mockResolvedValueOnce({
+      providerMessageId: "provider_123",
+      target: "chat_123",
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      const delivery = await dependencies.sendTelegram({
+        idempotencyKey: "assistant-outbox:intent_123",
+        message: "hello from hosted",
+        replyToMessageId: null,
+        target: "chat_123",
+      });
+
+      return createDispatchResult({
+        delivery: createDelivery({
+          providerMessageId: delivery.providerMessageId,
+          target: delivery.target,
+        }),
+        status: "sent",
+      });
+    });
+
+    const outcomes = await drainHostedCommittedAssistantDeliveriesAfterCommit({
+      assistantDeliveryEffects: [effect],
+      forwardedEnv: {
+        OPENAI_API_KEY: "sk-runtime",
+      },
+      platformEnv: {
+        TELEGRAM_API_BASE_URL: "https://api.telegram.example",
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+        TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
+      },
+      wake: HOSTED_WAKE.wake,
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+    });
+
+    expect(mocks.sendTelegramMessage).toHaveBeenCalledWith({
+      idempotencyKey: "assistant-outbox:intent_123",
+      message: "hello from hosted",
+      replyToMessageId: null,
+      target: "chat_123",
+    }, {
+      env: {
+        OPENAI_API_KEY: "sk-runtime",
+        TELEGRAM_API_BASE_URL: "https://api.telegram.example",
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+        TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
+      },
+    });
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryStatus: "sent",
+        retryable: false,
+      }),
+    ]);
   });
 
   it("routes hosted email thread deliveries through the shared effects port", async () => {

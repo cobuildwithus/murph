@@ -553,10 +553,14 @@ describe("knowledge formatting and model helpers", () => {
       "- `research/a.md`",
     ].join("\n") + "\n");
 
-    const strippedSections = stripGeneratedKnowledgeSections([
+    const strippedTrailingSections = stripGeneratedKnowledgeSections([
       "# Sleep quality",
       "",
       "Narrative body.",
+      "",
+      "## Other",
+      "",
+      "Keep this section.",
       "",
       "## Related",
       "",
@@ -565,15 +569,29 @@ describe("knowledge formatting and model helpers", () => {
       "## Sources",
       "",
       "- `research/a.md`",
-      "",
-      "## Other",
-      "",
-      "Keep this section.",
     ].join("\n"));
-    expect(strippedSections).toContain("Narrative body.");
-    expect(strippedSections).toContain("## Other");
-    expect(strippedSections).not.toContain("## Related");
-    expect(strippedSections).not.toContain("## Sources");
+    expect(strippedTrailingSections).toContain("Narrative body.");
+    expect(strippedTrailingSections).toContain("## Other");
+    expect(strippedTrailingSections).not.toContain("## Related");
+    expect(strippedTrailingSections).not.toContain("## Sources");
+
+    const preservedNarrativeSections = stripGeneratedKnowledgeSections([
+      "# Sleep quality",
+      "",
+      "Narrative body.",
+      "",
+      "## Related",
+      "",
+      "This is a real narrative section about adjacent experiments.",
+      "",
+      "## Sources",
+      "",
+      "These notes came from a synthesis pass, not the generated source list.",
+    ].join("\n"));
+    expect(preservedNarrativeSections).toContain("## Related");
+    expect(preservedNarrativeSections).toContain("adjacent experiments");
+    expect(preservedNarrativeSections).toContain("## Sources");
+    expect(preservedNarrativeSections).toContain("synthesis pass");
     expect(stripKnowledgeLeadingHeading("# Heading\n\nBody text.")).toBe("Body text.");
     expect(stripKnowledgeLeadingHeading("Body text only.")).toBe("Body text only.");
     expect(stripGeneratedKnowledgeSections("Plain body only.\n")).toBe("Plain body only.");

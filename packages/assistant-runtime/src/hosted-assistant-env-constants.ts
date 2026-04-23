@@ -4,5 +4,7 @@ export {
 } from "@murphai/operator-config/hosted-assistant-config-constants";
 export {
   HOSTED_SHARED_FORWARDED_ENV_CATEGORY_KEYS,
+  HOSTED_SHARED_INGRESS_ONLY_SECRET_ENV_NAMES,
   HOSTED_SHARED_MODEL_CREDENTIAL_ENV_NAMES,
+  HOSTED_SHARED_PLATFORM_ONLY_ENV_NAMES,
 } from "./hosted-env-categories.ts";

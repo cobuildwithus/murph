@@ -132,7 +132,7 @@ describe("hosted browser vault replica store", () => {
     ).toThrow("Browser vault replica.schema must be murph.browser-vault-replica.v1.");
   });
 
-  it("stores immutable replica objects per data version instead of deleting prior copies", async () => {
+  it("keeps prior replica objects until explicitly deleted", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     const rootKey = createTestRootKey(31);
     const store = createHostedBrowserVaultReplicaStore({
@@ -172,5 +172,45 @@ describe("hosted browser vault replica store", () => {
     expect(bucket.objects.has(firstRef.objectKey)).toBe(true);
     expect(bucket.objects.has(secondRef.objectKey)).toBe(true);
     expect(bucket.deleted).toEqual([]);
+
+    await store.deleteBrowserVaultReplica(firstRef);
+
+    expect(bucket.deleted).toEqual([firstRef.objectKey]);
+    expect(bucket.objects.has(firstRef.objectKey)).toBe(false);
+    expect(bucket.objects.has(secondRef.objectKey)).toBe(true);
+  });
+
+  it("refuses to delete a replica outside the bound user's namespace", async () => {
+    const bucket = new MemoryEncryptedR2Bucket();
+    const rootKey = createTestRootKey(37);
+    const store = createHostedBrowserVaultReplicaStore({
+      bucket,
+      rootKey,
+    });
+    const foreignDeleteStore = createHostedBrowserVaultReplicaStore({
+      bucket,
+      rootKey,
+      userId: "user_456",
+    });
+
+    const foreignRef = await store.writeBrowserVaultReplica({
+      replica: await createBrowserVaultReplica({
+        generatedAt: "2026-04-17T00:00:00.000Z",
+        sourceBundleHash: "d".repeat(64),
+        vault: createVaultReadModel({
+          entities: [],
+          metadata: null,
+          vaultRoot: "browser://vault",
+        }),
+      }),
+      userId: "user_123",
+    });
+
+    await expect(foreignDeleteStore.deleteBrowserVaultReplica(foreignRef)).rejects.toThrow(
+      `Hosted browser vault replica ${foreignRef.objectKey} is outside the bound user replica namespace.`,
+    );
+
+    expect(bucket.deleted).toEqual([]);
+    expect(bucket.objects.has(foreignRef.objectKey)).toBe(true);
   });
 });

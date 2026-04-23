@@ -488,6 +488,139 @@ test('deleteLinqMessage treats missing provider messages as an idempotent succes
   expect(fetchImplementation.mock.calls[1]?.[0]).toContain('/messages/message-missing')
 })
 
+test('deleteLinqMessage retries transient delete failures because delete is idempotent', async () => {
+  vi.useFakeTimers()
+  const env = {
+    LINQ_API_BASE_URL: 'https://linq.example.test/custom',
+    LINQ_API_TOKEN: 'linq-token',
+  } satisfies NodeJS.ProcessEnv
+
+  let retryAfterDeleteAttempts = 0
+  const retryAfterDelete = deleteLinqMessage(
+    {
+      messageId: ' message-retry-http ',
+    },
+    {
+      env,
+      fetchImplementation: async (url: string) => {
+        if (!url.endsWith('/messages/message-retry-http')) {
+          throw new Error(`Unexpected request: ${url}`)
+        }
+
+        retryAfterDeleteAttempts += 1
+        if (retryAfterDeleteAttempts === 1) {
+          return createJsonResponse({ error: 'retry later' }, {
+            headers: { 'Retry-After': '0' },
+            status: 503,
+          })
+        }
+
+        return new Response(null, { status: 204 })
+      },
+    },
+  )
+  await retryAfterDelete
+
+  let transportDeleteAttempts = 0
+  const transportRetryDelete = deleteLinqMessage(
+    {
+      messageId: ' message-retry-transport ',
+    },
+    {
+      env,
+      fetchImplementation: async (url: string) => {
+        if (!url.endsWith('/messages/message-retry-transport')) {
+          throw new Error(`Unexpected request: ${url}`)
+        }
+
+        transportDeleteAttempts += 1
+        if (transportDeleteAttempts === 1) {
+          throw new Error('temporary transport failure')
+        }
+
+        return new Response(null, { status: 204 })
+      },
+    },
+  )
+  await vi.advanceTimersByTimeAsync(1_000)
+  await transportRetryDelete
+
+  assert.equal(retryAfterDeleteAttempts, 2)
+  assert.equal(transportDeleteAttempts, 2)
+})
+
+test('stopLinqChatTypingIndicator does not inherit delete-message retries', async () => {
+  vi.useFakeTimers()
+  const env = {
+    LINQ_API_BASE_URL: 'https://linq.example.test/custom',
+    LINQ_API_TOKEN: 'linq-token',
+  } satisfies NodeJS.ProcessEnv
+
+  let throttleAttempts = 0
+  await assert.rejects(
+    () =>
+      stopLinqChatTypingIndicator(
+        {
+          chatId: 'chat-stop-once',
+        },
+        {
+          env,
+          fetchImplementation: async (url: string) => {
+            if (!url.endsWith('/chats/chat-stop-once/typing')) {
+              throw new Error(`Unexpected request: ${url}`)
+            }
+
+            throttleAttempts += 1
+            return createJsonResponse({ error: 'retry later' }, {
+              headers: { 'Retry-After': '0' },
+              status: 429,
+            })
+          },
+        },
+      ),
+    (error) =>
+      error instanceof VaultCliError &&
+      error.code === 'LINQ_API_REQUEST_FAILED' &&
+      error.context?.operation === 'typing_stop' &&
+      error.context?.retryable === false &&
+      error.context?.status === 429,
+  )
+
+  assert.equal(throttleAttempts, 1)
+
+  let transientAttempts = 0
+  await assert.rejects(
+    () =>
+      stopLinqChatTypingIndicator(
+        {
+          chatId: 'chat-stop-once-503',
+        },
+        {
+          env,
+          fetchImplementation: async (url: string) => {
+            if (!url.endsWith('/chats/chat-stop-once-503/typing')) {
+              throw new Error(`Unexpected request: ${url}`)
+            }
+
+            transientAttempts += 1
+            return createJsonResponse({ error: 'retry later' }, {
+              headers: { 'Retry-After': '0' },
+              status: 503,
+            })
+          },
+        },
+      ),
+    (error) =>
+      error instanceof VaultCliError &&
+      error.code === 'LINQ_API_REQUEST_FAILED' &&
+      error.context?.operation === 'typing_stop' &&
+      error.context?.retryable === false &&
+      error.context?.status === 503,
+  )
+
+  assert.equal(transientAttempts, 1)
+})
+
 test('linq runtime covers optional payload omissions, fallback http messages, and timeout transport errors', async () => {
   const seenRequests: Array<{
     body?: string

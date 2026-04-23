@@ -58,6 +58,7 @@ import { ingestHostedConversationMessageWake } from "../src/hosted-runtime/event
 
 function createRuntime() {
   return {
+    forwardedEnv: {},
     platform: {
       artifactStore: {
         async get() {
@@ -69,6 +70,7 @@ function createRuntime() {
       effectsPort: createHostedRuntimeEffectsPortStub(),
       usageExportPort: null,
     },
+    platformEnv: {},
   } as const;
 }
 
@@ -102,7 +104,17 @@ afterEach(() => {
 
 describe("ingestHostedConversationMessageWake", () => {
   it("normalizes each hosted conversation wake directly before parsed inbox persistence", async () => {
-    const runtime = createRuntime();
+    const runtime = {
+      ...createRuntime(),
+      forwardedEnv: {
+        OPENAI_API_KEY: "sk-runtime",
+      },
+      platformEnv: {
+        TELEGRAM_API_BASE_URL: "https://api.telegram.example",
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+        TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
+      },
+    };
     const vaultRoot = "/tmp/assistant-runtime-conversation";
     const processCapture = vi.fn(async (capture: unknown) => {
       expect(capture).toBeDefined();
@@ -226,6 +238,12 @@ describe("ingestHostedConversationMessageWake", () => {
       occurredAt: "2026-04-08T00:00:00.000Z",
     });
     expect(mocks.createHostedTelegramAttachmentDownloadDriver).toHaveBeenCalledTimes(1);
+    expect(mocks.createHostedTelegramAttachmentDownloadDriver).toHaveBeenCalledWith({
+      OPENAI_API_KEY: "sk-runtime",
+      TELEGRAM_API_BASE_URL: "https://api.telegram.example",
+      TELEGRAM_BOT_TOKEN: "telegram-token",
+      TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
+    });
     expect(mocks.normalizeHostedTelegramConversationCapture).toHaveBeenCalledWith({
       accountId: "bot",
       downloadDriver: telegramDriver,

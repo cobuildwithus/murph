@@ -2,10 +2,9 @@ import {
   decodeHostedBundleBase64,
   encodeHostedBundleBase64,
 } from "@murphai/runtime-state/node/hosted-bundle-codec";
-import {
-  emitHostedExecutionStructuredLog,
-  type HostedExecutionBundleRef,
-  type HostedExecutionRunnerResult,
+import type {
+  HostedExecutionBundleRef,
+  HostedExecutionRunnerResult,
 } from "@murphai/hosted-execution";
 
 import {
@@ -14,7 +13,6 @@ import {
   type HostedBundleStore,
   type R2BucketLike,
 } from "../bundle-store.js";
-import { HostedBundleGarbageCollector } from "../bundle-gc.js";
 
 interface RunnerBundleRefCacheReader {
   readCachedBundleRef(): Promise<HostedExecutionBundleRef | null>;
@@ -25,27 +23,19 @@ export interface RunnerBundleApplyResult {
 }
 
 export class RunnerBundleSync {
-  private readonly garbageCollector: HostedBundleGarbageCollector;
-
   constructor(
     private readonly bucket: R2BucketLike,
     private readonly platformEnvelopeKey: Uint8Array,
     private readonly platformEnvelopeKeyId: string,
     private readonly platformEnvelopeKeysById: Readonly<Record<string, Uint8Array>>,
     private readonly bundleRefCacheReader?: RunnerBundleRefCacheReader,
-  ) {
-    this.garbageCollector = new HostedBundleGarbageCollector(
-      bucket,
-      platformEnvelopeKey,
-      platformEnvelopeKeyId,
-      platformEnvelopeKeysById,
-    );
-  }
+  ) {}
 
   async readBundlesForRunner(
     currentBundleRef?: HostedExecutionBundleRef | null,
+    userId?: string | null,
   ): Promise<HostedExecutionRunnerResult["bundle"]> {
-    const store = this.createBundleStore();
+    const store = this.createBundleStore(userId ?? undefined);
     return encodeHostedBundleBase64(await readRequiredBundleForRunner({
       bundleStore: store,
       ref: await this.resolveCurrentBundleRef(currentBundleRef),
@@ -57,7 +47,7 @@ export class RunnerBundleSync {
     currentBundleRefOrVersion: HostedExecutionBundleRef | number | null,
     bundle?: HostedExecutionRunnerResult["bundle"],
   ): Promise<RunnerBundleApplyResult> {
-    const bundleStore = this.createBundleStore();
+    const bundleStore = this.createBundleStore(userId);
     const currentBundleRef = await this.resolveCurrentBundleRef(currentBundleRefOrVersion);
     const nextBundle = bundle ?? null;
     const nextBundleBytes = decodeHostedBundleBase64(nextBundle);
@@ -70,22 +60,18 @@ export class RunnerBundleSync {
           plaintext: nextBundleBytes ?? new Uint8Array(),
         });
 
-    await this.cleanupBundleTransitionBestEffort({
-      nextBundleRef,
-      previousBundleRef: currentBundleRef,
-      userId,
-    });
     return {
       bundleRef: nextBundleRef,
     };
   }
 
-  private createBundleStore() {
+  private createBundleStore(userId?: string) {
     return createHostedBundleStore({
       bucket: this.bucket,
       key: this.platformEnvelopeKey,
       keyId: this.platformEnvelopeKeyId,
       keysById: this.platformEnvelopeKeysById,
+      userId: userId ?? null,
     });
   }
 
@@ -97,32 +83,6 @@ export class RunnerBundleSync {
     }
 
     return this.bundleRefCacheReader?.readCachedBundleRef() ?? null;
-  }
-
-  private async cleanupBundleTransitionBestEffort(input: {
-    nextBundleRef: HostedExecutionBundleRef | null;
-    previousBundleRef: HostedExecutionBundleRef | null;
-    userId: string;
-  }): Promise<void> {
-    try {
-      await this.garbageCollector.cleanupBundleTransition(input);
-    } catch (error) {
-      emitHostedExecutionStructuredLog({
-        component: "runner",
-        details: {
-          nextBundleRefKey: input.nextBundleRef?.key ?? null,
-          previousBundleRefKey: input.previousBundleRef?.key ?? null,
-          userId: input.userId,
-        },
-        error,
-        level: "warn",
-        message:
-          "Hosted bundle cleanup failed after a successful bundle swap; continuing without cleanup.",
-        phase: "completed",
-        run: null,
-        userId: input.userId,
-      });
-    }
   }
 }
 

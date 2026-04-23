@@ -56,9 +56,9 @@ describe("buildHostedRunnerContainerEnv", () => {
 describe("hosted runner log categories", () => {
   it("preserves the forwarded env category summaries used by runner logging", () => {
     expect(summarizeHostedRunnerForwardedEnvLogCategories({
+      TELEGRAM_BOT_USERNAME: "murph_bot",
       MURPH_WEB_SEARCH_TIMEOUT_MS: "5000",
       OPENAI_API_KEY: "openai-secret",
-      TELEGRAM_BOT_TOKEN: "telegram-secret",
     })).toEqual({
       assistantConfigured: true,
       hostedEmailConfigured: false,

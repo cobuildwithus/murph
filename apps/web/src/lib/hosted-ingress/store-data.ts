@@ -8,7 +8,7 @@ import type {
   HostedIngressStoreClient,
 } from "./store.types";
 
-export async function ensureHostedExecutionCursorRowTx(input: {
+export async function ensureHostedExecutionCursorRow(input: {
   tx: HostedIngressStoreClient;
   userId: string;
 }): Promise<HostedExecutionCursorRow> {
@@ -78,7 +78,7 @@ export function resolveHostedIngressPayloadCiphertextSync(
   return payloadRow.payloadCiphertext;
 }
 
-export async function readHostedIngressPayloadRowByWakeIdTx(input: {
+export async function readHostedIngressPayloadRowByWakeId(input: {
   tx: HostedIngressStoreClient;
   ingressEventId: string;
   userId: string;
@@ -96,7 +96,7 @@ export async function readHostedIngressPayloadRowByWakeIdTx(input: {
   return row;
 }
 
-export async function readHostedIngressPayloadRowsByWakeIdTx(input: {
+export async function readHostedIngressPayloadRowsByWakeId(input: {
   tx: HostedIngressStoreClient;
   userId: string;
   ingressEventIds: string[];
@@ -168,7 +168,7 @@ export async function bumpHostedExecutionCursorVersionTx(input: {
   });
 }
 
-export async function findHostedIngressByDedupeKeyTx(input: {
+export async function findHostedIngressByDedupeKey(input: {
   dedupeKey: string | null;
   tx: HostedIngressStoreClient;
   userId: string;
@@ -187,7 +187,7 @@ export async function findHostedIngressByDedupeKeyTx(input: {
   });
 }
 
-export async function findHostedIngressByEventIdTx(input: {
+export async function findHostedIngressByEventId(input: {
   eventId: string;
   tx: HostedIngressStoreClient;
   userId: string;
@@ -198,7 +198,7 @@ export async function findHostedIngressByEventIdTx(input: {
     return null;
   }
 
-  const event = await findHostedIngressEventAliasByEventIdTx({
+  const event = await findHostedIngressEventAliasByEventId({
     eventId,
     tx: input.tx,
     userId: input.userId,
@@ -244,7 +244,7 @@ export async function createHostedIngressEventAliasTx(input: {
   });
 }
 
-export async function findHostedIngressEventAliasByEventIdTx(input: {
+export async function findHostedIngressEventAliasByEventId(input: {
   eventId: string;
   tx: HostedIngressStoreClient;
   userId: string;
@@ -265,21 +265,35 @@ export async function findHostedIngressEventAliasByEventIdTx(input: {
   });
 }
 
-export async function findCurrentHostedIngressEventAliasByWakeIdTx(input: {
+export async function findCurrentHostedIngressEventAliasByWakeId(input: {
   tx: HostedIngressStoreClient;
   ingressEventId: string;
   userId: string;
 }): Promise<HostedIngressEventAliasRow | null> {
-  return input.tx.hostedIngressEventAlias.findFirst({
+  const currentAliases = await input.tx.hostedIngressEventAlias.findMany({
     where: {
       ingressEventId: input.ingressEventId,
       replacedByEventId: null,
       userId: input.userId,
     },
-    orderBy: {
-      createdAt: "desc",
-    },
+    orderBy: [
+      {
+        createdAt: "desc",
+      },
+      {
+        eventId: "desc",
+      },
+    ],
+    take: 2,
   });
+
+  if (currentAliases.length > 1) {
+    throw new Error(
+      `Hosted ingress wake ${JSON.stringify(input.ingressEventId)} has multiple current aliases for ${input.userId}: ${JSON.stringify(currentAliases.map((row) => row.eventId))}.`,
+    );
+  }
+
+  return currentAliases[0] ?? null;
 }
 
 export async function replaceHostedIngressEventAliasTx(input: {
@@ -287,7 +301,7 @@ export async function replaceHostedIngressEventAliasTx(input: {
   replacedByEventId: string;
   tx: HostedIngressMutationTx;
   userId: string;
-}): Promise<boolean> {
+}): Promise<void> {
   const updated = await input.tx.hostedIngressEventAlias.updateMany({
     where: {
       eventId: input.eventId,
@@ -299,7 +313,11 @@ export async function replaceHostedIngressEventAliasTx(input: {
     },
   });
 
-  return updated.count === 1;
+  if (updated.count !== 1) {
+    throw new Error(
+      `Hosted ingress alias ${JSON.stringify(input.eventId)} replacement for ${input.userId} expected exactly one current row, updated ${updated.count}.`,
+    );
+  }
 }
 
 export async function findUncommittedWakeByCoalescingKeyTx(input: {
@@ -311,7 +329,7 @@ export async function findUncommittedWakeByCoalescingKeyTx(input: {
     return null;
   }
 
-  const cursor = await ensureHostedExecutionCursorRowTx({
+  const cursor = await ensureHostedExecutionCursorRow({
     tx: input.tx,
     userId: input.userId,
   });

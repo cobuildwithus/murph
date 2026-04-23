@@ -16,11 +16,11 @@ describe("hosted storage paths", () => {
     const hash = "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210";
 
     const artifactKey = await hostedArtifactObjectKey(rootKey, userId, sha256);
-    const bundleKey = await hostedBundleObjectKey(rootKey, "vault", hash);
+    const bundleKey = await hostedBundleObjectKey(rootKey, "vault", hash, userId);
     const runnerSecretsKey = await hostedRunnerSecretsObjectKey(rootKey, userId);
 
     expect(artifactKey).toMatch(/^users\/artifacts\/[0-9a-f]{24}\/[0-9a-f]{48}\.artifact\.bin$/);
-    expect(bundleKey).toMatch(/^bundles\/vault\/[0-9a-f]{48}\.bundle\.json$/);
+    expect(bundleKey).toMatch(/^users\/bundles\/[0-9a-f]{24}\/vault\/[0-9a-f]{48}\.bundle\.json$/);
     expect(runnerSecretsKey).toMatch(/^users\/runner-secrets\/[0-9a-f]{24}\.json$/);
 
     expectOpaqueStrings(

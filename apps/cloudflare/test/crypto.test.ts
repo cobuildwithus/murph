@@ -144,12 +144,13 @@ describe("hosted storage object keys", () => {
       bucket,
       key: rootKey,
       keyId,
+      userId: "user_bundle_123",
     });
     const bundlePlaintext = new TextEncoder().encode("bundle-plaintext");
     const bundleRef = await bundleStore.writeBundle("vault", bundlePlaintext);
 
-    expect(bundleRef.key).toMatch(/^bundles\/vault\//u);
-    expectOpaqueStrings([bundleRef.key], [bundleRef.hash]);
+    expect(bundleRef.key).toMatch(/^users\/bundles\//u);
+    expectOpaqueStrings([bundleRef.key], ["user_bundle_123", bundleRef.hash]);
 
     const artifactStore = createHostedArtifactStore({
       bucket,

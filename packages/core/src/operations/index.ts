@@ -4,6 +4,7 @@ export {
   CANONICAL_RESOURCE_LOCK_METADATA_BASENAME,
   canonicalLogicalResource,
   canonicalPathResource,
+  canonicalPathResourceForVault,
   dedupeCanonicalResources,
   isCanonicalResourceLockScopeActive,
   withCanonicalResourceLocks,

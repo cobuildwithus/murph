@@ -227,6 +227,9 @@ export function shouldAttemptAssistantProviderFailover(input: {
   if (traits.connectionLost) {
     return true
   }
+  if (isAssistantProviderTerminalFailure(input.error)) {
+    return false
+  }
 
   const code = readErrorCode(input.error)
   if (!code) {
@@ -246,6 +249,20 @@ export function shouldAttemptAssistantProviderFailover(input: {
     'ASSISTANT_CODEX_RESUME_STALE',
     'invalid_payload',
   ]).has(code)
+}
+
+function isAssistantProviderTerminalFailure(error: unknown): boolean {
+  const statusCode = readAssistantProviderStatusCode(error)
+  if (statusCode === 401 || statusCode === 403 || statusCode === 404) {
+    return true
+  }
+
+  const normalizedCode = readNormalizedErrorCode(error)
+  if (normalizedCode && isAssistantProviderTerminalCode(normalizedCode)) {
+    return true
+  }
+
+  return looksLikeAssistantProviderTerminalFailureMessage(readErrorMessage(error))
 }
 
 function readAssistantProviderFailoverTraits(error: unknown): {
@@ -499,6 +516,96 @@ function readErrorMessage(error: unknown): string | null {
   }
 
   return typeof error === 'string' && error.trim().length > 0 ? error : null
+}
+
+function readAssistantProviderStatusCode(error: unknown): number | null {
+  for (const candidate of [
+    error,
+    readRecordProperty(error, 'context'),
+    readRecordProperty(error, 'cause'),
+  ]) {
+    const statusCode =
+      readNumberProperty(candidate, 'statusCode') ??
+      readNumberProperty(candidate, 'status')
+    if (statusCode !== null) {
+      return statusCode
+    }
+  }
+
+  return null
+}
+
+function readNormalizedErrorCode(error: unknown): string | null {
+  return readErrorCode(error)?.trim().toLowerCase() ?? null
+}
+
+function isAssistantProviderTerminalCode(code: string): boolean {
+  return new Set([
+    'authentication_error',
+    'configuration_error',
+    'forbidden',
+    'invalid_api_key',
+    'invalid_payload',
+    'invalid_request',
+    'invalid_request_error',
+    'invalid_url',
+    'missing_api_key',
+    'model_not_found',
+    'no_such_model',
+    'not_found',
+    'permission_denied',
+    'resource_not_found',
+    'unauthorized',
+    'unsupported_model',
+  ]).has(code)
+}
+
+function looksLikeAssistantProviderTerminalFailureMessage(
+  message: string | null,
+): boolean {
+  const normalized = message?.trim().toLowerCase() ?? ''
+  if (!normalized) {
+    return false
+  }
+
+  return (
+    /\binvalid request\b/u.test(normalized) ||
+    /\b(?:authentication|unauthorized|forbidden|invalid api key|api key|credentials?)\b/u.test(
+      normalized,
+    ) ||
+    /\b(?:model not found|no such model|unknown model|unsupported model)\b/u.test(
+      normalized,
+    ) ||
+    /\b(?:base url|endpoint|configuration)\b.*\b(?:required|invalid|missing|misconfigured)\b/u.test(
+      normalized,
+    )
+  )
+}
+
+function readRecordProperty(
+  value: unknown,
+  key: 'cause' | 'context',
+): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || !(key in value)) {
+    return null
+  }
+
+  const candidate = (value as Record<string, unknown>)[key]
+  return candidate && typeof candidate === 'object' && !Array.isArray(candidate)
+    ? (candidate as Record<string, unknown>)
+    : null
+}
+
+function readNumberProperty(
+  value: unknown,
+  key: 'status' | 'statusCode',
+): number | null {
+  if (!value || typeof value !== 'object' || !(key in value)) {
+    return null
+  }
+
+  const candidate = (value as Record<string, unknown>)[key]
+  return typeof candidate === 'number' && Number.isFinite(candidate) ? candidate : null
 }
 
 function normalizePositiveInt(value: number | null | undefined): number | null {

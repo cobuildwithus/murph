@@ -1,6 +1,15 @@
 import { orderedUniqueStrings } from './knowledge-model.ts'
 
-const GENERATED_KNOWLEDGE_SECTION_HEADINGS = ['Related', 'Sources'] as const
+const GENERATED_KNOWLEDGE_SECTION_DEFINITIONS = [
+  {
+    heading: 'Sources',
+    itemPattern: /^-\s+`[^`\n]+`\s*$/u,
+  },
+  {
+    heading: 'Related',
+    itemPattern: /^-\s+\[\[[^\]\n]+\]\]\s*$/u,
+  },
+] as const
 
 export function renderKnowledgePageBody(input: {
   title: string
@@ -37,14 +46,15 @@ export function renderKnowledgePageBody(input: {
 }
 
 export function stripGeneratedKnowledgeSections(body: string): string {
-  let normalized = String(body ?? '')
+  let normalized = String(body ?? '').replace(/\r\n?/gu, '\n').trim()
 
-  for (const heading of GENERATED_KNOWLEDGE_SECTION_HEADINGS) {
-    const pattern = new RegExp(
-      `(^|\\n)##\\s+${escapeRegExp(heading)}\\s*\\n[\\s\\S]*?(?=\\n##\\s+|$)`,
-      'giu',
-    )
-    normalized = normalized.replace(pattern, '$1').trim()
+  while (normalized.length > 0) {
+    const stripped = stripTrailingGeneratedKnowledgeSection(normalized)
+    if (stripped === normalized) {
+      break
+    }
+
+    normalized = stripped
   }
 
   return normalized
@@ -56,6 +66,71 @@ export function stripKnowledgeLeadingHeading(body: string): string {
     .trim()
 }
 
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')
+function stripTrailingGeneratedKnowledgeSection(body: string): string {
+  const lines = body.split('\n')
+  const sectionStart = findTrailingKnowledgeSectionStart(lines)
+
+  if (sectionStart === null) {
+    return body
+  }
+
+  const definition = matchGeneratedKnowledgeSectionDefinition(lines[sectionStart] ?? '')
+  if (!definition) {
+    return body
+  }
+
+  const contentLines = trimKnowledgeSectionLines(lines.slice(sectionStart + 1))
+  if (
+    contentLines.length === 0 ||
+    contentLines.some((line) => !definition.itemPattern.test(line))
+  ) {
+    return body
+  }
+
+  return lines.slice(0, sectionStart).join('\n').trim()
+}
+
+function findTrailingKnowledgeSectionStart(lines: readonly string[]): number | null {
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    if (/^##\s+/u.test(lines[index]?.trim() ?? '')) {
+      return index
+    }
+  }
+
+  return null
+}
+
+function matchGeneratedKnowledgeSectionDefinition(
+  headingLine: string,
+): (typeof GENERATED_KNOWLEDGE_SECTION_DEFINITIONS)[number] | null {
+  const headingMatch = headingLine.trim().match(/^##\s+(.+?)\s*$/u)
+  if (!headingMatch) {
+    return null
+  }
+
+  const heading = headingMatch[1]
+  if (!heading) {
+    return null
+  }
+
+  return (
+    GENERATED_KNOWLEDGE_SECTION_DEFINITIONS.find(
+      (definition) => definition.heading === heading,
+    ) ?? null
+  )
+}
+
+function trimKnowledgeSectionLines(lines: readonly string[]): string[] {
+  let start = 0
+  let end = lines.length
+
+  while (start < end && lines[start]?.trim() === '') {
+    start += 1
+  }
+
+  while (end > start && lines[end - 1]?.trim() === '') {
+    end -= 1
+  }
+
+  return lines.slice(start, end).map((line) => line.trimEnd())
 }

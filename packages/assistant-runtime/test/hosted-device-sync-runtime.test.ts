@@ -3,20 +3,26 @@ import { mkdir } from "node:fs/promises";
 import path from "node:path";
 
 import { describe, test } from "vitest";
+import { openSqliteRuntimeDatabase } from "@murphai/runtime-state/node";
 
 import { buildDeviceSyncTokenCipherOptions, createSecretCodec } from "@murphai/device-syncd/crypto";
-import { createDeviceSyncService } from "@murphai/device-syncd/service";
 import {
   type DeviceSyncAccount,
   type DeviceSyncJobRecord,
   type DeviceSyncProvider,
   type ProviderAuthTokens,
 } from "@murphai/device-syncd/types";
+import type { DeviceSyncService } from "@murphai/device-syncd";
 import type {
   HostedExecutionDeviceSyncRuntimeApplyResponse,
   HostedExecutionDeviceSyncRuntimeSnapshotResponse,
 } from "@murphai/device-syncd/hosted-runtime";
 
+import {
+  closeHostedRuntimeDeviceSyncService,
+  createHostedRuntimeDeviceSyncService,
+  requireHostedRuntimeDeviceSyncStore,
+} from "../src/device-sync-service.ts";
 import {
   reconcileHostedDeviceSyncControlPlaneState,
   syncHostedDeviceSyncControlPlaneState,
@@ -26,6 +32,10 @@ import { createHostedRuntimeWorkspace } from "./hosted-runtime-test-helpers.ts";
 
 const DEVICE_SYNC_SECRET = "secret-for-tests";
 type ApplyUpdatesRequest = Parameters<HostedRuntimeDeviceSyncPort["applyUpdates"]>[0];
+
+function getStore(service: DeviceSyncService) {
+  return requireHostedRuntimeDeviceSyncStore(service);
+}
 
 function createFakeProvider(overrides: Partial<DeviceSyncProvider> = {}): DeviceSyncProvider {
   const baseProvider: DeviceSyncProvider = {
@@ -92,7 +102,7 @@ function createFakeProvider(overrides: Partial<DeviceSyncProvider> = {}): Device
 }
 
 function createDeviceSyncServiceForVault(vaultRoot: string) {
-  return createDeviceSyncService({
+  return createHostedRuntimeDeviceSyncService({
     secret: DEVICE_SYNC_SECRET,
     config: {
       publicBaseUrl: "https://sync.example.test/device-sync",
@@ -241,32 +251,56 @@ function requireApplyUpdatesRequest(
   return request;
 }
 
-function readJobsForAccount(service: ReturnType<typeof createDeviceSyncService>, accountId: string) {
-  return service.store.database.prepare(`
-    select
-      available_at as availableAt,
-      dedupe_key as dedupeKey,
-      kind,
-      last_error_code as lastErrorCode,
-      last_error_message as lastErrorMessage,
-      max_attempts as maxAttempts,
-      payload_json as payloadJson,
-      priority,
-      status
-    from device_job
-    where account_id = ?
-    order by created_at asc, id asc
-  `).all(accountId) as Array<{
-    availableAt: string;
-    dedupeKey: string | null;
-    kind: string;
-    lastErrorCode: string | null;
-    lastErrorMessage: string | null;
-    maxAttempts: number;
-    payloadJson: string;
-    priority: number;
-    status: string;
-  }>;
+function readJobsForAccount(service: DeviceSyncService, accountId: string) {
+  const database = openSqliteRuntimeDatabase(getStore(service).databasePath);
+
+  try {
+    return database.prepare(`
+      select
+        available_at as availableAt,
+        dedupe_key as dedupeKey,
+        kind,
+        last_error_code as lastErrorCode,
+        last_error_message as lastErrorMessage,
+        max_attempts as maxAttempts,
+        payload_json as payloadJson,
+        priority,
+        status
+      from device_job
+      where account_id = ?
+      order by created_at asc, id asc
+    `).all(accountId) as Array<{
+      availableAt: string;
+      dedupeKey: string | null;
+      kind: string;
+      lastErrorCode: string | null;
+      lastErrorMessage: string | null;
+      maxAttempts: number;
+      payloadJson: string;
+      priority: number;
+      status: string;
+    }>;
+  } finally {
+    database.close();
+  }
+}
+
+function setAccountUpdatedAtForTesting(
+  service: DeviceSyncService,
+  accountId: string,
+  updatedAt: string,
+): void {
+  const database = openSqliteRuntimeDatabase(getStore(service).databasePath);
+
+  try {
+    database.prepare(`
+      update device_connection
+      set updated_at = ?
+      where id = ?
+    `).run(updatedAt, accountId);
+  } finally {
+    database.close();
+  }
 }
 
 describe("hosted device-sync runtime", () => {
@@ -291,7 +325,7 @@ describe("hosted device-sync runtime", () => {
       assert.equal(state.localToHostedAccountIds.size, 0);
       assert.equal(state.observedTokenVersions.size, 0);
     } finally {
-      service.close();
+      closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
     }
   });
@@ -331,7 +365,7 @@ describe("hosted device-sync runtime", () => {
       assert.equal(state.localToHostedAccountIds.size, 0);
       assert.equal(state.observedTokenVersions.size, 0);
     } finally {
-      service.close();
+      closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
     }
   });
@@ -353,7 +387,7 @@ describe("hosted device-sync runtime", () => {
         provider: "demo",
         state: begin.state,
       });
-      const pendingJob = service.store.enqueueJob({
+      const pendingJob = getStore(service).enqueueJob({
         accountId: connected.account.id,
         availableAt: "2026-04-06T09:05:00.000Z",
         kind: "manual-backfill",
@@ -428,7 +462,7 @@ describe("hosted device-sync runtime", () => {
       );
       assert.equal(state.observedTokenVersions.get("hosted_conn_disconnected"), null);
 
-      const stored = service.store.getAccountById(connected.account.id);
+      const stored = getStore(service).getAccountById(connected.account.id);
       assert.ok(stored);
       assert.equal(stored.status, "disconnected");
       assert.equal(stored.displayName, "Hosted Demo");
@@ -443,7 +477,7 @@ describe("hosted device-sync runtime", () => {
       assert.equal(stored.lastSyncStartedAt, "2026-04-06T09:02:00.000Z");
       assert.equal(stored.lastSyncCompletedAt, "2026-04-06T09:03:00.000Z");
 
-      const deadJob = service.store.getJobById(pendingJob.id);
+      const deadJob = getStore(service).getJobById(pendingJob.id);
       assert.equal(deadJob?.status, "dead");
       assert.equal(deadJob?.lastErrorCode, "HOSTED_CONTROL_PLANE_DISCONNECTED");
       assert.equal(
@@ -451,7 +485,7 @@ describe("hosted device-sync runtime", () => {
         "Hosted control plane marked the device-sync connection as disconnected.",
       );
     } finally {
-      service.close();
+      closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
     }
   });
@@ -533,7 +567,7 @@ describe("hosted device-sync runtime", () => {
         service,
       });
 
-      const disconnected = service.store.getAccountById(connected.account.id);
+      const disconnected = getStore(service).getAccountById(connected.account.id);
       assert.ok(disconnected);
       assert.equal(disconnected.status, "disconnected");
       assert.equal(disconnected.accessTokenEncrypted, "");
@@ -565,7 +599,7 @@ describe("hosted device-sync runtime", () => {
 
       assert.equal(state.observedTokenVersions.get("hosted_conn_reconnect_after_clear"), 1);
 
-      const stored = service.store.getAccountById(connected.account.id);
+      const stored = getStore(service).getAccountById(connected.account.id);
       assert.ok(stored);
       assert.equal(stored.status, "active");
       assert.equal(stored.displayName, "Hosted Reconnected");
@@ -616,7 +650,7 @@ describe("hosted device-sync runtime", () => {
         ],
       });
     } finally {
-      service.close();
+      closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
     }
   });
@@ -684,7 +718,7 @@ describe("hosted device-sync runtime", () => {
 
       assert.equal(state.observedTokenVersions.get("hosted_conn_wake"), 4);
 
-      const stored = service.store.getAccountById(connected.account.id);
+      const stored = getStore(service).getAccountById(connected.account.id);
       assert.ok(stored);
       assert.equal(stored.nextReconcileAt, "2026-04-04T12:00:00.000Z");
       assert.equal(stored.hostedObservedTokenVersion, 4);
@@ -747,7 +781,7 @@ describe("hosted device-sync runtime", () => {
         },
       );
     } finally {
-      service.close();
+      closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
     }
   });
@@ -843,7 +877,7 @@ describe("hosted device-sync runtime", () => {
         ],
       );
     } finally {
-      service.close();
+      closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
     }
   });
@@ -887,12 +921,12 @@ describe("hosted device-sync runtime", () => {
         service,
       });
 
-      const stored = service.store.getAccountById(connected.account.id);
+      const stored = getStore(service).getAccountById(connected.account.id);
       assert.ok(stored);
       assert.equal(stored.nextReconcileAt, "2026-04-04T12:00:00.000Z");
       assert.deepEqual(readJobsForAccount(service, connected.account.id), []);
     } finally {
-      service.close();
+      closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
     }
   });
@@ -914,7 +948,7 @@ describe("hosted device-sync runtime", () => {
         provider: "demo",
         state: begin.state,
       });
-      const pendingJob = service.store.enqueueJob({
+      const pendingJob = getStore(service).enqueueJob({
         accountId: connected.account.id,
         availableAt: "2026-04-06T09:05:00.000Z",
         kind: "manual-backfill",
@@ -955,10 +989,10 @@ describe("hosted device-sync runtime", () => {
       });
 
       assert.equal(fetchSnapshotCalls, 1);
-      const stored = service.store.getAccountById(connected.account.id);
+      const stored = getStore(service).getAccountById(connected.account.id);
       assert.equal(stored?.status, "disconnected");
 
-      const deadJob = service.store.getJobById(pendingJob.id);
+      const deadJob = getStore(service).getJobById(pendingJob.id);
       assert.equal(deadJob?.status, "dead");
       assert.equal(deadJob?.lastErrorCode, "HOSTED_DEVICE_SYNC_DISCONNECTED");
       assert.equal(
@@ -966,7 +1000,7 @@ describe("hosted device-sync runtime", () => {
         "Hosted device-sync wake marked the connection as disconnected.",
       );
     } finally {
-      service.close();
+      closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
     }
   });
@@ -1004,11 +1038,11 @@ describe("hosted device-sync runtime", () => {
         service,
       });
 
-      const stored = service.store.getAccountById(connected.account.id);
+      const stored = getStore(service).getAccountById(connected.account.id);
       assert.equal(stored?.status, "reauthorization_required");
       assert.deepEqual(readJobsForAccount(service, connected.account.id), []);
     } finally {
-      service.close();
+      closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
     }
   });
@@ -1030,7 +1064,7 @@ describe("hosted device-sync runtime", () => {
         provider: "demo",
         state: begin.state,
       });
-      service.store.markSyncFailed(
+      getStore(service).markSyncFailed(
         connected.account.id,
         "2026-04-06T09:09:00.000Z",
         "LOCAL_ERR",
@@ -1068,12 +1102,12 @@ describe("hosted device-sync runtime", () => {
         service,
       });
 
-      const stored = service.store.getAccountById(connected.account.id);
+      const stored = getStore(service).getAccountById(connected.account.id);
       assert.equal(stored?.lastErrorCode, "LOCAL_ERR");
       assert.equal(stored?.lastErrorMessage, "local error still newer");
       assert.equal(stored?.lastSyncErrorAt, "2026-04-06T09:09:00.000Z");
     } finally {
-      service.close();
+      closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
     }
   });
@@ -1117,10 +1151,10 @@ describe("hosted device-sync runtime", () => {
         service,
       });
 
-      const stored = service.store.getAccountById(connected.account.id);
+      const stored = getStore(service).getAccountById(connected.account.id);
       assert.equal(stored?.nextReconcileAt, "2026-04-04T13:00:00.000Z");
     } finally {
-      service.close();
+      closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
     }
   });
@@ -1161,11 +1195,11 @@ describe("hosted device-sync runtime", () => {
         service,
       });
 
-      const stored = service.store.getAccountById(connected.account.id);
+      const stored = getStore(service).getAccountById(connected.account.id);
       assert.equal(stored?.nextReconcileAt, "2026-04-04T12:00:00.000Z");
       assert.deepEqual(readJobsForAccount(service, connected.account.id), []);
     } finally {
-      service.close();
+      closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
     }
   });
@@ -1187,7 +1221,7 @@ describe("hosted device-sync runtime", () => {
         provider: "demo",
         state: begin.state,
       });
-      service.store.markSyncFailed(
+      getStore(service).markSyncFailed(
         connected.account.id,
         "2026-04-06T09:09:00.000Z",
         "LOCAL_ERR",
@@ -1224,13 +1258,13 @@ describe("hosted device-sync runtime", () => {
         service,
       });
 
-      const stored = service.store.getAccountById(connected.account.id);
+      const stored = getStore(service).getAccountById(connected.account.id);
       assert.equal(stored?.lastErrorCode, null);
       assert.equal(stored?.lastErrorMessage, null);
       assert.equal(stored?.lastSyncErrorAt, null);
       assert.equal(stored?.lastSyncCompletedAt, "2026-04-06T09:10:00.000Z");
     } finally {
-      service.close();
+      closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
     }
   });
@@ -1278,7 +1312,7 @@ describe("hosted device-sync runtime", () => {
         service,
       });
 
-      service.store.patchAccount(connected.account.id, {
+      getStore(service).patchAccount(connected.account.id, {
         nextReconcileAt: "2026-04-06T10:30:00.000Z",
       });
 
@@ -1306,11 +1340,11 @@ describe("hosted device-sync runtime", () => {
         service,
       });
 
-      const stored = service.store.getAccountById(connected.account.id);
+      const stored = getStore(service).getAccountById(connected.account.id);
       assert.equal(stored?.nextReconcileAt, "2026-04-06T11:00:00.000Z");
       assert.equal(stored?.hostedObservedUpdatedAt, "2026-04-06T09:05:00.000Z");
     } finally {
-      service.close();
+      closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
     }
   });
@@ -1367,11 +1401,11 @@ describe("hosted device-sync runtime", () => {
         service,
       });
 
-      const hydrated = service.store.getAccountById(connected.account.id);
+      const hydrated = getStore(service).getAccountById(connected.account.id);
       assert.ok(hydrated);
 
       const codec = createSecretCodec(DEVICE_SYNC_SECRET);
-      const locallyRefreshed = service.store.updateAccountTokens(
+      const locallyRefreshed = getStore(service).updateAccountTokens(
         hydrated.id,
         {
           accessToken: "local-access-refresh",
@@ -1399,7 +1433,7 @@ describe("hosted device-sync runtime", () => {
 
       assert.ok(locallyRefreshed);
 
-      service.store.patchAccount(connected.account.id, {
+      getStore(service).patchAccount(connected.account.id, {
         displayName: "Local Fresh",
         metadata: {
           local: true,
@@ -1439,7 +1473,7 @@ describe("hosted device-sync runtime", () => {
         service,
       });
 
-      const stored = service.store.getAccountById(connected.account.id);
+      const stored = getStore(service).getAccountById(connected.account.id);
       assert.ok(stored);
       assert.equal(stored.status, "reauthorization_required");
       assert.equal(stored.displayName, "Local Fresh");
@@ -1475,7 +1509,7 @@ describe("hosted device-sync runtime", () => {
         "local-refresh-refresh",
       );
     } finally {
-      service.close();
+      closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
     }
   });
@@ -1532,11 +1566,11 @@ describe("hosted device-sync runtime", () => {
         service,
       });
 
-      const hydrated = service.store.getAccountById(connected.account.id);
+      const hydrated = getStore(service).getAccountById(connected.account.id);
       assert.ok(hydrated);
 
       const codec = createSecretCodec(DEVICE_SYNC_SECRET);
-      const locallyRefreshed = service.store.updateAccountTokens(
+      const locallyRefreshed = getStore(service).updateAccountTokens(
         hydrated.id,
         {
           accessToken: "local-access-refresh",
@@ -1564,7 +1598,7 @@ describe("hosted device-sync runtime", () => {
 
       assert.ok(locallyRefreshed);
 
-      service.store.patchAccount(connected.account.id, {
+      getStore(service).patchAccount(connected.account.id, {
         displayName: "Local Fresh",
         metadata: {
           local: true,
@@ -1574,11 +1608,7 @@ describe("hosted device-sync runtime", () => {
         status: "reauthorization_required",
       });
 
-      service.store.database.prepare(`
-        update device_connection
-        set updated_at = ?
-        where id = ?
-      `).run("2026-04-06T08:00:00.000Z", connected.account.id);
+      setAccountUpdatedAtForTesting(service, connected.account.id, "2026-04-06T08:00:00.000Z");
 
       await syncHostedDeviceSyncControlPlaneState({
         deviceSyncPort: {
@@ -1616,7 +1646,7 @@ describe("hosted device-sync runtime", () => {
         service,
       });
 
-      const stored = service.store.getAccountById(connected.account.id);
+      const stored = getStore(service).getAccountById(connected.account.id);
       assert.ok(stored);
       assert.equal(stored.status, "reauthorization_required");
       assert.equal(stored.displayName, "Local Fresh");
@@ -1653,7 +1683,7 @@ describe("hosted device-sync runtime", () => {
         "local-refresh-refresh",
       );
     } finally {
-      service.close();
+      closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
     }
   });
@@ -1713,11 +1743,11 @@ describe("hosted device-sync runtime", () => {
         service,
       });
 
-      const hydrated = service.store.getAccountById(connected.account.id);
+      const hydrated = getStore(service).getAccountById(connected.account.id);
       assert.ok(hydrated);
 
       const codec = createSecretCodec(DEVICE_SYNC_SECRET);
-      const locallyRefreshed = service.store.updateAccountTokens(
+      const locallyRefreshed = getStore(service).updateAccountTokens(
         hydrated.id,
         {
           accessToken: "local-access-refresh",
@@ -1745,7 +1775,7 @@ describe("hosted device-sync runtime", () => {
 
       assert.ok(locallyRefreshed);
 
-      service.store.patchAccount(connected.account.id, {
+      getStore(service).patchAccount(connected.account.id, {
         displayName: "Local Fresh",
         metadata: {
           local: true,
@@ -1796,7 +1826,7 @@ describe("hosted device-sync runtime", () => {
         updates: [],
       });
     } finally {
-      service.close();
+      closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
     }
   });
@@ -1843,7 +1873,7 @@ describe("hosted device-sync runtime", () => {
         service,
       });
 
-      service.store.patchAccount(connected.account.id, {
+      getStore(service).patchAccount(connected.account.id, {
         nextReconcileAt: "2026-04-06T10:30:00.000Z",
       });
 
@@ -1871,10 +1901,10 @@ describe("hosted device-sync runtime", () => {
         service,
       });
 
-      const stored = service.store.getAccountById(connected.account.id);
+      const stored = getStore(service).getAccountById(connected.account.id);
       assert.equal(stored?.nextReconcileAt, "2026-04-06T10:30:00.000Z");
     } finally {
-      service.close();
+      closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
     }
   });
@@ -1921,7 +1951,7 @@ describe("hosted device-sync runtime", () => {
         service,
       });
 
-      service.store.patchAccount(connected.account.id, {
+      getStore(service).patchAccount(connected.account.id, {
         nextReconcileAt: "not-a-timestamp",
       });
 
@@ -1949,10 +1979,10 @@ describe("hosted device-sync runtime", () => {
         service,
       });
 
-      const stored = service.store.getAccountById(connected.account.id);
+      const stored = getStore(service).getAccountById(connected.account.id);
       assert.equal(stored?.nextReconcileAt, "2026-04-06T11:00:00.000Z");
     } finally {
-      service.close();
+      closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
     }
   });
@@ -1999,7 +2029,7 @@ describe("hosted device-sync runtime", () => {
         service,
       });
 
-      service.store.patchAccount(connected.account.id, {
+      getStore(service).patchAccount(connected.account.id, {
         nextReconcileAt: "2026-04-06T10:30:00.000Z",
       });
 
@@ -2027,10 +2057,10 @@ describe("hosted device-sync runtime", () => {
         service,
       });
 
-      const stored = service.store.getAccountById(connected.account.id);
+      const stored = getStore(service).getAccountById(connected.account.id);
       assert.equal(stored?.nextReconcileAt, "2026-04-06T10:30:00.000Z");
     } finally {
-      service.close();
+      closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
     }
   });
@@ -2100,7 +2130,7 @@ describe("hosted device-sync runtime", () => {
       const localAccountId = state.hostedToLocalAccountIds.get("hosted_conn_reconcile");
       assert.ok(localAccountId);
 
-      service.store.patchAccount(localAccountId, {
+      getStore(service).patchAccount(localAccountId, {
         clearErrors: true,
         displayName: "Local Demo",
         metadata: {
@@ -2108,13 +2138,13 @@ describe("hosted device-sync runtime", () => {
         },
         scopes: ["offline", "heartrate"],
       });
-      service.store.markWebhookReceived(localAccountId, "2026-04-02T13:05:00.000Z");
-      service.store.markSyncStarted(localAccountId, "2026-04-02T13:06:00.000Z");
+      getStore(service).markWebhookReceived(localAccountId, "2026-04-02T13:05:00.000Z");
+      getStore(service).markSyncStarted(localAccountId, "2026-04-02T13:06:00.000Z");
 
       const codec = createSecretCodec(DEVICE_SYNC_SECRET);
-      const storedLocalAccount = service.store.getAccountById(localAccountId);
+      const storedLocalAccount = getStore(service).getAccountById(localAccountId);
       assert.ok(storedLocalAccount);
-      const updated = service.store.updateAccountTokens(localAccountId, {
+      const updated = getStore(service).updateAccountTokens(localAccountId, {
         accessToken: "local-access",
         accessTokenEncrypted: codec.encrypt(
           "local-access",
@@ -2138,7 +2168,7 @@ describe("hosted device-sync runtime", () => {
       assert.ok(updated);
 
       assert.equal(
-        service.store.markSyncSucceeded(
+        getStore(service).markSyncSucceeded(
           localAccountId,
           "2026-04-02T13:07:00.000Z",
           null,
@@ -2189,7 +2219,7 @@ describe("hosted device-sync runtime", () => {
         },
       });
     } finally {
-      service.close();
+      closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
     }
   });
@@ -2250,7 +2280,7 @@ describe("hosted device-sync runtime", () => {
 
       assert.equal(applyUpdatesCalls, 0);
     } finally {
-      service.close();
+      closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
     }
   });
@@ -2301,7 +2331,7 @@ describe("hosted device-sync runtime", () => {
         updates: [],
       });
     } finally {
-      service.close();
+      closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
     }
   });
@@ -2346,7 +2376,7 @@ describe("hosted device-sync runtime", () => {
       const localAccountId = state.hostedToLocalAccountIds.get("hosted_conn_disconnect_after_sync");
       assert.ok(localAccountId);
 
-      service.store.disconnectAccount(localAccountId, "2026-04-06T09:40:00.000Z");
+      getStore(service).disconnectAccount(localAccountId, "2026-04-06T09:40:00.000Z");
 
       await reconcileHostedDeviceSyncControlPlaneState({
         deviceSyncPort,
@@ -2366,7 +2396,7 @@ describe("hosted device-sync runtime", () => {
         tokenBundle: null,
       });
     } finally {
-      service.close();
+      closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
     }
   });
@@ -2411,7 +2441,7 @@ describe("hosted device-sync runtime", () => {
       const localAccountId = state.hostedToLocalAccountIds.get("hosted_conn_error_delta");
       assert.ok(localAccountId);
 
-      service.store.markSyncFailed(
+      getStore(service).markSyncFailed(
         localAccountId,
         "2026-04-06T09:40:00.000Z",
         "LOCAL_ERR",
@@ -2440,7 +2470,7 @@ describe("hosted device-sync runtime", () => {
         observedUpdatedAt: "2026-04-04T09:05:00.000Z",
       });
     } finally {
-      service.close();
+      closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
     }
   });
@@ -2491,7 +2521,7 @@ describe("hosted device-sync runtime", () => {
       const localAccountId = state.hostedToLocalAccountIds.get("hosted_conn_clear_tokens");
       assert.ok(localAccountId);
 
-      service.store.updateAccountTokens(localAccountId, {
+      getStore(service).updateAccountTokens(localAccountId, {
         accessToken: "",
         accessTokenEncrypted: "",
         refreshToken: null,
@@ -2513,7 +2543,7 @@ describe("hosted device-sync runtime", () => {
         tokenBundle: null,
       });
     } finally {
-      service.close();
+      closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
     }
   });
@@ -2577,7 +2607,7 @@ describe("hosted device-sync runtime", () => {
         },
       };
 
-      const seeded = service.store.upsertAccount({
+      const seeded = getStore(service).upsertAccount({
         connectedAt: "2026-04-04T09:00:00.000Z",
         displayName: "Hosted Demo",
         externalAccountId: "demo-null-fence",
@@ -2605,15 +2635,15 @@ describe("hosted device-sync runtime", () => {
       const localAccountId = state.hostedToLocalAccountIds.get("hosted_conn_null_fence");
       assert.equal(localAccountId, seeded.id);
 
-      service.store.patchAccount(localAccountId, {
+      getStore(service).patchAccount(localAccountId, {
         displayName: "Local Null Fence",
       });
-      service.store.markSyncStarted(localAccountId, "2026-04-06T09:40:00.000Z");
+      getStore(service).markSyncStarted(localAccountId, "2026-04-06T09:40:00.000Z");
 
       const codec = createSecretCodec(DEVICE_SYNC_SECRET);
-      const storedLocalAccount = service.store.getAccountById(localAccountId);
+      const storedLocalAccount = getStore(service).getAccountById(localAccountId);
       assert.ok(storedLocalAccount);
-      const updated = service.store.updateAccountTokens(localAccountId, {
+      const updated = getStore(service).updateAccountTokens(localAccountId, {
         accessToken: "local-first-access",
         accessTokenEncrypted: codec.encrypt(
           "local-first-access",
@@ -2663,7 +2693,7 @@ describe("hosted device-sync runtime", () => {
         },
       });
     } finally {
-      service.close();
+      closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
     }
   });
@@ -2721,7 +2751,7 @@ describe("hosted device-sync runtime", () => {
       const localAccountId = state.hostedToLocalAccountIds.get("hosted_conn_noop_reconcile");
       assert.ok(localAccountId);
 
-      service.store.patchAccount(localAccountId, {
+      getStore(service).patchAccount(localAccountId, {
         nextReconcileAt: "2026-04-06T08:00:00.000Z",
       });
 
@@ -2738,7 +2768,7 @@ describe("hosted device-sync runtime", () => {
         updates: [],
       });
     } finally {
-      service.close();
+      closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
     }
   });
@@ -2796,7 +2826,7 @@ describe("hosted device-sync runtime", () => {
         updates: [],
       });
     } finally {
-      service.close();
+      closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
     }
   });
@@ -2865,7 +2895,7 @@ describe("hosted device-sync runtime", () => {
         updates: [],
       });
     } finally {
-      service.close();
+      closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
     }
   });

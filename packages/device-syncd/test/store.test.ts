@@ -8,6 +8,13 @@ import { openSqliteRuntimeDatabase } from "@murphai/runtime-state/node";
 import { SqliteDeviceSyncStore } from "../src/store.ts";
 import { DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION } from "../src/store/schema.ts";
 import { makeTempDirectory } from "./helpers.ts";
+import {
+  insertWebhookTraceRowForTesting,
+  readWebhookTraceLifecycleRowsForTesting,
+  readWebhookTraceRowForTesting,
+  setConnectionScopesJsonForTesting,
+  setConnectionUpdatedAtForTesting,
+} from "./store-test-helpers.ts";
 
 const MINIMIZED_WEBHOOK_TRACE_EXTERNAL_ACCOUNT_ID = "_minimized_";
 const UNSUPPORTED_SCHEMA_VERSION = DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION + 1;
@@ -15,13 +22,6 @@ const UNSUPPORTED_SCHEMA_VERSION_RE = new RegExp(
   `device sync runtime database schema version ${UNSUPPORTED_SCHEMA_VERSION} is newer than supported version ${DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION}`,
   "u",
 );
-
-interface WebhookTraceRow {
-  external_account_id: string;
-  payload_json: string;
-  processing_expires_at: string | null;
-  status: string;
-}
 
 test("device sync store minimizes webhook trace payload retention without changing claim or completion state", async () => {
   const tempDir = await makeTempDirectory("murph-device-syncd-store");
@@ -40,7 +40,7 @@ test("device sync store minimizes webhook trace payload retention without changi
       "claimed",
     );
 
-    assert.deepEqual(normalizeWebhookTraceRow(readWebhookTraceRow(store, "oura", "trace-1")), {
+    assert.deepEqual(normalizeWebhookTraceRow(readWebhookTraceRowForTesting(store, "oura", "trace-1")), {
       external_account_id: MINIMIZED_WEBHOOK_TRACE_EXTERNAL_ACCOUNT_ID,
       payload_json: "{}",
       processing_expires_at: "2026-04-01T00:01:00.000Z",
@@ -59,7 +59,7 @@ test("device sync store minimizes webhook trace payload retention without changi
       "claimed",
     );
 
-    assert.deepEqual(normalizeWebhookTraceRow(readWebhookTraceRow(store, "oura", "trace-1")), {
+    assert.deepEqual(normalizeWebhookTraceRow(readWebhookTraceRowForTesting(store, "oura", "trace-1")), {
       external_account_id: MINIMIZED_WEBHOOK_TRACE_EXTERNAL_ACCOUNT_ID,
       payload_json: "{}",
       processing_expires_at: "2026-04-01T00:03:00.000Z",
@@ -68,7 +68,7 @@ test("device sync store minimizes webhook trace payload retention without changi
 
     store.completeWebhookTrace("oura", "trace-1");
 
-    assert.deepEqual(normalizeWebhookTraceRow(readWebhookTraceRow(store, "oura", "trace-1")), {
+    assert.deepEqual(normalizeWebhookTraceRow(readWebhookTraceRowForTesting(store, "oura", "trace-1")), {
       external_account_id: MINIMIZED_WEBHOOK_TRACE_EXTERNAL_ACCOUNT_ID,
       payload_json: "{}",
       processing_expires_at: null,
@@ -88,27 +88,14 @@ test("device sync store prunes processed webhook traces older than the retention
   const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
 
   try {
-    store.database.prepare(`
-      insert into webhook_trace (
-        provider,
-        trace_id,
-        external_account_id,
-        event_type,
-        received_at,
-        payload_json,
-        status,
-        processing_expires_at
-      ) values (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      "oura",
-      "trace-old-processed",
-      "legacy-acct",
-      "sleep.updated",
-      "2025-01-01T00:00:00.000Z",
-      "{}",
-      "processed",
-      null,
-    );
+    insertWebhookTraceRowForTesting(store, {
+      provider: "oura",
+      traceId: "trace-old-processed",
+      externalAccountId: "legacy-acct",
+      eventType: "sleep.updated",
+      receivedAt: "2025-01-01T00:00:00.000Z",
+      status: "processed",
+    });
 
     assert.equal(
       store.claimWebhookTrace({
@@ -122,16 +109,7 @@ test("device sync store prunes processed webhook traces older than the retention
       "claimed",
     );
 
-    const remainingTraceIds = (
-      store.database.prepare(`
-        select trace_id
-        from webhook_trace
-        where provider = ?
-        order by trace_id asc
-      `).all("oura") as Array<{ trace_id?: string }>
-    )
-      .map((row) => row.trace_id)
-      .filter((traceId): traceId is string => typeof traceId === "string");
+    const remainingTraceIds = readWebhookTraceLifecycleRowsForTesting(store, "oura").map((row) => row.trace_id);
 
     assert.deepEqual(remainingTraceIds, ["trace-new"]);
   } finally {
@@ -529,11 +507,7 @@ test("device sync store rejects same-snapshot hosted replays after newer local c
     assert.equal(locallyPatched.localConnectionRevision, 1);
     assert.equal(locallyPatched.localTokenRevision, 1);
 
-    store.database.prepare(`
-      update device_connection
-      set updated_at = ?
-      where id = ?
-    `).run("2026-04-06T23:00:00.000Z", hydrated!.id);
+    setConnectionUpdatedAtForTesting(store, hydrated!.id, "2026-04-06T23:00:00.000Z");
 
     const replayed = store.hydrateHostedAccount({
       connection: {
@@ -577,6 +551,235 @@ test("device sync store rejects same-snapshot hosted replays after newer local c
     assert.equal(replayed?.accessTokenExpiresAt, "2026-04-07T05:00:00.000Z");
     assert.equal(replayed?.nextReconcileAt, "2026-04-07T06:00:00.000Z");
     assert.equal(replayed?.lastErrorCode, "REPLAY_IGNORED");
+  } finally {
+    store.close();
+    await rm(tempDir, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
+test("device sync store preserves replayed connection state while applying fresher hosted tokens", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-store-hosted-token-advance");
+  const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
+
+  try {
+    const seeded = store.upsertAccount({
+      provider: "demo",
+      externalAccountId: "demo-hosted-token-advance",
+      displayName: "Seeded",
+      scopes: ["offline"],
+      tokens: {
+        accessToken: "seed-access",
+        accessTokenEncrypted: "enc:seed-access",
+        refreshToken: "seed-refresh",
+        refreshTokenEncrypted: "enc:seed-refresh",
+      },
+      metadata: {
+        seeded: true,
+      },
+      connectedAt: "2026-04-07T00:00:00.000Z",
+      nextReconcileAt: "2026-04-07T02:00:00.000Z",
+    });
+
+    const hydrated = store.hydrateHostedAccount({
+      connection: {
+        connectedAt: "2026-04-07T00:00:00.000Z",
+        displayName: "Hosted Fresh",
+        externalAccountId: seeded.externalAccountId,
+        metadata: {
+          hosted: true,
+        },
+        provider: seeded.provider,
+        scopes: ["sleep"],
+        status: "active",
+        updatedAt: "2026-04-07T01:00:00.000Z",
+      },
+      hostedObservedTokenVersion: 7,
+      hostedObservedUpdatedAt: "2026-04-07T01:00:00.000Z",
+      localState: {
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastSyncCompletedAt: "2026-04-07T00:30:00.000Z",
+        lastSyncErrorAt: null,
+        lastSyncStartedAt: "2026-04-07T00:20:00.000Z",
+        lastWebhookAt: "2026-04-07T00:10:00.000Z",
+        nextReconcileAt: "2026-04-07T03:00:00.000Z",
+      },
+      tokens: {
+        accessToken: "hosted-access-v7",
+        accessTokenEncrypted: "enc:hosted-access-v7",
+        accessTokenExpiresAt: "2026-04-07T04:00:00.000Z",
+        refreshToken: "hosted-refresh-v7",
+        refreshTokenEncrypted: "enc:hosted-refresh-v7",
+      },
+    });
+
+    assert.ok(hydrated);
+
+    const locallyPatched = store.patchAccount(hydrated!.id, {
+      displayName: "Local Fresh",
+      metadata: {
+        local: true,
+      },
+      scopes: ["offline", "manual"],
+      status: "reauthorization_required",
+    });
+
+    assert.equal(locallyPatched.displayName, "Local Fresh");
+
+    const replayedConnectionFreshToken = store.hydrateHostedAccount({
+      connection: {
+        connectedAt: "2026-04-07T00:00:00.000Z",
+        displayName: "Hosted Replayed Connection",
+        externalAccountId: seeded.externalAccountId,
+        metadata: {
+          replay: true,
+        },
+        provider: seeded.provider,
+        scopes: ["sleep"],
+        status: "active",
+        updatedAt: "2026-04-07T01:00:00.000Z",
+      },
+      hostedObservedTokenVersion: 8,
+      hostedObservedUpdatedAt: "2026-04-07T01:00:00.000Z",
+      localState: {
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastSyncCompletedAt: "2026-04-07T01:30:00.000Z",
+        lastSyncErrorAt: null,
+        lastSyncStartedAt: "2026-04-07T01:20:00.000Z",
+        lastWebhookAt: "2026-04-07T01:10:00.000Z",
+        nextReconcileAt: "2026-04-07T04:00:00.000Z",
+      },
+      tokens: {
+        accessToken: "hosted-access-v8",
+        accessTokenEncrypted: "enc:hosted-access-v8",
+        accessTokenExpiresAt: "2026-04-07T05:00:00.000Z",
+        refreshToken: "hosted-refresh-v8",
+        refreshTokenEncrypted: "enc:hosted-refresh-v8",
+      },
+    });
+
+    assert.equal(replayedConnectionFreshToken?.id, seeded.id);
+    assert.equal(replayedConnectionFreshToken?.displayName, "Local Fresh");
+    assert.equal(replayedConnectionFreshToken?.status, "reauthorization_required");
+    assert.deepEqual(replayedConnectionFreshToken?.metadata, {
+      hosted: true,
+      local: true,
+    });
+    assert.deepEqual(replayedConnectionFreshToken?.scopes, ["offline", "manual"]);
+    assert.equal(replayedConnectionFreshToken?.hostedObservedUpdatedAt, "2026-04-07T01:00:00.000Z");
+    assert.equal(replayedConnectionFreshToken?.hostedObservedTokenVersion, 8);
+    assert.equal(replayedConnectionFreshToken?.accessTokenEncrypted, "enc:hosted-access-v8");
+    assert.equal(replayedConnectionFreshToken?.refreshTokenEncrypted, "enc:hosted-refresh-v8");
+    assert.equal(replayedConnectionFreshToken?.accessTokenExpiresAt, "2026-04-07T05:00:00.000Z");
+  } finally {
+    store.close();
+    await rm(tempDir, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
+test("device sync store keeps local tokens when hosted disconnect clear requests arrive with stale token observations", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-store-hosted-clear-stale");
+  const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
+
+  try {
+    const seeded = store.upsertAccount({
+      provider: "demo",
+      externalAccountId: "demo-hosted-clear-stale",
+      displayName: "Seeded",
+      scopes: ["offline"],
+      tokens: {
+        accessToken: "seed-access",
+        accessTokenEncrypted: "enc:seed-access",
+        refreshToken: "seed-refresh",
+        refreshTokenEncrypted: "enc:seed-refresh",
+      },
+      metadata: {
+        seeded: true,
+      },
+      connectedAt: "2026-04-07T00:00:00.000Z",
+      nextReconcileAt: "2026-04-07T02:00:00.000Z",
+    });
+
+    const hydrated = store.hydrateHostedAccount({
+      connection: {
+        connectedAt: "2026-04-07T00:00:00.000Z",
+        displayName: "Hosted Fresh",
+        externalAccountId: seeded.externalAccountId,
+        metadata: {
+          hosted: true,
+        },
+        provider: seeded.provider,
+        scopes: ["sleep"],
+        status: "active",
+        updatedAt: "2026-04-07T01:00:00.000Z",
+      },
+      hostedObservedTokenVersion: 7,
+      hostedObservedUpdatedAt: "2026-04-07T01:00:00.000Z",
+      localState: {
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastSyncCompletedAt: "2026-04-07T00:30:00.000Z",
+        lastSyncErrorAt: null,
+        lastSyncStartedAt: "2026-04-07T00:20:00.000Z",
+        lastWebhookAt: "2026-04-07T00:10:00.000Z",
+        nextReconcileAt: "2026-04-07T03:00:00.000Z",
+      },
+      tokens: {
+        accessToken: "hosted-access-v7",
+        accessTokenEncrypted: "enc:hosted-access-v7",
+        accessTokenExpiresAt: "2026-04-07T04:00:00.000Z",
+        refreshToken: "hosted-refresh-v7",
+        refreshTokenEncrypted: "enc:hosted-refresh-v7",
+      },
+    });
+
+    assert.ok(hydrated);
+
+    const blockedClear = store.hydrateHostedAccount({
+      clearTokens: true,
+      connection: {
+        connectedAt: "2026-04-07T00:00:00.000Z",
+        displayName: "Hosted Disconnect",
+        externalAccountId: seeded.externalAccountId,
+        metadata: {
+          reason: "stale-observation",
+        },
+        provider: seeded.provider,
+        scopes: ["sleep"],
+        status: "disconnected",
+        updatedAt: "2026-04-07T02:00:00.000Z",
+      },
+      hostedObservedTokenVersion: 6,
+      hostedObservedUpdatedAt: "2026-04-07T02:00:00.000Z",
+      localState: {
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastSyncCompletedAt: "2026-04-07T01:30:00.000Z",
+        lastSyncErrorAt: null,
+        lastSyncStartedAt: "2026-04-07T01:20:00.000Z",
+        lastWebhookAt: "2026-04-07T01:10:00.000Z",
+        nextReconcileAt: null,
+      },
+    });
+
+    assert.equal(blockedClear?.id, seeded.id);
+    assert.equal(blockedClear?.status, "disconnected");
+    assert.equal(blockedClear?.disconnectGeneration, 1);
+    assert.deepEqual(blockedClear?.metadata, {
+      reason: "stale-observation",
+    });
+    assert.equal(blockedClear?.hostedObservedUpdatedAt, "2026-04-07T02:00:00.000Z");
+    assert.equal(blockedClear?.hostedObservedTokenVersion, 7);
+    assert.equal(blockedClear?.accessTokenEncrypted, "enc:hosted-access-v7");
+    assert.equal(blockedClear?.refreshTokenEncrypted, "enc:hosted-refresh-v7");
+    assert.equal(blockedClear?.accessTokenExpiresAt, "2026-04-07T04:00:00.000Z");
   } finally {
     store.close();
     await rm(tempDir, {
@@ -955,9 +1158,7 @@ test("device sync store fails closed when stored scopes_json is malformed", asyn
       connectedAt: "2026-04-07T00:00:00.000Z",
     });
 
-    store.database
-      .prepare("update device_connection set scopes_json = ? where id = ?")
-      .run("{not-json", account.id);
+    setConnectionScopesJsonForTesting(store, account.id, "{not-json");
 
     assert.throws(
       () => store.getAccountById(account.id),
@@ -1286,37 +1487,8 @@ test("device sync store updates existing accounts and rejects stale success writ
   }
 });
 
-function readWebhookTraceRow(
-  store: SqliteDeviceSyncStore,
-  provider: string,
-  traceId: string,
-): WebhookTraceRow | null {
-  const row = store.database.prepare(`
-    select external_account_id, payload_json, processing_expires_at, status
-    from webhook_trace
-    where provider = ?
-      and trace_id = ?
-  `).get(provider, traceId);
-
-  if (
-    !row
-    || typeof row !== "object"
-    || typeof row.external_account_id !== "string"
-    || typeof row.payload_json !== "string"
-    || (row.processing_expires_at !== null && typeof row.processing_expires_at !== "string")
-    || typeof row.status !== "string"
-  ) {
-    return null;
-  }
-
-  return {
-    external_account_id: row.external_account_id,
-    payload_json: row.payload_json,
-    processing_expires_at: row.processing_expires_at,
-    status: row.status,
-  };
-}
-
-function normalizeWebhookTraceRow(row: WebhookTraceRow | null): WebhookTraceRow | null {
+function normalizeWebhookTraceRow(
+  row: ReturnType<typeof readWebhookTraceRowForTesting>,
+): ReturnType<typeof readWebhookTraceRowForTesting> {
   return row ? { ...row } : null;
 }

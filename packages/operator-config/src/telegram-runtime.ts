@@ -1,6 +1,5 @@
 import {
   parseTelegramThreadTarget,
-  serializeTelegramThreadTarget,
   type TelegramThreadTarget,
 } from '@murphai/messaging-ingress/telegram-webhook'
 
@@ -98,7 +97,7 @@ export async function startTelegramTypingSession(
       fetchImplementation,
       signal: linkedStopSignal.signal,
       target,
-      targetLabel: serializeTelegramThreadTarget(target),
+      targetLabel: redactTelegramTargetForDiagnostics(target),
       token,
     })
   } catch (error) {
@@ -195,10 +194,13 @@ export async function deleteTelegramMessages(
         `Telegram Bot API ${request.operation} failed with HTTP ${response.status}.`,
       {
         errorCode: errorContext.errorCode,
+        migrateToChatId: redactTelegramChatIdForDiagnostics(
+          errorContext.migrateToChatId,
+        ),
         messageIdCount: batch.length,
         operation: request.operation,
         status: response.status,
-        target: serializeTelegramThreadTarget(target),
+        target: redactTelegramTargetForDiagnostics(target),
       },
     )
   }
@@ -222,7 +224,7 @@ function parseTelegramTargetOrThrow(target: string): TelegramThreadTarget {
     'ASSISTANT_TELEGRAM_TARGET_INVALID',
     'Telegram targets must use "<chatId>", "<chatId>:topic:<messageThreadId>", "<chatId>:dm-topic:<directMessagesTopicId>", and optional ":business:<businessConnectionId>" routing segments.',
     {
-      target: normalizedTarget,
+      target: redactTelegramTargetForDiagnostics(normalizedTarget),
     },
   )
 }
@@ -258,7 +260,7 @@ async function keepTelegramTypingIndicatorAlive(input: {
       ignoreAbortedSignal: true,
       signal: input.signal,
       target,
-      targetLabel: serializeTelegramThreadTarget(target),
+      targetLabel: redactTelegramTargetForDiagnostics(target),
       token: input.token,
     })
   }
@@ -328,11 +330,74 @@ async function sendTelegramTypingIndicatorOnce(input: {
       `Telegram Bot API sendChatAction failed with HTTP ${response.status}.`,
     {
       errorCode: errorContext.errorCode,
-      migrateToChatId: errorContext.migrateToChatId,
+      migrateToChatId: redactTelegramChatIdForDiagnostics(
+        errorContext.migrateToChatId,
+      ),
       status: response.status,
       target: input.targetLabel,
     },
   )
+}
+
+function redactTelegramTargetForDiagnostics(
+  target: TelegramThreadTarget | string,
+): string {
+  if (typeof target !== 'string') {
+    return formatRedactedTelegramTarget({
+      businessConnectionId: target.businessConnectionId ?? null,
+      directMessagesTopicId: target.directMessagesTopicId ?? null,
+      messageThreadId: target.messageThreadId ?? null,
+      valid: true,
+    })
+  }
+
+  const normalized = normalizeNullableString(target)
+  if (!normalized) {
+    return '[redacted-telegram-target]'
+  }
+
+  const parsed = parseTelegramThreadTarget(normalized)
+  if (parsed) {
+    return formatRedactedTelegramTarget({
+      businessConnectionId: parsed.businessConnectionId ?? null,
+      directMessagesTopicId: parsed.directMessagesTopicId ?? null,
+      messageThreadId: parsed.messageThreadId ?? null,
+      valid: true,
+    })
+  }
+
+  return formatRedactedTelegramTarget({
+    businessConnectionId:
+      normalized.includes(':business:') ? 'present' : null,
+    directMessagesTopicId: normalized.includes(':dm-topic:') ? 1 : null,
+    messageThreadId: normalized.includes(':topic:') ? 1 : null,
+    valid: false,
+  })
+}
+
+function formatRedactedTelegramTarget(input: {
+  businessConnectionId: string | null
+  directMessagesTopicId: number | null
+  messageThreadId: number | null
+  valid: boolean
+}): string {
+  const parts = [input.valid ? 'chat' : 'invalid']
+  if (input.businessConnectionId) {
+    parts.push('business')
+  }
+  if (input.messageThreadId !== null) {
+    parts.push('topic')
+  }
+  if (input.directMessagesTopicId !== null) {
+    parts.push('dm-topic')
+  }
+  return `[redacted-telegram-target:${parts.join('+')}]`
+}
+
+function redactTelegramChatIdForDiagnostics(value: string | null): string | null {
+  return normalizeNullableString(value)
+    ? '[redacted-telegram-chat-id]'
+    : null
 }
 
 function buildTelegramDeleteRequest(

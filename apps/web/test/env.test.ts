@@ -53,7 +53,7 @@ describe("readHostedDeviceSyncEnvironment", () => {
       DEVICE_SYNC_PUBLIC_BASE_URL: "https://api.withmurph.ai/device-sync",
       DEVICE_SYNC_ALLOWED_MUTATION_ORIGINS: "https://www.withmurph.ai",
       DEVICE_SYNC_ALLOWED_RETURN_ORIGINS: "https://www.withmurph.ai",
-      HOSTED_ONBOARDING_PUBLIC_BASE_URL: "not-a-url",
+      HOSTED_ONBOARDING_PUBLIC_BASE_URL: "https://",
     });
 
     expect(environment.publicBaseUrl).toBe("https://api.withmurph.ai/device-sync");

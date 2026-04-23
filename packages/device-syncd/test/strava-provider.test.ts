@@ -512,7 +512,7 @@ describe("Strava device-sync provider", () => {
     });
   });
 
-  it("disconnects Strava accounts when deauthorization jobs execute", async () => {
+  it("invokes the disconnect callback when deauthorization jobs execute", async () => {
     const provider = createStravaDeviceSyncProvider({
       clientId: "12345",
       clientSecret: "secret",

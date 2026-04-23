@@ -6,6 +6,20 @@ export function requireObject(value: unknown, label: string): Record<string, unk
   return value as Record<string, unknown>;
 }
 
+export function rejectLegacyAliases(
+  record: Record<string, unknown>,
+  label: string,
+  aliases: Readonly<Record<string, string>>,
+): void {
+  for (const [legacyKey, canonicalKey] of Object.entries(aliases)) {
+    if (Object.prototype.hasOwnProperty.call(record, legacyKey)) {
+      throw new TypeError(
+        `${label} must not include legacy ${legacyKey}; use ${canonicalKey}.`,
+      );
+    }
+  }
+}
+
 export function requireString(value: unknown, label: string): string {
   if (typeof value !== "string" || value.length === 0) {
     throw new TypeError(`${label} must be a non-empty string.`);

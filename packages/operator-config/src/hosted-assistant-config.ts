@@ -21,10 +21,10 @@ import {
 import {
   resolveOpenAICompatibleProviderPresetFromId,
   resolveOpenAICompatibleProviderPresetFromProviderName,
+  resolveOpenAICompatibleProviderTargetPresetId,
   type SetupAssistantProviderPreset,
 } from './assistant/openai-compatible-provider-presets.js'
 import { resolveAssistantRuntimeTarget } from './assistant/target-runtime.js'
-import { isAssistantVercelAIGatewayBaseUrl } from './assistant/shared.js'
 import type { AssistantProviderConfigInput } from './assistant/provider-config.js'
 import {
   readOperatorConfig,
@@ -664,9 +664,11 @@ function isHostedAssistantVercelAiGatewayTarget(input: {
   providerName: string | null
 }): boolean {
   return (
-    input.presetId === 'vercel-ai-gateway' ||
-    input.providerName?.toLowerCase() === 'vercel-ai-gateway' ||
-    isAssistantVercelAIGatewayBaseUrl(input.baseUrl)
+    resolveOpenAICompatibleProviderTargetPresetId({
+      baseUrl: input.baseUrl,
+      presetId: input.presetId,
+      providerName: input.providerName,
+    }) === 'vercel-ai-gateway'
   )
 }
 

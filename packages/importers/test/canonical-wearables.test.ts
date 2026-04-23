@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 
 import { test } from "vitest";
+import { normalizeWearableMetricValue } from "../src/device-providers/metric-catalog.ts";
 
 import {
   canonicalizeDeviceBatchPayload,
@@ -42,6 +43,12 @@ test("wearable metric catalog resolves current hyphenated and sample aliases", (
   assert.equal(resolveWearableCanonicalMetricKey("vo2max"), "estimatedVo2Max");
   assert.equal(resolveWearableCanonicalMetricKey("cardio_fitness"), "estimatedVo2Max");
   assert.equal(resolveWearableCanonicalMetricKey("cardiorespiratory_fitness"), "estimatedVo2Max");
+  assert.equal(resolveWearableCanonicalMetricKey("energy-burned"), "activeCalories");
+  assert.equal(resolveWearableCanonicalMetricKey("max-heart-rate"), "maxHeartRate");
+  assert.equal(resolveWearableCanonicalMetricKey("workout-strain"), "workoutStrain");
+  assert.equal(resolveWearableCanonicalMetricKey("percent-recorded"), "percentRecorded");
+  assert.equal(resolveWearableCanonicalMetricKey("altitude-gain"), "totalElevationGainMeters");
+  assert.equal(resolveWearableCanonicalMetricKey("altitude-change"), "altitudeChangeMeters");
   assert.equal(resolveWearableMetricTolerance("day-strain"), 0.5);
 });
 
@@ -104,6 +111,130 @@ test("canonicalizeDeviceBatchPayload preserves hashed account identity and maps 
   assert.ok(records.every((record) => !("accountId" in record.source)));
   assert.ok(records.every((record) => record.source.providerAccountIdHash?.length === 24));
   assert.ok(records.every((record) => record.source.dataSourceId.startsWith("wearable_source_")));
+});
+
+test("wearable metric normalization converts energy-burned and preserves WHOOP workout metrics", () => {
+  assert.deepEqual(
+    normalizeWearableMetricValue("energy-burned", 418.4, "kJ"),
+    {
+      key: "activeCalories",
+      unit: "kcal",
+      value: 100,
+    },
+  );
+  assert.equal(
+    normalizeWearableMetricValue("energy-burned", 418.4, null),
+    null,
+  );
+
+  const records = canonicalizeDeviceBatchPayload({
+    provider: "whoop",
+    accountId: "whoop-user-1",
+    importedAt: "2026-04-20T12:00:00.000Z",
+    events: [
+      {
+        kind: "observation",
+        occurredAt: "2026-04-20T18:00:00.000Z",
+        dayKey: "2026-04-20",
+        fields: {
+          metric: "energy-burned",
+          unit: "kJ",
+          value: 418.4,
+        },
+      },
+      {
+        kind: "observation",
+        occurredAt: "2026-04-20T18:00:00.000Z",
+        dayKey: "2026-04-20",
+        fields: {
+          metric: "max-heart-rate",
+          unit: "bpm",
+          value: 168,
+        },
+      },
+      {
+        kind: "observation",
+        occurredAt: "2026-04-20T18:00:00.000Z",
+        dayKey: "2026-04-20",
+        fields: {
+          metric: "workout-strain",
+          unit: "whoop_strain",
+          value: 11.1,
+        },
+      },
+      {
+        kind: "observation",
+        occurredAt: "2026-04-20T18:00:00.000Z",
+        dayKey: "2026-04-20",
+        fields: {
+          metric: "percent-recorded",
+          unit: "%",
+          value: 99,
+        },
+      },
+      {
+        kind: "observation",
+        occurredAt: "2026-04-20T18:00:00.000Z",
+        dayKey: "2026-04-20",
+        fields: {
+          metric: "altitude-gain",
+          unit: "meter",
+          value: 42,
+        },
+      },
+      {
+        kind: "observation",
+        occurredAt: "2026-04-20T18:00:00.000Z",
+        dayKey: "2026-04-20",
+        fields: {
+          metric: "altitude-change",
+          unit: "meter",
+          value: 33,
+        },
+      },
+    ],
+  });
+
+  const observationMetrics = records
+    .filter((record) => record.kind === "observation")
+    .map((record) => ({
+      metric: record.metric,
+      unit: record.unit,
+      value: record.value,
+    }));
+
+  assert.deepEqual(observationMetrics, [
+    {
+      metric: "activeCalories",
+      unit: "kcal",
+      value: 100,
+    },
+    {
+      metric: "maxHeartRate",
+      unit: "bpm",
+      value: 168,
+    },
+    {
+      metric: "workoutStrain",
+      unit: "whoop_strain",
+      value: 11.1,
+    },
+    {
+      metric: "percentRecorded",
+      unit: "%",
+      value: 99,
+    },
+    {
+      metric: "totalElevationGainMeters",
+      unit: "meter",
+      value: 42,
+    },
+    {
+      metric: "altitudeChangeMeters",
+      unit: "meter",
+      value: 33,
+    },
+  ]);
 });
 
 test("prepareDeviceProviderSnapshotImport emits raw envelopes and canonical wearable artifacts", async () => {

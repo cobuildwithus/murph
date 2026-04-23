@@ -180,7 +180,23 @@ for (const family of VAULT_FAMILY_DESCRIPTORS) {
 assert.equal((schemaCatalog["event-record"] as { oneOf?: unknown[] }).oneOf?.length, 19);
 assert.equal((schemaCatalog["sample-record"] as { oneOf?: unknown[] }).oneOf?.length, 8);
 assert.deepEqual(commandNounCapabilityByNoun.get("food")?.bundles, ["payloadCrud"]);
-assert.deepEqual(commandNounCapabilityByNoun.get("food")?.additionalCapabilities ?? [], []);
+assert.deepEqual(commandNounCapabilityByNoun.get("food")?.additionalCapabilities ?? [], [
+  "rename",
+  "schedule",
+  "unschedule",
+]);
+assert.deepEqual(commandNounCapabilityByNoun.get("assistant")?.capabilities ?? [], [
+  "ask",
+  "chat",
+  "deliver",
+  "status",
+  "doctor",
+  "run",
+  "stop",
+  "session-list",
+  "session-show",
+]);
+assert.deepEqual(commandNounCapabilityByNoun.get("device")?.bundles ?? [], ["deviceControl"]);
 assert.equal(
   commandNounCapabilities.map((entry) => String(entry.noun)).includes("history"),
   false,

@@ -54,6 +54,7 @@ import {
   materializeInboxModelBundle,
   routeInboxCaptureWithModel,
 } from '../src/inbox-model-harness.ts'
+import { resolveAssistantModelSpecFromProviderConfig } from '../src/assistant/provider-config.ts'
 import {
   buildInboxModelAttachmentBundle,
   hasInboxMultimodalAttachmentEvidenceCandidate,
@@ -235,6 +236,47 @@ describe('model harness runtime helpers', () => {
         apiKey: 'env-secret',
         baseURL: 'https://router.example.com/v1',
         name: 'murph-assistant',
+      }),
+    )
+  })
+
+  it('does not resurrect ambient API keys when an explicit caller env blanks the configured key', () => {
+    process.env.ASSISTANT_API_KEY = 'ambient-secret'
+
+    const spec = resolveAssistantModelSpecFromProviderConfig(
+      {
+        apiKeyEnv: 'ASSISTANT_API_KEY',
+        baseUrl: 'https://router.example.com/v1',
+        model: 'router-model',
+        provider: 'openai-compatible',
+      },
+      {
+        ASSISTANT_API_KEY: '   ',
+      },
+    )
+
+    expect(spec).toMatchObject({
+      apiKeyEnv: 'ASSISTANT_API_KEY',
+      apiKeyEnvValue: null,
+      baseUrl: 'https://router.example.com/v1',
+      model: 'router-model',
+    })
+
+    const compatibleModel = resolveAssistantLanguageModel(spec!)
+
+    expect(compatibleModel).toEqual({
+      model: 'router-model',
+      options: {
+        apiKey: undefined,
+        baseURL: 'https://router.example.com/v1',
+        name: 'murph-assistant',
+      },
+      provider: 'openai-compatible',
+    })
+    expect(harnessMocks.createOpenAICompatible).toHaveBeenCalledWith(
+      expect.objectContaining({
+        apiKey: undefined,
+        baseURL: 'https://router.example.com/v1',
       }),
     )
   })

@@ -2,7 +2,8 @@ import path from "node:path";
 
 import {
   buildLinqMessageText,
-  parseCanonicalLinqMessageReceivedEvent,
+  parseLinqMessageReceivedEvent,
+  readLinqRecipientLineHandle,
   type LinqMediaPart,
   type LinqMessagePart,
   type LinqMessageReceivedData,
@@ -84,9 +85,10 @@ export async function normalizeLinqWebhookEvent({
   signal,
   attachmentDownloadTimeoutMs = null,
 }: NormalizeLinqWebhookEventInput): Promise<InboundCapture> {
-  const messageEvent = parseCanonicalLinqMessageReceivedEvent(event);
+  const messageEvent = parseLinqMessageReceivedEvent(event);
   const accountId =
-    normalizeTextValue(messageEvent.data.recipient_phone ?? null) ?? defaultAccountId;
+    normalizeTextValue(readLinqRecipientLineHandle(messageEvent.data))
+    ?? defaultAccountId;
   return normalizeLinqMessageReceivedEvent({
     accountId,
     attachmentDownloadTimeoutMs,
@@ -196,7 +198,7 @@ async function normalizeLinqMessageReceivedEvent(input: {
   return createInboundCaptureFromChatMessage({
     accountId:
       normalizeTextValue(input.accountId ?? null)
-      ?? normalizeTextValue(input.messageEvent.data.recipient_phone ?? null),
+      ?? normalizeTextValue(readLinqRecipientLineHandle(input.messageEvent.data)),
     message: input.externalIdOverride
       ? {
           ...message,

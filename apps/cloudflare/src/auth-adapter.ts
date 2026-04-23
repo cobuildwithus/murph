@@ -18,6 +18,7 @@ const remoteJwkSetCache = new Map<string, RemoteJwkSet>();
 const HOSTED_EXECUTION_LOCAL_JWKS_HOSTS = new Set([
   "127.0.0.1",
   "::1",
+  "[::1]",
   "host.docker.internal",
   "localhost",
 ]);

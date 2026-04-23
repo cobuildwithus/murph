@@ -1,7 +1,13 @@
-import { type HostedMember } from "@prisma/client";
-
 import { createHostedPhoneLookupKey } from "./contact-privacy";
 import { hostedOnboardingError } from "./errors";
+import {
+  lookupHostedMemberByVerifiedEmailAddress,
+  type HostedMemberCoreState,
+} from "./hosted-member-store";
+import {
+  lookupHostedMemberRoutingByTelegramUserId,
+  type HostedMemberRoutingLookupMatch,
+} from "./hosted-member-routing-store";
 import { type HostedPrivyIdentity } from "./privy";
 import { normalizeHostedWalletAddress } from "./revnet";
 import {
@@ -13,10 +19,15 @@ import {
 } from "./hosted-member-identity-store";
 import { type HostedOnboardingReadClient } from "./shared";
 
+export type HostedMemberPrivyIdentityLookupMatch =
+  | HostedMemberIdentityLookupMatch
+  | HostedMemberRoutingLookupMatch
+  | "verifiedEmail";
+
 export interface HostedMemberPrivyIdentityLookup {
-  core: HostedMemberIdentityLookup["core"];
-  identity: HostedMemberIdentityLookup["identity"];
-  matchedBy: HostedMemberIdentityLookupMatch[];
+  core: HostedMemberCoreState;
+  identity: HostedMemberIdentityLookup["identity"] | null;
+  matchedBy: HostedMemberPrivyIdentityLookupMatch[];
 }
 
 export function hasHostedMemberPrivyIdentity(member: {
@@ -56,18 +67,40 @@ export async function lookupHostedMemberForPrivyIdentity(input: {
         walletAddress: normalizedWalletAddress,
       })
     : null;
+  const lookupByTelegramUserId = input.identity.telegram?.telegramUserId
+    ? () => lookupHostedMemberRoutingByTelegramUserId({
+        prisma: input.prisma,
+        telegramUserId: input.identity.telegram!.telegramUserId,
+      })
+    : null;
+  const lookupByVerifiedEmail = input.identity.email?.address
+    ? () => lookupHostedMemberByVerifiedEmailAddress({
+        address: input.identity.email!.address,
+        prisma: input.prisma,
+      })
+    : null;
 
-  const [memberByPrivyUserId, memberByPhoneNumber, memberByWalletAddress] =
+  const [
+    memberByPrivyUserId,
+    memberByPhoneNumber,
+    memberByWalletAddress,
+    memberByTelegramUserId,
+    memberByVerifiedEmail,
+  ] =
     input.parallelizeReads
       ? await Promise.all([
           lookupByPrivyUserId?.() ?? Promise.resolve(null),
           lookupByPhoneNumber?.() ?? Promise.resolve(null),
           lookupByWalletAddress?.() ?? Promise.resolve(null),
+          lookupByTelegramUserId?.() ?? Promise.resolve(null),
+          lookupByVerifiedEmail?.() ?? Promise.resolve(null),
         ])
       : [
           lookupByPrivyUserId ? await lookupByPrivyUserId() : null,
           lookupByPhoneNumber ? await lookupByPhoneNumber() : null,
           lookupByWalletAddress ? await lookupByWalletAddress() : null,
+          lookupByTelegramUserId ? await lookupByTelegramUserId() : null,
+          lookupByVerifiedEmail ? await lookupByVerifiedEmail() : null,
         ];
 
   if (memberByPrivyUserId) {
@@ -82,6 +115,14 @@ export async function lookupHostedMemberForPrivyIdentity(input: {
     addHostedMemberPrivyIdentityMatch(matches, memberByWalletAddress);
   }
 
+  if (memberByTelegramUserId) {
+    addHostedMemberPrivyIdentityMatch(matches, memberByTelegramUserId);
+  }
+
+  if (memberByVerifiedEmail) {
+    addHostedMemberPrivyIdentityMatch(matches, memberByVerifiedEmail);
+  }
+
   if (matches.size > 1) {
     throw createHostedPrivyIdentityConflictError();
   }
@@ -93,14 +134,19 @@ export function createHostedPrivyIdentityConflictError() {
   return hostedOnboardingError({
     code: "PRIVY_IDENTITY_CONFLICT",
     message:
-      "This verified phone session conflicts with an existing Murph account. Contact support so we can merge it safely.",
+      "This verified sign-in session conflicts with an existing Murph account. Contact support so we can merge it safely.",
     httpStatus: 409,
   });
 }
 
 function addHostedMemberPrivyIdentityMatch(
   matches: Map<string, HostedMemberPrivyIdentityLookup>,
-  match: HostedMemberIdentityLookup,
+  match:
+    | HostedMemberIdentityLookup
+    | {
+      core: HostedMemberCoreState;
+      matchedBy: HostedMemberPrivyIdentityLookupMatch;
+    },
 ): void {
   const existingMatch = matches.get(match.core.id);
 
@@ -108,12 +154,15 @@ function addHostedMemberPrivyIdentityMatch(
     if (!existingMatch.matchedBy.includes(match.matchedBy)) {
       existingMatch.matchedBy.push(match.matchedBy);
     }
+    if ("identity" in match && match.identity && !existingMatch.identity) {
+      existingMatch.identity = match.identity;
+    }
     return;
   }
 
   matches.set(match.core.id, {
     core: match.core,
-    identity: match.identity,
+    identity: "identity" in match ? match.identity : null,
     matchedBy: [match.matchedBy],
   });
 }

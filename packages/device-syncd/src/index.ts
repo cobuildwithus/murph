@@ -8,8 +8,8 @@ export {
 export { DeviceSyncError, deviceSyncError, isDeviceSyncError } from "./errors.ts";
 export { createDeviceSyncRegistry } from "./registry.ts";
 export { resolveDeviceSyncWebhookPreflightResponse } from "./webhook-verification.ts";
-export { createDeviceSyncService, createDefaultImporterPort, DeviceSyncService } from "./service.ts";
-export type { CreateDeviceSyncServiceInput } from "./service.ts";
+export { createDeviceSyncService, createDefaultImporterPort } from "./service.ts";
+export type { CreateDeviceSyncServiceInput, DeviceSyncService } from "./service.ts";
 export {
   cloneConfiguredDeviceSyncRuntimeConfig,
   createConfiguredDeviceSyncRegistry,

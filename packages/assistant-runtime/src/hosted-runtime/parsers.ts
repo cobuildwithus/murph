@@ -92,6 +92,14 @@ export function parseHostedAssistantRuntimeConfig(
             "Hosted assistant runtime config.forwardedEnv",
           ),
         }),
+    ...(record.platformEnv === undefined
+      ? {}
+      : {
+          platformEnv: parseStringRecord(
+            record.platformEnv,
+            "Hosted assistant runtime config.platformEnv",
+          ),
+        }),
     ...(record.resolvedConfig === undefined
       ? {}
       : {

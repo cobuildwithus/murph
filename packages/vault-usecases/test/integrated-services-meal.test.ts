@@ -34,18 +34,19 @@ test("integrated core addMeal forwards structured meal fields to core", async ()
     photo: null,
     audio: null,
   }));
+  const loadCoreRuntime = vi.fn(async () => ({
+    addMeal,
+  }));
+  const loadQueryRuntime = vi.fn();
 
   const integratedServicesModule = await importWithMocks<
     typeof import("../src/usecases/integrated-services.ts")
   >("../src/usecases/integrated-services.ts", {
     "../src/usecases/runtime.ts": () => ({
       createUnwiredMethod: vi.fn(),
+      loadCoreRuntime,
       loadImporterRuntime: vi.fn(),
-      loadIntegratedRuntime: vi.fn(async () => ({
-        core: {
-          addMeal,
-        },
-      })),
+      loadQueryRuntime,
     }),
   });
 
@@ -94,4 +95,6 @@ test("integrated core addMeal forwards structured meal fields to core", async ()
     ingredients: ["salmon", "rice"],
     nutrition: normalizedNutrition,
   });
+  assert.equal(loadCoreRuntime.mock.calls.length, 1);
+  assert.equal(loadQueryRuntime.mock.calls.length, 0);
 });

@@ -10,13 +10,18 @@ import {
 } from "@murphai/hosted-execution/contracts";
 
 import { writeEncryptedR2Payload, type EncryptedR2BucketLike } from "./crypto.js";
-import { hostedBrowserVaultReplicaObjectKey } from "./storage-paths.js";
+import {
+  hostedBrowserVaultReplicaObjectKey,
+  hostedBrowserVaultReplicaUserPrefix,
+} from "./storage-paths.js";
 
 const BROWSER_VAULT_REPLICA_SCHEMA = "murph.browser-vault-replica.v1";
 const utf8Decoder = new TextDecoder();
 const utf8Encoder = new TextEncoder();
 
-type HostedBrowserVaultReplicaBucketLike = EncryptedR2BucketLike;
+type HostedBrowserVaultReplicaBucketLike = EncryptedR2BucketLike & {
+  delete?(key: string): Promise<void>;
+};
 
 export interface BrowserVaultReplicaAadFields {
   dataVersion: string;
@@ -28,6 +33,7 @@ export interface BrowserVaultReplicaAadFields {
 }
 
 export interface HostedBrowserVaultReplicaStore {
+  deleteBrowserVaultReplica(ref: HostedBrowserVaultReplicaRef | null): Promise<void>;
   deriveBrowserVaultReplicaKey(ref: HostedBrowserVaultReplicaRef): Promise<Uint8Array>;
   readBrowserVaultReplicaEnvelope(ref: HostedBrowserVaultReplicaRef): Promise<HostedCipherEnvelope | null>;
   writeBrowserVaultReplica(input: { replica: unknown; userId: string }): Promise<HostedBrowserVaultReplicaRef>;
@@ -50,8 +56,19 @@ export function createBrowserVaultReplicaAadFields(input: {
 export function createHostedBrowserVaultReplicaStore(input: {
   bucket: HostedBrowserVaultReplicaBucketLike;
   rootKey: Uint8Array;
+  userId?: string | null;
 }): HostedBrowserVaultReplicaStore {
   return {
+    async deleteBrowserVaultReplica(ref) {
+      if (!ref || !input.bucket.delete) {
+        return;
+      }
+
+      await assertHostedBrowserVaultReplicaOwnedByUser(input, ref);
+
+      await input.bucket.delete(ref.objectKey);
+    },
+
     async deriveBrowserVaultReplicaKey(ref) {
       return deriveBrowserVaultReplicaKey(input.rootKey, ref);
     },
@@ -111,6 +128,28 @@ export function createHostedBrowserVaultReplicaStore(input: {
       return ref;
     },
   };
+}
+
+async function assertHostedBrowserVaultReplicaOwnedByUser(
+  input: {
+    rootKey: Uint8Array;
+    userId?: string | null;
+  },
+  ref: HostedBrowserVaultReplicaRef,
+): Promise<void> {
+  if (!input.userId) {
+    return;
+  }
+
+  const expectedPrefix = await hostedBrowserVaultReplicaUserPrefix({
+    rootKey: input.rootKey,
+    userId: input.userId,
+  });
+  if (!ref.objectKey.startsWith(expectedPrefix)) {
+    throw new Error(
+      `Hosted browser vault replica ${ref.objectKey} is outside the bound user replica namespace.`,
+    );
+  }
 }
 
 async function deriveBrowserVaultReplicaKey(

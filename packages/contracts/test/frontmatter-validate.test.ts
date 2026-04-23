@@ -215,6 +215,21 @@ describe("parseFrontmatterDocument", () => {
         }),
       }),
     );
+
+    expect(() =>
+      parseFrontmatterDocument(["---", "title: \"unterminated", "---"].join("\n"), {
+        createError: (problem) => new TaggedFrontmatterError(problem),
+      }),
+    ).toThrowError(
+      expect.objectContaining({
+        name: "TaggedFrontmatterError",
+        problem: expect.objectContaining({
+          code: "invalid_scalar",
+          index: 0,
+          line: "title: \"unterminated",
+        }),
+      }),
+    );
   });
 
   it("falls back cleanly in tolerant mode for malformed frontmatter", () => {
@@ -237,6 +252,17 @@ describe("parseFrontmatterDocument", () => {
     ).toEqual({
       attributes: {},
       body: "---\ntitle: Example",
+      rawFrontmatter: null,
+    });
+
+    expect(
+      parseFrontmatterDocument(["---", "title: \"unterminated", "---", "", "Body"].join("\n"), {
+        mode: "tolerant",
+        bodyNormalization: "trim",
+      }),
+    ).toEqual({
+      attributes: {},
+      body: "---\ntitle: \"unterminated\n---\n\nBody",
       rawFrontmatter: null,
     });
   });

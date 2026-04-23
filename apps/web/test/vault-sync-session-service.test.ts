@@ -177,7 +177,42 @@ describe("vault sync commit projection", () => {
     ]);
   });
 
-  it("marks committed sessions with conflicts when the run summary reports vault-sync conflicts", async () => {
+  it("marks committed sessions with conflicts when the plural run summary reports vault-sync conflicts", async () => {
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const prisma = {
+      hostedVaultSyncSession: {
+        updateMany,
+      },
+    } as never;
+
+    await markHostedVaultSyncSessionCommittedFromRunSummary({
+      memberId: "member_123",
+      prisma,
+      redactedSummary: {
+        details: {
+          vaultSyncImports: [{
+            conflictCount: 2,
+            sessionId: "vsi_123",
+          }],
+        },
+      },
+    });
+
+    expect(updateMany).toHaveBeenCalledWith({
+      data: {
+        status: "committed_with_conflicts",
+      },
+      where: {
+        id: "vsi_123",
+        memberId: "member_123",
+        status: {
+          in: ["exchanged", "uploaded", "queued"],
+        },
+      },
+    });
+  });
+
+  it("ignores legacy singular vault-sync summaries after the hard cut", async () => {
     const updateMany = vi.fn().mockResolvedValue({ count: 1 });
     const prisma = {
       hostedVaultSyncSession: {
@@ -198,18 +233,7 @@ describe("vault sync commit projection", () => {
       },
     });
 
-    expect(updateMany).toHaveBeenCalledWith({
-      data: {
-        status: "committed_with_conflicts",
-      },
-      where: {
-        id: "vsi_123",
-        memberId: "member_123",
-        status: {
-          in: ["exchanged", "uploaded", "queued"],
-        },
-      },
-    });
+    expect(updateMany).not.toHaveBeenCalled();
   });
 
   it("marks every vault-sync session reported by one run summary", async () => {

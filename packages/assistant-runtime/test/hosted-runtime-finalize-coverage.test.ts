@@ -21,10 +21,11 @@ const HOSTED_RUN_CONTEXT = {
 } as const;
 
 const mocks = vi.hoisted(() => ({
+  closeHostedRuntimeDeviceSyncService: vi.fn(),
   collectHostedAssistantDeliverySideEffects: vi.fn(),
   createConfiguredDeviceSyncProvidersFromConfigs: vi.fn(),
   createDeviceSyncRegistry: vi.fn(),
-  createDeviceSyncService: vi.fn(),
+  createHostedRuntimeDeviceSyncService: vi.fn(),
   createHostedArtifactUploadSink: vi.fn(),
   decodeHostedBundleBase64: vi.fn(),
   drainHostedCommittedAssistantDeliveriesAfterCommit: vi.fn(),
@@ -90,8 +91,9 @@ vi.mock("@murphai/device-syncd/registry", () => ({
   createDeviceSyncRegistry: mocks.createDeviceSyncRegistry,
 }));
 
-vi.mock("@murphai/device-syncd/service", () => ({
-  createDeviceSyncService: mocks.createDeviceSyncService,
+vi.mock("../src/device-sync-service.ts", () => ({
+  closeHostedRuntimeDeviceSyncService: mocks.closeHostedRuntimeDeviceSyncService,
+  createHostedRuntimeDeviceSyncService: mocks.createHostedRuntimeDeviceSyncService,
 }));
 
 vi.mock("@murphai/assistant-engine/gateway-local-adapter", () => ({
@@ -211,6 +213,9 @@ function createExecutionContext() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.closeHostedRuntimeDeviceSyncService.mockImplementation((service: { close?: () => void }) => {
+    service.close?.();
+  });
 
   mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValue([
     hostedDeliveryEffect,
@@ -221,7 +226,7 @@ beforeEach(() => {
       return [];
     },
   });
-  mocks.createDeviceSyncService.mockReturnValue({
+  mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
     close: vi.fn(),
     getNextWakeAt: vi.fn(() => null),
   });
@@ -353,7 +358,7 @@ describe("assistant-runtime execution coverage", () => {
           return [{ provider: "oura" }];
         },
       });
-      mocks.createDeviceSyncService.mockReturnValue({
+      mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
         close,
         getNextWakeAt() {
           return "2026-04-08T00:05:00.000Z";

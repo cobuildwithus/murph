@@ -80,4 +80,6 @@ HOSTED_EXECUTION_RUNNER_TIMEOUT_MS=60000
 
 # Optional allowlist extensions for encrypted per-user runner env overrides.
 # Keep these in sync with the native container runtime when you extend the exact-key allowlist.
-# HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS=OPENAI_API_KEY,AGENTMAIL_API_KEY,TELEGRAM_BOT_TOKEN
+# Do not include platform-owned Telegram vars such as TELEGRAM_BOT_TOKEN,
+# TELEGRAM_API_BASE_URL, or TELEGRAM_FILE_BASE_URL here.
+# HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS=OPENAI_API_KEY,CUSTOM_API_KEY

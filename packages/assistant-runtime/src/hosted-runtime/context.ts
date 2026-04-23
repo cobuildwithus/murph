@@ -161,8 +161,6 @@ async function bootstrapHostedAssistantRuntimeState(
         && runtimeEnv.HOSTED_ASSISTANT_PROVIDER.length > 0,
       linqApiTokenConfigured: typeof runtimeEnv.LINQ_API_TOKEN === "string"
         && runtimeEnv.LINQ_API_TOKEN.length > 0,
-      linqWebhookSecretConfigured: typeof runtimeEnv.LINQ_WEBHOOK_SECRET === "string"
-        && runtimeEnv.LINQ_WEBHOOK_SECRET.length > 0,
     },
     wake,
     message: "Hosted assistant bootstrap evaluated.",

@@ -7,19 +7,21 @@ import { importWithMocks } from "./mock-import.ts";
 test("showWearableLatest forwards normalized surface filters to the shared query runtime", async () => {
   const readModel = { kind: "read-model" };
   const summarizeWearableLatest = vi.fn(() => ({ latestDate: "2026-04-04" }));
+  const loadCoreRuntime = vi.fn();
+  const loadImporterRuntime = vi.fn();
+  const loadQueryRuntime = vi.fn(async () => ({
+    readVault: vi.fn(async () => readModel),
+    summarizeWearableLatest,
+  }));
 
   const integratedServicesModule = await importWithMocks<
     typeof import("../src/usecases/integrated-services.ts")
   >("../src/usecases/integrated-services.ts", {
     "../src/usecases/runtime.ts": () => ({
       createUnwiredMethod: vi.fn(),
-      loadImporterRuntime: vi.fn(),
-      loadIntegratedRuntime: vi.fn(async () => ({
-        query: {
-          readVault: vi.fn(async () => readModel),
-          summarizeWearableLatest,
-        },
-      })),
+      loadCoreRuntime,
+      loadImporterRuntime,
+      loadQueryRuntime,
     }),
   });
 
@@ -49,6 +51,9 @@ test("showWearableLatest forwards normalized surface filters to the shared query
       latestDate: "2026-04-04",
     },
   });
+  assert.equal(loadQueryRuntime.mock.calls.length, 1);
+  assert.equal(loadCoreRuntime.mock.calls.length, 0);
+  assert.equal(loadImporterRuntime.mock.calls.length, 0);
 });
 
 test("metric and drift wearable service methods use the shared assistant-aligned method names", async () => {
@@ -56,21 +61,23 @@ test("metric and drift wearable service methods use the shared assistant-aligned
   const summarizeWearableMetricLatest = vi.fn(() => ({ metric: "restingHeartRate" }));
   const summarizeWearableMetricTrend = vi.fn(() => ({ metric: "restingHeartRate", points: [] }));
   const explainWearableDrift = vi.fn(() => ({ windowDays: 7, signals: [] }));
+  const loadCoreRuntime = vi.fn();
+  const loadImporterRuntime = vi.fn();
+  const loadQueryRuntime = vi.fn(async () => ({
+    readVault: vi.fn(async () => readModel),
+    summarizeWearableMetricLatest,
+    summarizeWearableMetricTrend,
+    explainWearableDrift,
+  }));
 
   const integratedServicesModule = await importWithMocks<
     typeof import("../src/usecases/integrated-services.ts")
   >("../src/usecases/integrated-services.ts", {
     "../src/usecases/runtime.ts": () => ({
       createUnwiredMethod: vi.fn(),
-      loadImporterRuntime: vi.fn(),
-      loadIntegratedRuntime: vi.fn(async () => ({
-        query: {
-          readVault: vi.fn(async () => readModel),
-          summarizeWearableMetricLatest,
-          summarizeWearableMetricTrend,
-          explainWearableDrift,
-        },
-      })),
+      loadCoreRuntime,
+      loadImporterRuntime,
+      loadQueryRuntime,
     }),
   });
 
@@ -151,4 +158,7 @@ test("metric and drift wearable service methods use the shared assistant-aligned
       signals: [],
     },
   });
+  assert.equal(loadQueryRuntime.mock.calls.length, 3);
+  assert.equal(loadCoreRuntime.mock.calls.length, 0);
+  assert.equal(loadImporterRuntime.mock.calls.length, 0);
 });

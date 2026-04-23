@@ -16,6 +16,7 @@ import {
   listAssistantOutboxIntents,
   markAssistantOutboxIntentMirrorTerminalById,
   normalizeAssistantDeliveryError,
+  sendTelegramMessage,
   readAssistantOutboxIntentMirrorState,
   shouldDispatchAssistantOutboxIntent,
   type AssistantChannelDelivery,
@@ -36,6 +37,7 @@ import type {
 import type {
   HostedRuntimeEffectsPort,
 } from "./platform.ts";
+import { buildHostedPlatformBackedRuntimeEnv } from "./environment.ts";
 
 const HOSTED_MAX_COMMITTED_ASSISTANT_DELIVERY_EFFECTS = 20;
 const HOSTED_ASSISTANT_DELIVERY_BOUNDARY = "hosted_runtime_finalize";
@@ -66,9 +68,15 @@ export async function collectHostedAssistantDeliverySideEffects(
 export async function drainHostedCommittedAssistantDeliveriesAfterCommit(input: {
   effectsPort: HostedRuntimeEffectsPort;
   assistantDeliveryEffects: HostedAssistantDeliveryEffect[];
+  forwardedEnv?: Readonly<Record<string, string>>;
+  platformEnv?: Readonly<Record<string, string>>;
   vaultRoot: string;
   wake: HostedRuntimeEvent;
 }): Promise<HostedAssistantDeliveryOutcome[]> {
+  const telegramEnv = buildHostedPlatformBackedRuntimeEnv({
+    forwardedEnv: input.forwardedEnv ?? {},
+    platformEnv: input.platformEnv,
+  }) as NodeJS.ProcessEnv;
   const outcomes: HostedAssistantDeliveryOutcome[] = [];
   for (const assistantDeliveryEffect of input.assistantDeliveryEffects) {
     emitHostedExecutionStructuredLog({
@@ -87,6 +95,7 @@ export async function drainHostedCommittedAssistantDeliveriesAfterCommit(input: 
       wake: input.wake,
       effectsPort: input.effectsPort,
       assistantDeliveryEffect,
+      telegramEnv,
       userId: input.wake.userId,
       vaultRoot: input.vaultRoot,
     }));
@@ -99,6 +108,7 @@ async function deliverHostedCommittedAssistantDelivery(input: {
   wake: HostedRuntimeEvent;
   effectsPort: HostedRuntimeEffectsPort;
   assistantDeliveryEffect: HostedAssistantDeliveryEffect;
+  telegramEnv: NodeJS.ProcessEnv;
   userId: string;
   vaultRoot: string;
 }): Promise<HostedAssistantDeliveryOutcome> {
@@ -141,6 +151,10 @@ async function deliverHostedCommittedAssistantDelivery(input: {
             targetKind: request.targetKind,
           });
         },
+        sendTelegram: async (request) =>
+          await sendTelegramMessage(request, {
+            env: input.telegramEnv,
+          }),
       },
       intentId: input.assistantDeliveryEffect.effectId,
       now,

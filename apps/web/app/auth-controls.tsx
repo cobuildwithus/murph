@@ -148,7 +148,7 @@ export function LandingAuthActions({
         <LandingAuthDialogButton
           buttonClassName={styles.signin}
           buttonLabel="Sign in"
-          description="Use your phone number, email address, or Telegram to sign in."
+          description="Use your previously linked phone number, email address, or Telegram account to sign in."
           intent="signin"
           title="Sign in to Murph"
         />

@@ -271,6 +271,8 @@ export interface ProviderScheduleResult {
 export interface ProviderJobContext {
   account: DeviceSyncAccount;
   now: string;
+  // Providers must route job-time side effects through this context instead of
+  // reaching into service/store internals directly.
   importSnapshot(snapshot: unknown): Promise<unknown>;
   refreshAccountTokens(): Promise<DeviceSyncAccount>;
   disconnectAccount?(): Promise<void>;

@@ -94,6 +94,7 @@ describe("hosted assistant runner env policy", () => {
     expect(isHostedRunnerSecretKeyAllowed("HOSTED_ASSISTANT_PROVIDER")).toBe(false);
     expect(isHostedRunnerSecretKeyAllowed("HOSTED_ASSISTANT_MODEL")).toBe(false);
     expect(isHostedRunnerSecretKeyAllowed("OPENAI_API_KEY")).toBe(true);
+    expect(isHostedRunnerSecretKeyAllowed("TELEGRAM_BOT_TOKEN")).toBe(false);
     expect(isHostedRunnerSecretKeyAllowed("VERCEL_AI_API_KEY")).toBe(true);
   });
 });

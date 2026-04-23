@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 
 import { test } from "vitest";
 
+import { canonicalizeDeviceBatchPayload } from "@murphai/importers";
 import type { CanonicalWearableRecord } from "@murphai/importers/device-providers/canonical-wearable-records";
 
 import { collectCanonicalWearableDataset } from "../src/wearables/canonical-records.ts";
@@ -129,4 +130,123 @@ test("collectCanonicalWearableDataset keeps canonical candidates and suppresses 
   assert.equal(dataset.activitySessionAggregates.length, 1);
   assert.equal(dataset.activitySessionAggregates[0]?.sessionMinutes, 42);
   assert.equal(sourceFamilyScore("canonical"), 4);
+});
+
+test("collectCanonicalWearableDataset surfaces WHOOP metrics from normalized canonical records", () => {
+  const records = canonicalizeDeviceBatchPayload({
+    provider: "whoop",
+    accountId: "whoop-user-1",
+    importedAt: "2026-04-20T12:00:00.000Z",
+    events: [
+      {
+        kind: "observation",
+        occurredAt: "2026-04-20T18:00:00.000Z",
+        dayKey: "2026-04-20",
+        fields: {
+          metric: "energy-burned",
+          unit: "kJ",
+          value: 418.4,
+        },
+      },
+      {
+        kind: "observation",
+        occurredAt: "2026-04-20T18:00:00.000Z",
+        dayKey: "2026-04-20",
+        fields: {
+          metric: "max-heart-rate",
+          unit: "bpm",
+          value: 168,
+        },
+      },
+      {
+        kind: "observation",
+        occurredAt: "2026-04-20T18:00:00.000Z",
+        dayKey: "2026-04-20",
+        fields: {
+          metric: "workout-strain",
+          unit: "whoop_strain",
+          value: 11.1,
+        },
+      },
+      {
+        kind: "observation",
+        occurredAt: "2026-04-20T18:00:00.000Z",
+        dayKey: "2026-04-20",
+        fields: {
+          metric: "percent-recorded",
+          unit: "%",
+          value: 99,
+        },
+      },
+      {
+        kind: "observation",
+        occurredAt: "2026-04-20T18:00:00.000Z",
+        dayKey: "2026-04-20",
+        fields: {
+          metric: "altitude-gain",
+          unit: "meter",
+          value: 42,
+        },
+      },
+      {
+        kind: "observation",
+        occurredAt: "2026-04-20T18:00:00.000Z",
+        dayKey: "2026-04-20",
+        fields: {
+          metric: "altitude-change",
+          unit: "meter",
+          value: 33,
+        },
+      },
+    ],
+  });
+
+  const dataset = collectCanonicalWearableDataset(records);
+  const observations = dataset.metricCandidates
+    .map((candidate) => ({
+      metric: candidate.metric,
+      sourceFamily: candidate.sourceFamily,
+      unit: candidate.unit,
+      value: candidate.value,
+    }))
+    .sort((left, right) => left.metric.localeCompare(right.metric));
+
+  assert.deepEqual(observations, [
+    {
+      metric: "activeCalories",
+      sourceFamily: "canonical",
+      unit: "kcal",
+      value: 100,
+    },
+    {
+      metric: "altitudeChangeMeters",
+      sourceFamily: "canonical",
+      unit: "meter",
+      value: 33,
+    },
+    {
+      metric: "maxHeartRate",
+      sourceFamily: "canonical",
+      unit: "bpm",
+      value: 168,
+    },
+    {
+      metric: "percentRecorded",
+      sourceFamily: "canonical",
+      unit: "%",
+      value: 99,
+    },
+    {
+      metric: "totalElevationGainMeters",
+      sourceFamily: "canonical",
+      unit: "meter",
+      value: 42,
+    },
+    {
+      metric: "workoutStrain",
+      sourceFamily: "canonical",
+      unit: "whoop_strain",
+      value: 11.1,
+    },
+  ]);
 });

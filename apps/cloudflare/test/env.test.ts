@@ -33,6 +33,22 @@ describe("readHostedExecutionEnvironment", () => {
     expect(environment.webCallbackSigning.privateKeyJwkJson).toContain("\"kty\":\"EC\"");
   });
 
+  it("normalizes a scheme-less hosted web base url in worker env", () => {
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_WEB_BASE_URL: "web.example.test",
+    }));
+
+    expect(environment.hostedWebBaseUrl).toBe("https://web.example.test");
+  });
+
+  it("accepts a bracketed IPv6 localhost hosted web base url in worker env", () => {
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_WEB_BASE_URL: "http://[::1]:3000",
+    }));
+
+    expect(environment.hostedWebBaseUrl).toBe("http://[::1]:3000");
+  });
+
   it("reads the configured Vercel OIDC environment when provided", () => {
     const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
       HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "preview",
@@ -60,10 +76,10 @@ describe("readHostedExecutionEnvironment", () => {
 
   it("reads optional runner-secret allowlist extensions", () => {
     const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
-      HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: "OPENAI_API_KEY,TELEGRAM_BOT_TOKEN",
+      HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: "OPENAI_API_KEY,CUSTOM_API_KEY",
     }));
 
-    expect(environment.allowedRunnerSecretKeys).toBe("OPENAI_API_KEY,TELEGRAM_BOT_TOKEN");
+    expect(environment.allowedRunnerSecretKeys).toBe("OPENAI_API_KEY,CUSTOM_API_KEY");
   });
 
   it("reads optional platform-envelope keyrings", () => {
@@ -162,6 +178,7 @@ describe("hosted runner secrets policy", () => {
 
     expect(isHostedRunnerSecretKeyAllowed("FFMPEG_COMMAND")).toBe(false);
     expect(isHostedRunnerSecretKeyAllowed("HOSTED_AI_USAGE_REPORTING_SECRET")).toBe(false);
+    expect(isHostedRunnerSecretKeyAllowed("TELEGRAM_BOT_TOKEN")).toBe(false);
     expect(isHostedRunnerSecretKeyAllowed("WHISPER_COMMAND")).toBe(false);
     expect(isHostedRunnerSecretKeyAllowed("WHISPER_MODEL_PATH")).toBe(false);
   });
@@ -188,6 +205,7 @@ describe("hosted runner secrets policy", () => {
       HOSTED_AI_USAGE_REPORTING_SECRET: "usage-reporting-secret",
       NODE_OPTIONS: "--require /tmp/evil-loader.js",
       OPENAI_API_KEY: "sk-test",
+      TELEGRAM_BOT_TOKEN: "telegram-token",
       WHISPER_COMMAND: "/tmp/evil-whisper",
     })).toEqual({
       OPENAI_API_KEY: "sk-test",

@@ -17,10 +17,27 @@ import type {
   QueryRuntimeModule,
 } from "./types.js"
 
+let coreRuntimePromise: Promise<CoreRuntimeModule> | null = null
+let queryRuntimePromise: Promise<QueryRuntimeModule> | null = null
 let integratedRuntimePromise: Promise<IntegratedRuntime> | null = null
 
-export function createUnwiredMethod(name: string): () => Promise<never> {
-  return async () => {
+function toRuntimeUnavailableCause(error: unknown): unknown {
+  if (
+    error instanceof VaultCliError
+    && error.code === "runtime_unavailable"
+    && typeof error.context?.cause === "string"
+  ) {
+    return error.context.cause
+  }
+
+  return error
+}
+
+export function createUnwiredMethod<
+  TArgs extends unknown[] = [],
+  TResult = never,
+>(name: string): (...args: TArgs) => Promise<TResult> {
+  return async (..._args: TArgs) => {
     throw new VaultCliError(
       "not_implemented",
       `CLI integration for ${name} is not wired yet.`,
@@ -107,29 +124,67 @@ export async function loadImportersRuntimeModule(): Promise<ImportersFactoryRunt
   return loadRuntimeModule<ImportersFactoryRuntimeModule>("@murphai/importers")
 }
 
+export async function loadCoreRuntime(): Promise<CoreRuntimeModule> {
+  const runtimePromise =
+    coreRuntimePromise ??
+    (coreRuntimePromise = (async () => {
+      try {
+        const coreModule = await loadRuntimeModule("@murphai/core")
+
+        if (!isCoreRuntimeModule(coreModule)) {
+          throw new TypeError("Core runtime package did not match the expected module shape.")
+        }
+
+        return coreModule
+      } catch (error) {
+        coreRuntimePromise = null
+        throw createRuntimeUnavailableError("core-backed vault-cli services", error)
+      }
+    })())
+
+  return runtimePromise
+}
+
+export async function loadQueryRuntime(): Promise<QueryRuntimeModule> {
+  const runtimePromise =
+    queryRuntimePromise ??
+    (queryRuntimePromise = (async () => {
+      try {
+        const queryModule = await loadRuntimeModule("@murphai/query")
+
+        if (!isQueryRuntimeModule(queryModule)) {
+          throw new TypeError("Query runtime package did not match the expected module shape.")
+        }
+
+        return queryModule
+      } catch (error) {
+        queryRuntimePromise = null
+        throw createRuntimeUnavailableError("query-backed vault-cli services", error)
+      }
+    })())
+
+  return runtimePromise
+}
+
 export async function loadIntegratedRuntime(): Promise<IntegratedRuntime> {
   const runtimePromise =
     integratedRuntimePromise ??
     (integratedRuntimePromise = (async () => {
       try {
-        const [coreModule, queryModule] = await Promise.all([
-          loadRuntimeModule("@murphai/core"),
-          loadRuntimeModule("@murphai/query"),
+        const [core, query] = await Promise.all([
+          loadCoreRuntime(),
+          loadQueryRuntime(),
         ])
 
-        if (!isCoreRuntimeModule(coreModule) || !isQueryRuntimeModule(queryModule)) {
-          throw new TypeError("Integrated runtime packages did not match the expected module shape.")
-        }
-
         return {
-          core: coreModule,
-          query: queryModule,
+          core,
+          query,
         }
       } catch (error) {
         integratedRuntimePromise = null
         throw createRuntimeUnavailableError(
           "integrated vault-cli services",
-          error,
+          toRuntimeUnavailableCause(error),
         )
       }
     })())
@@ -138,15 +193,24 @@ export async function loadIntegratedRuntime(): Promise<IntegratedRuntime> {
 }
 
 export async function loadImporterRuntime(): Promise<ImportersRuntime> {
-  const [{ core }, importersModule] = await Promise.all([
-    loadIntegratedRuntime(),
-    loadImportersRuntimeModule(),
-  ])
+  let core!: CoreRuntimeModule
+  let importersModule!: ImportersFactoryRuntimeModule
 
-  if (!isImportersRuntimeModule(importersModule)) {
+  try {
+    const [loadedCore, loadedImportersModule] = await Promise.all([
+      loadCoreRuntime(),
+      loadImportersRuntimeModule(),
+    ])
+
+    if (!isImportersRuntimeModule(loadedImportersModule)) {
+      throw new TypeError("Importer runtime package did not match the expected module shape.")
+    }
+    core = loadedCore
+    importersModule = loadedImportersModule
+  } catch (error) {
     throw createRuntimeUnavailableError(
       "importer-backed vault-cli services",
-      new TypeError("Importer runtime package did not match the expected module shape."),
+      toRuntimeUnavailableCause(error),
     )
   }
 

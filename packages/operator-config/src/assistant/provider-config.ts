@@ -6,10 +6,7 @@ import {
   type AssistantSandbox,
 } from '../assistant-cli-contracts.js'
 import { splitAssistantHeadersForPersistence } from './redaction.js'
-import {
-  isAssistantVercelAIGatewayBaseUrl,
-  normalizeNullableString,
-} from './shared.js'
+import { normalizeNullableString } from './shared.js'
 import {
   normalizeAssistantWebSearchMode,
   resolveAssistantRuntimeTarget,
@@ -21,8 +18,8 @@ import {
   type AssistantWebSearchMode,
 } from './target-runtime.js'
 import {
-  resolveOpenAICompatibleProviderPreset,
   resolveOpenAICompatibleProviderPresetFromId,
+  resolveOpenAICompatibleProviderTargetPresetId,
   type SetupAssistantProviderPreset,
 } from './openai-compatible-provider-presets.js'
 
@@ -608,9 +605,11 @@ function isAssistantGatewayOnlyProviderTarget(input: {
   providerName: string | null
 }): boolean {
   return (
-    input.presetId === 'vercel-ai-gateway' ||
-    input.providerName?.toLowerCase() === 'vercel-ai-gateway' ||
-    isAssistantVercelAIGatewayBaseUrl(input.baseUrl)
+    resolveOpenAICompatibleProviderTargetPresetId({
+      baseUrl: input.baseUrl,
+      presetId: input.presetId,
+      providerName: input.providerName,
+    }) === 'vercel-ai-gateway'
   )
 }
 
@@ -665,18 +664,12 @@ function isAssistantProviderConfig(
 function resolveAssistantCompatiblePresetId(
   input: AssistantProviderConfigInput | null | undefined,
 ): SetupAssistantProviderPreset | null {
-  const inferredPreset =
-    resolveOpenAICompatibleProviderPreset({
-      apiKeyEnv: input?.apiKeyEnv,
-      baseUrl: input?.baseUrl,
-      providerName: input?.providerName,
-    })?.id ?? null
-
-  return (
-    inferredPreset ??
-    normalizeAssistantPresetId(input?.presetId) ??
-    null
-  )
+  return resolveOpenAICompatibleProviderTargetPresetId({
+    apiKeyEnv: input?.apiKeyEnv,
+    baseUrl: input?.baseUrl,
+    presetId: input?.presetId,
+    providerName: input?.providerName,
+  })
 }
 
 function resolveAssistantProviderForNormalization(

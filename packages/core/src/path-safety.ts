@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { promises as fs } from "node:fs";
 
@@ -6,6 +7,11 @@ import { isErrnoException } from "./types.ts";
 
 const WINDOWS_DRIVE_PREFIX_PATTERN = /^[A-Za-z]:/;
 const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001F\u007F]/u;
+const vaultCaseInsensitiveComparisonCache = new Map<string, Promise<boolean>>();
+
+export interface VaultPathComparisonOptions {
+  caseInsensitive?: boolean;
+}
 
 function toVaultRelativeDisplayPath(value: string): string {
   return value.split(path.sep).join("/");
@@ -55,6 +61,64 @@ export function normalizeRelativeVaultPath(relativePath: unknown): string {
   }
 
   return normalized;
+}
+
+function useCaseInsensitiveVaultPathComparisons(
+  options: VaultPathComparisonOptions = {},
+): boolean {
+  return options.caseInsensitive === true;
+}
+
+export function normalizeRelativeVaultPathForComparison(
+  relativePath: unknown,
+  options: VaultPathComparisonOptions = {},
+): string {
+  const normalized = normalizeRelativeVaultPath(relativePath);
+  return useCaseInsensitiveVaultPathComparisons(options) ? normalized.toLowerCase() : normalized;
+}
+
+async function detectVaultFilesystemCaseInsensitive(vaultRoot: string): Promise<boolean> {
+  await fs.access(vaultRoot);
+
+  const probeName = `.murph-case-probe-${randomUUID().replace(/-/g, "")}Aa`;
+  const probeAbsolutePath = path.join(vaultRoot, probeName);
+  const foldedProbeAbsolutePath = path.join(vaultRoot, probeName.toLowerCase());
+  const handle = await fs.open(probeAbsolutePath, "wx");
+
+  try {
+    await handle.close();
+
+    try {
+      await fs.access(foldedProbeAbsolutePath);
+      return true;
+    } catch (error) {
+      if (isErrnoException(error) && error.code === "ENOENT") {
+        return false;
+      }
+
+      throw error;
+    }
+  } finally {
+    await fs.rm(probeAbsolutePath, { force: true });
+  }
+}
+
+export async function isVaultFilesystemCaseInsensitive(vaultRoot: unknown): Promise<boolean> {
+  const absoluteRoot = normalizeVaultRoot(vaultRoot);
+  const cachedProbe = vaultCaseInsensitiveComparisonCache.get(absoluteRoot);
+  if (cachedProbe) {
+    return await cachedProbe;
+  }
+
+  const probe = detectVaultFilesystemCaseInsensitive(absoluteRoot);
+  vaultCaseInsensitiveComparisonCache.set(absoluteRoot, probe);
+
+  try {
+    return await probe;
+  } catch (error) {
+    vaultCaseInsensitiveComparisonCache.delete(absoluteRoot);
+    throw error;
+  }
 }
 
 export function normalizeOpaquePathSegment(value: unknown, label = "Path segment"): string {
@@ -229,13 +293,27 @@ export function formatVaultRelativePath(vaultRoot: unknown, absolutePath: unknow
   return path.relative(absoluteRoot, candidate).split(path.sep).join("/");
 }
 
-export function isRawRelativePath(relativePath: unknown): boolean {
-  const normalized = normalizeRelativeVaultPath(relativePath);
+export function isRawRelativePath(
+  relativePath: unknown,
+  options: VaultPathComparisonOptions = {},
+): boolean {
+  const normalized = normalizeRelativeVaultPathForComparison(relativePath, options);
   return normalized === "raw" || normalized.startsWith("raw/");
 }
 
-export function isAppendOnlyRelativePath(relativePath: unknown): boolean {
-  const normalized = normalizeRelativeVaultPath(relativePath);
+export function isJsonlRelativePath(
+  relativePath: unknown,
+  options: VaultPathComparisonOptions = {},
+): boolean {
+  const normalized = normalizeRelativeVaultPathForComparison(relativePath, options);
+  return normalized.endsWith(".jsonl");
+}
+
+export function isAppendOnlyRelativePath(
+  relativePath: unknown,
+  options: VaultPathComparisonOptions = {},
+): boolean {
+  const normalized = normalizeRelativeVaultPathForComparison(relativePath, options);
   return (
     normalized === "audit" ||
     normalized.startsWith("audit/") ||

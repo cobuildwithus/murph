@@ -79,6 +79,26 @@ function cycleOrFallbackTimestamp(...candidates: Array<string | undefined>): str
   return candidates.find((candidate) => typeof candidate === "string" && candidate.length > 0);
 }
 
+function firstDayKey(...candidates: Array<string | undefined>): string | undefined {
+  for (const candidate of candidates) {
+    if (typeof candidate !== "string") {
+      continue;
+    }
+
+    const match = /^(\d{4}-\d{2}-\d{2})/u.exec(candidate.trim());
+
+    if (match) {
+      return match[1];
+    }
+  }
+
+  return undefined;
+}
+
+function utcStartOfDay(dayKey: string | undefined): string | undefined {
+  return dayKey ? toIso(`${dayKey}T00:00:00.000Z`) : undefined;
+}
+
 function millisecondsToMinutes(value: unknown): number | undefined {
   const numeric = finiteNumber(value);
 
@@ -89,10 +109,41 @@ function millisecondsToMinutes(value: unknown): number | undefined {
   return numeric / 60000;
 }
 
+function firstBodyMeasurementRecordedAt(bodyMeasurement: PlainObject | undefined): string | undefined {
+  if (!bodyMeasurement) {
+    return undefined;
+  }
+
+  return cycleOrFallbackTimestamp(
+    toIso(bodyMeasurement.measured_at),
+    toIso(bodyMeasurement.measuredAt),
+    toIso(bodyMeasurement.recorded_at),
+    toIso(bodyMeasurement.recordedAt),
+    toIso(bodyMeasurement.updated_at),
+    toIso(bodyMeasurement.updatedAt),
+  );
+}
+
+function calculateBodyMassIndex(bodyMeasurement: PlainObject | undefined): number | undefined {
+  const weightKilograms = finiteNumber(bodyMeasurement?.weight_kilogram ?? bodyMeasurement?.weightKilogram);
+  const heightMeters = finiteNumber(bodyMeasurement?.height_meter ?? bodyMeasurement?.heightMeter);
+
+  if (weightKilograms === undefined || heightMeters === undefined || heightMeters <= 0) {
+    return undefined;
+  }
+
+  return Number((weightKilograms / (heightMeters * heightMeters)).toFixed(4));
+}
+
 interface WhoopWorkoutMetricSource {
   workout: PlainObject;
   score?: PlainObject;
   sportName: string;
+}
+
+interface WhoopBodyMeasurementMetricSource {
+  measurement: PlainObject;
+  bmi?: number;
 }
 
 const WHOOP_SLEEP_SAMPLE_METRICS: readonly SampleMetricDescriptor<PlainObject | undefined>[] = [
@@ -285,6 +336,30 @@ const WHOOP_WORKOUT_OBSERVATION_METRICS: readonly ObservationMetricDescriptor<Wh
   },
 ];
 
+const WHOOP_BODY_OBSERVATION_METRICS: readonly ObservationMetricDescriptor<WhoopBodyMeasurementMetricSource>[] = [
+  {
+    metric: "weight",
+    value: ({ measurement }) => measurement.weight_kilogram ?? measurement.weightKilogram,
+    unit: "kg",
+    title: "WHOOP weight",
+    facet: "weight",
+  },
+  {
+    metric: "bmi",
+    value: ({ bmi }) => bmi,
+    unit: "kg_m2",
+    title: "WHOOP BMI",
+    facet: "bmi",
+  },
+  {
+    metric: "max-heart-rate",
+    value: ({ measurement }) => measurement.max_heart_rate ?? measurement.maxHeartRate,
+    unit: "bpm",
+    title: "WHOOP max heart rate",
+    facet: "max-heart-rate",
+  },
+];
+
 function pushDeletionObservation(
   events: DeviceEventPayload[],
   rawArtifacts: DeviceRawArtifactPayload[],
@@ -336,9 +411,35 @@ export function normalizeWhoopSnapshot(snapshot: WhoopSnapshotInput): Normalized
   const accountId =
     stringId(request.accountId) ??
     stringId(profile?.user_id ?? profile?.userId ?? profile?.id);
+  const bodyMeasurementDayKey = bodyMeasurement
+    ? firstDayKey(firstBodyMeasurementRecordedAt(bodyMeasurement), importedAt)
+    : undefined;
+  const bodyMeasurementRecordedAt = bodyMeasurement
+    ? firstBodyMeasurementRecordedAt(bodyMeasurement) ?? utcStartOfDay(bodyMeasurementDayKey)
+    : undefined;
+  const bodyMeasurementResourceId = bodyMeasurementDayKey ?? "current";
+  const bodyMeasurementBmi = calculateBodyMassIndex(bodyMeasurement);
 
   pushRawArtifact(rawArtifacts, createRawArtifact("profile", "profile.json", profile));
   pushRawArtifact(rawArtifacts, createRawArtifact("body-measurement", "body-measurement.json", bodyMeasurement));
+
+  if (bodyMeasurement && bodyMeasurementRecordedAt) {
+    emitObservationMetrics(
+      events,
+      {
+        source: {
+          measurement: bodyMeasurement,
+          bmi: bodyMeasurementBmi,
+        },
+        occurredAt: bodyMeasurementRecordedAt,
+        recordedAt: bodyMeasurementRecordedAt,
+        dayKey: bodyMeasurementDayKey,
+        rawArtifactRoles: ["body-measurement"],
+        externalRef: (facet) => makeExternalRef("body-measurement", bodyMeasurementResourceId, undefined, facet),
+      },
+      WHOOP_BODY_OBSERVATION_METRICS,
+    );
+  }
 
   for (const sleep of sleeps) {
     const sleepId = stringId(sleep.id) ?? `sleep-${events.length + 1}`;
@@ -552,6 +653,7 @@ export function normalizeWhoopSnapshot(snapshot: WhoopSnapshotInput): Normalized
 
   const provenance = stripEmptyObject({
     whoopUserId: stringId(profile?.user_id ?? profile?.userId ?? profile?.id),
+    bodyMeasurementDay: bodyMeasurementDayKey,
     importedSections: {
       profile: Boolean(profile),
       bodyMeasurement: Boolean(bodyMeasurement),

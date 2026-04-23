@@ -473,6 +473,9 @@ test("WHOOP provider backfills snapshot windows and refreshes once after a 401",
   assert.deepEqual(importedSnapshots[0], {
     accountId: "whoop-user-1",
     importedAt: "2026-03-16T10:00:00.000Z",
+    bodyMeasurements: {
+      height_meter: 1.83,
+    },
     sleeps: [{ id: "sleep-1", cycle_id: "cycle-1" }],
     recoveries: [{ id: "recovery-1", cycle_id: "cycle-1", score: 79 }],
     cycles: [{ id: "cycle-1", score: 82 }],
@@ -492,6 +495,7 @@ test("WHOOP provider backfills snapshot windows and refreshes once after a 401",
     ],
   );
   assert.ok(requests.slice(2).every((request) => request.authorization === "Bearer fresh-access-token"));
+  assert.equal(requests.at(-1)?.url, "https://api.prod.whoop.com/developer/v2/user/measurement/body");
 });
 
 test("WHOOP provider schedules reconcile jobs without profile/body-measurement sync flags", () => {
@@ -516,6 +520,82 @@ test("WHOOP provider schedules reconcile jobs without profile/body-measurement s
     windowEnd: now,
   });
   assert.equal(scheduled?.nextReconcileAt, "2026-03-16T16:00:00.000Z");
+});
+
+test("WHOOP provider skips body measurement fetches when the account did not grant the body scope", async () => {
+  const requests: string[] = [];
+  const importedSnapshots: unknown[] = [];
+  const windowStart = "2026-03-15T00:00:00.000Z";
+  const windowEnd = "2026-03-16T00:00:00.000Z";
+  const provider = createWhoopDeviceSyncProvider({
+    clientId: "whoop-client-id",
+    clientSecret: "whoop-client-secret",
+    fetchImpl: async (input) => {
+      const url = readUrl(input);
+      requests.push(url);
+
+      if (url === `https://api.prod.whoop.com/developer/v2/activity/sleep?limit=25&start=${encodeURIComponent(windowStart)}&end=${encodeURIComponent(windowEnd)}`) {
+        return createJsonResponse({ records: [] });
+      }
+
+      if (url === `https://api.prod.whoop.com/developer/v2/recovery?limit=25&start=${encodeURIComponent(windowStart)}&end=${encodeURIComponent(windowEnd)}`) {
+        return createJsonResponse({ records: [] });
+      }
+
+      if (url === `https://api.prod.whoop.com/developer/v2/cycle?limit=25&start=${encodeURIComponent(windowStart)}&end=${encodeURIComponent(windowEnd)}`) {
+        return createJsonResponse({ records: [] });
+      }
+
+      if (url === `https://api.prod.whoop.com/developer/v2/activity/workout?limit=25&start=${encodeURIComponent(windowStart)}&end=${encodeURIComponent(windowEnd)}`) {
+        return createJsonResponse({ records: [] });
+      }
+
+      if (url === "https://api.prod.whoop.com/developer/v2/user/measurement/body") {
+        throw new Error("body measurement fetch should not run without the body scope");
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    },
+  });
+  const context: ProviderJobContext = {
+    account: createAccount(
+      ["read:sleep", "read:recovery", "read:cycles", "read:workout", "read:profile"],
+      {
+        accessToken: "scoped-access-token",
+      },
+    ),
+    now: "2026-03-16T10:00:00.000Z",
+    logger: {},
+    async importSnapshot(snapshot) {
+      importedSnapshots.push(snapshot);
+      return {
+        ok: true,
+      };
+    },
+    async refreshAccountTokens() {
+      throw new Error("refreshAccountTokens should not be called");
+    },
+  };
+
+  await provider.executeJob(
+    context,
+    createJob("reconcile", {
+      windowStart,
+      windowEnd,
+    }),
+  );
+
+  assert.deepEqual(importedSnapshots, [
+    {
+      accountId: "whoop-user-1",
+      importedAt: "2026-03-16T10:00:00.000Z",
+      sleeps: [],
+      recoveries: [],
+      cycles: [],
+      workouts: [],
+    },
+  ]);
+  assert.equal(requests.includes("https://api.prod.whoop.com/developer/v2/user/measurement/body"), false);
 });
 
 test("WHOOP provider maps webhook events to the same job kinds, priorities, and payload fields", async () => {
@@ -692,8 +772,7 @@ test("WHOOP provider rejects non-object webhook payloads after signature verific
   );
 });
 
-test("WHOOP provider turns missing resource imports into the existing delete snapshot shape", async () => {
-  const importedSnapshots: unknown[] = [];
+test("WHOOP provider does not synthesize delete snapshots when an updated resource fetch returns 404", async () => {
   const provider = createWhoopDeviceSyncProvider({
     clientId: "whoop-client-id",
     clientSecret: "whoop-client-secret",
@@ -704,48 +783,110 @@ test("WHOOP provider turns missing resource imports into the existing delete sna
         return new Response(null, { status: 404 });
       }
 
+      if (url === "https://api.prod.whoop.com/developer/v2/activity/sleep/sleep-404") {
+        return new Response(null, { status: 404 });
+      }
+
       throw new Error(`Unexpected request: ${url}`);
     },
   });
-  const context: ProviderJobContext = {
-    account: createAccount(["read:workout"]),
-    now: "2026-03-16T10:00:00.000Z",
-    logger: {},
-    async importSnapshot(snapshot) {
-      importedSnapshots.push(snapshot);
-      return {
-        ok: true,
-      };
-    },
-    async refreshAccountTokens() {
-      throw new Error("refreshAccountTokens should not be called");
-    },
-  };
-
-  await provider.executeJob(
-    context,
-    createJob("resource", {
+  const cases = [
+    {
       resourceType: "workout",
       resourceId: "workout-404",
       eventType: "workout.updated",
-      occurredAt: "2026-03-15T09:00:00.000Z",
-    }),
-  );
-
-  assert.deepEqual(importedSnapshots, [
-    {
-      accountId: "whoop-user-1",
-      importedAt: "2026-03-16T10:00:00.000Z",
-      deletions: [
-        {
-          resource_type: "workout",
-          resource_id: "workout-404",
-          occurred_at: "2026-03-15T09:00:00.000Z",
-          source_event_type: "workout.updated",
-        },
-      ],
+      scopes: ["read:workout"],
     },
-  ]);
+    {
+      resourceType: "sleep",
+      resourceId: "sleep-404",
+      eventType: "sleep.updated",
+      scopes: ["offline"],
+    },
+  ] as const;
+
+  for (const testCase of cases) {
+    const importedSnapshots: unknown[] = [];
+
+    await provider.executeJob(
+      {
+        account: createAccount([...testCase.scopes]),
+        now: "2026-03-16T10:00:00.000Z",
+        logger: {},
+        async importSnapshot(snapshot) {
+          importedSnapshots.push(snapshot);
+          return {
+            ok: true,
+          };
+        },
+        async refreshAccountTokens() {
+          throw new Error("refreshAccountTokens should not be called");
+        },
+      },
+      createJob("resource", {
+        resourceType: testCase.resourceType,
+        resourceId: testCase.resourceId,
+        eventType: testCase.eventType,
+        occurredAt: "2026-03-15T09:00:00.000Z",
+      }),
+    );
+
+    assert.deepEqual(importedSnapshots, []);
+  }
+});
+
+test("WHOOP provider skips resource imports when the account did not grant the required resource scopes", async () => {
+  const cases = [
+    {
+      scopes: ["offline"],
+      resourceType: "workout",
+      resourceId: "workout-77",
+      eventType: "workout.updated",
+    },
+    {
+      scopes: ["read:recovery"],
+      resourceType: "recovery",
+      resourceId: "sleep-42",
+      eventType: "recovery.updated",
+    },
+  ] as const;
+
+  for (const testCase of cases) {
+    const requests: string[] = [];
+    const importedSnapshots: unknown[] = [];
+    const provider = createWhoopDeviceSyncProvider({
+      clientId: "whoop-client-id",
+      clientSecret: "whoop-client-secret",
+      fetchImpl: async (input) => {
+        const url = readUrl(input);
+        requests.push(url);
+        throw new Error(`Unexpected request: ${url}`);
+      },
+    });
+
+    await provider.executeJob(
+      {
+        account: createAccount([...testCase.scopes]),
+        now: "2026-03-16T10:00:00.000Z",
+        logger: {},
+        async importSnapshot(snapshot) {
+          importedSnapshots.push(snapshot);
+          return { ok: true };
+        },
+        async refreshAccountTokens() {
+          throw new Error("refreshAccountTokens should not be called");
+        },
+      },
+      createJob("resource", {
+        resourceType: testCase.resourceType,
+        resourceId: testCase.resourceId,
+        eventType: testCase.eventType,
+      }),
+    );
+
+    assert.deepEqual(importedSnapshots, []);
+    assert.deepEqual(requests, []);
+  }
 });
 
 test("WHOOP provider rejects missing, invalid, stale, and bad-signature webhook deliveries before parsing payloads", async () => {
@@ -1051,7 +1192,7 @@ test("WHOOP provider surfaces revoke failures, rejects payloads missing required
 
   await importProvider.executeJob(
     {
-      account: createAccount(["offline"]),
+      account: createAccount(["offline", "read:workout"]),
       now: "2026-03-16T10:00:00.000Z",
       logger: {},
       async importSnapshot(snapshot) {
@@ -1059,7 +1200,7 @@ test("WHOOP provider surfaces revoke failures, rejects payloads missing required
         return { ok: true };
       },
       async refreshAccountTokens() {
-        return createAccount(["offline"]);
+        return createAccount(["offline", "read:workout"]);
       },
     },
     createJob("resource", {
@@ -1069,7 +1210,7 @@ test("WHOOP provider surfaces revoke failures, rejects payloads missing required
   );
   await importProvider.executeJob(
     {
-      account: createAccount(["offline"]),
+      account: createAccount(["offline", "read:sleep", "read:recovery", "read:cycles", "read:workout"]),
       now: "2026-03-16T10:00:00.000Z",
       logger: {},
       async importSnapshot(snapshot) {
@@ -1077,7 +1218,7 @@ test("WHOOP provider surfaces revoke failures, rejects payloads missing required
         return { ok: true };
       },
       async refreshAccountTokens() {
-        return createAccount(["offline"]);
+        return createAccount(["offline", "read:sleep", "read:recovery", "read:cycles", "read:workout"]);
       },
     },
     createJob("reconcile", {}),
@@ -1182,7 +1323,7 @@ test("WHOOP provider imports sleep-related resources with linked cycle and recov
 
   await provider.executeJob(
     {
-      account: createAccount(["offline"]),
+      account: createAccount(["offline", "read:sleep", "read:recovery", "read:cycles"]),
       now: "2026-03-16T10:00:00.000Z",
       logger: {},
       async importSnapshot(snapshot) {
@@ -1190,7 +1331,7 @@ test("WHOOP provider imports sleep-related resources with linked cycle and recov
         return { ok: true };
       },
       async refreshAccountTokens() {
-        return createAccount(["offline"]);
+        return createAccount(["offline", "read:sleep", "read:recovery", "read:cycles"]);
       },
     },
     createJob("resource", {

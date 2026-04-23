@@ -22,20 +22,29 @@ export async function exportHostedPendingAssistantUsage(input: {
   usageExportPort?: HostedRuntimeUsageExportPort | null;
   vaultRoot: string;
 }): Promise<HostedPendingAssistantUsageExportResult> {
+  let invalidPendingRecordCount = 0;
   const pendingRecords = await listPendingAssistantUsageRecords({
+    onInvalidRecord: ({ error, fileName }) => {
+      invalidPendingRecordCount += 1;
+      console.warn(
+        `Skipping malformed pending assistant usage file ${fileName}; leaving it pending: ${summarizeHostedExecutionError(error)}`,
+      );
+    },
+    skipInvalidRecords: true,
     vault: input.vaultRoot,
   });
+  const totalPendingRecords = pendingRecords.length + invalidPendingRecordCount;
 
   if (!input.usageExportPort || pendingRecords.length === 0) {
     return {
       exported: 0,
-      failed: 0,
-      pending: pendingRecords.length,
+      failed: input.usageExportPort ? invalidPendingRecordCount : 0,
+      pending: totalPendingRecords,
     };
   }
 
   let exported = 0;
-  let failed = 0;
+  let failed = invalidPendingRecordCount;
 
   for (const batch of chunkPendingUsageRecords(pendingRecords, HOSTED_USAGE_EXPORT_BATCH_LIMIT)) {
     try {
@@ -81,7 +90,7 @@ export async function exportHostedPendingAssistantUsage(input: {
   return {
     exported,
     failed,
-    pending: pendingRecords.length - exported,
+    pending: totalPendingRecords - exported,
   };
 }
 

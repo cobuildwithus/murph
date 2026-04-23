@@ -226,6 +226,7 @@ describe("hosted Privy verification", () => {
     });
 
     await expect(requireHostedPrivyIdentity("  signed-identity-token  ")).resolves.toEqual({
+      email: null,
       phone: {
         number: "+14155552671",
         verifiedAt: 1741194420,

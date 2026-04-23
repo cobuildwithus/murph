@@ -2,6 +2,7 @@ import {
   HOSTED_ASSISTANT_ALLOWED_API_KEY_ENV_NAMES,
   HOSTED_ASSISTANT_CONFIG_ENV_NAMES,
   HOSTED_SHARED_FORWARDED_ENV_CATEGORY_KEYS,
+  HOSTED_SHARED_INGRESS_ONLY_SECRET_ENV_NAMES,
   HOSTED_SHARED_MODEL_CREDENTIAL_ENV_NAMES,
 } from "@murphai/assistant-runtime/hosted-assistant-env-constants";
 import {
@@ -36,6 +37,7 @@ const DEFAULT_ALLOWED_RUNNER_SECRET_KEYS = [
 const DISALLOWED_RUNNER_SECRET_KEYS = new Set([
   ...OPERATOR_ONLY_RUNNER_BINARY_ENV_KEYS,
   ...RUNNER_SECRET_PROCESS_CONTROL_KEYS,
+  ...HOSTED_SHARED_INGRESS_ONLY_SECRET_ENV_NAMES,
   "HOME",
   "HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY",
   "HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED",
@@ -60,6 +62,12 @@ const DISALLOWED_RUNNER_SECRET_KEYS = new Set([
   "PATH",
   "PORT",
   "PWD",
+  // The hosted Telegram token and base URLs are platform-owned. Letting
+  // member-controlled runner secrets override them can redirect privileged
+  // Bot API traffic to arbitrary endpoints.
+  "TELEGRAM_API_BASE_URL",
+  "TELEGRAM_BOT_TOKEN",
+  "TELEGRAM_FILE_BASE_URL",
   "VAULT",
 ]);
 
@@ -88,6 +96,8 @@ const RUNNER_ENV_PROFILE_KEYS = {
     ...HOSTED_ASSISTANT_CONFIG_ENV_NAMES,
   ],
   "hosted-email": HOSTED_SHARED_FORWARDED_ENV_CATEGORY_KEYS.hostedEmailConfigured,
+  // Linq webhook verification stays on the worker/web ingress boundary.
+  // The runner only needs outbound Linq API config.
   linq: HOSTED_SHARED_FORWARDED_ENV_CATEGORY_KEYS.linqConfigured,
   mapbox: [
     "MAPBOX_ACCESS_TOKEN",
@@ -213,7 +223,7 @@ const CONTAINER_REWRITABLE_RUNNER_URL_KEYS = new Set([
   "TELEGRAM_FILE_BASE_URL",
 ]);
 
-function rewriteHostedRunnerLoopbackUrlForContainer(
+export function rewriteHostedRunnerLoopbackUrlForContainer(
   key: string,
   value: string,
   source: UnknownEnvSource,

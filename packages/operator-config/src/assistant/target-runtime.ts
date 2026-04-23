@@ -1,5 +1,5 @@
 import {
-  resolveOpenAICompatibleProviderPresetFromId,
+  resolveOpenAICompatibleProviderTargetPresetId,
   type SetupAssistantProviderPreset,
 } from './openai-compatible-provider-presets.js'
 import { normalizeNullableString } from './shared.js'
@@ -133,9 +133,12 @@ export function normalizeAssistantWebSearchMode(
 }
 
 export function resolveAssistantTargetPresetId(
-  input: Pick<AssistantRuntimeResolutionInput, 'presetId'>,
+  input: Pick<
+    AssistantRuntimeResolutionInput,
+    'apiKeyEnv' | 'baseUrl' | 'presetId' | 'providerName'
+  >,
 ): SetupAssistantProviderPreset | null {
-  return resolveOpenAICompatibleProviderPresetFromId(input.presetId)?.id ?? null
+  return resolveOpenAICompatibleProviderTargetPresetId(input)
 }
 
 export function resolveAssistantRuntimeTarget(
@@ -179,10 +182,22 @@ export function resolveAssistantRuntimeTarget(
   }
 
   const presetId = resolveAssistantTargetPresetId({
+    apiKeyEnv:
+      input?.target && input.target.kind !== 'codex-cli'
+        ? input.target.apiKeyEnv
+        : input?.apiKeyEnv,
+    baseUrl:
+      input?.target && input.target.kind !== 'codex-cli'
+        ? input.target.baseUrl
+        : input?.baseUrl,
     presetId:
       input?.target && input.target.kind !== 'codex-cli'
         ? input.target.presetId
         : input?.presetId,
+    providerName:
+      input?.target && input.target.kind !== 'codex-cli'
+        ? input.target.providerName
+        : input?.providerName,
   })
   const runtimeBehavior = resolveAssistantOpenAICompatibleRuntimeBehavior({
     model: input?.target?.model ?? input?.model,

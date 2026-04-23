@@ -14,7 +14,7 @@ import {
 } from "@murphai/hosted-execution";
 
 import {
-  findHostedIngressByEventIdTx,
+  findHostedIngressByEventId,
   materializeHostedIngressEnvelopeTx,
 } from "../hosted-ingress/lifecycle";
 import {
@@ -179,7 +179,7 @@ async function activateHostedMemberForPositiveSourceTxInner(input: {
     sourceEventId: input.dispatchContext.sourceEventId,
     sourceType: input.dispatchContext.sourceType,
   });
-  const existingWakeEventId = await findHostedIngressByEventIdTx({
+  const existingWakeEventId = await findHostedIngressByEventId({
     eventId: activationEventId,
     tx: input.prisma,
     userId: currentMember.core.id,

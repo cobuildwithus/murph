@@ -3,6 +3,7 @@ import {
   baseCommandOptionsSchema,
   type BaseCommandOptions,
 } from './vault-cli-contracts.js'
+import { isSensitiveAssistantHeader } from './assistant/redaction.js'
 import { VaultCliError } from './vault-cli-errors.js'
 
 export const emptyArgsSchema = z.object({})
@@ -38,12 +39,6 @@ export function requestIdFromOptions(
 
 const httpHeaderNamePattern = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/u
 const httpHeaderValueControlPattern = /[\u0000-\u0008\u000A-\u001F\u007F]/u
-const forbiddenHeadersJsonNames = new Set([
-  'authorization',
-  'cookie',
-  'proxy-authorization',
-  'set-cookie',
-])
 
 const httpUrlInvalidMessage =
   'Expected an http or https URL without embedded credentials.'
@@ -154,14 +149,14 @@ export function parseHeadersJsonOption(value?: string) {
       )
     }
 
-    const normalizedName = key.toLowerCase()
-    if (forbiddenHeadersJsonNames.has(normalizedName)) {
+    if (isSensitiveAssistantHeader(key, candidate)) {
       throw new VaultCliError(
         'invalid_payload',
         'headersJson may not include credential headers. Use apiKey or apiKeyEnv for model credentials.',
       )
     }
 
+    const normalizedName = key.toLowerCase()
     if (normalizedNames.has(normalizedName)) {
       throw new VaultCliError(
         'invalid_payload',

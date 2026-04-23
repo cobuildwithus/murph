@@ -28,10 +28,11 @@ import type {
   HostedConversationWakeMetrics,
   NormalizedHostedAssistantRuntimeConfig,
 } from "../models.ts";
+import { buildHostedPlatformBackedRuntimeEnv } from "../environment.ts";
 
 export async function ingestHostedConversationMessageWake(input: {
   wake: HostedExecutionConversationMessageWake;
-  runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "platform">;
+  runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "forwardedEnv" | "platform" | "platformEnv">;
   vaultRoot: string;
 }): Promise<HostedConversationWakeMetrics> {
   const capture = await normalizeHostedConversationMessageWake(input);
@@ -71,7 +72,7 @@ export async function ingestHostedConversationMessageWake(input: {
 
 async function normalizeHostedConversationMessageWake(input: {
   wake: HostedExecutionConversationMessageWake;
-  runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "platform">;
+  runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "forwardedEnv" | "platform" | "platformEnv">;
 }) {
   if (isHostedLinqConversationMessageWake(input.wake)) {
     return normalizeHostedLinqConversationCapture({
@@ -86,7 +87,12 @@ async function normalizeHostedConversationMessageWake(input: {
   if (isHostedTelegramConversationMessageWake(input.wake)) {
     return normalizeHostedTelegramConversationCapture({
       accountId: "bot",
-      downloadDriver: createHostedTelegramAttachmentDownloadDriver(),
+      downloadDriver: createHostedTelegramAttachmentDownloadDriver(
+        buildHostedPlatformBackedRuntimeEnv({
+          forwardedEnv: input.runtime.forwardedEnv,
+          platformEnv: input.runtime.platformEnv,
+        }),
+      ),
       externalId: input.wake.eventId,
       message: input.wake.message.telegramMessage,
       occurredAt: input.wake.occurredAt,

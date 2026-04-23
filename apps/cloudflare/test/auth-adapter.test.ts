@@ -60,6 +60,22 @@ describe("cloudflare hosted execution auth adapter", () => {
     });
   });
 
+  it("accepts a bracketed IPv6 loopback JWKS URL override in development", () => {
+    expect(readHostedExecutionVercelOidcValidationEnvironment({
+      HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "development",
+      HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL: "http://[::1]:4010/.well-known/jwks",
+      HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME: TEST_PROJECT_NAME,
+      HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: TEST_TEAM_SLUG,
+    })).toEqual({
+      ...createHostedExecutionVercelOidcValidationEnvironment({
+        environment: "development",
+        projectName: TEST_PROJECT_NAME,
+        teamSlug: TEST_TEAM_SLUG,
+      }),
+      jwksUrl: "http://[::1]:4010/.well-known/jwks",
+    });
+  });
+
   it("rejects JWKS URL overrides outside development", () => {
     expect(() =>
       readHostedExecutionVercelOidcValidationEnvironment({

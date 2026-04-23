@@ -331,6 +331,44 @@ test('hosted assistant bootstrap reads process env and accepts valid boolean and
         error.message,
       ),
   )
+
+  await assert.rejects(
+    () =>
+      hostedConfigModule.ensureHostedAssistantOperatorDefaults({
+        allowMissing: false,
+        env: {
+          HOSTED_ASSISTANT_BASE_URL: 'https://gateway.internal.test/v1',
+          HOSTED_ASSISTANT_GATEWAY_ONLY_PROVIDERS: 'openai',
+          HOSTED_ASSISTANT_MODEL: 'openai/gpt-5.4',
+          HOSTED_ASSISTANT_PROVIDER: 'vercel-ai-gateway',
+        },
+      }),
+    (error) =>
+      error instanceof hostedConfigModule.HostedAssistantConfigurationError &&
+      error.code === 'HOSTED_ASSISTANT_CONFIG_INVALID' &&
+      /HOSTED_ASSISTANT_GATEWAY_ONLY_PROVIDERS can be used only with Vercel AI Gateway/u.test(
+        error.message,
+      ),
+  )
+
+  await assert.rejects(
+    () =>
+      hostedConfigModule.ensureHostedAssistantOperatorDefaults({
+        allowMissing: false,
+        env: {
+          HOSTED_ASSISTANT_BASE_URL: 'https://gateway.internal.test/v1',
+          HOSTED_ASSISTANT_MODEL: 'openai/gpt-5.4',
+          HOSTED_ASSISTANT_PROVIDER: 'vercel-ai-gateway',
+          HOSTED_ASSISTANT_ZERO_DATA_RETENTION: 'true',
+        },
+      }),
+    (error) =>
+      error instanceof hostedConfigModule.HostedAssistantConfigurationError &&
+      error.code === 'HOSTED_ASSISTANT_CONFIG_INVALID' &&
+      /HOSTED_ASSISTANT_ZERO_DATA_RETENTION can be used only with a hosted target that enforces zero data retention/u.test(
+        error.message,
+      ),
+  )
 })
 
 test('hosted assistant bootstrap returns missing or invalid states and throws required errors', async () => {

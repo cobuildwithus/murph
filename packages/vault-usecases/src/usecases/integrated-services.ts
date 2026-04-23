@@ -28,8 +28,9 @@ import {
 } from "./explicit-health-family-services.js"
 import {
   createUnwiredMethod,
+  loadCoreRuntime,
   loadImporterRuntime,
-  loadIntegratedRuntime,
+  loadQueryRuntime,
 } from "./runtime.js"
 import {
   asEntityEnvelope,
@@ -118,7 +119,7 @@ function createIntegratedCoreServices(
       timezone?: string
     }) {
       const { vault } = input
-      const { core } = await loadIntegratedRuntime()
+      const core = await loadCoreRuntime()
       await core.initializeVault({
         vaultRoot: vault,
         timezone: input.timezone ?? resolveSystemTimeZone(),
@@ -132,7 +133,7 @@ function createIntegratedCoreServices(
     },
     async validate(input: CommandContext) {
       const { vault } = input
-      const { core } = await loadIntegratedRuntime()
+      const core = await loadCoreRuntime()
       const result = await core.validateVault({ vaultRoot: vault })
       return {
         vault,
@@ -142,7 +143,7 @@ function createIntegratedCoreServices(
     },
     async repairVault(input: CommandContext) {
       const { vault } = input
-      const { core } = await loadIntegratedRuntime()
+      const core = await loadCoreRuntime()
       const result = await core.repairVault({ vaultRoot: vault })
       return {
         vault,
@@ -164,7 +165,7 @@ function createIntegratedCoreServices(
       nutrition?: import('@murphai/contracts').MealNutrition
     }) {
       const { vault, photo, audio, note, occurredAt, source, ingredients, nutrition } = input
-      const { core } = await loadIntegratedRuntime()
+      const core = await loadCoreRuntime()
       const result = await core.addMeal({
         vaultRoot: vault,
         photoPath: photo,
@@ -417,7 +418,7 @@ function createIntegratedCoreServices(
     },
     async projectAssessment(input: ProjectAssessmentInput) {
       const { vault, assessmentId } = input
-      const { core } = await loadIntegratedRuntime()
+      const core = await loadCoreRuntime()
       const assessment = await core.readAssessmentResponse({
         vaultRoot: vault,
         assessmentId,
@@ -433,7 +434,7 @@ function createIntegratedCoreServices(
       }
     },
     ...createExplicitHealthCoreServices(async () => {
-      const { core } = await loadIntegratedRuntime()
+      const core = await loadCoreRuntime()
       return { core }
     }),
   } satisfies CoreWriteServices
@@ -535,7 +536,7 @@ function createIntegratedImporterServices(): ImporterServices {
 function createIntegratedQueryServices(): QueryServices {
   return {
     ...createExplicitHealthQueryServices(async () => {
-      const { query } = await loadIntegratedRuntime()
+      const query = await loadQueryRuntime()
       return { query }
     }),
     async showDocument(input: CommandContext & {
@@ -591,7 +592,7 @@ function createIntegratedQueryServices(): QueryServices {
       from?: string
       to?: string
     }) {
-      const { query } = await loadIntegratedRuntime()
+      const query = await loadQueryRuntime()
       const result = await query.readMealNutritionTotals(input.vault, {
         from: input.from,
         to: input.to,
@@ -676,7 +677,7 @@ function createIntegratedQueryServices(): QueryServices {
         })
       }
 
-      const { query } = await loadIntegratedRuntime()
+      const query = await loadQueryRuntime()
       const readModel = await query.readVault(vault)
       const entity = query.lookupEntityById(readModel, id)
 
@@ -702,7 +703,7 @@ function createIntegratedQueryServices(): QueryServices {
         tag,
         limit,
       } = input
-      const { query } = await loadIntegratedRuntime()
+      const query = await loadQueryRuntime()
       const recordTypes =
         normalizeRepeatableEnumFlagOption(
           recordType,
@@ -743,7 +744,7 @@ function createIntegratedQueryServices(): QueryServices {
       providers?: string[]
     }) {
       const normalized = normalizeWearableDayInput(input)
-      const { query } = await loadIntegratedRuntime()
+      const query = await loadQueryRuntime()
       const readModel = await query.readVault(input.vault)
       const summary = query.summarizeWearableDay(readModel, normalized.date, {
         providers:
@@ -766,7 +767,7 @@ function createIntegratedQueryServices(): QueryServices {
       providers?: string[]
     }) {
       const normalized = normalizeWearableSurfaceInput(input)
-      const { query } = await loadIntegratedRuntime()
+      const query = await loadQueryRuntime()
       const readModel = await query.readVault(input.vault)
       const summary = query.summarizeWearableLatest(readModel, normalized.queryFilters)
 
@@ -785,7 +786,7 @@ function createIntegratedQueryServices(): QueryServices {
       windowDays?: number
     }) {
       const normalized = normalizeWearableMetricInput(input)
-      const { query } = await loadIntegratedRuntime()
+      const query = await loadQueryRuntime()
       const readModel = await query.readVault(input.vault)
       const summary = query.summarizeWearableMetricLatest(readModel, normalized.metric, normalized.queryFilters)
 
@@ -804,7 +805,7 @@ function createIntegratedQueryServices(): QueryServices {
       windowDays?: number
     }) {
       const normalized = normalizeWearableMetricInput(input)
-      const { query } = await loadIntegratedRuntime()
+      const query = await loadQueryRuntime()
       const readModel = await query.readVault(input.vault)
       const summary = query.summarizeWearableMetricTrend(readModel, normalized.metric, normalized.queryFilters)
 
@@ -825,7 +826,7 @@ function createIntegratedQueryServices(): QueryServices {
         ...input,
         metric: "drift",
       })
-      const { query } = await loadIntegratedRuntime()
+      const query = await loadQueryRuntime()
       const readModel = await query.readVault(input.vault)
       const summary = query.explainWearableDrift(readModel, normalized.queryFilters)
 
@@ -849,7 +850,7 @@ function createIntegratedQueryServices(): QueryServices {
       limit: number
     }) {
       const normalized = normalizeWearableSummaryInput(input)
-      const { query } = await loadIntegratedRuntime()
+      const query = await loadQueryRuntime()
       const readModel = await query.readVault(input.vault)
       const items = query.summarizeWearableSleep(readModel, normalized.queryFilters)
 
@@ -868,7 +869,7 @@ function createIntegratedQueryServices(): QueryServices {
       limit: number
     }) {
       const normalized = normalizeWearableSummaryInput(input)
-      const { query } = await loadIntegratedRuntime()
+      const query = await loadQueryRuntime()
       const readModel = await query.readVault(input.vault)
       const items = query.summarizeWearableActivity(readModel, normalized.queryFilters)
 
@@ -887,7 +888,7 @@ function createIntegratedQueryServices(): QueryServices {
       limit: number
     }) {
       const normalized = normalizeWearableSummaryInput(input)
-      const { query } = await loadIntegratedRuntime()
+      const query = await loadQueryRuntime()
       const readModel = await query.readVault(input.vault)
       const items = query.summarizeWearableBodyState(readModel, normalized.queryFilters)
 
@@ -906,7 +907,7 @@ function createIntegratedQueryServices(): QueryServices {
       limit: number
     }) {
       const normalized = normalizeWearableSummaryInput(input)
-      const { query } = await loadIntegratedRuntime()
+      const query = await loadQueryRuntime()
       const readModel = await query.readVault(input.vault)
       const items = query.summarizeWearableRecovery(readModel, normalized.queryFilters)
 
@@ -925,7 +926,7 @@ function createIntegratedQueryServices(): QueryServices {
       limit: number
     }) {
       const normalized = normalizeWearableSummaryInput(input)
-      const { query } = await loadIntegratedRuntime()
+      const query = await loadQueryRuntime()
       const readModel = await query.readVault(input.vault)
       const items = query.summarizeWearableSourceHealth(readModel, normalized.queryFilters)
 
@@ -943,7 +944,7 @@ function createIntegratedQueryServices(): QueryServices {
       out?: string
     }) {
       const { vault, from, to, experiment, out } = input
-      const { query } = await loadIntegratedRuntime()
+      const query = await loadQueryRuntime()
       const readModel = await query.readVaultTolerant(vault)
       const pack = query.buildExportPack(readModel, {
         from,

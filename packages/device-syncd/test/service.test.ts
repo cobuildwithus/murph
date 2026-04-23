@@ -7,11 +7,27 @@ import { openSqliteRuntimeDatabase, writeSqliteRuntimeUserVersion } from "@murph
 import { createWhoopDeviceSyncProvider } from "../src/providers/whoop.ts";
 import { buildDeviceSyncTokenCipherOptions, createSecretCodec } from "../src/crypto.ts";
 import { DeviceSyncError, deviceSyncError } from "../src/errors.ts";
+import { disconnectDeviceSyncAccount, queueDeviceSyncManualReconcile } from "../src/service-controls.ts";
+import { getDeviceSyncServiceTestingHooks } from "../src/service-testing.ts";
 import { createDeviceSyncService } from "../src/service.ts";
 import { scopeWebhookTraceId } from "../src/shared.ts";
 import { SqliteDeviceSyncStore } from "../src/store.ts";
 import { DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION } from "../src/store/schema.ts";
 import { createJsonResponse, makeTempDirectory, readUrl } from "./helpers.ts";
+import {
+  countJobsForAccountForTesting,
+  expireJobLeaseForTesting,
+  insertWebhookTraceRowForTesting,
+  listJobKindsForAccountForTesting,
+  readCredentialStateForTesting,
+  readFirstJobIdForAccountForTesting,
+  readJobsForAccountForTesting,
+  readNamedSqliteTablesForTesting,
+  readObservationStateForTesting,
+  readTableColumnsForTesting,
+  readWebhookTraceLifecycleRowsForTesting,
+  readWebhookTraceStatusForTesting,
+} from "./store-test-helpers.ts";
 
 import type {
   DeviceSyncAccount,
@@ -26,12 +42,26 @@ const UNSUPPORTED_SCHEMA_VERSION_RE = new RegExp(
   `device sync runtime database schema version ${UNSUPPORTED_SCHEMA_VERSION} is newer than supported version ${DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION}`,
 );
 
-function readTableColumns(store: SqliteDeviceSyncStore, tableName: string): string[] {
-  return (
-    store.database.prepare(`pragma table_info(${tableName})`).all() as Array<{ name?: string }>
-  )
-    .map((row) => row.name)
-    .filter((name): name is string => typeof name === "string");
+function createServiceFixture(input: Parameters<typeof createDeviceSyncService>[0]): {
+  close: () => void;
+  service: ReturnType<typeof createDeviceSyncService>;
+  store: SqliteDeviceSyncStore;
+} {
+  const fixtureStore = input.store
+    ?? new SqliteDeviceSyncStore(input.config.stateDatabasePath ?? path.join(input.config.vaultRoot, ".runtime", "device-syncd.sqlite"));
+  const service = createDeviceSyncService({
+    ...input,
+    store: fixtureStore,
+  });
+
+  return {
+    service,
+    store: fixtureStore,
+    close() {
+      service.close();
+      fixtureStore.close();
+    },
+  };
 }
 
 function createWhoopWebhookHeaders(clientSecret: string, rawBody: Buffer, timestamp = Date.now().toString()): Headers {
@@ -172,6 +202,44 @@ function requireCallback(callback: (() => void) | null, message: string): () => 
   return callback;
 }
 
+test("device sync service facade does not expose privileged store or control methods", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd");
+  const { service, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [createFakeProvider()],
+  });
+
+  try {
+    assert.equal(Reflect.has(service, "store"), false);
+    assert.equal(Reflect.has(service, "queueManualReconcile"), false);
+    assert.equal(Reflect.has(service, "disconnectAccount"), false);
+  } finally {
+    close();
+  }
+});
+
+test("device sync service trusted helper ports reject unknown service objects", async () => {
+  const fakeService = {} as unknown as ReturnType<typeof createDeviceSyncService>;
+
+  assert.throws(
+    () => getDeviceSyncServiceTestingHooks(fakeService),
+    /Unknown device sync service instance\./,
+  );
+  assert.throws(
+    () => queueDeviceSyncManualReconcile(fakeService, "acct_missing"),
+    /Unknown device sync service instance\./,
+  );
+  await assert.rejects(
+    () => disconnectDeviceSyncAccount(fakeService, "acct_missing"),
+    /Unknown device sync service instance\./,
+  );
+});
+
 test("device sync service connects, imports, and deduplicates webhook traces", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd");
   const imports: unknown[] = [];
@@ -183,7 +251,7 @@ test("device sync service connects, imports, and deduplicates webhook traces", a
       };
     },
   };
-  const service = createDeviceSyncService({
+  const { service, store, close } = createServiceFixture({
     secret: "secret-for-tests",
     config: {
       vaultRoot,
@@ -215,11 +283,7 @@ test("device sync service connects, imports, and deduplicates webhook traces", a
   assert.equal(firstWebhook.accepted, true);
   assert.equal(firstWebhook.duplicate, false);
   assert.equal(
-    (
-      service.store.database
-        .prepare("select status from webhook_trace where provider = ? and trace_id = ?")
-        .get("demo", scopeWebhookTraceId("demo", "demo-abc", "trace-1")) as { status?: string } | undefined
-    )?.status,
+    readWebhookTraceStatusForTesting(store, "demo", scopeWebhookTraceId("demo", "demo-abc", "trace-1")),
     "processed",
   );
 
@@ -229,11 +293,11 @@ test("device sync service connects, imports, and deduplicates webhook traces", a
   await service.runWorkerOnce();
   assert.equal(imports.length, 2);
 
-  const reconcile = service.queueManualReconcile(connected.account.id);
+  const reconcile = queueDeviceSyncManualReconcile(service, connected.account.id);
   assert.equal(reconcile.account.id, connected.account.id);
   assert.equal(reconcile.jobs.length, 1);
 
-  service.close();
+  close();
 });
 
 test("device sync service keeps connection-established webhook admin upkeep best-effort", async () => {
@@ -247,7 +311,7 @@ test("device sync service keeps connection-established webhook admin upkeep best
   const baseProvider = createFakeProvider();
   const webhookDescriptor = baseProvider.descriptor.webhook;
   assert.ok(webhookDescriptor);
-  const service = createDeviceSyncService({
+  const { service, store, close } = createServiceFixture({
     secret: "secret-for-tests",
     config: {
       vaultRoot,
@@ -307,14 +371,10 @@ test("device sync service keeps connection-established webhook admin upkeep best
     state: begin.state,
     code: "webhook-admin",
   });
-  const queuedJobs = service.store.database.prepare(`
-    select count(*) as total
-    from device_job
-    where account_id = ?
-  `).get(connected.account.id) as { total: number };
+  const queuedJobs = countJobsForAccountForTesting(store, connected.account.id);
 
   assert.equal(connected.account.externalAccountId, "oura-webhook-admin");
-  assert.equal(queuedJobs.total, 0);
+  assert.equal(queuedJobs, 0);
   assert.equal(ensureSubscriptions.mock.calls.length, 1);
   assert.deepEqual(upkeepInput, {
     publicBaseUrl: "https://sync.example.test/device-sync",
@@ -331,7 +391,7 @@ test("device sync service keeps connection-established webhook admin upkeep best
   assert.equal(warnEvents[0]?.context?.provider, "oura");
   assert.equal(warnEvents[0]?.context?.reason, "connection-established");
 
-  service.close();
+  close();
 });
 
 test("device sync service does not run connection-established webhook admin upkeep for non-Oura providers", async () => {
@@ -340,7 +400,7 @@ test("device sync service does not run connection-established webhook admin upke
   const baseProvider = createFakeProvider();
   const webhookDescriptor = baseProvider.descriptor.webhook;
   assert.ok(webhookDescriptor);
-  const service = createDeviceSyncService({
+  const { service, close } = createServiceFixture({
     secret: "secret-for-tests",
     config: {
       vaultRoot,
@@ -395,13 +455,13 @@ test("device sync service does not run connection-established webhook admin upke
 
   assert.equal(ensureSubscriptions.mock.calls.length, 0);
 
-  service.close();
+  close();
 });
 
 test("device sync service redacts connection metadata from public account responses while retaining internal provider state", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-public-redaction");
   let seenMetadata: Record<string, unknown> | null = null;
-  const service = createDeviceSyncService({
+  const { service, store, close } = createServiceFixture({
     secret: "secret-for-tests",
     config: {
       vaultRoot,
@@ -432,7 +492,7 @@ test("device sync service redacts connection metadata from public account respon
   assert.equal(Object.prototype.hasOwnProperty.call(connected.account, "hostedObservedUpdatedAt"), false);
   assert.deepEqual(service.getAccount(connected.account.id)?.metadata, {});
   assert.deepEqual(service.listAccounts()[0]?.metadata, {});
-  assert.deepEqual(service.store.getAccountById(connected.account.id)?.metadata, {
+  assert.deepEqual(store.getAccountById(connected.account.id)?.metadata, {
     connectedBy: "sensitive-connect-code",
   });
 
@@ -441,12 +501,12 @@ test("device sync service redacts connection metadata from public account respon
     connectedBy: "sensitive-connect-code",
   });
 
-  service.close();
+  close();
 });
 
 test("device sync service fails closed when stored token integrity validation fails", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-token-integrity");
-  const service = createDeviceSyncService({
+  const { service, store, close } = createServiceFixture({
     secret: "secret-for-tests",
     config: {
       vaultRoot,
@@ -465,11 +525,11 @@ test("device sync service fails closed when stored token integrity validation fa
     state: begin.state,
     code: "tampered",
   });
-  const stored = service.store.getAccountById(connected.account.id);
+  const stored = store.getAccountById(connected.account.id);
   assert.ok(stored);
 
   const codec = createSecretCodec("secret-for-tests");
-  const updated = service.store.updateAccountTokens(stored.id, {
+  const updated = store.updateAccountTokens(stored.id, {
     accessToken: "tampered-access-token",
     accessTokenEncrypted: codec.encrypt(
       "tampered-access-token",
@@ -491,12 +551,12 @@ test("device sync service fails closed when stored token integrity validation fa
   });
   assert.ok(updated);
 
-  const reconcile = service.queueManualReconcile(stored.id);
+  const reconcile = queueDeviceSyncManualReconcile(service, stored.id);
   const processedJob = await service.runWorkerOnce();
 
-  const failedJob = processedJob ? service.store.getJobById(processedJob.id) : null;
-  const queuedManualJob = service.store.getJobById(reconcile.job.id);
-  const reauthorizationAccount = service.store.getAccountById(stored.id);
+  const failedJob = processedJob ? store.getJobById(processedJob.id) : null;
+  const queuedManualJob = store.getJobById(reconcile.job.id);
+  const reauthorizationAccount = store.getAccountById(stored.id);
 
   assert.equal(processedJob?.id, reconcile.job.id);
   assert.equal(failedJob?.status, "dead");
@@ -505,13 +565,14 @@ test("device sync service fails closed when stored token integrity validation fa
   assert.equal(queuedManualJob?.status, "dead");
   assert.equal(reauthorizationAccount?.status, "reauthorization_required");
 
-  service.close();
+  close();
 });
 
 test("device sync service starts and stops its timers, closes owned stores, and rejects missing provider or account lookups", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-lifecycle");
   const setIntervalSpy = vi.spyOn(globalThis, "setInterval");
   const clearIntervalSpy = vi.spyOn(globalThis, "clearInterval");
+  const closeSpy = vi.spyOn(SqliteDeviceSyncStore.prototype, "close");
   const service = createDeviceSyncService({
     secret: "secret-for-tests",
     config: {
@@ -523,13 +584,6 @@ test("device sync service starts and stops its timers, closes owned stores, and 
   });
 
   try {
-    let closeCalls = 0;
-    const originalClose = service.store.close.bind(service.store);
-    service.store.close = () => {
-      closeCalls += 1;
-      return originalClose();
-    };
-
     assert.deepEqual(service.describeProviders(), []);
     assert.equal(service.getAccount("missing-account"), null);
     assert.equal(service.getNextWakeAt("2026-03-17T10:00:00.000Z"), null);
@@ -541,7 +595,7 @@ test("device sync service starts and stops its timers, closes owned stores, and 
         && error.httpStatus === 404,
     );
     assert.throws(
-      () => service.queueManualReconcile("missing-account"),
+      () => queueDeviceSyncManualReconcile(service, "missing-account"),
       (error: unknown) =>
         error instanceof DeviceSyncError
         && error.code === "ACCOUNT_NOT_FOUND"
@@ -555,16 +609,17 @@ test("device sync service starts and stops its timers, closes owned stores, and 
 
     assert.equal(setIntervalSpy.mock.calls.length, 2);
     assert.equal(clearIntervalSpy.mock.calls.length, 2);
-    assert.equal(closeCalls, 1);
+    assert.equal(closeSpy.mock.calls.length, 1);
   } finally {
     setIntervalSpy.mockRestore();
     clearIntervalSpy.mockRestore();
+    closeSpy.mockRestore();
   }
 });
 
 test("device sync service scheduler queues due active jobs and skips unsupported or inactive accounts", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-scheduler");
-  const service = createDeviceSyncService({
+  const { service, store, close } = createServiceFixture({
     secret: "secret-for-tests",
     config: {
       vaultRoot,
@@ -613,7 +668,7 @@ test("device sync service scheduler queues due active jobs and skips unsupported
     ],
   });
 
-  const dueActive = service.store.upsertAccount({
+  const dueActive = store.upsertAccount({
     provider: "scheduled",
     externalAccountId: "scheduled-1",
     displayName: "Scheduled",
@@ -625,7 +680,7 @@ test("device sync service scheduler queues due active jobs and skips unsupported
     connectedAt: "2026-03-17T10:00:00.000Z",
     nextReconcileAt: "2026-03-17T11:00:00.000Z",
   });
-  service.store.upsertAccount({
+  store.upsertAccount({
     provider: "scheduled",
     externalAccountId: "scheduled-future",
     displayName: "Future",
@@ -637,7 +692,7 @@ test("device sync service scheduler queues due active jobs and skips unsupported
     connectedAt: "2026-03-17T10:00:00.000Z",
     nextReconcileAt: "2026-03-17T13:00:00.000Z",
   });
-  service.store.upsertAccount({
+  store.upsertAccount({
     provider: "unsupported",
     externalAccountId: "unsupported-1",
     displayName: "Unsupported",
@@ -649,7 +704,7 @@ test("device sync service scheduler queues due active jobs and skips unsupported
     connectedAt: "2026-03-17T10:00:00.000Z",
     nextReconcileAt: "2026-03-17T11:00:00.000Z",
   });
-  const disconnected = service.store.upsertAccount({
+  const disconnected = store.upsertAccount({
     provider: "scheduled",
     externalAccountId: "scheduled-disconnected",
     displayName: "Disconnected",
@@ -665,38 +720,21 @@ test("device sync service scheduler queues due active jobs and skips unsupported
 
   await service.runSchedulerOnce();
 
-  const scheduledJobs = service.store.database.prepare(`
-    select kind
-    from device_job
-    where account_id = ?
-    order by created_at asc, id asc
-  `).all(dueActive.id) as Array<{ kind: string }>;
-  const unsupportedJobs = service.store.database.prepare(`
-    select count(*) as total
-    from device_job
-    where account_id = ?
-  `);
-  const unsupportedAccount = service.store.getAccountByExternalAccount("unsupported", "unsupported-1");
+  const scheduledJobs = listJobKindsForAccountForTesting(store, dueActive.id);
+  const unsupportedAccount = store.getAccountByExternalAccount("unsupported", "unsupported-1");
   assert.ok(unsupportedAccount);
-  const unsupportedJobCount = unsupportedJobs.get(unsupportedAccount.id) as { total: number };
-  const disconnectedJobs = service.store.database.prepare(`
-    select count(*) as total
-    from device_job
-    where account_id = ?
-  `).get(disconnected.id) as { total: number };
+  assert.deepEqual(scheduledJobs, ["scheduled-refresh"]);
+  assert.equal(store.getAccountById(dueActive.id)?.nextReconcileAt, "2026-03-17T12:30:00.000Z");
+  assert.equal(countJobsForAccountForTesting(store, unsupportedAccount.id), 0);
+  assert.equal(countJobsForAccountForTesting(store, disconnected.id), 0);
 
-  assert.deepEqual(scheduledJobs.map((job) => job.kind), ["scheduled-refresh"]);
-  assert.equal(service.store.getAccountById(dueActive.id)?.nextReconcileAt, "2026-03-17T12:30:00.000Z");
-  assert.equal(unsupportedJobCount.total, 0);
-  assert.equal(disconnectedJobs.total, 0);
-
-  service.close();
+  close();
 });
 
 test("device sync service scheduler logs failures once and skips reentrant ticks", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-scheduler-error");
   const schedulerErrors: Array<{ context?: Record<string, unknown>; message: string }> = [];
-  const service = createDeviceSyncService({
+  const { service, store, close } = createServiceFixture({
     secret: "secret-for-tests",
     config: {
       vaultRoot,
@@ -730,7 +768,7 @@ test("device sync service scheduler logs failures once and skips reentrant ticks
     ],
   });
 
-  service.store.upsertAccount({
+  store.upsertAccount({
     provider: "broken",
     externalAccountId: "broken-1",
     displayName: "Broken",
@@ -745,18 +783,19 @@ test("device sync service scheduler logs failures once and skips reentrant ticks
 
   await service.runSchedulerOnce();
 
-  Reflect.set(service, "schedulerTickInFlight", true);
+  const testingHooks = getDeviceSyncServiceTestingHooks(service);
+  testingHooks.setSchedulerTickInFlight(true);
   await service.runSchedulerOnce();
   assert.equal(schedulerErrors.length, 1);
-  Reflect.set(service, "schedulerTickInFlight", false);
+  testingHooks.setSchedulerTickInFlight(false);
 
-  service.close();
+  close();
 });
 
 test("device sync service worker batch logs drain failures once and skips reentrant ticks", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-worker-batch-error");
   const workerErrors: Array<{ context?: Record<string, unknown>; message: string }> = [];
-  const service = createDeviceSyncService({
+  const { service, store, close } = createServiceFixture({
     secret: "secret-for-tests",
     config: {
       vaultRoot,
@@ -775,30 +814,30 @@ test("device sync service worker batch logs drain failures once and skips reentr
   });
 
   let drainCalls = 0;
-  Reflect.set(service, "drainWorker", async () => {
+  const testingHooks = getDeviceSyncServiceTestingHooks(service);
+  const restoreDrainWorker = testingHooks.replaceDrainWorkerForTesting(async () => {
     drainCalls += 1;
     throw new Error("worker batch exploded");
   });
 
-  const runWorkerBatchOnce = Reflect.get(service, "runWorkerBatchOnce") as () => Promise<void>;
-
-  await runWorkerBatchOnce.call(service);
+  await testingHooks.runWorkerBatchOnce();
   assert.equal(drainCalls, 1);
   assert.equal(workerErrors.length, 1);
   assert.equal(workerErrors[0]?.message, "Device sync worker tick failed.");
 
-  Reflect.set(service, "workerTickInFlight", true);
-  await runWorkerBatchOnce.call(service);
+  testingHooks.setWorkerTickInFlight(true);
+  await testingHooks.runWorkerBatchOnce();
   assert.equal(drainCalls, 1);
   assert.equal(workerErrors.length, 1);
-  Reflect.set(service, "workerTickInFlight", false);
+  testingHooks.setWorkerTickInFlight(false);
+  restoreDrainWorker();
 
-  service.close();
+  close();
 });
 
 test("device sync service worker handles missing providers, disconnected jobs, and reauthorization-required jobs", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-worker-edges");
-  const service = createDeviceSyncService({
+  const { service, store, close } = createServiceFixture({
     secret: "secret-for-tests",
     config: {
       vaultRoot,
@@ -808,7 +847,7 @@ test("device sync service worker handles missing providers, disconnected jobs, a
     providers: [createFakeProvider()],
   });
 
-  const queuedAccount = service.store.upsertAccount({
+  const queuedAccount = store.upsertAccount({
     provider: "demo",
     externalAccountId: "demo-worker-edges",
     displayName: "Demo",
@@ -820,7 +859,7 @@ test("device sync service worker handles missing providers, disconnected jobs, a
     connectedAt: "2026-03-17T10:00:00.000Z",
   });
 
-  const missingProviderJob = service.store.enqueueJob({
+  const missingProviderJob = store.enqueueJob({
     accountId: queuedAccount.id,
     provider: "missing-provider",
     kind: "sync",
@@ -828,13 +867,13 @@ test("device sync service worker handles missing providers, disconnected jobs, a
     availableAt: "2026-03-17T10:00:00.000Z",
   });
   await service.runWorkerOnce();
-  assert.equal(service.store.getJobById(missingProviderJob.id)?.status, "dead");
-  assert.equal(service.store.getJobById(missingProviderJob.id)?.lastErrorCode, "PROVIDER_NOT_REGISTERED");
+  assert.equal(store.getJobById(missingProviderJob.id)?.status, "dead");
+  assert.equal(store.getJobById(missingProviderJob.id)?.lastErrorCode, "PROVIDER_NOT_REGISTERED");
 
-  service.store.patchAccount(queuedAccount.id, {
+  store.patchAccount(queuedAccount.id, {
     status: "disconnected",
   });
-  const disconnectedJob = service.store.enqueueJob({
+  const disconnectedJob = store.enqueueJob({
     accountId: queuedAccount.id,
     provider: "demo",
     kind: "sync",
@@ -842,9 +881,9 @@ test("device sync service worker handles missing providers, disconnected jobs, a
     availableAt: "2026-03-17T10:00:01.000Z",
   });
   await service.runWorkerOnce();
-  assert.equal(service.store.getJobById(disconnectedJob.id)?.status, "succeeded");
+  assert.equal(store.getJobById(disconnectedJob.id)?.status, "succeeded");
 
-  const reauthAccount = service.store.upsertAccount({
+  const reauthAccount = store.upsertAccount({
     provider: "demo",
     externalAccountId: "demo-worker-reauth",
     displayName: "Demo Reauth",
@@ -856,7 +895,7 @@ test("device sync service worker handles missing providers, disconnected jobs, a
     },
     connectedAt: "2026-03-17T10:00:00.000Z",
   });
-  const reauthJob = service.store.enqueueJob({
+  const reauthJob = store.enqueueJob({
     accountId: reauthAccount.id,
     provider: "demo",
     kind: "sync",
@@ -864,17 +903,24 @@ test("device sync service worker handles missing providers, disconnected jobs, a
     availableAt: "2026-03-17T10:00:02.000Z",
   });
   await service.runWorkerOnce();
-  assert.equal(service.store.getJobById(reauthJob.id)?.status, "dead");
-  assert.equal(service.store.getJobById(reauthJob.id)?.lastErrorCode, "ACCOUNT_REAUTHORIZATION_REQUIRED");
+  assert.equal(store.getJobById(reauthJob.id)?.status, "dead");
+  assert.equal(store.getJobById(reauthJob.id)?.lastErrorCode, "ACCOUNT_REAUTHORIZATION_REQUIRED");
 
-  service.close();
+  close();
 });
 
 test("device sync service treats token refresh races as cancelled work instead of provider failures", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-refresh-cancel");
   const debugEvents: Array<{ context?: Record<string, unknown>; message: string }> = [];
-  let service!: ReturnType<typeof createDeviceSyncService>;
-  service = createDeviceSyncService({
+  let refreshStartedResolve: (() => void) | null = null;
+  let releaseRefreshResolve: (() => void) | null = null;
+  const refreshStarted = new Promise<void>((resolve) => {
+    refreshStartedResolve = resolve;
+  });
+  const releaseRefresh = new Promise<void>((resolve) => {
+    releaseRefreshResolve = resolve;
+  });
+  const { service, store, close } = createServiceFixture({
     secret: "secret-for-tests",
     config: {
       vaultRoot,
@@ -891,8 +937,9 @@ test("device sync service treats token refresh races as cancelled work instead o
     },
     providers: [
       createFakeProvider({
-        async refreshTokens(account: DeviceSyncAccount): Promise<ProviderAuthTokens> {
-          service.store.disconnectAccount(account.id, "2026-03-17T11:05:00.000Z");
+        async refreshTokens(_account: DeviceSyncAccount): Promise<ProviderAuthTokens> {
+          refreshStartedResolve?.();
+          await releaseRefresh;
           return {
             accessToken: "refresh-access",
             refreshToken: "refresh-refresh",
@@ -919,12 +966,17 @@ test("device sync service treats token refresh races as cancelled work instead o
     code: "cancelled",
   });
 
-  const processedJob = await service.runWorkerOnce();
+  const workerPromise = service.runWorkerOnce();
+  await refreshStarted;
+  await disconnectDeviceSyncAccount(service, connected.account.id);
+  requireCallback(releaseRefreshResolve, "refresh release callback was not initialized")();
+  const processedJob = await workerPromise;
 
   assert.equal(processedJob?.kind, "backfill");
-  assert.equal(service.store.getAccountById(connected.account.id)?.status, "disconnected");
-  assert.equal(service.store.getAccountById(connected.account.id)?.lastErrorCode, null);
-  assert.equal(service.store.getJobById(processedJob!.id)?.status, "running");
+  assert.equal(store.getAccountById(connected.account.id)?.status, "disconnected");
+  assert.equal(store.getAccountById(connected.account.id)?.lastErrorCode, null);
+  assert.equal(store.getJobById(processedJob!.id)?.status, "dead");
+  assert.equal(store.getJobById(processedJob!.id)?.lastErrorCode, "ACCOUNT_DISCONNECTED");
   assert.equal(debugEvents.length, 1);
   assert.equal(debugEvents[0]?.message, "Device sync job side effects skipped because execution was cancelled.");
   assert.deepEqual(debugEvents[0]?.context, {
@@ -933,13 +985,98 @@ test("device sync service treats token refresh races as cancelled work instead o
     jobId: processedJob!.id,
   });
 
-  service.close();
+  close();
+});
+
+test("device sync service dead-letters provider-driven disconnect jobs", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-provider-disconnect");
+  const debugEvents: Array<{ context?: Record<string, unknown>; message: string }> = [];
+  const imports: unknown[] = [];
+  const importer: DeviceSyncImporterPort = {
+    async importDeviceProviderSnapshot(input) {
+      imports.push(input);
+      return {
+        ok: true,
+      };
+    },
+  };
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+      log: {
+        debug(message, context) {
+          debugEvents.push({
+            message,
+            context: context as Record<string, unknown> | undefined,
+          });
+        },
+      },
+    },
+    providers: [
+      createFakeProvider({
+        async executeJob(context) {
+          await context.disconnectAccount?.();
+          return {
+            metadataPatch: {
+              shouldNotPersist: true,
+            },
+            nextReconcileAt: "2026-03-19T00:00:00.000Z",
+            scheduledJobs: [
+              {
+                kind: "follow-up",
+                dedupeKey: `follow-up:${context.account.id}`,
+              },
+            ],
+          };
+        },
+      }),
+    ],
+    importer,
+  });
+
+  const begin = await service.startConnection({
+    provider: "demo",
+  });
+  const connected = await service.handleOAuthCallback({
+    provider: "demo",
+    state: begin.state,
+    code: "provider-disconnect",
+  });
+  const processedJob = await service.runWorkerOnce();
+  const storedAccount = store.getAccountById(connected.account.id);
+  const storedJob = processedJob ? store.getJobById(processedJob.id) : null;
+
+  assert.equal(processedJob?.kind, "backfill");
+  assert.ok(storedAccount);
+  assert.equal(storedAccount?.status, "disconnected");
+  assert.deepEqual(storedAccount?.metadata, {
+    connectedBy: "provider-disconnect",
+  });
+  assert.equal(storedAccount?.nextReconcileAt, null);
+  assert.equal(storedJob?.status, "dead");
+  assert.equal(storedJob?.lastErrorCode, "ACCOUNT_DISCONNECTED");
+  assert.equal(service.summarize().jobsQueued, 0);
+  assert.equal(service.summarize().jobsRunning, 0);
+  assert.equal(service.summarize().jobsDead, 1);
+  assert.equal(imports.length, 0);
+  assert.equal(debugEvents.length, 1);
+  assert.equal(debugEvents[0]?.message, "Device sync job side effects skipped because execution was cancelled.");
+  assert.deepEqual(debugEvents[0]?.context, {
+    provider: "demo",
+    accountId: connected.account.id,
+    jobId: processedJob!.id,
+  });
+
+  close();
 });
 
 test("device sync service accepts legacy Oura resource jobs that fall back without a dataType", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-oura-legacy-resource-job");
   let seenPayload: Record<string, unknown> | null = null;
-  const service = createDeviceSyncService({
+  const { service, store, close } = createServiceFixture({
     secret: "secret-for-tests",
     config: {
       vaultRoot,
@@ -957,7 +1094,7 @@ test("device sync service accepts legacy Oura resource jobs that fall back witho
     ],
   });
 
-  const account = service.store.upsertAccount({
+  const account = store.upsertAccount({
     provider: "oura",
     externalAccountId: "oura-legacy",
     displayName: "Oura Legacy",
@@ -968,7 +1105,7 @@ test("device sync service accepts legacy Oura resource jobs that fall back witho
     },
     connectedAt: "2026-03-17T10:00:00.000Z",
   });
-  const job = service.store.enqueueJob({
+  const job = store.enqueueJob({
     accountId: account.id,
     provider: "oura",
     kind: "resource",
@@ -987,15 +1124,15 @@ test("device sync service accepts legacy Oura resource jobs that fall back witho
   assert.deepEqual(seenPayload, {
     objectId: "missing-data-type",
   });
-  assert.equal(service.store.getJobById(job.id)?.status, "succeeded");
+  assert.equal(store.getJobById(job.id)?.status, "succeeded");
 
-  service.close();
+  close();
 });
 
 test("device sync service accepts legacy Strava delete jobs that rely on the default resource type", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-strava-legacy-delete-job");
   let seenPayload: Record<string, unknown> | null = null;
-  const service = createDeviceSyncService({
+  const { service, store, close } = createServiceFixture({
     secret: "secret-for-tests",
     config: {
       vaultRoot,
@@ -1013,7 +1150,7 @@ test("device sync service accepts legacy Strava delete jobs that rely on the def
     ],
   });
 
-  const account = service.store.upsertAccount({
+  const account = store.upsertAccount({
     provider: "strava",
     externalAccountId: "strava-legacy",
     displayName: "Strava Legacy",
@@ -1024,7 +1161,7 @@ test("device sync service accepts legacy Strava delete jobs that rely on the def
     },
     connectedAt: "2026-03-17T10:00:00.000Z",
   });
-  const job = service.store.enqueueJob({
+  const job = store.enqueueJob({
     accountId: account.id,
     provider: "strava",
     kind: "delete",
@@ -1043,9 +1180,9 @@ test("device sync service accepts legacy Strava delete jobs that rely on the def
   assert.deepEqual(seenPayload, {
     resourceId: "activity-123",
   });
-  assert.equal(service.store.getJobById(job.id)?.status, "succeeded");
+  assert.equal(store.getJobById(job.id)?.status, "succeeded");
 
-  service.close();
+  close();
 });
 
 test("device sync service durably suppresses WHOOP webhook replays without trace_id even when retry deliveries have a new signature timestamp", async () => {
@@ -1329,10 +1466,10 @@ test("device sync service accepts and dedupes disconnected-account webhooks whil
     code: "xyz",
   });
 
-  await service.disconnectAccount(connected.account.id);
+  await disconnectDeviceSyncAccount(service, connected.account.id);
 
   assert.throws(
-    () => service.queueManualReconcile(connected.account.id),
+    () => queueDeviceSyncManualReconcile(service, connected.account.id),
     /Disconnected device sync accounts must be reconnected/u,
   );
 
@@ -1363,7 +1500,7 @@ test("device sync service accepts and dedupes disconnected-account webhooks whil
 
 test("device sync service rejects manual reconcile when the stored account provider is no longer registered", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-manual-missing-provider");
-  const service = createDeviceSyncService({
+  const { service, store, close } = createServiceFixture({
     secret: "secret-for-tests",
     config: {
       vaultRoot,
@@ -1373,7 +1510,7 @@ test("device sync service rejects manual reconcile when the stored account provi
     providers: [],
   });
 
-  const account = service.store.upsertAccount({
+  const account = store.upsertAccount({
     provider: "missing-provider",
     externalAccountId: "missing-provider-account",
     displayName: "Missing Provider",
@@ -1386,19 +1523,19 @@ test("device sync service rejects manual reconcile when the stored account provi
   });
 
   assert.throws(
-    () => service.queueManualReconcile(account.id),
+    () => queueDeviceSyncManualReconcile(service, account.id),
     (error: unknown) =>
       error instanceof DeviceSyncError
       && error.code === "PROVIDER_NOT_REGISTERED"
       && error.httpStatus === 404,
   );
 
-  service.close();
+  close();
 });
 
 test("device sync service rejects manual reconcile for reauthorization-required accounts", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-manual-reauthorize");
-  const service = createDeviceSyncService({
+  const { service, store, close } = createServiceFixture({
     secret: "secret-for-tests",
     config: {
       vaultRoot,
@@ -1417,19 +1554,19 @@ test("device sync service rejects manual reconcile for reauthorization-required 
     code: "reauthorize",
   });
 
-  service.store.patchAccount(connected.account.id, {
+  store.patchAccount(connected.account.id, {
     status: "reauthorization_required",
   });
 
   assert.throws(
-    () => service.queueManualReconcile(connected.account.id),
+    () => queueDeviceSyncManualReconcile(service, connected.account.id),
     (error: unknown) =>
       error instanceof DeviceSyncError
       && error.code === "ACCOUNT_REAUTHORIZATION_REQUIRED"
       && error.httpStatus === 409,
   );
 
-  service.close();
+  close();
 });
 
 test("device sync service records granted callback scopes and describes polling-only providers", async () => {
@@ -1505,7 +1642,7 @@ test("device sync service records granted callback scopes and describes polling-
 
 test("manual reconcile queues every scheduled job and store claims only one job per account at a time", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-serialized");
-  const service = createDeviceSyncService({
+  const { service, store, close } = createServiceFixture({
     secret: "secret-for-tests",
     config: {
       vaultRoot,
@@ -1558,7 +1695,7 @@ test("manual reconcile queues every scheduled job and store claims only one job 
     code: "abc",
   });
 
-  const reconcile = service.queueManualReconcile(connected.account.id);
+  const reconcile = queueDeviceSyncManualReconcile(service, connected.account.id);
   assert.equal(reconcile.job.kind, "reconcile-summary");
   assert.deepEqual(
     reconcile.jobs.map((job) => job.kind),
@@ -1566,8 +1703,8 @@ test("manual reconcile queues every scheduled job and store claims only one job 
   );
 
   const now = new Date().toISOString();
-  const firstClaim = service.store.claimDueJob("worker-a", now, 60_000);
-  const secondClaim = service.store.claimDueJob("worker-b", now, 60_000);
+  const firstClaim = store.claimDueJob("worker-a", now, 60_000);
+  const secondClaim = store.claimDueJob("worker-b", now, 60_000);
 
   assert.equal(
     ["reconcile-summary", "reconcile-detail"].includes(firstClaim?.kind ?? ""),
@@ -1575,15 +1712,15 @@ test("manual reconcile queues every scheduled job and store claims only one job 
   );
   assert.equal(secondClaim, null);
 
-  service.store.completeJob(firstClaim!.id, now);
+  store.completeJob(firstClaim!.id, now);
 
-  const thirdClaim = service.store.claimDueJob("worker-b", now, 60_000);
+  const thirdClaim = store.claimDueJob("worker-b", now, 60_000);
   assert.deepEqual(
     new Set([firstClaim?.kind, thirdClaim?.kind]),
     new Set(["reconcile-summary", "reconcile-detail"]),
   );
 
-  service.close();
+  close();
 });
 
 test("device sync service fences in-flight jobs after disconnect", async () => {
@@ -1606,7 +1743,7 @@ test("device sync service fences in-flight jobs after disconnect", async () => {
       };
     },
   };
-  const service = createDeviceSyncService({
+  const { service, store, close } = createServiceFixture({
     secret: "secret-for-tests",
     config: {
       vaultRoot,
@@ -1656,7 +1793,7 @@ test("device sync service fences in-flight jobs after disconnect", async () => {
     state: begin.state,
     code: "fence",
   });
-  const accountBeforeDisconnect = service.store.getAccountById(connected.account.id);
+  const accountBeforeDisconnect = store.getAccountById(connected.account.id);
   const initialJob = service.summarize();
 
   assert.equal(initialJob.jobsQueued, 1);
@@ -1665,24 +1802,14 @@ test("device sync service fences in-flight jobs after disconnect", async () => {
   const workerPromise = service.runWorkerOnce();
   await providerStarted;
 
-  const disconnected = await service.disconnectAccount(connected.account.id);
+  const disconnected = await disconnectDeviceSyncAccount(service, connected.account.id);
   assert.equal(disconnected.account.status, "disconnected");
 
   requireCallback(releaseProviderResolve, "provider release callback was not initialized")();
   await workerPromise;
 
-  const storedAccount = service.store.getAccountById(connected.account.id);
-  const jobs = service.store.database.prepare(`
-    select id, kind, status, last_error_code
-    from device_job
-    where account_id = ?
-    order by created_at asc, id asc
-  `).all(connected.account.id) as Array<{
-    id: string;
-    kind: string;
-    status: string;
-    last_error_code: string | null;
-  }>;
+  const storedAccount = store.getAccountById(connected.account.id);
+  const jobs = readJobsForAccountForTesting(store, connected.account.id);
 
   assert.equal(refreshCalls, 0);
   assert.equal(imports.length, 0);
@@ -1701,7 +1828,7 @@ test("device sync service fences in-flight jobs after disconnect", async () => {
   assert.equal(jobs[0]?.status, "dead");
   assert.equal(jobs[0]?.last_error_code, "ACCOUNT_DISCONNECTED");
 
-  service.close();
+  close();
 });
 
 test("device sync service does not fail jobs reclaimed by another worker after the original lease expires", async () => {
@@ -1714,7 +1841,7 @@ test("device sync service does not fail jobs reclaimed by another worker after t
   const releaseProvider = new Promise<void>((resolve) => {
     releaseProviderResolve = resolve;
   });
-  const service = createDeviceSyncService({
+  const { service, store, close } = createServiceFixture({
     secret: "secret-for-tests",
     config: {
       vaultRoot,
@@ -1744,33 +1871,23 @@ test("device sync service does not fail jobs reclaimed by another worker after t
   const workerPromise = service.runWorkerOnce();
   await providerStarted;
 
-  const initialJob = service.store.database.prepare(`
-    select id
-    from device_job
-    where account_id = ?
-    order by created_at asc, id asc
-    limit 1
-  `).get(connected.account.id) as { id?: string } | undefined;
+  const initialJobId = readFirstJobIdForAccountForTesting(store, connected.account.id);
 
-  assert.ok(initialJob?.id);
+  assert.ok(initialJobId);
 
   const expiredLeaseAt = new Date(Date.now() - 1_000).toISOString();
   const reclaimAt = new Date().toISOString();
-  service.store.database.prepare(`
-    update device_job
-    set lease_expires_at = ?
-    where id = ?
-  `).run(expiredLeaseAt, initialJob.id);
+  expireJobLeaseForTesting(store, initialJobId, expiredLeaseAt);
 
-  const reclaimedJob = service.store.claimDueJob("worker-b", reclaimAt, 60_000);
-  assert.equal(reclaimedJob?.id, initialJob.id);
+  const reclaimedJob = store.claimDueJob("worker-b", reclaimAt, 60_000);
+  assert.equal(reclaimedJob?.id, initialJobId);
   assert.equal(reclaimedJob?.status, "running");
   assert.equal(reclaimedJob?.leaseOwner, "worker-b");
 
   requireCallback(releaseProviderResolve, "provider release callback was not initialized")();
   await workerPromise;
 
-  const persistedJob = service.store.getJobById(initialJob.id);
+  const persistedJob = store.getJobById(initialJobId);
   assert.equal(persistedJob?.status, "running");
   assert.equal(persistedJob?.leaseOwner, "worker-b");
   assert.equal(persistedJob?.lastErrorCode, null);
@@ -1778,7 +1895,7 @@ test("device sync service does not fail jobs reclaimed by another worker after t
   assert.equal(service.summarize().jobsRunning, 1);
   assert.equal(service.summarize().jobsDead, 0);
 
-  service.close();
+  close();
 });
 
 test("device sync service stops snapshot imports after the job lease expires and another worker reclaims it", async () => {
@@ -1800,7 +1917,7 @@ test("device sync service stops snapshot imports after the job lease expires and
       };
     },
   };
-  const service = createDeviceSyncService({
+  const { service, store, close } = createServiceFixture({
     secret: "secret-for-tests",
     config: {
       vaultRoot,
@@ -1839,33 +1956,23 @@ test("device sync service stops snapshot imports after the job lease expires and
   const workerPromise = service.runWorkerOnce();
   await providerStarted;
 
-  const initialJob = service.store.database.prepare(`
-    select id
-    from device_job
-    where account_id = ?
-    order by created_at asc, id asc
-    limit 1
-  `).get(connected.account.id) as { id?: string } | undefined;
+  const initialJobId = readFirstJobIdForAccountForTesting(store, connected.account.id);
 
-  assert.ok(initialJob?.id);
+  assert.ok(initialJobId);
 
   const expiredLeaseAt = new Date(Date.now() - 1_000).toISOString();
   const reclaimAt = new Date().toISOString();
-  service.store.database.prepare(`
-    update device_job
-    set lease_expires_at = ?
-    where id = ?
-  `).run(expiredLeaseAt, initialJob.id);
+  expireJobLeaseForTesting(store, initialJobId, expiredLeaseAt);
 
-  const reclaimedJob = service.store.claimDueJob("worker-b", reclaimAt, 60_000);
-  assert.equal(reclaimedJob?.id, initialJob.id);
+  const reclaimedJob = store.claimDueJob("worker-b", reclaimAt, 60_000);
+  assert.equal(reclaimedJob?.id, initialJobId);
   assert.equal(reclaimedJob?.leaseOwner, "worker-b");
 
   requireCallback(releaseProviderResolve, "provider release callback was not initialized")();
   await workerPromise;
 
-  const persistedJob = service.store.getJobById(initialJob.id);
-  const storedAccount = service.store.getAccountById(connected.account.id);
+  const persistedJob = store.getJobById(initialJobId);
+  const storedAccount = store.getAccountById(connected.account.id);
 
   assert.equal(imports.length, 0);
   assert.equal(persistedJob?.status, "running");
@@ -1876,7 +1983,7 @@ test("device sync service stops snapshot imports after the job lease expires and
     connectedBy: "stale-import",
   });
 
-  service.close();
+  close();
 });
 
 test("device sync service does not persist refreshed tokens after the job lease expires mid-refresh", async () => {
@@ -1889,7 +1996,7 @@ test("device sync service does not persist refreshed tokens after the job lease 
   const releaseRefresh = new Promise<void>((resolve) => {
     releaseRefreshResolve = resolve;
   });
-  const service = createDeviceSyncService({
+  const { service, store, close } = createServiceFixture({
     secret: "secret-for-tests",
     config: {
       vaultRoot,
@@ -1922,40 +2029,30 @@ test("device sync service does not persist refreshed tokens after the job lease 
     state: begin.state,
     code: "stale-refresh",
   });
-  const tokensBefore = service.store.getAccountById(connected.account.id);
+  const tokensBefore = store.getAccountById(connected.account.id);
 
   assert.ok(tokensBefore);
 
   const workerPromise = service.runWorkerOnce();
   await refreshStarted;
 
-  const initialJob = service.store.database.prepare(`
-    select id
-    from device_job
-    where account_id = ?
-    order by created_at asc, id asc
-    limit 1
-  `).get(connected.account.id) as { id?: string } | undefined;
+  const initialJobId = readFirstJobIdForAccountForTesting(store, connected.account.id);
 
-  assert.ok(initialJob?.id);
+  assert.ok(initialJobId);
 
   const expiredLeaseAt = new Date(Date.now() - 1_000).toISOString();
   const reclaimAt = new Date().toISOString();
-  service.store.database.prepare(`
-    update device_job
-    set lease_expires_at = ?
-    where id = ?
-  `).run(expiredLeaseAt, initialJob.id);
+  expireJobLeaseForTesting(store, initialJobId, expiredLeaseAt);
 
-  const reclaimedJob = service.store.claimDueJob("worker-b", reclaimAt, 60_000);
-  assert.equal(reclaimedJob?.id, initialJob.id);
+  const reclaimedJob = store.claimDueJob("worker-b", reclaimAt, 60_000);
+  assert.equal(reclaimedJob?.id, initialJobId);
   assert.equal(reclaimedJob?.leaseOwner, "worker-b");
 
   requireCallback(releaseRefreshResolve, "refresh release callback was not initialized")();
   await workerPromise;
 
-  const persistedJob = service.store.getJobById(initialJob.id);
-  const accountAfter = service.store.getAccountById(connected.account.id);
+  const persistedJob = store.getJobById(initialJobId);
+  const accountAfter = store.getAccountById(connected.account.id);
 
   assert.ok(accountAfter);
   assert.equal(accountAfter?.accessTokenEncrypted, tokensBefore.accessTokenEncrypted);
@@ -1964,12 +2061,12 @@ test("device sync service does not persist refreshed tokens after the job lease 
   assert.equal(persistedJob?.leaseOwner, "worker-b");
   assert.equal(persistedJob?.lastErrorCode, null);
 
-  service.close();
+  close();
 });
 
 test("device sync service next wake tracks scheduled reconciles and queued jobs", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-next-wake");
-  const service = createDeviceSyncService({
+  const { service, store, close } = createServiceFixture({
     secret: "secret-for-tests",
     config: {
       vaultRoot,
@@ -1993,7 +2090,7 @@ test("device sync service next wake tracks scheduled reconciles and queued jobs"
     "2026-03-17T12:00:00.000Z",
   );
 
-  service.store.enqueueJob({
+  store.enqueueJob({
     accountId: connected.account.id,
     availableAt: "2026-03-17T11:00:00.000Z",
     kind: "retry",
@@ -2007,7 +2104,7 @@ test("device sync service next wake tracks scheduled reconciles and queued jobs"
     "2026-03-17T11:00:00.000Z",
   );
 
-  service.store.enqueueJob({
+  store.enqueueJob({
     accountId: connected.account.id,
     availableAt: "2026-03-17T09:59:00.000Z",
     kind: "due-now",
@@ -2021,12 +2118,12 @@ test("device sync service next wake tracks scheduled reconciles and queued jobs"
     "2026-03-17T09:59:00.000Z",
   );
 
-  service.close();
+  close();
 });
 
 test("device sync service requeues retryable provider failures and marks the account for reauthorization", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-reauth-retry");
-  const service = createDeviceSyncService({
+  const { service, store, close } = createServiceFixture({
     secret: "secret-for-tests",
     config: {
       vaultRoot,
@@ -2057,18 +2154,8 @@ test("device sync service requeues retryable provider failures and marks the acc
   });
 
   const processedJob = await service.runWorkerOnce();
-  const storedAccount = service.store.getAccountById(connected.account.id);
-  const queuedJobs = service.store.database.prepare(`
-    select status, attempts, last_error_code, last_error_message
-    from device_job
-    where account_id = ?
-    order by created_at asc, id asc
-  `).all(connected.account.id) as Array<{
-    attempts: number;
-    last_error_code: string | null;
-    last_error_message: string | null;
-    status: string;
-  }>;
+  const storedAccount = store.getAccountById(connected.account.id);
+  const queuedJobs = readJobsForAccountForTesting(store, connected.account.id);
 
   assert.equal(processedJob?.kind, "backfill");
   assert.equal(storedAccount?.status, "reauthorization_required");
@@ -2081,12 +2168,12 @@ test("device sync service requeues retryable provider failures and marks the acc
   assert.equal(queuedJobs[0]?.last_error_code, "TOKEN_REFRESH_FAILED");
   assert.equal(queuedJobs[0]?.last_error_message, "Reconnect required.");
 
-  service.close();
+  close();
 });
 
 test("device sync service records unexpected job errors as dead jobs", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-job-error");
-  const service = createDeviceSyncService({
+  const { service, store, close } = createServiceFixture({
     secret: "secret-for-tests",
     config: {
       vaultRoot,
@@ -2112,17 +2199,8 @@ test("device sync service records unexpected job errors as dead jobs", async () 
   });
 
   const processedJob = await service.runWorkerOnce();
-  const storedAccount = service.store.getAccountById(connected.account.id);
-  const jobStatus = service.store.database.prepare(`
-    select status, last_error_code, last_error_message
-    from device_job
-    where account_id = ?
-    order by created_at asc, id asc
-  `).get(connected.account.id) as {
-    last_error_code: string | null;
-    last_error_message: string | null;
-    status: string;
-  };
+  const storedAccount = store.getAccountById(connected.account.id);
+  const jobStatus = readJobsForAccountForTesting(store, connected.account.id)[0];
 
   assert.equal(processedJob?.kind, "backfill");
   assert.equal(storedAccount?.status, "active");
@@ -2132,12 +2210,12 @@ test("device sync service records unexpected job errors as dead jobs", async () 
   assert.equal(jobStatus.last_error_code, "SYNC_JOB_FAILED");
   assert.equal(jobStatus.last_error_message, "provider exploded");
 
-  service.close();
+  close();
 });
 
 test("device sync service string job failures still produce deterministic dead-job state", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-job-string-error");
-  const service = createDeviceSyncService({
+  const { service, store, close } = createServiceFixture({
     secret: "secret-for-tests",
     config: {
       vaultRoot,
@@ -2163,29 +2241,20 @@ test("device sync service string job failures still produce deterministic dead-j
   });
 
   await service.runWorkerOnce();
-  const storedAccount = service.store.getAccountById(connected.account.id);
-  const jobStatus = service.store.database.prepare(`
-    select status, last_error_code, last_error_message
-    from device_job
-    where account_id = ?
-    order by created_at asc, id asc
-  `).get(connected.account.id) as {
-    last_error_code: string | null;
-    last_error_message: string | null;
-    status: string;
-  };
+  const storedAccount = store.getAccountById(connected.account.id);
+  const jobStatus = readJobsForAccountForTesting(store, connected.account.id)[0];
 
   assert.equal(storedAccount?.lastErrorCode, "SYNC_JOB_FAILED");
   assert.equal(storedAccount?.lastErrorMessage, "plain failure");
   assert.equal(jobStatus.status, "dead");
   assert.equal(jobStatus.last_error_message, "plain failure");
 
-  service.close();
+  close();
 });
 
 test("device sync service redacts secret-bearing job failures before persistence", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-job-error-redacted");
-  const service = createDeviceSyncService({
+  const { service, store, close } = createServiceFixture({
     secret: "secret-for-tests",
     config: {
       vaultRoot,
@@ -2213,17 +2282,8 @@ test("device sync service redacts secret-bearing job failures before persistence
   });
 
   await service.runWorkerOnce();
-  const storedAccount = service.store.getAccountById(connected.account.id);
-  const jobStatus = service.store.database.prepare(`
-    select status, last_error_code, last_error_message
-    from device_job
-    where account_id = ?
-    order by created_at asc, id asc
-  `).get(connected.account.id) as {
-    last_error_code: string | null;
-    last_error_message: string | null;
-    status: string;
-  };
+  const storedAccount = store.getAccountById(connected.account.id);
+  const jobStatus = readJobsForAccountForTesting(store, connected.account.id)[0];
 
   assert.equal(storedAccount?.lastErrorCode, "SYNC_JOB_FAILED");
   assert.equal(
@@ -2237,7 +2297,7 @@ test("device sync service redacts secret-bearing job failures before persistence
     "authorization=[redacted] refresh_token=[redacted] [redacted.jwt]",
   );
 
-  service.close();
+  close();
 });
 
 test("device sync service logs non-error revoke failures but still disconnects locally", async () => {
@@ -2276,7 +2336,7 @@ test("device sync service logs non-error revoke failures but still disconnects l
     code: "disconnect-warning",
   });
 
-  const disconnected = await service.disconnectAccount(connected.account.id);
+  const disconnected = await disconnectDeviceSyncAccount(service, connected.account.id);
 
   assert.equal(disconnected.account.status, "disconnected");
   assert.equal(warnEvents.length, 1);
@@ -2452,25 +2512,15 @@ test("sqlite store splits connection, credential, and observation state into exp
   store.markWebhookReceived(created.id, "2026-03-20T11:00:00.000Z");
   store.markSyncFailed(created.id, "2026-03-20T12:00:00.000Z", "SYNC_FAILED", "sync failed", "reauthorization_required");
 
-  const sqliteTables = (
-    store.database.prepare(`
-      select name
-      from sqlite_master
-      where type = 'table'
-        and name in (
-          'device_account',
-          'device_connection',
-          'device_credential_state',
-          'device_job',
-          'device_observation_state',
-          'oauth_state',
-          'webhook_trace'
-        )
-      order by name asc
-    `).all() as Array<{ name?: string }>
-  )
-    .map((row) => row.name)
-    .filter((name): name is string => typeof name === "string");
+  const sqliteTables = readNamedSqliteTablesForTesting(store, [
+    "device_account",
+    "device_connection",
+    "device_credential_state",
+    "device_job",
+    "device_observation_state",
+    "oauth_state",
+    "webhook_trace",
+  ]);
 
   assert.deepEqual(sqliteTables, [
     "device_connection",
@@ -2480,7 +2530,7 @@ test("sqlite store splits connection, credential, and observation state into exp
     "oauth_state",
     "webhook_trace",
   ]);
-  assert.deepEqual(readTableColumns(store, "device_connection"), [
+  assert.deepEqual(readTableColumnsForTesting(store, "device_connection"), [
     "id",
     "provider",
     "external_account_id",
@@ -2493,7 +2543,7 @@ test("sqlite store splits connection, credential, and observation state into exp
     "created_at",
     "updated_at",
   ]);
-  assert.deepEqual(readTableColumns(store, "device_credential_state"), [
+  assert.deepEqual(readTableColumnsForTesting(store, "device_credential_state"), [
     "account_id",
     "access_token_encrypted",
     "refresh_token_encrypted",
@@ -2501,7 +2551,7 @@ test("sqlite store splits connection, credential, and observation state into exp
     "created_at",
     "updated_at",
   ]);
-  assert.deepEqual(readTableColumns(store, "device_observation_state"), [
+  assert.deepEqual(readTableColumnsForTesting(store, "device_observation_state"), [
     "account_id",
     "hosted_observed_updated_at",
     "hosted_observed_connection_revision",
@@ -2520,43 +2570,14 @@ test("sqlite store splits connection, credential, and observation state into exp
     "updated_at",
   ]);
 
-  const credentialRow = store.database.prepare(`
-    select access_token_encrypted, refresh_token_encrypted, access_token_expires_at
-    from device_credential_state
-    where account_id = ?
-  `).get(created.id) as {
-    access_token_encrypted: string;
-    refresh_token_encrypted: string | null;
-    access_token_expires_at: string | null;
-  };
+  const credentialRow = readCredentialStateForTesting(store, created.id);
+  assert.ok(credentialRow);
   assert.equal(credentialRow.access_token_encrypted, "enc:split-access");
   assert.equal(credentialRow.refresh_token_encrypted, "enc:split-refresh");
   assert.equal(credentialRow.access_token_expires_at, "2026-03-28T00:00:00.000Z");
 
-  const observationRow = store.database.prepare(`
-    select
-      hosted_observed_updated_at,
-      hosted_observed_connection_revision,
-      hosted_observed_token_version,
-      hosted_observed_token_revision,
-      local_connection_revision,
-      local_token_revision,
-      last_webhook_at,
-      last_error_code,
-      next_reconcile_at
-    from device_observation_state
-    where account_id = ?
-  `).get(created.id) as {
-    hosted_observed_updated_at: string | null;
-    hosted_observed_connection_revision: number;
-    hosted_observed_token_version: number | null;
-    hosted_observed_token_revision: number;
-    local_connection_revision: number;
-    local_token_revision: number;
-    last_webhook_at: string | null;
-    last_error_code: string | null;
-    next_reconcile_at: string | null;
-  };
+  const observationRow = readObservationStateForTesting(store, created.id);
+  assert.ok(observationRow);
   assert.equal(observationRow.hosted_observed_updated_at, null);
   assert.equal(observationRow.hosted_observed_connection_revision, 0);
   assert.equal(observationRow.hosted_observed_token_version, null);
@@ -2713,23 +2734,14 @@ test("sqlite store persists the webhook trace claim lifecycle", async () => {
     "claimed",
   );
 
-  store.database.prepare(`
-    insert into webhook_trace (
-      provider,
-      trace_id,
-      external_account_id,
-      event_type,
-      received_at,
-      payload_json
-    ) values (?, ?, ?, ?, ?, ?)
-  `).run(
-    "demo",
-    "trace-legacy",
-    "demo-legacy",
-    "demo.updated",
-    "2026-03-27T00:08:00.000Z",
-    JSON.stringify({ resourceId: "resource-legacy" }),
-  );
+  insertWebhookTraceRowForTesting(store, {
+    provider: "demo",
+    traceId: "trace-legacy",
+    externalAccountId: "demo-legacy",
+    eventType: "demo.updated",
+    receivedAt: "2026-03-27T00:08:00.000Z",
+    payloadJson: JSON.stringify({ resourceId: "resource-legacy" }),
+  });
   assert.equal(
     store.claimWebhookTrace({
       ...baseTrace,
@@ -2740,18 +2752,7 @@ test("sqlite store persists the webhook trace claim lifecycle", async () => {
     "processed",
   );
 
-  const rows = (store.database.prepare(`
-    select trace_id, status, processing_expires_at
-    from webhook_trace
-    where provider = 'demo'
-    order by trace_id asc
-  `).all() as Array<{
-    trace_id: string;
-    status: string;
-    processing_expires_at: string | null;
-  }>).map((row) => ({
-    ...row,
-  }));
+  const rows = readWebhookTraceLifecycleRowsForTesting(store, "demo");
 
   assert.deepEqual(rows, [
     {

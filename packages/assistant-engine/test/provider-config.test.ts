@@ -38,4 +38,23 @@ describe('assistant provider config model spec', () => {
     })
     expect(openAiSpec).not.toHaveProperty('responsesRequestPolicy')
   })
+
+  it('refuses gateway responses request policy for custom endpoints with stale gateway metadata', () => {
+    const customSpec = resolveAssistantModelSpecFromProviderConfig({
+      baseUrl: 'https://proxy.example.com/v1',
+      gatewayOnlyProviders: ['openai'],
+      model: 'openai/gpt-5.4',
+      presetId: 'vercel-ai-gateway',
+      provider: 'openai-compatible',
+      providerName: 'vercel-ai-gateway',
+      zeroDataRetention: true,
+    })
+
+    expect(customSpec).toMatchObject({
+      baseUrl: 'https://proxy.example.com/v1',
+      executionDriver: 'openai-compatible',
+      model: 'openai/gpt-5.4',
+    })
+    expect(customSpec).not.toHaveProperty('responsesRequestPolicy')
+  })
 })

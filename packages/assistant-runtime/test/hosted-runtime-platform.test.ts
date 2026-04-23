@@ -6,6 +6,7 @@ import {
   ASSISTANT_USAGE_SCHEMA,
   createAssistantUsageId,
   listPendingAssistantUsageRecords,
+  resolveAssistantUsageCredentialSource,
   writePendingAssistantUsageRecord,
 } from "@murphai/runtime-state/node";
 import { buildHostedExecutionRuntimeTimerWake } from "@murphai/hosted-execution";
@@ -20,7 +21,7 @@ import {
 } from "../src/hosted-runtime/platform.ts";
 import {
   resolveHostedVercelAiGatewayStripeCustomerId,
-} from "../src/hosted-runtime.ts";
+} from "../src/hosted-runtime/billing.ts";
 import { exportHostedPendingAssistantUsage } from "../src/hosted-runtime/usage.ts";
 import type { HostedRuntimePlatform } from "../src/hosted-runtime/platform.ts";
 import { createHostedRuntimeWorkspace } from "./hosted-runtime-test-helpers.ts";
@@ -287,6 +288,220 @@ test("hosted runtime delegated billing skips lookup when the configured provider
     null,
   );
   assert.equal(called, false);
+});
+
+test("hosted runtime delegated billing skips lookup for lookalike Vercel AI Gateway hosts", async () => {
+  let called = false;
+  const billingPort = {
+    async resolveVercelAiGatewayStripeCustomerId() {
+      called = true;
+      return {
+        stripeCustomerId: "cus_123",
+      };
+    },
+  } satisfies NonNullable<HostedRuntimePlatform["billingPort"]>;
+
+  assert.equal(
+    await resolveHostedVercelAiGatewayStripeCustomerId({
+      billingPort,
+      forwardedEnv: {
+        HOSTED_ASSISTANT_BASE_URL: "https://ai-gateway.vercel.sh.example.test/v1",
+        [HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY_ENV]: "rk_test_123",
+        [HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED_ENV]: "true",
+      },
+      run: null,
+      userEnv: {},
+      wake: createHostedRuntimeTestWake(),
+    }),
+    null,
+  );
+  assert.equal(called, false);
+});
+
+test("hosted runtime delegated billing skips lookup for userinfo-bearing Vercel AI Gateway urls", async () => {
+  let called = false;
+  const billingPort = {
+    async resolveVercelAiGatewayStripeCustomerId() {
+      called = true;
+      return {
+        stripeCustomerId: "cus_123",
+      };
+    },
+  } satisfies NonNullable<HostedRuntimePlatform["billingPort"]>;
+
+  assert.equal(
+    await resolveHostedVercelAiGatewayStripeCustomerId({
+      billingPort,
+      forwardedEnv: {
+        HOSTED_ASSISTANT_BASE_URL: "https://user:pass@ai-gateway.vercel.sh/v1",
+        [HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY_ENV]: "rk_test_123",
+        [HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED_ENV]: "true",
+      },
+      run: null,
+      userEnv: {},
+      wake: createHostedRuntimeTestWake(),
+    }),
+    null,
+  );
+  assert.equal(called, false);
+});
+
+test("hosted runtime delegated billing skips lookup for Vercel AI Gateway urls with non-default explicit ports", async () => {
+  let called = false;
+  const billingPort = {
+    async resolveVercelAiGatewayStripeCustomerId() {
+      called = true;
+      return {
+        stripeCustomerId: "cus_123",
+      };
+    },
+  } satisfies NonNullable<HostedRuntimePlatform["billingPort"]>;
+
+  for (const baseUrl of ["https://ai-gateway.vercel.sh:444/v1"]) {
+    assert.equal(
+      await resolveHostedVercelAiGatewayStripeCustomerId({
+        billingPort,
+        forwardedEnv: {
+          HOSTED_ASSISTANT_BASE_URL: baseUrl,
+          [HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY_ENV]: "rk_test_123",
+          [HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED_ENV]: "true",
+        },
+        run: null,
+        userEnv: {},
+        wake: createHostedRuntimeTestWake(),
+      }),
+      null,
+    );
+  }
+
+  assert.equal(called, false);
+});
+
+test("hosted runtime delegated billing skips lookup when a custom base url conflicts with stale Vercel gateway markers", async () => {
+  let called = false;
+  const billingPort = {
+    async resolveVercelAiGatewayStripeCustomerId() {
+      called = true;
+      return {
+        stripeCustomerId: "cus_123",
+      };
+    },
+  } satisfies NonNullable<HostedRuntimePlatform["billingPort"]>;
+
+  assert.equal(
+    await resolveHostedVercelAiGatewayStripeCustomerId({
+      billingPort,
+      forwardedEnv: {
+        HOSTED_ASSISTANT_BASE_URL: "https://router.example.test/v1",
+        HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+        HOSTED_ASSISTANT_PROVIDER_NAME: "vercel-ai-gateway",
+        [HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY_ENV]: "rk_test_123",
+        [HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED_ENV]: "true",
+      },
+      run: null,
+      userEnv: {},
+      wake: createHostedRuntimeTestWake(),
+    }),
+    null,
+  );
+  assert.equal(called, false);
+});
+
+test("hosted runtime delegated billing skips lookup when gateway metadata is present without a trusted base url", async () => {
+  let called = false;
+  const billingPort = {
+    async resolveVercelAiGatewayStripeCustomerId() {
+      called = true;
+      return {
+        stripeCustomerId: "cus_123",
+      };
+    },
+  } satisfies NonNullable<HostedRuntimePlatform["billingPort"]>;
+
+  assert.equal(
+    await resolveHostedVercelAiGatewayStripeCustomerId({
+      billingPort,
+      forwardedEnv: {
+        HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+        HOSTED_ASSISTANT_PROVIDER_NAME: "vercel-ai-gateway",
+        [HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY_ENV]: "rk_test_123",
+        [HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED_ENV]: "true",
+      },
+      run: null,
+      userEnv: {},
+      wake: createHostedRuntimeTestWake(),
+    }),
+    null,
+  );
+  assert.equal(called, false);
+});
+
+test("hosted runtime treats blank configured user API key overrides as platform-funded execution", async () => {
+  const platform = {
+    artifactStore: {
+      async get() {
+        return null;
+      },
+      async put() {},
+    },
+    effectsPort: {
+      async readRawEmailMessage() {
+        return null;
+      },
+      async sendEmail() {
+        return undefined;
+      },
+    },
+  } satisfies HostedRuntimePlatform;
+  const normalized = normalizeHostedAssistantRuntimeConfig(
+    {
+      forwardedEnv: {
+        HOSTED_ASSISTANT_API_KEY_ENV: "VERCEL_AI_API_KEY",
+      },
+      userEnv: {
+        VERCEL_AI_API_KEY: "   ",
+      },
+    },
+    platform,
+  );
+  let called = false;
+  const billingPort = {
+    async resolveVercelAiGatewayStripeCustomerId() {
+      called = true;
+      return {
+        stripeCustomerId: "cus_123",
+      };
+    },
+  } satisfies NonNullable<HostedRuntimePlatform["billingPort"]>;
+
+  assert.deepEqual(normalized.userEnv, {});
+  assert.equal(
+    resolveAssistantUsageCredentialSource({
+      apiKeyEnv: "VERCEL_AI_API_KEY",
+      provider: "openai-compatible",
+      userEnvKeys: Object.keys(normalized.userEnv),
+    }),
+    "platform",
+  );
+  assert.equal(
+    await resolveHostedVercelAiGatewayStripeCustomerId({
+      billingPort,
+      forwardedEnv: {
+        HOSTED_ASSISTANT_API_KEY_ENV: "VERCEL_AI_API_KEY",
+        HOSTED_ASSISTANT_BASE_URL: "https://ai-gateway.vercel.sh/v1",
+        HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+        [HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY_ENV]: "rk_test_123",
+        [HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED_ENV]: "true",
+      },
+      run: null,
+      userEnv: {
+        VERCEL_AI_API_KEY: "   ",
+      },
+      wake: createHostedRuntimeTestWake(),
+    }),
+    "cus_123",
+  );
+  assert.equal(called, true);
 });
 
 test("hosted runtime delegated billing fails closed when the Stripe customer lookup throws", async () => {

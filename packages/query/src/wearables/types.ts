@@ -72,15 +72,20 @@ export interface WearableActivityDay {
   activityScore: WearableResolvedMetric;
   activeCalories: WearableResolvedMetric;
   activityTypes: string[];
+  altitudeChangeMeters: WearableResolvedMetric;
   date: string;
   dayStrain: WearableResolvedMetric;
   distanceKm: WearableResolvedMetric;
   estimatedVo2Max: WearableResolvedMetric;
+  maxHeartRate: WearableResolvedMetric;
   notes: string[];
+  percentRecorded: WearableResolvedMetric;
   sessionCount: WearableResolvedMetric;
   sessionMinutes: WearableResolvedMetric;
   steps: WearableResolvedMetric;
   summaryConfidence: WearableSummaryConfidence;
+  totalElevationGainMeters: WearableResolvedMetric;
+  workoutStrain: WearableResolvedMetric;
 }
 
 export interface WearableSleepNight {
@@ -379,10 +384,15 @@ export const BODY_METRIC_KEYS = new Set<WearableMetricKey>([
 export const ACTIVITY_METRIC_KEYS = new Set<WearableMetricKey>([
   "activeCalories",
   "activityScore",
+  "altitudeChangeMeters",
   "dayStrain",
   "distanceKm",
   "estimatedVo2Max",
+  "maxHeartRate",
+  "percentRecorded",
   "sessionCount",
   "sessionMinutes",
   "steps",
+  "totalElevationGainMeters",
+  "workoutStrain",
 ]);

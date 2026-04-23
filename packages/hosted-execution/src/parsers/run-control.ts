@@ -30,6 +30,7 @@ import type {
   HostedRunTriggerKind,
 } from "../contracts.ts";
 import {
+  rejectLegacyAliases,
   requireArray,
   requireBigIntString,
   requireBoolean,
@@ -106,7 +107,9 @@ export function parseHostedRunAcquireRequest(value: unknown): HostedRunAcquireRe
 
 export function parseHostedRunAcquireResponse(value: unknown): HostedRunAcquireResponse {
   const record = requireObject(value, "Hosted run acquire response");
-  const pendingIngressEventCount = record.pendingIngressEventCount ?? record.pendingWakeCount;
+  rejectLegacyAliases(record, "Hosted run acquire response", {
+    pendingWakeCount: "pendingIngressEventCount",
+  });
 
   return {
     acquired: requireBoolean(record.acquired, "Hosted run acquire response acquired"),
@@ -114,7 +117,7 @@ export function parseHostedRunAcquireResponse(value: unknown): HostedRunAcquireR
     events: requireArray(record.events, "Hosted run acquire response events")
       .map((entry) => parseHostedIngressEvent(entry)),
     pendingIngressEventCount: requireNumber(
-      pendingIngressEventCount,
+      record.pendingIngressEventCount,
       "Hosted run acquire response pendingIngressEventCount",
     ),
     resumeFinalize: requireBoolean(
@@ -210,7 +213,9 @@ export function parseHostedRunTurnInputAdoptResponse(
 
 export function parseHostedRunRecord(value: unknown): HostedRunRecord {
   const record = requireObject(value, "Hosted run record");
-  const ingressEventIds = record.ingressEventIds ?? record.wakeIds;
+  rejectLegacyAliases(record, "Hosted run record", {
+    wakeIds: "ingressEventIds",
+  });
 
   return {
     acquiredAt: requireString(record.acquiredAt, "Hosted run record acquiredAt"),
@@ -339,7 +344,7 @@ export function parseHostedRunRecord(value: unknown): HostedRunRecord {
     updatedAt: requireString(record.updatedAt, "Hosted run record updatedAt"),
     userId: requireString(record.userId, "Hosted run record userId"),
     ingressEventIds: requireStringArray(
-      ingressEventIds,
+      record.ingressEventIds,
       "Hosted run record ingressEventIds",
     ),
   };
@@ -597,7 +602,9 @@ export function parseHostedRunStatusRequest(value: unknown): HostedRunStatusRequ
 
 export function parseHostedRunStatusResponse(value: unknown): HostedRunStatusResponse {
   const record = requireObject(value, "Hosted run status response");
-  const pendingIngressEventCount = record.pendingIngressEventCount ?? record.pendingWakeCount;
+  rejectLegacyAliases(record, "Hosted run status response", {
+    pendingWakeCount: "pendingIngressEventCount",
+  });
 
   return {
     cursor: parseHostedExecutionCursorState(record.cursor),
@@ -608,7 +615,7 @@ export function parseHostedRunStatusResponse(value: unknown): HostedRunStatusRes
             .map((entry) => parseHostedRunLogRecord(entry)),
         }),
     pendingIngressEventCount: requireNumber(
-      pendingIngressEventCount,
+      record.pendingIngressEventCount,
       "Hosted run status response pendingIngressEventCount",
     ),
     run: record.run === null ? null : parseHostedRunRecord(record.run),
@@ -666,15 +673,17 @@ function parseHostedRunEventResult(
   label: string,
 ): HostedRunEventResult {
   const record = requireObject(value, label);
+  rejectLegacyAliases(record, label, {
+    wakeId: "ingressEventId",
+  });
   const state = requireString(record.state, `${label}.state`);
-  const ingressEventId = record.ingressEventId ?? record.wakeId;
 
   if (state !== "completed" && state !== "quarantined") {
     throw new TypeError(`${label}.state must be completed or quarantined.`);
   }
 
   return {
-    ingressEventId: requireString(ingressEventId, `${label}.ingressEventId`),
+    ingressEventId: requireString(record.ingressEventId, `${label}.ingressEventId`),
     ...(record.quarantineCode === undefined
       ? {}
       : {

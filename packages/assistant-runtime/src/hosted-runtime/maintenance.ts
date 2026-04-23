@@ -1,6 +1,5 @@
 import { createConfiguredDeviceSyncProvidersFromConfigs } from "@murphai/device-syncd/config";
 import { createDeviceSyncRegistry } from "@murphai/device-syncd/registry";
-import { createDeviceSyncService } from "@murphai/device-syncd/service";
 import {
   type AssistantExecutionContext,
   createAssistantFoodAutoLogHooks,
@@ -31,6 +30,10 @@ import type {
   HostedRuntimeDeviceSyncPort,
 } from "./platform.ts";
 import { createHostedAssistantTurnInputPort } from "./turn-input.ts";
+import {
+  closeHostedRuntimeDeviceSyncService,
+  createHostedRuntimeDeviceSyncService,
+} from "../device-sync-service.ts";
 
 const HOSTED_MAX_DEVICE_SYNC_JOBS = 20;
 
@@ -98,7 +101,7 @@ export async function runHostedAssistantRuntimeTimerLane(input: {
   wake: HostedRuntimeEvent;
   executionContext: AssistantExecutionContext;
   requestId: string;
-  runtime?: Pick<NormalizedHostedAssistantRuntimeConfig, "platform">;
+  runtime?: Pick<NormalizedHostedAssistantRuntimeConfig, "forwardedEnv" | "platform" | "platformEnv">;
   skipAssistantAutomation?: boolean;
   vaultRoot: string;
 }): Promise<HostedMaintenanceMetrics> {
@@ -138,7 +141,7 @@ export async function runHostedAssistantAutomation(
   requestId: string,
   executionContext: AssistantExecutionContext,
   wake: HostedRuntimeEvent,
-  runtime?: Pick<NormalizedHostedAssistantRuntimeConfig, "platform">,
+  runtime?: Pick<NormalizedHostedAssistantRuntimeConfig, "forwardedEnv" | "platform" | "platformEnv">,
 ): Promise<{ nextWakeAt: string | null; progressed: boolean }> {
   const inboxServices = createIntegratedInboxServices();
   const vaultServices = createIntegratedVaultServices({
@@ -314,7 +317,7 @@ export async function runHostedDeviceSyncPass(
       skipped: false,
     };
   } finally {
-    service.close();
+    closeHostedRuntimeDeviceSyncService(service);
   }
 }
 
@@ -383,7 +386,7 @@ function createHostedDeviceSyncRuntime(input: {
     return null;
   }
 
-  return createDeviceSyncService({
+  return createHostedRuntimeDeviceSyncService({
     secret: input.deviceSyncConfig.secret,
     config: {
       publicBaseUrl: input.deviceSyncConfig.publicBaseUrl,

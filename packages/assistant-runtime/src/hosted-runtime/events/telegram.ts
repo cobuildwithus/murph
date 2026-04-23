@@ -6,18 +6,20 @@ import type { TelegramFile } from "@murphai/messaging-ingress/telegram-webhook";
 const DEFAULT_TELEGRAM_API_BASE_URL = "https://api.telegram.org";
 const DEFAULT_TELEGRAM_FILE_BASE_URL = "https://api.telegram.org/file";
 
-export function createHostedTelegramAttachmentDownloadDriver(): TelegramAttachmentDownloadDriver | null {
-  const token = readHostedTelegramString("TELEGRAM_BOT_TOKEN");
+export function createHostedTelegramAttachmentDownloadDriver(
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): TelegramAttachmentDownloadDriver | null {
+  const token = readHostedTelegramString(env, "TELEGRAM_BOT_TOKEN");
   if (!token || typeof globalThis.fetch !== "function") {
     return null;
   }
 
   const apiBaseUrl = normalizeHostedTelegramBaseUrl(
-    readHostedTelegramString("TELEGRAM_API_BASE_URL"),
+    readHostedTelegramString(env, "TELEGRAM_API_BASE_URL"),
     DEFAULT_TELEGRAM_API_BASE_URL,
   );
   const fileBaseUrl = normalizeHostedTelegramBaseUrl(
-    readHostedTelegramString("TELEGRAM_FILE_BASE_URL"),
+    readHostedTelegramString(env, "TELEGRAM_FILE_BASE_URL"),
     DEFAULT_TELEGRAM_FILE_BASE_URL,
   );
   if (!apiBaseUrl || !fileBaseUrl) {
@@ -47,8 +49,11 @@ export function createHostedTelegramAttachmentDownloadDriver(): TelegramAttachme
   };
 }
 
-function readHostedTelegramString(key: string): string | null {
-  const value = process.env[key];
+function readHostedTelegramString(
+  env: Readonly<Record<string, string | undefined>>,
+  key: string,
+): string | null {
+  const value = env[key];
   if (typeof value !== "string") {
     return null;
   }

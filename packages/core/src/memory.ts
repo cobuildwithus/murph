@@ -24,7 +24,7 @@ import {
   writeCanonicalMarkdownDocument,
 } from "./markdown-documents.ts";
 import {
-  canonicalPathResource,
+  canonicalPathResourceForVault,
   withCanonicalResourceLocks,
 } from "./operations/index.ts";
 import { resolveVaultPath } from "./path-safety.ts";
@@ -221,7 +221,7 @@ async function withLockedMemoryDocument<TResult>(
 ): Promise<TResult> {
   return await withCanonicalResourceLocks({
     vaultRoot,
-    resources: [canonicalPathResource(memoryDocumentRelativePath)],
+    resources: [await canonicalPathResourceForVault(vaultRoot, memoryDocumentRelativePath)],
     run,
   });
 }

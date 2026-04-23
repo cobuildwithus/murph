@@ -9,7 +9,7 @@ import { stringifyFrontmatterDocument } from "../frontmatter.ts";
 import { stageMarkdownDocumentWrite } from "../markdown-documents.ts";
 import { commitAuditedCanonicalWrite } from "../audited-write.ts";
 import {
-  canonicalPathResource,
+  canonicalPathResourceForVault,
   dedupeCanonicalResources,
   withCanonicalResourceLocks,
 } from "../operations/index.ts";
@@ -65,11 +65,16 @@ function validateCoreFrontmatter(
 export async function updateVaultSummary(
   input: UpdateVaultSummaryInput,
 ): Promise<UpdateVaultSummaryResult> {
+  const [metadataResource, coreDocumentResource] = await Promise.all([
+    canonicalPathResourceForVault(input.vaultRoot, VAULT_LAYOUT.metadata),
+    canonicalPathResourceForVault(input.vaultRoot, VAULT_LAYOUT.coreDocument),
+  ]);
+
   return withCanonicalResourceLocks({
     vaultRoot: input.vaultRoot,
     resources: dedupeCanonicalResources([
-      canonicalPathResource(VAULT_LAYOUT.metadata),
-      canonicalPathResource(VAULT_LAYOUT.coreDocument),
+      metadataResource,
+      coreDocumentResource,
     ]),
     run: async () => {
       const { metadata } = await loadVault({ vaultRoot: input.vaultRoot });

@@ -31,15 +31,19 @@ import {
   basenameFromFilePath,
   formatVaultRelativePath,
   isAppendOnlyRelativePath,
+  isJsonlRelativePath,
   isRawRelativePath,
+  isVaultFilesystemCaseInsensitive,
   normalizeOpaquePathSegment,
   normalizeRelativeVaultPath,
+  normalizeRelativeVaultPathForComparison,
   normalizeVaultRoot,
   resolveVaultPath,
   resolveVaultPathOnDisk,
   sanitizeFileName,
   sanitizePathSegment,
 } from "../src/path-safety.ts";
+import { isProtectedCanonicalPath } from "../src/operations/write-batch.ts";
 import * as markdownDocuments from "../src/markdown-documents.ts";
 import { createMarkdownRegistryApi } from "../src/registry/api.ts";
 import {
@@ -94,6 +98,27 @@ test("path helpers normalize, format, and classify vault paths", async () => {
   assert.equal(isRawRelativePath("bank/goals/sleep.md"), false);
   assert.equal(isAppendOnlyRelativePath("audit/2026/2026-04.jsonl"), true);
   assert.equal(isAppendOnlyRelativePath("bank/goals/sleep.md"), false);
+  assert.equal(
+    normalizeRelativeVaultPathForComparison("Bank\\Goals\\Sleep.md", {
+      caseInsensitive: true,
+    }),
+    "bank/goals/sleep.md",
+  );
+  assert.equal(isRawRelativePath("Raw/documents/file.pdf", { caseInsensitive: true }), true);
+  assert.equal(isRawRelativePath("Raw/documents/file.pdf", { caseInsensitive: false }), false);
+  assert.equal(isAppendOnlyRelativePath("Ledger/2026/2026-04.JSONL", { caseInsensitive: true }), true);
+  assert.equal(isJsonlRelativePath("Ledger/2026/2026-04.JSONL", { caseInsensitive: true }), true);
+  assert.equal(isProtectedCanonicalPath("Bank/goals/sleep.md", { caseInsensitive: true }), true);
+  assert.equal(isProtectedCanonicalPath("Ledger/events/2026-04.JSONL", { caseInsensitive: true }), true);
+  assert.equal(isProtectedCanonicalPath("core.md", { caseInsensitive: true }), true);
+  const caseSensitivityProbePath = path.join(vaultRoot, "CaseProbeAa.txt");
+  await fs.writeFile(caseSensitivityProbePath, "probe\n", "utf8");
+  const aliasVisible = await fs.access(path.join(vaultRoot, "caseprobeaa.txt")).then(
+    () => true,
+    () => false,
+  );
+  await fs.rm(caseSensitivityProbePath, { force: true });
+  assert.equal(await isVaultFilesystemCaseInsensitive(vaultRoot), aliasVisible);
   assert.equal(sanitizePathSegment(" Bedtime Consistency! "), "bedtime-consistency");
   assert.equal(basenameFromFilePath("folder/subdir/report.PDF"), "report.PDF");
   assert.equal(sanitizeFileName("folder/My Report 2026.PDF"), "my-report-2026.pdf");

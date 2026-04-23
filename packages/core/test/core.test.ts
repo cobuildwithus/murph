@@ -115,6 +115,7 @@ function invalidTestValue<T>(value: unknown): T {
 }
 
 type WriteBatchPrototypeMethodMap = {
+  applyRawCopy: (this: WriteBatch, action: unknown) => Promise<void>;
   applyDelete: (this: WriteBatch, index: number, action: unknown) => Promise<void>;
   applyJsonlAppend: (this: WriteBatch, action: unknown) => Promise<void>;
   applyTextWrite: (this: WriteBatch, index: number, action: unknown) => Promise<void>;
@@ -178,6 +179,15 @@ function readRequiredPrototypeMethod<TMethod extends (...args: never[]) => unkno
   const value = Reflect.get(Object.getPrototypeOf(instance), name);
   assert.equal(typeof value, "function");
   return value as TMethod;
+}
+
+function readFirstWriteBatchAction(batch: WriteBatch): Record<string, unknown> {
+  const record = expectRecord<{ actions?: unknown[] }>(Reflect.get(batch, "record"));
+  assert.equal(Array.isArray(record.actions), true);
+  const [firstAction] = record.actions ?? [];
+  assert.equal(typeof firstAction, "object");
+  assert.notEqual(firstAction, null);
+  return firstAction as Record<string, unknown>;
 }
 
 async function makeTempDirectory(name: string): Promise<string> {
@@ -3368,6 +3378,534 @@ test("WriteBatch rolls back applied canonical writes when guard receipt persiste
   const operation = await readStoredWriteOperation(vaultRoot, batch.metadataRelativePath);
   assert.equal(operation.status, "rolled_back");
   assert.equal(operation.error?.message, "injected guard receipt failure");
+  assert.equal(operation.actions[0]?.state, "rolled_back");
+});
+
+test("WriteBatch still rolls back canonical writes when action metadata persistence fails after a mutation", async () => {
+  const vaultRoot = await makeTempDirectory("murph-vault");
+  await initializeVault({ vaultRoot });
+
+  const targetRelativePath = "notes/post-mutation-persist-failure.txt";
+  const targetAbsolutePath = path.join(vaultRoot, targetRelativePath);
+  const lockAbsolutePath = path.join(vaultRoot, ".runtime/locks/canonical-write");
+  const batch = await WriteBatch.create({
+    vaultRoot,
+    operationType: "post_mutation_persist_failure",
+    summary: "Rollback even when action metadata persistence fails after a write applies",
+  });
+  const originalPersist = readRequiredPrototypeMethod<() => Promise<void>>(batch, "persist");
+  let injectedPersistFailure = false;
+
+  await batch.stageTextWrite(targetRelativePath, "applied before metadata persist\n", {
+    overwrite: false,
+  });
+
+  Reflect.set(
+    Object.getPrototypeOf(batch),
+    "persist",
+    async function persistWithPostMutationFailure(this: object) {
+      const record = Reflect.get(this, "record");
+      const rawActions =
+        typeof record === "object" && record !== null ? Reflect.get(record, "actions") : undefined;
+      const firstAction = Array.isArray(rawActions) ? rawActions[0] : undefined;
+
+      if (
+        !injectedPersistFailure &&
+        typeof record === "object" &&
+        record !== null &&
+        Reflect.get(record, "status") === "committing" &&
+        typeof firstAction === "object" &&
+        firstAction !== null &&
+        Reflect.get(firstAction, "state") === "applied"
+      ) {
+        injectedPersistFailure = true;
+        throw new Error("injected post-mutation persist failure");
+      }
+
+      return originalPersist.call(this);
+    },
+  );
+
+  try {
+    await assert.rejects(() => batch.commit(), /injected post-mutation persist failure/u);
+  } finally {
+    Reflect.set(Object.getPrototypeOf(batch), "persist", originalPersist);
+  }
+
+  assert.equal(injectedPersistFailure, true);
+  assert.equal(await fs.access(targetAbsolutePath).then(() => true, () => false), false);
+  assert.equal(await fs.access(path.join(vaultRoot, batch.stageRootRelativePath)).then(() => true, () => false), false);
+  assert.equal(await fs.access(lockAbsolutePath).then(() => true, () => false), false);
+
+  const operation = await readStoredWriteOperation(vaultRoot, batch.metadataRelativePath);
+  assert.equal(operation.status, "rolled_back");
+  assert.equal(operation.error?.message, "injected post-mutation persist failure");
+  assert.equal(operation.actions[0]?.state, "rolled_back");
+});
+
+test("WriteBatch keeps raw-copy recovery metadata durable before finalization and resumes idempotently", async () => {
+  const vaultRoot = await makeTempDirectory("murph-raw-copy-resume-window");
+  await initializeVault({ vaultRoot });
+
+  const batch = await WriteBatch.create({
+    vaultRoot,
+    operationType: "raw_copy_resume_window",
+    summary: "Keep raw-copy recovery metadata durable before finalization",
+  });
+  await batch.stageRawText({
+    targetRelativePath: "raw/documents/2026/04/resume-window.txt",
+    originalFileName: "resume-window.txt",
+    mediaType: "text/plain",
+    content: "raw payload\n",
+  });
+
+  const applyRawCopy = getWriteBatchPrototypeMethod("applyRawCopy");
+  const originalPersist = readRequiredPrototypeMethod<() => Promise<void>>(batch, "persist");
+  const action = readFirstWriteBatchAction(batch);
+  let injectedPersistFailure = false;
+
+  Reflect.set(Object.getPrototypeOf(batch), "persist", async function persistWithRawCopyFailure(this: object) {
+    if (!injectedPersistFailure && Reflect.get(action, "state") === "applied") {
+      injectedPersistFailure = true;
+      throw new Error("injected raw-copy finalize failure");
+    }
+
+    return originalPersist.call(this);
+  });
+
+  try {
+    await assert.rejects(() => applyRawCopy.call(batch, action), /injected raw-copy finalize failure/u);
+  } finally {
+    Reflect.set(Object.getPrototypeOf(batch), "persist", originalPersist);
+  }
+
+  const targetAbsolutePath = path.join(vaultRoot, "raw/documents/2026/04/resume-window.txt");
+  assert.equal(await fs.readFile(targetAbsolutePath, "utf8"), "raw payload\n");
+
+  const recoverable = await readRecoverableStoredWriteOperation(vaultRoot, batch.metadataRelativePath);
+  assert.equal(recoverable?.actions[0]?.state, "staged");
+  assert.equal(recoverable?.actions[0]?.existedBefore, false);
+
+  Reflect.set(action, "state", "staged");
+  Reflect.set(action, "appliedAt", undefined);
+  await applyRawCopy.call(batch, action);
+
+  const operation = await readStoredWriteOperation(vaultRoot, batch.metadataRelativePath);
+  assert.equal(operation.actions[0]?.state, "applied");
+  assert.equal(operation.actions[0]?.effect, "copy");
+  assert.equal(operation.actions[0]?.existedBefore, false);
+});
+
+test("WriteBatch keeps text-overwrite rollback prerequisites durable before finalization and resumes idempotently", async () => {
+  const vaultRoot = await makeTempDirectory("murph-text-overwrite-resume-window");
+  await initializeVault({ vaultRoot });
+
+  const coreAbsolutePath = path.join(vaultRoot, "CORE.md");
+  const originalCore = await fs.readFile(coreAbsolutePath, "utf8");
+  const parsedCore = parseFrontmatterDocument(originalCore);
+  const updatedCore = stringifyFrontmatterDocument({
+    attributes: {
+      ...parsedCore.attributes,
+      title: "Resume Window Test",
+      updatedAt: "2026-03-16T12:15:00.000Z",
+    },
+    body: parsedCore.body.replace(/^# .*$/mu, "# Resume Window Test"),
+  });
+  const batch = await WriteBatch.create({
+    vaultRoot,
+    operationType: "text_overwrite_resume_window",
+    summary: "Keep text overwrite rollback prerequisites durable before finalization",
+  });
+  await batch.stageTextWrite("CORE.md", updatedCore, {
+    overwrite: true,
+  });
+
+  const applyTextWrite = getWriteBatchPrototypeMethod("applyTextWrite");
+  const originalPersist = readRequiredPrototypeMethod<() => Promise<void>>(batch, "persist");
+  const action = readFirstWriteBatchAction(batch);
+  let injectedPersistFailure = false;
+
+  Reflect.set(Object.getPrototypeOf(batch), "persist", async function persistWithTextFailure(this: object) {
+    if (!injectedPersistFailure && Reflect.get(action, "state") === "applied") {
+      injectedPersistFailure = true;
+      throw new Error("injected text finalize failure");
+    }
+
+    return originalPersist.call(this);
+  });
+
+  try {
+    await assert.rejects(() => applyTextWrite.call(batch, 0, action), /injected text finalize failure/u);
+  } finally {
+    Reflect.set(Object.getPrototypeOf(batch), "persist", originalPersist);
+  }
+
+  assert.equal(await fs.readFile(coreAbsolutePath, "utf8"), updatedCore);
+
+  const recoverable = await readRecoverableStoredWriteOperation(vaultRoot, batch.metadataRelativePath);
+  const recoverableAction = recoverable?.actions[0];
+  assert.equal(recoverableAction?.kind, "text_write");
+  if (recoverableAction?.kind !== "text_write") {
+    throw new Error("Expected a staged text_write recoverable action.");
+  }
+  assert.equal(recoverableAction.state, "staged");
+  assert.equal(recoverableAction.existedBefore, true);
+  assert.equal(typeof recoverableAction.backupRelativePath, "string");
+  assert.deepEqual(recoverableAction.committedPayloadReceipt, {
+    sha256: createHash("sha256").update(updatedCore).digest("hex"),
+    byteLength: Buffer.byteLength(updatedCore),
+  });
+  assert.equal(
+    recoverableAction.backupRelativePath
+      ? await fs.readFile(path.join(vaultRoot, recoverableAction.backupRelativePath), "utf8")
+      : null,
+    originalCore,
+  );
+
+  Reflect.set(action, "state", "staged");
+  Reflect.set(action, "appliedAt", undefined);
+  await applyTextWrite.call(batch, 0, action);
+
+  const operation = await readStoredWriteOperation(vaultRoot, batch.metadataRelativePath);
+  assert.equal(operation.actions[0]?.state, "applied");
+  assert.equal(operation.actions[0]?.effect, "update");
+  assert.equal(operation.actions[0]?.existedBefore, true);
+  assert.equal(operation.actions[0]?.backupRelativePath, recoverableAction.backupRelativePath);
+});
+
+test("WriteBatch resumes no-overwrite text reuses without requiring overwrite backup metadata", async () => {
+  const vaultRoot = await makeTempDirectory("murph-text-reuse-resume-window");
+  await initializeVault({ vaultRoot });
+
+  const targetRelativePath = "notes/reuse-resume-window.txt";
+  const targetAbsolutePath = path.join(vaultRoot, targetRelativePath);
+  await fs.mkdir(path.dirname(targetAbsolutePath), { recursive: true });
+  await fs.writeFile(targetAbsolutePath, "same content\n", "utf8");
+
+  const batch = await WriteBatch.create({
+    vaultRoot,
+    operationType: "text_reuse_resume_window",
+    summary: "Resume no-overwrite text reuses without backup metadata",
+  });
+  await batch.stageTextWrite(targetRelativePath, "same content\n", {
+    overwrite: false,
+    allowExistingMatch: true,
+  });
+
+  const applyTextWrite = getWriteBatchPrototypeMethod("applyTextWrite");
+  const originalPersist = readRequiredPrototypeMethod<() => Promise<void>>(batch, "persist");
+  const action = readFirstWriteBatchAction(batch);
+  let injectedPersistFailure = false;
+
+  Reflect.set(Object.getPrototypeOf(batch), "persist", async function persistWithReuseFailure(this: object) {
+    if (!injectedPersistFailure && Reflect.get(action, "state") === "reused") {
+      injectedPersistFailure = true;
+      throw new Error("injected text reuse finalize failure");
+    }
+
+    return originalPersist.call(this);
+  });
+
+  try {
+    await assert.rejects(() => applyTextWrite.call(batch, 0, action), /injected text reuse finalize failure/u);
+  } finally {
+    Reflect.set(Object.getPrototypeOf(batch), "persist", originalPersist);
+  }
+
+  assert.equal(await fs.readFile(targetAbsolutePath, "utf8"), "same content\n");
+
+  const recoverable = await readRecoverableStoredWriteOperation(vaultRoot, batch.metadataRelativePath);
+  const recoverableAction = recoverable?.actions[0];
+  assert.equal(recoverableAction?.kind, "text_write");
+  if (recoverableAction?.kind !== "text_write") {
+    throw new Error("Expected a staged text_write recoverable action.");
+  }
+  assert.equal(recoverableAction.state, "staged");
+  assert.equal(recoverableAction.existedBefore, undefined);
+  assert.equal(recoverableAction.backupRelativePath, undefined);
+
+  Reflect.set(action, "state", "staged");
+  Reflect.set(action, "appliedAt", undefined);
+  await applyTextWrite.call(batch, 0, action);
+
+  const operation = await readStoredWriteOperation(vaultRoot, batch.metadataRelativePath);
+  const storedAction = operation.actions[0];
+  assert.equal(storedAction?.kind, "text_write");
+  if (storedAction?.kind !== "text_write") {
+    throw new Error("Expected the stored action to remain a text_write record.");
+  }
+  assert.equal(storedAction.state, "reused");
+  assert.equal(storedAction.effect, "reuse");
+  assert.equal(storedAction.existedBefore, true);
+  assert.equal(storedAction.backupRelativePath, undefined);
+});
+
+test("WriteBatch keeps append rollback prerequisites durable before finalization and avoids duplicate replay", async () => {
+  const vaultRoot = await makeTempDirectory("murph-jsonl-append-resume-window");
+  await initializeVault({ vaultRoot });
+
+  const targetRelativePath = "ledger/events/2026-04.jsonl";
+  const targetAbsolutePath = path.join(vaultRoot, targetRelativePath);
+  await fs.mkdir(path.dirname(targetAbsolutePath), { recursive: true });
+  await fs.writeFile(targetAbsolutePath, "first\n", "utf8");
+
+  const batch = await WriteBatch.create({
+    vaultRoot,
+    operationType: "jsonl_append_resume_window",
+    summary: "Keep append rollback prerequisites durable before finalization",
+  });
+  await batch.stageJsonlAppend(targetRelativePath, "second\n");
+
+  const applyJsonlAppend = getWriteBatchPrototypeMethod("applyJsonlAppend");
+  const originalPersist = readRequiredPrototypeMethod<() => Promise<void>>(batch, "persist");
+  const action = readFirstWriteBatchAction(batch);
+  let injectedPersistFailure = false;
+
+  Reflect.set(Object.getPrototypeOf(batch), "persist", async function persistWithAppendFailure(this: object) {
+    if (!injectedPersistFailure && Reflect.get(action, "state") === "applied") {
+      injectedPersistFailure = true;
+      throw new Error("injected append finalize failure");
+    }
+
+    return originalPersist.call(this);
+  });
+
+  try {
+    await assert.rejects(() => applyJsonlAppend.call(batch, action), /injected append finalize failure/u);
+  } finally {
+    Reflect.set(Object.getPrototypeOf(batch), "persist", originalPersist);
+  }
+
+  assert.equal(await fs.readFile(targetAbsolutePath, "utf8"), "first\nsecond\n");
+
+  const recoverable = await readRecoverableStoredWriteOperation(vaultRoot, batch.metadataRelativePath);
+  const recoverableAction = recoverable?.actions[0];
+  assert.equal(recoverableAction?.kind, "jsonl_append");
+  if (recoverableAction?.kind !== "jsonl_append") {
+    throw new Error("Expected a staged jsonl_append recoverable action.");
+  }
+  assert.equal(recoverableAction.state, "staged");
+  assert.equal(recoverableAction.existedBefore, true);
+  assert.equal(recoverableAction.originalSize, Buffer.byteLength("first\n"));
+  assert.deepEqual(recoverableAction.committedPayloadReceipt, {
+    sha256: createHash("sha256").update("second\n").digest("hex"),
+    byteLength: Buffer.byteLength("second\n"),
+  });
+
+  Reflect.set(action, "state", "staged");
+  Reflect.set(action, "appliedAt", undefined);
+  await applyJsonlAppend.call(batch, action);
+
+  assert.equal(await fs.readFile(targetAbsolutePath, "utf8"), "first\nsecond\n");
+
+  const operation = await readStoredWriteOperation(vaultRoot, batch.metadataRelativePath);
+  assert.equal(operation.actions[0]?.state, "applied");
+  assert.equal(operation.actions[0]?.effect, "append");
+  assert.equal(operation.actions[0]?.originalSize, Buffer.byteLength("first\n"));
+});
+
+test("WriteBatch keeps delete rollback prerequisites durable before finalization and resumes idempotently", async () => {
+  const vaultRoot = await makeTempDirectory("murph-delete-resume-window");
+  await initializeVault({ vaultRoot });
+
+  const targetRelativePath = "notes/delete-resume-window.txt";
+  const targetAbsolutePath = path.join(vaultRoot, targetRelativePath);
+  await fs.mkdir(path.dirname(targetAbsolutePath), { recursive: true });
+  await fs.writeFile(targetAbsolutePath, "delete me\n", "utf8");
+
+  const batch = await WriteBatch.create({
+    vaultRoot,
+    operationType: "delete_resume_window",
+    summary: "Keep delete rollback prerequisites durable before finalization",
+  });
+  await batch.stageDelete(targetRelativePath);
+
+  const applyDelete = getWriteBatchPrototypeMethod("applyDelete");
+  const originalPersist = readRequiredPrototypeMethod<() => Promise<void>>(batch, "persist");
+  const action = readFirstWriteBatchAction(batch);
+  let injectedPersistFailure = false;
+
+  Reflect.set(Object.getPrototypeOf(batch), "persist", async function persistWithDeleteFailure(this: object) {
+    if (!injectedPersistFailure && Reflect.get(action, "state") === "applied") {
+      injectedPersistFailure = true;
+      throw new Error("injected delete finalize failure");
+    }
+
+    return originalPersist.call(this);
+  });
+
+  try {
+    await assert.rejects(() => applyDelete.call(batch, 0, action), /injected delete finalize failure/u);
+  } finally {
+    Reflect.set(Object.getPrototypeOf(batch), "persist", originalPersist);
+  }
+
+  assert.equal(await fs.access(targetAbsolutePath).then(() => true, () => false), false);
+
+  const recoverable = await readRecoverableStoredWriteOperation(vaultRoot, batch.metadataRelativePath);
+  const recoverableAction = recoverable?.actions[0];
+  assert.equal(recoverableAction?.kind, "delete");
+  if (recoverableAction?.kind !== "delete") {
+    throw new Error("Expected a staged delete recoverable action.");
+  }
+  assert.equal(recoverableAction.state, "staged");
+  assert.equal(recoverableAction.existedBefore, true);
+  assert.equal(typeof recoverableAction.backupRelativePath, "string");
+  assert.equal(
+    recoverableAction.backupRelativePath
+      ? await fs.readFile(path.join(vaultRoot, recoverableAction.backupRelativePath), "utf8")
+      : null,
+    "delete me\n",
+  );
+
+  Reflect.set(action, "state", "staged");
+  Reflect.set(action, "appliedAt", undefined);
+  await applyDelete.call(batch, 0, action);
+
+  assert.equal(await fs.access(targetAbsolutePath).then(() => true, () => false), false);
+
+  const operation = await readStoredWriteOperation(vaultRoot, batch.metadataRelativePath);
+  assert.equal(operation.actions[0]?.state, "applied");
+  assert.equal(operation.actions[0]?.effect, "delete");
+  assert.equal(operation.actions[0]?.existedBefore, true);
+});
+
+test("WriteBatch keeps rollback bookkeeping best-effort when rollback-status persistence fails after rollback", async () => {
+  const vaultRoot = await makeTempDirectory("murph-vault");
+  await initializeVault({ vaultRoot });
+
+  const targetRelativePath = "notes/rollback-status-persist-failure.txt";
+  const targetAbsolutePath = path.join(vaultRoot, targetRelativePath);
+  const lockAbsolutePath = path.join(vaultRoot, ".runtime/locks/canonical-write");
+  const batch = await WriteBatch.create({
+    vaultRoot,
+    operationType: "rollback_status_persist_failure",
+    summary: "Keep rollback best-effort even when rollback-status metadata persistence fails",
+  });
+  const originalPersist = readRequiredPrototypeMethod<() => Promise<void>>(batch, "persist");
+  let injectedCommitFailure = false;
+  let injectedRollbackStatusFailure = false;
+
+  await batch.stageTextWrite(targetRelativePath, "applied before rollback status persist\n", {
+    overwrite: false,
+  });
+
+  Reflect.set(
+    Object.getPrototypeOf(batch),
+    "persist",
+    async function persistWithRollbackStatusFailure(this: object) {
+      const record = Reflect.get(this, "record");
+      const rawActions =
+        typeof record === "object" && record !== null ? Reflect.get(record, "actions") : undefined;
+      const firstAction = Array.isArray(rawActions) ? rawActions[0] : undefined;
+      const status =
+        typeof record === "object" && record !== null ? Reflect.get(record, "status") : undefined;
+
+      if (
+        !injectedCommitFailure &&
+        status === "committing" &&
+        typeof firstAction === "object" &&
+        firstAction !== null &&
+        Reflect.get(firstAction, "state") === "applied"
+      ) {
+        injectedCommitFailure = true;
+        throw new Error("injected post-mutation persist failure");
+      }
+
+      if (!injectedRollbackStatusFailure && status === "rolled_back") {
+        injectedRollbackStatusFailure = true;
+        throw new Error("injected rollback-status persist failure");
+      }
+
+      return originalPersist.call(this);
+    },
+  );
+
+  try {
+    await assert.rejects(() => batch.commit(), /injected post-mutation persist failure/u);
+  } finally {
+    Reflect.set(Object.getPrototypeOf(batch), "persist", originalPersist);
+  }
+
+  assert.equal(injectedCommitFailure, true);
+  assert.equal(injectedRollbackStatusFailure, true);
+  assert.equal(await fs.access(targetAbsolutePath).then(() => true, () => false), false);
+  assert.equal(await fs.access(path.join(vaultRoot, batch.stageRootRelativePath)).then(() => true, () => false), false);
+  assert.equal(await fs.access(lockAbsolutePath).then(() => true, () => false), false);
+
+  const operation = await readStoredWriteOperation(vaultRoot, batch.metadataRelativePath);
+  assert.notEqual(operation.status, "failed");
+  assert.equal(operation.error?.message, "injected post-mutation persist failure");
+});
+
+test("WriteBatch preserves the original rollback error when rollback cleanup leaves stage artifacts behind", async () => {
+  const vaultRoot = await makeTempDirectory("murph-vault");
+  await initializeVault({ vaultRoot });
+
+  const targetRelativePath = "notes/post-mutation-persist-cleanup-failure.txt";
+  const targetAbsolutePath = path.join(vaultRoot, targetRelativePath);
+  const batch = await WriteBatch.create({
+    vaultRoot,
+    operationType: "post_mutation_persist_cleanup_failure",
+    summary: "Preserve the rollback trigger when cleanup fails after rollback",
+  });
+  const originalPersist = readRequiredPrototypeMethod<() => Promise<void>>(batch, "persist");
+  const originalCleanupStageArtifacts = readRequiredPrototypeMethod<
+    () => Promise<void>
+  >(batch, "cleanupStageArtifacts");
+  let injectedPersistFailure = false;
+
+  await batch.stageTextWrite(targetRelativePath, "applied before rollback cleanup failure\n", {
+    overwrite: false,
+  });
+
+  Reflect.set(
+    Object.getPrototypeOf(batch),
+    "persist",
+    async function persistWithPostMutationFailure(this: object) {
+      const record = Reflect.get(this, "record");
+      const rawActions =
+        typeof record === "object" && record !== null ? Reflect.get(record, "actions") : undefined;
+      const firstAction = Array.isArray(rawActions) ? rawActions[0] : undefined;
+
+      if (
+        !injectedPersistFailure &&
+        typeof record === "object" &&
+        record !== null &&
+        Reflect.get(record, "status") === "committing" &&
+        typeof firstAction === "object" &&
+        firstAction !== null &&
+        Reflect.get(firstAction, "state") === "applied"
+      ) {
+        injectedPersistFailure = true;
+        throw new Error("injected post-mutation persist failure");
+      }
+
+      return originalPersist.call(this);
+    },
+  );
+  Reflect.set(
+    Object.getPrototypeOf(batch),
+    "cleanupStageArtifacts",
+    async function cleanupStageArtifactsWithFailure() {
+      throw new Error("injected rollback cleanup failure");
+    },
+  );
+
+  try {
+    await assert.rejects(() => batch.commit(), /injected post-mutation persist failure/u);
+  } finally {
+    Reflect.set(Object.getPrototypeOf(batch), "persist", originalPersist);
+    Reflect.set(Object.getPrototypeOf(batch), "cleanupStageArtifacts", originalCleanupStageArtifacts);
+  }
+
+  assert.equal(injectedPersistFailure, true);
+  assert.equal(await fs.access(targetAbsolutePath).then(() => true, () => false), false);
+  assert.equal(await fs.access(path.join(vaultRoot, batch.stageRootRelativePath)).then(() => true, () => false), true);
+
+  const operation = await readStoredWriteOperation(vaultRoot, batch.metadataRelativePath);
+  assert.equal(operation.status, "rolled_back");
+  assert.equal(operation.error?.message, "injected post-mutation persist failure");
   assert.equal(operation.actions[0]?.state, "rolled_back");
 });
 

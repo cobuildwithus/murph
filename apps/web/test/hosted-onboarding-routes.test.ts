@@ -199,6 +199,7 @@ describe("hosted onboarding routes", () => {
           type: "wallet",
         },
       },
+      intent: "signup",
       inviteCode: "invite-code",
       verifiedPrivyUser: {
         id: "did:privy:user_123",
@@ -240,6 +241,7 @@ describe("hosted onboarding routes", () => {
           type: "wallet",
         },
       },
+      intent: "signup",
       inviteCode: null,
       verifiedPrivyUser: {
         id: "did:privy:user_123",
@@ -278,11 +280,35 @@ describe("hosted onboarding routes", () => {
           type: "wallet",
         },
       },
+      intent: "signup",
       inviteCode: "invite-code",
       verifiedPrivyUser: {
         id: "did:privy:user_123",
       },
     });
+  });
+
+  it("passes an explicit sign-in intent through the completion route", async () => {
+    const response = await privyCompleteRoute.POST(
+      new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
+        body: JSON.stringify({
+          intent: "signin",
+          inviteCode: "invite-code",
+        }),
+        headers: {
+          cookie: "privy-id-token=cookie-token",
+          origin: SAME_ORIGIN_HEADERS.origin,
+          "user-agent": "test-agent",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.completeHostedPrivyVerification).toHaveBeenCalledWith(expect.objectContaining({
+      intent: "signin",
+      inviteCode: "invite-code",
+    }));
   });
 
   it("rejects hosted Privy completion requests that are missing the Privy identity cookie", async () => {

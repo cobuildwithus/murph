@@ -743,6 +743,8 @@ function createAssistantProviderUsageAttribution(input: {
   const apiKeyEnv = input.attemptPlan.route.providerOptions.apiKeyEnv ?? null
   const credentialSource = resolveAssistantUsageCredentialSource({
     apiKeyEnv,
+    effectiveEnv: input.env,
+    headers: input.attemptPlan.route.providerOptions.headers ?? null,
     provider: input.attemptPlan.route.provider,
     userEnvKeys: [...(input.executionPlan.executionContext?.hosted?.userEnvKeys ?? [])],
   })

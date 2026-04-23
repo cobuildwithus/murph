@@ -95,7 +95,7 @@ export async function readHostedIngressTarget(input: {
   };
 }
 
-export async function findHostedIngressByEventIdTx(input: {
+export async function findHostedIngressByEventId(input: {
   eventId: string;
   tx: HostedIngressClient;
   userId: string;

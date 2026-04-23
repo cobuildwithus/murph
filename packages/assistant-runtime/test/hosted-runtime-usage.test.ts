@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { stat, writeFile } from "node:fs/promises";
 
 import { test, vi } from "vitest";
 
@@ -6,6 +7,8 @@ import {
   ASSISTANT_USAGE_SCHEMA,
   createAssistantUsageId,
   listPendingAssistantUsageRecords,
+  resolveAssistantStatePaths,
+  resolvePendingAssistantUsagePath,
   writePendingAssistantUsageRecord,
 } from "@murphai/runtime-state/node";
 
@@ -146,6 +149,88 @@ test("hosted usage export leaves unacknowledged records pending and warns", asyn
     );
     assert.equal(warn.mock.calls.length, 1);
     assert.match(String(warn.mock.calls[0]?.[0]), /leaving the remainder pending/u);
+  } finally {
+    warn.mockRestore();
+    await cleanup();
+  }
+});
+
+test("hosted usage export skips malformed pending records and still exports valid ones", async () => {
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace("hosted-runtime-usage-");
+
+  try {
+    const validUsageId = await writePendingRecord(vaultRoot, "turn_valid");
+    const invalidUsageId = "turn_invalid.unexpected-1";
+    const invalidRecordPath = resolvePendingAssistantUsagePath(
+      resolveAssistantStatePaths(vaultRoot),
+      invalidUsageId,
+    );
+
+    await writeFile(
+      invalidRecordPath,
+      `${JSON.stringify({
+        apiKeyEnv: null,
+        attemptCount: 1,
+        baseUrl: null,
+        cacheWriteTokens: null,
+        cachedInputTokens: null,
+        credentialSource: "platform",
+        featureKey: null,
+        gatewayTags: [],
+        inputTokens: 10,
+        memberId: "member_123",
+        occurredAt: "2026-04-07T00:00:00.000Z",
+        outputTokens: 5,
+        provider: "openai-compatible",
+        providerName: "example",
+        reasoningTokens: null,
+        reportingUserId: null,
+        requestedModel: "gpt-5.4-mini",
+        routeId: "primary",
+        schema: ASSISTANT_USAGE_SCHEMA,
+        servedModel: "gpt-5.4-mini",
+        sessionId: "asst_invalid",
+        stripeMeterSource: "murph",
+        surface: null,
+        totalTokens: 15,
+        triggerKind: null,
+        turnId: "turn_invalid",
+        usageId: invalidUsageId,
+      })}\n`,
+      "utf8",
+    );
+
+    const result = await exportHostedPendingAssistantUsage({
+      usageExportPort: {
+        async recordUsage() {
+          return {
+            recorded: 1,
+            usageIds: [validUsageId],
+          };
+        },
+      },
+      vaultRoot,
+    });
+
+    assert.deepEqual(result, {
+      exported: 1,
+      failed: 1,
+      pending: 1,
+    });
+    assert.deepEqual(
+      await listPendingAssistantUsageRecords({
+        skipInvalidRecords: true,
+        vault: vaultRoot,
+      }),
+      [],
+    );
+    assert.equal((await stat(invalidRecordPath)).isFile(), true);
+    assert.equal(warn.mock.calls.length, 1);
+    assert.match(
+      String(warn.mock.calls[0]?.[0]),
+      /Skipping malformed pending assistant usage file/u,
+    );
   } finally {
     warn.mockRestore();
     await cleanup();

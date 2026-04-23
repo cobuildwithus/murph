@@ -1,8 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { once } from 'node:events'
-import { constants as fsConstants } from 'node:fs'
-import { access, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
-import { homedir, tmpdir } from 'node:os'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import path from 'node:path'
 
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
@@ -28,14 +27,23 @@ import {
   normalizeStatusText,
   normalizeStreamingText,
 } from './assistant-codex-events.js'
+import {
+  resolveCodexChildEnv,
+} from './assistant-codex/config.js'
+import {
+  materializeCodexImagePaths,
+  type CodexAppServerImageInput,
+} from './assistant-codex/images.js'
 import type {
   AssistantProviderTraceEvent,
   AssistantProviderTraceUpdate,
 } from './assistant/provider-traces.js'
-import { sanitizeChildProcessEnv } from './child-process-env.js'
 
 export { extractCodexTraceUpdates } from './assistant-codex-events.js'
+export { resolveCodexDisplayOptions } from './assistant-codex/config.js'
 export type { CodexProgressEvent } from './assistant-codex-events.js'
+export type { CodexDisplayOptions } from './assistant-codex/config.js'
+export type { CodexAppServerImageInput } from './assistant-codex/images.js'
 
 const CODEX_RPC_CLIENT_NAME = 'murph'
 const CODEX_RPC_CLIENT_TITLE = 'Murph'
@@ -84,12 +92,6 @@ export interface CodexAppServerTurnInput {
   workingDirectory: string
 }
 
-export interface CodexAppServerImageInput {
-  bytes?: Uint8Array | Buffer
-  mimeType?: string | null
-  path?: string
-}
-
 export interface CodexAppServerTurnResult {
   finalMessage: string
   jsonEvents: unknown[]
@@ -97,11 +99,6 @@ export interface CodexAppServerTurnResult {
   sessionId: string | null
   stderr: string
   stdout: string
-}
-
-export interface CodexDisplayOptions {
-  model: string | null
-  reasoningEffort: string | null
 }
 
 export async function executeCodexAppServerTurn(
@@ -595,43 +592,6 @@ async function runCodexAppServerTurn(
   }
 }
 
-async function resolveCodexChildEnv(input: {
-  codexHome?: string | null
-  env?: NodeJS.ProcessEnv
-}): Promise<NodeJS.ProcessEnv> {
-  const nextEnv = sanitizeChildProcessEnv(input.env)
-  const resolvedHome = resolveConfiguredCodexHome(input.codexHome)
-  if (!resolvedHome) {
-    return nextEnv
-  }
-  await assertAccessibleCodexHomeDirectory(resolvedHome)
-
-  return {
-    ...nextEnv,
-    CODEX_HOME: resolvedHome,
-  }
-}
-
-export async function resolveCodexDisplayOptions(input: {
-  configPath?: string
-  model?: string | null
-  profile?: string | null
-}): Promise<CodexDisplayOptions> {
-  const explicitModel = normalizeNullableString(input.model)
-  const explicitProfile = normalizeNullableString(input.profile)
-  const config = await readCodexDisplayConfig(input.configPath)
-  const activeProfileName = explicitProfile ?? config.defaultProfile
-  const activeProfile = activeProfileName
-    ? config.profiles[activeProfileName] ?? null
-    : null
-
-  return {
-    model: explicitModel ?? activeProfile?.model ?? config.model,
-    reasoningEffort:
-      activeProfile?.reasoningEffort ?? config.reasoningEffort,
-  }
-}
-
 function buildCodexThreadStartParams(
   input: CodexAppServerTurnInput & {
     workingDirectory: string
@@ -777,242 +737,6 @@ function attachCodexAbortListener(input: {
   return () => {
     signal.removeEventListener('abort', handleAbort)
   }
-}
-
-async function materializeCodexImagePaths(input: {
-  images?: readonly CodexAppServerImageInput[] | null
-  tempRoot: string
-}): Promise<string[]> {
-  const imageInputs = input.images ?? []
-  const imagePaths: string[] = []
-
-  for (const [index, image] of imageInputs.entries()) {
-    imagePaths.push(
-      await materializeCodexImagePath({
-        image,
-        index,
-        tempRoot: input.tempRoot,
-      }),
-    )
-  }
-
-  return imagePaths
-}
-
-async function materializeCodexImagePath(input: {
-  image: CodexAppServerImageInput
-  index: number
-  tempRoot: string
-}): Promise<string> {
-  const inferredMimeType = normalizeNullableString(input.image.mimeType)
-  const normalizedPath = normalizeNullableString(input.image.path)
-  if (normalizedPath) {
-    return resolveReadableCodexImagePath(normalizedPath)
-  }
-
-  const bytes = input.image.bytes
-  if (!bytes) {
-    throw new VaultCliError(
-      'ASSISTANT_CODEX_IMAGE_INVALID',
-      'Codex app-server image input requires either bytes or a readable path.',
-    )
-  }
-
-  return writeCodexImageBytes({
-    bytes: Buffer.from(bytes),
-    index: input.index,
-    mimeType: inferredMimeType,
-    tempRoot: input.tempRoot,
-  })
-}
-
-async function writeCodexImageBytes(input: {
-  bytes: Buffer
-  index: number
-  mimeType: string | null
-  tempRoot: string
-}): Promise<string> {
-  const filePath = path.join(
-    input.tempRoot,
-    `image-${input.index + 1}${resolveCodexImageExtension(input.mimeType)}`,
-  )
-  await writeFile(filePath, input.bytes)
-  return filePath
-}
-
-async function resolveReadableCodexImagePath(candidatePath: string): Promise<string> {
-  const resolvedPath = path.resolve(candidatePath)
-
-  try {
-    await access(resolvedPath, fsConstants.R_OK)
-  } catch {
-    throw new VaultCliError(
-      'ASSISTANT_CODEX_IMAGE_INVALID',
-      `Codex app-server image input path is not readable: ${resolvedPath}`,
-    )
-  }
-
-  return resolvedPath
-}
-
-function resolveCodexImageExtension(mimeType: string | null): string {
-  switch (mimeType) {
-    case 'image/jpeg':
-      return '.jpg'
-    case 'image/png':
-      return '.png'
-    case 'image/webp':
-      return '.webp'
-    case 'image/gif':
-      return '.gif'
-    case 'image/heic':
-      return '.heic'
-    case 'image/heif':
-      return '.heif'
-    case 'image/bmp':
-      return '.bmp'
-    case 'image/tiff':
-      return '.tiff'
-    default:
-      return '.img'
-  }
-}
-
-async function readCodexDisplayConfig(
-  configPath = path.join(homedir(), '.codex', 'config.toml'),
-): Promise<CodexDisplayConfig> {
-  try {
-    const raw = await readFile(configPath, 'utf8')
-    return parseCodexDisplayConfig(raw)
-  } catch {
-    return {
-      defaultProfile: null,
-      model: null,
-      reasoningEffort: null,
-      profiles: {},
-    }
-  }
-}
-
-function resolveConfiguredCodexHome(
-  codexHome: string | null | undefined,
-): string | null {
-  const normalized = normalizeNullableString(codexHome)
-  if (!normalized) {
-    return null
-  }
-
-  if (normalized === '~') {
-    return homedir()
-  }
-
-  if (normalized.startsWith(`~${path.sep}`)) {
-    return path.resolve(homedir(), normalized.slice(2))
-  }
-
-  return path.resolve(normalized)
-}
-
-async function assertAccessibleCodexHomeDirectory(
-  resolvedHome: string,
-): Promise<void> {
-  try {
-    await stat(resolvedHome)
-  } catch {
-    throw new VaultCliError(
-      'ASSISTANT_CODEX_HOME_INVALID',
-      `Configured Codex home does not exist: ${resolvedHome}`,
-    )
-  }
-
-  let resolvedStats
-  try {
-    await access(
-      resolvedHome,
-      fsConstants.R_OK | fsConstants.W_OK | fsConstants.X_OK,
-    )
-    resolvedStats = await stat(resolvedHome)
-  } catch {
-    throw new VaultCliError(
-      'ASSISTANT_CODEX_HOME_INVALID',
-      `Configured Codex home is not accessible: ${resolvedHome}`,
-    )
-  }
-
-  if (!resolvedStats.isDirectory()) {
-    throw new VaultCliError(
-      'ASSISTANT_CODEX_HOME_INVALID',
-      `Configured Codex home is not a directory: ${resolvedHome}`,
-    )
-  }
-}
-
-function parseCodexDisplayConfig(raw: string): CodexDisplayConfig {
-  const config: CodexDisplayConfig = {
-    defaultProfile: null,
-    model: null,
-    reasoningEffort: null,
-    profiles: {},
-  }
-
-  let activeProfile: string | null = null
-
-  for (const rawLine of raw.split(/\r?\n/u)) {
-    const line = rawLine.trim()
-    if (line.length === 0 || line.startsWith('#')) {
-      continue
-    }
-
-    const profileSectionMatch = /^\[profiles\.([^\]]+)\]$/u.exec(line)
-    if (profileSectionMatch) {
-      activeProfile = profileSectionMatch[1] ?? null
-      if (activeProfile && !config.profiles[activeProfile]) {
-        config.profiles[activeProfile] = {
-          model: null,
-          reasoningEffort: null,
-        }
-      }
-      continue
-    }
-
-    if (/^\[.*\]$/u.test(line)) {
-      activeProfile = null
-      continue
-    }
-
-    const stringAssignmentMatch =
-      /^([A-Za-z0-9_]+)\s*=\s*"([^"]*)"\s*$/u.exec(line)
-    if (!stringAssignmentMatch) {
-      continue
-    }
-
-    const [, key, value] = stringAssignmentMatch
-    const normalizedValue = normalizeNullableString(value)
-
-    if (activeProfile) {
-      const profile = config.profiles[activeProfile]
-      if (!profile) {
-        continue
-      }
-
-      if (key === 'model') {
-        profile.model = normalizedValue
-      } else if (key === 'model_reasoning_effort') {
-        profile.reasoningEffort = normalizedValue
-      }
-      continue
-    }
-
-    if (key === 'model') {
-      config.model = normalizedValue
-    } else if (key === 'model_reasoning_effort') {
-      config.reasoningEffort = normalizedValue
-    } else if (key === 'profile') {
-      config.defaultProfile = normalizedValue
-    }
-  }
-
-  return config
 }
 
 function writeCodexRpcMessage(
@@ -1585,19 +1309,6 @@ function buildCodexResumeStaleMessage(input: {
   parts.push('Murph should start a fresh provider thread for this turn.')
 
   return parts.join(' ')
-}
-
-interface CodexDisplayConfig {
-  defaultProfile: string | null
-  model: string | null
-  reasoningEffort: string | null
-  profiles: Record<
-    string,
-    {
-      model: string | null
-      reasoningEffort: string | null
-    }
-  >
 }
 
 function consumeCompleteLines(

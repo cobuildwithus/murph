@@ -65,6 +65,7 @@ import {
   buildHostedExecutionVaultSyncImportWake,
 } from "./builders.ts";
 import {
+  rejectLegacyAliases,
   requireArray,
   requireBoolean,
   requireBigIntString,
@@ -446,10 +447,12 @@ export function parseHostedRuntimeDrainEvent(
   label = "Hosted runtime drain event",
 ): HostedRuntimeDrainEvent {
   const record = requireObject(value, label);
-  const ingressEventId = record.ingressEventId ?? record.wakeId;
+  rejectLegacyAliases(record, label, {
+    wakeId: "ingressEventId",
+  });
 
   return {
-    ingressEventId: requireString(ingressEventId, `${label}.ingressEventId`),
+    ingressEventId: requireString(record.ingressEventId, `${label}.ingressEventId`),
     seq: requireBigIntString(record.seq, `${label}.seq`),
     ...(record.sharePack === undefined
       ? {}
@@ -552,7 +555,9 @@ function parseHostedRunLogLevelValue(
 
 export function parseHostedExecutionUserStatus(value: unknown): HostedExecutionUserStatus {
   const record = requireObject(value, "Hosted execution user status");
-  const pendingIngressEventCount = record.pendingIngressEventCount ?? record.pendingWakeCount;
+  rejectLegacyAliases(record, "Hosted execution user status", {
+    pendingWakeCount: "pendingIngressEventCount",
+  });
 
   return {
     bundleRef: parseHostedExecutionBundleRef(
@@ -574,7 +579,7 @@ export function parseHostedExecutionUserStatus(value: unknown): HostedExecutionU
     lastRunAt: readNullableString(record.lastRunAt, "Hosted execution user status lastRunAt"),
     nextWakeAt: readNullableString(record.nextWakeAt, "Hosted execution user status nextWakeAt"),
     pendingIngressEventCount: requireNumber(
-      pendingIngressEventCount,
+      record.pendingIngressEventCount,
       "Hosted execution user status pendingIngressEventCount",
     ),
     ...(record.run === undefined ? {} : {
