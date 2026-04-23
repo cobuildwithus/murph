@@ -152,13 +152,12 @@ test("history links round-trip through write, storage, read, and list surfaces",
   assert.equal(storedRecord?.relatedIds, undefined);
 });
 
-test("history relatedIds ingress still canonicalizes to links and omits legacy storage fields", async () => {
+test("history append rejects deprecated relatedIds inputs", async () => {
   const vaultRoot = await makeTempDirectory("murph-history-related-ids");
   await initializeVault({ vaultRoot });
-
-  const appended = await appendHistoryEvent({
+  const legacyInput = {
     vaultRoot,
-    kind: "encounter",
+    kind: "encounter" as const,
     occurredAt: "2026-03-03T18:00:00.000Z",
     title: "Legacy linked encounter",
     encounterType: "office_visit",
@@ -166,35 +165,15 @@ test("history relatedIds ingress still canonicalizes to links and omits legacy s
       "prov_01JNW7YJ7MNE7M9Q2QWQK4Z3F8",
       " prov_01JNW7YJ7MNE7M9Q2QWQK4Z3F8 ",
     ],
-  });
-  const read = await readHistoryEvent({
-    vaultRoot,
-    eventId: appended.record.id,
-  });
-  const stored = await readJsonlRecords({
-    vaultRoot,
-    relativePath: appended.relativePath,
-  });
-  const storedRecord = stored.find(
-    (record) => (record as { id?: string }).id === appended.record.id,
-  ) as {
-    links?: unknown;
-    relatedIds?: unknown;
-  } | undefined;
+  };
 
-  assert.deepEqual(appended.record.links, [
-    { type: "related_to", targetId: "prov_01JNW7YJ7MNE7M9Q2QWQK4Z3F8" },
-  ]);
-  assert.deepEqual(read.record.links, [
-    { type: "related_to", targetId: "prov_01JNW7YJ7MNE7M9Q2QWQK4Z3F8" },
-  ]);
-  assert.deepEqual(storedRecord?.links, [
-    { type: "related_to", targetId: "prov_01JNW7YJ7MNE7M9Q2QWQK4Z3F8" },
-  ]);
-  assert.equal(storedRecord?.relatedIds, undefined);
+  await assert.rejects(
+    () => appendHistoryEvent(legacyInput),
+    (error: unknown) => error instanceof VaultError && error.code === "EVENT_INVALID",
+  );
 });
 
-test("history reads legacy relatedIds rows back as canonical links", async () => {
+test("history reads reject legacy stored relatedIds rows", async () => {
   const vaultRoot = await makeTempDirectory("murph-history-legacy-related-ids");
   await initializeVault({ vaultRoot });
 
@@ -225,21 +204,22 @@ test("history reads legacy relatedIds rows back as canonical links", async () =>
     },
   });
 
-  const read = await readHistoryEvent({
-    vaultRoot,
-    eventId: legacyEventId,
-  });
-  const listed = await listHistoryEvents({
-    vaultRoot,
-    kinds: ["encounter"],
-  });
-
-  assert.deepEqual(read.record.links, [
-    { type: "related_to", targetId: "prov_01JNW7YJ7MNE7M9Q2QWQK4Z3F8" },
-  ]);
-  assert.deepEqual(listed[0]?.links, [
-    { type: "related_to", targetId: "prov_01JNW7YJ7MNE7M9Q2QWQK4Z3F8" },
-  ]);
+  await assert.rejects(
+    () =>
+      readHistoryEvent({
+        vaultRoot,
+        eventId: legacyEventId,
+      }),
+    (error: unknown) => error instanceof VaultError && error.code === "VAULT_INVALID_HISTORY_EVENT",
+  );
+  await assert.rejects(
+    () =>
+      listHistoryEvents({
+        vaultRoot,
+        kinds: ["encounter"],
+      }),
+    (error: unknown) => error instanceof VaultError && error.code === "VAULT_INVALID_HISTORY_EVENT",
+  );
 });
 
 test("health history append rejects explicit duplicate event ids", async () => {

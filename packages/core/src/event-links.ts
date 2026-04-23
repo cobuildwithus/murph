@@ -5,6 +5,22 @@ export interface CanonicalEventLink {
   targetId: string;
 }
 
+export function assertNoLegacyRelatedIds({
+  value,
+  errorCode,
+  errorMessage,
+}: {
+  value: unknown;
+  errorCode: string;
+  errorMessage: string;
+}): void {
+  if (value === undefined) {
+    return;
+  }
+
+  throw new VaultError(errorCode, errorMessage);
+}
+
 export function normalizeCanonicalEventLinks({
   value,
   errorCode,
@@ -48,38 +64,4 @@ export function normalizeCanonicalEventLinks({
   }
 
   return links.length > 0 ? links : [];
-}
-
-export function canonicalizeEventRelations({
-  links,
-  relatedIds,
-  normalizeStringList,
-  errorCode,
-  errorMessage,
-}: {
-  links: unknown;
-  relatedIds: unknown;
-  normalizeStringList: (value: unknown) => string[] | undefined;
-  errorCode: string;
-  errorMessage: string;
-}): {
-  links: CanonicalEventLink[] | undefined;
-} {
-  const normalizedLinks = normalizeCanonicalEventLinks({
-    value: links,
-    errorCode,
-    errorMessage,
-  });
-  const normalizedRelatedIds = normalizeStringList(relatedIds);
-  const canonicalLinks =
-    normalizedLinks !== undefined
-      ? normalizedLinks
-      : normalizedRelatedIds?.map((targetId) => ({
-          type: "related_to",
-          targetId,
-        }));
-
-  return {
-    links: canonicalLinks,
-  };
 }

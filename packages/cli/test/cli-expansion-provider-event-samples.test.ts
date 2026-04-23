@@ -1064,7 +1064,7 @@ test.sequential(
           bodySite: 'temple',
           note: 'Resolved after breakfast.',
           tags: ['symptom', 'morning'],
-          relatedIds: [requireData(providerUpsert).providerId],
+          links: [{ type: 'related_to', targetId: requireData(providerUpsert).providerId }],
         }),
         'utf8',
       )

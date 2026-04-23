@@ -101,4 +101,23 @@ describe("importDeviceBatch", () => {
       code: "VAULT_INVALID_DEVICE_RAW_ARTIFACTS",
     });
   });
+
+  it("rejects device events that still use deprecated relatedIds", async () => {
+    const vaultRoot = await createTestVaultRoot();
+
+    await expect(
+      importDeviceBatch({
+        vaultRoot,
+        provider: "oura",
+        events: invalidTestValue<typeof VALID_DEVICE_EVENT[]>([
+          {
+            ...VALID_DEVICE_EVENT,
+            relatedIds: ["evt_01JRV2E6E2H6A0A0N0D0H0B0C2"],
+          },
+        ]),
+      }),
+    ).rejects.toMatchObject({
+      code: "VAULT_INVALID_INPUT",
+    });
+  });
 });
