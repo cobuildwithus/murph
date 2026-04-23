@@ -34,6 +34,10 @@ test("public entrypoints expose the expected symbols", () => {
   assert.equal(typeof runtimeModule.loadIntegratedRuntime, "function");
   assert.equal(typeof runtimeModule.createRuntimeUnavailableError, "function");
 
+  assert.equal(Object.hasOwn(helpersModule, "applyRecordPatch"), false);
+  assert.equal(Object.hasOwn(helpersModule, "appendJournalText"), false);
+  assert.equal(Object.hasOwn(helpersModule, "createExplicitHealthCoreServices"), false);
+  assert.equal(Object.hasOwn(helpersModule, "createExplicitHealthQueryServices"), false);
   assert.equal(typeof testingModule.applyRecordPatch, "function");
   assert.equal(typeof testingModule.appendJournalText, "function");
   assert.equal(typeof testingModule.createExplicitHealthCoreServices, "function");

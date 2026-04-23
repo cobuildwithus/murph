@@ -24,7 +24,6 @@ import type {
   HealthCoreRuntimeMethods,
   HealthCoreServiceMethods,
   HealthListEnvelope,
-  HealthQueryRuntimeMethods,
   HealthQueryServiceMethods,
   JsonObject,
   UpsertRecordResult,
@@ -1100,23 +1099,6 @@ export interface CoreRuntimeModule extends HealthCoreRuntimeMethods {
   }>
 }
 
-interface QueryRuntimeSupplementMethods {
-  listSupplements(
-    vaultRoot: string,
-    options?: Record<string, unknown>,
-  ): Promise<JsonObject[]>
-  showSupplement(vaultRoot: string, lookup: string): Promise<JsonObject | null>
-  listSupplementCompounds(
-    vaultRoot: string,
-    options?: Record<string, unknown>,
-  ): Promise<SupplementCompoundRecordResult[]>
-  showSupplementCompound(
-    vaultRoot: string,
-    lookup: string,
-    options?: Record<string, unknown>,
-  ): Promise<SupplementCompoundRecordResult | null>
-}
-
 type ImporterSource = "manual" | "import" | "device" | "derived"
 
 export interface ImportersRuntime {
@@ -1257,10 +1239,7 @@ export type ImportersFactoryRuntimeModule = Pick<
 export type QueryEntity = QueryCanonicalEntity
 export type QueryRecord = QueryCanonicalEntity
 
-export type QueryRuntimeModule =
-  SharedQueryRuntimeModule &
-  HealthQueryRuntimeMethods &
-  QueryRuntimeSupplementMethods
+export type QueryRuntimeModule = SharedQueryRuntimeModule
 
 export interface IntegratedRuntime {
   core: CoreRuntimeModule

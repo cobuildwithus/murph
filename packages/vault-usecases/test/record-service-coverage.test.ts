@@ -551,7 +551,7 @@ describe("record patching and duration helpers", () => {
 describe("public barrel exports", () => {
   test("keep the package-level barrels wired to the owning modules", () => {
     assert.equal(typeof indexModule.normalizeInputFileOption, "function");
-    assert.equal(typeof helpersModule.applyRecordPatch, "function");
+    assert.equal(Object.hasOwn(helpersModule, "applyRecordPatch"), false);
     assert.equal(typeof recordsModule.scaffoldFoodPayload, "function");
     assert.deepEqual(recordsModule.scaffoldFoodPayload(), scaffoldFoodPayload());
     assert.equal(typeof testingModule.applyRecordPatch, "function");
@@ -1368,6 +1368,145 @@ describe("record service seams", () => {
       updatedAt: "2026-04-08T12:00:00.000Z",
       updated: true,
     });
+
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-09T01:02:03.000Z"));
+    try {
+      const experimentId = "exp_01JNV4458HYPP53JDQCBP1QJFM";
+      const experimentOutcomeCore = {
+        applyCanonicalWriteBatch: vi.fn(async (input: {
+          textWrites?: Array<{ relativePath: string; content: string }>
+        }) => ({
+          textWrites: input.textWrites?.map(({ relativePath }) => relativePath) ?? [],
+        })),
+      };
+      const experimentOutcomeQuery = {
+        readVault: vi.fn(async () => journalQuery.readVault()),
+        lookupEntityById: vi.fn(() => ({
+          entityId: experimentId,
+          primaryLookupId: experimentId,
+          lookupIds: [experimentId],
+          family: "experiment",
+          recordClass: "bank",
+          kind: "experiment",
+          status: "active",
+          occurredAt: "2026-04-08T12:00:00.000Z",
+          date: "2026-04-08",
+          path: "experiments/focus-sprint.md",
+          title: "Focus Sprint",
+          body: "---\n",
+          attributes: {
+            schemaVersion: "murph.frontmatter.experiment.v1",
+            docType: "experiment",
+            experimentId,
+            slug: "focus-sprint",
+            status: "active",
+            title: "Focus Sprint",
+            startedOn: "2026-04-01",
+          },
+          links: [],
+          relatedIds: [],
+          stream: null,
+          experimentSlug: "focus-sprint",
+          tags: [],
+          frontmatter: null,
+        })),
+        analyzeExperimentOutcome: vi.fn(() => ({
+          schemaVersion: "murph.experiment-outcome.v1",
+          asOf: "2026-04-08",
+          adherenceSummary: {
+            adherenceLevel: "good",
+            completedSessions: 8,
+            minimumUsefulSessions: 6,
+            status: "on_track",
+            targetSessions: 10,
+          },
+          conclusion: {
+            caveats: [],
+            headline: "Headline",
+            plainLanguage: "Plain language",
+          },
+          confidence: {
+            level: "medium",
+            reasons: [],
+          },
+          confounders: [],
+          experiment: {
+            id: experimentId,
+            slug: "focus-sprint",
+            status: "active",
+            title: "Focus Sprint",
+          },
+          metricResults: [],
+          protocolRef: null,
+          windows: {
+            baselineEnd: null,
+            baselineStart: null,
+            interventionEnd: null,
+            interventionStart: null,
+          },
+        })),
+      };
+
+      const outcomeJournal = await importWithMocks<
+        typeof import("../src/usecases/experiment-journal-vault.ts")
+      >("../src/usecases/experiment-journal-vault.ts", {
+        "@murphai/core": mockActualModule("@murphai/core", (actual) => actual),
+        "../src/runtime-import.ts": mockActualModule("../src/runtime-import.ts", (actual) => ({
+          ...actual,
+          loadRuntimeModule: vi.fn(async (specifier: string) => {
+            if (specifier === "@murphai/core") {
+              return experimentOutcomeCore;
+            }
+
+            throw new Error(`Unexpected specifier: ${specifier}`);
+          }),
+        })),
+        "../src/query-runtime.ts": mockActualModule("../src/query-runtime.ts", (actual) => ({
+          ...actual,
+          loadQueryRuntime: vi.fn(async () => experimentOutcomeQuery),
+        })),
+      });
+
+      const result = await outcomeJournal.writeExperimentOutcomeRecord({
+        vault: "./vault",
+        lookup: "exp_1",
+      });
+
+      expect(result).toMatchObject({
+        vault: "./vault",
+        experimentId,
+        lookupId: experimentId,
+        slug: "focus-sprint",
+        asOf: "2026-04-08",
+        outcomePath: "bank/experiments/outcomes/focus-sprint-2026-04-08.json",
+        updatedExperiment: true,
+        outcome: {
+          schemaVersion: "murph.experiment-outcome.v1",
+          generatedAt: "2026-04-09T01:02:03.000Z",
+          outcomeId: `${experimentId}-outcome-2026-04-08`,
+          schema: "murph.experiment-outcome.v1",
+        },
+      });
+      const writeBatchInput = experimentOutcomeCore.applyCanonicalWriteBatch.mock.calls[0]?.[0];
+      expect(writeBatchInput).toMatchObject({
+        operationType: "experiment_outcome_write",
+        summary: `Write experiment outcome ${experimentId}-outcome-2026-04-08`,
+        textWrites: expect.arrayContaining([
+          expect.objectContaining({
+            relativePath: "bank/experiments/outcomes/focus-sprint-2026-04-08.json",
+          }),
+        ]),
+      });
+      expect(
+        JSON.parse(writeBatchInput?.textWrites?.[0]?.content ?? "{}"),
+      ).toMatchObject({
+        schemaVersion: "murph.experiment-outcome.v1",
+        generatedAt: "2026-04-09T01:02:03.000Z",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
 
     assert.equal(eventUpsert.mock.calls.length, 1);
     assert.equal(eventDelete.mock.calls.length, 1);

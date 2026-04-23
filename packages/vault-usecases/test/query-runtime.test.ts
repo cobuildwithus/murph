@@ -2,11 +2,13 @@ import { describe, expect, it } from "vitest";
 import * as sharedQuery from "@murphai/query";
 
 import {
+  loadQueryRuntime,
+} from "../src/query-runtime.ts";
+import {
   describeQueryLookupConstraint,
   inferQueryIdEntityKind,
   isQueryableQueryLookupId,
-  loadQueryRuntime,
-} from "../src/query-runtime.ts";
+} from "../src/query-id-families.ts";
 
 describe("query runtime compatibility surface", () => {
   it("keeps the local lookup helpers as thin aliases over the shared query owner", () => {
@@ -22,11 +24,18 @@ describe("query runtime compatibility surface", () => {
   it("loads the shared query runtime surface without a second local function layer", async () => {
     const runtime = await loadQueryRuntime();
 
+    expect(runtime.analyzeExperimentOutcome).toBe(sharedQuery.analyzeExperimentOutcome);
     expect(runtime.buildExportPack).toBe(sharedQuery.buildExportPack);
     expect(runtime.buildTimeline).toBe(sharedQuery.buildTimeline);
+    expect(runtime.listAssessments).toBe(sharedQuery.listAssessments);
     expect(runtime.listSupplements).toBe(sharedQuery.listSupplements);
+    expect(runtime.listSupplementCompounds).toBe(sharedQuery.listSupplementCompounds);
+    expect(runtime.listBloodTests).toBe(sharedQuery.listBloodTests);
+    expect(runtime.showAssessment).toBe(sharedQuery.showAssessment);
+    expect(runtime.showBloodTest).toBe(sharedQuery.showBloodTest);
     expect(runtime.searchVaultRuntime).toBe(sharedQuery.searchVaultRuntime);
     expect(runtime.showSupplement).toBe(sharedQuery.showSupplement);
     expect(runtime.showSupplementCompound).toBe(sharedQuery.showSupplementCompound);
+    expect(runtime.summarizeExperimentProgress).toBe(sharedQuery.summarizeExperimentProgress);
   });
 });
