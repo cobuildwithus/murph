@@ -280,6 +280,200 @@ test("browser vault replica creation projects safe fields, filters excluded fami
   assert.equal(signals.bodyState[0]?.weightKg.selection.value, 72.4);
 });
 
+test("browser vault replica projects imported glucose samples into body-state rows and merges them with existing body-state metrics", async () => {
+  const replica = await createBrowserVaultReplica({
+    generatedAt: "2026-04-20T12:00:00.000Z",
+    sourceBundleHash: "e".repeat(64),
+    vault: createVaultReadModel({
+      entities: [
+        createCanonicalEntity("event", "body_weight_1", {
+          attributes: {
+            externalRef: {
+              resourceId: "weight-1",
+              resourceType: "summary",
+              system: "garmin",
+            },
+            measurements: [
+              {
+                metric: "weight",
+                unit: "kg",
+                value: 72.4,
+              },
+            ],
+            recordedAt: "2026-04-20T07:00:00.000Z",
+          },
+          date: "2026-04-20",
+          kind: "body_measurement",
+          occurredAt: "2026-04-20T06:55:00.000Z",
+          title: "Weight check",
+        }),
+        createCanonicalEntity("sample", "glucose_1", {
+          attributes: {
+            externalRef: {
+              resourceId: "glucose-1",
+              resourceType: "summary",
+              system: "dexcom",
+            },
+            unit: "mg_dL",
+            value: 94,
+          },
+          date: "2026-04-20",
+          occurredAt: "2026-04-20T06:30:00.000Z",
+          stream: "glucose",
+          title: "Glucose sample 1",
+        }),
+        createCanonicalEntity("sample", "glucose_2", {
+          attributes: {
+            externalRef: {
+              resourceId: "glucose-2",
+              resourceType: "summary",
+              system: "dexcom",
+            },
+            unit: "mg_dL",
+            value: 96,
+          },
+          date: "2026-04-20",
+          occurredAt: "2026-04-20T06:45:00.000Z",
+          stream: "glucose",
+          title: "Glucose sample 2",
+        }),
+        createCanonicalEntity("sample", "glucose_3", {
+          attributes: {
+            externalRef: {
+              resourceId: "glucose-3",
+              resourceType: "summary",
+              system: "dexcom",
+            },
+            unit: "mg_dL",
+            value: 98,
+          },
+          date: "2026-04-20",
+          occurredAt: "2026-04-20T07:00:00.000Z",
+          stream: "glucose",
+          title: "Glucose sample 3",
+        }),
+        createCanonicalEntity("sample", "glucose_4", {
+          attributes: {
+            externalRef: {
+              resourceId: "glucose-4",
+              resourceType: "summary",
+              system: "dexcom",
+            },
+            unit: "mg_dL",
+            value: 94,
+          },
+          date: "2026-04-19",
+          occurredAt: "2026-04-19T06:30:00.000Z",
+          stream: "glucose",
+          title: "Glucose sample 4",
+        }),
+        createCanonicalEntity("sample", "glucose_5", {
+          attributes: {
+            externalRef: {
+              resourceId: "glucose-5",
+              resourceType: "summary",
+              system: "dexcom",
+            },
+            unit: "mg_dL",
+            value: 96,
+          },
+          date: "2026-04-19",
+          occurredAt: "2026-04-19T06:45:00.000Z",
+          stream: "glucose",
+          title: "Glucose sample 5",
+        }),
+        createCanonicalEntity("sample", "glucose_6", {
+          attributes: {
+            externalRef: {
+              resourceId: "glucose-6",
+              resourceType: "summary",
+              system: "dexcom",
+            },
+            unit: "mg_dL",
+            value: 98,
+          },
+          date: "2026-04-19",
+          occurredAt: "2026-04-19T07:00:00.000Z",
+          stream: "glucose",
+          title: "Glucose sample 6",
+        }),
+      ],
+      metadata: {
+        title: "Glucose browser vault",
+      },
+      vaultRoot: "browser://glucose",
+    }),
+  });
+
+  const mergedDay = replica.metricDayRows.find((row) => row.id === "body_state:2026-04-20");
+  const glucoseOnlyDay = replica.metricDayRows.find((row) => row.id === "body_state:2026-04-19");
+  const mergedGlucoseMetric = replica.metricRows.find((row) => row.id === "body_state:2026-04-20:glucose");
+
+  assert.ok(mergedDay);
+  assert.ok(glucoseOnlyDay);
+  assert.ok(mergedGlucoseMetric);
+  assert.deepEqual(Object.keys(mergedDay.metrics).sort(), [
+    "bmi",
+    "bodyFatPercentage",
+    "glucose",
+    "temperature",
+    "weightKg",
+  ]);
+  assert.equal(mergedDay.metrics.glucose.selection.unit, "mg_dL");
+  assert.equal(mergedDay.metrics.glucose.selection.value, 96);
+  assert.equal(mergedDay.metrics.weightKg.selection.value, 72.4);
+  assert.equal(mergedDay.confidence, "high");
+  assert.equal(mergedDay.notes.includes("Glucose context is not inferred; compare same-device and same-timing readings when possible."), true);
+  assert.equal(mergedDay.notes.includes("Selected weight: 72.4 kg."), true);
+  assert.equal(mergedGlucoseMetric.confidence, "medium");
+  assert.equal(selectBrowserVaultSignals(createBrowserVaultQueryClient(parseBrowserVaultReplica(replica))).bodyState[0]?.summaryConfidence.level, "high");
+  assert.equal(glucoseOnlyDay.metrics.glucose.selection.unit, "mg_dL");
+  assert.equal(glucoseOnlyDay.metrics.glucose.selection.value, 96);
+  assert.equal(glucoseOnlyDay.confidence, "medium");
+  assert.equal(glucoseOnlyDay.notes.includes("Daily glucose summary from 3 imported samples."), true);
+});
+
+test("browser vault replica projects wearable estimated VO2 max into activity rows and signals", async () => {
+  const replica = await createBrowserVaultReplica({
+    generatedAt: "2026-04-20T12:00:00.000Z",
+    sourceBundleHash: "g".repeat(64),
+    vault: createVaultReadModel({
+      entities: [
+        createCanonicalEntity("event", "obs_vo2max", {
+          attributes: {
+            externalRef: {
+              resourceId: "cardio-fitness-1",
+              resourceType: "summary",
+              system: "garmin",
+            },
+            metric: "cardio_fitness",
+            recordedAt: "2026-04-20T06:10:00.000Z",
+            unit: "ml/kg/min",
+            value: 48.6,
+          },
+          kind: "observation",
+          title: "Cardio fitness",
+        }),
+      ],
+      metadata: {
+        title: "VO2 browser vault",
+      },
+      vaultRoot: "browser://vo2",
+    }),
+  });
+
+  const activityDay = replica.metricDayRows.find((row) => row.id === "activity:2026-04-20");
+  const vo2Metric = replica.metricRows.find((row) => row.id === "activity:2026-04-20:estimatedVo2Max");
+  const signals = selectBrowserVaultSignals(createBrowserVaultQueryClient(parseBrowserVaultReplica(replica)));
+
+  assert.ok(activityDay);
+  assert.ok(vo2Metric);
+  assert.equal(activityDay.metrics.estimatedVo2Max.selection.unit, "ml/kg/min");
+  assert.equal(activityDay.metrics.estimatedVo2Max.selection.value, 48.6);
+  assert.equal(vo2Metric.value, 48.6);
+  assert.equal(signals.activity[0]?.estimatedVo2Max.selection.value, 48.6);
+});
+
 test("browser vault replica parsing rejects malformed policy, metric, and timeline fields", () => {
   const replica = createReplicaFixture();
 
