@@ -147,6 +147,7 @@ export async function startHostedLocalFullStackScenario(input: {
       ...baseEnvironment,
       ...hostedAssistantDevEnv,
       ...resolveHostedLocalSmokeWebEnv(baseEnvironment),
+      MURPH_DEV_SKIP_STRIPE_LISTEN: "1",
       ...(input.additionalEnv ?? {}),
       DATABASE_URL: localDatabaseUrl,
       HOSTED_EXECUTION_RUNNER_ENV_PROFILES: mergeRequiredEnvProfile(

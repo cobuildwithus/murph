@@ -14,6 +14,9 @@ import {
   type HostedLocalDevStack,
 } from "../../../../scripts/dev-hosted-local/stack.ts";
 
+const hostedLocalStatusTimeoutMs = 180_000;
+const hostedLocalStatusPollIntervalMs = 250;
+
 export interface HostedLocalDevHarness {
   config: ReturnType<typeof resolveHostedLocalDevConfig>;
   oidcToken: string;
@@ -149,8 +152,8 @@ export async function startHostedLocalDevHarness(input: {
           timeoutMs?: number;
         } = {},
       ): Promise<HostedExecutionUserStatus> => {
-        const timeoutMs = pollInput.timeoutMs ?? 180_000;
-        const pollIntervalMs = pollInput.pollIntervalMs ?? 1_000;
+        const timeoutMs = pollInput.timeoutMs ?? hostedLocalStatusTimeoutMs;
+        const pollIntervalMs = pollInput.pollIntervalMs ?? hostedLocalStatusPollIntervalMs;
         const startedAt = Date.now();
 
         while ((Date.now() - startedAt) < timeoutMs) {
@@ -184,8 +187,8 @@ export async function startHostedLocalDevHarness(input: {
           timeoutMs?: number;
         } = {},
       ): Promise<HostedExecutionUserStatus> => {
-        const timeoutMs = pollInput.timeoutMs ?? 180_000;
-        const pollIntervalMs = pollInput.pollIntervalMs ?? 1_000;
+        const timeoutMs = pollInput.timeoutMs ?? hostedLocalStatusTimeoutMs;
+        const pollIntervalMs = pollInput.pollIntervalMs ?? hostedLocalStatusPollIntervalMs;
         const startedAt = Date.now();
 
         while ((Date.now() - startedAt) < timeoutMs) {

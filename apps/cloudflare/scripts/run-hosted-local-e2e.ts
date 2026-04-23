@@ -12,21 +12,8 @@ const hostedLocalFullStackE2eFiles = [
 ] as const;
 
 async function main(): Promise<void> {
-  await cleanupHostedRunnerContainers({
-    cwd: repoRoot,
-    env: process.env,
-    ignoreErrors: true,
-  });
-
   try {
-    for (const file of hostedLocalFullStackE2eFiles) {
-      await runVitestFile(file);
-      await cleanupHostedRunnerContainers({
-        cwd: repoRoot,
-        env: process.env,
-        ignoreErrors: true,
-      });
-    }
+    await runVitestFiles(hostedLocalFullStackE2eFiles);
   } finally {
     await cleanupHostedRunnerContainers({
       cwd: repoRoot,
@@ -36,7 +23,7 @@ async function main(): Promise<void> {
   }
 }
 
-async function runVitestFile(file: string): Promise<void> {
+async function runVitestFiles(files: readonly string[]): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     const child = spawn("pnpm", [
       "exec",
@@ -44,7 +31,7 @@ async function runVitestFile(file: string): Promise<void> {
       "run",
       "--config",
       "apps/cloudflare/vitest.e2e.config.ts",
-      file,
+      ...files,
       "--no-coverage",
     ], {
       cwd: repoRoot,
@@ -61,8 +48,8 @@ async function runVitestFile(file: string): Promise<void> {
 
       reject(new Error(
         signal
-          ? `Hosted local full-stack e2e file ${file} exited with signal ${signal}.`
-          : `Hosted local full-stack e2e file ${file} exited with code ${code ?? "unknown"}.`,
+          ? `Hosted local full-stack e2e suite exited with signal ${signal}.`
+          : `Hosted local full-stack e2e suite exited with code ${code ?? "unknown"}.`,
       ));
     });
   });
