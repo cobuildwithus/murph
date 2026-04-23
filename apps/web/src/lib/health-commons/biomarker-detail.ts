@@ -8,7 +8,9 @@ import type {
   HealthCommonsBiomarkerProtocolRelationship,
   HealthCommonsBiomarkerProtocolScoring,
   HealthCommonsBiomarkerTrendAggregation,
+  HealthCommonsClaim,
   HealthCommonsInterpretationFrame,
+  HealthCommonsSource,
 } from "@murphai/contracts/health-commons";
 
 import {
@@ -67,6 +69,27 @@ export interface BiomarkerMeasurementModel {
   howToMeasure: string[];
 }
 
+export interface BiomarkerSourceModel {
+  citation: string | null;
+  evidenceLabel: string;
+  externalUrl: string | null;
+  key: string;
+  summary: string;
+  title: string;
+  typeLabel: string;
+  year: number | null;
+}
+
+export interface BiomarkerClaimModel {
+  caveats: string[];
+  claimId: string;
+  sourceKeys: string[];
+  sources: BiomarkerSourceModel[];
+  strength: HealthCommonsClaim["strength"];
+  text: string;
+  type: HealthCommonsClaim["type"];
+}
+
 export interface BiomarkerProtocolRankingModel {
   burdenLabel: string;
   cautionLabel: string;
@@ -90,6 +113,7 @@ export interface BiomarkerPageModel {
   body: string;
   catalogHash: string;
   categories: string[];
+  claims: BiomarkerClaimModel[];
   communityOutcomeSummary: HealthCommonsBiomarkerCommunityOutcomeSummary;
   explainerCards: HealthCommonsBiomarkerExplainerCard[];
   interpretationFrame: HealthCommonsInterpretationFrame;
@@ -105,6 +129,7 @@ export interface BiomarkerPageModel {
   routeId: string;
   shortName: string;
   slug: string;
+  sourceHighlights: BiomarkerSourceModel[];
   statusLabel: string;
   summary: string;
   title: string;
@@ -167,6 +192,7 @@ function toBiomarkerPageModel(
     body: biomarker.body,
     catalogHash: catalog.catalogHash,
     categories: biomarker.categories ?? [],
+    claims: buildBiomarkerClaims(biomarker, catalog),
     communityOutcomeSummary: biomarker.communityOutcomeSummary ?? {
       minimumCohortSize: 20,
       placeholder: "Community outcome summaries will appear once enough opted-in Murph runs are available.",
@@ -198,6 +224,7 @@ function toBiomarkerPageModel(
     routeId: toTrailingRouteId(biomarker.slug),
     shortName: biomarkerSpec?.shortName ?? biomarker.aliases?.[0] ?? biomarker.title,
     slug: biomarker.slug,
+    sourceHighlights: buildBiomarkerSourceHighlights(biomarker, catalog),
     statusLabel: formatStatusLabel(biomarker.status),
     summary: biomarker.summary ?? summarizeBody(biomarker.body),
     title: biomarkerSpec?.displayName ?? biomarker.title,
@@ -215,6 +242,142 @@ function isPublishedBiomarker(entity: HealthCommonsEntity): boolean {
     && (entity.protocolRanking?.candidates?.length ?? 0) > 0
     && entity.communityOutcomeSummary != null
     && (entity.biomarker?.privateMetricBindings?.some(isBrowserVaultMetricBinding) ?? false);
+}
+
+function buildBiomarkerClaims(
+  biomarker: HealthCommonsEntity,
+  catalog: HealthCommonsCatalogReader,
+): BiomarkerClaimModel[] {
+  return (biomarker.claims ?? []).map((claim) => ({
+    caveats: claim.caveats ?? [],
+    claimId: claim.claimId,
+    sourceKeys: claim.sourceKeys ?? [],
+    sources: resolveClaimSources(claim, catalog),
+    strength: claim.strength,
+    text: claim.text,
+    type: claim.type,
+  }));
+}
+
+function buildBiomarkerSourceHighlights(
+  biomarker: HealthCommonsEntity,
+  catalog: HealthCommonsCatalogReader,
+): BiomarkerSourceModel[] {
+  const claimSourceOrder = new Map<string, number>();
+  let nextClaimSourceIndex = 0;
+  for (const claim of biomarker.claims ?? []) {
+    for (const sourceKey of claim.sourceKeys ?? []) {
+      if (!claimSourceOrder.has(sourceKey)) {
+        claimSourceOrder.set(sourceKey, nextClaimSourceIndex);
+        nextClaimSourceIndex += 1;
+      }
+    }
+  }
+
+  const citedSources = catalog.listRelated({
+    entity: biomarker,
+    entityTypes: ["source_artifact"],
+    relationTypes: ["cites"],
+  });
+  const claimSources = (biomarker.claims ?? []).flatMap((claim) =>
+    resolveClaimSourceEntities(claim, catalog)
+  );
+
+  return uniqueEntities([...claimSources, ...citedSources])
+    .sort((left, right) => compareBiomarkerSourceEntities(left, right, claimSourceOrder))
+    .map(toBiomarkerSourceModel);
+}
+
+function resolveClaimSources(
+  claim: HealthCommonsClaim,
+  catalog: HealthCommonsCatalogReader,
+): BiomarkerSourceModel[] {
+  return resolveClaimSourceEntities(claim, catalog).map(toBiomarkerSourceModel);
+}
+
+function resolveClaimSourceEntities(
+  claim: HealthCommonsClaim,
+  catalog: HealthCommonsCatalogReader,
+): HealthCommonsEntity[] {
+  return (claim.sourceKeys ?? []).flatMap((sourceKey) => {
+    const source = catalog.findByKey(sourceKey);
+
+    return source?.entityType === "source_artifact" ? [source] : [];
+  });
+}
+
+function toBiomarkerSourceModel(sourceEntity: HealthCommonsEntity): BiomarkerSourceModel {
+  const source: HealthCommonsSource | undefined = sourceEntity.source;
+
+  return {
+    citation: source?.citation ?? null,
+    evidenceLabel: sourceEntity.researchEvidence?.designLabel
+      ?? formatSourceKind(source?.kind ?? sourceEntity.entityType),
+    externalUrl: source?.url ?? null,
+    key: sourceEntity.key,
+    summary: resolveBiomarkerSourceSummary(sourceEntity),
+    title: source?.title ?? sourceEntity.title,
+    typeLabel: formatSourceKind(source?.kind ?? sourceEntity.entityType),
+    year: source?.year ?? null,
+  };
+}
+
+function compareBiomarkerSourceEntities(
+  left: HealthCommonsEntity,
+  right: HealthCommonsEntity,
+  claimSourceOrder: ReadonlyMap<string, number>,
+): number {
+  const leftClaimOrder = claimSourceOrder.get(left.key);
+  const rightClaimOrder = claimSourceOrder.get(right.key);
+
+  if (leftClaimOrder !== rightClaimOrder) {
+    if (leftClaimOrder === undefined) {
+      return 1;
+    }
+
+    if (rightClaimOrder === undefined) {
+      return -1;
+    }
+
+    return leftClaimOrder - rightClaimOrder;
+  }
+
+  const leftYear = left.source?.year ?? 0;
+  const rightYear = right.source?.year ?? 0;
+
+  if (leftYear !== rightYear) {
+    return rightYear - leftYear;
+  }
+
+  return left.title.localeCompare(right.title);
+}
+
+function formatSourceKind(value: string): string {
+  return formatWords(value.replace(/_/gu, " "));
+}
+
+function readEntityString(entity: HealthCommonsEntity, key: string): string | null {
+  const value = (entity as Record<string, unknown>)[key];
+
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
+}
+
+function resolveBiomarkerSourceSummary(entity: HealthCommonsEntity): string {
+  const murphTakeaway = readEntityString(entity, "murphTakeaway");
+  if (murphTakeaway) {
+    return murphTakeaway;
+  }
+
+  const whyItMatters = readEntityString(entity, "whyItMatters");
+  if (whyItMatters) {
+    return whyItMatters;
+  }
+
+  if (typeof entity.summary === "string" && entity.summary.trim().length > 0) {
+    return entity.summary;
+  }
+
+  return summarizeBody(entity.body);
 }
 
 function buildProtocolRankings(input: {
