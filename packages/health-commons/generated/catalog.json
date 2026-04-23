@@ -1576,7 +1576,7 @@
       "schemaVersion": "murph.commons.artifact-manifest.v1"
     }
   ],
-  "catalogHash": "sha256:f0b6e1b386e5c4ab65bc825514d2cafd197739e989d4e7755ea7d86ecf46e2b0",
+  "catalogHash": "sha256:09125f5c72e222afa8f59d45eaca96066e2f602af913d11a28beaa311bb85d72",
   "changes": [
     {
       "affectedFields": [
@@ -2408,6 +2408,36 @@
     },
     {
       "affectedFields": [
+        "content/biomarkers/blood-glucose.md",
+        "content/sources/blood-glucose/*.md",
+        "packages/query/browser-vault glucose metric projection",
+        "generated.catalog"
+      ],
+      "changeId": "chg_2026_04_23_blood_glucose_biomarker_page",
+      "changeType": "seed",
+      "editSummary": "Added a publishable Blood Glucose biomarker page with diagnostic boundaries, monitoring/device guardrails, hypoglycemia safety language, protocol rankings, and source-backed claims.",
+      "entityKey": "biomarker:blood-glucose",
+      "minor": false,
+      "rationale": "Murph needs a glucose page that separates clinical diagnosis from personal tracking, surfaces method and timing context, and can read imported glucose samples in the private browser-vault biomarker trend card.",
+      "reviewStatus": "proposed",
+      "schemaVersion": "murph.commons.change.v1",
+      "sourceKeys": [
+        "source_artifact:ada-standards-2026-diagnosis",
+        "source_artifact:ada-standards-2026-glycemic-goals",
+        "source_artifact:ada-diabetes-diagnosis",
+        "source_artifact:niddk-diabetes-prediabetes-tests",
+        "source_artifact:cdc-manage-blood-sugar-2024",
+        "source_artifact:cdc-low-blood-sugar-2024",
+        "source_artifact:ada-blood-glucose-meters",
+        "source_artifact:fda-noninvasive-glucose-wearable-warning-2024",
+        "source_artifact:pmid-11832527",
+        "source_artifact:pmid-35029593",
+        "source_artifact:pmid-36715875",
+        "source_artifact:pmid-31915891"
+      ]
+    },
+    {
+      "affectedFields": [
         "biomarker",
         "relations",
         "protocolRanking",
@@ -2438,69 +2468,1122 @@
   "entities": [
     {
       "aliases": [
-        "deep sleep"
+        "glucose",
+        "blood sugar",
+        "fasting glucose",
+        "fasting blood glucose",
+        "finger-stick glucose",
+        "CGM glucose",
+        "sensor glucose"
       ],
-      "body": "Deep sleep minutes can be useful context, but they should not carry the whole verdict on whether a dry-sauna experiment worked.\n\nIf a strong deep-sleep signal repeats alongside other useful changes, it is worth noting. Broader sleep continuity and cardiovascular signals should still carry more weight.",
-      "categories": [
-        "sleep",
-        "wearable-metric"
-      ],
-      "entityType": "biomarker",
-      "interpretationFrame": {
-        "caveat": "Consumer wearables infer sleep stages and can disagree with one another.",
-        "principle": "Treat stage estimates as directional context, not exact physiology."
+      "biomarker": {
+        "direction": {
+          "desired": "mixed_or_contextual",
+          "label": "Lower spikes and safer time-in-range are usually better, but lows are dangerous.",
+          "nuance": "The right interpretation depends on diabetes status, pregnancy, medications, fasting state, meal timing, exercise timing, illness, and clinician-set targets. A lower value is not automatically better."
+        },
+        "displayName": "Blood Glucose",
+        "explainerCards": [
+          {
+            "body": "Blood glucose is the amount of glucose in blood at a moment in time. Murph treats imported glucose values as a private trend signal, not as a diagnostic label.",
+            "title": "What it is"
+          },
+          {
+            "body": "Glucose patterns can show fasting control, post-meal excursions, overnight stability, hypoglycemia risk, and how meals, exercise, sleep, stress, alcohol, and illness interact.",
+            "title": "Why people care"
+          },
+          {
+            "body": "Compare like with like. A fasting lab glucose should not be averaged with a post-dinner finger-stick or a CGM sensor value during exercise. Segment by timing and device before deciding what changed.",
+            "title": "How to read it"
+          },
+          {
+            "body": "Meal carbohydrate, meal timing, activity, exercise timing, diabetes medications, illness, stress, sleep loss, circadian disruption, alcohol, dehydration, sensor placement, strip handling, and calibration issues can all move the number.",
+            "title": "What moves it"
+          },
+          {
+            "body": "Hypoglycemia is an immediate safety issue. If readings are unexpectedly low, symptoms do not match the device, or insulin or sulfonylurea dosing is involved, follow the clinical plan and confirm with an approved meter or clinician-guided workflow.",
+            "title": "Safety first"
+          }
+        ],
+        "measurement": {
+          "bestContext": "Use explicit context labels: fasting lab FPG, waking home meter, pre-meal, one-to-two-hour post-meal, overnight CGM, exercise window, sick day, or medication window. Murph should compare like-context windows rather than mixing every glucose number into one generic average.",
+          "confounders": [
+            "meal carbohydrate and meal timing",
+            "fasting duration",
+            "exercise timing and intensity",
+            "insulin and glucose-lowering medications",
+            "illness, infection, or acute stress",
+            "sleep loss and circadian disruption",
+            "alcohol",
+            "dehydration",
+            "pregnancy",
+            "CGM lag or compression lows",
+            "meter strip storage or expiration",
+            "device, sensor, or calibration changes"
+          ],
+          "howToMeasure": [
+            "For diagnosis, use clinician-ordered laboratory tests such as fasting plasma glucose, A1C, oral glucose tolerance testing, or random plasma glucose in the appropriate clinical context.",
+            "For home finger-stick checks, use an FDA-cleared meter and strips, wash and dry hands, use unexpired strips stored as directed, and record the timing relative to meals, activity, symptoms, and medications.",
+            "For CGM, treat the sensor as a glucose-trend system; confirm with a blood glucose meter when symptoms and sensor readings do not match, when readings are changing rapidly, or when the device instructions require confirmation.",
+            "Capture context fields whenever possible: fasting duration, meal time, carbohydrate-heavy meals, activity or exercise, sleep disruption, alcohol, illness, stress, insulin or sulfonylurea use, and sensor or meter changes.",
+            "Prefer medians, time-in-range style summaries, and same-context before/after windows over isolated readings."
+          ]
+        },
+        "privateMetricBindings": [
+          {
+            "domain": "body_state",
+            "metric": "glucose",
+            "preferred": true,
+            "source": "browser_vault_metric",
+            "unit": "mg_dL"
+          }
+        ],
+        "shortName": "Glucose",
+        "trendDefaults": {
+          "aggregation": "median",
+          "comparisonWindowDays": 30,
+          "latestWindowDays": 14,
+          "minimumPoints": 7
+        },
+        "unit": "mg/dL",
+        "valuePrecision": 0
       },
-      "key": "biomarker:deep-sleep-minutes",
-      "measurementContexts": [
-        "overnight_wearable"
+      "body": "Blood glucose is one of the most useful and most easily misread biomarkers in a personal health vault. It is useful because it changes quickly enough to reveal meal, activity, sleep, stress, alcohol, illness, and medication effects. It is easily misread because the same number can mean different things depending on whether it came from a fasting laboratory draw, a waking finger-stick, a post-meal check, a CGM trace, an exercise window, or an illness day.\n\n## Diagnosis and self-tracking are different jobs\n\nMurph should keep a strict boundary between clinical diagnosis and personal trend interpretation. Fasting plasma glucose, A1C, oral glucose tolerance testing, and random plasma glucose are clinical tests with specific diagnostic rules. A home glucose meter or CGM trace can be useful for day-to-day management and experiments, but it is not a diagnosis engine.\n\nUseful reference anchors:\n\n- **Fasting plasma glucose:** under 100 mg/dL is commonly described as normal, 100 to 125 mg/dL as impaired fasting glucose or prediabetes range, and 126 mg/dL or higher as a diabetes-range result when confirmed in the right clinical context.\n- **Oral glucose tolerance testing:** two-hour values below 140 mg/dL are commonly described as normal, 140 to 199 mg/dL as prediabetes range, and 200 mg/dL or higher as diabetes range when interpreted clinically.\n- **Diabetes-management targets:** many diabetes education materials use 80 to 130 mg/dL before meals and less than 180 mg/dL two hours after a meal as typical targets, but those targets are individualized.\n- **Low glucose:** below 70 mg/dL is a common action threshold in diabetes education and is a safety issue, not a score to optimize downward.\n\nThose anchors should be visible as context, but Murph should not label a person as normal, prediabetic, diabetic, controlled, or uncontrolled from a private trend card.\n\n## Context buckets Murph should avoid mixing\n\nThe safest product behavior is to segment glucose into explicit buckets before summarizing it:\n\n- **Fasting laboratory plasma glucose** for clinical reference.\n- **Waking home meter glucose** for a consistent self-tracking window.\n- **Pre-meal finger-stick glucose** for meal and medication context.\n- **One-to-two-hour post-meal glucose** for postprandial excursions.\n- **CGM overnight summaries** for nocturnal stability and possible lows.\n- **Exercise-window readings** for activity response and hypoglycemia risk.\n- **Sick-day readings** for illness, ketone, and clinician-plan context.\n\nA single combined glucose average is often less informative than a small number of labeled, same-context trend lines.\n\n## What can move blood glucose\n\nFood and activity are only the obvious movers. Glucose can also move with sleep restriction, circadian disruption, late meals, acute stress, infection, injury, dehydration, alcohol, menstrual cycle phase, pregnancy, insulin or sulfonylurea dosing, steroid medication, sensor lag, compression lows, strip storage, device changes, and whether the user washed their hands before a finger-stick.\n\nThat is why the page treats glucose as **mixed_or_contextual** rather than simply “lower is better.” Lower post-meal spikes may be a reasonable experiment goal for many users, but hypoglycemia is dangerous and should never be rewarded.\n\n## How Murph should display it\n\nFor the first Murph implementation, imported `glucose` samples are projected into the private browser vault as a daily `body_state:glucose` metric. The biomarker card can show a private trend when enough values exist, but product copy should still remind users that:\n\n- the trend is private,\n- the trend is not diagnostic,\n- the unit and method matter,\n- same-context comparisons are preferable,\n- symptoms and clinical plans override app interpretation.\n\nFuture versions should add richer glucose-specific summaries: fasting median, post-meal peak or area-under-curve, time above range, time below range, overnight lows, coefficient of variation, and method labels for CGM versus finger-stick versus lab.\n\n## Protocol interpretation\n\nThe strongest protocol relationship in the current Commons set is regular physical activity, represented here by Norwegian 4x4 as a secondary glucose candidate rather than as a glucose-first protocol. Post-meal walking evidence is particularly useful for designing future meal-timed micro-experiments, but that protocol is not yet a first-class Murph variant in this snapshot.\n\nRed-light glasses before bed remain a low-confidence indirect candidate because circadian and sleep context matter for glucose, not because the glasses themselves have been proven as a glucose treatment. Sauna is listed as a cautious manual candidate only because heat exposure can change recovery and hydration context; it should not be presented as a glucose-lowering protocol from this evidence set.\n\n## Safety boundary\n\nPeople using insulin, sulfonylureas, or other glucose-lowering medications need to follow their clinician's instructions for glucose monitoring, hypoglycemia treatment, sick-day rules, exercise, and dose changes. Murph should never suggest medication changes, insulin dosing, or ignoring unexpected lows or symptoms.",
+      "categories": [
+        "metabolic",
+        "glycemic-control",
+        "body-state",
+        "sample-metric",
+        "clinical-lab",
+        "cgm"
       ],
-      "quality": "usable",
-      "relations": [
+      "claims": [
         {
-          "target": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
-          "type": "related_protocol"
+          "caveats": [
+            "Laboratory plasma glucose, A1C, OGTT, random plasma glucose, home blood meters, and CGM sensor glucose each have different uses and error models."
+          ],
+          "claimId": "blood-glucose-diagnostic-lab-thresholds",
+          "sourceKeys": [
+            "source_artifact:ada-standards-2026-diagnosis",
+            "source_artifact:ada-diabetes-diagnosis",
+            "source_artifact:niddk-diabetes-prediabetes-tests"
+          ],
+          "strength": "high",
+          "text": "Fasting plasma glucose and oral glucose tolerance thresholds are diagnostic anchors only when measured in the right clinical context, usually with confirmation; Murph should surface them as reference context, not diagnose users.",
+          "type": "evidence_scope"
+        },
+        {
+          "caveats": [
+            "Targets vary by age, pregnancy, comorbidities, medications, hypoglycemia risk, and clinician plan."
+          ],
+          "claimId": "blood-glucose-monitoring-targets-contextual",
+          "sourceKeys": [
+            "source_artifact:cdc-manage-blood-sugar-2024",
+            "source_artifact:ada-standards-2026-glycemic-goals"
+          ],
+          "strength": "moderate",
+          "text": "Common diabetes-management targets such as pre-meal 80 to 130 mg/dL and less than 180 mg/dL two hours after a meal are personalized treatment targets, not universal wellness goals.",
+          "type": "evidence_scope"
+        },
+        {
+          "caveats": [
+            "Symptoms, insulin use, sulfonylureas, alcohol, exercise, and impaired hypoglycemia awareness can change urgency."
+          ],
+          "claimId": "blood-glucose-low-is-safety-critical",
+          "sourceKeys": [
+            "source_artifact:cdc-low-blood-sugar-2024",
+            "source_artifact:ada-standards-2026-glycemic-goals"
+          ],
+          "strength": "high",
+          "text": "Glucose below 70 mg/dL is generally treated as low blood sugar in diabetes education, and lower or symptomatic readings deserve immediate action according to the user's clinical plan.",
+          "type": "safety"
+        },
+        {
+          "caveats": [
+            "Approved CGM workflows can be appropriate for people with diabetes, but device instructions and confirmatory meter checks still matter."
+          ],
+          "claimId": "blood-glucose-device-method-caveat",
+          "sourceKeys": [
+            "source_artifact:ada-blood-glucose-meters",
+            "source_artifact:cdc-manage-blood-sugar-2024",
+            "source_artifact:fda-noninvasive-glucose-wearable-warning-2024"
+          ],
+          "strength": "high",
+          "text": "Home meters, CGMs, and unauthorized noninvasive wearables should not be treated as interchangeable. Murph should label method, device, and confidence and should not promote smartwatch or ring-only glucose claims.",
+          "type": "design_guardrail"
+        },
+        {
+          "caveats": [
+            "Effects differ by diabetes status, medication use, meal composition, intensity, timing, and baseline fitness."
+          ],
+          "claimId": "blood-glucose-lifestyle-moves-glucose",
+          "sourceKeys": [
+            "source_artifact:pmid-11832527",
+            "source_artifact:pmid-35029593",
+            "source_artifact:pmid-36715875"
+          ],
+          "strength": "moderate",
+          "text": "Lifestyle change and regular physical activity can improve glucose control or diabetes-risk outcomes, while post-meal walking is a plausible short-window experiment for reducing postprandial excursions.",
+          "type": "intervention_result"
+        },
+        {
+          "caveats": [
+            "Circadian evidence supports context and hypothesis generation more than it proves any single consumer sleep protocol will improve glucose."
+          ],
+          "claimId": "blood-glucose-sleep-circadian-context",
+          "sourceKeys": [
+            "source_artifact:pmid-31915891"
+          ],
+          "strength": "moderate",
+          "text": "Sleep and circadian disruption can affect glucose metabolism, so glucose trend interpretation should keep sleep timing, shift work, travel, and late meals visible.",
+          "type": "mechanistic"
         }
       ],
-      "relativePath": "biomarkers/deep-sleep-minutes.md",
-      "revision": {
-        "pageRevisionId": "sha256:83958181cf383cda6d51a85e735802e4d5b184c43f616846d13d8951c0f291fd",
-        "recipeHash": null,
-        "runSpecRevisionId": null
+      "communityOutcomeSummary": {
+        "minimumCohortSize": 30,
+        "placeholder": "Early Murph glucose outcome summaries will appear once enough opted-in experiment runs include glucose samples with timing context.",
+        "state": "coming_soon"
       },
-      "schemaVersion": "murph.commons.page.v1",
-      "slug": "biomarkers/deep-sleep-minutes",
-      "status": "draft",
-      "summary": "A wearable-estimated sleep-stage marker that can be interesting, but is less reliable than broad sleep duration or continuity trends.",
-      "title": "Deep Sleep Minutes",
-      "unit": "minutes"
-    },
-    {
-      "aliases": [
-        "wearable VO2max",
-        "cardio fitness estimate",
-        "estimated cardio fitness"
-      ],
-      "body": "Estimated VO2max is a practical signal for Norwegian 4x4 because the intervention literature targets cardiorespiratory fitness, but most people have consumer wearable estimates rather than lab testing.\n\nInterpret this marker as a noisy proxy. A useful result should combine this estimate with session fidelity, heart-rate recovery, symptoms, and adherence.",
-      "categories": [
-        "cardiovascular",
-        "fitness",
-        "wearable-metric"
-      ],
       "entityType": "biomarker",
       "interpretationFrame": {
-        "caveat": "Consumer estimates are not laboratory gas-exchange VO2max measurements and may update slowly or noisily.",
-        "principle": "Trend direction and repeated signal are more useful than a single absolute value."
+        "caveat": "Blood/finger-stick, laboratory plasma, and CGM interstitial sensor glucose are related but not interchangeable. Diagnosis and medication decisions require clinician-guided lab testing or approved diabetes-monitoring workflows, not Murph trend cards.",
+        "principle": "Segment by context before interpreting. Fasting lab values, waking finger-stick checks, pre-meal values, post-meal values, overnight CGM summaries, exercise windows, illness windows, and medication windows answer different questions."
       },
-      "key": "biomarker:estimated-vo2max",
+      "key": "biomarker:blood-glucose",
       "measurementContexts": [
-        "wearable_cardio_fitness",
-        "field_test_proxy"
+        "fasting_lab_plasma_glucose",
+        "waking_home_meter",
+        "pre_meal_fingerstick",
+        "postprandial_glucose",
+        "continuous_glucose_monitoring",
+        "overnight_cgm"
       ],
+      "protocolRanking": {
+        "candidates": [
+          {
+            "display": {
+              "burdenLabel": "High",
+              "cautionLabel": "Higher",
+              "confidence": "medium"
+            },
+            "expectedDirection": "down_or_stable",
+            "mechanism": "Repeated aerobic training can improve insulin sensitivity and muscle glucose disposal, but glucose is a secondary endpoint for this protocol and medication-associated hypoglycemia risk must be visible.",
+            "protocolKey": "protocol_variant:norwegian-4x4/norwegian-4x4",
+            "relationship": "secondary_biomarker",
+            "scoring": {
+              "biomarkerRelevance": 3,
+              "burdenPenalty": 4,
+              "evidenceWeight": 3,
+              "safetyCautionPenalty": 3,
+              "wearableMeasurability": 3
+            }
+          },
+          {
+            "display": {
+              "burdenLabel": "Low",
+              "cautionLabel": "Low",
+              "confidence": "low"
+            },
+            "expectedDirection": "mixed_or_contextual",
+            "mechanism": "Evening light reduction may improve sleep timing or circadian regularity, which can indirectly matter for glucose interpretation, but direct evidence for this consumer protocol as a glucose intervention is sparse.",
+            "protocolKey": "protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed",
+            "relationship": "secondary_biomarker",
+            "scoring": {
+              "biomarkerRelevance": 2,
+              "burdenPenalty": 1,
+              "evidenceWeight": 2,
+              "safetyCautionPenalty": 1,
+              "wearableMeasurability": 3
+            }
+          },
+          {
+            "display": {
+              "burdenLabel": "Moderate",
+              "cautionLabel": "Moderate",
+              "confidence": "low"
+            },
+            "expectedDirection": "mixed_or_contextual",
+            "mechanism": "Passive heat can change autonomic tone, hydration, and recovery context, but it is not a validated glucose-lowering self-test in this Commons set and can confound readings through dehydration or heat stress.",
+            "protocolKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+            "relationship": "manual_candidate",
+            "scoring": {
+              "biomarkerRelevance": 1,
+              "burdenPenalty": 2,
+              "evidenceWeight": 1,
+              "safetyCautionPenalty": 3,
+              "wearableMeasurability": 3
+            }
+          }
+        ],
+        "scoreFormula": "evidenceWeight * 3 + biomarkerRelevance * 3 + wearableMeasurability * 2 - burdenPenalty - safetyCautionPenalty + communityOutcomeConfidence",
+        "version": "deterministic-v0"
+      },
       "quality": "usable",
       "relations": [
         {
           "target": "protocol_variant:norwegian-4x4/norwegian-4x4",
           "type": "related_protocol"
+        },
+        {
+          "target": "protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed",
+          "type": "related_protocol"
+        },
+        {
+          "target": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "type": "related_protocol"
+        },
+        {
+          "target": "source_artifact:ada-standards-2026-diagnosis",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:ada-standards-2026-glycemic-goals",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:ada-diabetes-diagnosis",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:niddk-diabetes-prediabetes-tests",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:cdc-manage-blood-sugar-2024",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:cdc-low-blood-sugar-2024",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:ada-blood-glucose-meters",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:fda-noninvasive-glucose-wearable-warning-2024",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-11832527",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-35029593",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-36715875",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-31915891",
+          "type": "cites"
+        }
+      ],
+      "relativePath": "biomarkers/blood-glucose.md",
+      "revision": {
+        "pageRevisionId": "sha256:c6aed219455d44f239deca0b5ac2a058ef01449bde6d09bdbad73c12e315561e",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "biomarkers/blood-glucose",
+      "status": "field-testing",
+      "summary": "A high-signal but context-heavy metabolic biomarker from lab fasting plasma glucose, finger-stick blood glucose, or CGM/sensor glucose; useful for personal trends only when timing, device, meal, medication, sleep, illness, and activity context stay visible.",
+      "title": "Blood Glucose",
+      "unit": "mg/dL"
+    },
+    {
+      "aliases": [
+        "SpO2",
+        "SpO₂",
+        "blood oxygen",
+        "blood oxygen level",
+        "blood oxygen saturation",
+        "oxygen saturation",
+        "pulse ox",
+        "pulse oximetry"
+      ],
+      "biomarker": {
+        "direction": {
+          "desired": "stable",
+          "label": "Stable in your normal range is usually the goal.",
+          "nuance": "For many healthy sea-level adults, SpO₂ already sits near a physiological ceiling. Higher is not an experiment target; repeated lows, drops from baseline, or lows paired with shortness of breath, chest pain, confusion, bluish lips or nails, or unusual fatigue deserve medical context."
+        },
+        "displayName": "Blood Oxygen Saturation (SpO₂)",
+        "explainerCards": [
+          {
+            "body": "SpO₂ is a pulse-oximetry estimate of the percentage of hemoglobin carrying oxygen. Murph treats it as a respiratory, sleep, altitude, illness, and safety-context signal rather than a performance score.",
+            "title": "What it is"
+          },
+          {
+            "body": "SpO₂ can help contextualize sleep-disordered breathing patterns, respiratory illness, altitude exposure, recovery strain, and symptom-matched low-oxygen warnings. It is most useful when compared with your own same-device baseline.",
+            "title": "Why people care"
+          },
+          {
+            "body": "Use overnight wearable trends for repeated personal context and a medical-grade finger pulse oximeter for careful symptom-driven spot checks. Prefer medians and repeated patterns over one noisy reading.",
+            "title": "How to read it"
+          },
+          {
+            "body": "Cold hands, poor circulation, movement, sensor fit, nail polish or artificial nails, tobacco or carbon monoxide exposure, skin pigmentation, altitude, illness, and general-wellness device limits can all distort readings.",
+            "title": "What can fool it"
+          }
+        ],
+        "measurement": {
+          "bestContext": "For self-tracking, overnight wearable SpO₂ is best for repeated personal trend and desaturation context; a medical-grade finger pulse oximeter is better for symptom-driven spot checks; arterial blood gas or clinical co-oximetry remains more definitive in clinical care.",
+          "confounders": [
+            "device class",
+            "skin pigmentation",
+            "cold hands",
+            "poor circulation",
+            "low perfusion",
+            "movement artifact",
+            "sensor fit",
+            "nail polish",
+            "artificial nails",
+            "tobacco exposure",
+            "carbon monoxide exposure",
+            "methemoglobinemia or dyes",
+            "altitude",
+            "acute respiratory infection",
+            "asthma or COPD flare",
+            "pneumonia",
+            "sleep apnea",
+            "supplemental oxygen",
+            "device firmware changes"
+          ],
+          "howToMeasure": [
+            "Compare like with like: same device, same sensor placement, same time window, and the same daytime-versus-overnight context.",
+            "For a finger pulse oximeter, use a warm relaxed hand, remove nail polish or artificial nails when practical, sit still, keep the hand below heart level if instructed, and wait until the number is steady before recording it.",
+            "Record date, time, symptoms, altitude or travel, respiratory illness, fever, asthma or COPD flare, unusual fatigue, chest discomfort, shortness of breath, supplemental oxygen use, and device changes.",
+            "For overnight wearable data, separate the nightly median or average from desaturation events; a stable median can hide repeated dips, and a single dip can be movement artifact.",
+            "Do not use consumer wearable SpO₂ alone to diagnose sleep apnea, pneumonia, COPD exacerbation, heart disease, or any other condition. Use it to decide whether a symptom pattern or repeated trend deserves clinical follow-up.",
+            "Treat low readings that match concerning symptoms as safety context even if the wearable is imperfect; clinician-specific thresholds and emergency instructions override generic wellness ranges.",
+            "Do not try to optimize SpO₂ upward if it is already in your normal range. The practical goal is stable normal oxygenation and absence of repeated unexplained drops."
+          ]
+        },
+        "privateMetricBindings": [
+          {
+            "domain": "sleep",
+            "metric": "spo2",
+            "preferred": true,
+            "source": "browser_vault_metric",
+            "unit": "%"
+          },
+          {
+            "domain": "recovery",
+            "metric": "spo2",
+            "source": "browser_vault_metric",
+            "unit": "%"
+          },
+          {
+            "accessor": "sleep.spo2",
+            "source": "browser_vault_signal_summary",
+            "unit": "%"
+          }
+        ],
+        "shortName": "SpO₂",
+        "trendDefaults": {
+          "aggregation": "median",
+          "comparisonWindowDays": 30,
+          "latestWindowDays": 7,
+          "minimumPoints": 5
+        },
+        "unit": "%",
+        "valuePrecision": 1
+      },
+      "body": "SpO₂ is the pulse-oximetry estimate of arterial oxygen saturation: the percentage of hemoglobin binding sites carrying oxygen at the moment of measurement. In consumer health tracking, it is best treated as a respiratory and sleep-context biomarker, not as a score to maximize.\n\n## Practical baseline\n\nMany healthy sea-level adults will usually see readings in the mid-to-high 90s. The exact acceptable range is contextual: altitude, chronic lung disease, congenital or cardiac conditions, medication effects, recent respiratory illness, and clinician-directed oxygen targets can all change what is normal for a specific person.\n\nFor Murph, the most useful pattern is not “highest possible SpO₂.” It is whether the value remains stable in the user's own normal range and whether there are repeated unexplained lows, especially overnight or during illness.\n\n## Daytime spot checks versus overnight wearable trends\n\nA careful finger pulse-oximeter spot check is useful when the user has symptoms or wants a same-moment reading. It should be done with a warm hand, minimal movement, good sensor fit, and awareness of nail polish, skin temperature, and circulation.\n\nWearable overnight SpO₂ is better for repeated trend context. It can surface patterns that may be relevant to sleep-disordered breathing, altitude, alcohol, respiratory illness, or recovery strain. However, wrist and ring sensors are not the same thing as a diagnostic sleep study, and movement or fit artifacts can create false dips.\n\n## Interpretation rules for this page\n\nUse same-device 7-day medians against a longer personal baseline. Separate daytime readings from overnight readings. Keep symptom notes, altitude, illness, supplemental oxygen use, device changes, and sleep-quality changes visible next to the trend.\n\nA stable median does not rule out short desaturation events. A single low wearable datapoint does not diagnose disease. Repeated lows, drops from personal baseline, or lows paired with shortness of breath, chest pain, confusion, blue lips or nails, severe fatigue, or rapidly worsening illness deserve clinical context.\n\n## Why this is not an optimization target\n\nIn healthy users, SpO₂ already operates near a physiological ceiling. Exercise, sauna, sleep hygiene, and light protocols may improve other biomarkers without moving SpO₂ at all. That is not a failure. Murph should score most wellness protocols against their true primary endpoints and use SpO₂ as a guardrail, confounder, and respiratory-safety context marker.\n\n## Source posture\n\nThis page uses FDA pulse-oximeter guidance for device and home-monitoring caveats, clinical references for broad oxygen-saturation context, and sleep-medicine diagnostic guidance to avoid treating consumer overnight oxygen trends as a diagnosis of obstructive sleep apnea.",
+      "categories": [
+        "respiratory",
+        "cardiovascular",
+        "sleep",
+        "wearable-metric",
+        "safety-signal"
+      ],
+      "communityOutcomeSummary": {
+        "minimumCohortSize": 20,
+        "placeholder": "Early Murph outcome summaries will appear here once enough opted-in experiment runs are available.",
+        "state": "coming_soon"
+      },
+      "entityType": "biomarker",
+      "interpretationFrame": {
+        "caveat": "SpO₂ is vulnerable to device class, skin pigmentation, perfusion, temperature, movement, nail polish, tobacco or carbon-monoxide exposure, altitude, illness, and sleep-disordered breathing. Compare same-device same-context trends and treat low or symptom-matched readings as medical context.",
+        "principle": "Stable personal-normal readings matter more than chasing a higher number; repeated drops or symptom-matched lows are safety signals, not optimization targets."
+      },
+      "key": "biomarker:blood-oxygen-spo2",
+      "measurementContexts": [
+        "overnight_wearable",
+        "finger_pulse_oximeter",
+        "clinical_pulse_oximeter",
+        "high_altitude_context",
+        "symptom_context"
+      ],
+      "protocolRanking": {
+        "candidates": [
+          {
+            "display": {
+              "burdenLabel": "Low",
+              "cautionLabel": "Low",
+              "confidence": "low"
+            },
+            "expectedDirection": "stable",
+            "mechanism": "Evening light reduction may improve sleep timing or continuity, but it does not treat sleep apnea or hypoxemia. SpO₂ should remain stable; repeated overnight drops would be a safety-context signal rather than proof the protocol is working.",
+            "protocolKey": "protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed",
+            "relationship": "related_protocol",
+            "scoring": {
+              "biomarkerRelevance": 1,
+              "burdenPenalty": 1,
+              "evidenceWeight": 1,
+              "safetyCautionPenalty": 1,
+              "wearableMeasurability": 5
+            }
+          },
+          {
+            "display": {
+              "burdenLabel": "Moderate",
+              "cautionLabel": "Moderate",
+              "confidence": "low"
+            },
+            "expectedDirection": "stable",
+            "mechanism": "Sauna is a heat-stress and recovery experiment, not an oxygenation intervention. Tracking SpO₂ is mainly a guardrail: stable readings are reassuring, while symptom-matched lows after heat, dehydration, illness, or respiratory strain should not be ignored.",
+            "protocolKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+            "relationship": "related_protocol",
+            "scoring": {
+              "biomarkerRelevance": 1,
+              "burdenPenalty": 2,
+              "evidenceWeight": 1,
+              "safetyCautionPenalty": 2,
+              "wearableMeasurability": 5
+            }
+          },
+          {
+            "display": {
+              "burdenLabel": "High",
+              "cautionLabel": "Higher",
+              "confidence": "low"
+            },
+            "expectedDirection": "stable",
+            "mechanism": "Aerobic interval training targets cardiorespiratory fitness and estimated VO₂max, but resting or overnight SpO₂ is tightly regulated in healthy users. Use it as a safety and illness-context check, not as the primary success marker for 4x4 training.",
+            "protocolKey": "protocol_variant:norwegian-4x4/norwegian-4x4",
+            "relationship": "related_protocol",
+            "scoring": {
+              "biomarkerRelevance": 1,
+              "burdenPenalty": 4,
+              "evidenceWeight": 1,
+              "safetyCautionPenalty": 3,
+              "wearableMeasurability": 5
+            }
+          }
+        ],
+        "scoreFormula": "evidenceWeight * 3 + biomarkerRelevance * 3 + wearableMeasurability * 2 - burdenPenalty - safetyCautionPenalty + communityOutcomeConfidence",
+        "version": "deterministic-v0"
+      },
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed",
+          "type": "related_protocol"
+        },
+        {
+          "target": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "type": "related_protocol"
+        },
+        {
+          "target": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "type": "related_protocol"
+        },
+        {
+          "target": "source_artifact:fda-pulse-oximeter-basics-2025",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:fda-pulse-oximeter-skin-tone-guidance-2025",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-29262014",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:mayo-hypoxemia-pulse-oximetry",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:cleveland-clinic-blood-oxygen-level",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-28162150",
+          "type": "cites"
+        }
+      ],
+      "relativePath": "biomarkers/blood-oxygen-spo2.md",
+      "revision": {
+        "pageRevisionId": "sha256:01d6226b7ee82e7abe800b4ea5c02654409c60a75ef197d3ac503a39227394ab",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "biomarkers/blood-oxygen-spo2",
+      "status": "field-testing",
+      "summary": "A respiratory and sleep-context signal that estimates the percentage of oxygen-saturated hemoglobin in blood; useful for spotting personal baseline shifts, repeated overnight desaturation patterns, altitude or illness context, and symptom-matched safety signals.",
+      "title": "Blood Oxygen Saturation (SpO₂)",
+      "unit": "%"
+    },
+    {
+      "aliases": [
+        "deep sleep",
+        "slow-wave sleep",
+        "SWS",
+        "N3 sleep",
+        "delta sleep",
+        "deep sleep duration"
+      ],
+      "biomarker": {
+        "direction": {
+          "desired": "higher_or_stable",
+          "label": "More can be useful, but stable sufficient deep sleep alongside good continuity is the target.",
+          "nuance": "Do not chase deep sleep minutes at the expense of total sleep, regular timing, or feeling restored. A higher number from a wearable is not automatically a healthier night."
+        },
+        "displayName": "Deep Sleep Minutes",
+        "explainerCards": [
+          {
+            "body": "Deep sleep minutes are a device's estimate of time spent in N3 / slow-wave sleep, the EEG-defined non-REM stage dominated by slow waves.",
+            "title": "What it is"
+          },
+          {
+            "body": "Slow-wave sleep is linked to sleep depth, memory and learning biology, cardiometabolic physiology, and emerging glymphatic-clearance hypotheses, but those links do not make a consumer stage estimate diagnostic.",
+            "title": "Why people care"
+          },
+          {
+            "body": "Compare your own repeated windows on the same device. A useful signal is a persistent 14-to-30-day shift that travels with better sleep continuity or subjective restoration.",
+            "title": "How to read it"
+          },
+          {
+            "body": "Total sleep opportunity, earlier-night sleep, alcohol, illness, sleep apnea, fragmented sleep, late caffeine, late intense exercise, heat timing, stress, age, and device algorithms can all move the number.",
+            "title": "What moves it"
+          }
+        ],
+        "measurement": {
+          "bestContext": "Same-device overnight wearable data is best for self-tracking; polysomnography with EEG is the reference method when a clinical sleep question needs an answer.",
+          "confounders": [
+            "alcohol",
+            "illness",
+            "sleep apnea symptoms",
+            "fragmented sleep",
+            "short sleep opportunity",
+            "irregular bedtime",
+            "late caffeine",
+            "late intense exercise",
+            "sauna or hot-bath timing",
+            "travel",
+            "stress",
+            "age",
+            "naps",
+            "device or algorithm changes"
+          ],
+          "howToMeasure": [
+            "Use the same wearable and algorithm version when comparing baseline and intervention windows.",
+            "Prefer 14-day medians against a prior 30-day baseline; ignore one-night spikes unless they repeat.",
+            "Read deep sleep beside total sleep time, sleep efficiency, awakenings, wake-after-sleep-onset, timing regularity, and subjective restoration.",
+            "Tag confounders such as alcohol, illness, hard training, sauna or hot-bath timing, late caffeine, travel, device changes, and possible sleep apnea symptoms.",
+            "Escalate to clinical sleep testing rather than wearable-stage chasing when low deep sleep is paired with excessive sleepiness, loud snoring, witnessed apneas, insomnia, parasomnias, or safety-sensitive fatigue."
+          ]
+        },
+        "privateMetricBindings": [
+          {
+            "domain": "sleep",
+            "metric": "deepMinutes",
+            "preferred": true,
+            "source": "browser_vault_metric",
+            "unit": "minutes"
+          },
+          {
+            "accessor": "sleep.deepMinutes",
+            "source": "browser_vault_signal_summary",
+            "unit": "minutes"
+          }
+        ],
+        "shortName": "Deep sleep",
+        "trendDefaults": {
+          "aggregation": "median",
+          "comparisonWindowDays": 30,
+          "latestWindowDays": 14,
+          "minimumPoints": 7
+        },
+        "unit": "minutes",
+        "valuePrecision": 0
+      },
+      "body": "Deep sleep minutes are useful only when Murph keeps the measurement boundary clear: this page is about a **consumer-wearable estimate** of N3 / slow-wave sleep duration, not a direct laboratory measurement of slow-wave activity or glymphatic clearance.\n\n## Bottom line\n\nUse deep sleep minutes as a **secondary sleep architecture signal**. It can make a self-experiment more interesting when the trend repeats across many nights, but it should not override the broader sleep story. A strong read needs agreement across total sleep time, sleep efficiency, wake-after-sleep-onset, bedtime regularity, subjective restoration, and relevant confounder notes.\n\n## Why Murph includes it\n\nPeople ask about deep sleep because it feels intuitive: the number appears on many devices, and the underlying N3 / slow-wave literature is tied to sleep depth, memory and learning biology, blood-pressure associations, and brain-restoration hypotheses. Murph can support that curiosity while preventing overclaiming.\n\n## Measurement hierarchy\n\n1. **Clinical question:** use polysomnography or clinician-directed sleep testing.\n2. **Personal trend question:** use the same wearable, same finger or wrist placement, same device family, and same algorithm window.\n3. **Protocol verdict:** treat the deep-sleep number as secondary. Prefer outcomes that are less algorithm-dependent, such as total sleep, sleep efficiency, morning blood pressure, resting heart rate, HRV trend, and next-day functioning.\n\n## What makes a trend convincing\n\nA deep-sleep change is more credible when it persists across a 14-day median, is compared with at least a 30-day baseline, does not coincide with a device change, and is accompanied by fewer awakenings or better next-day restoration. It is less credible when it appears after alcohol, illness, travel, a late workout, a late sauna or hot bath, short sleep opportunity, or a device/algorithm update.\n\n## Safety and escalation\n\nDo not use this page to self-diagnose a sleep disorder. Persistent low deep sleep paired with excessive daytime sleepiness, loud snoring, witnessed apneas, insomnia, parasomnias, morning headaches, resistant hypertension, or safety-sensitive fatigue is a reason to seek clinical sleep guidance rather than optimize a wearable stage chart.",
+      "categories": [
+        "sleep",
+        "recovery",
+        "sleep-architecture",
+        "wearable-metric"
+      ],
+      "claims": [
+        {
+          "caveats": [
+            "AASM-style stage labels are 30-second epoch summaries; they simplify continuous sleep-depth physiology.",
+            "Age, sex, electrode placement, and EEG amplitude thresholds can change how N3 is scored even in laboratory data."
+          ],
+          "claimId": "n3-eeg-definition",
+          "sourceKeys": [
+            "source_artifact:doi-10.1093-sleep-zsaf063"
+          ],
+          "strength": "high",
+          "text": "Laboratory N3 / slow-wave sleep is an EEG-scored state, not a direct wrist or ring measurement; wearables estimate it from proxies such as movement, heart rate, heart-rate variability, temperature, and proprietary algorithms.",
+          "type": "evidence_scope"
+        },
+        {
+          "caveats": [
+            "Some devices perform better in healthy-lab samples than in clinical or fragmented-sleep populations.",
+            "Algorithm updates can change apparent trends without physiology changing."
+          ],
+          "claimId": "wearable-stage-noise",
+          "sourceKeys": [
+            "source_artifact:pmid-37917155-deep-sleep",
+            "source_artifact:pmid-39460013-deep-sleep",
+            "source_artifact:doi-10.1038-s41598-025-93774-z"
+          ],
+          "strength": "high",
+          "text": "Consumer wearables often detect sleep versus wake better than they classify specific stages, so Murph should treat deep sleep minutes as trend context rather than a clinical endpoint.",
+          "type": "design_guardrail"
+        },
+        {
+          "caveats": [
+            "Cohort associations can be confounded by age, sleep apnea, total sleep time, cardiometabolic risk, medications, and sleep fragmentation.",
+            "For a self-test, morning blood pressure and resting heart rate are stronger primary endpoints than wearable deep-sleep minutes."
+          ],
+          "claimId": "blood-pressure-association",
+          "sourceKeys": [
+            "source_artifact:pmid-21876072",
+            "source_artifact:pmid-29087522"
+          ],
+          "strength": "moderate",
+          "text": "Prospective cohort evidence links lower slow-wave sleep with higher incident hypertension risk, but this does not prove that deliberately increasing a wearable deep-sleep score lowers blood pressure.",
+          "type": "association_not_causation"
+        },
+        {
+          "caveats": [
+            "Glymphatic clearance is an active research area with rodent, imaging, and physiology evidence; it is not a consumer-wearable biomarker.",
+            "Subjective restoration can diverge from EEG-defined slow-wave activity."
+          ],
+          "claimId": "glymphatic-hypothesis-boundary",
+          "sourceKeys": [
+            "source_artifact:pmid-41325105"
+          ],
+          "strength": "low",
+          "text": "NREM slow-wave physiology is a plausible part of brain-restoration and glymphatic-clearance biology, but current human methods are not strong enough to infer glymphatic clearance from consumer deep-sleep minutes.",
+          "type": "mechanistic"
+        },
+        {
+          "caveats": [
+            "Prioritize total sleep time, sleep efficiency, bedtime regularity, wake-after-sleep-onset, and next-day functioning when these disagree with the stage estimate."
+          ],
+          "claimId": "interpret-with-broader-sleep",
+          "sourceKeys": [
+            "source_artifact:pmid-37917155-deep-sleep",
+            "source_artifact:doi-10.1038-s41598-025-93774-z"
+          ],
+          "strength": "moderate",
+          "text": "A deep-sleep trend is most actionable when it is consistent with broader sleep markers and the person's notes; isolated stage changes should not drive protocol conclusions.",
+          "type": "design_guardrail"
+        }
+      ],
+      "communityOutcomeSummary": {
+        "minimumCohortSize": 30,
+        "placeholder": "Early Murph outcome summaries for deep sleep will appear once enough opted-in runs have same-device sleep-stage data and privacy thresholds are met.",
+        "state": "coming_soon"
+      },
+      "entityType": "biomarker",
+      "interpretationFrame": {
+        "caveat": "Wrist and finger wearables infer N3 without scalp EEG; deep sleep can be misclassified, especially with fragmented sleep, illness, alcohol, age-related EEG-amplitude changes, sleep apnea, or device changes.",
+        "principle": "Treat deep sleep minutes as a directional, low-confidence wearable sleep-stage trend and only promote it when it agrees with sleep duration, sleep efficiency, wake-after-sleep-onset, subjective restoration, and confounder notes."
+      },
+      "key": "biomarker:deep-sleep-minutes",
+      "measurementContexts": [
+        "overnight_wearable",
+        "polysomnography_eeg",
+        "sleep_diary_context"
+      ],
+      "protocolRanking": {
+        "candidates": [
+          {
+            "display": {
+              "burdenLabel": "Low",
+              "cautionLabel": "Low",
+              "confidence": "medium"
+            },
+            "expectedDirection": "up_or_stable",
+            "mechanism": "Evening light reduction may indirectly support earlier, less-fragmented sleep. Because N3 tends to be concentrated earlier in the night, timing and continuity improvements may show up as a better deep-sleep trend, but the wearable stage itself remains noisy.",
+            "protocolKey": "protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed",
+            "relationship": "secondary_biomarker",
+            "scoring": {
+              "biomarkerRelevance": 3,
+              "burdenPenalty": 1,
+              "evidenceWeight": 3,
+              "safetyCautionPenalty": 1,
+              "wearableMeasurability": 3
+            }
+          },
+          {
+            "display": {
+              "burdenLabel": "Moderate",
+              "cautionLabel": "Moderate",
+              "confidence": "low"
+            },
+            "expectedDirection": "mixed_or_contextual",
+            "mechanism": "A well-timed heat-and-cool-down routine may improve relaxation and sleep continuity for some people, while sessions that are too hot, too late, dehydrating, or poorly tolerated can worsen sleep. Track deep sleep only as a secondary signal.",
+            "protocolKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+            "relationship": "secondary_biomarker",
+            "scoring": {
+              "biomarkerRelevance": 2,
+              "burdenPenalty": 2,
+              "evidenceWeight": 2,
+              "safetyCautionPenalty": 2,
+              "wearableMeasurability": 3
+            }
+          },
+          {
+            "display": {
+              "burdenLabel": "High",
+              "cautionLabel": "Higher",
+              "confidence": "low"
+            },
+            "expectedDirection": "mixed_or_contextual",
+            "mechanism": "Regular exercise can improve sleep health overall, but high-intensity work can acutely disrupt sleep when scheduled late or layered onto under-recovery. Use deep sleep as context beside RHR, HRV, total sleep, and training load.",
+            "protocolKey": "protocol_variant:norwegian-4x4/norwegian-4x4",
+            "relationship": "related_protocol",
+            "scoring": {
+              "biomarkerRelevance": 2,
+              "burdenPenalty": 4,
+              "evidenceWeight": 3,
+              "safetyCautionPenalty": 3,
+              "wearableMeasurability": 3
+            }
+          }
+        ],
+        "scoreFormula": "evidenceWeight * 3 + biomarkerRelevance * 3 + wearableMeasurability * 2 - burdenPenalty - safetyCautionPenalty + communityOutcomeConfidence",
+        "version": "deterministic-v0"
+      },
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed",
+          "type": "related_protocol"
+        },
+        {
+          "target": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "type": "related_protocol"
+        },
+        {
+          "target": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "type": "related_protocol"
+        },
+        {
+          "target": "source_artifact:doi-10.1093-sleep-zsaf063",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-21876072",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-29087522",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-37917155-deep-sleep",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-39460013-deep-sleep",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:doi-10.1038-s41598-025-93774-z",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-41325105",
+          "type": "cites"
+        }
+      ],
+      "relativePath": "biomarkers/deep-sleep-minutes.md",
+      "revision": {
+        "pageRevisionId": "sha256:bb000c46124b3d5caab473c2e708141bb221784b93983f03f527a0d30127735d",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "biomarkers/deep-sleep-minutes",
+      "status": "field-testing",
+      "summary": "A wearable-estimated N3 / slow-wave sleep trend that can add recovery context, but should be interpreted as a noisy within-person signal rather than exact brain physiology.",
+      "title": "Deep Sleep Minutes",
+      "unit": "minutes"
+    },
+    {
+      "aliases": [
+        "VO2 max",
+        "VO₂ max",
+        "V̇O2max",
+        "maximal oxygen uptake",
+        "cardiorespiratory fitness",
+        "CRF",
+        "cardio fitness",
+        "cardio fitness estimate",
+        "estimated VO2max",
+        "wearable VO2max",
+        "wearable cardio fitness",
+        "estimated cardio fitness"
+      ],
+      "biomarker": {
+        "direction": {
+          "desired": "higher",
+          "label": "Higher usually means better cardiorespiratory fitness.",
+          "nuance": "The number is only interpretable in context. A lower value after illness, detraining, device changes, weight change, or poor sensor data may not mean your cardiovascular system truly worsened."
+        },
+        "displayName": "VO₂ Max",
+        "explainerCards": [
+          {
+            "body": "VO₂ max is the maximal rate your body can take in, transport, and use oxygen during intense large-muscle exercise. It is usually expressed relative to body mass as ml/kg/min.",
+            "title": "What it is"
+          },
+          {
+            "body": "Cardiorespiratory fitness is one of the strongest whole-body fitness signals. The research literature links higher fitness with lower mortality and chronic-disease risk, but Murph treats this as population evidence, not a one-person verdict.",
+            "title": "Why people care"
+          },
+          {
+            "body": "A lab cardiopulmonary exercise test with gas exchange is the reference context. Consumer wearables estimate VO₂ max from signals such as heart rate, pace, power, GPS, demographics, and device-specific algorithms.",
+            "title": "Lab vs wearable"
+          },
+          {
+            "body": "Use same-device values across weeks or months. A sustained rise after well-executed aerobic training is more meaningful than a single new reading, especially because many devices update the estimate slowly.",
+            "title": "How to read a trend"
+          },
+          {
+            "body": "Aerobic interval training, endurance training, detraining, illness, heat, altitude, sensor fit, route/GPS quality, body-weight changes, medications that affect heart rate, and the specific test protocol can all change the number.",
+            "title": "What moves it"
+          }
+        ],
+        "measurement": {
+          "bestContext": "Lab CPET with respiratory gas analysis is best when a precise clinical or performance value matters. For Murph experiments, same-device wearable cardio-fitness estimates are acceptable as a private trend signal when interpreted cautiously.",
+          "confounders": [
+            "device algorithm changes",
+            "heart-rate sensor fit",
+            "GPS or pace accuracy",
+            "unsupported exercise mode",
+            "altitude",
+            "heat",
+            "recent illness",
+            "detraining",
+            "beta blockers or heart-rate medication",
+            "body-weight changes",
+            "inadequate aerobic data",
+            "lab protocol differences"
+          ],
+          "howToMeasure": [
+            "Prefer a lab cardiopulmonary exercise test when you need a true VO₂ max value, clinical-grade interpretation, or age/sex reference-standard comparison.",
+            "For wearable estimates, keep the same device, app, and measurement mode across baseline and intervention windows.",
+            "Give the device enough valid outdoor walking, running, cycling, or other supported aerobic data with reliable heart-rate and movement signals.",
+            "Compare 2-to-12-week trends rather than single readings; many consumer algorithms smooth or update slowly.",
+            "Keep illness, detraining, travel, heat, altitude, hard training blocks, body-weight changes, medication changes, and device/firmware changes visible in the experiment notes."
+          ]
+        },
+        "privateMetricBindings": [
+          {
+            "domain": "activity",
+            "metric": "estimatedVo2Max",
+            "preferred": true,
+            "source": "browser_vault_metric",
+            "unit": "ml/kg/min"
+          },
+          {
+            "accessor": "activity.estimatedVo2Max",
+            "source": "browser_vault_signal_summary",
+            "unit": "ml/kg/min"
+          }
+        ],
+        "shortName": "VO₂ max",
+        "trendDefaults": {
+          "aggregation": "median",
+          "comparisonWindowDays": 90,
+          "latestWindowDays": 14,
+          "minimumPoints": 2
+        },
+        "unit": "ml/kg/min",
+        "valuePrecision": 1
+      },
+      "body": "VO₂ max is the highest rate at which the body can use oxygen during intense, sustained, large-muscle exercise. It is one of the clearest single markers of cardiorespiratory fitness, but the measurement context matters a lot.\n\n## Bottom line for Murph\n\nUse VO₂ max as a **fitness trend marker**, not a body-ranking score. The most useful Murph question is not “is my number good enough?” It is: “did this specific protocol, run with enough fidelity and recovery, move my own cardiorespiratory-fitness signal in a plausible direction?”\n\nFor a Norwegian 4x4 experiment, VO₂ max belongs near the top of the outcome stack because the protocol is explicitly designed to stress aerobic capacity. For a sauna or recovery protocol, VO₂ max is a secondary or contextual signal; it may be interesting, but it is not the main reason to run the experiment.\n\n## Measurement hierarchy\n\n1. **Lab CPET with gas exchange** is the reference context when a precise value matters. It directly measures oxygen uptake during a graded exercise test and can be interpreted against reference standards.\n2. **Structured field tests** can be useful when lab testing is unavailable, but they estimate fitness from performance and assumptions.\n3. **Wearable cardio-fitness estimates** are the most scalable Murph signal. They are convenient and private, but they are algorithmic estimates and should be read as repeated trends.\n\n## What counts as a useful self-experiment signal\n\nA useful VO₂ max experiment read usually has:\n\n- a stable baseline window from the same device or lab method,\n- enough supported aerobic sessions for the wearable estimate to update,\n- clear session-fidelity evidence such as interval intensity, pace, power, or heart-rate zones,\n- visible context for illness, travel, altitude, heat, medication changes, and body-weight changes,\n- a follow-up window long enough for adaptation rather than a one-day bounce.\n\nFor wearable estimates, a small shift can be noise. A more trustworthy pattern is a sustained same-device increase over several weeks that lines up with better session capacity, easier submaximal efforts, or improved heart-rate recovery.\n\n## Common traps\n\nDo not compare a watch estimate to a lab result as though they are interchangeable. Do not compare two devices unless you are explicitly studying device disagreement. Do not treat a sudden device-side jump as biological proof if firmware, GPS, sensor fit, route, or training mode changed.\n\nVO₂ max is also not a complete health story. It can improve while sleep, joint pain, mood, or life-fit gets worse. Murph should keep the protocol bounded, keep safety visible, and interpret the number as one clue among several.",
+      "categories": [
+        "cardiovascular",
+        "fitness",
+        "exercise",
+        "wearable-metric",
+        "clinical-context"
+      ],
+      "claims": [
+        {
+          "caveats": [
+            "Lab test validity depends on protocol quality, participant effort, equipment calibration, and test termination criteria."
+          ],
+          "claimId": "vo2max_definition_reference_standard",
+          "sourceKeys": [
+            "source_artifact:pmid-28153947"
+          ],
+          "strength": "high",
+          "text": "VO₂ max is best treated as maximal oxygen uptake during intense large-muscle exercise; direct measurement uses cardiopulmonary exercise testing with respiratory gas exchange, while VO₂peak or algorithmic estimates are not identical to a confirmed maximal test.",
+          "type": "evidence_scope"
+        },
+        {
+          "caveats": [
+            "These are population-level associations and guideline-level recommendations, not proof that a single person's wearable estimate predicts their future health."
+          ],
+          "claimId": "crf_clinical_vital_sign",
+          "sourceKeys": [
+            "source_artifact:pmid-27881567",
+            "source_artifact:pmid-38599681"
+          ],
+          "strength": "high",
+          "text": "Cardiorespiratory fitness has strong clinical prognostic value, and the American Heart Association argues it should be assessed in routine clinical practice when it can improve patient management.",
+          "type": "association_not_causation"
+        },
+        {
+          "caveats": [
+            "Reference standards depend on the tested population, exercise modality, and whether the value is measured or estimated."
+          ],
+          "claimId": "friend_reference_standards",
+          "sourceKeys": [
+            "source_artifact:pmid-26455884"
+          ],
+          "strength": "moderate",
+          "text": "CPET-derived reference standards, including FRIEND Registry work, help interpret measured cardiorespiratory fitness by age, sex, and testing context.",
+          "type": "evidence_scope"
+        },
+        {
+          "caveats": [
+            "Accuracy varies by device, population, activity mode, heart-rate sensor quality, GPS/power data, and proprietary algorithm changes."
+          ],
+          "claimId": "wearable_vo2max_proxy",
+          "sourceKeys": [
+            "source_artifact:pmid-35072942",
+            "source_artifact:pmid-41477023"
+          ],
+          "strength": "moderate",
+          "text": "Consumer wearables can estimate VO₂ max, and exercise-based algorithms tend to perform better than resting-only estimates, but individual-level error remains large enough that Murph should treat wearable VO₂ max as a trend proxy.",
+          "type": "evidence_scope"
+        },
+        {
+          "caveats": [
+            "Protocol adherence, safety screening, baseline fitness, intensity fidelity, and recovery determine whether a home experiment resembles supervised study conditions."
+          ],
+          "claimId": "norwegian_4x4_primary_outcome",
+          "sourceKeys": [
+            "source_artifact:pmid-17414804",
+            "source_artifact:pmid-30733142",
+            "source_artifact:pmid-24066036"
+          ],
+          "strength": "moderate",
+          "text": "Norwegian 4x4-style aerobic interval training is one of the clearest Murph protocol candidates for improving VO₂ max because direct interval-training trials and later syntheses commonly use VO₂ max or cardiorespiratory fitness as a primary endpoint.",
+          "type": "intervention_result"
+        }
+      ],
+      "communityOutcomeSummary": {
+        "minimumCohortSize": 30,
+        "placeholder": "VO₂ max outcome summaries will appear once enough opted-in Murph runs have same-device baseline and intervention windows with visible training adherence and confounder notes.",
+        "state": "coming_soon"
+      },
+      "entityType": "biomarker",
+      "interpretationFrame": {
+        "caveat": "Wearable VO₂ max is an algorithmic estimate, not a direct gas-exchange measurement. Device changes, algorithm updates, heart-rate accuracy, GPS quality, altitude, heat, illness, medications, training load, and body-weight changes can all move the estimate.",
+        "principle": "Compare like with like. A lab CPET value is the strongest single measurement, but for self-experiments the most useful signal is usually a repeated same-device trend against your own baseline."
+      },
+      "key": "biomarker:estimated-vo2max",
+      "measurementContexts": [
+        "lab_cpet",
+        "graded_exercise_test",
+        "wearable_cardio_fitness",
+        "field_test_proxy"
+      ],
+      "protocolRanking": {
+        "candidates": [
+          {
+            "display": {
+              "burdenLabel": "High",
+              "cautionLabel": "Higher",
+              "confidence": "high"
+            },
+            "expectedDirection": "up",
+            "mechanism": "Norwegian 4x4 directly targets aerobic power with repeated high-intensity intervals. It is the cleanest current Murph candidate for a VO₂ max outcome, especially when session intensity and recovery are tracked.",
+            "protocolKey": "protocol_variant:norwegian-4x4/norwegian-4x4",
+            "relationship": "primary_biomarker",
+            "scoring": {
+              "biomarkerRelevance": 5,
+              "burdenPenalty": 4,
+              "communityOutcomeConfidence": 0,
+              "evidenceWeight": 5,
+              "safetyCautionPenalty": 3,
+              "wearableMeasurability": 4
+            }
+          },
+          {
+            "display": {
+              "burdenLabel": "Moderate",
+              "cautionLabel": "Moderate",
+              "confidence": "low"
+            },
+            "expectedDirection": "mixed_or_contextual",
+            "mechanism": "Repeated heat exposure can create cardiovascular strain and recovery adaptations, but it is not a direct aerobic-capacity protocol and should not outrank actual aerobic training for VO₂ max.",
+            "protocolKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+            "relationship": "secondary_biomarker",
+            "scoring": {
+              "biomarkerRelevance": 2,
+              "burdenPenalty": 2,
+              "communityOutcomeConfidence": 0,
+              "evidenceWeight": 2,
+              "safetyCautionPenalty": 2,
+              "wearableMeasurability": 4
+            }
+          }
+        ],
+        "scoreFormula": "evidenceWeight * 3 + biomarkerRelevance * 3 + wearableMeasurability * 2 - burdenPenalty - safetyCautionPenalty + communityOutcomeConfidence",
+        "version": "deterministic-v1-vo2max"
+      },
+      "quality": "reviewed",
+      "relations": [
+        {
+          "target": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "type": "related_protocol"
+        },
+        {
+          "target": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "type": "related_protocol"
+        },
+        {
+          "target": "source_artifact:pmid-27881567",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-26455884",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-28153947",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-35072942",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-38599681",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-41477023",
+          "type": "cites"
         },
         {
           "target": "source_artifact:pmid-17414804",
@@ -2517,16 +3600,16 @@
       ],
       "relativePath": "biomarkers/estimated-vo2max.md",
       "revision": {
-        "pageRevisionId": "sha256:d55eeb2f971a0e3226a3a1ec9db4837ee0f9f9ee6445be09c60c455f45a9aa77",
+        "pageRevisionId": "sha256:e09c11205431c45a12abfebe9529879d5596e0d87b9b091e3b91aae3fc04f534",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
       "schemaVersion": "murph.commons.page.v1",
       "slug": "biomarkers/estimated-vo2max",
       "status": "field-testing",
-      "summary": "A consumer-device cardio-fitness estimate that can show whether interval training is nudging fitness in the right direction, while staying noisier than a lab VO2max test.",
-      "title": "Estimated VO2max",
-      "unit": "ml/kg/min estimate"
+      "summary": "A cardiorespiratory fitness marker: lab VO₂ max is maximal oxygen uptake during intense whole-body exercise, while wearable cardio-fitness values are useful but noisier estimates for personal trend tracking.",
+      "title": "VO₂ Max",
+      "unit": "ml/kg/min"
     },
     {
       "aliases": [
@@ -7591,6 +8674,240 @@
     },
     {
       "aliases": [
+        "ada blood glucose meters"
+      ],
+      "body": "This ADA page supports practical method copy for glucose meters. Murph should not present any single home reading as perfectly precise, and it should keep device and strip context visible.",
+      "categories": [
+        "blood-glucose",
+        "diabetes",
+        "device",
+        "monitoring"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Device and measurement method caveat",
+      "key": "source_artifact:ada-blood-glucose-meters",
+      "murphTakeaway": "Use to justify device confidence labels and confirmatory meter-check prompts when CGM readings and symptoms do not match.",
+      "potentialMurphEndpoints": [
+        "device method labeling",
+        "meter confirmation warnings",
+        "strip handling context"
+      ],
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "biomarker:blood-glucose",
+          "type": "cites"
+        }
+      ],
+      "relativePath": "sources/blood-glucose/ada-blood-glucose-meters.md",
+      "researchEvidence": {
+        "aggregateRole": "context",
+        "designKind": "guideline",
+        "designLabel": "ADA device education page",
+        "notes": [
+          "Device-context source for meter accuracy and confirmatory checks."
+        ],
+        "populationLabel": "People using blood glucose meters or CGMs"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:bee4187ea860af71bcdeb400e0cff0063dcd43d02b3eedb663613762737dd8c0",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/blood-glucose/ada-blood-glucose-meters",
+      "source": {
+        "authors": "American Diabetes Association",
+        "kind": "web_page",
+        "title": "Blood Glucose Meters Can Play an Important Role in Diabetes Care",
+        "url": "https://diabetes.org/about-diabetes/devices-technology/blood-glucose-meters-important-role-in-diabetes-care",
+        "year": 2026
+      },
+      "status": "draft",
+      "summary": "ADA device-education page describing blood glucose meters, whole-blood test strips, accuracy expectations, and CGM-confirmation use.",
+      "title": "Blood Glucose Meters Can Play an Important Role in Diabetes Care",
+      "whyItMatters": "Supports product language that meter, CGM, and lab glucose values need method labels and are not perfect measurements."
+    },
+    {
+      "aliases": [
+        "ada diabetes diagnosis tests"
+      ],
+      "body": "The ADA diagnosis page is useful as a plain-language companion to the professional Standards. It explains the major diabetes tests and why one abnormal result is commonly repeated or confirmed.",
+      "categories": [
+        "blood-glucose",
+        "diabetes",
+        "patient-education"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Patient-facing testing reference",
+      "key": "source_artifact:ada-diabetes-diagnosis",
+      "murphTakeaway": "Use for plain-language education and route users back to clinical testing rather than app-based diagnosis.",
+      "potentialMurphEndpoints": [
+        "fasting glucose explanatory copy",
+        "OGTT explanatory copy",
+        "random glucose with symptoms context"
+      ],
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "biomarker:blood-glucose",
+          "type": "cites"
+        }
+      ],
+      "relativePath": "sources/blood-glucose/ada-diabetes-diagnosis.md",
+      "researchEvidence": {
+        "aggregateRole": "context",
+        "designKind": "guideline",
+        "designLabel": "ADA patient education page",
+        "notes": [
+          "Patient-facing reference for test types and common diagnostic thresholds."
+        ],
+        "populationLabel": "People learning about diabetes testing"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:6184e4e53e2f2091260329dc0e028b33f5078a137a25d6a2519e2c72fcfefe7e",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/blood-glucose/ada-diabetes-diagnosis",
+      "source": {
+        "authors": "American Diabetes Association",
+        "kind": "web_page",
+        "title": "Diabetes Diagnosis & Tests",
+        "url": "https://diabetes.org/about-diabetes/diagnosis",
+        "year": 2026
+      },
+      "status": "draft",
+      "summary": "ADA patient-facing explanation of A1C, fasting plasma glucose, OGTT, random plasma glucose, and repeat-confirmation context.",
+      "title": "Diabetes Diagnosis & Tests",
+      "whyItMatters": "Gives accessible threshold and repeat-testing context for the blood glucose biomarker page."
+    },
+    {
+      "aliases": [
+        "ada diagnosis classification diabetes 2026",
+        "dc26-S002"
+      ],
+      "body": "This ADA Standards chapter is a current guideline source for diabetes classification and diagnostic criteria. Murph should use it to explain why fasting plasma glucose, A1C, OGTT, random plasma glucose, home meter readings, and CGM sensor values are not interchangeable.\n\n## Murph use\n\n- Show diagnostic anchors as educational context.\n- Avoid diagnosing or classifying users from browser-vault glucose samples.\n- Keep laboratory confirmation and clinical review visible whenever diagnostic thresholds are mentioned.",
+      "categories": [
+        "blood-glucose",
+        "diabetes",
+        "diagnosis",
+        "guideline"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Clinical diagnostic criteria",
+      "key": "source_artifact:ada-standards-2026-diagnosis",
+      "murphTakeaway": "Use as high-authority diagnostic context and as a hard boundary: Murph can explain reference ranges, but clinical diagnosis requires appropriate laboratory testing and medical review.",
+      "potentialMurphEndpoints": [
+        "fasting plasma glucose context labels",
+        "A1C and OGTT reference boundaries",
+        "lab-confirmation guardrails"
+      ],
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "biomarker:blood-glucose",
+          "type": "cites"
+        }
+      ],
+      "relativePath": "sources/blood-glucose/ada-standards-2026-diagnosis.md",
+      "researchEvidence": {
+        "aggregateRole": "context",
+        "designKind": "guideline",
+        "designLabel": "ADA Standards of Care guideline chapter",
+        "notes": [
+          "Clinical guideline source; use for diagnostic-reference boundaries, not for app-driven diagnosis."
+        ],
+        "populationLabel": "People being screened, classified, or diagnosed for diabetes or prediabetes"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:6029a71bb608f33ca7159881447380ba99fbef557b9ec6f053afde34407c32a5",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/blood-glucose/ada-standards-2026-diagnosis",
+      "source": {
+        "authors": "American Diabetes Association Professional Practice Committee",
+        "citation": "American Diabetes Association Professional Practice Committee. 2. Diagnosis and Classification of Diabetes: Standards of Care in Diabetes—2026. Diabetes Care. 2026;49(Supplement 1):S27-S49. doi:10.2337/dc26-S002",
+        "doi": "10.2337/dc26-S002",
+        "journal": "Diabetes Care",
+        "kind": "guideline",
+        "pmid": "41358893",
+        "title": "2. Diagnosis and Classification of Diabetes: Standards of Care in Diabetes—2026",
+        "url": "https://diabetesjournals.org/care/article/49/Supplement_1/S27/163926/2-Diagnosis-and-Classification-of-Diabetes",
+        "year": 2026
+      },
+      "status": "draft",
+      "summary": "ADA Standards chapter for diabetes classification and diagnostic criteria; used as the current clinical reference boundary for Murph glucose pages.",
+      "title": "2. Diagnosis and Classification of Diabetes: Standards of Care in Diabetes—2026",
+      "whyItMatters": "Keeps Murph's blood glucose page anchored to current ADA diagnostic language while preventing private trend cards from becoming a diagnosis feature."
+    },
+    {
+      "aliases": [
+        "ada glycemic goals hypoglycemia 2026",
+        "dc26-S006"
+      ],
+      "body": "This ADA Standards chapter is used for glycemic goal and hypoglycemia context. It is especially important for Murph because glucose is not simply a lower-is-better biomarker. Safe interpretation depends on the person's diagnosis, medications, pregnancy status, comorbidities, and clinician-set goals.",
+      "categories": [
+        "blood-glucose",
+        "diabetes",
+        "glycemic-goals",
+        "guideline"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Clinical glycemic targets and hypoglycemia guardrails",
+      "key": "source_artifact:ada-standards-2026-glycemic-goals",
+      "murphTakeaway": "Use for individualized target and hypoglycemia framing. Do not turn guideline targets into one-size-fits-all app goals.",
+      "potentialMurphEndpoints": [
+        "time below range",
+        "time above range",
+        "individualized target context",
+        "hypoglycemia warning copy"
+      ],
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "biomarker:blood-glucose",
+          "type": "cites"
+        }
+      ],
+      "relativePath": "sources/blood-glucose/ada-standards-2026-glycemic-goals.md",
+      "researchEvidence": {
+        "aggregateRole": "context",
+        "designKind": "guideline",
+        "designLabel": "ADA Standards of Care guideline chapter",
+        "notes": [
+          "Goal-setting guideline source; targets are individualized and should not be treated as universal wellness goals."
+        ],
+        "populationLabel": "People with diabetes and clinicians setting glycemic goals"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:46ff9ec09d19140faa66bf64605d929e25cafe26483303e40461f97c423c6970",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/blood-glucose/ada-standards-2026-glycemic-goals",
+      "source": {
+        "authors": "American Diabetes Association Professional Practice Committee",
+        "citation": "American Diabetes Association Professional Practice Committee. 6. Glycemic Goals and Hypoglycemia: Standards of Care in Diabetes—2026. Diabetes Care. 2026;49(Supplement 1). doi:10.2337/dc26-S006",
+        "doi": "10.2337/dc26-S006",
+        "journal": "Diabetes Care",
+        "kind": "guideline",
+        "pmid": "41358894",
+        "title": "6. Glycemic Goals and Hypoglycemia: Standards of Care in Diabetes—2026",
+        "url": "https://diabetesjournals.org/care/article/49/Supplement_1/S111/163928/6-Glycemic-Goals-and-Hypoglycemia-Standards-of",
+        "year": 2026
+      },
+      "status": "draft",
+      "summary": "ADA Standards chapter for individualized glycemic goals, CGM metrics, and hypoglycemia levels.",
+      "title": "6. Glycemic Goals and Hypoglycemia: Standards of Care in Diabetes—2026",
+      "whyItMatters": "Provides the safety and personalization context for glucose targets, time-in-range, and hypoglycemia language."
+    },
+    {
+      "aliases": [
         "bryan johnson morning routine 2026 sauna"
       ],
       "artifacts": [
@@ -7811,6 +9128,174 @@
       "title": "Bryan Johnson - 31 brutal minutes to saunamaxx"
     },
     {
+      "aliases": [
+        "cdc hypoglycemia low blood sugar"
+      ],
+      "body": "This CDC hypoglycemia page supports the safety boundary for Murph's glucose biomarker. The product should never reward hypoglycemia or make low glucose look like an optimization success.",
+      "categories": [
+        "blood-glucose",
+        "diabetes",
+        "hypoglycemia",
+        "safety"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Hypoglycemia safety boundary",
+      "key": "source_artifact:cdc-low-blood-sugar-2024",
+      "murphTakeaway": "Use as a high-priority safety source for low glucose. A low reading is an action signal, not a performance win.",
+      "potentialMurphEndpoints": [
+        "low-glucose safety copy",
+        "symptom mismatch warnings",
+        "clinician-plan reminders"
+      ],
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "biomarker:blood-glucose",
+          "type": "cites"
+        }
+      ],
+      "relativePath": "sources/blood-glucose/cdc-low-blood-sugar-2024.md",
+      "researchEvidence": {
+        "aggregateRole": "context",
+        "designKind": "guideline",
+        "designLabel": "CDC hypoglycemia patient-education page",
+        "notes": [
+          "Safety-focused patient education, not an efficacy study."
+        ],
+        "populationLabel": "People at risk of hypoglycemia, especially people with diabetes"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:abe83a391ad404401bd894b043612132b1c7240b40a31068ac2447f8639f5e52",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/blood-glucose/cdc-low-blood-sugar-2024",
+      "source": {
+        "authors": "Centers for Disease Control and Prevention",
+        "kind": "web_page",
+        "title": "Low Blood Sugar (Hypoglycemia)",
+        "url": "https://www.cdc.gov/diabetes/about/low-blood-sugar-hypoglycemia.html",
+        "year": 2024
+      },
+      "status": "draft",
+      "summary": "CDC hypoglycemia education page defining low blood sugar below 70 mg/dL and emphasizing that lows can be dangerous if untreated.",
+      "title": "Low Blood Sugar (Hypoglycemia)",
+      "whyItMatters": "Prevents Murph from treating lower glucose as always better and supports visible low-glucose warnings."
+    },
+    {
+      "aliases": [
+        "cdc manage blood sugar"
+      ],
+      "body": "This CDC page is used for home-monitoring language, typical diabetes target examples, and the need to personalize targets with a health care team.",
+      "categories": [
+        "blood-glucose",
+        "diabetes",
+        "patient-education",
+        "monitoring"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Home monitoring and target examples",
+      "key": "source_artifact:cdc-manage-blood-sugar-2024",
+      "murphTakeaway": "Use as plain-language monitoring context. Targets should be labeled as typical diabetes-management examples, not universal optimization goals.",
+      "potentialMurphEndpoints": [
+        "pre-meal target context",
+        "post-meal target context",
+        "meter and CGM method copy",
+        "sick-day context"
+      ],
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "biomarker:blood-glucose",
+          "type": "cites"
+        }
+      ],
+      "relativePath": "sources/blood-glucose/cdc-manage-blood-sugar-2024.md",
+      "researchEvidence": {
+        "aggregateRole": "context",
+        "designKind": "guideline",
+        "designLabel": "CDC diabetes patient-education page",
+        "notes": [
+          "Gives typical diabetes target examples while emphasizing individualized targets and care-team guidance."
+        ],
+        "populationLabel": "People managing diabetes"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:744177972c3d101b916c1bfdf80e9d761ee6f93cb18e20fc82257bb48d71762c",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/blood-glucose/cdc-manage-blood-sugar-2024",
+      "source": {
+        "authors": "Centers for Disease Control and Prevention",
+        "kind": "web_page",
+        "title": "Manage Blood Sugar",
+        "url": "https://www.cdc.gov/diabetes/treatment/index.html",
+        "year": 2024
+      },
+      "status": "draft",
+      "summary": "CDC diabetes-management page with meter/CGM monitoring context, typical target examples, and high/low blood sugar action framing.",
+      "title": "Manage Blood Sugar",
+      "whyItMatters": "Anchors common diabetes-management target examples and confirms that home monitoring context depends on individualized care plans."
+    },
+    {
+      "body": "This Cleveland Clinic reference is useful for practical user-facing context: normal ranges are broad, chronic lung disease and high altitude can change expectations, pulse-oximeter readings can differ from arterial saturation, and low home readings may warrant calling a provider or seeking urgent care depending on severity and symptoms.\n\nMurph should not display hard diagnostic rules, but it should make clear that symptomatic low oxygen readings are not a wellness-optimization target; they are a clinical context signal.",
+      "categories": [
+        "spo2",
+        "hypoxemia",
+        "respiratory",
+        "clinical-context"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Patient-facing safety thresholds and clinical-context caveats",
+      "key": "source_artifact:cleveland-clinic-blood-oxygen-level",
+      "modality": "Blood oxygen testing and pulse oximetry",
+      "murphTakeaway": "Use this source for conservative safety wording: clinician-specific guidance overrides generic ranges, and symptomatic low readings should not be ignored.",
+      "murphV1Priority": "Medium",
+      "potentialMurphEndpoints": [
+        "SpO₂ spot checks",
+        "respiratory symptom notes",
+        "escalation-context copy"
+      ],
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "biomarker:blood-oxygen-spo2",
+          "type": "measures"
+        }
+      ],
+      "relativePath": "sources/spo2/cleveland-clinic-blood-oxygen-level.md",
+      "researchEvidence": {
+        "aggregateRole": "context",
+        "designKind": "guideline",
+        "designLabel": "Patient clinical reference",
+        "populationLabel": "Patients looking up blood oxygen level and pulse-oximetry interpretation"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:b24cadec0ce196b12503d5d683a5d81563d222212e9e82eae2cbe9cab99fa893",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/spo2/cleveland-clinic-blood-oxygen-level",
+      "source": {
+        "authors": "Cleveland Clinic",
+        "citation": "Cleveland Clinic. Blood Oxygen Level. Last reviewed 2022-02-18.",
+        "journal": "Cleveland Clinic",
+        "kind": "web_page",
+        "title": "Blood Oxygen Level",
+        "url": "https://my.clevelandclinic.org/health/diagnostics/22447-blood-oxygen-level",
+        "year": 2022
+      },
+      "status": "field-testing",
+      "studyDesign": "Patient clinical reference",
+      "summary": "Patient-facing clinical reference explaining pulse-oximeter readings, arterial blood oxygen testing, common causes of low oxygen, and when low home readings warrant clinical contact.",
+      "title": "Cleveland Clinic blood oxygen level reference",
+      "whyItMatters": "Supports broad home-monitoring caveats: pulse-oximeter values can differ from arterial saturation, chronic conditions and altitude change context, and low readings with symptoms need clinical escalation."
+    },
+    {
       "body": "This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.\n\n**Findings:** This meta-analysis pooled small RCT and quasi-experimental studies of sauna bathing and blood pressure in healthy adults. The main finding is a blood-pressure-lowering signal, but the evidence base is small and heterogeneous.\n\n**Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a cardiovascular record marked lower priority for Murph v1 interpretation.\n\n**Potential Murph endpoints/context:** blood pressure context, resting heart rate context\n\n**Protocol takeaway:** Use as cardiovascular context around heat exposure, not as a guaranteed 21-day result-card endpoint.",
       "categories": [
         "sauna",
@@ -7965,6 +9450,65 @@
       "whyItMatters": "Expands the audited Finnish dry-sauna evidence corpus with a cardiovascular record marked lower priority for Murph v1 interpretation."
     },
     {
+      "body": "This source is included for **clinical-stage accuracy guardrails**. It found that group-level sleep estimates can look acceptable while individual-level stage discrepancies remain large.\n\n**Murph implication:** Deep sleep minutes should never be the sole protocol verdict, and clinical symptoms should route users toward clinical sleep evaluation rather than stage optimization.",
+      "categories": [
+        "deep-sleep",
+        "consumer-sleep-technology",
+        "wearable-validation",
+        "clinical-context"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Clinical wearable-stage caution",
+      "key": "source_artifact:doi-10.1038-s41598-025-93774-z",
+      "murphTakeaway": "A consumer stage estimate can be directionally useful but should not be used to diagnose or rule out sleep disorders.",
+      "potentialMurphEndpoints": [
+        "deep sleep minutes",
+        "light sleep minutes",
+        "REM minutes",
+        "total sleep time",
+        "sleep efficiency"
+      ],
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "biomarker:deep-sleep-minutes",
+          "type": "measures"
+        }
+      ],
+      "relativePath": "sources/deep-sleep/doi-10.1038-s41598-025-93774-z.md",
+      "researchEvidence": {
+        "aggregateRole": "context",
+        "designKind": "controlled_trial",
+        "designLabel": "Clinical sleep-lab validation against polysomnography",
+        "notes": [
+          "Particularly important for the guardrail that consumer ring stage estimates are not clinical sleep-medicine measurements."
+        ],
+        "populationLabel": "University sleep-lab patients with diverse sleep-related and medical conditions"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:0521b1d7405db363c84b0ac89f2d9cad8ea3f3ee25c0830515016417c00e2c3e",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/deep-sleep/doi-10.1038-s41598-025-93774-z",
+      "source": {
+        "authors": "Herberger S, Aurnhammer C, Bauerfeind S, Bothe T, Penzel T, Fietze I",
+        "citation": "Herberger S, Aurnhammer C, Bauerfeind S, Bothe T, Penzel T, Fietze I. Performance of wearable finger ring trackers for diagnostic sleep measurement in the clinical context. Sci Rep. 2025;15:9461. doi:10.1038/s41598-025-93774-z.",
+        "doi": "10.1038/s41598-025-93774-z",
+        "journal": "Scientific Reports",
+        "kind": "journal_article",
+        "pmid": "40108409",
+        "title": "Performance of wearable finger ring trackers for diagnostic sleep measurement in the clinical context",
+        "url": "https://www.nature.com/articles/s41598-025-93774-z",
+        "year": 2025
+      },
+      "status": "draft",
+      "summary": "Clinical sleep-lab comparison showing that ring tracker averages can mask large individual-level sleep-stage errors.",
+      "title": "Performance of wearable finger ring trackers for diagnostic sleep measurement in the clinical context",
+      "whyItMatters": "Clinical context shows why average agreement is not enough when an individual wants to interpret one night or one disorder-relevant trend."
+    },
+    {
       "body": "This source is included for **Acute and mechanistic**.\n\n**Findings:** This acute Finnish-sauna study measured immune-cell and cytokine responses after a single heat exposure. The main finding is that immune-cell responses were stronger than cytokine changes, making it a mechanism paper rather than a consumer outcome source.\n\n**Why it matters:** Newest mechanistic Finnish-sauna paper\n\n**Potential experiment signals:** optional exploratory lab signals\n\n**Protocol takeaway:** Good for forward-looking mechanism section.",
       "categories": [
         "sauna",
@@ -8038,6 +9582,61 @@
       "summary": "This acute Finnish-sauna study measured immune-cell and cytokine responses after a single heat exposure. The main finding is that immune-cell responses were stronger than cytokine changes, making it a mechanism paper rather than a consumer outcome source. For Murph, it supports future lab-mechanism notes and not wearable promises.",
       "title": "Acute Finnish sauna heat exposure induces stronger immune cell than cytokine responses",
       "whyItMatters": "Newest mechanistic Finnish-sauna paper"
+    },
+    {
+      "body": "This source anchors the **measurement definition** for the deep-sleep biomarker. It explains that current AASM-style rules define slow waves by EEG frequency and amplitude criteria and label an epoch as N3 when enough of the epoch contains slow waves.\n\n**Murph implication:** Wearable deep sleep should be displayed as an estimated sleep-stage trend. It should not be presented as direct slow-wave activity, direct sleep depth, or direct glymphatic clearance.",
+      "categories": [
+        "deep-sleep",
+        "sleep-stage-scoring",
+        "eeg"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "N3 definition and scoring boundary",
+      "key": "source_artifact:doi-10.1093-sleep-zsaf063",
+      "murphTakeaway": "Keep the page clear that the clinical reference is EEG-scored N3 and that consumer wearables infer stage labels indirectly.",
+      "potentialMurphEndpoints": [
+        "N3 sleep minutes",
+        "slow-wave sleep duration",
+        "sleep-stage confidence"
+      ],
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "biomarker:deep-sleep-minutes",
+          "type": "measures"
+        }
+      ],
+      "relativePath": "sources/deep-sleep/doi-10.1093-sleep-zsaf063.md",
+      "researchEvidence": {
+        "aggregateRole": "context",
+        "designKind": "other",
+        "designLabel": "Sleep-stage scoring methods paper",
+        "notes": [
+          "Used for definition and measurement-boundary context, not as evidence that consumer wearables accurately measure N3."
+        ],
+        "populationLabel": "Sleep Heart Health Study EEG records and current AASM scoring context"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:fc47fe59c9355fab3d89e221458f4590b256ab6beaa1c8a5b473efcf40427751",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/deep-sleep/doi-10.1093-sleep-zsaf063",
+      "source": {
+        "authors": "Davidson S, et al",
+        "citation": "Davidson S, et al. Is it time to revisit the scoring of slow wave (N3) sleep? Sleep. 2025;48(10):zsaf063. doi:10.1093/sleep/zsaf063.",
+        "doi": "10.1093/sleep/zsaf063",
+        "journal": "Sleep",
+        "kind": "journal_article",
+        "title": "Is it time to revisit the scoring of slow wave (N3) sleep?",
+        "url": "https://academic.oup.com/sleep/article/48/10/zsaf063/8074201",
+        "year": 2025
+      },
+      "status": "draft",
+      "summary": "Sleep article used to anchor the EEG definition of N3 / slow-wave sleep and to keep the biomarker page explicit about scoring-threshold limitations.",
+      "title": "Is it time to revisit the scoring of slow wave (N3) sleep?",
+      "whyItMatters": "Defines why deep sleep minutes are not directly measured by wrist or ring devices and why even EEG-scored N3 is a thresholded simplification."
     },
     {
       "body": "This source is included for **Eye and sleep claim calibration**.\n\n**Findings:** Pre-Cochrane systematic review concluding that high-quality evidence was lacking for broad blue-light spectacle claims. Earlier review reinforces that broad visual, macular-health, and sleep-quality claims need caution.\n\n**Why it matters:** Earlier review reinforces that broad visual, macular-health, and sleep-quality claims need caution.\n\n**Potential experiment signals:** visual performance, eye fatigue, sleep quality, macular health\n\n**Protocol takeaway:** Use to support conservative claim language, superseded by the 2023 Cochrane review where overlapping.",
@@ -8560,6 +10159,173 @@
     },
     {
       "aliases": [
+        "fda smartwatch ring glucose warning 2024"
+      ],
+      "body": "This FDA safety communication is a product guardrail. Murph should not add noninvasive smartwatch or smart-ring glucose claims as if they are equivalent to approved meters or CGMs.",
+      "categories": [
+        "blood-glucose",
+        "device",
+        "safety",
+        "noninvasive-wearables"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Device safety and unauthorized noninvasive claims",
+      "key": "source_artifact:fda-noninvasive-glucose-wearable-warning-2024",
+      "murphTakeaway": "Do not treat unauthorized smartwatch or smart-ring-only glucose claims as reliable glucose measurements.",
+      "potentialMurphEndpoints": [
+        "source validation",
+        "unsupported device warnings",
+        "glucose device confidence labels"
+      ],
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "biomarker:blood-glucose",
+          "type": "cites"
+        }
+      ],
+      "relativePath": "sources/blood-glucose/fda-noninvasive-glucose-wearable-warning-2024.md",
+      "researchEvidence": {
+        "aggregateRole": "context",
+        "designKind": "guideline",
+        "designLabel": "FDA safety communication",
+        "notes": [
+          "Safety communication; not an efficacy study."
+        ],
+        "populationLabel": "Consumers considering noninvasive glucose claims from smartwatches or smart rings"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:6fec662ff1822c54f0e344a9972163b0d041953e53d2a690726deea561ed196d",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/blood-glucose/fda-noninvasive-glucose-wearable-warning-2024",
+      "source": {
+        "authors": "U.S. Food and Drug Administration",
+        "kind": "web_page",
+        "title": "Do Not Use Smartwatches or Smart Rings to Measure Blood Glucose Levels: FDA Safety Communication",
+        "url": "https://www.fda.gov/medical-devices/safety-communications/do-not-use-smartwatches-or-smart-rings-measure-blood-glucose-levels-fda-safety-communication",
+        "year": 2024
+      },
+      "status": "draft",
+      "summary": "FDA safety communication warning that no smartwatch or smart ring has been authorized, cleared, or approved to measure glucose on its own without piercing the skin.",
+      "title": "Do Not Use Smartwatches or Smart Rings to Measure Blood Glucose Levels: FDA Safety Communication",
+      "whyItMatters": "Prevents Murph from accepting or promoting ring-only or watch-only glucose claims as validated glucose data."
+    },
+    {
+      "body": "The FDA page is the practical measurement anchor for Murph's SpO₂ biomarker page.\n\nIt emphasizes that home pulse-oximeter readings should be interpreted with how the user feels, that a careful reading requires stillness and device-specific instructions, and that accuracy can be affected by perfusion, temperature, smoking exposure, fingernail polish, and skin pigmentation.\n\nIt also separates medical pulse oximeters from general-wellness or sport products that are not evaluated by FDA for clinical decision-making.",
+      "categories": [
+        "spo2",
+        "pulse-oximetry",
+        "device-accuracy",
+        "home-monitoring"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Measurement technique and consumer-device limits",
+      "key": "source_artifact:fda-pulse-oximeter-basics-2025",
+      "modality": "Pulse oximetry and home oxygen-saturation monitoring",
+      "murphTakeaway": "Use FDA technique and caveats whenever displaying SpO₂: same context, steady reading, symptom context, and explicit device-limit language.",
+      "murphV1Priority": "High",
+      "potentialMurphEndpoints": [
+        "SpO₂ spot checks",
+        "overnight SpO₂ trend context",
+        "respiratory symptoms and safety notes"
+      ],
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "biomarker:blood-oxygen-spo2",
+          "type": "measures"
+        }
+      ],
+      "relativePath": "sources/spo2/fda-pulse-oximeter-basics-2025.md",
+      "researchEvidence": {
+        "aggregateRole": "context",
+        "designKind": "guideline",
+        "designLabel": "Consumer medical-device guidance",
+        "populationLabel": "Consumers and patients using pulse oximeters at home"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:847491dde0fa6697dd5e3aca863b9d77ec838f9965f3e553a81d1d3391f4ce8b",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/spo2/fda-pulse-oximeter-basics-2025",
+      "source": {
+        "authors": "U.S. Food and Drug Administration",
+        "citation": "U.S. Food and Drug Administration. Pulse Oximeter Basics. FDA Consumer Updates. Content current as of 2025-03-26.",
+        "journal": "FDA Consumer Updates",
+        "kind": "web_page",
+        "title": "Pulse Oximeter Basics",
+        "url": "https://www.fda.gov/consumers/consumer-updates/pulse-oximeter-basics",
+        "year": 2025
+      },
+      "status": "field-testing",
+      "studyDesign": "Regulatory consumer guidance",
+      "summary": "FDA consumer guidance on home pulse-oximeter use, symptom context, measurement technique, accuracy limitations, and the distinction between medical devices and general-wellness products.",
+      "title": "FDA Pulse Oximeter Basics",
+      "whyItMatters": "Anchors Murph's home-use instructions: interpret readings alongside symptoms, measure carefully, and do not treat general-wellness devices as clinical decision tools."
+    },
+    {
+      "body": "This FDA announcement supports the skin-pigmentation caveat on the SpO₂ biomarker page.\n\nMurph should not imply that all pulse-oximeter or wearable readings have identical accuracy across all people. The practical product-language consequence is simple: trends are useful, but the device class and known accuracy limitations should stay visible.",
+      "categories": [
+        "spo2",
+        "pulse-oximetry",
+        "device-accuracy",
+        "skin-pigmentation",
+        "health-equity"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Skin-pigmentation accuracy caveat",
+      "key": "source_artifact:fda-pulse-oximeter-skin-tone-guidance-2025",
+      "modality": "Pulse oximetry device performance",
+      "murphTakeaway": "SpO₂ pages and trend cards should explicitly mention skin-pigmentation performance differences and avoid overconfident clinical interpretation.",
+      "murphV1Priority": "High",
+      "potentialMurphEndpoints": [
+        "SpO₂ trend interpretation",
+        "device-limit explanations",
+        "health-equity caveats"
+      ],
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "biomarker:blood-oxygen-spo2",
+          "type": "measures"
+        }
+      ],
+      "relativePath": "sources/spo2/fda-pulse-oximeter-skin-tone-guidance-2025.md",
+      "researchEvidence": {
+        "aggregateRole": "context",
+        "designKind": "guideline",
+        "designLabel": "Regulatory draft-guidance announcement",
+        "populationLabel": "People using pulse oximeters across diverse skin pigmentation"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:e1160c964af3f3106b75200dcc62c4e804c967fed27083f20881131bc13e8f2b",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/spo2/fda-pulse-oximeter-skin-tone-guidance-2025",
+      "source": {
+        "authors": "U.S. Food and Drug Administration",
+        "citation": "U.S. Food and Drug Administration. FDA Proposes Updated Recommendations to Help Improve Performance of Pulse Oximeters Across Skin Tones. FDA News Release. 2025-01-06.",
+        "journal": "FDA News Release",
+        "kind": "web_page",
+        "title": "FDA Proposes Updated Recommendations to Help Improve Performance of Pulse Oximeters Across Skin Tones",
+        "url": "https://www.fda.gov/news-events/press-announcements/fda-proposes-updated-recommendations-help-improve-performance-pulse-oximeters-across-skin-tones",
+        "year": 2025
+      },
+      "status": "field-testing",
+      "studyDesign": "Regulatory draft-guidance announcement",
+      "summary": "FDA 2025 announcement describing draft recommendations intended to improve pulse-oximeter performance across people with different skin pigmentation.",
+      "title": "FDA draft recommendations to improve pulse oximeter performance across skin tones",
+      "whyItMatters": "Prevents Murph from presenting pulse-oximeter readings as equally reliable across all users without a device-accuracy caveat."
+    },
+    {
+      "aliases": [
         "linkedin bryan johnson core body temp sauna april 2026"
       ],
       "artifacts": [
@@ -8893,6 +10659,61 @@
       "whyItMatters": "Strong narrative synthesis focused on cardiovascular mechanisms and outcomes"
     },
     {
+      "body": "Mayo Clinic's hypoxemia reference is useful for user-facing language around low oxygen, arterial blood gas testing, and broad pulse-oximeter ranges.\n\nMurph should use this source to keep its copy plain-spoken: low oxygen is a clinical context signal, and a pulse oximeter is an estimate rather than a full diagnosis.",
+      "categories": [
+        "spo2",
+        "hypoxemia",
+        "respiratory",
+        "clinical-context"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Broad patient-facing reference range and hypoxemia context",
+      "key": "source_artifact:mayo-hypoxemia-pulse-oximetry",
+      "modality": "Hypoxemia and oxygen-saturation testing",
+      "murphTakeaway": "Use Mayo's patient-facing framing to keep low SpO₂ safety language clear without turning Murph into a diagnostic tool.",
+      "murphV1Priority": "Medium",
+      "potentialMurphEndpoints": [
+        "SpO₂ spot checks",
+        "respiratory symptoms",
+        "clinical follow-up prompts"
+      ],
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "biomarker:blood-oxygen-spo2",
+          "type": "measures"
+        }
+      ],
+      "relativePath": "sources/spo2/mayo-hypoxemia-pulse-oximetry.md",
+      "researchEvidence": {
+        "aggregateRole": "context",
+        "designKind": "guideline",
+        "designLabel": "Patient clinical reference",
+        "populationLabel": "Patients looking up hypoxemia and blood oxygen context"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:b11c0e65f6d6223e4a5346ac475cbd987f70ee8aa3edd3fa403ff15e41f74d83",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/spo2/mayo-hypoxemia-pulse-oximetry",
+      "source": {
+        "authors": "Mayo Clinic Staff",
+        "citation": "Mayo Clinic Staff. Low blood oxygen (hypoxemia). Mayo Clinic. Updated 2026-02-20.",
+        "journal": "Mayo Clinic",
+        "kind": "web_page",
+        "title": "Low blood oxygen (hypoxemia)",
+        "url": "https://www.mayoclinic.org/symptoms/hypoxemia/basics/definition/sym-20050930",
+        "year": 2026
+      },
+      "status": "field-testing",
+      "studyDesign": "Patient clinical reference",
+      "summary": "Patient-facing clinical reference explaining hypoxemia, pulse-oximetry context, arterial blood gas testing, and broad oxygen-saturation ranges.",
+      "title": "Mayo Clinic hypoxemia reference",
+      "whyItMatters": "Supports the broad sea-level range language and the caution that low readings are clinical context, not a self-diagnosis."
+    },
+    {
       "body": "This physiology reference supports the page’s context-first interpretation. REM minutes are not just a nightly score; they reflect where a person is in the NREM/REM cycle, how much sleep opportunity they had, and whether the later part of the sleep period was preserved.",
       "categories": [
         "rem-sleep",
@@ -8942,6 +10763,62 @@
       "summary": "NCBI Bookshelf physiology chapter describing normal NREM/REM cycling, REM timing, REM physiology, and REM proportion of total sleep.",
       "title": "Sleep Physiology and REM Sleep Architecture",
       "whyItMatters": "Explains why REM minutes are sensitive to sleep timing, sleep duration, and later-night sleep opportunity."
+    },
+    {
+      "aliases": [
+        "niddk diabetes prediabetes tests"
+      ],
+      "body": "This NIDDK page is a core method-boundary source. It is the clearest source in this set for saying that diabetes diagnosis requires a lab test and that meter results are not suitable for diagnosis.",
+      "categories": [
+        "blood-glucose",
+        "diabetes",
+        "diagnosis",
+        "professional-reference"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Laboratory testing and method boundary",
+      "key": "source_artifact:niddk-diabetes-prediabetes-tests",
+      "murphTakeaway": "Use as a guardrail source: browser-vault glucose samples can support trends, but diagnosis requires appropriate laboratory testing.",
+      "potentialMurphEndpoints": [
+        "lab versus meter method labels",
+        "fasting sample context",
+        "threshold reference copy"
+      ],
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "biomarker:blood-glucose",
+          "type": "cites"
+        }
+      ],
+      "relativePath": "sources/blood-glucose/niddk-diabetes-prediabetes-tests.md",
+      "researchEvidence": {
+        "aggregateRole": "context",
+        "designKind": "guideline",
+        "designLabel": "NIDDK professional clinical-tool page",
+        "notes": [
+          "Highlights that diagnosis requires a laboratory test and that meter results are not suitable for diagnosis."
+        ],
+        "populationLabel": "Health professionals evaluating diabetes and prediabetes tests"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:ec36e1ca4f0af2f8eae35e23db6a857ac0c956334c8ff8ed2734ca7561048fb2",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/blood-glucose/niddk-diabetes-prediabetes-tests",
+      "source": {
+        "authors": "National Institute of Diabetes and Digestive and Kidney Diseases",
+        "kind": "web_page",
+        "title": "Diabetes & Prediabetes Tests",
+        "url": "https://www.niddk.nih.gov/health-information/professionals/clinical-tools-patient-management/diabetes/diabetes-prediabetes",
+        "year": 2025
+      },
+      "status": "draft",
+      "summary": "NIDDK professional testing page emphasizing lab-test requirements, fasting sample context, FPG/OGTT thresholds, and meter-result limitations for diagnosis.",
+      "title": "Diabetes & Prediabetes Tests",
+      "whyItMatters": "Provides method-specific details that help Murph distinguish lab diagnosis from private self-tracking."
     },
     {
       "body": "## What this is\n\nThis page represents the structured Norwegian 4x4 research corpus behind the bounded interval experiment. It is a curation artifact, not a primary study.\n\n## Corpus at a glance\n\n- 51 refined pass-2 records\n- 29 records landed into the local machine-readable corpus draft\n- 6 records marked as directly supporting the practical protocol recipe or variant-separation decision\n- 6 clinical-lineage records that explain the CERG/Norwegian 4x4 disease-population evidence base without becoming unscreened self-treatment evidence\n- 2 clinical synthesis/review records used as overclaim guardrails\n- 9 records primarily used for safety and contraindication language\n- 3 larger clinical mixed/null records that prevent overclaiming superiority\n- 4 adjacent-variant records that should probably become separate pages\n\n## Evidence backbone\n\n- `source_artifact:pmid-17414804` — direct healthy-adult 4x4 RCT.\n- `source_artifact:pmid-26440134` — direct 4HIIT versus 1HIIT versus MICT comparison supporting 4x4/1x4 separation and the 6-week window.\n- `source_artifact:pmid-30733142` — HIIT protocol/VO2max meta-analysis supporting long-interval programming.\n- `source_artifact:pmid-24066036` — VO2max trainability and response-variability context.\n- `source_artifact:ntnu-cerg-norwegian-4x4` — public protocol-dose description.\n- `source_artifact:doi-10.3390-ijerph17145103` — heart-rate response and target-zone fidelity.\n- `source_artifact:pmid-23988787` — RPE-only guidance can miss the intended target intensity.\n\n## Clinical lineage and population mismatch\n\nThese sources explain why Norwegian 4x4 is heavily represented in cardiometabolic and cardiac-rehabilitation literature, but they should not be used as direct evidence for unscreened self-treatment:\n\n- `source_artifact:pmid-15179103` — stable coronary artery disease trial.\n- `source_artifact:pmid-17548726` — stable post-infarction heart-failure trial.\n- `source_artifact:pmid-18606913` — metabolic-syndrome pilot trial.\n- `source_artifact:pmid-18673303` — overweight-adolescent trial.\n- `source_artifact:pmid-19958872` — post-CABG rehabilitation trial.\n- `source_artifact:pmid-21450580` — essential-hypertension trial.\n\n## Safety and contraindications\n\nSafety claims should use `source_artifact:pmid-22879367`, `source_artifact:pmid-30376749`, `source_artifact:pmid-29416382`, `source_artifact:pmid-32860412`, and `source_artifact:pmid-32100573`. These are safety-only or guideline/context sources and should not be used to imply that unscreened home HIIT is risk-free.\n\n## Mixed, null, and clinical synthesis evidence\n\nThe protocol must visibly include `source_artifact:pmid-25464446`, `source_artifact:pmid-28082387`, and `source_artifact:pmid-33560320` because they prevent overclaiming from earlier small positive trials. Use `source_artifact:pmid-29502328` and `source_artifact:pmid-28385556` as synthesis and implementation context, not as replacements for primary trial evidence.\n\n## Adjacent variants to split\n\nLow-volume 1 x 4 HIIT, sprint-interval training, athlete-performance 4x4, disease-treatment cardiac rehabilitation, metabolic-syndrome/diabetes HIIT, and pediatric/adolescent cardiometabolic-risk protocols should not be collapsed into this interval experiment.\n\n## Selected sources\n\n- `source_artifact:pmid-17414804` — Evidence backbone; claimUse `supports-protocol`; Canonical small RCT supporting the Norwegian 4x4 dose as a VO2max-oriented aerobic interval protocol.\n- `source_artifact:pmid-26440134` — Protocol dose and variant separation; claimUse `supports-protocol`; Direct 6-week comparison showing the standard 4x4 dose should not be collapsed into 1x4 HIIT or moderate continuous training.\n- `source_artifact:ntnu-cerg-norwegian-4x4` — Protocol dose and design; claimUse `supports-protocol`; Public-facing source for the commonly cited Norwegian 4x4 session structure.\n- `source_artifact:pmid-30733142` — Protocol dose and design; claimUse `supports-protocol`; Meta-analysis used to justify long-interval HIIT as a plausible VO2max-oriented design class.\n- `source_artifact:pmid-24066036` — Context-only rationale; claimUse `context-only`; Open-access meta-analysis supporting the general concept of VO2max trainability from HIIT while showing response variability.\n- `source_artifact:doi-10.3390-ijerph17145103` — Wearable or testable signals; claimUse `supports-protocol`; Acute implementation source showing how heart rate behaves during a 4x4 session and why target-zone fidelity needs to be logged.\n- `source_artifact:pmid-23988787` — Wearable or testable signals; claimUse `supports-protocol`; Implementation caution source: RPE-only guidance can miss the intended HR target during interval training.\n- `source_artifact:pmid-15179103` — Clinical lineage and population mismatch; claimUse `context-only`; Early supervised CAD trial that belongs in the clinical lineage, not the unsupervised wellness claim base.\n- `source_artifact:pmid-17548726` — Clinical lineage and population mismatch; claimUse `context-only`; Classic supervised heart-failure 4x4-lineage trial.\n- `source_artifact:pmid-18606913` — Clinical lineage and population mismatch; claimUse `context-only`; Metabolic-syndrome pilot trial from the CERG/Norwegian 4x4 lineage.\n- `source_artifact:pmid-18673303` — Clinical lineage and population mismatch; claimUse `context-only`; Overweight-adolescent 4x4-style trial that should stay population-bounded.\n- `source_artifact:pmid-19958872` — Clinical lineage and population mismatch; claimUse `context-only`; Post-CABG supervised rehabilitation trial.\n- `source_artifact:pmid-21450580` — Clinical lineage and population mismatch; claimUse `context-only`; Hypertension trial used for blood-pressure context and clinician-boundary language.\n- `source_artifact:pmid-25464446` — Mixed and null clinical evidence; claimUse `context-only`; Larger CAD trial that prevents overclaiming HIIT superiority over moderate continuous training.\n- `source_artifact:pmid-28082387` — Mixed and null clinical evidence; claimUse `context-only`; Larger HFrEF trial that did not confirm clear HIIT superiority and highlighted intensity-fidelity issues.\n- `source_artifact:pmid-33560320` — Mixed and null clinical evidence; claimUse `context-only`; HFpEF clinical trial showing no significant primary peak-VO2 advantage for HIIT over comparators.\n- `source_artifact:pmid-28385556` — Clinical synthesis and implementation context; claimUse `context-only`; CERG-lineage narrative review for health-outcome and home/clinical HIIT framing.\n- `source_artifact:pmid-29502328` — Clinical synthesis and overclaim guardrails; claimUse `context-only`; Updated CAD/HF meta-analysis that keeps clinical claims population-bounded.\n- `source_artifact:pmid-22879367` — Safety and contraindications; claimUse `safety-only`; Quantified supervised cardiac-rehabilitation safety registry; key low-but-not-zero risk framing.\n- `source_artifact:pmid-30376749` — Safety and contraindications; claimUse `safety-only`; Systematic review of HIIT safety in cardiovascular disease populations.\n- `source_artifact:pmid-29416382` — Safety and contraindications; claimUse `safety-only`; Cardiac-rehabilitation meta-analysis supporting efficacy and safety context under supervision.\n- `source_artifact:pmid-32860412` — Safety and contraindications; claimUse `safety-only`; Backbone guideline for cardiovascular disease, exercise eligibility, and clinician-clearance boundaries.\n- `source_artifact:pmid-32100573` — Safety and contraindications; claimUse `safety-only`; AHA scientific statement for acute cardiovascular event risk and progression language.\n- `source_artifact:pmid-33239350` — Public health context; claimUse `context-only`; Public-health context showing vigorous aerobic exercise as one option within weekly activity guidance.\n- `source_artifact:pmid-30293954` — Wearable or testable signals; claimUse `context-only`; HRV/autonomic-control synthesis; useful for setting cautious expectations around HRV.\n- `source_artifact:pmid-28846513` — Adjacent variants to split; claimUse `context-only`; Low-volume 1x4 HIIT evidence that should not be treated as the same as standard 4x4.\n- `source_artifact:pmid-39256000` — Adjacent variants to split; claimUse `context-only`; Recent metabolic-syndrome HIIT synthesis; useful to separate metabolic HIIT and low-volume variants from standard 4x4.\n- `source_artifact:pmid-36314990` — Adjacent variants to split; claimUse `context-only`; Athlete trial comparing 4x4-style intervals with sprint-interval training; supports not merging SIT with Norwegian 4x4.\n- `source_artifact:pmid-37608507` — Adjacent variants to split; claimUse `context-only`; Female athlete comparison source supporting separation of 4x4 from supramaximal sprint-interval training.\n\n## Use rule\n\nUse this page to understand why the practical version is a **2x/week, 6-week, wearable-guided experiment** rather than a maximal training prescription. Do not cite this bibliography in place of primary intervention evidence, safety guidance, or variant-specific source pages.",
@@ -9297,6 +11174,71 @@
       "summary": "This clinical review summarizes potential sauna benefits, risks, and contraindications. The main finding is balanced: sauna may be well tolerated for many people, but risk rises with certain medical conditions, dehydration, alcohol, or medication contexts. For Murph, it is a safety and education source rather than a protocol-efficacy paper.",
       "title": "Benefits and risks of sauna bathing",
       "whyItMatters": "Expands the audited Finnish dry-sauna evidence corpus with a general / mixed record marked medium priority for Murph v1 interpretation."
+    },
+    {
+      "aliases": [
+        "pmid-11832527",
+        "diabetes prevention program lifestyle metformin"
+      ],
+      "body": "The Diabetes Prevention Program is a high-quality lifestyle source for glucose-related outcomes. It belongs in Murph as broad prevention context, not as proof that any one short consumer protocol will reproduce the trial.",
+      "categories": [
+        "blood-glucose",
+        "diabetes-prevention",
+        "lifestyle",
+        "randomized-trial"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Lifestyle prevention outcome evidence",
+      "key": "source_artifact:pmid-11832527",
+      "murphTakeaway": "Use as high-quality lifestyle evidence, but do not imply that one short glucose trend proves a DPP-like outcome.",
+      "potentialMurphEndpoints": [
+        "fasting glucose context",
+        "weight and activity adherence context",
+        "diabetes-risk outcome context"
+      ],
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "biomarker:blood-glucose",
+          "type": "cites"
+        }
+      ],
+      "relativePath": "sources/blood-glucose/pmid-11832527.md",
+      "researchEvidence": {
+        "aggregateRole": "primary",
+        "cohortKey": "diabetes-prevention-program-2002",
+        "designKind": "randomized_controlled_trial",
+        "designLabel": "Multicenter randomized diabetes-prevention trial",
+        "durationLabel": "Mean 2.8-year follow-up",
+        "notes": [
+          "Population-level prevention trial, not a glucose-trend self-experiment."
+        ],
+        "participantCount": 3234,
+        "participantCountKind": "reported",
+        "populationLabel": "Adults at high risk for type 2 diabetes"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:d5dc866653608117940bc79840401d521a110e189348b0aca3c0816f27567e77",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/blood-glucose/pmid-11832527",
+      "source": {
+        "authors": "Diabetes Prevention Program Research Group",
+        "citation": "Diabetes Prevention Program Research Group. Reduction in the incidence of type 2 diabetes with lifestyle intervention or metformin. New England Journal of Medicine. 2002;346(6):393-403. doi:10.1056/NEJMoa012512",
+        "doi": "10.1056/NEJMoa012512",
+        "journal": "New England Journal of Medicine",
+        "kind": "journal_article",
+        "pmid": "11832527",
+        "title": "Reduction in the incidence of type 2 diabetes with lifestyle intervention or metformin",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/11832527/",
+        "year": 2002
+      },
+      "status": "draft",
+      "summary": "Diabetes Prevention Program RCT showing large diabetes-incidence reduction with intensive lifestyle intervention in high-risk adults.",
+      "title": "Reduction in the incidence of type 2 diabetes with lifestyle intervention or metformin",
+      "whyItMatters": "Supports the broad claim that lifestyle change can materially affect diabetes-risk outcomes, while staying broader than any single Murph protocol."
     },
     {
       "body": "This source is included for **sweat and detox-claim caveats**.\n\n**Findings:** Dry-sauna sweat-composition study used to add mineral-loss and sweat-measurement context without overclaiming detox or microplastic clearance. Adds direct sauna-sweat composition data and supports hydration/mineral caution, but it is not evidence that sauna clears microplastics or broad toxin burden.\n\n**Why it matters:** It shows sauna sweat contains measurable minerals and trace elements, which is useful for hydration context but not sufficient for detox claims.\n\n**Potential Murph endpoints/context:** hydration context, electrolyte context, sweat-loss context\n\n**Protocol takeaway:** High-burden sauna protocols should log hydration and avoid promising toxin or microplastic clearance.",
@@ -10600,6 +12542,66 @@
       "whyItMatters": "Supports why morning blood pressure can be tracked as context, but also why hypertension treatment claims need clinician-supervised framing."
     },
     {
+      "body": "This source is included for **cardiometabolic association context**. It reported that lower slow-wave sleep percentage was associated with incident hypertension among older men after adjustment for several sleep and health factors.\n\n**Murph implication:** This supports a cautious “associated with blood-pressure risk” claim, not a promise that a protocol or wearable-stage increase will lower blood pressure.",
+      "categories": [
+        "deep-sleep",
+        "blood-pressure",
+        "cohort"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Cardiometabolic association",
+      "key": "source_artifact:pmid-21876072",
+      "murphTakeaway": "Use slow-wave sleep as context; for experiments, morning blood pressure is a better primary endpoint than consumer deep-sleep minutes.",
+      "potentialMurphEndpoints": [
+        "morning blood pressure",
+        "deep sleep minutes",
+        "total sleep time",
+        "sleep fragmentation"
+      ],
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "biomarker:deep-sleep-minutes",
+          "type": "measures"
+        }
+      ],
+      "relativePath": "sources/deep-sleep/pmid-21876072.md",
+      "researchEvidence": {
+        "aggregateRole": "context",
+        "designKind": "prospective_cohort",
+        "designLabel": "Prospective cohort using in-home polysomnography",
+        "durationLabel": "Mean follow-up about 3.4 years",
+        "notes": [
+          "Association evidence for blood-pressure risk context; not proof that increasing wearable deep-sleep minutes changes hypertension risk."
+        ],
+        "participantCount": 784,
+        "participantCountKind": "reported",
+        "populationLabel": "Community-dwelling men age 65 years or older without baseline hypertension"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:496ccc7638261235d37a8a8c4b95ce4bcf37b0839ead7bf412ce2fc376e02f48",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/deep-sleep/pmid-21876072",
+      "source": {
+        "authors": "Fung MM, Peters K, Redline S, Ziegler MG, Ancoli-Israel S, Barrett-Connor E, Stone KL",
+        "citation": "Fung MM, Peters K, Redline S, et al. Decreased slow wave sleep increases risk of developing hypertension in elderly men. Hypertension. 2011;58(4):596-603. doi:10.1161/HYPERTENSIONAHA.111.174409.",
+        "doi": "10.1161/HYPERTENSIONAHA.111.174409",
+        "journal": "Hypertension",
+        "kind": "journal_article",
+        "pmid": "21876072",
+        "title": "Decreased slow wave sleep increases risk of developing hypertension in elderly men",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/21876072/",
+        "year": 2011
+      },
+      "status": "draft",
+      "summary": "Prospective cohort evidence linking lower polysomnography-measured slow-wave sleep with incident hypertension in older men.",
+      "title": "Decreased slow wave sleep increases risk of developing hypertension in elderly men",
+      "whyItMatters": "Provides source-backed rationale for mentioning blood pressure while keeping causality claims bounded."
+    },
+    {
       "body": "This source is included for **sweat and detox-claim caveats**.\n\n**Findings:** Adjacent sweat-toxicant review added only to calibrate toxin-excretion claims; it is not sauna-specific proof that a sauna protocol lowers body burden. Gives a review-level sweat toxicant context while making clear that sauna-specific toxin, microplastic, or clinical-clearance claims remain unproven for Murph protocols.\n\n**Why it matters:** It helps calibrate sweat-toxicant language, but it does not establish that a sauna protocol lowers clinically meaningful toxin or microplastic burden.\n\n**Potential Murph endpoints/context:** claim calibration, sweat context, safety copy\n\n**Protocol takeaway:** Sauna pages should avoid translating sweat-detection evidence into detox outcome promises.",
       "categories": [
         "sauna",
@@ -11868,6 +13870,70 @@
     },
     {
       "aliases": [
+        "pmid-26455884"
+      ],
+      "body": "This source is included for **reference-standard context**.\n\n## Quick read\n\n- **Source type:** Registry-based reference-standards paper.\n- **Role in Murph:** explains why lab CPET values can be interpreted against age/sex/testing-context standards.\n- **Most relevant Murph signals:** measured VO₂ max and METs; wearable estimates only by analogy.\n\n## Murph takeaway\n\nUse this source to keep VO₂ max interpretation grounded: reference standards belong to specific test methods and populations, not to casual device-to-device comparisons.",
+      "categories": [
+        "vo2max",
+        "cpet",
+        "reference-standards",
+        "cardiorespiratory-fitness"
+      ],
+      "claimUse": "measurement-context",
+      "entityType": "source_artifact",
+      "evidenceBucket": "VO2 max measurement and reference standards",
+      "key": "source_artifact:pmid-26455884",
+      "murphV1Priority": "High",
+      "potentialMurphEndpoints": [
+        "lab CPET VO2 max",
+        "METs",
+        "estimated VO2 max / cardio-fitness proxy"
+      ],
+      "quality": "reviewed",
+      "relations": [
+        {
+          "target": "biomarker:estimated-vo2max",
+          "type": "measures"
+        }
+      ],
+      "relativePath": "sources/vo2-max/pmid-26455884.md",
+      "researchEvidence": {
+        "aggregateRole": "context",
+        "cohortKey": "friend-registry-cpet-reference-standards",
+        "designKind": "retrospective_registry",
+        "designLabel": "FRIEND Registry CPET reference-standards analysis",
+        "notes": [
+          "Use as context for measured CPET interpretation, not as a target range for consumer wearable estimates."
+        ],
+        "participantCount": 7783,
+        "participantCountKind": "reported",
+        "populationLabel": "U.S. adults without cardiovascular disease who completed maximal treadmill CPET"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:b4986a210c9b1f91e7f6dd563605d3f7781ea1cea6de26162b41f10c9d99ae1a",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/vo2-max/pmid-26455884",
+      "source": {
+        "authors": "L A Kaminsky, R Arena, J Myers",
+        "citation": "Kaminsky LA, Arena R, Myers J. Reference Standards for Cardiorespiratory Fitness Measured With Cardiopulmonary Exercise Testing: Data From the Fitness Registry and the Importance of Exercise National Database. Mayo Clin Proc. 2015;90:1515-1523. doi:10.1016/j.mayocp.2015.07.026.",
+        "doi": "10.1016/j.mayocp.2015.07.026",
+        "journal": "Mayo Clinic Proceedings",
+        "kind": "journal_article",
+        "pmid": "26455884",
+        "title": "Reference Standards for Cardiorespiratory Fitness Measured With Cardiopulmonary Exercise Testing: Data From the Fitness Registry and the Importance of Exercise National Database",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/26455884/",
+        "year": 2015
+      },
+      "status": "draft",
+      "summary": "A U.S. FRIEND Registry reference-standards paper using cardiopulmonary exercise testing data to contextualize measured cardiorespiratory fitness.",
+      "title": "FRIEND Registry CPET reference standards for cardiorespiratory fitness",
+      "whyItMatters": "Helps separate measured lab cardiorespiratory fitness from rough consumer estimates and unsupported ranking."
+    },
+    {
+      "aliases": [
         "ayaki 2016 adult blue-light shield eyewear",
         "blue-light shield eyewear adults self-luminous devices"
       ],
@@ -12125,6 +14191,65 @@
       "whyItMatters": "Reinforces that delayed-sleep-phase protocols need their own framing and should not be merged into a general bedtime eyewear experiment."
     },
     {
+      "aliases": [
+        "pmid-27881567"
+      ],
+      "body": "This source is included for the **clinical meaning** of VO₂ max and cardiorespiratory fitness.\n\n## Quick read\n\n- **Source type:** American Heart Association scientific statement.\n- **Role in Murph:** context for why cardiorespiratory fitness deserves a biomarker page.\n- **Most relevant Murph signals:** measured VO₂ max, estimated wearable cardio fitness, METs, and exercise capacity.\n\n## Murph takeaway\n\nUse this source to explain that cardiorespiratory fitness is a strong clinical signal, while avoiding diagnostic claims from a consumer wearable value.",
+      "categories": [
+        "vo2max",
+        "cardiorespiratory-fitness",
+        "clinical-guideline",
+        "cardiovascular"
+      ],
+      "claimUse": "clinical-context",
+      "entityType": "source_artifact",
+      "evidenceBucket": "VO2 max and cardiorespiratory-fitness clinical context",
+      "key": "source_artifact:pmid-27881567",
+      "murphV1Priority": "High",
+      "potentialMurphEndpoints": [
+        "measured VO2 max",
+        "estimated VO2 max / cardio-fitness proxy",
+        "METs or exercise capacity"
+      ],
+      "quality": "reviewed",
+      "relations": [
+        {
+          "target": "biomarker:estimated-vo2max",
+          "type": "measures"
+        }
+      ],
+      "relativePath": "sources/vo2-max/pmid-27881567.md",
+      "researchEvidence": {
+        "aggregateRole": "synthesis",
+        "aggregationNote": "Synthesizes evidence for cardiorespiratory fitness as a clinical risk marker and practical assessment target.",
+        "designKind": "guideline",
+        "designLabel": "American Heart Association scientific statement",
+        "populationLabel": "Adults in clinical and preventive-health contexts"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:61a7da9c925b65b89fb4842c1527501ce58e3eec4b9f8afb3afd2d6287bfcedd",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/vo2-max/pmid-27881567",
+      "source": {
+        "authors": "R Ross, S N Blair, R Arena, T S Church, J-P Després, B A Franklin, W L Haskell, L A Kaminsky, B D Levine, C J Lavie, J Myers, J Niebauer, J Sallis, S S Sawada, X Sui, U Wisløff",
+        "citation": "Ross R, Blair SN, Arena R, Church TS, Després J-P, Franklin BA, Haskell WL, Kaminsky LA, Levine BD, Lavie CJ, Myers J, Niebauer J, Sallis J, Sawada SS, Sui X, Wisløff U. Importance of Assessing Cardiorespiratory Fitness in Clinical Practice: A Case for Fitness as a Clinical Vital Sign. Circulation. 2016;134:e653-e699. doi:10.1161/CIR.0000000000000461.",
+        "doi": "10.1161/CIR.0000000000000461",
+        "journal": "Circulation",
+        "kind": "guideline",
+        "pmid": "27881567",
+        "title": "Importance of Assessing Cardiorespiratory Fitness in Clinical Practice: A Case for Fitness as a Clinical Vital Sign: A Scientific Statement From the American Heart Association",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/27881567/",
+        "year": 2016
+      },
+      "status": "draft",
+      "summary": "AHA scientific statement arguing that cardiorespiratory fitness has strong prognostic value and should be assessed in clinical practice when it improves patient management.",
+      "title": "Fitness as a clinical vital sign: American Heart Association scientific statement",
+      "whyItMatters": "Frames cardiorespiratory fitness as clinically meaningful while keeping Murph language cautious and non-diagnostic."
+    },
+    {
       "body": "This source is included for **Long-term Finnish cohort evidence**.\n\n**Findings:** This prospective KIHD cohort paper associated sauna frequency with lower dementia and Alzheimer's disease risk in middle-aged Finnish men. The main finding is a long-term brain-health association, not a near-term cognition experiment result.\n\n**Why it matters:** Supports brain-health narrative, not immediate wearable outcomes\n\n**Potential experiment signals:** subjective cognition, sleep, long-horizon education\n\n**Protocol takeaway:** Use cautiously; not a short-term personal-result paper.",
       "categories": [
         "sauna"
@@ -12367,6 +14492,122 @@
       "summary": "Larger HFrEF trial that did not confirm clear HIIT superiority and highlighted intensity-fidelity issues.",
       "title": "High-intensity interval training in patients with heart failure with reduced ejection fraction",
       "whyItMatters": "Larger HFrEF trial that did not confirm clear HIIT superiority and highlighted intensity-fidelity issues."
+    },
+    {
+      "aliases": [
+        "pmid-28153947"
+      ],
+      "body": "This source is included for **measurement precision**.\n\n## Quick read\n\n- **Source type:** Measurement-methods review.\n- **Role in Murph:** defines why lab VO₂ max is different from a device estimate or an unverified peak value.\n- **Most relevant Murph signals:** lab CPET VO₂ max and consumer estimated VO₂ max as separate tiers.\n\n## Murph takeaway\n\nUse this source whenever the page needs to say: wearable VO₂ max can be useful, but it is not a direct maximal oxygen-uptake measurement.",
+      "categories": [
+        "vo2max",
+        "cpet",
+        "measurement-methods",
+        "exercise-physiology"
+      ],
+      "claimUse": "measurement-methods",
+      "entityType": "source_artifact",
+      "evidenceBucket": "VO2 max measurement methods",
+      "key": "source_artifact:pmid-28153947",
+      "murphV1Priority": "High",
+      "potentialMurphEndpoints": [
+        "lab CPET VO2 max",
+        "VO2peak",
+        "estimated VO2 max / cardio-fitness proxy"
+      ],
+      "quality": "reviewed",
+      "relations": [
+        {
+          "target": "biomarker:estimated-vo2max",
+          "type": "measures"
+        }
+      ],
+      "relativePath": "sources/vo2-max/pmid-28153947.md",
+      "researchEvidence": {
+        "aggregateRole": "context",
+        "aggregationNote": "Used for measurement language, not intervention efficacy.",
+        "designKind": "narrative_review",
+        "designLabel": "Exercise-physiology measurement review",
+        "populationLabel": "Exercise-testing and performance-measurement contexts"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:539798931b135bab0fa34258e7d816075d85d8367f3f3ceca21b1e528f3054be",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/vo2-max/pmid-28153947",
+      "source": {
+        "authors": "D C Poole, A M Jones",
+        "citation": "Poole DC, Jones AM. Measurement of the maximum oxygen uptake V̇O2max: V̇O2peak is no longer acceptable. J Appl Physiol. 2017;122:997-1002. doi:10.1152/japplphysiol.01063.2016.",
+        "doi": "10.1152/japplphysiol.01063.2016",
+        "journal": "Journal of Applied Physiology",
+        "kind": "review",
+        "pmid": "28153947",
+        "title": "Measurement of the maximum oxygen uptake V̇O2max: V̇O2peak is no longer acceptable",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/28153947/",
+        "year": 2017
+      },
+      "status": "draft",
+      "summary": "Methodological review emphasizing that confirmed VO₂ max measurement is a specific maximal oxygen-uptake construct, not simply any highest value or wearable estimate.",
+      "title": "Measurement of maximum oxygen uptake: VO₂max versus VO₂peak",
+      "whyItMatters": "Keeps the biomarker page from conflating measured VO₂ max, VO₂peak, field estimates, and consumer-wearable values."
+    },
+    {
+      "body": "This AASM guideline is included as a guardrail for overnight SpO₂ interpretation.\n\nConsumer wearable oxygen trends can provide a useful personal signal, especially when repeated lows align with snoring, witnessed apneas, morning headaches, daytime sleepiness, or cardiometabolic risk. They should not be presented as a diagnosis of obstructive sleep apnea. Appropriate diagnosis depends on clinical evaluation and validated sleep testing.",
+      "categories": [
+        "spo2",
+        "sleep-apnea",
+        "sleep",
+        "diagnostic-guideline"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Sleep-apnea diagnostic guardrail",
+      "key": "source_artifact:pmid-28162150",
+      "modality": "Polysomnography and home sleep apnea testing",
+      "murphTakeaway": "If overnight SpO₂ suggests repeated desaturation or the user has sleep-apnea symptoms, frame it as follow-up context for clinical evaluation, not a diagnosis.",
+      "murphV1Priority": "High",
+      "potentialMurphEndpoints": [
+        "overnight SpO₂ trend context",
+        "desaturation pattern notes",
+        "sleep-apnea referral context"
+      ],
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "biomarker:blood-oxygen-spo2",
+          "type": "measures"
+        }
+      ],
+      "relativePath": "sources/spo2/pmid-28162150.md",
+      "researchEvidence": {
+        "aggregateRole": "context",
+        "designKind": "guideline",
+        "designLabel": "Clinical practice guideline",
+        "populationLabel": "Adults with suspected obstructive sleep apnea"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:1e1af1234ae6f1f005acae3f4d88c2e34223475cefff184de1b27f08245a69ce",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/spo2/pmid-28162150",
+      "source": {
+        "authors": "V. K. Kapur, D. H. Auckley, S. Chowdhuri, K. M. Kuhlmann, R. Mehra, K. Ramar, C. G. Harrod",
+        "citation": "Kapur VK, Auckley DH, Chowdhuri S, Kuhlmann DC, Mehra R, Ramar K, Harrod CG. Clinical Practice Guideline for Diagnostic Testing for Adult Obstructive Sleep Apnea: An American Academy of Sleep Medicine Clinical Practice Guideline. J Clin Sleep Med. 2017;13(3):479-504. doi:10.5664/jcsm.6506. PMID: 28162150.",
+        "doi": "10.5664/jcsm.6506",
+        "journal": "Journal of Clinical Sleep Medicine",
+        "kind": "guideline",
+        "pmid": "28162150",
+        "title": "Clinical Practice Guideline for Diagnostic Testing for Adult Obstructive Sleep Apnea",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/28162150/",
+        "year": 2017
+      },
+      "status": "field-testing",
+      "studyDesign": "Clinical practice guideline",
+      "summary": "American Academy of Sleep Medicine guideline used as a guardrail: consumer overnight SpO₂ trends can raise sleep-breathing questions, but sleep apnea diagnosis requires appropriate clinical testing.",
+      "title": "AASM clinical practice guideline for diagnostic testing for adult obstructive sleep apnea",
+      "whyItMatters": "Prevents Murph from implying that wearable overnight oxygen data can diagnose obstructive sleep apnea."
     },
     {
       "aliases": [
@@ -12882,6 +15123,65 @@
       "whyItMatters": "Important for interaction with exercise"
     },
     {
+      "body": "This source is included for **Sleep Heart Health Study association context**. It quantified the association between polysomnography-measured slow-wave sleep and incident hypertension in a large community cohort.\n\n**Murph implication:** It justifies keeping morning blood pressure visible on experiments that target sleep depth, while the consumer deep-sleep metric remains a secondary trend signal.",
+      "categories": [
+        "deep-sleep",
+        "blood-pressure",
+        "sleep-heart-health-study"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Cardiometabolic association",
+      "key": "source_artifact:pmid-29087522",
+      "murphTakeaway": "Mention blood-pressure relevance as association evidence and pair deep sleep with more direct cardiovascular endpoints.",
+      "potentialMurphEndpoints": [
+        "morning blood pressure",
+        "deep sleep minutes",
+        "total sleep time",
+        "sleep fragmentation"
+      ],
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "biomarker:deep-sleep-minutes",
+          "type": "measures"
+        }
+      ],
+      "relativePath": "sources/deep-sleep/pmid-29087522.md",
+      "researchEvidence": {
+        "aggregateRole": "context",
+        "designKind": "prospective_cohort",
+        "designLabel": "Prospective cohort using Sleep Heart Health Study polysomnography",
+        "notes": [
+          "Useful for population-level association; not a direct intervention study and not wearable validation."
+        ],
+        "participantCount": 1850,
+        "participantCountKind": "reported",
+        "populationLabel": "Middle-aged men and women without baseline hypertension"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:8153bf5a11dfdf4d8c74aaa4a3c354fbd588f79554fdd94b821460f083004799",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/deep-sleep/pmid-29087522",
+      "source": {
+        "authors": "Javaheri S, Zhao YY, Punjabi NM, Quan SF, Gottlieb DJ, Redline S",
+        "citation": "Javaheri S, Zhao YY, Punjabi NM, Quan SF, Gottlieb DJ, Redline S. Slow-Wave Sleep Is Associated With Incident Hypertension: The Sleep Heart Health Study. Sleep. 2018;41(1):zsx179. doi:10.1093/sleep/zsx179.",
+        "doi": "10.1093/sleep/zsx179",
+        "journal": "Sleep",
+        "kind": "journal_article",
+        "pmid": "29087522",
+        "title": "Slow-Wave Sleep Is Associated With Incident Hypertension: The Sleep Heart Health Study",
+        "url": "https://academic.oup.com/sleep/article/41/1/zsx179/4565433",
+        "year": 2018
+      },
+      "status": "draft",
+      "summary": "Sleep Heart Health Study analysis extending slow-wave sleep and incident hypertension evidence to a large middle-aged cohort.",
+      "title": "Slow-Wave Sleep Is Associated With Incident Hypertension: The Sleep Heart Health Study",
+      "whyItMatters": "Helps Murph explain why slow-wave sleep is health-relevant while preventing causal overreach."
+    },
+    {
       "body": "This source is included for **Ordinary bedtime glasses insomnia**.\n\n**Findings:** Adults with insomnia symptoms wore amber lenses for two hours before bed in a randomized crossover trial. Compared with clear lenses, the amber condition improved several sleep and insomnia measures. This is one of the clearest dose anchors for the protocol, but the trial was small, short, and not enough to call the glasses an insomnia treatment.\n\n**Why it matters:** Directly informs the 2-hour pre-bed design, while remaining a small pilot with imperfect blinding.\n\n**Potential experiment signals:** insomnia symptoms, sleep diary, actigraphy total sleep time, sleep quality\n\n**Protocol takeaway:** Use as a practical dose anchor, not as definitive treatment evidence.",
       "categories": [
         "red-light-glasses-before-bed",
@@ -13038,6 +15338,62 @@
       "summary": "This prospective KIHD cohort paper associated frequent sauna bathing with lower pneumonia risk over long follow-up. The main finding is a respiratory long-horizon signal, not an immediate experiment outcome. For Murph, it supports illness-log education while keeping the wearable protocol focused on nearer signals.",
       "title": "Frequent sauna bathing may reduce the risk of pneumonia",
       "whyItMatters": "Respiratory-risk signal from Finnish cohort"
+    },
+    {
+      "body": "This clinical review is the main general reference for how pulse oximetry works and why it can be wrong.\n\nFor Murph, the most important takeaway is that SpO₂ should be interpreted as an estimate and as a trend signal. It is useful because it is noninvasive and widely available, but it can be distorted by low perfusion, skin pigmentation, nail polish, movement, ambient light, dyshemoglobins, and other measurement conditions.",
+      "categories": [
+        "spo2",
+        "pulse-oximetry",
+        "respiratory",
+        "clinical-context"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Clinical interpretation and false-reading mechanisms",
+      "key": "source_artifact:pmid-29262014",
+      "modality": "Pulse oximetry",
+      "murphTakeaway": "Use SpO₂ as a trend and safety-context marker with explicit caveats for movement, low perfusion, skin pigmentation, nail polish, dyshemoglobins, and device class.",
+      "murphV1Priority": "High",
+      "potentialMurphEndpoints": [
+        "SpO₂ spot checks",
+        "overnight SpO₂ trend context",
+        "device accuracy caveats"
+      ],
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "biomarker:blood-oxygen-spo2",
+          "type": "measures"
+        }
+      ],
+      "relativePath": "sources/spo2/pmid-29262014.md",
+      "researchEvidence": {
+        "aggregateRole": "context",
+        "designKind": "narrative_review",
+        "designLabel": "Clinical narrative review",
+        "populationLabel": "Clinical and consumer pulse-oximetry users"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:8181d005f3f06df17ecc3da79dfd2d8214cc64852681e56b1555bfe23d3d5258",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/spo2/pmid-29262014",
+      "source": {
+        "authors": "Klaus D. Torp, Pranav Modi, Elizabeth J. Pollard, Leslie V. Simon",
+        "citation": "Torp KD, Modi P, Pollard EJ, Simon LV. Pulse Oximetry. In: StatPearls. Treasure Island (FL): StatPearls Publishing; updated 2023-07-30. PMID: 29262014.",
+        "journal": "StatPearls",
+        "kind": "review",
+        "pmid": "29262014",
+        "title": "Pulse Oximetry",
+        "url": "https://www.ncbi.nlm.nih.gov/books/NBK470348/",
+        "year": 2023
+      },
+      "status": "field-testing",
+      "studyDesign": "Narrative clinical review",
+      "summary": "Clinical review of pulse oximetry covering normal sea-level saturation context, hypoxemia interpretation, accuracy limits, and common sources of false readings.",
+      "title": "Pulse Oximetry - StatPearls",
+      "whyItMatters": "Provides the broad clinical foundation for SpO₂ reference-range language, trend-versus-single-reading interpretation, and confounder lists."
     },
     {
       "body": "This source is included for **Acute and mechanistic**.\n\n**Findings:** This acute study measured cardiovascular function before and after a single sauna session in adults with cardiovascular risk factors. The main finding is that sauna can acutely change blood pressure, heart rate, arterial stiffness, and related markers.\n\n**Why it matters:** One of the best acute Finnish-sauna physiology studies\n\n**Potential experiment signals:** SBP/DBP, pulse wave velocity, HR, biomarkers\n\n**Protocol takeaway:** Great for choosing measurable pre/post signals.",
@@ -15291,6 +17647,88 @@
       "whyItMatters": "Useful for sauna-around-training experiments because it pushes outcome selection toward next-session performance rather than only morning recovery scores."
     },
     {
+      "aliases": [
+        "pmid-31915891",
+        "circadian disruption glucose metabolism"
+      ],
+      "body": "This review supports the context that circadian disruption can influence glucose metabolism. Murph should use it to keep sleep timing, late meals, shift work, travel, and evening-light interventions visible when interpreting glucose trends.",
+      "categories": [
+        "blood-glucose",
+        "circadian",
+        "sleep",
+        "diabetes",
+        "review"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Circadian context for glucose interpretation",
+      "key": "source_artifact:pmid-31915891",
+      "murphTakeaway": "Use as mechanism/context only. It justifies tracking sleep and circadian confounders, not claiming direct glucose efficacy for red-light glasses.",
+      "potentialMurphEndpoints": [
+        "fasting glucose by sleep timing",
+        "overnight CGM stability",
+        "post-meal glucose after late meals"
+      ],
+      "protocolEvidence": [
+        {
+          "caveat": "This review does not test Murph's red-light-glasses protocol as a glucose intervention.",
+          "displayPriority": 90,
+          "endpointKeys": [
+            "biomarker:blood-glucose"
+          ],
+          "groupId": "glucose-circadian-context",
+          "headline": "Circadian disruption can adversely affect glucose metabolism, making sleep timing relevant context for glucose trends.",
+          "implication": "Supports low-confidence indirect relevance for evening-light protocols when glucose is interpreted alongside sleep timing.",
+          "protocolKey": "protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed",
+          "result": "not_efficacy_evidence",
+          "scope": "same_mechanism",
+          "stance": "context_only"
+        }
+      ],
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed",
+          "type": "related_protocol"
+        },
+        {
+          "target": "biomarker:blood-glucose",
+          "type": "cites"
+        }
+      ],
+      "relativePath": "sources/blood-glucose/pmid-31915891.md",
+      "researchEvidence": {
+        "aggregateRole": "context",
+        "designKind": "narrative_review",
+        "designLabel": "Mechanistic narrative review",
+        "notes": [
+          "Supports circadian and sleep context for glucose interpretation, not direct efficacy for red-light glasses."
+        ],
+        "populationLabel": "Healthy individuals and individuals with type 2 diabetes"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:f9400b229af01aa1a333920d3b3bac3bb813bb1afaeeda6970a3dc4349266c59",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/blood-glucose/pmid-31915891",
+      "source": {
+        "authors": "I C Mason, J Qian, G K Adler, F A J L Scheer",
+        "citation": "Mason IC, Qian J, Adler GK, Scheer FAJL. Impact of circadian disruption on glucose metabolism: implications for type 2 diabetes. Diabetologia. 2020;63:462-472. doi:10.1007/s00125-019-05059-6",
+        "doi": "10.1007/s00125-019-05059-6",
+        "journal": "Diabetologia",
+        "kind": "review",
+        "pmid": "31915891",
+        "title": "Impact of circadian disruption on glucose metabolism: implications for type 2 diabetes",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/31915891/",
+        "year": 2020
+      },
+      "status": "draft",
+      "summary": "Diabetologia review on circadian-system disruption and glucose metabolism in healthy individuals and people with type 2 diabetes.",
+      "title": "Impact of circadian disruption on glucose metabolism: implications for type 2 diabetes",
+      "whyItMatters": "Keeps sleep timing, shift work, travel, and late-light context visible on the glucose biomarker page."
+    },
+    {
       "body": "This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.\n\n**Findings:** This repeated-session study measured nitric oxide, nitrotyrosine, and oxidative-status markers in training and non-training men. The main finding is that sauna may interact with oxidative and vascular signaling, especially alongside training status.\n\n**Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a exercise / recovery record marked medium priority for Murph v1 interpretation.\n\n**Potential Murph endpoints/context:** exercise-context logging\n\n**Protocol takeaway:** Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes.",
       "categories": [
         "sauna",
@@ -17490,6 +19928,146 @@
       "whyItMatters": "Shows melatonin timing can move even when sleep outcomes are not the main practical win."
     },
     {
+      "aliases": [
+        "pmid-35029593",
+        "acsm type 2 diabetes exercise consensus"
+      ],
+      "body": "This consensus statement supports the general connection between physical activity and glucose management in type 2 diabetes. For Murph, it should inform protocol ranking and safety copy while avoiding overclaiming about any specific 4x4 recipe.",
+      "categories": [
+        "blood-glucose",
+        "exercise",
+        "diabetes",
+        "guideline"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Exercise and glucose-management context",
+      "key": "source_artifact:pmid-35029593",
+      "murphTakeaway": "Use as exercise context and safety language for glucose pages, not as protocol-specific evidence for Norwegian 4x4.",
+      "potentialMurphEndpoints": [
+        "post-exercise glucose",
+        "fasting glucose",
+        "time in hyperglycemia",
+        "hypoglycemia symptoms and medication context"
+      ],
+      "protocolEvidence": [
+        {
+          "caveat": "Exercise safety and hypoglycemia risk depend on medications, complications, baseline fitness, and clinician guidance.",
+          "displayPriority": 80,
+          "endpointKeys": [
+            "biomarker:blood-glucose"
+          ],
+          "groupId": "glucose-exercise-context",
+          "headline": "Regular physical activity and reduced sedentary time are central glucose-management context in type 2 diabetes.",
+          "implication": "Supports physical-activity relevance for glucose, but does not prove the Murph 4x4 recipe as a glucose-specific protocol.",
+          "protocolKey": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "result": "not_efficacy_evidence",
+          "scope": "general_guideline",
+          "stance": "context_only"
+        }
+      ],
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "type": "related_protocol"
+        },
+        {
+          "target": "biomarker:blood-glucose",
+          "type": "cites"
+        }
+      ],
+      "relativePath": "sources/blood-glucose/pmid-35029593.md",
+      "researchEvidence": {
+        "aggregateRole": "context",
+        "designKind": "guideline",
+        "designLabel": "American College of Sports Medicine consensus statement",
+        "notes": [
+          "Exercise guidance and safety context; not a Murph Norwegian 4x4 trial."
+        ],
+        "populationLabel": "People with type 2 diabetes"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:254c4a0a4b0600aa7e23801776c852bbc051178273966d2e10433a98eedac2e9",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/blood-glucose/pmid-35029593",
+      "source": {
+        "authors": "Jill A Kanaley, Sheri R Colberg, Matthew H Corcoran, Steven K Malin, Nancy R Rodriguez, Carlos J Crespo, John P Kirwan, Juleen R Zierath",
+        "citation": "Kanaley JA, Colberg SR, Corcoran MH, Malin SK, Rodriguez NR, Crespo CJ, Kirwan JP, Zierath JR. Exercise/Physical Activity in Individuals with Type 2 Diabetes: A Consensus Statement from the American College of Sports Medicine. Medicine & Science in Sports & Exercise. 2022;54(2):353-368. doi:10.1249/MSS.0000000000002800.",
+        "doi": "10.1249/MSS.0000000000002800",
+        "journal": "Medicine & Science in Sports & Exercise",
+        "kind": "guideline",
+        "pmid": "35029593",
+        "title": "Exercise/Physical Activity in Individuals with Type 2 Diabetes: A Consensus Statement from the American College of Sports Medicine",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/35029593/",
+        "year": 2022
+      },
+      "status": "draft",
+      "summary": "ACSM consensus statement on physical activity for type 2 diabetes, including regular activity, reduced sedentary time, and safety accommodations.",
+      "title": "Exercise/Physical Activity in Individuals with Type 2 Diabetes: A Consensus Statement from the American College of Sports Medicine",
+      "whyItMatters": "Provides expert-context support for treating physical activity as glucose-relevant while keeping vigorous protocols safety-bounded."
+    },
+    {
+      "aliases": [
+        "pmid-35072942"
+      ],
+      "body": "This source is included for **consumer-wearable validation**.\n\n## Quick read\n\n- **Source type:** Systematic review, meta-analysis, and expert statement.\n- **Role in Murph:** explains why exercise-based wearable estimates are plausible but still uncertain at the individual level.\n- **Most relevant Murph signals:** wearable estimated VO₂ max and lab comparison context.\n\n## Murph takeaway\n\nUse this source to justify the page’s main product rule: same-device wearable VO₂ max is a trend proxy, not a clinical-grade measurement.",
+      "categories": [
+        "vo2max",
+        "wearables",
+        "validation",
+        "systematic-review"
+      ],
+      "claimUse": "wearable-validation",
+      "entityType": "source_artifact",
+      "evidenceBucket": "Consumer wearable VO2 max validation",
+      "key": "source_artifact:pmid-35072942",
+      "murphV1Priority": "High",
+      "potentialMurphEndpoints": [
+        "estimated VO2 max / cardio-fitness proxy",
+        "lab CPET VO2 max reference comparisons"
+      ],
+      "quality": "reviewed",
+      "relations": [
+        {
+          "target": "biomarker:estimated-vo2max",
+          "type": "measures"
+        }
+      ],
+      "relativePath": "sources/vo2-max/pmid-35072942.md",
+      "researchEvidence": {
+        "aggregateRole": "synthesis",
+        "aggregationNote": "Exercise-based wearable algorithms appear more accurate than resting-only algorithms, but individual-level error remains important.",
+        "designKind": "meta_analysis",
+        "designLabel": "Systematic review, meta-analysis, and expert statement",
+        "includedStudyCount": 14
+      },
+      "revision": {
+        "pageRevisionId": "sha256:2c523d55d66b1a1c4655241f5b7afb7373eaa0e244d707ea1acea605a017cdff",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/vo2-max/pmid-35072942",
+      "source": {
+        "authors": "P Molina-Garcia, H L Notbohm, M Schumann, R Argent, M Hetherington-Rauth, J Stang, W Bloch, S Cheng, U Ekelund, L B Sardinha, B Caulfield, J C Brønd, A Grøntved, F B Ortega",
+        "citation": "Molina-Garcia P, Notbohm HL, Schumann M, Argent R, Hetherington-Rauth M, Stang J, Bloch W, Cheng S, Ekelund U, Sardinha LB, Caulfield B, Brønd JC, Grøntved A, Ortega FB. Validity of Estimating the Maximal Oxygen Consumption by Consumer Wearables: A Systematic Review With Meta-analysis and Expert Statement of the INTERLIVE Network. Sports Med. 2022;52:1577-1597. doi:10.1007/s40279-021-01639-y.",
+        "doi": "10.1007/s40279-021-01639-y",
+        "journal": "Sports Medicine",
+        "kind": "review",
+        "pmid": "35072942",
+        "title": "Validity of Estimating the Maximal Oxygen Consumption by Consumer Wearables: A Systematic Review With Meta-analysis and Expert Statement of the INTERLIVE Network",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/35072942/",
+        "year": 2022
+      },
+      "status": "draft",
+      "summary": "Systematic review, meta-analysis, and expert statement on the validity of consumer wearable VO₂ max estimates and best-practice validation domains.",
+      "title": "INTERLIVE systematic review of consumer-wearable VO₂max estimates",
+      "whyItMatters": "Anchors Murph's language that wearable VO₂ max is useful for trend tracking but not interchangeable with lab CPET."
+    },
+    {
       "body": "This source is included for **Adjacent pregnancy sleep RCT**.\n\n**Findings:** In a related third-trimester pregnancy trial, full blue-blocking glasses did not significantly improve primary sleep outcomes versus partial blue blockers. The control lenses also blocked some blue light, which may have reduced contrast between groups. This is an adjacent null/mixed sleep result, not a general adult protocol proof.\n\n**Why it matters:** Useful contradiction: a pregnancy sleep trial did not show statistically significant effects on primary sleep outcomes.\n\n**Potential experiment signals:** total sleep time, sleep efficiency, mid-point of sleep, pregnancy sleep outcomes\n\n**Protocol takeaway:** Pregnancy is an adjacent supervised variant; do not use this as a general adult protocol proof.",
       "categories": [
         "red-light-glasses-before-bed",
@@ -18322,6 +20900,68 @@
       "summary": "Athlete trial comparing 4x4-style intervals with sprint-interval training; supports not merging SIT with Norwegian 4x4.",
       "title": "Aerobic high-intensity intervals are superior to improve VO2max compared with sprint intervals in well-trained men",
       "whyItMatters": "Athlete trial comparing 4x4-style intervals with sprint-interval training; supports not merging SIT with Norwegian 4x4."
+    },
+    {
+      "aliases": [
+        "pmid-36715875",
+        "postprandial walking glucose meta analysis"
+      ],
+      "body": "This review is directly relevant to post-meal glucose self-experiments. It should push Murph toward a future meal-timed walking protocol rather than forcing all glucose intervention logic through broader exercise protocols.",
+      "categories": [
+        "blood-glucose",
+        "postprandial-glucose",
+        "walking",
+        "exercise",
+        "meta-analysis"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Postprandial exercise timing",
+      "key": "source_artifact:pmid-36715875",
+      "murphTakeaway": "Use to motivate a future post-meal walking protocol and as context for glucose interpretation around meals.",
+      "potentialMurphEndpoints": [
+        "post-meal glucose peak",
+        "one-to-two-hour post-meal glucose",
+        "CGM postprandial excursion"
+      ],
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "biomarker:blood-glucose",
+          "type": "cites"
+        }
+      ],
+      "relativePath": "sources/blood-glucose/pmid-36715875.md",
+      "researchEvidence": {
+        "aggregateRole": "synthesis",
+        "designKind": "meta_analysis",
+        "designLabel": "Systematic review with meta-analysis",
+        "notes": [
+          "Useful for meal-timed walking hypotheses; not yet tied to a first-class Murph protocol variant in this repo snapshot."
+        ],
+        "populationLabel": "Healthy subjects and patients with impaired glucose tolerance"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:fdf8ad677035e5f060b00fcee507728b3a4df94703c92320f89947a2a97446df",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/blood-glucose/pmid-36715875",
+      "source": {
+        "authors": "T Engeroff, D A Groneberg, J Wilke",
+        "citation": "Engeroff T, Groneberg DA, Wilke J. After Dinner Rest a While, After Supper Walk a Mile? Sports Medicine. 2023;53(4):849-869. doi:10.1007/s40279-022-01808-7",
+        "doi": "10.1007/s40279-022-01808-7",
+        "journal": "Sports Medicine",
+        "kind": "review",
+        "pmid": "36715875",
+        "title": "After Dinner Rest a While, After Supper Walk a Mile? A Systematic Review with Meta-analysis on the Acute Postprandial Glycemic Response to Exercise Before and After Meal Ingestion in Healthy Subjects and Patients with Impaired Glucose Tolerance",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/36715875/",
+        "year": 2023
+      },
+      "status": "draft",
+      "summary": "Sports Medicine systematic review/meta-analysis on pre- and post-meal exercise timing for acute postprandial glucose excursions.",
+      "title": "After Dinner Rest a While, After Supper Walk a Mile? Postprandial Exercise Timing Review",
+      "whyItMatters": "Supports future glucose-specific micro-experiments around short post-meal walking or activity breaks."
     },
     {
       "body": "This source is included for **Acute and mechanistic**.\n\n**Findings:** This Finnish-sauna physiology study compared single and repeated sauna sessions in trained and untrained men. The main finding is that repeated exposure may produce different immune and HSP-70 responses than a single session.\n\n**Why it matters:** Shows repeated exposure may matter more than one-off sessions\n\n**Potential experiment signals:** series vs single-session design\n\n**Protocol takeaway:** Supports multi-week protocol instead of one-off.",
@@ -19193,6 +21833,63 @@
       "whyItMatters": "Shows that consumer sleep-stage classification varies widely across devices, which is central to REM-minute interpretation."
     },
     {
+      "body": "This source is included for **consumer sleep tracker validation context**. It compares multiple consumer sleep trackers with polysomnography and highlights why device-specific validation matters.\n\n**Murph implication:** Deep sleep minutes should be interpreted as an inferred stage estimate. Murph should require same-device trend windows and should avoid cross-device or cross-person comparisons.",
+      "categories": [
+        "deep-sleep",
+        "consumer-sleep-technology",
+        "wearable-validation"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Consumer sleep tracker validation",
+      "key": "source_artifact:pmid-37917155-deep-sleep",
+      "murphTakeaway": "Wearable sleep-stage data can be useful for personal tracking, but Murph should show it with explicit confidence and same-device caveats.",
+      "potentialMurphEndpoints": [
+        "deep sleep minutes",
+        "REM minutes",
+        "total sleep time",
+        "sleep efficiency"
+      ],
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "biomarker:deep-sleep-minutes",
+          "type": "measures"
+        }
+      ],
+      "relativePath": "sources/deep-sleep/pmid-37917155.md",
+      "researchEvidence": {
+        "aggregateRole": "context",
+        "designKind": "controlled_trial",
+        "designLabel": "Prospective multicenter validation against polysomnography",
+        "notes": [
+          "Used as measurement-context evidence rather than protocol efficacy evidence."
+        ],
+        "populationLabel": "Sleep-lab validation sample comparing consumer trackers with PSG"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:105e5d2744c46f183d041c230c3b71435f02f34b2d53eab000629aa385e5ffbc",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/deep-sleep/pmid-37917155",
+      "source": {
+        "authors": "Lee T, Cho Y, Cha KS, Jung J, Cho J, Kim H, Kim D, Hong J, Lee D, Keum M, Kushida CA, Yoon IY, Kim JW",
+        "citation": "Lee T, Cho Y, Cha KS, et al. Accuracy of 11 Wearable, Nearable, and Airable Consumer Sleep Trackers: Prospective Multicenter Validation Study. JMIR Mhealth Uhealth. 2023;11:e50983. doi:10.2196/50983.",
+        "doi": "10.2196/50983",
+        "journal": "JMIR mHealth and uHealth",
+        "kind": "journal_article",
+        "pmid": "37917155",
+        "title": "Accuracy of 11 Wearable, Nearable, and Airable Consumer Sleep Trackers: Prospective Multicenter Validation Study",
+        "url": "https://mhealth.jmir.org/2023/1/e50983",
+        "year": 2023
+      },
+      "status": "draft",
+      "summary": "Multicenter PSG validation of consumer sleep trackers, used to keep wearable sleep-stage claims device-specific and cautious.",
+      "title": "Accuracy of 11 Wearable, Nearable, and Airable Consumer Sleep Trackers: Prospective Multicenter Validation Study",
+      "whyItMatters": "Supports the page rule that deep sleep minutes should be trended within person and not treated as a clinical sleep-stage measurement."
+    },
+    {
       "body": "This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.\n\n**Findings:** This acute study examined neural changes associated with the Japanese totonou state after sauna bathing. The main finding is an exploratory neural and subjective-state signal, not a core wearable endpoint.\n\n**Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a neuro / mental record marked lower priority for Murph v1 interpretation.\n\n**Potential Murph endpoints/context:** safety screening, session tolerance, illness and respiratory context\n\n**Protocol takeaway:** Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes.",
       "categories": [
         "sauna",
@@ -19574,6 +22271,68 @@
     },
     {
       "aliases": [
+        "pmid-38599681"
+      ],
+      "body": "This source is included for **population-level outcome context**.\n\n## Quick read\n\n- **Source type:** Overview of meta-analyses.\n- **Role in Murph:** supports the importance of cardiorespiratory fitness without turning a wearable value into a personal risk score.\n- **Most relevant Murph signals:** measured or estimated cardiorespiratory fitness.\n\n## Murph takeaway\n\nUse this source to say cardiorespiratory fitness matters at the population level, while keeping Murph’s user-facing interpretation focused on self-comparison and experiment deltas.",
+      "categories": [
+        "vo2max",
+        "cardiorespiratory-fitness",
+        "epidemiology",
+        "meta-analysis"
+      ],
+      "claimUse": "population-prognosis",
+      "entityType": "source_artifact",
+      "evidenceBucket": "Cardiorespiratory fitness population outcomes",
+      "key": "source_artifact:pmid-38599681",
+      "murphV1Priority": "High",
+      "potentialMurphEndpoints": [
+        "cardiorespiratory fitness",
+        "measured VO2 max",
+        "estimated VO2 max / cardio-fitness proxy"
+      ],
+      "quality": "reviewed",
+      "relations": [
+        {
+          "target": "biomarker:estimated-vo2max",
+          "type": "measures"
+        }
+      ],
+      "relativePath": "sources/vo2-max/pmid-38599681.md",
+      "researchEvidence": {
+        "aggregateRole": "synthesis",
+        "aggregationNote": "Use as population-level prognostic context, not as individual diagnosis from a wearable value.",
+        "designKind": "systematic_review",
+        "designLabel": "Overview of meta-analyses",
+        "includedStudyCount": 199,
+        "participantCount": 20900000,
+        "participantCountKind": "approximate",
+        "populationLabel": "Adult cohort studies across morbidity and mortality outcomes"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:d9c42a2f162bd6bb71099dd49307d6250c3b5c33813e088c3b44d6d2067dab50",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/vo2-max/pmid-38599681",
+      "source": {
+        "authors": "J J Lang et al.",
+        "citation": "Lang JJ, et al. Cardiorespiratory fitness is a strong and consistent predictor of morbidity and mortality among adults: an overview of meta-analyses representing over 20.9 million observations from 199 unique cohort studies. Br J Sports Med. 2024. doi:10.1136/bjsports-2023-107849.",
+        "doi": "10.1136/bjsports-2023-107849",
+        "journal": "British Journal of Sports Medicine",
+        "kind": "review",
+        "pmid": "38599681",
+        "title": "Cardiorespiratory fitness is a strong and consistent predictor of morbidity and mortality among adults: an overview of meta-analyses representing over 20.9 million observations from 199 unique cohort studies",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/38599681/",
+        "year": 2024
+      },
+      "status": "draft",
+      "summary": "Large overview of meta-analyses linking higher cardiorespiratory fitness with lower adult mortality and incident chronic-condition risk.",
+      "title": "Cardiorespiratory fitness and adult morbidity/mortality: overview of meta-analyses",
+      "whyItMatters": "Supports why VO₂ max/cardiorespiratory fitness deserves high prominence while preserving association-not-causation language."
+    },
+    {
+      "aliases": [
         "Kunutsor 2024 sauna cardiorespiratory fitness"
       ],
       "body": "This source is included for long-term Finnish cohort context.\n\n**Findings:** KIHD study of 2,012 Finnish men evaluating cross-sectional and longitudinal associations between sauna exposure and cardiorespiratory fitness over an 11-year follow-up. Adds cardiorespiratory-fitness context to the KIHD sauna evidence base without turning sauna into an exercise substitute.\n\n**Protocol takeaway:** it belongs in rationale and future fitness-context discussions, not in the near-term wearable result promise for the first dry-sauna protocol.",
@@ -19877,6 +22636,66 @@
       "summary": "PSG validation study of Oura Ring Gen 3, Fitbit Sense 2, and Apple Watch 8 showing strong sleep/wake sensitivity but poor concordance for REM-stage duration.",
       "title": "Accuracy of Three Commercial Wearable Devices for Sleep Tracking in Healthy Adults",
       "whyItMatters": "Shows why Murph can use consumer REM minutes as a personal signal while avoiding clinical-strength claims."
+    },
+    {
+      "body": "This source is included for **current consumer wearable validation**. It compared three popular devices with PSG in healthy adults under inpatient study conditions.\n\n**Murph implication:** The result supports showing deep sleep for personal curiosity, but the page should still warn that healthy-lab validation does not equal diagnostic accuracy in messy real-world sleep.",
+      "categories": [
+        "deep-sleep",
+        "consumer-sleep-technology",
+        "wearable-validation"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Consumer sleep tracker validation",
+      "key": "source_artifact:pmid-39460013-deep-sleep",
+      "murphTakeaway": "Use as optimistic validation context but do not generalize the result to every device, population, or night.",
+      "potentialMurphEndpoints": [
+        "deep sleep minutes",
+        "total sleep time",
+        "sleep efficiency",
+        "wake minutes"
+      ],
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "biomarker:deep-sleep-minutes",
+          "type": "measures"
+        }
+      ],
+      "relativePath": "sources/deep-sleep/pmid-39460013.md",
+      "researchEvidence": {
+        "aggregateRole": "context",
+        "designKind": "controlled_trial",
+        "designLabel": "Single-night inpatient validation against polysomnography",
+        "durationLabel": "One inpatient night",
+        "notes": [
+          "Healthy-adult setting may overestimate performance in fragmented sleep, illness, older adults, or clinical sleep populations."
+        ],
+        "participantCount": 35,
+        "participantCountKind": "reported",
+        "populationLabel": "Healthy adults age 20 to 50 years without a sleep disorder"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:c1c9a90f18f1df63b622bd28f09c4bd7e67d511797021a5ba296177e06596390",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/deep-sleep/pmid-39460013",
+      "source": {
+        "authors": "Robbins R, Weaver MD, Sullivan JP, Quan SF, Gilmore K, Shaw S, Benz A, Qadri S, Barger LK, Czeisler CA, Duffy JF",
+        "citation": "Robbins R, Weaver MD, Sullivan JP, et al. Accuracy of Three Commercial Wearable Devices for Sleep Tracking in Healthy Adults. Sensors. 2024;24(20):6532. doi:10.3390/s24206532.",
+        "doi": "10.3390/s24206532",
+        "journal": "Sensors",
+        "kind": "journal_article",
+        "pmid": "39460013",
+        "title": "Accuracy of Three Commercial Wearable Devices for Sleep Tracking in Healthy Adults",
+        "url": "https://www.mdpi.com/1424-8220/24/20/6532",
+        "year": 2024
+      },
+      "status": "draft",
+      "summary": "Controlled PSG comparison of Oura Ring Gen3, Fitbit Sense 2, and Apple Watch Series 8 in healthy adults.",
+      "title": "Accuracy of Three Commercial Wearable Devices for Sleep Tracking in Healthy Adults",
+      "whyItMatters": "Shows that some current devices can approximate PSG in healthy-lab settings while still requiring device-specific and population-specific caution."
     },
     {
       "aliases": [
@@ -20510,6 +23329,62 @@
       "whyItMatters": "Useful adjacent evidence for separating pediatric sleep-phase questions from the ordinary adult bedtime protocol."
     },
     {
+      "body": "This source is included for **mechanistic restoration context**. It reviews evidence that brain-clearance processes may contribute to restorative sleep and notes that human measurement methods remain under development.\n\n**Murph implication:** The deep sleep page can mention glymphatic biology as a plausible research direction, but it must not imply that a consumer deep-sleep score measures clearance.",
+      "categories": [
+        "deep-sleep",
+        "glymphatic",
+        "restorative-sleep"
+      ],
+      "entityType": "source_artifact",
+      "evidenceBucket": "Mechanistic restoration hypothesis",
+      "key": "source_artifact:pmid-41325105",
+      "murphTakeaway": "Do not infer glymphatic clearance from wearable deep sleep. Keep this as a hypothesis and research-context note.",
+      "potentialMurphEndpoints": [
+        "subjective restoration",
+        "deep sleep minutes",
+        "sleep continuity"
+      ],
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "biomarker:deep-sleep-minutes",
+          "type": "measures"
+        }
+      ],
+      "relativePath": "sources/deep-sleep/pmid-41325105.md",
+      "researchEvidence": {
+        "aggregateRole": "context",
+        "designKind": "narrative_review",
+        "designLabel": "Narrative review of glymphatic clearance and restorative sleep physiology",
+        "notes": [
+          "Use as mechanistic context only; consumer deep-sleep minutes are not a glymphatic biomarker."
+        ],
+        "populationLabel": "Mechanistic animal and human imaging literature"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:52d4770fe02379bf12404d47a0cafd1940ef19203f9b786e929e0cce3fd4e598",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/deep-sleep/pmid-41325105",
+      "source": {
+        "authors": "Hauglund NL, Nedergaard M",
+        "citation": "Hauglund NL, Nedergaard M. Is glymphatic clearance the secret to restorative sleep? Brain. 2025. doi:10.1093/brain/awaf453.",
+        "doi": "10.1093/brain/awaf453",
+        "journal": "Brain",
+        "kind": "review",
+        "pmid": "41325105",
+        "title": "Is glymphatic clearance the secret to restorative sleep?",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/41325105/",
+        "year": 2025
+      },
+      "status": "draft",
+      "summary": "2025 review of glymphatic clearance, NREM physiology, and emerging human biomarkers, used to bound brain-restoration claims.",
+      "title": "Is glymphatic clearance the secret to restorative sleep?",
+      "whyItMatters": "Lets the page explain why slow-wave sleep is biologically interesting while making the limit explicit."
+    },
+    {
       "body": "This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.\n\n**Findings:** This cross-sectional study captures women's perceptions of sauna bathing and health or well-being impacts. The main finding is subjective and real-world context rather than clinical efficacy.\n\n**Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a general / mixed record marked lower priority for Murph v1 interpretation.\n\n**Potential Murph endpoints/context:** supporting corpus context\n\n**Protocol takeaway:** Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes.",
       "categories": [
         "sauna",
@@ -20905,6 +23780,65 @@
       "summary": "This acute Finnish-sauna and cold-water study measured cardiovascular dynamic responses in healthy normotensive women. The main finding is that sauna-plus-cold produces measurable cardiovascular load in women, so sex and cold-exposure context matter. For Murph, it supports BP/RHR safety framing and not defaulting to cold immersion.",
       "title": "Acute Finnish sauna heating and cold water immersion effects on cardiovascular dynamic response in normotensive women",
       "whyItMatters": "Expands the audited Finnish dry-sauna evidence corpus with a cardiovascular record marked high priority for Murph v1 interpretation."
+    },
+    {
+      "aliases": [
+        "pmid-41477023"
+      ],
+      "body": "This source is included for **recent wearable-validation context**.\n\n## Quick read\n\n- **Source type:** Qualitative systematic review.\n- **Role in Murph:** updates the wearable-accuracy caveat with newer validation literature.\n- **Most relevant Murph signals:** wearable estimated VO₂ max and lab graded-exercise-test comparisons.\n\n## Murph takeaway\n\nUse this source to keep the product copy careful: wearable VO₂ max may be valid enough for trends in some populations, but device-specific validation and individual-level uncertainty remain important.",
+      "categories": [
+        "vo2max",
+        "wearables",
+        "validation",
+        "systematic-review"
+      ],
+      "claimUse": "wearable-validation",
+      "entityType": "source_artifact",
+      "evidenceBucket": "Recent wearable VO2 max validation context",
+      "key": "source_artifact:pmid-41477023",
+      "murphV1Priority": "Medium",
+      "potentialMurphEndpoints": [
+        "estimated VO2 max / cardio-fitness proxy",
+        "lab graded exercise test reference comparisons"
+      ],
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "biomarker:estimated-vo2max",
+          "type": "measures"
+        }
+      ],
+      "relativePath": "sources/vo2-max/pmid-41477023.md",
+      "researchEvidence": {
+        "aggregateRole": "synthesis",
+        "aggregationNote": "Reinforces practical validity in some contexts while noting elite-athlete and longitudinal-validation limitations.",
+        "designKind": "systematic_review",
+        "designLabel": "Qualitative systematic review of wearable VO2max and lactate-threshold accuracy",
+        "includedStudyCount": 13,
+        "populationLabel": "Healthy, recreational, and professional exercise populations in wearable validation studies"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:cccbf3d846e3fae740b7e04032327a3253b030bee38fcd2761fa529de72b6b10",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/vo2-max/pmid-41477023",
+      "source": {
+        "authors": "L Železnik Mežan",
+        "citation": "Železnik Mežan L. Accuracy of wearables for determining the maximal oxygen uptake and lactate threshold: a qualitative systematic review. Front Sports Act Living. 2025;7:1707991. doi:10.3389/fspor.2025.1707991.",
+        "doi": "10.3389/fspor.2025.1707991",
+        "journal": "Frontiers in Sports and Active Living",
+        "kind": "review",
+        "pmid": "41477023",
+        "title": "Accuracy of wearables for determining the maximal oxygen uptake and lactate threshold: a qualitative systematic review",
+        "url": "https://www.frontiersin.org/journals/sports-and-active-living/articles/10.3389/fspor.2025.1707991/full",
+        "year": 2025
+      },
+      "status": "draft",
+      "summary": "2025 systematic review of wearable VO₂ max and lactate-threshold accuracy, reinforcing that wearable estimates can be useful but device/population validation still matters.",
+      "title": "Recent qualitative review of wearable VO₂max accuracy",
+      "whyItMatters": "Keeps the VO₂ max page current about wearable accuracy evidence and remaining validation gaps."
     },
     {
       "artifactNeeded": true,
@@ -24157,6 +27091,11 @@
     }
   ],
   "redirects": [
+    {
+      "from": "biomarker:spo2",
+      "reason": "Short biomarker shorthand now resolves to the canonical Blood Oxygen Saturation page.",
+      "to": "biomarker:blood-oxygen-spo2"
+    },
     {
       "from": "experiment_family:sauna/finnish-dry",
       "reason": "Renamed to the user-facing dry-sauna family key.",

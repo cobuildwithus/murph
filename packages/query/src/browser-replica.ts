@@ -42,6 +42,8 @@ const TIMELINE_LIMIT = 240;
 const SIGNAL_LIMIT = 30;
 const SOURCE_HEALTH_LIMIT = 24;
 const WEEKLY_SAMPLE_LOOKBACK_DAYS = 365;
+const GLUCOSE_SAMPLE_STREAM = "glucose";
+const GLUCOSE_SAMPLE_UNIT = "mg_dL";
 
 const INCLUDED_FAMILIES = [
   "allergy",
@@ -225,12 +227,14 @@ export async function createBrowserVaultReplica(
   const sleep = summarizeWearableSleep(input.vault, { limit: SIGNAL_LIMIT });
   const recovery = summarizeWearableRecovery(input.vault, { limit: SIGNAL_LIMIT });
   const bodyState = summarizeWearableBodyState(input.vault, { limit: SIGNAL_LIMIT });
-  const metricDayRows = [
+  const glucoseSampleMetricDayRows = projectGlucoseSampleMetricDayRows(input.vault, generatedAt);
+  const metricDayRows = mergeMetricDayRows([
     ...activity.map(projectActivityMetricDayRow),
     ...sleep.map(projectSleepMetricDayRow),
     ...recovery.map(projectRecoveryMetricDayRow),
     ...bodyState.map(projectBodyStateMetricDayRow),
-  ];
+    ...glucoseSampleMetricDayRows,
+  ]);
   const metricRows = metricDayRows.flatMap((day) => dayToMetricRows(day));
   const sourceHealthRows = summarizeWearableSourceHealth(input.vault, { limit: SOURCE_HEALTH_LIMIT })
     .map(projectSourceHealthRow);
@@ -455,6 +459,7 @@ export interface BrowserVaultActivitySummary {
   date: string;
   dayStrain: BrowserVaultResolvedMetric;
   distanceKm: BrowserVaultResolvedMetric;
+  estimatedVo2Max: BrowserVaultResolvedMetric;
   notes: string[];
   sessionCount: BrowserVaultResolvedMetric;
   sessionMinutes: BrowserVaultResolvedMetric;
@@ -724,6 +729,64 @@ function projectWeeklySampleSummary(entry: DailySampleSummary): OverviewWeeklySa
   };
 }
 
+function projectGlucoseSampleMetricDayRows(
+  vault: VaultReadModel,
+  generatedAt: string,
+): BrowserVaultMetricDayRow[] {
+  const cutoffDate = subtractDaysFromIsoDate(generatedAt.slice(0, 10), METRIC_LOOKBACK_DAYS);
+
+  return summarizeDailySamples(vault, {
+    from: cutoffDate,
+    streams: [GLUCOSE_SAMPLE_STREAM],
+  })
+    .filter((entry) => entry.unit === GLUCOSE_SAMPLE_UNIT && entry.averageValue !== null)
+    .map(projectGlucoseSampleMetricDayRow)
+    .sort(compareMetricDayRows);
+}
+
+function projectGlucoseSampleMetricDayRow(summary: DailySampleSummary): BrowserVaultMetricDayRow {
+  const confidence = inferSampleSummaryConfidence(summary);
+
+  return buildMetricDayRow({
+    attributes: {
+      firstSampleAt: summary.firstSampleAt,
+      glucoseConfidence: confidence,
+      lastSampleAt: summary.lastSampleAt,
+      sampleCount: summary.sampleCount,
+      sourceStream: summary.stream,
+    },
+    confidence,
+    date: summary.date,
+    domain: "body_state",
+    metrics: {
+      glucose: {
+        selection: {
+          unit: GLUCOSE_SAMPLE_UNIT,
+          value: summary.averageValue,
+        },
+      },
+    },
+    notes: buildGlucoseSampleNotes(summary),
+  });
+}
+
+function inferSampleSummaryConfidence(summary: DailySampleSummary): WearableConfidenceLevel {
+  if (summary.numericSampleCount >= 3) {
+    return "medium";
+  }
+
+  return "low";
+}
+
+function buildGlucoseSampleNotes(summary: DailySampleSummary): string[] {
+  const sampleLabel = summary.sampleCount === 1 ? "sample" : "samples";
+
+  return [
+    `Daily glucose summary from ${summary.sampleCount} imported ${sampleLabel}.`,
+    "Glucose context is not inferred; compare same-device and same-timing readings when possible.",
+  ];
+}
+
 function projectWearableAssistantSummary(summary: WearableAssistantSummary): BrowserVaultAssistantSummary {
   return {
     highlights: summary.highlights.slice(),
@@ -742,6 +805,7 @@ function projectActivityMetricDayRow(summary: WearableActivitySummary): BrowserV
       activeCalories: projectWearableResolvedMetric(summary.activeCalories),
       dayStrain: projectWearableResolvedMetric(summary.dayStrain),
       distanceKm: projectWearableResolvedMetric(summary.distanceKm),
+      estimatedVo2Max: projectWearableResolvedMetric(summary.estimatedVo2Max),
       sessionCount: projectWearableResolvedMetric(summary.sessionCount),
       sessionMinutes: projectWearableResolvedMetric(summary.sessionMinutes),
       steps: projectWearableResolvedMetric(summary.steps),
@@ -842,9 +906,82 @@ function buildMetricDayRow(input: {
   };
 }
 
+function mergeMetricDayRows(rows: readonly BrowserVaultMetricDayRow[]): BrowserVaultMetricDayRow[] {
+  const byId = new Map<string, BrowserVaultMetricDayRow>();
+
+  for (const row of rows) {
+    const existing = byId.get(row.id);
+    byId.set(row.id, existing ? mergeMetricDayRow(existing, row) : row);
+  }
+
+  return [...byId.values()].sort(compareMetricDayRows);
+}
+
+function mergeMetricDayRow(
+  left: BrowserVaultMetricDayRow,
+  right: BrowserVaultMetricDayRow,
+): BrowserVaultMetricDayRow {
+  return buildMetricDayRow({
+    attributes: {
+      ...left.attributes,
+      ...right.attributes,
+    },
+    confidence: mergedMetricDayConfidence(left, right),
+    date: left.date,
+    domain: left.domain,
+    metrics: {
+      ...left.metrics,
+      ...right.metrics,
+    },
+    notes: uniqueStrings([...left.notes, ...right.notes]),
+  });
+}
+
+function compareMetricDayRows(left: BrowserVaultMetricDayRow, right: BrowserVaultMetricDayRow): number {
+  const domainDelta = metricDomainSortIndex(left.domain) - metricDomainSortIndex(right.domain);
+
+  if (domainDelta !== 0) {
+    return domainDelta;
+  }
+
+  return right.date.localeCompare(left.date);
+}
+
+function metricDomainSortIndex(domain: BrowserVaultMetricDomain): number {
+  if (domain === "activity") {
+    return 0;
+  }
+  if (domain === "sleep") {
+    return 1;
+  }
+  if (domain === "recovery") {
+    return 2;
+  }
+
+  return 3;
+}
+
+function mergedMetricDayConfidence(
+  left: BrowserVaultMetricDayRow,
+  right: BrowserVaultMetricDayRow,
+): WearableConfidenceLevel {
+  if (hasOnlyGlucoseMetric(left) && !hasOnlyGlucoseMetric(right)) {
+    return right.confidence;
+  }
+  if (!hasOnlyGlucoseMetric(left) && hasOnlyGlucoseMetric(right)) {
+    return left.confidence;
+  }
+
+  return left.confidence;
+}
+
+function hasOnlyGlucoseMetric(row: BrowserVaultMetricDayRow): boolean {
+  return Object.keys(row.metrics).every((metricKey) => metricKey === "glucose");
+}
+
 function dayToMetricRows(day: BrowserVaultMetricDayRow): BrowserVaultMetricRow[] {
   return Object.entries(day.metrics).map(([metric, resolved]) => ({
-    confidence: day.confidence,
+    confidence: metricConfidence(day, metric),
     date: day.date,
     domain: day.domain,
     id: `${day.id}:${metric}`,
@@ -891,6 +1028,7 @@ function dayToActivitySummary(day: BrowserVaultMetricDayRow): BrowserVaultActivi
     date: day.date,
     dayStrain: metric(day, "dayStrain"),
     distanceKm: metric(day, "distanceKm"),
+    estimatedVo2Max: metric(day, "estimatedVo2Max"),
     notes: day.notes.slice(),
     sessionCount: metric(day, "sessionCount"),
     sessionMinutes: metric(day, "sessionMinutes"),
@@ -958,6 +1096,18 @@ function dayToBodyStateSummary(day: BrowserVaultMetricDayRow): BrowserVaultBodyS
 
 function metric(day: BrowserVaultMetricDayRow, key: string): BrowserVaultResolvedMetric {
   return day.metrics[key] ?? { selection: { unit: null, value: null } };
+}
+
+function metricConfidence(day: BrowserVaultMetricDayRow, key: string): WearableConfidenceLevel {
+  if (key === "glucose") {
+    const glucoseConfidence = readNullableString(day.attributes.glucoseConfidence);
+
+    if (glucoseConfidence === "low" || glucoseConfidence === "medium" || glucoseConfidence === "high") {
+      return glucoseConfidence;
+    }
+  }
+
+  return day.confidence;
 }
 
 function matchesEntityFilters(entity: BrowserVaultEntity, filters: BrowserVaultEntityFilters): boolean {

@@ -830,6 +830,36 @@
     },
     {
       "affectedFields": [
+        "content/biomarkers/blood-glucose.md",
+        "content/sources/blood-glucose/*.md",
+        "packages/query/browser-vault glucose metric projection",
+        "generated.catalog"
+      ],
+      "changeId": "chg_2026_04_23_blood_glucose_biomarker_page",
+      "changeType": "seed",
+      "editSummary": "Added a publishable Blood Glucose biomarker page with diagnostic boundaries, monitoring/device guardrails, hypoglycemia safety language, protocol rankings, and source-backed claims.",
+      "entityKey": "biomarker:blood-glucose",
+      "minor": false,
+      "rationale": "Murph needs a glucose page that separates clinical diagnosis from personal tracking, surfaces method and timing context, and can read imported glucose samples in the private browser-vault biomarker trend card.",
+      "reviewStatus": "proposed",
+      "schemaVersion": "murph.commons.change.v1",
+      "sourceKeys": [
+        "source_artifact:ada-standards-2026-diagnosis",
+        "source_artifact:ada-standards-2026-glycemic-goals",
+        "source_artifact:ada-diabetes-diagnosis",
+        "source_artifact:niddk-diabetes-prediabetes-tests",
+        "source_artifact:cdc-manage-blood-sugar-2024",
+        "source_artifact:cdc-low-blood-sugar-2024",
+        "source_artifact:ada-blood-glucose-meters",
+        "source_artifact:fda-noninvasive-glucose-wearable-warning-2024",
+        "source_artifact:pmid-11832527",
+        "source_artifact:pmid-35029593",
+        "source_artifact:pmid-36715875",
+        "source_artifact:pmid-31915891"
+      ]
+    },
+    {
+      "affectedFields": [
         "biomarker",
         "relations",
         "protocolRanking",
