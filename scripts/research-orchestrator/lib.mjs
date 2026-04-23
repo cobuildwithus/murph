@@ -279,14 +279,14 @@ const directLine = raw
   .find((line) => /ChatGPT (thread|conversation) URL: https:\\/\\/chatgpt\\.com\\/c\\//u.test(line));
 
 if (directLine) {
-  const match = directLine.match(/https:\\/\\/chatgpt\\.com\\/c\\/[^\\s"'\`]+/u);
+  const match = directLine.match(/https:\\/\\/chatgpt\\.com\\/c\\/\\S+/u);
   if (match) {
     fs.writeFileSync(chatUrlPath, match[0] + "\\n", "utf8");
     process.exit(0);
   }
 }
 
-const matches = [...raw.matchAll(/https:\\/\\/chatgpt\\.com\\/c\\/[^\\s"'\`]+/gu)];
+const matches = [...raw.matchAll(/https:\\/\\/chatgpt\\.com\\/c\\/\\S+/gu)];
 if (matches.length > 0) {
   fs.writeFileSync(chatUrlPath, matches.at(-1)[0] + "\\n", "utf8");
 }
