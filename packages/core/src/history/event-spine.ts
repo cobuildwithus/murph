@@ -11,7 +11,7 @@ import {
 
 import { ID_PREFIXES } from "../constants.ts";
 import { buildAttachmentCompatibilityProjections } from "../event-attachments.ts";
-import { canonicalizeEventRelations } from "../event-links.ts";
+import { normalizeCanonicalEventLinks } from "../event-links.ts";
 import { VaultError } from "../errors.ts";
 import { generateRecordId } from "../ids.ts";
 import { defaultTimeZone, normalizeTimeZone, toLocalDayKey } from "../time.ts";
@@ -19,7 +19,6 @@ import {
   compactObject,
   normalizeLocalDate,
   normalizeOptionalText,
-  uniqueTrimmedStringList,
 } from "../domains/shared.ts";
 
 type RevisionComparableRecord = Pick<EventRecord, "id" | "occurredAt" | "recordedAt" | "lifecycle">;
@@ -43,8 +42,6 @@ export interface BuildEventSpineEnvelopeInput {
   tags?: string[];
   experimentSlug?: string;
   links?: unknown;
-  relatedIds?: unknown;
-  normalizeRelationIds?: (value: unknown) => string[] | undefined;
   relationErrorCode?: string;
   relationErrorMessage?: string;
   strictDayKey?: boolean;
@@ -173,11 +170,8 @@ export function buildEventSpineEnvelope(
     );
   }
   const dayKey = normalizedDayKey ?? toLocalDayKey(input.occurredAt, effectiveTimeZone, "occurredAt");
-  const normalizeRelationIds = input.normalizeRelationIds ?? uniqueTrimmedStringList;
-  const canonicalRelations = canonicalizeEventRelations({
-    links: input.links,
-    relatedIds: input.relatedIds,
-    normalizeStringList: normalizeRelationIds,
+  const canonicalLinks = normalizeCanonicalEventLinks({
+    value: input.links,
     errorCode: input.relationErrorCode ?? "EVENT_CONTRACT_INVALID",
     errorMessage:
       input.relationErrorMessage ??
@@ -196,7 +190,7 @@ export function buildEventSpineEnvelope(
     note: input.note,
     tags: input.tags,
     experimentSlug: input.experimentSlug,
-    links: canonicalRelations.links,
+    links: canonicalLinks,
     rawRefs: input.rawRefs ?? attachmentProjections?.rawRefs ?? undefined,
     attachments,
     lifecycle: input.lifecycle,

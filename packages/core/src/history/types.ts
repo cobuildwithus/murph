@@ -68,6 +68,7 @@ interface HistoryEventDraftBase {
   note?: string;
   tags?: string[];
   links?: EventRecord["links"];
+  /** @deprecated use links */
   relatedIds?: string[];
   rawRefs?: string[];
 }

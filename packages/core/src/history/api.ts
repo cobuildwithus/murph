@@ -13,6 +13,7 @@ import type {
 } from "@murphai/contracts";
 import { ID_PREFIXES, VAULT_LAYOUT } from "../constants.ts";
 import { emitAuditRecord } from "../audit.ts";
+import { canonicalizeEventRelations } from "../event-links.ts";
 import { VaultError } from "../errors.ts";
 import { readJsonlRecords, toMonthlyShardRelativePath } from "../jsonl.ts";
 import { generateRecordId } from "../ids.ts";
@@ -429,6 +430,26 @@ function buildHistoryKindFields(input: AppendHistoryEventInput): HistoryKindFiel
   }
 }
 
+function normalizeHistoryRelationLinks({
+  links,
+  relatedIds,
+  errorCode,
+  errorMessage,
+}: {
+  links: unknown;
+  relatedIds: unknown;
+  errorCode: string;
+  errorMessage: string;
+}): HistoryEventRecord["links"] {
+  return canonicalizeEventRelations({
+    links,
+    relatedIds,
+    normalizeStringList: (value) => validateSortedStringList(value, "relatedIds", "id", 32, 80),
+    errorCode,
+    errorMessage,
+  }).links as HistoryEventRecord["links"];
+}
+
 function buildHistoryEventRecord(
   input: AppendHistoryEventInput,
   fallbackTimeZone?: string,
@@ -441,6 +462,12 @@ function buildHistoryEventRecord(
   const recordedAt = normalizeTimestamp(input.recordedAt ?? occurredAt, "recordedAt");
   const eventId = normalizeId(input.eventId, "eventId", ID_PREFIXES.event) ?? generateRecordId("event");
   const timeZone = normalizeTimeZone(input.timeZone ?? fallbackTimeZone);
+  const relationLinks = normalizeHistoryRelationLinks({
+    links: input.links,
+    relatedIds: input.relatedIds,
+    errorCode: "EVENT_INVALID",
+    errorMessage: "History event links must contain objects with type and targetId fields.",
+  });
   const baseRecord = buildEventSpineEnvelope({
     id: eventId,
     occurredAt,
@@ -451,10 +478,7 @@ function buildHistoryEventRecord(
     title: requireString(input.title, "title", 160),
     note: optionalString(input.note, "note", 4000),
     tags: normalizeTagList(input.tags, "tags"),
-    links: input.links,
-    relatedIds: input.relatedIds,
-    normalizeRelationIds: (value) =>
-      validateSortedStringList(value, "relatedIds", "id", 32, 80),
+    links: relationLinks,
     relationErrorCode: "EVENT_INVALID",
     relationErrorMessage: "History event links must contain objects with type and targetId fields.",
     rawRefs: normalizeRelativePathList(input.rawRefs, "rawRefs"),
@@ -495,6 +519,12 @@ function parseStoredHistoryEvent(value: unknown): HistoryEventRecord | null {
     "VAULT_INVALID_HISTORY_EVENT",
     "Stored health history event has an invalid lifecycle.",
   );
+  const relationLinks = normalizeHistoryRelationLinks({
+    links: value.links,
+    relatedIds: value.relatedIds,
+    errorCode: "VAULT_INVALID_HISTORY_EVENT",
+    errorMessage: "Stored health history event links must contain objects with type and targetId fields.",
+  });
 
   const baseRecord = buildEventSpineEnvelope({
     schemaVersion: requireString(value.schemaVersion, "schemaVersion", 40) as HistoryEventRecord["schemaVersion"],
@@ -510,10 +540,7 @@ function parseStoredHistoryEvent(value: unknown): HistoryEventRecord | null {
     title: requireString(value.title, "title", 160),
     note: optionalString(value.note, "note", 4000),
     tags: normalizeTagList(value.tags, "tags"),
-    links: value.links,
-    relatedIds: value.relatedIds,
-    normalizeRelationIds: (relatedIds) =>
-      validateSortedStringList(relatedIds, "relatedIds", "id", 32, 80),
+    links: relationLinks,
     relationErrorCode: "VAULT_INVALID_HISTORY_EVENT",
     relationErrorMessage: "Stored health history event links must contain objects with type and targetId fields.",
     rawRefs: normalizeRelativePathList(value.rawRefs, "rawRefs"),
