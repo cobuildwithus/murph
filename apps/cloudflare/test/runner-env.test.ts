@@ -96,6 +96,7 @@ describe("buildHostedRunnerContainerEnv", () => {
       HOSTED_ASSISTANT_BASE_URL: "http://127.0.0.1:4111/v1",
       HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://host.docker.internal:8787",
       HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "linq,telegram",
+      LINQ_ATTACHMENT_CDN_BASE_URL: "http://127.0.0.1:4011/attachment-downloads",
       HOSTED_WEB_BASE_URL: "http://127.0.0.1:3000",
       LINQ_API_BASE_URL: "http://localhost:4011",
       TELEGRAM_API_BASE_URL: "http://127.0.0.1:4012",
@@ -104,6 +105,7 @@ describe("buildHostedRunnerContainerEnv", () => {
       HOSTED_ASSISTANT_BASE_URL: "http://host.docker.internal:4111/v1",
       HOSTED_EMAIL_INGRESS_READY: "false",
       HOSTED_EMAIL_SEND_READY: "false",
+      LINQ_ATTACHMENT_CDN_BASE_URL: "http://host.docker.internal:4011/attachment-downloads",
       LINQ_API_BASE_URL: "http://host.docker.internal:4011/",
       NODE_ENV: "production",
       TELEGRAM_API_BASE_URL: "http://host.docker.internal:4012/",
@@ -116,6 +118,7 @@ describe("buildHostedRunnerContainerEnv", () => {
       HOSTED_ASSISTANT_BASE_URL: "http://127.0.0.1:4111/v1",
       HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://host.docker.internal:8787",
       HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "linq,telegram",
+      LINQ_ATTACHMENT_CDN_BASE_URL: "http://127.0.0.1:4011/attachment-downloads",
       LINQ_API_BASE_URL: "http://localhost:4011",
       TELEGRAM_API_BASE_URL: "http://127.0.0.1:4012",
       TELEGRAM_FILE_BASE_URL: "http://127.0.0.1:4013",
@@ -123,6 +126,7 @@ describe("buildHostedRunnerContainerEnv", () => {
       HOSTED_ASSISTANT_BASE_URL: "http://127.0.0.1:4111/v1",
       HOSTED_EMAIL_INGRESS_READY: "false",
       HOSTED_EMAIL_SEND_READY: "false",
+      LINQ_ATTACHMENT_CDN_BASE_URL: "http://127.0.0.1:4011/attachment-downloads",
       LINQ_API_BASE_URL: "http://localhost:4011",
       NODE_ENV: "production",
       TELEGRAM_API_BASE_URL: "http://127.0.0.1:4012",
@@ -509,6 +513,9 @@ describe("hosted deploy automation device-sync surface", () => {
     );
     expect(HOSTED_WORKER_OPTIONAL_VAR_NAMES).not.toContain(
       "OURA_WEBHOOK_VERIFICATION_TOKEN",
+    );
+    expect(HOSTED_WORKER_OPTIONAL_VAR_NAMES).not.toContain(
+      "LINQ_ATTACHMENT_CDN_BASE_URL",
     );
   });
 });

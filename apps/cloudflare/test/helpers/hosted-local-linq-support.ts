@@ -1,4 +1,4 @@
-import { createServer, type Server as HttpServer } from "node:http";
+import { createServer, type IncomingMessage, type Server as HttpServer } from "node:http";
 
 import { MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE } from "@murphai/contracts";
 import {
@@ -16,6 +16,7 @@ import type { HostedLocalFullStackScenario } from "./hosted-local-full-stack-sce
 
 export interface ObservedLinqRequest {
   body: string;
+  host: string | null;
   method: string;
   url: string;
 }
@@ -23,16 +24,47 @@ export interface ObservedLinqRequest {
 export type ObservedLinqRequestMatcher = (request: ObservedLinqRequest) => boolean;
 
 const linqCreateChatPath = "/chats";
+const linqAttachmentDownloadBasePath = "/attachment-downloads";
+
+type HostedLinqInboundPartInput =
+  | {
+      type: "text";
+      value: string;
+    }
+  | {
+      attachmentId: string;
+      fileName?: string;
+      mimeType?: string;
+      size?: number | null;
+      type: "media" | "voice_memo";
+      url?: string | null;
+    };
 
 export interface HostedLocalLinqStub {
+  attachmentDownloadBaseUrl: string;
   baseUrl: string;
   countObservedSends(expectedPath: string, matchRequest?: ObservedLinqRequestMatcher): number;
+  countObservedRequests(input: {
+    expectedMethod: string;
+    expectedPath: string;
+    matchRequest?: ObservedLinqRequestMatcher;
+  }): number;
   createChatPath: string;
   createCreateChatRequestMatcher(userId: string): ObservedLinqRequestMatcher;
+  listObservedMessageIds(chatId: string): string[];
   observedRequests: ObservedLinqRequest[];
   readObservedMessageText(request: ObservedLinqRequest): string | null;
   requireObservedChatId(userId: string): string;
+  requireLatestObservedMessageId(chatId: string): string;
   stop(): Promise<void>;
+  waitForAdditionalRequest(input: {
+    baselineCount: number;
+    expectedMethod: string;
+    expectedPath: string;
+    matchRequest?: ObservedLinqRequestMatcher;
+    scenario: HostedLocalFullStackScenario;
+    userId: string;
+  }): Promise<ObservedLinqRequest>;
   waitForAdditionalSend(input: {
     baselineCount: number;
     expectedPath: string;
@@ -40,6 +72,14 @@ export interface HostedLocalLinqStub {
     scenario: HostedLocalFullStackScenario;
     userId: string;
   }): Promise<ObservedLinqRequest>;
+  waitForMatchingRequestCount(input: {
+    expectedCount: number;
+    expectedMethod: string;
+    expectedPath: string;
+    matchRequest?: ObservedLinqRequestMatcher;
+    scenario: HostedLocalFullStackScenario;
+    userId: string;
+  }): Promise<ObservedLinqRequest[]>;
   waitForMatchingSendCount(input: {
     expectedCount: number;
     expectedPath: string;
@@ -65,13 +105,18 @@ export const HOSTED_LINQ_GROUPED_ASSISTANT_REPLY_TEXT =
 export async function startHostedLocalLinqStub(): Promise<HostedLocalLinqStub> {
   const observedRequests: ObservedLinqRequest[] = [];
   const observedChatIdsByRecipient = new Map<string, string>();
+  const observedMessageIdsByChat = new Map<string, string[]>();
+  const voiceMemoBytes = buildHostedLocalLinqVoiceMemoBytes();
   let nextObservedChatSequence = 0;
+  let nextObservedMessageSequence = 0;
+  let attachmentDownloadBaseUrl = "";
   let server: HttpServer | null = null;
 
   server = createServer(async (request, response) => {
     const body = await readRequestBody(request);
     observedRequests.push({
       body,
+      host: request.headers.host?.trim() || null,
       method: request.method ?? "GET",
       url: request.url ?? "/",
     });
@@ -90,12 +135,14 @@ export async function startHostedLocalLinqStub(): Promise<HostedLocalLinqStub> {
 
       const recipient = Array.isArray(parsedBody?.to) ? parsedBody.to[0] : "unknown";
       const chatId = `chat_local_${++nextObservedChatSequence}`;
+      const messageId = `linq_msg_local_${++nextObservedMessageSequence}`;
       observedChatIdsByRecipient.set(String(recipient ?? "unknown"), chatId);
+      observedMessageIdsByChat.set(chatId, [messageId]);
       writeJsonResponse(response, 200, {
         chat: {
           id: chatId,
           message: {
-            id: `linq_msg_${Date.now()}`,
+            id: messageId,
           },
         },
       });
@@ -114,12 +161,45 @@ export async function startHostedLocalLinqStub(): Promise<HostedLocalLinqStub> {
         return;
       }
 
+      const chatId = request.url.split("/")[2] ?? "unknown";
+      const messageId = `linq_msg_local_${++nextObservedMessageSequence}`;
+      const observedMessageIds = observedMessageIdsByChat.get(chatId) ?? [];
+      observedMessageIds.push(messageId);
+      observedMessageIdsByChat.set(chatId, observedMessageIds);
       writeJsonResponse(response, 200, {
         data: {
-          chat_id: request.url.split("/")[2],
-          id: `linq_msg_${Date.now()}`,
+          chat_id: chatId,
+          id: messageId,
         },
       });
+      return;
+    }
+
+    if (request.method === "GET" && request.url && /^\/attachments\/[^/]+$/u.test(request.url)) {
+      const attachmentId = decodeURIComponent(request.url.split("/").at(-1) ?? "");
+      writeJsonResponse(response, 200, {
+        download_url: buildHostedLocalLinqAttachmentDownloadUrl(
+          resolveHostedLocalLinqAttachmentDownloadBaseUrl(request, attachmentDownloadBaseUrl),
+          attachmentId,
+        ),
+      });
+      return;
+    }
+
+    if (
+      request.method === "GET"
+      && request.url
+      && /^\/attachment-downloads\/[^/]+\.wav$/u.test(request.url)
+    ) {
+      response.statusCode = 200;
+      response.setHeader("content-type", "audio/wav");
+      response.end(Buffer.from(voiceMemoBytes));
+      return;
+    }
+
+    if (request.method === "DELETE" && request.url && /^\/messages\/[^/]+$/u.test(request.url)) {
+      response.statusCode = 204;
+      response.end();
       return;
     }
 
@@ -153,9 +233,12 @@ export async function startHostedLocalLinqStub(): Promise<HostedLocalLinqStub> {
       resolve();
     });
   });
+  const baseUrl = `http://127.0.0.1:${requireBoundTcpPort(activeServer, "Linq stub")}`;
+  attachmentDownloadBaseUrl = `${baseUrl}${linqAttachmentDownloadBasePath}`;
 
   const waitForObservedRequests = async (input: {
     expectedCount: number;
+    expectedMethod: string;
     expectedPath: string;
     matchRequest?: ObservedLinqRequestMatcher;
     scenario: HostedLocalFullStackScenario;
@@ -165,7 +248,12 @@ export async function startHostedLocalLinqStub(): Promise<HostedLocalLinqStub> {
 
     while ((Date.now() - startedAt) < 60_000) {
       const matchingRequests = observedRequests.filter((request) =>
-        isMatchingObservedLinqSend(request, input.expectedPath, input.matchRequest)
+        isMatchingObservedLinqRequest(
+          request,
+          input.expectedMethod,
+          input.expectedPath,
+          input.matchRequest,
+        )
       );
 
       if (matchingRequests.length >= input.expectedCount) {
@@ -177,7 +265,7 @@ export async function startHostedLocalLinqStub(): Promise<HostedLocalLinqStub> {
 
       throw new Error(
         await input.scenario.buildFailureMessage(input.userId, [
-          `Timed out waiting for ${input.expectedCount} Linq send(s) for ${input.userId}.`,
+          `Timed out waiting for ${input.expectedCount} Linq request(s) for ${input.userId}.`,
           `expected path: ${input.expectedPath}`,
           `observed requests: ${JSON.stringify(observedRequests)}`,
         ]),
@@ -185,10 +273,15 @@ export async function startHostedLocalLinqStub(): Promise<HostedLocalLinqStub> {
   };
 
   return {
-    baseUrl: `http://127.0.0.1:${requireBoundTcpPort(activeServer, "Linq stub")}`,
+    attachmentDownloadBaseUrl,
+    baseUrl,
     countObservedSends: (expectedPath, matchRequest) =>
       observedRequests.filter((request) =>
-        isMatchingObservedLinqSend(request, expectedPath, matchRequest)
+        isMatchingObservedLinqRequest(request, "POST", expectedPath, matchRequest)
+      ).length,
+    countObservedRequests: ({ expectedMethod, expectedPath, matchRequest }) =>
+      observedRequests.filter((request) =>
+        isMatchingObservedLinqRequest(request, expectedMethod, expectedPath, matchRequest)
       ).length,
     createChatPath: linqCreateChatPath,
     createCreateChatRequestMatcher: (userId) => {
@@ -201,6 +294,7 @@ export async function startHostedLocalLinqStub(): Promise<HostedLocalLinqStub> {
         return parsed?.from === expectedFrom && Array.isArray(to) && to[0] === expectedTo;
       };
     },
+    listObservedMessageIds: (chatId) => [...(observedMessageIdsByChat.get(chatId) ?? [])],
     observedRequests,
     readObservedMessageText: readObservedLinqMessageText,
     requireObservedChatId: (userId) => {
@@ -212,13 +306,22 @@ export async function startHostedLocalLinqStub(): Promise<HostedLocalLinqStub> {
 
       return chatId;
     },
+    requireLatestObservedMessageId: (chatId) => {
+      const latestMessageId = observedMessageIdsByChat.get(chatId)?.at(-1) ?? null;
+      if (!latestMessageId) {
+        throw new Error(`Expected an observed Linq message id for chat ${chatId}.`);
+      }
+
+      return latestMessageId;
+    },
     stop: async () => {
       await stopHttpStubServer(activeServer);
       server = null;
     },
-    waitForAdditionalSend: async (input) => {
+    waitForAdditionalRequest: async (input) => {
       const matchingRequests = await waitForObservedRequests({
         expectedCount: input.baselineCount + 1,
+        expectedMethod: input.expectedMethod,
         expectedPath: input.expectedPath,
         matchRequest: input.matchRequest,
         scenario: input.scenario,
@@ -226,9 +329,30 @@ export async function startHostedLocalLinqStub(): Promise<HostedLocalLinqStub> {
       });
       return matchingRequests.at(-1)!;
     },
+    waitForAdditionalSend: async (input) => {
+      const matchingRequests = await waitForObservedRequests({
+        expectedCount: input.baselineCount + 1,
+        expectedMethod: "POST",
+        expectedPath: input.expectedPath,
+        matchRequest: input.matchRequest,
+        scenario: input.scenario,
+        userId: input.userId,
+      });
+      return matchingRequests.at(-1)!;
+    },
+    waitForMatchingRequestCount: async (input) =>
+      await waitForObservedRequests({
+        expectedCount: input.expectedCount,
+        expectedMethod: input.expectedMethod,
+        expectedPath: input.expectedPath,
+        matchRequest: input.matchRequest,
+        scenario: input.scenario,
+        userId: input.userId,
+      }),
     waitForMatchingSendCount: async (input) =>
       await waitForObservedRequests({
         expectedCount: input.expectedCount,
+        expectedMethod: "POST",
         expectedPath: input.expectedPath,
         matchRequest: input.matchRequest,
         scenario: input.scenario,
@@ -238,6 +362,7 @@ export async function startHostedLocalLinqStub(): Promise<HostedLocalLinqStub> {
       (
         await waitForObservedRequests({
           expectedCount: 1,
+          expectedMethod: "POST",
           expectedPath: input.expectedPath,
           matchRequest: input.matchRequest,
           scenario: input.scenario,
@@ -253,9 +378,17 @@ export function buildHostedLinqInboundEvent(
   input: {
     eventId?: string;
     messageId?: string;
+    parts?: HostedLinqInboundPartInput[];
     text?: string;
   } = {},
 ): Record<string, unknown> {
+  const parts = input.parts?.map(buildHostedLinqInboundPart) ?? [
+    {
+      type: "text",
+      value: input.text ?? "hello mate",
+    },
+  ];
+
   return {
     api_version: "v3",
     created_at: new Date().toISOString(),
@@ -281,12 +414,7 @@ export function buildHostedLinqInboundEvent(
       is_from_me: false,
       message: {
         id: input.messageId ?? `msg_local_${userId}`,
-        parts: [
-          {
-            type: "text",
-            value: input.text ?? "hello mate",
-          },
-        ],
+        parts,
       },
       recipient_handle: {
         handle: buildLinqHomePhoneNumber(userId),
@@ -375,13 +503,14 @@ function buildStableTestPhoneNumber(userId: string, prefix: string): string {
   return `+1555${prefix}${buildStableNumericSuffix(userId, 7)}`;
 }
 
-function isMatchingObservedLinqSend(
+function isMatchingObservedLinqRequest(
   request: ObservedLinqRequest,
+  expectedMethod: string,
   expectedPath: string,
   matchRequest?: ObservedLinqRequestMatcher,
 ): boolean {
   return (
-    request.method === "POST"
+    request.method === expectedMethod
     && request.url === expectedPath
     && (matchRequest ? matchRequest(request) : true)
   );
@@ -452,6 +581,59 @@ function readObservedLinqMessageText(request: ObservedLinqRequest): string | nul
     .filter((value): value is string => typeof value === "string")
     .join("\n")
     || null;
+}
+
+function buildHostedLinqInboundPart(part: HostedLinqInboundPartInput): Record<string, unknown> {
+  if (part.type === "text") {
+    return {
+      type: "text",
+      value: part.value,
+    };
+  }
+
+  return {
+    attachment_id: part.attachmentId,
+    ...(part.fileName ? { filename: part.fileName } : {}),
+    ...(part.mimeType ? { mime_type: part.mimeType } : {}),
+    ...(typeof part.size === "number" ? { size: part.size } : {}),
+    type: part.type,
+    ...(part.url ? { url: part.url } : {}),
+  };
+}
+
+function buildHostedLocalLinqAttachmentDownloadUrl(
+  attachmentDownloadBaseUrl: string,
+  attachmentId: string,
+): string {
+  return `${attachmentDownloadBaseUrl}/${encodeURIComponent(attachmentId)}.wav`;
+}
+
+function resolveHostedLocalLinqAttachmentDownloadBaseUrl(
+  request: Pick<IncomingMessage, "headers">,
+  fallbackBaseUrl: string,
+): string {
+  const host = request.headers.host?.trim();
+  if (!host) {
+    return fallbackBaseUrl;
+  }
+
+  try {
+    return new URL(linqAttachmentDownloadBasePath, `http://${host}`).toString().replace(/\/$/u, "");
+  } catch {
+    return fallbackBaseUrl;
+  }
+}
+
+function buildHostedLocalLinqVoiceMemoBytes(): Uint8Array {
+  return Uint8Array.from([
+    0x52, 0x49, 0x46, 0x46, 0x2c, 0x00, 0x00, 0x00,
+    0x57, 0x41, 0x56, 0x45, 0x66, 0x6d, 0x74, 0x20,
+    0x10, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00,
+    0x40, 0x1f, 0x00, 0x00, 0x80, 0x3e, 0x00, 0x00,
+    0x02, 0x00, 0x10, 0x00, 0x64, 0x61, 0x74, 0x61,
+    0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0x7f,
+    0x00, 0x80, 0x00, 0x00,
+  ]);
 }
 
 function requireBoundTcpPort(server: HttpServer, label: string): number {
