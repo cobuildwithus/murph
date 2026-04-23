@@ -6,7 +6,6 @@ import type { HostedMemberBillingSnapshot } from "@/src/lib/hosted-onboarding/ho
 const mocks = vi.hoisted(() => ({
   lockHostedMemberRow: vi.fn(),
   readHostedMemberBillingSnapshot: vi.fn(),
-  readHostedMemberCoreState: vi.fn(),
   updateHostedMemberCoreState: vi.fn(),
   writeHostedMemberStripeBillingRef: vi.fn(),
 }));
@@ -23,7 +22,6 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", async () => {
   return {
     ...actual,
     readHostedMemberBillingSnapshot: mocks.readHostedMemberBillingSnapshot,
-    readHostedMemberCoreState: mocks.readHostedMemberCoreState,
     updateHostedMemberCoreState: mocks.updateHostedMemberCoreState,
   };
 });
@@ -41,6 +39,8 @@ vi.mock("@/src/lib/hosted-onboarding/shared", async () => {
 
 import {
   prepareHostedMemberStripeBillingWrite,
+  writeHostedMemberStripeBillingRefIfFreshTx,
+  writeHostedMemberStripeBillingTx,
   updateHostedMemberStripeBillingIfFreshTx,
 } from "@/src/lib/hosted-onboarding/stripe-billing-policy";
 
@@ -51,9 +51,9 @@ describe("hosted onboarding stripe billing policy", () => {
     const member = makeMemberSnapshot();
     mocks.lockHostedMemberRow.mockResolvedValue(undefined);
     mocks.readHostedMemberBillingSnapshot.mockResolvedValue(member);
-    mocks.readHostedMemberCoreState.mockResolvedValue(member.core);
     mocks.updateHostedMemberCoreState.mockResolvedValue(member.core);
     mocks.writeHostedMemberStripeBillingRef.mockResolvedValue({
+      lastStripeEventCreatedAt: new Date("2026-04-12T00:00:00.000Z"),
       memberId: "member_123",
       stripeCustomerId: "cus_123",
       stripeSubscriptionId: "sub_123",
@@ -112,14 +112,6 @@ describe("hosted onboarding stripe billing policy", () => {
     mocks.lockHostedMemberRow.mockImplementation(async () => {
       trace.push("lock-row");
     });
-    mocks.readHostedMemberCoreState.mockImplementation(async () => {
-      trace.push("locked-core-read");
-      return makeMemberSnapshot({
-        core: {
-          billingStatus: currentBillingStatus,
-        },
-      }).core;
-    });
     mocks.updateHostedMemberCoreState.mockImplementation(async ({ billingStatus }) => {
       trace.push(`write-core:${billingStatus}`);
       currentBillingStatus = billingStatus;
@@ -132,6 +124,7 @@ describe("hosted onboarding stripe billing policy", () => {
     mocks.writeHostedMemberStripeBillingRef.mockImplementation(async () => {
       trace.push("write-billing-ref");
       return {
+        lastStripeEventCreatedAt: new Date("2026-04-12T00:00:00.000Z"),
         memberId: "member_123",
         stripeCustomerId: "cus_123",
         stripeSubscriptionId: "sub_456",
@@ -152,7 +145,7 @@ describe("hosted onboarding stripe billing policy", () => {
     });
 
     await expect(
-      updateHostedMemberStripeBillingIfFreshTx({
+      writeHostedMemberStripeBillingTx({
         billingStatus: HostedBillingStatus.past_due,
         canonicalBillingStatus: HostedBillingStatus.past_due,
         dispatchContext: {
@@ -187,11 +180,244 @@ describe("hosted onboarding stripe billing policy", () => {
 
     expect(trace).toEqual([
       "lock-row",
-      "locked-core-read",
+      "locked-billing-read",
       "write-core:past_due",
       "write-billing-ref",
       "locked-billing-read",
     ]);
+    expect(mocks.writeHostedMemberStripeBillingRef).toHaveBeenCalledWith({
+      memberId: "member_123",
+      stripeCustomerId: "cus_123",
+      stripeEventCreatedAt: new Date("2026-04-12T00:00:00.000Z"),
+      stripeSubscriptionId: "sub_456",
+      tx,
+    });
+  });
+
+  it("does not let invoice.payment_failed promote a non-active member back to active", async () => {
+    mocks.readHostedMemberBillingSnapshot
+      .mockResolvedValueOnce(makeMemberSnapshot({
+        billingRef: {
+          lastStripeEventCreatedAt: new Date("2026-04-11T23:00:00.000Z"),
+          memberId: "member_123",
+          stripeCustomerId: "cus_123",
+          stripeSubscriptionId: "sub_456",
+        },
+        core: {
+          billingStatus: HostedBillingStatus.past_due,
+        },
+      }))
+      .mockResolvedValueOnce(makeMemberSnapshot({
+        billingRef: {
+          lastStripeEventCreatedAt: new Date("2026-04-12T00:00:00.000Z"),
+          memberId: "member_123",
+          stripeCustomerId: "cus_123",
+          stripeSubscriptionId: "sub_456",
+        },
+        core: {
+          billingStatus: HostedBillingStatus.past_due,
+        },
+      }));
+
+    await expect(
+      writeHostedMemberStripeBillingTx({
+        billingStatus: HostedBillingStatus.past_due,
+        canonicalBillingStatus: HostedBillingStatus.active,
+        dispatchContext: {
+          eventCreatedAt: new Date("2026-04-12T00:00:00.000Z"),
+          occurredAt: "2026-04-12T00:00:00.000Z",
+          sourceEventId: "evt_failed_late",
+          sourceType: "stripe.invoice.payment_failed",
+        },
+        member: makeMemberSnapshot({
+          core: {
+            billingStatus: HostedBillingStatus.past_due,
+          },
+        }),
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: "sub_456",
+        tx: {} as never,
+      }),
+    ).resolves.toEqual(makeMemberSnapshot({
+      billingRef: {
+        lastStripeEventCreatedAt: new Date("2026-04-12T00:00:00.000Z"),
+        memberId: "member_123",
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: "sub_456",
+      },
+      core: {
+        billingStatus: HostedBillingStatus.past_due,
+      },
+    }));
+
+    expect(mocks.updateHostedMemberCoreState).toHaveBeenCalledWith({
+      billingStatus: HostedBillingStatus.past_due,
+      memberId: "member_123",
+      prisma: {},
+      suspendedAt: undefined,
+    });
+  });
+
+  it("ignores Stripe billing writes from strictly older sources", async () => {
+    mocks.readHostedMemberBillingSnapshot.mockResolvedValue(makeMemberSnapshot({
+      billingRef: {
+        lastStripeEventCreatedAt: new Date("2026-04-12T01:00:00.000Z"),
+        memberId: "member_123",
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: "sub_456",
+      },
+      core: {
+        billingStatus: HostedBillingStatus.active,
+      },
+    }));
+
+    await expect(
+      writeHostedMemberStripeBillingTx({
+        billingStatus: HostedBillingStatus.past_due,
+        canonicalBillingStatus: HostedBillingStatus.past_due,
+        dispatchContext: {
+          eventCreatedAt: new Date("2026-04-12T00:00:00.000Z"),
+          occurredAt: "2026-04-12T00:00:00.000Z",
+          sourceEventId: "evt_older",
+          sourceType: "stripe.invoice.payment_failed",
+        },
+        member: makeMemberSnapshot(),
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: "sub_456",
+        tx: {} as never,
+      }),
+    ).resolves.toBeNull();
+
+    expect(mocks.updateHostedMemberCoreState).not.toHaveBeenCalled();
+    expect(mocks.writeHostedMemberStripeBillingRef).not.toHaveBeenCalled();
+  });
+
+  it("still allows same-second Stripe billing writes to proceed because source ids are not monotonic", async () => {
+    const freshnessAt = new Date("2026-04-12T01:00:00.000Z");
+    let currentBillingStatus = HostedBillingStatus.active;
+    let currentBillingRef = {
+      lastStripeEventCreatedAt: freshnessAt,
+      memberId: "member_123",
+      stripeCustomerId: "cus_123",
+      stripeSubscriptionId: "sub_456",
+    };
+
+    mocks.readHostedMemberBillingSnapshot.mockImplementation(async () => makeMemberSnapshot({
+      billingRef: currentBillingRef,
+      core: {
+        billingStatus: currentBillingStatus,
+      },
+    }));
+    mocks.updateHostedMemberCoreState.mockImplementation(async ({ billingStatus }) => {
+      currentBillingStatus = billingStatus;
+      return makeMemberSnapshot({
+        billingRef: currentBillingRef,
+        core: {
+          billingStatus,
+        },
+      }).core;
+    });
+    mocks.writeHostedMemberStripeBillingRef.mockImplementation(async ({
+      stripeEventCreatedAt,
+      stripeCustomerId,
+      stripeSubscriptionId,
+    }) => {
+      currentBillingRef = {
+        lastStripeEventCreatedAt: stripeEventCreatedAt ?? null,
+        memberId: "member_123",
+        stripeCustomerId: stripeCustomerId ?? null,
+        stripeSubscriptionId: stripeSubscriptionId ?? null,
+      };
+    });
+
+    await expect(
+      writeHostedMemberStripeBillingTx({
+        billingStatus: HostedBillingStatus.past_due,
+        canonicalBillingStatus: HostedBillingStatus.past_due,
+        dispatchContext: {
+          eventCreatedAt: freshnessAt,
+          occurredAt: freshnessAt.toISOString(),
+          sourceEventId: "evt_same_second",
+          sourceType: "stripe.invoice.payment_failed",
+        },
+        member: makeMemberSnapshot(),
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: "sub_456",
+        tx: {} as never,
+      }),
+    ).resolves.toEqual(makeMemberSnapshot({
+      billingRef: {
+        lastStripeEventCreatedAt: freshnessAt,
+        memberId: "member_123",
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: "sub_456",
+      },
+      core: {
+        billingStatus: HostedBillingStatus.past_due,
+      },
+    }));
+
+    expect(mocks.updateHostedMemberCoreState).toHaveBeenCalled();
+    expect(mocks.writeHostedMemberStripeBillingRef).toHaveBeenCalledWith({
+      memberId: "member_123",
+      stripeCustomerId: "cus_123",
+      stripeEventCreatedAt: freshnessAt,
+      stripeSubscriptionId: "sub_456",
+      tx: {},
+    });
+  });
+
+  it("persists Stripe freshness markers for ref-only checkout bindings", async () => {
+    const tx = {
+      __tag: "tx",
+    };
+
+    mocks.readHostedMemberBillingSnapshot.mockResolvedValueOnce(makeMemberSnapshot({
+      billingRef: {
+        memberId: "member_123",
+        stripeCustomerId: "cus_existing",
+        stripeSubscriptionId: "sub_existing",
+      },
+    })).mockResolvedValueOnce(makeMemberSnapshot({
+      billingRef: {
+        lastStripeEventCreatedAt: new Date("2026-04-12T00:00:00.000Z"),
+        memberId: "member_123",
+        stripeCustomerId: "cus_checkout",
+        stripeSubscriptionId: "sub_checkout",
+      },
+    }));
+
+    await expect(
+      writeHostedMemberStripeBillingRefIfFreshTx({
+        dispatchContext: {
+          eventCreatedAt: new Date("2026-04-12T00:00:00.000Z"),
+          sourceEventId: "evt_checkout",
+        },
+        memberId: "member_123",
+        stripeCustomerId: "cus_checkout",
+        stripeSubscriptionId: "sub_checkout",
+        tx: tx as never,
+      }),
+    ).resolves.toEqual(makeMemberSnapshot({
+      billingRef: {
+        lastStripeEventCreatedAt: new Date("2026-04-12T00:00:00.000Z"),
+        memberId: "member_123",
+        stripeCustomerId: "cus_checkout",
+        stripeSubscriptionId: "sub_checkout",
+      },
+    }));
+
+    expect(mocks.writeHostedMemberStripeBillingRef).toHaveBeenCalledWith({
+      memberId: "member_123",
+      stripeCustomerId: "cus_checkout",
+      stripeEventCreatedAt: new Date("2026-04-12T00:00:00.000Z"),
+      stripeSubscriptionId: "sub_checkout",
+      tx,
+    });
+  });
+
+  it("keeps the legacy freshness-named export as an alias of the locked write helper", () => {
+    expect(updateHostedMemberStripeBillingIfFreshTx).toBe(writeHostedMemberStripeBillingTx);
   });
 });
 

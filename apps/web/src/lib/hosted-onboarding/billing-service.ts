@@ -24,6 +24,7 @@ import {
   finishHostedOnboardingTiming,
   startHostedOnboardingTiming,
 } from "./logging";
+import { sha256Hex } from "../primitives";
 import {
   extractHostedPrivyVerifiedEmailAccount,
   type PrivyLinkedAccountLike,
@@ -146,6 +147,14 @@ export async function createHostedBillingCheckout(
       billingPlanCode,
       memberId: invite.member.id,
     };
+    const checkoutIdempotencyKey = buildHostedBillingCheckoutIdempotencyKey({
+      billingPlanCode,
+      inviteCode: invite.inviteCode,
+      memberId: invite.member.id,
+      shareCode,
+      stripeCustomerId: customerId,
+      verifiedEmail,
+    });
     const checkoutSession = await stripe.checkout.sessions.create({
       cancel_url: buildStripeCancelUrl(publicBaseUrl, invite.inviteCode, shareCode),
       client_reference_id: invite.member.id,
@@ -162,6 +171,8 @@ export async function createHostedBillingCheckout(
         metadata: checkoutMetadata,
       },
       success_url: buildStripeSuccessUrl(publicBaseUrl, invite.inviteCode, shareCode),
+    }, {
+      idempotencyKey: checkoutIdempotencyKey,
     });
 
     if (!checkoutSession.url) {
@@ -222,6 +233,48 @@ async function resolveHostedStripeCustomerId(input: {
     });
     throw error;
   }
+}
+
+export function buildHostedBillingCheckoutIdempotencyKey(input: {
+  billingPlanCode: HostedBillingPlanCode;
+  inviteCode: string;
+  memberId: string;
+  shareCode?: string | null;
+  stripeCustomerId?: string | null;
+  verifiedEmail?: string | null;
+}): string {
+  const shareKey = normalizeNullableString(input.shareCode) ?? "direct";
+  const customerBindingKey = deriveHostedBillingCheckoutCustomerBindingKey({
+    stripeCustomerId: input.stripeCustomerId,
+    verifiedEmail: input.verifiedEmail,
+  });
+  return [
+    "hosted-billing-checkout",
+    input.memberId,
+    input.inviteCode,
+    input.billingPlanCode,
+    shareKey,
+    customerBindingKey,
+  ].join(":");
+}
+
+function deriveHostedBillingCheckoutCustomerBindingKey(input: {
+  stripeCustomerId?: string | null;
+  verifiedEmail?: string | null;
+}): string {
+  const stripeCustomerId = normalizeNullableString(input.stripeCustomerId);
+
+  if (stripeCustomerId) {
+    return `customer:${stripeCustomerId}`;
+  }
+
+  const verifiedEmail = normalizeNullableString(input.verifiedEmail)?.toLowerCase() ?? null;
+
+  if (verifiedEmail) {
+    return `email:${sha256Hex(verifiedEmail).slice(0, 12)}`;
+  }
+
+  return "customer:none";
 }
 
 export function requireHostedMemberWalletAddressForRevnet(member: {

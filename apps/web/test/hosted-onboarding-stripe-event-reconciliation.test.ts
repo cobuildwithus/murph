@@ -1,4 +1,4 @@
-import { HostedStripeEventStatus } from "@prisma/client";
+import { HostedBillingStatus, HostedStripeEventStatus } from "@prisma/client";
 import type Stripe from "stripe";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -138,9 +138,7 @@ describe("hosted Stripe event reconciliation", () => {
     mocks.resolveStripeCustomerContext.mockResolvedValue({
       customerId: null,
     });
-    mocks.stripe.subscriptions.retrieve.mockResolvedValue({
-      status: "active",
-    });
+    mocks.stripe.subscriptions.retrieve.mockResolvedValue(makeCanonicalSubscription());
     mocks.drainHostedRevnetIssuanceSubmissionQueue.mockResolvedValue([]);
   });
 
@@ -203,7 +201,9 @@ describe("hosted Stripe event reconciliation", () => {
       },
       prisma.client,
       "active",
+      makeCanonicalSubscription(),
     );
+    expect(mocks.stripe.subscriptions.retrieve).toHaveBeenCalledWith("sub_123");
     expect(prisma.client.$transaction).toHaveBeenCalledWith(
       expect.any(Function),
       HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
@@ -242,18 +242,23 @@ describe("hosted Stripe event reconciliation", () => {
 
     expect(mocks.applyStripeCheckoutCompleted).toHaveBeenCalledWith(
       event.data.object,
-      expect.objectContaining({
-        sourceEventId: event.id,
-        sourceType: "stripe.checkout.session.completed",
-      }),
       expect.anything(),
     );
   });
 
-  it("routes subscription updates through the live Stripe event", async () => {
+  it("uses the live Stripe subscription state instead of a stale subscription event payload", async () => {
     const prisma = createStripeEventPrismaHarness();
     const event = makeSubscriptionUpdatedEvent();
+    const canonicalSubscription = makeCanonicalSubscription({
+      customer: "cus_subscription",
+      id: "sub_123",
+      metadata: {
+        memberId: "member_123",
+      },
+      status: "active",
+    });
     mocks.stripe.events.retrieve.mockResolvedValue(event);
+    mocks.stripe.subscriptions.retrieve.mockResolvedValue(canonicalSubscription);
 
     await recordHostedStripeEvent({
       event,
@@ -274,13 +279,59 @@ describe("hosted Stripe event reconciliation", () => {
     });
 
     expect(mocks.applyStripeSubscriptionUpdated).toHaveBeenCalledWith(
-      event.data.object,
+      canonicalSubscription,
       expect.objectContaining({
         sourceEventId: event.id,
         sourceType: "stripe.customer.subscription.updated",
       }),
       expect.anything(),
     );
+    expect(mocks.stripe.subscriptions.retrieve).toHaveBeenCalledWith("sub_123");
+  });
+
+  it("routes invoice.payment_failed through the live Stripe subscription instead of the stale event payload", async () => {
+    const prisma = createStripeEventPrismaHarness();
+    const event = makeInvoicePaymentFailedEvent();
+    const canonicalSubscription = makeCanonicalSubscription({
+      customer: "cus_subscription",
+      id: "sub_123",
+      metadata: {
+        memberId: "member_123",
+      },
+      status: "past_due",
+    });
+    mocks.stripe.events.retrieve.mockResolvedValue(event);
+    mocks.stripe.subscriptions.retrieve.mockResolvedValue(canonicalSubscription);
+
+    await recordHostedStripeEvent({
+      event,
+      prisma: prisma.client,
+    });
+
+    await expect(
+      reconcileHostedStripeEventById({
+        eventId: event.id,
+        prisma: prisma.client,
+      }),
+    ).resolves.toEqual({
+      activatedMemberId: null,
+      createdOrUpdatedRevnetIssuance: false,
+      eventId: event.id,
+      hostedExecutionEventId: null,
+      status: "completed",
+    });
+
+    expect(mocks.applyStripeInvoicePaymentFailed).toHaveBeenCalledWith(
+      event.data.object,
+      expect.objectContaining({
+        sourceEventId: event.id,
+        sourceType: "stripe.invoice.payment_failed",
+      }),
+      expect.anything(),
+      HostedBillingStatus.past_due,
+      canonicalSubscription,
+    );
+    expect(mocks.stripe.subscriptions.retrieve).toHaveBeenCalledWith("sub_123");
   });
 
   it("resolves refund customer context from the live Stripe event", async () => {
@@ -384,6 +435,33 @@ function makeInvoicePaidEvent(): Stripe.Event {
   });
 }
 
+function makeInvoicePaymentFailedEvent(): Stripe.Event {
+  return makeStripeEvent({
+    api_version: "2025-03-31.basil",
+    created: 1774708804,
+    data: {
+      object: {
+        amount_due: 2000,
+        charge: "ch_123",
+        currency: "usd",
+        customer: "cus_123",
+        id: "in_123",
+        payment_intent: "pi_123",
+        subscription: "sub_123",
+      },
+    },
+    id: "evt_invoice_payment_failed_123",
+    livemode: false,
+    object: "event",
+    pending_webhooks: 0,
+    request: {
+      id: null,
+      idempotency_key: null,
+    },
+    type: "invoice.payment_failed",
+  });
+}
+
 function makeCheckoutCompletedEvent(): Stripe.Event {
   return makeStripeEvent({
     api_version: "2025-03-31.basil",
@@ -458,6 +536,20 @@ function makeRefundCreatedEvent(): Stripe.Event {
     },
     type: "refund.created",
   });
+}
+
+function makeCanonicalSubscription(overrides?: Partial<{
+  customer: string;
+  id: string;
+  metadata: Record<string, string>;
+  status: Stripe.Subscription.Status;
+}>): Stripe.Subscription {
+  return {
+    customer: overrides?.customer ?? "cus_123",
+    id: overrides?.id ?? "sub_123",
+    metadata: overrides?.metadata ?? {},
+    status: overrides?.status ?? "active",
+  } as Stripe.Subscription;
 }
 
 function makeStripeEvent<

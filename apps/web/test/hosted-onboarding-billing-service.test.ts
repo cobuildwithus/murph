@@ -217,12 +217,17 @@ describe("createHostedBillingCheckout", () => {
         success_url:
           "https://join.example.test/join/invite-code/success?session_id={CHECKOUT_SESSION_ID}&share=share_123",
       }),
+      {
+        idempotencyKey: "hosted-billing-checkout:member_123:invite-code:launch_monthly:share_123:email:8ba467122dd5",
+      },
     );
     const checkoutSessionRequest = mocks.stripe.checkout.sessions.create.mock.calls[0]?.[0];
     expect(checkoutSessionRequest).not.toHaveProperty("customer");
     expect(checkoutSessionRequest).not.toHaveProperty("automatic_tax");
     expect(checkoutSessionRequest).not.toHaveProperty("customer_update");
-    expect(mocks.stripe.checkout.sessions.create.mock.calls[0]?.[1]).toBeUndefined();
+    expect(mocks.stripe.checkout.sessions.create.mock.calls[0]?.[1]).toEqual({
+      idempotencyKey: "hosted-billing-checkout:member_123:invite-code:launch_monthly:share_123:email:8ba467122dd5",
+    });
     expect(consoleInfo).toHaveBeenCalledWith(
       "Hosted onboarding timing.",
       expect.objectContaining({
@@ -303,6 +308,9 @@ describe("createHostedBillingCheckout", () => {
       expect.objectContaining({
         customer: "cus_existing",
       }),
+      {
+        idempotencyKey: "hosted-billing-checkout:member_123:invite-code:launch_monthly:direct:customer:cus_existing",
+      },
     );
     const checkoutSessionRequest = mocks.stripe.checkout.sessions.create.mock.calls[0]?.[0];
     expect(checkoutSessionRequest).not.toHaveProperty("customer_email");
@@ -328,9 +336,136 @@ describe("createHostedBillingCheckout", () => {
       expect.not.objectContaining({
         customer: expect.anything(),
       }),
+      {
+        idempotencyKey: "hosted-billing-checkout:member_123:invite-code:launch_monthly:direct:customer:none",
+      },
     );
     const checkoutSessionRequest = mocks.stripe.checkout.sessions.create.mock.calls[0]?.[0];
     expect(checkoutSessionRequest).not.toHaveProperty("customer_email");
+  });
+
+  it("uses the same Stripe idempotency key for duplicate checkout requests", async () => {
+    mocks.requireHostedInviteForBillingCheckout.mockResolvedValue(makeInvite());
+    const prisma = makePrisma();
+
+    await expect(Promise.all([
+      createHostedBillingCheckout({
+        inviteCode: "invite-code",
+        linkedAccounts: [
+          {
+            address: "member@example.test",
+            type: "email",
+            verified_at: 1_710_000_000,
+          },
+        ],
+        member: makeAuthenticatedMember(),
+        now: new Date("2026-03-27T12:00:00.000Z"),
+        prisma: prisma as never,
+        shareCode: "share_123",
+      }),
+      createHostedBillingCheckout({
+        inviteCode: "invite-code",
+        linkedAccounts: [
+          {
+            address: "member@example.test",
+            type: "email",
+            verified_at: 1_710_000_000,
+          },
+        ],
+        member: makeAuthenticatedMember(),
+        now: new Date("2026-03-27T12:00:00.000Z"),
+        prisma: prisma as never,
+        shareCode: "share_123",
+      }),
+    ])).resolves.toEqual([
+      {
+        alreadyActive: false,
+        url: "https://billing.example.test/session_123",
+      },
+      {
+        alreadyActive: false,
+        url: "https://billing.example.test/session_123",
+      },
+    ]);
+
+    expect(mocks.stripe.checkout.sessions.create).toHaveBeenCalledTimes(2);
+    const firstCall = mocks.stripe.checkout.sessions.create.mock.calls[0];
+    const secondCall = mocks.stripe.checkout.sessions.create.mock.calls[1];
+
+    expect(firstCall?.[0]).toEqual(secondCall?.[0]);
+    expect(firstCall?.[1]).toEqual({
+      idempotencyKey: "hosted-billing-checkout:member_123:invite-code:launch_monthly:share_123:email:8ba467122dd5",
+    });
+    expect(secondCall?.[1]).toEqual({
+      idempotencyKey: "hosted-billing-checkout:member_123:invite-code:launch_monthly:share_123:email:8ba467122dd5",
+    });
+  });
+
+  it("changes the Stripe idempotency key when a retry upgrades from email-bound checkout to a durable customer binding", async () => {
+    mocks.requireHostedInviteForBillingCheckout.mockResolvedValue(makeInvite());
+    const prisma = makePrisma({
+      findUniqueResults: [
+        null,
+        {
+          memberId: "member_123",
+          ...buildHostedMemberBillingPrivateColumns({
+            memberId: "member_123",
+            stripeCustomerId: "cus_existing",
+            stripeSubscriptionId: null,
+          }),
+          stripeCustomerLookupKey: "hbidx:stripe-customer:v1:existing",
+          stripeSubscriptionLookupKey: null,
+        },
+      ],
+    });
+
+    await createHostedBillingCheckout({
+      inviteCode: "invite-code",
+      linkedAccounts: [
+        {
+          address: "member@example.test",
+          type: "email",
+          verified_at: 1_710_000_000,
+        },
+      ],
+      member: makeAuthenticatedMember(),
+      now: new Date("2026-03-27T12:00:00.000Z"),
+      prisma: prisma as never,
+      shareCode: "share_123",
+    });
+
+    await createHostedBillingCheckout({
+      inviteCode: "invite-code",
+      linkedAccounts: [
+        {
+          address: "member@example.test",
+          type: "email",
+          verified_at: 1_710_000_000,
+        },
+      ],
+      member: makeAuthenticatedMember(),
+      now: new Date("2026-03-27T12:00:05.000Z"),
+      prisma: prisma as never,
+      shareCode: "share_123",
+    });
+
+    const firstCall = mocks.stripe.checkout.sessions.create.mock.calls[0];
+    const secondCall = mocks.stripe.checkout.sessions.create.mock.calls[1];
+
+    expect(firstCall?.[0]).toMatchObject({
+      customer_email: "member@example.test",
+    });
+    expect(firstCall?.[0]).not.toHaveProperty("customer");
+    expect(firstCall?.[1]).toEqual({
+      idempotencyKey: "hosted-billing-checkout:member_123:invite-code:launch_monthly:share_123:email:8ba467122dd5",
+    });
+    expect(secondCall?.[0]).toMatchObject({
+      customer: "cus_existing",
+    });
+    expect(secondCall?.[0]).not.toHaveProperty("customer_email");
+    expect(secondCall?.[1]).toEqual({
+      idempotencyKey: "hosted-billing-checkout:member_123:invite-code:launch_monthly:share_123:customer:cus_existing",
+    });
   });
 });
 

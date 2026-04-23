@@ -1,6 +1,8 @@
 import type { PrismaClient } from "@prisma/client";
 
 import {
+  claimHostedAiUsageStripeMetering,
+  HostedAiUsageStripeMeterClaimLostError,
   markHostedAiUsageStripeFailed,
   markHostedAiUsageStripeProgress,
   listHostedAiUsagePendingStripeMetering,
@@ -15,13 +17,21 @@ const DEFAULT_STRIPE_METER_BATCH_LIMIT = 32;
 const DEFAULT_STRIPE_METER_EVENT_NAME = "token-billing-tokens";
 const STRIPE_METER_RETRY_BASE_DELAY_MS = 5 * 60_000;
 const STRIPE_METER_RETRY_MAX_DELAY_MS = 24 * 60 * 60_000;
-const STRIPE_METER_PROGRESS_PREFIX = "tokens-v1:";
+const STRIPE_METER_LEASE_MS = 5 * 60_000;
+const STRIPE_METER_PROGRESS_V1_PREFIX = "tokens-v1:";
+const STRIPE_METER_PROGRESS_V2_PREFIX = "tokens-v2:";
+const STRIPE_METER_COMPLETED_IDENTIFIER = "tokens-v1";
 
 type HostedAiUsageStripeTokenType = "input" | "output";
 
 interface HostedAiUsageStripeTokenEvent {
   tokenType: HostedAiUsageStripeTokenType;
   value: number;
+}
+
+interface HostedAiUsageStripeProgressState {
+  completedTokenTypes: Set<HostedAiUsageStripeTokenType>;
+  fencedTokenTypes: Set<HostedAiUsageStripeTokenType>;
 }
 
 export interface HostedAiUsageStripeMeterEnvironment {
@@ -66,51 +76,126 @@ export async function drainHostedAiUsageStripeMetering(input: {
   let failed = 0;
 
   for (const candidate of candidates) {
+    let claim = await claimHostedAiUsageStripeMetering({
+      attemptedAt,
+      candidate,
+      leaseMs: STRIPE_METER_LEASE_MS,
+      prisma: input.prisma,
+    });
+
+    if (!claim) {
+      continue;
+    }
+
     const skipReason = resolveHostedAiUsageStripeSkipReason(candidate);
+    const progress = parseHostedAiUsageStripeProgressIdentifier(
+      candidate.stripeMeterIdentifier,
+    );
+    let currentIdentifier = normalizeOptionalString(candidate.stripeMeterIdentifier);
+
+    if (progress.fencedTokenTypes.size > 0) {
+      try {
+        await markHostedAiUsageStripeFailed({
+          attemptedAt,
+          claim,
+          expectedIdentifier: currentIdentifier,
+          id: candidate.id,
+          identifier: currentIdentifier,
+          message: buildHostedAiUsageStripeCrashFenceMessage(progress),
+          prisma: input.prisma,
+        });
+        failed += 1;
+      } catch (error) {
+        if (!(error instanceof HostedAiUsageStripeMeterClaimLostError)) {
+          throw error;
+        }
+      }
+      continue;
+    }
 
     if (skipReason) {
-      await markHostedAiUsageStripeSkipped({
-        attemptedAt,
-        id: candidate.id,
-        message: skipReason,
-        prisma: input.prisma,
-      });
-      skipped += 1;
+      try {
+        await markHostedAiUsageStripeSkipped({
+          attemptedAt,
+          claim,
+          expectedIdentifier: currentIdentifier,
+          id: candidate.id,
+          message: skipReason,
+          prisma: input.prisma,
+        });
+        skipped += 1;
+      } catch (error) {
+        if (!(error instanceof HostedAiUsageStripeMeterClaimLostError)) {
+          throw error;
+        }
+      }
       continue;
     }
 
     const allTokenEvents = resolveHostedAiUsageStripeTokenEvents(candidate);
-    const completedTokenTypes = parseHostedAiUsageStripeCompletedTokenTypes(
-      candidate.stripeMeterIdentifier,
-    );
     const tokenEvents = allTokenEvents.filter(
-      (tokenEvent) => !completedTokenTypes.has(tokenEvent.tokenType),
+      (tokenEvent) => !progress.completedTokenTypes.has(tokenEvent.tokenType),
     );
 
     if (tokenEvents.length === 0) {
-      if (completedTokenTypes.size > 0) {
-        await markHostedAiUsageStripeMetered({
-          attemptedAt,
-          id: candidate.id,
-          identifier: `${candidate.id}:tokens-v1`,
-          prisma: input.prisma,
-        });
-        metered += 1;
+      if (progress.completedTokenTypes.size > 0) {
+        try {
+          await markHostedAiUsageStripeMetered({
+            attemptedAt,
+            claim,
+            expectedIdentifier: currentIdentifier,
+            id: candidate.id,
+            identifier: `${candidate.id}:${STRIPE_METER_COMPLETED_IDENTIFIER}`,
+            prisma: input.prisma,
+          });
+          metered += 1;
+        } catch (error) {
+          if (!(error instanceof HostedAiUsageStripeMeterClaimLostError)) {
+            throw error;
+          }
+        }
         continue;
       }
 
-      await markHostedAiUsageStripeSkipped({
-        attemptedAt,
-        id: candidate.id,
-        message: "Skipped Stripe AI metering because no positive input or output token count was available.",
-        prisma: input.prisma,
-      });
-      skipped += 1;
+      try {
+        await markHostedAiUsageStripeSkipped({
+          attemptedAt,
+          claim,
+          expectedIdentifier: currentIdentifier,
+          id: candidate.id,
+          message: "Skipped Stripe AI metering because no positive input or output token count was available.",
+          prisma: input.prisma,
+        });
+        skipped += 1;
+      } catch (error) {
+        if (!(error instanceof HostedAiUsageStripeMeterClaimLostError)) {
+          throw error;
+        }
+      }
       continue;
     }
 
     try {
       for (const tokenEvent of tokenEvents) {
+        const fencedIdentifier = formatHostedAiUsageStripeProgressIdentifier({
+          completedTokenTypes: progress.completedTokenTypes,
+          fencedTokenTypes: new Set([tokenEvent.tokenType]),
+        });
+
+        if (!fencedIdentifier) {
+          throw new TypeError("Hosted AI usage Stripe metering fence identifier was missing.");
+        }
+
+        claim = await markHostedAiUsageStripeProgress({
+          attemptedAt,
+          claim,
+          expectedIdentifier: currentIdentifier,
+          id: candidate.id,
+          identifier: fencedIdentifier,
+          prisma: input.prisma,
+        });
+        currentIdentifier = fencedIdentifier;
+
         await createHostedAiUsageStripeMeterEvent({
           eventName: environment.meterEventName,
           fetchImpl,
@@ -121,57 +206,83 @@ export async function drainHostedAiUsageStripeMetering(input: {
           stripeSecretKey: environment.stripeSecretKey,
           tokenEvent,
         });
-        completedTokenTypes.add(tokenEvent.tokenType);
+        progress.completedTokenTypes.add(tokenEvent.tokenType);
+        progress.fencedTokenTypes.delete(tokenEvent.tokenType);
 
-        if (completedTokenTypes.size < allTokenEvents.length) {
-          const progressIdentifier = formatHostedAiUsageStripeProgressIdentifier(
-            completedTokenTypes,
-          );
+        if (progress.completedTokenTypes.size < allTokenEvents.length) {
+          const progressIdentifier = formatHostedAiUsageStripeProgressIdentifier(progress);
 
           if (!progressIdentifier) {
             throw new TypeError("Hosted AI usage Stripe metering progress identifier was missing.");
           }
 
-          await markHostedAiUsageStripeProgress({
+          claim = await markHostedAiUsageStripeProgress({
             attemptedAt,
+            claim,
+            expectedIdentifier: currentIdentifier,
             id: candidate.id,
             identifier: progressIdentifier,
             prisma: input.prisma,
           });
+          currentIdentifier = progressIdentifier;
         }
       }
       await markHostedAiUsageStripeMetered({
         attemptedAt,
+        claim,
+        expectedIdentifier: currentIdentifier,
         id: candidate.id,
-        identifier: `${candidate.id}:tokens-v1`,
+        identifier: `${candidate.id}:${STRIPE_METER_COMPLETED_IDENTIFIER}`,
         prisma: input.prisma,
       });
       metered += 1;
     } catch (error) {
+      if (error instanceof HostedAiUsageStripeMeterClaimLostError) {
+        continue;
+      }
+
       const message = error instanceof Error ? error.message : String(error);
+      const completedIdentifier = formatHostedAiUsageStripeProgressIdentifier(progress);
 
       if (shouldRetryStripeMeterEvent(error)) {
-        await markHostedAiUsageStripeRetryableFailure({
-          attemptedAt,
-          id: candidate.id,
-          identifier: formatHostedAiUsageStripeProgressIdentifier(completedTokenTypes),
-          message,
-          nextAttemptAt: computeHostedAiUsageStripeRetryAt({
+        try {
+          await markHostedAiUsageStripeRetryableFailure({
             attemptedAt,
-            nextAttemptCount: candidate.stripeMeterAttemptCount + 1,
-          }),
-          prisma: input.prisma,
-        });
+            claim,
+            expectedIdentifier: currentIdentifier,
+            id: candidate.id,
+            identifier: completedIdentifier,
+            message,
+            nextAttemptAt: computeHostedAiUsageStripeRetryAt({
+              attemptedAt,
+              nextAttemptCount: claim.attemptCount,
+            }),
+            prisma: input.prisma,
+          });
+          failed += 1;
+        } catch (updateError) {
+          if (!(updateError instanceof HostedAiUsageStripeMeterClaimLostError)) {
+            throw updateError;
+          }
+        }
       } else {
-        await markHostedAiUsageStripeFailed({
-          attemptedAt,
-          id: candidate.id,
-          identifier: formatHostedAiUsageStripeProgressIdentifier(completedTokenTypes),
-          message,
-          prisma: input.prisma,
-        });
+        try {
+          await markHostedAiUsageStripeFailed({
+            attemptedAt,
+            claim,
+            expectedIdentifier: currentIdentifier,
+            id: candidate.id,
+            identifier: completedIdentifier,
+            message,
+            prisma: input.prisma,
+          });
+          failed += 1;
+        } catch (updateError) {
+          if (!(updateError instanceof HostedAiUsageStripeMeterClaimLostError)) {
+            throw updateError;
+          }
+        }
       }
-      failed += 1;
     }
   }
 
@@ -270,34 +381,78 @@ function resolveHostedAiUsageStripeModel(candidate: HostedAiUsageStripeCandidate
   );
 }
 
-function parseHostedAiUsageStripeCompletedTokenTypes(
+function parseHostedAiUsageStripeProgressIdentifier(
   identifier: string | null,
-): Set<HostedAiUsageStripeTokenType> {
+): HostedAiUsageStripeProgressState {
   const normalizedIdentifier = normalizeOptionalString(identifier);
 
-  if (!normalizedIdentifier || !normalizedIdentifier.startsWith(STRIPE_METER_PROGRESS_PREFIX)) {
-    return new Set();
+  if (!normalizedIdentifier) {
+    return buildHostedAiUsageStripeProgressState();
   }
 
-  return new Set(
-    normalizedIdentifier
-      .slice(STRIPE_METER_PROGRESS_PREFIX.length)
+  if (normalizedIdentifier.startsWith(STRIPE_METER_PROGRESS_V1_PREFIX)) {
+    return buildHostedAiUsageStripeProgressState({
+      completedTokenTypes: normalizedIdentifier
+        .slice(STRIPE_METER_PROGRESS_V1_PREFIX.length)
+        .split(",")
+        .flatMap((tokenType) =>
+          tokenType === "input" || tokenType === "output" ? [tokenType] : [],
+        ),
+    });
+  }
+
+  if (!normalizedIdentifier.startsWith(STRIPE_METER_PROGRESS_V2_PREFIX)) {
+    return buildHostedAiUsageStripeProgressState();
+  }
+
+  const segments = normalizedIdentifier
+    .slice(STRIPE_METER_PROGRESS_V2_PREFIX.length)
+    .split(";")
+    .map((segment) => segment.trim())
+    .filter((segment) => segment.length > 0);
+  const completedTokenTypes: HostedAiUsageStripeTokenType[] = [];
+  const fencedTokenTypes: HostedAiUsageStripeTokenType[] = [];
+
+  for (const segment of segments) {
+    const [rawKey, rawValue = ""] = segment.split("=", 2);
+    const normalizedTokenTypes = rawValue
       .split(",")
-      .flatMap((tokenType) =>
-        tokenType === "input" || tokenType === "output" ? [tokenType] : [],
-      ),
-  );
+      .flatMap(parseHostedAiUsageStripeTokenType);
+
+    if (rawKey === "completed") {
+      completedTokenTypes.push(...normalizedTokenTypes);
+    } else if (rawKey === "fenced") {
+      fencedTokenTypes.push(...normalizedTokenTypes);
+    }
+  }
+
+  return buildHostedAiUsageStripeProgressState({
+    completedTokenTypes,
+    fencedTokenTypes,
+  });
 }
 
 function formatHostedAiUsageStripeProgressIdentifier(
-  completedTokenTypes: Iterable<HostedAiUsageStripeTokenType>,
+  progress: HostedAiUsageStripeProgressState,
 ): string | null {
-  const normalizedTokenTypes = [...new Set(completedTokenTypes)].sort();
-  if (normalizedTokenTypes.length === 0) {
+  const completedTokenTypes = [...progress.completedTokenTypes].sort();
+  const fencedTokenTypes = [...progress.fencedTokenTypes].sort();
+
+  if (completedTokenTypes.length === 0 && fencedTokenTypes.length === 0) {
     return null;
   }
 
-  return `${STRIPE_METER_PROGRESS_PREFIX}${normalizedTokenTypes.join(",")}`;
+  const segments: string[] = [];
+
+  if (completedTokenTypes.length > 0) {
+    segments.push(`completed=${completedTokenTypes.join(",")}`);
+  }
+
+  if (fencedTokenTypes.length > 0) {
+    segments.push(`fenced=${fencedTokenTypes.join(",")}`);
+  }
+
+  return `${STRIPE_METER_PROGRESS_V2_PREFIX}${segments.join(";")}`;
 }
 
 function normalizePositiveTokenCount(value: number | null): number | null {
@@ -365,4 +520,28 @@ class StripeMeterEventError extends Error {
     super(message);
     this.name = "StripeMeterEventError";
   }
+}
+
+function buildHostedAiUsageStripeProgressState(input: {
+  completedTokenTypes?: Iterable<HostedAiUsageStripeTokenType>;
+  fencedTokenTypes?: Iterable<HostedAiUsageStripeTokenType>;
+} = {}): HostedAiUsageStripeProgressState {
+  return {
+    completedTokenTypes: new Set(input.completedTokenTypes ?? []),
+    fencedTokenTypes: new Set(input.fencedTokenTypes ?? []),
+  };
+}
+
+function buildHostedAiUsageStripeCrashFenceMessage(
+  progress: HostedAiUsageStripeProgressState,
+): string {
+  const fencedTokenTypes = [...progress.fencedTokenTypes].sort().join(", ");
+
+  return `Stopped Stripe AI metering retry because a prior worker fenced token-side progress for ${fencedTokenTypes} before POST and the delivery outcome is unknown; refusing to resend automatically.`;
+}
+
+function parseHostedAiUsageStripeTokenType(
+  tokenType: string,
+): HostedAiUsageStripeTokenType[] {
+  return tokenType === "input" || tokenType === "output" ? [tokenType] : [];
 }
