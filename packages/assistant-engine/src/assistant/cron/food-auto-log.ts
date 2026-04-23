@@ -31,6 +31,14 @@ interface FoodAutoLogRecord {
 }
 
 interface FoodAutoLogCoreRuntime {
+  acquireCanonicalWriteLock(
+    vaultRoot: string,
+    options?: {
+      timeoutMs?: number
+    },
+  ): Promise<{
+    release(): Promise<void>
+  }>
   findEventByExternalRef(input: ExternalRef & { vaultRoot: string }): Promise<{ id: string; kind: string } | null>
   listFoods(vaultRoot: string): Promise<FoodAutoLogRecord[]>
   readFood(input: {
@@ -61,6 +69,10 @@ interface FoodAutoLogCoreRuntime {
       time: string
     } | null
   }): Promise<unknown>
+  withCanonicalWriteLockScope<TResult>(
+    vaultRoot: string,
+    run: () => Promise<TResult>,
+  ): Promise<TResult>
 }
 
 export interface CanonicalFoodAssistantCronJobRecord {
@@ -157,13 +169,6 @@ export async function runFoodAutoLogCronJob(input: {
     resourceType: 'occurrence',
     resourceId: `${input.foodId}:${occurrenceAt}`,
   }
-  const existing = await core.findEventByExternalRef({
-    vaultRoot: input.vault,
-    ...externalRef,
-  })
-  if (existing) {
-    return `Skipped recurring food "${food.title}" because occurrence ${occurrenceAt} is already logged as ${existing.kind} ${existing.id}.`
-  }
   const note = renderAutoLoggedFoodMealNote(food)
   const mealInput: Parameters<typeof importers.addMeal>[0] & { externalRef: ExternalRef } = {
     vaultRoot: input.vault,
@@ -176,9 +181,25 @@ export async function runFoodAutoLogCronJob(input: {
   if (inheritedNutrition != null) {
     mealInput.nutrition = inheritedNutrition
   }
-  const result = await importers.addMeal(mealInput)
 
-  return `Auto-logged recurring food "${food.title}" as meal ${result.mealId}.`
+  return await core.withCanonicalWriteLockScope(input.vault, async () => {
+    const lock = await core.acquireCanonicalWriteLock(input.vault)
+
+    try {
+      const existing = await core.findEventByExternalRef({
+        vaultRoot: input.vault,
+        ...externalRef,
+      })
+      if (existing) {
+        return `Skipped recurring food "${food.title}" because occurrence ${occurrenceAt} is already logged as ${existing.kind} ${existing.id}.`
+      }
+
+      const result = await importers.addMeal(mealInput)
+      return `Auto-logged recurring food "${food.title}" as meal ${result.mealId}.`
+    } finally {
+      await lock.release()
+    }
+  })
 }
 
 async function loadFoodAutoLogCoreRuntime(): Promise<FoodAutoLogCoreRuntime> {

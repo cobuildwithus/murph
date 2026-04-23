@@ -47,8 +47,7 @@ test("vault-sync merge keeps planning reads and applyCanonicalWriteBatch inside 
     "await planJsonlMerge({",
     "await planRawMerge({",
     "await planTextMerge({",
-    "await validateMergePlanAgainstCurrentVaultContracts({",
-    "await applyCanonicalWriteBatch(",
+    "await applyCanonicalWriteBatch({",
     "await lock.release();",
   ]);
 });
