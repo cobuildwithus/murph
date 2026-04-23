@@ -11,6 +11,7 @@ import {
   type ParseFailure,
 } from "./health/loaders.ts";
 import {
+  asObject,
   firstString,
   firstStringArray,
   type FrontmatterObject,
@@ -39,25 +40,12 @@ export interface HealthLibraryGraph {
   nodes: HealthLibraryNode[];
 }
 
-export interface HealthLibraryParseIssue {
-  kind: "parse";
+export interface HealthLibraryGraphIssue {
   lineNumber?: number;
   parser: "frontmatter" | "json";
   reason: string;
   relativePath: string;
 }
-
-export interface HealthLibraryValidationIssue {
-  field: "slug" | "entityType";
-  kind: "validation";
-  parser: "frontmatter";
-  reason: string;
-  relativePath: string;
-}
-
-export type HealthLibraryGraphIssue =
-  | HealthLibraryParseIssue
-  | HealthLibraryValidationIssue;
 
 export interface HealthLibraryGraphReadResult {
   graph: HealthLibraryGraph;
@@ -75,16 +63,10 @@ export async function readHealthLibraryGraph(
 
   for (const relativePath of relativePaths) {
     const document = await readMarkdownDocument(vaultRoot, relativePath);
-    const outcome = toHealthLibraryNode(
-      document.relativePath,
-      document.body,
-      document.attributes,
-    );
-    if (!outcome.ok) {
-      throw toStrictHealthLibraryError(outcome.issue);
+    const node = toHealthLibraryNode(document.relativePath, document.body, document.attributes);
+    if (node) {
+      nodes.push(node);
     }
-
-    nodes.push(outcome.node);
   }
 
   nodes.sort((left, right) => left.slug.localeCompare(right.slug));
@@ -115,12 +97,9 @@ export async function readHealthLibraryGraphWithIssues(
       outcome.document.body,
       outcome.document.attributes,
     );
-    if (!node.ok) {
-      issues.push(node.issue);
-      continue;
+    if (node) {
+      nodes.push(node);
     }
-
-    nodes.push(node.node);
   }
 
   nodes.sort((left, right) => left.slug.localeCompare(right.slug));
@@ -139,62 +118,34 @@ function toHealthLibraryNode(
   relativePath: string,
   body: string,
   attributes: FrontmatterObject,
-): { ok: true; node: HealthLibraryNode } | { ok: false; issue: HealthLibraryValidationIssue } {
-  const slug = firstString(attributes, ["slug"]);
-  if (!slug) {
-    return {
-      ok: false,
-      issue: buildHealthLibraryValidationIssue(
-        relativePath,
-        "slug",
-        "Health library page must declare a non-empty slug.",
-      ),
-    };
+): HealthLibraryNode | null {
+  const source = asObject(attributes);
+  if (!source) {
+    return null;
   }
 
-  const entityTypeValue = firstString(attributes, ["entityType", "entity_type"]);
+  const slug = firstString(source, ["slug"]);
   const entityType = parseHealthLibraryEntityType(
-    entityTypeValue,
+    firstString(source, ["entityType", "entity_type"]),
   );
 
-  if (!entityTypeValue) {
-    return {
-      ok: false,
-      issue: buildHealthLibraryValidationIssue(
-        relativePath,
-        "entityType",
-        "Health library page must declare a valid entityType.",
-      ),
-    };
-  }
-
-  if (!entityType) {
-    return {
-      ok: false,
-      issue: buildHealthLibraryValidationIssue(
-        relativePath,
-        "entityType",
-        `Health library entityType "${entityTypeValue}" is not supported.`,
-      ),
-    };
+  if (!slug || !entityType) {
+    return null;
   }
 
   return {
-    ok: true,
-    node: {
-      aliases: firstStringArray(attributes, ["aliases"]),
-      attributes,
-      body,
-      categories: firstStringArray(attributes, ["categories"]),
-      entityType,
-      key: firstString(attributes, ["key"]) ?? `${entityType}:${slug}`,
-      relativePath,
-      relations: parseRelations(attributes.relations),
-      slug,
-      status: firstString(attributes, ["status"]),
-      summary: firstString(attributes, ["summary"]) ?? summarizeBody(body),
-      title: firstString(attributes, ["title"]) ?? humanizeSlug(slug),
-    },
+    aliases: firstStringArray(source, ["aliases"]),
+    attributes,
+    body,
+    categories: firstStringArray(source, ["categories"]),
+    entityType,
+    key: firstString(source, ["key"]) ?? `${entityType}:${slug}`,
+    relativePath,
+    relations: parseRelations(source.relations),
+    slug,
+    status: firstString(source, ["status"]),
+    summary: firstString(source, ["summary"]) ?? summarizeBody(body),
+    title: firstString(source, ["title"]) ?? humanizeSlug(slug),
   };
 }
 
@@ -243,32 +194,9 @@ function humanizeSlug(slug: string): string {
 
 function parseFailureToIssue(failure: ParseFailure): HealthLibraryGraphIssue {
   return {
-    kind: "parse",
     lineNumber: failure.lineNumber,
     parser: failure.parser,
     reason: failure.reason,
     relativePath: failure.relativePath,
   };
-}
-
-function buildHealthLibraryValidationIssue(
-  relativePath: string,
-  field: HealthLibraryValidationIssue["field"],
-  reason: string,
-): HealthLibraryValidationIssue {
-  return {
-    field,
-    kind: "validation",
-    parser: "frontmatter",
-    reason,
-    relativePath,
-  };
-}
-
-function toStrictHealthLibraryError(
-  issue: HealthLibraryValidationIssue,
-): Error {
-  return new Error(
-    `Failed to validate frontmatter at ${issue.relativePath}: ${issue.reason}`,
-  );
 }
