@@ -39,7 +39,7 @@ The current repo flow is:
 7. run extraction batches
 8. run section synthesis seams
 9. run page builder
-10. run QA seams
+10. run evidence QA and safety QA
 11. run final landing reducer
 
 The scaffold currently automates the early phases best. Later phases may still require the agent to materialize concrete prompt files and command wrappers from templates already present in the workspace.
@@ -214,9 +214,8 @@ Run:
 
 - evidence QA
 - safety QA
-- schema/artifact QA
 
-Use deterministic local checks where possible. Model QA should focus on claim discipline, safety severity, and schema consistency.
+Use deterministic local checks where possible. Model QA should focus on claim discipline and safety severity; schema/artifact checks should stay local or be folded into the final reducer rather than a separate model seam.
 
 ### 10. Final Landing Reducer
 

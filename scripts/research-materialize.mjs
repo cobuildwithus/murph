@@ -448,16 +448,6 @@ function buildLaterTemplateSpecs(commonPromptTokens, sharedHeader, sectionSeams)
       },
     },
     {
-      relativePath: "prompts/33-schema-artifact-qa.template.md",
-      templateName: "schema-artifact-qa.md",
-      replacements: {
-        ...commonPromptTokens,
-        SHARED_HEADER: sharedHeader,
-        PROTOCOL_PACKAGE_DRAFT_SOURCE: "TODO_PROTOCOL_PACKAGE_DRAFT_SOURCE",
-        ARTIFACT_MANIFEST_SOURCE: "TODO_ARTIFACT_MANIFEST_SOURCE",
-      },
-    },
-    {
       relativePath: "prompts/34-final-landing-reducer.template.md",
       templateName: "final-landing-reducer.md",
       replacements: {
@@ -466,7 +456,6 @@ function buildLaterTemplateSpecs(commonPromptTokens, sharedHeader, sectionSeams)
         PROTOCOL_PACKAGE_DRAFT_SOURCE: "TODO_PROTOCOL_PACKAGE_DRAFT_SOURCE",
         EVIDENCE_QA_SOURCE: "TODO_EVIDENCE_QA_SOURCE",
         SAFETY_QA_SOURCE: "TODO_SAFETY_QA_SOURCE",
-        SCHEMA_ARTIFACT_QA_SOURCE: "TODO_SCHEMA_ARTIFACT_QA_SOURCE",
       },
     },
   ];
@@ -496,10 +485,6 @@ function buildPageBuilderDraftSourceList(outDirRelative, protocolSlug, familySlu
     `${outDirRelative}/downloads/${PAGE_BUILDER_LABEL}/downloads/${familySlug}.md`,
     `${outDirRelative}/downloads/${PAGE_BUILDER_LABEL}/downloads/${familySlug}-package-draft.zip`,
   ]);
-}
-
-function buildPageBuilderArtifactManifestSource(outDirRelative) {
-  return `${outDirRelative}/downloads/${PAGE_BUILDER_LABEL}/downloads/research-artifacts.json`;
 }
 
 function buildRunbook({
@@ -652,8 +637,6 @@ function main(argv) {
     materializedSpec.protocolSlug,
     materializedSpec.familySlug,
   );
-  const pageBuilderArtifactManifestSource =
-    buildPageBuilderArtifactManifestSource(outDirRelative);
   const updatedWorkflow = {
     ...workflow,
     schemaVersion: ORCHESTRATOR_SCHEMA_VERSION,
@@ -713,13 +696,6 @@ function main(argv) {
       relativePath: "prompts/32-safety-qa.template.md",
       replacements: {
         PROTOCOL_PACKAGE_DRAFT_SOURCE: pageBuilderDraftSource,
-      },
-    },
-    {
-      relativePath: "prompts/33-schema-artifact-qa.template.md",
-      replacements: {
-        PROTOCOL_PACKAGE_DRAFT_SOURCE: pageBuilderDraftSource,
-        ARTIFACT_MANIFEST_SOURCE: pageBuilderArtifactManifestSource,
       },
     },
     {

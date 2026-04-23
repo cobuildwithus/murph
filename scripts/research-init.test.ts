@@ -361,6 +361,7 @@ describe("research init scaffold", () => {
         sectionSeams: Array<{ id: string; focus: string }>;
         sourceExtractionSchema: { fields: string[] };
         initialFilePlan: { files: Array<{ kind: string; path: string; why: string }> };
+        promptFiles: string[];
         runnableCommands: string[];
       };
 
@@ -429,6 +430,9 @@ describe("research init scaffold", () => {
         "packages/health-commons/content/protocols/cold-water-immersion/cold-plunge.md",
       );
       expect(materializedWorkflow.runnableCommands).toContain("commands/02-discovery-direct-cwi.sh");
+      expect(materializedWorkflow.promptFiles).not.toContain(
+        "prompts/33-schema-artifact-qa.template.md",
+      );
 
       const discoveryPrompt = readFileSync(
         path.join(outDir, "prompts", "02-discovery-direct-cwi.md"),
@@ -472,13 +476,20 @@ describe("research init scaffold", () => {
         `- ${path.relative(repoRoot, outDir).split(path.sep).join(path.posix.sep)}/downloads/30-page-builder/downloads/cold-water-immersion-package-draft.zip`,
       );
 
-      const schemaQaPrompt = readFileSync(
-        path.join(outDir, "prompts", "33-schema-artifact-qa.template.md"),
+      expect(existsSync(path.join(outDir, "prompts", "33-schema-artifact-qa.template.md"))).toBe(
+        false,
+      );
+
+      const finalReducerPrompt = readFileSync(
+        path.join(outDir, "prompts", "34-final-landing-reducer.template.md"),
         "utf8",
       );
-      expect(schemaQaPrompt).toContain(
-        `${path.relative(repoRoot, outDir).split(path.sep).join(path.posix.sep)}/downloads/30-page-builder/downloads/research-artifacts.json`,
+      expect(finalReducerPrompt).toContain(
+        `- ${path.relative(repoRoot, outDir).split(path.sep).join(path.posix.sep)}/downloads/30-page-builder/downloads/cold-plunge.md`,
       );
+      expect(finalReducerPrompt).toContain("TODO_EVIDENCE_QA_SOURCE");
+      expect(finalReducerPrompt).toContain("TODO_SAFETY_QA_SOURCE");
+      expect(finalReducerPrompt).not.toContain("SCHEMA_ARTIFACT_QA_SOURCE");
 
       const materializedReadme = readFileSync(path.join(outDir, "README.md"), "utf8");
       expect(materializedReadme).toContain("materialized from the charter response");
