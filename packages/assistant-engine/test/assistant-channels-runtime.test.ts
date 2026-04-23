@@ -213,6 +213,117 @@ describe('assistant channels runtime seam', () => {
     )
   })
 
+  it('preserves sent Telegram chunk ids when a later chunk fails and rollback cannot be confirmed', async () => {
+    const fetchImplementation = createQueuedFetch([
+      createTelegramResponse(200, {
+        ok: true,
+        result: {
+          message_id: 1001,
+        },
+      }),
+      createTelegramResponse(400, {
+        description: 'later chunk failed',
+        error_code: 400,
+      }),
+      createTelegramResponse(502, {
+        description: 'rollback failed',
+        error_code: 502,
+      }),
+    ])
+
+    await expect(
+      sendTelegramMessage(
+        {
+          message: `${'a'.repeat(4096)}b`,
+          target: '123',
+        },
+        {
+          env: {
+            TELEGRAM_API_BASE_URL: 'https://telegram.test/',
+            TELEGRAM_BOT_TOKEN: 'bot-token',
+          },
+          fetchImplementation,
+        },
+      ),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_TELEGRAM_DELIVERY_AMBIGUOUS',
+      deliveryMayHaveSucceeded: true,
+      providerMessageId: '1001',
+      providerMessageIds: ['1001'],
+      target: '123',
+    })
+
+    expect(fetchImplementation).toHaveBeenCalledTimes(3)
+    expect(fetchImplementation.mock.calls[2]?.[0]).toContain('/deleteMessages')
+    expect(readJsonBody(fetchImplementation.mock.calls[2]?.[1]?.body)).toMatchObject({
+      chat_id: '123',
+      message_ids: [1001],
+    })
+  })
+
+  it('rolls back Telegram partial sends against the migrated target when a later chunk fails', async () => {
+    const fetchImplementation = createQueuedFetch([
+      createTelegramResponse(400, {
+        description: 'group chat migrated',
+        error_code: 400,
+        parameters: {
+          migrate_to_chat_id: '456',
+        },
+      }),
+      createTelegramResponse(200, {
+        ok: true,
+        result: {
+          message_id: 1001,
+        },
+      }),
+      createTelegramResponse(400, {
+        description: 'later chunk failed',
+        error_code: 400,
+      }),
+      createTelegramResponse(502, {
+        description: 'rollback failed',
+        error_code: 502,
+      }),
+    ])
+
+    await expect(
+      sendTelegramMessage(
+        {
+          message: `${'a'.repeat(4096)}b`,
+          target: '123',
+        },
+        {
+          env: {
+            TELEGRAM_API_BASE_URL: 'https://telegram.test/',
+            TELEGRAM_BOT_TOKEN: 'bot-token',
+          },
+          fetchImplementation,
+        },
+      ),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_TELEGRAM_DELIVERY_AMBIGUOUS',
+      deliveryMayHaveSucceeded: true,
+      providerMessageId: '1001',
+      providerMessageIds: ['1001'],
+      target: '456',
+    })
+
+    expect(fetchImplementation).toHaveBeenCalledTimes(4)
+    expect(readJsonBody(fetchImplementation.mock.calls[1]?.[1]?.body)).toMatchObject({
+      chat_id: '456',
+      text: 'a'.repeat(4096),
+    })
+    expect(readJsonBody(fetchImplementation.mock.calls[2]?.[1]?.body)).toMatchObject({
+      chat_id: '456',
+      text: 'b',
+    })
+    expect(fetchImplementation.mock.calls[3]?.[0]).toContain('/deleteMessages')
+    expect(readJsonBody(fetchImplementation.mock.calls[3]?.[1]?.body)).toMatchObject({
+      chat_id: '456',
+      message_ids: [1001],
+    })
+  })
+
   it('rejects Telegram sends without runtime support or with invalid targets', async () => {
     await expect(
       sendTelegramMessage(

@@ -1142,6 +1142,47 @@ describe('assistant outbox runtime', () => {
     )
   })
 
+  it('marks Telegram partial-send ambiguity as abandoned and preserves sent chunk metadata', async () => {
+    const { vaultRoot } = await createAssistantVault('assistant-outbox-telegram-partial-')
+
+    const seeded = await createIntent(vaultRoot, {
+      explicitTarget: '123',
+      message: `${'a'.repeat(4096)}b`,
+      sessionId: 'session-telegram-partial',
+      turnId: 'turn-telegram-partial',
+    })
+    mockedDeliverAssistantMessageOverBinding.mockRejectedValueOnce(
+      Object.assign(new Error('later chunk failed'), {
+        code: 'ASSISTANT_TELEGRAM_DELIVERY_AMBIGUOUS',
+        deliveryMayHaveSucceeded: true,
+        providerMessageId: '1001',
+        providerMessageIds: ['1001'],
+        target: '456',
+      }),
+    )
+
+    const dispatched = await dispatchAssistantOutboxIntent({
+      force: true,
+      intentId: seeded.intentId,
+      now: new Date('2026-04-08T04:20:00.000Z'),
+      vault: vaultRoot,
+    })
+
+    expect(dispatched.intent.status).toBe('abandoned')
+    expect(dispatched.intent.deliveryConfirmationPending).toBe(false)
+    expect(dispatched.intent.delivery).toMatchObject({
+      channel: 'telegram',
+      messageLength: seeded.message.length,
+      providerMessageId: '1001',
+      providerMessageIds: ['1001'],
+      target: '456',
+      targetKind: 'explicit',
+    })
+    expect(dispatched.deliveryError).toMatchObject({
+      code: 'ASSISTANT_DELIVERY_AMBIGUOUS',
+    })
+  })
+
   it('drains only due intents and summarizes mixed outbox states', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-drain-')
     vi.useFakeTimers()

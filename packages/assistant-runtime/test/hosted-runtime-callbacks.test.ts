@@ -476,6 +476,10 @@ describe("hosted runtime callbacks", () => {
     const effect = createEffect({ transportIdempotent: false });
     mocks.readAssistantOutboxIntentMirrorState.mockResolvedValue(
       createMirrorState({
+        delivery: createDelivery({
+          providerMessageIds: ["1001"],
+          target: "456",
+        }),
         intentId: effect.effectId,
         lastError: {
           code: "ASSISTANT_DELIVERY_AMBIGUOUS",
@@ -495,7 +499,9 @@ describe("hosted runtime callbacks", () => {
     expect(outcomes).toEqual([
       expect.objectContaining({
         deliveryStatus: "failed_ambiguous",
+        providerMessageIds: ["1001"],
         retryable: false,
+        target: "456",
       }),
     ]);
     expect(mocks.dispatchAssistantOutboxIntent).not.toHaveBeenCalled();
@@ -650,6 +656,10 @@ describe("hosted runtime callbacks", () => {
     mocks.dispatchAssistantOutboxIntent.mockResolvedValue(
       createDispatchResult(
         {
+          delivery: createDelivery({
+            providerMessageIds: ["1001"],
+            target: "456",
+          }),
           lastError: {
             code: "ASSISTANT_DELIVERY_CONFIRMATION_PENDING",
             message: "telegram timeout",
@@ -676,7 +686,9 @@ describe("hosted runtime callbacks", () => {
     expect(outcomes).toEqual([
       expect.objectContaining({
         deliveryStatus: "failed_ambiguous",
+        providerMessageIds: ["1001"],
         retryable: false,
+        target: "456",
       }),
     ]);
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
