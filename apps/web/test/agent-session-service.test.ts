@@ -413,6 +413,70 @@ describe("HostedDeviceSyncAgentSessionService retry-safe bearer reuse", () => {
       vi.useRealTimers();
     }
   });
+
+  it("persists the provider-returned refresh token bundle without stale-token fallback", async () => {
+    vi.useFakeTimers();
+    try {
+      const bearerToken = "hbds_agent_original";
+      const harness = createRetrySafeStoreHarness(bearerToken);
+      const refreshTokens = vi.fn(async () => ({
+        accessToken: "access-token-refreshed",
+        accessTokenExpiresAt: "2026-04-01T02:00:00.000Z",
+        refreshToken: null,
+      }));
+      const registry = createDeviceSyncRegistry([createWhoopProvider({
+        refreshTokens,
+      })]);
+
+      vi.setSystemTime(new Date("2026-04-01T00:10:00.000Z"));
+      const firstService = new HostedDeviceSyncAgentSessionService({
+        request: createAgentRequest("https://murph.example/api/device-sync/agent/connections/conn-1/refresh-token-bundle", bearerToken),
+        store: harness.store,
+        registry,
+      });
+
+      const firstSession = await firstService.requireAgentSession();
+      const firstRefresh = await firstService.refreshTokenBundle(firstSession, "conn-1", {
+        expectedTokenVersion: 2,
+        force: true,
+      });
+
+      expect(firstRefresh).toMatchObject({
+        refreshed: true,
+        tokenVersionChanged: true,
+        tokenBundle: {
+          accessToken: "access-token-refreshed",
+          refreshToken: null,
+          tokenVersion: 3,
+        },
+      });
+
+      vi.setSystemTime(new Date("2026-04-01T00:15:00.000Z"));
+      const retryService = new HostedDeviceSyncAgentSessionService({
+        request: createAgentRequest("https://murph.example/api/device-sync/agent/connections/conn-1/refresh-token-bundle", bearerToken),
+        store: harness.store,
+        registry,
+      });
+
+      const retrySession = await retryService.requireAgentSession();
+      const retryRefresh = await retryService.refreshTokenBundle(retrySession, "conn-1", {
+        expectedTokenVersion: 2,
+      });
+
+      expect(retryRefresh).toMatchObject({
+        refreshed: false,
+        tokenVersionChanged: true,
+        tokenBundle: {
+          accessToken: "access-token-refreshed",
+          refreshToken: null,
+          tokenVersion: 3,
+        },
+      });
+      expect(refreshTokens).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 function createWhoopProvider(input: {
@@ -508,7 +572,15 @@ function createRetrySafeStoreHarness(bearerToken: string): {
     nextReconcileAt: null,
     updatedAt: connection.updatedAt.toISOString(),
   };
-  let storedConnection = {
+  let storedConnection: Omit<
+    typeof publicConnection,
+    "accessToken" | "keyVersion" | "refreshToken" | "tokenVersion"
+  > & {
+    accessToken: string;
+    keyVersion: string;
+    refreshToken: string | null;
+    tokenVersion: number;
+  } = {
     ...publicConnection,
     accessToken: connection.accessToken,
     refreshToken: connection.refreshToken,
@@ -601,7 +673,7 @@ function createRetrySafeStoreHarness(bearerToken: string): {
           accessTokenExpiresAt:
             input.tokenBundle.accessTokenExpiresAt ?? storedConnection.accessTokenExpiresAt,
           keyVersion: input.tokenBundle.keyVersion,
-          refreshToken: input.tokenBundle.refreshToken ?? storedConnection.refreshToken,
+          refreshToken: input.tokenBundle.refreshToken,
           tokenVersion: input.tokenBundle.tokenVersion,
           updatedAt: sessionState.updatedAt,
         };

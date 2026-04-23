@@ -263,12 +263,11 @@ export class HostedDeviceSyncAgentSessionService {
       }
 
       const nextTokens = refreshResult.tokens;
-      const nextRefreshToken = nextTokens.refreshToken ?? currentTokenBundle.refreshToken;
       const nextStoredTokenBundle = {
         accessToken: nextTokens.accessToken,
         accessTokenExpiresAt: nextTokens.accessTokenExpiresAt ?? null,
         keyVersion: currentTokenBundle.keyVersion,
-        refreshToken: nextRefreshToken ?? null,
+        refreshToken: nextTokens.refreshToken ?? null,
         tokenVersion: currentTokenBundle.tokenVersion + 1,
       };
       const tokenVersionChanged = nextStoredTokenBundle.tokenVersion !== currentTokenBundle.tokenVersion;

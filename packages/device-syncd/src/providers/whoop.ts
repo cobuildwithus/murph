@@ -27,6 +27,7 @@ import {
   parseResponseBody,
   postOAuthTokenRequest,
   refreshOAuthTokens,
+  requireRefreshToken,
   splitScopes,
   tokenResponseToAuthTokens as sharedTokenResponseToAuthTokens,
 } from "./shared-oauth.ts";
@@ -232,6 +233,19 @@ function tokenResponseToAuthTokens(payload: WhoopTokenResponse): ProviderAuthTok
       httpStatus: 502,
     }),
   );
+}
+
+function refreshTokenResponseToAuthTokens(payload: WhoopTokenResponse): ProviderAuthTokens {
+  const tokens = tokenResponseToAuthTokens(payload);
+  tokens.refreshToken = requireRefreshToken(tokens.refreshToken, () =>
+    deviceSyncError({
+      code: "WHOOP_REFRESH_TOKEN_MISSING",
+      message: "WHOOP refresh response did not include the next refresh token and the account must be reconnected.",
+      retryable: false,
+      accountStatus: "reauthorization_required",
+    }),
+  );
+  return tokens;
 }
 
 function constantTimeBase64Equals(expected: string, actual: string): boolean {
@@ -619,7 +633,7 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
         account,
         clientId: config.clientId,
         clientSecret: config.clientSecret,
-        tokenResponseToAuthTokens,
+        tokenResponseToAuthTokens: refreshTokenResponseToAuthTokens,
         buildMissingRefreshTokenError: () =>
           deviceSyncError({
             code: "WHOOP_REFRESH_TOKEN_MISSING",
@@ -627,7 +641,6 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
             retryable: false,
             accountStatus: "reauthorization_required",
           }),
-        resolveRefreshToken: ({ currentRefreshToken, responseRefreshToken }) => responseRefreshToken ?? currentRefreshToken,
         extraParameters: {
           scope: "offline",
         },
