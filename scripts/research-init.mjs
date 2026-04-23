@@ -39,8 +39,8 @@ Options:
 
 Environment used by generated command wrappers:
   RESEARCH_MODEL         Defaults to gpt-5.4-pro
-  RESEARCH_WAIT_TIMEOUT  Defaults to 45m
-  RESEARCH_TIMEOUT       Defaults to 60m
+  RESEARCH_WAIT_TIMEOUT  Defaults to 200m
+  RESEARCH_TIMEOUT       Defaults to 210m
 `);
   process.exit(exitCode);
 }
@@ -173,6 +173,7 @@ That command writes:
 - \`logs/01-charter.result.json\`
 - \`logs/01-charter.stderr.log\`
 - \`state/chat-urls/01-charter.txt\` when a ChatGPT thread URL is detected
+- \`state/thread-exports/01-charter.thread.json\` when thread export succeeds
 
 ## After The Charter Finishes
 
@@ -183,8 +184,8 @@ That command writes:
 ## Environment Knobs
 
 - \`RESEARCH_MODEL\`: defaults to \`gpt-5.4-pro\`
-- \`RESEARCH_WAIT_TIMEOUT\`: defaults to \`45m\`
-- \`RESEARCH_TIMEOUT\`: defaults to \`60m\`
+- \`RESEARCH_WAIT_TIMEOUT\`: defaults to \`200m\`
+- \`RESEARCH_TIMEOUT\`: defaults to \`210m\`
 
 ## Notes
 
@@ -228,8 +229,10 @@ function main(argv) {
     path.join(outDir, "commands"),
     path.join(outDir, "responses"),
     path.join(outDir, "logs"),
+    path.join(outDir, "downloads"),
     path.join(outDir, "state"),
     path.join(outDir, "state", "chat-urls"),
+    path.join(outDir, "state", "thread-exports"),
   ];
 
   for (const dir of dirs) {
