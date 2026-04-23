@@ -1127,6 +1127,74 @@ describe('executeProviderTurnWithRecovery', () => {
     )
   })
 
+  it('fails over after image-view-only Codex traffic when providerActionCount stays zero', async () => {
+    const primaryRoute = createRoute({
+      label: 'Primary',
+      routeId: 'route-primary',
+    })
+    const backupRoute = createRoute({
+      label: 'Backup',
+      routeId: 'route-backup',
+    })
+    const imageViewOnlyError = createError(
+      'codex connection lost after image view',
+      'ASSISTANT_CODEX_CONNECTION_LOST',
+      {
+        connectionLost: true,
+        providerActionCount: 0,
+        recoverableConnectionLoss: true,
+        retryable: true,
+      },
+    )
+
+    runnerMocks.executeAssistantProviderTurnAttempt
+      .mockResolvedValueOnce(
+        createFailedAttemptResult({
+          error: imageViewOnlyError,
+          executedToolCount: 0,
+          providerActionCount: 0,
+        }),
+      )
+      .mockResolvedValueOnce(
+        createSuccessfulAttemptResult({
+          providerSessionId: 'provider-session-backup',
+          response: 'Backup answer after image view',
+        }),
+      )
+    runnerMocks.recordAssistantFailoverRouteFailure.mockResolvedValue(
+      createFailoverState({
+        routeId: primaryRoute.routeId,
+      }),
+    )
+
+    const outcome = await executeProviderTurnWithRecovery({
+      input: createMessageInput({
+        prompt: 'Retry the Codex route',
+      }),
+      plan: createTurnPlan({}),
+      resolvedSession: createAssistantSession(),
+      routes: [primaryRoute, backupRoute],
+      turnCreatedAt: '2026-04-08T00:00:00.000Z',
+      turnId: 'turn-image-view-failover',
+    })
+
+    expect(outcome).toMatchObject({
+      kind: 'succeeded',
+      providerTurn: {
+        attemptCount: 2,
+        response: 'Backup answer after image view',
+        route: backupRoute,
+      },
+    })
+    expect(extractReceiptKinds()).toEqual([
+      'provider.attempt.started',
+      'provider.attempt.failed',
+      'provider.failover.applied',
+      'provider.attempt.started',
+      'provider.attempt.succeeded',
+    ])
+  })
+
   it('returns a recovered session on terminal failures when bound tools already executed', async () => {
     const primaryRoute = createRoute({
       label: 'Primary',
@@ -1430,9 +1498,19 @@ function createFailoverState(input?: {
   })
 }
 
-function createError(message: string, code: string): Error & { code: string } {
-  const error = new Error(message) as Error & { code: string }
+function createError(
+  message: string,
+  code: string,
+  context?: Record<string, unknown>,
+): Error & { code: string; context?: Record<string, unknown> } {
+  const error = new Error(message) as Error & {
+    code: string
+    context?: Record<string, unknown>
+  }
   error.code = code
+  if (context) {
+    error.context = context
+  }
   return error
 }
 

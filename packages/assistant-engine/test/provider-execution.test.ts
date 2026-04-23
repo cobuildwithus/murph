@@ -12,7 +12,7 @@ import type {
 import { createAssistantUsageAttribution } from '../src/assistant/usage-attribution.ts'
 
 const providerMocks = vi.hoisted(() => ({
-  executeCodexPrompt: vi.fn(),
+  executeCodexAppServerTurn: vi.fn(),
   generateText: vi.fn(),
   prepareAssistantDirectCliEnv: vi.fn(),
   resolveAssistantLanguageModel: vi.fn(),
@@ -35,7 +35,7 @@ vi.mock('../src/assistant-cli-access.ts', () => ({
 }))
 
 vi.mock('../src/assistant-codex.ts', () => ({
-  executeCodexPrompt: providerMocks.executeCodexPrompt,
+  executeCodexAppServerTurn: providerMocks.executeCodexAppServerTurn,
 }))
 
 import { codexCliProviderDefinition } from '../src/assistant/providers/codex-cli.ts'
@@ -317,6 +317,7 @@ describe('openAiCompatibleProviderDefinition.executeTurn', () => {
       metadata: {
         activityLabels: [],
         executedToolCount: 1,
+        providerActionCount: 0,
         rawToolEvents: [
           {
             mode: 'apply',
@@ -545,6 +546,7 @@ describe('openAiCompatibleProviderDefinition.executeTurn', () => {
       metadata: {
         activityLabels: [],
         executedToolCount: 0,
+        providerActionCount: 0,
         rawToolEvents: [],
       },
       ok: true,
@@ -651,6 +653,7 @@ describe('openAiCompatibleProviderDefinition.executeTurn', () => {
       metadata: {
         activityLabels: [],
         executedToolCount: 0,
+        providerActionCount: 0,
         rawToolEvents: [],
       },
       ok: true,
@@ -735,6 +738,7 @@ describe('openAiCompatibleProviderDefinition.executeTurn', () => {
       metadata: {
         activityLabels: [],
         executedToolCount: 0,
+        providerActionCount: 0,
         rawToolEvents: [],
       },
       ok: false,
@@ -905,7 +909,7 @@ describe('codexCliProviderDefinition', () => {
         }),
       }),
     ).resolves.toEqual({
-      message: 'Codex model discovery is not available from the local CLI adapter.',
+      message: 'Codex app-server model discovery is not wired into Murph yet.',
       models: [],
       status: 'unsupported',
     })
@@ -923,16 +927,47 @@ describe('codexCliProviderDefinition', () => {
       }),
     ).rejects.toMatchObject({
       code: 'ASSISTANT_PROVIDER_UNSUPPORTED',
-      message: 'Codex CLI execution requires a Codex provider config.',
+      message: 'Codex app-server execution requires a Codex provider config.',
     })
   })
 
-  it('prepares CLI execution inputs and extracts usage from the completion event tail', async () => {
+  it.each([
+    'on-request',
+    'untrusted',
+  ] as const)(
+    'fails closed before launching Codex app-server turns for approvalPolicy=%s',
+    async (approvalPolicy) => {
+      await expect(
+        codexCliProviderDefinition.executeTurn({
+          env: {
+            PATH: '/usr/bin:/bin',
+          },
+          prompt: 'Unsupported approval policy',
+          providerConfig: normalizeAssistantProviderConfig({
+            provider: 'codex-cli',
+            approvalPolicy,
+            model: 'codex-mini',
+            oss: false,
+          }),
+          workingDirectory: WORKING_DIRECTORY,
+        }),
+      ).rejects.toMatchObject({
+        code: 'ASSISTANT_CODEX_APPROVAL_POLICY_UNSUPPORTED',
+        message:
+          `Codex app-server approval policy "${approvalPolicy}" is not supported in noninteractive assistant turns. Use approvalPolicy=never.`,
+      })
+
+      expect(providerMocks.prepareAssistantDirectCliEnv).not.toHaveBeenCalled()
+      expect(providerMocks.executeCodexAppServerTurn).not.toHaveBeenCalled()
+    },
+  )
+
+  it('prepares app-server execution inputs and extracts usage from the completion event tail', async () => {
     providerMocks.prepareAssistantDirectCliEnv.mockReturnValue({
       CODEX_ENV: 'prepared',
       PATH: '/prepared/bin',
     })
-    providerMocks.executeCodexPrompt.mockResolvedValue({
+    providerMocks.executeCodexAppServerTurn.mockResolvedValue({
       finalMessage: 'Codex final answer',
       jsonEvents: [
         {
@@ -954,6 +989,7 @@ describe('codexCliProviderDefinition', () => {
           type: 'turn/completed',
         },
       ],
+      providerActionCount: 0,
       sessionId: 'codex-session-7',
       stderr: 'codex stderr',
       stdout: 'codex stdout',
@@ -988,7 +1024,7 @@ describe('codexCliProviderDefinition', () => {
     expect(providerMocks.prepareAssistantDirectCliEnv).toHaveBeenCalledWith({
       PATH: '/usr/bin:/bin',
     })
-    expect(providerMocks.executeCodexPrompt).toHaveBeenCalledWith({
+    expect(providerMocks.executeCodexAppServerTurn).toHaveBeenCalledWith({
       abortSignal: undefined,
       approvalPolicy: 'never',
       codexCommand: 'codex-dev',
@@ -1016,6 +1052,7 @@ describe('codexCliProviderDefinition', () => {
       metadata: {
         activityLabels: [],
         executedToolCount: 0,
+        providerActionCount: 0,
         rawToolEvents: [],
       },
       ok: true,
@@ -1084,13 +1121,14 @@ describe('codexCliProviderDefinition', () => {
     })
   })
 
-  it('omits undefined optional codex fields when the provider config is sparse', async () => {
+  it('defaults sparse codex provider configs to approvalPolicy=never before launch', async () => {
     providerMocks.prepareAssistantDirectCliEnv.mockReturnValue({
       PATH: '/prepared/bin',
     })
-    providerMocks.executeCodexPrompt.mockResolvedValue({
+    providerMocks.executeCodexAppServerTurn.mockResolvedValue({
       finalMessage: 'Minimal codex answer',
       jsonEvents: [],
+      providerActionCount: 0,
       sessionId: 'codex-session-minimal',
       stderr: '',
       stdout: '',
@@ -1107,9 +1145,9 @@ describe('codexCliProviderDefinition', () => {
       workingDirectory: WORKING_DIRECTORY,
     })
 
-    expect(providerMocks.executeCodexPrompt).toHaveBeenCalledWith({
+    expect(providerMocks.executeCodexAppServerTurn).toHaveBeenCalledWith({
       abortSignal: undefined,
-      approvalPolicy: undefined,
+      approvalPolicy: 'never',
       codexCommand: undefined,
       codexHome: undefined,
       configOverrides: undefined,
@@ -1133,11 +1171,11 @@ describe('codexCliProviderDefinition', () => {
     providerMocks.prepareAssistantDirectCliEnv.mockReturnValue({
       PATH: '/prepared/bin',
     })
-    providerMocks.executeCodexPrompt
+    providerMocks.executeCodexAppServerTurn
       .mockRejectedValueOnce(
         new VaultCliError(
           'ASSISTANT_CODEX_RESUME_STALE',
-          'Codex CLI could not resume the saved provider session.',
+          'Codex app-server could not resume the saved provider session.',
           {
             providerSessionId: 'stale-session',
             retryable: true,
@@ -1148,6 +1186,7 @@ describe('codexCliProviderDefinition', () => {
       .mockResolvedValueOnce({
         finalMessage: 'Recovered with fresh session',
         jsonEvents: [],
+        providerActionCount: 0,
         sessionId: 'codex-session-fresh',
         stderr: '',
         stdout: '',
@@ -1199,28 +1238,34 @@ describe('codexCliProviderDefinition', () => {
       },
     })
 
-    expect(providerMocks.executeCodexPrompt).toHaveBeenCalledTimes(2)
-    expect(providerMocks.executeCodexPrompt).toHaveBeenNthCalledWith(
+    expect(providerMocks.executeCodexAppServerTurn).toHaveBeenCalledTimes(2)
+    expect(providerMocks.executeCodexAppServerTurn).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
         prompt: 'User message:\nCurrent user turn',
         resumeSessionId: 'stale-session',
       }),
     )
-    expect(providerMocks.executeCodexPrompt).toHaveBeenNthCalledWith(
+    expect(providerMocks.executeCodexAppServerTurn).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({
         prompt: expect.stringContaining('System/bootstrap instructions.'),
         resumeSessionId: undefined,
       }),
     )
-    expect(providerMocks.executeCodexPrompt.mock.calls[1]?.[0]?.prompt).toContain(
+    expect(
+      providerMocks.executeCodexAppServerTurn.mock.calls[1]?.[0]?.prompt,
+    ).toContain(
       'Conversation so far:\nUser:\nEarlier user turn\n\nAssistant:\nEarlier assistant turn',
     )
-    expect(providerMocks.executeCodexPrompt.mock.calls[1]?.[0]?.prompt).toContain(
+    expect(
+      providerMocks.executeCodexAppServerTurn.mock.calls[1]?.[0]?.prompt,
+    ).toContain(
       'Fresh bootstrap context.',
     )
-    expect(providerMocks.executeCodexPrompt.mock.calls[1]?.[0]?.prompt).toContain(
+    expect(
+      providerMocks.executeCodexAppServerTurn.mock.calls[1]?.[0]?.prompt,
+    ).toContain(
       'User message:\nCurrent user turn',
     )
   })
@@ -1229,10 +1274,10 @@ describe('codexCliProviderDefinition', () => {
     providerMocks.prepareAssistantDirectCliEnv.mockReturnValue({
       PATH: '/prepared/bin',
     })
-    providerMocks.executeCodexPrompt.mockRejectedValue(
+    providerMocks.executeCodexAppServerTurn.mockRejectedValue(
       new VaultCliError(
-        'ASSISTANT_CODEX_EXECUTION_FAILED',
-        'Codex CLI failed to execute the prompt.',
+        'ASSISTANT_CODEX_FAILED',
+        'Codex app-server failed to execute the turn.',
       ),
     )
 
@@ -1249,25 +1294,26 @@ describe('codexCliProviderDefinition', () => {
         workingDirectory: WORKING_DIRECTORY,
       }),
     ).rejects.toMatchObject({
-      code: 'ASSISTANT_CODEX_EXECUTION_FAILED',
-      message: 'Codex CLI failed to execute the prompt.',
+      code: 'ASSISTANT_CODEX_FAILED',
+      message: 'Codex app-server failed to execute the turn.',
     })
 
-    expect(providerMocks.executeCodexPrompt).toHaveBeenCalledTimes(1)
-    expect(providerMocks.executeCodexPrompt).toHaveBeenCalledWith(
+    expect(providerMocks.executeCodexAppServerTurn).toHaveBeenCalledTimes(1)
+    expect(providerMocks.executeCodexAppServerTurn).toHaveBeenCalledWith(
       expect.objectContaining({
         resumeSessionId: 'resume-session',
       }),
     )
   })
 
-  it('passes only image user message parts through to the Codex CLI adapter', async () => {
+  it('passes only image user message parts through to the Codex app-server adapter', async () => {
     providerMocks.prepareAssistantDirectCliEnv.mockReturnValue({
       PATH: '/prepared/bin',
     })
-    providerMocks.executeCodexPrompt.mockResolvedValue({
+    providerMocks.executeCodexAppServerTurn.mockResolvedValue({
       finalMessage: 'Image-aware answer',
       jsonEvents: [],
+      providerActionCount: 0,
       sessionId: 'codex-session-images',
       stderr: '',
       stdout: '',
@@ -1302,7 +1348,7 @@ describe('codexCliProviderDefinition', () => {
       workingDirectory: WORKING_DIRECTORY,
     })
 
-    expect(providerMocks.executeCodexPrompt).toHaveBeenCalledWith(
+    expect(providerMocks.executeCodexAppServerTurn).toHaveBeenCalledWith(
       expect.objectContaining({
         images: [
           {
@@ -1314,13 +1360,14 @@ describe('codexCliProviderDefinition', () => {
     )
   })
 
-  it('passes filesystem-backed image references through to the Codex CLI adapter', async () => {
+  it('passes filesystem-backed image references through to the Codex app-server adapter', async () => {
     providerMocks.prepareAssistantDirectCliEnv.mockReturnValue({
       PATH: '/prepared/bin',
     })
-    providerMocks.executeCodexPrompt.mockResolvedValue({
+    providerMocks.executeCodexAppServerTurn.mockResolvedValue({
       finalMessage: 'Image-aware answer',
       jsonEvents: [],
+      providerActionCount: 0,
       sessionId: 'codex-session-paths',
       stderr: '',
       stdout: '',
@@ -1351,7 +1398,7 @@ describe('codexCliProviderDefinition', () => {
       workingDirectory: WORKING_DIRECTORY,
     })
 
-    expect(providerMocks.executeCodexPrompt).toHaveBeenCalledWith(
+    expect(providerMocks.executeCodexAppServerTurn).toHaveBeenCalledWith(
       expect.objectContaining({
         images: [
           {
@@ -1367,13 +1414,14 @@ describe('codexCliProviderDefinition', () => {
     )
   })
 
-  it('decodes inline data URLs and ArrayBuffers for the Codex CLI adapter', async () => {
+  it('decodes inline data URLs and ArrayBuffers for the Codex app-server adapter', async () => {
     providerMocks.prepareAssistantDirectCliEnv.mockReturnValue({
       PATH: '/prepared/bin',
     })
-    providerMocks.executeCodexPrompt.mockResolvedValue({
+    providerMocks.executeCodexAppServerTurn.mockResolvedValue({
       finalMessage: 'Image-aware answer',
       jsonEvents: [],
+      providerActionCount: 0,
       sessionId: 'codex-session-inline-images',
       stderr: '',
       stdout: '',
@@ -1410,7 +1458,7 @@ describe('codexCliProviderDefinition', () => {
       workingDirectory: WORKING_DIRECTORY,
     })
 
-    expect(providerMocks.executeCodexPrompt).toHaveBeenCalledWith(
+    expect(providerMocks.executeCodexAppServerTurn).toHaveBeenCalledWith(
       expect.objectContaining({
         images: [
           {
@@ -1430,7 +1478,7 @@ describe('codexCliProviderDefinition', () => {
     )
   })
 
-  it('rejects unsupported remote image URLs for the Codex CLI adapter', async () => {
+  it('rejects unsupported remote image URLs for the Codex app-server adapter', async () => {
     providerMocks.prepareAssistantDirectCliEnv.mockReturnValue({
       PATH: '/prepared/bin',
     })
@@ -1456,13 +1504,13 @@ describe('codexCliProviderDefinition', () => {
       }),
     ).rejects.toMatchObject({
       code: 'ASSISTANT_CODEX_IMAGE_INVALID',
-      message: 'Codex CLI image input does not support URL scheme "https:".',
+      message: 'Codex app-server image input does not support URL scheme "https:".',
     })
 
-    expect(providerMocks.executeCodexPrompt).not.toHaveBeenCalled()
+    expect(providerMocks.executeCodexAppServerTurn).not.toHaveBeenCalled()
   })
 
-  it('rejects malformed or non-base64 inline image data for the Codex CLI adapter', async () => {
+  it('rejects malformed or non-base64 inline image data for the Codex app-server adapter', async () => {
     providerMocks.prepareAssistantDirectCliEnv.mockReturnValue({
       PATH: '/prepared/bin',
     })
@@ -1488,7 +1536,7 @@ describe('codexCliProviderDefinition', () => {
       }),
     ).rejects.toMatchObject({
       code: 'ASSISTANT_CODEX_IMAGE_INVALID',
-      message: 'Codex CLI image input data URLs must use base64 encoding.',
+      message: 'Codex app-server image input data URLs must use base64 encoding.',
     })
 
     await expect(
@@ -1512,9 +1560,9 @@ describe('codexCliProviderDefinition', () => {
       }),
     ).rejects.toMatchObject({
       code: 'ASSISTANT_CODEX_IMAGE_INVALID',
-      message: 'Codex CLI image input data URL is malformed.',
+      message: 'Codex app-server image input data URL is malformed.',
     })
 
-    expect(providerMocks.executeCodexPrompt).not.toHaveBeenCalled()
+    expect(providerMocks.executeCodexAppServerTurn).not.toHaveBeenCalled()
   })
 })

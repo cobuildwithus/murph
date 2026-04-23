@@ -13,6 +13,7 @@ import type {
   AssistantSandbox,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import type {
+  CodexNormalizedEvent,
   CodexProgressEvent,
 } from './assistant-codex-events.js'
 import {
@@ -106,7 +107,7 @@ export interface CodexDisplayOptions {
 export async function executeCodexAppServerTurn(
   input: CodexAppServerTurnInput,
 ): Promise<CodexAppServerTurnResult> {
-  assertSupportedCodexAppServerApprovalPolicy(input.approvalPolicy)
+  const approvalPolicy = resolveSupportedCodexAppServerApprovalPolicy(input.approvalPolicy)
   const codexCommand = input.codexCommand?.trim() || 'codex'
   const workingDirectory = path.resolve(input.workingDirectory)
   const childEnv = await resolveCodexChildEnv({
@@ -118,11 +119,15 @@ export async function executeCodexAppServerTurn(
     images: input.images,
     tempRoot,
   })
-  const args = buildCodexAppServerArgs(input)
+  const normalizedInput = {
+    ...input,
+    approvalPolicy,
+  }
+  const args = buildCodexAppServerArgs(normalizedInput)
 
   try {
     return await runCodexAppServerTurn({
-      ...input,
+      ...normalizedInput,
       args,
       codexCommand,
       imagePaths,
@@ -143,15 +148,14 @@ export function buildCodexAppServerArgs(
     'approvalPolicy' | 'configOverrides' | 'oss' | 'profile' | 'sandbox'
   >,
 ): string[] {
+  const approvalPolicy = resolveSupportedCodexAppServerApprovalPolicy(input.approvalPolicy)
   const args: string[] = []
 
   if (input.sandbox) {
     args.push('-s', input.sandbox)
   }
 
-  if (input.approvalPolicy) {
-    args.push('-a', input.approvalPolicy)
-  }
+  args.push('-a', approvalPolicy)
 
   for (const override of input.configOverrides ?? []) {
     args.push('--config', override)
@@ -202,6 +206,7 @@ async function runCodexAppServerTurn(
   const pendingRequests = new Map<CodexRpcId, PendingCodexRpcRequest>()
   const assistantStreams = new Map<string, string>()
   const assistantStreamOrder: string[] = []
+  let stdinFailure: VaultCliError | null = null
 
   let completeTurn: (() => void) | null = null
   let failTurn: ((error: unknown) => void) | null = null
@@ -210,13 +215,82 @@ async function runCodexAppServerTurn(
     failTurn = reject
   })
   void turnCompleted.catch(() => undefined)
+  let cleanupAbortListener = () => {}
 
-  const cleanupAbortListener = attachCodexAbortListener({
+  const rejectOnce = (error: unknown) => {
+    if (settled) {
+      return
+    }
+
+    settled = true
+    cleanupAbortListener()
+    rejectPendingCodexRpcRequests(pendingRequests, error)
+    failTurn?.(error)
+  }
+
+  const handleCodexStdinError = (error: unknown): VaultCliError | null => {
+    if (normalShutdown && readNodeErrorCode(error) === 'EPIPE') {
+      return null
+    }
+
+    const failure =
+      stdinFailure ??
+      buildCodexProcessExitError({
+        abortRequested,
+        code: child.exitCode,
+        fallback: buildCodexStdinFailureFallback({
+          error,
+          lastEventError,
+          stderr,
+        }),
+        providerActionCount,
+        providerSessionId,
+        signal: child.signalCode ?? null,
+        stderr,
+      })
+    stdinFailure = failure
+    rejectOnce(failure)
+    return failure
+  }
+
+  const tryWriteRpcMessage = (
+    payload: Record<string, unknown>,
+  ): VaultCliError | null => {
+    if (stdinFailure) {
+      return stdinFailure
+    }
+
+    try {
+      writeCodexRpcMessage(child, payload)
+      return stdinFailure
+    } catch (error) {
+      return handleCodexStdinError(error)
+    }
+  }
+
+  const tryCloseCodexStdin = (): VaultCliError | null => {
+    if (stdinFailure) {
+      return stdinFailure
+    }
+
+    try {
+      child.stdin.end()
+      return stdinFailure
+    } catch (error) {
+      return handleCodexStdinError(error)
+    }
+  }
+
+  child.stdin.on('error', (error) => {
+    void handleCodexStdinError(error)
+  })
+
+  cleanupAbortListener = attachCodexAbortListener({
     abortSignal: input.abortSignal,
     onAbort: () => {
       abortRequested = true
       if (providerSessionId && turnId) {
-        writeCodexRpcMessage(child, {
+        void tryWriteRpcMessage({
           id: nextRequestId,
           method: 'turn/interrupt',
           params: {
@@ -271,9 +345,11 @@ async function runCodexAppServerTurn(
     const requestId = readCodexRpcServerRequestId(message)
     if (requestId !== null) {
       denyUnsupportedCodexServerRequest({
-        child,
         message,
         requestId,
+        writeRpcMessage: (payload) => {
+          void tryWriteRpcMessage(payload)
+        },
       })
       return
     }
@@ -282,10 +358,7 @@ async function runCodexAppServerTurn(
     lastEventError = extractCodexErrorMessage(message) ?? lastEventError
 
     const normalizedEvent = normalizeCodexEvent(message)
-    const providerActionKey = extractCodexProviderActionKey({
-      event: message,
-      normalizedEvent,
-    })
+    const providerActionKey = extractCodexProviderActionKey(normalizedEvent)
     if (providerActionKey && !providerActionItemIds.has(providerActionKey)) {
       providerActionItemIds.add(providerActionKey)
       providerActionCount += 1
@@ -345,30 +418,23 @@ async function runCodexAppServerTurn(
         reject,
         resolve,
       })
-      writeCodexRpcMessage(child, {
+      const failure = tryWriteRpcMessage({
         id,
         method,
         params: stripUndefinedRpcParams(params),
       })
+      if (failure) {
+        pendingRequests.delete(id)
+        reject(failure)
+      }
     })
   }
 
   const sendNotification = (method: string, params: Record<string, unknown>): void => {
-    writeCodexRpcMessage(child, {
+    void tryWriteRpcMessage({
       method,
       params: stripUndefinedRpcParams(params),
     })
-  }
-
-  const rejectOnce = (error: unknown) => {
-    if (settled) {
-      return
-    }
-
-    settled = true
-    cleanupAbortListener()
-    rejectPendingCodexRpcRequests(pendingRequests, error)
-    failTurn?.(error)
   }
 
   child.on('error', (error) => {
@@ -429,20 +495,15 @@ async function runCodexAppServerTurn(
     }
 
     rejectOnce(
-      abortRequested || signal === 'SIGINT'
-        ? buildCodexInterruptedError({
-            providerActionCount,
-            providerSessionId,
-            signal,
-          })
-        : buildCodexFailure({
-            code,
-            fallback: lastEventError,
-            providerActionCount,
-            providerSessionId,
-            signal,
-            stderr,
-          }),
+      buildCodexProcessExitError({
+        abortRequested,
+        code,
+        fallback: lastEventError,
+        providerActionCount,
+        providerSessionId,
+        signal,
+        stderr,
+      }),
     )
   })
 
@@ -463,9 +524,13 @@ async function runCodexAppServerTurn(
 
     const threadResult = await withCodexRpcTimeout(
       providerSessionId
-        ? sendRequest('thread/resume', {
-            threadId: providerSessionId,
-          })
+        ? sendRequest(
+            'thread/resume',
+            buildCodexThreadResumeParams({
+              input,
+              providerSessionId,
+            }),
+          )
         : sendRequest('thread/start', buildCodexThreadStartParams(input)),
       CODEX_RPC_DEFAULT_TIMEOUT_MS,
       providerSessionId ? 'thread/resume' : 'thread/start',
@@ -494,10 +559,19 @@ async function runCodexAppServerTurn(
 
     await turnCompleted
     normalShutdown = true
-    await stopCodexAppServerChild(child)
+    await stopCodexAppServerChild({
+      child,
+      closeStdin: tryCloseCodexStdin,
+    })
+    if (stdinFailure) {
+      throw stdinFailure
+    }
   } catch (error) {
     normalShutdown = true
-    await stopCodexAppServerChild(child).catch(() => undefined)
+    await stopCodexAppServerChild({
+      child,
+      closeStdin: tryCloseCodexStdin,
+    }).catch(() => undefined)
     throw error
   } finally {
     cleanupAbortListener()
@@ -563,10 +637,39 @@ function buildCodexThreadStartParams(
     workingDirectory: string
   },
 ): Record<string, unknown> {
+  return buildCodexThreadContextParams({
+    includeServiceName: true,
+    input,
+  })
+}
+
+function buildCodexThreadResumeParams(input: {
+  input: CodexAppServerTurnInput & {
+    workingDirectory: string
+  }
+  providerSessionId: string
+}): Record<string, unknown> {
   return stripUndefinedRpcParams({
-    cwd: input.workingDirectory,
-    model: normalizeNullableString(input.model),
-    serviceName: CODEX_RPC_CLIENT_NAME,
+    ...buildCodexThreadContextParams({
+      includeServiceName: false,
+      input: input.input,
+    }),
+    threadId: input.providerSessionId,
+  })
+}
+
+function buildCodexThreadContextParams(input: {
+  includeServiceName: boolean
+  input: CodexAppServerTurnInput & {
+    workingDirectory: string
+  }
+}): Record<string, unknown> {
+  return stripUndefinedRpcParams({
+    approvalPolicy: mapCodexAppServerApprovalPolicy(input.input.approvalPolicy),
+    cwd: input.input.workingDirectory,
+    model: normalizeNullableString(input.input.model),
+    sandbox: input.input.sandbox,
+    serviceName: input.includeServiceName ? CODEX_RPC_CLIENT_NAME : undefined,
   })
 }
 
@@ -578,14 +681,11 @@ function buildCodexTurnStartParams(input: {
   providerSessionId: string
 }): Record<string, unknown> {
   return stripUndefinedRpcParams({
-    approvalPolicy: mapCodexAppServerApprovalPolicy(input.input.approvalPolicy),
-    cwd: input.input.workingDirectory,
     effort: normalizeNullableString(input.input.reasoningEffort),
     input: buildCodexAppServerInputItems({
       imagePaths: input.imagePaths,
       prompt: input.input.prompt,
     }),
-    model: normalizeNullableString(input.input.model),
     threadId: input.providerSessionId,
   })
 }
@@ -621,11 +721,11 @@ function mapCodexAppServerApprovalPolicy(
   }
 }
 
-function assertSupportedCodexAppServerApprovalPolicy(
+function resolveSupportedCodexAppServerApprovalPolicy(
   approvalPolicy: AssistantApprovalPolicy | null | undefined,
-): void {
+): 'never' {
   if (!approvalPolicy || approvalPolicy === 'never') {
-    return
+    return 'never'
   }
 
   throw new VaultCliError(
@@ -939,29 +1039,36 @@ async function waitForCodexSpawn(child: ChildProcessWithoutNullStreams): Promise
   })
 }
 
-async function stopCodexAppServerChild(
-  child: ChildProcessWithoutNullStreams,
-): Promise<void> {
-  try {
-    child.stdin.end()
-  } catch {
-    // Best effort cleanup.
-  }
+async function stopCodexAppServerChild(input: {
+  child: ChildProcessWithoutNullStreams
+  closeStdin: () => VaultCliError | null
+}): Promise<void> {
+  const stdinCloseError = input.closeStdin()
 
-  if (child.exitCode !== null || child.signalCode !== null) {
+  if (input.child.exitCode !== null || input.child.signalCode !== null) {
+    if (stdinCloseError) {
+      throw stdinCloseError
+    }
     return
   }
 
-  if (!child.killed) {
-    child.kill()
+  if (!input.child.killed) {
+    input.child.kill()
   }
 
-  if (await waitForCodexChildExit(child, CODEX_APP_SERVER_STOP_TIMEOUT_MS)) {
+  if (await waitForCodexChildExit(input.child, CODEX_APP_SERVER_STOP_TIMEOUT_MS)) {
+    if (stdinCloseError) {
+      throw stdinCloseError
+    }
     return
   }
 
-  child.kill('SIGKILL')
-  await waitForCodexChildExit(child, CODEX_APP_SERVER_STOP_TIMEOUT_MS)
+  input.child.kill('SIGKILL')
+  await waitForCodexChildExit(input.child, CODEX_APP_SERVER_STOP_TIMEOUT_MS)
+
+  if (stdinCloseError) {
+    throw stdinCloseError
+  }
 }
 
 async function waitForCodexChildExit(
@@ -1039,14 +1146,14 @@ function rejectPendingCodexRpcRequests(
 }
 
 function denyUnsupportedCodexServerRequest(input: {
-  child: ChildProcessWithoutNullStreams
   message: CodexRpcMessage
   requestId: CodexRpcId
+  writeRpcMessage: (payload: Record<string, unknown>) => void
 }): void {
   const method = typeof input.message.method === 'string'
     ? input.message.method
     : 'unknown'
-  writeCodexRpcMessage(input.child, {
+  input.writeRpcMessage({
     id: input.requestId,
     error: {
       code: -32000,
@@ -1170,48 +1277,60 @@ function isFailedCodexTurnStatus(status: string | null): boolean {
   )
 }
 
-function extractCodexProviderActionKey(input: {
-  event: CodexRpcMessage
-  normalizedEvent: ReturnType<typeof normalizeCodexEvent>
-}): string | null {
-  const method = typeof input.event.method === 'string' ? input.event.method : null
-  if (method !== 'item/started' && method !== 'item/completed') {
-    return null
+function extractCodexProviderActionKey(
+  normalizedEvent: CodexNormalizedEvent,
+): string | null {
+  if (normalizedEvent.kind === 'status_item') {
+    if (
+      normalizedEvent.itemType !== 'command.execution' &&
+      normalizedEvent.itemType !== 'dynamic.tool.call' &&
+      normalizedEvent.itemType !== 'file.change'
+    ) {
+      return null
+    }
+
+    return (
+      normalizedEvent.itemId ??
+      providerActionFallbackKeyFromNormalized(normalizedEvent)
+    )
   }
 
   if (
-    input.normalizedEvent.kind !== 'status_item' &&
-    input.normalizedEvent.kind !== 'tool_call' &&
-    input.normalizedEvent.kind !== 'web_search'
+    normalizedEvent.kind !== 'tool_call' &&
+    normalizedEvent.kind !== 'web_search'
   ) {
     return null
   }
 
-  if (input.normalizedEvent.kind === 'status_item') {
-    const actionTypes = new Set([
-      'command.execution',
-      'file.change',
-      'dynamic.tool.call',
-      'image.view',
-    ])
-    if (!actionTypes.has(input.normalizedEvent.itemType)) {
-      return null
-    }
-  }
-
-  return input.normalizedEvent.itemId ?? `${method}:${providerActionFallbackKey(input.event)}`
+  return (
+    normalizedEvent.itemId ??
+    providerActionFallbackKeyFromNormalized(normalizedEvent)
+  )
 }
 
-function providerActionFallbackKey(event: CodexRpcMessage): string {
-  const params = asRecord(event.params)
-  const item = asRecord(params?.item)
-  return JSON.stringify({
-    type: item?.type ?? null,
-    command: item?.command ?? null,
-    path: item?.path ?? null,
-    query: item?.query ?? null,
-    tool: item?.tool ?? null,
-  })
+function providerActionFallbackKeyFromNormalized(
+  event: Extract<
+    CodexNormalizedEvent,
+    { kind: 'status_item' | 'tool_call' | 'web_search' }
+  >,
+): string {
+  switch (event.kind) {
+    case 'status_item':
+      return JSON.stringify({
+        commandLabel: event.commandLabel,
+        filePaths: event.filePaths,
+        itemType: event.itemType,
+      })
+    case 'tool_call':
+      return JSON.stringify({
+        toolName: event.toolName,
+        toolServer: event.toolServer,
+      })
+    case 'web_search':
+      return JSON.stringify({
+        query: event.query,
+      })
+  }
 }
 
 function buildCodexTurnFailedError(input: {
@@ -1277,6 +1396,50 @@ function buildCodexFailure(input: {
       retryable: connectionLost,
     },
   )
+}
+
+function buildCodexProcessExitError(input: {
+  abortRequested: boolean
+  code: number | null
+  fallback: string | null
+  providerActionCount: number
+  providerSessionId: string | null
+  signal: NodeJS.Signals | null
+  stderr: string
+}): VaultCliError {
+  if (input.abortRequested || input.signal === 'SIGINT') {
+    return buildCodexInterruptedError({
+      providerActionCount: input.providerActionCount,
+      providerSessionId: input.providerSessionId,
+      signal: input.signal,
+    })
+  }
+
+  return buildCodexFailure(input)
+}
+
+function buildCodexStdinFailureFallback(input: {
+  error: unknown
+  lastEventError: string | null
+  stderr: string
+}): string | null {
+  const preferredDetail =
+    normalizeStatusText(input.lastEventError ?? tailText(input.stderr)) ??
+    input.lastEventError ??
+    tailText(input.stderr)
+  const streamErrorDetail = readNodeErrorMessage(input.error)
+
+  if (!preferredDetail) {
+    return streamErrorDetail
+  }
+
+  if (!streamErrorDetail) {
+    return preferredDetail
+  }
+
+  return preferredDetail.toLowerCase() === streamErrorDetail.toLowerCase()
+    ? preferredDetail
+    : `${preferredDetail} ${streamErrorDetail}`
 }
 
 function buildCodexInterruptedError(input: {
@@ -1471,11 +1634,24 @@ function isCodexResumeStaleText(value: string): boolean {
 
   const normalized = value.toLowerCase()
   return (
-    normalized.includes('thread/resume failed') ||
     normalized.includes('no rollout found for thread id') ||
-    normalized.includes('could not resume') ||
-    normalized.includes('not found')
+    normalized.includes('thread not found') ||
+    normalized.includes('could not resume thread')
   )
+}
+
+function readNodeErrorCode(error: unknown): string | null {
+  const record = asRecord(error)
+  return normalizeNullableString(asString(record?.code))
+}
+
+function readNodeErrorMessage(error: unknown): string | null {
+  if (error instanceof Error) {
+    return normalizeStatusText(error.message) ?? error.message
+  }
+
+  const record = asRecord(error)
+  return normalizeStatusText(asString(record?.message) ?? null)
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
