@@ -259,6 +259,16 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     mocks.nudgeHostedRunUserBestEffort.mockResolvedValue(true);
   });
 
+  it("builds the inactive signup invite with the concise Murph positioning line", () => {
+    expect(buildHostedInviteReply({
+      activeSubscription: false,
+      joinUrl: "https://join.example.test/join/code_first_text",
+    })).toBe(`Welcome to Murph, your personal health assistant.
+
+Verify your phone to finish signup here:
+https://join.example.test/join/code_first_text`);
+  });
+
   it("reuses an existing transaction when dispatching active-member Linq messages", async () => {
     const prisma = asPrismaTransactionClient({
       hostedWebhookReceipt: {
