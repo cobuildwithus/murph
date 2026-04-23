@@ -6,6 +6,9 @@ import {
   HOSTED_SHARED_MODEL_CREDENTIAL_ENV_NAMES,
 } from "@murphai/assistant-runtime/hosted-assistant-env-constants";
 import {
+  HOSTED_AI_USAGE_BILLING_MODE_ENV,
+} from "@murphai/hosted-execution";
+import {
   readHostedEmailCapabilities,
 } from "@murphai/hosted-execution/hosted-email";
 
@@ -39,6 +42,7 @@ const DISALLOWED_RUNNER_SECRET_KEYS = new Set([
   ...RUNNER_SECRET_PROCESS_CONTROL_KEYS,
   ...HOSTED_SHARED_INGRESS_ONLY_SECRET_ENV_NAMES,
   "HOME",
+  HOSTED_AI_USAGE_BILLING_MODE_ENV,
   "HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY",
   "HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED",
   // This is a platform metering secret forwarded by the assistant env profile,
@@ -88,6 +92,7 @@ export const HOSTED_EXECUTION_RUNNER_ENV_PROFILES_ENV =
 const RUNNER_ENV_PROFILE_KEYS = {
   assistant: [
     ...HOSTED_ASSISTANT_ALLOWED_API_KEY_ENV_NAMES,
+    HOSTED_AI_USAGE_BILLING_MODE_ENV,
     "HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY",
     "HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED",
     "HOSTED_ASSISTANT_ZERO_DATA_RETENTION",

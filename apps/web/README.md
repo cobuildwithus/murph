@@ -138,6 +138,7 @@ Hosted onboarding extras:
 - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_ANNUAL`
 - `HOSTED_ONBOARDING_STRIPE_USAGE_PRICE_ID_LAUNCH_MONTHLY`
 - `HOSTED_ONBOARDING_STRIPE_USAGE_PRICE_ID_LAUNCH_ANNUAL`
+- `HOSTED_AI_USAGE_BILLING_MODE`
 - `STRIPE_SECRET_KEY`
 - `STRIPE_WEBHOOK_SECRET`
 - `LINQ_API_TOKEN`
@@ -147,15 +148,21 @@ Hosted onboarding extras:
 
 Hosted AI usage metering:
 
-- `HOSTED_AI_USAGE_STRIPE_METER_EVENT_NAME` must match the Stripe Billing meter attached to the configured `HOSTED_ONBOARDING_STRIPE_USAGE_PRICE_ID_*` prices when you use the hosted-web fallback drain.
+- `HOSTED_AI_USAGE_BILLING_MODE` defaults to `disabled`, which records hosted AI usage rows but does not attach usage prices at checkout or post Stripe meter events.
+- Missing or unsupported `HOSTED_AI_USAGE_BILLING_MODE` values fail closed to `disabled`.
+- `HOSTED_AI_USAGE_BILLING_MODE=stripe_meter` re-enables the classic hosted-web Stripe meter fallback and requires `HOSTED_ONBOARDING_STRIPE_USAGE_PRICE_ID_*` plus `HOSTED_AI_USAGE_STRIPE_METER_EVENT_NAME`.
+- `HOSTED_AI_USAGE_STRIPE_METER_EVENT_NAME` must match the Stripe Billing meter attached to the configured `HOSTED_ONBOARDING_STRIPE_USAGE_PRICE_ID_*` prices when you use `stripe_meter`.
 - `HOSTED_AI_USAGE_STRIPE_BATCH_LIMIT` controls how many pending usage rows each cron drain attempts.
-- `HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED=1` enables the delegated Vercel AI Gateway billing path for platform-owned Gateway requests.
+- `HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED=1` enables the delegated Vercel AI Gateway billing path for platform-owned Gateway requests only when `HOSTED_AI_USAGE_BILLING_MODE=stripe_meter`.
 - `HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY` must be a Stripe restricted key with billing meter-event write permission only; it is forwarded to hosted execution, never persisted with usage rows, and ignored unless it starts with `rk_`.
 
 `apps/web` records every hosted assistant usage row by member in `HostedAiUsage`.
-Rows delegated to Vercel AI Gateway keep `stripeMeterSource=vercel-ai-gateway`
-and `stripeMeterStatus=delegated` for reconciliation, while the existing
-hosted-web Stripe drain continues to own `stripeMeterSource=murph`.
+While usage billing is disabled, imported rows keep `stripeMeterSource=murph`
+and `stripeMeterStatus=skipped` so they cannot be backbilled later. Rows
+delegated to Vercel AI Gateway keep `stripeMeterSource=vercel-ai-gateway`
+and `stripeMeterStatus=delegated` only when `stripe_meter` billing is enabled
+in both the web app and execution worker,
+while the hosted-web Stripe drain owns `stripeMeterSource=murph`.
 
 For exact flat-fee plus included-credit plus provider token cost with margin
 pricing, prefer Stripe pricing plans and Billing for LLM tokens when your

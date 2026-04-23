@@ -1,9 +1,15 @@
 import type { PrismaClient } from "@prisma/client";
 
 import {
+  HOSTED_AI_USAGE_BILLING_DISABLED_MESSAGE,
+  readHostedAiUsageBillingMode,
+  type HostedAiUsageBillingMode,
+} from "@murphai/hosted-execution";
+import {
   claimHostedAiUsageStripeMetering,
   HostedAiUsageStripeMeterClaimLostError,
   markHostedAiUsageStripeFailed,
+  markHostedAiUsageStripeMeteringDisabled,
   markHostedAiUsageStripeProgress,
   listHostedAiUsagePendingStripeMetering,
   markHostedAiUsageStripeMetered,
@@ -14,7 +20,6 @@ import {
 
 const STRIPE_METER_EVENTS_URL = "https://api.stripe.com/v1/billing/meter_events";
 const DEFAULT_STRIPE_METER_BATCH_LIMIT = 32;
-const DEFAULT_STRIPE_METER_EVENT_NAME = "token-billing-tokens";
 const STRIPE_METER_RETRY_BASE_DELAY_MS = 5 * 60_000;
 const STRIPE_METER_RETRY_MAX_DELAY_MS = 24 * 60 * 60_000;
 const STRIPE_METER_LEASE_MS = 5 * 60_000;
@@ -35,6 +40,7 @@ interface HostedAiUsageStripeProgressState {
 }
 
 export interface HostedAiUsageStripeMeterEnvironment {
+  aiUsageBillingMode: HostedAiUsageBillingMode;
   meterEventName: string | null;
   stripeSecretKey: string | null;
   batchLimit: number;
@@ -56,6 +62,22 @@ export async function drainHostedAiUsageStripeMetering(input: {
   const environment = input.environment ?? readHostedAiUsageStripeMeterEnvironment(process.env);
   const fetchImpl = input.fetchImpl ?? fetch;
   const attemptedAt = normalizeStripeMeterDate(input.now ?? new Date().toISOString(), "now");
+
+  if (environment.aiUsageBillingMode === "disabled") {
+    const skipped = await markHostedAiUsageStripeMeteringDisabled({
+      limit: environment.batchLimit,
+      message: HOSTED_AI_USAGE_BILLING_DISABLED_MESSAGE,
+      now: attemptedAt,
+      prisma: input.prisma,
+    });
+
+    return {
+      configured: false,
+      failed: 0,
+      metered: 0,
+      skipped,
+    };
+  }
 
   if (!environment.stripeSecretKey || !environment.meterEventName) {
     return {
@@ -298,9 +320,8 @@ export function readHostedAiUsageStripeMeterEnvironment(
   source: Readonly<Record<string, string | undefined>> = process.env,
 ): HostedAiUsageStripeMeterEnvironment {
   return {
-    meterEventName:
-      normalizeOptionalString(source.HOSTED_AI_USAGE_STRIPE_METER_EVENT_NAME)
-      ?? DEFAULT_STRIPE_METER_EVENT_NAME,
+    aiUsageBillingMode: readHostedAiUsageBillingMode(source),
+    meterEventName: normalizeOptionalString(source.HOSTED_AI_USAGE_STRIPE_METER_EVENT_NAME),
     stripeSecretKey: normalizeOptionalString(source.STRIPE_SECRET_KEY),
     batchLimit: readPositiveInteger(
       normalizeOptionalString(source.HOSTED_AI_USAGE_STRIPE_BATCH_LIMIT),

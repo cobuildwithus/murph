@@ -1,6 +1,9 @@
 import {
   deviceSyncProviderRuntimeVariableEnvKeys,
 } from "@murphai/device-syncd/config";
+import {
+  HOSTED_AI_USAGE_BILLING_MODE_ENV,
+} from "@murphai/hosted-execution";
 
 export const HOSTED_WORKER_OPTIONAL_VAR_NAMES = [
   "DEVICE_SYNC_PUBLIC_BASE_URL",
@@ -11,6 +14,7 @@ export const HOSTED_WORKER_OPTIONAL_VAR_NAMES = [
   "HOSTED_EMAIL_DOMAIN",
   "HOSTED_EMAIL_FROM_ADDRESS",
   "HOSTED_EMAIL_LOCAL_PART",
+  HOSTED_AI_USAGE_BILLING_MODE_ENV,
   "HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED",
   "HOSTED_ASSISTANT_API_KEY_ENV",
   "HOSTED_ASSISTANT_APPROVAL_POLICY",
