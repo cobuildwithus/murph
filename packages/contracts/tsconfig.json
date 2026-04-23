@@ -11,9 +11,6 @@
       ],
       "@murphai/contracts/schemas": [
         "packages/contracts/src/schemas.ts"
-      ],
-      "@murphai/contracts/*": [
-        "packages/contracts/src/*.ts"
       ]
     }
   },

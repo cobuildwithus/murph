@@ -11,7 +11,7 @@ import type {
   HealthCommonsClaim,
   HealthCommonsInterpretationFrame,
   HealthCommonsSource,
-} from "@murphai/contracts/health-commons";
+} from "@murphai/contracts";
 
 import {
   healthCommonsCatalog,

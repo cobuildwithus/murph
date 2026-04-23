@@ -2,7 +2,6 @@ import { createMurphPackageVitestConfig } from "../../config/vitest-package.js";
 
 const WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
   "@murphai/contracts": "../contracts/src/index.ts",
-  "@murphai/contracts/health-commons": "../contracts/src/health-commons.ts",
   "@murphai/health-commons": "./src/index.ts",
 } as const;
 

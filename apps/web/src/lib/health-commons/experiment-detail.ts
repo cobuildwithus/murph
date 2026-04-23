@@ -8,8 +8,8 @@ import type {
   HealthCommonsSafety,
   HealthCommonsTestPlan,
   HealthCommonsSource,
-} from "@murphai/contracts/health-commons";
-import type { StoredMedia } from "@murphai/contracts";
+  StoredMedia,
+} from "@murphai/contracts";
 
 import {
   CURRENT_EXPERIMENT_PROTOCOL_CONTRACT_VERSION,

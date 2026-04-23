@@ -26,8 +26,11 @@ import {
   goalFrontmatterSchema,
   healthEntityDefinitionByKind,
   healthEntityDefinitions,
+  isStrictIsoDate,
+  isStrictIsoDateTime,
   journalDayFrontmatterSchema,
   exampleSampleRecords,
+  normalizeStrictIsoTimestamp,
   exampleVaultMetadata,
   providerFrontmatterSchema,
   recipeFrontmatterSchema,
@@ -39,11 +42,6 @@ import {
   parseFrontmatterDocument,
 } from "@murphai/contracts";
 import { schemaCatalog } from "@murphai/contracts/schemas";
-import {
-  isStrictIsoDate,
-  isStrictIsoDateTime,
-  normalizeStrictIsoTimestamp,
-} from "@murphai/contracts/time";
 
 interface PackageJsonShape {
   main?: string;
