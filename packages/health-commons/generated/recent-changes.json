@@ -860,6 +860,35 @@
     },
     {
       "affectedFields": [
+        "status",
+        "quality",
+        "biomarker",
+        "claims",
+        "protocolRanking",
+        "communityOutcomeSummary",
+        "relations",
+        "sources/deep-sleep"
+      ],
+      "changeId": "chg_2026_04_23_deep_sleep_biomarker_page",
+      "changeType": "evidence_change",
+      "editSummary": "Expanded Deep Sleep Minutes from a draft stub into a structured Health Commons biomarker page with wearable bindings, measurement guardrails, claims, protocol ranking, community-outcome placeholder, and source artifacts.",
+      "entityKey": "biomarker:deep-sleep-minutes",
+      "minor": false,
+      "rationale": "Make /biomarkers/deep-sleep-minutes publishable in apps/web while keeping consumer sleep-stage limitations and source-backed claim boundaries visible.",
+      "reviewStatus": "proposed",
+      "schemaVersion": "murph.commons.change.v1",
+      "sourceKeys": [
+        "source_artifact:doi-10.1093-sleep-zsaf063",
+        "source_artifact:pmid-21876072",
+        "source_artifact:pmid-29087522",
+        "source_artifact:pmid-37917155-deep-sleep",
+        "source_artifact:pmid-39460013-deep-sleep",
+        "source_artifact:doi-10.1038-s41598-025-93774-z",
+        "source_artifact:pmid-41325105"
+      ]
+    },
+    {
+      "affectedFields": [
         "biomarker",
         "relations",
         "protocolRanking",
