@@ -685,6 +685,122 @@ test("device sync store failJob requeues retryable jobs, dead-letters terminal j
   }
 });
 
+test("device sync store wakes expired final-attempt leases and dead-letters them instead of stranding them", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-store-expired-final-attempt");
+  const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
+
+  try {
+    const account = store.upsertAccount({
+      provider: "demo",
+      externalAccountId: "demo-expired-final-attempt",
+      displayName: "Demo",
+      scopes: ["offline"],
+      tokens: {
+        accessToken: "access-token",
+        accessTokenEncrypted: "enc:access-token",
+        refreshToken: "refresh-token",
+        refreshTokenEncrypted: "enc:refresh-token",
+      },
+      connectedAt: "2026-04-07T00:00:00.000Z",
+    });
+
+    const job = store.enqueueJob({
+      accountId: account.id,
+      availableAt: "2026-04-07T00:00:00.000Z",
+      kind: "final-attempt",
+      maxAttempts: 1,
+      payload: {},
+      provider: "demo",
+    });
+
+    const claimed = store.claimDueJob("worker-a", "2026-04-07T00:00:00.000Z", 60_000);
+    assert.equal(claimed?.id, job.id);
+    assert.equal(store.readNextJobWakeAt(), "2026-04-07T00:01:00.000Z");
+    assert.equal(store.claimDueJob("worker-b", "2026-04-07T00:01:01.000Z", 60_000), null);
+
+    const deadJob = store.getJobById(job.id);
+    assert.equal(deadJob?.status, "dead");
+    assert.equal(deadJob?.lastErrorCode, "LEASE_EXPIRED");
+    assert.equal(deadJob?.lastErrorMessage, "Device sync job lease expired before completion.");
+  } finally {
+    store.close();
+    await rm(tempDir, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
+test("device sync store ignores expired exhausted running rows for dedupe and reaps them before lower-priority follow-up claims", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-store-expired-final-attempt-dedupe");
+  const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
+
+  try {
+    const account = store.upsertAccount({
+      provider: "demo",
+      externalAccountId: "demo-expired-final-attempt-dedupe",
+      displayName: "Demo",
+      scopes: ["offline"],
+      tokens: {
+        accessToken: "access-token",
+        accessTokenEncrypted: "enc:access-token",
+        refreshToken: "refresh-token",
+        refreshTokenEncrypted: "enc:refresh-token",
+      },
+      connectedAt: "2026-04-07T00:00:00.000Z",
+    });
+
+    const exhaustedJob = store.enqueueJob({
+      accountId: account.id,
+      availableAt: "2026-04-07T00:00:00.000Z",
+      dedupeKey: "reconcile:demo-expired-final-attempt-dedupe",
+      kind: "final-attempt",
+      maxAttempts: 1,
+      payload: {},
+      priority: 5,
+      provider: "demo",
+    });
+    const claimed = store.claimDueJob("worker-a", "2026-04-07T00:00:00.000Z", 60_000);
+    assert.equal(claimed?.id, exhaustedJob.id);
+
+    const dedupedReplacement = store.enqueueJob({
+      accountId: account.id,
+      availableAt: "2026-04-07T00:01:01.000Z",
+      dedupeKey: "reconcile:demo-expired-final-attempt-dedupe",
+      kind: "replacement",
+      payload: {},
+      provider: "demo",
+    });
+    assert.notEqual(dedupedReplacement.id, exhaustedJob.id);
+
+    store.enqueueJob({
+      accountId: account.id,
+      availableAt: "2026-04-07T00:01:01.000Z",
+      kind: "higher-priority-follow-up",
+      payload: {},
+      priority: 100,
+      provider: "demo",
+    });
+
+    const firstAfterExpiry = store.claimDueJob("worker-b", "2026-04-07T00:01:01.000Z", 60_000);
+    assert.equal(firstAfterExpiry?.kind, "higher-priority-follow-up");
+    assert.equal(store.completeJobIfOwned(firstAfterExpiry!.id, "worker-b", "2026-04-07T00:01:30.000Z"), true);
+
+    const exhaustedAfterClaim = store.getJobById(exhaustedJob.id);
+    assert.equal(exhaustedAfterClaim?.status, "dead");
+    assert.equal(exhaustedAfterClaim?.lastErrorCode, "LEASE_EXPIRED");
+
+    const replacementJob = store.claimDueJob("worker-c", "2026-04-07T00:01:31.000Z", 60_000);
+    assert.equal(replacementJob?.id, dedupedReplacement.id);
+  } finally {
+    store.close();
+    await rm(tempDir, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
 test("device sync store reuses queued jobs with the same dedupe key", async () => {
   const tempDir = await makeTempDirectory("murph-device-syncd-store-dedupe");
   const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
@@ -1057,6 +1173,20 @@ test("device sync store hydrates new hosted accounts, guards token updates, and 
 
     assert.equal(claimed?.id, job.id);
     assert.equal(store.completeJobIfOwned(job.id, "worker-b", "2026-04-07T01:00:30.000Z"), false);
+    assert.equal(store.completeJobIfOwned(job.id, "worker-a", "2026-04-07T01:01:00.000Z"), false);
+    assert.equal(
+      store.failJobIfOwned(
+        job.id,
+        "worker-a",
+        "2026-04-07T01:01:00.000Z",
+        "LEASE_EXPIRED",
+        "stale worker should not transition expired leases",
+        "2026-04-07T01:05:00.000Z",
+        true,
+      ),
+      false,
+    );
+    assert.equal(store.getJobById(job.id)?.status, "running");
     assert.equal(store.readNextJobWakeAt(), "2026-04-07T01:01:00.000Z");
 
     const reclaimed = store.claimDueJob("worker-b", "2026-04-07T01:01:01.000Z", 60_000);
