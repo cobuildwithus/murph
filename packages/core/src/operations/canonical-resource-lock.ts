@@ -14,9 +14,12 @@ import {
 
 import { VaultError } from "../errors.ts";
 import {
+  isVaultFilesystemCaseInsensitive,
   normalizeRelativeVaultPath,
+  normalizeRelativeVaultPathForComparison,
   normalizeVaultRoot,
   resolveVaultPath,
+  type VaultPathComparisonOptions,
 } from "../path-safety.ts";
 import { toIsoTimestamp } from "../time.ts";
 
@@ -48,8 +51,16 @@ export interface CanonicalResourceLockHandle {
 }
 
 interface CanonicalResourceLockContext {
+  acquisitionQueueTail: Promise<void>;
+  heldResourceStates: Map<string, HeldCanonicalResourceState>;
+  heldResources: CanonicalMutationResource[];
   ownerToken: string;
   vaultRoot: string;
+}
+
+interface HeldCanonicalResourceState {
+  depth: number;
+  releaseUnderlying: () => Promise<void>;
 }
 
 interface AcquireCanonicalResourceLockInput {
@@ -62,12 +73,130 @@ interface AcquireCanonicalResourceLockInput {
 const canonicalResourceLockContextStorage = new AsyncLocalStorage<CanonicalResourceLockContext>();
 const processCanonicalResourceQueues = new Map<string, Promise<void>>();
 
-export function canonicalPathResource(relativePath: string): CanonicalMutationResource {
+function findHeldCanonicalResource(
+  context: CanonicalResourceLockContext,
+  resourceKey: string,
+): CanonicalMutationResource | undefined {
+  return context.heldResources.find((resource) => resource.key === resourceKey);
+}
+
+function getHeldCanonicalResourceDepth(
+  context: CanonicalResourceLockContext,
+  resourceKey: string,
+): number {
+  return context.heldResourceStates.get(resourceKey)?.depth ?? 0;
+}
+
+function trackHeldCanonicalResource(
+  context: CanonicalResourceLockContext,
+  resource: CanonicalMutationResource,
+  releaseUnderlying: () => Promise<void>,
+): void {
+  const existingState = context.heldResourceStates.get(resource.key);
+  if (existingState) {
+    existingState.depth += 1;
+    return;
+  }
+
+  context.heldResourceStates.set(resource.key, {
+    depth: 1,
+    releaseUnderlying,
+  });
+  context.heldResources = dedupeCanonicalResources([...context.heldResources, resource]);
+}
+
+async function releaseHeldCanonicalResource(
+  context: CanonicalResourceLockContext,
+  resourceKey: string,
+): Promise<void> {
+  const currentState = context.heldResourceStates.get(resourceKey);
+  if (!currentState) {
+    return;
+  }
+
+  if (currentState.depth > 1) {
+    currentState.depth -= 1;
+    return;
+  }
+
+  context.heldResourceStates.delete(resourceKey);
+  const nextHeldResources = context.heldResources.filter((resource) => resource.key !== resourceKey);
+  if (nextHeldResources.length !== context.heldResources.length) {
+    context.heldResources = nextHeldResources;
+  }
+
+  await currentState.releaseUnderlying();
+}
+
+function assertCanonicalResourceLockOrdering(
+  context: CanonicalResourceLockContext,
+  resource: CanonicalMutationResource,
+): CanonicalMutationResource | undefined {
+  const heldResource = findHeldCanonicalResource(context, resource.key);
+  if (heldResource) {
+    return heldResource;
+  }
+
+  const highestHeldResource = context.heldResources[context.heldResources.length - 1];
+  if (highestHeldResource && highestHeldResource.key.localeCompare(resource.key) > 0) {
+    throw new VaultError(
+      "CANONICAL_RESOURCE_LOCK_ORDER",
+      buildCanonicalResourceLockOrderingMessage(resource, highestHeldResource),
+      {
+        highestHeldResourceKey: highestHeldResource.key,
+        highestHeldResourceLabel: highestHeldResource.label,
+        heldResourceKeys: context.heldResources.map((heldResource) => heldResource.key),
+        resourceKey: resource.key,
+        resourceLabel: resource.label,
+      },
+    );
+  }
+
+  return undefined;
+}
+
+async function acquireCanonicalResourceScopeQueueSlot(
+  context: CanonicalResourceLockContext,
+): Promise<() => void> {
+  const prior = context.acquisitionQueueTail;
+  let releaseQueue!: () => void;
+  const queued = new Promise<void>((resolve) => {
+    releaseQueue = resolve;
+  });
+  const tail = prior.then(
+    () => queued,
+    () => queued,
+  );
+  context.acquisitionQueueTail = tail;
+
+  await prior.catch(() => undefined);
+
+  return () => {
+    releaseQueue();
+    if (context.acquisitionQueueTail === tail) {
+      context.acquisitionQueueTail = Promise.resolve();
+    }
+  };
+}
+
+export function canonicalPathResource(
+  relativePath: string,
+  options: VaultPathComparisonOptions = {},
+): CanonicalMutationResource {
   const normalizedRelativePath = normalizeRelativeVaultPath(relativePath);
   return {
-    key: `path:${normalizedRelativePath}`,
+    key: `path:${normalizeRelativeVaultPathForComparison(normalizedRelativePath, options)}`,
     label: normalizedRelativePath,
   };
+}
+
+export async function canonicalPathResourceForVault(
+  vaultRoot: string,
+  relativePath: string,
+): Promise<CanonicalMutationResource> {
+  return canonicalPathResource(relativePath, {
+    caseInsensitive: await isVaultFilesystemCaseInsensitive(vaultRoot),
+  });
 }
 
 export function canonicalLogicalResource(key: string, label = key): CanonicalMutationResource {
@@ -123,29 +252,36 @@ export async function withCanonicalResourceLocks<TResult>(input: {
     parentContext?.vaultRoot === vaultRoot
       ? parentContext
       : {
+          acquisitionQueueTail: Promise.resolve(),
+          heldResourceStates: new Map(),
+          heldResources: [],
           ownerToken,
           vaultRoot,
         };
-  const acquiredHandles: CanonicalResourceLockHandle[] = [];
+  const executeWithLocks = async (): Promise<TResult> => {
+    const acquiredHandles: CanonicalResourceLockHandle[] = [];
 
-  try {
-    for (const resource of resources) {
-      acquiredHandles.push(await acquireCanonicalResourceLock({
-        vaultRoot,
-        resource,
-        timeoutMs: input.timeoutMs,
-        ownerToken,
-      }));
-    }
+    try {
+      for (const resource of resources) {
+        acquiredHandles.push(await acquireCanonicalResourceLock({
+          vaultRoot,
+          resource,
+          timeoutMs: input.timeoutMs,
+          ownerToken,
+        }));
+      }
 
-    if (parentContext?.vaultRoot === vaultRoot) {
       return await input.run();
+    } finally {
+      await releaseCanonicalResourceLocks(acquiredHandles);
     }
+  };
 
-    return await canonicalResourceLockContextStorage.run(context, input.run);
-  } finally {
-    await releaseCanonicalResourceLocks(acquiredHandles);
+  if (parentContext?.vaultRoot === vaultRoot) {
+    return await executeWithLocks();
   }
+
+  return await canonicalResourceLockContextStorage.run(context, executeWithLocks);
 }
 
 export async function acquireCanonicalResourceLock(
@@ -157,83 +293,128 @@ export async function acquireCanonicalResourceLock(
     input.ownerToken ??
     context?.ownerToken ??
     randomUUID().replace(/-/g, "");
-  const isReentrantOwner = context?.vaultRoot === vaultRoot && context.ownerToken === ownerToken;
+  const sameScopeContext =
+    context?.vaultRoot === vaultRoot && context.ownerToken === ownerToken ? context : null;
+  const releaseScopeQueue = sameScopeContext
+    ? await acquireCanonicalResourceScopeQueueSlot(sameScopeContext)
+    : null;
   const metadata = buildCanonicalResourceLockMetadata(input.resource);
   const ownerKey = `canonical-resource:${hashVaultRoot(vaultRoot)}:${input.resource.key}:${ownerToken}`;
   const { lockPath, metadataPath } = resolveCanonicalResourceLockPaths(vaultRoot, input.resource);
   const queueKey = `${hashVaultRoot(vaultRoot)}:${input.resource.key}`;
-  const releaseQueue = isReentrantOwner
-    ? null
-    : await acquireCanonicalResourceQueueSlot(queueKey);
-  const startedAt = Date.now();
-  let attempt = 0;
 
   try {
-    while (true) {
-      try {
-        const handle = await acquireDirectoryLock({
-          ownerKey,
-          lockPath,
-          metadataPath,
-          metadata,
-          cleanupRetries: CANONICAL_RESOURCE_LOCK_CLEANUP_RETRIES,
-          cleanupRetryDelayMs: CANONICAL_RESOURCE_LOCK_CLEANUP_RETRY_DELAY_MS,
-          parseMetadata(value) {
-            return isCanonicalResourceLockMetadata(value) ? value : null;
-          },
-          invalidMetadataReason: "Canonical resource lock metadata is malformed.",
-          inspectStale(lockMetadata) {
-            if (lockMetadata.host === fingerprintHost() && !isProcessRunning(lockMetadata.pid)) {
-              return `Process ${lockMetadata.pid} is no longer running.`;
-            }
+    const heldResource = sameScopeContext
+      ? assertCanonicalResourceLockOrdering(sameScopeContext, input.resource)
+      : undefined;
+    if (heldResource && sameScopeContext) {
+      trackHeldCanonicalResource(sameScopeContext, heldResource, async () => {});
 
-            return null;
-          },
-        });
+      let released = false;
+      return {
+        metadata,
+        resource: input.resource,
+        async release() {
+          if (released) {
+            return;
+          }
 
-        let released = false;
-        return {
-          metadata: handle.metadata,
-          resource: input.resource,
-          async release() {
-            if (released) {
-              return;
-            }
+          released = true;
+          await releaseHeldCanonicalResource(sameScopeContext, input.resource.key);
+        },
+      };
+    }
 
-            released = true;
+    const releaseQueue = await acquireCanonicalResourceQueueSlot(queueKey);
+    const startedAt = Date.now();
+    let attempt = 0;
 
-            try {
-              await handle.release();
-            } finally {
-              releaseQueue?.();
-            }
-          },
-        };
-      } catch (error) {
-        if (!(error instanceof DirectoryLockHeldError)) {
-          throw error;
-        }
-
-        if (Date.now() - startedAt >= (input.timeoutMs ?? DEFAULT_CANONICAL_RESOURCE_LOCK_TIMEOUT_MS)) {
-          throw new VaultError(
-            "CANONICAL_RESOURCE_LOCKED",
-            buildCanonicalResourceLockTimeoutMessage(input.resource, error.inspection.metadata),
-            {
-              resourceKey: input.resource.key,
-              resourceLabel: input.resource.label,
-              metadata: error.inspection.metadata ?? null,
+    try {
+      while (true) {
+        try {
+          const handle = await acquireDirectoryLock({
+            ownerKey,
+            lockPath,
+            metadataPath,
+            metadata,
+            cleanupRetries: CANONICAL_RESOURCE_LOCK_CLEANUP_RETRIES,
+            cleanupRetryDelayMs: CANONICAL_RESOURCE_LOCK_CLEANUP_RETRY_DELAY_MS,
+            parseMetadata(value) {
+              return isCanonicalResourceLockMetadata(value) ? value : null;
             },
-          );
-        }
+            invalidMetadataReason: "Canonical resource lock metadata is malformed.",
+            inspectStale(lockMetadata) {
+              if (lockMetadata.host === fingerprintHost() && !isProcessRunning(lockMetadata.pid)) {
+                return `Process ${lockMetadata.pid} is no longer running.`;
+              }
 
-        const waitMs = Math.min(MAX_CANONICAL_RESOURCE_LOCK_WAIT_MS, 25 * 2 ** Math.min(attempt, 3));
-        attempt += 1;
-        await sleep(waitMs);
+              return null;
+            },
+          });
+
+          let released = false;
+          if (sameScopeContext) {
+            trackHeldCanonicalResource(sameScopeContext, input.resource, async () => {
+              try {
+                await handle.release();
+              } finally {
+                releaseQueue();
+              }
+            });
+          }
+
+          return {
+            metadata: handle.metadata,
+            resource: input.resource,
+            async release() {
+              if (released) {
+                return;
+              }
+
+              released = true;
+
+              if (sameScopeContext) {
+                await releaseHeldCanonicalResource(sameScopeContext, input.resource.key);
+                return;
+              }
+
+              try {
+                await handle.release();
+              } finally {
+                releaseQueue();
+              }
+            },
+          };
+        } catch (error) {
+          if (!(error instanceof DirectoryLockHeldError)) {
+            throw error;
+          }
+
+          if (Date.now() - startedAt >= (input.timeoutMs ?? DEFAULT_CANONICAL_RESOURCE_LOCK_TIMEOUT_MS)) {
+            throw new VaultError(
+              "CANONICAL_RESOURCE_LOCKED",
+              buildCanonicalResourceLockTimeoutMessage(input.resource, error.inspection.metadata),
+              {
+                resourceKey: input.resource.key,
+                resourceLabel: input.resource.label,
+                metadata: error.inspection.metadata ?? null,
+              },
+            );
+          }
+
+          const waitMs = Math.min(MAX_CANONICAL_RESOURCE_LOCK_WAIT_MS, 25 * 2 ** Math.min(attempt, 3));
+          attempt += 1;
+          await sleep(waitMs);
+        }
       }
+    } catch (error) {
+      releaseQueue();
+      throw error;
     }
   } catch (error) {
-    releaseQueue?.();
     throw error;
+  } finally {
+    releaseScopeQueue?.();
   }
 }
 
@@ -308,6 +489,13 @@ function buildCanonicalResourceLockTimeoutMessage(
   }
 
   return `Timed out waiting for canonical resource "${resource.label}" held by pid=${metadata.pid}, startedAt=${metadata.startedAt}, command=${metadata.command}.`;
+}
+
+function buildCanonicalResourceLockOrderingMessage(
+  resource: CanonicalMutationResource,
+  highestHeldResource: CanonicalMutationResource,
+): string {
+  return `Canonical resource "${resource.label}" cannot be acquired after already holding "${highestHeldResource.label}". Acquire canonical resources together in sorted order.`;
 }
 
 function isCanonicalResourceLockMetadata(value: unknown): value is CanonicalResourceLockMetadata {

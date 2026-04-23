@@ -5,8 +5,11 @@ import { VaultError } from "./errors.ts";
 import {
   assertPathWithinVaultOnDisk,
   isAppendOnlyRelativePath,
+  isJsonlRelativePath,
   isRawRelativePath,
+  isVaultFilesystemCaseInsensitive,
   resolveVaultPath,
+  type VaultPathComparisonOptions,
 } from "./path-safety.ts";
 import { isErrnoException } from "./types.ts";
 
@@ -60,6 +63,10 @@ interface ApplyJsonlAppendTargetOptions {
   target: ResolvedVaultPath;
 }
 
+interface PrepareVerifiedTargetOptions {
+  createParentDirectory: boolean;
+}
+
 async function pathExists(absolutePath: string): Promise<boolean> {
   try {
     await fs.access(absolutePath);
@@ -73,9 +80,13 @@ async function pathExists(absolutePath: string): Promise<boolean> {
   }
 }
 
-export function assertWriteTargetPolicy(relativePath: string, policy: WriteTargetPolicy): void {
+export function assertWriteTargetPolicy(
+  relativePath: string,
+  policy: WriteTargetPolicy,
+  options: VaultPathComparisonOptions = {},
+): void {
   if (policy.kind === "raw") {
-    if (!isRawRelativePath(relativePath)) {
+    if (!isRawRelativePath(relativePath, options)) {
       throw new VaultError(
         "VAULT_RAW_PATH_REQUIRED",
         policy.messages?.rawRequired ?? "Raw writes must target the raw/ tree.",
@@ -87,7 +98,7 @@ export function assertWriteTargetPolicy(relativePath: string, policy: WriteTarge
   }
 
   if (policy.kind === "jsonl_append") {
-    if (isRawRelativePath(relativePath)) {
+    if (isRawRelativePath(relativePath, options)) {
       throw new VaultError(
         "VAULT_RAW_IMMUTABLE",
         policy.messages?.rawDisallowed ?? "Raw files are immutable once written.",
@@ -95,7 +106,7 @@ export function assertWriteTargetPolicy(relativePath: string, policy: WriteTarge
       );
     }
 
-    if (!relativePath.endsWith(".jsonl") || !isAppendOnlyRelativePath(relativePath)) {
+    if (!isJsonlRelativePath(relativePath, options) || !isAppendOnlyRelativePath(relativePath, options)) {
       throw new VaultError(
         "VAULT_APPEND_ONLY_PATH",
         policy.messages?.appendOnlyDisallowed ??
@@ -108,8 +119,8 @@ export function assertWriteTargetPolicy(relativePath: string, policy: WriteTarge
   }
 
   if (
-    isAppendOnlyRelativePath(relativePath) &&
-    relativePath.endsWith(".jsonl") &&
+    isAppendOnlyRelativePath(relativePath, options) &&
+    isJsonlRelativePath(relativePath, options) &&
     !policy.allowAppendOnlyJsonl
   ) {
     throw new VaultError(
@@ -119,7 +130,7 @@ export function assertWriteTargetPolicy(relativePath: string, policy: WriteTarge
     );
   }
 
-  if (isRawRelativePath(relativePath) && !policy.allowRaw) {
+  if (isRawRelativePath(relativePath, options) && !policy.allowRaw) {
     throw new VaultError(
       "VAULT_RAW_IMMUTABLE",
       policy.messages?.rawDisallowed ?? "Use copyRawArtifact for raw writes.",
@@ -128,20 +139,55 @@ export function assertWriteTargetPolicy(relativePath: string, policy: WriteTarge
   }
 }
 
+export async function assertWriteTargetPolicyForVault(
+  vaultRoot: string,
+  relativePath: string,
+  policy: WriteTargetPolicy,
+): Promise<void> {
+  assertWriteTargetPolicy(relativePath, policy, {
+    caseInsensitive: await isVaultFilesystemCaseInsensitive(vaultRoot),
+  });
+}
+
+async function prepareVerifiedTarget(
+  vaultRoot: string,
+  relativePath: string,
+  policy?: WriteTargetPolicy,
+  options: PrepareVerifiedTargetOptions = {
+    createParentDirectory: true,
+  },
+): Promise<ResolvedVaultPath> {
+  const resolved = resolveVaultPath(vaultRoot, relativePath);
+  if (policy) {
+    await assertWriteTargetPolicyForVault(resolved.vaultRoot, resolved.relativePath, policy);
+  }
+
+  await assertPathWithinVaultOnDisk(resolved.vaultRoot, resolved.absolutePath);
+  if (options.createParentDirectory) {
+    await fs.mkdir(path.dirname(resolved.absolutePath), { recursive: true });
+    await assertPathWithinVaultOnDisk(resolved.vaultRoot, resolved.absolutePath);
+  }
+  return resolved;
+}
+
 export async function prepareVerifiedWriteTarget(
   vaultRoot: string,
   relativePath: string,
   policy?: WriteTargetPolicy,
 ): Promise<ResolvedVaultPath> {
-  const resolved = resolveVaultPath(vaultRoot, relativePath);
-  if (policy) {
-    assertWriteTargetPolicy(resolved.relativePath, policy);
-  }
+  return await prepareVerifiedTarget(vaultRoot, relativePath, policy, {
+    createParentDirectory: true,
+  });
+}
 
-  await assertPathWithinVaultOnDisk(resolved.vaultRoot, resolved.absolutePath);
-  await fs.mkdir(path.dirname(resolved.absolutePath), { recursive: true });
-  await assertPathWithinVaultOnDisk(resolved.vaultRoot, resolved.absolutePath);
-  return resolved;
+export async function prepareVerifiedDeleteTarget(
+  vaultRoot: string,
+  relativePath: string,
+  policy?: WriteTargetPolicy,
+): Promise<ResolvedVaultPath> {
+  return await prepareVerifiedTarget(vaultRoot, relativePath, policy, {
+    createParentDirectory: false,
+  });
 }
 
 export async function fileContentsEqual(leftAbsolutePath: string, rightAbsolutePath: string): Promise<boolean> {
