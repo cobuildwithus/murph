@@ -273,6 +273,193 @@ describe("createHostedLinqAttachmentDownloadDriver", () => {
     }, undefined)).resolves.toEqual(Uint8Array.from([13, 14, 15]));
   });
 
+  it("falls back to the original direct-download error when metadata returns an untrusted local url", async () => {
+    process.env.LINQ_API_BASE_URL = "http://host.docker.internal:4011";
+    process.env.LINQ_API_TOKEN = "linq-token";
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+
+      if (url === "https://cdn.linqapp.com/files/stale-invalid-origin.m4a") {
+        return new Response("forbidden", {
+          status: 403,
+          statusText: "Forbidden",
+        });
+      }
+
+      if (url === "http://host.docker.internal:4011/attachments/att_invalid_origin") {
+        assert.equal(
+          (init?.headers as Record<string, string> | undefined)?.authorization,
+          "Bearer linq-token",
+        );
+        return new Response(JSON.stringify({
+          download_url: "http://example.com/attachment-downloads/att_invalid_origin.wav",
+        }), {
+          status: 200,
+          headers: {
+            "content-type": "application/json",
+          },
+        });
+      }
+
+      throw new Error(`Unexpected fetch url: ${url}`);
+    });
+    setFetch(fetchMock as typeof globalThis.fetch);
+
+    const driver = createHostedLinqAttachmentDownloadDriver();
+    assert.ok(driver);
+    assert.ok(driver.downloadPart);
+
+    await expect(driver.downloadPart?.({
+      attachmentId: "att_invalid_origin",
+      mimeType: "audio/wav",
+      type: "voice_memo",
+      url: "https://cdn.linqapp.com/files/stale-invalid-origin.m4a",
+    }, undefined)).rejects.toThrow(
+      "Hosted Linq attachment download failed with 403 Forbidden.",
+    );
+  });
+
+  it("falls back to the original direct-download error when metadata returns a local url outside the attachment path", async () => {
+    process.env.LINQ_API_BASE_URL = "http://host.docker.internal:4011";
+    process.env.LINQ_API_TOKEN = "linq-token";
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+
+      if (url === "https://cdn.linqapp.com/files/stale-invalid-path.m4a") {
+        return new Response("forbidden", {
+          status: 403,
+          statusText: "Forbidden",
+        });
+      }
+
+      if (url === "http://host.docker.internal:4011/attachments/att_invalid_path") {
+        assert.equal(
+          (init?.headers as Record<string, string> | undefined)?.authorization,
+          "Bearer linq-token",
+        );
+        return new Response(JSON.stringify({
+          download_url: "http://host.docker.internal:4011/other/att_invalid_path.wav",
+        }), {
+          status: 200,
+          headers: {
+            "content-type": "application/json",
+          },
+        });
+      }
+
+      throw new Error(`Unexpected fetch url: ${url}`);
+    });
+    setFetch(fetchMock as typeof globalThis.fetch);
+
+    const driver = createHostedLinqAttachmentDownloadDriver();
+    assert.ok(driver);
+    assert.ok(driver.downloadPart);
+
+    await expect(driver.downloadPart?.({
+      attachmentId: "att_invalid_path",
+      mimeType: "audio/wav",
+      type: "voice_memo",
+      url: "https://cdn.linqapp.com/files/stale-invalid-path.m4a",
+    }, undefined)).rejects.toThrow(
+      "Hosted Linq attachment download failed with 403 Forbidden.",
+    );
+  });
+
+  it("returns null when metadata download lookup receives an invalid url string", async () => {
+    process.env.LINQ_API_BASE_URL = "http://host.docker.internal:4011";
+    process.env.LINQ_API_TOKEN = "linq-token";
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+
+      if (url === "http://host.docker.internal:4011/attachments/att_invalid_url") {
+        assert.equal(
+          (init?.headers as Record<string, string> | undefined)?.authorization,
+          "Bearer linq-token",
+        );
+        return new Response(JSON.stringify({
+          download_url: "::not-a-url::",
+        }), {
+          status: 200,
+          headers: {
+            "content-type": "application/json",
+          },
+        });
+      }
+
+      throw new Error(`Unexpected fetch url: ${url}`);
+    });
+    setFetch(fetchMock as typeof globalThis.fetch);
+
+    const driver = createHostedLinqAttachmentDownloadDriver();
+    assert.ok(driver);
+    assert.ok(driver.downloadPart);
+
+    await expect(driver.downloadPart?.({
+      attachmentId: "att_invalid_url",
+      mimeType: "audio/wav",
+      type: "voice_memo",
+    }, undefined)).resolves.toBeNull();
+  });
+
+  it("relays aborts from the caller signal into metadata lookup downloads", async () => {
+    process.env.LINQ_API_BASE_URL = "https://api.linqapp.com/api/partner/v3";
+    process.env.LINQ_API_TOKEN = "linq-token";
+
+    const fetchMock = vi.fn((_input: RequestInfo | URL, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener(
+          "abort",
+          () => reject(new Error(String(init.signal?.reason ?? "aborted"))),
+          { once: true },
+        );
+      }));
+    setFetch(fetchMock as typeof globalThis.fetch);
+
+    const driver = createHostedLinqAttachmentDownloadDriver();
+    assert.ok(driver);
+    assert.ok(driver.downloadPart);
+
+    const controller = new AbortController();
+    const downloadPromise = driver.downloadPart?.({
+      attachmentId: "att_abort_relay",
+      mimeType: "audio/wav",
+      type: "voice_memo",
+    }, controller.signal);
+
+    controller.abort("caller aborted");
+
+    await expect(downloadPromise).resolves.toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
+  });
+
+  it("returns null immediately when metadata lookup starts with an already-aborted signal", async () => {
+    process.env.LINQ_API_BASE_URL = "https://api.linqapp.com/api/partner/v3";
+    process.env.LINQ_API_TOKEN = "linq-token";
+
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      expect(init?.signal?.aborted).toBe(true);
+      throw new Error("already aborted");
+    });
+    setFetch(fetchMock as typeof globalThis.fetch);
+
+    const driver = createHostedLinqAttachmentDownloadDriver();
+    assert.ok(driver);
+    assert.ok(driver.downloadPart);
+
+    const controller = new AbortController();
+    controller.abort("already aborted");
+
+    await expect(driver.downloadPart?.({
+      attachmentId: "att_already_aborted",
+      mimeType: "audio/wav",
+      type: "voice_memo",
+    }, controller.signal)).resolves.toBeNull();
+  });
+
   it("gives hosted voice memo downloads enough time to finish", async () => {
     vi.useFakeTimers();
 
