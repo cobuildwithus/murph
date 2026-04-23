@@ -1,35 +1,48 @@
 import { z } from "zod";
 
-import { DERIVED_KNOWLEDGE_SEARCH_RESULT_FORMAT } from "./knowledge-model.ts";
-import type {
-  DerivedKnowledgeSearchHit,
-  DerivedKnowledgeSearchResult,
-} from "./knowledge-search.ts";
+import {
+  DERIVED_KNOWLEDGE_SEARCH_RESULT_FORMAT,
+  KNOWLEDGE_SLUG_PATTERN,
+} from "./knowledge-model.ts";
 
 const nonEmptyStringSchema = z.string().min(1);
 const nullableNonEmptyStringSchema = nonEmptyStringSchema.nullable();
 const pathLikeSchema = nonEmptyStringSchema;
-const slugSchema = nonEmptyStringSchema;
+const knowledgePageSlugSchema = z.string().regex(KNOWLEDGE_SLUG_PATTERN);
+const knowledgeLibrarySlugSchema = nonEmptyStringSchema;
+const knowledgeRelatedSlugSchema = nonEmptyStringSchema;
 
-export type KnowledgePageReference = Pick<
-  DerivedKnowledgeSearchHit,
-  | "compiledAt"
-  | "librarySlugs"
-  | "pagePath"
-  | "pageType"
-  | "relatedSlugs"
-  | "slug"
-  | "sourcePaths"
-  | "status"
-  | "summary"
-  | "title"
->;
+export interface KnowledgePageReference {
+  compiledAt: string | null;
+  librarySlugs: string[];
+  pagePath: string;
+  pageType: string | null;
+  relatedSlugs: string[];
+  slug: string;
+  sourcePaths: string[];
+  status: string | null;
+  summary: string | null;
+  title: string;
+}
 
 export interface KnowledgePageMetadata extends KnowledgePageReference {}
 
 export interface KnowledgePage extends KnowledgePageMetadata {
   body: string;
   markdown: string;
+}
+
+export interface KnowledgeGraphSearchHit extends KnowledgePageReference {
+  matchedTerms: string[];
+  score: number;
+  snippet: string;
+}
+
+export interface KnowledgeGraphSearchResult {
+  format: typeof DERIVED_KNOWLEDGE_SEARCH_RESULT_FORMAT;
+  hits: KnowledgeGraphSearchHit[];
+  query: string;
+  total: number;
 }
 
 export interface KnowledgeUpsertResult {
@@ -48,11 +61,10 @@ export interface KnowledgeListResult {
   vault: string;
 }
 
-export interface KnowledgeSearchHit
-  extends DerivedKnowledgeSearchHit {}
+export interface KnowledgeSearchHit extends KnowledgeGraphSearchHit {}
 
 export interface KnowledgeSearchResult
-  extends Pick<DerivedKnowledgeSearchResult, "format" | "hits" | "query" | "total"> {
+  extends KnowledgeGraphSearchResult {
   hits: KnowledgeSearchHit[];
   pageType: string | null;
   status: string | null;
@@ -105,11 +117,11 @@ export interface KnowledgeLintResult {
 
 export const knowledgePageReferenceSchema = z.object({
   compiledAt: nullableNonEmptyStringSchema,
-  librarySlugs: z.array(slugSchema),
+  librarySlugs: z.array(knowledgeLibrarySlugSchema),
   pagePath: pathLikeSchema,
   pageType: nullableNonEmptyStringSchema,
-  relatedSlugs: z.array(slugSchema),
-  slug: slugSchema,
+  relatedSlugs: z.array(knowledgeRelatedSlugSchema),
+  slug: knowledgePageSlugSchema,
   sourcePaths: z.array(pathLikeSchema),
   status: nullableNonEmptyStringSchema,
   summary: nullableNonEmptyStringSchema,
@@ -139,20 +151,26 @@ export const knowledgeListResultSchema = z.object({
   vault: pathLikeSchema,
 }) satisfies z.ZodType<KnowledgeListResult>;
 
-export const knowledgeSearchHitSchema =
+export const knowledgeGraphSearchHitSchema =
   knowledgePageReferenceSchema.extend({
     matchedTerms: z.array(nonEmptyStringSchema),
     score: z.number(),
     snippet: nonEmptyStringSchema,
-  }) satisfies z.ZodType<KnowledgeSearchHit>;
+  }) satisfies z.ZodType<KnowledgeGraphSearchHit>;
 
-export const knowledgeSearchResultSchema = z.object({
+export const knowledgeGraphSearchResultSchema = z.object({
   format: z.literal(DERIVED_KNOWLEDGE_SEARCH_RESULT_FORMAT),
-  hits: z.array(knowledgeSearchHitSchema),
-  pageType: nullableNonEmptyStringSchema,
+  hits: z.array(knowledgeGraphSearchHitSchema),
   query: nonEmptyStringSchema,
-  status: nullableNonEmptyStringSchema,
   total: z.number().int().nonnegative(),
+}) satisfies z.ZodType<KnowledgeGraphSearchResult>;
+
+export const knowledgeSearchHitSchema =
+  knowledgeGraphSearchHitSchema satisfies z.ZodType<KnowledgeSearchHit>;
+
+export const knowledgeSearchResultSchema = knowledgeGraphSearchResultSchema.extend({
+  pageType: nullableNonEmptyStringSchema,
+  status: nullableNonEmptyStringSchema,
   vault: pathLikeSchema,
 }) satisfies z.ZodType<KnowledgeSearchResult>;
 
@@ -189,7 +207,7 @@ export const knowledgeLintProblemSchema = z.object({
   message: nonEmptyStringSchema,
   pagePath: pathLikeSchema,
   severity: z.enum(["error", "warning"]),
-  slug: slugSchema.nullable(),
+  slug: knowledgePageSlugSchema.nullable(),
 }) satisfies z.ZodType<KnowledgeLintProblem>;
 
 export const knowledgeLintResultSchema = z.object({

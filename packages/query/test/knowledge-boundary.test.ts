@@ -7,6 +7,7 @@ const packageDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '.
 const packageJsonPath = path.join(packageDir, 'package.json')
 const rootIndexPath = path.join(packageDir, 'src', 'index.ts')
 const knowledgeGraphPath = path.join(packageDir, 'src', 'knowledge-graph.ts')
+const knowledgeSearchPath = path.join(packageDir, 'src', 'knowledge-search.ts')
 
 describe('query knowledge boundary', () => {
   it('keeps knowledge search and contract helpers off duplicate public subpaths', async () => {
@@ -23,6 +24,7 @@ describe('query knowledge boundary', () => {
 
     expect(source).toContain('./knowledge-search.ts')
     expect(source).toContain('./knowledge-contracts.ts')
+    expect(source).not.toMatch(/\bDerivedKnowledgeSearch(?:Filters|Hit|Result)\b/u)
   })
 
   it('keeps graph loading independent from search-only contracts', async () => {
@@ -30,5 +32,12 @@ describe('query knowledge boundary', () => {
 
     expect(source).not.toContain('./knowledge-search.ts')
     expect(source).not.toMatch(/\bDerivedKnowledgeSearch(?:Filters|Hit|Result)\b/u)
+  })
+
+  it('keeps knowledge search result types owned by the contract module', async () => {
+    const source = await readFile(knowledgeSearchPath, 'utf8')
+
+    expect(source).toContain('./knowledge-contracts.ts')
+    expect(source).not.toMatch(/export interface DerivedKnowledgeSearch(?:Hit|Result)\b/u)
   })
 })

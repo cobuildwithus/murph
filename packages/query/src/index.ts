@@ -208,9 +208,7 @@ export {
 export {
   searchDerivedKnowledgeGraph,
   searchDerivedKnowledgeVault,
-  type DerivedKnowledgeSearchFilters,
-  type DerivedKnowledgeSearchHit,
-  type DerivedKnowledgeSearchResult,
+  type KnowledgeGraphSearchFilters,
 } from "./knowledge-search.ts";
 export {
   DERIVED_KNOWLEDGE_SEARCH_RESULT_FORMAT,
@@ -225,6 +223,8 @@ export {
 } from "./knowledge-model.ts";
 export {
   knowledgeGetResultSchema,
+  knowledgeGraphSearchHitSchema,
+  knowledgeGraphSearchResultSchema,
   knowledgeIndexRebuildResultSchema,
   knowledgeLintProblemSchema,
   knowledgeLintResultSchema,
@@ -240,6 +240,8 @@ export {
 } from "./knowledge-contracts.ts";
 export type {
   KnowledgeGetResult,
+  KnowledgeGraphSearchHit,
+  KnowledgeGraphSearchResult,
   KnowledgeIndexRebuildResult,
   KnowledgeLintProblem,
   KnowledgeLintResult,

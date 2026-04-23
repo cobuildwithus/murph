@@ -184,6 +184,56 @@ describe('readDerivedKnowledgeGraph', () => {
     expect(index).toContain('library: `sleep-architecture`')
   })
 
+  it('renders nested knowledge page links from the full path under derived knowledge', async () => {
+    const vaultRoot = await createVaultRoot()
+    await writeKnowledgePageAt(
+      vaultRoot,
+      'topics/sleep-quality',
+      [
+        '---',
+        'title: Sleep quality',
+        'slug: sleep-quality',
+        'pageType: concept',
+        'status: active',
+        'summary: What seems to improve or disrupt sleep quality.',
+        '---',
+        '',
+        '# Sleep quality',
+        '',
+        'Notes about sleep quality.',
+        '',
+      ].join('\n'),
+    )
+    await writeKnowledgePageAt(
+      vaultRoot,
+      'references/magnesium',
+      [
+        '---',
+        'title: Magnesium',
+        'slug: magnesium',
+        'pageType: supplement',
+        'status: active',
+        'relatedSlugs:',
+        '  - sleep-quality',
+        '---',
+        '',
+        '# Magnesium',
+        '',
+        'Reference page for magnesium.',
+        '',
+      ].join('\n'),
+    )
+
+    const graph = await readDerivedKnowledgeGraph(vaultRoot)
+    const index = renderDerivedKnowledgeIndex(graph, '2026-04-23T00:00:00.000Z')
+
+    expect(graph.bySlug.get('sleep-quality')?.relativePath).toBe(
+      `${DERIVED_KNOWLEDGE_PAGES_ROOT}/topics/sleep-quality.md`,
+    )
+    expect(index).toContain('[Sleep quality](pages/topics/sleep-quality.md)')
+    expect(index).toContain('related: [Sleep quality](pages/topics/sleep-quality.md)')
+  })
+
   it('reports frontmatter parse failures separately from the loaded graph', async () => {
     const vaultRoot = await createVaultRoot()
     await writeKnowledgePage(
@@ -305,8 +355,24 @@ async function writeKnowledgePage(
   slug: string,
   markdown: string,
 ): Promise<void> {
+  await writeKnowledgePageAt(vaultRoot, slug, markdown)
+}
+
+async function writeKnowledgePageAt(
+  vaultRoot: string,
+  relativePagePath: string,
+  markdown: string,
+): Promise<void> {
+  const filePath = path.join(
+    vaultRoot,
+    DERIVED_KNOWLEDGE_PAGES_ROOT,
+    `${relativePagePath}.md`,
+  )
+  await mkdir(path.dirname(filePath), {
+    recursive: true,
+  })
   await writeFile(
-    path.join(vaultRoot, DERIVED_KNOWLEDGE_PAGES_ROOT, `${slug}.md`),
+    filePath,
     markdown,
     'utf8',
   )

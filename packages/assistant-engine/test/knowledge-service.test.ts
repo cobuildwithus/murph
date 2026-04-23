@@ -225,6 +225,70 @@ describe('knowledge service helpers', () => {
     expect(savedLog).toContain('- slug: `hydration`')
   })
 
+  it('upserts an existing nested page in place without creating a flat duplicate', async () => {
+    const vaultRoot = await createKnowledgeVaultRoot('murph-knowledge-nested-upsert-')
+    await writeVaultFile(vaultRoot, 'journal/hydration.md', 'Hydration evidence.\n')
+    await writeKnowledgePageAt(
+      vaultRoot,
+      'topics/hydration',
+      buildKnowledgeMarkdown({
+        body: 'Hydration helps.',
+        compiledAt: '2026-04-07T09:00:00.000Z',
+        librarySlugs: [],
+        pageType: 'concept',
+        relatedSlugs: [],
+        slug: 'hydration',
+        sourcePaths: ['journal/hydration.md'],
+        status: 'active',
+        summary: 'Hydration helps.',
+        title: 'Hydration',
+      }),
+    )
+
+    const result = await upsertKnowledgePage(
+      {
+        body: 'Hydration supports recovery and references [[sleep]].',
+        slug: 'hydration',
+        vault: vaultRoot,
+      },
+      {
+        now: () => new Date('2026-04-08T12:00:00.000Z'),
+        readTextFile: async (filePath) => await readFile(filePath, 'utf8'),
+        saveText: async ({ relativePath, content }) => {
+          await writeVaultFile(vaultRoot, relativePath, content)
+        },
+      },
+    )
+
+    expect(result.page).toMatchObject({
+      pagePath: 'derived/knowledge/pages/topics/hydration.md',
+      relatedSlugs: ['sleep'],
+      slug: 'hydration',
+    })
+
+    const nestedPage = await readFile(
+      path.join(vaultRoot, DERIVED_KNOWLEDGE_PAGES_ROOT, 'topics', 'hydration.md'),
+      'utf8',
+    )
+    expect(nestedPage).toContain('compiledAt: 2026-04-08T12:00:00.000Z')
+    expect(nestedPage).toContain('- sleep')
+
+    await expect(
+      readFile(
+        path.join(vaultRoot, DERIVED_KNOWLEDGE_PAGES_ROOT, 'hydration.md'),
+        'utf8',
+      ),
+    ).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
+
+    const savedIndex = await readFile(
+      path.join(vaultRoot, 'derived/knowledge/index.md'),
+      'utf8',
+    )
+    expect(savedIndex).toContain('[Hydration](pages/topics/hydration.md)')
+  })
+
   it('serializes concurrent upserts before page, index, and log writes enter saveText', async () => {
     const vaultRoot = await createKnowledgeVaultRoot('murph-knowledge-concurrent-upsert-')
     await writeVaultFile(vaultRoot, 'journal/first.md', 'First evidence.\n')
@@ -566,9 +630,17 @@ async function writeKnowledgePage(
   slug: string,
   markdown: string,
 ): Promise<void> {
+  await writeKnowledgePageAt(vaultRoot, slug, markdown)
+}
+
+async function writeKnowledgePageAt(
+  vaultRoot: string,
+  relativePagePath: string,
+  markdown: string,
+): Promise<void> {
   await writeVaultFile(
     vaultRoot,
-    path.posix.join(DERIVED_KNOWLEDGE_PAGES_ROOT, `${slug}.md`),
+    path.posix.join(DERIVED_KNOWLEDGE_PAGES_ROOT, `${relativePagePath}.md`),
     markdown,
   )
 }
