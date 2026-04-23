@@ -1,5 +1,13 @@
-import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -27,6 +35,49 @@ function runResearchMaterialize(...args: string[]) {
       ...process.env,
     },
   });
+}
+
+function runResearchPackageScript(
+  packageScriptPath: string,
+  outDir: string,
+  prefix: string,
+) {
+  return spawnSync("bash", [packageScriptPath, "--zip", "--out-dir", outDir, "--name", prefix], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+    },
+  });
+}
+
+function runGeneratedReviewGptHelper(
+  helperScriptPath: string,
+  label: string,
+  promptFile: string,
+  responseFile: string,
+  env: NodeJS.ProcessEnv,
+) {
+  return spawnSync("bash", [helperScriptPath, label, promptFile, responseFile], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    env,
+  });
+}
+
+function parseZipPathFromOutput(output: string) {
+  const match = Array.from(output.matchAll(/^ZIP: (.*) \(\d+ bytes\)$/gm)).at(-1);
+  return match?.[1] ?? "";
+}
+
+function listZipEntries(zipPath: string) {
+  return execFileSync("unzip", ["-Z1", zipPath], {
+    cwd: repoRoot,
+    encoding: "utf8",
+  })
+    .split(/\r?\n/u)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
 }
 
 const sampleCharterResponse = `# Cold plunge charter
@@ -338,6 +389,53 @@ describe("research init scaffold", () => {
       expect(materializedReadme).toContain("materialized from the charter response");
       expect(materializedReadme).toContain("commands/02-discovery-direct-cwi.sh");
       expect(materializedReadme).toContain("Template-Only Later Stages");
+
+      writeFileSync(
+        path.join(outDir, "downloads", "sample-extraction.json"),
+        "{\n  \"ok\": true\n}\n",
+        "utf8",
+      );
+      writeFileSync(
+        path.join(outDir, "state", "thread-exports", "sample.thread.json"),
+        "{\n  \"assistantSnapshots\": []\n}\n",
+        "utf8",
+      );
+
+      const packageOutDir = path.join(tempRoot, "research-package-out");
+      mkdirSync(packageOutDir, { recursive: true });
+      const packageResult = runResearchPackageScript(
+        path.join(outDir, "scripts", "package-research-context.sh"),
+        packageOutDir,
+        "cold-plunge-research-context",
+      );
+
+      expect(packageResult.status).toBe(0);
+      expect(packageResult.stderr).toBe("");
+      expect(packageResult.stdout).toContain("Research workspace files added:");
+      expect(packageResult.stdout).toContain("Research reference files added:");
+
+      const zipPath = parseZipPathFromOutput(packageResult.stdout);
+      expect(zipPath).toBeTruthy();
+      expect(existsSync(zipPath)).toBe(true);
+
+      const zipEntries = listZipEntries(zipPath);
+      const relativeOutDir = path.relative(repoRoot, outDir).split(path.sep).join(path.posix.sep);
+      expect(zipEntries).toContain(`${relativeOutDir}/workflow.json`);
+      expect(zipEntries).toContain(`${relativeOutDir}/prompts/01-charter.md`);
+      expect(zipEntries).toContain(`${relativeOutDir}/responses/01-charter.md`);
+      expect(zipEntries).toContain(`${relativeOutDir}/downloads/sample-extraction.json`);
+      expect(zipEntries).toContain(`${relativeOutDir}/state/thread-exports/sample.thread.json`);
+      expect(zipEntries).toContain("agent-docs/product-specs/health-commons.md");
+      expect(zipEntries).toContain("agent-docs/product-specs/experiment-onboarding.md");
+      expect(zipEntries).toContain("packages/contracts/src/health-commons.ts");
+      expect(zipEntries).toContain(
+        "packages/health-commons/content/protocols/red-light-glasses-before-bed/red-light-glasses-before-bed.md",
+      );
+      expect(zipEntries).toContain("packages/health-commons/content/biomarkers/hrv-rmssd.md");
+      expect(zipEntries).toContain(
+        "packages/health-commons/content/artifacts/norwegian-4x4/research-artifacts.json",
+      );
+      expect(zipEntries).not.toContain("packages/health-commons/content/sources/sauna/pmid-37029766.md");
     } finally {
       rmSync(tempRoot, { recursive: true, force: true });
     }
@@ -397,6 +495,113 @@ describe("research init scaffold", () => {
       rmSync(tempRoot, { recursive: true, force: true });
     }
   });
+
+  it("captures the thread URL and exports the thread snapshot even when review:gpt fails after send", () => {
+    mkdirSync(researchOutputRoot, { recursive: true });
+    const tempRoot = mkdtempSync(path.join(researchOutputRoot, "tmp-research-helper-"));
+    const outDir = path.join(tempRoot, "helper-failure-recovery");
+
+    try {
+      const initResult = runResearchInit("cold plunge", "--out-dir", outDir);
+      expect(initResult.status).toBe(0);
+
+      const stubBinDir = path.join(tempRoot, "bin");
+      mkdirSync(stubBinDir, { recursive: true });
+
+      const stubPnpmPath = path.join(stubBinDir, "pnpm");
+      writeFileSync(
+        stubPnpmPath,
+        `#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "$#" -ge 4 && "$1" == "exec" && "$2" == "cobuild-review-gpt" && "$3" == "thread" && "$4" == "export" ]]; then
+  output_path=""
+  chat_url=""
+  browser_endpoint=""
+  while [[ "$#" -gt 0 ]]; do
+    case "$1" in
+      --output)
+        output_path="$2"
+        shift 2
+        ;;
+      --chat-url)
+        chat_url="$2"
+        shift 2
+        ;;
+      --browser-endpoint)
+        browser_endpoint="$2"
+        shift 2
+        ;;
+      *)
+        shift
+        ;;
+    esac
+  done
+
+  mkdir -p "$(dirname "$output_path")"
+  cat >"$output_path" <<JSON
+{
+  "chatUrl": "$chat_url",
+  "browserEndpoint": "$browser_endpoint",
+  "assistantSnapshots": [
+    {
+      "text": "Recovered thread snapshot"
+    }
+  ]
+}
+JSON
+  exit 0
+fi
+
+printf '%s\\n' 'Managed browser endpoint: 127.0.0.1:9224'
+printf '%s\\n' 'ChatGPT conversation URL: https://chatgpt.com/c/test-thread-123'
+printf '%s\\n' '{"status":"sent"}'
+printf '%s\\n' 'Draft staging failed' >&2
+exit 17
+`,
+        "utf8",
+      );
+      chmodSync(stubPnpmPath, 0o755);
+
+      const helperLabel = "99-recovery-check";
+      const helperScriptPath = path.join(outDir, "commands", "_run-review-gpt.sh");
+      const promptPath = path.join(outDir, "prompts", "01-charter.md");
+      const responsePath = path.join(outDir, "responses", `${helperLabel}.md`);
+      const helperResult = runGeneratedReviewGptHelper(
+        helperScriptPath,
+        helperLabel,
+        promptPath,
+        responsePath,
+        {
+          ...process.env,
+          PATH: `${stubBinDir}${path.delimiter}${process.env.PATH ?? ""}`,
+        },
+      );
+
+      expect(helperResult.status).toBe(17);
+      expect(helperResult.stderr).toContain("Draft staging failed");
+      expect(helperResult.stderr).toContain("Chat URL: https://chatgpt.com/c/test-thread-123");
+      expect(helperResult.stderr).toContain(
+        `Thread export: ${path.join(outDir, "state", "thread-exports", `${helperLabel}.thread.json`)}`,
+      );
+
+      const chatUrlPath = path.join(outDir, "state", "chat-urls", `${helperLabel}.txt`);
+      const threadExportPath = path.join(
+        outDir,
+        "state",
+        "thread-exports",
+        `${helperLabel}.thread.json`,
+      );
+
+      expect(existsSync(chatUrlPath)).toBe(true);
+      expect(readFileSync(chatUrlPath, "utf8")).toBe("https://chatgpt.com/c/test-thread-123\n");
+      expect(existsSync(threadExportPath)).toBe(true);
+      expect(readFileSync(threadExportPath, "utf8")).toContain("Recovered thread snapshot");
+      expect(readFileSync(threadExportPath, "utf8")).toContain("127.0.0.1:9224");
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
 });
 
 function writeTextFileSync(filePath: string, content: string) {
@@ -413,9 +618,14 @@ function assertResearchReviewGptSupportFiles(outDir: string) {
   const researchConfig = readFileSync(configPath, "utf8");
   expect(researchConfig).toContain('scripts/review-gpt.config.sh');
   expect(researchConfig).toContain('package_script="${workspace_dir}/scripts/package-research-context.sh"');
+  expect(researchConfig).toContain('research_thread_export_browser_endpoint="${RESEARCH_THREAD_EXPORT_BROWSER_ENDPOINT:-}"');
 
   const packageScript = readFileSync(packageScriptPath, "utf8");
-  expect(packageScript).toContain('add_if_exists "${workspace_relative}/workflow.json"');
-  expect(packageScript).toContain('collect_dir_files "${workspace_relative}/prompts"');
-  expect(packageScript).toContain('collect_dir_files "${workspace_relative}/responses"');
+  expect(packageScript).toContain('add_file_if_exists "${workspace_relative}/workflow.json"');
+  expect(packageScript).toContain('collect_workspace_dir "${workspace_relative}/prompts"');
+  expect(packageScript).toContain('collect_workspace_dir "${workspace_relative}/responses"');
+  expect(packageScript).toContain('collect_workspace_dir "${workspace_relative}/downloads"');
+  expect(packageScript).toContain('collect_workspace_dir "${workspace_relative}/state/thread-exports"');
+  expect(packageScript).toContain('agent-docs/product-specs/health-commons.md');
+  expect(packageScript).toContain('packages/health-commons/content/protocols');
 }
