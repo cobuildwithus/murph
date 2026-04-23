@@ -338,6 +338,20 @@ describe("helper barrel exports", () => {
         message: 'Vault-relative path "/tmp/escape.md" is invalid.',
       });
     }
+    for (const relativePath of ["foo/..", "foo/bar/../.."]) {
+      expect(() => normalizeOptionalRelativePath(relativePath)).toThrowError(
+        `Vault-relative path "${relativePath}" escapes the selected vault root.`,
+      );
+      expect(() => relativePathEntries([{ relativePath }])).toThrowError(
+        `Vault-relative path "${relativePath}" escapes the selected vault root.`,
+      );
+      expect(() => relativePathStrings([relativePath])).toThrowError(
+        `Vault-relative path "${relativePath}" escapes the selected vault root.`,
+      );
+    }
+    expect(normalizeOptionalRelativePath("././")).toBe("./");
+    expect(relativePathEntries([{ relativePath: "././" }])).toEqual(["./"]);
+    expect(relativePathStrings(["././"])).toEqual(["./"]);
     expect(
       mergeByRelativePath(
         [{ relativePath: "bank/goals/goal-a.md", title: "old" }],

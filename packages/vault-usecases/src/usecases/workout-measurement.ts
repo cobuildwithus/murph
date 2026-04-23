@@ -1,10 +1,28 @@
 import type { WorkoutUnitPreferences } from '@murphai/contracts'
-import {
-  readPreferencesDocument,
-  updateWorkoutUnitPreferences,
-} from '@murphai/core'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import { loadRuntimeModule } from '../runtime-import.js'
 import { compactObject } from './vault-usecase-helpers.js'
+
+interface WorkoutPreferencesDocument {
+  sourcePath: string
+  updatedAt: string
+  workoutUnitPreferences: WorkoutUnitPreferences | null
+}
+
+interface WorkoutMeasurementCoreRuntime {
+  readPreferencesDocument(vaultRoot: string): Promise<WorkoutPreferencesDocument>
+  updateWorkoutUnitPreferences(input: {
+    vaultRoot: string
+    preferences: WorkoutUnitPreferences
+    updatedAt?: string
+  }): Promise<{
+    document: WorkoutPreferencesDocument
+  }>
+}
+
+async function loadWorkoutMeasurementCoreRuntime(): Promise<WorkoutMeasurementCoreRuntime> {
+  return loadRuntimeModule<WorkoutMeasurementCoreRuntime>('@murphai/core')
+}
 
 function normalizeUnitPreferences(
   value: WorkoutUnitPreferences | null | undefined,
@@ -16,6 +34,7 @@ function normalizeUnitPreferences(
 }
 
 export async function showWorkoutUnitPreferences(vault: string) {
+  const { readPreferencesDocument } = await loadWorkoutMeasurementCoreRuntime()
   const preferences = await readPreferencesDocument(vault)
 
   return {
@@ -33,6 +52,10 @@ export async function setWorkoutUnitPreferences(input: {
   bodyMeasurement?: 'cm' | 'in'
   recordedAt?: string
 }) {
+  const {
+    readPreferencesDocument,
+    updateWorkoutUnitPreferences,
+  } = await loadWorkoutMeasurementCoreRuntime()
   const requested = compactObject({
     weight: input.weight,
     bodyMeasurement: input.bodyMeasurement,

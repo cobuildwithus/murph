@@ -25,8 +25,6 @@ import {
 } from "@murphai/vault-usecases";
 import { inputFileOptionSchema } from "@murphai/vault-usecases";
 import { normalizeRepeatableFlagOption } from "@murphai/vault-usecases";
-import { createIntegratedVaultServices } from "../src/usecases/integrated-services.ts";
-import { createUnwiredVaultServices } from "../src/usecases/integrated-services.ts";
 import * as vaultServicesApi from "@murphai/vault-usecases/vault-services";
 
 describe("health CLI descriptors", () => {
@@ -43,11 +41,10 @@ describe("health CLI descriptors", () => {
 
     expect(publicApi.inputFileOptionSchema).toBe(inputFileOptionSchema);
     expect(publicApi.normalizeRepeatableFlagOption).toBe(normalizeRepeatableFlagOption);
-    expect(publicApi.createIntegratedVaultServices).toBe(createIntegratedVaultServices);
-    expect(publicApi.createUnwiredVaultServices).toBe(createUnwiredVaultServices);
-
-    expect(vaultServicesApi.createIntegratedVaultServices).toBe(createIntegratedVaultServices);
-    expect(vaultServicesApi.createUnwiredVaultServices).toBe(createUnwiredVaultServices);
+    expect(typeof publicApi.createIntegratedVaultServices).toBe("function");
+    expect(typeof publicApi.createUnwiredVaultServices).toBe("function");
+    expect(publicApi.createIntegratedVaultServices).toBe(vaultServicesApi.createIntegratedVaultServices);
+    expect(publicApi.createUnwiredVaultServices).toBe(vaultServicesApi.createUnwiredVaultServices);
   });
 
   it("exposes the expected command metadata, lookup helpers, and method lists", () => {
