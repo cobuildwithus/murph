@@ -5,6 +5,7 @@ import path from "node:path";
 
 import {
   ORCHESTRATOR_SCHEMA_VERSION,
+  buildResearchArtifactContracts,
   buildCommandHelperScript,
   buildCommandWrapper,
   buildProtocolMetadata,
@@ -136,6 +137,7 @@ function buildWorkflowObject({ generatedAt, outDirRelative, spec }) {
       ...buildProtocolMetadata(spec.protocolName, spec.protocolSlug, spec.familySlug),
       provisional: true,
     },
+    artifactContracts: buildResearchArtifactContracts(),
     discoveryShards: [],
     sectionSeams: [],
     promptFiles: ["prompts/01-charter.md"],

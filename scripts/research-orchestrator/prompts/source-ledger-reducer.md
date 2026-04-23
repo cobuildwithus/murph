@@ -68,6 +68,12 @@ Return JSON named SOURCE_EXTRACTION_BATCHES_V1:
   ]
 }
 
+Also attach two downloadable JSON files:
+- `canonical_source_ledger_v1.json` containing exactly `CANONICAL_SOURCE_LEDGER_V1`
+- `source_extraction_batches_v1.json` containing exactly `SOURCE_EXTRACTION_BATCHES_V1`
+
+Treat those files as the canonical machine-readable seam outputs for this reducer.
+
 Batching rules:
 - No batch may exceed 40 records.
 - Put dense systematic reviews in smaller batches if they require heavy extraction.
