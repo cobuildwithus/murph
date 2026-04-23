@@ -23,6 +23,7 @@ import type {
   StoredCapture,
 } from "../contracts/capture.ts";
 import {
+  buildAttachmentId,
   buildFtsQuery,
   buildSnippet,
   normalizeAccountKey,
@@ -403,6 +404,8 @@ function createInboxRuntimeStore(database: DatabaseSync, databasePath: string): 
       where source = ? and account_id = ? and external_id = ?
     `,
   );
+  const deleteCaptureStatement = database.prepare("delete from capture where capture_id = ?");
+  const deleteCaptureSearchIndexStatement = database.prepare("delete from capture_fts where capture_id = ?");
   const upsertCaptureStatement = database.prepare(
     `
       insert into capture (
@@ -441,6 +444,23 @@ function createInboxRuntimeStore(database: DatabaseSync, databasePath: string): 
         vault_event_id = excluded.vault_event_id,
         envelope_path = excluded.envelope_path,
         created_at = excluded.created_at
+      where
+        capture.source is not excluded.source
+        or capture.account_id is not excluded.account_id
+        or capture.external_id is not excluded.external_id
+        or capture.thread_id is not excluded.thread_id
+        or capture.thread_title is not excluded.thread_title
+        or capture.thread_is_direct is not excluded.thread_is_direct
+        or capture.actor_id is not excluded.actor_id
+        or capture.actor_name is not excluded.actor_name
+        or capture.actor_is_self is not excluded.actor_is_self
+        or capture.occurred_at is not excluded.occurred_at
+        or capture.received_at is not excluded.received_at
+        or capture.text_content is not excluded.text_content
+        or capture.raw_json is not excluded.raw_json
+        or capture.vault_event_id is not excluded.vault_event_id
+        or capture.envelope_path is not excluded.envelope_path
+        or capture.created_at is not excluded.created_at
     `,
   );
   const insertAttachmentStatement = database.prepare(
@@ -470,6 +490,17 @@ function createInboxRuntimeStore(database: DatabaseSync, databasePath: string): 
         file_name = excluded.file_name,
         sha256 = excluded.sha256,
         size_bytes = excluded.size_bytes
+      where
+        capture_attachment.capture_id is not excluded.capture_id
+        or capture_attachment.ordinal is not excluded.ordinal
+        or capture_attachment.external_id is not excluded.external_id
+        or capture_attachment.kind is not excluded.kind
+        or capture_attachment.mime is not excluded.mime
+        or capture_attachment.original_path is not excluded.original_path
+        or capture_attachment.stored_path is not excluded.stored_path
+        or capture_attachment.file_name is not excluded.file_name
+        or capture_attachment.sha256 is not excluded.sha256
+        or capture_attachment.size_bytes is not excluded.size_bytes
     `,
   );
   const listCapturesAscendingStatement = database.prepare(
@@ -623,21 +654,26 @@ function createInboxRuntimeStore(database: DatabaseSync, databasePath: string): 
     },
     upsertCaptureIndex({ captureId, eventId, input, stored }) {
       const normalizedAccountId = normalizeAccountKey(input.accountId);
-      const existing = findCaptureIdByExternalIdStatement.get(
-        input.source,
-        normalizedAccountId,
-        input.externalId,
-      ) as { capture_id: string } | undefined;
-      const effectiveCaptureId = existing?.capture_id ?? captureId;
-      const normalizedAttachments = normalizeStoredAttachments(
-        effectiveCaptureId,
+      const normalizedAttachments = normalizeRuntimeAttachments(
+        captureId,
         stored.attachments,
-        `runtime capture ${effectiveCaptureId}`,
+        `runtime capture ${captureId}`,
       );
 
       withTransaction(database, () => {
+        const existing = findCaptureIdByExternalIdStatement.get(
+          input.source,
+          normalizedAccountId,
+          input.externalId,
+        ) as { capture_id: string } | undefined;
+
+        if (existing?.capture_id && existing.capture_id !== captureId) {
+          deleteCaptureSearchIndexStatement.run(existing.capture_id);
+          deleteCaptureStatement.run(existing.capture_id);
+        }
+
         upsertCaptureStatement.run(
-          effectiveCaptureId,
+          captureId,
           input.source,
           normalizedAccountId,
           input.externalId,
@@ -658,7 +694,7 @@ function createInboxRuntimeStore(database: DatabaseSync, databasePath: string): 
 
         for (const attachment of normalizedAttachments) {
           insertAttachmentStatement.run(
-            effectiveCaptureId,
+            captureId,
             attachment.attachmentId,
             attachment.ordinal,
             normalizeNullable(attachment.externalId),
@@ -674,7 +710,7 @@ function createInboxRuntimeStore(database: DatabaseSync, databasePath: string): 
         }
 
         if (normalizedAttachments.length === 0) {
-          database.prepare("delete from capture_attachment where capture_id = ?").run(effectiveCaptureId);
+          database.prepare("delete from capture_attachment where capture_id = ?").run(captureId);
         } else {
           const seenIds = normalizedAttachments.map((attachment) => attachment.attachmentId);
           database
@@ -685,16 +721,16 @@ function createInboxRuntimeStore(database: DatabaseSync, databasePath: string): 
                   and attachment_id not in (${seenIds.map(() => "?").join(", ")})
               `,
             )
-            .run(effectiveCaptureId, ...seenIds);
+            .run(captureId, ...seenIds);
         }
 
-        refreshCaptureSearchIndex(database, effectiveCaptureId);
+        refreshCaptureSearchIndex(database, captureId);
       });
 
-      return effectiveCaptureId;
+      return captureId;
     },
     enqueueDerivedJobs({ captureId, stored }) {
-      const normalizedAttachments = normalizeStoredAttachments(
+      const normalizedAttachments = normalizeRuntimeAttachments(
         captureId,
         stored.attachments,
         `runtime capture ${captureId}`,
@@ -817,6 +853,23 @@ function assertCanonicalAttachmentRows(database: DatabaseSync): void {
   throw new TypeError(
     `Inbox runtime requires canonical attachment metadata; capture_attachment row for capture "${captureId}" has invalid "ordinal" value ${ordinal}.`,
   );
+}
+
+function normalizeRuntimeAttachments(
+  captureId: string,
+  attachments: ReadonlyArray<StoredCapture["attachments"][number]>,
+  context: string,
+): StoredCapture["attachments"] {
+  return normalizeStoredAttachments(captureId, attachments, context).map((attachment) => {
+    const expectedAttachmentId = buildAttachmentId(captureId, attachment.ordinal);
+    if (attachment.attachmentId !== expectedAttachmentId) {
+      throw new TypeError(
+        `Inbox runtime requires attachment ids derived from capture "${captureId}"; expected "${expectedAttachmentId}" for ordinal ${attachment.ordinal}.`,
+      );
+    }
+
+    return attachment;
+  });
 }
 
 function normalizeCaptureFilters(
