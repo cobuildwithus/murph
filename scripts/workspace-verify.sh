@@ -116,15 +116,44 @@ normalize_non_negative_integer() {
   printf '%s\n' "$fallback"
 }
 
+detect_logical_cpu_count() {
+  local cpu_count=""
+
+  if command -v getconf >/dev/null 2>&1; then
+    cpu_count="$(getconf _NPROCESSORS_ONLN 2>/dev/null || true)"
+  fi
+
+  if [[ ! "$cpu_count" =~ ^[1-9][0-9]*$ ]] && command -v sysctl >/dev/null 2>&1; then
+    cpu_count="$(sysctl -n hw.ncpu 2>/dev/null || true)"
+  fi
+
+  normalize_positive_integer "$cpu_count" "4"
+}
+
+local_concurrency_default() {
+  local cap="$1"
+  local fallback="$2"
+  local cpu_count
+  cpu_count="$(detect_logical_cpu_count)"
+
+  if [[ "$cpu_count" -gt "$cap" ]]; then
+    printf '%s\n' "$cap"
+    return
+  fi
+
+  normalize_positive_integer "$cpu_count" "$fallback"
+}
+
 readonly app_verify_parallel_default="$([[ -n "${CI:-}" ]] && echo 0 || echo 1)"
 readonly app_verify_parallel="${MURPH_APP_VERIFY_PARALLEL:-$app_verify_parallel_default}"
+readonly acceptance_early_cloudflare_verify="${MURPH_ACCEPTANCE_EARLY_CLOUDFLARE_VERIFY:-$app_verify_parallel}"
 readonly test_lane_parallel_default="$([[ -n "${CI:-}" ]] && echo 0 || echo 1)"
 readonly test_lane_parallel="${MURPH_TEST_LANES_PARALLEL:-$test_lane_parallel_default}"
 readonly package_coverage_concurrency_default="$([[ -n "${CI:-}" ]] && echo 1 || echo 4)"
 readonly package_coverage_concurrency_limit="$(normalize_positive_integer "${MURPH_PACKAGE_COVERAGE_CONCURRENCY:-$package_coverage_concurrency_default}" "$package_coverage_concurrency_default")"
 readonly package_coverage_vitest_max_workers_default="$([[ -n "${CI:-}" ]] && echo 50% || echo 100%)"
 readonly package_coverage_vitest_max_workers="${MURPH_PACKAGE_COVERAGE_VITEST_MAX_WORKERS:-$package_coverage_vitest_max_workers_default}"
-readonly typecheck_workspace_concurrency_default="$([[ -n "${CI:-}" ]] && echo 2 || echo 4)"
+readonly typecheck_workspace_concurrency_default="$([[ -n "${CI:-}" ]] && echo 2 || local_concurrency_default 6 4)"
 readonly typecheck_preflight_parallel_default="1"
 readonly typecheck_preflight_parallel="${MURPH_TYPECHECK_PREFLIGHT_PARALLEL:-$typecheck_preflight_parallel_default}"
 readonly typecheck_workspace_concurrency="$(normalize_positive_integer "${MURPH_TYPECHECK_WORKSPACE_CONCURRENCY:-$typecheck_workspace_concurrency_default}" "$typecheck_workspace_concurrency_default")"
@@ -675,17 +704,16 @@ run_all_package_coverage() {
 }
 
 run_typecheck_preflight() {
-  if [[ "$typecheck_preflight_parallel" != "1" ]]; then
-    run_timed_step "Shell syntax" check_shell_syntax
-    run_timed_step "Node syntax" check_node_syntax
-    run_timed_step "Dependency policy" run_dependency_policy_check
-    run_timed_step "Workspace boundary checks" run_workspace_boundary_check
-    run_timed_step "Hosted run stale-name guard" pnpm exec tsx "scripts/check-hosted-run-stale-residue.ts"
-    run_timed_step "Repo TS tools typecheck" pnpm exec tsc -p "tsconfig.tools.json" --pretty false
-    run_timed_step "Contracts build" pnpm --dir "packages/contracts" build
-    return 0
-  fi
+  run_timed_step "Shell syntax" check_shell_syntax
+  run_timed_step "Node syntax" check_node_syntax
+  run_timed_step "Dependency policy" run_dependency_policy_check
+  run_timed_step "Workspace boundary checks" run_workspace_boundary_check
+  run_timed_step "Hosted run stale-name guard" pnpm exec tsx "scripts/check-hosted-run-stale-residue.ts"
+  run_timed_step "Repo TS tools typecheck" pnpm exec tsc -p "tsconfig.tools.json" --pretty false
+  run_timed_step "Contracts build" pnpm --dir "packages/contracts" build
+}
 
+run_typecheck_overlapped() {
   local pids=()
 
   run_timed_step "Shell syntax" check_shell_syntax &
@@ -718,15 +746,25 @@ run_typecheck_preflight() {
   pids+=("$repo_tools_typecheck_pid")
   register_background_pid "$repo_tools_typecheck_pid"
 
-  run_timed_step "Contracts build" pnpm --dir "packages/contracts" build &
-  local contracts_build_pid="$!"
-  pids+=("$contracts_build_pid")
-  register_background_pid "$contracts_build_pid"
+  run_timed_step "Contracts build" pnpm --dir "packages/contracts" build
+
+  # The contracts build is the only preflight prerequisite for the package/app
+  # typecheck fanout. Keep the remaining independent guards running while that
+  # fanout starts.
+  run_timed_step "Workspace package/app typecheck" run_typecheck_packages &
+  local package_typecheck_pid="$!"
+  pids+=("$package_typecheck_pid")
+  register_background_pid "$package_typecheck_pid"
 
   wait_for_background_jobs "${pids[@]}"
 }
 
 run_typecheck() {
+  if [[ "$typecheck_preflight_parallel" == "1" ]]; then
+    run_typecheck_overlapped
+    return 0
+  fi
+
   run_typecheck_preflight
   run_timed_step "Workspace package/app typecheck" run_typecheck_packages
 }
@@ -797,8 +835,17 @@ run_test_coverage() {
     smoke_pid="$!"
     register_background_pid "$smoke_pid"
 
-    wait_for_background_jobs "$coverage_pid" "$smoke_pid"
-    run_timed_step "App verification" run_test_apps "$acceptance_typechecked"
+    if [[ "$acceptance_early_cloudflare_verify" == "1" ]]; then
+      run_app_verify_command_with_retry "apps/cloudflare" "$acceptance_typechecked" &
+      local cloudflare_verify_pid="$!"
+      register_background_pid "$cloudflare_verify_pid"
+
+      wait_for_background_jobs "$coverage_pid" "$smoke_pid" "$cloudflare_verify_pid"
+      run_app_verify_command_with_retry "apps/web" "$acceptance_typechecked"
+    else
+      wait_for_background_jobs "$coverage_pid" "$smoke_pid"
+      run_timed_step "App verification" run_test_apps "$acceptance_typechecked"
+    fi
   else
     run_timed_step "Package coverage suite" run_test_packages_coverage 0 "$acceptance_typechecked"
     run_timed_step "App verification" run_test_apps "$acceptance_typechecked"
