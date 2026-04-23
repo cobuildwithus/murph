@@ -2647,7 +2647,7 @@ describe("runHostedExecutionJob", () => {
     expect(savedIntent.delivery).toEqual(delivery);
   });
 
-  it("preserves worker-resolved runtime fields while keeping control-only keys out of child env", () => {
+  it("preserves worker-resolved runtime fields while keeping control-only and worker-only secret keys out of child env", () => {
     const previousAllowedUserEnvKeys = process.env.HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS;
     const previousCommitTimeout = process.env.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS;
     process.env.HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS = "OPENAI_API_KEY";
@@ -2658,9 +2658,13 @@ describe("runHostedExecutionJob", () => {
         commitTimeoutMs: 45_000,
         forwardedEnv: {
           HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: "CUSTOM_API_KEY",
+          HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK: '{"kty":"EC","d":"automation"}',
+          HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "platform-key",
           HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "5000",
+          HOSTED_WAKE_ENCRYPTION_KEY: "wake-key",
           HOSTED_EMAIL_INGRESS_READY: "true",
           HOSTED_EMAIL_SEND_READY: "true",
+          HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: '{"kty":"EC","d":"callback"}',
           OPENAI_API_KEY: "sk-worker",
         },
         resolvedConfig: {
@@ -2685,7 +2689,19 @@ describe("runHostedExecutionJob", () => {
         "HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS",
       );
       expect(runtime.forwardedEnv).not.toHaveProperty(
+        "HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK",
+      );
+      expect(runtime.forwardedEnv).not.toHaveProperty(
+        "HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY",
+      );
+      expect(runtime.forwardedEnv).not.toHaveProperty(
         "HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS",
+      );
+      expect(runtime.forwardedEnv).not.toHaveProperty(
+        "HOSTED_WAKE_ENCRYPTION_KEY",
+      );
+      expect(runtime.forwardedEnv).not.toHaveProperty(
+        "HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK",
       );
       expect(runtime.userEnv).toMatchObject({
         CUSTOM_API_KEY: "custom-user",
@@ -2741,6 +2757,35 @@ describe("runHostedExecutionJob", () => {
       restoreEnvVar("OPENAI_API_KEY", previousOpenAiApiKey);
       restoreEnvVar("TELEGRAM_BOT_TOKEN", previousTelegramBotToken);
     }
+  });
+
+  it("derives Telegram runtime capabilities from explicit platform env when forwarded env omits them", () => {
+    const runtime = buildHostedExecutionJobRuntime({
+      forwardedEnv: {
+        OPENAI_API_KEY: "job-openai-key",
+      },
+      platformEnv: {
+        TELEGRAM_API_BASE_URL: "https://api.telegram.example",
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+        TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
+      },
+    });
+
+    expect(runtime.forwardedEnv).toEqual({
+      OPENAI_API_KEY: "job-openai-key",
+    });
+    expect(runtime.platformEnv).toEqual({
+      TELEGRAM_API_BASE_URL: "https://api.telegram.example",
+      TELEGRAM_BOT_TOKEN: "telegram-token",
+      TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
+    });
+    expect(runtime.resolvedConfig).toEqual({
+      channelCapabilities: {
+        emailSendReady: false,
+        telegramBotConfigured: true,
+      },
+      deviceSync: null,
+    });
   });
 
   it("falls back to ambient runner env only when the runtime envelope omits forwarded env entirely", () => {
@@ -2820,7 +2865,7 @@ describe("runHostedExecutionJob", () => {
     }
   });
 
-  it("derives explicit runtime capabilities from the forwarded runner env", () => {
+  it("derives explicit runtime capabilities from separately supplied Telegram platform env", () => {
     const runtime = buildHostedExecutionJobRuntime({
       forwardedEnv: {
         DEVICE_SYNC_PUBLIC_BASE_URL: "https://device-sync.example.test",
@@ -2830,12 +2875,24 @@ describe("runHostedExecutionJob", () => {
         HOSTED_EMAIL_LOCAL_PART: "assistant",
         HOSTED_EMAIL_SEND_READY: "true",
         HOSTED_EMAIL_SIGNING_SECRET: "email-secret",
-        TELEGRAM_BOT_TOKEN: "telegram-token",
         WHOOP_CLIENT_ID: "whoop-client",
         WHOOP_CLIENT_SECRET: "whoop-secret",
       },
+      platformEnv: {
+        TELEGRAM_API_BASE_URL: "https://api.telegram.example",
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+        TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
+      },
     });
 
+    expect(runtime.forwardedEnv).not.toHaveProperty("TELEGRAM_BOT_TOKEN");
+    expect(runtime.forwardedEnv).not.toHaveProperty("TELEGRAM_API_BASE_URL");
+    expect(runtime.forwardedEnv).not.toHaveProperty("TELEGRAM_FILE_BASE_URL");
+    expect(runtime.platformEnv).toEqual({
+      TELEGRAM_API_BASE_URL: "https://api.telegram.example",
+      TELEGRAM_BOT_TOKEN: "telegram-token",
+      TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
+    });
     expect(runtime.resolvedConfig).toMatchObject({
       channelCapabilities: {
         emailSendReady: true,

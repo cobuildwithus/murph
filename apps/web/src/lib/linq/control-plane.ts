@@ -18,7 +18,9 @@ import { fetchLinqApi, LinqApiTimeoutError } from "./api";
 import { readHostedLinqEnvironment } from "./env";
 import { PrismaLinqControlPlaneStore } from "./prisma-store";
 import {
-  parseCanonicalLinqMessageReceivedEvent,
+  parseLinqMessageReceivedEvent,
+  readLinqRecipientLineHandle,
+  resolveLinqWebhookOccurredAt,
   verifyAndParseLinqWebhookRequest,
   type LinqWebhookEvent,
 } from "@murphai/messaging-ingress/linq-webhook";
@@ -262,9 +264,9 @@ export class HostedLinqControlPlane {
       return this.buildIgnoredWebhookResponse(event);
     }
 
-    let messageEvent: ReturnType<typeof parseCanonicalLinqMessageReceivedEvent>;
+    let messageEvent: ReturnType<typeof parseLinqMessageReceivedEvent>;
     try {
-      messageEvent = parseCanonicalLinqMessageReceivedEvent(event);
+      messageEvent = parseLinqMessageReceivedEvent(event);
     } catch (error) {
       if (error instanceof TypeError) {
         throw hostedLinqError({
@@ -277,7 +279,9 @@ export class HostedLinqControlPlane {
 
       throw error;
     }
-    const recipientPhone = normalizeOptionalRecipientPhone(messageEvent.data.recipient_phone ?? null);
+    const recipientPhone = normalizeOptionalRecipientPhone(
+      readLinqRecipientLineHandle(messageEvent.data),
+    );
 
     if (!recipientPhone) {
       return this.buildIgnoredWebhookResponse(event, {
@@ -303,7 +307,7 @@ export class HostedLinqControlPlane {
       eventType: event.event_type,
       chatId: normalizeNullableString(messageEvent.data.chat_id),
       messageId: normalizeNullableString(messageEvent.data.message?.id),
-      occurredAt: resolveWebhookOccurredAt(event),
+      occurredAt: resolveLinqWebhookOccurredAt(messageEvent),
       receivedAt: toIsoTimestamp(new Date()),
     });
 
@@ -367,46 +371,6 @@ function buildIgnoredWebhookResult(
     eventType: event.event_type,
     traceId: event.trace_id ?? null,
   };
-}
-
-function resolveWebhookOccurredAt(event: LinqWebhookEvent): string | null {
-  if (event.event_type !== "message.received") {
-    return normalizeIsoTimestamp(event.created_at);
-  }
-
-  const sentAt = normalizeIsoTimestamp(
-    typeof event.data === "object" && event.data && "sent_at" in event.data
-      ? String((event.data as { sent_at?: unknown }).sent_at ?? "")
-      : null,
-  );
-
-  if (sentAt) {
-    return sentAt;
-  }
-
-  const receivedAt = normalizeIsoTimestamp(
-    typeof event.data === "object" && event.data && "received_at" in event.data
-      ? String((event.data as { received_at?: unknown }).received_at ?? "")
-      : null,
-  );
-
-  return receivedAt ?? normalizeIsoTimestamp(event.created_at);
-}
-
-function normalizeIsoTimestamp(value: string | null | undefined): string | null {
-  const normalized = normalizeNullableString(value);
-
-  if (!normalized) {
-    return null;
-  }
-
-  const parsed = new Date(normalized);
-
-  if (Number.isNaN(parsed.getTime())) {
-    return null;
-  }
-
-  return parsed.toISOString();
 }
 
 function normalizeOptionalRecipientPhone(value: unknown): string | null {

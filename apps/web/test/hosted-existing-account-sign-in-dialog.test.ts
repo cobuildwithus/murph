@@ -93,7 +93,7 @@ test("HostedExistingAccountSignInDialog opens the shared sign-in panel with phon
 
   expect(container.textContent).toContain("Sign in to Murph");
   expect(container.textContent).toContain(
-    "Use your phone number, email address, or Telegram to sign in.",
+    "Use your previously linked phone number, email address, or Telegram account to sign in.",
   );
   expect(container.querySelector('[data-hosted-auth-panel-intent="signin"]')).toBeTruthy();
   expect(container.querySelector('[data-hosted-auth-panel-methods="phone,telegram,email"]')).toBeTruthy();

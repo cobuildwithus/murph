@@ -1,3 +1,4 @@
+import type { HostedAuthenticationIntent } from "@/src/lib/hosted-onboarding/authentication-intent";
 import {
   HostedOnboardingApiError,
   requestHostedOnboardingJson,
@@ -47,9 +48,20 @@ export async function runHostedPrivyFinalizationAttempt({
   }
 }
 
-export async function requestHostedPrivyCompletionWithRetry(
-  inviteCode?: string | null,
-): Promise<HostedPrivyCompletionPayload> {
+export function buildHostedPrivyCompletionRequestPayload(input: {
+  intent: HostedAuthenticationIntent;
+  inviteCode?: string | null;
+}): Record<string, string> {
+  return {
+    intent: input.intent,
+    ...(input.inviteCode ? { inviteCode: input.inviteCode } : {}),
+  };
+}
+
+export async function requestHostedPrivyCompletionWithRetry(input: {
+  intent: HostedAuthenticationIntent;
+  inviteCode?: string | null;
+}): Promise<HostedPrivyCompletionPayload> {
   let lastError: unknown = null;
 
   for (const delayMs of HOSTED_PRIVY_COMPLETION_RETRY_DELAYS_MS) {
@@ -59,7 +71,7 @@ export async function requestHostedPrivyCompletionWithRetry(
 
     try {
       return await requestHostedOnboardingJson<HostedPrivyCompletionPayload>({
-        payload: inviteCode ? { inviteCode } : {},
+        payload: buildHostedPrivyCompletionRequestPayload(input),
         url: "/api/hosted-onboarding/privy/complete",
       });
     } catch (error) {

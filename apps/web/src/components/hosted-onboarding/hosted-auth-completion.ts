@@ -1,3 +1,4 @@
+import type { HostedAuthenticationIntent } from "@/src/lib/hosted-onboarding/authentication-intent";
 import {
   ensureHostedPrivyPhoneReady,
   ensureHostedPrivyWalletReady,
@@ -6,7 +7,6 @@ import { isHostedOnboardingAccessibleStage } from "@/src/lib/hosted-onboarding/s
 import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 
 import { requestHostedPrivyCompletionWithRetry } from "./hosted-privy-auth-support";
-import type { HostedPhoneAuthIntent } from "./hosted-phone-auth-types";
 
 export interface HostedAuthCompletionUser {
   linkedAccounts?: unknown;
@@ -20,7 +20,7 @@ export interface HostedPrivyClientSessionInput {
 }
 
 interface HostedAuthCompletionInput extends HostedPrivyClientSessionInput {
-  intent: HostedPhoneAuthIntent;
+  intent: HostedAuthenticationIntent;
   inviteCode?: string | null;
 }
 
@@ -49,7 +49,10 @@ export async function completeHostedPrivyAuth(
     });
   }
 
-  const payload = await requestHostedPrivyCompletionWithRetry(input.inviteCode);
+  const payload = await requestHostedPrivyCompletionWithRetry({
+    intent: input.intent,
+    inviteCode: input.inviteCode,
+  });
   await input.refreshUser?.().catch(() => null);
   const redirectUrl = await resolveHostedAuthRedirectUrl({
     intent: input.intent,
@@ -63,7 +66,7 @@ export async function completeHostedPrivyAuth(
 }
 
 async function resolveHostedAuthRedirectUrl(input: {
-  intent: HostedPhoneAuthIntent;
+  intent: HostedAuthenticationIntent;
   payload: HostedPrivyCompletionPayload;
 }): Promise<string> {
   if (input.payload.stage === "checkout") {

@@ -7,6 +7,7 @@ import {
 import { buildDeviceSyncTokenCipherOptions, createSecretCodec } from "./crypto.ts";
 import { deviceSyncError, isDeviceSyncError } from "./errors.ts";
 import { sanitizeHostedRuntimeErrorText } from "./hosted-runtime.ts";
+import { registerDeviceSyncServiceInternals } from "./service-internals.ts";
 import { createDeviceSyncPublicIngress, DeviceSyncPublicIngress } from "./public-ingress.ts";
 import { toRedactedPublicDeviceSyncAccount } from "./public-account.ts";
 import { createDeviceSyncRegistry } from "./registry.ts";
@@ -63,16 +64,39 @@ export interface CreateDeviceSyncServiceInput {
   store?: SqliteDeviceSyncStore;
 }
 
-export class DeviceSyncService {
+export interface DeviceSyncService {
   readonly vaultRoot: string;
   readonly publicBaseUrl: string;
   readonly allowedReturnOrigins: string[];
-  readonly store: SqliteDeviceSyncStore;
+  readonly registry: DeviceSyncRegistry;
+  readonly publicIngress: DeviceSyncPublicIngress;
+  describeProviders(): PublicProviderDescriptor[];
+  describeProvider(providerName: string | DeviceSyncProvider): PublicProviderDescriptor;
+  summarize(): DeviceSyncServiceSummary;
+  listAccounts(provider?: string): PublicDeviceSyncAccount[];
+  getAccount(accountId: string): PublicDeviceSyncAccount | null;
+  start(): void;
+  stop(): void;
+  close(): void;
+  startConnection(input: StartConnectionInput): Promise<BeginConnectionResult>;
+  handleOAuthCallback(input: HandleOAuthCallbackInput): Promise<CompleteConnectionResult>;
+  handleWebhook(providerName: string, headers: Headers, rawBody: Buffer): Promise<HandleWebhookResult>;
+  getNextWakeAt(now?: string): string | null;
+  runSchedulerOnce(): Promise<void>;
+  runWorkerOnce(): Promise<DeviceSyncJobRecord | null>;
+  drainWorker(limit?: number): Promise<number>;
+}
+
+class DeviceSyncServiceController {
+  readonly vaultRoot: string;
+  readonly publicBaseUrl: string;
+  readonly allowedReturnOrigins: string[];
   readonly registry: DeviceSyncRegistry;
   readonly publicIngress: DeviceSyncPublicIngress;
 
   private readonly logger: DeviceSyncLogger;
   private readonly importer: DeviceSyncImporterPort;
+  readonly store: SqliteDeviceSyncStore;
   private readonly codec: ReturnType<typeof createSecretCodec>;
   private readonly workerLeaseMs: number;
   private readonly workerPollMs: number;
@@ -82,8 +106,8 @@ export class DeviceSyncService {
   private readonly ownsStore: boolean;
   private workerTimer: NodeJS.Timeout | null = null;
   private schedulerTimer: NodeJS.Timeout | null = null;
-  private workerTickInFlight = false;
-  private schedulerTickInFlight = false;
+  workerTickInFlight = false;
+  schedulerTickInFlight = false;
 
   constructor(input: CreateDeviceSyncServiceInput) {
     this.vaultRoot = input.config.vaultRoot;
@@ -182,9 +206,9 @@ export class DeviceSyncService {
 
   start(): void {
     if (!this.workerTimer) {
-      void this.runWorkerBatchOnce();
+      void this.runWorkerBatchOnceInternal();
       this.workerTimer = setInterval(() => {
-        void this.runWorkerBatchOnce();
+        void this.runWorkerBatchOnceInternal();
       }, this.workerPollMs);
     }
 
@@ -228,7 +252,7 @@ export class DeviceSyncService {
     return this.publicIngress.handleWebhook(providerName, headers, rawBody);
   }
 
-  queueManualReconcile(accountId: string): QueueManualReconcileResult {
+  queueManualReconcileInternal(accountId: string): QueueManualReconcileResult {
     const account = this.requireStoredAccount(accountId);
 
     if (account.status === "disconnected") {
@@ -282,7 +306,7 @@ export class DeviceSyncService {
     };
   }
 
-  async disconnectAccount(accountId: string): Promise<DisconnectAccountResult> {
+  async disconnectAccountInternal(accountId: string): Promise<DisconnectAccountResult> {
     const account = this.requireStoredAccount(accountId);
     const provider = this.requireProvider(account.provider);
     const now = toIsoTimestamp(new Date());
@@ -451,7 +475,6 @@ export class DeviceSyncService {
     };
 
     let currentAccount: DeviceSyncAccount;
-    let executionDisconnected = false;
 
     try {
       currentAccount = this.toDecryptedAccount(storedAccount);
@@ -495,22 +518,11 @@ export class DeviceSyncService {
             );
             const disconnected = this.store.disconnectAccount(currentAccount.id, now);
             currentAccount = this.toDecryptedAccount(disconnected);
-            executionDisconnected = true;
           },
           logger: this.logger,
         },
         normalizedJob,
       );
-
-      if (executionDisconnected) {
-        ensureJobLeaseOwned();
-
-        if (!this.store.completeJobIfOwned(job.id, this.workerId, currentNow())) {
-          return job;
-        }
-
-        return job;
-      }
 
       ensureExecutionActive();
 
@@ -576,7 +588,7 @@ export class DeviceSyncService {
     return processed;
   }
 
-  private async runWorkerBatchOnce(): Promise<void> {
+  async runWorkerBatchOnceInternal(): Promise<void> {
     if (this.workerTickInFlight) {
       return;
     }
@@ -761,7 +773,31 @@ export function createDefaultImporterPort(): DeviceSyncImporterPort {
 }
 
 export function createDeviceSyncService(input: CreateDeviceSyncServiceInput): DeviceSyncService {
-  return new DeviceSyncService(input);
+  const controller = new DeviceSyncServiceController(input);
+  const service = Object.freeze({
+    vaultRoot: controller.vaultRoot,
+    publicBaseUrl: controller.publicBaseUrl,
+    allowedReturnOrigins: [...controller.allowedReturnOrigins],
+    registry: controller.registry,
+    publicIngress: controller.publicIngress,
+    describeProviders: () => controller.describeProviders(),
+    describeProvider: (providerName) => controller.describeProvider(providerName),
+    summarize: () => controller.summarize(),
+    listAccounts: (provider) => controller.listAccounts(provider),
+    getAccount: (accountId) => controller.getAccount(accountId),
+    start: () => controller.start(),
+    stop: () => controller.stop(),
+    close: () => controller.close(),
+    startConnection: (startConnectionInput) => controller.startConnection(startConnectionInput),
+    handleOAuthCallback: (callbackInput) => controller.handleOAuthCallback(callbackInput),
+    handleWebhook: (providerName, headers, rawBody) => controller.handleWebhook(providerName, headers, rawBody),
+    getNextWakeAt: (now) => controller.getNextWakeAt(now),
+    runSchedulerOnce: () => controller.runSchedulerOnce(),
+    runWorkerOnce: () => controller.runWorkerOnce(),
+    drainWorker: (limit) => controller.drainWorker(limit),
+  } satisfies DeviceSyncService);
+  registerDeviceSyncServiceInternals(service, controller);
+  return service;
 }
 
 function earliestIsoTimestamp(...values: Array<string | null | undefined>): string | null {

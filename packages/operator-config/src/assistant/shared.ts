@@ -2,6 +2,38 @@ import { normalizeNullableString as normalizeNullableText } from '../text/shared
 
 export { normalizeNullableString } from '../text/shared.js'
 
+export function parseAssistantBaseUrl(
+  value: string | null | undefined,
+): URL | null {
+  const normalized = normalizeNullableText(value)
+  if (!normalized) {
+    return null
+  }
+
+  try {
+    const parsed = new URL(normalized)
+    return parsed.username || parsed.password ? null : parsed
+  } catch {
+    return null
+  }
+}
+
+export function assistantBaseUrlsShareOrigin(
+  left: URL | string | null | undefined,
+  right: URL | string | null | undefined,
+): boolean {
+  const parsedLeft = normalizeAssistantBaseUrl(left)
+  const parsedRight = normalizeAssistantBaseUrl(right)
+
+  return (
+    parsedLeft !== null &&
+    parsedRight !== null &&
+    parsedLeft.protocol === parsedRight.protocol &&
+    parsedLeft.hostname.toLowerCase() === parsedRight.hostname.toLowerCase() &&
+    parsedLeft.port === parsedRight.port
+  )
+}
+
 export function readAssistantEnvString(
   env: NodeJS.ProcessEnv | null | undefined,
   key: string | null | undefined,
@@ -31,18 +63,24 @@ function matchesAssistantHttpsHost(
   value: string | null | undefined,
   expectedHostname: string,
 ): boolean {
-  const normalized = normalizeNullableText(value)
-  if (!normalized) {
+  const parsed = parseAssistantBaseUrl(value)
+  if (!parsed) {
     return false
   }
 
-  try {
-    const parsed = new URL(normalized)
-    return (
-      parsed.protocol === 'https:' &&
-      parsed.hostname.toLowerCase() === expectedHostname
-    )
-  } catch {
-    return false
+  return (
+    parsed.protocol === 'https:' &&
+    parsed.hostname.toLowerCase() === expectedHostname &&
+    parsed.port === ''
+  )
+}
+
+function normalizeAssistantBaseUrl(
+  value: URL | string | null | undefined,
+): URL | null {
+  if (value instanceof URL) {
+    return value.username || value.password ? null : value
   }
+
+  return parseAssistantBaseUrl(value)
 }

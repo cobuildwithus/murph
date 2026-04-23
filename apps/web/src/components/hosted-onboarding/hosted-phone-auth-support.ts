@@ -1,11 +1,11 @@
 import type { FormEvent } from "react";
 
+import type { HostedAuthenticationIntent } from "@/src/lib/hosted-onboarding/authentication-intent";
 import {
   maskPhoneNumber,
   normalizePhoneNumberForCountry,
 } from "@/src/lib/hosted-onboarding/phone";
 import type { HostedPrivyClientPendingAction } from "@/src/lib/hosted-onboarding/privy-client";
-import { isHostedOnboardingAccessibleStage } from "@/src/lib/hosted-onboarding/stage";
 import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 
 import {
@@ -14,7 +14,6 @@ import {
 } from "./hosted-auth-completion";
 import { HostedOnboardingApiError, requestHostedOnboardingJson } from "./client-api";
 import type {
-  HostedPhoneAuthIntent,
   HostedPhoneLinkPayload,
   HostedPhoneVerificationAttempt,
   HostedResolvedPhoneSubmission,
@@ -120,7 +119,7 @@ export function readSubmittedPhoneNumber(event: FormEvent<HTMLFormElement> | und
 
 export async function finalizeHostedPrivyVerification(input: HostedPrivyClientSessionInput & {
   inviteCode?: string | null;
-  intent: HostedPhoneAuthIntent;
+  intent: HostedAuthenticationIntent;
   onCompleted?: (payload: HostedPrivyCompletionPayload) => Promise<void> | void;
 }) {
   const result = await completeHostedPrivyAuth({
@@ -172,17 +171,6 @@ export async function requestHostedPhoneLinkSyncWithRetry(): Promise<HostedPhone
   throw lastError instanceof Error
     ? lastError
     : new Error("We could not save your verified phone number.");
-}
-
-export function resolveHostedPrivyCompletionRedirectUrl(input: {
-  intent: HostedPhoneAuthIntent;
-  payload: HostedPrivyCompletionPayload;
-}): string {
-  if (input.intent === "signin" && isHostedOnboardingAccessibleStage(input.payload.stage)) {
-    return "/settings";
-  }
-
-  return `/join/${encodeURIComponent(input.payload.inviteCode)}`;
 }
 
 function isRetryableHostedPhoneLinkError(error: unknown): boolean {

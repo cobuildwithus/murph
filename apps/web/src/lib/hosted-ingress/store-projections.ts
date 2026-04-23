@@ -18,9 +18,9 @@ import {
 } from "@murphai/hosted-execution/parsers";
 
 import {
-  ensureHostedExecutionCursorRowTx,
-  readHostedIngressPayloadRowByWakeIdTx,
-  readHostedIngressPayloadRowsByWakeIdTx,
+  ensureHostedExecutionCursorRow,
+  readHostedIngressPayloadRowByWakeId,
+  readHostedIngressPayloadRowsByWakeId,
   resolveHostedIngressPayloadCiphertextSync,
 } from "./store-data";
 import type {
@@ -45,7 +45,7 @@ export async function resolveHostedIngressLifecycleStateTx(input: {
     return "completed";
   }
 
-  const cursor = await ensureHostedExecutionCursorRowTx({
+  const cursor = await ensureHostedExecutionCursorRow({
     tx: input.tx,
     userId: input.record.userId,
   });
@@ -138,7 +138,7 @@ export async function hydrateHostedIngressEventTx(input: {
   }
 
   const payloadRow = input.record.payloadRef
-    ? await readHostedIngressPayloadRowByWakeIdTx({
+    ? await readHostedIngressPayloadRowByWakeId({
       ingressEventId: input.record.payloadRef,
       tx: input.tx,
       userId: input.record.userId,
@@ -156,7 +156,7 @@ export async function hydrateHostedIngressEventsTx(input: {
     return [];
   }
 
-  const payloadRowsByWakeId = await readHostedIngressPayloadRowsByWakeIdTx({
+  const payloadRowsByWakeId = await readHostedIngressPayloadRowsByWakeId({
     ingressEventIds: input.records
       .filter((record) => record.quarantinedAt === null)
       .map((record) => record.payloadRef)

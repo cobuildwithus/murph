@@ -68,6 +68,26 @@ test("loadRuntimeModule resolves workspace or built-in modules dynamically", asy
   assert.equal(typeof pathModule.join, "function");
 });
 
+test("public runtime barrel stays importable before query helper wiring is resolved", async () => {
+  let lookupHelperLoads = 0;
+  const runtimeModule = await importWithMocks<typeof import("../src/runtime.ts")>(
+    "../src/runtime.ts",
+    {
+      "@murphai/query/id-families": () => {
+        lookupHelperLoads += 1;
+        return {
+          describeLookupConstraint: vi.fn(),
+          inferIdEntityKind: vi.fn(),
+          isQueryableLookupId: vi.fn(),
+        };
+      },
+    },
+  );
+
+  assert.equal(typeof runtimeModule.loadQueryRuntime, "function");
+  assert.equal(lookupHelperLoads, 0);
+});
+
 test("createRuntimeUnavailableError preserves package guidance with and without an Error cause", () => {
   const withCause = createRuntimeUnavailableError("integrated vault-cli services", new Error("boom"));
   const withoutCause = createRuntimeUnavailableError("integrated vault-cli services", "boom");
@@ -94,15 +114,11 @@ test("createUnwiredMethod rejects with a shared not_implemented error", async ()
   });
 });
 
-test("loadIntegratedRuntime validates module shape and caches the successful runtime", async () => {
+test("loadCoreRuntime validates module shape and caches the successful runtime", async () => {
   const coreRuntime = createCoreRuntimeStub();
-  const queryRuntime = createQueryRuntimeStub();
   const loadRuntimeModuleMock = vi.fn(async (specifier: string) => {
     if (specifier === "@murphai/core") {
       return coreRuntime;
-    }
-    if (specifier === "@murphai/query") {
-      return queryRuntime;
     }
     throw new Error(`Unexpected specifier: ${specifier}`);
   });
@@ -115,27 +131,57 @@ test("loadIntegratedRuntime validates module shape and caches the successful run
       }),
     },
   );
-  const firstRuntime = await runtimeModule.loadIntegratedRuntime();
-  const secondRuntime = await runtimeModule.loadIntegratedRuntime();
+  const firstRuntime = await runtimeModule.loadCoreRuntime();
+  const secondRuntime = await runtimeModule.loadCoreRuntime();
 
-  assert.equal(firstRuntime.core, coreRuntime);
-  assert.equal(firstRuntime.query, queryRuntime);
+  assert.equal(firstRuntime, coreRuntime);
   assert.equal(secondRuntime, firstRuntime);
-  assert.deepEqual(loadRuntimeModuleMock.mock.calls, [["@murphai/core"], ["@murphai/query"]]);
+  assert.deepEqual(loadRuntimeModuleMock.mock.calls, [["@murphai/core"]]);
 });
 
-test("loadIntegratedRuntime clears the cache after a shape mismatch and retries cleanly", async () => {
-  const coreRuntime = createCoreRuntimeStub();
+test("loadQueryRuntime clears the cache after a shape mismatch and retries cleanly", async () => {
   const queryRuntime = createQueryRuntimeStub();
   let attempt = 0;
   const loadRuntimeModuleMock = vi.fn(async (specifier: string) => {
+    if (specifier === "@murphai/query") {
+      attempt += 1;
+      return attempt === 1 ? {} : queryRuntime;
+    }
+    throw new Error(`Unexpected specifier: ${specifier}`);
+  });
+
+  const runtimeModule = await importWithMocks<typeof import("../src/usecases/runtime.ts")>(
+    "../src/usecases/runtime.ts",
+    {
+      "../src/runtime-import.ts": () => ({
+        loadRuntimeModule: vi.fn(loadRuntimeModuleMock),
+      }),
+    },
+  );
+
+  await assert.rejects(() => runtimeModule.loadQueryRuntime(), {
+    name: "VaultCliError",
+    code: "runtime_unavailable",
+    message:
+      "Local runtime for query-backed vault-cli services is unavailable until the integrating workspace installs incur and links @murphai/core, @murphai/importers, and @murphai/query.",
+  });
+
+  const recoveredRuntime = await runtimeModule.loadQueryRuntime();
+  assert.equal(recoveredRuntime, queryRuntime);
+  assert.deepEqual(loadRuntimeModuleMock.mock.calls, [["@murphai/query"], ["@murphai/query"]]);
+});
+
+test("loadIntegratedRuntime composes cached owner loaders and retries only the failed owner", async () => {
+  const coreRuntime = createCoreRuntimeStub();
+  const queryRuntime = createQueryRuntimeStub();
+  let coreAttempts = 0;
+  const loadRuntimeModuleMock = vi.fn(async (specifier: string) => {
     if (specifier === "@murphai/core") {
-      return attempt === 0 ? {} : coreRuntime;
+      coreAttempts += 1;
+      return coreAttempts === 1 ? {} : coreRuntime;
     }
     if (specifier === "@murphai/query") {
-      const value = queryRuntime;
-      attempt += 1;
-      return value;
+      return queryRuntime;
     }
     throw new Error(`Unexpected specifier: ${specifier}`);
   });
@@ -152,25 +198,27 @@ test("loadIntegratedRuntime clears the cache after a shape mismatch and retries 
   await assert.rejects(() => runtimeModule.loadIntegratedRuntime(), {
     name: "VaultCliError",
     code: "runtime_unavailable",
+    message:
+      "Local runtime for integrated vault-cli services is unavailable until the integrating workspace installs incur and links @murphai/core, @murphai/importers, and @murphai/query.",
   });
 
   const recoveredRuntime = await runtimeModule.loadIntegratedRuntime();
   assert.equal(recoveredRuntime.core, coreRuntime);
   assert.equal(recoveredRuntime.query, queryRuntime);
-  assert.equal(loadRuntimeModuleMock.mock.calls.length, 4);
+  assert.deepEqual(loadRuntimeModuleMock.mock.calls, [
+    ["@murphai/core"],
+    ["@murphai/query"],
+    ["@murphai/core"],
+  ]);
 });
 
-test("loadImporterRuntime validates the importer factory shape before creating services", async () => {
+test("loadImporterRuntime creates importers from core without loading query", async () => {
   const coreRuntime = createCoreRuntimeStub();
-  const queryRuntime = createQueryRuntimeStub();
   const importersRuntime = { importer: true };
   const createImporters = vi.fn(() => importersRuntime);
   const loadRuntimeModuleMock = vi.fn(async (specifier: string) => {
     if (specifier === "@murphai/core") {
       return coreRuntime;
-    }
-    if (specifier === "@murphai/query") {
-      return queryRuntime;
     }
     if (specifier === "@murphai/importers") {
       return {
@@ -192,17 +240,17 @@ test("loadImporterRuntime validates the importer factory shape before creating s
 
   assert.equal(result, importersRuntime);
   assert.deepEqual(createImporters.mock.calls, [[{ corePort: coreRuntime }]]);
+  assert.deepEqual(loadRuntimeModuleMock.mock.calls, [
+    ["@murphai/core"],
+    ["@murphai/importers"],
+  ]);
 });
 
 test("loadImporterRuntime reports invalid importer factory shapes through the shared runtime error", async () => {
   const coreRuntime = createCoreRuntimeStub();
-  const queryRuntime = createQueryRuntimeStub();
   const loadRuntimeModuleMock = vi.fn(async (specifier: string) => {
     if (specifier === "@murphai/core") {
       return coreRuntime;
-    }
-    if (specifier === "@murphai/query") {
-      return queryRuntime;
     }
     if (specifier === "@murphai/importers") {
       return {};
@@ -222,5 +270,74 @@ test("loadImporterRuntime reports invalid importer factory shapes through the sh
   await assert.rejects(() => runtimeModule.loadImporterRuntime(), {
     name: "VaultCliError",
     code: "runtime_unavailable",
+    message:
+      "Local runtime for importer-backed vault-cli services is unavailable until the integrating workspace installs incur and links @murphai/core, @murphai/importers, and @murphai/query.",
   });
+});
+
+test("loadImporterRuntime preserves the importer-backed error label when core loading fails", async () => {
+  const loadRuntimeModuleMock = vi.fn(async (specifier: string) => {
+    if (specifier === "@murphai/core") {
+      return {};
+    }
+    if (specifier === "@murphai/importers") {
+      return {
+        createImporters: vi.fn(),
+      };
+    }
+    throw new Error(`Unexpected specifier: ${specifier}`);
+  });
+
+  const runtimeModule = await importWithMocks<typeof import("../src/usecases/runtime.ts")>(
+    "../src/usecases/runtime.ts",
+    {
+      "../src/runtime-import.ts": () => ({
+        loadRuntimeModule: vi.fn(loadRuntimeModuleMock),
+      }),
+    },
+  );
+
+  await assert.rejects(() => runtimeModule.loadImporterRuntime(), {
+    name: "VaultCliError",
+    code: "runtime_unavailable",
+    message:
+      "Local runtime for importer-backed vault-cli services is unavailable until the integrating workspace installs incur and links @murphai/core, @murphai/importers, and @murphai/query.",
+  });
+});
+
+test("loadImporterRuntime preserves importer factory construction errors", async () => {
+  const coreRuntime = createCoreRuntimeStub();
+  const createImportersError = new Error("factory boom");
+  const createImporters = vi.fn(() => {
+    throw createImportersError;
+  });
+  const loadRuntimeModuleMock = vi.fn(async (specifier: string) => {
+    if (specifier === "@murphai/core") {
+      return coreRuntime;
+    }
+    if (specifier === "@murphai/importers") {
+      return {
+        createImporters,
+      };
+    }
+    throw new Error(`Unexpected specifier: ${specifier}`);
+  });
+
+  const runtimeModule = await importWithMocks<typeof import("../src/usecases/runtime.ts")>(
+    "../src/usecases/runtime.ts",
+    {
+      "../src/runtime-import.ts": () => ({
+        loadRuntimeModule: vi.fn(loadRuntimeModuleMock),
+      }),
+    },
+  );
+
+  await assert.rejects(
+    () => runtimeModule.loadImporterRuntime(),
+    (error: unknown) => {
+      assert.equal(error, createImportersError);
+      return true;
+    },
+  );
+  assert.deepEqual(createImporters.mock.calls, [[{ corePort: coreRuntime }]]);
 });

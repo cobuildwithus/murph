@@ -7,10 +7,10 @@ import {
   assertHostedIngressUserMatch,
   bumpHostedExecutionCursorVersionTx,
   createHostedIngressEventAliasTx,
-  ensureHostedExecutionCursorRowTx,
-  findHostedIngressByDedupeKeyTx,
-  findHostedIngressByEventIdTx,
-  findCurrentHostedIngressEventAliasByWakeIdTx,
+  ensureHostedExecutionCursorRow,
+  findHostedIngressByDedupeKey,
+  findHostedIngressByEventId,
+  findCurrentHostedIngressEventAliasByWakeId,
   findUncommittedWakeByCoalescingKeyTx,
   lockHostedExecutionCursorRowTx,
   replaceHostedIngressEventAliasTx,
@@ -50,7 +50,7 @@ export async function appendHostedIngressTx(
 ): Promise<AppendHostedIngressResult> {
   const occurredAt = requireOccurredAtDate(input.occurredAt);
 
-  await ensureHostedExecutionCursorRowTx({
+  await ensureHostedExecutionCursorRow({
     tx: input.tx,
     userId: input.userId,
   });
@@ -61,13 +61,13 @@ export async function appendHostedIngressTx(
 
   {
     const existingDuplicate = input.eventId
-      ? await findHostedIngressByEventIdTx({
+      ? await findHostedIngressByEventId({
         eventId: input.eventId,
         tx: input.tx,
         userId: input.userId,
       })
       : input.dedupeKey
-        ? await findHostedIngressByDedupeKeyTx({
+        ? await findHostedIngressByDedupeKey({
           dedupeKey: input.dedupeKey,
           tx: input.tx,
           userId: input.userId,
@@ -239,13 +239,13 @@ async function createHostedIngressTx(
       && error.code === "P2002"
     ) {
       const existing = input.eventId
-        ? await findHostedIngressByEventIdTx({
+        ? await findHostedIngressByEventId({
           eventId: input.eventId,
           tx: input.tx,
           userId: input.userId,
         })
         : input.dedupeKey
-          ? await findHostedIngressByDedupeKeyTx({
+          ? await findHostedIngressByDedupeKey({
             dedupeKey: input.dedupeKey,
             tx: input.tx,
             userId: input.userId,
@@ -286,10 +286,9 @@ async function replaceCurrentHostedIngressEventAliasTx(input: {
     return;
   }
 
-  const currentEvent = await findCurrentHostedIngressEventAliasByWakeIdTx({
-    ingressEventId: input.wake.id,
+  const currentEvent = await ensureCurrentHostedIngressEventAliasTx({
     tx: input.tx,
-    userId: input.userId,
+    wake: input.wake,
   });
 
   if (currentEvent?.eventId === nextEventId) {
@@ -297,16 +296,10 @@ async function replaceCurrentHostedIngressEventAliasTx(input: {
   }
 
   if (currentEvent) {
+    // The replacement chain FK is deferred until commit, so we can retire the
+    // current alias before inserting its successor in the same transaction.
     await replaceHostedIngressEventAliasTx({
       eventId: currentEvent.eventId,
-      replacedByEventId: nextEventId,
-      tx: input.tx,
-      userId: input.userId,
-    });
-  } else if (input.wake.dedupeKey && input.wake.dedupeKey !== nextEventId) {
-    await createHostedIngressEventAliasTx({
-      eventId: input.wake.dedupeKey,
-      ingressEventId: input.wake.id,
       replacedByEventId: nextEventId,
       tx: input.tx,
       userId: input.userId,
@@ -347,11 +340,38 @@ async function resolveCurrentHostedIngressEventAliasIdTx(input: {
   tx: AppendHostedIngressInput["tx"];
   wake: HostedIngressEventRow;
 }): Promise<string | null> {
-  const currentEvent = await findCurrentHostedIngressEventAliasByWakeIdTx({
+  const currentEvent = await ensureCurrentHostedIngressEventAliasTx({
+    tx: input.tx,
+    wake: input.wake,
+  });
+
+  return currentEvent?.eventId ?? null;
+}
+
+async function ensureCurrentHostedIngressEventAliasTx(input: {
+  tx: AppendHostedIngressInput["tx"];
+  wake: HostedIngressEventRow;
+}) {
+  const currentEvent = await findCurrentHostedIngressEventAliasByWakeId({
     ingressEventId: input.wake.id,
     tx: input.tx,
     userId: input.wake.userId,
   });
 
-  return currentEvent?.eventId ?? input.wake.dedupeKey ?? null;
+  if (currentEvent) {
+    return currentEvent;
+  }
+
+  const dedupeKey = input.wake.dedupeKey?.trim();
+
+  if (!dedupeKey) {
+    return null;
+  }
+
+  return createHostedIngressEventAliasTx({
+    eventId: dedupeKey,
+    ingressEventId: input.wake.id,
+    tx: input.tx,
+    userId: input.wake.userId,
+  });
 }

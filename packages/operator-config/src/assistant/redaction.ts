@@ -7,6 +7,16 @@ export interface AssistantHeaderPersistenceSplit {
   secretHeaders: Record<string, string> | null
 }
 
+export function isSensitiveAssistantHeader(
+  name: string,
+  value: string,
+): boolean {
+  return (
+    isSensitiveAssistantHeaderName(name)
+    || isSensitiveAssistantHeaderValue(value)
+  )
+}
+
 export function splitAssistantHeadersForPersistence(
   headers: Record<string, string> | null | undefined,
 ): AssistantHeaderPersistenceSplit {
@@ -22,7 +32,7 @@ export function splitAssistantHeadersForPersistence(
 
   for (const [key, rawValue] of Object.entries(headers)) {
     const value = typeof rawValue === 'string' ? rawValue : String(rawValue)
-    if (isSensitiveAssistantHeaderName(key) || isSensitiveAssistantHeaderValue(value)) {
+    if (isSensitiveAssistantHeader(key, value)) {
       secretHeaders[key] = value
       continue
     }

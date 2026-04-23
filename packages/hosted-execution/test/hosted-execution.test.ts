@@ -108,6 +108,10 @@ describe("hosted execution coverage gaps", () => {
     expect(normalizeHostedExecutionString("  abc  ")).toBe("abc");
 
     expect(
+      normalizeHostedExecutionBaseUrl(" Example.com/root/?q=1#frag "),
+    ).toBe("https://example.com/root");
+
+    expect(
       normalizeHostedExecutionBaseUrl(" https://Example.com/root/?q=1#frag "),
     ).toBe("https://example.com/root");
 
@@ -118,11 +122,16 @@ describe("hosted execution coverage gaps", () => {
     ).toBe("http://localhost:8787/api");
 
     expect(
+      normalizeHostedExecutionBaseUrl("http://[::1]:8787/api/?q=1", {
+        allowHttpLocalhost: true,
+      }),
+    ).toBe("http://[::1]:8787/api");
+
+    expect(
       normalizeHostedExecutionBaseUrl("http://api.example.com/v1/?q=1", {
         allowHttpHosts: ["API.EXAMPLE.COM"],
       }),
     ).toBe("http://api.example.com/v1");
-
     expect(() => normalizeHostedExecutionBaseUrl("http://example.com")).toThrow(
       /HTTPS unless the host is explicitly allowlisted/i,
     );
@@ -311,5 +320,19 @@ describe("hosted execution coverage gaps", () => {
       vaultSyncImport: runnerPayload,
       wake,
     });
+
+    expect(() => parseHostedRuntimeDrainEvent({
+      seq: "12",
+      vaultSyncImport: runnerPayload,
+      wake,
+      wakeId: "ingress_vault_sync",
+    })).toThrow(/ingressEventId/u);
+    expect(() => parseHostedRuntimeDrainEvent({
+      ingressEventId: "ingress_vault_sync",
+      seq: "12",
+      vaultSyncImport: runnerPayload,
+      wake,
+      wakeId: "ingress_vault_sync",
+    })).toThrow(/wakeId/u);
   });
 });

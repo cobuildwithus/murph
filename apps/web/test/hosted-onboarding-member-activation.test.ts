@@ -5,7 +5,7 @@ import type { HostedMemberSnapshot } from "@/src/lib/hosted-onboarding/hosted-me
 import type { HostedStripeDispatchContext } from "@/src/lib/hosted-onboarding/stripe-dispatch";
 
 const mocks = vi.hoisted(() => ({
-  findHostedIngressByEventIdTx: vi.fn(),
+  findHostedIngressByEventId: vi.fn(),
   lockHostedMemberRow: vi.fn(),
   readHostedMemberCoreState: vi.fn(),
   readHostedMemberEmailAuthorization: vi.fn(),
@@ -17,7 +17,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/src/lib/hosted-ingress/lifecycle", () => ({
-  findHostedIngressByEventIdTx: mocks.findHostedIngressByEventIdTx,
+  findHostedIngressByEventId: mocks.findHostedIngressByEventId,
   materializeHostedIngressEnvelopeTx: mocks.materializeHostedIngressEnvelopeTx,
 }));
 
@@ -68,7 +68,7 @@ describe("hosted onboarding member activation", () => {
     vi.clearAllMocks();
     vi.spyOn(console, "info").mockImplementation(() => {});
 
-    mocks.findHostedIngressByEventIdTx.mockResolvedValue(null);
+    mocks.findHostedIngressByEventId.mockResolvedValue(null);
     mocks.lockHostedMemberRow.mockResolvedValue(undefined);
     setActivationMemberSnapshot(makeMemberSnapshot());
     mocks.resolveHostedMemberActivationLinqRoute.mockResolvedValue({
@@ -455,7 +455,7 @@ describe("hosted onboarding member activation", () => {
       },
     });
     setActivationMemberSnapshot(member);
-    mocks.findHostedIngressByEventIdTx.mockResolvedValue(
+    mocks.findHostedIngressByEventId.mockResolvedValue(
       "member.activated:stripe.customer.subscription.updated:member_123:evt_123",
     );
 

@@ -24,9 +24,12 @@ import {
 import { assistantGatewayLocalProjectionSourceReader } from "@murphai/assistant-engine/gateway-local-adapter";
 import { createConfiguredDeviceSyncProvidersFromConfigs } from "@murphai/device-syncd/config";
 import { createDeviceSyncRegistry } from "@murphai/device-syncd/registry";
-import { createDeviceSyncService } from "@murphai/device-syncd/service";
 import { exportGatewayProjectionSnapshotLocal } from "@murphai/gateway-local";
 
+import {
+  closeHostedRuntimeDeviceSyncService,
+  createHostedRuntimeDeviceSyncService,
+} from "../device-sync-service.ts";
 import { createHostedArtifactUploadSink } from "./artifacts.ts";
 import { toHostedArtifactPathKey } from "./artifact-paths.ts";
 import {
@@ -644,7 +647,7 @@ async function resolveHostedDeviceSyncWakeAt(input: {
       return null;
     }
 
-    const service = createDeviceSyncService({
+    const service = createHostedRuntimeDeviceSyncService({
       secret: input.deviceSyncConfig.secret,
       config: {
         publicBaseUrl: input.deviceSyncConfig.publicBaseUrl,
@@ -656,7 +659,7 @@ async function resolveHostedDeviceSyncWakeAt(input: {
     try {
       return normalizeHostedWakeAt(service.getNextWakeAt(), input.referenceMs);
     } finally {
-      service.close();
+      closeHostedRuntimeDeviceSyncService(service);
     }
   } catch (error) {
     emitHostedExecutionStructuredLog({

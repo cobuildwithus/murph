@@ -110,7 +110,7 @@ describe("device-sync providers", () => {
     expect(provider.provider).toBe(WHOOP_DEVICE_PROVIDER_DESCRIPTOR.provider);
     expect(provider.descriptor.displayName).toBe(WHOOP_DEVICE_PROVIDER_DESCRIPTOR.displayName);
     expect(provider.descriptor.webhook?.path).toBe(WHOOP_DEVICE_PROVIDER_DESCRIPTOR.webhook?.path);
-    expect(provider.descriptor.oauth?.defaultScopes).toContain("read:team");
+    expect(provider.descriptor.oauth?.defaultScopes).toEqual(["offline", "read:profile", "read:team"]);
     expect(provider.descriptor.sync?.windows).toEqual({
       backfillDays: 11,
       reconcileDays: 4,
@@ -121,6 +121,16 @@ describe("device-sync providers", () => {
     );
     expect(WHOOP_DEVICE_PROVIDER_DESCRIPTOR.oauth?.defaultScopes).toEqual(baselineScopes);
     expect(WHOOP_DEVICE_PROVIDER_DESCRIPTOR.sync?.windows).toEqual(baselineWindows);
+  });
+
+  it("keeps WHOOP explicit empty scope overrides at the required base scopes only", () => {
+    const provider = createWhoopDeviceSyncProvider({
+      clientId: "whoop-client",
+      clientSecret: "whoop-secret",
+      scopes: [],
+    });
+
+    expect(provider.descriptor.oauth?.defaultScopes).toEqual(["offline", "read:profile"]);
   });
 
   it("applies Strava runtime overrides onto the shared descriptor shape", () => {

@@ -109,6 +109,11 @@ test("prepareDeviceProviderSnapshotImport normalizes WHOOP snapshots into canoni
       profile: {
         user_id: "whoop-user-1",
       },
+      bodyMeasurements: {
+        height_meter: 1.82,
+        weight_kilogram: 82.1,
+        max_heart_rate: 188,
+      },
       sleeps: [
         {
           id: "sleep-1",
@@ -185,16 +190,20 @@ test("prepareDeviceProviderSnapshotImport normalizes WHOOP snapshots into canoni
   assert.ok(payload.events?.some((event) => event.kind === "activity_session"));
   assert.ok(payload.events?.some((event) => event.kind === "observation" && event.fields?.metric === "recovery-score"));
   assert.ok(payload.events?.some((event) => event.kind === "observation" && event.fields?.metric === "day-strain"));
+  assert.ok(payload.events?.some((event) => event.kind === "observation" && event.fields?.metric === "weight"));
+  assert.ok(payload.events?.some((event) => event.kind === "observation" && event.fields?.metric === "bmi"));
   assert.ok(payload.samples?.some((sample) => sample.stream === "respiratory_rate"));
   assert.ok(payload.samples?.some((sample) => sample.stream === "hrv"));
   assert.ok(payload.samples?.some((sample) => sample.stream === "temperature"));
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "profile"));
+  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "body-measurement"));
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "sleep:sleep-1"));
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "workout:workout-1"));
 
   const sleepEvent = payload.events?.find((event) => event.kind === "sleep_session");
   const workoutEvent = payload.events?.find((event) => event.kind === "activity_session");
   const hrvSample = payload.samples?.find((sample) => sample.stream === "hrv");
+  const bmiEvent = payload.events?.find((event) => event.fields?.metric === "bmi");
 
   assert.deepEqual(sleepEvent?.fields, {
     startAt: "2026-03-15T22:00:00.000Z",
@@ -205,6 +214,7 @@ test("prepareDeviceProviderSnapshotImport normalizes WHOOP snapshots into canoni
   assert.equal(workoutEvent?.fields?.distanceKm, 7.25);
   assert.equal(hrvSample?.sample.value, 42.5);
   assert.equal(hrvSample?.externalRef?.facet, "hrv");
+  assert.equal(bmiEvent?.dayKey, "2026-03-16");
 });
 
 test("prepareDeviceProviderSnapshotImport normalizes Oura snapshots into canonical device payloads", async () => {
@@ -1769,8 +1779,11 @@ test("prepareDeviceProviderSnapshotImport handles WHOOP fallbacks and string num
     provider: "whoop",
     snapshot: {
       accountId: 101,
+      importedAt: "2026-03-16T12:00:00.000Z",
       bodyMeasurements: {
         height_meter: "1.82",
+        weight_kilogram: "72.8",
+        max_heart_rate: "191",
       },
       sleeps: [
         {
@@ -1845,6 +1858,19 @@ test("prepareDeviceProviderSnapshotImport handles WHOOP fallbacks and string num
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "body-measurement"));
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "cycle:12"));
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "workout:9"));
+  assert.ok(
+    payload.events?.some(
+      (event) => event.kind === "observation" && event.fields?.metric === "weight" && event.fields?.value === 72.8,
+    ),
+  );
+  assert.ok(
+    payload.events?.some(
+      (event) =>
+        event.kind === "observation" &&
+        event.fields?.metric === "max-heart-rate" &&
+        event.fields?.value === 191,
+    ),
+  );
   assert.ok(payload.samples?.some((sample) => sample.stream === "respiratory_rate" && sample.sample.value === 14.6));
   assert.ok(payload.samples?.some((sample) => sample.stream === "temperature" && sample.sample.value === 36.7));
   assert.ok(
@@ -1862,7 +1888,39 @@ test("prepareDeviceProviderSnapshotImport handles WHOOP fallbacks and string num
   );
   assert.equal(payload.events?.some((event) => event.kind === "sleep_session"), false);
   assert.equal(payload.events?.some((event) => event.kind === "activity_session"), false);
+  assert.ok(
+    payload.events?.some(
+      (event) =>
+        event.kind === "observation" &&
+        event.fields?.metric === "bmi" &&
+        event.fields?.value === Number((72.8 / (1.82 * 1.82)).toFixed(4)),
+    ),
+  );
   assert.equal(payload.provenance?.whoopUserId, undefined);
+  assert.equal(payload.provenance?.bodyMeasurementDay, "2026-03-16");
+});
+
+test("prepareDeviceProviderSnapshotImport prefers WHOOP measurement timestamps over generic update timestamps", async () => {
+  const payload = await prepareDeviceProviderSnapshotImport({
+    provider: "whoop",
+    snapshot: {
+      accountId: "whoop-user-1",
+      importedAt: "2026-03-17T12:00:00.000Z",
+      bodyMeasurements: {
+        height_meter: 1.82,
+        weight_kilogram: 72.8,
+        updated_at: "2026-03-17T08:00:00.000Z",
+        measured_at: "2026-03-16T07:00:00.000Z",
+      },
+    },
+  });
+
+  const weightEvent = payload.events?.find((event) => event.fields?.metric === "weight");
+
+  assert.equal(weightEvent?.occurredAt, "2026-03-16T07:00:00.000Z");
+  assert.equal(weightEvent?.recordedAt, "2026-03-16T07:00:00.000Z");
+  assert.equal(weightEvent?.dayKey, "2026-03-16");
+  assert.equal(payload.provenance?.bodyMeasurementDay, "2026-03-16");
 });
 
 test("prepareDeviceProviderSnapshotImport preserves shared raw-artifact omission and text trimming across Oura and WHOOP", async () => {

@@ -148,8 +148,7 @@ function readVaultSyncImportSummaries(value: unknown): Record<string, unknown>[]
     });
   }
 
-  const legacySummary = readRecord(details?.vaultSyncImport);
-  return legacySummary ? [legacySummary] : [];
+  return [];
 }
 
 function readVaultSyncImportSummary(value: unknown, sessionId?: string | null): Record<string, unknown> | null {

@@ -113,11 +113,13 @@ function createRuntime() {
 
   return {
     commitTimeoutMs: 45_000,
+    forwardedEnv: {},
     platform: {
       artifactStore,
       effectsPort: createHostedRuntimeEffectsPortStub(),
       usageExportPort: null,
     },
+    platformEnv: {},
     resolvedConfig: createHostedRuntimeResolvedConfig(),
     userEnv: {},
   };
@@ -639,6 +641,7 @@ describe("executeHostedRunDrainForCommit", () => {
           }),
         ],
       });
+      expect(result.committedResult.result.redactedDetails).not.toHaveProperty("vaultSyncImport");
     } finally {
       vi.useRealTimers();
     }

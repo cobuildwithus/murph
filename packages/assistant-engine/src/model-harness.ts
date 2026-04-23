@@ -475,6 +475,7 @@ export interface AssistantToolCatalog {
 export interface AssistantModelSpec {
   apiKey?: string
   apiKeyEnv?: string
+  apiKeyEnvValue?: string | null
   baseUrl?: string
   executionDriver?: AssistantExecutionDriver
   headers?: Record<string, string>
@@ -1232,6 +1233,12 @@ function isAssistantPlainObject(value: unknown): value is Record<string, unknown
 function resolveAssistantApiKey(spec: AssistantModelSpec): string | undefined {
   if (typeof spec.apiKey === 'string' && spec.apiKey.length > 0) {
     return spec.apiKey
+  }
+
+  if ('apiKeyEnvValue' in spec) {
+    return typeof spec.apiKeyEnvValue === 'string' && spec.apiKeyEnvValue.length > 0
+      ? spec.apiKeyEnvValue
+      : undefined
   }
 
   if (typeof spec.apiKeyEnv === 'string' && spec.apiKeyEnv.length > 0) {

@@ -145,7 +145,7 @@ describe("hosted Privy request auth", () => {
     }));
   });
 
-  it("uses the trusted Murph member id from the session before falling back to identity probes", async () => {
+  it("requires identity lookup confirmation before trusting the session Murph member id", async () => {
     const member = createHostedMember();
     mocks.resolveHostedPrivySessionFromRequest.mockResolvedValue({
       identity: {
@@ -163,6 +163,9 @@ describe("hosted Privy request auth", () => {
       },
     });
     mocks.readHostedMemberCoreState.mockResolvedValue(member);
+    mocks.lookupHostedMemberForPrivyIdentity.mockResolvedValue(createHostedMemberLookup({
+      core: member,
+    }));
 
     await expect(getPrivyMemberAuth(createAuthenticatedRequest(), prisma)).resolves.toMatchObject({
       member: {
@@ -174,7 +177,13 @@ describe("hosted Privy request auth", () => {
       memberId: member.id,
       prisma,
     });
-    expect(mocks.lookupHostedMemberForPrivyIdentity).not.toHaveBeenCalled();
+    expect(mocks.lookupHostedMemberForPrivyIdentity).toHaveBeenCalledWith(expect.objectContaining({
+      identity: expect.objectContaining({
+        userId: "did:privy:user_123",
+      }),
+      parallelizeReads: true,
+      prisma,
+    }));
   });
 
   it("falls back to the legacy identity lookup when the trusted member id is stale", async () => {
@@ -210,6 +219,88 @@ describe("hosted Privy request auth", () => {
       parallelizeReads: true,
       prisma,
     }));
+  });
+
+  it("rejects stale session metadata when the stored Murph member id points at a different member", async () => {
+    const staleMember = createHostedMember({
+      id: "member_stale",
+    });
+    const resolvedMember = createHostedMember({
+      id: "member_resolved",
+    });
+    const memberLookup = createHostedMemberLookup({
+      core: resolvedMember,
+      identity: {
+        maskedPhoneNumberHint: "*** 2671",
+        memberId: resolvedMember.id,
+        phoneNumber: "+14155552671",
+        phoneNumberVerifiedAt: new Date("2025-03-27T08:00:00.000Z"),
+        privyUserId: "did:privy:user_123",
+        signupPhoneCodeSendAttemptId: null,
+        signupPhoneCodeSendAttemptStartedAt: null,
+        signupPhoneCodeSentAt: null,
+        signupPhoneNumber: null,
+        walletAddress: null,
+        walletChainType: null,
+        walletCreatedAt: null,
+        walletProvider: null,
+      },
+      matchedBy: ["phoneNumber"],
+    });
+
+    mocks.resolveHostedPrivySessionFromRequest.mockResolvedValue({
+      identity: {
+        phone: {
+          number: "+14155552671",
+          verifiedAt: 1741194420,
+        },
+        userId: "did:privy:user_123",
+        wallet: null,
+      },
+      linkedAccounts: [],
+      memberId: staleMember.id,
+      verifiedPrivyUser: {
+        id: "did:privy:user_123",
+      },
+    });
+    mocks.readHostedMemberCoreState.mockResolvedValue(staleMember);
+    mocks.lookupHostedMemberForPrivyIdentity.mockResolvedValue(memberLookup);
+
+    await expect(getPrivyMemberAuth(createAuthenticatedRequest(), prisma)).resolves.toMatchObject({
+      member: {
+        id: resolvedMember.id,
+      },
+      memberLookup,
+    });
+  });
+
+  it("does not authenticate a stale session member id when identity probes find no hosted member", async () => {
+    const staleMember = createHostedMember({
+      id: "member_stale",
+    });
+
+    mocks.resolveHostedPrivySessionFromRequest.mockResolvedValue({
+      identity: {
+        phone: {
+          number: "+14155552671",
+          verifiedAt: 1741194420,
+        },
+        userId: "did:privy:user_123",
+        wallet: null,
+      },
+      linkedAccounts: [],
+      memberId: staleMember.id,
+      verifiedPrivyUser: {
+        id: "did:privy:user_123",
+      },
+    });
+    mocks.readHostedMemberCoreState.mockResolvedValue(staleMember);
+    mocks.lookupHostedMemberForPrivyIdentity.mockResolvedValue(null);
+
+    await expect(getPrivyMemberAuth(createAuthenticatedRequest(), prisma)).resolves.toMatchObject({
+      member: null,
+      memberLookup: null,
+    });
   });
 
   it("requires the hosted Privy identity cookie for the session-only auth path", async () => {
@@ -350,6 +441,21 @@ function createHostedMember(
 
 function createHostedMemberLookup(overrides: Partial<{
   core: HostedMember;
+  identity: {
+    maskedPhoneNumberHint: string | null;
+    memberId: string;
+    phoneNumber: string | null;
+    phoneNumberVerifiedAt: Date | null;
+    privyUserId: string | null;
+    signupPhoneCodeSendAttemptId: string | null;
+    signupPhoneCodeSendAttemptStartedAt: Date | null;
+    signupPhoneCodeSentAt: Date | null;
+    signupPhoneNumber: string | null;
+    walletAddress: string | null;
+    walletChainType: string | null;
+    walletCreatedAt: Date | null;
+    walletProvider: string | null;
+  };
   matchedBy: string[];
 }> = {}) {
   return {

@@ -137,6 +137,16 @@ function listWearableActivityDaysFromDataset(dataset: WearableDataset): Wearable
     const distanceKm = resolveMetric("distanceKm", selectMetricCandidates(dateCandidates, "distanceKm"), {
       metricFamily: "activity",
     });
+    const totalElevationGainMeters = resolveMetric(
+      "totalElevationGainMeters",
+      selectMetricCandidates(dateCandidates, "totalElevationGainMeters"),
+      { metricFamily: "activity" },
+    );
+    const altitudeChangeMeters = resolveMetric(
+      "altitudeChangeMeters",
+      selectMetricCandidates(dateCandidates, "altitudeChangeMeters"),
+      { metricFamily: "activity" },
+    );
     const estimatedVo2Max = resolveMetric("estimatedVo2Max", selectMetricCandidates(dateCandidates, "estimatedVo2Max"), {
       metricFamily: "cardio",
     });
@@ -144,6 +154,15 @@ function listWearableActivityDaysFromDataset(dataset: WearableDataset): Wearable
       metricFamily: "activity",
     });
     const dayStrain = resolveMetric("dayStrain", selectMetricCandidates(dateCandidates, "dayStrain"), {
+      metricFamily: "activity",
+    });
+    const workoutStrain = resolveMetric("workoutStrain", selectMetricCandidates(dateCandidates, "workoutStrain"), {
+      metricFamily: "activity",
+    });
+    const maxHeartRate = resolveMetric("maxHeartRate", selectMetricCandidates(dateCandidates, "maxHeartRate"), {
+      metricFamily: "activity",
+    });
+    const percentRecorded = resolveMetric("percentRecorded", selectMetricCandidates(dateCandidates, "percentRecorded"), {
       metricFamily: "activity",
     });
     const sessionMinutes = resolveMetric(
@@ -161,9 +180,14 @@ function listWearableActivityDaysFromDataset(dataset: WearableDataset): Wearable
       ["steps", steps],
       ["activeCalories", activeCalories],
       ["distanceKm", distanceKm],
+      ["totalElevationGainMeters", totalElevationGainMeters],
+      ["altitudeChangeMeters", altitudeChangeMeters],
       ["estimatedVo2Max", estimatedVo2Max],
       ["activityScore", activityScore],
       ["dayStrain", dayStrain],
+      ["workoutStrain", workoutStrain],
+      ["maxHeartRate", maxHeartRate],
+      ["percentRecorded", percentRecorded],
       ["sessionMinutes", sessionMinutes],
       ["sessionCount", sessionCount],
     ], {
@@ -180,15 +204,20 @@ function listWearableActivityDaysFromDataset(dataset: WearableDataset): Wearable
       activityScore,
       activeCalories,
       activityTypes,
+      altitudeChangeMeters,
       date,
       dayStrain,
       distanceKm,
       estimatedVo2Max,
+      maxHeartRate,
       notes,
+      percentRecorded,
       sessionCount,
       sessionMinutes,
       steps,
       summaryConfidence,
+      totalElevationGainMeters,
+      workoutStrain,
     };
   });
 }

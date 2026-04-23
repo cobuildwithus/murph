@@ -34,7 +34,7 @@ export function HostedExistingAccountSignInDialog() {
               Sign in to Murph
             </DialogTitle>
             <DialogDescription>
-              Use your phone number, email address, or Telegram to sign in.
+              Use your previously linked phone number, email address, or Telegram account to sign in.
             </DialogDescription>
           </DialogHeader>
           {open ? (

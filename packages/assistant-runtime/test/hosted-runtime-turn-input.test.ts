@@ -94,6 +94,7 @@ function createPort(input: {
     inboxServices,
     requestId: "req_turn_input",
     runtime: {
+      forwardedEnv: {},
       platform: {
         artifactStore: {
           get: vi.fn(async () => null),
@@ -107,6 +108,7 @@ function createPort(input: {
           refresh: input.hostedRefresh,
         },
       },
+      platformEnv: {},
     },
     vaultRoot: "/tmp/vault-root",
     wake: TIMER_WAKE,
@@ -122,6 +124,7 @@ describe("createHostedAssistantTurnInputPort", () => {
         inboxServices,
         requestId: "req_no_port",
         runtime: {
+          forwardedEnv: {},
           platform: {
             artifactStore: {
               get: vi.fn(async () => null),
@@ -133,6 +136,7 @@ describe("createHostedAssistantTurnInputPort", () => {
             },
             turnInputPort: null,
           },
+          platformEnv: {},
         },
         vaultRoot: "/tmp/vault-root",
         wake: TIMER_WAKE,

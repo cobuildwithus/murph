@@ -1,3 +1,17 @@
+// Ingress-only verification secrets stay on the control-plane/webhook boundary
+// and must not enter user-executable hosted runtime env.
+export const HOSTED_SHARED_INGRESS_ONLY_SECRET_ENV_NAMES = [
+  "LINQ_WEBHOOK_SECRET",
+] as const;
+
+// Platform-owned Telegram routing vars must never be user-controlled because
+// privileged Telegram requests embed the bot token in the request URL.
+export const HOSTED_SHARED_PLATFORM_ONLY_ENV_NAMES = [
+  "TELEGRAM_API_BASE_URL",
+  "TELEGRAM_BOT_TOKEN",
+  "TELEGRAM_FILE_BASE_URL",
+] as const;
+
 export const HOSTED_SHARED_FORWARDED_ENV_CATEGORY_KEYS = {
   assistantConfigured: [
     "ANTHROPIC_API_KEY",
@@ -25,7 +39,6 @@ export const HOSTED_SHARED_FORWARDED_ENV_CATEGORY_KEYS = {
     "LINQ_ATTACHMENT_CDN_BASE_URL",
     "LINQ_API_BASE_URL",
     "LINQ_API_TOKEN",
-    "LINQ_WEBHOOK_SECRET",
   ],
   parserToolingConfigured: [
     "FFMPEG_COMMAND",
@@ -34,7 +47,6 @@ export const HOSTED_SHARED_FORWARDED_ENV_CATEGORY_KEYS = {
   ],
   telegramConfigured: [
     "TELEGRAM_API_BASE_URL",
-    "TELEGRAM_BOT_TOKEN",
     "TELEGRAM_BOT_USERNAME",
     "TELEGRAM_FILE_BASE_URL",
   ],

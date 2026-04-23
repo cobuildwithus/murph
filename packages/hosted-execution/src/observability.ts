@@ -505,11 +505,21 @@ function readHostedExecutionSafeConfigurationMessage(message: string): string | 
 export function sanitizeHostedExecutionStructuredLogDetails(
   value: HostedExecutionStructuredLogDetails | null | undefined,
 ): HostedExecutionStructuredLogDetails | null {
+  return sanitizeHostedExecutionStructuredLogDetailsWithHints(
+    value,
+    inferHostedExecutionDetailSanitizationHints(value),
+  );
+}
+
+function sanitizeHostedExecutionStructuredLogDetailsWithHints(
+  value: HostedExecutionStructuredLogDetails | null | undefined,
+  hints: HostedExecutionDetailSanitizationHints,
+): HostedExecutionStructuredLogDetails | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return null;
   }
 
-  const sanitized = sanitizeHostedExecutionDetailNode(value, 0);
+  const sanitized = sanitizeHostedExecutionDetailNode(value, 0, hints);
   return sanitized && typeof sanitized === "object" && !Array.isArray(sanitized)
     ? sanitized
     : null;
@@ -522,11 +532,14 @@ export function buildHostedExecutionSafeErrorDetails(
     return null;
   }
 
-  const nestedContext = sanitizeHostedExecutionStructuredLogDetails(
+  const hints = inferHostedExecutionErrorSanitizationHints(error);
+  const nestedContext = sanitizeHostedExecutionStructuredLogDetailsWithHints(
     readHostedExecutionObjectErrorProperty(error, ["context"]),
+    hints,
   );
-  const nestedDetails = sanitizeHostedExecutionStructuredLogDetails(
+  const nestedDetails = sanitizeHostedExecutionStructuredLogDetailsWithHints(
     readHostedExecutionObjectErrorProperty(error, ["details"]),
+    hints,
   );
   const details: HostedExecutionStructuredLogDetails = {
     ...(nestedContext ?? {}),
@@ -700,6 +713,7 @@ function hostedExecutionFragmentsOverlap(left: string, right: string): boolean {
 function sanitizeHostedExecutionDetailNode(
   value: HostedExecutionStructuredLogDetailValue,
   depth: number,
+  hints: HostedExecutionDetailSanitizationHints,
 ): HostedExecutionStructuredLogDetailValue | null {
   if (depth > HOSTED_EXECUTION_MAX_DETAIL_DEPTH) {
     return null;
@@ -720,7 +734,7 @@ function sanitizeHostedExecutionDetailNode(
   if (Array.isArray(value)) {
     const sanitizedItems = value
       .slice(0, HOSTED_EXECUTION_MAX_DETAIL_ARRAY_LENGTH)
-      .map((entry) => sanitizeHostedExecutionDetailNode(entry, depth + 1))
+      .map((entry) => sanitizeHostedExecutionDetailNode(entry, depth + 1, hints))
       .filter((entry): entry is Exclude<typeof entry, null> => entry !== null);
     return sanitizedItems.length > 0 ? sanitizedItems : null;
   }
@@ -729,6 +743,10 @@ function sanitizeHostedExecutionDetailNode(
     return null;
   }
 
+  const objectHints = mergeHostedExecutionDetailSanitizationHints(
+    hints,
+    inferHostedExecutionDetailSanitizationHints(value),
+  );
   const sanitizedEntries = Object.entries(value)
     .slice(0, HOSTED_EXECUTION_MAX_DETAIL_KEYS)
     .flatMap(([key, entry]) => {
@@ -736,11 +754,157 @@ function sanitizeHostedExecutionDetailNode(
         return [];
       }
 
-      const sanitizedEntry = sanitizeHostedExecutionDetailNode(entry, depth + 1);
+      const redactedTelegramEntry = sanitizeHostedExecutionTelegramDetailEntry(
+        key,
+        entry,
+        objectHints,
+      );
+      if (redactedTelegramEntry !== undefined) {
+        return redactedTelegramEntry === null ? [] : [[key, redactedTelegramEntry] as const];
+      }
+
+      const sanitizedEntry = sanitizeHostedExecutionDetailNode(entry, depth + 1, objectHints);
       return sanitizedEntry === null ? [] : [[key, sanitizedEntry] as const];
     });
 
   return sanitizedEntries.length > 0 ? Object.fromEntries(sanitizedEntries) : null;
+}
+
+interface HostedExecutionDetailSanitizationHints {
+  redactTelegramIdentifiers: boolean;
+}
+
+function inferHostedExecutionDetailSanitizationHints(
+  value: unknown,
+): HostedExecutionDetailSanitizationHints {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {
+      redactTelegramIdentifiers: false,
+    };
+  }
+
+  const record = value as Record<string, unknown>;
+  return {
+    redactTelegramIdentifiers: hostedExecutionDetailIndicatesTelegram(record),
+  };
+}
+
+function inferHostedExecutionErrorSanitizationHints(
+  error: Error,
+): HostedExecutionDetailSanitizationHints {
+  const code = readHostedExecutionStringErrorProperty(error, ["code", "errorCode"]);
+  const context = readHostedExecutionObjectErrorProperty(error, ["context"]);
+  const details = readHostedExecutionObjectErrorProperty(error, ["details"]);
+
+  return mergeHostedExecutionDetailSanitizationHints(
+    {
+      redactTelegramIdentifiers: typeof code === "string"
+        && code.toUpperCase().includes("TELEGRAM"),
+    },
+    mergeHostedExecutionDetailSanitizationHints(
+      inferHostedExecutionDetailSanitizationHints(context),
+      inferHostedExecutionDetailSanitizationHints(details),
+    ),
+  );
+}
+
+function mergeHostedExecutionDetailSanitizationHints(
+  primary: HostedExecutionDetailSanitizationHints,
+  secondary: HostedExecutionDetailSanitizationHints,
+): HostedExecutionDetailSanitizationHints {
+  return {
+    redactTelegramIdentifiers:
+      primary.redactTelegramIdentifiers || secondary.redactTelegramIdentifiers,
+  };
+}
+
+function hostedExecutionDetailIndicatesTelegram(
+  value: Record<string, unknown>,
+): boolean {
+  return [
+    "assistantNotificationChannel",
+    "channel",
+    "deliveryChannel",
+    "notificationRouteChannel",
+    "provider",
+    "wakeChannel",
+  ].some((key) => normalizeHostedExecutionDetailString(value[key])?.toLowerCase() === "telegram");
+}
+
+function sanitizeHostedExecutionTelegramDetailEntry(
+  key: string,
+  value: HostedExecutionStructuredLogDetailValue,
+  hints: HostedExecutionDetailSanitizationHints,
+): HostedExecutionStructuredLogDetailValue | null | undefined {
+  if (!hints.redactTelegramIdentifiers) {
+    return undefined;
+  }
+
+  switch (key) {
+    case "businessConnectionId":
+    case "business_connection_id":
+      return hostedExecutionDetailValuePresent(value)
+        ? "[redacted-telegram-business-connection-id]"
+        : null;
+    case "chatId":
+    case "chat_id":
+    case "migrateToChatId":
+    case "migrate_to_chat_id":
+      return hostedExecutionDetailValuePresent(value)
+        ? "[redacted-telegram-chat-id]"
+        : null;
+    case "directMessagesTopicId":
+    case "direct_messages_topic_id":
+    case "messageThreadId":
+    case "message_thread_id":
+      return hostedExecutionDetailValuePresent(value)
+        ? "[redacted-telegram-topic-id]"
+        : null;
+    case "target":
+    case "targetLabel":
+    case "threadId":
+      return summarizeRedactedHostedTelegramTarget(value);
+    default:
+      return undefined;
+  }
+}
+
+function summarizeRedactedHostedTelegramTarget(
+  value: HostedExecutionStructuredLogDetailValue,
+): HostedExecutionStructuredLogDetailValue | null {
+  const normalized = normalizeHostedExecutionDetailString(value);
+  if (!normalized) {
+    return null;
+  }
+
+  const parts = ["chat"];
+  if (normalized.includes(":business:")) {
+    parts.push("business");
+  }
+  if (normalized.includes(":topic:")) {
+    parts.push("topic");
+  }
+  if (normalized.includes(":dm-topic:")) {
+    parts.push("dm-topic");
+  }
+
+  return `[redacted-telegram-target:${parts.join("+")}]`;
+}
+
+function hostedExecutionDetailValuePresent(
+  value: HostedExecutionStructuredLogDetailValue,
+): boolean {
+  if (typeof value === "number") {
+    return Number.isFinite(value);
+  }
+
+  return normalizeHostedExecutionDetailString(value) !== null;
+}
+
+function normalizeHostedExecutionDetailString(value: unknown): string | null {
+  return typeof value === "string"
+    ? normalizeHostedExecutionDiagnosticMessage(value, 512)
+    : null;
 }
 
 function normalizeHostedExecutionDiagnosticMessage(

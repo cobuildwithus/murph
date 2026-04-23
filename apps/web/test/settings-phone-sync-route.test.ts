@@ -41,6 +41,12 @@ vi.mock("@/src/lib/hosted-ingress/control", () => ({
   nudgeHostedRunBestEffort: mocks.nudgeHostedRunBestEffort,
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
+  getHostedOnboardingEnvironment: () => ({
+    publicBaseUrl: "https://join.example.test",
+  }),
+}));
+
 type SettingsPhoneSyncRouteModule = typeof import("../app/api/settings/phone/sync/route");
 
 let settingsPhoneSyncRoute: SettingsPhoneSyncRouteModule;

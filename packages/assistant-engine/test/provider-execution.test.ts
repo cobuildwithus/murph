@@ -417,14 +417,17 @@ describe('openAiCompatibleProviderDefinition.executeTurn', () => {
         onToolEvent: expect.any(Function),
       }),
     )
-    expect(providerMocks.resolveAssistantLanguageModel).toHaveBeenCalledWith({
-      apiKey: 'test-openai-key',
-      apiKeyEnv: 'OPENAI_API_KEY',
-      baseUrl: 'https://api.openai.com/v1',
-      executionDriver: 'responses',
-      model: 'gpt-4.1-mini',
-      providerName: 'OpenAI',
-    })
+    expect(providerMocks.resolveAssistantLanguageModel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        apiKey: 'test-openai-key',
+        apiKeyEnv: 'OPENAI_API_KEY',
+        apiKeyEnvValue: 'test-openai-key',
+        baseUrl: 'https://api.openai.com/v1',
+        executionDriver: 'responses',
+        model: 'gpt-4.1-mini',
+        providerName: 'OpenAI',
+      }),
+    )
     expect(providerMocks.generateText.mock.calls[0]?.[0]).toMatchObject({
       abortSignal: undefined,
       maxRetries: 0,
@@ -591,6 +594,7 @@ describe('openAiCompatibleProviderDefinition.executeTurn', () => {
       model: {
         provider: 'mock-language-model',
       },
+      onStepFinish: expect.any(Function),
       system: undefined,
       timeout: 600000,
     })
@@ -721,6 +725,79 @@ describe('openAiCompatibleProviderDefinition.executeTurn', () => {
     expect(onTraceEvent).not.toHaveBeenCalled()
   })
 
+  it('counts deduped provider-executed native web search actions in success metadata', async () => {
+    providerMocks.generateText.mockImplementationOnce(async (options) => {
+      options.onStepFinish?.({
+        toolCalls: [
+          {
+            providerExecuted: true,
+            toolCallId: 'provider-web-search-1',
+          },
+        ],
+        toolResults: [
+          {
+            providerExecuted: true,
+            toolCallId: 'provider-web-search-1',
+          },
+        ],
+      })
+
+      return {
+        response: {
+          id: 'response-openai-provider-web-search',
+          model: 'gpt-4.1-mini-2026-04-01',
+        },
+        text: 'Provider-native web search answer',
+        toolCalls: [
+          {
+            providerExecuted: true,
+            toolCallId: 'provider-web-search-1',
+          },
+        ],
+        toolResults: [
+          {
+            providerExecuted: true,
+            toolCallId: 'provider-web-search-1',
+          },
+        ],
+        totalUsage: {
+          input_tokens: 5,
+          output_tokens: 8,
+          total_tokens: 13,
+        },
+      }
+    })
+
+    const result = await openAiCompatibleProviderDefinition.executeTurn({
+      providerConfig: normalizeAssistantProviderConfig({
+        provider: 'openai-compatible',
+        baseUrl: 'https://api.openai.com/v1',
+        model: 'gpt-4.1-mini',
+        presetId: 'openai',
+        providerName: 'OpenAI',
+        webSearch: 'provider',
+      }),
+      prompt: 'Search the web natively and answer.',
+      workingDirectory: WORKING_DIRECTORY,
+    })
+
+    expect(result).toMatchObject({
+      metadata: {
+        executedToolCount: 0,
+        providerActionCount: 1,
+      },
+      ok: true,
+    })
+    expect(providerMocks.generateText.mock.calls[0]?.[0]).toMatchObject({
+      onStepFinish: expect.any(Function),
+      tools: {
+        web_search: expect.objectContaining({
+          description: 'Native OpenAI web search tool',
+        }),
+      },
+    })
+  })
+
   it('returns a failed provider result when generateText throws', async () => {
     providerMocks.generateText.mockRejectedValueOnce(new Error('gateway timeout'))
 
@@ -747,6 +824,54 @@ describe('openAiCompatibleProviderDefinition.executeTurn', () => {
       throw new Error('Expected the provider execution to fail.')
     }
     expect(result.error).toEqual(new Error('gateway timeout'))
+  })
+
+  it('preserves provider-native action counts when generateText fails after provider work', async () => {
+    const providerFailure = new Error('gateway timeout after provider-native search')
+    providerMocks.generateText.mockImplementationOnce(async (options) => {
+      options.onStepFinish?.({
+        toolCalls: [
+          {
+            providerExecuted: true,
+            toolCallId: 'provider-web-search-1',
+          },
+        ],
+        toolResults: [
+          {
+            providerExecuted: true,
+            toolCallId: 'provider-web-search-1',
+          },
+        ],
+      })
+
+      throw providerFailure
+    })
+
+    const result = await openAiCompatibleProviderDefinition.executeTurn({
+      providerConfig: normalizeAssistantProviderConfig({
+        provider: 'openai-compatible',
+        baseUrl: 'https://api.openai.com/v1',
+        model: 'gpt-4.1-mini',
+        presetId: 'openai',
+        providerName: 'OpenAI',
+        webSearch: 'provider',
+      }),
+      prompt: 'Retry this request after native search.',
+      workingDirectory: WORKING_DIRECTORY,
+    })
+
+    expect(result).toMatchObject({
+      metadata: {
+        executedToolCount: 0,
+        providerActionCount: 1,
+        rawToolEvents: [],
+      },
+      ok: false,
+    })
+    if (result.ok) {
+      throw new Error('Expected the provider execution to fail.')
+    }
+    expect(result.error).toBe(providerFailure)
   })
 
   it('routes Vercel AI Gateway zero-data-retention through the responses request policy', async () => {
@@ -812,7 +937,7 @@ describe('openAiCompatibleProviderDefinition.executeTurn', () => {
       }),
     )
 
-    expect(providerMocks.generateText).toHaveBeenCalledWith({
+    expect(providerMocks.generateText.mock.calls[0]?.[0]).toMatchObject({
       abortSignal: undefined,
       maxRetries: 0,
       messages: [
@@ -897,6 +1022,125 @@ describe('openAiCompatibleProviderDefinition.executeTurn', () => {
         },
       }),
     )
+  })
+
+  it('keeps custom endpoints off gateway provider options and delegated billing even with stale gateway metadata', async () => {
+    providerMocks.generateText.mockResolvedValue({
+      text: 'Proxy answer',
+      response: {
+        id: 'gateway-proxy-1',
+        modelId: 'openai/gpt-5.4',
+      },
+      usage: {
+        completion_tokens: 2,
+        prompt_tokens: 4,
+      },
+    })
+
+    await openAiCompatibleProviderDefinition.executeTurn({
+      env: {
+        HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY: 'rk_test_123',
+        HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED: '1',
+      },
+      providerConfig: normalizeAssistantProviderConfig({
+        provider: 'openai-compatible',
+        apiKeyEnv: 'VERCEL_AI_API_KEY',
+        baseUrl: 'https://proxy.example.com/v1',
+        gatewayOnlyProviders: ['openai'],
+        headers: {
+          'x-extra-header': 'keep-me',
+        },
+        model: 'openai/gpt-5.4',
+        presetId: 'vercel-ai-gateway',
+        providerName: 'vercel-ai-gateway',
+        zeroDataRetention: true,
+      }),
+      usageAttribution: createAssistantUsageAttribution({
+        credentialSource: 'platform',
+        environment: 'production',
+        featureKey: 'assistant_reply',
+        memberId: 'member_123',
+        reportingSecret: 'reporting-secret',
+        surface: 'hosted_web',
+        stripeCustomerId: 'cus_123',
+        stripeMeterSource: 'vercel-ai-gateway',
+        triggerKind: 'manual_ask',
+        zeroDataRetention: true,
+      }),
+      prompt: 'Use the custom proxy',
+      workingDirectory: WORKING_DIRECTORY,
+    })
+
+    expect(providerMocks.resolveAssistantLanguageModel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        apiKeyEnv: 'VERCEL_AI_API_KEY',
+        baseUrl: 'https://proxy.example.com/v1',
+        apiKeyEnvValue: null,
+        executionDriver: 'openai-compatible',
+        headers: {
+          'X-Extra-Header': 'keep-me',
+        },
+      }),
+    )
+    expect(
+      providerMocks.resolveAssistantLanguageModel.mock.calls[0]?.[0],
+    ).not.toHaveProperty('responsesRequestPolicy')
+    expect(providerMocks.generateText.mock.calls[0]?.[0]).not.toHaveProperty(
+      'providerOptions.gateway',
+    )
+  })
+
+  it('keeps Murph web.search on custom endpoints even when stale OpenAI metadata would otherwise enable native search', async () => {
+    providerMocks.generateText.mockResolvedValue({
+      text: 'Proxy answer',
+      response: {
+        id: 'proxy-openai-1',
+        modelId: 'gpt-4.1-mini',
+      },
+      usage: {
+        completion_tokens: 5,
+        prompt_tokens: 6,
+      },
+    })
+
+    const toolCatalog: AssistantToolCatalog = {
+      createAiSdkTools: vi.fn(
+        (_mode: AssistantToolExecutionMode = 'preview', _callbacks: AssistantCreateAiSdkToolsOptions = {}) => ({
+          'web.search': tool({
+            description: 'Mock web search tool',
+            execute: async () => ({}),
+            inputSchema: z.object({
+              query: z.string().optional(),
+            }),
+          }),
+        }),
+      ),
+      executeCalls: vi.fn(),
+      hasTool: vi.fn(),
+      listTools: vi.fn(),
+    }
+
+    await openAiCompatibleProviderDefinition.executeTurn({
+      providerConfig: normalizeAssistantProviderConfig({
+        provider: 'openai-compatible',
+        baseUrl: 'https://proxy.example.com/v1',
+        model: 'gpt-4.1-mini',
+        presetId: 'openai',
+        providerName: 'OpenAI',
+      }),
+      toolRuntime: {
+        toolCatalog,
+        vault: '/tmp/test-vault',
+      },
+      userPrompt: 'Search for the latest note.',
+      workingDirectory: WORKING_DIRECTORY,
+    })
+
+    expect(providerMocks.generateText.mock.calls[0]?.[0]?.tools).toMatchObject({
+      web_search: expect.objectContaining({
+        description: 'Mock web search tool',
+      }),
+    })
   })
 })
 

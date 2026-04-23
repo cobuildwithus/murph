@@ -798,44 +798,26 @@ describe("HostedPhoneAuth", () => {
     );
   });
 
-  it("sends active existing-account sign-ins straight to settings", async () => {
-    const { resolveHostedPrivyCompletionRedirectUrl } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-support");
+  it("includes the auth intent in hosted Privy completion requests", async () => {
+    const { buildHostedPrivyCompletionRequestPayload } = await import("@/src/components/hosted-onboarding/hosted-privy-auth-support");
 
-    assert.equal(
-      resolveHostedPrivyCompletionRedirectUrl({
+    assert.deepEqual(
+      buildHostedPrivyCompletionRequestPayload({
         intent: "signin",
-        payload: {
-          inviteCode: "invite-code",
-          joinUrl: "/join/invite-code",
-          messagingSetupRequired: false,
-          stage: "active",
-        },
       }),
-      "/settings",
+      {
+        intent: "signin",
+      },
     );
-    assert.equal(
-      resolveHostedPrivyCompletionRedirectUrl({
+    assert.deepEqual(
+      buildHostedPrivyCompletionRequestPayload({
         intent: "signup",
-        payload: {
-          inviteCode: "invite-code",
-          joinUrl: "/join/invite-code",
-          messagingSetupRequired: false,
-          stage: "active",
-        },
+        inviteCode: "invite-code",
       }),
-      "/join/invite-code",
-    );
-    assert.equal(
-      resolveHostedPrivyCompletionRedirectUrl({
+      {
         intent: "signup",
-        payload: {
-          inviteCode: "invite-code",
-          joinUrl: "https://www.withmurph.ai/join/invite-code",
-          messagingSetupRequired: false,
-          stage: "checkout",
-        },
-      }),
-      "/join/invite-code",
+        inviteCode: "invite-code",
+      },
     );
   });
 
@@ -889,6 +871,9 @@ describe("HostedPhoneAuth", () => {
     assert.equal(ensureHostedPrivyPhoneReady.mock.calls.length, 1);
     assert.equal(requestHostedOnboardingJson.mock.calls.length, 1);
     assert.equal(requestHostedOnboardingJson.mock.calls[0]?.[0]?.url, "/api/hosted-onboarding/privy/complete");
+    assert.deepEqual(requestHostedOnboardingJson.mock.calls[0]?.[0]?.payload, {
+      intent: "signup",
+    });
     assert.equal(assign.mock.calls.length, 1);
     assert.equal(assign.mock.calls[0]?.[0], "/join/invite-code");
   });
@@ -946,6 +931,9 @@ describe("HostedPhoneAuth", () => {
       linkedAccounts: [{ type: "phone" }],
     });
     assert.equal(requestHostedOnboardingJson.mock.calls.length, 1);
+    assert.deepEqual(requestHostedOnboardingJson.mock.calls[0]?.[0]?.payload, {
+      intent: "signup",
+    });
     assert.equal(assign.mock.calls.length, 1);
     assert.equal(assign.mock.calls[0]?.[0], "/settings");
   });
@@ -1012,6 +1000,12 @@ describe("HostedPhoneAuth", () => {
 
     assert.equal(ensureHostedPrivyPhoneReady.mock.calls.length, 1);
     assert.equal(requestHostedOnboardingJson.mock.calls.length, 2);
+    assert.deepEqual(requestHostedOnboardingJson.mock.calls[0]?.[0]?.payload, {
+      intent: "signup",
+    });
+    assert.deepEqual(requestHostedOnboardingJson.mock.calls[1]?.[0]?.payload, {
+      intent: "signup",
+    });
     assert.equal(assign.mock.calls.length, 1);
     assert.equal(assign.mock.calls[0]?.[0], "/join/invite-code");
   });
@@ -1076,6 +1070,12 @@ describe("HostedPhoneAuth", () => {
 
     assert.equal(ensureHostedPrivyPhoneReady.mock.calls.length, 1);
     assert.equal(requestHostedOnboardingJson.mock.calls.length, 2);
+    assert.deepEqual(requestHostedOnboardingJson.mock.calls[0]?.[0]?.payload, {
+      intent: "signup",
+    });
+    assert.deepEqual(requestHostedOnboardingJson.mock.calls[1]?.[0]?.payload, {
+      intent: "signup",
+    });
     assert.equal(assign.mock.calls.length, 1);
     assert.equal(assign.mock.calls[0]?.[0], "/join/invite-code");
   });

@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   countPendingHostedIngressEvents: vi.fn(),
-  ensureHostedExecutionCursorRowTx: vi.fn(),
+  ensureHostedExecutionCursorRow: vi.fn(),
   hydrateHostedIngressEventsTx: vi.fn(),
   lockHostedExecutionCursorRowTx: vi.fn(),
   projectHostedExecutionCursorRecord: vi.fn((cursor: CursorRow) => ({
@@ -20,7 +20,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/src/lib/hosted-ingress/store-data", () => ({
-  ensureHostedExecutionCursorRowTx: mocks.ensureHostedExecutionCursorRowTx,
+  ensureHostedExecutionCursorRow: mocks.ensureHostedExecutionCursorRow,
   lockHostedExecutionCursorRowTx: mocks.lockHostedExecutionCursorRowTx,
 }));
 
@@ -142,7 +142,7 @@ describe("hosted run log handling", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.countPendingHostedIngressEvents.mockResolvedValue(0);
-    mocks.ensureHostedExecutionCursorRowTx.mockResolvedValue(buildCursorRow());
+    mocks.ensureHostedExecutionCursorRow.mockResolvedValue(buildCursorRow());
   });
 
   it("stores only sanitized operator messages and requires the active run token", async () => {
@@ -471,7 +471,7 @@ describe("commitHostedRunTx", () => {
       },
     });
 
-    mocks.ensureHostedExecutionCursorRowTx
+    mocks.ensureHostedExecutionCursorRow
       .mockResolvedValueOnce(initialCursor)
       .mockResolvedValueOnce(initialCursor)
       .mockResolvedValueOnce(committedCursor);
@@ -607,7 +607,7 @@ describe("commitHostedRunTx", () => {
       },
     });
 
-    mocks.ensureHostedExecutionCursorRowTx
+    mocks.ensureHostedExecutionCursorRow
       .mockResolvedValueOnce(initialCursor)
       .mockResolvedValueOnce(initialCursor)
       .mockResolvedValueOnce(committedCursor);
@@ -692,7 +692,7 @@ describe("commitHostedRunTx", () => {
       },
     });
 
-    mocks.ensureHostedExecutionCursorRowTx.mockResolvedValue(cursor);
+    mocks.ensureHostedExecutionCursorRow.mockResolvedValue(cursor);
 
     const result = await commitHostedRunTx({
       eventResults: [
@@ -792,7 +792,7 @@ describe("commitHostedRunTx", () => {
       },
     });
 
-    mocks.ensureHostedExecutionCursorRowTx
+    mocks.ensureHostedExecutionCursorRow
       .mockResolvedValueOnce(initialCursor)
       .mockResolvedValueOnce(initialCursor)
       .mockResolvedValueOnce(committedCursor);
@@ -899,7 +899,7 @@ describe("commitHostedRunTx", () => {
       },
     });
 
-    mocks.ensureHostedExecutionCursorRowTx
+    mocks.ensureHostedExecutionCursorRow
       .mockResolvedValueOnce(initialCursor)
       .mockResolvedValueOnce(initialCursor)
       .mockResolvedValueOnce(committedCursor);
@@ -1038,7 +1038,7 @@ describe("commitHostedRunTx", () => {
       },
     });
 
-    mocks.ensureHostedExecutionCursorRowTx
+    mocks.ensureHostedExecutionCursorRow
       .mockResolvedValueOnce(initialCursor)
       .mockResolvedValueOnce(initialCursor)
       .mockResolvedValueOnce(committedCursor);
@@ -1122,7 +1122,7 @@ describe("hosted run turn input", () => {
       }))
     );
     mocks.lockHostedExecutionCursorRowTx.mockResolvedValue(undefined);
-    mocks.ensureHostedExecutionCursorRowTx.mockResolvedValue(buildCursorRow());
+    mocks.ensureHostedExecutionCursorRow.mockResolvedValue(buildCursorRow());
   });
 
   it("peeks pending contiguous ingress after the active run high-water", async () => {
@@ -1315,7 +1315,7 @@ describe("acquireHostedRunTx", () => {
       },
     });
 
-    mocks.ensureHostedExecutionCursorRowTx.mockResolvedValue(cursor);
+    mocks.ensureHostedExecutionCursorRow.mockResolvedValue(cursor);
 
     const result = await acquireHostedRunTx({
       tx,
@@ -1355,7 +1355,7 @@ describe("acquireHostedRunTx", () => {
       },
     });
 
-    mocks.ensureHostedExecutionCursorRowTx.mockResolvedValue(cursor);
+    mocks.ensureHostedExecutionCursorRow.mockResolvedValue(cursor);
 
     const result = await acquireHostedRunTx({
       triggerKind: "manual_repair",
@@ -1419,7 +1419,7 @@ describe("acquireHostedRunTx", () => {
       },
     });
 
-    mocks.ensureHostedExecutionCursorRowTx.mockResolvedValue(cursor);
+    mocks.ensureHostedExecutionCursorRow.mockResolvedValue(cursor);
 
     const result = await acquireHostedRunTx({
       now: new Date("2026-04-20T00:05:00.000Z"),
@@ -1502,7 +1502,7 @@ describe("acquireHostedRunTx", () => {
       },
     });
 
-    mocks.ensureHostedExecutionCursorRowTx.mockResolvedValue(cursor);
+    mocks.ensureHostedExecutionCursorRow.mockResolvedValue(cursor);
 
     const result = await acquireHostedRunTx({
       now: new Date("2026-04-20T00:20:00.000Z"),
@@ -1562,7 +1562,7 @@ describe("finalizeHostedRunTx", () => {
       },
     });
 
-    mocks.ensureHostedExecutionCursorRowTx.mockResolvedValue(cursor);
+    mocks.ensureHostedExecutionCursorRow.mockResolvedValue(cursor);
 
     const result = await finalizeHostedRunTx({
       finalSnapshotRef: {
@@ -1646,7 +1646,7 @@ describe("finalizeHostedRunTx", () => {
       },
     });
 
-    mocks.ensureHostedExecutionCursorRowTx
+    mocks.ensureHostedExecutionCursorRow
       .mockResolvedValueOnce(cursor)
       .mockResolvedValueOnce(cursor)
       .mockResolvedValueOnce(finalizedCursor);
@@ -1753,7 +1753,7 @@ describe("releaseHostedRunFinalizeTx", () => {
       },
     });
 
-    mocks.ensureHostedExecutionCursorRowTx.mockResolvedValue(cursor);
+    mocks.ensureHostedExecutionCursorRow.mockResolvedValue(cursor);
 
     const result = await releaseHostedRunFinalizeTx({
       failureCode: "HOSTED_RUN_FINALIZE_BACKPRESSURED",
@@ -1792,7 +1792,7 @@ describe("releaseHostedRunFinalizeTx", () => {
       },
     });
 
-    mocks.ensureHostedExecutionCursorRowTx.mockResolvedValue(cursor);
+    mocks.ensureHostedExecutionCursorRow.mockResolvedValue(cursor);
 
     const result = await releaseHostedRunFinalizeTx({
       runId: "run_123",

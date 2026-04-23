@@ -6,7 +6,20 @@ export async function hostedBundleObjectKey(
   rootKey: Uint8Array,
   kind: HostedExecutionBundleKind,
   hash: string,
+  userId?: string | null,
 ): Promise<string> {
+  if (typeof userId === "string" && userId.length > 0) {
+    const userSegment = await deriveHostedBundleUserSegment(rootKey, userId);
+    const bundleSegment = await deriveHostedStorageOpaqueId({
+      length: 48,
+      rootKey,
+      scope: "bundle-path",
+      value: `bundle:${userId}:${kind}:${hash}`,
+    });
+
+    return `users/bundles/${userSegment}/${kind}/${bundleSegment}.bundle.json`;
+  }
+
   const bundleSegment = await deriveHostedStorageOpaqueId({
     length: 48,
     rootKey,
@@ -15,6 +28,17 @@ export async function hostedBundleObjectKey(
   });
 
   return `bundles/${kind}/${bundleSegment}.bundle.json`;
+}
+
+export function isUserScopedHostedBundleObjectKey(key: string): boolean {
+  return /^users\/bundles\/[0-9a-f]{24}\/[^/]+\/[0-9a-f]{48}\.bundle\.json$/u.test(key);
+}
+
+export async function hostedBundleUserPrefix(
+  rootKey: Uint8Array,
+  userId: string,
+): Promise<string> {
+  return `users/bundles/${await deriveHostedBundleUserSegment(rootKey, userId)}/`;
 }
 
 export async function hostedArtifactObjectKey(
@@ -57,12 +81,7 @@ export async function hostedBrowserVaultReplicaObjectKey(input: {
   rootKey: Uint8Array;
   userId: string;
 }): Promise<string> {
-  const userSegment = await deriveHostedStorageOpaqueId({
-    length: 24,
-    rootKey: input.rootKey,
-    scope: "browser-vault-replica-path",
-    value: `user:${input.userId}`,
-  });
+  const userSegment = await deriveHostedBrowserVaultReplicaUserSegment(input.rootKey, input.userId);
   const replicaSegment = await deriveHostedStorageOpaqueId({
     length: 48,
     rootKey: input.rootKey,
@@ -71,4 +90,38 @@ export async function hostedBrowserVaultReplicaObjectKey(input: {
   });
 
   return `users/browser-vault-replicas/${userSegment}/${replicaSegment}.json`;
+}
+
+export async function hostedBrowserVaultReplicaUserPrefix(input: {
+  rootKey: Uint8Array;
+  userId: string;
+}): Promise<string> {
+  return `users/browser-vault-replicas/${await deriveHostedBrowserVaultReplicaUserSegment(
+    input.rootKey,
+    input.userId,
+  )}/`;
+}
+
+async function deriveHostedBundleUserSegment(
+  rootKey: Uint8Array,
+  userId: string,
+): Promise<string> {
+  return deriveHostedStorageOpaqueId({
+    length: 24,
+    rootKey,
+    scope: "bundle-path",
+    value: `user:${userId}`,
+  });
+}
+
+async function deriveHostedBrowserVaultReplicaUserSegment(
+  rootKey: Uint8Array,
+  userId: string,
+): Promise<string> {
+  return deriveHostedStorageOpaqueId({
+    length: 24,
+    rootKey,
+    scope: "browser-vault-replica-path",
+    value: `user:${userId}`,
+  });
 }

@@ -15,7 +15,7 @@ import type {
 export function createHostedAssistantTurnInputPort(input: {
   inboxServices: Parameters<typeof createInboxBackedAssistantTurnInputPort>[0]["inboxServices"];
   requestId: string;
-  runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "platform">;
+  runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "forwardedEnv" | "platform" | "platformEnv">;
   vaultRoot: string;
   wake: HostedRuntimeEvent;
 }): AssistantTurnInputPort | undefined {

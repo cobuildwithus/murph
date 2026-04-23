@@ -1,7 +1,6 @@
 import type {
   HostedExecutionBundleRef,
   HostedBrowserVaultReplicaRef,
-  HostedExecutionRedactedLogEntry,
   HostedExecutionRunContext,
   HostedExecutionRunLevel,
   HostedExecutionRunPhase,
@@ -17,7 +16,6 @@ import type {
 } from "@murphai/hosted-execution";
 import type { GatewayProjectionSnapshot } from "@murphai/gateway-core";
 import {
-  deriveHostedExecutionErrorCode,
   emitHostedExecutionStructuredLog,
   extractHostedAssistantNotificationRedactedDetails,
   formatHostedExecutionLogMessage,
@@ -28,7 +26,6 @@ import {
 } from "@murphai/hosted-execution/parsers";
 import type {
   HostedAssistantDeliveryOutcome,
-  HostedAssistantRuntimeCompletedJobResult,
   HostedAssistantRuntimeConfig,
   HostedAssistantRuntimeJobInput,
   HostedAssistantRuntimeJobResult,
@@ -37,15 +34,12 @@ import {
   HOSTED_RUN_MESSAGING_ACTIVITY_OWNER_ENV,
   HOSTED_RUN_MESSAGING_ACTIVITY_OWNER_EXECUTOR,
   computeHostedRunElapsedMs,
-  deleteHostedLinqMessages,
-  deleteHostedTelegramMessages,
   selectHostedRunMessagingActivityTarget,
   startHostedRunMessagingActivity,
   type HostedRunMessagingActivityHandle,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import type { R2BucketLike } from "../bundle-store.js";
 import { createHostedBrowserVaultReplicaStore } from "../browser-vault-store.js";
-import { deleteHostedEmailRawMessage } from "../hosted-email.ts";
 import type { HostedExecutionEnvironment } from "../env.js";
 import { type HostedUserCryptoContext } from "../user-key-store.js";
 import { HostedGatewayProjectionCache } from "../gateway-projection-cache.js";
@@ -58,24 +52,25 @@ import {
   buildHostedRunnerAmbientEnv,
   buildHostedRunnerContainerEnv,
   buildHostedRunnerJobRuntimeConfig,
+  buildHostedRunnerPlatformEnv,
 } from "../runner-env.ts";
 import {
   summarizeHostedRunnerForwardedEnvLogCategories,
   summarizeHostedRunnerSecretLogCategories,
 } from "../hosted-env-policy.ts";
-import {
-  type RunnerPendingCleanupState,
-  type RunnerStateRecord,
-} from "./types.js";
+import { type RunnerStateRecord } from "./types.js";
 import { RunnerBundleSync } from "./runner-bundle-sync.js";
+import { RunnerCleanupService } from "./runner-cleanup.js";
 import { RunnerStateStore } from "./runner-state-store.js";
 import type { RunnerLeaseOwnerInput } from "./runner-state-store.js";
 import { RunnerRuntimeAlarmScheduler } from "./runner-runtime-alarm-scheduler.js";
 import { RunnerSecretsService } from "./runner-secrets.js";
 import {
-  fetchHostedExecutionWebControlPlaneResponse,
-  recordHostedRunLogInWeb,
-} from "../web-control-plane.ts";
+  recordHostedRunBreadcrumbInWebBestEffort,
+  recordHostedRunPhaseLogInWebBestEffort,
+  recordHostedRunnerResultLogsInWebBestEffort,
+} from "./runner-web-observability.js";
+import { fetchHostedExecutionWebControlPlaneResponse } from "../web-control-plane.ts";
 
 export type HostedIngressEnvelopeProgressRecord =
   Pick<HostedRuntimeEvent, "eventId" | "userId">;
@@ -98,9 +93,6 @@ export interface RunnerRunDrainExecutionResult {
   state: HostedIngressLifecycleState;
 }
 
-const HOSTED_RUN_PHASE_LOG_TIMEOUT_MS = 2_000;
-const HOSTED_RUN_LOG_COMPONENT = "cloudflare-runner";
-
 interface RunnerRunTransitionInput<T> {
   eventId: string;
   gatewayProjectionSnapshot?: GatewayProjectionSnapshot | null;
@@ -121,10 +113,52 @@ interface RunnerRunProcessorDependencies {
   runtimeAlarmScheduler: RunnerRuntimeAlarmScheduler;
 }
 
+interface RunnerRunDrainLifecycleContext {
+  currentBundleRef: HostedExecutionBundleRef | null;
+  events: HostedRuntimeDrainEvent[];
+  leaseOwner: RunnerLeaseOwnerInput;
+  run: HostedExecutionRunContext;
+  runToken?: string | null;
+  wake: HostedIngressEnvelopeProgressRecord;
+}
+
+interface RunnerRunDrainLifecyclePolicy {
+  failureReason: string;
+  handleSuccess(
+    runnerResult: HostedAssistantRuntimeJobResult,
+    context: RunnerRunDrainLifecycleContext,
+  ): Promise<RunnerRunDrainExecutionResult>;
+  includeEventCountInFailureBreadcrumb?: boolean;
+  messages: {
+    backpressuredBreadcrumb: string;
+    backpressuredRetry: string;
+    failedBreadcrumb: string;
+    failedRetry: string;
+    start: string;
+    startPhase: HostedExecutionRunPhase;
+  };
+  resumeFinalize: boolean;
+}
+
 export class RunnerRunProcessor {
+  private readonly cleanupService: RunnerCleanupService;
+
   constructor(
     private readonly dependencies: RunnerRunProcessorDependencies,
-  ) {}
+  ) {
+    this.cleanupService = new RunnerCleanupService({
+      bucket: this.dependencies.bucket,
+      clearPendingRunCleanup: (runId) =>
+        this.dependencies.stateStore.clearPendingRunCleanup(runId),
+      readPendingRunCleanup: (runId) =>
+        this.dependencies.stateStore.readPendingRunCleanup(runId),
+      readUserCrypto: async (userId) =>
+        (await this.dependencies.ensureRunnerStores(userId)).crypto,
+      resolveRunnerRuntimeEnv: (userId) => this.resolveRunnerRuntimeEnv(userId),
+      writePendingRunCleanup: (runId, cleanup) =>
+        this.dependencies.stateStore.writePendingRunCleanup(runId, cleanup),
+    });
+  }
 
   async readRunDrainSharePack(
     wake: HostedIngressEnvelope,
@@ -206,187 +240,32 @@ export class RunnerRunProcessor {
       };
     }
 
-    await this.dependencies.stateStore.beginRun({
-      eventId: runEventId,
-      run,
-      userId,
-    });
-    await this.advanceRunPhase({
-      clearError: true,
-      wake: { eventId: runEventId, userId },
-      message: "Running hosted run drain from the web-owned run ledger.",
-      phase: "wake.running",
-      run,
+    return this.processRunDrainLifecycle({
+      currentBundleRef: input.currentBundleRef,
+      events: input.events,
+      lifecycle: {
+        failureReason: "runner_invocation_failed",
+        handleSuccess: (runnerResult, context) =>
+          this.handleExecuteRunDrainSuccess(runnerResult, context),
+        includeEventCountInFailureBreadcrumb: true,
+        messages: {
+          backpressuredBreadcrumb:
+            "Cloudflare deferred hosted run execution because the runtime is not configured yet.",
+          backpressuredRetry:
+            "Hosted run drain deferred because the runtime is not configured yet.",
+          failedBreadcrumb:
+            "Cloudflare runner invocation failed while preparing the hosted run snapshot.",
+          failedRetry: "Hosted run drain failed after invoking the runtime.",
+          start: "Running hosted run drain from the web-owned run ledger.",
+          startPhase: "wake.running",
+        },
+        resumeFinalize: false,
+      },
+      messagingActivityOwnedByExecutor: input.messagingActivityOwnedByExecutor,
+      primaryWake: input.primaryWake,
+      run: input.run,
       runToken: input.runToken,
     });
-
-    try {
-      const runnerResult = await this.invokeRunner(
-        userId,
-        input.currentBundleRef,
-        input.primaryWake,
-        run,
-        buildHostedRuntimeDrainRequest({
-          events: input.events,
-          resumeFinalize: false,
-          run: input.run,
-        }),
-        input.runToken,
-        {
-          messagingActivityOwnedByExecutor: input.messagingActivityOwnedByExecutor === true,
-        },
-      );
-      const result = runnerResult.result;
-
-      if (runnerResult.phase === "prepared") {
-        const cursorSnapshotRef = await this.persistCompletedRunnerResult({
-          currentBundleRef: input.currentBundleRef,
-          eventId: runEventId,
-          finalGatewayProjectionSnapshot: runnerResult.committedGatewayProjectionSnapshot,
-          result: runnerResult.result,
-          run,
-        });
-        void recordHostedRunnerResultLogsInWebBestEffort({
-          baseUrl: this.dependencies.hostedWebBaseUrl,
-          callbackSigning: this.dependencies.env.webCallbackSigning,
-          redactedLogEntries: result.result.redactedLogEntries ?? null,
-          run,
-          runToken: input.runToken,
-          userId,
-          wakeEventId: runEventId,
-        });
-        void recordHostedRunBreadcrumbInWebBestEffort({
-          baseUrl: this.dependencies.hostedWebBaseUrl,
-          callbackSigning: this.dependencies.env.webCallbackSigning,
-          message: "Cloudflare prepared a hosted run snapshot for commit.",
-          phase: "runner_prepared_snapshot",
-          redacted: {
-            assistantDeliveryEffectCount: runnerResult.committedAssistantDeliveryEffects.length,
-            eventCount: input.events.length,
-            nextRuntimeWakeScheduled: result.result.nextWakeAt !== null,
-          },
-          run,
-          runToken: input.runToken,
-          userId,
-          wakeEventId: runEventId,
-        });
-        await this.advanceRunPhase({
-          clearError: true,
-          wake: { eventId: runEventId, userId },
-          message: "Hosted run drain prepared a snapshot and is awaiting web commit.",
-          phase: "commit.recorded",
-          run,
-          runToken: input.runToken,
-        });
-        await this.dependencies.stateStore.completeRun({
-          eventId: runEventId,
-          finishedAt: new Date().toISOString(),
-          leaseOwner,
-        });
-        return {
-          cursorSnapshotRef,
-          finalizeRequired: true,
-          nextRuntimeWakeAt: result.result.nextWakeAt ?? null,
-          redactedSummary: buildRunnerRedactedSummary({
-            assistantDeliveryEffectCount: runnerResult.committedAssistantDeliveryEffects.length,
-            eventsHandled: result.result.eventsHandled,
-            phase: "prepared",
-            redactedDetails: result.result.redactedDetails ?? null,
-            summary: result.result.summary,
-          }),
-          state: "completed",
-        };
-      }
-
-      const cursorSnapshotRef = await this.persistCompletedRunnerResult({
-        currentBundleRef: input.currentBundleRef,
-        eventId: runEventId,
-        finalGatewayProjectionSnapshot: runnerResult.finalGatewayProjectionSnapshot,
-        result: runnerResult.result,
-        run,
-      });
-      void recordHostedRunnerResultLogsInWebBestEffort({
-        baseUrl: this.dependencies.hostedWebBaseUrl,
-        callbackSigning: this.dependencies.env.webCallbackSigning,
-        redactedLogEntries: result.result.redactedLogEntries ?? null,
-        run,
-        runToken: input.runToken,
-        userId,
-        wakeEventId: runEventId,
-      });
-      const browserVaultReplicaRef = await this.persistBrowserVaultReplicaBestEffort(
-        userId,
-        runnerResult.browserVaultReplica ?? null,
-      );
-      await this.dependencies.stateStore.completeRun({
-        eventId: runEventId,
-        finishedAt: new Date().toISOString(),
-        leaseOwner,
-      });
-      return {
-        ...(runnerResult.assistantDeliveryOutcomes && runnerResult.assistantDeliveryOutcomes.length > 0
-          ? {
-              assistantDeliveryOutcomes: runnerResult.assistantDeliveryOutcomes,
-            }
-          : {}),
-        browserVaultReplicaRef,
-        cursorSnapshotRef,
-        finalizeRequired: false,
-        nextRuntimeWakeAt: result.result.nextWakeAt ?? null,
-        redactedSummary: buildRunnerRedactedSummary({
-          eventsHandled: result.result.eventsHandled,
-          phase: "finalized",
-          redactedDetails: result.result.redactedDetails ?? null,
-          summary: result.result.summary,
-        }),
-        state: "completed",
-      };
-    } catch (error) {
-      await this.dependencies.stateStore.failRun({
-        error,
-        eventId: runEventId,
-        leaseOwner,
-      });
-      const backpressured = error instanceof HostedExecutionConfigurationError;
-      void recordHostedRunBreadcrumbInWebBestEffort({
-        baseUrl: this.dependencies.hostedWebBaseUrl,
-        callbackSigning: this.dependencies.env.webCallbackSigning,
-        error,
-        level: backpressured ? "warn" : "error",
-        message: backpressured
-          ? "Cloudflare deferred hosted run execution because the runtime is not configured yet."
-          : "Cloudflare runner invocation failed while preparing the hosted run snapshot.",
-        phase: backpressured ? "runtime_backpressured" : "runtime_failed",
-        redacted: mergeHostedRunRedactedDetails(
-          {
-            eventCount: input.events.length,
-            reason: backpressured ? "runtime_not_configured" : "runner_invocation_failed",
-            resumeFinalize: false,
-          },
-          extractHostedAssistantNotificationRedactedDetails(error),
-        ),
-        run,
-        runToken: input.runToken,
-        userId,
-        wakeEventId: runEventId,
-      });
-      await this.advanceRunPhase({
-        wake: { eventId: runEventId, userId },
-        error,
-        level: backpressured ? "warn" : "error",
-        message: backpressured
-          ? "Hosted run drain deferred because the runtime is not configured yet."
-          : "Hosted run drain failed after invoking the runtime.",
-        phase: "retry.scheduled",
-        run,
-        runToken: input.runToken,
-      });
-      return {
-        cursorSnapshotRef: null,
-        finalizeRequired: false,
-        state: "backpressured",
-      };
-    }
   }
 
   async startRunMessagingActivity(input: {
@@ -434,24 +313,70 @@ export class RunnerRunProcessor {
     run: HostedRunRecord;
     runToken?: string | null;
   }): Promise<RunnerRunDrainExecutionResult> {
+    return this.processRunDrainLifecycle({
+      currentBundleRef: input.currentBundleRef,
+      events: [],
+      lifecycle: {
+        failureReason: "runner_finalize_failed",
+        handleSuccess: (runnerResult, context) =>
+          this.handleFinalizeRunDrainSuccess(runnerResult, context),
+        messages: {
+          backpressuredBreadcrumb:
+            "Cloudflare deferred hosted run finalization because the runtime is not configured yet.",
+          backpressuredRetry:
+            "Hosted run-drain finalization deferred because the runtime is not configured yet.",
+          failedBreadcrumb:
+            "Cloudflare runner invocation failed while finalizing the hosted run.",
+          failedRetry: "Hosted run-drain finalization failed after invoking the runtime.",
+          start: "Finalizing hosted run-drain side effects from the web-visible prepared snapshot.",
+          startPhase: "side-effects.draining",
+        },
+        resumeFinalize: true,
+      },
+      messagingActivityOwnedByExecutor: input.messagingActivityOwnedByExecutor,
+      primaryWake: input.primaryWake,
+      run: input.run,
+      runToken: input.runToken,
+    });
+  }
+
+  private async processRunDrainLifecycle(input: {
+    currentBundleRef: HostedExecutionBundleRef | null;
+    events: HostedRuntimeDrainEvent[];
+    lifecycle: RunnerRunDrainLifecyclePolicy;
+    messagingActivityOwnedByExecutor?: boolean;
+    primaryWake: HostedRuntimeEvent;
+    run: HostedRunRecord;
+    runToken?: string | null;
+  }): Promise<RunnerRunDrainExecutionResult> {
     const userId = input.primaryWake.userId;
     const run = hostedRunRecordToExecutionRunContext(input.run);
-    const runEventId = hostedRunEventId(input.run.id);
-    const leaseOwner: RunnerLeaseOwnerInput = {
-      eventId: runEventId,
+    const wake = {
+      eventId: hostedRunEventId(input.run.id),
+      userId,
+    } satisfies HostedIngressEnvelopeProgressRecord;
+    const context: RunnerRunDrainLifecycleContext = {
+      currentBundleRef: input.currentBundleRef,
+      events: input.events,
+      leaseOwner: {
+        eventId: wake.eventId,
+        run,
+      },
       run,
+      runToken: input.runToken,
+      wake,
     };
 
     await this.dependencies.stateStore.beginRun({
-      eventId: runEventId,
+      eventId: wake.eventId,
       run,
       userId,
     });
     await this.advanceRunPhase({
       clearError: true,
-      wake: { eventId: runEventId, userId },
-      message: "Finalizing hosted run-drain side effects from the web-visible prepared snapshot.",
-      phase: "side-effects.draining",
+      wake,
+      message: input.lifecycle.messages.start,
+      phase: input.lifecycle.messages.startPhase,
       run,
       runToken: input.runToken,
     });
@@ -463,8 +388,8 @@ export class RunnerRunProcessor {
         input.primaryWake,
         run,
         buildHostedRuntimeDrainRequest({
-          events: [],
-          resumeFinalize: true,
+          events: input.events,
+          resumeFinalize: input.lifecycle.resumeFinalize,
           run: input.run,
         }),
         input.runToken,
@@ -473,59 +398,12 @@ export class RunnerRunProcessor {
         },
       );
 
-      if (!isCompletedRunnerResult(runnerResult)) {
-        throw new Error("Hosted run-drain finalization returned a duplicate committed result.");
-      }
-
-      const cursorSnapshotRef = await this.persistCompletedRunnerResult({
-        currentBundleRef: input.currentBundleRef,
-        eventId: runEventId,
-        finalGatewayProjectionSnapshot: runnerResult.finalGatewayProjectionSnapshot,
-        result: runnerResult.result,
-        run,
-      });
-      const browserVaultReplicaRef = await this.persistBrowserVaultReplicaBestEffort(
-        userId,
-        runnerResult.browserVaultReplica ?? null,
-      );
-      await this.dependencies.stateStore.completeRun({
-        eventId: runEventId,
-        finishedAt: new Date().toISOString(),
-        leaseOwner,
-      });
-      await this.advanceRunPhase({
-        clearError: true,
-        wake: { eventId: runEventId, userId },
-        message: "Hosted run drain finalized committed side effects.",
-        phase: "completed",
-        run,
-        runToken: input.runToken,
-      });
-
-      return {
-        ...(runnerResult.assistantDeliveryOutcomes && runnerResult.assistantDeliveryOutcomes.length > 0
-          ? {
-              assistantDeliveryOutcomes: runnerResult.assistantDeliveryOutcomes,
-            }
-          : {}),
-        browserVaultReplicaRef,
-        cursorSnapshotRef,
-        finalizeRequired: false,
-        nextRuntimeWakeAt: runnerResult.result.result.nextWakeAt,
-        redactedSummary: buildRunnerRedactedSummary({
-          ...summarizeHostedAssistantDeliveryOutcomes(runnerResult.assistantDeliveryOutcomes),
-          eventsHandled: runnerResult.result.result.eventsHandled,
-          phase: "finalized",
-          redactedDetails: runnerResult.result.result.redactedDetails ?? null,
-          summary: runnerResult.result.result.summary,
-        }),
-        state: "completed",
-      };
+      return await input.lifecycle.handleSuccess(runnerResult, context);
     } catch (error) {
       await this.dependencies.stateStore.failRun({
         error,
-        eventId: runEventId,
-        leaseOwner,
+        eventId: wake.eventId,
+        leaseOwner: context.leaseOwner,
       });
       const backpressured = error instanceof HostedExecutionConfigurationError;
       void recordHostedRunBreadcrumbInWebBestEffort({
@@ -534,28 +412,31 @@ export class RunnerRunProcessor {
         error,
         level: backpressured ? "warn" : "error",
         message: backpressured
-          ? "Cloudflare deferred hosted run finalization because the runtime is not configured yet."
-          : "Cloudflare runner invocation failed while finalizing the hosted run.",
+          ? input.lifecycle.messages.backpressuredBreadcrumb
+          : input.lifecycle.messages.failedBreadcrumb,
         phase: backpressured ? "runtime_backpressured" : "runtime_failed",
         redacted: mergeHostedRunRedactedDetails(
           {
-            reason: backpressured ? "runtime_not_configured" : "runner_finalize_failed",
-            resumeFinalize: true,
+            ...(input.lifecycle.includeEventCountInFailureBreadcrumb
+              ? { eventCount: input.events.length }
+              : {}),
+            reason: backpressured ? "runtime_not_configured" : input.lifecycle.failureReason,
+            resumeFinalize: input.lifecycle.resumeFinalize,
           },
           extractHostedAssistantNotificationRedactedDetails(error),
         ),
         run,
         runToken: input.runToken,
         userId,
-        wakeEventId: runEventId,
+        wakeEventId: wake.eventId,
       });
       await this.advanceRunPhase({
-        wake: { eventId: runEventId, userId },
+        wake,
         error,
         level: backpressured ? "warn" : "error",
         message: backpressured
-          ? "Hosted run-drain finalization deferred because the runtime is not configured yet."
-          : "Hosted run-drain finalization failed after invoking the runtime.",
+          ? input.lifecycle.messages.backpressuredRetry
+          : input.lifecycle.messages.failedRetry,
         phase: "retry.scheduled",
         run,
         runToken: input.runToken,
@@ -568,344 +449,223 @@ export class RunnerRunProcessor {
     }
   }
 
+  private async handleExecuteRunDrainSuccess(
+    runnerResult: HostedAssistantRuntimeJobResult,
+    context: RunnerRunDrainLifecycleContext,
+  ): Promise<RunnerRunDrainExecutionResult> {
+    const result = runnerResult.result;
+    const assistantDeliveryOutcomes = readRunnerAssistantDeliveryOutcomes(runnerResult);
+
+    if (runnerResult.phase === "prepared") {
+      const cursorSnapshotRef = await this.persistCompletedRunnerResult({
+        currentBundleRef: context.currentBundleRef,
+        eventId: context.wake.eventId,
+        finalGatewayProjectionSnapshot: runnerResult.committedGatewayProjectionSnapshot,
+        result: runnerResult.result,
+        run: context.run,
+      });
+      void recordHostedRunnerResultLogsInWebBestEffort({
+        baseUrl: this.dependencies.hostedWebBaseUrl,
+        callbackSigning: this.dependencies.env.webCallbackSigning,
+        redactedLogEntries: result.result.redactedLogEntries ?? null,
+        run: context.run,
+        runToken: context.runToken,
+        userId: context.wake.userId,
+        wakeEventId: context.wake.eventId,
+      });
+      void recordHostedRunBreadcrumbInWebBestEffort({
+        baseUrl: this.dependencies.hostedWebBaseUrl,
+        callbackSigning: this.dependencies.env.webCallbackSigning,
+        message: "Cloudflare prepared a hosted run snapshot for commit.",
+        phase: "runner_prepared_snapshot",
+        redacted: {
+          assistantDeliveryEffectCount: runnerResult.committedAssistantDeliveryEffects.length,
+          eventCount: context.events.length,
+          nextRuntimeWakeScheduled: result.result.nextWakeAt !== null,
+        },
+        run: context.run,
+        runToken: context.runToken,
+        userId: context.wake.userId,
+        wakeEventId: context.wake.eventId,
+      });
+      await this.advanceRunPhase({
+        clearError: true,
+        wake: context.wake,
+        message: "Hosted run drain prepared a snapshot and is awaiting web commit.",
+        phase: "commit.recorded",
+        run: context.run,
+        runToken: context.runToken,
+      });
+      await this.dependencies.stateStore.completeRun({
+        eventId: context.wake.eventId,
+        finishedAt: new Date().toISOString(),
+        leaseOwner: context.leaseOwner,
+      });
+      return {
+        ...(assistantDeliveryOutcomes
+          ? {
+              assistantDeliveryOutcomes,
+            }
+          : {}),
+        cursorSnapshotRef,
+        finalizeRequired: true,
+        nextRuntimeWakeAt: result.result.nextWakeAt ?? null,
+        redactedSummary: buildRunnerRedactedSummary({
+          assistantDeliveryEffectCount: runnerResult.committedAssistantDeliveryEffects.length,
+          eventsHandled: result.result.eventsHandled,
+          phase: "prepared",
+          redactedDetails: result.result.redactedDetails ?? null,
+          summary: result.result.summary,
+        }),
+        state: "completed",
+      };
+    }
+
+    const cursorSnapshotRef = await this.persistCompletedRunnerResult({
+      currentBundleRef: context.currentBundleRef,
+      eventId: context.wake.eventId,
+      finalGatewayProjectionSnapshot: runnerResult.finalGatewayProjectionSnapshot,
+      result: runnerResult.result,
+      run: context.run,
+    });
+    void recordHostedRunnerResultLogsInWebBestEffort({
+      baseUrl: this.dependencies.hostedWebBaseUrl,
+      callbackSigning: this.dependencies.env.webCallbackSigning,
+      redactedLogEntries: result.result.redactedLogEntries ?? null,
+      run: context.run,
+      runToken: context.runToken,
+      userId: context.wake.userId,
+      wakeEventId: context.wake.eventId,
+    });
+    const browserVaultReplicaRef = await this.persistBrowserVaultReplicaBestEffort(
+      context.wake.userId,
+      runnerResult.browserVaultReplica ?? null,
+    );
+    await this.dependencies.stateStore.completeRun({
+      eventId: context.wake.eventId,
+      finishedAt: new Date().toISOString(),
+      leaseOwner: context.leaseOwner,
+    });
+    return {
+      ...(assistantDeliveryOutcomes
+        ? {
+            assistantDeliveryOutcomes,
+          }
+        : {}),
+      browserVaultReplicaRef,
+      cursorSnapshotRef,
+      finalizeRequired: false,
+      nextRuntimeWakeAt: result.result.nextWakeAt ?? null,
+      redactedSummary: buildRunnerRedactedSummary({
+        eventsHandled: result.result.eventsHandled,
+        phase: "finalized",
+        redactedDetails: result.result.redactedDetails ?? null,
+        summary: result.result.summary,
+      }),
+      state: "completed",
+    };
+  }
+
+  private async handleFinalizeRunDrainSuccess(
+    runnerResult: HostedAssistantRuntimeJobResult,
+    context: RunnerRunDrainLifecycleContext,
+  ): Promise<RunnerRunDrainExecutionResult> {
+    if (!isCompletedRunnerResult(runnerResult)) {
+      throw new Error("Hosted run-drain finalization returned a duplicate committed result.");
+    }
+    const assistantDeliveryOutcomes = readRunnerAssistantDeliveryOutcomes(runnerResult);
+
+    const cursorSnapshotRef = await this.persistCompletedRunnerResult({
+      currentBundleRef: context.currentBundleRef,
+      eventId: context.wake.eventId,
+      finalGatewayProjectionSnapshot: runnerResult.finalGatewayProjectionSnapshot,
+      result: runnerResult.result,
+      run: context.run,
+    });
+    const browserVaultReplicaRef = await this.persistBrowserVaultReplicaBestEffort(
+      context.wake.userId,
+      runnerResult.browserVaultReplica ?? null,
+    );
+    await this.dependencies.stateStore.completeRun({
+      eventId: context.wake.eventId,
+      finishedAt: new Date().toISOString(),
+      leaseOwner: context.leaseOwner,
+    });
+    await this.advanceRunPhase({
+      clearError: true,
+      wake: context.wake,
+      message: "Hosted run drain finalized committed side effects.",
+      phase: "completed",
+      run: context.run,
+      runToken: context.runToken,
+    });
+
+    return {
+      ...(assistantDeliveryOutcomes
+        ? {
+            assistantDeliveryOutcomes,
+          }
+        : {}),
+      browserVaultReplicaRef,
+      cursorSnapshotRef,
+      finalizeRequired: false,
+      nextRuntimeWakeAt: runnerResult.result.result.nextWakeAt,
+      redactedSummary: buildRunnerRedactedSummary({
+        ...summarizeHostedAssistantDeliveryOutcomes(assistantDeliveryOutcomes),
+        eventsHandled: runnerResult.result.result.eventsHandled,
+        phase: "finalized",
+        redactedDetails: runnerResult.result.result.redactedDetails ?? null,
+        summary: runnerResult.result.result.summary,
+      }),
+      state: "completed",
+    };
+  }
+
   async cleanupTransientWakeDataBestEffortForRunDrain(input: {
     assistantDeliveryOutcomes?: readonly HostedAssistantDeliveryOutcome[] | null;
     runId?: string | null;
     userId?: string | null;
     wakes: readonly HostedIngressEnvelope[];
   }): Promise<void> {
-    let pendingCleanup: RunnerPendingCleanupState | null = null;
-    let canClearPendingCleanup = input.runId == null;
-    if (input.runId) {
-      try {
-        pendingCleanup = await this.dependencies.stateStore.readPendingRunCleanup(input.runId);
-        canClearPendingCleanup = true;
-      } catch (error) {
-        emitHostedExecutionStructuredLog({
-          component: "runner",
-          details: {
-            runId: input.runId,
-          },
-          error,
-          eventId: input.wakes[0]?.eventId ?? "hosted-run:cleanup",
-          level: "warn",
-          message: "Hosted pending cleanup sidecar read failed; continuing with in-memory cleanup inputs only.",
-          phase: "completed",
-          run: null,
-          userId: input.userId ?? input.wakes[0]?.userId ?? "unknown",
-        });
-      }
-    }
-    if (
-      input.wakes.length === 0
-      && (!input.assistantDeliveryOutcomes || input.assistantDeliveryOutcomes.length === 0)
-      && !pendingCleanup
-    ) {
-      return;
-    }
-
-    for (const wake of input.wakes) {
-      await this.deleteTransientWakeDataBestEffort(wake);
-    }
-    for (const emailMessage of pendingCleanup?.emailMessages ?? []) {
-      await this.deletePendingEmailCleanupBestEffort(emailMessage);
-    }
-
-    await this.deleteHostedLinqMessagesBestEffort({
-      assistantDeliveryOutcomes: input.assistantDeliveryOutcomes ?? [],
-      pendingCleanup,
-      userId: input.userId ?? null,
-      wakes: input.wakes,
-    });
-    await this.deleteHostedTelegramMessagesBestEffort({
-      assistantDeliveryOutcomes: input.assistantDeliveryOutcomes ?? [],
-      pendingCleanup,
-      userId: input.userId ?? null,
-      wakes: input.wakes,
-    });
-
-    if (input.runId && canClearPendingCleanup) {
-      try {
-        await this.dependencies.stateStore.clearPendingRunCleanup(input.runId);
-      } catch (error) {
-        emitHostedExecutionStructuredLog({
-          component: "runner",
-          details: {
-            runId: input.runId,
-          },
-          error,
-          eventId: input.wakes[0]?.eventId ?? "hosted-run:cleanup",
-          level: "warn",
-          message: "Hosted pending cleanup sidecar clear failed; continuing after best-effort cleanup.",
-          phase: "completed",
-          run: null,
-          userId: input.userId ?? input.wakes[0]?.userId ?? "unknown",
-        });
-      }
-    }
+    await this.cleanupService.cleanupTransientWakeDataBestEffortForRunDrain(input);
   }
 
   async persistPendingRunCleanupData(input: {
+    assistantDeliveryOutcomes?: readonly HostedAssistantDeliveryOutcome[] | null;
     runId: string;
     wakes: readonly HostedIngressEnvelope[];
   }): Promise<void> {
-    await this.dependencies.stateStore.writePendingRunCleanup(
-      input.runId,
-      buildRunnerPendingCleanupState(input.wakes),
-    );
-  }
-
-  private async deleteTransientWakeDataBestEffort(wake: HostedIngressEnvelope): Promise<void> {
-    if (wake.kind !== "conversation.message" || wake.message.channel !== "email") {
-      return;
-    }
-
-    try {
-      const { crypto } = await this.dependencies.ensureRunnerStores(wake.userId);
-      await deleteHostedEmailRawMessage({
-        bucket: this.dependencies.bucket,
-        key: crypto.rootKey,
-        keysById: crypto.keysById,
-        rawMessageKey: wake.message.rawMessageKey,
-        userId: wake.userId,
-      });
-    } catch (error) {
-      emitHostedExecutionStructuredLog({
-        component: "runner",
-        details: {
-          rawMessageKey: wake.message.rawMessageKey,
-          wakeChannel: wake.message.channel,
-          wakeKind: wake.kind,
-        },
-        error,
-        eventId: wake.eventId,
-        level: "warn",
-        message: "Hosted wake best-effort raw email cleanup failed; the durable raw message object may need manual cleanup.",
-        phase: "completed",
-        run: null,
-        userId: wake.userId,
-      });
-    }
-  }
-
-  private async deletePendingEmailCleanupBestEffort(input: {
-    eventId: string;
-    rawMessageKey: string;
-    userId: string;
-  }): Promise<void> {
-    try {
-      const { crypto } = await this.dependencies.ensureRunnerStores(input.userId);
-      await deleteHostedEmailRawMessage({
-        bucket: this.dependencies.bucket,
-        key: crypto.rootKey,
-        keysById: crypto.keysById,
-        rawMessageKey: input.rawMessageKey,
-        userId: input.userId,
-      });
-    } catch (error) {
-      emitHostedExecutionStructuredLog({
-        component: "runner",
-        details: {
-          rawMessageKey: input.rawMessageKey,
-          wakeChannel: "email",
-          wakeKind: "conversation.message",
-        },
-        error,
-        eventId: input.eventId,
-        level: "warn",
-        message: "Hosted wake best-effort raw email cleanup failed; the durable raw message object may need manual cleanup.",
-        phase: "completed",
-        run: null,
-        userId: input.userId,
-      });
-    }
-  }
-
-  private async deleteHostedLinqMessagesBestEffort(input: {
-    assistantDeliveryOutcomes: readonly HostedAssistantDeliveryOutcome[];
-    pendingCleanup: RunnerPendingCleanupState | null;
-    userId: string | null;
-    wakes: readonly HostedIngressEnvelope[];
-  }): Promise<void> {
-    const messageIds = new Set<string>();
-
-    for (const wake of input.wakes) {
-      if (wake.kind === "conversation.message" && wake.message.channel === "linq") {
-        messageIds.add(wake.message.linqMessage.messageId);
-      }
-    }
-    for (const messageId of input.pendingCleanup?.linqMessageIds ?? []) {
-      messageIds.add(messageId);
-    }
-
-    for (const outcome of input.assistantDeliveryOutcomes) {
-      if (!shouldUseHostedDeliveryOutcomeForCleanup(outcome, "linq")) {
-        continue;
-      }
-
-      for (const messageId of readHostedProviderMessageIds(outcome)) {
-        messageIds.add(messageId);
-      }
-    }
-
-    if (messageIds.size === 0) {
-      return;
-    }
-
-    const firstWake = input.wakes[0];
-    const cleanupUserId = firstWake?.userId ?? input.userId ?? null;
-    try {
-      const runtimeEnv = await this.resolveRunnerRuntimeEnv(cleanupUserId);
-      await deleteHostedLinqMessages({
-        env: runtimeEnv,
-        messageIds: [...messageIds],
-      });
-    } catch (error) {
-      emitHostedExecutionStructuredLog({
-        component: "runner",
-        details: {
-          messageIdCount: messageIds.size,
-          provider: "linq",
-        },
-        error,
-        eventId: firstWake?.eventId ?? "hosted-run:cleanup",
-        level: "warn",
-        message: "Hosted Linq message cleanup failed; the provider copy may need manual deletion.",
-        phase: "completed",
-        run: null,
-        userId: cleanupUserId ?? "unknown",
-      });
-    }
-  }
-
-  private async deleteHostedTelegramMessagesBestEffort(input: {
-    assistantDeliveryOutcomes: readonly HostedAssistantDeliveryOutcome[];
-    pendingCleanup: RunnerPendingCleanupState | null;
-    userId: string | null;
-    wakes: readonly HostedIngressEnvelope[];
-  }): Promise<void> {
-    const groupedMessageIds = new Map<string, Set<string>>();
-    const cleanupTargetAliases = buildHostedTelegramCleanupTargetAliasMap(
-      input.assistantDeliveryOutcomes,
-    );
-    const cleanupWakeMessages: Array<{ messageId: string; target: string }> = [];
-    const persistedCleanupMessages = [...(input.pendingCleanup?.telegramMessages ?? [])];
-
-    for (const wake of input.wakes) {
-      if (wake.kind !== "conversation.message" || wake.message.channel !== "telegram") {
-        continue;
-      }
-
-      cleanupWakeMessages.push({
-        messageId: wake.message.telegramMessage.messageId,
-        target: wake.message.telegramMessage.threadId,
-      });
-    }
-
-    for (const message of cleanupWakeMessages) {
-      addHostedProviderMessageId(
-        groupedMessageIds,
-        resolveHostedTelegramCleanupTarget(message.target, cleanupTargetAliases),
-        message.messageId,
-      );
-    }
-    for (const message of persistedCleanupMessages) {
-      addHostedProviderMessageId(
-        groupedMessageIds,
-        resolveHostedTelegramCleanupTarget(message.target, cleanupTargetAliases),
-        message.messageId,
-      );
-    }
-
-    for (const outcome of input.assistantDeliveryOutcomes) {
-      if (!isHostedTelegramCleanupTargetOutcome(outcome)) {
-        continue;
-      }
-
-      for (const cleanupMessage of readHostedCleanupMessages(outcome)) {
-        addHostedProviderMessageId(
-          groupedMessageIds,
-          cleanupMessage.target,
-          cleanupMessage.messageId,
-        );
-      }
-    }
-
-    if (groupedMessageIds.size === 0) {
-      return;
-    }
-
-    const firstWake = input.wakes[0];
-    const cleanupUserId = firstWake?.userId ?? input.userId ?? null;
-    try {
-      const runtimeEnv = await this.resolveRunnerRuntimeEnv(cleanupUserId);
-      for (const [target, messageIds] of groupedMessageIds) {
-        try {
-          await deleteHostedTelegramMessages({
-            env: runtimeEnv,
-            messageIds: [...messageIds],
-            target,
-          });
-        } catch (error) {
-          emitHostedExecutionStructuredLog({
-            component: "runner",
-            details: {
-              messageIdCount: messageIds.size,
-              provider: "telegram",
-              target,
-            },
-            error,
-            eventId: firstWake?.eventId ?? "hosted-run:cleanup",
-            level: "warn",
-            message: "Hosted Telegram message cleanup failed; the provider copy may need manual deletion.",
-            phase: "completed",
-            run: null,
-            userId: cleanupUserId ?? "unknown",
-          });
-        }
-      }
-    } catch (error) {
-      emitHostedExecutionStructuredLog({
-        component: "runner",
-        details: {
-          provider: "telegram",
-          targetCount: groupedMessageIds.size,
-        },
-        error,
-        eventId: firstWake?.eventId ?? "hosted-run:cleanup",
-        level: "warn",
-        message: "Hosted Telegram cleanup environment resolution failed; the provider copies may need manual deletion.",
-        phase: "completed",
-        run: null,
-        userId: cleanupUserId ?? "unknown",
-      });
-    }
+    await this.cleanupService.persistPendingRunCleanupData(input);
   }
 
   private async resolveRunnerRuntimeEnv(
     userId: string | null,
   ): Promise<Record<string, string>> {
+    const forwardedEnv = buildHostedRunnerAmbientEnv(
+      this.dependencies.runnerRuntimeEnvSource,
+    );
+
     if (!userId) {
       return {
-        ...buildHostedRunnerAmbientEnv(this.dependencies.runnerRuntimeEnvSource),
+        ...forwardedEnv,
+        ...buildHostedRunnerPlatformEnv(this.dependencies.runnerRuntimeEnvSource),
       };
     }
     const { runnerSecrets: runnerSecretsService } = await this.dependencies.ensureRunnerStores(
       userId,
     );
     const runnerSecrets = await runnerSecretsService.readRunnerSecrets(userId);
-    const forwardedEnv = buildHostedRunnerAmbientEnv(
-      this.dependencies.runnerRuntimeEnvSource,
-    );
     const runtimeConfig = buildHostedRunnerJobRuntimeConfig({
       configSource: this.dependencies.readRunnerRuntimeConfigSource(),
       forwardedEnv,
+      rewritePlatformUrlsForContainer: true,
       runnerSecrets,
     });
 
     return {
       ...(runtimeConfig.forwardedEnv ?? {}),
       ...(runtimeConfig.userEnv ?? {}),
+      ...(runtimeConfig.platformEnv ?? {}),
     };
   }
 
@@ -944,7 +704,7 @@ export class RunnerRunProcessor {
     });
     const job: HostedAssistantRuntimeJobInput = {
       request: {
-        bundle: await bundleSync.readBundlesForRunner(currentBundleRef),
+        bundle: await bundleSync.readBundlesForRunner(currentBundleRef, userId),
         currentBundleRef,
         run,
         runDrain,
@@ -1302,6 +1062,20 @@ function isCompletedRunnerResult(
   return result.phase === undefined || result.phase === "completed";
 }
 
+function readRunnerAssistantDeliveryOutcomes(
+  result: HostedAssistantRuntimeJobResult,
+): HostedAssistantDeliveryOutcome[] | undefined {
+  if (
+    "assistantDeliveryOutcomes" in result
+    && Array.isArray(result.assistantDeliveryOutcomes)
+    && result.assistantDeliveryOutcomes.length > 0
+  ) {
+    return result.assistantDeliveryOutcomes;
+  }
+
+  return undefined;
+}
+
 
 function buildRunnerRedactedSummary(
   input: Record<string, unknown> & { redactedDetails?: Record<string, unknown> | null },
@@ -1311,185 +1085,6 @@ function buildRunnerRedactedSummary(
     ...summary,
     ...(redactedDetails ? { details: redactedDetails } : {}),
   };
-}
-
-function readHostedProviderMessageIds(
-  outcome: HostedAssistantDeliveryOutcome,
-): string[] {
-  if (Array.isArray(outcome.providerMessageIds) && outcome.providerMessageIds.length > 0) {
-    return outcome.providerMessageIds;
-  }
-
-  return outcome.providerMessageId ? [outcome.providerMessageId] : [];
-}
-
-function readHostedCleanupTargetAliases(
-  outcome: HostedAssistantDeliveryOutcome,
-): string[] {
-  if (!Array.isArray(outcome.cleanupTargetAliases) || outcome.cleanupTargetAliases.length === 0) {
-    return [];
-  }
-
-  return Array.from(
-    new Set(
-      outcome.cleanupTargetAliases
-        .map((value) => typeof value === "string" ? value.trim() : "")
-        .filter((value) => value.length > 0),
-    ),
-  );
-}
-
-function readHostedCleanupMessages(
-  outcome: HostedAssistantDeliveryOutcome,
-): Array<{ messageId: string; target: string }> {
-  if (Array.isArray(outcome.cleanupMessages) && outcome.cleanupMessages.length > 0) {
-    return Array.from(
-      new Map(
-        outcome.cleanupMessages.flatMap((entry) => {
-          if (!entry || typeof entry !== "object") {
-            return [];
-          }
-
-          const messageId =
-            "messageId" in entry && typeof entry.messageId === "string"
-              ? entry.messageId.trim()
-              : "";
-          const target =
-            "target" in entry && typeof entry.target === "string"
-              ? entry.target.trim()
-              : "";
-          if (messageId.length === 0 || target.length === 0) {
-            return [];
-          }
-
-          return [[`${target}\u0000${messageId}`, { messageId, target }] as const];
-        }),
-      ).values(),
-    );
-  }
-
-  if (typeof outcome.target !== "string" || outcome.target.length === 0) {
-    return [];
-  }
-
-  const target = outcome.target;
-  return readHostedProviderMessageIds(outcome).map((messageId) => ({
-    messageId,
-    target,
-  }));
-}
-
-function addHostedProviderMessageId(
-  groupedMessageIds: Map<string, Set<string>>,
-  target: string,
-  messageId: string,
-): void {
-  const bucket = groupedMessageIds.get(target) ?? new Set<string>();
-  bucket.add(messageId);
-  groupedMessageIds.set(target, bucket);
-}
-
-function shouldUseHostedDeliveryOutcomeForCleanup(
-  outcome: HostedAssistantDeliveryOutcome,
-  channel: string,
-): boolean {
-  return outcome.deliveryChannel === channel
-    && (outcome.deliveryStatus === "sent" || outcome.deliveryStatus === "failed_ambiguous")
-    && readHostedProviderMessageIds(outcome).length > 0;
-}
-
-function isHostedTelegramCleanupTargetOutcome(
-  outcome: HostedAssistantDeliveryOutcome,
-): outcome is HostedAssistantDeliveryOutcome & { target: string } {
-  return outcome.deliveryChannel === "telegram"
-    && (outcome.deliveryStatus === "sent" || outcome.deliveryStatus === "failed_ambiguous")
-    && typeof outcome.target === "string"
-    && outcome.target.length > 0;
-}
-
-function buildRunnerPendingCleanupState(
-  wakes: readonly HostedIngressEnvelope[],
-): RunnerPendingCleanupState | null {
-  const cleanup: RunnerPendingCleanupState = {
-    emailMessages: [],
-    linqMessageIds: [],
-    telegramMessages: [],
-  };
-
-  for (const wake of wakes) {
-    if (wake.kind !== "conversation.message") {
-      continue;
-    }
-
-    switch (wake.message.channel) {
-      case "email":
-        cleanup.emailMessages.push({
-          eventId: wake.eventId,
-          rawMessageKey: wake.message.rawMessageKey,
-          userId: wake.userId,
-        });
-        break;
-      case "linq":
-        cleanup.linqMessageIds.push(wake.message.linqMessage.messageId);
-        break;
-      case "telegram":
-        cleanup.telegramMessages.push({
-          messageId: wake.message.telegramMessage.messageId,
-          target: wake.message.telegramMessage.threadId,
-        });
-        break;
-      default:
-        break;
-    }
-  }
-
-  return cleanup.emailMessages.length > 0
-    || cleanup.linqMessageIds.length > 0
-    || cleanup.telegramMessages.length > 0
-    ? cleanup
-    : null;
-}
-
-function resolveHostedTelegramCleanupTarget(
-  target: string,
-  cleanupTargetAliases: ReadonlyMap<string, string | null>,
-): string {
-  const replacement = cleanupTargetAliases.get(target);
-  return replacement ?? target;
-}
-
-function buildHostedTelegramCleanupTargetAliasMap(
-  outcomes: readonly HostedAssistantDeliveryOutcome[],
-): Map<string, string | null> {
-  const aliases = new Map<string, string | null>();
-
-  for (const outcome of outcomes) {
-    if (!shouldUseHostedDeliveryOutcomeForCleanup(outcome, "telegram")) {
-      continue;
-    }
-
-    if (typeof outcome.target !== "string" || outcome.target.length === 0) {
-      continue;
-    }
-
-    for (const alias of readHostedCleanupTargetAliases(outcome)) {
-      if (alias === outcome.target) {
-        continue;
-      }
-
-      const existing = aliases.get(alias);
-      if (existing === undefined) {
-        aliases.set(alias, outcome.target);
-        continue;
-      }
-
-      if (existing !== outcome.target) {
-        aliases.set(alias, null);
-      }
-    }
-  }
-
-  return aliases;
 }
 
 export function summarizeHostedAssistantDeliveryOutcomes(
@@ -1515,122 +1110,6 @@ export function summarizeHostedAssistantDeliveryOutcomes(
     } : {}),
   };
 }
-
-export async function recordHostedRunPhaseLogInWebBestEffort(input: {
-  baseUrl: string | null;
-  callbackSigning: HostedExecutionEnvironment["webCallbackSigning"];
-  component?: string;
-  error?: unknown;
-  level?: HostedExecutionRunLevel;
-  message: string;
-  phase: HostedExecutionRunPhase;
-  recordLog?: typeof recordHostedRunLogInWeb;
-  run: HostedExecutionRunContext;
-  runToken?: string | null;
-  userId: string;
-  wakeEventId: string;
-}): Promise<void> {
-  return recordHostedRunBreadcrumbInWebBestEffort(input);
-}
-
-export async function recordHostedRunBreadcrumbInWebBestEffort(input: {
-  baseUrl: string | null;
-  callbackSigning: HostedExecutionEnvironment["webCallbackSigning"];
-  component?: string;
-  error?: unknown;
-  level?: HostedExecutionRunLevel;
-  message: string;
-  phase: string;
-  recordLog?: typeof recordHostedRunLogInWeb;
-  redacted?: Record<string, unknown> | null;
-  run: HostedExecutionRunContext;
-  runToken?: string | null;
-  userId: string;
-  wakeEventId: string;
-}): Promise<void> {
-  if (!input.baseUrl) {
-    return;
-  }
-
-  if (typeof input.runToken !== "string") {
-    return;
-  }
-
-  const runToken = input.runToken;
-  const recordLog = input.recordLog ?? recordHostedRunLogInWeb;
-  // Keep web-visible observability linkable without persisting canonical wake ids.
-  const correlationId = await createHostedRunLogCorrelationId(input.wakeEventId);
-  const redacted = {
-    ...(stripHostedRunObservabilityEventFields(input.redacted) ?? {}),
-    correlationId,
-    ...(input.error === undefined ? {} : { errorCode: deriveHostedExecutionErrorCode(input.error) }),
-    runElapsedMs: computeHostedRunElapsedMs(input.run),
-  };
-
-  try {
-    await recordLog({
-      baseUrl: input.baseUrl,
-      body: {
-        at: new Date().toISOString(),
-        component: input.component ?? HOSTED_RUN_LOG_COMPONENT,
-        level: input.level ?? (input.error === undefined ? "info" : "error"),
-        message: input.message,
-        phase: input.phase,
-        redacted,
-        runId: input.run.runId,
-        runToken,
-      },
-      boundUserId: input.userId,
-      callbackSigning: input.callbackSigning,
-      timeoutMs: HOSTED_RUN_PHASE_LOG_TIMEOUT_MS,
-    });
-  } catch (error) {
-    emitHostedExecutionStructuredLog({
-      component: HOSTED_RUN_LOG_COMPONENT,
-      details: {
-        runElapsedMs: computeHostedRunElapsedMs(input.run),
-        runLogCorrelationId: correlationId,
-      },
-      error,
-      eventId: input.wakeEventId,
-      level: "warn",
-      message: "Hosted run phase log write to web failed; continuing with runner-local observability only.",
-      phase: "retry.scheduled",
-      run: input.run,
-      userId: input.userId,
-    });
-  }
-}
-
-export async function recordHostedRunnerResultLogsInWebBestEffort(input: {
-  baseUrl: string | null;
-  callbackSigning: HostedExecutionEnvironment["webCallbackSigning"];
-  recordLog?: typeof recordHostedRunLogInWeb;
-  redactedLogEntries: readonly HostedExecutionRedactedLogEntry[] | null | undefined;
-  run: HostedExecutionRunContext;
-  runToken?: string | null;
-  userId: string;
-  wakeEventId: string;
-}): Promise<void> {
-  for (const entry of input.redactedLogEntries ?? []) {
-    const eventId = entry.eventId ?? input.wakeEventId;
-    await recordHostedRunBreadcrumbInWebBestEffort({
-      baseUrl: input.baseUrl,
-      callbackSigning: input.callbackSigning,
-      component: entry.component,
-      level: entry.level,
-      message: entry.message,
-      phase: entry.phase,
-      recordLog: input.recordLog,
-      redacted: entry.redacted ?? null,
-      run: input.run,
-      runToken: input.runToken,
-      userId: input.userId,
-      wakeEventId: eventId,
-    });
-  }
-}
-
 function mergeHostedRunRedactedDetails(
   primary: Record<string, unknown> | null | undefined,
   secondary: Record<string, unknown> | null | undefined,
@@ -1642,35 +1121,11 @@ function mergeHostedRunRedactedDetails(
 
   return Object.keys(merged).length > 0 ? merged : null;
 }
-
-function stripHostedRunObservabilityEventFields(
-  value: Record<string, unknown> | null | undefined,
-): Record<string, unknown> | null {
-  if (!value) {
-    return null;
-  }
-
-  const { correlationId: _ignoredCorrelationId, eventId: _ignoredEventId, ...rest } = value;
-  return Object.keys(rest).length > 0 ? rest : null;
-}
-
-async function createHostedRunLogCorrelationId(eventId: string): Promise<string> {
-  const digest = new Uint8Array(
-    await crypto.subtle.digest(
-      "SHA-256",
-      new TextEncoder().encode(`hosted-run-log:${eventId}`),
-    ),
-  );
-
-  return `evtcorr_${bytesToHex(digest.subarray(0, 16))}`;
-}
-
-function bytesToHex(bytes: Uint8Array): string {
-  return [...bytes]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
-}
-
+export {
+  recordHostedRunBreadcrumbInWebBestEffort,
+  recordHostedRunPhaseLogInWebBestEffort,
+  recordHostedRunnerResultLogsInWebBestEffort,
+};
 
 function createMissingHostedVaultSyncImportError(input: {
   sessionId: string;

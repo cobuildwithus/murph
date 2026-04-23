@@ -447,7 +447,7 @@ test('startTelegramTypingSession validates Telegram runtime prerequisites and ta
       error instanceof VaultCliError &&
       error.code === 'ASSISTANT_TELEGRAM_TARGET_INVALID' &&
       error.message.includes('Telegram targets must use') &&
-      error.context?.target === '123:wat:456',
+      error.context?.target === '[redacted-telegram-target:invalid]',
   )
 })
 
@@ -615,7 +615,7 @@ test('startTelegramTypingSession wraps initial Telegram API transport and respon
       error.code === 'ASSISTANT_TELEGRAM_ACTIVITY_FAILED' &&
       error.message === 'chat unavailable' &&
       error.context?.status === 403 &&
-      error.context?.migrateToChatId === '123',
+      error.context?.migrateToChatId === '[redacted-telegram-chat-id]',
   )
 
   await assert.rejects(
@@ -685,6 +685,42 @@ test('startTelegramTypingSession rethrows background refresh failures on stop', 
       error instanceof VaultCliError &&
       error.code === 'ASSISTANT_TELEGRAM_ACTIVITY_FAILED' &&
       error.message === 'refresh failed',
+  )
+})
+
+test('deleteTelegramMessages redacts Telegram identifiers in error details', async () => {
+  await assert.rejects(
+    () =>
+      deleteTelegramMessages(
+        {
+          messageIds: ['1', '2'],
+          target: '123:business:biz-123:topic:456',
+        },
+        {
+          env: {
+            TELEGRAM_BOT_TOKEN: 'bot-token',
+          },
+          fetchImplementation: async () =>
+            createTelegramResponse(
+              {
+                description: 'cleanup failed',
+                error_code: 400,
+                ok: false,
+                parameters: {
+                  migrate_to_chat_id: '456',
+                },
+              },
+              400,
+            ),
+        },
+      ),
+    (error) =>
+      error instanceof VaultCliError &&
+      error.code === 'ASSISTANT_TELEGRAM_DELETE_FAILED' &&
+      error.message === 'cleanup failed' &&
+      error.context?.target === '[redacted-telegram-target:chat+business+topic]' &&
+      error.context?.migrateToChatId === '[redacted-telegram-chat-id]' &&
+      error.context?.messageIdCount === 2,
   )
 })
 

@@ -52,6 +52,14 @@ const hostedMemberEmailAuthorizationStateSelect =
     verifiedEmailVerifiedAt: true,
   });
 
+const hostedMemberEmailAuthorizationLookupSelect =
+  Prisma.validator<Prisma.HostedMemberEmailAuthorizationSelect>()({
+    ...hostedMemberEmailAuthorizationStateSelect,
+    member: {
+      select: hostedMemberCoreStateSelect,
+    },
+  });
+
 export type HostedMemberCoreState = Prisma.HostedMemberGetPayload<{
   select: typeof hostedMemberCoreStateSelect;
 }>;
@@ -74,6 +82,12 @@ export interface HostedMemberEmailAuthorizationState {
   verifiedEmail: HostedMemberVerifiedEmailFact | null;
 }
 
+export interface HostedMemberEmailAuthorizationLookup {
+  core: HostedMemberCoreState;
+  emailAuthorization: HostedMemberEmailAuthorizationState;
+  matchedBy: "verifiedEmail";
+}
+
 export interface HostedMemberEmailAuthorizationWriteInput {
   directPublicSender?: {
     address: string;
@@ -85,6 +99,13 @@ export interface HostedMemberEmailAuthorizationWriteInput {
     address: string;
     verifiedAt: Date;
   } | null;
+}
+
+export interface HostedMemberVerifiedEmailSyncInput {
+  address: string;
+  memberId: string;
+  prisma?: Prisma.TransactionClient | HostedOnboardingReadClient;
+  verifiedAt: Date;
 }
 
 /**
@@ -199,6 +220,30 @@ export async function readHostedMemberIdByAuthorizedDirectPublicSenderAddress(in
     : null;
 }
 
+export async function lookupHostedMemberByVerifiedEmailAddress(input: {
+  address: string | null | undefined;
+  prisma: HostedOnboardingReadClient;
+}): Promise<HostedMemberEmailAuthorizationLookup | null> {
+  const lookupKey = createHostedEmailLookupKey(input.address);
+
+  if (!lookupKey) {
+    return null;
+  }
+
+  const record = await input.prisma.hostedMemberEmailAuthorization.findUnique({
+    where: {
+      verifiedEmailLookupKey: lookupKey,
+    },
+    select: hostedMemberEmailAuthorizationLookupSelect,
+  });
+
+  if (!record || !record.verifiedEmailVerifiedAt) {
+    return null;
+  }
+
+  return projectHostedMemberEmailAuthorizationLookup(record);
+}
+
 export async function upsertHostedMemberEmailAuthorization(
   input: HostedMemberEmailAuthorizationWriteInput,
 ): Promise<HostedMemberEmailAuthorizationState> {
@@ -216,6 +261,32 @@ export async function upsertHostedMemberEmailAuthorization(
   });
 
   return projectHostedMemberEmailAuthorizationState(record);
+}
+
+export async function syncHostedMemberVerifiedEmailAuthorization(
+  input: HostedMemberVerifiedEmailSyncInput,
+): Promise<HostedMemberEmailAuthorizationState> {
+  const prismaClient = input.prisma;
+
+  if (prismaClient && "$transaction" in prismaClient && typeof prismaClient.$transaction === "function") {
+    return prismaClient.$transaction((tx: Prisma.TransactionClient) => upsertHostedMemberEmailAuthorization({
+      memberId: input.memberId,
+      prisma: tx,
+      verifiedEmail: {
+        address: input.address,
+        verifiedAt: input.verifiedAt,
+      },
+    }));
+  }
+
+  return upsertHostedMemberEmailAuthorization({
+    memberId: input.memberId,
+    prisma: input.prisma as Prisma.TransactionClient,
+    verifiedEmail: {
+      address: input.address,
+      verifiedAt: input.verifiedAt,
+    },
+  });
 }
 
 export async function readHostedMemberSnapshot(input: {
@@ -262,6 +333,18 @@ export async function readHostedMemberSnapshot(input: {
     identity,
     routing,
   });
+}
+
+function projectHostedMemberEmailAuthorizationLookup(
+  record: Prisma.HostedMemberEmailAuthorizationGetPayload<{
+    select: typeof hostedMemberEmailAuthorizationLookupSelect;
+  }>,
+): HostedMemberEmailAuthorizationLookup {
+  return {
+    core: record.member,
+    emailAuthorization: projectHostedMemberEmailAuthorizationState(record),
+    matchedBy: "verifiedEmail",
+  };
 }
 
 export async function updateHostedMemberCoreState(input: {

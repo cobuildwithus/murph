@@ -274,6 +274,26 @@ describe("hosted execution observability", () => {
     });
   });
 
+  it("redacts Telegram identifiers from safe error details when the error code is Telegram-specific", () => {
+    const error = Object.assign(new Error("Telegram cleanup failed"), {
+      code: "ASSISTANT_TELEGRAM_DELETE_FAILED",
+      context: {
+        businessConnectionId: "biz-123",
+        messageIdCount: 2,
+        migrateToChatId: "456",
+        target: "123:business:biz-123:topic:456",
+      },
+    });
+
+    expect(buildHostedExecutionSafeErrorDetails(error)).toMatchObject({
+      errorCodeDetail: "ASSISTANT_TELEGRAM_DELETE_FAILED",
+      businessConnectionId: "[redacted-telegram-business-connection-id]",
+      messageIdCount: 2,
+      migrateToChatId: "[redacted-telegram-chat-id]",
+      target: "[redacted-telegram-target:chat+business+topic]",
+    });
+  });
+
   it("formats operator-facing log messages with redacted detail appended only once", () => {
     expect(
       formatHostedExecutionLogMessage(
@@ -435,6 +455,19 @@ describe("hosted execution observability", () => {
         "at second (<REDACTED_PATH>)",
       ],
       token: "secret-token",
+    });
+    expect(
+      sanitizeHostedExecutionStructuredLogDetails({
+        chat_id: "123",
+        direct_messages_topic_id: 9,
+        provider: "telegram",
+        target: "123:business:biz-123:dm-topic:9",
+      }),
+    ).toEqual({
+      chat_id: "[redacted-telegram-chat-id]",
+      direct_messages_topic_id: "[redacted-telegram-topic-id]",
+      provider: "telegram",
+      target: "[redacted-telegram-target:chat+business+dm-topic]",
     });
     expect(buildHostedExecutionSafeErrorDetails("not-an-error")).toBeNull();
     expect(readHostedExecutionSafeErrorName(Object.assign(new Error("x"), { name: "Error" }))).toBe("Error");

@@ -3,7 +3,7 @@ import {
   type LinqWebhookEvent,
   isLinqWebhookPayloadError,
   isLinqWebhookVerificationError,
-  parseCanonicalLinqMessageReceivedEvent,
+  parseLinqMessageReceivedEvent,
   parseLinqWebhookEvent,
   resolveLinqWebhookOccurredAt,
   summarizeLinqMessageReceivedEvent,
@@ -32,7 +32,7 @@ export function requireHostedLinqMessageReceivedEvent(
   event: HostedLinqWebhookEvent,
 ): HostedLinqMessageReceivedEvent {
   try {
-    return parseCanonicalLinqMessageReceivedEvent(event);
+    return parseLinqMessageReceivedEvent(event);
   } catch (error) {
     if (error instanceof TypeError) {
       if (error.message.startsWith("Invalid ISO timestamp:")) {

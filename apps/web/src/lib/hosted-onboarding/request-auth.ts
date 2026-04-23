@@ -49,29 +49,41 @@ export async function resolvePrivyMemberAuthFromSession(input: {
   member: HostedMember | null;
   memberLookup: HostedMemberPrivyIdentityLookup | null;
 }> {
-  if (input.memberId) {
-    const member = await readHostedMemberCoreState({
-      memberId: input.memberId,
-      prisma: input.prisma,
-    });
-
-    if (member) {
-      return {
-        member,
-        memberLookup: null,
-      };
-    }
-  }
-
   const memberLookup = await lookupHostedMemberForPrivyIdentity({
     identity: input.identity,
     parallelizeReads: true,
     prisma: input.prisma,
   });
 
+  if (!input.memberId) {
+    return {
+      member: memberLookup?.core ?? null,
+      memberLookup,
+    };
+  }
+
+  const sessionMember = await readHostedMemberCoreState({
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
+
+  if (!memberLookup) {
+    return {
+      member: null,
+      memberLookup: null,
+    };
+  }
+
+  if (!sessionMember || sessionMember.id !== memberLookup.core.id) {
+    return {
+      member: memberLookup.core,
+      memberLookup,
+    };
+  }
+
   return {
-    member: memberLookup?.core ?? null,
-    memberLookup,
+    member: sessionMember,
+    memberLookup: null,
   };
 }
 

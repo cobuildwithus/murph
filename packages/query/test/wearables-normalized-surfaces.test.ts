@@ -300,6 +300,100 @@ test("latest surface stays joined to the latest sleep-backed local day instead o
   );
 });
 
+test("activity surfaces keep WHOOP workout metrics and convert energy-burned into active calories", () => {
+  const vault = makeVault([
+    makeObservation({
+      entityId: "evt_whoop_energy",
+      metric: "energy-burned",
+      value: 418.4,
+      unit: "kJ",
+      dayKey: "2026-04-06",
+      occurredAt: "2026-04-06T18:00:00Z",
+      recordedAt: "2026-04-06T18:05:00Z",
+      provider: "whoop",
+      resourceType: "workout",
+    }),
+    makeObservation({
+      entityId: "evt_whoop_max_hr",
+      metric: "max-heart-rate",
+      value: 168,
+      unit: "bpm",
+      dayKey: "2026-04-06",
+      occurredAt: "2026-04-06T18:00:00Z",
+      recordedAt: "2026-04-06T18:05:00Z",
+      provider: "whoop",
+      resourceType: "workout",
+    }),
+    makeObservation({
+      entityId: "evt_whoop_strain",
+      metric: "workout-strain",
+      value: 11.1,
+      unit: "whoop_strain",
+      dayKey: "2026-04-06",
+      occurredAt: "2026-04-06T18:00:00Z",
+      recordedAt: "2026-04-06T18:05:00Z",
+      provider: "whoop",
+      resourceType: "workout",
+    }),
+    makeObservation({
+      entityId: "evt_whoop_recorded",
+      metric: "percent-recorded",
+      value: 99,
+      unit: "%",
+      dayKey: "2026-04-06",
+      occurredAt: "2026-04-06T18:00:00Z",
+      recordedAt: "2026-04-06T18:05:00Z",
+      provider: "whoop",
+      resourceType: "workout",
+    }),
+    makeObservation({
+      entityId: "evt_whoop_gain",
+      metric: "altitude-gain",
+      value: 42,
+      unit: "meter",
+      dayKey: "2026-04-06",
+      occurredAt: "2026-04-06T18:00:00Z",
+      recordedAt: "2026-04-06T18:05:00Z",
+      provider: "whoop",
+      resourceType: "workout",
+    }),
+    makeObservation({
+      entityId: "evt_whoop_change",
+      metric: "altitude-change",
+      value: 33,
+      unit: "meter",
+      dayKey: "2026-04-06",
+      occurredAt: "2026-04-06T18:00:00Z",
+      recordedAt: "2026-04-06T18:05:00Z",
+      provider: "whoop",
+      resourceType: "workout",
+    }),
+  ]);
+
+  const latest = summarizeWearableLatest(vault);
+  const energy = summarizeWearableMetricLatest(vault, "energy-burned", { windowDays: 1 });
+  const maxHeartRate = summarizeWearableMetricLatest(vault, "max-heart-rate", { windowDays: 1 });
+
+  assert.equal(latest?.activity?.activeCalories.selection.value, 100);
+  assert.equal(latest?.activity?.activeCalories.selection.unit, "kcal");
+  assert.equal(latest?.activity?.maxHeartRate.selection.value, 168);
+  assert.equal(latest?.activity?.workoutStrain.selection.value, 11.1);
+  assert.equal(latest?.activity?.percentRecorded.selection.value, 99);
+  assert.equal(latest?.activity?.totalElevationGainMeters.selection.value, 42);
+  assert.equal(latest?.activity?.altitudeChangeMeters.selection.value, 33);
+
+  assert.equal(energy?.metric, "activeCalories");
+  assert.equal(energy?.resolvedAlias, "energy-burned");
+  assert.equal(energy?.summaryKind, "activity");
+  assert.equal(energy?.unit, "kcal");
+  assert.equal(energy?.value, 100);
+
+  assert.equal(maxHeartRate?.metric, "maxHeartRate");
+  assert.equal(maxHeartRate?.summaryKind, "activity");
+  assert.equal(maxHeartRate?.unit, "bpm");
+  assert.equal(maxHeartRate?.value, 168);
+});
+
 test("metric latest and trend surfaces keep fallback and aggregate-backed points", () => {
   const vault = makeVault([
     makeSleepSession({

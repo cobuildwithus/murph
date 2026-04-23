@@ -7,8 +7,8 @@ import type {
   DeviceSamplePayload,
 } from "../core-port.ts";
 import {
+  normalizeWearableMetricValue,
   resolveWearableCanonicalMetricKey,
-  resolveWearableMetricCatalogEntry,
   type WearableCanonicalMetricKey,
 } from "./metric-catalog.ts";
 import { stableStringify, type WearableRawIngestEnvelope } from "./raw-ingest-envelope.ts";
@@ -127,17 +127,18 @@ function canonicalizeEvent(
 
   const metric = readStringField(event.fields, "metric");
   const value = readFiniteNumberField(event.fields, "value");
-  const canonicalMetric = metric ? resolveWearableCanonicalMetricKey(metric) : null;
+  const normalizedMetric = metric && value !== null
+    ? normalizeWearableMetricValue(metric, value, readStringField(event.fields, "unit"))
+    : null;
 
-  if (!canonicalMetric || value === null) {
+  if (!normalizedMetric) {
     return [];
   }
 
-  const catalogEntry = resolveWearableMetricCatalogEntry(canonicalMetric);
   const record: CanonicalWearableObservationRecord = stripUndefined({
     id: buildCanonicalRecordId("observation", payload, event, {
-      metric: canonicalMetric,
-      value,
+      metric: normalizedMetric.key,
+      value: normalizedMetric.value,
       envelopeId: context.rawEnvelope?.id,
     }),
     kind: "observation" as const,
@@ -148,9 +149,9 @@ function canonicalizeEvent(
     occurredAt: event.occurredAt,
     timeZone: event.timeZone,
     source: buildCanonicalSource(payload, event.externalRef, event.rawArtifactRoles, context),
-    metric: canonicalMetric,
-    unit: readStringField(event.fields, "unit") ?? catalogEntry?.defaultUnit ?? "unknown",
-    value,
+    metric: normalizedMetric.key,
+    unit: normalizedMetric.unit,
+    value: normalizedMetric.value,
     title: event.title,
     note: event.note,
   });

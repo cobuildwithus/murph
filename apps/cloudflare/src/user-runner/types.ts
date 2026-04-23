@@ -69,6 +69,7 @@ export interface RunnerPendingCleanupTelegramRef {
 export interface RunnerPendingCleanupState {
   emailMessages: RunnerPendingCleanupEmailRef[];
   linqMessageIds: string[];
+  required: boolean;
   telegramMessages: RunnerPendingCleanupTelegramRef[];
 }
 

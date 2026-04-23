@@ -12,6 +12,7 @@ import {
   parseHostedRunFinalizeResponse,
   parseHostedRunLogRequest,
   parseHostedRunLogResponse,
+  parseHostedRunRecord,
   parseHostedRunReleaseFinalizeRequest,
   parseHostedRunReleaseFinalizeResponse,
   parseHostedRunStatusRequest,
@@ -55,7 +56,7 @@ const TEST_CURSOR_WITHOUT_SNAPSHOT_REF = {
   version: "4",
 } as const;
 
-const TEST_LEGACY_RUN_RECORD = {
+const TEST_RUN_RECORD = {
   acquiredAt: "2026-04-17T00:00:00.000Z",
   attestationRef: null,
   attempt: 1,
@@ -73,7 +74,7 @@ const TEST_LEGACY_RUN_RECORD = {
   triggerKind: "runtime_timer",
   updatedAt: "2026-04-17T00:00:01.000Z",
   userId: "member-1",
-  wakeIds: ["wake-legacy"],
+  ingressEventIds: ["ingress-legacy"],
 } as const;
 
 describe("parser threshold coverage", () => {
@@ -122,14 +123,14 @@ describe("parser threshold coverage", () => {
     })).toThrow(/replicaSchema must be murph\.browser-vault-replica\.v1/i);
   });
 
-  it("covers legacy wake fallbacks and optional run-control shapes", () => {
+  it("covers canonical run-control shapes and optional fields", () => {
     expect(parseHostedRunAcquireRequest({})).toEqual({});
 
     expect(parseHostedRunAcquireResponse({
       acquired: true,
       cursor: TEST_CURSOR_WITH_SNAPSHOT_REF,
       events: [],
-      pendingWakeCount: 2,
+      pendingIngressEventCount: 2,
       resumeFinalize: false,
       run: null,
     })).toEqual({
@@ -147,7 +148,7 @@ describe("parser threshold coverage", () => {
       events: [],
       pendingIngressEventCount: 0,
       resumeFinalize: false,
-      run: TEST_LEGACY_RUN_RECORD,
+      run: TEST_RUN_RECORD,
     })).toEqual({
       acquired: true,
       cursor: TEST_CURSOR_WITH_SNAPSHOT_REF,
@@ -165,7 +166,7 @@ describe("parser threshold coverage", () => {
         executorCodeDigest: null,
         executorKind: "cloudflare-container",
         id: "run-legacy",
-        ingressEventIds: ["wake-legacy"],
+        ingressEventIds: ["ingress-legacy"],
         inputCommittedSeq: "24",
         inputCursorVersion: "4",
         signedResultRef: null,
@@ -183,7 +184,7 @@ describe("parser threshold coverage", () => {
       pendingIngressEventCount: 0,
       resumeFinalize: false,
       run: {
-        ...TEST_LEGACY_RUN_RECORD,
+        ...TEST_RUN_RECORD,
         redactedSummary: null,
       },
     })).toEqual({
@@ -203,7 +204,7 @@ describe("parser threshold coverage", () => {
         executorCodeDigest: null,
         executorKind: "cloudflare-container",
         id: "run-legacy",
-        ingressEventIds: ["wake-legacy"],
+        ingressEventIds: ["ingress-legacy"],
         inputCommittedSeq: "24",
         inputCursorVersion: "4",
         redactedSummary: null,
@@ -225,7 +226,7 @@ describe("parser threshold coverage", () => {
         userId: "member-1",
         version: "4",
       },
-      pendingWakeCount: 1,
+      pendingIngressEventCount: 1,
       run: null,
     })).toEqual({
       cursor: {
@@ -260,8 +261,8 @@ describe("parser threshold coverage", () => {
     expect(parseHostedRunCommitRequest({
       eventResults: [
         {
+          ingressEventId: "wake-1",
           state: "completed",
-          wakeId: "wake-1",
         },
       ],
       expectedCursorVersion: "4",
@@ -294,6 +295,8 @@ describe("parser threshold coverage", () => {
       needsFinalize: false,
       run: null,
     });
+
+    expect(parseHostedRunRecord(TEST_RUN_RECORD)).toEqual(TEST_RUN_RECORD);
 
     expect(parseHostedRunFinalizeRequest({
       browserVaultReplicaRef: TEST_BROWSER_VAULT_REPLICA_REF,
@@ -446,5 +449,76 @@ describe("parser threshold coverage", () => {
     });
 
     expect(parseHostedRunStatusRequest({})).toEqual({});
+  });
+
+  it("rejects removed legacy run-control keys", () => {
+    expect(() => parseHostedRunAcquireResponse({
+      acquired: true,
+      cursor: TEST_CURSOR_WITH_SNAPSHOT_REF,
+      events: [],
+      pendingWakeCount: 2,
+      resumeFinalize: false,
+      run: null,
+    })).toThrow(/pendingIngressEventCount/u);
+    expect(() => parseHostedRunAcquireResponse({
+      acquired: true,
+      cursor: TEST_CURSOR_WITH_SNAPSHOT_REF,
+      events: [],
+      pendingIngressEventCount: 2,
+      pendingWakeCount: 2,
+      resumeFinalize: false,
+      run: null,
+    })).toThrow(/pendingWakeCount/u);
+
+    const { ingressEventIds: _ingressEventIds, ...runWithoutIngressEventIds } = TEST_RUN_RECORD;
+
+    expect(() => parseHostedRunRecord({
+      ...runWithoutIngressEventIds,
+      wakeIds: ["wake-legacy"],
+    })).toThrow(/ingressEventIds/u);
+    expect(() => parseHostedRunRecord({
+      ...TEST_RUN_RECORD,
+      wakeIds: ["wake-legacy"],
+    })).toThrow(/wakeIds/u);
+
+    expect(() => parseHostedRunStatusResponse({
+      cursor: TEST_CURSOR_WITH_SNAPSHOT_REF,
+      pendingWakeCount: 1,
+      run: null,
+    })).toThrow(/pendingIngressEventCount/u);
+    expect(() => parseHostedRunStatusResponse({
+      cursor: TEST_CURSOR_WITH_SNAPSHOT_REF,
+      pendingIngressEventCount: 1,
+      pendingWakeCount: 1,
+      run: null,
+    })).toThrow(/pendingWakeCount/u);
+
+    expect(() => parseHostedRunCommitRequest({
+      eventResults: [
+        {
+          state: "completed",
+          wakeId: "wake-1",
+        },
+      ],
+      expectedCursorVersion: "4",
+      finalizeRequired: false,
+      outputCommittedSeq: "25",
+      runId: "run-1",
+      runToken: "run_token_123",
+    })).toThrow(/ingressEventId/u);
+    expect(() => parseHostedRunCommitRequest({
+      eventResults: [
+        {
+          ingressEventId: "ingress-1",
+          state: "completed",
+          wakeId: "wake-1",
+        },
+      ],
+      expectedCursorVersion: "4",
+      finalizeRequired: false,
+      outputCommittedSeq: "25",
+      runId: "run-1",
+      runToken: "run_token_123",
+    })).toThrow(/wakeId/u);
   });
 });

@@ -49,11 +49,17 @@ test("hosted-runtime-contracts subpath stays wired to the worker-safe hosted run
   assert.equal(readHostedRunnerCommitTimeoutMs, readHostedRunnerCommitTimeoutMsDirect);
 });
 
-test("package manifest declares the hosted assistant env, hosted runtime contracts, and hosted email subpaths", () => {
+test("package manifest declares the hosted assistant env, hosted runtime contracts, and hosted email subpaths", async () => {
   const manifest = JSON.parse(
     readFileSync(new URL("../package.json", import.meta.url), "utf8"),
   ) as {
     exports?: Record<string, unknown>;
+  };
+  const envConstantsModule = await import(
+    new URL("../dist/hosted-assistant-env-constants.js", import.meta.url).href
+  ) as {
+    HOSTED_SHARED_INGRESS_ONLY_SECRET_ENV_NAMES: readonly string[];
+    HOSTED_SHARED_PLATFORM_ONLY_ENV_NAMES: readonly string[];
   };
 
   assert.ok(manifest.exports);
@@ -64,7 +70,9 @@ test("package manifest declares the hosted assistant env, hosted runtime contrac
   assert.ok(Array.isArray(HOSTED_ASSISTANT_CONFIG_ENV_NAMES));
   assert.ok(HOSTED_ASSISTANT_CONFIG_ENV_NAMES.length > 0);
   assert.ok(Array.isArray(HOSTED_SHARED_FORWARDED_ENV_CATEGORY_KEYS.telegramConfigured));
+  assert.ok(envConstantsModule.HOSTED_SHARED_INGRESS_ONLY_SECRET_ENV_NAMES.includes("LINQ_WEBHOOK_SECRET"));
   assert.ok(HOSTED_SHARED_MODEL_CREDENTIAL_ENV_NAMES.includes("OPENAI_API_KEY"));
+  assert.ok(envConstantsModule.HOSTED_SHARED_PLATFORM_ONLY_ENV_NAMES.includes("TELEGRAM_BOT_TOKEN"));
   assert.equal(typeof readHostedAssistantApiKeyEnvName, "function");
   assert.equal(typeof HostedAssistantConfigurationError, "function");
 });

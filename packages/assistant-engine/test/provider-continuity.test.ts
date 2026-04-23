@@ -289,6 +289,42 @@ describe('OpenAI-compatible native resume retention options', () => {
     expect(JSON.stringify(providerOptions)).not.toContain('member_123')
   })
 
+  it('withholds gateway provider options for custom endpoints even when stale gateway metadata remains', () => {
+    const usageAttribution = createAssistantUsageAttribution({
+      credentialSource: 'platform',
+      environment: 'production',
+      featureKey: 'assistant_reply',
+      memberId: 'member_123',
+      reportingSecret: 'reporting-secret',
+      surface: 'hosted_web',
+      stripeCustomerId: 'cus_123',
+      stripeMeterSource: 'vercel-ai-gateway',
+      triggerKind: 'manual_ask',
+      zeroDataRetention: true,
+    })
+
+    const providerOptions = resolveOpenAiCompatibleProviderOptions({
+      providerConfig: normalizeAssistantProviderConfig({
+        baseUrl: 'https://proxy.example.com/v1',
+        gatewayOnlyProviders: ['openai'],
+        model: 'openai/gpt-5',
+        presetId: 'vercel-ai-gateway',
+        provider: 'openai-compatible',
+        providerName: 'vercel-ai-gateway',
+        zeroDataRetention: true,
+      }),
+      resumeProviderSessionId: null,
+      usageAttribution,
+      usesResponsesApi: true,
+    })
+
+    expect(providerOptions).toEqual({
+      openai: {
+        store: false,
+      },
+    })
+  })
+
   it('delegates Stripe token billing headers only for platform-funded Vercel gateway turns with a valid customer id', () => {
     expect(
       resolveOpenAiCompatibleVercelStripeBillingHeaders({
@@ -341,6 +377,24 @@ describe('OpenAI-compatible native resume retention options', () => {
         },
         providerTarget: {
           baseUrl: 'https://ai-gateway.vercel.sh/v1',
+          providerName: 'vercel-ai-gateway',
+          presetId: 'vercel-ai-gateway',
+        },
+      }),
+    ).toBeNull()
+
+    expect(
+      resolveOpenAiCompatibleVercelStripeBillingHeaders({
+        billingContext: {
+          credentialSource: 'platform',
+          stripeCustomerId: 'cus_123',
+        },
+        env: {
+          HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY: 'rk_test_123',
+          HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED: '1',
+        },
+        providerTarget: {
+          baseUrl: 'https://proxy.example.com/v1',
           providerName: 'vercel-ai-gateway',
           presetId: 'vercel-ai-gateway',
         },

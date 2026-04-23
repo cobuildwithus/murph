@@ -51,7 +51,22 @@ describe("assertHostedOnboardingMutationOrigin", () => {
     ).not.toThrow();
   });
 
-  it("falls back to the request host when no canonical public origin is configured", async () => {
+  it("rejects requests without an Origin header", async () => {
+    const { assertHostedOnboardingMutationOrigin } = await import("@/src/lib/hosted-onboarding/csrf");
+
+    expect(() =>
+      assertHostedOnboardingMutationOrigin(
+        new Request("https://app.example.test/api/hosted-onboarding/invites", {
+          method: "POST",
+        }),
+      )
+    ).toThrowError(expect.objectContaining({
+      code: "HOSTED_ONBOARDING_ORIGIN_REQUIRED",
+      httpStatus: 403,
+    }));
+  });
+
+  it("fails closed on non-loopback hosts when no canonical public origin is configured", async () => {
     mocks.getHostedOnboardingEnvironment.mockReturnValue(createHostedOnboardingEnvironment({
       publicBaseUrl: null,
     }));
@@ -67,7 +82,52 @@ describe("assertHostedOnboardingMutationOrigin", () => {
           },
         }),
       )
+    ).toThrowError(expect.objectContaining({
+      code: "HOSTED_ONBOARDING_ORIGIN_NOT_CONFIGURED",
+      httpStatus: 500,
+    }));
+  });
+
+  it("allows matching localhost origins in non-production when no canonical origin is configured", async () => {
+    mocks.getHostedOnboardingEnvironment.mockReturnValue(createHostedOnboardingEnvironment({
+      publicBaseUrl: null,
+    }));
+
+    const { assertHostedOnboardingMutationOrigin } = await import("@/src/lib/hosted-onboarding/csrf");
+
+    expect(() =>
+      assertHostedOnboardingMutationOrigin(
+        new Request("http://localhost:3000/api/hosted-onboarding/invites", {
+          method: "POST",
+          headers: {
+            origin: "http://localhost:3000",
+          },
+        }),
+      )
     ).not.toThrow();
+  });
+
+  it("rejects localhost fallback in production when no canonical origin is configured", async () => {
+    mocks.getHostedOnboardingEnvironment.mockReturnValue(createHostedOnboardingEnvironment({
+      isProduction: true,
+      publicBaseUrl: null,
+    }));
+
+    const { assertHostedOnboardingMutationOrigin } = await import("@/src/lib/hosted-onboarding/csrf");
+
+    expect(() =>
+      assertHostedOnboardingMutationOrigin(
+        new Request("http://localhost:3000/api/hosted-onboarding/invites", {
+          method: "POST",
+          headers: {
+            origin: "http://localhost:3000",
+          },
+        }),
+      )
+    ).toThrowError(expect.objectContaining({
+      code: "HOSTED_ONBOARDING_ORIGIN_NOT_CONFIGURED",
+      httpStatus: 500,
+    }));
   });
 });
 

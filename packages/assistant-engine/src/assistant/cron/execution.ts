@@ -1,0 +1,626 @@
+import { randomUUID } from 'node:crypto'
+import { setScheduledLogStatus, upsertAutomation } from '@murphai/core'
+import {
+  assistantCronJobSchema,
+  assistantCronRunRecordSchema,
+  type AssistantCronJob,
+  type AssistantCronRunRecord,
+  type AssistantCronTrigger,
+} from '@murphai/operator-config/assistant-cli-contracts'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import { sendAssistantNotificationLocal } from '../../assistant-service.js'
+import type { AssistantExecutionContext } from '../execution-context.js'
+import type { AssistantOutboxDispatchMode } from '../outbox.js'
+import { errorMessage } from '../shared.js'
+import type { AssistantStatePaths } from '../store/paths.js'
+import { withAssistantCronWriteLock } from './locking.js'
+import { buildAssistantCronNotificationDedupeToken } from './notification-delivery.js'
+import {
+  readAssistantCronCanonicalRuntimeStore,
+  writeAssistantCronCanonicalRuntimeStore,
+  findAssistantCronCanonicalRuntimeRecord,
+  removeAssistantCronCanonicalRuntimeRecord,
+  upsertAssistantCronCanonicalRuntimeRecord,
+  type AssistantCronCanonicalRuntimeRecord,
+  type AssistantCronCanonicalRuntimeState,
+} from './runtime-state.js'
+import { computeAssistantCronNextRunAt } from './schedule.js'
+import { runFoodAutoLogCronJob } from './food-auto-log.js'
+import { runScheduledLogCronJob } from './scheduled-log.js'
+import {
+  buildCanonicalFoodIdSet,
+  buildCanonicalAutomationUpsertInput,
+  buildVisibleLocalAssistantCronStore,
+  isCanonicalAssistantCronSourceEnabled,
+  listCanonicalAssistantCronRecords,
+  projectCanonicalAssistantCronJob,
+  type CanonicalAssistantCronJobRecord,
+  resolveCanonicalAssistantCronJobId,
+  resolveCanonicalAssistantCronOccurrenceAt,
+  resolveCanonicalRuntimeState,
+  type ResolvedAssistantCronJob,
+} from './canonical-jobs.js'
+import {
+  appendAssistantCronRun,
+  isAssistantCronJobDue,
+  readAssistantCronStore,
+  resolveAssistantCronJobIndex,
+  sortAssistantCronJobs,
+  writeAssistantCronStore,
+} from './store.js'
+
+const ASSISTANT_CRON_RUN_SCHEMA = 'murph.assistant-cron-run.v1'
+const ASSISTANT_CRON_MAX_RESPONSE_LENGTH = 4_000
+
+export async function claimResolvedAssistantCronJob(input: {
+  job: ResolvedAssistantCronJob
+  occurrenceFallbackAt?: string | null
+  paths: AssistantStatePaths
+}): Promise<ResolvedAssistantCronJob> {
+  if (input.job.kind === 'local') {
+    const store = await readAssistantCronStore(input.paths)
+    const index = resolveAssistantCronJobIndex(store, input.job.job.jobId)
+    const existing = store.jobs[index] as AssistantCronJob
+
+    if (existing.state.runningAt !== null) {
+      throw new VaultCliError(
+        'ASSISTANT_CRON_JOB_RUNNING',
+        `Assistant cron job "${existing.name}" is already running.`,
+      )
+    }
+
+    const now = new Date().toISOString()
+    const claimed = assistantCronJobSchema.parse({
+      ...existing,
+      updatedAt: now,
+      state: {
+        ...existing.state,
+        runningAt: now,
+        runningPid: process.pid,
+      },
+    })
+
+    store.jobs[index] = claimed
+    await writeAssistantCronStore(input.paths, store)
+    return {
+      kind: 'local',
+      job: claimed,
+    }
+  }
+
+  const runtimeStore = await readAssistantCronCanonicalRuntimeStore(input.paths)
+  const currentRuntimeState =
+    findAssistantCronCanonicalRuntimeRecord(
+      runtimeStore,
+      resolveCanonicalAssistantCronJobId(input.job.source),
+    ) ?? input.job.runtimeState
+
+  if (currentRuntimeState.state.runningAt !== null) {
+    throw new VaultCliError(
+      'ASSISTANT_CRON_JOB_RUNNING',
+      `Assistant cron job "${input.job.job.name}" is already running.`,
+    )
+  }
+
+  const now = new Date().toISOString()
+  const occurrenceAt =
+    resolveCanonicalAssistantCronOccurrenceAt(
+      input.job.source,
+      currentRuntimeState,
+    ) ??
+    input.occurrenceFallbackAt ??
+    now
+  const updatedRuntimeState: AssistantCronCanonicalRuntimeRecord = {
+    ...currentRuntimeState,
+    updatedAt: now,
+    state: {
+      ...currentRuntimeState.state,
+      pendingOccurrenceAt: occurrenceAt,
+      retryAfterAt: null,
+      runningAt: now,
+      runningPid: process.pid,
+    },
+  }
+  upsertAssistantCronCanonicalRuntimeRecord(runtimeStore, updatedRuntimeState)
+  await writeAssistantCronCanonicalRuntimeStore(input.paths, runtimeStore)
+
+  return {
+    kind: 'canonical',
+    source: input.job.source,
+    runtimeState: updatedRuntimeState,
+    job: projectCanonicalAssistantCronJob({
+      source: input.job.source,
+      runtimeState: updatedRuntimeState,
+    }),
+  }
+}
+
+export async function claimNextDueAssistantCronJob(
+  paths: AssistantStatePaths,
+  vault: string,
+): Promise<ResolvedAssistantCronJob | null> {
+  return withAssistantCronWriteLock(paths, async () => {
+    const [store, canonicalRecords, runtimeStore] = await Promise.all([
+      readAssistantCronStore(paths),
+      listCanonicalAssistantCronRecords(vault, ['active']),
+      readAssistantCronCanonicalRuntimeStore(paths),
+    ])
+    const now = new Date().toISOString()
+    const canonicalFoodIds = buildCanonicalFoodIdSet(canonicalRecords)
+    const visibleLocalStore = buildVisibleLocalAssistantCronStore(
+      store,
+      canonicalFoodIds,
+    )
+    const canonicalEntries = canonicalRecords.map((source) => {
+      const runtimeState = resolveCanonicalRuntimeState(source, runtimeStore)
+      return {
+        source,
+        runtimeState,
+        job: projectCanonicalAssistantCronJob({
+          source,
+          runtimeState,
+        }),
+      }
+    })
+    const candidate = sortAssistantCronJobs([
+      ...visibleLocalStore.jobs,
+      ...canonicalEntries.map((entry) => entry.job),
+    ]).find((job) =>
+      isAssistantCronJobDue(job, now),
+    )
+    if (!candidate) {
+      return null
+    }
+
+    const localCandidate = store.jobs.find((job) => job.jobId === candidate.jobId)
+    if (localCandidate) {
+      return claimResolvedAssistantCronJob({
+        paths,
+        job: {
+          kind: 'local',
+          job: localCandidate,
+        },
+      })
+    }
+
+    const canonicalEntry = canonicalEntries.find(
+      (entry) => resolveCanonicalAssistantCronJobId(entry.source) === candidate.jobId,
+    )
+    if (!canonicalEntry) {
+      throw new VaultCliError(
+        'ASSISTANT_CRON_JOB_NOT_FOUND',
+        `Assistant cron job "${candidate.name}" was not found.`,
+      )
+    }
+
+    return claimResolvedAssistantCronJob({
+      paths,
+      job: {
+        kind: 'canonical',
+        source: canonicalEntry.source,
+        runtimeState: canonicalEntry.runtimeState,
+        job: canonicalEntry.job,
+      },
+      occurrenceFallbackAt: candidate.state.nextRunAt,
+    })
+  })
+}
+
+export async function executeClaimedAssistantCronJob(input: {
+  deliveryDispatchMode?: AssistantOutboxDispatchMode
+  executionContext?: AssistantExecutionContext | null
+  job: ResolvedAssistantCronJob
+  paths: AssistantStatePaths
+  signal?: AbortSignal
+  trigger: AssistantCronTrigger
+  vault: string
+}): Promise<{
+  job: AssistantCronJob
+  removedAfterRun: boolean
+  run: AssistantCronRunRecord
+}> {
+  const claimedJob = input.job.job
+  const startedAt = new Date().toISOString()
+  let finishedAt = startedAt
+  let sessionId: string | null = null
+  let response: string | null = null
+  let errorText: string | null = null
+  let status: 'failed' | 'succeeded' = 'failed'
+  const occurrenceAt =
+    input.job.kind === 'canonical'
+      ? input.job.runtimeState.state.pendingOccurrenceAt ??
+        resolveCanonicalAssistantCronOccurrenceAt(
+          input.job.source,
+          input.job.runtimeState,
+        ) ??
+        startedAt
+      : startedAt
+
+  try {
+    if (input.signal?.aborted) {
+      throw new VaultCliError(
+        'ASSISTANT_CRON_ABORTED',
+        `Assistant cron job "${claimedJob.name}" was aborted before it started.`,
+      )
+    }
+
+    if (input.job.kind === 'canonical' && input.job.source.kind === 'scheduledLog') {
+      response = await runScheduledLogCronJob({
+        vault: input.vault,
+        scheduledLogId: input.job.source.scheduledLogId,
+        occurrenceAt,
+      })
+    } else if (claimedJob.foodAutoLog) {
+      response = await runFoodAutoLogCronJob({
+        vault: input.vault,
+        foodId: claimedJob.foodAutoLog.foodId,
+        occurrenceAt,
+      })
+    } else {
+      const result = await sendAssistantNotificationLocal({
+        vault: input.vault,
+        instructions: buildAssistantCronExecutionInstructions(claimedJob),
+        deliveryDedupeToken: buildAssistantCronNotificationDedupeToken({
+          job: claimedJob,
+          trigger: input.trigger,
+        }),
+        executionContext: input.executionContext,
+        sessionId: claimedJob.target.sessionId,
+        alias: claimedJob.target.alias,
+        allowBindingRebind: claimedJob.target.sessionId !== null,
+        channel: claimedJob.target.channel,
+        identityId: claimedJob.target.identityId,
+        participantId: claimedJob.target.participantId,
+        threadId: claimedJob.target.threadId,
+        deliveryDispatchMode: input.deliveryDispatchMode,
+        deliveryTarget: claimedJob.target.deliveryTarget,
+        turnTrigger: 'automation-cron',
+        workingDirectory: input.vault,
+      })
+
+      sessionId = result.session.sessionId
+      response = result.response ?? result.decision.privateSummary
+    }
+    status = 'succeeded'
+  } catch (error) {
+    errorText = errorMessage(error)
+    status = 'failed'
+  } finally {
+    finishedAt = new Date().toISOString()
+  }
+
+  const run = assistantCronRunRecordSchema.parse({
+    schema: ASSISTANT_CRON_RUN_SCHEMA,
+    runId: cryptoRandomRunId(),
+    jobId: claimedJob.jobId,
+    trigger: input.trigger,
+    status,
+    startedAt,
+    finishedAt,
+    sessionId,
+    response: truncateAssistantCronResponse(response),
+    responseLength: response?.length ?? 0,
+    error: errorText,
+  })
+
+  const finalized = await withAssistantCronWriteLock(input.paths, async () => {
+    await appendAssistantCronRun(input.paths, run)
+
+    if (input.job.kind === 'local') {
+      const store = await readAssistantCronStore(input.paths)
+      const index = store.jobs.findIndex((job) => job.jobId === claimedJob.jobId)
+
+      if (index === -1) {
+        return {
+          job: claimedJob,
+          removedAfterRun: true,
+        }
+      }
+
+      const current = store.jobs[index] as AssistantCronJob
+      const finalizedJob = finalizeAssistantCronJobAfterRun({
+        job: current,
+        finishedAt,
+        responseSessionId: sessionId,
+        run: {
+          ...run,
+          status,
+        },
+      })
+      let removedAfterRun = false
+
+      if (shouldRemoveAssistantCronJobAfterRun(current, run)) {
+        store.jobs.splice(index, 1)
+        removedAfterRun = true
+      } else {
+        store.jobs[index] = finalizedJob
+      }
+
+      await writeAssistantCronStore(input.paths, store)
+
+      return {
+        job: finalizedJob,
+        removedAfterRun,
+      }
+    }
+
+    const runtimeStore = await readAssistantCronCanonicalRuntimeStore(input.paths)
+    const currentRuntimeState =
+      findAssistantCronCanonicalRuntimeRecord(
+        runtimeStore,
+        resolveCanonicalAssistantCronJobId(input.job.source),
+      ) ?? input.job.runtimeState
+    const updatedRuntimeState = finalizeCanonicalAssistantCronRuntimeAfterRun({
+      finishedAt,
+      run: {
+        ...run,
+        status,
+      },
+      runtimeState: currentRuntimeState,
+      responseSessionId:
+        input.job.source.kind === 'automation' &&
+        input.job.source.continuityPolicy === 'preserve'
+          ? sessionId
+          : null,
+      source: input.job.source,
+    })
+    const persistedRuntimeState: AssistantCronCanonicalRuntimeRecord = {
+      ...currentRuntimeState,
+      alias:
+        input.job.source.kind === 'automation' &&
+        input.job.source.continuityPolicy === 'preserve'
+          ? updatedRuntimeState.alias
+          : null,
+      sessionId:
+        input.job.source.kind === 'automation' &&
+        input.job.source.continuityPolicy === 'preserve'
+          ? updatedRuntimeState.sessionId
+          : null,
+      updatedAt: finishedAt,
+      state: updatedRuntimeState.state,
+    }
+    const finalizedJob = projectCanonicalAssistantCronJob({
+      source: input.job.source,
+      runtimeState: persistedRuntimeState,
+    })
+    let removedAfterRun = false
+
+    if (shouldRemoveAssistantCronJobAfterRun(finalizedJob, run)) {
+      if (input.job.source.kind === 'automation') {
+        await upsertAutomation(
+          buildCanonicalAutomationUpsertInput({
+            vault: input.vault,
+            automationId: input.job.source.automationId,
+            automation: input.job.source,
+            title: input.job.source.title,
+            status: 'archived',
+            schedule: input.job.source.schedule,
+            route: input.job.source.route,
+            instructions: input.job.source.instructions,
+          }),
+        )
+      } else if (input.job.source.kind === 'scheduledLog') {
+        await setScheduledLogStatus({
+          vaultRoot: input.vault,
+          scheduledLogId: input.job.source.scheduledLogId,
+          status: 'archived',
+        })
+      }
+      removeAssistantCronCanonicalRuntimeRecord(
+        runtimeStore,
+        resolveCanonicalAssistantCronJobId(input.job.source),
+      )
+      removedAfterRun = true
+    } else {
+      upsertAssistantCronCanonicalRuntimeRecord(runtimeStore, persistedRuntimeState)
+    }
+
+    await writeAssistantCronCanonicalRuntimeStore(input.paths, runtimeStore)
+
+    return {
+      job:
+        removedAfterRun
+          ? finalizedJob
+          : projectCanonicalAssistantCronJob({
+              source: input.job.source,
+              runtimeState: persistedRuntimeState,
+            }),
+      removedAfterRun,
+    }
+  })
+
+  return {
+    job: finalized.job,
+    removedAfterRun: finalized.removedAfterRun,
+    run,
+  }
+}
+
+function buildAssistantCronExecutionInstructions(job: AssistantCronJob): string {
+  return job.prompt
+}
+
+function finalizeAssistantCronJobAfterRun(input: {
+  finishedAt: string
+  job: AssistantCronJob
+  responseSessionId: string | null
+  run: AssistantCronRunRecord & {
+    status: 'failed' | 'succeeded'
+  }
+}): AssistantCronJob {
+  const runningClearedState = {
+    ...input.job.state,
+    runningAt: null,
+    runningPid: null,
+    lastRunAt: input.finishedAt,
+  }
+  const shouldAutoBindSession =
+    input.responseSessionId !== null && !assistantCronJobHasStableSessionLocator(input.job)
+
+  if (input.run.status === 'succeeded') {
+    const nextRunAt = resolveAssistantCronNextRunAfterSuccess(
+      input.job,
+      new Date(input.finishedAt),
+    )
+
+    return assistantCronJobSchema.parse({
+      ...input.job,
+      enabled:
+        input.job.schedule.kind === 'at' && input.job.keepAfterRun
+          ? false
+          : input.job.enabled,
+      target: shouldAutoBindSession
+        ? {
+            ...input.job.target,
+            sessionId: input.responseSessionId,
+          }
+        : input.job.target,
+      updatedAt: input.finishedAt,
+      state: {
+        ...runningClearedState,
+        nextRunAt,
+        lastSucceededAt: input.finishedAt,
+        lastError: null,
+        consecutiveFailures: 0,
+      },
+    })
+  }
+
+  const failureCount = input.job.state.consecutiveFailures + 1
+  const nextRunAt = input.job.enabled
+    ? new Date(
+        Date.parse(input.finishedAt) + resolveAssistantCronFailureBackoffMs(failureCount),
+      ).toISOString()
+    : input.job.state.nextRunAt
+
+  return assistantCronJobSchema.parse({
+    ...input.job,
+    updatedAt: input.finishedAt,
+    state: {
+      ...runningClearedState,
+      nextRunAt,
+      lastFailedAt: input.finishedAt,
+      lastError: input.run.error,
+      consecutiveFailures: failureCount,
+    },
+  })
+}
+
+function shouldRemoveAssistantCronJobAfterRun(
+  job: AssistantCronJob,
+  run: AssistantCronRunRecord,
+): boolean {
+  return job.schedule.kind === 'at' && !job.keepAfterRun && run.status === 'succeeded'
+}
+
+function resolveAssistantCronNextRunAfterSuccess(
+  job: AssistantCronJob,
+  now: Date,
+): string | null {
+  if (!job.enabled) {
+    return job.state.nextRunAt
+  }
+
+  if (job.schedule.kind === 'at') {
+    return null
+  }
+
+  return computeAssistantCronNextRunAt(job.schedule, now)
+}
+
+function resolveAssistantCronFailureBackoffMs(failureCount: number): number {
+  if (failureCount <= 1) {
+    return 30_000
+  }
+
+  if (failureCount === 2) {
+    return 60_000
+  }
+
+  if (failureCount === 3) {
+    return 5 * 60_000
+  }
+
+  if (failureCount === 4) {
+    return 15 * 60_000
+  }
+
+  return 60 * 60_000
+}
+
+function finalizeCanonicalAssistantCronRuntimeAfterRun(input: {
+  finishedAt: string
+  responseSessionId: string | null
+  run: AssistantCronRunRecord & {
+    status: 'failed' | 'succeeded'
+  }
+  runtimeState: AssistantCronCanonicalRuntimeRecord
+  source: CanonicalAssistantCronJobRecord
+}): AssistantCronCanonicalRuntimeRecord {
+  const runningClearedState: AssistantCronCanonicalRuntimeState = {
+    ...input.runtimeState.state,
+    runningAt: null,
+    runningPid: null,
+    lastRunAt: input.finishedAt,
+  }
+
+  if (input.run.status === 'succeeded') {
+    return {
+      ...input.runtimeState,
+      sessionId: input.responseSessionId ?? input.runtimeState.sessionId,
+      updatedAt: input.finishedAt,
+      state: {
+        ...runningClearedState,
+        pendingOccurrenceAt: null,
+        retryAfterAt: null,
+        lastSucceededAt: input.finishedAt,
+        lastError: null,
+        consecutiveFailures: 0,
+      },
+    }
+  }
+
+  const failureCount = input.runtimeState.state.consecutiveFailures + 1
+  const retryAfterAt = isCanonicalAssistantCronSourceEnabled(input.source)
+    ? new Date(
+        Date.parse(input.finishedAt) +
+          resolveAssistantCronFailureBackoffMs(failureCount),
+      ).toISOString()
+    : null
+
+  return {
+    ...input.runtimeState,
+    updatedAt: input.finishedAt,
+    state: {
+      ...runningClearedState,
+      pendingOccurrenceAt:
+        input.runtimeState.state.pendingOccurrenceAt ??
+        resolveCanonicalAssistantCronOccurrenceAt(input.source, input.runtimeState),
+      retryAfterAt,
+      lastFailedAt: input.finishedAt,
+      lastError: input.run.error,
+      consecutiveFailures: failureCount,
+    },
+  }
+}
+
+function assistantCronJobHasStableSessionLocator(job: AssistantCronJob): boolean {
+  return Boolean(
+    job.target.sessionId ||
+      job.target.alias ||
+      (job.target.channel &&
+        (job.target.participantId || job.target.threadId)),
+  )
+}
+
+function truncateAssistantCronResponse(response: string | null): string | null {
+  if (response === null) {
+    return null
+  }
+
+  return response.slice(0, ASSISTANT_CRON_MAX_RESPONSE_LENGTH)
+}
+
+function cryptoRandomRunId(): string {
+  return `cronrun_${randomUUID().replace(/-/gu, '')}`
+}

@@ -60,6 +60,7 @@ const executionContext = {
 function createRuntime() {
   return {
     commitTimeoutMs: null,
+    forwardedEnv: {},
     platform: {
       artifactStore: {
         async get() {
@@ -71,6 +72,7 @@ function createRuntime() {
       effectsPort: createHostedRuntimeEffectsPortStub(),
       usageExportPort: null,
     },
+    platformEnv: {},
     resolvedConfig: createHostedRuntimeResolvedConfig(),
     userEnv: {},
   } as const;

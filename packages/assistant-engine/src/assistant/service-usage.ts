@@ -51,6 +51,7 @@ export async function persistPendingAssistantUsageEvent(input: {
       apiKeyEnv,
       credentialSource: usageAttribution?.credentialSource ?? resolveAssistantUsageCredentialSource({
         apiKeyEnv,
+        headers: input.providerResult.providerOptions.headers ?? null,
         provider: input.providerResult.provider,
         userEnvKeys: [...(input.executionContext.hosted?.userEnvKeys ?? [])],
       }),

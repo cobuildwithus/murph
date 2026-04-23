@@ -1,5 +1,8 @@
 import type { AssistantModelSpec } from '../model-harness.js'
-import { readAssistantEnvString } from '@murphai/operator-config/assistant/shared'
+import {
+  isAssistantVercelAIGatewayBaseUrl,
+  readAssistantEnvString,
+} from '@murphai/operator-config/assistant/shared'
 import {
   normalizeAssistantProviderConfig,
   normalizeAssistantGatewayOnlyProviders,
@@ -30,6 +33,8 @@ export function resolveAssistantModelSpecFromProviderConfig(
 
   const apiKeyEnv = normalizeNullableString(normalized.target.apiKeyEnv)
   const apiKeyValue = readAssistantEnvString(env, apiKeyEnv) ?? undefined
+  const explicitEnvSnapshot =
+    env !== process.env && typeof apiKeyEnv === 'string' && apiKeyEnv.length > 0
   const responsesRequestPolicy = resolveAssistantResponsesRequestPolicy(normalized)
 
   return {
@@ -38,6 +43,7 @@ export function resolveAssistantModelSpecFromProviderConfig(
     model,
     ...(apiKeyValue ? { apiKey: apiKeyValue } : {}),
     ...(apiKeyEnv ? { apiKeyEnv } : {}),
+    ...(explicitEnvSnapshot ? { apiKeyEnvValue: apiKeyValue ?? null } : {}),
     ...(normalized.target.headers ? { headers: normalized.target.headers } : {}),
     ...(normalized.target.providerName
       ? { providerName: normalized.target.providerName }
@@ -49,7 +55,11 @@ export function resolveAssistantModelSpecFromProviderConfig(
 function resolveAssistantResponsesRequestPolicy(
   input: ReturnType<typeof normalizeAssistantProviderConfig>,
 ): AssistantModelSpec['responsesRequestPolicy'] {
-  if (input.target.kind !== 'responses' || input.target.via !== 'vercel-ai-gateway') {
+  if (
+    input.target.kind !== 'responses' ||
+    input.target.via !== 'vercel-ai-gateway' ||
+    !isAssistantVercelAIGatewayBaseUrl(input.target.baseUrl)
+  ) {
     return undefined
   }
 

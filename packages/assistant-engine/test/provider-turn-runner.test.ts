@@ -998,6 +998,122 @@ describe('executeProviderTurnWithRecovery', () => {
     )
   })
 
+  it('treats credential-like provider headers as member-auth and skips delegated Vercel billing', async () => {
+    const route = createRoute({
+      routeId: 'route-header-auth-gateway',
+      providerOptions: {
+        apiKeyEnv: null,
+        baseUrl: 'https://ai-gateway.vercel.sh/v1',
+        headers: {
+          'X-Api-Key': 'member-secret-header',
+        },
+        model: 'openai/gpt-5.4',
+        presetId: 'vercel-ai-gateway',
+        providerName: 'vercel-ai-gateway',
+      },
+    })
+    const session = createAssistantSession()
+
+    runnerMocks.executeAssistantProviderTurnAttempt.mockResolvedValue(
+      createSuccessfulAttemptResult({
+        providerSessionId: 'provider-session-header-auth',
+        response: 'Header auth answer',
+      }),
+    )
+
+    await executeProviderTurnWithRecovery({
+      input: createMessageInput({
+        executionContext: {
+          hosted: {
+            memberId: 'member_123',
+            stripeCustomerId: 'cus_123',
+            userEnvKeys: [],
+          },
+        },
+        prompt: 'Use the header-auth gateway route',
+      }),
+      plan: createTurnPlan({
+        cliAccessEnv: {
+          CLI_TOKEN: 'test-cli-token',
+          HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY: 'rk_test_123',
+          HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED: 'true',
+        },
+      }),
+      resolvedSession: session,
+      routes: [route],
+      turnCreatedAt: '2026-04-08T00:00:00.000Z',
+      turnId: 'turn-header-auth-gateway',
+    })
+
+    expect(runnerMocks.executeAssistantProviderTurnAttempt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        usageAttribution: expect.objectContaining({
+          credentialSource: 'member',
+          gatewayTags: expect.arrayContaining(['credential:member']),
+          stripeCustomerId: 'cus_123',
+          stripeMeterSource: 'murph',
+        }),
+      }),
+    )
+  })
+
+  it('treats blank configured user env overrides as platform-funded gateway usage', async () => {
+    const route = createRoute({
+      routeId: 'route-blank-user-key-gateway',
+      providerOptions: {
+        apiKeyEnv: 'OPENAI_API_KEY',
+        baseUrl: 'https://ai-gateway.vercel.sh/v1',
+        model: 'openai/gpt-5.4',
+        presetId: 'vercel-ai-gateway',
+        providerName: 'vercel-ai-gateway',
+      },
+    })
+    const session = createAssistantSession()
+
+    runnerMocks.executeAssistantProviderTurnAttempt.mockResolvedValue(
+      createSuccessfulAttemptResult({
+        providerSessionId: 'provider-session-blank-user-key',
+        response: 'Gateway answer',
+      }),
+    )
+
+    await executeProviderTurnWithRecovery({
+      input: createMessageInput({
+        executionContext: {
+          hosted: {
+            memberId: 'member_123',
+            stripeCustomerId: 'cus_123',
+            userEnvKeys: ['OPENAI_API_KEY'],
+          },
+        },
+        prompt: 'Use the gateway with a blank hosted override',
+      }),
+      plan: createTurnPlan({
+        cliAccessEnv: {
+          CLI_TOKEN: 'test-cli-token',
+          HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY: 'rk_test_123',
+          HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED: 'true',
+          OPENAI_API_KEY: '   ',
+        },
+      }),
+      resolvedSession: session,
+      routes: [route],
+      turnCreatedAt: '2026-04-08T00:00:00.000Z',
+      turnId: 'turn-blank-user-key-gateway',
+    })
+
+    expect(runnerMocks.executeAssistantProviderTurnAttempt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        usageAttribution: expect.objectContaining({
+          credentialSource: 'platform',
+          gatewayTags: expect.arrayContaining(['credential:platform']),
+          stripeCustomerId: 'cus_123',
+          stripeMeterSource: 'vercel-ai-gateway',
+        }),
+      }),
+    )
+  })
+
   it('keeps the turn moving when the vault overview helper fails', async () => {
     const route = createRoute({
       routeId: 'route-bootstrap-overview-failure',
@@ -1343,6 +1459,122 @@ describe('executeProviderTurnWithRecovery', () => {
       error: appServerError,
       route: primaryRoute,
       session: recoveredSession,
+    })
+    expect(runnerMocks.recordAssistantFailoverRouteFailure).toHaveBeenCalledTimes(1)
+    expect(extractReceiptKinds()).toEqual([
+      'provider.attempt.started',
+      'provider.attempt.failed',
+    ])
+    expect(runnerMocks.recordAssistantDiagnosticEvent).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'provider.failover.applied',
+      }),
+    )
+  })
+
+  it('does not fail over when the provider error reports started provider work', async () => {
+    const primaryRoute = createRoute({
+      label: 'Primary',
+      routeId: 'route-primary',
+    })
+    const backupRoute = createRoute({
+      label: 'Backup',
+      routeId: 'route-backup',
+    })
+    const recoveredSession = createAssistantSession({
+      providerSessionId: 'provider-session-recovered',
+      resumeRouteId: 'route-primary',
+      updatedAt: '2026-04-08T00:04:00.000Z',
+    })
+    const providerWorkError = createError('provider work already started', 'UPSTREAM_FAILED', {
+      providerActionCount: 1,
+      retryable: true,
+    })
+
+    runnerMocks.executeAssistantProviderTurnAttempt.mockResolvedValue(
+      createFailedAttemptResult({
+        error: providerWorkError,
+        executedToolCount: 0,
+        providerActionCount: 0,
+      }),
+    )
+    runnerMocks.recoverAssistantSessionAfterProviderFailure.mockResolvedValue(
+      recoveredSession,
+    )
+
+    const outcome = await executeProviderTurnWithRecovery({
+      input: createMessageInput({
+        prompt: 'Retry the started provider route',
+      }),
+      plan: createTurnPlan({}),
+      resolvedSession: createAssistantSession(),
+      routes: [primaryRoute, backupRoute],
+      turnCreatedAt: '2026-04-08T00:00:00.000Z',
+      turnId: 'turn-provider-context-action',
+    })
+
+    expect(outcome).toEqual({
+      kind: 'failed_terminal',
+      error: providerWorkError,
+      route: primaryRoute,
+      session: recoveredSession,
+    })
+    expect(extractReceiptKinds()).toEqual([
+      'provider.attempt.started',
+      'provider.attempt.failed',
+    ])
+    expect(runnerMocks.recordAssistantDiagnosticEvent).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'provider.failover.applied',
+      }),
+    )
+  })
+
+  it('keeps provider-native OpenAI-compatible action failures terminal instead of failing over', async () => {
+    const primaryRoute = createRoute({
+      label: 'Primary',
+      providerOptions: {
+        baseUrl: 'https://api.openai.com/v1',
+        presetId: 'openai',
+        providerName: 'OpenAI',
+        webSearch: 'provider',
+      },
+      routeId: 'route-primary',
+    })
+    const backupRoute = createRoute({
+      label: 'Backup',
+      routeId: 'route-backup',
+    })
+    const session = createAssistantSession()
+    const providerNativeActionError = createError(
+      'provider-native web search failed',
+      'ASSISTANT_PROVIDER_TIMEOUT',
+    )
+
+    runnerMocks.executeAssistantProviderTurnAttempt.mockResolvedValue(
+      createFailedAttemptResult({
+        error: providerNativeActionError,
+        executedToolCount: 0,
+        providerActionCount: 1,
+      }),
+    )
+
+    const outcome = await executeProviderTurnWithRecovery({
+      input: createMessageInput({
+        prompt: 'Retry the provider-native search route',
+      }),
+      plan: createTurnPlan({}),
+      resolvedSession: session,
+      routes: [primaryRoute, backupRoute],
+      turnCreatedAt: '2026-04-08T00:00:00.000Z',
+      turnId: 'turn-provider-native-action-terminal',
+    })
+
+    expect(outcome).toEqual({
+      kind: 'failed_terminal',
+      error: providerNativeActionError,
+      route: primaryRoute,
+      session,
     })
     expect(runnerMocks.recordAssistantFailoverRouteFailure).toHaveBeenCalledTimes(1)
     expect(extractReceiptKinds()).toEqual([

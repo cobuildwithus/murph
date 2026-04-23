@@ -3,11 +3,12 @@ import { type User as PrivyUser } from "@privy-io/node";
 import { hostedOnboardingError } from "./errors";
 import {
   HOSTED_PRIVY_EMBEDDED_WALLET_CHAIN_TYPE,
+  type HostedPrivyEmailAccount,
   type HostedPrivyLinkedAccountContainer,
   type HostedPrivyPhoneAccount,
   type HostedPrivyTelegramAccount,
   type HostedPrivyWalletAccount,
-  extractHostedPrivyPreferredEmailAccount,
+  extractHostedPrivyVerifiedEmailAccount,
   resolveHostedPrivyLinkedAccountState,
   resolveHostedPrivyLinkedAccounts,
   resolveHostedPrivyTelegramAccountSelection,
@@ -20,6 +21,7 @@ export const HOSTED_PRIVY_MEMBER_ID_METADATA_KEY = "murph_member_id";
 export type HostedPrivyUser = PrivyUser & HostedPrivyLinkedAccountContainer;
 
 export interface HostedPrivyIdentity {
+  email?: HostedPrivyEmailAccount | null;
   phone: HostedPrivyPhoneAccount | null;
   telegram: HostedPrivyTelegramAccount | null;
   userId: string;
@@ -50,7 +52,7 @@ export function readHostedPrivyMemberIdFromVerifiedUser(user: HostedPrivyUser): 
 export function resolveHostedPrivyIdentityFromVerifiedUser(user: HostedPrivyUser): HostedPrivyIdentity {
   const linkedAccountState = resolveHostedPrivyLinkedAccountState(user, HOSTED_PRIVY_EMBEDDED_WALLET_CHAIN_TYPE);
   const { phone, wallet } = linkedAccountState;
-  const email = extractHostedPrivyPreferredEmailAccount(linkedAccountState.linkedAccounts);
+  const email = extractHostedPrivyVerifiedEmailAccount(linkedAccountState.linkedAccounts);
   const telegramSelection = resolveHostedPrivyTelegramAccountSelection(user);
 
   if (telegramSelection.ambiguous) {
@@ -78,6 +80,7 @@ export function resolveHostedPrivyIdentityFromVerifiedUser(user: HostedPrivyUser
   }
 
   return {
+    email,
     phone,
     telegram: telegramSelection.account,
     userId: user.id,

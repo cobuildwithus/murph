@@ -614,6 +614,7 @@ describe("assistant pending usage seam", () => {
       seamMocks.resolveAssistantUsageCredentialSource
     ).toHaveBeenCalledWith({
       apiKeyEnv: "RUNTIME_KEY",
+      headers: null,
       provider: "openai-compatible",
       userEnvKeys: [" OPENAI_API_KEY ", "", "CUSTOM_KEY"],
     });
@@ -648,6 +649,49 @@ describe("assistant pending usage seam", () => {
         turnId: "turn-usage",
         usageId: "turn-usage:3",
       },
+    });
+  });
+
+  it("passes credential-like provider headers into fallback hosted usage attribution", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-08T10:02:00.000Z"));
+
+    await persistPendingAssistantUsageEvent({
+      executionContext: {
+        hosted: {
+          memberId: "member-42",
+          userEnvKeys: [],
+        },
+      },
+      providerResult: createProviderResult({
+        providerOptions: createProviderOptions({
+          apiKeyEnv: null,
+          headers: {
+            "X-Api-Key": "member-header-secret",
+          },
+        }),
+      }),
+      turnId: "turn-usage-header-fallback",
+      vault: "/vault",
+    });
+
+    expect(
+      seamMocks.resolveAssistantUsageCredentialSource
+    ).toHaveBeenCalledWith({
+      apiKeyEnv: null,
+      headers: {
+        "X-Api-Key": "member-header-secret",
+      },
+      provider: "openai-compatible",
+      userEnvKeys: [],
+    });
+    expect(seamMocks.writePendingAssistantUsageRecord).toHaveBeenCalledWith({
+      vault: "/vault",
+      record: expect.objectContaining({
+        credentialSource: "hosted-user-env",
+        occurredAt: "2026-04-08T10:02:00.000Z",
+        turnId: "turn-usage-header-fallback",
+      }),
     });
   });
 

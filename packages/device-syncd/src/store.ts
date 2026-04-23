@@ -372,6 +372,42 @@ function resolveHydratedHostedAccountTokens(input: {
   };
 }
 
+type HostedHydratedTokenPayloadAction = "apply_bundle" | "clear" | "keep";
+
+function resolveHostedAccountHydrationPlan(input: {
+  existing: StoredDeviceSyncAccount | null;
+  hydration: HostedAccountHydrationInput;
+  connectionStateReplayed: boolean;
+  connectionStateStale: boolean;
+  tokenStateReplayed: boolean;
+  tokenStateStale: boolean;
+}): {
+  advanceTokenObservation: boolean;
+  connectionAccepted: boolean;
+  tokenPayloadAction: HostedHydratedTokenPayloadAction;
+} {
+  const connectionAccepted = input.existing === null || (!input.connectionStateStale && !input.connectionStateReplayed);
+  const tokenAccepted = !input.tokenStateStale && !input.tokenStateReplayed;
+  const tokenClearRequested = input.hydration.clearTokens === true
+    || (input.hydration.connection.status === "disconnected" && input.hydration.tokens === undefined);
+
+  let tokenPayloadAction: HostedHydratedTokenPayloadAction = "keep";
+
+  if (input.hydration.tokens !== undefined && tokenAccepted) {
+    tokenPayloadAction = "apply_bundle";
+  } else if (tokenClearRequested && input.hydration.tokens === undefined && connectionAccepted && tokenAccepted) {
+    tokenPayloadAction = "clear";
+  }
+
+  return {
+    advanceTokenObservation: tokenAccepted
+      && input.hydration.hostedObservedTokenVersion !== null
+      && tokenPayloadAction !== "clear",
+    connectionAccepted,
+    tokenPayloadAction,
+  };
+}
+
 function parseIsoMs(value: string | null): number | null {
   if (!value) {
     return null;
@@ -486,7 +522,7 @@ const ACCOUNT_ROW_SELECT = `
 
 export class SqliteDeviceSyncStore {
   readonly databasePath: string;
-  readonly database: DatabaseSync;
+  private readonly database: DatabaseSync;
 
   constructor(databasePath: string) {
     this.databasePath = databasePath;
@@ -876,62 +912,58 @@ export class SqliteDeviceSyncStore {
         nextObservedTokenVersion: input.hostedObservedTokenVersion ?? null,
         previousObservedTokenVersion: existing?.hostedObservedTokenVersion ?? null,
       });
-      const shouldApplyConnectionState = existing === null || (!connectionStateStale && !connectionStateReplayed);
-      const requestedClearTokens = input.clearTokens === true
-        || (input.connection.status === "disconnected" && input.tokens === undefined);
-      const shouldApplyTokenBundle = input.tokens !== undefined && !tokenStateStale && !tokenStateReplayed;
-      const shouldApplyTokenObservation = !tokenStateStale
-        && !tokenStateReplayed
-        && input.hostedObservedTokenVersion !== null;
-      const shouldClearTokens = requestedClearTokens
-        && input.tokens === undefined
-        && !connectionStateStale
-        && !connectionStateReplayed
-        && !tokenStateStale
-        && !tokenStateReplayed;
-      const connectionUpdatedAt = shouldApplyConnectionState
+      const hydrationPlan = resolveHostedAccountHydrationPlan({
+        existing,
+        hydration: input,
+        connectionStateReplayed,
+        connectionStateStale,
+        tokenStateReplayed,
+        tokenStateStale,
+      });
+      const shouldClearTokens = hydrationPlan.tokenPayloadAction === "clear";
+      const connectionUpdatedAt = hydrationPlan.connectionAccepted
         ? input.connection.updatedAt
         : existing?.updatedAt ?? input.connection.updatedAt;
       const rowUpdatedAt = latestIsoTimestamp(existing?.updatedAt ?? null, connectionUpdatedAt)
         ?? connectionUpdatedAt;
       const { accessTokenEncrypted, refreshTokenEncrypted, accessTokenExpiresAt } = resolveHydratedHostedAccountTokens({
         existing,
-        inputTokens: shouldApplyTokenBundle ? input.tokens : undefined,
+        inputTokens: hydrationPlan.tokenPayloadAction === "apply_bundle" ? input.tokens : undefined,
         shouldClearTokens,
       });
-      const hostedObservedUpdatedAt = shouldApplyConnectionState
+      const hostedObservedUpdatedAt = hydrationPlan.connectionAccepted
         ? input.hostedObservedUpdatedAt ?? existing?.hostedObservedUpdatedAt ?? null
         : existing?.hostedObservedUpdatedAt ?? null;
-      const hostedObservedConnectionRevision = shouldApplyConnectionState
+      const hostedObservedConnectionRevision = hydrationPlan.connectionAccepted
         ? existing?.localConnectionRevision ?? 0
         : existing?.hostedObservedConnectionRevision ?? 0;
       const hostedObservedTokenVersion = shouldClearTokens
         ? null
-        : shouldApplyTokenObservation
+        : hydrationPlan.advanceTokenObservation
           ? input.hostedObservedTokenVersion
           : existing?.hostedObservedTokenVersion ?? null;
-      const hostedObservedTokenRevision = shouldClearTokens || shouldApplyTokenObservation
+      const hostedObservedTokenRevision = shouldClearTokens || hydrationPlan.advanceTokenObservation
         ? existing?.localTokenRevision ?? 0
         : existing?.hostedObservedTokenRevision ?? 0;
-      const displayName = shouldApplyConnectionState
+      const displayName = hydrationPlan.connectionAccepted
         ? input.connection.displayName
         : existing?.displayName ?? input.connection.displayName;
-      const status = shouldApplyConnectionState
+      const status = hydrationPlan.connectionAccepted
         ? input.connection.status
         : existing?.status ?? input.connection.status;
-      const scopes = shouldApplyConnectionState
+      const scopes = hydrationPlan.connectionAccepted
         ? input.connection.scopes
         : existing?.scopes ?? input.connection.scopes;
       const metadata = sanitizeStoredDeviceSyncMetadata(
-        shouldApplyConnectionState
+        hydrationPlan.connectionAccepted
           ? input.connection.metadata
           : existing?.metadata ?? input.connection.metadata,
       );
-      const connectedAt = shouldApplyConnectionState
+      const connectedAt = hydrationPlan.connectionAccepted
         ? input.connection.connectedAt
         : existing?.connectedAt ?? input.connection.connectedAt;
       const disconnectGeneration = existing
-        ? shouldApplyConnectionState && status === "disconnected" && existing.status !== "disconnected"
+        ? hydrationPlan.connectionAccepted && status === "disconnected" && existing.status !== "disconnected"
           ? existing.disconnectGeneration + 1
           : existing.disconnectGeneration
         : status === "disconnected"

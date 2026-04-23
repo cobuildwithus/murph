@@ -37,6 +37,7 @@ export interface HostedAssistantRuntimeResolvedConfig {
 export interface HostedAssistantRuntimeConfig {
   commitTimeoutMs?: number | null;
   forwardedEnv?: Readonly<Record<string, string>>;
+  platformEnv?: Readonly<Record<string, string>>;
   resolvedConfig?: HostedAssistantRuntimeResolvedConfig;
   userEnv?: Readonly<Record<string, string>>;
 }
@@ -72,6 +73,7 @@ export interface NormalizedHostedAssistantRuntimeConfig {
   commitTimeoutMs: number | null;
   forwardedEnv: Record<string, string>;
   platform: HostedRuntimePlatform;
+  platformEnv: Record<string, string>;
   resolvedConfig: HostedAssistantRuntimeResolvedConfig;
   userEnv: Record<string, string>;
 }
@@ -92,7 +94,6 @@ export interface HostedRunDrainMetrics {
   redactedLogEntries: HostedExecutionRedactedLogEntry[];
   shareImportResult: HostedShareImportResult | null;
   shareImportTitle: string | null;
-  vaultSyncImportResult: HostedVaultSyncImportResult | null;
   vaultSyncImportResults: HostedVaultSyncImportResult[];
 }
 

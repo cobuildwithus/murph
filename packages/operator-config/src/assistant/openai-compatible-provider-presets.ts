@@ -1,4 +1,8 @@
-import { normalizeNullableString } from './shared.js'
+import {
+  assistantBaseUrlsShareOrigin,
+  normalizeNullableString,
+  parseAssistantBaseUrl,
+} from './shared.js'
 
 export const setupAssistantProviderPresetValues = [
   'openai',
@@ -365,9 +369,9 @@ export function resolveOpenAICompatibleProviderPreset(input: {
   baseUrl?: string | null
   providerName?: string | null
 }): OpenAICompatibleProviderPreset | null {
-  const byBaseUrl = resolveOpenAICompatibleProviderPresetFromBaseUrl(input.baseUrl)
-  if (byBaseUrl) {
-    return byBaseUrl
+  const normalizedBaseUrl = normalizeNullableString(input.baseUrl)
+  if (normalizedBaseUrl !== null) {
+    return resolveOpenAICompatibleProviderPresetFromBaseUrl(normalizedBaseUrl)
   }
 
   const byProviderName = resolveOpenAICompatibleProviderPresetFromProviderName(
@@ -385,6 +389,34 @@ export function resolveOpenAICompatibleProviderPreset(input: {
   }
 
   return null
+}
+
+export function resolveOpenAICompatibleProviderTargetPresetId(input: {
+  apiKeyEnv?: string | null
+  baseUrl?: string | null
+  presetId?: string | null
+  providerName?: string | null
+}): SetupAssistantProviderPreset | null {
+  const explicitPresetId = resolveOpenAICompatibleProviderPresetFromId(input.presetId)?.id ?? null
+  if (explicitPresetId === 'custom') {
+    return 'custom'
+  }
+
+  const normalizedBaseUrl = normalizeNullableString(input.baseUrl)
+  if (normalizedBaseUrl !== null) {
+    return (
+      resolveOpenAICompatibleProviderPresetFromBaseUrl(normalizedBaseUrl)?.id ?? null
+    )
+  }
+
+  return (
+    explicitPresetId ??
+    resolveOpenAICompatibleProviderPreset({
+      apiKeyEnv: input.apiKeyEnv,
+      providerName: input.providerName,
+    })?.id ??
+    null
+  )
 }
 
 export function resolveOpenAICompatibleProviderPresetFromId(
@@ -427,44 +459,18 @@ export function resolveOpenAICompatibleProviderPresetFromApiKeyEnv(
 export function resolveOpenAICompatibleProviderPresetFromBaseUrl(
   baseUrl: string | null | undefined,
 ): OpenAICompatibleProviderPreset | null {
-  const normalizedBaseUrl = normalizeNullableString(baseUrl)
-  if (!normalizedBaseUrl) {
+  const parsedBaseUrl = parseAssistantBaseUrl(baseUrl)
+  if (!parsedBaseUrl) {
     return null
   }
-
-  const normalizedPrefix = normalizedBaseUrl.toLowerCase()
-  for (const preset of OPENAI_COMPATIBLE_PROVIDER_PRESETS) {
-    if (
-      preset.urlPrefixes.some((prefix) =>
-        normalizedPrefix.startsWith(prefix.toLowerCase()),
-      )
-    ) {
-      return preset
-    }
-  }
-
-  let parsedUrl: URL | null = null
-
-  try {
-    parsedUrl = new URL(normalizedBaseUrl)
-  } catch {
-    parsedUrl = null
-  }
-
-  if (!parsedUrl) {
-    return null
-  }
-
-  const hostname = parsedUrl.hostname.toLowerCase()
-  const port = parsedUrl.port
 
   return (
     OPENAI_COMPATIBLE_PROVIDER_PRESETS.find((preset) => {
-      if (!preset.hostnames.some((candidate) => candidate.toLowerCase() === hostname)) {
-        return false
-      }
-
-      return preset.ports == null || preset.ports.length === 0 || preset.ports.includes(port)
+      return (
+        preset.urlPrefixes.some((prefix) =>
+          matchesAssistantProviderUrlPrefix(parsedBaseUrl, prefix),
+        ) || matchesAssistantProviderHost(parsedBaseUrl, preset)
+      )
     }) ?? null
   )
 }
@@ -484,4 +490,55 @@ function canonicalizeProviderToken(value: string | null | undefined): string {
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-+|-+$/g, '') ?? ''
   )
+}
+
+function matchesAssistantProviderUrlPrefix(baseUrl: URL, prefix: string): boolean {
+  const parsedPrefix = parseAssistantBaseUrl(prefix)
+  if (!parsedPrefix || !assistantBaseUrlsShareOrigin(baseUrl, parsedPrefix)) {
+    return false
+  }
+
+  return matchesAssistantUrlPathPrefix(baseUrl.pathname, parsedPrefix.pathname)
+}
+
+function matchesAssistantProviderHost(
+  baseUrl: URL,
+  preset: OpenAICompatibleProviderPreset,
+): boolean {
+  const presetBaseUrl = parseAssistantBaseUrl(preset.baseUrl)
+  if (presetBaseUrl && presetBaseUrl.protocol !== baseUrl.protocol) {
+    return false
+  }
+
+  if (
+    !preset.hostnames.some(
+      (candidate) => candidate.toLowerCase() === baseUrl.hostname.toLowerCase(),
+    )
+  ) {
+    return false
+  }
+
+  return preset.ports == null || preset.ports.length === 0
+    ? baseUrl.port === ''
+    : preset.ports.includes(baseUrl.port)
+}
+
+function matchesAssistantUrlPathPrefix(
+  pathname: string,
+  prefixPathname: string,
+): boolean {
+  const normalizedPathname = normalizeAssistantPathname(pathname)
+  const normalizedPrefix = normalizeAssistantPathname(prefixPathname)
+
+  return (
+    normalizedPrefix === '/' ||
+    normalizedPathname === normalizedPrefix ||
+    normalizedPathname.startsWith(`${normalizedPrefix}/`)
+  )
+}
+
+function normalizeAssistantPathname(pathname: string): string {
+  return pathname.endsWith('/') && pathname !== '/'
+    ? pathname.slice(0, -1)
+    : pathname
 }

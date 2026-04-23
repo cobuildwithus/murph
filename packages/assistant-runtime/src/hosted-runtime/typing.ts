@@ -61,6 +61,7 @@ export async function startHostedRunMessagingActivity(input: {
   component?: HostedMessagingActivityComponent;
   events: readonly HostedRuntimeDrainEvent[];
   linqRefreshMs?: number;
+  platformEnv?: Readonly<Record<string, string>>;
   runtimeEnv: Readonly<Record<string, string>>;
   run: HostedAssistantRuntimeJobInput["request"]["run"] | null;
   startTimeoutMs?: number;
@@ -106,6 +107,7 @@ export async function startHostedRunMessagingActivity(input: {
         },
         buildHostedMessagingActivityDependencies(input.runtimeEnv, {
           linqRefreshMs: input.linqRefreshMs,
+          platformEnv: input.platformEnv,
           signal: startAbortController.signal,
         }),
       ),
@@ -289,10 +291,15 @@ function buildHostedMessagingActivityDependencies(
   runtimeEnv: Readonly<Record<string, string>>,
   options: {
     linqRefreshMs?: number;
+    platformEnv?: Readonly<Record<string, string>>;
     signal: AbortSignal;
   },
 ): AssistantChannelDependencies {
   const env = runtimeEnv as NodeJS.ProcessEnv;
+  const telegramEnv = {
+    ...runtimeEnv,
+    ...(options.platformEnv ?? {}),
+  } as NodeJS.ProcessEnv;
 
   return {
     startLinqTyping: (input) => startLinqTypingIndicator(input, {
@@ -301,7 +308,7 @@ function buildHostedMessagingActivityDependencies(
       signal: options.signal,
     }),
     startTelegramTyping: (input) => startTelegramTypingIndicator(input, {
-      env,
+      env: telegramEnv,
       signal: options.signal,
     }),
   };

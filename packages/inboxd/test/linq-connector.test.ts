@@ -302,7 +302,7 @@ test("normalizeLinqWebhookEvent accepts minimized canonical Linq events from hos
   });
 
   assert.equal(capture.externalId, "linq:hbid:linq.message:v1:test");
-  assert.equal(capture.accountId, "hbidx:phone:v1:test");
+  assert.equal(capture.accountId, "hbid:linq.recipient:v1:test");
   assert.equal(capture.thread.id, "chat_stored");
   assert.equal(capture.text, "Stored webhook snapshot");
   assert.deepEqual(capture.raw, {
@@ -318,6 +318,60 @@ test("normalizeLinqWebhookEvent accepts minimized canonical Linq events from hos
     media_part_count: 0,
     voice_memo_part_count: 0,
   });
+});
+
+test("normalizeLinqWebhookEvent prefers recipient_handle over chat.owner_handle when recipient_phone is absent", async () => {
+  const canonical = {
+    api_version: "v3",
+    created_at: "2026-04-02T04:00:00.000Z",
+    webhook_version: "2026-02-03",
+    data: {
+      chat: {
+        id: "chat_stored_precedence",
+        owner_handle: {
+          handle: "hbid:linq.owner:v1:test",
+          id: "handle_owner_precedence",
+          is_me: true,
+          service: "iMessage",
+        },
+      },
+      chat_id: "chat_stored_precedence",
+      direction: "inbound",
+      from: "hbid:linq.from:v1:test",
+      from_handle: {
+        handle: "hbid:linq.from:v1:test",
+        id: "handle_sender_precedence",
+        service: "iMessage",
+      },
+      is_from_me: false,
+      message: {
+        id: "hbid:linq.message.precedence:v1:test",
+        parts: [],
+      },
+      recipient_handle: {
+        handle: "hbid:linq.recipient:v1:test",
+        id: "handle_recipient_precedence",
+        is_me: true,
+        service: "iMessage",
+      },
+      received_at: "2026-04-02T04:00:01.000Z",
+      sender_handle: {
+        handle: "hbid:linq.from:v1:test",
+        id: "handle_sender_precedence",
+        service: "iMessage",
+      },
+      service: "iMessage",
+    },
+    event_id: "evt_stored_precedence",
+    event_type: "message.received",
+  } as const;
+
+  const capture = await normalizeLinqWebhookEvent({
+    defaultAccountId: "hbidx:phone:v1:test",
+    event: canonical,
+  });
+
+  assert.equal(capture.accountId, "hbid:linq.recipient:v1:test");
 });
 
 test("normalizeHostedLinqConversationMessage preserves hosted account ids and reply-thread message ids", async () => {

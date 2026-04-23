@@ -325,6 +325,50 @@ describe('assistant failover helpers', () => {
       }),
     ).toBe(true)
   })
+
+  it('keeps raw auth, config, model, and invalid-request upstream failures terminal unless marked retryable', () => {
+    expect(
+      shouldAttemptAssistantProviderFailover({
+        error: new Error('Incorrect API key provided to the upstream endpoint.'),
+      }),
+    ).toBe(false)
+    expect(
+      shouldAttemptAssistantProviderFailover({
+        error: new Error('No such model: openai/gpt-missing'),
+      }),
+    ).toBe(false)
+    expect(
+      shouldAttemptAssistantProviderFailover({
+        error: Object.assign(new Error('forbidden'), {
+          statusCode: 403,
+        }),
+      }),
+    ).toBe(false)
+    expect(
+      shouldAttemptAssistantProviderFailover({
+        error: Object.assign(new Error('not found'), {
+          status: 404,
+        }),
+      }),
+    ).toBe(false)
+    expect(
+      shouldAttemptAssistantProviderFailover({
+        error: Object.assign(new Error('invalid request payload'), {
+          code: 'invalid_request_error',
+        }),
+      }),
+    ).toBe(false)
+    expect(
+      shouldAttemptAssistantProviderFailover({
+        error: Object.assign(new Error('incorrect api key'), {
+          context: {
+            retryable: true,
+          },
+          statusCode: 401,
+        }),
+      }),
+    ).toBe(true)
+  })
 })
 
 async function createVaultRoot(): Promise<string> {

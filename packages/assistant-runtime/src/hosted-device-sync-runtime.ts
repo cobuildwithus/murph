@@ -1,5 +1,8 @@
 import { buildDeviceSyncTokenCipherOptions, createSecretCodec } from "@murphai/device-syncd/crypto";
-import type { DeviceSyncService } from "@murphai/device-syncd/service";
+import type {
+  DeviceSyncService,
+  SqliteDeviceSyncStore,
+} from "@murphai/device-syncd";
 import type {
   DeviceSyncJobInput,
   StoredDeviceSyncAccount,
@@ -24,6 +27,7 @@ import type {
 import type {
   HostedRuntimeDeviceSyncPort,
 } from "./hosted-runtime/platform.ts";
+import { requireHostedRuntimeDeviceSyncStore } from "./device-sync-service.ts";
 
 export interface HostedDeviceSyncRuntimeSyncState {
   hostedToLocalAccountIds: Map<string, string>;
@@ -32,7 +36,7 @@ export interface HostedDeviceSyncRuntimeSyncState {
   snapshot: HostedDeviceSyncRuntimeSnapshotResponse | null;
 }
 
-type HostedAccountHydrationInput = Parameters<DeviceSyncService["store"]["hydrateHostedAccount"]>[0];
+type HostedAccountHydrationInput = Parameters<SqliteDeviceSyncStore["hydrateHostedAccount"]>[0];
 type HostedDeviceSyncRuntimeClient = HostedRuntimeDeviceSyncPort | null;
 
 export async function syncHostedDeviceSyncControlPlaneState(input: {
@@ -62,13 +66,14 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
 
   const codec = createSecretCodec(input.secret);
   const now = input.wake.occurredAt;
+  const store = requireHostedRuntimeDeviceSyncStore(input.service);
 
   for (const entry of snapshot.connections) {
-    const existing = input.service.store.getAccountByExternalAccount(
+    const existing = store.getAccountByExternalAccount(
       entry.connection.provider,
       entry.connection.externalAccountId,
     );
-    const stored = input.service.store.hydrateHostedAccount(
+    const stored = store.hydrateHostedAccount(
       buildHostedAccountHydrationInput({
         codec,
         entry,
@@ -81,7 +86,7 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
     }
 
     if (stored.status === "disconnected" && existing?.status !== "disconnected") {
-      input.service.store.markPendingJobsDeadForAccount(
+      store.markPendingJobsDeadForAccount(
         stored.id,
         now,
         "HOSTED_CONTROL_PLANE_DISCONNECTED",
@@ -130,12 +135,13 @@ export async function reconcileHostedDeviceSyncControlPlaneState(input: {
 
   const codec = createSecretCodec(input.secret);
   const updates: HostedDeviceSyncRuntimeConnectionUpdate[] = [];
+  const store = requireHostedRuntimeDeviceSyncStore(input.service);
   const snapshotByConnectionId = new Map(
     input.state.snapshot.connections.map((entry) => [entry.connection.id, entry]),
   );
 
   for (const [localAccountId, hostedConnectionId] of input.state.localToHostedAccountIds.entries()) {
-    const account = input.service.store.getAccountById(localAccountId);
+    const account = store.getAccountById(localAccountId);
 
     if (!account) {
       continue;
@@ -188,20 +194,21 @@ function applyHostedDeviceSyncWakeHint(input: {
 
   const wake = resolveHostedDeviceSyncWakeContext(input.wake);
   const localAccountId = wake.connectionId ? input.hostedToLocalAccountIds.get(wake.connectionId) ?? null : null;
+  const store = requireHostedRuntimeDeviceSyncStore(input.service);
 
   if (!localAccountId) {
     return;
   }
 
-  const account = input.service.store.getAccountById(localAccountId);
+  const account = store.getAccountById(localAccountId);
 
   if (!account) {
     return;
   }
 
   if (input.wake.reason === "disconnected") {
-    input.service.store.disconnectAccount(localAccountId, input.wake.occurredAt);
-    input.service.store.markPendingJobsDeadForAccount(
+    store.disconnectAccount(localAccountId, input.wake.occurredAt);
+    store.markPendingJobsDeadForAccount(
       localAccountId,
       input.wake.occurredAt,
       "HOSTED_DEVICE_SYNC_DISCONNECTED",
@@ -211,7 +218,7 @@ function applyHostedDeviceSyncWakeHint(input: {
   }
 
   if (input.wake.reason === "reauthorization_required") {
-    input.service.store.patchAccount(localAccountId, {
+    store.patchAccount(localAccountId, {
       status: "reauthorization_required",
     });
     return;
@@ -221,7 +228,7 @@ function applyHostedDeviceSyncWakeHint(input: {
 
   for (const hint of jobHints) {
     const job = hostedJobHintToDeviceSyncJobInput(hint, input.wake.occurredAt);
-    input.service.store.enqueueJob({
+    store.enqueueJob({
       accountId: localAccountId,
       availableAt: job.availableAt,
       dedupeKey: job.dedupeKey,
@@ -235,7 +242,7 @@ function applyHostedDeviceSyncWakeHint(input: {
 
   const wakePatch = buildHostedDeviceSyncWakeAccountPatch(account, wake.hint);
   if (wakePatch) {
-    input.service.store.patchAccount(localAccountId, wakePatch);
+    store.patchAccount(localAccountId, wakePatch);
   }
 }
 

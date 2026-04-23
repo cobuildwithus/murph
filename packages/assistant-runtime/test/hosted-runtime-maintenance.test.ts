@@ -3,11 +3,12 @@ import assert from "node:assert/strict";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  closeHostedRuntimeDeviceSyncService: vi.fn(),
   createAssistantFoodAutoLogHooks: vi.fn(),
   createInboxBackedAssistantTurnInputPort: vi.fn(),
   createConfiguredDeviceSyncProvidersFromConfigs: vi.fn(),
   createDeviceSyncRegistry: vi.fn(),
-  createDeviceSyncService: vi.fn(),
+  createHostedRuntimeDeviceSyncService: vi.fn(),
   createIntegratedInboxServices: vi.fn(),
   createIntegratedVaultServices: vi.fn(),
   emitHostedExecutionStructuredLog: vi.fn(),
@@ -28,8 +29,9 @@ vi.mock("@murphai/device-syncd/registry", () => ({
   createDeviceSyncRegistry: mocks.createDeviceSyncRegistry,
 }));
 
-vi.mock("@murphai/device-syncd/service", () => ({
-  createDeviceSyncService: mocks.createDeviceSyncService,
+vi.mock("../src/device-sync-service.ts", () => ({
+  closeHostedRuntimeDeviceSyncService: mocks.closeHostedRuntimeDeviceSyncService,
+  createHostedRuntimeDeviceSyncService: mocks.createHostedRuntimeDeviceSyncService,
 }));
 
 vi.mock("@murphai/assistant-engine", () => ({
@@ -92,6 +94,9 @@ const DEVICE_SYNC_CONFIG = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.closeHostedRuntimeDeviceSyncService.mockImplementation((service: { close?: () => void }) => {
+    service.close?.();
+  });
   mocks.createIntegratedInboxServices.mockReturnValue(Symbol("inbox-services"));
   mocks.createInboxBackedAssistantTurnInputPort.mockReturnValue({
     listNewConversationCaptures: vi.fn(async (query) => ({
@@ -200,6 +205,7 @@ describe("runHostedAssistantAutomation", () => {
           userId: "member_123",
         },
         {
+          forwardedEnv: {},
           platform: {
             artifactStore: {
               get: vi.fn(async () => null),
@@ -213,6 +219,7 @@ describe("runHostedAssistantAutomation", () => {
               refresh: hostedTurnInputRefresh,
             },
           },
+          platformEnv: {},
         },
       ),
     ).resolves.toEqual({
@@ -308,6 +315,7 @@ describe("runHostedAssistantAutomation", () => {
           userId: "member_123",
         },
         {
+          forwardedEnv: {},
           platform: {
             artifactStore: {
               get: vi.fn(async () => null),
@@ -321,6 +329,7 @@ describe("runHostedAssistantAutomation", () => {
               refresh: hostedTurnInputRefresh,
             },
           },
+          platformEnv: {},
         },
       ),
     ).rejects.toThrow("inbox import failed");
@@ -381,6 +390,7 @@ describe("runHostedAssistantAutomation", () => {
           userId: "member_123",
         },
         {
+          forwardedEnv: {},
           platform: {
             artifactStore: {
               get: vi.fn(async () => null),
@@ -394,6 +404,7 @@ describe("runHostedAssistantAutomation", () => {
               refresh: hostedTurnInputRefresh,
             },
           },
+          platformEnv: {},
         },
       ),
     ).rejects.toThrow("hosted refresh failed");
@@ -581,7 +592,7 @@ describe("runHostedDeviceSyncPass", () => {
       processedJobs: 0,
       skipped: true,
     });
-    expect(mocks.createDeviceSyncService).not.toHaveBeenCalled();
+    expect(mocks.createHostedRuntimeDeviceSyncService).not.toHaveBeenCalled();
   });
 
   it("skips device sync when the resolved registry has no providers", async () => {
@@ -608,7 +619,7 @@ describe("runHostedDeviceSyncPass", () => {
       processedJobs: 0,
       skipped: true,
     });
-    expect(mocks.createDeviceSyncService).not.toHaveBeenCalled();
+    expect(mocks.createHostedRuntimeDeviceSyncService).not.toHaveBeenCalled();
   });
 
   it("skips device sync when the hosted runtime resolved config disables device sync", async () => {
@@ -631,7 +642,7 @@ describe("runHostedDeviceSyncPass", () => {
       processedJobs: 0,
       skipped: true,
     });
-    expect(mocks.createDeviceSyncService).not.toHaveBeenCalled();
+    expect(mocks.createHostedRuntimeDeviceSyncService).not.toHaveBeenCalled();
   });
 
   it("logs non-fatal control-plane sync failures for non-device-sync wake events and keeps processing jobs", async () => {
@@ -639,7 +650,7 @@ describe("runHostedDeviceSyncPass", () => {
     const runSchedulerOnce = vi.fn(async () => undefined);
     const drainWorker = vi.fn(async () => 3);
 
-    mocks.createDeviceSyncService.mockReturnValue({
+    mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
       close,
       drainWorker,
       getNextWakeAt: () => "2026-04-08T02:00:00.000Z",
@@ -687,7 +698,7 @@ describe("runHostedDeviceSyncPass", () => {
     const runSchedulerOnce = vi.fn(async () => undefined);
     const drainWorker = vi.fn(async () => 3);
 
-    mocks.createDeviceSyncService.mockReturnValue({
+    mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
       close,
       drainWorker,
       getNextWakeAt: () => "2026-04-08T02:00:00.000Z",
@@ -732,7 +743,7 @@ describe("runHostedDeviceSyncPass", () => {
   it("fails closed on control-plane sync errors during device-sync wake handling", async () => {
     const close = vi.fn();
 
-    mocks.createDeviceSyncService.mockReturnValue({
+    mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
       close,
       drainWorker: vi.fn(),
       getNextWakeAt: () => null,
@@ -769,7 +780,7 @@ describe("runHostedDeviceSyncPass", () => {
   it("fails closed on control-plane reconcile errors during device-sync wake handling", async () => {
     const close = vi.fn();
 
-    mocks.createDeviceSyncService.mockReturnValue({
+    mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
       close,
       drainWorker: vi.fn(async () => 1),
       getNextWakeAt: () => null,
@@ -847,7 +858,7 @@ describe("runHostedAssistantRuntimeTimerLane", () => {
       vault: "/tmp/vault-root",
       vaultServices: expect.anything(),
     });
-    expect(mocks.createDeviceSyncService).not.toHaveBeenCalled();
+    expect(mocks.createHostedRuntimeDeviceSyncService).not.toHaveBeenCalled();
   });
 
   it("returns an immediate follow-up wake when assistant work is still runnable now", async () => {
@@ -1047,7 +1058,7 @@ describe("runHostedAssistantRuntimeTimerLane", () => {
 
 describe("runHostedDeviceSyncWakeLane", () => {
   it("runs only the hosted device-sync lane", async () => {
-    mocks.createDeviceSyncService.mockReturnValue({
+    mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
       close: vi.fn(),
       drainWorker: vi.fn(async () => 1),
       getNextWakeAt: () => "2026-04-08T00:30:00.000Z",

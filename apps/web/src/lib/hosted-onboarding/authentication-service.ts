@@ -2,6 +2,7 @@ import {
   type PrismaClient,
 } from "@prisma/client";
 
+import { type HostedAuthenticationIntent } from "./authentication-intent";
 import { getPrisma } from "../prisma";
 import { readHostedPhoneHint } from "./contact-privacy";
 import { isHostedMemberSuspended } from "./entitlement";
@@ -13,7 +14,10 @@ import {
   startHostedOnboardingTiming,
 } from "./logging";
 import { isHostedMemberActivationPending } from "./activation-progress";
-import { readHostedMemberSnapshot } from "./hosted-member-store";
+import {
+  readHostedMemberSnapshot,
+  syncHostedMemberVerifiedEmailAuthorization,
+} from "./hosted-member-store";
 import {
   syncHostedMemberTelegramRoutingBinding,
 } from "./hosted-member-routing-store";
@@ -33,6 +37,7 @@ import {
 } from "./invite-service";
 import {
   ensureHostedMemberForPrivyIdentity,
+  requireExistingHostedMemberForPrivyIdentity,
   reconcileHostedPrivyIdentityOnMember,
 } from "./member-identity-service";
 import type { HostedPostVerificationStage } from "./stage";
@@ -40,6 +45,7 @@ import type { HostedPostVerificationStage } from "./stage";
 export async function completeHostedPrivyVerification(input: {
   identity: HostedPrivyIdentity;
   inviteCode?: string | null;
+  intent?: HostedAuthenticationIntent;
   now?: Date;
   prisma?: PrismaClient;
   verifiedPrivyUser?: HostedPrivyUser | null;
@@ -74,25 +80,24 @@ export async function completeHostedPrivyVerification(input: {
             now,
           });
         })()
-      : await ensureHostedMemberForPrivyIdentity({
-          identity: input.identity,
-          prisma,
-          now,
-        });
+      : input.intent === "signin"
+        ? await requireExistingHostedMemberForPrivyIdentity({
+            identity: input.identity,
+            now,
+            prisma,
+          })
+        : await ensureHostedMemberForPrivyIdentity({
+            identity: input.identity,
+            prisma,
+            now,
+          });
 
-    if (input.identity.telegram?.telegramUserId) {
-      await syncHostedMemberTelegramRoutingBinding({
-        memberId: member.id,
-        prisma,
-        telegramUserId: input.identity.telegram.telegramUserId,
-      });
-    }
-
-    await syncHostedPrivyMemberIdMetadata({
+    await syncHostedPrivyBindings({
+      identity: input.identity,
       memberId: member.id,
-      privyUserId: input.identity.userId,
+      prisma,
       verifiedPrivyUser: input.verifiedPrivyUser ?? null,
-    }).catch(() => null);
+    });
 
     const memberSnapshot = await readHostedMemberSnapshot({
       memberId: member.id,
@@ -148,5 +153,47 @@ export async function completeHostedPrivyVerification(input: {
       usedInvite,
     });
     throw error;
+  }
+}
+
+async function syncHostedPrivyBindings(input: {
+  identity: HostedPrivyIdentity;
+  memberId: string;
+  prisma: PrismaClient;
+  verifiedPrivyUser: HostedPrivyUser | null;
+}): Promise<void> {
+  if (input.identity.email?.verifiedAt) {
+    await syncHostedMemberVerifiedEmailAuthorization({
+      address: input.identity.email.address,
+      memberId: input.memberId,
+      prisma: input.prisma,
+      verifiedAt: new Date(input.identity.email.verifiedAt * 1000),
+    });
+  }
+
+  if (input.identity.telegram?.telegramUserId) {
+    await syncHostedMemberTelegramRoutingBinding({
+      memberId: input.memberId,
+      prisma: input.prisma,
+      telegramUserId: input.identity.telegram.telegramUserId,
+    });
+  }
+
+  await syncHostedPrivyMemberIdMetadataBestEffort({
+    memberId: input.memberId,
+    privyUserId: input.identity.userId,
+    verifiedPrivyUser: input.verifiedPrivyUser,
+  });
+}
+
+async function syncHostedPrivyMemberIdMetadataBestEffort(input: {
+  memberId: string;
+  privyUserId: string;
+  verifiedPrivyUser: HostedPrivyUser | null;
+}): Promise<void> {
+  try {
+    await syncHostedPrivyMemberIdMetadata(input);
+  } catch {
+    console.warn("Hosted Privy member metadata sync failed.");
   }
 }

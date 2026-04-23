@@ -41,7 +41,7 @@ export async function executeHostedIngressEvent(input: {
   executionContext: AssistantExecutionContext;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
-    "commitTimeoutMs" | "platform" | "resolvedConfig" | "userEnv"
+    "commitTimeoutMs" | "forwardedEnv" | "platform" | "platformEnv" | "resolvedConfig" | "userEnv"
   >;
   runtimeEnv: Readonly<Record<string, string>>;
   sharePack?: HostedExecutionRunnerSharePack | null;
@@ -82,7 +82,7 @@ async function handleHostedIngressEvent(input: {
   executionContext: AssistantExecutionContext;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
-    "commitTimeoutMs" | "platform" | "resolvedConfig" | "userEnv"
+    "commitTimeoutMs" | "forwardedEnv" | "platform" | "platformEnv" | "resolvedConfig" | "userEnv"
   >;
   sharePack?: HostedExecutionRunnerSharePack | null;
   vaultRoot: string;
@@ -109,7 +109,7 @@ async function executeHostedConversationWake(input: {
   wake: HostedExecutionConversationMessageWake;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
-    "platform"
+    "forwardedEnv" | "platform" | "platformEnv"
   >;
   vaultRoot: string;
 }): Promise<HostedIngressOutcome> {

@@ -19,6 +19,8 @@ import {
   getAssistantCronJob,
   listAssistantCronJobs,
   removeAssistantCronJob,
+  setAssistantCronJobEnabled,
+  setAssistantCronJobTarget,
 } from '../src/assistant-cron.ts'
 import {
   readAssistantCronCanonicalRuntimeStore,
@@ -417,6 +419,120 @@ test('canonical food lookups ignore hidden local duplicates and removal scrubs t
     store.jobs.filter((job) => job.foodAutoLog?.foodId === created.foodId).length,
     0,
   )
+})
+
+test('canonical food lookups stay visible while enable and target mutations still address hidden local duplicates', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-food-local-mutation-cron-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await initializeVault({ vaultRoot })
+
+  const created = await upsertFoodRecord({
+    vault: vaultRoot,
+    hooks: createAssistantFoodAutoLogHooks(),
+    payload: {
+      status: 'active',
+      title: 'Daily Oats',
+      slug: 'daily-oats',
+      autoLogDaily: {
+        time: '07:30',
+      },
+    },
+  })
+
+  await addAssistantCronJob({
+    vault: vaultRoot,
+    name: 'food-daily:daily-oats',
+    prompt: 'Auto-log recurring food "Daily Oats" as a note-only meal.',
+    schedule: {
+      kind: 'dailyLocal',
+      localTime: '07:30',
+    },
+    foodAutoLog: {
+      foodId: created.foodId,
+    },
+  })
+
+  const updatedTarget = await setAssistantCronJobTarget({
+    channel: 'telegram',
+    deliveryTarget: 'room-1',
+    job: 'food-daily:daily-oats',
+    vault: vaultRoot,
+  })
+  assert.equal(updatedTarget.job.target.channel, 'telegram')
+
+  const disabled = await setAssistantCronJobEnabled(
+    vaultRoot,
+    'food-daily:daily-oats',
+    false,
+  )
+  assert.equal(disabled.enabled, false)
+  assert.equal(disabled.target.channel, 'telegram')
+
+  const visibleJob = await getAssistantCronJob(vaultRoot, 'food-daily:daily-oats')
+  assert.equal(visibleJob.jobId, buildDailyFoodCronJobId(created.foodId))
+  assert.equal(visibleJob.enabled, true)
+  assert.equal(visibleJob.target.channel, null)
+
+  const hiddenLocalJob = (await readAssistantCronStore(
+    resolveAssistantStatePaths(vaultRoot),
+  )).jobs.find((job) => job.foodAutoLog?.foodId === created.foodId)
+  assert.ok(hiddenLocalJob)
+  assert.equal(hiddenLocalJob.enabled, false)
+  assert.equal(hiddenLocalJob.target.channel, 'telegram')
+  assert.equal(hiddenLocalJob.target.deliveryTarget, 'room-1')
+})
+
+test('food auto-log creation through addAssistantCronJob preserves create-time target metadata', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-food-target-preserve-cron-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await initializeVault({ vaultRoot })
+
+  const created = await upsertFoodRecord({
+    vault: vaultRoot,
+    hooks: createAssistantFoodAutoLogHooks(),
+    payload: {
+      status: 'active',
+      title: 'Daily Oats',
+      slug: 'daily-oats',
+      autoLogDaily: {
+        time: '07:30',
+      },
+    },
+  })
+
+  const job = await addAssistantCronJob({
+    vault: vaultRoot,
+    name: 'food-daily:daily-oats-targeted',
+    prompt: 'Auto-log recurring food "Daily Oats" as a note-only meal.',
+    schedule: {
+      kind: 'dailyLocal',
+      localTime: '07:30',
+    },
+    sessionId: 'session-food-target',
+    alias: 'alias-food-target',
+    channel: 'telegram',
+    deliveryTarget: 'room-1',
+    foodAutoLog: {
+      foodId: created.foodId,
+    },
+  })
+
+  assert.equal(job.target.sessionId, 'session-food-target')
+  assert.equal(job.target.alias, 'alias-food-target')
+  assert.equal(job.target.channel, 'telegram')
+  assert.equal(job.target.deliveryTarget, 'room-1')
+
+  const storedJob = (await readAssistantCronStore(resolveAssistantStatePaths(vaultRoot))).jobs
+    .find((entry) => entry.jobId === job.jobId)
+  assert.ok(storedJob)
+  assert.equal(storedJob?.target.sessionId, 'session-food-target')
+  assert.equal(storedJob?.target.alias, 'alias-food-target')
+  assert.equal(storedJob?.target.channel, 'telegram')
+  assert.equal(storedJob?.target.deliveryTarget, 'room-1')
 })
 
 test('renaming a recurring food refreshes the derived cron job metadata', async () => {

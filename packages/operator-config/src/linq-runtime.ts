@@ -183,6 +183,7 @@ export async function deleteLinqMessage(
 
   try {
     await requestLinqNoContent({
+      allowDeleteRetries: true,
       details: {
         operation: 'delete_message',
         provider: 'linq',
@@ -363,6 +364,7 @@ async function requestLinqJson<T>(input: {
 }
 
 async function requestLinqNoContent(input: {
+  allowDeleteRetries?: boolean
   details: LinqSafeRequestDetails
   env: NodeJS.ProcessEnv
   fetchImplementation?: LinqFetch
@@ -379,6 +381,7 @@ async function requestLinqNoContent(input: {
 type LinqHttpMethod = 'DELETE' | 'GET' | 'POST'
 
 async function requestLinq<T>(input: {
+  allowDeleteRetries?: boolean
   details: LinqSafeRequestDetails
   env: NodeJS.ProcessEnv
   fetchImplementation?: LinqFetch
@@ -392,9 +395,16 @@ async function requestLinq<T>(input: {
 
   return requestJsonWithRetry<T, LinqFetchResponse>({
     createHttpError: (response) =>
-      createLinqHttpError(response, input.details, input.method, input.path),
+      createLinqHttpError(
+        response,
+        input.details,
+        input.method,
+        input.path,
+        input.allowDeleteRetries === true,
+      ),
     fetchResponse: () =>
       fetchLinqResponse({
+        allowDeleteRetries: input.allowDeleteRetries === true,
         body: request.body,
         details: input.details,
         fetchImplementation: request.fetchImplementation,
@@ -470,6 +480,7 @@ function createLinqConfigurationError(
 }
 
 async function fetchLinqResponse(input: {
+  allowDeleteRetries: boolean
   details: LinqSafeRequestDetails
   fetchImplementation: LinqFetch
   url: string
@@ -489,7 +500,7 @@ async function fetchLinqResponse(input: {
         method: input.method,
         path: input.path,
         timedOut,
-        retryable: shouldRetryLinqTransportFailure(input.method),
+        retryable: shouldRetryLinqTransportFailure(input.method, input.allowDeleteRetries),
       }),
     fetchImplementation: input.fetchImplementation,
     headers: input.headers,
@@ -505,6 +516,7 @@ async function createLinqHttpError(
   details: LinqSafeRequestDetails,
   method: LinqHttpMethod,
   path: string,
+  allowDeleteRetries: boolean,
 ): Promise<VaultCliError> {
   const { payload, rawText } = await readJsonErrorResponse(response)
 
@@ -517,7 +529,7 @@ async function createLinqHttpError(
       failureStage: 'http',
       method,
       path,
-      retryable: shouldRetryLinqHttpStatus(method, response.status),
+      retryable: shouldRetryLinqHttpStatus(method, response.status, allowDeleteRetries),
       status: response.status,
     },
   )
@@ -573,16 +585,26 @@ function isLinqNotFoundError(error: unknown): error is VaultCliError {
   )
 }
 
-function shouldRetryLinqHttpStatus(method: LinqHttpMethod, status: number): boolean {
+function shouldRetryLinqHttpStatus(
+  method: LinqHttpMethod,
+  status: number,
+  allowDeleteRetries = false,
+): boolean {
   if (status === 429) {
-    return true
+    return method !== 'DELETE' || allowDeleteRetries
   }
 
-  return method === 'GET' && (status === 408 || status >= 500)
+  return (
+    (method === 'GET' || (method === 'DELETE' && allowDeleteRetries)) &&
+    (status === 408 || status >= 500)
+  )
 }
 
-function shouldRetryLinqTransportFailure(method: LinqHttpMethod): boolean {
-  return method === 'GET'
+function shouldRetryLinqTransportFailure(
+  method: LinqHttpMethod,
+  allowDeleteRetries = false,
+): boolean {
+  return method === 'GET' || (method === 'DELETE' && allowDeleteRetries)
 }
 
 async function waitForLinqRetryDelay(

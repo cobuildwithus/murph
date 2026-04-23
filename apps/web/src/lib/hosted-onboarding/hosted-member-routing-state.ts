@@ -32,8 +32,10 @@ export const hostedMemberRoutingLookupSelect =
     member: {
       select: {
         billingStatus: true,
+        createdAt: true,
         id: true,
         suspendedAt: true,
+        updatedAt: true,
       },
     },
   });
@@ -64,7 +66,7 @@ export type HostedMemberRoutingLookupMatch =
   | "telegramUserId";
 
 export interface HostedMemberRoutingLookup {
-  core: Pick<HostedMember, "billingStatus" | "id" | "suspendedAt">;
+  core: Pick<HostedMember, "billingStatus" | "createdAt" | "id" | "suspendedAt" | "updatedAt">;
   matchedBy: HostedMemberRoutingLookupMatch;
   routing: HostedMemberRoutingLookupSnapshot;
 }

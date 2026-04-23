@@ -22,7 +22,8 @@ export type FrontmatterParseProblemCode =
   | "unexpected_object_indentation"
   | "expected_key_value"
   | "unexpected_nested_object_indentation"
-  | "unexpected_trailing_content";
+  | "unexpected_trailing_content"
+  | "invalid_scalar";
 
 export interface FrontmatterParseProblem {
   code: FrontmatterParseProblemCode;
@@ -125,6 +126,13 @@ function createProblem(
         line,
         index,
       };
+    case "invalid_scalar":
+      return {
+        code,
+        message: "Invalid frontmatter scalar.",
+        line,
+        index,
+      };
   }
 }
 
@@ -162,6 +170,23 @@ export function parseFrontmatterScalar(value: string): FrontmatterValue {
   }
 
   return value;
+}
+
+function parseScalarValue(
+  value: string,
+  line: string,
+  index: number,
+  parseScalar: (value: string) => FrontmatterValue,
+): FrontmatterValue {
+  try {
+    return parseScalar(value);
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      fail(createProblem("invalid_scalar", line, index));
+    }
+
+    throw error;
+  }
 }
 
 function nextMeaningfulLine(
@@ -225,7 +250,7 @@ function parseArray(
     const remainder = trimmed.slice(1).trimStart();
 
     if (remainder) {
-      value.push(parseScalar(remainder));
+      value.push(parseScalarValue(remainder, line, index, parseScalar));
       index += 1;
       continue;
     }
@@ -317,7 +342,7 @@ function parseObject(
     const remainder = trimmed.slice(separatorIndex + 1).trim();
 
     if (remainder) {
-      value[key] = parseScalar(remainder);
+      value[key] = parseScalarValue(remainder, line, index, parseScalar);
       index += 1;
       continue;
     }

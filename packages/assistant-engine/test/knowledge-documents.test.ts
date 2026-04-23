@@ -72,6 +72,10 @@ describe('knowledge document helpers', () => {
       '',
       'Hydration helps recovery.',
       '',
+      '## Notes',
+      '',
+      'Keep this section.',
+      '',
       '## Related',
       '',
       '- [[sleep]]',
@@ -79,10 +83,6 @@ describe('knowledge document helpers', () => {
       '## Sources',
       '',
       '- `journal/hydration.md`',
-      '',
-      '## Notes',
-      '',
-      'Keep this section.',
     ].join('\n')
 
     const normalizedBody = normalizeKnowledgeBody(body)

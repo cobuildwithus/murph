@@ -51,14 +51,14 @@ const TEST_CRON_JOB = {
 
 const TEST_PROVIDER_OPTIONS = {
   continuityFingerprint: 'fingerprint-http-test',
-  executionDriver: 'codex-cli',
+  executionDriver: 'codex-app-server',
   approvalPolicy: null,
   model: null,
   oss: false,
   profile: null,
   provider: 'codex-cli',
   reasoningEffort: null,
-  resumeKind: 'codex-session',
+  resumeKind: 'codex-thread',
   sandbox: null,
 } as const
 

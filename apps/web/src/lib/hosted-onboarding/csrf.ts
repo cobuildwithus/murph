@@ -12,26 +12,32 @@ export function assertHostedOnboardingMutationOrigin(request: Request): void {
     });
   }
 
-  const publicBaseUrl = normalizeOrigin(getHostedOnboardingEnvironment().publicBaseUrl);
-  const allowedOrigins = new Set<string>();
+  const environment = getHostedOnboardingEnvironment();
+  const canonicalOrigin = normalizeOrigin(environment.publicBaseUrl);
 
-  if (publicBaseUrl) {
-    allowedOrigins.add(publicBaseUrl);
-  } else {
-    const requestOrigin = normalizeOrigin(request.url);
-    if (requestOrigin) {
-      allowedOrigins.add(requestOrigin);
+  if (canonicalOrigin) {
+    if (canonicalOrigin === origin) {
+      return;
     }
+
+    throw hostedOnboardingError({
+      code: "HOSTED_ONBOARDING_ORIGIN_MISMATCH",
+      httpStatus: 403,
+      message: "Hosted browser mutation origin is not allowed.",
+    });
   }
 
-  if (allowedOrigins.has(origin)) {
+  const requestOrigin = normalizeOrigin(request.url);
+
+  if (!environment.isProduction && requestOrigin && requestOrigin === origin && isLoopbackOrigin(origin)) {
     return;
   }
 
   throw hostedOnboardingError({
-    code: "HOSTED_ONBOARDING_ORIGIN_MISMATCH",
-    httpStatus: 403,
-    message: "Hosted browser mutation origin is not allowed.",
+    code: "HOSTED_ONBOARDING_ORIGIN_NOT_CONFIGURED",
+    httpStatus: 500,
+    message:
+      "Hosted browser mutation routes require a canonical public origin configuration outside explicit localhost development.",
   });
 }
 
@@ -58,4 +64,13 @@ function normalizeOrigin(value: string | null | undefined): string | null {
 function isLoopbackHost(hostname: string, protocol: string): boolean {
   return protocol === "http:"
     && (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]");
+}
+
+function isLoopbackOrigin(origin: string): boolean {
+  try {
+    const url = new URL(origin);
+    return isLoopbackHost(url.hostname.toLowerCase(), url.protocol.toLowerCase());
+  } catch {
+    return false;
+  }
 }

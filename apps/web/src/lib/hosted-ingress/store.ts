@@ -4,9 +4,9 @@ import type {
 
 import { getPrisma } from "../prisma";
 import {
-  ensureHostedExecutionCursorRowTx,
-  findCurrentHostedIngressEventAliasByWakeIdTx,
-  findHostedIngressEventAliasByEventIdTx,
+  ensureHostedExecutionCursorRow,
+  findCurrentHostedIngressEventAliasByWakeId,
+  findHostedIngressEventAliasByEventId,
   resolveHostedIngressEventAliasId,
 } from "./store-data";
 import {
@@ -30,7 +30,7 @@ export {
   appendHostedOrderedWakeTx,
   appendHostedIngressTx,
 } from "./store-append";
-export { ensureHostedExecutionCursorRowTx } from "./store-data";
+export { ensureHostedExecutionCursorRow } from "./store-data";
 export {
   projectHostedExecutionCursorRecord,
   projectHostedIngressEvent,
@@ -42,7 +42,7 @@ export async function findHostedIngressEventAliasIdByEventIdTx(input: {
   tx: HostedIngressStoreClient;
   userId: string;
 }): Promise<string | null> {
-  const event = await findHostedIngressEventAliasByEventIdTx(input);
+  const event = await findHostedIngressEventAliasByEventId(input);
   return event?.ingressEventId ?? null;
 }
 
@@ -51,7 +51,7 @@ export async function readHostedExecutionCursor(input: {
   userId: string;
 }): Promise<HostedExecutionCursorState> {
   const prisma = input.prisma ?? getPrisma();
-  const cursor = await ensureHostedExecutionCursorRowTx({
+  const cursor = await ensureHostedExecutionCursorRow({
     tx: prisma,
     userId: input.userId,
   });
@@ -64,7 +64,7 @@ export async function countPendingHostedIngressEvents(input: {
   userId: string;
 }): Promise<number> {
   const prisma = input.prisma ?? getPrisma();
-  const cursor = await ensureHostedExecutionCursorRowTx({
+  const cursor = await ensureHostedExecutionCursorRow({
     tx: prisma,
     userId: input.userId,
   });
@@ -170,7 +170,7 @@ export async function readLatestHostedIngressLifecycleByKind(input: {
     return null;
   }
 
-  const event = await findCurrentHostedIngressEventAliasByWakeIdTx({
+  const event = await findCurrentHostedIngressEventAliasByWakeId({
     ingressEventId: wake.id,
     tx: prisma,
     userId: input.userId,
@@ -196,7 +196,7 @@ async function resolveHostedIngressEventAliasResolutionTx(input: {
   event: HostedIngressEventAliasRow;
   wake: HostedIngressEventRow;
 } | null> {
-  const event = await findHostedIngressEventAliasByEventIdTx({
+  const event = await findHostedIngressEventAliasByEventId({
     eventId: input.eventId,
     tx: input.tx,
     userId: input.userId,

@@ -5,7 +5,7 @@ import {
   resolveHostedLinqRecipientPhoneNumber,
 } from "@/src/lib/hosted-onboarding/linq-webhook";
 
-it("prefers explicit legacy recipient fields over chat owner data", () => {
+it("prefers explicit raw recipient fields over chat owner data", () => {
   const event = requireHostedLinqMessageReceivedEvent({
     api_version: "v3",
     created_at: "2026-03-28T12:00:00.000Z",
@@ -50,7 +50,7 @@ it("prefers explicit legacy recipient fields over chat owner data", () => {
   expect(resolveHostedLinqRecipientPhoneNumber(event)).toBe("+15557654321");
 });
 
-it("falls back to an explicit legacy recipient handle when recipient_phone is absent", () => {
+it("falls back to an explicit raw recipient handle when recipient_phone is absent", () => {
   const event = requireHostedLinqMessageReceivedEvent({
     api_version: "v3",
     created_at: "2026-03-28T12:00:00.000Z",

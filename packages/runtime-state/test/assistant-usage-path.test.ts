@@ -14,9 +14,15 @@ import {
 import { resolveAssistantStatePaths } from "../src/assistant-state.js";
 
 function createUsageRecord(usageId: string): AssistantUsageRecord {
+  const match = usageId.match(/^(?<turnId>.+)\.attempt-(?<attemptCount>\d+)$/u);
+
+  if (!match?.groups) {
+    throw new Error(`Test usage id ${usageId} must be canonical.`);
+  }
+
   return {
     apiKeyEnv: "OPENAI_API_KEY",
-    attemptCount: 1,
+    attemptCount: Number(match.groups.attemptCount),
     baseUrl: null,
     cacheWriteTokens: null,
     cachedInputTokens: null,
@@ -40,7 +46,7 @@ function createUsageRecord(usageId: string): AssistantUsageRecord {
     surface: null,
     totalTokens: 30,
     triggerKind: null,
-    turnId: "turn/with/slash",
+    turnId: match.groups.turnId,
     usageId,
   };
 }
@@ -52,8 +58,10 @@ describe("pending assistant usage paths", () => {
     const usagePendingDirectory = paths.usagePendingDirectory;
     const usageId = "turn/with/slash.attempt-1";
     const resolvedPath = resolvePendingAssistantUsagePath(paths, usageId);
+    const expectedFileName = `${Buffer.from(usageId, "utf8").toString("base64url")}.json`;
 
     expect(path.dirname(resolvedPath)).toBe(usagePendingDirectory);
+    expect(path.basename(resolvedPath)).toBe(expectedFileName);
     expect(path.basename(resolvedPath)).not.toContain("/");
     expect(path.basename(resolvedPath)).not.toContain("\\");
 
@@ -73,33 +81,35 @@ describe("pending assistant usage paths", () => {
     await expect(listPendingAssistantUsageRecords({ paths })).resolves.toEqual([]);
   });
 
-  it("removes a legacy safe pending-usage filename when writing and deleting the encoded file", async () => {
+  it("ignores a leftover legacy pending-usage filename and deletes only the canonical encoded file", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-usage-path-"));
     const paths = resolveAssistantStatePaths(vaultRoot);
     const usageId = "turn-safe.attempt-1";
     const encodedPath = resolvePendingAssistantUsagePath(paths, usageId);
     const legacyPath = path.join(paths.usagePendingDirectory, `${usageId}.json`);
+    const record = createUsageRecord(usageId);
 
     await mkdir(paths.usagePendingDirectory, { recursive: true });
-    await writeFile(legacyPath, "{\"legacy\":true}\n", "utf8");
+    await writeFile(legacyPath, `${JSON.stringify(record)}\n`, "utf8");
 
     await writePendingAssistantUsageRecord({
       paths,
-      record: createUsageRecord(usageId),
+      record,
     });
 
     expect((await stat(encodedPath)).isFile()).toBe(true);
-    await expect(stat(legacyPath)).rejects.toMatchObject({
-      code: "ENOENT",
-    });
+    expect((await stat(legacyPath)).isFile()).toBe(true);
+    await expect(listPendingAssistantUsageRecords({ paths })).resolves.toEqual([record]);
 
     await deletePendingAssistantUsageRecord({
       paths,
       usageId,
     });
 
+    await expect(listPendingAssistantUsageRecords({ paths })).resolves.toEqual([]);
     await expect(stat(encodedPath)).rejects.toMatchObject({
       code: "ENOENT",
     });
+    expect((await stat(legacyPath)).isFile()).toBe(true);
   });
 });

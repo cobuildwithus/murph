@@ -64,6 +64,16 @@ const DEFAULT_BACKFILL_DAYS = WHOOP_SYNC.windows.backfillDays;
 const DEFAULT_RECONCILE_DAYS = WHOOP_SYNC.windows.reconcileDays;
 const DEFAULT_RECONCILE_INTERVAL_MS = WHOOP_SYNC.windows.reconcileIntervalMs;
 const WHOOP_DEFAULT_SCOPES = Object.freeze([...WHOOP_OAUTH.defaultScopes]);
+const WHOOP_REQUIRED_SCOPES = Object.freeze(["offline", "read:profile"] as const);
+
+type WhoopScope =
+  | "offline"
+  | "read:profile"
+  | "read:body_measurement"
+  | "read:sleep"
+  | "read:recovery"
+  | "read:cycles"
+  | "read:workout";
 
 interface WhoopTokenResponse {
   access_token?: unknown;
@@ -115,6 +125,7 @@ interface WhoopApiSession {
 }
 
 interface WhoopResourceDescriptor {
+  requiredScopes: readonly WhoopScope[];
   importResource(api: WhoopApiSession, resourceId: string, now: string): Promise<Record<string, unknown> | null>;
 }
 
@@ -171,8 +182,12 @@ async function importWhoopSleepRelatedSnapshot(
   }
 
   const cycleId = normalizeIdentifier(sleepRecord.cycle_id);
-  const cycle = cycleId ? await api.requestJson<Record<string, unknown>>(`/v2/cycle/${cycleId}`, { optional: true }) : null;
-  const recovery = cycleId ? await api.requestJson<Record<string, unknown>>(`/v2/cycle/${cycleId}/recovery`, { optional: true }) : null;
+  const cycle = cycleId && hasWhoopScope(api.account, "read:cycles")
+    ? await api.requestJson<Record<string, unknown>>(`/v2/cycle/${cycleId}`, { optional: true })
+    : null;
+  const recovery = cycleId && hasWhoopScope(api.account, "read:recovery")
+    ? await api.requestJson<Record<string, unknown>>(`/v2/cycle/${cycleId}/recovery`, { optional: true })
+    : null;
 
   return {
     accountId: api.account.externalAccountId,
@@ -205,23 +220,61 @@ async function importWhoopWorkoutSnapshot(
 
 const WHOOP_RESOURCE_DESCRIPTORS: Record<WhoopResourceType, WhoopResourceDescriptor> = Object.freeze({
   sleep: {
+    requiredScopes: ["read:sleep"],
     importResource: importWhoopSleepRelatedSnapshot,
   },
   recovery: {
+    requiredScopes: ["read:sleep", "read:recovery"],
     importResource: importWhoopSleepRelatedSnapshot,
   },
   workout: {
+    requiredScopes: ["read:workout"],
     importResource: importWhoopWorkoutSnapshot,
   },
 });
+
+const WHOOP_WINDOW_COLLECTIONS = Object.freeze([
+  {
+    key: "sleeps",
+    path: "/v2/activity/sleep",
+    scope: "read:sleep",
+  },
+  {
+    key: "recoveries",
+    path: "/v2/recovery",
+    scope: "read:recovery",
+  },
+  {
+    key: "cycles",
+    path: "/v2/cycle",
+    scope: "read:cycles",
+  },
+  {
+    key: "workouts",
+    path: "/v2/activity/workout",
+    scope: "read:workout",
+  },
+] as const satisfies ReadonlyArray<{
+  key: "sleeps" | "recoveries" | "cycles" | "workouts";
+  path: string;
+  scope: WhoopScope;
+}>);
 
 function whoopBaseUrl(config: WhoopDeviceSyncProviderConfig): string {
   return (config.baseUrl ?? DEFAULT_WHOOP_BASE_URL).replace(/\/+$/u, "");
 }
 
 function buildWhoopScopes(input: string[] | undefined): string[] {
-  const requested = [...WHOOP_DEFAULT_SCOPES, ...(input ?? [])];
-  return [...new Set(requested.map((scope) => scope.trim()).filter(Boolean))];
+  const requested = input === undefined ? [...WHOOP_DEFAULT_SCOPES] : input;
+  return [...new Set([...WHOOP_REQUIRED_SCOPES, ...requested].map((scope) => scope.trim()).filter(Boolean))];
+}
+
+function hasWhoopScope(account: Pick<DeviceSyncAccount, "scopes">, scope: WhoopScope): boolean {
+  return account.scopes.includes(scope);
+}
+
+function hasWhoopScopes(account: Pick<DeviceSyncAccount, "scopes">, scopes: readonly WhoopScope[]): boolean {
+  return scopes.every((scope) => hasWhoopScope(account, scope));
 }
 
 function tokenResponseToAuthTokens(payload: WhoopTokenResponse): ProviderAuthTokens {
@@ -490,6 +543,33 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
     };
   }
 
+  async function populateWhoopWindowSnapshot(
+    api: ReturnType<typeof createApiSession>,
+    snapshot: Record<string, unknown>,
+    windowStart: string,
+    windowEnd: string,
+  ): Promise<void> {
+    for (const descriptor of WHOOP_WINDOW_COLLECTIONS) {
+      if (!hasWhoopScope(api.account, descriptor.scope)) {
+        continue;
+      }
+
+      snapshot[descriptor.key] = await api.fetchPagedCollection(descriptor.path, windowStart, windowEnd);
+    }
+
+    if (!hasWhoopScope(api.account, "read:body_measurement")) {
+      return;
+    }
+
+    const bodyMeasurement = await api.requestJson<Record<string, unknown>>("/v2/user/measurement/body", {
+      optional: true,
+    });
+
+    if (bodyMeasurement) {
+      snapshot.bodyMeasurements = bodyMeasurement;
+    }
+  }
+
   async function executeWindowImport(
     context: ProviderJobContext,
     payload: Record<string, unknown>,
@@ -503,11 +583,9 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
     const snapshot: Record<string, unknown> = {
       accountId: api.account.externalAccountId,
       importedAt: now,
-      sleeps: await api.fetchPagedCollection("/v2/activity/sleep", windowStart, windowEnd),
-      recoveries: await api.fetchPagedCollection("/v2/recovery", windowStart, windowEnd),
-      cycles: await api.fetchPagedCollection("/v2/cycle", windowStart, windowEnd),
-      workouts: await api.fetchPagedCollection("/v2/activity/workout", windowStart, windowEnd),
     };
+
+    await populateWhoopWindowSnapshot(api, snapshot, windowStart, windowEnd);
 
     await context.importSnapshot(snapshot);
     return {};
@@ -530,12 +608,13 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
       });
     }
 
+    if (!hasWhoopScopes(api.account, descriptor.requiredScopes)) {
+      return {};
+    }
+
     const snapshot = await descriptor.importResource(api, resourceId, now);
 
     if (!snapshot) {
-      await context.importSnapshot(
-        buildDeleteSnapshot(api.account, now, buildWhoopDeleteMarker(resourceType, resourceId, now, job.payload)),
-      );
       return {};
     }
 

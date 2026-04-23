@@ -48,7 +48,7 @@ export interface HealthLibraryParseIssue {
 }
 
 export interface HealthLibraryValidationIssue {
-  field: "slug" | "entityType";
+  field: "key" | "slug" | "entityType";
   kind: "validation";
   parser: "frontmatter";
   reason: string;
@@ -66,6 +66,7 @@ export interface HealthLibraryGraphReadResult {
 
 const HEALTH_LIBRARY_ROOT = "bank/library";
 const HEALTH_LIBRARY_ENTITY_TYPES = new Set<HealthLibraryEntityType>(HEALTH_COMMONS_ENTITY_TYPES);
+type HealthLibraryLookupField = "key" | "slug";
 
 export async function readHealthLibraryGraph(
   vaultRoot: string,
@@ -87,13 +88,9 @@ export async function readHealthLibraryGraph(
     nodes.push(outcome.node);
   }
 
-  nodes.sort((left, right) => left.slug.localeCompare(right.slug));
+  nodes.sort(compareHealthLibraryNodes);
 
-  return {
-    byKey: new Map(nodes.map((node) => [node.key, node])),
-    bySlug: new Map(nodes.map((node) => [node.slug, node])),
-    nodes,
-  };
+  return buildHealthLibraryGraph(nodes, false).graph;
 }
 
 export async function readHealthLibraryGraphWithIssues(
@@ -123,14 +120,12 @@ export async function readHealthLibraryGraphWithIssues(
     nodes.push(node.node);
   }
 
-  nodes.sort((left, right) => left.slug.localeCompare(right.slug));
+  nodes.sort(compareHealthLibraryNodes);
+  const graphResult = buildHealthLibraryGraph(nodes, true);
+  issues.push(...graphResult.issues);
 
   return {
-    graph: {
-      byKey: new Map(nodes.map((node) => [node.key, node])),
-      bySlug: new Map(nodes.map((node) => [node.slug, node])),
-      nodes,
-    },
+    graph: graphResult.graph,
     issues,
   };
 }
@@ -239,6 +234,95 @@ function humanizeSlug(slug: string): string {
     .filter(Boolean)
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
+}
+
+function buildHealthLibraryGraph(
+  nodes: readonly HealthLibraryNode[],
+  tolerateDuplicates: boolean,
+): HealthLibraryGraphReadResult {
+  const keyLookup = buildHealthLibraryLookup(nodes, "key");
+  const slugLookup = buildHealthLibraryLookup(nodes, "slug");
+  const issues = [...slugLookup.issues, ...keyLookup.issues];
+  const firstIssue = issues[0];
+
+  if (!tolerateDuplicates && firstIssue) {
+    throw toStrictHealthLibraryError(firstIssue);
+  }
+
+  return {
+    graph: {
+      byKey: keyLookup.map,
+      bySlug: slugLookup.map,
+      nodes: [...nodes],
+    },
+    issues,
+  };
+}
+
+function buildHealthLibraryLookup(
+  nodes: readonly HealthLibraryNode[],
+  field: HealthLibraryLookupField,
+): {
+  issues: HealthLibraryValidationIssue[];
+  map: ReadonlyMap<string, HealthLibraryNode>;
+} {
+  const groups = new Map<string, HealthLibraryNode[]>();
+
+  for (const node of nodes) {
+    const value = node[field];
+    const current = groups.get(value);
+    if (current) {
+      current.push(node);
+      continue;
+    }
+
+    groups.set(value, [node]);
+  }
+
+  const map = new Map<string, HealthLibraryNode>();
+  const issues: HealthLibraryValidationIssue[] = [];
+
+  for (const [value, group] of groups) {
+    if (group.length === 1) {
+      const soleNode = group[0];
+      if (soleNode) {
+        map.set(value, soleNode);
+      }
+      continue;
+    }
+
+    issues.push(
+      buildHealthLibraryValidationIssue(
+        group[0]?.relativePath ?? HEALTH_LIBRARY_ROOT,
+        field,
+        `Duplicate health library ${field} "${value}" found in ${group
+          .map((node) => node.relativePath)
+          .join(", ")}; omitted from ${field === "slug" ? "bySlug" : "byKey"}.`,
+      ),
+    );
+  }
+
+  return {
+    issues,
+    map,
+  };
+}
+
+function compareHealthLibraryNodes(
+  left: HealthLibraryNode,
+  right: HealthLibraryNode,
+): number {
+  const slugComparison = left.slug.localeCompare(right.slug);
+  if (slugComparison !== 0) {
+    return slugComparison;
+  }
+
+  const keyComparison = left.key.localeCompare(right.key);
+  if (keyComparison !== 0) {
+    return keyComparison;
+  }
+
+  return left.relativePath.localeCompare(right.relativePath);
 }
 
 function parseFailureToIssue(failure: ParseFailure): HealthLibraryGraphIssue {

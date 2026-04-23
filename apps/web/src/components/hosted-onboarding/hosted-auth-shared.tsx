@@ -1,11 +1,12 @@
 "use client";
 
+import type { HostedAuthenticationIntent } from "@/src/lib/hosted-onboarding/authentication-intent";
 import { cn } from "@/lib/utils";
 
 const HOSTED_TERMS_URL = "/legal/terms.pdf";
 const HOSTED_PRIVACY_URL = "/legal/privacy.pdf";
 
-export type HostedAuthIntent = "signup" | "signin";
+export type HostedAuthIntent = HostedAuthenticationIntent;
 
 export function normalizeEmailAddress(value: string | null | undefined): string | null {
   if (typeof value !== "string") {

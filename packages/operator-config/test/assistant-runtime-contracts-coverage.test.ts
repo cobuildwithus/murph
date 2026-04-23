@@ -50,8 +50,8 @@ test('assistant target runtime resolves drivers, namespaces, and web-search fall
     reasoningEffort: 'medium',
     webSearch: 'murph',
   })
-  assert.equal(codexTarget.executionDriver, 'codex-cli')
-  assert.equal(codexTarget.resumeKind, 'codex-session')
+  assert.equal(codexTarget.executionDriver, 'codex-app-server')
+  assert.equal(codexTarget.resumeKind, 'codex-thread')
   assert.equal(codexTarget.supportsNativeResume, true)
   assert.equal(shouldAssistantTargetUseMurphWebSearch({ provider: 'codex-cli', webSearch: 'murph' }), true)
 
@@ -68,11 +68,11 @@ test('assistant target runtime resolves drivers, namespaces, and web-search fall
     reasoningEffort: 'high',
   }
   const openAiTarget = resolveAssistantRuntimeTarget(explicitOpenAiTargetInput)
-  assert.equal(openAiTarget.executionDriver, 'responses')
-  assert.equal(openAiTarget.resumeKind, 'openai-response-id')
-  assert.equal(openAiTarget.supportsProviderWebSearch, true)
-  assert.equal(openAiTarget.supportsReasoningEffort, true)
-  assert.equal(shouldAssistantTargetUseProviderWebSearch(explicitOpenAiTargetInput), true)
+  assert.equal(openAiTarget.executionDriver, 'openai-compatible')
+  assert.equal(openAiTarget.resumeKind, null)
+  assert.equal(openAiTarget.supportsProviderWebSearch, false)
+  assert.equal(openAiTarget.supportsReasoningEffort, false)
+  assert.equal(shouldAssistantTargetUseProviderWebSearch(explicitOpenAiTargetInput), false)
   assert.equal(
     shouldAssistantTargetUseMurphWebSearch({
       ...explicitOpenAiTargetInput,
@@ -103,19 +103,19 @@ test('assistant target runtime resolves drivers, namespaces, and web-search fall
     zeroDataRetention: true,
   }
   const gatewayOpenAi = resolveAssistantRuntimeTarget(gatewayOpenAiInput)
-  assert.equal(gatewayOpenAi.executionDriver, 'responses')
-  assert.equal(gatewayOpenAi.resumeKind, 'openai-response-id')
-  assert.equal(gatewayOpenAi.supportsGatewayWebSearch, true)
-  assert.equal(gatewayOpenAi.supportsProviderWebSearch, true)
-  assert.equal(gatewayOpenAi.supportsReasoningEffort, true)
-  assert.equal(gatewayOpenAi.supportsZeroDataRetention, true)
-  assert.equal(shouldAssistantTargetUseGatewayWebSearch(gatewayOpenAiInput), true)
+  assert.equal(gatewayOpenAi.executionDriver, 'openai-compatible')
+  assert.equal(gatewayOpenAi.resumeKind, null)
+  assert.equal(gatewayOpenAi.supportsGatewayWebSearch, false)
+  assert.equal(gatewayOpenAi.supportsProviderWebSearch, false)
+  assert.equal(gatewayOpenAi.supportsReasoningEffort, false)
+  assert.equal(gatewayOpenAi.supportsZeroDataRetention, false)
+  assert.equal(shouldAssistantTargetUseGatewayWebSearch(gatewayOpenAiInput), false)
   assert.equal(
     shouldAssistantTargetUseMurphWebSearch({
       ...gatewayOpenAiInput,
       webSearch: 'provider',
     }),
-    false,
+    true,
   )
 
   const gatewayAnthropicInput = {
@@ -340,7 +340,7 @@ test('assistant session parsing handles null resume state and resolves codex res
     sessionWithoutResumeState.providerOptions.continuityFingerprint,
     codexRuntimeTarget.continuityFingerprint,
   )
-  assert.equal(sessionWithoutResumeState.providerOptions.resumeKind, 'codex-session')
+  assert.equal(sessionWithoutResumeState.providerOptions.resumeKind, 'codex-thread')
 
   const codexResumeContract = parseAssistantSessionRecord({
     alias: null,
@@ -390,5 +390,5 @@ test('assistant session parsing handles null resume state and resolves codex res
     codexResumeContract.providerOptions.continuityFingerprint,
     codexResumeRuntimeTarget.continuityFingerprint,
   )
-  assert.equal(codexResumeContract.providerOptions.resumeKind, 'codex-session')
+  assert.equal(codexResumeContract.providerOptions.resumeKind, 'codex-thread')
 })

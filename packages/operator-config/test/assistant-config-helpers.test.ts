@@ -32,6 +32,7 @@ import {
   supportsAssistantZeroDataRetention,
 } from '../src/assistant/provider-config.ts'
 import {
+  isSensitiveAssistantHeader,
   isSensitiveAssistantHeaderName,
   isSensitiveAssistantHeaderValue,
   mergeAssistantHeaders,
@@ -59,7 +60,9 @@ test('assistant header helpers canonicalize, dedupe, sort, and redact persistenc
     'X-Zeta': 'z',
   })
   assert.equal(isSensitiveAssistantHeaderName('x-api-key'), true)
+  assert.equal(isSensitiveAssistantHeaderName('x-custom-token'), true)
   assert.equal(isSensitiveAssistantHeaderName('x-trace-id'), false)
+  assert.equal(isSensitiveAssistantHeader('x-trace-id', 'Bearer secret-token-1234'), true)
   assert.equal(isSensitiveAssistantHeaderValue('Bearer secret-token-1234'), true)
   assert.equal(isSensitiveAssistantHeaderValue('Basic second-secret-4567'), true)
   assert.equal(isSensitiveAssistantHeaderValue('Bearer third-secret-8901'), true)
@@ -298,7 +301,7 @@ test('assistant provider config helpers infer, merge, compact, and serialize by 
       apiKeyEnv: 'OPENAI_API_KEY',
       presetId: 'openai',
     }),
-    true,
+    false,
   )
   assert.equal(supportsAssistantReasoningEffort({ provider: 'codex-cli' }), true)
   assert.equal(
@@ -449,7 +452,7 @@ test('hosted assistant helpers normalize equality, labels, and active-profile fa
       baseUrl: ' https://gateway.example.test/v1 ',
       providerName: 'ignored',
     }),
-    'OpenAI',
+    'ignored',
   )
   assert.equal(
     resolveHostedAssistantProfileLabel({

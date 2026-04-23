@@ -14,7 +14,7 @@ import {
   readJsonFile,
 } from "./fs.ts";
 import {
-  canonicalPathResource,
+  canonicalPathResourceForVault,
   withCanonicalResourceLocks,
 } from "./operations/index.ts";
 import { resolveVaultPath } from "./path-safety.ts";
@@ -225,7 +225,7 @@ async function withLockedPreferencesDocument<TResult>(
 ): Promise<TResult> {
   return await withCanonicalResourceLocks({
     vaultRoot,
-    resources: [canonicalPathResource(preferencesDocumentRelativePath)],
+    resources: [await canonicalPathResourceForVault(vaultRoot, preferencesDocumentRelativePath)],
     run,
   });
 }
