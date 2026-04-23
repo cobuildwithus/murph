@@ -83,18 +83,31 @@ const assistantThreadRoutingDescription =
   'Optional upstream thread identifier when the transport routes by thread/chat. Use the transport-native thread value, such as a Telegram chat id or `<chatId>:topic:<messageThreadId>` topic route; direct-recipient routes can often leave this unset.'
 
 const assistantOneSendDeliveryTargetRoutingDescription =
-  'Optional one-send outbound destination in the transport-native send format. For Telegram use a chat id or `<chatId>:topic:<messageThreadId>`; for Linq use a chat id; for email use a recipient address. Reply-in-place sessions can often omit this and reuse the saved thread.'
+  'Optional one-send outbound destination in the transport-native send format. For Telegram use a chat id or `<chatId>:topic:<messageThreadId>`; for email use a recipient address. Reply-in-place sessions can often omit this and reuse the saved thread.'
 
 const assistantSavedDeliveryTargetRoutingDescription =
-  'Optional saved outbound destination in the transport-native send format. For Telegram use a chat id or `<chatId>:topic:<messageThreadId>`; for Linq use a chat id; for email use a recipient address.'
+  'Optional saved outbound destination in the transport-native send format. For Telegram use a chat id or `<chatId>:topic:<messageThreadId>`; for email use a recipient address.'
 const assistantEmailDeliveryTargetPattern = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/u
-const assistantChannelOptionSchema = z
+const assistantKnownChannelOptionSchema = z
   .string()
   .min(1)
   .refine(
     (value) => assistantChannelNameSchema.safeParse(value.trim().toLowerCase()).success,
     'Supported assistant channels: telegram, linq, email.',
   )
+const assistantLocalChannelOptionSchema = z
+  .string()
+  .min(1)
+  .refine(
+    (value) => {
+      const normalized = value.trim().toLowerCase()
+      return normalized === 'telegram' || normalized === 'email'
+    },
+    'Supported local assistant channels: telegram, email.',
+  )
+
+const LOCAL_ASSISTANT_LINQ_ERROR =
+  'Local assistant Linq routes are no longer supported. Hosted/shared assistant-engine Linq support remains available.'
 
 function normalizeAssistantChannelOption(
   value?: string,
@@ -128,9 +141,9 @@ const assistantSessionOptionFields = {
   alias: optionalNonEmptyStringOption(
     'Optional stable alias used to map an external conversation onto one assistant session.',
   ),
-  channel: assistantChannelOptionSchema
+  channel: assistantLocalChannelOptionSchema
     .optional()
-    .describe('Optional channel label such as telegram, linq, or email.'),
+    .describe('Optional channel label such as telegram or email.'),
   identity: optionalNonEmptyStringOption(assistantIdentityRoutingDescription),
   participant: optionalNonEmptyStringOption(assistantParticipantRoutingDescription),
   thread: optionalNonEmptyStringOption(assistantThreadRoutingDescription),
@@ -213,6 +226,8 @@ function assertAssistantSelfDeliveryTargetInput(input: {
   participant?: string
   thread?: string
 }) {
+  assertLocalAssistantChannelSupported(input.channel)
+
   if (!input.deliveryTarget && !input.participant && !input.thread) {
     throw new VaultCliError(
       'invalid_option',
@@ -230,10 +245,23 @@ function assertAssistantSelfDeliveryTargetInput(input: {
   assertAssistantDeliveryTargetForChannel(input)
 }
 
+function assertLocalAssistantChannelSupported(channel?: string | null): void {
+  if (normalizeAssistantChannelOption(channel ?? undefined) !== 'linq') {
+    return
+  }
+
+  throw new VaultCliError(
+    'invalid_option',
+    LOCAL_ASSISTANT_LINQ_ERROR,
+  )
+}
+
 function assertAssistantDeliveryTargetForChannel(input: {
   channel?: string
   deliveryTarget?: string
 }): void {
+  assertLocalAssistantChannelSupported(input.channel)
+
   if (
     input.channel !== 'email' ||
     !input.deliveryTarget ||
@@ -663,7 +691,7 @@ function createAssistantRunCommandDefinition(
     args: emptyArgsSchema,
     description:
       input?.description ??
-      'Start the local assistant automation loop that watches the inbox runtime, runs due automations, auto-replies over configured channels such as Telegram, Linq, or email, and optionally applies model-routed canonical promotions.',
+      'Start the local assistant automation loop that watches the inbox runtime, runs due automations, auto-replies over configured local channels such as Telegram or email, and optionally applies model-routed canonical promotions.',
     hint:
       input?.hint ??
       'Use --baseUrl with a local OpenAI-compatible model endpoint such as Ollama when you also want canonical inbox triage. Channel auto-reply can run without a routing model, and due automations fire while this loop is active.',
@@ -764,7 +792,7 @@ export function registerAssistantCommands(
       description:
         'Send one message through the local provider-backed assistant and persist session metadata plus a local transcript outside the canonical vault.',
       hint:
-        'Murph persists a local transcript plus per-session metadata under `.runtime/operations/assistant/`, and still reuses provider-side history when available. Use --deliverResponse to send the assistant reply back out over a mapped channel such as Telegram, Linq, or email.',
+        'Murph persists a local transcript plus per-session metadata under `.runtime/operations/assistant/`, and still reuses provider-side history when available. Use --deliverResponse to send the assistant reply back out over a mapped channel such as Telegram or email.',
       examples: [
         {
           args: {
@@ -774,19 +802,6 @@ export function registerAssistantCommands(
             vault: './vault',
           },
           description: 'Start a new local assistant session rooted at the vault directory.',
-        },
-        {
-          args: {
-            prompt: 'Send a quick check-in about lunch.',
-          },
-          options: {
-            vault: './vault',
-            channel: 'linq',
-            thread: 'chat_lunch',
-            deliveryTarget: 'chat_lunch',
-            deliverResponse: true,
-          },
-          description: 'Generate a reply locally and deliver it over Linq.',
         },
         {
           args: {
@@ -852,9 +867,9 @@ export function registerAssistantCommands(
           .describe('Outbound message body to deliver over the mapped assistant channel.'),
       }),
       description:
-        'Deliver one outbound assistant message without invoking the chat provider. Telegram, Linq, and email all use the same stored assistant channel binding surface.',
+        'Deliver one outbound assistant message without invoking the chat provider. Telegram and email both use the same stored assistant channel binding surface.',
       hint:
-        'Use --deliveryTarget to override the stored delivery target for one send only. For Telegram it can be a chat id or <chatId>:topic:<messageThreadId>; for Linq it can be a chat id; for email it can be a recipient address while thread-bound sessions reply in place.',
+        'Use --deliveryTarget to override the stored delivery target for one send only. For Telegram it can be a chat id or <chatId>:topic:<messageThreadId>; for email it can be a recipient address while thread-bound sessions reply in place.',
       examples: [
         {
           args: {
@@ -867,18 +882,6 @@ export function registerAssistantCommands(
             deliveryTarget: '123456789',
           },
           description: 'Send a direct Telegram reply to one chat.',
-        },
-        {
-          args: {
-            message: 'I saw the message and queued your follow-up.',
-          },
-          options: {
-            vault: './vault',
-            channel: 'linq',
-            thread: 'chat_123',
-            deliveryTarget: 'chat_123',
-          },
-          description: 'Send a Linq reply back into the same direct chat.',
         },
         {
           args: {
@@ -970,7 +973,7 @@ export function registerAssistantCommands(
 
     selfTarget.command('show', {
       args: z.object({
-        channel: assistantChannelOptionSchema.describe('Saved outbound channel to inspect.'),
+        channel: assistantKnownChannelOptionSchema.describe('Saved outbound channel to inspect.'),
       }),
       description: 'Show one saved self-delivery target for a specific outbound channel.',
       options: z.object({
@@ -990,8 +993,8 @@ export function registerAssistantCommands(
 
     selfTarget.command('set', {
       args: z.object({
-        channel: assistantChannelOptionSchema
-          .describe('Outbound channel to save, such as telegram, linq, or email.'),
+        channel: assistantLocalChannelOptionSchema
+          .describe('Outbound channel to save, such as telegram or email.'),
       }),
       description:
         'Save or replace the local default outbound target for one channel. Provide at least one of --participant, --thread, or --deliveryTarget; saved email targets also require --identity with the configured AgentMail inbox id.',
@@ -1030,7 +1033,7 @@ export function registerAssistantCommands(
 
     selfTarget.command('clear', {
       args: z.object({
-        channel: assistantChannelOptionSchema
+        channel: assistantKnownChannelOptionSchema
           .optional()
           .describe('Optional saved outbound channel to clear. Omit to clear all saved self-targets.'),
       }),

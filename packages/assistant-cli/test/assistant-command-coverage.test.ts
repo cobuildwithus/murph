@@ -390,7 +390,7 @@ test('assistant ask resolves saved delivery defaults and forwards parsed provide
       apiKeyEnv: 'OLLAMA_API_KEY',
       approvalPolicy: 'never',
       baseUrl: 'http://127.0.0.1:11434/v1',
-      channel: 'linq',
+      channel: 'telegram',
       codexCommand: 'codex-bin',
       deliverResponse: true,
       deliveryTarget: 'chat_original',
@@ -417,7 +417,7 @@ test('assistant ask resolves saved delivery defaults and forwards parsed provide
   assert.deepEqual(
     commandMocks.applyAssistantSelfDeliveryTargetDefaults.mock.calls[0]?.[0],
     {
-      channel: 'linq',
+      channel: 'telegram',
       deliveryTarget: 'chat_original',
       identityId: 'identity_cli',
       participantId: 'participant_cli',
@@ -455,6 +455,41 @@ test('assistant ask resolves saved delivery defaults and forwards parsed provide
     threadId: 'thread_saved',
     vault: '/tmp/vault',
   })
+})
+
+test('assistant ask rejects saved Linq delivery routes for the local assistant surface', async () => {
+  const commands = createAssistantCli()
+  const assistant = readCommandGroup(commands, 'assistant')
+  const ask = readCommand(assistant.commands, 'ask')
+
+  commandMocks.applyAssistantSelfDeliveryTargetDefaults.mockResolvedValueOnce({
+    channel: 'linq',
+    identityId: 'identity_saved',
+    participantId: 'participant_saved',
+    threadId: 'thread_saved',
+    deliveryTarget: 'chat_saved',
+  })
+
+  await assert.rejects(
+    () =>
+      ask.run({
+        args: {
+          prompt: 'hello from command coverage',
+        },
+        options: {
+          deliverResponse: true,
+          session: undefined,
+          vault: '/tmp/vault',
+        },
+      }),
+    (error: unknown) => {
+      assert.ok(error instanceof VaultCliError)
+      assert.match(error.message, /Linq routes are no longer supported/u)
+      return true
+    },
+  )
+
+  assert.equal(commandMocks.sendAssistantMessage.mock.calls.length, 0)
 })
 
 test('assistant chat writes a resume hint only for human non-explicit output', async () => {
@@ -835,6 +870,23 @@ test('self-target commands normalize channels, enforce email identity, and surfa
     },
   )
 
+  await assert.rejects(
+    () =>
+      readCommand(selfTarget.commands, 'set').run({
+        args: {
+          channel: 'linq',
+        },
+        options: {
+          deliveryTarget: 'chat_123',
+        },
+      }),
+    (error: unknown) => {
+      assert.ok(error instanceof VaultCliError)
+      assert.match(error.message, /Linq routes are no longer supported/u)
+      return true
+    },
+  )
+
   const setResult = await readCommand(selfTarget.commands, 'set').run({
     args: {
       channel: '  Email  ',
@@ -925,6 +977,10 @@ test('assistant command help describes routing shapes and flat header JSON input
   )
   assert.equal(
     run.description?.includes('Telegram, Linq, or email'),
+    false,
+  )
+  assert.equal(
+    run.description?.includes('Telegram or email'),
     true,
   )
   assert.equal(

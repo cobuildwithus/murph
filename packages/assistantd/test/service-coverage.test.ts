@@ -15,7 +15,21 @@ const mocks = vi.hoisted(() => ({
   getAssistantCronJob: vi.fn(async (vault, job) => ({ job, vault })),
   getAssistantCronJobTarget: vi.fn(async (vault, job) => ({ job, vault })),
   getAssistantCronStatus: vi.fn(async (vault) => ({ vault })),
-  getAssistantSession: vi.fn(async (vault, sessionId) => ({ sessionId, vault })),
+  getAssistantSession: vi.fn(async (vault, sessionId) => ({
+    binding: {
+      channel: 'local',
+    },
+    sessionId,
+    vault,
+  })),
+  readAssistantAutomationState: vi.fn(async () => ({
+    autoReply: [] as Array<{
+      channel: string
+      cursor: null
+    }>,
+    inboxScanCursor: null,
+    updatedAt: '2026-04-23T00:00:00.000Z',
+  })),
   getAssistantStatus: vi.fn(async (input) => ({ input })),
   listAssistantCronJobs: vi.fn(async (vault) => ([vault])),
   listAssistantCronRuns: vi.fn(async (input) => ({ input })),
@@ -31,6 +45,7 @@ const mocks = vi.hoisted(() => ({
   processDueAssistantCronJobs: vi.fn(async (input) => ({ input })),
   readAssistantOutboxIntent: vi.fn(async (vault, intentId) => ({ intentId, vault })),
   runAssistantAutomation: vi.fn(async (input) => ({ input })),
+  saveAssistantAutomationState: vi.fn(async (_vault, state) => state),
   sendAssistantMessage: vi.fn(async (input) => ({ input })),
   setAssistantCronJobTarget: vi.fn(async (input) => ({ input })),
   updateAssistantSessionOptions: vi.fn(async (input) => ({ input })),
@@ -43,6 +58,7 @@ vi.mock('@murphai/assistant-engine', () => ({
   getAssistantCronJobTarget: mocks.getAssistantCronJobTarget,
   getAssistantCronStatus: mocks.getAssistantCronStatus,
   getAssistantSession: mocks.getAssistantSession,
+  readAssistantAutomationState: mocks.readAssistantAutomationState,
   getAssistantStatus: mocks.getAssistantStatus,
   listAssistantCronJobs: mocks.listAssistantCronJobs,
   listAssistantCronRuns: mocks.listAssistantCronRuns,
@@ -52,6 +68,7 @@ vi.mock('@murphai/assistant-engine', () => ({
   processDueAssistantCronJobs: mocks.processDueAssistantCronJobs,
   readAssistantOutboxIntent: mocks.readAssistantOutboxIntent,
   runAssistantAutomation: mocks.runAssistantAutomation,
+  saveAssistantAutomationState: mocks.saveAssistantAutomationState,
   sendAssistantMessage: mocks.sendAssistantMessage,
   setAssistantCronJobTarget: mocks.setAssistantCronJobTarget,
   updateAssistantSessionOptions: mocks.updateAssistantSessionOptions,
@@ -296,6 +313,79 @@ test('createAssistantLocalService wires the local integrations and forwards assi
       vault: TEST_VAULT_ROOT,
     },
   ])
+})
+
+test('createAssistantLocalService rejects local Linq routes and drops legacy Linq auto-reply state before automation', async () => {
+  mocks.getAssistantSession.mockResolvedValueOnce({
+    binding: {
+      channel: 'linq',
+    },
+    sessionId: 'session_linq',
+    vault: TEST_VAULT_ROOT,
+  })
+  mocks.readAssistantAutomationState.mockResolvedValueOnce({
+    autoReply: [
+      {
+        channel: 'linq',
+        cursor: null,
+      },
+      {
+        channel: 'telegram',
+        cursor: null,
+      },
+    ],
+    inboxScanCursor: null,
+    updatedAt: '2026-04-23T00:00:00.000Z',
+  })
+
+  const service = createAssistantLocalService(TEST_VAULT_ROOT)
+
+  await assert.rejects(
+    () =>
+      service.openConversation({
+        channel: 'linq',
+        vault: TEST_VAULT_ROOT,
+      } as Parameters<AssistantLocalService['openConversation']>[0]),
+    /Linq routes are no longer supported/u,
+  )
+  await assert.rejects(
+    () =>
+      service.sendMessage({
+        prompt: 'hello',
+        sessionId: 'session_linq',
+        vault: TEST_VAULT_ROOT,
+      } as Parameters<AssistantLocalService['sendMessage']>[0]),
+    /Linq routes are no longer supported/u,
+  )
+  assert.throws(
+    () =>
+      service.setCronTarget({
+        channel: 'linq',
+        job: 'cron_job_test',
+        vault: TEST_VAULT_ROOT,
+      }),
+    /Linq routes are no longer supported/u,
+  )
+
+  await service.runAutomationOnce({
+    once: true,
+    vault: TEST_VAULT_ROOT,
+  })
+
+  assert.equal(mocks.openAssistantConversation.mock.calls.length, 0)
+  assert.equal(mocks.sendAssistantMessage.mock.calls.length, 0)
+  assert.equal(mocks.setAssistantCronJobTarget.mock.calls.length, 0)
+  assert.deepEqual(mocks.saveAssistantAutomationState.mock.calls[0]?.[0], TEST_VAULT_ROOT)
+  assert.deepEqual(mocks.saveAssistantAutomationState.mock.calls[0]?.[1], {
+    autoReply: [
+      {
+        channel: 'telegram',
+        cursor: null,
+      },
+    ],
+    inboxScanCursor: null,
+    updatedAt: mocks.saveAssistantAutomationState.mock.calls[0]?.[1]?.updatedAt,
+  })
 })
 
 test('createAssistantLocalService rejects requests that target a different vault', async () => {
