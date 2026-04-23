@@ -27,6 +27,7 @@ import {
   parseEventSpineAttachments,
   selectLatestEventSpineEntry,
 } from "../history/event-spine.ts";
+import { canonicalizeEventRelations } from "../event-links.ts";
 
 import {
   compactObject,
@@ -259,6 +260,13 @@ function buildEventRecord(
     throw new VaultError("EVENT_OCCURRED_AT_MISSING", "Event payload requires occurredAt.");
   }
   const attachments = parseEventSpineAttachments(payload.attachments);
+  const canonicalLinks = canonicalizeEventRelations({
+    links: payload.links,
+    relatedIds: payload.relatedIds,
+    normalizeStringList: uniqueTrimmedStringList,
+    errorCode: "EVENT_CONTRACT_INVALID",
+    errorMessage: "Event payload links must contain objects with type and targetId fields.",
+  }).links;
 
   return validateContract(
     eventRecordSchema,
@@ -270,14 +278,12 @@ function buildEventRecord(
         dayKey: valueAsString(payload.dayKey),
         timeZone: valueAsString(payload.timeZone),
         fallbackTimeZone,
-      source: valueAsString(payload.source),
-      title: requireText(payload.title, "Event payload requires a title."),
-      note: normalizeOptionalText(valueAsString(payload.note)) ?? undefined,
-      tags: uniqueTrimmedStringList(payload.tags) ?? undefined,
-      experimentSlug: valueAsString(payload.experimentSlug),
-      links: payload.links,
-      relatedIds: payload.relatedIds,
-        normalizeRelationIds: uniqueTrimmedStringList,
+        source: valueAsString(payload.source),
+        title: requireText(payload.title, "Event payload requires a title."),
+        note: normalizeOptionalText(valueAsString(payload.note)) ?? undefined,
+        tags: uniqueTrimmedStringList(payload.tags) ?? undefined,
+        experimentSlug: valueAsString(payload.experimentSlug),
+        links: canonicalLinks,
         rawRefs: uniqueTrimmedStringList(payload.rawRefs) ?? undefined,
         attachments,
         lifecycle,
@@ -315,7 +321,6 @@ function buildBaseEventContractInput(
         "experimentSlug" in draft ? draft.experimentSlug : undefined,
       ),
       links: draft.links,
-      normalizeRelationIds: uniqueTrimmedStringList,
       rawRefs: uniqueTrimmedStringList(draft.rawRefs) ?? undefined,
       attachments: draft.attachments,
       lifecycle: undefined,
@@ -648,6 +653,116 @@ function normalizeCaptureDraft(
   };
 }
 
+function toActivitySessionDraft(
+  record: EventRecordByKind<"activity_session">,
+): AttachmentBackedEventDraft<"activity_session"> {
+  const {
+    schemaVersion: _schemaVersion,
+    kind: _kind,
+    lifecycle: _lifecycle,
+    recordedAt: _recordedAt,
+    dayKey: _dayKey,
+    ...draft
+  } = record;
+
+  return draft;
+}
+
+function toBodyMeasurementDraft(
+  record: EventRecordByKind<"body_measurement">,
+): AttachmentBackedEventDraft<"body_measurement"> {
+  const {
+    schemaVersion: _schemaVersion,
+    kind: _kind,
+    lifecycle: _lifecycle,
+    recordedAt: _recordedAt,
+    dayKey: _dayKey,
+    ...draft
+  } = record;
+
+  return draft;
+}
+
+function toCaptureDraft(
+  record: EventRecordByKind<"note">,
+): AttachmentBackedEventDraft<"capture"> {
+  const {
+    schemaVersion: _schemaVersion,
+    kind: _kind,
+    lifecycle: _lifecycle,
+    recordedAt: _recordedAt,
+    dayKey: _dayKey,
+    ...draft
+  } = record;
+
+  return draft;
+}
+
+function toMeasurementDraft(
+  record: EventRecordByKind<"measurement">,
+): AttachmentBackedEventDraft<"measurement"> {
+  const {
+    schemaVersion: _schemaVersion,
+    kind: _kind,
+    lifecycle: _lifecycle,
+    recordedAt: _recordedAt,
+    dayKey: _dayKey,
+    ...draft
+  } = record;
+
+  return draft;
+}
+
+function rehydrateDraftFromLatest<TDraft>(
+  latestDraft: TDraft | null,
+  draft: TDraft,
+  mergeDrafts: (latestDraft: TDraft, draft: TDraft) => TDraft,
+): TDraft {
+  return latestDraft ? mergeDrafts(latestDraft, draft) : draft;
+}
+
+function mergeActivitySessionDrafts(
+  latestDraft: AttachmentBackedEventDraft<"activity_session">,
+  draft: AttachmentBackedEventDraft<"activity_session">,
+): AttachmentBackedEventDraft<"activity_session"> {
+  return {
+    ...latestDraft,
+    ...draft,
+    attachments: mergeByRelativePath(latestDraft.attachments, draft.attachments),
+    rawRefs: mergeStringLists(latestDraft.rawRefs, draft.rawRefs),
+    workout: {
+      ...latestDraft.workout,
+      ...draft.workout,
+      media: mergeByRelativePath(latestDraft.workout.media, draft.workout.media),
+    },
+  };
+}
+
+function mergeCaptureDrafts(
+  latestDraft: AttachmentBackedEventDraft<"capture">,
+  draft: AttachmentBackedEventDraft<"capture">,
+): AttachmentBackedEventDraft<"capture"> {
+  return {
+    ...latestDraft,
+    ...draft,
+    attachments: mergeByRelativePath(latestDraft.attachments, draft.attachments),
+    rawRefs: mergeStringLists(latestDraft.rawRefs, draft.rawRefs),
+  };
+}
+
+function mergeMeasurementDrafts<K extends "measurement" | "body_measurement">(
+  latestDraft: AttachmentBackedEventDraft<K>,
+  draft: AttachmentBackedEventDraft<K>,
+): AttachmentBackedEventDraft<K> {
+  return {
+    ...latestDraft,
+    ...draft,
+    attachments: mergeByRelativePath(latestDraft.attachments, draft.attachments),
+    rawRefs: mergeStringLists(latestDraft.rawRefs, draft.rawRefs),
+    media: mergeByRelativePath(latestDraft.media, draft.media),
+  };
+}
+
 function applyMeasurementAttachmentProjections<K extends "measurement" | "body_measurement">(
   draft: AttachmentBackedEventDraft<K>,
   attachments: readonly EventAttachment[],
@@ -669,65 +784,125 @@ function applyMeasurementAttachmentProjections<K extends "measurement" | "body_m
   } as AttachmentBackedEventDraft<K>;
 }
 
-export async function addActivitySession(
-  input: AddActivitySessionInput,
-): Promise<AddActivitySessionResult> {
+type AttachmentBackedWriteResult<TStoredKind extends EventRecord["kind"]> = UpsertEventResult & {
+  event: EventRecordByKind<TStoredKind>;
+  manifestPath: string | null;
+};
+
+interface WriteAttachmentBackedEventInput<
+  K extends AttachmentBackedPublicEventKind,
+  TStoredKind extends EventRecord["kind"],
+> {
+  vaultRoot: string;
+  draft: AttachmentBackedEventDraft<K>;
+  attachments?: readonly EventAttachmentSourceInput[];
+  rawImport?: RawImportOptions;
+  specializedKind: K;
+  writeLabel: string;
+  operationType: string;
+  commandName: string;
+  ownerKind: EventAttachmentOwnerKind;
+  defaultImportKind: RawImportKind;
+  rawImportFamily: string;
+  toLatestDraft: (record: EventRecordByKind<TStoredKind>) => AttachmentBackedEventDraft<K>;
+  mergeDrafts: (
+    latestDraft: AttachmentBackedEventDraft<K>,
+    draft: AttachmentBackedEventDraft<K>,
+  ) => AttachmentBackedEventDraft<K>;
+  applyAttachmentProjections: (
+    draft: AttachmentBackedEventDraft<K>,
+    attachments: readonly EventAttachment[],
+  ) => AttachmentBackedEventDraft<K>;
+  buildRecord: (
+    draft: AttachmentBackedEventDraft<K>,
+    fallbackTimeZone: string | undefined,
+    lifecycle: EventLifecycle,
+  ) => EventRecordByKind<TStoredKind>;
+  normalizeDraft?: (
+    draft: AttachmentBackedEventDraft<K>,
+  ) => AttachmentBackedEventDraft<K>;
+  requireAttachments?: {
+    code: string;
+    message: string;
+  };
+}
+
+async function writeAttachmentBackedEvent<
+  K extends AttachmentBackedPublicEventKind,
+  TStoredKind extends EventRecord["kind"],
+>(
+  input: WriteAttachmentBackedEventInput<K, TStoredKind>,
+): Promise<AttachmentBackedWriteResult<TStoredKind>> {
   const vault = await loadVault({ vaultRoot: input.vaultRoot });
   const eventId = normalizeDraftEventId(input.draft.id) ?? generateRecordId(ID_PREFIXES.event);
-  const draft: AttachmentBackedEventDraft<"activity_session"> = {
+  const draft: AttachmentBackedEventDraft<K> = {
     ...input.draft,
     id: eventId,
   };
   const matchedShards = await loadEventLedgerShardsById(input.vaultRoot, eventId);
-  ensureSpecializedEventKind("activity_session", eventId, matchedShards);
+  ensureSpecializedEventKind(input.specializedKind, eventId, matchedShards);
   const latestMatchedEvent = selectLatestMatchedEvent(matchedShards);
+  let rehydratedDraft = rehydrateDraftFromLatest(
+    latestMatchedEvent
+      ? input.toLatestDraft(latestMatchedEvent.record as EventRecordByKind<TStoredKind>)
+      : null,
+    draft,
+    input.mergeDrafts,
+  );
+
+  if (input.normalizeDraft) {
+    rehydratedDraft = input.normalizeDraft(rehydratedDraft);
+  }
+
   const lifecycle = buildEventSpineLifecycle(
     latestMatchedEvent ? eventSpineRevision(latestMatchedEvent.record) + 1 : 1,
   );
   const preparedAttachments = prepareEventAttachments({
-    ownerKind: "workout",
+    ownerKind: input.ownerKind,
     ownerId: eventId,
-    occurredAt: draft.occurredAt,
+    occurredAt: rehydratedDraft.occurredAt,
     attachments: input.attachments ?? [],
   });
 
-  return runCanonicalWrite<AddActivitySessionResult>({
+  if (input.requireAttachments && preparedAttachments.length === 0) {
+    throw new VaultError(input.requireAttachments.code, input.requireAttachments.message);
+  }
+
+  return runCanonicalWrite<AttachmentBackedWriteResult<TStoredKind>>({
     vaultRoot: input.vaultRoot,
-    operationType: "activity_session_write",
-    summary: `Write activity_session ${eventId}`,
-    occurredAt: draft.occurredAt,
+    operationType: input.operationType,
+    summary: `Write ${input.writeLabel} ${eventId}`,
+    occurredAt: rehydratedDraft.occurredAt,
     mutate: async ({ batch }) => {
       const stagedAttachments =
         preparedAttachments.length > 0
           ? await stagePreparedEventAttachmentsInBatch({
               batch,
               owner: {
-                kind: "workout",
+                kind: input.ownerKind,
                 id: eventId,
               },
               attachments: preparedAttachments,
               importId: input.rawImport?.importId ?? eventId,
-              importKind: input.rawImport?.importKind ?? "workout_batch",
+              importKind: input.rawImport?.importKind ?? input.defaultImportKind,
               importedAt: resolveRawImportImportedAt(input.rawImport?.importedAt),
-              source: resolveRawImportSource(input.rawImport?.source, draft.source),
+              source: resolveRawImportSource(input.rawImport?.source, rehydratedDraft.source),
               provenance: input.rawImport?.provenance ?? {
                 eventId,
-                family: "workout",
+                family: input.rawImportFamily,
                 mediaCount: preparedAttachments.length,
               },
             })
           : null;
+
+      if (input.requireAttachments && !stagedAttachments) {
+        throw new VaultError(input.requireAttachments.code, input.requireAttachments.message);
+      }
+
       const projectedDraft = stagedAttachments
-        ? applyActivitySessionAttachmentProjections(draft, stagedAttachments.attachments)
-        : draft;
-      const eventRecord = buildTypedEventRecord(
-        {
-          kind: "activity_session",
-          ...projectedDraft,
-        },
-        vault.metadata.timezone,
-        lifecycle,
-      ) as EventRecordByKind<"activity_session">;
+        ? input.applyAttachmentProjections(rehydratedDraft, stagedAttachments.attachments)
+        : rehydratedDraft;
+      const eventRecord = input.buildRecord(projectedDraft, vault.metadata.timezone, lifecycle);
       const ledgerFile = toEventLedgerFile(eventRecord.occurredAt);
 
       await batch.stageJsonlAppend(ledgerFile, `${JSON.stringify(eventRecord)}\n`);
@@ -735,8 +910,8 @@ export async function addActivitySession(
         vaultRoot: input.vaultRoot,
         batch,
         action: "event_upsert",
-        commandName: "core.addActivitySession",
-        summary: `Wrote activity_session ${eventId}.`,
+        commandName: input.commandName,
+        summary: `Wrote ${input.writeLabel} ${eventId}.`,
         occurredAt: eventRecord.occurredAt,
         files: [ledgerFile],
         targetIds: [eventId],
@@ -750,260 +925,131 @@ export async function addActivitySession(
         manifestPath: stagedAttachments?.manifestPath ?? null,
       };
     },
+  });
+}
+
+export async function addActivitySession(
+  input: AddActivitySessionInput,
+): Promise<AddActivitySessionResult> {
+  return writeAttachmentBackedEvent({
+    vaultRoot: input.vaultRoot,
+    draft: input.draft,
+    attachments: input.attachments,
+    rawImport: input.rawImport,
+    specializedKind: "activity_session",
+    writeLabel: "activity_session",
+    operationType: "activity_session_write",
+    commandName: "core.addActivitySession",
+    ownerKind: "workout",
+    defaultImportKind: "workout_batch",
+    rawImportFamily: "workout",
+    toLatestDraft: toActivitySessionDraft,
+    mergeDrafts: mergeActivitySessionDrafts,
+    applyAttachmentProjections: applyActivitySessionAttachmentProjections,
+    buildRecord: (draft, fallbackTimeZone, lifecycle) =>
+      buildTypedEventRecord(
+        {
+          kind: "activity_session",
+          ...draft,
+        },
+        fallbackTimeZone,
+        lifecycle,
+      ) as EventRecordByKind<"activity_session">,
   });
 }
 
 export async function addBodyMeasurement(
   input: AddBodyMeasurementInput,
 ): Promise<AddBodyMeasurementResult> {
-  const vault = await loadVault({ vaultRoot: input.vaultRoot });
-  const eventId = normalizeDraftEventId(input.draft.id) ?? generateRecordId(ID_PREFIXES.event);
-  const draft: AttachmentBackedEventDraft<"body_measurement"> = {
-    ...input.draft,
-    id: eventId,
-  };
-  const matchedShards = await loadEventLedgerShardsById(input.vaultRoot, eventId);
-  ensureSpecializedEventKind("body_measurement", eventId, matchedShards);
-  const latestMatchedEvent = selectLatestMatchedEvent(matchedShards);
-  const lifecycle = buildEventSpineLifecycle(
-    latestMatchedEvent ? eventSpineRevision(latestMatchedEvent.record) + 1 : 1,
-  );
-  const preparedAttachments = prepareEventAttachments({
-    ownerKind: "measurement",
-    ownerId: eventId,
-    occurredAt: draft.occurredAt,
-    attachments: input.attachments ?? [],
-  });
-
-  return runCanonicalWrite<AddBodyMeasurementResult>({
+  return writeAttachmentBackedEvent({
     vaultRoot: input.vaultRoot,
+    draft: input.draft,
+    attachments: input.attachments,
+    rawImport: input.rawImport,
+    specializedKind: "body_measurement",
+    writeLabel: "body_measurement",
     operationType: "body_measurement_write",
-    summary: `Write body_measurement ${eventId}`,
-    occurredAt: draft.occurredAt,
-    mutate: async ({ batch }) => {
-      const stagedAttachments =
-        preparedAttachments.length > 0
-          ? await stagePreparedEventAttachmentsInBatch({
-              batch,
-              owner: {
-                kind: "measurement",
-                id: eventId,
-              },
-              attachments: preparedAttachments,
-              importId: input.rawImport?.importId ?? eventId,
-              importKind: input.rawImport?.importKind ?? "measurement_batch",
-              importedAt: resolveRawImportImportedAt(input.rawImport?.importedAt),
-              source: resolveRawImportSource(input.rawImport?.source, draft.source),
-              provenance: input.rawImport?.provenance ?? {
-                eventId,
-                family: "measurement",
-                mediaCount: preparedAttachments.length,
-              },
-            })
-          : null;
-      const projectedDraft = stagedAttachments
-        ? applyMeasurementAttachmentProjections(draft, stagedAttachments.attachments)
-        : draft;
-      const eventRecord = buildTypedEventRecord(
+    commandName: "core.addBodyMeasurement",
+    ownerKind: "measurement",
+    defaultImportKind: "measurement_batch",
+    rawImportFamily: "measurement",
+    toLatestDraft: toBodyMeasurementDraft,
+    mergeDrafts: mergeMeasurementDrafts,
+    applyAttachmentProjections: applyMeasurementAttachmentProjections,
+    buildRecord: (draft, fallbackTimeZone, lifecycle) =>
+      buildTypedEventRecord(
         {
           kind: "body_measurement",
-          ...projectedDraft,
+          ...draft,
         },
-        vault.metadata.timezone,
+        fallbackTimeZone,
         lifecycle,
-      ) as EventRecordByKind<"body_measurement">;
-      const ledgerFile = toEventLedgerFile(eventRecord.occurredAt);
-
-      await batch.stageJsonlAppend(ledgerFile, `${JSON.stringify(eventRecord)}\n`);
-      await emitAuditRecord({
-        vaultRoot: input.vaultRoot,
-        batch,
-        action: "event_upsert",
-        commandName: "core.addBodyMeasurement",
-        summary: `Wrote body_measurement ${eventId}.`,
-        occurredAt: eventRecord.occurredAt,
-        files: [ledgerFile],
-        targetIds: [eventId],
-      });
-
-      return {
-        eventId,
-        ledgerFile,
-        created: matchedShards.length === 0,
-        event: eventRecord,
-        manifestPath: stagedAttachments?.manifestPath ?? null,
-      };
-    },
+      ) as EventRecordByKind<"body_measurement">,
   });
 }
 
 export async function addCapture(
   input: AddCaptureInput,
 ): Promise<AddCaptureResult> {
-  const vault = await loadVault({ vaultRoot: input.vaultRoot });
-  const eventId = normalizeDraftEventId(input.draft.id) ?? generateRecordId(ID_PREFIXES.event);
-  const draft = normalizeCaptureDraft({
-    ...input.draft,
-    id: eventId,
-  });
-  const matchedShards = await loadEventLedgerShardsById(input.vaultRoot, eventId);
-  ensureSpecializedEventKind("capture", eventId, matchedShards);
-  const latestMatchedEvent = selectLatestMatchedEvent(matchedShards);
-  const lifecycle = buildEventSpineLifecycle(
-    latestMatchedEvent ? eventSpineRevision(latestMatchedEvent.record) + 1 : 1,
-  );
-  const preparedAttachments = prepareEventAttachments({
-    ownerKind: "capture",
-    ownerId: eventId,
-    occurredAt: draft.occurredAt,
-    attachments: input.attachments,
-  });
-
-  if (preparedAttachments.length === 0) {
-    throw new VaultError("CAPTURE_MEDIA_MISSING", "Capture writes require at least one media attachment.");
-  }
-
-  return runCanonicalWrite<AddCaptureResult>({
+  return writeAttachmentBackedEvent({
     vaultRoot: input.vaultRoot,
+    draft: input.draft,
+    attachments: input.attachments,
+    rawImport: input.rawImport,
+    specializedKind: "capture",
+    writeLabel: "capture",
     operationType: "capture_write",
-    summary: `Write capture ${eventId}`,
-    occurredAt: draft.occurredAt,
-    mutate: async ({ batch }) => {
-      const stagedAttachments = await stagePreparedEventAttachmentsInBatch({
-        batch,
-        owner: {
-          kind: "capture",
-          id: eventId,
-        },
-        attachments: preparedAttachments,
-        importId: input.rawImport?.importId ?? eventId,
-        importKind: input.rawImport?.importKind ?? "capture",
-        importedAt: resolveRawImportImportedAt(input.rawImport?.importedAt),
-        source: resolveRawImportSource(input.rawImport?.source, draft.source),
-        provenance: input.rawImport?.provenance ?? {
-          eventId,
-          family: "capture",
-          mediaCount: preparedAttachments.length,
-        },
-      });
-      if (!stagedAttachments) {
-        throw new VaultError("CAPTURE_MEDIA_MISSING", "Capture writes require at least one media attachment.");
-      }
-      const projectedDraft = applyCaptureAttachmentProjections(draft, stagedAttachments.attachments);
-      const eventRecord = buildTypedEventRecord(
+    commandName: "core.addCapture",
+    ownerKind: "capture",
+    defaultImportKind: "capture",
+    rawImportFamily: "capture",
+    toLatestDraft: toCaptureDraft,
+    mergeDrafts: mergeCaptureDrafts,
+    applyAttachmentProjections: applyCaptureAttachmentProjections,
+    normalizeDraft: normalizeCaptureDraft,
+    requireAttachments: {
+      code: "CAPTURE_MEDIA_MISSING",
+      message: "Capture writes require at least one media attachment.",
+    },
+    buildRecord: (draft, fallbackTimeZone, lifecycle) =>
+      buildTypedEventRecord(
         {
           kind: "note",
-          ...projectedDraft,
+          ...draft,
         },
-        vault.metadata.timezone,
+        fallbackTimeZone,
         lifecycle,
-      ) as EventRecordByKind<"note">;
-      const ledgerFile = toEventLedgerFile(eventRecord.occurredAt);
-
-      await batch.stageJsonlAppend(ledgerFile, `${JSON.stringify(eventRecord)}\n`);
-      await emitAuditRecord({
-        vaultRoot: input.vaultRoot,
-        batch,
-        action: "event_upsert",
-        commandName: "core.addCapture",
-        summary: `Wrote capture ${eventId}.`,
-        occurredAt: eventRecord.occurredAt,
-        files: [ledgerFile],
-        targetIds: [eventId],
-      });
-
-      return {
-        eventId,
-        ledgerFile,
-        created: matchedShards.length === 0,
-        event: eventRecord,
-        manifestPath: stagedAttachments.manifestPath,
-      };
-    },
+      ) as EventRecordByKind<"note">,
   });
 }
 
 export async function addMeasurement(
   input: AddMeasurementInput,
 ): Promise<AddMeasurementResult> {
-  const vault = await loadVault({ vaultRoot: input.vaultRoot });
-  const eventId = normalizeDraftEventId(input.draft.id) ?? generateRecordId(ID_PREFIXES.event);
-  const draft: AttachmentBackedEventDraft<"measurement"> = {
-    ...input.draft,
-    id: eventId,
-  };
-  const matchedShards = await loadEventLedgerShardsById(input.vaultRoot, eventId);
-  ensureSpecializedEventKind("measurement", eventId, matchedShards);
-  const latestMatchedEvent = selectLatestMatchedEvent(matchedShards);
-  const lifecycle = buildEventSpineLifecycle(
-    latestMatchedEvent ? eventSpineRevision(latestMatchedEvent.record) + 1 : 1,
-  );
-  const preparedAttachments = prepareEventAttachments({
-    ownerKind: "measurement",
-    ownerId: eventId,
-    occurredAt: draft.occurredAt,
-    attachments: input.attachments ?? [],
-  });
-
-  return runCanonicalWrite<AddMeasurementResult>({
+  return writeAttachmentBackedEvent({
     vaultRoot: input.vaultRoot,
+    draft: input.draft,
+    attachments: input.attachments,
+    rawImport: input.rawImport,
+    specializedKind: "measurement",
+    writeLabel: "measurement",
     operationType: "measurement_write",
-    summary: `Write measurement ${eventId}`,
-    occurredAt: draft.occurredAt,
-    mutate: async ({ batch }) => {
-      const stagedAttachments =
-        preparedAttachments.length > 0
-          ? await stagePreparedEventAttachmentsInBatch({
-              batch,
-              owner: {
-                kind: "measurement",
-                id: eventId,
-              },
-              attachments: preparedAttachments,
-              importId: input.rawImport?.importId ?? eventId,
-              importKind: input.rawImport?.importKind ?? "measurement_batch",
-              importedAt: resolveRawImportImportedAt(input.rawImport?.importedAt),
-              source: resolveRawImportSource(input.rawImport?.source, draft.source),
-              provenance: input.rawImport?.provenance ?? {
-                eventId,
-                family: "measurement",
-                mediaCount: preparedAttachments.length,
-              },
-            })
-          : null;
-      const projectedDraft = stagedAttachments
-        ? applyMeasurementAttachmentProjections(draft, stagedAttachments.attachments)
-        : draft;
-      const eventRecord = buildTypedEventRecord(
+    commandName: "core.addMeasurement",
+    ownerKind: "measurement",
+    defaultImportKind: "measurement_batch",
+    rawImportFamily: "measurement",
+    toLatestDraft: toMeasurementDraft,
+    mergeDrafts: mergeMeasurementDrafts,
+    applyAttachmentProjections: applyMeasurementAttachmentProjections,
+    buildRecord: (draft, fallbackTimeZone, lifecycle) =>
+      buildTypedEventRecord(
         {
           kind: "measurement",
-          ...projectedDraft,
+          ...draft,
         },
-        vault.metadata.timezone,
+        fallbackTimeZone,
         lifecycle,
-      ) as EventRecordByKind<"measurement">;
-      const ledgerFile = toEventLedgerFile(eventRecord.occurredAt);
-
-      await batch.stageJsonlAppend(ledgerFile, `${JSON.stringify(eventRecord)}\n`);
-      await emitAuditRecord({
-        vaultRoot: input.vaultRoot,
-        batch,
-        action: "event_upsert",
-        commandName: "core.addMeasurement",
-        summary: `Wrote measurement ${eventId}.`,
-        occurredAt: eventRecord.occurredAt,
-        files: [ledgerFile],
-        targetIds: [eventId],
-      });
-
-      return {
-        eventId,
-        ledgerFile,
-        created: matchedShards.length === 0,
-        event: eventRecord,
-        manifestPath: stagedAttachments?.manifestPath ?? null,
-      };
-    },
+      ) as EventRecordByKind<"measurement">,
   });
 }
 
@@ -1025,8 +1071,7 @@ export function buildExperimentEventRecord(input: {
         source: "manual",
         title: input.title.trim(),
         note: normalizeOptionalText(input.note) ?? undefined,
-        relatedIds: [input.experimentId],
-        normalizeRelationIds: uniqueTrimmedStringList,
+        links: [{ type: "related_to", targetId: input.experimentId }],
       }),
       kind: "experiment_event",
       experimentId: input.experimentId,

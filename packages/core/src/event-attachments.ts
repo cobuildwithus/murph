@@ -13,10 +13,15 @@ import {
 } from "@murphai/contracts";
 
 import { describeRawArtifact, stageRawImportManifest } from "./operations/raw-manifests.ts";
-import { runCanonicalWrite, type WriteBatch } from "./operations/write-batch.ts";
-import { resolveVaultPath } from "./path-safety.ts";
+import {
+  readStoredWriteOperation,
+  WriteBatch,
+  WRITE_OPERATION_DIRECTORY,
+} from "./operations/write-batch.ts";
+import { normalizeRelativeVaultPath, resolveVaultPath } from "./path-safety.ts";
 import { prepareRawArtifact, type RawArtifact } from "./raw.ts";
 import { loadVault } from "./vault.ts";
+import { VaultError } from "./errors.ts";
 
 import type { DateInput } from "./types.ts";
 
@@ -67,11 +72,83 @@ export interface StagedEventAttachments {
   attachments: EventAttachment[];
   manifestPath: string;
   rawRefs: string[];
+  stageOperationPath?: string;
 }
 
 export interface EventAttachmentProjections {
   media: StoredMedia[];
   rawRefs: string[];
+}
+
+function normalizeStageOperationPath(stageOperationPath: string): string {
+  const normalizedPath = normalizeRelativeVaultPath(stageOperationPath);
+
+  if (
+    path.posix.dirname(normalizedPath) !== WRITE_OPERATION_DIRECTORY
+    || !normalizedPath.endsWith(".json")
+  ) {
+    throw new VaultError(
+      "INVALID_INPUT",
+      "stageOperationPath must target a write operation metadata file under .runtime/operations/.",
+    );
+  }
+
+  return normalizedPath;
+}
+
+function assertStagedEventAttachmentOperation(operation: {
+  status: string;
+  actions: Array<{
+    kind: string;
+    state?: string;
+    targetRelativePath: string;
+  }>;
+}, manifestPath: string): void {
+  if (operation.status !== "staged") {
+    throw new VaultError(
+      "OPERATION_STATE_INVALID",
+      "cleanupStagedEventAttachments only accepts staged attachment operations.",
+    );
+  }
+
+  const rawDirectory = path.posix.dirname(manifestPath);
+  let manifestMatched = false;
+
+  for (const action of operation.actions) {
+    if (action.state !== "staged") {
+      throw new VaultError(
+        "OPERATION_STATE_INVALID",
+        "cleanupStagedEventAttachments only accepts attachment operations with staged actions.",
+      );
+    }
+
+    if (action.kind === "raw_copy") {
+      if (path.posix.dirname(action.targetRelativePath) !== rawDirectory) {
+        throw new VaultError(
+          "INVALID_INPUT",
+          `staged raw path "${action.targetRelativePath}" must stay within "${rawDirectory}".`,
+        );
+      }
+      continue;
+    }
+
+    if (action.kind === "text_write" && action.targetRelativePath === manifestPath) {
+      manifestMatched = true;
+      continue;
+    }
+
+    throw new VaultError(
+      "INVALID_INPUT",
+      "cleanupStagedEventAttachments requires a stageEventAttachments write operation.",
+    );
+  }
+
+  if (!manifestMatched) {
+    throw new VaultError(
+      "INVALID_INPUT",
+      `stage operation does not stage manifest "${manifestPath}".`,
+    );
+  }
 }
 
 function toStoredMediaKind(kind: EventAttachmentKind): StoredMedia["kind"] {
@@ -229,40 +306,83 @@ export async function stagePreparedEventAttachmentsInBatch(
 export async function stageEventAttachments(
   input: StageEventAttachmentsInput,
 ): Promise<StagedEventAttachments | null> {
-  if (input.attachments.length === 0) {
+  await loadVault({ vaultRoot: input.vaultRoot });
+  const prepared = prepareEventAttachments(input);
+  if (prepared.length === 0) {
     return null;
   }
 
-  await loadVault({ vaultRoot: input.vaultRoot });
-  const prepared = prepareEventAttachments(input);
-
-  return await runCanonicalWrite({
+  const batch = await WriteBatch.create({
     vaultRoot: input.vaultRoot,
     operationType: input.operationType,
     summary: input.summary,
     occurredAt: input.occurredAt,
-    mutate: async ({ batch }) =>
-      stagePreparedEventAttachmentsInBatch({
-        batch,
-        owner: {
-          kind: input.ownerKind,
-          id: input.ownerId,
-        },
-        attachments: prepared,
-        importId: input.importId,
-        importKind: input.importKind,
-        importedAt: input.importedAt,
-        source: input.source,
-        provenance: input.provenance,
-      }),
   });
+
+  let staged: StagedEventAttachments | null;
+
+  try {
+    staged = await stagePreparedEventAttachmentsInBatch({
+      batch,
+      owner: {
+        kind: input.ownerKind,
+        id: input.ownerId,
+      },
+      attachments: prepared,
+      importId: input.importId,
+      importKind: input.importKind,
+      importedAt: input.importedAt,
+      source: input.source,
+      provenance: input.provenance,
+    });
+  } catch (error) {
+    await batch.rollback();
+    throw error;
+  }
+
+  if (!staged) {
+    return null;
+  }
+
+  return {
+    ...staged,
+    stageOperationPath: batch.metadataRelativePath,
+  };
 }
 
 export async function cleanupStagedEventAttachments(input: {
   vaultRoot: string;
   manifestPath: string;
+  stageOperationPath?: string;
 }): Promise<void> {
-  const rawDirectory = path.posix.dirname(input.manifestPath);
-  const resolved = resolveVaultPath(input.vaultRoot, rawDirectory);
-  await fs.rm(resolved.absolutePath, { recursive: true, force: true });
+  if (!input.stageOperationPath) {
+    throw new VaultError(
+      "INVALID_INPUT",
+      "cleanupStagedEventAttachments requires stageOperationPath returned by stageEventAttachments.",
+    );
+  }
+
+  const manifestPath = normalizeRelativeVaultPath(input.manifestPath);
+  const stageOperationPath = normalizeStageOperationPath(input.stageOperationPath);
+  const operation = await readStoredWriteOperation(input.vaultRoot, stageOperationPath);
+  const expectedOperationPath = path.posix.join(WRITE_OPERATION_DIRECTORY, `${operation.operationId}.json`);
+
+  if (stageOperationPath !== expectedOperationPath) {
+    throw new VaultError(
+      "OPERATION_INVALID",
+      `write operation metadata path "${stageOperationPath}" does not match operation "${operation.operationId}".`,
+    );
+  }
+
+  assertStagedEventAttachmentOperation(operation, manifestPath);
+
+  const resolvedOperationPath = resolveVaultPath(input.vaultRoot, stageOperationPath);
+  const resolvedStageRoot = resolveVaultPath(
+    input.vaultRoot,
+    path.posix.join(WRITE_OPERATION_DIRECTORY, operation.operationId),
+  );
+  await Promise.all([
+    fs.rm(resolvedOperationPath.absolutePath, { force: true }),
+    fs.rm(resolvedStageRoot.absolutePath, { recursive: true, force: true }),
+  ]);
 }

@@ -14,7 +14,6 @@ const CANONICAL_WRITE_ALLOWLIST = new Set([
   "domains/events.ts",
   "domains/experiments.ts",
   "domains/shared.ts",
-  "event-attachments.ts",
   "history/api.ts",
   "mutations.ts",
   "operations/write-batch.ts",

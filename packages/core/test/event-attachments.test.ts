@@ -5,7 +5,7 @@ import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promise
 import { afterEach, describe, expect, it } from "vitest";
 
 import { initializeVault } from "../src/index.ts";
-import { WriteBatch } from "../src/operations/write-batch.ts";
+import { readStoredWriteOperation, WriteBatch } from "../src/operations/write-batch.ts";
 import {
   buildAttachmentCompatibilityProjections,
   cleanupStagedEventAttachments,
@@ -228,7 +228,7 @@ describe("event attachment helpers", () => {
     expect(staged?.manifestPath).toContain(`raw/workouts/2026/04/${WORKOUT_OWNER_ID}/`);
   });
 
-  it("stages event attachments, handles empty input, and cleans up the staged directory", async () => {
+  it("stages event attachments, handles empty input, and cleans up only staged operation artifacts", async () => {
     const vaultRoot = await createTempVault("murph-core-event-attachments-stage-");
     const sourcePath = await createSourceFile(vaultRoot, "shared-photo.jpg", "shared-payload");
 
@@ -282,19 +282,58 @@ describe("event attachment helpers", () => {
     expect(staged).not.toBeNull();
     expect(staged?.rawRefs).toEqual([staged?.attachments[0]?.relativePath ?? ""]);
     expect(staged?.manifestPath).toContain(`raw/workouts/2026/04/${WORKOUT_OWNER_ID}/`);
+    expect(staged?.stageOperationPath).toContain(".runtime/operations/");
 
     if (!staged) {
       return;
     }
 
     const manifestAbsolutePath = path.join(vaultRoot, staged.manifestPath);
-    expect(await readFile(manifestAbsolutePath, "utf8")).toContain("\"importKind\": \"workout_batch\"");
+    const attachmentAbsolutePath = path.join(vaultRoot, staged.attachments[0]!.relativePath);
+    const stageOperationPath = staged.stageOperationPath!;
+    const stageOperationAbsolutePath = path.join(vaultRoot, stageOperationPath);
+    const operation = await readStoredWriteOperation(vaultRoot, stageOperationPath);
+    const stageRootAbsolutePath = path.join(vaultRoot, ".runtime/operations", operation.operationId);
+
+    expect(operation.status).toBe("staged");
+    expect(
+      operation.actions.map((action) => action.targetRelativePath),
+    ).toEqual(
+      expect.arrayContaining([
+        staged.manifestPath,
+        staged.attachments[0]!.relativePath,
+      ]),
+    );
+    await expect(access(manifestAbsolutePath)).rejects.toThrow();
+    await expect(access(attachmentAbsolutePath)).rejects.toThrow();
+    await expect(access(stageOperationAbsolutePath)).resolves.toBeUndefined();
+    await expect(access(stageRootAbsolutePath)).resolves.toBeUndefined();
+    await expect(
+      cleanupStagedEventAttachments({
+        vaultRoot,
+        manifestPath: staged.manifestPath,
+      }),
+    ).rejects.toThrow("stageOperationPath");
+    await expect(
+      cleanupStagedEventAttachments({
+        vaultRoot,
+        manifestPath: staged.manifestPath,
+        stageOperationPath: "CORE.md",
+      }),
+    ).rejects.toThrow("metadata file under .runtime/operations");
+    await mkdir(path.dirname(manifestAbsolutePath), { recursive: true });
+    await writeFile(manifestAbsolutePath, "{\"importKind\":\"persisted\"}\n");
+    await writeFile(attachmentAbsolutePath, "committed-payload");
 
     await cleanupStagedEventAttachments({
       vaultRoot,
       manifestPath: staged.manifestPath,
+      stageOperationPath,
     });
 
-    await expect(access(manifestAbsolutePath)).rejects.toThrow();
+    expect(await readFile(manifestAbsolutePath, "utf8")).toContain("\"persisted\"");
+    expect(await readFile(attachmentAbsolutePath, "utf8")).toBe("committed-payload");
+    await expect(access(stageOperationAbsolutePath)).rejects.toThrow();
+    await expect(access(stageRootAbsolutePath)).rejects.toThrow();
   });
 });
