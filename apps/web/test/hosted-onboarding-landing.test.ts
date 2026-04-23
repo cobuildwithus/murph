@@ -51,10 +51,10 @@ describe("hosted onboarding landing helpers", () => {
       resolveHostedInstallScriptUrl(
         createProcessEnv({ HOSTED_WEB_BASE_URL: "https://murph.example.test/app" }),
       ),
-    ).toBe("https://murph.example.test/install.sh");
+    ).toBeNull();
     expect(
       resolveHostedInstallScriptUrl(
-        createProcessEnv({ HOSTED_ONBOARDING_PUBLIC_BASE_URL: "not-a-url" }),
+        createProcessEnv({ HOSTED_ONBOARDING_PUBLIC_BASE_URL: "https://" }),
       ),
     ).toBeNull();
     expect(

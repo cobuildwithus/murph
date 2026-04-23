@@ -33,6 +33,25 @@ describe("hosted public URL helpers", () => {
     expect(resolveHostedPublicBaseUrl(source)).toBe("https://web.example.test");
   });
 
+  it("normalizes explicit hosted public-base values without a scheme", () => {
+    const source = createProcessEnv({
+      HOSTED_ONBOARDING_PUBLIC_BASE_URL: "join.example.test",
+    });
+
+    expect(resolveHostedPublicBaseUrl(source)).toBe("https://join.example.test");
+    expect(resolveHostedPublicOrigin(source)).toBe("https://join.example.test");
+  });
+
+  it("accepts bracketed IPv6 loopback public-base URLs for local development", () => {
+    const source = createProcessEnv({
+      HOSTED_ONBOARDING_PUBLIC_BASE_URL: "http://[::1]:3000",
+    });
+
+    expect(resolveHostedPublicBaseUrl(source)).toBe("http://[::1]:3000");
+    expect(resolveHostedPublicOrigin(source)).toBe("http://[::1]:3000");
+    expect(resolveHostedDeviceSyncPublicBaseUrl(source)).toBe("http://[::1]:3000/api/device-sync");
+  });
+
   it("keeps higher-priority hosted public-base envs ahead of HOSTED_WEB_BASE_URL", () => {
     expect(resolveHostedPublicBaseUrl(createProcessEnv({
       HOSTED_ONBOARDING_PUBLIC_BASE_URL: "https://join.example.test",
@@ -55,6 +74,37 @@ describe("hosted public URL helpers", () => {
     });
 
     expect(resolveHostedDeviceSyncPublicBaseUrl(source)).toBe("https://api.example.test/device-sync");
+  });
+
+  it("fails closed when a configured hosted public base URL includes a non-root path", () => {
+    const source = createProcessEnv({
+      HOSTED_ONBOARDING_PUBLIC_BASE_URL: "https://join.example.test/app",
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
+    });
+
+    expect(resolveHostedPublicBaseUrl(source)).toBeNull();
+    expect(resolveHostedPublicOrigin(source)).toBeNull();
+    expect(resolveHostedDeviceSyncPublicBaseUrl(source)).toBeNull();
+  });
+
+  it("fails closed when HOSTED_WEB_BASE_URL includes a non-root path", () => {
+    const source = createProcessEnv({
+      HOSTED_WEB_BASE_URL: "https://web.example.test/app",
+    });
+
+    expect(resolveHostedPublicBaseUrl(source)).toBeNull();
+    expect(resolveHostedPublicOrigin(source)).toBeNull();
+    expect(resolveHostedDeviceSyncPublicBaseUrl(source)).toBeNull();
+  });
+
+  it("fails closed when the Vercel production fallback includes a non-root path", () => {
+    const source = createProcessEnv({
+      VERCEL_PROJECT_PRODUCTION_URL: "www.withmurph.ai/app",
+    });
+
+    expect(resolveHostedPublicBaseUrl(source)).toBeNull();
+    expect(resolveHostedPublicOrigin(source)).toBeNull();
+    expect(resolveHostedDeviceSyncPublicBaseUrl(source)).toBeNull();
   });
 
   it("returns null for an invalid Vercel production-domain fallback", () => {

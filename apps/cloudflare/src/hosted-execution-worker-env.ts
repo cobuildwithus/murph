@@ -1,4 +1,5 @@
 import {
+  type HostedExecutionBaseUrlNormalizationOptions,
   normalizeHostedExecutionBaseUrl,
   normalizeHostedExecutionString,
 } from "@murphai/hosted-execution/env";
@@ -83,6 +84,9 @@ export function readHostedExecutionWorkerEnvironment(
     hostedWebBaseUrl: requireHostedExecutionBaseUrl(
       source.HOSTED_WEB_BASE_URL,
       "HOSTED_WEB_BASE_URL",
+      {
+        requireOriginOnly: true,
+      },
     ),
     maxEventAttempts: parsePositiveInteger(
       normalizeHostedExecutionString(source.HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS),
@@ -141,9 +145,11 @@ function requireHostedExecutionString(
 function requireHostedExecutionBaseUrl(
   value: string | null | undefined,
   label: string,
+  options?: HostedExecutionBaseUrlNormalizationOptions,
 ): string {
   const normalized = normalizeHostedExecutionBaseUrl(value, {
     allowHttpLocalhost: true,
+    ...options,
   });
 
   if (!normalized) {

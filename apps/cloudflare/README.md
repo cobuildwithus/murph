@@ -67,6 +67,10 @@ Required worker vars:
 - `HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG`
 - `HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME`
 
+`HOSTED_WEB_BASE_URL` must be an origin-only hosted web URL. Do not configure a
+subpath such as `https://example.test/app`; the worker appends its own internal
+callback routes to that origin.
+
 Defaulted worker vars:
 
 - `HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY_ID=v1`

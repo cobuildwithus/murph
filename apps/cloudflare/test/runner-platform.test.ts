@@ -99,7 +99,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         keyId: "v1",
         privateKeyJwkJson: TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
       },
-      webControlBaseUrl: "https://web.example.test/app",
+      webControlBaseUrl: "https://web.example.test",
     });
 
     await expect(platform.deviceSyncPort!.fetchSnapshot({
@@ -305,13 +305,13 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       });
     });
     const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
-      HOSTED_WEB_BASE_URL: "https://web.example.test/app",
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
     }));
     const platform = buildHostedExecutionRuntimePlatform({
       boundUserId: "member_123",
       fetchImpl: fetchMock as typeof fetch,
       webCallbackSigning: environment.webCallbackSigning,
-      webControlBaseUrl: "https://web.example.test/app",
+      webControlBaseUrl: "https://web.example.test",
     });
 
     const snapshot = await platform.deviceSyncPort!.fetchSnapshot({
@@ -344,13 +344,13 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       status: 200,
     }));
     const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
-      HOSTED_WEB_BASE_URL: "https://web.example.test/app",
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
     }));
     const platform = buildHostedExecutionRuntimePlatform({
       boundUserId: "member_123",
       fetchImpl: fetchMock as typeof fetch,
       webCallbackSigning: environment.webCallbackSigning,
-      webControlBaseUrl: "https://web.example.test/app",
+      webControlBaseUrl: "https://web.example.test",
     });
 
     const connectLink = await platform.deviceSyncPort!.createConnectLink({
@@ -383,13 +383,13 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       status: 200,
     }));
     const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
-      HOSTED_WEB_BASE_URL: "https://web.example.test/app",
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
     }));
     const platform = buildHostedExecutionRuntimePlatform({
       boundUserId: "member_123",
       fetchImpl: fetchMock as typeof fetch,
       webCallbackSigning: environment.webCallbackSigning,
-      webControlBaseUrl: "https://web.example.test/app",
+      webControlBaseUrl: "https://web.example.test",
     });
 
     const billing = await platform.billingPort!.resolveVercelAiGatewayStripeCustomerId();
@@ -423,19 +423,37 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       status: 200,
     }));
     const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
-      HOSTED_WEB_BASE_URL: "https://web.example.test/app",
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
     }));
     const platform = buildHostedExecutionRuntimePlatform({
       boundUserId: "member_123",
       fetchImpl: fetchMock as typeof fetch,
       webCallbackSigning: environment.webCallbackSigning,
-      webControlBaseUrl: "https://web.example.test/app",
+      webControlBaseUrl: "https://web.example.test",
     });
 
     await expect(platform.billingPort!.resolveVercelAiGatewayStripeCustomerId()).rejects.toThrow(
       "Hosted delegated billing Stripe customer lookup returned invalid JSON.",
     );
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects direct hosted web control base URLs with non-root paths", async () => {
+    const fetchMock = vi.fn();
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      webCallbackSigning: {
+        keyId: "v1",
+        privateKeyJwkJson: TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
+      },
+      webControlBaseUrl: "https://web.example.test/app",
+    });
+
+    await expect(platform.deviceSyncPort!.fetchSnapshot({
+      connectionId: "conn_123",
+    })).rejects.toThrow(/must not include a path/u);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("routes hosted web control-plane calls through the worker proxy when callback signing stays outside the child", async () => {

@@ -210,6 +210,15 @@ Public origin precedence:
   webhook base for hosted device sync; when unset, `apps/web` derives that base
   as `<canonical hosted public origin>/api/device-sync`
 
+Hosted public-base constraints:
+
+- `HOSTED_ONBOARDING_PUBLIC_BASE_URL`, `HOSTED_WEB_BASE_URL`, and the
+  `VERCEL_PROJECT_PRODUCTION_URL` fallback are origin-only values. Do not set
+  them to subpaths such as `https://example.test/app`.
+- `DEVICE_SYNC_PUBLIC_BASE_URL` remains the one explicit callback-base override
+  that may include its `/api/device-sync` path because that route base is part
+  of the device-sync provider contract.
+
 Callback auth contract:
 
 - `apps/web` verifies narrow Cloudflare-signed internal callbacks with

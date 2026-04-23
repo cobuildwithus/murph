@@ -193,15 +193,42 @@ test("resolveHostedPrivyOrigin prefers an explicit custom auth domain and otherw
   assert.equal(
     resolveHostedPrivyOrigin(createProcessEnv({
       PRIVY_CUSTOM_AUTH_DOMAIN: "privy.custom.example.com",
-      HOSTED_ONBOARDING_PUBLIC_BASE_URL: "https://www.example.com/join",
+      HOSTED_ONBOARDING_PUBLIC_BASE_URL: "https://www.example.com",
     })),
     "https://privy.custom.example.com",
   );
   assert.equal(
     resolveHostedPrivyOrigin(createProcessEnv({
-      HOSTED_ONBOARDING_PUBLIC_BASE_URL: "https://www.example.com/join",
+      HOSTED_ONBOARDING_PUBLIC_BASE_URL: "https://www.example.com",
     })),
     "https://privy.example.com",
+  );
+});
+
+test("resolveHostedPrivyOrigin rejects hosted public base URLs with non-root paths", () => {
+  assert.throws(
+    () => resolveHostedPrivyOrigin(createProcessEnv({
+      HOSTED_ONBOARDING_PUBLIC_BASE_URL: "https://www.example.com/join",
+    })),
+    /must not include a path/u,
+  );
+});
+
+test("resolveHostedPrivyOrigin rejects a pathful HOSTED_WEB_BASE_URL fallback", () => {
+  assert.throws(
+    () => resolveHostedPrivyOrigin(createProcessEnv({
+      HOSTED_WEB_BASE_URL: "https://www.example.com/app",
+    })),
+    /must not include a path/u,
+  );
+});
+
+test("resolveHostedPrivyOrigin rejects a pathful Vercel production fallback", () => {
+  assert.throws(
+    () => resolveHostedPrivyOrigin(createProcessEnv({
+      VERCEL_PROJECT_PRODUCTION_URL: "www.example.com/app",
+    })),
+    /must not include a path/u,
   );
 });
 
