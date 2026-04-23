@@ -292,7 +292,7 @@ export function readLinqWebhookHeader(
   return null;
 }
 
-export function requireLinqMessageReceivedEvent(
+export function parseRawLinqMessageReceivedEvent(
   event: LinqWebhookEvent,
 ): LinqMessageReceivedEvent {
   if (event.event_type !== "message.received") {
@@ -324,8 +324,12 @@ export function requireLinqMessageReceivedEvent(
     ?? normalizeNullableString(ownerHandle?.service)
     ?? normalizeRequiredString(data.service, "Linq message.received service");
   const preferredService = normalizeNullableString(data.preferred_service) ?? undefined;
-  const occurredAt =
+  const sentAt =
     normalizeOptionalTimestamp(data.sent_at, "Linq message.received sent_at")
+    ?? undefined;
+  const receivedAt =
+    normalizeOptionalTimestamp(data.received_at, "Linq message.received received_at")
+    ?? sentAt
     ?? createdAt;
 
   return {
@@ -344,9 +348,9 @@ export function requireLinqMessageReceivedEvent(
       preferred_service: preferredService,
       recipient_handle: recipientHandle,
       recipient_phone: recipientPhone,
-      received_at: occurredAt,
+      received_at: receivedAt,
       is_from_me: isFromMe,
-      sent_at: normalizeOptionalTimestamp(data.sent_at, "Linq message.received sent_at") ?? undefined,
+      sent_at: sentAt,
       sender_handle: senderHandle,
       service,
       message: {
@@ -359,7 +363,7 @@ export function requireLinqMessageReceivedEvent(
   };
 }
 
-export function parseCanonicalLinqMessageReceivedEvent(
+export function parseLinqMessageReceivedEvent(
   event: LinqWebhookEvent,
 ): LinqMessageReceivedEvent {
   if (event.event_type !== "message.received") {
@@ -367,11 +371,11 @@ export function parseCanonicalLinqMessageReceivedEvent(
   }
 
   const data = toLinqObjectRecord(event.data, "Linq message.received data");
-  if (!isCanonicalLinqMessageReceivedData(data)) {
-    return requireLinqMessageReceivedEvent(event);
+  if (!isNormalizedLinqMessageReceivedData(data)) {
+    return parseRawLinqMessageReceivedEvent(event);
   }
 
-  return parseCanonicalLinqMessageReceivedEventFromCanonicalData(event, data);
+  return parseNormalizedLinqMessageReceivedEventData(event, data);
 }
 
 export function buildLinqMessageText(
@@ -397,6 +401,18 @@ export function summarizeLinqMessageReceivedEvent(
   };
 }
 
+export function readLinqRecipientLineHandle(
+  data: LinqMessageReceivedData | null | undefined,
+): string | null {
+  if (!data) {
+    return null;
+  }
+
+  return normalizeNullableString(data.recipient_phone)
+    ?? normalizeNullableString(data.recipient_handle?.handle)
+    ?? normalizeNullableString(data.chat?.owner_handle?.handle);
+}
+
 export function resolveLinqWebhookOccurredAt(event: LinqMessageReceivedEvent): string {
   const occurredAt = normalizeTextValue(event.data.received_at ?? event.created_at);
 
@@ -408,59 +424,30 @@ export function resolveLinqWebhookOccurredAt(event: LinqMessageReceivedEvent): s
 }
 
 export function minimizeLinqWebhookEvent(event: LinqWebhookEvent): Record<string, unknown> {
-  const messageEvent =
-    event.event_type === "message.received"
-      ? isCanonicalLinqMessageReceivedData(event.data)
-        ? (event as LinqMessageReceivedEvent)
-        : parseCanonicalLinqMessageReceivedEvent(event)
-      : null;
-
-  return sanitizeRawMetadata(
-    compactRecord({
-      api_version: event.api_version,
-      event_id: event.event_id,
-      event_type: event.event_type,
-      created_at: event.created_at,
-      webhook_version: event.webhook_version,
-      trace_id: event.trace_id,
-      partner_id: event.partner_id,
-      data: messageEvent ? pickLinqMessageReceivedData(messageEvent.data) : event.data,
-    }),
-  ) as Record<string, unknown>;
+  return sanitizeRawMetadata(pickMinimizedLinqWebhookEvent(event)) as Record<string, unknown>;
 }
 
 export function minimizeLinqMessageReceivedEvent(
   event: LinqMessageReceivedEvent,
 ): Record<string, unknown> {
+  return minimizeLinqWebhookEvent(event);
+}
+
+function pickMinimizedLinqWebhookEvent(event: LinqWebhookEvent): Record<string, unknown> {
+  const messageEvent =
+    event.event_type === "message.received"
+      ? parseLinqMessageReceivedEvent(event)
+      : null;
+
   return compactRecord({
     api_version: event.api_version,
-    created_at: event.created_at,
-    webhook_version: event.webhook_version,
-    data: compactRecord({
-      chat: pickLinqChatInfo(event.data.chat),
-      chat_id: event.data.chat_id,
-      direction: event.data.direction,
-      from: event.data.from,
-      from_handle: pickLinqChatHandle(event.data.from_handle),
-      is_from_me: event.data.is_from_me,
-      message: compactRecord({
-        effect: pickLinqMessageEffect(event.data.message.effect),
-        id: event.data.message.id,
-        parts: event.data.message.parts.map((part) => pickLinqMessagePart(part)),
-        reply_to: pickLinqReplyTo(event.data.message.reply_to),
-      }),
-      preferred_service: event.data.preferred_service,
-      received_at: event.data.received_at,
-      recipient_handle: pickLinqChatHandle(event.data.recipient_handle),
-      recipient_phone: event.data.recipient_phone,
-      service: event.data.service,
-      sent_at: event.data.sent_at,
-      sender_handle: pickLinqChatHandle(event.data.sender_handle),
-    }),
     event_id: event.event_id,
     event_type: event.event_type,
-    partner_id: event.partner_id,
+    created_at: event.created_at,
+    webhook_version: event.webhook_version,
     trace_id: event.trace_id,
+    partner_id: event.partner_id,
+    data: messageEvent ? pickLinqMessageReceivedData(messageEvent.data) : undefined,
   });
 }
 
@@ -649,7 +636,7 @@ function parseOptionalChatInfo(value: unknown): LinqChatInfo | null {
   };
 }
 
-function parseCanonicalLinqMessageReceivedEventFromCanonicalData(
+function parseNormalizedLinqMessageReceivedEventData(
   event: LinqWebhookEvent,
   data: Record<string, unknown>,
 ): LinqMessageReceivedEvent {
@@ -714,7 +701,7 @@ function parseCanonicalLinqMessageReceivedEventFromCanonicalData(
   };
 }
 
-function isCanonicalLinqMessageReceivedData(value: unknown): value is LinqMessageReceivedData {
+function isNormalizedLinqMessageReceivedData(value: unknown): value is LinqMessageReceivedData {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return false;
   }
@@ -816,10 +803,10 @@ function pickLinqMessageReceivedData(data: LinqMessageReceivedData): Record<stri
     sent_at: data.sent_at,
     sender_handle: pickLinqChatHandle(data.sender_handle),
     message: compactRecord({
+      effect: pickLinqMessageEffect(data.message.effect),
       id: data.message.id,
       parts: data.message.parts.map((part) => pickLinqMessagePart(part)),
-      effect: data.message.effect ?? undefined,
-      reply_to: data.message.reply_to ?? undefined,
+      reply_to: pickLinqReplyTo(data.message.reply_to),
     }),
   });
 }
