@@ -19,14 +19,10 @@ import {
   parseHostedAssistantDeliveryRecord,
   parseHostedAssistantDeliverySideEffect,
   parseHostedAssistantDeliverySideEffects,
-  parseHostedExecutionSideEffect,
-  parseHostedExecutionSideEffectRecord,
-  parseHostedExecutionSideEffects,
   readHostedExecutionSafeErrorName,
   sanitizeHostedExecutionStructuredLogDetails,
   sameHostedAssistantDeliverySideEffectIdentity,
-  sameHostedExecutionAssistantDelivery,
-  sameHostedExecutionSideEffectIdentity,
+  sameHostedAssistantDeliveryReceipt,
   summarizeHostedExecutionError,
   summarizeHostedExecutionErrorCode,
 } from "../src/index.ts";
@@ -516,7 +512,7 @@ describe("hosted execution side-effects", () => {
       state: "sent",
     });
 
-    expect(parseHostedExecutionSideEffect({
+    expect(parseHostedAssistantDeliverySideEffect({
       effectId: "intent_123",
       fingerprint: "fingerprint_123",
       kind: "assistant.delivery",
@@ -528,7 +524,7 @@ describe("hosted execution side-effects", () => {
       payload: createHostedAssistantDeliveryPayload(),
     });
 
-    expect(parseHostedExecutionSideEffectRecord({
+    expect(parseHostedAssistantDeliveryRecord({
       delivery,
       effectId: "intent_123",
       fingerprint: "fingerprint_123",
@@ -544,11 +540,11 @@ describe("hosted execution side-effects", () => {
       state: "sent",
     });
 
-    expect(parseHostedExecutionSideEffects("not-an-array")).toEqual([]);
+    expect(parseHostedAssistantDeliverySideEffects("not-an-array")).toEqual([]);
   });
 
   it("compares side-effect identities and delivery payloads structurally", () => {
-    expect(sameHostedExecutionSideEffectIdentity(
+    expect(sameHostedAssistantDeliverySideEffectIdentity(
       {
         effectId: "effect_123",
         fingerprint: "fingerprint_123",
@@ -560,7 +556,7 @@ describe("hosted execution side-effects", () => {
         kind: "assistant.delivery",
       },
     )).toBe(true);
-    expect(sameHostedExecutionSideEffectIdentity(
+    expect(sameHostedAssistantDeliverySideEffectIdentity(
       {
         effectId: "effect_123",
         fingerprint: "fingerprint_123",
@@ -573,8 +569,8 @@ describe("hosted execution side-effects", () => {
       },
     )).toBe(false);
 
-    expect(sameHostedExecutionAssistantDelivery(delivery, { ...delivery })).toBe(true);
-    expect(sameHostedExecutionAssistantDelivery(delivery, {
+    expect(sameHostedAssistantDeliveryReceipt(delivery, { ...delivery })).toBe(true);
+    expect(sameHostedAssistantDeliveryReceipt(delivery, {
       ...delivery,
       providerThreadId: "thread_123",
     })).toBe(false);
@@ -594,16 +590,16 @@ describe("hosted execution side-effects", () => {
   });
 
   it("fails closed on invalid side-effect shapes", () => {
-    expect(() => parseHostedExecutionSideEffect(null)).toThrow(
-      /Hosted execution side effect must be an object/i,
+    expect(() => parseHostedAssistantDeliverySideEffect(null)).toThrow(
+      /Hosted assistant delivery side effect must be an object/i,
     );
-    expect(() => parseHostedExecutionSideEffect({
+    expect(() => parseHostedAssistantDeliverySideEffect({
       effectId: "effect_123",
       fingerprint: "fingerprint_123",
       kind: "other",
-    })).toThrow(/Unsupported hosted execution side effect kind: other/i);
+    })).toThrow(/Unsupported hosted assistant delivery kind: other/i);
 
-    expect(() => parseHostedExecutionSideEffectRecord({
+    expect(() => parseHostedAssistantDeliveryRecord({
       effectId: "intent_123",
       fingerprint: "fingerprint_123",
       kind: "assistant.delivery",
@@ -635,7 +631,7 @@ describe("hosted execution side-effects", () => {
       effectId: "intent_123",
     })).toThrow(/messageLength must be a non-negative integer/i);
 
-    expect(() => parseHostedExecutionSideEffectRecord({
+    expect(() => parseHostedAssistantDeliveryRecord({
       delivery: {
         ...delivery,
         targetKind: "group",
@@ -645,8 +641,8 @@ describe("hosted execution side-effects", () => {
       kind: "assistant.delivery",
       recordedAt: "2026-04-08T00:00:00.000Z",
       state: "sent",
-    })).toThrow(/Unsupported hosted execution assistant delivery target kind: group/i);
-    expect(() => parseHostedExecutionSideEffectRecord({
+    })).toThrow(/Unsupported hosted assistant delivery target kind: group/i);
+    expect(() => parseHostedAssistantDeliveryRecord({
       effectId: "effect_123",
       fingerprint: "fingerprint_123",
       kind: "other",

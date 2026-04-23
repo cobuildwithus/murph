@@ -1,8 +1,8 @@
 import * as z from "zod";
 
-import { isValidIanaTimeZone } from "./time.ts";
+import { CONTRACT_SCHEMA_VERSION } from "./constants.ts";
 
-export const AUTOMATION_SCHEMA_VERSION = "vault-automation.v1" as const;
+export const AUTOMATION_SCHEMA_VERSION = CONTRACT_SCHEMA_VERSION.automationFrontmatter;
 export const AUTOMATION_DOC_TYPE = "automation" as const;
 
 export const automationStatusValues = [
@@ -30,13 +30,6 @@ function isoTimestampSchema() {
   return z.string().min(1);
 }
 
-function timeZoneSchema() {
-  return z
-    .string()
-    .min(3)
-    .refine((value) => isValidIanaTimeZone(value), "Expected a valid IANA timezone.");
-}
-
 export const automationScheduleAtSchema = z
   .object({
     kind: z.literal("at"),
@@ -55,7 +48,6 @@ export const automationScheduleCronSchema = z
   .object({
     kind: z.literal("cron"),
     expression: z.string().min(1),
-    timeZone: timeZoneSchema().optional(),
   })
   .strict();
 
@@ -63,7 +55,6 @@ export const automationScheduleDailyLocalSchema = z
   .object({
     kind: z.literal("dailyLocal"),
     localTime: z.string().regex(dailyLocalTimePattern, "Expected a 24-hour HH:MM time."),
-    timeZone: timeZoneSchema().optional(),
   })
   .strict();
 

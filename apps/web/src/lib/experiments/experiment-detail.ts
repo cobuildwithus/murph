@@ -4,7 +4,7 @@ import type {
   ExperimentRunProjection,
 } from "@/src/types/experiments";
 
-export const CURRENT_EXPERIMENT_PROTOCOL_CONTRACT_VERSION = 5;
+export const CURRENT_EXPERIMENT_PROTOCOL_CONTRACT_VERSION = 1;
 
 export interface ComposeExperimentDetailInput {
   protocol: ExperimentProtocol;

@@ -60,7 +60,7 @@ describe("automation helpers", () => {
       "daily-summary",
       [
         "---",
-        "schemaVersion: vault-automation.v1",
+        "schemaVersion: murph.frontmatter.automation.v1",
         "docType: automation",
         "automationId: auto_daily_summary",
         "slug: daily-summary",
@@ -95,7 +95,7 @@ describe("automation helpers", () => {
       "alpha-summary",
       [
         "---",
-        "schemaVersion: vault-automation.v1",
+        "schemaVersion: murph.frontmatter.automation.v1",
         "docType: automation",
         "automationId: auto_alpha_summary",
         "slug: alpha-summary",
@@ -124,7 +124,7 @@ describe("automation helpers", () => {
       "weekly-brief",
       [
         "---",
-        "schemaVersion: vault-automation.v1",
+        "schemaVersion: murph.frontmatter.automation.v1",
         "docType: automation",
         "automationId: auto_weekly_brief",
         "slug: weekly-brief",
@@ -134,7 +134,6 @@ describe("automation helpers", () => {
         "schedule:",
         "  kind: cron",
         "  expression: 0 8 * * 1",
-        "  timeZone: UTC",
         "route:",
         "  channel: email",
         "  deliverResponse: true",
@@ -213,7 +212,7 @@ describe("automation helpers", () => {
       "broken-daily",
       [
         "---",
-        "schemaVersion: vault-automation.v1",
+        "schemaVersion: murph.frontmatter.automation.v1",
         "docType: automation",
         "automationId: auto_broken_daily",
         "slug: broken-daily",
@@ -242,6 +241,43 @@ describe("automation helpers", () => {
     await expect(listAutomations(vaultRoot)).rejects.toThrow(
       /schedule\.localTime must use HH:MM format\./u,
     );
+
+    const timeZoneVault = await createVaultRoot();
+    await writeAutomationDocument(
+      timeZoneVault,
+      "broken-timezone",
+      [
+        "---",
+        "schemaVersion: murph.frontmatter.automation.v1",
+        "docType: automation",
+        "automationId: auto_broken_timezone",
+        "slug: broken-timezone",
+        "title: Broken timezone",
+        "status: active",
+        "schedule:",
+        "  kind: cron",
+        "  expression: 0 8 * * 1",
+        "  timeZone: UTC",
+        "route:",
+        "  channel: email",
+        "  deliverResponse: true",
+        "  deliveryTarget: null",
+        "  identityId: null",
+        "  participantId: null",
+        "  threadId: null",
+        "continuityPolicy: preserve",
+        "createdAt: 2026-04-08T00:00:00.000Z",
+        "updatedAt: 2026-04-08T00:00:00.000Z",
+        "---",
+        "",
+        "Broken timezone body.",
+        "",
+      ].join("\n"),
+    );
+
+    await expect(listAutomations(timeZoneVault)).rejects.toThrow(
+      /schedule\.timeZone is not supported for canonical automation schedules\./u,
+    );
   });
 
   it("rejects missing and unsupported automation schedule shapes", async () => {
@@ -251,7 +287,7 @@ describe("automation helpers", () => {
       "broken-null-schedule",
       [
         "---",
-        "schemaVersion: vault-automation.v1",
+        "schemaVersion: murph.frontmatter.automation.v1",
         "docType: automation",
         "automationId: auto_broken_null_schedule",
         "slug: broken-null-schedule",
@@ -285,7 +321,7 @@ describe("automation helpers", () => {
       "broken-kind",
       [
         "---",
-        "schemaVersion: vault-automation.v1",
+        "schemaVersion: murph.frontmatter.automation.v1",
         "docType: automation",
         "automationId: auto_broken_kind",
         "slug: broken-kind",
@@ -320,8 +356,8 @@ describe("automation helpers", () => {
       "broken-shape",
       [
         "---",
-        "schemaVersion: vault-automation.v0",
-        "docType: note",
+        "schemaVersion: vault-automation.v1",
+        "docType: automation",
         "automationId: auto_broken_shape",
         "slug: broken-shape",
         "title: Broken shape",
@@ -356,7 +392,7 @@ describe("automation helpers", () => {
       "broken-prompt",
       [
         "---",
-        "schemaVersion: vault-automation.v1",
+        "schemaVersion: murph.frontmatter.automation.v1",
         "docType: automation",
         "automationId: auto_broken_prompt",
         "slug: broken-prompt",

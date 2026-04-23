@@ -13,10 +13,6 @@ export const HOSTED_ASSISTANT_DELIVERY_KINDS = [
   HOSTED_ASSISTANT_DELIVERY_KIND,
 ] as const;
 
-export const HOSTED_EXECUTION_SIDE_EFFECT_KINDS = [
-  HOSTED_ASSISTANT_DELIVERY_KIND,
-] as const;
-
 export const hostedAssistantDeliveryRecordStateValues = [
   "pending",
   "sending",
@@ -25,8 +21,6 @@ export const hostedAssistantDeliveryRecordStateValues = [
   "failed_ambiguous",
 ] as const;
 
-export const HOSTED_EXECUTION_SIDE_EFFECT_RECORD_STATES =
-  hostedAssistantDeliveryRecordStateValues;
 export const HOSTED_ASSISTANT_DELIVERY_RECORD_STATES =
   hostedAssistantDeliveryRecordStateValues;
 
@@ -34,12 +28,8 @@ export type HostedAssistantDeliveryKind = typeof HOSTED_ASSISTANT_DELIVERY_KIND;
 export type HostedAssistantDeliveryTargetKind = GatewayDeliveryTargetKind;
 export type HostedAssistantBindingDeliveryKind = GatewayReplyRouteKind;
 
-export type HostedExecutionSideEffectKind = HostedAssistantDeliveryKind;
-
 export type HostedAssistantDeliveryRecordState =
   (typeof hostedAssistantDeliveryRecordStateValues)[number];
-
-export type HostedExecutionSideEffectRecordState = HostedAssistantDeliveryRecordState;
 
 export const hostedAssistantBindingDeliveryKindValues = gatewayReplyRouteKindValues;
 
@@ -69,7 +59,6 @@ export interface HostedAssistantDeliverySideEffect {
 }
 
 export type HostedAssistantDeliveryEffect = HostedAssistantDeliverySideEffect;
-export type HostedExecutionSideEffect = HostedAssistantDeliverySideEffect;
 
 export interface HostedAssistantDeliveryReceipt {
   channel: string;
@@ -83,7 +72,6 @@ export interface HostedAssistantDeliveryReceipt {
 }
 
 export type HostedAssistantDelivery = HostedAssistantDeliveryReceipt;
-export type HostedExecutionAssistantDelivery = HostedAssistantDeliveryReceipt;
 
 export interface HostedAssistantDeliveryAttempt {
   channel: string | null;
@@ -149,8 +137,6 @@ export type HostedAssistantDeliveryRecord =
   | HostedAssistantDeliverySentRecord
   | HostedAssistantDeliveryFailedRecord
   | HostedAssistantDeliveryAmbiguousFailureRecord;
-
-export type HostedExecutionSideEffectRecord = HostedAssistantDeliveryRecord;
 
 function buildHostedAssistantDeliveryIdentity(input: {
   dedupeKey: string;
@@ -231,7 +217,9 @@ export function buildHostedAssistantDeliveryFailedRecord(input: {
   effectId: string;
   failure: HostedAssistantDeliveryFailure;
   state?: "failed" | "failed_ambiguous";
-}): HostedAssistantDeliveryFailedRecord | HostedAssistantDeliveryAmbiguousFailureRecord {
+}):
+  | HostedAssistantDeliveryFailedRecord
+  | HostedAssistantDeliveryAmbiguousFailureRecord {
   const attempt = parseHostedAssistantDeliveryAttempt(
     input.attempt,
     "Hosted assistant failed side effect attempt",
@@ -249,49 +237,6 @@ export function buildHostedAssistantDeliveryFailedRecord(input: {
     recordedAt: failure.failedAt,
     state,
   };
-}
-
-export function parseHostedExecutionSideEffect(value: unknown): HostedExecutionSideEffect {
-  const record = requireObject(value, "Hosted execution side effect");
-  const kind = requireHostedExecutionSideEffectKind(
-    record.kind,
-    "Hosted execution side effect kind",
-  );
-
-  switch (kind) {
-    case HOSTED_ASSISTANT_DELIVERY_KIND:
-      return {
-        effectId: requireHostedAssistantDeliveryEffectId(
-          record,
-          "Hosted assistant side effect",
-        ),
-        fingerprint: requireString(
-          record.fingerprint,
-          "Hosted assistant side effect fingerprint",
-        ),
-        kind,
-        payload: parseHostedAssistantDeliveryPayload(
-          record.payload,
-          "Hosted assistant side effect payload",
-        ),
-      };
-    default:
-      throw new TypeError(`Unsupported hosted execution side effect kind: ${kind}`);
-  }
-}
-
-export function parseHostedExecutionSideEffects(value: unknown): HostedExecutionSideEffect[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  return value.map((entry) => parseHostedExecutionSideEffect(entry));
-}
-
-export function parseHostedExecutionSideEffectRecord(
-  value: unknown,
-): HostedExecutionSideEffectRecord {
-  return parseHostedAssistantDeliveryRecord(value);
 }
 
 export function parseHostedAssistantDeliverySideEffect(
@@ -404,22 +349,15 @@ export function parseHostedAssistantDeliveryRecord(
   }
 }
 
-export function sameHostedExecutionSideEffectIdentity(
-  left: Pick<HostedExecutionSideEffectRecord, "effectId" | "fingerprint" | "kind">,
-  right: Pick<HostedExecutionSideEffectRecord, "effectId" | "fingerprint" | "kind">,
+export function sameHostedAssistantDeliverySideEffectIdentity(
+  left: Pick<HostedAssistantDeliveryRecord, "effectId" | "fingerprint" | "kind">,
+  right: Pick<HostedAssistantDeliveryRecord, "effectId" | "fingerprint" | "kind">,
 ): boolean {
   return (
     left.effectId === right.effectId
     && left.fingerprint === right.fingerprint
     && left.kind === right.kind
   );
-}
-
-export function sameHostedAssistantDeliverySideEffectIdentity(
-  left: Pick<HostedAssistantDeliveryRecord, "effectId" | "fingerprint" | "kind">,
-  right: Pick<HostedAssistantDeliveryRecord, "effectId" | "fingerprint" | "kind">,
-): boolean {
-  return sameHostedExecutionSideEffectIdentity(left, right);
 }
 
 export function sameHostedAssistantDeliveryReceipt(
@@ -465,13 +403,6 @@ export function sameHostedAssistantDeliveryFailure(
   );
 }
 
-export function sameHostedExecutionAssistantDelivery(
-  left: HostedExecutionAssistantDelivery,
-  right: HostedExecutionAssistantDelivery,
-): boolean {
-  return sameHostedAssistantDeliveryReceipt(left, right);
-}
-
 function requireObject(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new TypeError(`${label} must be an object.`);
@@ -503,19 +434,6 @@ function requireNonNegativeInteger(value: unknown, label: string): number {
   return value;
 }
 
-function requireHostedExecutionSideEffectKind(
-  value: unknown,
-  label: string,
-): HostedExecutionSideEffectKind {
-  const kind = requireString(value, label);
-
-  if (isHostedExecutionSideEffectKind(kind)) {
-    return kind;
-  }
-
-  throw new TypeError(`Unsupported hosted execution side effect kind: ${kind}`);
-}
-
 function requireHostedAssistantDeliveryKind(
   value: unknown,
   label: string,
@@ -529,19 +447,6 @@ function requireHostedAssistantDeliveryKind(
   throw new TypeError(`Unsupported hosted assistant delivery kind: ${kind}`);
 }
 
-function requireHostedExecutionSideEffectRecordState(
-  value: unknown,
-  label: string,
-): HostedExecutionSideEffectRecordState {
-  const state = requireString(value, label);
-
-  if (isHostedExecutionSideEffectRecordState(state)) {
-    return state;
-  }
-
-  throw new TypeError(`Unsupported hosted execution side effect record state: ${state}`);
-}
-
 function requireHostedAssistantDeliveryRecordState(
   value: unknown,
   label: string,
@@ -553,18 +458,6 @@ function requireHostedAssistantDeliveryRecordState(
   }
 
   throw new TypeError(`Unsupported hosted assistant delivery record state: ${state}`);
-}
-
-export function isHostedExecutionSideEffectKind(
-  value: string,
-): value is HostedExecutionSideEffectKind {
-  return isHostedAssistantDeliveryKind(value);
-}
-
-export function isHostedExecutionSideEffectRecordState(
-  value: string,
-): value is HostedExecutionSideEffectRecordState {
-  return isHostedAssistantDeliveryRecordState(value);
 }
 
 export function isHostedAssistantDeliveryKind(
@@ -648,7 +541,7 @@ function parseHostedAssistantDeliveryAttempt(
     ),
     startedAt: requireString(record.startedAt, `${label}.startedAt`),
     target: requireNullableString(record.target ?? null, `${label}.target`),
-    targetKind: requireNullableHostedExecutionAssistantDeliveryTargetKind(
+    targetKind: requireNullableHostedAssistantDeliveryTargetKind(
       record.targetKind ?? null,
       `${label}.targetKind`,
     ),
@@ -694,7 +587,7 @@ function parseHostedAssistantDeliveryReceipt(
     ),
     sentAt: requireString(record.sentAt, `${label}.sentAt`),
     target: requireString(record.target, `${label}.target`),
-    targetKind: requireHostedExecutionAssistantDeliveryTargetKind(
+    targetKind: requireHostedAssistantDeliveryTargetKind(
       record.targetKind,
       `${label}.targetKind`,
     ),
@@ -759,7 +652,7 @@ function requireNullableHostedAssistantBindingDeliveryKind(
   return requireHostedAssistantBindingDeliveryKind(value, label);
 }
 
-function requireHostedExecutionAssistantDeliveryTargetKind(
+function requireHostedAssistantDeliveryTargetKind(
   value: unknown,
   label: string,
 ): HostedAssistantDeliveryTargetKind {
@@ -770,11 +663,11 @@ function requireHostedExecutionAssistantDeliveryTargetKind(
   }
 
   throw new TypeError(
-    `Unsupported hosted execution assistant delivery target kind: ${targetKind}`,
+    `Unsupported hosted assistant delivery target kind: ${targetKind}`,
   );
 }
 
-function requireNullableHostedExecutionAssistantDeliveryTargetKind(
+function requireNullableHostedAssistantDeliveryTargetKind(
   value: unknown,
   label: string,
 ): HostedAssistantDeliveryTargetKind | null {
@@ -782,5 +675,5 @@ function requireNullableHostedExecutionAssistantDeliveryTargetKind(
     return null;
   }
 
-  return requireHostedExecutionAssistantDeliveryTargetKind(value, label);
+  return requireHostedAssistantDeliveryTargetKind(value, label);
 }

@@ -223,7 +223,7 @@ describe("research init scaffold", () => {
         runnableCommands: string[];
       };
 
-      expect(initWorkflow.schemaVersion).toBe("murph.research.orchestrator.init.v2");
+      expect(initWorkflow.schemaVersion).toBe("murph.research.orchestrator.init.v1");
       expect(initWorkflow.status).toBe("charter_pending");
       expect(initWorkflow.topic).toBe("cold plunge");
       expect(initWorkflow.protocol.name).toBe("Cold Plunge");
@@ -270,7 +270,7 @@ describe("research init scaffold", () => {
         "stale\n",
       );
 
-      const legacyWorkflow = {
+      const staleWorkflow = {
         ...initWorkflow,
         schemaVersion: "murph.research.orchestrator.init.v1",
         status: "charter_pending",
@@ -283,7 +283,7 @@ describe("research init scaffold", () => {
       };
       writeFileSync(
         path.join(outDir, "workflow.json"),
-        JSON.stringify(legacyWorkflow, null, 2) + "\n",
+        JSON.stringify(staleWorkflow, null, 2) + "\n",
         "utf8",
       );
 
@@ -340,7 +340,7 @@ describe("research init scaffold", () => {
         runnableCommands: string[];
       };
 
-      expect(materializedWorkflow.schemaVersion).toBe("murph.research.orchestrator.init.v2");
+      expect(materializedWorkflow.schemaVersion).toBe("murph.research.orchestrator.init.v1");
       expect(materializedWorkflow.status).toBe("materialized");
       expect(materializedWorkflow.materializedFrom).toBe(
         path.relative(repoRoot, path.join(outDir, "responses", "01-charter.md")).split(path.sep).join(path.posix.sep),
@@ -491,6 +491,34 @@ describe("research init scaffold", () => {
 
       expect(result.status).not.toBe(0);
       expect(result.stderr).toContain("Missing required CHARTER_MANIFEST_V1 JSON block");
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects unsupported old research scaffold schema versions", () => {
+    mkdirSync(researchOutputRoot, { recursive: true });
+    const tempRoot = mkdtempSync(path.join(researchOutputRoot, "tmp-research-old-schema-"));
+    const outDir = path.join(tempRoot, "old-schema");
+
+    try {
+      const initResult = runResearchInit("cold plunge", "--out-dir", outDir);
+      expect(initResult.status).toBe(0);
+
+      const workflowPath = path.join(outDir, "workflow.json");
+      const workflow = JSON.parse(readFileSync(workflowPath, "utf8")) as {
+        schemaVersion: string;
+      };
+      workflow.schemaVersion = "murph.research.orchestrator.init.v2";
+      writeFileSync(workflowPath, JSON.stringify(workflow, null, 2) + "\n", "utf8");
+
+      const result = runResearchMaterialize("--workspace", outDir);
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain(
+        "Unsupported workflow schema in output-packages/research/",
+      );
+      expect(result.stderr).toContain("murph.research.orchestrator.init.v2");
     } finally {
       rmSync(tempRoot, { recursive: true, force: true });
     }

@@ -1325,7 +1325,7 @@ describe('assistant product small seams', () => {
           alias: null,
           createdAt: '2026-04-09T00:00:00.000Z',
           jobId: canonicalJobId,
-          schema: 'murph.assistant-canonical-cron-runtime-state.v2',
+          schema: 'murph.assistant-canonical-cron-runtime-state.v1',
           sessionId: null,
           state: {
             activatedAt: '2026-04-09T00:00:00.000Z',
@@ -1345,7 +1345,7 @@ describe('assistant product small seams', () => {
           alias: null,
           createdAt: '2026-04-09T00:00:00.000Z',
           jobId: buildDailyFoodCronJobId('food-other'),
-          schema: 'murph.assistant-canonical-cron-runtime-state.v2',
+          schema: 'murph.assistant-canonical-cron-runtime-state.v1',
           sessionId: null,
           state: {
             activatedAt: '2026-04-09T00:00:00.000Z',
@@ -1362,7 +1362,7 @@ describe('assistant product small seams', () => {
           updatedAt: '2026-04-09T00:00:00.000Z',
         },
       ],
-      version: 2,
+      version: 1,
     })
 
     await expect(
@@ -1415,7 +1415,7 @@ describe('assistant product small seams', () => {
     })
     readAssistantCronCanonicalRuntimeStore.mockResolvedValueOnce({
       jobs: [],
-      version: 2,
+      version: 1,
     })
     getAssistantCronJob.mockResolvedValueOnce({
       jobId: canonicalJobId,
@@ -1454,7 +1454,7 @@ describe('assistant product small seams', () => {
             jobId: canonicalJobId,
           }),
         ],
-        version: 2,
+        version: 1,
       }),
     )
     expect(getAssistantCronJob).toHaveBeenCalledWith('/tmp/test-vault', canonicalJobId)

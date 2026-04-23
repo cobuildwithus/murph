@@ -6,6 +6,7 @@ import {
   automationScheduleDailyLocalSchema,
   automationScheduleEverySchema,
   automationScheduleKindValues,
+  automationScheduleSchema,
   type AutomationRoute,
   type AutomationScheduleKind,
 } from '@murphai/contracts'
@@ -822,28 +823,14 @@ export const assistantCronAtScheduleSchema = automationScheduleAtSchema
 export const assistantCronEveryScheduleSchema = automationScheduleEverySchema
 
 export const assistantCronExpressionScheduleSchema = automationScheduleCronSchema
-  .omit({ timeZone: true })
-  .strict()
 
 export const assistantCronExpressionScheduleInputSchema = assistantCronExpressionScheduleSchema
 
 export const assistantCronDailyLocalScheduleSchema = automationScheduleDailyLocalSchema
-  .omit({ timeZone: true })
-  .strict()
 
-export const assistantCronScheduleSchema = z.discriminatedUnion('kind', [
-  assistantCronAtScheduleSchema,
-  assistantCronEveryScheduleSchema,
-  assistantCronExpressionScheduleSchema,
-  assistantCronDailyLocalScheduleSchema,
-])
+export const assistantCronScheduleSchema = automationScheduleSchema
 
-export const assistantCronScheduleInputSchema = z.discriminatedUnion('kind', [
-  assistantCronAtScheduleSchema,
-  assistantCronEveryScheduleSchema,
-  assistantCronExpressionScheduleInputSchema,
-  assistantCronDailyLocalScheduleSchema,
-])
+export const assistantCronScheduleInputSchema = automationScheduleSchema
 
 const assistantCronRouteSchema = automationRouteSchema
   .omit({ channel: true, threadId: true })

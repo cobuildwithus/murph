@@ -2,11 +2,7 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, writeFileSyn
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const ORCHESTRATOR_SCHEMA_VERSION = "murph.research.orchestrator.init.v2";
-const SUPPORTED_SCAFFOLD_SCHEMA_VERSIONS = new Set([
-  "murph.research.orchestrator.init.v1",
-  ORCHESTRATOR_SCHEMA_VERSION,
-]);
+export const ORCHESTRATOR_SCHEMA_VERSION = "murph.research.orchestrator.init.v1";
 
 const libPath = fileURLToPath(import.meta.url);
 export const orchestratorDir = path.dirname(libPath);
@@ -111,7 +107,7 @@ export function isExistingScaffoldDir(outDir) {
 
   try {
     const workflow = JSON.parse(readFileSync(workflowPath, "utf8"));
-    return SUPPORTED_SCAFFOLD_SCHEMA_VERSIONS.has(workflow?.schemaVersion);
+    return workflow?.schemaVersion === ORCHESTRATOR_SCHEMA_VERSION;
   } catch {
     return false;
   }
@@ -124,7 +120,7 @@ export function readWorkflow(workspaceDir) {
   }
 
   const workflow = JSON.parse(readFileSync(workflowPath, "utf8"));
-  if (!SUPPORTED_SCAFFOLD_SCHEMA_VERSIONS.has(workflow?.schemaVersion)) {
+  if (workflow?.schemaVersion !== ORCHESTRATOR_SCHEMA_VERSION) {
     throw new Error(
       `Unsupported workflow schema in ${toPosixRelative(workflowPath)}: ${String(workflow?.schemaVersion ?? "unknown")}`,
     );
@@ -484,10 +480,6 @@ Options:
   --zip                      Create only a .zip archive (default)
   --out-dir <dir>            Output directory (default: audit-packages)
   --name <prefix>            Output filename prefix (default: murph-research-context)
-  --with-tests               Accepted for compatibility; no effect.
-  --no-tests                 Accepted for compatibility; no effect.
-  --with-docs                Accepted for compatibility; no effect.
-  --no-docs                  Accepted for compatibility; no effect.
   -h, --help                 Show this help message
 USAGE
   exit "\${exit_code}"
@@ -495,7 +487,7 @@ USAGE
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --zip|--with-tests|--no-tests|--with-docs|--no-docs)
+    --zip)
       shift
       ;;
     --out-dir)
