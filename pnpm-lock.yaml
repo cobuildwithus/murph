@@ -12,8 +12,8 @@ importers:
         specifier: ^0.1.15
         version: 0.1.15
       '@cobuild/review-gpt':
-        specifier: ^0.5.73
-        version: 0.5.73(@cfworker/json-schema@4.1.1)(openapi-types@12.1.3)
+        specifier: ^0.5.74
+        version: 0.5.74(@cfworker/json-schema@4.1.1)
       '@types/node':
         specifier: ^25.5.0
         version: 25.5.0
@@ -1034,8 +1034,8 @@ packages:
     resolution: {integrity: sha512-CjzP5OHu6RhOOjmPl/1djZNVEbjttt62rBSzvuPK7u9NrZ37F2lkHT+QmZ4Lb+ZDmMhPTqlwdyqnzwD0Gkhm1Q==}
     hasBin: true
 
-  '@cobuild/review-gpt@0.5.73':
-    resolution: {integrity: sha512-Ge/EXWcOgHusTF1Xzo5oEI+3aBK0MXwfQ7YGiqdoqKeDVefGAlmoL0QMXz9As6+CHg5vrooEJg5Cf7pP1Xcyfg==}
+  '@cobuild/review-gpt@0.5.74':
+    resolution: {integrity: sha512-kvaHmhgrDlt87Jj/c5Yhv6u9oCLJLUgVhFuXs00aNWNtJVjVYweM07znYF0YFbHD5qTg7tG30QA9vaEGO1s4wQ==}
     hasBin: true
 
   '@cobuild/wire@0.3.6':
@@ -1882,6 +1882,15 @@ packages:
       '@cfworker/json-schema':
         optional: true
 
+  '@modelcontextprotocol/server@2.0.0-alpha.2':
+    resolution: {integrity: sha512-gmLgdHzlYM8L7Aw/+VE0kxjT25WKamtUSLNhdOgrJq5CrESvqVSoAfWSJJeNPUXNTluQ+dYDGFbKVitdsJtbPA==}
+    engines: {node: '>=20'}
+    peerDependencies:
+      '@cfworker/json-schema': ^4.1.1
+    peerDependenciesMeta:
+      '@cfworker/json-schema':
+        optional: true
+
   '@mozilla/readability@0.6.0':
     resolution: {integrity: sha512-juG5VWh4qAivzTAeMzvY9xs9HY5rAcr2E4I7tiSSCokRFi7XIZCAu92ZkSTsIj1OPceCifL3cpfteP3pDT9/QQ==}
     engines: {node: '>=14.0.0'}
@@ -2585,8 +2594,8 @@ packages:
     resolution: {integrity: sha512-7a18ODb043eszMBr6mpVWz802xIRMzdmptarVxTtnMIW7ZQzba/v8jLp3kcHUHb76uRkyJRPpGSwdm7+8GmsEA==}
     engines: {node: '>=10'}
 
-  '@repomix/tree-sitter-wasms@0.1.16':
-    resolution: {integrity: sha512-CIINozBWFwjhH4DQALN/b4n1S08fHhXQOdjX2G7s4w+Urew37aLU0AHVyCjHM5Pbnh63tDYt4YyUkS6vRUV38A==}
+  '@repomix/tree-sitter-wasms@0.1.17':
+    resolution: {integrity: sha512-tc3HnFqdMF1pXhIMzG3aTaBDpIiHK2tPfn3fwqA6P3WTbHa+1EuuTubbKshvmN7xCHP5Ojz0/VW4R+XvR88KOw==}
 
   '@rolldown/binding-android-arm64@1.0.0-rc.9':
     resolution: {integrity: sha512-lcJL0bN5hpgJfSIz/8PIf02irmyL43P+j1pTCfbD1DbLkmGRuFIA4DD3B3ZOvGqG0XiVvRznbKtN0COQVaKUTg==}
@@ -5407,6 +5416,11 @@ packages:
 
   incur@0.3.13:
     resolution: {integrity: sha512-ypjWHtDSS8h6TPz+elg9cmQMe7gZu6YpUSAcv4HGIppdQ47VYHXZdho7P4I08CPSzz9VV4tVsWej2pfzXl8jgg==}
+    hasBin: true
+
+  incur@0.3.25:
+    resolution: {integrity: sha512-jrSkzauM42ilbQJ6THVkAY6dTulkyVW0sZpVHdA8gfiBwrLrLnLUf8U3bAOegAKBIMSOFgk1idchgu9xm9HMng==}
+    engines: {node: '>=22'}
     hasBin: true
 
   indent-string@5.0.0:
@@ -8599,8 +8613,7 @@ snapshots:
 
   '@bcoe/v8-coverage@1.0.2': {}
 
-  '@cfworker/json-schema@4.1.1':
-    optional: true
+  '@cfworker/json-schema@4.1.1': {}
 
   '@chevrotain/cst-dts-gen@10.5.0':
     dependencies:
@@ -8672,14 +8685,13 @@ snapshots:
 
   '@cobuild/repo-tools@0.1.15': {}
 
-  '@cobuild/review-gpt@0.5.73(@cfworker/json-schema@4.1.1)(openapi-types@12.1.3)':
+  '@cobuild/review-gpt@0.5.74(@cfworker/json-schema@4.1.1)':
     dependencies:
       '@cobuild/repo-tools': 0.1.15
-      incur: 0.3.13(@cfworker/json-schema@4.1.1)(openapi-types@12.1.3)
+      incur: 0.3.25
       repomix: 1.13.1(@cfworker/json-schema@4.1.1)
     transitivePeerDependencies:
       - '@cfworker/json-schema'
-      - openapi-types
       - supports-color
 
   '@cobuild/wire@0.3.6(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@3.25.76)':
@@ -9524,6 +9536,12 @@ snapshots:
       '@cfworker/json-schema': 4.1.1
     transitivePeerDependencies:
       - supports-color
+
+  '@modelcontextprotocol/server@2.0.0-alpha.2(@cfworker/json-schema@4.1.1)':
+    dependencies:
+      zod: 4.3.6
+    optionalDependencies:
+      '@cfworker/json-schema': 4.1.1
 
   '@mozilla/readability@0.6.0': {}
 
@@ -10714,7 +10732,7 @@ snapshots:
 
   '@repomix/strip-comments@2.4.2': {}
 
-  '@repomix/tree-sitter-wasms@0.1.16': {}
+  '@repomix/tree-sitter-wasms@0.1.17': {}
 
   '@rolldown/binding-android-arm64@1.0.0-rc.9':
     optional: true
@@ -14603,6 +14621,15 @@ snapshots:
       - openapi-types
       - supports-color
 
+  incur@0.3.25:
+    dependencies:
+      '@cfworker/json-schema': 4.1.1
+      '@modelcontextprotocol/server': 2.0.0-alpha.2(@cfworker/json-schema@4.1.1)
+      '@toon-format/toon': 2.1.0
+      tokenx: 1.3.0
+      yaml: 2.8.3
+      zod: 4.3.6
+
   indent-string@5.0.0: {}
 
   inherits@2.0.4: {}
@@ -16227,7 +16254,7 @@ snapshots:
       '@clack/prompts': 0.11.0
       '@modelcontextprotocol/sdk': 1.29.0(@cfworker/json-schema@4.1.1)(zod@4.3.6)
       '@repomix/strip-comments': 2.4.2
-      '@repomix/tree-sitter-wasms': 0.1.16
+      '@repomix/tree-sitter-wasms': 0.1.17
       '@secretlint/core': 11.7.1
       '@secretlint/secretlint-rule-preset-recommend': 11.7.1
       commander: 14.0.3
