@@ -174,6 +174,7 @@ export interface AssistantProviderTurnExecutionResult {
 export interface AssistantProviderAttemptMetadata {
   activityLabels: readonly string[]
   executedToolCount: number
+  providerActionCount: number
   rawToolEvents: readonly unknown[]
 }
 

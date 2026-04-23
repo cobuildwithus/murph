@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events'
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { PassThrough } from 'node:stream'
@@ -24,8 +24,8 @@ vi.mock('node:os', async (importOriginal) => {
 })
 
 import {
-  buildCodexArgs,
-  executeCodexPrompt,
+  buildCodexAppServerArgs,
+  executeCodexAppServerTurn,
   resolveCodexDisplayOptions,
 } from '../src/assistant-codex.ts'
 import {
@@ -57,72 +57,31 @@ afterEach(async () => {
 })
 
 describe('assistant codex runtime', () => {
-  it('builds Codex CLI args for fresh and resumed turns', () => {
+  it('builds Codex app-server args for configured turns', () => {
     expect(
-      buildCodexArgs({
+      buildCodexAppServerArgs({
         approvalPolicy: 'on-request',
         configOverrides: ['model="gpt-5"', 'theme="clean"'],
-        imagePaths: ['/tmp/image-1.png', '/tmp/image-2.jpg'],
-        model: 'gpt-5',
         oss: true,
-        outputFile: '/tmp/output.txt',
         profile: 'daily',
-        prompt: 'hello',
-        reasoningEffort: 'high',
         sandbox: 'workspace-write',
-        workingDirectory: '/workspace/app',
       }),
     ).toEqual([
-      '--ask-for-approval',
+      '-s',
+      'workspace-write',
+      '-a',
       'on-request',
       '--config',
       'model="gpt-5"',
       '--config',
       'theme="clean"',
-      'exec',
-      '--json',
-      '--skip-git-repo-check',
-      '--output-last-message',
-      '/tmp/output.txt',
-      '--cd',
-      '/workspace/app',
-      '--sandbox',
-      'workspace-write',
-      '--oss',
       '--profile',
       'daily',
-      '--model',
-      'gpt-5',
-      '--config',
-      'model_reasoning_effort="high"',
-      '--image',
-      '/tmp/image-1.png',
-      '--image',
-      '/tmp/image-2.jpg',
-      '-',
+      '--oss',
+      'app-server',
     ])
 
-    expect(
-      buildCodexArgs({
-        model: 'gpt-5-mini',
-        outputFile: '/tmp/resume.txt',
-        prompt: 'resume',
-        reasoningEffort: null,
-        resumeSessionId: 'session-42',
-        workingDirectory: '/workspace/ignored',
-      }),
-    ).toEqual([
-      'exec',
-      'resume',
-      'session-42',
-      '--json',
-      '--skip-git-repo-check',
-      '--output-last-message',
-      '/tmp/resume.txt',
-      '--model',
-      'gpt-5-mini',
-      '-',
-    ])
+    expect(buildCodexAppServerArgs({})).toEqual(['app-server'])
   })
 
   it('resolves display options from config files and explicit overrides', async () => {
@@ -171,7 +130,7 @@ describe('assistant codex runtime', () => {
     })
   })
 
-  it('executes Codex prompts, sanitizes env, and prefers output-file messages', async () => {
+  it('executes Codex app-server turns, sanitizes env, and streams assistant output through JSON-RPC', async () => {
     const workingDirectory = await createTempDir('assistant-codex-workdir-')
     const codexHome = await createTempDir('assistant-codex-home-')
     const imageBytes = Buffer.from([0xff, 0xd8, 0xff])
@@ -180,36 +139,156 @@ describe('assistant codex runtime', () => {
 
     codexMocks.spawn.mockImplementation((_command, args, options) => {
       const child = new MockChildProcess()
-      const outputFile = readOutputFilePath(args)
-      const imagePath = readImagePath(args)
+      const expectedWorkingDirectory = path.resolve(workingDirectory)
 
       queueMicrotask(() => {
-        child.stdout.write(
-          `${JSON.stringify({ type: 'thread.started', thread_id: 'thread-1' })}\n`,
-        )
-        child.stdout.write(
-          `${JSON.stringify({
-            delta: 'Hello',
-            item_id: 'assistant-1',
-            type: 'assistant.message.delta',
-          })}\n`,
-        )
-        child.stdout.write(
-          `${JSON.stringify({
-            item: {
-              id: 'assistant-1',
-              message: 'Hello from assistant',
-              type: 'assistant_message',
-            },
-            type: 'item.completed',
-          })}\n`,
-        )
-        child.stderr.write('Retrying after timeout\n')
-
         void (async () => {
+          let messages = await waitForRpcMessages(child, 1)
+          expect(messages[0]).toEqual({
+            id: 1,
+            method: 'initialize',
+            params: {
+              clientInfo: {
+                name: 'murph',
+                title: 'Murph',
+                version: '1.0.0',
+              },
+            },
+          })
+          child.stdout.write(jsonLine({ id: 1, result: {} }))
+
+          messages = await waitForRpcMessages(child, 3)
+          expect(messages[1]).toEqual({
+            method: 'initialized',
+            params: {},
+          })
+          expect(messages[2]).toEqual({
+            id: 2,
+            method: 'thread/start',
+            params: {
+              cwd: expectedWorkingDirectory,
+              model: 'gpt-5',
+              serviceName: 'murph',
+            },
+          })
+          child.stdout.write(
+            jsonLine({
+              id: 2,
+              result: {
+                thread: {
+                  id: 'thread-1',
+                },
+              },
+            }),
+          )
+
+          messages = await waitForRpcMessages(child, 4)
+          const turnStart = messages[3]
+          expect(turnStart).toMatchObject({
+            id: 3,
+            method: 'turn/start',
+            params: {
+              approvalPolicy: 'never',
+              cwd: expectedWorkingDirectory,
+              effort: 'high',
+              model: 'gpt-5',
+              threadId: 'thread-1',
+            },
+          })
+          expect(asRecord(turnStart.params).sandboxPolicy).toBeUndefined()
+          const inputItems = readTurnStartInputItems(turnStart)
+          expect(inputItems[0]).toEqual({
+            type: 'text',
+            text: 'Explain this',
+          })
+          expect(inputItems[1]).toMatchObject({
+            type: 'localImage',
+          })
+          const imagePath = readLocalImagePath(inputItems[1])
           expect(imagePath.endsWith('.jpg')).toBe(true)
           await expect(readFile(imagePath)).resolves.toEqual(imageBytes)
-          await writeFile(outputFile, 'Final message from output file\n', 'utf8')
+
+          child.stdout.write(
+            jsonLine({
+              id: 3,
+              result: {
+                turn: {
+                  id: 'turn-1',
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              method: 'turn/started',
+              params: {
+                turn: {
+                  id: 'turn-1',
+                },
+              },
+            }),
+          )
+          child.stderr.write('Retrying after timeout\n')
+          child.stdout.write(
+            jsonLine({
+              method: 'item/started',
+              params: {
+                item: {
+                  id: 'command-1',
+                  type: 'command.execution',
+                  command: 'pwd',
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              method: 'assistant.message.delta',
+              params: {
+                item: {
+                  id: 'assistant-1',
+                  type: 'assistant_message',
+                },
+                delta: 'Hello ',
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              method: 'item/completed',
+              params: {
+                item: {
+                  id: 'assistant-1',
+                  type: 'assistant_message',
+                  message: 'Hello world',
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              method: 'item/completed',
+              params: {
+                item: {
+                  id: 'command-1',
+                  type: 'command.execution',
+                  command: 'pwd',
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              method: 'turn/completed',
+              params: {
+                turn: {
+                  id: 'turn-1',
+                  status: 'completed',
+                },
+              },
+            }),
+          )
+          child.emit('exit', 0, null)
           child.emit('close', 0, null)
         })()
       })
@@ -228,7 +307,7 @@ describe('assistant codex runtime', () => {
     })
 
     await expect(
-      executeCodexPrompt({
+      executeCodexAppServerTurn({
         codexCommand: '  codex  ',
         codexHome,
         env: {
@@ -243,18 +322,24 @@ describe('assistant codex runtime', () => {
         ],
         onProgress,
         onTraceEvent,
+        approvalPolicy: 'never',
+        configOverrides: ['model="gpt-5"'],
+        model: 'gpt-5',
+        reasoningEffort: 'high',
         prompt: 'Explain this',
+        sandbox: 'workspace-write',
         workingDirectory,
       }),
     ).resolves.toMatchObject({
-      finalMessage: 'Final message from output file',
+      finalMessage: 'Hello world',
+      providerActionCount: 1,
       sessionId: 'thread-1',
       stderr: 'Retrying after timeout',
     })
 
     expect(codexMocks.spawn).toHaveBeenCalledWith(
       'codex',
-      expect.arrayContaining(['exec', '--json', '--skip-git-repo-check']),
+      ['-s', 'workspace-write', '-a', 'never', '--config', 'model="gpt-5"', 'app-server'],
       expect.any(Object),
     )
     expect(onProgress).toHaveBeenCalledWith(
@@ -270,11 +355,10 @@ describe('assistant codex runtime', () => {
         id: 'assistant-1',
         kind: 'message',
         state: 'completed',
-        text: 'Hello from assistant',
+        text: 'Hello world',
       }),
     )
-    expect(onTraceEvent).toHaveBeenNthCalledWith(
-      2,
+    expect(onTraceEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         providerSessionId: 'thread-1',
         updates: [
@@ -282,32 +366,71 @@ describe('assistant codex runtime', () => {
             kind: 'assistant',
             mode: 'append',
             streamKey: 'assistant:assistant-1',
-            text: 'Hello',
+            text: 'Hello ',
           },
         ],
       }),
     )
   })
 
-  it('passes readable image paths through to Codex without rematerializing them', async () => {
+  it('passes readable image paths through to Codex app-server without rematerializing them', async () => {
     const workingDirectory = await createTempDir('assistant-codex-path-image-')
     const imagePath = path.join(workingDirectory, 'evidence.png')
 
     await writeFile(imagePath, Buffer.from([0x89, 0x50, 0x4e, 0x47]))
 
-    codexMocks.spawn.mockImplementation((_command, args) => {
+    codexMocks.spawn.mockImplementation(() => {
       const child = new MockChildProcess()
 
       queueMicrotask(() => {
-        expect(readImagePath(args)).toBe(imagePath)
-        child.emit('close', 0, null)
+        void (async () => {
+          await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: 1, result: {} }))
+          await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(
+            jsonLine({
+              id: 2,
+              result: {
+                thread: {
+                  id: 'thread-path',
+                },
+              },
+            }),
+          )
+          const turnStart = await waitForRpcMethod(child, 'turn/start')
+          const inputItems = readTurnStartInputItems(turnStart)
+          expect(readLocalImagePath(inputItems[1])).toBe(imagePath)
+          child.stdout.write(
+            jsonLine({
+              id: 3,
+              result: {
+                turn: {
+                  id: 'turn-path',
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              method: 'turn/completed',
+              params: {
+                turn: {
+                  id: 'turn-path',
+                  status: 'completed',
+                },
+              },
+            }),
+          )
+          child.emit('exit', 0, null)
+          child.emit('close', 0, null)
+        })()
       })
 
       return child
     })
 
     await expect(
-      executeCodexPrompt({
+      executeCodexAppServerTurn({
         images: [
           {
             path: imagePath,
@@ -319,7 +442,7 @@ describe('assistant codex runtime', () => {
       }),
     ).resolves.toMatchObject({
       finalMessage: '',
-      sessionId: null,
+      sessionId: 'thread-path',
     })
   })
 
@@ -331,7 +454,7 @@ describe('assistant codex runtime', () => {
     await chmod(imagePath, 0o000)
 
     await expect(
-      executeCodexPrompt({
+      executeCodexAppServerTurn({
         images: [
           {
             path: imagePath,
@@ -343,113 +466,31 @@ describe('assistant codex runtime', () => {
       }),
     ).rejects.toMatchObject({
       code: 'ASSISTANT_CODEX_IMAGE_INVALID',
-      message: `Codex CLI image input path is not readable: ${imagePath}`,
+      message: `Codex app-server image input path is not readable: ${imagePath}`,
     })
 
     expect(codexMocks.spawn).not.toHaveBeenCalled()
   })
 
-  it('falls back to streamed assistant text when the output file is missing', async () => {
-    const workingDirectory = await createTempDir('assistant-codex-stream-')
-
-    codexMocks.spawn.mockImplementation((_command, args) => {
-      const child = new MockChildProcess()
-      const outputFile = readOutputFilePath(args)
-
-      queueMicrotask(() => {
-        child.stdout.write(
-          `${JSON.stringify({
-            delta: 'Hello ',
-            item_id: 'assistant-2',
-            type: 'assistant.message.delta',
-          })}\n`,
-        )
-        child.stdout.write(
-          `${JSON.stringify({
-            delta: 'world',
-            item_id: 'assistant-2',
-            type: 'assistant.message.delta',
-          })}\n`,
-        )
-        void (async () => {
-          await writeFile(outputFile, '   \n', 'utf8')
-          child.emit('close', 0, null)
-        })()
-      })
-
-      return child
-    })
+  it('fails closed on unsupported interactive approval policies before spawning Codex', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-approval-policy-')
 
     await expect(
-      executeCodexPrompt({
-        prompt: 'stream please',
-        resumeSessionId: 'resume-1',
+      executeCodexAppServerTurn({
+        approvalPolicy: 'on-request',
+        prompt: 'require approval',
         workingDirectory,
       }),
-    ).resolves.toMatchObject({
-      finalMessage: 'Hello world',
-      sessionId: 'resume-1',
-    })
-  })
-
-  it('falls back to the last assistant message when no stream or file output exists', async () => {
-    const workingDirectory = await createTempDir('assistant-codex-message-')
-
-    codexMocks.spawn.mockImplementation(() => {
-      const child = new MockChildProcess()
-
-      queueMicrotask(() => {
-        child.stdout.write(
-          `${JSON.stringify({
-            item: {
-              id: 'assistant-3',
-              content: [{ text: 'Message from event' }],
-              type: 'assistant_message',
-            },
-            type: 'item.completed',
-          })}\n`,
-        )
-        child.emit('close', 0, null)
-      })
-
-      return child
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_CODEX_APPROVAL_POLICY_UNSUPPORTED',
+      context: {
+        approvalPolicy: 'on-request',
+        retryable: false,
+      },
+      message: expect.stringContaining('approvalPolicy=never'),
     })
 
-    await expect(
-      executeCodexPrompt({
-        prompt: 'message fallback',
-        workingDirectory,
-      }),
-    ).resolves.toMatchObject({
-      finalMessage: 'Message from event',
-      sessionId: null,
-    })
-  })
-
-  it('falls back to non-json stdout lines when no structured assistant output exists', async () => {
-    const workingDirectory = await createTempDir('assistant-codex-stdout-')
-
-    codexMocks.spawn.mockImplementation(() => {
-      const child = new MockChildProcess()
-
-      queueMicrotask(() => {
-        child.stdout.write('plain stdout line\n')
-        child.stdout.write('trailing stdout line')
-        child.emit('close', 0, null)
-      })
-
-      return child
-    })
-
-    await expect(
-      executeCodexPrompt({
-        prompt: 'stdout fallback',
-        workingDirectory,
-      }),
-    ).resolves.toMatchObject({
-      finalMessage: 'plain stdout line\ntrailing stdout line',
-      stdout: 'plain stdout line\ntrailing stdout line',
-    })
+    expect(codexMocks.spawn).not.toHaveBeenCalled()
   })
 
   it('rejects invalid Codex homes before spawning the CLI', async () => {
@@ -460,7 +501,7 @@ describe('assistant codex runtime', () => {
     await writeFile(filePath, 'content', 'utf8')
 
     await expect(
-      executeCodexPrompt({
+      executeCodexAppServerTurn({
         codexHome: filePath,
         prompt: 'invalid home',
         workingDirectory,
@@ -483,7 +524,7 @@ describe('assistant codex runtime', () => {
     await chmod(executableFilePath, 0o755)
 
     await expect(
-      executeCodexPrompt({
+      executeCodexAppServerTurn({
         codexHome: missingPath,
         prompt: 'missing home',
         workingDirectory,
@@ -494,7 +535,7 @@ describe('assistant codex runtime', () => {
     })
 
     await expect(
-      executeCodexPrompt({
+      executeCodexAppServerTurn({
         codexHome: executableFilePath,
         prompt: 'file home',
         workingDirectory,
@@ -512,23 +553,26 @@ describe('assistant codex runtime', () => {
       const child = new MockChildProcess()
 
       queueMicrotask(() => {
-        const error = new Error('spawn codex ENOENT') as NodeJS.ErrnoException
-        error.code = 'ENOENT'
-        child.emit('error', error)
+        void (async () => {
+          await waitForRpcMethod(child, 'initialize')
+          const error = new Error('spawn codex ENOENT') as NodeJS.ErrnoException
+          error.code = 'ENOENT'
+          child.emit('error', error)
+        })()
       })
 
       return child
     })
 
     await expect(
-      executeCodexPrompt({
+      executeCodexAppServerTurn({
         prompt: 'missing binary',
         workingDirectory,
       }),
     ).rejects.toMatchObject({
       code: 'ASSISTANT_CODEX_NOT_FOUND',
       message:
-        'Codex CLI executable "codex" was not found. Install @openai/codex or pass --codexCommand.',
+        'Codex app-server executable "codex" was not found. Install @openai/codex or pass --codexCommand.',
     })
   })
 
@@ -539,24 +583,52 @@ describe('assistant codex runtime', () => {
       const child = new MockChildProcess()
 
       queueMicrotask(() => {
-        child.stdout.write(
-          `${JSON.stringify({ type: 'thread.started', thread_id: 'thread-77' })}\n`,
-        )
-        child.stdout.write(
-          `${JSON.stringify({
-            errorMessage: 'Connection closed before response.completed',
-            type: 'turn.failed',
-          })}\n`,
-        )
-        child.stderr.write('connection closed before response.completed\n')
-        child.emit('close', 1, null)
+        void (async () => {
+          await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: 1, result: {} }))
+          await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(
+            jsonLine({
+              id: 2,
+              result: {
+                thread: {
+                  id: 'thread-77',
+                },
+              },
+            }),
+          )
+          await waitForRpcMessages(child, 4)
+          child.stdout.write(
+            jsonLine({
+              id: 3,
+              result: {
+                turn: {
+                  id: 'turn-77',
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              method: 'turn/started',
+              params: {
+                turn: {
+                  id: 'turn-77',
+                },
+              },
+            }),
+          )
+          child.stderr.write('connection closed before response.completed\n')
+          child.emit('exit', 1, null)
+          child.emit('close', 1, null)
+        })()
       })
 
       return child
     })
 
     await expect(
-      executeCodexPrompt({
+      executeCodexAppServerTurn({
         prompt: 'retry me',
         workingDirectory,
       }),
@@ -568,116 +640,29 @@ describe('assistant codex runtime', () => {
         recoverableConnectionLoss: true,
         retryable: true,
       },
-      message: expect.stringContaining('Murph preserved the provider session'),
+      message: expect.stringContaining('Murph preserved the provider thread'),
     })
   })
 
-  it('classifies stale resume failures from child close instead of surfacing stdin EPIPE', async () => {
+  it('classifies stale resume failures from thread/resume RPC errors', async () => {
     const workingDirectory = await createTempDir('assistant-codex-stale-resume-')
 
     codexMocks.spawn.mockImplementation(() => {
       const child = new MockChildProcess()
 
       queueMicrotask(() => {
-        const error = new Error('write EPIPE') as NodeJS.ErrnoException
-        error.code = 'EPIPE'
-        child.stdin.emit('error', error)
-        child.stderr.write(
-          'thread/resume failed: no rollout found for thread id stale-thread\n',
-        )
-        child.emit('close', 1, null)
-      })
-
-      return child
-    })
-
-    await expect(
-      executeCodexPrompt({
-        prompt: 'resume please',
-        resumeSessionId: 'stale-thread',
-        workingDirectory,
-      }),
-    ).rejects.toMatchObject({
-      code: 'ASSISTANT_CODEX_RESUME_STALE',
-      context: {
-        providerSessionId: 'stale-thread',
-        retryable: true,
-        staleResume: true,
-      },
-      message: expect.stringContaining('no rollout found for thread id stale-thread'),
-    })
-  })
-
-  it('formats non-connection Codex failures from the trailing stderr context', async () => {
-    const workingDirectory = await createTempDir('assistant-codex-failure-')
-
-    codexMocks.spawn.mockImplementation(() => {
-      const child = new MockChildProcess()
-
-      queueMicrotask(() => {
-        child.stderr.write('\nfirst line\nsecond line\nthird line\nfourth line\n')
-        child.emit('close', 2, null)
-      })
-
-      return child
-    })
-
-    await expect(
-      executeCodexPrompt({
-        prompt: 'fail normally',
-        workingDirectory,
-      }),
-    ).rejects.toMatchObject({
-      code: 'ASSISTANT_CODEX_FAILED',
-      context: {
-        connectionLost: false,
-        providerSessionId: null,
-        recoverableConnectionLoss: false,
-        retryable: false,
-      },
-      message: 'Codex CLI failed. exit code 2. second line third line fourth line',
-    })
-  })
-
-  it('surfaces signal-only failures and readback errors from the output file path', async () => {
-    const signalWorkingDirectory = await createTempDir('assistant-codex-signal-failure-')
-
-    codexMocks.spawn.mockImplementationOnce(() => {
-      const child = new MockChildProcess()
-
-      queueMicrotask(() => {
-        child.emit('close', null, 'SIGTERM')
-      })
-
-      return child
-    })
-
-    await expect(
-      executeCodexPrompt({
-        prompt: 'signal fail',
-        workingDirectory: signalWorkingDirectory,
-      }),
-    ).rejects.toMatchObject({
-      code: 'ASSISTANT_CODEX_FAILED',
-      message: 'Codex CLI failed. signal SIGTERM.',
-    })
-
-    const readbackWorkingDirectory = await createTempDir('assistant-codex-readback-error-')
-
-    codexMocks.spawn.mockImplementationOnce((_command, args) => {
-      const child = new MockChildProcess()
-      const outputFile = readOutputFilePath(args)
-
-      queueMicrotask(() => {
         void (async () => {
-          await rm(outputFile, {
-            force: true,
-            recursive: true,
-          })
-          await mkdir(outputFile, {
-            recursive: true,
-          })
-          child.emit('close', 0, null)
+          await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: 1, result: {} }))
+          await waitForRpcMethod(child, 'thread/resume')
+          child.stdout.write(
+            jsonLine({
+              id: 2,
+              error: {
+                message: 'thread/resume failed: no rollout found for thread id stale-thread',
+              },
+            }),
+          )
         })()
       })
 
@@ -685,35 +670,76 @@ describe('assistant codex runtime', () => {
     })
 
     await expect(
-      executeCodexPrompt({
-        prompt: 'readback fail',
-        workingDirectory: readbackWorkingDirectory,
+      executeCodexAppServerTurn({
+        prompt: 'resume please',
+        resumeSessionId: 'stale-thread',
+        workingDirectory,
       }),
     ).rejects.toMatchObject({
-      code: 'EISDIR',
+      code: 'ASSISTANT_CODEX_RESUME_STALE',
+      context: {
+        retryable: true,
+        staleResume: true,
+      },
+      message: expect.stringContaining('no rollout found for thread id stale-thread'),
     })
   })
 
-  it('treats aborted runs as interrupted and kills the child with SIGINT', async () => {
+  it('treats aborted runs as interrupted, sends turn/interrupt, and kills the child with SIGINT', async () => {
     const workingDirectory = await createTempDir('assistant-codex-abort-')
     const controller = new AbortController()
     let child: MockChildProcess | null = null
 
     codexMocks.spawn.mockImplementation(() => {
       child = new MockChildProcess()
-      child.kill.mockImplementation((signal?: NodeJS.Signals) => {
-        queueMicrotask(() => {
-          child?.emit('close', null, signal ?? null)
-        })
-        return true
+
+      queueMicrotask(() => {
+        void (async () => {
+          const spawnedChild = requireMockChildProcess(child)
+          await waitForRpcMethod(spawnedChild, 'initialize')
+          spawnedChild.stdout.write(jsonLine({ id: 1, result: {} }))
+          await waitForRpcMethod(spawnedChild, 'thread/start')
+          spawnedChild.stdout.write(
+            jsonLine({
+              id: 2,
+              result: {
+                thread: {
+                  id: 'thread-abort',
+                },
+              },
+            }),
+          )
+          await waitForRpcMessages(spawnedChild, 4)
+          spawnedChild.stdout.write(
+            jsonLine({
+              id: 3,
+              result: {
+                turn: {
+                  id: 'turn-abort',
+                },
+              },
+            }),
+          )
+          spawnedChild.stdout.write(
+            jsonLine({
+              method: 'turn/started',
+              params: {
+                turn: {
+                  id: 'turn-abort',
+                },
+              },
+            }),
+          )
+          await waitForRpcMessages(spawnedChild, 4)
+          controller.abort()
+        })()
       })
+
       return child
     })
 
-    controller.abort()
-
     await expect(
-      executeCodexPrompt({
+      executeCodexAppServerTurn({
         abortSignal: controller.signal,
         prompt: 'abort me',
         workingDirectory,
@@ -722,12 +748,21 @@ describe('assistant codex runtime', () => {
       code: 'ASSISTANT_CODEX_INTERRUPTED',
       context: {
         interrupted: true,
-        providerSessionId: null,
+        providerSessionId: 'thread-abort',
         retryable: false,
       },
     })
 
     const spawnedChild = requireMockChildProcess(child)
+    const messages = await waitForRpcMessages(spawnedChild, 5)
+    expect(messages[4]).toEqual({
+      id: 4,
+      method: 'turn/interrupt',
+      params: {
+        threadId: 'thread-abort',
+        turnId: 'turn-abort',
+      },
+    })
     expect(spawnedChild.kill).toHaveBeenCalledWith('SIGINT')
   })
 })
@@ -1768,14 +1803,44 @@ describe('assistant codex event shaping', () => {
 })
 
 class MockChildProcess extends EventEmitter {
+  exitCode: number | null = null
+  killed = false
+  pid = 1234
+  signalCode: NodeJS.Signals | null = null
   readonly stderr = new PassThrough()
   readonly stdin = new MockStdin()
   readonly stdout = new PassThrough()
-  readonly kill = vi.fn((_signal?: NodeJS.Signals) => true)
+  readonly kill = vi.fn((signal?: NodeJS.Signals) => {
+    this.killed = true
+    queueMicrotask(() => {
+      if (this.exitCode === null && this.signalCode === null) {
+        this.emit('exit', null, signal ?? null)
+        this.emit('close', null, signal ?? null)
+      }
+    })
+    return true
+  })
+
+  override emit(eventName: string | symbol, ...args: unknown[]): boolean {
+    if (eventName === 'exit' || eventName === 'close') {
+      this.exitCode =
+        typeof args[0] === 'number' || args[0] === null ? (args[0] as number | null) : null
+      this.signalCode =
+        typeof args[1] === 'string' || args[1] === null
+          ? (args[1] as NodeJS.Signals | null)
+          : null
+    }
+    return super.emit(eventName, ...args)
+  }
 }
 
 class MockStdin extends EventEmitter {
   readonly writes: string[] = []
+
+  write(chunk: string | Uint8Array): boolean {
+    this.writes.push(typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8'))
+    return true
+  }
 
   end(chunk?: string | Uint8Array): void {
     if (typeof chunk === 'string') {
@@ -1793,32 +1858,74 @@ async function createTempDir(prefix: string): Promise<string> {
   return rootPath
 }
 
-function readOutputFilePath(args: readonly unknown[]): string {
-  const outputFlagIndex = args.findIndex((value) => value === '--output-last-message')
-  if (outputFlagIndex < 0) {
-    throw new Error('Expected --output-last-message in Codex args.')
-  }
-
-  const outputPath = args[outputFlagIndex + 1]
-  if (typeof outputPath !== 'string') {
-    throw new TypeError('Expected a string output path after --output-last-message.')
-  }
-
-  return outputPath
+function jsonLine(payload: Record<string, unknown>): string {
+  return `${JSON.stringify(payload)}\n`
 }
 
-function readImagePath(args: readonly unknown[]): string {
-  const imageFlagIndex = args.findIndex((value) => value === '--image')
-  if (imageFlagIndex < 0) {
-    throw new Error('Expected --image in Codex args.')
+function asRecord(value: unknown): Record<string, unknown> {
+  if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+    return value as Record<string, unknown>
+  }
+  throw new TypeError('Expected a record value.')
+}
+
+function readWrittenRpcMessages(
+  child: MockChildProcess,
+): Record<string, unknown>[] {
+  return child.stdin.writes
+    .map((write) => write.trim())
+    .filter((write) => write.length > 0)
+    .map((write) => asRecord(JSON.parse(write)))
+}
+
+async function waitForRpcMessages(
+  child: MockChildProcess,
+  count: number,
+): Promise<Record<string, unknown>[]> {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    const messages = readWrittenRpcMessages(child)
+    if (messages.length >= count) {
+      return messages
+    }
+    await new Promise((resolve) => setTimeout(resolve, 0))
   }
 
-  const imagePath = args[imageFlagIndex + 1]
-  if (typeof imagePath !== 'string') {
-    throw new TypeError('Expected a string image path after --image.')
+  throw new Error(`Expected at least ${count} RPC messages from Murph.`)
+}
+
+async function waitForRpcMethod(
+  child: MockChildProcess,
+  method: string,
+): Promise<Record<string, unknown>> {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    const message = readWrittenRpcMessages(child).find(
+      (candidate) => candidate.method === method,
+    )
+    if (message) {
+      return message
+    }
+    await new Promise((resolve) => setTimeout(resolve, 0))
   }
 
-  return imagePath
+  throw new Error(`Expected RPC method ${method} from Murph.`)
+}
+
+function readTurnStartInputItems(
+  message: Record<string, unknown>,
+): Record<string, unknown>[] {
+  const params = asRecord(message.params)
+  const input = params.input
+  if (!Array.isArray(input)) {
+    throw new TypeError('Expected turn/start params.input to be an array.')
+  }
+  return input.map((item) => asRecord(item))
+}
+
+function readLocalImagePath(item: Record<string, unknown>): string {
+  if (typeof item.path !== 'string') {
+    throw new TypeError('Expected a localImage path string.')
+  }
+  return item.path
 }
 
 function requireMockChildProcess(

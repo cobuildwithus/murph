@@ -32,14 +32,14 @@ describe('assistant failover helpers', () => {
       providerOptions: {
         provider: 'codex-cli',
         continuityFingerprint: 'codex-fingerprint',
-        executionDriver: 'codex-cli',
+        executionDriver: 'codex-app-server',
         model: 'gpt-oss:20b',
         reasoningEffort: 'high',
         sandbox: 'workspace-write',
         approvalPolicy: 'never',
         profile: 'default',
         oss: false,
-        resumeKind: 'codex-session',
+        resumeKind: 'codex-thread',
       },
       backups: [
         {
@@ -96,14 +96,14 @@ describe('assistant failover helpers', () => {
       providerOptions: {
         provider: 'codex-cli',
         continuityFingerprint: 'codex-fingerprint',
-        executionDriver: 'codex-cli',
+        executionDriver: 'codex-app-server',
         model: 'gpt-oss:20b',
         reasoningEffort: 'high',
         sandbox: 'workspace-write',
         approvalPolicy: 'never',
         profile: 'default',
         oss: false,
-        resumeKind: 'codex-session',
+        resumeKind: 'codex-thread',
       },
     })
 
@@ -130,14 +130,14 @@ describe('assistant failover helpers', () => {
       providerOptions: {
         provider: 'codex-cli',
         continuityFingerprint: 'codex-fingerprint',
-        executionDriver: 'codex-cli',
+        executionDriver: 'codex-app-server',
         model: 'gpt-oss:20b',
         reasoningEffort: 'high',
         sandbox: 'workspace-write',
         approvalPolicy: 'never',
         profile: 'default',
         oss: false,
-        resumeKind: 'codex-session',
+        resumeKind: 'codex-thread',
       },
     })
 
@@ -210,14 +210,14 @@ describe('assistant failover helpers', () => {
       providerOptions: {
         provider: 'codex-cli',
         continuityFingerprint: 'codex-fingerprint',
-        executionDriver: 'codex-cli',
+        executionDriver: 'codex-app-server',
         model: 'gpt-oss:20b',
         reasoningEffort: 'high',
         sandbox: 'workspace-write',
         approvalPolicy: 'never',
         profile: 'default',
         oss: false,
-        resumeKind: 'codex-session',
+        resumeKind: 'codex-thread',
       },
     })
 

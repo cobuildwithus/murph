@@ -176,7 +176,7 @@ const assistantProviderOptionFields = {
     .enum(assistantApprovalPolicyValues)
     .optional()
     .describe(
-      'Codex approval policy for local assistant chat. Defaults to never for the privileged local Codex adapter.',
+      'Codex approval policy for local assistant chat. Murph noninteractive assistant turns currently support only never; other modes fail closed.',
     ),
   profile: optionalNonEmptyStringOption('Optional Codex config profile name.'),
   oss: z

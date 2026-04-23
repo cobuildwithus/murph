@@ -31,7 +31,7 @@ vi.mock('ai', () => ({
 }))
 
 vi.mock('@murphai/assistant-engine/assistant-codex', () => ({
-  executeCodexPrompt: providerMocks.executeCodexPrompt,
+  executeCodexAppServerTurn: providerMocks.executeCodexPrompt,
 }))
 
 vi.mock('@murphai/assistant-engine/model-harness', async () => {
@@ -169,8 +169,8 @@ test('serializeAssistantProviderSessionOptions preserves an explicit Codex home 
   })
 
   const { continuityFingerprint, ...rest } = actual
-  assert.equal(actual.executionDriver, 'codex-cli')
-  assert.equal(actual.resumeKind, 'codex-session')
+  assert.equal(actual.executionDriver, 'codex-app-server')
+  assert.equal(actual.resumeKind, 'codex-thread')
   assert.equal(typeof continuityFingerprint, 'string')
   if (typeof continuityFingerprint !== 'string') {
     throw new Error('Expected continuity fingerprint for Codex provider options.')
@@ -185,8 +185,8 @@ test('serializeAssistantProviderSessionOptions preserves an explicit Codex home 
     oss: false,
     provider: 'codex-cli',
     codexHome: '/tmp/codex-1',
-    executionDriver: 'codex-cli',
-    resumeKind: 'codex-session',
+    executionDriver: 'codex-app-server',
+    resumeKind: 'codex-thread',
   })
 })
 

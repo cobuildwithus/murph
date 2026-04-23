@@ -1,5 +1,5 @@
 /**
- * Owns Codex CLI event normalization and progress/trace extraction so
+ * Owns Codex app-server event normalization and progress/trace extraction so
  * assistant-codex.ts can stay focused on process execution and config loading.
  */
 
@@ -99,7 +99,11 @@ export function normalizeCodexEvent(event: unknown): CodexNormalizedEvent {
   }
 
   const eventType = normalizeIdentifier(
-    typeof record.type === 'string' ? record.type : null,
+    typeof record.type === 'string'
+      ? record.type
+      : typeof record.method === 'string'
+        ? record.method
+        : null,
   )
 
   const errorText = extractCodexErrorMessage(event)
@@ -719,6 +723,12 @@ function extractCodexEventItem(
     return nestedItem
   }
 
+  const params = asRecord(event.params)
+  const paramsItem = asRecord(params?.item)
+  if (paramsItem) {
+    return paramsItem
+  }
+
   return null
 }
 
@@ -726,32 +736,42 @@ function extractCodexEventItemType(
   event: Record<string, unknown>,
   item: Record<string, unknown> | null,
 ): string | null {
-  return normalizeIdentifier(
+  const params = asRecord(event.params)
+  const candidate =
     typeof item?.type === 'string'
       ? item.type
       : typeof event.item_type === 'string'
         ? event.item_type
         : typeof event.itemType === 'string'
           ? event.itemType
-          : null,
-  )
+          : typeof params?.item_type === 'string'
+            ? params.item_type
+            : typeof params?.itemType === 'string'
+              ? params.itemType
+              : null
+
+  return normalizeIdentifier(candidate)
 }
 
 function extractCodexItemId(
   event: Record<string, unknown>,
   item: Record<string, unknown> | null,
 ): string | null {
-  return (
-    normalizeNullableString(
-      typeof item?.id === 'string'
-        ? item.id
-        : typeof event.item_id === 'string'
-          ? event.item_id
-          : typeof event.itemId === 'string'
-            ? event.itemId
-            : null,
-    ) ?? null
-  )
+  const params = asRecord(event.params)
+  const candidate =
+    typeof item?.id === 'string'
+      ? item.id
+      : typeof event.item_id === 'string'
+        ? event.item_id
+        : typeof event.itemId === 'string'
+          ? event.itemId
+          : typeof params?.item_id === 'string'
+            ? params.item_id
+            : typeof params?.itemId === 'string'
+              ? params.itemId
+              : null
+
+  return normalizeNullableString(candidate) ?? null
 }
 
 function extractCodexEventPlanText(
@@ -877,18 +897,24 @@ function collectTextParts(value: unknown): string | null {
 }
 
 function extractEventTextDelta(record: Record<string, unknown>): string | null {
+  const params = asRecord(record.params)
   const directDelta =
     (typeof record.delta === 'string' ? record.delta : null) ??
     (typeof record.text_delta === 'string' ? record.text_delta : null) ??
     (typeof record.textDelta === 'string' ? record.textDelta : null) ??
     (typeof record.text === 'string' ? record.text : null) ??
-    (typeof record.value === 'string' ? record.value : null)
+    (typeof record.value === 'string' ? record.value : null) ??
+    (typeof params?.delta === 'string' ? params.delta : null) ??
+    (typeof params?.text_delta === 'string' ? params.text_delta : null) ??
+    (typeof params?.textDelta === 'string' ? params.textDelta : null) ??
+    (typeof params?.text === 'string' ? params.text : null) ??
+    (typeof params?.value === 'string' ? params.value : null)
 
   if (directDelta) {
     return normalizeStreamingText(directDelta)
   }
 
-  const delta = asRecord(record.delta)
+  const delta = asRecord(record.delta) ?? asRecord(params?.delta)
   if (!delta) {
     return null
   }
@@ -1157,7 +1183,13 @@ function redactCodexStatusText(value: string): string {
 
 export function extractCodexSessionId(event: unknown): string | null {
   const record = asRecord(event)
-  const eventType = typeof record?.type === 'string' ? record.type : null
+  const eventType = normalizeIdentifier(
+    typeof record?.type === 'string'
+      ? record.type
+      : typeof record?.method === 'string'
+        ? record.method
+        : null,
+  )
 
   if (eventType && eventType.startsWith('thread.')) {
     return (
@@ -1179,7 +1211,13 @@ export function extractCodexErrorMessage(event: unknown): string | null {
     return null
   }
 
-  const eventType = typeof record.type === 'string' ? record.type : null
+  const eventType = normalizeIdentifier(
+    typeof record.type === 'string'
+      ? record.type
+      : typeof record.method === 'string'
+        ? record.method
+        : null,
+  )
   if (
     eventType !== 'error' &&
     eventType !== 'turn.failed' &&

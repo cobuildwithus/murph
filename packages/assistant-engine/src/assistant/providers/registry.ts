@@ -263,6 +263,7 @@ function createEmptyAssistantProviderAttemptMetadata(): AssistantProviderAttempt
   return {
     activityLabels: [],
     executedToolCount: 0,
+    providerActionCount: 0,
     rawToolEvents: [],
   }
 }

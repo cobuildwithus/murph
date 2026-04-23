@@ -86,9 +86,9 @@ const TEST_SESSION = {
     approvalPolicy: null,
     profile: null,
     oss: false,
-    executionDriver: 'codex-cli',
+    executionDriver: 'codex-app-server',
     provider: 'codex-cli',
-    resumeKind: 'codex-session',
+    resumeKind: 'codex-thread',
   },
   alias: 'chat:test',
   binding: {

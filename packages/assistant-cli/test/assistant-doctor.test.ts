@@ -116,8 +116,8 @@ const BASE_SESSION: AssistantSession = {
     approvalPolicy: null,
     profile: null,
     oss: false,
-    executionDriver: 'codex-cli',
-    resumeKind: 'codex-session',
+    executionDriver: 'codex-app-server',
+    resumeKind: 'codex-thread',
   },
   alias: 'chat:doctor',
   binding: {

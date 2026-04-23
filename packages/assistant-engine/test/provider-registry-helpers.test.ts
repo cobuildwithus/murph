@@ -97,7 +97,7 @@ describe('assistant provider registry helpers', () => {
           oss: false,
         }),
       ),
-    ).toBe('Codex CLI')
+    ).toBe('Codex app-server')
 
     expect(
       buildAssistantProviderLabel(
@@ -106,7 +106,7 @@ describe('assistant provider registry helpers', () => {
           oss: true,
         }),
       ),
-    ).toBe('Codex OSS')
+    ).toBe('Codex OSS app-server')
 
     expect(
       buildAssistantProviderLabel(
@@ -670,6 +670,7 @@ describe('assistant provider registry helpers', () => {
             activityLabels: ['  Existing Label  '],
             executedToolCount: 1,
             rawToolEvents: [{ type: 'raw-tool-event' }],
+            providerActionCount: 0,
           },
           ok: true,
           result: executionResult,
@@ -697,6 +698,7 @@ describe('assistant provider registry helpers', () => {
       activityLabels: ['Existing Label', 'Search Web'],
       executedToolCount: 1,
       rawToolEvents: [{ type: 'raw-tool-event' }],
+      providerActionCount: 0,
     })
     expect(attempt.result).toEqual(executionResult)
   })
@@ -734,6 +736,7 @@ describe('assistant provider registry helpers', () => {
         activityLabels: ['Refresh Session'],
         executedToolCount: 0,
         rawToolEvents: [],
+        providerActionCount: 0,
       },
       ok: false,
     })

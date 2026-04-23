@@ -152,7 +152,7 @@ function createAssistantAskResult(input: {
       provider: 'codex-cli',
       providerOptions: {
         continuityFingerprint: 'codex-fingerprint',
-        executionDriver: 'codex-cli',
+        executionDriver: 'codex-app-server',
         model: 'gpt-5.4',
         reasoningEffort: 'medium',
         sandbox: 'workspace-write',
@@ -160,7 +160,7 @@ function createAssistantAskResult(input: {
         profile: null,
         oss: false,
         provider: 'codex-cli',
-        resumeKind: 'codex-session',
+        resumeKind: 'codex-thread',
       },
     },
     delivery: input.delivery

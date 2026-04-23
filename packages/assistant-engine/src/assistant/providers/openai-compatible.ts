@@ -293,6 +293,7 @@ export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
         metadata: {
           activityLabels: [],
           executedToolCount,
+          providerActionCount: 0,
           rawToolEvents: toolEvents,
         },
         ok: true,
@@ -321,6 +322,7 @@ export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
         metadata: {
           activityLabels: [],
           executedToolCount,
+          providerActionCount: 0,
           rawToolEvents: toolEvents,
         },
         ok: false,

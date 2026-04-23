@@ -276,7 +276,7 @@
                           ]
                         },
                         "approvalPolicy": {
-                          "description": "Codex approval policy for local assistant chat. Defaults to never for the privileged local Codex adapter.",
+                          "description": "Codex approval policy for local assistant chat. Murph noninteractive assistant turns currently support only never; other modes fail closed.",
                           "type": "string",
                           "enum": [
                             "untrusted",
@@ -403,7 +403,7 @@
                           ]
                         },
                         "approvalPolicy": {
-                          "description": "Codex approval policy for local assistant chat. Defaults to never for the privileged local Codex adapter.",
+                          "description": "Codex approval policy for local assistant chat. Murph noninteractive assistant turns currently support only never; other modes fail closed.",
                           "type": "string",
                           "enum": [
                             "untrusted",
@@ -996,7 +996,7 @@
                   ]
                 },
                 "approvalPolicy": {
-                  "description": "Codex approval policy for local assistant chat. Defaults to never for the privileged local Codex adapter.",
+                  "description": "Codex approval policy for local assistant chat. Murph noninteractive assistant turns currently support only never; other modes fail closed.",
                   "type": "string",
                   "enum": [
                     "untrusted",
