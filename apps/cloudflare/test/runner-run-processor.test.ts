@@ -206,7 +206,7 @@ function createRunDrainRequest(runId: string): HostedRuntimeDrainRequest {
 }
 
 describe("runner wake processor delivery summaries", () => {
-  it("includes the first non-sent delivery message in the finalize summary", () => {
+  it("keeps only structured first non-sent delivery details in the finalize summary", () => {
     const summary = summarizeHostedAssistantDeliveryOutcomes([
       {
         deliveryChannel: "linq",
@@ -231,8 +231,6 @@ describe("runner wake processor delivery summaries", () => {
       assistantDeliveryNonSentCount: 1,
       assistantDeliveryFirstNonSentChannel: "linq",
       assistantDeliveryFirstNonSentCode: "LINQ_API_REQUEST_FAILED",
-      assistantDeliveryFirstNonSentMessage:
-        "Linq request POST /chats/stale/messages failed with HTTP 404. Chat not found",
       assistantDeliveryFirstNonSentStatus: "failed",
     });
   });
@@ -780,11 +778,57 @@ describe("recordHostedRunPhaseLogInWebBestEffort", () => {
       body: expect.objectContaining({
         message: "Hosted run drain failed after invoking the runtime.",
         redacted: expect.objectContaining({
-          eventId: "wake-999",
+          correlationId: expect.stringMatching(/^evtcorr_[a-f0-9]{32}$/u),
           errorCode: expect.any(String),
         }),
       }),
     }));
+    expect(recordLog.mock.calls[0]?.[0]?.body.redacted).not.toHaveProperty("eventId");
+  });
+
+  it("keeps correlation ids stable for the same wake id across callback-signing changes", async () => {
+    const recordLog = vi.fn().mockResolvedValue({
+      log: null,
+      logged: true,
+    });
+
+    await recordHostedRunPhaseLogInWebBestEffort({
+      baseUrl: "https://hosted.example",
+      callbackSigning,
+      message: "Hosted run drain resumed.",
+      phase: "wake.running",
+      recordLog,
+      run: {
+        attempt: 1,
+        runId: "run-999",
+        startedAt: new Date(Date.now() - 250).toISOString(),
+      },
+      runToken: "run-token-999",
+      userId: "user-999",
+      wakeEventId: "wake-stable-1",
+    });
+
+    await recordHostedRunPhaseLogInWebBestEffort({
+      baseUrl: "https://hosted.example",
+      callbackSigning: {
+        keyId: "rotated-key",
+        privateKeyJwkJson: "{\"kty\":\"EC\",\"x\":\"different\"}",
+      },
+      message: "Hosted run drain resumed.",
+      phase: "wake.running",
+      recordLog,
+      run: {
+        attempt: 1,
+        runId: "run-999",
+        startedAt: new Date(Date.now() - 250).toISOString(),
+      },
+      runToken: "run-token-999",
+      userId: "user-999",
+      wakeEventId: "wake-stable-1",
+    });
+
+    expect(recordLog.mock.calls[0]?.[0]?.body.redacted?.correlationId)
+      .toBe(recordLog.mock.calls[1]?.[0]?.body.redacted?.correlationId);
   });
 });
 
@@ -794,7 +838,7 @@ describe("recordHostedRunnerResultLogsInWebBestEffort", () => {
     privateKeyJwkJson: "{\"kty\":\"EC\"}",
   };
 
-  it("forwards runtime-owned redacted log entries with their originating event ids", async () => {
+  it("forwards runtime-owned redacted log entries with opaque correlation ids instead of raw event ids", async () => {
     const recordLog = vi.fn().mockResolvedValue({
       log: null,
       logged: true,
@@ -842,8 +886,8 @@ describe("recordHostedRunnerResultLogsInWebBestEffort", () => {
         component: "runtime",
         message: "Hosted assistant notification failed and was skipped so the hosted run can continue.",
         redacted: expect.objectContaining({
+          correlationId: expect.stringMatching(/^evtcorr_[a-f0-9]{32}$/u),
           errorCode: "runtime_error",
-          eventId: "wake-notification-1",
           notificationRouteChannel: "linq",
         }),
       }),
@@ -853,11 +897,53 @@ describe("recordHostedRunnerResultLogsInWebBestEffort", () => {
         component: "runtime",
         message: "Hosted assistant notification finished.",
         redacted: expect.objectContaining({
-          eventId: "wake-notification-2",
+          correlationId: expect.stringMatching(/^evtcorr_[a-f0-9]{32}$/u),
           notificationRouteChannel: "telegram",
         }),
       }),
     }));
+    expect(recordLog.mock.calls[0]?.[0]?.body.redacted).not.toHaveProperty("eventId");
+    expect(recordLog.mock.calls[1]?.[0]?.body.redacted).not.toHaveProperty("eventId");
+    expect(recordLog.mock.calls[0]?.[0]?.body.redacted?.correlationId)
+      .not.toBe(recordLog.mock.calls[1]?.[0]?.body.redacted?.correlationId);
+  });
+
+  it("strips any runtime-supplied eventId field from outgoing redacted payloads", async () => {
+    const recordLog = vi.fn().mockResolvedValue({
+      log: null,
+      logged: true,
+    });
+
+    await recordHostedRunnerResultLogsInWebBestEffort({
+      baseUrl: "https://hosted.example",
+      callbackSigning,
+      recordLog,
+      redactedLogEntries: [{
+        component: "runtime",
+        eventId: "wake-notification-1",
+        level: "warn",
+        message: "Hosted assistant notification failed and was skipped so the hosted run can continue.",
+        phase: "wake.running",
+        redacted: {
+          eventId: "raw-runtime-event-id-should-not-leave-cloudflare",
+          notificationRouteChannel: "linq",
+        },
+      }],
+      run: {
+        attempt: 1,
+        runId: "run-654",
+        startedAt: new Date(Date.now() - 250).toISOString(),
+      },
+      runToken: "run-token-654",
+      userId: "user-654",
+      wakeEventId: "wake-batch",
+    });
+
+    expect(recordLog.mock.calls[0]?.[0]?.body.redacted).toEqual(expect.objectContaining({
+      correlationId: expect.stringMatching(/^evtcorr_[a-f0-9]{32}$/u),
+      notificationRouteChannel: "linq",
+    }));
+    expect(recordLog.mock.calls[0]?.[0]?.body.redacted).not.toHaveProperty("eventId");
   });
 });
 
