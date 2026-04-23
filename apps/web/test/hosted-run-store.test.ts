@@ -842,6 +842,106 @@ describe("commitHostedRunTx", () => {
     });
   });
 
+  it("sanitizes redacted summaries before commit persistence", async () => {
+    const initialCursor = buildCursorRow();
+    const committedCursor = buildCursorRow({
+      committedSeq: 9n,
+      version: 4n,
+    });
+    const runToken = "run-token.summary-sanitized";
+    const run = buildRunRow({
+      eventSeqs: [],
+      runToken,
+      triggerKind: "runtime_timer",
+      ingressEventIds: [],
+    });
+    const hostedExecutionCursorUpdateMany = vi.fn(async () => ({ count: 1 }));
+    const hostedRunUpdate = vi.fn(async ({ data }: {
+      data: {
+        committedAt: Date;
+        finalSnapshotRef: unknown;
+        finalizedAt: Date;
+        nextRuntimeWakeAt: Date | null;
+        nextRuntimeWakeReason: string | null;
+        outputCommittedSeq: bigint;
+        outputCursorVersion: bigint;
+        preparedAt: Date;
+        preparedSnapshotRef: unknown;
+        redactedSummaryJson?: unknown;
+        status: "finalized";
+      };
+      where: { id: string };
+    }) => ({
+      ...run,
+      committedAt: data.committedAt,
+      finalSnapshotRef: null,
+      finalizedAt: data.finalizedAt,
+      nextRuntimeWakeAt: data.nextRuntimeWakeAt,
+      nextRuntimeWakeReason: data.nextRuntimeWakeReason,
+      outputCommittedSeq: data.outputCommittedSeq,
+      outputCursorVersion: data.outputCursorVersion,
+      preparedAt: data.preparedAt,
+      preparedSnapshotRef: null,
+      redactedSummaryJson: data.redactedSummaryJson ?? null,
+      status: data.status,
+    }));
+    const tx = asHostedRunMutationTx({
+      hostedExecutionCursor: {
+        updateMany: hostedExecutionCursorUpdateMany,
+      },
+      hostedRun: {
+        findFirst: vi.fn(async () => run),
+        update: hostedRunUpdate,
+      },
+      hostedIngressEvent: {
+        update: vi.fn(),
+        updateMany: vi.fn(),
+      },
+    });
+
+    mocks.ensureHostedExecutionCursorRowTx
+      .mockResolvedValueOnce(initialCursor)
+      .mockResolvedValueOnce(initialCursor)
+      .mockResolvedValueOnce(committedCursor);
+
+    const result = await commitHostedRunTx({
+      expectedCursorVersion: 3n,
+      finalizeRequired: false,
+      outputCommittedSeq: 9n,
+      redactedSummary: {
+        error: "Bearer top-secret-token person@example.com",
+        nested: {
+          phone: "+15555551234",
+        },
+        url: "https://secret.example.test/path",
+      },
+      runId: run.id,
+      runToken,
+      tx,
+      userId: "member_123",
+    });
+
+    expect(hostedRunUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        redactedSummaryJson: {
+          error: "Bearer <redacted-secret> <redacted-email>",
+          nested: {
+            phone: "<redacted-phone>",
+          },
+          url: "<redacted-url>",
+        },
+      }),
+      where: { id: run.id },
+    }));
+    expect(result.run?.redactedSummary).toEqual({
+      error: "Bearer <redacted-secret> <redacted-email>",
+      nested: {
+        phone: "<redacted-phone>",
+      },
+      url: "<redacted-url>",
+    });
+  });
+
   it("scrubs terminal ingress payload ciphertext and spilled payload rows after commit", async () => {
     const initialCursor = buildCursorRow();
     const committedCursor = buildCursorRow({
@@ -1484,6 +1584,126 @@ describe("finalizeHostedRunTx", () => {
         id: "run_123",
         status: { in: ["finalizing"] },
         userId: "member_123",
+      },
+    });
+  });
+
+  it("sanitizes redacted summaries before finalize persistence", async () => {
+    const cursor = buildCursorRow({
+      committedSeq: 11n,
+      version: 4n,
+    });
+    const finalizedCursor = buildCursorRow({
+      committedSeq: 11n,
+      version: 5n,
+    });
+    const runToken = "run-token.finalize-summary-sanitized";
+    const run = {
+      ...buildRunRow({
+        eventSeqs: [],
+        runToken,
+        status: "finalizing",
+        triggerKind: "runtime_timer",
+        ingressEventIds: [],
+      }),
+      outputCommittedSeq: 11n,
+      outputCursorVersion: 4n,
+    };
+    const hostedExecutionCursorUpdateMany = vi.fn(async () => ({ count: 1 }));
+    const hostedRunUpdate = vi.fn(async ({ data }: {
+      data: {
+        finalSnapshotRef: unknown;
+        finalizedAt: Date;
+        nextRuntimeWakeAt: Date | null;
+        nextRuntimeWakeReason: string | null;
+        outputCursorVersion: bigint;
+        redactedSummaryJson?: unknown;
+        status: "finalized";
+      };
+      where: { id: string };
+    }) => ({
+      ...run,
+      finalSnapshotRef: data.finalSnapshotRef,
+      finalizedAt: data.finalizedAt,
+      nextRuntimeWakeAt: data.nextRuntimeWakeAt,
+      nextRuntimeWakeReason: data.nextRuntimeWakeReason,
+      outputCursorVersion: data.outputCursorVersion,
+      redactedSummaryJson: data.redactedSummaryJson ?? null,
+      status: data.status,
+    }));
+    const tx = asHostedRunMutationTx({
+      hostedExecutionCursor: {
+        updateMany: hostedExecutionCursorUpdateMany,
+      },
+      hostedRun: {
+        findFirst: vi.fn(async () => run),
+        update: hostedRunUpdate,
+      },
+      hostedIngressEvent: {
+        findMany: vi.fn(),
+        update: vi.fn(),
+        updateMany: vi.fn(),
+      },
+    });
+
+    mocks.ensureHostedExecutionCursorRowTx
+      .mockResolvedValueOnce(cursor)
+      .mockResolvedValueOnce(cursor)
+      .mockResolvedValueOnce(finalizedCursor);
+
+    const result = await finalizeHostedRunTx({
+      finalSnapshotRef: {
+        hash: "hash-finalized",
+        key: "snapshot/finalized",
+        size: 128,
+        updatedAt: "2026-04-20T00:21:00.000Z",
+      },
+      redactedSummary: {
+        email: "person@example.com",
+        nested: {
+          path: "/tmp/private/output.json",
+        },
+      },
+      runId: run.id,
+      runToken,
+      tx,
+      userId: "member_123",
+    });
+
+    expect(hostedExecutionCursorUpdateMany).toHaveBeenCalledWith({
+      data: {
+        browserVaultReplicaRef: Prisma.DbNull,
+        nextRuntimeWakeAt: null,
+        nextRuntimeWakeReason: null,
+        snapshotRef: {
+          hash: "hash-finalized",
+          key: "snapshot/finalized",
+          size: 128,
+          updatedAt: "2026-04-20T00:21:00.000Z",
+        },
+        version: { increment: 1 },
+      },
+      where: {
+        committedSeq: 11n,
+        userId: "member_123",
+        version: 4n,
+      },
+    });
+    expect(hostedRunUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        redactedSummaryJson: {
+          email: "<redacted-email>",
+          nested: {
+            path: "<redacted-path>",
+          },
+        },
+      }),
+      where: { id: run.id },
+    }));
+    expect(result.run?.redactedSummary).toEqual({
+      email: "<redacted-email>",
+      nested: {
+        path: "<redacted-path>",
       },
     });
   });

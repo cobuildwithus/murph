@@ -644,6 +644,9 @@ export async function commitHostedRunTx(input: {
   const nextRuntimeWakeReason = input.nextRuntimeWakeReason === undefined
     ? cursor.nextRuntimeWakeReason
     : normalizeHostedRunWakeReason(input.nextRuntimeWakeReason);
+  const safeRedactedSummary = input.redactedSummary === undefined
+    ? undefined
+    : sanitizeHostedRunStoredJsonValue(input.redactedSummary);
   const updateResult = await input.tx.hostedExecutionCursor.updateMany({
     where: {
       committedSeq: run.inputCommittedSeq,
@@ -702,9 +705,9 @@ export async function commitHostedRunTx(input: {
       outputCursorVersion: current.version,
       preparedAt: now,
       preparedSnapshotRef: nextSnapshotRef,
-      redactedSummaryJson: input.redactedSummary === undefined
+      redactedSummaryJson: safeRedactedSummary === undefined
         ? undefined
-        : toNullablePrismaJson(input.redactedSummary ?? null),
+        : toNullablePrismaJson(safeRedactedSummary),
       status: needsFinalize ? "committed_needs_finalize" : "finalized",
       ...(needsFinalize ? {} : { finalSnapshotRef: nextSnapshotRef, finalizedAt: now }),
     },
@@ -805,6 +808,9 @@ export async function finalizeHostedRunTx(input: {
   const nextRuntimeWakeReason = input.nextRuntimeWakeReason === undefined
     ? cursor.nextRuntimeWakeReason
     : normalizeHostedRunWakeReason(input.nextRuntimeWakeReason);
+  const safeRedactedSummary = input.redactedSummary === undefined
+    ? undefined
+    : sanitizeHostedRunStoredJsonValue(input.redactedSummary);
   const updateResult = await input.tx.hostedExecutionCursor.updateMany({
     where: {
       committedSeq: run.outputCommittedSeq,
@@ -845,9 +851,9 @@ export async function finalizeHostedRunTx(input: {
       nextRuntimeWakeAt,
       nextRuntimeWakeReason,
       outputCursorVersion: current.version,
-      redactedSummaryJson: input.redactedSummary === undefined
+      redactedSummaryJson: safeRedactedSummary === undefined
         ? undefined
-        : toNullablePrismaJson(input.redactedSummary ?? null),
+        : toNullablePrismaJson(safeRedactedSummary),
       status: "finalized",
     },
   });
@@ -945,7 +951,7 @@ export async function recordHostedRunLog(input: {
 }): Promise<HostedRunLogResponse> {
   const prisma = input.prisma ?? getPrisma();
   const safeMessage = sanitizeHostedRunLogMessage(input.message, input.redacted);
-  const safeRedacted = sanitizeHostedRunLogRedacted(input.redacted);
+  const safeRedacted = sanitizeHostedRunStoredJsonValue(input.redacted);
 
   return prisma.$transaction(async (tx) => {
     const run = await tx.hostedRun.findFirst({
@@ -1772,7 +1778,9 @@ function sanitizeHostedRunLogMessage(message: string, redacted: unknown): string
   );
 }
 
-function sanitizeHostedRunLogRedacted(value: unknown): Prisma.InputJsonValue | Prisma.NullableJsonNullValueInput | null {
+function sanitizeHostedRunStoredJsonValue(
+  value: unknown,
+): Prisma.InputJsonValue | Prisma.NullableJsonNullValueInput | null {
   if (value === undefined || value === null) {
     return null;
   }
@@ -1783,12 +1791,12 @@ function sanitizeHostedRunLogRedacted(value: unknown): Prisma.InputJsonValue | P
     return value;
   }
   if (Array.isArray(value)) {
-    return toPrismaJson(value.map((entry) => sanitizeHostedRunLogRedacted(entry)));
+    return toPrismaJson(value.map((entry) => sanitizeHostedRunStoredJsonValue(entry)));
   }
   if (typeof value === "object") {
     return toPrismaJson(
       Object.fromEntries(
-        Object.entries(value).map(([key, entry]) => [key, sanitizeHostedRunLogRedacted(entry)]),
+        Object.entries(value).map(([key, entry]) => [key, sanitizeHostedRunStoredJsonValue(entry)]),
       ),
     );
   }
