@@ -53,6 +53,8 @@ import {
 import {
   commonDateRangeOptionDescriptions,
   commonListLimitOptionSchema,
+  createCommonListCommand,
+  registerFactoryCommand,
 } from './command-factory-primitives.js'
 import { normalizeOccurredAtOption } from './occurred-at-option.js'
 
@@ -182,32 +184,32 @@ export function registerWorkoutCommands(
     },
   })
 
-  workout.command('list', {
-    description: 'List workout sessions with optional date bounds.',
-    args: z.object({}),
-    options: withBaseOptions({
-      from: z
-        .string()
-        .regex(/^\d{4}-\d{2}-\d{2}$/u)
-        .optional()
-        .describe(commonDateRangeOptionDescriptions.from),
-      to: z
-        .string()
-        .regex(/^\d{4}-\d{2}-\d{2}$/u)
-        .optional()
-        .describe(commonDateRangeOptionDescriptions.to),
-      limit: commonListLimitOptionSchema,
+  registerFactoryCommand(
+    workout,
+    createCommonListCommand({
+      description: 'List workout sessions with optional date bounds.',
+      options: {
+        from: {
+          description: commonDateRangeOptionDescriptions.from,
+          name: 'from',
+        },
+        to: {
+          description: commonDateRangeOptionDescriptions.to,
+          name: 'to',
+        },
+        limit: commonListLimitOptionSchema,
+      },
+      output: listResultSchema,
+      run(input) {
+        return listWorkoutRecords({
+          vault: input.vault,
+          from: input.from,
+          to: input.to,
+          limit: input.limit,
+        })
+      },
     }),
-    output: listResultSchema,
-    async run({ options }) {
-      return listWorkoutRecords({
-        vault: options.vault,
-        from: typeof options.from === 'string' ? options.from : undefined,
-        to: typeof options.to === 'string' ? options.to : undefined,
-        limit: typeof options.limit === 'number' ? options.limit : undefined,
-      })
-    },
-  })
+  )
 
   workout.command('manifest', {
     description: 'Show the immutable raw import manifest for an imported workout event.',

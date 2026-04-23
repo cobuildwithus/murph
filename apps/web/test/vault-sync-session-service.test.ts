@@ -15,6 +15,7 @@ import {
   projectHostedVaultSyncSessionView,
 } from "@/src/lib/vault-sync/shared";
 import {
+  listHostedVaultSyncSessions,
   markHostedVaultSyncSessionCommittedFromRunSummary,
 } from "@/src/lib/vault-sync/session-service";
 
@@ -96,6 +97,86 @@ describe("vault sync shared projections", () => {
 });
 
 describe("vault sync commit projection", () => {
+  it("reads plural vault-sync summaries when projecting queued session run status", async () => {
+    const prisma = {
+      hostedVaultSyncSession: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            createdAt: new Date("2026-04-21T00:00:00.000Z"),
+            expiresAt: new Date("2026-04-21T01:00:00.000Z"),
+            id: "vsi_first",
+            localManifestHash: null,
+            queuedIngressEventId: "evt_first",
+            revokedAt: null,
+            sourceVaultId: "vault_local",
+            sourceVaultTitle: "Local Vault",
+            status: "queued",
+          },
+          {
+            createdAt: new Date("2026-04-20T00:00:00.000Z"),
+            expiresAt: new Date("2026-04-20T01:00:00.000Z"),
+            id: "vsi_second",
+            localManifestHash: null,
+            queuedIngressEventId: "evt_second",
+            revokedAt: null,
+            sourceVaultId: "vault_local",
+            sourceVaultTitle: "Local Vault",
+            status: "queued",
+          },
+        ]),
+      },
+      hostedIngressEvent: {
+        findUnique: vi.fn()
+          .mockResolvedValueOnce({
+            run: {
+              redactedSummaryJson: {
+                details: {
+                  vaultSyncImports: [
+                    {
+                      conflictCount: 0,
+                      sessionId: "vsi_first",
+                    },
+                  ],
+                },
+              },
+              status: "completed",
+            },
+            state: "completed",
+          })
+          .mockResolvedValueOnce({
+            run: {
+              redactedSummaryJson: {
+                details: {
+                  vaultSyncImports: [
+                    {
+                      conflictCount: 3,
+                      sessionId: "vsi_second",
+                    },
+                  ],
+                },
+              },
+              status: "completed",
+            },
+            state: "completed",
+          }),
+      },
+    } as never;
+
+    await expect(listHostedVaultSyncSessions({
+      memberId: "member_123",
+      prisma,
+    })).resolves.toEqual([
+      expect.objectContaining({
+        id: "vsi_first",
+        status: "committed",
+      }),
+      expect.objectContaining({
+        id: "vsi_second",
+        status: "committed_with_conflicts",
+      }),
+    ]);
+  });
+
   it("marks committed sessions with conflicts when the run summary reports vault-sync conflicts", async () => {
     const updateMany = vi.fn().mockResolvedValue({ count: 1 });
     const prisma = {

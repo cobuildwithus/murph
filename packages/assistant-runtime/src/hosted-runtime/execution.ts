@@ -498,7 +498,6 @@ function buildHostedRunDrainRedactedDetails(
       skipped: result.skipped,
     }));
     details.vaultSyncImports = vaultSyncImports;
-    details.vaultSyncImport = vaultSyncImports[0] ?? null;
   }
 
   return Object.keys(details).length > 0 ? details : null;

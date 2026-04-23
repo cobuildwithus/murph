@@ -1,13 +1,12 @@
-import { Buffer } from "node:buffer";
-
 import {
   buildHostedSecretAad,
-  createHostedSecretCodec,
-  decodeHostedEncryptionKey,
-  decodeHostedEncryptionKeyring,
   type HostedSecretCodec,
 } from "../device-sync/crypto";
-import { normalizeNullableString } from "../primitives";
+import {
+  createHostedNullableStringEncryption,
+  getOrCreateHostedSecretCodec,
+  readHostedEncryptionEnvironment,
+} from "../hosted-encryption-shared";
 
 const HOSTED_WEB_ENCRYPTION_KEY_ENV_KEYS = [
   "HOSTED_WEB_ENCRYPTION_KEY",
@@ -18,12 +17,6 @@ const HOSTED_WEB_ENCRYPTION_KEY_VERSION_ENV_KEYS = [
 const HOSTED_WEB_ENCRYPTION_KEYRING_JSON_ENV_KEYS = [
   "HOSTED_WEB_ENCRYPTION_KEYRING_JSON",
 ] as const;
-
-interface HostedWebEncryptionEnvironment {
-  encryptionKey: Buffer;
-  encryptionKeyVersion: string;
-  encryptionKeysByVersion: Readonly<Record<string, Buffer>>;
-}
 
 interface HostedWebConfigurationErrorInput {
   code: string;
@@ -60,39 +53,31 @@ export function isHostedWebConfigurationError(
 }
 
 export function getHostedWebEncryptionCodec(): HostedSecretCodec {
-  if (globalForHostedWebEncryption.__murphHostedWebEncryptionCodec) {
-    return globalForHostedWebEncryption.__murphHostedWebEncryptionCodec;
-  }
-
-  const environment = readHostedWebEncryptionEnvironment();
-  const codec = createHostedSecretCodec({
-    key: environment.encryptionKey,
-    keyVersion: environment.encryptionKeyVersion,
-    keysByVersion: environment.encryptionKeysByVersion,
+  return getOrCreateHostedSecretCodec({
+    cachedCodec: globalForHostedWebEncryption.__murphHostedWebEncryptionCodec,
+    readEnvironment: readHostedWebEncryptionEnvironment,
+    setCachedCodec(codec) {
+      globalForHostedWebEncryption.__murphHostedWebEncryptionCodec = codec;
+    },
+    shouldCache: process.env.NODE_ENV !== "test",
   });
-
-  if (process.env.NODE_ENV !== "test") {
-    globalForHostedWebEncryption.__murphHostedWebEncryptionCodec = codec;
-  }
-
-  return codec;
 }
+
+const hostedWebNullableStringEncryption = createHostedNullableStringEncryption<{
+  field: string;
+  memberId: string;
+  value: string | null | undefined;
+}>({
+  buildCipherOptions: buildHostedWebFieldCipherOptions,
+  getCodec: getHostedWebEncryptionCodec,
+});
 
 export function encryptHostedWebNullableString(input: {
   field: string;
   memberId: string;
   value: string | null | undefined;
 }): string | null {
-  const normalized = normalizeNullableString(input.value);
-
-  if (!normalized) {
-    return null;
-  }
-
-  return getHostedWebEncryptionCodec().encrypt(
-    normalized,
-    buildHostedWebFieldCipherOptions(input),
-  );
+  return hostedWebNullableStringEncryption.encryptNullableString(input);
 }
 
 export function decryptHostedWebNullableString(input: {
@@ -100,15 +85,7 @@ export function decryptHostedWebNullableString(input: {
   memberId: string;
   value: string | null | undefined;
 }): string | null {
-  const normalized = normalizeNullableString(input.value);
-
-  if (!normalized) {
-    return null;
-  }
-
-  return normalizeNullableString(
-    getHostedWebEncryptionCodec().decrypt(normalized, buildHostedWebFieldCipherOptions(input)),
-  );
+  return hostedWebNullableStringEncryption.decryptNullableString(input);
 }
 
 function buildHostedWebFieldCipherOptions(input: {
@@ -127,26 +104,18 @@ function buildHostedWebFieldCipherOptions(input: {
 
 function readHostedWebEncryptionEnvironment(
   source: NodeJS.ProcessEnv = process.env,
-): HostedWebEncryptionEnvironment {
+) {
   try {
-    const encryptionKeyValue = readEnv(source, HOSTED_WEB_ENCRYPTION_KEY_ENV_KEYS);
-    const encryptionKeyVersion =
-      readEnv(source, HOSTED_WEB_ENCRYPTION_KEY_VERSION_ENV_KEYS) ?? "v1";
-    const encryptionKeyringJson = readEnv(source, HOSTED_WEB_ENCRYPTION_KEYRING_JSON_ENV_KEYS);
-    const encryptionKey = encryptionKeyValue
-      ? decodeHostedEncryptionKey(encryptionKeyValue)
-      : readRequiredHostedWebEncryptionKey();
-
-    return {
-      encryptionKey,
-      encryptionKeyVersion,
-      encryptionKeysByVersion: decodeHostedEncryptionKeyring({
-        currentKey: encryptionKey,
-        currentKeyVersion: encryptionKeyVersion,
-        keyringJson: encryptionKeyringJson,
-        label: "HOSTED_WEB_ENCRYPTION_KEYRING_JSON",
-      }),
-    };
+    return readHostedEncryptionEnvironment({
+      envKeys: {
+        encryptionKey: HOSTED_WEB_ENCRYPTION_KEY_ENV_KEYS,
+        encryptionKeyVersion: HOSTED_WEB_ENCRYPTION_KEY_VERSION_ENV_KEYS,
+        encryptionKeyringJson: HOSTED_WEB_ENCRYPTION_KEYRING_JSON_ENV_KEYS,
+      },
+      keyringLabel: "HOSTED_WEB_ENCRYPTION_KEYRING_JSON",
+      readRequiredEncryptionKey: readRequiredHostedWebEncryptionKey,
+      source,
+    });
   } catch (error) {
     throw toHostedWebConfigurationError(error);
   }
@@ -160,20 +129,6 @@ function readRequiredHostedWebEncryptionKey(): never {
   });
 }
 
-function readEnv(
-  source: NodeJS.ProcessEnv,
-  keys: readonly string[],
-): string | null {
-  for (const key of keys) {
-    const value = normalizeNullableString(source[key]);
-
-    if (value) {
-      return value;
-    }
-  }
-
-  return null;
-}
 function toHostedWebConfigurationError(error: unknown): HostedWebConfigurationError | never {
   if (isHostedWebConfigurationError(error)) {
     return error;

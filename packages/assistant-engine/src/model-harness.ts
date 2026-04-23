@@ -495,10 +495,35 @@ export function isAssistantModelConfigurationError(
   )
 }
 
-export function assertAssistantModelSpecReadyForExecution(
+type ValidatedAssistantModelSpec =
+  | {
+      baseUrl?: string
+      executionDriver: 'responses'
+    }
+  | {
+      baseUrl: string
+      executionDriver: 'openai-compatible'
+    }
+
+function validateAssistantModelSpecForExecution(
   spec: AssistantModelSpec,
-): void {
-  const executionDriver =
+  mode: 'assert',
+): {
+  baseUrl?: string
+  executionDriver: 'openai-compatible' | 'responses'
+}
+function validateAssistantModelSpecForExecution(
+  spec: AssistantModelSpec,
+  mode: 'resolve',
+): ValidatedAssistantModelSpec
+function validateAssistantModelSpecForExecution(
+  spec: AssistantModelSpec,
+  mode: 'assert' | 'resolve',
+): {
+  baseUrl?: string
+  executionDriver: 'openai-compatible' | 'responses'
+} {
+  const configuredExecutionDriver =
     typeof spec.executionDriver === 'string' && spec.executionDriver.trim().length > 0
       ? spec.executionDriver.trim()
       : 'openai-compatible'
@@ -508,30 +533,53 @@ export function assertAssistantModelSpecReadyForExecution(
       ASSISTANT_MODEL_CONFIG_INVALID_CODE,
       'Assistant model configuration is invalid: model id is required.',
       {
-        executionDriver,
+        executionDriver: configuredExecutionDriver,
       },
     )
   }
 
-  if (executionDriver === 'codex-app-server') {
+  if (configuredExecutionDriver === 'responses') {
+    return {
+      baseUrl: spec.baseUrl,
+      executionDriver: 'responses',
+    }
+  }
+
+  if (configuredExecutionDriver === 'codex-app-server') {
     throw new VaultCliError(
       ASSISTANT_MODEL_CONFIG_INVALID_CODE,
       'Assistant model configuration is invalid: Codex app-server models cannot be resolved through the AI SDK model harness.',
       {
-        executionDriver,
+        executionDriver: configuredExecutionDriver,
       },
     )
   }
 
-  if (executionDriver === 'openai-compatible' && !spec.baseUrl) {
-    throw new VaultCliError(
-      ASSISTANT_MODEL_CONFIG_INVALID_CODE,
-      'Assistant model configuration is invalid: OpenAI-compatible routing requires a base URL.',
-      {
-        executionDriver,
-      },
-    )
+  if (
+    mode === 'resolve'
+    || configuredExecutionDriver === 'openai-compatible'
+  ) {
+    if (!spec.baseUrl) {
+      throw new VaultCliError(
+        ASSISTANT_MODEL_CONFIG_INVALID_CODE,
+        'Assistant model configuration is invalid: OpenAI-compatible routing requires a base URL.',
+        {
+          executionDriver: configuredExecutionDriver,
+        },
+      )
+    }
   }
+
+  return {
+    baseUrl: spec.baseUrl ?? '',
+    executionDriver: 'openai-compatible',
+  }
+}
+
+export function assertAssistantModelSpecReadyForExecution(
+  spec: AssistantModelSpec,
+): void {
+  validateAssistantModelSpecForExecution(spec, 'assert')
 }
 
 export interface GenerateAssistantObjectInput<TSchema extends z.ZodTypeAny> {
@@ -721,19 +769,15 @@ export async function generateAssistantObject<TSchema extends z.ZodTypeAny>(
 export function resolveAssistantLanguageModel(
   spec: AssistantModelSpec,
 ): LanguageModel {
-  assertAssistantModelSpecReadyForExecution(spec)
-
-  const executionDriver =
-    typeof spec.executionDriver === 'string' && spec.executionDriver.trim().length > 0
-      ? spec.executionDriver.trim()
-      : 'openai-compatible'
+  const { baseUrl, executionDriver } =
+    validateAssistantModelSpecForExecution(spec, 'resolve')
 
   switch (executionDriver) {
     case 'responses': {
       const provider = createOpenAI({
         name: normalizeAssistantProviderName(spec.providerName),
         apiKey: resolveAssistantApiKey(spec),
-        ...(spec.baseUrl ? { baseURL: spec.baseUrl } : {}),
+        ...(baseUrl ? { baseURL: baseUrl } : {}),
         ...(spec.headers ? { headers: spec.headers } : {}),
         fetch: createAssistantResponsesFetch(spec.responsesRequestPolicy),
       })
@@ -741,22 +785,8 @@ export function resolveAssistantLanguageModel(
       return provider.responses(spec.model)
     }
 
-    case 'codex-app-server':
-      throw new VaultCliError(
-        ASSISTANT_MODEL_CONFIG_INVALID_CODE,
-        'Assistant model configuration is invalid: Codex app-server models cannot be resolved through the AI SDK model harness.',
-      )
-
     case 'openai-compatible':
     default: {
-      const baseUrl = spec.baseUrl
-      if (!baseUrl) {
-        throw new VaultCliError(
-          ASSISTANT_MODEL_CONFIG_INVALID_CODE,
-          'Assistant model configuration is invalid: OpenAI-compatible routing requires a base URL.',
-        )
-      }
-
       const provider = createOpenAICompatible({
         name: normalizeAssistantProviderName(spec.providerName),
         apiKey: resolveAssistantApiKey(spec),

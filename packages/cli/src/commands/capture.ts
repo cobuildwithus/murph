@@ -25,6 +25,8 @@ import { occurredAtOptionSchema } from '@murphai/operator-config/vault-cli-contr
 import {
   commonDateRangeOptionDescriptions,
   commonListLimitOptionSchema,
+  createCommonListCommand,
+  registerFactoryCommand,
 } from './command-factory-primitives.js'
 import { normalizeOccurredAtOption } from './occurred-at-option.js'
 
@@ -161,58 +163,77 @@ export function registerCaptureCommands(
     },
   })
 
-  capture.command('list', {
-    description: captureCommandDescriptions.list,
-    args: z.object({}),
-    options: withBaseOptions({
-      from: z
-        .string()
-        .regex(/^\d{4}-\d{2}-\d{2}$/u)
-        .optional()
-        .describe(commonDateRangeOptionDescriptions.from),
-      to: z
-        .string()
-        .regex(/^\d{4}-\d{2}-\d{2}$/u)
-        .optional()
-        .describe(commonDateRangeOptionDescriptions.to),
-      label: z
-        .string()
-        .min(1)
-        .max(160)
-        .optional()
-        .describe('Optional stable capture label filter.'),
-      bodySite: z
-        .string()
-        .min(1)
-        .max(400)
-        .optional()
-        .describe('Optional body/site filter, matched through the normalized site-* tag.'),
-      collection: z
-        .string()
-        .min(1)
-        .max(160)
-        .optional()
-        .describe('Optional collection filter.'),
-      tag: z
-        .array(z.string().min(1))
-        .optional()
-        .describe('Optional tag filter. Repeat --tag for multiple tags; all requested tags must match.'),
-      limit: commonListLimitOptionSchema,
+  registerFactoryCommand(
+    capture,
+    createCommonListCommand({
+      description: captureCommandDescriptions.list,
+      options: {
+        from: {
+          description: commonDateRangeOptionDescriptions.from,
+          name: 'from',
+        },
+        to: {
+          description: commonDateRangeOptionDescriptions.to,
+          name: 'to',
+        },
+        tag: z
+          .array(z.string().min(1))
+          .optional()
+          .describe('Optional tag filter. Repeat --tag for multiple tags; all requested tags must match.'),
+        limit: commonListLimitOptionSchema,
+      },
+      extraOptions: {
+        label: z
+          .string()
+          .min(1)
+          .max(160)
+          .optional()
+          .describe('Optional stable capture label filter.'),
+        bodySite: z
+          .string()
+          .min(1)
+          .max(400)
+          .optional()
+          .describe('Optional body/site filter, matched through the normalized site-* tag.'),
+        collection: z
+          .string()
+          .min(1)
+          .max(160)
+          .optional()
+          .describe('Optional collection filter.'),
+      },
+      output: listResultSchema,
+      buildInput(input, options) {
+        return {
+          ...input,
+          label: typeof options.label === 'string' ? options.label : undefined,
+          bodySite:
+            typeof options.bodySite === 'string'
+              ? options.bodySite
+              : undefined,
+          collection:
+            typeof options.collection === 'string'
+              ? options.collection
+              : undefined,
+          tag: Array.isArray(options.tag)
+            ? options.tag.filter((entry): entry is string => typeof entry === 'string')
+            : undefined,
+        }
+      },
+      run(input) {
+        return listCaptureRecords({
+          vault: input.vault,
+          from: input.from,
+          to: input.to,
+          label: input.label,
+          bodySite: input.bodySite,
+          collection: input.collection,
+          tags: normalizeRepeatableFlagOption(input.tag, 'tag'),
+          limit: input.limit,
+        })
+      },
     }),
-    output: listResultSchema,
-    async run({ options }) {
-      return listCaptureRecords({
-        vault: options.vault,
-        from: typeof options.from === 'string' ? options.from : undefined,
-        to: typeof options.to === 'string' ? options.to : undefined,
-        label: typeof options.label === 'string' ? options.label : undefined,
-        bodySite: typeof options.bodySite === 'string' ? options.bodySite : undefined,
-        collection: typeof options.collection === 'string' ? options.collection : undefined,
-        tags: normalizeRepeatableFlagOption(options.tag, 'tag'),
-        limit: typeof options.limit === 'number' ? options.limit : undefined,
-      })
-    },
-  })
+  )
 
   capture.command('manifest', {
     description: captureCommandDescriptions.manifest,

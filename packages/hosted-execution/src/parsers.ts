@@ -131,7 +131,7 @@ export function parseHostedIngressEnvelope(value: unknown): HostedIngressEnvelop
   const kind = parseHostedIngressKind(record.kind, "Hosted execution wake kind");
   const eventId = requireString(record.eventId, "Hosted execution wake eventId");
   const occurredAt = requireString(record.occurredAt, "Hosted execution wake occurredAt");
-  const userId = requireString(record.userId, "Hosted execution wake userId");
+  const wireUserId = requireString(record.userId, "Hosted execution wake userId");
 
   switch (kind) {
     case "conversation.message":
@@ -139,7 +139,7 @@ export function parseHostedIngressEnvelope(value: unknown): HostedIngressEnvelop
         eventId,
         message: parseHostedExecutionConversationMessagePayload(record.message),
         occurredAt,
-        userId,
+        userId: wireUserId,
       });
     case "member.activated":
       return buildHostedExecutionMemberActivatedWake({
@@ -148,7 +148,7 @@ export function parseHostedIngressEnvelope(value: unknown): HostedIngressEnvelop
           record.memberChannels,
           "Hosted execution wake member.activated memberChannels",
         ),
-        memberId: userId,
+        memberId: wireUserId,
         occurredAt,
       });
     case "member.channels.updated":
@@ -158,13 +158,13 @@ export function parseHostedIngressEnvelope(value: unknown): HostedIngressEnvelop
           record.memberChannels,
           "Hosted execution wake member.channels.updated memberChannels",
         ),
-        memberId: userId,
+        memberId: wireUserId,
         occurredAt,
       });
     case "assistant.notification.requested":
       return buildHostedExecutionAssistantNotificationRequestedWake({
         eventId,
-        memberId: userId,
+        memberId: wireUserId,
         notification: parseHostedExecutionAssistantNotificationRequestedPayload(
           record.notification,
           "Hosted execution wake assistant.notification.requested notification",
@@ -195,19 +195,19 @@ export function parseHostedIngressEnvelope(value: unknown): HostedIngressEnvelop
               ),
             }),
         reason: parseHostedExecutionDeviceSyncReason(record.reason),
-        userId,
+        userId: wireUserId,
       });
     case "vault.share.accepted":
       return buildHostedExecutionVaultShareAcceptedWake({
         eventId,
-        memberId: userId,
+        memberId: wireUserId,
         occurredAt,
         share: parseHostedExecutionShareReference(record.share),
       });
     case "vault.sync.import":
       return buildHostedExecutionVaultSyncImportWake({
         eventId,
-        memberId: userId,
+        memberId: wireUserId,
         occurredAt,
         vaultSync: parseHostedExecutionVaultSyncImportReference(record.vaultSync),
       });
