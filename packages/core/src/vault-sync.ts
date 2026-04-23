@@ -1,8 +1,17 @@
 import { createHash } from "node:crypto";
-import { mkdtemp, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { cp, mkdtemp, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import {
+  safeParseContract,
+  type VaultFrontmatterFamilyDescriptor,
+  type VaultJsonValidationFamilyDescriptor,
+  type VaultJsonlValidationFamilyDescriptor,
+  VAULT_FRONTMATTER_FAMILIES,
+  VAULT_JSON_VALIDATION_FAMILIES,
+  VAULT_JSONL_VALIDATION_FAMILIES,
+} from "@murphai/contracts";
 import {
   restoreHostedBundleRoots,
   snapshotHostedBundleRoots,
@@ -13,8 +22,10 @@ import {
 
 import { VAULT_LAYOUT, VAULT_SCHEMA_VERSION } from "./constants.ts";
 import { VaultError } from "./errors.ts";
+import { parseFrontmatterDocument } from "./frontmatter.ts";
 import {
   acquireCanonicalWriteLock,
+  CANONICAL_WRITE_LOCK_DIRECTORY,
   withCanonicalWriteLockScope,
 } from "./operations/canonical-write-lock.ts";
 import { normalizeOpaquePathSegment, normalizeRelativeVaultPath, resolveVaultPath } from "./path-safety.ts";
@@ -25,6 +36,8 @@ import {
   type CanonicalRawCopyInput,
   type CanonicalTextWriteInput,
 } from "./public-mutations.ts";
+import type { UnknownRecord } from "./types.ts";
+import { assertValidVault, validateJsonlRecordAgainstVault } from "./vault.ts";
 
 export const VAULT_SYNC_IMPORT_MANIFEST_SCHEMA = "murph.vaultSync.importManifest.v1";
 export const VAULT_SYNC_CONFLICT_MANIFEST_SCHEMA = "murph.vaultSync.conflictManifest.v1";
@@ -213,18 +226,6 @@ function isErrnoException(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error && "code" in error;
 }
 
-async function fileExists(absolutePath: string): Promise<boolean> {
-  try {
-    const stats = await stat(absolutePath);
-    return stats.isFile();
-  } catch (error) {
-    if (isErrnoException(error) && error.code === "ENOENT") {
-      return false;
-    }
-    throw error;
-  }
-}
-
 async function readFileIfExists(absolutePath: string): Promise<Uint8Array | null> {
   try {
     return await readFile(absolutePath);
@@ -315,6 +316,11 @@ function isImportableJsonlLedgerPath(relativePath: string): boolean {
   );
 }
 
+function isImportableValidatedTextPath(relativePath: string): boolean {
+  return findFrontmatterValidationFamily(relativePath) !== null
+    || findJsonValidationFamily(relativePath) !== null;
+}
+
 function classifyImportFile(relativePath: string): VaultSyncImportFileKind | null {
   if (isExcludedLocalPath(relativePath)) {
     return null;
@@ -332,17 +338,8 @@ function classifyImportFile(relativePath: string): VaultSyncImportFileKind | nul
     return "jsonl_ledger";
   }
 
-  if (
-    relativePath === VAULT_LAYOUT.coreDocument
-    || relativePath === VAULT_LAYOUT.memoryDocument
-    || relativePath === VAULT_LAYOUT.preferencesDocument
-    || startsWithPath(relativePath, VAULT_LAYOUT.bankDirectory)
-    || startsWithPath(relativePath, VAULT_LAYOUT.journalDirectory)
-    || startsWithPath(relativePath, VAULT_LAYOUT.automationsDirectory)
-  ) {
-    if (relativePath.endsWith(".md") || relativePath.endsWith(".json") || relativePath.endsWith(".txt")) {
-      return "text";
-    }
+  if (isImportableValidatedTextPath(relativePath)) {
+    return "text";
   }
 
   return null;
@@ -550,6 +547,56 @@ function isVaultSyncImportFileKind(value: string): value is VaultSyncImportFileK
   return value === "jsonl_ledger" || value === "raw" || value === "text" || value === "metadata";
 }
 
+function invalidImportManifest(message: string): never {
+  throw new VaultError("VAULT_SYNC_IMPORT_MANIFEST_INVALID", message);
+}
+
+function parseManifestFileEntry(entry: unknown): VaultSyncImportManifestFile {
+  if (!isPlainObject(entry)) {
+    invalidImportManifest("Vault sync import manifest contains an invalid file entry.");
+  }
+
+  if (
+    typeof entry.path !== "string"
+    || typeof entry.kind !== "string"
+    || !isVaultSyncImportFileKind(entry.kind)
+    || typeof entry.sha256 !== "string"
+    || typeof entry.bytes !== "number"
+    || !Number.isFinite(entry.bytes)
+    || entry.bytes < 0
+  ) {
+    invalidImportManifest("Vault sync import manifest contains a malformed file entry.");
+  }
+
+  const relativePath = normalizeRelativeVaultPath(entry.path);
+  const expectedKind = classifyImportFile(relativePath);
+  if (!expectedKind || expectedKind !== entry.kind) {
+    invalidImportManifest("Vault sync import manifest contains a non-canonical or mismatched file entry.");
+  }
+
+  return {
+    bytes: entry.bytes,
+    kind: entry.kind,
+    path: relativePath,
+    sha256: entry.sha256,
+  };
+}
+
+function parseManifestExcludedEntry(entry: unknown): VaultSyncImportManifestExcludedFile {
+  if (!isPlainObject(entry)) {
+    invalidImportManifest("Vault sync import manifest contains an invalid excluded entry.");
+  }
+
+  if (typeof entry.path !== "string" || typeof entry.reason !== "string") {
+    invalidImportManifest("Vault sync import manifest contains a malformed excluded entry.");
+  }
+
+  return {
+    path: normalizeRelativeVaultPath(entry.path),
+    reason: entry.reason,
+  };
+}
+
 export async function readVaultSyncImportManifest(importMetaRoot: string): Promise<VaultSyncImportManifest> {
   const parsed = await readJsonObjectIfExists(path.join(importMetaRoot, IMPORT_PACK_MANIFEST_PATH));
   if (!parsed || parsed.schema !== VAULT_SYNC_IMPORT_MANIFEST_SCHEMA) {
@@ -565,37 +612,19 @@ export async function readVaultSyncImportManifest(importMetaRoot: string): Promi
   }
 
   const files: VaultSyncImportManifestFile[] = [];
+  const filePaths = new Set<string>();
   for (const file of filesValue) {
-    if (!isPlainObject(file)) {
-      continue;
+    const parsedFile = parseManifestFileEntry(file);
+    if (filePaths.has(parsedFile.path)) {
+      invalidImportManifest("Vault sync import manifest contains duplicate file paths.");
     }
-    if (
-      typeof file.path === "string"
-      && typeof file.kind === "string"
-      && isVaultSyncImportFileKind(file.kind)
-      && typeof file.sha256 === "string"
-      && typeof file.bytes === "number"
-    ) {
-      files.push({
-        bytes: file.bytes,
-        kind: file.kind,
-        path: normalizeRelativeVaultPath(file.path),
-        sha256: file.sha256,
-      });
-    }
+    filePaths.add(parsedFile.path);
+    files.push(parsedFile);
   }
 
   const excluded: VaultSyncImportManifestExcludedFile[] = [];
   for (const entry of excludedValue) {
-    if (!isPlainObject(entry)) {
-      continue;
-    }
-    if (typeof entry.path === "string" && typeof entry.reason === "string") {
-      excluded.push({
-        path: normalizeRelativeVaultPath(entry.path),
-        reason: entry.reason,
-      });
-    }
+    excluded.push(parseManifestExcludedEntry(entry));
   }
 
   const manifest: VaultSyncImportManifest = {
@@ -618,6 +647,45 @@ export async function readVaultSyncImportManifest(importMetaRoot: string): Promi
   }
 
   return manifest;
+}
+
+async function readVerifiedImportFileBytes(input: {
+  expectedSha256: string;
+  importVaultRoot: string;
+  relativePath: string;
+}): Promise<Uint8Array> {
+  const absolutePath = path.join(input.importVaultRoot, input.relativePath);
+  let bytes: Uint8Array;
+  try {
+    bytes = await readFile(absolutePath);
+  } catch (error) {
+    if (isErrnoException(error) && error.code === "ENOENT") {
+      throw new VaultError(
+        "VAULT_SYNC_IMPORT_FILE_MISSING",
+        "Vault sync import pack is missing a manifest-listed file.",
+        {
+          expectedSha256: input.expectedSha256,
+          relativePath: input.relativePath,
+        },
+      );
+    }
+    throw error;
+  }
+
+  const actualSha256 = sha256Prefixed(bytes);
+  if (actualSha256 !== input.expectedSha256) {
+    throw new VaultError(
+      "VAULT_SYNC_IMPORT_FILE_HASH_MISMATCH",
+      "Vault sync import pack file hash does not match the manifest.",
+      {
+        actualSha256,
+        expectedSha256: input.expectedSha256,
+        relativePath: input.relativePath,
+      },
+    );
+  }
+
+  return bytes;
 }
 
 function recordIdValue(record: Record<string, unknown>): string | null {
@@ -658,6 +726,165 @@ function stableRecordKey(record: Record<string, unknown>, relativePath: string):
   }
 
   return sha256Prefixed(stableJson(record));
+}
+
+function findJsonlValidationFamily(relativePath: string): VaultJsonlValidationFamilyDescriptor | null {
+  return VAULT_JSONL_VALIDATION_FAMILIES.find((family) =>
+    relativePath.endsWith(family.fileExtension) && startsWithPath(relativePath, family.directory)
+  ) ?? null;
+}
+
+function findFrontmatterValidationFamily(relativePath: string): VaultFrontmatterFamilyDescriptor | null {
+  for (const family of VAULT_FRONTMATTER_FAMILIES) {
+    if (
+      family.storageKind === "singleton-file"
+        ? family.relativePath === relativePath
+        : relativePath.endsWith(family.fileExtension) && startsWithPath(relativePath, family.directory)
+    ) {
+      return family;
+    }
+  }
+
+  return null;
+}
+
+function findJsonValidationFamily(relativePath: string): VaultJsonValidationFamilyDescriptor | null {
+  return VAULT_JSON_VALIDATION_FAMILIES.find((family) => family.relativePath === relativePath) ?? null;
+}
+
+function throwImportValidationFailed(input: {
+  code: string;
+  details?: { errors: string[] };
+  message: string;
+  relativePath: string;
+}): never {
+  throw new VaultError(
+    "VAULT_SYNC_IMPORT_VALIDATION_FAILED",
+    "Vault sync import payload failed canonical validation before commit.",
+    {
+      issues: [
+        {
+          code: input.code,
+          ...(input.details ? { details: input.details } : {}),
+          message: input.message,
+          path: input.relativePath,
+          severity: "error",
+        },
+      ],
+    },
+  );
+}
+
+function throwImportValidationIssues(issues: Array<{
+  code: string;
+  message: string;
+  path?: string;
+  severity: string;
+}>): never {
+  throw new VaultError(
+    "VAULT_SYNC_IMPORT_VALIDATION_FAILED",
+    "Vault sync import payload failed canonical validation before commit.",
+    {
+      issues,
+    },
+  );
+}
+
+async function assertImportedJsonlRecordValid(input: {
+  importVaultRoot: string;
+  index: number;
+  record: Record<string, unknown>;
+  relativePath: string;
+}): Promise<void> {
+  const { importVaultRoot, index, record, relativePath } = input;
+  const family = findJsonlValidationFamily(relativePath);
+  if (!family) {
+    return;
+  }
+
+  const result = safeParseContract(family.validation.schema, record);
+  if (!result.success) {
+    throwImportValidationFailed({
+      code: family.validation.issueCode,
+      details: {
+        errors: result.errors,
+      },
+      message: `record ${index + 1}: ${result.errors.join("; ")}`,
+      relativePath,
+    });
+  }
+
+  const issues = await validateJsonlRecordAgainstVault({
+    familyId: family.id,
+    index,
+    record: result.data as UnknownRecord,
+    relativePath,
+    vaultRoot: importVaultRoot,
+  });
+  if (issues.length > 0) {
+    throwImportValidationIssues(issues);
+  }
+}
+
+function assertImportedTextFileValid(content: string, relativePath: string): void {
+  const frontmatterFamily = findFrontmatterValidationFamily(relativePath);
+  if (frontmatterFamily) {
+    let parsed: ReturnType<typeof parseFrontmatterDocument>;
+    try {
+      parsed = parseFrontmatterDocument(content);
+    } catch (error) {
+      throwImportValidationFailed({
+        code: frontmatterFamily.validation.issueCode,
+        message: error instanceof Error ? error.message : String(error),
+        relativePath,
+      });
+    }
+
+    const result = safeParseContract(frontmatterFamily.validation.schema, parsed.attributes);
+    if (!result.success) {
+      throwImportValidationFailed({
+        code: frontmatterFamily.validation.issueCode,
+        details: {
+          errors: result.errors,
+        },
+        message: result.errors.join("; "),
+        relativePath,
+      });
+    }
+    return;
+  }
+
+  const jsonFamily = findJsonValidationFamily(relativePath);
+  if (!jsonFamily) {
+    throwImportValidationFailed({
+      code: "VAULT_SYNC_IMPORT_UNSUPPORTED_TEXT_PATH",
+      message: "Vault sync import text path is not a supported canonical contract path.",
+      relativePath,
+    });
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content);
+  } catch (error) {
+    throwImportValidationFailed({
+      code: jsonFamily.validation.issueCode,
+      message: error instanceof Error ? error.message : String(error),
+      relativePath,
+    });
+  }
+
+  const result = safeParseContract(jsonFamily.validation.schema, parsed);
+  if (!result.success) {
+    throwImportValidationFailed({
+      code: jsonFamily.validation.issueCode,
+      details: {
+        errors: result.errors,
+      },
+      message: result.errors.join("; "),
+      relativePath,
+    });
+  }
 }
 
 function readJsonlRecordObjects(content: string, relativePath: string): Record<string, unknown>[] {
@@ -714,16 +941,21 @@ function manifestPreservationPath(sessionId: string): string {
 
 async function planJsonlMerge(input: {
   importVaultRoot: string;
+  localContent: string;
   plan: MergePlan;
   relativePath: string;
   sessionId: string;
   targetVaultRoot: string;
 }): Promise<void> {
-  const localPath = path.join(input.importVaultRoot, input.relativePath);
-  const localContent = Buffer.from(await readFile(localPath)).toString("utf8");
   const remoteRecords = await buildExistingRecordIndex(input.targetVaultRoot, input.relativePath);
 
-  for (const record of readJsonlRecordObjects(localContent, input.relativePath)) {
+  for (const [index, record] of readJsonlRecordObjects(input.localContent, input.relativePath).entries()) {
+    await assertImportedJsonlRecordValid({
+      importVaultRoot: input.importVaultRoot,
+      index,
+      record,
+      relativePath: input.relativePath,
+    });
     const key = stableRecordKey(record, input.relativePath);
     const localHash = sha256Prefixed(stableJson(record));
     const existing = remoteRecords.get(key);
@@ -766,23 +998,21 @@ async function planJsonlMerge(input: {
 }
 
 async function planRawMerge(input: {
-  importVaultRoot: string;
+  localBytes: Uint8Array;
   plan: MergePlan;
   relativePath: string;
   sessionId: string;
   targetVaultRoot: string;
 }): Promise<void> {
-  const localPath = path.join(input.importVaultRoot, input.relativePath);
-  const localBytes = await readFile(localPath);
-  const localSha256 = sha256Prefixed(localBytes);
+  const localSha256 = sha256Prefixed(input.localBytes);
   const remoteBytes = await readFileIfExists(path.join(input.targetVaultRoot, input.relativePath));
 
   if (!remoteBytes) {
-    input.plan.rawCopies.push({
+    input.plan.rawContents.push({
       allowExistingMatch: true,
+      content: input.localBytes,
       mediaType: "application/octet-stream",
       originalFileName: path.posix.basename(input.relativePath),
-      sourcePath: localPath,
       targetRelativePath: input.relativePath,
     });
     return;
@@ -803,32 +1033,32 @@ async function planRawMerge(input: {
     reason: "remote_and_local_differ",
     remoteSha256,
   });
-  input.plan.rawCopies.push({
+  input.plan.rawContents.push({
     allowExistingMatch: true,
+    content: input.localBytes,
     mediaType: "application/octet-stream",
     originalFileName: path.posix.basename(input.relativePath),
-    sourcePath: localPath,
     targetRelativePath: preservedLocalPath,
   });
 }
 
 async function planTextMerge(input: {
-  importVaultRoot: string;
   kind: VaultSyncImportFileKind;
+  localBytes: Uint8Array;
   plan: MergePlan;
   relativePath: string;
   sessionId: string;
   targetVaultRoot: string;
 }): Promise<void> {
-  const localPath = path.join(input.importVaultRoot, input.relativePath);
-  const localBytes = await readFile(localPath);
-  const localSha256 = sha256Prefixed(localBytes);
+  const content = Buffer.from(input.localBytes).toString("utf8");
+  assertImportedTextFileValid(content, input.relativePath);
+  const localSha256 = sha256Prefixed(input.localBytes);
   const remoteBytes = await readFileIfExists(path.join(input.targetVaultRoot, input.relativePath));
 
   if (!remoteBytes) {
     input.plan.textWrites.push({
       allowExistingMatch: true,
-      content: Buffer.from(localBytes).toString("utf8"),
+      content,
       overwrite: false,
       relativePath: input.relativePath,
     });
@@ -850,11 +1080,11 @@ async function planTextMerge(input: {
     reason: "remote_and_local_differ",
     remoteSha256,
   });
-  input.plan.rawCopies.push({
+  input.plan.rawContents.push({
     allowExistingMatch: true,
+    content,
     mediaType: input.relativePath.endsWith(".json") ? "application/json" : "text/plain",
     originalFileName: path.posix.basename(input.relativePath),
-    sourcePath: localPath,
     targetRelativePath: preservedLocalPath,
   });
 }
@@ -864,6 +1094,72 @@ function hasPendingWrites(plan: MergePlan): boolean {
     || plan.rawContents.length > 0
     || plan.textWrites.length > 0
     || plan.jsonlAppends.length > 0;
+}
+
+function countImportedRawFiles(plan: MergePlan, sessionId: string): number {
+  const isImportedRawPath = (relativePath: string): boolean =>
+    relativePath.startsWith(`${VAULT_LAYOUT.rawDirectory}/`) && !relativePath.startsWith(`${SYNC_IMPORT_ROOT}/${sessionId}/`);
+
+  return plan.rawCopies.filter((entry) => isImportedRawPath(entry.targetRelativePath)).length
+    + plan.rawContents.filter((entry) => isImportedRawPath(entry.targetRelativePath)).length;
+}
+
+function buildMergeCanonicalWriteBatchInput(input: {
+  importedAt: Date;
+  plan: MergePlan;
+  sessionId: string;
+  vaultRoot: string;
+}) {
+  return {
+    audit: {
+      action: "document_import" as const,
+      commandName: "core.mergeVaultSyncImportIntoVault",
+      summary: `Merged local vault sync import ${input.sessionId}.`,
+    },
+    jsonlAppends: input.plan.jsonlAppends,
+    occurredAt: input.importedAt,
+    operationType: "vault_sync_import",
+    rawContents: input.plan.rawContents,
+    rawCopies: input.plan.rawCopies,
+    summary: `Merge local vault sync import ${input.sessionId}`,
+    textWrites: input.plan.textWrites,
+    vaultRoot: input.vaultRoot,
+  };
+}
+
+async function validateMergePlanAgainstCurrentVaultContracts(input: {
+  importedAt: Date;
+  plan: MergePlan;
+  sessionId: string;
+  targetVaultRoot: string;
+}): Promise<void> {
+  if (!hasPendingWrites(input.plan)) {
+    return;
+  }
+
+  const previewVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-vault-sync-merge-preview-"));
+  try {
+    await cp(input.targetVaultRoot, previewVaultRoot, { recursive: true });
+    await rm(path.join(previewVaultRoot, CANONICAL_WRITE_LOCK_DIRECTORY), {
+      force: true,
+      recursive: true,
+    });
+    await applyCanonicalWriteBatch(
+      buildMergeCanonicalWriteBatchInput({
+        importedAt: input.importedAt,
+        plan: input.plan,
+        sessionId: input.sessionId,
+        vaultRoot: previewVaultRoot,
+      }),
+    );
+    await assertValidVault({
+      vaultRoot: previewVaultRoot,
+      errorCode: "VAULT_SYNC_IMPORT_VALIDATION_FAILED",
+      message: "Vault sync import payload failed canonical validation before commit.",
+    });
+  } finally {
+    await rm(previewVaultRoot, { force: true, recursive: true });
+  }
 }
 
 export async function mergeVaultSyncImportIntoVault(
@@ -888,13 +1184,16 @@ export async function mergeVaultSyncImportIntoVault(
 
       for (const file of manifest.files) {
         const relativePath = normalizeRelativeVaultPath(file.path);
-        if (!(await fileExists(path.join(input.importVaultRoot, relativePath)))) {
-          continue;
-        }
+        const localBytes = await readVerifiedImportFileBytes({
+          expectedSha256: file.sha256,
+          importVaultRoot: input.importVaultRoot,
+          relativePath,
+        });
 
         if (file.kind === "jsonl_ledger") {
           await planJsonlMerge({
             importVaultRoot: input.importVaultRoot,
+            localContent: Buffer.from(localBytes).toString("utf8"),
             plan,
             relativePath,
             sessionId,
@@ -905,7 +1204,7 @@ export async function mergeVaultSyncImportIntoVault(
 
         if (file.kind === "raw") {
           await planRawMerge({
-            importVaultRoot: input.importVaultRoot,
+            localBytes,
             plan,
             relativePath,
             sessionId,
@@ -915,8 +1214,8 @@ export async function mergeVaultSyncImportIntoVault(
         }
 
         await planTextMerge({
-          importVaultRoot: input.importVaultRoot,
           kind: file.kind,
+          localBytes,
           plan,
           relativePath,
           sessionId,
@@ -936,7 +1235,7 @@ export async function mergeVaultSyncImportIntoVault(
           summary: {
             conflictCount: plan.conflicts.length,
             importedJsonlRecords: plan.jsonlAppends.length,
-            importedRawFiles: plan.rawCopies.filter((entry) => entry.targetRelativePath.startsWith(`${VAULT_LAYOUT.rawDirectory}/`) && !entry.targetRelativePath.startsWith(`${SYNC_IMPORT_ROOT}/${sessionId}/`)).length,
+            importedRawFiles: countImportedRawFiles(plan, sessionId),
             importedTextFiles: plan.textWrites.length,
           },
         };
@@ -949,22 +1248,22 @@ export async function mergeVaultSyncImportIntoVault(
         });
       }
 
+      await validateMergePlanAgainstCurrentVaultContracts({
+        importedAt,
+        plan,
+        sessionId,
+        targetVaultRoot: input.targetVaultRoot,
+      });
+
       if (hasPendingWrites(plan)) {
-        await applyCanonicalWriteBatch({
-          audit: {
-            action: "document_import",
-            commandName: "core.mergeVaultSyncImportIntoVault",
-            summary: `Merged local vault sync import ${sessionId}.`,
-          },
-          jsonlAppends: plan.jsonlAppends,
-          occurredAt: importedAt,
-          operationType: "vault_sync_import",
-          rawContents: plan.rawContents,
-          rawCopies: plan.rawCopies,
-          summary: `Merge local vault sync import ${sessionId}`,
-          textWrites: plan.textWrites,
-          vaultRoot: input.targetVaultRoot,
-        });
+        await applyCanonicalWriteBatch(
+          buildMergeCanonicalWriteBatchInput({
+            importedAt,
+            plan,
+            sessionId,
+            vaultRoot: input.targetVaultRoot,
+          }),
+        );
       }
 
       return {
@@ -972,7 +1271,7 @@ export async function mergeVaultSyncImportIntoVault(
         conflicts: plan.conflicts,
         imported: {
           jsonlRecords: plan.jsonlAppends.length,
-          rawFiles: plan.rawCopies.filter((entry) => entry.targetRelativePath.startsWith(`${VAULT_LAYOUT.rawDirectory}/`) && !entry.targetRelativePath.startsWith(`${SYNC_IMPORT_ROOT}/${sessionId}/`)).length,
+          rawFiles: countImportedRawFiles(plan, sessionId),
           textFiles: plan.textWrites.length,
         },
         sessionId,
