@@ -144,9 +144,12 @@ export type {
 export {
   runInboxDaemon,
   runPollConnector,
+  runPollConnectorBackfill,
 } from "./kernel/daemon.ts";
 export type {
   ConnectorRestartPolicy,
+  RunPollConnectorBackfillInput,
+  RunPollConnectorBackfillResult,
 } from "./kernel/daemon.ts";
 export {
   createInboxPipeline,

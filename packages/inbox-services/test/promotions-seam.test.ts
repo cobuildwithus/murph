@@ -206,6 +206,9 @@ function createInboxRuntimeModule(runtime: RuntimeStore): InboxRuntimeModule {
     async createInboxPipeline() {
       throw new Error('createInboxPipeline not used in promotions tests')
     },
+    async createParsedInboxPipeline() {
+      throw new Error('createParsedInboxPipeline not used in promotions tests')
+    },
     createTelegramPollConnector() {
       throw new Error('createTelegramPollConnector not used in promotions tests')
     },
@@ -223,6 +226,9 @@ function createInboxRuntimeModule(runtime: RuntimeStore): InboxRuntimeModule {
     },
     async runInboxDaemon() {
       throw new Error('runInboxDaemon not used in promotions tests')
+    },
+    async runPollConnectorBackfill() {
+      throw new Error('runPollConnectorBackfill not used in promotions tests')
     },
     async runInboxDaemonWithParsers() {
       throw new Error('runInboxDaemonWithParsers not used in promotions tests')
@@ -373,6 +379,7 @@ async function writePromotionStore(
     promotedAt?: string
     lookupId: string | null
     relatedId: string | null
+    captureEventId?: string | null
     note?: string | null
   }>,
 ): Promise<void> {
@@ -1055,12 +1062,30 @@ test('document preservation and experiment helper branches are deterministic', a
       entries,
       'experiment-1',
       experimentCapture.eventId,
+      null,
+      experimentCapture,
+    ).relativePath,
+    'bank/experiments/current.md',
+  )
+  assert.equal(
+    requireExperimentPromotionEntry(
+      entries,
+      'experiment-1',
+      'experiment-related-1',
+      experimentCapture.eventId,
       experimentCapture,
     ).relativePath,
     'bank/experiments/current.md',
   )
   assert.throws(
-    () => requireExperimentPromotionEntry(entries, null, experimentCapture.eventId, experimentCapture),
+    () =>
+      requireExperimentPromotionEntry(
+        entries,
+        null,
+        experimentCapture.eventId,
+        experimentCapture.eventId,
+        experimentCapture,
+      ),
     (error: unknown) =>
       error instanceof VaultCliError &&
       error.code === 'INBOX_PROMOTION_STATE_INVALID',
@@ -1070,7 +1095,21 @@ test('document preservation and experiment helper branches are deterministic', a
       requireExperimentPromotionEntry(
         entries,
         'experiment-1',
-        'other-event',
+        null,
+        experimentCapture.eventId,
+        experimentCapture,
+      ),
+    (error: unknown) =>
+      error instanceof VaultCliError &&
+      error.code === 'INBOX_PROMOTION_STATE_INVALID',
+  )
+  assert.throws(
+    () =>
+      requireExperimentPromotionEntry(
+        entries,
+        'experiment-1',
+        'experiment-related-1',
+        null,
         experimentCapture,
       ),
     (error: unknown) =>
@@ -1082,6 +1121,7 @@ test('document preservation and experiment helper branches are deterministic', a
       requireExperimentPromotionEntry(
         entries,
         'missing-experiment',
+        experimentCapture.eventId,
         experimentCapture.eventId,
         experimentCapture,
       ),
@@ -1443,7 +1483,7 @@ test('app promotion ops exercise meal, document, journal, and experiment flows',
         journalCalls.push(input)
         return {
           lookupId: 'journal:2026-04-08',
-          relatedId: input.capture.eventId,
+          relatedId: 'journal-related-1',
           journalPath: 'journal/2026/2026-04-08.md',
           created: true,
           appended: false,
@@ -1454,7 +1494,7 @@ test('app promotion ops exercise meal, document, journal, and experiment flows',
         experimentCalls.push(input)
         return {
           experimentId: 'experiment-1',
-          relatedId: input.capture.eventId,
+          relatedId: 'experiment-related-1',
           experimentPath: input.relativePath,
           experimentSlug: 'current-experiment',
           appended: true,
@@ -1641,6 +1681,7 @@ test('app promotion ops exercise meal, document, journal, and experiment flows',
     requestId: null,
   })
   assert.equal(journalResult.lookupId, 'journal:2026-04-08')
+  assert.equal(journalResult.relatedId, 'journal-related-1')
   assert.equal(journalCalls.length, 1)
   assert.equal(journalCalls[0]?.date, '2026-04-08')
 
@@ -1650,20 +1691,38 @@ test('app promotion ops exercise meal, document, journal, and experiment flows',
     requestId: null,
   })
   assert.equal(experimentResult.lookupId, 'experiment-1')
+  assert.equal(experimentResult.relatedId, 'experiment-related-1')
   assert.equal(experimentCalls[0]?.relativePath, 'bank/experiments/current.md')
+  const createdPromotionEntries = await readPromotionsByCapture(paths)
+  assert.equal(
+    createdPromotionEntries.get('capture-journal')?.[0]?.relatedId,
+    'journal-related-1',
+  )
+  assert.equal(
+    createdPromotionEntries.get('capture-experiment')?.[0]?.relatedId,
+    'experiment-related-1',
+  )
+  const existingJournalCapture = captures.find(
+    (capture) => capture.captureId === 'capture-journal-existing',
+  )
+  const existingExperimentCapture = captures.find(
+    (capture) => capture.captureId === 'capture-experiment-existing',
+  )
 
   await writePromotionStore(paths, [
     {
       captureId: 'capture-journal-existing',
       target: 'journal',
       lookupId: 'journal:2026-04-08',
-      relatedId: 'capture-journal-existing-event',
+      relatedId: 'journal-related-existing',
+      captureEventId: existingJournalCapture?.eventId ?? null,
     },
     {
       captureId: 'capture-experiment-existing',
       target: 'experiment-note',
       lookupId: 'experiment-1',
-      relatedId: 'capture-experiment-existing-event',
+      relatedId: 'experiment-related-existing',
+      captureEventId: existingExperimentCapture?.eventId ?? null,
     },
   ])
   const existingJournal = await ops.promoteJournal({
@@ -1671,13 +1730,23 @@ test('app promotion ops exercise meal, document, journal, and experiment flows',
     captureId: 'capture-journal-existing',
     requestId: null,
   })
-  assert.equal(existingJournal.relatedId, 'capture-journal-existing-event')
+  assert.equal(existingJournal.relatedId, 'journal-related-1')
   const existingExperiment = await ops.promoteExperimentNote({
     vault: paths.absoluteVaultRoot,
     captureId: 'capture-experiment-existing',
     requestId: null,
   })
-  assert.equal(existingExperiment.relatedId, 'capture-experiment-existing-event')
+  assert.equal(existingExperiment.relatedId, 'experiment-related-1')
+
+  const promotionEntries = await readPromotionsByCapture(paths)
+  assert.equal(
+    promotionEntries.get('capture-journal-existing')?.[0]?.relatedId,
+    'journal-related-1',
+  )
+  assert.equal(
+    promotionEntries.get('capture-experiment-existing')?.[0]?.relatedId,
+    'experiment-related-1',
+  )
 
   await assert.rejects(
     () =>

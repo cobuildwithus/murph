@@ -123,8 +123,14 @@ function createInboxModule(
     async openInboxRuntime() {
       throw new Error('unused')
     },
+    async createParsedInboxPipeline() {
+      throw new Error('unused')
+    },
     async rebuildRuntimeFromVault() {},
     async runInboxDaemon() {},
+    async runPollConnectorBackfill() {
+      throw new Error('unused')
+    },
     async runInboxDaemonWithParsers() {},
     ...overrides,
   }

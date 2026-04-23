@@ -29,6 +29,7 @@ const mocks = vi.hoisted(() => ({
   processCaptureMock: vi.fn(),
   runInboxDaemonMock: vi.fn(),
   runPollConnectorMock: vi.fn(),
+  runPollConnectorBackfillMock: vi.fn(),
   createInboxParserServiceMock: vi.fn(),
   listInboxCaptureMutationsMock: vi.fn(),
   openInboxRuntimeMock: vi.fn(),
@@ -46,6 +47,7 @@ vi.mock("../src/kernel/pipeline.ts", () => ({
 vi.mock("../src/kernel/daemon.ts", () => ({
   runInboxDaemon: mocks.runInboxDaemonMock,
   runPollConnector: mocks.runPollConnectorMock,
+  runPollConnectorBackfill: mocks.runPollConnectorBackfillMock,
 }));
 
 vi.mock("../src/kernel/sqlite.ts", () => ({
@@ -85,6 +87,7 @@ afterEach(() => {
   mocks.processCaptureMock.mockReset();
   mocks.runInboxDaemonMock.mockReset();
   mocks.runPollConnectorMock.mockReset();
+  mocks.runPollConnectorBackfillMock.mockReset();
   mocks.createInboxParserServiceMock.mockReset();
   mocks.listInboxCaptureMutationsMock.mockReset();
   mocks.openInboxRuntimeMock.mockReset();
@@ -99,10 +102,12 @@ test("parser and runtime barrels keep read-through exports aligned", () => {
   assert.equal(indexModule.runInboxDaemonWithParsers, parsersModule.runInboxDaemonWithParsers);
   assert.equal(indexModule.createInboxPipeline, runtimeModule.createInboxPipeline);
   assert.equal(indexModule.processCapture, runtimeModule.processCapture);
+  assert.equal(indexModule.runPollConnectorBackfill, runtimeModule.runPollConnectorBackfill);
   assert.equal(indexModule.openInboxRuntime, runtimeModule.openInboxRuntime);
   assert.equal(indexModule.readInboxCaptureMutationHead, runtimeModule.readInboxCaptureMutationHead);
   assert.equal(indexModule.listInboxCaptureMutations, runtimeModule.listInboxCaptureMutations);
   assert.equal(indexModule.rebuildRuntimeFromVault, runtimeModule.rebuildRuntimeFromVault);
+  assert.equal(runtimeModule.createCaptureCheckpoint, createCaptureCheckpoint);
 });
 
 test("contracts stay aligned across direct, root, and runtime barrels", () => {
@@ -172,6 +177,51 @@ test("createParsedInboxPipeline drains the parser service after persisting a cap
 
   pipeline.close();
   assert.equal(pipelineClose.mock.calls.length, 1);
+});
+
+test("createParsedInboxPipeline can skip parser drains for deduped captures", async () => {
+  const runtime = createRuntimeStoreStub();
+  const persisted = {
+    captureId: "cap_456",
+    eventId: "evt_456",
+    envelopePath: "vault/inbox/capture.json",
+    createdAt: "2026-04-08T00:00:00.000Z",
+    deduped: true,
+  };
+  const pipelineProcessCapture = vi.fn().mockResolvedValue(persisted);
+  const parserDrain = vi.fn().mockResolvedValue([]);
+  mocks.createInboxPipelineMock.mockResolvedValue({
+    runtime,
+    processCapture: pipelineProcessCapture,
+    close: vi.fn(),
+  });
+  mocks.createInboxParserServiceMock.mockReturnValue({
+    drain: parserDrain,
+    drainOnce: vi.fn(),
+    requeue: vi.fn(),
+  });
+
+  const pipeline = await parsersModule.createParsedInboxPipeline({
+    vaultRoot: "/vault",
+    runtime,
+    registry: createParserRegistryStub(),
+    drainParsersOnDeduped: false,
+  });
+
+  const result = await pipeline.processCapture({
+    source: "telegram",
+    externalId: "msg-2",
+    thread: { id: "thread-1" },
+    actor: { isSelf: false },
+    occurredAt: "2026-04-08T00:00:00.000Z",
+    text: "Hello again",
+    attachments: [],
+    raw: {},
+  });
+
+  assert.equal(result, persisted);
+  assert.equal(pipelineProcessCapture.mock.calls.length, 1);
+  assert.equal(parserDrain.mock.calls.length, 0);
 });
 
 test("runInboxDaemonWithParsers drains parser jobs before starting the daemon", async () => {

@@ -1021,6 +1021,7 @@ test('runtime backfill imports captures, updates cursors, and drains parsers onl
     },
   ])
   const createParsedInboxPipeline = vi.fn(async (input: {
+    drainParsersOnDeduped?: boolean
     onParserDrain?: (results: ParserRuntimeDrainResult[]) => Promise<void> | void
   }) => ({
     close: pipeline.close,
@@ -1112,6 +1113,10 @@ test('runtime backfill imports captures, updates cursors, and drains parsers onl
   assert.deepEqual(backfilled.cursor, { marker: 'next' })
   assert.equal(backfilled.parse?.attempted, 1)
   assert.equal(createParsedInboxPipeline.mock.calls.length, 1)
+  assert.equal(
+    createParsedInboxPipeline.mock.calls[0]?.[0]?.drainParsersOnDeduped,
+    false,
+  )
   assert.equal(runPollConnectorBackfill.mock.calls.length, 1)
   assert.equal(pipeline.close.mock.calls.length, 1)
 })

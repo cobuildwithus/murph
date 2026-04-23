@@ -1,3 +1,4 @@
+import { createCaptureCheckpoint } from '@murphai/inboxd/runtime'
 import {
   type InboxConnectorConfig,
   type InboxPromotionEntry,
@@ -36,17 +37,7 @@ export function isStoredDocumentAttachment(
   return attachment.kind === 'document' && hasStoredPath(attachment)
 }
 
-export function buildCaptureCursor(capture: {
-  occurredAt: string
-  externalId: string
-  receivedAt?: string | null
-}): Record<string, unknown> {
-  return {
-    occurredAt: capture.occurredAt,
-    externalId: capture.externalId,
-    receivedAt: capture.receivedAt ?? null,
-  }
-}
+export const buildCaptureCursor = createCaptureCheckpoint
 
 export function summarizeCapture(
   capture: RuntimeCaptureRecord,

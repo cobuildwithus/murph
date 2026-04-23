@@ -63,6 +63,7 @@ export const inboxPromotionEntrySchema = z.object({
   promotedAt: isoTimestampSchema,
   lookupId: z.string().min(1).nullable(),
   relatedId: z.string().min(1).nullable(),
+  captureEventId: z.string().min(1).nullable().optional(),
   note: z.string().min(1).nullable(),
 })
 

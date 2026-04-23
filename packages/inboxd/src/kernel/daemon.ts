@@ -1,4 +1,4 @@
-import type { PollConnector } from "../connectors/types.ts";
+import type { Cursor, PollConnector } from "../connectors/types.ts";
 import type { InboxPipeline } from "./pipeline.ts";
 import { createCaptureCheckpoint, relayAbort, waitForAbortOrTimeout } from "../shared.ts";
 
@@ -28,6 +28,16 @@ export interface RunPollConnectorInput {
   maxConnectorRestartDelayMs?: number;
 }
 
+export interface RunPollConnectorBackfillInput {
+  connector: PollConnector;
+  pipeline: InboxPipeline;
+  accountId?: string | null;
+}
+
+export interface RunPollConnectorBackfillResult {
+  cursor: Cursor | null;
+}
+
 export async function runPollConnector({
   connector,
   pipeline,
@@ -49,28 +59,17 @@ export async function runPollConnector({
   if (normalizedMaxRestartDelayMs < normalizedRestartDelayMs) {
     throw new TypeError("Connector max restart delay must be at least the restart delay.");
   }
-  let cursor = pipeline.runtime.getCursor(connector.source, cursorAccountId);
-
-  const emit = async (
-    capture: Parameters<InboxPipeline["processCapture"]>[0],
-    checkpoint?: Record<string, unknown> | null,
-  ) => {
-    const result = await pipeline.processCapture(capture);
-    const nextCursor =
-      checkpoint === undefined ? createCaptureCheckpoint(capture) : checkpoint;
-    cursor = nextCursor;
-    pipeline.runtime.setCursor(
-      connector.source,
-      cursorAccountId ?? capture.accountId ?? null,
-      nextCursor,
-    );
-    return result;
-  };
+  const cursorState = createPollConnectorCursorState({
+    connector,
+    pipeline,
+    accountId: cursorAccountId,
+  });
 
   try {
     if (connector.capabilities.backfill) {
-      cursor = await connector.backfill(cursor, emit);
-      pipeline.runtime.setCursor(connector.source, cursorAccountId, cursor);
+      cursorState.writeTerminalCursor(
+        await connector.backfill(cursorState.getCursor(), cursorState.emit),
+      );
     }
 
     if (!signal.aborted && connector.capabilities.watch) {
@@ -78,7 +77,11 @@ export async function runPollConnector({
 
       while (!signal.aborted) {
         try {
-          await connector.watch(cursor, emit, signal);
+          await connector.watch(
+            cursorState.getCursor(),
+            cursorState.emit,
+            signal,
+          );
           break;
         } catch (error) {
           if (!restartConnectorOnFailure || signal.aborted) {
@@ -99,6 +102,35 @@ export async function runPollConnector({
         }
       }
     }
+  } finally {
+    await connector.close?.();
+  }
+}
+
+export async function runPollConnectorBackfill({
+  connector,
+  pipeline,
+  accountId = null,
+}: RunPollConnectorBackfillInput): Promise<RunPollConnectorBackfillResult> {
+  const cursorState = createPollConnectorCursorState({
+    connector,
+    pipeline,
+    accountId,
+  });
+
+  try {
+    if (!connector.capabilities.backfill) {
+      return { cursor: cursorState.getCursor() };
+    }
+
+    return {
+      cursor: cursorState.writeTerminalCursor(
+        await connector.backfill(cursorState.getCursor(), cursorState.emit),
+        {
+          preserveLatestEmittedCursor: true,
+        },
+      ),
+    };
   } finally {
     await connector.close?.();
   }
@@ -189,6 +221,57 @@ async function runConnectorWithRestart(input: {
       );
     }
   }
+}
+
+function createPollConnectorCursorState(input: {
+  connector: PollConnector;
+  pipeline: InboxPipeline;
+  accountId?: string | null;
+}) {
+  const cursorAccountId = input.accountId ?? input.connector.accountId ?? null;
+  let cursor = input.pipeline.runtime.getCursor(
+    input.connector.source,
+    cursorAccountId,
+  );
+
+  return {
+    emit: async (
+      capture: Parameters<InboxPipeline["processCapture"]>[0],
+      checkpoint?: Cursor | null,
+    ) => {
+      const result = await input.pipeline.processCapture(capture);
+      const nextCursor =
+        checkpoint === undefined
+          ? createCaptureCheckpoint(capture)
+          : (checkpoint ?? null);
+      cursor = nextCursor;
+      input.pipeline.runtime.setCursor(
+        input.connector.source,
+        cursorAccountId ?? capture.accountId ?? null,
+        nextCursor,
+      );
+      return result;
+    },
+    getCursor: (): Cursor | null => cursor,
+    writeTerminalCursor: (
+      nextCursor: Cursor | null,
+      options?: {
+        preserveLatestEmittedCursor?: boolean;
+      },
+    ): Cursor | null => {
+      const resolvedCursor =
+        nextCursor === null && options?.preserveLatestEmittedCursor
+          ? cursor ?? null
+          : nextCursor;
+      cursor = resolvedCursor;
+      input.pipeline.runtime.setCursor(
+        input.connector.source,
+        cursorAccountId,
+        resolvedCursor,
+      );
+      return resolvedCursor;
+    },
+  };
 }
 
 function shouldRetryConnectorFailure(

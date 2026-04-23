@@ -9,6 +9,11 @@ export type {
 } from "./kernel/pipeline.ts";
 export type {
   ConnectorRestartPolicy,
+  RunPollConnectorBackfillInput,
+  RunPollConnectorBackfillResult,
+} from "./kernel/daemon.ts";
+export {
+  runPollConnectorBackfill,
 } from "./kernel/daemon.ts";
 export type {
   IndexedAttachment,
@@ -30,3 +35,6 @@ export type {
 export {
   rebuildRuntimeFromVault,
 } from "./indexing/persist.ts";
+export {
+  createCaptureCheckpoint,
+} from "./shared-runtime.ts";

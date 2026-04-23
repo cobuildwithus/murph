@@ -1,6 +1,7 @@
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type {
   InboxAppEnvironment,
+  InboxPipeline,
   InboxServices,
   InboxRunEvent,
   ParserRuntimeDrainResult,
@@ -19,7 +20,6 @@ import {
   createParserServiceContext,
   summarizeParserDrain,
 } from '../inbox-services/parser.js'
-import { buildCaptureCursor } from '../inbox-services/query.js'
 import {
   ensureInitialized,
   readConfig,
@@ -278,17 +278,39 @@ export function createInboxRuntimeOps(
       const runtime = await inboxd.openInboxRuntime({
         vaultRoot: paths.absoluteVaultRoot,
       })
-      const pipeline = await inboxd.createInboxPipeline({
-        vaultRoot: paths.absoluteVaultRoot,
-        runtime,
-      })
-      const parserService = input.parse
-        ? await createParserServiceContext(
-            paths.absoluteVaultRoot,
+      let parseResults: ParserRuntimeDrainResult[] = []
+      let pipeline: InboxPipeline | null = null
+
+      try {
+        if (input.parse) {
+          const parsers = await env.requireParsers('historical inbox backfill parsing')
+          const configured = await parsers.createConfiguredParserRegistry({
+            vaultRoot: paths.absoluteVaultRoot,
+          })
+          pipeline = await inboxd.createParsedInboxPipeline({
+            vaultRoot: paths.absoluteVaultRoot,
             runtime,
-            await env.requireParsers('historical inbox backfill parsing'),
-          )
-        : null
+            registry: configured.registry,
+            ffmpeg: configured.ffmpeg,
+            drainParsersOnDeduped: false,
+            onParserDrain(results) {
+              parseResults = parseResults.concat(results)
+            },
+          })
+        } else {
+          pipeline = await inboxd.createInboxPipeline({
+            vaultRoot: paths.absoluteVaultRoot,
+            runtime,
+          })
+        }
+      } catch (error) {
+        runtime.close()
+        throw error
+      }
+      if (!pipeline) {
+        runtime.close()
+        throw new Error('Inbox backfill pipeline was not created.')
+      }
 
       try {
         const connector = await instantiateConnector({
@@ -300,51 +322,35 @@ export function createInboxRuntimeOps(
         })
         let importedCount = 0
         let dedupedCount = 0
-        let parseResults: ParserRuntimeDrainResult[] = []
         const cursorAccountId = runtimeNamespaceAccountId(connectorConfig)
-        let cursor = runtime.getCursor(connector.source, cursorAccountId)
-
-        const nextCursor = await connector.backfill(
-          cursor,
-          async (capture, checkpoint) => {
+        const countingPipeline: InboxPipeline = {
+          runtime: pipeline.runtime,
+          async processCapture(capture) {
             const persisted = await pipeline.processCapture(capture)
             if (persisted.deduped) {
               dedupedCount += 1
             } else {
               importedCount += 1
-              if (parserService) {
-                parseResults = parseResults.concat(
-                  await parserService.drain({
-                    captureId: persisted.captureId,
-                  }),
-                )
-              }
             }
-            cursor =
-              checkpoint === undefined ? buildCaptureCursor(capture) : checkpoint ?? null
-            runtime.setCursor(
-              connector.source,
-              cursorAccountId ?? capture.accountId ?? null,
-              cursor,
-            )
             return persisted
           },
-        )
-
-        runtime.setCursor(
-          connector.source,
-          cursorAccountId,
-          nextCursor ?? cursor ?? null,
-        )
-        await connector.close?.()
+          close() {
+            pipeline.close()
+          },
+        }
+        const backfill = await inboxd.runPollConnectorBackfill({
+          connector,
+          pipeline: countingPipeline,
+          accountId: cursorAccountId,
+        })
 
         return {
           vault: paths.absoluteVaultRoot,
           sourceId: connectorConfig.id,
           importedCount,
           dedupedCount,
-          cursor: runtime.getCursor(connector.source, cursorAccountId) ?? null,
-          parse: parserService
+          cursor: backfill.cursor,
+          parse: input.parse
             ? summarizeParserDrain(paths.absoluteVaultRoot, parseResults)
             : undefined,
         }
