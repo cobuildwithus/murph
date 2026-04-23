@@ -126,6 +126,7 @@ export async function promoteCanonicalAttachmentImport<
     capture: RuntimeCaptureRecord
     prepared: TPrepared
     attachment: TAttachment
+    metadata: CanonicalPromotionMetadata
   }): Promise<{
     lookupId: string
     relatedId: string
@@ -181,6 +182,7 @@ export async function promoteCanonicalAttachmentImport<
               capture,
               prepared,
               attachment,
+              metadata,
             }),
         })
 
