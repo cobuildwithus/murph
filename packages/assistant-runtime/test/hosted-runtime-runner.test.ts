@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  HOSTED_AI_USAGE_BILLING_MODE_ENV,
   buildHostedExecutionDeviceSyncWake,
   buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionMemberActivatedWake,
@@ -711,6 +712,7 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
         },
         runtime: {
           forwardedEnv: {
+            [HOSTED_AI_USAGE_BILLING_MODE_ENV]: "stripe_meter",
             HOSTED_ASSISTANT_BASE_URL: "https://ai-gateway.vercel.sh/v1",
             HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
             HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY: "rk_test_123",
@@ -737,6 +739,53 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
     expect(billingPort.resolveVercelAiGatewayStripeCustomerId).toHaveBeenCalledTimes(1);
   });
 
+  it("skips delegated billing lookup when hosted AI usage billing mode is disabled", async () => {
+    const billingPort = {
+      resolveVercelAiGatewayStripeCustomerId: vi.fn(async () => ({
+        stripeCustomerId: "cus_platform_123",
+      })),
+    };
+    mocks.executeHostedRunDrainForCommit.mockImplementationOnce(async (input) => {
+      expect(input.executionContext.hosted?.stripeCustomerId).toBeNull();
+      return committedExecution;
+    });
+
+    const result = await runHostedAssistantRuntimeJobInProcessDetailed(
+      {
+        request: {
+          bundle: "incoming-bundle",
+          run: HOSTED_RUN_CONTEXT,
+          runDrain: createSingleWakeRunDrain(buildMemberActivatedWake("evt_billing_disabled")),
+        },
+        runtime: {
+          forwardedEnv: {
+            [HOSTED_AI_USAGE_BILLING_MODE_ENV]: "disabled",
+            HOSTED_ASSISTANT_BASE_URL: "https://ai-gateway.vercel.sh/v1",
+            HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+            HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY: "rk_test_123",
+            HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED: "true",
+          },
+          userEnv: {},
+        },
+      },
+      {
+        platform: {
+          artifactStore: {
+            async get() {
+              return null;
+            },
+            async put() {},
+          },
+          billingPort,
+          effectsPort: createHostedRuntimeEffectsPortStub(),
+        },
+      },
+    );
+
+    assert.deepEqual(result, committedFirstPassResult);
+    expect(billingPort.resolveVercelAiGatewayStripeCustomerId).not.toHaveBeenCalled();
+  });
+
   it("skips delegated billing lookup for member-funded Vercel AI Gateway runs", async () => {
     const billingPort = {
       resolveVercelAiGatewayStripeCustomerId: vi.fn(async () => ({
@@ -757,6 +806,7 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
         },
         runtime: {
           forwardedEnv: {
+            [HOSTED_AI_USAGE_BILLING_MODE_ENV]: "stripe_meter",
             HOSTED_ASSISTANT_API_KEY_ENV: "VERCEL_AI_API_KEY",
             HOSTED_ASSISTANT_BASE_URL: "https://ai-gateway.vercel.sh/v1",
             HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
@@ -806,6 +856,7 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
         },
         runtime: {
           forwardedEnv: {
+            [HOSTED_AI_USAGE_BILLING_MODE_ENV]: "stripe_meter",
             HOSTED_ASSISTANT_API_KEY_ENV: "VERCEL_AI_API_KEY",
             HOSTED_ASSISTANT_BASE_URL: "https://ai-gateway.vercel.sh/v1",
             HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
@@ -1006,6 +1057,7 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
         },
         runtime: {
           forwardedEnv: {
+            [HOSTED_AI_USAGE_BILLING_MODE_ENV]: "stripe_meter",
             HOSTED_ASSISTANT_BASE_URL: "https://ai-gateway.vercel.sh/v1",
             HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
             HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY: "rk_test_123",

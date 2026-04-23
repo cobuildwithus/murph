@@ -1,4 +1,5 @@
 export * from "./auth.ts";
+export * from "./ai-usage-billing-mode.ts";
 export * from "./builders.ts";
 export * from "./bundles.ts";
 export * from "./contracts.ts";
