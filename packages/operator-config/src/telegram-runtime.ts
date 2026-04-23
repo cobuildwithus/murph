@@ -173,15 +173,13 @@ export async function deleteTelegramMessages(
 
   for (let index = 0; index < messageIds.length; index += TELEGRAM_DELETE_BATCH_LIMIT) {
     const batch = messageIds.slice(index, index + TELEGRAM_DELETE_BATCH_LIMIT)
+    const request = buildTelegramDeleteRequest(target, batch)
     const response = await sendTelegramBotApiRequest({
       baseUrl,
       fetchImplementation,
       method: 'POST',
-      operation: 'deleteMessages',
-      payload: {
-        chat_id: target.chatId,
-        message_ids: batch,
-      },
+      operation: request.operation,
+      payload: request.payload,
       signal: dependencies.signal,
       token,
     })
@@ -194,10 +192,11 @@ export async function deleteTelegramMessages(
     throw new VaultCliError(
       'ASSISTANT_TELEGRAM_DELETE_FAILED',
       errorContext.description ??
-        `Telegram Bot API deleteMessages failed with HTTP ${response.status}.`,
+        `Telegram Bot API ${request.operation} failed with HTTP ${response.status}.`,
       {
         errorCode: errorContext.errorCode,
         messageIdCount: batch.length,
+        operation: request.operation,
         status: response.status,
         target: serializeTelegramThreadTarget(target),
       },
@@ -336,11 +335,37 @@ async function sendTelegramTypingIndicatorOnce(input: {
   )
 }
 
+function buildTelegramDeleteRequest(
+  target: TelegramThreadTarget,
+  messageIds: readonly number[],
+): {
+  operation: 'deleteBusinessMessages' | 'deleteMessages'
+  payload: Record<string, unknown>
+} {
+  if (target.businessConnectionId) {
+    return {
+      operation: 'deleteBusinessMessages',
+      payload: {
+        business_connection_id: target.businessConnectionId,
+        message_ids: messageIds,
+      },
+    }
+  }
+
+  return {
+    operation: 'deleteMessages',
+    payload: {
+      chat_id: target.chatId,
+      message_ids: messageIds,
+    },
+  }
+}
+
 async function sendTelegramBotApiRequest(input: {
   baseUrl: string
   fetchImplementation: TelegramFetchImplementation
   method: 'POST'
-  operation: 'deleteMessages' | 'sendChatAction'
+  operation: 'deleteBusinessMessages' | 'deleteMessages' | 'sendChatAction'
   payload: Record<string, unknown>
   signal?: AbortSignal
   token: string
