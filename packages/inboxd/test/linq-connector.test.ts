@@ -55,7 +55,27 @@ test("normalizeLinqWebhookEvent builds direct chat captures and hydrates downloa
   assert.equal(capture.attachments[0]?.fileName, "photo.jpg");
   assert.equal(capture.attachments[0]?.mime, "image/jpeg");
   assert.equal(capture.attachments[0]?.data?.byteLength, 4);
-  assert.equal(capture.raw.event_type, "message.received");
+  assert.deepEqual(capture.raw, {
+    schema: "murph.linq-capture.v1",
+    event_type: "message.received",
+    event_id: "evt_123",
+    chat_id: "chat_123",
+    message_id: "msg_123",
+    is_from_me: false,
+    service: "SMS",
+    text_part_count: 1,
+    link_part_count: 0,
+    media_part_count: 1,
+    voice_memo_part_count: 0,
+    attachments: [
+      {
+        type: "media",
+        attachment_id: "att_1",
+        mime_type: "image/jpeg",
+        size: 4,
+      },
+    ],
+  });
 });
 
 test("normalizeLinqWebhookEvent falls back to created_at when received_at is missing", async () => {
@@ -285,7 +305,19 @@ test("normalizeLinqWebhookEvent accepts minimized canonical Linq events from hos
   assert.equal(capture.accountId, "hbidx:phone:v1:test");
   assert.equal(capture.thread.id, "chat_stored");
   assert.equal(capture.text, "Stored webhook snapshot");
-  assert.equal(capture.raw.event_type, "message.received");
+  assert.deepEqual(capture.raw, {
+    schema: "murph.linq-capture.v1",
+    event_type: "message.received",
+    event_id: "evt_stored",
+    chat_id: "chat_stored",
+    message_id: "hbid:linq.message:v1:test",
+    is_from_me: false,
+    service: "iMessage",
+    text_part_count: 1,
+    link_part_count: 0,
+    media_part_count: 0,
+    voice_memo_part_count: 0,
+  });
 });
 
 test("normalizeHostedLinqConversationMessage preserves hosted account ids and reply-thread message ids", async () => {
@@ -371,27 +403,26 @@ test("normalizeHostedLinqConversationMessage preserves reply metadata and metada
     },
   ]);
   assert.deepEqual(capture.raw, {
-    chatId: "chat_stored",
-    from: "hbid:linq.from:v1:test",
-    isFromMe: false,
-    messageId: "msg_reply_media_123",
-    parts: [
+    schema: "murph.linq-capture.v1",
+    event_type: "message.received",
+    chat_id: "chat_stored",
+    message_id: "msg_reply_media_123",
+    is_from_me: false,
+    service: "iMessage",
+    reply_to_message_id: "msg_parent_123",
+    reply_to_part_index: 1,
+    text_part_count: 1,
+    link_part_count: 0,
+    media_part_count: 0,
+    voice_memo_part_count: 1,
+    attachments: [
       {
-        type: "text",
-        value: "See attached reply",
-      },
-      {
+        type: "voice_memo",
         attachment_id: "voice_att_1",
-        filename: "voice-note.m4a",
         mime_type: "audio/m4a",
         size: 4096,
-        type: "voice_memo",
-        url: "https://cdn.example.test/voice-note.m4a",
       },
     ],
-    replyToMessageId: "msg_parent_123",
-    replyToPartIndex: 1,
-    service: "iMessage",
   });
 });
 
