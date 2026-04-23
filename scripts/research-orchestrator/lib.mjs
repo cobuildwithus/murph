@@ -1135,28 +1135,21 @@ find_repo_dir() {
 }
 
 repo_dir="$(find_repo_dir "\${workspace_dir}")" || repo_dir=""
-default_browser_binary="/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"
-default_browser_user_data_dir="$HOME/Library/Application Support/MurphReviewGPT/Eragon"
 profile_helper=""
 
 if [[ -n "\${repo_dir}" ]]; then
   profile_helper="\${repo_dir}/scripts/review-gpt-browser-profile.sh"
-  if [[ -x "\${profile_helper}" ]]; then
-    eragon_browser_binary="$("\${profile_helper}" browser-binary eragon 2>/dev/null || true)"
-    eragon_user_data_dir="$("\${profile_helper}" user-data-dir eragon 2>/dev/null || true)"
-    if [[ -n "\${eragon_browser_binary}" ]]; then
-      default_browser_binary="\${eragon_browser_binary}"
-    fi
-    if [[ -n "\${eragon_user_data_dir}" ]]; then
-      default_browser_user_data_dir="\${eragon_user_data_dir}"
-    fi
+  if [[ -r "\${profile_helper}" ]]; then
+    # shellcheck source=/dev/null
+    . "\${profile_helper}"
+    murph_review_gpt_profile_apply_browser_defaults eragon || true
   fi
 fi
 
-browser_binary_path="\${browser_binary_path:-\${default_browser_binary}}"
-managed_browser_user_data_dir="\${RESEARCH_MANAGED_BROWSER_USER_DATA_DIR:-\${default_browser_user_data_dir}}"
-managed_browser_profile="\${RESEARCH_MANAGED_BROWSER_PROFILE:-Default}"
-managed_browser_port="\${RESEARCH_MANAGED_BROWSER_PORT:-9448}"
+browser_binary_path="\${browser_binary_path:-/Applications/Brave Browser.app/Contents/MacOS/Brave Browser}"
+managed_browser_user_data_dir="\${RESEARCH_MANAGED_BROWSER_USER_DATA_DIR:-\${managed_browser_user_data_dir:-$HOME/Library/Application Support/MurphReviewGPT/Eragon}}"
+managed_browser_profile="\${RESEARCH_MANAGED_BROWSER_PROFILE:-\${managed_browser_profile:-Default}}"
+managed_browser_port="\${RESEARCH_MANAGED_BROWSER_PORT:-\${managed_browser_port:-9448}}"
 research_thread_export_browser_endpoint="\${RESEARCH_THREAD_EXPORT_BROWSER_ENDPOINT:-http://127.0.0.1:\${managed_browser_port}}"
 `;
 }

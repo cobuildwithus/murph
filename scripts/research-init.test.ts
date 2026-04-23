@@ -1516,9 +1516,10 @@ function assertResearchReviewGptSupportFiles(outDir: string) {
 
   const workProfileConfig = readFileSync(workProfileConfigPath, "utf8");
   expect(workProfileConfig).toContain('. "${script_dir}/review-gpt-research.config.sh"');
-  expect(workProfileConfig).toContain('default_browser_binary="/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"');
-  expect(workProfileConfig).toContain('default_browser_user_data_dir="$HOME/Library/Application Support/MurphReviewGPT/Eragon"');
-  expect(workProfileConfig).toContain('managed_browser_port="${RESEARCH_MANAGED_BROWSER_PORT:-9448}"');
+  expect(workProfileConfig).toContain('murph_review_gpt_profile_apply_browser_defaults eragon || true');
+  expect(workProfileConfig).toContain('browser_binary_path="${browser_binary_path:-/Applications/Brave Browser.app/Contents/MacOS/Brave Browser}"');
+  expect(workProfileConfig).toContain('managed_browser_user_data_dir="${RESEARCH_MANAGED_BROWSER_USER_DATA_DIR:-${managed_browser_user_data_dir:-$HOME/Library/Application Support/MurphReviewGPT/Eragon}}"');
+  expect(workProfileConfig).toContain('managed_browser_port="${RESEARCH_MANAGED_BROWSER_PORT:-${managed_browser_port:-9448}}"');
   expect(workProfileConfig).toContain('research_thread_export_browser_endpoint="${RESEARCH_THREAD_EXPORT_BROWSER_ENDPOINT:-http://127.0.0.1:${managed_browser_port}}"');
   expect(workProfileConfig).not.toContain('scripts/review-gpt.config.sh');
 
