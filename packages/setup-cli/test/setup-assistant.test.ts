@@ -173,7 +173,7 @@ test('setup assistant defaults round-trip between saved operator defaults and se
   })
   assert.equal(
     formatSavedAssistantDefaultsSummary(codexDefaults),
-    'gpt-5.4 in Codex OSS (Team account)',
+    'gpt-5.4 via Codex OSS app-server (Team account)',
   )
   assert.equal(
     formatSavedAssistantDefaultsSummary(openAiDefaults),
@@ -242,7 +242,7 @@ test('setup assistant summary helpers label accounts consistently for selected a
         quota: null,
       },
     }),
-    'the configured model in Codex CLI',
+    'the configured model via Codex app-server',
   )
   assert.equal(
     formatSavedAssistantDefaultsSummary({
@@ -268,7 +268,57 @@ test('setup assistant summary helpers label accounts consistently for selected a
       },
       selfDeliveryTargets: null,
     }),
-    'the configured model in Codex CLI',
+    'the configured model via Codex app-server',
+  )
+})
+
+test('setup assistant saved defaults summaries cover OpenAI-compatible endpoint and fallback branches', () => {
+  assert.equal(
+    formatSavedAssistantDefaultsSummary({
+      backend: {
+        adapter: 'openai-compatible',
+        apiKeyEnv: 'OPENAI_API_KEY',
+        endpoint: 'https://example.test/v1',
+        headers: null,
+        model: null,
+        presetId: null,
+        providerName: 'Example',
+        reasoningEffort: null,
+        webSearch: null,
+      },
+      identityId: null,
+      failoverRoutes: null,
+      account: {
+        source: 'codex-auth-json',
+        kind: 'api-key',
+        planCode: null,
+        planName: null,
+        quota: null,
+      },
+      selfDeliveryTargets: null,
+    }),
+    'the configured model via https://example.test/v1 (API key account)',
+  )
+
+  assert.equal(
+    formatSavedAssistantDefaultsSummary({
+      backend: {
+        adapter: 'openai-compatible',
+        apiKeyEnv: null,
+        endpoint: null,
+        headers: null,
+        model: null,
+        presetId: null,
+        providerName: null,
+        reasoningEffort: null,
+        webSearch: null,
+      },
+      identityId: null,
+      failoverRoutes: null,
+      account: null,
+      selfDeliveryTargets: null,
+    }),
+    null,
   )
 })
 
@@ -712,7 +762,7 @@ test('setup assistant defaults helpers retain explicit codex command and surface
         quota: null,
       },
     }),
-    'the configured local model in Codex OSS',
+    'the configured local model via Codex OSS app-server',
   )
   assert.equal(
     formatSavedAssistantDefaultsSummary({
@@ -988,7 +1038,7 @@ test('setup assistant summaries and account helpers cover OSS and fallback branc
       },
       detail: 'Codex OSS',
     }),
-    'the configured local model in Codex OSS (API key account)',
+    'the configured local model via Codex OSS app-server (API key account)',
   )
 
   assert.equal(detectCodexAccountFromAuthJson('not-json'), null)
