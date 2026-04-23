@@ -668,7 +668,7 @@ function buildCodexThreadContextParams(input: {
     approvalPolicy: mapCodexAppServerApprovalPolicy(input.input.approvalPolicy),
     cwd: input.input.workingDirectory,
     model: normalizeNullableString(input.input.model),
-    sandbox: input.input.sandbox,
+    sandbox: mapCodexAppServerSandboxMode(input.input.sandbox),
     serviceName: input.includeServiceName ? CODEX_RPC_CLIENT_NAME : undefined,
   })
 }
@@ -716,6 +716,21 @@ function mapCodexAppServerApprovalPolicy(
       return 'unlessTrusted'
     case 'never':
       return 'never'
+    default:
+      return undefined
+  }
+}
+
+function mapCodexAppServerSandboxMode(
+  sandbox: AssistantSandbox | null | undefined,
+): string | undefined {
+  switch (sandbox) {
+    case 'read-only':
+      return 'readOnly'
+    case 'workspace-write':
+      return 'workspaceWrite'
+    case 'danger-full-access':
+      return 'dangerFullAccess'
     default:
       return undefined
   }
