@@ -585,11 +585,17 @@ function parseLinqMessagePart(part: unknown, index: number): LinqMessagePart {
       url: normalizeNullableString(record.url),
       attachment_id:
         normalizeNullableString(record.id)
-        ?? normalizeNullableString(record.attachment_id),
-      filename: normalizeNullableString(record.filename),
-      mime_type: normalizeNullableString(record.mime_type),
+        ?? normalizeNullableString(record.attachment_id)
+        ?? normalizeNullableString(record.attachmentId),
+      filename:
+        normalizeNullableString(record.filename)
+        ?? normalizeNullableString(record.fileName),
+      mime_type:
+        normalizeNullableString(record.mime_type)
+        ?? normalizeNullableString(record.mimeType),
       size:
         normalizeNullableNumber(record.size_bytes)
+        ?? normalizeNullableNumber(record.sizeBytes)
         ?? normalizeNullableNumber(record.size),
     };
   }
