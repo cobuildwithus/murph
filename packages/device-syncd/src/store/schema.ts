@@ -5,7 +5,54 @@
 
 import type { DatabaseSync } from "node:sqlite";
 
-export const DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION = 1;
+export const DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION = 2;
+
+function addColumnIfMissing(
+  database: DatabaseSync,
+  tableName: string,
+  columnName: string,
+  definition: string,
+): boolean {
+  const columns = new Set(
+    (database.prepare(`pragma table_info(${tableName})`).all() as Array<{ name?: string }>)
+      .map((row) => row.name)
+      .filter((name): name is string => typeof name === "string"),
+  );
+
+  if (columns.has(columnName)) {
+    return false;
+  }
+
+  database.exec(`alter table ${tableName} add column ${columnName} ${definition};`);
+  return true;
+}
+
+function backfillLegacyDeviceObservationRevisions(database: DatabaseSync): void {
+  database.exec(`
+    update device_observation_state as observation
+    set local_connection_revision = 1
+    where local_connection_revision = 0
+      and hosted_observed_updated_at is not null
+      and exists (
+        select 1
+        from device_connection as connection
+        where connection.id = observation.account_id
+          and connection.updated_at <> observation.hosted_observed_updated_at
+      );
+
+    update device_observation_state as observation
+    set local_token_revision = 1
+    where local_token_revision = 0
+      and hosted_observed_token_version is not null
+      and hosted_observed_updated_at is not null
+      and exists (
+        select 1
+        from device_credential_state as credential
+        where credential.account_id = observation.account_id
+          and credential.updated_at <> observation.hosted_observed_updated_at
+      );
+  `);
+}
 
 export function ensureDeviceSyncStoreSchema(database: DatabaseSync): void {
   database.exec(`
@@ -51,7 +98,11 @@ export function ensureDeviceSyncStoreSchema(database: DatabaseSync): void {
       create table if not exists device_observation_state (
         account_id text primary key references device_connection(id) on delete cascade,
         hosted_observed_updated_at text,
+        hosted_observed_connection_revision integer not null default 0,
         hosted_observed_token_version integer,
+        hosted_observed_token_revision integer not null default 0,
+        local_connection_revision integer not null default 0,
+        local_token_revision integer not null default 0,
         last_webhook_at text,
         last_sync_started_at text,
         last_sync_completed_at text,
@@ -109,4 +160,38 @@ export function ensureDeviceSyncStoreSchema(database: DatabaseSync): void {
       create index if not exists webhook_trace_received_idx
       on webhook_trace (received_at desc);
     `);
+
+  const addedHostedObservedConnectionRevision = addColumnIfMissing(
+    database,
+    "device_observation_state",
+    "hosted_observed_connection_revision",
+    "integer not null default 0",
+  );
+  const addedHostedObservedTokenRevision = addColumnIfMissing(
+    database,
+    "device_observation_state",
+    "hosted_observed_token_revision",
+    "integer not null default 0",
+  );
+  const addedLocalConnectionRevision = addColumnIfMissing(
+    database,
+    "device_observation_state",
+    "local_connection_revision",
+    "integer not null default 0",
+  );
+  const addedLocalTokenRevision = addColumnIfMissing(
+    database,
+    "device_observation_state",
+    "local_token_revision",
+    "integer not null default 0",
+  );
+
+  if (
+    addedHostedObservedConnectionRevision
+    || addedHostedObservedTokenRevision
+    || addedLocalConnectionRevision
+    || addedLocalTokenRevision
+  ) {
+    backfillLegacyDeviceObservationRevisions(database);
+  }
 }

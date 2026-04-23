@@ -44,11 +44,15 @@ function createAccount(scopes: string[], overrides: Partial<DeviceSyncAccount> =
 function createStoredAccount(scopes: string[], overrides: Partial<StoredDeviceSyncAccount> = {}): StoredDeviceSyncAccount {
   return {
     ...createAccount(scopes),
+    ...overrides,
     accessTokenEncrypted: "encrypted-access-token",
+    hostedObservedConnectionRevision: overrides.hostedObservedConnectionRevision ?? 0,
+    hostedObservedTokenRevision: overrides.hostedObservedTokenRevision ?? 0,
     hostedObservedTokenVersion: null,
     hostedObservedUpdatedAt: null,
+    localConnectionRevision: overrides.localConnectionRevision ?? 0,
+    localTokenRevision: overrides.localTokenRevision ?? 0,
     refreshTokenEncrypted: "encrypted-refresh-token",
-    ...overrides,
   };
 }
 

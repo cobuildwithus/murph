@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -458,11 +458,32 @@ describe("vault sync merge", () => {
       .resolves.toBe(hostedCoreBefore);
     expect(result.imported.jsonlRecords).toBe(1);
     expect(result.imported.rawFiles).toBe(2);
-    expect(result.conflicts.some((conflict) => conflict.path === VAULT_LAYOUT.coreDocument)).toBe(true);
-    expect(result.conflictManifestPath).toBeTruthy();
+    expect(result.conflicts).toContainEqual(expect.objectContaining({
+      path: VAULT_LAYOUT.coreDocument,
+      preservedLocalPath: null,
+    }));
+    expect(result.conflictManifestPath).toBe("raw/sync-imports/vsi_test_merge/manifest.json");
+    if (!result.conflictManifestPath) {
+      throw new Error("Expected conflict manifest path");
+    }
+    const conflictManifest = JSON.parse(
+      await readFile(path.join(hosted, result.conflictManifestPath), "utf8"),
+    ) as {
+      conflicts?: Array<Record<string, unknown>>;
+      summary?: { conflictCount?: number };
+    };
+    expect(conflictManifest.summary?.conflictCount).toBe(result.conflicts.length);
+    expect(conflictManifest.conflicts).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        path: VAULT_LAYOUT.coreDocument,
+        preservedLocalPath: null,
+        reason: "remote_and_local_differ",
+      }),
+    ]));
+    await expect(readdir(path.join(hosted, "raw/sync-imports/vsi_test_merge"))).resolves.toEqual(["manifest.json"]);
   });
 
-  it("preserves raw and JSONL conflicts without clobbering hosted values", async () => {
+  it("records raw and JSONL conflicts without clobbering hosted values or preserving payload copies", async () => {
     const hosted = await createTempVault("Hosted vault");
     const local = await createTempVault("Local vault");
     const eventLedger = `${VAULT_LAYOUT.eventLedgerDirectory}/2026/2026-04.jsonl`;
@@ -516,16 +537,48 @@ describe("vault sync merge", () => {
       .resolves.toContain("\"title\":\"Hosted encounter\"");
     await expect(readFile(path.join(hosted, rawFile), "utf8"))
       .resolves.toBe("hosted raw\n");
-    expect(result.conflicts.some((conflict) => conflict.kind === "jsonl")).toBe(true);
-    expect(result.conflicts.some((conflict) => conflict.kind === "raw")).toBe(true);
-    const preservedPaths = result.conflicts
-      .map((conflict) => conflict.preservedLocalPath)
-      .filter((preservedPath): preservedPath is string => Boolean(preservedPath));
-    expect(preservedPaths.length).toBeGreaterThanOrEqual(2);
-    for (const preservedPath of preservedPaths) {
-      await expect(readFile(path.join(hosted, preservedPath), "utf8"))
-        .resolves.toBeTruthy();
+    expect(result.conflicts).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: "jsonl",
+        localSha256: expect.stringMatching(/^sha256:/u),
+        path: eventLedger,
+        preservedLocalPath: null,
+        reason: "same_record_key_different_payload",
+        remoteSha256: expect.stringMatching(/^sha256:/u),
+      }),
+      expect.objectContaining({
+        kind: "raw",
+        localSha256: expect.stringMatching(/^sha256:/u),
+        path: rawFile,
+        preservedLocalPath: null,
+        reason: "remote_and_local_differ",
+        remoteSha256: expect.stringMatching(/^sha256:/u),
+      }),
+    ]));
+    expect(result.conflictManifestPath).toBe("raw/sync-imports/vsi_conflicts/manifest.json");
+    if (!result.conflictManifestPath) {
+      throw new Error("Expected conflict manifest path");
     }
+    const conflictManifest = JSON.parse(
+      await readFile(path.join(hosted, result.conflictManifestPath), "utf8"),
+    ) as {
+      conflicts?: Array<Record<string, unknown>>;
+      summary?: { conflictCount?: number };
+    };
+    expect(conflictManifest.summary?.conflictCount).toBe(result.conflicts.length);
+    expect(conflictManifest.conflicts).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: "jsonl",
+        path: eventLedger,
+        preservedLocalPath: null,
+      }),
+      expect.objectContaining({
+        kind: "raw",
+        path: rawFile,
+        preservedLocalPath: null,
+      }),
+    ]));
+    await expect(readdir(path.join(hosted, "raw/sync-imports/vsi_conflicts"))).resolves.toEqual(["manifest.json"]);
   });
 
   it("rejects JSONL import records that are not objects", async () => {

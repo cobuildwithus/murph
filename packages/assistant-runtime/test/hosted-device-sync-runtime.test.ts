@@ -404,7 +404,20 @@ describe("hosted device-sync runtime", () => {
       });
 
       assert.equal(fetchSnapshotCalls, 1);
-      assert.deepEqual(state.snapshot, snapshot);
+      assert.deepEqual(state.snapshot, {
+        ...snapshot,
+        connections: [
+          {
+            ...snapshot.connections[0],
+            connection: {
+              ...snapshot.connections[0]!.connection,
+              metadata: {
+                hosted: true,
+              },
+            },
+          },
+        ],
+      });
       assert.equal(
         state.hostedToLocalAccountIds.get("hosted_conn_disconnected"),
         connected.account.id,
@@ -437,6 +450,171 @@ describe("hosted device-sync runtime", () => {
         deadJob?.lastErrorMessage,
         "Hosted control plane marked the device-sync connection as disconnected.",
       );
+    } finally {
+      service.close();
+      await cleanup();
+    }
+  });
+
+  test("sync accepts a hosted reconnect after an accepted token clear and reconciliation stays quiet", async () => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-",
+    );
+    await mkdir(vaultRoot, { recursive: true });
+
+    const service = createDeviceSyncServiceForVault(vaultRoot);
+
+    try {
+      const begin = await service.startConnection({
+        provider: "demo",
+      });
+      const connected = await service.handleOAuthCallback({
+        code: "reconnect-after-clear",
+        provider: "demo",
+        state: begin.state,
+      });
+
+      let currentSnapshot = buildRuntimeSnapshot({
+        connectionId: "hosted_conn_reconnect_after_clear",
+        displayName: "Hosted Fresh",
+        externalAccountId: connected.account.externalAccountId,
+        hostedUpdatedAt: "2026-04-06T09:10:00.000Z",
+        tokenBundle: {
+          accessToken: "hosted-access-v5",
+          accessTokenExpiresAt: "2026-04-07T00:00:00.000Z",
+          refreshToken: "hosted-refresh-v5",
+          tokenVersion: 5,
+        },
+      });
+      let appliedRequest: ApplyUpdatesRequest | null = null;
+      const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
+        async applyUpdates(input): Promise<HostedExecutionDeviceSyncRuntimeApplyResponse> {
+          appliedRequest = input;
+          return {
+            appliedAt: "2026-04-06T09:21:01.000Z",
+            updates: [],
+            userId: "member_123",
+          };
+        },
+        async createConnectLink() {
+          throw new Error("createConnectLink should not be called during sync or reconciliation");
+        },
+        async fetchSnapshot() {
+          return currentSnapshot;
+        },
+      };
+
+      await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake: buildCronWake("2026-04-06T09:11:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+
+      currentSnapshot = buildRuntimeSnapshot({
+        connectionId: "hosted_conn_reconnect_after_clear",
+        displayName: "Hosted Disconnected",
+        externalAccountId: connected.account.externalAccountId,
+        hostedUpdatedAt: "2026-04-06T09:15:00.000Z",
+        localState: {
+          lastSyncCompletedAt: "2026-04-06T09:14:00.000Z",
+        },
+        metadata: {
+          disconnected: true,
+        },
+        status: "disconnected",
+        tokenBundle: null,
+      });
+
+      await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake: buildCronWake("2026-04-06T09:16:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+
+      const disconnected = service.store.getAccountById(connected.account.id);
+      assert.ok(disconnected);
+      assert.equal(disconnected.status, "disconnected");
+      assert.equal(disconnected.accessTokenEncrypted, "");
+      assert.equal(disconnected.refreshTokenEncrypted, null);
+      assert.equal(disconnected.hostedObservedTokenVersion, null);
+
+      currentSnapshot = buildRuntimeSnapshot({
+        connectionId: "hosted_conn_reconnect_after_clear",
+        displayName: "Hosted Reconnected",
+        externalAccountId: connected.account.externalAccountId,
+        hostedUpdatedAt: "2026-04-06T09:20:00.000Z",
+        metadata: {
+          reconnected: true,
+        },
+        tokenBundle: {
+          accessToken: "hosted-access-v1",
+          accessTokenExpiresAt: "2026-04-07T01:00:00.000Z",
+          refreshToken: "hosted-refresh-v1",
+          tokenVersion: 1,
+        },
+      });
+
+      const state = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake: buildCronWake("2026-04-06T09:21:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+
+      assert.equal(state.observedTokenVersions.get("hosted_conn_reconnect_after_clear"), 1);
+
+      const stored = service.store.getAccountById(connected.account.id);
+      assert.ok(stored);
+      assert.equal(stored.status, "active");
+      assert.equal(stored.displayName, "Hosted Reconnected");
+      assert.equal(stored.hostedObservedTokenVersion, 1);
+      const codec = createSecretCodec(DEVICE_SYNC_SECRET);
+      assert.equal(
+        codec.decrypt(
+          stored.accessTokenEncrypted,
+          buildDeviceSyncTokenCipherOptions({
+            externalAccountId: stored.externalAccountId,
+            provider: stored.provider,
+            purpose: "device-sync-access-token",
+          }),
+        ),
+        "hosted-access-v1",
+      );
+      assert.ok(stored.refreshTokenEncrypted);
+      assert.equal(
+        codec.decrypt(
+          stored.refreshTokenEncrypted,
+          buildDeviceSyncTokenCipherOptions({
+            externalAccountId: stored.externalAccountId,
+            provider: stored.provider,
+            purpose: "device-sync-refresh-token",
+          }),
+        ),
+        "hosted-refresh-v1",
+      );
+
+      await reconcileHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake: buildCronWake("2026-04-06T09:22:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+        state,
+      });
+
+      assert.deepEqual(requireApplyUpdatesRequest(appliedRequest), {
+        occurredAt: "2026-04-06T09:22:00.000Z",
+        updates: [
+          {
+            connectionId: "hosted_conn_reconnect_after_clear",
+            localState: {
+              lastSyncCompletedAt: "2026-04-06T09:14:00.000Z",
+            },
+            observedUpdatedAt: "2026-04-06T09:20:00.000Z",
+          },
+        ],
+      });
     } finally {
       service.close();
       await cleanup();
@@ -1131,6 +1309,492 @@ describe("hosted device-sync runtime", () => {
       const stored = service.store.getAccountById(connected.account.id);
       assert.equal(stored?.nextReconcileAt, "2026-04-06T11:00:00.000Z");
       assert.equal(stored?.hostedObservedUpdatedAt, "2026-04-06T09:05:00.000Z");
+    } finally {
+      service.close();
+      await cleanup();
+    }
+  });
+
+  test("sync ignores stale hosted disconnect replays while keeping newer local tokens and connection state", async () => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-",
+    );
+    await mkdir(vaultRoot, { recursive: true });
+
+    const service = createDeviceSyncServiceForVault(vaultRoot);
+
+    try {
+      const begin = await service.startConnection({
+        provider: "demo",
+      });
+      const connected = await service.handleOAuthCallback({
+        code: "stale-hosted-disconnect",
+        provider: "demo",
+        state: begin.state,
+      });
+
+      await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: {
+          async applyUpdates() {
+            throw new Error("applyUpdates should not be called during sync");
+          },
+          async createConnectLink() {
+            throw new Error("createConnectLink should not be called during sync");
+          },
+          async fetchSnapshot() {
+            return buildRuntimeSnapshot({
+              connectionId: "hosted_conn_stale_disconnect",
+              displayName: "Hosted Fresh",
+              externalAccountId: connected.account.externalAccountId,
+              hostedUpdatedAt: "2026-04-06T09:10:00.000Z",
+              localState: {
+                nextReconcileAt: "2026-04-06T10:00:00.000Z",
+              },
+              metadata: {
+                hosted: true,
+              },
+              tokenBundle: {
+                accessToken: "hosted-access-v5",
+                accessTokenExpiresAt: "2026-04-07T00:00:00.000Z",
+                refreshToken: "hosted-refresh-v5",
+                tokenVersion: 5,
+              },
+            });
+          },
+        },
+        wake: buildCronWake("2026-04-06T09:11:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+
+      const hydrated = service.store.getAccountById(connected.account.id);
+      assert.ok(hydrated);
+
+      const codec = createSecretCodec(DEVICE_SYNC_SECRET);
+      const locallyRefreshed = service.store.updateAccountTokens(
+        hydrated.id,
+        {
+          accessToken: "local-access-refresh",
+          accessTokenEncrypted: codec.encrypt(
+            "local-access-refresh",
+            buildDeviceSyncTokenCipherOptions({
+              externalAccountId: hydrated.externalAccountId,
+              provider: hydrated.provider,
+              purpose: "device-sync-access-token",
+            }),
+          ),
+          accessTokenExpiresAt: "2026-04-07T01:00:00.000Z",
+          refreshToken: "local-refresh-refresh",
+          refreshTokenEncrypted: codec.encrypt(
+            "local-refresh-refresh",
+            buildDeviceSyncTokenCipherOptions({
+              externalAccountId: hydrated.externalAccountId,
+              provider: hydrated.provider,
+              purpose: "device-sync-refresh-token",
+            }),
+          ),
+        },
+        hydrated.disconnectGeneration,
+      );
+
+      assert.ok(locallyRefreshed);
+
+      service.store.patchAccount(connected.account.id, {
+        displayName: "Local Fresh",
+        metadata: {
+          local: true,
+        },
+        nextReconcileAt: "2026-04-06T10:30:00.000Z",
+        scopes: ["offline", "read:data", "manual"],
+        status: "reauthorization_required",
+      });
+
+      await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: {
+          async applyUpdates() {
+            throw new Error("applyUpdates should not be called during sync");
+          },
+          async createConnectLink() {
+            throw new Error("createConnectLink should not be called during sync");
+          },
+          async fetchSnapshot() {
+            return buildRuntimeSnapshot({
+              connectionId: "hosted_conn_stale_disconnect",
+              displayName: "Hosted Stale Disconnect",
+              externalAccountId: connected.account.externalAccountId,
+              hostedUpdatedAt: "2026-04-06T09:05:00.000Z",
+              localState: {
+                nextReconcileAt: "2026-04-06T11:00:00.000Z",
+              },
+              metadata: {
+                stale: true,
+              },
+              status: "disconnected",
+              tokenBundle: null,
+            });
+          },
+        },
+        wake: buildCronWake("2026-04-06T09:12:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+
+      const stored = service.store.getAccountById(connected.account.id);
+      assert.ok(stored);
+      assert.equal(stored.status, "reauthorization_required");
+      assert.equal(stored.displayName, "Local Fresh");
+      assert.deepEqual(stored.metadata, {
+        hosted: true,
+        local: true,
+      });
+      assert.deepEqual(stored.scopes, ["offline", "read:data", "manual"]);
+      assert.equal(stored.nextReconcileAt, "2026-04-06T11:00:00.000Z");
+      assert.equal(stored.hostedObservedUpdatedAt, "2026-04-06T09:10:00.000Z");
+      assert.equal(stored.hostedObservedTokenVersion, 5);
+      assert.equal(
+        codec.decrypt(
+          stored.accessTokenEncrypted,
+          buildDeviceSyncTokenCipherOptions({
+            externalAccountId: stored.externalAccountId,
+            provider: stored.provider,
+            purpose: "device-sync-access-token",
+          }),
+        ),
+        "local-access-refresh",
+      );
+      assert.ok(stored.refreshTokenEncrypted);
+      assert.equal(
+        codec.decrypt(
+          stored.refreshTokenEncrypted,
+          buildDeviceSyncTokenCipherOptions({
+            externalAccountId: stored.externalAccountId,
+            provider: stored.provider,
+            purpose: "device-sync-refresh-token",
+          }),
+        ),
+        "local-refresh-refresh",
+      );
+    } finally {
+      service.close();
+      await cleanup();
+    }
+  });
+
+  test("sync ignores same-snapshot hosted disconnect replays after newer local token and connection writes even when local timestamps skew older", async () => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-",
+    );
+    await mkdir(vaultRoot, { recursive: true });
+
+    const service = createDeviceSyncServiceForVault(vaultRoot);
+
+    try {
+      const begin = await service.startConnection({
+        provider: "demo",
+      });
+      const connected = await service.handleOAuthCallback({
+        code: "same-snapshot-hosted-disconnect",
+        provider: "demo",
+        state: begin.state,
+      });
+
+      await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: {
+          async applyUpdates() {
+            throw new Error("applyUpdates should not be called during sync");
+          },
+          async createConnectLink() {
+            throw new Error("createConnectLink should not be called during sync");
+          },
+          async fetchSnapshot() {
+            return buildRuntimeSnapshot({
+              connectionId: "hosted_conn_same_snapshot_disconnect",
+              displayName: "Hosted Fresh",
+              externalAccountId: connected.account.externalAccountId,
+              hostedUpdatedAt: "2026-04-06T09:10:00.000Z",
+              localState: {
+                nextReconcileAt: "2026-04-06T10:00:00.000Z",
+              },
+              metadata: {
+                hosted: true,
+              },
+              tokenBundle: {
+                accessToken: "hosted-access-v5",
+                accessTokenExpiresAt: "2026-04-07T00:00:00.000Z",
+                refreshToken: "hosted-refresh-v5",
+                tokenVersion: 5,
+              },
+            });
+          },
+        },
+        wake: buildCronWake("2026-04-06T09:11:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+
+      const hydrated = service.store.getAccountById(connected.account.id);
+      assert.ok(hydrated);
+
+      const codec = createSecretCodec(DEVICE_SYNC_SECRET);
+      const locallyRefreshed = service.store.updateAccountTokens(
+        hydrated.id,
+        {
+          accessToken: "local-access-refresh",
+          accessTokenEncrypted: codec.encrypt(
+            "local-access-refresh",
+            buildDeviceSyncTokenCipherOptions({
+              externalAccountId: hydrated.externalAccountId,
+              provider: hydrated.provider,
+              purpose: "device-sync-access-token",
+            }),
+          ),
+          accessTokenExpiresAt: "2026-04-07T01:00:00.000Z",
+          refreshToken: "local-refresh-refresh",
+          refreshTokenEncrypted: codec.encrypt(
+            "local-refresh-refresh",
+            buildDeviceSyncTokenCipherOptions({
+              externalAccountId: hydrated.externalAccountId,
+              provider: hydrated.provider,
+              purpose: "device-sync-refresh-token",
+            }),
+          ),
+        },
+        hydrated.disconnectGeneration,
+      );
+
+      assert.ok(locallyRefreshed);
+
+      service.store.patchAccount(connected.account.id, {
+        displayName: "Local Fresh",
+        metadata: {
+          local: true,
+        },
+        nextReconcileAt: "2026-04-06T10:30:00.000Z",
+        scopes: ["offline", "read:data", "manual"],
+        status: "reauthorization_required",
+      });
+
+      service.store.database.prepare(`
+        update device_connection
+        set updated_at = ?
+        where id = ?
+      `).run("2026-04-06T08:00:00.000Z", connected.account.id);
+
+      await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: {
+          async applyUpdates() {
+            throw new Error("applyUpdates should not be called during sync");
+          },
+          async createConnectLink() {
+            throw new Error("createConnectLink should not be called during sync");
+          },
+          async fetchSnapshot() {
+            return buildRuntimeSnapshot({
+              connectionId: "hosted_conn_same_snapshot_disconnect",
+              displayName: "Hosted Replayed Disconnect",
+              externalAccountId: connected.account.externalAccountId,
+              hostedUpdatedAt: "2026-04-06T09:10:00.000Z",
+              localState: {
+                lastErrorCode: "REPLAY_IGNORED",
+                lastErrorMessage: "same hosted snapshot",
+                lastSyncCompletedAt: "2026-04-06T09:45:00.000Z",
+                lastSyncErrorAt: "2026-04-06T09:40:00.000Z",
+                lastSyncStartedAt: "2026-04-06T09:35:00.000Z",
+                lastWebhookAt: "2026-04-06T09:30:00.000Z",
+                nextReconcileAt: "2026-04-06T11:00:00.000Z",
+              },
+              metadata: {
+                replay: true,
+              },
+              status: "disconnected",
+              tokenBundle: null,
+            });
+          },
+        },
+        wake: buildCronWake("2026-04-06T09:12:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+
+      const stored = service.store.getAccountById(connected.account.id);
+      assert.ok(stored);
+      assert.equal(stored.status, "reauthorization_required");
+      assert.equal(stored.displayName, "Local Fresh");
+      assert.deepEqual(stored.metadata, {
+        hosted: true,
+        local: true,
+      });
+      assert.deepEqual(stored.scopes, ["offline", "read:data", "manual"]);
+      assert.equal(stored.nextReconcileAt, "2026-04-06T11:00:00.000Z");
+      assert.equal(stored.hostedObservedUpdatedAt, "2026-04-06T09:10:00.000Z");
+      assert.equal(stored.hostedObservedTokenVersion, 5);
+      assert.equal(stored.lastErrorCode, "REPLAY_IGNORED");
+      assert.equal(
+        codec.decrypt(
+          stored.accessTokenEncrypted,
+          buildDeviceSyncTokenCipherOptions({
+            externalAccountId: stored.externalAccountId,
+            provider: stored.provider,
+            purpose: "device-sync-access-token",
+          }),
+        ),
+        "local-access-refresh",
+      );
+      assert.ok(stored.refreshTokenEncrypted);
+      assert.equal(
+        codec.decrypt(
+          stored.refreshTokenEncrypted,
+          buildDeviceSyncTokenCipherOptions({
+            externalAccountId: stored.externalAccountId,
+            provider: stored.provider,
+            purpose: "device-sync-refresh-token",
+          }),
+        ),
+        "local-refresh-refresh",
+      );
+    } finally {
+      service.close();
+      await cleanup();
+    }
+  });
+
+  test("same-wake reconcile uses the accepted baseline after a same-snapshot replay is fenced", async () => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-",
+    );
+    await mkdir(vaultRoot, { recursive: true });
+
+    const service = createDeviceSyncServiceForVault(vaultRoot);
+
+    try {
+      const begin = await service.startConnection({
+        provider: "demo",
+      });
+      const connected = await service.handleOAuthCallback({
+        code: "same-wake-replay-baseline",
+        provider: "demo",
+        state: begin.state,
+      });
+
+      let currentSnapshot = buildRuntimeSnapshot({
+        connectionId: "hosted_conn_same_wake_replay",
+        displayName: "Hosted Fresh",
+        externalAccountId: connected.account.externalAccountId,
+        hostedUpdatedAt: "2026-04-06T09:10:00.000Z",
+        tokenBundle: {
+          accessToken: "hosted-access-v5",
+          accessTokenExpiresAt: "2026-04-07T00:00:00.000Z",
+          refreshToken: "hosted-refresh-v5",
+          tokenVersion: 5,
+        },
+      });
+      let appliedRequest: ApplyUpdatesRequest | null = null;
+      const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
+        async applyUpdates(input): Promise<HostedExecutionDeviceSyncRuntimeApplyResponse> {
+          appliedRequest = input;
+          return {
+            appliedAt: "2026-04-06T09:13:01.000Z",
+            updates: [],
+            userId: "member_123",
+          };
+        },
+        async createConnectLink() {
+          throw new Error("createConnectLink should not be called during sync or reconciliation");
+        },
+        async fetchSnapshot() {
+          return currentSnapshot;
+        },
+      };
+
+      await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake: buildCronWake("2026-04-06T09:11:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+
+      const hydrated = service.store.getAccountById(connected.account.id);
+      assert.ok(hydrated);
+
+      const codec = createSecretCodec(DEVICE_SYNC_SECRET);
+      const locallyRefreshed = service.store.updateAccountTokens(
+        hydrated.id,
+        {
+          accessToken: "local-access-refresh",
+          accessTokenEncrypted: codec.encrypt(
+            "local-access-refresh",
+            buildDeviceSyncTokenCipherOptions({
+              externalAccountId: hydrated.externalAccountId,
+              provider: hydrated.provider,
+              purpose: "device-sync-access-token",
+            }),
+          ),
+          accessTokenExpiresAt: "2026-04-07T01:00:00.000Z",
+          refreshToken: "local-refresh-refresh",
+          refreshTokenEncrypted: codec.encrypt(
+            "local-refresh-refresh",
+            buildDeviceSyncTokenCipherOptions({
+              externalAccountId: hydrated.externalAccountId,
+              provider: hydrated.provider,
+              purpose: "device-sync-refresh-token",
+            }),
+          ),
+        },
+        hydrated.disconnectGeneration,
+      );
+
+      assert.ok(locallyRefreshed);
+
+      service.store.patchAccount(connected.account.id, {
+        displayName: "Local Fresh",
+        metadata: {
+          local: true,
+        },
+        nextReconcileAt: "2026-04-06T10:30:00.000Z",
+        scopes: ["offline", "read:data", "manual"],
+        status: "reauthorization_required",
+      });
+
+      currentSnapshot = buildRuntimeSnapshot({
+        connectionId: "hosted_conn_same_wake_replay",
+        displayName: "Hosted Replayed Disconnect",
+        externalAccountId: connected.account.externalAccountId,
+        hostedUpdatedAt: "2026-04-06T09:10:00.000Z",
+        localState: {
+          lastErrorCode: "REPLAY_IGNORED",
+          lastErrorMessage: "same hosted snapshot",
+          lastSyncCompletedAt: "2026-04-06T09:12:00.000Z",
+          lastSyncErrorAt: "2026-04-06T09:11:30.000Z",
+          lastSyncStartedAt: "2026-04-06T09:11:15.000Z",
+          lastWebhookAt: "2026-04-06T09:11:05.000Z",
+          nextReconcileAt: "2026-04-06T11:00:00.000Z",
+        },
+        metadata: {
+          replay: true,
+        },
+        status: "disconnected",
+        tokenBundle: null,
+      });
+
+      const state = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake: buildCronWake("2026-04-06T09:12:30.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+
+      await reconcileHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake: buildCronWake("2026-04-06T09:13:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+        state,
+      });
+
+      assert.deepEqual(requireApplyUpdatesRequest(appliedRequest), {
+        occurredAt: "2026-04-06T09:13:00.000Z",
+        updates: [],
+      });
     } finally {
       service.close();
       await cleanup();

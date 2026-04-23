@@ -927,12 +927,6 @@ async function buildExistingRecordIndex(
   return index;
 }
 
-function conflictPreservationPath(sessionId: string, localSha256: string, originalPath: string): string {
-  const digest = localSha256.replace(/^sha256:/u, "");
-  const basename = path.posix.basename(originalPath).replace(/[^A-Za-z0-9._-]/gu, "_") || "conflict";
-  return `${SYNC_IMPORT_ROOT}/${sessionId}/conflicts/${digest}/${basename}`;
-}
-
 function manifestPreservationPath(sessionId: string): string {
   return `${SYNC_IMPORT_ROOT}/${sessionId}/manifest.json`;
 }
@@ -975,23 +969,15 @@ async function planJsonlMerge(input: {
       continue;
     }
 
-    const preservedLocalPath = conflictPreservationPath(input.sessionId, localHash, `${input.relativePath}.json`);
     const conflict: MergeVaultSyncImportConflict = {
       kind: "jsonl",
       localSha256: localHash,
       path: input.relativePath,
-      preservedLocalPath,
+      preservedLocalPath: null,
       reason: "same_record_key_different_payload",
       remoteSha256: existing.hash,
     };
     input.plan.conflicts.push(conflict);
-    input.plan.rawContents.push({
-      allowExistingMatch: true,
-      content: `${JSON.stringify(record, null, 2)}\n`,
-      mediaType: "application/json",
-      originalFileName: `${path.posix.basename(input.relativePath)}.json`,
-      targetRelativePath: preservedLocalPath,
-    });
   }
 }
 
@@ -1022,21 +1008,13 @@ async function planRawMerge(input: {
     return;
   }
 
-  const preservedLocalPath = conflictPreservationPath(input.sessionId, localSha256, input.relativePath);
   input.plan.conflicts.push({
     kind: "raw",
     localSha256,
     path: input.relativePath,
-    preservedLocalPath,
+    preservedLocalPath: null,
     reason: "remote_and_local_differ",
     remoteSha256,
-  });
-  input.plan.rawContents.push({
-    allowExistingMatch: true,
-    content: input.localBytes,
-    mediaType: "application/octet-stream",
-    originalFileName: path.posix.basename(input.relativePath),
-    targetRelativePath: preservedLocalPath,
   });
 }
 
@@ -1069,21 +1047,13 @@ async function planTextMerge(input: {
     return;
   }
 
-  const preservedLocalPath = conflictPreservationPath(input.sessionId, localSha256, input.relativePath);
   input.plan.conflicts.push({
     kind: input.kind === "metadata" ? "metadata" : "text",
     localSha256,
     path: input.relativePath,
-    preservedLocalPath,
+    preservedLocalPath: null,
     reason: "remote_and_local_differ",
     remoteSha256,
-  });
-  input.plan.rawContents.push({
-    allowExistingMatch: true,
-    content,
-    mediaType: input.relativePath.endsWith(".json") ? "application/json" : "text/plain",
-    originalFileName: path.posix.basename(input.relativePath),
-    targetRelativePath: preservedLocalPath,
   });
 }
 

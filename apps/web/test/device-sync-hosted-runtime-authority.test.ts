@@ -1,10 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  buildHostedPublicDeviceSyncAccount: vi.fn((input: { record: ReturnType<typeof buildHostedRecord> }) =>
-    buildPublicConnection(input.record)),
+  buildHostedPublicDeviceSyncAccount: vi.fn((input: {
+    fallback?: { externalAccountId?: string | null };
+    record: ReturnType<typeof buildHostedRecord>;
+  }) =>
+    buildPublicConnection({
+      ...input.record,
+      externalAccountId: input.record.externalAccountId ?? input.fallback?.externalAccountId ?? null,
+    })),
   createHostedDeviceSyncControlPlane: vi.fn(),
-  mapHostedConnectionRecord: vi.fn((record: ReturnType<typeof buildHostedRecord>) => record),
+  mapHostedConnectionRecord: vi.fn((record: ReturnType<typeof buildHostedRecord>) => ({
+    ...record,
+    externalAccountId: null,
+  })),
 }));
 
 vi.mock("@/src/lib/device-sync/control-plane", () => ({
@@ -26,7 +35,7 @@ function buildHostedRecord(
     connectedAt: string;
     createdAt: string;
     displayName: string | null;
-    externalAccountId: string;
+    externalAccountId: string | null;
     id: string;
     lastErrorCode: string | null;
     lastErrorMessage: string | null;
@@ -169,6 +178,11 @@ function createAuthorityHarness(input: {
   };
 
   const store = {
+    getConnectionForUser: vi.fn(async () =>
+      buildPublicConnection({
+        ...currentRecord,
+        externalAccountId: currentRecord.externalAccountId ?? "acct_123",
+      })),
     getStoredConnectionAccountForUser: vi.fn(async () => currentStoredAccount),
     persistStoredConnectionTokenBundle,
     prisma: {
@@ -363,6 +377,152 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     expect(harness.record.accessTokenExpiresAt).toBeNull();
     expect(harness.record.status).toBe("disconnected");
     expect(harness.storedAccount).toBeNull();
+  });
+
+  it("preserves the durable external account binding across tokenless clears and retokenization", async () => {
+    const harness = createAuthorityHarness({
+      record: buildHostedRecord({
+        externalAccountId: null,
+      }),
+      storedAccount: null,
+    });
+    const { applyHostedDeviceSyncRuntimeResult } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+
+    const clearResponse = await applyHostedDeviceSyncRuntimeResult({
+      request: new Request("https://example.test/device-sync/runtime/apply", {
+        body: JSON.stringify({
+          updates: [
+            {
+              connectionId: "conn_123",
+              observedTokenVersion: null,
+              tokenBundle: null,
+            },
+          ],
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    });
+
+    expect(clearResponse.updates[0]).toMatchObject({
+      connection: expect.objectContaining({
+        externalAccountId: "acct_123",
+      }),
+      connectionId: "conn_123",
+      tokenUpdate: "missing",
+      writeUpdate: "applied",
+    });
+    expect(harness.persistStoredConnectionTokenBundle).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        connectionId: "conn_123",
+        externalAccountId: undefined,
+        tokenBundle: null,
+      }),
+    );
+    expect(harness.store.getConnectionForUser).toHaveBeenCalledWith("user_123", "conn_123");
+    expect(harness.storedAccount).toBeNull();
+
+    const retokenizedResponse = await applyHostedDeviceSyncRuntimeResult({
+      request: new Request("https://example.test/device-sync/runtime/apply", {
+        body: JSON.stringify({
+          updates: [
+            {
+              connectionId: "conn_123",
+              observedTokenVersion: null,
+              tokenBundle: {
+                accessToken: "fresh-access-token",
+                accessTokenExpiresAt: "2026-04-07T00:00:00.000Z",
+                keyVersion: "kv_runtime",
+                refreshToken: "fresh-refresh-token",
+                tokenVersion: 1,
+              },
+            },
+          ],
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    });
+
+    expect(retokenizedResponse.updates[0]).toMatchObject({
+      connection: expect.objectContaining({
+        externalAccountId: "acct_123",
+      }),
+      connectionId: "conn_123",
+      tokenUpdate: "applied",
+      writeUpdate: "applied",
+    });
+    expect(harness.persistStoredConnectionTokenBundle).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        connectionId: "conn_123",
+        externalAccountId: undefined,
+        tokenBundle: expect.objectContaining({
+          accessToken: "fresh-access-token",
+          refreshToken: "fresh-refresh-token",
+          tokenVersion: 1,
+        }),
+      }),
+    );
+    expect(harness.storedAccount).toMatchObject({
+      accessToken: "fresh-access-token",
+      externalAccountId: "acct_123",
+      refreshToken: "fresh-refresh-token",
+      tokenVersion: 1,
+    });
+  });
+
+  it("reads a tokenless hosted snapshot from the durable external account binding", async () => {
+    const harness = createAuthorityHarness({
+      record: buildHostedRecord({
+        externalAccountId: null,
+      }),
+      storedAccount: null,
+    });
+    const { readHostedDeviceSyncRuntimeState } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+
+    harness.store.prisma.deviceConnection.findMany.mockResolvedValue([harness.record]);
+    harness.store.getConnectionForUser.mockResolvedValue({
+      ...buildPublicConnection(buildHostedRecord()),
+      externalAccountId: "acct_123",
+    });
+
+    const response = await readHostedDeviceSyncRuntimeState({
+      request: new Request("https://example.test/device-sync/runtime/snapshot", {
+        body: JSON.stringify({
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    });
+
+    expect(harness.store.getConnectionForUser).toHaveBeenCalledWith("user_123", "conn_123");
+    expect(mocks.buildHostedPublicDeviceSyncAccount).toHaveBeenCalledWith(
+      expect.objectContaining({
+        fallback: expect.objectContaining({
+          externalAccountId: "acct_123",
+        }),
+      }),
+    );
+    expect(response).toMatchObject({
+      connections: [
+        expect.objectContaining({
+          connection: expect.objectContaining({
+            externalAccountId: "acct_123",
+            id: "conn_123",
+          }),
+        }),
+      ],
+      userId: "user_123",
+    });
   });
 
   it("applies fresh null fences once and rejects a replay after the hosted version advances", async () => {

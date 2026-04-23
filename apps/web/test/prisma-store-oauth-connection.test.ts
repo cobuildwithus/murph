@@ -25,11 +25,20 @@ type MutableOAuthSession = {
 };
 
 type MutableConnectionRecord = {
+  accessTokenEncrypted: string | null;
+  accessTokenExpiresAt: Date | null;
   id: string;
   userId: string;
   provider: string;
   providerAccountBlindIndex: string;
+  displayName: string | null;
+  externalAccountIdEncrypted: string | null;
+  keyVersion: string | null;
+  metadataJson: Record<string, unknown> | null;
+  refreshTokenEncrypted: string | null;
+  scopesJson: string[] | null;
   status: "active" | "disconnected" | "reauthorization_required";
+  tokenVersion: number | null;
   connectedAt: Date;
   lastWebhookAt: Date | null;
   lastSyncStartedAt: Date | null;
@@ -572,6 +581,187 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       },
     });
   });
+
+  it("preserves the stored external account binding across token clears, tokenless reads, and retokenization", async () => {
+    let connection = createConnection({
+      accessTokenEncrypted: "enc:access-token",
+      accessTokenExpiresAt: new Date("2026-03-25T04:00:00.000Z"),
+      externalAccountIdEncrypted: "enc:acct_456",
+      keyVersion: "v1",
+      provider: "oura",
+      refreshTokenEncrypted: "enc:refresh-token",
+      tokenVersion: 2,
+      userId: "user-123",
+    });
+
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      codec: TEST_CODEC,
+      prisma: {
+        deviceConnection: {
+          findFirst: async ({ where }: { where: { id: string; userId: string } }) =>
+            where.id === connection.id && where.userId === connection.userId ? cloneConnection(connection) : null,
+          findUnique: async ({ where }: { where: { id?: string } | { provider_providerAccountBlindIndex?: { provider: string; providerAccountBlindIndex: string } } }) =>
+            "id" in where && where.id === connection.id ? cloneConnection(connection) : null,
+          update: async ({ data }: { data: Record<string, unknown> }) => {
+            connection = {
+              ...connection,
+              accessTokenEncrypted: typeof data.accessTokenEncrypted === "string"
+                ? data.accessTokenEncrypted
+                : data.accessTokenEncrypted === null
+                  ? null
+                  : connection.accessTokenEncrypted,
+              accessTokenExpiresAt: data.accessTokenExpiresAt instanceof Date
+                ? data.accessTokenExpiresAt
+                : data.accessTokenExpiresAt === null
+                  ? null
+                  : connection.accessTokenExpiresAt,
+              externalAccountIdEncrypted: typeof data.externalAccountIdEncrypted === "string"
+                ? data.externalAccountIdEncrypted
+                : data.externalAccountIdEncrypted === null
+                  ? null
+                  : connection.externalAccountIdEncrypted,
+              keyVersion: typeof data.keyVersion === "string"
+                ? data.keyVersion
+                : data.keyVersion === null
+                  ? null
+                  : connection.keyVersion,
+              refreshTokenEncrypted: typeof data.refreshTokenEncrypted === "string"
+                ? data.refreshTokenEncrypted
+                : data.refreshTokenEncrypted === null
+                  ? null
+                  : connection.refreshTokenEncrypted,
+              tokenVersion: typeof data.tokenVersion === "number"
+                ? data.tokenVersion
+                : data.tokenVersion === null
+                  ? null
+                  : connection.tokenVersion,
+            };
+
+            return cloneConnection(connection);
+          },
+        },
+      } as never,
+      providerAccountBlindIndexKey: BLIND_INDEX_KEY,
+    });
+
+    await store.persistStoredConnectionTokenBundle({
+      connectionId: "dsc_123",
+      externalAccountId: null,
+      provider: "oura",
+      tokenBundle: null,
+    });
+
+    expect(connection.accessTokenEncrypted).toBeNull();
+    expect(connection.refreshTokenEncrypted).toBeNull();
+    expect(connection.tokenVersion).toBeNull();
+    expect(connection.externalAccountIdEncrypted).toBe("enc:acct_456");
+    await expect(store.getStoredConnectionAccountForUser("user-123", "dsc_123")).resolves.toBeNull();
+    await expect(store.getConnectionForUser("user-123", "dsc_123")).resolves.toEqual(expect.objectContaining({
+      externalAccountId: "acct_456",
+      id: "dsc_123",
+      provider: "oura",
+    }));
+
+    await store.persistStoredConnectionTokenBundle({
+      connectionId: "dsc_123",
+      externalAccountId: null,
+      provider: "oura",
+      tokenBundle: {
+        accessToken: "fresh-access-token",
+        accessTokenExpiresAt: "2026-03-26T04:00:00.000Z",
+        keyVersion: "v1",
+        refreshToken: "fresh-refresh-token",
+        tokenVersion: 1,
+      },
+    });
+
+    await expect(store.getStoredConnectionAccountForUser("user-123", "dsc_123")).resolves.toEqual(
+      expect.objectContaining({
+        accessToken: "fresh-access-token",
+        externalAccountId: "acct_456",
+        refreshToken: "fresh-refresh-token",
+        tokenVersion: 1,
+      }),
+    );
+  });
+
+  it("clears the stored external account binding only when explicitly requested", async () => {
+    let connection = createConnection({
+      accessTokenEncrypted: "enc:access-token",
+      accessTokenExpiresAt: new Date("2026-03-25T04:00:00.000Z"),
+      externalAccountIdEncrypted: "enc:acct_456",
+      keyVersion: "v1",
+      provider: "oura",
+      refreshTokenEncrypted: "enc:refresh-token",
+      tokenVersion: 2,
+      userId: "user-123",
+    });
+
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      codec: TEST_CODEC,
+      prisma: {
+        deviceConnection: {
+          findFirst: async ({ where }: { where: { id: string; userId: string } }) =>
+            where.id === connection.id && where.userId === connection.userId ? cloneConnection(connection) : null,
+          findUnique: async ({ where }: { where: { id?: string } | { provider_providerAccountBlindIndex?: { provider: string; providerAccountBlindIndex: string } } }) =>
+            "id" in where && where.id === connection.id ? cloneConnection(connection) : null,
+          update: async ({ data }: { data: Record<string, unknown> }) => {
+            connection = {
+              ...connection,
+              accessTokenEncrypted: typeof data.accessTokenEncrypted === "string"
+                ? data.accessTokenEncrypted
+                : data.accessTokenEncrypted === null
+                  ? null
+                  : connection.accessTokenEncrypted,
+              accessTokenExpiresAt: data.accessTokenExpiresAt instanceof Date
+                ? data.accessTokenExpiresAt
+                : data.accessTokenExpiresAt === null
+                  ? null
+                  : connection.accessTokenExpiresAt,
+              externalAccountIdEncrypted: typeof data.externalAccountIdEncrypted === "string"
+                ? data.externalAccountIdEncrypted
+                : data.externalAccountIdEncrypted === null
+                  ? null
+                  : connection.externalAccountIdEncrypted,
+              keyVersion: typeof data.keyVersion === "string"
+                ? data.keyVersion
+                : data.keyVersion === null
+                  ? null
+                  : connection.keyVersion,
+              refreshTokenEncrypted: typeof data.refreshTokenEncrypted === "string"
+                ? data.refreshTokenEncrypted
+                : data.refreshTokenEncrypted === null
+                  ? null
+                  : connection.refreshTokenEncrypted,
+              tokenVersion: typeof data.tokenVersion === "number"
+                ? data.tokenVersion
+                : data.tokenVersion === null
+                  ? null
+                  : connection.tokenVersion,
+            };
+
+            return cloneConnection(connection);
+          },
+        },
+      } as never,
+      providerAccountBlindIndexKey: BLIND_INDEX_KEY,
+    });
+
+    await store.persistStoredConnectionTokenBundle({
+      clearExternalAccountId: true,
+      connectionId: "dsc_123",
+      externalAccountId: null,
+      provider: "oura",
+      tokenBundle: null,
+    });
+
+    expect(connection.externalAccountIdEncrypted).toBeNull();
+    await expect(store.getConnectionForUser("user-123", "dsc_123")).resolves.toEqual(expect.objectContaining({
+      externalAccountId: "opaque:dsc_123",
+      id: "dsc_123",
+      provider: "oura",
+    }));
+  });
 });
 
 function cloneOAuthSession(session: MutableOAuthSession | null): MutableOAuthSession | null {
@@ -588,6 +778,7 @@ function cloneConnection(record: MutableConnectionRecord | null): MutableConnect
   return record
     ? {
         ...record,
+        accessTokenExpiresAt: record.accessTokenExpiresAt ? new Date(record.accessTokenExpiresAt) : null,
         connectedAt: new Date(record.connectedAt),
         lastWebhookAt: record.lastWebhookAt ? new Date(record.lastWebhookAt) : null,
         lastSyncStartedAt: record.lastSyncStartedAt ? new Date(record.lastSyncStartedAt) : null,
@@ -602,6 +793,8 @@ function cloneConnection(record: MutableConnectionRecord | null): MutableConnect
 
 function createConnection(overrides: Partial<MutableConnectionRecord>): MutableConnectionRecord {
   return {
+    accessTokenEncrypted: overrides.accessTokenEncrypted ?? null,
+    accessTokenExpiresAt: overrides.accessTokenExpiresAt ?? null,
     id: overrides.id ?? "dsc_123",
     userId: overrides.userId ?? "user-123",
     provider: overrides.provider ?? "oura",
@@ -611,7 +804,14 @@ function createConnection(overrides: Partial<MutableConnectionRecord>): MutableC
         provider: overrides.provider ?? "oura",
         externalAccountId: "acct_456",
       }),
+    displayName: overrides.displayName ?? "Oura ring",
+    externalAccountIdEncrypted: overrides.externalAccountIdEncrypted ?? "enc:acct_456",
+    keyVersion: overrides.keyVersion ?? null,
+    metadataJson: overrides.metadataJson ?? {},
+    refreshTokenEncrypted: overrides.refreshTokenEncrypted ?? null,
+    scopesJson: overrides.scopesJson ?? [],
     status: overrides.status ?? "reauthorization_required",
+    tokenVersion: overrides.tokenVersion ?? null,
     connectedAt: overrides.connectedAt ?? new Date("2026-03-25T00:00:00.000Z"),
     lastWebhookAt: overrides.lastWebhookAt ?? null,
     lastSyncStartedAt: overrides.lastSyncStartedAt ?? null,

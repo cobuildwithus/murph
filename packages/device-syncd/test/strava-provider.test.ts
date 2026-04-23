@@ -88,8 +88,12 @@ describe("Strava device-sync provider", () => {
       accessTokenExpiresAt: null,
       disconnectGeneration: 0,
       accessTokenEncrypted: "ciphertext",
+      hostedObservedConnectionRevision: 0,
+      hostedObservedTokenRevision: 0,
       hostedObservedTokenVersion: null,
       hostedObservedUpdatedAt: null,
+      localConnectionRevision: 0,
+      localTokenRevision: 0,
       refreshTokenEncrypted: "refresh-ciphertext",
     }, "2026-04-16T06:00:00.000Z");
 
