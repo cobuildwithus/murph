@@ -53,17 +53,22 @@ export interface HostedBillingCheckoutLineItem {
 
 export function buildHostedBillingCheckoutLineItems(input: {
   priceId: string;
-  usagePriceId: string;
+  usagePriceId?: string | null;
 }): HostedBillingCheckoutLineItem[] {
-  return [
+  const lineItems: HostedBillingCheckoutLineItem[] = [
     {
       price: input.priceId,
       quantity: 1,
     },
-    {
-      price: input.usagePriceId,
-    },
   ];
+
+  if (input.usagePriceId) {
+    lineItems.push({
+      price: input.usagePriceId,
+    });
+  }
+
+  return lineItems;
 }
 
 export async function createHostedBillingCheckout(
@@ -151,8 +156,10 @@ export async function createHostedBillingCheckout(
       billingPlanCode,
       inviteCode: invite.inviteCode,
       memberId: invite.member.id,
+      priceId,
       shareCode,
       stripeCustomerId: customerId,
+      usagePriceId,
       verifiedEmail,
     });
     const checkoutSession = await stripe.checkout.sessions.create({
@@ -239,8 +246,10 @@ export function buildHostedBillingCheckoutIdempotencyKey(input: {
   billingPlanCode: HostedBillingPlanCode;
   inviteCode: string;
   memberId: string;
+  priceId: string;
   shareCode?: string | null;
   stripeCustomerId?: string | null;
+  usagePriceId?: string | null;
   verifiedEmail?: string | null;
 }): string {
   const shareKey = normalizeNullableString(input.shareCode) ?? "direct";
@@ -248,14 +257,27 @@ export function buildHostedBillingCheckoutIdempotencyKey(input: {
     stripeCustomerId: input.stripeCustomerId,
     verifiedEmail: input.verifiedEmail,
   });
+  const lineItemBindingKey = deriveHostedBillingCheckoutLineItemBindingKey({
+    priceId: input.priceId,
+    usagePriceId: input.usagePriceId,
+  });
   return [
     "hosted-billing-checkout",
     input.memberId,
     input.inviteCode,
     input.billingPlanCode,
+    lineItemBindingKey,
     shareKey,
     customerBindingKey,
   ].join(":");
+}
+
+function deriveHostedBillingCheckoutLineItemBindingKey(input: {
+  priceId: string;
+  usagePriceId?: string | null;
+}): string {
+  const usagePriceId = normalizeNullableString(input.usagePriceId) ?? "none";
+  return `items:${sha256Hex(`${input.priceId}:${usagePriceId}`).slice(0, 12)}`;
 }
 
 function deriveHostedBillingCheckoutCustomerBindingKey(input: {

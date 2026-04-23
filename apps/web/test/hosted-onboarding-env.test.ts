@@ -20,6 +20,7 @@ describe("readHostedOnboardingEnvironment", () => {
       STRIPE_SECRET_KEY: "sk_test_123",
     }));
 
+    expect(environment.aiUsageBillingMode).toBe("disabled");
     expect(environment.publicBaseUrl).toBe("https://join.example.test");
     expect(environment.privyAppId).toBe("cm_app_123");
     expect(environment.privyVerificationKey).toBe("privy-verification-key");
@@ -34,6 +35,22 @@ describe("readHostedOnboardingEnvironment", () => {
       launch_annual: "price_usage_annual_123",
       launch_monthly: "price_usage_monthly_123",
     });
+  });
+
+  it("reads explicit Stripe-meter AI usage billing mode", () => {
+    const environment = readHostedOnboardingEnvironment(createProcessEnv({
+      HOSTED_AI_USAGE_BILLING_MODE: "stripe_meter",
+    }));
+
+    expect(environment.aiUsageBillingMode).toBe("stripe_meter");
+  });
+
+  it("fails unsupported hosted AI usage billing modes closed to disabled", () => {
+    const environment = readHostedOnboardingEnvironment(createProcessEnv({
+      HOSTED_AI_USAGE_BILLING_MODE: "usage_allowance",
+    }));
+
+    expect(environment.aiUsageBillingMode).toBe("disabled");
   });
 
   it("reads explicit Linq config", () => {

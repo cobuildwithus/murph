@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => {
     listHostedAiUsagePendingStripeMetering: vi.fn(),
     markHostedAiUsageStripeFailed: vi.fn(),
     markHostedAiUsageStripeMetered: vi.fn(),
+    markHostedAiUsageStripeMeteringDisabled: vi.fn(),
     markHostedAiUsageStripeProgress: vi.fn(),
     markHostedAiUsageStripeRetryableFailure: vi.fn(),
     markHostedAiUsageStripeSkipped: vi.fn(),
@@ -26,6 +27,7 @@ vi.mock("@/src/lib/hosted-execution/usage", () => ({
   listHostedAiUsagePendingStripeMetering: mocks.listHostedAiUsagePendingStripeMetering,
   markHostedAiUsageStripeFailed: mocks.markHostedAiUsageStripeFailed,
   markHostedAiUsageStripeMetered: mocks.markHostedAiUsageStripeMetered,
+  markHostedAiUsageStripeMeteringDisabled: mocks.markHostedAiUsageStripeMeteringDisabled,
   markHostedAiUsageStripeProgress: mocks.markHostedAiUsageStripeProgress,
   markHostedAiUsageStripeRetryableFailure: mocks.markHostedAiUsageStripeRetryableFailure,
   markHostedAiUsageStripeSkipped: mocks.markHostedAiUsageStripeSkipped,
@@ -76,6 +78,7 @@ describe("drainHostedAiUsageStripeMetering", () => {
   it("returns unconfigured when Stripe metering env is absent", async () => {
     const result = await drainHostedAiUsageStripeMetering({
       environment: {
+        aiUsageBillingMode: "stripe_meter",
         batchLimit: 32,
         meterEventName: null,
         stripeSecretKey: null,
@@ -91,6 +94,38 @@ describe("drainHostedAiUsageStripeMetering", () => {
     expect(mocks.listHostedAiUsagePendingStripeMetering).not.toHaveBeenCalled();
   });
 
+  it("skips due pending rows without posting when AI usage billing is disabled", async () => {
+    mocks.markHostedAiUsageStripeMeteringDisabled.mockResolvedValue(2);
+    const fetchMock = vi.fn();
+
+    const result = await drainHostedAiUsageStripeMetering({
+      environment: {
+        aiUsageBillingMode: "disabled",
+        batchLimit: 32,
+        meterEventName: "ai_total_tokens",
+        stripeSecretKey: "sk_test_123",
+      },
+      fetchImpl: fetchMock as typeof fetch,
+      now: "2026-03-29T12:05:00.000Z",
+    });
+
+    expect(result).toEqual({
+      configured: false,
+      failed: 0,
+      metered: 0,
+      skipped: 2,
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(mocks.listHostedAiUsagePendingStripeMetering).not.toHaveBeenCalled();
+    expect(mocks.markHostedAiUsageStripeMeteringDisabled).toHaveBeenCalledWith({
+      limit: 32,
+      message:
+        "Hosted AI usage billing is disabled until Stripe native LLM billing is enabled.",
+      now: new Date("2026-03-29T12:05:00.000Z"),
+      prisma: undefined,
+    });
+  });
+
   it("skips member-funded usage after claiming the row", async () => {
     const claim = createClaim("2026-03-29T12:05:01.000Z");
     mocks.listHostedAiUsagePendingStripeMetering.mockResolvedValue([
@@ -103,6 +138,7 @@ describe("drainHostedAiUsageStripeMetering", () => {
 
     const result = await drainHostedAiUsageStripeMetering({
       environment: {
+        aiUsageBillingMode: "stripe_meter",
         batchLimit: 32,
         meterEventName: "ai_total_tokens",
         stripeSecretKey: "sk_test_123",
@@ -157,6 +193,7 @@ describe("drainHostedAiUsageStripeMetering", () => {
 
     const result = await drainHostedAiUsageStripeMetering({
       environment: {
+        aiUsageBillingMode: "stripe_meter",
         batchLimit: 32,
         meterEventName: "ai_total_tokens",
         stripeSecretKey: "sk_test_123",
@@ -241,6 +278,7 @@ describe("drainHostedAiUsageStripeMetering", () => {
     const [first, second] = await Promise.all([
       drainHostedAiUsageStripeMetering({
         environment: {
+          aiUsageBillingMode: "stripe_meter",
           batchLimit: 32,
           meterEventName: "ai_total_tokens",
           stripeSecretKey: "sk_test_123",
@@ -250,6 +288,7 @@ describe("drainHostedAiUsageStripeMetering", () => {
       }),
       drainHostedAiUsageStripeMetering({
         environment: {
+          aiUsageBillingMode: "stripe_meter",
           batchLimit: 32,
           meterEventName: "ai_total_tokens",
           stripeSecretKey: "sk_test_123",
@@ -310,6 +349,7 @@ describe("drainHostedAiUsageStripeMetering", () => {
     await expect(
       drainHostedAiUsageStripeMetering({
         environment: {
+          aiUsageBillingMode: "stripe_meter",
           batchLimit: 32,
           meterEventName: "ai_total_tokens",
           stripeSecretKey: "sk_test_123",
@@ -365,6 +405,7 @@ describe("drainHostedAiUsageStripeMetering", () => {
     await expect(
       drainHostedAiUsageStripeMetering({
         environment: {
+          aiUsageBillingMode: "stripe_meter",
           batchLimit: 32,
           meterEventName: "ai_total_tokens",
           stripeSecretKey: "sk_test_123",
@@ -414,6 +455,7 @@ describe("drainHostedAiUsageStripeMetering", () => {
 
     const result = await drainHostedAiUsageStripeMetering({
       environment: {
+        aiUsageBillingMode: "stripe_meter",
         batchLimit: 32,
         meterEventName: "ai_total_tokens",
         stripeSecretKey: "sk_test_123",
@@ -446,25 +488,43 @@ describe("readHostedAiUsageStripeMeterEnvironment", () => {
   it("reads batch size and the Stripe meter event name", () => {
     expect(
       readHostedAiUsageStripeMeterEnvironment({
+        HOSTED_AI_USAGE_BILLING_MODE: "stripe_meter",
         HOSTED_AI_USAGE_STRIPE_BATCH_LIMIT: "16",
         HOSTED_AI_USAGE_STRIPE_METER_EVENT_NAME: "ai_total_tokens",
         STRIPE_SECRET_KEY: "sk_test_123",
       }),
     ).toEqual({
+      aiUsageBillingMode: "stripe_meter",
       batchLimit: 16,
       meterEventName: "ai_total_tokens",
       stripeSecretKey: "sk_test_123",
     });
   });
 
-  it("defaults the Stripe meter event name when the env var is absent", () => {
+  it("defaults AI usage billing to disabled without synthesizing a Stripe meter event name", () => {
     expect(
       readHostedAiUsageStripeMeterEnvironment({
         STRIPE_SECRET_KEY: "sk_test_123",
       }),
     ).toEqual({
+      aiUsageBillingMode: "disabled",
       batchLimit: 32,
-      meterEventName: "token-billing-tokens",
+      meterEventName: null,
+      stripeSecretKey: "sk_test_123",
+    });
+  });
+
+  it("fails unsupported AI usage billing modes closed to disabled", () => {
+    expect(
+      readHostedAiUsageStripeMeterEnvironment({
+        HOSTED_AI_USAGE_BILLING_MODE: "usage_allowance",
+        HOSTED_AI_USAGE_STRIPE_METER_EVENT_NAME: "ai_total_tokens",
+        STRIPE_SECRET_KEY: "sk_test_123",
+      }),
+    ).toEqual({
+      aiUsageBillingMode: "disabled",
+      batchLimit: 32,
+      meterEventName: "ai_total_tokens",
       stripeSecretKey: "sk_test_123",
     });
   });

@@ -6,6 +6,7 @@ import {
   HostedAiUsageStripeMeterClaimLostError,
   importHostedAiUsageRecords,
   listHostedAiUsagePendingStripeMetering,
+  markHostedAiUsageStripeMeteringDisabled,
   markHostedAiUsageStripeProgress,
 } from "@/src/lib/hosted-execution/usage";
 
@@ -70,6 +71,7 @@ describe("importHostedAiUsageRecords", () => {
     };
 
     const result = await importHostedAiUsageRecords({
+      aiUsageBillingMode: "disabled",
       prisma: prisma as never,
       trustedUserId: "member_123",
       usage: [BASE_USAGE_RECORD],
@@ -86,7 +88,10 @@ describe("importHostedAiUsageRecords", () => {
       create: expect.objectContaining({
         id: "turn_123.attempt-1",
         memberId: "member_123",
+        stripeMeterError:
+          "Hosted AI usage billing is disabled until Stripe native LLM billing is enabled.",
         stripeMeterSource: "murph",
+        stripeMeterStatus: "skipped",
         totalTokens: 165,
       }),
       select: expect.any(Object),
@@ -98,6 +103,94 @@ describe("importHostedAiUsageRecords", () => {
     expect(upsertCall?.create).not.toHaveProperty("providerRequestId");
     expect(upsertCall?.create).not.toHaveProperty("providerMetadataJson");
     expect(upsertCall?.create).not.toHaveProperty("rawUsageJson");
+  });
+
+  it("does not delegate Vercel AI Gateway rows or read billing refs while usage billing is disabled", async () => {
+    const hostedAiUsageUpsert = vi.fn(async (args: { create: Record<string, unknown> }) => args.create);
+    const findUnique = vi.fn(async () => {
+      throw new Error("billing ref lookup should not run while usage billing is disabled");
+    });
+    const prisma = {
+      hostedAiUsage: {
+        upsert: hostedAiUsageUpsert,
+      },
+      hostedMemberBillingRef: {
+        findUnique,
+      },
+    };
+
+    await expect(
+      importHostedAiUsageRecords({
+        aiUsageBillingMode: "disabled",
+        prisma: prisma as never,
+        trustedUserId: "member_123",
+        usage: [
+          {
+            ...BASE_USAGE_RECORD,
+            baseUrl: "https://ai-gateway.vercel.sh/v1",
+            providerName: "vercel-ai-gateway",
+            stripeMeterSource: "vercel-ai-gateway",
+          },
+        ],
+      }),
+    ).resolves.toMatchObject({
+      recordedIds: ["turn_123.attempt-1"],
+    });
+
+    expect(findUnique).not.toHaveBeenCalled();
+    expect(hostedAiUsageUpsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({
+        stripeMeterError:
+          "Hosted AI usage billing is disabled until Stripe native LLM billing is enabled.",
+        stripeMeterSource: "murph",
+        stripeMeterStatus: "skipped",
+      }),
+    }));
+  });
+
+  it("fails unsupported env billing modes closed to skipped usage records", async () => {
+    const originalBillingMode = process.env.HOSTED_AI_USAGE_BILLING_MODE;
+    const hostedAiUsageUpsert = vi.fn(async (args: { create: Record<string, unknown> }) => args.create);
+    const findUnique = vi.fn(async () => {
+      throw new Error("billing ref lookup should not run for unsupported billing modes");
+    });
+    const prisma = {
+      hostedAiUsage: {
+        upsert: hostedAiUsageUpsert,
+      },
+      hostedMemberBillingRef: {
+        findUnique,
+      },
+    };
+
+    process.env.HOSTED_AI_USAGE_BILLING_MODE = "usage_allowance";
+    try {
+      await expect(
+        importHostedAiUsageRecords({
+          prisma: prisma as never,
+          trustedUserId: "member_123",
+          usage: [BASE_USAGE_RECORD],
+        }),
+      ).resolves.toMatchObject({
+        recordedIds: ["turn_123.attempt-1"],
+      });
+    } finally {
+      if (originalBillingMode === undefined) {
+        delete process.env.HOSTED_AI_USAGE_BILLING_MODE;
+      } else {
+        process.env.HOSTED_AI_USAGE_BILLING_MODE = originalBillingMode;
+      }
+    }
+
+    expect(findUnique).not.toHaveBeenCalled();
+    expect(hostedAiUsageUpsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({
+        stripeMeterError:
+          "Hosted AI usage billing is disabled until Stripe native LLM billing is enabled.",
+        stripeMeterSource: "murph",
+        stripeMeterStatus: "skipped",
+      }),
+    }));
   });
 
   it("dedupes identical usage rows by usageId before persisting them", async () => {
@@ -112,6 +205,7 @@ describe("importHostedAiUsageRecords", () => {
     };
 
     const result = await importHostedAiUsageRecords({
+      aiUsageBillingMode: "disabled",
       prisma: prisma as never,
       trustedUserId: "member_123",
       usage: [BASE_USAGE_RECORD, BASE_USAGE_RECORD],
@@ -133,6 +227,7 @@ describe("importHostedAiUsageRecords", () => {
 
     await expect(
       importHostedAiUsageRecords({
+        aiUsageBillingMode: "disabled",
         prisma: prisma as never,
         trustedUserId: "member_123",
         usage: [
@@ -161,6 +256,7 @@ describe("importHostedAiUsageRecords", () => {
 
     await expect(
       importHostedAiUsageRecords({
+        aiUsageBillingMode: "disabled",
         prisma: prisma as never,
         trustedUserId: "member_123",
         usage: [
@@ -192,6 +288,7 @@ describe("importHostedAiUsageRecords", () => {
 
     await expect(
       importHostedAiUsageRecords({
+        aiUsageBillingMode: "disabled",
         prisma: prisma as never,
         trustedUserId: "member_123",
         usage: [BASE_USAGE_RECORD],
@@ -216,6 +313,7 @@ describe("importHostedAiUsageRecords", () => {
 
     await expect(
       importHostedAiUsageRecords({
+        aiUsageBillingMode: "disabled",
         prisma: prisma as never,
         trustedUserId: "member_123",
         usage: [BASE_USAGE_RECORD],
@@ -225,7 +323,7 @@ describe("importHostedAiUsageRecords", () => {
     );
   });
 
-  it("rejects an existing usage row when stripeMeterSource does not match", async () => {
+  it("accepts an existing usage row when the stored billing outcome already differs", async () => {
     const prisma = {
       hostedAiUsage: {
         upsert: vi.fn(async (args: { create: Record<string, unknown> }) => ({
@@ -240,13 +338,14 @@ describe("importHostedAiUsageRecords", () => {
 
     await expect(
       importHostedAiUsageRecords({
+        aiUsageBillingMode: "disabled",
         prisma: prisma as never,
         trustedUserId: "member_123",
         usage: [BASE_USAGE_RECORD],
       }),
-    ).rejects.toThrow(
-      "Hosted AI usage id turn_123.attempt-1 already exists with different immutable fields: stripeMeterSource.",
-    );
+    ).resolves.toMatchObject({
+      recordedIds: ["turn_123.attempt-1"],
+    });
   });
 
   it("rejects usage rows whose memberId does not match the trusted hosted execution user", async () => {
@@ -261,6 +360,7 @@ describe("importHostedAiUsageRecords", () => {
 
     await expect(
       importHostedAiUsageRecords({
+        aiUsageBillingMode: "disabled",
         prisma: prisma as never,
         trustedUserId: "member_123",
         usage: [
@@ -305,6 +405,7 @@ describe("importHostedAiUsageRecords", () => {
     };
 
     await importHostedAiUsageRecords({
+      aiUsageBillingMode: "stripe_meter",
       prisma: prisma as never,
       trustedUserId: "member_123",
       usage: [
@@ -339,6 +440,7 @@ describe("importHostedAiUsageRecords", () => {
     };
 
     await importHostedAiUsageRecords({
+      aiUsageBillingMode: "stripe_meter",
       prisma: prisma as never,
       trustedUserId: "member_123",
       usage: [
@@ -378,6 +480,7 @@ describe("importHostedAiUsageRecords", () => {
     };
 
     await importHostedAiUsageRecords({
+      aiUsageBillingMode: "stripe_meter",
       prisma: prisma as never,
       trustedUserId: "member_123",
       usage: [
@@ -395,6 +498,105 @@ describe("importHostedAiUsageRecords", () => {
         stripeMeterSource: "murph",
       }),
     }));
+  });
+});
+
+describe("markHostedAiUsageStripeMeteringDisabled", () => {
+  it("marks pending or expired processing Murph-metered rows as skipped without requiring a Stripe customer", async () => {
+    const findMany = vi.fn(async () => [
+      {
+        id: "usage_pending",
+      },
+    ]);
+    const updateMany = vi.fn(async () => ({ count: 1 }));
+    const prisma = {
+      hostedAiUsage: {
+        findMany,
+        updateMany,
+      },
+    };
+
+    await expect(
+      markHostedAiUsageStripeMeteringDisabled({
+        limit: 16,
+        now: "2026-03-29T12:05:00.000Z",
+        prisma: prisma as never,
+      }),
+    ).resolves.toBe(1);
+
+    expect(findMany).toHaveBeenCalledWith({
+      where: {
+        stripeMeterSource: "murph",
+        OR: [
+          {
+            stripeMeterStatus: "pending",
+          },
+          {
+            stripeMeterStatus: "processing",
+            OR: [
+              {
+                stripeMeterNextAttemptAt: null,
+              },
+              {
+                stripeMeterNextAttemptAt: {
+                  lte: new Date("2026-03-29T12:05:00.000Z"),
+                },
+              },
+            ],
+          },
+        ],
+      },
+      orderBy: [
+        {
+          stripeMeterNextAttemptAt: "asc",
+        },
+        {
+          occurredAt: "asc",
+        },
+        {
+          createdAt: "asc",
+        },
+      ],
+      take: 16,
+      select: {
+        id: true,
+      },
+    });
+    expect(updateMany).toHaveBeenCalledWith({
+      where: {
+        id: {
+          in: ["usage_pending"],
+        },
+        stripeMeterSource: "murph",
+        OR: [
+          {
+            stripeMeterStatus: "pending",
+          },
+          {
+            stripeMeterStatus: "processing",
+            OR: [
+              {
+                stripeMeterNextAttemptAt: null,
+              },
+              {
+                stripeMeterNextAttemptAt: {
+                  lte: new Date("2026-03-29T12:05:00.000Z"),
+                },
+              },
+            ],
+          },
+        ],
+      },
+      data: {
+        stripeMeterError:
+          "Hosted AI usage billing is disabled until Stripe native LLM billing is enabled.",
+        stripeMeterIdentifier: null,
+        stripeMeterLastAttemptedAt: new Date("2026-03-29T12:05:00.000Z"),
+        stripeMeterNextAttemptAt: null,
+        stripeMeterStatus: "skipped",
+        stripeMeteredAt: null,
+      },
+    });
   });
 });
 

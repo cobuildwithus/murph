@@ -1,3 +1,5 @@
+import type { HostedAiUsageBillingMode } from "@murphai/hosted-execution";
+
 export const HOSTED_BILLING_PLAN_CODES = [
   "launch_monthly",
   "launch_annual",
@@ -78,26 +80,32 @@ export function listHostedBillingPlanPresentations(input?: {
 }
 
 export function resolveHostedBillingReady(input: {
+  aiUsageBillingMode: HostedAiUsageBillingMode;
   stripePriceIdsByPlan: Readonly<Record<HostedBillingPlanCode, string | null>>;
   stripeSecretKey: string | null;
   stripeUsageMeterEventName: string | null;
   stripeUsagePriceIdsByPlan: Readonly<Record<HostedBillingPlanCode, string | null>>;
 }): boolean {
-  if (!input.stripeSecretKey || !input.stripeUsageMeterEventName) {
+  if (!input.stripeSecretKey) {
+    return false;
+  }
+
+  if (input.aiUsageBillingMode === "stripe_meter" && !input.stripeUsageMeterEventName) {
     return false;
   }
 
   return HOSTED_BILLING_PLAN_CODES.some((code) =>
-    hasHostedBillingPlanStripePrices(input, code)
+    hasHostedBillingPlanStripePrices(input, code, input.aiUsageBillingMode)
   );
 }
 
 export function resolveConfiguredHostedBillingPlanCodes(input: {
+  aiUsageBillingMode: HostedAiUsageBillingMode;
   stripePriceIdsByPlan: Readonly<Record<HostedBillingPlanCode, string | null>>;
   stripeUsagePriceIdsByPlan: Readonly<Record<HostedBillingPlanCode, string | null>>;
 }): HostedBillingPlanCode[] {
   return HOSTED_BILLING_PLAN_CODES.filter((code) =>
-    hasHostedBillingPlanStripePrices(input, code)
+    hasHostedBillingPlanStripePrices(input, code, input.aiUsageBillingMode)
   );
 }
 
@@ -146,8 +154,15 @@ function hasHostedBillingPlanStripePrices(
     stripeUsagePriceIdsByPlan: Readonly<Record<HostedBillingPlanCode, string | null>>;
   },
   code: HostedBillingPlanCode,
+  aiUsageBillingMode: HostedAiUsageBillingMode,
 ): boolean {
-  return Boolean(input.stripePriceIdsByPlan[code] && input.stripeUsagePriceIdsByPlan[code]);
+  if (!input.stripePriceIdsByPlan[code]) {
+    return false;
+  }
+
+  return aiUsageBillingMode === "stripe_meter"
+    ? Boolean(input.stripeUsagePriceIdsByPlan[code])
+    : true;
 }
 
 function hasHostedBillingPlanCode(
