@@ -19,6 +19,16 @@ import {
 } from './shared.js'
 
 const ASSISTANT_ROUTING_PARSER_RETRY_DELAY_MS = 30 * 1000
+const ASSISTANT_MODEL_CONFIG_INVALID_CODE = 'assistant_model_config_invalid'
+
+function isAssistantModelConfigurationError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    error.code === ASSISTANT_MODEL_CONFIG_INVALID_CODE
+  )
+}
 
 type AssistantInboxCaptureSummary = Awaited<
   ReturnType<InboxServices['list']>
@@ -116,6 +126,17 @@ export async function routeAssistantInboxCapture(input: {
       tools: result.plan.actions.map((action: { tool: string }) => action.tool),
     }
   } catch (error) {
+    if (isAssistantModelConfigurationError(error)) {
+      return {
+        advanceCursor: false,
+        details: errorMessage(error),
+        nextWakeAt: computeAssistantAutomationRetryAt(
+          ASSISTANT_ROUTING_PARSER_RETRY_DELAY_MS,
+        ),
+        status: 'failed',
+      }
+    }
+
     return {
       advanceCursor: true,
       details: errorMessage(error),
@@ -156,6 +177,7 @@ export async function scanAssistantInboxOnce(input: {
 
   const summary = createEmptyInboxScanResult()
   summary.considered = captures.length
+  let nextCursor = input.afterCursor ?? null
 
   for (const capture of captures) {
     if (input.signal?.aborted) {
@@ -176,13 +198,15 @@ export async function scanAssistantInboxOnce(input: {
       outcome,
       summary,
     })
+
+    if (!outcome.advanceCursor) {
+      break
+    }
+
+    nextCursor = cursorFromCapture(capture)
   }
 
-  await input.onCursorProgress?.(
-    captures.length > 0
-      ? cursorFromCapture(captures[captures.length - 1]!)
-      : input.afterCursor ?? null,
-  )
+  await input.onCursorProgress?.(nextCursor)
 
   return summary
 }

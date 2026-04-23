@@ -510,3 +510,32 @@ test('wearables commands exercise day and list surfaces with provider normalizat
   assert.equal(sourcesList.exitCode, null)
   assert.equal(requireData(sourcesList.envelope).count >= 0, true)
 })
+
+test('wearables provider filters reject unsupported provider names in-process', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    'murph-cli-wearables-provider-guard-',
+  )
+  cleanupPaths.push(parentRoot)
+
+  const cli = createCoverageCli()
+  const result = await runInProcessJsonCli(cli, [
+    'wearables',
+    'day',
+    '--date',
+    '2026-04-05',
+    '--provider',
+    'ottoai',
+    '--vault',
+    vaultRoot,
+  ])
+
+  assert.equal(result.exitCode, 1)
+  assert.equal(result.envelope.ok, false)
+  if (!result.envelope.ok) {
+    assert.match(
+      result.envelope.error.message ?? '',
+      /Unsupported value for --provider: "ottoai"/u,
+    )
+    assert.match(result.envelope.error.message ?? '', /garmin, oura, strava, whoop/u)
+  }
+})

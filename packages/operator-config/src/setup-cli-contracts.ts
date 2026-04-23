@@ -19,6 +19,10 @@ import {
   pathSchema,
   requestIdSchema,
 } from './vault-cli-contracts.js'
+import {
+  apiKeyEnvNameSchema,
+  httpBaseUrlSchema,
+} from './command-helpers.js'
 
 export const whisperModelValues = [
   'tiny',
@@ -208,14 +212,10 @@ export const setupCommandOptionsSchema = z.object({
     .min(1)
     .optional()
     .describe('Optional default assistant model to save during setup.'),
-  assistantBaseUrl: z
-    .string()
-    .min(1)
+  assistantBaseUrl: httpBaseUrlSchema
     .optional()
     .describe('Optional OpenAI-compatible base URL to save during setup, such as http://127.0.0.1:11434/v1 for Ollama.'),
-  assistantApiKeyEnv: z
-    .string()
-    .min(1)
+  assistantApiKeyEnv: apiKeyEnvNameSchema
     .optional()
     .describe('Optional environment variable name that should hold the OpenAI-compatible API key.'),
   assistantProviderName: z

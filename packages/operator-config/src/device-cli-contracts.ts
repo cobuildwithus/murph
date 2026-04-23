@@ -1,10 +1,37 @@
 import { z } from 'zod'
+import {
+  configuredDeviceSyncProviderKeys,
+  type ConfiguredDeviceSyncProviderKey,
+} from '@murphai/device-syncd/config'
+import { httpBaseUrlSchema, httpUrlSchema } from './command-helpers.js'
 import { isoTimestampSchema, pathSchema } from './vault-cli-contracts.js'
 
-export const deviceSyncBaseUrlSchema = z
-  .string()
-  .url()
+export const deviceSyncBaseUrlSchema = httpBaseUrlSchema
   .describe('Reachable base URL for the local device sync control plane.')
+
+export const deviceSyncProviderKeyValues = configuredDeviceSyncProviderKeys
+const deviceSyncProviderKeySet = new Set<string>(deviceSyncProviderKeyValues)
+
+export function formatDeviceSyncProviderKeyList(): string {
+  return deviceSyncProviderKeyValues.join(', ')
+}
+
+export function normalizeDeviceSyncProviderKey(
+  value: string,
+): ConfiguredDeviceSyncProviderKey | null {
+  const normalized = value.trim().toLowerCase()
+
+  return deviceSyncProviderKeySet.has(normalized)
+    ? (normalized as ConfiguredDeviceSyncProviderKey)
+    : null
+}
+
+export const deviceSyncProviderKeySchema = z
+  .string()
+  .min(1)
+  .refine((value) => normalizeDeviceSyncProviderKey(value) !== null, {
+    message: `Unsupported device-sync provider. Supported providers: ${formatDeviceSyncProviderKeyList()}.`,
+  })
 
 export const deviceSyncAccountStatusSchema = z.enum([
   'active',
@@ -75,7 +102,7 @@ export const deviceConnectResultSchema = z.object({
   provider: z.string().min(1),
   state: z.string().min(1),
   expiresAt: isoTimestampSchema,
-  authorizationUrl: z.string().url(),
+  authorizationUrl: httpUrlSchema,
   openedBrowser: z.boolean(),
 })
 

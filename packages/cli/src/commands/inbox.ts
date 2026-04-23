@@ -1,6 +1,9 @@
 import { Cli, z } from 'incur'
 import {
+  apiKeyEnvNameSchema,
   emptyArgsSchema,
+  httpBaseUrlSchema,
+  normalizeHttpBaseUrlOption,
   parseHeadersJsonOption,
   requestIdFromOptions,
   withBaseOptions,
@@ -949,25 +952,20 @@ export function registerInboxCommands(
     description:
       'Use the shared assistant model harness to generate a CLI action plan for one inbox capture.',
     hint:
-      'Pass --baseUrl to target a local or other OpenAI-compatible endpoint; omit it to use the AI Gateway model string.',
+      'Pass --baseUrl to target a local or other OpenAI-compatible endpoint. Use the saved assistant backend for AI Gateway routing rather than omitting the endpoint here.',
     options: withBaseOptions({
       model: z
         .string()
         .min(1)
         .describe('Model id to use, such as anthropic/claude-sonnet-4.5 or a local model id.'),
-      baseUrl: z
-        .string()
-        .min(1)
-        .optional()
-        .describe('Optional OpenAI-compatible base URL for local or custom model endpoints.'),
+      baseUrl: httpBaseUrlSchema
+        .describe('OpenAI-compatible base URL for local or custom model endpoints.'),
       apiKey: z
         .string()
         .min(1)
         .optional()
         .describe('Optional explicit API key for OpenAI-compatible model endpoints.'),
-      apiKeyEnv: z
-        .string()
-        .min(1)
+      apiKeyEnv: apiKeyEnvNameSchema
         .optional()
         .describe('Optional environment variable name that stores the API key.'),
       providerName: z
@@ -996,7 +994,9 @@ export function registerInboxCommands(
         apply: context.options.apply,
         modelSpec: {
           model: context.options.model,
-          baseUrl: context.options.baseUrl,
+          baseUrl:
+            normalizeHttpBaseUrlOption(context.options.baseUrl) ??
+            context.options.baseUrl,
           apiKey: context.options.apiKey,
           apiKeyEnv: context.options.apiKeyEnv,
           providerName: context.options.providerName,

@@ -11,18 +11,22 @@ import {
   deviceDaemonStopResultSchema,
   deviceProviderListResultSchema,
   deviceSyncBaseUrlSchema,
+  deviceSyncProviderKeySchema,
+  normalizeDeviceSyncProviderKey,
 } from '@murphai/operator-config/device-cli-contracts'
 import type { VaultServices } from '@murphai/vault-usecases'
 
-const providerNameSchema = z
-  .string()
-  .min(1)
+const providerNameSchema = deviceSyncProviderKeySchema
   .describe('Live device-sync provider key such as garmin, whoop, or oura.')
 
 const accountIdSchema = z
   .string()
   .min(1)
   .describe('Device sync account id returned by the control plane.')
+
+function normalizeProviderName(value: string): string {
+  return normalizeDeviceSyncProviderKey(value) ?? value.trim().toLowerCase()
+}
 
 const invalidReturnToCharacterPattern = /[\u0000-\u001F\u007F]/u
 
@@ -122,7 +126,7 @@ export function registerDeviceCommands(
     async run({ args, options }) {
       return services.devices.connect({
         vault: options.vault,
-        provider: args.provider,
+        provider: normalizeProviderName(args.provider),
         baseUrl: options.baseUrl,
         returnTo: options.returnTo,
         open: options.open,
@@ -147,7 +151,7 @@ export function registerDeviceCommands(
       return services.devices.listAccounts({
         vault: options.vault,
         baseUrl: options.baseUrl,
-        provider: options.provider,
+        provider: options.provider ? normalizeProviderName(options.provider) : undefined,
       })
     },
   })

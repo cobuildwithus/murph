@@ -1,4 +1,5 @@
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
+import { z } from 'zod'
 import {
   MAPBOX_DIRECTIONS_API_VERSION,
   type MapboxDirectionsResponse,
@@ -8,6 +9,41 @@ import {
   type ResolvedRoutePoint,
 } from './mapbox-route-contracts.js'
 import { fetchMapboxJson } from './mapbox-route-client.js'
+
+const finiteNonnegativeNumberSchema = z.number().finite().nonnegative()
+const mapboxDirectionsGeometrySchema = z
+  .object({
+    type: z.string(),
+    coordinates: z.array(
+      z.tuple([z.number().finite(), z.number().finite()]),
+    ),
+  })
+  .passthrough()
+
+const mapboxDirectionsLegSchema = z
+  .object({
+    distance: finiteNonnegativeNumberSchema,
+    duration: finiteNonnegativeNumberSchema,
+    summary: z.string().optional(),
+  })
+  .passthrough()
+
+const mapboxDirectionsRouteSchema = z
+  .object({
+    distance: finiteNonnegativeNumberSchema,
+    duration: finiteNonnegativeNumberSchema,
+    geometry: mapboxDirectionsGeometrySchema.optional(),
+    legs: z.array(mapboxDirectionsLegSchema).optional(),
+  })
+  .passthrough()
+
+const mapboxDirectionsResponseSchema = z
+  .object({
+    code: z.string().optional(),
+    message: z.string().optional(),
+    routes: z.array(mapboxDirectionsRouteSchema).optional(),
+  })
+  .passthrough()
 
 export async function requestDirections(input: {
   accessToken: string
@@ -32,12 +68,20 @@ export async function requestDirections(input: {
     url.searchParams.set('geometries', 'geojson')
   }
 
-  const payload = await fetchMapboxJson<MapboxDirectionsResponse>({
-    fetchImpl: input.fetchImpl,
-    timeoutMs: input.timeoutMs,
-    url,
-    requestLabel: 'directions',
-  })
+  const parsedPayload = mapboxDirectionsResponseSchema.safeParse(
+    await fetchMapboxJson<unknown>({
+      fetchImpl: input.fetchImpl,
+      timeoutMs: input.timeoutMs,
+      url,
+      requestLabel: 'directions',
+    }),
+  )
+
+  if (!parsedPayload.success) {
+    throw new Error('Mapbox returned an invalid directions response.')
+  }
+
+  const payload: MapboxDirectionsResponse = parsedPayload.data
 
   if (payload.code !== 'Ok') {
     throw new Error(

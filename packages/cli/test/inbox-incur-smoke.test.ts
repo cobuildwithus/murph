@@ -149,4 +149,5 @@ test('inbox model route schema exposes backend and apply options', async () => {
   assert.equal('apply' in schema.options.properties, true)
   assert.equal(schema.options.required?.includes('vault') ?? false, true)
   assert.equal(schema.options.required?.includes('model') ?? false, true)
+  assert.equal(schema.options.required?.includes('baseUrl') ?? false, true)
 })

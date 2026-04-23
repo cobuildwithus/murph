@@ -14,6 +14,11 @@ import {
   type AssistantOperatorDefaults,
 } from '@murphai/operator-config/operator-config'
 import {
+  apiKeyEnvNameSchema,
+  httpBaseUrlSchema,
+  normalizeHttpBaseUrlOption,
+} from '@murphai/operator-config/command-helpers'
+import {
   setupAssistantAccountSchema,
   setupCommandOptionsSchema,
   setupAssistantProviderPresetSchema,
@@ -79,18 +84,22 @@ const modelCommandOptionsSchema = z.object({
   model: optionalNonEmptyStringOption(
     'Default model to save for the selected backend. In non-interactive mode, pair this with `--preset` unless Murph can reuse the currently saved backend.',
   ),
-  baseUrl: optionalNonEmptyStringOption(
-    describePresetScopedOption(
-      'OpenAI-compatible base URL to save, such as http://127.0.0.1:11434/v1.',
-      'openai-compatible',
+  baseUrl: httpBaseUrlSchema
+    .optional()
+    .describe(
+      describePresetScopedOption(
+        'OpenAI-compatible base URL to save, such as http://127.0.0.1:11434/v1.',
+        'openai-compatible',
+      ),
     ),
-  ),
-  apiKeyEnv: optionalNonEmptyStringOption(
-    describePresetScopedOption(
-      'Environment variable name that should hold the OpenAI-compatible API key.',
-      'openai-compatible',
+  apiKeyEnv: apiKeyEnvNameSchema
+    .optional()
+    .describe(
+      describePresetScopedOption(
+        'Environment variable name that should hold the OpenAI-compatible API key.',
+        'openai-compatible',
+      ),
     ),
-  ),
   providerName: optionalNonEmptyStringOption(
     describePresetScopedOption(
       'Stable label for the saved OpenAI-compatible provider.',
@@ -527,7 +536,9 @@ function createModelSetupOptions(input: {
       : {}),
     ...(input.options.baseUrl !== undefined
       ? {
-          assistantBaseUrl: input.options.baseUrl,
+          assistantBaseUrl:
+            normalizeHttpBaseUrlOption(input.options.baseUrl) ??
+            input.options.baseUrl,
         }
       : {}),
     ...(input.options.apiKeyEnv !== undefined

@@ -1,4 +1,5 @@
 import { Cli, z } from 'incur'
+import { wearablePreferenceProviderValues } from '@murphai/contracts'
 import {
   wearableCanonicalMetricKeys,
 } from '@murphai/importers/device-providers/metric-catalog'
@@ -8,7 +9,7 @@ import {
   withBaseOptions,
 } from '@murphai/operator-config/command-helpers'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
-import { normalizeRepeatableFlagOption } from '@murphai/vault-usecases'
+import { normalizeRepeatableEnumFlagOption } from '@murphai/vault-usecases'
 import {
   localDateSchema,
   pathSchema,
@@ -479,7 +480,11 @@ function withWearableComparisonOptions() {
 }
 
 function normalizeWearableProviders(value: readonly string[] | undefined): string[] {
-  return normalizeRepeatableFlagOption(value, 'provider') ?? []
+  return normalizeRepeatableEnumFlagOption(
+    value?.map((entry) => entry.toLowerCase()),
+    'provider',
+    wearablePreferenceProviderValues,
+  ) ?? []
 }
 
 export function registerWearablesCommands(

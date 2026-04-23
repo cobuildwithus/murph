@@ -54,6 +54,7 @@ import {
   defineAssistantCapability,
   resolveAssistantLanguageModel,
 } from '@murphai/assistant-engine/model-harness'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 const TEST_API_KEY_ENV = 'ASSISTANT_TEST_KEY'
 
@@ -499,6 +500,19 @@ test('resolveAssistantLanguageModel uses the openai-compatible provider with env
   assert.equal(headers?.authorization, 'Bearer secret-key')
   assert.equal(headers?.['x-test-header'], 'bundle')
   assert.match(String(headers?.['user-agent']), /^ai-sdk\/openai-compatible\//u)
+})
+
+test('resolveAssistantLanguageModel classifies missing OpenAI-compatible base URLs as configuration errors', () => {
+  assert.throws(
+    () =>
+      resolveAssistantLanguageModel({
+        model: 'local-model',
+      }),
+    (error) =>
+      error instanceof VaultCliError &&
+      error.code === 'assistant_model_config_invalid' &&
+      /requires a base URL/u.test(error.message),
+  )
 })
 
 test('capability tool catalog preview mode validates input but does not execute the tool', async () => {

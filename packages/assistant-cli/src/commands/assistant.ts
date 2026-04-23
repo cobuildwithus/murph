@@ -3,6 +3,7 @@ import {
   assistantApprovalPolicyValues,
   assistantAskResultSchema,
   assistantChatProviderValues,
+  assistantChannelNameSchema,
   assistantChatResultSchema,
   assistantDeliverResultSchema,
   assistantDoctorResultSchema,
@@ -41,7 +42,10 @@ import {
   resolveAssistantStatePaths,
 } from '@murphai/assistant-engine/assistant-state'
 import {
+  apiKeyEnvNameSchema,
   emptyArgsSchema,
+  httpBaseUrlSchema,
+  normalizeHttpBaseUrlOption,
   parseHeadersJsonOption,
   requestIdFromOptions,
   withBaseOptions,
@@ -78,6 +82,33 @@ const assistantOneSendDeliveryTargetRoutingDescription =
 
 const assistantSavedDeliveryTargetRoutingDescription =
   'Optional saved outbound destination in the transport-native send format. For Telegram use a chat id or `<chatId>:topic:<messageThreadId>`; for Linq use a chat id; for email use a recipient address.'
+const assistantEmailDeliveryTargetPattern = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/u
+const assistantChannelOptionSchema = z
+  .string()
+  .min(1)
+  .refine(
+    (value) => assistantChannelNameSchema.safeParse(value.trim().toLowerCase()).success,
+    'Supported assistant channels: telegram, linq, email.',
+  )
+
+function normalizeAssistantChannelOption(
+  value?: string,
+): string | undefined {
+  if (!value) {
+    return undefined
+  }
+
+  const normalized = value.trim().toLowerCase()
+  const parsed = assistantChannelNameSchema.safeParse(normalized)
+
+  return parsed.success ? parsed.data : normalized
+}
+
+function normalizeAssistantBaseUrlOption(
+  value?: string,
+): string | undefined {
+  return value ? normalizeHttpBaseUrlOption(value) ?? value : undefined
+}
 
 function optionalNonEmptyStringOption(description: string) {
   return z
@@ -92,9 +123,9 @@ const assistantSessionOptionFields = {
   alias: optionalNonEmptyStringOption(
     'Optional stable alias used to map an external conversation onto one assistant session.',
   ),
-  channel: optionalNonEmptyStringOption(
-    'Optional channel label such as telegram, linq, or email.',
-  ),
+  channel: assistantChannelOptionSchema
+    .optional()
+    .describe('Optional channel label such as telegram, linq, or email.'),
   identity: optionalNonEmptyStringOption(assistantIdentityRoutingDescription),
   participant: optionalNonEmptyStringOption(assistantParticipantRoutingDescription),
   thread: optionalNonEmptyStringOption(assistantThreadRoutingDescription),
@@ -113,12 +144,16 @@ const assistantProviderOptionFields = {
   model: optionalNonEmptyStringOption(
     'Optional provider model override for local chat turns.',
   ),
-  baseUrl: optionalNonEmptyStringOption(
-    'Optional OpenAI-compatible base URL for local assistant chat, such as http://127.0.0.1:11434/v1 for Ollama.',
-  ),
-  apiKeyEnv: optionalNonEmptyStringOption(
-    'Optional environment variable name that stores the OpenAI-compatible API key for local assistant chat.',
-  ),
+  baseUrl: httpBaseUrlSchema
+    .optional()
+    .describe(
+      'Optional OpenAI-compatible base URL for local assistant chat, such as http://127.0.0.1:11434/v1 for Ollama.',
+    ),
+  apiKeyEnv: apiKeyEnvNameSchema
+    .optional()
+    .describe(
+      'Optional environment variable name that stores the OpenAI-compatible API key for local assistant chat.',
+    ),
   providerName: optionalNonEmptyStringOption(
     'Optional stable provider label for OpenAI-compatible local assistant chat sessions.',
   ),
@@ -189,6 +224,26 @@ function assertAssistantSelfDeliveryTargetInput(input: {
       'Saved email self delivery targets require --identity with the configured AgentMail inbox id.',
     )
   }
+
+  assertAssistantDeliveryTargetForChannel(input)
+}
+
+function assertAssistantDeliveryTargetForChannel(input: {
+  channel?: string
+  deliveryTarget?: string
+}): void {
+  if (
+    input.channel !== 'email' ||
+    !input.deliveryTarget ||
+    assistantEmailDeliveryTargetPattern.test(input.deliveryTarget.trim())
+  ) {
+    return
+  }
+
+  throw new VaultCliError(
+    'invalid_option',
+    'Email delivery targets must be a single recipient email address.',
+  )
 }
 
 const assistantChatArgsSchema = z.object({
@@ -370,7 +425,7 @@ function assistantConversationOptionsFromCli<T extends AssistantConversationCliO
   return {
     sessionId: options.session,
     alias: options.alias,
-    channel: options.channel,
+    channel: normalizeAssistantChannelOption(options.channel),
     identityId: options.identity,
     participantId: options.participant,
     threadId: options.thread,
@@ -385,7 +440,7 @@ function assistantProviderOverridesFromCli<T extends AssistantProviderCliOptions
     provider: options.provider,
     codexCommand: options.codexCommand,
     model: options.model,
-    baseUrl: options.baseUrl,
+    baseUrl: normalizeAssistantBaseUrlOption(options.baseUrl),
     apiKeyEnv: options.apiKeyEnv,
     providerName: options.providerName,
     sandbox: options.sandbox,
@@ -415,7 +470,7 @@ async function resolveAssistantDeliveryRouteFromCli(input: {
 }) {
   return applyAssistantSelfDeliveryTargetDefaults(
     {
-      channel: input.channel,
+      channel: normalizeAssistantChannelOption(input.channel),
       identityId: input.identity,
       participantId: input.participant,
       threadId: input.thread,
@@ -444,17 +499,26 @@ async function resolveAssistantDeliveryInvocationFromCli(
         deliveryTarget: deliveryOverrides.deliveryTarget,
       })
     : null
+  const resolvedChannel =
+    savedRoute?.channel ?? normalizeAssistantChannelOption(options.channel)
+  const resolvedDeliveryTarget =
+    savedRoute?.deliveryTarget ?? deliveryOverrides.deliveryTarget
+
+  assertAssistantDeliveryTargetForChannel({
+    channel: resolvedChannel,
+    deliveryTarget: resolvedDeliveryTarget,
+  })
 
   return {
     conversationOptions: assistantConversationOptionsFromCli({
       ...options,
-      channel: savedRoute?.channel ?? options.channel,
+      channel: resolvedChannel,
       identity: savedRoute?.identityId ?? options.identity,
       participant: savedRoute?.participantId ?? options.participant,
       thread: savedRoute?.threadId ?? options.thread,
     }),
     deliveryOverrides,
-    resolvedDeliveryTarget: savedRoute?.deliveryTarget ?? deliveryOverrides.deliveryTarget,
+    resolvedDeliveryTarget,
   }
 }
 
@@ -513,9 +577,7 @@ const assistantRunOptionsSchema = withBaseOptions({
     .describe(
       'Optional model id for canonical inbox triage routing, such as gpt-oss:20b or an AI Gateway model string. Omit it when you only want channel auto-reply.',
     ),
-  baseUrl: z
-    .string()
-    .min(1)
+  baseUrl: httpBaseUrlSchema
     .optional()
     .describe('Optional OpenAI-compatible base URL for the inbox routing model.'),
   apiKey: z
@@ -523,9 +585,7 @@ const assistantRunOptionsSchema = withBaseOptions({
     .min(1)
     .optional()
     .describe('Optional explicit API key for the OpenAI-compatible routing endpoint.'),
-  apiKeyEnv: z
-    .string()
-    .min(1)
+  apiKeyEnv: apiKeyEnvNameSchema
     .optional()
     .describe('Optional environment variable name that stores the routing API key.'),
   providerName: z
@@ -567,6 +627,19 @@ const assistantRunOptionsSchema = withBaseOptions({
     .optional()
     .describe('Run one assistant scan and then exit.'),
 })
+
+function assertAssistantRunModelOptions(
+  options: z.infer<typeof assistantRunOptionsSchema>,
+): void {
+  if (!options.model || normalizeAssistantBaseUrlOption(options.baseUrl)) {
+    return
+  }
+
+  throw new VaultCliError(
+    'invalid_option',
+    'assistant run --model requires --baseUrl for the OpenAI-compatible routing endpoint. Omit --model when you only want channel auto-reply.',
+  )
+}
 
 function createAssistantRunCommandDefinition(
   inboxServices: InboxServices,
@@ -615,6 +688,7 @@ function createAssistantRunCommandDefinition(
     output: assistantRunResultSchema,
     async run(context: { options: z.infer<typeof assistantRunOptionsSchema> }) {
       const terminalLogOptions = resolveForegroundTerminalLogOptions(process.env)
+      assertAssistantRunModelOptions(context.options)
 
       return runAssistantAutomation({
         inboxServices,
@@ -624,7 +698,7 @@ function createAssistantRunCommandDefinition(
         modelSpec: context.options.model
           ? {
               model: context.options.model,
-              baseUrl: context.options.baseUrl,
+              baseUrl: normalizeAssistantBaseUrlOption(context.options.baseUrl),
               apiKey: context.options.apiKey,
               apiKeyEnv: context.options.apiKeyEnv,
               providerName: context.options.providerName,
@@ -886,7 +960,7 @@ export function registerAssistantCommands(
 
     selfTarget.command('show', {
       args: z.object({
-        channel: z.string().min(1).describe('Saved outbound channel to inspect.'),
+        channel: assistantChannelOptionSchema.describe('Saved outbound channel to inspect.'),
       }),
       description: 'Show one saved self-delivery target for a specific outbound channel.',
       options: z.object({
@@ -898,7 +972,7 @@ export function registerAssistantCommands(
         return {
           ...buildAssistantOperatorConfigResult(),
           target:
-            targets.find((target) => target.channel === context.args.channel.trim().toLowerCase()) ??
+            targets.find((target) => target.channel === normalizeAssistantChannelOption(context.args.channel)) ??
             null,
         }
       },
@@ -906,9 +980,7 @@ export function registerAssistantCommands(
 
     selfTarget.command('set', {
       args: z.object({
-        channel: z
-          .string()
-          .min(1)
+        channel: assistantChannelOptionSchema
           .describe('Outbound channel to save, such as telegram, linq, or email.'),
       }),
       description:
@@ -921,7 +993,8 @@ export function registerAssistantCommands(
       }),
       output: assistantSelfDeliveryTargetSetResultSchema,
       async run(context) {
-        const channel = context.args.channel.trim().toLowerCase()
+        const channel =
+          normalizeAssistantChannelOption(context.args.channel) ?? context.args.channel
         assertAssistantSelfDeliveryTargetInput({
           channel,
           identity: context.options.identity,
@@ -947,9 +1020,7 @@ export function registerAssistantCommands(
 
     selfTarget.command('clear', {
       args: z.object({
-        channel: z
-          .string()
-          .min(1)
+        channel: assistantChannelOptionSchema
           .optional()
           .describe('Optional saved outbound channel to clear. Omit to clear all saved self-targets.'),
       }),
@@ -961,7 +1032,9 @@ export function registerAssistantCommands(
       async run(context) {
         return {
           ...buildAssistantOperatorConfigResult(),
-          clearedChannels: await clearAssistantSelfDeliveryTargets(context.args.channel),
+          clearedChannels: await clearAssistantSelfDeliveryTargets(
+            normalizeAssistantChannelOption(context.args.channel),
+          ),
         }
       },
     })

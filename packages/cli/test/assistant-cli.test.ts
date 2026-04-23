@@ -568,6 +568,107 @@ test.sequential(
 )
 
 test.sequential(
+  'assistant self-target commands reject unsupported channels and invalid email recipients',
+  async () => {
+    const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-self-target-guard-'))
+    const homeRoot = path.join(parent, 'home')
+    await mkdir(homeRoot, { recursive: true })
+    cleanupPaths.push(parent)
+
+    const env = {
+      HOME: homeRoot,
+    }
+
+    const unsupportedChannel = await runCli([
+      'assistant',
+      'self-target',
+      'set',
+      'slack',
+      '--thread',
+      'thread-1',
+    ], {
+      env,
+    })
+    assert.equal(unsupportedChannel.ok, false)
+    if (!unsupportedChannel.ok) {
+      assert.match(unsupportedChannel.error.message ?? '', /telegram/u)
+      assert.match(unsupportedChannel.error.message ?? '', /linq/u)
+      assert.match(unsupportedChannel.error.message ?? '', /email/u)
+    }
+
+    const invalidEmail = await runCli([
+      'assistant',
+      'self-target',
+      'set',
+      'email',
+      '--identity',
+      'inbox-id',
+      '--delivery-target',
+      'not-an-email',
+    ], {
+      env,
+    })
+    assert.equal(invalidEmail.ok, false)
+    if (!invalidEmail.ok) {
+      assert.match(invalidEmail.error.message ?? '', /single recipient email address/u)
+    }
+
+    const invalidDirectEmail = await runCli([
+      'assistant',
+      'deliver',
+      'hello',
+      '--vault',
+      path.join(parent, 'vault'),
+      '--channel',
+      'email',
+      '--identity',
+      'inbox-id',
+      '--delivery-target',
+      'not-an-email',
+    ], {
+      env,
+    })
+    assert.equal(invalidDirectEmail.ok, false)
+    if (!invalidDirectEmail.ok) {
+      assert.match(
+        invalidDirectEmail.error.message ?? '',
+        /single recipient email address/u,
+      )
+    }
+  },
+  ASSISTANT_CLI_TIMEOUT_MS,
+)
+
+test.sequential(
+  'assistant run rejects routing models that omit the OpenAI-compatible base URL',
+  async () => {
+    const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-run-model-guard-'))
+    const vaultRoot = path.join(parent, 'vault')
+    cleanupPaths.push(parent)
+
+    const result = await runCli([
+      'assistant',
+      'run',
+      '--vault',
+      vaultRoot,
+      '--model',
+      'gpt-oss:20b',
+      '--once',
+    ], {
+      env: {
+        MURPH_CLI_TEST_PERSISTENT_HARNESS: '0',
+      },
+    })
+
+    assert.equal(result.ok, false)
+    if (!result.ok) {
+      assert.match(result.error.message ?? '', /requires --baseUrl/u)
+    }
+  },
+  ASSISTANT_CLI_TIMEOUT_MS,
+)
+
+test.sequential(
   'provider-turn vault.cli.run falls back to the workspace CLI when vault-cli is unavailable on PATH',
   async () => {
     const parent = await mkdtemp(path.join(tmpdir(), 'murph-provider-turn-cli-fallback-'))

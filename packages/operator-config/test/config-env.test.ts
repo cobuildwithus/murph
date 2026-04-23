@@ -15,8 +15,11 @@ import {
   parseAssistantSessionRecord,
 } from '../src/assistant-cli-contracts.ts'
 import {
+  apiKeyEnvNameSchema,
   emptyArgsSchema,
   firstString,
+  httpBaseUrlSchema,
+  normalizeHttpBaseUrlOption,
   parseHeadersJsonOption,
   requestIdFromOptions,
   resolveEffectiveTopLevelToken,
@@ -220,13 +223,41 @@ test('command helpers normalize top-level tokens, request ids, and JSON headers'
   assert.equal(parseHeadersJsonOption(), undefined)
 
   const headers = parseHeadersJsonOption(
-    '{"Authorization":"Bearer abcdefghijklmnop","X-Trace":" trace-id "}',
+    '{"X-Client":"murph","X-Trace":" trace-id "}',
   )
 
   assert.deepEqual(headers, {
-    Authorization: 'Bearer abcdefghijklmnop',
+    'X-Client': 'murph',
     'X-Trace': ' trace-id ',
   })
+  assert.throws(
+    () => parseHeadersJsonOption('{"Authorization":"credential"}'),
+    (error: unknown) =>
+      error instanceof VaultCliError &&
+      error.code === 'invalid_payload' &&
+      /credential headers/u.test(error.message),
+  )
+  assert.throws(
+    () => parseHeadersJsonOption('{"Bad Header":"value"}'),
+    (error: unknown) =>
+      error instanceof VaultCliError &&
+      error.code === 'invalid_payload' &&
+      /invalid HTTP header name/u.test(error.message),
+  )
+  assert.throws(
+    () => parseHeadersJsonOption('{"X-Trace":"one","x-trace":"two"}'),
+    (error: unknown) =>
+      error instanceof VaultCliError &&
+      error.code === 'invalid_payload' &&
+      /duplicate header name/u.test(error.message),
+  )
+  assert.throws(
+    () => parseHeadersJsonOption('{"X-Trace":"bad\\nvalue"}'),
+    (error: unknown) =>
+      error instanceof VaultCliError &&
+      error.code === 'invalid_payload' &&
+      /invalid value/u.test(error.message),
+  )
   assert.throws(
     () => parseHeadersJsonOption('{'),
     (error: unknown) =>
@@ -287,6 +318,26 @@ test('command helpers normalize top-level tokens, request ids, and JSON headers'
     'req-123',
   )
   assert.equal(requestIdFromOptions({ vault: '/vault' }), null)
+})
+
+test('command helper option schemas reject unsafe base URLs and env names', () => {
+  assert.equal(
+    normalizeHttpBaseUrlOption(' http://127.0.0.1:11434/v1/ '),
+    'http://127.0.0.1:11434/v1',
+  )
+  assert.equal(apiKeyEnvNameSchema.parse('OPENAI_API_KEY'), 'OPENAI_API_KEY')
+  assert.throws(
+    () => httpBaseUrlSchema.parse('https://user:secret@example.test/v1'),
+    /embedded credentials/u,
+  )
+  assert.throws(
+    () => httpBaseUrlSchema.parse('https://example.test/v1?token=secret'),
+    /query parameters/u,
+  )
+  assert.throws(
+    () => apiKeyEnvNameSchema.parse('1_BAD_KEY'),
+    /environment variable name/u,
+  )
 })
 
 test('assistant backend targets trim config input and strip sensitive headers before persistence', () => {
