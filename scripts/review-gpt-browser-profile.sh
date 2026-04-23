@@ -285,6 +285,28 @@ murph_review_gpt_profile_export_browser_env() {
   export managed_browser_profile="$MURPH_REVIEW_GPT_PROFILE_BROWSER_PROFILE"
   export managed_browser_port="$MURPH_REVIEW_GPT_PROFILE_PORT"
   export MURPH_REVIEW_GPT_BROWSER_ENDPOINT="$browser_endpoint"
+  export MURPH_REVIEW_GPT_PROFILE_SLUG="$profile_slug"
+  export MURPH_REVIEW_GPT_PROFILE_NAME
+  export MURPH_REVIEW_GPT_PROFILE_PORT
+  export MURPH_REVIEW_GPT_PROFILE_BROWSER_PROFILE
+  export MURPH_REVIEW_GPT_PROFILE_PRODUCT_DIR_NAME
+  export MURPH_REVIEW_GPT_PROFILE_USER_DATA_DIR
+}
+
+murph_review_gpt_profile_apply_browser_defaults() {
+  local profile_slug="$1"
+  local browser_binary user_data_dir browser_endpoint
+
+  browser_binary="$(murph_review_gpt_profile_browser_binary "$profile_slug")" || return 1
+  user_data_dir="$(murph_review_gpt_profile_user_data_dir "$profile_slug")" || return 1
+  browser_endpoint="$(murph_review_gpt_profile_browser_endpoint "$profile_slug")" || return 1
+  murph_review_gpt_load_profile "$profile_slug" || return 1
+
+  browser_binary_path="${browser_binary_path:-${browser_binary}}"
+  managed_browser_user_data_dir="${managed_browser_user_data_dir:-${user_data_dir}}"
+  managed_browser_profile="${managed_browser_profile:-${MURPH_REVIEW_GPT_PROFILE_BROWSER_PROFILE}}"
+  managed_browser_port="${managed_browser_port:-${MURPH_REVIEW_GPT_PROFILE_PORT}}"
+  MURPH_REVIEW_GPT_BROWSER_ENDPOINT="${MURPH_REVIEW_GPT_BROWSER_ENDPOINT:-${browser_endpoint}}"
 }
 
 murph_review_gpt_profile_prepare_browser_env() {
@@ -402,13 +424,16 @@ murph_review_gpt_profile_run_review_gpt() {
   fi
   if [[ "${1:-}" == "delay" ]]; then
     shift
-    if ! murph_review_gpt_args_skip_browser_prepare "$@"; then
+    if ! murph_review_gpt_args_skip_browser_prepare "$@" || murph_review_gpt_args_include_option --dry-run "$@"; then
       murph_review_gpt_profile_export_browser_env "$profile_slug" || return 1
     fi
     exec pnpm exec cobuild-review-gpt delay --config "$config_path" "$@"
   fi
 
   if murph_review_gpt_args_skip_browser_prepare "$@"; then
+    if murph_review_gpt_args_include_option --dry-run "$@"; then
+      murph_review_gpt_profile_export_browser_env "$profile_slug" || return 1
+    fi
     exec pnpm exec cobuild-review-gpt --config "$config_path" "$@"
   fi
 
