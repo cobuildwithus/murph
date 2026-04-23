@@ -57,6 +57,7 @@ const wakeProcessorMocks = vi.hoisted(() => ({
   persistPendingRunCleanupData: vi.fn(),
   readRunDrainSharePack: vi.fn(),
   readRunDrainVaultSyncImport: vi.fn(),
+  recordHostedRunBreadcrumbInWebBestEffort: vi.fn(),
   startRunMessagingActivity: vi.fn(),
 }));
 
@@ -114,6 +115,8 @@ vi.mock("../src/user-runner/runner-run-processor.js", async () => {
   return {
     ...actual,
     RunnerRunProcessor: MockRunnerRunProcessor,
+    recordHostedRunBreadcrumbInWebBestEffort:
+      wakeProcessorMocks.recordHostedRunBreadcrumbInWebBestEffort,
   };
 });
 
@@ -309,7 +312,51 @@ function createRunRecord(): HostedRunRecord {
   };
 }
 
+async function expectRecordedRunPhases(phases: readonly string[]): Promise<void> {
+  await vi.waitFor(() => {
+    const recordedPhases = webControlMocks.recordHostedRunLogInWeb.mock.calls
+      .map(([input]) => input.body.phase)
+      .sort();
+    expect(recordedPhases).toEqual([...phases].sort());
+  });
+}
+
 beforeEach(() => {
+  wakeProcessorMocks.recordHostedRunBreadcrumbInWebBestEffort.mockImplementation((input: {
+    baseUrl: string | null;
+    callbackSigning: unknown;
+    message: string;
+    phase: string;
+    run: {
+      runId: string;
+    };
+    runToken?: string | null;
+    userId: string;
+  }) => {
+    if (!input.baseUrl || typeof input.runToken !== "string") {
+      return Promise.resolve();
+    }
+
+    webControlMocks.recordHostedRunLogInWeb({
+      baseUrl: input.baseUrl,
+      body: {
+        at: "2026-04-20T00:00:00.000Z",
+        component: "cloudflare-runner",
+        level: "info",
+        message: input.message,
+        phase: input.phase,
+        redacted: null,
+        runId: input.run.runId,
+        runToken: input.runToken,
+      },
+      boundUserId: input.userId,
+      callbackSigning: input.callbackSigning,
+      timeoutMs: 5_000,
+    });
+
+    return Promise.resolve();
+  });
+
   webControlMocks.readHostedRunStatusFromWeb.mockImplementation(async (input: {
     body?: {
       runId?: string | null;
@@ -483,9 +530,7 @@ describe("HostedUserRunner resumeFinalize drain", () => {
       requestedTargetSeq: null,
       targetReached: true,
     });
-    expect(
-      webControlMocks.recordHostedRunLogInWeb.mock.calls.map(([input]) => input.body.phase),
-    ).toEqual([
+    await expectRecordedRunPhases([
       "acquired",
       "finalize_started",
       "finalize_finished",
@@ -582,9 +627,7 @@ describe("HostedUserRunner resumeFinalize drain", () => {
       requestedTargetSeq: null,
       targetReached: true,
     });
-    expect(
-      webControlMocks.recordHostedRunLogInWeb.mock.calls.map(([input]) => input.body.phase),
-    ).toEqual([
+    await expectRecordedRunPhases([
       "acquired",
       "commit_attempted",
       "commit_won",
@@ -1011,15 +1054,188 @@ describe("HostedUserRunner resumeFinalize drain", () => {
         ],
       }),
     );
-    expect(
-      webControlMocks.recordHostedRunLogInWeb.mock.calls.map(([input]) => input.body.phase),
-    ).toEqual([
+    await expectRecordedRunPhases([
       "acquired",
       "commit_attempted",
       "commit_won",
       "finalize_started",
       "finalize_finished",
     ]);
+  });
+
+  it("logs and ignores pending cleanup persistence failures when same-request finalize can finish", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    envMocks.readHostedExecutionEnvironment.mockReturnValue(createTestRuntimeEnvironment());
+    const state = createDurableObjectStateHarness();
+    const stateStore = new RunnerStateStore(state);
+    await stateStore.bootstrapUser("user-resume-finalize");
+    const runner = new HostedUserRunner(
+      state,
+      envMocks.readHostedExecutionEnvironment(createHostedExecutionTestEnv()),
+      new MemoryEncryptedR2Bucket(),
+    );
+
+    const acquiredCursor = createCursorState({
+      committedSeq: "10",
+      nextSeq: "11",
+      snapshotKey: "snapshot/acquired",
+      version: "cursor-v1",
+    });
+    const committedCursor = createCursorState({
+      committedSeq: "10",
+      nextSeq: "11",
+      snapshotKey: "snapshot/committed",
+      version: "cursor-v2",
+    });
+    const finalizeCursor = createCursorState({
+      committedSeq: "10",
+      nextSeq: "11",
+      snapshotKey: "snapshot/finalize",
+      version: "cursor-v3",
+    });
+    const finalizedCursor = createCursorState({
+      committedSeq: "11",
+      nextSeq: "12",
+      snapshotKey: "snapshot/finalized",
+      version: "cursor-v4",
+    });
+    const acquiredRun = {
+      ...createRunRecord(),
+      status: "acquired" as const,
+      triggerKind: "external_ingress" as const,
+    };
+    const committedRun = {
+      ...acquiredRun,
+      status: "committed_needs_finalize" as const,
+    };
+    const finalizingRun = {
+      ...acquiredRun,
+      status: "finalizing" as const,
+      triggerKind: "retry_finalize" as const,
+    };
+    const cleanupWake = buildHostedExecutionLinqConversationMessageWake({
+      eventId: "linq-wake",
+      linqMessage: {
+        chatId: "chat_123",
+        from: "+15550001",
+        isFromMe: false,
+        messageId: "linq_inbound_message",
+        parts: [
+          {
+            type: "text",
+            value: "hello",
+          },
+        ],
+      },
+      occurredAt: "2026-04-20T09:00:00.000Z",
+      phoneLookupKey: "lookup_123",
+      userId: "user-resume-finalize",
+    });
+
+    const prepareAcquire: HostedRunAcquireResponse = {
+      acquired: true,
+      cursor: acquiredCursor,
+      events: [
+        createAcquireEvent({
+          id: "evt-linq",
+          seq: "11",
+          userId: "user-resume-finalize",
+          wake: cleanupWake,
+        }),
+      ],
+      pendingIngressEventCount: 1,
+      resumeFinalize: false,
+      run: acquiredRun,
+      runToken: "prepare-token",
+    };
+    const resumeFinalizeAcquire: HostedRunAcquireResponse = {
+      acquired: true,
+      cursor: finalizeCursor,
+      events: [],
+      pendingIngressEventCount: 1,
+      resumeFinalize: true,
+      run: finalizingRun,
+      runToken: "finalize-token",
+    };
+    const commitResponse: HostedRunCommitResponse = {
+      committed: true,
+      cursor: committedCursor,
+      needsFinalize: true,
+      run: committedRun,
+    };
+    const finalizedResponse: HostedRunFinalizeResponse = {
+      cursor: finalizedCursor,
+      finalized: true,
+      run: finalizingRun,
+    };
+
+    webControlMocks.acquireHostedRunFromWeb
+      .mockResolvedValueOnce(prepareAcquire)
+      .mockResolvedValueOnce(resumeFinalizeAcquire);
+    webControlMocks.commitHostedRunToWeb.mockResolvedValue(commitResponse);
+    webControlMocks.finalizeHostedRunInWeb.mockResolvedValue(finalizedResponse);
+    webControlMocks.recordHostedRunLogInWeb.mockResolvedValue({
+      log: null,
+      logged: true,
+    });
+    wakeProcessorMocks.executeRunDrain.mockResolvedValue({
+      cursorSnapshotRef: committedCursor.snapshotRef,
+      finalizeRequired: true,
+      nextRuntimeWakeAt: null,
+      redactedSummary: null,
+      state: "completed",
+    });
+    wakeProcessorMocks.persistPendingRunCleanupData.mockRejectedValueOnce(
+      new Error("pending cleanup sidecar write failed"),
+    );
+    wakeProcessorMocks.finalizeRunDrain.mockResolvedValue({
+      cursorSnapshotRef: finalizedCursor.snapshotRef,
+      nextRuntimeWakeAt: null,
+      redactedSummary: null,
+      state: "completed",
+    });
+
+    try {
+      const result = await runner.drainHostedRuns();
+
+      expect(result).toEqual({
+        committedSeq: finalizedCursor.committedSeq,
+        requestedTargetSeq: null,
+        targetReached: true,
+      });
+      expect(wakeProcessorMocks.persistPendingRunCleanupData).toHaveBeenCalledWith({
+        runId: acquiredRun.id,
+        wakes: [cleanupWake],
+      });
+      expect(webControlMocks.acquireHostedRunFromWeb).toHaveBeenCalledTimes(2);
+      expect(wakeProcessorMocks.finalizeRunDrain).toHaveBeenCalledTimes(1);
+      expect(webControlMocks.finalizeHostedRunInWeb).toHaveBeenCalledTimes(1);
+      expect(wakeProcessorMocks.cleanupTransientWakeDataBestEffortForRunDrain).toHaveBeenCalledWith(
+        expect.objectContaining({
+          runId: finalizingRun.id,
+          userId: "user-resume-finalize",
+          wakes: [cleanupWake],
+        }),
+      );
+
+      const payload = JSON.parse(String(warnSpy.mock.calls[0]?.[0] ?? "{}")) as Record<string, unknown>;
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(payload).toEqual(expect.objectContaining({
+        component: "cloudflare.user-runner",
+        details: expect.objectContaining({
+          cleanupWakeCount: 1,
+          runId: acquiredRun.id,
+        }),
+        level: "warn",
+        message: expect.stringContaining(
+          "Hosted run pending cleanup persistence failed after commit; continuing without durable cleanup recovery state.",
+        ),
+        phase: "wake.running",
+        userId: "user-resume-finalize",
+      }));
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   it("keeps messaging activity alive through finalize and stops it before finalize delivery completes", async () => {
@@ -1244,9 +1460,7 @@ describe("HostedUserRunner resumeFinalize drain", () => {
     await expect(stateStore.readState()).resolves.toMatchObject({
       nextWakeAt: expect.any(String),
     });
-    expect(
-      webControlMocks.recordHostedRunLogInWeb.mock.calls.map(([input]) => input.body.phase),
-    ).toEqual([
+    await expectRecordedRunPhases([
       "acquired",
       "finalize_started",
       "finalize_released",

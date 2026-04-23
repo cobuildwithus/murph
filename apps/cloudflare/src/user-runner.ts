@@ -615,8 +615,9 @@ export class HostedUserRunner {
       let cursor = commit.cursor;
 
       if (commit.needsFinalize) {
-        await this.runProcessor.persistPendingRunCleanupData({
+        await this.persistPendingRunCleanupDataBestEffort({
           runId: run.id,
+          userId: input.userId,
           wakes: cleanupWakes,
         });
         await this.syncRunnerBundleCacheToCursor(cursor.snapshotRef);
@@ -788,6 +789,33 @@ export class HostedUserRunner {
       cursor: finalized.cursor,
       state: finalized.finalized ? "completed" : "backpressured",
     };
+  }
+
+  private async persistPendingRunCleanupDataBestEffort(input: {
+    runId: string;
+    userId: string;
+    wakes: readonly HostedIngressEnvelope[];
+  }): Promise<void> {
+    try {
+      await this.runProcessor.persistPendingRunCleanupData({
+        runId: input.runId,
+        wakes: input.wakes,
+      });
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "cloudflare.user-runner",
+        details: {
+          cleanupWakeCount: input.wakes.length,
+          runId: input.runId,
+        },
+        error,
+        level: "warn",
+        message:
+          "Hosted run pending cleanup persistence failed after commit; continuing without durable cleanup recovery state.",
+        phase: "wake.running",
+        userId: input.userId,
+      });
+    }
   }
 
   private async releaseHostedRunFinalizeForRetry(input: {
