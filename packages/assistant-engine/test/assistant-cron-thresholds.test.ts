@@ -208,8 +208,7 @@ beforeEach(() => {
     },
   })
   cronMocks.loadRuntimeModule.mockReset().mockResolvedValue({
-    findEventByExternalRef: vi.fn(async () => null),
-    readFood: vi.fn(),
+    ...buildFoodAutoLogCoreRuntime(),
   })
   cronMocks.loadImporterRuntime.mockReset().mockResolvedValue({
     addMeal: vi.fn(),
@@ -530,11 +529,13 @@ describe('assistant cron runtime threshold coverage', () => {
     const { vaultRoot } = await createRuntimeContext('assistant-cron-local-one-shot-')
 
     cronMocks.loadRuntimeModule.mockResolvedValueOnce({
-      findEventByExternalRef: vi.fn(async () => null),
-      readFood: vi.fn(async () => ({
-        foodId: 'food-1',
-        title: 'Daily Oats',
-      })),
+      ...buildFoodAutoLogCoreRuntime({
+        findEventByExternalRef: vi.fn(async () => null),
+        readFood: vi.fn(async () => ({
+          foodId: 'food-1',
+          title: 'Daily Oats',
+        })),
+      }),
     })
     cronMocks.loadImporterRuntime.mockResolvedValueOnce({
       addMeal: vi.fn(async () => ({
@@ -588,12 +589,14 @@ describe('assistant cron runtime threshold coverage', () => {
     }))
 
     cronMocks.loadRuntimeModule.mockResolvedValueOnce({
-      findEventByExternalRef: vi.fn(async () => null),
-      readFood: vi.fn(async () => ({
-        foodId: 'food-nutrition',
-        nutrition,
-        title: 'Protein Oats',
-      })),
+      ...buildFoodAutoLogCoreRuntime({
+        findEventByExternalRef: vi.fn(async () => null),
+        readFood: vi.fn(async () => ({
+          foodId: 'food-nutrition',
+          nutrition,
+          title: 'Protein Oats',
+        })),
+      }),
     })
     cronMocks.loadImporterRuntime.mockResolvedValueOnce({
       addMeal,
@@ -675,11 +678,13 @@ describe('assistant cron runtime threshold coverage', () => {
     const { vaultRoot } = await createRuntimeContext('assistant-cron-local-race-')
 
     cronMocks.loadRuntimeModule.mockResolvedValueOnce({
-      findEventByExternalRef: vi.fn(async () => null),
-      readFood: vi.fn(async () => ({
-        foodId: 'food-race',
-        title: 'Race Oats',
-      })),
+      ...buildFoodAutoLogCoreRuntime({
+        findEventByExternalRef: vi.fn(async () => null),
+        readFood: vi.fn(async () => ({
+          foodId: 'food-race',
+          title: 'Race Oats',
+        })),
+      }),
     })
     cronMocks.loadImporterRuntime.mockResolvedValueOnce({
       addMeal: vi.fn(async () => ({
@@ -1548,6 +1553,20 @@ async function createRuntimeContext(prefix: string) {
   const context = await createTempVaultContext(prefix)
   tempRoots.push(context.parentRoot)
   return context
+}
+
+function buildFoodAutoLogCoreRuntime(overrides: Record<string, unknown> = {}) {
+  return {
+    acquireCanonicalWriteLock: vi.fn(async () => ({
+      release: vi.fn(async () => undefined),
+    })),
+    findEventByExternalRef: vi.fn(async () => null),
+    readFood: vi.fn(),
+    withCanonicalWriteLockScope: vi.fn(
+      async (_vaultRoot: string, run: () => Promise<unknown>) => await run(),
+    ),
+    ...overrides,
+  }
 }
 
 async function loadWebFetchModule(input?: {

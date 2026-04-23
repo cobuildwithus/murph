@@ -185,11 +185,15 @@ beforeEach(() => {
     },
   })
   cronMocks.loadRuntimeModule.mockReset().mockResolvedValue({
+    acquireCanonicalWriteLock: vi.fn(async () => ({
+      release: vi.fn(async () => undefined),
+    })),
     findEventByExternalRef: vi.fn(async () => null),
     readFood: vi.fn(async ({ foodId }: { foodId?: string }) => ({
       foodId: foodId ?? 'food-1',
       title: 'Daily Oats',
     })),
+    withCanonicalWriteLockScope: vi.fn(async (_vaultRoot: string, run: () => Promise<unknown>) => await run()),
   })
   cronMocks.renderAutoLoggedFoodMealNote
     .mockReset()
