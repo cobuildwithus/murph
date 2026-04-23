@@ -482,12 +482,11 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
           "TELEGRAM_BOT_TOKEN",
           "TELEGRAM_FILE_BASE_URL",
         ].join(","),
-      },
-      forwardedEnv: {
         TELEGRAM_API_BASE_URL: "https://api.telegram.example",
         TELEGRAM_BOT_TOKEN: "telegram-token",
         TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
       },
+      forwardedEnv: {},
       runnerSecrets: {
         TELEGRAM_API_BASE_URL: "https://evil.telegram.example",
         TELEGRAM_BOT_TOKEN: "telegram-user",
@@ -506,12 +505,12 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
 
   it("preserves an explicit resolved config override when the caller already computed semantics", () => {
     expect(buildHostedRunnerJobRuntimeConfig({
-      forwardedEnv: {
+      configSource: {
         TELEGRAM_API_BASE_URL: "https://api.telegram.example",
         TELEGRAM_BOT_TOKEN: "telegram-token",
         TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
       },
-      configSource: {},
+      forwardedEnv: {},
       resolvedConfig: {
         channelCapabilities: {
           emailSendReady: false,
