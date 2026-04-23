@@ -646,7 +646,7 @@ test("event link canonicalization dedupes links, falls back from related ids, an
       targetId: "evt_02",
     },
   ]);
-  assert.deepEqual(deduped.relatedIds, ["evt_01", "evt_02"]);
+  assert.equal("relatedIds" in deduped, false);
 
   const fallback = canonicalizeEventRelations({
     links: undefined,
@@ -661,7 +661,7 @@ test("event link canonicalization dedupes links, falls back from related ids, an
       targetId: "evt_03",
     },
   ]);
-  assert.deepEqual(fallback.relatedIds, ["evt_03"]);
+  assert.equal("relatedIds" in fallback, false);
 
   assert.equal(isVaultError(new VaultError("TEST", "Broken")), true);
   assert.equal(isVaultError(new Error("nope")), false);
