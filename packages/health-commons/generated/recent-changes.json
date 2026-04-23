@@ -889,6 +889,40 @@
     },
     {
       "affectedFields": [
+        "biomarkers/hrv-rmssd.biomarker",
+        "biomarkers/hrv-rmssd.claims",
+        "biomarkers/hrv-rmssd.protocolRanking",
+        "biomarkers/hrv-rmssd.communityOutcomeSummary",
+        "sources/hrv",
+        "apps/web.biomarker_research_notes",
+        "generated.catalog"
+      ],
+      "changeId": "chg_2026_04_23_hrv_rmssd_biomarker_page",
+      "changeType": "evidence_change",
+      "editSummary": "Expanded the HRV / RMSSD biomarker from a thin sauna-related stub into a publishable Health Commons biomarker page with browser-vault bindings, measurement guidance, claims, protocol rankings, community-outcome placeholder, and a curated HRV evidence source set.",
+      "entityKey": "biomarker:hrv-rmssd",
+      "minor": false,
+      "rationale": "The web biomarker route only publishes pages with structured biomarker metadata, private metric bindings, protocol candidates, and community outcome data. HRV also needs explicit measurement guardrails because it is context-sensitive and commonly overinterpreted from consumer wearables.",
+      "reviewStatus": "proposed",
+      "schemaVersion": "murph.commons.change.v1",
+      "sourceKeys": [
+        "source_artifact:hrv-bibliography-2026-04-23",
+        "source_artifact:pmid-8598068",
+        "source_artifact:pmid-29034226",
+        "source_artifact:pmid-39351472",
+        "source_artifact:pmid-30852243",
+        "source_artifact:pmid-39955401",
+        "source_artifact:pmid-39015867",
+        "source_artifact:pmid-39077654",
+        "source_artifact:pmid-40834291",
+        "source_artifact:pmid-40285070",
+        "source_artifact:pmid-29486547",
+        "source_artifact:pmid-29549064",
+        "source_artifact:pmid-33262801"
+      ]
+    },
+    {
+      "affectedFields": [
         "biomarker",
         "relations",
         "protocolRanking",

@@ -1576,7 +1576,7 @@
       "schemaVersion": "murph.commons.artifact-manifest.v1"
     }
   ],
-  "catalogHash": "sha256:affa6963c5d93c867e75629d8c2f02a8a1416b1edfcd2bc644b61b92c732b122",
+  "catalogHash": "sha256:24c1f7fb98bf1689f5b68087e88ef0ef67caec01076a7fd92fcf1bc08079c254",
   "changes": [
     {
       "affectedFields": [
@@ -2467,6 +2467,40 @@
     },
     {
       "affectedFields": [
+        "biomarkers/hrv-rmssd.biomarker",
+        "biomarkers/hrv-rmssd.claims",
+        "biomarkers/hrv-rmssd.protocolRanking",
+        "biomarkers/hrv-rmssd.communityOutcomeSummary",
+        "sources/hrv",
+        "apps/web.biomarker_research_notes",
+        "generated.catalog"
+      ],
+      "changeId": "chg_2026_04_23_hrv_rmssd_biomarker_page",
+      "changeType": "evidence_change",
+      "editSummary": "Expanded the HRV / RMSSD biomarker from a thin sauna-related stub into a publishable Health Commons biomarker page with browser-vault bindings, measurement guidance, claims, protocol rankings, community-outcome placeholder, and a curated HRV evidence source set.",
+      "entityKey": "biomarker:hrv-rmssd",
+      "minor": false,
+      "rationale": "The web biomarker route only publishes pages with structured biomarker metadata, private metric bindings, protocol candidates, and community outcome data. HRV also needs explicit measurement guardrails because it is context-sensitive and commonly overinterpreted from consumer wearables.",
+      "reviewStatus": "proposed",
+      "schemaVersion": "murph.commons.change.v1",
+      "sourceKeys": [
+        "source_artifact:hrv-bibliography-2026-04-23",
+        "source_artifact:pmid-8598068",
+        "source_artifact:pmid-29034226",
+        "source_artifact:pmid-39351472",
+        "source_artifact:pmid-30852243",
+        "source_artifact:pmid-39955401",
+        "source_artifact:pmid-39015867",
+        "source_artifact:pmid-39077654",
+        "source_artifact:pmid-40834291",
+        "source_artifact:pmid-40285070",
+        "source_artifact:pmid-29486547",
+        "source_artifact:pmid-29549064",
+        "source_artifact:pmid-33262801"
+      ]
+    },
+    {
+      "affectedFields": [
         "biomarker",
         "relations",
         "protocolRanking",
@@ -2825,243 +2859,6 @@
     },
     {
       "aliases": [
-        "SpO2",
-        "SpO₂",
-        "blood oxygen",
-        "blood oxygen level",
-        "blood oxygen saturation",
-        "oxygen saturation",
-        "pulse ox",
-        "pulse oximetry"
-      ],
-      "biomarker": {
-        "direction": {
-          "desired": "stable",
-          "label": "Stable in your normal range is usually the goal.",
-          "nuance": "For many healthy sea-level adults, SpO₂ already sits near a physiological ceiling. Higher is not an experiment target; repeated lows, drops from baseline, or lows paired with shortness of breath, chest pain, confusion, bluish lips or nails, or unusual fatigue deserve medical context."
-        },
-        "displayName": "Blood Oxygen Saturation (SpO₂)",
-        "explainerCards": [
-          {
-            "body": "SpO₂ is a pulse-oximetry estimate of the percentage of hemoglobin carrying oxygen. Murph treats it as a respiratory, sleep, altitude, illness, and safety-context signal rather than a performance score.",
-            "title": "What it is"
-          },
-          {
-            "body": "SpO₂ can help contextualize sleep-disordered breathing patterns, respiratory illness, altitude exposure, recovery strain, and symptom-matched low-oxygen warnings. It is most useful when compared with your own same-device baseline.",
-            "title": "Why people care"
-          },
-          {
-            "body": "Use overnight wearable trends for repeated personal context and a medical-grade finger pulse oximeter for careful symptom-driven spot checks. Prefer medians and repeated patterns over one noisy reading.",
-            "title": "How to read it"
-          },
-          {
-            "body": "Cold hands, poor circulation, movement, sensor fit, nail polish or artificial nails, tobacco or carbon monoxide exposure, skin pigmentation, altitude, illness, and general-wellness device limits can all distort readings.",
-            "title": "What can fool it"
-          }
-        ],
-        "measurement": {
-          "bestContext": "For self-tracking, overnight wearable SpO₂ is best for repeated personal trend and desaturation context; a medical-grade finger pulse oximeter is better for symptom-driven spot checks; arterial blood gas or clinical co-oximetry remains more definitive in clinical care.",
-          "confounders": [
-            "device class",
-            "skin pigmentation",
-            "cold hands",
-            "poor circulation",
-            "low perfusion",
-            "movement artifact",
-            "sensor fit",
-            "nail polish",
-            "artificial nails",
-            "tobacco exposure",
-            "carbon monoxide exposure",
-            "methemoglobinemia or dyes",
-            "altitude",
-            "acute respiratory infection",
-            "asthma or COPD flare",
-            "pneumonia",
-            "sleep apnea",
-            "supplemental oxygen",
-            "device firmware changes"
-          ],
-          "howToMeasure": [
-            "Compare like with like: same device, same sensor placement, same time window, and the same daytime-versus-overnight context.",
-            "For a finger pulse oximeter, use a warm relaxed hand, remove nail polish or artificial nails when practical, sit still, keep the hand below heart level if instructed, and wait until the number is steady before recording it.",
-            "Record date, time, symptoms, altitude or travel, respiratory illness, fever, asthma or COPD flare, unusual fatigue, chest discomfort, shortness of breath, supplemental oxygen use, and device changes.",
-            "For overnight wearable data, separate the nightly median or average from desaturation events; a stable median can hide repeated dips, and a single dip can be movement artifact.",
-            "Do not use consumer wearable SpO₂ alone to diagnose sleep apnea, pneumonia, COPD exacerbation, heart disease, or any other condition. Use it to decide whether a symptom pattern or repeated trend deserves clinical follow-up.",
-            "Treat low readings that match concerning symptoms as safety context even if the wearable is imperfect; clinician-specific thresholds and emergency instructions override generic wellness ranges.",
-            "Do not try to optimize SpO₂ upward if it is already in your normal range. The practical goal is stable normal oxygenation and absence of repeated unexplained drops."
-          ]
-        },
-        "privateMetricBindings": [
-          {
-            "domain": "sleep",
-            "metric": "spo2",
-            "preferred": true,
-            "source": "browser_vault_metric",
-            "unit": "%"
-          },
-          {
-            "domain": "recovery",
-            "metric": "spo2",
-            "source": "browser_vault_metric",
-            "unit": "%"
-          },
-          {
-            "accessor": "sleep.spo2",
-            "source": "browser_vault_signal_summary",
-            "unit": "%"
-          }
-        ],
-        "shortName": "SpO₂",
-        "trendDefaults": {
-          "aggregation": "median",
-          "comparisonWindowDays": 30,
-          "latestWindowDays": 7,
-          "minimumPoints": 5
-        },
-        "unit": "%",
-        "valuePrecision": 1
-      },
-      "body": "SpO₂ is the pulse-oximetry estimate of arterial oxygen saturation: the percentage of hemoglobin binding sites carrying oxygen at the moment of measurement. In consumer health tracking, it is best treated as a respiratory and sleep-context biomarker, not as a score to maximize.\n\n## Practical baseline\n\nMany healthy sea-level adults will usually see readings in the mid-to-high 90s. The exact acceptable range is contextual: altitude, chronic lung disease, congenital or cardiac conditions, medication effects, recent respiratory illness, and clinician-directed oxygen targets can all change what is normal for a specific person.\n\nFor Murph, the most useful pattern is not “highest possible SpO₂.” It is whether the value remains stable in the user's own normal range and whether there are repeated unexplained lows, especially overnight or during illness.\n\n## Daytime spot checks versus overnight wearable trends\n\nA careful finger pulse-oximeter spot check is useful when the user has symptoms or wants a same-moment reading. It should be done with a warm hand, minimal movement, good sensor fit, and awareness of nail polish, skin temperature, and circulation.\n\nWearable overnight SpO₂ is better for repeated trend context. It can surface patterns that may be relevant to sleep-disordered breathing, altitude, alcohol, respiratory illness, or recovery strain. However, wrist and ring sensors are not the same thing as a diagnostic sleep study, and movement or fit artifacts can create false dips.\n\n## Interpretation rules for this page\n\nUse same-device 7-day medians against a longer personal baseline. Separate daytime readings from overnight readings. Keep symptom notes, altitude, illness, supplemental oxygen use, device changes, and sleep-quality changes visible next to the trend.\n\nA stable median does not rule out short desaturation events. A single low wearable datapoint does not diagnose disease. Repeated lows, drops from personal baseline, or lows paired with shortness of breath, chest pain, confusion, blue lips or nails, severe fatigue, or rapidly worsening illness deserve clinical context.\n\n## Why this is not an optimization target\n\nIn healthy users, SpO₂ already operates near a physiological ceiling. Exercise, sauna, sleep hygiene, and light protocols may improve other biomarkers without moving SpO₂ at all. That is not a failure. Murph should score most wellness protocols against their true primary endpoints and use SpO₂ as a guardrail, confounder, and respiratory-safety context marker.\n\n## Source posture\n\nThis page uses FDA pulse-oximeter guidance for device and home-monitoring caveats, clinical references for broad oxygen-saturation context, and sleep-medicine diagnostic guidance to avoid treating consumer overnight oxygen trends as a diagnosis of obstructive sleep apnea.",
-      "categories": [
-        "respiratory",
-        "cardiovascular",
-        "sleep",
-        "wearable-metric",
-        "safety-signal"
-      ],
-      "communityOutcomeSummary": {
-        "minimumCohortSize": 20,
-        "placeholder": "Early Murph outcome summaries will appear here once enough opted-in experiment runs are available.",
-        "state": "coming_soon"
-      },
-      "entityType": "biomarker",
-      "interpretationFrame": {
-        "caveat": "SpO₂ is vulnerable to device class, skin pigmentation, perfusion, temperature, movement, nail polish, tobacco or carbon-monoxide exposure, altitude, illness, and sleep-disordered breathing. Compare same-device same-context trends and treat low or symptom-matched readings as medical context.",
-        "principle": "Stable personal-normal readings matter more than chasing a higher number; repeated drops or symptom-matched lows are safety signals, not optimization targets."
-      },
-      "key": "biomarker:blood-oxygen-spo2",
-      "measurementContexts": [
-        "overnight_wearable",
-        "finger_pulse_oximeter",
-        "clinical_pulse_oximeter",
-        "high_altitude_context",
-        "symptom_context"
-      ],
-      "protocolRanking": {
-        "candidates": [
-          {
-            "display": {
-              "burdenLabel": "Low",
-              "cautionLabel": "Low",
-              "confidence": "low"
-            },
-            "expectedDirection": "stable",
-            "mechanism": "Evening light reduction may improve sleep timing or continuity, but it does not treat sleep apnea or hypoxemia. SpO₂ should remain stable; repeated overnight drops would be a safety-context signal rather than proof the protocol is working.",
-            "protocolKey": "protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed",
-            "relationship": "related_protocol",
-            "scoring": {
-              "biomarkerRelevance": 1,
-              "burdenPenalty": 1,
-              "evidenceWeight": 1,
-              "safetyCautionPenalty": 1,
-              "wearableMeasurability": 5
-            }
-          },
-          {
-            "display": {
-              "burdenLabel": "Moderate",
-              "cautionLabel": "Moderate",
-              "confidence": "low"
-            },
-            "expectedDirection": "stable",
-            "mechanism": "Sauna is a heat-stress and recovery experiment, not an oxygenation intervention. Tracking SpO₂ is mainly a guardrail: stable readings are reassuring, while symptom-matched lows after heat, dehydration, illness, or respiratory strain should not be ignored.",
-            "protocolKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
-            "relationship": "related_protocol",
-            "scoring": {
-              "biomarkerRelevance": 1,
-              "burdenPenalty": 2,
-              "evidenceWeight": 1,
-              "safetyCautionPenalty": 2,
-              "wearableMeasurability": 5
-            }
-          },
-          {
-            "display": {
-              "burdenLabel": "High",
-              "cautionLabel": "Higher",
-              "confidence": "low"
-            },
-            "expectedDirection": "stable",
-            "mechanism": "Aerobic interval training targets cardiorespiratory fitness and estimated VO₂max, but resting or overnight SpO₂ is tightly regulated in healthy users. Use it as a safety and illness-context check, not as the primary success marker for 4x4 training.",
-            "protocolKey": "protocol_variant:norwegian-4x4/norwegian-4x4",
-            "relationship": "related_protocol",
-            "scoring": {
-              "biomarkerRelevance": 1,
-              "burdenPenalty": 4,
-              "evidenceWeight": 1,
-              "safetyCautionPenalty": 3,
-              "wearableMeasurability": 5
-            }
-          }
-        ],
-        "scoreFormula": "evidenceWeight * 3 + biomarkerRelevance * 3 + wearableMeasurability * 2 - burdenPenalty - safetyCautionPenalty + communityOutcomeConfidence",
-        "version": "deterministic-v0"
-      },
-      "quality": "usable",
-      "relations": [
-        {
-          "target": "protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed",
-          "type": "related_protocol"
-        },
-        {
-          "target": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
-          "type": "related_protocol"
-        },
-        {
-          "target": "protocol_variant:norwegian-4x4/norwegian-4x4",
-          "type": "related_protocol"
-        },
-        {
-          "target": "source_artifact:fda-pulse-oximeter-basics-2025",
-          "type": "cites"
-        },
-        {
-          "target": "source_artifact:fda-pulse-oximeter-skin-tone-guidance-2025",
-          "type": "cites"
-        },
-        {
-          "target": "source_artifact:pmid-29262014",
-          "type": "cites"
-        },
-        {
-          "target": "source_artifact:mayo-hypoxemia-pulse-oximetry",
-          "type": "cites"
-        },
-        {
-          "target": "source_artifact:cleveland-clinic-blood-oxygen-level",
-          "type": "cites"
-        },
-        {
-          "target": "source_artifact:pmid-28162150",
-          "type": "cites"
-        }
-      ],
-      "relativePath": "biomarkers/blood-oxygen-spo2.md",
-      "revision": {
-        "pageRevisionId": "sha256:01d6226b7ee82e7abe800b4ea5c02654409c60a75ef197d3ac503a39227394ab",
-        "recipeHash": null,
-        "runSpecRevisionId": null
-      },
-      "schemaVersion": "murph.commons.page.v1",
-      "slug": "biomarkers/blood-oxygen-spo2",
-      "status": "field-testing",
-      "summary": "A respiratory and sleep-context signal that estimates the percentage of oxygen-saturated hemoglobin in blood; useful for spotting personal baseline shifts, repeated overnight desaturation patterns, altitude or illness context, and symptom-matched safety signals.",
-      "title": "Blood Oxygen Saturation (SpO₂)",
-      "unit": "%"
-    },
-    {
-      "aliases": [
         "deep sleep",
         "slow-wave sleep",
         "SWS",
@@ -3355,264 +3152,31 @@
     },
     {
       "aliases": [
-        "VO2 max",
-        "VO₂ max",
-        "V̇O2max",
-        "maximal oxygen uptake",
-        "cardiorespiratory fitness",
-        "CRF",
-        "cardio fitness",
-        "cardio fitness estimate",
-        "estimated VO2max",
         "wearable VO2max",
-        "wearable cardio fitness",
+        "cardio fitness estimate",
         "estimated cardio fitness"
       ],
-      "biomarker": {
-        "direction": {
-          "desired": "higher",
-          "label": "Higher usually means better cardiorespiratory fitness.",
-          "nuance": "The number is only interpretable in context. A lower value after illness, detraining, device changes, weight change, or poor sensor data may not mean your cardiovascular system truly worsened."
-        },
-        "displayName": "VO₂ Max",
-        "explainerCards": [
-          {
-            "body": "VO₂ max is the maximal rate your body can take in, transport, and use oxygen during intense large-muscle exercise. It is usually expressed relative to body mass as ml/kg/min.",
-            "title": "What it is"
-          },
-          {
-            "body": "Cardiorespiratory fitness is one of the strongest whole-body fitness signals. The research literature links higher fitness with lower mortality and chronic-disease risk, but Murph treats this as population evidence, not a one-person verdict.",
-            "title": "Why people care"
-          },
-          {
-            "body": "A lab cardiopulmonary exercise test with gas exchange is the reference context. Consumer wearables estimate VO₂ max from signals such as heart rate, pace, power, GPS, demographics, and device-specific algorithms.",
-            "title": "Lab vs wearable"
-          },
-          {
-            "body": "Use same-device values across weeks or months. A sustained rise after well-executed aerobic training is more meaningful than a single new reading, especially because many devices update the estimate slowly.",
-            "title": "How to read a trend"
-          },
-          {
-            "body": "Aerobic interval training, endurance training, detraining, illness, heat, altitude, sensor fit, route/GPS quality, body-weight changes, medications that affect heart rate, and the specific test protocol can all change the number.",
-            "title": "What moves it"
-          }
-        ],
-        "measurement": {
-          "bestContext": "Lab CPET with respiratory gas analysis is best when a precise clinical or performance value matters. For Murph experiments, same-device wearable cardio-fitness estimates are acceptable as a private trend signal when interpreted cautiously.",
-          "confounders": [
-            "device algorithm changes",
-            "heart-rate sensor fit",
-            "GPS or pace accuracy",
-            "unsupported exercise mode",
-            "altitude",
-            "heat",
-            "recent illness",
-            "detraining",
-            "beta blockers or heart-rate medication",
-            "body-weight changes",
-            "inadequate aerobic data",
-            "lab protocol differences"
-          ],
-          "howToMeasure": [
-            "Prefer a lab cardiopulmonary exercise test when you need a true VO₂ max value, clinical-grade interpretation, or age/sex reference-standard comparison.",
-            "For wearable estimates, keep the same device, app, and measurement mode across baseline and intervention windows.",
-            "Give the device enough valid outdoor walking, running, cycling, or other supported aerobic data with reliable heart-rate and movement signals.",
-            "Compare 2-to-12-week trends rather than single readings; many consumer algorithms smooth or update slowly.",
-            "Keep illness, detraining, travel, heat, altitude, hard training blocks, body-weight changes, medication changes, and device/firmware changes visible in the experiment notes."
-          ]
-        },
-        "privateMetricBindings": [
-          {
-            "domain": "activity",
-            "metric": "estimatedVo2Max",
-            "preferred": true,
-            "source": "browser_vault_metric",
-            "unit": "ml/kg/min"
-          },
-          {
-            "accessor": "activity.estimatedVo2Max",
-            "source": "browser_vault_signal_summary",
-            "unit": "ml/kg/min"
-          }
-        ],
-        "shortName": "VO₂ max",
-        "trendDefaults": {
-          "aggregation": "median",
-          "comparisonWindowDays": 90,
-          "latestWindowDays": 14,
-          "minimumPoints": 2
-        },
-        "unit": "ml/kg/min",
-        "valuePrecision": 1
-      },
-      "body": "VO₂ max is the highest rate at which the body can use oxygen during intense, sustained, large-muscle exercise. It is one of the clearest single markers of cardiorespiratory fitness, but the measurement context matters a lot.\n\n## Bottom line for Murph\n\nUse VO₂ max as a **fitness trend marker**, not a body-ranking score. The most useful Murph question is not “is my number good enough?” It is: “did this specific protocol, run with enough fidelity and recovery, move my own cardiorespiratory-fitness signal in a plausible direction?”\n\nFor a Norwegian 4x4 experiment, VO₂ max belongs near the top of the outcome stack because the protocol is explicitly designed to stress aerobic capacity. For a sauna or recovery protocol, VO₂ max is a secondary or contextual signal; it may be interesting, but it is not the main reason to run the experiment.\n\n## Measurement hierarchy\n\n1. **Lab CPET with gas exchange** is the reference context when a precise value matters. It directly measures oxygen uptake during a graded exercise test and can be interpreted against reference standards.\n2. **Structured field tests** can be useful when lab testing is unavailable, but they estimate fitness from performance and assumptions.\n3. **Wearable cardio-fitness estimates** are the most scalable Murph signal. They are convenient and private, but they are algorithmic estimates and should be read as repeated trends.\n\n## What counts as a useful self-experiment signal\n\nA useful VO₂ max experiment read usually has:\n\n- a stable baseline window from the same device or lab method,\n- enough supported aerobic sessions for the wearable estimate to update,\n- clear session-fidelity evidence such as interval intensity, pace, power, or heart-rate zones,\n- visible context for illness, travel, altitude, heat, medication changes, and body-weight changes,\n- a follow-up window long enough for adaptation rather than a one-day bounce.\n\nFor wearable estimates, a small shift can be noise. A more trustworthy pattern is a sustained same-device increase over several weeks that lines up with better session capacity, easier submaximal efforts, or improved heart-rate recovery.\n\n## Common traps\n\nDo not compare a watch estimate to a lab result as though they are interchangeable. Do not compare two devices unless you are explicitly studying device disagreement. Do not treat a sudden device-side jump as biological proof if firmware, GPS, sensor fit, route, or training mode changed.\n\nVO₂ max is also not a complete health story. It can improve while sleep, joint pain, mood, or life-fit gets worse. Murph should keep the protocol bounded, keep safety visible, and interpret the number as one clue among several.",
+      "body": "Estimated VO2max is a practical signal for Norwegian 4x4 because the intervention literature targets cardiorespiratory fitness, but most people have consumer wearable estimates rather than lab testing.\n\nInterpret this marker as a noisy proxy. A useful result should combine this estimate with session fidelity, heart-rate recovery, symptoms, and adherence.",
       "categories": [
         "cardiovascular",
         "fitness",
-        "exercise",
-        "wearable-metric",
-        "clinical-context"
+        "wearable-metric"
       ],
-      "claims": [
-        {
-          "caveats": [
-            "Lab test validity depends on protocol quality, participant effort, equipment calibration, and test termination criteria."
-          ],
-          "claimId": "vo2max_definition_reference_standard",
-          "sourceKeys": [
-            "source_artifact:pmid-28153947"
-          ],
-          "strength": "high",
-          "text": "VO₂ max is best treated as maximal oxygen uptake during intense large-muscle exercise; direct measurement uses cardiopulmonary exercise testing with respiratory gas exchange, while VO₂peak or algorithmic estimates are not identical to a confirmed maximal test.",
-          "type": "evidence_scope"
-        },
-        {
-          "caveats": [
-            "These are population-level associations and guideline-level recommendations, not proof that a single person's wearable estimate predicts their future health."
-          ],
-          "claimId": "crf_clinical_vital_sign",
-          "sourceKeys": [
-            "source_artifact:pmid-27881567",
-            "source_artifact:pmid-38599681"
-          ],
-          "strength": "high",
-          "text": "Cardiorespiratory fitness has strong clinical prognostic value, and the American Heart Association argues it should be assessed in routine clinical practice when it can improve patient management.",
-          "type": "association_not_causation"
-        },
-        {
-          "caveats": [
-            "Reference standards depend on the tested population, exercise modality, and whether the value is measured or estimated."
-          ],
-          "claimId": "friend_reference_standards",
-          "sourceKeys": [
-            "source_artifact:pmid-26455884"
-          ],
-          "strength": "moderate",
-          "text": "CPET-derived reference standards, including FRIEND Registry work, help interpret measured cardiorespiratory fitness by age, sex, and testing context.",
-          "type": "evidence_scope"
-        },
-        {
-          "caveats": [
-            "Accuracy varies by device, population, activity mode, heart-rate sensor quality, GPS/power data, and proprietary algorithm changes."
-          ],
-          "claimId": "wearable_vo2max_proxy",
-          "sourceKeys": [
-            "source_artifact:pmid-35072942",
-            "source_artifact:pmid-41477023"
-          ],
-          "strength": "moderate",
-          "text": "Consumer wearables can estimate VO₂ max, and exercise-based algorithms tend to perform better than resting-only estimates, but individual-level error remains large enough that Murph should treat wearable VO₂ max as a trend proxy.",
-          "type": "evidence_scope"
-        },
-        {
-          "caveats": [
-            "Protocol adherence, safety screening, baseline fitness, intensity fidelity, and recovery determine whether a home experiment resembles supervised study conditions."
-          ],
-          "claimId": "norwegian_4x4_primary_outcome",
-          "sourceKeys": [
-            "source_artifact:pmid-17414804",
-            "source_artifact:pmid-30733142",
-            "source_artifact:pmid-24066036"
-          ],
-          "strength": "moderate",
-          "text": "Norwegian 4x4-style aerobic interval training is one of the clearest Murph protocol candidates for improving VO₂ max because direct interval-training trials and later syntheses commonly use VO₂ max or cardiorespiratory fitness as a primary endpoint.",
-          "type": "intervention_result"
-        }
-      ],
-      "communityOutcomeSummary": {
-        "minimumCohortSize": 30,
-        "placeholder": "VO₂ max outcome summaries will appear once enough opted-in Murph runs have same-device baseline and intervention windows with visible training adherence and confounder notes.",
-        "state": "coming_soon"
-      },
       "entityType": "biomarker",
       "interpretationFrame": {
-        "caveat": "Wearable VO₂ max is an algorithmic estimate, not a direct gas-exchange measurement. Device changes, algorithm updates, heart-rate accuracy, GPS quality, altitude, heat, illness, medications, training load, and body-weight changes can all move the estimate.",
-        "principle": "Compare like with like. A lab CPET value is the strongest single measurement, but for self-experiments the most useful signal is usually a repeated same-device trend against your own baseline."
+        "caveat": "Consumer estimates are not laboratory gas-exchange VO2max measurements and may update slowly or noisily.",
+        "principle": "Trend direction and repeated signal are more useful than a single absolute value."
       },
       "key": "biomarker:estimated-vo2max",
       "measurementContexts": [
-        "lab_cpet",
-        "graded_exercise_test",
         "wearable_cardio_fitness",
         "field_test_proxy"
       ],
-      "protocolRanking": {
-        "candidates": [
-          {
-            "display": {
-              "burdenLabel": "High",
-              "cautionLabel": "Higher",
-              "confidence": "high"
-            },
-            "expectedDirection": "up",
-            "mechanism": "Norwegian 4x4 directly targets aerobic power with repeated high-intensity intervals. It is the cleanest current Murph candidate for a VO₂ max outcome, especially when session intensity and recovery are tracked.",
-            "protocolKey": "protocol_variant:norwegian-4x4/norwegian-4x4",
-            "relationship": "primary_biomarker",
-            "scoring": {
-              "biomarkerRelevance": 5,
-              "burdenPenalty": 4,
-              "communityOutcomeConfidence": 0,
-              "evidenceWeight": 5,
-              "safetyCautionPenalty": 3,
-              "wearableMeasurability": 4
-            }
-          },
-          {
-            "display": {
-              "burdenLabel": "Moderate",
-              "cautionLabel": "Moderate",
-              "confidence": "low"
-            },
-            "expectedDirection": "mixed_or_contextual",
-            "mechanism": "Repeated heat exposure can create cardiovascular strain and recovery adaptations, but it is not a direct aerobic-capacity protocol and should not outrank actual aerobic training for VO₂ max.",
-            "protocolKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
-            "relationship": "secondary_biomarker",
-            "scoring": {
-              "biomarkerRelevance": 2,
-              "burdenPenalty": 2,
-              "communityOutcomeConfidence": 0,
-              "evidenceWeight": 2,
-              "safetyCautionPenalty": 2,
-              "wearableMeasurability": 4
-            }
-          }
-        ],
-        "scoreFormula": "evidenceWeight * 3 + biomarkerRelevance * 3 + wearableMeasurability * 2 - burdenPenalty - safetyCautionPenalty + communityOutcomeConfidence",
-        "version": "deterministic-v1-vo2max"
-      },
-      "quality": "reviewed",
+      "quality": "usable",
       "relations": [
         {
           "target": "protocol_variant:norwegian-4x4/norwegian-4x4",
           "type": "related_protocol"
-        },
-        {
-          "target": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
-          "type": "related_protocol"
-        },
-        {
-          "target": "source_artifact:pmid-27881567",
-          "type": "cites"
-        },
-        {
-          "target": "source_artifact:pmid-26455884",
-          "type": "cites"
-        },
-        {
-          "target": "source_artifact:pmid-28153947",
-          "type": "cites"
-        },
-        {
-          "target": "source_artifact:pmid-35072942",
-          "type": "cites"
-        },
-        {
-          "target": "source_artifact:pmid-38599681",
-          "type": "cites"
-        },
-        {
-          "target": "source_artifact:pmid-41477023",
-          "type": "cites"
         },
         {
           "target": "source_artifact:pmid-17414804",
@@ -3629,54 +3193,346 @@
       ],
       "relativePath": "biomarkers/estimated-vo2max.md",
       "revision": {
-        "pageRevisionId": "sha256:e09c11205431c45a12abfebe9529879d5596e0d87b9b091e3b91aae3fc04f534",
+        "pageRevisionId": "sha256:d55eeb2f971a0e3226a3a1ec9db4837ee0f9f9ee6445be09c60c455f45a9aa77",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
       "schemaVersion": "murph.commons.page.v1",
       "slug": "biomarkers/estimated-vo2max",
       "status": "field-testing",
-      "summary": "A cardiorespiratory fitness marker: lab VO₂ max is maximal oxygen uptake during intense whole-body exercise, while wearable cardio-fitness values are useful but noisier estimates for personal trend tracking.",
-      "title": "VO₂ Max",
-      "unit": "ml/kg/min"
+      "summary": "A consumer-device cardio-fitness estimate that can show whether interval training is nudging fitness in the right direction, while staying noisier than a lab VO2max test.",
+      "title": "Estimated VO2max",
+      "unit": "ml/kg/min estimate"
     },
     {
       "aliases": [
         "HRV",
-        "RMSSD"
+        "RMSSD",
+        "heart rate variability",
+        "overnight HRV",
+        "vagal HRV",
+        "pulse rate variability"
       ],
-      "body": "HRV can be interesting for dry sauna, but it works better as an **exploratory secondary marker** than as the main verdict.\n\nWhy the caution:\n\n- some acute physiology papers make HRV look promising,\n- repeated heat-acclimation work suggests adaptation can happen over weeks,\n- but a modern multi-arm randomized trial showed **no reliable HRV improvement** from regular post-exercise sauna bathing.\n\nThat means a null HRV result should not automatically count as a protocol failure, and a positive HRV result should be checked against confounders before it is promoted into a stronger claim.",
+      "biomarker": {
+        "direction": {
+          "desired": "higher_or_stable",
+          "label": "Higher or stable can be better, but context matters.",
+          "nuance": "A rising personal baseline can reflect improved recovery capacity or aerobic adaptation, while acute drops can reflect strain. Very high, very low, or abrupt values still need context and signal-quality checks."
+        },
+        "displayName": "Heart Rate Variability (RMSSD)",
+        "explainerCards": [
+          {
+            "body": "HRV is variation in the timing between consecutive heartbeats. RMSSD is a time-domain HRV metric that emphasizes short-term beat-to-beat variation and is commonly used as a vagal or recovery-oriented signal.",
+            "title": "What it is"
+          },
+          {
+            "body": "People track HRV because it can reflect autonomic regulation, recovery strain, sleep disruption, alcohol, stress, illness, and adaptation to training. Murph treats it as a contextual trend, not a medical diagnosis.",
+            "title": "Why people care"
+          },
+          {
+            "body": "Use the same device, timing, and context. Overnight wearable HRV or a quiet morning resting reading is more useful than mixing devices, post-workout readings, or different posture and breathing conditions.",
+            "title": "How to measure it"
+          },
+          {
+            "body": "Aerobic training can lift baseline HRV in some people, while poor sleep, alcohol, infection, psychological stress, dehydration, hard training, heat load, and device changes can all shift the signal.",
+            "title": "What moves it"
+          }
+        ],
+        "measurement": {
+          "bestContext": "Use overnight wearable HRV or a consistent quiet morning resting measurement, then compare 7-day medians against a prior 30-day same-device baseline.",
+          "confounders": [
+            "poor sleep",
+            "alcohol",
+            "illness",
+            "inflammation",
+            "psychological stress",
+            "hard training",
+            "heat exposure",
+            "dehydration",
+            "travel",
+            "caffeine timing",
+            "breathing pattern",
+            "posture",
+            "measurement timing",
+            "arrhythmia or ectopy",
+            "device changes",
+            "signal quality"
+          ],
+          "howToMeasure": [
+            "Use the same wearable, chest strap, app, and metric label when comparing baseline and intervention windows; do not mix RMSSD with SDNN, LF/HF, or a device recovery score.",
+            "Prefer overnight readings or immediately-on-waking resting readings before caffeine, exercise, screens, or stressful work.",
+            "Compare a 7-day median with the prior 30-day baseline, and require enough points before calling a direction.",
+            "Keep resting heart rate, sleep duration, sleep efficiency, alcohol, illness symptoms, unusual stress, travel, heat exposure, and training load visible on the same timeline.",
+            "Label or exclude days with poor optical signal, device changes, arrhythmia flags, ectopic-beat artifacts, unusually short sleep, or nonstandard measurement posture.",
+            "Treat consumer-wearable HRV as a personal trend signal; for clinical decisions, use validated ECG or clinician-guided measurement."
+          ]
+        },
+        "privateMetricBindings": [
+          {
+            "domain": "recovery",
+            "metric": "hrv",
+            "preferred": true,
+            "source": "browser_vault_metric",
+            "unit": "ms"
+          },
+          {
+            "domain": "sleep",
+            "metric": "hrv",
+            "source": "browser_vault_metric",
+            "unit": "ms"
+          },
+          {
+            "accessor": "recovery.hrv",
+            "source": "browser_vault_signal_summary",
+            "unit": "ms"
+          },
+          {
+            "accessor": "sleep.hrv",
+            "source": "browser_vault_signal_summary",
+            "unit": "ms"
+          }
+        ],
+        "shortName": "HRV",
+        "trendDefaults": {
+          "aggregation": "median",
+          "comparisonWindowDays": 30,
+          "latestWindowDays": 7,
+          "minimumPoints": 7
+        },
+        "unit": "ms",
+        "valuePrecision": 0
+      },
+      "body": "## Bottom line\n\nHRV is a useful **recovery-context biomarker** when it is read as a personal trend. It is much weaker when it is treated as a universal score, a diagnosis, or a one-morning verdict. Murph should use HRV to ask, \"Is this protocol adding strain, improving my recovery baseline, or being confounded by sleep, alcohol, illness, stress, or measurement changes?\"\n\nFor this page, HRV means **RMSSD-style heart rate variability in milliseconds**. RMSSD emphasizes short-term beat-to-beat variation and is the consumer-wearable HRV metric most likely to appear in recovery dashboards. It should not be merged with SDNN, LF/HF, proprietary readiness scores, or app-specific normalized HRV values.\n\n## What HRV / RMSSD measures\n\nA steady pulse does not mean every heartbeat arrives on an identical schedule. HRV describes variation in the time between normal beats. RMSSD is calculated from successive beat-to-beat differences, so it is especially sensitive to short-term parasympathetic or vagal modulation.\n\nFor Murph, the practical interpretation is narrower than the physiology. HRV can be a window into autonomic state, but the product experience should avoid pretending that a wearable HRV value cleanly separates \"healthy\" from \"unhealthy.\" A useful HRV read asks whether the user's own baseline is stable, rising, or falling under comparable conditions.\n\n## Best measurement approach\n\nThe cleanest consumer workflow is **same device, same context, repeated windows**. Overnight HRV can be convenient because it is passive and frequent. Morning resting HRV can be cleaner if the user takes it consistently before caffeine, exercise, screens, and stressful tasks. Either can work; mixing them breaks interpretability.\n\nMurph should prefer the 7-day median against the prior 30-day baseline. Daily values are still shown privately, but the interpretation should wait for repeated points. HRV is noisy enough that one low morning after alcohol, poor sleep, a late workout, travel, or a stressful day should be treated as a context flag, not a protocol conclusion.\n\n## What can move HRV\n\nPatterns that can plausibly raise a personal HRV baseline include improved aerobic fitness, steadier sleep, reduced alcohol, better recovery spacing, lower chronic stress load, and more consistent routines. Patterns that can acutely lower HRV include illness, inflammation, alcohol, insufficient sleep, unusually hard training, heat stress, dehydration, travel, psychological stress, and poor measurement quality.\n\nSome protocols create both effects. A hard interval protocol may improve autonomic fitness over weeks but suppress HRV the day after a difficult workout. A sauna protocol may create acute heat strain, then a rebound or adaptation signal, but direct multi-week HRV improvement should remain a cautious claim. A sleep-light protocol may only move HRV if it actually improves sleep timing, sleep continuity, or bedtime arousal.\n\n## Protocol ranking logic\n\nNorwegian 4x4 ranks first because structured exercise has the strongest general evidence path for improving HRV-related autonomic markers, and HRV is easy to measure during a 6-week training block. The caution is recovery: if the workload is too aggressive, HRV may fall even while the protocol is physiologically plausible.\n\nFinnish dry sauna ranks next because heat exposure is autonomically active and existing Health Commons sauna sources already connect it to recovery markers. The HRV claim stays contextual because direct intervention evidence is mixed and a modern trial did not clearly confirm HRV improvement from regular post-exercise sauna bathing.\n\nRed-light glasses before bed are indirect. They may help HRV only through better sleep timing, less bedtime arousal, or improved sleep continuity. The external Bryan Johnson sauna routine is also contextual: it is a higher-burden heat protocol, so HRV is most useful as a safety and recovery-tolerance signal.\n\n## How Murph should interpret your trend\n\nA stronger positive HRV pattern is a stable or rising 7-day median, similar or lower resting heart rate, no obvious illness or alcohol confounder, adequate sleep, and no major device or timing change. A weaker pattern is a single-day spike, a change after switching devices, or a rise paired with poor sleep and a large resting-heart-rate increase.\n\nA concerning or cautionary pattern is a repeated HRV drop below baseline paired with higher resting heart rate, poor sleep, unusual fatigue, illness symptoms, palpitations, dizziness, or a protocol that recently became more intense. Murph should respond by surfacing context, not by diagnosing disease.\n\n## What not to claim\n\nDo not claim that higher HRV is always better. Do not claim that a protocol \"worked\" because HRV rose for one night. Do not compare users against each other unless a future community summary has strong privacy thresholds and enough same-device runs. Do not mix RMSSD, SDNN, LF/HF, and proprietary readiness scores into a single HRV outcome.\n\nThe right claim is more modest and more useful: HRV / RMSSD is a high-signal contextual biomarker for bounded self-experiments when it is measured consistently, interpreted against a personal baseline, and checked against sleep, alcohol, stress, illness, training load, and signal quality.",
       "categories": [
         "recovery",
         "autonomic",
+        "cardiovascular",
+        "sleep",
         "wearable-metric"
       ],
+      "claims": [
+        {
+          "caveats": [
+            "Different devices may report different HRV windows, artifact filters, and sleep-stage selections under the same HRV label."
+          ],
+          "claimId": "hrv_definition_and_metric_scope",
+          "sourceKeys": [
+            "source_artifact:pmid-8598068",
+            "source_artifact:pmid-29034226"
+          ],
+          "strength": "high",
+          "text": "HRV is a family of beat-to-beat variability measures; this Murph page scopes the consumer biomarker to RMSSD-style millisecond values rather than frequency-domain ratios or proprietary recovery scores.",
+          "type": "evidence_scope"
+        },
+        {
+          "claimId": "hrv_measurement_standardization",
+          "sourceKeys": [
+            "source_artifact:pmid-39351472",
+            "source_artifact:pmid-30852243",
+            "source_artifact:pmid-39955401"
+          ],
+          "strength": "high",
+          "text": "HRV interpretation depends strongly on measurement context, so Murph should prefer same-device, same-window, repeated measurements and keep posture, breathing, timing, signal quality, and artifacts visible.",
+          "type": "design_guardrail"
+        },
+        {
+          "claimId": "hrv_exercise_training_baseline",
+          "sourceKeys": [
+            "source_artifact:pmid-39015867",
+            "source_artifact:pmid-39077654"
+          ],
+          "strength": "moderate",
+          "text": "Structured exercise training, especially aerobic or interval-oriented programs, can improve RMSSD and other HRV markers in pooled adult trials, but acute hard sessions can temporarily suppress recovery signals.",
+          "type": "intervention_result"
+        },
+        {
+          "claimId": "hrv_wearable_validation_mixed",
+          "sourceKeys": [
+            "source_artifact:pmid-40834291",
+            "source_artifact:pmid-40285070"
+          ],
+          "strength": "moderate",
+          "text": "Consumer devices can be useful for personal nocturnal trend tracking, but agreement with ECG varies by product, algorithm, context, and HRV feature.",
+          "type": "mixed_evidence"
+        },
+        {
+          "claimId": "hrv_stress_sleep_alcohol_context",
+          "sourceKeys": [
+            "source_artifact:pmid-29486547",
+            "source_artifact:pmid-29549064",
+            "source_artifact:pmid-33262801"
+          ],
+          "strength": "moderate",
+          "text": "Stress, alcohol intake, and sleep timing or quality can shift HRV enough to confound short self-experiments, so Murph should not attribute an HRV change to a protocol until these context variables are checked.",
+          "type": "association_not_causation"
+        }
+      ],
+      "communityOutcomeSummary": {
+        "minimumCohortSize": 20,
+        "placeholder": "Early Murph HRV outcome summaries will appear here once enough opted-in experiment runs are available with stable same-device baseline and intervention windows.",
+        "state": "coming_soon"
+      },
       "entityType": "biomarker",
       "interpretationFrame": {
-        "caveat": "HRV is sensitive to sleep, illness, alcohol, stress, measurement timing, training load, and device algorithms.",
-        "principle": "Personal baseline matters more than cross-person comparison."
+        "caveat": "HRV is sensitive to sleep, alcohol, illness, inflammation, psychological stress, training load, breathing, posture, timing, arrhythmias, ectopy, device placement, and proprietary wearable algorithms.",
+        "principle": "Compare HRV against your own same-device baseline, using repeated readings and stable windows rather than one dramatic morning."
       },
       "key": "biomarker:hrv-rmssd",
       "measurementContexts": [
         "overnight_wearable",
-        "morning_resting_manual"
+        "morning_resting_manual",
+        "short_term_ecg_or_chest_strap"
       ],
-      "quality": "usable",
+      "protocolRanking": {
+        "candidates": [
+          {
+            "display": {
+              "burdenLabel": "High",
+              "cautionLabel": "Higher",
+              "confidence": "medium"
+            },
+            "expectedDirection": "up_or_stable",
+            "mechanism": "Aerobic and high-intensity interval training are the most plausible Murph protocols for increasing a personal HRV baseline over weeks, although hard sessions can transiently lower HRV when recovery is insufficient.",
+            "protocolKey": "protocol_variant:norwegian-4x4/norwegian-4x4",
+            "relationship": "secondary_biomarker",
+            "scoring": {
+              "biomarkerRelevance": 4,
+              "burdenPenalty": 4,
+              "evidenceWeight": 4,
+              "safetyCautionPenalty": 3,
+              "wearableMeasurability": 5
+            }
+          },
+          {
+            "display": {
+              "burdenLabel": "Moderate",
+              "cautionLabel": "Moderate",
+              "confidence": "low"
+            },
+            "expectedDirection": "mixed_or_contextual",
+            "mechanism": "Dry sauna can acutely shift autonomic recovery markers and may be relevant to heat-acclimation tolerance, but direct multi-week HRV improvement evidence is mixed, so HRV should be a tolerance and context signal rather than the primary success criterion.",
+            "protocolKey": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+            "relationship": "secondary_biomarker",
+            "scoring": {
+              "biomarkerRelevance": 3,
+              "burdenPenalty": 2,
+              "evidenceWeight": 3,
+              "safetyCautionPenalty": 2,
+              "wearableMeasurability": 5
+            }
+          },
+          {
+            "display": {
+              "burdenLabel": "Low",
+              "cautionLabel": "Low",
+              "confidence": "low"
+            },
+            "expectedDirection": "mixed_or_contextual",
+            "mechanism": "Evening light reduction could indirectly improve overnight HRV if it improves sleep timing or reduces bedtime arousal, but HRV is not a direct or primary endpoint for this protocol.",
+            "protocolKey": "protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed",
+            "relationship": "secondary_biomarker",
+            "scoring": {
+              "biomarkerRelevance": 2,
+              "burdenPenalty": 1,
+              "evidenceWeight": 2,
+              "safetyCautionPenalty": 1,
+              "wearableMeasurability": 5
+            }
+          },
+          {
+            "display": {
+              "burdenLabel": "High",
+              "cautionLabel": "Higher",
+              "confidence": "low"
+            },
+            "expectedDirection": "mixed_or_contextual",
+            "mechanism": "The source-attributed Blueprint sauna routine is a higher-burden heat load stacked around workouts, so HRV is best used as a strain and recovery-tolerance monitor, not as proof that the external routine is improving autonomic health.",
+            "protocolKey": "protocol_variant:dry-sauna/bryan-johnson-blueprint",
+            "relationship": "secondary_biomarker",
+            "scoring": {
+              "biomarkerRelevance": 3,
+              "burdenPenalty": 4,
+              "evidenceWeight": 2,
+              "safetyCautionPenalty": 3,
+              "wearableMeasurability": 5
+            }
+          }
+        ],
+        "scoreFormula": "evidenceWeight * 3 + biomarkerRelevance * 3 + wearableMeasurability * 2 - burdenPenalty - safetyCautionPenalty + communityOutcomeConfidence",
+        "version": "deterministic-v0"
+      },
+      "quality": "reviewed",
       "relations": [
+        {
+          "target": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "type": "related_protocol"
+        },
         {
           "target": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
           "type": "related_protocol"
         },
         {
+          "target": "protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed",
+          "type": "related_protocol"
+        },
+        {
+          "target": "protocol_variant:dry-sauna/bryan-johnson-blueprint",
+          "type": "related_protocol"
+        },
+        {
+          "target": "source_artifact:hrv-bibliography-2026-04-23",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-8598068",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-29034226",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-39351472",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-30852243",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-39955401",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-39015867",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-39077654",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-40834291",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-40285070",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-29486547",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-29549064",
+          "type": "cites"
+        },
+        {
+          "target": "source_artifact:pmid-33262801",
+          "type": "cites"
+        },
+        {
           "target": "source_artifact:pmid-31331560",
-          "type": "cites"
-        },
-        {
-          "target": "source_artifact:pmid-25432420",
-          "type": "cites"
-        },
-        {
-          "target": "source_artifact:pmid-34622026",
           "type": "cites"
         },
         {
@@ -3686,14 +3542,14 @@
       ],
       "relativePath": "biomarkers/hrv-rmssd.md",
       "revision": {
-        "pageRevisionId": "sha256:a0ea1a36f924e5264190cd1af947c9494ca513d47241a42fbbd836ebf0a90772",
+        "pageRevisionId": "sha256:924591a98238f39d0cb17e319716b8b3af080ed0b6d2583f6acb7faec19f2864",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
       "schemaVersion": "murph.commons.page.v1",
       "slug": "biomarkers/hrv-rmssd",
       "status": "field-testing",
-      "summary": "A recovery and autonomic signal that can be interesting when it repeats, but is noisy enough to treat as context rather than proof.",
+      "summary": "A recovery and autonomic-balance signal based on beat-to-beat timing variation. Useful for personal trend monitoring, but noisy enough that Murph treats it as context, not a diagnosis or a one-day verdict.",
       "title": "HRV / RMSSD",
       "unit": "ms"
     },
@@ -9270,61 +9126,6 @@
       "whyItMatters": "Anchors common diabetes-management target examples and confirms that home monitoring context depends on individualized care plans."
     },
     {
-      "body": "This Cleveland Clinic reference is useful for practical user-facing context: normal ranges are broad, chronic lung disease and high altitude can change expectations, pulse-oximeter readings can differ from arterial saturation, and low home readings may warrant calling a provider or seeking urgent care depending on severity and symptoms.\n\nMurph should not display hard diagnostic rules, but it should make clear that symptomatic low oxygen readings are not a wellness-optimization target; they are a clinical context signal.",
-      "categories": [
-        "spo2",
-        "hypoxemia",
-        "respiratory",
-        "clinical-context"
-      ],
-      "entityType": "source_artifact",
-      "evidenceBucket": "Patient-facing safety thresholds and clinical-context caveats",
-      "key": "source_artifact:cleveland-clinic-blood-oxygen-level",
-      "modality": "Blood oxygen testing and pulse oximetry",
-      "murphTakeaway": "Use this source for conservative safety wording: clinician-specific guidance overrides generic ranges, and symptomatic low readings should not be ignored.",
-      "murphV1Priority": "Medium",
-      "potentialMurphEndpoints": [
-        "SpO₂ spot checks",
-        "respiratory symptom notes",
-        "escalation-context copy"
-      ],
-      "quality": "usable",
-      "relations": [
-        {
-          "target": "biomarker:blood-oxygen-spo2",
-          "type": "measures"
-        }
-      ],
-      "relativePath": "sources/spo2/cleveland-clinic-blood-oxygen-level.md",
-      "researchEvidence": {
-        "aggregateRole": "context",
-        "designKind": "guideline",
-        "designLabel": "Patient clinical reference",
-        "populationLabel": "Patients looking up blood oxygen level and pulse-oximetry interpretation"
-      },
-      "revision": {
-        "pageRevisionId": "sha256:b24cadec0ce196b12503d5d683a5d81563d222212e9e82eae2cbe9cab99fa893",
-        "recipeHash": null,
-        "runSpecRevisionId": null
-      },
-      "schemaVersion": "murph.commons.page.v1",
-      "slug": "sources/spo2/cleveland-clinic-blood-oxygen-level",
-      "source": {
-        "authors": "Cleveland Clinic",
-        "citation": "Cleveland Clinic. Blood Oxygen Level. Last reviewed 2022-02-18.",
-        "journal": "Cleveland Clinic",
-        "kind": "web_page",
-        "title": "Blood Oxygen Level",
-        "url": "https://my.clevelandclinic.org/health/diagnostics/22447-blood-oxygen-level",
-        "year": 2022
-      },
-      "status": "field-testing",
-      "studyDesign": "Patient clinical reference",
-      "summary": "Patient-facing clinical reference explaining pulse-oximeter readings, arterial blood oxygen testing, common causes of low oxygen, and when low home readings warrant clinical contact.",
-      "title": "Cleveland Clinic blood oxygen level reference",
-      "whyItMatters": "Supports broad home-monitoring caveats: pulse-oximeter values can differ from arterial saturation, chronic conditions and altitude change context, and low readings with symptoms need clinical escalation."
-    },
-    {
       "body": "This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.\n\n**Findings:** This meta-analysis pooled small RCT and quasi-experimental studies of sauna bathing and blood pressure in healthy adults. The main finding is a blood-pressure-lowering signal, but the evidence base is small and heterogeneous.\n\n**Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a cardiovascular record marked lower priority for Murph v1 interpretation.\n\n**Potential Murph endpoints/context:** blood pressure context, resting heart rate context\n\n**Protocol takeaway:** Use as cardiovascular context around heat exposure, not as a guaranteed 21-day result-card endpoint.",
       "categories": [
         "sauna",
@@ -10243,115 +10044,48 @@
       "whyItMatters": "Prevents Murph from accepting or promoting ring-only or watch-only glucose claims as validated glucose data."
     },
     {
-      "body": "The FDA page is the practical measurement anchor for Murph's SpO₂ biomarker page.\n\nIt emphasizes that home pulse-oximeter readings should be interpreted with how the user feels, that a careful reading requires stillness and device-specific instructions, and that accuracy can be affected by perfusion, temperature, smoking exposure, fingernail polish, and skin pigmentation.\n\nIt also separates medical pulse oximeters from general-wellness or sport products that are not evaluated by FDA for clinical decision-making.",
+      "body": "This memo supports the HRV / RMSSD biomarker page.\n\nThe source set separates four layers: measurement standards, metric interpretation, protocol evidence, and confounders. Murph should use HRV as a private contextual trend, prefer same-device repeated windows, and avoid turning a one-day value into a clinical claim.",
       "categories": [
-        "spo2",
-        "pulse-oximetry",
-        "device-accuracy",
-        "home-monitoring"
+        "hrv",
+        "biomarker",
+        "bibliography"
       ],
       "entityType": "source_artifact",
-      "evidenceBucket": "Measurement technique and consumer-device limits",
-      "key": "source_artifact:fda-pulse-oximeter-basics-2025",
-      "modality": "Pulse oximetry and home oxygen-saturation monitoring",
-      "murphTakeaway": "Use FDA technique and caveats whenever displaying SpO₂: same context, steady reading, symptom context, and explicit device-limit language.",
-      "murphV1Priority": "High",
-      "potentialMurphEndpoints": [
-        "SpO₂ spot checks",
-        "overnight SpO₂ trend context",
-        "respiratory symptoms and safety notes"
-      ],
+      "key": "source_artifact:hrv-bibliography-2026-04-23",
       "quality": "usable",
       "relations": [
         {
-          "target": "biomarker:blood-oxygen-spo2",
+          "target": "biomarker:hrv-rmssd",
           "type": "measures"
         }
       ],
-      "relativePath": "sources/spo2/fda-pulse-oximeter-basics-2025.md",
+      "relativePath": "sources/hrv/hrv-bibliography-2026-04-23.md",
       "researchEvidence": {
-        "aggregateRole": "context",
-        "designKind": "guideline",
-        "designLabel": "Consumer medical-device guidance",
-        "populationLabel": "Consumers and patients using pulse oximeters at home"
+        "aggregateRole": "synthesis",
+        "designKind": "bibliography",
+        "designLabel": "Curated bibliography",
+        "notes": [
+          "Compiles standards, reviews, exercise syntheses, wearable validation papers, and confounder papers into a product-facing interpretation frame.",
+          "Intended for self-experiment interpretation, not clinical diagnosis."
+        ],
+        "populationLabel": "Adults using HRV as a recovery, autonomic, or wearable trend marker"
       },
       "revision": {
-        "pageRevisionId": "sha256:847491dde0fa6697dd5e3aca863b9d77ec838f9965f3e553a81d1d3391f4ce8b",
+        "pageRevisionId": "sha256:20c20db64444ba2f5fbf9d9341a7e5c665b67bfaaf5a931787d84a776c23cc90",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
       "schemaVersion": "murph.commons.page.v1",
-      "slug": "sources/spo2/fda-pulse-oximeter-basics-2025",
+      "slug": "sources/hrv/hrv-bibliography-2026-04-23",
       "source": {
-        "authors": "U.S. Food and Drug Administration",
-        "citation": "U.S. Food and Drug Administration. Pulse Oximeter Basics. FDA Consumer Updates. Content current as of 2025-03-26.",
-        "journal": "FDA Consumer Updates",
-        "kind": "web_page",
-        "title": "Pulse Oximeter Basics",
-        "url": "https://www.fda.gov/consumers/consumer-updates/pulse-oximeter-basics",
-        "year": 2025
+        "authors": "Murph Health Commons",
+        "kind": "other",
+        "title": "HRV / RMSSD biomarker bibliography and interpretation memo",
+        "year": 2026
       },
-      "status": "field-testing",
-      "studyDesign": "Regulatory consumer guidance",
-      "summary": "FDA consumer guidance on home pulse-oximeter use, symptom context, measurement technique, accuracy limitations, and the distinction between medical devices and general-wellness products.",
-      "title": "FDA Pulse Oximeter Basics",
-      "whyItMatters": "Anchors Murph's home-use instructions: interpret readings alongside symptoms, measure carefully, and do not treat general-wellness devices as clinical decision tools."
-    },
-    {
-      "body": "This FDA announcement supports the skin-pigmentation caveat on the SpO₂ biomarker page.\n\nMurph should not imply that all pulse-oximeter or wearable readings have identical accuracy across all people. The practical product-language consequence is simple: trends are useful, but the device class and known accuracy limitations should stay visible.",
-      "categories": [
-        "spo2",
-        "pulse-oximetry",
-        "device-accuracy",
-        "skin-pigmentation",
-        "health-equity"
-      ],
-      "entityType": "source_artifact",
-      "evidenceBucket": "Skin-pigmentation accuracy caveat",
-      "key": "source_artifact:fda-pulse-oximeter-skin-tone-guidance-2025",
-      "modality": "Pulse oximetry device performance",
-      "murphTakeaway": "SpO₂ pages and trend cards should explicitly mention skin-pigmentation performance differences and avoid overconfident clinical interpretation.",
-      "murphV1Priority": "High",
-      "potentialMurphEndpoints": [
-        "SpO₂ trend interpretation",
-        "device-limit explanations",
-        "health-equity caveats"
-      ],
-      "quality": "usable",
-      "relations": [
-        {
-          "target": "biomarker:blood-oxygen-spo2",
-          "type": "measures"
-        }
-      ],
-      "relativePath": "sources/spo2/fda-pulse-oximeter-skin-tone-guidance-2025.md",
-      "researchEvidence": {
-        "aggregateRole": "context",
-        "designKind": "guideline",
-        "designLabel": "Regulatory draft-guidance announcement",
-        "populationLabel": "People using pulse oximeters across diverse skin pigmentation"
-      },
-      "revision": {
-        "pageRevisionId": "sha256:e1160c964af3f3106b75200dcc62c4e804c967fed27083f20881131bc13e8f2b",
-        "recipeHash": null,
-        "runSpecRevisionId": null
-      },
-      "schemaVersion": "murph.commons.page.v1",
-      "slug": "sources/spo2/fda-pulse-oximeter-skin-tone-guidance-2025",
-      "source": {
-        "authors": "U.S. Food and Drug Administration",
-        "citation": "U.S. Food and Drug Administration. FDA Proposes Updated Recommendations to Help Improve Performance of Pulse Oximeters Across Skin Tones. FDA News Release. 2025-01-06.",
-        "journal": "FDA News Release",
-        "kind": "web_page",
-        "title": "FDA Proposes Updated Recommendations to Help Improve Performance of Pulse Oximeters Across Skin Tones",
-        "url": "https://www.fda.gov/news-events/press-announcements/fda-proposes-updated-recommendations-help-improve-performance-pulse-oximeters-across-skin-tones",
-        "year": 2025
-      },
-      "status": "field-testing",
-      "studyDesign": "Regulatory draft-guidance announcement",
-      "summary": "FDA 2025 announcement describing draft recommendations intended to improve pulse-oximeter performance across people with different skin pigmentation.",
-      "title": "FDA draft recommendations to improve pulse oximeter performance across skin tones",
-      "whyItMatters": "Prevents Murph from presenting pulse-oximeter readings as equally reliable across all users without a device-accuracy caveat."
+      "status": "draft",
+      "summary": "Curated Murph evidence memo for the HRV / RMSSD biomarker page, covering measurement standards, RMSSD interpretation, exercise effects, wearable validation, and common confounders.",
+      "title": "HRV / RMSSD biomarker bibliography and interpretation memo"
     },
     {
       "aliases": [
@@ -10686,61 +10420,6 @@
       "summary": "This narrative review synthesizes cardiovascular, inflammatory, and mortality evidence for sauna bathing. The main finding is a coherent mechanism-and-outcomes story, especially around cardiovascular stress, vascular function, and long-term associations. For Murph, it is rationale and mechanism context, not a substitute for protocol-specific intervention data.",
       "title": "Cardiovascular and other health benefits of sauna bathing: a review of the evidence",
       "whyItMatters": "Strong narrative synthesis focused on cardiovascular mechanisms and outcomes"
-    },
-    {
-      "body": "Mayo Clinic's hypoxemia reference is useful for user-facing language around low oxygen, arterial blood gas testing, and broad pulse-oximeter ranges.\n\nMurph should use this source to keep its copy plain-spoken: low oxygen is a clinical context signal, and a pulse oximeter is an estimate rather than a full diagnosis.",
-      "categories": [
-        "spo2",
-        "hypoxemia",
-        "respiratory",
-        "clinical-context"
-      ],
-      "entityType": "source_artifact",
-      "evidenceBucket": "Broad patient-facing reference range and hypoxemia context",
-      "key": "source_artifact:mayo-hypoxemia-pulse-oximetry",
-      "modality": "Hypoxemia and oxygen-saturation testing",
-      "murphTakeaway": "Use Mayo's patient-facing framing to keep low SpO₂ safety language clear without turning Murph into a diagnostic tool.",
-      "murphV1Priority": "Medium",
-      "potentialMurphEndpoints": [
-        "SpO₂ spot checks",
-        "respiratory symptoms",
-        "clinical follow-up prompts"
-      ],
-      "quality": "usable",
-      "relations": [
-        {
-          "target": "biomarker:blood-oxygen-spo2",
-          "type": "measures"
-        }
-      ],
-      "relativePath": "sources/spo2/mayo-hypoxemia-pulse-oximetry.md",
-      "researchEvidence": {
-        "aggregateRole": "context",
-        "designKind": "guideline",
-        "designLabel": "Patient clinical reference",
-        "populationLabel": "Patients looking up hypoxemia and blood oxygen context"
-      },
-      "revision": {
-        "pageRevisionId": "sha256:b11c0e65f6d6223e4a5346ac475cbd987f70ee8aa3edd3fa403ff15e41f74d83",
-        "recipeHash": null,
-        "runSpecRevisionId": null
-      },
-      "schemaVersion": "murph.commons.page.v1",
-      "slug": "sources/spo2/mayo-hypoxemia-pulse-oximetry",
-      "source": {
-        "authors": "Mayo Clinic Staff",
-        "citation": "Mayo Clinic Staff. Low blood oxygen (hypoxemia). Mayo Clinic. Updated 2026-02-20.",
-        "journal": "Mayo Clinic",
-        "kind": "web_page",
-        "title": "Low blood oxygen (hypoxemia)",
-        "url": "https://www.mayoclinic.org/symptoms/hypoxemia/basics/definition/sym-20050930",
-        "year": 2026
-      },
-      "status": "field-testing",
-      "studyDesign": "Patient clinical reference",
-      "summary": "Patient-facing clinical reference explaining hypoxemia, pulse-oximetry context, arterial blood gas testing, and broad oxygen-saturation ranges.",
-      "title": "Mayo Clinic hypoxemia reference",
-      "whyItMatters": "Supports the broad sea-level range language and the caution that low readings are clinical context, not a self-diagnosis."
     },
     {
       "body": "This physiology reference supports the page’s context-first interpretation. REM minutes are not just a nightly score; they reflect where a person is in the NREM/REM cycle, how much sleep opportunity they had, and whether the later part of the sleep period was preserved.",
@@ -13899,70 +13578,6 @@
     },
     {
       "aliases": [
-        "pmid-26455884"
-      ],
-      "body": "This source is included for **reference-standard context**.\n\n## Quick read\n\n- **Source type:** Registry-based reference-standards paper.\n- **Role in Murph:** explains why lab CPET values can be interpreted against age/sex/testing-context standards.\n- **Most relevant Murph signals:** measured VO₂ max and METs; wearable estimates only by analogy.\n\n## Murph takeaway\n\nUse this source to keep VO₂ max interpretation grounded: reference standards belong to specific test methods and populations, not to casual device-to-device comparisons.",
-      "categories": [
-        "vo2max",
-        "cpet",
-        "reference-standards",
-        "cardiorespiratory-fitness"
-      ],
-      "claimUse": "measurement-context",
-      "entityType": "source_artifact",
-      "evidenceBucket": "VO2 max measurement and reference standards",
-      "key": "source_artifact:pmid-26455884",
-      "murphV1Priority": "High",
-      "potentialMurphEndpoints": [
-        "lab CPET VO2 max",
-        "METs",
-        "estimated VO2 max / cardio-fitness proxy"
-      ],
-      "quality": "reviewed",
-      "relations": [
-        {
-          "target": "biomarker:estimated-vo2max",
-          "type": "measures"
-        }
-      ],
-      "relativePath": "sources/vo2-max/pmid-26455884.md",
-      "researchEvidence": {
-        "aggregateRole": "context",
-        "cohortKey": "friend-registry-cpet-reference-standards",
-        "designKind": "retrospective_registry",
-        "designLabel": "FRIEND Registry CPET reference-standards analysis",
-        "notes": [
-          "Use as context for measured CPET interpretation, not as a target range for consumer wearable estimates."
-        ],
-        "participantCount": 7783,
-        "participantCountKind": "reported",
-        "populationLabel": "U.S. adults without cardiovascular disease who completed maximal treadmill CPET"
-      },
-      "revision": {
-        "pageRevisionId": "sha256:b4986a210c9b1f91e7f6dd563605d3f7781ea1cea6de26162b41f10c9d99ae1a",
-        "recipeHash": null,
-        "runSpecRevisionId": null
-      },
-      "schemaVersion": "murph.commons.page.v1",
-      "slug": "sources/vo2-max/pmid-26455884",
-      "source": {
-        "authors": "L A Kaminsky, R Arena, J Myers",
-        "citation": "Kaminsky LA, Arena R, Myers J. Reference Standards for Cardiorespiratory Fitness Measured With Cardiopulmonary Exercise Testing: Data From the Fitness Registry and the Importance of Exercise National Database. Mayo Clin Proc. 2015;90:1515-1523. doi:10.1016/j.mayocp.2015.07.026.",
-        "doi": "10.1016/j.mayocp.2015.07.026",
-        "journal": "Mayo Clinic Proceedings",
-        "kind": "journal_article",
-        "pmid": "26455884",
-        "title": "Reference Standards for Cardiorespiratory Fitness Measured With Cardiopulmonary Exercise Testing: Data From the Fitness Registry and the Importance of Exercise National Database",
-        "url": "https://pubmed.ncbi.nlm.nih.gov/26455884/",
-        "year": 2015
-      },
-      "status": "draft",
-      "summary": "A U.S. FRIEND Registry reference-standards paper using cardiopulmonary exercise testing data to contextualize measured cardiorespiratory fitness.",
-      "title": "FRIEND Registry CPET reference standards for cardiorespiratory fitness",
-      "whyItMatters": "Helps separate measured lab cardiorespiratory fitness from rough consumer estimates and unsupported ranking."
-    },
-    {
-      "aliases": [
         "ayaki 2016 adult blue-light shield eyewear",
         "blue-light shield eyewear adults self-luminous devices"
       ],
@@ -14220,65 +13835,6 @@
       "whyItMatters": "Reinforces that delayed-sleep-phase protocols need their own framing and should not be merged into a general bedtime eyewear experiment."
     },
     {
-      "aliases": [
-        "pmid-27881567"
-      ],
-      "body": "This source is included for the **clinical meaning** of VO₂ max and cardiorespiratory fitness.\n\n## Quick read\n\n- **Source type:** American Heart Association scientific statement.\n- **Role in Murph:** context for why cardiorespiratory fitness deserves a biomarker page.\n- **Most relevant Murph signals:** measured VO₂ max, estimated wearable cardio fitness, METs, and exercise capacity.\n\n## Murph takeaway\n\nUse this source to explain that cardiorespiratory fitness is a strong clinical signal, while avoiding diagnostic claims from a consumer wearable value.",
-      "categories": [
-        "vo2max",
-        "cardiorespiratory-fitness",
-        "clinical-guideline",
-        "cardiovascular"
-      ],
-      "claimUse": "clinical-context",
-      "entityType": "source_artifact",
-      "evidenceBucket": "VO2 max and cardiorespiratory-fitness clinical context",
-      "key": "source_artifact:pmid-27881567",
-      "murphV1Priority": "High",
-      "potentialMurphEndpoints": [
-        "measured VO2 max",
-        "estimated VO2 max / cardio-fitness proxy",
-        "METs or exercise capacity"
-      ],
-      "quality": "reviewed",
-      "relations": [
-        {
-          "target": "biomarker:estimated-vo2max",
-          "type": "measures"
-        }
-      ],
-      "relativePath": "sources/vo2-max/pmid-27881567.md",
-      "researchEvidence": {
-        "aggregateRole": "synthesis",
-        "aggregationNote": "Synthesizes evidence for cardiorespiratory fitness as a clinical risk marker and practical assessment target.",
-        "designKind": "guideline",
-        "designLabel": "American Heart Association scientific statement",
-        "populationLabel": "Adults in clinical and preventive-health contexts"
-      },
-      "revision": {
-        "pageRevisionId": "sha256:61a7da9c925b65b89fb4842c1527501ce58e3eec4b9f8afb3afd2d6287bfcedd",
-        "recipeHash": null,
-        "runSpecRevisionId": null
-      },
-      "schemaVersion": "murph.commons.page.v1",
-      "slug": "sources/vo2-max/pmid-27881567",
-      "source": {
-        "authors": "R Ross, S N Blair, R Arena, T S Church, J-P Després, B A Franklin, W L Haskell, L A Kaminsky, B D Levine, C J Lavie, J Myers, J Niebauer, J Sallis, S S Sawada, X Sui, U Wisløff",
-        "citation": "Ross R, Blair SN, Arena R, Church TS, Després J-P, Franklin BA, Haskell WL, Kaminsky LA, Levine BD, Lavie CJ, Myers J, Niebauer J, Sallis J, Sawada SS, Sui X, Wisløff U. Importance of Assessing Cardiorespiratory Fitness in Clinical Practice: A Case for Fitness as a Clinical Vital Sign. Circulation. 2016;134:e653-e699. doi:10.1161/CIR.0000000000000461.",
-        "doi": "10.1161/CIR.0000000000000461",
-        "journal": "Circulation",
-        "kind": "guideline",
-        "pmid": "27881567",
-        "title": "Importance of Assessing Cardiorespiratory Fitness in Clinical Practice: A Case for Fitness as a Clinical Vital Sign: A Scientific Statement From the American Heart Association",
-        "url": "https://pubmed.ncbi.nlm.nih.gov/27881567/",
-        "year": 2016
-      },
-      "status": "draft",
-      "summary": "AHA scientific statement arguing that cardiorespiratory fitness has strong prognostic value and should be assessed in clinical practice when it improves patient management.",
-      "title": "Fitness as a clinical vital sign: American Heart Association scientific statement",
-      "whyItMatters": "Frames cardiorespiratory fitness as clinically meaningful while keeping Murph language cautious and non-diagnostic."
-    },
-    {
       "body": "This source is included for **Long-term Finnish cohort evidence**.\n\n**Findings:** This prospective KIHD cohort paper associated sauna frequency with lower dementia and Alzheimer's disease risk in middle-aged Finnish men. The main finding is a long-term brain-health association, not a near-term cognition experiment result.\n\n**Why it matters:** Supports brain-health narrative, not immediate wearable outcomes\n\n**Potential experiment signals:** subjective cognition, sleep, long-horizon education\n\n**Protocol takeaway:** Use cautiously; not a short-term personal-result paper.",
       "categories": [
         "sauna"
@@ -14521,122 +14077,6 @@
       "summary": "Larger HFrEF trial that did not confirm clear HIIT superiority and highlighted intensity-fidelity issues.",
       "title": "High-intensity interval training in patients with heart failure with reduced ejection fraction",
       "whyItMatters": "Larger HFrEF trial that did not confirm clear HIIT superiority and highlighted intensity-fidelity issues."
-    },
-    {
-      "aliases": [
-        "pmid-28153947"
-      ],
-      "body": "This source is included for **measurement precision**.\n\n## Quick read\n\n- **Source type:** Measurement-methods review.\n- **Role in Murph:** defines why lab VO₂ max is different from a device estimate or an unverified peak value.\n- **Most relevant Murph signals:** lab CPET VO₂ max and consumer estimated VO₂ max as separate tiers.\n\n## Murph takeaway\n\nUse this source whenever the page needs to say: wearable VO₂ max can be useful, but it is not a direct maximal oxygen-uptake measurement.",
-      "categories": [
-        "vo2max",
-        "cpet",
-        "measurement-methods",
-        "exercise-physiology"
-      ],
-      "claimUse": "measurement-methods",
-      "entityType": "source_artifact",
-      "evidenceBucket": "VO2 max measurement methods",
-      "key": "source_artifact:pmid-28153947",
-      "murphV1Priority": "High",
-      "potentialMurphEndpoints": [
-        "lab CPET VO2 max",
-        "VO2peak",
-        "estimated VO2 max / cardio-fitness proxy"
-      ],
-      "quality": "reviewed",
-      "relations": [
-        {
-          "target": "biomarker:estimated-vo2max",
-          "type": "measures"
-        }
-      ],
-      "relativePath": "sources/vo2-max/pmid-28153947.md",
-      "researchEvidence": {
-        "aggregateRole": "context",
-        "aggregationNote": "Used for measurement language, not intervention efficacy.",
-        "designKind": "narrative_review",
-        "designLabel": "Exercise-physiology measurement review",
-        "populationLabel": "Exercise-testing and performance-measurement contexts"
-      },
-      "revision": {
-        "pageRevisionId": "sha256:539798931b135bab0fa34258e7d816075d85d8367f3f3ceca21b1e528f3054be",
-        "recipeHash": null,
-        "runSpecRevisionId": null
-      },
-      "schemaVersion": "murph.commons.page.v1",
-      "slug": "sources/vo2-max/pmid-28153947",
-      "source": {
-        "authors": "D C Poole, A M Jones",
-        "citation": "Poole DC, Jones AM. Measurement of the maximum oxygen uptake V̇O2max: V̇O2peak is no longer acceptable. J Appl Physiol. 2017;122:997-1002. doi:10.1152/japplphysiol.01063.2016.",
-        "doi": "10.1152/japplphysiol.01063.2016",
-        "journal": "Journal of Applied Physiology",
-        "kind": "review",
-        "pmid": "28153947",
-        "title": "Measurement of the maximum oxygen uptake V̇O2max: V̇O2peak is no longer acceptable",
-        "url": "https://pubmed.ncbi.nlm.nih.gov/28153947/",
-        "year": 2017
-      },
-      "status": "draft",
-      "summary": "Methodological review emphasizing that confirmed VO₂ max measurement is a specific maximal oxygen-uptake construct, not simply any highest value or wearable estimate.",
-      "title": "Measurement of maximum oxygen uptake: VO₂max versus VO₂peak",
-      "whyItMatters": "Keeps the biomarker page from conflating measured VO₂ max, VO₂peak, field estimates, and consumer-wearable values."
-    },
-    {
-      "body": "This AASM guideline is included as a guardrail for overnight SpO₂ interpretation.\n\nConsumer wearable oxygen trends can provide a useful personal signal, especially when repeated lows align with snoring, witnessed apneas, morning headaches, daytime sleepiness, or cardiometabolic risk. They should not be presented as a diagnosis of obstructive sleep apnea. Appropriate diagnosis depends on clinical evaluation and validated sleep testing.",
-      "categories": [
-        "spo2",
-        "sleep-apnea",
-        "sleep",
-        "diagnostic-guideline"
-      ],
-      "entityType": "source_artifact",
-      "evidenceBucket": "Sleep-apnea diagnostic guardrail",
-      "key": "source_artifact:pmid-28162150",
-      "modality": "Polysomnography and home sleep apnea testing",
-      "murphTakeaway": "If overnight SpO₂ suggests repeated desaturation or the user has sleep-apnea symptoms, frame it as follow-up context for clinical evaluation, not a diagnosis.",
-      "murphV1Priority": "High",
-      "potentialMurphEndpoints": [
-        "overnight SpO₂ trend context",
-        "desaturation pattern notes",
-        "sleep-apnea referral context"
-      ],
-      "quality": "usable",
-      "relations": [
-        {
-          "target": "biomarker:blood-oxygen-spo2",
-          "type": "measures"
-        }
-      ],
-      "relativePath": "sources/spo2/pmid-28162150.md",
-      "researchEvidence": {
-        "aggregateRole": "context",
-        "designKind": "guideline",
-        "designLabel": "Clinical practice guideline",
-        "populationLabel": "Adults with suspected obstructive sleep apnea"
-      },
-      "revision": {
-        "pageRevisionId": "sha256:1e1af1234ae6f1f005acae3f4d88c2e34223475cefff184de1b27f08245a69ce",
-        "recipeHash": null,
-        "runSpecRevisionId": null
-      },
-      "schemaVersion": "murph.commons.page.v1",
-      "slug": "sources/spo2/pmid-28162150",
-      "source": {
-        "authors": "V. K. Kapur, D. H. Auckley, S. Chowdhuri, K. M. Kuhlmann, R. Mehra, K. Ramar, C. G. Harrod",
-        "citation": "Kapur VK, Auckley DH, Chowdhuri S, Kuhlmann DC, Mehra R, Ramar K, Harrod CG. Clinical Practice Guideline for Diagnostic Testing for Adult Obstructive Sleep Apnea: An American Academy of Sleep Medicine Clinical Practice Guideline. J Clin Sleep Med. 2017;13(3):479-504. doi:10.5664/jcsm.6506. PMID: 28162150.",
-        "doi": "10.5664/jcsm.6506",
-        "journal": "Journal of Clinical Sleep Medicine",
-        "kind": "guideline",
-        "pmid": "28162150",
-        "title": "Clinical Practice Guideline for Diagnostic Testing for Adult Obstructive Sleep Apnea",
-        "url": "https://pubmed.ncbi.nlm.nih.gov/28162150/",
-        "year": 2017
-      },
-      "status": "field-testing",
-      "studyDesign": "Clinical practice guideline",
-      "summary": "American Academy of Sleep Medicine guideline used as a guardrail: consumer overnight SpO₂ trends can raise sleep-breathing questions, but sleep apnea diagnosis requires appropriate clinical testing.",
-      "title": "AASM clinical practice guideline for diagnostic testing for adult obstructive sleep apnea",
-      "whyItMatters": "Prevents Murph from implying that wearable overnight oxygen data can diagnose obstructive sleep apnea."
     },
     {
       "aliases": [
@@ -15152,6 +14592,55 @@
       "whyItMatters": "Important for interaction with exercise"
     },
     {
+      "body": "Murph uses this overview for the user-facing explanation of HRV, RMSSD, and why a healthy heart is not expected to behave like a metronome.",
+      "categories": [
+        "hrv",
+        "rmssd",
+        "review"
+      ],
+      "entityType": "source_artifact",
+      "key": "source_artifact:pmid-29034226",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "biomarker:hrv-rmssd",
+          "type": "measures"
+        }
+      ],
+      "relativePath": "sources/hrv/pmid-29034226.md",
+      "researchEvidence": {
+        "aggregateRole": "context",
+        "designKind": "narrative_review",
+        "designLabel": "HRV metric overview",
+        "notes": [
+          "Useful for explaining HRV as beat-to-beat interval variation.",
+          "Supports product copy that distinguishes HRV families and RMSSD."
+        ],
+        "populationLabel": "HRV health and performance applications"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:bde81a1c446749d992ab314c7ead48b3c88edc9a13e16ab7cc0d67513bab5978",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/hrv/pmid-29034226",
+      "source": {
+        "authors": "Shaffer F, Ginsberg JP",
+        "citation": "Shaffer F, Ginsberg JP. An Overview of Heart Rate Variability Metrics and Norms. Front Public Health. 2017;5:258. doi:10.3389/fpubh.2017.00258.",
+        "doi": "10.3389/fpubh.2017.00258",
+        "journal": "Frontiers in Public Health",
+        "kind": "review",
+        "pmid": "29034226",
+        "title": "An Overview of Heart Rate Variability Metrics and Norms",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/29034226/",
+        "year": 2017
+      },
+      "status": "draft",
+      "summary": "A practical overview of HRV metrics, including time-domain measures such as RMSSD, plus normative and interpretation context for health and performance applications.",
+      "title": "An Overview of Heart Rate Variability Metrics and Norms"
+    },
+    {
       "body": "This source is included for **Sleep Heart Health Study association context**. It quantified the association between polysomnography-measured slow-wave sleep and incident hypertension in a large community cohort.\n\n**Murph implication:** It justifies keeping morning blood pressure visible on experiments that target sleep depth, while the consumer deep-sleep metric remains a secondary trend signal.",
       "categories": [
         "deep-sleep",
@@ -15367,62 +14856,6 @@
       "summary": "This prospective KIHD cohort paper associated frequent sauna bathing with lower pneumonia risk over long follow-up. The main finding is a respiratory long-horizon signal, not an immediate experiment outcome. For Murph, it supports illness-log education while keeping the wearable protocol focused on nearer signals.",
       "title": "Frequent sauna bathing may reduce the risk of pneumonia",
       "whyItMatters": "Respiratory-risk signal from Finnish cohort"
-    },
-    {
-      "body": "This clinical review is the main general reference for how pulse oximetry works and why it can be wrong.\n\nFor Murph, the most important takeaway is that SpO₂ should be interpreted as an estimate and as a trend signal. It is useful because it is noninvasive and widely available, but it can be distorted by low perfusion, skin pigmentation, nail polish, movement, ambient light, dyshemoglobins, and other measurement conditions.",
-      "categories": [
-        "spo2",
-        "pulse-oximetry",
-        "respiratory",
-        "clinical-context"
-      ],
-      "entityType": "source_artifact",
-      "evidenceBucket": "Clinical interpretation and false-reading mechanisms",
-      "key": "source_artifact:pmid-29262014",
-      "modality": "Pulse oximetry",
-      "murphTakeaway": "Use SpO₂ as a trend and safety-context marker with explicit caveats for movement, low perfusion, skin pigmentation, nail polish, dyshemoglobins, and device class.",
-      "murphV1Priority": "High",
-      "potentialMurphEndpoints": [
-        "SpO₂ spot checks",
-        "overnight SpO₂ trend context",
-        "device accuracy caveats"
-      ],
-      "quality": "usable",
-      "relations": [
-        {
-          "target": "biomarker:blood-oxygen-spo2",
-          "type": "measures"
-        }
-      ],
-      "relativePath": "sources/spo2/pmid-29262014.md",
-      "researchEvidence": {
-        "aggregateRole": "context",
-        "designKind": "narrative_review",
-        "designLabel": "Clinical narrative review",
-        "populationLabel": "Clinical and consumer pulse-oximetry users"
-      },
-      "revision": {
-        "pageRevisionId": "sha256:8181d005f3f06df17ecc3da79dfd2d8214cc64852681e56b1555bfe23d3d5258",
-        "recipeHash": null,
-        "runSpecRevisionId": null
-      },
-      "schemaVersion": "murph.commons.page.v1",
-      "slug": "sources/spo2/pmid-29262014",
-      "source": {
-        "authors": "Klaus D. Torp, Pranav Modi, Elizabeth J. Pollard, Leslie V. Simon",
-        "citation": "Torp KD, Modi P, Pollard EJ, Simon LV. Pulse Oximetry. In: StatPearls. Treasure Island (FL): StatPearls Publishing; updated 2023-07-30. PMID: 29262014.",
-        "journal": "StatPearls",
-        "kind": "review",
-        "pmid": "29262014",
-        "title": "Pulse Oximetry",
-        "url": "https://www.ncbi.nlm.nih.gov/books/NBK470348/",
-        "year": 2023
-      },
-      "status": "field-testing",
-      "studyDesign": "Narrative clinical review",
-      "summary": "Clinical review of pulse oximetry covering normal sea-level saturation context, hypoxemia interpretation, accuracy limits, and common sources of false readings.",
-      "title": "Pulse Oximetry - StatPearls",
-      "whyItMatters": "Provides the broad clinical foundation for SpO₂ reference-range language, trend-versus-single-reading interpretation, and confounder lists."
     },
     {
       "body": "This source is included for **Acute and mechanistic**.\n\n**Findings:** This acute study measured cardiovascular function before and after a single sauna session in adults with cardiovascular risk factors. The main finding is that sauna can acutely change blood pressure, heart rate, arterial stiffness, and related markers.\n\n**Why it matters:** One of the best acute Finnish-sauna physiology studies\n\n**Potential experiment signals:** SBP/DBP, pulse wave velocity, HR, biomarkers\n\n**Protocol takeaway:** Great for choosing measurable pre/post signals.",
@@ -15687,6 +15120,54 @@
       "whyItMatters": "Helpful for explaining why supervised cardiac-rehab evidence should shape safety language without being treated as home clearance."
     },
     {
+      "body": "Murph uses this source to keep psychological stress visible when interpreting HRV changes during self-experiments.",
+      "categories": [
+        "hrv",
+        "stress",
+        "confounders"
+      ],
+      "entityType": "source_artifact",
+      "key": "source_artifact:pmid-29486547",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "biomarker:hrv-rmssd",
+          "type": "measures"
+        }
+      ],
+      "relativePath": "sources/hrv/pmid-29486547.md",
+      "researchEvidence": {
+        "aggregateRole": "context",
+        "designKind": "meta_analysis",
+        "designLabel": "Stress and HRV meta-analysis and review",
+        "notes": [
+          "Supports keeping stress visible as an HRV confounder and interpretation context."
+        ],
+        "populationLabel": "Human psychological stress studies using HRV"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:120b35a8ff0fa35e8b173b80d63eb46cfb6aae1886386da54d95648833b2878c",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/hrv/pmid-29486547",
+      "source": {
+        "authors": "Kim HG, Cheon EJ, Bai DS, Lee YH, Koo BH",
+        "citation": "Kim HG, et al. Stress and Heart Rate Variability: A Meta-Analysis and Review of the Literature. Psychiatry Investig. 2018;15(3):235-245. doi:10.30773/pi.2017.08.17.",
+        "doi": "10.30773/pi.2017.08.17",
+        "journal": "Psychiatry Investigation",
+        "kind": "review",
+        "pmid": "29486547",
+        "title": "Stress and Heart Rate Variability: A Meta-Analysis and Review of the Literature",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/29486547/",
+        "year": 2018
+      },
+      "status": "draft",
+      "summary": "A meta-analysis and review supporting HRV as a psychological stress-related autonomic marker, with enough context sensitivity to require careful interpretation.",
+      "title": "Stress and Heart Rate Variability Meta-Analysis and Review"
+    },
+    {
       "aliases": [
         "pmid-29502328"
       ],
@@ -15775,6 +15256,57 @@
       "summary": "Updated CAD/HF synthesis that keeps supervised clinical findings visible without letting them stand in for home 4x4 evidence.",
       "title": "Aerobic interval vs. continuous training in patients with coronary artery disease or heart failure: an updated systematic review and meta-analysis with a focus on secondary outcomes",
       "whyItMatters": "Keeps the cardiac-rehab and heart-failure lineage visible without letting those pooled clinical outcomes stand in for a general wearable self-experiment."
+    },
+    {
+      "body": "Murph uses this study to keep alcohol visible on the same timeline as HRV, especially for overnight readings.",
+      "categories": [
+        "hrv",
+        "alcohol",
+        "sleep",
+        "confounders"
+      ],
+      "entityType": "source_artifact",
+      "key": "source_artifact:pmid-29549064",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "biomarker:hrv-rmssd",
+          "type": "measures"
+        }
+      ],
+      "relativePath": "sources/hrv/pmid-29549064.md",
+      "researchEvidence": {
+        "aggregateRole": "context",
+        "designKind": "prospective_cohort",
+        "designLabel": "Real-world observational sleep/autonomic study",
+        "notes": [
+          "Supports alcohol as a high-priority HRV confounder in overnight wearable interpretation."
+        ],
+        "participantCount": 4098,
+        "participantCountKind": "reported",
+        "populationLabel": "Finnish employees with beat-to-beat sleep recordings"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:bc2d4ef8ee090ccf21d385380671d6162230be2b5eb5fd8698fd19129879af27",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/hrv/pmid-29549064",
+      "source": {
+        "authors": "Pietila J, Helander E, Korhonen I, Myllymaki T, Kujala UM, Lindholm H",
+        "citation": "Pietila J, et al. Acute Effect of Alcohol Intake on Cardiovascular Autonomic Regulation During the First Hours of Sleep in a Large Real-World Sample of Finnish Employees. JMIR Ment Health. 2018;5(1):e23. doi:10.2196/mental.9519.",
+        "doi": "10.2196/mental.9519",
+        "journal": "JMIR Mental Health",
+        "kind": "journal_article",
+        "pmid": "29549064",
+        "title": "Acute Effect of Alcohol Intake on Cardiovascular Autonomic Regulation During the First Hours of Sleep in a Large Real-World Sample of Finnish Employees",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/29549064/",
+        "year": 2018
+      },
+      "status": "draft",
+      "summary": "A large real-world Finnish employee study assessing how alcohol intake affects cardiovascular autonomic regulation during the first hours of sleep.",
+      "title": "Acute Effect of Alcohol Intake on Cardiovascular Autonomic Regulation During Sleep"
     },
     {
       "aliases": [
@@ -16818,6 +16350,54 @@
       "summary": "Repeated dry-sauna physiology or body-composition study in young sedentary overweight men, useful for dose tolerance and body-size caveats.",
       "title": "Correlations between Repeated Use of Dry Sauna for 4 x 10 Minutes, Physiological Parameters, Anthropometric Features, and Body Composition in Young Sedentary and Overweight Men",
       "whyItMatters": "Adds body-size and sedentary-user tolerance context for safety and interpretation."
+    },
+    {
+      "body": "Murph uses this source to justify strict measurement-context language and to make artifact or signal-quality exclusions visible to users.",
+      "categories": [
+        "hrv",
+        "measurement",
+        "checklist"
+      ],
+      "entityType": "source_artifact",
+      "key": "source_artifact:pmid-30852243",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "biomarker:hrv-rmssd",
+          "type": "measures"
+        }
+      ],
+      "relativePath": "sources/hrv/pmid-30852243.md",
+      "researchEvidence": {
+        "aggregateRole": "context",
+        "designKind": "guideline",
+        "designLabel": "HRV collection and analysis checklist",
+        "notes": [
+          "Supports explicit collection, normalization, artifact, and analysis guardrails."
+        ],
+        "populationLabel": "HRV research and clinical-practice reporting"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:09a3811dd8d9d89fde9874de8401e3e89edb9b7ca6d70c55dc8a9d1387e71b4f",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/hrv/pmid-30852243",
+      "source": {
+        "authors": "Catai AM, Pastre CM, Godoy MF, Silva E, Takahashi ACM, Vanderlei LCM",
+        "citation": "Catai AM, et al. Heart rate variability: are you using it properly? Standardisation checklist of procedures. Braz J Phys Ther. 2020;24(2):91-102. doi:10.1016/j.bjpt.2019.02.006.",
+        "doi": "10.1016/j.bjpt.2019.02.006",
+        "journal": "Brazilian Journal of Physical Therapy",
+        "kind": "guideline",
+        "pmid": "30852243",
+        "title": "Heart rate variability: are you using it properly? Standardisation checklist of procedures",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/30852243/",
+        "year": 2020
+      },
+      "status": "draft",
+      "summary": "A checklist-style recommendations paper for HRV collection and analysis methods, emphasizing standardization and transparent reporting.",
+      "title": "Heart rate variability standardisation checklist of procedures"
     },
     {
       "body": "This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.\n\n**Findings:** This review examines whether sauna bathing may protect against sudden cardiac death. The main finding is that the hypothesis is supported mostly by observational and mechanistic context, not definitive intervention proof.\n\n**Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a general / mixed record marked medium priority for Murph v1 interpretation.\n\n**Potential Murph endpoints/context:** supporting corpus context\n\n**Protocol takeaway:** Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes.",
@@ -19009,6 +18589,53 @@
       "whyItMatters": "Public-health context showing vigorous aerobic exercise as one option within weekly activity guidance."
     },
     {
+      "body": "Murph uses this source to make sleep duration, sleep quality, and sleep efficiency visible beside HRV trends.",
+      "categories": [
+        "hrv",
+        "sleep",
+        "confounders"
+      ],
+      "entityType": "source_artifact",
+      "key": "source_artifact:pmid-33262801",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "biomarker:hrv-rmssd",
+          "type": "measures"
+        }
+      ],
+      "relativePath": "sources/hrv/pmid-33262801.md",
+      "researchEvidence": {
+        "aggregateRole": "context",
+        "designKind": "cross_sectional",
+        "designLabel": "Sleep quality/duration and HRV association study",
+        "notes": [
+          "Supports sleep duration and quality as HRV interpretation context."
+        ],
+        "populationLabel": "Adults assessed for sleep, HRV, and blood pressure associations"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:df71f9744192fe64a4916cdb0530de142d8cd48432e5f63cb38d1387c0ce33d0",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/hrv/pmid-33262801",
+      "source": {
+        "authors": "Sajjadieh A, Shahsavari A, Safaei A, Penzel T, Schoebel C, Fietze I, Mozafarian N, Amra B, Kelishadi R",
+        "citation": "Sajjadieh A, et al. The Association of Sleep Duration and Quality with Heart Rate Variability and Blood Pressure. Tanaffos. 2020;19(2):135-143.",
+        "journal": "Tanaffos",
+        "kind": "journal_article",
+        "pmid": "33262801",
+        "title": "The Association of Sleep Duration and Quality with Heart Rate Variability and Blood Pressure",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/33262801/",
+        "year": 2020
+      },
+      "status": "draft",
+      "summary": "A 2020 study evaluating associations between sleep duration, sleep quality, blood pressure, and HRV.",
+      "title": "The Association of Sleep Duration and Quality with Heart Rate Variability and Blood Pressure"
+    },
+    {
       "body": "For Murph, this paper is a guardrail against over-reading a single wearable REM number. The validation pattern supports using REM sleep minutes as a secondary experiment marker, especially when paired with total sleep time, sleep efficiency, and subjective sleep quality.",
       "categories": [
         "rem-sleep",
@@ -20037,64 +19664,6 @@
       "summary": "ACSM consensus statement on physical activity for type 2 diabetes, including regular activity, reduced sedentary time, and safety accommodations.",
       "title": "Exercise/Physical Activity in Individuals with Type 2 Diabetes: A Consensus Statement from the American College of Sports Medicine",
       "whyItMatters": "Provides expert-context support for treating physical activity as glucose-relevant while keeping vigorous protocols safety-bounded."
-    },
-    {
-      "aliases": [
-        "pmid-35072942"
-      ],
-      "body": "This source is included for **consumer-wearable validation**.\n\n## Quick read\n\n- **Source type:** Systematic review, meta-analysis, and expert statement.\n- **Role in Murph:** explains why exercise-based wearable estimates are plausible but still uncertain at the individual level.\n- **Most relevant Murph signals:** wearable estimated VO₂ max and lab comparison context.\n\n## Murph takeaway\n\nUse this source to justify the page’s main product rule: same-device wearable VO₂ max is a trend proxy, not a clinical-grade measurement.",
-      "categories": [
-        "vo2max",
-        "wearables",
-        "validation",
-        "systematic-review"
-      ],
-      "claimUse": "wearable-validation",
-      "entityType": "source_artifact",
-      "evidenceBucket": "Consumer wearable VO2 max validation",
-      "key": "source_artifact:pmid-35072942",
-      "murphV1Priority": "High",
-      "potentialMurphEndpoints": [
-        "estimated VO2 max / cardio-fitness proxy",
-        "lab CPET VO2 max reference comparisons"
-      ],
-      "quality": "reviewed",
-      "relations": [
-        {
-          "target": "biomarker:estimated-vo2max",
-          "type": "measures"
-        }
-      ],
-      "relativePath": "sources/vo2-max/pmid-35072942.md",
-      "researchEvidence": {
-        "aggregateRole": "synthesis",
-        "aggregationNote": "Exercise-based wearable algorithms appear more accurate than resting-only algorithms, but individual-level error remains important.",
-        "designKind": "meta_analysis",
-        "designLabel": "Systematic review, meta-analysis, and expert statement",
-        "includedStudyCount": 14
-      },
-      "revision": {
-        "pageRevisionId": "sha256:2c523d55d66b1a1c4655241f5b7afb7373eaa0e244d707ea1acea605a017cdff",
-        "recipeHash": null,
-        "runSpecRevisionId": null
-      },
-      "schemaVersion": "murph.commons.page.v1",
-      "slug": "sources/vo2-max/pmid-35072942",
-      "source": {
-        "authors": "P Molina-Garcia, H L Notbohm, M Schumann, R Argent, M Hetherington-Rauth, J Stang, W Bloch, S Cheng, U Ekelund, L B Sardinha, B Caulfield, J C Brønd, A Grøntved, F B Ortega",
-        "citation": "Molina-Garcia P, Notbohm HL, Schumann M, Argent R, Hetherington-Rauth M, Stang J, Bloch W, Cheng S, Ekelund U, Sardinha LB, Caulfield B, Brønd JC, Grøntved A, Ortega FB. Validity of Estimating the Maximal Oxygen Consumption by Consumer Wearables: A Systematic Review With Meta-analysis and Expert Statement of the INTERLIVE Network. Sports Med. 2022;52:1577-1597. doi:10.1007/s40279-021-01639-y.",
-        "doi": "10.1007/s40279-021-01639-y",
-        "journal": "Sports Medicine",
-        "kind": "review",
-        "pmid": "35072942",
-        "title": "Validity of Estimating the Maximal Oxygen Consumption by Consumer Wearables: A Systematic Review With Meta-analysis and Expert Statement of the INTERLIVE Network",
-        "url": "https://pubmed.ncbi.nlm.nih.gov/35072942/",
-        "year": 2022
-      },
-      "status": "draft",
-      "summary": "Systematic review, meta-analysis, and expert statement on the validity of consumer wearable VO₂ max estimates and best-practice validation domains.",
-      "title": "INTERLIVE systematic review of consumer-wearable VO₂max estimates",
-      "whyItMatters": "Anchors Murph's language that wearable VO₂ max is useful for trend tracking but not interchangeable with lab CPET."
     },
     {
       "body": "This source is included for **Adjacent pregnancy sleep RCT**.\n\n**Findings:** In a related third-trimester pregnancy trial, full blue-blocking glasses did not significantly improve primary sleep outcomes versus partial blue blockers. The control lenses also blocked some blue light, which may have reduced contrast between groups. This is an adjacent null/mixed sleep result, not a general adult protocol proof.\n\n**Why it matters:** Useful contradiction: a pregnancy sleep trial did not show statistically significant effects on primary sleep outcomes.\n\n**Potential experiment signals:** total sleep time, sleep efficiency, mid-point of sleep, pregnancy sleep outcomes\n\n**Protocol takeaway:** Pregnancy is an adjacent supervised variant; do not use this as a general adult protocol proof.",
@@ -22300,68 +21869,6 @@
     },
     {
       "aliases": [
-        "pmid-38599681"
-      ],
-      "body": "This source is included for **population-level outcome context**.\n\n## Quick read\n\n- **Source type:** Overview of meta-analyses.\n- **Role in Murph:** supports the importance of cardiorespiratory fitness without turning a wearable value into a personal risk score.\n- **Most relevant Murph signals:** measured or estimated cardiorespiratory fitness.\n\n## Murph takeaway\n\nUse this source to say cardiorespiratory fitness matters at the population level, while keeping Murph’s user-facing interpretation focused on self-comparison and experiment deltas.",
-      "categories": [
-        "vo2max",
-        "cardiorespiratory-fitness",
-        "epidemiology",
-        "meta-analysis"
-      ],
-      "claimUse": "population-prognosis",
-      "entityType": "source_artifact",
-      "evidenceBucket": "Cardiorespiratory fitness population outcomes",
-      "key": "source_artifact:pmid-38599681",
-      "murphV1Priority": "High",
-      "potentialMurphEndpoints": [
-        "cardiorespiratory fitness",
-        "measured VO2 max",
-        "estimated VO2 max / cardio-fitness proxy"
-      ],
-      "quality": "reviewed",
-      "relations": [
-        {
-          "target": "biomarker:estimated-vo2max",
-          "type": "measures"
-        }
-      ],
-      "relativePath": "sources/vo2-max/pmid-38599681.md",
-      "researchEvidence": {
-        "aggregateRole": "synthesis",
-        "aggregationNote": "Use as population-level prognostic context, not as individual diagnosis from a wearable value.",
-        "designKind": "systematic_review",
-        "designLabel": "Overview of meta-analyses",
-        "includedStudyCount": 199,
-        "participantCount": 20900000,
-        "participantCountKind": "approximate",
-        "populationLabel": "Adult cohort studies across morbidity and mortality outcomes"
-      },
-      "revision": {
-        "pageRevisionId": "sha256:d9c42a2f162bd6bb71099dd49307d6250c3b5c33813e088c3b44d6d2067dab50",
-        "recipeHash": null,
-        "runSpecRevisionId": null
-      },
-      "schemaVersion": "murph.commons.page.v1",
-      "slug": "sources/vo2-max/pmid-38599681",
-      "source": {
-        "authors": "J J Lang et al.",
-        "citation": "Lang JJ, et al. Cardiorespiratory fitness is a strong and consistent predictor of morbidity and mortality among adults: an overview of meta-analyses representing over 20.9 million observations from 199 unique cohort studies. Br J Sports Med. 2024. doi:10.1136/bjsports-2023-107849.",
-        "doi": "10.1136/bjsports-2023-107849",
-        "journal": "British Journal of Sports Medicine",
-        "kind": "review",
-        "pmid": "38599681",
-        "title": "Cardiorespiratory fitness is a strong and consistent predictor of morbidity and mortality among adults: an overview of meta-analyses representing over 20.9 million observations from 199 unique cohort studies",
-        "url": "https://pubmed.ncbi.nlm.nih.gov/38599681/",
-        "year": 2024
-      },
-      "status": "draft",
-      "summary": "Large overview of meta-analyses linking higher cardiorespiratory fitness with lower adult mortality and incident chronic-condition risk.",
-      "title": "Cardiorespiratory fitness and adult morbidity/mortality: overview of meta-analyses",
-      "whyItMatters": "Supports why VO₂ max/cardiorespiratory fitness deserves high prominence while preserving association-not-causation language."
-    },
-    {
-      "aliases": [
         "Kunutsor 2024 sauna cardiorespiratory fitness"
       ],
       "body": "This source is included for long-term Finnish cohort context.\n\n**Findings:** KIHD study of 2,012 Finnish men evaluating cross-sectional and longitudinal associations between sauna exposure and cardiorespiratory fitness over an 11-year follow-up. Adds cardiorespiratory-fitness context to the KIHD sauna evidence base without turning sauna into an exercise substitute.\n\n**Protocol takeaway:** it belongs in rationale and future fitness-context discussions, not in the near-term wearable result promise for the first dry-sauna protocol.",
@@ -22444,6 +21951,147 @@
       "summary": "KIHD study of 2,012 Finnish men evaluating cross-sectional and longitudinal associations between sauna exposure and cardiorespiratory fitness over an 11-year follow-up.",
       "title": "Enhancing Cardiorespiratory Fitness Through Sauna Bathing: Insights From the Kuopio Ischemic Heart Disease Prospective Study",
       "whyItMatters": "Adds cardiorespiratory-fitness context to the KIHD sauna evidence base without turning sauna into an exercise substitute."
+    },
+    {
+      "body": "This source supports the HRV page's exercise-training ranking. It does not mean every hard interval plan improves HRV; Murph should still watch recovery and training-load confounding.",
+      "categories": [
+        "hrv",
+        "exercise",
+        "meta-analysis"
+      ],
+      "entityType": "source_artifact",
+      "key": "source_artifact:pmid-39015867",
+      "protocolEvidence": [
+        {
+          "caveat": "Not specific to the exact Norwegian 4x4 dose; acute hard training can lower HRV when recovery is insufficient.",
+          "displayPriority": 25,
+          "endpointKeys": [
+            "biomarker:hrv-rmssd"
+          ],
+          "groupId": "hrv-exercise-training-synthesis",
+          "headline": "Exercise training improved RMSSD and related HRV parameters in pooled healthy-adult RCTs.",
+          "implication": "Supports Norwegian 4x4 as the most plausible Health Commons protocol path for moving HRV over weeks.",
+          "protocolKey": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "result": "positive",
+          "scope": "same_mechanism",
+          "stance": "supports"
+        }
+      ],
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "biomarker:hrv-rmssd",
+          "type": "measures"
+        },
+        {
+          "target": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "type": "related_protocol"
+        }
+      ],
+      "relativePath": "sources/hrv/pmid-39015867.md",
+      "researchEvidence": {
+        "aggregateRole": "synthesis",
+        "designKind": "meta_analysis",
+        "designLabel": "Systematic review and meta-analysis of randomized controlled trials",
+        "includedStudyCount": 16,
+        "notes": [
+          "Supports ranking structured exercise as the clearest protocol family for improving RMSSD-like HRV markers.",
+          "Moderator and heterogeneity findings mean Murph should keep confidence moderate rather than high."
+        ],
+        "participantCount": 623,
+        "participantCountKind": "reported",
+        "populationLabel": "Healthy adults in exercise-training RCTs"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:9d876f0b0000b8d2128c421425ce0d8b8e8cce723f435dfb686d1ddb34eb1e3c",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/hrv/pmid-39015867",
+      "source": {
+        "authors": "Amekran Y, El Hangouche AJ",
+        "citation": "Amekran Y, El Hangouche AJ. Effects of Exercise Training on Heart Rate Variability in Healthy Adults: A Systematic Review and Meta-analysis of Randomized Controlled Trials. Cureus. 2024;16(6):e62465. doi:10.7759/cureus.62465.",
+        "doi": "10.7759/cureus.62465",
+        "journal": "Cureus",
+        "kind": "journal_article",
+        "pmid": "39015867",
+        "title": "Effects of Exercise Training on Heart Rate Variability in Healthy Adults: A Systematic Review and Meta-analysis of Randomized Controlled Trials",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/39015867/",
+        "year": 2024
+      },
+      "status": "draft",
+      "summary": "A 2024 systematic review and meta-analysis of randomized controlled trials in healthy adults reporting improvements in RMSSD, HF, and SDNN after exercise training.",
+      "title": "Effects of Exercise Training on Heart Rate Variability in Healthy Adults"
+    },
+    {
+      "body": "This source supports ranking interval-style exercise above indirect protocols for HRV movement, while keeping the relationship as secondary and moderate-confidence.",
+      "categories": [
+        "hrv",
+        "exercise",
+        "network-meta-analysis"
+      ],
+      "entityType": "source_artifact",
+      "key": "source_artifact:pmid-39077654",
+      "protocolEvidence": [
+        {
+          "caveat": "The analysis compares modality categories, not Murph's exact workout implementation.",
+          "displayPriority": 24,
+          "endpointKeys": [
+            "biomarker:hrv-rmssd"
+          ],
+          "groupId": "hrv-exercise-modality-ranking",
+          "headline": "HIIT ranked highly for several HRV outcomes in an adult exercise-modality network meta-analysis.",
+          "implication": "Strengthens the biological plausibility of Norwegian 4x4 as an HRV-moving protocol family.",
+          "protocolKey": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "result": "positive",
+          "scope": "adjacent_variant",
+          "stance": "supports"
+        }
+      ],
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "biomarker:hrv-rmssd",
+          "type": "measures"
+        },
+        {
+          "target": "protocol_variant:norwegian-4x4/norwegian-4x4",
+          "type": "related_protocol"
+        }
+      ],
+      "relativePath": "sources/hrv/pmid-39077654.md",
+      "researchEvidence": {
+        "aggregateRole": "synthesis",
+        "designKind": "meta_analysis",
+        "designLabel": "Network meta-analysis of exercise modalities",
+        "notes": [
+          "Supports the plausibility of interval training for RMSSD improvement.",
+          "Network-meta-analysis ranking is contextual evidence, not exact-protocol proof."
+        ],
+        "populationLabel": "Adults in exercise intervention studies"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:471d20644f172fb555ff76e0d376ea9a902edf4c8dbbf54a1b8e61ac1419a67f",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/hrv/pmid-39077654",
+      "source": {
+        "authors": "Yang F, Ma J, et al",
+        "citation": "Yang F, Ma J, et al. Effect of Exercise Modality on Heart Rate Variability in Adults. Rev Cardiovasc Med. 2024;25(1):9. doi:10.31083/j.rcm2501009.",
+        "doi": "10.31083/j.rcm2501009",
+        "journal": "Reviews in Cardiovascular Medicine",
+        "kind": "journal_article",
+        "pmid": "39077654",
+        "title": "Effect of Exercise Modality on Heart Rate Variability in Adults",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/39077654/",
+        "year": 2024
+      },
+      "status": "draft",
+      "summary": "A 2024 network meta-analysis comparing exercise modalities for HRV outcomes and ranking HIIT highly for SDNN, RMSSD, and LF/HF changes.",
+      "title": "Effect of Exercise Modality on Heart Rate Variability in Adults"
     },
     {
       "aliases": [
@@ -22531,6 +22179,55 @@
       "summary": "Recent metabolic-syndrome HIIT synthesis that helps separate cardiometabolic variants and lower-volume HIIT from the exact four-interval recipe.",
       "title": "High-intensity interval training for cardiometabolic health in adults with metabolic syndrome: a systematic review and meta-analysis of randomised controlled trials",
       "whyItMatters": "Useful for separating metabolic-syndrome HIIT and lower-volume variants from the standard four-interval recipe."
+    },
+    {
+      "body": "This review is used for the page's measurement guardrails: same timing, same posture, same device, signal-quality awareness, and explicit confounder handling.",
+      "categories": [
+        "hrv",
+        "measurement",
+        "confounders"
+      ],
+      "entityType": "source_artifact",
+      "key": "source_artifact:pmid-39351472",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "biomarker:hrv-rmssd",
+          "type": "measures"
+        }
+      ],
+      "relativePath": "sources/hrv/pmid-39351472.md",
+      "researchEvidence": {
+        "aggregateRole": "context",
+        "designKind": "narrative_review",
+        "designLabel": "Measurement-factor review",
+        "notes": [
+          "Supports confounder and standardization guidance in the HRV page.",
+          "Useful for explaining why Murph should not compare one-off HRV readings across people or devices."
+        ],
+        "populationLabel": "HRV measurement contexts"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:e9862e81cd6878fb5b8d9fa1940eb3edd982dc50d38cfefaf49158ace5bc891f",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/hrv/pmid-39351472",
+      "source": {
+        "authors": "Damoun N, Amekran Y, et al",
+        "citation": "Damoun N, et al. Heart rate variability measurement and influencing factors: Towards the standardization of methodology. Glob Cardiol Sci Pract. 2024;2024(3):35. doi:10.21542/gcsp.2024.35.",
+        "doi": "10.21542/gcsp.2024.35",
+        "journal": "Global Cardiology Science and Practice",
+        "kind": "review",
+        "pmid": "39351472",
+        "title": "Heart rate variability measurement and influencing factors: Towards the standardization of methodology",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/39351472/",
+        "year": 2024
+      },
+      "status": "draft",
+      "summary": "A 2024 review emphasizing that HRV is affected by many pre-assessment and assessment factors, making standardization essential for reliable outcomes.",
+      "title": "Heart rate variability measurement and influencing factors"
     },
     {
       "body": "This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.\n\n**Findings:** This cross-sectional MONICA study describes sauna bathing patterns and health context in northern Sweden. The main finding is population context, not an efficacy result.\n\n**Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a general / mixed record marked lower priority for Murph v1 interpretation.\n\n**Potential Murph endpoints/context:** supporting corpus context\n\n**Protocol takeaway:** Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes.",
@@ -22876,6 +22573,54 @@
       "whyItMatters": "Relevant to protocols that stack sauna after workouts, but the synthesis keeps the performance-adaptation claim uncertain."
     },
     {
+      "body": "Murph uses this reliability source to balance the page: HRV can be informative under controlled repeated measurement, but consumer interpretation should still be context-heavy.",
+      "categories": [
+        "hrv",
+        "reliability",
+        "measurement"
+      ],
+      "entityType": "source_artifact",
+      "key": "source_artifact:pmid-39955401",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "biomarker:hrv-rmssd",
+          "type": "measures"
+        }
+      ],
+      "relativePath": "sources/hrv/pmid-39955401.md",
+      "researchEvidence": {
+        "aggregateRole": "context",
+        "designKind": "cross_sectional",
+        "designLabel": "Controlled reliability measurement study",
+        "notes": [
+          "Supports using HRV when conditions are controlled, but not overreading uncontrolled one-off values."
+        ],
+        "populationLabel": "Adults assessed across controlled HRV measurement conditions"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:0254288216403999f3219cca4df59289376d0ee47525e52a8e06635e1f6b1398",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/hrv/pmid-39955401",
+      "source": {
+        "authors": "Besson C, Baggish AL, Monteventi P, Schmitt L, Stucky F, Gremeaux V",
+        "citation": "Besson C, et al. Assessing the clinical reliability of short-term heart rate variability: insights from controlled dual-environment and dual-position measurements. Sci Rep. 2025;15:5611. doi:10.1038/s41598-025-89892-3.",
+        "doi": "10.1038/s41598-025-89892-3",
+        "journal": "Scientific Reports",
+        "kind": "journal_article",
+        "pmid": "39955401",
+        "title": "Assessing the clinical reliability of short-term heart rate variability: insights from controlled dual-environment and dual-position measurements",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/39955401/",
+        "year": 2025
+      },
+      "status": "draft",
+      "summary": "A 2025 reliability paper showing that short-term HRV can be robust under rigorous, controlled conditions while emphasizing confounder management.",
+      "title": "Assessing the clinical reliability of short-term heart rate variability"
+    },
+    {
       "body": "This source is part of Murph's audited Finnish dry-sauna yes/likely corpus.\n\n**Findings:** This narrative review summarizes sauna therapy mechanisms, possible benefits, and cautions for rheumatic diseases. The main finding is condition-specific symptom and safety context, not general evidence for healthy users.\n\n**Why it matters:** Expands the audited Finnish dry-sauna evidence corpus with a symptoms / musculoskeletal record marked lower priority for Murph v1 interpretation.\n\n**Potential Murph endpoints/context:** symptom context\n\n**Protocol takeaway:** Use as supporting corpus context; do not convert directly into promised short-term wearable outcomes.",
       "categories": [
         "sauna",
@@ -22946,6 +22691,54 @@
       "summary": "This narrative review summarizes sauna therapy mechanisms, possible benefits, and cautions for rheumatic diseases. The main finding is condition-specific symptom and safety context, not general evidence for healthy users. For Murph, it supports cautions and optional symptom framing only.",
       "title": "Sauna therapy in rheumatic diseases: mechanisms, potential benefits, and cautions",
       "whyItMatters": "Expands the audited Finnish dry-sauna evidence corpus with a symptoms / musculoskeletal record marked lower priority for Murph v1 interpretation."
+    },
+    {
+      "body": "This source informs the Apple Watch and consumer-wearable caveat: do not overstate wearable HRV precision, and avoid high-stakes clinical interpretation.",
+      "categories": [
+        "hrv",
+        "wearables",
+        "validation"
+      ],
+      "entityType": "source_artifact",
+      "key": "source_artifact:pmid-40285070",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "biomarker:hrv-rmssd",
+          "type": "measures"
+        }
+      ],
+      "relativePath": "sources/hrv/pmid-40285070.md",
+      "researchEvidence": {
+        "aggregateRole": "context",
+        "designKind": "cross_sectional",
+        "designLabel": "Wearable HRV validity study",
+        "notes": [
+          "Supports the product language that PPG wearables may be trend-useful but should not replace validated clinical measurement."
+        ],
+        "populationLabel": "Healthy adults measured with Apple Watch and laboratory reference methods"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:bf6a3076256a12202deacf7c0ab624db05e1bd6237afd59e6e11864bf3e38791",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/hrv/pmid-40285070",
+      "source": {
+        "authors": "Bonneval L, Wing D, et al",
+        "citation": "Bonneval L, et al. Validity of Heart Rate Variability Measured with Apple Watch Series 6 Compared to Laboratory Measures. Sensors. 2025;25(8):2380. doi:10.3390/s25082380.",
+        "doi": "10.3390/s25082380",
+        "journal": "Sensors",
+        "kind": "journal_article",
+        "pmid": "40285070",
+        "title": "Validity of Heart Rate Variability Measured with Apple Watch Series 6 Compared to Laboratory Measures",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/40285070/",
+        "year": 2025
+      },
+      "status": "draft",
+      "summary": "A 2025 validation paper comparing Apple Watch HRV-related measures to laboratory measures, supporting cautious use of wearable readings while noting limits for more refined HRV features.",
+      "title": "Validity of Heart Rate Variability Measured with Apple Watch Series 6 Compared to Laboratory Measures"
     },
     {
       "aliases": [
@@ -23122,6 +22915,57 @@
       "summary": "Product spectral adequacy and implementation source for lens-quality guardrails, including melanopic daylight filtering density.",
       "title": "Optimizing the Potential Utility of Blue-Blocking Glasses for Sleep and Circadian Health",
       "whyItMatters": "Shows why lens color and marketing labels are not enough; spectral filtering, fit, timing, and usage determine whether melanopic input is actually reduced."
+    },
+    {
+      "body": "Murph uses this source for the wearable interpretation guardrail: consumer nocturnal HRV can be useful, but validation is device-specific.",
+      "categories": [
+        "hrv",
+        "wearables",
+        "validation"
+      ],
+      "entityType": "source_artifact",
+      "key": "source_artifact:pmid-40834291",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "biomarker:hrv-rmssd",
+          "type": "measures"
+        }
+      ],
+      "relativePath": "sources/hrv/pmid-40834291.md",
+      "researchEvidence": {
+        "aggregateRole": "context",
+        "designKind": "cross_sectional",
+        "designLabel": "Consumer wearable validation against ECG",
+        "notes": [
+          "Supports using wearable HRV as a personal trend with device-specific caution.",
+          "Reinforces not mixing devices or algorithms across baseline and intervention windows."
+        ],
+        "participantCount": 13,
+        "participantCountKind": "reported",
+        "populationLabel": "Healthy adults wearing ECG reference and consumer devices overnight"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:adf63f7f790efad5748c3ad043e9763e3cdaab84d7a3a6d86140e1114613320d",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/hrv/pmid-40834291",
+      "source": {
+        "authors": "Dial MB, Hollander ME, et al",
+        "citation": "Dial MB, et al. Validation of nocturnal resting heart rate and heart rate variability in consumer wearables. Physiol Rep. 2025. doi:10.14814/phy2.70527.",
+        "doi": "10.14814/phy2.70527",
+        "journal": "Physiological Reports",
+        "kind": "journal_article",
+        "pmid": "40834291",
+        "title": "Validation of nocturnal resting heart rate and heart rate variability in consumer wearables",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/40834291/",
+        "year": 2025
+      },
+      "status": "draft",
+      "summary": "A 2025 validation study comparing nocturnal RHR and HRV from five consumer wearables against ECG, finding device-dependent agreement.",
+      "title": "Validation of nocturnal resting heart rate and heart rate variability in consumer wearables"
     },
     {
       "body": "This source is included for **Evidence backbone**.\n\n**Findings:** Review-level sauna evidence used to frame what dry sauna may plausibly affect and where the claims need caution. Best recent top-down read on post-exercise heating; it puts the mixed acute recovery literature next to the more promising longer adaptation signal.\n\n**Why it matters:** Best recent top-down read on post-exercise heating; it puts the mixed acute recovery literature next to the more promising longer adaptation signal.\n\n**Potential experiment signals:** HRV, RHR, sleep, performance, soreness, training load\n\n**Protocol takeaway:** Position post-exercise sauna as uncertain for immediate recovery but plausible for longer endurance adaptation, and design signals accordingly.\n\nThis review is particularly relevant for future exercise-plus-sauna variants, because it synthesizes post-exercise heat exposure rather than standalone sauna only.",
@@ -23811,65 +23655,6 @@
       "whyItMatters": "Expands the audited Finnish dry-sauna evidence corpus with a cardiovascular record marked high priority for Murph v1 interpretation."
     },
     {
-      "aliases": [
-        "pmid-41477023"
-      ],
-      "body": "This source is included for **recent wearable-validation context**.\n\n## Quick read\n\n- **Source type:** Qualitative systematic review.\n- **Role in Murph:** updates the wearable-accuracy caveat with newer validation literature.\n- **Most relevant Murph signals:** wearable estimated VO₂ max and lab graded-exercise-test comparisons.\n\n## Murph takeaway\n\nUse this source to keep the product copy careful: wearable VO₂ max may be valid enough for trends in some populations, but device-specific validation and individual-level uncertainty remain important.",
-      "categories": [
-        "vo2max",
-        "wearables",
-        "validation",
-        "systematic-review"
-      ],
-      "claimUse": "wearable-validation",
-      "entityType": "source_artifact",
-      "evidenceBucket": "Recent wearable VO2 max validation context",
-      "key": "source_artifact:pmid-41477023",
-      "murphV1Priority": "Medium",
-      "potentialMurphEndpoints": [
-        "estimated VO2 max / cardio-fitness proxy",
-        "lab graded exercise test reference comparisons"
-      ],
-      "quality": "usable",
-      "relations": [
-        {
-          "target": "biomarker:estimated-vo2max",
-          "type": "measures"
-        }
-      ],
-      "relativePath": "sources/vo2-max/pmid-41477023.md",
-      "researchEvidence": {
-        "aggregateRole": "synthesis",
-        "aggregationNote": "Reinforces practical validity in some contexts while noting elite-athlete and longitudinal-validation limitations.",
-        "designKind": "systematic_review",
-        "designLabel": "Qualitative systematic review of wearable VO2max and lactate-threshold accuracy",
-        "includedStudyCount": 13,
-        "populationLabel": "Healthy, recreational, and professional exercise populations in wearable validation studies"
-      },
-      "revision": {
-        "pageRevisionId": "sha256:cccbf3d846e3fae740b7e04032327a3253b030bee38fcd2761fa529de72b6b10",
-        "recipeHash": null,
-        "runSpecRevisionId": null
-      },
-      "schemaVersion": "murph.commons.page.v1",
-      "slug": "sources/vo2-max/pmid-41477023",
-      "source": {
-        "authors": "L Železnik Mežan",
-        "citation": "Železnik Mežan L. Accuracy of wearables for determining the maximal oxygen uptake and lactate threshold: a qualitative systematic review. Front Sports Act Living. 2025;7:1707991. doi:10.3389/fspor.2025.1707991.",
-        "doi": "10.3389/fspor.2025.1707991",
-        "journal": "Frontiers in Sports and Active Living",
-        "kind": "review",
-        "pmid": "41477023",
-        "title": "Accuracy of wearables for determining the maximal oxygen uptake and lactate threshold: a qualitative systematic review",
-        "url": "https://www.frontiersin.org/journals/sports-and-active-living/articles/10.3389/fspor.2025.1707991/full",
-        "year": 2025
-      },
-      "status": "draft",
-      "summary": "2025 systematic review of wearable VO₂ max and lactate-threshold accuracy, reinforcing that wearable estimates can be useful but device/population validation still matters.",
-      "title": "Recent qualitative review of wearable VO₂max accuracy",
-      "whyItMatters": "Keeps the VO₂ max page current about wearable accuracy evidence and remaining validation gaps."
-    },
-    {
       "artifactNeeded": true,
       "body": "This source is included for **Product and home-lighting context**.\n\n**Findings:** This modeling study showed that household lamp spectra and brightness can change estimated melatonin suppression. Cool LED and CFL lighting produced higher modeled suppression than warmer or incandescent sources, and tunable warm settings reduced disruption. It supports logging room lighting and treating lighting changes as distinct from eyewear.\n\n**Why it matters:** Shows why room-light brightness and lens spectra can matter as much as the fact that a lens is amber or red.\n\n**Potential experiment signals:** estimated melatonin suppression, spectral transmittance, home-lighting conditions\n\n**Protocol takeaway:** Supports logging room-light brightness and treating room-light redesign as a separate intervention from eyewear.\n\n**Claim use:** `context-only`. Keep this classification when wiring claims so home-lighting modeling work does not get mistaken for direct bedtime sleep efficacy evidence.",
       "categories": [
@@ -24109,6 +23894,55 @@
       "summary": "This cross-sectional survey describes how Finnish women used sauna during pregnancy. The main finding is not an efficacy claim, but a safety-context record about real-world pregnancy habits and tolerance. For Murph, it supports pregnancy screening and cautions rather than a general protocol claim.",
       "title": "Sauna habits of Finnish women during pregnancy",
       "whyItMatters": "Expands the audited Finnish dry-sauna evidence corpus with a safety / physiology record marked lower priority for Murph v1 interpretation."
+    },
+    {
+      "body": "Classic HRV standards source. Murph uses it to keep the HRV page scoped to RMSSD-style millisecond values and to avoid mixing incompatible measurement windows or HRV features.",
+      "categories": [
+        "hrv",
+        "measurement",
+        "standards"
+      ],
+      "entityType": "source_artifact",
+      "key": "source_artifact:pmid-8598068",
+      "quality": "usable",
+      "relations": [
+        {
+          "target": "biomarker:hrv-rmssd",
+          "type": "measures"
+        }
+      ],
+      "relativePath": "sources/hrv/pmid-8598068.md",
+      "researchEvidence": {
+        "aggregateRole": "context",
+        "designKind": "guideline",
+        "designLabel": "Measurement standards and clinical interpretation guidance",
+        "notes": [
+          "Anchors HRV terminology and measurement-window caution.",
+          "Supports keeping RMSSD, SDNN, frequency-domain, and long-recording metrics distinct."
+        ],
+        "populationLabel": "HRV measurement and interpretation contexts"
+      },
+      "revision": {
+        "pageRevisionId": "sha256:c3ab0ee032412a708728f57f5c9a257beb99b3f7b2dfa59e7aeb5f69915cc1da",
+        "recipeHash": null,
+        "runSpecRevisionId": null
+      },
+      "schemaVersion": "murph.commons.page.v1",
+      "slug": "sources/hrv/pmid-8598068",
+      "source": {
+        "authors": "Task Force of the European Society of Cardiology and the North American Society of Pacing and Electrophysiology",
+        "citation": "Task Force. Heart rate variability: standards of measurement, physiological interpretation and clinical use. Circulation. 1996;93(5):1043-1065. doi:10.1161/01.CIR.93.5.1043.",
+        "doi": "10.1161/01.CIR.93.5.1043",
+        "journal": "Circulation",
+        "kind": "guideline",
+        "pmid": "8598068",
+        "title": "Heart rate variability standards of measurement, physiological interpretation and clinical use",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/8598068/",
+        "year": 1996
+      },
+      "status": "draft",
+      "summary": "The 1996 Task Force standards are the classic reference for HRV measurement terminology, recording contexts, physiological interpretation, and clinical-use boundaries.",
+      "title": "Heart rate variability standards of measurement, physiological interpretation, and clinical use"
     },
     {
       "body": "This source is included for **fertility and male heat-safety guardrails**.\n\n**Findings:** Short repeated-sauna human study used as additional male-fertility context because sperm movement parameters fell after exposure and recovered after cessation. Provides a second human sauna signal that scrotal heat exposure can transiently reduce sperm movement characteristics even when other semen measures are unchanged.\n\n**Why it matters:** The study found reversible decreases in computer-assisted sperm movement parameters after two weeks of sauna exposure.\n\n**Potential Murph endpoints/context:** fertility screening context, conception intent, safety guidance\n\n**Protocol takeaway:** Keep fertility and trying-to-conceive caveats explicit on sauna protocols.",
@@ -27120,11 +26954,6 @@
     }
   ],
   "redirects": [
-    {
-      "from": "biomarker:spo2",
-      "reason": "Short biomarker shorthand now resolves to the canonical Blood Oxygen Saturation page.",
-      "to": "biomarker:blood-oxygen-spo2"
-    },
     {
       "from": "experiment_family:sauna/finnish-dry",
       "reason": "Renamed to the user-facing dry-sauna family key.",
