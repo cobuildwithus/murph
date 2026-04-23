@@ -1,7 +1,4 @@
-import path from "node:path";
-
-import type { InboundCapture, PersistedCapture, StoredAttachment, StoredCapture } from "../contracts/capture.ts";
-import type { InboxCaptureRecord } from "../contracts/search.ts";
+import type { InboundCapture, PersistedCapture } from "../contracts/capture.ts";
 import type { InboxRuntimeStore } from "./sqlite.ts";
 import {
   ensureInboxVault,
@@ -51,13 +48,6 @@ export async function processCapture(
   context: PipelineContext,
 ): Promise<PersistedCapture> {
   const { ids, runtime, vaultRoot } = context;
-  const dedupe = runtime.findByExternalId(input.source, input.accountId, input.externalId);
-
-  if (dedupe) {
-    enqueueDerivedJobsForRecoveredCapture(runtime, dedupe);
-    return dedupe;
-  }
-
   const captureId = createDeterministicInboxCaptureId(input);
   const storedEnvelope = await findStoredCaptureEnvelope({
     vaultRoot,
@@ -115,50 +105,6 @@ export async function processCapture(
     envelopePath: persisted.stored.envelopePath,
     createdAt: persisted.stored.storedAt,
     deduped: false,
-  };
-}
-
-function enqueueDerivedJobsForRecoveredCapture(
-  runtime: InboxRuntimeStore,
-  dedupe: PersistedCapture,
-): void {
-  const capture = runtime.getCapture(dedupe.captureId);
-  if (!capture) {
-    return;
-  }
-
-  runtime.enqueueDerivedJobs({
-    captureId: dedupe.captureId,
-    stored: captureRecordToStoredCapture(capture, dedupe.createdAt),
-  });
-}
-
-function captureRecordToStoredCapture(
-  capture: InboxCaptureRecord,
-  storedAt: string,
-): StoredCapture {
-  return {
-    captureId: capture.captureId,
-    eventId: capture.eventId,
-    storedAt,
-    sourceDirectory: path.posix.dirname(capture.envelopePath),
-    envelopePath: capture.envelopePath,
-    attachments: capture.attachments.map(captureAttachmentToStoredAttachment),
-  };
-}
-
-function captureAttachmentToStoredAttachment(attachment: InboxCaptureRecord["attachments"][number]): StoredAttachment {
-  return {
-    attachmentId: attachment.attachmentId,
-    ordinal: attachment.ordinal,
-    externalId: attachment.externalId,
-    kind: attachment.kind,
-    mime: attachment.mime,
-    originalPath: attachment.originalPath,
-    storedPath: attachment.storedPath,
-    fileName: attachment.fileName,
-    byteSize: attachment.byteSize,
-    sha256: attachment.sha256,
   };
 }
 

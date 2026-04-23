@@ -35,7 +35,7 @@ import {
   sanitizeFileName,
   sanitizeSegment,
 } from "../shared.ts";
-import type { InboxRuntimeStore } from "../kernel/sqlite.ts";
+import { replaceInboxCaptureProjection, type InboxRuntimeStore } from "../kernel/sqlite.ts";
 import {
   INBOX_CAPTURE_LEDGER_DIRECTORY,
   buildInboxCaptureLedgerPathForOccurredAt,
@@ -455,17 +455,19 @@ export async function rebuildRuntimeFromVault(input: {
 }): Promise<void> {
   const canonicalRecords = await listCanonicalInboxCaptureRecords(input.vaultRoot);
   const restoredIdentityKeys = new Set<string>();
+  const projectionEntries: Array<{
+    captureId: string;
+    eventId: string;
+    input: InboundCapture;
+    stored: StoredCapture;
+  }> = [];
 
   for (const record of canonicalRecords) {
     const envelope = inboxCaptureRecordToStoredCaptureEnvelope(record);
-    const captureId = input.runtime.upsertCaptureIndex({
+    projectionEntries.push({
       captureId: envelope.captureId,
       eventId: envelope.eventId,
       input: envelope.input,
-      stored: envelope.stored,
-    });
-    input.runtime.enqueueDerivedJobs({
-      captureId,
       stored: envelope.stored,
     });
     restoredIdentityKeys.add(record.identityKey);
@@ -483,18 +485,19 @@ export async function rebuildRuntimeFromVault(input: {
       vaultRoot: input.vaultRoot,
       envelope,
     });
-    const captureId = input.runtime.upsertCaptureIndex({
+    projectionEntries.push({
       captureId: envelope.captureId,
       eventId: envelope.eventId,
       input: envelope.input,
       stored: envelope.stored,
     });
-    input.runtime.enqueueDerivedJobs({
-      captureId,
-      stored: envelope.stored,
-    });
     restoredIdentityKeys.add(createInboxCaptureIdentityKey(envelope.input));
   }
+
+  replaceInboxCaptureProjection({
+    databasePath: input.runtime.databasePath,
+    entries: projectionEntries,
+  });
 }
 
 function buildInboxAccountDirectory(input: InboundCapture): string {
