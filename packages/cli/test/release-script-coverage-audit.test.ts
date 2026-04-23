@@ -222,32 +222,32 @@ describe('monorepo release flow coverage audit', () => {
     expect(rootPackageJson.scripts?.['release:minor']).toBe('bash scripts/release.sh minor')
     expect(rootPackageJson.scripts?.['release:major']).toBe('bash scripts/release.sh major')
     expect(rootPackageJson.scripts?.['review:gpt']).toBe(
-      'pnpm exec cobuild-review-gpt --config scripts/review-gpt.config.sh',
+      'bash scripts/review-gpt-browser-profile.sh review-gpt phlebas',
     )
     expect(rootPackageJson.scripts?.['review:gpt:full']).toBe(
-      'pnpm exec cobuild-review-gpt --config scripts/review-gpt-full.config.sh',
+      'bash scripts/review-gpt-browser-profile.sh review-gpt phlebas --config-path scripts/review-gpt-full.config.sh',
     )
     expect(rootPackageJson.scripts?.['review:gpt:diagnose']).toBe(
-      'pnpm exec cobuild-review-gpt thread diagnose --browser-endpoint ${MURPH_REVIEW_GPT_BROWSER_ENDPOINT:-http://127.0.0.1:9442}',
+      'bash scripts/review-gpt-browser-profile.sh thread phlebas diagnose',
     )
     expect(rootPackageJson.scripts?.['review:gpt:delay']).toBe(
-      'pnpm exec cobuild-review-gpt delay --config scripts/review-gpt.config.sh',
+      'bash scripts/review-gpt-browser-profile.sh review-gpt phlebas delay',
     )
     expect(rootPackageJson.scripts?.['review:gpt:schedule']).toBe(
-      'pnpm exec cobuild-review-gpt delay --config scripts/review-gpt.config.sh',
+      'bash scripts/review-gpt-browser-profile.sh review-gpt phlebas delay',
     )
     expect(rootPackageJson.scripts?.['review:gpt:data']).toBe('bash scripts/review-gpt-data.sh')
     expect(rootPackageJson.scripts?.['chatgpt:thread:export']).toBe(
-      'pnpm exec cobuild-review-gpt thread export --browser-endpoint ${MURPH_REVIEW_GPT_BROWSER_ENDPOINT:-http://127.0.0.1:9442} --format json --filter-output exportPath',
+      'bash scripts/review-gpt-browser-profile.sh thread phlebas export --format json --filter-output exportPath',
     )
     expect(rootPackageJson.scripts?.['chatgpt:thread:download']).toBe(
-      'pnpm exec cobuild-review-gpt thread download --browser-endpoint ${MURPH_REVIEW_GPT_BROWSER_ENDPOINT:-http://127.0.0.1:9442} --format json --filter-output downloadedFile',
+      'bash scripts/review-gpt-browser-profile.sh thread phlebas download --format json --filter-output downloadedFile',
     )
     expect(rootPackageJson.scripts?.['chatgpt:thread:watch']).toBe(
-      'pnpm exec cobuild-review-gpt thread wake --browser-endpoint ${MURPH_REVIEW_GPT_BROWSER_ENDPOINT:-http://127.0.0.1:9442} --no-poll-until-complete --format json',
+      'bash scripts/review-gpt-browser-profile.sh thread phlebas wake --no-poll-until-complete --format json',
     )
     expect(rootPackageJson.scripts?.['chatgpt:thread:wake']).toBe(
-      'pnpm exec cobuild-review-gpt thread wake --browser-endpoint ${MURPH_REVIEW_GPT_BROWSER_ENDPOINT:-http://127.0.0.1:9442} --no-poll-until-complete --format json',
+      'bash scripts/review-gpt-browser-profile.sh thread phlebas wake --no-poll-until-complete --format json',
     )
     expect(rootPackageJson.scripts?.['verify:workspace-package-cycles']).toBe(
       'node scripts/check-workspace-package-cycles.mjs',
@@ -521,6 +521,10 @@ Updated: 2026-04-24
       path.join(repoRoot, 'scripts', 'review-gpt-full.config.sh'),
       'utf8',
     )
+    const dataReviewConfig = readFileSync(
+      path.join(repoRoot, 'scripts', 'review-gpt.data.config.sh'),
+      'utf8',
+    )
     const repoToolsConfig = readFileSync(
       path.join(repoRoot, 'scripts', 'repo-tools.config.sh'),
       'utf8',
@@ -538,6 +542,10 @@ Updated: 2026-04-24
     expect(fullReviewConfig).toContain('include_tests=1')
     expect(fullReviewConfig).toContain('include_docs=1')
     expect(fullReviewConfig).toContain('package_script="scripts/package-audit-context-full.sh"')
+    expect(dataReviewConfig).toContain('include_tests=0')
+    expect(dataReviewConfig).toContain('include_docs=0')
+    expect(dataReviewConfig).toContain('repomix_attachment_format="none"')
+    expect(dataReviewConfig).toContain('package_script="scripts/package-data-context.sh"')
     expect(repoToolsConfig).toContain("export COBUILD_AUDIT_CONTEXT_INCLUDE_TESTS_DEFAULT='0'")
     expect(repoToolsConfig).toContain("export COBUILD_AUDIT_CONTEXT_INCLUDE_DOCS_DEFAULT='0'")
     expect(repoToolsConfig).toContain("export COBUILD_AUDIT_CONTEXT_INCLUDE_CI_DEFAULT='0'")
@@ -1009,6 +1017,7 @@ exit 1
           outputRoot,
           '--name',
           'murph-test-data',
+          '--no-docs',
         ],
         {
           cwd: repoRoot,

@@ -214,15 +214,49 @@ murph_review_gpt_profile_activate() {
   osascript -e "tell application \"$MURPH_REVIEW_GPT_PROFILE_NAME\" to activate"
 }
 
-murph_review_gpt_profile_stop_processes() {
+murph_review_gpt_profile_process_ids() {
   local profile_slug="$1"
-  local app_path product_dir_name pids
+  local app_path product_dir_name
   murph_review_gpt_load_profile "$profile_slug" || return 1
 
   app_path="$MURPH_REVIEW_GPT_PROFILE_ROOT/$MURPH_REVIEW_GPT_PROFILE_NAME.app"
   product_dir_name="$MURPH_REVIEW_GPT_PROFILE_PRODUCT_DIR_NAME"
 
-  pids="$(ps -axo pid=,command= | awk -v app="$app_path" -v product="$product_dir_name" 'index($0, app) || index($0, product) { print $1 }')"
+  ps -axo pid=,command= | awk -v app="$app_path" -v product="$product_dir_name" 'index($0, app) || index($0, product) { print $1 }'
+}
+
+murph_review_gpt_profile_endpoint_ready() {
+  local profile_slug="$1"
+  local browser_endpoint
+  browser_endpoint="$(murph_review_gpt_profile_browser_endpoint "$profile_slug")" || return 1
+  curl --silent --show-error --fail --max-time 1 "$browser_endpoint/json/version" >/dev/null 2>&1
+}
+
+murph_review_gpt_profile_wait_for_endpoint() {
+  local profile_slug="$1"
+  local browser_endpoint=""
+  local attempt=0
+  local max_attempts="${2:-50}"
+
+  browser_endpoint="$(murph_review_gpt_profile_browser_endpoint "$profile_slug")" || return 1
+
+  while (( attempt < max_attempts )); do
+    if murph_review_gpt_profile_endpoint_ready "$profile_slug"; then
+      return 0
+    fi
+    sleep 0.2
+    attempt=$((attempt + 1))
+  done
+
+  echo "Error: managed browser failed to start on ${browser_endpoint}." >&2
+  return 1
+}
+
+murph_review_gpt_profile_stop_processes() {
+  local profile_slug="$1"
+  local pids
+
+  pids="$(murph_review_gpt_profile_process_ids "$profile_slug")" || return 1
   if [[ -z "$pids" ]]; then
     return 0
   fi
@@ -230,58 +264,195 @@ murph_review_gpt_profile_stop_processes() {
   kill -TERM $pids 2>/dev/null || true
   sleep 2
 
-  pids="$(ps -axo pid=,command= | awk -v app="$app_path" -v product="$product_dir_name" 'index($0, app) || index($0, product) { print $1 }')"
+  pids="$(murph_review_gpt_profile_process_ids "$profile_slug")" || return 1
   if [[ -n "$pids" ]]; then
     kill -KILL $pids 2>/dev/null || true
     sleep 1
   fi
 }
 
-murph_review_gpt_profile_run_review_gpt() {
+murph_review_gpt_profile_export_browser_env() {
   local profile_slug="$1"
-  shift
+  local browser_binary user_data_dir browser_endpoint
 
-  local repo_root browser_binary user_data_dir browser_endpoint config_path
-  repo_root="$(murph_review_gpt_repo_root)" || return 1
   browser_binary="$(murph_review_gpt_profile_browser_binary "$profile_slug")" || return 1
   user_data_dir="$(murph_review_gpt_profile_user_data_dir "$profile_slug")" || return 1
   browser_endpoint="$(murph_review_gpt_profile_browser_endpoint "$profile_slug")" || return 1
   murph_review_gpt_load_profile "$profile_slug" || return 1
 
-  config_path="$repo_root/scripts/review-gpt.config.sh"
-  if [[ -f "$MURPH_REVIEW_GPT_PROFILE_ROOT/review-gpt.$profile_slug.config.sh" ]]; then
-    config_path="$MURPH_REVIEW_GPT_PROFILE_ROOT/review-gpt.$profile_slug.config.sh"
-  fi
-
-  murph_review_gpt_profile_stop_processes "$profile_slug" || return 1
-
-  cd "$repo_root"
   export browser_binary_path="$browser_binary"
   export managed_browser_user_data_dir="$user_data_dir"
   export managed_browser_profile="$MURPH_REVIEW_GPT_PROFILE_BROWSER_PROFILE"
   export managed_browser_port="$MURPH_REVIEW_GPT_PROFILE_PORT"
   export MURPH_REVIEW_GPT_BROWSER_ENDPOINT="$browser_endpoint"
+}
 
+murph_review_gpt_profile_prepare_browser_env() {
+  local profile_slug="$1"
+  local running_pids
+
+  murph_review_gpt_profile_export_browser_env "$profile_slug" || return 1
+
+  if murph_review_gpt_profile_endpoint_ready "$profile_slug"; then
+    return 0
+  fi
+
+  running_pids="$(murph_review_gpt_profile_process_ids "$profile_slug")" || return 1
+  if [[ -n "$running_pids" ]]; then
+    murph_review_gpt_profile_stop_processes "$profile_slug" || return 1
+  fi
+  murph_review_gpt_profile_open_chatgpt "$profile_slug" >/dev/null 2>&1 || return 1
+  murph_review_gpt_profile_wait_for_endpoint "$profile_slug" || return 1
+}
+
+murph_review_gpt_resolve_config_path() {
+  local profile_slug="$1"
+  local config_override="${2:-}"
+  local repo_root config_path
+  repo_root="$(murph_review_gpt_repo_root)" || return 1
+
+  if [[ -n "$config_override" ]]; then
+    if [[ "$config_override" == /* ]]; then
+      printf '%s\n' "$config_override"
+    else
+      printf '%s\n' "$repo_root/$config_override"
+    fi
+    return 0
+  fi
+
+  murph_review_gpt_load_profile "$profile_slug" || return 1
+  config_path="$repo_root/scripts/review-gpt.config.sh"
+  if [[ -f "$MURPH_REVIEW_GPT_PROFILE_ROOT/review-gpt.$profile_slug.config.sh" ]]; then
+    config_path="$MURPH_REVIEW_GPT_PROFILE_ROOT/review-gpt.$profile_slug.config.sh"
+  fi
+  printf '%s\n' "$config_path"
+}
+
+murph_review_gpt_args_skip_browser_prepare() {
+  local arg
+  case "${1:-}" in
+    completions|mcp|skills)
+      return 0
+      ;;
+  esac
+
+  for arg in "$@"; do
+    case "$arg" in
+      -h|--help|--version|--dry-run|--list-presets|--schema|--llms|--llms-full|--mcp)
+        return 0
+        ;;
+    esac
+  done
+  return 1
+}
+
+murph_review_gpt_args_include_option() {
+  local option_name="$1"
+  shift
+
+  while [[ "$#" -gt 0 ]]; do
+    case "$1" in
+      "$option_name"|"$option_name="*)
+        return 0
+        ;;
+    esac
+    shift
+  done
+
+  return 1
+}
+
+murph_review_gpt_profile_run_review_gpt() {
+  local profile_slug="$1"
+  shift
+
+  local repo_root config_override="" config_path
+  repo_root="$(murph_review_gpt_repo_root)" || return 1
+
+  while [[ "$#" -gt 0 ]]; do
+    case "$1" in
+      --config|--config-path)
+        [[ "$#" -ge 2 ]] || {
+          echo "Missing value for $1." >&2
+          return 1
+        }
+        config_override="$2"
+        shift 2
+        ;;
+      --config=*|--config-path=*)
+        config_override="${1#*=}"
+        shift
+        ;;
+      *)
+        break
+        ;;
+    esac
+  done
+
+  config_path="$(murph_review_gpt_resolve_config_path "$profile_slug" "$config_override")" || return 1
+
+  cd "$repo_root"
+  if [[ "${1:-}" == "thread" ]]; then
+    shift
+    [[ "$#" -gt 0 ]] || {
+      pnpm exec cobuild-review-gpt thread --help
+      return 1
+    }
+    murph_review_gpt_profile_run_thread "$profile_slug" "$@"
+  fi
+  if [[ "${1:-}" == "delay" ]]; then
+    shift
+    if ! murph_review_gpt_args_skip_browser_prepare "$@"; then
+      murph_review_gpt_profile_export_browser_env "$profile_slug" || return 1
+    fi
+    exec pnpm exec cobuild-review-gpt delay --config "$config_path" "$@"
+  fi
+
+  if murph_review_gpt_args_skip_browser_prepare "$@"; then
+    exec pnpm exec cobuild-review-gpt --config "$config_path" "$@"
+  fi
+
+  murph_review_gpt_profile_prepare_browser_env "$profile_slug" || return 1
   exec pnpm exec cobuild-review-gpt --config "$config_path" "$@"
+}
+
+murph_review_gpt_profile_run_thread() {
+  local profile_slug="$1"
+  shift
+
+  local repo_root thread_browser_endpoint="${MURPH_REVIEW_GPT_BROWSER_ENDPOINT:-}"
+  repo_root="$(murph_review_gpt_repo_root)" || return 1
+
+  cd "$repo_root"
+  if murph_review_gpt_args_skip_browser_prepare "$@"; then
+    exec pnpm exec cobuild-review-gpt thread "$@"
+  fi
+  if murph_review_gpt_args_include_option --browser-endpoint "$@"; then
+    exec pnpm exec cobuild-review-gpt thread "$@"
+  fi
+  if [[ "${1:-}" == "wake" ]]; then
+    if [[ -z "$thread_browser_endpoint" ]]; then
+      thread_browser_endpoint="$(murph_review_gpt_profile_browser_endpoint "$profile_slug")" || return 1
+    fi
+    exec pnpm exec cobuild-review-gpt thread "$@" --browser-endpoint "$thread_browser_endpoint"
+  fi
+  if [[ -z "$thread_browser_endpoint" ]]; then
+    murph_review_gpt_profile_prepare_browser_env "$profile_slug" || return 1
+    thread_browser_endpoint="$MURPH_REVIEW_GPT_BROWSER_ENDPOINT"
+  fi
+  exec pnpm exec cobuild-review-gpt thread "$@" --browser-endpoint "$thread_browser_endpoint"
 }
 
 murph_review_gpt_profile_run_research() {
   local profile_slug="$1"
   shift
 
-  local browser_binary user_data_dir browser_endpoint
-  browser_binary="$(murph_review_gpt_profile_browser_binary "$profile_slug")" || return 1
-  user_data_dir="$(murph_review_gpt_profile_user_data_dir "$profile_slug")" || return 1
-  browser_endpoint="$(murph_review_gpt_profile_browser_endpoint "$profile_slug")" || return 1
-  murph_review_gpt_load_profile "$profile_slug" || return 1
+  murph_review_gpt_profile_prepare_browser_env "$profile_slug" || return 1
 
-  murph_review_gpt_profile_stop_processes "$profile_slug" || return 1
-
-  export RESEARCH_MANAGED_BROWSER_USER_DATA_DIR="$user_data_dir"
-  export RESEARCH_MANAGED_BROWSER_PROFILE="$MURPH_REVIEW_GPT_PROFILE_BROWSER_PROFILE"
-  export RESEARCH_MANAGED_BROWSER_PORT="$MURPH_REVIEW_GPT_PROFILE_PORT"
-  export RESEARCH_THREAD_EXPORT_BROWSER_ENDPOINT="$browser_endpoint"
-  export browser_binary_path="$browser_binary"
+  export RESEARCH_MANAGED_BROWSER_USER_DATA_DIR="$managed_browser_user_data_dir"
+  export RESEARCH_MANAGED_BROWSER_PROFILE="$managed_browser_profile"
+  export RESEARCH_MANAGED_BROWSER_PORT="$managed_browser_port"
+  export RESEARCH_THREAD_EXPORT_BROWSER_ENDPOINT="$MURPH_REVIEW_GPT_BROWSER_ENDPOINT"
 
   exec "$@"
 }
@@ -294,8 +465,10 @@ Usage:
   bash scripts/review-gpt-browser-profile.sh activate <profile-slug>
   bash scripts/review-gpt-browser-profile.sh browser-binary <profile-slug>
   bash scripts/review-gpt-browser-profile.sh browser-endpoint <profile-slug>
+  bash scripts/review-gpt-browser-profile.sh ensure-endpoint <profile-slug>
   bash scripts/review-gpt-browser-profile.sh user-data-dir <profile-slug>
-  bash scripts/review-gpt-browser-profile.sh review-gpt <profile-slug> [review-gpt args...]
+  bash scripts/review-gpt-browser-profile.sh review-gpt <profile-slug> [--config-path <path>] [review-gpt args...]
+  bash scripts/review-gpt-browser-profile.sh thread <profile-slug> <thread args...>
   bash scripts/review-gpt-browser-profile.sh research <profile-slug> <command...>
 EOF
 }
@@ -325,6 +498,11 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
       [[ -n "$profile_slug" ]] || { murph_review_gpt_profile_usage >&2; exit 1; }
       murph_review_gpt_profile_browser_endpoint "$profile_slug"
       ;;
+    ensure-endpoint)
+      [[ -n "$profile_slug" ]] || { murph_review_gpt_profile_usage >&2; exit 1; }
+      murph_review_gpt_profile_prepare_browser_env "$profile_slug"
+      printf '%s\n' "$MURPH_REVIEW_GPT_BROWSER_ENDPOINT"
+      ;;
     user-data-dir)
       [[ -n "$profile_slug" ]] || { murph_review_gpt_profile_usage >&2; exit 1; }
       murph_review_gpt_profile_user_data_dir "$profile_slug"
@@ -333,6 +511,12 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
       [[ -n "$profile_slug" ]] || { murph_review_gpt_profile_usage >&2; exit 1; }
       shift 2
       murph_review_gpt_profile_run_review_gpt "$profile_slug" "$@"
+      ;;
+    thread)
+      [[ -n "$profile_slug" ]] || { murph_review_gpt_profile_usage >&2; exit 1; }
+      shift 2
+      [[ "$#" -gt 0 ]] || { murph_review_gpt_profile_usage >&2; exit 1; }
+      murph_review_gpt_profile_run_thread "$profile_slug" "$@"
       ;;
     research)
       [[ -n "$profile_slug" ]] || { murph_review_gpt_profile_usage >&2; exit 1; }

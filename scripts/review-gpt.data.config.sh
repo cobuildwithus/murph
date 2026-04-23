@@ -24,6 +24,7 @@ managed_browser_port="${managed_browser_port:-9442}"
 name_prefix="murph-chatgpt-data"
 include_tests=0
 include_docs=0
+repomix_attachment_format="none"
 preset_dir="scripts/chatgpt-review-presets"
 package_script="scripts/package-data-context.sh"
 

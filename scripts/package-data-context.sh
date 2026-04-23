@@ -27,6 +27,7 @@ Options:
   --zip                      Create only a .zip archive (default)
   --out-dir <dir>            Output directory (default: output-packages)
   --name <prefix>            Output filename prefix (default: murph-data-bundle)
+  --no-docs                  Accepted for review-gpt package-script compatibility
   -h, --help                 Show this help message
 USAGE
   exit "$exit_code"
@@ -198,6 +199,9 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --zip)
+      shift
+      ;;
+    --no-docs)
       shift
       ;;
     --out-dir)
