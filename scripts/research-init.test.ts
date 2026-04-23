@@ -261,10 +261,12 @@ describe("research init scaffold", () => {
       expect(helperScript).toContain('assert_workspace_package_script');
       expect(helperScript).toContain('resolve_package_script_from_config');
       expect(helperScript).toContain("--send");
-      expect(helperScript).toContain("--wait");
+      expect(helperScript).toContain("thread wake");
+      expect(helperScript).toContain("--skip-resume");
       expect(helperScript).toContain("murph-workspace");
       expect(helperScript).toContain('match(/https:\\/\\/chatgpt\\.com\\/c\\/\\S+/u)');
       expect(helperScript).toContain('matchAll(/https:\\/\\/chatgpt\\.com\\/c\\/\\S+/gu)');
+      expect(helperScript).toContain('managed_browser_port');
 
       assertResearchReviewGptSupportFiles(outDir);
 
@@ -545,7 +547,7 @@ describe("research init scaffold", () => {
     }
   });
 
-  it("captures the thread URL and exports the thread snapshot even when review:gpt fails after send", () => {
+  it("recovers from send failure with stderr-only thread URL capture, config-only browser endpoint fallback, and stale per-label outputs already present", () => {
     mkdirSync(researchOutputRoot, { recursive: true });
     const tempRoot = mkdtempSync(path.join(researchOutputRoot, "tmp-research-helper-"));
     const outDir = path.join(tempRoot, "helper-failure-recovery");
@@ -563,14 +565,14 @@ describe("research init scaffold", () => {
         `#!/usr/bin/env bash
 set -euo pipefail
 
-if [[ "$#" -ge 4 && "$1" == "exec" && "$2" == "cobuild-review-gpt" && "$3" == "thread" && "$4" == "export" ]]; then
-  output_path=""
+if [[ "$#" -ge 4 && "$1" == "exec" && "$2" == "cobuild-review-gpt" && "$3" == "thread" && "$4" == "wake" ]]; then
+  output_dir=""
   chat_url=""
   browser_endpoint=""
   while [[ "$#" -gt 0 ]]; do
     case "$1" in
-      --output)
-        output_path="$2"
+      --output-dir)
+        output_dir="$2"
         shift 2
         ;;
       --chat-url)
@@ -587,24 +589,34 @@ if [[ "$#" -ge 4 && "$1" == "exec" && "$2" == "cobuild-review-gpt" && "$3" == "t
     esac
   done
 
-  mkdir -p "$(dirname "$output_path")"
-  cat >"$output_path" <<JSON
+  mkdir -p "$output_dir/downloads"
+  printf '%s\\n' 'artifact bytes' >"$output_dir/downloads/recovered.json"
+  cat >"$output_dir/thread.json" <<JSON
 {
   "chatUrl": "$chat_url",
   "browserEndpoint": "$browser_endpoint",
   "assistantSnapshots": [
     {
-      "text": "Recovered thread snapshot"
+      "text": "Recovered intermediary thread snapshot that should not win"
+    },
+    {
+      "text": "Recovered final thread snapshot"
     }
   ]
 }
 JSON
+  cat >"$output_dir/status.json" <<JSON
+{
+  "chatUrl": "$chat_url",
+  "downloadedArtifacts": ["$output_dir/downloads/recovered.json"]
+}
+JSON
+  printf '%s\\n' '{"state":"completed"}'
   exit 0
 fi
 
-printf '%s\\n' 'Managed browser endpoint: 127.0.0.1:9224'
-printf '%s\\n' 'ChatGPT conversation URL: https://chatgpt.com/c/test-thread-123'
 printf '%s\\n' '{"status":"sent"}'
+printf '%s\\n' 'ChatGPT conversation URL: https://chatgpt.com/c/test-thread-123' >&2
 printf '%s\\n' 'Draft staging failed' >&2
 exit 17
 `,
@@ -616,6 +628,22 @@ exit 17
       const helperScriptPath = path.join(outDir, "commands", "_run-review-gpt.sh");
       const promptPath = path.join(outDir, "prompts", "01-charter.md");
       const responsePath = path.join(outDir, "responses", `${helperLabel}.md`);
+      const chatUrlPath = path.join(outDir, "state", "chat-urls", `${helperLabel}.txt`);
+      const threadExportPath = path.join(
+        outDir,
+        "state",
+        "thread-exports",
+        `${helperLabel}.thread.json`,
+      );
+      const wakeOutputDir = path.join(outDir, "downloads", helperLabel);
+      mkdirSync(path.dirname(chatUrlPath), { recursive: true });
+      mkdirSync(path.dirname(threadExportPath), { recursive: true });
+      mkdirSync(wakeOutputDir, { recursive: true });
+      writeTextFileSync(chatUrlPath, "https://chatgpt.com/c/stale-thread\n");
+      writeTextFileSync(threadExportPath, '{"assistantSnapshots":[{"text":"stale export"}]}\n');
+      writeTextFileSync(responsePath, "stale response\n");
+      writeTextFileSync(path.join(wakeOutputDir, "status.json"), '{"downloadedArtifacts":["stale.json"]}\n');
+
       const helperResult = runGeneratedReviewGptHelper(
         helperScriptPath,
         helperLabel,
@@ -627,26 +655,27 @@ exit 17
         },
       );
 
-      expect(helperResult.status).toBe(17);
-      expect(helperResult.stderr).toContain("Draft staging failed");
-      expect(helperResult.stderr).toContain("Chat URL: https://chatgpt.com/c/test-thread-123");
-      expect(helperResult.stderr).toContain(
-        `Thread export: ${path.join(outDir, "state", "thread-exports", `${helperLabel}.thread.json`)}`,
+      expect(helperResult.status).toBe(0);
+      expect(helperResult.stderr).toBe("");
+      expect(helperResult.stdout).toContain(`Response: ${responsePath}`);
+      expect(helperResult.stdout).toContain(
+        `Wake output: ${path.join(outDir, "downloads", helperLabel)}`,
       );
+      expect(helperResult.stdout).toContain("Recovered after send failure: yes");
 
-      const chatUrlPath = path.join(outDir, "state", "chat-urls", `${helperLabel}.txt`);
-      const threadExportPath = path.join(
-        outDir,
-        "state",
-        "thread-exports",
-        `${helperLabel}.thread.json`,
-      );
+      const wakeThreadPath = path.join(outDir, "downloads", helperLabel, "thread.json");
+      const wakeStatusPath = path.join(outDir, "downloads", helperLabel, "status.json");
 
       expect(existsSync(chatUrlPath)).toBe(true);
       expect(readFileSync(chatUrlPath, "utf8")).toBe("https://chatgpt.com/c/test-thread-123\n");
       expect(existsSync(threadExportPath)).toBe(true);
-      expect(readFileSync(threadExportPath, "utf8")).toContain("Recovered thread snapshot");
-      expect(readFileSync(threadExportPath, "utf8")).toContain("127.0.0.1:9224");
+      expect(readFileSync(threadExportPath, "utf8")).toContain("Recovered final thread snapshot");
+      expect(readFileSync(threadExportPath, "utf8")).toContain("http://127.0.0.1:9224");
+      expect(existsSync(wakeThreadPath)).toBe(true);
+      expect(existsSync(wakeStatusPath)).toBe(true);
+      expect(readFileSync(responsePath, "utf8")).toContain("Recovered final thread snapshot");
+      expect(readFileSync(responsePath, "utf8")).not.toContain("Recovered intermediary thread snapshot");
+      expect(readFileSync(responsePath, "utf8")).not.toContain("stale response");
     } finally {
       rmSync(tempRoot, { recursive: true, force: true });
     }
@@ -735,6 +764,7 @@ function assertResearchReviewGptSupportFiles(outDir: string) {
   expect(workProfileConfig).toContain('scripts/review-gpt.config.sh');
   expect(workProfileConfig).toContain('package_script="${workspace_dir:-$(cd "${script_dir}/.." && pwd)}/scripts/package-research-context.sh"');
   expect(workProfileConfig).toContain('managed_browser_port="${RESEARCH_MANAGED_BROWSER_PORT:-9224}"');
+  expect(workProfileConfig).toContain('research_thread_export_browser_endpoint="${RESEARCH_THREAD_EXPORT_BROWSER_ENDPOINT:-http://127.0.0.1:${managed_browser_port}}"');
 
   const packageScript = readFileSync(packageScriptPath, "utf8");
   expect(packageScript).toContain('add_file_if_exists "${workspace_relative}/workflow.json"');
