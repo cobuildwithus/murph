@@ -126,7 +126,7 @@ const TEST_CHAT_RESULT = {
   session: TEST_SESSION,
 } satisfies AssistantChatResult
 
-test('package manifest exposes only the intentional assistant command and runtime logging subpaths', async () => {
+test('package manifest exposes only the intentional assistant command and runtime logging subpaths without a root fallback', async () => {
   const packageManifest = JSON.parse(
     await readFile(new URL('../package.json', import.meta.url), 'utf8'),
   ) as {
@@ -141,8 +141,9 @@ test('package manifest exposes only the intentional assistant command and runtim
   assert.equal(packageManifest.name, '@murphai/assistant-cli')
   assert.equal(packageManifest.private, true)
   assert.equal(packageManifest.type, 'module')
-  assert.equal(packageManifest.main, './dist/index.js')
-  assert.equal(packageManifest.types, './dist/index.d.ts')
+  assert.equal(packageManifest.main, undefined)
+  assert.equal(packageManifest.types, undefined)
+  assert.equal(packageManifest.exports?.['.'], undefined)
   assert.deepEqual(packageManifest.exports?.['./commands/assistant'], {
     types: './dist/commands/assistant.d.ts',
     default: './dist/commands/assistant.js',
