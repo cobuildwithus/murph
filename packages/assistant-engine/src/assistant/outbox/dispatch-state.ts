@@ -1,4 +1,5 @@
 import {
+  assistantChannelDeliverySchema,
   assistantOutboxIntentSchema,
   type AssistantChannelDelivery,
   type AssistantDeliveryError,
@@ -10,6 +11,7 @@ import { ensureAssistantState } from '../store/persistence.js'
 import { appendAssistantTurnReceiptEvent, updateAssistantTurnReceipt } from '../turns.js'
 import { writeJsonFileAtomic } from '../shared.js'
 import {
+  createAssistantDeliveryAmbiguousError,
   createAssistantDeliveryConfirmationPendingError,
   isAssistantOutboxRetryableError,
   normalizeAssistantDeliveryError,
@@ -197,11 +199,19 @@ export async function updateAssistantOutboxAfterDispatchFailure(input: {
   sending: AssistantOutboxIntent
   vault: string
 }): Promise<AssistantOutboxIntent> {
-  const deliveryError = input.deliveryMayHaveSucceeded
-    ? createAssistantDeliveryConfirmationPendingError(input.error)
-    : normalizeAssistantDeliveryError(input.error)
-  const retryable =
-    input.deliveryMayHaveSucceeded || isAssistantOutboxRetryableError(input.error)
+  const ambiguousDelivery = readTelegramAmbiguousDeliveryFromError({
+    error: input.error,
+    failedAt: input.failedAt,
+    sending: input.sending,
+  })
+  const deliveryError = ambiguousDelivery
+    ? createAssistantDeliveryAmbiguousError(input.error)
+    : input.deliveryMayHaveSucceeded
+      ? createAssistantDeliveryConfirmationPendingError(input.error)
+      : normalizeAssistantDeliveryError(input.error)
+  const retryable = ambiguousDelivery
+    ? false
+    : input.deliveryMayHaveSucceeded || isAssistantOutboxRetryableError(input.error)
 
   return withAssistantRuntimeWriteLock(input.vault, async (paths) => {
     await ensureAssistantState(paths)
@@ -215,15 +225,20 @@ export async function updateAssistantOutboxAfterDispatchFailure(input: {
       : null
     const failedIntent = assistantOutboxIntentSchema.parse({
       ...(current ?? input.sending),
+      delivery: ambiguousDelivery ?? current?.delivery ?? input.sending.delivery,
       deliveryConfirmationPending: input.deliveryMayHaveSucceeded
-        ? input.deliveryTransportIdempotent
+        ? ambiguousDelivery
+          ? false
+          : input.deliveryTransportIdempotent
         : false,
-      deliveryTransportIdempotent: input.deliveryMayHaveSucceeded
+      deliveryTransportIdempotent: ambiguousDelivery
+        ? false
+        : input.deliveryMayHaveSucceeded
         ? input.deliveryTransportIdempotent
         : (current?.deliveryTransportIdempotent ?? input.sending.deliveryTransportIdempotent),
       updatedAt: failedAt,
       nextAttemptAt,
-      status: retryable ? 'retryable' : 'failed',
+      status: ambiguousDelivery ? 'abandoned' : retryable ? 'retryable' : 'failed',
       lastError: deliveryError,
     })
     await writeJsonFileAtomic(input.intentPath, failedIntent)
@@ -273,6 +288,77 @@ export async function updateAssistantOutboxAfterDispatchFailure(input: {
     })
     return failedIntent
   })
+}
+
+function readTelegramAmbiguousDeliveryFromError(input: {
+  error: unknown
+  failedAt: Date
+  sending: AssistantOutboxIntent
+}): AssistantChannelDelivery | null {
+  if (input.sending.channel !== 'telegram') {
+    return null
+  }
+
+  const errorRecord = readRecord(input.error)
+  const context = readRecord(errorRecord?.context)
+  const providerMessageIds =
+    readNonEmptyStringArray(errorRecord?.providerMessageIds) ??
+    readNonEmptyStringArray(context?.providerMessageIds) ??
+    null
+  const target =
+    readNonEmptyString(errorRecord?.target) ??
+    readNonEmptyString(context?.target) ??
+    null
+  const targetKind = inferAssistantOutboxFailureTargetKind(input.sending)
+  if (!providerMessageIds || !target || !targetKind) {
+    return null
+  }
+
+  return assistantChannelDeliverySchema.parse({
+    channel: 'telegram',
+    idempotencyKey: input.sending.deliveryIdempotencyKey,
+    messageLength: input.sending.message.length,
+    providerMessageId: providerMessageIds.at(-1) ?? null,
+    providerMessageIds,
+    providerThreadId: null,
+    sentAt: input.failedAt.toISOString(),
+    target,
+    targetKind,
+  })
+}
+
+function inferAssistantOutboxFailureTargetKind(
+  intent: Pick<AssistantOutboxIntent, 'bindingDelivery' | 'explicitTarget'>,
+): AssistantChannelDelivery['targetKind'] | null {
+  if (intent.explicitTarget) {
+    return 'explicit'
+  }
+
+  return intent.bindingDelivery?.kind ?? null
+}
+
+function readRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === 'object' && value !== null
+    ? value as Record<string, unknown>
+    : null
+}
+
+function readNonEmptyString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim().length > 0
+    ? value.trim()
+    : null
+}
+
+function readNonEmptyStringArray(value: unknown): string[] | null {
+  if (!Array.isArray(value)) {
+    return null
+  }
+
+  const normalized = value
+    .map((entry) => readNonEmptyString(entry))
+    .filter((entry): entry is string => entry !== null)
+
+  return normalized.length > 0 ? normalized : null
 }
 
 export async function rescheduleAssistantOutboxConfirmationRetry(input: {

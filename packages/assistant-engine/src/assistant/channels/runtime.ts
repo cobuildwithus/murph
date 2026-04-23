@@ -16,6 +16,7 @@ import {
   stopLinqChatTypingIndicator,
 } from '@murphai/operator-config/linq-runtime'
 import {
+  deleteTelegramMessages,
   resolveTelegramApiBaseUrl,
   resolveTelegramBotToken,
   type TelegramFetchImplementation,
@@ -73,6 +74,13 @@ type TelegramSendAttemptOutcome =
       kind: 'retry'
       retryAfterSeconds: number | null
     }
+
+interface TelegramAmbiguousDeliveryFailure extends VaultCliError {
+  deliveryMayHaveSucceeded: true
+  providerMessageId: string | null
+  providerMessageIds: string[]
+  target: string
+}
 
 export async function sendTelegramMessage(
   input: {
@@ -465,22 +473,45 @@ async function sendTelegramMessageDetailed(
 
   const chunks = splitTelegramMessageText(input.message)
   for (const chunk of chunks) {
-    const delivered = await sendTelegramTextChunk({
-      baseUrl,
-      fetchImplementation,
-      replyToMessageId,
-      target,
-      targetLabel,
-      text: chunk,
-      token,
-    })
-    target = delivered.target
-    targetLabel = delivered.targetLabel
-    lastProviderMessageId = delivered.providerMessageId
-    if (delivered.providerMessageId) {
-      providerMessageIds.push(delivered.providerMessageId)
+    try {
+      const delivered = await sendTelegramTextChunk({
+        baseUrl,
+        fetchImplementation,
+        replyToMessageId,
+        target,
+        targetLabel,
+        text: chunk,
+        token,
+      })
+      target = delivered.target
+      targetLabel = delivered.targetLabel
+      lastProviderMessageId = delivered.providerMessageId
+      if (delivered.providerMessageId) {
+        providerMessageIds.push(delivered.providerMessageId)
+      }
+      replyToMessageId = null
+    } catch (error) {
+      if (providerMessageIds.length === 0) {
+        throw error
+      }
+
+      const rollbackError = await rollbackTelegramPartialDelivery({
+        env,
+        fetchImplementation,
+        providerMessageIds,
+        target: targetLabel,
+      })
+      if (!rollbackError) {
+        throw error
+      }
+
+      throw createTelegramAmbiguousDeliveryFailure({
+        error,
+        providerMessageIds,
+        rollbackError,
+        target: targetLabel,
+      })
     }
-    replyToMessageId = null
   }
 
   return {
@@ -488,6 +519,60 @@ async function sendTelegramMessageDetailed(
     ...(providerMessageIds.length > 1 ? { providerMessageIds } : {}),
     target: targetLabel,
   }
+}
+
+async function rollbackTelegramPartialDelivery(input: {
+  env: NodeJS.ProcessEnv
+  fetchImplementation: TelegramFetchImplementation
+  providerMessageIds: readonly string[]
+  target: string
+}): Promise<unknown | null> {
+  try {
+    await deleteTelegramMessages(
+      {
+        messageIds: input.providerMessageIds,
+        target: input.target,
+      },
+      {
+        env: input.env,
+        fetchImplementation: input.fetchImplementation,
+      },
+    )
+    return null
+  } catch (error) {
+    return error
+  }
+}
+
+function createTelegramAmbiguousDeliveryFailure(input: {
+  error: unknown
+  providerMessageIds: readonly string[]
+  rollbackError: unknown
+  target: string
+}): TelegramAmbiguousDeliveryFailure {
+  const providerMessageIds = [...input.providerMessageIds]
+  const originalFailure = normalizeOptionalText(describeUnknownError(input.error))
+  const rollbackFailure = normalizeOptionalText(describeUnknownError(input.rollbackError))
+  const message = rollbackFailure
+    ? `Telegram delivery partially succeeded before a later chunk failed, and rollback could not be confirmed. ${originalFailure ?? 'A later chunk failed.'} Rollback failure: ${rollbackFailure}`
+    : `Telegram delivery partially succeeded before a later chunk failed, and rollback could not be confirmed. ${originalFailure ?? 'A later chunk failed.'}`
+  const error = new VaultCliError(
+    'ASSISTANT_TELEGRAM_DELIVERY_AMBIGUOUS',
+    message,
+    {
+      originalFailure,
+      providerMessageIds,
+      rollbackFailure,
+      target: input.target,
+    },
+  )
+
+  return Object.assign(error, {
+    deliveryMayHaveSucceeded: true as const,
+    providerMessageId: providerMessageIds.at(-1) ?? null,
+    providerMessageIds,
+    target: input.target,
+  })
 }
 
 function resolveAgentmailThreadReplyMessageId(input: {

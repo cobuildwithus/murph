@@ -275,6 +275,7 @@ async function maybeResolveHostedAssistantDeliveryFromMirror(input: {
         deliveryErrorCode: ambiguousError.code,
         deliveryErrorMessage: ambiguousError.message,
         deliveryStatus: "failed_ambiguous",
+        delivery: intent.delivery ?? null,
         effect: input.assistantDeliveryEffect,
         retryable: false,
       });
@@ -350,6 +351,7 @@ async function maybeResolveHostedAssistantDeliveryFromMirror(input: {
         deliveryErrorCode: ambiguousError.code,
         deliveryErrorMessage: ambiguousError.message,
         deliveryStatus: "failed_ambiguous",
+        delivery: intent.delivery ?? null,
         effect: input.assistantDeliveryEffect,
         retryable: false,
       });
@@ -475,6 +477,7 @@ async function buildHostedAssistantDeliveryDispatchResult(input: {
       deliveryErrorCode: ambiguousError.code,
       deliveryErrorMessage: ambiguousError.message,
       deliveryStatus: "failed_ambiguous",
+      delivery,
       effect: assistantDeliveryEffect,
       retryable: false,
     });
@@ -566,6 +569,7 @@ async function buildHostedAssistantDeliveryDispatchResult(input: {
         deliveryErrorCode: ambiguousError.code,
         deliveryErrorMessage: ambiguousError.message,
         deliveryStatus: "failed_ambiguous",
+        delivery,
         effect: assistantDeliveryEffect,
         retryable: false,
       });
