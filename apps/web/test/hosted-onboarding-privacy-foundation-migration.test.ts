@@ -260,9 +260,6 @@ describe("hosted Prisma baseline migration", () => {
     );
     expect(migrationEntries).toEqual([
       "2026040600_init",
-      "2026042100_hosted_vault_sync",
-      "2026042101_hosted_ai_usage_meter_attempts",
-      "2026042200_hosted_ai_usage_gateway_attribution",
       "migration_lock.toml",
     ]);
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_assistant_runtime_issue"');
@@ -277,6 +274,14 @@ describe("hosted Prisma baseline migration", () => {
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_member_billing_ref"');
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_member_email_authorization"');
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_share_payload"');
+    expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_vault_sync_session"');
+    expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_vault_sync_payload"');
+    expect(baselineMigrationSql).toContain(
+      'CREATE UNIQUE INDEX "hosted_vault_sync_session_pairing_code_hash_key"',
+    );
+    expect(baselineMigrationSql).toContain(
+      'ALTER TABLE "hosted_vault_sync_payload" ADD CONSTRAINT "hosted_vault_sync_payload_session_id_fkey"',
+    );
     expect(baselineMigrationSql).toContain('CREATE UNIQUE INDEX "hosted_member_routing_linq_chat_lookup_key_key"');
     expect(baselineMigrationSql).toContain('CREATE UNIQUE INDEX "hosted_member_routing_reply_alias_lookup_key_key"');
     expect(baselineMigrationSql).toContain('"masked_phone_number_hint" TEXT');
@@ -317,6 +322,27 @@ describe("hosted Prisma baseline migration", () => {
     );
     expect(baselineMigrationSql).toContain(
       'CREATE UNIQUE INDEX "linq_webhook_event_user_id_event_id_key" ON "linq_webhook_event"("user_id", "event_id")',
+    );
+    expect(baselineMigrationSql).toContain('"feature_key" TEXT');
+    expect(baselineMigrationSql).toContain('"surface" TEXT');
+    expect(baselineMigrationSql).toContain('"trigger_kind" TEXT');
+    expect(baselineMigrationSql).toContain('"reporting_user_id" TEXT');
+    expect(baselineMigrationSql).toContain('"gateway_tags_json" JSONB');
+    expect(baselineMigrationSql).toContain('"stripe_meter_source" TEXT NOT NULL DEFAULT \'murph\'');
+    expect(baselineMigrationSql).toContain('"stripe_meter_attempt_count" INTEGER NOT NULL DEFAULT 0');
+    expect(baselineMigrationSql).toContain('"stripe_meter_last_attempted_at" TIMESTAMP(3)');
+    expect(baselineMigrationSql).toContain('"stripe_meter_next_attempt_at" TIMESTAMP(3)');
+    expect(baselineMigrationSql).toContain(
+      'CREATE INDEX "hosted_ai_usage_feature_key_created_at_idx" ON "hosted_ai_usage"("feature_key", "created_at")',
+    );
+    expect(baselineMigrationSql).toContain(
+      'CREATE INDEX "hosted_ai_usage_reporting_user_id_created_at_idx" ON "hosted_ai_usage"("reporting_user_id", "created_at")',
+    );
+    expect(baselineMigrationSql).toContain(
+      'CREATE INDEX "hosted_ai_usage_surface_created_at_idx" ON "hosted_ai_usage"("surface", "created_at")',
+    );
+    expect(baselineMigrationSql).toContain(
+      'CREATE INDEX "hosted_ai_usage_stripe_meter_due_idx" ON "hosted_ai_usage"("stripe_meter_status", "stripe_meter_next_attempt_at", "occurred_at")',
     );
     expect(baselineMigrationSql).toContain('"telegram_user_lookup_key" TEXT');
     expect(baselineMigrationSql).not.toContain('CREATE TABLE "hosted_session"');
