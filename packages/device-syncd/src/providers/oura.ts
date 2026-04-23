@@ -16,7 +16,7 @@ import {
   sha256Text,
   subtractDays,
 } from "../shared.ts";
-import { formatDeviceSyncAccountLabel } from "../provider-label.ts";
+import { formatDeviceSyncProviderLabel } from "../provider-label.ts";
 import {
   buildOAuthConnectUrl,
   buildProviderApiError,
@@ -24,6 +24,7 @@ import {
   createRefreshingApiSession,
   exchangeOAuthAuthorizationCode,
   fetchBearerJson,
+  parseResponseBody,
   postOAuthTokenRequest,
   refreshOAuthTokens,
   requireRefreshToken,
@@ -53,6 +54,7 @@ import type { OuraWebhookSubscriptionClient } from "./oura-webhooks.ts";
 const OURA_AUTH_BASE_URL = "https://cloud.ouraring.com";
 const OURA_API_BASE_URL = "https://api.ouraring.com";
 const OURA_AUTHORIZE_PATH = "/oauth/authorize";
+const OURA_REVOKE_PATH = "/oauth/revoke";
 const OURA_TOKEN_PATH = "/oauth/token";
 const OURA_PROVIDER_DESCRIPTOR = OURA_DEVICE_PROVIDER_DESCRIPTOR;
 const OURA_OAUTH = requireDeviceProviderOAuthDescriptor(OURA_PROVIDER_DESCRIPTOR);
@@ -638,6 +640,31 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
     });
   }
 
+  async function revokeOuraAccessToken(accessToken: string): Promise<void> {
+    const revokeUrl = new URL(`${apiBaseUrl}${OURA_REVOKE_PATH}`);
+    revokeUrl.searchParams.set("access_token", accessToken);
+
+    const response = await fetchImpl(revokeUrl, {
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+
+    if (response.status === 401 || response.status === 404 || response.status === 204) {
+      return;
+    }
+
+    if (!response.ok) {
+      throw buildOuraApiError(
+        "OURA_REVOKE_FAILED",
+        "Oura revoke access request failed.",
+        response,
+        await parseResponseBody(response),
+        {
+          retryable: response.status === 429 || response.status >= 500,
+        },
+      );
+    }
+  }
+
   async function fetchPagedCollection(
     requestJson: <T>(path: string, options?: { optional?: boolean }) => Promise<T | null>,
     path: string,
@@ -939,53 +966,61 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
           }),
       });
 
-      const grantedScopesFromToken = normalizeGrantedScopes(tokenPayload.scope);
-      const grantedScopes =
-        grantedScopesFromToken.length > 0
-          ? grantedScopesFromToken
-          : context.grantedScopes.length > 0
-            ? [...context.grantedScopes]
-            : [...scopes];
+      try {
+        const grantedScopesFromToken = normalizeGrantedScopes(tokenPayload.scope);
+        const grantedScopes =
+          grantedScopesFromToken.length > 0
+            ? grantedScopesFromToken
+            : context.grantedScopes.length > 0
+              ? [...context.grantedScopes]
+              : [...scopes];
 
-      if (!grantedScopes.includes("personal")) {
-        throw deviceSyncError({
-          code: "OURA_PERSONAL_SCOPE_REQUIRED",
-          message: "Oura connections require the personal scope so Murph can identify the account.",
-          retryable: false,
-          httpStatus: 400,
-        });
+        if (!grantedScopes.includes("personal")) {
+          throw deviceSyncError({
+            code: "OURA_PERSONAL_SCOPE_REQUIRED",
+            message: "Oura connections require the personal scope so Murph can identify the account.",
+            retryable: false,
+            httpStatus: 400,
+          });
+        }
+
+        const personalInfo = await fetchPersonalInfo(tokens.accessToken);
+        const externalAccountId = normalizeIdentifier(personalInfo.id ?? personalInfo.user_id ?? personalInfo.userId);
+
+        if (!externalAccountId) {
+          throw deviceSyncError({
+            code: "OURA_PROFILE_INVALID",
+            message: "Oura personal info response did not include a stable user identifier.",
+            retryable: false,
+            httpStatus: 502,
+          });
+        }
+
+        return {
+          externalAccountId,
+          displayName: formatDeviceSyncProviderLabel(descriptor.provider),
+          scopes: grantedScopes,
+          tokens,
+          initialJobs: [
+            {
+              kind: "backfill",
+              priority: 100,
+              payload: buildOuraWindowJobPayload({
+                now: context.now,
+                includePersonalInfo: true,
+                windowDays: backfillDays,
+              }),
+            },
+          ],
+          nextReconcileAt: addMilliseconds(context.now, reconcileIntervalMs),
+        };
+      } catch (error) {
+        try {
+          await revokeOuraAccessToken(tokens.accessToken);
+        } catch {}
+
+        throw error;
       }
-
-      const personalInfo = await fetchPersonalInfo(tokens.accessToken);
-      const externalAccountId = normalizeIdentifier(personalInfo.id ?? personalInfo.user_id ?? personalInfo.userId);
-
-      if (!externalAccountId) {
-        throw deviceSyncError({
-          code: "OURA_PROFILE_INVALID",
-          message: "Oura personal info response did not include a stable user identifier.",
-          retryable: false,
-          httpStatus: 502,
-        });
-      }
-
-      return {
-        externalAccountId,
-        displayName: formatDeviceSyncAccountLabel(descriptor.provider, externalAccountId),
-        scopes: grantedScopes,
-        tokens,
-        initialJobs: [
-          {
-            kind: "backfill",
-            priority: 100,
-            payload: buildOuraWindowJobPayload({
-              now: context.now,
-              includePersonalInfo: true,
-              windowDays: backfillDays,
-            }),
-          },
-        ],
-        nextReconcileAt: addMilliseconds(context.now, reconcileIntervalMs),
-      };
     },
     async refreshTokens(account: DeviceSyncAccount): Promise<ProviderAuthTokens> {
       return refreshOAuthTokens({
@@ -1011,6 +1046,9 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
             }),
           ),
       });
+    },
+    async revokeAccess(account: DeviceSyncAccount): Promise<void> {
+      await revokeOuraAccessToken(account.accessToken);
     },
     async verifyAndParseWebhook(context: ProviderWebhookContext): Promise<ProviderWebhookResult> {
       const signature = normalizeString(context.headers.get("x-oura-signature"));
@@ -1063,7 +1101,8 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
       const objectId = normalizeIdentifier(payload.object_id ?? payload.objectId ?? payload.id);
       const operation = normalizeOuraWebhookOperation(rawEventType);
       const eventType = dataType ? buildOuraSourceEventType(rawEventType, dataType, operation) : rawEventType;
-      const occurredAt = normalizeIsoTimestamp(payload.event_time ?? payload.eventTime ?? payload.timestamp) ?? context.now;
+      const payloadOccurredAt = normalizeIsoTimestamp(payload.event_time ?? payload.eventTime ?? payload.timestamp);
+      const occurredAt = payloadOccurredAt ?? context.now;
 
       if (!externalAccountId || !eventType || !dataType || !objectId) {
         throw deviceSyncError({
@@ -1078,7 +1117,7 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
         normalizeString(payload.trace_id ?? payload.traceId ?? payload.event_id ?? payload.eventId) ??
         sha256Text(
           `${externalAccountId}:${eventType}:${dataType}:${objectId}:${
-            normalizeString(payload.event_time ?? payload.eventTime ?? payload.timestamp) ?? ""
+            payloadOccurredAt ?? new Date(timestampMs).toISOString()
           }`,
         );
 

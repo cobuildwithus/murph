@@ -1,6 +1,9 @@
 import { createHmac } from "node:crypto";
 
+import { formatDeviceSyncAccountLabel } from "@murphai/device-syncd/provider-label";
 import type { PublicDeviceSyncAccount } from "@murphai/device-syncd/public-ingress";
+
+import { formatHostedDeviceSyncProviderLabel } from "./provider-label";
 
 export interface HostedBrowserDeviceSyncConnection extends Omit<PublicDeviceSyncAccount, "externalAccountId"> {
   id: string;
@@ -23,8 +26,26 @@ export function toHostedBrowserDeviceSyncConnection(
 
   return {
     ...rest,
+    displayName: sanitizeHostedBrowserDisplayName(account),
     id: createHostedBrowserConnectionId(secret, id),
   };
+}
+
+function sanitizeHostedBrowserDisplayName(account: PublicDeviceSyncAccount): string | null {
+  const displayName = account.displayName?.trim() ?? "";
+
+  if (!displayName) {
+    return null;
+  }
+
+  const providerLabel = formatHostedDeviceSyncProviderLabel(account.provider);
+  const providerGeneratedLabel = formatDeviceSyncAccountLabel(account.provider, account.externalAccountId);
+
+  if (displayName.toLowerCase() === providerGeneratedLabel.toLowerCase()) {
+    return providerLabel;
+  }
+
+  return displayName;
 }
 
 function normalizeSecret(secret: Buffer | Uint8Array | string): Buffer | Uint8Array {

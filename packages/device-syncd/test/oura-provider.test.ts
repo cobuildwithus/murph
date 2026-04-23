@@ -17,7 +17,7 @@ function createAccount(scopes: string[]): DeviceSyncAccount {
     provider: "oura",
     externalAccountId: "oura-user-1",
     disconnectGeneration: 0,
-    displayName: "Oura oura-user-1",
+    displayName: "Oura",
     status: "active",
     scopes,
     accessTokenExpiresAt: null,
@@ -127,7 +127,7 @@ test("Oura provider exchanges an auth code into a refreshable connection", async
   );
 
   assert.equal(connection.externalAccountId, "oura-user-1");
-  assert.equal(connection.displayName, "Oura oura-user-1");
+  assert.equal(connection.displayName, "Oura");
   assert.equal(connection.tokens.refreshToken, "refresh-token");
   assert.deepEqual(connection.scopes, ["personal", "daily", "heartrate"]);
   assert.equal(connection.initialJobs?.[0]?.kind, "backfill");
@@ -229,6 +229,40 @@ test("Oura provider requires an existing refresh token before attempting refresh
   assert.equal(fetchCalled, false);
 });
 
+test("Oura provider revokes access tokens through the OAuth revoke endpoint", async () => {
+  const requests: string[] = [];
+  const provider = createOuraDeviceSyncProvider({
+    clientId: "oura-client-id",
+    clientSecret: "oura-client-secret",
+    fetchImpl: async (input, init) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      requests.push(`${init?.method ?? "GET"} ${url}`);
+
+      if (url === "https://api.ouraring.com/oauth/revoke?access_token=access-token") {
+        return new Response(null, { status: 204 });
+      }
+
+      if (url === "https://api.ouraring.com/oauth/revoke?access_token=stale-token") {
+        return new Response(null, { status: 401 });
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    },
+  });
+  const revokeAccess = requireValue(provider.revokeAccess);
+
+  await revokeAccess(createAccount(["personal"]));
+  await revokeAccess({
+    ...createAccount(["personal"]),
+    accessToken: "stale-token",
+  });
+
+  assert.deepEqual(requests, [
+    "GET https://api.ouraring.com/oauth/revoke?access_token=access-token",
+    "GET https://api.ouraring.com/oauth/revoke?access_token=stale-token",
+  ]);
+});
+
 test("Oura provider rejects auth exchanges without a refresh token and personal-info ids", async () => {
   const missingRefreshProvider = createOuraDeviceSyncProvider({
     clientId: "oura-client-id",
@@ -284,6 +318,10 @@ test("Oura provider rejects auth exchanges without a refresh token and personal-
         return createJsonResponse({
           email: "oura@example.com",
         });
+      }
+
+      if (url === "https://api.ouraring.com/oauth/revoke?access_token=access-token") {
+        return new Response(null, { status: 204 });
       }
 
       throw new Error(`Unexpected request: ${url}`);
@@ -569,6 +607,10 @@ test("Oura provider falls back to granted scopes and rejects connections without
         });
       }
 
+      if (url === "https://api.ouraring.com/oauth/revoke?access_token=access-token") {
+        return new Response(null, { status: 204 });
+      }
+
       throw new Error(`Unexpected request: ${url}`);
     },
   });
@@ -606,6 +648,54 @@ test("Oura provider falls back to granted scopes and rejects connections without
       error.code === "OURA_PERSONAL_SCOPE_REQUIRED" &&
       error.httpStatus === 400,
   );
+});
+
+test("Oura provider best-effort revokes exchanged access tokens when post-token-exchange validation fails", async () => {
+  const requests: string[] = [];
+  const provider = createOuraDeviceSyncProvider({
+    clientId: "oura-client-id",
+    clientSecret: "oura-client-secret",
+    fetchImpl: async (input, init) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      requests.push(`${init?.method ?? "GET"} ${url}`);
+
+      if (url === "https://api.ouraring.com/oauth/token") {
+        return createJsonResponse({
+          access_token: "access-token",
+          refresh_token: "refresh-token",
+          expires_in: 3600,
+        });
+      }
+
+      if (url === "https://api.ouraring.com/oauth/revoke?access_token=access-token") {
+        return new Response(null, { status: 204 });
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    },
+  });
+
+  await assert.rejects(
+    () =>
+      provider.exchangeAuthorizationCode(
+        {
+          callbackUrl: "https://sync.example.test/device-sync/oauth/oura/callback",
+          state: "state-revoke-on-failure",
+          now: "2026-03-16T10:00:00.000Z",
+          grantedScopes: ["workout"],
+        },
+        "auth-code-without-personal",
+      ),
+    (error) =>
+      error instanceof DeviceSyncError &&
+      error.code === "OURA_PERSONAL_SCOPE_REQUIRED" &&
+      error.httpStatus === 400,
+  );
+
+  assert.deepEqual(requests, [
+    "POST https://api.ouraring.com/oauth/token",
+    "GET https://api.ouraring.com/oauth/revoke?access_token=access-token",
+  ]);
 });
 
 test("Oura provider turns non-operation webhook events into reconcile hints and rejects stale signed deliveries", async () => {
@@ -1006,7 +1096,7 @@ test("Oura provider imports hosted-narrowed delete wake payloads as deletion sna
   ]);
 });
 
-test("Oura provider fallback trace ids ignore transport timestamps when the webhook body is unchanged", async () => {
+test("Oura provider fallback trace ids ignore transport timestamps when the webhook body includes event_time", async () => {
   const provider = createOuraDeviceSyncProvider({
     clientId: "oura-client-id",
     clientSecret: "oura-client-secret",
@@ -1035,6 +1125,88 @@ test("Oura provider fallback trace ids ignore transport timestamps when the webh
 
   assert.equal(first?.traceId, second?.traceId);
   assert.equal(first?.jobs[0]?.dedupeKey, second?.jobs[0]?.dedupeKey);
+});
+
+test("Oura provider prefers payload trace_id over fallback trace derivation", async () => {
+  const provider = createOuraDeviceSyncProvider({
+    clientId: "oura-client-id",
+    clientSecret: "oura-client-secret",
+  });
+  const verifyAndParseWebhook = requireVerifyAndParseWebhook(provider);
+  const rawBody = Buffer.from(
+    JSON.stringify({
+      event_type: "update",
+      data_type: "workout",
+      object_id: "workout-7",
+      user_id: "oura-user-1",
+      trace_id: "provided-trace-id",
+    }),
+    "utf8",
+  );
+  const parsed = await verifyAndParseWebhook({
+    headers: createOuraWebhookHeaders("oura-client-secret", "2026-03-16T10:00:00.000Z", rawBody),
+    rawBody,
+    now: "2026-03-16T10:00:00.000Z",
+  });
+
+  assert.equal(parsed?.traceId, "provided-trace-id");
+  assert.equal(parsed?.jobs[0]?.dedupeKey, "oura-webhook:provided-trace-id");
+});
+
+test("Oura provider prefers payload event_id when trace_id is absent", async () => {
+  const provider = createOuraDeviceSyncProvider({
+    clientId: "oura-client-id",
+    clientSecret: "oura-client-secret",
+  });
+  const verifyAndParseWebhook = requireVerifyAndParseWebhook(provider);
+  const rawBody = Buffer.from(
+    JSON.stringify({
+      event_type: "update",
+      data_type: "workout",
+      object_id: "workout-7",
+      user_id: "oura-user-1",
+      event_id: "provided-event-id",
+    }),
+    "utf8",
+  );
+  const parsed = await verifyAndParseWebhook({
+    headers: createOuraWebhookHeaders("oura-client-secret", "2026-03-16T10:00:00.000Z", rawBody),
+    rawBody,
+    now: "2026-03-16T10:00:00.000Z",
+  });
+
+  assert.equal(parsed?.traceId, "provided-event-id");
+  assert.equal(parsed?.jobs[0]?.dedupeKey, "oura-webhook:provided-event-id");
+});
+
+test("Oura provider fallback trace ids use the webhook transport timestamp when the body omits ids and event time", async () => {
+  const provider = createOuraDeviceSyncProvider({
+    clientId: "oura-client-id",
+    clientSecret: "oura-client-secret",
+  });
+  const verifyAndParseWebhook = requireVerifyAndParseWebhook(provider);
+  const rawBody = Buffer.from(
+    JSON.stringify({
+      event_type: "update",
+      data_type: "workout",
+      object_id: "workout-7",
+      user_id: "oura-user-1",
+    }),
+    "utf8",
+  );
+  const first = await verifyAndParseWebhook({
+    headers: createOuraWebhookHeaders("oura-client-secret", "2026-03-16T10:00:00.000Z", rawBody),
+    rawBody,
+    now: "2026-03-16T10:00:00.000Z",
+  });
+  const second = await verifyAndParseWebhook({
+    headers: createOuraWebhookHeaders("oura-client-secret", "2026-03-16T10:05:00.000Z", rawBody),
+    rawBody,
+    now: "2026-03-16T10:05:00.000Z",
+  });
+
+  assert.notEqual(first?.traceId, second?.traceId);
+  assert.notEqual(first?.jobs[0]?.dedupeKey, second?.jobs[0]?.dedupeKey);
 });
 
 test("Oura webhook resource jobs fetch only the hinted collection and keep the matching object id", async () => {

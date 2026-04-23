@@ -48,6 +48,16 @@ export interface HostedDeviceSyncSettingsResponse {
 const FIRST_SYNC_GRACE_MS = 6 * 60 * 60_000;
 const RECENT_SYNC_WINDOW_MS = 36 * 60 * 60_000;
 const STALE_SYNC_WINDOW_MS = 4 * 24 * 60 * 60_000;
+const CONNECTION_LABEL_FORMATTER = new Intl.DateTimeFormat("en-US", {
+  month: "short",
+  day: "numeric",
+  year: "numeric",
+  hour: "numeric",
+  minute: "2-digit",
+  second: "2-digit",
+  timeZone: "UTC",
+  timeZoneName: "short",
+});
 
 export function buildHostedDeviceSyncSettingsSources(input: {
   connections: readonly HostedBrowserDeviceSyncConnection[];
@@ -86,9 +96,11 @@ export function buildHostedDeviceSyncSettingsSources(input: {
       continue;
     }
 
-    for (const connection of connections) {
+    for (const [connectionIndex, connection] of connections.entries()) {
       sources.push(buildConnectedSource({
         connection,
+        connectionIndex,
+        duplicateCount: connections.length,
         now,
         provider,
       }));
@@ -100,8 +112,11 @@ export function buildHostedDeviceSyncSettingsSources(input: {
       continue;
     }
 
-    for (const connection of connections) {
-      sources.push(buildUnavailableSource(connection));
+    for (const [connectionIndex, connection] of connections.entries()) {
+      sources.push(buildUnavailableSource(connection, {
+        connectionIndex,
+        duplicateCount: connections.length,
+      }));
     }
   }
 
@@ -140,12 +155,19 @@ function buildAvailableSource(provider: PublicProviderDescriptor): HostedDeviceS
 
 function buildConnectedSource(input: {
   connection: HostedBrowserDeviceSyncConnection;
+  connectionIndex: number;
+  duplicateCount: number;
   now: Date;
   provider: PublicProviderDescriptor;
 }): HostedDeviceSyncSettingsSource {
   const { connection, now } = input;
   const providerLabel = formatHostedDeviceSyncProviderLabel(connection.provider);
-  const displayName = normalizeDisplayName(connection.displayName, providerLabel);
+  const displayName = resolveDisplayName({
+    connection,
+    connectionIndex: input.connectionIndex,
+    duplicateCount: input.duplicateCount,
+    providerLabel,
+  });
   const lastSuccessfulSyncAt = connection.lastSyncCompletedAt;
   const lastActivityAt = latestIsoTimestamp(
     connection.lastSyncCompletedAt,
@@ -351,9 +373,18 @@ function buildConnectedSource(input: {
 
 function buildUnavailableSource(
   connection: HostedBrowserDeviceSyncConnection,
+  input: {
+    connectionIndex: number;
+    duplicateCount: number;
+  },
 ): HostedDeviceSyncSettingsSource {
   const providerLabel = formatHostedDeviceSyncProviderLabel(connection.provider);
-  const displayName = normalizeDisplayName(connection.displayName, providerLabel);
+  const displayName = resolveDisplayName({
+    connection,
+    connectionIndex: input.connectionIndex,
+    duplicateCount: input.duplicateCount,
+    providerLabel,
+  });
   const lastActivityAt = latestIsoTimestamp(
     connection.lastSyncCompletedAt,
     connection.lastSyncStartedAt,
@@ -399,6 +430,33 @@ function normalizeDisplayName(value: string | null, providerLabel: string): stri
   }
 
   return normalized;
+}
+
+function resolveDisplayName(input: {
+  connection: HostedBrowserDeviceSyncConnection;
+  connectionIndex: number;
+  duplicateCount: number;
+  providerLabel: string;
+}): string | null {
+  const normalized = normalizeDisplayName(input.connection.displayName, input.providerLabel);
+
+  if (normalized) {
+    return normalized;
+  }
+
+  if (input.duplicateCount <= 1) {
+    return null;
+  }
+
+  const disambiguatorTimestamp =
+    input.connection.connectedAt ?? input.connection.createdAt ?? input.connection.updatedAt;
+  const parsed = disambiguatorTimestamp ? Date.parse(disambiguatorTimestamp) : Number.NaN;
+
+  if (Number.isNaN(parsed)) {
+    return `Connection ${input.connectionIndex + 1}`;
+  }
+
+  return `Connected ${CONNECTION_LABEL_FORMATTER.format(new Date(parsed))} (#${input.connectionIndex + 1})`;
 }
 
 function latestIsoTimestamp(...values: Array<string | null | undefined>): string | null {
