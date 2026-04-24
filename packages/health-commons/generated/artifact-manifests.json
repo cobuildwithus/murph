@@ -2296,6 +2296,91 @@
       "description": "Manifest stubs for sauna research artifacts and article PDFs. Keep files out of Git, stage them under research-artifacts/, hash them locally, then upload to Cloudflare R2 only after rights review.",
       "manifestKey": "source_artifact:sauna/research-artifacts",
       "schemaVersion": "murph.commons.artifact-manifest.v1"
+    },
+    {
+      "artifacts": [
+        {
+          "accessNotes": "MDPI PDF candidate from the research package. Re-hash locally before upload.",
+          "artifactId": "art_pmid_36671752_pdf",
+          "contentType": "application/pdf",
+          "kind": "pdf",
+          "localPath": "research-artifacts/whole-body-photobiomodulation/pmid-36671752.pdf",
+          "objectKey": "commons/research/whole-body-photobiomodulation/pmid-36671752/source.pdf",
+          "redistributable": true,
+          "rightsStatus": "open_access",
+          "sourceKey": "source_artifact:pmid-36671752",
+          "sourceUrl": "https://www.mdpi.com/2079-7737/12/1/60/pdf",
+          "storage": "cloudflare-r2"
+        },
+        {
+          "accessNotes": "Open-access PDF candidate captured in the research package; prefer a canonical hosted file at ingest when available.",
+          "artifactId": "art_pmid_40253006_pdf",
+          "contentType": "application/pdf",
+          "kind": "pdf",
+          "localPath": "research-artifacts/whole-body-photobiomodulation/pmid-40253006.pdf",
+          "objectKey": "commons/research/whole-body-photobiomodulation/pmid-40253006/source.pdf",
+          "redistributable": true,
+          "rightsStatus": "open_access",
+          "sourceKey": "source_artifact:pmid-40253006",
+          "sourceUrl": "https://www.odontologos.com.co/assets/doc/news/2025-10-22_113621eScholarship_UC_item_68j64451.pdf",
+          "storage": "cloudflare-r2"
+        },
+        {
+          "accessNotes": "FDA guidance PDF candidate from the research package. Re-hash locally before upload.",
+          "artifactId": "art_fda_pbm_devices_guidance_2023_01_12_pdf",
+          "contentType": "application/pdf",
+          "kind": "pdf",
+          "localPath": "research-artifacts/whole-body-photobiomodulation/fda-pbm-devices-guidance-2023-01-12.pdf",
+          "objectKey": "commons/research/whole-body-photobiomodulation/fda-pbm-devices-guidance-2023-01-12/source.pdf",
+          "redistributable": true,
+          "rightsStatus": "open_access",
+          "sourceKey": "source_artifact:fda-pbm-devices-guidance-2023-01-12",
+          "sourceUrl": "https://www.fda.gov/media/164417/download",
+          "storage": "cloudflare-r2"
+        },
+        {
+          "accessNotes": "Open-access PDF candidate from the research package. Re-hash locally before upload.",
+          "artifactId": "art_pmid_37002704_pdf",
+          "contentType": "application/pdf",
+          "kind": "pdf",
+          "localPath": "research-artifacts/whole-body-photobiomodulation/pmid-37002704.pdf",
+          "objectKey": "commons/research/whole-body-photobiomodulation/pmid-37002704/source.pdf",
+          "redistributable": true,
+          "rightsStatus": "open_access",
+          "sourceKey": "source_artifact:pmid-37002704",
+          "sourceUrl": "https://onlinelibrary.wiley.com/doi/pdf/10.1111/jsr.13895",
+          "storage": "cloudflare-r2"
+        },
+        {
+          "accessNotes": "MDPI PDF candidate from the research package. Re-hash locally before upload.",
+          "artifactId": "art_pmid_41228430_pdf",
+          "contentType": "application/pdf",
+          "kind": "pdf",
+          "localPath": "research-artifacts/whole-body-photobiomodulation/pmid-41228430.pdf",
+          "objectKey": "commons/research/whole-body-photobiomodulation/pmid-41228430/source.pdf",
+          "redistributable": true,
+          "rightsStatus": "open_access",
+          "sourceKey": "source_artifact:pmid-41228430",
+          "sourceUrl": "https://www.mdpi.com/2072-6643/17/21/3357/pdf",
+          "storage": "cloudflare-r2"
+        },
+        {
+          "accessNotes": "Metadata-safe placeholder only until direct redistribution compatibility is explicitly confirmed.",
+          "artifactId": "art_pmid_37018063_pdf",
+          "contentType": "application/pdf",
+          "kind": "pdf",
+          "localPath": "research-artifacts/whole-body-photobiomodulation/pmid-37018063.pdf",
+          "objectKey": "commons/research/whole-body-photobiomodulation/pmid-37018063/source.pdf",
+          "redistributable": false,
+          "rightsStatus": "open_access",
+          "sourceKey": "source_artifact:pmid-37018063",
+          "sourceUrl": "https://onlinelibrary.wiley.com/doi/10.1002/jbio.202200391",
+          "storage": "cloudflare-r2"
+        }
+      ],
+      "description": "Rights-safe whole-body photobiomodulation research artifact manifest. Keep copyrighted files out of Git. Registry and web-page sources are intentionally source-page-only here unless a concrete redistributable file is later verified.",
+      "manifestKey": "source_artifact:whole-body-photobiomodulation/research-artifacts",
+      "schemaVersion": "murph.commons.artifact-manifest.v1"
     }
   ]
 }
