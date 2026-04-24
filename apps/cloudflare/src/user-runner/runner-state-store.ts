@@ -304,22 +304,16 @@ export class RunnerStateStore {
   }
 
   async readPendingRunCleanupRecoveryRunIds(): Promise<string[]> {
-    const legacyValue = await this.state.storage.get<unknown>(pendingRunCleanupLatestRunIdStorageKey());
-    const legacyRunId = normalizePendingRunCleanupRunId(legacyValue);
     const value = await this.state.storage.get<unknown>(pendingRunCleanupRunIdsStorageKey());
     const runIds = normalizePendingRunCleanupRunIds(value);
-    const candidates = runIds.length > 0
-      ? runIds
-      : (legacyRunId ? [legacyRunId] : []);
 
-    if (candidates.length === 0) {
+    if (runIds.length === 0) {
       await this.state.storage.delete(pendingRunCleanupRunIdsStorageKey());
-      await this.state.storage.delete(pendingRunCleanupLatestRunIdStorageKey());
       return [];
     }
 
     const retained: string[] = [];
-    for (const runId of candidates) {
+    for (const runId of runIds) {
       const cleanup = await this.readDurablePendingRunCleanup(runId);
       if (cleanup) {
         retained.push(runId);
@@ -331,7 +325,6 @@ export class RunnerStateStore {
     } else {
       await this.state.storage.delete(pendingRunCleanupRunIdsStorageKey());
     }
-    await this.state.storage.delete(pendingRunCleanupLatestRunIdStorageKey());
 
     return retained;
   }
@@ -370,11 +363,6 @@ export class RunnerStateStore {
           // Best-effort rollback only; preserve the original payload write failure.
         }
         throw error;
-      }
-      try {
-        await this.state.storage.delete(pendingRunCleanupLatestRunIdStorageKey());
-      } catch {
-        // Legacy-pointer cleanup should not make the durable write itself fail.
       }
       return;
     }
@@ -437,7 +425,6 @@ export class RunnerStateStore {
     } else {
       await this.state.storage.delete(pendingRunCleanupRunIdsStorageKey());
     }
-    await this.state.storage.delete(pendingRunCleanupLatestRunIdStorageKey());
   }
 
   private readStateSync(): RunnerStateRecord {
@@ -682,10 +669,6 @@ function sameHostedExecutionRun(
 
 function pendingRunCleanupStorageKey(runId: string): string {
   return `runner:pending-cleanup:${runId}`;
-}
-
-function pendingRunCleanupLatestRunIdStorageKey(): string {
-  return "runner:pending-cleanup:latest-run-id";
 }
 
 function pendingRunCleanupRunIdsStorageKey(): string {

@@ -141,9 +141,10 @@ test("assistant runtime issue helpers sanitize, persist, sort, and delete pendin
   }
 });
 
-test("assistant runtime issue listing accepts legacy raw pending files", async () => {
+test("assistant runtime issue listing rejects raw pending files unless invalid records are skipped", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-assistant-runtime-issues-"));
   const paths = resolveAssistantStatePaths(vaultRoot);
+  const invalidFiles: string[] = [];
   const record = parseAssistantRuntimeIssueRecord({
     component: "assistant.runtime",
     details: {},
@@ -171,9 +172,21 @@ test("assistant runtime issue listing accepts legacy raw pending files", async (
 
     assert.deepEqual(
       await listPendingAssistantRuntimeIssueRecords({
+        onInvalidRecord: ({ fileName }) => {
+          invalidFiles.push(fileName);
+        },
+        paths,
+        skipInvalidRecords: true,
+      }),
+      [],
+    );
+    assert.deepEqual(invalidFiles, [`${record.issueId}.json`]);
+
+    await assert.rejects(
+      () => listPendingAssistantRuntimeIssueRecords({
         paths,
       }),
-      [record],
+      /pending assistant runtime issue record must be a versioned murph\.assistant-runtime-issue\.v1 envelope/u,
     );
   } finally {
     await rm(vaultRoot, { force: true, recursive: true });

@@ -37,9 +37,6 @@ export const preferencesDocumentSchema = withContractMetadata(
   "Murph Preferences Document",
 );
 
-/** @deprecated Use preferencesDocumentSchema. */
-export const validPreferencesDocumentSchema = preferencesDocumentSchema;
-
 export type WorkoutUnitPreferences = z.infer<typeof workoutUnitPreferencesSchema>;
 export type WearablePreferenceProvider = z.infer<typeof wearablePreferenceProviderSchema>;
 export type WearablePreferences = z.infer<typeof wearablePreferencesSchema>;

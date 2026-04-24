@@ -46,7 +46,3 @@ export async function nudgeHostedRunBestEffort(input: {
     userId: input.userId,
   });
 }
-
-// Compatibility aliases for callers that still use the older trigger naming.
-export const triggerHostedRunUser = nudgeHostedRunUser;
-export const triggerHostedRunUserBestEffort = nudgeHostedRunUserBestEffort;

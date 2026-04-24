@@ -124,10 +124,11 @@ test("assistant usage records round-trip through pending storage and sort by occ
   }
 });
 
-test("assistant usage listing accepts legacy raw pending files while new writes use versioned envelopes", async () => {
+test("assistant usage listing rejects raw pending files unless invalid records are skipped", async () => {
   const parent = await mkdtemp(path.join(tmpdir(), "murph-assistant-usage-"));
   const vaultRoot = path.join(parent, "vault");
   const paths = resolveAssistantStatePaths(vaultRoot);
+  const invalidFiles: string[] = [];
   const record: AssistantUsageRecord = {
     apiKeyEnv: null,
     attemptCount: 1,
@@ -171,9 +172,23 @@ test("assistant usage listing accepts legacy raw pending files while new writes 
 
     assert.deepEqual(
       await listPendingAssistantUsageRecords({
+        onInvalidRecord: ({ fileName }) => {
+          invalidFiles.push(fileName);
+        },
+        paths,
+        skipInvalidRecords: true,
+      }),
+      [],
+    );
+    assert.deepEqual(invalidFiles, [
+      path.basename(resolvePendingAssistantUsagePath(paths, record.usageId)),
+    ]);
+
+    await assert.rejects(
+      () => listPendingAssistantUsageRecords({
         paths,
       }),
-      [record],
+      /pending assistant usage record must be a versioned murph\.assistant-usage\.v1 envelope/u,
     );
   } finally {
     await rm(parent, { force: true, recursive: true });

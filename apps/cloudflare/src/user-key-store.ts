@@ -41,7 +41,6 @@ export interface HostedUserKeyAuditRecord {
 
 export type HostedUserCryptoRepairNeededReason =
   | "missing-envelope"
-  | "legacy-object-key-location"
   | "managed-recipient-reconciliation";
 
 export class HostedUserCryptoRepairNeededError extends Error {
@@ -236,10 +235,6 @@ async function resolveHostedUserRootKeyEnvelope(input: {
   reason: string;
   userId: string;
 }): Promise<{ envelope: HostedUserRootKeyEnvelope; rootKey: Uint8Array | null }> {
-  const currentObjectKey = await hostedUserRootKeyEnvelopeObjectKey(
-    input.envelopeEncryptionKey,
-    input.userId,
-  );
   const storedEnvelope = await readStoredHostedUserRootKeyEnvelope({
     bucket: input.bucket,
     envelopeEncryptionKey: input.envelopeEncryptionKey,
@@ -278,23 +273,6 @@ async function resolveHostedUserRootKeyEnvelope(input: {
       envelope: created.envelope,
       rootKey: created.rootKey,
     };
-  }
-
-  if (storedEnvelope && storedEnvelope.objectKey !== currentObjectKey) {
-    if (input.accessMode !== "activation-provision") {
-      throw createHostedUserCryptoRepairNeededError({
-        reason: "legacy-object-key-location",
-        userId: input.userId,
-      });
-    }
-
-    await writeHostedUserRootKeyEnvelope({
-      bucket: input.bucket,
-      envelope: existingEnvelope,
-      envelopeEncryptionKey: input.envelopeEncryptionKey,
-      envelopeEncryptionKeyId: input.envelopeEncryptionKeyId,
-      envelopeEncryptionKeysById: input.envelopeEncryptionKeysById,
-    });
   }
 
   const needsReconciliation = input.desiredManagedRecipients.some((desiredRecipient) => {
@@ -375,42 +353,37 @@ async function readStoredHostedUserRootKeyEnvelope(input: {
   envelopeEncryptionKeyId: string;
   envelopeEncryptionKeysById: Readonly<Record<string, Uint8Array>>;
   userId: string;
-}): Promise<{ envelope: HostedUserRootKeyEnvelope; objectKey: string } | null> {
-  for (const objectKey of await hostedUserRootKeyEnvelopeObjectKeys(
+}): Promise<{ envelope: HostedUserRootKeyEnvelope } | null> {
+  const objectKey = await hostedUserRootKeyEnvelopeObjectKey(
     input.envelopeEncryptionKey,
-    input.envelopeEncryptionKeysById,
     input.userId,
-  )) {
-    const plaintext = await readEncryptedR2Payload({
-      aad: buildHostedStorageAad({
-        key: objectKey,
-        purpose: "root-key-envelope",
-        userId: input.userId,
-      }),
-      bucket: input.bucket,
-      callerLabel: "Hosted user root key envelope",
-      cryptoKey: input.envelopeEncryptionKey,
-      cryptoKeysById: input.envelopeEncryptionKeysById,
-      expectedKeyId: input.envelopeEncryptionKeyId,
+  );
+  const plaintext = await readEncryptedR2Payload({
+    aad: buildHostedStorageAad({
       key: objectKey,
-      scope: "root-key-envelope",
-    });
+      purpose: "root-key-envelope",
+      userId: input.userId,
+    }),
+    bucket: input.bucket,
+    callerLabel: "Hosted user root key envelope",
+    cryptoKey: input.envelopeEncryptionKey,
+    cryptoKeysById: input.envelopeEncryptionKeysById,
+    expectedKeyId: input.envelopeEncryptionKeyId,
+    key: objectKey,
+    scope: "root-key-envelope",
+  });
 
-    if (!plaintext) {
-      continue;
-    }
-
-    const envelopeValue: unknown = JSON.parse(new TextDecoder().decode(plaintext));
-    return {
-      envelope: parseStoredHostedUserRootKeyEnvelope(
-        envelopeValue,
-        input.userId,
-      ),
-      objectKey,
-    };
+  if (!plaintext) {
+    return null;
   }
 
-  return null;
+  const envelopeValue: unknown = JSON.parse(new TextDecoder().decode(plaintext));
+  return {
+    envelope: parseStoredHostedUserRootKeyEnvelope(
+      envelopeValue,
+      input.userId,
+    ),
+  };
 }
 
 function parseStoredHostedUserRootKeyEnvelope(
@@ -433,7 +406,6 @@ async function writeHostedUserRootKeyEnvelope(input: {
   envelope: HostedUserRootKeyEnvelope;
   envelopeEncryptionKey: Uint8Array;
   envelopeEncryptionKeyId: string;
-  envelopeEncryptionKeysById?: Readonly<Record<string, Uint8Array>>;
 }): Promise<void> {
   const objectKey = await hostedUserRootKeyEnvelopeObjectKey(
     input.envelopeEncryptionKey,
@@ -453,22 +425,6 @@ async function writeHostedUserRootKeyEnvelope(input: {
     scope: "root-key-envelope",
     value: input.envelope,
   });
-
-  if (!input.bucket.delete) {
-    return;
-  }
-
-  for (const candidateKey of await hostedUserRootKeyEnvelopeObjectKeys(
-    input.envelopeEncryptionKey,
-    input.envelopeEncryptionKeysById ?? {},
-    input.envelope.userId,
-  )) {
-    if (candidateKey === objectKey) {
-      continue;
-    }
-
-    await input.bucket.delete(candidateKey);
-  }
 }
 
 async function unwrapHostedAutomationRootKey(input: {
@@ -520,21 +476,6 @@ async function hostedUserRootKeyEnvelopeObjectKey(
   return `users/keys/${userSegment}.json`;
 }
 
-async function hostedUserRootKeyEnvelopeObjectKeys(
-  envelopeEncryptionKey: Uint8Array,
-  envelopeEncryptionKeysById: Readonly<Record<string, Uint8Array>>,
-  userId: string,
-): Promise<string[]> {
-  const candidateKeys = dedupeHostedStorageKeys([
-    envelopeEncryptionKey,
-    ...Object.values(envelopeEncryptionKeysById),
-  ]);
-
-  return Promise.all(candidateKeys.map((candidateKey) =>
-    hostedUserRootKeyEnvelopeObjectKey(candidateKey, userId)
-  ));
-}
-
 function buildDesiredManagedRecipients(input: {
   automationRecipientKeyId: string;
   automationRecipientPublicKey: HostedUserRecipientPublicKeyJwk;
@@ -571,23 +512,6 @@ function isManagedRecipientKind(kind: HostedUserRootKeyRecipientKind): boolean {
   return kind === "automation" || kind === "recovery" || kind === "tee-automation";
 }
 
-function dedupeHostedStorageKeys(keys: readonly Uint8Array[]): Uint8Array[] {
-  const seen = new Set<string>();
-  const deduped: Uint8Array[] = [];
-
-  for (const key of keys) {
-    const fingerprint = Array.from(key).join(",");
-    if (seen.has(fingerprint)) {
-      continue;
-    }
-
-    seen.add(fingerprint);
-    deduped.push(key);
-  }
-
-  return deduped;
-}
-
 function assertOptionalRecipientPairConfigured(input: {
   keyId: string | null;
   keyLabel: string;
@@ -611,12 +535,6 @@ function createHostedUserCryptoRepairNeededError(input: {
     case "missing-envelope":
       return new HostedUserCryptoRepairNeededError({
         message: "Hosted user root key envelope repair is required before runtime access: missing envelope.",
-        reason: input.reason,
-        userId: input.userId,
-      });
-    case "legacy-object-key-location":
-      return new HostedUserCryptoRepairNeededError({
-        message: "Hosted user root key envelope repair is required before runtime access: legacy object-key location.",
         reason: input.reason,
         userId: input.userId,
       });

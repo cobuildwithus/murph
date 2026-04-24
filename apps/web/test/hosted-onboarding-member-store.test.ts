@@ -594,7 +594,7 @@ describe("hosted-member-store", () => {
     });
   });
 
-  it("reads legacy plaintext Telegram private payloads as a direct user binding", async () => {
+  it("fails closed when the persisted Telegram private payload is not JSON", async () => {
     const telegramUserIdEncrypted = encryptHostedWebNullableString({
       field: "hosted-member-routing.telegram-user-id",
       memberId: "member_123",
@@ -607,8 +607,26 @@ describe("hosted-member-store", () => {
         telegramUserIdEncrypted,
       }),
     ).toEqual({
-      telegramThreadId: "456",
-      telegramUserId: "456",
+      telegramThreadId: null,
+      telegramUserId: null,
+    });
+  });
+
+  it("fails closed when the persisted Telegram private payload has the wrong JSON shape", async () => {
+    const telegramUserIdEncrypted = encryptHostedWebNullableString({
+      field: "hosted-member-routing.telegram-user-id",
+      memberId: "member_123",
+      value: JSON.stringify(456),
+    });
+
+    expect(
+      readHostedMemberRoutingTelegramPrivateState({
+        memberId: "member_123",
+        telegramUserIdEncrypted,
+      }),
+    ).toEqual({
+      telegramThreadId: null,
+      telegramUserId: null,
     });
   });
 

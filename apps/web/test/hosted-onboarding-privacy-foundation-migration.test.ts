@@ -253,7 +253,7 @@ const HOSTED_MEMBER_RELATION_TYPES = new Set([
 ]);
 
 describe("hosted Prisma baseline migration", () => {
-  it("preserves the reviewed split-table hosted-member baseline plus the forward Stripe hardening migration", () => {
+  it("preserves the reviewed split-table hosted-member baseline with Stripe hardening squashed in", () => {
     const migrationEntries = readdirSync(new URL("../prisma/migrations/", import.meta.url))
       .filter((entry) => !entry.startsWith("."))
       .sort();
@@ -261,13 +261,8 @@ describe("hosted Prisma baseline migration", () => {
       new URL("../prisma/migrations/2026040600_init/migration.sql", import.meta.url),
       "utf8",
     );
-    const forwardMigrationSql = readFileSync(
-      new URL("../prisma/migrations/2026042301_hosted_stripe_hardening/migration.sql", import.meta.url),
-      "utf8",
-    );
     expect(migrationEntries).toEqual([
       "2026040600_init",
-      "2026042301_hosted_stripe_hardening",
       "migration_lock.toml",
     ]);
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_assistant_runtime_issue"');
@@ -331,13 +326,7 @@ describe("hosted Prisma baseline migration", () => {
     expect(baselineMigrationSql).toContain(
       'FOREIGN KEY ("ingress_event_id") REFERENCES "hosted_ingress_event"("id")',
     );
-    expect(baselineMigrationSql).not.toContain('"last_stripe_event_created_at" TIMESTAMP(3)');
-    expect(forwardMigrationSql).toContain(
-      'ALTER TABLE "hosted_member_billing_ref"\n  ADD COLUMN IF NOT EXISTS "last_stripe_event_created_at" TIMESTAMP(3);',
-    );
-    expect(forwardMigrationSql).toContain(
-      'CREATE UNIQUE INDEX IF NOT EXISTS "hosted_ai_usage_turn_id_attempt_count_idx"',
-    );
+    expect(baselineMigrationSql).toContain('"last_stripe_event_created_at" TIMESTAMP(3)');
     expect(baselineMigrationSql).toContain(
       'ALTER TABLE "hosted_ingress_event_alias" ADD CONSTRAINT "hosted_ingress_event_alias_user_id_replaced_by_event_id_fkey" FOREIGN KEY ("user_id", "replaced_by_event_id") REFERENCES "hosted_ingress_event_alias"("user_id", "event_id") ON DELETE NO ACTION ON UPDATE CASCADE DEFERRABLE INITIALLY DEFERRED',
     );
@@ -365,11 +354,11 @@ describe("hosted Prisma baseline migration", () => {
     expect(baselineMigrationSql).toContain(
       'CREATE INDEX "hosted_ai_usage_stripe_meter_due_idx" ON "hosted_ai_usage"("stripe_meter_status", "stripe_meter_next_attempt_at", "occurred_at")',
     );
-    expect(baselineMigrationSql).not.toContain(
+    expect(baselineMigrationSql).toContain(
       'CREATE UNIQUE INDEX "hosted_ai_usage_turn_id_attempt_count_idx" ON "hosted_ai_usage"("turn_id", "attempt_count")',
     );
-    expect(forwardMigrationSql).toContain(
-      'CREATE UNIQUE INDEX IF NOT EXISTS "hosted_ai_usage_turn_id_attempt_count_idx"\n  ON "hosted_ai_usage"("turn_id", "attempt_count");',
+    expect(baselineMigrationSql).not.toContain(
+      'CREATE UNIQUE INDEX IF NOT EXISTS "hosted_ai_usage_turn_id_attempt_count_idx"',
     );
     expect(baselineMigrationSql).toContain('"telegram_user_lookup_key" TEXT');
     expect(baselineMigrationSql).not.toContain('CREATE TABLE "hosted_session"');

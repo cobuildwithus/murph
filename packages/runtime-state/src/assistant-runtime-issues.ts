@@ -235,31 +235,12 @@ function resolveAssistantRuntimeIssuePaths(
 }
 
 function parsePendingAssistantRuntimeIssueFile(value: unknown): AssistantRuntimeIssueRecord {
-  if (hasVersionedJsonEnvelope(value)) {
-    return parseVersionedJsonStateEnvelope(value, {
-      label: "pending assistant runtime issue record",
-      parseValue: parseAssistantRuntimeIssueRecord,
-      schema: ASSISTANT_RUNTIME_ISSUE_SCHEMA,
-      schemaVersion: ASSISTANT_RUNTIME_ISSUE_FILE_SCHEMA_VERSION,
-    });
-  }
-
-  return parseAssistantRuntimeIssueRecord(value);
-}
-
-function hasVersionedJsonEnvelope(value: unknown): value is {
-  schema: unknown;
-  schemaVersion: unknown;
-  value: unknown;
-} {
-  return Boolean(
-    value
-    && typeof value === "object"
-    && !Array.isArray(value)
-    && "schema" in value
-    && "schemaVersion" in value
-    && "value" in value,
-  );
+  return parseVersionedJsonStateEnvelope(value, {
+    label: "pending assistant runtime issue record",
+    parseValue: parseAssistantRuntimeIssueRecord,
+    schema: ASSISTANT_RUNTIME_ISSUE_SCHEMA,
+    schemaVersion: ASSISTANT_RUNTIME_ISSUE_FILE_SCHEMA_VERSION,
+  });
 }
 
 function normalizeIssueSchema(value: unknown): typeof ASSISTANT_RUNTIME_ISSUE_SCHEMA {

@@ -282,16 +282,12 @@ function isCanonicalPendingAssistantUsageFileName(fileName: string): boolean {
 }
 
 function parsePendingAssistantUsageFile(value: unknown): AssistantUsageRecord {
-  if (hasVersionedJsonEnvelope(value)) {
-    return parseVersionedJsonStateEnvelope(value, {
-      label: "pending assistant usage record",
-      parseValue: parseAssistantUsageRecord,
-      schema: ASSISTANT_USAGE_SCHEMA,
-      schemaVersion: ASSISTANT_USAGE_FILE_SCHEMA_VERSION,
-    });
-  }
-
-  return parseAssistantUsageRecord(value);
+  return parseVersionedJsonStateEnvelope(value, {
+    label: "pending assistant usage record",
+    parseValue: parseAssistantUsageRecord,
+    schema: ASSISTANT_USAGE_SCHEMA,
+    schemaVersion: ASSISTANT_USAGE_FILE_SCHEMA_VERSION,
+  });
 }
 
 function requireRecord(value: unknown, label: string): Record<string, unknown> {
@@ -300,21 +296,6 @@ function requireRecord(value: unknown, label: string): Record<string, unknown> {
   }
 
   return value as Record<string, unknown>;
-}
-
-function hasVersionedJsonEnvelope(value: unknown): value is {
-  schema: unknown;
-  schemaVersion: unknown;
-  value: unknown;
-} {
-  return Boolean(
-    value
-    && typeof value === "object"
-    && !Array.isArray(value)
-    && "schema" in value
-    && "schemaVersion" in value
-    && "value" in value,
-  );
 }
 
 function normalizeUsageSchema(value: unknown): typeof ASSISTANT_USAGE_SCHEMA {
