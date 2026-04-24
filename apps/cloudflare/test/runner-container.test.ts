@@ -1,5 +1,6 @@
 import type { HostedAssistantRuntimeJobResult } from "@murphai/assistant-runtime";
 import { buildHostedExecutionMemberActivatedWake } from "@murphai/hosted-execution";
+import { encodeHostedBundleBase64 } from "@murphai/runtime-state/node/hosted-bundle-codec";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -26,6 +27,7 @@ import {
   RunnerContainer,
 } from "../src/runner-container.ts";
 import { CLOUDFLARE_HOSTED_RUNTIME_HOSTS } from "../src/internal-hosts.ts";
+import { HostedBundleArchiveValidationError } from "../src/hosted-bundle-validation.ts";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -672,6 +674,103 @@ describe("RunnerContainer", () => {
       status: 400,
       statusCode: 400,
     });
+  });
+
+  it("rejects HTTP 200 runner responses with invalid output bundle archives", async () => {
+    const invalidBundle = encodeHostedBundleBase64(
+      Uint8Array.from(Buffer.from("not-a-hosted-bundle")),
+    );
+    if (!invalidBundle) {
+      throw new Error("Expected invalid bundle bytes to encode.");
+    }
+
+    const { container, destroy } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/health")) {
+          return new Response(JSON.stringify({ ok: true }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
+        return new Response(JSON.stringify({
+          ...createRunnerResult(),
+          result: {
+            ...createRunnerResult().result,
+            bundle: invalidBundle,
+          },
+        }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }),
+    });
+
+    const thrown = await container.invoke({
+      job: {
+        request: createRunnerRequest("evt_invalid_output_bundle"),
+      },
+      timeoutMs: 10_000,
+      userId: "member_123",
+    }).catch((error: unknown) => error);
+
+    expect(thrown).toBeInstanceOf(HostedBundleArchiveValidationError);
+    expect(thrown).toMatchObject({
+      message: "Hosted bundle archive is invalid.",
+      operation: "runner-output",
+      refKey: null,
+    });
+    expect(String(thrown)).not.toContain(invalidBundle);
+    expect(destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects HTTP 200 runner responses with invalid output bundle payloads", async () => {
+    const { container, destroy } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/health")) {
+          return new Response(JSON.stringify({ ok: true }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
+        return new Response(JSON.stringify({
+          ...createRunnerResult(),
+          result: {
+            ...createRunnerResult().result,
+            bundle: "not-base64!",
+          },
+        }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }),
+    });
+
+    const thrown = await container.invoke({
+      job: {
+        request: createRunnerRequest("evt_invalid_output_bundle_payload"),
+      },
+      timeoutMs: 10_000,
+      userId: "member_123",
+    }).catch((error: unknown) => error);
+
+    expect(thrown).toBeInstanceOf(HostedBundleArchiveValidationError);
+    expect(thrown).toMatchObject({
+      message: "Hosted bundle archive payload is invalid.",
+      operation: "runner-output",
+      refKey: null,
+    });
+    expect(String(thrown)).not.toContain("not-base64!");
+    expect(destroy).toHaveBeenCalledTimes(1);
   });
 
   it("keeps the canonical internal HTTP run route disabled", async () => {

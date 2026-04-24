@@ -319,6 +319,8 @@ describe("hosted deploy automation helpers", () => {
       "tags: murph-cloudflare-runner-base:node24.14.1-whisper1.8.1-base-en",
       "cache-from: type=gha,scope=cloudflare-runner-base",
       "cache-to: type=gha,mode=max,scope=cloudflare-runner-base",
+      "run: pnpm --dir apps/cloudflare runner:docker:smoke:prepared-base",
+      "run: pnpm --dir apps/cloudflare deploy:artifacts",
     ]) {
       expect(workflow).toContain(expectedLine);
     }

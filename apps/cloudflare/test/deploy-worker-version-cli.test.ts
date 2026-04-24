@@ -54,6 +54,7 @@ describe("runDeployWorkerVersionCli", () => {
           CF_WORKER_NAME: "hosted-worker",
         }),
         resultPath: path.join(deployRoot, ".deploy", "deployment-result.json"),
+        runnerBundleDir: path.join(deployRoot, ".deploy", "runner-bundle"),
         secretsFilePath: path.join(deployRoot, ".deploy", "worker-secrets.json"),
         workerName: "hosted-worker",
       }),

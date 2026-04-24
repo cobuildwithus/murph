@@ -28,6 +28,7 @@ import {
   createHostedBundleStore,
 } from "../src/bundle-store.ts";
 import { createHostedBrowserVaultReplicaStore } from "../src/browser-vault-store.ts";
+import type { HostedExecutionEnvironment } from "../src/env.ts";
 import { hostedArtifactObjectKey } from "../src/storage-paths.ts";
 import { HostedUserRunner } from "../src/user-runner.ts";
 import { HostedWebControlPlaneResponseError } from "../src/web-control-plane.ts";
@@ -135,7 +136,9 @@ vi.mock("../src/user-runner/runner-run-processor.js", async () => {
   };
 });
 
-function createTestRuntimeEnvironment() {
+function createTestRuntimeEnvironment(
+  overrides: Partial<HostedExecutionEnvironment> = {},
+): HostedExecutionEnvironment {
   const runtimeKey = Uint8Array.from({ length: 32 }, () => 9);
 
   return {
@@ -169,15 +172,18 @@ function createTestRuntimeEnvironment() {
     teeAutomationRecipientPublicKey: null,
     vercelOidcValidation: {
       audience: "https://vercel.com/murph-team",
+      environment: "production",
       issuer: "https://oidc.vercel.com/murph-team",
       jwksUrl: "https://oidc.vercel.com/murph-team/.well-known/jwks",
       projectName: "murph-web",
+      subject: "owner:murph-team:project:murph-web:environment:production",
       teamSlug: "murph-team",
     },
     webCallbackSigning: {
       keyId: "v1",
       privateKeyJwkJson: TEST_AUTOMATION_RECIPIENT_PRIVATE_JWK_JSON,
     },
+    ...overrides,
   };
 }
 
@@ -450,11 +456,21 @@ async function writeRequiredPendingCleanupState(
 
 async function expectRecordedRunPhases(phases: readonly string[]): Promise<void> {
   await vi.waitFor(() => {
-    const recordedPhases = webControlMocks.recordHostedRunLogInWeb.mock.calls
-      .map(([input]) => input.body.phase)
+    const recordedPhases = getRecordedRunLogBodies()
+      .map((body) => body.phase)
       .sort();
     expect(recordedPhases).toEqual([...phases].sort());
   });
+}
+
+function getRecordedRunLogBodies(): Array<{
+  level: string;
+  message: string;
+  phase: string;
+  redacted: unknown;
+}> {
+  return webControlMocks.recordHostedRunLogInWeb.mock.calls
+    .map(([input]) => input.body);
 }
 
 beforeEach(() => {
@@ -463,6 +479,8 @@ beforeEach(() => {
     callbackSigning: unknown;
     message: string;
     phase: string;
+    level?: "debug" | "info" | "warn" | "error";
+    redacted?: Record<string, unknown> | null;
     run: {
       runId: string;
     };
@@ -478,10 +496,10 @@ beforeEach(() => {
       body: {
         at: "2026-04-20T00:00:00.000Z",
         component: "cloudflare-runner",
-        level: "info",
+        level: input.level ?? "info",
         message: input.message,
         phase: input.phase,
-        redacted: null,
+        redacted: input.redacted ?? null,
         runId: input.run.runId,
         runToken: input.runToken,
       },
@@ -516,6 +534,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.resetAllMocks();
 });
 
@@ -624,17 +643,25 @@ describe("HostedUserRunner resumeFinalize drain", () => {
     await expect(state.storage.getAlarm()).resolves.toBeNull();
   });
 
-  it("keeps retrying ordinary acquire failures from the alarm path", async () => {
-    envMocks.readHostedExecutionEnvironment.mockReturnValue(createTestRuntimeEnvironment());
+  it("keeps retrying ordinary acquire failures from the alarm path with the configured delay", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-20T00:00:00.000Z"));
+    const environment = createTestRuntimeEnvironment({
+      retryDelayMs: 45_000,
+    });
+    envMocks.readHostedExecutionEnvironment.mockReturnValue(environment);
     const state = createDurableObjectStateHarness();
     const stateStore = new RunnerStateStore(state);
     const runner = new HostedUserRunner(
       state,
-      envMocks.readHostedExecutionEnvironment(createHostedExecutionTestEnv()),
+      environment,
       new MemoryEncryptedR2Bucket(),
     );
     await runner.bootstrapUser("user-resume-finalize");
     await runner.nudgeHostedRun();
+    await expect(state.storage.getAlarm()).resolves.toBe(
+      Date.parse("2026-04-20T00:00:00.000Z"),
+    );
 
     webControlMocks.acquireHostedRunFromWeb.mockRejectedValueOnce(new Error("temporary web outage"));
 
@@ -642,9 +669,11 @@ describe("HostedUserRunner resumeFinalize drain", () => {
 
     expect(webControlMocks.acquireHostedRunFromWeb).toHaveBeenCalledTimes(1);
     await expect(stateStore.readState()).resolves.toMatchObject({
-      nextWakeAt: expect.any(String),
+      nextWakeAt: "2026-04-20T00:00:45.000Z",
     });
-    await expect(state.storage.getAlarm()).resolves.toEqual(expect.any(Number));
+    await expect(state.storage.getAlarm()).resolves.toBe(
+      Date.parse("2026-04-20T00:00:45.000Z"),
+    );
   });
 
   it("refetches after a successful finalize-resume before declaring the queue drained", async () => {
@@ -838,6 +867,82 @@ describe("HostedUserRunner resumeFinalize drain", () => {
       "commit_attempted",
       "commit_won",
     ]);
+  });
+
+  it("records web-closed runtime failures as expected requeues instead of commit loss", async () => {
+    envMocks.readHostedExecutionEnvironment.mockReturnValue(createTestRuntimeEnvironment());
+    const state = createDurableObjectStateHarness();
+    const stateStore = new RunnerStateStore(state);
+    await stateStore.bootstrapUser("user-resume-finalize");
+    const runner = new HostedUserRunner(
+      state,
+      envMocks.readHostedExecutionEnvironment(createHostedExecutionTestEnv()),
+      new MemoryEncryptedR2Bucket(),
+    );
+
+    const acquiredCursor = createCursorState({
+      committedSeq: "10",
+      nextSeq: "11",
+      snapshotKey: "snapshot/acquired",
+      version: "cursor-v1",
+    });
+    const run = createRunRecord();
+    run.status = "acquired";
+    run.triggerKind = "runtime_timer";
+    const failedRun: HostedRunRecord = {
+      ...run,
+      errorClass: "hosted_run_runtime",
+      errorCode: "HOSTED_RUN_RUNTIME_BACKPRESSURED",
+      failedAt: "2026-04-20T00:00:01.000Z",
+      status: "failed",
+    };
+
+    webControlMocks.acquireHostedRunFromWeb.mockResolvedValueOnce({
+      acquired: true,
+      cursor: acquiredCursor,
+      events: [],
+      pendingIngressEventCount: 1,
+      resumeFinalize: false,
+      run,
+      runToken: "run-token",
+    } satisfies HostedRunAcquireResponse);
+    webControlMocks.commitHostedRunToWeb.mockResolvedValue({
+      committed: false,
+      cursor: acquiredCursor,
+      needsFinalize: false,
+      run: failedRun,
+    } satisfies HostedRunCommitResponse);
+    wakeProcessorMocks.executeRunDrain.mockResolvedValue({
+      cursorSnapshotRef: null,
+      finalizeRequired: false,
+      state: "backpressured",
+    });
+
+    const result = await runner.drainHostedRuns();
+
+    expect(result).toEqual({
+      committedSeq: acquiredCursor.committedSeq,
+      requestedTargetSeq: null,
+      targetReached: true,
+    });
+    await expectRecordedRunPhases([
+      "acquired",
+      "commit_attempted",
+      "failure_recorded",
+    ]);
+    const recordedPhases = getRecordedRunLogBodies().map((body) => body.phase);
+    expect(recordedPhases).not.toContain("commit_lost");
+    const failureLog = getRecordedRunLogBodies()
+      .find((body) => body.phase === "failure_recorded");
+    expect(failureLog).toMatchObject({
+      level: "warn",
+      redacted: {
+        commitKind: "failure",
+        failureCode: "HOSTED_RUN_RUNTIME_BACKPRESSURED",
+        requeueExpected: true,
+        webRunStatus: "failed",
+      },
+    });
   });
 
   it("deletes superseded bundle and browser-vault replica objects after a commit wins without finalize", async () => {
@@ -1070,6 +1175,11 @@ describe("HostedUserRunner resumeFinalize drain", () => {
     expect(bucket.objects.has(authoritativeReplicaRef.objectKey)).toBe(true);
     expect(bucket.objects.has(candidateBundle.ref.key)).toBe(false);
     expect(bucket.objects.has(candidateReplicaRef.objectKey)).toBe(false);
+    await expectRecordedRunPhases([
+      "acquired",
+      "commit_attempted",
+      "commit_lost",
+    ]);
   });
 
   it("reconciles old authoritative cleanup on the next drain when commit response loss hides a winning cursor swap", async () => {

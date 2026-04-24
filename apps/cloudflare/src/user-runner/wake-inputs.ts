@@ -28,9 +28,7 @@ import {
   isHostedRunSideInputNotFoundError,
   type RunnerUserStores,
 } from "./runner-run-processor.js";
-import type { RunnerRuntimeAlarmScheduler } from "./runner-runtime-alarm-scheduler.js";
 
-const HOSTED_WAKE_NUDGE_RETRY_DELAY_MS = 5_000;
 const HOSTED_WAKE_QUARANTINE_EMAIL_RAW_MESSAGE_MISSING = "email-raw-message-missing";
 const HOSTED_WAKE_QUARANTINE_INVALID_PAYLOAD = "invalid-wake-payload";
 const HOSTED_WAKE_QUARANTINE_SIDE_INPUT_UNAVAILABLE = "hosted-side-input-unavailable";
@@ -47,10 +45,6 @@ export interface HostedWakeInputContext {
   readRunDrainVaultSyncImport(
     wake: HostedIngressEnvelope,
   ): Promise<HostedRuntimeDrainEvent["vaultSyncImport"]>;
-}
-
-export interface HostedWakeRetryAlarmContext {
-  runtimeAlarmScheduler: Pick<RunnerRuntimeAlarmScheduler, "syncNextWake">;
 }
 
 export async function resolveHostedRunDrainInputs(
@@ -255,14 +249,6 @@ export function quarantineHostedRunWake(input: {
     ingressEventId: input.wake.id,
     quarantineCode: input.quarantineCode,
     state: "quarantined",
-  });
-}
-
-export async function scheduleHostedWakeRetryAlarm(
-  context: HostedWakeRetryAlarmContext,
-): Promise<void> {
-  await context.runtimeAlarmScheduler.syncNextWake({
-    preferredWakeAt: new Date(Date.now() + HOSTED_WAKE_NUDGE_RETRY_DELAY_MS).toISOString(),
   });
 }
 

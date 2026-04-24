@@ -395,6 +395,7 @@ describe("hosted runner container image contract", () => {
     expect(packageJson.scripts?.["deploy:worker"]).toBe(
       "pnpm deploy:artifacts && pnpm runner:docker:base && pnpm deploy:worker:apply",
     );
+    expect(packageJson.scripts?.["deploy:artifacts"]).toContain("pnpm deploy:artifacts:validate");
     expect(packageJson.scripts?.["runner:docker:base"]).toBe(
       `docker build -f ../../Dockerfile.cloudflare-hosted-runner-base -t ${hostedRunnerBaseImageTag} ../..`,
     );
@@ -402,11 +403,16 @@ describe("hosted runner container image contract", () => {
       "pnpm runner:bundle && pnpm runner:docker:base && docker build -f ../../Dockerfile.cloudflare-hosted-runner -t murph-cloudflare-runner .",
     );
     expect(packageJson.scripts?.["runner:docker:smoke"]).toBe(
-      "pnpm runner:docker:smoke:prepare && pnpm runner:docker:base && docker build -f ../../Dockerfile.cloudflare-hosted-runner -t murph-cloudflare-runner . && pnpm runner:docker:smoke:built",
+      "pnpm runner:docker:smoke:prepare && pnpm runner:docker:base && pnpm runner:docker:smoke:image && pnpm runner:docker:smoke:built",
+    );
+    expect(packageJson.scripts?.["runner:docker:smoke:prepared-base"]).toBe(
+      "pnpm runner:docker:smoke:prepare && pnpm runner:docker:smoke:image && pnpm runner:docker:smoke:built",
     );
     expect(packageJson.scripts?.["worker:deploy"]).toBe(
-      "pnpm deploy:artifacts && pnpm runner:docker:base && pnpm worker:deploy:apply",
+      "pnpm deploy:worker",
     );
+    expect(packageJson.scripts?.["worker:deploy:apply"]).toBe("pnpm deploy:worker:apply");
+    expect(packageJson.scripts?.["worker:deploy:apply"]).not.toContain("wrangler deploy");
     expect(packageJson.scripts?.["worker:dev"]).toBe(
       "pnpm runner:docker:base && pnpm exec wrangler dev",
     );

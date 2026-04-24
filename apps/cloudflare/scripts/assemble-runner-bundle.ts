@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { resolveCloudflareDeployPaths } from "./deploy-automation.js";
+import { writeRunnerBundleManifest } from "./deploy-artifacts.js";
 import {
   hostedRunnerBundleOnlyDependencyNames,
   hostedRunnerRuntimePackageName,
@@ -89,6 +90,11 @@ async function assembleRunnerBundle(): Promise<void> {
       stagingBundleDir,
       runnerBundleDeployRoot,
     );
+    await writeRunnerBundleManifest(runnerBundleDeployRoot, {
+      appDir,
+      includeBundleOnlyDependencies,
+      repoRoot,
+    });
 
     console.log(
       `Assembled Cloudflare runner bundle at ${runnerBundleDisplayRoot}`,

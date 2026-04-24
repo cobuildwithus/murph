@@ -18,12 +18,14 @@ describe("runHostedWorkerDeployment", () => {
         HOSTED_EXECUTION_DEPLOYMENT_MODE: "gradual",
       },
       resultPath: "/tmp/deployment-result.json",
+      runnerBundleDir: "/tmp/runner-bundle",
       secretsFilePath: "/tmp/worker-secrets.json",
       workerName: "hosted-worker",
     })).rejects.toThrow("HOSTED_EXECUTION_DEPLOYMENT_MODE must be 'direct'.");
 
     expect(dependencies.mkdir).not.toHaveBeenCalled();
     expect(dependencies.deployDirect).not.toHaveBeenCalled();
+    expect(dependencies.validatePreparedArtifacts).not.toHaveBeenCalled();
   });
 
   it("runs a direct deploy and records the final deployment traffic", async () => {
@@ -54,10 +56,17 @@ describe("runHostedWorkerDeployment", () => {
         HOSTED_EXECUTION_VERSION_MESSAGE: "unused direct version message",
       },
       resultPath: "/tmp/deployment-result.json",
+      runnerBundleDir: "/tmp/runner-bundle",
       secretsFilePath: "/tmp/worker-secrets.json",
       workerName: "hosted-worker",
     });
 
+    expect(dependencies.validatePreparedArtifacts).toHaveBeenCalledWith({
+      configPath: "/tmp/wrangler.generated.jsonc",
+      includeSecrets: true,
+      runnerBundleDir: "/tmp/runner-bundle",
+      secretsFilePath: "/tmp/worker-secrets.json",
+    });
     expect(dependencies.deployDirect).toHaveBeenCalledWith({
       configPath: "/tmp/wrangler.generated.jsonc",
       deploymentMessage: "manual direct deploy",
@@ -74,9 +83,17 @@ describe("runHostedWorkerDeployment", () => {
           versionId: "version-direct",
         },
       ],
-      smokeVersionId: null,
+      smokeVersionId: "version-direct",
       uploadedVersionId: null,
     });
+    expect(dependencies.writeFile).toHaveBeenCalledWith(
+      "/tmp/github-output.txt",
+      expect.stringContaining("smoke_version_id=version-direct"),
+      {
+        encoding: "utf8",
+        flag: "a",
+      },
+    );
     expect(dependencies.writeFile).toHaveBeenCalledWith(
       "/tmp/github-output.txt",
       expect.stringContaining("final_version_traffic=[{\"percentage\":100,\"versionId\":\"version-direct\"}]"),
@@ -111,6 +128,7 @@ describe("runHostedWorkerDeployment", () => {
         CF_WORKER_NAME: "hosted-worker",
       },
       resultPath: "/tmp/deployment-result.json",
+      runnerBundleDir: "/tmp/runner-bundle",
       secretsFilePath: "/tmp/worker-secrets.json",
       workerName: "hosted-worker",
     });
@@ -152,10 +170,17 @@ describe("runHostedWorkerDeployment", () => {
         HOSTED_EXECUTION_DEPLOYMENT_MODE: "direct",
       },
       resultPath: "/tmp/deployment-result.json",
+      runnerBundleDir: "/tmp/runner-bundle",
       secretsFilePath: "/tmp/worker-secrets.json",
       workerName: "hosted-worker",
     });
 
+    expect(dependencies.validatePreparedArtifacts).toHaveBeenCalledWith({
+      configPath: "/tmp/wrangler.generated.jsonc",
+      includeSecrets: false,
+      runnerBundleDir: "/tmp/runner-bundle",
+      secretsFilePath: "/tmp/worker-secrets.json",
+    });
     expect(dependencies.deployDirect).toHaveBeenCalledWith({
       configPath: "/tmp/wrangler.generated.jsonc",
       deploymentMessage: expect.stringContaining("direct deploy"),
@@ -180,6 +205,7 @@ describe("runHostedWorkerDeployment", () => {
         HOSTED_EXECUTION_DEPLOYMENT_MODE: "direct",
       },
       resultPath: "/tmp/deployment-result.json",
+      runnerBundleDir: "/tmp/runner-bundle",
       secretsFilePath: "/tmp/worker-secrets.json",
       workerName: "hosted-worker",
     });
@@ -193,6 +219,29 @@ describe("runHostedWorkerDeployment", () => {
       workerName: "hosted-worker",
     });
   });
+
+  it("rejects invalid prepared artifacts before running Wrangler", async () => {
+    const dependencies = createDependencies({
+      validatePreparedArtifacts: async () => {
+        throw new Error("Prepared runner bundle changed after assembly.");
+      },
+    });
+
+    await expect(runHostedWorkerDeployment({
+      configPath: "/tmp/wrangler.generated.jsonc",
+      dependencies,
+      env: {
+        CF_WORKER_NAME: "hosted-worker",
+      },
+      resultPath: "/tmp/deployment-result.json",
+      runnerBundleDir: "/tmp/runner-bundle",
+      secretsFilePath: "/tmp/worker-secrets.json",
+      workerName: "hosted-worker",
+    })).rejects.toThrow("Prepared runner bundle changed after assembly.");
+
+    expect(dependencies.mkdir).not.toHaveBeenCalled();
+    expect(dependencies.deployDirect).not.toHaveBeenCalled();
+  });
 });
 
 function createDependencies(
@@ -201,6 +250,7 @@ function createDependencies(
   deployDirect: ReturnType<typeof vi.fn>;
   mkdir: ReturnType<typeof vi.fn>;
   readCurrentDeployment: ReturnType<typeof vi.fn>;
+  validatePreparedArtifacts: ReturnType<typeof vi.fn>;
   writeFile: ReturnType<typeof vi.fn>;
 } {
   const deployDirect = vi.fn(
@@ -212,6 +262,9 @@ function createDependencies(
   const readCurrentDeployment = vi.fn(
     overrides.readCurrentDeployment ?? (async () => null),
   );
+  const validatePreparedArtifacts = vi.fn(
+    overrides.validatePreparedArtifacts ?? (async () => {}),
+  );
   const writeFile = vi.fn(
     overrides.writeFile ?? (async () => {}),
   );
@@ -220,6 +273,7 @@ function createDependencies(
     deployDirect,
     mkdir,
     readCurrentDeployment,
+    validatePreparedArtifacts,
     writeFile,
   };
 }

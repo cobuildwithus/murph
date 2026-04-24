@@ -12,6 +12,7 @@ const MAX_HOSTED_BUNDLE_ARCHIVE_FILE_COUNT = 50_000;
 const MAX_HOSTED_BUNDLE_PATH_LENGTH = 4_096;
 const MAX_HOSTED_BUNDLE_ROOT_LENGTH = 256;
 const BASE64_CANONICAL_PATTERN = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u;
+const SHA256_HEX_PATTERN = /^[a-f0-9]{64}$/u;
 
 export interface HostedBundleArtifactRef {
   byteSize: number;
@@ -197,10 +198,23 @@ export function parseHostedBundleArchive(bytes: Uint8Array | ArrayBuffer): Hoste
     schema?: string;
   };
 
+  let uncompressed: Buffer;
   try {
-    parsed = JSON.parse(
-      gunzipSync(buffer, { maxOutputLength: MAX_HOSTED_BUNDLE_ARCHIVE_UNCOMPRESSED_BYTES }).toString("utf8"),
-    ) as Partial<HostedBundleArchive> & { schema?: string };
+    uncompressed = gunzipSync(buffer, {
+      maxOutputLength: MAX_HOSTED_BUNDLE_ARCHIVE_UNCOMPRESSED_BYTES,
+    });
+  } catch (error) {
+    if (isZlibMaxOutputLengthError(error)) {
+      throw new Error(
+        `Hosted bundle archive exceeds the ${MAX_HOSTED_BUNDLE_ARCHIVE_UNCOMPRESSED_BYTES} byte uncompressed size limit.`,
+      );
+    }
+
+    throw new Error("Hosted bundle archive is invalid.");
+  }
+
+  try {
+    parsed = JSON.parse(uncompressed.toString("utf8")) as Partial<HostedBundleArchive> & { schema?: string };
   } catch {
     throw new Error("Hosted bundle archive is invalid.");
   }
@@ -233,6 +247,14 @@ export function parseHostedBundleArchive(bytes: Uint8Array | ArrayBuffer): Hoste
 }
 
 export function serializeHostedBundleArchive(archive: HostedBundleArchive): Uint8Array {
+  if (archive.schema !== HOSTED_BUNDLE_SCHEMA || !Array.isArray(archive.files)) {
+    throw new Error("Hosted bundle archive is invalid.");
+  }
+
+  if (!isHostedExecutionBundleKind(archive.kind)) {
+    throw new Error("Hosted bundle archive kind is invalid.");
+  }
+
   const files = archive.files.map((file) => parseHostedBundleArchiveFile(file));
 
   if (files.length > MAX_HOSTED_BUNDLE_ARCHIVE_FILE_COUNT) {
@@ -243,17 +265,30 @@ export function serializeHostedBundleArchive(archive: HostedBundleArchive): Uint
 
   assertUniqueHostedBundleArchiveEntries(files);
 
-  return Uint8Array.from(
-    gzipSync(
-      Buffer.from(
-        JSON.stringify({
-          ...archive,
-          files: sortHostedBundleFiles(files),
-        }),
-        "utf8",
-      ),
-    ),
+  const serialized = Buffer.from(
+    JSON.stringify({
+      files: sortHostedBundleFiles(files),
+      kind: archive.kind,
+      schema: HOSTED_BUNDLE_SCHEMA,
+    }),
+    "utf8",
   );
+
+  if (serialized.byteLength > MAX_HOSTED_BUNDLE_ARCHIVE_UNCOMPRESSED_BYTES) {
+    throw new Error(
+      `Hosted bundle archive exceeds the ${MAX_HOSTED_BUNDLE_ARCHIVE_UNCOMPRESSED_BYTES} byte uncompressed size limit.`,
+    );
+  }
+
+  const compressed = gzipSync(serialized);
+
+  if (compressed.byteLength > MAX_HOSTED_BUNDLE_ARCHIVE_COMPRESSED_BYTES) {
+    throw new Error(
+      `Hosted bundle archive exceeds the ${MAX_HOSTED_BUNDLE_ARCHIVE_COMPRESSED_BYTES} byte compressed size limit.`,
+    );
+  }
+
+  return Uint8Array.from(compressed);
 }
 
 function decodeStrictBase64(value: string, errorMessage: string): Uint8Array {
@@ -304,19 +339,9 @@ function parseHostedBundleArchiveFile(file: unknown): HostedBundleArchiveFile {
     };
   }
 
-  const artifactRecord = record.artifact;
-  if (
-    artifactRecord
-    && typeof artifactRecord === "object"
-    && !Array.isArray(artifactRecord)
-    && typeof (artifactRecord as Record<string, unknown>).sha256 === "string"
-    && typeof (artifactRecord as Record<string, unknown>).byteSize === "number"
-  ) {
+  if (record.artifact !== undefined) {
     return {
-      artifact: {
-        byteSize: (artifactRecord as Record<string, unknown>).byteSize as number,
-        sha256: (artifactRecord as Record<string, unknown>).sha256 as string,
-      },
+      artifact: parseHostedBundleArtifactRef(record.artifact),
       ...normalized,
     };
   }
@@ -346,11 +371,11 @@ export function normalizeBundlePath(value: string): string {
   const candidate = value.replace(/\\/g, "/");
 
   if (!candidate || candidate.includes("\u0000")) {
-    throw new Error(`Hosted bundle path is invalid: ${value}`);
+    throw new Error("Hosted bundle path is invalid.");
   }
 
   if (WINDOWS_DRIVE_PREFIX_PATTERN.test(candidate) || path.posix.isAbsolute(candidate)) {
-    throw new Error(`Hosted bundle path is invalid: ${value}`);
+    throw new Error("Hosted bundle path is invalid.");
   }
 
   const normalized = path.posix.normalize(candidate);
@@ -362,7 +387,7 @@ export function normalizeBundlePath(value: string): string {
     || normalized.includes("/../")
     || normalized.length > MAX_HOSTED_BUNDLE_PATH_LENGTH
   ) {
-    throw new Error(`Hosted bundle path is invalid: ${value}`);
+    throw new Error("Hosted bundle path is invalid.");
   }
 
   return normalized;
@@ -410,17 +435,17 @@ export function assertHostedBundleArtifactIntegrity(input: {
   ref: HostedBundleArtifactRef;
   root: string;
 }): void {
-  if (input.bytes.byteLength !== input.ref.byteSize) {
+  const ref = parseHostedBundleArtifactRef(input.ref);
+
+  if (input.bytes.byteLength !== ref.byteSize) {
     throw new Error(
-      `Hosted bundle artifact ${input.root}:${input.path} size mismatch: expected ${input.ref.byteSize}, got ${input.bytes.byteLength}.`,
+      `Hosted bundle artifact size mismatch: expected ${ref.byteSize}, got ${input.bytes.byteLength}.`,
     );
   }
 
   const actualSha256 = sha256HostedBundleHex(input.bytes);
-  if (actualSha256 !== input.ref.sha256) {
-    throw new Error(
-      `Hosted bundle artifact ${input.root}:${input.path} hash mismatch: expected ${input.ref.sha256}, got ${actualSha256}.`,
-    );
+  if (actualSha256 !== ref.sha256) {
+    throw new Error("Hosted bundle artifact hash mismatch.");
   }
 }
 
@@ -440,10 +465,35 @@ function normalizeHostedBundleRoot(value: string): string {
     || normalized.length > MAX_HOSTED_BUNDLE_ROOT_LENGTH
     || normalized.includes("\u0000")
   ) {
-    throw new Error(`Hosted bundle root is invalid: ${value}`);
+    throw new Error("Hosted bundle root is invalid.");
   }
 
   return normalized;
+}
+
+function parseHostedBundleArtifactRef(value: unknown): HostedBundleArtifactRef {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Hosted bundle archive contains invalid artifact metadata.");
+  }
+
+  const record = value as Record<string, unknown>;
+  const byteSize = record.byteSize;
+  const sha256 = record.sha256;
+
+  if (
+    typeof byteSize !== "number"
+    || !Number.isSafeInteger(byteSize)
+    || byteSize < 0
+    || typeof sha256 !== "string"
+    || !SHA256_HEX_PATTERN.test(sha256)
+  ) {
+    throw new Error("Hosted bundle archive contains invalid artifact metadata.");
+  }
+
+  return {
+    byteSize,
+    sha256,
+  };
 }
 
 function assertUniqueHostedBundleArchiveEntries(files: readonly HostedBundleArchiveFile[]): void {
@@ -453,9 +503,14 @@ function assertUniqueHostedBundleArchiveEntries(files: readonly HostedBundleArch
     const key = `${file.root}:${file.path}`;
 
     if (seen.has(key)) {
-      throw new Error(`Hosted bundle archive contains duplicate file entry: ${key}.`);
+      throw new Error("Hosted bundle archive contains duplicate file entries.");
     }
 
     seen.add(key);
   }
+}
+
+function isZlibMaxOutputLengthError(error: unknown): boolean {
+  return error instanceof RangeError
+    && (error as { code?: unknown }).code === "ERR_BUFFER_TOO_LARGE";
 }
