@@ -35,9 +35,9 @@ test("scheduled-log occurrence keeps dedupe and write steps inside the canonical
 });
 
 test("vault-sync merge keeps planning reads and applyCanonicalWriteBatch inside the canonical write lock scope", async () => {
-  const source = await readSource("../src/vault-sync.ts");
+  const source = await readSource("../src/vault-sync/merge.ts");
   const start = source.indexOf("export async function mergeVaultSyncImportIntoVault");
-  assert.notEqual(start, -1, "Expected mergeVaultSyncImportIntoVault in vault-sync.ts");
+  assert.notEqual(start, -1, "Expected mergeVaultSyncImportIntoVault in vault-sync/merge.ts");
   const segment = source.slice(start);
 
   assert.match(segment, /withCanonicalWriteLockScope\(input\.targetVaultRoot/u);
@@ -54,15 +54,15 @@ test("vault-sync merge keeps planning reads and applyCanonicalWriteBatch inside 
 });
 
 test("vault-sync preserves verified imported payloads from memory while keeping conflicts manifest-only", async () => {
-  const source = await readSource("../src/vault-sync.ts");
-  const jsonlStart = source.indexOf("async function planJsonlMerge");
-  const rawStart = source.indexOf("async function planRawMerge");
-  const textStart = source.indexOf("async function planTextMerge");
+  const source = await readSource("../src/vault-sync/merge.ts");
+  const jsonlStart = source.indexOf("export async function planJsonlMerge");
+  const rawStart = source.indexOf("export async function planRawMerge");
+  const textStart = source.indexOf("export async function planTextMerge");
   const hasPendingStart = source.indexOf("function hasPendingWrites");
-  assert.notEqual(jsonlStart, -1, "Expected planJsonlMerge in vault-sync.ts");
-  assert.notEqual(rawStart, -1, "Expected planRawMerge in vault-sync.ts");
-  assert.notEqual(textStart, -1, "Expected planTextMerge in vault-sync.ts");
-  assert.notEqual(hasPendingStart, -1, "Expected hasPendingWrites in vault-sync.ts");
+  assert.notEqual(jsonlStart, -1, "Expected planJsonlMerge in vault-sync/merge.ts");
+  assert.notEqual(rawStart, -1, "Expected planRawMerge in vault-sync/merge.ts");
+  assert.notEqual(textStart, -1, "Expected planTextMerge in vault-sync/merge.ts");
+  assert.notEqual(hasPendingStart, -1, "Expected hasPendingWrites in vault-sync/merge.ts");
 
   const jsonlSegment = source.slice(jsonlStart, rawStart);
   assert.doesNotMatch(jsonlSegment, /input\.plan\.rawContents\.push\(/u);

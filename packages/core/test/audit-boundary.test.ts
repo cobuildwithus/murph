@@ -11,7 +11,8 @@ const SOURCE_ROOT = path.resolve(TEST_DIRECTORY, "../src");
 const CANONICAL_WRITE_ALLOWLIST = new Set([
   "audit.ts",
   "audited-write.ts",
-  "domains/events.ts",
+  "domains/events/attachment-backed.ts",
+  "domains/events/ledger.ts",
   "domains/experiments.ts",
   "domains/shared.ts",
   "history/api.ts",
