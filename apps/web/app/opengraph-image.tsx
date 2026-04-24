@@ -7,12 +7,12 @@ import {
   fraunces600FontPath,
 } from "./font-files";
 
-export const alt = "Murph — Wearable data, made useful.";
+export const alt = "Murph — Health experiments with the data you have.";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
 const HEADLINE = "Your personal,\nhealth assistant.";
-const SUBTEXT = "Expert-backed experiments, measured by your wearable.";
+const SUBTEXT = "Expert-backed experiments, reviewed against your baseline.";
 
 export default async function OGImage() {
   const [heroData, fraunces400Data, fraunces600Data, dmSans400Data] =
@@ -42,7 +42,6 @@ export default async function OGImage() {
         }}
       >
         {/* Hero background */}
-        {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={heroData}
           alt=""

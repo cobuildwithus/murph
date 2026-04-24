@@ -12,8 +12,12 @@ const FAQ_ITEMS = [
     "The web dashboard works on any device with a browser. For daily guidance, Murph texts you through iMessage, Telegram, or email. You can use just the chat if you prefer.",
   ],
   [
+    "Do I need a wearable?",
+    "No. A wearable can add useful signals, but Murph can also work from notes, labs, symptoms, meals, workouts, and manual measurements. The point is the before-and-after experiment loop.",
+  ],
+  [
     "How is this different from my wearable’s app?",
-    "Your wearable shows data. Murph gives you something to do with it — a bounded experiment with baseline measurement and a clear conclusion at the end.",
+    "Wearable apps show status. Murph turns whatever evidence you have into a bounded experiment with a baseline and a clear review at the end.",
   ],
   [
     "Can I run multiple experiments?",

@@ -18,15 +18,15 @@ export function HeroSection({ authenticated }: { authenticated: boolean }) {
       <div className="relative z-10 flex min-h-[85svh] flex-col justify-end px-6 pb-14 sm:min-h-svh sm:px-10 sm:pb-18 lg:px-16 lg:pb-24">
         <div className="max-w-[560px]">
           <h1 className="font-serif text-[clamp(2.5rem,5.2vw,4.5rem)] font-semibold leading-[0.95] tracking-[-0.04em] text-white lg:text-balance">
-            <span className="block lg:whitespace-nowrap">You measure your health.</span>
+            <span className="block lg:whitespace-nowrap">Run a health experiment.</span>
             <span className="block text-[#d4b87a] lg:whitespace-nowrap">
-              Now experiment with it.
+              Learn what changed.
             </span>
           </h1>
 
           <p className="mt-6 max-w-[420px] text-base leading-[1.75] text-pretty text-white/75">
-            Murph is your personal health assistant. Connect your data. Run an
-            experiment. See what actually makes you healthier.
+            Murph is your personal health assistant. Bring the context you have.
+            Run an experiment. See what actually changed.
           </p>
 
           <div className="mt-8">

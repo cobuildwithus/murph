@@ -40,7 +40,7 @@ export function HowItWorksSection() {
           Improve your health, one experiment at a time.
         </h2>
         <p className="mt-5 max-w-[48ch] text-base leading-[1.7] text-pretty text-[#635a48]">
-          Connect your data. Run an experiment. See what changes.
+          Bring what you have. Run an experiment. See what changes.
         </p>
 
         <div className="mt-12 grid gap-4 sm:gap-5 lg:mt-14 md:grid-cols-12">
@@ -83,7 +83,7 @@ function ConnectCard() {
       <StepBadge
         badgeClass="bg-[#c4a882]/25 text-[#5a4d3a]"
         n="01"
-        title="Connect"
+        title="Add context"
       />
 
       <div className="flex-1 space-y-4">
@@ -148,7 +148,7 @@ function ConnectCard() {
       </div>
 
       <p className="text-[0.8125rem] leading-[1.6] text-[#736a58]">
-        Wearables, meals, labs — Murph connects it all.
+        Wearables can help, but meals, labs, and notes count too.
       </p>
     </div>
   );

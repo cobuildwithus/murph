@@ -110,7 +110,7 @@ test("HostedDeviceSyncSettings falls back to a generic message when server prefe
     },
   }));
 
-  assert.match(markup, /Could not load your wearables right now\./);
+  assert.match(markup, /Could not load your data sources right now\./);
   assert.doesNotMatch(markup, /DEVICE_SYNC_PUBLIC_BASE_URL/);
   assert.match(markup, /data-source-count="0"/);
 });
