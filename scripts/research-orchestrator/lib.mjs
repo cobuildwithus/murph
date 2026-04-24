@@ -786,35 +786,10 @@ resolve_browser_endpoint() {
     return 0
   fi
 
-  local endpoint_from_result=""
-  local candidate_result_file=""
-  for candidate_result_file in "\${result_file}" "\${send_result_file}"; do
-    if [[ ! -f "\${candidate_result_file}" ]]; then
-      continue
-    fi
-    endpoint_from_result="$(
-      sed -n 's/^Managed browser endpoint: \\(.*\\)$/\\1/p' "\${candidate_result_file}" | tail -n 1
-    )"
-    if [[ -n "\${endpoint_from_result}" ]]; then
-      case "\${endpoint_from_result}" in
-        http://*|https://*)
-          printf '%s\\n' "\${endpoint_from_result}"
-          ;;
-        *)
-          printf 'http://%s\\n' "\${endpoint_from_result}"
-          ;;
-      esac
-      return 0
-    fi
-  done
-
-  if [[ ! -f "\${review_gpt_config}" ]]; then
-    return 0
-  fi
-
   local configured_endpoint=""
-  configured_endpoint="$(
-    REVIEW_GPT_CONFIG_PATH="\${review_gpt_config}" RUN_DIR="\${run_dir}" bash <<'BASH'
+  if [[ -f "\${review_gpt_config}" ]]; then
+    configured_endpoint="$(
+      REVIEW_GPT_CONFIG_PATH="\${review_gpt_config}" RUN_DIR="\${run_dir}" bash <<'BASH'
 set -euo pipefail
 
 review_gpt_config="\${REVIEW_GPT_CONFIG_PATH}"
@@ -854,12 +829,35 @@ if [[ -n "\${remote_port:-}" ]]; then
   printf 'http://127.0.0.1:%s\\n' "\${remote_port}"
 fi
 BASH
-  )" || true
+    )" || true
+  fi
 
   if [[ -n "\${configured_endpoint}" ]]; then
     printf '%s\\n' "\${configured_endpoint}"
     return 0
   fi
+
+  local endpoint_from_result=""
+  local candidate_result_file=""
+  for candidate_result_file in "\${result_file}" "\${send_result_file}"; do
+    if [[ ! -f "\${candidate_result_file}" ]]; then
+      continue
+    fi
+    endpoint_from_result="$(
+      sed -n 's/^Managed browser endpoint: \\(.*\\)$/\\1/p' "\${candidate_result_file}" | tail -n 1
+    )"
+    if [[ -n "\${endpoint_from_result}" ]]; then
+      case "\${endpoint_from_result}" in
+        http://*|https://*)
+          printf '%s\\n' "\${endpoint_from_result}"
+          ;;
+        *)
+          printf 'http://%s\\n' "\${endpoint_from_result}"
+          ;;
+      esac
+      return 0
+    fi
+  done
 }
 
 run_thread_wake() {
@@ -1147,14 +1145,14 @@ if [[ -n "\${repo_dir}" ]]; then
   if [[ -r "\${profile_helper}" ]]; then
     # shellcheck source=/dev/null
     . "\${profile_helper}"
-    murph_review_gpt_profile_apply_browser_defaults eragon || true
+    murph_review_gpt_profile_apply_browser_defaults hercules || true
   fi
 fi
 
 browser_binary_path="\${browser_binary_path:-/Applications/Brave Browser.app/Contents/MacOS/Brave Browser}"
-managed_browser_user_data_dir="\${RESEARCH_MANAGED_BROWSER_USER_DATA_DIR:-\${managed_browser_user_data_dir:-$HOME/Library/Application Support/MurphReviewGPT/Eragon}}"
+managed_browser_user_data_dir="\${RESEARCH_MANAGED_BROWSER_USER_DATA_DIR:-\${managed_browser_user_data_dir:-$HOME/Library/Application Support/MurphReviewGPT/Hercules}}"
 managed_browser_profile="\${RESEARCH_MANAGED_BROWSER_PROFILE:-\${managed_browser_profile:-Default}}"
-managed_browser_port="\${RESEARCH_MANAGED_BROWSER_PORT:-\${managed_browser_port:-9448}}"
+managed_browser_port="\${RESEARCH_MANAGED_BROWSER_PORT:-\${managed_browser_port:-9446}}"
 research_thread_export_browser_endpoint="\${RESEARCH_THREAD_EXPORT_BROWSER_ENDPOINT:-http://127.0.0.1:\${managed_browser_port}}"
 `;
 }

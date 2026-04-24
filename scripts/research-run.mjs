@@ -22,7 +22,7 @@ function usage() {
   pnpm research:run --workspace <output-packages/research/...> --seam <label> --action harvest [--lane <lane>]
 
 Examples:
-  pnpm research:run --workspace output-packages/research/example --seam 01-charter --action send --lane eragon
+  pnpm research:run --workspace output-packages/research/example --seam 01-charter --action send --lane hercules
   pnpm research:run --workspace output-packages/research/example --seam 01-charter --action harvest
 `;
 }
@@ -160,7 +160,7 @@ function normalizeSeam(seamArg) {
 function normalizeLane(laneArg) {
   const lane = laneArg.trim().toLowerCase();
   if (!/^[a-z0-9][a-z0-9-]*$/u.test(lane)) {
-    throw new Error("Unsafe --lane. Use a named review-gpt profile slug, such as eragon.");
+    throw new Error("Unsafe --lane. Use a named review-gpt profile slug, such as hercules.");
   }
   return lane;
 }
