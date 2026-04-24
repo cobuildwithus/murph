@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  createGatewayConversationSessionKey,
   gatewayPermissionRequestSchema,
   gatewayProjectionSnapshotSchema,
   type GatewayPermissionRequest,
@@ -15,8 +16,9 @@ import {
 } from "../src/gateway-projection-cache-permissions.js";
 import { HostedGatewayProjectionCache } from "../src/gateway-projection-cache.ts";
 
-const EMAIL_THREAD_SESSION_KEY =
-  "gwcs_eyJraW5kIjoiY29udmVyc2F0aW9uIiwicm91dGVUb2tlbiI6ImQ3ZTZiMDU4Y2MzZWZmMWQ5NzNjZGM5YTM0ZjVjNGJjYWU3YzQxNjBlNzRjY2MwZmIyZDU5NGU3ZGEyYjkzNmQiLCJ2ZXJzaW9uIjoxfQ";
+const EMAIL_THREAD_SESSION_KEY = createGatewayConversationSessionKey(
+  "channel:email|identity:identity-1|participant:participant-1|thread:thread-1",
+);
 
 function createCache(): HostedGatewayProjectionCache {
   return new HostedGatewayProjectionCache();

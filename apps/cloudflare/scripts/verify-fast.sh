@@ -119,10 +119,17 @@ trap 'handle_termination_signal INT' INT
 trap 'handle_termination_signal TERM' TERM
 trap 'handle_termination_signal HUP' HUP
 
-pnpm test:node &
+pnpm --dir "$repo_root" exec vitest run \
+  --config apps/cloudflare/vitest.node.workspace.ts \
+  --no-coverage \
+  --cache=false &
 node_pid="$!"
 register_background_pid "$node_pid"
-pnpm test:workers &
+pnpm --dir "$repo_root" exec vitest run \
+  --config apps/cloudflare/vitest.workers.config.ts \
+  --no-coverage \
+  --passWithNoTests \
+  --cache=false &
 workers_pid="$!"
 register_background_pid "$workers_pid"
 

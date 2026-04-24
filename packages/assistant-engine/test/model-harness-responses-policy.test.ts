@@ -1,0 +1,255 @@
+import { afterEach, describe, expect, it } from 'vitest'
+
+import type { AssistantModelSpec } from '../src/model-harness/model-spec.ts'
+import {
+  applyAssistantResponsesRequestPolicy,
+  createAssistantResponsesFetch,
+  maybeMutateAssistantResponsesRequest,
+  resolveAssistantApiKey,
+  resolveAssistantGatewayRequestOptions,
+  shouldMutateAssistantResponsesRequest,
+} from '../src/model-harness/responses-policy.ts'
+import { restoreEnvironmentVariable } from './test-helpers.js'
+
+const TEST_API_KEY_ENV = 'MURPH_ASSISTANT_ENGINE_RESPONSES_POLICY_TEST_KEY'
+const previousTestApiKey = process.env[TEST_API_KEY_ENV]
+
+afterEach(() => {
+  restoreEnvironmentVariable(TEST_API_KEY_ENV, previousTestApiKey)
+})
+
+describe('assistant Responses API request policy', () => {
+  it('adds compaction and normalized gateway request options to Responses payloads', () => {
+    const nextPayload = applyAssistantResponsesRequestPolicy(
+      {
+        model: 'gpt-test',
+        providerOptions: {
+          gateway: {
+            existing: 'preserved',
+          },
+          otherProviderOption: true,
+        },
+      },
+      {
+        gatewayOnlyProviders: [
+          ' OpenAI ',
+          'openai',
+          'bad provider slug',
+          'anthropic-1',
+        ],
+        gatewayReporting: {
+          tags: [' alpha ', 'alpha', '', 'beta'],
+          user: ' user-1 ',
+        },
+        gatewayZeroDataRetention: true,
+      },
+    )
+
+    expect(nextPayload).toEqual({
+      context_management: [
+        {
+          compact_threshold: 200_000,
+          type: 'compaction',
+        },
+      ],
+      model: 'gpt-test',
+      providerOptions: {
+        gateway: {
+          existing: 'preserved',
+          only: ['openai', 'anthropic-1'],
+          tags: ['alpha', 'beta'],
+          user: 'user-1',
+          zeroDataRetention: true,
+        },
+        otherProviderOption: true,
+      },
+    })
+  })
+
+  it('preserves explicit context management and skips payload rewrites without policy work', () => {
+    expect(
+      applyAssistantResponsesRequestPolicy(
+        {
+          context_management: [
+            {
+              type: 'manual',
+            },
+          ],
+        },
+        undefined,
+      ),
+    ).toBeNull()
+
+    expect(
+      applyAssistantResponsesRequestPolicy(
+        {
+          context_management: false,
+          providerOptions: {
+            gateway: 'not-an-object',
+          },
+        },
+        {
+          gatewayOnlyProviders: ['OpenAI'],
+        },
+      ),
+    ).toEqual({
+      context_management: false,
+      providerOptions: {
+        gateway: {
+          only: ['openai'],
+        },
+      },
+    })
+
+    expect(resolveAssistantGatewayRequestOptions(undefined)).toBeNull()
+  })
+
+  it('only mutates POST requests to Responses endpoints with readable JSON bodies', async () => {
+    expect(
+      shouldMutateAssistantResponsesRequest('https://api.example.test/v1/responses', {
+        method: 'GET',
+      }),
+    ).toBe(false)
+    expect(
+      shouldMutateAssistantResponsesRequest('not-a-valid-url'),
+    ).toBe(false)
+    expect(
+      shouldMutateAssistantResponsesRequest(
+        new Request('https://api.example.test/v1/responses', {
+          method: 'POST',
+        }),
+      ),
+    ).toBe(true)
+
+    const noBodyInit = {
+      method: 'POST',
+    }
+    await expect(
+      maybeMutateAssistantResponsesRequest(
+        undefined,
+        'https://api.example.test/v1/responses',
+        noBodyInit,
+      ),
+    ).resolves.toBe(noBodyInit)
+
+    const invalidJsonInit = {
+      body: 'not-json',
+      method: 'POST',
+    }
+    await expect(
+      maybeMutateAssistantResponsesRequest(
+        undefined,
+        'https://api.example.test/v1/responses',
+        invalidJsonInit,
+      ),
+    ).resolves.toBe(invalidJsonInit)
+
+    const noPolicyWorkInit = {
+      body: JSON.stringify({
+        context_management: [
+          {
+            type: 'manual',
+          },
+        ],
+      }),
+      method: 'POST',
+    }
+    await expect(
+      maybeMutateAssistantResponsesRequest(
+        undefined,
+        'https://api.example.test/v1/responses',
+        noPolicyWorkInit,
+      ),
+    ).resolves.toBe(noPolicyWorkInit)
+
+    const request = new Request('https://api.example.test/v1/responses', {
+      body: JSON.stringify({
+        model: 'gpt-test',
+      }),
+      method: 'POST',
+    })
+    const mutated = await maybeMutateAssistantResponsesRequest(undefined, request)
+    expect(JSON.parse(String(mutated?.body))).toMatchObject({
+      context_management: [
+        {
+          compact_threshold: 200_000,
+          type: 'compaction',
+        },
+      ],
+      model: 'gpt-test',
+    })
+  })
+
+  it('wraps fetch with the same Responses request mutation policy', async () => {
+    const calls: Array<{
+      body: string | null
+      input: Parameters<typeof fetch>[0]
+    }> = []
+    const baseFetch: typeof fetch = async (input, init) => {
+      calls.push({
+        body: typeof init?.body === 'string' ? init.body : null,
+        input,
+      })
+      return new Response('ok')
+    }
+    const fetchWithPolicy = createAssistantResponsesFetch(
+      {
+        gatewayZeroDataRetention: true,
+      },
+      baseFetch,
+    )
+
+    const response = await fetchWithPolicy('https://api.example.test/v1/responses', {
+      body: JSON.stringify({
+        model: 'gpt-test',
+      }),
+      method: 'POST',
+    })
+
+    await expect(response.text()).resolves.toBe('ok')
+    expect(calls).toHaveLength(1)
+    expect(JSON.parse(calls[0]?.body ?? '{}')).toMatchObject({
+      providerOptions: {
+        gateway: {
+          zeroDataRetention: true,
+        },
+      },
+    })
+  })
+
+  it('resolves assistant API keys by explicit, injected, and environment sources', () => {
+    expect(
+      resolveAssistantApiKey({
+        apiKey: 'direct-key',
+        model: 'gpt-test',
+      }),
+    ).toBe('direct-key')
+    expect(
+      resolveAssistantApiKey({
+        apiKeyEnvValue: 'injected-key',
+        model: 'gpt-test',
+      }),
+    ).toBe('injected-key')
+    expect(
+      resolveAssistantApiKey({
+        apiKeyEnvValue: '',
+        model: 'gpt-test',
+      }),
+    ).toBeUndefined()
+
+    process.env[TEST_API_KEY_ENV] = 'env-key'
+    const envSpec: AssistantModelSpec = {
+      apiKeyEnv: TEST_API_KEY_ENV,
+      model: 'gpt-test',
+    }
+    expect(resolveAssistantApiKey(envSpec)).toBe('env-key')
+
+    process.env[TEST_API_KEY_ENV] = ''
+    expect(resolveAssistantApiKey(envSpec)).toBeUndefined()
+    expect(
+      resolveAssistantApiKey({
+        model: 'gpt-test',
+      }),
+    ).toBeUndefined()
+  })
+})

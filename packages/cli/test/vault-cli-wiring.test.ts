@@ -21,6 +21,7 @@ afterEach(async () => {
 
 test('createVaultCli uses the default integrated inbox services wiring', async () => {
   const fakeCli = {
+    serve: vi.fn(async () => undefined),
     use: vi.fn(),
   }
   const createDefaultVaultServices = vi.fn(() => ({

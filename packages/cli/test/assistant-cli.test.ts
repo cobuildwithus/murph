@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { Cli } from 'incur'
+import { initializeVault } from '@murphai/core'
 import { afterEach, test, vi } from 'vitest'
 import {
   TOP_LEVEL_COMMANDS_REQUIRING_VAULT,
@@ -275,8 +276,8 @@ test.sequential(
   async () => {
     const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-cli-'))
     const vaultRoot = path.join(parent, 'vault')
-    await mkdir(vaultRoot)
     cleanupPaths.push(parent)
+    await initializeVault({ vaultRoot })
 
     const created = await resolveAssistantSession({
       vault: vaultRoot,
@@ -340,6 +341,7 @@ test.sequential(
       recursive: true,
     })
     cleanupPaths.push(parent)
+    await initializeVault({ vaultRoot })
 
     const originalHome = process.env.HOME
     process.env.HOME = homeRoot
@@ -395,8 +397,8 @@ test.sequential(
     const overrideVaultRoot = path.join(homeRoot, 'override-vault')
     cleanupPaths.push(parent)
 
-    await mkdir(defaultVaultRoot, { recursive: true })
-    await mkdir(overrideVaultRoot, { recursive: true })
+    await initializeVault({ vaultRoot: defaultVaultRoot })
+    await initializeVault({ vaultRoot: overrideVaultRoot })
 
     const originalHome = process.env.HOME
     process.env.HOME = homeRoot

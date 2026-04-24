@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
 import { Cli, z } from 'incur'
+import { initializeVault } from '@murphai/core'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { localParallelCliTest as test } from './local-parallel-test.js'
 import {
@@ -139,6 +140,7 @@ test('root config file can provide command option defaults', async () => {
   const configPath = path.join(tempRoot, 'murph.json')
 
   try {
+    await initializeVault({ vaultRoot })
     await writeFile(
       configPath,
       JSON.stringify({
@@ -188,6 +190,7 @@ test('root config autodiscovery resolves ~/.config/murph/config.json', async () 
   const configDir = path.join(homeRoot, '.config', 'murph')
 
   try {
+    await initializeVault({ vaultRoot: homeVaultRoot })
     await mkdir(configDir, { recursive: true })
     await writeFile(
       path.join(configDir, 'config.json'),

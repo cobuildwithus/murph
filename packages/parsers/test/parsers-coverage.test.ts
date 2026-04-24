@@ -10,6 +10,7 @@ import * as parsers from "../src/index.js";
 import { prepareAudioInput, resolveFfmpegCommand } from "../src/adapters/ffmpeg.js";
 import { createTextFileProvider } from "../src/adapters/text-file.js";
 import type { ParserArtifactRef } from "../src/contracts/artifact.js";
+import type { ParserOutput, ProviderRunResult } from "../src/contracts/parse.js";
 import type {
   AttachmentParseJobFinalizeResult,
   AttachmentParseJobRecord,
@@ -49,16 +50,25 @@ const envSnapshot = {
   WHISPER_MODEL_PATH: process.env.WHISPER_MODEL_PATH,
   PATH: process.env.PATH,
 };
+const temporaryDirectories: string[] = [];
 
-afterEach(() => {
+afterEach(async () => {
   process.env.FFMPEG_COMMAND = envSnapshot.FFMPEG_COMMAND;
   process.env.WHISPER_COMMAND = envSnapshot.WHISPER_COMMAND;
   process.env.WHISPER_MODEL_PATH = envSnapshot.WHISPER_MODEL_PATH;
   process.env.PATH = envSnapshot.PATH;
+
+  await Promise.all(
+    temporaryDirectories.splice(0).map((directory) =>
+      fs.rm(directory, { force: true, recursive: true }),
+    ),
+  );
 });
 
 async function makeTempDirectory(name: string): Promise<string> {
-  return fs.mkdtemp(path.join(os.tmpdir(), `${name}-`));
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), `${name}-`));
+  temporaryDirectories.push(directory);
+  return directory;
 }
 
 async function writeFile(directory: string, fileName: string, content: string): Promise<string> {
@@ -87,6 +97,38 @@ function buildArtifact(overrides: Partial<ParserArtifactRef> = {}): ParserArtifa
     storedPath: "raw/inbox/example/example.txt",
     ...overrides,
   };
+}
+
+async function parseAttachmentWithProviderResult(
+  result: ProviderRunResult,
+): Promise<ParserOutput> {
+  const directory = await makeTempDirectory("murph-parsers-parse-attachment");
+  const inputPath = await writeFile(directory, "attachment.txt", "source text");
+  const registry = createParserRegistry([
+    {
+      discover: async () => ({ available: true, reason: "available" }),
+      id: "normalization-test-provider",
+      locality: "local",
+      openness: "open_source",
+      priority: 100,
+      run: async () => result,
+      runtime: "node",
+      supports: async () => true,
+    },
+  ]);
+
+  const parsed = await parsers.parseAttachment({
+    artifact: buildArtifact({ absolutePath: inputPath }),
+    registry,
+    scratchRoot: path.join(directory, "scratch"),
+  });
+
+  return parsed.output;
+}
+
+function providerResultForRuntimeValidation(value: unknown): ProviderRunResult {
+  // These tests intentionally feed malformed provider payloads through the runtime parser boundary.
+  return value as ProviderRunResult;
 }
 
 function createRuntimeStore(
@@ -176,6 +218,255 @@ test("text-file provider covers discovery, support, and run edge cases", async (
     scratchDirectory: directory,
   });
   assert.equal(markdownResult.markdown, "# heading\n\n- item");
+});
+
+test("parseAttachment preserves explicit normalized blocks, tables, metadata, and warnings", async () => {
+  const output = await parseAttachmentWithProviderResult({
+    blocks: [
+      {
+        confidence: 0,
+        endMs: 12.5,
+        id: "heading_1",
+        kind: "heading",
+        metadata: {
+          flag: true,
+          note: "kept",
+          score: 0.25,
+          source: null,
+        },
+        order: 0,
+        page: 1,
+        startMs: null,
+        text: "Heading",
+      },
+      {
+        confidence: 1,
+        endMs: null,
+        id: "table_1",
+        kind: "table",
+        order: 1,
+        page: null,
+        startMs: 13,
+        text: "Rows",
+      },
+    ],
+    markdown: "  # Heading  ",
+    metadata: {
+      durationMs: 12.5,
+      language: "en",
+      pageCount: null,
+      warnings: [
+        {
+          code: "low_confidence",
+          message: "Some extracted text had low confidence.",
+        },
+      ],
+    },
+    tables: [
+      {
+        id: "table_1",
+        page: null,
+        rows: [
+          ["Name", "Value"],
+          ["alpha", "1"],
+        ],
+      },
+    ],
+    text: "  Heading\nRows  ",
+  });
+
+  assert.equal(output.providerId, "normalization-test-provider");
+  assert.equal(output.text, "Heading\nRows");
+  assert.equal(output.markdown, "# Heading");
+  assert.deepEqual(output.blocks, [
+    {
+      confidence: 0,
+      endMs: 12.5,
+      id: "heading_1",
+      kind: "heading",
+      metadata: {
+        flag: true,
+        note: "kept",
+        score: 0.25,
+        source: null,
+      },
+      order: 0,
+      page: 1,
+      startMs: null,
+      text: "Heading",
+    },
+    {
+      confidence: 1,
+      endMs: null,
+      id: "table_1",
+      kind: "table",
+      order: 1,
+      page: null,
+      startMs: 13,
+      text: "Rows",
+    },
+  ]);
+  assert.deepEqual(output.tables, [
+    {
+      id: "table_1",
+      page: null,
+      rows: [
+        ["Name", "Value"],
+        ["alpha", "1"],
+      ],
+    },
+  ]);
+  assert.deepEqual(output.metadata, {
+    durationMs: 12.5,
+    language: "en",
+    pageCount: null,
+    warnings: [
+      {
+        code: "low_confidence",
+        message: "Some extracted text had low confidence.",
+      },
+    ],
+  });
+});
+
+test("parseAttachment rejects malformed provider output at normalization boundaries", async () => {
+  const validBlock = {
+    id: "block_1",
+    kind: "paragraph",
+    order: 0,
+    text: "body",
+  };
+  const validTable = {
+    id: "table_1",
+    rows: [["cell"]],
+  };
+  const cases: Array<{
+    name: string;
+    result: unknown;
+    message: RegExp;
+  }> = [
+    {
+      message: /Parser provider result must be a plain object/u,
+      name: "missing result object",
+      result: null,
+    },
+    {
+      message: /Parser text must be a string/u,
+      name: "non-string text",
+      result: { text: 123 },
+    },
+    {
+      message: /Parser blocks must be an array/u,
+      name: "non-array blocks",
+      result: { blocks: "not blocks", text: "body" },
+    },
+    {
+      message: /Parser blocks exceed/u,
+      name: "too many blocks",
+      result: { blocks: new Array(5_001).fill(validBlock), text: "body" },
+    },
+    {
+      message: /unsupported kind/u,
+      name: "unsupported block kind",
+      result: { blocks: [{ ...validBlock, kind: "unsupported" }], text: "body" },
+    },
+    {
+      message: /Parser block 1 order must be a non-negative integer/u,
+      name: "invalid block order",
+      result: { blocks: [{ ...validBlock, order: -1 }], text: "body" },
+    },
+    {
+      message: /Parser block 1 confidence must be between 0 and 1/u,
+      name: "invalid block confidence",
+      result: { blocks: [{ ...validBlock, confidence: 1.5 }], text: "body" },
+    },
+    {
+      message: /Parser tables must be an array/u,
+      name: "non-array tables",
+      result: { tables: "not tables", text: "body" },
+    },
+    {
+      message: /Parser tables exceed/u,
+      name: "too many tables",
+      result: { tables: new Array(101).fill(validTable), text: "body" },
+    },
+    {
+      message: /Parser table 1 rows must be an array/u,
+      name: "non-array table rows",
+      result: { tables: [{ id: "table_1", rows: "not rows" }], text: "body" },
+    },
+    {
+      message: /Parser table 1 row 1 must be an array/u,
+      name: "non-array table row",
+      result: { tables: [{ id: "table_1", rows: ["not row"] }], text: "body" },
+    },
+    {
+      message: /Parser table 1 row 1 exceeds/u,
+      name: "too many table columns",
+      result: { tables: [{ id: "table_1", rows: [new Array(51).fill("cell")] }], text: "body" },
+    },
+    {
+      message: /Parser table 1 row 1 cell 1 must be a string/u,
+      name: "non-string table cell",
+      result: { tables: [{ id: "table_1", rows: [[123]] }], text: "body" },
+    },
+    {
+      message: /Parser metadata field "extra" is not supported/u,
+      name: "unsupported top-level metadata",
+      result: { metadata: { extra: true }, text: "body" },
+    },
+    {
+      message: /Parser metadata warnings must be an array/u,
+      name: "non-array warnings",
+      result: { metadata: { warnings: "not warnings" }, text: "body" },
+    },
+    {
+      message: /Parser metadata warnings exceed/u,
+      name: "too many warnings",
+      result: {
+        metadata: {
+          warnings: new Array(51).fill({ code: "warn", message: "warning" }),
+        },
+        text: "body",
+      },
+    },
+    {
+      message: /Parser warning 1 must be a plain object/u,
+      name: "invalid warning entry",
+      result: { metadata: { warnings: ["warning"] }, text: "body" },
+    },
+    {
+      message: /Parser block 1 metadata exceeds/u,
+      name: "too many block metadata keys",
+      result: {
+        blocks: [{
+          ...validBlock,
+          metadata: Object.fromEntries(
+            Array.from({ length: 21 }, (_, index) => [`key_${index}`, index]),
+          ),
+        }],
+        text: "body",
+      },
+    },
+    {
+      message: /Parser block 1 metadata contains an invalid metadata key/u,
+      name: "invalid block metadata key",
+      result: { blocks: [{ ...validBlock, metadata: { "": "empty" } }], text: "body" },
+    },
+    {
+      message: /Parser block 1 metadata contains an unsupported metadata value/u,
+      name: "unsupported block metadata value",
+      result: { blocks: [{ ...validBlock, metadata: { nested: { value: true } } }], text: "body" },
+    },
+  ];
+
+  for (const testCase of cases) {
+    await assert.rejects(
+      () => parseAttachmentWithProviderResult(providerResultForRuntimeValidation(testCase.result)),
+      testCase.message,
+      testCase.name,
+    );
+  }
 });
 
 test("ffmpeg helpers cover env lookup, system fallback, passthrough, and video failure paths", async () => {

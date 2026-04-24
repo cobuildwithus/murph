@@ -23,6 +23,27 @@ function buildMemberActivatedWake(eventId: string) {
   };
 }
 
+function buildRuntimeTimerJobRequest(overrides: Record<string, unknown> = {}) {
+  return {
+    bundle: null,
+    run: {
+      attempt: 1,
+      runId: "run_123",
+      startedAt: "2026-04-08T00:00:01.000Z",
+    },
+    runDrain: {
+      acquiredAt: "2026-04-08T00:00:00.000Z",
+      events: [],
+      inputCommittedSeq: "24",
+      inputCursorVersion: "4",
+      runId: "run_123",
+      triggerKind: "runtime_timer",
+      userId: "member_123",
+    },
+    ...overrides,
+  };
+}
+
 describe("hosted runtime parser coverage", () => {
   it("rejects missing or null runDrain on runtime job inputs", () => {
     expect(() => parseHostedAssistantRuntimeJobInput({
@@ -124,13 +145,7 @@ describe("hosted runtime parser coverage", () => {
   });
 
   it("parses run-drain finalize requests", () => {
-    const parsed = parseHostedAssistantRuntimeJobRequest({
-      bundle: null,
-      run: {
-        attempt: 1,
-        runId: "run_123",
-        startedAt: "2026-04-08T00:00:01.000Z",
-      },
+    const parsed = parseHostedAssistantRuntimeJobRequest(buildRuntimeTimerJobRequest({
       runDrain: {
         acquiredAt: "2026-04-08T00:00:00.000Z",
         events: [],
@@ -141,7 +156,7 @@ describe("hosted runtime parser coverage", () => {
         triggerKind: "runtime_timer",
         userId: "member_123",
       },
-    });
+    }));
 
     expect(resolveHostedWake(parsed.runDrain)).toEqual({
       eventId: "hosted-run:run_123",
@@ -169,13 +184,7 @@ describe("hosted runtime parser coverage", () => {
   });
 
   it("rejects invalid run-drain finalize flags", () => {
-    expect(() => parseHostedAssistantRuntimeJobRequest({
-      bundle: null,
-      run: {
-        attempt: 1,
-        runId: "run_123",
-        startedAt: "2026-04-08T00:00:01.000Z",
-      },
+    expect(() => parseHostedAssistantRuntimeJobRequest(buildRuntimeTimerJobRequest({
       runDrain: {
         acquiredAt: "2026-04-08T00:00:00.000Z",
         events: [],
@@ -186,7 +195,7 @@ describe("hosted runtime parser coverage", () => {
         triggerKind: "runtime_timer",
         userId: "member_123",
       },
-    })).toThrow(/resumeFinalize must be a boolean/u);
+    }))).toThrow(/resumeFinalize must be a boolean/u);
   });
 
   it("rejects legacy request.wake once runDrain is present", () => {
@@ -217,8 +226,7 @@ describe("hosted runtime parser coverage", () => {
   });
 
   it("derives a synthetic runtime-timer wake from empty run-drain requests", () => {
-    const parsed = parseHostedAssistantRuntimeJobRequest({
-      bundle: null,
+    const parsed = parseHostedAssistantRuntimeJobRequest(buildRuntimeTimerJobRequest({
       run: {
         attempt: 1,
         runId: "run_empty_drain",
@@ -233,7 +241,7 @@ describe("hosted runtime parser coverage", () => {
         triggerKind: "runtime_timer",
         userId: "member_123",
       },
-    });
+    }));
 
     expect(resolveHostedWake(parsed.runDrain)).toEqual({
       eventId: "hosted-run:run_empty_drain",
@@ -298,5 +306,109 @@ describe("hosted runtime parser coverage", () => {
         },
       },
     })).toThrow(/webhookVerificationToken is a provider-owned admin secret/u);
+  });
+
+  it("parses explicit managed auto-reply channel config", () => {
+    expect(
+      parseHostedAssistantRuntimeConfig({
+        resolvedConfig: {
+          channelCapabilities: {
+            emailSendReady: true,
+            telegramBotConfigured: true,
+          },
+          deviceSync: null,
+          managedAutoReplyChannels: [
+            {
+              capabilityReady: true,
+              channel: "email",
+              memberChannel: "email",
+            },
+            {
+              capabilityReady: false,
+              channel: "telegram",
+            },
+            {
+              capabilityReady: true,
+              channel: "linq",
+              memberChannel: null,
+            },
+          ],
+        },
+      }),
+    ).toEqual({
+      resolvedConfig: {
+        channelCapabilities: {
+          emailSendReady: true,
+          telegramBotConfigured: true,
+        },
+        deviceSync: null,
+        managedAutoReplyChannels: [
+          {
+            capabilityReady: true,
+            channel: "email",
+            memberChannel: "email",
+          },
+          {
+            capabilityReady: false,
+            channel: "telegram",
+            memberChannel: null,
+          },
+          {
+            capabilityReady: true,
+            channel: "linq",
+            memberChannel: null,
+          },
+        ],
+      },
+    });
+  });
+
+  it("rejects malformed explicit managed auto-reply channel config", () => {
+    expect(() => parseHostedAssistantRuntimeConfig({
+      resolvedConfig: {
+        channelCapabilities: {
+          emailSendReady: true,
+          telegramBotConfigured: true,
+        },
+        managedAutoReplyChannels: {
+          email: true,
+        },
+      },
+    })).toThrow(/managedAutoReplyChannels must be an array/u);
+
+    expect(() => parseHostedAssistantRuntimeConfig({
+      resolvedConfig: {
+        channelCapabilities: {
+          emailSendReady: true,
+          telegramBotConfigured: true,
+        },
+        managedAutoReplyChannels: [
+          {
+            capabilityReady: true,
+            channel: "",
+          },
+        ],
+      },
+    })).toThrow(/managedAutoReplyChannels\[0\]\.channel must be a non-empty string/u);
+  });
+
+  it("parses nullable and string run tokens on hosted runtime job requests", () => {
+    expect(
+      parseHostedAssistantRuntimeJobRequest(buildRuntimeTimerJobRequest({
+        runToken: null,
+      })).runToken,
+    ).toBeNull();
+
+    expect(
+      parseHostedAssistantRuntimeJobRequest(buildRuntimeTimerJobRequest({
+        runToken: "run-token-123",
+      })).runToken,
+    ).toBe("run-token-123");
+  });
+
+  it("rejects invalid run tokens", () => {
+    expect(() => parseHostedAssistantRuntimeJobRequest(buildRuntimeTimerJobRequest({
+      runToken: "",
+    }))).toThrow(/request runToken must be a non-empty string/u);
   });
 });
