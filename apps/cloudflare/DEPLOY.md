@@ -48,6 +48,7 @@ Set these in the selected GitHub environment as vars:
 
 `CF_PUBLIC_BASE_URL` is required for the standard deploy-and-smoke flow because smoke targets the public Worker URL after deploy.
 The workflow enables `HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER=true`; deploy smoke signs `/internal/deploy/container-smoke`, starts the Cloudflare-managed runner container, and compares its reported runner-bundle fingerprint with the freshly rendered `.deploy/runner-bundle` manifest.
+Because Cloudflare updates Worker code before container instances finish rolling, the runner-container smoke retries through the container rollout window and does not pass until the managed container reports the freshly deployed runner bundle.
 
 ## Required GitHub Environment Secrets
 
@@ -274,7 +275,7 @@ That command:
 - renders the deploy config and worker secrets payload
 - assembles the runner bundle, building and packing the runner workspace closure with bounded parallelism (`MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY` and `MURPH_RUNNER_BUNDLE_PACK_CONCURRENCY`, both defaulting to `4`)
 - prepares the stable native runner base image with Docker's local cache
-- deploys the Worker directly with Wrangler, which builds only the small app image layer from the prepared runner bundle
+- deploys the Worker directly with Wrangler using immediate container rollout, which builds only the small app image layer from the prepared runner bundle
 
 The GitHub `Deploy Cloudflare Hosted Execution` workflow prepares the same base image with Docker Buildx and the GitHub Actions cache before `wrangler deploy`, so normal production deploys avoid rebuilding the stable native parser stack during the `Deploy Worker` step.
 The workflow also runs `pnpm --dir apps/cloudflare runner:docker:smoke:prepared-base` before any deploy. That smoke builds the app image from a prepared runner bundle and executes the hosted runner inside Docker. Because the smoke overlays test entrypoints into `.deploy/runner-bundle/`, the workflow re-runs `deploy:artifacts` afterward and `deploy:worker:apply` rejects any smoke-mutated bundle that reaches the deploy step.
@@ -285,6 +286,7 @@ The workflow also runs `pnpm --dir apps/cloudflare runner:docker:smoke:prepared-
 
 - `GET /`
 - `GET /health`
+- if `HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER=true`, one signed `POST /internal/deploy/container-smoke` that waits until the Cloudflare-managed runner container reports the expected runner-bundle fingerprint
 - if `HOSTED_EXECUTION_SMOKE_USER_ID` is configured, one authenticated `GET /internal/users/:userId/status`
 
 Optional smoke env:
@@ -293,5 +295,6 @@ Optional smoke env:
 - `HOSTED_EXECUTION_SMOKE_USER_ID` to enable the authenticated status check
 - `HOSTED_EXECUTION_SMOKE_OIDC_TOKEN` or `VERCEL_OIDC_TOKEN` for authenticated status auth
 - `HOSTED_EXECUTION_SMOKE_VERSION_ID` to pin smoke requests to a version in the active deployment; the deploy workflow passes the freshly deployed version
+- `HOSTED_EXECUTION_SMOKE_RUNNER_MAX_ATTEMPTS` and `HOSTED_EXECUTION_SMOKE_RUNNER_RETRY_DELAY_MS` to override the managed-container rollout wait
 
 If `HOSTED_EXECUTION_SMOKE_USER_ID` is unset, smoke stops after the public banner and health checks.

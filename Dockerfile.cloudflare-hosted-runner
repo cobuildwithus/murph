@@ -4,4 +4,5 @@ FROM ${HOSTED_RUNNER_BASE_IMAGE}
 
 COPY --chown=runner:runner .deploy/runner-bundle/ /app/
 
+ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["node", "dist/container-entrypoint.js"]
