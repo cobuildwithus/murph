@@ -364,12 +364,14 @@ describe("hosted runner container image contract", () => {
       "WHISPER_MODEL_PATH=/home/runner/.murph/models/whisper/${WHISPER_MODEL_FILE}",
     );
     expect(baseDockerfile).toContain("RUN ldconfig");
+    expect(baseDockerfile).toContain("tini");
     expect(baseDockerfile).not.toContain('CMD ["node", "dist/container-entrypoint.js"]');
     expect(finalDockerfile).toContain(`ARG HOSTED_RUNNER_BASE_IMAGE=${hostedRunnerBaseImageTag}`);
     expect(finalDockerfile).toContain("FROM ${HOSTED_RUNNER_BASE_IMAGE}");
     expect(finalDockerfile).toContain(
       "COPY --chown=runner:runner .deploy/runner-bundle/ /app/",
     );
+    expect(finalDockerfile).toContain('ENTRYPOINT ["/usr/bin/tini", "--"]');
     expect(finalDockerfile).toContain('CMD ["node", "dist/container-entrypoint.js"]');
     expect(finalDockerfile).not.toContain("apt-get install");
     expect(finalDockerfile).not.toContain("whisper.cpp");

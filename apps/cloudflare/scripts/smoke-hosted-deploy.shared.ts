@@ -34,8 +34,8 @@ type FetchLike = typeof fetch;
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const appDir = path.resolve(scriptDir, "..");
-const DEFAULT_RUNNER_CONTAINER_SMOKE_MAX_ATTEMPTS = 8;
-const DEFAULT_RUNNER_CONTAINER_SMOKE_RETRY_DELAY_MS = 5_000;
+const DEFAULT_RUNNER_CONTAINER_SMOKE_MAX_ATTEMPTS = 120;
+const DEFAULT_RUNNER_CONTAINER_SMOKE_RETRY_DELAY_MS = 10_000;
 
 interface SmokeControlRequest {
   authorizationHeader: string;
@@ -309,7 +309,9 @@ function assertSmokeRunnerBundleManifest(
     actual.sourceFingerprint !== expected.sourceFingerprint
   ) {
     throw new RunnerContainerSmokeRetryableError(
-      "runner container smoke did not run the expected runner bundle.",
+      "runner container smoke did not run the expected runner bundle. "
+        + `expected bundle=${expected.bundleFingerprint} source=${expected.sourceFingerprint}; `
+        + `actual bundle=${actual.bundleFingerprint} source=${actual.sourceFingerprint}.`,
     );
   }
 }

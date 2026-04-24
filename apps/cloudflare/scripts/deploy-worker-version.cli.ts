@@ -37,6 +37,7 @@ export async function runDeployWorkerVersionCli(
           "deploy",
           "--config",
           input.configPath,
+          "--containers-rollout=immediate",
           "--message",
           input.deploymentMessage,
           "--name",
