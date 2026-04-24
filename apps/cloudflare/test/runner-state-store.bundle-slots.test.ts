@@ -423,6 +423,29 @@ describe("RunnerStateStore pending cleanup sidecar", () => {
       telegramMessages: [],
     });
   });
+
+  it("clears a scalar durable recovery run-id index instead of treating it as a list", async () => {
+    const { storageValues, store } = createRunnerStateStoreHarness();
+    const runId = "run-cleanup";
+
+    await store.bootstrapUser("user-cache");
+    storageValues.set(pendingRunCleanupStorageKey(runId), {
+      emailMessages: [],
+      linqMessageIds: ["linq-1"],
+      required: true,
+      telegramMessages: [],
+    });
+    storageValues.set(pendingRunCleanupRunIdsStorageKey(), runId);
+
+    await expect(store.readPendingRunCleanupRecoveryRunIds()).resolves.toEqual([]);
+    expect(storageValues.has(pendingRunCleanupRunIdsStorageKey())).toBe(false);
+    await expect(store.readDurablePendingRunCleanup(runId)).resolves.toEqual({
+      emailMessages: [],
+      linqMessageIds: ["linq-1"],
+      required: true,
+      telegramMessages: [],
+    });
+  });
 });
 
 describe("RunnerStateStore tracked authoritative cursor", () => {

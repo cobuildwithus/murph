@@ -209,6 +209,7 @@ CREATE TABLE "hosted_member_billing_ref" (
     "stripe_customer_id_encrypted" TEXT,
     "stripe_subscription_lookup_key" TEXT,
     "stripe_subscription_id_encrypted" TEXT,
+    "last_stripe_event_created_at" TIMESTAMP(3),
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMP(3) NOT NULL
 );
@@ -857,6 +858,9 @@ CREATE INDEX "hosted_ai_usage_stripe_meter_due_idx" ON "hosted_ai_usage"("stripe
 
 -- CreateIndex
 CREATE INDEX "hosted_ai_usage_surface_created_at_idx" ON "hosted_ai_usage"("surface", "created_at");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "hosted_ai_usage_turn_id_attempt_count_idx" ON "hosted_ai_usage"("turn_id", "attempt_count");
 
 -- CreateIndex
 CREATE INDEX "hosted_assistant_runtime_issue_fingerprint_occurred_at_idx" ON "hosted_assistant_runtime_issue"("fingerprint", "occurred_at");

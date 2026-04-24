@@ -279,32 +279,22 @@ function parseHostedMemberRoutingTelegramPrivateValue(
     };
   }
 
-  if (envelope.status === "unsupported") {
-    return {
-      telegramThreadId: null,
-      telegramUserId: null,
-    };
-  }
-
-  const legacyTelegramTarget = normalizeHostedTelegramDirectThreadTarget(normalized);
-
   return {
-    telegramThreadId: legacyTelegramTarget,
-    telegramUserId: legacyTelegramTarget,
+    telegramThreadId: null,
+    telegramUserId: null,
   };
 }
 
 function parseHostedMemberRoutingTelegramPrivateEnvelope(
   value: string,
 ):
-  | { status: "legacy" }
   | { status: "supported"; telegramThreadId: string | null; telegramUserId: string | null }
   | { status: "unsupported" } {
   try {
     const parsed: unknown = JSON.parse(value);
 
     if (!parsed || typeof parsed !== "object") {
-      return { status: "legacy" };
+      return { status: "unsupported" };
     }
 
     if (Array.isArray(parsed)) {
@@ -324,7 +314,7 @@ function parseHostedMemberRoutingTelegramPrivateEnvelope(
       telegramUserId: typeof record.telegramUserId === "string" ? record.telegramUserId : null,
     };
   } catch {
-    return { status: "legacy" };
+    return { status: "unsupported" };
   }
 }
 
