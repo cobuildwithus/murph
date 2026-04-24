@@ -204,6 +204,7 @@ describe("experiment detail private-run composition", () => {
       status: "active",
     }));
     expect(privateRun?.nextStep).toEqual(expect.objectContaining({
+      context: "Personal outcome analysis becomes useful after the protocol window closes and enough follow-up evidence is available.",
       title: "Continue the protocol",
       when: "Day 6",
     }));
@@ -314,6 +315,26 @@ describe("experiment detail private-run composition", () => {
     expect(finishedMarkup).toContain("No biomarker comparison exported yet");
     expect(finishedMarkup).toContain("Private run recorded");
     expect(finishedMarkup).toContain("Private run present; outcome export still pending.");
+
+    const finishedFallbackRun = resolveBrowserVaultExperimentRun({
+      client: await createClient({
+        generatedAt: "2026-04-29T08:00:00.000Z",
+        trackedExperiments: [{
+          id: "exp_sauna_03",
+          slug: "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          startedOn: "2026-04-01",
+          status: "finished",
+          summary: null,
+          tags: ["sauna"],
+          title: "Finnish Dry Sauna",
+        }],
+      }),
+      protocol: protocol!,
+    });
+
+    expect(finishedFallbackRun?.conclusions?.[0]?.items[0]?.text).toBe(
+      "The private run exists, but no outcome comparison has been exported yet.",
+    );
 
     const staleMarkup = renderToStaticMarkup(
       <ResultsTab

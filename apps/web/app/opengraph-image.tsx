@@ -12,7 +12,7 @@ export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
 const HEADLINE = "Your personal,\nhealth assistant.";
-const SUBTEXT = "Expert-backed experiments, measured by your wearable.";
+const SUBTEXT = "Health experiments with friends.";
 
 export default async function OGImage() {
   const [heroData, fraunces400Data, fraunces600Data, dmSans400Data] =

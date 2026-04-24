@@ -134,6 +134,10 @@ test("HomePage renders the canonical landing page at the root route", async () =
     /curl -fsSL https:\/\/www\.withmurph\.ai\/install\.sh \| bash/
   );
   assert.match(markup, /murph chat/);
+  assert.match(markup, /Do I need a wearable\?/);
+  assert.match(markup, /No\. A wearable can add useful signals/);
+  assert.match(markup, /Wearable apps show status/);
+  assert.doesNotMatch(markup, /Your wearable shows data/);
 });
 
 test("HomePage metadata keeps the root route as the canonical landing URL", async () => {

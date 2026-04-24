@@ -123,7 +123,7 @@ export function resolveBrowserVaultExperimentRun({
           variant: "insight",
           items: [{
             icon: "→",
-            text: trackedExperiment.summary ?? "The private run exists, but no wearable outcome comparison has been exported yet.",
+            text: trackedExperiment.summary ?? "The private run exists, but no outcome comparison has been exported yet.",
           }],
         }]
       : undefined,
@@ -290,7 +290,7 @@ function buildRunNextStep(input: {
     instructions: input.protocol.protocol.find((step) => /session|protocol|complete/iu.test(step.detail))?.detail
       ?? input.protocol.protocol[0]?.detail
       ?? "Follow the protocol steps and keep the rest of the week ordinary.",
-    context: "Personal outcome analysis becomes useful after the protocol window closes and enough wearable data is available.",
+    context: "Personal outcome analysis becomes useful after the protocol window closes and enough follow-up evidence is available.",
   };
 }
 
