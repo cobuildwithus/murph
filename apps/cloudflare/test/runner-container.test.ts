@@ -46,7 +46,7 @@ describe("RunnerContainer", () => {
     vi.clearAllMocks();
   });
 
-  it("reuses a warm per-user shell across back-to-back invocations", async () => {
+  it("destroys each successful per-user shell and cold-starts back-to-back invocations", async () => {
     const { container, containerFetch, destroy, setOutboundByHosts, startAndWaitForPorts } =
       createContainerDouble({
         containerFetch: vi.fn(async (url: string) => {
@@ -85,8 +85,8 @@ describe("RunnerContainer", () => {
 
     expect(firstResponse).toEqual(createRunnerResult());
     expect(secondResponse).toEqual(createRunnerResult());
-    expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
-    expect(destroy).not.toHaveBeenCalled();
+    expect(startAndWaitForPorts).toHaveBeenCalledTimes(2);
+    expect(destroy).toHaveBeenCalledTimes(2);
 
     expect(startAndWaitForPorts.mock.calls[0]?.[0]?.startOptions?.envVars).toEqual({
       PORT: "8080",
@@ -100,7 +100,8 @@ describe("RunnerContainer", () => {
     const firstAuthorization = readAuthorizationHeader(executeCalls[0]?.[1]?.headers);
     const secondAuthorization = readAuthorizationHeader(executeCalls[1]?.[1]?.headers);
     expect(firstAuthorization).toMatch(/^Bearer .+/u);
-    expect(secondAuthorization).toBe(firstAuthorization);
+    expect(secondAuthorization).toMatch(/^Bearer .+/u);
+    expect(secondAuthorization).not.toBe(firstAuthorization);
 
     const outboundTokens = setOutboundByHosts.mock.calls
       .map(([mapping]) => readRunnerProxyToken(mapping as Record<string, unknown>))
@@ -353,7 +354,7 @@ describe("RunnerContainer", () => {
     expect(readRunnerMethodsByHost(mapping ?? {})).not.toHaveProperty("localhost");
   });
 
-  it("destroys the warm shell on container activity expiry and cold-starts the next run", async () => {
+  it("keeps activity expiry idempotent after post-run teardown and cold-starts the next run", async () => {
     const { container, containerFetch, destroy, setOutboundByHosts, startAndWaitForPorts } =
       createContainerDouble();
 
@@ -369,6 +370,7 @@ describe("RunnerContainer", () => {
     );
     const firstToken = readAuthorizationHeader(firstExecuteCall?.[1]?.headers);
 
+    expect(destroy).toHaveBeenCalledTimes(1);
     await container.onActivityExpired();
     expect(destroy).toHaveBeenCalledTimes(1);
 
@@ -388,11 +390,79 @@ describe("RunnerContainer", () => {
       .filter((token): token is string => token !== null);
 
     expect(startAndWaitForPorts).toHaveBeenCalledTimes(2);
+    expect(destroy).toHaveBeenCalledTimes(2);
     expect(firstToken).not.toBe(secondToken);
     expect(outboundTokens).toHaveLength(2);
     expect(outboundTokens[0]).toBeTruthy();
     expect(outboundTokens[1]).toBeTruthy();
     expect(outboundTokens[0]).not.toBe(outboundTokens[1]);
+  });
+
+  it("does not reuse a successful shell when best-effort teardown fails", async () => {
+    vi.useFakeTimers();
+
+    try {
+      let status: "running" | "stopped" = "stopped";
+      const destroy = vi.fn(async () => {
+        if (destroy.mock.calls.length === 1) {
+          status = "running";
+          throw new Error("transient destroy failure");
+        }
+        status = "stopped";
+      });
+      const getState = vi.fn(async () => ({
+        lastChange: Date.now(),
+        status,
+      }));
+      const startAndWaitForPorts = vi.fn(async () => {
+        status = "running";
+      });
+      const { container, containerFetch } = createContainerDouble({
+        destroy,
+        getState,
+        startAndWaitForPorts,
+      });
+
+      const firstInvoke = container.invoke({
+        job: {
+          request: createRunnerRequest("evt_teardown_failure_first"),
+        },
+        timeoutMs: 30_000,
+        userId: "member_123",
+      });
+      await vi.advanceTimersByTimeAsync(5_500);
+      await expect(firstInvoke).resolves.toEqual(createRunnerResult());
+
+      await expect(container.invoke({
+        job: {
+          request: createRunnerRequest("evt_teardown_failure_second"),
+        },
+        timeoutMs: 30_000,
+        userId: "member_123",
+      })).resolves.toEqual(createRunnerResult());
+
+      const executeCalls = containerFetch.mock.calls.filter(([url]) =>
+        String(url).endsWith("/internal/run")
+      );
+      const firstAuthorization = readAuthorizationHeader(executeCalls[0]?.[1]?.headers);
+      const secondAuthorization = readAuthorizationHeader(executeCalls[1]?.[1]?.headers);
+
+      expect(startAndWaitForPorts).toHaveBeenCalledTimes(2);
+      expect(destroy).toHaveBeenCalledTimes(3);
+      expect(firstAuthorization).toMatch(/^Bearer .+/u);
+      expect(secondAuthorization).toMatch(/^Bearer .+/u);
+      expect(secondAuthorization).not.toBe(firstAuthorization);
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          component: "container",
+          level: "warn",
+          message: "Hosted execution container destroy request failed.",
+          phase: "failed",
+        }),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("keeps activity-expiry cleanup best-effort when destroy fails", async () => {
@@ -439,7 +509,7 @@ describe("RunnerContainer", () => {
     );
   });
 
-  it("destroys an already-running shell with ambiguous supervisor state before reusing it", async () => {
+  it("destroys an already-running shell with ambiguous supervisor state before cold start", async () => {
     const { container, destroy, startAndWaitForPorts } = createContainerDouble({
       initialStatus: "running",
     });
@@ -452,7 +522,7 @@ describe("RunnerContainer", () => {
       userId: "member_123",
     });
 
-    expect(destroy).toHaveBeenCalledTimes(1);
+    expect(destroy).toHaveBeenCalledTimes(2);
     expect(destroy.mock.invocationCallOrder[0]).toBeLessThan(
       startAndWaitForPorts.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
     );
@@ -465,6 +535,7 @@ describe("RunnerContainer", () => {
     try {
       let healthFailures = 0;
       const { container, startAndWaitForPorts } = createContainerDouble({
+        initialStatus: "running",
         containerFetch: vi.fn(async (url: string) => {
           if (url.endsWith("/health")) {
             healthFailures += 1;
@@ -485,13 +556,8 @@ describe("RunnerContainer", () => {
           });
         }),
       });
-
-      await container.invoke({
-        job: {
-          request: createRunnerRequest("evt_initial_warm"),
-        },
-        timeoutMs: 5_000,
-        userId: "member_123",
+      Object.assign(container, {
+        runnerControlToken: "stale-control-token",
       });
 
       await container.invoke({
@@ -503,8 +569,8 @@ describe("RunnerContainer", () => {
       });
 
       expect(healthFailures).toBe(1);
-      expect(startAndWaitForPorts).toHaveBeenCalledTimes(2);
-      expect(startAndWaitForPorts.mock.calls[1]?.[0]).toMatchObject({
+      expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
+      expect(startAndWaitForPorts.mock.calls[0]?.[0]).toMatchObject({
         cancellationOptions: expect.objectContaining({
           instanceGetTimeoutMS: 2_500,
           portReadyTimeoutMS: 2_500,
@@ -1074,11 +1140,11 @@ describe("RunnerContainer", () => {
     expect(startAndWaitForPorts).not.toHaveBeenCalled();
   });
 
-  it("restarts the warm shell when destroy races with an already-stopping shell", async () => {
+  it("cold-starts after a warm health failure whose destroy races with an already-stopping shell", async () => {
     vi.useFakeTimers();
 
     try {
-      let status: "running" | "stopping" | "stopped" = "stopped";
+      let status: "running" | "stopping" | "stopped" = "running";
       let healthChecks = 0;
       const destroy = vi.fn(async () => {
         status = "stopping";
@@ -1117,29 +1183,23 @@ describe("RunnerContainer", () => {
         getState,
         startAndWaitForPorts: startAndWaitForPortsMock,
       });
+      Object.assign(container, {
+        runnerControlToken: "stale-control-token",
+      });
 
-      await expect(container.invoke({
-        job: {
-          request: createRunnerRequest("evt_before_destroy_race"),
-        },
-        timeoutMs: 30_000,
-        userId: "member_123",
-      })).resolves.toEqual(createRunnerResult());
-      expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
-
-      const secondInvokePromise = container.invoke({
+      const invokePromise = container.invoke({
         job: {
           request: createRunnerRequest("evt_after_destroy_race"),
         },
         timeoutMs: 30_000,
         userId: "member_123",
       });
-      await vi.advanceTimersByTimeAsync(300);
+      await vi.advanceTimersByTimeAsync(600);
 
-      await expect(secondInvokePromise).resolves.toEqual(createRunnerResult());
+      await expect(invokePromise).resolves.toEqual(createRunnerResult());
       expect(healthChecks).toBe(1);
-      expect(destroy).toHaveBeenCalledTimes(1);
-      expect(startAndWaitForPorts).toHaveBeenCalledTimes(2);
+      expect(destroy).toHaveBeenCalledTimes(2);
+      expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
     } finally {
       vi.useRealTimers();
     }

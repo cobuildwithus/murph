@@ -61,6 +61,24 @@ describe("runDeployWorkerVersionCli", () => {
     );
   });
 
+  it("rejects unsupported deploy args before entering rollout orchestration", async () => {
+    const runHostedWorkerDeployment = vi.fn();
+
+    await expect(
+      runDeployWorkerVersionCli(["--dry-run"], {
+        deployRoot: path.join("/tmp", "repo", "apps", "cloudflare"),
+        env: {
+          CF_WORKER_NAME: "hosted-worker",
+          HOSTED_EXECUTION_DEPLOYMENT_MODE: "direct",
+        },
+        log: false,
+        runHostedWorkerDeployment,
+      }),
+    ).rejects.toThrow("Unsupported deploy worker argument: --dry-run");
+
+    expect(runHostedWorkerDeployment).not.toHaveBeenCalled();
+  });
+
   it("treats wrangler no-deployments errors as an empty current deployment", async () => {
     wranglerMocks.runWranglerJson.mockRejectedValueOnce(new Error("Worker hosted-worker has no deployments"));
 

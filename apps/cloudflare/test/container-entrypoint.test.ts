@@ -1,7 +1,7 @@
 import { request as httpRequest, type ClientRequest } from "node:http";
 import { EventEmitter } from "node:events";
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { HostedAssistantConfigurationError } from "@murphai/assistant-runtime/hosted-assistant-env";
 
@@ -27,10 +27,18 @@ import {
 import * as nodeRunner from "../src/node-runner.js";
 
 const servers: Array<Awaited<ReturnType<typeof startHostedContainerEntrypoint>>> = [];
+const nativeFetch = globalThis.fetch;
+
+beforeEach(() => {
+  vi.unstubAllGlobals();
+  globalThis.fetch = nativeFetch;
+});
 
 afterEach(async () => {
   vi.clearAllMocks();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+  globalThis.fetch = nativeFetch;
   await Promise.all(servers.splice(0).map(async (server) => {
     server.closeAllConnections?.();
     await new Promise<void>((resolve, reject) => {
