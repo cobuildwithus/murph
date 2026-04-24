@@ -56,7 +56,7 @@ describe('assistant channel adapter delivery inference', () => {
     })
   })
 
-  it('keeps linq thread-only by default', () => {
+  it('keeps linq thread-only by default and allows requested participant delivery', () => {
     expect(
       getAssistantChannelAdapter('linq')?.inferBindingDelivery({
         conversation: {
@@ -74,6 +74,18 @@ describe('assistant channel adapter delivery inference', () => {
     ).toEqual({
       kind: 'thread',
       target: 'linq-thread',
+    })
+
+    expect(
+      getAssistantChannelAdapter('linq')?.inferBindingDelivery({
+        conversation: {
+          participantId: 'linq-user',
+        },
+        deliveryKind: 'participant',
+      }),
+    ).toEqual({
+      kind: 'participant',
+      target: 'linq-user',
     })
   })
 

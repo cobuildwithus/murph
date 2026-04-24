@@ -155,6 +155,20 @@ describe('channel helper seams', () => {
 
     expect(
       inferBindingDeliveryForChannel({
+        channel: 'linq',
+        conversation: createConversation({
+          participantId: 'participant-2',
+          threadId: null,
+        }),
+        deliveryKind: 'participant',
+      }),
+    ).toEqual({
+      kind: 'participant',
+      target: 'participant-2',
+    })
+
+    expect(
+      inferBindingDeliveryForChannel({
         channel: 'custom-channel',
         conversation: createConversation({
           directness: 'group',
