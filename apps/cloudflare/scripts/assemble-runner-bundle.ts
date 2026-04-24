@@ -6,13 +6,13 @@ import { fileURLToPath } from "node:url";
 import { resolveCloudflareDeployPaths } from "./deploy-automation.js";
 import {
   hostedRunnerBundleOnlyDependencyNames,
+  hostedRunnerRuntimePackageName,
   runnerBundleDirectoryName,
   resolveHostedRunnerBuildPackageNames,
   resolveHostedRunnerWorkspacePackageNames,
 } from "./runner-bundle-contract.js";
 import { installPackedRunnerDependencies } from "./runner-bundle/dependency-install.js";
 import { materializeFinalRunnerBundle } from "./runner-bundle/final-bundle.js";
-import { runPnpmCommand } from "./runner-bundle/process.js";
 import {
   pruneRunnerBundle,
   rewriteRuntimeBinWrappers,
@@ -57,10 +57,10 @@ async function assembleRunnerBundle(): Promise<void> {
 
   try {
     if (!shouldSkipBuild) {
-      await buildHostedRunnerWorkspaceArtifacts(hostedRunnerBuildPackageNames, {
-        repoRoot,
-      });
-      await runPnpmCommand(["build"], { cwd: appDir });
+      await buildHostedRunnerWorkspaceArtifacts(
+        [...hostedRunnerBuildPackageNames, hostedRunnerRuntimePackageName],
+        { repoRoot },
+      );
     }
 
     await stageHostedRunnerRuntimeArtifact(stagingBundleDir, {

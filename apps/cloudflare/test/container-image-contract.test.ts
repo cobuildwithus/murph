@@ -72,7 +72,7 @@ describe("hosted runner container image contract", () => {
     expect(bundleAssemblyScript).toContain(
       'import { materializeFinalRunnerBundle } from "./runner-bundle/final-bundle.js";',
     );
-    expect(bundleAssemblyScript).toContain(
+    expect(bundleAssemblyScript).not.toContain(
       'import { runPnpmCommand } from "./runner-bundle/process.js";',
     );
     expect(bundleAssemblyScript).toContain(
@@ -81,12 +81,13 @@ describe("hosted runner container image contract", () => {
     expect(bundleAssemblyScript).toContain(
       'import {\n  buildHostedRunnerWorkspaceArtifacts,\n  packWorkspacePackageArtifacts,\n  stageHostedRunnerRuntimeArtifact,\n} from "./runner-bundle/workspace-artifacts.js";',
     );
+    expect(bundleAssemblyScript).toContain("hostedRunnerRuntimePackageName,");
     expect(bundleAssemblyScript).toContain("runnerBundleDirectoryName,");
     expect(bundleAssemblyScript).toContain("if (!shouldSkipBuild) {");
     expect(bundleAssemblyScript).toContain(
-      "await buildHostedRunnerWorkspaceArtifacts(hostedRunnerBuildPackageNames, {",
+      "await buildHostedRunnerWorkspaceArtifacts(\n        [...hostedRunnerBuildPackageNames, hostedRunnerRuntimePackageName],\n        { repoRoot },\n      );",
     );
-    expect(bundleAssemblyScript).toContain(
+    expect(bundleAssemblyScript).not.toContain(
       "await runPnpmCommand([\"build\"], { cwd: appDir });",
     );
     expect(bundleAssemblyScript).toContain(
