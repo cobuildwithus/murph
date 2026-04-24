@@ -44,4 +44,7 @@ export {
   isAssistantModelConfigurationError,
   resolveAssistantLanguageModel,
 } from './model-harness/model-spec.js'
-export type { AssistantResponsesRequestPolicy } from './model-harness/responses-policy.js'
+export type {
+  AssistantResponsesRequestDebugEvent,
+  AssistantResponsesRequestPolicy,
+} from './model-harness/responses-policy.js'

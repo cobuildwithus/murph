@@ -185,6 +185,14 @@ describe('assistant Responses API request policy', () => {
       body: string | null
       input: Parameters<typeof fetch>[0]
     }> = []
+    const debugEvents: Array<{
+      gatewayZeroDataRetention: boolean | null
+      inputTextLength: number
+      model: string | null
+      requestBody: string
+      requestBodyHash: string
+      toolNames: string[]
+    }> = []
     const baseFetch: typeof fetch = async (input, init) => {
       calls.push({
         body: typeof init?.body === 'string' ? init.body : null,
@@ -194,6 +202,20 @@ describe('assistant Responses API request policy', () => {
     }
     const fetchWithPolicy = createAssistantResponsesFetch(
       {
+        debugObserver(event) {
+          debugEvents.push({
+            gatewayZeroDataRetention: event.gatewayZeroDataRetention,
+            inputTextLength: event.inputTextLength,
+            model: event.model,
+            requestBody: event.requestBody,
+            requestBodyHash: event.requestBodyHash,
+            toolNames: event.toolNames,
+          })
+        },
+        gatewayReporting: {
+          tags: ['member:test'],
+          user: 'member_test',
+        },
         gatewayZeroDataRetention: true,
       },
       baseFetch,
@@ -201,7 +223,24 @@ describe('assistant Responses API request policy', () => {
 
     const response = await fetchWithPolicy('https://api.example.test/v1/responses', {
       body: JSON.stringify({
+        input: [
+          {
+            content: [
+              {
+                text: 'Send the signup welcome.',
+                type: 'input_text',
+              },
+            ],
+            role: 'user',
+          },
+        ],
         model: 'gpt-test',
+        tools: [
+          {
+            name: 'vault.show',
+            type: 'function',
+          },
+        ],
       }),
       method: 'POST',
     })
@@ -215,6 +254,20 @@ describe('assistant Responses API request policy', () => {
         },
       },
     })
+    expect(debugEvents).toHaveLength(1)
+    expect(debugEvents[0]).toMatchObject({
+      gatewayZeroDataRetention: true,
+      inputTextLength: 'Send the signup welcome.'.length,
+      model: 'gpt-test',
+      toolNames: ['vault.show'],
+    })
+    expect(debugEvents[0]?.requestBodyHash).toHaveLength(64)
+    expect(debugEvents[0]?.requestBody).toContain('Send the signup welcome.')
+    expect(debugEvents[0]?.requestBody).toContain('"zeroDataRetention":true')
+    expect(debugEvents[0]?.requestBody).toContain('"user":"[redacted]"')
+    expect(debugEvents[0]?.requestBody).toContain('"tags":"[redacted]"')
+    expect(debugEvents[0]?.requestBody).not.toContain('member_test')
+    expect(debugEvents[0]?.requestBody).not.toContain('member:test')
   })
 
   it('resolves assistant API keys by explicit, injected, and environment sources', () => {

@@ -113,6 +113,34 @@ describe("executeHostedIngressEvent", () => {
     mocks.prepareHostedWakeContext.mockResolvedValue(bootstrapResult);
     const debugSystemPrompt = "System prompt headed to Azure with notification rules. ".repeat(16);
     const debugUserPrompt = "Send exactly the signup welcome.";
+    const debugRequestBody = JSON.stringify({
+      model: "openai/gpt-5.4",
+      input: [
+        {
+          content: [
+            {
+              text: debugUserPrompt,
+              type: "input_text",
+            },
+          ],
+          role: "user",
+        },
+      ],
+      instructions: debugSystemPrompt,
+      providerOptions: {
+        gateway: {
+          tags: "[redacted]",
+          user: "[redacted]",
+          zeroDataRetention: true,
+        },
+      },
+      tools: [
+        {
+          name: "vault.show",
+          type: "function",
+        },
+      ],
+    });
     mocks.sendAssistantNotification.mockImplementationOnce(async (input) => {
       input.onTraceEvent?.({
         providerSessionId: null,
@@ -143,6 +171,42 @@ describe("executeHostedIngressEvent", () => {
           userPrompt: debugUserPrompt,
           userPromptLength: debugUserPrompt.length,
           zeroDataRetention: true,
+        },
+        updates: [],
+      });
+      input.onTraceEvent?.({
+        providerSessionId: null,
+        rawEvent: {
+          schema: "murph.assistant-responses-request-debug.v1",
+          type: "assistant.responses.request.debug",
+          contextManagementPresent: true,
+          gatewayOnlyProviderCount: 0,
+          gatewayTagsCount: 1,
+          gatewayUserPresent: true,
+          gatewayZeroDataRetention: true,
+          inputMessageCount: 1,
+          inputRoles: ["user"],
+          inputTextFieldCount: 1,
+          inputTextHash: "hash-input",
+          inputTextLength: debugUserPrompt.length,
+          instructionsHash: "hash-instructions",
+          instructionsLength: debugSystemPrompt.length,
+          method: "POST",
+          model: "openai/gpt-5.4",
+          payloadTopLevelKeys: ["input", "instructions", "model", "providerOptions", "tools"],
+          previousResponseIdPresent: false,
+          providerOptionsHash: "hash-provider-options",
+          requestBody: debugRequestBody,
+          requestBodyHash: "hash-request-body",
+          requestBodyLength: debugRequestBody.length,
+          requestUrlOrigin: "https://ai-gateway.vercel.sh",
+          requestUrlPath: "/v1/responses",
+          responseFormatHash: "hash-response-format",
+          textConfigHash: "hash-text-config",
+          toolChoice: "auto",
+          toolCount: 1,
+          toolNames: ["vault.show"],
+          toolsHash: "hash-tools",
         },
         updates: [],
       });
@@ -265,6 +329,29 @@ describe("executeHostedIngressEvent", () => {
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenNthCalledWith(
       3,
       expect.objectContaining({
+        component: "runtime.provider.http",
+        details: expect.objectContaining({
+          assistantResponsesDebug: expect.objectContaining({
+            gatewayZeroDataRetention: true,
+            model: "openai/gpt-5.4",
+            requestBodyChunkGroups: expect.arrayContaining([
+              expect.arrayContaining([
+                expect.stringContaining('"model":"openai/gpt-5.4"'),
+              ]),
+            ]),
+            requestBodyHash: "hash-request-body",
+            requestUrlPath: "/v1/responses",
+            toolNames: ["vault.show"],
+          }),
+        }),
+        message: "Hosted assistant final Responses request debug payload captured.",
+        phase: "wake.running",
+        wake,
+      }),
+    );
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenNthCalledWith(
+      4,
+      expect.objectContaining({
         component: "runtime",
         details: expect.objectContaining({
           notificationRouteChannel: "linq",
@@ -299,6 +386,18 @@ describe("executeHostedIngressEvent", () => {
     assert.ok(userPromptChunks.every((chunk) => chunk.length <= 320));
     assert.equal(systemPromptChunks.join(""), debugSystemPrompt.trim());
     assert.equal(userPromptChunks.join(""), debugUserPrompt);
+    const responsesDebug = result.redactedLogEntries?.[2]?.redacted?.assistantResponsesDebug;
+    assert.equal(typeof responsesDebug, "object");
+    assert.ok(responsesDebug !== null);
+    assert.ok(!Array.isArray(responsesDebug));
+    const responsesDebugRecord = responsesDebug as Record<string, unknown>;
+    const requestBodyChunkGroups = responsesDebugRecord.requestBodyChunkGroups;
+    assert.ok(Array.isArray(requestBodyChunkGroups));
+    assert.ok(requestBodyChunkGroups.every((group) => Array.isArray(group)));
+    assert.equal(
+      (requestBodyChunkGroups as string[][]).flat().join(""),
+      debugRequestBody,
+    );
     expect(result).toEqual({
       bootstrapResult,
       conversationMetrics: null,
@@ -337,6 +436,25 @@ describe("executeHostedIngressEvent", () => {
               ]),
               userPromptChunks: [debugUserPrompt],
               zeroDataRetention: true,
+            }),
+          }),
+        },
+        {
+          component: "runtime.provider.http",
+          eventId: "evt_notification",
+          level: "info",
+          message: "Hosted assistant final Responses request debug payload captured.",
+          phase: "wake.running",
+          redacted: expect.objectContaining({
+            assistantResponsesDebug: expect.objectContaining({
+              model: "openai/gpt-5.4",
+              requestBodyChunkGroups: expect.arrayContaining([
+                expect.arrayContaining([
+                  expect.stringContaining('"model":"openai/gpt-5.4"'),
+                ]),
+              ]),
+              requestBodyHash: "hash-request-body",
+              toolNames: ["vault.show"],
             }),
           }),
         },
