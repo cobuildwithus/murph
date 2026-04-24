@@ -1,4 +1,5 @@
 import { Cli, z } from "incur";
+import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 
 import {
   memoryDocumentSnapshotSchema,
@@ -75,6 +76,13 @@ export function registerMemoryCommands(cli: Cli.Cli) {
     async run({ args, options }) {
       const document = await readMemoryDocument(options.vault);
       const memory = args.memoryId ? await getMemoryRecord(options.vault, args.memoryId) : null;
+      if (args.memoryId && !memory) {
+        throw new VaultCliError(
+          "memory_not_found",
+          `Memory record "${args.memoryId}" does not exist.`,
+        );
+      }
+
       return {
         vault: options.vault,
         document,

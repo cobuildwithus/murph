@@ -17,12 +17,18 @@ Rules:
 - Avoid interactive Murph entrypoints such as `murph chat`, `murph run`, `vault-cli chat`, `vault-cli run`, `assistant chat`, and `assistant run`.
 - Prefer the operator's configured default vault. Do not pass `--vault` unless the user explicitly wants a different vault or the command fails because no default vault is configured.
 - When structured output will help, append `--format json`.
+- Do not quote raw vault root, runtime root, status path, or other local filesystem paths in the user-facing answer. Summarize the relevant fields, or use `--filter-output <field>` when you only need one value.
 
 Discovery order:
 1. If you know the exact command, run it directly.
 2. If the command path is unclear, run `vault-cli <command path> --help`.
-3. If you need exact arguments, option names, or output contracts, run `vault-cli <command path> --schema --format json`.
+3. If you need exact arguments, option names, or output contracts for one leaf command, run `vault-cli <command path> --schema --format json`.
 4. Use `vault-cli --llms` or `vault-cli --llms-full` only for broad discovery.
+
+Schema notes:
+- `vault-cli --schema --format json` and group requests such as `vault-cli inbox --schema --format json` return a `murph.schema-index.v1` command index, not one leaf payload schema.
+- For commands that use `--input @file.json|-`, run the matching `scaffold` command to get a payload template before writing.
+- JSON error envelopes include `error.code` and `error.retryable`; use the code for recovery decisions. Common setup codes include `missing_vault`, `invalid_vault`, `memory_not_found`, and `knowledge_body_required`.
 
 Read-command chooser:
 - `vault-cli show <id>` for one exact record id.
@@ -36,6 +42,7 @@ Read-command chooser:
 If Murph is not configured yet:
 - ask the operator to install `@murphai/murph` if `vault-cli` is missing
 - ask them to run `murph onboard` or set `VAULT=/path/to/vault` if no default vault is configured
+- if a command returns `invalid_vault`, ask them to initialize or select an existing Murph vault before retrying
 
 When you answer, summarize the relevant Murph output instead of dumping large raw JSON unless the user asked for the raw result.
 

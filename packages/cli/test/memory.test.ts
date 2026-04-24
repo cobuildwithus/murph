@@ -21,6 +21,7 @@ import {
 import { readMemoryDocument as readMemoryDocumentFromQuery } from "@murphai/query";
 
 import { createTempVaultContext, runInProcessJsonCli } from "./cli-test-helpers.js";
+import { incurErrorBridge } from "../src/incur-error-bridge.js";
 import { registerMemoryCommands } from "../src/commands/memory.js";
 
 const cleanupPaths: string[] = [];
@@ -341,6 +342,31 @@ test("memory update refuses missing record ids through the registered CLI", asyn
   assert.equal(updated.exitCode, 1);
   assert.equal(updated.envelope.ok, false);
   assert.equal(updated.envelope.error.message, 'Memory record "mem_missing" does not exist.');
+});
+
+test("memory show refuses missing record ids through the registered CLI", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext("murph-memory-cli-show-missing-");
+  cleanupPaths.push(parentRoot);
+
+  const cli = Cli.create("vault-cli", {
+    description: "memory test cli",
+    version: "0.0.0-test",
+  });
+  cli.use(incurErrorBridge);
+
+  registerMemoryCommands(cli);
+
+  const shown = await runInProcessJsonCli(cli, [
+    "memory",
+    "show",
+    "mem_missing",
+    "--vault",
+    vaultRoot,
+  ]);
+  assert.equal(shown.exitCode, 1);
+  assert.equal(shown.envelope.ok, false);
+  assert.equal(shown.envelope.error.code, "memory_not_found");
+  assert.equal(shown.envelope.error.message, 'Memory record "mem_missing" does not exist.');
 });
 
 test("memory command module does not register a search subcommand", async () => {

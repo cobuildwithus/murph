@@ -11,6 +11,7 @@ import {
   type AuditCommandListItem,
   type CommandShowEntity,
 } from '@murphai/vault-usecases/helpers'
+import { assertInitializedVaultRoot } from './vault-root-validation.js'
 
 export type { AuditCommandListItem } from '@murphai/vault-usecases/helpers'
 
@@ -30,6 +31,7 @@ export async function showAudit(
   vaultRoot: string,
   auditId: string,
 ): Promise<CommandShowEntity> {
+  await assertInitializedVaultRoot(vaultRoot)
   const query = await loadQueryRuntime()
   const vault = await query.readVault(vaultRoot)
   const record = query.lookupEntityById(vault, auditId)
@@ -45,6 +47,7 @@ export async function listAudits(
   vaultRoot: string,
   options: AuditListOptions = {},
 ): Promise<AuditCommandListItem[]> {
+  await assertInitializedVaultRoot(vaultRoot)
   const query = await loadQueryRuntime()
   const vault = await query.readVault(vaultRoot)
   const sorted = [...vault.audits]

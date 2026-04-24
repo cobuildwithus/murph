@@ -9,6 +9,7 @@
  */
 
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   DEFAULT_ELEVATION_SAMPLE_SPACING_METERS,
   DEFAULT_MAX_ELEVATION_SAMPLES,
@@ -50,7 +51,8 @@ export async function estimateMapboxRoute(
   const accessToken = readMapboxAccessToken(env)
 
   if (!accessToken) {
-    throw new Error(
+    throw new VaultCliError(
+      'route_mapbox_token_missing',
       'Mapbox routing is not configured. Set MAPBOX_ACCESS_TOKEN in the runtime environment before using route estimation.',
     )
   }

@@ -9,7 +9,7 @@ export const incurErrorBridge = middleware(async (_context, next) => {
       const retryable =
         typeof error.context?.retryable === 'boolean'
           ? error.context.retryable
-          : undefined
+          : false
       const exitCode =
         typeof error.context?.exitCode === 'number'
           ? error.context.exitCode

@@ -132,6 +132,14 @@ export async function upsertKnowledgePage(
   const now = dependencies.now ?? (() => new Date())
   const savedAt = now().toISOString()
   const saveText = dependencies.saveText ?? saveKnowledgeText
+  const normalizedBody = normalizeKnowledgeBody(input.body)
+  if (input.body.trim().length === 0) {
+    throw new VaultCliError(
+      'knowledge_body_required',
+      'Knowledge page body must not be blank.',
+    )
+  }
+
   const initialTitle = deriveKnowledgeTitle({
     body: input.body,
     slug: input.slug,
@@ -175,7 +183,6 @@ export async function upsertKnowledgePage(
           ? orderedUniqueStrings([...existingSourcePaths, ...explicitSourcePaths])
           : existingSourcePaths,
       )
-      const normalizedBody = normalizeKnowledgeBody(input.body)
       const bodyRelatedSlugs = extractKnowledgeRelatedSlugsFromBody({
         body: input.body,
         slug,

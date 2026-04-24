@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { estimateMapboxRoute } from '../src/mapbox-route.js'
 
 function jsonResponse(payload: unknown, status = 200): Response {
@@ -35,6 +36,17 @@ describe('estimateMapboxRoute', () => {
     ).rejects.toThrow(
       'Set MAPBOX_ACCESS_TOKEN in the runtime environment before using route estimation.',
     )
+    await expect(
+      estimateMapboxRoute({
+        origin: '123 Example St, Melbourne VIC',
+        destination: 'St Kilda Beach',
+      }, {
+        env: {},
+      }),
+    ).rejects.toMatchObject({
+      code: 'route_mapbox_token_missing',
+      name: 'VaultCliError',
+    } satisfies Partial<VaultCliError>)
   })
 
   it('uses address geocoding, free-text Search Box, and walking entrance preference together', async () => {

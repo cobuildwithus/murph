@@ -16,6 +16,7 @@ import type { InboxServices } from '@murphai/inbox-services'
 const test = baseTest.sequential
 
 const commandMocks = vi.hoisted(() => ({
+  access: vi.fn(),
   assertAssistantInkInteractiveInputAvailable: vi.fn(),
   applyAssistantSelfDeliveryTargetDefaults: vi.fn(),
   clearAssistantSelfDeliveryTargets: vi.fn(),
@@ -47,6 +48,10 @@ const commandMocks = vi.hoisted(() => ({
   sendAssistantMessage: vi.fn(),
   shouldExposeSensitiveHealthContext: vi.fn(),
   stopAssistantAutomation: vi.fn(),
+}))
+
+vi.mock('node:fs/promises', () => ({
+  access: commandMocks.access,
 }))
 
 vi.mock('../src/assistant/runtime.js', () => ({
@@ -263,6 +268,7 @@ beforeEach(() => {
     mock.mockReset()
   }
 
+  commandMocks.access.mockResolvedValue(undefined)
   commandMocks.redactAssistantDisplayPath.mockImplementation(
     (value: string) => `redacted:${value}`,
   )
@@ -640,6 +646,67 @@ test('assistant deliver resolves saved routes unless a session is provided', asy
   })
 })
 
+test('assistant deliver rejects serialized object delivery targets before sending', async () => {
+  const commands = createAssistantCli()
+  const assistant = readCommandGroup(commands, 'assistant')
+  const deliver = readCommand(assistant.commands, 'deliver')
+
+  await assert.rejects(
+    () =>
+      deliver.run({
+        args: {
+          message: 'Delivery test message',
+        },
+        options: {
+          channel: 'telegram',
+          deliveryTarget: '[object Object]',
+          vault: '/tmp/vault',
+        },
+      }),
+    (error: unknown) => {
+      assert.ok(error instanceof VaultCliError)
+      assert.equal(error.code, 'invalid_option')
+      assert.match(error.message, /transport-native string/u)
+      return true
+    },
+  )
+
+  assert.equal(commandMocks.deliverAssistantMessage.mock.calls.length, 0)
+})
+
+test('assistant deliver preflights existing sessions before sending', async () => {
+  const commands = createAssistantCli()
+  const assistant = readCommandGroup(commands, 'assistant')
+  const deliver = readCommand(assistant.commands, 'deliver')
+  const sessionError = new VaultCliError(
+    'assistant_session_not_found',
+    'Assistant session "session_missing" does not exist.',
+  )
+
+  commandMocks.getAssistantSession.mockRejectedValueOnce(sessionError)
+
+  await assert.rejects(
+    () =>
+      deliver.run({
+        args: {
+          message: 'Reuse the existing session',
+        },
+        options: {
+          deliveryTarget: 'session_override',
+          session: 'session_missing',
+          vault: '/tmp/vault',
+        },
+      }),
+    sessionError,
+  )
+
+  assert.deepEqual(commandMocks.getAssistantSession.mock.calls[0], [
+    '/tmp/vault',
+    'session_missing',
+  ])
+  assert.equal(commandMocks.deliverAssistantMessage.mock.calls.length, 0)
+})
+
 test('assistant run forwards automation options and emits formatted foreground logs', async () => {
   const commands = createAssistantCli()
   const assistant = readCommandGroup(commands, 'assistant')
@@ -790,6 +857,10 @@ test('status, doctor, and stop commands delegate to their runtime helpers', asyn
     sessionId: 'session_status',
     vault: '/tmp/vault',
   })
+  assert.deepEqual(commandMocks.getAssistantSession.mock.calls[0], [
+    '/tmp/vault',
+    'session_status',
+  ])
   assert.deepEqual(commandMocks.runAssistantDoctor.mock.calls[0], [
     '/tmp/vault',
     {
@@ -799,6 +870,60 @@ test('status, doctor, and stop commands delegate to their runtime helpers', asyn
   assert.deepEqual(commandMocks.stopAssistantAutomation.mock.calls[0]?.[0], {
     vault: '/tmp/vault',
   })
+})
+
+test('assistant status and session commands reject uninitialized vault roots before runtime reads', async () => {
+  const commands = createAssistantCli()
+  const assistant = readCommandGroup(commands, 'assistant')
+  const session = readCommandGroup(assistant.commands, 'session')
+  const missingVaultError = Object.assign(new Error('missing vault metadata'), {
+    code: 'ENOENT',
+  })
+  const assertInvalidVaultError = (error: unknown) => {
+    assert.ok(error instanceof VaultCliError)
+    assert.equal(error.code, 'invalid_vault')
+    assert.match(error.message, /not initialized/u)
+    return true
+  }
+
+  commandMocks.access.mockRejectedValue(missingVaultError)
+
+  await assert.rejects(
+    () =>
+      readCommand(assistant.commands, 'status').run({
+        options: {
+          limit: 5,
+          vault: '/tmp/not-vault',
+        },
+      }),
+    assertInvalidVaultError,
+  )
+  await assert.rejects(
+    () =>
+      readCommand(session.commands, 'list').run({
+        args: {},
+        options: {
+          vault: '/tmp/not-vault',
+        },
+      }),
+    assertInvalidVaultError,
+  )
+  await assert.rejects(
+    () =>
+      readCommand(session.commands, 'show').run({
+        args: {
+          sessionId: 'session_missing',
+        },
+        options: {
+          vault: '/tmp/not-vault',
+        },
+      }),
+    assertInvalidVaultError,
+  )
+
+  assert.equal(commandMocks.getAssistantStatus.mock.calls.length, 0)
+  assert.equal(commandMocks.getAssistantSession.mock.calls.length, 0)
+  assert.equal(commandMocks.listAssistantSessions.mock.calls.length, 0)
 })
 
 test('self-target commands normalize channels, enforce email identity, and surface config paths', async () => {

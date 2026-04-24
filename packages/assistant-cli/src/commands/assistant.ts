@@ -1,3 +1,5 @@
+import path from 'node:path'
+import { access } from 'node:fs/promises'
 import { Cli, z } from 'incur'
 import {
   assistantAskResultSchema,
@@ -108,6 +110,7 @@ const assistantLocalChannelOptionSchema = z
 
 const LOCAL_ASSISTANT_LINQ_ERROR =
   'Local assistant Linq routes are no longer supported. Hosted/shared assistant-engine Linq support remains available.'
+const VAULT_METADATA_FILE = 'vault.json'
 
 function normalizeAssistantChannelOption(
   value?: string,
@@ -261,6 +264,7 @@ function assertAssistantDeliveryTargetForChannel(input: {
   deliveryTarget?: string
 }): void {
   assertLocalAssistantChannelSupported(input.channel)
+  assertAssistantDeliveryTargetLooksIntentional(input.deliveryTarget)
 
   if (
     input.channel !== 'email' ||
@@ -273,6 +277,51 @@ function assertAssistantDeliveryTargetForChannel(input: {
   throw new VaultCliError(
     'invalid_option',
     'Email delivery targets must be a single recipient email address.',
+  )
+}
+
+function assertAssistantDeliveryTargetLooksIntentional(
+  deliveryTarget?: string,
+): void {
+  const normalized = deliveryTarget?.trim()
+  if (!normalized) {
+    return
+  }
+
+  if (
+    normalized === '[object Object]' ||
+    normalized.startsWith('{') ||
+    normalized.startsWith('[')
+  ) {
+    throw new VaultCliError(
+      'invalid_option',
+      'Assistant delivery targets must be a transport-native string, not a serialized object.',
+    )
+  }
+}
+
+async function assertAssistantInitializedVaultRoot(vault: string): Promise<void> {
+  try {
+    await access(path.join(vault, VAULT_METADATA_FILE))
+    return
+  } catch (error) {
+    if (!isMissingPathError(error)) {
+      throw error
+    }
+  }
+
+  throw new VaultCliError(
+    'invalid_vault',
+    'The selected vault is not initialized. Run `vault-cli init --vault <path>` first.',
+  )
+}
+
+function isMissingPathError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    (error.code === 'ENOENT' || error.code === 'ENOTDIR')
   )
 }
 
@@ -356,6 +405,11 @@ function createAssistantStatusCommandDefinition(input?: {
         vault: string
       }
     }) {
+      await assertAssistantInitializedVaultRoot(context.options.vault)
+      if (context.options.session) {
+        await getAssistantSession(context.options.vault, context.options.session)
+      }
+
       return getAssistantStatus({
         vault: context.options.vault,
         sessionId: context.options.session,
@@ -837,6 +891,10 @@ export function registerAssistantCommands(
       }),
       output: assistantAskResultSchema,
       async run(context) {
+        if (context.options.session) {
+          await getAssistantSession(context.options.vault, context.options.session)
+        }
+
         const delivery = await resolveAssistantDeliveryInvocationFromCli(
           context.options,
           {
@@ -929,6 +987,10 @@ export function registerAssistantCommands(
       }),
       output: assistantDeliverResultSchema,
       async run(context) {
+        if (context.options.session) {
+          await getAssistantSession(context.options.vault, context.options.session)
+        }
+
         const delivery = await resolveAssistantDeliveryInvocationFromCli(
           context.options,
           {
@@ -1135,6 +1197,7 @@ export function registerAssistantCommands(
       options: withBaseOptions(),
       output: assistantSessionListResultSchema,
       async run(context) {
+        await assertAssistantInitializedVaultRoot(context.options.vault)
         const sessions = await listAssistantSessions(context.options.vault)
         return assistantSessionListResultSchema.parse({
           ...buildAssistantStateResultPaths(context.options.vault),
@@ -1151,6 +1214,7 @@ export function registerAssistantCommands(
       options: withBaseOptions(),
       output: assistantSessionShowResultSchema,
       async run(context) {
+        await assertAssistantInitializedVaultRoot(context.options.vault)
         const session = await getAssistantSession(
           context.options.vault,
           context.args.sessionId,
