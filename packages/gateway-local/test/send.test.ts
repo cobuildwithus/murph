@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {
   createGatewayConversationSessionKey,
   createGatewayOutboxMessageId,
+  readGatewayConversationSessionToken,
   type GatewayConversation,
   type GatewayProjectionSnapshot,
 } from "@murphai/gateway-core";
@@ -42,7 +43,9 @@ import { sendGatewayMessageLocal } from "../src/send.js";
 
 const TEST_ROUTE_TOKEN = "gateway-local-route";
 const TEST_SESSION_KEY = createGatewayConversationSessionKey(TEST_ROUTE_TOKEN);
+const TEST_NORMALIZED_ROUTE_TOKEN = readGatewayConversationSessionToken(TEST_SESSION_KEY);
 const TEST_REPLY_TO_MESSAGE_ID = createGatewayOutboxMessageId(TEST_ROUTE_TOKEN, "seed-intent");
+const TEST_SEND_IDEMPOTENCY_KEY = `gateway-send:${TEST_NORMALIZED_ROUTE_TOKEN}:client-123`;
 
 const TEST_EMAIL_CONVERSATION: GatewayConversation = {
   schema: "murph.gateway-conversation.v1",
@@ -220,8 +223,8 @@ test("sendGatewayMessageLocal shapes the delivery request and result payload", a
       target: "thread-email",
     },
     channel: "email",
-    dedupeToken: "gateway-send:gateway-local-route:client-123",
-    deliveryIdempotencyKey: "gateway-send:gateway-local-route:client-123",
+    dedupeToken: TEST_SEND_IDEMPOTENCY_KEY,
+    deliveryIdempotencyKey: TEST_SEND_IDEMPOTENCY_KEY,
     dispatchMode: "queue-only",
     identityId: "murph@example.com",
     message: "hello from local",
@@ -240,7 +243,7 @@ test("sendGatewayMessageLocal shapes the delivery request and result payload", a
   assert.equal(result.queued, false);
   assert.deepEqual(result.delivery, {
     channel: "email",
-    idempotencyKey: "gateway-send:gateway-local-route:client-123",
+    idempotencyKey: TEST_SEND_IDEMPOTENCY_KEY,
     messageLength: 16,
     sentAt: "2026-04-08T00:00:00.000Z",
     target: "thread-email",

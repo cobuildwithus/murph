@@ -147,11 +147,10 @@ export function inferGatewayReplyRouteForChannel(
         includeParticipant: true,
       })
     case 'linq':
-      return inferThreadFirstGatewayReplyRoute({
+      return inferLinqGatewayReplyRoute({
         conversation: input.conversation ?? {},
         deliveryKind: input.deliveryKind ?? null,
         deliveryTarget: input.deliveryTarget ?? null,
-        includeParticipant: false,
       })
     default:
       return inferFallbackGatewayReplyRoute({
@@ -160,6 +159,29 @@ export function inferGatewayReplyRouteForChannel(
         deliveryTarget: input.deliveryTarget ?? null,
       })
   }
+}
+
+function inferLinqGatewayReplyRoute(
+  input: GatewayReplyRouteInferenceInput,
+): GatewayResolvedReplyRoute | null {
+  const explicit = resolveExplicitGatewayReplyRoute(input)
+  if (explicit) {
+    return explicit.kind === 'thread' ? explicit : null
+  }
+
+  if (input.deliveryKind === 'participant') {
+    return null
+  }
+
+  const conversation = normalizeGatewayReplyRouteContext(input.conversation)
+  if (conversation.threadId) {
+    return {
+      kind: 'thread',
+      target: conversation.threadId,
+    }
+  }
+
+  return null
 }
 
 function normalizeGatewayReplyRouteContext(
