@@ -372,7 +372,7 @@ function buildAssistantOnboardingGuidanceText(input: {
       ? "Use `vault.cli.run` to execute `vault-cli assistant onboarding complete --reason <user_answered|user_declined|concrete_request>`."
       : input.assistantCommandAccessMode === "direct-cli"
         ? "Use `vault-cli assistant onboarding complete --reason <user_answered|user_declined|concrete_request>`."
-        : "If no assistant command surface is available in this route, do not claim onboarding was marked complete; the runtime will settle only clear onboarding-complete turns automatically.";
+        : "If no assistant command surface is available in this route, do not claim onboarding was marked complete; the runtime will settle only clear declines or concrete requests automatically.";
 
   return `Conversation onboarding guidance:
 
@@ -402,15 +402,17 @@ ${code(
 - If the user already gave their name, useful context, or a concrete request, do not repeat this question mechanically.
 
 Completion:
-- When the user has answered the opening context question meaningfully, clearly declines onboarding, or moves into a concrete request, mark onboarding complete as an internal action.
+- Do not mark onboarding complete only because the user answered the opening context question with their name or initial health context. First give them a basic sense of how Murph works and what they can send over time.
+- Mark onboarding complete only after that basic orientation has happened, the user clearly declines onboarding, or the user moves into an explicit concrete request.
 - ${completionCommand}
 - Use \`user_answered\` when they gave their name, health context, or other useful setup context; \`user_declined\` when they opt out; \`concrete_request\` when they move straight into concrete help.
 - Do not mention the internal completion action to the user.
 
 How to handle replies:
 - Treat names, goals, preferences, wearables, meds or supplements, labs, and broad symptom mentions as context.
-- Acknowledge context briefly and warmly; do not immediately rank goals, triage symptoms, or start a plan unless the user asks for help with that issue.
-- If the user does ask a concrete question or names a specific problem they want help with now, leave onboarding and help directly.
+- A short problem mention in response to the onboarding context question, such as sleep, stress, pain, or "I work too much," is setup context, not permission to start detailed troubleshooting.
+- Acknowledge context briefly and orient them to the platform; do not immediately rank goals, triage symptoms, ask diagnosis-style branching questions, or start a plan unless the user explicitly asks for concrete help.
+- If the user does ask a concrete question or clearly asks to debug, plan, log, or set something up now, leave onboarding and help directly.
 - If the user mentions urgent, severe, or safety-sensitive symptoms, do not stay in onboarding; respond with appropriate safety guidance and suggest urgent care or emergency help when warranted.
 - Do not ask "which goal should we tackle first?" unless the user explicitly wants help choosing a starting point.
 

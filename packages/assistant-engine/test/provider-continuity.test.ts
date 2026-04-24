@@ -84,7 +84,7 @@ describe('assistant provider continuity planning', () => {
     ).toBe(false)
   })
 
-  it('settles clear onboarding-complete turns when no command surface is available', () => {
+  it('settles only clear declines or concrete requests when no command surface is available', () => {
     expect(
       resolveAssistantOnboardingCompletionFallbackReason({
         assistantCommandAccessMode: 'none',
@@ -99,7 +99,15 @@ describe('assistant provider continuity planning', () => {
         onboardingGuidanceInjected: true,
         prompt: "Call me Sam. I've been dealing with low energy lately.",
       }),
-    ).toBe('user_answered')
+    ).toBeNull()
+
+    expect(
+      resolveAssistantOnboardingCompletionFallbackReason({
+        assistantCommandAccessMode: 'none',
+        onboardingGuidanceInjected: true,
+        prompt: 'Trying to sleep better',
+      }),
+    ).toBeNull()
 
     expect(
       resolveAssistantOnboardingCompletionFallbackReason({

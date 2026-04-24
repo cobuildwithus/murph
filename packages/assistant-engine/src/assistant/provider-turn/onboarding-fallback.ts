@@ -11,10 +11,6 @@ const ASSISTANT_ONBOARDING_CONCRETE_REQUEST_PREFIX_PATTERN =
   /^(?:can|could|would|will|should|what|why|how|when|where|who|help|tell|explain|give|show|check|look|find|summarize|analyse|analyze|compare|review|log|track|estimate|recommend|plan)\b/u
 const ASSISTANT_ONBOARDING_CONCRETE_REQUEST_PHRASE_PATTERN =
   /\b(?:help me|i need help|i want help|can you|could you|would you|what should i|should i|i want to know|i need to know)\b/u
-const ASSISTANT_ONBOARDING_CONTEXT_ANSWER_PATTERN =
-  /\b(?:sleep|energy|stress|pain|fatigue|anxiety|mood|digestion|labs?|supplements?|meds?|medications?|workout|workouts|exercise|glucose|cholesterol|blood pressure|migraine|symptom|symptoms|knee|back|headache|period|menstrual|recovery)\b/u
-const ASSISTANT_ONBOARDING_NAME_PATTERN =
-  /\b(?:my name is|call me)\b/u
 
 export function resolveAssistantOnboardingCompletionFallbackReason(input: {
   assistantCommandAccessMode: AssistantMurphCommandAccessMode
@@ -41,10 +37,6 @@ export function resolveAssistantOnboardingCompletionFallbackReason(input: {
     return 'concrete_request'
   }
 
-  if (looksLikeMeaningfulOnboardingAnswer(normalizedPrompt)) {
-    return 'user_answered'
-  }
-
   return null
 }
 
@@ -59,16 +51,6 @@ export function looksLikeConcreteOnboardingRequest(
     (ASSISTANT_ONBOARDING_CONCRETE_REQUEST_PREFIX_PATTERN.test(normalizedPrompt) &&
       countOnboardingFallbackWords(normalizedPrompt) >= 3) ||
     ASSISTANT_ONBOARDING_CONCRETE_REQUEST_PHRASE_PATTERN.test(normalizedPrompt)
-  )
-}
-
-export function looksLikeMeaningfulOnboardingAnswer(
-  normalizedPrompt: string,
-): boolean {
-  return (
-    ASSISTANT_ONBOARDING_NAME_PATTERN.test(normalizedPrompt) ||
-    (ASSISTANT_ONBOARDING_CONTEXT_ANSWER_PATTERN.test(normalizedPrompt) &&
-      countOnboardingFallbackWords(normalizedPrompt) >= 2)
   )
 }
 

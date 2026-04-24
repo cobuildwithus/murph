@@ -1020,6 +1020,47 @@ describe('executeProviderTurnWithRecovery', () => {
     )
   })
 
+  it('keeps onboarding open for broad context answers when no command surface is available', async () => {
+    const route = createRoute({
+      routeId: 'route-no-command-surface',
+    })
+    const session = createAssistantSession()
+
+    runnerMocks.resolveAssistantProviderTargetExecutionCapabilities.mockReturnValue({
+      murphCommandSurface: 'bound-tools',
+      requestFormat: 'messages',
+      supportsNativeResume: false,
+      supportsToolRuntime: false,
+    })
+    runnerMocks.executeAssistantProviderTurnAttempt.mockResolvedValue(
+      createSuccessfulAttemptResult({
+        providerSessionId: null,
+        response: 'Got it. You can send rough sleep notes as they happen.',
+      }),
+    )
+
+    const outcome = await executeProviderTurnWithRecovery({
+      input: createMessageInput({
+        prompt: 'Trying to sleep better',
+      }),
+      plan: createTurnPlan({
+        onboardingGuidanceOpen: true,
+      }),
+      resolvedSession: session,
+      routes: [route],
+      turnCreatedAt: '2026-04-08T00:00:00.000Z',
+      turnId: 'turn-no-command-onboarding-context',
+    })
+
+    expect(outcome).toMatchObject({
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingCompletionFallbackReason: null,
+        onboardingGuidanceInjected: true,
+      },
+    })
+  })
+
   it('passes automation-cron turn trigger into the system prompt builder', async () => {
     const route = createRoute({
       label: 'Primary',
