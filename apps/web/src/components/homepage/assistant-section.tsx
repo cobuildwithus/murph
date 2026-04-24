@@ -1,20 +1,5 @@
 const CHANNELS = ["iMessage", "Telegram", "Email"] as const;
 
-const PRIVACY_ITEMS = [
-  {
-    desc: "Your experiments stay between you and your body.",
-    title: "No data sales",
-  },
-  {
-    desc: "Strong encryption. Open source. Only you access your data.",
-    title: "Encrypted by default",
-  },
-  {
-    desc: "Your chats don’t train models. Zero data retention.",
-    title: "Private conversations.",
-  },
-] as const;
-
 const MESSAGES = [
   {
     from: "murph",
@@ -63,22 +48,6 @@ export function AssistantSection() {
                 >
                   {channel}
                 </span>
-              ))}
-            </div>
-
-            <div className="mt-10 grid gap-4">
-              {PRIVACY_ITEMS.map((item) => (
-                <div key={item.title} className="flex gap-3">
-                  <span className="mt-0.5 text-[0.5rem] text-[#5a6e32]">◆</span>
-                  <div>
-                    <p className="text-sm font-medium text-[#f5f0e8]/70">
-                      {item.title}
-                    </p>
-                    <p className="mt-0.5 text-[0.8125rem] text-[#f5f0e8]/55">
-                      {item.desc}
-                    </p>
-                  </div>
-                </div>
               ))}
             </div>
           </div>
