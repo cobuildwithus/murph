@@ -54,7 +54,7 @@ Updated: 2026-04-24
 3. [x] Apply the reducer patch and review the resulting authored content diff.
 4. [x] Regenerate Health Commons derived outputs.
 5. [x] Run Health Commons verification and required completion audits.
-6. [ ] Land a scoped commit through the repo finish helper.
+6. [x] Land a scoped commit through the repo finish helper.
 
 ## Decisions
 
