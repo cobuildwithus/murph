@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto'
+
 import type {
   AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
@@ -531,12 +533,13 @@ function emitHostedNotificationProviderRequestDebugTrace(input: {
         routeId: attemptPlan.route.routeId,
         sessionContextPresent: attemptPlan.routePlan.sessionContext != null,
         supportsToolRuntime: attemptPlan.routePlan.supportsToolRuntime,
-        systemPrompt,
+        systemPromptHash:
+          systemPrompt === null ? null : hashAssistantProviderDebugText(systemPrompt),
         systemPromptLength: systemPrompt?.length ?? 0,
         toolCount: toolNames.length,
         toolNames,
         turnTrigger: executionPlan.input.turnTrigger ?? null,
-        userPrompt: executionPlan.input.prompt,
+        userPromptHash: hashAssistantProviderDebugText(executionPlan.input.prompt),
         userPromptLength: executionPlan.input.prompt.length,
         webSearch: providerOptions.webSearch ?? null,
         zeroDataRetention: providerOptions.zeroDataRetention ?? null,
@@ -544,13 +547,17 @@ function emitHostedNotificationProviderRequestDebugTrace(input: {
       updates: [
         {
           kind: 'status',
-          text: 'Hosted notification provider request debug payload captured.',
+          text: 'Hosted notification provider request summary captured.',
         },
       ],
     })
   } catch {
     // Debug trace observers must not block the provider call.
   }
+}
+
+function hashAssistantProviderDebugText(value: string): string {
+  return createHash('sha256').update(value).digest('hex')
 }
 
 function listAssistantToolCatalogNames(

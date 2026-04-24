@@ -20,7 +20,6 @@ export interface AssistantResponsesRequestDebugEvent {
   payloadTopLevelKeys: string[]
   previousResponseIdPresent: boolean
   providerOptionsHash: string | null
-  requestBody: string
   requestBodyHash: string
   requestBodyLength: number
   requestUrlOrigin: string | null
@@ -367,7 +366,6 @@ function buildAssistantResponsesRequestDebugEvent(input: {
     providerOptionsHash: hashAssistantResponsesJsonValueOrNull(
       input.payload.providerOptions,
     ),
-    requestBody: stringifyAssistantResponsesDebugPayload(input.payload),
     requestBodyHash: hashAssistantResponsesString(input.body),
     requestBodyLength: input.body.length,
     requestUrlOrigin: urlDetails.origin,
@@ -540,85 +538,6 @@ function hashAssistantResponsesJsonValueOrNull(value: unknown): string | null {
   return value === undefined || value === null
     ? null
     : hashAssistantResponsesStableJson(value)
-}
-
-function stringifyAssistantResponsesDebugPayload(
-  payload: Record<string, unknown>,
-): string {
-  return JSON.stringify(redactAssistantResponsesDebugPayload(payload))
-}
-
-function redactAssistantResponsesDebugPayload(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    return value.map(redactAssistantResponsesDebugPayload)
-  }
-
-  if (!isAssistantPlainObject(value)) {
-    return typeof value === 'string' ? redactAssistantResponsesDebugText(value) : value
-  }
-
-  const next: Record<string, unknown> = {}
-  for (const [key, entry] of Object.entries(value)) {
-    if (isAssistantResponsesDebugSensitiveKey(key)) {
-      next[key] = '[redacted]'
-      continue
-    }
-
-    if (key === 'gateway' && isAssistantPlainObject(entry)) {
-      next[key] = redactAssistantResponsesGatewayDebugPayload(entry)
-      continue
-    }
-
-    next[key] = redactAssistantResponsesDebugPayload(entry)
-  }
-
-  return next
-}
-
-function redactAssistantResponsesGatewayDebugPayload(
-  gateway: Record<string, unknown>,
-): Record<string, unknown> {
-  const next: Record<string, unknown> = {}
-  for (const [key, value] of Object.entries(gateway)) {
-    if (key === 'user' || key === 'tags') {
-      next[key] = '[redacted]'
-      continue
-    }
-
-    next[key] = redactAssistantResponsesDebugPayload(value)
-  }
-
-  return next
-}
-
-function isAssistantResponsesDebugSensitiveKey(key: string): boolean {
-  return /authorization|secret|token|password|passcode|api[-_]?key|cookie|set-cookie/iu
-    .test(key)
-}
-
-function redactAssistantResponsesDebugText(value: string): string {
-  return value
-    .replace(/file:\/\/\/Users\/[^\s)"']+/gu, 'file://<REDACTED_PATH>')
-    .replace(/\/Users\/[^\s)"']+/gu, '<REDACTED_PATH>')
-    .replace(/\/home\/[^\s)"']+/gu, '<REDACTED_PATH>')
-    .replace(/\/root\/[^\s)"']+/gu, '<REDACTED_PATH>')
-    .replace(/\b[A-Za-z]:\\Users\\[^\s)"']+/gu, '<REDACTED_PATH>')
-    .replace(
-      /\b(authorization)\b\s*:\s*Bearer\s+[A-Za-z0-9._~+/=-]+\b/giu,
-      (_match, key: string) => `${key}=Bearer [redacted]`,
-    )
-    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+\b/giu, 'Bearer [redacted]')
-    .replace(/\+\d{8,15}\b/gu, '[redacted-phone]')
-    .replace(/\b([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})\b/gu, '[redacted-email]')
-    .replace(
-      /\b(authorization)\b\s*[:=]\s*(?!Bearer\b)(?:"[^"]+"|'[^']+'|\S+)/giu,
-      (_match, key: string) => `${key}=[redacted]`,
-    )
-    .replace(
-      /\b((?:[A-Z][A-Z0-9_]*_)?(?:token|secret|password|passcode|api[_-]?key|cookie|set-cookie))\b\s*[:=]\s*(?:"[^"]+"|'[^']+'|\S+)/giu,
-      '$1=[redacted]',
-    )
-    .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/gu, '[redacted-token]')
 }
 
 function hashAssistantResponsesStableJson(value: unknown): string {

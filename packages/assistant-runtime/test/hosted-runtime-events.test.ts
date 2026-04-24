@@ -163,12 +163,12 @@ describe("executeHostedIngressEvent", () => {
           routeId: "route-notification",
           sessionContextPresent: false,
           supportsToolRuntime: true,
-          systemPrompt: debugSystemPrompt,
+          systemPromptHash: "hash-system-prompt",
           systemPromptLength: debugSystemPrompt.length,
           toolCount: 0,
           toolNames: [],
           turnTrigger: "automation-cron",
-          userPrompt: debugUserPrompt,
+          userPromptHash: "hash-user-prompt",
           userPromptLength: debugUserPrompt.length,
           zeroDataRetention: true,
         },
@@ -196,7 +196,6 @@ describe("executeHostedIngressEvent", () => {
           payloadTopLevelKeys: ["input", "instructions", "model", "providerOptions", "tools"],
           previousResponseIdPresent: false,
           providerOptionsHash: "hash-provider-options",
-          requestBody: debugRequestBody,
           requestBodyHash: "hash-request-body",
           requestBodyLength: debugRequestBody.length,
           requestUrlOrigin: "https://ai-gateway.vercel.sh",
@@ -307,21 +306,20 @@ describe("executeHostedIngressEvent", () => {
       expect.objectContaining({
         component: "runtime.provider",
         details: expect.objectContaining({
-          assistantProviderDebug: expect.objectContaining({
+          assistantProviderRequest: expect.objectContaining({
             gatewayOnlyProviders: ["azure"],
             providerExecutionDriver: "responses",
             providerModel: "openai/gpt-5.4",
             providerName: "vercel-ai-gateway",
             schema: "murph.assistant-provider-request-debug.v1",
-            systemPromptChunks: expect.arrayContaining([
-              expect.stringContaining("System prompt headed to Azure"),
-            ]),
+            systemPromptHash: "hash-system-prompt",
             systemPromptLength: debugSystemPrompt.length,
-            userPromptChunks: [debugUserPrompt],
+            userPromptHash: "hash-user-prompt",
+            userPromptLength: debugUserPrompt.length,
             zeroDataRetention: true,
           }),
         }),
-        message: "Hosted assistant provider request debug payload captured.",
+        message: "Hosted assistant provider request summary captured.",
         phase: "wake.running",
         wake,
       }),
@@ -331,20 +329,16 @@ describe("executeHostedIngressEvent", () => {
       expect.objectContaining({
         component: "runtime.provider.http",
         details: expect.objectContaining({
-          assistantResponsesDebug: expect.objectContaining({
+          assistantResponsesRequest: expect.objectContaining({
             gatewayZeroDataRetention: true,
             model: "openai/gpt-5.4",
-            requestBodyChunkGroups: expect.arrayContaining([
-              expect.arrayContaining([
-                expect.stringContaining('"model":"openai/gpt-5.4"'),
-              ]),
-            ]),
             requestBodyHash: "hash-request-body",
+            requestBodyLength: debugRequestBody.length,
             requestUrlPath: "/v1/responses",
             toolNames: ["vault.show"],
           }),
         }),
-        message: "Hosted assistant final Responses request debug payload captured.",
+        message: "Hosted assistant final Responses request summary captured.",
         phase: "wake.running",
         wake,
       }),
@@ -364,39 +358,22 @@ describe("executeHostedIngressEvent", () => {
     );
     expect(result.redactedLogEntries?.[1]?.redacted).toEqual(
       expect.objectContaining({
-        assistantProviderDebug: expect.not.objectContaining({
+        assistantProviderRequest: expect.not.objectContaining({
           rawEvent: expect.anything(),
           systemPrompt: expect.anything(),
+          systemPromptChunks: expect.anything(),
           userPrompt: expect.anything(),
+          userPromptChunks: expect.anything(),
         }),
       }),
     );
-    const providerDebug = result.redactedLogEntries?.[1]?.redacted?.assistantProviderDebug;
-    assert.equal(typeof providerDebug, "object");
-    assert.ok(providerDebug !== null);
-    assert.ok(!Array.isArray(providerDebug));
-    const providerDebugRecord = providerDebug as Record<string, unknown>;
-    const systemPromptChunks = providerDebugRecord.systemPromptChunks;
-    const userPromptChunks = providerDebugRecord.userPromptChunks;
-    assert.ok(Array.isArray(systemPromptChunks));
-    assert.ok(Array.isArray(userPromptChunks));
-    assert.ok(systemPromptChunks.every((chunk): chunk is string => typeof chunk === "string"));
-    assert.ok(userPromptChunks.every((chunk): chunk is string => typeof chunk === "string"));
-    assert.ok(systemPromptChunks.every((chunk) => chunk.length <= 320));
-    assert.ok(userPromptChunks.every((chunk) => chunk.length <= 320));
-    assert.equal(systemPromptChunks.join(""), debugSystemPrompt.trim());
-    assert.equal(userPromptChunks.join(""), debugUserPrompt);
-    const responsesDebug = result.redactedLogEntries?.[2]?.redacted?.assistantResponsesDebug;
-    assert.equal(typeof responsesDebug, "object");
-    assert.ok(responsesDebug !== null);
-    assert.ok(!Array.isArray(responsesDebug));
-    const responsesDebugRecord = responsesDebug as Record<string, unknown>;
-    const requestBodyChunkGroups = responsesDebugRecord.requestBodyChunkGroups;
-    assert.ok(Array.isArray(requestBodyChunkGroups));
-    assert.ok(requestBodyChunkGroups.every((group) => Array.isArray(group)));
-    assert.equal(
-      (requestBodyChunkGroups as string[][]).flat().join(""),
-      debugRequestBody,
+    expect(result.redactedLogEntries?.[2]?.redacted).toEqual(
+      expect.objectContaining({
+        assistantResponsesRequest: expect.not.objectContaining({
+          requestBody: expect.anything(),
+          requestBodyChunkGroups: expect.anything(),
+        }),
+      }),
     );
     expect(result).toEqual({
       bootstrapResult,
@@ -425,16 +402,14 @@ describe("executeHostedIngressEvent", () => {
           component: "runtime.provider",
           eventId: "evt_notification",
           level: "info",
-          message: "Hosted assistant provider request debug payload captured.",
+          message: "Hosted assistant provider request summary captured.",
           phase: "wake.running",
           redacted: expect.objectContaining({
-            assistantProviderDebug: expect.objectContaining({
+            assistantProviderRequest: expect.objectContaining({
               gatewayOnlyProviders: ["azure"],
               providerModel: "openai/gpt-5.4",
-              systemPromptChunks: expect.arrayContaining([
-                expect.stringContaining("System prompt headed to Azure"),
-              ]),
-              userPromptChunks: [debugUserPrompt],
+              systemPromptHash: "hash-system-prompt",
+              userPromptHash: "hash-user-prompt",
               zeroDataRetention: true,
             }),
           }),
@@ -443,17 +418,13 @@ describe("executeHostedIngressEvent", () => {
           component: "runtime.provider.http",
           eventId: "evt_notification",
           level: "info",
-          message: "Hosted assistant final Responses request debug payload captured.",
+          message: "Hosted assistant final Responses request summary captured.",
           phase: "wake.running",
           redacted: expect.objectContaining({
-            assistantResponsesDebug: expect.objectContaining({
+            assistantResponsesRequest: expect.objectContaining({
               model: "openai/gpt-5.4",
-              requestBodyChunkGroups: expect.arrayContaining([
-                expect.arrayContaining([
-                  expect.stringContaining('"model":"openai/gpt-5.4"'),
-                ]),
-              ]),
               requestBodyHash: "hash-request-body",
+              requestBodyLength: debugRequestBody.length,
               toolNames: ["vault.show"],
             }),
           }),
