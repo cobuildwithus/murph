@@ -85,6 +85,7 @@ describe('assistant CLI tool catalogs', () => {
 
     expect(
       createQueryAndReadToolDefinitions(toolContext, {
+        includeHealthCommonsTools: false,
         includeQueryTools: false,
         includeVaultTextReadTool: false,
         includeWebSearchTools: false,
@@ -99,6 +100,10 @@ describe('assistant CLI tool catalogs', () => {
       }).map((tool) => tool.name),
     ).toEqual([
       'vault.fs.readText',
+      'healthCommons.search',
+      'healthCommons.get',
+      'healthCommons.listProtocols',
+      'healthCommons.listSources',
       'web.fetch',
       'web.pdf.read',
       'web.search',
@@ -278,6 +283,8 @@ describe('assistant CLI tool catalogs', () => {
       }),
     )
     expect(defaultCatalog.hasTool('assistant.knowledge.upsert')).toBe(true)
+    expect(defaultCatalog.hasTool('healthCommons.search')).toBe(true)
+    expect(defaultCatalog.hasTool('healthCommons.listProtocols')).toBe(true)
     expect(defaultCatalog.hasTool('vault.show')).toBe(true)
     expect(defaultCatalog.hasTool('web.search')).toBe(false)
     expect(defaultCatalog.hasTool('vault.fs.readText')).toBe(true)
@@ -290,6 +297,7 @@ describe('assistant CLI tool catalogs', () => {
       }),
     )
     expect(inboxRoutingCatalog.hasTool('assistant.knowledge.upsert')).toBe(false)
+    expect(inboxRoutingCatalog.hasTool('healthCommons.search')).toBe(false)
     expect(inboxRoutingCatalog.hasTool('assistant.selfTarget.list')).toBe(false)
     expect(inboxRoutingCatalog.hasTool('vault.show')).toBe(false)
     expect(inboxRoutingCatalog.hasTool('web.fetch')).toBe(false)
@@ -303,6 +311,10 @@ describe('assistant CLI tool catalogs', () => {
     )
     expect(providerTurnCatalog.hasTool('assistant.knowledge.list')).toBe(true)
     expect(providerTurnCatalog.hasTool('assistant.knowledge.upsert')).toBe(true)
+    expect(providerTurnCatalog.hasTool('healthCommons.search')).toBe(true)
+    expect(providerTurnCatalog.hasTool('healthCommons.get')).toBe(true)
+    expect(providerTurnCatalog.hasTool('healthCommons.listProtocols')).toBe(true)
+    expect(providerTurnCatalog.hasTool('healthCommons.listSources')).toBe(true)
     expect(providerTurnCatalog.hasTool('vault.cli.run')).toBe(true)
     expect(providerTurnCatalog.hasTool('vault.fs.readText')).toBe(true)
     expect(providerTurnCatalog.hasTool('vault.show')).toBe(false)
@@ -372,9 +384,18 @@ describe('assistant CLI tool catalogs', () => {
 
     const registry = createDefaultAssistantCapabilityRegistry(createToolContext())
     expect(registry.hasCapability('assistant.knowledge.list')).toBe(true)
+    expect(registry.hasCapability('healthCommons.search')).toBe(true)
     expect(registry.getCapability('assistant.knowledge.list')?.mutationSemantics).toBe(
       'read-only',
     )
+    expect(registry.getCapability('healthCommons.search')?.mutationSemantics).toBe(
+      'read-only',
+    )
+    expect(registry.getCapability('healthCommons.search')?.provenance).toMatchObject({
+      generatedFrom: '@murphai/health-commons',
+      localOnly: true,
+      origin: 'hand-authored-helper',
+    })
     expect(registry.getCapability('assistant.knowledge.upsert')?.riskClass).toBe(
       'medium',
     )

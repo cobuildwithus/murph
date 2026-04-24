@@ -10,6 +10,7 @@ function buildPrompt(
   turnTrigger: 'automation-cron' | 'manual-ask' | null = null,
   options?: {
     activeExperimentContext?: string | null
+    assistantHealthCommonsAccessMode?: 'bound-tools' | 'direct-cli' | 'none'
     assistantHostedDeviceConnectAvailable?: boolean
     assistantHostedDeviceConnectProviders?: Array<{ label: string; provider: string }>
     assistantToolNameAliases?: Record<string, string>
@@ -21,6 +22,8 @@ function buildPrompt(
     assistantCliContract: null,
     allowSensitiveHealthContext: true,
     assistantCommandAccessMode,
+    assistantHealthCommonsAccessMode:
+      options?.assistantHealthCommonsAccessMode ?? assistantCommandAccessMode,
     assistantHostedDeviceConnectAvailable:
       options?.assistantHostedDeviceConnectAvailable ?? false,
     assistantHostedDeviceConnectProviders:
@@ -45,17 +48,22 @@ function buildNotificationPrompt(
   channel: string | null = null,
   options?: {
     activeExperimentContext?: string | null
+    assistantHealthCommonsAccessMode?: 'bound-tools' | 'direct-cli' | 'none'
     assistantHostedDeviceConnectAvailable?: boolean
     assistantHostedDeviceConnectProviders?: Array<{ label: string; provider: string }>
+    assistantToolNameAliases?: Record<string, string>
   },
 ) {
   return buildAssistantNotificationDecisionSystemPrompt({
     activeExperimentContext: options?.activeExperimentContext ?? null,
     allowSensitiveHealthContext: true,
+    assistantHealthCommonsAccessMode:
+      options?.assistantHealthCommonsAccessMode ?? 'bound-tools',
     assistantHostedDeviceConnectAvailable:
       options?.assistantHostedDeviceConnectAvailable ?? false,
     assistantHostedDeviceConnectProviders:
       options?.assistantHostedDeviceConnectProviders ?? [],
+    assistantToolNameAliases: options?.assistantToolNameAliases ?? null,
     channel,
     currentLocalDate: '2026-04-10',
     currentTimeZone: 'Australia/Sydney',
@@ -90,14 +98,57 @@ describe('buildAssistantSystemPrompt', () => {
   it('renders provider-visible aliases for bound tool names when supplied', () => {
     const prompt = buildPrompt('bound-tools', null, {
       assistantToolNameAliases: {
+        'healthCommons.search': 'healthCommons_search',
         'murph.device.connect': 'murph_device_connect',
         'vault.cli.run': 'vault_cli_run',
       },
     })
 
+    expect(prompt).toContain('Use `healthCommons_search` or `healthCommons.listProtocols`')
     expect(prompt).toContain('call `vault_cli_run` with `route estimate ...`')
     expect(prompt).toContain('Use `vault_cli_run` as the canonical Murph runtime surface')
     expect(prompt).not.toContain('`vault.cli.run`')
+  })
+
+  it('uses Health Commons CLI commands instead of bound tools in direct CLI prompts', () => {
+    const prompt = buildPrompt('direct-cli')
+
+    expect(prompt).toContain('use `vault-cli commons search "<query>" --format json`')
+    expect(prompt).toContain('`vault-cli commons protocol show <key-or-slug> --format json`')
+    expect(prompt).toContain(
+      'use `vault-cli commons search "<query>" --format json` or `vault-cli commons protocol list --format json` for fuzzy discovery',
+    )
+    expect(prompt).toContain(
+      '`vault-cli knowledge ...` is for the user\'s derived knowledge wiki. It is not the canonical Health Commons corpus; use `vault-cli commons ...`',
+    )
+    expect(prompt).not.toContain('use `healthCommons.search`')
+  })
+
+  it('does not claim Health Commons access when no command surface is exposed', () => {
+    const prompt = buildPrompt('none')
+
+    expect(prompt).toContain(
+      'if no Health Commons surface is available, do not claim to have inspected the corpus.',
+    )
+    expect(prompt).toContain(
+      'If no Health Commons command or tool surface is exposed, do not claim to have inspected public protocol options',
+    )
+    expect(prompt).not.toContain('use `healthCommons.search`')
+    expect(prompt).not.toContain('use `vault-cli commons search')
+  })
+
+  it('uses Health Commons native tools even when the general command surface is unavailable', () => {
+    const prompt = buildPrompt('none', null, {
+      assistantHealthCommonsAccessMode: 'bound-tools',
+    })
+
+    expect(prompt).toContain('Use `healthCommons.search` or `healthCommons.listProtocols`')
+    expect(prompt).toContain(
+      'Resolve the public protocol reference through Health Commons first: use `healthCommons.search` or `healthCommons.listProtocols`',
+    )
+    expect(prompt).toContain('use `healthCommons.*` for public Health Commons')
+    expect(prompt).not.toContain('use `vault-cli commons search')
+    expect(prompt).not.toContain('if no Health Commons surface is available')
   })
 
   it('tells direct-cli sessions to use vault-cli route estimate directly', () => {
@@ -316,10 +367,25 @@ Ready to get started?`)
 
     expect(prompt).toContain('Experiment onboarding:')
     expect(prompt).toContain(
-      'Resolve the protocol page first with `vault-cli protocol show <protocol id or slug> --format json`.',
+      'For health improvement ideas, protocol discovery, protocol setup, and experiment design, search Health Commons first.',
     )
     expect(prompt).toContain(
-      "Use the protocol page's Health Commons `experimentOnboarding` block when available.",
+      'A Health Commons `protocol_variant` is a public reference protocol, not a private vault protocol record.',
+    )
+    expect(prompt).toContain(
+      'Do not use private `vault-cli protocol show` or `vault-cli protocol list` as the discovery path for public Health Commons protocols.',
+    )
+    expect(prompt).toContain(
+      '`assistant.knowledge.*` and `vault-cli knowledge ...` are for the user\'s derived knowledge wiki. They are not the canonical Health Commons corpus; use `healthCommons.*` for public Health Commons protocol, biomarker, and source discovery.',
+    )
+    expect(prompt).toContain(
+      'Resolve the public protocol reference through Health Commons first: use `healthCommons.search` or `healthCommons.listProtocols` for fuzzy discovery, then `healthCommons.get` for the exact `protocol_variant` page before planning.',
+    )
+    expect(prompt).toContain(
+      "Use the Health Commons page's `experimentOnboarding` block when available.",
+    )
+    expect(prompt).toContain(
+      'Keep public Health Commons references, private vault protocol adaptations, and experiments separate.',
     )
     expect(prompt).toContain(
       'Before setup questions, check whether the user already has an active experiment with `vault-cli experiment list --status active --format json`.',
@@ -459,5 +525,19 @@ describe('buildAssistantNotificationDecisionSystemPrompt', () => {
     expect(prompt.indexOf('Hosted wearable connection')).toBeLessThan(
       prompt.indexOf('Notification execution rules:'),
     )
+  })
+
+  it('renders provider-visible aliases for notification decision bound tools', () => {
+    const prompt = buildNotificationPrompt('telegram', {
+      assistantToolNameAliases: {
+        'healthCommons.search': 'healthCommons_search',
+        'healthCommons.get': 'healthCommons_get',
+        'healthCommons.listProtocols': 'healthCommons_listProtocols',
+      },
+    })
+
+    expect(prompt).toContain('Use `healthCommons_search` or `healthCommons_listProtocols`')
+    expect(prompt).toContain('`healthCommons_get` for the exact page')
+    expect(prompt).not.toContain('`healthCommons.search`')
   })
 })

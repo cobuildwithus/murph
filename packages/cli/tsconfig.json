@@ -47,6 +47,9 @@
       "path": "../gateway-core"
     },
     {
+      "path": "../health-commons"
+    },
+    {
       "path": "../assistantd"
     }
   ],

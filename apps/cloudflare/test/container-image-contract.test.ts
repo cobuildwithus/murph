@@ -264,6 +264,7 @@ describe("hosted runner container image contract", () => {
       "@murphai/device-syncd",
       "@murphai/gateway-core",
       "@murphai/gateway-local",
+      "@murphai/health-commons",
       "@murphai/hosted-execution",
       "@murphai/importers",
       "@murphai/inbox-services",

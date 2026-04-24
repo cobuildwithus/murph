@@ -21,6 +21,7 @@ import {
   defineHandAuthoredHelperTool,
   defineNativeLocalOnlyTool,
 } from './definition-factory.js'
+import { createHealthCommonsToolDefinitions } from './definitions/health-commons.js'
 import {
   createAssistantKnowledgeReadToolDefinitions,
   createAssistantKnowledgeWriteToolDefinitions,
@@ -47,6 +48,7 @@ export {
   createAssistantKnowledgeReadToolDefinitions,
   createAssistantKnowledgeWriteToolDefinitions,
 } from './definitions/knowledge.js'
+export { createHealthCommonsToolDefinitions } from './definitions/health-commons.js'
 export { createInboxPromotionToolDefinitions } from './definitions/inbox-promotion.js'
 export { createOutwardSideEffectToolDefinitions } from './definitions/outward-side-effects.js'
 export { createVaultQueryToolDefinitions } from './definitions/vault-query.js'
@@ -162,6 +164,9 @@ export function createQueryAndReadToolDefinitions(
   return [
     ...(options.includeVaultTextReadTool ?? true
       ? createVaultTextReadToolDefinitions(input)
+      : []),
+    ...(options.includeHealthCommonsTools ?? true
+      ? createHealthCommonsToolDefinitions()
       : []),
     ...(options.includeQueryTools ?? true
       ? createVaultQueryToolDefinitions(input)

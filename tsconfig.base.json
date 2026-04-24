@@ -31,6 +31,12 @@
       "@murphai/health-commons": [
         "packages/health-commons/src/index.ts"
       ],
+      "@murphai/health-commons/runtime": [
+        "packages/health-commons/src/runtime.ts"
+      ],
+      "@murphai/health-commons/generated/*": [
+        "packages/health-commons/generated/*"
+      ],
       "@murphai/health-commons/*": [
         "packages/health-commons/src/*"
       ],

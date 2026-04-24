@@ -25,6 +25,13 @@ import {
   captureCommandDescriptions,
   registerCaptureCommands,
 } from './commands/capture.js'
+import {
+  commonsProtocolListResultSchema,
+  commonsProtocolShowResultSchema,
+  commonsSearchResultSchema,
+  commonsSourceListResultSchema,
+  registerCommonsCommands,
+} from './commands/commons.js'
 import { registerDeviceCommands } from './commands/device.js'
 import { registerDocumentCommands } from './commands/document.js'
 import { registerEventCommands } from './commands/event.js'
@@ -374,6 +381,40 @@ export const vaultCliCommandDescriptors = [
     ],
     register({ cli, services }) {
       registerCaptureCommands(cli, services)
+    },
+  },
+  {
+    id: 'commons',
+    bindingMode: 'none',
+    rootCommandNames: ['commons'],
+    leafCommands: [
+      {
+        path: ['commons', 'search'],
+        description:
+          'Search the public Health Commons catalog without reading or writing private vault protocols.',
+        output: commonsSearchResultSchema,
+      },
+      {
+        path: ['commons', 'protocol', 'list'],
+        description:
+          'List public Health Commons protocol variants with optional text, status, and category filters.',
+        output: commonsProtocolListResultSchema,
+      },
+      {
+        path: ['commons', 'protocol', 'show'],
+        description:
+          'Show one public Health Commons protocol variant by key, slug, or alias, including exact revision ids.',
+        output: commonsProtocolShowResultSchema,
+      },
+      {
+        path: ['commons', 'source', 'list'],
+        description:
+          'List public Health Commons source artifacts with optional text, kind, and status filters.',
+        output: commonsSourceListResultSchema,
+      },
+    ],
+    register({ cli }) {
+      registerCommonsCommands(cli)
     },
   },
   {
@@ -1256,7 +1297,7 @@ function assertValidVaultCliCommandManifest(
 
 assertValidVaultCliCommandManifest(vaultCliCommandDescriptors)
 
-const ROOT_COMMAND_NAMES_EXEMPT_FROM_VAULT = new Set(['model', 'route'])
+const ROOT_COMMAND_NAMES_EXEMPT_FROM_VAULT = new Set(['commons', 'model', 'route'])
 
 export function registerVaultCliCommandDescriptors(input: {
   cli: Cli.Cli

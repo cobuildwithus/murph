@@ -1,15 +1,21 @@
+import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
 
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
   buildHostedRunnerWorkspaceBuildArgs,
   mapWithConcurrency,
+  packWorkspacePackageArtifacts,
   stageHostedRunnerRuntimeArtifact,
 } from "../scripts/runner-bundle/workspace-artifacts.js";
 
+const execFileAsync = promisify(execFile);
+const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
 const temporaryDirectories: string[] = [];
 
 afterEach(async () => {
@@ -180,5 +186,32 @@ describe("runner bundle runtime artifact staging", () => {
       "@murphai/runtime-state": "workspace:*",
       jose: "^6.2.2",
     });
+  });
+
+  it("packs the Health Commons generated catalog for hosted runner installs", async () => {
+    const tarballsDir = await mkdtemp(path.join(tmpdir(), "murph-runner-pack-"));
+
+    temporaryDirectories.push(tarballsDir);
+
+    const tarballs = await packWorkspacePackageArtifacts(
+      ["@murphai/health-commons"],
+      tarballsDir,
+      { repoRoot },
+    );
+    const healthCommonsTarball = tarballs.get("@murphai/health-commons");
+
+    if (!healthCommonsTarball) {
+      throw new Error("Health Commons tarball was not packed.");
+    }
+
+    const { stdout } = await execFileAsync(
+      "tar",
+      ["-tzf", healthCommonsTarball],
+      { maxBuffer: 8 * 1024 * 1024 },
+    );
+    const entries = stdout.split("\n");
+
+    expect(entries).toContain("package/generated/catalog.json");
+    expect(entries).toContain("package/package.json");
   });
 });

@@ -840,8 +840,10 @@ test('default-vault injection skips incomplete command groups', () => {
 test('manifest marks query as vault-backed while model and route are exempt', () => {
   assert.equal(collectVaultRequiredCliDescriptorRootCommandNames().includes('query'), true)
   assert.equal(collectVaultCliDescriptorRootCommandNames().includes('model'), true)
+  assert.equal(collectVaultCliDescriptorRootCommandNames().includes('commons'), true)
   assert.equal(collectVaultCliDescriptorRootCommandNames().includes('route'), true)
   assert.equal(collectVaultRequiredCliDescriptorRootCommandNames().includes('model'), false)
+  assert.equal(collectVaultRequiredCliDescriptorRootCommandNames().includes('commons'), false)
   assert.equal(collectVaultRequiredCliDescriptorRootCommandNames().includes('route'), false)
 })
 

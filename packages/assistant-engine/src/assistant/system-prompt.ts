@@ -20,6 +20,7 @@ export interface AssistantSystemPromptInput {
   assistantCliContract: string | null;
   allowSensitiveHealthContext: boolean;
   assistantCommandAccessMode: AssistantMurphCommandAccessMode;
+  assistantHealthCommonsAccessMode: AssistantHealthCommonsAccessMode;
   assistantHostedDeviceConnectAvailable?: boolean;
   assistantHostedDeviceConnectProviders?: readonly AssistantHostedDeviceConnectProvider[];
   assistantKnowledgeToolsAvailable?: boolean;
@@ -37,13 +38,20 @@ export interface AssistantSystemPromptInput {
 export interface AssistantNotificationDecisionSystemPromptInput {
   activeExperimentContext?: string | null;
   allowSensitiveHealthContext: boolean;
+  assistantHealthCommonsAccessMode: AssistantHealthCommonsAccessMode;
   assistantHostedDeviceConnectAvailable?: boolean;
   assistantHostedDeviceConnectProviders?: readonly AssistantHostedDeviceConnectProvider[];
+  assistantToolNameAliases?: Readonly<Record<string, string>> | null;
   channel: string | null;
   currentLocalDate: string;
   currentTimeZone: string;
   vaultOverview?: string | null;
 }
+
+export type AssistantHealthCommonsAccessMode =
+  | "bound-tools"
+  | "direct-cli"
+  | "none";
 
 function joinPromptSections(
   ...sections: Array<string | null | undefined | false>
@@ -91,6 +99,9 @@ export function buildAssistantSystemPrompt(
     }),
     buildAssistantProductPrinciplesText(),
     buildAssistantHealthReasoningText(),
+    buildAssistantHealthCommonsGuidanceText({
+      assistantHealthCommonsAccessMode: input.assistantHealthCommonsAccessMode,
+    }),
     buildAssistantVaultNavigationText({
       assistantCommandAccessMode: input.assistantCommandAccessMode,
       assistantHostedDeviceConnectAvailable:
@@ -100,6 +111,7 @@ export function buildAssistantSystemPrompt(
     }),
     buildAssistantExperimentOnboardingGuidanceText({
       assistantCommandAccessMode: input.assistantCommandAccessMode,
+      assistantHealthCommonsAccessMode: input.assistantHealthCommonsAccessMode,
     }),
     buildAssistantExecutionBehaviorText({
       profile: input.modelBehaviorProfile,
@@ -122,6 +134,7 @@ export function buildAssistantSystemPrompt(
     }),
     buildAssistantKnowledgeGuidanceText({
       assistantCommandAccessMode: input.assistantCommandAccessMode,
+      assistantHealthCommonsAccessMode: input.assistantHealthCommonsAccessMode,
       assistantKnowledgeToolsAvailable:
         input.assistantKnowledgeToolsAvailable ?? false,
     }),
@@ -137,7 +150,7 @@ export function buildAssistantSystemPrompt(
 export function buildAssistantNotificationDecisionSystemPrompt(
   input: AssistantNotificationDecisionSystemPromptInput
 ): string {
-  return joinPromptSections(
+  const prompt = joinPromptSections(
     buildAssistantIdentityAndScopeText(),
     buildAssistantCurrentDateContextText({
       currentLocalDate: input.currentLocalDate,
@@ -145,6 +158,9 @@ export function buildAssistantNotificationDecisionSystemPrompt(
     }),
     buildAssistantProductPrinciplesText(),
     buildAssistantHealthReasoningText(),
+    buildAssistantHealthCommonsGuidanceText({
+      assistantHealthCommonsAccessMode: input.assistantHealthCommonsAccessMode,
+    }),
     buildAssistantHostedDeviceConnectGuidanceText({
       assistantHostedDeviceConnectAvailable:
         input.assistantHostedDeviceConnectAvailable ?? false,
@@ -157,6 +173,7 @@ export function buildAssistantNotificationDecisionSystemPrompt(
     buildAssistantToolTruthfulnessText(),
     buildAssistantNotificationDecisionGuidanceText(input.channel)
   );
+  return renderAssistantToolNameAliases(prompt, input.assistantToolNameAliases);
 }
 
 function buildAssistantCurrentDateContextText(input: {
@@ -198,6 +215,30 @@ function buildAssistantHealthReasoningText(): string {
 - Prefer lower-burden, reversible, life-fit next steps over protocol stacks or micro-optimization.
 - Do not present a diagnosis or medical certainty from limited data.
 - If the user describes potentially urgent, dangerous, or fast-worsening symptoms, say that clearly and direct them toward appropriate in-person or emergency care.`;
+}
+
+function buildAssistantHealthCommonsGuidanceText(input: {
+  assistantHealthCommonsAccessMode: AssistantHealthCommonsAccessMode;
+}): string {
+  return `Health Commons:
+- Health Commons is the public source-backed reference corpus for protocols, biomarkers, sources, and related health pages. It is separate from the user's private vault.
+- For health improvement ideas, protocol discovery, protocol setup, and experiment design, search Health Commons first. ${buildHealthCommonsDiscoverySurfaceText(input.assistantHealthCommonsAccessMode)}
+- A Health Commons \`protocol_variant\` is a public reference protocol, not a private vault protocol record. A private vault protocol is the user's fork or adaptation of a protocol. An experiment is a private time-bounded evaluation run with a hypothesis, plan, adherence evidence, metrics, and outcome.
+- Do not use private \`vault-cli protocol show\` or \`vault-cli protocol list\` as the discovery path for public Health Commons protocols. Use private vault protocol records only when the user is inspecting or editing their own saved adaptation/fork.`;
+}
+
+function buildHealthCommonsDiscoverySurfaceText(
+  assistantHealthCommonsAccessMode: AssistantHealthCommonsAccessMode,
+): string {
+  if (assistantHealthCommonsAccessMode === "bound-tools") {
+    return "Use `healthCommons.search` or `healthCommons.listProtocols` for discovery, `healthCommons.get` for the exact page, and `healthCommons.listSources` when the user asks what evidence backs a protocol.";
+  }
+
+  if (assistantHealthCommonsAccessMode === "direct-cli") {
+    return "Use `vault-cli commons search \"<query>\" --format json` or `vault-cli commons protocol list --format json` for discovery, `vault-cli commons protocol show <key-or-slug> --format json` for the exact page, and `vault-cli commons source list --protocol <key-or-slug> --format json` when the user asks what evidence backs a protocol.";
+  }
+
+  return "Use the Health Commons command or tool surface only when one is exposed in the route; if no Health Commons surface is available, do not claim to have inspected the corpus.";
 }
 
 function buildAssistantVaultNavigationText(input: {
@@ -259,6 +300,7 @@ function buildAssistantHostedDeviceConnectGuidanceText(input: {
 
 function buildAssistantExperimentOnboardingGuidanceText(input: {
   assistantCommandAccessMode: AssistantMurphCommandAccessMode;
+  assistantHealthCommonsAccessMode: AssistantHealthCommonsAccessMode;
 }): string {
   const commandSurface =
     input.assistantCommandAccessMode === "bound-tools"
@@ -269,10 +311,11 @@ function buildAssistantExperimentOnboardingGuidanceText(input: {
 
   return `Experiment onboarding:
 - When the user asks to start, run, explore, or set up a protocol or experiment, treat that as a planning conversation until they explicitly confirm the final run plan. Do not create an active experiment or reminder automation from the first request alone.
-- Resolve the protocol page first with \`vault-cli protocol show <protocol id or slug> --format json\`. If the protocol name is fuzzy, use \`vault-cli protocol list --format json\` or \`vault-cli search query "<protocol name>" --format json\` to find the canonical protocol page before planning.
-- Use the protocol page's Health Commons \`experimentOnboarding\` block when available. It defines the start prompt, vault checks, safety screen, setup slots, plan defaults, logging fields, assistant reminder policy, and protocol-specific read hints. If the page has no onboarding block, fall back to the protocol \`safety\`, \`testPlans\`, \`protocol\`, and \`claims\` fields for a lightweight onboarding flow.
+- ${buildHealthCommonsProtocolResolutionText(input.assistantHealthCommonsAccessMode)}
+- Use the Health Commons page's \`experimentOnboarding\` block when available. It defines the start prompt, vault checks, safety screen, setup slots, plan defaults, logging fields, assistant reminder policy, and protocol-specific read hints. If the page has no onboarding block, fall back to the public protocol \`safety\`, \`testPlans\`, \`protocol\`, and \`claims\` fields for a lightweight onboarding flow.
 - For source-attributed external protocols, keep the source routine separate from the user's run plan. Do not present a celebrity or external source protocol as Murph's default recommendation; offer a lower-burden variant or defer when the onboarding slots or safety context suggest poor fit.
 - ${commandSurface}
+- Keep public Health Commons references, private vault protocol adaptations, and experiments separate. If the user wants to personalize a public protocol, treat that as a private adaptation/fork before or during experiment setup rather than rewriting the public Health Commons protocol.
 - Before setup questions, check whether the user already has an active experiment with \`vault-cli experiment list --status active --format json\`. If there is one, ask whether they want to pause or finish it, defer this protocol, or knowingly run multiple experiments with weaker attribution.
 - Review relevant context instead of asking everything from scratch: use \`vault-cli memory show --format json\`, \`vault-cli search query "<protocol safety/logistics context>" --format json\`, \`vault-cli timeline ... --format json\`, and the relevant normalized wearable reads such as \`vault-cli wearables latest --format json\`, \`vault-cli wearables metric latest <metric> --format json\`, \`vault-cli wearables metric trend <metric> --format json\`, \`vault-cli wearables drift --format json\`, \`vault-cli wearables sources list --format json\`, or \`vault-cli wearables day <date> --format json\` as appropriate. When the onboarding block includes \`contextReview.vaultChecks[].readHints\`, treat those as protocol-specific command hints and prefer them over ad hoc reads. If a hint looks abbreviated or stale, verify the exact CLI shape with \`vault-cli <command path> --help\` or \`vault-cli <command path> --schema --format json\` before using it.
 - For high-caution protocols, ask the compact safety screen even if the vault is silent. If the user says yes or is unsure about a red flag, do not set up the protocol as an unsupervised active experiment; suggest clinician guidance, a lower-intensity alternative, or postponing.
@@ -284,6 +327,20 @@ function buildAssistantExperimentOnboardingGuidanceText(input: {
 - Before scheduled experiment check-ins, reminder decisions, or review nudges, read \`vault-cli experiment progress <id> --format json\` so the message reflects current adherence, missing evidence, and review readiness instead of a generic nudge.
 - Use \`vault-cli experiment outcome analyze <id> --format json\` when the user asks for a run review, end-of-run interpretation, or worth-repeating judgment, and follow its confidence and confounder framing rather than improvising causal claims. If the deterministic outcome is good enough to save and the user wants it persisted, use \`vault-cli experiment outcome write <id> --format json\`.
 - Create reminders only after opt-in with \`vault-cli automation scaffold --format json\`, edit the payload to the agreed neutral instructions and schedule, then save with \`vault-cli automation upsert --input -\`. Missed-log checks should be neutral, at most once per planned session, and easy to decline.`;
+}
+
+function buildHealthCommonsProtocolResolutionText(
+  assistantHealthCommonsAccessMode: AssistantHealthCommonsAccessMode,
+): string {
+  if (assistantHealthCommonsAccessMode === "bound-tools") {
+    return "Resolve the public protocol reference through Health Commons first: use `healthCommons.search` or `healthCommons.listProtocols` for fuzzy discovery, then `healthCommons.get` for the exact `protocol_variant` page before planning. Do not use private `vault-cli protocol show` or `vault-cli protocol list` to discover public protocol options.";
+  }
+
+  if (assistantHealthCommonsAccessMode === "direct-cli") {
+    return "Resolve the public protocol reference through Health Commons first: use `vault-cli commons search \"<query>\" --format json` or `vault-cli commons protocol list --format json` for fuzzy discovery, then `vault-cli commons protocol show <key-or-slug> --format json` for the exact `protocol_variant` page before planning. Do not use private `vault-cli protocol show` or `vault-cli protocol list` to discover public protocol options.";
+  }
+
+  return "Resolve the public protocol reference through Health Commons first when a Health Commons surface is available. If no Health Commons command or tool surface is exposed, do not claim to have inspected public protocol options; explain what you would need. Do not use private `vault-cli protocol show` or `vault-cli protocol list` to discover public protocol options.";
 }
 
 function buildAssistantAudienceSafetyText(
@@ -522,6 +579,7 @@ Keep waiting on long research runs unless they actually error or time out. Both 
 
 function buildAssistantKnowledgeGuidanceText(input: {
   assistantCommandAccessMode: AssistantMurphCommandAccessMode;
+  assistantHealthCommonsAccessMode: AssistantHealthCommonsAccessMode;
   assistantKnowledgeToolsAvailable: boolean;
 }): string {
   return joinPromptSections(
@@ -529,8 +587,25 @@ function buildAssistantKnowledgeGuidanceText(input: {
       ? "For wiki work, prefer the dedicated knowledge surface for this route over generic CLI execution."
       : "For wiki work, use `vault-cli knowledge ...` directly in this turn.",
     "Murph's knowledge system has two layers: `bank/library` is the stable reference layer, while `derived/knowledge` is the user's compiled wiki.",
+    buildHealthCommonsKnowledgeDistinctionText(
+      input.assistantHealthCommonsAccessMode
+    ),
     "The assistant is responsible for compiling and maintaining the wiki over time. The wiki exists to preserve reusable synthesized understanding so Murph can accumulate context, patterns, decisions, and working knowledge instead of re-deriving them from scratch in later turns. Keep it sparse and useful; do not create pages for one-off mentions or disposable answers.",
     "For wiki tasks, read `derived/knowledge/index.md` first, then one to three targeted pages. Update an existing matching page instead of creating a near-duplicate, and note meaningful conclusion changes.",
     "Persist pages through the dedicated knowledge write surface for this route, attach `librarySlugs` when a page builds on `bank/library`, and use only canonical vault sources, never `derived/**` or `.runtime/**`."
   );
+}
+
+function buildHealthCommonsKnowledgeDistinctionText(
+  assistantHealthCommonsAccessMode: AssistantHealthCommonsAccessMode,
+): string {
+  if (assistantHealthCommonsAccessMode === "bound-tools") {
+    return "`assistant.knowledge.*` and `vault-cli knowledge ...` are for the user's derived knowledge wiki. They are not the canonical Health Commons corpus; use `healthCommons.*` for public Health Commons protocol, biomarker, and source discovery.";
+  }
+
+  if (assistantHealthCommonsAccessMode === "direct-cli") {
+    return "`vault-cli knowledge ...` is for the user's derived knowledge wiki. It is not the canonical Health Commons corpus; use `vault-cli commons ...` for public Health Commons protocol, biomarker, and source discovery.";
+  }
+
+  return "`assistant.knowledge.*` and `vault-cli knowledge ...` are for the user's derived knowledge wiki. They are not the canonical Health Commons corpus; use a Health Commons-specific surface for public protocol, biomarker, and source discovery when one is exposed.";
 }
