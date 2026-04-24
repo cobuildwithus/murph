@@ -17,6 +17,18 @@ Use this skill when the user wants Codex to coordinate with a ChatGPT Pro thread
 
 In this repo, `pnpm review:gpt` is wrapped through `scripts/review-gpt-browser-profile.sh` and defaults to the `phlebas` managed browser profile.
 
+Before sending new work or arming a manual wake, check the live tab counts for available managed profiles such as `eragon`, `phlebas`, `vonneumann`, and `hercules`. Prefer the lowest-load profile that can run the task instead of concentrating new ChatGPT threads in one browser. If `hercules` is already overloaded, use a lighter profile for new sends unless the workspace explicitly requires Hercules and no equivalent lane exists.
+
+Useful live check:
+
+```bash
+for profile in phlebas vonneumann hercules eragon; do
+  endpoint="$(bash scripts/review-gpt-browser-profile.sh browser-endpoint "$profile")"
+  count="$(curl --silent --max-time 1 "$endpoint/json/list" | jq '[.[] | select(.type == "page")] | length' 2>/dev/null || printf 'offline')"
+  printf '%s\t%s\n' "$profile" "$count"
+done
+```
+
 Do not run raw `pnpm exec cobuild-review-gpt thread wake ...` for Murph watch flows unless you also pass the explicit browser endpoint from the repo wrapper. The raw tool default can attach to a different browser profile.
 
 Prefer:
