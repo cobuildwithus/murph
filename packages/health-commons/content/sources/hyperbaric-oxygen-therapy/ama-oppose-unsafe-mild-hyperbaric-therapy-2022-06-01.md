@@ -3,7 +3,7 @@ schemaVersion: "murph.commons.page.v1"
 entityType: "source_artifact"
 key: "source_artifact:ama-oppose-unsafe-mild-hyperbaric-therapy-2022-06-01"
 slug: "sources/hyperbaric-oxygen-therapy/ama-oppose-unsafe-mild-hyperbaric-therapy-2022-06-01"
-title: "Oppose Unsafe Use of "Mild Hyperbaric Therapy""
+title: 'Oppose Unsafe Use of "Mild Hyperbaric Therapy"'
 summary: "Policy signal from organized medicine about safety and supervision concerns around mild-hyperbaric marketing and practice drift."
 status: "draft"
 quality: "usable"
@@ -21,7 +21,7 @@ relations:
     target: "experiment_family:hyperbaric-oxygen-therapy"
 source:
   kind: "guideline"
-  title: "Oppose Unsafe Use of "Mild Hyperbaric Therapy""
+  title: 'Oppose Unsafe Use of "Mild Hyperbaric Therapy"'
   url: "https://policysearch.ama-assn.org/policyfinder/detail/D-270.986?uri=%2FAMADoc%2Fdirectives.xml-D-270.986.xml"
 researchEvidence:
   designKind: "guideline"

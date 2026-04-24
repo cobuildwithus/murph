@@ -5910,7 +5910,7 @@
       "schemaVersion": "murph.commons.artifact-manifest.v1"
     }
   ],
-  "catalogHash": "sha256:967417d5e289adb920d90248d52170b9b757a04d4caf746184bd4d1bce0c2ac6",
+  "catalogHash": "sha256:b27ecd8401951141a926caa0a1c9b2144ee8e1ebb59e0efa9a3c27949f81dd79",
   "changes": [
     {
       "affectedFields": [
@@ -8152,7 +8152,7 @@
         "direction": {
           "desired": "lower_or_stable",
           "label": "Lower symptom burden is better.",
-          "nuance": "A single severe symptom, stopped session, or facility safety concern should trigger clinician/facility follow-up rather than trend interpretation."
+          "nuance": "A single severe symptom, unsafe glucose or blood-pressure reading, stopped session, device/facility concern, or staff instruction should override trend interpretation and trigger clinician/facility follow-up."
         },
         "displayName": "HBOT session tolerability",
         "explainerCards": [
@@ -8253,7 +8253,7 @@
       ],
       "relativePath": "biomarkers/hbot-session-tolerability.md",
       "revision": {
-        "pageRevisionId": "sha256:79041bfbd5de602af7d6b8427001f80cd635067eba5973e7c304b4f8243d8855",
+        "pageRevisionId": "sha256:e0ad12118260e31344e06258aa3000216e98cd6a81357c98b554bcd28608f438",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -9888,7 +9888,7 @@
         "clinical HBOT",
         "oxygen therapy family"
       ],
-      "body": "# Hyperbaric Oxygen Therapy\n\nThis family page is the boundary layer for oxygen therapies that are often conflated in public language. The canonical Murph protocol is **supervised systemic chamber HBOT**.\n\nMild chambers, soft/fabric chambers, topical oxygen, topical hyperbaric oxygen, normobaric oxygen, exercise-with-oxygen therapy, athlete oxygen exposure, and commercial wellness or rejuvenation programs should stay as adjacent variants unless their own evidence pages are built.\n\nThe family evidence map is intentionally safety-sensitive. Some clinical lanes have substantial source coverage, such as selected diabetic-foot ulcers, late radiation injury, sudden sensorineural hearing loss, and acute hospital-only indications. Other lanes, especially healthy-aging, cognition optimization, aesthetic, performance, and longevity claims, remain off-label or research-context claims rather than established Murph outcomes.",
+      "body": "# Hyperbaric Oxygen Therapy\n\nThis family page is the boundary layer for oxygen therapies that are often conflated in public language. The canonical Murph protocol is **supervised systemic chamber HBOT**.\n\nSafety boundary: this family page is not a self-treatment guide. Do not use Murph to start HBOT for current carbon-monoxide exposure/poisoning, decompression illness, gas embolism, crush or traumatic ischemia, non-healing wounds, radiation injury, sudden hearing loss, or neurologic symptoms/diagnoses. Acute indications require emergency or hospital pathways. Chronic wound, radiation, ENT, and neurologic uses require a treating clinician/facility plan and should be handled as separate clinical variants with indication-specific outcomes, not as ordinary wellness experiments.\n\nMild chambers, soft/fabric chambers, topical oxygen, topical hyperbaric oxygen, normobaric oxygen, exercise-with-oxygen therapy, athlete oxygen exposure, and commercial wellness or rejuvenation programs should stay as adjacent variants unless their own evidence pages are built.\n\nThe family evidence map is intentionally safety-sensitive. Some clinical lanes have substantial source coverage, such as selected diabetic-foot ulcers, late radiation injury, sudden sensorineural hearing loss, and acute hospital-only indications. Other lanes, especially healthy-aging, cognition optimization, aesthetic, performance, and longevity claims, remain off-label or research-context claims rather than established Murph outcomes.",
       "canonicalModality": "supervised_systemic_chamber_hbot",
       "categories": [
         "oxygen-therapy",
@@ -9967,7 +9967,7 @@
         ]
       },
       "revision": {
-        "pageRevisionId": "sha256:be98a915dde1690073fc0a14add526e26b1d7a236ff0e8406ace1ad02f4a1586",
+        "pageRevisionId": "sha256:f4cb3ab79e20288e3da5ecf09ebbb088d8b2d4aafdfd1d21180ffb90dc3b8e84",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -14287,6 +14287,8 @@
             "medication_change",
             "glucose_instability",
             "blood_pressure_instability",
+            "recent_nicotine_caffeine_or_vasoconstrictor_exposure",
+            "opioid_sedative_alcohol_withdrawal_or_other_seizure_threshold_modifier",
             "sleep_disruption",
             "other_major_intervention"
           ],
@@ -14312,11 +14314,7 @@
         },
         "planDefaults": {
           "baselineDays": 7,
-          "firstSessionGuidance": "Do not begin unless the clinician/facility plan is active; first-session logging should focus on tolerability, equalization, and whether the session was completed as prescribed.",
-          "interventionDays": 42,
-          "minimumUsefulSessions": 1,
-          "sessionsPerWeek": 5,
-          "targetSessions": 20,
+          "firstSessionGuidance": "Do not create the run until the clinician/facility pressure, oxygen method, chamber type, session duration, air-break plan, frequency, total planned sessions, and supervision status are entered.",
           "testPlanId": "clinician-supervised-hbot-tolerance-49d"
         },
         "safetyScreen": {
@@ -14328,29 +14326,35 @@
               "id": "unsupervised_start",
               "ifPositive": "do_not_start_unsupervised",
               "prompt": "Are you considering HBOT without a current clinician prescription or without a medically supervised chamber facility?",
-              "why": "The protocol is restricted to clinician-supervised systemic chamber HBOT tracking."
+              "why": "Murph must not start, schedule, or track HBOT without both a current clinician prescription and a medically supervised chamber facility."
+            },
+            {
+              "id": "urgent_or_disease_treatment_request",
+              "ifPositive": "do_not_start_unsupervised",
+              "prompt": "Is this for current carbon-monoxide exposure/poisoning, decompression illness, gas embolism, crush or traumatic ischemia, a non-healing wound, radiation injury, sudden hearing loss, or a neurologic symptom/diagnosis?",
+              "why": "Murph must not recommend self-treatment for acute, wound, radiation, ENT, or neurologic HBOT indications. Only create a tracking run after an active clinician/facility plan exists, and keep disease-specific outcomes in a separate clinical variant."
             },
             {
               "id": "absolute_or_major_chamber_safety_issue",
               "ifPositive": "do_not_start_unsupervised",
-              "prompt": "Any untreated pneumothorax, unresolved chamber/device compatibility concern, intraocular gas, or facility instruction that says HBOT should not proceed?",
-              "why": "These can create immediate chamber-safety risk."
+              "prompt": "Any untreated pneumothorax, unresolved chamber/device compatibility concern, intraocular gas, prohibited-material concern, or facility instruction that says HBOT should not proceed?",
+              "why": "These can create immediate chamber-safety risk and must be cleared by the treating clinician/facility before Murph continues."
             },
             {
               "id": "relative_contraindication_or_monitoring_issue",
               "ifPositive": "clinician_guidance_before_unsupervised_start",
-              "prompt": "Any lung disease, ear/sinus equalization problem, recent respiratory infection, fever, seizure history, diabetes/hypoglycemia risk, pregnancy context, selected chemotherapy/medication exposure, implanted device, uncontrolled blood pressure, heart-failure concern, or severe claustrophobia/anxiety?",
-              "why": "These require individualized clinician and facility review before logging or continuing sessions."
+              "prompt": "Any lung disease, blebs/bullae, COPD/asthma, thoracic surgery history, ear/sinus equalization problem, recent respiratory infection, fever, seizure history or seizure-threshold modifier, CNS disease, hypercapnia/CO2-retention risk, opioid or sedative use, alcohol withdrawal/dependence, diabetes/hypoglycemia risk, pregnancy context, intraocular gas or recent eye surgery, selected chemotherapy/medication exposure, implanted or external device, uncontrolled blood pressure, heart-failure concern, severe claustrophobia/anxiety, or recent nicotine/high-caffeine/other vasoconstrictor exposure?",
+              "why": "These require individualized clinician and facility review before creating or continuing an HBOT tracking run."
             },
             {
               "id": "active_or_recent_adverse_event",
               "ifPositive": "clinician_guidance_before_unsupervised_start",
-              "prompt": "Any severe ear/sinus pain, neurologic symptom, chest symptom, shortness of breath, vision change, severe anxiety, glucose symptom, or prior HBOT session stopped for safety?",
+              "prompt": "Any severe ear/sinus pain, neurologic symptom, chest symptom, shortness of breath, vision change, severe anxiety, glucose symptom, unsafe blood-pressure reading if relevant, device alarm, or prior HBOT session stopped for safety?",
               "why": "Active or recurring adverse events should be handled by the treating team before Murph continues the tracking plan."
             }
           ],
           "notes": [
-            "A positive or uncertain screen is not a diagnosis; it means Murph should not set up or continue HBOT tracking without clinician/facility guidance."
+            "A positive or uncertain screen is not a diagnosis; it means Murph must not create or continue HBOT tracking until the treating clinician/facility has reviewed the issue and cleared the plan."
           ],
           "stopIf": {
             "inheritFromProtocolSafety": true
@@ -14430,16 +14434,7 @@
         "relationship": "root"
       },
       "protocol": {
-        "doseSignature": "Clinician-prescribed systemic chamber HBOT · log ATA/oxygen/session/air breaks · 60–90 min common outpatient sessions · course is indication-specific",
-        "durationMinutes": {
-          "max": 90,
-          "min": 60
-        },
-        "frequency": {
-          "sessionsPerWeek": 5
-        },
-        "interventionSessionsMinimum": 1,
-        "interventionSessionsTarget": 20,
+        "doseSignature": "Clinician-prescribed systemic chamber HBOT · no Murph default pressure, frequency, duration, or session target · log exact prescribed pressure/oxygen/session/air-break/course details",
         "keepInMind": [
           "HBOT evidence is indication-specific: diabetic-foot ulcers, late radiation injury, sudden sensorineural hearing loss, acute carbon monoxide poisoning, decompression illness, trauma, healthy aging, and neurocognitive claims do not share one certainty level.",
           "Accepted, covered, cleared, advertised, and evidence-supported are different labels; do not turn an indication list or device clearance into a broad benefit claim.",
@@ -14470,19 +14465,19 @@
           "Before the first logged session, confirm the indication, chamber type, pressure units, oxygen delivery method, session duration, air-break schedule, planned number of sessions, and who is medically supervising the course.",
           "Complete the facility safety screen and disclose pneumothorax history, lung disease, ear/sinus equalization problems, recent respiratory infection, seizure history, diabetes or hypoglycemia risk, pregnancy context, intraocular gas, implanted devices, medication or chemotherapy exposures, and claustrophobia/anxiety.",
           "For each session, follow facility rules on clothing, electronics, personal items, grounding, device compatibility, monitoring, equalization, and staff instructions.",
-          "During descent and treatment, tell staff immediately about ear or sinus pain, inability to equalize, chest pain, shortness of breath, neurologic symptoms, visual symptoms, severe anxiety, glucose symptoms, or any unusual sensation.",
+          "During descent and treatment, tell staff immediately about ear or sinus pain, inability to equalize, dizziness or faintness, cough or new pulmonary symptoms, chest pain, shortness of breath, neurologic symptoms, visual symptoms, severe anxiety, glucose symptoms, unsafe blood-pressure readings if relevant, device alarms, or any unusual sensation.",
           "After each session, log pressure/ATA, minutes completed, air breaks, symptoms, adverse events, glucose/BP checks if relevant, vision or ear changes, and whether the session was paused, shortened, or stopped.",
           "Keep mild/soft-chamber sessions, topical oxygen devices, normobaric oxygen, EWOT, athletic oxygen exposure, and named wellness programs out of this protocol log; track those as separate variants."
         ],
         "stopConditions": [
-          "Do not start an unsupervised course without a clinician prescription and facility safety controls.",
-          "Stop or defer immediately if the facility or clinician identifies untreated pneumothorax, unsafe device/implant compatibility, prohibited materials, or another absolute safety issue.",
-          "Tell staff and stop the session as directed for severe ear or sinus pain, inability to equalize, chest pain, shortness of breath, neurologic symptoms, seizure symptoms, confusion, severe headache, vision changes, severe anxiety, hypoglycemia symptoms, or any staff safety concern.",
-          "Pause the Murph experiment and seek clinician guidance if symptoms persist after a session, adverse events recur, sessions are repeatedly shortened, or the care plan changes."
+          "Do not start an unsupervised course without a current clinician prescription and medically supervised facility safety controls.",
+          "Stop or defer immediately if the facility or clinician identifies untreated pneumothorax, unsafe device/implant compatibility, intraocular gas, prohibited materials, or another absolute safety issue.",
+          "Tell staff immediately and stop or defer as directed for severe ear or sinus pain, inability to equalize, dizziness or faintness, cough or new pulmonary symptoms, chest pain, shortness of breath, neurologic symptoms, seizure-like symptoms, confusion, severe headache, vision changes, severe anxiety or panic, hypoglycemia symptoms, unsafe glucose or blood-pressure reading if relevant, device alarm, prohibited-material concern, or any staff safety concern.",
+          "Pause the Murph experiment and seek clinician/facility guidance if symptoms persist after a session, adverse events recur, sessions are repeatedly shortened, BP/glucose readings are unsafe, or the care plan changes."
         ],
-        "target": "Use the treating clinician’s prescription for pressure, oxygen fraction, chamber type, session length, air breaks, and course length; do not self-set dose.",
+        "target": "Use only the treating clinician’s prescription for pressure, oxygen fraction, chamber type, session length, air breaks, frequency, and course length; keep planning-only if any dose field is unknown.",
         "tips": [
-          "Replace the default schedule with the clinician’s actual order; the 5x/week and 20-session fields are tracking placeholders, not a universal dose recommendation.",
+          "Do not create an executable schedule until the clinician’s actual pressure, oxygen method, chamber type, session duration, air-break plan, frequency, and total planned sessions are known.",
           "Use the same pressure units the source/facility uses—ATA, bar, kPa, or atmospheres—and avoid silently converting unless the facility confirms the conversion.",
           "If diabetes or blood-pressure risk is present, ask the care team what pre/post checks and thresholds they want recorded.",
           "Treat missed, paused, or shortened sessions as dose-fidelity data rather than failures.",
@@ -15320,9 +15315,9 @@
         "primaryClaim": "The most defensible Murph page is a tracking wrapper for prescribed systemic chamber HBOT: it can document dose fidelity, supervision, tolerability, and adverse events while keeping efficacy claims tied to specific clinical indications and source keys."
       },
       "revision": {
-        "pageRevisionId": "sha256:e9d0879f1c577ba2db58a3abb49343fd95ea552a40224303b3d855f23fdae049",
-        "recipeHash": "sha256:de085900377e2342f4c151bcd626b69eb99ca9478cee4f0c523237831d579db9",
-        "runSpecRevisionId": "sha256:4a638144051bfbba9c70dc8b682e2a758e9e7413b7071c6825ccbfe170d431ec"
+        "pageRevisionId": "sha256:0a02fda248ae2690a399e8c8d0b2021ee9ed90b5e859c290996d89c7fd148ecc",
+        "recipeHash": "sha256:d41ca71db4ec5c8a16b095e650ffc40453c948904e835520394a0440bcda5dac",
+        "runSpecRevisionId": "sha256:40826580691bff0c0c77fb11ee40b878d01a3e133f90ca9a806e9299e729830e"
       },
       "safety": {
         "avoidOrGetClinicianGuidance": [
@@ -15337,7 +15332,9 @@
           "implanted_or_external_device_needing_pressure_compatibility_review",
           "selected_chemotherapy_or_medication_exposures",
           "uncontrolled_blood_pressure_or_heart_failure_context",
-          "severe_claustrophobia_or_confinement_anxiety"
+          "severe_claustrophobia_or_confinement_anxiety",
+          "recent_nicotine_high_caffeine_or_other_vasoconstrictor_exposure_needing_facility_review",
+          "cns_disease_hypercapnia_opioid_or_sedative_use_alcohol_withdrawal_or_other_seizure_threshold_modifier"
         ],
         "cautionLevel": "high",
         "notes": [
@@ -15349,9 +15346,11 @@
           "facility_or_clinician_says_not_to_proceed",
           "severe_ear_or_sinus_pain_or_inability_to_equalize",
           "chest_pain_shortness_of_breath_or_pulmonary_symptoms",
+          "dizziness_faintness_cough_or_new_pulmonary_symptoms",
           "neurologic_symptoms_seizure_confusion_or_severe_headache",
           "vision_change_or_severe_eye_symptom",
           "hypoglycemia_symptoms_or_unsafe_glucose_reading_if_relevant",
+          "unsafe_blood_pressure_reading_if_relevant",
           "severe_anxiety_panic_or_confinement_intolerance",
           "device_alarm_or_staff_safety_concern",
           "session_paused_shortened_or_stopped_for_safety_without_clinician_followup"
@@ -28363,11 +28362,11 @@
           "displayPriority": 50,
           "groupId": "acute_and_emergent_indications",
           "headline": "Key randomized trial frequently cited because it contributes mixed or negative evidence within the CO poisoning literature. Also surfaced in shard(s): adjacent-modalities-and-external-claims. Canonicalized on PMID 10092916 / DOI 10.5694/j.1326-5377.1999.tb140318.x. Shard directness guesses differed; shard claim-use guesses differed.",
-          "implication": "Use this source according to its ledger role: supports-protocol / clinical_supervised.",
+          "implication": "Use this source as direct counterevidence or limiting evidence; it should not be summarized as positive protocol support.",
           "protocolKey": "protocol_variant:hyperbaric-oxygen-therapy/hyperbaric-oxygen-therapy",
-          "result": "positive",
+          "result": "no_clear_advantage",
           "scope": "clinical_supervised",
-          "stance": "supports"
+          "stance": "does_not_confirm"
         }
       ],
       "quality": "usable",
@@ -28394,7 +28393,7 @@
         ]
       },
       "revision": {
-        "pageRevisionId": "sha256:f332d3bc2782d034a0e11081ee6cdd5b7046f53266294e900ca08bb13ff24df5",
+        "pageRevisionId": "sha256:fc55ac568996dfd03b2d89dd118adabd40212176cbc6ba58b64dfb75ef7eb14b",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -31840,11 +31839,11 @@
           "displayPriority": 10,
           "groupId": "ent_and_sudden_sensorineural_hearing_loss",
           "headline": "Early Cochrane review anchoring the evidence base for HBOT in SSHL/tinnitus discussions.",
-          "implication": "Use this source according to its ledger role: supports-protocol / clinical_supervised.",
+          "implication": "Use this source as mixed or limiting evidence; preserve null, negative, endpoint-specific, and heterogeneity findings rather than summarizing it as uniformly positive support.",
           "protocolKey": "protocol_variant:hyperbaric-oxygen-therapy/hyperbaric-oxygen-therapy",
-          "result": "positive",
+          "result": "mixed",
           "scope": "clinical_supervised",
-          "stance": "supports"
+          "stance": "mixed"
         }
       ],
       "quality": "usable",
@@ -31871,7 +31870,7 @@
         ]
       },
       "revision": {
-        "pageRevisionId": "sha256:0ede3714d2b0068dad863d7d55682d1f7057a3da96957a843cf0af5299939cd0",
+        "pageRevisionId": "sha256:a2589290576c521fd4e85ae0c8e6ed4e4b497ea1067e100670fe79b3b3ec1f56",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -32711,22 +32710,22 @@
           "displayPriority": 10,
           "groupId": "acute_and_emergent_indications",
           "headline": "Early systematic review that frames heterogeneity and uncertainty across acute CO poisoning trials.",
-          "implication": "Use this source according to its ledger role: supports-protocol / clinical_supervised.",
+          "implication": "Use this source as mixed or limiting evidence; preserve null, negative, endpoint-specific, and heterogeneity findings rather than summarizing it as uniformly positive support.",
           "protocolKey": "protocol_variant:hyperbaric-oxygen-therapy/hyperbaric-oxygen-therapy",
-          "result": "positive",
+          "result": "mixed",
           "scope": "clinical_supervised",
-          "stance": "supports"
+          "stance": "mixed"
         },
         {
           "caveat": "This source page is a rights-safe metadata summary generated from the canonical ledger; do not infer sample size, effect size, adverse-event rate, DOI, PMID, or population details beyond the recorded metadata.",
           "displayPriority": 10,
           "groupId": "acute-emergency-indications",
           "headline": "Early systematic review that frames heterogeneity and uncertainty across acute CO poisoning trials.",
-          "implication": "Use this source according to its ledger role: supports-protocol / clinical_supervised.",
+          "implication": "Use this source as mixed or limiting evidence; preserve null, negative, endpoint-specific, and heterogeneity findings rather than summarizing it as uniformly positive support.",
           "protocolKey": "protocol_variant:hyperbaric-oxygen-therapy/hyperbaric-oxygen-therapy",
-          "result": "positive",
+          "result": "mixed",
           "scope": "clinical_supervised",
-          "stance": "supports"
+          "stance": "mixed"
         }
       ],
       "quality": "usable",
@@ -32753,7 +32752,7 @@
         ]
       },
       "revision": {
-        "pageRevisionId": "sha256:3b8866a487eb0143dff80353126273b0478880dfddaf255a4e5628cbeb3f0c30",
+        "pageRevisionId": "sha256:08b711614b983c663bd9cc4bb570f97f571f577f61b7c88242ebb9f258bceaf0",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -32794,11 +32793,11 @@
           "displayPriority": 10,
           "groupId": "ent_and_sudden_sensorineural_hearing_loss",
           "headline": "Foundational evidence synthesis focused on randomized HBOT evidence for SSHL/tinnitus-era literature.",
-          "implication": "Use this source according to its ledger role: supports-protocol / clinical_supervised.",
+          "implication": "Use this source as mixed or limiting evidence; preserve null, negative, endpoint-specific, and heterogeneity findings rather than summarizing it as uniformly positive support.",
           "protocolKey": "protocol_variant:hyperbaric-oxygen-therapy/hyperbaric-oxygen-therapy",
-          "result": "positive",
+          "result": "mixed",
           "scope": "clinical_supervised",
-          "stance": "supports"
+          "stance": "mixed"
         }
       ],
       "quality": "usable",
@@ -32825,7 +32824,7 @@
         ]
       },
       "revision": {
-        "pageRevisionId": "sha256:9298ad8c282ca250dd7f2524de1843343e8a5a6ec3981a529f9e14b045434b4d",
+        "pageRevisionId": "sha256:27820ea8fc872cff03e2ad5f82ca3f44abdfe8ce5a50c54c205007a24ee65a24",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -36866,11 +36865,11 @@
           "displayPriority": 50,
           "groupId": "acute_and_emergent_indications",
           "headline": "Later randomized evidence directly relevant to unresolved treatment questions in acute CO poisoning.",
-          "implication": "Use this source according to its ledger role: supports-protocol / clinical_supervised.",
+          "implication": "Use this source as direct counterevidence or limiting evidence; it should not be summarized as positive protocol support.",
           "protocolKey": "protocol_variant:hyperbaric-oxygen-therapy/hyperbaric-oxygen-therapy",
-          "result": "positive",
+          "result": "no_clear_advantage",
           "scope": "clinical_supervised",
-          "stance": "supports"
+          "stance": "does_not_confirm"
         }
       ],
       "quality": "usable",
@@ -36897,7 +36896,7 @@
         ]
       },
       "revision": {
-        "pageRevisionId": "sha256:3cd73768b3247e0e70954461d569913fb46b1803665621b00538b2a9a3da763a",
+        "pageRevisionId": "sha256:45bc210a3a9baafa3230a480ea17bc8d6feaec6a9ccb52d811765e7dc02d7fd4",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -37398,22 +37397,22 @@
           "displayPriority": 10,
           "groupId": "acute_and_emergent_indications",
           "headline": "High-priority synthesis of randomized CO poisoning evidence and a standard reference for balanced protocol claims. Also surfaced in shard(s): adjacent-modalities-and-external-claims. Canonicalized on PMID 21491385 / DOI 10.1002/14651858.cd002041.pub3. Shard directness guesses differed; shard claim-use guesses differed.",
-          "implication": "Use this source according to its ledger role: supports-protocol / clinical_supervised.",
+          "implication": "Use this source as direct counterevidence or limiting evidence; it should not be summarized as positive protocol support.",
           "protocolKey": "protocol_variant:hyperbaric-oxygen-therapy/hyperbaric-oxygen-therapy",
-          "result": "positive",
+          "result": "no_clear_advantage",
           "scope": "clinical_supervised",
-          "stance": "supports"
+          "stance": "does_not_confirm"
         },
         {
           "caveat": "This source page is a rights-safe metadata summary generated from the canonical ledger; do not infer sample size, effect size, adverse-event rate, DOI, PMID, or population details beyond the recorded metadata.",
           "displayPriority": 10,
           "groupId": "acute-emergency-indications",
           "headline": "High-priority synthesis of randomized CO poisoning evidence and a standard reference for balanced protocol claims. Also surfaced in shard(s): adjacent-modalities-and-external-claims. Canonicalized on PMID 21491385 / DOI 10.1002/14651858.cd002041.pub3. Shard directness guesses differed; shard claim-use guesses differed.",
-          "implication": "Use this source according to its ledger role: supports-protocol / clinical_supervised.",
+          "implication": "Use this source as direct counterevidence or limiting evidence; it should not be summarized as positive protocol support.",
           "protocolKey": "protocol_variant:hyperbaric-oxygen-therapy/hyperbaric-oxygen-therapy",
-          "result": "positive",
+          "result": "no_clear_advantage",
           "scope": "clinical_supervised",
-          "stance": "supports"
+          "stance": "does_not_confirm"
         }
       ],
       "quality": "usable",
@@ -37440,7 +37439,7 @@
         ]
       },
       "revision": {
-        "pageRevisionId": "sha256:437506713ce8e4891c01af66882ba4e337077feab655e5a00ae0cb35dbc0a82b",
+        "pageRevisionId": "sha256:1dbf464f59809bdc709ee06e97b73ad245af1e2297f2b0f6eeebbbeb5bd0df90",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -39697,11 +39696,11 @@
           "displayPriority": 10,
           "groupId": "ent_and_sudden_sensorineural_hearing_loss",
           "headline": "Updated Cochrane synthesis that remains a major reference point for older HBOT hearing-loss trials.",
-          "implication": "Use this source according to its ledger role: supports-protocol / clinical_supervised.",
+          "implication": "Use this source as mixed or limiting evidence; preserve null, negative, endpoint-specific, and heterogeneity findings rather than summarizing it as uniformly positive support.",
           "protocolKey": "protocol_variant:hyperbaric-oxygen-therapy/hyperbaric-oxygen-therapy",
-          "result": "positive",
+          "result": "mixed",
           "scope": "clinical_supervised",
-          "stance": "supports"
+          "stance": "mixed"
         }
       ],
       "quality": "usable",
@@ -39728,7 +39727,7 @@
         ]
       },
       "revision": {
-        "pageRevisionId": "sha256:e1a0f004754dc80deb48007467d64a3026b836094c12ca1a41f10e3624e61d26",
+        "pageRevisionId": "sha256:958f6dff0dd93fb22838f35455686af1df34e2fad39a23d9aa8a5360c4986927",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -40467,11 +40466,11 @@
           "displayPriority": 50,
           "groupId": "problem_wounds_and_diabetic_foot_ulcers",
           "headline": "Important negative observational study that must remain visible alongside positive trials.",
-          "implication": "Use this source according to its ledger role: supports-protocol / clinical_supervised.",
+          "implication": "Use this source as direct counterevidence or limiting evidence; it should not be summarized as positive protocol support.",
           "protocolKey": "protocol_variant:hyperbaric-oxygen-therapy/hyperbaric-oxygen-therapy",
-          "result": "positive",
+          "result": "no_clear_advantage",
           "scope": "clinical_supervised",
-          "stance": "supports"
+          "stance": "does_not_confirm"
         }
       ],
       "quality": "usable",
@@ -40498,7 +40497,7 @@
         ]
       },
       "revision": {
-        "pageRevisionId": "sha256:ce5cc2297fad426781893711d49227c84e46af1284e858c2ef6239460b40ffaf",
+        "pageRevisionId": "sha256:3e73da23764247907b22c274996658f195b33fd7dd07f351ccd091c42b195263",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -41698,22 +41697,22 @@
           "displayPriority": 10,
           "groupId": "acute_and_emergent_indications",
           "headline": "Highest-priority evidence synthesis spanning acute traumatic wound indications relevant to traumatic ischemia.",
-          "implication": "Use this source according to its ledger role: supports-protocol / clinical_supervised.",
+          "implication": "Use this source as mixed or limiting evidence; preserve null, negative, endpoint-specific, and heterogeneity findings rather than summarizing it as uniformly positive support.",
           "protocolKey": "protocol_variant:hyperbaric-oxygen-therapy/hyperbaric-oxygen-therapy",
-          "result": "positive",
+          "result": "mixed",
           "scope": "clinical_supervised",
-          "stance": "supports"
+          "stance": "mixed"
         },
         {
           "caveat": "This source page is a rights-safe metadata summary generated from the canonical ledger; do not infer sample size, effect size, adverse-event rate, DOI, PMID, or population details beyond the recorded metadata.",
           "displayPriority": 10,
           "groupId": "acute-emergency-indications",
           "headline": "Highest-priority evidence synthesis spanning acute traumatic wound indications relevant to traumatic ischemia.",
-          "implication": "Use this source according to its ledger role: supports-protocol / clinical_supervised.",
+          "implication": "Use this source as mixed or limiting evidence; preserve null, negative, endpoint-specific, and heterogeneity findings rather than summarizing it as uniformly positive support.",
           "protocolKey": "protocol_variant:hyperbaric-oxygen-therapy/hyperbaric-oxygen-therapy",
-          "result": "positive",
+          "result": "mixed",
           "scope": "clinical_supervised",
-          "stance": "supports"
+          "stance": "mixed"
         }
       ],
       "quality": "usable",
@@ -41740,7 +41739,7 @@
         ]
       },
       "revision": {
-        "pageRevisionId": "sha256:1741269a83584beae747103af838c17f0654232b77e3b987aaf2489af4b64717",
+        "pageRevisionId": "sha256:f051ad8d3d9bd7df064b9f287b2254909a7145bcbe0da1189101ac1284ff9459",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -44219,11 +44218,11 @@
           "displayPriority": 50,
           "groupId": "acute_and_emergent_indications",
           "headline": "Foundational randomized comparison in acute CO poisoning and part of the core trial set behind HBOT practice debates.",
-          "implication": "Use this source according to its ledger role: supports-protocol / clinical_supervised.",
+          "implication": "Use this source as direct counterevidence or limiting evidence; it should not be summarized as positive protocol support.",
           "protocolKey": "protocol_variant:hyperbaric-oxygen-therapy/hyperbaric-oxygen-therapy",
-          "result": "positive",
+          "result": "no_clear_advantage",
           "scope": "clinical_supervised",
-          "stance": "supports"
+          "stance": "does_not_confirm"
         }
       ],
       "quality": "usable",
@@ -44250,7 +44249,7 @@
         ]
       },
       "revision": {
-        "pageRevisionId": "sha256:4317dbc3b603f9010cfcd250d52d3755435a3d35d6f72e36909af2d9dabeaa12",
+        "pageRevisionId": "sha256:f7e68ceeb4c24ba3ec0266d19367677e70ac326aa27f5d9969e26d165b92cf55",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -46066,11 +46065,11 @@
           "displayPriority": 50,
           "groupId": "late_radiation_tissue_injury",
           "headline": "Major negative or mixed sham-controlled pelvic bowel trial that prevents survivorship literature from appearing one-sided.",
-          "implication": "Use this source according to its ledger role: supports-protocol / clinical_supervised.",
+          "implication": "Use this source as direct counterevidence or limiting evidence; it should not be summarized as positive protocol support.",
           "protocolKey": "protocol_variant:hyperbaric-oxygen-therapy/hyperbaric-oxygen-therapy",
-          "result": "positive",
+          "result": "no_clear_advantage",
           "scope": "clinical_supervised",
-          "stance": "supports"
+          "stance": "does_not_confirm"
         }
       ],
       "quality": "usable",
@@ -46097,7 +46096,7 @@
         ]
       },
       "revision": {
-        "pageRevisionId": "sha256:0c9b502e227994285e21bf150911440a04dec68ab27e8b2bb6f4787a8562d667",
+        "pageRevisionId": "sha256:1591d84d625e824142340a9d8077a9f50720623c7b2fd1332ee65a352b2c7484",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -46299,22 +46298,22 @@
           "displayPriority": 50,
           "groupId": "problem_wounds_and_diabetic_foot_ulcers",
           "headline": "Major modern negative/null randomized trial essential for balanced protocol framing.",
-          "implication": "Use this source according to its ledger role: supports-protocol / clinical_supervised.",
+          "implication": "Use this source as direct counterevidence or limiting evidence; it should not be summarized as positive protocol support.",
           "protocolKey": "protocol_variant:hyperbaric-oxygen-therapy/hyperbaric-oxygen-therapy",
-          "result": "positive",
+          "result": "no_clear_advantage",
           "scope": "clinical_supervised",
-          "stance": "supports"
+          "stance": "does_not_confirm"
         },
         {
           "caveat": "This source page is a rights-safe metadata summary generated from the canonical ledger; do not infer sample size, effect size, adverse-event rate, DOI, PMID, or population details beyond the recorded metadata.",
           "displayPriority": 50,
           "groupId": "diabetic-foot-and-problem-wounds",
           "headline": "Major modern negative/null randomized trial essential for balanced protocol framing.",
-          "implication": "Use this source according to its ledger role: supports-protocol / clinical_supervised.",
+          "implication": "Use this source as direct counterevidence or limiting evidence; it should not be summarized as positive protocol support.",
           "protocolKey": "protocol_variant:hyperbaric-oxygen-therapy/hyperbaric-oxygen-therapy",
-          "result": "positive",
+          "result": "no_clear_advantage",
           "scope": "clinical_supervised",
-          "stance": "supports"
+          "stance": "does_not_confirm"
         }
       ],
       "quality": "usable",
@@ -46341,7 +46340,7 @@
         ]
       },
       "revision": {
-        "pageRevisionId": "sha256:4f0614ea21f2f15e58b269079c0e948a63ff1be6b0c7dbb0a5ed213957a182e4",
+        "pageRevisionId": "sha256:4ae19c86d1d05b71deb27ab69a035f50e88e4286aafb995f3e6cc3b90fb665b0",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -51250,22 +51249,22 @@
           "displayPriority": 50,
           "groupId": "problem_wounds_and_diabetic_foot_ulcers",
           "headline": "Large multicenter randomized trial central to modern interpretation of HBOT for ischemic diabetic wounds.",
-          "implication": "Use this source according to its ledger role: supports-protocol / clinical_supervised.",
+          "implication": "Use this source as direct counterevidence or limiting evidence; it should not be summarized as positive protocol support.",
           "protocolKey": "protocol_variant:hyperbaric-oxygen-therapy/hyperbaric-oxygen-therapy",
-          "result": "positive",
+          "result": "no_clear_advantage",
           "scope": "clinical_supervised",
-          "stance": "supports"
+          "stance": "does_not_confirm"
         },
         {
           "caveat": "This source page is a rights-safe metadata summary generated from the canonical ledger; do not infer sample size, effect size, adverse-event rate, DOI, PMID, or population details beyond the recorded metadata.",
           "displayPriority": 50,
           "groupId": "diabetic-foot-and-problem-wounds",
           "headline": "Large multicenter randomized trial central to modern interpretation of HBOT for ischemic diabetic wounds.",
-          "implication": "Use this source according to its ledger role: supports-protocol / clinical_supervised.",
+          "implication": "Use this source as direct counterevidence or limiting evidence; it should not be summarized as positive protocol support.",
           "protocolKey": "protocol_variant:hyperbaric-oxygen-therapy/hyperbaric-oxygen-therapy",
-          "result": "positive",
+          "result": "no_clear_advantage",
           "scope": "clinical_supervised",
-          "stance": "supports"
+          "stance": "does_not_confirm"
         }
       ],
       "quality": "usable",
@@ -51292,7 +51291,7 @@
         ]
       },
       "revision": {
-        "pageRevisionId": "sha256:ee156a224afe07099bf781af6e00ca7fbe633aa935c842a04ae79e5c30e5317b",
+        "pageRevisionId": "sha256:602bf987487a1d13c22b9b9deaa1ba648a083fd48c1f6797887e3c9d07c8b6ea",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -53311,22 +53310,22 @@
           "displayPriority": 50,
           "groupId": "neurocognitive_and_restorative_clinical_hbot",
           "headline": "Large military sham-controlled RCT central to later pooled analyses, safety papers, and policy discussions.",
-          "implication": "Use this source according to its ledger role: supports-protocol / clinical_supervised.",
+          "implication": "Use this source as mixed or limiting evidence; preserve null, negative, endpoint-specific, and heterogeneity findings rather than summarizing it as uniformly positive support.",
           "protocolKey": "protocol_variant:hyperbaric-oxygen-therapy/hyperbaric-oxygen-therapy",
-          "result": "positive",
+          "result": "mixed",
           "scope": "clinical_supervised",
-          "stance": "supports"
+          "stance": "mixed"
         },
         {
           "caveat": "This source page is a rights-safe metadata summary generated from the canonical ledger; do not infer sample size, effect size, adverse-event rate, DOI, PMID, or population details beyond the recorded metadata.",
           "displayPriority": 50,
           "groupId": "dose-and-course-implementation",
           "headline": "Large military sham-controlled RCT central to later pooled analyses, safety papers, and policy discussions.",
-          "implication": "Use this source according to its ledger role: supports-protocol / clinical_supervised.",
+          "implication": "Use this source as mixed or limiting evidence; preserve null, negative, endpoint-specific, and heterogeneity findings rather than summarizing it as uniformly positive support.",
           "protocolKey": "protocol_variant:hyperbaric-oxygen-therapy/hyperbaric-oxygen-therapy",
-          "result": "positive",
+          "result": "mixed",
           "scope": "clinical_supervised",
-          "stance": "supports"
+          "stance": "mixed"
         }
       ],
       "quality": "usable",
@@ -53353,7 +53352,7 @@
         ]
       },
       "revision": {
-        "pageRevisionId": "sha256:1aa6cca19712be18e15b0605e08be28a03787a944ca0420a64b0108bc23d9bf1",
+        "pageRevisionId": "sha256:131c7de90acca45fe6c59c098e68fbc0aae5c094de12ee3101c43b0c30c79c46",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -55261,11 +55260,11 @@
           "displayPriority": 50,
           "groupId": "ent_and_sudden_sensorineural_hearing_loss",
           "headline": "Modern randomized direct-comparison trial in a severe/profound SSNHL subgroup.",
-          "implication": "Use this source according to its ledger role: supports-protocol / clinical_supervised.",
+          "implication": "Use this source as mixed or limiting evidence; preserve null, negative, endpoint-specific, and heterogeneity findings rather than summarizing it as uniformly positive support.",
           "protocolKey": "protocol_variant:hyperbaric-oxygen-therapy/hyperbaric-oxygen-therapy",
-          "result": "positive",
+          "result": "mixed",
           "scope": "clinical_supervised",
-          "stance": "supports"
+          "stance": "mixed"
         }
       ],
       "quality": "usable",
@@ -55292,7 +55291,7 @@
         ]
       },
       "revision": {
-        "pageRevisionId": "sha256:4a969d64615e3b5fa6cbba76687a0e153ca04b05e6864d412d377a40d5c477de",
+        "pageRevisionId": "sha256:360b3dc7c3c4c0d0aca1fef983fced061df8b588006774176cceb7c506c962f7",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -59901,22 +59900,22 @@
           "displayPriority": 50,
           "groupId": "ent_and_sudden_sensorineural_hearing_loss",
           "headline": "Useful mixed/negative comparative source with longer-term salvage follow-up and open full text.",
-          "implication": "Use this source according to its ledger role: supports-protocol / clinical_supervised.",
+          "implication": "Use this source as direct counterevidence or limiting evidence; it should not be summarized as positive protocol support.",
           "protocolKey": "protocol_variant:hyperbaric-oxygen-therapy/hyperbaric-oxygen-therapy",
-          "result": "positive",
+          "result": "no_clear_advantage",
           "scope": "clinical_supervised",
-          "stance": "supports"
+          "stance": "does_not_confirm"
         },
         {
           "caveat": "This source page is a rights-safe metadata summary generated from the canonical ledger; do not infer sample size, effect size, adverse-event rate, DOI, PMID, or population details beyond the recorded metadata.",
           "displayPriority": 50,
           "groupId": "ent-and-ssnhl",
           "headline": "Useful mixed/negative comparative source with longer-term salvage follow-up and open full text.",
-          "implication": "Use this source according to its ledger role: supports-protocol / clinical_supervised.",
+          "implication": "Use this source as direct counterevidence or limiting evidence; it should not be summarized as positive protocol support.",
           "protocolKey": "protocol_variant:hyperbaric-oxygen-therapy/hyperbaric-oxygen-therapy",
-          "result": "positive",
+          "result": "no_clear_advantage",
           "scope": "clinical_supervised",
-          "stance": "supports"
+          "stance": "does_not_confirm"
         }
       ],
       "quality": "usable",
@@ -59943,7 +59942,7 @@
         ]
       },
       "revision": {
-        "pageRevisionId": "sha256:e5e130aefe679cd56b41e8ab180e85a182ec60222049e8c28fedafd085fce048",
+        "pageRevisionId": "sha256:ea5590dcc02c6eafee968b570617fd00ce95e182755188f4432a64e33bbfb547",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -60472,22 +60471,22 @@
           "displayPriority": 10,
           "groupId": "problem_wounds_and_diabetic_foot_ulcers",
           "headline": "Direct synthesis focused on the ischemic subset most often proposed for HBOT referral.",
-          "implication": "Use this source according to its ledger role: supports-protocol / clinical_supervised.",
+          "implication": "Use this source as mixed or limiting evidence; preserve null, negative, endpoint-specific, and heterogeneity findings rather than summarizing it as uniformly positive support.",
           "protocolKey": "protocol_variant:hyperbaric-oxygen-therapy/hyperbaric-oxygen-therapy",
-          "result": "positive",
+          "result": "mixed",
           "scope": "clinical_supervised",
-          "stance": "supports"
+          "stance": "mixed"
         },
         {
           "caveat": "This source page is a rights-safe metadata summary generated from the canonical ledger; do not infer sample size, effect size, adverse-event rate, DOI, PMID, or population details beyond the recorded metadata.",
           "displayPriority": 10,
           "groupId": "diabetic-foot-and-problem-wounds",
           "headline": "Direct synthesis focused on the ischemic subset most often proposed for HBOT referral.",
-          "implication": "Use this source according to its ledger role: supports-protocol / clinical_supervised.",
+          "implication": "Use this source as mixed or limiting evidence; preserve null, negative, endpoint-specific, and heterogeneity findings rather than summarizing it as uniformly positive support.",
           "protocolKey": "protocol_variant:hyperbaric-oxygen-therapy/hyperbaric-oxygen-therapy",
-          "result": "positive",
+          "result": "mixed",
           "scope": "clinical_supervised",
-          "stance": "supports"
+          "stance": "mixed"
         }
       ],
       "quality": "usable",
@@ -60514,7 +60513,7 @@
         ]
       },
       "revision": {
-        "pageRevisionId": "sha256:1d89dd6ca4c7e719912c5ac0c70af2d665cdf8e32f69035c252327d3a194d951",
+        "pageRevisionId": "sha256:4dc571857f2179799998aef53ddeb2513fa81b05e2c8ff8263bb90e81e0f5154",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -64709,22 +64708,22 @@
           "displayPriority": 10,
           "groupId": "problem_wounds_and_diabetic_foot_ulcers",
           "headline": "Open-access meta-analysis that many later overviews cite.",
-          "implication": "Use this source according to its ledger role: supports-protocol / clinical_supervised.",
+          "implication": "Use this source as mixed or limiting evidence; preserve null, negative, endpoint-specific, and heterogeneity findings rather than summarizing it as uniformly positive support.",
           "protocolKey": "protocol_variant:hyperbaric-oxygen-therapy/hyperbaric-oxygen-therapy",
-          "result": "positive",
+          "result": "mixed",
           "scope": "clinical_supervised",
-          "stance": "supports"
+          "stance": "mixed"
         },
         {
           "caveat": "This source page is a rights-safe metadata summary generated from the canonical ledger; do not infer sample size, effect size, adverse-event rate, DOI, PMID, or population details beyond the recorded metadata.",
           "displayPriority": 10,
           "groupId": "diabetic-foot-and-problem-wounds",
           "headline": "Open-access meta-analysis that many later overviews cite.",
-          "implication": "Use this source according to its ledger role: supports-protocol / clinical_supervised.",
+          "implication": "Use this source as mixed or limiting evidence; preserve null, negative, endpoint-specific, and heterogeneity findings rather than summarizing it as uniformly positive support.",
           "protocolKey": "protocol_variant:hyperbaric-oxygen-therapy/hyperbaric-oxygen-therapy",
-          "result": "positive",
+          "result": "mixed",
           "scope": "clinical_supervised",
-          "stance": "supports"
+          "stance": "mixed"
         }
       ],
       "quality": "usable",
@@ -64751,7 +64750,7 @@
         ]
       },
       "revision": {
-        "pageRevisionId": "sha256:0161a45baca78e0e67aa3ce7fc2d3695de53868e7feb47d5497e3adc58145503",
+        "pageRevisionId": "sha256:8e807f7a2c04632e9c635d58ad3c02597a9f5a63afb718dcfd3dd8c620db1fcb",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -65265,13 +65264,13 @@
       ],
       "artifactRightsStatusGuess": "open_access",
       "batchId": "batch-008",
-      "body": "## Quick read\n\n- **Ledger role:** supports-protocol / clinical_supervised.\n- **Evidence bucket:** Healthy aging, longevity, and off-label wellness.\n- **Study design label:** systematic_review.\n- **Priority:** backbone.\n\n## Murph use\n\nMost relevant cognition-focused systematic review across HBOT indications.\n\n## Rights-safe handling\n\nThis page is metadata and synthesis only. It does not include copyrighted full text. Store or redistribute PDFs only after separate rights, license, hash, and storage review.",
+      "body": "## Quick read\n\n- **Ledger role:** context-only / background.\n- **Evidence bucket:** Healthy aging, longevity, and off-label wellness.\n- **Study design label:** systematic_review.\n- **Priority:** backbone.\n\n## Murph use\n\nCognition-focused review found heterogeneous HBOT signals rather than a single pooled healthy-aging effect.\n\n## Rights-safe handling\n\nThis page is metadata and synthesis only. It does not include copyrighted full text. Store or redistribute PDFs only after separate rights, license, hash, and storage review.",
       "categories": [
         "hyperbaric-oxygen-therapy",
         "healthy-aging-longevity-and-off-label-wellness"
       ],
-      "claimUse": "supports-protocol",
-      "directness": "clinical_supervised",
+      "claimUse": "context-only",
+      "directness": "background",
       "entityType": "source_artifact",
       "evidenceBucket": "Healthy aging, longevity, and off-label wellness",
       "key": "source_artifact:pmid-33847854",
@@ -65279,26 +65278,26 @@
       "pmcid": "PMC8888529",
       "protocolEvidence": [
         {
-          "caveat": "This source page is a rights-safe metadata summary generated from the canonical ledger; do not infer sample size, effect size, adverse-event rate, DOI, PMID, or population details beyond the recorded metadata.",
+          "caveat": "Included studies differed in population, comparator, and outcome measures, so direct protocol claims should remain anchored to population-matched primary trials.",
           "displayPriority": 10,
           "groupId": "healthy_aging_longevity_and_off_label_wellness",
-          "headline": "Most relevant cognition-focused systematic review across HBOT indications.",
-          "implication": "Use this source according to its ledger role: supports-protocol / clinical_supervised.",
+          "headline": "Cognition-focused review found heterogeneous HBOT signals rather than a single pooled healthy-aging effect.",
+          "implication": "Use this source as a cognition field map, not as a stand-alone positive efficacy source for general healthy-aging cognition.",
           "protocolKey": "protocol_variant:hyperbaric-oxygen-therapy/hyperbaric-oxygen-therapy",
-          "result": "positive",
-          "scope": "clinical_supervised",
-          "stance": "supports"
+          "result": "mixed",
+          "scope": "general_guideline",
+          "stance": "mixed"
         },
         {
-          "caveat": "This source page is a rights-safe metadata summary generated from the canonical ledger; do not infer sample size, effect size, adverse-event rate, DOI, PMID, or population details beyond the recorded metadata.",
+          "caveat": "Included studies differed in population, comparator, and outcome measures, so direct protocol claims should remain anchored to population-matched primary trials.",
           "displayPriority": 10,
           "groupId": "healthy-aging-neurocognitive-and-performance-claims",
-          "headline": "Most relevant cognition-focused systematic review across HBOT indications.",
-          "implication": "Use this source according to its ledger role: supports-protocol / clinical_supervised.",
+          "headline": "Cognition-focused review found heterogeneous HBOT signals rather than a single pooled healthy-aging effect.",
+          "implication": "Use this source as a cognition field map, not as a stand-alone positive efficacy source for general healthy-aging cognition.",
           "protocolKey": "protocol_variant:hyperbaric-oxygen-therapy/hyperbaric-oxygen-therapy",
-          "result": "positive",
-          "scope": "clinical_supervised",
-          "stance": "supports"
+          "result": "mixed",
+          "scope": "general_guideline",
+          "stance": "mixed"
         }
       ],
       "quality": "usable",
@@ -65314,18 +65313,18 @@
       ],
       "relativePath": "sources/hyperbaric-oxygen-therapy/pmid-33847854.md",
       "researchEvidence": {
-        "aggregateRole": "primary",
+        "aggregateRole": "synthesis",
         "designKind": "systematic_review",
         "designLabel": "systematic review",
         "notes": [
           "Evidence bucket: Healthy aging, longevity, and off-label wellness",
-          "Ledger directness: clinical_supervised",
-          "Ledger claim use: supports-protocol",
+          "Ledger directness: background",
+          "Ledger claim use: context-only",
           "Ledger priority: backbone"
         ]
       },
       "revision": {
-        "pageRevisionId": "sha256:654dd690f46f3db082aafb1e25486c005c8a2be904dba6f970a6ad3dbca4be17",
+        "pageRevisionId": "sha256:0fbda166d4ebcc5e2dc3c8b1430e64aa03cddd149ae54b81bcf7cba1fdbff0a2",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -66385,11 +66384,11 @@
           "displayPriority": 50,
           "groupId": "acute_and_emergent_indications",
           "headline": "Prospective multicenter observational evidence focused on delayed neurologic outcomes after acute CO poisoning.",
-          "implication": "Use this source according to its ledger role: supports-protocol / clinical_supervised.",
+          "implication": "Use this source as direct counterevidence or limiting evidence; it should not be summarized as positive protocol support.",
           "protocolKey": "protocol_variant:hyperbaric-oxygen-therapy/hyperbaric-oxygen-therapy",
-          "result": "positive",
+          "result": "no_clear_advantage",
           "scope": "clinical_supervised",
-          "stance": "supports"
+          "stance": "does_not_confirm"
         }
       ],
       "quality": "usable",
@@ -66416,7 +66415,7 @@
         ]
       },
       "revision": {
-        "pageRevisionId": "sha256:bd272be55ffb8fa3772d74bbea41e2e420f948a0527a8d233cef515f3a0148c4",
+        "pageRevisionId": "sha256:68e48d587fe6ff9c80200e9d385ab7d4b0767a12d7eee3be66eaf4345e54041e",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -70996,11 +70995,11 @@
           "displayPriority": 50,
           "groupId": "ent_and_sudden_sensorineural_hearing_loss",
           "headline": "Recent direct ENT cohort centered on final audiometric outcomes after HBOT exposure.",
-          "implication": "Use this source according to its ledger role: supports-protocol / clinical_supervised.",
+          "implication": "Use this source as direct counterevidence or limiting evidence; it should not be summarized as positive protocol support.",
           "protocolKey": "protocol_variant:hyperbaric-oxygen-therapy/hyperbaric-oxygen-therapy",
-          "result": "positive",
+          "result": "no_clear_advantage",
           "scope": "clinical_supervised",
-          "stance": "supports"
+          "stance": "does_not_confirm"
         }
       ],
       "quality": "usable",
@@ -71027,7 +71026,7 @@
         ]
       },
       "revision": {
-        "pageRevisionId": "sha256:56ec49aa1b95ae4e96c4d11b6eabf5bae4e6b87ba531dbf2bc48c761d2eda5ae",
+        "pageRevisionId": "sha256:4534d4891f3360f9b8e7f47078850920ad694f1213c18ee7cffddb411216938e",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -71544,22 +71543,22 @@
           "displayPriority": 50,
           "groupId": "acute_and_emergent_indications",
           "headline": "Largest modern randomized trauma trial located for acute lower-limb injury and HBOT.",
-          "implication": "Use this source according to its ledger role: supports-protocol / clinical_supervised.",
+          "implication": "Use this source as mixed or limiting evidence; preserve null, negative, endpoint-specific, and heterogeneity findings rather than summarizing it as uniformly positive support.",
           "protocolKey": "protocol_variant:hyperbaric-oxygen-therapy/hyperbaric-oxygen-therapy",
-          "result": "positive",
+          "result": "mixed",
           "scope": "clinical_supervised",
-          "stance": "supports"
+          "stance": "mixed"
         },
         {
           "caveat": "This source page is a rights-safe metadata summary generated from the canonical ledger; do not infer sample size, effect size, adverse-event rate, DOI, PMID, or population details beyond the recorded metadata.",
           "displayPriority": 50,
           "groupId": "acute-emergency-indications",
           "headline": "Largest modern randomized trauma trial located for acute lower-limb injury and HBOT.",
-          "implication": "Use this source according to its ledger role: supports-protocol / clinical_supervised.",
+          "implication": "Use this source as mixed or limiting evidence; preserve null, negative, endpoint-specific, and heterogeneity findings rather than summarizing it as uniformly positive support.",
           "protocolKey": "protocol_variant:hyperbaric-oxygen-therapy/hyperbaric-oxygen-therapy",
-          "result": "positive",
+          "result": "mixed",
           "scope": "clinical_supervised",
-          "stance": "supports"
+          "stance": "mixed"
         }
       ],
       "quality": "usable",
@@ -71586,7 +71585,7 @@
         ]
       },
       "revision": {
-        "pageRevisionId": "sha256:75b83187f9dc058a54b2d1965648a5e0af87f5297da86597c151e1c5408f3fc5",
+        "pageRevisionId": "sha256:475812d0675336253cf941ced82cdf8fc48500532f1e85f23f72ff627daa5ab8",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -75442,22 +75441,22 @@
           "displayPriority": 50,
           "groupId": "ent_and_sudden_sensorineural_hearing_loss",
           "headline": "Recent open-access adjunctive-corticosteroid cohort directly aligned with common protocol framing.",
-          "implication": "Use this source according to its ledger role: supports-protocol / clinical_supervised.",
+          "implication": "Use this source as direct counterevidence or limiting evidence; it should not be summarized as positive protocol support.",
           "protocolKey": "protocol_variant:hyperbaric-oxygen-therapy/hyperbaric-oxygen-therapy",
-          "result": "positive",
+          "result": "no_clear_advantage",
           "scope": "clinical_supervised",
-          "stance": "supports"
+          "stance": "does_not_confirm"
         },
         {
           "caveat": "This source page is a rights-safe metadata summary generated from the canonical ledger; do not infer sample size, effect size, adverse-event rate, DOI, PMID, or population details beyond the recorded metadata.",
           "displayPriority": 50,
           "groupId": "ent-and-ssnhl",
           "headline": "Recent open-access adjunctive-corticosteroid cohort directly aligned with common protocol framing.",
-          "implication": "Use this source according to its ledger role: supports-protocol / clinical_supervised.",
+          "implication": "Use this source as direct counterevidence or limiting evidence; it should not be summarized as positive protocol support.",
           "protocolKey": "protocol_variant:hyperbaric-oxygen-therapy/hyperbaric-oxygen-therapy",
-          "result": "positive",
+          "result": "no_clear_advantage",
           "scope": "clinical_supervised",
-          "stance": "supports"
+          "stance": "does_not_confirm"
         }
       ],
       "quality": "usable",
@@ -75484,7 +75483,7 @@
         ]
       },
       "revision": {
-        "pageRevisionId": "sha256:7d5d871bcb680d033dcbbe8af3069a03e2eaeb7be6b2adcc99f5ceed900958d8",
+        "pageRevisionId": "sha256:54b9e6381e2b15a26d5135cc75960b3830bf2b616c4946f6410c7006a2e67829",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -76080,11 +76079,11 @@
           "displayPriority": 50,
           "groupId": "ent_and_sudden_sensorineural_hearing_loss",
           "headline": "Direct salvage-comparison study in a contemporary steroid background regimen.",
-          "implication": "Use this source according to its ledger role: supports-protocol / clinical_supervised.",
+          "implication": "Use this source as direct counterevidence or limiting evidence; it should not be summarized as positive protocol support.",
           "protocolKey": "protocol_variant:hyperbaric-oxygen-therapy/hyperbaric-oxygen-therapy",
-          "result": "positive",
+          "result": "no_clear_advantage",
           "scope": "clinical_supervised",
-          "stance": "supports"
+          "stance": "does_not_confirm"
         }
       ],
       "quality": "usable",
@@ -76111,7 +76110,7 @@
         ]
       },
       "revision": {
-        "pageRevisionId": "sha256:21acf13539530b8521fcfdc0f1c033360772b76b9b16c13504b4b446c104a1da",
+        "pageRevisionId": "sha256:cee105e14bc4c126b289ebce954ea555d703f308578badded6ce733291ffdc4a",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -83502,22 +83501,22 @@
           "displayPriority": 50,
           "groupId": "neurocognitive_and_restorative_clinical_hbot",
           "headline": "Major placebo-controlled phase II long-COVID trial and essential direct evidence for balanced synthesis.",
-          "implication": "Use this source according to its ledger role: supports-protocol / clinical_supervised.",
+          "implication": "Use this source as direct counterevidence or limiting evidence; it should not be summarized as positive protocol support.",
           "protocolKey": "protocol_variant:hyperbaric-oxygen-therapy/hyperbaric-oxygen-therapy",
-          "result": "positive",
+          "result": "no_clear_advantage",
           "scope": "clinical_supervised",
-          "stance": "supports"
+          "stance": "does_not_confirm"
         },
         {
           "caveat": "This source page is a rights-safe metadata summary generated from the canonical ledger; do not infer sample size, effect size, adverse-event rate, DOI, PMID, or population details beyond the recorded metadata.",
           "displayPriority": 50,
           "groupId": "dose-and-course-implementation",
           "headline": "Major placebo-controlled phase II long-COVID trial and essential direct evidence for balanced synthesis.",
-          "implication": "Use this source according to its ledger role: supports-protocol / clinical_supervised.",
+          "implication": "Use this source as direct counterevidence or limiting evidence; it should not be summarized as positive protocol support.",
           "protocolKey": "protocol_variant:hyperbaric-oxygen-therapy/hyperbaric-oxygen-therapy",
-          "result": "positive",
+          "result": "no_clear_advantage",
           "scope": "clinical_supervised",
-          "stance": "supports"
+          "stance": "does_not_confirm"
         }
       ],
       "quality": "usable",
@@ -83544,7 +83543,7 @@
         ]
       },
       "revision": {
-        "pageRevisionId": "sha256:dfd19c1404e437ba0b41f89c859b717103c7e2128b6a5d88940ec30bc8d8b910",
+        "pageRevisionId": "sha256:b29adae5a326f052245daad9d4a03fd43df7276dce9412d5d1b6abdde8fb1369",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -83945,22 +83944,22 @@
           "displayPriority": 10,
           "groupId": "ent_and_sudden_sensorineural_hearing_loss",
           "headline": "Recent steroid-adjunct meta-analysis aligned closely with the protocol’s common real-world use case.",
-          "implication": "Use this source according to its ledger role: supports-protocol / clinical_supervised.",
+          "implication": "Use this source as mixed or limiting evidence; preserve null, negative, endpoint-specific, and heterogeneity findings rather than summarizing it as uniformly positive support.",
           "protocolKey": "protocol_variant:hyperbaric-oxygen-therapy/hyperbaric-oxygen-therapy",
-          "result": "positive",
+          "result": "mixed",
           "scope": "clinical_supervised",
-          "stance": "supports"
+          "stance": "mixed"
         },
         {
           "caveat": "This source page is a rights-safe metadata summary generated from the canonical ledger; do not infer sample size, effect size, adverse-event rate, DOI, PMID, or population details beyond the recorded metadata.",
           "displayPriority": 10,
           "groupId": "ent-and-ssnhl",
           "headline": "Recent steroid-adjunct meta-analysis aligned closely with the protocol’s common real-world use case.",
-          "implication": "Use this source according to its ledger role: supports-protocol / clinical_supervised.",
+          "implication": "Use this source as mixed or limiting evidence; preserve null, negative, endpoint-specific, and heterogeneity findings rather than summarizing it as uniformly positive support.",
           "protocolKey": "protocol_variant:hyperbaric-oxygen-therapy/hyperbaric-oxygen-therapy",
-          "result": "positive",
+          "result": "mixed",
           "scope": "clinical_supervised",
-          "stance": "supports"
+          "stance": "mixed"
         }
       ],
       "quality": "usable",
@@ -83987,7 +83986,7 @@
         ]
       },
       "revision": {
-        "pageRevisionId": "sha256:dc2a39c36fdbe5f2911d07e3db929a6b215f50d9f1411d512c91ea3c9745f019",
+        "pageRevisionId": "sha256:7269061671601183bbe2928e9599f698e61d23e47f9a507c5f7e4425be9ff8e7",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -86956,12 +86955,12 @@
       ],
       "artifactRightsStatusGuess": "open_access",
       "batchId": "batch-008",
-      "body": "## Quick read\n\n- **Ledger role:** context-only / clinical_supervised.\n- **Evidence bucket:** Healthy aging, longevity, and off-label wellness.\n- **Study design label:** rct.\n- **Priority:** high.\n\n## Murph use\n\nKey mixed/negative direct trial result in mildly impaired older adults.\n\n## Rights-safe handling\n\nThis page is metadata and synthesis only. It does not include copyrighted full text. Store or redistribute PDFs only after separate rights, license, hash, and storage review.",
+      "body": "## Quick read\n\n- **Ledger role:** supports-protocol / clinical_supervised.\n- **Evidence bucket:** Healthy aging, longevity, and off-label wellness.\n- **Study design label:** rct.\n- **Priority:** high.\n\n## Murph use\n\nIn a high-risk diabetic-MCI cohort, HBOT did not beat sham on primary cognition or imaging outcomes.\n\n## Rights-safe handling\n\nThis page is metadata and synthesis only. It does not include copyrighted full text. Store or redistribute PDFs only after separate rights, license, hash, and storage review.",
       "categories": [
         "hyperbaric-oxygen-therapy",
         "healthy-aging-longevity-and-off-label-wellness"
       ],
-      "claimUse": "context-only",
+      "claimUse": "supports-protocol",
       "directness": "clinical_supervised",
       "entityType": "source_artifact",
       "evidenceBucket": "Healthy aging, longevity, and off-label wellness",
@@ -86970,26 +86969,26 @@
       "pmcid": "PMC12726044",
       "protocolEvidence": [
         {
-          "caveat": "This source page is a rights-safe metadata summary generated from the canonical ledger; do not infer sample size, effect size, adverse-event rate, DOI, PMID, or population details beyond the recorded metadata.",
+          "caveat": "Accessible evidence is abstract-like and does not fully detail event attribution, multiplicity handling, or complete subgroup analyses.",
           "displayPriority": 50,
           "groupId": "healthy_aging_longevity_and_off_label_wellness",
-          "headline": "Key mixed/negative direct trial result in mildly impaired older adults.",
-          "implication": "Use this source according to its ledger role: context-only / clinical_supervised.",
+          "headline": "In a high-risk diabetic-MCI cohort, HBOT did not beat sham on primary cognition or imaging outcomes.",
+          "implication": "Use this as direct mixed or negative cognition evidence that limits broad cognition-benefit claims.",
           "protocolKey": "protocol_variant:hyperbaric-oxygen-therapy/hyperbaric-oxygen-therapy",
-          "result": "not_efficacy_evidence",
-          "scope": "clinical_supervised",
-          "stance": "context_only"
+          "result": "no_clear_advantage",
+          "scope": "direct_protocol",
+          "stance": "mixed"
         },
         {
-          "caveat": "This source page is a rights-safe metadata summary generated from the canonical ledger; do not infer sample size, effect size, adverse-event rate, DOI, PMID, or population details beyond the recorded metadata.",
+          "caveat": "Accessible evidence is abstract-like and does not fully detail event attribution, multiplicity handling, or complete subgroup analyses.",
           "displayPriority": 50,
           "groupId": "healthy-aging-neurocognitive-and-performance-claims",
-          "headline": "Key mixed/negative direct trial result in mildly impaired older adults.",
-          "implication": "Use this source according to its ledger role: context-only / clinical_supervised.",
+          "headline": "In a high-risk diabetic-MCI cohort, HBOT did not beat sham on primary cognition or imaging outcomes.",
+          "implication": "Use this as direct mixed or negative cognition evidence that limits broad cognition-benefit claims.",
           "protocolKey": "protocol_variant:hyperbaric-oxygen-therapy/hyperbaric-oxygen-therapy",
-          "result": "not_efficacy_evidence",
-          "scope": "clinical_supervised",
-          "stance": "context_only"
+          "result": "no_clear_advantage",
+          "scope": "direct_protocol",
+          "stance": "mixed"
         }
       ],
       "quality": "usable",
@@ -87005,18 +87004,18 @@
       ],
       "relativePath": "sources/hyperbaric-oxygen-therapy/pmid-41434344.md",
       "researchEvidence": {
-        "aggregateRole": "context",
+        "aggregateRole": "primary",
         "designKind": "randomized_controlled_trial",
         "designLabel": "rct",
         "notes": [
           "Evidence bucket: Healthy aging, longevity, and off-label wellness",
           "Ledger directness: clinical_supervised",
-          "Ledger claim use: context-only",
+          "Ledger claim use: supports-protocol",
           "Ledger priority: high"
         ]
       },
       "revision": {
-        "pageRevisionId": "sha256:baed48e13e09979c791ecf2e9ef1e3407ff843f7b094e4de10b4687ecb5a728a",
+        "pageRevisionId": "sha256:1ef57d2b5d61082e3d6dcd72bf6bde33c47901a6fb7b2cf335bceca45c25c066",
         "recipeHash": null,
         "runSpecRevisionId": null
       },
@@ -87279,33 +87278,33 @@
           "displayPriority": 10,
           "groupId": "acute_and_emergent_indications",
           "headline": "Most recent synthesis located for acute CO poisoning and useful to map how the trial base has been reinterpreted through 2026.",
-          "implication": "Use this source according to its ledger role: supports-protocol / clinical_supervised.",
+          "implication": "Use this source as direct counterevidence or limiting evidence; it should not be summarized as positive protocol support.",
           "protocolKey": "protocol_variant:hyperbaric-oxygen-therapy/hyperbaric-oxygen-therapy",
-          "result": "positive",
+          "result": "no_clear_advantage",
           "scope": "clinical_supervised",
-          "stance": "supports"
+          "stance": "does_not_confirm"
         },
         {
           "caveat": "This source page is a rights-safe metadata summary generated from the canonical ledger; do not infer sample size, effect size, adverse-event rate, DOI, PMID, or population details beyond the recorded metadata.",
           "displayPriority": 10,
           "groupId": "dose-and-course-implementation",
           "headline": "Most recent synthesis located for acute CO poisoning and useful to map how the trial base has been reinterpreted through 2026.",
-          "implication": "Use this source according to its ledger role: supports-protocol / clinical_supervised.",
+          "implication": "Use this source as direct counterevidence or limiting evidence; it should not be summarized as positive protocol support.",
           "protocolKey": "protocol_variant:hyperbaric-oxygen-therapy/hyperbaric-oxygen-therapy",
-          "result": "positive",
+          "result": "no_clear_advantage",
           "scope": "clinical_supervised",
-          "stance": "supports"
+          "stance": "does_not_confirm"
         },
         {
           "caveat": "This source page is a rights-safe metadata summary generated from the canonical ledger; do not infer sample size, effect size, adverse-event rate, DOI, PMID, or population details beyond the recorded metadata.",
           "displayPriority": 10,
           "groupId": "acute-emergency-indications",
           "headline": "Most recent synthesis located for acute CO poisoning and useful to map how the trial base has been reinterpreted through 2026.",
-          "implication": "Use this source according to its ledger role: supports-protocol / clinical_supervised.",
+          "implication": "Use this source as direct counterevidence or limiting evidence; it should not be summarized as positive protocol support.",
           "protocolKey": "protocol_variant:hyperbaric-oxygen-therapy/hyperbaric-oxygen-therapy",
-          "result": "positive",
+          "result": "no_clear_advantage",
           "scope": "clinical_supervised",
-          "stance": "supports"
+          "stance": "does_not_confirm"
         }
       ],
       "quality": "usable",
@@ -87332,7 +87331,7 @@
         ]
       },
       "revision": {
-        "pageRevisionId": "sha256:e689abdfc5540fc9b9cf69902477ed7dc2b297f7d7748c9bfee9cd00665a061c",
+        "pageRevisionId": "sha256:5b391e47e414780a13044dc2fc0888b9b40f2dc1f57982f27c15f7c9dff2c920",
         "recipeHash": null,
         "runSpecRevisionId": null
       },

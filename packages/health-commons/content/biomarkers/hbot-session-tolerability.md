@@ -50,7 +50,7 @@ biomarker:
   direction:
     desired: "lower_or_stable"
     label: "Lower symptom burden is better."
-    nuance: "A single severe symptom, stopped session, or facility safety concern should trigger clinician/facility follow-up rather than trend interpretation."
+    nuance: "A single severe symptom, unsafe glucose or blood-pressure reading, stopped session, device/facility concern, or staff instruction should override trend interpretation and trigger clinician/facility follow-up."
   trendDefaults:
     latestWindowDays: 7
     comparisonWindowDays: 7

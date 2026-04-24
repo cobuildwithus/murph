@@ -75,6 +75,8 @@ researchCoverage:
 
 This family page is the boundary layer for oxygen therapies that are often conflated in public language. The canonical Murph protocol is **supervised systemic chamber HBOT**.
 
+Safety boundary: this family page is not a self-treatment guide. Do not use Murph to start HBOT for current carbon-monoxide exposure/poisoning, decompression illness, gas embolism, crush or traumatic ischemia, non-healing wounds, radiation injury, sudden hearing loss, or neurologic symptoms/diagnoses. Acute indications require emergency or hospital pathways. Chronic wound, radiation, ENT, and neurologic uses require a treating clinician/facility plan and should be handled as separate clinical variants with indication-specific outcomes, not as ordinary wellness experiments.
+
 Mild chambers, soft/fabric chambers, topical oxygen, topical hyperbaric oxygen, normobaric oxygen, exercise-with-oxygen therapy, athlete oxygen exposure, and commercial wellness or rejuvenation programs should stay as adjacent variants unless their own evidence pages are built.
 
 The family evidence map is intentionally safety-sensitive. Some clinical lanes have substantial source coverage, such as selected diabetic-foot ulcers, late radiation injury, sudden sensorineural hearing loss, and acute hospital-only indications. Other lanes, especially healthy-aging, cognition optimization, aesthetic, performance, and longevity claims, remain off-label or research-context claims rather than established Murph outcomes.
