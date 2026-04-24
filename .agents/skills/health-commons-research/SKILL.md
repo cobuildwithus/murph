@@ -335,7 +335,7 @@ Do not let repomix exclude `output-packages/**`.
 
 ## Operational Rules
 
-- Use the workspace-specific Hercules managed browser lane for research.
+- Use the workspace-specific managed browser lanes for research. Before launching a new send or harvest, consider which named browser profiles already have active tabs and pick a lower-load profile when possible (for example `phlebas`, `hercules`, `vonneumann`, or `eragon`) instead of concentrating every seam in one browser.
 - Keep launches measured; fast fanout is good, but broken uploads are wasted time.
 - Expect long waits. Let the normal wake loop do its job unless there is concrete evidence the run is wedged.
 - The workspace command wrappers already carry the intended long wait budget. Prefer those wrappers over manually assembled `thread wake` commands.
