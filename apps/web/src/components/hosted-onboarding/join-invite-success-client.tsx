@@ -61,7 +61,7 @@ export function JoinInviteSuccessClient({
       successSyncStartedRef.current ||
       !sessionId ||
       !status.session.matchesInvite ||
-      status.stage !== "checkout"
+      !shouldRequestHostedBillingSuccess(status.stage)
     ) {
       return;
     }
@@ -92,7 +92,7 @@ export function JoinInviteSuccessClient({
     return () => {
       cancelled = true;
     };
-  }, [inviteCode, sessionId, status.session.matchesInvite, status.stage]);
+  }, [inviteCode, preview, sessionId, status.session.matchesInvite, status.stage]);
 
   const href = `/join/${encodeURIComponent(inviteCode)}${shareCode ? `?share=${encodeURIComponent(shareCode)}` : ""}`;
   const successState = resolveHostedInviteSuccessState(status);
@@ -136,6 +136,10 @@ export function JoinInviteSuccessClient({
       </Button>
     </div>
   );
+}
+
+function shouldRequestHostedBillingSuccess(stage: HostedInviteStatusPayload["stage"]): boolean {
+  return stage === "checkout" || stage === "activating" || stage === "active";
 }
 
 function resolveHostedInviteSuccessState(status: HostedInviteStatusPayload): HostedInviteSuccessState {

@@ -145,6 +145,16 @@ describe("hosted onboarding routes", () => {
       sendAttemptId: "send_attempt_123",
     });
     mocks.requirePrivyMemberAuth.mockResolvedValue({
+      identity: {
+        email: {
+          address: "user@example.com",
+          verifiedAt: 1_710_000_000,
+        },
+        phone: null,
+        telegram: null,
+        userId: "did:privy:user_123",
+        wallet: null,
+      },
       linkedAccounts: [
         {
           address: "user@example.com",
@@ -154,6 +164,9 @@ describe("hosted onboarding routes", () => {
       member: {
         id: "member_123",
         suspendedAt: null,
+      },
+      verifiedPrivyUser: {
+        id: "did:privy:user_123",
       },
     });
     mocks.requireHostedInviteCodeFromRequest.mockResolvedValue({
@@ -774,6 +787,22 @@ describe("hosted onboarding routes", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
     expect(mocks.requirePrivyMemberAuth).toHaveBeenCalledWith(request);
+    expect(mocks.completeHostedPrivyVerification).toHaveBeenCalledWith({
+      identity: {
+        email: {
+          address: "user@example.com",
+          verifiedAt: 1_710_000_000,
+        },
+        phone: null,
+        telegram: null,
+        userId: "did:privy:user_123",
+        wallet: null,
+      },
+      inviteCode: "invite-code",
+      verifiedPrivyUser: {
+        id: "did:privy:user_123",
+      },
+    });
     expect(mocks.createHostedBillingCheckout).toHaveBeenCalledWith({
       inviteCode: "invite-code",
       linkedAccounts: [

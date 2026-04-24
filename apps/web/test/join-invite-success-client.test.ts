@@ -119,9 +119,60 @@ test("checkout-stage success page reconciles the returned session once and updat
   await view.cleanup();
 });
 
+test("activating success page reconciles the returned session when webhooks won the race", async () => {
+  const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+    new Response(JSON.stringify(createStatus("activating")), {
+      status: 200,
+    }),
+  );
+  vi.stubGlobal("fetch", fetchMock);
+
+  const view = await renderJoinInviteSuccessClientForEffects({
+    initialStatus: createStatus("activating"),
+  });
+  await act(async () => {});
+
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  expect(fetchMock).toHaveBeenCalledWith("/api/hosted-onboarding/billing/success", expect.objectContaining({
+    body: JSON.stringify({
+      inviteCode: "invite-code",
+      sessionId: "cs_123",
+    }),
+    method: "POST",
+  }));
+
+  await view.cleanup();
+});
+
+test("active success page reconciles the returned session when the invite is already active", async () => {
+  const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+    new Response(JSON.stringify(createStatus("active")), {
+      status: 200,
+    }),
+  );
+  vi.stubGlobal("fetch", fetchMock);
+
+  const view = await renderJoinInviteSuccessClientForEffects({
+    initialStatus: createStatus("active"),
+  });
+  await act(async () => {});
+
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  expect(fetchMock).toHaveBeenCalledWith("/api/hosted-onboarding/billing/success", expect.objectContaining({
+    body: JSON.stringify({
+      inviteCode: "invite-code",
+      sessionId: "cs_123",
+    }),
+    method: "POST",
+  }));
+
+  await view.cleanup();
+});
+
 test("active success page returns to the invite with a hard navigation", async () => {
   const view = await renderJoinInviteSuccessClientForEffects({
     initialStatus: createStatus("active"),
+    sessionId: null,
   });
   const continueButton = findButtonByText(view.container, /Continue/);
 

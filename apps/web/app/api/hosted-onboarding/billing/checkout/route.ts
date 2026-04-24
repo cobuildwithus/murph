@@ -7,6 +7,7 @@ import {
   finishHostedOnboardingTiming,
   startHostedOnboardingTiming,
 } from "@/src/lib/hosted-onboarding/logging";
+import { completeHostedPrivyVerification } from "@/src/lib/hosted-onboarding/member-service";
 import { requirePrivyMemberAuth } from "@/src/lib/hosted-onboarding/request-auth";
 import { requireHostedInviteCodeFromRequest } from "@/src/lib/hosted-onboarding/route-helpers";
 
@@ -22,6 +23,12 @@ export const POST = withJsonError(async (request: Request) => {
     if (body.billingPlanCode !== undefined && !billingPlanCode) {
       throw new TypeError("billingPlanCode must be one of the configured Murph billing plans.");
     }
+
+    await completeHostedPrivyVerification({
+      identity: auth.identity,
+      inviteCode,
+      verifiedPrivyUser: auth.verifiedPrivyUser,
+    });
 
     const checkout = await createHostedBillingCheckout({
       ...(billingPlanCode ? { billingPlanCode } : {}),

@@ -52,6 +52,7 @@ import {
 } from "../runner-container.js";
 import {
   isHostedBundleArchiveValidationError,
+  isHostedBundleArchiveValidationFailure,
 } from "../hosted-bundle-validation.js";
 import {
   buildHostedRunnerAmbientEnv,
@@ -442,7 +443,12 @@ export class RunnerRunProcessor {
 
       return await input.lifecycle.handleSuccess(runnerResult, context);
     } catch (error) {
-      if (isHostedBundleArchiveValidationError(error) && error.operation === "runner-input") {
+      const invalidAuthoritativeBundle = resolveInvalidAuthoritativeBundleArchiveValidation({
+        currentBundleRef: input.currentBundleRef,
+        error,
+      });
+
+      if (invalidAuthoritativeBundle) {
         await this.dependencies.stateStore.completeRun({
           eventId: wake.eventId,
           finishedAt: new Date().toISOString(),
@@ -457,7 +463,7 @@ export class RunnerRunProcessor {
             "Cloudflare quarantined hosted run execution because the authoritative bundle archive is invalid.",
           phase: "quarantined",
           redacted: {
-            bundleRefKey: error.refKey,
+            bundleRefKey: invalidAuthoritativeBundle.refKey,
             reason: "invalid_authoritative_snapshot",
             resumeFinalize: input.lifecycle.resumeFinalize,
           },
@@ -1095,6 +1101,27 @@ export class HostedExecutionObsoleteRunResultError extends Error {
     );
     this.name = "HostedExecutionObsoleteRunResultError";
   }
+}
+
+function resolveInvalidAuthoritativeBundleArchiveValidation(input: {
+  currentBundleRef: HostedExecutionBundleRef | null;
+  error: unknown;
+}): {
+  refKey: string | null;
+} | null {
+  if (isHostedBundleArchiveValidationError(input.error)) {
+    return input.error.operation === "runner-input"
+      ? { refKey: input.error.refKey }
+      : null;
+  }
+
+  if (input.currentBundleRef && isHostedBundleArchiveValidationFailure(input.error)) {
+    return {
+      refKey: input.currentBundleRef.key,
+    };
+  }
+
+  return null;
 }
 
 function hostedRunEventId(runId: string): string {

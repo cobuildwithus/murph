@@ -2302,6 +2302,102 @@ describe("RunnerRunProcessor.executeRunDrain", () => {
     expect(invokeHostedExecutionContainerRunner).not.toHaveBeenCalled();
   });
 
+  it("quarantines invalid authoritative bundles discovered by the runtime child", async () => {
+    const {
+      processor,
+      readBundlesForRunner,
+      stateStore,
+    } = createInvokeRunnerProcessor();
+    const invalidRef: HostedExecutionBundleRef = {
+      hash: "1".repeat(64),
+      key: "bundles/user_123/vault/runtime-invalid",
+      size: 120,
+      updatedAt: "2026-04-20T09:00:00.000Z",
+    };
+    const runtimeError = new Error("Hosted bundle archive is invalid.");
+    readBundlesForRunner.mockResolvedValueOnce("bundle-encoded");
+    const invokeHostedExecutionContainerRunner = vi.spyOn(
+      runnerContainerModule,
+      "invokeHostedExecutionContainerRunner",
+    ).mockRejectedValueOnce(runtimeError);
+
+    const result = await processor.executeRunDrain({
+      currentBundleRef: invalidRef,
+      events: [],
+      primaryWake: createRuntimeTimerWake(),
+      run: createHostedRunRecord({
+        runId: "run-runtime-invalid-input",
+      }),
+      runToken: "run-token",
+    });
+
+    expect(result).toEqual({
+      cursorSnapshotRef: invalidRef,
+      finalizeRequired: false,
+      redactedSummary: {
+        phase: "quarantined",
+        reason: "invalid_authoritative_snapshot",
+      },
+      state: "quarantined",
+    });
+    expect(invokeHostedExecutionContainerRunner).toHaveBeenCalledTimes(1);
+    expect(stateStore.completeRun).toHaveBeenCalledTimes(1);
+    expect(stateStore.failRun).not.toHaveBeenCalled();
+    expect(stateStore.recordRunPhase).toHaveBeenCalledWith(expect.objectContaining({
+      error: runtimeError,
+      level: "warn",
+      message: expect.stringContaining(
+        "Hosted run execution quarantined an invalid authoritative snapshot instead of scheduling another retry.",
+      ),
+      phase: "quarantined",
+    }));
+  });
+
+  it("keeps explicit runner-output bundle validation failures on the normal failure path", async () => {
+    const {
+      processor,
+      readBundlesForRunner,
+      stateStore,
+    } = createInvokeRunnerProcessor();
+    const invalidRef: HostedExecutionBundleRef = {
+      hash: "2".repeat(64),
+      key: "bundles/user_123/vault/output-invalid",
+      size: 180,
+      updatedAt: "2026-04-20T09:00:00.000Z",
+    };
+    const validationError = new HostedBundleArchiveValidationError({
+      cause: new Error("Hosted bundle archive is invalid."),
+      operation: "runner-output",
+      ref: invalidRef,
+    });
+    readBundlesForRunner.mockResolvedValueOnce("bundle-encoded");
+    const invokeHostedExecutionContainerRunner = vi.spyOn(
+      runnerContainerModule,
+      "invokeHostedExecutionContainerRunner",
+    ).mockRejectedValueOnce(validationError);
+
+    const result = await processor.executeRunDrain({
+      currentBundleRef: invalidRef,
+      events: [],
+      primaryWake: createRuntimeTimerWake(),
+      run: createHostedRunRecord({
+        runId: "run-output-invalid",
+      }),
+      runToken: "run-token",
+    });
+
+    expect(result.state).toBe("backpressured");
+    expect(invokeHostedExecutionContainerRunner).toHaveBeenCalledTimes(1);
+    expect(stateStore.failRun).toHaveBeenCalledTimes(1);
+    expect(stateStore.completeRun).not.toHaveBeenCalled();
+    expect(stateStore.recordRunPhase).toHaveBeenCalledWith(expect.objectContaining({
+      phase: "retry.scheduled",
+    }));
+    expect(stateStore.recordRunPhase).not.toHaveBeenCalledWith(expect.objectContaining({
+      phase: "quarantined",
+    }));
+  });
+
   it("leaves existing browser-vault replica objects untouched when a completed run returns no replica", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     const rootKey = createTestRootKey(33);
