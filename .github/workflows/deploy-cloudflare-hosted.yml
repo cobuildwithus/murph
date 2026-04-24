@@ -213,11 +213,11 @@ jobs:
 
       - name: Setup Docker Buildx
         if: ${{ inputs.deploy_worker }}
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Prepare runner base image
         if: ${{ inputs.deploy_worker }}
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: Dockerfile.cloudflare-hosted-runner-base
