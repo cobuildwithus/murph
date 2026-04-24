@@ -14,6 +14,9 @@ import {
   runnerBundleDirectoryName,
 } from "../scripts/runner-bundle-contract.js";
 
+const hostedRunnerBaseImageTag =
+  "murph-cloudflare-runner-base:node24.14.1-whisper1.8.1-base-en";
+
 function createDeployEnvironment() {
   return {
     allowedRunnerSecretKeys: null,
@@ -319,44 +322,58 @@ describe("hosted runner container image contract", () => {
     }
   });
 
-  it("pins whisper.cpp provisioning and default parser env in the image", async () => {
-    const dockerfile = await readFile(
+  it("pins whisper.cpp provisioning in the base image and keeps the final image app-only", async () => {
+    const finalDockerfile = await readFile(
       new URL("../../../Dockerfile.cloudflare-hosted-runner", import.meta.url),
       "utf8",
     );
+    const baseDockerfile = await readFile(
+      new URL("../../../Dockerfile.cloudflare-hosted-runner-base", import.meta.url),
+      "utf8",
+    );
 
-    expect(dockerfile).toContain("ARG WHISPER_CPP_VERSION=v1.8.1");
-    expect(dockerfile).toContain("ARG WHISPER_MODEL_FILE=ggml-base.en.bin");
-    expect(dockerfile).toContain("ARG NODE_VERSION=24.14.1");
-    expect(dockerfile).toContain("FROM node:${NODE_VERSION}-bookworm-slim AS whisper-builder");
-    expect(dockerfile).toContain("FROM node:${NODE_VERSION}-bookworm-slim\n\nARG NODE_VERSION");
-    expect(dockerfile).toContain(
+    expect(baseDockerfile).toContain("ARG WHISPER_CPP_VERSION=v1.8.1");
+    expect(baseDockerfile).toContain("ARG WHISPER_MODEL_FILE=ggml-base.en.bin");
+    expect(baseDockerfile).toContain("ARG NODE_VERSION=24.14.1");
+    expect(baseDockerfile).toContain("FROM node:${NODE_VERSION}-bookworm-slim AS whisper-builder");
+    expect(baseDockerfile).toContain("FROM node:${NODE_VERSION}-bookworm-slim\n\nARG NODE_VERSION");
+    expect(baseDockerfile).toContain(
       "https://github.com/ggml-org/whisper.cpp/archive/refs/tags/${WHISPER_CPP_VERSION}.tar.gz",
     );
-    expect(dockerfile).toContain("-DGGML_NATIVE=OFF");
-    expect(dockerfile).not.toContain("GGML_CPU_ARM_ARCH");
-    expect(dockerfile).toContain(
+    expect(baseDockerfile).toContain("-DGGML_NATIVE=OFF");
+    expect(baseDockerfile).not.toContain("GGML_CPU_ARM_ARCH");
+    expect(baseDockerfile).toContain(
       "cmake --build build -j\"$(nproc)\" --config Release --target whisper-cli",
     );
-    expect(dockerfile).toContain("COPY --from=whisper-builder /opt/whisper/bin/whisper-cli /usr/local/bin/whisper-cli");
-    expect(dockerfile).toContain("COPY --from=whisper-builder /opt/whisper/lib/ /usr/local/lib/");
-    expect(dockerfile).toContain(
+    expect(baseDockerfile).toContain("COPY --from=whisper-builder /opt/whisper/bin/whisper-cli /usr/local/bin/whisper-cli");
+    expect(baseDockerfile).toContain("COPY --from=whisper-builder /opt/whisper/lib/ /usr/local/lib/");
+    expect(baseDockerfile).toContain(
       "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/${WHISPER_MODEL_FILE}",
     );
-    expect(dockerfile).toContain(
+    expect(baseDockerfile).not.toContain(
       "COPY --chown=runner:runner .deploy/runner-bundle/ /app/",
     );
-    expect(dockerfile).not.toContain("wrangler.generated.jsonc");
-    expect(dockerfile).not.toContain("worker-secrets.json");
-    expect(dockerfile).not.toContain("runner-bundle-builder");
-    expect(dockerfile).not.toContain("pnpm install --frozen-lockfile");
-    expect(dockerfile).toContain("PATH=/app/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin");
-    expect(dockerfile).toContain("WHISPER_COMMAND=/usr/local/bin/whisper-cli");
-    expect(dockerfile).toContain(
+    expect(baseDockerfile).not.toContain("wrangler.generated.jsonc");
+    expect(baseDockerfile).not.toContain("worker-secrets.json");
+    expect(baseDockerfile).not.toContain("runner-bundle-builder");
+    expect(baseDockerfile).not.toContain("pnpm install --frozen-lockfile");
+    expect(baseDockerfile).toContain("PATH=/app/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin");
+    expect(baseDockerfile).toContain("WHISPER_COMMAND=/usr/local/bin/whisper-cli");
+    expect(baseDockerfile).toContain(
       "WHISPER_MODEL_PATH=/home/runner/.murph/models/whisper/${WHISPER_MODEL_FILE}",
     );
-    expect(dockerfile).toContain("RUN ldconfig");
-    expect(dockerfile).toContain('CMD ["node", "dist/container-entrypoint.js"]');
+    expect(baseDockerfile).toContain("RUN ldconfig");
+    expect(baseDockerfile).not.toContain('CMD ["node", "dist/container-entrypoint.js"]');
+    expect(finalDockerfile).toContain(`ARG HOSTED_RUNNER_BASE_IMAGE=${hostedRunnerBaseImageTag}`);
+    expect(finalDockerfile).toContain("FROM ${HOSTED_RUNNER_BASE_IMAGE}");
+    expect(finalDockerfile).toContain(
+      "COPY --chown=runner:runner .deploy/runner-bundle/ /app/",
+    );
+    expect(finalDockerfile).toContain('CMD ["node", "dist/container-entrypoint.js"]');
+    expect(finalDockerfile).not.toContain("apt-get install");
+    expect(finalDockerfile).not.toContain("whisper.cpp");
+    expect(finalDockerfile).not.toContain("huggingface.co");
+    expect(finalDockerfile).not.toContain("worker-secrets.json");
   });
 
   it("pins the checked-in and rendered Wrangler config to an app-local build context", async () => {
@@ -374,8 +391,23 @@ describe("hosted runner container image contract", () => {
 
     expect(wranglerConfig).toContain('"image": "../../Dockerfile.cloudflare-hosted-runner"');
     expect(wranglerConfig).toContain('"image_build_context": "."');
+    expect(packageJson.scripts?.["deploy:worker"]).toBe(
+      "pnpm deploy:artifacts && pnpm runner:docker:base && pnpm deploy:worker:apply",
+    );
+    expect(packageJson.scripts?.["runner:docker:base"]).toBe(
+      `docker build -f ../../Dockerfile.cloudflare-hosted-runner-base -t ${hostedRunnerBaseImageTag} ../..`,
+    );
     expect(packageJson.scripts?.["runner:docker:build"]).toBe(
-      "pnpm runner:bundle && docker build -f ../../Dockerfile.cloudflare-hosted-runner -t murph-cloudflare-runner .",
+      "pnpm runner:bundle && pnpm runner:docker:base && docker build -f ../../Dockerfile.cloudflare-hosted-runner -t murph-cloudflare-runner .",
+    );
+    expect(packageJson.scripts?.["runner:docker:smoke"]).toBe(
+      "pnpm runner:docker:smoke:prepare && pnpm runner:docker:base && docker build -f ../../Dockerfile.cloudflare-hosted-runner -t murph-cloudflare-runner . && pnpm runner:docker:smoke:built",
+    );
+    expect(packageJson.scripts?.["worker:deploy"]).toBe(
+      "pnpm deploy:artifacts && pnpm runner:docker:base && pnpm worker:deploy:apply",
+    );
+    expect(packageJson.scripts?.["worker:dev"]).toBe(
+      "pnpm runner:docker:base && pnpm exec wrangler dev",
     );
     expect(packageJson.scripts?.["runner:bundle:assemble-only"]).toBe(
       "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/assemble-runner-bundle.ts --skip-build",

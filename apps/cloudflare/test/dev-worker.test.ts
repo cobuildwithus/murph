@@ -24,9 +24,10 @@ describe("cloudflare dev-worker script", () => {
     expect(normalizePnpmScriptArgs(["--ip", "127.0.0.1"])).toEqual(["--ip", "127.0.0.1"]);
   });
 
-  it("bundles the runner before wrangler dev by default", () => {
+  it("prepares the runner bundle and base image before wrangler dev by default", () => {
     expect(resolveWorkerDevPnpmCommands(["--", "--port", "8787"], {})).toEqual([
       ["runner:bundle"],
+      ["runner:docker:base"],
       ["exec", "wrangler", "dev", "--port", "8787"],
     ]);
   });
@@ -36,6 +37,7 @@ describe("cloudflare dev-worker script", () => {
 
     expect(shouldSkipRunnerBundle(env)).toBe(true);
     expect(resolveWorkerDevPnpmCommands(["--", "--port", "8787"], env)).toEqual([
+      ["runner:docker:base"],
       ["exec", "wrangler", "dev", "--port", "8787"],
     ]);
   });

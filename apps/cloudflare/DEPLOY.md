@@ -240,6 +240,15 @@ pnpm --dir apps/cloudflare deploy:secrets:render
 pnpm --dir apps/cloudflare runner:bundle
 ```
 
+Local deploys and Docker smoke checks also prepare the stable native base image:
+
+```bash
+pnpm --dir apps/cloudflare runner:docker:base
+```
+
+That image is tagged `murph-cloudflare-runner-base:node24.14.1-whisper1.8.1-base-en`.
+It contains Node, `ffmpeg`, `whisper.cpp`, and the default Whisper model, but no app bundle or worker secrets.
+
 When you need to backstop lifecycle rules locally or in CI:
 
 ```bash
@@ -260,7 +269,10 @@ That command:
 
 - renders the deploy config and worker secrets payload
 - assembles the runner bundle, building and packing the runner workspace closure with bounded parallelism (`MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY` and `MURPH_RUNNER_BUNDLE_PACK_CONCURRENCY`, both defaulting to `4`)
-- deploys the Worker directly with Wrangler
+- prepares the stable native runner base image with Docker's local cache
+- deploys the Worker directly with Wrangler, which builds only the small app image layer from the prepared runner bundle
+
+The GitHub `Deploy Cloudflare Hosted Execution` workflow prepares the same base image with Docker Buildx and the GitHub Actions cache before `wrangler deploy`, so normal production deploys avoid rebuilding the stable native parser stack during the `Deploy Worker` step.
 
 ## Smoke
 
