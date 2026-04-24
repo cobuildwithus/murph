@@ -13,6 +13,8 @@ It intentionally lists live architecture, product, verification, and package-bou
 | --- | --- | --- | --- | --- |
 | `README.md` | Human-facing repo overview, install path, runtime tiers, and verification entrypoints. | Current repository state | High | 2026-04-22 |
 | `ARCHITECTURE.md` | Top-level module map, trust boundaries, persisted-state rules, control-flow contracts, and package-boundary rules. | Current runtime architecture | High | 2026-04-22 |
+| `PRODUCT.md` | Strategic design context: register, users, brand personality, anti-references, design principles. Loaded by the impeccable skill before any UI work. | Product/brand strategic context | High | 2026-04-24 |
+| `DESIGN.md` | Visual design system in Google Stitch DESIGN.md format: color, typography, elevation, components, do's/don'ts, YAML token frontmatter. Loaded by the impeccable skill before any UI work. | Visual design system | High | 2026-04-24 |
 | `docs/architecture.md` | Concise architecture summary, repo-shape overview, and package-boundary hygiene notes. | Current architectural baseline | High | 2026-04-22 |
 | `docs/contracts/` | Frozen contract docs for vault layout, schemas, commands, and invariants. | Canonical vault interface decisions | High | 2026-03-27 |
 | `docs/device-sync-hosted-control-plane.md` | Current hosted control-plane direction for device sync. | Device-sync architecture direction | Medium | 2026-04-19 |
@@ -22,7 +24,7 @@ It intentionally lists live architecture, product, verification, and package-bou
 | `docs/templates/README.md` | Entry points for reusable device-provider templates. | Template inventory | Low | 2026-04-03 |
 | `agent-docs/PRODUCT_SENSE.md` | Product behavior guardrails for implementation work. | Current product behavior | High | 2026-04-22 |
 | `agent-docs/PRODUCT_CONSTITUTION.md` | Internal product constitution and tradeoff rules. | Product principles | High | 2026-04-22 |
-| `agent-docs/FRONTEND.md` | Frontend implementation guidance for `apps/web`, including design-system sources and UI workflow rules. | Current frontend implementation guidance | Medium | 2026-04-15 |
+| `agent-docs/FRONTEND.md` | Frontend implementation guidance for `apps/web`, including design-system sources (`PRODUCT.md`, `DESIGN.md`) and UI workflow rules. | Current frontend implementation guidance | Medium | 2026-04-24 |
 | `agent-docs/product-marketing-context.md` | Product marketing context: positioning, audience, differentiation, customer language, brand voice, and the protocol outcome graph. | Product/marketing decisions | High | 2026-04-22 |
 | `agent-docs/QUALITY_SCORE.md` | Current quality posture by area. | Current repo quality posture | Medium | 2026-04-06 |
 | `agent-docs/RELIABILITY.md` | Reliability guardrails and failure-mode expectations. | Runtime reliability policy | High | 2026-03-31 |
