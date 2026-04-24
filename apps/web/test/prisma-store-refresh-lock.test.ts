@@ -6,12 +6,12 @@ describe("PrismaDeviceSyncControlPlaneStore refresh locks", () => {
   it("takes the advisory lock inside the transaction before running the callback", async () => {
     const lockCalls: Array<{ strings: readonly string[]; values: unknown[] }> = [];
     const tx = {
-      $queryRaw: async (strings: TemplateStringsArray, ...values: unknown[]) => {
+      $executeRaw: async (strings: TemplateStringsArray, ...values: unknown[]) => {
         lockCalls.push({
           strings: [...strings],
           values,
         });
-        return undefined;
+        return 0;
       },
     };
 

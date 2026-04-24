@@ -205,8 +205,7 @@ export function JoinInviteCheckoutPanel({
         <p className="text-sm font-semibold text-[#2d3436]">Choose your plan</p>
         <p className="text-sm leading-relaxed text-muted-foreground">
           Murph includes a private health vault, full experiment library, before
-          and after analysis, and iMessage, email, and Telgram support out of
-          the box.
+          and after analysis.
         </p>
       </div>
 

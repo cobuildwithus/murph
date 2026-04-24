@@ -138,7 +138,7 @@ export function LandingAuthActions({
           "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#5a6e32]"
         )}
         buttonLabel={signupLabel}
-        description="Use your phone number, email address, or Telegram to get started."
+        description="Use your phone, email, or Telegram to get started."
         intent="signup"
         showArrow={context !== "nav"}
         showLegalNotice

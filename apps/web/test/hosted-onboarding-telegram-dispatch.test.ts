@@ -115,6 +115,7 @@ import { handleHostedOnboardingTelegramWebhook as handleHostedOnboardingTelegram
 
 type HostedOnboardingTelegramWebhookInput = Parameters<typeof handleHostedOnboardingTelegramWebhookImpl>[0];
 type TelegramWebhookPrismaHarness = {
+  $executeRaw: () => Promise<unknown>;
   $queryRaw: () => Promise<unknown>;
   $transaction: (callback: (tx: TelegramWebhookPrismaHarness) => Promise<unknown>) => Promise<unknown>;
   hostedMemberRouting?: {
@@ -1399,6 +1400,7 @@ function withPrismaTransaction<T extends Record<string, unknown>>(
   prisma: T,
 ): T & TelegramWebhookPrismaHarness {
   const prismaWithTransaction = prisma as T & TelegramWebhookPrismaHarness;
+  prismaWithTransaction.$executeRaw = async () => 0;
   prismaWithTransaction.$queryRaw = async () => [];
   prismaWithTransaction.$transaction = async (
     callback: (tx: TelegramWebhookPrismaHarness) => Promise<unknown>,
