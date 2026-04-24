@@ -33,7 +33,7 @@ export default async function SettingsPage() {
             Your account
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Subscription, messaging, vault sync, and optional data sources.
+            Subscription, connected accounts, vault sync, and wearables.
           </p>
         </div>
 
@@ -67,7 +67,7 @@ export default async function SettingsPage() {
 
         <section className="flex flex-col gap-4">
           <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-            Data sources
+            Wearables
           </div>
           <HostedDeviceSyncSettings
             authenticated={authenticated}

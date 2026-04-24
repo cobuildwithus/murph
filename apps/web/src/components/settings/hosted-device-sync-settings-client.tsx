@@ -70,7 +70,7 @@ export function HostedDeviceSyncSettingsClient(props: {
       setErrorState(null);
     } catch (error) {
       setErrorState(
-        createHostedDeviceSyncErrorState(error, "Could not load your data sources right now.", "load"),
+        createHostedDeviceSyncErrorState(error, "Could not load your wearables right now.", "load"),
       );
     } finally {
       setIsRefreshing(false);
@@ -187,14 +187,14 @@ export function HostedDeviceSyncSettingsClient(props: {
   const errorMessage = errorState?.message ?? null;
   const showUnavailableState = props.authenticated && errorState?.phase === "load" && sources.length === 0;
   const errorAlertTitle = errorState?.phase === "load"
-    ? "Unable to load connected sources"
-    : "Unable to update connected sources";
+    ? "Unable to load wearable sources"
+    : "Unable to update wearable sources";
 
   return (
     <div className="space-y-5">
       {successMessage ? (
         <Alert className="border-emerald-200 bg-emerald-50 text-emerald-900">
-          <AlertTitle>Connected source updated</AlertTitle>
+          <AlertTitle>Wearable source updated</AlertTitle>
           <AlertDescription>{successMessage}</AlertDescription>
         </Alert>
       ) : null}
@@ -216,14 +216,14 @@ export function HostedDeviceSyncSettingsClient(props: {
       {!props.authenticated ? (
         <HostedSettingsSessionState
           authenticated={props.authenticated}
-          signedOutDescription="Sign in to manage your data sources."
+          signedOutDescription="Sign in to manage your wearables."
         />
       ) : showUnavailableState ? (
         <HostedDeviceSyncSettingsStatusCard
           actionLabel={isHostedDeviceSyncBlockedState(errorState) ? null : "Refresh status"}
-          description={errorMessage ?? "Could not load your data sources right now."}
+          description={errorMessage ?? "Could not load your wearables right now."}
           disabled={isRefreshing}
-          title={isHostedDeviceSyncBlockedState(errorState) ? "Data sources unavailable" : "Could not load data sources"}
+          title={isHostedDeviceSyncBlockedState(errorState) ? "Wearables unavailable" : "Could not load wearables"}
           onAction={isHostedDeviceSyncBlockedState(errorState) ? undefined : loadSources}
         />
       ) : (

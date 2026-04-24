@@ -118,7 +118,7 @@ test("SettingsPage reads the server-side Privy session and threads it into the s
   assert.match(markup, /Hosted vault sync settings/);
   assert.match(markup, /Hosted device sync settings/);
   assert.match(markup, /Your account/);
-  assert.match(markup, /Subscription, messaging, vault sync, and optional data sources\./);
+  assert.match(markup, /Subscription, connected accounts, vault sync, and wearables\./);
   assert.match(markup, /data-phone-country-code="CA"/);
   expect(mocks.getHostedPageAuthSnapshot).toHaveBeenCalledTimes(1);
   expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(expect.objectContaining({

@@ -167,7 +167,7 @@ test("HostedDeviceSyncSettingsClient renders an unavailable state instead of the
 
   expect(mocks.HostedDeviceSyncSettingsStatusCard).toHaveBeenCalledWith(expect.objectContaining({
     description: "Your subscription is canceled. Open billing to resume access.",
-    title: "Data sources unavailable",
+    title: "Wearables unavailable",
   }), undefined);
   expect(mocks.HostedDeviceSyncSettingsContent).not.toHaveBeenCalled();
 });

@@ -18,14 +18,14 @@ import { StickyNav } from "./sticky-nav";
 export const metadata: Metadata = {
   title: "Murph — Discover what actually makes you healthier",
   description:
-    "Your personal health assistant. Pick a protocol, bring the context you have, and see what actually changed.",
+    "Your personal health assistant. Connect your data, pick a protocol, see what actually makes you healthier.",
   alternates: {
     canonical: "/",
   },
   openGraph: {
     title: "Murph — Discover what actually makes you healthier",
     description:
-      "Your personal health assistant. Pick a protocol, run it as a proper experiment, and compare the result against your baseline.",
+      "Your personal health assistant. Pick a protocol, run it as a proper experiment, see what actually changed. Expert-backed, measured against your baseline.",
     siteName: "Murph",
     type: "website",
   },
@@ -33,7 +33,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: "Murph — Discover what actually makes you healthier",
     description:
-      "Your personal health assistant. Pick a protocol, run it as a proper experiment, and review what changed with or without a wearable.",
+      "Your personal health assistant. Pick a protocol, see what actually makes you healthier. Works with Oura, WHOOP, Garmin, and Strava.",
   },
 };
 
@@ -44,9 +44,9 @@ export default async function HomePage() {
   const launchPricingSummary = formatHostedLandingPricingLongSummary();
   const signupCta: HomepageSignupCta = authenticated
     ? {
-        body: "Manage billing, vault sync, and connected sources from one place.",
+        body: "Manage billing and connected wearables from one place.",
         eyebrow: "Your account",
-        metaItems: ["Subscription and billing", "Connected sources"],
+        metaItems: ["Subscription and billing", "Wearable connections"],
         note: null,
         signupLabel: "Open settings",
         title: "You’re already set up.",
@@ -56,7 +56,7 @@ export default async function HomePage() {
         eyebrow: "Sign up",
         metaItems: [
           `${launchPricingSummary}`,
-          "Chat, uploads, and optional connected sources",
+          "Oura, WHOOP, Strava, and Garmin",
         ],
         note: null,
         signupLabel: "Get started",
