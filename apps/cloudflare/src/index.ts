@@ -417,7 +417,7 @@ async function handleDeployContainerSmokeRoute(
   context: WorkerRouteContext,
 ): Promise<Response> {
   const result = await context.env.RUNNER_CONTAINER
-    .getByName("__deploy-smoke")
+    .getByName(resolveDeployContainerSmokeObjectName(context.env))
     .smokeHealth();
 
   return json({
@@ -425,6 +425,15 @@ async function handleDeployContainerSmokeRoute(
     runnerContainer: result,
     service: "cloudflare-hosted-runner",
   });
+}
+
+function resolveDeployContainerSmokeObjectName(
+  env: Pick<WorkerEnvironmentSource, "CF_VERSION_METADATA">,
+): string {
+  const workerVersionId = readWorkerVersionId(env);
+  return workerVersionId
+    ? `__deploy-smoke-${workerVersionId}`
+    : "__deploy-smoke";
 }
 
 async function handleRunRoute(

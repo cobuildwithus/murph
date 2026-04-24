@@ -198,6 +198,39 @@ describe("cloudflare worker routes", () => {
     });
   });
 
+  it("uses a version-specific deploy smoke Durable Object name when version metadata is present", async () => {
+    const baseEnv = createWorkerEnv();
+    const getByName = vi.fn(createRunnerContainerNamespace().getByName);
+    const env = {
+      ...baseEnv,
+      CF_VERSION_METADATA: {
+        id: "version-123",
+        tag: "test",
+        timestamp: "2026-04-24T00:00:00.000Z",
+      },
+      RUNNER_CONTAINER: {
+        getByName,
+      },
+    };
+    const url = new URL("https://runner.example.test/internal/deploy/container-smoke");
+    const callbackSigning = readHostedExecutionEnvironment(asWorkerStringEnvironment(env)).webCallbackSigning;
+    const request = new Request(url, {
+      headers: await createHostedWebCallbackSignatureHeaders({
+        environment: callbackSigning,
+        method: "POST",
+        path: url.pathname,
+        payload: "",
+        search: url.search,
+      }),
+      method: "POST",
+    });
+
+    const response = await worker.fetch(request, env);
+
+    expect(response.status).toBe(200);
+    expect(getByName).toHaveBeenCalledWith("__deploy-smoke-version-123");
+  });
+
   it("rejects unsigned deploy container smoke requests", async () => {
     const response = await worker.fetch(
       new Request("https://runner.example.test/internal/deploy/container-smoke", {
