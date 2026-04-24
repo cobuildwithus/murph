@@ -238,7 +238,19 @@ Ready to get started?`)
       'Onboarding stays active until the assistant runtime marks it complete.',
     )
     expect(prompt).toContain(
+      'Do not mark onboarding complete only because the user answered the opening context question with their name or initial health context.',
+    )
+    expect(prompt).toContain(
+      'First give them a basic sense of how Murph works and what they can send over time.',
+    )
+    expect(prompt).toContain(
       'Use `vault.cli.run` to execute `vault-cli assistant onboarding complete --reason <user_answered|user_declined|concrete_request>`.',
+    )
+    expect(prompt).toContain(
+      'A short problem mention in response to the onboarding context question, such as sleep, stress, pain, or "I work too much," is setup context, not permission to start detailed troubleshooting.',
+    )
+    expect(prompt).toContain(
+      'do not immediately rank goals, triage symptoms, ask diagnosis-style branching questions, or start a plan unless the user explicitly asks for concrete help.',
     )
     expect(prompt).toContain(
       'If the user mentions urgent, severe, or safety-sensitive symptoms, do not stay in onboarding;',
@@ -249,7 +261,7 @@ Ready to get started?`)
     const prompt = buildPrompt('none', null, { onboardingGuidance: true })
 
     expect(prompt).toContain(
-      'the runtime will settle only clear onboarding-complete turns automatically',
+      'the runtime will settle only clear declines or concrete requests automatically',
     )
     expect(prompt).toContain('do not claim onboarding was marked complete')
   })
