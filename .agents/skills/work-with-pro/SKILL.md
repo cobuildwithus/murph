@@ -38,6 +38,15 @@ If a raw `cobuild-review-gpt` command is unavoidable, include:
 
 If a thread export says "Unable to load conversation" or times out while the user says the thread was created by `review:gpt`, first suspect the wrong browser endpoint. Re-run through the Phlebas wrapper before nudging the thread, asking the user to resend, or abandoning the Pro path.
 
+## Long-Running Threads
+
+ChatGPT Pro research and review threads may legitimately run for the full configured poll budget, and some research seams can take 200 minutes or longer.
+
+- Treat partial assistant text, a visible stop button, or a busy wake status as possible ongoing work rather than failure.
+- Do not kill wake processes, close ChatGPT tabs, resend/split the same task, or abandon the thread early solely because no artifact has downloaded yet.
+- If the user says the thread may take longer than the default timeout, extend the wake timeout or leave the remote thread intact and report current state.
+- Only terminate or replace a thread early when the correct browser profile cannot load it, the send clearly failed, it returned a final unusable answer, the configured timeout expired, or the user explicitly asks to stop.
+
 ## Modes
 
 Use one of three modes:
@@ -54,7 +63,7 @@ Default to `watch-only` when the user provides only a ChatGPT URL plus instructi
 2. Do not send a prompt, nudge, or request for a patch.
 3. Start the wake with the Phlebas wrapper command above.
 4. Keep the wake attached in a persistent tool session when possible, and confirm it is armed from initial logs or a still-running process.
-5. Let the wake run until it completes, times out, fails concretely, or the user redirects.
+5. Let the wake run until it completes, times out, fails concretely, or the user redirects; do not treat partial streaming text or missing artifacts before timeout as failure.
 6. When it resumes Codex, inspect the exported thread, retained assistant response, downloaded artifacts, and status file.
 7. If a `.patch`, `.diff`, or equivalent artifact exists, apply the returned intent carefully, preserving unrelated dirty-tree work.
 8. If no artifact exists and the retained response is only prose, partial progress, or an offer to proceed, report that state and ask before nudging.
