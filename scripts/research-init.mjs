@@ -168,7 +168,7 @@ These identity fields are only starting hints for the charter. The charter manif
 
 ## Run Now
 
-1. \`pnpm research:run --workspace ${outDirRelative} --seam 01-charter --action send --lane eragon\`
+1. \`pnpm research:run --workspace ${outDirRelative} --seam 01-charter --action send --lane hercules\`
 2. Once the thread has answered, \`pnpm research:run --workspace ${outDirRelative} --seam 01-charter --action harvest\`
 
 Those commands write:
@@ -289,7 +289,7 @@ function main(argv) {
   writeTextFile(path.join(outDir, "README.md"), buildRunbook({ outDirRelative, spec }));
 
   console.log(`Initialized research orchestrator scaffold at ${outDirRelative}`);
-  console.log(`Run next: pnpm research:run --workspace ${outDirRelative} --seam 01-charter --action send --lane eragon`);
+  console.log(`Run next: pnpm research:run --workspace ${outDirRelative} --seam 01-charter --action send --lane hercules`);
   console.log(`Then harvest the charter with: pnpm research:run --workspace ${outDirRelative} --seam 01-charter --action harvest`);
   console.log(`Then materialize later seams with: pnpm research:materialize --workspace ${outDirRelative}`);
 }

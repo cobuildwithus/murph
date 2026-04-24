@@ -76,7 +76,7 @@ For each research workspace, expect:
 - `config/review-gpt-work-profile.sh`
 - `scripts/package-research-context.sh`
 
-Research runs should use the workspace-specific config and isolated research browser profile, not the default personal `review:gpt` browser session.
+Research runs should use the workspace-specific config through the Hercules managed browser lane, not the default personal `review:gpt` browser session or any Chrome fallback.
 
 If you need another parallel browser lane, a shared profile bundle under `output-packages/review-gpt-profiles/<name>/` is a valid pattern. The useful pieces are:
 
@@ -104,8 +104,8 @@ Run:
 
 ```bash
 pnpm research:init "<topic>"
-bash output-packages/research/<workspace>/commands/01-charter.send.sh
-bash output-packages/research/<workspace>/commands/01-charter.harvest.sh
+pnpm research:run --workspace output-packages/research/<workspace> --seam 01-charter --action send --lane hercules
+pnpm research:run --workspace output-packages/research/<workspace> --seam 01-charter --action harvest
 ```
 
 The charter must define:
@@ -145,9 +145,9 @@ The current harvest runner reads `workflow.json`, normalizes the returned file i
 
 For discovery seams:
 
-- run `commands/<label>.send.sh`
+- run `pnpm research:run --workspace output-packages/research/<workspace> --seam <label> --action send --lane hercules`
 - wait for the thread to finish
-- run `commands/<label>.harvest.sh`
+- run `pnpm research:run --workspace output-packages/research/<workspace> --seam <label> --action harvest`
 
 Harvest guidance:
 
@@ -300,7 +300,7 @@ Do not rerun immediately if the thread is still obviously thinking.
 
 Instead:
 
-1. keep the isolated Chrome profile open
+1. keep the Hercules managed browser lane open
 2. wait for the thread to finish
 3. export/download
 4. backfill the local response
@@ -331,7 +331,7 @@ Do not let repomix exclude `output-packages/**`.
 
 ## Operational Rules
 
-- Use the workspace-specific isolated browser profile for research.
+- Use the workspace-specific Hercules managed browser lane for research.
 - Keep launches measured; fast fanout is good, but broken uploads are wasted time.
 - Expect long waits. Let the normal wake loop do its job unless there is concrete evidence the run is wedged.
 - The workspace command wrappers already carry the intended long wait budget. Prefer those wrappers over manually assembled `thread wake` commands.

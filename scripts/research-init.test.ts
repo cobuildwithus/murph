@@ -482,7 +482,7 @@ exit 64
       expect(initResult.stdout).toContain(
         "pnpm research:run --workspace",
       );
-      expect(initResult.stdout).toContain("--seam 01-charter --action send --lane eragon");
+      expect(initResult.stdout).toContain("--seam 01-charter --action send --lane hercules");
       expect(initResult.stdout).toContain("--seam 01-charter --action harvest");
       expect(existsSync(path.join(outDir, "README.md"))).toBe(true);
       expect(existsSync(path.join(outDir, "workflow.json"))).toBe(true);
@@ -572,7 +572,7 @@ exit 64
       const initReadme = readFileSync(path.join(outDir, "README.md"), "utf8");
       expect(initReadme).toContain("Only the charter send/harvest pair is runnable right now.");
       expect(initReadme).toContain(
-        `pnpm research:run --workspace ${path.relative(repoRoot, outDir).split(path.sep).join(path.posix.sep)} --seam 01-charter --action send --lane eragon`,
+        `pnpm research:run --workspace ${path.relative(repoRoot, outDir).split(path.sep).join(path.posix.sep)} --seam 01-charter --action send --lane hercules`,
       );
       expect(initReadme).toContain(
         `pnpm research:run --workspace ${path.relative(repoRoot, outDir).split(path.sep).join(path.posix.sep)} --seam 01-charter --action harvest`,
@@ -623,7 +623,7 @@ exit 64
       expect(materializeResult.stderr).toBe("");
       expect(materializeResult.stdout).toContain("Materialized post-charter prompts");
       expect(materializeResult.stdout).toContain(
-        "--seam 02-discovery-direct-cwi --action send --lane eragon",
+        "--seam 02-discovery-direct-cwi --action send --lane hercules",
       );
       expect(materializeResult.stdout).toContain(
         "--seam 02-discovery-direct-cwi --action harvest",
@@ -850,7 +850,7 @@ exit 64
       const materializedReadme = readFileSync(path.join(outDir, "README.md"), "utf8");
       expect(materializedReadme).toContain("materialized from the charter response");
       expect(materializedReadme).toContain(
-        `pnpm research:run --workspace ${path.relative(repoRoot, outDir).split(path.sep).join(path.posix.sep)} --seam 02-discovery-direct-cwi --action send --lane eragon`,
+        `pnpm research:run --workspace ${path.relative(repoRoot, outDir).split(path.sep).join(path.posix.sep)} --seam 02-discovery-direct-cwi --action send --lane hercules`,
       );
       expect(materializedReadme).toContain(
         `pnpm research:run --workspace ${path.relative(repoRoot, outDir).split(path.sep).join(path.posix.sep)} --seam 02-discovery-direct-cwi --action harvest`,
@@ -1142,7 +1142,7 @@ exit 17
       expect(readFileSync(chatUrlPath, "utf8")).toBe("https://chatgpt.com/c/test-thread-123\n");
       expect(existsSync(threadExportPath)).toBe(true);
       expect(readFileSync(threadExportPath, "utf8")).toContain("Recovered final thread snapshot");
-      expect(readFileSync(threadExportPath, "utf8")).toContain("http://127.0.0.1:9448");
+      expect(readFileSync(threadExportPath, "utf8")).toContain("http://127.0.0.1:9446");
       expect(existsSync(wakeThreadPath)).toBe(true);
       expect(existsSync(wakeStatusPath)).toBe(true);
       expect(readFileSync(responsePath, "utf8")).toContain("Recovered final thread snapshot");
@@ -1220,7 +1220,7 @@ exit 64
       mkdirSync(path.dirname(chatUrlPath), { recursive: true });
       mkdirSync(path.dirname(staleResultPath), { recursive: true });
       writeTextFileSync(chatUrlPath, "https://chatgpt.com/c/endpoint-check\n");
-      writeTextFileSync(staleResultPath, "Managed browser endpoint: http://127.0.0.1:9444\n");
+      writeTextFileSync(staleResultPath, "Managed browser endpoint: http://127.0.0.1:19999\n");
 
       const helperResult = runGeneratedReviewGptHarvest(
         path.join(outDir, "commands", "_run-review-gpt.sh"),
@@ -1880,10 +1880,10 @@ function assertResearchReviewGptSupportFiles(outDir: string) {
 
   const workProfileConfig = readFileSync(workProfileConfigPath, "utf8");
   expect(workProfileConfig).toContain('. "${script_dir}/review-gpt-research.config.sh"');
-  expect(workProfileConfig).toContain('murph_review_gpt_profile_apply_browser_defaults eragon || true');
+  expect(workProfileConfig).toContain('murph_review_gpt_profile_apply_browser_defaults hercules || true');
   expect(workProfileConfig).toContain('browser_binary_path="${browser_binary_path:-/Applications/Brave Browser.app/Contents/MacOS/Brave Browser}"');
-  expect(workProfileConfig).toContain('managed_browser_user_data_dir="${RESEARCH_MANAGED_BROWSER_USER_DATA_DIR:-${managed_browser_user_data_dir:-$HOME/Library/Application Support/MurphReviewGPT/Eragon}}"');
-  expect(workProfileConfig).toContain('managed_browser_port="${RESEARCH_MANAGED_BROWSER_PORT:-${managed_browser_port:-9448}}"');
+  expect(workProfileConfig).toContain('managed_browser_user_data_dir="${RESEARCH_MANAGED_BROWSER_USER_DATA_DIR:-${managed_browser_user_data_dir:-$HOME/Library/Application Support/MurphReviewGPT/Hercules}}"');
+  expect(workProfileConfig).toContain('managed_browser_port="${RESEARCH_MANAGED_BROWSER_PORT:-${managed_browser_port:-9446}}"');
   expect(workProfileConfig).toContain('research_thread_export_browser_endpoint="${RESEARCH_THREAD_EXPORT_BROWSER_ENDPOINT:-http://127.0.0.1:${managed_browser_port}}"');
   expect(workProfileConfig).not.toContain('scripts/review-gpt.config.sh');
 
