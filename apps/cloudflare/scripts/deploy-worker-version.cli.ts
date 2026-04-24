@@ -6,6 +6,7 @@ import {
   type DeploymentStatusPayload,
   type HostedWorkerDeploymentResult,
 } from "./deploy-worker-version.shared.js";
+import { assertPreparedDeployArtifacts } from "./deploy-artifacts.js";
 import {
   parseJsonValue,
   requireConfiguredString,
@@ -22,7 +23,7 @@ export async function runDeployWorkerVersionCli(
     runHostedWorkerDeployment?: typeof runHostedWorkerDeployment;
   } = {},
 ): Promise<HostedWorkerDeploymentResult> {
-  const { configPath, resultPath, secretsFilePath } = resolveDeployWorkerCliPaths(argv, {
+  const { configPath, resultPath, runnerBundleDir, secretsFilePath } = resolveDeployWorkerCliPaths(argv, {
     deployRoot: options.deployRoot,
   });
   const env = options.env ?? process.env;
@@ -47,16 +48,18 @@ export async function runDeployWorkerVersionCli(
       },
       mkdir,
       readCurrentDeployment,
+      validatePreparedArtifacts: assertPreparedDeployArtifacts,
       writeFile,
     },
     env,
     resultPath,
+    runnerBundleDir,
     secretsFilePath,
     workerName,
   });
 
   if (options.log ?? true) {
-    console.log(`Rendered Cloudflare deployment result to ${resultPath}`);
+    console.log("Rendered Cloudflare deployment result.");
     if (result.candidateVersionId) {
       console.log(`Candidate version: ${result.candidateVersionId}`);
     }

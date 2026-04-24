@@ -47,6 +47,12 @@ export interface HostedWorkerDeploymentDependencies {
     recursive: boolean;
   }): Promise<unknown>;
   readCurrentDeployment(workerName: string, configPath: string): Promise<DeploymentStatusPayload | null>;
+  validatePreparedArtifacts(input: {
+    configPath: string;
+    includeSecrets: boolean;
+    runnerBundleDir: string;
+    secretsFilePath: string;
+  }): Promise<void>;
   writeFile(
     target: string,
     content: string,
@@ -74,12 +80,19 @@ export async function runHostedWorkerDeployment(input: {
   dependencies: HostedWorkerDeploymentDependencies;
   env?: EnvSource;
   resultPath: string;
+  runnerBundleDir: string;
   secretsFilePath: string;
   workerName: string;
 }): Promise<HostedWorkerDeploymentResult> {
   const env = input.env ?? process.env;
   const deploymentSettings = resolveHostedWorkerDeploymentSettings(env, () => new Date());
 
+  await input.dependencies.validatePreparedArtifacts({
+    configPath: input.configPath,
+    includeSecrets: deploymentSettings.includeSecrets,
+    runnerBundleDir: input.runnerBundleDir,
+    secretsFilePath: input.secretsFilePath,
+  });
   await input.dependencies.mkdir(path.dirname(input.resultPath), { recursive: true });
 
   const result = await runDirectDeployment({
@@ -125,17 +138,26 @@ async function runDirectDeployment(input: {
     input.configPath,
   );
   const finalDeploymentVersions = mapDeploymentVersions(finalDeployment);
+  const smokeVersionId = resolveSmokeVersionId(finalDeploymentVersions);
 
   return {
-    candidateVersionId: finalDeploymentVersions[0]?.versionId ?? null,
+    candidateVersionId: smokeVersionId,
     currentDeploymentVersions: null,
     finalDeploymentVersions,
     mode: "direct",
     rolloutPercentage: null,
-    smokeVersionId: null,
+    smokeVersionId,
     uploadedVersionId: null,
     workerName: input.workerName,
   };
+}
+
+function resolveSmokeVersionId(
+  versions: ReadonlyArray<{ percentage: number; versionId: string }>,
+): string | null {
+  const fullTrafficVersion = versions.find((version) => version.percentage === 100);
+
+  return fullTrafficVersion?.versionId ?? versions[0]?.versionId ?? null;
 }
 
 function resolveHostedWorkerDeploymentSettings(

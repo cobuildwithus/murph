@@ -1,6 +1,7 @@
 import path from "node:path";
 
 import { resolveCloudflareDeployPaths } from "./deploy-automation.js";
+import { runnerBundleDirectoryName } from "./runner-bundle-contract.js";
 
 export function resolveDeployWorkerCliPaths(
   argv: string[],
@@ -10,6 +11,7 @@ export function resolveDeployWorkerCliPaths(
 ): {
   configPath: string;
   resultPath: string;
+  runnerBundleDir: string;
   secretsFilePath: string;
 } {
   const deployRoot = options.deployRoot ?? path.dirname(resolveCloudflareDeployPaths().deployDir);
@@ -45,6 +47,7 @@ export function resolveDeployWorkerCliPaths(
   return {
     configPath,
     resultPath,
+    runnerBundleDir: path.join(deployPaths.deployDir, runnerBundleDirectoryName),
     secretsFilePath,
   };
 }

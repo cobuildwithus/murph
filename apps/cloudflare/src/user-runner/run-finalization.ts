@@ -12,6 +12,7 @@ import type {
   HostedIngressLifecycleState,
   HostedRunAcquireResponse,
   HostedRunCleanupTarget,
+  HostedRunCommitResponse,
   HostedRunEventResult,
   HostedRunRecord,
 } from "@murphai/hosted-execution/contracts";
@@ -1399,17 +1400,16 @@ async function failAcquiredHostedRun(
     callbackSigning: context.callbackSigning,
     timeoutMs: context.runnerTimeoutMs,
   });
+  const breadcrumb = resolveFailureCommitBreadcrumb({
+    commit,
+    failureCode: input.failureCode,
+  });
 
   context.recordHostedRunBreadcrumb({
-    level: commit.committed ? "info" : "warn",
-    message: commit.committed
-      ? "Cloudflare won the hosted run commit."
-      : "Cloudflare lost the hosted run commit.",
-    phase: commit.committed ? "commit_won" : "commit_lost",
-    redacted: {
-      commitKind: "failure",
-      failureCode: input.failureCode,
-    },
+    level: breadcrumb.level,
+    message: breadcrumb.message,
+    phase: breadcrumb.phase,
+    redacted: breadcrumb.redacted,
     run: input.run,
     runToken: input.runToken,
     userId: input.userId,
@@ -1418,6 +1418,47 @@ async function failAcquiredHostedRun(
   return {
     cursor: commit.cursor,
     state: "backpressured",
+  };
+}
+
+function resolveFailureCommitBreadcrumb(input: {
+  commit: HostedRunCommitResponse;
+  failureCode: string;
+}): {
+  level: "info" | "warn";
+  message: string;
+  phase: string;
+  redacted: Record<string, unknown>;
+} {
+  const failureRecorded = input.commit.run?.status === "failed"
+    && input.commit.run.errorCode === input.failureCode;
+
+  if (failureRecorded) {
+    return {
+      level: "warn",
+      message:
+        "Cloudflare recorded the hosted run failure; web will retry the uncommitted work.",
+      phase: "failure_recorded",
+      redacted: {
+        commitKind: "failure",
+        failureCode: input.failureCode,
+        requeueExpected: true,
+        webRunStatus: input.commit.run?.status ?? null,
+      },
+    };
+  }
+
+  return {
+    level: input.commit.committed ? "info" : "warn",
+    message: input.commit.committed
+      ? "Cloudflare won the hosted run commit."
+      : "Cloudflare lost the hosted run commit.",
+    phase: input.commit.committed ? "commit_won" : "commit_lost",
+    redacted: {
+      commitKind: "failure",
+      failureCode: input.failureCode,
+      webRunStatus: input.commit.run?.status ?? null,
+    },
   };
 }
 

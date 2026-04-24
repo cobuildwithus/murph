@@ -20,6 +20,7 @@ That rendered surface is then used by:
 - `pnpm --dir apps/cloudflare deploy:smoke`
 
 The rendered deploy helper path is the canonical rollout contract. The lower-level version helper still exists for recovery work, and the checked-in Wrangler scaffold remains useful for local development, but production deploys should use the rendered config so hosted email send bindings stay environment-specific and sender-restricted.
+`deploy:worker:apply` validates the generated Wrangler config, worker secrets payload, and `.deploy/runner-bundle/` manifest before invoking Wrangler. The runner bundle manifest records the assembled workspace closure and source/bundle fingerprints, so applying after a stale hosted-local bundle, a smoke-mutated bundle, or a config/secrets render newer than the bundle fails before upload.
 Hosted assistant delivery recovery now relies on committed side-effect state inside the encrypted workspace plus the web-owned hosted-run recovery record.
 
 ## One-Time Cloudflare Setup
@@ -238,6 +239,7 @@ pnpm --dir apps/cloudflare deploy:preflight
 pnpm --dir apps/cloudflare deploy:config:render
 pnpm --dir apps/cloudflare deploy:secrets:render
 pnpm --dir apps/cloudflare runner:bundle
+pnpm --dir apps/cloudflare deploy:artifacts:validate
 ```
 
 Local deploys and Docker smoke checks also prepare the stable native base image:
@@ -273,6 +275,7 @@ That command:
 - deploys the Worker directly with Wrangler, which builds only the small app image layer from the prepared runner bundle
 
 The GitHub `Deploy Cloudflare Hosted Execution` workflow prepares the same base image with Docker Buildx and the GitHub Actions cache before `wrangler deploy`, so normal production deploys avoid rebuilding the stable native parser stack during the `Deploy Worker` step.
+The workflow also runs `pnpm --dir apps/cloudflare runner:docker:smoke:prepared-base` before any deploy. That smoke builds the app image from a prepared runner bundle and executes the hosted runner inside Docker. Because the smoke overlays test entrypoints into `.deploy/runner-bundle/`, the workflow re-runs `deploy:artifacts` afterward and `deploy:worker:apply` rejects any smoke-mutated bundle that reaches the deploy step.
 
 ## Smoke
 
@@ -287,6 +290,6 @@ Optional smoke env:
 - `HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL` to target a non-default public Worker URL
 - `HOSTED_EXECUTION_SMOKE_USER_ID` to enable the authenticated status check
 - `HOSTED_EXECUTION_SMOKE_OIDC_TOKEN` or `VERCEL_OIDC_TOKEN` for authenticated status auth
-- `HOSTED_EXECUTION_SMOKE_VERSION_ID` only when intentionally smoke-testing a recovery deployment version override
+- `HOSTED_EXECUTION_SMOKE_VERSION_ID` to pin smoke requests to a version in the active deployment; the deploy workflow passes the freshly deployed version
 
 If `HOSTED_EXECUTION_SMOKE_USER_ID` is unset, smoke stops after the public banner and health checks.

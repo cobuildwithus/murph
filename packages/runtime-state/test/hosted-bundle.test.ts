@@ -184,7 +184,7 @@ test("hosted bundle archive helpers validate text entries, artifact entries, and
     () => hostedBundle.assertHostedBundleArtifactIntegrity({
       bytes: Uint8Array.from(Buffer.from("bad")),
       path: "artifacts/report.pdf",
-      ref: { byteSize: 4, sha256: "nope" },
+      ref: { byteSize: 4, sha256: sha256HostedBundleHex(Buffer.from("pdf")) },
       root: "vault",
     }),
     /size mismatch/u,
@@ -193,7 +193,7 @@ test("hosted bundle archive helpers validate text entries, artifact entries, and
     () => hostedBundle.assertHostedBundleArtifactIntegrity({
       bytes: Uint8Array.from(Buffer.from("pdf")),
       path: "artifacts/report.pdf",
-      ref: { byteSize: 3, sha256: "nope" },
+      ref: { byteSize: 3, sha256: sha256HostedBundleHex(Buffer.from("nope")) },
       root: "vault",
     }),
     /hash mismatch/u,
@@ -202,6 +202,10 @@ test("hosted bundle archive helpers validate text entries, artifact entries, and
   assert.throws(
     () => hostedBundle.parseHostedBundleArchive(Uint8Array.from(Buffer.from("not-gzip"))),
     /Hosted bundle archive is invalid\./u,
+  );
+  assert.throws(
+    () => hostedBundle.parseHostedBundleArchive(new Uint8Array(64 * 1024 * 1024 + 1)),
+    /Hosted bundle archive exceeds the .* compressed size limit/u,
   );
   assert.throws(
     () => hostedBundle.parseHostedBundleArchive(gzipSync(Buffer.from(JSON.stringify({
@@ -233,6 +237,83 @@ test("hosted bundle archive helpers validate text entries, artifact entries, and
     })))),
     /Hosted bundle archive contains invalid inline file contents/u,
   );
+  const validArtifactHash = sha256HostedBundleHex(Buffer.from("pdf"));
+  for (const byteSize of [
+    Number.NaN,
+    Number.POSITIVE_INFINITY,
+    -1,
+    1.5,
+    Number.MAX_SAFE_INTEGER + 1,
+  ]) {
+    assert.throws(
+      () => hostedBundle.serializeHostedBundleArchive({
+        files: [
+          {
+            artifact: {
+              byteSize,
+              sha256: validArtifactHash,
+            },
+            path: "artifacts/report.pdf",
+            root: "vault",
+          },
+        ],
+        kind: "vault",
+        schema: HOSTED_BUNDLE_SCHEMA,
+      }),
+      /Hosted bundle archive contains invalid artifact metadata/u,
+    );
+  }
+  assert.throws(
+    () => hostedBundle.parseHostedBundleArchive(gzipSync(Buffer.from(JSON.stringify({
+      files: [
+        {
+          artifact: {
+            byteSize: Number.MAX_SAFE_INTEGER + 1,
+            sha256: validArtifactHash,
+          },
+          path: "artifacts/report.pdf",
+          root: "vault",
+        },
+      ],
+      kind: "vault",
+      schema: HOSTED_BUNDLE_SCHEMA,
+    })))),
+    /Hosted bundle archive contains invalid artifact metadata/u,
+  );
+  assert.throws(
+    () => hostedBundle.serializeHostedBundleArchive({
+      files: [
+        {
+          artifact: {
+            byteSize: 3,
+            sha256: "not-a-sha",
+          },
+          path: "artifacts/report.pdf",
+          root: "vault",
+        },
+      ],
+      kind: "vault",
+      schema: HOSTED_BUNDLE_SCHEMA,
+    }),
+    /Hosted bundle archive contains invalid artifact metadata/u,
+  );
+  assert.throws(
+    () => hostedBundle.serializeHostedBundleArchive({
+      files: [
+        {
+          artifact: {
+            byteSize: 3,
+            sha256: validArtifactHash.toUpperCase(),
+          },
+          path: "artifacts/report.pdf",
+          root: "vault",
+        },
+      ],
+      kind: "vault",
+      schema: HOSTED_BUNDLE_SCHEMA,
+    }),
+    /Hosted bundle archive contains invalid artifact metadata/u,
+  );
   assert.throws(
     () => hostedBundle.serializeHostedBundleArchive({
       files: [
@@ -242,7 +323,7 @@ test("hosted bundle archive helpers validate text entries, artifact entries, and
       kind: "vault",
       schema: HOSTED_BUNDLE_SCHEMA,
     }),
-    /duplicate file entry/u,
+    /duplicate file entries/u,
   );
 });
 
@@ -1270,7 +1351,7 @@ test("hosted execution restore rejects externalized artifacts whose bytes do not
       },
       bundle: snapshot.bundle,
       workspaceRoot: restoreRoot,
-    })).rejects.toThrow("Hosted bundle artifact vault:raw/captures/report.pdf");
+    })).rejects.toThrow("Hosted bundle artifact size mismatch");
   } finally {
     await rm(workspaceRoot, { force: true, recursive: true });
     await rm(restoreRoot, { force: true, recursive: true });
@@ -1398,7 +1479,7 @@ test("hosted bundle restore rejects duplicate root and path entries", () => {
     ],
     kind: "vault",
     schema: HOSTED_BUNDLE_SCHEMA,
-  })).toThrow(/duplicate file entry/i);
+  })).toThrow(/duplicate file entries/i);
 });
 
 test("hosted bundle restore rejects duplicate entries when parsing untrusted bundle bytes", () => {
@@ -1424,7 +1505,7 @@ test("hosted bundle restore rejects duplicate entries when parsing untrusted bun
     expectedKind: "vault",
     path: "notes/today.md",
     root: "vault",
-  })).toThrow(/duplicate file entry/i);
+  })).toThrow(/duplicate file entries/i);
 });
 
 test("hosted bundle restore rejects restore paths that traverse pre-existing symbolic links", async () => {

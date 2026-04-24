@@ -15,6 +15,7 @@ describe("resolveDeployWorkerCliPaths", () => {
 
     expect(result.configPath).toBe(path.join(deployRoot, ".deploy", "wrangler.generated.jsonc"));
     expect(result.resultPath).toBe(path.join(deployRoot, ".deploy", "deployment-result.json"));
+    expect(result.runnerBundleDir).toBe(path.join(deployRoot, ".deploy", "runner-bundle"));
     expect(result.secretsFilePath).toBe(path.join(deployRoot, ".deploy", "worker-secrets.json"));
   });
 
@@ -36,6 +37,7 @@ describe("resolveDeployWorkerCliPaths", () => {
 
     expect(result.configPath).toBe(path.join(deployRoot, ".deploy", "wrangler.generated.jsonc"));
     expect(result.resultPath).toBe(path.join(deployRoot, ".deploy", "custom-result.json"));
+    expect(result.runnerBundleDir).toBe(path.join(deployRoot, ".deploy", "runner-bundle"));
     expect(result.secretsFilePath).toBe(path.join(deployRoot, ".deploy", "custom-secrets.json"));
   });
 });

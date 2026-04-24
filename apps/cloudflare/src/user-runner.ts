@@ -57,9 +57,6 @@ import { RunnerSecretsService } from "./user-runner/runner-secrets.js";
 import { RunnerStateStore } from "./user-runner/runner-state-store.js";
 import { RunnerRuntimeAlarmScheduler } from "./user-runner/runner-runtime-alarm-scheduler.js";
 import {
-  scheduleHostedWakeRetryAlarm,
-} from "./user-runner/wake-inputs.js";
-import {
   toUserStatus,
   type DurableObjectStateLike,
   type RunnerStateRecord,
@@ -218,7 +215,7 @@ export class HostedUserRunner {
         phase: "wake.running",
         userId: null,
       });
-      await scheduleHostedWakeRetryAlarm({ runtimeAlarmScheduler: this.runtimeAlarmScheduler });
+      await this.scheduleHostedWakeRetryAlarm();
       return;
     }
 
@@ -235,14 +232,14 @@ export class HostedUserRunner {
         phase: "wake.running",
         userId: record.userId ?? null,
       });
-      await scheduleHostedWakeRetryAlarm({ runtimeAlarmScheduler: this.runtimeAlarmScheduler });
+      await this.scheduleHostedWakeRetryAlarm();
       return;
     }
 
     try {
       const drainResult = await this.withRunDrainLock(async () => this.drainHostedRunsInternal());
       if (shouldScheduleHostedWakeRetryAlarm(drainResult)) {
-        await scheduleHostedWakeRetryAlarm({ runtimeAlarmScheduler: this.runtimeAlarmScheduler });
+        await this.scheduleHostedWakeRetryAlarm();
       }
     } catch (error) {
       emitHostedExecutionStructuredLog({
@@ -253,7 +250,7 @@ export class HostedUserRunner {
         phase: "wake.running",
         userId: record.userId,
       });
-      await scheduleHostedWakeRetryAlarm({ runtimeAlarmScheduler: this.runtimeAlarmScheduler });
+      await this.scheduleHostedWakeRetryAlarm();
     }
   }
 
@@ -292,13 +289,19 @@ export class HostedUserRunner {
     try {
       const result = await this.withRunDrainLock(async () => this.drainHostedRunsInternal(input));
       if (shouldScheduleHostedWakeRetryAlarm(result)) {
-        await scheduleHostedWakeRetryAlarm({ runtimeAlarmScheduler: this.runtimeAlarmScheduler });
+        await this.scheduleHostedWakeRetryAlarm();
       }
       return toHostedRunDrainResult(result);
     } catch (error) {
-      await scheduleHostedWakeRetryAlarm({ runtimeAlarmScheduler: this.runtimeAlarmScheduler });
+      await this.scheduleHostedWakeRetryAlarm();
       throw error;
     }
+  }
+
+  private async scheduleHostedWakeRetryAlarm(): Promise<void> {
+    await this.runtimeAlarmScheduler.syncNextWake({
+      preferredWakeAt: new Date(Date.now() + this.env.retryDelayMs).toISOString(),
+    });
   }
 
   private async drainHostedRunsInternal(input: {
