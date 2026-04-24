@@ -62,7 +62,6 @@ export function buildWearableRawIngestEnvelope(
     resourceType: input.resourceType,
     resourceId: input.resourceId,
     providerEventId: input.providerEventId,
-    observedAt,
     payloadHash,
   });
 
@@ -97,7 +96,6 @@ function buildWearableRawIngestEnvelopeId(input: {
   resourceType?: string;
   resourceId?: string;
   providerEventId?: string;
-  observedAt: string;
   payloadHash: string;
 }): string {
   const digest = sha256Hex(stableStringify(input)).slice(0, 24);

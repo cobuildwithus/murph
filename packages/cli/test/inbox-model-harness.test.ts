@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { access, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { access, mkdtemp, mkdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { tmpdir } from 'node:os'
 import { test as baseTest, vi } from 'vitest'
@@ -282,7 +282,7 @@ test('materializeInboxModelBundle emits a text-only routing bundle with write-ca
   const vaultServices = createStubVaultServices()
 
   try {
-    const result = await materializeInboxModelBundle({
+    const pathOnlyResult = await materializeInboxModelBundle({
       inboxServices,
       requestId: 'req_bundle',
       captureId: 'cap_1',
@@ -290,6 +290,18 @@ test('materializeInboxModelBundle emits a text-only routing bundle with write-ca
       vaultServices,
     })
 
+    assert.equal(pathOnlyResult.bundle, null)
+
+    const result = await materializeInboxModelBundle({
+      inboxServices,
+      requestId: 'req_bundle',
+      captureId: 'cap_1',
+      vault: vaultRoot,
+      vaultServices,
+      includeSensitiveBundle: true,
+    })
+
+    assert.ok(result.bundle)
     assert.equal(result.bundle.schema, 'murph.inbox-model-bundle.v1')
     assert.equal(result.bundle.captureId, 'cap_1')
     assert.equal(result.bundle.preparedInputMode, 'text-only')
@@ -336,6 +348,14 @@ test('materializeInboxModelBundle emits a text-only routing bundle with write-ca
     }
 
     assert.equal(persistedBundle.schema, 'murph.inbox-model-bundle.v1')
+    assert.equal(
+      (await stat(path.dirname(path.join(vaultRoot, result.bundlePath)))).mode & 0o777,
+      0o700,
+    )
+    assert.equal(
+      (await stat(path.join(vaultRoot, result.bundlePath))).mode & 0o777,
+      0o600,
+    )
     assert.equal(
       persistedBundle.tools.some((tool) => tool.name === 'inbox.promote.document'),
       true,
@@ -460,8 +480,10 @@ test('materializeInboxModelBundle marks supported meal photos as multimodal-read
       captureId: 'cap_photo',
       vault: vaultRoot,
       vaultServices: createStubVaultServices(),
+      includeSensitiveBundle: true,
     })
 
+    assert.ok(result.bundle)
     assert.equal(result.bundle.preparedInputMode, 'multimodal')
     assert.equal(result.bundle.attachments[0]?.routingImage.eligible, true)
     assert.equal(result.bundle.attachments[0]?.routingImage.reason, 'supported-format')
@@ -550,8 +572,10 @@ test('materializeInboxModelBundle keeps unsupported HEIC meal photos on the text
       captureId: 'cap_heic',
       vault: vaultRoot,
       vaultServices: createStubVaultServices(),
+      includeSensitiveBundle: true,
     })
 
+    assert.ok(result.bundle)
     assert.equal(result.bundle.preparedInputMode, 'text-only')
     assert.equal(result.bundle.attachments[0]?.routingImage.eligible, false)
     assert.equal(result.bundle.attachments[0]?.routingImage.reason, 'unsupported-format')
@@ -609,8 +633,10 @@ test('materializeInboxModelBundle marks parse-failed PDFs with no text as multim
       captureId: 'cap_pdf_fallback',
       vault: vaultRoot,
       vaultServices: createStubVaultServices(),
+      includeSensitiveBundle: true,
     })
 
+    assert.ok(result.bundle)
     assert.equal(result.bundle.preparedInputMode, 'multimodal')
     assert.equal(result.bundle.attachments[0]?.routingImage.eligible, false)
     assert.match(result.bundle.routingText, /Prepared input mode: multimodal/u)
@@ -700,8 +726,10 @@ test('materializeInboxModelBundle ignores derived parser paths that escape the v
       captureId: 'cap_2',
       vault: vaultRoot,
       vaultServices: createStubVaultServices(),
+      includeSensitiveBundle: true,
     })
 
+    assert.ok(result.bundle)
     assert.doesNotMatch(
       result.bundle.routingText,
       /outside-vault text should never enter the routing bundle/u,
@@ -876,8 +904,10 @@ test('materializeInboxModelBundle ignores derived parser paths that resolve outs
       requestId: 'req_bundle_outside',
       captureId: 'cap_2',
       vault: vaultRoot,
+      includeSensitiveBundle: true,
     })
 
+    assert.ok(result.bundle)
     assert.equal(result.bundle.attachments[0]?.fragments.length, 1)
     assert.equal(
       result.bundle.attachments[0]?.fragments.some((fragment) =>
@@ -973,8 +1003,10 @@ test('materializeInboxModelBundle ignores manifest entries that point at in-vaul
       captureId: 'cap_3',
       vault: vaultRoot,
       vaultServices: createStubVaultServices(),
+      includeSensitiveBundle: true,
     })
 
+    assert.ok(result.bundle)
     assert.doesNotMatch(result.bundle.routingText, /bank secret text should never enter/u)
     assert.equal(
       result.bundle.attachments[0]?.fragments.some(
@@ -1080,8 +1112,10 @@ test('materializeInboxModelBundle ignores derived manifests from another capture
       captureId: 'cap_4',
       vault: vaultRoot,
       vaultServices: createStubVaultServices(),
+      includeSensitiveBundle: true,
     })
 
+    assert.ok(result.bundle)
     assert.equal(
       result.bundle.attachments[0]?.fragments.some((fragment) =>
         fragment.kind.startsWith('derived_'),

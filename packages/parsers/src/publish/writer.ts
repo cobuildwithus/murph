@@ -20,6 +20,8 @@ export interface PublishedParserArtifacts {
 }
 
 const DERIVED_INBOX_ROOT = normalizeRelativePath("derived/inbox");
+const PARSER_ARTIFACT_DIRECTORY_MODE = 0o700;
+const PARSER_ARTIFACT_FILE_MODE = 0o600;
 
 export async function writeParserArtifacts(input: {
   attempt: number;
@@ -43,6 +45,7 @@ export async function writeParserArtifacts(input: {
     ),
   );
   const absoluteAttemptDirectoryPath = await resetVaultDirectory(input.vaultRoot, attemptDirectoryPath);
+  await fs.chmod(absoluteAttemptDirectoryPath, PARSER_ARTIFACT_DIRECTORY_MODE);
 
   const plainTextPath = normalizePublishedParserPath(path.posix.join(attemptDirectoryPath, "plain.txt"));
   const markdownPath = normalizePublishedParserPath(path.posix.join(attemptDirectoryPath, "normalized.md"));
@@ -129,5 +132,9 @@ async function writeValidatedArtifactFile(
   content: string,
 ): Promise<void> {
   await assertVaultPathOnDisk(vaultRoot, absolutePath);
-  await fs.writeFile(absolutePath, content, "utf8");
+  await fs.writeFile(absolutePath, content, {
+    encoding: "utf8",
+    mode: PARSER_ARTIFACT_FILE_MODE,
+  });
+  await fs.chmod(absolutePath, PARSER_ARTIFACT_FILE_MODE);
 }

@@ -102,6 +102,13 @@ export interface UpsertPublicDeviceSyncConnectionInput {
   nextReconcileAt?: string | null;
 }
 
+export interface MarkPublicDeviceSyncConnectionSetupFailedInput {
+  accountId: string;
+  now: string;
+  code: string;
+  message: string;
+}
+
 export interface DeviceSyncWebhookTraceRecord {
   provider: string;
   traceId: string;
@@ -141,6 +148,9 @@ export interface DeviceSyncPublicIngressStore {
     expectedProvider?: string,
   ): ConsumeOAuthStateResult | Promise<ConsumeOAuthStateResult>;
   upsertConnection(input: UpsertPublicDeviceSyncConnectionInput): PublicDeviceSyncAccount | Promise<PublicDeviceSyncAccount>;
+  markConnectionSetupFailed(
+    input: MarkPublicDeviceSyncConnectionSetupFailedInput,
+  ): PublicDeviceSyncAccount | null | Promise<PublicDeviceSyncAccount | null>;
   getConnectionByExternalAccount(
     provider: string,
     externalAccountId: string,

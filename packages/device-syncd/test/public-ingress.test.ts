@@ -37,6 +37,7 @@ class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
   >();
   lastRecordedWebhookTrace: DeviceSyncWebhookTraceRecord | null = null;
   completedWebhookTraceCalls = 0;
+  markConnectionSetupFailedError: Error | null = null;
   private accountCounter = 0;
 
   deleteExpiredOAuthStates(now: string): number {
@@ -114,6 +115,35 @@ class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
 
     this.accounts.set(id, record);
     this.accountsByProviderExternal.set(key, id);
+    return record;
+  }
+
+  markConnectionSetupFailed(input: {
+    accountId: string;
+    code: string;
+    message: string;
+    now: string;
+  }): PublicDeviceSyncAccount | null {
+    if (this.markConnectionSetupFailedError) {
+      throw this.markConnectionSetupFailedError;
+    }
+
+    const existing = this.accounts.get(input.accountId) ?? null;
+    if (!existing) {
+      return null;
+    }
+
+    const record: PublicDeviceSyncAccount = {
+      ...existing,
+      accessTokenExpiresAt: null,
+      lastErrorCode: input.code,
+      lastErrorMessage: input.message,
+      lastSyncErrorAt: input.now,
+      nextReconcileAt: null,
+      status: "reauthorization_required",
+      updatedAt: input.now,
+    };
+    this.accounts.set(input.accountId, record);
     return record;
   }
 
@@ -1419,7 +1449,7 @@ test("public ingress best-effort revokes pending provider access when OAuth pers
   assert.equal(store.getConnectionByExternalAccount("demo", "demo-abc"), null);
 });
 
-test("public ingress does not revoke provider access after the connection has already been stored", async () => {
+test("public ingress revokes and marks setup failure after post-persistence OAuth hook failures", async () => {
   const store = new InMemoryPublicIngressStore();
   const revokeCalls: string[] = [];
   const hookError = new Error("post-persist hook failure");
@@ -1452,9 +1482,69 @@ test("public ingress does not revoke provider access after the connection has al
     (error: unknown) => error === hookError,
   );
 
-  assert.deepEqual(revokeCalls, []);
+  assert.deepEqual(revokeCalls, ["demo-persisted"]);
   assert.equal(store.hasOAuthState(begin.state), false);
-  assert.equal(store.getConnectionByExternalAccount("demo", "demo-persisted")?.id, "acct_01");
+  const storedAccount = store.getConnectionByExternalAccount("demo", "demo-persisted");
+  assert.ok(storedAccount);
+  assert.equal(storedAccount.id, "acct_01");
+  assert.equal(storedAccount.status, "reauthorization_required");
+  assert.equal(storedAccount.accessTokenExpiresAt, null);
+  assert.equal(storedAccount.lastErrorCode, "OAUTH_SETUP_FAILED");
+  assert.equal(storedAccount.lastErrorMessage, "post-persist hook failure");
+  assert.ok(storedAccount.lastSyncErrorAt);
+  assert.equal(storedAccount.nextReconcileAt, null);
+});
+
+test("public ingress surfaces persisted OAuth cleanup failures after post-persistence hook failures", async () => {
+  const store = new InMemoryPublicIngressStore();
+  const revokeCalls: string[] = [];
+  const hookError = new Error("post-persist hook failure");
+  store.markConnectionSetupFailedError = new Error("setup failure mark failed");
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([
+      createFakeProvider({
+        async revokeAccess(account) {
+          revokeCalls.push(account.externalAccountId);
+        },
+      }),
+    ]),
+    store,
+    hooks: {
+      onConnectionEstablished() {
+        throw hookError;
+      },
+    },
+  });
+
+  const begin = await ingress.startConnection({ provider: "demo" });
+
+  await assert.rejects(
+    () =>
+      ingress.handleOAuthCallback({
+        provider: "demo",
+        state: begin.state,
+        code: "persisted",
+      }),
+    (error: unknown) => {
+      assert.ok(error instanceof DeviceSyncError);
+      assert.equal(error.code, "OAUTH_SETUP_CLEANUP_FAILED");
+      assert.equal(
+        error.message,
+        "OAuth connection setup failed after persistence, and stored-token cleanup did not complete.",
+      );
+      assert.deepEqual(error.details, {
+        accountId: "acct_01",
+        setupFailureCode: "OAUTH_SETUP_FAILED",
+        provider: "demo",
+        returnTo: null,
+      });
+      return true;
+    },
+  );
+
+  assert.deepEqual(revokeCalls, ["demo-persisted"]);
+  assert.equal(store.hasOAuthState(begin.state), false);
 });
 
 test("public ingress does not burn valid oauth state on provider mismatch", async () => {

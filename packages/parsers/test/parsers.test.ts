@@ -1174,6 +1174,55 @@ test("parseAttachment rejects unsafe or malformed attachment IDs before using sc
   assert.deepEqual(await fs.readdir(scratchRoot), []);
 });
 
+test("parseAttachment rejects oversized provider output before returning parser artifacts", async () => {
+  const scratchRoot = await makeTempDirectory("murph-parser-scratch-output-limits");
+  const sourceRoot = await makeTempDirectory("murph-parser-scratch-output-limits-source");
+  const inputPath = await writeExternalFile(sourceRoot, "scan.png", "image-bytes-placeholder");
+  const registry = createParserRegistry([
+    {
+      id: "fake-image",
+      locality: "local",
+      openness: "open_source",
+      runtime: "node",
+      priority: 100,
+      async discover() {
+        return {
+          available: true,
+          reason: "available for parser output limits test",
+        };
+      },
+      supports() {
+        return true;
+      },
+      async run() {
+        return {
+          text: "x".repeat(500_001),
+        };
+      },
+    },
+  ]);
+
+  await assert.rejects(
+    () =>
+      parseAttachment({
+        artifact: {
+          captureId: "cap_output_limits",
+          attachmentId: "att_output_limits",
+          kind: "image",
+          fileName: "scan.png",
+          mime: "image/png",
+          storedPath: "raw/inbox/example/scan.png",
+          absolutePath: inputPath,
+        },
+        registry,
+        scratchRoot,
+      }),
+    /Parser text exceeds/u,
+  );
+
+  assert.deepEqual(await fs.readdir(scratchRoot), []);
+});
+
 test("writeParserArtifacts removes stale optional files on rerun", async () => {
   const vaultRoot = await makeTempDirectory("murph-parser-publish-rerun");
   await initializeVault({
@@ -1210,6 +1259,14 @@ test("writeParserArtifacts removes stale optional files on rerun", async () => {
   });
   assert.equal(first.manifestPath, "derived/inbox/cap_publish_rerun/attachments/att_publish_rerun/attempts/0001/manifest.json");
   assert.equal(first.tablesPath, "derived/inbox/cap_publish_rerun/attachments/att_publish_rerun/attempts/0001/tables.json");
+  assert.equal(
+    (await fs.stat(path.join(vaultRoot, first.attemptDirectoryPath))).mode & 0o777,
+    0o700,
+  );
+  assert.equal(
+    (await fs.stat(path.join(vaultRoot, first.plainTextPath))).mode & 0o777,
+    0o600,
+  );
 
   const second = await writeParserArtifacts({
     attempt: 2,

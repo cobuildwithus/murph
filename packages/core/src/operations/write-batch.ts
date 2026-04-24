@@ -43,6 +43,8 @@ type WriteOperationActionState = "staged" | "applied" | "reused" | "rolled_back"
 const PROTECTED_CANONICAL_ROOT_FILES = new Set<string>([VAULT_LAYOUT.metadata, VAULT_LAYOUT.coreDocument]);
 const CANONICAL_WRITE_GUARD_RECEIPT_DIRECTORY_ENV = "MURPH_CANONICAL_WRITE_GUARD_RECEIPT_DIR";
 const WRITE_OPERATION_GUARD_RECEIPT_SCHEMA_VERSION = "murph.write-operation-guard-receipt.v1";
+const GUARD_RECEIPT_DIRECTORY_MODE = 0o700;
+const GUARD_RECEIPT_FILE_MODE = 0o600;
 
 export interface CommittedPayloadReceipt {
   sha256: string;
@@ -66,7 +68,6 @@ type WriteOperationGuardReceiptAction =
       kind: "jsonl_append" | "text_write";
       targetRelativePath: string;
       committedPayloadReceipt: CommittedPayloadReceipt;
-      payloadRelativePath: string;
     };
 
 interface CreateWriteBatchInput {
@@ -330,6 +331,19 @@ function resolveGuardReceiptDirectoryFromEnv(env: NodeJS.ProcessEnv = process.en
     ? env[CANONICAL_WRITE_GUARD_RECEIPT_DIRECTORY_ENV]?.trim()
     : "";
   return candidate ? path.resolve(candidate) : null;
+}
+
+async function ensurePrivateGuardReceiptDirectory(receiptRoot: string): Promise<void> {
+  await fs.mkdir(receiptRoot, { recursive: true, mode: GUARD_RECEIPT_DIRECTORY_MODE });
+  await fs.chmod(receiptRoot, GUARD_RECEIPT_DIRECTORY_MODE);
+}
+
+async function writePrivateGuardReceiptFile(absolutePath: string, content: string): Promise<void> {
+  await fs.writeFile(absolutePath, content, {
+    encoding: "utf8",
+    mode: GUARD_RECEIPT_FILE_MODE,
+  });
+  await fs.chmod(absolutePath, GUARD_RECEIPT_FILE_MODE);
 }
 
 function metadataRelativePath(operationId: string): string {
@@ -1160,9 +1174,9 @@ export class WriteBatch {
     }
 
     const actions: WriteOperationGuardReceiptAction[] = [];
-    await ensureDirectory(receiptRoot);
+    await ensurePrivateGuardReceiptDirectory(receiptRoot);
 
-    for (const [index, action] of this.record.actions.entries()) {
+    for (const action of this.record.actions) {
       if (!(await isProtectedCanonicalPathForVault(this.vaultRoot, action.targetRelativePath))) {
         continue;
       }
@@ -1184,19 +1198,10 @@ export class WriteBatch {
         continue;
       }
 
-      const payloadDirectory = path.join(receiptRoot, this.operationId);
-      const payloadFileName = `${String(index).padStart(4, "0")}.${action.kind === "text_write" ? "txt" : "jsonl"}`;
-      const payloadAbsolutePath = path.join(payloadDirectory, payloadFileName);
-      const payloadRelativePath = path.posix.join(this.operationId, payloadFileName);
-      const stageAbsolutePath = resolveVaultPath(this.vaultRoot, action.stageRelativePath).absolutePath;
-      await ensureDirectory(payloadDirectory);
-      await fs.copyFile(stageAbsolutePath, payloadAbsolutePath);
-
       actions.push({
         kind: action.kind,
         targetRelativePath: action.targetRelativePath,
         committedPayloadReceipt: payloadReceipt,
-        payloadRelativePath,
       });
     }
 
@@ -1211,10 +1216,9 @@ export class WriteBatch {
       updatedAt: this.record.updatedAt,
       actions,
     };
-    await fs.writeFile(
+    await writePrivateGuardReceiptFile(
       path.join(receiptRoot, `${this.operationId}.json`),
       `${JSON.stringify(receipt, null, 2)}\n`,
-      "utf8",
     );
   }
 

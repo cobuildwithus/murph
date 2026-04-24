@@ -1564,6 +1564,7 @@ describe('inbox model harness', () => {
     expect(bundle.routingText).toContain('Prepared input mode: multimodal')
     expect(bundle.routingText).toContain('[truncated ')
     expect(materialized.bundlePath).toBe('derived/inbox/capture-1/assistant/bundle.json')
+    expect(materialized.bundle).toBeNull()
     expect(
       JSON.parse(
         await readFile(
@@ -1571,7 +1572,7 @@ describe('inbox model harness', () => {
           'utf8',
         ),
       ),
-    ).toEqual(materialized.bundle)
+    ).toEqual(bundle)
   })
 
   it('retries multimodal routing as text-only when the model rejects rich inputs', async () => {

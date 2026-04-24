@@ -95,10 +95,12 @@ export async function prepareDeviceProviderSnapshotImport(
     ? adapter.parseSnapshot(request.snapshot)
     : request.snapshot;
   const normalized = await adapter.normalizeSnapshot(snapshot);
+  const rawObservedAt = resolveStableRawEnvelopeObservedAt(request, normalized);
   const basePayload = stripUndefined({
     vaultRoot: request.vaultRoot,
     ...normalized,
     accountId: normalized.accountId ?? request.accountId,
+    importedAt: rawObservedAt,
   });
   const rawEnvelope = buildWearableRawIngestEnvelope({
     provider: basePayload.provider,
@@ -112,7 +114,7 @@ export async function prepareDeviceProviderSnapshotImport(
     resourceId: request.resourceId,
     providerEventId: request.providerEventId,
     eventType: request.eventType,
-    observedAt: request.observedAt ?? basePayload.importedAt,
+    observedAt: rawObservedAt,
     occurredAt: request.occurredAt,
     windowStart: request.windowStart,
     windowEnd: request.windowEnd,
@@ -166,6 +168,46 @@ function attachSingleLegacyRawArtifactRole(payload: DeviceBatchImportPayload): D
       ? event
       : { ...event, rawArtifactRoles: [rawArtifact.role] }),
   };
+}
+
+function resolveStableRawEnvelopeObservedAt(
+  request: DeviceProviderSnapshotImportInput,
+  payload: DeviceBatchImportPayload,
+): string {
+  return firstValidTimestamp(
+    request.observedAt,
+    request.occurredAt,
+    request.windowEnd,
+    request.windowStart,
+    earliestPayloadTimestamp(payload),
+    payload.importedAt,
+  ) ?? new Date(0).toISOString();
+}
+
+function earliestPayloadTimestamp(payload: DeviceBatchImportPayload): string | undefined {
+  return firstValidTimestamp(
+    ...(payload.events ?? []).flatMap((event) => [
+      event.recordedAt,
+      event.occurredAt,
+    ]),
+    ...(payload.samples ?? []).flatMap((sample) => [
+      sample.recordedAt,
+      sample.sample.recordedAt,
+      sample.sample.occurredAt,
+      sample.sample.startAt,
+      sample.sample.endAt,
+    ]),
+  );
+}
+
+function firstValidTimestamp(...candidates: Array<string | undefined>): string | undefined {
+  const validCandidates = candidates
+    .filter((candidate): candidate is string =>
+      typeof candidate === "string" && Number.isFinite(Date.parse(candidate))
+    )
+    .sort((left, right) => Date.parse(left) - Date.parse(right));
+
+  return validCandidates[0];
 }
 
 function buildRawEnvelopeArtifact(

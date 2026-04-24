@@ -3,6 +3,7 @@ import {
   deviceSyncError,
   sanitizeStoredDeviceSyncMetadata,
   toRedactedPublicDeviceSyncAccount,
+  type MarkPublicDeviceSyncConnectionSetupFailedInput,
   type PublicDeviceSyncAccount,
   type UpsertPublicDeviceSyncConnectionInput,
 } from "@murphai/device-syncd/public-ingress";
@@ -221,6 +222,44 @@ export class PrismaHostedConnectionStore {
       },
     });
 
+  }
+
+  async markConnectionSetupFailed(
+    input: MarkPublicDeviceSyncConnectionSetupFailedInput,
+  ): Promise<PublicDeviceSyncAccount | null> {
+    const record = await this.prisma.$transaction(async (tx) => {
+      const existing = await tx.deviceConnection.findUnique({
+        where: {
+          id: input.accountId,
+        },
+        ...hostedConnectionRecordArgs,
+      });
+
+      if (!existing) {
+        return null;
+      }
+
+      return tx.deviceConnection.update({
+        where: {
+          id: input.accountId,
+        },
+        data: {
+          accessTokenEncrypted: null,
+          accessTokenExpiresAt: null,
+          keyVersion: null,
+          lastErrorCode: normalizeNullableString(input.code) ?? "OAUTH_SETUP_FAILED",
+          lastErrorMessage: omitHostedSqlErrorText(input.message),
+          lastSyncErrorAt: new Date(input.now),
+          nextReconcileAt: null,
+          refreshTokenEncrypted: null,
+          status: "reauthorization_required",
+          tokenVersion: null,
+        },
+        ...hostedConnectionRecordArgs,
+      });
+    });
+
+    return record ? this.buildDurableConnectionRecord(record) : null;
   }
 
   async syncDurableConnectionState(

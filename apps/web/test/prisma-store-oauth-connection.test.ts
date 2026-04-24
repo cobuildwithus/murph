@@ -451,6 +451,70 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     expect(tx.deviceConnectionSecret.upsert).not.toHaveBeenCalled();
   });
 
+  it("clears hosted OAuth tokens when post-connect setup fails", async () => {
+    let stored = createConnection({
+      accessTokenEncrypted: "enc:access-token",
+      accessTokenExpiresAt: new Date("2026-03-26T04:00:00.000Z"),
+      keyVersion: "v1",
+      nextReconcileAt: new Date("2026-03-26T05:00:00.000Z"),
+      refreshTokenEncrypted: "enc:refresh-token",
+      status: "active",
+      tokenVersion: 3,
+    });
+
+    const tx = {
+      deviceConnection: {
+        findUnique: vi.fn(async () => cloneConnection(stored)),
+        update: vi.fn(async ({ data }: { data: Partial<MutableConnectionRecord> }) => {
+          stored = {
+            ...stored,
+            ...data,
+            updatedAt: new Date("2026-03-26T06:00:00.000Z"),
+          };
+          return cloneConnection(stored);
+        }),
+      },
+    };
+
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      codec: TEST_CODEC,
+      prisma: {
+        $transaction: async <TResult>(callback: (transaction: typeof tx) => Promise<TResult>) => callback(tx),
+      } as never,
+      providerAccountBlindIndexKey: BLIND_INDEX_KEY,
+    });
+
+    const result = await store.markConnectionSetupFailed({
+      accountId: "dsc_123",
+      now: "2026-03-26T06:00:00.000Z",
+      code: "OAUTH_SETUP_FAILED",
+      message: "post-connect setup failed",
+    });
+
+    expect(tx.deviceConnection.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        accessTokenEncrypted: null,
+        accessTokenExpiresAt: null,
+        keyVersion: null,
+        lastErrorCode: "OAUTH_SETUP_FAILED",
+        lastErrorMessage: null,
+        nextReconcileAt: null,
+        refreshTokenEncrypted: null,
+        status: "reauthorization_required",
+        tokenVersion: null,
+      }),
+    }));
+    expect(result).toEqual(expect.objectContaining({
+      accessTokenExpiresAt: null,
+      lastErrorCode: "OAUTH_SETUP_FAILED",
+      lastErrorMessage: null,
+      nextReconcileAt: null,
+      status: "reauthorization_required",
+    }));
+    expect(stored.accessTokenEncrypted).toBeNull();
+    expect(stored.refreshTokenEncrypted).toBeNull();
+  });
+
   it("serves ordinary hosted connection lists from durable Prisma metadata without live runtime reads", async () => {
     const connection = createConnection({
       id: "dsc_123",

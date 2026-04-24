@@ -250,6 +250,29 @@ describe("vault sync import packs", () => {
     );
   });
 
+  it("rejects an import manifest with non-integer byte counts", async () => {
+    const source = await createTempVault("Local source");
+
+    const pack = await buildVaultSyncImportPack({ vaultRoot: source });
+    const restored = await restoreVaultSyncImportPack({ bundle: pack.bundle });
+    tempRoots.push(restored.workspaceRoot);
+
+    await rewriteImportManifest(restored.metaRoot, (manifestBase) => {
+      const files = Array.isArray(manifestBase.files) ? manifestBase.files.slice() : [];
+      const firstFile = files[0];
+      expect(firstFile).toBeTruthy();
+      files[0] = {
+        ...(firstFile as Record<string, unknown>),
+        bytes: 1.5,
+      };
+      manifestBase.files = files;
+    });
+
+    await expect(readVaultSyncImportManifest(restored.metaRoot)).rejects.toSatisfy((error: unknown) =>
+      isVaultError(error) && error.code === "VAULT_SYNC_IMPORT_MANIFEST_INVALID"
+    );
+  });
+
   it("rejects an import manifest with duplicate canonical file entries", async () => {
     const source = await createTempVault("Local source");
     const eventLedger = `${VAULT_LAYOUT.eventLedgerDirectory}/2026/2026-04.jsonl`;
@@ -361,7 +384,7 @@ describe("vault sync merge", () => {
       eventLedger,
       `${JSON.stringify(buildEncounterEvent({
         id: "evt_01JQ7B2RNEF0JYQK0R40MVM75J",
-        title: "Tampered event payload",
+        title: "Tampered file event",
       }))}\n`,
     );
 
@@ -373,6 +396,54 @@ describe("vault sync merge", () => {
     })).rejects.toSatisfy((error: unknown) => (
       isVaultError(error) &&
       error.code === "VAULT_SYNC_IMPORT_FILE_HASH_MISMATCH" &&
+      error.details.relativePath === eventLedger
+    ));
+
+    await expect(readFile(path.join(hosted, eventLedger), "utf8")).rejects.toThrow();
+    await expect(validateVault({ vaultRoot: hosted })).resolves.toMatchObject({ valid: true });
+  });
+
+  it("fails closed when a restored import file size does not match the manifest", async () => {
+    const hosted = await createTempVault("Hosted vault");
+    const local = await createTempVault("Local vault");
+    const eventLedger = `${VAULT_LAYOUT.eventLedgerDirectory}/2026/2026-04.jsonl`;
+
+    await appendJsonlRecord({
+      vaultRoot: local,
+      relativePath: eventLedger,
+      record: buildEncounterEvent({
+        id: "evt_01JQ7B2RNEF0JYQK0R40MVSZ01",
+        title: "Size mismatch event",
+      }),
+    });
+
+    const pack = await buildVaultSyncImportPack({ vaultRoot: local });
+    const restored = await restoreVaultSyncImportPack({ bundle: pack.bundle });
+    tempRoots.push(restored.workspaceRoot);
+    await rewriteImportManifest(restored.metaRoot, (manifestBase) => {
+      const files = Array.isArray(manifestBase.files) ? manifestBase.files.slice() : [];
+      const targetIndex = files.findIndex((file) =>
+        typeof file === "object"
+        && file !== null
+        && (file as { path?: unknown }).path === eventLedger
+      );
+      expect(targetIndex).toBeGreaterThanOrEqual(0);
+      const targetFile = files[targetIndex] as Record<string, unknown>;
+      files[targetIndex] = {
+        ...targetFile,
+        bytes: Number(targetFile.bytes) + 1,
+      };
+      manifestBase.files = files;
+    });
+
+    await expect(mergeVaultSyncImportIntoVault({
+      importMetaRoot: restored.metaRoot,
+      importVaultRoot: restored.vaultRoot,
+      sessionId: "vsi_size_mismatch",
+      targetVaultRoot: hosted,
+    })).rejects.toSatisfy((error: unknown) => (
+      isVaultError(error) &&
+      error.code === "VAULT_SYNC_IMPORT_FILE_SIZE_MISMATCH" &&
       error.details.relativePath === eventLedger
     ));
 
@@ -599,6 +670,29 @@ describe("vault sync merge", () => {
     })).rejects.toSatisfy((error: unknown) =>
       isVaultError(error) && error.code === "VAULT_SYNC_INVALID_JSONL"
     );
+  });
+
+  it("rejects JSONL import lines that exceed the streaming validation limit", async () => {
+    const hosted = await createTempVault("Hosted vault");
+    const local = await createTempVault("Local vault");
+    const eventLedger = `${VAULT_LAYOUT.eventLedgerDirectory}/2026/2026-04.jsonl`;
+    await writeVaultFile(local, eventLedger, `${" ".repeat(1024 * 1024 + 1)}\n`);
+
+    const pack = await buildVaultSyncImportPack({ vaultRoot: local });
+    const restored = await restoreVaultSyncImportPack({ bundle: pack.bundle });
+    tempRoots.push(restored.workspaceRoot);
+
+    await expect(mergeVaultSyncImportIntoVault({
+      importMetaRoot: restored.metaRoot,
+      importVaultRoot: restored.vaultRoot,
+      sessionId: "vsi_oversized_jsonl_line",
+      targetVaultRoot: hosted,
+    })).rejects.toSatisfy((error: unknown) =>
+      isVaultError(error) && error.code === "VAULT_SYNC_INVALID_JSONL"
+    );
+
+    await expect(readFile(path.join(hosted, eventLedger), "utf8")).rejects.toThrow();
+    await expect(validateVault({ vaultRoot: hosted })).resolves.toMatchObject({ valid: true });
   });
 
   it("rejects contract-invalid imported JSONL before mutating the hosted vault", async () => {
