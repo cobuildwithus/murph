@@ -19,11 +19,14 @@ const VALID_ACTIONS = new Set(["send", "harvest"]);
 function usage() {
   return `Usage:
   pnpm research:run --workspace <output-packages/research/...> --seam <label> --action send --lane <lane>
-  pnpm research:run --workspace <output-packages/research/...> --seam <label> --action harvest [--lane <lane>]
+  pnpm research:run --workspace <output-packages/research/...> --seam <label> --action harvest [--lane <lane> --explore-lane]
 
 Examples:
   pnpm research:run --workspace output-packages/research/example --seam 01-charter --action send --lane hercules
   pnpm research:run --workspace output-packages/research/example --seam 01-charter --action harvest
+
+Options:
+  --explore-lane  Allow harvest to intentionally probe a lane that differs from the recorded send lane.
 `;
 }
 
@@ -38,6 +41,7 @@ function takeOption(argv, index, optionName) {
 function parseArgs(argv) {
   const args = {
     action: "",
+    exploreLane: false,
     lane: "",
     seam: "",
     workspace: "",
@@ -91,6 +95,10 @@ function parseArgs(argv) {
     }
     if (token.startsWith("--profile=")) {
       args.lane = token.slice("--profile=".length);
+      continue;
+    }
+    if (token === "--explore-lane") {
+      args.exploreLane = true;
       continue;
     }
     if (!args.action && VALID_ACTIONS.has(token)) {
@@ -201,6 +209,31 @@ function readJsonFile(filePath) {
   return parsed;
 }
 
+function readStateString(state, key) {
+  const value = state[key];
+  return typeof value === "string" ? value : "";
+}
+
+function readActionStateString(state, action, key) {
+  const actionState = state[action];
+  if (!actionState || typeof actionState !== "object" || Array.isArray(actionState)) {
+    return "";
+  }
+  const value = actionState[key];
+  return typeof value === "string" ? value : "";
+}
+
+function readRecordedSendLane(state) {
+  return readActionStateString(state, "send", "lane") || readStateString(state, "lane");
+}
+
+function readRecordedSendEndpoint(state) {
+  return (
+    readActionStateString(state, "send", "browserEndpoint") ||
+    readStateString(state, "browserEndpoint")
+  );
+}
+
 function statePathFor(workspaceDir, seam) {
   return path.join(workspaceDir, "state", "seams", `${seam}.json`);
 }
@@ -261,18 +294,23 @@ function writeRunState({
 }) {
   const now = new Date().toISOString();
   const state = readJsonFile(statePath);
+  const recordedSendLane = readRecordedSendLane(state);
+  const recordedSendEndpoint = readRecordedSendEndpoint(state);
   const actionState = state[action] && typeof state[action] === "object"
     ? state[action]
     : {};
   const baseActionState = phase === "started" ? {} : actionState;
+  const topLevelLane = action === "send" || !recordedSendLane ? lane : recordedSendLane;
+  const topLevelEndpoint =
+    action === "send" || !recordedSendEndpoint ? browserEndpoint : recordedSendEndpoint;
 
   const nextState = {
     ...state,
     schemaVersion: STATE_SCHEMA_VERSION,
     seam,
     workspace: toPosixRelative(workspaceDir),
-    lane,
-    browserEndpoint,
+    lane: topLevelLane,
+    browserEndpoint: topLevelEndpoint,
     updatedAt: now,
   };
 
@@ -334,6 +372,68 @@ function runLaneCommand(profileHelper, lane, commandPath) {
   return result.status ?? 1;
 }
 
+function laneMismatchMessage({ existingState, requestedLane, recordedLane, seam }) {
+  const recordedEndpoint = readRecordedSendEndpoint(existingState);
+  const recordedSuffix = recordedEndpoint ? ` (${recordedEndpoint})` : "";
+  return [
+    `Refusing to harvest ${seam} from lane ${requestedLane}: this seam was sent on ${recordedLane}${recordedSuffix}.`,
+    'Wrong browser profiles often surface as "Unable to load conversation" or wake timeouts.',
+    `Run without --lane to use the recorded send lane, or pass --explore-lane with --lane ${requestedLane} to intentionally probe that profile.`,
+  ].join("\n");
+}
+
+function resolveLaneForRun({ action, args, existingState, seam }) {
+  if (action === "send") {
+    if (!args.lane) {
+      throw new Error("--lane is required for send so the seam is bound to a named browser lane.");
+    }
+    return {
+      exploratoryMismatch: false,
+      lane: normalizeLane(String(args.lane)),
+    };
+  }
+
+  const recordedLane = readRecordedSendLane(existingState);
+  if (!args.lane) {
+    if (!recordedLane) {
+      throw new Error(
+        `No lane recorded for ${seam}. Re-run with --lane <lane> once, then future harvests can omit it.`,
+      );
+    }
+    return {
+      exploratoryMismatch: false,
+      lane: normalizeLane(recordedLane),
+    };
+  }
+
+  const lane = normalizeLane(String(args.lane));
+  if (recordedLane) {
+    const normalizedRecordedLane = normalizeLane(recordedLane);
+    if (lane !== normalizedRecordedLane && !args.exploreLane) {
+      throw new Error(
+        laneMismatchMessage({
+          existingState,
+          requestedLane: lane,
+          recordedLane: normalizedRecordedLane,
+          seam,
+        }),
+      );
+    }
+    return {
+      exploratoryMismatch: lane !== normalizedRecordedLane,
+      lane,
+    };
+  }
+
+  if (args.exploreLane) {
+    console.warn("--explore-lane was ignored because this seam has no recorded send lane.");
+  }
+  return {
+    exploratoryMismatch: false,
+    lane,
+  };
+}
+
 function main(argv) {
   const args = parseArgs(argv);
   if (args.help) {
@@ -347,19 +447,19 @@ function main(argv) {
   const commandPath = resolveCommandPath(workspaceDir, seam, action);
   const statePath = statePathFor(workspaceDir, seam);
   const existingState = readJsonFile(statePath);
-  const laneArg = args.lane || (action === "harvest" ? existingState.lane ?? "" : "");
-
-  if (!laneArg) {
-    throw new Error(
-      action === "send"
-        ? "--lane is required for send so the seam is bound to a named browser lane."
-        : `No lane recorded for ${seam}. Re-run with --lane <lane> once, then future harvests can omit it.`,
-    );
-  }
-
-  const lane = normalizeLane(String(laneArg));
+  const laneSelection = resolveLaneForRun({ action, args, existingState, seam });
+  const lane = laneSelection.lane;
   const profileHelper = resolveProfileHelper();
   const browserEndpoint = resolveBrowserEndpoint(profileHelper, lane);
+
+  if (laneSelection.exploratoryMismatch) {
+    const recordedEndpoint = readRecordedSendEndpoint(existingState);
+    const recordedLane = normalizeLane(readRecordedSendLane(existingState));
+    const recordedSuffix = recordedEndpoint ? ` (${recordedEndpoint})` : "";
+    console.warn(
+      `Exploratory harvest override for ${seam}: sent on ${recordedLane}${recordedSuffix}, trying ${lane} (${browserEndpoint}).`,
+    );
+  }
 
   console.log(
     `Running research ${action} for ${seam} via lane ${lane} (${browserEndpoint}).`,
