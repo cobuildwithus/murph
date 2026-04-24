@@ -138,6 +138,9 @@ describe("hosted deploy automation helpers", () => {
       }>;
       vars: Record<string, string>;
       secrets?: { required?: string[] };
+      version_metadata?: {
+        binding: string;
+      };
     };
 
     expect(config.name).toBe("hosted-worker");
@@ -149,8 +152,8 @@ describe("hosted deploy automation helpers", () => {
         image_build_context: "..",
         instance_type: "standard-1",
         max_instances: 250,
-        rollout_active_grace_period: 300,
-        rollout_step_percentage: [10, 25, 50, 100],
+        rollout_active_grace_period: 0,
+        rollout_step_percentage: [100],
       },
     ]);
     expect(config.durable_objects.bindings).toEqual([
@@ -175,6 +178,7 @@ describe("hosted deploy automation helpers", () => {
     ]);
     expect(config.compatibility_flags).toEqual(["nodejs_compat"]);
     expect(config.placement).toEqual({ mode: "smart" });
+    expect(config.version_metadata).toEqual({ binding: "CF_VERSION_METADATA" });
     expect(config.observability).toEqual({
       enabled: true,
       head_sampling_rate: 1,
@@ -253,6 +257,9 @@ describe("hosted deploy automation helpers", () => {
       placement: {
         mode: string;
       };
+      version_metadata?: {
+        binding: string;
+      };
     };
     const checkedInConfig = parseJsoncObject(
       await readFile(new URL("../wrangler.jsonc", import.meta.url), "utf8"),
@@ -279,6 +286,9 @@ describe("hosted deploy automation helpers", () => {
       placement: {
         mode: string;
       };
+      version_metadata?: {
+        binding: string;
+      };
     };
 
     expect(checkedInConfig.containers).toHaveLength(1);
@@ -292,6 +302,7 @@ describe("hosted deploy automation helpers", () => {
     expect(checkedInConfig.durable_objects.bindings).toEqual(generatedConfig.durable_objects.bindings);
     expect(checkedInConfig.migrations).toEqual(generatedConfig.migrations);
     expect(checkedInConfig.placement).toEqual(generatedConfig.placement);
+    expect(checkedInConfig.version_metadata).toEqual(generatedConfig.version_metadata);
   });
 
   it("keeps the hosted deploy workflow env surface, fallback defaults, and summary aligned", async () => {
@@ -311,6 +322,7 @@ describe("hosted deploy automation helpers", () => {
       "CF_CONTAINER_INSTANCE_TYPE: ${{ vars.CF_CONTAINER_INSTANCE_TYPE || '{\"vcpu\":1,\"memory_mib\":3072,\"disk_mb\":6000}' }}",
       "CF_CONTAINER_MAX_INSTANCES: ${{ vars.CF_CONTAINER_MAX_INSTANCES || '1000' }}",
       "HOSTED_EXECUTION_RUNNER_ENV_PROFILES: ${{ vars.HOSTED_EXECUTION_RUNNER_ENV_PROFILES || 'hosted-email,linq,mapbox,telegram' }}",
+      'HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER: "true"',
       "MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY: 4",
       "MURPH_RUNNER_BUNDLE_PACK_CONCURRENCY: 4",
       "uses: docker/setup-buildx-action@v4",

@@ -209,6 +209,14 @@ function createStorage() {
           async invoke() {
             throw new Error("Runner container should not be invoked by the seeded backpressure tests.");
           },
+          async smokeHealth() {
+            return {
+              ok: true,
+              runnerBundle: null,
+              service: "cloudflare-hosted-runner-node",
+              status: 200,
+            };
+          },
         };
       },
     },

@@ -52,6 +52,7 @@ export interface HostedWorkerDeploymentDependencies {
     includeSecrets: boolean;
     runnerBundleDir: string;
     secretsFilePath: string;
+    source?: EnvSource;
   }): Promise<void>;
   writeFile(
     target: string,
@@ -92,6 +93,7 @@ export async function runHostedWorkerDeployment(input: {
     includeSecrets: deploymentSettings.includeSecrets,
     runnerBundleDir: input.runnerBundleDir,
     secretsFilePath: input.secretsFilePath,
+    source: env,
   });
   await input.dependencies.mkdir(path.dirname(input.resultPath), { recursive: true });
 
@@ -138,7 +140,7 @@ async function runDirectDeployment(input: {
     input.configPath,
   );
   const finalDeploymentVersions = mapDeploymentVersions(finalDeployment);
-  const smokeVersionId = resolveSmokeVersionId(finalDeploymentVersions);
+  const smokeVersionId = requireSmokeVersionId(finalDeploymentVersions);
 
   return {
     candidateVersionId: smokeVersionId,
@@ -157,7 +159,19 @@ function resolveSmokeVersionId(
 ): string | null {
   const fullTrafficVersion = versions.find((version) => version.percentage === 100);
 
-  return fullTrafficVersion?.versionId ?? versions[0]?.versionId ?? null;
+  return fullTrafficVersion?.versionId ?? null;
+}
+
+function requireSmokeVersionId(
+  versions: ReadonlyArray<{ percentage: number; versionId: string }>,
+): string {
+  const smokeVersionId = resolveSmokeVersionId(versions);
+
+  if (!smokeVersionId) {
+    throw new Error("Direct deploy did not report a 100% Worker version for smoke.");
+  }
+
+  return smokeVersionId;
 }
 
 function resolveHostedWorkerDeploymentSettings(

@@ -179,6 +179,48 @@ describe("startHostedContainerEntrypoint", () => {
     });
   });
 
+  it("includes runner bundle metadata on the health endpoint when the manifest is present", async () => {
+    const server = await startHostedContainerEntrypoint({
+      controlToken: null,
+      port: 0,
+      runtime: {
+        processApi: {
+          async readFile(filePath: string) {
+            expect(filePath.endsWith(".murph-runner-bundle-manifest.json")).toBe(true);
+            return JSON.stringify({
+              buildSkipped: false,
+              bundleFingerprint: "bundle-fingerprint",
+              generatedAt: "2026-04-24T00:00:00.000Z",
+              schemaVersion: 2,
+              sourceFingerprint: "source-fingerprint",
+            });
+          },
+        },
+      },
+    });
+    servers.push(server);
+    const address = server.address();
+
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+    }
+
+    const response = await fetch(`http://127.0.0.1:${address.port}/health`);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      runnerBundle: {
+        buildSkipped: false,
+        bundleFingerprint: "bundle-fingerprint",
+        generatedAt: "2026-04-24T00:00:00.000Z",
+        schemaVersion: 2,
+        sourceFingerprint: "source-fingerprint",
+      },
+      service: "cloudflare-hosted-runner-node",
+    });
+  });
+
   it("rejects the removed legacy internal run alias", async () => {
     const server = await startHostedContainerEntrypoint({
       controlToken: "runner-token",

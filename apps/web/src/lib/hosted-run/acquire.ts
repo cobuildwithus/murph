@@ -253,9 +253,15 @@ export async function acquireHostedRunTx(input: {
     records: wakeRows,
     tx: input.tx,
   });
+  const attempt = await resolveNextHostedRunAttemptTx({
+    inputCommittedSeq: cursor.committedSeq,
+    tx: input.tx,
+    userId: input.userId,
+  });
   const run = await input.tx.hostedRun.create({
     data: {
       acquiredAt: now,
+      attempt,
       eventCount: wakeRows.length,
       eventKindsJson: toPrismaJsonArray(uniqueStrings(wakeRows.map((wake) => wake.kind))),
       eventSeqsJson: toPrismaJsonArray(wakeRows.map((wake) => wake.seq.toString())),
@@ -298,6 +304,28 @@ export async function acquireHostedRunTx(input: {
     userId: input.userId,
     cursor,
   });
+}
+
+async function resolveNextHostedRunAttemptTx(input: {
+  inputCommittedSeq: bigint;
+  tx: HostedRunMutationTx;
+  userId: string;
+}): Promise<number> {
+  const previousAttempts = await input.tx.hostedRun.aggregate({
+    _max: {
+      attempt: true,
+    },
+    where: {
+      inputCommittedSeq: input.inputCommittedSeq,
+      status: "failed",
+      userId: input.userId,
+    },
+  });
+  const maxAttempt = previousAttempts._max.attempt;
+
+  return typeof maxAttempt === "number" && Number.isInteger(maxAttempt)
+    ? maxAttempt + 1
+    : 1;
 }
 
 export async function peekHostedRunTurnInputTx(input: {

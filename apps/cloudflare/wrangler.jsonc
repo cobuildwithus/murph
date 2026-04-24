@@ -18,8 +18,8 @@
         "disk_mb": 6000
       },
       "max_instances": 1000,
-      "rollout_active_grace_period": 300,
-      "rollout_step_percentage": [10, 25, 50, 100]
+      "rollout_active_grace_period": 0,
+      "rollout_step_percentage": [100]
     }
   ],
   "durable_objects": {
@@ -33,6 +33,9 @@
         "class_name": "RunnerContainer"
       }
     ]
+  },
+  "version_metadata": {
+    "binding": "CF_VERSION_METADATA"
   },
   "migrations": [
     {

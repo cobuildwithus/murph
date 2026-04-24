@@ -1,3 +1,6 @@
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+
 import {
   buildCloudflareHostedControlUserStatusPath,
 } from "@murphai/cloudflare-hosted-control/routes";
@@ -9,11 +12,19 @@ import {
   type HostedExecutionUserStatus,
 } from "@murphai/hosted-execution/contracts";
 import {
+  readBooleanEnv,
   normalizeOptionalString,
 } from "./deploy-automation/shared.ts";
 import {
+  runnerBundleManifestFileName,
+} from "./deploy-artifacts.ts";
+import {
   readBearerAuthorizationToken,
 } from "../src/auth-adapter.ts";
+import {
+  createHostedWebCallbackSignatureHeaders,
+  readHostedWebCallbackSigningEnvironment,
+} from "../src/web-callback-auth.ts";
 
 type EnvSource = Readonly<Record<string, string | undefined>>;
 
@@ -28,6 +39,12 @@ interface SmokeControlRequest {
 }
 
 type SmokeUserStatus = HostedExecutionUserStatus;
+
+interface SmokeRunnerBundleManifest {
+  buildSkipped?: boolean;
+  bundleFingerprint?: string;
+  sourceFingerprint?: string;
+}
 
 export function resolveSmokeWorkerBaseUrl(source: EnvSource = process.env): string {
   const workerBaseUrl = readFirstConfiguredString(
@@ -77,6 +94,11 @@ export async function runSmokeHostedDeploy(input: {
   const log = input.log ?? console.log;
   const workerBaseUrl = resolveSmokeWorkerBaseUrl(source);
   const smokeUserId = normalizeOptionalString(source.HOSTED_EXECUTION_SMOKE_USER_ID);
+  const smokeVersionId = normalizeOptionalString(source.HOSTED_EXECUTION_SMOKE_VERSION_ID);
+  const shouldSmokeRunnerContainer = readBooleanEnv(
+    source.HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER,
+    false,
+  );
   const authorizationHeader = readSmokeOidcAuthorizationHeader(source);
   const versionOverrideHeaders = buildVersionOverrideHeaders(source);
   const smokeBaseUrl = `${workerBaseUrl}/`;
@@ -84,13 +106,24 @@ export async function runSmokeHostedDeploy(input: {
   await assertServiceBanner(
     fetchImpl,
     new URL("/", smokeBaseUrl).toString(),
+    smokeVersionId,
     versionOverrideHeaders,
   );
   await assertHealth(
     fetchImpl,
     new URL("/health", smokeBaseUrl).toString(),
+    smokeVersionId,
     versionOverrideHeaders,
   );
+
+  if (shouldSmokeRunnerContainer) {
+    await assertRunnerContainerSmoke({
+      fetchImpl,
+      source,
+      url: new URL("/internal/deploy/container-smoke", smokeBaseUrl).toString(),
+      versionOverrideHeaders,
+    });
+  }
 
   if (!smokeUserId) {
     log("Skipping authenticated hosted status check because HOSTED_EXECUTION_SMOKE_USER_ID is not configured.");
@@ -119,9 +152,109 @@ export async function runSmokeHostedDeploy(input: {
   log("Cloudflare hosted execution smoke checks passed.");
 }
 
+async function assertRunnerContainerSmoke(input: {
+  fetchImpl: FetchLike;
+  source: EnvSource;
+  url: string;
+  versionOverrideHeaders: Record<string, string> | undefined;
+}): Promise<void> {
+  const url = new URL(input.url);
+  const payload = "";
+  const signatureHeaders = await createHostedWebCallbackSignatureHeaders({
+    environment: readHostedWebCallbackSigningEnvironment(input.source),
+    method: "POST",
+    path: url.pathname,
+    payload,
+    search: url.search,
+  });
+  const response = await input.fetchImpl(url, {
+    body: payload,
+    headers: {
+      ...(input.versionOverrideHeaders ?? {}),
+      ...signatureHeaders,
+    },
+    method: "POST",
+  });
+
+  if (!response.ok) {
+    throw new Error(`runner container smoke failed with HTTP ${response.status}.`);
+  }
+
+  const responsePayload = await response.json() as {
+    ok?: unknown;
+    runnerContainer?: {
+      ok?: unknown;
+      runnerBundle?: SmokeRunnerBundleManifest | null;
+      service?: unknown;
+    };
+  };
+
+  if (responsePayload.ok !== true || responsePayload.runnerContainer?.ok !== true) {
+    throw new Error("runner container smoke did not return ok=true.");
+  }
+
+  if (responsePayload.runnerContainer.service !== "cloudflare-hosted-runner-node") {
+    throw new Error("runner container smoke did not return the expected service id.");
+  }
+
+  assertSmokeRunnerBundleManifest(
+    responsePayload.runnerContainer.runnerBundle ?? null,
+    await readExpectedRunnerBundleManifest(input.source),
+  );
+}
+
+async function readExpectedRunnerBundleManifest(source: EnvSource): Promise<SmokeRunnerBundleManifest> {
+  const manifestPath = normalizeOptionalString(source.HOSTED_EXECUTION_SMOKE_RUNNER_MANIFEST_PATH)
+    ?? path.resolve(process.cwd(), ".deploy", "runner-bundle", runnerBundleManifestFileName);
+  const parsed = JSON.parse(await readFile(manifestPath, "utf8")) as unknown;
+
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("runner smoke manifest must contain a JSON object.");
+  }
+
+  const manifest = parsed as SmokeRunnerBundleManifest;
+
+  if (
+    typeof manifest.bundleFingerprint !== "string" ||
+    typeof manifest.sourceFingerprint !== "string"
+  ) {
+    throw new Error("runner smoke manifest is missing bundle/source fingerprints.");
+  }
+
+  return manifest;
+}
+
+function assertSmokeRunnerBundleManifest(
+  actual: SmokeRunnerBundleManifest | null,
+  expected: SmokeRunnerBundleManifest,
+): void {
+  if (!actual) {
+    throw new Error("runner container smoke did not return runner bundle metadata.");
+  }
+
+  if (actual.buildSkipped === true) {
+    throw new Error("runner container smoke returned a runner bundle assembled without rebuilding workspace artifacts.");
+  }
+
+  if (
+    typeof actual.bundleFingerprint !== "string" ||
+    typeof actual.sourceFingerprint !== "string"
+  ) {
+    throw new Error("runner container smoke returned incomplete runner bundle metadata.");
+  }
+
+  if (
+    actual.bundleFingerprint !== expected.bundleFingerprint ||
+    actual.sourceFingerprint !== expected.sourceFingerprint
+  ) {
+    throw new Error("runner container smoke did not run the expected runner bundle.");
+  }
+}
+
 async function assertHealth(
   fetchImpl: FetchLike,
   url: string,
+  expectedVersionId: string | null,
   versionOverrideHeaders: Record<string, string> | undefined,
 ): Promise<void> {
   const payload = await readSmokePublicPayload(fetchImpl, url, versionOverrideHeaders, "worker health check");
@@ -129,11 +262,14 @@ async function assertHealth(
   if (payload.ok !== true) {
     throw new Error("worker health check did not return ok=true.");
   }
+
+  assertSmokeWorkerVersion(payload, expectedVersionId, "worker health check");
 }
 
 async function assertServiceBanner(
   fetchImpl: FetchLike,
   url: string,
+  expectedVersionId: string | null,
   versionOverrideHeaders: Record<string, string> | undefined,
 ): Promise<void> {
   const payload = await readSmokePublicPayload(fetchImpl, url, versionOverrideHeaders, "worker banner check");
@@ -145,6 +281,8 @@ async function assertServiceBanner(
   if (payload.service !== "cloudflare-hosted-runner") {
     throw new Error("worker banner check did not return the expected service id.");
   }
+
+  assertSmokeWorkerVersion(payload, expectedVersionId, "worker banner check");
 }
 
 async function readSmokePublicPayload(
@@ -152,7 +290,7 @@ async function readSmokePublicPayload(
   url: string,
   versionOverrideHeaders: Record<string, string> | undefined,
   action: string,
-): Promise<{ ok?: unknown; service?: unknown }> {
+): Promise<{ ok?: unknown; service?: unknown; workerVersionId?: unknown }> {
   const response = await fetchImpl(url, {
     headers: versionOverrideHeaders,
   });
@@ -161,7 +299,21 @@ async function readSmokePublicPayload(
     throw new Error(`${action} failed with HTTP ${response.status}.`);
   }
 
-  return await response.json() as { ok?: unknown; service?: unknown };
+  return await response.json() as { ok?: unknown; service?: unknown; workerVersionId?: unknown };
+}
+
+function assertSmokeWorkerVersion(
+  payload: { workerVersionId?: unknown },
+  expectedVersionId: string | null,
+  action: string,
+): void {
+  if (!expectedVersionId) {
+    return;
+  }
+
+  if (payload.workerVersionId !== expectedVersionId) {
+    throw new Error(`${action} did not run the requested Worker version.`);
+  }
 }
 
 async function readSmokeUserStatus(input: SmokeControlRequest): Promise<SmokeUserStatus> {

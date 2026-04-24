@@ -1420,9 +1420,15 @@ describe("acquireHostedRunTx", () => {
       triggerKind: "manual_repair",
     });
     const hostedRunCreate = vi.fn(async () => manualRepairRun);
+    const hostedRunAggregate = vi.fn(async () => ({
+      _max: {
+        attempt: null,
+      },
+    }));
     const hostedIngressEventUpdateMany = vi.fn();
     const tx = asHostedRunMutationTx({
       hostedRun: {
+        aggregate: hostedRunAggregate,
         create: hostedRunCreate,
         findFirst: vi.fn(async () => null),
         findMany: vi.fn(async () => []),
@@ -1459,12 +1465,83 @@ describe("acquireHostedRunTx", () => {
     });
     expect(hostedRunCreate).toHaveBeenCalledWith({
       data: expect.objectContaining({
+        attempt: 1,
         eventCount: 0,
         ingressEventIdsJson: [],
         triggerKind: "manual_repair",
       }),
     });
+    expect(hostedRunAggregate).toHaveBeenCalledWith({
+      _max: {
+        attempt: true,
+      },
+      where: {
+        inputCommittedSeq: cursor.committedSeq,
+        status: "failed",
+        userId: "member_123",
+      },
+    });
     expect(hostedIngressEventUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("increments new run attempts for the same unadvanced cursor after a failed prior run", async () => {
+    const cursor = buildCursorRow();
+    const wakeRow = {
+      id: "wake_10",
+      kind: "conversation.message",
+      quarantinedAt: null,
+      runId: null,
+      seq: 10n,
+      state: "pending",
+      userId: "member_123",
+    };
+    const retryRun = buildRunRow({
+      eventSeqs: ["10"],
+      ingressEventIds: ["wake_10"],
+      runToken: "retry-run-token",
+    });
+    const hostedRunAggregate = vi.fn(async () => ({
+      _max: {
+        attempt: 2,
+      },
+    }));
+    const hostedRunCreate = vi.fn(async () => ({
+      ...retryRun,
+      attempt: 3,
+    }));
+    const tx = asHostedRunMutationTx({
+      hostedRun: {
+        aggregate: hostedRunAggregate,
+        create: hostedRunCreate,
+        findFirst: vi.fn(async () => null),
+        findMany: vi.fn(async () => []),
+      },
+      hostedIngressEvent: {
+        findMany: vi.fn(async () => [wakeRow]),
+        update: vi.fn(),
+        updateMany: vi.fn(async () => ({ count: 1 })),
+      },
+    });
+
+    mocks.ensureHostedExecutionCursorRow.mockResolvedValue(cursor);
+
+    const result = await acquireHostedRunTx({
+      tx,
+      userId: "member_123",
+    });
+
+    expect(result.acquired).toBe(true);
+    expect(result.run).toMatchObject({
+      attempt: 3,
+      id: retryRun.id,
+    });
+    expect(hostedRunCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        attempt: 3,
+        inputCommittedSeq: cursor.committedSeq,
+        ingressEventIdsJson: ["wake_10"],
+      }),
+    });
   });
 
   it("claims resumable finalize runs by moving them to finalizing with a fresh token", async () => {

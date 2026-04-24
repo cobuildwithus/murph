@@ -11,6 +11,11 @@ import {
   type RunnerBundleManifest,
 } from "../scripts/deploy-artifacts.js";
 import {
+  buildHostedWorkerSecretsPayload,
+  buildHostedWranglerDeployConfig,
+  readHostedDeployAutomationEnvironment,
+} from "../scripts/deploy-automation.js";
+import {
   hostedRunnerRuntimePackageName,
   resolveHostedRunnerWorkspacePackageNames,
 } from "../scripts/runner-bundle-contract.js";
@@ -61,6 +66,16 @@ describe("deploy artifact validation", () => {
 
     await expect(assertPreparedDeployArtifacts(fixture)).rejects.toThrow(
       "Prepared runner bundle was assembled for hosted-local use",
+    );
+  });
+
+  it("rejects a runner bundle assembled without rebuilding workspace artifacts", async () => {
+    const fixture = await createDeployArtifactFixture({
+      buildSkipped: true,
+    });
+
+    await expect(assertPreparedDeployArtifacts(fixture)).rejects.toThrow(
+      "Prepared runner bundle was assembled without rebuilding workspace artifacts",
     );
   });
 
@@ -118,6 +133,36 @@ describe("deploy artifact validation", () => {
     );
   });
 
+  it("rejects a generated config that does not match the current deploy environment", async () => {
+    const fixture = await createDeployArtifactFixture();
+    const staleConfig = buildHostedWranglerDeployConfig(
+      readHostedDeployAutomationEnvironment({
+        ...fixture.source,
+        CF_CONTAINER_MAX_INSTANCES: "99",
+      }),
+    );
+
+    await writeFile(fixture.configPath, `${JSON.stringify(staleConfig, null, 2)}\n`, "utf8");
+
+    await expect(assertPreparedDeployArtifacts(fixture)).rejects.toThrow(
+      "Generated Wrangler config does not match the current deploy environment",
+    );
+  });
+
+  it("rejects worker secrets that do not match the current deploy environment", async () => {
+    const fixture = await createDeployArtifactFixture();
+    const staleSecrets = buildHostedWorkerSecretsPayload({
+      ...fixture.source,
+      HOSTED_WAKE_ENCRYPTION_KEY: "stale-wake-key",
+    });
+
+    await writeFile(fixture.secretsFilePath, `${JSON.stringify(staleSecrets, null, 2)}\n`, "utf8");
+
+    await expect(assertPreparedDeployArtifacts(fixture)).rejects.toThrow(
+      "Worker secrets payload does not match the current deploy environment",
+    );
+  });
+
   it("rejects stale source fingerprints", async () => {
     const fixture = await createDeployArtifactFixture();
 
@@ -137,6 +182,7 @@ describe("deploy artifact validation", () => {
 });
 
 async function createDeployArtifactFixture(input: {
+  buildSkipped?: boolean;
   config?: Record<string, unknown>;
   includeBundleOnlyDependencies?: boolean;
   virtualStorePackageName?: string;
@@ -146,6 +192,7 @@ async function createDeployArtifactFixture(input: {
   manifest: RunnerBundleManifest;
   runnerBundleDir: string;
   secretsFilePath: string;
+  source: Record<string, string>;
   workspacePackageNames: readonly string[];
 }> {
   const root = await mkdtemp(path.join(os.tmpdir(), "cloudflare-deploy-artifacts-"));
@@ -158,23 +205,23 @@ async function createDeployArtifactFixture(input: {
       includeBundleOnlyDependencies: input.includeBundleOnlyDependencies ?? true,
     }),
   ];
+  const source = createDeployArtifactFixtureSource();
+  const defaultConfig = buildHostedWranglerDeployConfig(
+    readHostedDeployAutomationEnvironment(source),
+  );
 
   await mkdir(path.join(runnerBundleDir, "dist"), { recursive: true });
   await mkdir(path.join(runnerBundleDir, "node_modules", ".bin"), { recursive: true });
   await writeFile(
     configPath,
-    `${JSON.stringify(input.config ?? {
-      containers: [
-        {
-          class_name: "RunnerContainer",
-          image: "../../../Dockerfile.cloudflare-hosted-runner",
-          image_build_context: "..",
-        },
-      ],
-    }, null, 2)}\n`,
+    `${JSON.stringify(input.config ?? defaultConfig, null, 2)}\n`,
     "utf8",
   );
-  await writeFile(secretsFilePath, "{}\n", "utf8");
+  await writeFile(
+    secretsFilePath,
+    `${JSON.stringify(buildHostedWorkerSecretsPayload(source), null, 2)}\n`,
+    "utf8",
+  );
   await writeFile(
     path.join(runnerBundleDir, "package.json"),
     `${JSON.stringify({
@@ -220,6 +267,7 @@ async function createDeployArtifactFixture(input: {
   }
 
   const manifest = await writeRunnerBundleManifest(runnerBundleDir, {
+    buildSkipped: input.buildSkipped === true,
     includeBundleOnlyDependencies: input.includeBundleOnlyDependencies ?? true,
   });
 
@@ -229,7 +277,22 @@ async function createDeployArtifactFixture(input: {
     manifest,
     runnerBundleDir,
     secretsFilePath,
+    source,
     workspacePackageNames,
+  };
+}
+
+function createDeployArtifactFixtureSource(): Record<string, string> {
+  return {
+    CF_BUNDLES_BUCKET: "hosted-bundles",
+    CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
+    CF_WORKER_NAME: "hosted-worker",
+    HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK: "{\"kty\":\"EC\"}",
+    HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK: "{\"kty\":\"EC\"}",
+    HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "platform-key",
+    HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK: "{\"kty\":\"EC\"}",
+    HOSTED_WAKE_ENCRYPTION_KEY: "wake-key",
+    HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "{\"kty\":\"EC\"}",
   };
 }
 

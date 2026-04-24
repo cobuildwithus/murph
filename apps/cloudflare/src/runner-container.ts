@@ -87,6 +87,7 @@ export interface HostedExecutionContainerStubLike {
     token: string;
     userId?: string;
   }): Promise<boolean>;
+  smokeHealth(): Promise<HostedExecutionContainerSmokeHealthResult>;
 }
 
 export interface HostedExecutionContainerNamespaceLike {
@@ -112,6 +113,19 @@ interface RunnerContainerStopWaitResult {
   lastStatus: string | null;
   observedStatuses: string[];
   pollCount: number;
+}
+
+interface HostedExecutionContainerSmokeHealthResult {
+  ok: boolean;
+  runnerBundle: {
+    buildSkipped?: boolean;
+    bundleFingerprint?: string;
+    generatedAt?: string;
+    schemaVersion?: number;
+    sourceFingerprint?: string;
+  } | null;
+  service: string | null;
+  status: number;
 }
 
 // Cloudflare rolls Worker code ahead of container instances, so keep the
@@ -152,6 +166,41 @@ export class RunnerContainer extends Container {
   async destroyInstance(): Promise<void> {
     await this.withLifecycleLock(async () => {
       await this.stopWarmContainer();
+    });
+  }
+
+  async smokeHealth(): Promise<HostedExecutionContainerSmokeHealthResult> {
+    return await this.withLifecycleLock(async () => {
+      const readyTimeoutMs = readRunnerReadyTimeoutMs(this.environment);
+
+      try {
+        await this.ensureSmokeContainerReady(readyTimeoutMs);
+        const response = await this.containerFetch(
+          RUNNER_HEALTH_URL,
+          {
+            signal: AbortSignal.timeout(readyTimeoutMs),
+          },
+          RUNNER_PORT,
+        );
+        const payload = await response.json() as {
+          ok?: unknown;
+          runnerBundle?: unknown;
+          service?: unknown;
+        };
+
+        if (!response.ok || payload.ok !== true) {
+          throw new Error(`Hosted runner container smoke health failed with HTTP ${response.status}.`);
+        }
+
+        return {
+          ok: true,
+          runnerBundle: parseRunnerContainerSmokeBundle(payload.runnerBundle),
+          service: typeof payload.service === "string" ? payload.service : null,
+          status: response.status,
+        };
+      } finally {
+        await this.stopWarmContainer({ failClosed: false });
+      }
     });
   }
 
@@ -527,6 +576,31 @@ export class RunnerContainer extends Container {
     });
 
     return runnerControlToken;
+  }
+
+  private async ensureSmokeContainerReady(timeoutMs: number): Promise<void> {
+    const status = readContainerStatus(await this.getState());
+
+    if (!isRunnerContainerStopped(status)) {
+      await assertRunnerHealthy(this, timeoutMs);
+      return;
+    }
+
+    await this.startAndWaitForPorts({
+      cancellationOptions: {
+        abort: AbortSignal.timeout(timeoutMs),
+        instanceGetTimeoutMS: timeoutMs,
+        portReadyTimeoutMS: timeoutMs,
+        waitInterval: RUNNER_WAIT_INTERVAL_MS,
+      },
+      ports: RUNNER_PORT,
+      startOptions: {
+        enableInternet: true,
+        envVars: buildHostedRunnerSupervisorEnv({
+          port: RUNNER_PORT,
+        }),
+      },
+    });
   }
 
   private async installOutboundHandlers(
@@ -1232,6 +1306,24 @@ function readErrorMessage(error: unknown): string | null {
   }
 
   return null;
+}
+
+function parseRunnerContainerSmokeBundle(
+  value: unknown,
+): HostedExecutionContainerSmokeHealthResult["runnerBundle"] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+
+  return {
+    ...(typeof record.buildSkipped === "boolean" ? { buildSkipped: record.buildSkipped } : {}),
+    ...(typeof record.bundleFingerprint === "string" ? { bundleFingerprint: record.bundleFingerprint } : {}),
+    ...(typeof record.generatedAt === "string" ? { generatedAt: record.generatedAt } : {}),
+    ...(typeof record.schemaVersion === "number" ? { schemaVersion: record.schemaVersion } : {}),
+    ...(typeof record.sourceFingerprint === "string" ? { sourceFingerprint: record.sourceFingerprint } : {}),
+  };
 }
 
 function resolveHostedRunnerRequestWake(

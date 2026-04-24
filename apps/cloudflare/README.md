@@ -50,6 +50,7 @@ Bindings:
 - `USER_RUNNER`
 - `RUNNER_CONTAINER`
 - `BUNDLES`
+- `CF_VERSION_METADATA` version metadata binding, used by deploy smoke to prove the requested Worker version actually handled the request
 - optional `HOSTED_EMAIL` native `send_email` binding for outbound hosted email
 
 Required worker secrets:
@@ -107,5 +108,6 @@ Cloudflare keeps only the wake-payload decryption lane plus the worker-owned cal
 - `apps/cloudflare/.deploy/worker-secrets.json`
 
 `pnpm --dir apps/cloudflare deploy:worker` is the canonical cut because it renders environment-specific deploy config, worker secrets, the hosted email send binding restrictions, and the cached native runner base image before upload. The lower-level version helper remains in-tree as a recovery-only path.
+Deploy smoke pins the 100% Worker version, verifies the response-reported version metadata, and, when enabled by the workflow, runs a signed managed-container smoke that compares the live runner bundle fingerprint with `.deploy/runner-bundle/.murph-runner-bundle-manifest.json`.
 
 See [DEPLOY.md](./DEPLOY.md) for the exact GitHub environment surface, lifecycle rules, and smoke workflow.

@@ -36,6 +36,9 @@ import {
 } from "./auth-adapter.ts";
 import { readHostedExecutionEnvironment } from "./env.ts";
 import {
+  verifyHostedWebCallbackSignatureHeaders,
+} from "./web-callback-auth.ts";
+import {
   json,
   methodNotAllowed,
   notFound,
@@ -70,7 +73,7 @@ import {
 
 type RouteParams = Readonly<Record<string, string>>;
 type RouteMatcher = (pathname: string) => RouteParams | null;
-type WorkerRouteAuthorization = "vercel-oidc" | null;
+type WorkerRouteAuthorization = "vercel-oidc" | "web-callback-signature" | null;
 type WrongMethodResponse = "method-not-allowed" | "not-found";
 
 interface DeclarativeRoute<Context> {
@@ -85,12 +88,13 @@ interface DeclarativeRoute<Context> {
 }
 
 const workerPublicRoutes: readonly DeclarativeRoute<{
+  env: WorkerEnvironmentSource;
   request: Request;
   url: URL;
 }>[] = [
   {
-    handle() {
-      return createServiceBannerResponse();
+    handle(context) {
+      return createServiceBannerResponse(context.env);
     },
     match: matchExactPath("/", "/health"),
     methods: ["GET"],
@@ -99,6 +103,16 @@ const workerPublicRoutes: readonly DeclarativeRoute<{
 ];
 
 const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
+  {
+    authorization: "web-callback-signature",
+    async handle(context) {
+      return handleDeployContainerSmokeRoute(context);
+    },
+    match: matchExactPath("/internal/deploy/container-smoke"),
+    methods: ["POST"],
+    name: "deploy-container-smoke",
+    wrongMethodResponse: "method-not-allowed",
+  },
   {
     authorizeBeforeMethod: true,
     authorization: "vercel-oidc",
@@ -159,7 +173,7 @@ export default {
       if (localInternalProxyResponse) {
         return localInternalProxyResponse;
       }
-      const publicResponse = await handleDeclarativeRoute(workerPublicRoutes, { request, url });
+      const publicResponse = await handleDeclarativeRoute(workerPublicRoutes, { env, request, url });
       if (publicResponse) {
         return publicResponse;
       }
@@ -280,8 +294,20 @@ async function handleDeclarativeRoute<Context>(
   return null;
 }
 
-function createServiceBannerResponse(): Response {
-  return json({ ok: true, service: "cloudflare-hosted-runner" });
+function createServiceBannerResponse(env: Pick<WorkerEnvironmentSource, "CF_VERSION_METADATA">): Response {
+  const workerVersionId = readWorkerVersionId(env);
+  return json({
+    ok: true,
+    service: "cloudflare-hosted-runner",
+    ...(workerVersionId ? { workerVersionId } : {}),
+  });
+}
+
+function readWorkerVersionId(env: Pick<WorkerEnvironmentSource, "CF_VERSION_METADATA">): string | null {
+  const versionId = env.CF_VERSION_METADATA?.id;
+  return typeof versionId === "string" && versionId.trim().length > 0
+    ? versionId.trim()
+    : null;
 }
 
 async function authorizeRoute(
@@ -290,6 +316,51 @@ async function authorizeRoute(
   routeName: string,
 ): Promise<Response | null> {
   switch (authorization) {
+    case "web-callback-signature": {
+      const callbackSigning = context.environment?.webCallbackSigning;
+      const url = context.url;
+      if (!callbackSigning || !url) {
+        emitHostedExecutionStructuredLog({
+          component: "worker",
+          details: buildWorkerRouteLogDetails({
+            authScheme: "web-callback-signature",
+            reason: "missing-callback-signing-environment",
+            routeName,
+          }, context.request),
+          level: "warn",
+          message: "Hosted worker route rejected an internal request before auth because callback signing is unavailable.",
+          phase: "failed",
+        });
+        return unauthorized();
+      }
+
+      const payload = await readCachedRequestText(context);
+      const verified = await verifyHostedWebCallbackSignatureHeaders({
+        environment: callbackSigning,
+        method: context.request.method,
+        path: url.pathname,
+        payload,
+        request: context.request,
+        search: url.search,
+      });
+
+      if (verified) {
+        return null;
+      }
+
+      emitHostedExecutionStructuredLog({
+        component: "worker",
+        details: buildWorkerRouteLogDetails({
+          authScheme: "web-callback-signature",
+          reason: "callback-signature-verification-failed",
+          routeName,
+        }, context.request),
+        level: "warn",
+        message: "Hosted worker route rejected an internal request after callback signature verification failed.",
+        phase: "failed",
+      });
+      return unauthorized();
+    }
     case "vercel-oidc": {
       const validation = context.environment?.vercelOidcValidation;
       if (!validation) {
@@ -340,6 +411,20 @@ async function handleStatusRoute(
   const userId = decodeRouteParam(encodedUserId);
   const stub = await resolveUserRunnerStub(context.env, userId);
   return json(await stub.status());
+}
+
+async function handleDeployContainerSmokeRoute(
+  context: WorkerRouteContext,
+): Promise<Response> {
+  const result = await context.env.RUNNER_CONTAINER
+    .getByName("__deploy-smoke")
+    .smokeHealth();
+
+  return json({
+    ok: result.ok === true,
+    runnerContainer: result,
+    service: "cloudflare-hosted-runner",
+  });
 }
 
 async function handleRunRoute(
