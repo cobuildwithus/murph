@@ -1,4 +1,4 @@
-import { Container, type OutboundHandlerContext } from "@cloudflare/containers";
+import { Container, type OutboundHandlerContext, type StopParams } from "@cloudflare/containers";
 import {
   computeHostedRunElapsedMs,
   parseHostedAssistantRuntimeJobInput,
@@ -31,6 +31,7 @@ const RUNNER_WAIT_INTERVAL_MS = 250;
 const DEFAULT_RUNNER_READY_TIMEOUT_MS = 20_000;
 const RUNNER_DESTROY_TIMEOUT_MS = 5_000;
 const DEFAULT_RUNNER_IDLE_TTL_MS = 300_000;
+const RUNNER_DESTROY_STATUS_SAMPLE_LIMIT = 8;
 const OUTBOUND_HANDLER_INSTALL_RETRY_LIMIT = 5;
 const OUTBOUND_HANDLER_INSTALL_RETRY_DELAY_MS = 250;
 const MIN_RUNNER_IDLE_TTL_MS = 1_000;
@@ -95,6 +96,18 @@ type RunnerOutboundHandlerContext = OutboundHandlerContext<{
 
 type RunnerContainerEnvironmentSource = Readonly<Record<string, unknown>>;
 
+interface RunnerContainerLogContext {
+  run: HostedAssistantRuntimeJobInput["request"]["run"] | null;
+  userId: string;
+  wake: HostedRuntimeEvent;
+}
+
+interface RunnerContainerStopWaitResult {
+  lastStatus: string | null;
+  observedStatuses: string[];
+  pollCount: number;
+}
+
 // Cloudflare rolls Worker code ahead of container instances, so keep the
 // worker/container outbound contract to one stable handler method.
 const RUNNER_OUTBOUND_HANDLER_METHOD = "internalWorkerProxy";
@@ -111,6 +124,7 @@ export class RunnerContainer extends Container {
 
   private readonly environment: RunnerContainerEnvironmentSource;
   private lifecycleLock: Promise<void> = Promise.resolve();
+  private currentLogContext: RunnerContainerLogContext | null = null;
   private runnerControlToken: string | null = null;
   private runnerOutboundProxyState: RunnerOutboundProxyState | null = null;
   private installedRunnerOutboundProxyState: RunnerOutboundProxyState | null = null;
@@ -150,6 +164,66 @@ export class RunnerContainer extends Container {
     });
   }
 
+  override onStart(): void {
+    const context = this.currentLogContext;
+    emitHostedExecutionStructuredLog({
+      component: "container",
+      wake: context?.wake,
+      details: {
+        ...buildRunnerContainerContextDetails(context),
+        lifecycleStage: "onStart",
+        runnerPort: RUNNER_PORT,
+        sleepAfter: String(this.sleepAfter),
+      },
+      message: "Hosted execution container lifecycle hook reported start.",
+      phase: "container.ready",
+      run: context?.run,
+      userId: context?.userId,
+    });
+  }
+
+  override onStop(params: StopParams): void {
+    const context = this.currentLogContext;
+    const cleanExit = params.exitCode === 0;
+    emitHostedExecutionStructuredLog({
+      component: "container",
+      wake: context?.wake,
+      details: {
+        ...buildRunnerContainerContextDetails(context),
+        exitCode: params.exitCode,
+        lifecycleStage: "onStop",
+        runnerPort: RUNNER_PORT,
+        stopReason: params.reason,
+      },
+      level: cleanExit ? "info" : "warn",
+      message: cleanExit
+        ? "Hosted execution container lifecycle hook reported stop."
+        : "Hosted execution container lifecycle hook reported non-zero stop.",
+      phase: cleanExit ? "container.ready" : "failed",
+      run: context?.run,
+      userId: context?.userId,
+    });
+  }
+
+  override onError(error: unknown): never {
+    const context = this.currentLogContext;
+    emitHostedExecutionStructuredLog({
+      component: "container",
+      wake: context?.wake,
+      details: {
+        ...buildRunnerContainerContextDetails(context),
+        lifecycleStage: "onError",
+        runnerPort: RUNNER_PORT,
+      },
+      error,
+      message: "Hosted execution container lifecycle hook reported an error.",
+      phase: "failed",
+      run: context?.run,
+      userId: context?.userId,
+    });
+    throw error;
+  }
+
   override async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
 
@@ -171,6 +245,11 @@ export class RunnerContainer extends Container {
     );
     const routeUserId = input.job.request.runDrain.userId;
     const runIdentity = resolveRunnerOutboundRunIdentity(input.job);
+    const logContext: RunnerContainerLogContext = {
+      run,
+      userId: routeUserId,
+      wake,
+    };
     const outboundProxyState: RunnerOutboundProxyState = {
       attempt: runIdentity.attempt,
       runId: runIdentity.runId,
@@ -178,9 +257,30 @@ export class RunnerContainer extends Container {
       userId: routeUserId,
     };
     let keepWarm = false;
+    this.currentLogContext = logContext;
 
     try {
       const startTime = Date.now();
+      emitHostedExecutionStructuredLog({
+        component: "container",
+        wake,
+        details: {
+          hasLocalInternalProxyBaseUrl: localInternalProxyBaseUrl !== null,
+          readyTimeoutMs: readRunnerReadyTimeoutMs(this.environment),
+          runDrainEventCount: input.job.request.runDrain.events.length,
+          runDrainResumeFinalize: input.job.request.runDrain.resumeFinalize === true,
+          runDrainTriggerKind: input.job.request.runDrain.triggerKind,
+          runElapsedMs: computeHostedRunElapsedMs(run),
+          runnerIdleTtlMs: readRunnerIdleTtlMs(this.environment),
+          runnerPort: RUNNER_PORT,
+          timeoutMs: input.timeoutMs,
+          wakeKind: wake.kind,
+        },
+        message: "Hosted execution container invocation received.",
+        phase: "container.starting",
+        run,
+        userId: routeUserId,
+      });
       const runnerControlToken = await this.ensureContainerReady(input);
       this.runnerOutboundProxyState = outboundProxyState;
       await this.installOutboundHandlers(outboundProxyState, {
@@ -199,6 +299,7 @@ export class RunnerContainer extends Container {
         message: "Hosted execution container sending runner request.",
         phase: "container.ready",
         run,
+        userId: routeUserId,
       });
       const response = await this.containerFetch(
         RUNNER_EXECUTE_URL,
@@ -230,6 +331,7 @@ export class RunnerContainer extends Container {
         message: "Hosted execution container received runner response.",
         phase: "container.ready",
         run,
+        userId: routeUserId,
       });
 
       if (!response.ok) {
@@ -244,24 +346,34 @@ export class RunnerContainer extends Container {
         component: "container",
         wake,
         error,
+        details: {
+          runElapsedMs: computeHostedRunElapsedMs(run),
+        },
         message: "Hosted execution container failed.",
         phase: "failed",
         run,
+        userId: routeUserId,
       });
       throw error;
     } finally {
-      const outboundProxyExpired = await this.expireOutboundProxyState(outboundProxyState, {
-        run,
-        wake,
-      });
-      if (!outboundProxyExpired) {
-        keepWarm = false;
-      }
+      try {
+        const outboundProxyExpired = await this.expireOutboundProxyState(outboundProxyState, {
+          run,
+          wake,
+        });
+        if (!outboundProxyExpired) {
+          keepWarm = false;
+        }
 
-      const shouldDestroy = !keepWarm;
+        const shouldDestroy = !keepWarm;
 
-      if (shouldDestroy) {
-        await this.stopWarmContainer();
+        if (shouldDestroy) {
+          await this.stopWarmContainer();
+        }
+      } finally {
+        if (this.currentLogContext === logContext) {
+          this.currentLogContext = null;
+        }
       }
     }
   }
@@ -273,21 +385,25 @@ export class RunnerContainer extends Container {
     const wake = resolveHostedRunnerRequestWake(input.job.request);
     const run = input.job.request.run ?? null;
     const status = readContainerStatus(await this.getState());
+    const readyTimeoutMs = readRunnerReadyTimeoutMs(this.environment);
 
     if (!isRunnerContainerStopped(status) && this.runnerControlToken) {
       try {
-        await assertRunnerHealthy(this, Math.min(input.timeoutMs, readRunnerReadyTimeoutMs(this.environment)));
+        await assertRunnerHealthy(this, Math.min(input.timeoutMs, readyTimeoutMs));
         emitHostedExecutionStructuredLog({
           component: "container",
           wake,
           details: {
             readinessLatencyMs: Date.now() - readinessStartedAt,
+            readinessTimeoutMs: Math.min(input.timeoutMs, readyTimeoutMs),
             runElapsedMs: computeHostedRunElapsedMs(run),
             startMode: "warm",
+            statusBeforeStart: status,
           },
           message: "Hosted execution container is ready.",
           phase: "container.ready",
           run,
+          userId: input.userId,
         });
         return this.runnerControlToken;
       } catch (error) {
@@ -296,18 +412,35 @@ export class RunnerContainer extends Container {
           wake,
           details: {
             readinessLatencyMs: Date.now() - readinessStartedAt,
+            readinessTimeoutMs: Math.min(input.timeoutMs, readyTimeoutMs),
             runElapsedMs: computeHostedRunElapsedMs(run),
             startMode: "warm",
+            statusBeforeStart: status,
           },
           error,
           level: "warn",
           message: "Hosted execution container warm health check failed; restarting shell.",
           phase: "container.starting",
           run,
+          userId: input.userId,
         });
         await this.stopWarmContainer();
       }
     } else if (!isRunnerContainerStopped(status)) {
+      emitHostedExecutionStructuredLog({
+        component: "container",
+        wake,
+        details: {
+          runElapsedMs: computeHostedRunElapsedMs(run),
+          startMode: "cold",
+          statusBeforeStart: status,
+        },
+        level: "warn",
+        message: "Hosted execution container found a running shell without a control token; destroying before cold start.",
+        phase: "container.starting",
+        run,
+        userId: input.userId,
+      });
       await this.stopWarmContainer();
     }
 
@@ -315,17 +448,25 @@ export class RunnerContainer extends Container {
       component: "container",
       wake,
       details: {
+        readinessPollIntervalMs: RUNNER_WAIT_INTERVAL_MS,
+        readinessTimeoutMs: Math.min(
+          Math.max(1, input.timeoutMs - (Date.now() - readinessStartedAt)),
+          readyTimeoutMs,
+        ),
         runElapsedMs: computeHostedRunElapsedMs(run),
+        runnerPort: RUNNER_PORT,
         startMode: "cold",
+        statusBeforeStart: status,
       },
       message: "Hosted execution container starting.",
       phase: "container.starting",
       run,
+      userId: input.userId,
     });
 
     const runnerControlToken = crypto.randomUUID();
     const remainingTimeoutMs = Math.max(1, input.timeoutMs - (Date.now() - readinessStartedAt));
-    const readinessTimeoutMs = Math.min(remainingTimeoutMs, readRunnerReadyTimeoutMs(this.environment));
+    const readinessTimeoutMs = Math.min(remainingTimeoutMs, readyTimeoutMs);
     try {
       await this.startAndWaitForPorts({
         cancellationOptions: {
@@ -348,14 +489,19 @@ export class RunnerContainer extends Container {
         wake,
         details: {
           readinessLatencyMs: Date.now() - readinessStartedAt,
+          readinessPollIntervalMs: RUNNER_WAIT_INTERVAL_MS,
+          readinessTimeoutMs,
           runElapsedMs: computeHostedRunElapsedMs(run),
+          runnerPort: RUNNER_PORT,
           startMode: "cold",
+          statusBeforeStart: status,
         },
         error,
         level: "error",
         message: "Hosted execution container failed to start or listen.",
         phase: "container.starting",
         run,
+        userId: input.userId,
       });
       throw error;
     }
@@ -366,12 +512,17 @@ export class RunnerContainer extends Container {
       wake,
       details: {
         readinessLatencyMs: Date.now() - readinessStartedAt,
+        readinessPollIntervalMs: RUNNER_WAIT_INTERVAL_MS,
+        readinessTimeoutMs,
         runElapsedMs: computeHostedRunElapsedMs(run),
+        runnerPort: RUNNER_PORT,
         startMode: "cold",
+        statusBeforeStart: status,
       },
       message: "Hosted execution container is ready.",
       phase: "container.ready",
       run,
+      userId: input.userId,
     });
 
     return runnerControlToken;
@@ -490,6 +641,7 @@ export class RunnerContainer extends Container {
     failClosed?: boolean;
   } = {}): Promise<void> {
     const failClosed = Boolean(input.failClosed);
+    const context = this.currentLogContext;
     let statusBeforeDestroy: string | null = null;
 
     try {
@@ -503,6 +655,7 @@ export class RunnerContainer extends Container {
         destroyTimeoutMs: RUNNER_DESTROY_TIMEOUT_MS,
         error,
         failClosed,
+        context,
         message: "Hosted execution container failed while checking its lifecycle state.",
         statusBeforeDestroy,
         stage: "status",
@@ -516,6 +669,22 @@ export class RunnerContainer extends Container {
     const destroyStartedAt = Date.now();
     let destroyError: unknown = null;
 
+    emitHostedExecutionStructuredLog({
+      component: "container",
+      wake: context?.wake,
+      details: {
+        ...buildRunnerContainerContextDetails(context),
+        destroyTimeoutMs: RUNNER_DESTROY_TIMEOUT_MS,
+        failClosed,
+        lifecycleStage: "destroy-requested",
+        statusBeforeDestroy,
+      },
+      message: "Hosted execution container destroy requested.",
+      phase: "container.ready",
+      run: context?.run,
+      userId: context?.userId,
+    });
+
     try {
       await this.destroy();
     } catch (error) {
@@ -528,6 +697,7 @@ export class RunnerContainer extends Container {
         destroyTimeoutMs: RUNNER_DESTROY_TIMEOUT_MS,
         error,
         failClosed,
+        context,
         message: "Hosted execution container destroy request failed.",
         statusBeforeDestroy,
         stage: "destroy",
@@ -535,7 +705,26 @@ export class RunnerContainer extends Container {
     }
 
     try {
-      await waitForRunnerContainerStop(this, RUNNER_DESTROY_TIMEOUT_MS);
+      const stopWait = await waitForRunnerContainerStop(this, RUNNER_DESTROY_TIMEOUT_MS);
+      emitHostedExecutionStructuredLog({
+        component: "container",
+        wake: context?.wake,
+        details: {
+          ...buildRunnerContainerContextDetails(context),
+          destroyLatencyMs: Date.now() - destroyStartedAt,
+          destroyPollCount: stopWait.pollCount,
+          destroyTimeoutMs: RUNNER_DESTROY_TIMEOUT_MS,
+          failClosed,
+          lifecycleStage: "stopped",
+          observedStatuses: stopWait.observedStatuses,
+          statusAfterDestroy: stopWait.lastStatus,
+          statusBeforeDestroy,
+        },
+        message: "Hosted execution container destroy confirmed stopped.",
+        phase: "container.ready",
+        run: context?.run,
+        userId: context?.userId,
+      });
     } catch (error) {
       if (isMissingRunnerContainerError(error)) {
         return;
@@ -545,6 +734,7 @@ export class RunnerContainer extends Container {
         destroyTimeoutMs: RUNNER_DESTROY_TIMEOUT_MS,
         error,
         failClosed,
+        context,
         message: "Hosted execution container destroy did not stop the shell.",
         statusBeforeDestroy,
         stage: "wait-for-stop",
@@ -554,19 +744,6 @@ export class RunnerContainer extends Container {
       }
       return;
     }
-
-    emitHostedExecutionStructuredLog({
-      component: "container",
-      details: {
-        destroyLatencyMs: Date.now() - destroyStartedAt,
-        destroyTimeoutMs: RUNNER_DESTROY_TIMEOUT_MS,
-        failClosed,
-        lifecycleStage: "stopped",
-        statusBeforeDestroy,
-      },
-      message: "Hosted execution container destroy confirmed stopped.",
-      phase: "container.ready",
-    });
 
     if (destroyError) {
       return;
@@ -724,6 +901,7 @@ function createRunnerOutboundProxyToken(): string {
 }
 
 function emitRunnerContainerLifecycleFailure(input: {
+  context: RunnerContainerLogContext | null;
   destroyLatencyMs: number | null;
   destroyTimeoutMs: number;
   error: unknown;
@@ -734,7 +912,9 @@ function emitRunnerContainerLifecycleFailure(input: {
 }): void {
   emitHostedExecutionStructuredLog({
     component: "container",
+    wake: input.context?.wake,
     details: {
+      ...buildRunnerContainerContextDetails(input.context),
       destroyLatencyMs: input.destroyLatencyMs,
       destroyTimeoutMs: input.destroyTimeoutMs,
       failClosed: input.failClosed,
@@ -745,7 +925,17 @@ function emitRunnerContainerLifecycleFailure(input: {
     level: input.failClosed ? "error" : "warn",
     message: input.message,
     phase: "failed",
+    run: input.context?.run,
+    userId: input.context?.userId,
   });
+}
+
+function buildRunnerContainerContextDetails(
+  context: RunnerContainerLogContext | null | undefined,
+): HostedExecutionStructuredLogDetails {
+  return context?.run
+    ? { runElapsedMs: computeHostedRunElapsedMs(context.run) }
+    : {};
 }
 
 function createChildLocalInternalProxyBaseUrl(input: {
@@ -852,17 +1042,64 @@ function isRunnerContainerStopped(status: string | null): boolean {
 async function waitForRunnerContainerStop(
   container: RunnerContainer,
   timeoutMs: number,
-): Promise<void> {
+): Promise<RunnerContainerStopWaitResult> {
   const deadline = Date.now() + timeoutMs;
+  const observedStatuses: string[] = [];
+  let lastStatus: string | null = null;
+  let pollCount = 0;
 
   while (Date.now() <= deadline) {
-    if (isRunnerContainerStopped(await readRunnerContainerStatus(container))) {
-      return;
+    pollCount += 1;
+    lastStatus = await readRunnerContainerStatus(container);
+    appendObservedRunnerContainerStatus(observedStatuses, lastStatus);
+    if (isRunnerContainerStopped(lastStatus)) {
+      return {
+        lastStatus,
+        observedStatuses,
+        pollCount,
+      };
     }
     await sleep(RUNNER_WAIT_INTERVAL_MS);
   }
 
-  throw new Error("Hosted runner container destroy did not stop the shell.");
+  throw new HostedRunnerContainerStopTimeoutError({
+    lastStatus,
+    observedStatuses,
+    pollCount,
+    timeoutMs,
+  });
+}
+
+class HostedRunnerContainerStopTimeoutError extends Error {
+  readonly details: HostedExecutionStructuredLogDetails;
+
+  constructor(input: RunnerContainerStopWaitResult & {
+    timeoutMs: number;
+  }) {
+    super("Hosted runner container destroy did not stop the shell.");
+    this.name = "HostedRunnerContainerStopTimeoutError";
+    this.details = {
+      destroyPollCount: input.pollCount,
+      destroyTimeoutMs: input.timeoutMs,
+      observedStatuses: input.observedStatuses,
+      statusAfterDestroy: input.lastStatus,
+    };
+  }
+}
+
+function appendObservedRunnerContainerStatus(
+  statuses: string[],
+  status: string | null,
+): void {
+  const normalized = status ?? "unknown";
+  if (statuses.at(-1) === normalized) {
+    return;
+  }
+
+  if (statuses.length >= RUNNER_DESTROY_STATUS_SAMPLE_LIMIT) {
+    statuses.shift();
+  }
+  statuses.push(normalized);
 }
 
 async function readRunnerContainerStatus(
