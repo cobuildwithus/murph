@@ -781,7 +781,7 @@ function attachOpenAiCompatibleResponsesRequestDebugObserver(input: {
           updates: [
             {
               kind: 'status',
-              text: 'Hosted provider final Responses request debug payload captured.',
+              text: 'Hosted provider final Responses request summary captured.',
             },
           ],
         })

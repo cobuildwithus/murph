@@ -189,8 +189,8 @@ describe('assistant Responses API request policy', () => {
       gatewayZeroDataRetention: boolean | null
       inputTextLength: number
       model: string | null
-      requestBody: string
       requestBodyHash: string
+      requestBodyLength: number
       toolNames: string[]
     }> = []
     const baseFetch: typeof fetch = async (input, init) => {
@@ -207,8 +207,8 @@ describe('assistant Responses API request policy', () => {
             gatewayZeroDataRetention: event.gatewayZeroDataRetention,
             inputTextLength: event.inputTextLength,
             model: event.model,
-            requestBody: event.requestBody,
             requestBodyHash: event.requestBodyHash,
+            requestBodyLength: event.requestBodyLength,
             toolNames: event.toolNames,
           })
         },
@@ -262,12 +262,7 @@ describe('assistant Responses API request policy', () => {
       toolNames: ['vault.show'],
     })
     expect(debugEvents[0]?.requestBodyHash).toHaveLength(64)
-    expect(debugEvents[0]?.requestBody).toContain('Send the signup welcome.')
-    expect(debugEvents[0]?.requestBody).toContain('"zeroDataRetention":true')
-    expect(debugEvents[0]?.requestBody).toContain('"user":"[redacted]"')
-    expect(debugEvents[0]?.requestBody).toContain('"tags":"[redacted]"')
-    expect(debugEvents[0]?.requestBody).not.toContain('member_test')
-    expect(debugEvents[0]?.requestBody).not.toContain('member:test')
+    expect(debugEvents[0]?.requestBodyLength).toBeGreaterThan(0)
   })
 
   it('resolves assistant API keys by explicit, injected, and environment sources', () => {

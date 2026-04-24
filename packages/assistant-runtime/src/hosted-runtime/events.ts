@@ -17,7 +17,6 @@ import {
   extractHostedAssistantNotificationRedactedDetails,
   isHostedConversationMessageWake,
   sanitizeHostedExecutionStructuredLogDetails,
-  sanitizeHostedExecutionStructuredLogText,
 } from "@murphai/hosted-execution";
 import {
   hydrateHostedExecutionDefaultTarget,
@@ -43,10 +42,6 @@ const HOSTED_PROVIDER_REQUEST_DEBUG_SCHEMA = "murph.assistant-provider-request-d
 const HOSTED_PROVIDER_REQUEST_DEBUG_TYPE = "assistant.provider.request.debug";
 const HOSTED_RESPONSES_REQUEST_DEBUG_SCHEMA = "murph.assistant-responses-request-debug.v1";
 const HOSTED_RESPONSES_REQUEST_DEBUG_TYPE = "assistant.responses.request.debug";
-const HOSTED_PROVIDER_REQUEST_DEBUG_PROMPT_CHUNK_SIZE = 300;
-const HOSTED_PROVIDER_REQUEST_DEBUG_PROMPT_CHUNK_LIMIT = 32;
-const HOSTED_RESPONSES_REQUEST_DEBUG_BODY_CHUNK_GROUP_LIMIT = 32;
-const HOSTED_RESPONSES_REQUEST_DEBUG_BODY_CHUNKS_PER_GROUP = 32;
 
 export async function executeHostedIngressEvent(input: {
   wake: HostedIngressEnvelope;
@@ -350,13 +345,13 @@ function emitHostedAssistantNotificationProviderTraceLog(input: {
   if (requestDebug) {
     const redactedDetails = sanitizeHostedExecutionStructuredLogDetails({
       ...buildHostedAssistantNotificationLogDetails(input.wake),
-      assistantProviderDebug: buildHostedProviderRequestDebugDetails(requestDebug),
+      assistantProviderRequest: buildHostedProviderRequestSummary(requestDebug),
     });
 
     emitHostedExecutionStructuredLog({
       component: "runtime.provider",
       details: redactedDetails,
-      message: "Hosted assistant provider request debug payload captured.",
+      message: "Hosted assistant provider request summary captured.",
       phase: "wake.running",
       wake: input.wake,
     });
@@ -365,7 +360,7 @@ function emitHostedAssistantNotificationProviderTraceLog(input: {
       component: "runtime.provider",
       eventId: input.wake.eventId,
       level: "info",
-      message: "Hosted assistant provider request debug payload captured.",
+      message: "Hosted assistant provider request summary captured.",
       phase: "wake.running",
       redacted: redactedDetails,
     };
@@ -378,13 +373,13 @@ function emitHostedAssistantNotificationProviderTraceLog(input: {
 
   const redactedDetails = sanitizeHostedExecutionStructuredLogDetails({
     ...buildHostedAssistantNotificationLogDetails(input.wake),
-    assistantResponsesDebug: buildHostedResponsesRequestDebugDetails(responsesDebug),
+    assistantResponsesRequest: buildHostedResponsesRequestSummary(responsesDebug),
   });
 
   emitHostedExecutionStructuredLog({
     component: "runtime.provider.http",
     details: redactedDetails,
-    message: "Hosted assistant final Responses request debug payload captured.",
+    message: "Hosted assistant final Responses request summary captured.",
     phase: "wake.running",
     wake: input.wake,
   });
@@ -393,7 +388,7 @@ function emitHostedAssistantNotificationProviderTraceLog(input: {
     component: "runtime.provider.http",
     eventId: input.wake.eventId,
     level: "info",
-    message: "Hosted assistant final Responses request debug payload captured.",
+    message: "Hosted assistant final Responses request summary captured.",
     phase: "wake.running",
     redacted: redactedDetails,
   };
@@ -443,16 +438,9 @@ function readHostedResponsesRequestDebugTrace(
     : null;
 }
 
-function buildHostedProviderRequestDebugDetails(
+function buildHostedProviderRequestSummary(
   debug: Record<string, unknown>,
 ): HostedExecutionStructuredLogDetails {
-  const rawSystemPrompt = readHostedProviderDebugString(debug, "systemPrompt");
-  const rawUserPrompt = readHostedProviderDebugString(debug, "userPrompt");
-  const systemPrompt = sanitizeHostedProviderDebugPrompt(rawSystemPrompt);
-  const userPrompt = sanitizeHostedProviderDebugPrompt(rawUserPrompt);
-  const systemPromptChunks = chunkHostedProviderDebugPrompt(systemPrompt);
-  const userPromptChunks = chunkHostedProviderDebugPrompt(userPrompt);
-
   return {
     attemptCount: readHostedProviderDebugNumber(debug, "attemptCount"),
     channel: readHostedProviderDebugString(debug, "channel"),
@@ -480,48 +468,25 @@ function buildHostedProviderRequestDebugDetails(
       readHostedProviderDebugBoolean(debug, "sessionContextPresent"),
     supportsToolRuntime:
       readHostedProviderDebugBoolean(debug, "supportsToolRuntime"),
-    systemPromptChunks,
+    systemPromptHash: readHostedProviderDebugString(debug, "systemPromptHash"),
     systemPromptLength:
       readHostedProviderDebugNumber(debug, "systemPromptLength")
-      ?? rawSystemPrompt?.length
       ?? 0,
-    systemPromptTruncated:
-      systemPromptChunks.length >= HOSTED_PROVIDER_REQUEST_DEBUG_PROMPT_CHUNK_LIMIT
-      && systemPrompt !== null
-      && systemPrompt.length
-        > HOSTED_PROVIDER_REQUEST_DEBUG_PROMPT_CHUNK_SIZE
-          * HOSTED_PROVIDER_REQUEST_DEBUG_PROMPT_CHUNK_LIMIT,
     toolCount: readHostedProviderDebugNumber(debug, "toolCount"),
     toolNames: readHostedProviderDebugStringArray(debug, "toolNames"),
     turnTrigger: readHostedProviderDebugString(debug, "turnTrigger"),
-    userPromptChunks,
+    userPromptHash: readHostedProviderDebugString(debug, "userPromptHash"),
     userPromptLength:
       readHostedProviderDebugNumber(debug, "userPromptLength")
-      ?? rawUserPrompt?.length
       ?? 0,
-    userPromptTruncated:
-      userPromptChunks.length >= HOSTED_PROVIDER_REQUEST_DEBUG_PROMPT_CHUNK_LIMIT
-      && userPrompt !== null
-      && userPrompt.length
-        > HOSTED_PROVIDER_REQUEST_DEBUG_PROMPT_CHUNK_SIZE
-          * HOSTED_PROVIDER_REQUEST_DEBUG_PROMPT_CHUNK_LIMIT,
     webSearch: readHostedProviderDebugString(debug, "webSearch"),
     zeroDataRetention: readHostedProviderDebugBoolean(debug, "zeroDataRetention"),
   };
 }
 
-function buildHostedResponsesRequestDebugDetails(
+function buildHostedResponsesRequestSummary(
   debug: Record<string, unknown>,
 ): HostedExecutionStructuredLogDetails {
-  const rawRequestBody = readHostedProviderDebugString(debug, "requestBody");
-  const requestBody = sanitizeHostedProviderDebugPrompt(rawRequestBody);
-  const requestBodyChunkGroups =
-    chunkHostedResponsesRequestDebugBodyGroups(requestBody);
-  const requestBodyChunkCount = requestBodyChunkGroups.reduce(
-    (count, group) => count + group.length,
-    0,
-  );
-
   return {
     contextManagementPresent:
       readHostedProviderDebugBoolean(debug, "contextManagementPresent"),
@@ -548,19 +513,8 @@ function buildHostedResponsesRequestDebugDetails(
       readHostedProviderDebugBoolean(debug, "previousResponseIdPresent"),
     providerOptionsHash:
       readHostedProviderDebugString(debug, "providerOptionsHash"),
-    requestBodyChunkCount,
-    requestBodyChunkGroups,
     requestBodyHash: readHostedProviderDebugString(debug, "requestBodyHash"),
     requestBodyLength: readHostedProviderDebugNumber(debug, "requestBodyLength"),
-    requestBodyTruncated:
-      requestBodyChunkCount >=
-        HOSTED_RESPONSES_REQUEST_DEBUG_BODY_CHUNK_GROUP_LIMIT
-          * HOSTED_RESPONSES_REQUEST_DEBUG_BODY_CHUNKS_PER_GROUP
-      && requestBody !== null
-      && requestBody.length
-        > HOSTED_PROVIDER_REQUEST_DEBUG_PROMPT_CHUNK_SIZE
-          * HOSTED_RESPONSES_REQUEST_DEBUG_BODY_CHUNK_GROUP_LIMIT
-          * HOSTED_RESPONSES_REQUEST_DEBUG_BODY_CHUNKS_PER_GROUP,
     requestUrlOrigin: readHostedProviderDebugString(debug, "requestUrlOrigin"),
     requestUrlPath: readHostedProviderDebugString(debug, "requestUrlPath"),
     responseFormatHash:
@@ -609,62 +563,6 @@ function readHostedProviderDebugStringArray(
           typeof entry === "string" && entry.trim().length > 0,
       )
     : [];
-}
-
-function sanitizeHostedProviderDebugPrompt(value: string | null): string | null {
-  return value ? sanitizeHostedExecutionStructuredLogText(value) : null;
-}
-
-function chunkHostedProviderDebugPrompt(value: string | null): string[] {
-  if (!value) {
-    return [];
-  }
-
-  const chunks: string[] = [];
-  for (
-    let index = 0;
-    index < value.length
-    && chunks.length < HOSTED_PROVIDER_REQUEST_DEBUG_PROMPT_CHUNK_LIMIT;
-    index += HOSTED_PROVIDER_REQUEST_DEBUG_PROMPT_CHUNK_SIZE
-  ) {
-    chunks.push(
-      value.slice(index, index + HOSTED_PROVIDER_REQUEST_DEBUG_PROMPT_CHUNK_SIZE),
-    );
-  }
-
-  return chunks;
-}
-
-function chunkHostedResponsesRequestDebugBodyGroups(
-  value: string | null,
-): string[][] {
-  if (!value) {
-    return [];
-  }
-
-  const groups: string[][] = [];
-  let group: string[] = [];
-  for (
-    let index = 0;
-    index < value.length
-    && groups.length < HOSTED_RESPONSES_REQUEST_DEBUG_BODY_CHUNK_GROUP_LIMIT;
-    index += HOSTED_PROVIDER_REQUEST_DEBUG_PROMPT_CHUNK_SIZE
-  ) {
-    group.push(value.slice(index, index + HOSTED_PROVIDER_REQUEST_DEBUG_PROMPT_CHUNK_SIZE));
-    if (group.length >= HOSTED_RESPONSES_REQUEST_DEBUG_BODY_CHUNKS_PER_GROUP) {
-      groups.push(group);
-      group = [];
-    }
-  }
-
-  if (
-    group.length > 0
-    && groups.length < HOSTED_RESPONSES_REQUEST_DEBUG_BODY_CHUNK_GROUP_LIMIT
-  ) {
-    groups.push(group);
-  }
-
-  return groups;
 }
 
 function buildAssistantNotificationInput(

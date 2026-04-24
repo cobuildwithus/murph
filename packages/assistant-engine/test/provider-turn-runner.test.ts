@@ -591,17 +591,18 @@ describe('executeProviderTurnWithRecovery', () => {
           providerName: 'vercel-ai-gateway',
           promptProfile: 'notification-decision',
           schema: 'murph.assistant-provider-request-debug.v1',
-          systemPrompt:
-            'notification:chat:2026-04-08:America/Los_Angeles:Vault overview for navigation only:\n- Canonical coverage includes 1 meal event.',
+          systemPromptHash: expect.any(String),
+          systemPromptLength: expect.any(Number),
           turnTrigger: 'automation-cron',
           type: 'assistant.provider.request.debug',
-          userPrompt: 'Check the notification decision.',
+          userPromptHash: expect.any(String),
+          userPromptLength: 'Check the notification decision.'.length,
           zeroDataRetention: true,
         }),
         updates: [
           {
             kind: 'status',
-            text: 'Hosted notification provider request debug payload captured.',
+            text: 'Hosted notification provider request summary captured.',
           },
         ],
       }),
