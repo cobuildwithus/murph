@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
+  HostedExecutionBundleRef,
   HostedExecutionRuntimeTimerWake,
   HostedRuntimeDrainRequest,
   HostedRunRecord,
@@ -28,6 +29,9 @@ import {
   RunnerRunProcessor,
   summarizeHostedAssistantDeliveryOutcomes,
 } from "../src/user-runner/runner-run-processor.ts";
+import {
+  HostedBundleArchiveValidationError,
+} from "../src/hosted-bundle-validation.js";
 import {
   recordHostedRunBreadcrumbInWebBestEffort,
   recordHostedRunPhaseLogInWebBestEffort,
@@ -128,6 +132,22 @@ function createInvokeRunnerProcessor(input: {
   const readBundlesForRunner = vi.fn().mockResolvedValue(null);
   const readRunnerSecrets = vi.fn().mockResolvedValue(input.runnerSecrets ?? {});
   const pendingCleanupByRunId = new Map<string, unknown>();
+  const stateStore = {
+    beginRun: vi.fn().mockResolvedValue(undefined),
+    clearPendingRunCleanup: vi.fn().mockImplementation(async (runId: string) => {
+      pendingCleanupByRunId.set(runId, null);
+    }),
+    completeRun: vi.fn().mockResolvedValue(undefined),
+    failRun: vi.fn(),
+    readActiveRunLease: vi.fn().mockResolvedValue(null),
+    readPendingRunCleanup: vi.fn().mockImplementation(async (runId: string) =>
+      pendingCleanupByRunId.get(runId) ?? null
+    ),
+    recordRunPhase: vi.fn().mockResolvedValue({}),
+    writePendingRunCleanup: vi.fn().mockImplementation(async (runId: string, cleanup: unknown) => {
+      pendingCleanupByRunId.set(runId, cleanup);
+    }),
+  };
   const ensureRunnerStores = vi.fn().mockResolvedValue({
     bundleSync: {
       readBundlesForRunner,
@@ -163,21 +183,7 @@ function createInvokeRunnerProcessor(input: {
       getByName: vi.fn(),
     },
     runnerRuntimeEnvSource: input.forwardedEnvSource ?? {},
-    stateStore: {
-      beginRun: vi.fn().mockResolvedValue(undefined),
-      clearPendingRunCleanup: vi.fn().mockImplementation(async (runId: string) => {
-        pendingCleanupByRunId.set(runId, null);
-      }),
-      completeRun: vi.fn().mockResolvedValue(undefined),
-      failRun: vi.fn(),
-      readPendingRunCleanup: vi.fn().mockImplementation(async (runId: string) =>
-        pendingCleanupByRunId.get(runId) ?? null
-      ),
-      recordRunPhase: vi.fn().mockResolvedValue({}),
-      writePendingRunCleanup: vi.fn().mockImplementation(async (runId: string, cleanup: unknown) => {
-        pendingCleanupByRunId.set(runId, cleanup);
-      }),
-    },
+    stateStore,
     runtimeAlarmScheduler: {},
   } as never);
 
@@ -186,6 +192,7 @@ function createInvokeRunnerProcessor(input: {
     processor,
     readBundlesForRunner,
     readRunnerSecrets,
+    stateStore,
   };
 }
 
@@ -2238,6 +2245,61 @@ describe("RunnerRunProcessor.executeRunDrain", () => {
     });
     expect(beginRun).toHaveBeenCalledTimes(1);
     expect(completeRun).toHaveBeenCalledTimes(1);
+  });
+
+  it("quarantines invalid authoritative runner input instead of retrying the run", async () => {
+    const {
+      processor,
+      readBundlesForRunner,
+      stateStore,
+    } = createInvokeRunnerProcessor();
+    const invalidRef: HostedExecutionBundleRef = {
+      hash: "0".repeat(64),
+      key: "bundles/user_123/vault/invalid",
+      size: 20,
+      updatedAt: "2026-04-20T09:00:00.000Z",
+    };
+    const validationError = new HostedBundleArchiveValidationError({
+      cause: new Error("Hosted bundle archive is invalid."),
+      operation: "runner-input",
+      ref: invalidRef,
+    });
+    readBundlesForRunner.mockRejectedValueOnce(validationError);
+    const invokeHostedExecutionContainerRunner = vi.spyOn(
+      runnerContainerModule,
+      "invokeHostedExecutionContainerRunner",
+    );
+
+    const result = await processor.executeRunDrain({
+      currentBundleRef: invalidRef,
+      events: [],
+      primaryWake: createRuntimeTimerWake(),
+      run: createHostedRunRecord({
+        runId: "run-invalid-input",
+      }),
+      runToken: "run-token",
+    });
+
+    expect(result).toEqual({
+      cursorSnapshotRef: invalidRef,
+      finalizeRequired: false,
+      redactedSummary: {
+        phase: "quarantined",
+        reason: "invalid_authoritative_snapshot",
+      },
+      state: "quarantined",
+    });
+    expect(stateStore.completeRun).toHaveBeenCalledTimes(1);
+    expect(stateStore.failRun).not.toHaveBeenCalled();
+    expect(stateStore.recordRunPhase).toHaveBeenCalledWith(expect.objectContaining({
+      error: validationError,
+      level: "warn",
+      message: expect.stringContaining(
+        "Hosted run execution quarantined an invalid authoritative snapshot instead of scheduling another retry.",
+      ),
+      phase: "quarantined",
+    }));
+    expect(invokeHostedExecutionContainerRunner).not.toHaveBeenCalled();
   });
 
   it("leaves existing browser-vault replica objects untouched when a completed run returns no replica", async () => {

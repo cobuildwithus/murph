@@ -51,6 +51,9 @@ import {
   invokeHostedExecutionContainerRunner,
 } from "../runner-container.js";
 import {
+  isHostedBundleArchiveValidationError,
+} from "../hosted-bundle-validation.js";
+import {
   buildHostedRunnerAmbientEnv,
   buildHostedRunnerContainerEnv,
   buildHostedRunnerJobRuntimeConfig,
@@ -439,6 +442,51 @@ export class RunnerRunProcessor {
 
       return await input.lifecycle.handleSuccess(runnerResult, context);
     } catch (error) {
+      if (isHostedBundleArchiveValidationError(error) && error.operation === "runner-input") {
+        await this.dependencies.stateStore.completeRun({
+          eventId: wake.eventId,
+          finishedAt: new Date().toISOString(),
+          leaseOwner: context.leaseOwner,
+        });
+        void recordHostedRunBreadcrumbInWebBestEffort({
+          baseUrl: this.dependencies.hostedWebBaseUrl,
+          callbackSigning: this.dependencies.env.webCallbackSigning,
+          error,
+          level: "warn",
+          message:
+            "Cloudflare quarantined hosted run execution because the authoritative bundle archive is invalid.",
+          phase: "quarantined",
+          redacted: {
+            bundleRefKey: error.refKey,
+            reason: "invalid_authoritative_snapshot",
+            resumeFinalize: input.lifecycle.resumeFinalize,
+          },
+          run,
+          runToken: input.runToken,
+          userId,
+          wakeEventId: wake.eventId,
+        });
+        await this.advanceRunPhase({
+          wake,
+          error,
+          level: "warn",
+          message:
+            "Hosted run execution quarantined an invalid authoritative snapshot instead of scheduling another retry.",
+          phase: "quarantined",
+          run,
+          runToken: input.runToken,
+        });
+        return {
+          cursorSnapshotRef: input.currentBundleRef,
+          finalizeRequired: false,
+          redactedSummary: {
+            phase: "quarantined",
+            reason: "invalid_authoritative_snapshot",
+          },
+          state: "quarantined",
+        };
+      }
+
       await this.dependencies.stateStore.failRun({
         error,
         eventId: wake.eventId,

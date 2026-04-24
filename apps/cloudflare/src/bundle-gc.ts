@@ -12,6 +12,10 @@ import {
   MissingHostedBundleError,
   type R2BucketLike,
 } from "./bundle-store.js";
+import {
+  HostedBundleArchiveValidationError,
+  isHostedBundleArchiveValidationFailure,
+} from "./hosted-bundle-validation.js";
 
 export class HostedBundleGarbageCollector {
   constructor(
@@ -121,6 +125,13 @@ export class HostedBundleGarbageCollector {
       if (!options.failIfUnreadable) {
         return new Set();
       }
+      if (isHostedBundleArchiveValidationFailure(error)) {
+        throw new HostedBundleArchiveValidationError({
+          cause: error,
+          operation: "cleanup-authoritative-next",
+          ref,
+        });
+      }
       throw error;
     }
 
@@ -132,11 +143,26 @@ export class HostedBundleGarbageCollector {
       return new Set();
     }
 
-    return new Set(
-      listHostedBundleArtifacts({
-        bytes,
-        expectedKind: "vault",
-      }).map((artifact) => artifact.ref.sha256),
-    );
+    try {
+      return new Set(
+        listHostedBundleArtifacts({
+          bytes,
+          expectedKind: "vault",
+        }).map((artifact) => artifact.ref.sha256),
+      );
+    } catch (error) {
+      if (!isHostedBundleArchiveValidationFailure(error)) {
+        throw error;
+      }
+      if (!options.failIfUnreadable) {
+        return new Set();
+      }
+
+      throw new HostedBundleArchiveValidationError({
+        cause: error,
+        operation: "cleanup-authoritative-next",
+        ref,
+      });
+    }
   }
 }

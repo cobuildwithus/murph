@@ -42,6 +42,9 @@ import {
   resolveHostedRunDrainInputs,
   type HostedWakeInputContext,
 } from "./wake-inputs.js";
+import {
+  isHostedBundleArchiveValidationError,
+} from "../hosted-bundle-validation.js";
 
 export type HostedRunDrainState = HostedIngressLifecycleState;
 
@@ -221,6 +224,23 @@ export async function prepareAndCommitAcquiredHostedRun(
       run,
       runToken,
     });
+
+    if (execution.state === "quarantined") {
+      return quarantineAcquiredHostedRunAfterInvalidBundle(context, {
+        acquired: input.acquired,
+        eventResults: input.acquired.events.map((event) => ({
+          ingressEventId: event.id,
+          quarantineCode: "invalid-authoritative-snapshot",
+          state: "quarantined",
+        })),
+        outputCommittedSeq: resolved.outputCommittedSeq,
+        run,
+        runToken,
+        snapshotRef: execution.cursorSnapshotRef ?? input.acquired.cursor.snapshotRef,
+        summary: execution.redactedSummary ?? null,
+        userId: input.userId,
+      });
+    }
 
     if (execution.state !== "completed") {
       return failAcquiredHostedRun(context, {
@@ -549,6 +569,58 @@ export async function finalizeAcquiredHostedRun(
     await input.onRuntimeDeliveryFinished?.();
   }
 
+  if (execution.state === "quarantined") {
+    const finalized = await finalizeHostedRunInWeb({
+      baseUrl: context.hostedWebBaseUrl,
+      body: {
+        browserVaultReplicaRef: null,
+        finalSnapshotRef: execution.cursorSnapshotRef ?? input.acquired.cursor.snapshotRef,
+        nextRuntimeWakeAt: null,
+        nextRuntimeWakeReason: null,
+        redactedSummary: execution.redactedSummary ?? {
+          phase: "quarantined",
+          reason: "invalid_authoritative_snapshot",
+        },
+        runId: run.id,
+        runToken,
+      },
+      boundUserId: input.userId,
+      callbackSigning: context.callbackSigning,
+      timeoutMs: context.runnerTimeoutMs,
+    });
+
+    context.recordHostedRunBreadcrumb({
+      level: finalized.finalized ? "warn" : "error",
+      message: finalized.finalized
+        ? "Cloudflare finalized a hosted run without runtime replay because the authoritative bundle archive is invalid."
+        : "Cloudflare could not finalize a hosted run after detecting an invalid authoritative bundle archive.",
+      phase: finalized.finalized ? "finalize_quarantined" : "finalize_quarantine_failed",
+      redacted: {
+        finalized: finalized.finalized,
+        reason: "invalid_authoritative_snapshot",
+      },
+      run,
+      runToken,
+      userId: input.userId,
+    });
+
+    if (finalized.finalized) {
+      await context.runProcessor.cleanupTransientWakeDataBestEffortForRunDrain({
+        ...(input.cleanupTargets && input.cleanupTargets.length > 0
+          ? { cleanupTargets: input.cleanupTargets }
+          : {}),
+        runId: run.id,
+        userId: input.userId,
+        wakes: input.cleanupWakes ?? [],
+      });
+    }
+
+    return {
+      cursor: finalized.cursor,
+      state: finalized.finalized ? "completed" : "backpressured",
+    };
+  }
+
   if (execution.state !== "completed") {
     await releaseHostedRunFinalizeForRetry(context, {
       failureCode: execution.state === "backpressured"
@@ -710,20 +782,36 @@ export async function cleanupCommittedCursorTransitionBestEffort(
         userId: input.userId,
       });
     } catch (error) {
-      emitHostedExecutionStructuredLog({
-        component: "cloudflare.user-runner",
-        details: {
-          nextBundleRefKey: input.nextCursor.snapshotRef?.key ?? null,
-          previousBundleRefKey: input.previousCursor.snapshotRef?.key ?? null,
-        },
-        error,
-        level: "warn",
-        message:
-          "Hosted bundle cleanup failed after the authoritative cursor committed a new snapshot ref; continuing without cleanup.",
-        phase: "wake.running",
-        userId: input.userId,
-      });
-      cleanupApplied = false;
+      if (isHostedBundleArchiveValidationError(error)) {
+        emitHostedExecutionStructuredLog({
+          component: "cloudflare.user-runner",
+          details: {
+            nextBundleRefKey: input.nextCursor.snapshotRef?.key ?? null,
+            previousBundleRefKey: input.previousCursor.snapshotRef?.key ?? null,
+          },
+          error,
+          level: "warn",
+          message:
+            "Hosted bundle cleanup found an invalid authoritative snapshot archive; preserving prior bundle data and marking cleanup reconciled.",
+          phase: "wake.running",
+          userId: input.userId,
+        });
+      } else {
+        emitHostedExecutionStructuredLog({
+          component: "cloudflare.user-runner",
+          details: {
+            nextBundleRefKey: input.nextCursor.snapshotRef?.key ?? null,
+            previousBundleRefKey: input.previousCursor.snapshotRef?.key ?? null,
+          },
+          error,
+          level: "warn",
+          message:
+            "Hosted bundle cleanup failed after the authoritative cursor committed a new snapshot ref; continuing without cleanup.",
+          phase: "wake.running",
+          userId: input.userId,
+        });
+        cleanupApplied = false;
+      }
     }
   }
 
@@ -1195,6 +1283,80 @@ export async function releaseHostedRunFinalizeForRetry(
       userId: input.userId,
     });
   }
+}
+
+async function quarantineAcquiredHostedRunAfterInvalidBundle(
+  context: Pick<
+    HostedRunFinalizationContext,
+    "callbackSigning" | "hostedWebBaseUrl" | "recordHostedRunBreadcrumb" | "runnerTimeoutMs"
+  >,
+  input: {
+    acquired: HostedRunAcquireResponse;
+    eventResults: HostedRunEventResult[];
+    outputCommittedSeq: string;
+    run: HostedRunRecord;
+    runToken: string;
+    snapshotRef: HostedExecutionCursorState["snapshotRef"];
+    summary: Record<string, unknown> | null;
+    userId: string;
+  },
+): Promise<HostedRunFinalizationOutcome> {
+  context.recordHostedRunBreadcrumb({
+    level: "warn",
+    message:
+      "Cloudflare quarantined a hosted run because the authoritative bundle archive is invalid.",
+    phase: "commit_quarantine_attempted",
+    redacted: {
+      commitKind: "invalid_authoritative_snapshot",
+      eventCount: input.eventResults.length,
+    },
+    run: input.run,
+    runToken: input.runToken,
+    userId: input.userId,
+  });
+  const commit = await commitHostedRunToWeb({
+    baseUrl: context.hostedWebBaseUrl,
+    body: {
+      eventResults: input.eventResults,
+      expectedCursorVersion: input.acquired.cursor.version,
+      finalizeRequired: false,
+      nextRuntimeWakeAt: null,
+      nextRuntimeWakeReason: null,
+      outputCommittedSeq: input.outputCommittedSeq,
+      preparedSnapshotRef: input.snapshotRef,
+      redactedSummary: input.summary ?? {
+        eventCount: input.eventResults.length,
+        phase: "quarantined",
+        reason: "invalid_authoritative_snapshot",
+      },
+      runId: input.run.id,
+      runToken: input.runToken,
+    },
+    boundUserId: input.userId,
+    callbackSigning: context.callbackSigning,
+    timeoutMs: context.runnerTimeoutMs,
+  });
+
+  context.recordHostedRunBreadcrumb({
+    level: commit.committed ? "warn" : "error",
+    message: commit.committed
+      ? "Cloudflare committed invalid-bundle quarantine for the hosted run."
+      : "Cloudflare could not commit invalid-bundle quarantine for the hosted run.",
+    phase: commit.committed ? "commit_quarantined" : "commit_quarantine_failed",
+    redacted: {
+      committed: commit.committed,
+      eventCount: input.eventResults.length,
+      reason: "invalid_authoritative_snapshot",
+    },
+    run: input.run,
+    runToken: input.runToken,
+    userId: input.userId,
+  });
+
+  return {
+    cursor: commit.cursor,
+    state: commit.committed ? "completed" : "backpressured",
+  };
 }
 
 async function failAcquiredHostedRun(

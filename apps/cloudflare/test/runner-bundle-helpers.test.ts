@@ -22,6 +22,9 @@ import {
 import { encryptHostedStorageEnvelope } from "../src/crypto.js";
 import { hostedArtifactObjectKey } from "../src/storage-paths.js";
 import { HostedBundleGarbageCollector } from "../src/bundle-gc.js";
+import {
+  HostedBundleArchiveValidationError,
+} from "../src/hosted-bundle-validation.js";
 import { RunnerBundleSync } from "../src/user-runner/runner-bundle-sync.js";
 import { MemoryEncryptedR2Bucket, createTestRootKey } from "./test-helpers.js";
 
@@ -171,7 +174,8 @@ describe("RunnerBundleSync", () => {
         v1: bundleKey,
       },
     );
-    const firstBundle = Uint8Array.from(Buffer.from("bundle-one"));
+    const firstBundle = createTextOnlyBundle("notes/current.txt", "bundle-one");
+    const secondBundle = createTextOnlyBundle("notes/next.txt", "bundle-two");
     const currentBundleRef = await createHostedBundleStore({
       bucket: bucket.api,
       key: bundleKey,
@@ -182,10 +186,123 @@ describe("RunnerBundleSync", () => {
     const nextBundle = await bundleSync.applyRunnerResultBundles(
       "member_123",
       currentBundleRef,
-      encodeHostedBundleBase64(Uint8Array.from(Buffer.from("bundle-two"))),
+      encodeHostedBundleBase64(secondBundle),
     );
 
     await expect(bundleSync.readBundlesForRunner(nextBundle.bundleRef, "member_123")).resolves.not.toBeNull();
+  });
+
+  it("rejects an invalid acquired snapshot archive before invoking runner input", async () => {
+    const bucket = createBucketStore();
+    const bundleSync = new RunnerBundleSync(
+      bucket.api,
+      bundleKey,
+      "v1",
+      {
+        v1: bundleKey,
+      },
+    );
+    const invalidRef = await createHostedBundleStore({
+      bucket: bucket.api,
+      key: bundleKey,
+      keyId: "v1",
+      userId: "member_123",
+    }).writeBundle("vault", Uint8Array.from(Buffer.from("not-a-hosted-bundle")));
+
+    await expect(bundleSync.readBundlesForRunner(invalidRef, "member_123")).rejects.toMatchObject({
+      operation: "runner-input",
+      refKey: invalidRef.key,
+    });
+    await expect(bundleSync.readBundlesForRunner(invalidRef, "member_123")).rejects.toBeInstanceOf(
+      HostedBundleArchiveValidationError,
+    );
+  });
+
+  it("rejects invalid runner output before writing a new bundle object", async () => {
+    const bucket = createBucketStore();
+    const bundleSync = new RunnerBundleSync(
+      bucket.api,
+      bundleKey,
+      "v1",
+      {
+        v1: bundleKey,
+      },
+    );
+
+    await expect(bundleSync.applyRunnerResultBundles(
+      "member_123",
+      null,
+      encodeHostedBundleBase64(Uint8Array.from(Buffer.from("not-a-hosted-bundle"))),
+    )).rejects.toMatchObject({
+      operation: "runner-output",
+    });
+
+    expect(bucket.values.size).toBe(0);
+    expect(bucket.deleted).toEqual([]);
+  });
+
+  it("rejects runner output with malformed inline file contents before writing a new bundle object", async () => {
+    const bucket = createBucketStore();
+    const bundleSync = new RunnerBundleSync(
+      bucket.api,
+      bundleKey,
+      "v1",
+      {
+        v1: bundleKey,
+      },
+    );
+
+    await expect(bundleSync.applyRunnerResultBundles(
+      "member_123",
+      null,
+      encodeHostedBundleBase64(createInvalidInlineContentsBundle()),
+    )).rejects.toMatchObject({
+      operation: "runner-output",
+    });
+
+    expect(bucket.values.size).toBe(0);
+    expect(bucket.deleted).toEqual([]);
+  });
+
+  it("wraps acquired snapshot ref-integrity mismatches as deterministic runner input validation failures", async () => {
+    const bucket = createBucketStore();
+    const bundleStore = createHostedBundleStore({
+      bucket: bucket.api,
+      key: bundleKey,
+      keyId: "v1",
+      userId: "member_123",
+    });
+    const currentRef = await bundleStore.writeBundle(
+      "vault",
+      createTextOnlyBundle("notes/current.txt", "current"),
+    );
+    const corruptedEnvelope = await encryptHostedStorageEnvelope({
+      aad: buildHostedStorageAad({
+        hash: currentRef.hash,
+        key: currentRef.key,
+        kind: "vault",
+        purpose: "bundle",
+        size: currentRef.size,
+      }),
+      key: bundleKey,
+      keyId: "v1",
+      plaintext: createTextOnlyBundle("notes/current.txt", "corrupted-current"),
+      scope: "bundle",
+    });
+    await bucket.api.put(currentRef.key, JSON.stringify(corruptedEnvelope));
+    const bundleSync = new RunnerBundleSync(
+      bucket.api,
+      bundleKey,
+      "v1",
+      {
+        v1: bundleKey,
+      },
+    );
+
+    await expect(bundleSync.readBundlesForRunner(currentRef, "member_123")).rejects.toMatchObject({
+      operation: "runner-input",
+      refKey: currentRef.key,
+    });
   });
 
   it("refuses to restore a bundle from another user's namespace", async () => {
@@ -220,14 +337,15 @@ describe("RunnerBundleSync", () => {
         v1: bundleKey,
       },
     );
+    const globalBundle = createTextOnlyBundle("notes/global.txt", "bundle-global");
     const globalRef = await createHostedBundleStore({
       bucket: bucket.api,
       key: bundleKey,
       keyId: "v1",
-    }).writeBundle("vault", Uint8Array.from(Buffer.from("bundle-global")));
+    }).writeBundle("vault", globalBundle);
 
     await expect(bundleSync.readBundlesForRunner(globalRef, "member_a")).resolves.toEqual(
-      encodeHostedBundleBase64(Uint8Array.from(Buffer.from("bundle-global"))),
+      encodeHostedBundleBase64(globalBundle),
     );
   });
 
@@ -246,12 +364,12 @@ describe("RunnerBundleSync", () => {
       key: bundleKey,
       keyId: "v1",
       userId: "member_123",
-    }).writeBundle("vault", Uint8Array.from(Buffer.from("bundle-one")));
+    }).writeBundle("vault", createTextOnlyBundle("notes/current.txt", "bundle-one"));
 
     await expect(bundleSync.applyRunnerResultBundles(
       "member_123",
       currentBundleRef,
-      encodeHostedBundleBase64(Uint8Array.from(Buffer.from("bundle-two"))),
+      encodeHostedBundleBase64(createTextOnlyBundle("notes/next.txt", "bundle-two")),
     )).resolves.toEqual({
       bundleRef: expect.objectContaining({
         key: expect.any(String),
@@ -662,6 +780,62 @@ describe("HostedBundleGarbageCollector", () => {
     expect(bucket.values.has(previousBundleRef.key)).toBe(true);
   });
 
+  it("fails closed and preserves the previous bundle when the authoritative next bundle is an invalid archive", async () => {
+    const bucket = createBucketStore();
+    const artifactStore = createHostedArtifactStore({
+      bucket: bucket.api,
+      key: bundleKey,
+      keyId: "v1",
+      userId: "member_123",
+    });
+    const bundleStore = createHostedBundleStore({
+      bucket: bucket.api,
+      key: bundleKey,
+      keyId: "v1",
+      userId: "member_123",
+    });
+    const previousArtifactBytes = Uint8Array.from(Buffer.from("old-artifact"));
+    const previousArtifactSha = sha256HostedBundleHex(previousArtifactBytes);
+
+    await artifactStore.writeArtifact(previousArtifactSha, previousArtifactBytes);
+    const previousBundleRef = await bundleStore.writeBundle(
+      "vault",
+      createArtifactOnlyBundle(previousArtifactSha, previousArtifactBytes.byteLength),
+    );
+    const nextBundleRef = await bundleStore.writeBundle(
+      "vault",
+      Uint8Array.from(Buffer.from("not-a-hosted-bundle")),
+    );
+    const previousArtifactKey = await artifactObjectKeyForTest(
+      bundleKey,
+      "member_123",
+      previousArtifactSha,
+    );
+
+    await expect(
+      new HostedBundleGarbageCollector(
+        bucket.api,
+        bundleKey,
+        "v1",
+        {
+          v1: bundleKey,
+        },
+      ).cleanupBundleTransition({
+        nextBundleRef,
+        previousBundleRef,
+        userId: "member_123",
+      }),
+    ).rejects.toMatchObject({
+      operation: "cleanup-authoritative-next",
+      refKey: nextBundleRef.key,
+    });
+
+    expect(bucket.deleted).toEqual([]);
+    expect(bucket.values.has(previousArtifactKey)).toBe(true);
+    expect(bucket.values.has(previousBundleRef.key)).toBe(true);
+    expect(bucket.values.has(nextBundleRef.key)).toBe(true);
+  });
+
   it("skips artifact diffing but still deletes an unreadable superseded previous bundle", async () => {
     const bucket = createBucketStore();
     const artifactStore = createHostedArtifactStore({
@@ -762,6 +936,24 @@ function createTextOnlyBundle(path: string, text: string): Uint8Array {
     root: "vault",
     text,
   });
+}
+
+function createInvalidInlineContentsBundle(): Uint8Array {
+  return Uint8Array.from(
+    gzipSync(
+      Buffer.from(JSON.stringify({
+        files: [
+          {
+            contentsBase64: "not@@base64",
+            path: "notes/bad.txt",
+            root: "vault",
+          },
+        ],
+        kind: "vault",
+        schema: "murph.hosted-bundle.v1",
+      })),
+    ),
+  );
 }
 
 function createBucketStore() {
