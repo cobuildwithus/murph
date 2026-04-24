@@ -46,6 +46,7 @@ afterEach(async () => {
     await cleanup();
   }
   activeJoinInviteSuccessClientCleanups.clear();
+  vi.useRealTimers();
 });
 
 test("verify-stage success page keeps the copy neutral while sign-in settles", () => {
@@ -165,6 +166,53 @@ test("active success page reconciles the returned session when the invite is alr
     }),
     method: "POST",
   }));
+
+  await view.cleanup();
+});
+
+test("pending success page shows email support after the setup delay", async () => {
+  vi.useFakeTimers();
+  const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+    new Response(JSON.stringify(createStatus("activating")), {
+      status: 200,
+    }),
+  );
+  vi.stubGlobal("fetch", fetchMock);
+
+  const view = await renderJoinInviteSuccessClientForEffects({
+    initialStatus: createStatus("activating"),
+  });
+  await act(async () => {});
+
+  assert.doesNotMatch(view.container.textContent ?? "", /Setup is taking longer than expected/);
+
+  await act(async () => {
+    vi.advanceTimersByTime(59_999);
+  });
+
+  assert.doesNotMatch(view.container.textContent ?? "", /Setup is taking longer than expected/);
+
+  await act(async () => {
+    vi.advanceTimersByTime(1);
+  });
+
+  assert.match(view.container.textContent ?? "", /Setup is taking longer than expected/);
+  assert.match(view.container.textContent ?? "", /Support ready/);
+  assert.match(view.container.textContent ?? "", /the draft will include the setup context we need/);
+  assert.match(view.container.textContent ?? "", /Email support/);
+
+  const supportButton = findButtonByText(view.container, /Email support/);
+
+  await act(async () => {
+    supportButton.click();
+  });
+
+  expect(view.locationAssign).toHaveBeenCalledTimes(1);
+  const mailtoHref = String(view.locationAssign.mock.calls[0]?.[0] ?? "");
+  expect(mailtoHref).toContain("mailto:support@withmurph.ai");
+  expect(mailtoHref).toContain("Invite%20code%3A%20invite-code");
+  expect(mailtoHref).toContain("Current%20stage%3A%20activating");
+  expect(mailtoHref).not.toContain("cs_123");
 
   await view.cleanup();
 });
