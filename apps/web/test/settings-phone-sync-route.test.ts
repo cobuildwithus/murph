@@ -204,6 +204,41 @@ describe("settings phone sync route", () => {
     });
   });
 
+  it("blocks suspended hosted members before syncing the phone identity", async () => {
+    mocks.requirePrivyMemberAuth.mockResolvedValue({
+      identity: {
+        phone: {
+          number: "+14155552671",
+        },
+      },
+      linkedAccounts: [],
+      member: {
+        billingStatus: "active",
+        id: "member_123",
+        suspendedAt: new Date("2026-04-07T01:00:00.000Z"),
+      },
+    });
+
+    const response = await settingsPhoneSyncRoute.POST(
+      new Request("https://join.example.test/api/settings/phone/sync", {
+        headers: SAME_ORIGIN_HEADERS,
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    expect(mocks.reconcileHostedPrivyIdentityOnMemberTx).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedMemberChannelsUpdatedTx).not.toHaveBeenCalled();
+    expect(mocks.nudgeHostedRunBestEffort).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "HOSTED_MEMBER_SUSPENDED",
+        message: "This hosted account is suspended. Contact support to restore access.",
+        retryable: false,
+      },
+    });
+  });
+
   it("requires Privy-authenticated hosted member context before syncing the phone number", async () => {
     mocks.requirePrivyMemberAuth.mockRejectedValue(hostedOnboardingError({
       code: "AUTH_REQUIRED",

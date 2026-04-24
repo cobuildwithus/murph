@@ -345,6 +345,11 @@ describe("settings telegram sync route", () => {
   it("returns a retryable conflict while the Telegram account has not reached the server-side Privy session yet", async () => {
     mocks.requirePrivyMemberAuth.mockResolvedValue({
       linkedAccounts: [],
+      member: {
+        billingStatus: "active",
+        id: "member_123",
+        suspendedAt: null,
+      },
       verifiedPrivyUser: {
         id: "did:privy:user_123",
         linked_accounts: [],
@@ -409,6 +414,11 @@ describe("settings telegram sync route", () => {
   it("returns a retryable conflict when the server-side Privy identity token is still on an older Telegram account", async () => {
     mocks.requirePrivyMemberAuth.mockResolvedValue({
       linkedAccounts: [],
+      member: {
+        billingStatus: "active",
+        id: "member_123",
+        suspendedAt: null,
+      },
       verifiedPrivyUser: {
         id: "did:privy:user_123",
         linked_accounts: [
@@ -449,6 +459,11 @@ describe("settings telegram sync route", () => {
   it("rejects ambiguous Telegram state when top-level and linked Telegram accounts disagree", async () => {
     mocks.requirePrivyMemberAuth.mockResolvedValue({
       linkedAccounts: [],
+      member: {
+        billingStatus: "active",
+        id: "member_123",
+        suspendedAt: null,
+      },
       verifiedPrivyUser: {
         id: "did:privy:user_123",
         linked_accounts: [
@@ -492,11 +507,25 @@ describe("settings telegram sync route", () => {
   });
 
   it("blocks sync when hosted access is suspended", async () => {
-    mocks.requirePrivyMemberAuth.mockRejectedValue(hostedOnboardingError({
-      code: "HOSTED_MEMBER_SUSPENDED",
-      httpStatus: 403,
-      message: "This hosted account is suspended. Contact support to restore access.",
-    }));
+    mocks.requirePrivyMemberAuth.mockResolvedValue({
+      linkedAccounts: [],
+      member: {
+        billingStatus: "active",
+        id: "member_123",
+        suspendedAt: new Date("2026-04-07T01:00:00.000Z"),
+      },
+      verifiedPrivyUser: {
+        id: "did:privy:user_123",
+        linked_accounts: [
+          {
+            first_name: "Alice",
+            id: 456,
+            type: "telegram",
+            username: "alice",
+          },
+        ],
+      },
+    });
 
     const response = await settingsTelegramSyncRoute.POST(
       new Request("https://join.example.test/api/settings/telegram/sync", {

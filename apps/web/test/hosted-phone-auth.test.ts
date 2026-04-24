@@ -273,7 +273,7 @@ describe("HostedPhoneAuth", () => {
     assert.doesNotMatch(markup, /Preparing your account/);
   });
 
-  it("renders the one-tap invite send-code shortcut without exposing the phone hint", async () => {
+  it("renders invite signup as manual phone entry without exposing the phone hint", async () => {
     const { HostedInvitePhoneAuth } = await import("@/src/components/hosted-onboarding/hosted-invite-phone-auth");
 
     const markup = renderToStaticMarkup(
@@ -282,14 +282,13 @@ describe("HostedPhoneAuth", () => {
       }),
     );
 
-    assert.match(markup, /Send code/);
-    assert.match(markup, /text a 6-digit code to your phone\./);
-    assert.match(markup, /Use a different number/);
+    assert.match(markup, /Phone number/);
+    assert.match(markup, /Enter the number that received your Murph invite\./);
+    assert.match(markup, /Text me a code/);
+    assert.match(markup, /By signing up, you agree to our/);
     assert.match(markup, /data-privy-captcha="mounted"/);
-    assert.doesNotMatch(markup, /Phone number/);
-    assert.doesNotMatch(markup, /Text me a code/);
+    assert.doesNotMatch(markup, /text a 6-digit code to your phone\./);
     assert.doesNotMatch(markup, /\*\*\* 4567/);
-    assert.doesNotMatch(markup, /Phone number that received this invite/);
   });
 
   it("autofocuses and enlarges the verification code input", async () => {
@@ -305,7 +304,7 @@ describe("HostedPhoneAuth", () => {
         disabled: false,
         intent: "signup",
         pendingAction: null,
-        phoneFieldDescription: "Enter the number that messaged Murph.",
+        phoneFieldDescription: "Enter the number that received your Murph invite.",
         phoneFieldLabel: "Phone number",
         phoneCountryOptions: [{ code: "US", dialCode: "+1", label: "United States", placeholder: "(415) 555-2671" }],
         phoneNumber: "",
@@ -327,28 +326,6 @@ describe("HostedPhoneAuth", () => {
     assert.match(markup, /We texted the latest code to \*\*\* 2671\./);
   });
 
-  it("renders invite shortcut actions full width", async () => {
-    const { HostedInviteShortcutStep } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-step-views");
-
-    const markup = renderToStaticMarkup(
-      React.createElement(HostedInviteShortcutStep, {
-        disabled: false,
-        pendingAction: null,
-        onSendCode() {},
-        onUseDifferentNumber() {},
-      }),
-    );
-
-    assert.match(markup, /Send code/);
-    assert.match(markup, /Use a different number/);
-    assert.match(markup, /By signing up, you agree to our/);
-    assert.match(markup, /\/legal\/terms\.pdf/);
-    assert.match(markup, /\/legal\/privacy\.pdf/);
-    assert.match(markup, /underline-offset-4/);
-    assert.match(markup, /class="[^"]*w-fit[^"]*"/);
-    assert.equal(markup.match(/w-full/g)?.length ?? 0, 0);
-  });
-
   it("disables invite manual-entry send-code submit until the phone number is valid", async () => {
     const { HostedPhoneAuthFlow } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-views");
 
@@ -359,7 +336,7 @@ describe("HostedPhoneAuth", () => {
         disabled: false,
         intent: "signup",
         pendingAction: null,
-        phoneFieldDescription: "Enter the number that messaged Murph.",
+        phoneFieldDescription: "Enter the number that received your Murph invite.",
         phoneFieldLabel: "Phone number",
         phoneCountryOptions: [{ code: "US", dialCode: "+1", label: "United States", placeholder: "(415) 555-2671" }],
         phoneNumber: "",
@@ -392,7 +369,7 @@ describe("HostedPhoneAuth", () => {
         disabled: false,
         intent: "signup",
         pendingAction: null,
-        phoneFieldDescription: "Enter the number that messaged Murph.",
+        phoneFieldDescription: "Enter the number that received your Murph invite.",
         phoneFieldLabel: "Phone number",
         phoneCountryOptions: [{ code: "US", dialCode: "+1", label: "United States", placeholder: "(415) 555-2671" }],
         phoneNumber: "4155552671",
@@ -1080,7 +1057,7 @@ describe("HostedPhoneAuth", () => {
     assert.equal(assign.mock.calls[0]?.[0], "/join/invite-code");
   });
 
-  it("uses the invite shortcut route for the first invite send-code request", async () => {
+  it("starts invite signup in manual entry instead of the stored-phone shortcut", async () => {
     const harness = await loadHostedInvitePhoneAuthHarness();
 
     renderToStaticMarkup(
@@ -1089,14 +1066,11 @@ describe("HostedPhoneAuth", () => {
       }),
     );
 
-    assert.equal(harness.shortcutProps.length, 1);
-    await harness.shortcutProps[0].onSendCode();
-
-    assert.equal(harness.controller.handleInviteSendCode.mock.calls.length, 1);
+    assert.equal(harness.flowProps.length, 1);
     assert.equal(harness.controller.handleResendCode.mock.calls.length, 0);
   });
 
-  it("keeps resend on the invite shortcut path while the invite code step is active", async () => {
+  it("uses the manual-entry resend path while an invite code attempt is active", async () => {
     const harness = await loadHostedInvitePhoneAuthHarness({
       activeAttempt: {
         maskedPhoneNumber: "*** 2523",
@@ -1113,24 +1087,11 @@ describe("HostedPhoneAuth", () => {
     assert.equal(harness.flowProps.length, 1);
     await harness.flowProps[0].onResendCode();
 
-    assert.equal(harness.controller.handleInviteSendCode.mock.calls.length, 1);
-    assert.equal(harness.controller.handleResendCode.mock.calls.length, 0);
+    assert.equal(harness.controller.handleResendCode.mock.calls.length, 1);
   });
 
-  it("falls back to manual entry when the invite shortcut phone is unavailable", async () => {
-    const setManualEntryVisible = vi.fn();
-    const harness = await loadHostedInvitePhoneAuthHarness({
-      inviteSendResult: "manual-entry-required",
-      ReactMock: async () => {
-        const actual = await vi.importActual<typeof import("react")>("react");
-        return {
-          ...actual,
-          useState(initialValue: boolean) {
-            return [initialValue, setManualEntryVisible] as const;
-          },
-        };
-      },
-    });
+  it("resets the phone auth flow from invite manual entry without calling the stored-phone shortcut", async () => {
+    const harness = await loadHostedInvitePhoneAuthHarness();
 
     renderToStaticMarkup(
       React.createElement(harness.HostedInvitePhoneAuth, {
@@ -1138,17 +1099,15 @@ describe("HostedPhoneAuth", () => {
       }),
     );
 
-    assert.equal(harness.shortcutProps.length, 1);
-    await harness.shortcutProps[0].onSendCode();
+    assert.equal(harness.flowProps.length, 1);
+    harness.flowProps[0].onUseDifferentNumber();
 
-    assert.deepEqual(harness.controller.handleInviteSendCode.mock.calls.length, 1);
-    assert.deepEqual(setManualEntryVisible.mock.calls, [[true]]);
+    assert.equal(harness.controller.handleResetPhoneAuthFlow.mock.calls.length, 1);
   });
 });
 
 async function loadHostedInvitePhoneAuthHarness(input?: {
   activeAttempt?: { maskedPhoneNumber: string; phoneNumber: string } | null;
-  inviteSendResult?: "error" | "manual-entry-required" | "sent";
   ReactMock?: () => Promise<Record<string, unknown>>;
 }) {
   vi.resetModules();
@@ -1157,11 +1116,9 @@ async function loadHostedInvitePhoneAuthHarness(input?: {
     vi.doMock("react", input.ReactMock);
   }
 
-  const shortcutProps: Array<{ onSendCode: () => Promise<void>; onUseDifferentNumber: () => void }> = [];
   const flowProps: Array<{ onResendCode: () => Promise<void>; onUseDifferentNumber: () => void }> = [];
   const controller = createHostedInvitePhoneAuthControllerHarness(
     input?.activeAttempt ?? null,
-    input?.inviteSendResult,
   );
   const flushPendingInvitePhoneCodeMutation = vi.fn().mockResolvedValue(undefined);
 
@@ -1170,12 +1127,6 @@ async function loadHostedInvitePhoneAuthHarness(input?: {
   }));
   vi.doMock("@/src/components/hosted-onboarding/hosted-phone-auth-support", () => ({
     flushPendingInvitePhoneCodeMutation,
-  }));
-  vi.doMock("@/src/components/hosted-onboarding/hosted-phone-auth-step-views", () => ({
-    HostedInviteShortcutStep(props: { onSendCode: () => Promise<void>; onUseDifferentNumber: () => void }) {
-      shortcutProps.push(props);
-      return React.createElement("div", { "data-shortcut-step": "true" });
-    },
   }));
   vi.doMock("@/src/components/hosted-onboarding/hosted-phone-auth-views", () => ({
     HostedPhoneAuthFlow(props: { onResendCode: () => Promise<void>; onUseDifferentNumber: () => void }) {
@@ -1194,13 +1145,11 @@ async function loadHostedInvitePhoneAuthHarness(input?: {
     controller,
     flowProps,
     flushPendingInvitePhoneCodeMutation,
-    shortcutProps,
   };
 }
 
 function createHostedInvitePhoneAuthControllerHarness(
   activeAttempt: { maskedPhoneNumber: string; phoneNumber: string } | null,
-  inviteSendResult: "error" | "manual-entry-required" | "sent" = "sent",
 ) {
   return {
     authenticatedLoadingBody: "loading body",
@@ -1210,7 +1159,6 @@ function createHostedInvitePhoneAuthControllerHarness(
     errorMessage: null,
     flowDisabled: false,
     handleContinueAuthenticated: vi.fn(),
-    handleInviteSendCode: vi.fn().mockResolvedValue(inviteSendResult),
     handleLogout: vi.fn(),
     handleResendCode: vi.fn(),
     pendingAction: null,

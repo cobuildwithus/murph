@@ -13,6 +13,9 @@ import {
   decryptHostedWebNullableString,
   encryptHostedWebNullableString,
 } from "../hosted-web/encryption";
+import {
+  readHostedMemberRoutingTelegramPrivateState,
+} from "./member-private-codecs";
 
 import {
   type HostedMemberStripeBillingRefSnapshot,
@@ -122,6 +125,11 @@ export interface HostedMemberSnapshot extends HostedMemberBillingSnapshot {
   emailAuthorization?: HostedMemberEmailAuthorizationState | null;
   identity: HostedMemberIdentityState | null;
   routing: HostedMemberRoutingStateSnapshot | null;
+}
+
+export interface HostedMemberMessagingSetupState {
+  identity: Pick<HostedMemberIdentityState, "phoneLookupKey"> | null;
+  routing: Pick<HostedMemberRoutingStateSnapshot, "telegramThreadId" | "telegramUserId"> | null;
 }
 
 export async function createHostedMember(input: {
@@ -333,6 +341,52 @@ export async function readHostedMemberSnapshot(input: {
     identity,
     routing,
   });
+}
+
+export async function readHostedMemberMessagingSetupState(input: {
+  memberId: string;
+  prisma: HostedOnboardingReadClient;
+}): Promise<HostedMemberMessagingSetupState | null> {
+  const memberRecord = await input.prisma.hostedMember.findUnique({
+    where: {
+      id: input.memberId,
+    },
+    select: {
+      identity: {
+        select: {
+          phoneLookupKey: true,
+        },
+      },
+      routing: {
+        select: {
+          memberId: true,
+          telegramUserIdEncrypted: true,
+        },
+      },
+    },
+  });
+
+  if (!memberRecord) {
+    return null;
+  }
+
+  const telegramRouting = memberRecord.routing
+    ? readHostedMemberRoutingTelegramPrivateState(memberRecord.routing)
+    : null;
+
+  return {
+    identity: memberRecord.identity
+      ? {
+          phoneLookupKey: memberRecord.identity.phoneLookupKey,
+        }
+      : null,
+    routing: telegramRouting
+      ? {
+          telegramThreadId: telegramRouting.telegramThreadId,
+          telegramUserId: telegramRouting.telegramUserId,
+        }
+      : null,
+  };
 }
 
 function projectHostedMemberEmailAuthorizationLookup(

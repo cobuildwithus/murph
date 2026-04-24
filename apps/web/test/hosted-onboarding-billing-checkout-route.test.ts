@@ -56,6 +56,7 @@ describe("hosted onboarding billing checkout route", () => {
       ],
       member: {
         id: "member_123",
+        suspendedAt: null,
       },
     });
   });
@@ -90,6 +91,7 @@ describe("hosted onboarding billing checkout route", () => {
       ],
       member: {
         id: "member_123",
+        suspendedAt: null,
       },
       shareCode: "share_123",
     });

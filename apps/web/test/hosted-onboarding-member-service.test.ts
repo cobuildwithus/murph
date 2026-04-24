@@ -335,7 +335,7 @@ describe("hosted-onboarding member-service barrel", () => {
 });
 
 describe("prepareHostedInvitePhoneCode", () => {
-  it("returns the stored signup phone and records only the transient send attempt on the local identity row", async () => {
+  it("returns only a masked stored-phone hint and records the transient send attempt on the local identity row", async () => {
     const hostedMemberIdentity = {
       findUnique: vi.fn().mockResolvedValue(makeIdentityRecord({
         memberId: "member_123",
@@ -351,16 +351,17 @@ describe("prepareHostedInvitePhoneCode", () => {
       hostedMemberIdentity,
     });
 
-    await expect(
-      prepareHostedInvitePhoneCode({
-        inviteCode: "invite-code",
-        now: NOW,
-        prisma: prisma as never,
-      }),
-    ).resolves.toEqual({
-      phoneNumber: "+15551234567",
+    const result = await prepareHostedInvitePhoneCode({
+      inviteCode: "invite-code",
+      now: NOW,
+      prisma: prisma as never,
+    });
+
+    expect(result).toEqual({
+      phoneHint: "*** 4567",
       sendAttemptId: expect.stringMatching(/^hbpc_/u),
     });
+    expect(result).not.toHaveProperty("phoneNumber");
 
     expect(hostedMemberIdentity.update).toHaveBeenCalledWith({
       where: {
@@ -400,7 +401,7 @@ describe("prepareHostedInvitePhoneCode", () => {
     });
   });
 
-  it("reuses the canonical verified phone after the signup-only phone has been cleared", async () => {
+  it("reuses the canonical verified phone hint after the signup-only phone has been cleared", async () => {
     const hostedMemberIdentity = {
       findUnique: vi.fn().mockResolvedValue(makeIdentityRecord({
         memberId: "member_123",
@@ -417,16 +418,17 @@ describe("prepareHostedInvitePhoneCode", () => {
       hostedMemberIdentity,
     });
 
-    await expect(
-      prepareHostedInvitePhoneCode({
-        inviteCode: "invite-code",
-        now: NOW,
-        prisma: prisma as never,
-      }),
-    ).resolves.toEqual({
-      phoneNumber: "+15557654321",
+    const result = await prepareHostedInvitePhoneCode({
+      inviteCode: "invite-code",
+      now: NOW,
+      prisma: prisma as never,
+    });
+
+    expect(result).toEqual({
+      phoneHint: "*** 4567",
       sendAttemptId: expect.stringMatching(/^hbpc_/u),
     });
+    expect(result).not.toHaveProperty("phoneNumber");
   });
 
   it("rate limits repeated invite send-code requests", async () => {
@@ -440,6 +442,38 @@ describe("prepareHostedInvitePhoneCode", () => {
         findUnique: vi.fn().mockResolvedValue(makeIdentityRecord({
           memberId: "member_123",
           signupPhoneCodeSentAt: new Date("2026-04-07T01:00:30.000Z"),
+          signupPhoneNumber: "+15551234567",
+        })),
+        update,
+      },
+    });
+
+    await expect(
+      prepareHostedInvitePhoneCode({
+        inviteCode: "invite-code",
+        now: new Date("2026-04-07T01:00:45.000Z"),
+        prisma: prisma as never,
+      }),
+    ).rejects.toMatchObject({
+      code: "PHONE_CODE_COOLDOWN",
+      httpStatus: 429,
+    });
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it("rate limits repeated invite send-code requests while a send attempt is in flight", async () => {
+    const update = vi.fn();
+    const prisma = asRootPrisma({
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedInvite: {
+        findUnique: vi.fn().mockResolvedValue(makeInviteRecord()),
+      },
+      hostedMemberIdentity: {
+        findUnique: vi.fn().mockResolvedValue(makeIdentityRecord({
+          memberId: "member_123",
+          signupPhoneCodeSendAttemptId: "hbpc_in_flight",
+          signupPhoneCodeSendAttemptStartedAt: new Date("2026-04-07T01:00:30.000Z"),
+          signupPhoneCodeSentAt: null,
           signupPhoneNumber: "+15551234567",
         })),
         update,

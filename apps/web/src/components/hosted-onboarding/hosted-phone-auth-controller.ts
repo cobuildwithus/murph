@@ -28,15 +28,11 @@ import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/t
 import type { HostedPrivyClientSessionInput } from "./hosted-auth-completion";
 
 import {
-  abortInvitePhoneCodeSend,
   createHostedPhoneVerificationAttempt,
-  finalizeInvitePhoneCodeSendConfirmation,
   finalizeHostedPhoneLink,
   finalizeHostedPrivyVerification,
-  flushPendingInvitePhoneCodeMutation,
   isHostedPhoneVerificationCodeComplete,
   normalizeHostedPhoneVerificationCode,
-  queuePendingInvitePhoneCodeMutation,
   readSubmittedPhoneNumber,
   resolveHostedPhoneResendTarget,
   resolveHostedPhoneSubmission,
@@ -44,10 +40,6 @@ import {
   runHostedPrivyFinalizationAttempt,
   toErrorMessage,
 } from "./hosted-phone-auth-support";
-import {
-  HostedOnboardingApiError,
-  requestHostedOnboardingJson,
-} from "./client-api";
 import {
   HOSTED_PHONE_COUNTRY_OPTIONS,
 } from "./hosted-phone-country-options";
@@ -69,8 +61,6 @@ interface HostedPhoneAuthControllerInput {
   onSignOut?: () => Promise<void> | void;
   suppressAuthenticatedSessionIssue?: boolean;
 }
-
-type HostedInviteSendCodeResult = "error" | "manual-entry-required" | "sent";
 
 const DEFAULT_HOSTED_PHONE_COUNTRY_CODE = "US";
 
@@ -238,7 +228,7 @@ export function useHostedPhoneAuthController({
 
     lastAutoSubmittedCodeRef.current = normalizedVerificationCode;
     submitVerificationCodeEffect(normalizedVerificationCode);
-  }, [normalizedVerificationCode, pendingAction, phoneVerificationAttempt, submitVerificationCodeEffect]);
+  }, [normalizedVerificationCode, pendingAction, phoneVerificationAttempt]);
 
   async function handleSendCode(event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault();
@@ -308,73 +298,6 @@ export function useHostedPhoneAuthController({
     }
 
     await handleSendCode();
-  }
-
-  async function handleInviteSendCode(): Promise<HostedInviteSendCodeResult> {
-    if (!inviteCode) {
-      return "error";
-    }
-
-    let result: HostedInviteSendCodeResult = "sent";
-
-    const sendResult = await runHostedPhonePendingAction({
-      action: "send-code",
-      onBeforeAction: () => {
-        setErrorMessage(null);
-      },
-      onError: (error) => {
-        if (
-          error instanceof HostedOnboardingApiError
-          && error.code === "SIGNUP_PHONE_UNAVAILABLE"
-        ) {
-          result = "manual-entry-required";
-          resetPhoneAuthFlow();
-          setErrorMessage("Enter the number that messaged Murph to continue.");
-          return;
-        }
-
-        result = "error";
-        setErrorMessage(
-          toErrorMessage(error, "We could not send a verification code."),
-        );
-      },
-      run: async () => {
-        await flushPendingInvitePhoneCodeMutation(inviteCode);
-        const payload = await requestHostedOnboardingJson<{
-          phoneNumber: string;
-          sendAttemptId: string;
-        }>({
-          method: "POST",
-          url: `/api/hosted-onboarding/invites/${encodeURIComponent(inviteCode)}/send-code`,
-        });
-
-        try {
-          await sendVerificationCode(payload.phoneNumber);
-        } catch (error) {
-          const abortSucceeded = await abortInvitePhoneCodeSend({
-            inviteCode,
-            sendAttemptId: payload.sendAttemptId,
-          });
-          if (!abortSucceeded) {
-            queuePendingInvitePhoneCodeMutation({
-              inviteCode,
-              kind: "abort",
-              sendAttemptId: payload.sendAttemptId,
-            });
-          }
-          throw error;
-        }
-
-        void finalizeInvitePhoneCodeSendConfirmation({
-          inviteCode,
-          sendAttemptId: payload.sendAttemptId,
-        });
-        return "sent" as const;
-      },
-      setPendingAction,
-    });
-
-    return sendResult ?? result;
   }
 
   async function handleVerifyCode(submittedCode = normalizedVerificationCode) {
@@ -487,7 +410,6 @@ export function useHostedPhoneAuthController({
     authenticatedView,
     errorMessage,
     flowDisabled,
-    handleInviteSendCode,
     pendingAction,
     sharedFlowProps,
     handleContinueAuthenticated,

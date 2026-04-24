@@ -1,7 +1,10 @@
 import { getPrisma } from "@/src/lib/prisma";
 import { nudgeHostedRunBestEffort } from "@/src/lib/hosted-ingress/control";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
-import { hasHostedMemberActiveAccess } from "@/src/lib/hosted-onboarding/entitlement";
+import {
+  assertHostedMemberNotSuspended,
+  hasHostedMemberActiveAccess,
+} from "@/src/lib/hosted-onboarding/entitlement";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { upsertHostedMemberTelegramRoutingBindingTx } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
 import { jsonOk, withJsonError, readOptionalJsonObject } from "@/src/lib/hosted-onboarding/http";
@@ -17,6 +20,7 @@ import { buildHostedTelegramBotLink } from "@/src/lib/hosted-onboarding/telegram
 export const POST = withJsonError(async (request: Request) => {
   assertHostedOnboardingMutationOrigin(request);
   const auth = await requirePrivyMemberAuth(request);
+  assertHostedMemberNotSuspended(auth.member);
   const body = await readOptionalJsonObject(request);
   const expectedTelegramUserId = normalizeComparableTelegramUserId(
     typeof body?.expectedTelegramUserId === "string" ? body.expectedTelegramUserId : null,

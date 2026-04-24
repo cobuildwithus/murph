@@ -22,47 +22,6 @@ import type {
   HostedPhoneCountryOption,
 } from "./hosted-phone-auth-types";
 
-export function HostedInviteShortcutStep({
-  disabled,
-  pendingAction,
-  onSendCode,
-  onUseDifferentNumber,
-}: {
-  disabled: boolean;
-  pendingAction: HostedPhoneAuthPendingAction;
-  onSendCode: () => void;
-  onUseDifferentNumber: () => void;
-}) {
-  return (
-    <div className="flex flex-col gap-4">
-      <div className="flex flex-col gap-1">
-        <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
-          Step 1 of 2
-        </p>
-        <p className="text-sm leading-relaxed text-foreground">
-          We’ll text a 6-digit code to your phone.
-        </p>
-      </div>
-      <Button
-        type="button"
-        onClick={onSendCode}
-        disabled={disabled}
-        size="lg"
-        className="w-fit"
-      >
-        {pendingAction === "send-code" ? "Sending…" : "Send code"}
-      </Button>
-      <HostedUseDifferentNumberButton
-        disabled={disabled}
-        pendingAction={pendingAction}
-        size="sm"
-        onClick={onUseDifferentNumber}
-      />
-      <HostedAuthLegalNotice className="border-t border-[#c4a882]/20 pt-3" />
-    </div>
-  );
-}
-
 export function HostedPhoneEntryStep({
   intent,
   phoneFieldLabel,

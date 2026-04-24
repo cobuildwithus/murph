@@ -1,6 +1,5 @@
 import {
   HostedBillingStatus,
-  type HostedMember,
   type PrismaClient,
 } from "@prisma/client";
 
@@ -40,10 +39,15 @@ export interface HostedBillingCheckoutInput {
   billingPlanCode?: HostedBillingPlanCode;
   inviteCode: string;
   linkedAccounts?: readonly PrivyLinkedAccountLike[];
-  member?: HostedMember;
+  member?: HostedBillingCheckoutAuthenticatedMember;
   now?: Date;
   prisma?: PrismaClient;
   shareCode?: string | null;
+}
+
+export interface HostedBillingCheckoutAuthenticatedMember {
+  id: string;
+  suspendedAt: Date | null;
 }
 
 export interface HostedBillingCheckoutLineItem {
@@ -208,7 +212,7 @@ export async function createHostedBillingCheckout(
 
 async function resolveHostedBillingCheckoutAuth(
   input: HostedBillingCheckoutInput,
-): Promise<{ member: HostedMember }> {
+): Promise<{ member: HostedBillingCheckoutAuthenticatedMember }> {
   if (input.member) {
     return { member: input.member };
   }

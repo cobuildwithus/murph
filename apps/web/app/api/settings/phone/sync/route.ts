@@ -2,7 +2,10 @@ import { getPrisma } from "@/src/lib/prisma";
 import { nudgeHostedRunBestEffort } from "@/src/lib/hosted-ingress/control";
 import { readHostedPhoneHint } from "@/src/lib/hosted-onboarding/contact-privacy";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
-import { hasHostedMemberActiveAccess } from "@/src/lib/hosted-onboarding/entitlement";
+import {
+  assertHostedMemberNotSuspended,
+  hasHostedMemberActiveAccess,
+} from "@/src/lib/hosted-onboarding/entitlement";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import {
@@ -16,6 +19,7 @@ import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "@/src/lib/hosted-onboardi
 export const POST = withJsonError(async (request: Request) => {
   assertHostedOnboardingMutationOrigin(request);
   const auth = await requirePrivyMemberAuth(request);
+  assertHostedMemberNotSuspended(auth.member);
   const phoneNumber = auth.identity.phone?.number ?? null;
 
   if (!phoneNumber) {
