@@ -10,6 +10,8 @@ import { DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION } from "../src/store/schema.ts"
 import { makeTempDirectory } from "./helpers.ts";
 import {
   insertWebhookTraceRowForTesting,
+  readCredentialStateForTesting,
+  readObservationStateForTesting,
   readWebhookTraceLifecycleRowsForTesting,
   readWebhookTraceRowForTesting,
   setConnectionScopesJsonForTesting,
@@ -1393,6 +1395,85 @@ test("device sync store hydrates new hosted accounts, guards token updates, and 
     const reclaimed = store.claimDueJob("worker-b", "2026-04-07T01:01:01.000Z", 60_000);
     assert.equal(reclaimed?.id, job.id);
     assert.equal(reclaimed?.leaseOwner, "worker-b");
+  } finally {
+    store.close();
+    await rm(tempDir, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
+test("device sync store clears tokens and requires reauthorization after connection setup failures", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-store-setup-failed");
+  const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
+
+  try {
+    assert.equal(
+      store.markConnectionSetupFailed(
+        "missing-account",
+        "2026-04-07T00:30:00.000Z",
+        "OAUTH_DENIED",
+        "operator denied access",
+      ),
+      null,
+    );
+
+    const account = store.upsertAccount({
+      provider: "demo",
+      externalAccountId: "demo-setup-failed",
+      displayName: "Setup Failed",
+      scopes: ["offline"],
+      tokens: {
+        accessToken: "setup-access",
+        accessTokenEncrypted: "enc:setup-access",
+        refreshToken: "setup-refresh",
+        refreshTokenEncrypted: "enc:setup-refresh",
+        accessTokenExpiresAt: "2026-04-07T02:00:00.000Z",
+      },
+      connectedAt: "2026-04-07T00:00:00.000Z",
+      nextReconcileAt: "2026-04-07T01:00:00.000Z",
+    });
+
+    const failed = store.markConnectionSetupFailed(
+      account.id,
+      "2026-04-07T00:30:00.000Z",
+      "OAUTH_DENIED",
+      "operator denied access",
+    );
+
+    assert.equal(failed?.id, account.id);
+    assert.equal(failed?.status, "reauthorization_required");
+    assert.equal(failed?.accessTokenEncrypted, "");
+    assert.equal(failed?.refreshTokenEncrypted, null);
+    assert.equal(failed?.accessTokenExpiresAt, null);
+    assert.equal(failed?.lastSyncErrorAt, "2026-04-07T00:30:00.000Z");
+    assert.equal(failed?.lastErrorCode, "OAUTH_DENIED");
+    assert.equal(failed?.lastErrorMessage, "operator denied access");
+    assert.equal(failed?.nextReconcileAt, null);
+    assert.equal(failed?.localConnectionRevision, account.localConnectionRevision + 1);
+    assert.equal(failed?.localTokenRevision, account.localTokenRevision + 1);
+
+    const credentialState = readCredentialStateForTesting(store, account.id);
+    assert.ok(credentialState);
+    assert.deepEqual({ ...credentialState }, {
+      access_token_encrypted: "",
+      refresh_token_encrypted: null,
+      access_token_expires_at: null,
+    });
+    const observationState = readObservationStateForTesting(store, account.id);
+    assert.ok(observationState);
+    assert.deepEqual({ ...observationState }, {
+      hosted_observed_connection_revision: 0,
+      hosted_observed_token_revision: 0,
+      hosted_observed_token_version: null,
+      hosted_observed_updated_at: null,
+      last_error_code: "OAUTH_DENIED",
+      last_webhook_at: null,
+      local_connection_revision: account.localConnectionRevision + 1,
+      local_token_revision: account.localTokenRevision + 1,
+      next_reconcile_at: null,
+    });
   } finally {
     store.close();
     await rm(tempDir, {

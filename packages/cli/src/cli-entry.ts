@@ -1,3 +1,4 @@
+import { access } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Cli } from 'incur'
@@ -143,12 +144,14 @@ export async function runMurphCliAction(
       ? await resolveConfiguredDefaultVault(homeDirectory)
       : await resolveDefaultVault(homeDirectory)
   await cli.serve(
-    prepareProgramArgsForExecution({
+    await prepareProgramArgsForExecution({
       applyDefaultVaultToArgs,
       argv,
       commandNeedsVaultForExecution,
+      configFiles: vaultCliModule.CLI_CONFIG_FILES,
       defaultVault,
       hasExplicitVaultOption,
+      homeDirectory,
       programName,
       resolveEffectiveTopLevelToken: () => topLevelToken,
     }),
@@ -178,15 +181,17 @@ function resolvePublishedCliBinPath(): string {
     : path.resolve(moduleDirectory, 'bin.js')
 }
 
-function prepareProgramArgsForExecution(input: {
+async function prepareProgramArgsForExecution(input: {
   applyDefaultVaultToArgs: (args: readonly string[], vault: string | null) => string[]
   argv: string[]
   commandNeedsVaultForExecution: (args: readonly string[]) => boolean
+  configFiles: readonly string[]
   defaultVault: string | null
   hasExplicitVaultOption: (args: readonly string[]) => boolean
+  homeDirectory: string
   programName: string
   resolveEffectiveTopLevelToken: (args: readonly string[]) => string | null
-}): string[] {
+}): Promise<string[]> {
   const explicitVaultRequested = input.hasExplicitVaultOption(input.argv)
   const commandNeedsVault = input.commandNeedsVaultForExecution(input.argv)
   const commandAllowsExplicitVaultOverride =
@@ -221,7 +226,8 @@ function prepareProgramArgsForExecution(input: {
     input.programName !== 'murph' &&
     input.defaultVault === null &&
     !explicitVaultRequested &&
-    commandNeedsVault
+    commandNeedsVault &&
+    !(await hasEnabledIncurConfigFile(input.argv, input.configFiles, input.homeDirectory))
   ) {
     throw new VaultCliError(
       'missing_vault',
@@ -230,6 +236,86 @@ function prepareProgramArgsForExecution(input: {
   }
 
   return input.applyDefaultVaultToArgs(input.argv, input.defaultVault)
+}
+
+async function hasEnabledIncurConfigFile(
+  argv: readonly string[],
+  configFiles: readonly string[],
+  homeDirectory: string,
+): Promise<boolean> {
+  const configFlagState = readConfigFlagState(argv)
+  if (configFlagState.disabled) {
+    return false
+  }
+
+  if (configFlagState.explicit) {
+    return true
+  }
+
+  for (const filePath of configFiles) {
+    if (await pathIsReadable(resolveIncurConfigPath(filePath, homeDirectory))) {
+      return true
+    }
+  }
+
+  return false
+}
+
+function readConfigFlagState(argv: readonly string[]): {
+  disabled: boolean
+  explicit: boolean
+} {
+  let disabled = false
+  let explicit = false
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const token = argv[index]
+    if (token === '--config') {
+      disabled = false
+      explicit = true
+      index += 1
+      continue
+    }
+    if (token?.startsWith('--config=')) {
+      disabled = false
+      explicit = true
+      continue
+    }
+    if (token === '--no-config') {
+      disabled = true
+      explicit = false
+    }
+  }
+
+  return {
+    disabled,
+    explicit,
+  }
+}
+
+function resolveIncurConfigPath(configPath: string, homeDirectory: string): string {
+  if (configPath === '~') {
+    return homeDirectory
+  }
+
+  if (configPath.startsWith('~/')) {
+    return path.join(homeDirectory, configPath.slice(2))
+  }
+
+  return path.resolve(process.cwd(), configPath)
+}
+
+async function pathIsReadable(targetPath: string): Promise<boolean> {
+  try {
+    await access(targetPath)
+    return true
+  } catch (error) {
+    if (isNodeErrorWithCode(error, 'ENOENT') || isNodeErrorWithCode(error, 'ENOTDIR')) {
+      return false
+    }
+
+    throw error
+  }
 }
 
 function formatErrorMessage(error: unknown): string {

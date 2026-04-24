@@ -8254,6 +8254,10 @@
                                   "type": "string",
                                   "minLength": 1,
                                   "maxLength": 128
+                                },
+                                "sensitive": {
+                                  "description": "Return the full sensitive routing bundle in CLI output. The artifact file is always written privately.",
+                                  "type": "boolean"
                                 }
                               }
                             }

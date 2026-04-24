@@ -18,6 +18,7 @@ const detectSetupProgramName = vi.fn((argv0: string | undefined) =>
 const isSetupInvocation = vi.fn(() => false)
 
 vi.mock('../src/vault-cli.js', () => ({
+  CLI_CONFIG_FILES: [],
   createVaultCliWithOptions,
 }))
 

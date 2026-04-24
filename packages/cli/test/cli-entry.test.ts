@@ -38,6 +38,7 @@ function mockCliActionModules(input: {
   setupRuntimeEnvModule?: Record<string, unknown>;
 }) {
   vi.doMock("../src/vault-cli.js", () => ({
+    CLI_CONFIG_FILES: [],
     createVaultCliWithOptions: vi.fn(() => input.cli),
   }));
   vi.doMock("@murphai/operator-config/operator-config", () => ({

@@ -20,7 +20,7 @@ const CLI_SYNC_SUGGESTIONS = [
   'bootstrap the Murph inbox runtime',
 ]
 
-const CLI_CONFIG_FILES = ['~/.config/murph/config.json'] as const
+export const CLI_CONFIG_FILES = ['~/.config/murph/config.json'] as const
 
 export function createDefaultVaultServices(): CliVaultServices {
   return ensureCliVaultServices(

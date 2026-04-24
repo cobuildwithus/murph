@@ -16,7 +16,10 @@ import {
 import { registerVaultCliCommandDescriptors } from './vault-cli-command-manifest.js'
 import { installVaultCliSchemaIndex } from './vault-cli-schema-index.js'
 
-export { CLI_DESCRIPTION } from './vault-cli-bootstrap.js'
+export {
+  CLI_CONFIG_FILES,
+  CLI_DESCRIPTION,
+} from './vault-cli-bootstrap.js'
 
 export interface CreateVaultCliOptions {
   commandName?: string
