@@ -213,6 +213,7 @@ export interface HostedRuntimeDrainEvent {
 
 export interface HostedRuntimeDrainRequest {
   acquiredAt: string;
+  committedResult?: HostedExecutionRunnerResult | null;
   events: HostedRuntimeDrainEvent[];
   inputCommittedSeq: string;
   inputCursorVersion: string;
@@ -380,6 +381,8 @@ export interface HostedExecutionRedactedLogEntry {
 export interface HostedExecutionRunnerResult {
   bundle: HostedExecutionBundlePayload;
   result: {
+    adoptedCleanupTargets?: HostedRunCleanupTarget[];
+    adoptedEventResults?: HostedRunEventResult[];
     eventsHandled: number;
     nextWakeAt?: string | null;
     redactedDetails?: Record<string, unknown> | null;
@@ -648,6 +651,23 @@ export interface HostedRunEventResult {
   quarantineCode?: string | null;
   state: "completed" | "quarantined";
 }
+
+export type HostedRunCleanupTarget =
+  | {
+      channel: "email";
+      eventId: string;
+      rawMessageKey: string;
+      userId: string;
+    }
+  | {
+      channel: "linq";
+      messageId: string;
+    }
+  | {
+      channel: "telegram";
+      messageId: string;
+      target: string;
+    };
 
 export interface HostedRunCommitRequest {
   eventResults?: HostedRunEventResult[];

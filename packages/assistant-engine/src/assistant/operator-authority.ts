@@ -20,6 +20,12 @@ export function isAssistantOperatorAuthority(
 export function resolveAssistantOperatorAuthority(
   value: unknown,
 ): AssistantOperatorAuthority {
+  return isAssistantOperatorAuthority(value) ? value : 'accepted-inbound-message'
+}
+
+export function resolveTrustedLocalAssistantOperatorAuthority(
+  value: unknown,
+): AssistantOperatorAuthority {
   return isAssistantOperatorAuthority(value) ? value : 'direct-operator'
 }
 

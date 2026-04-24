@@ -1,5 +1,6 @@
 import { z } from 'zod'
-import { readFile, rm } from 'node:fs/promises'
+import { readFile, rename, rm } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 import {
   assistantPersistedSessionSchema,
@@ -26,6 +27,11 @@ import type { AssistantStatePaths } from './store/paths.js'
 export interface AssistantSecretPersistenceResult<TPersisted> {
   migratedHeaderNames: string[]
   persisted: TPersisted
+}
+
+export interface AssistantSessionSecretsPersistenceStage {
+  abort: () => Promise<void>
+  commit: () => Promise<void>
 }
 
 export function extractAssistantSessionSecretsForPersistence(
@@ -75,6 +81,11 @@ export function mergeAssistantSessionSecrets(
   if (!secrets || session.target.adapter !== 'openai-compatible') {
     return session
   }
+  assertAssistantSessionSecretsIdentity({
+    expectedSessionId: session.sessionId,
+    expectedUpdatedAt: session.updatedAt,
+    secrets,
+  })
 
   return parseAssistantSessionRecord({
     ...serializeAssistantSessionForPersistence(session),
@@ -88,12 +99,14 @@ export function mergeAssistantSessionSecrets(
 export async function readAssistantSessionSecrets(input: {
   paths: AssistantStatePaths
   sessionId: string
+  updatedAt?: string | null
 }): Promise<AssistantSessionSecrets | null> {
   const secretsPath = resolveAssistantSessionSecretsPath(input.paths, input.sessionId)
+  let secrets: AssistantSessionSecrets
 
   try {
     const raw = await readFile(secretsPath, 'utf8')
-    return assistantSessionSecretsSchema.parse(JSON.parse(raw))
+    secrets = assistantSessionSecretsSchema.parse(JSON.parse(raw))
   } catch (error) {
     if (isMissingFileError(error)) {
       return null
@@ -113,6 +126,24 @@ export async function readAssistantSessionSecrets(input: {
       sessionId: input.sessionId,
     })
   }
+
+  try {
+    assertAssistantSessionSecretsIdentity({
+      expectedSessionId: input.sessionId,
+      expectedUpdatedAt: input.updatedAt,
+      secrets,
+    })
+  } catch (error) {
+    await quarantineAssistantStateFile({
+      artifactKind: 'session',
+      error,
+      filePath: secretsPath,
+      paths: input.paths,
+    }).catch(() => undefined)
+    throw error
+  }
+
+  return secrets
 }
 
 export async function persistAssistantSessionSecrets(input: {
@@ -126,8 +157,48 @@ export async function persistAssistantSessionSecrets(input: {
     return
   }
 
+  assertAssistantSessionSecretsIdentity({
+    expectedSessionId: input.sessionId,
+    expectedUpdatedAt: input.secrets.updatedAt,
+    secrets: input.secrets,
+  })
   await ensureAssistantStateDirectory(path.dirname(secretsPath))
   await writeJsonFileAtomic(secretsPath, input.secrets)
+}
+
+export async function stageAssistantSessionSecretsForPersistence(input: {
+  paths: AssistantStatePaths
+  secrets: AssistantSessionSecrets | null
+  sessionId: string
+}): Promise<AssistantSessionSecretsPersistenceStage> {
+  const secretsPath = resolveAssistantSessionSecretsPath(input.paths, input.sessionId)
+  if (!input.secrets) {
+    return {
+      abort: async () => undefined,
+      commit: async () => {
+        await rm(secretsPath, { force: true })
+      },
+    }
+  }
+
+  assertAssistantSessionSecretsIdentity({
+    expectedSessionId: input.sessionId,
+    expectedUpdatedAt: input.secrets.updatedAt,
+    secrets: input.secrets,
+  })
+
+  await ensureAssistantStateDirectory(path.dirname(secretsPath))
+  const stagedPath = `${secretsPath}.tmp-${process.pid}-${randomUUID()}`
+  await writeJsonFileAtomic(stagedPath, input.secrets)
+
+  return {
+    abort: async () => {
+      await rm(stagedPath, { force: true })
+    },
+    commit: async () => {
+      await rename(stagedPath, secretsPath)
+    },
+  }
 }
 
 export function resolveAssistantSessionSecretsPath(
@@ -152,4 +223,36 @@ function createAssistantSecretSidecarCorruptedError(input: {
     reason: input.error instanceof Error ? input.error.message : String(input.error),
     sessionId: input.sessionId,
   })
+}
+
+function assertAssistantSessionSecretsIdentity(input: {
+  expectedSessionId: string
+  expectedUpdatedAt?: string | null
+  secrets: AssistantSessionSecrets
+}): void {
+  if (input.secrets.sessionId !== input.expectedSessionId) {
+    throw new VaultCliError(
+      'ASSISTANT_SESSION_SECRETS_MISMATCH',
+      `Assistant session "${input.expectedSessionId}" secret sidecar belongs to a different session and was not used.`,
+      {
+        expectedSessionId: input.expectedSessionId,
+        sidecarSessionId: input.secrets.sessionId,
+      },
+    )
+  }
+
+  if (
+    input.expectedUpdatedAt &&
+    input.secrets.updatedAt !== input.expectedUpdatedAt
+  ) {
+    throw new VaultCliError(
+      'ASSISTANT_SESSION_SECRETS_MISMATCH',
+      `Assistant session "${input.expectedSessionId}" secret sidecar is stale and was not used.`,
+      {
+        expectedSessionId: input.expectedSessionId,
+        expectedUpdatedAt: input.expectedUpdatedAt,
+        sidecarUpdatedAt: input.secrets.updatedAt,
+      },
+    )
+  }
 }

@@ -300,24 +300,25 @@ export async function appendAssistantTranscriptEntries(
   sessionId: string,
   entries: readonly AssistantTranscriptEntryInput[],
 ): Promise<AssistantTranscriptEntry[]> {
-  const paths = resolveAssistantStatePaths(vault)
-  await ensureAssistantState(paths)
+  return withAssistantRuntimeWriteLock(vault, async (paths) => {
+    await ensureAssistantState(paths)
 
-  if (entries.length === 0) {
-    return []
-  }
+    if (entries.length === 0) {
+      return []
+    }
 
-  const parsed = entries.map((entry) =>
-    assistantTranscriptEntrySchema.parse({
-      schema: 'murph.assistant-transcript-entry.v1',
-      kind: entry.kind,
-      text: entry.text,
-      createdAt: normalizeNullableString(entry.createdAt) ?? new Date().toISOString(),
-    }),
-  )
-  await appendTranscriptEntries(paths, sessionId, parsed)
+    const parsed = entries.map((entry) =>
+      assistantTranscriptEntrySchema.parse({
+        schema: 'murph.assistant-transcript-entry.v1',
+        kind: entry.kind,
+        text: entry.text,
+        createdAt: normalizeNullableString(entry.createdAt) ?? new Date().toISOString(),
+      }),
+    )
+    await appendTranscriptEntries(paths, sessionId, parsed)
 
-  return parsed
+    return parsed
+  })
 }
 
 async function createAssistantSessionNotFoundError(input: {

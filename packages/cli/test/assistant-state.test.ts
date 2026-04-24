@@ -1466,8 +1466,21 @@ test('malformed session secret sidecars are quarantined instead of being treated
     channel: 'telegram',
     participantId: 'contact:corrupted-sidecar',
   })
+  const target = createAssistantBackendTarget({
+    provider: 'openai-compatible',
+    model: 'gpt-4.1-mini',
+    reasoningEffort: null,
+    baseUrl: 'https://api.example.test/v1',
+    apiKeyEnv: 'OPENAI_API_KEY',
+    providerName: 'example',
+    headers: {
+      Authorization: 'Bearer session-secret-token',
+    },
+  })
+  assert.ok(target)
   const updatedSession = await saveAssistantSession(vaultRoot, {
     ...resolved.session,
+    target,
     provider: 'openai-compatible',
     providerOptions: {
       ...resolved.session.providerOptions,

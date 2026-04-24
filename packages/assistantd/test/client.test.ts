@@ -194,6 +194,22 @@ test('resolveAssistantDaemonClientConfig trims loopback URLs, honors disable fla
       }),
     /loopback-only http:\/\//u,
   )
+  for (const baseUrl of [
+    'https://127.0.0.1:50241',
+    'http://127.0.0.1:50241/prefix',
+    'http://127.0.0.1:50241?x=1',
+    'http://127.0.0.1:50241#fragment',
+    'http://user:pass@127.0.0.1:50241',
+  ]) {
+    assert.throws(
+      () =>
+        resolveAssistantDaemonClientConfig({
+          MURPH_ASSISTANTD_BASE_URL: baseUrl,
+          MURPH_ASSISTANTD_CONTROL_TOKEN: 'secret-token',
+        }),
+      /valid loopback-only http:\/\//u,
+    )
+  }
 })
 
 test('gateway daemon client is inert when assistantd client config is absent', async () => {

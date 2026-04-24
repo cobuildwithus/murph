@@ -118,10 +118,8 @@ test('createAssistantLocalService wires the local integrations and forwards assi
 
   assert.equal(process.env[ASSISTANTD_DISABLE_CLIENT_ENV], '1')
   assert.deepEqual(mocks.createIntegratedInboxServices.mock.calls, [[]])
-  assert.deepEqual(mocks.createAssistantFoodAutoLogHooks.mock.calls, [[]])
-  assert.deepEqual(mocks.createIntegratedVaultServices.mock.calls, [
-    [{ foodAutoLogHooks: { kind: 'food-hooks' } }],
-  ])
+  assert.deepEqual(mocks.createAssistantFoodAutoLogHooks.mock.calls, [])
+  assert.deepEqual(mocks.createIntegratedVaultServices.mock.calls, [])
   assert.deepEqual(mocks.createLocalGatewayService.mock.calls, [
     [
       TEST_VAULT_ROOT,
@@ -181,6 +179,7 @@ test('createAssistantLocalService wires the local integrations and forwards assi
     vault: TEST_VAULT_ROOT,
   })
   await service.runAutomationOnce({
+    allowCanonicalWrites: true,
     allowSelfAuthored: true,
     deliveryDispatchMode: 'queue-only',
     drainOutbox: true,
@@ -270,6 +269,7 @@ test('createAssistantLocalService wires the local integrations and forwards assi
   ])
   assert.deepEqual(mocks.runAssistantAutomation.mock.calls[0], [
     {
+      applyCanonicalWrites: true,
       allowSelfAuthored: true,
       deliveryDispatchMode: 'queue-only',
       drainOutbox: true,
@@ -286,6 +286,7 @@ test('createAssistantLocalService wires the local integrations and forwards assi
   ])
   assert.deepEqual(mocks.runAssistantAutomation.mock.calls[1], [
     {
+      applyCanonicalWrites: false,
       allowSelfAuthored: undefined,
       deliveryDispatchMode: undefined,
       drainOutbox: undefined,
@@ -297,11 +298,16 @@ test('createAssistantLocalService wires the local integrations and forwards assi
       sessionMaxAgeMs: null,
       startDaemon: false,
       vault: TEST_VAULT_ROOT,
-      vaultServices: { kind: 'vault-services' },
+      vaultServices: null,
     },
+  ])
+  assert.deepEqual(mocks.createAssistantFoodAutoLogHooks.mock.calls, [[]])
+  assert.deepEqual(mocks.createIntegratedVaultServices.mock.calls, [
+    [{ foodAutoLogHooks: { kind: 'food-hooks' } }],
   ])
   assert.deepEqual(mocks.sendAssistantMessage.mock.calls[0], [
     {
+      operatorAuthority: 'direct-operator',
       prompt: 'hello',
       vault: TEST_VAULT_ROOT,
     },
@@ -313,6 +319,40 @@ test('createAssistantLocalService wires the local integrations and forwards assi
       vault: TEST_VAULT_ROOT,
     },
   ])
+})
+
+test('createAssistantLocalService defaults omitted message authority and preserves explicit inbound authority', async () => {
+  const service = createAssistantLocalService(TEST_VAULT_ROOT)
+
+  await service.sendMessage({
+    prompt: 'default authority',
+    vault: TEST_VAULT_ROOT,
+  } as Parameters<AssistantLocalService['sendMessage']>[0])
+  await service.sendMessage({
+    operatorAuthority: 'accepted-inbound-message',
+    prompt: 'explicit inbound authority',
+    vault: TEST_VAULT_ROOT,
+  } as Parameters<AssistantLocalService['sendMessage']>[0])
+
+  assert.deepEqual(
+    mocks.sendAssistantMessage.mock.calls.map(([input]) => ({
+      operatorAuthority: input.operatorAuthority,
+      prompt: input.prompt,
+      vault: input.vault,
+    })),
+    [
+      {
+        operatorAuthority: 'direct-operator',
+        prompt: 'default authority',
+        vault: TEST_VAULT_ROOT,
+      },
+      {
+        operatorAuthority: 'accepted-inbound-message',
+        prompt: 'explicit inbound authority',
+        vault: TEST_VAULT_ROOT,
+      },
+    ],
+  )
 })
 
 test('createAssistantLocalService rejects local Linq routes and drops legacy Linq auto-reply state before automation', async () => {
@@ -393,14 +433,36 @@ test('createAssistantLocalService rejects requests that target a different vault
 
   assert.throws(
     () => service.listSessions({ vault: '/tmp/other-vault' }),
-    /bound to \/tmp\/assistantd-service-vault/u,
+    (error: unknown) => {
+      assert.equal(error instanceof Error, true)
+      if (!error || typeof error !== 'object') {
+        return false
+      }
+      assert.equal('code' in error ? error.code : undefined, 'ASSISTANTD_VAULT_MISMATCH')
+      assert.equal(
+        error instanceof Error ? error.message : '',
+        'Request vault does not match the daemon-bound vault.',
+      )
+      return true
+    },
   )
   assert.throws(
     () => service.getSession({
       sessionId: 'session_service_test',
       vault: '/tmp/other-vault',
     }),
-    /bound to \/tmp\/assistantd-service-vault/u,
+    (error: unknown) => {
+      assert.equal(error instanceof Error, true)
+      if (!error || typeof error !== 'object') {
+        return false
+      }
+      assert.equal('code' in error ? error.code : undefined, 'ASSISTANTD_VAULT_MISMATCH')
+      assert.equal(
+        error instanceof Error ? error.message : '',
+        'Request vault does not match the daemon-bound vault.',
+      )
+      return true
+    },
   )
 })
 

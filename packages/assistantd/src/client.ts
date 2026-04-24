@@ -369,18 +369,28 @@ function firstAssistantDaemonEnvValue(
 }
 
 function normalizeAssistantDaemonBaseUrl(baseUrl: string): string {
-  const normalized = baseUrl.replace(/\/+$/u, '')
+  const trimmed = baseUrl.trim()
   try {
-    if (!isLoopbackHttpBaseUrl(normalized)) {
+    const url = new URL(trimmed)
+    if (
+      url.username ||
+      url.password ||
+      url.search ||
+      url.hash ||
+      (url.pathname !== '' && url.pathname !== '/')
+    ) {
+      throw new Error('Assistant daemon base URL must be an origin-only URL.')
+    }
+    if (!isLoopbackHttpBaseUrl(url.origin)) {
       throw new Error('Assistant daemon base URL must use loopback-only http:// addressing.')
     }
+    return url.origin
   } catch (error) {
     throw new Error(
-      `Assistant daemon base URL must be a valid loopback-only http:// URL: ${baseUrl}`,
+      'Assistant daemon base URL must be a valid loopback-only http:// origin URL.',
       { cause: error },
     )
   }
-  return normalized
 }
 
 function normalizeNullableString(value: string | null | undefined): string | null {

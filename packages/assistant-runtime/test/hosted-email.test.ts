@@ -32,8 +32,10 @@ test("hosted email send parsing trims blank optional identity ids to null", () =
       targetKind: "explicit",
     }),
     {
+      idempotencyKey: null,
       identityId: null,
       message: "hello",
+      replyToMessageId: null,
       subject: null,
       target: "user@example.com",
       targetKind: "explicit",
@@ -49,11 +51,35 @@ test("hosted email send parsing treats an omitted identity id as null", () => {
       targetKind: "explicit",
     }),
     {
+      idempotencyKey: null,
       identityId: null,
       message: "hello",
+      replyToMessageId: null,
       subject: null,
       target: "user@example.com",
       targetKind: "explicit",
+    },
+  );
+});
+
+test("hosted email send parsing preserves idempotency and reply target fields", () => {
+  assert.deepEqual(
+    parseHostedEmailSendRequest({
+      idempotencyKey: " email-send-123 ",
+      identityId: "assistant@example.com",
+      message: "hello",
+      replyToMessageId: " message-parent-123 ",
+      target: "thread_123",
+      targetKind: "thread",
+    }),
+    {
+      idempotencyKey: "email-send-123",
+      identityId: "assistant@example.com",
+      message: "hello",
+      replyToMessageId: "message-parent-123",
+      subject: null,
+      target: "thread_123",
+      targetKind: "thread",
     },
   );
 });

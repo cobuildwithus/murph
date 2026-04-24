@@ -34,6 +34,7 @@ import {
 import {
   buildLocalInternalProxyRouteBaseUrl,
   isScopedLocalInternalProxyBaseUrl,
+  readScopedLocalInternalProxyRouteUserId,
 } from "./local-internal-proxy-route.ts";
 import {
   HOSTED_WEB_ISSUE_RECORD_PATH,
@@ -67,7 +68,7 @@ export function buildHostedExecutionRuntimePlatform(input: {
   const fetchImpl = createCloudflareHostedRuntimeFetch(
     input.boundUserId,
     input.internalWorkerProxyToken ?? null,
-    input.localInternalProxyBaseUrl ?? process.env.HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL ?? null,
+    input.localInternalProxyBaseUrl ?? null,
     input.fetchImpl ?? fetch,
   );
   const timeoutMs = readHostedRunnerCommitTimeoutMs(input.commitTimeoutMs ?? null);
@@ -371,6 +372,11 @@ function createHostedLocalInternalProxyUrl(
   }
 
   const normalizedBasePath = ensureTrailingSlash(normalizedBaseUrl);
+  const scopedUserId = readScopedLocalInternalProxyRouteUserId(normalizedBasePath);
+  if (scopedUserId !== null && scopedUserId !== boundUserId) {
+    throw new TypeError("HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL is scoped to a different user.");
+  }
+
   const proxyBaseUrl = isScopedLocalInternalProxyBaseUrl(normalizedBasePath)
     ? normalizedBasePath
     : new URL(buildLocalInternalProxyRouteBaseUrl({

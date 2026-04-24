@@ -22,10 +22,7 @@ import { recordAssistantDiagnosticEvent } from './diagnostics.js'
 import { withAssistantRuntimeWriteLock } from './runtime-write-lock.js'
 import { ensureAssistantState } from './store/persistence.js'
 import { getAssistantSession, resolveAssistantStatePaths, saveAssistantSession } from './store.js'
-import {
-  appendAssistantTurnReceiptEvent,
-  updateAssistantTurnReceipt,
-} from './turns.js'
+import { appendAssistantTurnReceiptEvent } from './turns.js'
 import {
   buildAssistantOutboxPersistedTarget,
   buildAssistantOutboxRawTargetIdentity,
@@ -42,6 +39,7 @@ import {
   shouldDispatchAssistantOutboxIntent,
 } from './outbox/retry-policy.js'
 import { buildAssistantOutboxSummary as buildAssistantOutboxSummaryLocal } from './outbox/summary.js'
+import { repairAssistantOutboxReceiptForIntent } from './outbox/receipt-repair.js'
 import {
   findAssistantOutboxIntentByDedupeKey,
   listAssistantOutboxIntentsLocal as listAssistantOutboxIntentsLocalStore,
@@ -65,6 +63,7 @@ import {
   normalizeNullableString,
   writeJsonFileAtomic,
 } from './shared.js'
+import { sanitizeAssistantOutboxIntentForPersistence } from './redaction.js'
 
 const ASSISTANT_OUTBOX_INTENT_SCHEMA = 'murph.assistant-outbox-intent.v1'
 
@@ -189,6 +188,11 @@ export async function createAssistantOutboxIntent(input: {
     })
     const existing = await findAssistantOutboxIntentByDedupeKey(input.vault, dedupeKey)
     if (existing) {
+      await repairAssistantOutboxReceiptForIntent({
+        at: existing.updatedAt,
+        intent: existing,
+        vault: input.vault,
+      })
       return existing
     }
 
@@ -218,32 +222,17 @@ export async function createAssistantOutboxIntent(input: {
       }),
       lastError: null,
     })
+    const persistedIntent = assistantOutboxIntentSchema.parse(
+      sanitizeAssistantOutboxIntentForPersistence(intent),
+    )
     await writeJsonFileAtomic(
       resolveAssistantOutboxIntentPath(paths.outboxDirectory, intent.intentId),
-      intent,
+      persistedIntent,
     )
-    await appendAssistantTurnReceiptEvent({
-      vault: input.vault,
-      turnId: input.turnId,
-      kind: 'delivery.queued',
-      detail: 'outbound delivery queued',
-      metadata: {
-        intentId: intent.intentId,
-        channel: intent.channel ?? 'unknown',
-      },
+    await repairAssistantOutboxReceiptForIntent({
       at: createdAt,
-    })
-    await updateAssistantTurnReceipt({
+      intent: persistedIntent,
       vault: input.vault,
-      turnId: input.turnId,
-      mutate(receipt) {
-        return {
-          ...receipt,
-          updatedAt: createdAt,
-          deliveryDisposition: 'queued',
-          deliveryIntentId: intent.intentId,
-        }
-      },
     })
     await recordAssistantDiagnosticEvent({
       vault: input.vault,
@@ -258,7 +247,7 @@ export async function createAssistantOutboxIntent(input: {
       },
     })
 
-    return intent
+    return persistedIntent
   })
 }
 
@@ -359,15 +348,18 @@ export async function dispatchAssistantOutboxIntent(input: {
       attemptCount: intent.attemptCount + 1,
       status: 'sending',
     })
-    await writeJsonFileAtomic(intentPath, sending)
+    const persistedSending = assistantOutboxIntentSchema.parse(
+      sanitizeAssistantOutboxIntentForPersistence(sending),
+    )
+    await writeJsonFileAtomic(intentPath, persistedSending)
     await appendAssistantTurnReceiptEvent({
       vault: input.vault,
-      turnId: sending.turnId,
+      turnId: persistedSending.turnId,
       kind: 'delivery.attempt.started',
-      detail: `attempt ${sending.attemptCount}`,
+      detail: `attempt ${persistedSending.attemptCount}`,
       metadata: {
-        intentId: sending.intentId,
-        attempt: String(sending.attemptCount),
+        intentId: persistedSending.intentId,
+        attempt: String(persistedSending.attemptCount),
       },
       at: startedAt,
     })
@@ -376,11 +368,15 @@ export async function dispatchAssistantOutboxIntent(input: {
       action: 'dispatch' as const,
       intent,
       intentPath,
-      sending,
+      sending: persistedSending,
     }
   })
 
   if (prepared.action === 'skip') {
+    await repairAssistantOutboxReceiptForIntent({
+      intent: prepared.intent,
+      vault: input.vault,
+    })
     return {
       intent: prepared.intent,
       deliveryError: prepared.intent.lastError,

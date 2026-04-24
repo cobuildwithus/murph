@@ -61,7 +61,9 @@ export async function sendHostedEmailMessage(input: {
   const prepared = await prepareHostedEmailSend({
     config: input.config,
     existingThreadTarget: preflight.existingThreadTarget,
+    idempotencyKey: input.request.idempotencyKey ?? null,
     message: input.request.message,
+    replyToMessageId: input.request.replyToMessageId ?? null,
     replyAddress,
     subject: input.request.subject ?? null,
     target: input.request.target,
@@ -169,7 +171,9 @@ async function sendHostedEmailMimeMessage(input: {
 async function prepareHostedEmailSend(input: {
   config: HostedEmailConfig;
   existingThreadTarget: HostedEmailThreadTarget | null;
+  idempotencyKey: string | null;
   message: string;
+  replyToMessageId: string | null;
   replyAddress: string;
   subject: string | null;
   target: string;
@@ -187,6 +191,9 @@ async function prepareHostedEmailSend(input: {
 
   const existingThreadTarget = input.existingThreadTarget;
   const requestedSubject = normalizeHostedEmailSubject(input.subject);
+  const replyToMessageId = normalizeHostedEmailMessageReference(input.replyToMessageId)
+    ?? existingThreadTarget?.lastMessageId
+    ?? null;
 
   // Hosted email stays owner-only by default. Even when inbound normalization
   // captured reply-all participants, outbound replies collapse back to the
@@ -206,15 +213,21 @@ async function prepareHostedEmailSend(input: {
   const subject = existingThreadTarget
     ? ensureHostedEmailReplySubject(existingThreadTarget.subject, input.config.defaultSubject)
     : requestedSubject ?? normalizeHostedEmailSubject(input.config.defaultSubject) ?? "Murph update";
-  const messageId = createHostedEmailMessageId(fromAddress);
+  const messageId = await createHostedEmailMessageId({
+    fromAddress,
+    idempotencyKey: input.idempotencyKey,
+  });
+  const previousReferences = uniqueHostedEmailMessageReferences([
+    ...(existingThreadTarget?.references ?? []),
+    replyToMessageId,
+  ]);
   const threadTarget = createHostedEmailThreadTarget({
     cc,
     lastMessageId: messageId,
-    references: [
-      ...(existingThreadTarget?.references ?? []),
-      existingThreadTarget?.lastMessageId,
+    references: uniqueHostedEmailMessageReferences([
+      ...previousReferences,
       messageId,
-    ].filter((value): value is string => Boolean(value && value.trim())),
+    ]),
     subject,
     to,
   });
@@ -225,9 +238,9 @@ async function prepareHostedEmailSend(input: {
       bodyText: input.message,
       cc,
       fromAddress,
-      inReplyTo: existingThreadTarget?.lastMessageId ?? null,
+      inReplyTo: replyToMessageId,
       messageId,
-      references: existingThreadTarget?.references ?? [],
+      references: previousReferences,
       replyToAddress: input.replyAddress,
       subject,
       to,
@@ -270,9 +283,49 @@ function buildRawMimeMessage(input: {
   )}\r\n`;
 }
 
-function createHostedEmailMessageId(fromAddress: string): string {
+async function createHostedEmailMessageId(input: {
+  fromAddress: string;
+  idempotencyKey: string | null;
+}): Promise<string> {
+  const fromAddress = input.fromAddress;
   const domain = fromAddress.split("@")[1] ?? "localhost";
+  const idempotencyKey = input.idempotencyKey?.trim() ?? "";
+  if (idempotencyKey.length > 0) {
+    return `<hosted.${await sha256HostedEmailHex(`${fromAddress}\u0000${idempotencyKey}`)}@${domain}>`;
+  }
+
   return `<hosted.${Date.now().toString(36)}.${randomHostedEmailKey()}@${domain}>`;
+}
+
+function normalizeHostedEmailMessageReference(value: string | null): string | null {
+  const trimmed = value?.trim() ?? "";
+  if (trimmed.length === 0) {
+    return null;
+  }
+  if (/[\r\n]/u.test(trimmed)) {
+    throw new HostedEmailSendValidationError(
+      "Hosted email reply message id contains an unsafe line break.",
+    );
+  }
+
+  return trimmed;
+}
+
+function uniqueHostedEmailMessageReferences(values: readonly (string | null | undefined)[]): string[] {
+  return Array.from(
+    new Set(
+      values
+        .map((value) => normalizeHostedEmailMessageReference(value ?? null))
+        .filter((value): value is string => value !== null),
+    ),
+  );
+}
+
+async function sha256HostedEmailHex(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
 }
 
 function wrapMimeBase64(value: string): string {

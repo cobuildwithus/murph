@@ -43,6 +43,7 @@ export interface AssistantRoutingCaptureOutcome {
 }
 
 export async function routeAssistantInboxCapture(input: {
+  applyCanonicalWrites?: boolean
   capture: AssistantInboxCaptureSummary
   inboxServices: InboxServices
   modelSpec: AssistantModelSpec
@@ -108,7 +109,7 @@ export async function routeAssistantInboxCapture(input: {
       captureId: capture.captureId,
       vault: input.vault,
       vaultServices: input.vaultServices,
-      apply: true,
+      apply: input.applyCanonicalWrites ?? true,
       modelSpec: input.modelSpec,
     })
 
@@ -147,6 +148,7 @@ export async function routeAssistantInboxCapture(input: {
 
 export async function scanAssistantInboxOnce(input: {
   afterCursor?: AssistantAutomationCursor | null
+  applyCanonicalWrites?: boolean
   inboxServices: InboxServices
   maxPerScan?: number
   modelSpec: AssistantModelSpec
@@ -176,6 +178,7 @@ export async function scanAssistantInboxOnce(input: {
   })
 
   const summary = createEmptyInboxScanResult()
+  const applyCanonicalWrites = input.applyCanonicalWrites ?? true
   summary.considered = captures.length
   let nextCursor = input.afterCursor ?? null
 
@@ -185,6 +188,7 @@ export async function scanAssistantInboxOnce(input: {
     }
 
     const outcome = await routeAssistantInboxCapture({
+      applyCanonicalWrites: input.applyCanonicalWrites,
       capture,
       inboxServices: input.inboxServices,
       modelSpec: input.modelSpec,
@@ -203,10 +207,14 @@ export async function scanAssistantInboxOnce(input: {
       break
     }
 
-    nextCursor = cursorFromCapture(capture)
+    if (applyCanonicalWrites) {
+      nextCursor = cursorFromCapture(capture)
+    }
   }
 
-  await input.onCursorProgress?.(nextCursor)
+  if (applyCanonicalWrites) {
+    await input.onCursorProgress?.(nextCursor)
+  }
 
   return summary
 }

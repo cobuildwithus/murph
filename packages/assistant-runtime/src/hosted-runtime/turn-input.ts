@@ -4,6 +4,9 @@ import {
 } from "@murphai/assistant-engine";
 import {
   emitHostedExecutionStructuredLog,
+  type HostedExecutionConversationMessageWake,
+  type HostedRunCleanupTarget,
+  type HostedRunEventResult,
   type HostedRuntimeEvent,
 } from "@murphai/hosted-execution";
 
@@ -16,6 +19,10 @@ export function createHostedAssistantTurnInputPort(input: {
   inboxServices: Parameters<typeof createInboxBackedAssistantTurnInputPort>[0]["inboxServices"];
   requestId: string;
   runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "forwardedEnv" | "platform" | "platformEnv">;
+  onImportedEvent?: (
+    result: HostedRunEventResult,
+    cleanupTarget: HostedRunCleanupTarget | null,
+  ) => void;
   vaultRoot: string;
   wake: HostedRuntimeEvent;
 }): AssistantTurnInputPort | undefined {
@@ -59,6 +66,12 @@ export function createHostedAssistantTurnInputPort(input: {
       }
 
       for (const event of refresh?.events ?? []) {
+        if (lastImportedSeq !== null && BigInt(event.seq) <= BigInt(lastImportedSeq)) {
+          continue;
+        }
+
+        lastImportedSeq = maxBigIntString(lastImportedSeq, event.seq);
+
         if (
           importedIngressEventIds.has(event.ingressEventId)
           || event.wake.kind !== "conversation.message"
@@ -72,7 +85,13 @@ export function createHostedAssistantTurnInputPort(input: {
           wake: event.wake,
         });
         importedIngressEventIds.add(event.ingressEventId);
-        lastImportedSeq = maxBigIntString(lastImportedSeq, event.seq);
+        input.onImportedEvent?.(
+          {
+            ingressEventId: event.ingressEventId,
+            state: "completed",
+          },
+          createHostedTurnInputCleanupTarget(event.wake),
+        );
         imported = true;
       }
 
@@ -98,4 +117,29 @@ function maxBigIntString(left: string | null, right: string): string {
   }
 
   return left;
+}
+
+function createHostedTurnInputCleanupTarget(
+  wake: HostedExecutionConversationMessageWake,
+): HostedRunCleanupTarget | null {
+  switch (wake.message.channel) {
+    case "email":
+      return {
+        channel: "email",
+        eventId: wake.eventId,
+        rawMessageKey: wake.message.rawMessageKey,
+        userId: wake.userId,
+      };
+    case "linq":
+      return {
+        channel: "linq",
+        messageId: wake.message.linqMessage.messageId,
+      };
+    case "telegram":
+      return {
+        channel: "telegram",
+        messageId: wake.message.telegramMessage.messageId,
+        target: wake.message.telegramMessage.threadId,
+      };
+  }
 }

@@ -23,6 +23,7 @@ export interface AssistantSystemPromptInput {
   assistantHostedDeviceConnectAvailable?: boolean;
   assistantHostedDeviceConnectProviders?: readonly AssistantHostedDeviceConnectProvider[];
   assistantKnowledgeToolsAvailable?: boolean;
+  assistantToolNameAliases?: Readonly<Record<string, string>> | null;
   channel: string | null;
   cliAccess: Pick<AssistantCliAccessContext, "rawCommand" | "setupCommand">;
   currentLocalDate: string;
@@ -56,10 +57,33 @@ function code(value: string): string {
   return `\`${value}\``;
 }
 
+function renderAssistantToolNameAliases(
+  prompt: string,
+  aliases: Readonly<Record<string, string>> | null | undefined
+): string {
+  if (!aliases) {
+    return prompt;
+  }
+
+  let rendered = prompt;
+  for (const [canonicalName, providerVisibleName] of Object.entries(aliases)) {
+    if (!providerVisibleName || providerVisibleName === canonicalName) {
+      continue;
+    }
+
+    rendered = rendered.replaceAll(
+      code(canonicalName),
+      code(providerVisibleName)
+    );
+  }
+
+  return rendered;
+}
+
 export function buildAssistantSystemPrompt(
   input: AssistantSystemPromptInput
 ): string {
-  return joinPromptSections(
+  const prompt = joinPromptSections(
     buildAssistantIdentityAndScopeText(),
     buildAssistantCurrentDateContextText({
       currentLocalDate: input.currentLocalDate,
@@ -103,6 +127,7 @@ export function buildAssistantSystemPrompt(
     buildAssistantCliGuidanceText(input.cliAccess),
     buildAssistantCliContractText(input.assistantCliContract)
   );
+  return renderAssistantToolNameAliases(prompt, input.assistantToolNameAliases);
 }
 
 export function buildAssistantNotificationDecisionSystemPrompt(

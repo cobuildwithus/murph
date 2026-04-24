@@ -6,6 +6,8 @@ import {
   isAssistantSessionNotFoundError,
 } from '@murphai/assistant-engine'
 import {
+  GATEWAY_SESSION_NOT_FOUND_CODE,
+  GATEWAY_UNSUPPORTED_OPERATION_CODE,
   gatewayFetchAttachmentsInputSchema,
   gatewayGetConversationInputSchema,
   gatewayListConversationsInputSchema,
@@ -25,6 +27,10 @@ import {
   type GatewaySendMessageInput,
   type GatewayWaitForEventsInput,
 } from '@murphai/gateway-core'
+import {
+  ASSISTANTD_VAULT_MISMATCH_CODE,
+  createAssistantdVaultMismatchError,
+} from './errors.js'
 import type { AssistantLocalService } from './service.js'
 
 const assistantConversationDirectnessValues = new Set([
@@ -58,31 +64,8 @@ type AssistantOutboxDrainRequest = Parameters<AssistantLocalService['drainOutbox
 type AssistantAutomationRunRequest = Parameters<AssistantLocalService['runAutomationOnce']>[0]
 type AssistantCronProcessRequest = Parameters<AssistantLocalService['processDueCron']>[0]
 type AssistantCronTargetSetRequest = Parameters<AssistantLocalService['setCronTarget']>[0]
-type AssistantGatewayListConversationsRequest = GatewayListConversationsInput & {
-  vault?: string | null
-}
-type AssistantGatewayGetConversationRequest = GatewayGetConversationInput & {
-  vault?: string | null
-}
-type AssistantGatewayReadMessagesRequest = GatewayReadMessagesInput & {
-  vault?: string | null
-}
-type AssistantGatewayFetchAttachmentsRequest = GatewayFetchAttachmentsInput & {
-  vault?: string | null
-}
-type AssistantGatewayPollEventsRequest = GatewayPollEventsInput & {
-  vault?: string | null
-}
-type AssistantGatewayWaitForEventsRequest = GatewayWaitForEventsInput & {
-  vault?: string | null
-}
-type AssistantGatewaySendMessageRequest = GatewaySendMessageInput & {
-  vault?: string | null
-}
-type AssistantGatewayListOpenPermissionsRequest = GatewayListOpenPermissionsInput & {
-  vault?: string | null
-}
-type AssistantGatewayRespondToPermissionRequest = GatewayRespondToPermissionInput & {
+export interface AssistantGatewayRequest<TInput extends object> {
+  gatewayInput: TInput
   vault?: string | null
 }
 
@@ -171,10 +154,10 @@ function assertAssistantBoundVault(
     return
   }
 
-  throw new AssistantHttpRequestError(
-    `assistantd is bound to ${configuredVault}, but the request targeted ${requestedVault}.`,
-    400,
-  )
+  throw createAssistantdVaultMismatchError({
+    configuredVault,
+    requestedVault,
+  })
 }
 
 function parseAssistantSessionRoute(url: URL): AssistantSessionLookupRequest {
@@ -200,206 +183,115 @@ function parseAssistantOutboxDrainRequestBody(payload: unknown): AssistantOutbox
 
 function parseGatewayListConversationsRequestBody(
   payload: unknown,
-): AssistantGatewayListConversationsRequest {
-  const record = asAssistantRequestRecord(payload, 'gateway/conversations/list')
-  const { vault, ...gatewayRecord } = record
-  try {
-    return {
-      ...gatewayListConversationsInputSchema.parse(gatewayRecord),
-      vault:
-        typeof vault === 'undefined'
-          ? undefined
-          : readOptionalNullableStringField(record, 'vault', 'gateway/conversations/list'),
-    }
-  } catch (error) {
-    throw new AssistantHttpRequestError(
-      error instanceof Error
-        ? error.message
-        : 'Assistant gateway conversation-list request was invalid.',
-      400,
-    )
-  }
+): AssistantGatewayRequest<GatewayListConversationsInput> {
+  return parseAssistantGatewayRequestBody(
+    payload,
+    gatewayListConversationsInputSchema,
+    'gateway/conversations/list',
+  )
 }
 
 function parseGatewayGetConversationRequestBody(
   payload: unknown,
-): AssistantGatewayGetConversationRequest {
-  const record = asAssistantRequestRecord(payload, 'gateway/conversations/get')
-  const { vault, ...gatewayRecord } = record
-  try {
-    return {
-      ...gatewayGetConversationInputSchema.parse(gatewayRecord),
-      vault:
-        typeof vault === 'undefined'
-          ? undefined
-          : readOptionalNullableStringField(record, 'vault', 'gateway/conversations/get'),
-    }
-  } catch (error) {
-    throw new AssistantHttpRequestError(
-      error instanceof Error
-        ? error.message
-        : 'Assistant gateway conversation-get request was invalid.',
-      400,
-    )
-  }
+): AssistantGatewayRequest<GatewayGetConversationInput> {
+  return parseAssistantGatewayRequestBody(
+    payload,
+    gatewayGetConversationInputSchema,
+    'gateway/conversations/get',
+  )
 }
 
 function parseGatewayReadMessagesRequestBody(
   payload: unknown,
-): AssistantGatewayReadMessagesRequest {
-  const record = asAssistantRequestRecord(payload, 'gateway/messages/read')
-  const { vault, ...gatewayRecord } = record
-  try {
-    return {
-      ...gatewayReadMessagesInputSchema.parse(gatewayRecord),
-      vault:
-        typeof vault === 'undefined'
-          ? undefined
-          : readOptionalNullableStringField(record, 'vault', 'gateway/messages/read'),
-    }
-  } catch (error) {
-    throw new AssistantHttpRequestError(
-      error instanceof Error
-        ? error.message
-        : 'Assistant gateway message-read request was invalid.',
-      400,
-    )
-  }
+): AssistantGatewayRequest<GatewayReadMessagesInput> {
+  return parseAssistantGatewayRequestBody(
+    payload,
+    gatewayReadMessagesInputSchema,
+    'gateway/messages/read',
+  )
 }
 
 function parseGatewayFetchAttachmentsRequestBody(
   payload: unknown,
-): AssistantGatewayFetchAttachmentsRequest {
-  const record = asAssistantRequestRecord(payload, 'gateway/attachments/fetch')
-  const { vault, ...gatewayRecord } = record
-  try {
-    return {
-      ...gatewayFetchAttachmentsInputSchema.parse(gatewayRecord),
-      vault:
-        typeof vault === 'undefined'
-          ? undefined
-          : readOptionalNullableStringField(record, 'vault', 'gateway/attachments/fetch'),
-    }
-  } catch (error) {
-    throw new AssistantHttpRequestError(
-      error instanceof Error
-        ? error.message
-        : 'Assistant gateway attachment-fetch request was invalid.',
-      400,
-    )
-  }
+): AssistantGatewayRequest<GatewayFetchAttachmentsInput> {
+  return parseAssistantGatewayRequestBody(
+    payload,
+    gatewayFetchAttachmentsInputSchema,
+    'gateway/attachments/fetch',
+  )
 }
 
 function parseGatewaySendMessageRequestBody(
   payload: unknown,
-): AssistantGatewaySendMessageRequest {
-  const record = asAssistantRequestRecord(payload, 'gateway/messages/send')
-  const { vault, ...gatewayRecord } = record
-  try {
-    return {
-      ...gatewaySendMessageInputSchema.parse(gatewayRecord),
-      vault:
-        typeof vault === 'undefined'
-          ? undefined
-          : readOptionalNullableStringField(record, 'vault', 'gateway/messages/send'),
-    }
-  } catch (error) {
-    throw new AssistantHttpRequestError(
-      error instanceof Error
-        ? error.message
-        : 'Assistant gateway message-send request was invalid.',
-      400,
-    )
-  }
+): AssistantGatewayRequest<GatewaySendMessageInput> {
+  return parseAssistantGatewayRequestBody(
+    payload,
+    gatewaySendMessageInputSchema,
+    'gateway/messages/send',
+  )
 }
 
 function parseGatewayPollEventsRequestBody(
   payload: unknown,
-): AssistantGatewayPollEventsRequest {
-  const record = asAssistantRequestRecord(payload, 'gateway/events/poll')
-  const { vault, ...gatewayRecord } = record
-  try {
-    return {
-      ...gatewayPollEventsInputSchema.parse(gatewayRecord),
-      vault:
-        typeof vault === 'undefined'
-          ? undefined
-          : readOptionalNullableStringField(record, 'vault', 'gateway/events/poll'),
-    }
-  } catch (error) {
-    throw new AssistantHttpRequestError(
-      error instanceof Error
-        ? error.message
-        : 'Assistant gateway event-poll request was invalid.',
-      400,
-    )
-  }
+): AssistantGatewayRequest<GatewayPollEventsInput> {
+  return parseAssistantGatewayRequestBody(
+    payload,
+    gatewayPollEventsInputSchema,
+    'gateway/events/poll',
+  )
 }
 
 function parseGatewayWaitForEventsRequestBody(
   payload: unknown,
-): AssistantGatewayWaitForEventsRequest {
-  const record = asAssistantRequestRecord(payload, 'gateway/events/wait')
-  const { vault, ...gatewayRecord } = record
-  try {
-    return {
-      ...gatewayWaitForEventsInputSchema.parse(gatewayRecord),
-      vault:
-        typeof vault === 'undefined'
-          ? undefined
-          : readOptionalNullableStringField(record, 'vault', 'gateway/events/wait'),
-    }
-  } catch (error) {
-    throw new AssistantHttpRequestError(
-      error instanceof Error
-        ? error.message
-        : 'Assistant gateway event-wait request was invalid.',
-      400,
-    )
-  }
+): AssistantGatewayRequest<GatewayWaitForEventsInput> {
+  return parseAssistantGatewayRequestBody(
+    payload,
+    gatewayWaitForEventsInputSchema,
+    'gateway/events/wait',
+  )
 }
 
 function parseGatewayListOpenPermissionsRequestBody(
   payload: unknown,
-): AssistantGatewayListOpenPermissionsRequest {
-  const record = asAssistantRequestRecord(payload, 'gateway/permissions/list-open')
-  const { vault, ...gatewayRecord } = record
-  try {
-    return {
-      ...gatewayListOpenPermissionsInputSchema.parse(gatewayRecord),
-      vault:
-        typeof vault === 'undefined'
-          ? undefined
-          : readOptionalNullableStringField(record, 'vault', 'gateway/permissions/list-open'),
-    }
-  } catch (error) {
-    throw new AssistantHttpRequestError(
-      error instanceof Error
-        ? error.message
-        : 'Assistant gateway permission-list request was invalid.',
-      400,
-    )
-  }
+): AssistantGatewayRequest<GatewayListOpenPermissionsInput> {
+  return parseAssistantGatewayRequestBody(
+    payload,
+    gatewayListOpenPermissionsInputSchema,
+    'gateway/permissions/list-open',
+  )
 }
 
 function parseGatewayRespondToPermissionRequestBody(
   payload: unknown,
-): AssistantGatewayRespondToPermissionRequest {
-  const record = asAssistantRequestRecord(payload, 'gateway/permissions/respond')
-  const { vault, ...gatewayRecord } = record
+): AssistantGatewayRequest<GatewayRespondToPermissionInput> {
+  return parseAssistantGatewayRequestBody(
+    payload,
+    gatewayRespondToPermissionInputSchema,
+    'gateway/permissions/respond',
+  )
+}
+
+function parseAssistantGatewayRequestBody<TInput extends object>(
+  payload: unknown,
+  schema: { parse(input: unknown): TInput },
+  context: string,
+): AssistantGatewayRequest<TInput> {
+  const record = asAssistantRequestRecord(payload, context)
+  const vault = readOptionalNullableStringField(record, 'vault', context)
+  const gatewayRecord = { ...record }
+  delete gatewayRecord.vault
+
   try {
+    const gatewayInput = schema.parse(gatewayRecord)
     return {
-      ...gatewayRespondToPermissionInputSchema.parse(gatewayRecord),
-      vault:
-        typeof vault === 'undefined'
-          ? undefined
-          : readOptionalNullableStringField(record, 'vault', 'gateway/permissions/respond'),
+      gatewayInput,
+      ...(vault === undefined ? {} : { vault }),
     }
   } catch (error) {
     throw new AssistantHttpRequestError(
       error instanceof Error
         ? error.message
-        : 'Assistant gateway permission-response request was invalid.',
+        : `Assistant ${context} request was invalid.`,
       400,
     )
   }
@@ -425,6 +317,7 @@ function parseAssistantAutomationRunRequestBody(payload: unknown): AssistantAuto
   assertOptionalNullableStringField(record, 'vault', 'automation/run-once')
   assertOptionalNullableStringField(record, 'requestId', 'automation/run-once')
   assertOptionalBooleanField(record, 'allowSelfAuthored', 'automation/run-once')
+  assertOptionalBooleanField(record, 'allowCanonicalWrites', 'automation/run-once')
   assertOptionalBooleanField(record, 'drainOutbox', 'automation/run-once')
   assertOptionalBooleanField(record, 'once', 'automation/run-once')
   assertOptionalBooleanField(record, 'startDaemon', 'automation/run-once')
@@ -938,10 +831,19 @@ function resolveAssistantHttpErrorStatus(error: unknown): number {
   }
 
   const code = readAssistantErrorCode(error)
-  if (code === 'ASSISTANT_INVALID_RUNTIME_ID' || code === 'ASSISTANT_STATE_INVALID_DOC_ID') {
+  if (
+    code === ASSISTANTD_VAULT_MISMATCH_CODE ||
+    code === 'ASSISTANT_INVALID_RUNTIME_ID' ||
+    code === 'ASSISTANT_STATE_INVALID_DOC_ID' ||
+    code === GATEWAY_UNSUPPORTED_OPERATION_CODE
+  ) {
     return 400
   }
-  if (code === 'ASSISTANT_SESSION_NOT_FOUND' || code === 'ASSISTANT_CRON_JOB_NOT_FOUND') {
+  if (
+    code === 'ASSISTANT_SESSION_NOT_FOUND' ||
+    code === 'ASSISTANT_CRON_JOB_NOT_FOUND' ||
+    code === GATEWAY_SESSION_NOT_FOUND_CODE
+  ) {
     return 404
   }
   /* v8 ignore next -- retained as a defensive seam; matching code-based errors return above */

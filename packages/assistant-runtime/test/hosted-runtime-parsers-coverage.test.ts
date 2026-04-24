@@ -90,6 +90,23 @@ describe("hosted runtime parser coverage", () => {
           publicBaseUrl: "https://device-sync.example.test",
           secret: "secret_123",
         },
+        managedAutoReplyChannels: [
+          {
+            capabilityReady: true,
+            channel: "email",
+            memberChannel: "email",
+          },
+          {
+            capabilityReady: true,
+            channel: "linq",
+            memberChannel: "linq",
+          },
+          {
+            capabilityReady: false,
+            channel: "telegram",
+            memberChannel: "telegram",
+          },
+        ],
       },
       userEnv: {
         OPENAI_API_KEY: "secret",

@@ -274,6 +274,7 @@ export async function executeClaimedAssistantCronJob(input: {
         threadId: claimedJob.target.threadId,
         deliveryDispatchMode: input.deliveryDispatchMode,
         deliveryTarget: claimedJob.target.deliveryTarget,
+        operatorAuthority: 'direct-operator',
         turnTrigger: 'automation-cron',
         workingDirectory: input.vault,
       })

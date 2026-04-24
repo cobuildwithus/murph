@@ -40,6 +40,7 @@ import {
   isAssistantOperatorAuthority,
   resolveAcceptedInboundMessageOperatorAuthority,
   resolveAssistantOperatorAuthority,
+  resolveTrustedLocalAssistantOperatorAuthority,
 } from '../src/assistant/operator-authority.ts'
 import {
   buildFailedAssistantPromptAttemptText,
@@ -485,7 +486,15 @@ describe('assistant product small seams', () => {
     ])
     expect(isAssistantOperatorAuthority('direct-operator')).toBe(true)
     expect(isAssistantOperatorAuthority('user')).toBe(false)
-    expect(resolveAssistantOperatorAuthority('not-valid')).toBe('direct-operator')
+    expect(resolveAssistantOperatorAuthority('not-valid')).toBe(
+      'accepted-inbound-message',
+    )
+    expect(resolveAssistantOperatorAuthority(undefined)).toBe(
+      'accepted-inbound-message',
+    )
+    expect(resolveTrustedLocalAssistantOperatorAuthority('not-valid')).toBe(
+      'direct-operator',
+    )
     expect(resolveAcceptedInboundMessageOperatorAuthority()).toBe(
       'accepted-inbound-message',
     )

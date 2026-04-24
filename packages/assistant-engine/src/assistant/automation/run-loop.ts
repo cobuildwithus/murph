@@ -59,6 +59,7 @@ type AssistantAutomationLoopStateSnapshot = Pick<
 >
 
 export interface RunAssistantAutomationInput {
+  applyCanonicalWrites?: boolean
   allowSelfAuthored?: boolean
   deliveryDispatchMode?: AssistantOutboxDispatchMode
   drainOutbox?: boolean
@@ -75,7 +76,7 @@ export interface RunAssistantAutomationInput {
   sessionMaxAgeMs?: number | null
   turnInputPort?: AssistantTurnInputPort
   vault: string
-  vaultServices?: VaultServices
+  vaultServices?: VaultServices | null
 }
 
 export interface RunAssistantAutomationPassInput
@@ -258,6 +259,7 @@ export async function runAssistantAutomationPass(
   input: RunAssistantAutomationPassInput,
 ): Promise<AssistantAutomationPassResult> {
   const inboxServices = input.inboxServices ?? createIntegratedInboxServices()
+  const applyCanonicalWrites = input.applyCanonicalWrites ?? true
   const executionContext = normalizeAssistantExecutionContext(input.executionContext)
   const turnInputPort =
     input.turnInputPort ??
@@ -268,9 +270,11 @@ export async function runAssistantAutomationPass(
           requestId: input.requestId ?? null,
           vault: input.vault,
         }))
-  const vaultServices = input.vaultServices ?? createIntegratedVaultServices({
-    foodAutoLogHooks: createAssistantFoodAutoLogHooks(),
-  })
+  const vaultServices = applyCanonicalWrites
+    ? input.vaultServices ?? createIntegratedVaultServices({
+        foodAutoLogHooks: createAssistantFoodAutoLogHooks(),
+      })
+    : undefined
 
   maybeThrowInjectedAssistantFault({
     component: 'automation',
@@ -309,22 +313,28 @@ export async function runAssistantAutomationPass(
   let state = await readAssistantAutomationState(input.vault)
   const stateBeforeScan = snapshotAssistantAutomationLoopState(state)
 
-  const recovery = await recoverAssistantAutoReplies({
-    allowSelfAuthored: input.allowSelfAuthored ?? false,
-    deliveryDispatchMode: input.deliveryDispatchMode,
-    autoReply: state.autoReply,
-    executionContext,
-    inboxServices,
-    maxPerScan: input.maxPerScan,
-    onEvent: input.onEvent,
-    requestId: input.requestId,
-    signal: input.signal,
-    sessionMaxAgeMs: input.sessionMaxAgeMs ?? null,
-    turnInputPort,
-    vault: input.vault,
-  })
+  const recovery = applyCanonicalWrites
+    ? await recoverAssistantAutoReplies({
+        allowSelfAuthored: input.allowSelfAuthored ?? false,
+        deliveryDispatchMode: input.deliveryDispatchMode,
+        autoReply: state.autoReply,
+        executionContext,
+        inboxServices,
+        maxPerScan: input.maxPerScan,
+        onEvent: input.onEvent,
+        requestId: input.requestId,
+        signal: input.signal,
+        sessionMaxAgeMs: input.sessionMaxAgeMs ?? null,
+        turnInputPort,
+        vault: input.vault,
+      })
+    : {
+        ...createEmptyAutoReplyScanResult(),
+        progressed: false,
+      }
 
   const scanResult = await scanAssistantAutomationOnce({
+    applyCanonicalWrites,
     allowSelfAuthored: input.allowSelfAuthored ?? false,
     deliveryDispatchMode: input.deliveryDispatchMode,
     executionContext,
@@ -348,13 +358,19 @@ export async function runAssistantAutomationPass(
       })
     },
   })
-  const cronResult = await processDueAssistantCronJobs({
-    deliveryDispatchMode: input.deliveryDispatchMode,
-    executionContext,
-    vault: input.vault,
-    signal: input.signal,
-    limit: input.maxPerScan,
-  })
+  const cronResult = applyCanonicalWrites
+    ? await processDueAssistantCronJobs({
+        deliveryDispatchMode: input.deliveryDispatchMode,
+        executionContext,
+        vault: input.vault,
+        signal: input.signal,
+        limit: input.maxPerScan,
+      })
+    : {
+        failed: 0,
+        processed: 0,
+        succeeded: 0,
+      }
 
   await refreshAssistantStatusSnapshot(input.vault).catch((error) => {
     warnAssistantBestEffortFailure({
@@ -368,6 +384,7 @@ export async function runAssistantAutomationPass(
     state,
   )
   const cronStatus = await getAssistantCronStatus(input.vault)
+  const cronNextRunAt = applyCanonicalWrites ? cronStatus.nextRunAt : null
   const outboxNextAttemptAt = input.drainOutbox ?? true
     ? (await buildAssistantOutboxSummary(input.vault)).nextAttemptAt
     : null
@@ -381,7 +398,7 @@ export async function runAssistantAutomationPass(
     nextWakeAt: earliestAssistantAutomationWakeAt(
       replies.nextWakeAt,
       scanResult.routing.nextWakeAt,
-      cronStatus.nextRunAt,
+      cronNextRunAt,
       outboxNextAttemptAt,
     ),
     outboxAttempted: outboxResult.attempted,

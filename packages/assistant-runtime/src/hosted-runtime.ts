@@ -76,6 +76,7 @@ export type {
   HostedAssistantRuntimeJobInput,
   HostedAssistantRuntimeJobResult,
   HostedAssistantRuntimeJobRequest,
+  HostedAssistantRuntimeManagedAutoReplyChannel,
   HostedAssistantRuntimeResolvedConfig,
 } from "./hosted-runtime/models.ts";
 export type {
@@ -88,10 +89,7 @@ export type {
   HostedRuntimeUsageExportPort,
 } from "./hosted-runtime/platform.ts";
 export {
-  createHostedRuntimeChildLauncherDirectories,
-  createHostedRuntimeChildProcessEnv,
-  resolveHostedRuntimeTsconfigPath,
-  resolveHostedRuntimeTsxImportSpecifier,
+  sanitizeHostedAssistantRuntimeForwardedEnv,
 } from "./hosted-runtime/environment.ts";
 export {
   parseHostedRuntimeBillingStripeCustomerResponse,
@@ -387,13 +385,4 @@ function buildHostedRuntimeStartDetails(
     ),
     userEnvKeyCount: Object.keys(runtime.userEnv).length,
   };
-}
-
-function normalizeHostedRuntimeString(value: string | null | undefined): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  const normalized = value.trim();
-  return normalized.length > 0 ? normalized : null;
 }

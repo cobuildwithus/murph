@@ -8,11 +8,15 @@ import {
 
 import type {
   HostedAssistantRuntimeDeviceSyncConfig,
+  HostedAssistantRuntimeManagedAutoReplyChannel,
   HostedAssistantRuntimeResolvedConfig,
   HostedAssistantRuntimeConfig,
   HostedAssistantRuntimeJobInput,
   HostedAssistantRuntimeJobRequest,
 } from "./models.ts";
+import {
+  createDefaultHostedManagedAutoReplyChannels,
+} from "./managed-auto-reply.ts";
 
 export function parseHostedAssistantRuntimeJobInput(
   value: unknown,
@@ -124,18 +128,28 @@ function parseHostedAssistantRuntimeResolvedConfig(
   label: string,
 ): HostedAssistantRuntimeResolvedConfig {
   const record = requireObject(value, label);
+  const channelCapabilities = parseHostedAssistantRuntimeChannelCapabilities(
+    record.channelCapabilities,
+    `${label}.channelCapabilities`,
+  );
 
   return {
-    channelCapabilities: parseHostedAssistantRuntimeChannelCapabilities(
-      record.channelCapabilities,
-      `${label}.channelCapabilities`,
-    ),
+    channelCapabilities,
     deviceSync:
       record.deviceSync === undefined || record.deviceSync === null
         ? null
         : parseHostedAssistantRuntimeDeviceSyncConfig(
             record.deviceSync,
             `${label}.deviceSync`,
+          ),
+    managedAutoReplyChannels: record.managedAutoReplyChannels === undefined
+      ? createDefaultHostedManagedAutoReplyChannels(channelCapabilities)
+      : requireArray(record.managedAutoReplyChannels, `${label}.managedAutoReplyChannels`)
+          .map((entry, index) =>
+            parseHostedAssistantRuntimeManagedAutoReplyChannel(
+              entry,
+              `${label}.managedAutoReplyChannels[${index}]`,
+            )
           ),
   };
 }
@@ -160,6 +174,19 @@ function parseHostedAssistantRuntimeDeviceSyncConfig(
   label: string,
 ): HostedAssistantRuntimeDeviceSyncConfig {
   return parseConfiguredDeviceSyncRuntimeConfig(value, label);
+}
+
+function parseHostedAssistantRuntimeManagedAutoReplyChannel(
+  value: unknown,
+  label: string,
+): HostedAssistantRuntimeManagedAutoReplyChannel {
+  const record = requireObject(value, label);
+
+  return {
+    capabilityReady: requireBoolean(record.capabilityReady, `${label}.capabilityReady`),
+    channel: requireString(record.channel, `${label}.channel`),
+    memberChannel: readOptionalNullableString(record.memberChannel, `${label}.memberChannel`),
+  };
 }
 
 function parseStringRecord(value: unknown, label: string): Record<string, string> {
@@ -196,6 +223,13 @@ function requireObject(value: unknown, label: string): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
+function requireArray(value: unknown, label: string): unknown[] {
+  if (!Array.isArray(value)) {
+    throw new TypeError(`${label} must be an array.`);
+  }
+
+  return value;
+}
 
 function requireString(value: unknown, label: string): string {
   if (typeof value !== "string" || value.length === 0) {
@@ -223,6 +257,14 @@ function requireNumber(value: unknown, label: string): number {
 
 function readNullableString(value: unknown, label: string): string | null {
   if (value === null) {
+    return null;
+  }
+
+  return requireString(value, label);
+}
+
+function readOptionalNullableString(value: unknown, label: string): string | null {
+  if (value === undefined || value === null) {
     return null;
   }
 

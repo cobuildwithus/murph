@@ -24,12 +24,14 @@ import {
   resolveAssistantChatProviderFromConfig,
   serializeAssistantProviderSessionOptions,
 } from '@murphai/operator-config/assistant/provider-config'
+import { splitAssistantHeadersForPersistence } from '@murphai/operator-config/assistant/redaction'
 import { resolveAssistantProviderLabel } from './provider-registry.js'
 import {
   isMissingFileError,
   normalizeNullableString,
   writeJsonFileAtomic,
 } from './shared.js'
+import { sanitizeAssistantPortableStateString } from './redaction.js'
 
 const ASSISTANT_FAILOVER_STATE_SCHEMA = 'murph.assistant-failover-state.v1'
 const DEFAULT_FAILOVER_COOLDOWN_MS = 60_000
@@ -192,8 +194,8 @@ export async function recordAssistantFailoverRouteFailure(input: {
         successCount: 0,
         consecutiveFailures: 1,
         lastFailureAt: at,
-        lastErrorCode: readErrorCode(input.error),
-        lastErrorMessage: readErrorMessage(input.error),
+        lastErrorCode: readPersistedErrorCode(input.error),
+        lastErrorMessage: readPersistedErrorMessage(input.error),
         cooldownUntil,
       },
       'failure',
@@ -433,14 +435,69 @@ function hashAssistantFailoverRoute(input: {
 }): string {
   return createHash('sha1')
     .update(
-      JSON.stringify({
-        provider: input.provider,
-        providerOptions: input.providerOptions,
-        codexCommand: input.codexCommand,
-      }),
+      JSON.stringify(buildAssistantFailoverRouteIdentity(input)),
     )
     .digest('hex')
     .slice(0, 16)
+}
+
+function buildAssistantFailoverRouteIdentity(input: {
+  codexCommand: string | null
+  provider: AssistantChatProvider
+  providerOptions: AssistantProviderSessionOptions
+}) {
+  return {
+    provider: input.provider,
+    executionDriver: input.providerOptions.executionDriver,
+    model: input.providerOptions.model,
+    reasoningEffort: input.providerOptions.reasoningEffort,
+    sandbox: input.providerOptions.sandbox,
+    approvalPolicy: input.providerOptions.approvalPolicy,
+    profile: input.providerOptions.profile,
+    oss: input.providerOptions.oss,
+    codexHome: input.providerOptions.codexHome ?? null,
+    codexCommand: input.codexCommand,
+    baseUrl: input.providerOptions.baseUrl ?? null,
+    apiKeyEnv: input.providerOptions.apiKeyEnv ?? null,
+    providerName: input.providerOptions.providerName ?? null,
+    presetId: input.providerOptions.presetId ?? null,
+    gatewayOnlyProviders: normalizeStringListForRouteIdentity(
+      input.providerOptions.gatewayOnlyProviders,
+    ),
+    headers: buildAssistantFailoverHeaderIdentity(input.providerOptions.headers),
+    webSearch: input.providerOptions.webSearch ?? null,
+    zeroDataRetention: input.providerOptions.zeroDataRetention === true,
+    resumeKind: input.providerOptions.resumeKind,
+  }
+}
+
+function buildAssistantFailoverHeaderIdentity(
+  headers: Record<string, string> | null | undefined,
+): {
+  names: string[]
+  publicValues: Array<{ name: string; value: string }>
+} {
+  const names = normalizeStringListForRouteIdentity(Object.keys(headers ?? {}))
+  const publicHeaders = splitAssistantHeadersForPersistence(headers).persistedHeaders ?? {}
+  const publicValues = Object.entries(publicHeaders)
+    .map(([rawName, rawValue]) => ({
+      name: normalizeNullableString(rawName),
+      value: normalizeNullableString(rawValue),
+    }))
+    .filter(
+      (entry): entry is { name: string; value: string } =>
+        entry.name !== null && entry.value !== null,
+    )
+    .sort((left, right) =>
+      left.name === right.name
+        ? left.value.localeCompare(right.value)
+        : left.name.localeCompare(right.name),
+    )
+
+  return {
+    names,
+    publicValues,
+  }
 }
 
 function resolveAssistantFailoverCooldownMs(error: unknown): number | null {
@@ -510,12 +567,33 @@ function readErrorCode(error: unknown): string | null {
     : null
 }
 
+function readPersistedErrorCode(error: unknown): string | null {
+  const code = readErrorCode(error)
+  return code
+    ? sanitizeAssistantPortableStateString(code, 80).replaceAll(/\s+/gu, '_')
+    : null
+}
+
 function readErrorMessage(error: unknown): string | null {
   if (error instanceof Error && error.message.trim().length > 0) {
     return error.message
   }
 
   return typeof error === 'string' && error.trim().length > 0 ? error : null
+}
+
+function readPersistedErrorMessage(error: unknown): string | null {
+  const message = readErrorMessage(error)
+  return message ? sanitizeAssistantPortableStateString(message) : null
+}
+
+function normalizeStringListForRouteIdentity(
+  values: readonly string[] | null | undefined,
+): string[] {
+  return [...(values ?? [])]
+    .map((value) => normalizeNullableString(value))
+    .filter((value): value is string => value !== null)
+    .sort((left, right) => left.localeCompare(right))
 }
 
 function readAssistantProviderStatusCode(error: unknown): number | null {

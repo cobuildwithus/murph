@@ -547,6 +547,73 @@ describe("hosted email routing and transport", () => {
     expect(collapsedThreadTarget?.cc).toEqual([]);
   });
 
+  it("uses idempotency keys for stable message ids and explicit email reply parents", async () => {
+    const emailBinding = {
+      send: vi.fn(async (_message: unknown) => undefined),
+    };
+    webControlPlane.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValue(new Response(
+      JSON.stringify({ ok: true }),
+      {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      },
+    ));
+    const threadedTarget = serializeHostedEmailThreadTarget(createHostedEmailThreadTarget({
+      cc: [],
+      lastMessageId: "<thread-last@example.test>",
+      references: ["<thread-root@example.test>", "<thread-last@example.test>"],
+      subject: "Existing subject",
+      to: ["owner@example.com"],
+    }));
+
+    const first = await sendHostedEmailMessage({
+      config: TEST_CONFIG,
+      emailBinding,
+      request: {
+        identityId: null,
+        idempotencyKey: "assistant-outbox:intent_email_123",
+        message: "follow up",
+        replyToMessageId: "<explicit-parent@example.test>",
+        target: threadedTarget,
+        targetKind: "thread",
+      },
+      userId: "user_123",
+      webCallbackSigning: TEST_CALLBACK_SIGNING,
+      webControlBaseUrl: "https://web.example.test",
+    });
+    const second = await sendHostedEmailMessage({
+      config: TEST_CONFIG,
+      emailBinding,
+      request: {
+        identityId: null,
+        idempotencyKey: "assistant-outbox:intent_email_123",
+        message: "follow up",
+        replyToMessageId: "<explicit-parent@example.test>",
+        target: threadedTarget,
+        targetKind: "thread",
+      },
+      userId: "user_123",
+      webCallbackSigning: TEST_CALLBACK_SIGNING,
+      webControlBaseUrl: "https://web.example.test",
+    });
+
+    const firstMessage = emailBinding.send.mock.calls[0]?.[0] as { raw: string };
+    const secondMessage = emailBinding.send.mock.calls[1]?.[0] as { raw: string };
+    const firstMessageId = firstMessage.raw.match(/^Message-ID: (.+)$/mu)?.[1];
+    const secondMessageId = secondMessage.raw.match(/^Message-ID: (.+)$/mu)?.[1];
+
+    expect(firstMessageId).toBeDefined();
+    expect(firstMessageId).toBe(secondMessageId);
+    expect(parseHostedEmailThreadTarget(first.target)?.lastMessageId).toBe(firstMessageId);
+    expect(parseHostedEmailThreadTarget(second.target)?.lastMessageId).toBe(firstMessageId);
+    expect(firstMessage.raw).toContain("In-Reply-To: <explicit-parent@example.test>");
+    expect(firstMessage.raw).toContain(
+      "References: <thread-root@example.test> <thread-last@example.test> <explicit-parent@example.test>",
+    );
+  });
+
   it("rejects sender overrides when the caller tries to bypass the configured sender identity", async () => {
     await expect(sendHostedEmailMessage({
       config: TEST_CONFIG,

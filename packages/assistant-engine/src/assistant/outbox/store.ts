@@ -13,6 +13,7 @@ import {
   isMissingFileError,
   writeJsonFileAtomic,
 } from '../shared.js'
+import { sanitizeAssistantOutboxIntentForPersistence } from '../redaction.js'
 import {
   resolveAssistantOutboxIntentPath,
   resolveAssistantOutboxQuarantineDirectory,
@@ -42,7 +43,9 @@ export async function saveAssistantOutboxIntent(
 ): Promise<AssistantOutboxIntent> {
   return withAssistantRuntimeWriteLock(vault, async (paths) => {
     await ensureAssistantState(paths)
-    const parsed = assistantOutboxIntentSchema.parse(intent)
+    const parsed = assistantOutboxIntentSchema.parse(
+      sanitizeAssistantOutboxIntentForPersistence(intent),
+    )
     await writeJsonFileAtomic(
       resolveAssistantOutboxIntentPath(paths.outboxDirectory, parsed.intentId),
       parsed,

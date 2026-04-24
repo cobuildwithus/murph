@@ -1,5 +1,6 @@
 import type {
   HostedExecutionBundleRef,
+  HostedExecutionRunnerResult,
   HostedExecutionRunStatus,
   HostedExecutionTimelineEntry,
   HostedExecutionUserStatus,
@@ -67,6 +68,7 @@ export interface RunnerPendingCleanupTelegramRef {
 }
 
 export interface RunnerPendingCleanupState {
+  committedResult?: HostedExecutionRunnerResult | null;
   emailMessages: RunnerPendingCleanupEmailRef[];
   linqMessageIds: string[];
   required: boolean;

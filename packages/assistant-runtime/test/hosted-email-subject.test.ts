@@ -26,8 +26,10 @@ describe('hosted runtime email subject support', () => {
         targetKind: 'explicit',
       }),
     ).toEqual({
+      idempotencyKey: null,
       identityId: 'assistant@example.com',
       message: 'Hello from Murph',
+      replyToMessageId: null,
       subject: 'Daily check-in',
       target: 'user@example.com',
       targetKind: 'explicit',
@@ -106,8 +108,10 @@ describe('hosted runtime email subject support', () => {
 
       expect(sentRequests).toHaveLength(1)
       expect(sentRequests[0]).toMatchObject({
+        idempotencyKey: `assistant-outbox:${intent.intentId}`,
         identityId: 'assistant@example.com',
         message: 'Hello from Murph',
+        replyToMessageId: null,
         subject: 'Daily check-in',
         target: 'user@example.com',
         targetKind: 'explicit',

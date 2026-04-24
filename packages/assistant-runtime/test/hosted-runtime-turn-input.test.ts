@@ -31,6 +31,7 @@ import type {
 } from "@murphai/assistant-engine";
 import type {
   HostedRuntimeDrainEvent,
+  HostedRunEventResult,
   HostedRuntimeEvent,
 } from "@murphai/hosted-execution";
 
@@ -86,12 +87,14 @@ function createDrainEvent(input: {
 function createPort(input: {
   basePort: AssistantTurnInputPort;
   hostedRefresh: HostedRuntimeTurnInputPort["refresh"];
+  onImportedEvent?: (result: HostedRunEventResult) => void;
 }): AssistantTurnInputPort | undefined {
   const inboxServices = {} as InboxServicesInput;
   mocks.createInboxBackedAssistantTurnInputPort.mockReturnValueOnce(input.basePort);
 
   return createHostedAssistantTurnInputPort({
     inboxServices,
+    ...(input.onImportedEvent ? { onImportedEvent: input.onImportedEvent } : {}),
     requestId: "req_turn_input",
     runtime: {
       forwardedEnv: {},
@@ -164,6 +167,10 @@ describe("createHostedAssistantTurnInputPort", () => {
       .mockResolvedValueOnce({
         progressed: false,
         reason: "source_unavailable",
+      })
+      .mockResolvedValueOnce({
+        progressed: false,
+        reason: "source_unavailable",
       });
     const baseListNewConversationCaptures = vi.fn<
       AssistantTurnInputPort["listNewConversationCaptures"]
@@ -225,9 +232,19 @@ describe("createHostedAssistantTurnInputPort", () => {
             wake: TIMER_WAKE,
           }),
         ],
+      })
+      .mockResolvedValueOnce({
+        events: [],
       });
 
-    const port = createPort({ basePort, hostedRefresh });
+    const importedEvents: HostedRunEventResult[] = [];
+    const port = createPort({
+      basePort,
+      hostedRefresh,
+      onImportedEvent(result) {
+        importedEvents.push(result);
+      },
+    });
     expect(port).toBeDefined();
 
     await expect(port?.refresh({ phase: "before_delivery" })).resolves.toEqual({
@@ -239,10 +256,14 @@ describe("createHostedAssistantTurnInputPort", () => {
       reason: "ingested_input",
     });
     await expect(port?.refresh({ phase: "after_provider" })).resolves.toEqual({
-      progressed: true,
-      reason: "ingested_input",
+      progressed: false,
+      reason: "no_new_input",
     });
     await expect(port?.refresh({ phase: "after_tool_result" })).resolves.toEqual({
+      progressed: false,
+      reason: "source_unavailable",
+    });
+    await expect(port?.refresh({ phase: "before_provider" })).resolves.toEqual({
       progressed: false,
       reason: "source_unavailable",
     });
@@ -272,7 +293,7 @@ describe("createHostedAssistantTurnInputPort", () => {
       requestId: "req_turn_input",
     });
     expect(hostedRefresh).toHaveBeenNthCalledWith(2, {
-      afterSeq: "11",
+      afterSeq: "12",
       phase: "before_provider",
       requestId: "req_turn_input",
     });
@@ -286,7 +307,22 @@ describe("createHostedAssistantTurnInputPort", () => {
       phase: "after_tool_result",
       requestId: "req_turn_input",
     });
-    expect(mocks.ingestHostedConversationMessageWake).toHaveBeenCalledTimes(3);
+    expect(hostedRefresh).toHaveBeenNthCalledWith(5, {
+      afterSeq: "14",
+      phase: "before_provider",
+      requestId: "req_turn_input",
+    });
+    expect(mocks.ingestHostedConversationMessageWake).toHaveBeenCalledTimes(2);
+    expect(importedEvents).toEqual([
+      {
+        ingressEventId: "ingress_first",
+        state: "completed",
+      },
+      {
+        ingressEventId: "ingress_second",
+        state: "completed",
+      },
+    ]);
     expect(mocks.ingestHostedConversationMessageWake).toHaveBeenNthCalledWith(1, {
       runtime: expect.any(Object),
       vaultRoot: "/tmp/vault-root",
@@ -297,12 +333,7 @@ describe("createHostedAssistantTurnInputPort", () => {
       vaultRoot: "/tmp/vault-root",
       wake: secondWake,
     });
-    expect(mocks.ingestHostedConversationMessageWake).toHaveBeenNthCalledWith(3, {
-      runtime: expect.any(Object),
-      vaultRoot: "/tmp/vault-root",
-      wake: lowerSeqWake,
-    });
-    expect(baseRefresh).toHaveBeenCalledTimes(4);
+    expect(baseRefresh).toHaveBeenCalledTimes(5);
     expect(baseListNewConversationCaptures).toHaveBeenCalledWith(captureQuery);
   });
 

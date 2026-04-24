@@ -112,12 +112,14 @@ async function exportHostedIssueBatch(input: {
   const response = await input.issueExportPort.recordIssues(input.batch);
 
   const batchIssueIds = new Set(input.batch.map((record) => record.issueId));
-  const acknowledgedIssueIds = response.issueIds.filter((issueId) => batchIssueIds.has(issueId));
-  const failed = input.batch.length - acknowledgedIssueIds.length;
+  const acknowledgedIssueIds = new Set(
+    response.issueIds.filter((issueId) => batchIssueIds.has(issueId)),
+  );
+  const failed = input.batch.length - acknowledgedIssueIds.size;
 
   if (failed > 0) {
     console.warn(
-      `Hosted assistant runtime issue export acknowledged ${acknowledgedIssueIds.length} of ${input.batch.length} records; leaving the remainder pending.`,
+      `Hosted assistant runtime issue export acknowledged ${acknowledgedIssueIds.size} of ${input.batch.length} records; leaving the remainder pending.`,
     );
   }
 
@@ -129,7 +131,7 @@ async function exportHostedIssueBatch(input: {
   }
 
   return {
-    exported: acknowledgedIssueIds.length,
+    exported: acknowledgedIssueIds.size,
     failed,
   };
 }

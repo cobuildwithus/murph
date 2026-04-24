@@ -6,34 +6,33 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
-  createHostedRuntimeChildLauncherDirectories,
-  createHostedRuntimeChildProcessEnv,
-  resolveHostedRuntimeTsxImportSpecifier,
-} from "@murphai/assistant-runtime";
-
-import {
   parseHostedRunnerSmokeInput,
   parseHostedRunnerSmokeResult,
   type HostedRunnerSmokeResult,
 } from "./hosted-runner-smoke-contract.js";
+import {
+  createHostedRunnerChildLauncherDirectories,
+  createHostedRunnerChildProcessEnv,
+  resolveHostedRunnerTsxImportSpecifier,
+} from "./runner-child-launcher.ts";
 
 export async function runHostedRunnerSmokeDetailed(input: unknown): Promise<HostedRunnerSmokeResult> {
   const smokeInput = parseHostedRunnerSmokeInput(input);
   const launcherRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-smoke-launch-"));
 
   try {
-    const launcherDirectories = await createHostedRuntimeChildLauncherDirectories(launcherRoot);
+    const launcherDirectories = await createHostedRunnerChildLauncherDirectories(launcherRoot);
     const childEntry = resolveHostedRunnerSmokeChildEntry();
     const isTypeScriptChild = childEntry.endsWith(".ts");
     const child = spawn(
       process.execPath,
       isTypeScriptChild
-        ? ["--import", resolveHostedRuntimeTsxImportSpecifier(), childEntry]
+        ? ["--import", resolveHostedRunnerTsxImportSpecifier(), childEntry]
         : [childEntry],
       {
         cwd: launcherRoot,
         detached: process.platform !== "win32",
-        env: createHostedRuntimeChildProcessEnv({
+        env: createHostedRunnerChildProcessEnv({
           forwardedEnv: readHostedNativeToolEnv(),
           isTypeScriptChild,
           launcherDirectories,

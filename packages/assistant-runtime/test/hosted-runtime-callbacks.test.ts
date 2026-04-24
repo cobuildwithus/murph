@@ -608,7 +608,9 @@ describe("hosted runtime callbacks", () => {
       bindingDeliveryTarget: "thread_123",
       channel: "email",
       explicitTarget: "thread_123",
+      idempotencyKey: "assistant-outbox:intent_123",
       identityId: "assistant@example.com",
+      replyToMessageId: "message_parent_123",
       subject: "Hosted subject",
     });
     const sendEmail = vi.fn(async (request: HostedEmailSendRequest) =>
@@ -619,8 +621,10 @@ describe("hosted runtime callbacks", () => {
     );
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
       const delivery = await dependencies.sendEmail({
+        idempotencyKey: "assistant-outbox:intent_123",
         identityId: "assistant@example.com",
         message: "hello from hosted",
+        replyToMessageId: "message_parent_123",
         subject: "Hosted subject",
         target: "thread_123",
         targetKind: "thread",
@@ -641,8 +645,10 @@ describe("hosted runtime callbacks", () => {
     });
 
     expect(sendEmail).toHaveBeenCalledWith({
+      idempotencyKey: "assistant-outbox:intent_123",
       identityId: "assistant@example.com",
       message: "hello from hosted",
+      replyToMessageId: "message_parent_123",
       subject: "Hosted subject",
       target: "thread_123",
       targetKind: "thread",

@@ -1,10 +1,5 @@
 import { createAssistantRuntimeCache } from './runtime-cache.js'
 
-export const ASSISTANT_SESSION_CACHE = {
-  maxEntries: 256,
-  ttlMs: 30_000,
-} as const
-
 export const ASSISTANT_INDEX_CACHE = {
   maxEntries: 16,
   ttlMs: 30_000,

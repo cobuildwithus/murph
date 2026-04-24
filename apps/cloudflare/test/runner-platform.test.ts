@@ -283,6 +283,53 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     );
   });
 
+  it("does not fall back to ambient local proxy base env when the scoped option is missing", async () => {
+    const previousLocalProxyBaseUrl = process.env.HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL;
+    process.env.HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL = "http://127.0.0.1:8787";
+    const fetchMock = vi.fn(async () => new Response(null, { status: 200 }));
+
+    try {
+      const platform = buildHostedExecutionRuntimePlatform({
+        boundUserId: "member_123",
+        fetchImpl: fetchMock as typeof fetch,
+        internalWorkerProxyToken: "runner-proxy-token",
+      });
+
+      await platform.effectsPort.readRawEmailMessage("raw/message#1");
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const request = requireFetchRequest(fetchMock.mock.calls[0], "direct effects port fetch");
+      expect(request.url).toBe("http://results.worker/messages/raw%2Fmessage%231");
+      expect(request.headers.get("x-hosted-execution-runner-proxy-token")).toBe(
+        "runner-proxy-token",
+      );
+    } finally {
+      if (previousLocalProxyBaseUrl === undefined) {
+        delete process.env.HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL;
+      } else {
+        process.env.HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL = previousLocalProxyBaseUrl;
+      }
+    }
+  });
+
+  it("rejects a pre-scoped local bridge base for a different member", async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 200 }));
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      internalWorkerProxyToken: "runner-proxy-token",
+      localInternalProxyBaseUrl:
+        "http://127.0.0.1:8787/__murph/local-internal-proxy/users/member_other/",
+    });
+
+    await expect(
+      platform.effectsPort.readRawEmailMessage("raw/message#1"),
+    ).rejects.toThrow(
+      "HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL is scoped to a different user.",
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("binds device-sync runtime requests to the hosted member id at the signed web callback seam", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const request = input instanceof Request ? input : new Request(input, init);

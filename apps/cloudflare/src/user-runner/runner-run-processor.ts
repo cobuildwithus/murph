@@ -13,6 +13,8 @@ import type {
   HostedRuntimeDrainEvent,
   HostedRuntimeDrainRequest,
   HostedIngressLifecycleState,
+  HostedRunCleanupTarget,
+  HostedRunEventResult,
 } from "@murphai/hosted-execution";
 import type { GatewayProjectionSnapshot } from "@murphai/gateway-core";
 import {
@@ -84,13 +86,46 @@ export interface RunnerUserStores {
 }
 
 export interface RunnerRunDrainExecutionResult {
+  adoptedCleanupTargets?: HostedRunCleanupTarget[];
+  adoptedEventResults?: HostedRunEventResult[];
   assistantDeliveryOutcomes?: HostedAssistantDeliveryOutcome[];
   browserVaultReplicaRef?: HostedBrowserVaultReplicaRef | null;
+  committedResult?: HostedExecutionRunnerResult | null;
   cursorSnapshotRef: HostedExecutionBundleRef | null;
   finalizeRequired: boolean;
   nextRuntimeWakeAt?: string | null;
   redactedSummary?: Record<string, unknown>;
   state: HostedIngressLifecycleState;
+}
+
+const HOSTED_RUN_SIDE_INPUT_NOT_FOUND_CODE = "HOSTED_RUN_SIDE_INPUT_NOT_FOUND";
+
+export type HostedRunSideInputKind = "share-pack" | "vault-sync-import";
+
+export class HostedRunSideInputNotFoundError extends Error {
+  readonly code = HOSTED_RUN_SIDE_INPUT_NOT_FOUND_CODE;
+  readonly sideInputKind: HostedRunSideInputKind;
+
+  constructor(input: {
+    message: string;
+    sideInputKind: HostedRunSideInputKind;
+  }) {
+    super(input.message);
+    this.name = "HostedRunSideInputNotFoundError";
+    this.sideInputKind = input.sideInputKind;
+  }
+}
+
+export function isHostedRunSideInputNotFoundError(
+  error: unknown,
+): error is HostedRunSideInputNotFoundError {
+  return error instanceof HostedRunSideInputNotFoundError
+    || (
+      typeof error === "object"
+      && error !== null
+      && "code" in error
+      && error.code === HOSTED_RUN_SIDE_INPUT_NOT_FOUND_CODE
+    );
 }
 
 interface RunnerRunTransitionInput<T> {
@@ -307,6 +342,7 @@ export class RunnerRunProcessor {
   }
 
   async finalizeRunDrain(input: {
+    committedResult?: HostedExecutionRunnerResult | null;
     currentBundleRef: HostedExecutionBundleRef | null;
     primaryWake: HostedRuntimeEvent;
     messagingActivityOwnedByExecutor?: boolean;
@@ -314,6 +350,7 @@ export class RunnerRunProcessor {
     runToken?: string | null;
   }): Promise<RunnerRunDrainExecutionResult> {
     return this.processRunDrainLifecycle({
+      committedResult: input.committedResult ?? null,
       currentBundleRef: input.currentBundleRef,
       events: [],
       lifecycle: {
@@ -341,6 +378,7 @@ export class RunnerRunProcessor {
   }
 
   private async processRunDrainLifecycle(input: {
+    committedResult?: HostedExecutionRunnerResult | null;
     currentBundleRef: HostedExecutionBundleRef | null;
     events: HostedRuntimeDrainEvent[];
     lifecycle: RunnerRunDrainLifecyclePolicy;
@@ -388,6 +426,7 @@ export class RunnerRunProcessor {
         input.primaryWake,
         run,
         buildHostedRuntimeDrainRequest({
+          committedResult: input.committedResult ?? null,
           events: input.events,
           resumeFinalize: input.lifecycle.resumeFinalize,
           run: input.run,
@@ -502,11 +541,18 @@ export class RunnerRunProcessor {
         leaseOwner: context.leaseOwner,
       });
       return {
+        ...(result.result.adoptedCleanupTargets && result.result.adoptedCleanupTargets.length > 0
+          ? { adoptedCleanupTargets: result.result.adoptedCleanupTargets }
+          : {}),
+        ...(result.result.adoptedEventResults && result.result.adoptedEventResults.length > 0
+          ? { adoptedEventResults: result.result.adoptedEventResults }
+          : {}),
         ...(assistantDeliveryOutcomes
           ? {
               assistantDeliveryOutcomes,
             }
           : {}),
+        committedResult: runnerResult.result,
         cursorSnapshotRef,
         finalizeRequired: true,
         nextRuntimeWakeAt: result.result.nextWakeAt ?? null,
@@ -547,6 +593,12 @@ export class RunnerRunProcessor {
       leaseOwner: context.leaseOwner,
     });
     return {
+      ...(result.result.adoptedCleanupTargets && result.result.adoptedCleanupTargets.length > 0
+        ? { adoptedCleanupTargets: result.result.adoptedCleanupTargets }
+        : {}),
+      ...(result.result.adoptedEventResults && result.result.adoptedEventResults.length > 0
+        ? { adoptedEventResults: result.result.adoptedEventResults }
+        : {}),
       ...(assistantDeliveryOutcomes
         ? {
             assistantDeliveryOutcomes,
@@ -622,6 +674,7 @@ export class RunnerRunProcessor {
   }
 
   async cleanupTransientWakeDataBestEffortForRunDrain(input: {
+    cleanupTargets?: readonly HostedRunCleanupTarget[] | null;
     assistantDeliveryOutcomes?: readonly HostedAssistantDeliveryOutcome[] | null;
     runId?: string | null;
     userId?: string | null;
@@ -632,10 +685,15 @@ export class RunnerRunProcessor {
 
   async persistPendingRunCleanupData(input: {
     assistantDeliveryOutcomes?: readonly HostedAssistantDeliveryOutcome[] | null;
+    cleanupTargets?: readonly HostedRunCleanupTarget[] | null;
+    committedResult?: HostedExecutionRunnerResult | null;
     runId: string;
     wakes: readonly HostedIngressEnvelope[];
   }): Promise<void> {
-    await this.cleanupService.persistPendingRunCleanupData(input);
+    await this.cleanupService.persistPendingRunCleanupData({
+      ...input,
+      committedResult: input.committedResult ?? null,
+    });
   }
 
   private async resolveRunnerRuntimeEnv(
@@ -902,29 +960,6 @@ export class RunnerRunProcessor {
     }
   }
 
-  private resolveRunContext(
-    record: RunnerStateRecord,
-    input: {
-      attempt?: number;
-      eventId: string;
-      startedAt: string;
-    },
-  ): HostedExecutionRunContext {
-    if (record.run && record.run.eventId === input.eventId) {
-      return {
-        attempt: record.run.attempt,
-        runId: record.run.runId,
-        startedAt: record.run.startedAt,
-      };
-    }
-
-    return {
-      attempt: input.attempt ?? 1,
-      runId: crypto.randomUUID(),
-      startedAt: input.startedAt,
-    };
-  }
-
   private async readRecentActiveRunLease(): Promise<{
     eventId: string;
     run: HostedExecutionRunContext;
@@ -1027,6 +1062,7 @@ function hostedRunRecordToExecutionRunContext(run: HostedRunRecord): HostedExecu
 }
 
 function buildHostedRuntimeDrainRequest(input: {
+  committedResult?: HostedExecutionRunnerResult | null;
   events: HostedRuntimeDrainEvent[];
   resumeFinalize: boolean;
   run: HostedRunRecord;
@@ -1036,6 +1072,9 @@ function buildHostedRuntimeDrainRequest(input: {
     events: input.resumeFinalize ? [] : input.events,
     inputCommittedSeq: input.run.inputCommittedSeq,
     inputCursorVersion: input.run.inputCursorVersion,
+    ...(input.resumeFinalize && input.committedResult
+      ? { committedResult: input.committedResult }
+      : {}),
     ...(input.resumeFinalize ? { resumeFinalize: true } : {}),
     runId: input.run.id,
     triggerKind: input.run.triggerKind,
@@ -1130,19 +1169,21 @@ export {
 function createMissingHostedVaultSyncImportError(input: {
   sessionId: string;
   userId: string;
-}): Error {
-  return new Error(
-    `Hosted vault sync import ${input.userId}/${input.sessionId} is missing from the canonical web payload route.`,
-  );
+}): HostedRunSideInputNotFoundError {
+  return new HostedRunSideInputNotFoundError({
+    message:
+      `Hosted vault sync import ${input.userId}/${input.sessionId} is missing from the canonical web payload route.`,
+    sideInputKind: "vault-sync-import",
+  });
 }
 
 function createMissingHostedSharePackError(input: {
   ownerUserId: string;
   shareId: string;
-}): Error & { code: string } {
-  const error = new Error(
-    `Hosted share payload ${input.ownerUserId}/${input.shareId} is missing from the canonical web payload route.`,
-  ) as Error & { code: string };
-  error.code = "HOSTED_SHARE_PACK_NOT_FOUND";
-  return error;
+}): HostedRunSideInputNotFoundError {
+  return new HostedRunSideInputNotFoundError({
+    message:
+      `Hosted share payload ${input.ownerUserId}/${input.shareId} is missing from the canonical web payload route.`,
+    sideInputKind: "share-pack",
+  });
 }

@@ -5,7 +5,7 @@ import {
   type AssistantSession,
   type AssistantTranscriptEntry,
 } from '@murphai/operator-config/assistant-cli-contracts'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { listAssistantQuarantineEntriesAtPaths } from '../src/assistant/quarantine.ts'
 import { listAssistantRuntimeEventsAtPath } from '../src/assistant/runtime-events.ts'
@@ -33,6 +33,9 @@ import { createTempVaultContext } from './test-helpers.ts'
 const tempRoots: string[] = []
 
 afterEach(async () => {
+  vi.doUnmock('../src/assistant/shared.ts')
+  vi.resetModules()
+  vi.restoreAllMocks()
   await Promise.all(
     tempRoots.splice(0).map((rootPath) =>
       rm(rootPath, {
@@ -225,6 +228,90 @@ describe('assistant store persistence seams', () => {
     expect(
       isAssistantSessionExpired(session, null, new Date('2026-04-08T01:00:00.000Z')),
     ).toBe(false)
+  })
+
+  it('leaves the previous secret sidecar committed when the main session write fails', async () => {
+    const paths = await createAssistantPaths('assistant-store-persistence-sidecar-stage-')
+    const session = createSession({
+      sessionId: 'session-sidecar-stage',
+      updatedAt: '2026-04-08T00:05:00.000Z',
+    })
+    await writeAssistantSession(paths, session)
+    const sessionPath = resolveAssistantSessionPath(paths, session.sessionId)
+    const secretsPath = resolveAssistantSessionSecretsPath(paths, session.sessionId)
+    const originalSidecar = await readFile(secretsPath, 'utf8')
+
+    vi.resetModules()
+    vi.doMock('../src/assistant/shared.ts', async () => {
+      const actual =
+        await vi.importActual<typeof import('../src/assistant/shared.ts')>(
+          '../src/assistant/shared.ts',
+        )
+      return {
+        ...actual,
+        writeJsonFileAtomic: vi.fn(async (filePath: string, value: unknown) => {
+          if (filePath === sessionPath) {
+            throw new Error('injected session write failure')
+          }
+          await actual.writeJsonFileAtomic(filePath, value)
+        }),
+      }
+    })
+    const { writeAssistantSession: writeAssistantSessionWithFailure } =
+      await import('../src/assistant/store/persistence.ts')
+    const rotatedSession = createSession({
+      headers: {
+        Authorization: 'Bearer rotated-secret-token',
+        'X-Trace': 'trace-456',
+      },
+      sessionId: session.sessionId,
+      updatedAt: '2026-04-08T00:06:00.000Z',
+    })
+
+    await expect(
+      writeAssistantSessionWithFailure(paths, rotatedSession),
+    ).rejects.toThrow('injected session write failure')
+
+    await expect(readFile(secretsPath, 'utf8')).resolves.toBe(originalSidecar)
+  })
+
+  it('ignores stale leftover secret sidecars for non-openai sessions', async () => {
+    const paths = await createAssistantPaths('assistant-store-persistence-codex-sidecar-')
+    const session = createCodexSession({
+      sessionId: 'session-codex-leftover-sidecar',
+      updatedAt: '2026-04-08T00:10:00.000Z',
+    })
+    const secretsPath = resolveAssistantSessionSecretsPath(paths, session.sessionId)
+    await ensureAssistantState(paths)
+    await writeAssistantSession(paths, session)
+    await writeFile(
+      secretsPath,
+      JSON.stringify({
+        schema: 'murph.assistant-session-secrets.v1',
+        sessionId: session.sessionId,
+        updatedAt: '2026-04-08T00:05:00.000Z',
+        providerHeaders: {
+          Authorization: 'Bearer stale-secret-token',
+        },
+      }),
+      'utf8',
+    )
+
+    await expect(
+      readAssistantSession({
+        paths,
+        sessionId: session.sessionId,
+      }),
+    ).resolves.toMatchObject({
+      sessionId: session.sessionId,
+      target: {
+        adapter: 'codex-cli',
+      },
+      updatedAt: session.updatedAt,
+    })
+    await expect(readFile(secretsPath, 'utf8')).resolves.toContain(
+      'stale-secret-token',
+    )
   })
 
   it('trims persisted transcripts down to the replay window while preserving trailing non-conversation entries', async () => {
@@ -610,10 +697,46 @@ function createTranscriptEntry(
   }
 }
 
+function createCodexSession(input?: {
+  sessionId?: string
+  updatedAt?: string
+}): AssistantSession {
+  return parseAssistantSessionRecord({
+    schema: 'murph.assistant-session.v1',
+    sessionId: input?.sessionId ?? 'session-codex',
+    target: {
+      adapter: 'codex-cli',
+      approvalPolicy: 'never',
+      codexCommand: null,
+      model: 'gpt-5.4',
+      oss: false,
+      profile: null,
+      reasoningEffort: 'medium',
+      sandbox: 'workspace-write',
+    },
+    resumeState: null,
+    alias: 'codex',
+    binding: {
+      conversationKey: null,
+      channel: null,
+      identityId: null,
+      actorId: null,
+      threadId: null,
+      threadIsDirect: null,
+      delivery: null,
+    },
+    createdAt: '2026-04-08T00:00:00.000Z',
+    updatedAt: input?.updatedAt ?? '2026-04-08T00:05:00.000Z',
+    lastTurnAt: null,
+    turnCount: 0,
+  })
+}
+
 function createSession(input?: {
   alias?: string | null
   conversationKey?: string | null
   createdAt?: string
+  headers?: Record<string, string>
   lastTurnAt?: string | null
   sessionId?: string
   threadId?: string | null
@@ -633,7 +756,7 @@ function createSession(input?: {
       adapter: 'openai-compatible',
       apiKeyEnv: 'OPENAI_API_KEY',
       endpoint: 'https://api.example.com/v1',
-      headers: {
+      headers: input?.headers ?? {
         Authorization: 'Bearer secret-token',
         Cookie: 'session-cookie',
         'X-Trace': 'trace-123',

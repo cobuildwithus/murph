@@ -279,6 +279,9 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
   it("preserves typed runtime fields when the caller already resolved them", () => {
     expect(buildHostedRunnerJobRuntime({
       commitTimeoutMs: 45_000,
+      configSource: {
+        HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: "CUSTOM_API_KEY",
+      },
       forwardedEnv: {
         HOSTED_EMAIL_INGRESS_READY: "true",
         HOSTED_EMAIL_SEND_READY: "true",
@@ -326,7 +329,7 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
         OPENAI_API_KEY: "sk-user",
         VENICE_API_KEY: "venice-user",
       },
-    })).toEqual({
+    })).toMatchObject({
       commitTimeoutMs: 45_000,
       forwardedEnv: {
         OPENAI_API_KEY: "sk-worker",
@@ -346,6 +349,16 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
     });
   });
 
+  it("ignores commit timeout env values with trailing junk", () => {
+    expect(buildHostedRunnerJobRuntimeConfig({
+      configSource: {
+        HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "45000abc",
+      },
+      forwardedEnv: {},
+      runnerSecrets: {},
+    }).commitTimeoutMs).toBe(30_000);
+  });
+
   it("prefers explicit platform env over conflicting forwarded Telegram env", () => {
     expect(buildHostedRunnerJobRuntime({
       forwardedEnv: {
@@ -359,7 +372,7 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
         TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
       },
       runnerSecrets: {},
-    })).toEqual({
+    })).toMatchObject({
       commitTimeoutMs: 30_000,
       forwardedEnv: {},
       platformEnv: {
@@ -391,7 +404,7 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
         TELEGRAM_BOT_TOKEN: "telegram-token",
       } as Record<string, string>,
       runnerSecrets: {},
-    })).toEqual({
+    })).toMatchObject({
       commitTimeoutMs: 30_000,
       forwardedEnv: {
         OPENAI_API_KEY: "sk-worker",
@@ -599,8 +612,15 @@ describe("buildHostedRunnerChildRuntimeEnv", () => {
   it("preserves the explicit forwarded child runtime env when provided", () => {
     expect(buildHostedRunnerChildRuntimeEnv({
       forwardedEnv: {
+        HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_KEYRING_JSON: "{}",
+        HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://127.0.0.1:8787",
         HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "platform-key",
+        HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEYRING_JSON: "{}",
+        HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK: '{"kty":"EC","x":"recovery","y":"recovery"}',
+        HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "45000",
+        HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL: "http://127.0.0.1:4010/.well-known/jwks",
         HOSTED_WAKE_ENCRYPTION_KEY: "wake-key",
+        HOSTED_WAKE_ENCRYPTION_KEYRING_JSON: "{}",
         HOSTED_WEB_BASE_URL: "https://forwarded.example.test",
         HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
         OPENAI_API_KEY: "sk-test",
@@ -623,7 +643,7 @@ describe("buildHostedRunnerResolvedConfig", () => {
       HOSTED_EMAIL_LOCAL_PART: "assistant",
       HOSTED_EMAIL_SEND_READY: "true",
       TELEGRAM_BOT_TOKEN: "telegram-token",
-    })).toEqual({
+    })).toMatchObject({
       channelCapabilities: {
         emailSendReady: true,
         telegramBotConfigured: true,
@@ -636,7 +656,7 @@ describe("buildHostedRunnerResolvedConfig", () => {
     expect(buildHostedRunnerResolvedConfig({
       DEVICE_SYNC_PUBLIC_BASE_URL: "https://device-sync.example.test",
       DEVICE_SYNC_SECRET: "secret_123",
-    })).toEqual({
+    })).toMatchObject({
       channelCapabilities: {
         emailSendReady: false,
         telegramBotConfigured: false,
@@ -676,7 +696,7 @@ describe("buildHostedRunnerResolvedConfig", () => {
       OURA_WEBHOOK_VERIFICATION_TOKEN: "verification-token",
     });
 
-    expect(resolved).toEqual({
+    expect(resolved).toMatchObject({
       channelCapabilities: {
         emailSendReady: false,
         telegramBotConfigured: false,

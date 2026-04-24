@@ -30,6 +30,7 @@ import type { RunAssistantAutomationInput } from '@murphai/assistant-engine/assi
 import type { AssistantOutboxDispatchMode } from '@murphai/assistant-engine/assistant-outbox'
 import { createLocalGatewayService } from '@murphai/gateway-local'
 import type { GatewayService } from '@murphai/gateway-core'
+import { createAssistantdVaultMismatchError } from './errors.js'
 
 const ASSISTANTD_DISABLE_CLIENT_ENV = 'MURPH_ASSISTANTD_DISABLE_CLIENT'
 const LOCAL_ASSISTANT_LINQ_ERROR =
@@ -51,6 +52,7 @@ type AssistantLocalSessionOptionsInput = Omit<
 > & { vault?: string | null }
 
 export interface AssistantLocalAutomationRunInput {
+  allowCanonicalWrites?: boolean
   allowSelfAuthored?: boolean
   deliveryDispatchMode?: RunAssistantAutomationInput['deliveryDispatchMode']
   drainOutbox?: boolean
@@ -202,9 +204,6 @@ export function createAssistantLocalService(vaultRoot: string): AssistantLocalSe
   ensureAssistantDaemonClientDisabled()
 
   const inboxServices = createIntegratedInboxServices()
-  const vaultServices = createIntegratedVaultServices({
-    foodAutoLogHooks: createAssistantFoodAutoLogHooks(),
-  })
   const gateway = createLocalGatewayService(vaultRoot, {
     messageSender: assistantGatewayLocalMessageSender,
     sourceReader: assistantGatewayLocalProjectionSourceReader,
@@ -344,8 +343,10 @@ export function createAssistantLocalService(vaultRoot: string): AssistantLocalSe
     runAutomationOnce: (input) =>
       runAssistantdLocalCall(async () => {
         const vault = resolveAssistantdRequestVault(input?.vault, vaultRoot)
+        const allowCanonicalWrites = input?.allowCanonicalWrites === true
         await dropLegacyLocalLinqAutoReplyState(vault)
         return runAssistantAutomation({
+          applyCanonicalWrites: allowCanonicalWrites,
           allowSelfAuthored: input?.allowSelfAuthored,
           deliveryDispatchMode: input?.deliveryDispatchMode,
           drainOutbox: input?.drainOutbox,
@@ -359,20 +360,28 @@ export function createAssistantLocalService(vaultRoot: string): AssistantLocalSe
             input?.startDaemon ??
             ((input?.once ?? true) ? false : true),
           vault,
-          vaultServices,
+          vaultServices: allowCanonicalWrites
+            ? createIntegratedVaultServices({
+                foodAutoLogHooks: createAssistantFoodAutoLogHooks(),
+              })
+            : null,
         })
       }),
     sendMessage: (input) =>
       runAssistantdLocalCall(async () => {
         const vault = resolveAssistantdRequestVault(input.vault, vaultRoot)
+        const messageInput: AssistantLocalMessageInput = {
+          ...input,
+          operatorAuthority: input.operatorAuthority ?? 'direct-operator',
+        }
         await assertLocalAssistantLinqRouteAllowed({
-          channel: input.channel,
-          conversation: input.conversation,
-          sessionId: input.sessionId,
+          channel: messageInput.channel,
+          conversation: messageInput.conversation,
+          sessionId: messageInput.sessionId,
           vault,
         })
         return sendAssistantMessage({
-          ...input,
+          ...messageInput,
           vault,
         })
       }),
@@ -406,9 +415,10 @@ function resolveAssistantdRequestVault(
     return configuredVault
   }
   if (requestedVault !== configuredVault) {
-    throw new Error(
-      `assistantd is bound to ${configuredVault}, but the request targeted ${requestedVault}.`,
-    )
+    throw createAssistantdVaultMismatchError({
+      configuredVault,
+      requestedVault,
+    })
   }
   return configuredVault
 }

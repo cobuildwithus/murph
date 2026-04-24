@@ -115,19 +115,21 @@ describe("runHostedExecutionJobIsolatedDetailed", () => {
 
     spawnMock.mockImplementation((_command, _args, options) => {
       expect(options?.env).toMatchObject({
-        HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://127.0.0.1:8787",
         HOSTED_WEB_BASE_URL: "https://forwarded.example.test",
         OPENAI_API_KEY: "openai-key",
       });
+      expect(options?.env?.HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL).toBeUndefined();
       expect(options?.env?.HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK).toBeUndefined();
       expect(options?.env?.HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK).toBeUndefined();
       expect(options?.env?.HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY).toBeUndefined();
+      expect(options?.env?.HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEYRING_JSON).toBeUndefined();
       expect(options?.env?.HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK).toBeUndefined();
       expect(options?.env?.HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT).toBeUndefined();
       expect(options?.env?.HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL).toBeUndefined();
       expect(options?.env?.HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME).toBeUndefined();
       expect(options?.env?.HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG).toBeUndefined();
       expect(options?.env?.HOSTED_WAKE_ENCRYPTION_KEY).toBeUndefined();
+      expect(options?.env?.HOSTED_WAKE_ENCRYPTION_KEYRING_JSON).toBeUndefined();
       expect(options?.env?.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK).toBeUndefined();
 
       const child = new EventEmitter() as EventEmitter & {
@@ -163,8 +165,12 @@ describe("runHostedExecutionJobIsolatedDetailed", () => {
         runtime: {
           forwardedEnv: {
             HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "platform-key",
+            HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEYRING_JSON: "{}",
             HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://127.0.0.1:8787",
+            HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK: '{"kty":"EC","x":"recovery","y":"recovery"}',
+            HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL: "http://127.0.0.1:4010/.well-known/jwks",
             HOSTED_WAKE_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64url"),
+            HOSTED_WAKE_ENCRYPTION_KEYRING_JSON: "{}",
             HOSTED_WEB_BASE_URL: "https://forwarded.example.test",
             HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: '{"kty":"EC","d":"secret"}',
             OPENAI_API_KEY: "openai-key",

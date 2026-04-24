@@ -39,7 +39,10 @@ vi.mock('../src/assistant-codex.ts', () => ({
 }))
 
 import { codexCliProviderDefinition } from '../src/assistant/providers/codex-cli.ts'
-import { openAiCompatibleProviderDefinition } from '../src/assistant/providers/openai-compatible.ts'
+import {
+  openAiCompatibleProviderDefinition,
+  resolveOpenAiCompatibleProviderVisibleToolAliases,
+} from '../src/assistant/providers/openai-compatible.ts'
 
 const WORKING_DIRECTORY = '/tmp/assistant-engine-provider-tests'
 
@@ -795,6 +798,79 @@ describe('openAiCompatibleProviderDefinition.executeTurn', () => {
           description: 'Native OpenAI web search tool',
         }),
       },
+    })
+  })
+
+  it('filters Murph web-read helpers when provider-native web search is selected', async () => {
+    providerMocks.generateText.mockResolvedValue({
+      text: 'Native search answer',
+      response: {
+        id: 'response-openai-web-native',
+        model: 'gpt-4.1-mini',
+      },
+    })
+
+    const toolCatalog: AssistantToolCatalog = {
+      createAiSdkTools: vi.fn(() => ({
+        'web.fetch': tool({
+          description: 'Mock web fetch tool',
+          execute: async () => ({}),
+          inputSchema: z.object({ url: z.string() }),
+        }),
+        'web.pdf.read': tool({
+          description: 'Mock web PDF tool',
+          execute: async () => ({}),
+          inputSchema: z.object({ url: z.string() }),
+        }),
+        'web.search': tool({
+          description: 'Mock Murph web search tool',
+          execute: async () => ({}),
+          inputSchema: z.object({ query: z.string() }),
+        }),
+      })),
+      executeCalls: vi.fn(),
+      hasTool: vi.fn(),
+      listTools: vi.fn(),
+    }
+
+    await openAiCompatibleProviderDefinition.executeTurn({
+      providerConfig: normalizeAssistantProviderConfig({
+        provider: 'openai-compatible',
+        baseUrl: 'https://api.openai.com/v1',
+        model: 'gpt-4.1-mini',
+        presetId: 'openai',
+        providerName: 'OpenAI',
+        webSearch: 'provider',
+      }),
+      prompt: 'Search natively.',
+      toolRuntime: {
+        toolCatalog,
+        vault: '/tmp/test-vault',
+      },
+      workingDirectory: WORKING_DIRECTORY,
+    })
+
+    const tools = providerMocks.generateText.mock.calls[0]?.[0]?.tools
+    expect(tools).toMatchObject({
+      web_search: expect.objectContaining({
+        description: 'Native OpenAI web search tool',
+      }),
+    })
+    expect(tools).not.toHaveProperty('web_fetch')
+    expect(tools).not.toHaveProperty('web_pdf_read')
+  })
+
+  it('centralizes OpenAI-compatible provider-visible tool aliases', () => {
+    expect(
+      resolveOpenAiCompatibleProviderVisibleToolAliases([
+        'vault.cli.run',
+        'vault_cli_run',
+        'web.pdf.read',
+      ]),
+    ).toEqual({
+      'vault.cli.run': 'vault_cli_run',
+      vault_cli_run: 'vault_cli_run_2',
+      'web.pdf.read': 'web_pdf_read',
     })
   })
 

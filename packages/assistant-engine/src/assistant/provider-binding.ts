@@ -1,5 +1,4 @@
 import type {
-  AssistantChatProvider,
   AssistantSessionResumeState,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { normalizeNullableString } from './shared.js'
@@ -7,7 +6,6 @@ import type { ResolvedAssistantFailoverRoute } from './failover.js'
 
 export function resolveAssistantProviderResumeKey(input: {
   resumeState: AssistantSessionResumeState | null
-  provider: AssistantChatProvider
 }): string | null {
   if (!input.resumeState) {
     return null

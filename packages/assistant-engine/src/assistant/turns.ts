@@ -23,6 +23,13 @@ import {
   isMissingFileError,
   writeJsonFileAtomic,
 } from './shared.js'
+import {
+  sanitizeAssistantDeliveryErrorForPersistence,
+  sanitizeAssistantPortableMetadata,
+  sanitizeAssistantPortableStateString,
+  sanitizeAssistantTurnReceiptForPersistence,
+  sanitizeAssistantTurnTimelineEventForPersistence,
+} from './redaction.js'
 
 const ASSISTANT_TURN_RECEIPT_SCHEMA = 'murph.assistant-turn-receipt.v1'
 const PROVIDER_MODEL_PREVIEW_LIMIT = 240
@@ -65,7 +72,7 @@ export async function createAssistantTurnReceipt(input: {
         at: startedAt,
         kind: 'turn.started',
         detail: null,
-        metadata: input.metadata ?? {},
+        metadata: sanitizeAssistantPortableMetadata(input.metadata),
       }),
     ],
   })
@@ -92,7 +99,9 @@ export async function saveAssistantTurnReceipt(
 ): Promise<AssistantTurnReceipt> {
   return withAssistantRuntimeWriteLock(vault, async (paths) => {
     await ensureAssistantState(paths)
-    const parsed = assistantTurnReceiptSchema.parse(receipt)
+    const parsed = assistantTurnReceiptSchema.parse(
+      sanitizeAssistantTurnReceiptForPersistence(receipt),
+    )
     await writeAssistantTurnReceiptAtPath(paths, parsed)
     return parsed
   })
@@ -120,12 +129,14 @@ export async function appendAssistantTurnReceiptEvent(input: {
       updatedAt: at,
       timeline: [
         ...existing.timeline,
-        assistantTurnTimelineEventSchema.parse({
-          at,
-          kind: input.kind,
-          detail: input.detail ?? null,
-          metadata: input.metadata ?? {},
-        }),
+        sanitizeAssistantTurnTimelineEventForPersistence(
+          assistantTurnTimelineEventSchema.parse({
+            at,
+            kind: input.kind,
+            detail: input.detail ?? null,
+            metadata: input.metadata ?? {},
+          }),
+        ),
       ],
     })
     await writeAssistantTurnReceiptAtPath(paths, updated)
@@ -146,7 +157,9 @@ export async function updateAssistantTurnReceipt(input: {
       return null
     }
 
-    const updated = assistantTurnReceiptSchema.parse(input.mutate(existing))
+    const updated = assistantTurnReceiptSchema.parse(
+      sanitizeAssistantTurnReceiptForPersistence(input.mutate(existing)),
+    )
     await writeAssistantTurnReceiptAtPath(paths, updated)
     return updated
   })
@@ -174,11 +187,15 @@ export async function finalizeAssistantTurnReceipt(input: {
           : 'turn.completed',
     detail:
       input.status === 'failed'
-        ? input.error?.message ?? 'assistant turn failed'
+        ? sanitizeAssistantPortableStateString(
+            input.error?.message ?? 'assistant turn failed',
+          )
         : input.status === 'blocked'
-          ? input.error?.message ?? 'assistant turn blocked before delivery'
+          ? sanitizeAssistantPortableStateString(
+              input.error?.message ?? 'assistant turn blocked before delivery',
+            )
           : null,
-    metadata: input.metadata ?? {},
+    metadata: sanitizeAssistantPortableMetadata(input.metadata),
   })
 
   return updateAssistantTurnReceipt({
@@ -199,7 +216,9 @@ export async function finalizeAssistantTurnReceipt(input: {
             : receipt.responsePreview,
         updatedAt: completedAt,
         completedAt,
-        lastError: input.error ?? receipt.lastError,
+        lastError:
+          sanitizeAssistantDeliveryErrorForPersistence(input.error) ??
+          receipt.lastError,
         timeline: [...receipt.timeline, statusEvent],
       })
     },
@@ -328,19 +347,22 @@ async function writeAssistantTurnReceiptAtPath(
   receipt: AssistantTurnReceipt,
 ): Promise<void> {
   const receiptPath = resolveAssistantTurnReceiptPath(paths, receipt.turnId)
-  await writeJsonFileAtomic(receiptPath, receipt)
+  const safeReceipt = assistantTurnReceiptSchema.parse(
+    sanitizeAssistantTurnReceiptForPersistence(receipt),
+  )
+  await writeJsonFileAtomic(receiptPath, safeReceipt)
   await appendAssistantRuntimeEventAtPaths(paths, {
-    at: receipt.updatedAt,
+    at: safeReceipt.updatedAt,
     component: 'turns',
-    entityId: receipt.turnId,
+    entityId: safeReceipt.turnId,
     entityType: 'turn-receipt',
     kind: 'turn.receipt.upserted',
-    level: receipt.status === 'failed' ? 'warn' : 'info',
-    message: `Assistant turn receipt ${receipt.turnId} was persisted with status ${receipt.status}.`,
+    level: safeReceipt.status === 'failed' ? 'warn' : 'info',
+    message: `Assistant turn receipt ${safeReceipt.turnId} was persisted with status ${safeReceipt.status}.`,
     data: {
-      deliveryDisposition: receipt.deliveryDisposition,
-      sessionId: receipt.sessionId,
-      status: receipt.status,
+      deliveryDisposition: safeReceipt.deliveryDisposition,
+      sessionId: safeReceipt.sessionId,
+      status: safeReceipt.status,
     },
   }).catch(() => undefined)
 }

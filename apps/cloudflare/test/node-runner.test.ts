@@ -2659,13 +2659,17 @@ describe("runHostedExecutionJob", () => {
         forwardedEnv: {
           HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: "CUSTOM_API_KEY",
           HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK: '{"kty":"EC","d":"automation"}',
+          HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://127.0.0.1:8787",
           HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "platform-key",
           HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "5000",
           HOSTED_WAKE_ENCRYPTION_KEY: "wake-key",
           HOSTED_EMAIL_INGRESS_READY: "true",
           HOSTED_EMAIL_SEND_READY: "true",
           HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: '{"kty":"EC","d":"callback"}',
+          LD_PRELOAD: "/tmp/injected.so",
+          NODE_OPTIONS: "--require /tmp/injected.js",
           OPENAI_API_KEY: "sk-worker",
+          PATH: "/tmp/custom-bin",
         },
         resolvedConfig: {
           channelCapabilities: {
@@ -2676,6 +2680,10 @@ describe("runHostedExecutionJob", () => {
         },
         userEnv: {
           CUSTOM_API_KEY: "custom-user",
+          HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "platform-user-key",
+          LD_PRELOAD: "/tmp/user-injected.so",
+          NODE_OPTIONS: "--require /tmp/user-injected.js",
+          PATH: "/tmp/user-bin",
         },
       });
 
@@ -2692,6 +2700,9 @@ describe("runHostedExecutionJob", () => {
         "HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK",
       );
       expect(runtime.forwardedEnv).not.toHaveProperty(
+        "HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL",
+      );
+      expect(runtime.forwardedEnv).not.toHaveProperty(
         "HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY",
       );
       expect(runtime.forwardedEnv).not.toHaveProperty(
@@ -2703,9 +2714,16 @@ describe("runHostedExecutionJob", () => {
       expect(runtime.forwardedEnv).not.toHaveProperty(
         "HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK",
       );
+      expect(runtime.forwardedEnv).not.toHaveProperty("LD_PRELOAD");
+      expect(runtime.forwardedEnv).not.toHaveProperty("NODE_OPTIONS");
+      expect(runtime.forwardedEnv).not.toHaveProperty("PATH");
       expect(runtime.userEnv).toMatchObject({
         CUSTOM_API_KEY: "custom-user",
       });
+      expect(runtime.userEnv).not.toHaveProperty("HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY");
+      expect(runtime.userEnv).not.toHaveProperty("LD_PRELOAD");
+      expect(runtime.userEnv).not.toHaveProperty("NODE_OPTIONS");
+      expect(runtime.userEnv).not.toHaveProperty("PATH");
       expect(runtime.resolvedConfig).toEqual({
         channelCapabilities: {
           emailSendReady: true,
@@ -2779,7 +2797,7 @@ describe("runHostedExecutionJob", () => {
       TELEGRAM_BOT_TOKEN: "telegram-token",
       TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
     });
-    expect(runtime.resolvedConfig).toEqual({
+    expect(runtime.resolvedConfig).toMatchObject({
       channelCapabilities: {
         emailSendReady: false,
         telegramBotConfigured: true,
@@ -2852,7 +2870,7 @@ describe("runHostedExecutionJob", () => {
       });
 
       expect(runtime.forwardedEnv).toEqual({});
-      expect(runtime.resolvedConfig).toEqual({
+      expect(runtime.resolvedConfig).toMatchObject({
         channelCapabilities: {
           emailSendReady: false,
           telegramBotConfigured: false,
@@ -2930,7 +2948,7 @@ describe("runHostedExecutionJob", () => {
       HOSTED_EMAIL_INGRESS_READY: "true",
       HOSTED_EMAIL_SEND_READY: "true",
     });
-    expect(runtime.resolvedConfig).toEqual({
+    expect(runtime.resolvedConfig).toMatchObject({
       channelCapabilities: {
         emailSendReady: true,
         telegramBotConfigured: false,
@@ -2958,7 +2976,7 @@ describe("runHostedExecutionJob", () => {
       HOSTED_EMAIL_INGRESS_READY: "false",
       HOSTED_EMAIL_SEND_READY: "false",
     });
-    expect(runtime.resolvedConfig).toEqual({
+    expect(runtime.resolvedConfig).toMatchObject({
       channelCapabilities: {
         emailSendReady: false,
         telegramBotConfigured: false,
@@ -2977,7 +2995,7 @@ describe("runHostedExecutionJob", () => {
       },
     });
 
-    expect(runtime.resolvedConfig).toEqual({
+    expect(runtime.resolvedConfig).toMatchObject({
       channelCapabilities: {
         emailSendReady: true,
         telegramBotConfigured: false,

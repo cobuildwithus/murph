@@ -11,6 +11,8 @@ import type {
   HostedExecutionRedactedLogEntry,
   HostedExecutionRunnerRequest,
   HostedExecutionRunnerResult,
+  HostedRunCleanupTarget,
+  HostedRunEventResult,
   HostedRuntimeDrainRequest,
 } from "@murphai/hosted-execution";
 import type {
@@ -27,11 +29,18 @@ export interface HostedAssistantRuntimeChannelCapabilities {
   telegramBotConfigured: boolean;
 }
 
+export interface HostedAssistantRuntimeManagedAutoReplyChannel {
+  capabilityReady: boolean;
+  channel: string;
+  memberChannel?: string | null;
+}
+
 export type HostedAssistantRuntimeDeviceSyncConfig = ConfiguredDeviceSyncRuntimeConfig;
 
 export interface HostedAssistantRuntimeResolvedConfig {
   channelCapabilities: HostedAssistantRuntimeChannelCapabilities;
   deviceSync: HostedAssistantRuntimeDeviceSyncConfig | null;
+  managedAutoReplyChannels?: HostedAssistantRuntimeManagedAutoReplyChannel[];
 }
 
 export interface HostedAssistantRuntimeConfig {
@@ -85,6 +94,8 @@ export interface HostedCommittedExecutionState {
 }
 
 export interface HostedRunDrainMetrics {
+  adoptedCleanupTargets: HostedRunCleanupTarget[];
+  adoptedEventResults: HostedRunEventResult[];
   bootstrapResult: HostedBootstrapResult | null;
   deviceSyncProcessed: number;
   deviceSyncSkipped: boolean;
@@ -151,6 +162,8 @@ export type HostedShareImportResult = ImportSharePackIntoVaultResult;
 export type HostedVaultSyncImportResult = VaultSyncImportMergeResult;
 
 export interface HostedIngressEffect {
+  adoptedCleanupTargets?: HostedRunCleanupTarget[] | null;
+  adoptedEventResults?: HostedRunEventResult[] | null;
   conversationMetrics: HostedConversationWakeMetrics | null;
   redactedLogEntries?: HostedExecutionRedactedLogEntry[] | null;
   shareImportResult: HostedShareImportResult | null;
@@ -178,6 +191,8 @@ export interface HostedIngressExecutionMetrics extends HostedIngressEffect {
 }
 
 export interface HostedMaintenanceMetrics {
+  adoptedCleanupTargets?: HostedRunCleanupTarget[] | null;
+  adoptedEventResults?: HostedRunEventResult[] | null;
   deviceSyncProcessed: number;
   deviceSyncSkipped: boolean;
   nextWakeAt: string | null;

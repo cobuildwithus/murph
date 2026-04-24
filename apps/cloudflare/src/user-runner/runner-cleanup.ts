@@ -1,4 +1,8 @@
-import type { HostedIngressEnvelope } from "@murphai/hosted-execution";
+import type {
+  HostedExecutionRunnerResult,
+  HostedIngressEnvelope,
+  HostedRunCleanupTarget,
+} from "@murphai/hosted-execution";
 import {
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
@@ -34,6 +38,7 @@ export class RunnerCleanupService {
 
   async cleanupTransientWakeDataBestEffortForRunDrain(input: {
     assistantDeliveryOutcomes?: readonly HostedAssistantDeliveryOutcome[] | null;
+    cleanupTargets?: readonly HostedRunCleanupTarget[] | null;
     runId?: string | null;
     userId?: string | null;
     wakes: readonly HostedIngressEnvelope[];
@@ -64,6 +69,7 @@ export class RunnerCleanupService {
     }
     if (
       input.wakes.length === 0
+      && (!input.cleanupTargets || input.cleanupTargets.length === 0)
       && (!input.assistantDeliveryOutcomes || input.assistantDeliveryOutcomes.length === 0)
       && !pendingCleanup
     ) {
@@ -74,6 +80,10 @@ export class RunnerCleanupService {
       await this.deleteTransientWakeDataBestEffort(wake);
     }
     let pendingEmailCleanupConfirmed = true;
+    for (const emailMessage of readHostedEmailCleanupTargets(input.cleanupTargets ?? [])) {
+      pendingEmailCleanupConfirmed = await this.deletePendingEmailCleanupBestEffort(emailMessage)
+        && pendingEmailCleanupConfirmed;
+    }
     for (const emailMessage of pendingCleanup?.emailMessages ?? []) {
       pendingEmailCleanupConfirmed = await this.deletePendingEmailCleanupBestEffort(emailMessage)
         && pendingEmailCleanupConfirmed;
@@ -84,6 +94,7 @@ export class RunnerCleanupService {
 
     const hostedLinqCleanupConfirmed = await this.deleteHostedLinqMessagesBestEffort({
       assistantDeliveryOutcomes: input.assistantDeliveryOutcomes ?? [],
+      cleanupTargets: input.cleanupTargets ?? [],
       pendingCleanup,
       userId: input.userId ?? null,
       wakes: input.wakes,
@@ -93,6 +104,7 @@ export class RunnerCleanupService {
     }
     const unresolvedTelegramMessages = await this.deleteHostedTelegramMessagesBestEffort({
       assistantDeliveryOutcomes: input.assistantDeliveryOutcomes ?? [],
+      cleanupTargets: input.cleanupTargets ?? [],
       pendingCleanup,
       userId: input.userId ?? null,
       wakes: input.wakes,
@@ -174,12 +186,19 @@ export class RunnerCleanupService {
 
   async persistPendingRunCleanupData(input: {
     assistantDeliveryOutcomes?: readonly HostedAssistantDeliveryOutcome[] | null;
+    cleanupTargets?: readonly HostedRunCleanupTarget[] | null;
+    committedResult?: HostedExecutionRunnerResult | null;
     runId: string;
     wakes: readonly HostedIngressEnvelope[];
   }): Promise<void> {
     await this.dependencies.writePendingRunCleanup(
       input.runId,
-      buildRunnerPendingCleanupState(input.wakes, input.assistantDeliveryOutcomes ?? []),
+      buildRunnerPendingCleanupState({
+        assistantDeliveryOutcomes: input.assistantDeliveryOutcomes ?? [],
+        cleanupTargets: input.cleanupTargets ?? [],
+        committedResult: input.committedResult ?? null,
+        wakes: input.wakes,
+      }),
     );
   }
 
@@ -259,6 +278,7 @@ export class RunnerCleanupService {
 
   private async deleteHostedLinqMessagesBestEffort(input: {
     assistantDeliveryOutcomes: readonly HostedAssistantDeliveryOutcome[];
+    cleanupTargets: readonly HostedRunCleanupTarget[];
     pendingCleanup: RunnerPendingCleanupState | null;
     userId: string | null;
     wakes: readonly HostedIngressEnvelope[];
@@ -272,6 +292,11 @@ export class RunnerCleanupService {
     }
     for (const messageId of input.pendingCleanup?.linqMessageIds ?? []) {
       messageIds.add(messageId);
+    }
+    for (const cleanupTarget of input.cleanupTargets) {
+      if (cleanupTarget.channel === "linq") {
+        messageIds.add(cleanupTarget.messageId);
+      }
     }
 
     for (const outcome of input.assistantDeliveryOutcomes) {
@@ -319,6 +344,7 @@ export class RunnerCleanupService {
 
   private async deleteHostedTelegramMessagesBestEffort(input: {
     assistantDeliveryOutcomes: readonly HostedAssistantDeliveryOutcome[];
+    cleanupTargets: readonly HostedRunCleanupTarget[];
     pendingCleanup: RunnerPendingCleanupState | null;
     userId: string | null;
     wakes: readonly HostedIngressEnvelope[];
@@ -353,6 +379,16 @@ export class RunnerCleanupService {
         groupedMessageIds,
         resolveHostedTelegramCleanupTarget(message.target, cleanupTargetAliases),
         message.messageId,
+      );
+    }
+    for (const cleanupTarget of input.cleanupTargets) {
+      if (cleanupTarget.channel !== "telegram") {
+        continue;
+      }
+      addHostedProviderMessageId(
+        groupedMessageIds,
+        resolveHostedTelegramCleanupTarget(cleanupTarget.target, cleanupTargetAliases),
+        cleanupTarget.messageId,
       );
     }
 
@@ -504,6 +540,29 @@ function readHostedCleanupMessages(
   }));
 }
 
+function readHostedEmailCleanupTargets(
+  cleanupTargets: readonly HostedRunCleanupTarget[],
+): Array<{ eventId: string; rawMessageKey: string; userId: string }> {
+  return Array.from(
+    new Map(
+      cleanupTargets.flatMap((cleanupTarget) => {
+        if (cleanupTarget.channel !== "email") {
+          return [];
+        }
+
+        return [[
+          `${cleanupTarget.userId}\u0000${cleanupTarget.rawMessageKey}`,
+          {
+            eventId: cleanupTarget.eventId,
+            rawMessageKey: cleanupTarget.rawMessageKey,
+            userId: cleanupTarget.userId,
+          },
+        ] as const];
+      }),
+    ).values(),
+  );
+}
+
 function addHostedProviderMessageId(
   groupedMessageIds: Map<string, Set<string>>,
   target: string,
@@ -532,10 +591,12 @@ function isHostedTelegramCleanupTargetOutcome(
     && outcome.target.length > 0;
 }
 
-function buildRunnerPendingCleanupState(
-  wakes: readonly HostedIngressEnvelope[],
-  assistantDeliveryOutcomes: readonly HostedAssistantDeliveryOutcome[],
-): RunnerPendingCleanupState {
+function buildRunnerPendingCleanupState(input: {
+  assistantDeliveryOutcomes: readonly HostedAssistantDeliveryOutcome[];
+  cleanupTargets: readonly HostedRunCleanupTarget[];
+  committedResult?: HostedExecutionRunnerResult | null;
+  wakes: readonly HostedIngressEnvelope[];
+}): RunnerPendingCleanupState {
   const linqMessageIds = new Set<string>();
   const telegramMessages = new Map<string, { messageId: string; target: string }>();
   const cleanup: RunnerPendingCleanupState = {
@@ -544,8 +605,11 @@ function buildRunnerPendingCleanupState(
     required: true,
     telegramMessages: [],
   };
+  if (input.committedResult) {
+    cleanup.committedResult = input.committedResult;
+  }
 
-  for (const wake of wakes) {
+  for (const wake of input.wakes) {
     if (wake.kind !== "conversation.message") {
       continue;
     }
@@ -575,7 +639,31 @@ function buildRunnerPendingCleanupState(
     }
   }
 
-  for (const outcome of assistantDeliveryOutcomes) {
+  for (const cleanupTarget of input.cleanupTargets) {
+    switch (cleanupTarget.channel) {
+      case "email":
+        cleanup.emailMessages.push({
+          eventId: cleanupTarget.eventId,
+          rawMessageKey: cleanupTarget.rawMessageKey,
+          userId: cleanupTarget.userId,
+        });
+        break;
+      case "linq":
+        linqMessageIds.add(cleanupTarget.messageId);
+        break;
+      case "telegram":
+        telegramMessages.set(
+          `${cleanupTarget.target}\u0000${cleanupTarget.messageId}`,
+          {
+            messageId: cleanupTarget.messageId,
+            target: cleanupTarget.target,
+          },
+        );
+        break;
+    }
+  }
+
+  for (const outcome of input.assistantDeliveryOutcomes) {
     if (!shouldUseHostedDeliveryOutcomeForCleanup(outcome, "linq")) {
       continue;
     }
@@ -584,7 +672,7 @@ function buildRunnerPendingCleanupState(
       linqMessageIds.add(messageId);
     }
   }
-  for (const outcome of assistantDeliveryOutcomes) {
+  for (const outcome of input.assistantDeliveryOutcomes) {
     if (!isHostedTelegramCleanupTargetOutcome(outcome)) {
       continue;
     }
@@ -597,6 +685,14 @@ function buildRunnerPendingCleanupState(
     }
   }
 
+  cleanup.emailMessages = Array.from(
+    new Map(
+      cleanup.emailMessages.map((message) => [
+        `${message.userId}\u0000${message.rawMessageKey}`,
+        message,
+      ]),
+    ).values(),
+  );
   cleanup.linqMessageIds = [...linqMessageIds];
   cleanup.telegramMessages = [...telegramMessages.values()];
 
@@ -611,6 +707,7 @@ function cloneRunnerPendingCleanupState(
   }
 
   return {
+    ...(cleanup.committedResult ? { committedResult: cleanup.committedResult } : {}),
     emailMessages: cleanup.emailMessages.map((message) => ({ ...message })),
     linqMessageIds: [...cleanup.linqMessageIds],
     required: cleanup.required,

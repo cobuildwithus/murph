@@ -23,12 +23,22 @@ import type {
   AssistantToolCatalogOptions,
   AssistantToolContext,
 } from './shared.js'
+import {
+  isAcceptedInboundMessageOperatorAuthority,
+} from '../assistant/operator-authority.js'
 
 interface AssistantCapabilityConcernDefinitions {
   assistantRuntimeTools: AssistantCapabilityDefinition[]
   canonicalVaultWriteTools: AssistantCapabilityDefinition[]
   outwardSideEffectTools: AssistantCapabilityDefinition[]
   queryAndReadTools: AssistantCapabilityDefinition[]
+}
+
+interface ProviderTurnAssistantToolCatalogOptions {
+  includeCliExecutorTool: boolean
+  includeOutwardSideEffectTools: boolean
+  includeStatefulWriteTools: boolean
+  includeWebSearchTools: boolean
 }
 
 const defaultAssistantCapabilityHosts = [
@@ -142,16 +152,51 @@ function listInboxRoutingAssistantCapabilities(
 function listProviderTurnAssistantCapabilities(
   input: AssistantToolContext,
 ): AssistantCapabilityDefinition[] {
+  const options = resolveProviderTurnAssistantToolCatalogOptions(input)
   return [
     ...createAssistantKnowledgeReadToolDefinitions(input),
-    ...createAssistantKnowledgeWriteToolDefinitions(input),
-    ...createAssistantCliExecutorToolDefinitions(input),
+    ...(options.includeStatefulWriteTools
+      ? createAssistantKnowledgeWriteToolDefinitions(input)
+      : []),
+    ...(options.includeCliExecutorTool
+      ? createAssistantCliExecutorToolDefinitions(input)
+      : []),
     ...createVaultTextReadToolDefinitions(input),
-    ...createOutwardSideEffectToolDefinitions(input),
-    ...createWebSearchToolDefinitions(),
-    ...createWebFetchToolDefinitions(),
-    ...createWebPdfReadToolDefinitions(),
+    ...(options.includeOutwardSideEffectTools
+      ? createOutwardSideEffectToolDefinitions(input)
+      : []),
+    ...(options.includeWebSearchTools
+      ? [
+          ...createWebSearchToolDefinitions(),
+          ...createWebFetchToolDefinitions(),
+          ...createWebPdfReadToolDefinitions(),
+        ]
+      : []),
   ]
+}
+
+function resolveProviderTurnAssistantToolCatalogOptions(
+  input: AssistantToolContext,
+): ProviderTurnAssistantToolCatalogOptions {
+  const acceptedInbound =
+    input.operatorAuthority !== null &&
+    input.operatorAuthority !== undefined &&
+    isAcceptedInboundMessageOperatorAuthority(input.operatorAuthority)
+  if (acceptedInbound) {
+    return {
+      includeCliExecutorTool: false,
+      includeOutwardSideEffectTools: false,
+      includeStatefulWriteTools: false,
+      includeWebSearchTools: false,
+    }
+  }
+
+  return {
+    includeCliExecutorTool: true,
+    includeOutwardSideEffectTools: true,
+    includeStatefulWriteTools: true,
+    includeWebSearchTools: true,
+  }
 }
 
 function listNotificationTurnAssistantCapabilities(

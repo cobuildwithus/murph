@@ -157,9 +157,11 @@ import { executeProviderTurnWithRecovery } from '../src/assistant/provider-turn-
 describe('executeProviderTurnWithRecovery', () => {
   const toolCatalog = {
     hasTool: vi.fn<(toolName: string) => boolean>(),
+    listTools: vi.fn(),
   }
   const notificationToolCatalog = {
     hasTool: vi.fn<(toolName: string) => boolean>(),
+    listTools: vi.fn(),
   }
 
   beforeEach(() => {
@@ -205,7 +207,18 @@ describe('executeProviderTurnWithRecovery', () => {
       kind: 'vault-services',
     })
     toolCatalog.hasTool.mockReset().mockReturnValue(true)
+    toolCatalog.listTools.mockReset().mockReturnValue([
+      { name: 'vault.cli.run' },
+      { name: 'assistant.knowledge.list' },
+      { name: 'assistant.knowledge.search' },
+      { name: 'assistant.knowledge.get' },
+      { name: 'assistant.knowledge.lint' },
+      { name: 'assistant.knowledge.upsert' },
+      { name: 'assistant.knowledge.rebuildIndex' },
+      { name: 'murph.device.connect' },
+    ])
     notificationToolCatalog.hasTool.mockReset().mockReturnValue(true)
+    notificationToolCatalog.listTools.mockReset().mockReturnValue([])
     runnerMocks.createProviderTurnAssistantToolCatalog
       .mockReset()
       .mockReturnValue(toolCatalog)
@@ -362,6 +375,7 @@ describe('executeProviderTurnWithRecovery', () => {
           CLI_TOKEN: 'test-cli-token',
           MEMORY_CONTEXT: 'enabled',
         },
+        operatorAuthority: 'direct-operator',
       }),
     )
     expect(runnerMocks.buildAssistantSystemPrompt).toHaveBeenCalledWith(
@@ -370,6 +384,9 @@ describe('executeProviderTurnWithRecovery', () => {
         assistantCommandAccessMode: 'bound-tools',
         assistantHostedDeviceConnectAvailable: true,
         assistantKnowledgeToolsAvailable: true,
+        assistantToolNameAliases: expect.objectContaining({
+          'vault.cli.run': 'vault_cli_run',
+        }),
         channel: 'chat',
         currentLocalDate: '2026-04-08',
         currentTimeZone: 'America/Los_Angeles',
@@ -956,6 +973,11 @@ describe('executeProviderTurnWithRecovery', () => {
         onboardingGuidanceInjected: true,
       },
     })
+    expect(runnerMocks.executeAssistantProviderTurnAttempt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        toolRuntime: null,
+      }),
+    )
   })
 
   it('passes automation-cron turn trigger into the system prompt builder', async () => {
@@ -1264,6 +1286,7 @@ describe('executeProviderTurnWithRecovery', () => {
       providerTurn: {
         attemptCount: 2,
         route: backupRoute,
+        session: recoveredSession,
       },
     })
     expect(runnerMocks.recoverAssistantSessionAfterProviderFailure).toHaveBeenCalledWith({
@@ -1275,6 +1298,14 @@ describe('executeProviderTurnWithRecovery', () => {
     expect(runnerMocks.attachRecoveredAssistantSession).toHaveBeenCalledWith(
       rateLimitError,
       recoveredSession,
+    )
+    expect(runnerMocks.executeAssistantProviderTurnAttempt).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        sessionContext: {
+          binding: recoveredSession.binding,
+        },
+      }),
     )
     expect(extractReceiptKinds()).toEqual([
       'provider.attempt.started',
@@ -1809,6 +1840,7 @@ function createMessageInput(
     userMessageContent: overrides?.userMessageContent ?? null,
     onProviderEvent: overrides?.onProviderEvent ?? null,
     onTraceEvent: overrides?.onTraceEvent,
+    operatorAuthority: overrides?.operatorAuthority,
     showThinkingTraces: overrides?.showThinkingTraces ?? false,
     abortSignal: overrides?.abortSignal,
   }
@@ -1818,6 +1850,7 @@ function createTurnPlan(input: {
   allowSensitiveHealthContext?: boolean
   onboardingGuidanceOpen?: boolean
   cliAccessEnv?: Record<string, string>
+  operatorAuthority?: AssistantTurnSharedPlan['operatorAuthority']
 }): AssistantTurnSharedPlan {
   const allowSensitiveHealthContext =
     input.allowSensitiveHealthContext ?? false
@@ -1845,11 +1878,11 @@ function createTurnPlan(input: {
         threadId: null,
         threadIsDirect: null,
       },
-      operatorAuthority: 'direct-operator',
+      operatorAuthority: input.operatorAuthority ?? 'direct-operator',
     },
     onboardingGuidanceOpen: input.onboardingGuidanceOpen ?? false,
     firstContactStateDocIds: [],
-    operatorAuthority: 'direct-operator',
+    operatorAuthority: input.operatorAuthority ?? 'direct-operator',
     persistUserPromptOnFailure: false,
     requestedWorkingDirectory: '/tmp/provider-turn-runner-tests',
   }

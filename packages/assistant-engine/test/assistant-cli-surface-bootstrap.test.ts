@@ -412,3 +412,49 @@ test('resolveAssistantCliSurfaceBootstrapContext clears the cached promise after
     ['full', 'full', 'compact', 'full'],
   )
 })
+
+test('resolveAssistantCliSurfaceBootstrapContext keys the in-memory cache by manifest context', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    'murph-assistant-cli-surface-contract-keyed-cache-',
+  )
+  cleanupPaths.push(parentRoot)
+
+  vi.resetModules()
+
+  const readAssistantCliLlmsManifest = vi.fn(async (input: {
+    cliEnv?: NodeJS.ProcessEnv
+    detail: 'compact' | 'full'
+  }) => ({
+    commands: [
+      {
+        description: `Command for ${input.cliEnv?.MURPH_WEB_SEARCH_PROVIDER ?? 'none'}`,
+        name: 'status',
+      },
+    ],
+  }))
+  vi.doMock('../src/assistant-cli-tools.js', () => ({
+    readAssistantCliLlmsManifest,
+  }))
+  const {
+    resolveAssistantCliSurfaceBootstrapContext,
+  } = await import('../src/assistant/cli-surface-bootstrap.ts')
+
+  const firstContract = await resolveAssistantCliSurfaceBootstrapContext({
+    cliEnv: {
+      MURPH_WEB_SEARCH_PROVIDER: 'one',
+    },
+    sessionId: 'session-keyed-cache-one',
+    vault: vaultRoot,
+  })
+  const secondContract = await resolveAssistantCliSurfaceBootstrapContext({
+    cliEnv: {
+      MURPH_WEB_SEARCH_PROVIDER: 'two',
+    },
+    sessionId: 'session-keyed-cache-two',
+    vault: vaultRoot,
+  })
+
+  assert.match(firstContract ?? '', /Command for one/u)
+  assert.match(secondContract ?? '', /Command for two/u)
+  assert.equal(readAssistantCliLlmsManifest.mock.calls.length, 2)
+})

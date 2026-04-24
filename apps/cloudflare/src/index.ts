@@ -19,6 +19,11 @@ import {
   type HostedBrowserVaultReplicaRef,
 } from "@murphai/hosted-execution/contracts";
 import { parseHostedBrowserVaultReplicaRef } from "@murphai/hosted-execution/parsers";
+import {
+  CLOUDFLARE_HOSTED_CONTROL_BROWSER_VAULT_REPLICA_NOT_FOUND_CODE,
+  CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS,
+  matchCloudflareHostedControlUserRoutePath,
+} from "@murphai/cloudflare-hosted-control/routes";
 
 import {
   CLOUDFLARE_HOSTED_RUNTIME_INTERNAL_HOSTNAMES,
@@ -103,8 +108,8 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
     async handle(context, params) {
       return handleRunRoute(context, params.userId);
     },
-    match: matchNamedPath(/^\/internal\/users\/(?<userId>[^/]+)\/run$/u),
-    methods: ["POST"],
+    match: (pathname) => matchCloudflareHostedControlUserRoutePath("run", pathname),
+    methods: [CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS.run.method],
     name: "user-run",
     wrongMethodResponse: "method-not-allowed",
   },
@@ -117,8 +122,8 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
     async handle(context, params) {
       return handleBrowserVaultSessionRoute(context, params.userId);
     },
-    match: matchNamedPath(/^\/internal\/users\/(?<userId>[^/]+)\/browser-vault\/session$/u),
-    methods: ["POST"],
+    match: (pathname) => matchCloudflareHostedControlUserRoutePath("browserVaultSession", pathname),
+    methods: [CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS.browserVaultSession.method],
     name: "browser-vault-session",
     wrongMethodResponse: "method-not-allowed",
   },
@@ -131,8 +136,8 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
     async handle(context, params) {
       return handleStatusRoute(context, params.userId);
     },
-    match: matchNamedPath(/^\/internal\/users\/(?<userId>[^/]+)\/status$/u),
-    methods: ["GET"],
+    match: (pathname) => matchCloudflareHostedControlUserRoutePath("status", pathname),
+    methods: [CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS.status.method],
     name: "user-status",
     wrongMethodResponse: "method-not-allowed",
   },
@@ -441,7 +446,10 @@ async function handleBrowserVaultSessionRoute(
   const replicaEnvelope = await replicaStore.readBrowserVaultReplicaEnvelope(body.replicaRef);
 
   if (!replicaEnvelope) {
-    return json({ error: "Browser vault replica was not found." }, 404);
+    return json({
+      code: CLOUDFLARE_HOSTED_CONTROL_BROWSER_VAULT_REPLICA_NOT_FOUND_CODE,
+      error: "Browser vault replica was not found.",
+    }, 404);
   }
 
   const replicaKey = await replicaStore.deriveBrowserVaultReplicaKey(body.replicaRef);
@@ -686,7 +694,7 @@ async function ownsLocalInternalProxyTokenForUser(input: {
 }): Promise<boolean> {
   const stub = input.env.RUNNER_CONTAINER.getByName(input.userId);
   return typeof stub.ownsInternalWorkerProxyToken === "function"
-    ? await stub.ownsInternalWorkerProxyToken({ token: input.token })
+    ? await stub.ownsInternalWorkerProxyToken({ token: input.token, userId: input.userId })
     : false;
 }
 
@@ -769,16 +777,6 @@ function readOptionalTrimmedHeader(request: Request, name: string): string | nul
 function matchExactPath(...paths: readonly string[]): RouteMatcher {
   const allowedPaths = new Set(paths);
   return (pathname) => (allowedPaths.has(pathname) ? {} : null);
-}
-
-function matchNamedPath(pattern: RegExp): RouteMatcher {
-  return (pathname) => {
-    const match = pattern.exec(pathname);
-    if (!match?.groups) {
-      return null;
-    }
-    return match.groups;
-  };
 }
 
 function respondToWrongMethod(response: WrongMethodResponse): Response {

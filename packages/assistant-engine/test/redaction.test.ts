@@ -28,19 +28,27 @@ describe('assistant redaction helpers', () => {
 
     expect(
       redactAssistantStateStructuredValue({
+        accessToken: 'access-token-value',
+        clientSecret: 'client-secret-value',
         nested: [
           {
             authorization: 'Bearer abcdefghijklmnop',
           },
           {
+            refreshToken: 'refresh-token-value',
+          },
+          {
             note: 'token=my-secret',
           },
         ],
+        password: 'password-value',
         headers: {
           cookie: 'cookie-value',
         },
       }),
     ).toEqual({
+      accessToken: '[REDACTED]',
+      clientSecret: '[REDACTED]',
       headers: {
         cookie: '[REDACTED]',
       },
@@ -49,9 +57,13 @@ describe('assistant redaction helpers', () => {
           authorization: '[REDACTED]',
         },
         {
+          refreshToken: '[REDACTED]',
+        },
+        {
           note: 'token=[REDACTED]',
         },
       ],
+      password: '[REDACTED]',
     })
   })
 

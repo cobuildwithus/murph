@@ -255,6 +255,21 @@ describe('assistant CLI tool catalogs', () => {
     expect(providerTurnCatalog.hasTool('web.fetch')).toBe(true)
     expect(providerTurnCatalog.hasTool('web.search')).toBe(true)
 
+    const acceptedInboundCatalog = createProviderTurnAssistantToolCatalog(
+      createToolContext({
+        operatorAuthority: 'accepted-inbound-message',
+      }),
+    )
+    expect(acceptedInboundCatalog.hasTool('assistant.knowledge.list')).toBe(true)
+    expect(acceptedInboundCatalog.hasTool('assistant.knowledge.upsert')).toBe(false)
+    expect(acceptedInboundCatalog.hasTool('vault.cli.run')).toBe(false)
+    expect(acceptedInboundCatalog.hasTool('vault.fs.readText')).toBe(true)
+    expect(acceptedInboundCatalog.hasTool('murph.device.connect')).toBe(false)
+    expect(acceptedInboundCatalog.hasTool('vault.share.createLink')).toBe(false)
+    expect(acceptedInboundCatalog.hasTool('web.fetch')).toBe(false)
+    expect(acceptedInboundCatalog.hasTool('web.pdf.read')).toBe(false)
+    expect(acceptedInboundCatalog.hasTool('web.search')).toBe(false)
+
     const providerRuntime = createProviderTurnAssistantCapabilityRuntime(
       createToolContext(),
     )
@@ -314,6 +329,12 @@ describe('assistant CLI tool catalogs', () => {
     )
     expect(registry.getCapability('assistant.knowledge.upsert')?.riskClass).toBe(
       'medium',
+    )
+    expect(registry.getCapability('assistant.selfTarget.list')?.mutationSemantics).toBe(
+      'read-only',
+    )
+    expect(registry.getCapability('assistant.selfTarget.show')?.mutationSemantics).toBe(
+      'read-only',
     )
 
     const catalog = createAssistantToolCatalogFromCapabilities(

@@ -22,7 +22,6 @@ import {
   createAssistantBoundedRuntimeCache,
   ASSISTANT_AUTOMATION_STATE_CACHE,
   ASSISTANT_INDEX_CACHE,
-  ASSISTANT_SESSION_CACHE,
 } from '../runtime-budget-policy.js'
 import {
   appendTextFile,
@@ -40,9 +39,9 @@ import {
 import {
   extractAssistantSessionSecretsForPersistence,
   mergeAssistantSessionSecrets,
-  persistAssistantSessionSecrets,
   readAssistantSessionSecrets,
   resolveAssistantSessionSecretsPath,
+  stageAssistantSessionSecretsForPersistence,
 } from '../state-secrets.js'
 import { quarantineAssistantStateFile } from '../quarantine.js'
 import { appendAssistantRuntimeEventAtPaths } from '../runtime-events.js'
@@ -54,11 +53,6 @@ export const ASSISTANT_INDEX_STORE_VERSION = 1
 export const ASSISTANT_AUTOMATION_STATE_VERSION = 1
 // Keep aligned with the bootstrap transcript replay ceiling in provider-turn-runner.
 export const ASSISTANT_TRANSCRIPT_REPLAY_RETENTION_LIMIT = 100
-
-const assistantSessionCache = createAssistantBoundedRuntimeCache<string, AssistantSession | null>({
-  name: 'assistant.sessions',
-  ...ASSISTANT_SESSION_CACHE,
-})
 
 const assistantIndexStoreCache = createAssistantBoundedRuntimeCache<string, AssistantAliasStore>({
   name: 'assistant.indexes',
@@ -104,7 +98,6 @@ export async function readAssistantSession(input: {
     raw = await readFile(sessionPath, 'utf8')
   } catch (error) {
     if (isMissingFileError(error)) {
-      assistantSessionCache.set(sessionPath, null)
       return null
     }
     throw error
@@ -116,7 +109,6 @@ export async function readAssistantSession(input: {
       parseAssistantSessionRecord(JSON.parse(raw)),
     )
   } catch (error) {
-    assistantSessionCache.delete(sessionPath)
     await quarantineAssistantStateFile({
       artifactKind: 'session',
       error,
@@ -133,14 +125,16 @@ export async function readAssistantSession(input: {
     })
   }
 
-  let secrets: Awaited<ReturnType<typeof readAssistantSessionSecrets>>
+  let secrets: Awaited<ReturnType<typeof readAssistantSessionSecrets>> = null
   try {
-    secrets = await readAssistantSessionSecrets({
-      paths: input.paths,
-      sessionId: input.sessionId,
-    })
+    if (persistedSession.target.adapter === 'openai-compatible') {
+      secrets = await readAssistantSessionSecrets({
+        paths: input.paths,
+        sessionId: input.sessionId,
+        updatedAt: persistedSession.updatedAt,
+      })
+    }
   } catch (error) {
-    assistantSessionCache.delete(sessionPath)
     if (input.treatCorruptedAsMissing) {
       return null
     }
@@ -151,9 +145,7 @@ export async function readAssistantSession(input: {
     })
   }
 
-  const session = mergeAssistantSessionSecrets(persistedSession, secrets)
-  assistantSessionCache.set(sessionPath, session)
-  return session
+  return mergeAssistantSessionSecrets(persistedSession, secrets)
 }
 
 export async function writeAssistantSession(
@@ -169,13 +161,18 @@ export async function writeAssistantSession(
   const persisted = assistantPersistedSessionSchema.parse(
     normalizeAssistantSessionForWrite(redactedSession),
   )
-  await persistAssistantSessionSecrets({
+  const stagedSecrets = await stageAssistantSessionSecretsForPersistence({
     paths,
     secrets,
     sessionId: normalized.sessionId,
   })
-  await writeJsonFileAtomic(sessionPath, persisted)
-  assistantSessionCache.set(sessionPath, normalized)
+  try {
+    await writeJsonFileAtomic(sessionPath, persisted)
+    await stagedSecrets.commit()
+  } catch (error) {
+    await stagedSecrets.abort().catch(() => undefined)
+    throw error
+  }
   await appendAssistantRuntimeEventAtPaths(paths, {
     at: normalized.updatedAt,
     component: 'state',

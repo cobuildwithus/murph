@@ -11,13 +11,13 @@ Current responsibilities:
 - collect due hosted side effects before the durable commit, then resume their post-commit delivery from committed state
 - export sanitized pending assistant-runtime issue records through the injected host platform after commit instead of persisting raw hosted diagnostics in the worker
 - expose the method-based `HostedRuntimePlatform` seam that hosted apps inject at runtime
-- provide the generic child-launcher env helpers that hosted apps use when they own isolated runner process lifecycle
+- provide shared hosted runtime env sanitization so host apps can build their own launcher policy without forwarding control-plane secrets
 
 Current non-goals:
 
 - CLI command routing
 - Ink/UI surfaces
-- owning shared hosted execution contracts, worker topology, or side-effect codecs that belong in `@murphai/hosted-execution` or the host app
+- owning shared hosted execution contracts, worker topology, child-process launch policy, or side-effect codecs that belong in `@murphai/hosted-execution` or the host app
 - replacing the canonical vault or hosted bundle model
 
 `HostedRuntimePlatform` is the only hosted transport seam this package expects. Runtime code talks to semantic capabilities such as `artifactStore`, `effectsPort`, `deviceSyncPort`, `issueExportPort`, and `usageExportPort`; it does not reconstruct internal URLs, inspect hostnames, or default Cloudflare worker topology.

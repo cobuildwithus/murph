@@ -58,11 +58,9 @@ export function buildHostedExecutionJobRuntime(
       ? buildHostedRunnerPlatformEnv(process.env)
       : {}
     : { ...requestedRuntime.platformEnv };
-  const configSource = requestedRuntime.resolvedConfig
-    ? undefined
-    : requestedRuntime.forwardedEnv === undefined
-      ? process.env
-      : requestedRuntime.forwardedEnv;
+  const configSource = requestedRuntime.forwardedEnv === undefined
+    ? process.env
+    : requestedRuntime.forwardedEnv;
 
   // The worker-owned runtime envelope is the source of truth when present.
   // The container only falls back to ambient env for local/manual callers that omit it entirely.

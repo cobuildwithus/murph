@@ -15,6 +15,10 @@ import {
   inspectAssistantRuntimeWriteLock,
   withAssistantRuntimeWriteLock,
 } from '../src/assistant/runtime-write-lock.ts'
+import {
+  appendAssistantTranscriptEntries,
+  listAssistantTranscriptEntries,
+} from '../src/assistant/store.ts'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
 import { createDeferred, createTempVaultContext } from './test-helpers.js'
 
@@ -82,6 +86,47 @@ test('assistant runtime write lock reports active state while held and clears st
 
   await clearAssistantRuntimeWriteLock(vaultRoot)
   assert.equal((await inspectAssistantRuntimeWriteLock(vaultRoot)).state, 'unlocked')
+})
+
+test('assistant transcript appends wait behind the shared runtime write lock', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    'murph-assistant-transcript-append-lock-',
+  )
+  cleanupPaths.push(parentRoot)
+
+  const held = createDeferred<void>()
+  const release = createDeferred<void>()
+  const events: string[] = []
+
+  const writer = withAssistantRuntimeWriteLock(vaultRoot, async () => {
+    events.push('lock:start')
+    held.resolve()
+    await release.promise
+    events.push('lock:end')
+  })
+
+  await held.promise
+  let appendCompleted = false
+  const append = appendAssistantTranscriptEntries(vaultRoot, 'session-lock-test', [
+    {
+      kind: 'user',
+      text: 'hello after lock',
+    },
+  ]).then((entries) => {
+    appendCompleted = true
+    events.push(`append:${entries.length}`)
+  })
+
+  await Promise.resolve()
+  assert.equal(appendCompleted, false)
+  release.resolve()
+  await Promise.all([writer, append])
+
+  assert.deepEqual(events, ['lock:start', 'lock:end', 'append:1'])
+  assert.equal(
+    (await listAssistantTranscriptEntries(vaultRoot, 'session-lock-test'))[0]?.text,
+    'hello after lock',
+  )
 })
 
 test('assistant runtime write lock surfaces held external metadata as a VaultCliError', async () => {

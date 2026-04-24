@@ -11,6 +11,7 @@ import {
 import {
   parseHostedBrowserVaultReplicaRef,
   parseHostedExecutionCursorSnapshotRef,
+  parseHostedExecutionRunnerResult,
 } from "@murphai/hosted-execution/parsers";
 import type { HostedExecutionBundleRef } from "@murphai/runtime-state";
 
@@ -734,6 +735,7 @@ function normalizeRunnerPendingCleanupState(value: unknown): RunnerPendingCleanu
   }
 
   const record = value as {
+    committedResult?: unknown;
     emailMessages?: unknown;
     linqMessageIds?: unknown;
     required?: unknown;
@@ -791,10 +793,25 @@ function normalizeRunnerPendingCleanupState(value: unknown): RunnerPendingCleanu
     return null;
   }
 
+  const committedResult = normalizePendingCleanupCommittedResult(record.committedResult);
+
   return {
+    ...(committedResult ? { committedResult } : {}),
     emailMessages,
     linqMessageIds,
     required,
     telegramMessages,
   };
+}
+
+function normalizePendingCleanupCommittedResult(value: unknown): RunnerPendingCleanupState["committedResult"] {
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  try {
+    return parseHostedExecutionRunnerResult(value);
+  } catch {
+    return null;
+  }
 }
