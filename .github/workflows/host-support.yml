@@ -56,8 +56,8 @@ jobs:
       - name: Run cross-platform CLI coverage
         run: env MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 pnpm exec vitest run packages/cli/test/setup-cli.test.ts packages/cli/test/cli-expansion-inbox-attachments.test.ts packages/cli/test/inbox-service-boundaries.test.ts --no-coverage --maxWorkers 1
 
-  release-checks-linux:
-    name: Release checks (ubuntu)
+  release-build-typecheck-linux:
+    name: Release build/typecheck (ubuntu)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -74,5 +74,151 @@ jobs:
       - name: Install deps
         run: pnpm install --frozen-lockfile
 
-      - name: Run release checks
-        run: pnpm release:check
+      - name: Validate release metadata
+        run: |
+          bash -n scripts/release-check.sh scripts/release.sh scripts/update-changelog.sh scripts/generate-release-notes.sh
+          node --check scripts/release-helpers.mjs
+          node --check scripts/verify-release-target.mjs
+          node --check scripts/pack-publishables.mjs
+          node --check scripts/publish-publishables.mjs
+          node scripts/verify-release-target.mjs
+
+      - name: Clean workspace build
+        run: pnpm build:workspace:clean
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Artifact hygiene
+        run: pnpm no-js
+
+      - name: Doc gardening
+        run: bash scripts/doc-gardening.sh --fail-on-issues
+
+  release-package-coverage-linux:
+    name: Release package coverage (${{ matrix.shard }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shard: assistant-engine
+            packages: packages/assistant-engine
+          - shard: cli
+            packages: packages/cli
+          - shard: assistant-runtime-setup-operator
+            packages: packages/assistant-runtime packages/setup-cli packages/operator-config
+          - shard: core-query-usecases
+            packages: packages/core packages/query packages/vault-usecases
+          - shard: device-inbox-runtime
+            packages: packages/device-syncd packages/inboxd packages/importers packages/runtime-state
+          - shard: assistant-gateway-hosted
+            packages: packages/assistant-cli packages/assistantd packages/gateway-local packages/hosted-execution
+          - shard: small-packages
+            packages: packages/cloudflare-hosted-control packages/contracts packages/gateway-core packages/inbox-services packages/messaging-ingress packages/openclaw-plugin packages/parsers
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v5
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Prepare built CLI runtime artifacts
+        if: ${{ matrix.shard == 'cli' }}
+        run: pnpm build:test-runtime:prepared
+
+      - name: Verify CLI package shape
+        if: ${{ matrix.shard == 'cli' }}
+        run: pnpm exec tsx packages/cli/scripts/verify-package-shape.ts
+
+      - name: Run package coverage shard
+        run: |
+          for package_dir in ${{ matrix.packages }}; do
+            if [[ "$package_dir" == "packages/cli" ]]; then
+              env MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 MURPH_VITEST_MAX_WORKERS=50% pnpm exec vitest run --config packages/cli/vitest.workspace.ts --coverage
+            else
+              env MURPH_VITEST_MAX_WORKERS=50% pnpm --dir "$package_dir" test:coverage
+            fi
+          done
+
+  release-app-verification-linux:
+    name: Release app verification (ubuntu)
+    runs-on: ubuntu-latest
+    env:
+      MURPH_APP_VERIFY_PARALLEL: "1"
+      MURPH_VERIFY_STEP_PARALLEL: "1"
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v5
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Run app verification
+        run: pnpm test:apps
+
+  release-fixture-coverage-linux:
+    name: Release fixture coverage (ubuntu)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v5
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Run fixture coverage
+        run: pnpm exec tsx e2e/smoke/verify-scenario-integrity.ts --coverage
+
+  release-checks-linux:
+    name: Release checks (ubuntu)
+    runs-on: ubuntu-latest
+    needs:
+      - release-build-typecheck-linux
+      - release-package-coverage-linux
+      - release-app-verification-linux
+      - release-fixture-coverage-linux
+    if: ${{ always() }}
+    steps:
+      - name: Check release shards
+        run: |
+          if [[ "${{ needs.release-build-typecheck-linux.result }}" != "success" ]]; then
+            echo "Release build/typecheck shard failed or did not complete."
+            exit 1
+          fi
+          if [[ "${{ needs.release-package-coverage-linux.result }}" != "success" ]]; then
+            echo "Release package coverage shard failed or did not complete."
+            exit 1
+          fi
+          if [[ "${{ needs.release-app-verification-linux.result }}" != "success" ]]; then
+            echo "Release app verification shard failed or did not complete."
+            exit 1
+          fi
+          if [[ "${{ needs.release-fixture-coverage-linux.result }}" != "success" ]]; then
+            echo "Release fixture coverage shard failed or did not complete."
+            exit 1
+          fi
