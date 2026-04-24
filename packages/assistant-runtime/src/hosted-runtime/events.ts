@@ -41,8 +41,12 @@ type HostedIngressOutcome = HostedIngressEffect & {
 
 const HOSTED_PROVIDER_REQUEST_DEBUG_SCHEMA = "murph.assistant-provider-request-debug.v1";
 const HOSTED_PROVIDER_REQUEST_DEBUG_TYPE = "assistant.provider.request.debug";
+const HOSTED_RESPONSES_REQUEST_DEBUG_SCHEMA = "murph.assistant-responses-request-debug.v1";
+const HOSTED_RESPONSES_REQUEST_DEBUG_TYPE = "assistant.responses.request.debug";
 const HOSTED_PROVIDER_REQUEST_DEBUG_PROMPT_CHUNK_SIZE = 300;
 const HOSTED_PROVIDER_REQUEST_DEBUG_PROMPT_CHUNK_LIMIT = 32;
+const HOSTED_RESPONSES_REQUEST_DEBUG_BODY_CHUNK_GROUP_LIMIT = 32;
+const HOSTED_RESPONSES_REQUEST_DEBUG_BODY_CHUNKS_PER_GROUP = 32;
 
 export async function executeHostedIngressEvent(input: {
   wake: HostedIngressEnvelope;
@@ -343,28 +347,53 @@ function emitHostedAssistantNotificationProviderTraceLog(input: {
   wake: HostedExecutionAssistantNotificationRequestedWake;
 }): HostedExecutionRedactedLogEntry | null {
   const requestDebug = readHostedProviderRequestDebugTrace(input.event);
-  if (!requestDebug) {
+  if (requestDebug) {
+    const redactedDetails = sanitizeHostedExecutionStructuredLogDetails({
+      ...buildHostedAssistantNotificationLogDetails(input.wake),
+      assistantProviderDebug: buildHostedProviderRequestDebugDetails(requestDebug),
+    });
+
+    emitHostedExecutionStructuredLog({
+      component: "runtime.provider",
+      details: redactedDetails,
+      message: "Hosted assistant provider request debug payload captured.",
+      phase: "wake.running",
+      wake: input.wake,
+    });
+
+    return {
+      component: "runtime.provider",
+      eventId: input.wake.eventId,
+      level: "info",
+      message: "Hosted assistant provider request debug payload captured.",
+      phase: "wake.running",
+      redacted: redactedDetails,
+    };
+  }
+
+  const responsesDebug = readHostedResponsesRequestDebugTrace(input.event);
+  if (!responsesDebug) {
     return null;
   }
 
   const redactedDetails = sanitizeHostedExecutionStructuredLogDetails({
     ...buildHostedAssistantNotificationLogDetails(input.wake),
-    assistantProviderDebug: buildHostedProviderRequestDebugDetails(requestDebug),
+    assistantResponsesDebug: buildHostedResponsesRequestDebugDetails(responsesDebug),
   });
 
   emitHostedExecutionStructuredLog({
-    component: "runtime.provider",
+    component: "runtime.provider.http",
     details: redactedDetails,
-    message: "Hosted assistant provider request debug payload captured.",
+    message: "Hosted assistant final Responses request debug payload captured.",
     phase: "wake.running",
     wake: input.wake,
   });
 
   return {
-    component: "runtime.provider",
+    component: "runtime.provider.http",
     eventId: input.wake.eventId,
     level: "info",
-    message: "Hosted assistant provider request debug payload captured.",
+    message: "Hosted assistant final Responses request debug payload captured.",
     phase: "wake.running",
     redacted: redactedDetails,
   };
@@ -388,6 +417,28 @@ function readHostedProviderRequestDebugTrace(
 
   return schema === HOSTED_PROVIDER_REQUEST_DEBUG_SCHEMA
     || type === HOSTED_PROVIDER_REQUEST_DEBUG_TYPE
+    ? record
+    : null;
+}
+
+function readHostedResponsesRequestDebugTrace(
+  event: unknown,
+): Record<string, unknown> | null {
+  if (!event || typeof event !== "object" || Array.isArray(event)) {
+    return null;
+  }
+
+  const rawEvent = (event as { rawEvent?: unknown }).rawEvent;
+  if (!rawEvent || typeof rawEvent !== "object" || Array.isArray(rawEvent)) {
+    return null;
+  }
+
+  const record = rawEvent as Record<string, unknown>;
+  const schema = readHostedProviderDebugString(record, "schema");
+  const type = readHostedProviderDebugString(record, "type");
+
+  return schema === HOSTED_RESPONSES_REQUEST_DEBUG_SCHEMA
+    || type === HOSTED_RESPONSES_REQUEST_DEBUG_TYPE
     ? record
     : null;
 }
@@ -459,6 +510,70 @@ function buildHostedProviderRequestDebugDetails(
   };
 }
 
+function buildHostedResponsesRequestDebugDetails(
+  debug: Record<string, unknown>,
+): HostedExecutionStructuredLogDetails {
+  const rawRequestBody = readHostedProviderDebugString(debug, "requestBody");
+  const requestBody = sanitizeHostedProviderDebugPrompt(rawRequestBody);
+  const requestBodyChunkGroups =
+    chunkHostedResponsesRequestDebugBodyGroups(requestBody);
+  const requestBodyChunkCount = requestBodyChunkGroups.reduce(
+    (count, group) => count + group.length,
+    0,
+  );
+
+  return {
+    contextManagementPresent:
+      readHostedProviderDebugBoolean(debug, "contextManagementPresent"),
+    gatewayOnlyProviderCount:
+      readHostedProviderDebugNumber(debug, "gatewayOnlyProviderCount"),
+    gatewayTagsCount: readHostedProviderDebugNumber(debug, "gatewayTagsCount"),
+    gatewayUserPresent: readHostedProviderDebugBoolean(debug, "gatewayUserPresent"),
+    gatewayZeroDataRetention:
+      readHostedProviderDebugBoolean(debug, "gatewayZeroDataRetention"),
+    inputMessageCount: readHostedProviderDebugNumber(debug, "inputMessageCount"),
+    inputRoles: readHostedProviderDebugStringArray(debug, "inputRoles"),
+    inputTextFieldCount:
+      readHostedProviderDebugNumber(debug, "inputTextFieldCount"),
+    inputTextHash: readHostedProviderDebugString(debug, "inputTextHash"),
+    inputTextLength: readHostedProviderDebugNumber(debug, "inputTextLength"),
+    instructionsHash: readHostedProviderDebugString(debug, "instructionsHash"),
+    instructionsLength:
+      readHostedProviderDebugNumber(debug, "instructionsLength"),
+    method: readHostedProviderDebugString(debug, "method"),
+    model: readHostedProviderDebugString(debug, "model"),
+    payloadTopLevelKeys:
+      readHostedProviderDebugStringArray(debug, "payloadTopLevelKeys"),
+    previousResponseIdPresent:
+      readHostedProviderDebugBoolean(debug, "previousResponseIdPresent"),
+    providerOptionsHash:
+      readHostedProviderDebugString(debug, "providerOptionsHash"),
+    requestBodyChunkCount,
+    requestBodyChunkGroups,
+    requestBodyHash: readHostedProviderDebugString(debug, "requestBodyHash"),
+    requestBodyLength: readHostedProviderDebugNumber(debug, "requestBodyLength"),
+    requestBodyTruncated:
+      requestBodyChunkCount >=
+        HOSTED_RESPONSES_REQUEST_DEBUG_BODY_CHUNK_GROUP_LIMIT
+          * HOSTED_RESPONSES_REQUEST_DEBUG_BODY_CHUNKS_PER_GROUP
+      && requestBody !== null
+      && requestBody.length
+        > HOSTED_PROVIDER_REQUEST_DEBUG_PROMPT_CHUNK_SIZE
+          * HOSTED_RESPONSES_REQUEST_DEBUG_BODY_CHUNK_GROUP_LIMIT
+          * HOSTED_RESPONSES_REQUEST_DEBUG_BODY_CHUNKS_PER_GROUP,
+    requestUrlOrigin: readHostedProviderDebugString(debug, "requestUrlOrigin"),
+    requestUrlPath: readHostedProviderDebugString(debug, "requestUrlPath"),
+    responseFormatHash:
+      readHostedProviderDebugString(debug, "responseFormatHash"),
+    schema: HOSTED_RESPONSES_REQUEST_DEBUG_SCHEMA,
+    textConfigHash: readHostedProviderDebugString(debug, "textConfigHash"),
+    toolChoice: readHostedProviderDebugString(debug, "toolChoice"),
+    toolCount: readHostedProviderDebugNumber(debug, "toolCount"),
+    toolNames: readHostedProviderDebugStringArray(debug, "toolNames"),
+    toolsHash: readHostedProviderDebugString(debug, "toolsHash"),
+  };
+}
+
 function readHostedProviderDebugString(
   debug: Record<string, unknown>,
   key: string,
@@ -518,6 +633,38 @@ function chunkHostedProviderDebugPrompt(value: string | null): string[] {
   }
 
   return chunks;
+}
+
+function chunkHostedResponsesRequestDebugBodyGroups(
+  value: string | null,
+): string[][] {
+  if (!value) {
+    return [];
+  }
+
+  const groups: string[][] = [];
+  let group: string[] = [];
+  for (
+    let index = 0;
+    index < value.length
+    && groups.length < HOSTED_RESPONSES_REQUEST_DEBUG_BODY_CHUNK_GROUP_LIMIT;
+    index += HOSTED_PROVIDER_REQUEST_DEBUG_PROMPT_CHUNK_SIZE
+  ) {
+    group.push(value.slice(index, index + HOSTED_PROVIDER_REQUEST_DEBUG_PROMPT_CHUNK_SIZE));
+    if (group.length >= HOSTED_RESPONSES_REQUEST_DEBUG_BODY_CHUNKS_PER_GROUP) {
+      groups.push(group);
+      group = [];
+    }
+  }
+
+  if (
+    group.length > 0
+    && groups.length < HOSTED_RESPONSES_REQUEST_DEBUG_BODY_CHUNK_GROUP_LIMIT
+  ) {
+    groups.push(group);
+  }
+
+  return groups;
 }
 
 function buildAssistantNotificationInput(

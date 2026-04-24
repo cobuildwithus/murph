@@ -2,6 +2,7 @@ import { generateText, stepCountIs, tool, type ToolSet } from 'ai'
 import {
   resolveAssistantLanguageModel,
   type AssistantModelSpec,
+  type AssistantResponsesRequestDebugEvent,
   type AssistantAiSdkToolEvent,
 } from '../model-harness.js'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
@@ -18,7 +19,10 @@ import {
   extractOpenAICompatibleAssistantProviderUsage,
   extractOpenAICompatibleProviderSessionId,
 } from './helpers.js'
-import type { AssistantProviderTraceUpdate } from '../provider-traces.js'
+import type {
+  AssistantProviderTraceEvent,
+  AssistantProviderTraceUpdate,
+} from '../provider-traces.js'
 import {
   normalizeAssistantProviderOptionKey,
   normalizeNullableString,
@@ -214,15 +218,18 @@ export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
     }
 
     const usageAttribution = input.usageAttribution ?? null
-    const languageModelSpec = applyOpenAiCompatibleGatewayPolicies({
-      env: {
-        ...process.env,
-        ...(input.env ?? {}),
-      },
-      languageModelSpec: resolvedLanguageModelSpec,
-      providerZeroDataRetention: providerConfig.policy.zeroDataRetention === true,
-      providerTarget: providerConfig.target,
-      usageAttribution,
+    const languageModelSpec = attachOpenAiCompatibleResponsesRequestDebugObserver({
+      languageModelSpec: applyOpenAiCompatibleGatewayPolicies({
+        env: {
+          ...process.env,
+          ...(input.env ?? {}),
+        },
+        languageModelSpec: resolvedLanguageModelSpec,
+        providerZeroDataRetention: providerConfig.policy.zeroDataRetention === true,
+        providerTarget: providerConfig.target,
+        usageAttribution,
+      }),
+      onTraceEvent: input.onTraceEvent,
     })
 
     const toolEvents: unknown[] = []
@@ -745,6 +752,40 @@ function applyOpenAiCompatibleGatewayPolicies(input: {
             },
           }
         : {}),
+    },
+  }
+}
+
+function attachOpenAiCompatibleResponsesRequestDebugObserver(input: {
+  languageModelSpec: AssistantModelSpec
+  onTraceEvent?: (event: AssistantProviderTraceEvent) => void
+}): AssistantModelSpec {
+  if (
+    !input.onTraceEvent ||
+    (input.languageModelSpec.executionDriver ?? 'openai-compatible') !== 'responses'
+  ) {
+    return input.languageModelSpec
+  }
+
+  const existingPolicy = input.languageModelSpec.responsesRequestPolicy
+
+  return {
+    ...input.languageModelSpec,
+    responsesRequestPolicy: {
+      ...existingPolicy,
+      debugObserver(event: AssistantResponsesRequestDebugEvent): void {
+        existingPolicy?.debugObserver?.(event)
+        input.onTraceEvent?.({
+          providerSessionId: null,
+          rawEvent: event,
+          updates: [
+            {
+              kind: 'status',
+              text: 'Hosted provider final Responses request debug payload captured.',
+            },
+          ],
+        })
+      },
     },
   }
 }

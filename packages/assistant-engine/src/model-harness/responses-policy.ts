@@ -1,6 +1,42 @@
+import { createHash } from 'node:crypto'
+
 import type { AssistantModelSpec } from './model-spec.js'
 
+export interface AssistantResponsesRequestDebugEvent {
+  contextManagementPresent: boolean
+  gatewayOnlyProviderCount: number
+  gatewayTagsCount: number
+  gatewayUserPresent: boolean
+  gatewayZeroDataRetention: boolean | null
+  inputMessageCount: number | null
+  inputRoles: string[]
+  inputTextFieldCount: number
+  inputTextHash: string | null
+  inputTextLength: number
+  instructionsHash: string | null
+  instructionsLength: number | null
+  method: string | null
+  model: string | null
+  payloadTopLevelKeys: string[]
+  previousResponseIdPresent: boolean
+  providerOptionsHash: string | null
+  requestBody: string
+  requestBodyHash: string
+  requestBodyLength: number
+  requestUrlOrigin: string | null
+  requestUrlPath: string | null
+  responseFormatHash: string | null
+  schema: 'murph.assistant-responses-request-debug.v1'
+  textConfigHash: string | null
+  toolChoice: string | null
+  toolCount: number
+  toolNames: string[]
+  toolsHash: string | null
+  type: 'assistant.responses.request.debug'
+}
+
 export interface AssistantResponsesRequestPolicy {
+  debugObserver?: (event: AssistantResponsesRequestDebugEvent) => void
   gatewayOnlyProviders?: readonly string[] | null
   gatewayReporting?: {
     tags?: readonly string[]
@@ -53,13 +89,22 @@ export async function maybeMutateAssistantResponsesRequest(
   }
 
   const nextPayload = applyAssistantResponsesRequestPolicy(payload, requestPolicy)
+  const nextBody = nextPayload ? JSON.stringify(nextPayload) : body
+  observeAssistantResponsesRequest({
+    body: nextBody,
+    init,
+    input,
+    payload: nextPayload ?? payload,
+    requestPolicy,
+  })
+
   if (!nextPayload) {
     return init
   }
 
   return {
     ...init,
-    body: JSON.stringify(nextPayload),
+    body: nextBody,
   }
 }
 
@@ -246,6 +291,358 @@ function readAssistantFetchUrl(
   }
 
   return null
+}
+
+function observeAssistantResponsesRequest(input: {
+  body: string
+  init?: AssistantFetchInit
+  input: AssistantFetchInput
+  payload: Record<string, unknown>
+  requestPolicy: AssistantResponsesRequestPolicy | undefined
+}): void {
+  const observer = input.requestPolicy?.debugObserver
+  if (!observer) {
+    return
+  }
+
+  try {
+    observer(
+      buildAssistantResponsesRequestDebugEvent({
+        body: input.body,
+        init: input.init,
+        input: input.input,
+        payload: input.payload,
+      }),
+    )
+  } catch {
+    // Request debug observers must never interfere with the provider call.
+  }
+}
+
+function buildAssistantResponsesRequestDebugEvent(input: {
+  body: string
+  init?: AssistantFetchInit
+  input: AssistantFetchInput
+  payload: Record<string, unknown>
+}): AssistantResponsesRequestDebugEvent {
+  const urlDetails = readAssistantResponsesRequestUrlDetails(input.input)
+  const gatewayOptions = readAssistantJsonObjectPath(input.payload, [
+    'providerOptions',
+    'gateway',
+  ])
+  const inputSummary = summarizeAssistantResponsesInput(input.payload.input)
+  const toolNames = listAssistantResponsesToolNames(input.payload.tools)
+  const instructions = readAssistantString(input.payload.instructions)
+  const responseFormat =
+    input.payload.response_format ?? input.payload.responseFormat ?? null
+  const toolChoice =
+    readAssistantString(input.payload.tool_choice)
+    ?? readAssistantString(input.payload.toolChoice)
+
+  return {
+    contextManagementPresent: 'context_management' in input.payload,
+    gatewayOnlyProviderCount: readAssistantStringArray(gatewayOptions?.only).length,
+    gatewayTagsCount: readAssistantStringArray(gatewayOptions?.tags).length,
+    gatewayUserPresent: readAssistantString(gatewayOptions?.user) !== null,
+    gatewayZeroDataRetention:
+      typeof gatewayOptions?.zeroDataRetention === 'boolean'
+        ? gatewayOptions.zeroDataRetention
+        : null,
+    inputMessageCount: inputSummary.messageCount,
+    inputRoles: inputSummary.roles,
+    inputTextFieldCount: inputSummary.textFieldCount,
+    inputTextHash:
+      inputSummary.textFieldValues.length > 0
+        ? hashAssistantResponsesStableJson(inputSummary.textFieldValues)
+        : null,
+    inputTextLength: inputSummary.textLength,
+    instructionsHash: instructions ? hashAssistantResponsesString(instructions) : null,
+    instructionsLength: instructions?.length ?? null,
+    method: readAssistantResponsesRequestMethod(input.input, input.init),
+    model: readAssistantString(input.payload.model),
+    payloadTopLevelKeys: Object.keys(input.payload).sort(),
+    previousResponseIdPresent:
+      readAssistantString(input.payload.previous_response_id) !== null
+      || readAssistantString(input.payload.previousResponseId) !== null,
+    providerOptionsHash: hashAssistantResponsesJsonValueOrNull(
+      input.payload.providerOptions,
+    ),
+    requestBody: stringifyAssistantResponsesDebugPayload(input.payload),
+    requestBodyHash: hashAssistantResponsesString(input.body),
+    requestBodyLength: input.body.length,
+    requestUrlOrigin: urlDetails.origin,
+    requestUrlPath: urlDetails.path,
+    responseFormatHash: hashAssistantResponsesJsonValueOrNull(responseFormat),
+    schema: 'murph.assistant-responses-request-debug.v1',
+    textConfigHash: hashAssistantResponsesJsonValueOrNull(input.payload.text),
+    toolChoice,
+    toolCount: toolNames.length,
+    toolNames,
+    toolsHash: hashAssistantResponsesJsonValueOrNull(input.payload.tools),
+    type: 'assistant.responses.request.debug',
+  }
+}
+
+function readAssistantResponsesRequestUrlDetails(input: AssistantFetchInput): {
+  origin: string | null
+  path: string | null
+} {
+  const url = readAssistantFetchUrl(input)
+  if (!url) {
+    return {
+      origin: null,
+      path: null,
+    }
+  }
+
+  try {
+    const parsed = new URL(url)
+    return {
+      origin: parsed.origin,
+      path: parsed.pathname,
+    }
+  } catch {
+    return {
+      origin: null,
+      path: null,
+    }
+  }
+}
+
+function readAssistantResponsesRequestMethod(
+  input: AssistantFetchInput,
+  init?: AssistantFetchInit,
+): string | null {
+  const method = init?.method ?? (input instanceof Request ? input.method : 'POST')
+  return typeof method === 'string' && method.trim().length > 0
+    ? method.trim().toUpperCase()
+    : null
+}
+
+function summarizeAssistantResponsesInput(input: unknown): {
+  messageCount: number | null
+  roles: string[]
+  textFieldCount: number
+  textFieldValues: string[]
+  textLength: number
+} {
+  const textFieldValues: string[] = []
+  const roles: string[] = []
+
+  collectAssistantResponsesTextFields(input, textFieldValues)
+  collectAssistantResponsesRoles(input, roles)
+
+  return {
+    messageCount: Array.isArray(input) ? input.length : null,
+    roles: [...new Set(roles)].sort(),
+    textFieldCount: textFieldValues.length,
+    textFieldValues,
+    textLength: textFieldValues.reduce((sum, value) => sum + value.length, 0),
+  }
+}
+
+function listAssistantResponsesToolNames(input: unknown): string[] {
+  const tools = Array.isArray(input) ? input : []
+  return tools
+    .map((tool) => {
+      const record = isAssistantPlainObject(tool) ? tool : null
+      const functionRecord = isAssistantPlainObject(record?.function)
+        ? record.function
+        : null
+      return readAssistantString(record?.name)
+        ?? readAssistantString(functionRecord?.name)
+        ?? null
+    })
+    .filter((name): name is string => name !== null)
+    .sort()
+}
+
+function collectAssistantResponsesRoles(input: unknown, roles: string[]): void {
+  if (Array.isArray(input)) {
+    for (const entry of input) {
+      collectAssistantResponsesRoles(entry, roles)
+    }
+    return
+  }
+
+  if (!isAssistantPlainObject(input)) {
+    return
+  }
+
+  const role = readAssistantString(input.role)
+  if (role) {
+    roles.push(role)
+  }
+
+  if ('content' in input) {
+    collectAssistantResponsesRoles(input.content, roles)
+  }
+}
+
+function collectAssistantResponsesTextFields(
+  input: unknown,
+  values: string[],
+): void {
+  if (Array.isArray(input)) {
+    for (const entry of input) {
+      collectAssistantResponsesTextFields(entry, values)
+    }
+    return
+  }
+
+  if (!isAssistantPlainObject(input)) {
+    return
+  }
+
+  const text = readAssistantString(input.text)
+  if (text) {
+    values.push(text)
+  }
+
+  const content = input.content
+  if (typeof content === 'string' && content.trim().length > 0) {
+    values.push(content)
+    return
+  }
+
+  collectAssistantResponsesTextFields(content, values)
+}
+
+function readAssistantJsonObjectPath(
+  input: Record<string, unknown>,
+  path: readonly string[],
+): Record<string, unknown> | null {
+  let cursor: unknown = input
+  for (const key of path) {
+    if (!isAssistantPlainObject(cursor)) {
+      return null
+    }
+    cursor = cursor[key]
+  }
+
+  return isAssistantPlainObject(cursor) ? cursor : null
+}
+
+function readAssistantString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim().length > 0 ? value : null
+}
+
+function readAssistantStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter(
+        (entry): entry is string =>
+          typeof entry === 'string' && entry.trim().length > 0,
+      )
+    : []
+}
+
+function hashAssistantResponsesJsonValueOrNull(value: unknown): string | null {
+  return value === undefined || value === null
+    ? null
+    : hashAssistantResponsesStableJson(value)
+}
+
+function stringifyAssistantResponsesDebugPayload(
+  payload: Record<string, unknown>,
+): string {
+  return JSON.stringify(redactAssistantResponsesDebugPayload(payload))
+}
+
+function redactAssistantResponsesDebugPayload(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(redactAssistantResponsesDebugPayload)
+  }
+
+  if (!isAssistantPlainObject(value)) {
+    return typeof value === 'string' ? redactAssistantResponsesDebugText(value) : value
+  }
+
+  const next: Record<string, unknown> = {}
+  for (const [key, entry] of Object.entries(value)) {
+    if (isAssistantResponsesDebugSensitiveKey(key)) {
+      next[key] = '[redacted]'
+      continue
+    }
+
+    if (key === 'gateway' && isAssistantPlainObject(entry)) {
+      next[key] = redactAssistantResponsesGatewayDebugPayload(entry)
+      continue
+    }
+
+    next[key] = redactAssistantResponsesDebugPayload(entry)
+  }
+
+  return next
+}
+
+function redactAssistantResponsesGatewayDebugPayload(
+  gateway: Record<string, unknown>,
+): Record<string, unknown> {
+  const next: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(gateway)) {
+    if (key === 'user' || key === 'tags') {
+      next[key] = '[redacted]'
+      continue
+    }
+
+    next[key] = redactAssistantResponsesDebugPayload(value)
+  }
+
+  return next
+}
+
+function isAssistantResponsesDebugSensitiveKey(key: string): boolean {
+  return /authorization|secret|token|password|passcode|api[-_]?key|cookie|set-cookie/iu
+    .test(key)
+}
+
+function redactAssistantResponsesDebugText(value: string): string {
+  return value
+    .replace(/file:\/\/\/Users\/[^\s)"']+/gu, 'file://<REDACTED_PATH>')
+    .replace(/\/Users\/[^\s)"']+/gu, '<REDACTED_PATH>')
+    .replace(/\/home\/[^\s)"']+/gu, '<REDACTED_PATH>')
+    .replace(/\/root\/[^\s)"']+/gu, '<REDACTED_PATH>')
+    .replace(/\b[A-Za-z]:\\Users\\[^\s)"']+/gu, '<REDACTED_PATH>')
+    .replace(
+      /\b(authorization)\b\s*:\s*Bearer\s+[A-Za-z0-9._~+/=-]+\b/giu,
+      (_match, key: string) => `${key}=Bearer [redacted]`,
+    )
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+\b/giu, 'Bearer [redacted]')
+    .replace(/\+\d{8,15}\b/gu, '[redacted-phone]')
+    .replace(/\b([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})\b/gu, '[redacted-email]')
+    .replace(
+      /\b(authorization)\b\s*[:=]\s*(?!Bearer\b)(?:"[^"]+"|'[^']+'|\S+)/giu,
+      (_match, key: string) => `${key}=[redacted]`,
+    )
+    .replace(
+      /\b((?:[A-Z][A-Z0-9_]*_)?(?:token|secret|password|passcode|api[_-]?key|cookie|set-cookie))\b\s*[:=]\s*(?:"[^"]+"|'[^']+'|\S+)/giu,
+      '$1=[redacted]',
+    )
+    .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/gu, '[redacted-token]')
+}
+
+function hashAssistantResponsesStableJson(value: unknown): string {
+  return hashAssistantResponsesString(stableStringifyAssistantResponsesJson(value))
+}
+
+function hashAssistantResponsesString(value: string): string {
+  return createHash('sha256').update(value).digest('hex')
+}
+
+function stableStringifyAssistantResponsesJson(value: unknown): string {
+  if (value === null || typeof value !== 'object') {
+    return JSON.stringify(value)
+  }
+
+  if (Array.isArray(value)) {
+    return `[${value.map(stableStringifyAssistantResponsesJson).join(',')}]`
+  }
+
+  const record = value as Record<string, unknown>
+  return `{${Object.keys(record)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${stableStringifyAssistantResponsesJson(record[key])}`)
+    .join(',')}}`
 }
 
 async function readAssistantFetchBody(
