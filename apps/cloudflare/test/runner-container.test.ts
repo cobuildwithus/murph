@@ -182,6 +182,17 @@ describe("RunnerContainer", () => {
     expect(destroy).toHaveBeenCalledTimes(1);
   });
 
+  it("recycles any warm deploy smoke shell before checking container health", async () => {
+    const { container, destroy, startAndWaitForPorts } = createContainerDouble({
+      initialStatus: "running",
+    });
+
+    await container.smokeHealth();
+
+    expect(destroy).toHaveBeenCalledTimes(2);
+    expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
+  });
+
   it("starts the container without operator-only control-plane secrets in supervisor env", async () => {
     const { container, startAndWaitForPorts } = createContainerDouble({
       env: {

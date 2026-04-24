@@ -13,6 +13,7 @@ import {
   type HostedExecutionUserStatus,
 } from "@murphai/hosted-execution/contracts";
 import {
+  parseOptionalStrictInteger,
   readBooleanEnv,
   normalizeOptionalString,
 } from "./deploy-automation/shared.ts";
@@ -33,6 +34,8 @@ type FetchLike = typeof fetch;
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const appDir = path.resolve(scriptDir, "..");
+const DEFAULT_RUNNER_CONTAINER_SMOKE_MAX_ATTEMPTS = 8;
+const DEFAULT_RUNNER_CONTAINER_SMOKE_RETRY_DELAY_MS = 5_000;
 
 interface SmokeControlRequest {
   authorizationHeader: string;
@@ -48,6 +51,18 @@ interface SmokeRunnerBundleManifest {
   buildSkipped?: boolean;
   bundleFingerprint?: string;
   sourceFingerprint?: string;
+}
+
+interface SmokeRunnerRetryPolicy {
+  maxAttempts: number;
+  retryDelayMs: number;
+}
+
+class RunnerContainerSmokeRetryableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RunnerContainerSmokeRetryableError";
+  }
 }
 
 export function resolveSmokeWorkerBaseUrl(source: EnvSource = process.env): string {
@@ -128,6 +143,7 @@ export async function runSmokeHostedDeploy(input: {
   if (shouldSmokeRunnerContainer) {
     await assertRunnerContainerSmoke({
       fetchImpl,
+      log,
       source,
       url: new URL("/internal/deploy/container-smoke", smokeBaseUrl).toString(),
       versionOverrideHeaders,
@@ -163,10 +179,44 @@ export async function runSmokeHostedDeploy(input: {
 
 async function assertRunnerContainerSmoke(input: {
   fetchImpl: FetchLike;
+  log: (message: string) => void;
   source: EnvSource;
   url: string;
   versionOverrideHeaders: Record<string, string> | undefined;
 }): Promise<void> {
+  const expectedManifest = await readExpectedRunnerBundleManifest(input.source);
+  const retryPolicy = readRunnerContainerSmokeRetryPolicy(input.source);
+
+  for (let attempt = 1; attempt <= retryPolicy.maxAttempts; attempt += 1) {
+    try {
+      assertSmokeRunnerBundleManifest(
+        await readRunnerContainerSmoke(input),
+        expectedManifest,
+      );
+      return;
+    } catch (error) {
+      if (
+        attempt >= retryPolicy.maxAttempts ||
+        !(error instanceof RunnerContainerSmokeRetryableError)
+      ) {
+        throw error;
+      }
+
+      input.log(
+        `Runner container smoke attempt ${attempt}/${retryPolicy.maxAttempts} did not observe `
+          + `the expected runner bundle; retrying in ${retryPolicy.retryDelayMs}ms.`,
+      );
+      await sleep(retryPolicy.retryDelayMs);
+    }
+  }
+}
+
+async function readRunnerContainerSmoke(input: {
+  fetchImpl: FetchLike;
+  source: EnvSource;
+  url: string;
+  versionOverrideHeaders: Record<string, string> | undefined;
+}): Promise<SmokeRunnerBundleManifest | null> {
   const url = new URL(input.url);
   const payload = "";
   const signatureHeaders = await createHostedWebCallbackSignatureHeaders({
@@ -186,7 +236,9 @@ async function assertRunnerContainerSmoke(input: {
   });
 
   if (!response.ok) {
-    throw new Error(`runner container smoke failed with HTTP ${response.status}.`);
+    throw response.status >= 500
+      ? new RunnerContainerSmokeRetryableError(`runner container smoke failed with HTTP ${response.status}.`)
+      : new Error(`runner container smoke failed with HTTP ${response.status}.`);
   }
 
   const responsePayload = await response.json() as {
@@ -199,17 +251,14 @@ async function assertRunnerContainerSmoke(input: {
   };
 
   if (responsePayload.ok !== true || responsePayload.runnerContainer?.ok !== true) {
-    throw new Error("runner container smoke did not return ok=true.");
+    throw new RunnerContainerSmokeRetryableError("runner container smoke did not return ok=true.");
   }
 
   if (responsePayload.runnerContainer.service !== "cloudflare-hosted-runner-node") {
     throw new Error("runner container smoke did not return the expected service id.");
   }
 
-  assertSmokeRunnerBundleManifest(
-    responsePayload.runnerContainer.runnerBundle ?? null,
-    await readExpectedRunnerBundleManifest(input.source),
-  );
+  return responsePayload.runnerContainer.runnerBundle ?? null;
 }
 
 async function readExpectedRunnerBundleManifest(source: EnvSource): Promise<SmokeRunnerBundleManifest> {
@@ -237,7 +286,9 @@ function assertSmokeRunnerBundleManifest(
   expected: SmokeRunnerBundleManifest,
 ): void {
   if (!actual) {
-    throw new Error("runner container smoke did not return runner bundle metadata.");
+    throw new RunnerContainerSmokeRetryableError(
+      "runner container smoke did not return runner bundle metadata.",
+    );
   }
 
   if (actual.buildSkipped === true) {
@@ -248,15 +299,51 @@ function assertSmokeRunnerBundleManifest(
     typeof actual.bundleFingerprint !== "string" ||
     typeof actual.sourceFingerprint !== "string"
   ) {
-    throw new Error("runner container smoke returned incomplete runner bundle metadata.");
+    throw new RunnerContainerSmokeRetryableError(
+      "runner container smoke returned incomplete runner bundle metadata.",
+    );
   }
 
   if (
     actual.bundleFingerprint !== expected.bundleFingerprint ||
     actual.sourceFingerprint !== expected.sourceFingerprint
   ) {
-    throw new Error("runner container smoke did not run the expected runner bundle.");
+    throw new RunnerContainerSmokeRetryableError(
+      "runner container smoke did not run the expected runner bundle.",
+    );
   }
+}
+
+function readRunnerContainerSmokeRetryPolicy(source: EnvSource): SmokeRunnerRetryPolicy {
+  const maxAttempts = parseOptionalStrictInteger(
+    source.HOSTED_EXECUTION_SMOKE_RUNNER_MAX_ATTEMPTS,
+    "HOSTED_EXECUTION_SMOKE_RUNNER_MAX_ATTEMPTS must be a positive integer.",
+  ) ?? DEFAULT_RUNNER_CONTAINER_SMOKE_MAX_ATTEMPTS;
+  const retryDelayMs = parseOptionalStrictInteger(
+    source.HOSTED_EXECUTION_SMOKE_RUNNER_RETRY_DELAY_MS,
+    "HOSTED_EXECUTION_SMOKE_RUNNER_RETRY_DELAY_MS must be a non-negative integer.",
+  ) ?? DEFAULT_RUNNER_CONTAINER_SMOKE_RETRY_DELAY_MS;
+
+  if (maxAttempts < 1) {
+    throw new Error("HOSTED_EXECUTION_SMOKE_RUNNER_MAX_ATTEMPTS must be a positive integer.");
+  }
+
+  if (retryDelayMs < 0) {
+    throw new Error("HOSTED_EXECUTION_SMOKE_RUNNER_RETRY_DELAY_MS must be a non-negative integer.");
+  }
+
+  return {
+    maxAttempts,
+    retryDelayMs,
+  };
+}
+
+async function sleep(ms: number): Promise<void> {
+  if (ms <= 0) {
+    return;
+  }
+
+  await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function assertHealth(
