@@ -174,6 +174,7 @@ export class RunnerContainer extends Container {
       const readyTimeoutMs = readRunnerReadyTimeoutMs(this.environment);
 
       try {
+        await this.stopWarmContainer({ failClosed: false });
         await this.ensureSmokeContainerReady(readyTimeoutMs);
         const response = await this.containerFetch(
           RUNNER_HEALTH_URL,

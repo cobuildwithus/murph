@@ -328,6 +328,84 @@ describe("runSmokeHostedDeploy", () => {
     expect(headers.get("x-hosted-execution-timestamp")).toEqual(expect.any(String));
   });
 
+  it("retries the deploy-signed runner container smoke until the expected bundle is active", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "cloudflare-smoke-retry-manifest-"));
+    const manifestPath = path.join(root, ".deploy", "runner-bundle", ".murph-runner-bundle-manifest.json");
+    await mkdir(path.dirname(manifestPath), { recursive: true });
+    await writeFile(
+      manifestPath,
+      `${JSON.stringify({
+        buildSkipped: false,
+        bundleFingerprint: "expected-bundle",
+        sourceFingerprint: "expected-source",
+      }, null, 2)}\n`,
+      "utf8",
+    );
+    const logs: string[] = [];
+    const fetchCalls: string[] = [];
+    const fetchImpl = async (url: RequestInfo | URL) => {
+      fetchCalls.push(String(url));
+
+      if (String(url).endsWith("/")) {
+        return new Response(JSON.stringify({ ok: true, service: "cloudflare-hosted-runner" }), {
+          status: 200,
+        });
+      }
+
+      if (String(url).endsWith("/health")) {
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      }
+
+      if (String(url).endsWith("/internal/deploy/container-smoke")) {
+        const smokeAttempt = fetchCalls.filter((entry) =>
+          entry.endsWith("/internal/deploy/container-smoke")
+        ).length;
+        return new Response(JSON.stringify({
+          ok: true,
+          runnerContainer: {
+            ok: true,
+            runnerBundle: smokeAttempt === 1
+              ? {
+                  buildSkipped: false,
+                  bundleFingerprint: "stale-bundle",
+                  sourceFingerprint: "stale-source",
+                }
+              : {
+                  buildSkipped: false,
+                  bundleFingerprint: "expected-bundle",
+                  sourceFingerprint: "expected-source",
+                },
+            service: "cloudflare-hosted-runner-node",
+          },
+        }), { status: 200 });
+      }
+
+      throw new Error(`Unexpected smoke request: ${String(url)}`);
+    };
+
+    await runSmokeHostedDeploy({
+      fetchImpl,
+      log(message) {
+        logs.push(message);
+      },
+      source: {
+        HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER: "true",
+        HOSTED_EXECUTION_SMOKE_RUNNER_MANIFEST_PATH: manifestPath,
+        HOSTED_EXECUTION_SMOKE_RUNNER_MAX_ATTEMPTS: "2",
+        HOSTED_EXECUTION_SMOKE_RUNNER_RETRY_DELAY_MS: "0",
+        HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: "https://worker.example.test",
+        HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
+      },
+    });
+
+    expect(fetchCalls.filter((entry) =>
+      entry.endsWith("/internal/deploy/container-smoke")
+    )).toHaveLength(2);
+    expect(logs).toContain(
+      "Runner container smoke attempt 1/2 did not observe the expected runner bundle; retrying in 0ms.",
+    );
+  });
+
   it("fails when the authenticated hosted status check returns a non-ok response", async () => {
     const fetchImpl = async (url: RequestInfo | URL, init?: RequestInit) => {
       if (String(url).endsWith("/")) {
