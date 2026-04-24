@@ -55,18 +55,19 @@ describe("@murphai/health-commons runtime catalog reader", () => {
   it("lists compact protocol variants and source artifacts deterministically", () => {
     const reader = getGeneratedHealthCommonsCatalogReader();
 
-    const protocols = reader.listProtocolVariants({ limit: 3 });
+    const protocols = reader.listProtocolVariants({ limit: 4 });
     expect(protocols.map((protocol) => protocol.key)).toEqual([
       "protocol_variant:cold-water-immersion/cold-plunge",
+      "protocol_variant:creatine-supplementation/creatine-monohydrate",
       "protocol_variant:dry-sauna/bryan-johnson-blueprint",
       "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
     ]);
     expect(Object.keys(protocols[0] ?? {})).not.toContain("body");
-    expect(protocols[2]?.protocol).toMatchObject({
+    expect(protocols[3]?.protocol).toMatchObject({
       doseSignature: expect.stringContaining("3x/week"),
       runSpecRevisionId: expect.stringMatching(/^sha256:/u),
     });
-    expect(protocols[2]?.routeIds).toContain("finnish-sauna");
+    expect(protocols[3]?.routeIds).toContain("finnish-sauna");
 
     const saunaSources = reader.listSourceArtifacts({
       categories: ["sauna"],
