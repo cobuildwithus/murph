@@ -15,7 +15,6 @@ import {
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
-  resolveAssistantConversationAutoReplyEligibility,
   resolveAssistantConversationPolicy,
   shouldExposeSensitiveHealthContext,
 } from '../src/assistant/conversation-policy.ts'
@@ -36,9 +35,7 @@ import {
 } from '../src/assistant/memory/turn-context.ts'
 import {
   ASSISTANT_OPERATOR_AUTHORITY_VALUES,
-  isAcceptedInboundMessageOperatorAuthority,
   isAssistantOperatorAuthority,
-  resolveAcceptedInboundMessageOperatorAuthority,
   resolveAssistantOperatorAuthority,
   resolveTrustedLocalAssistantOperatorAuthority,
 } from '../src/assistant/operator-authority.ts'
@@ -118,13 +115,13 @@ afterEach(async () => {
 })
 
 describe('assistant product small seams', () => {
-  it('resolves conversation audiences, directness, sensitivity, and auto-reply eligibility', () => {
+  it('resolves conversation audiences, directness, and sensitivity', () => {
     const explicitOverride = resolveAssistantConversationPolicy({
       message: {
         deliverResponse: true,
         deliveryReplyToMessageId: 'reply-1',
         deliveryTarget: 'actor-1',
-        operatorAuthority: 'accepted-inbound-message',
+        operatorAuthority: 'direct-operator',
         threadId: null,
         threadIsDirect: null,
       },
@@ -152,17 +149,14 @@ describe('assistant product small seams', () => {
       threadIsDirect: true,
     })
     expect(explicitOverride.allowSensitiveHealthContext).toBe(true)
-    expect(explicitOverride.operatorAuthority).toBe('accepted-inbound-message')
-    expect(
-      resolveAssistantConversationAutoReplyEligibility(explicitOverride),
-    ).toBe(true)
+    expect(explicitOverride.operatorAuthority).toBe('direct-operator')
 
     const publicAudience = resolveAssistantConversationPolicy({
       message: {
         deliverResponse: true,
         deliveryReplyToMessageId: null,
         deliveryTarget: 'group-thread',
-        operatorAuthority: 'accepted-inbound-message',
+        operatorAuthority: 'direct-operator',
         threadId: 'group-thread',
         threadIsDirect: false,
       },
@@ -180,27 +174,6 @@ describe('assistant product small seams', () => {
     })
 
     expect(publicAudience.allowSensitiveHealthContext).toBe(false)
-    expect(
-      resolveAssistantConversationAutoReplyEligibility(publicAudience),
-    ).toBe(false)
-
-    expect(
-      resolveAssistantConversationAutoReplyEligibility({
-        audience: {
-          actorId: null,
-          bindingDelivery: null,
-          channel: null,
-          deliveryPolicy: 'not-requested',
-          effectiveThreadIsDirect: null,
-          explicitTarget: null,
-          identityId: null,
-          replyToMessageId: null,
-          threadId: null,
-          threadIsDirect: null,
-        },
-        operatorAuthority: 'direct-operator',
-      }),
-    ).toBe(true)
 
     expect(
       shouldExposeSensitiveHealthContext({
@@ -222,7 +195,7 @@ describe('assistant product small seams', () => {
         deliverResponse: true,
         deliveryReplyToMessageId: null,
         deliveryTarget: null,
-        operatorAuthority: 'accepted-inbound-message',
+        operatorAuthority: 'direct-operator',
         threadId: null,
         threadIsDirect: null,
       },
@@ -243,9 +216,6 @@ describe('assistant product small seams', () => {
     })
     expect(bindingTargetOnly.audience.deliveryPolicy).toBe('binding-target-only')
     expect(bindingTargetOnly.audience.effectiveThreadIsDirect).toBe(true)
-    expect(
-      resolveAssistantConversationAutoReplyEligibility(bindingTargetOnly),
-    ).toBe(true)
 
     const threadTargetAudience = resolveAssistantConversationPolicy({
       message: {
@@ -253,7 +223,7 @@ describe('assistant product small seams', () => {
         deliverResponse: true,
         deliveryReplyToMessageId: null,
         deliveryTarget: null,
-        operatorAuthority: 'accepted-inbound-message',
+        operatorAuthority: 'direct-operator',
         threadId: null,
         threadIsDirect: null,
       },
@@ -286,7 +256,7 @@ describe('assistant product small seams', () => {
         deliverResponse: true,
         deliveryReplyToMessageId: null,
         deliveryTarget: null,
-        operatorAuthority: 'accepted-inbound-message',
+        operatorAuthority: 'direct-operator',
         threadId: null,
         threadIsDirect: null,
       },
@@ -482,25 +452,18 @@ describe('assistant product small seams', () => {
   it('normalizes assistant operator authority values', () => {
     expect(ASSISTANT_OPERATOR_AUTHORITY_VALUES).toEqual([
       'direct-operator',
-      'accepted-inbound-message',
     ])
     expect(isAssistantOperatorAuthority('direct-operator')).toBe(true)
     expect(isAssistantOperatorAuthority('user')).toBe(false)
     expect(resolveAssistantOperatorAuthority('not-valid')).toBe(
-      'accepted-inbound-message',
+      'direct-operator',
     )
     expect(resolveAssistantOperatorAuthority(undefined)).toBe(
-      'accepted-inbound-message',
+      'direct-operator',
     )
     expect(resolveTrustedLocalAssistantOperatorAuthority('not-valid')).toBe(
       'direct-operator',
     )
-    expect(resolveAcceptedInboundMessageOperatorAuthority()).toBe(
-      'accepted-inbound-message',
-    )
-    expect(
-      isAcceptedInboundMessageOperatorAuthority('accepted-inbound-message'),
-    ).toBe(true)
   })
 
   it('extracts failed auto-reply prompts and persists deduplicated failure entries', async () => {

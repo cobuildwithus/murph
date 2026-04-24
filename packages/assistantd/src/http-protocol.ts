@@ -40,7 +40,6 @@ const assistantConversationDirectnessValues = new Set([
 ])
 const assistantOperatorAuthorityValues = new Set([
   'direct-operator',
-  'accepted-inbound-message',
 ])
 const assistantChatProviderValues = ['codex-cli', 'openai-compatible'] as const
 const assistantChatProviderValueSet = new Set(assistantChatProviderValues)

@@ -4,7 +4,6 @@ export type {
   AssistantConversationPolicy,
 } from '@murphai/assistant-engine/assistant-runtime'
 export {
-  resolveAssistantConversationAutoReplyEligibility,
   resolveAssistantConversationAudience,
   resolveAssistantConversationPolicy,
   shouldExposeSensitiveHealthContext,

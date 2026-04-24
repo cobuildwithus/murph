@@ -79,7 +79,6 @@ const replyMocks = vi.hoisted(() => ({
   listAssistantTurnReceipts: vi.fn(),
   normalizeNullableString: vi.fn(),
   prepareAssistantAutoReplyInput: vi.fn(),
-  resolveAcceptedInboundMessageOperatorAuthority: vi.fn(),
   resolveAssistantSession: vi.fn(),
   sendAssistantMessage: vi.fn(),
   writeAssistantAutoReplyGroupOutcomeArtifact: vi.fn(),
@@ -214,11 +213,6 @@ vi.mock('../src/assistant/conversation-ref.ts', async (importOriginal) => {
     conversationRefFromCapture: replyMocks.conversationRefFromCapture,
   }
 })
-
-vi.mock('../src/assistant/operator-authority.ts', () => ({
-  resolveAcceptedInboundMessageOperatorAuthority:
-    replyMocks.resolveAcceptedInboundMessageOperatorAuthority,
-}))
 
 vi.mock('../src/assistant/provider-turn-recovery.ts', () => ({
   isAssistantProviderConnectionLostError:
@@ -781,9 +775,6 @@ beforeEach(() => {
     prompt: 'reply prompt',
     userMessageContent: null,
   })
-  replyMocks.resolveAcceptedInboundMessageOperatorAuthority
-    .mockReset()
-    .mockReturnValue('accepted-inbound-message')
   replyMocks.resolveAssistantSession.mockReset().mockRejectedValue(
     Object.assign(new Error('not found'), {
       code: 'ASSISTANT_SESSION_NOT_FOUND',
@@ -2545,7 +2536,7 @@ describe('assistant auto-reply runtime', () => {
     expect(replyMocks.sendAssistantMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         deliveryReplyToMessageId: '123',
-        operatorAuthority: 'accepted-inbound-message',
+        operatorAuthority: 'direct-operator',
         receiptMetadata: {
           autoReplyCaptureId: 'capture-1',
           autoReplyCaptureIds: 'capture-1',

@@ -5,7 +5,6 @@ import type {
 import type { AssistantMessageInput } from './service-contracts.js'
 import { threadIsDirectFromConversationDirectness } from './conversation-ref.js'
 import {
-  isAcceptedInboundMessageOperatorAuthority,
   resolveAssistantOperatorAuthority,
   type AssistantOperatorAuthority,
 } from './operator-authority.js'
@@ -136,29 +135,6 @@ export function resolveAssistantConversationAudience(input: {
     threadId,
     threadIsDirect,
   }
-}
-
-export function resolveAssistantConversationAutoReplyEligibility(input: {
-  audience: AssistantConversationAudience
-  operatorAuthority: AssistantOperatorAuthority
-}): boolean {
-  if (!isAcceptedInboundMessageOperatorAuthority(input.operatorAuthority)) {
-    return true
-  }
-
-  if (!input.audience.channel || !input.audience.identityId) {
-    return false
-  }
-
-  if (input.audience.deliveryPolicy === 'not-requested') {
-    return false
-  }
-
-  if (input.audience.threadIsDirect === false && !input.audience.bindingDelivery) {
-    return false
-  }
-
-  return true
 }
 
 export function shouldExposeSensitiveHealthContext(
