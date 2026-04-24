@@ -4381,6 +4381,12 @@
       "schemaVersion": "murph.commons.artifact-manifest.v1"
     },
     {
+      "artifacts": [],
+      "description": "Rights-safe manifest stub for IT band syndrome rehabilitation research artifacts. Keep copyrighted PDFs and binaries out of Git; stage reviewed files under research-artifacts/iliotibial-band-syndrome-rehabilitation/ only after rights review.",
+      "manifestKey": "source_artifact:iliotibial-band-syndrome-rehabilitation/research-artifacts",
+      "schemaVersion": "murph.commons.artifact-manifest.v1"
+    },
+    {
       "artifacts": [
         {
           "accessNotes": "Open-access PDF candidate from the extraction batch, but redistribution/license terms were not verified. Keep metadata/source page only until rights review approves storage.",
