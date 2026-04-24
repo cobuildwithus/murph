@@ -516,25 +516,18 @@ attribution:
   ownerType: "murph"
   note: "Drafted from the 2026-04-23 Hyperbaric Oxygen Therapy research run; source keys are restricted to the canonical ledger, extraction drafts, and section synthesis artifacts in the uploaded snapshot."
 protocol:
-  doseSignature: "Clinician-prescribed systemic chamber HBOT · log ATA/oxygen/session/air breaks · 60–90 min common outpatient sessions · course is indication-specific"
-  target: "Use the treating clinician’s prescription for pressure, oxygen fraction, chamber type, session length, air breaks, and course length; do not self-set dose."
-  frequency:
-    sessionsPerWeek: 5
-  durationMinutes:
-    min: 60
-    max: 90
-  interventionSessionsMinimum: 1
-  interventionSessionsTarget: 20
+  doseSignature: "Clinician-prescribed systemic chamber HBOT · no Murph default pressure, frequency, duration, or session target · log exact prescribed pressure/oxygen/session/air-break/course details"
+  target: "Use only the treating clinician’s prescription for pressure, oxygen fraction, chamber type, session length, air breaks, frequency, and course length; keep planning-only if any dose field is unknown."
   steps:
     - "Start only from an active clinician-prescribed HBOT plan at a facility using appropriate chamber/device safety procedures; do not use Murph to initiate unsupervised HBOT."
     - "Before the first logged session, confirm the indication, chamber type, pressure units, oxygen delivery method, session duration, air-break schedule, planned number of sessions, and who is medically supervising the course."
     - "Complete the facility safety screen and disclose pneumothorax history, lung disease, ear/sinus equalization problems, recent respiratory infection, seizure history, diabetes or hypoglycemia risk, pregnancy context, intraocular gas, implanted devices, medication or chemotherapy exposures, and claustrophobia/anxiety."
     - "For each session, follow facility rules on clothing, electronics, personal items, grounding, device compatibility, monitoring, equalization, and staff instructions."
-    - "During descent and treatment, tell staff immediately about ear or sinus pain, inability to equalize, chest pain, shortness of breath, neurologic symptoms, visual symptoms, severe anxiety, glucose symptoms, or any unusual sensation."
+    - "During descent and treatment, tell staff immediately about ear or sinus pain, inability to equalize, dizziness or faintness, cough or new pulmonary symptoms, chest pain, shortness of breath, neurologic symptoms, visual symptoms, severe anxiety, glucose symptoms, unsafe blood-pressure readings if relevant, device alarms, or any unusual sensation."
     - "After each session, log pressure/ATA, minutes completed, air breaks, symptoms, adverse events, glucose/BP checks if relevant, vision or ear changes, and whether the session was paused, shortened, or stopped."
     - "Keep mild/soft-chamber sessions, topical oxygen devices, normobaric oxygen, EWOT, athletic oxygen exposure, and named wellness programs out of this protocol log; track those as separate variants."
   tips:
-    - "Replace the default schedule with the clinician’s actual order; the 5x/week and 20-session fields are tracking placeholders, not a universal dose recommendation."
+    - "Do not create an executable schedule until the clinician’s actual pressure, oxygen method, chamber type, session duration, air-break plan, frequency, and total planned sessions are known."
     - "Use the same pressure units the source/facility uses—ATA, bar, kPa, or atmospheres—and avoid silently converting unless the facility confirms the conversion."
     - "If diabetes or blood-pressure risk is present, ask the care team what pre/post checks and thresholds they want recorded."
     - "Treat missed, paused, or shortened sessions as dose-fidelity data rather than failures."
@@ -563,10 +556,10 @@ protocol:
     - "sleep efficiency recovery context"
     - "resting heart rate and HRV context"
   stopConditions:
-    - "Do not start an unsupervised course without a clinician prescription and facility safety controls."
-    - "Stop or defer immediately if the facility or clinician identifies untreated pneumothorax, unsafe device/implant compatibility, prohibited materials, or another absolute safety issue."
-    - "Tell staff and stop the session as directed for severe ear or sinus pain, inability to equalize, chest pain, shortness of breath, neurologic symptoms, seizure symptoms, confusion, severe headache, vision changes, severe anxiety, hypoglycemia symptoms, or any staff safety concern."
-    - "Pause the Murph experiment and seek clinician guidance if symptoms persist after a session, adverse events recur, sessions are repeatedly shortened, or the care plan changes."
+    - "Do not start an unsupervised course without a current clinician prescription and medically supervised facility safety controls."
+    - "Stop or defer immediately if the facility or clinician identifies untreated pneumothorax, unsafe device/implant compatibility, intraocular gas, prohibited materials, or another absolute safety issue."
+    - "Tell staff immediately and stop or defer as directed for severe ear or sinus pain, inability to equalize, dizziness or faintness, cough or new pulmonary symptoms, chest pain, shortness of breath, neurologic symptoms, seizure-like symptoms, confusion, severe headache, vision changes, severe anxiety or panic, hypoglycemia symptoms, unsafe glucose or blood-pressure reading if relevant, device alarm, prohibited-material concern, or any staff safety concern."
+    - "Pause the Murph experiment and seek clinician/facility guidance if symptoms persist after a session, adverse events recur, sessions are repeatedly shortened, BP/glucose readings are unsafe, or the care plan changes."
 testPlans:
   -
     planId: "clinician-supervised-hbot-tolerance-49d"
@@ -604,28 +597,28 @@ experimentOnboarding:
         reason: "This protocol is a tracking wrapper for prescribed care, not an unsupervised start path."
         freshnessDays: 30
         readHints:
-          - "search query "hyperbaric oxygen HBOT prescription treatment plan indication chamber pressure sessions" --format json"
+          - 'search query "hyperbaric oxygen HBOT prescription treatment plan indication chamber pressure sessions" --format json'
       -
         id: "pulmonary_ent_and_neurologic_risk"
         label: "Pulmonary, ENT, and seizure-threshold context"
         reason: "Pneumothorax, lung disease, ear/sinus equalization issues, respiratory infection, and seizure risk materially change HBOT safety."
         freshnessDays: 180
         readHints:
-          - "search query "pneumothorax COPD asthma ear sinus seizure epilepsy respiratory infection" --format json"
+          - 'search query "pneumothorax COPD asthma ear sinus seizure epilepsy respiratory infection" --format json'
       -
         id: "device_medication_and_chemotherapy_context"
         label: "Implants, devices, ocular gas, and medication exposures"
         reason: "Device compatibility, intraocular gas, and selected medication or chemotherapy exposures are safety-screen items."
         freshnessDays: 180
         readHints:
-          - "search query "implanted device pacemaker defibrillator intraocular gas bleomycin doxorubicin cisplatin disulfiram mafenide" --format json"
+          - 'search query "implanted device pacemaker defibrillator intraocular gas bleomycin doxorubicin cisplatin disulfiram mafenide" --format json'
       -
         id: "diabetes_blood_pressure_and_pregnancy_context"
         label: "Metabolic, cardiovascular, and pregnancy context"
         reason: "Hypoglycemia risk, acute blood-pressure changes, heart-failure context, and pregnancy context can alter monitoring and risk."
         freshnessDays: 90
         readHints:
-          - "search query "diabetes hypoglycemia blood pressure heart failure pregnancy" --format json"
+          - 'search query "diabetes hypoglycemia blood pressure heart failure pregnancy" --format json'
     notes:
       - "Review vault context first, but still ask the compact high-caution screen because absence of stored evidence is not clearance."
   safetyScreen:
@@ -637,26 +630,31 @@ experimentOnboarding:
         id: "unsupervised_start"
         prompt: "Are you considering HBOT without a current clinician prescription or without a medically supervised chamber facility?"
         ifPositive: "do_not_start_unsupervised"
-        why: "The protocol is restricted to clinician-supervised systemic chamber HBOT tracking."
+        why: "Murph must not start, schedule, or track HBOT without both a current clinician prescription and a medically supervised chamber facility."
+      -
+        id: "urgent_or_disease_treatment_request"
+        prompt: "Is this for current carbon-monoxide exposure/poisoning, decompression illness, gas embolism, crush or traumatic ischemia, a non-healing wound, radiation injury, sudden hearing loss, or a neurologic symptom/diagnosis?"
+        ifPositive: "do_not_start_unsupervised"
+        why: "Murph must not recommend self-treatment for acute, wound, radiation, ENT, or neurologic HBOT indications. Only create a tracking run after an active clinician/facility plan exists, and keep disease-specific outcomes in a separate clinical variant."
       -
         id: "absolute_or_major_chamber_safety_issue"
-        prompt: "Any untreated pneumothorax, unresolved chamber/device compatibility concern, intraocular gas, or facility instruction that says HBOT should not proceed?"
+        prompt: "Any untreated pneumothorax, unresolved chamber/device compatibility concern, intraocular gas, prohibited-material concern, or facility instruction that says HBOT should not proceed?"
         ifPositive: "do_not_start_unsupervised"
-        why: "These can create immediate chamber-safety risk."
+        why: "These can create immediate chamber-safety risk and must be cleared by the treating clinician/facility before Murph continues."
       -
         id: "relative_contraindication_or_monitoring_issue"
-        prompt: "Any lung disease, ear/sinus equalization problem, recent respiratory infection, fever, seizure history, diabetes/hypoglycemia risk, pregnancy context, selected chemotherapy/medication exposure, implanted device, uncontrolled blood pressure, heart-failure concern, or severe claustrophobia/anxiety?"
+        prompt: "Any lung disease, blebs/bullae, COPD/asthma, thoracic surgery history, ear/sinus equalization problem, recent respiratory infection, fever, seizure history or seizure-threshold modifier, CNS disease, hypercapnia/CO2-retention risk, opioid or sedative use, alcohol withdrawal/dependence, diabetes/hypoglycemia risk, pregnancy context, intraocular gas or recent eye surgery, selected chemotherapy/medication exposure, implanted or external device, uncontrolled blood pressure, heart-failure concern, severe claustrophobia/anxiety, or recent nicotine/high-caffeine/other vasoconstrictor exposure?"
         ifPositive: "clinician_guidance_before_unsupervised_start"
-        why: "These require individualized clinician and facility review before logging or continuing sessions."
+        why: "These require individualized clinician and facility review before creating or continuing an HBOT tracking run."
       -
         id: "active_or_recent_adverse_event"
-        prompt: "Any severe ear/sinus pain, neurologic symptom, chest symptom, shortness of breath, vision change, severe anxiety, glucose symptom, or prior HBOT session stopped for safety?"
+        prompt: "Any severe ear/sinus pain, neurologic symptom, chest symptom, shortness of breath, vision change, severe anxiety, glucose symptom, unsafe blood-pressure reading if relevant, device alarm, or prior HBOT session stopped for safety?"
         ifPositive: "clinician_guidance_before_unsupervised_start"
         why: "Active or recurring adverse events should be handled by the treating team before Murph continues the tracking plan."
     stopIf:
       inheritFromProtocolSafety: true
     notes:
-      - "A positive or uncertain screen is not a diagnosis; it means Murph should not set up or continue HBOT tracking without clinician/facility guidance."
+      - "A positive or uncertain screen is not a diagnosis; it means Murph must not create or continue HBOT tracking until the treating clinician/facility has reviewed the issue and cleared the plan."
   setupSlots:
     -
       id: "clinical_indication"
@@ -714,11 +712,7 @@ experimentOnboarding:
   planDefaults:
     testPlanId: "clinician-supervised-hbot-tolerance-49d"
     baselineDays: 7
-    interventionDays: 42
-    sessionsPerWeek: 5
-    targetSessions: 20
-    minimumUsefulSessions: 1
-    firstSessionGuidance: "Do not begin unless the clinician/facility plan is active; first-session logging should focus on tolerability, equalization, and whether the session was completed as prescribed."
+    firstSessionGuidance: "Do not create the run until the clinician/facility pressure, oxygen method, chamber type, session duration, air-break plan, frequency, total planned sessions, and supervision status are entered."
   logging:
     sessionFields:
       - "clinical_indication"
@@ -741,6 +735,8 @@ experimentOnboarding:
       - "medication_change"
       - "glucose_instability"
       - "blood_pressure_instability"
+      - "recent_nicotine_caffeine_or_vasoconstrictor_exposure"
+      - "opioid_sedative_alcohol_withdrawal_or_other_seizure_threshold_modifier"
       - "sleep_disruption"
       - "other_major_intervention"
     notes:
@@ -1497,13 +1493,17 @@ safety:
     - "selected_chemotherapy_or_medication_exposures"
     - "uncontrolled_blood_pressure_or_heart_failure_context"
     - "severe_claustrophobia_or_confinement_anxiety"
+    - "recent_nicotine_high_caffeine_or_other_vasoconstrictor_exposure_needing_facility_review"
+    - "cns_disease_hypercapnia_opioid_or_sedative_use_alcohol_withdrawal_or_other_seizure_threshold_modifier"
   stopIf:
     - "facility_or_clinician_says_not_to_proceed"
     - "severe_ear_or_sinus_pain_or_inability_to_equalize"
     - "chest_pain_shortness_of_breath_or_pulmonary_symptoms"
+    - "dizziness_faintness_cough_or_new_pulmonary_symptoms"
     - "neurologic_symptoms_seizure_confusion_or_severe_headache"
     - "vision_change_or_severe_eye_symptom"
     - "hypoglycemia_symptoms_or_unsafe_glucose_reading_if_relevant"
+    - "unsafe_blood_pressure_reading_if_relevant"
     - "severe_anxiety_panic_or_confinement_intolerance"
     - "device_alarm_or_staff_safety_concern"
     - "session_paused_shortened_or_stopped_for_safety_without_clinician_followup"
