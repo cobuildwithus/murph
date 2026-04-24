@@ -1,0 +1,67 @@
+---
+schemaVersion: "murph.commons.page.v1"
+entityType: "source_artifact"
+key: "source_artifact:uhms-hbo-indications-2020-05-04"
+slug: "sources/hyperbaric-oxygen-therapy/uhms-hbo-indications-2020-05-04"
+title: "Hyperbaric Oxygen Therapy Indications"
+summary: "Core professional reference for what counts as clinical HBOT and which indications the field recognizes. Discovered in shard(s): adjacent-modalities-and-external-claims; rebucketed to boundary-guidelines for extraction."
+status: "draft"
+quality: "usable"
+aliases:
+  - "uhms-hbo-indications-2020-05-04"
+categories:
+  - "hyperbaric-oxygen-therapy"
+  - "identity-boundary-supervision-and-variant-separation"
+relations:
+  -
+    type: "related_protocol"
+    target: "protocol_variant:hyperbaric-oxygen-therapy/hyperbaric-oxygen-therapy"
+  -
+    type: "parent_family"
+    target: "experiment_family:hyperbaric-oxygen-therapy"
+source:
+  kind: "guideline"
+  title: "Hyperbaric Oxygen Therapy Indications"
+  url: "https://www.uhms.org/images/UHMS-Reference-Material.pdf"
+researchEvidence:
+  designKind: "guideline"
+  designLabel: "guideline"
+  aggregateRole: "context"
+  notes:
+    - "Evidence bucket: Identity, boundary, supervision, and variant separation"
+    - "Ledger directness: direct_protocol"
+    - "Ledger claim use: context-only"
+    - "Ledger priority: backbone"
+protocolEvidence:
+  -
+    protocolKey: "protocol_variant:hyperbaric-oxygen-therapy/hyperbaric-oxygen-therapy"
+    groupId: "identity_boundary_supervision_and_variant_separation"
+    stance: "context_only"
+    scope: "direct_protocol"
+    result: "not_efficacy_evidence"
+    headline: "Core professional reference for what counts as clinical HBOT and which indications the field recognizes. Discovered in shard(s): adjacent-modalities-and-external-claims; rebucketed to boundary-guidelines for extraction."
+    implication: "Use this source according to its ledger role: context-only / direct_protocol."
+    caveat: "This source page is a rights-safe metadata summary generated from the canonical ledger; do not infer sample size, effect size, adverse-event rate, DOI, PMID, or population details beyond the recorded metadata."
+    displayPriority: 10
+evidenceBucket: "Identity, boundary, supervision, and variant separation"
+claimUse: "context-only"
+directness: "direct_protocol"
+murphV1Priority: "backbone"
+batchId: "batch-001"
+artifactRightsStatusGuess: "permission_required"
+---
+
+## Quick read
+
+- **Ledger role:** context-only / direct_protocol.
+- **Evidence bucket:** Identity, boundary, supervision, and variant separation.
+- **Study design label:** guideline.
+- **Priority:** backbone.
+
+## Murph use
+
+Core professional reference for what counts as clinical HBOT and which indications the field recognizes. Discovered in shard(s): adjacent-modalities-and-external-claims; rebucketed to boundary-guidelines for extraction.
+
+## Rights-safe handling
+
+This page is metadata and synthesis only. It does not include copyrighted full text. Store or redistribute PDFs only after separate rights, license, hash, and storage review.
