@@ -197,6 +197,7 @@ export interface HostedMaintenanceMetrics {
   deviceSyncSkipped: boolean;
   nextWakeAt: string | null;
   parserProcessed: number;
+  redactedLogEntries?: HostedExecutionRedactedLogEntry[] | null;
 }
 
 export type HostedWorkspaceArtifactMaterializer = (

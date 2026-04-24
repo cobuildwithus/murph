@@ -238,6 +238,7 @@ describe("runHostedAssistantAutomation", () => {
       ],
       nextWakeAt: null,
       progressed: true,
+      redactedLogEntries: expect.any(Array),
     });
 
     expect(hostedTurnInputRefresh).toHaveBeenCalledWith({
@@ -502,6 +503,29 @@ describe("runHostedAssistantAutomation", () => {
       adoptedEventResults: [],
       nextWakeAt: "2026-04-08T01:15:00.000Z",
       progressed: true,
+      redactedLogEntries: [
+        expect.objectContaining({
+          message: "Hosted assistant automation pass starting.",
+        }),
+        expect.objectContaining({
+          message: "Hosted assistant automation event: capture.replied.",
+          redacted: expect.objectContaining({
+            captureIdPresent: true,
+            details: "reply sent",
+            type: "capture.replied",
+          }),
+        }),
+        expect.objectContaining({
+          message: "Hosted assistant automation pass finished.",
+          redacted: expect.objectContaining({
+            automationEventCounts: {
+              "capture.replied": 1,
+            },
+            progressed: true,
+            requestId: "req_123",
+          }),
+        }),
+      ],
     });
 
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
@@ -517,7 +541,7 @@ describe("runHostedAssistantAutomation", () => {
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         details: expect.objectContaining({
-          captureId: "capture_123",
+          captureIdPresent: true,
           details: "reply sent",
           type: "capture.replied",
         }),
@@ -555,6 +579,14 @@ describe("runHostedAssistantAutomation", () => {
       adoptedEventResults: [],
       nextWakeAt: null,
       progressed: false,
+      redactedLogEntries: [
+        expect.objectContaining({
+          message: "Hosted assistant automation pass starting.",
+        }),
+        expect.objectContaining({
+          message: "Hosted assistant automation skipped because the inbox runtime is not initialized yet.",
+        }),
+      ],
     });
   });
 
@@ -853,11 +885,19 @@ describe("runHostedAssistantRuntimeTimerLane", () => {
       vaultRoot: "/tmp/vault-root",
     });
 
-    assert.deepEqual(result, {
+    expect(result).toMatchObject({
       deviceSyncProcessed: 0,
       deviceSyncSkipped: true,
       nextWakeAt: "2026-04-08T01:00:00.000Z",
       parserProcessed: 0,
+      redactedLogEntries: [
+        expect.objectContaining({
+          message: "Hosted assistant automation pass starting.",
+        }),
+        expect.objectContaining({
+          message: "Hosted assistant automation pass finished.",
+        }),
+      ],
     });
     expect(mocks.runAssistantAutomationPass).toHaveBeenCalledWith({
       deliveryDispatchMode: "queue-only",
@@ -907,11 +947,19 @@ describe("runHostedAssistantRuntimeTimerLane", () => {
         vaultRoot: "/tmp/vault-root",
       });
 
-      assert.deepEqual(result, {
+      expect(result).toMatchObject({
         deviceSyncProcessed: 0,
         deviceSyncSkipped: true,
         nextWakeAt: "2026-04-08T00:00:00.000Z",
         parserProcessed: 0,
+        redactedLogEntries: [
+          expect.objectContaining({
+            message: "Hosted assistant automation pass starting.",
+          }),
+          expect.objectContaining({
+            message: "Hosted assistant automation pass finished.",
+          }),
+        ],
       });
       expect(mocks.runAssistantAutomationPass).toHaveBeenCalledTimes(1);
     } finally {
@@ -976,11 +1024,17 @@ describe("runHostedAssistantRuntimeTimerLane", () => {
       vaultRoot: "/tmp/vault-root",
     });
 
-    assert.deepEqual(result, {
+    expect(result).toMatchObject({
       deviceSyncProcessed: 0,
       deviceSyncSkipped: true,
       nextWakeAt: null,
       parserProcessed: 0,
+      redactedLogEntries: [
+        expect.objectContaining({
+          message:
+            "Hosted assistant automation skipped because no explicit hosted assistant profile is configured.",
+        }),
+      ],
     });
     expect(mocks.runAssistantAutomationPass).not.toHaveBeenCalled();
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(

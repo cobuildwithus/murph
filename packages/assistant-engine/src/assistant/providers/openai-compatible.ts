@@ -263,17 +263,17 @@ export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
       providerConfig,
     })
 
+    const usesResponsesApi =
+      (languageModelSpec.executionDriver ?? 'openai-compatible') === 'responses'
+    const providerOptions = resolveOpenAiCompatibleProviderOptions({
+      providerConfig,
+      resumeProviderSessionId: input.resumeProviderSessionId,
+      usageAttribution,
+      usesResponsesApi,
+    })
+
     try {
       const messages = buildAssistantProviderMessages(input)
-      const usesResponsesApi =
-        (languageModelSpec.executionDriver ?? 'openai-compatible') === 'responses'
-      const providerOptions = resolveOpenAiCompatibleProviderOptions({
-        providerConfig,
-        resumeProviderSessionId: input.resumeProviderSessionId,
-        usageAttribution,
-        usesResponsesApi,
-      })
-
       const result = await generateText({
         abortSignal: input.abortSignal,
         maxRetries: tools ? 0 : OPENAI_COMPATIBLE_PROVIDER_MAX_RETRIES,
@@ -332,8 +332,12 @@ export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
         },
       }
     } catch (error) {
+      const annotatedError = annotateOpenAiCompatibleProviderError(error, {
+        languageModelSpec,
+        providerConfig,
+      })
       return {
-        error,
+        error: annotatedError,
         metadata: {
           activityLabels: [],
           executedToolCount,
@@ -350,6 +354,312 @@ export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
   resolveStaticModels() {
     return []
   },
+}
+
+function annotateOpenAiCompatibleProviderError(
+  error: unknown,
+  input: {
+    languageModelSpec: AssistantModelSpec
+    providerConfig: AssistantProviderConfig
+  },
+): unknown {
+  const details = buildOpenAiCompatibleProviderFailureDetails({
+    error,
+    languageModelSpec: input.languageModelSpec,
+    providerConfig: input.providerConfig,
+  })
+
+  if (error instanceof Error) {
+    const annotated = error as Error & { details?: Record<string, unknown> }
+    annotated.details = {
+      ...readOpenAiCompatibleObjectProperty(annotated.details),
+      ...details,
+    }
+    return annotated
+  }
+
+  return Object.assign(new Error('OpenAI-compatible provider execution failed.'), {
+    cause: error,
+    details,
+  })
+}
+
+function buildOpenAiCompatibleProviderFailureDetails(input: {
+  error: unknown
+  languageModelSpec: AssistantModelSpec
+  providerConfig: AssistantProviderConfig
+}): JsonObject {
+  const providerTarget: OpenAiCompatibleTargetIdentity = isAssistantOpenAICompatibleTargetConfig(input.providerConfig)
+    ? input.providerConfig.target
+    : {}
+  const baseUrl = readOpenAiCompatibleUrlDetails(input.languageModelSpec.baseUrl)
+  const requestUrl = readOpenAiCompatibleUrlDetails(
+    readOpenAiCompatibleNestedStringProperty(input.error, ['url']),
+  )
+  const gatewayOnlyProviders = normalizeAssistantGatewayOnlyProviders(
+    providerTarget.gatewayOnlyProviders,
+  )
+  const diagnostics = readOpenAiCompatibleErrorDiagnostics(input.error)
+
+  return pruneOpenAiCompatibleJsonObject({
+    assistantProviderAdapter: 'openai-compatible',
+    assistantProviderBaseUrlConfigured:
+      baseUrl.origin !== null || baseUrl.path !== null,
+    assistantProviderBaseUrlOrigin: baseUrl.origin,
+    assistantProviderBaseUrlPath: baseUrl.path,
+    assistantProviderErrorBodyCode: diagnostics.bodyCode,
+    assistantProviderErrorBodyMessage: diagnostics.bodyMessage,
+    assistantProviderErrorBodyPresent: diagnostics.bodyPresent,
+    assistantProviderErrorBodyType: diagnostics.bodyType,
+    assistantProviderErrorCode: diagnostics.code,
+    assistantProviderErrorMessage: diagnostics.message,
+    assistantProviderErrorRetryable: diagnostics.retryable,
+    assistantProviderErrorStatus: diagnostics.status,
+    assistantProviderErrorStatusText: diagnostics.statusText,
+    assistantProviderErrorType: diagnostics.type,
+    assistantProviderExecutionDriver:
+      input.languageModelSpec.executionDriver ?? 'openai-compatible',
+    assistantProviderGatewayOnlyProviderCount: gatewayOnlyProviders?.length ?? 0,
+    assistantProviderGatewayOnlyProviders:
+      gatewayOnlyProviders && gatewayOnlyProviders.length > 0
+        ? gatewayOnlyProviders.join(',')
+        : null,
+    assistantProviderGatewayTarget:
+      isOpenAiCompatibleVercelAiGatewayTarget(providerTarget),
+    assistantProviderModel: input.languageModelSpec.model,
+    assistantProviderName: providerTarget.providerName ?? input.languageModelSpec.providerName ?? null,
+    assistantProviderPresetId: providerTarget.presetId ?? null,
+    assistantProviderRequestUrlOrigin: requestUrl.origin,
+    assistantProviderRequestUrlPath: requestUrl.path,
+    assistantProviderZeroDataRetention:
+      input.providerConfig.policy.zeroDataRetention === true,
+  })
+}
+
+function readOpenAiCompatibleErrorDiagnostics(error: unknown): {
+  bodyCode: string | null
+  bodyMessage: string | null
+  bodyPresent: boolean
+  bodyType: string | null
+  code: string | null
+  message: string | null
+  retryable: boolean | null
+  status: number | null
+  statusText: string | null
+  type: string | null
+} {
+  const bodyPayload = readOpenAiCompatibleErrorBodyPayload(error)
+  const bodyError = readOpenAiCompatibleObjectProperty(bodyPayload?.error)
+  const bodySource = bodyError ?? bodyPayload
+
+  return {
+    bodyCode: readOpenAiCompatibleStringProperty(bodySource, 'code'),
+    bodyMessage: readOpenAiCompatibleStringProperty(bodySource, 'message'),
+    bodyPresent: bodyPayload !== null || readOpenAiCompatibleNestedStringProperty(error, [
+      'responseBody',
+      'body',
+    ]) !== null,
+    bodyType: readOpenAiCompatibleStringProperty(bodySource, 'type'),
+    code: readOpenAiCompatibleNestedStringProperty(error, ['code', 'errorCode']),
+    message: normalizeOpenAiCompatibleDiagnosticString(
+      error instanceof Error ? error.message : null,
+    ),
+    retryable: readOpenAiCompatibleNestedBooleanProperty(error, [
+      'isRetryable',
+      'retryable',
+    ]),
+    status: readOpenAiCompatibleNestedNumberProperty(error, [
+      'statusCode',
+      'status',
+      'responseStatus',
+    ]),
+    statusText: readOpenAiCompatibleNestedStringProperty(error, [
+      'statusText',
+      'responseStatusText',
+    ]),
+    type: readOpenAiCompatibleNestedStringProperty(error, ['type', 'errorType']),
+  }
+}
+
+function readOpenAiCompatibleErrorBodyPayload(
+  error: unknown,
+): Record<string, unknown> | null {
+  const data = readOpenAiCompatibleNestedObjectProperty(error, ['data'])
+  if (data) {
+    return data
+  }
+
+  const responseBody = readOpenAiCompatibleNestedStringProperty(error, [
+    'responseBody',
+    'body',
+  ])
+  if (!responseBody) {
+    return null
+  }
+
+  try {
+    const parsed: unknown = JSON.parse(responseBody)
+    return readOpenAiCompatibleObjectProperty(parsed)
+  } catch {
+    return null
+  }
+}
+
+function readOpenAiCompatibleUrlDetails(value: string | null | undefined): {
+  origin: string | null
+  path: string | null
+} {
+  const normalized = normalizeNullableString(value)
+  if (!normalized) {
+    return {
+      origin: null,
+      path: null,
+    }
+  }
+
+  try {
+    const url = new URL(normalized)
+    return {
+      origin: url.origin,
+      path: url.pathname,
+    }
+  } catch {
+    return {
+      origin: null,
+      path: null,
+    }
+  }
+}
+
+function readOpenAiCompatibleNestedStringProperty(
+  value: unknown,
+  keys: readonly string[],
+): string | null {
+  const found = readOpenAiCompatibleNestedProperty(value, keys)
+  return normalizeOpenAiCompatibleDiagnosticString(found)
+}
+
+function readOpenAiCompatibleNestedNumberProperty(
+  value: unknown,
+  keys: readonly string[],
+): number | null {
+  const found = readOpenAiCompatibleNestedProperty(value, keys)
+  return typeof found === 'number' && Number.isInteger(found) ? found : null
+}
+
+function readOpenAiCompatibleNestedBooleanProperty(
+  value: unknown,
+  keys: readonly string[],
+): boolean | null {
+  const found = readOpenAiCompatibleNestedProperty(value, keys)
+  return typeof found === 'boolean' ? found : null
+}
+
+function readOpenAiCompatibleNestedObjectProperty(
+  value: unknown,
+  keys: readonly string[],
+): Record<string, unknown> | null {
+  return readOpenAiCompatibleObjectProperty(
+    readOpenAiCompatibleNestedProperty(value, keys),
+  )
+}
+
+function readOpenAiCompatibleNestedProperty(
+  value: unknown,
+  keys: readonly string[],
+  state: {
+    depth: number
+    visited: Set<object>
+  } = {
+    depth: 0,
+    visited: new Set<object>(),
+  },
+): unknown {
+  const record = readOpenAiCompatibleObjectProperty(value)
+  if (!record || state.visited.has(record)) {
+    return undefined
+  }
+  state.visited.add(record)
+
+  for (const key of keys) {
+    const property = record[key]
+    if (property !== undefined && property !== null) {
+      return property
+    }
+  }
+
+  if (state.depth >= 3) {
+    return undefined
+  }
+
+  for (const key of ['cause', 'error', 'response', 'data', 'details', 'context']) {
+    const nested = readOpenAiCompatibleNestedProperty(record[key], keys, {
+      depth: state.depth + 1,
+      visited: state.visited,
+    })
+    if (nested !== undefined && nested !== null) {
+      return nested
+    }
+  }
+
+  return undefined
+}
+
+function readOpenAiCompatibleObjectProperty(
+  value: unknown,
+): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
+}
+
+function readOpenAiCompatibleStringProperty(
+  value: Record<string, unknown> | null,
+  key: string,
+): string | null {
+  return normalizeOpenAiCompatibleDiagnosticString(value?.[key])
+}
+
+function normalizeOpenAiCompatibleDiagnosticString(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  const normalized = value
+    .replace(/file:\/\/\/Users\/[^\s)"']+/gu, 'file://<REDACTED_PATH>')
+    .replace(/\/Users\/[^\s)"']+/gu, '<REDACTED_PATH>')
+    .replace(/\/home\/[^\s)"']+/gu, '<REDACTED_PATH>')
+    .replace(/\/root\/[^\s)"']+/gu, '<REDACTED_PATH>')
+    .replace(/\b[A-Za-z]:\\Users\\[^\s)"']+/gu, '<REDACTED_PATH>')
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+\b/giu, 'Bearer [redacted]')
+    .replace(/\+\d{8,15}\b/gu, '[redacted-phone]')
+    .replace(/\b([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})\b/gu, '[redacted-email]')
+    .replace(
+      /\b((?:[A-Z][A-Z0-9_]*_)?(?:token|secret|password|passcode|api[_-]?key|cookie|set-cookie))\b\s*[:=]\s*(?:"[^"]+"|'[^']+'|\S+)/giu,
+      '$1=[redacted]',
+    )
+    .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/gu, '[redacted-token]')
+    .replace(/[\r\n\t]+/gu, ' ')
+    .replace(/\s+/gu, ' ')
+    .trim()
+
+  if (!normalized) {
+    return null
+  }
+
+  return normalized.length <= 320
+    ? normalized
+    : `${normalized.slice(0, 317).trimEnd()}...`
+}
+
+function pruneOpenAiCompatibleJsonObject(
+  value: Record<string, JsonValue | undefined>,
+): JsonObject {
+  return Object.fromEntries(
+    Object.entries(value).filter((entry): entry is [string, JsonValue] =>
+      entry[1] !== undefined && entry[1] !== null,
+    ),
+  )
 }
 
 

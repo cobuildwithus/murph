@@ -20,6 +20,28 @@ export interface AssistantAutoReplyFailureSnapshot {
 }
 
 const SAFE_FAILURE_CONTEXT_KEYS = new Set([
+  'assistantProviderAdapter',
+  'assistantProviderBaseUrlConfigured',
+  'assistantProviderErrorBodyCode',
+  'assistantProviderErrorBodyMessage',
+  'assistantProviderErrorBodyPresent',
+  'assistantProviderErrorBodyType',
+  'assistantProviderErrorCode',
+  'assistantProviderErrorMessage',
+  'assistantProviderErrorRetryable',
+  'assistantProviderErrorStatus',
+  'assistantProviderErrorStatusText',
+  'assistantProviderErrorType',
+  'assistantProviderExecutionDriver',
+  'assistantProviderGatewayOnlyProviderCount',
+  'assistantProviderGatewayOnlyProviders',
+  'assistantProviderGatewayTarget',
+  'assistantProviderModel',
+  'assistantProviderName',
+  'assistantProviderPresetId',
+  'assistantProviderRequestUrlOrigin',
+  'assistantProviderRequestUrlPath',
+  'assistantProviderZeroDataRetention',
   'connectionLost',
   'errorCode',
   'interrupted',
@@ -142,7 +164,12 @@ function readFailureCode(error: unknown): string | null {
     return normalizeNullableString((error as { code: string }).code)
   }
 
-  return null
+  const details = readFailureRecord(error, 'details')
+  const context = readFailureRecord(error, 'context')
+  return readFailureString(details, 'assistantProviderErrorCode') ??
+    readFailureString(details, 'assistantProviderErrorBodyCode') ??
+    readFailureString(context, 'assistantProviderErrorCode') ??
+    readFailureString(context, 'assistantProviderErrorBodyCode')
 }
 
 function readFailureRetryable(error: unknown): boolean | null {
@@ -157,7 +184,24 @@ function readFailureRetryable(error: unknown): boolean | null {
     return details.retryable
   }
 
+  if (typeof details?.assistantProviderErrorRetryable === 'boolean') {
+    return details.assistantProviderErrorRetryable
+  }
+
+  if (typeof context?.assistantProviderErrorRetryable === 'boolean') {
+    return context.assistantProviderErrorRetryable
+  }
+
   return null
+}
+
+function readFailureString(
+  value: Record<string, unknown> | null,
+  key: string,
+): string | null {
+  return typeof value?.[key] === 'string'
+    ? normalizeNullableString(value[key])
+    : null
 }
 
 function readFailureContext(error: unknown): Record<string, unknown> | null {

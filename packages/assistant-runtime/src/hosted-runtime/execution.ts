@@ -402,6 +402,9 @@ function mergeHostedRunDrainMaintenanceMetrics(
   target.deviceSyncProcessed += metrics.deviceSyncProcessed;
   target.deviceSyncSkipped = target.deviceSyncSkipped && metrics.deviceSyncSkipped;
   target.parserProcessed += metrics.parserProcessed;
+  if (metrics.redactedLogEntries && metrics.redactedLogEntries.length > 0) {
+    target.redactedLogEntries.push(...metrics.redactedLogEntries);
+  }
 }
 
 function appendHostedRunCleanupTargets(

@@ -875,13 +875,26 @@ describe('openAiCompatibleProviderDefinition.executeTurn', () => {
   })
 
   it('returns a failed provider result when generateText throws', async () => {
-    providerMocks.generateText.mockRejectedValueOnce(new Error('gateway timeout'))
+    const providerError = Object.assign(new Error('gateway timeout'), {
+      responseBody: JSON.stringify({
+        error: {
+          code: 'rate_limit_exceeded',
+          message: 'Azure provider was rate limited.',
+          type: 'rate_limit_error',
+        },
+      }),
+      statusCode: 429,
+    })
+    providerMocks.generateText.mockRejectedValueOnce(providerError)
 
     const result = await openAiCompatibleProviderDefinition.executeTurn({
       providerConfig: normalizeAssistantProviderConfig({
         provider: 'openai-compatible',
-        baseUrl: 'https://api.openai.com/v1',
-        model: 'gpt-4.1-mini',
+        baseUrl: 'https://ai-gateway.vercel.sh/v1',
+        gatewayOnlyProviders: ['openai'],
+        model: 'openai/gpt-5.4',
+        presetId: 'vercel-ai-gateway',
+        providerName: 'vercel-ai-gateway',
       }),
       prompt: 'Retry this request',
       workingDirectory: WORKING_DIRECTORY,
@@ -899,7 +912,25 @@ describe('openAiCompatibleProviderDefinition.executeTurn', () => {
     if (result.ok) {
       throw new Error('Expected the provider execution to fail.')
     }
-    expect(result.error).toEqual(new Error('gateway timeout'))
+    expect(result.error).toBe(providerError)
+    expect((result.error as Error & { details?: Record<string, unknown> }).details).toMatchObject({
+      assistantProviderAdapter: 'openai-compatible',
+      assistantProviderBaseUrlConfigured: true,
+      assistantProviderBaseUrlOrigin: 'https://ai-gateway.vercel.sh',
+      assistantProviderBaseUrlPath: '/v1',
+      assistantProviderErrorBodyCode: 'rate_limit_exceeded',
+      assistantProviderErrorBodyMessage: 'Azure provider was rate limited.',
+      assistantProviderErrorBodyPresent: true,
+      assistantProviderErrorBodyType: 'rate_limit_error',
+      assistantProviderErrorMessage: 'gateway timeout',
+      assistantProviderErrorStatus: 429,
+      assistantProviderGatewayOnlyProviderCount: 1,
+      assistantProviderGatewayOnlyProviders: 'openai',
+      assistantProviderGatewayTarget: true,
+      assistantProviderModel: 'openai/gpt-5.4',
+      assistantProviderName: 'vercel-ai-gateway',
+      assistantProviderPresetId: 'vercel-ai-gateway',
+    })
   })
 
   it('preserves provider-native action counts when generateText fails after provider work', async () => {
