@@ -16,6 +16,8 @@ coverage/
 !/.agents/skills/github-project-issues/SKILL.md
 !/.agents/skills/health-commons-research/
 !/.agents/skills/health-commons-research/SKILL.md
+!/.agents/skills/work-with-pro/
+!/.agents/skills/work-with-pro/SKILL.md
 .claude/
 .windsurf/
 /skills/
