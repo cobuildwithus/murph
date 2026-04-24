@@ -172,7 +172,7 @@ test("OverviewPage preserves stale data when a refresh fails", () => {
 test("SignalsPage renders the empty signals state", () => {
   const markup = renderToStaticMarkup(createElement(SignalsPage));
 
-  assert.match(markup, /No connected signals yet/);
+  assert.match(markup, /No wearable signals yet/);
   assert.match(markup, /Connect a source or sync more recent data/i);
 });
 

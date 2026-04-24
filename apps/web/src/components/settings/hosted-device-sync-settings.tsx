@@ -31,7 +31,7 @@ export async function HostedDeviceSyncSettings(props: {
           }
         : {
             code: null,
-            message: "Could not load your data sources right now.",
+            message: "Could not load your wearables right now.",
           };
     }
   }

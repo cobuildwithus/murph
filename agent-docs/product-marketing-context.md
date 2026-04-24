@@ -8,7 +8,7 @@
 
 **Consumer shorthand:** Try things with your body, see what actually worked, and learn from other people doing the same.
 
-**What it does:** Bring the context you already have: notes, labs, manual measurements, meals, workouts, and connected wearable data when available. Browse or receive a protocol recommendation, run one bounded experiment through Telegram, iMessage, or email, and get a private outcome card showing what changed, what may have confounded it, and whether it looks worth repeating. Over time, Murph is building toward a living Health Commons where opt-in, structured results help people discover what works for bodies like theirs without turning health into a leaderboard.
+**What it does:** Connect your wearable, browse or receive a protocol recommendation, run one bounded experiment through Telegram, iMessage, or email, and get a private outcome card showing what changed, what may have confounded it, and whether it looks worth repeating. Over time, Murph is building toward a living Health Commons where opt-in, structured results help people discover what works for bodies like theirs without turning health into a leaderboard.
 
 **Product category:** Personal health experimentation / protocol outcome network
 
@@ -23,7 +23,7 @@ Murph should not be positioned primarily as a generic AI health assistant. The a
 The wedge is:
 - chat-first personal experimentation
 - easy logging and follow-up in channels people already use
-- private before/after learning tied to the best available evidence, including wearable data when present
+- private before/after learning tied to wearable data
 
 The moat is:
 - exact protocol version + user context + adherence + biomarker deltas + confounders + cohort learning
@@ -62,9 +62,9 @@ What we refuse to become:
 
 ## Target Audience
 
-**Target users:** Data-curious people who want to run small health experiments with the context they already have. Wearable owners (Oura, WHOOP, and adjacent device users over time) are a strong early adopter segment, but a wearable is not required.
+**Target users:** Wearable owners (Oura, WHOOP, and adjacent device users over time) who want more from their data than passive scores and are willing to try small experiments.
 
-**Initial ICP:** The data-curious, socially motivated experimenter who already screenshots graphs, keeps notes, saves labs, or texts friends about what changed, and does not want another app or a permanent health identity.
+**Initial ICP:** The data-curious, socially motivated experimenter who already screenshots graphs to friends, wants clearer answers than "my score was weird," and does not want another app or a permanent health identity.
 
 **Primary use case:** Run one bounded protocol, measure what changed, and decide whether it is worth repeating, sharing, or contributing anonymously.
 
@@ -85,11 +85,11 @@ What we refuse to become:
 
 | Persona | Cares about | Challenge | Value we promise |
 | --- | --- | --- | --- |
-| Data-curious health experimenter | Learning what actually helps, with enough proof to trust the answer | Notes, labs, scores, screenshots, and anecdotes do not add up to clean learning on their own | Run one protocol, get a private outcome card, and learn from cleaner cohort evidence when you want it |
+| Data-curious wearable experimenter | Learning what actually helps, with enough proof to trust the answer | Scores create awareness but not action; screenshots and anecdotes do not add up to clean learning | Run one protocol, get a private outcome card, and learn from cleaner cohort evidence when you want it |
 
 ## Problems & Pain Points
 
-**Core problem:** Personal health context creates awareness without an experiment loop. People accumulate notes, labs, scores, anecdotes, and screenshots but still do not know what to try, what changed, or how to learn from other people's results.
+**Core problem:** Wearables create awareness without an experiment loop. People accumulate scores, anecdotes, and screenshots but still do not know what to try, what changed, or how to learn from other people's results.
 
 **Why alternatives fall short:**
 - Wearable dashboards show status but not exact protocol-versioned before/after learning
@@ -99,13 +99,13 @@ What we refuse to become:
 - Most health apps either keep the experience purely private or make the social layer feel gross
 - Most health products still require opening another app to log, ask, or reflect
 
-**What it costs them:** Unused data, forgotten notes, weak behavior change, noisy self-experiments, and no compounding shared evidence.
+**What it costs them:** Wasted wearable subscriptions, abandoned devices, weak behavior change, noisy self-experiments, and no compounding shared evidence.
 
 **Emotional tension:** "I want clearer answers and some social proof, but I do not want my body turned into a competition."
 
 ## Competitive Landscape
 
-**Direct:** No direct competitor combines exact protocol versions, connected-source or self-logged private runs, sharable outcome cards, and an opt-in Health Commons of aggregate results.
+**Direct:** No direct competitor combines exact protocol versions, wearable-connected private runs, sharable outcome cards, and an opt-in Health Commons of aggregate results.
 
 **Secondary:**
 - Wearable apps with built-in AI helpers
@@ -133,7 +133,7 @@ What we refuse to become:
 
 **Why that is better:** Data becomes a tool for curiosity instead of a source of anxiety. Users learn something concrete from each run. The product gets more useful as the commons fills in, but it does not need to become louder or more addictive.
 
-**Why customers choose us:** Their health context finally becomes useful, and the result is something they can actually act on or share.
+**Why customers choose us:** Their wearable finally becomes useful, and the result is something they can actually act on or share.
 
 ## Product Loop
 
@@ -227,12 +227,12 @@ The first-class social object is the completed outcome card, not the biomarker i
 
 **Metrics:** TBD (MVP stage)
 
-**Customers:** Early-access health experimenters using Oura, WHOOP, adjacent data sources, notes, labs, and manual measurements.
+**Customers:** Early-access wearable owners experimenting with Oura, WHOOP, and adjacent data sources.
 
 **Value themes:**
 | Theme | Evidence |
 | --- | --- |
-| Health context needs an experiment loop | Users already say passive scores, saved notes, and one-off logs are interesting at first but do not change behavior on their own |
+| Wearables need an experiment loop | Users already say passive scores are interesting at first and then stop changing behavior |
 | People already improvise this manually | Users screenshot graphs, text friends, or paste context into general AI tools |
 | The right share unit is the result, not the dashboard | People naturally talk about "I tried this and here is what happened," not "here is my abstract health profile" |
 | Exact protocol version matters | Clean before/after learning requires knowing what someone actually did, not just the topic |
@@ -243,7 +243,7 @@ The first-class social object is the completed outcome card, not the biomarker i
 
 **Business goal:** Validate the private experiment loop first, then validate that opt-in contributions and cohort learning materially improve discovery and retention.
 
-**Primary conversion action:** Start first experiment -> connect an optional source when useful.
+**Primary conversion action:** Connect wearable -> start first experiment.
 
 **Compounding loop:** Finish experiment -> review outcome card -> share or contribute if useful -> discover next protocol.
 
