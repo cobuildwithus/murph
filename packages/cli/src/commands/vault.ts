@@ -13,6 +13,7 @@ import {
   vaultValidateResultSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
 import type { VaultServices } from '@murphai/vault-usecases'
+import { assertInitializedVaultRoot } from './vault-root-validation.js'
 
 const vaultShowResultSchema = z.object({
   vault: pathSchema,
@@ -117,6 +118,7 @@ export function registerVaultCommands(cli: Cli.Cli, services: VaultServices) {
     options: withBaseOptions(),
     output: vaultShowResultSchema,
     async run({ options }) {
+      await assertInitializedVaultRoot(options.vault)
       return services.query.showVault({
         vault: options.vault,
         requestId: requestIdFromOptions(options),
@@ -130,6 +132,7 @@ export function registerVaultCommands(cli: Cli.Cli, services: VaultServices) {
     options: withBaseOptions(),
     output: vaultStatsResultSchema,
     async run({ options }) {
+      await assertInitializedVaultRoot(options.vault)
       return services.query.showVaultStats({
         vault: options.vault,
         requestId: requestIdFromOptions(options),

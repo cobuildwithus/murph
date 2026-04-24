@@ -309,6 +309,30 @@ test('VaultCliError remains a typed incur envelope through the CLI bridge', asyn
   assert.equal(result.exitCode, 7)
 })
 
+test('VaultCliError envelopes default retryable to false', async () => {
+  const cli = Cli.create('bridge-smoke', {
+    description: 'bridge smoke test',
+    version: '0.0.0-test',
+  })
+  cli.use(incurErrorBridge)
+  cli.command('fail', {
+    args: z.object({}),
+    async run() {
+      throw new VaultCliError(
+        'BRIDGE_DEFAULT_RETRYABLE',
+        'bridge defaulted retryable',
+      )
+    },
+  })
+
+  const result = await runJsonCli(cli, ['fail'])
+
+  assert.equal(result.envelope.ok, false)
+  assert.equal(result.envelope.error?.code, 'BRIDGE_DEFAULT_RETRYABLE')
+  assert.equal(result.envelope.error?.retryable, false)
+  assert.equal(result.exitCode, 1)
+})
+
 test('root help lists the simple health CRUD command groups', async () => {
   const help = await runRawCli(['--help'])
 
@@ -453,6 +477,64 @@ test('descriptor direct service bindings resolve against the declared service su
       'function',
       `expected inbox service binding ${methodName} to exist`,
     )
+  }
+})
+
+test('root and group schema json requests return command indexes', async () => {
+  const rootIndex = JSON.parse(
+    await runSourceCliRaw(['--schema', '--format', 'json']),
+  ) as {
+    command: string | null
+    commands: Array<{ name?: string }>
+    kind: string
+    version: string
+  }
+  const inboxIndex = JSON.parse(
+    await runSourceCliRaw(['inbox', '--schema', '--format', 'json']),
+  ) as {
+    command: string | null
+    commands: Array<{ name?: string }>
+    kind: string
+    version: string
+  }
+
+  assert.equal(rootIndex.version, 'murph.schema-index.v1')
+  assert.equal(rootIndex.kind, 'root')
+  assert.equal(rootIndex.command, null)
+  assert.equal(rootIndex.commands.some((command) => command.name === 'vault show'), true)
+
+  assert.equal(inboxIndex.version, 'murph.schema-index.v1')
+  assert.equal(inboxIndex.kind, 'group')
+  assert.equal(inboxIndex.command, 'inbox')
+  assert.equal(inboxIndex.commands.some((command) => command.name === 'inbox bootstrap'), true)
+})
+
+test('read-only vault commands reject uninitialized vault roots before query reads', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-uninitialized-vault-'))
+
+  try {
+    const commands = [
+      ['vault', 'show', '--vault', vaultRoot],
+      ['vault', 'stats', '--vault', vaultRoot],
+      ['audit', 'list', '--vault', vaultRoot],
+      ['audit', 'show', 'aud_missing', '--vault', vaultRoot],
+    ]
+
+    for (const command of commands) {
+      const result = await runJsonCli(createVaultCli(), command)
+
+      assert.equal(result.exitCode, 1, command.join(' '))
+      assert.equal(result.envelope.ok, false, command.join(' '))
+      if (!result.envelope.ok) {
+        const error = result.envelope.error
+        assert.ok(error, command.join(' '))
+        assert.equal(error.code, 'invalid_vault', command.join(' '))
+        assert.match(error.message ?? '', /not initialized/u)
+        assert.equal(error.retryable, false, command.join(' '))
+      }
+    }
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
   }
 })
 
@@ -911,6 +993,38 @@ test('knowledge upsert allows a heading-only body through the built CLI boundary
 
     assert.equal(upserted.bodyLength, 0)
     assert.equal(upserted.page.slug, 'sleep-quality')
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test('knowledge upsert rejects whitespace-only bodies through the CLI boundary', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-knowledge-cli-blank-body-'))
+  const cli = createVaultCli()
+
+  try {
+    const initialized = await runJsonCli(cli, ['init', '--vault', vaultRoot])
+    assert.equal(initialized.envelope.ok, true)
+
+    const result = await runJsonCli(cli, [
+      'knowledge',
+      'upsert',
+      '--vault',
+      vaultRoot,
+      '--title',
+      'Blank page',
+      '--body',
+      '   \n\t',
+    ])
+
+    assert.equal(result.exitCode, 1)
+    assert.equal(result.envelope.ok, false)
+    if (!result.envelope.ok) {
+      const error = result.envelope.error
+      assert.ok(error)
+      assert.equal(error.code, 'knowledge_body_required')
+      assert.equal(error.retryable, false)
+    }
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
   }

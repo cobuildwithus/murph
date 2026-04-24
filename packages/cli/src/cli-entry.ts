@@ -187,16 +187,14 @@ function prepareProgramArgsForExecution(input: {
   programName: string
   resolveEffectiveTopLevelToken: (args: readonly string[]) => string | null
 }): string[] {
-  if (input.programName !== 'murph') {
-    return input.applyDefaultVaultToArgs(input.argv, input.defaultVault)
-  }
-
   const explicitVaultRequested = input.hasExplicitVaultOption(input.argv)
   const commandNeedsVault = input.commandNeedsVaultForExecution(input.argv)
   const commandAllowsExplicitVaultOverride =
+    input.programName === 'murph' &&
     input.resolveEffectiveTopLevelToken(input.argv) === 'init'
 
   if (
+    input.programName === 'murph' &&
     explicitVaultRequested &&
     commandNeedsVault &&
     !commandAllowsExplicitVaultOverride
@@ -208,13 +206,26 @@ function prepareProgramArgsForExecution(input: {
   }
 
   if (
+    input.programName === 'murph' &&
     input.defaultVault === null &&
     commandNeedsVault &&
     !commandAllowsExplicitVaultOverride
   ) {
     throw new VaultCliError(
-      'invalid_option',
+      'missing_vault',
       'No active Murph vault is configured. Run `murph onboard --vault ./vault` to create one, or `murph use <path>` to select an existing vault.',
+    )
+  }
+
+  if (
+    input.programName !== 'murph' &&
+    input.defaultVault === null &&
+    !explicitVaultRequested &&
+    commandNeedsVault
+  ) {
+    throw new VaultCliError(
+      'missing_vault',
+      'No vault was provided. Pass --vault <path> or select a default vault before running this command.',
     )
   }
 

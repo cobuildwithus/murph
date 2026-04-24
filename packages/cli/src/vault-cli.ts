@@ -14,6 +14,7 @@ import {
   type CliVaultServices,
 } from './device-services.js'
 import { registerVaultCliCommandDescriptors } from './vault-cli-command-manifest.js'
+import { installVaultCliSchemaIndex } from './vault-cli-schema-index.js'
 
 export { CLI_DESCRIPTION } from './vault-cli-bootstrap.js'
 
@@ -48,6 +49,7 @@ export function createVaultCliWithOptions(
     services,
     inboxServices,
   })
+  installVaultCliSchemaIndex(cli)
 
   return cli
 }

@@ -7,7 +7,10 @@ const createVaultCliWithOptions = vi.fn(() => ({
 const applyDefaultVaultToArgs = vi.fn((argv: string[], defaultVault: string | null) =>
   defaultVault ? [...argv, '--vault', defaultVault] : argv,
 )
-const resolveDefaultVault = vi.fn(async () => '/vaults/default')
+const hasExplicitVaultOption = vi.fn((argv: readonly string[]) =>
+  argv.includes('--vault'),
+)
+const resolveDefaultVault = vi.fn(async (): Promise<string | null> => '/vaults/default')
 const resolveOperatorHomeDirectory = vi.fn(() => '/home/operator')
 const detectSetupProgramName = vi.fn((argv0: string | undefined) =>
   argv0?.includes('murph') ? 'murph' : 'vault-cli',
@@ -22,7 +25,7 @@ vi.mock('@murphai/operator-config/operator-config', () => ({
   applyDefaultVaultToArgs,
   commandNeedsVaultForExecution: vi.fn(() => true),
   expandConfiguredVaultPath: vi.fn((vault: string) => vault),
-  hasExplicitVaultOption: vi.fn(() => false),
+  hasExplicitVaultOption,
   resolveConfiguredDefaultVault: vi.fn(async () => '/vaults/default'),
   resolveEffectiveTopLevelToken: vi.fn(
     (argv: readonly string[]) => argv.find((token) => !token.startsWith('-')) ?? null,
@@ -80,4 +83,33 @@ test('vault-cli launcher keeps the secondary alias on the shared CLI surface', a
   expect(createVaultCliWithOptions).toHaveBeenCalledWith({
     commandName: 'vault-cli',
   })
+})
+
+test('vault-cli launcher reports a typed missing-vault error without a default vault', async () => {
+  resolveDefaultVault.mockResolvedValueOnce(null)
+
+  await expect(
+    runMurphCliAction(['status'], {
+      argv0: '/usr/local/bin/vault-cli',
+    }),
+  ).rejects.toMatchObject({
+    code: 'missing_vault',
+  })
+
+  expect(serve).not.toHaveBeenCalled()
+})
+
+test('vault-cli launcher honors explicit vaults without a default vault', async () => {
+  resolveDefaultVault.mockResolvedValueOnce(null)
+
+  await runMurphCliAction(['status', '--vault', '/vaults/explicit'], {
+    argv0: '/usr/local/bin/vault-cli',
+  })
+
+  expect(serve).toHaveBeenCalledWith(
+    ['status', '--vault', '/vaults/explicit'],
+    expect.objectContaining({
+      env: process.env,
+    }),
+  )
 })
