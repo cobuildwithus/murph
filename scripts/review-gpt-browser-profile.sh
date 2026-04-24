@@ -200,7 +200,7 @@ murph_review_gpt_profile_open_chatgpt() {
 
   mkdir -p "$user_data_dir"
 
-  open -na "$target_app" --args \
+  open -g -na "$target_app" --args \
     "--user-data-dir=$user_data_dir" \
     "--profile-directory=$MURPH_REVIEW_GPT_PROFILE_BROWSER_PROFILE" \
     "--remote-debugging-port=$MURPH_REVIEW_GPT_PROFILE_PORT" \
