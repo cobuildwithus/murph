@@ -7,10 +7,7 @@ import {
   conversationCaptureRefFromCapture,
   conversationRefFromCapture,
 } from '../conversation-ref.js'
-import {
-  resolveAcceptedInboundMessageOperatorAuthority,
-  type AssistantOperatorAuthority,
-} from '../operator-authority.js'
+import type { AssistantOperatorAuthority } from '../operator-authority.js'
 import type { AssistantExecutionContext } from '../execution-context.js'
 import type { AssistantOutboxDispatchMode } from '../outbox.js'
 import {
@@ -843,7 +840,7 @@ async function evaluateAssistantAutoReplyGroup(input: {
   return {
     deliveryReplyToMessageId: readAutoReplyDeliveryReplyToMessageId(shownGroup),
     kind: 'reply',
-    operatorAuthority: resolveAcceptedInboundMessageOperatorAuthority(),
+    operatorAuthority: 'direct-operator',
     primaryCapture,
     prompt: preparedInput.prompt,
     userMessageContent: preparedInput.userMessageContent,

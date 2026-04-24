@@ -828,14 +828,14 @@ describe('assistant turn shared plan', () => {
         threadId: null,
         threadIsDirect: null,
       },
-      operatorAuthority: 'accepted-inbound-message',
+      operatorAuthority: 'direct-operator',
     })
     turnPlanMocks.resolveAssistantFirstContactStateDocIds.mockReturnValue([
       'onboarding/first-contact/doc-1',
     ])
     turnPlanMocks.isAssistantOnboardingOpen.mockResolvedValue(true)
     turnPlanMocks.resolveAssistantOperatorAuthority.mockReturnValue(
-      'accepted-inbound-message',
+      'direct-operator',
     )
 
     const resolved = {
@@ -855,7 +855,7 @@ describe('assistant turn shared plan', () => {
     const eligiblePlan = await resolveAssistantTurnSharedPlan(
       {
         includeEarlySessionOnboarding: true,
-        operatorAuthority: 'accepted-inbound-message',
+        operatorAuthority: 'direct-operator',
         persistUserPromptOnFailure: false,
         prompt: 'hello',
         vault: '/tmp/turn-plan-vault',
@@ -878,7 +878,7 @@ describe('assistant turn shared plan', () => {
     expect(eligiblePlan.firstContactStateDocIds).toEqual([
       'onboarding/first-contact/doc-1',
     ])
-    expect(eligiblePlan.operatorAuthority).toBe('accepted-inbound-message')
+    expect(eligiblePlan.operatorAuthority).toBe('direct-operator')
     expect(eligiblePlan.persistUserPromptOnFailure).toBe(false)
     expect(eligiblePlan.requestedWorkingDirectory).toBe('/tmp/turn-plan-workdir')
   })

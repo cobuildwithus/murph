@@ -950,7 +950,7 @@ test('assistantd http server enforces bearer auth, validates requests, and route
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        operatorAuthority: 'accepted-inbound-message',
+        operatorAuthority: 'direct-operator',
         vault: '/tmp/vault',
         prompt: 'hello over assistantd',
       }),
@@ -961,7 +961,7 @@ test('assistantd http server enforces bearer auth, validates requests, and route
     assert.equal(sendMessage.mock.calls[0]?.[0]?.prompt, 'hello over assistantd')
     assert.equal(
       sendMessage.mock.calls[0]?.[0]?.operatorAuthority,
-      'accepted-inbound-message',
+      'direct-operator',
     )
 
     const sessionOptions = await fetch(`${handle.address.baseUrl}/session-options`, {
@@ -1790,7 +1790,7 @@ test('assistantd http server enforces bearer auth, validates requests, and route
     assert.equal(invalidOperatorAuthority.status, 400)
     assert.match(
       await invalidOperatorAuthority.text(),
-      /operatorAuthority must be one of direct-operator, accepted-inbound-message/u,
+      /operatorAuthority must be one of direct-operator/u,
     )
 
     const oversizedBody = await fetch(`${handle.address.baseUrl}/message`, {

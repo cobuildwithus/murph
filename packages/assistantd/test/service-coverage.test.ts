@@ -321,7 +321,7 @@ test('createAssistantLocalService wires the local integrations and forwards assi
   ])
 })
 
-test('createAssistantLocalService defaults omitted message authority and preserves explicit inbound authority', async () => {
+test('createAssistantLocalService defaults omitted message authority and preserves explicit direct authority', async () => {
   const service = createAssistantLocalService(TEST_VAULT_ROOT)
 
   await service.sendMessage({
@@ -329,8 +329,8 @@ test('createAssistantLocalService defaults omitted message authority and preserv
     vault: TEST_VAULT_ROOT,
   } as Parameters<AssistantLocalService['sendMessage']>[0])
   await service.sendMessage({
-    operatorAuthority: 'accepted-inbound-message',
-    prompt: 'explicit inbound authority',
+    operatorAuthority: 'direct-operator',
+    prompt: 'explicit direct authority',
     vault: TEST_VAULT_ROOT,
   } as Parameters<AssistantLocalService['sendMessage']>[0])
 
@@ -347,8 +347,8 @@ test('createAssistantLocalService defaults omitted message authority and preserv
         vault: TEST_VAULT_ROOT,
       },
       {
-        operatorAuthority: 'accepted-inbound-message',
-        prompt: 'explicit inbound authority',
+        operatorAuthority: 'direct-operator',
+        prompt: 'explicit direct authority',
         vault: TEST_VAULT_ROOT,
       },
     ],

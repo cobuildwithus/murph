@@ -32,7 +32,6 @@ const commandMocks = vi.hoisted(() => ({
   redactAssistantSessionsForDisplay: vi.fn((value) => value),
   reopenAssistantOnboarding: vi.fn(),
   resolveAssistantConversationAudience: vi.fn(),
-  resolveAssistantConversationAutoReplyEligibility: vi.fn(),
   resolveAssistantConversationPolicy: vi.fn(),
   resolveAssistantOnboardingStatePath: vi.fn((vault: string) =>
     `${vault}/.runtime/operations/assistant/state/onboarding/conversation.json`
@@ -115,8 +114,6 @@ vi.mock('@murphai/assistant-engine/assistant-state', () => ({
 vi.mock('@murphai/assistant-engine/assistant-runtime', () => ({
   redactAssistantSessionForDisplay: commandMocks.redactAssistantSessionForDisplay,
   redactAssistantSessionsForDisplay: commandMocks.redactAssistantSessionsForDisplay,
-  resolveAssistantConversationAutoReplyEligibility:
-    commandMocks.resolveAssistantConversationAutoReplyEligibility,
   resolveAssistantConversationAudience:
     commandMocks.resolveAssistantConversationAudience,
   resolveAssistantConversationPolicy:

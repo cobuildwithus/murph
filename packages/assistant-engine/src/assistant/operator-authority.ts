@@ -1,6 +1,5 @@
 export const ASSISTANT_OPERATOR_AUTHORITY_VALUES = [
   'direct-operator',
-  'accepted-inbound-message',
 ] as const
 
 export type AssistantOperatorAuthority =
@@ -20,21 +19,11 @@ export function isAssistantOperatorAuthority(
 export function resolveAssistantOperatorAuthority(
   value: unknown,
 ): AssistantOperatorAuthority {
-  return isAssistantOperatorAuthority(value) ? value : 'accepted-inbound-message'
+  return isAssistantOperatorAuthority(value) ? value : 'direct-operator'
 }
 
 export function resolveTrustedLocalAssistantOperatorAuthority(
   value: unknown,
 ): AssistantOperatorAuthority {
   return isAssistantOperatorAuthority(value) ? value : 'direct-operator'
-}
-
-export function resolveAcceptedInboundMessageOperatorAuthority(): AssistantOperatorAuthority {
-  return 'accepted-inbound-message'
-}
-
-export function isAcceptedInboundMessageOperatorAuthority(
-  value: AssistantOperatorAuthority,
-): boolean {
-  return value === 'accepted-inbound-message'
 }

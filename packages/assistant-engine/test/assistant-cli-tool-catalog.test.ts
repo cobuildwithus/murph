@@ -255,20 +255,14 @@ describe('assistant CLI tool catalogs', () => {
     expect(providerTurnCatalog.hasTool('web.fetch')).toBe(true)
     expect(providerTurnCatalog.hasTool('web.search')).toBe(true)
 
-    const acceptedInboundCatalog = createProviderTurnAssistantToolCatalog(
+    const operatorAuthorityCatalog = createProviderTurnAssistantToolCatalog(
       createToolContext({
-        operatorAuthority: 'accepted-inbound-message',
+        operatorAuthority: 'direct-operator',
       }),
     )
-    expect(acceptedInboundCatalog.hasTool('assistant.knowledge.list')).toBe(true)
-    expect(acceptedInboundCatalog.hasTool('assistant.knowledge.upsert')).toBe(false)
-    expect(acceptedInboundCatalog.hasTool('vault.cli.run')).toBe(false)
-    expect(acceptedInboundCatalog.hasTool('vault.fs.readText')).toBe(true)
-    expect(acceptedInboundCatalog.hasTool('murph.device.connect')).toBe(false)
-    expect(acceptedInboundCatalog.hasTool('vault.share.createLink')).toBe(false)
-    expect(acceptedInboundCatalog.hasTool('web.fetch')).toBe(false)
-    expect(acceptedInboundCatalog.hasTool('web.pdf.read')).toBe(false)
-    expect(acceptedInboundCatalog.hasTool('web.search')).toBe(false)
+    expect(operatorAuthorityCatalog.listTools()).toEqual(
+      providerTurnCatalog.listTools(),
+    )
 
     const providerRuntime = createProviderTurnAssistantCapabilityRuntime(
       createToolContext(),
