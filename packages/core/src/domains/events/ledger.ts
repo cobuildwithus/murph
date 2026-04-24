@@ -1,0 +1,466 @@
+import type { EventRecord } from "@murphai/contracts";
+import {
+  EVENT_KINDS,
+  eventRecordSchema,
+} from "@murphai/contracts";
+
+import { emitAuditRecord } from "../../audit.ts";
+import { VAULT_LAYOUT } from "../../constants.ts";
+import {
+  assertNoLegacyRelatedIds,
+  normalizeCanonicalEventLinks,
+} from "../../event-links.ts";
+import { VaultError } from "../../errors.ts";
+import { walkVaultFiles } from "../../fs.ts";
+import {
+  buildEventSpineEnvelope,
+  buildEventSpineLifecycle,
+  eventSpineRevision,
+  isDeletedEventSpineRecord,
+  parseEventSpineAttachments,
+  selectLatestEventSpineEntry,
+} from "../../history/event-spine.ts";
+import { readJsonlRecords, toMonthlyShardRelativePath } from "../../jsonl.ts";
+import { loadVault } from "../../vault.ts";
+import {
+  compactObject,
+  normalizeOptionalText,
+  normalizeTimestampInput,
+  runLoadedCanonicalWrite,
+  uniqueTrimmedStringList,
+  validateContract,
+} from "../shared.ts";
+import {
+  buildTypedEventRecord,
+  normalizeDraftEventId,
+  PUBLIC_EVENT_WRITE_KIND_LIST,
+  requireText,
+  valueAsString,
+  type EventLifecycle,
+  type PublicEventDraft,
+} from "./drafts.ts";
+
+type JsonObject = Record<string, unknown>;
+
+export interface LoadedEventLedgerShard {
+  relativePath: string;
+  matchingRecords: EventRecord[];
+}
+
+export type MatchedEventRecord = {
+  relativePath: string;
+  record: EventRecord;
+};
+
+export interface UpsertEventPayloadInput {
+  vaultRoot: string;
+  payload: JsonObject;
+  allowSpecializedKindRewrite?: boolean;
+}
+
+export interface UpsertEventDraftInput {
+  vaultRoot: string;
+  draft: PublicEventDraft;
+  allowSpecializedKindRewrite?: boolean;
+}
+
+export type UpsertEventInput = UpsertEventPayloadInput | UpsertEventDraftInput;
+
+export interface DeleteEventInput {
+  vaultRoot: string;
+  eventId: string;
+}
+
+export interface FindEventByExternalRefInput {
+  vaultRoot: string;
+  system: string;
+  resourceType: string;
+  resourceId: string;
+  version?: string;
+  facet?: string;
+}
+
+export interface UpsertEventResult {
+  eventId: string;
+  ledgerFile: string;
+  created: boolean;
+}
+
+export interface DeleteEventResult {
+  eventId: string;
+  kind: EventRecord["kind"];
+  retainedPaths: string[];
+  deleted: true;
+}
+
+const RESERVED_EVENT_KEYS = new Set([
+  "schemaVersion",
+  "id",
+  "eventId",
+  "kind",
+  "occurredAt",
+  "recordedAt",
+  "dayKey",
+  "timeZone",
+  "source",
+  "title",
+  "note",
+  "tags",
+  "experimentSlug",
+  "links",
+  "rawRefs",
+  "lifecycle",
+]);
+
+const PUBLIC_EVENT_WRITE_KINDS = new Set<EventRecord["kind"]>(PUBLIC_EVENT_WRITE_KIND_LIST);
+const SUPPORTED_EVENT_KINDS = new Set<string>(EVENT_KINDS);
+
+function normalizeEventId(payload: JsonObject): string | undefined {
+  return normalizeOptionalText(
+    typeof payload.id === "string" ? payload.id : valueAsString(payload.eventId),
+  ) ?? undefined;
+}
+
+function eventSpecificFields(payload: JsonObject): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(payload).filter(
+      ([key, value]) => !RESERVED_EVENT_KEYS.has(key) && value !== undefined,
+    ),
+  );
+}
+
+function normalizeEventKind(payload: JsonObject): EventRecord["kind"] {
+  const kind = valueAsString(payload.kind);
+  if (!kind || !SUPPORTED_EVENT_KINDS.has(kind)) {
+    throw new VaultError("EVENT_KIND_INVALID", "Event payload requires a supported kind.");
+  }
+
+  return kind as EventRecord["kind"];
+}
+
+function buildEventRecord(
+  payload: JsonObject,
+  fallbackTimeZone?: string,
+  lifecycle?: EventLifecycle,
+): EventRecord {
+  const kind = normalizeEventKind(payload);
+  const occurredAt = normalizeTimestampInput(payload.occurredAt);
+  if (!occurredAt) {
+    throw new VaultError("EVENT_OCCURRED_AT_MISSING", "Event payload requires occurredAt.");
+  }
+  const attachments = parseEventSpineAttachments(payload.attachments);
+  assertNoLegacyRelatedIds({
+    value: payload.relatedIds,
+    errorCode: "EVENT_CONTRACT_INVALID",
+    errorMessage: "Event payload relatedIds is no longer supported; use links.",
+  });
+  const canonicalLinks = normalizeCanonicalEventLinks({
+    value: payload.links,
+    errorCode: "EVENT_CONTRACT_INVALID",
+    errorMessage: "Event payload links must contain objects with type and targetId fields.",
+  });
+
+  return validateContract(
+    eventRecordSchema,
+    compactObject({
+      ...buildEventSpineEnvelope({
+        id: normalizeEventId(payload),
+        occurredAt,
+        recordedAt: normalizeTimestampInput(payload.recordedAt),
+        dayKey: valueAsString(payload.dayKey),
+        timeZone: valueAsString(payload.timeZone),
+        fallbackTimeZone,
+        source: valueAsString(payload.source),
+        title: requireText(payload.title, "Event payload requires a title."),
+        note: normalizeOptionalText(valueAsString(payload.note)) ?? undefined,
+        tags: uniqueTrimmedStringList(payload.tags) ?? undefined,
+        experimentSlug: valueAsString(payload.experimentSlug),
+        links: canonicalLinks,
+        rawRefs: uniqueTrimmedStringList(payload.rawRefs) ?? undefined,
+        attachments,
+        lifecycle,
+      }),
+      kind,
+      ...eventSpecificFields(payload),
+    }),
+    "EVENT_CONTRACT_INVALID",
+    `Event payload for kind "${kind}" is invalid.`,
+  );
+}
+
+export function toEventLedgerFile(occurredAt: string): string {
+  return toMonthlyShardRelativePath(
+    VAULT_LAYOUT.eventLedgerDirectory,
+    occurredAt,
+    "occurredAt",
+  );
+}
+
+function isMatchingEventId(record: unknown, eventId: string): record is JsonObject & { id: string } {
+  return (
+    typeof record === "object" &&
+    record !== null &&
+    typeof (record as { id?: unknown }).id === "string" &&
+    (record as { id: string }).id === eventId
+  );
+}
+
+function validateStoredEventRecord(record: JsonObject): EventRecord {
+  return validateContract(
+    eventRecordSchema,
+    record,
+    "EVENT_CONTRACT_INVALID",
+    "Stored event record is invalid.",
+  );
+}
+
+function externalRefMatches(record: EventRecord, input: FindEventByExternalRefInput): boolean {
+  const externalRef = record.externalRef;
+  if (!externalRef) {
+    return false;
+  }
+
+  return externalRef.system === input.system &&
+    externalRef.resourceType === input.resourceType &&
+    externalRef.resourceId === input.resourceId &&
+    (input.version === undefined || externalRef.version === input.version) &&
+    (input.facet === undefined || externalRef.facet === input.facet);
+}
+
+export async function findEventByExternalRef(
+  input: FindEventByExternalRefInput,
+): Promise<EventRecord | null> {
+  const relativePaths = await walkVaultFiles(input.vaultRoot, VAULT_LAYOUT.eventLedgerDirectory, {
+    extension: ".jsonl",
+  });
+  const matches: MatchedEventRecord[] = [];
+
+  for (const relativePath of relativePaths) {
+    const records = await readJsonlRecords({
+      vaultRoot: input.vaultRoot,
+      relativePath,
+    });
+
+    for (const rawRecord of records) {
+      const record = validateStoredEventRecord(rawRecord as JsonObject);
+      if (externalRefMatches(record, input)) {
+        matches.push({ relativePath, record });
+      }
+    }
+  }
+
+  const latest = selectLatestEventSpineEntry(matches);
+  if (!latest || isDeletedEventSpineRecord(latest.record)) {
+    return null;
+  }
+
+  return latest.record;
+}
+
+function flattenMatchedEventRecords(
+  matchedShards: readonly LoadedEventLedgerShard[],
+): MatchedEventRecord[] {
+  return matchedShards.flatMap((shard) =>
+    shard.matchingRecords.map((record) => ({
+      relativePath: shard.relativePath,
+      record,
+    })),
+  );
+}
+
+export function selectLatestMatchedEvent(
+  matchedShards: readonly LoadedEventLedgerShard[],
+): MatchedEventRecord | null {
+  return selectLatestEventSpineEntry(flattenMatchedEventRecords(matchedShards));
+}
+
+export async function loadEventLedgerShardsById(
+  vaultRoot: string,
+  eventId: string,
+): Promise<LoadedEventLedgerShard[]> {
+  const relativePaths = await walkVaultFiles(vaultRoot, VAULT_LAYOUT.eventLedgerDirectory, {
+    extension: ".jsonl",
+  });
+  const matches: LoadedEventLedgerShard[] = [];
+
+  for (const relativePath of relativePaths) {
+    const records = await readJsonlRecords({
+      vaultRoot,
+      relativePath,
+    });
+    const matchingRecords = records
+      .filter((record) => isMatchingEventId(record, eventId))
+      .map((record) => validateStoredEventRecord(record as JsonObject));
+
+    if (matchingRecords.length > 0) {
+      matches.push({
+        relativePath,
+        matchingRecords,
+      });
+    }
+  }
+
+  return matches;
+}
+
+function extractRetainedPaths(record: EventRecord): string[] {
+  const retained = new Set<string>();
+
+  for (const attachment of record.attachments ?? []) {
+    retained.add(attachment.relativePath);
+  }
+
+  uniqueTrimmedStringList(record.rawRefs)?.forEach((relativePath) => retained.add(relativePath));
+
+  const mediaSources = [
+    (record as { media?: Array<{ relativePath?: unknown }> }).media,
+    (record as { workout?: { media?: Array<{ relativePath?: unknown }> } }).workout?.media,
+  ];
+  for (const mediaList of mediaSources) {
+    if (!Array.isArray(mediaList)) {
+      continue;
+    }
+    for (const entry of mediaList) {
+      const relativePath = valueAsString(entry?.relativePath);
+      if (relativePath) {
+        retained.add(relativePath);
+      }
+    }
+  }
+
+  return [...retained].sort((left, right) => left.localeCompare(right));
+}
+
+function canWriteEventKind(
+  kind: EventRecord["kind"],
+  matchedShards: readonly LoadedEventLedgerShard[],
+  allowSpecializedKindRewrite: boolean | undefined,
+): boolean {
+  if (PUBLIC_EVENT_WRITE_KINDS.has(kind)) {
+    return true;
+  }
+
+  return allowSpecializedKindRewrite === true && matchedShards.length > 0;
+}
+
+function isDraftUpsertInput(input: UpsertEventInput): input is UpsertEventDraftInput {
+  return "draft" in input;
+}
+
+export async function upsertEvent(
+  input: UpsertEventInput,
+): Promise<UpsertEventResult> {
+  const vault = await loadVault({ vaultRoot: input.vaultRoot });
+  const suppliedEventId = isDraftUpsertInput(input)
+    ? normalizeDraftEventId(input.draft.id)
+    : normalizeEventId(input.payload);
+  const kind = isDraftUpsertInput(input)
+    ? input.draft.kind
+    : normalizeEventKind(input.payload);
+  const matchedShards =
+    suppliedEventId === undefined
+      ? []
+      : await loadEventLedgerShardsById(input.vaultRoot, suppliedEventId);
+
+  if (
+    !canWriteEventKind(
+      kind,
+      matchedShards,
+      input.allowSpecializedKindRewrite,
+    )
+  ) {
+    throw new VaultError(
+      "EVENT_KIND_INVALID",
+      `Event kind "${kind}" is not supported by generic event upsert.`,
+    );
+  }
+
+  const latestMatchedEvent = selectLatestMatchedEvent(matchedShards);
+  const lifecycle = buildEventSpineLifecycle(
+    latestMatchedEvent ? eventSpineRevision(latestMatchedEvent.record) + 1 : 1,
+  );
+  const eventRecord = isDraftUpsertInput(input)
+    ? buildTypedEventRecord(input.draft, vault.metadata.timezone, lifecycle)
+    : buildEventRecord(input.payload, vault.metadata.timezone, lifecycle);
+
+  const ledgerFile = toEventLedgerFile(eventRecord.occurredAt);
+
+  return runLoadedCanonicalWrite<UpsertEventResult>({
+    vaultRoot: input.vaultRoot,
+    operationType: "event_upsert",
+    summary: `Upsert event ${eventRecord.id}`,
+    occurredAt: eventRecord.occurredAt,
+    mutate: async ({ batch }) => {
+      await batch.stageJsonlAppend(ledgerFile, `${JSON.stringify(eventRecord)}\n`);
+      await emitAuditRecord({
+        vaultRoot: input.vaultRoot,
+        batch,
+        action: "event_upsert",
+        commandName: "core.upsertEvent",
+        summary: `Upserted ${eventRecord.kind} ${eventRecord.id}.`,
+        occurredAt: eventRecord.occurredAt,
+        files: [ledgerFile],
+        targetIds: [eventRecord.id],
+      });
+
+      return {
+        eventId: eventRecord.id,
+        ledgerFile,
+        created: matchedShards.length === 0,
+      };
+    },
+  });
+}
+
+export async function deleteEvent(
+  input: DeleteEventInput,
+): Promise<DeleteEventResult> {
+  const matchedShards = await loadEventLedgerShardsById(input.vaultRoot, input.eventId);
+
+  if (matchedShards.length === 0) {
+    throw new VaultError("EVENT_MISSING", `Event "${input.eventId}" was not found.`);
+  }
+
+  const latestMatchedEvent = selectLatestMatchedEvent(matchedShards);
+  if (!latestMatchedEvent || isDeletedEventSpineRecord(latestMatchedEvent.record)) {
+    throw new VaultError("EVENT_MISSING", `Event "${input.eventId}" was not found.`);
+  }
+  const tombstoneRecord = validateContract(
+    eventRecordSchema,
+    compactObject({
+      ...latestMatchedEvent.record,
+      recordedAt: new Date().toISOString(),
+      lifecycle: buildEventSpineLifecycle(eventSpineRevision(latestMatchedEvent.record) + 1, "deleted"),
+    }),
+    "EVENT_CONTRACT_INVALID",
+    "Deleted event tombstone is invalid.",
+  );
+  const tombstoneLedgerFile = toEventLedgerFile(tombstoneRecord.occurredAt);
+
+  return runLoadedCanonicalWrite<DeleteEventResult>({
+    vaultRoot: input.vaultRoot,
+    operationType: "event_delete",
+    summary: `Delete event ${input.eventId}`,
+    occurredAt: new Date(),
+    mutate: async ({ batch }) => {
+      await batch.stageJsonlAppend(tombstoneLedgerFile, `${JSON.stringify(tombstoneRecord)}\n`);
+      await emitAuditRecord({
+        vaultRoot: input.vaultRoot,
+        batch,
+        action: "event_delete",
+        commandName: "core.deleteEvent",
+        summary: `Deleted ${latestMatchedEvent.record.kind} ${input.eventId}.`,
+        occurredAt: new Date(),
+        files: [tombstoneLedgerFile],
+        targetIds: [input.eventId],
+      });
+
+      return {
+        eventId: input.eventId,
+        kind: latestMatchedEvent.record.kind,
+        retainedPaths: extractRetainedPaths(latestMatchedEvent.record),
+        deleted: true,
+      };
+    },
+  });
+}

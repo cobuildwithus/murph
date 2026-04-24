@@ -1,55 +1,19 @@
 import type {
-  AssistantOnboardingCompletionReason,
-  AssistantChatProvider,
-  AssistantProviderSessionOptions,
   AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
-import {
-  normalizeIanaTimeZone,
-  resolveSystemTimeZone,
-  toLocalDayKey,
-} from '@murphai/contracts'
-import { loadVault } from '@murphai/core'
 import {
   resolveAssistantUsageCredentialSource,
 } from '@murphai/runtime-state/node'
 import {
-  resolveAssistantCliAccessContext,
-} from '../assistant-cli-access.js'
-import {
-  createNotificationTurnAssistantToolCatalog,
-  createProviderTurnAssistantToolCatalog,
-} from '../assistant-cli-tools.js'
-import {
   executeAssistantProviderTurnAttempt,
-  resolveAssistantProviderTargetExecutionCapabilities,
   type AssistantProviderAttemptMetadata,
 } from '../assistant-provider.js'
-import type {
-  AssistantMurphCommandAccessMode,
-} from './providers/types.js'
-import { recordAssistantDiagnosticEvent } from './diagnostics.js'
-import {
-  normalizeAssistantExecutionContext,
-  type AssistantHostedDeviceConnectProvider,
-} from './execution-context.js'
-import {
-  buildAssistantNotificationDecisionSystemPrompt,
-  buildAssistantSystemPrompt,
-} from './system-prompt.js'
-import { buildAssistantActiveExperimentContextBlock } from './active-experiment-context.js'
-import { resolveAssistantModelBehaviorProfile } from './model-behavior.js'
 import { errorMessage } from './shared.js'
 import {
   recordAssistantToolFailureRuntimeIssues,
-  resolveAssistantDiagnosticsPolicy,
-  type AssistantDiagnosticsPolicy,
 } from './issue-reporting.js'
-import { resolveAssistantCliSurfaceBootstrapContext } from './cli-surface-bootstrap.js'
-import { buildAssistantVaultOverviewBlock } from './vault-overview.js'
 import {
   getAssistantFailoverCooldownUntil,
-  isAssistantFailoverRouteCoolingDown,
   readAssistantFailoverState,
   recordAssistantFailoverRouteFailure,
   recordAssistantFailoverRouteSuccess,
@@ -57,28 +21,14 @@ import {
   type ResolvedAssistantFailoverRoute,
 } from './failover.js'
 import { maybeThrowInjectedAssistantFault } from './fault-injection.js'
-import { createAssistantMemoryTurnContextEnv } from './memory/turn-context.js'
 import {
   attachRecoveredAssistantSession,
   recoverAssistantSessionAfterProviderFailure,
 } from './provider-turn-recovery.js'
 import { resolveOpenAiCompatibleVercelStripeBillingHeaders } from './providers/openai-compatible.js'
 import {
-  resolveAssistantProviderResumeKey,
-  resolveAssistantRouteResumeBinding,
-} from './provider-binding.js'
-import {
-  listAssistantTranscriptEntries,
-} from './store.js'
-import {
-  appendAssistantTurnReceiptEvent,
-} from './turns.js'
-import {
-  prioritizeAssistantRoutesForRichUserMessageContent,
   resolveAssistantRouteUserMessageContent,
 } from './rich-content-routing.js'
-import { createIntegratedVaultServices } from '@murphai/vault-usecases/vault-services'
-import { createAssistantFoodAutoLogHooks } from './food-auto-log-hooks.js'
 import {
   createAssistantUsageAttribution,
   resolveAssistantUsageEnvironment,
@@ -93,118 +43,38 @@ import type {
   AssistantTurnSharedPlan,
   ExecutedAssistantProviderTurnResult,
 } from './service-contracts.js'
+import {
+  recordProviderAttemptFailed,
+  recordProviderAttemptStarted,
+  recordProviderAttemptSucceeded,
+  recordProviderCooldownFailoverApplied,
+  recordProviderFailoverApplied,
+} from './provider-turn/attempt-observability.js'
+import {
+  buildAssistantProviderTurnExecutionPlan,
+  prioritizeAssistantFailoverRoutes,
+  resolveAssistantProviderAttemptPlan,
+} from './provider-turn/planning.js'
+import type {
+  AssistantProviderAttemptPlan,
+  AssistantProviderFailoverState,
+  AssistantProviderTurnExecutionPlan,
+  AssistantProviderTurnExecutionProfile,
+} from './provider-turn/planning.js'
 
-interface AssistantRouteTurnPlan {
-  assistantCommandAccessMode: AssistantMurphCommandAccessMode
-  assistantCliContract: string | null
-  cliEnv: NodeJS.ProcessEnv
-  conversationMessages?: ReadonlyArray<{
-    content: string
-    role: 'assistant' | 'user'
-  }>
-  continuityContext: string | null
-  diagnosticsPolicy: AssistantDiagnosticsPolicy
-  onboardingCompletionFallbackReason: AssistantOnboardingCompletionReason | null
-  onboardingGuidanceInjected: boolean
-  resumeProviderSessionId: string | null
-  sessionContext?: {
-    binding: AssistantSession['binding']
-  }
-  systemPrompt: string | null
-  workingDirectory: string
-}
-
-interface AssistantPromptCapabilityAvailability {
-  assistantCommandAccessMode: AssistantMurphCommandAccessMode
-  assistantHostedDeviceConnectAvailable: boolean
-  assistantHostedDeviceConnectProviders: readonly AssistantHostedDeviceConnectProvider[]
-  assistantKnowledgeToolsAvailable: boolean
-}
-
-interface AssistantPromptTimeContext {
-  currentLocalDate: string
-  currentTimeZone: string
-}
-
-export type AssistantProviderTurnPromptProfile =
-  | 'conversation'
-  | 'notification-decision'
-
-export type AssistantProviderTurnToolProfile =
-  | 'provider-turn'
-  | 'notification-turn'
-
-export type AssistantProviderTurnNativeResumePolicy =
-  | 'default'
-  | 'disabled'
-
-export interface AssistantProviderTurnExecutionProfile {
-  nativeResumePolicy?: AssistantProviderTurnNativeResumePolicy
-  promptProfile?: AssistantProviderTurnPromptProfile
-  toolProfile?: AssistantProviderTurnToolProfile
-}
-
-export interface AssistantProviderTurnContinuityPlan {
-  onboardingGuidanceInjected: boolean
-  resumeProviderSessionId: string | null
-  shouldInjectBootstrapContext: boolean
-}
-
-export function resolveAssistantProviderTurnContinuityPlan(input: {
-  candidateResumeProviderSessionId: string | null
-  onboardingGuidanceOpen: boolean
-  promptProfile: AssistantProviderTurnPromptProfile
-}): AssistantProviderTurnContinuityPlan {
-  const resumeProviderSessionId = input.candidateResumeProviderSessionId
-  const shouldInjectBootstrapContext = resumeProviderSessionId === null
-  const onboardingGuidanceInjected =
-    input.promptProfile === 'conversation' &&
-    input.onboardingGuidanceOpen
-
-  return {
-    onboardingGuidanceInjected,
-    resumeProviderSessionId,
-    shouldInjectBootstrapContext,
-  }
-}
-
-const ASSISTANT_BOOTSTRAP_TRANSCRIPT_REPLAY_MESSAGE_LIMIT = 100
-
-function resolveAssistantProviderTurnExecutionProfile(
-  profile: AssistantProviderTurnExecutionProfile | null | undefined,
-): Required<AssistantProviderTurnExecutionProfile> {
-  return {
-    nativeResumePolicy: profile?.nativeResumePolicy ?? 'default',
-    promptProfile: profile?.promptProfile ?? 'conversation',
-    toolProfile: profile?.toolProfile ?? 'provider-turn',
-  }
-}
-
-type AssistantProviderFailoverState = Awaited<
-  ReturnType<typeof readAssistantFailoverState>
->
-
-interface AssistantProviderTurnExecutionPlan {
-  executionContext: ReturnType<typeof normalizeAssistantExecutionContext>
-  input: AssistantMessageInput
-  memoryTurnEnv: NodeJS.ProcessEnv
-  profile: Required<AssistantProviderTurnExecutionProfile>
-  primaryRoute: ResolvedAssistantFailoverRoute | null
-  promptTimeContext: AssistantPromptTimeContext
-  toolCatalog: ReturnType<typeof createProviderTurnAssistantToolCatalog>
-  routes: readonly ResolvedAssistantFailoverRoute[]
-  sharedPlan: AssistantTurnSharedPlan
-  turnId: string
-}
-
-interface AssistantProviderAttemptPlan {
-  attemptCount: number
-  primaryRouteCooldownFailover: boolean
-  remainingRoutes: readonly ResolvedAssistantFailoverRoute[]
-  route: ResolvedAssistantFailoverRoute
-  routePlan: AssistantRouteTurnPlan
-  session: AssistantSession
-}
+export {
+  resolveAssistantProviderTurnContinuityPlan,
+} from './provider-turn/planning.js'
+export type {
+  AssistantProviderTurnContinuityPlan,
+  AssistantProviderTurnExecutionProfile,
+  AssistantProviderTurnNativeResumePolicy,
+  AssistantProviderTurnPromptProfile,
+  AssistantProviderTurnToolProfile,
+} from './provider-turn/planning.js'
+export {
+  resolveAssistantOnboardingCompletionFallbackReason,
+} from './provider-turn/onboarding-fallback.js'
 
 type AssistantProviderAttemptOutcome =
   | {
@@ -252,6 +122,7 @@ export async function executeProviderTurnWithRecovery(input: {
   let lastRetriableFailure: unknown = null
   let lastAttemptedRoute: ResolvedAssistantFailoverRoute | null = null
   let nextAttemptCount = 1
+  let currentSession = input.resolvedSession
 
   while (attemptedRouteIds.size < executionPlan.routes.length) {
     const attemptPlan = await resolveAssistantProviderAttemptPlan({
@@ -259,7 +130,7 @@ export async function executeProviderTurnWithRecovery(input: {
       attemptedRouteIds,
       executionPlan,
       failoverState,
-      session: input.resolvedSession,
+      session: currentSession,
     })
     if (!attemptPlan) {
       break
@@ -276,6 +147,9 @@ export async function executeProviderTurnWithRecovery(input: {
     })
 
     failoverState = attemptOutcome.failoverState
+    if (attemptOutcome.kind !== 'succeeded') {
+      currentSession = attemptOutcome.session
+    }
 
     switch (attemptOutcome.kind) {
       case 'succeeded':
@@ -308,427 +182,9 @@ export async function executeProviderTurnWithRecovery(input: {
             error: lastRetriableFailure,
           }),
     route: lastAttemptedRoute,
-    session: input.resolvedSession,
+    session: currentSession,
   }
 }
-
-async function buildAssistantProviderTurnExecutionPlan(input: {
-  input: AssistantMessageInput
-  plan: AssistantTurnSharedPlan
-  profile?: AssistantProviderTurnExecutionProfile | null
-  resolvedSession: AssistantSession
-  routes: readonly ResolvedAssistantFailoverRoute[]
-  turnCreatedAt: string
-  turnId: string
-}): Promise<AssistantProviderTurnExecutionPlan> {
-  const executionContext = normalizeAssistantExecutionContext(input.input.executionContext)
-  const memoryTurnEnv = createAssistantMemoryTurnContextEnv({
-    allowSensitiveHealthContext: input.plan.allowSensitiveHealthContext,
-    sessionId: input.resolvedSession.sessionId,
-    sourcePrompt: input.input.prompt,
-    turnId: `${input.resolvedSession.sessionId}:${input.turnCreatedAt}`,
-    vault: input.input.vault,
-  })
-  const profile = resolveAssistantProviderTurnExecutionProfile(input.profile)
-  const toolCatalog = (
-    profile.toolProfile === 'notification-turn'
-      ? createNotificationTurnAssistantToolCatalog
-      : createProviderTurnAssistantToolCatalog
-  )({
-    allowSensitiveHealthContext: input.plan.allowSensitiveHealthContext,
-    cliEnv: {
-      ...input.plan.cliAccess.env,
-      ...memoryTurnEnv,
-    },
-    executionContext,
-    requestId: input.turnId,
-    sessionId: input.resolvedSession.sessionId,
-    vault: input.input.vault,
-    vaultServices: createIntegratedVaultServices({
-      foodAutoLogHooks: createAssistantFoodAutoLogHooks(),
-    }),
-    workingDirectory: input.plan.requestedWorkingDirectory,
-  })
-  const promptTimeContext = await resolveAssistantPromptTimeContext(input.input.vault)
-
-  return {
-    executionContext,
-    input: input.input,
-    memoryTurnEnv,
-    profile,
-    primaryRoute: input.routes[0] ?? null,
-    promptTimeContext,
-    toolCatalog,
-    routes: input.routes,
-    sharedPlan: input.plan,
-    turnId: input.turnId,
-  }
-}
-
-async function resolveAssistantProviderAttemptPlan(input: {
-  attemptCount: number
-  attemptedRouteIds: ReadonlySet<string>
-  executionPlan: AssistantProviderTurnExecutionPlan
-  failoverState: AssistantProviderFailoverState
-  session: AssistantSession
-}): Promise<AssistantProviderAttemptPlan | null> {
-  const remainingRoutes = prioritizeAssistantRoutesForRichUserMessageContent({
-    routes: input.executionPlan.routes.filter(
-      (route) => !input.attemptedRouteIds.has(route.routeId),
-    ),
-    userMessageContent: input.executionPlan.input.userMessageContent,
-  })
-  const prioritizedRoutes = prioritizeAssistantFailoverRoutes(
-    remainingRoutes,
-    input.failoverState,
-  )
-  const route = prioritizedRoutes[0] ?? null
-  if (!route) {
-    return null
-  }
-
-  return {
-    attemptCount: input.attemptCount,
-    primaryRouteCooldownFailover:
-      input.attemptCount === 1 &&
-      input.executionPlan.primaryRoute !== null &&
-      route.routeId !== input.executionPlan.primaryRoute.routeId,
-    remainingRoutes: prioritizedRoutes.slice(1),
-    route,
-    routePlan: await resolveAssistantRouteTurnPlan({
-      executionContext: input.executionPlan.executionContext,
-      input: input.executionPlan.input,
-      profile: input.executionPlan.profile,
-      promptTimeContext: input.executionPlan.promptTimeContext,
-      route,
-      session: input.session,
-      sharedPlan: input.executionPlan.sharedPlan,
-      toolCatalog: input.executionPlan.toolCatalog,
-    }),
-    session: input.session,
-  }
-}
-
-async function resolveAssistantRouteTurnPlan(input: {
-  executionContext: ReturnType<typeof normalizeAssistantExecutionContext> | null
-  toolCatalog: ReturnType<typeof createProviderTurnAssistantToolCatalog>
-  input: AssistantMessageInput
-  profile: Required<AssistantProviderTurnExecutionProfile>
-  promptTimeContext: AssistantPromptTimeContext
-  route: ResolvedAssistantFailoverRoute
-  session: AssistantSession
-  sharedPlan: AssistantTurnSharedPlan
-}): Promise<AssistantRouteTurnPlan> {
-  const workingDirectory = input.sharedPlan.requestedWorkingDirectory
-  const resumeBinding = resolveAssistantRouteResumeBinding({
-    route: input.route,
-    sessionResumeState: input.session.resumeState,
-  })
-  const routeProviderCapabilities = resolveAssistantProviderTargetExecutionCapabilities({
-    ...input.route.providerOptions,
-  })
-  const nativeResumeEnabled = input.profile.nativeResumePolicy !== 'disabled'
-  const candidateResumeProviderSessionId =
-    nativeResumeEnabled &&
-    routeProviderCapabilities.supportsNativeResume &&
-    resumeBinding !== null
-      ? resolveAssistantProviderResumeKey({
-          resumeState: resumeBinding,
-          provider: input.route.provider,
-        })
-      : null
-  const continuityPlan = resolveAssistantProviderTurnContinuityPlan({
-    candidateResumeProviderSessionId,
-    onboardingGuidanceOpen: input.sharedPlan.onboardingGuidanceOpen,
-    promptProfile: input.profile.promptProfile,
-  })
-  const resumeProviderSessionId = continuityPlan.resumeProviderSessionId
-  const shouldInjectBootstrapContext = continuityPlan.shouldInjectBootstrapContext
-  const shouldPrepareBootstrapContext =
-    shouldInjectBootstrapContext ||
-    (resumeProviderSessionId !== null &&
-      providerUsesFlatPrompt(routeProviderCapabilities))
-  const resolvedChannel = input.input.channel ?? input.session.binding.channel
-  const diagnosticsPolicy = resolveAssistantDiagnosticsPolicy({
-    channel: resolvedChannel,
-    executionContext: input.input.executionContext,
-  })
-  const shouldInjectOnboardingGuidance =
-    continuityPlan.onboardingGuidanceInjected
-  const providerCapabilities = routeProviderCapabilities
-  const transcriptReplayLimit = shouldPrepareBootstrapContext
-    ? ASSISTANT_BOOTSTRAP_TRANSCRIPT_REPLAY_MESSAGE_LIMIT
-    : null
-  const conversationMessages = transcriptReplayLimit
-    ? removeTrailingCurrentUserPrompt(
-        await loadAssistantConversationMessages({
-          limit: transcriptReplayLimit,
-          sessionId: input.session.sessionId,
-          vault: input.input.vault,
-        }),
-        input.input.prompt,
-      )
-    : undefined
-  const promptCapabilityAvailability = resolveAssistantPromptCapabilityAvailability({
-    executionContext: input.executionContext,
-    providerCapabilities,
-    toolCatalog: input.toolCatalog,
-  })
-  const assistantCommandAccessMode =
-    promptCapabilityAvailability.assistantCommandAccessMode
-  const assistantCliContract =
-    shouldPrepareBootstrapContext && input.profile.promptProfile === 'conversation'
-      ? await resolveAssistantCliSurfaceBootstrapContext({
-          cliEnv: input.sharedPlan.cliAccess.env,
-          executionContext: input.input.executionContext,
-          sessionId: input.session.sessionId,
-          vault: input.input.vault,
-          workingDirectory,
-        })
-      : null
-  const vaultOverview = shouldPrepareBootstrapContext
-    ? await resolveAssistantVaultOverviewBlock(input.input.vault)
-    : null
-  const activeExperimentContext = input.sharedPlan.allowSensitiveHealthContext
-    ? await resolveAssistantActiveExperimentContextBlock(input.input.vault)
-    : null
-
-  return {
-    assistantCommandAccessMode,
-    assistantCliContract,
-    cliEnv: input.sharedPlan.cliAccess.env,
-    conversationMessages,
-    continuityContext: null,
-    diagnosticsPolicy,
-    onboardingCompletionFallbackReason:
-      resolveAssistantOnboardingCompletionFallbackReason({
-        assistantCommandAccessMode,
-        onboardingGuidanceInjected: shouldInjectOnboardingGuidance,
-        prompt: input.input.prompt,
-      }),
-    onboardingGuidanceInjected: shouldInjectOnboardingGuidance,
-    resumeProviderSessionId,
-    sessionContext: shouldPrepareBootstrapContext
-      ? {
-          binding: input.session.binding,
-        }
-      : undefined,
-    workingDirectory,
-    systemPrompt:
-      input.profile.promptProfile === 'notification-decision'
-        ? buildAssistantNotificationDecisionSystemPrompt({
-            activeExperimentContext,
-            allowSensitiveHealthContext: input.sharedPlan.allowSensitiveHealthContext,
-            assistantHostedDeviceConnectAvailable:
-              promptCapabilityAvailability.assistantHostedDeviceConnectAvailable,
-            assistantHostedDeviceConnectProviders:
-              promptCapabilityAvailability.assistantHostedDeviceConnectProviders,
-            channel: resolvedChannel,
-            currentLocalDate: input.promptTimeContext.currentLocalDate,
-            currentTimeZone: input.promptTimeContext.currentTimeZone,
-            vaultOverview,
-          })
-        : buildAssistantSystemPrompt({
-            activeExperimentContext,
-            assistantCliContract,
-            allowSensitiveHealthContext: input.sharedPlan.allowSensitiveHealthContext,
-            assistantCommandAccessMode:
-              promptCapabilityAvailability.assistantCommandAccessMode,
-            assistantHostedDeviceConnectAvailable:
-              promptCapabilityAvailability.assistantHostedDeviceConnectAvailable,
-            assistantHostedDeviceConnectProviders:
-              promptCapabilityAvailability.assistantHostedDeviceConnectProviders,
-            assistantKnowledgeToolsAvailable:
-              promptCapabilityAvailability.assistantKnowledgeToolsAvailable,
-            cliAccess: input.sharedPlan.cliAccess,
-            channel: resolvedChannel,
-            currentLocalDate: input.promptTimeContext.currentLocalDate,
-            currentTimeZone: input.promptTimeContext.currentTimeZone,
-            onboardingGuidance: shouldInjectOnboardingGuidance,
-            modelBehaviorProfile: resolveAssistantModelBehaviorProfile(
-              input.route.providerOptions,
-            ),
-            turnTrigger: input.input.turnTrigger ?? null,
-            vaultOverview,
-          }),
-  }
-}
-
-async function resolveAssistantPromptTimeContext(
-  vaultRoot: string,
-): Promise<AssistantPromptTimeContext> {
-  const fallbackTimeZone = resolveSystemTimeZone()
-  let currentTimeZone = fallbackTimeZone
-
-  try {
-    const loadedVault = await loadVault({
-      vaultRoot,
-    })
-    currentTimeZone =
-      normalizeIanaTimeZone(loadedVault.metadata.timezone) ?? fallbackTimeZone
-  } catch {
-    // Prompt time context is best-effort and should not block the turn.
-  }
-
-  return {
-    currentLocalDate: toLocalDayKey(new Date(), currentTimeZone),
-    currentTimeZone,
-  }
-}
-
-async function resolveAssistantVaultOverviewBlock(
-  vaultRoot: string,
-): Promise<string | null> {
-  try {
-    return await buildAssistantVaultOverviewBlock(vaultRoot)
-  } catch {
-    return null
-  }
-}
-
-async function resolveAssistantActiveExperimentContextBlock(
-  vaultRoot: string,
-): Promise<string | null> {
-  try {
-    return await buildAssistantActiveExperimentContextBlock(vaultRoot)
-  } catch {
-    return null
-  }
-}
-
-function resolveAssistantPromptCapabilityAvailability(input: {
-  executionContext: ReturnType<typeof normalizeAssistantExecutionContext> | null
-  providerCapabilities: ReturnType<typeof resolveAssistantProviderTargetExecutionCapabilities>
-  toolCatalog: ReturnType<typeof createProviderTurnAssistantToolCatalog>
-}): AssistantPromptCapabilityAvailability {
-  const assistantHostedDeviceConnectAvailable = hasRouteToolRuntimeAccess({
-    providerCapabilities: input.providerCapabilities,
-    toolCatalog: input.toolCatalog,
-    toolNames: ['murph.device.connect'],
-  })
-
-  return {
-    assistantCommandAccessMode: resolveAssistantCommandAccessMode({
-      providerCapabilities: input.providerCapabilities,
-      toolCatalog: input.toolCatalog,
-    }),
-    assistantHostedDeviceConnectAvailable,
-    assistantHostedDeviceConnectProviders: assistantHostedDeviceConnectAvailable
-      ? input.executionContext?.hosted?.deviceConnectProviders ?? []
-      : [],
-    assistantKnowledgeToolsAvailable: hasRouteToolRuntimeAccess({
-      providerCapabilities: input.providerCapabilities,
-      toolCatalog: input.toolCatalog,
-      toolNames: [
-        'assistant.knowledge.list',
-        'assistant.knowledge.search',
-        'assistant.knowledge.get',
-        'assistant.knowledge.lint',
-        'assistant.knowledge.upsert',
-        'assistant.knowledge.rebuildIndex',
-      ],
-    }),
-  }
-}
-
-function hasRouteToolRuntimeAccess(input: {
-  providerCapabilities: ReturnType<typeof resolveAssistantProviderTargetExecutionCapabilities>
-  toolCatalog: ReturnType<typeof createProviderTurnAssistantToolCatalog>
-  toolNames: readonly string[]
-}): boolean {
-  return (
-    input.providerCapabilities.supportsToolRuntime &&
-    input.toolNames.every((toolName) => input.toolCatalog.hasTool(toolName))
-  )
-}
-
-function resolveAssistantCommandAccessMode(input: {
-  providerCapabilities: ReturnType<typeof resolveAssistantProviderTargetExecutionCapabilities>
-  toolCatalog: ReturnType<typeof createProviderTurnAssistantToolCatalog>
-}): AssistantMurphCommandAccessMode {
-  switch (input.providerCapabilities.murphCommandSurface) {
-    case 'bound-tools':
-      return hasRouteToolRuntimeAccess({
-        providerCapabilities: input.providerCapabilities,
-        toolCatalog: input.toolCatalog,
-        toolNames: ['vault.cli.run'],
-      })
-        ? 'bound-tools'
-        : 'none'
-    case 'direct-cli':
-      return 'direct-cli'
-    default:
-      return 'none'
-  }
-}
-
-const ASSISTANT_ONBOARDING_DECLINE_PATTERN =
-  /\b(?:no thanks|no thank you|skip (?:it|this)|rather not|don['’]t want to|do not want to|not right now)\b/u
-const ASSISTANT_ONBOARDING_CONCRETE_REQUEST_PREFIX_PATTERN =
-  /^(?:can|could|would|will|should|what|why|how|when|where|who|help|tell|explain|give|show|check|look|find|summarize|analyse|analyze|compare|review|log|track|estimate|recommend|plan)\b/u
-const ASSISTANT_ONBOARDING_CONCRETE_REQUEST_PHRASE_PATTERN =
-  /\b(?:help me|i need help|i want help|can you|could you|would you|what should i|should i|i want to know|i need to know)\b/u
-const ASSISTANT_ONBOARDING_CONTEXT_ANSWER_PATTERN =
-  /\b(?:sleep|energy|stress|pain|fatigue|anxiety|mood|digestion|labs?|supplements?|meds?|medications?|workout|workouts|exercise|glucose|cholesterol|blood pressure|migraine|symptom|symptoms|knee|back|headache|period|menstrual|recovery)\b/u
-const ASSISTANT_ONBOARDING_NAME_PATTERN =
-  /\b(?:my name is|call me)\b/u
-
-export function resolveAssistantOnboardingCompletionFallbackReason(input: {
-  assistantCommandAccessMode: AssistantMurphCommandAccessMode
-  onboardingGuidanceInjected: boolean
-  prompt: string
-}): AssistantOnboardingCompletionReason | null {
-  if (
-    !input.onboardingGuidanceInjected ||
-    input.assistantCommandAccessMode !== 'none'
-  ) {
-    return null
-  }
-
-  const normalizedPrompt = normalizePromptForOnboardingFallback(input.prompt)
-  if (!normalizedPrompt) {
-    return null
-  }
-
-  if (ASSISTANT_ONBOARDING_DECLINE_PATTERN.test(normalizedPrompt)) {
-    return 'user_declined'
-  }
-
-  if (looksLikeConcreteOnboardingRequest(normalizedPrompt)) {
-    return 'concrete_request'
-  }
-
-  if (looksLikeMeaningfulOnboardingAnswer(normalizedPrompt)) {
-    return 'user_answered'
-  }
-
-  return null
-}
-
-function normalizePromptForOnboardingFallback(prompt: string): string {
-  return prompt.trim().replace(/\s+/gu, ' ').toLowerCase()
-}
-
-function looksLikeConcreteOnboardingRequest(normalizedPrompt: string): boolean {
-  return (
-    (ASSISTANT_ONBOARDING_CONCRETE_REQUEST_PREFIX_PATTERN.test(normalizedPrompt) &&
-      countOnboardingFallbackWords(normalizedPrompt) >= 3) ||
-    ASSISTANT_ONBOARDING_CONCRETE_REQUEST_PHRASE_PATTERN.test(normalizedPrompt)
-  )
-}
-
-function looksLikeMeaningfulOnboardingAnswer(normalizedPrompt: string): boolean {
-  return (
-    ASSISTANT_ONBOARDING_NAME_PATTERN.test(normalizedPrompt) ||
-    (ASSISTANT_ONBOARDING_CONTEXT_ANSWER_PATTERN.test(normalizedPrompt) &&
-      countOnboardingFallbackWords(normalizedPrompt) >= 2)
-  )
-}
-
-function countOnboardingFallbackWords(normalizedPrompt: string): number {
-  return normalizedPrompt.match(/\b[\p{L}\p{N}']+\b/gu)?.length ?? 0
-}
-
 
 function createAssistantProviderUsageAttribution(input: {
   attemptPlan: AssistantProviderAttemptPlan
@@ -826,13 +282,16 @@ async function executeAssistantProviderAttempt(input: {
       message: 'Injected assistant provider failure.',
     })
     const { toolCatalog } = executionPlan
-    const toolRuntime = {
-      allowSensitiveHealthContext: executionPlan.sharedPlan.allowSensitiveHealthContext,
-      requestId: executionPlan.turnId,
-      sessionId: attemptPlan.session.sessionId,
-      toolCatalog,
-      vault: executionPlan.input.vault,
-    }
+    const toolRuntime = attemptPlan.routePlan.supportsToolRuntime
+      ? {
+          allowSensitiveHealthContext:
+            executionPlan.sharedPlan.allowSensitiveHealthContext,
+          requestId: executionPlan.turnId,
+          sessionId: attemptPlan.session.sessionId,
+          toolCatalog,
+          vault: executionPlan.input.vault,
+        }
+      : null
     const attemptEnv = {
       ...attemptPlan.routePlan.cliEnv,
       ...executionPlan.memoryTurnEnv,
@@ -1025,260 +484,6 @@ function classifyAssistantProviderAttemptFailure(input: {
   return 'retry_next_route'
 }
 
-async function recordProviderCooldownFailoverApplied(input: {
-  primaryRoute: ResolvedAssistantFailoverRoute
-  route: ResolvedAssistantFailoverRoute
-  sessionId: string
-  turnId: string
-  vault: string
-}): Promise<void> {
-  await appendAssistantTurnReceiptEvent({
-    vault: input.vault,
-    turnId: input.turnId,
-    kind: 'provider.failover.applied',
-    detail: `${input.primaryRoute.label} -> ${input.route.label}`,
-    metadata: {
-      from: input.primaryRoute.label,
-      to: input.route.label,
-      fromRouteId: input.primaryRoute.routeId,
-      toRouteId: input.route.routeId,
-      reason: 'cooldown',
-    },
-  })
-  await recordAssistantDiagnosticEvent({
-    vault: input.vault,
-    component: 'provider',
-    kind: 'provider.failover.applied',
-    level: 'warn',
-    message: `Primary assistant provider route ${input.primaryRoute.label} is cooling down; using ${input.route.label}.`,
-    sessionId: input.sessionId,
-    turnId: input.turnId,
-    data: {
-      from: input.primaryRoute.label,
-      to: input.route.label,
-      fromRouteId: input.primaryRoute.routeId,
-      toRouteId: input.route.routeId,
-    },
-    counterDeltas: {
-      providerFailovers: 1,
-    },
-  })
-}
-
-async function recordProviderAttemptStarted(input: {
-  attemptCount: number
-  at: string
-  route: ResolvedAssistantFailoverRoute
-  sessionId: string
-  turnId: string
-  vault: string
-}): Promise<void> {
-  await appendAssistantTurnReceiptEvent({
-    vault: input.vault,
-    turnId: input.turnId,
-    kind: 'provider.attempt.started',
-    detail: input.route.label,
-    metadata: {
-      attempt: String(input.attemptCount),
-      provider: input.route.provider,
-      model: input.route.providerOptions.model ?? 'default',
-      routeId: input.route.routeId,
-    },
-    at: input.at,
-  })
-  await recordAssistantDiagnosticEvent({
-    vault: input.vault,
-    component: 'provider',
-    kind: 'provider.attempt.started',
-    message: `Assistant provider attempt ${input.attemptCount} started with ${input.route.label}.`,
-    sessionId: input.sessionId,
-    turnId: input.turnId,
-    data: {
-      attempt: input.attemptCount,
-      routeId: input.route.routeId,
-      provider: input.route.provider,
-      model: input.route.providerOptions.model,
-    },
-    counterDeltas: {
-      providerAttempts: 1,
-    },
-    at: input.at,
-  })
-}
-
-async function recordProviderAttemptSucceeded(input: {
-  activityLabels?: readonly string[]
-  attemptCount: number
-  route: ResolvedAssistantFailoverRoute
-  turnId: string
-  vault: string
-}): Promise<void> {
-  const activityLabels = input.activityLabels ?? []
-  const metadata: Record<string, string> = {
-    attempt: String(input.attemptCount),
-    provider: input.route.provider,
-    model: input.route.providerOptions.model ?? 'default',
-    routeId: input.route.routeId,
-  }
-  if (activityLabels.length > 0) {
-    metadata.activityCount = String(activityLabels.length)
-    metadata.activities = activityLabels.join(', ')
-  }
-
-  await appendAssistantTurnReceiptEvent({
-    vault: input.vault,
-    turnId: input.turnId,
-    kind: 'provider.attempt.succeeded',
-    detail: input.route.label,
-    metadata,
-  })
-}
-
-async function recordProviderAttemptFailed(input: {
-  activityLabels?: readonly string[]
-  attemptCount: number
-  cooldownUntil: string | null
-  detail: string
-  errorCode: string | null
-  route: ResolvedAssistantFailoverRoute
-  sessionId: string
-  turnId: string
-  vault: string
-}): Promise<void> {
-  const activityLabels = input.activityLabels ?? []
-  const metadata: Record<string, string> = {
-    attempt: String(input.attemptCount),
-    provider: input.route.provider,
-    model: input.route.providerOptions.model ?? 'default',
-    routeId: input.route.routeId,
-    code: input.errorCode ?? 'unknown',
-  }
-  if (activityLabels.length > 0) {
-    metadata.activityCount = String(activityLabels.length)
-    metadata.activities = activityLabels.join(', ')
-  }
-
-  await appendAssistantTurnReceiptEvent({
-    vault: input.vault,
-    turnId: input.turnId,
-    kind: 'provider.attempt.failed',
-    detail: input.detail,
-    metadata,
-  })
-  if (input.cooldownUntil) {
-    await appendAssistantTurnReceiptEvent({
-      vault: input.vault,
-      turnId: input.turnId,
-      kind: 'provider.cooldown.started',
-      detail: `${input.route.label} cooling down until ${input.cooldownUntil}`,
-      metadata: {
-        routeId: input.route.routeId,
-        cooldownUntil: input.cooldownUntil,
-      },
-    })
-  }
-  await recordAssistantDiagnosticEvent({
-    vault: input.vault,
-    component: 'provider',
-    kind: 'provider.attempt.failed',
-    level: 'warn',
-    message: input.detail,
-    code: input.errorCode,
-    sessionId: input.sessionId,
-    turnId: input.turnId,
-    data: {
-      attempt: input.attemptCount,
-      routeId: input.route.routeId,
-      provider: input.route.provider,
-      model: input.route.providerOptions.model,
-      cooldownUntil: input.cooldownUntil,
-    },
-    counterDeltas: {
-      providerFailures: 1,
-    },
-  })
-}
-
-async function recordProviderFailoverApplied(input: {
-  errorCode: string | null
-  fromRoute: ResolvedAssistantFailoverRoute
-  sessionId: string
-  toRoute: ResolvedAssistantFailoverRoute
-  turnId: string
-  vault: string
-}): Promise<void> {
-  await appendAssistantTurnReceiptEvent({
-    vault: input.vault,
-    turnId: input.turnId,
-    kind: 'provider.failover.applied',
-    detail: `${input.fromRoute.label} -> ${input.toRoute.label}`,
-    metadata: {
-      from: input.fromRoute.label,
-      to: input.toRoute.label,
-      fromRouteId: input.fromRoute.routeId,
-      toRouteId: input.toRoute.routeId,
-    },
-  })
-  await recordAssistantDiagnosticEvent({
-    vault: input.vault,
-    component: 'provider',
-    kind: 'provider.failover.applied',
-    level: 'warn',
-    message: `Failing over assistant provider from ${input.fromRoute.label} to ${input.toRoute.label}.`,
-    code: input.errorCode,
-    sessionId: input.sessionId,
-    turnId: input.turnId,
-    data: {
-      from: input.fromRoute.label,
-      to: input.toRoute.label,
-      fromRouteId: input.fromRoute.routeId,
-      toRouteId: input.toRoute.routeId,
-    },
-    counterDeltas: {
-      providerFailovers: 1,
-    },
-  })
-}
-
-function prioritizeAssistantFailoverRoutes(
-  routes: readonly ResolvedAssistantFailoverRoute[],
-  state: Awaited<ReturnType<typeof readAssistantFailoverState>>,
-): ResolvedAssistantFailoverRoute[] {
-  const ready: ResolvedAssistantFailoverRoute[] = []
-  const cooling: ResolvedAssistantFailoverRoute[] = []
-
-  for (const route of routes) {
-    if (isAssistantFailoverRouteCoolingDown({ route, state })) {
-      cooling.push(route)
-    } else {
-      ready.push(route)
-    }
-  }
-
-  return ready.length > 0 ? [...ready, ...cooling] : [...routes]
-}
-
-function removeTrailingCurrentUserPrompt(
-  messages: ReadonlyArray<{
-    content: string
-    role: 'assistant' | 'user'
-  }>,
-  currentPrompt: string,
-): ReadonlyArray<{
-  content: string
-  role: 'assistant' | 'user'
-}> {
-  const lastMessage = messages.at(-1)
-  if (
-    lastMessage?.role === 'user' &&
-    lastMessage.content === currentPrompt
-  ) {
-    return messages.slice(0, -1)
-  }
-
-  return messages
-}
-
 function readAssistantErrorCode(error: unknown): string | null {
   if (!error || typeof error !== 'object' || !('code' in error)) {
     return null
@@ -1328,45 +533,4 @@ function attachAssistantFailoverExhaustionContext(input: {
   return new Error('Assistant provider routes were exhausted.', {
     cause: input.error,
   })
-}
-
-function providerUsesFlatPrompt(
-  capabilities: ReturnType<typeof resolveAssistantProviderTargetExecutionCapabilities>,
-): boolean {
-  return capabilities.requestFormat === 'flat-prompt'
-}
-
-async function loadAssistantConversationMessages(input: {
-  limit: number
-  sessionId: string
-  vault: string
-}): Promise<Array<{
-  content: string
-  role: 'assistant' | 'user'
-}>> {
-  const transcript = await listAssistantTranscriptEntries(
-    input.vault,
-    input.sessionId,
-  )
-
-  return transcript
-    .slice(-input.limit)
-    .flatMap((entry) =>
-      isAssistantConversationTranscriptEntry(entry)
-        ? [{
-            role: entry.kind,
-            content: entry.text,
-          }]
-        : [],
-    )
-}
-
-function isAssistantConversationTranscriptEntry(entry: {
-  kind: string
-  text: string
-}): entry is {
-  kind: 'assistant' | 'user'
-  text: string
-} {
-  return entry.kind === 'assistant' || entry.kind === 'user'
 }

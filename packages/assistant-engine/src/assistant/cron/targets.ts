@@ -1,0 +1,127 @@
+import {
+  type AssistantCronJob,
+  type AssistantCronTarget,
+  type AssistantCronTargetSnapshot,
+} from '@murphai/operator-config/assistant-cli-contracts'
+import { applyAssistantSelfDeliveryTargetDefaults } from '@murphai/operator-config/operator-config'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import { resolveAssistantBindingDelivery } from '../bindings.js'
+import { getAssistantChannelAdapter } from '../channel-adapters.js'
+import { normalizeNullableString } from '../shared.js'
+import {
+  buildAssistantCronTarget,
+  type AssistantCronTargetInput,
+} from './store.js'
+
+export async function resolveAssistantCronTargetDefaults<
+  TInput extends AssistantCronTargetInput,
+>(input: TInput) {
+  const resolvedTarget = await applyAssistantSelfDeliveryTargetDefaults(
+    {
+      channel: input.channel,
+      identityId: input.identityId,
+      participantId: input.participantId,
+      threadId: input.threadId,
+      deliveryTarget: input.deliveryTarget,
+    },
+    {
+      allowSingleSavedTargetFallback: true,
+    },
+  )
+
+  return {
+    ...input,
+    channel: resolvedTarget.channel ?? undefined,
+    identityId: resolvedTarget.identityId ?? undefined,
+    participantId: resolvedTarget.participantId ?? undefined,
+    threadId: resolvedTarget.threadId ?? undefined,
+    deliveryTarget: resolvedTarget.deliveryTarget ?? undefined,
+  }
+}
+
+export function validateAssistantCronDeliveryTarget(
+  input: AssistantCronTargetInput,
+): AssistantCronTarget {
+  const channel = normalizeNullableString(input.channel)
+  if (!channel) {
+    throw new VaultCliError(
+      'ASSISTANT_CRON_DELIVERY_REQUIRED',
+      'Assistant cron jobs must declare an outbound channel and delivery route. Pass --channel plus --thread, --participant, or --deliveryTarget. Cron jobs send a single notification message to the bound route.',
+    )
+  }
+
+  if (!getAssistantChannelAdapter(channel)) {
+    throw new VaultCliError(
+      'ASSISTANT_CHANNEL_UNSUPPORTED',
+      `Outbound delivery for channel "${channel}" is not supported in this build.`,
+    )
+  }
+
+  const identityId = normalizeNullableString(input.identityId)
+  if (channel === 'email' && !identityId) {
+    throw new VaultCliError(
+      'ASSISTANT_EMAIL_IDENTITY_REQUIRED',
+      'Email cron jobs require a configured email sender identity. Pass --identity with the email address or provider identity you want to send from.',
+    )
+  }
+
+  const participantId = normalizeNullableString(input.participantId)
+  const threadId = normalizeNullableString(input.threadId)
+  const deliveryTarget = normalizeNullableString(input.deliveryTarget)
+  const bindingDelivery = resolveAssistantBindingDelivery({
+    channel,
+    actorId: participantId,
+    threadId,
+  })
+
+  if (!deliveryTarget && !bindingDelivery) {
+    throw new VaultCliError(
+      'ASSISTANT_CRON_DELIVERY_REQUIRED',
+      'Assistant cron jobs must bind an explicit outbound route. Pass --thread, --participant, or --deliveryTarget for the selected channel.',
+    )
+  }
+
+  return buildAssistantCronTarget({
+    ...input,
+    channel,
+    identityId,
+    participantId,
+    threadId,
+    deliveryTarget,
+  })
+}
+
+export function buildAssistantCronTargetSnapshot(
+  job: Pick<AssistantCronJob, 'jobId' | 'name' | 'target'>,
+): AssistantCronTargetSnapshot {
+  return {
+    jobId: job.jobId,
+    jobName: job.name,
+    target: job.target,
+    bindingDelivery: resolveAssistantBindingDelivery({
+      channel: job.target.channel,
+      actorId: job.target.participantId,
+      threadId: job.target.threadId,
+      deliveryTarget: job.target.deliveryTarget,
+    }),
+  }
+}
+
+export function assistantCronTargetAudienceEquals(
+  left: Pick<
+    AssistantCronTarget,
+    'channel' | 'deliveryTarget' | 'identityId' | 'participantId' | 'threadId'
+  >,
+  right: Pick<
+    AssistantCronTarget,
+    'channel' | 'deliveryTarget' | 'identityId' | 'participantId' | 'threadId'
+  >,
+): boolean {
+  return (
+    left.channel === right.channel &&
+    left.identityId === right.identityId &&
+    left.participantId === right.participantId &&
+    left.threadId === right.threadId &&
+    left.deliveryTarget === right.deliveryTarget
+  )
+}

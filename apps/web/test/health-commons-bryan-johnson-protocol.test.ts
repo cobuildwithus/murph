@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
+import { healthCommonsCatalog } from "@/src/lib/health-commons/catalog";
 import { resolveHealthCommonsExperimentProtocol } from "@/src/lib/health-commons/experiment-detail";
+import { resolveProtocolImage } from "@/src/lib/health-commons/experiment-detail-media";
 
 describe("Health Commons experiment protocol metadata", () => {
   it("uses the simplified protocol title", () => {
@@ -43,5 +45,31 @@ describe("Health Commons experiment protocol metadata", () => {
 
     expect(protocol).not.toBeNull();
     expect(protocol?.image).toBe("/design-assets/cold-plunge-tub.jpeg");
+  });
+
+  it("prefers page-owned media over the route-mapped fallback image", () => {
+    const protocol = healthCommonsCatalog.findByKey(
+      "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+    );
+
+    expect(protocol).not.toBeNull();
+    if (!protocol) {
+      return;
+    }
+
+    const protocolWithPageMedia = {
+      ...protocol,
+      media: [
+        {
+          kind: "image",
+          relativePath: "/design-assets/hero-boundary-test.jpeg",
+          mediaType: "image/jpeg",
+        },
+      ],
+    };
+
+    expect(resolveProtocolImage(protocolWithPageMedia, "finnish-sauna")).toBe(
+      "/design-assets/hero-boundary-test.jpeg",
+    );
   });
 });
