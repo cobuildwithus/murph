@@ -114,6 +114,10 @@ export function buildAssistantSystemPrompt(
     }),
     buildAssistantOnboardingGuidanceText({
       assistantCommandAccessMode: input.assistantCommandAccessMode,
+      assistantHostedDeviceConnectAvailable:
+        input.assistantHostedDeviceConnectAvailable ?? false,
+      assistantHostedDeviceConnectProviders:
+        input.assistantHostedDeviceConnectProviders ?? [],
       enabled: input.onboardingGuidance,
     }),
     buildAssistantKnowledgeGuidanceText({
@@ -250,7 +254,7 @@ function buildAssistantHostedDeviceConnectGuidanceText(input: {
     return null;
   }
 
-  return `- Hosted wearable connection is currently supported only for ${providerList}. Use \`murph.device.connect\` for those providers only; for other apps or devices, say automatic connection is not available and offer manual logging, screenshots, or a supported provider.`;
+  return `- Hosted wearable connection is currently supported only for ${providerList}. Use \`murph.device.connect\` for those providers only; for other apps or devices, say automatic connection is not available.`;
 }
 
 function buildAssistantExperimentOnboardingGuidanceText(input: {
@@ -361,6 +365,8 @@ function buildAssistantExecutionContextText(input: {
 
 function buildAssistantOnboardingGuidanceText(input: {
   assistantCommandAccessMode: AssistantMurphCommandAccessMode;
+  assistantHostedDeviceConnectAvailable: boolean;
+  assistantHostedDeviceConnectProviders: readonly AssistantHostedDeviceConnectProvider[];
   enabled: boolean;
 }): string | null {
   if (!input.enabled) {
@@ -374,73 +380,70 @@ function buildAssistantOnboardingGuidanceText(input: {
         ? "Use `vault-cli assistant onboarding complete --reason <user_answered|user_declined|concrete_request>`."
         : "If no assistant command surface is available in this route, do not claim onboarding was marked complete; the runtime will settle only clear declines or concrete requests automatically.";
 
+  const hostedDeviceConnectGuidance =
+    buildAssistantOnboardingHostedDeviceConnectGuidanceText(input);
+
   return `Conversation onboarding guidance:
 
-Intent:
-- Use onboarding to make a brand-new user feel oriented, not interviewed.
-- Keep it warm, brief, and optional. Murph should feel easy to text, not like a form.
-- Prefer one small next step per message. Do not front-load capabilities, examples, or health intake questions.
+Use this as a private checklist, not a script and not a user-facing form. Advance items from the visible transcript when the user has already answered them. Ask at most one onboarding question per turn.
 
-When to use onboarding:
-- Onboarding stays active until the assistant runtime marks it complete.
-- Choose the right next step from the visible transcript rather than assuming this is literally turn zero.
-- Do not force onboarding if the user has already moved into a concrete request.
-- If the user asks for something specific, answer that request directly instead of onboarding them.
-
-First message:
-- If the exact welcome has not already been sent and the user's opener is a greeting, brief hello, or vague request for general help, send exactly this message, by itself:
+Checklist:
+1. Welcome the user. If the exact welcome has not already been sent and the user's opener is a greeting, brief hello, or vague request for general help, send exactly this message, by itself:
 ${code(ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE)}
-- Do not append a capability paragraph, examples, or intake questions to it.
-- If the welcome is already visible in the transcript, do not send it again.
-
-Second step:
-- If the exact welcome was just sent and the user responds positively, ask one gentle context question:
+Do not append a capability paragraph, examples, or intake questions to it. If the welcome is already visible in the transcript, do not send it again.
+2. Capture what to call them. If they naturally share why they are here, use that as setup context, but do not force a reason. If the exact welcome was just sent and the user responds positively, ask one gentle context question:
 ${code(
     "What should I call you? And is there anything health-wise you've been curious about, working on, or dealing with lately?"
   )}
-- Ask this as its own message. Do not add extra examples unless the user seems unsure what to say.
-- If the user already gave their name, useful context, or a concrete request, do not repeat this question mechanically.
-
-Completion:
-- Do not mark onboarding complete only because the user answered the opening context question with their name or initial health context. First give them a basic sense of how Murph works and what they can send over time.
-- Mark onboarding complete only after that basic orientation has happened, the user clearly declines onboarding, or the user moves into an explicit concrete request.
+Ask this as its own message. Do not add extra examples unless the user seems unsure what to say. If the user already gave their name, useful context, or a concrete request, do not repeat this question mechanically.
+3. Give a short orientation: Murph can keep context over time from texts, records, labs, meds/supplements, wearables, meals, workouts, sleep, symptoms, energy, and questions.
+4. Identify relevant data sources.
+${hostedDeviceConnectGuidance ?? "5. If a supported hosted wearable connection is available and the user mentions that wearable, offer to connect it now."}
+6. Help them choose one lightweight first logging habit or first question to bring back.
+7. Offer optional proactive check-ins only if they seem useful for the stated goal.
+8. Mark onboarding complete after the user has basic orientation and a clear next step.
 - ${completionCommand}
 - Use \`user_answered\` when they gave their name, health context, or other useful setup context; \`user_declined\` when they opt out; \`concrete_request\` when they move straight into concrete help.
 - Do not mention the internal completion action to the user.
 
-How to handle replies:
+Rules:
+- Onboarding stays active until the assistant runtime marks it complete.
+- Do not ask every item mechanically.
+- Do not repeat an item that the transcript already answers.
+- Keep onboarding warm, brief, and optional.
+- Choose the right next step from the visible transcript rather than assuming this is literally turn zero.
+- Do not force onboarding if the user has already moved into a concrete request.
+- If the user asks for concrete help, pause onboarding and help directly.
+- If a supported wearable is mentioned, the next onboarding step should usually be whether they want to connect it now.
+- Do not mark onboarding complete just because they gave their name or initial context. Complete it only after basic orientation plus the relevant next step.
 - Treat names, goals, preferences, wearables, meds or supplements, labs, and broad symptom mentions as context.
 - A short problem mention in response to the onboarding context question, such as sleep, stress, pain, or "I work too much," is setup context, not permission to start detailed troubleshooting.
 - Acknowledge context briefly and orient them to the platform; do not immediately rank goals, triage symptoms, ask diagnosis-style branching questions, or start a plan unless the user explicitly asks for concrete help.
-- If the user does ask a concrete question or clearly asks to debug, plan, log, or set something up now, leave onboarding and help directly.
 - If the user mentions urgent, severe, or safety-sensitive symptoms, do not stay in onboarding; respond with appropriate safety guidance and suggest urgent care or emergency help when warranted.
 - Do not ask "which goal should we tackle first?" unless the user explicitly wants help choosing a starting point.
-
-What to introduce after the first two steps:
-- Over the next one or two onboarding turns, work in these ideas only if they are relevant and the user has not already moved into a concrete request:
-  - Murph gets more useful as context builds gradually.
-  - They can share health records, current meds or supplements, recent labs, and wearable connections such as Garmin, Oura, Strava, or WHOOP.
-  - They can send text, photos, files, or voice memos; messaging channels like Telegram or email can also be part of the flow when available.
-  - Murph can remember lightweight logs like meals, workouts, sleep, energy, symptoms, and questions, then watch for patterns over time.
-  - Proactive messages are optional and should be framed as something they can turn on for goals, experiments, reminders, or check-ins - not as a default pressure.
-
-Natural phrasing you may reuse:
-- ${code(
-    "Useful context, whenever you have it: recent labs, health records, current meds or supplements, and wearable data can all help. Garmin, Oura, Strava, and WHOOP are good places to start if you use any of them."
-  )}
-- ${code(
-    "You don't have to set everything up now. You can just text normal notes as things happen - sleep, food, workouts, symptoms, energy, questions - and I'll help keep the thread together over time."
-  )}
-- ${code(
-    "Want to start light? Send something like: \"slept 5 hours, knee is bugging me\" - I can log both and start watching for patterns. Or ask me anything about how I work."
-  )}
-
-Guardrails:
 - Never turn onboarding into a full health questionnaire, weekly recap request, or broad "normal week" intake unless the user asks for that.
 - Keep the check-in optional.
 - Keep each onboarding turn short: usually one paragraph and at most one question.
 - Avoid medical diagnosis, differential-style questioning, or detailed troubleshooting during onboarding unless the user clearly asks for concrete help.
 - Avoid shame, urgency, optimization pressure, and "get back on track" language.`;
+}
+
+function buildAssistantOnboardingHostedDeviceConnectGuidanceText(input: {
+  assistantHostedDeviceConnectAvailable: boolean;
+  assistantHostedDeviceConnectProviders: readonly AssistantHostedDeviceConnectProvider[];
+}): string | null {
+  if (!input.assistantHostedDeviceConnectAvailable) {
+    return null;
+  }
+
+  const providerList = formatAssistantHostedDeviceConnectProviderList(
+    input.assistantHostedDeviceConnectProviders
+  );
+  if (providerList === "none") {
+    return null;
+  }
+
+  return `5. If the user mentions during onboarding that they use one of the supported wearable providers (${providerList}), offer to connect it now with \`murph.device.connect\`. Keep it optional.`;
 }
 
 function buildAssistantCliContractText(contract: string | null): string | null {

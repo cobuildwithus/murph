@@ -63,6 +63,17 @@ function buildNotificationPrompt(
   })
 }
 
+function getOnboardingGuidanceSection(prompt: string): string {
+  const start = prompt.indexOf('Conversation onboarding guidance:')
+  const end = prompt.indexOf('Scheduled assistant automation commands')
+
+  if (start === -1 || end === -1 || end <= start) {
+    throw new Error('Expected onboarding guidance and cron guidance sections to be present')
+  }
+
+  return prompt.slice(start, end)
+}
+
 describe('buildAssistantSystemPrompt', () => {
   it('tells bound-tool sessions to route run distance questions through vault.cli.run', () => {
     const prompt = buildPrompt('bound-tools')
@@ -217,19 +228,19 @@ Your own private health team, whenever you need it.
 
 Ready to get started?`)
     expect(prompt).toContain(
-      'Use onboarding to make a brand-new user feel oriented, not interviewed.',
+      'Use this as a private checklist, not a script and not a user-facing form.',
     )
     expect(prompt).toContain(
       "What should I call you? And is there anything health-wise you've been curious about, working on, or dealing with lately?",
     )
     expect(prompt).toContain(
-      'Useful context, whenever you have it: recent labs, health records, current meds or supplements, and wearable data can all help.',
+      'Capture what to call them. If they naturally share why they are here, use that as setup context, but do not force a reason.',
     )
     expect(prompt).toContain(
-      "You don't have to set everything up now. You can just text normal notes as things happen - sleep, food, workouts, symptoms, energy, questions - and I'll help keep the thread together over time.",
+      'Give a short orientation: Murph can keep context over time from texts, records, labs, meds/supplements, wearables, meals, workouts, sleep, symptoms, energy, and questions.',
     )
     expect(prompt).toContain(
-      'Want to start light? Send something like: "slept 5 hours, knee is bugging me" - I can log both and start watching for patterns.',
+      'Help them choose one lightweight first logging habit or first question to bring back.',
     )
     expect(prompt).toContain(
       'Do not append a capability paragraph, examples, or intake questions to it.',
@@ -238,10 +249,10 @@ Ready to get started?`)
       'Onboarding stays active until the assistant runtime marks it complete.',
     )
     expect(prompt).toContain(
-      'Do not mark onboarding complete only because the user answered the opening context question with their name or initial health context.',
+      'Do not mark onboarding complete just because they gave their name or initial context.',
     )
     expect(prompt).toContain(
-      'First give them a basic sense of how Murph works and what they can send over time.',
+      'Complete it only after basic orientation plus the relevant next step.',
     )
     expect(prompt).toContain(
       'Use `vault.cli.run` to execute `vault-cli assistant onboarding complete --reason <user_answered|user_declined|concrete_request>`.',
@@ -254,6 +265,40 @@ Ready to get started?`)
     )
     expect(prompt).toContain(
       'If the user mentions urgent, severe, or safety-sensitive symptoms, do not stay in onboarding;',
+    )
+  })
+
+  it('keeps onboarding as a short checklist and offers supported wearable connection', () => {
+    const prompt = buildPrompt('bound-tools', null, {
+      onboardingGuidance: true,
+      assistantHostedDeviceConnectAvailable: true,
+      assistantHostedDeviceConnectProviders: [
+        { label: 'Oura', provider: 'oura' },
+        { label: 'WHOOP', provider: 'whoop' },
+      ],
+    })
+    const onboarding = getOnboardingGuidanceSection(prompt)
+
+    expect(onboarding).toContain(
+      'Use this as a private checklist, not a script and not a user-facing form.',
+    )
+    expect(onboarding).toContain(
+      'Advance items from the visible transcript when the user has already answered them. Ask at most one onboarding question per turn.',
+    )
+    expect(onboarding).toContain(
+      'If the user mentions during onboarding that they use one of the supported wearable providers (Oura (`oura`) and WHOOP (`whoop`)), offer to connect it now with `murph.device.connect`.',
+    )
+    expect(onboarding).toContain(
+      'If a supported wearable is mentioned, the next onboarding step should usually be whether they want to connect it now.',
+    )
+    expect(onboarding).toContain(
+      'Keep each onboarding turn short: usually one paragraph and at most one question.',
+    )
+    expect(onboarding).toContain('Keep the check-in optional.')
+    expect(onboarding).not.toContain('manual logging')
+    expect(onboarding).not.toContain('screenshots')
+    expect(prompt).toContain(
+      'Hosted wearable connection is currently supported only for Oura (`oura`) and WHOOP (`whoop`). Use `murph.device.connect` for those providers only; for other apps or devices, say automatic connection is not available.',
     )
   })
 
