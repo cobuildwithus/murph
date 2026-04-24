@@ -8,6 +8,7 @@ import {
 import {
   createHostedPhoneLookupKey,
 } from "./contact-privacy";
+import { assertHostedMemberNotSuspended } from "./entitlement";
 import { getPrisma } from "../prisma";
 import { hostedOnboardingError } from "./errors";
 import { type HostedPrivyIdentity } from "./privy";
@@ -306,6 +307,7 @@ export async function reconcileHostedPrivyIdentityOnMemberTx(input: {
       httpStatus: 403,
     });
   }
+  assertHostedMemberNotSuspended(currentMember);
 
   assertHostedPrivyIdentityMatchesExpectedPhone({
     expectedPhoneHint: input.expectedPhoneHint,

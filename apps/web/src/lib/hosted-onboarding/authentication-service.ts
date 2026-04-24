@@ -5,8 +5,7 @@ import {
 import { type HostedAuthenticationIntent } from "./authentication-intent";
 import { getPrisma } from "../prisma";
 import { readHostedPhoneHint } from "./contact-privacy";
-import { isHostedMemberSuspended } from "./entitlement";
-import { hostedOnboardingError } from "./errors";
+import { assertHostedMemberNotSuspended } from "./entitlement";
 import { deriveHostedPostVerificationStage } from "./lifecycle";
 import {
   deriveHostedOnboardingTimingErrorName,
@@ -15,7 +14,7 @@ import {
 } from "./logging";
 import { isHostedMemberActivationPending } from "./activation-progress";
 import {
-  readHostedMemberSnapshot,
+  readHostedMemberMessagingSetupState,
   syncHostedMemberVerifiedEmailAuthorization,
 } from "./hosted-member-store";
 import {
@@ -68,6 +67,11 @@ export async function completeHostedPrivyVerification(input: {
       ? await requireHostedInviteForAuthentication(input.inviteCode, prisma, now)
       : null;
     usedInvite = invite !== null;
+
+    if (invite) {
+      assertHostedMemberNotSuspended(invite.member);
+    }
+
     const member = invite
       ? await (async () => {
           const inviteIdentity = requireHostedInviteMemberIdentity(invite.member);
@@ -92,6 +96,8 @@ export async function completeHostedPrivyVerification(input: {
             now,
           });
 
+    assertHostedMemberNotSuspended(member);
+
     await syncHostedPrivyBindings({
       identity: input.identity,
       memberId: member.id,
@@ -99,18 +105,10 @@ export async function completeHostedPrivyVerification(input: {
       verifiedPrivyUser: input.verifiedPrivyUser ?? null,
     });
 
-    const memberSnapshot = await readHostedMemberSnapshot({
+    const messagingSetupState = await readHostedMemberMessagingSetupState({
       memberId: member.id,
       prisma,
     });
-
-    if (isHostedMemberSuspended(member.suspendedAt)) {
-      throw hostedOnboardingError({
-        code: "HOSTED_MEMBER_SUSPENDED",
-        message: "This hosted account is suspended. Contact support to restore access.",
-        httpStatus: 403,
-      });
-    }
 
     const activeInvite = invite ?? await issueHostedInvite({
       channel: "web",
@@ -130,8 +128,8 @@ export async function completeHostedPrivyVerification(input: {
       suspendedAt: member.suspendedAt,
     });
     const messagingSetupRequired = isHostedMemberMessagingSetupRequired({
-      identity: memberSnapshot?.identity ?? null,
-      routing: memberSnapshot?.routing ?? null,
+      identity: messagingSetupState?.identity ?? null,
+      routing: messagingSetupState?.routing ?? null,
     });
 
     finishHostedOnboardingTiming(timing, "completed", {

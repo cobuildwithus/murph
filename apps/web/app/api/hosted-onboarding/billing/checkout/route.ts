@@ -27,7 +27,10 @@ export const POST = withJsonError(async (request: Request) => {
       ...(billingPlanCode ? { billingPlanCode } : {}),
       inviteCode,
       linkedAccounts: auth.linkedAccounts,
-      member: auth.member,
+      member: {
+        id: auth.member.id,
+        suspendedAt: auth.member.suspendedAt,
+      },
       ...(typeof body.shareCode === "string" ? { shareCode: body.shareCode } : {}),
     });
 

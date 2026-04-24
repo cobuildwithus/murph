@@ -84,6 +84,15 @@ type HostedMemberDelegate = {
   findUnique?: (input: { where?: Record<string, unknown> }) => Promise<unknown>;
   update?: (input: { data?: Record<string, unknown>; where?: Record<string, unknown> }) => Promise<unknown>;
 };
+type HostedMemberFindUniqueInclude = {
+  billingRef?: boolean;
+  identity?: boolean;
+  routing?: boolean;
+};
+type HostedMemberFindUniqueSelect = {
+  identity?: unknown;
+  routing?: unknown;
+};
 type HostedMemberRoutingDelegate = {
   findMany?: (input: { where?: Record<string, unknown> }) => Promise<unknown>;
   findFirst?: (input: { where?: Record<string, unknown> }) => Promise<unknown>;
@@ -1014,7 +1023,19 @@ describe("completeHostedPrivyVerification", () => {
 
     await expect(
       completeHostedPrivyVerification({
-        identity: makeIdentity(),
+        identity: makeIdentity({
+          email: {
+            address: "suspended@example.test",
+            verifiedAt: 1743064200,
+          },
+          telegram: {
+            firstName: "Alice",
+            lastName: null,
+            photoUrl: null,
+            telegramUserId: "456",
+            username: "alice",
+          },
+        }),
         inviteCode: "invite-code",
         now: NOW,
         prisma,
@@ -1026,6 +1047,9 @@ describe("completeHostedPrivyVerification", () => {
 
     expect(prisma.hostedMember.update).not.toHaveBeenCalled();
     expect(prisma.hostedInvite.update).not.toHaveBeenCalled();
+    expect(prisma.hostedMemberIdentity.upsert).not.toHaveBeenCalled();
+    expect(prisma.hostedMemberEmailAuthorization.upsert).not.toHaveBeenCalled();
+    expect(prisma.hostedMemberRouting.upsert).not.toHaveBeenCalled();
   });
 
   it("refuses a returning suspended member during public Privy verification before issuing a fresh invite", async () => {
@@ -1063,7 +1087,19 @@ describe("completeHostedPrivyVerification", () => {
 
     await expect(
       completeHostedPrivyVerification({
-        identity: makeIdentity(),
+        identity: makeIdentity({
+          email: {
+            address: "suspended@example.test",
+            verifiedAt: 1743064200,
+          },
+          telegram: {
+            firstName: "Alice",
+            lastName: null,
+            photoUrl: null,
+            telegramUserId: "456",
+            username: "alice",
+          },
+        }),
         now: NOW,
         prisma,
       }),
@@ -1074,6 +1110,9 @@ describe("completeHostedPrivyVerification", () => {
 
     expect(prisma.hostedMember.create).not.toHaveBeenCalled();
     expect(prisma.hostedInvite.create).not.toHaveBeenCalled();
+    expect(prisma.hostedMemberIdentity.upsert).not.toHaveBeenCalled();
+    expect(prisma.hostedMemberEmailAuthorization.upsert).not.toHaveBeenCalled();
+    expect(prisma.hostedMemberRouting.upsert).not.toHaveBeenCalled();
   });
 
   it("rejects a verified phone that conflicts across two existing hosted members", async () => {
@@ -1298,9 +1337,11 @@ function asCompleteHostedPrivyVerificationPrisma<T extends Record<string, unknow
         ...(hostedMember ?? {}),
         findUnique: vi.fn(async ({
           include,
+          select,
           where,
         }: {
-          include?: { billingRef?: boolean; identity?: boolean; routing?: boolean };
+          include?: HostedMemberFindUniqueInclude;
+          select?: HostedMemberFindUniqueSelect;
           where?: Record<string, unknown>;
         }) => {
           const invite = await hostedInvite?.findUnique?.({ where: {} });
@@ -1312,24 +1353,16 @@ function asCompleteHostedPrivyVerificationPrisma<T extends Record<string, unknow
             && isPlainRecord(inviteMember)
             && inviteMember.id === where.id
           ) {
-            if (!include || typeof inviteMember !== "object") {
+            if ((!include && !select) || typeof inviteMember !== "object") {
               return inviteMember;
             }
 
-            const memberRecord = inviteMember;
-            const memberId = typeof memberRecord.id === "string" ? memberRecord.id : null;
-            return {
-              ...memberRecord,
-              ...(include.billingRef ? { billingRef: memberRecord.billingRef ?? null } : {}),
-              ...(include.identity ? { identity: memberRecord.identity ?? readMemberIdentity(memberRecord) } : {}),
-              ...(include.routing
-                ? {
-                    routing:
-                      memberRecord.routing
-                      ?? (memberId ? routingRecordsByMemberId.get(memberId) ?? null : null),
-                  }
-                : {}),
-            };
+            return projectHostedMemberFindUniqueResult({
+              include,
+              member: inviteMember,
+              routingRecordsByMemberId,
+              select,
+            });
           }
 
           return null;
@@ -1348,19 +1381,22 @@ function asCompleteHostedPrivyVerificationPrisma<T extends Record<string, unknow
         configurable: true,
         value: vi.fn(async ({
           include,
+          select,
           where,
         }: {
-          include?: { billingRef?: boolean; identity?: boolean; routing?: boolean };
+          include?: HostedMemberFindUniqueInclude;
+          select?: HostedMemberFindUniqueSelect;
           where: Record<string, unknown>;
         }) => {
           const result = await Reflect.apply(originalFindUnique, hostedMemberRecord, [
             {
               include,
+              select,
               where,
             },
           ]);
 
-          if (!include || !result || typeof result !== "object") {
+          if ((!include && !select) || !result || typeof result !== "object") {
             return result;
           }
 
@@ -1368,21 +1404,12 @@ function asCompleteHostedPrivyVerificationPrisma<T extends Record<string, unknow
             return result;
           }
 
-          const memberRecord = result;
-          const memberId = typeof memberRecord.id === "string" ? memberRecord.id : null;
-
-          return {
-            ...memberRecord,
-            ...(include.billingRef ? { billingRef: memberRecord.billingRef ?? null } : {}),
-            ...(include.identity ? { identity: memberRecord.identity ?? readMemberIdentity(memberRecord) } : {}),
-            ...(include.routing
-              ? {
-                  routing:
-                    memberRecord.routing
-                    ?? (memberId ? routingRecordsByMemberId.get(memberId) ?? null : null),
-                }
-              : {}),
-          };
+          return projectHostedMemberFindUniqueResult({
+            include,
+            member: result,
+            routingRecordsByMemberId,
+            select,
+          });
         }),
       });
     }
@@ -1838,6 +1865,61 @@ function readHostedIngressEventDelegate(value: unknown): HostedIngressEventDeleg
         findFirst,
       }
     : undefined;
+}
+
+function projectHostedMemberFindUniqueResult(input: {
+  include?: HostedMemberFindUniqueInclude;
+  member: Record<string, unknown>;
+  routingRecordsByMemberId: Map<string, Record<string, unknown>>;
+  select?: HostedMemberFindUniqueSelect;
+}) {
+  const memberId = typeof input.member.id === "string" ? input.member.id : null;
+  const identity = isPlainRecord(input.member.identity)
+    ? input.member.identity
+    : readMemberIdentity(input.member);
+  const routing = isPlainRecord(input.member.routing)
+    ? input.member.routing
+    : memberId
+      ? input.routingRecordsByMemberId.get(memberId) ?? null
+      : null;
+
+  if (input.select?.identity || input.select?.routing) {
+    return {
+      ...(input.select.identity
+        ? {
+            identity,
+          }
+        : {}),
+      ...(input.select.routing
+        ? {
+            routing,
+          }
+        : {}),
+    };
+  }
+
+  if (input.select) {
+    return input.member;
+  }
+
+  return {
+    ...input.member,
+    ...(input.include?.billingRef
+      ? {
+          billingRef: input.member.billingRef ?? null,
+        }
+      : {}),
+    ...(input.include?.identity
+      ? {
+          identity,
+        }
+      : {}),
+    ...(input.include?.routing
+      ? {
+          routing,
+        }
+      : {}),
+  };
 }
 
 function readMemberIdentity(member: unknown) {

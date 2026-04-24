@@ -50,7 +50,7 @@ describe("hosted-onboarding member-identity-service", () => {
 
   it("locks and re-reads the current member before reconciling a Privy identity", async () => {
     const lockedMember = makeMember({
-      suspendedAt: NOW,
+      suspendedAt: null,
     });
     const lockQuery = vi.fn().mockResolvedValue([]);
     const hostedMember = {
@@ -110,7 +110,7 @@ describe("hosted-onboarding member-identity-service", () => {
       },
     });
     expect(hostedMember.update).not.toHaveBeenCalled();
-    expect(result.suspendedAt).toEqual(NOW);
+    expect(result.suspendedAt).toBeNull();
     expect(identityUpsert).toHaveBeenCalledWith(expect.objectContaining({
       where: {
         memberId: "member_123",
@@ -125,6 +125,49 @@ describe("hosted-onboarding member-identity-service", () => {
         signupPhoneNumberEncrypted: null,
       }),
     }));
+  });
+
+  it("blocks a suspended member before reconciling any identity fields", async () => {
+    const lockedMember = makeMember({
+      suspendedAt: NOW,
+    });
+    const prisma = asRootPrisma({
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue(lockedMember),
+        update: vi.fn(),
+      },
+      hostedMemberIdentity: {
+        findUnique: vi.fn().mockResolvedValue({
+          maskedPhoneNumberHint: "*** 4567",
+          memberId: lockedMember.id,
+          phoneLookupKey: "hbidx:phone:v1:existing",
+          phoneNumber: null,
+          phoneNumberVerifiedAt: null,
+          privyUserId: null,
+          walletAddress: null,
+          walletChainType: null,
+          walletCreatedAt: null,
+          walletProvider: null,
+        }),
+        upsert: vi.fn(),
+      },
+    });
+
+    await expect(reconcileHostedPrivyIdentityOnMember({
+      identity: makeIdentity(),
+      member: makeMember({
+        suspendedAt: null,
+      }),
+      now: NOW,
+      prisma: prisma as never,
+    })).rejects.toMatchObject({
+      code: "HOSTED_MEMBER_SUSPENDED",
+      httpStatus: 403,
+    });
+
+    expect(prisma.hostedMember.update).not.toHaveBeenCalled();
+    expect(prisma.hostedMemberIdentity.upsert).not.toHaveBeenCalled();
   });
 
   it("fails closed when the member disappears before the locked reconciliation write", async () => {

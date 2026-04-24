@@ -13,6 +13,7 @@ import {
 
 import {
   composeHostedMemberSnapshot,
+  readHostedMemberMessagingSetupState,
   readHostedMemberSnapshot,
   type HostedMemberCoreState,
 } from "@/src/lib/hosted-onboarding/hosted-member-store";
@@ -1932,6 +1933,66 @@ describe("hosted-member-store", () => {
         telegramThreadId: null,
         telegramUserId: null,
         telegramUserLookupKey: "tg_user_123",
+      },
+    });
+  });
+
+  it("reads only messaging setup state needed by Privy completion", async () => {
+    const routingPrivateColumns = buildHostedMemberRoutingPrivateColumns({
+      linqChatId: null,
+      linqRecipientPhone: null,
+      memberId: "member_123",
+      pendingLinqChatId: null,
+      pendingLinqRecipientPhone: null,
+      telegramThreadId: null,
+      telegramUserId: "456",
+    });
+    const findUnique = vi.fn().mockResolvedValue({
+      identity: {
+        phoneLookupKey: "hbidx:phone:v1:abc123",
+      },
+      routing: {
+        memberId: "member_123",
+        telegramUserIdEncrypted: routingPrivateColumns.telegramUserIdEncrypted,
+      },
+    });
+    const prisma = {
+      hostedMember: {
+        findUnique,
+      },
+    } as never;
+
+    await expect(
+      readHostedMemberMessagingSetupState({
+        memberId: "member_123",
+        prisma,
+      }),
+    ).resolves.toEqual({
+      identity: {
+        phoneLookupKey: "hbidx:phone:v1:abc123",
+      },
+      routing: {
+        telegramThreadId: "456",
+        telegramUserId: "456",
+      },
+    });
+
+    expect(findUnique).toHaveBeenCalledWith({
+      where: {
+        id: "member_123",
+      },
+      select: {
+        identity: {
+          select: {
+            phoneLookupKey: true,
+          },
+        },
+        routing: {
+          select: {
+            memberId: true,
+            telegramUserIdEncrypted: true,
+          },
+        },
       },
     });
   });

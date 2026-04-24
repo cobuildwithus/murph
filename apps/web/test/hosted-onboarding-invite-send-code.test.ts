@@ -52,19 +52,20 @@ describe("invite send-code lifecycle", () => {
     });
   });
 
-  it("records only the transient attempt id before returning the stored signup phone", async () => {
+  it("records only the transient attempt id before returning a masked stored-phone hint", async () => {
     storeMocks.readHostedMemberIdentity.mockResolvedValue(makeIdentity());
 
-    await expect(
-      prepareHostedInvitePhoneCode({
-        inviteCode: "invite-code",
-        now: new Date("2026-04-07T01:00:00.000Z"),
-        prisma: makeInvitePrisma(),
-      }),
-    ).resolves.toEqual({
-      phoneNumber: "+15551234567",
+    const result = await prepareHostedInvitePhoneCode({
+      inviteCode: "invite-code",
+      now: new Date("2026-04-07T01:00:00.000Z"),
+      prisma: makeInvitePrisma(),
+    });
+
+    expect(result).toEqual({
+      phoneHint: "*** 4567",
       sendAttemptId: expect.stringMatching(/^hbpc_/),
     });
+    expect(result).not.toHaveProperty("phoneNumber");
 
     expect(storeMocks.writeHostedMemberSignupPhoneState).toHaveBeenCalledWith({
       memberId: "member_123",
@@ -80,16 +81,38 @@ describe("invite send-code lifecycle", () => {
       signupPhoneNumber: null,
     }));
 
+    const result = await prepareHostedInvitePhoneCode({
+      inviteCode: "invite-code",
+      now: new Date("2026-04-07T01:00:00.000Z"),
+      prisma: makeInvitePrisma(),
+    });
+
+    expect(result).toEqual({
+      phoneHint: "*** 4567",
+      sendAttemptId: expect.stringMatching(/^hbpc_/),
+    });
+    expect(result).not.toHaveProperty("phoneNumber");
+  });
+
+  it("rate limits repeated invite send-code requests while an attempt is in flight", async () => {
+    storeMocks.readHostedMemberIdentity.mockResolvedValue(makeIdentity({
+      signupPhoneCodeSendAttemptId: "hbpc_in_flight",
+      signupPhoneCodeSendAttemptStartedAt: new Date("2026-04-07T01:00:30.000Z"),
+      signupPhoneCodeSentAt: null,
+    }));
+
     await expect(
       prepareHostedInvitePhoneCode({
         inviteCode: "invite-code",
-        now: new Date("2026-04-07T01:00:00.000Z"),
+        now: new Date("2026-04-07T01:00:45.000Z"),
         prisma: makeInvitePrisma(),
       }),
-    ).resolves.toEqual({
-      phoneNumber: "+15557654321",
-      sendAttemptId: expect.stringMatching(/^hbpc_/),
+    ).rejects.toMatchObject({
+      code: "PHONE_CODE_COOLDOWN",
+      httpStatus: 429,
     });
+
+    expect(storeMocks.writeHostedMemberSignupPhoneState).not.toHaveBeenCalled();
   });
 
   it("starts the durable cooldown on confirm and clears the temporary attempt markers", async () => {

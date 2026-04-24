@@ -353,7 +353,7 @@ export async function prepareHostedInvitePhoneCode(input: {
   inviteCode: string;
   now?: Date;
   prisma?: PrismaClient;
-}): Promise<{ phoneNumber: string; sendAttemptId: string }> {
+}): Promise<{ phoneHint: string; sendAttemptId: string }> {
   const now = input.now ?? new Date();
   const prisma = input.prisma ?? getPrisma();
 
@@ -373,8 +373,11 @@ export async function prepareHostedInvitePhoneCode(input: {
     }
 
     const retryAfterMs = readPhoneCodeRetryAfterMs({
+      lastAttemptAt: maxDate(
+        identity.signupPhoneCodeSentAt,
+        identity.signupPhoneCodeSendAttemptStartedAt,
+      ),
       now,
-      sentAt: identity.signupPhoneCodeSentAt,
     });
 
     if (retryAfterMs > 0) {
@@ -398,7 +401,7 @@ export async function prepareHostedInvitePhoneCode(input: {
     });
 
     return {
-      phoneNumber: resumePhoneNumber,
+      phoneHint: readHostedPhoneHint(identity.maskedPhoneNumberHint ?? resumePhoneNumber),
       sendAttemptId,
     };
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
@@ -604,15 +607,27 @@ async function readHostedInviteIdentityStateOrThrow(
 }
 
 function readPhoneCodeRetryAfterMs(input: {
+  lastAttemptAt: Date | null;
   now: Date;
-  sentAt: Date | null;
 }): number {
-  if (!input.sentAt) {
+  if (!input.lastAttemptAt) {
     return 0;
   }
 
   return Math.max(
     0,
-    input.sentAt.getTime() + HOSTED_INVITE_SEND_CODE_COOLDOWN_MS - input.now.getTime(),
+    input.lastAttemptAt.getTime() + HOSTED_INVITE_SEND_CODE_COOLDOWN_MS - input.now.getTime(),
   );
+}
+
+function maxDate(first: Date | null, second: Date | null): Date | null {
+  if (!first) {
+    return second;
+  }
+
+  if (!second) {
+    return first;
+  }
+
+  return first.getTime() >= second.getTime() ? first : second;
 }

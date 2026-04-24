@@ -141,7 +141,7 @@ describe("hosted onboarding routes", () => {
       ok: true,
     });
     mocks.prepareHostedInvitePhoneCode.mockResolvedValue({
-      phoneNumber: "+15551234567",
+      phoneHint: "*** 4567",
       sendAttemptId: "send_attempt_123",
     });
     mocks.requirePrivyMemberAuth.mockResolvedValue({
@@ -151,7 +151,10 @@ describe("hosted onboarding routes", () => {
           type: "email",
         },
       ],
-      member: { id: "member_123" },
+      member: {
+        id: "member_123",
+        suspendedAt: null,
+      },
     });
     mocks.requireHostedInviteCodeFromRequest.mockResolvedValue({
       body: {
@@ -569,7 +572,7 @@ describe("hosted onboarding routes", () => {
       inviteCode: "invite-code",
     });
     await expect(response.json()).resolves.toEqual({
-      phoneNumber: "+15551234567",
+      phoneHint: "*** 4567",
       sendAttemptId: "send_attempt_123",
     });
   });
@@ -779,7 +782,10 @@ describe("hosted onboarding routes", () => {
           type: "email",
         },
       ],
-      member: { id: "member_123" },
+      member: {
+        id: "member_123",
+        suspendedAt: null,
+      },
     });
     await expect(response.json()).resolves.toEqual({
       alreadyActive: false,
@@ -810,7 +816,10 @@ describe("hosted onboarding routes", () => {
           type: "email",
         },
       ],
-      member: { id: "member_123" },
+      member: {
+        id: "member_123",
+        suspendedAt: null,
+      },
     });
     await expect(response.json()).resolves.toEqual({
       alreadyActive: false,
@@ -848,7 +857,10 @@ describe("hosted onboarding routes", () => {
           type: "email",
         },
       ],
-      member: { id: "member_123" },
+      member: {
+        id: "member_123",
+        suspendedAt: null,
+      },
       shareCode: "share_123",
     });
     await expect(response.json()).resolves.toEqual({
