@@ -5,6 +5,7 @@ import {
   buildHostedAssistantDeliverySendingRecord,
   buildHostedAssistantDeliverySentRecord,
   buildHostedAssistantDeliverySideEffect,
+  buildHostedExecutionPrefixedSafeErrorDiagnostics,
   buildHostedExecutionSafeErrorDetails,
   buildHostedExecutionStructuredLogRecord,
   deriveHostedExecutionErrorCode,
@@ -67,7 +68,19 @@ describe("hosted execution observability", () => {
       [new Error("durable finalize failed"), "durable_finalize_error"],
       [new Error("Runner returned HTTP 502"), "runner_http_error"],
       [new Error("forbidden by authorization policy"), "authorization_error"],
+      [
+        Object.assign(new Error("provider failed"), {
+          cause: { statusCode: 401 },
+        }),
+        "authorization_error",
+      ],
       [new Error("request body must be a json object"), "invalid_request"],
+      [
+        Object.assign(new Error("provider failed"), {
+          context: { errorCode: "bad_request" },
+        }),
+        "invalid_request",
+      ],
       [Object.assign(new Error("aborted"), { name: "AbortError" }), "timeout"],
       [new TypeError("wrong type"), "type_error"],
       ["plain failure", "runtime_error"],
@@ -98,10 +111,10 @@ describe("hosted execution observability", () => {
     expect(
       normalizeHostedExecutionOperatorMessage(
         "Authorization: Bearer secret-token hello user@example.com token=my-token "
-        + "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.signature",
+        + "phone=+15551234567 eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.signature",
       ),
     ).toBe(
-      "Authorization=Bearer [redacted] hello [redacted-email] token=[redacted] [redacted-token]",
+      "Authorization=Bearer [redacted] hello [redacted-email] token=[redacted] phone=[redacted-phone] [redacted-token]",
     );
 
     const repeated = "x".repeat(260);
@@ -233,6 +246,10 @@ describe("hosted execution observability", () => {
 
   it("extracts a privacy-bounded assistant-notification detail subset from annotated errors", () => {
     const error = Object.assign(new Error("provider failed"), {
+      cause: Object.assign(new Error("Gateway rejected provider credentials."), {
+        code: "invalid_api_key",
+        statusCode: 401,
+      }),
       details: {
         assistantNotificationChannel: "linq",
         assistantNotificationDeliveryKind: "thread",
@@ -255,14 +272,31 @@ describe("hosted execution observability", () => {
       },
     });
 
+    expect(buildHostedExecutionPrefixedSafeErrorDiagnostics({
+      error,
+      prefix: "notification",
+    })).toMatchObject({
+      notificationErrorCode: "authorization_error",
+      notificationErrorCodeDetail: "invalid_api_key",
+      notificationErrorStatus: 401,
+    });
+
     expect(extractHostedAssistantNotificationRedactedDetails(error)).toEqual({
       assistantNotificationChannel: "linq",
       assistantNotificationDeliveryKind: "thread",
+      assistantNotificationErrorCause: "Gateway rejected provider credentials.",
+      assistantNotificationErrorCode: "authorization_error",
+      assistantNotificationErrorCodeDetail: "invalid_api_key",
+      assistantNotificationErrorDetail: "provider failed",
+      assistantNotificationErrorMessage: "Hosted execution authorization failed.",
+      assistantNotificationErrorName: "Error",
+      assistantNotificationErrorStatus: 401,
       assistantNotificationExplicitTargetPresent: false,
       assistantNotificationIdentityIdPresent: true,
       assistantNotificationLinqBaseUrlConfigured: true,
       assistantNotificationProvider: "openai-compatible",
       assistantNotificationProviderBaseUrlConfigured: true,
+      assistantNotificationProviderErrorCode: "invalid_api_key",
       assistantNotificationProviderModel: "gpt-4.1-mini",
       assistantNotificationRouteId: "route_primary",
       assistantNotificationStage: "provider",
@@ -454,7 +488,7 @@ describe("hosted execution observability", () => {
         "at first (<REDACTED_PATH>)",
         "at second (<REDACTED_PATH>)",
       ],
-      token: "secret-token",
+      token: "[redacted]",
     });
     expect(
       sanitizeHostedExecutionStructuredLogDetails({
