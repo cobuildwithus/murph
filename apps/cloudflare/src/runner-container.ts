@@ -262,7 +262,7 @@ export class RunnerContainer extends Container {
       token: createRunnerOutboundProxyToken(),
       userId: routeUserId,
     };
-    let keepWarm = false;
+    let completedSuccessfully = false;
     this.currentLogContext = logContext;
 
     try {
@@ -346,7 +346,7 @@ export class RunnerContainer extends Container {
 
       const result = await response.json();
       assertHostedRunnerContainerResult(result);
-      keepWarm = true;
+      completedSuccessfully = true;
       return result;
     } catch (error) {
       emitHostedExecutionStructuredLog({
@@ -368,15 +368,9 @@ export class RunnerContainer extends Container {
           run,
           wake,
         });
-        if (!outboundProxyExpired) {
-          keepWarm = false;
-        }
-
-        const shouldDestroy = !keepWarm;
-
-        if (shouldDestroy) {
-          await this.stopWarmContainer();
-        }
+        await this.stopWarmContainer({
+          failClosed: !completedSuccessfully || !outboundProxyExpired,
+        });
       } finally {
         if (this.currentLogContext === logContext) {
           this.currentLogContext = null;
