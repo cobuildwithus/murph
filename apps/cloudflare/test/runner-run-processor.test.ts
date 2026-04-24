@@ -165,6 +165,16 @@ function createInvokeRunnerProcessor(input: {
     },
     userId: "user_123",
   });
+  const destroyRunnerContainerInstance = vi.fn(async () => {});
+  const runnerContainerNamespace = {
+    getByName: vi.fn(() => ({
+      destroyInstance: destroyRunnerContainerInstance,
+      invoke: vi.fn(async () => {
+        throw new Error("unexpected runner container invocation");
+      }),
+      ownsInternalWorkerProxyToken: vi.fn(async () => false),
+    })),
+  };
 
   const processor = new RunnerRunProcessor({
     applyHostedTransition: vi.fn(),
@@ -179,19 +189,19 @@ function createInvokeRunnerProcessor(input: {
     },
     hostedWebBaseUrl: input.hostedWebBaseUrl ?? null,
     readRunnerRuntimeConfigSource: () => input.configSource ?? {},
-    runnerContainerNamespace: {
-      getByName: vi.fn(),
-    },
+    runnerContainerNamespace,
     runnerRuntimeEnvSource: input.forwardedEnvSource ?? {},
     stateStore,
     runtimeAlarmScheduler: {},
   } as never);
 
   return {
+    destroyRunnerContainerInstance,
     ensureRunnerStores,
     processor,
     readBundlesForRunner,
     readRunnerSecrets,
+    runnerContainerNamespace,
     stateStore,
   };
 }
@@ -2353,10 +2363,12 @@ describe("RunnerRunProcessor.executeRunDrain", () => {
     }));
   });
 
-  it("keeps explicit runner-output bundle validation failures on the normal failure path", async () => {
+  it("recycles the warm container before retrying explicit runner-output bundle validation failures", async () => {
     const {
+      destroyRunnerContainerInstance,
       processor,
       readBundlesForRunner,
+      runnerContainerNamespace,
       stateStore,
     } = createInvokeRunnerProcessor();
     const invalidRef: HostedExecutionBundleRef = {
@@ -2388,11 +2400,32 @@ describe("RunnerRunProcessor.executeRunDrain", () => {
 
     expect(result.state).toBe("backpressured");
     expect(invokeHostedExecutionContainerRunner).toHaveBeenCalledTimes(1);
+    expect(runnerContainerNamespace.getByName).toHaveBeenCalledWith("user_123");
+    expect(destroyRunnerContainerInstance).toHaveBeenCalledTimes(1);
     expect(stateStore.failRun).toHaveBeenCalledTimes(1);
     expect(stateStore.completeRun).not.toHaveBeenCalled();
     expect(stateStore.recordRunPhase).toHaveBeenCalledWith(expect.objectContaining({
       phase: "retry.scheduled",
     }));
+    const retryPhaseCallIndex = stateStore.recordRunPhase.mock.calls.findIndex(([call]) =>
+      typeof call === "object"
+        && call !== null
+        && "phase" in call
+        && call.phase === "retry.scheduled"
+    );
+    expect(retryPhaseCallIndex).toBeGreaterThanOrEqual(0);
+    const destroyCallOrder = destroyRunnerContainerInstance.mock.invocationCallOrder[0];
+    const failRunCallOrder = stateStore.failRun.mock.invocationCallOrder[0];
+    const retryPhaseCallOrder = stateStore.recordRunPhase.mock.invocationCallOrder[retryPhaseCallIndex];
+    if (
+      destroyCallOrder === undefined
+      || failRunCallOrder === undefined
+      || retryPhaseCallOrder === undefined
+    ) {
+      throw new Error("Expected runner-output recycle, fail, and retry phase calls to be recorded.");
+    }
+    expect(destroyCallOrder).toBeLessThan(failRunCallOrder);
+    expect(destroyCallOrder).toBeLessThan(retryPhaseCallOrder);
     expect(stateStore.recordRunPhase).not.toHaveBeenCalledWith(expect.objectContaining({
       phase: "quarantined",
     }));
