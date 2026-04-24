@@ -1,6 +1,7 @@
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { describe, expect, it, vi } from "vitest";
 import { HOSTED_EXECUTION_USER_ID_HEADER } from "@murphai/hosted-execution/contracts";
@@ -10,10 +11,13 @@ import {
 
 import {
   buildVersionOverrideHeaders,
+  resolveSmokeRunnerManifestPath,
   resolveSmokeWorkerBaseUrl,
   runSmokeHostedDeploy,
 } from "../scripts/smoke-hosted-deploy.shared.js";
 import { TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON } from "./hosted-execution-fixtures.js";
+
+const appDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 describe("resolveSmokeWorkerBaseUrl", () => {
   it("prefers the explicit smoke worker base URL over the other envs", () => {
@@ -71,6 +75,32 @@ describe("buildVersionOverrideHeaders", () => {
     })).toEqual({
       "Cloudflare-Workers-Version-Overrides": "hosted-worker=\"version-123\"",
     });
+  });
+});
+
+describe("resolveSmokeRunnerManifestPath", () => {
+  it("defaults to the Cloudflare app deploy directory instead of the caller cwd", () => {
+    const originalCwd = process.cwd();
+    const differentCwd = os.tmpdir();
+
+    try {
+      process.chdir(differentCwd);
+
+      expect(resolveSmokeRunnerManifestPath({})).toBe(
+        path.resolve(
+          appDir,
+          ".deploy/runner-bundle/.murph-runner-bundle-manifest.json",
+        ),
+      );
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
+
+  it("uses an explicit runner manifest override when configured", () => {
+    expect(resolveSmokeRunnerManifestPath({
+      HOSTED_EXECUTION_SMOKE_RUNNER_MANIFEST_PATH: " /tmp/runner-manifest.json ",
+    })).toBe("/tmp/runner-manifest.json");
   });
 });
 
