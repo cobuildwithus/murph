@@ -456,8 +456,8 @@ function buildHostedMemberSignupWelcomeNotificationWake(input: {
 
 function buildHostedMemberSignupWelcomeInstructions(): string {
   return [
-    "A new user has completed signup for Murph.",
-    "Send exactly this message and nothing else:",
+    "Prepare the first in-chat onboarding reply.",
+    "Use this user-facing reply only:",
     MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
   ].join("\n\n");
 }

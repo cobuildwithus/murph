@@ -95,8 +95,8 @@ const MEMBER_CHANNELS_LINQ = {
   linq: true,
 } as const;
 const SIGNUP_WELCOME_INSTRUCTIONS = [
-  "A new user has completed signup for Murph.",
-  "Send exactly this message and nothing else:",
+  "Prepare the first in-chat onboarding reply.",
+  "Use this user-facing reply only:",
   MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
 ].join("\n\n");
 let runHostedExecutionJobInternal = createHostedExecutionJobRunner({
