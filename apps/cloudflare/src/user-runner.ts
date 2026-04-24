@@ -33,6 +33,7 @@ import {
 import { withSerializedLock } from "./serialized-lock.js";
 import {
   acquireHostedRunFromWeb,
+  isHostedRunStaleRunnerAcquireError,
   readHostedRunStatusFromWeb,
 } from "./web-control-plane.ts";
 import { RunnerBundleSync } from "./user-runner/runner-bundle-sync.js";
@@ -71,8 +72,10 @@ const MAX_HOSTED_WAKE_DRAIN_BATCHES = 32;
 const MAX_HOSTED_WAKE_DRAIN_EVENTS =
   DEFAULT_HOSTED_WAKE_BATCH_LIMIT * MAX_HOSTED_WAKE_DRAIN_BATCHES;
 
+type HostedRunDrainExitState = HostedRunDrainState | "stale_runner" | null;
+
 interface HostedRunDrainLoopResult extends HostedRunDrainResult {
-  exitState: HostedRunDrainState | null;
+  exitState: HostedRunDrainExitState;
 }
 
 function emitHostedUserKeyAuditLog(record: HostedUserKeyAuditRecord): void {
@@ -317,16 +320,17 @@ export class HostedUserRunner {
       round += 1
     ) {
       const remainingEventBudget = MAX_HOSTED_WAKE_DRAIN_EVENTS - drainedEventCount;
-      const acquired = await acquireHostedRunFromWeb({
-        baseUrl: this.readHostedWebControlBaseUrl(),
-        body: {
-          executorKind: "cloudflare-container",
-          limit: Math.min(DEFAULT_HOSTED_WAKE_BATCH_LIMIT, remainingEventBudget),
-        },
-        boundUserId: userId,
-        callbackSigning: this.env.webCallbackSigning,
-        timeoutMs: this.env.runnerTimeoutMs,
+      const acquired = await this.acquireHostedRunForDrain({
+        limit: Math.min(DEFAULT_HOSTED_WAKE_BATCH_LIMIT, remainingEventBudget),
+        targetCommittedSeqHint,
+        userId,
       });
+
+      if (!acquired) {
+        return this.stopStaleHostedRunnerAcquireRetries({
+          targetCommittedSeqHint,
+        });
+      }
 
       await reconcileTrackedAuthoritativeCursorBestEffort(runFinalizationContext, {
         currentCursor: acquired.cursor,
@@ -419,6 +423,61 @@ export class HostedUserRunner {
       userId: input.userId,
       wakeEventId: input.wakeEventId ?? `hosted-run:${input.run.id}`,
     });
+  }
+
+  private async acquireHostedRunForDrain(input: {
+    limit: number;
+    targetCommittedSeqHint: bigint | null;
+    userId: string;
+  }): Promise<HostedRunAcquireResponse | null> {
+    try {
+      return await acquireHostedRunFromWeb({
+        baseUrl: this.readHostedWebControlBaseUrl(),
+        body: {
+          executorKind: "cloudflare-container",
+          limit: input.limit,
+        },
+        boundUserId: input.userId,
+        callbackSigning: this.env.webCallbackSigning,
+        timeoutMs: this.env.runnerTimeoutMs,
+      });
+    } catch (error) {
+      if (isHostedRunStaleRunnerAcquireError(error)) {
+        emitHostedExecutionStructuredLog({
+          component: "hosted.runner",
+          details: {
+            condition: "data-integrity.stale-runner-missing-hosted-member",
+            errorCode: error.errorCode ?? "",
+            httpStatus: String(error.status),
+            requestedTargetSeq: input.targetCommittedSeqHint?.toString() ?? "",
+          },
+          error,
+          level: "error",
+          message:
+            "Hosted runner acquire found a stale bound user missing from the web database; clearing the immediate retry alarm.",
+          phase: "wake.running",
+          userId: input.userId,
+        });
+        return null;
+      }
+
+      throw error;
+    }
+  }
+
+  private async stopStaleHostedRunnerAcquireRetries(input: {
+    targetCommittedSeqHint: bigint | null;
+  }): Promise<HostedRunDrainLoopResult> {
+    await this.runtimeAlarmScheduler.syncNextWake({
+      preferredWakeAt: null,
+    });
+
+    return {
+      committedSeq: "0",
+      exitState: "stale_runner",
+      requestedTargetSeq: input.targetCommittedSeqHint?.toString() ?? null,
+      targetReached: false,
+    };
   }
 
   private createHostedRunFinalizationContext(): HostedRunFinalizationContext {

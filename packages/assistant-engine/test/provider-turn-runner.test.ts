@@ -477,10 +477,15 @@ describe('executeProviderTurnWithRecovery', () => {
   })
 
   it('uses the notification-decision profile, notification tool catalog, and disabled native resume for notification turns', async () => {
+    const onTraceEvent = vi.fn()
     const route = createRoute({
       routeId: 'route-notification',
       providerOptions: {
+        gatewayOnlyProviders: ['azure'],
+        model: 'openai/gpt-5.4',
+        providerName: 'vercel-ai-gateway',
         resumeKind: 'openai-response-id',
+        zeroDataRetention: true,
       },
     })
     const session = createAssistantSession({
@@ -510,6 +515,13 @@ describe('executeProviderTurnWithRecovery', () => {
     const outcome = await executeProviderTurnWithRecovery({
       input: createMessageInput({
         channel: 'chat',
+        executionContext: {
+          hosted: {
+            memberId: 'member_123',
+            userEnvKeys: [],
+          },
+        },
+        onTraceEvent,
         prompt: 'Check the notification decision.',
         turnTrigger: 'automation-cron',
       }),
@@ -564,6 +576,34 @@ describe('executeProviderTurnWithRecovery', () => {
         resumeProviderSessionId: null,
         systemPrompt:
           'notification:chat:2026-04-08:America/Los_Angeles:Vault overview for navigation only:\n- Canonical coverage includes 1 meal event.',
+      }),
+    )
+    expect(onTraceEvent.mock.invocationCallOrder[0]).toBeLessThan(
+      runnerMocks.executeAssistantProviderTurnAttempt.mock.invocationCallOrder[0],
+    )
+    expect(onTraceEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providerSessionId: null,
+        rawEvent: expect.objectContaining({
+          gatewayOnlyProviderCount: 1,
+          gatewayOnlyProviders: ['azure'],
+          providerModel: 'openai/gpt-5.4',
+          providerName: 'vercel-ai-gateway',
+          promptProfile: 'notification-decision',
+          schema: 'murph.assistant-provider-request-debug.v1',
+          systemPrompt:
+            'notification:chat:2026-04-08:America/Los_Angeles:Vault overview for navigation only:\n- Canonical coverage includes 1 meal event.',
+          turnTrigger: 'automation-cron',
+          type: 'assistant.provider.request.debug',
+          userPrompt: 'Check the notification decision.',
+          zeroDataRetention: true,
+        }),
+        updates: [
+          {
+            kind: 'status',
+            text: 'Hosted notification provider request debug payload captured.',
+          },
+        ],
       }),
     )
   })

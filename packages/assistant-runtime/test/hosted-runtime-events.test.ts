@@ -111,6 +111,42 @@ describe("executeHostedIngressEvent", () => {
       vaultCreated: false,
     };
     mocks.prepareHostedWakeContext.mockResolvedValue(bootstrapResult);
+    const debugSystemPrompt = "System prompt headed to Azure with notification rules. ".repeat(16);
+    const debugUserPrompt = "Send exactly the signup welcome.";
+    mocks.sendAssistantNotification.mockImplementationOnce(async (input) => {
+      input.onTraceEvent?.({
+        providerSessionId: null,
+        rawEvent: {
+          schema: "murph.assistant-provider-request-debug.v1",
+          type: "assistant.provider.request.debug",
+          attemptCount: 1,
+          channel: "linq",
+          conversationMessageCount: 0,
+          conversationMessageRoles: [],
+          deliveryDispatchMode: "queue-only",
+          gatewayOnlyProviderCount: 1,
+          gatewayOnlyProviders: ["azure"],
+          nativeResumePolicy: "disabled",
+          promptProfile: "notification-decision",
+          provider: "openai-compatible",
+          providerExecutionDriver: "responses",
+          providerModel: "openai/gpt-5.4",
+          providerName: "vercel-ai-gateway",
+          routeId: "route-notification",
+          sessionContextPresent: false,
+          supportsToolRuntime: true,
+          systemPrompt: debugSystemPrompt,
+          systemPromptLength: debugSystemPrompt.length,
+          toolCount: 0,
+          toolNames: [],
+          turnTrigger: "automation-cron",
+          userPrompt: debugUserPrompt,
+          userPromptLength: debugUserPrompt.length,
+          zeroDataRetention: true,
+        },
+        updates: [],
+      });
+    });
 
     const wake = buildHostedExecutionAssistantNotificationRequestedWake({
       eventId: "evt_notification",
@@ -176,6 +212,7 @@ describe("executeHostedIngressEvent", () => {
       },
       identityId: "hbidx:phone:v1:test",
       instructions: "Send exactly the signup welcome.",
+      onTraceEvent: expect.any(Function),
       responsePolicy: {
         kind: "require_send_exact_text",
         text: "Welcome to Murph, your personal health assistant.",
@@ -204,6 +241,30 @@ describe("executeHostedIngressEvent", () => {
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({
+        component: "runtime.provider",
+        details: expect.objectContaining({
+          assistantProviderDebug: expect.objectContaining({
+            gatewayOnlyProviders: ["azure"],
+            providerExecutionDriver: "responses",
+            providerModel: "openai/gpt-5.4",
+            providerName: "vercel-ai-gateway",
+            schema: "murph.assistant-provider-request-debug.v1",
+            systemPromptChunks: expect.arrayContaining([
+              expect.stringContaining("System prompt headed to Azure"),
+            ]),
+            systemPromptLength: debugSystemPrompt.length,
+            userPromptChunks: [debugUserPrompt],
+            zeroDataRetention: true,
+          }),
+        }),
+        message: "Hosted assistant provider request debug payload captured.",
+        phase: "wake.running",
+        wake,
+      }),
+    );
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenNthCalledWith(
+      3,
+      expect.objectContaining({
         component: "runtime",
         details: expect.objectContaining({
           notificationRouteChannel: "linq",
@@ -214,6 +275,30 @@ describe("executeHostedIngressEvent", () => {
         wake,
       }),
     );
+    expect(result.redactedLogEntries?.[1]?.redacted).toEqual(
+      expect.objectContaining({
+        assistantProviderDebug: expect.not.objectContaining({
+          rawEvent: expect.anything(),
+          systemPrompt: expect.anything(),
+          userPrompt: expect.anything(),
+        }),
+      }),
+    );
+    const providerDebug = result.redactedLogEntries?.[1]?.redacted?.assistantProviderDebug;
+    assert.equal(typeof providerDebug, "object");
+    assert.ok(providerDebug !== null);
+    assert.ok(!Array.isArray(providerDebug));
+    const providerDebugRecord = providerDebug as Record<string, unknown>;
+    const systemPromptChunks = providerDebugRecord.systemPromptChunks;
+    const userPromptChunks = providerDebugRecord.userPromptChunks;
+    assert.ok(Array.isArray(systemPromptChunks));
+    assert.ok(Array.isArray(userPromptChunks));
+    assert.ok(systemPromptChunks.every((chunk): chunk is string => typeof chunk === "string"));
+    assert.ok(userPromptChunks.every((chunk): chunk is string => typeof chunk === "string"));
+    assert.ok(systemPromptChunks.every((chunk) => chunk.length <= 320));
+    assert.ok(userPromptChunks.every((chunk) => chunk.length <= 320));
+    assert.equal(systemPromptChunks.join(""), debugSystemPrompt.trim());
+    assert.equal(userPromptChunks.join(""), debugUserPrompt);
     expect(result).toEqual({
       bootstrapResult,
       conversationMetrics: null,
@@ -236,6 +321,24 @@ describe("executeHostedIngressEvent", () => {
             notificationRouteThreadIsDirect: true,
             responsePolicyKind: "require_send_exact_text",
           },
+        },
+        {
+          component: "runtime.provider",
+          eventId: "evt_notification",
+          level: "info",
+          message: "Hosted assistant provider request debug payload captured.",
+          phase: "wake.running",
+          redacted: expect.objectContaining({
+            assistantProviderDebug: expect.objectContaining({
+              gatewayOnlyProviders: ["azure"],
+              providerModel: "openai/gpt-5.4",
+              systemPromptChunks: expect.arrayContaining([
+                expect.stringContaining("System prompt headed to Azure"),
+              ]),
+              userPromptChunks: [debugUserPrompt],
+              zeroDataRetention: true,
+            }),
+          }),
         },
         {
           component: "runtime",
@@ -326,6 +429,7 @@ describe("executeHostedIngressEvent", () => {
       firstContactPolicy: null,
       identityId: "hbidx:phone:v1:test",
       instructions: "Send exactly the signup welcome.",
+      onTraceEvent: expect.any(Function),
       responsePolicy: null,
       threadId: "thread_123",
       threadIsDirect: true,
@@ -554,6 +658,7 @@ describe("executeHostedIngressEvent", () => {
       firstContactPolicy: null,
       identityId: "hbidx:phone:v1:test",
       instructions: "Send exactly the signup welcome.",
+      onTraceEvent: expect.any(Function),
       responsePolicy: null,
       threadId: null,
       threadIsDirect: true,

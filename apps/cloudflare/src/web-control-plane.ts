@@ -2,6 +2,7 @@ import {
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
 import {
+  HOSTED_RUN_STALE_RUNNER_USER_ERROR_CODE,
   HOSTED_EXECUTION_USER_ID_HEADER,
   type HostedRunAcquireRequest,
   type HostedRunAcquireResponse,
@@ -117,6 +118,52 @@ const HOSTED_WEB_HOSTED_RUN_TURN_INPUT_ADOPT_PATH =
   "/api/internal/hosted-run/turn-input/adopt";
 const HOSTED_WEB_HOSTED_RUN_TURN_INPUT_PEEK_PATH =
   "/api/internal/hosted-run/turn-input/peek";
+
+interface HostedWebControlPlaneJsonError {
+  code: string | null;
+  details: unknown;
+  message: string | null;
+  retryable: boolean | null;
+}
+
+export class HostedWebControlPlaneResponseError extends Error {
+  readonly description: string;
+  readonly errorCode: string | null;
+  readonly errorDetails: unknown;
+  readonly path: string;
+  readonly responseDetail: string | null;
+  readonly retryable: boolean | null;
+  readonly status: number;
+
+  constructor(input: {
+    description: string;
+    error: HostedWebControlPlaneJsonError | null;
+    path: string;
+    responseDetail: string | null;
+    status: number;
+  }) {
+    const baseMessage = `${input.description} failed with HTTP ${input.status}.`;
+    super(input.responseDetail ? `${baseMessage} ${input.responseDetail}` : baseMessage);
+    this.name = "HostedWebControlPlaneResponseError";
+    this.description = input.description;
+    this.errorCode = input.error?.code ?? null;
+    this.errorDetails = input.error?.details ?? null;
+    this.path = input.path;
+    this.responseDetail = input.responseDetail;
+    this.retryable = input.error?.retryable ?? null;
+    this.status = input.status;
+  }
+}
+
+export function isHostedRunStaleRunnerAcquireError(
+  error: unknown,
+): error is HostedWebControlPlaneResponseError {
+  return error instanceof HostedWebControlPlaneResponseError
+    && error.path === HOSTED_WEB_HOSTED_RUN_ACQUIRE_PATH
+    && error.errorCode === HOSTED_RUN_STALE_RUNNER_USER_ERROR_CODE
+    && error.retryable === false
+    && (error.status === 404 || error.status === 410);
+}
 
 export async function acquireHostedRunFromWeb(input: {
   baseUrl: string;
@@ -290,19 +337,19 @@ async function requestHostedWebControlPlaneJson<TResponse>(input: {
   }
 
   if (!response.ok) {
-    const responseDetail = (await response.text()).trim();
+    const failure = await readHostedWebControlPlaneFailure(response);
     throw emitHostedWebControlPlaneResponseFailure({
       boundUserId: input.input.boundUserId,
       description: input.description,
       path: input.path,
-      responseDetail: responseDetail.length > 0 ? responseDetail : null,
+      responseDetail: failure.responseDetail,
       response,
+      webError: failure.error,
     });
   }
 
   return input.parse(await response.json());
 }
-
 
 function emitHostedWebControlPlaneRequestFailure(input: {
   boundUserId: string;
@@ -330,16 +377,25 @@ function emitHostedWebControlPlaneResponseFailure(input: {
   path: string;
   response: Response;
   responseDetail: string | null;
+  webError: HostedWebControlPlaneJsonError | null;
 }): Error {
   const message = `${input.description} failed with HTTP ${input.response.status}.`;
-  const error = new Error(input.responseDetail ? `${message} ${input.responseDetail}` : message);
+  const error = new HostedWebControlPlaneResponseError({
+    description: input.description,
+    error: input.webError,
+    path: input.path,
+    responseDetail: input.responseDetail,
+    status: input.response.status,
+  });
 
   emitHostedExecutionStructuredLog({
     component: "cloudflare.web-control-plane",
     details: {
       description: input.description,
+      errorCode: input.webError?.code ?? "",
       path: input.path,
       responseDetail: input.responseDetail ?? "",
+      retryable: input.webError?.retryable ?? "",
       status: String(input.response.status),
     },
     level: "warn",
@@ -349,6 +405,50 @@ function emitHostedWebControlPlaneResponseFailure(input: {
   });
 
   return error;
+}
+
+async function readHostedWebControlPlaneFailure(response: Response): Promise<{
+  error: HostedWebControlPlaneJsonError | null;
+  responseDetail: string | null;
+}> {
+  const responseDetail = (await response.text()).trim();
+  const parsed = responseDetail.length > 0
+    ? parseHostedWebControlPlaneJsonErrorResponse(responseDetail)
+    : null;
+
+  return {
+    error: parsed,
+    responseDetail: responseDetail.length > 0 ? responseDetail : null,
+  };
+}
+
+function parseHostedWebControlPlaneJsonErrorResponse(
+  responseDetail: string,
+): HostedWebControlPlaneJsonError | null {
+  try {
+    return readHostedWebControlPlaneJsonError(JSON.parse(responseDetail));
+  } catch {
+    return null;
+  }
+}
+
+function readHostedWebControlPlaneJsonError(
+  value: unknown,
+): HostedWebControlPlaneJsonError | null {
+  if (!isRecord(value) || !isRecord(value.error)) {
+    return null;
+  }
+
+  return {
+    code: typeof value.error.code === "string" ? value.error.code : null,
+    details: "details" in value.error ? value.error.details : null,
+    message: typeof value.error.message === "string" ? value.error.message : null,
+    retryable: typeof value.error.retryable === "boolean" ? value.error.retryable : null,
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 function requireHostedWebControlBaseUrl(value: string): string {

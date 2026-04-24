@@ -420,6 +420,8 @@ export interface HostedRunNudgeResult {
   alreadyRunning: boolean;
 }
 
+export const HOSTED_RUN_STALE_RUNNER_USER_ERROR_CODE = "HOSTED_RUN_STALE_RUNNER_USER";
+
 export const HOSTED_INGRESS_LIFECYCLE_STATES = [
   "queued",
   "backpressured",

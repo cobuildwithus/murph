@@ -688,6 +688,12 @@ export function sanitizeHostedExecutionStructuredLogDetails(
   );
 }
 
+export function sanitizeHostedExecutionStructuredLogText(
+  value: string,
+): string | null {
+  return normalizeHostedExecutionDiagnosticMessage(value, 64_000);
+}
+
 function sanitizeHostedExecutionStructuredLogDetailsWithHints(
   value: HostedExecutionStructuredLogDetails | null | undefined,
   hints: HostedExecutionDetailSanitizationHints,
