@@ -876,6 +876,37 @@
     {
       "artifacts": [
         {
+          "accessNotes": "Open-access PDF candidate from the normalized artifact candidates. No PDF is included in this package; re-check license, hash locally, and upload only after rights review.",
+          "artifactId": "art_pmid_32599716_pdf",
+          "contentType": "application/pdf",
+          "kind": "pdf",
+          "localPath": "research-artifacts/creatine-supplementation/pmid-32599716.pdf",
+          "objectKey": "commons/research/creatine-supplementation/pmid-32599716/source.pdf",
+          "redistributable": true,
+          "rightsStatus": "open_access",
+          "sourceKey": "source_artifact:pmid-32599716",
+          "sourceUrl": "https://pmc.ncbi.nlm.nih.gov/articles/PMC7353308/pdf/nutrients-12-01880.pdf",
+          "storage": "cloudflare-r2"
+        },
+        {
+          "accessNotes": "Open-access PDF candidate named in normalized artifact candidates. Keep as external metadata until license language is verified; do not vendor in Git or upload to storage yet.",
+          "artifactId": "art_journalofexerciseandnutrition_creatine_timing_2018_10_10_pdf",
+          "contentType": "application/pdf",
+          "kind": "pdf",
+          "redistributable": false,
+          "rightsStatus": "open_access",
+          "sourceKey": "source_artifact:journalofexerciseandnutrition-creatine-timing-2018-10-10",
+          "sourceUrl": "https://www.journalofexerciseandnutrition.com/index.php/JEN/article/download/33/26",
+          "storage": "external"
+        }
+      ],
+      "description": "Manifest metadata for creatine-supplementation research artifacts. Do not commit publisher PDFs to Git. Stage, hash, and upload only after rights review; the landing package zip includes no PDFs.",
+      "manifestKey": "source_artifact:creatine-supplementation/research-artifacts",
+      "schemaVersion": "murph.commons.artifact-manifest.v1"
+    },
+    {
+      "artifacts": [
+        {
           "accessNotes": "Rights status is unclear; keep out of Git and stage only metadata or a landing-page/source-page candidate until rights are confirmed. Rights-safe package draft: metadata candidate only; do not store or redistribute full text until rights, license, hash, and exact file URL are manually verified.",
           "artifactId": "art_pmid_15881548_html",
           "contentType": "text/html",
