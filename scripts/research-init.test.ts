@@ -237,16 +237,24 @@ describe("research init scaffold", () => {
         `#!/usr/bin/env bash
 set -euo pipefail
 
+endpoint_for_lane() {
+  case "$1" in
+    phlebas) printf '%s\\n' 'http://127.0.0.1:17777' ;;
+    hercules) printf '%s\\n' 'http://127.0.0.1:17778' ;;
+    *) exit 65 ;;
+  esac
+}
+
 case "\${1:-}" in
   browser-endpoint)
-    printf '%s\\n' 'http://127.0.0.1:17777'
+    endpoint_for_lane "$2"
     ;;
   research)
     lane="$2"
     shift 2
     export RESEARCH_MANAGED_BROWSER_LANE="$lane"
-    export RESEARCH_MANAGED_BROWSER_ENDPOINT='http://127.0.0.1:17777'
-    export RESEARCH_THREAD_EXPORT_BROWSER_ENDPOINT='http://127.0.0.1:17777'
+    export RESEARCH_MANAGED_BROWSER_ENDPOINT="$(endpoint_for_lane "$lane")"
+    export RESEARCH_THREAD_EXPORT_BROWSER_ENDPOINT="$RESEARCH_MANAGED_BROWSER_ENDPOINT"
     exec "$@"
     ;;
   *)
@@ -383,6 +391,39 @@ exit 64
       expect(sendState.send.status).toBe("completed");
       expect(sendState.send.exitCode).toBe(0);
 
+      writeTextFileSync(
+        seamStatePath,
+        `${JSON.stringify(
+          {
+            ...sendState,
+            browserEndpoint: "http://127.0.0.1:17778",
+            lane: "hercules",
+          },
+          null,
+          2,
+        )}\n`,
+      );
+
+      const mismatchResult = runResearchRun(
+        [
+          "--workspace",
+          workspaceArg,
+          "--seam",
+          "01-charter",
+          "--action",
+          "harvest",
+          "--lane",
+          "hercules",
+        ],
+        env,
+      );
+
+      expect(mismatchResult.status).toBe(1);
+      expect(mismatchResult.stderr).toContain("Refusing to harvest 01-charter from lane hercules");
+      expect(mismatchResult.stderr).toContain("this seam was sent on phlebas");
+      expect(mismatchResult.stderr).toContain("--explore-lane");
+      expect(existsSync(path.join(outDir, "state", "harvest-lane.txt"))).toBe(false);
+
       const harvestResult = runResearchRun(
         ["--workspace", workspaceArg, "--seam", "01-charter", "--action", "harvest"],
         env,
@@ -401,14 +442,48 @@ exit 64
       ).toBe("http://127.0.0.1:17777\n");
 
       const harvestState = JSON.parse(readFileSync(seamStatePath, "utf8")) as {
+        browserEndpoint: string;
         harvest: { exitCode: number; lane: string; status: string };
+        lane: string;
       };
+      expect(harvestState.lane).toBe("phlebas");
+      expect(harvestState.browserEndpoint).toBe("http://127.0.0.1:17777");
       expect(harvestState.harvest.lane).toBe("phlebas");
       expect(harvestState.harvest.status).toBe("completed");
       expect(harvestState.harvest.exitCode).toBe(0);
       expect(readFileSync(path.join(outDir, "responses", "01-charter.md"), "utf8")).toContain(
         "Recovered charter response",
       );
+
+      const exploratoryResult = runResearchRun(
+        [
+          "--workspace",
+          workspaceArg,
+          "--seam",
+          "01-charter",
+          "--action",
+          "harvest",
+          "--lane",
+          "hercules",
+          "--explore-lane",
+        ],
+        env,
+      );
+
+      expect(exploratoryResult.status).toBe(0);
+      expect(exploratoryResult.stderr).toContain("Exploratory harvest override");
+      expect(readFileSync(path.join(outDir, "state", "harvest-lane.txt"), "utf8")).toBe(
+        "hercules\n",
+      );
+      const exploratoryState = JSON.parse(readFileSync(seamStatePath, "utf8")) as {
+        browserEndpoint: string;
+        harvest: { browserEndpoint: string; lane: string };
+        lane: string;
+      };
+      expect(exploratoryState.lane).toBe("phlebas");
+      expect(exploratoryState.browserEndpoint).toBe("http://127.0.0.1:17777");
+      expect(exploratoryState.harvest.lane).toBe("hercules");
+      expect(exploratoryState.harvest.browserEndpoint).toBe("http://127.0.0.1:17778");
 
       const resendResult = runResearchRun(
         [
