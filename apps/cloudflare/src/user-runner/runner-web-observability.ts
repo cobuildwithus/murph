@@ -5,8 +5,11 @@ import type {
   HostedExecutionRunPhase,
 } from "@murphai/hosted-execution";
 import {
+  buildHostedExecutionSafeErrorDetails,
   deriveHostedExecutionErrorCode,
   emitHostedExecutionStructuredLog,
+  readHostedExecutionSafeErrorName,
+  summarizeHostedExecutionError,
 } from "@murphai/hosted-execution";
 import {
   computeHostedRunElapsedMs,
@@ -62,10 +65,13 @@ export async function recordHostedRunBreadcrumbInWebBestEffort(input: {
   const recordLog = input.recordLog ?? recordHostedRunLogInWeb;
   // Keep web-visible observability linkable without persisting canonical wake ids.
   const correlationId = await createHostedRunLogCorrelationId(input.wakeEventId);
+  const errorRedactedDetails = input.error === undefined
+    ? null
+    : buildHostedRunLogErrorRedactedDetails(input.error);
   const redacted = {
     ...(stripHostedRunObservabilityEventFields(input.redacted) ?? {}),
     correlationId,
-    ...(input.error === undefined ? {} : { errorCode: deriveHostedExecutionErrorCode(input.error) }),
+    ...(errorRedactedDetails ?? {}),
     runElapsedMs: computeHostedRunElapsedMs(input.run),
   };
 
@@ -102,6 +108,17 @@ export async function recordHostedRunBreadcrumbInWebBestEffort(input: {
       userId: input.userId,
     });
   }
+}
+
+function buildHostedRunLogErrorRedactedDetails(error: unknown): Record<string, unknown> {
+  const safeDetails = buildHostedExecutionSafeErrorDetails(error);
+  const errorName = readHostedExecutionSafeErrorName(error);
+  return {
+    errorCode: deriveHostedExecutionErrorCode(error),
+    ...(safeDetails ? { errorDetails: safeDetails } : {}),
+    errorMessage: summarizeHostedExecutionError(error),
+    ...(errorName ? { errorName } : {}),
+  };
 }
 
 export async function recordHostedRunnerResultLogsInWebBestEffort(input: {

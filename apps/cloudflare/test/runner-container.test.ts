@@ -816,6 +816,53 @@ describe("RunnerContainer", () => {
     expect(destroy).toHaveBeenCalledTimes(1);
   });
 
+  it("records status samples when a destroy request does not stop the shell", async () => {
+    vi.useFakeTimers();
+
+    try {
+      const destroy = vi.fn(async () => {});
+      const getState = vi.fn(async () => ({
+        lastChange: Date.now(),
+        status: "running",
+      }));
+      const { container } = createContainerDouble({
+        destroy,
+        getState,
+        initialStatus: "running",
+      });
+
+      const destroyPromise = container.destroyInstance().catch((error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(5_500);
+
+      const thrown = await destroyPromise;
+      expect(thrown).toBeInstanceOf(Error);
+      expect(String(thrown)).toContain("Hosted runner container failed to destroy cleanly.");
+      expect(destroy).toHaveBeenCalledTimes(1);
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          component: "container",
+          details: expect.objectContaining({
+            destroyTimeoutMs: 5_000,
+            failClosed: true,
+            lifecycleStage: "wait-for-stop",
+            statusBeforeDestroy: "running",
+          }),
+          error: expect.objectContaining({
+            details: expect.objectContaining({
+              destroyPollCount: expect.any(Number),
+              observedStatuses: ["running"],
+              statusAfterDestroy: "running",
+            }),
+          }),
+          message: "Hosted execution container destroy did not stop the shell.",
+          phase: "failed",
+        }),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("does best-effort cleanup on activity expiry when destroy throws", async () => {
     const destroy = vi.fn(async () => {
       throw new Error("destroy failed");

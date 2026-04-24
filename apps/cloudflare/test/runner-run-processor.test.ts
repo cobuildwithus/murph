@@ -1747,6 +1747,11 @@ describe("recordHostedRunBreadcrumbInWebBestEffort", () => {
         phase: "runtime_failed",
         redacted: expect.objectContaining({
           errorCode: expect.any(String),
+          errorDetails: expect.objectContaining({
+            errorDetail: "boom",
+          }),
+          errorMessage: "Hosted execution runtime failed.",
+          errorName: "Error",
           reason: "runner_invocation_failed",
           runElapsedMs: expect.any(Number),
         }),
@@ -1859,7 +1864,7 @@ describe("recordHostedRunPhaseLogInWebBestEffort", () => {
     privateKeyJwkJson: "{\"kty\":\"EC\"}",
   };
 
-  it("adds the wake event id to redacted phase logs without storing raw error text", async () => {
+  it("adds the wake event correlation and safe error metadata to redacted phase logs", async () => {
     const recordLog = vi.fn().mockResolvedValue({
       log: null,
       logged: true,
@@ -1889,6 +1894,10 @@ describe("recordHostedRunPhaseLogInWebBestEffort", () => {
         redacted: expect.objectContaining({
           correlationId: expect.stringMatching(/^evtcorr_[a-f0-9]{32}$/u),
           errorCode: expect.any(String),
+          errorDetails: expect.objectContaining({
+            errorDetail: "boom",
+          }),
+          errorMessage: "Hosted execution runtime failed.",
         }),
       }),
     }));
