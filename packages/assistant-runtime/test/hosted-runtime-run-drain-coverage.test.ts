@@ -326,6 +326,88 @@ describe("executeHostedRunDrainForCommit", () => {
     ]);
   });
 
+  it("threads assistant maintenance redacted logs into the committed runner result", async () => {
+    mocks.runHostedAssistantRuntimeTimerLane.mockResolvedValueOnce({
+      deviceSyncProcessed: 0,
+      deviceSyncSkipped: true,
+      nextWakeAt: null,
+      parserProcessed: 0,
+      redactedLogEntries: [
+        {
+          component: "runtime",
+          eventId: "evt_linq_message",
+          level: "info",
+          message: "Hosted assistant automation pass finished.",
+          phase: "wake.running",
+          redacted: {
+            replyConsidered: 1,
+            replyFailed: 1,
+            replyReplied: 0,
+            routingConsidered: 0,
+          },
+        },
+      ],
+    });
+    mocks.executeHostedIngressEvent.mockResolvedValueOnce({
+      bootstrapResult: null,
+      conversationMetrics: {
+        nextWakeAt: null,
+        parserProcessed: 0,
+      },
+      ingressLane: "conversation-message",
+      shareImportResult: null,
+      shareImportTitle: null,
+    });
+
+    const result = await executeHostedRunDrainForCommit({
+      executionContext: createExecutionContext(),
+      request: {
+        bundle: "incoming-bundle",
+        run: HOSTED_RUN_CONTEXT,
+        runDrain: {
+          acquiredAt: "2026-04-08T00:00:00.000Z",
+          events: [
+            {
+              seq: "24",
+              wake: buildHostedExecutionLinqConversationMessageWake({
+                eventId: "evt_linq_message",
+                linqMessage: {
+                  chatId: "chat_123",
+                  from: "+15551234567",
+                  isFromMe: false,
+                  messageId: "msg_123",
+                  parts: [],
+                },
+                occurredAt: "2026-04-08T00:00:00.000Z",
+                phoneLookupKey: "15551234567",
+                userId: "member_123",
+              }),
+              ingressEventId: "wake_24",
+            },
+          ],
+          inputCommittedSeq: "24",
+          inputCursorVersion: "4",
+          runId: "run_123",
+          triggerKind: "external_ingress",
+          userId: "member_123",
+        },
+      },
+      restored: createRestored(),
+      runtime: createRuntime(),
+      runtimeEnv: {},
+    });
+
+    expect(result.committedResult.result.redactedLogEntries).toEqual([
+      expect.objectContaining({
+        message: "Hosted assistant automation pass finished.",
+        redacted: expect.objectContaining({
+          replyConsidered: 1,
+          replyFailed: 1,
+        }),
+      }),
+    ]);
+  });
+
   it("drains repeated immediate assistant follow-up work before snapshotting", async () => {
     vi.useFakeTimers();
 

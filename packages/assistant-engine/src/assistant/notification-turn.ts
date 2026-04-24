@@ -344,6 +344,9 @@ function buildAssistantNotificationObservabilityDetails(input: {
   const bindingDelivery = input.session.binding.delivery
   const linqBaseUrl = readAssistantNotificationUrlDetails(process.env.LINQ_API_BASE_URL)
   const providerBaseUrl = readAssistantNotificationUrlDetails(providerOptions.baseUrl)
+  const gatewayOnlyProviders = summarizeAssistantNotificationGatewayOnlyProviders(
+    providerOptions.gatewayOnlyProviders,
+  )
 
   return {
     assistantNotificationChannel: channel,
@@ -356,6 +359,7 @@ function buildAssistantNotificationObservabilityDetails(input: {
       normalizeNullableString(input.input.identityId) !== null,
     assistantNotificationLinqBaseUrlOrigin: linqBaseUrl.origin,
     assistantNotificationLinqBaseUrlPath: linqBaseUrl.path,
+    assistantNotificationGatewayOnlyProviders: gatewayOnlyProviders,
     assistantNotificationProvider: input.route?.provider ?? input.session.provider,
     assistantNotificationProviderBaseUrlOrigin: providerBaseUrl.origin,
     assistantNotificationProviderBaseUrlPath: providerBaseUrl.path,
@@ -371,6 +375,18 @@ function buildAssistantNotificationObservabilityDetails(input: {
       normalizeNullableString(input.input.workingDirectory) !== null,
     executionContextHosted: input.input.executionContext?.hosted != null,
   }
+}
+
+function summarizeAssistantNotificationGatewayOnlyProviders(
+  values: readonly string[] | null | undefined,
+): string | null {
+  const normalized = [...(values ?? [])]
+    .map((value) => normalizeNullableString(value)?.toLowerCase() ?? null)
+    .filter((value): value is string =>
+      value !== null && /^[a-z0-9][a-z0-9._-]*$/u.test(value),
+    )
+
+  return normalized.length > 0 ? Array.from(new Set(normalized)).join(',') : null
 }
 
 function readAssistantNotificationUrlDetails(value: string | null | undefined): {

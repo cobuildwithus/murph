@@ -150,11 +150,45 @@ const HOSTED_ASSISTANT_NOTIFICATION_STRING_DETAIL_KEYS = [
   "assistantNotificationChannel",
   "assistantNotificationDeliveryDispatchMode",
   "assistantNotificationDeliveryKind",
+  "assistantNotificationGatewayOnlyProviders",
   "assistantNotificationProvider",
   "assistantNotificationProviderModel",
   "assistantNotificationRouteId",
   "assistantNotificationStage",
   "assistantNotificationTurnTrigger",
+] as const;
+
+const HOSTED_ASSISTANT_PROVIDER_STRING_DETAIL_KEYS = [
+  "assistantProviderAdapter",
+  "assistantProviderBaseUrlOrigin",
+  "assistantProviderBaseUrlPath",
+  "assistantProviderErrorBodyCode",
+  "assistantProviderErrorBodyMessage",
+  "assistantProviderErrorBodyType",
+  "assistantProviderErrorCode",
+  "assistantProviderErrorMessage",
+  "assistantProviderErrorStatusText",
+  "assistantProviderErrorType",
+  "assistantProviderExecutionDriver",
+  "assistantProviderGatewayOnlyProviders",
+  "assistantProviderModel",
+  "assistantProviderName",
+  "assistantProviderPresetId",
+  "assistantProviderRequestUrlOrigin",
+  "assistantProviderRequestUrlPath",
+] as const;
+
+const HOSTED_ASSISTANT_PROVIDER_BOOLEAN_DETAIL_KEYS = [
+  "assistantProviderBaseUrlConfigured",
+  "assistantProviderErrorBodyPresent",
+  "assistantProviderErrorRetryable",
+  "assistantProviderGatewayTarget",
+  "assistantProviderZeroDataRetention",
+] as const;
+
+const HOSTED_ASSISTANT_PROVIDER_NUMBER_DETAIL_KEYS = [
+  "assistantProviderErrorStatus",
+  "assistantProviderGatewayOnlyProviderCount",
 ] as const;
 
 const HOSTED_ASSISTANT_NOTIFICATION_BOOLEAN_DETAIL_KEYS = [
@@ -408,7 +442,7 @@ export function buildHostedExecutionStructuredLogRecord(
 export function buildHostedExecutionSafeErrorDiagnostics(
   error: unknown,
 ): HostedExecutionStructuredLogDetails | null {
-  if (!(error instanceof Error)) {
+  if (error === undefined) {
     return null;
   }
 
@@ -470,7 +504,7 @@ export function buildHostedExecutionPrefixedSafeErrorDiagnostics(input: {
 export function extractHostedAssistantNotificationRedactedDetails(
   error: unknown,
 ): HostedExecutionStructuredLogDetails | null {
-  if (!(error instanceof Error)) {
+  if (error === undefined) {
     return null;
   }
 
@@ -482,23 +516,39 @@ export function extractHostedAssistantNotificationRedactedDetails(
       readHostedExecutionObjectErrorProperty(error, ["details"]),
     ),
   );
-
-  if (!mergedDetails) {
-    return null;
-  }
-
   const details: HostedExecutionStructuredLogDetails = {};
 
   for (const key of HOSTED_ASSISTANT_NOTIFICATION_STRING_DETAIL_KEYS) {
-    const value = mergedDetails[key];
+    const value = mergedDetails?.[key];
     if (typeof value === "string" || value === null) {
       details[key] = value;
     }
   }
 
   for (const key of HOSTED_ASSISTANT_NOTIFICATION_BOOLEAN_DETAIL_KEYS) {
-    const value = mergedDetails[key];
+    const value = mergedDetails?.[key];
     if (typeof value === "boolean" || value === null) {
+      details[key] = value;
+    }
+  }
+
+  for (const key of HOSTED_ASSISTANT_PROVIDER_STRING_DETAIL_KEYS) {
+    const value = mergedDetails?.[key];
+    if (typeof value === "string" || value === null) {
+      details[key] = value;
+    }
+  }
+
+  for (const key of HOSTED_ASSISTANT_PROVIDER_BOOLEAN_DETAIL_KEYS) {
+    const value = mergedDetails?.[key];
+    if (typeof value === "boolean" || value === null) {
+      details[key] = value;
+    }
+  }
+
+  for (const key of HOSTED_ASSISTANT_PROVIDER_NUMBER_DETAIL_KEYS) {
+    const value = mergedDetails?.[key];
+    if (typeof value === "number" || value === null) {
       details[key] = value;
     }
   }
@@ -515,8 +565,11 @@ export function extractHostedAssistantNotificationRedactedDetails(
   }
 
   if (
-    "assistantNotificationLinqBaseUrlOrigin" in mergedDetails
-    || "assistantNotificationLinqBaseUrlPath" in mergedDetails
+    mergedDetails
+    && (
+      "assistantNotificationLinqBaseUrlOrigin" in mergedDetails
+      || "assistantNotificationLinqBaseUrlPath" in mergedDetails
+    )
   ) {
     details.assistantNotificationLinqBaseUrlConfigured =
       typeof mergedDetails.assistantNotificationLinqBaseUrlOrigin === "string"
@@ -524,8 +577,11 @@ export function extractHostedAssistantNotificationRedactedDetails(
   }
 
   if (
-    "assistantNotificationProviderBaseUrlOrigin" in mergedDetails
-    || "assistantNotificationProviderBaseUrlPath" in mergedDetails
+    mergedDetails
+    && (
+      "assistantNotificationProviderBaseUrlOrigin" in mergedDetails
+      || "assistantNotificationProviderBaseUrlPath" in mergedDetails
+    )
   ) {
     details.assistantNotificationProviderBaseUrlConfigured =
       typeof mergedDetails.assistantNotificationProviderBaseUrlOrigin === "string"

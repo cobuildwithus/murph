@@ -254,6 +254,7 @@ describe("hosted execution observability", () => {
         assistantNotificationChannel: "linq",
         assistantNotificationDeliveryKind: "thread",
         assistantNotificationExplicitTargetPresent: false,
+        assistantNotificationGatewayOnlyProviders: "openai",
         assistantNotificationIdentityIdPresent: true,
         assistantNotificationLinqBaseUrlOrigin: "https://linq.example.test",
         assistantNotificationLinqBaseUrlPath: "/v1",
@@ -267,6 +268,16 @@ describe("hosted execution observability", () => {
         assistantNotificationThreadIsDirect: true,
         assistantNotificationTurnTrigger: "automation-cron",
         assistantNotificationWorkingDirectoryPresent: false,
+        assistantProviderAdapter: "openai-compatible",
+        assistantProviderErrorBodyCode: "invalid_request",
+        assistantProviderErrorBodyMessage: "Gateway only provider cannot serve this model.",
+        assistantProviderErrorBodyPresent: true,
+        assistantProviderErrorBodyType: "invalid_request_error",
+        assistantProviderErrorStatus: 400,
+        assistantProviderGatewayOnlyProviderCount: 1,
+        assistantProviderGatewayOnlyProviders: "openai",
+        assistantProviderGatewayTarget: true,
+        assistantProviderModel: "openai/gpt-5.4",
         executionContextHosted: true,
         prompt: "do not keep me",
       },
@@ -292,6 +303,7 @@ describe("hosted execution observability", () => {
       assistantNotificationErrorName: "Error",
       assistantNotificationErrorStatus: 401,
       assistantNotificationExplicitTargetPresent: false,
+      assistantNotificationGatewayOnlyProviders: "openai",
       assistantNotificationIdentityIdPresent: true,
       assistantNotificationLinqBaseUrlConfigured: true,
       assistantNotificationProvider: "openai-compatible",
@@ -304,7 +316,24 @@ describe("hosted execution observability", () => {
       assistantNotificationThreadIsDirect: true,
       assistantNotificationTurnTrigger: "automation-cron",
       assistantNotificationWorkingDirectoryPresent: false,
+      assistantProviderAdapter: "openai-compatible",
+      assistantProviderErrorBodyCode: "invalid_request",
+      assistantProviderErrorBodyMessage: "Gateway only provider cannot serve this model.",
+      assistantProviderErrorBodyPresent: true,
+      assistantProviderErrorBodyType: "invalid_request_error",
+      assistantProviderErrorStatus: 400,
+      assistantProviderGatewayOnlyProviderCount: 1,
+      assistantProviderGatewayOnlyProviders: "openai",
+      assistantProviderGatewayTarget: true,
+      assistantProviderModel: "openai/gpt-5.4",
       executionContextHosted: true,
+    });
+  });
+
+  it("keeps notification error diagnostics even when no annotation details exist", () => {
+    expect(extractHostedAssistantNotificationRedactedDetails("plain provider failure")).toEqual({
+      assistantNotificationErrorCode: "runtime_error",
+      assistantNotificationErrorMessage: "Hosted execution runtime failed.",
     });
   });
 

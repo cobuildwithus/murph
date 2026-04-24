@@ -2,6 +2,7 @@ import { createConfiguredDeviceSyncProvidersFromConfigs } from "@murphai/device-
 import { createDeviceSyncRegistry } from "@murphai/device-syncd/registry";
 import {
   type AssistantExecutionContext,
+  type AssistantRunEvent,
   createAssistantFoodAutoLogHooks,
   readAssistantAutomationState,
   runAssistantAutomationPass,
@@ -21,6 +22,7 @@ import {
 } from "../hosted-device-sync-runtime.ts";
 import { readHostedAssistantRuntimeState } from "./context.ts";
 import type {
+  HostedExecutionRedactedLogEntry,
   HostedRunCleanupTarget,
   HostedRunEventResult,
   HostedRuntimeEvent,
@@ -38,6 +40,7 @@ import {
 } from "../device-sync-service.ts";
 
 const HOSTED_MAX_DEVICE_SYNC_JOBS = 20;
+const HOSTED_ASSISTANT_AUTOMATION_REDACTED_EVENT_LOG_LIMIT = 12;
 
 interface HostedAssistantAutomationReadiness {
   activeProfileId: string | null;
@@ -72,8 +75,8 @@ async function resolveHostedAssistantAutomationReadiness(input: {
 function reportHostedAssistantAutomationSkipped(
   wake: HostedRuntimeEvent,
   readiness: HostedAssistantAutomationReadiness,
-): void {
-  emitHostedExecutionStructuredLog({
+): HostedExecutionRedactedLogEntry {
+  return emitHostedRuntimeRedactedLog({
     component: "runtime",
     details: {
       activeProfileId: readiness.activeProfileId,
@@ -110,9 +113,12 @@ export async function runHostedAssistantRuntimeTimerLane(input: {
   const assistantAutomation = await resolveHostedAssistantAutomationReadiness({
     skipAssistantAutomation: input.skipAssistantAutomation ?? false,
   });
+  const redactedLogEntries: HostedExecutionRedactedLogEntry[] = [];
 
   if (!assistantAutomation.configured) {
-    reportHostedAssistantAutomationSkipped(input.wake, assistantAutomation);
+    redactedLogEntries.push(
+      reportHostedAssistantAutomationSkipped(input.wake, assistantAutomation),
+    );
   }
 
   const assistantResult = assistantAutomation.shouldRun
@@ -128,9 +134,11 @@ export async function runHostedAssistantRuntimeTimerLane(input: {
         adoptedEventResults: [],
         nextWakeAt: null,
         progressed: false,
+        redactedLogEntries: [],
       };
   const nextWakeAt = assistantResult.nextWakeAt
     ?? (assistantResult.progressed ? new Date().toISOString() : null);
+  redactedLogEntries.push(...assistantResult.redactedLogEntries);
 
   return {
     ...(assistantResult.adoptedCleanupTargets.length === 0
@@ -143,6 +151,7 @@ export async function runHostedAssistantRuntimeTimerLane(input: {
     deviceSyncSkipped: true,
     nextWakeAt,
     parserProcessed: 0,
+    ...(redactedLogEntries.length === 0 ? {} : { redactedLogEntries }),
   };
 }
 
@@ -157,6 +166,7 @@ export async function runHostedAssistantAutomation(
   adoptedEventResults: HostedRunEventResult[];
   nextWakeAt: string | null;
   progressed: boolean;
+  redactedLogEntries: HostedExecutionRedactedLogEntry[];
 }> {
   const inboxServices = createIntegratedInboxServices();
   const vaultServices = createIntegratedVaultServices({
@@ -164,6 +174,9 @@ export async function runHostedAssistantAutomation(
   });
   const adoptedEventResults: HostedRunEventResult[] = [];
   const adoptedCleanupTargets: HostedRunCleanupTarget[] = [];
+  const redactedLogEntries: HostedExecutionRedactedLogEntry[] = [];
+  const automationEventCounts = new Map<string, number>();
+  let redactedAutomationEventLogCount = 0;
   const turnInputPort = runtime
     ? createHostedAssistantTurnInputPort({
         inboxServices,
@@ -180,7 +193,7 @@ export async function runHostedAssistantAutomation(
       })
     : undefined;
   const beforeState = await readAssistantAutomationState(vaultRoot);
-  emitHostedExecutionStructuredLog({
+  redactedLogEntries.push(emitHostedRuntimeRedactedLog({
     component: "runtime",
     details: {
       autoReplyChannels: beforeState.autoReply.map((entry) => entry.channel).join(","),
@@ -193,7 +206,7 @@ export async function runHostedAssistantAutomation(
     wake,
     message: "Hosted assistant automation pass starting.",
     phase: "wake.running",
-  });
+  }));
 
   try {
     const result = await runAssistantAutomationPass({
@@ -202,18 +215,24 @@ export async function runHostedAssistantAutomation(
       executionContext,
       inboxServices,
       onEvent: (event) => {
-        emitHostedExecutionStructuredLog({
+        automationEventCounts.set(
+          event.type,
+          (automationEventCounts.get(event.type) ?? 0) + 1,
+        );
+        const logEntry = emitHostedRuntimeRedactedLog({
           component: "runtime",
-          details: {
-            captureId: "captureId" in event ? (event.captureId ?? null) : null,
-            details: event.details ?? null,
-            requestId,
-            type: event.type,
-          },
+          details: buildHostedAssistantAutomationEventLogDetails(event, requestId),
           wake,
           message: `Hosted assistant automation event: ${event.type}.`,
           phase: "wake.running",
         });
+        if (
+          shouldPersistHostedAssistantAutomationEvent(event.type)
+          && redactedAutomationEventLogCount < HOSTED_ASSISTANT_AUTOMATION_REDACTED_EVENT_LOG_LIMIT
+        ) {
+          redactedLogEntries.push(logEntry);
+          redactedAutomationEventLogCount += 1;
+        }
       },
       vaultServices,
       requestId,
@@ -221,27 +240,53 @@ export async function runHostedAssistantAutomation(
       vault: vaultRoot,
     });
     const afterState = await readAssistantAutomationState(vaultRoot);
-    emitHostedExecutionStructuredLog({
+    const replies = result.replies ?? {
+      considered: 0,
+      failed: 0,
+      replied: 0,
+      skipped: 0,
+    };
+    const routing = result.routing ?? {
+      considered: 0,
+      failed: 0,
+      noAction: 0,
+      routed: 0,
+      skipped: 0,
+    };
+    redactedLogEntries.push(emitHostedRuntimeRedactedLog({
       component: "runtime",
       details: {
+        automationEventCounts: Object.fromEntries(automationEventCounts),
         autoReplyChannels: afterState.autoReply.map((entry) => entry.channel).join(","),
         autoReplyCursorSummary: afterState.autoReply.map((entry) =>
           `${entry.channel}:${entry.cursor?.captureId ?? "null"}`
         ).join(","),
+        cronProcessed: result.cronProcessed,
         inboxScanCursor: afterState.inboxScanCursor?.captureId ?? null,
         nextWakeAt: result.nextWakeAt,
+        outboxAttempted: result.outboxAttempted,
         progressed: result.progressed,
         requestId,
+        replyConsidered: replies.considered,
+        replyFailed: replies.failed,
+        replyReplied: replies.replied,
+        replySkipped: replies.skipped,
+        routingConsidered: routing.considered,
+        routingFailed: routing.failed,
+        routingNoAction: routing.noAction,
+        routingRouted: routing.routed,
+        routingSkipped: routing.skipped,
       },
       wake,
       message: "Hosted assistant automation pass finished.",
       phase: "wake.running",
-    });
+    }));
     return {
       adoptedCleanupTargets,
       adoptedEventResults,
       nextWakeAt: result.nextWakeAt,
       progressed: result.progressed,
+      redactedLogEntries,
     };
   } catch (error) {
     if (
@@ -250,7 +295,7 @@ export async function runHostedAssistantAutomation(
       && "code" in error
       && error.code === "INBOX_NOT_INITIALIZED"
     ) {
-      emitHostedExecutionStructuredLog({
+      redactedLogEntries.push(emitHostedRuntimeRedactedLog({
         component: "runtime",
         details: {
           requestId,
@@ -258,17 +303,75 @@ export async function runHostedAssistantAutomation(
         wake,
         message: "Hosted assistant automation skipped because the inbox runtime is not initialized yet.",
         phase: "wake.running",
-      });
+      }));
       return {
         adoptedCleanupTargets,
         adoptedEventResults,
         nextWakeAt: null,
         progressed: false,
+        redactedLogEntries,
       };
     }
 
+    emitHostedRuntimeRedactedLog({
+      component: "runtime",
+      details: {
+        requestId,
+      },
+      error,
+      level: "error",
+      wake,
+      message: "Hosted assistant automation pass failed.",
+      phase: "failed",
+    });
     throw error;
   }
+}
+
+function emitHostedRuntimeRedactedLog(
+  input: Parameters<typeof emitHostedExecutionStructuredLog>[0],
+): HostedExecutionRedactedLogEntry {
+  const record = emitHostedExecutionStructuredLog(input) as
+    | ReturnType<typeof emitHostedExecutionStructuredLog>
+    | undefined;
+
+  return {
+    component: record?.component ?? input.component,
+    eventId: record?.eventId ?? input.wake?.eventId ?? input.eventId ?? null,
+    level: record?.level ?? input.level ?? (input.error === undefined ? "info" : "error"),
+    message: record?.message ?? input.message,
+    phase: record?.phase ?? input.phase,
+    ...((record?.details ?? input.details) ? { redacted: record?.details ?? input.details } : {}),
+  };
+}
+
+function buildHostedAssistantAutomationEventLogDetails(
+  event: AssistantRunEvent,
+  requestId: string,
+): Record<string, boolean | number | string | null> {
+  return {
+    captureIdPresent: "captureId" in event ? event.captureId != null : false,
+    details: event.details ?? null,
+    errorCode: event.errorCode ?? null,
+    providerKind: event.providerKind ?? null,
+    providerState: event.providerState ?? null,
+    requestId,
+    safeDetails: event.safeDetails ?? null,
+    toolCount: event.tools?.length ?? null,
+    type: event.type,
+  };
+}
+
+function shouldPersistHostedAssistantAutomationEvent(type: string): boolean {
+  return new Set([
+    "capture.failed",
+    "capture.replied",
+    "capture.reply-failed",
+    "capture.reply-skipped",
+    "capture.reply-started",
+    "reply.scan.started",
+    "scan.started",
+  ]).has(type);
 }
 
 export async function runHostedDeviceSyncPass(
