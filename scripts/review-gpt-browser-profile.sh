@@ -445,7 +445,7 @@ murph_review_gpt_profile_run_thread() {
   local profile_slug="$1"
   shift
 
-  local repo_root thread_browser_endpoint="${MURPH_REVIEW_GPT_BROWSER_ENDPOINT:-}"
+  local repo_root thread_browser_endpoint
   repo_root="$(murph_review_gpt_repo_root)" || return 1
 
   cd "$repo_root"
@@ -456,15 +456,11 @@ murph_review_gpt_profile_run_thread() {
     exec pnpm exec cobuild-review-gpt thread "$@"
   fi
   if [[ "${1:-}" == "wake" ]]; then
-    if [[ -z "$thread_browser_endpoint" ]]; then
-      thread_browser_endpoint="$(murph_review_gpt_profile_browser_endpoint "$profile_slug")" || return 1
-    fi
+    thread_browser_endpoint="$(murph_review_gpt_profile_browser_endpoint "$profile_slug")" || return 1
     exec pnpm exec cobuild-review-gpt thread "$@" --browser-endpoint "$thread_browser_endpoint"
   fi
-  if [[ -z "$thread_browser_endpoint" ]]; then
-    murph_review_gpt_profile_prepare_browser_env "$profile_slug" || return 1
-    thread_browser_endpoint="$MURPH_REVIEW_GPT_BROWSER_ENDPOINT"
-  fi
+  murph_review_gpt_profile_prepare_browser_env "$profile_slug" || return 1
+  thread_browser_endpoint="$MURPH_REVIEW_GPT_BROWSER_ENDPOINT"
   exec pnpm exec cobuild-review-gpt thread "$@" --browser-endpoint "$thread_browser_endpoint"
 }
 
