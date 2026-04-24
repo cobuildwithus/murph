@@ -11,6 +11,7 @@ import {
   createAssistantKnowledgeWriteToolDefinitions,
   createAssistantRuntimeToolDefinitions,
   createCanonicalVaultWriteToolDefinitions,
+  createHealthCommonsToolDefinitions,
   createInboxPromotionToolDefinitions,
   createOutwardSideEffectToolDefinitions,
   createQueryAndReadToolDefinitions,
@@ -43,6 +44,7 @@ export interface AssistantCapabilityRuntime {
 const inboxRoutingAssistantToolCatalogOptions = {
   includeAssistantRuntimeTools: false,
   includeCanonicalWriteTools: true,
+  includeHealthCommonsTools: false,
   includeOutwardSideEffectTools: true,
   includeQueryTools: false,
   includeStatefulWriteTools: false,
@@ -145,6 +147,7 @@ function listProviderTurnAssistantCapabilities(
   return [
     ...createAssistantKnowledgeReadToolDefinitions(input),
     ...createAssistantKnowledgeWriteToolDefinitions(input),
+    ...createHealthCommonsToolDefinitions(),
     ...createAssistantCliExecutorToolDefinitions(input),
     ...createVaultTextReadToolDefinitions(input),
     ...createOutwardSideEffectToolDefinitions(input),
@@ -159,8 +162,10 @@ function listNotificationTurnAssistantCapabilities(
 ): AssistantCapabilityDefinition[] {
   return [
     ...createAssistantKnowledgeReadToolDefinitions(input),
+    ...createHealthCommonsToolDefinitions(),
     ...createVaultTextReadToolDefinitions(input),
     ...createQueryAndReadToolDefinitions(input, {
+      includeHealthCommonsTools: false,
       includeVaultTextReadTool: false,
       includeQueryTools: true,
       includeWebSearchTools: true,

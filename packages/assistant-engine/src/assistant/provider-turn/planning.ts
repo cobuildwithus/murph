@@ -57,6 +57,7 @@ import {
 import {
   buildAssistantNotificationDecisionSystemPrompt,
   buildAssistantSystemPrompt,
+  type AssistantHealthCommonsAccessMode,
 } from '../system-prompt.js'
 import { buildAssistantVaultOverviewBlock } from '../vault-overview.js'
 import {
@@ -86,6 +87,7 @@ export interface AssistantRouteTurnPlan {
 
 export interface AssistantPromptCapabilityAvailability {
   assistantCommandAccessMode: AssistantMurphCommandAccessMode
+  assistantHealthCommonsAccessMode: AssistantHealthCommonsAccessMode
   assistantHostedDeviceConnectAvailable: boolean
   assistantHostedDeviceConnectProviders: readonly AssistantHostedDeviceConnectProvider[]
   assistantKnowledgeToolsAvailable: boolean
@@ -390,10 +392,13 @@ export async function resolveAssistantRouteTurnPlan(input: {
         ? buildAssistantNotificationDecisionSystemPrompt({
             activeExperimentContext,
             allowSensitiveHealthContext: input.sharedPlan.allowSensitiveHealthContext,
+            assistantHealthCommonsAccessMode:
+              promptCapabilityAvailability.assistantHealthCommonsAccessMode,
             assistantHostedDeviceConnectAvailable:
               promptCapabilityAvailability.assistantHostedDeviceConnectAvailable,
             assistantHostedDeviceConnectProviders:
               promptCapabilityAvailability.assistantHostedDeviceConnectProviders,
+            assistantToolNameAliases,
             channel: resolvedChannel,
             currentLocalDate: input.promptTimeContext.currentLocalDate,
             currentTimeZone: input.promptTimeContext.currentTimeZone,
@@ -405,6 +410,8 @@ export async function resolveAssistantRouteTurnPlan(input: {
             allowSensitiveHealthContext: input.sharedPlan.allowSensitiveHealthContext,
             assistantCommandAccessMode:
               promptCapabilityAvailability.assistantCommandAccessMode,
+            assistantHealthCommonsAccessMode:
+              promptCapabilityAvailability.assistantHealthCommonsAccessMode,
             assistantHostedDeviceConnectAvailable:
               promptCapabilityAvailability.assistantHostedDeviceConnectAvailable,
             assistantHostedDeviceConnectProviders:
@@ -509,6 +516,11 @@ export function resolveAssistantPromptCapabilityAvailability(input: {
       supportsToolRuntime: input.supportsToolRuntime,
       toolCatalog: input.toolCatalog,
     }),
+    assistantHealthCommonsAccessMode: resolveAssistantHealthCommonsAccessMode({
+      providerCapabilities: input.providerCapabilities,
+      supportsToolRuntime: input.supportsToolRuntime,
+      toolCatalog: input.toolCatalog,
+    }),
     assistantHostedDeviceConnectAvailable,
     assistantHostedDeviceConnectProviders: assistantHostedDeviceConnectAvailable
       ? input.executionContext?.hosted?.deviceConnectProviders ?? []
@@ -526,6 +538,31 @@ export function resolveAssistantPromptCapabilityAvailability(input: {
       ],
     }),
   }
+}
+
+function resolveAssistantHealthCommonsAccessMode(input: {
+  providerCapabilities: ReturnType<typeof resolveAssistantProviderTargetExecutionCapabilities>
+  supportsToolRuntime: boolean
+  toolCatalog: ReturnType<typeof createProviderTurnAssistantToolCatalog>
+}): AssistantHealthCommonsAccessMode {
+  if (
+    hasRouteToolRuntimeAccess({
+      supportsToolRuntime: input.supportsToolRuntime,
+      toolCatalog: input.toolCatalog,
+      toolNames: [
+        'healthCommons.search',
+        'healthCommons.get',
+        'healthCommons.listProtocols',
+        'healthCommons.listSources',
+      ],
+    })
+  ) {
+    return 'bound-tools'
+  }
+
+  return input.providerCapabilities.murphCommandSurface === 'direct-cli'
+    ? 'direct-cli'
+    : 'none'
 }
 
 function hasRouteToolRuntimeAccess(input: {

@@ -11,6 +11,7 @@ interface PackageJsonShape {
   name?: string
   private?: boolean
   dependencies?: Record<string, string | undefined>
+  bundleDependencies?: string[]
   main?: string
   types?: string
   files?: string[]
@@ -84,6 +85,10 @@ assert(
   'package.json must depend on @murphai/assistant-engine so the published @murphai/murph package installs the vault and inbox owner directly.',
 )
 assert(
+  packageJson.dependencies?.['@murphai/health-commons'] === 'workspace:*',
+  'package.json must depend on @murphai/health-commons so the published @murphai/murph package ships the public Health Commons catalog.',
+)
+assert(
   packageJson.dependencies?.['@murphai/assistant-cli'] === 'workspace:*',
   'package.json must depend on @murphai/assistant-cli so the published @murphai/murph shell can delegate assistant UI and daemon-aware wrappers cleanly.',
 )
@@ -106,6 +111,10 @@ assert(
 assert(
   packageJson.files?.includes('config.schema.json') === true,
   'package.json files must include config.schema.json so published installs ship incur config-schema autocomplete.',
+)
+assert(
+  packageJson.bundleDependencies?.includes('@murphai/health-commons') === true,
+  'package.json bundleDependencies must include @murphai/health-commons so published installs ship the generated Health Commons catalog.',
 )
 assert(
   packageJson.bin?.['vault-cli'] === 'dist/bin.js',

@@ -15,6 +15,7 @@ export interface AssistantToolContext {
 export interface AssistantToolCatalogOptions {
   includeAssistantRuntimeTools?: boolean
   includeCanonicalWriteTools?: boolean
+  includeHealthCommonsTools?: boolean
   includeOutwardSideEffectTools?: boolean
   includeQueryTools?: boolean
   includeStatefulWriteTools?: boolean

@@ -122,6 +122,7 @@ test('root help exposes the Incur built-ins', async () => {
   assert.match(help, new RegExp(`vault-cli@${packageJson.version ?? '0.0.0'}`, 'u'))
   assert.match(help, /Integrations:/u)
   assert.match(help, /chat\s+Open the same interactive assistant chat UI as/u)
+  assert.match(help, /commons\s+Read-only Health Commons commands/u)
   assert.match(help, /search\s+Search commands for the shared local query projection/u)
   assert.match(help, /timeline\s+Build a descending cross-record timeline/u)
   assert.match(help, /completions\s+Generate shell completion script/u)
@@ -1681,6 +1682,14 @@ test('compact llms json manifest remains available', async () => {
     true,
   )
   assert.equal(
+    manifest.commands.some((command) => command.name === 'commons search'),
+    true,
+  )
+  assert.equal(
+    manifest.commands.some((command) => command.name === 'commons protocol show'),
+    true,
+  )
+  assert.equal(
     manifest.commands.some((command) => command.name === 'query projection status'),
     true,
   )
@@ -1711,6 +1720,10 @@ test('full llms json manifest remains available for schema-rich commands', async
   )
   assert.equal(
     manifest.commands.some((command) => command.name === 'search query'),
+    true,
+  )
+  assert.equal(
+    manifest.commands.some((command) => command.name === 'commons source list'),
     true,
   )
   assert.equal(

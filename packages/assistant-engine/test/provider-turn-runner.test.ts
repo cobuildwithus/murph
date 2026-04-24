@@ -382,6 +382,7 @@ describe('executeProviderTurnWithRecovery', () => {
       expect.objectContaining({
         assistantCliContract: 'cli-bootstrap',
         assistantCommandAccessMode: 'bound-tools',
+        assistantHealthCommonsAccessMode: 'bound-tools',
         assistantHostedDeviceConnectAvailable: true,
         assistantKnowledgeToolsAvailable: true,
         assistantToolNameAliases: expect.objectContaining({
@@ -432,6 +433,58 @@ describe('executeProviderTurnWithRecovery', () => {
       expect.objectContaining({
         kind: 'provider.failover.applied',
         level: 'warn',
+      }),
+    )
+  })
+
+  it('keeps Health Commons native tools visible when the generic CLI executor is unavailable', async () => {
+    const route = createRoute({
+      routeId: 'route-health-commons-native-only',
+    })
+    const session = createAssistantSession()
+    const healthCommonsToolNames = new Set([
+      'healthCommons.search',
+      'healthCommons.get',
+      'healthCommons.listProtocols',
+      'healthCommons.listSources',
+    ])
+
+    toolCatalog.hasTool.mockImplementation((toolName) =>
+      healthCommonsToolNames.has(toolName),
+    )
+    toolCatalog.listTools.mockReturnValue(
+      [...healthCommonsToolNames].map((name) => ({ name })),
+    )
+    runnerMocks.executeAssistantProviderTurnAttempt.mockResolvedValue(
+      createSuccessfulAttemptResult({
+        providerSessionId: 'provider-session-health-commons-native-only',
+        response: 'Health Commons answer',
+      }),
+    )
+
+    const outcome = await executeProviderTurnWithRecovery({
+      input: createMessageInput({
+        prompt: 'What Health Commons protocols are available?',
+      }),
+      plan: createTurnPlan({
+        allowSensitiveHealthContext: true,
+        onboardingGuidanceOpen: false,
+      }),
+      resolvedSession: session,
+      routes: [route],
+      turnCreatedAt: '2026-04-08T00:00:00.000Z',
+      turnId: 'turn-health-commons-native-only',
+    })
+
+    expect(outcome).toMatchObject({
+      kind: 'succeeded',
+    })
+    expect(runnerMocks.buildAssistantSystemPrompt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assistantCommandAccessMode: 'none',
+        assistantHealthCommonsAccessMode: 'bound-tools',
+        assistantHostedDeviceConnectAvailable: false,
+        assistantKnowledgeToolsAvailable: false,
       }),
     )
   })
@@ -499,6 +552,10 @@ describe('executeProviderTurnWithRecovery', () => {
       supportsNativeResume: true,
       supportsToolRuntime: true,
     })
+    notificationToolCatalog.listTools.mockReturnValue([
+      { name: 'healthCommons.search' },
+      { name: 'healthCommons.get' },
+    ])
     runnerMocks.resolveAssistantRouteResumeBinding.mockReturnValue(
       session.resumeState,
     )
@@ -562,6 +619,10 @@ describe('executeProviderTurnWithRecovery', () => {
         activeExperimentContext:
           'Active experiment context for navigation only:\n- Sauna RHR (`sauna-rhr`, exp_test): started 2026-04-01.',
         allowSensitiveHealthContext: true,
+        assistantHealthCommonsAccessMode: 'bound-tools',
+        assistantToolNameAliases: expect.objectContaining({
+          'healthCommons.search': 'healthCommons_search',
+        }),
         channel: 'chat',
         currentLocalDate: '2026-04-08',
         currentTimeZone: 'America/Los_Angeles',
@@ -767,6 +828,7 @@ describe('executeProviderTurnWithRecovery', () => {
       expect.objectContaining({
         assistantCliContract: null,
         assistantCommandAccessMode: 'direct-cli',
+        assistantHealthCommonsAccessMode: 'direct-cli',
         assistantHostedDeviceConnectAvailable: false,
         assistantKnowledgeToolsAvailable: false,
         currentLocalDate: '2026-04-08',

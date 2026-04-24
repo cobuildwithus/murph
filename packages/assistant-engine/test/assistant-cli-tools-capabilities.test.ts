@@ -19,6 +19,7 @@ import {
   createAssistantKnowledgeWriteToolDefinitions,
   createAssistantRuntimeToolDefinitions,
   createCanonicalVaultWriteToolDefinitions,
+  createHealthCommonsToolDefinitions,
   createHealthUpsertToolDefinitions,
   createInboxPromotionToolDefinitions,
   createOutwardSideEffectToolDefinitions,
@@ -1109,6 +1110,172 @@ describe('assistant CLI tool capability seam', () => {
           foods: [{ group: 'bundle' }],
         }),
     ).toThrow('Provide either an id or slug.')
+  })
+
+  it('executes Health Commons read-only tools against the public catalog', async () => {
+    const tools = createHealthCommonsToolDefinitions()
+
+    const protocols = await executeTool(tools, 'healthCommons.listProtocols', {
+      limit: 10,
+    })
+    expect(protocols).toMatchObject({
+      corpus: {
+        id: 'health-commons',
+        privateVaultRecords: false,
+      },
+      count: expect.any(Number),
+      protocols: expect.arrayContaining([
+        expect.objectContaining({
+          key: 'protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed',
+          entityType: 'protocol_variant',
+          hasExperimentOnboarding: true,
+        }),
+      ]),
+    })
+    expect(protocols.count).toBeGreaterThanOrEqual(7)
+
+    const search = await executeTool(tools, 'healthCommons.search', {
+      query: 'sleep',
+      entityTypes: ['protocol_variant'],
+      limit: 5,
+    })
+    expect(search).toMatchObject({
+      query: 'sleep',
+      results: expect.arrayContaining([
+        expect.objectContaining({
+          entity: expect.objectContaining({
+            key: 'protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed',
+          }),
+        }),
+      ]),
+    })
+
+    const protocol = await executeTool(tools, 'healthCommons.get', {
+      keyOrSlug: 'red-light-glasses-before-bed',
+      includeExperimentOnboarding: true,
+      includeSources: true,
+    })
+    expect(protocol).toMatchObject({
+      entity: expect.objectContaining({
+        key: 'protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed',
+        experimentOnboarding: expect.objectContaining({
+          startIntent: expect.objectContaining({
+            intentSummary: expect.stringContaining('Red-Light Glasses'),
+          }),
+        }),
+      }),
+      sources: expect.arrayContaining([
+        expect.objectContaining({
+          source: expect.objectContaining({
+            entityType: 'source_artifact',
+          }),
+        }),
+      ]),
+    })
+
+    const expandedProtocol = await executeTool(tools, 'healthCommons.get', {
+      keyOrSlug: 'protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed',
+      includeBody: true,
+      includeRelations: true,
+      includeExperimentOnboarding: false,
+      maxBodyChars: 24,
+    })
+    expect(expandedProtocol).toMatchObject({
+      entity: expect.objectContaining({
+        body: expect.objectContaining({
+          maxChars: 24,
+          truncated: true,
+        }),
+        bodyIncluded: true,
+        experimentOnboarding: null,
+      }),
+      relations: expect.arrayContaining([
+        expect.objectContaining({
+          entity: expect.objectContaining({
+            entityType: 'experiment_family',
+          }),
+        }),
+      ]),
+    })
+
+    const fullBodyProtocol = await executeTool(tools, 'healthCommons.get', {
+      keyOrSlug: 'protocols/red-light-glasses-before-bed/red-light-glasses-before-bed',
+      includeBody: true,
+      maxBodyChars: 6_000,
+    })
+    expect(fullBodyProtocol).toMatchObject({
+      entity: expect.objectContaining({
+        body: expect.objectContaining({
+          truncated: false,
+        }),
+      }),
+    })
+
+    const missingProtocol = await executeTool(tools, 'healthCommons.get', {
+      keyOrSlug: 'not-a-health-commons-record',
+    })
+    expect(missingProtocol).toMatchObject({
+      entity: null,
+      relations: [],
+      sources: [],
+    })
+
+    const fieldTestingProtocols = await executeTool(
+      tools,
+      'healthCommons.listProtocols',
+      {
+        categories: ['passive-heat'],
+        limit: 5,
+        query: 'sauna',
+        status: ['field-testing'],
+      },
+    )
+    expect(fieldTestingProtocols).toMatchObject({
+      count: 1,
+      protocols: [
+        expect.objectContaining({
+          key: 'protocol_variant:dry-sauna/murph-finnish-standard-3x-week',
+        }),
+      ],
+    })
+
+    const sources = await executeTool(tools, 'healthCommons.listSources', {
+      protocolKeyOrSlug: 'red-light-glasses-before-bed',
+      limit: 5,
+    })
+    expect(sources).toMatchObject({
+      count: expect.any(Number),
+      sources: expect.arrayContaining([
+        expect.objectContaining({
+          entityType: 'source_artifact',
+        }),
+      ]),
+    })
+
+    const remSources = await executeTool(tools, 'healthCommons.listSources', {
+      categories: ['rem-sleep'],
+      query: 'AASM',
+      limit: 5,
+    })
+    expect(remSources).toMatchObject({
+      sources: expect.arrayContaining([
+        expect.objectContaining({
+          key: 'source_artifact:aasm-scoring-manual-v3',
+        }),
+      ]),
+    })
+
+    const invalidProtocolSources = await executeTool(
+      tools,
+      'healthCommons.listSources',
+      {
+        protocolKeyOrSlug: 'source_artifact:aasm-scoring-manual-v3',
+      },
+    )
+    expect(invalidProtocolSources).toMatchObject({
+      count: 0,
+      sources: [],
+    })
   })
 
   it('covers registry factory branches and dependency-gated empty capability lists', async () => {
