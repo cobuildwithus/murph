@@ -43,6 +43,7 @@ Always read these before repo code/docs/test/config work:
 
 - Treat `.env` and `.env*` as sensitive. Never print, commit, or otherwise expose their contents.
 - Never print or commit secrets, raw credentials, or full `Authorization` headers.
+- When writing assistant/provider prompts, avoid automated-outreach framing: acquisition/signup language, "new user" labels, delivery/notification wording, and imperative exact-send phrasing in the same prompt. Prefer in-chat, user-facing task framing; the 2026-04-24 hosted first-contact welcome hit Azure OpenAI content filtering when signup/outbound wording was combined with the notification tool path.
 - Import sibling workspace packages by package name through declared public entrypoints only. Do not reach into another package's `src/` or `dist/`.
 - Workspace package dependencies must remain one-way and acyclic. Do not make package `A` depend on package `B` while `B` depends on `A`, whether directly, through public subpaths, or through compatibility shims.
 - Compatibility shims must be temporary and legacy-facing only. Keep the shim on the old path pointing at the new owner; never make the owning package depend on the legacy package to provide the same surface.

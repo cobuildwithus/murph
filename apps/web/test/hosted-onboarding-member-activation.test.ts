@@ -1,3 +1,4 @@
+import { MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE } from "@murphai/contracts";
 import { HostedBillingStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -143,6 +144,15 @@ describe("hosted onboarding member activation", () => {
           deliveryIdempotencyKey: "signup-welcome:member_123",
           firstContact: {
             markSeenOnDeliveryAccepted: true,
+          },
+          instructions: [
+            "Prepare the first in-chat onboarding reply.",
+            "Use this user-facing reply only:",
+            MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
+          ].join("\n\n"),
+          responsePolicy: {
+            kind: "require_send_exact_text",
+            text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
           },
           route: {
             actorId: "+15550100001",
