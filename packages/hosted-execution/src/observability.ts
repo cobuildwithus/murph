@@ -52,10 +52,18 @@ const HOSTED_EXECUTION_MAX_STACK_PREVIEW_LINES = 3;
 const HOSTED_EXECUTION_MAX_DETAIL_ARRAY_LENGTH = 32;
 const HOSTED_EXECUTION_MAX_DETAIL_DEPTH = 4;
 const HOSTED_EXECUTION_MAX_DETAIL_KEYS = 32;
+const HOSTED_EXECUTION_MAX_ERROR_PROPERTY_SCAN_DEPTH = 3;
 const HOSTED_EXECUTION_SAFE_CONFIGURATION_MESSAGE_PATTERNS = [
   /^(?:[A-Z][A-Z0-9_]{1,127}|CF_[A-Z0-9_]{1,127}|HOSTED_[A-Z0-9_]{1,127}|DEVICE_SYNC_[A-Z0-9_]{1,127})\s+(?:must be|is)\s+configured(?:\s+for [A-Za-z0-9 ._/-]+)?\.?$/u,
   /^Native hosted execution requires a RunnerContainer binding\.$/u,
 ];
+const HOSTED_EXECUTION_SENSITIVE_DETAIL_KEY_PATTERN =
+  /authorization|secret|token|password|passcode|api[-_]?key|cookie|set-cookie/iu;
+const HOSTED_EXECUTION_ERROR_CODE_PROPERTY_KEYS = ["code", "errorCode"] as const;
+const HOSTED_EXECUTION_ERROR_STATUS_PROPERTY_KEYS =
+  ["status", "statusCode", "responseStatus"] as const;
+const HOSTED_EXECUTION_ERROR_PROPERTY_CONTAINER_KEYS =
+  ["context", "details", "cause", "error", "response", "data"] as const;
 const HOSTED_EXECUTION_NAMED_ERROR_CODES = {
   RangeError: "range_error",
   ReferenceError: "reference_error",
@@ -214,6 +222,16 @@ export function normalizeHostedExecutionOperatorMessage(message: string): string
 export function deriveHostedExecutionErrorCode(error: unknown): HostedExecutionErrorCode {
   const name = error instanceof Error ? error.name : "";
   const message = normalizeHostedExecutionErrorMessage(error).toLowerCase();
+  const status = readHostedExecutionNumericErrorProperty(
+    error,
+    HOSTED_EXECUTION_ERROR_STATUS_PROPERTY_KEYS,
+    100,
+    599,
+  );
+  const detailCode = readHostedExecutionStringErrorProperty(
+    error,
+    HOSTED_EXECUTION_ERROR_CODE_PROPERTY_KEYS,
+  )?.toLowerCase();
 
   if (
     name === "HostedExecutionConfigurationError"
@@ -243,6 +261,20 @@ export function deriveHostedExecutionErrorCode(error: unknown): HostedExecutionE
   if (hostedExecutionMessageIncludesAny(message, ["authorization", "unauthorized", "forbidden"])) {
     return "authorization_error";
   }
+  if (
+    status === 401
+    || status === 403
+    || (detailCode
+      ? hostedExecutionMessageIncludesAny(detailCode, [
+          "auth",
+          "forbidden",
+          "invalid_api_key",
+          "unauthorized",
+        ])
+      : false)
+  ) {
+    return "authorization_error";
+  }
 
   if (
     hostedExecutionMessageIncludesAny(message, [
@@ -255,10 +287,26 @@ export function deriveHostedExecutionErrorCode(error: unknown): HostedExecutionE
   ) {
     return "invalid_request";
   }
+  if (
+    status === 400
+    || status === 404
+    || (detailCode
+      ? hostedExecutionMessageIncludesAny(detailCode, ["bad_request", "invalid_request", "not_found"])
+      : false)
+  ) {
+    return "invalid_request";
+  }
 
   if (
     name === "AbortError"
     || hostedExecutionMessageIncludesAny(message, ["abort", "timed out", "timeout"])
+  ) {
+    return "timeout";
+  }
+  if (
+    status === 408
+    || status === 504
+    || (detailCode ? hostedExecutionMessageIncludesAny(detailCode, ["timeout", "timed_out"]) : false)
   ) {
     return "timeout";
   }
@@ -357,6 +405,68 @@ export function buildHostedExecutionStructuredLogRecord(
   };
 }
 
+export function buildHostedExecutionSafeErrorDiagnostics(
+  error: unknown,
+): HostedExecutionStructuredLogDetails | null {
+  if (!(error instanceof Error)) {
+    return null;
+  }
+
+  const safeErrorDetails = buildHostedExecutionSafeErrorDetails(error);
+  const errorName = readHostedExecutionSafeErrorName(error);
+  const diagnostics: HostedExecutionStructuredLogDetails = {
+    errorCode: deriveHostedExecutionErrorCode(error),
+    errorMessage: summarizeHostedExecutionError(error),
+  };
+  const errorDetail = safeErrorDetails?.errorDetail;
+  const errorCause = safeErrorDetails?.errorCause;
+  const errorStatus = safeErrorDetails?.errorStatus;
+  const errorCodeDetail = safeErrorDetails?.errorCodeDetail;
+
+  if (errorName) {
+    diagnostics.errorName = errorName;
+  }
+
+  if (typeof errorDetail === "string" && errorDetail !== diagnostics.errorMessage) {
+    diagnostics.errorDetail = errorDetail;
+  }
+
+  if (typeof errorCause === "string") {
+    diagnostics.errorCause = errorCause;
+  }
+
+  if (typeof errorStatus === "number") {
+    diagnostics.errorStatus = errorStatus;
+  }
+
+  if (typeof errorCodeDetail === "string") {
+    diagnostics.errorCodeDetail = errorCodeDetail;
+  }
+
+  return diagnostics;
+}
+
+export function buildHostedExecutionPrefixedSafeErrorDiagnostics(input: {
+  error: unknown;
+  prefix: string;
+}): HostedExecutionStructuredLogDetails | null {
+  if (!/^[A-Za-z][A-Za-z0-9]{0,48}$/u.test(input.prefix)) {
+    throw new TypeError("Hosted execution diagnostic prefix must be a short identifier.");
+  }
+
+  const diagnostics = buildHostedExecutionSafeErrorDiagnostics(input.error);
+  if (!diagnostics) {
+    return null;
+  }
+
+  return Object.fromEntries(
+    Object.entries(diagnostics).map(([key, value]) => [
+      `${input.prefix}${key.slice(0, 1).toUpperCase()}${key.slice(1)}`,
+      value,
+    ]),
+  );
+}
+
 export function extractHostedAssistantNotificationRedactedDetails(
   error: unknown,
 ): HostedExecutionStructuredLogDetails | null {
@@ -391,6 +501,17 @@ export function extractHostedAssistantNotificationRedactedDetails(
     if (typeof value === "boolean" || value === null) {
       details[key] = value;
     }
+  }
+
+  const notificationErrorDiagnostics = buildHostedExecutionPrefixedSafeErrorDiagnostics({
+    error,
+    prefix: "assistantNotification",
+  });
+  Object.assign(details, notificationErrorDiagnostics ?? {});
+
+  const providerErrorCode = notificationErrorDiagnostics?.assistantNotificationErrorCodeDetail;
+  if (typeof providerErrorCode === "string") {
+    details.assistantNotificationProviderErrorCode = providerErrorCode;
   }
 
   if (
@@ -551,13 +672,13 @@ export function buildHostedExecutionSafeErrorDetails(
   const stackPreview = readHostedExecutionSafeStackPreview(error);
   const errorStatus = readHostedExecutionNumericErrorProperty(
     error,
-    ["status", "statusCode", "responseStatus"],
+    HOSTED_EXECUTION_ERROR_STATUS_PROPERTY_KEYS,
     100,
     599,
   );
   const errorCode = readHostedExecutionStringErrorProperty(
     error,
-    ["code", "errorCode"],
+    HOSTED_EXECUTION_ERROR_CODE_PROPERTY_KEYS,
   );
 
   if (errorDetail && errorDetail !== operatorSummary) {
@@ -595,6 +716,7 @@ function redactHostedExecutionText(value: string): string {
       (_match, key: string) => `${key}=Bearer [redacted]`,
     )
     .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+\b/giu, "Bearer [redacted]")
+    .replace(/\+\d{8,15}\b/gu, "[redacted-phone]")
     .replace(/\b([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})\b/gu, "[redacted-email]")
     .replace(
       /\b(authorization)\b\s*[:=]\s*(?!Bearer\b)(?:"[^"]+"|'[^']+'|\S+)/giu,
@@ -754,6 +876,13 @@ function sanitizeHostedExecutionDetailNode(
         return [];
       }
 
+      if (
+        HOSTED_EXECUTION_SENSITIVE_DETAIL_KEY_PATTERN.test(key)
+        && hostedExecutionDetailValuePresent(entry)
+      ) {
+        return [[key, "[redacted]"] as const];
+      }
+
       const redactedTelegramEntry = sanitizeHostedExecutionTelegramDetailEntry(
         key,
         entry,
@@ -792,7 +921,10 @@ function inferHostedExecutionDetailSanitizationHints(
 function inferHostedExecutionErrorSanitizationHints(
   error: Error,
 ): HostedExecutionDetailSanitizationHints {
-  const code = readHostedExecutionStringErrorProperty(error, ["code", "errorCode"]);
+  const code = readHostedExecutionStringErrorProperty(
+    error,
+    HOSTED_EXECUTION_ERROR_CODE_PROPERTY_KEYS,
+  );
   const context = readHostedExecutionObjectErrorProperty(error, ["context"]);
   const details = readHostedExecutionObjectErrorProperty(error, ["details"]);
 
@@ -962,16 +1094,51 @@ function readHostedExecutionStringErrorProperty(
   error: unknown,
   keys: readonly string[],
 ): string | null {
-  if (!error || typeof error !== "object") {
+  return readHostedExecutionNestedStringProperty(error, keys, {
+    depth: 0,
+    visited: new Set<object>(),
+  });
+}
+
+function readHostedExecutionNestedStringProperty(
+  value: unknown,
+  keys: readonly string[],
+  state: {
+    depth: number;
+    visited: Set<object>;
+  },
+): string | null {
+  if (!value || typeof value !== "object") {
     return null;
   }
 
+  if (state.visited.has(value)) {
+    return null;
+  }
+  state.visited.add(value);
+
   for (const key of keys) {
-    const value = (error as Record<string, unknown>)[key];
-    const normalized = normalizeHostedExecutionDiagnosticMessage(value);
+    const property = (value as Record<string, unknown>)[key];
+    const normalized = normalizeHostedExecutionDiagnosticMessage(property);
 
     if (normalized) {
       return normalized;
+    }
+  }
+
+  if (state.depth >= HOSTED_EXECUTION_MAX_ERROR_PROPERTY_SCAN_DEPTH) {
+    return null;
+  }
+
+  for (const key of HOSTED_EXECUTION_ERROR_PROPERTY_CONTAINER_KEYS) {
+    const nestedValue = (value as Record<string, unknown>)[key];
+    const nested = readHostedExecutionNestedStringProperty(nestedValue, keys, {
+      depth: state.depth + 1,
+      visited: state.visited,
+    });
+
+    if (nested) {
+      return nested;
     }
   }
 
@@ -984,15 +1151,63 @@ function readHostedExecutionNumericErrorProperty(
   minimum: number,
   maximum: number,
 ): number | null {
-  if (!error || typeof error !== "object") {
+  return readHostedExecutionNestedNumericProperty(error, keys, minimum, maximum, {
+    depth: 0,
+    visited: new Set<object>(),
+  });
+}
+
+function readHostedExecutionNestedNumericProperty(
+  value: unknown,
+  keys: readonly string[],
+  minimum: number,
+  maximum: number,
+  state: {
+    depth: number;
+    visited: Set<object>;
+  },
+): number | null {
+  if (!value || typeof value !== "object") {
     return null;
   }
 
-  for (const key of keys) {
-    const value = (error as Record<string, unknown>)[key];
+  if (state.visited.has(value)) {
+    return null;
+  }
+  state.visited.add(value);
 
-    if (typeof value === "number" && Number.isInteger(value) && value >= minimum && value <= maximum) {
-      return value;
+  for (const key of keys) {
+    const property = (value as Record<string, unknown>)[key];
+
+    if (
+      typeof property === "number"
+      && Number.isInteger(property)
+      && property >= minimum
+      && property <= maximum
+    ) {
+      return property;
+    }
+  }
+
+  if (state.depth >= HOSTED_EXECUTION_MAX_ERROR_PROPERTY_SCAN_DEPTH) {
+    return null;
+  }
+
+  for (const key of HOSTED_EXECUTION_ERROR_PROPERTY_CONTAINER_KEYS) {
+    const nestedValue = (value as Record<string, unknown>)[key];
+    const nested = readHostedExecutionNestedNumericProperty(
+      nestedValue,
+      keys,
+      minimum,
+      maximum,
+      {
+        depth: state.depth + 1,
+        visited: state.visited,
+      },
+    );
+
+    if (nested !== null) {
+      return nested;
     }
   }
 

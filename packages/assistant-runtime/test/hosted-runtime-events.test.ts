@@ -364,7 +364,16 @@ describe("executeHostedIngressEvent", () => {
       occurredAt: "2026-04-08T00:00:00.000Z",
     });
     mocks.sendAssistantNotification.mockRejectedValueOnce(
-      new Error("Azure content filter blocked the welcome message"),
+      Object.assign(new Error("Provider rejected configured credentials."), {
+        code: "invalid_api_key",
+        details: {
+          assistantNotificationProvider: "openai-compatible",
+          assistantNotificationProviderBaseUrlOrigin: "https://gateway.example.test",
+          assistantNotificationProviderModel: "openai/gpt-5.4",
+          assistantNotificationStage: "provider",
+        },
+        statusCode: 401,
+      }),
     );
 
     const result = await executeHostedIngressEvent({
@@ -389,7 +398,18 @@ describe("executeHostedIngressEvent", () => {
         level: "warn",
         message: "Hosted assistant notification failed and was skipped so the hosted run can continue.",
         redacted: expect.objectContaining({
-          errorCode: "runtime_error",
+          assistantNotificationErrorCode: "authorization_error",
+          assistantNotificationErrorCodeDetail: "invalid_api_key",
+          assistantNotificationErrorDetail: "Provider rejected configured credentials.",
+          assistantNotificationErrorMessage: "Hosted execution authorization failed.",
+          assistantNotificationErrorName: "Error",
+          assistantNotificationErrorStatus: 401,
+          assistantNotificationProvider: "openai-compatible",
+          assistantNotificationProviderBaseUrlConfigured: true,
+          assistantNotificationProviderErrorCode: "invalid_api_key",
+          assistantNotificationProviderModel: "openai/gpt-5.4",
+          assistantNotificationStage: "provider",
+          errorCode: "authorization_error",
           notificationRouteThreadIsDirect: null,
         }),
       }),
