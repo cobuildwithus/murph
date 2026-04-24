@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { Button } from "@/src/components/ui/button";
 import type { ExperimentStatus } from "@/src/types/experiments";
 
@@ -44,17 +43,7 @@ export function ExperimentHeader({
   const protocolDay = day == null ? null : Math.max(1, day - baselineDays);
 
   return (
-    <div className="flex flex-col gap-7">
-      {/* Breadcrumb */}
-      <div className="flex items-center gap-2 text-[13px]/4">
-        <Link href="/experiments" className="text-muted-foreground/70 hover:text-foreground">
-          Experiments
-        </Link>
-        <span className="text-secondary">→</span>
-        <span className="text-muted-foreground">{title}</span>
-      </div>
-
-      {/* Title row with CTA or ring */}
+    <div className="relative z-10 -mx-6 flex flex-col gap-7 rounded-t-3xl bg-background px-6 pt-10 md:-mx-14 md:px-14 md:pt-14">
       <div className="flex items-start justify-between gap-10">
         <div className="flex max-w-[700px] flex-col gap-3.5">
           {/* Metadata line */}
