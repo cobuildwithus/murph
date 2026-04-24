@@ -1,6 +1,9 @@
 import { createHash } from "node:crypto";
 
 import { Prisma } from "@prisma/client";
+import {
+  HOSTED_RUN_STALE_RUNNER_USER_ERROR_CODE,
+} from "@murphai/hosted-execution/contracts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -1297,6 +1300,82 @@ describe("acquireHostedRunTx", () => {
     mocks.countPendingHostedIngressEvents.mockResolvedValue(0);
     mocks.hydrateHostedIngressEventsTx.mockResolvedValue([]);
     mocks.lockHostedExecutionCursorRowTx.mockResolvedValue(undefined);
+  });
+
+  it("maps a missing hosted member during acquire to a terminal stale-runner error", async () => {
+    const missingMemberError = new Prisma.PrismaClientKnownRequestError(
+      "Foreign key constraint failed on the field: hosted_execution_cursor_user_id_fkey",
+      {
+        clientVersion: "test",
+        code: "P2003",
+        meta: {
+          modelName: "HostedExecutionCursor",
+        },
+      },
+    );
+    const tx = asHostedRunMutationTx({
+      hostedRun: {
+        create: vi.fn(),
+        findFirst: vi.fn(),
+        findMany: vi.fn(),
+      },
+      hostedIngressEvent: {
+        findMany: vi.fn(),
+        update: vi.fn(),
+        updateMany: vi.fn(),
+      },
+    });
+
+    mocks.ensureHostedExecutionCursorRow.mockRejectedValueOnce(missingMemberError);
+
+    await expect(acquireHostedRunTx({
+      tx,
+      userId: "member_deleted",
+    })).rejects.toMatchObject({
+      code: HOSTED_RUN_STALE_RUNNER_USER_ERROR_CODE,
+      details: {
+        boundary: "hosted-run.acquire",
+        condition: "stale_runner_missing_hosted_member",
+      },
+      httpStatus: 410,
+      retryable: false,
+    });
+
+    expect(mocks.lockHostedExecutionCursorRowTx).not.toHaveBeenCalled();
+  });
+
+  it("does not map unrelated acquire cursor foreign-key errors to stale-runner state", async () => {
+    const unrelatedForeignKeyError = new Prisma.PrismaClientKnownRequestError(
+      "Foreign key constraint failed on another hosted-run relation",
+      {
+        clientVersion: "test",
+        code: "P2003",
+        meta: {
+          modelName: "HostedRun",
+        },
+      },
+    );
+    const tx = asHostedRunMutationTx({
+      hostedRun: {
+        create: vi.fn(),
+        findFirst: vi.fn(),
+        findMany: vi.fn(),
+      },
+      hostedIngressEvent: {
+        findMany: vi.fn(),
+        update: vi.fn(),
+        updateMany: vi.fn(),
+      },
+    });
+
+    mocks.ensureHostedExecutionCursorRow.mockRejectedValueOnce(unrelatedForeignKeyError);
+
+    await expect(acquireHostedRunTx({
+      tx,
+      userId: "member_123",
+    })).rejects.toBe(unrelatedForeignKeyError);
+
+    expect(mocks.lockHostedExecutionCursorRowTx).not.toHaveBeenCalled();
   });
 
   it("returns no work when there are no wakes and no runtime timer unless repair was requested explicitly", async () => {

@@ -302,6 +302,10 @@ async function executeAssistantProviderAttempt(input: {
       executionPlan,
       hostedMemberId: executionPlan.executionContext?.hosted?.memberId ?? null,
     })
+    emitHostedNotificationProviderRequestDebugTrace({
+      attemptPlan,
+      executionPlan,
+    })
     const attemptResult = await executeAssistantProviderTurnAttempt({
       abortSignal: executionPlan.input.abortSignal,
       provider: attemptPlan.route.provider,
@@ -482,6 +486,81 @@ function classifyAssistantProviderAttemptFailure(input: {
   }
 
   return 'retry_next_route'
+}
+
+function emitHostedNotificationProviderRequestDebugTrace(input: {
+  attemptPlan: AssistantProviderAttemptPlan
+  executionPlan: AssistantProviderTurnExecutionPlan
+}): void {
+  const { attemptPlan, executionPlan } = input
+  const onTraceEvent = executionPlan.input.onTraceEvent
+
+  if (
+    !onTraceEvent ||
+    executionPlan.profile.promptProfile !== 'notification-decision' ||
+    executionPlan.executionContext?.hosted == null
+  ) {
+    return
+  }
+
+  try {
+    const providerOptions = attemptPlan.route.providerOptions
+    const systemPrompt = attemptPlan.routePlan.systemPrompt ?? null
+    const conversationMessages = attemptPlan.routePlan.conversationMessages ?? []
+    const toolNames = listAssistantToolCatalogNames(executionPlan.toolCatalog)
+
+    onTraceEvent({
+      providerSessionId: attemptPlan.routePlan.resumeProviderSessionId,
+      rawEvent: {
+        schema: 'murph.assistant-provider-request-debug.v1',
+        type: 'assistant.provider.request.debug',
+        attemptCount: attemptPlan.attemptCount,
+        channel: executionPlan.input.channel ?? attemptPlan.session.binding.channel,
+        conversationMessageCount: conversationMessages.length,
+        conversationMessageRoles: conversationMessages.map((message) => message.role),
+        deliveryDispatchMode: executionPlan.input.deliveryDispatchMode ?? null,
+        gatewayOnlyProviderCount:
+          providerOptions.gatewayOnlyProviders?.length ?? 0,
+        gatewayOnlyProviders: providerOptions.gatewayOnlyProviders ?? null,
+        nativeResumePolicy: executionPlan.profile.nativeResumePolicy,
+        provider: attemptPlan.route.provider,
+        providerExecutionDriver: providerOptions.executionDriver,
+        providerModel: providerOptions.model ?? null,
+        providerName: providerOptions.providerName ?? null,
+        promptProfile: executionPlan.profile.promptProfile,
+        routeId: attemptPlan.route.routeId,
+        sessionContextPresent: attemptPlan.routePlan.sessionContext != null,
+        supportsToolRuntime: attemptPlan.routePlan.supportsToolRuntime,
+        systemPrompt,
+        systemPromptLength: systemPrompt?.length ?? 0,
+        toolCount: toolNames.length,
+        toolNames,
+        turnTrigger: executionPlan.input.turnTrigger ?? null,
+        userPrompt: executionPlan.input.prompt,
+        userPromptLength: executionPlan.input.prompt.length,
+        webSearch: providerOptions.webSearch ?? null,
+        zeroDataRetention: providerOptions.zeroDataRetention ?? null,
+      },
+      updates: [
+        {
+          kind: 'status',
+          text: 'Hosted notification provider request debug payload captured.',
+        },
+      ],
+    })
+  } catch {
+    // Debug trace observers must not block the provider call.
+  }
+}
+
+function listAssistantToolCatalogNames(
+  toolCatalog: AssistantProviderTurnExecutionPlan['toolCatalog'],
+): string[] {
+  return toolCatalog
+    .listTools()
+    .map((tool) => tool.name)
+    .filter((name): name is string => typeof name === 'string' && name.length > 0)
+    .sort()
 }
 
 function readAssistantErrorCode(error: unknown): string | null {

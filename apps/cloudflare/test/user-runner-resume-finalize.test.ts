@@ -30,6 +30,7 @@ import {
 import { createHostedBrowserVaultReplicaStore } from "../src/browser-vault-store.ts";
 import { hostedArtifactObjectKey } from "../src/storage-paths.ts";
 import { HostedUserRunner } from "../src/user-runner.ts";
+import { HostedWebControlPlaneResponseError } from "../src/web-control-plane.ts";
 import { HostedRunSideInputNotFoundError } from "../src/user-runner/runner-run-processor.ts";
 import { createHostedUserKeyStore } from "../src/user-key-store.ts";
 import { RunnerStateStore } from "../src/user-runner/runner-state-store.js";
@@ -259,19 +260,24 @@ class SqliteDurableObjectSqlStorage {
 function createDurableObjectStateHarness(): DurableObjectStateLike {
   const db = new DatabaseSync(":memory:");
   const storageValues = new Map<string, unknown>();
+  let alarm: number | null = null;
 
   return {
     storage: {
       delete: async (key: string): Promise<boolean> => storageValues.delete(key),
-      deleteAlarm: async () => {},
+      deleteAlarm: async () => {
+        alarm = null;
+      },
       get: async <T,>(key: string): Promise<T | undefined> => (
         storageValues.get(key) as T | undefined
       ),
-      getAlarm: async () => null,
+      getAlarm: async () => alarm,
       put: async (key, value) => {
         storageValues.set(key, value);
       },
-      setAlarm: async () => {},
+      setAlarm: async (scheduledTime) => {
+        alarm = typeof scheduledTime === "number" ? scheduledTime : scheduledTime.getTime();
+      },
       sql: new SqliteDurableObjectSqlStorage(db),
     },
   };
@@ -575,6 +581,70 @@ describe("HostedUserRunner resumeFinalize drain", () => {
       alreadyRunning: true,
     });
     expect(record.nextWakeAt).not.toBeNull();
+  });
+
+  it("clears the alarm without retrying when acquire reports a stale missing hosted member", async () => {
+    envMocks.readHostedExecutionEnvironment.mockReturnValue(createTestRuntimeEnvironment());
+    const state = createDurableObjectStateHarness();
+    const stateStore = new RunnerStateStore(state);
+    const runner = new HostedUserRunner(
+      state,
+      envMocks.readHostedExecutionEnvironment(createHostedExecutionTestEnv()),
+      new MemoryEncryptedR2Bucket(),
+    );
+    await runner.bootstrapUser("user-resume-finalize");
+    await runner.nudgeHostedRun();
+    await expect(state.storage.getAlarm()).resolves.toEqual(expect.any(Number));
+
+    webControlMocks.acquireHostedRunFromWeb.mockRejectedValueOnce(
+      new HostedWebControlPlaneResponseError({
+        description: "Hosted run acquire",
+        error: {
+          code: "HOSTED_RUN_STALE_RUNNER_USER",
+          details: {
+            boundary: "hosted-run.acquire",
+            condition: "stale_runner_missing_hosted_member",
+          },
+          message:
+            "Hosted runner is bound to a member that no longer exists in the hosted web database.",
+          retryable: false,
+        },
+        path: "/api/internal/hosted-run/acquire",
+        responseDetail: null,
+        status: 410,
+      }),
+    );
+
+    await runner.alarm();
+
+    expect(webControlMocks.acquireHostedRunFromWeb).toHaveBeenCalledTimes(1);
+    await expect(stateStore.readState()).resolves.toMatchObject({
+      nextWakeAt: null,
+    });
+    await expect(state.storage.getAlarm()).resolves.toBeNull();
+  });
+
+  it("keeps retrying ordinary acquire failures from the alarm path", async () => {
+    envMocks.readHostedExecutionEnvironment.mockReturnValue(createTestRuntimeEnvironment());
+    const state = createDurableObjectStateHarness();
+    const stateStore = new RunnerStateStore(state);
+    const runner = new HostedUserRunner(
+      state,
+      envMocks.readHostedExecutionEnvironment(createHostedExecutionTestEnv()),
+      new MemoryEncryptedR2Bucket(),
+    );
+    await runner.bootstrapUser("user-resume-finalize");
+    await runner.nudgeHostedRun();
+
+    webControlMocks.acquireHostedRunFromWeb.mockRejectedValueOnce(new Error("temporary web outage"));
+
+    await runner.alarm();
+
+    expect(webControlMocks.acquireHostedRunFromWeb).toHaveBeenCalledTimes(1);
+    await expect(stateStore.readState()).resolves.toMatchObject({
+      nextWakeAt: expect.any(String),
+    });
+    await expect(state.storage.getAlarm()).resolves.toEqual(expect.any(Number));
   });
 
   it("refetches after a successful finalize-resume before declaring the queue drained", async () => {

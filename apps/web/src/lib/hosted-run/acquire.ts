@@ -1,12 +1,13 @@
 import { randomUUID } from "node:crypto";
 
 import { Prisma, type PrismaClient } from "@prisma/client";
-import type {
-  HostedRunAcquireResponse,
-  HostedRunExecutorKind,
-  HostedRunTriggerKind,
-  HostedRunTurnInputAdoptResponse,
-  HostedRunTurnInputPeekResponse,
+import {
+  HOSTED_RUN_STALE_RUNNER_USER_ERROR_CODE,
+  type HostedRunAcquireResponse,
+  type HostedRunExecutorKind,
+  type HostedRunTriggerKind,
+  type HostedRunTurnInputAdoptResponse,
+  type HostedRunTurnInputPeekResponse,
 } from "@murphai/hosted-execution/contracts";
 
 import { countPendingHostedIngressEvents } from "../hosted-ingress/store";
@@ -16,6 +17,7 @@ import type {
   HostedIngressEventRow,
   HostedIngressStoreClient,
 } from "../hosted-ingress/store.types";
+import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { getPrisma } from "../prisma";
 
 import {
@@ -125,7 +127,7 @@ export async function acquireHostedRunTx(input: {
 }): Promise<HostedRunAcquireResponse> {
   const now = input.now ?? new Date();
   const limit = normalizeHostedRunAcquireLimit(input.limit);
-  const cursor = await loadLockedCursorRowTx({
+  const cursor = await loadLockedAcquireCursorRowTx({
     tx: input.tx,
     userId: input.userId,
   });
@@ -434,6 +436,55 @@ export async function adoptHostedRunTurnInputTx(input: {
     }),
     run: projectHostedRunRecord(updatedRun),
   };
+}
+
+async function loadLockedAcquireCursorRowTx(input: {
+  tx: HostedRunMutationTx;
+  userId: string;
+}): Promise<HostedExecutionCursorRow> {
+  try {
+    return await loadLockedCursorRowTx(input);
+  } catch (error) {
+    throw mapHostedRunAcquireCursorError(error);
+  }
+}
+
+function mapHostedRunAcquireCursorError(error: unknown): Error {
+  if (isHostedExecutionCursorForeignKeyError(error)) {
+    return createHostedRunStaleRunnerUserError();
+  }
+
+  return error instanceof Error ? error : new Error("Hosted run acquire cursor load failed.");
+}
+
+function isHostedExecutionCursorForeignKeyError(error: unknown): boolean {
+  if (
+    !(error instanceof Prisma.PrismaClientKnownRequestError)
+    || error.code !== "P2003"
+  ) {
+    return false;
+  }
+
+  const modelName = error.meta?.modelName;
+  if (modelName === "HostedExecutionCursor") {
+    return true;
+  }
+
+  return typeof error.message === "string"
+    && error.message.includes("hosted_execution_cursor_user_id_fkey");
+}
+
+function createHostedRunStaleRunnerUserError(): Error {
+  return hostedOnboardingError({
+    code: HOSTED_RUN_STALE_RUNNER_USER_ERROR_CODE,
+    details: {
+      boundary: "hosted-run.acquire",
+      condition: "stale_runner_missing_hosted_member",
+    },
+    httpStatus: 410,
+    message: "Hosted runner is bound to a member that no longer exists in the hosted web database.",
+    retryable: false,
+  });
 }
 
 async function listContiguousHostedRunWakeRowsTx(input: {

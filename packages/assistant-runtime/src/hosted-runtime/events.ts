@@ -8,6 +8,7 @@ import type {
   HostedIngressSystemEnvelope,
   HostedIngressEnvelope,
   HostedExecutionRunPhase,
+  HostedExecutionStructuredLogDetails,
 } from "@murphai/hosted-execution";
 import { sendAssistantNotification } from "@murphai/assistant-engine";
 import {
@@ -15,6 +16,8 @@ import {
   emitHostedExecutionStructuredLog,
   extractHostedAssistantNotificationRedactedDetails,
   isHostedConversationMessageWake,
+  sanitizeHostedExecutionStructuredLogDetails,
+  sanitizeHostedExecutionStructuredLogText,
 } from "@murphai/hosted-execution";
 import {
   hydrateHostedExecutionDefaultTarget,
@@ -35,6 +38,11 @@ import type { AssistantExecutionContext } from "@murphai/assistant-engine";
 type HostedIngressOutcome = HostedIngressEffect & {
   ingressLane: HostedIngressLane;
 };
+
+const HOSTED_PROVIDER_REQUEST_DEBUG_SCHEMA = "murph.assistant-provider-request-debug.v1";
+const HOSTED_PROVIDER_REQUEST_DEBUG_TYPE = "assistant.provider.request.debug";
+const HOSTED_PROVIDER_REQUEST_DEBUG_PROMPT_CHUNK_SIZE = 300;
+const HOSTED_PROVIDER_REQUEST_DEBUG_PROMPT_CHUNK_LIMIT = 32;
 
 export async function executeHostedIngressEvent(input: {
   wake: HostedIngressEnvelope;
@@ -200,7 +208,14 @@ export async function executeHostedAssistantNotificationWake(input: {
 
   try {
     await sendAssistantNotification(
-      buildAssistantNotificationInput(input.wake, input.executionContext, input.vaultRoot),
+      buildAssistantNotificationInput(
+        input.wake,
+        input.executionContext,
+        input.vaultRoot,
+        (entry) => {
+          redactedLogEntries.push(entry);
+        },
+      ),
     );
   } catch (error) {
     if (!shouldSkipFailedHostedAssistantNotification(input.wake)) {
@@ -261,7 +276,7 @@ function emitHostedAssistantNotificationSkipLog(
 
 function buildHostedAssistantNotificationLogDetails(
   wake: HostedExecutionAssistantNotificationRequestedWake,
-): Record<string, boolean | string | null> {
+): HostedExecutionStructuredLogDetails {
   const route = wake.notification.route;
 
   return {
@@ -323,10 +338,193 @@ function emitHostedAssistantNotificationLifecycleLog(input: {
   };
 }
 
+function emitHostedAssistantNotificationProviderTraceLog(input: {
+  event: unknown;
+  wake: HostedExecutionAssistantNotificationRequestedWake;
+}): HostedExecutionRedactedLogEntry | null {
+  const requestDebug = readHostedProviderRequestDebugTrace(input.event);
+  if (!requestDebug) {
+    return null;
+  }
+
+  const redactedDetails = sanitizeHostedExecutionStructuredLogDetails({
+    ...buildHostedAssistantNotificationLogDetails(input.wake),
+    assistantProviderDebug: buildHostedProviderRequestDebugDetails(requestDebug),
+  });
+
+  emitHostedExecutionStructuredLog({
+    component: "runtime.provider",
+    details: redactedDetails,
+    message: "Hosted assistant provider request debug payload captured.",
+    phase: "wake.running",
+    wake: input.wake,
+  });
+
+  return {
+    component: "runtime.provider",
+    eventId: input.wake.eventId,
+    level: "info",
+    message: "Hosted assistant provider request debug payload captured.",
+    phase: "wake.running",
+    redacted: redactedDetails,
+  };
+}
+
+function readHostedProviderRequestDebugTrace(
+  event: unknown,
+): Record<string, unknown> | null {
+  if (!event || typeof event !== "object" || Array.isArray(event)) {
+    return null;
+  }
+
+  const rawEvent = (event as { rawEvent?: unknown }).rawEvent;
+  if (!rawEvent || typeof rawEvent !== "object" || Array.isArray(rawEvent)) {
+    return null;
+  }
+
+  const record = rawEvent as Record<string, unknown>;
+  const schema = readHostedProviderDebugString(record, "schema");
+  const type = readHostedProviderDebugString(record, "type");
+
+  return schema === HOSTED_PROVIDER_REQUEST_DEBUG_SCHEMA
+    || type === HOSTED_PROVIDER_REQUEST_DEBUG_TYPE
+    ? record
+    : null;
+}
+
+function buildHostedProviderRequestDebugDetails(
+  debug: Record<string, unknown>,
+): HostedExecutionStructuredLogDetails {
+  const rawSystemPrompt = readHostedProviderDebugString(debug, "systemPrompt");
+  const rawUserPrompt = readHostedProviderDebugString(debug, "userPrompt");
+  const systemPrompt = sanitizeHostedProviderDebugPrompt(rawSystemPrompt);
+  const userPrompt = sanitizeHostedProviderDebugPrompt(rawUserPrompt);
+  const systemPromptChunks = chunkHostedProviderDebugPrompt(systemPrompt);
+  const userPromptChunks = chunkHostedProviderDebugPrompt(userPrompt);
+
+  return {
+    attemptCount: readHostedProviderDebugNumber(debug, "attemptCount"),
+    channel: readHostedProviderDebugString(debug, "channel"),
+    conversationMessageCount:
+      readHostedProviderDebugNumber(debug, "conversationMessageCount"),
+    conversationMessageRoles:
+      readHostedProviderDebugStringArray(debug, "conversationMessageRoles"),
+    deliveryDispatchMode:
+      readHostedProviderDebugString(debug, "deliveryDispatchMode"),
+    gatewayOnlyProviderCount:
+      readHostedProviderDebugNumber(debug, "gatewayOnlyProviderCount"),
+    gatewayOnlyProviders:
+      readHostedProviderDebugStringArray(debug, "gatewayOnlyProviders"),
+    nativeResumePolicy:
+      readHostedProviderDebugString(debug, "nativeResumePolicy"),
+    promptProfile: readHostedProviderDebugString(debug, "promptProfile"),
+    provider: readHostedProviderDebugString(debug, "provider"),
+    providerExecutionDriver:
+      readHostedProviderDebugString(debug, "providerExecutionDriver"),
+    providerModel: readHostedProviderDebugString(debug, "providerModel"),
+    providerName: readHostedProviderDebugString(debug, "providerName"),
+    routeId: readHostedProviderDebugString(debug, "routeId"),
+    schema: HOSTED_PROVIDER_REQUEST_DEBUG_SCHEMA,
+    sessionContextPresent:
+      readHostedProviderDebugBoolean(debug, "sessionContextPresent"),
+    supportsToolRuntime:
+      readHostedProviderDebugBoolean(debug, "supportsToolRuntime"),
+    systemPromptChunks,
+    systemPromptLength:
+      readHostedProviderDebugNumber(debug, "systemPromptLength")
+      ?? rawSystemPrompt?.length
+      ?? 0,
+    systemPromptTruncated:
+      systemPromptChunks.length >= HOSTED_PROVIDER_REQUEST_DEBUG_PROMPT_CHUNK_LIMIT
+      && systemPrompt !== null
+      && systemPrompt.length
+        > HOSTED_PROVIDER_REQUEST_DEBUG_PROMPT_CHUNK_SIZE
+          * HOSTED_PROVIDER_REQUEST_DEBUG_PROMPT_CHUNK_LIMIT,
+    toolCount: readHostedProviderDebugNumber(debug, "toolCount"),
+    toolNames: readHostedProviderDebugStringArray(debug, "toolNames"),
+    turnTrigger: readHostedProviderDebugString(debug, "turnTrigger"),
+    userPromptChunks,
+    userPromptLength:
+      readHostedProviderDebugNumber(debug, "userPromptLength")
+      ?? rawUserPrompt?.length
+      ?? 0,
+    userPromptTruncated:
+      userPromptChunks.length >= HOSTED_PROVIDER_REQUEST_DEBUG_PROMPT_CHUNK_LIMIT
+      && userPrompt !== null
+      && userPrompt.length
+        > HOSTED_PROVIDER_REQUEST_DEBUG_PROMPT_CHUNK_SIZE
+          * HOSTED_PROVIDER_REQUEST_DEBUG_PROMPT_CHUNK_LIMIT,
+    webSearch: readHostedProviderDebugString(debug, "webSearch"),
+    zeroDataRetention: readHostedProviderDebugBoolean(debug, "zeroDataRetention"),
+  };
+}
+
+function readHostedProviderDebugString(
+  debug: Record<string, unknown>,
+  key: string,
+): string | null {
+  const value = debug[key];
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
+}
+
+function readHostedProviderDebugNumber(
+  debug: Record<string, unknown>,
+  key: string,
+): number | null {
+  const value = debug[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function readHostedProviderDebugBoolean(
+  debug: Record<string, unknown>,
+  key: string,
+): boolean | null {
+  const value = debug[key];
+  return typeof value === "boolean" ? value : null;
+}
+
+function readHostedProviderDebugStringArray(
+  debug: Record<string, unknown>,
+  key: string,
+): string[] {
+  const value = debug[key];
+  return Array.isArray(value)
+    ? value.filter(
+        (entry): entry is string =>
+          typeof entry === "string" && entry.trim().length > 0,
+      )
+    : [];
+}
+
+function sanitizeHostedProviderDebugPrompt(value: string | null): string | null {
+  return value ? sanitizeHostedExecutionStructuredLogText(value) : null;
+}
+
+function chunkHostedProviderDebugPrompt(value: string | null): string[] {
+  if (!value) {
+    return [];
+  }
+
+  const chunks: string[] = [];
+  for (
+    let index = 0;
+    index < value.length
+    && chunks.length < HOSTED_PROVIDER_REQUEST_DEBUG_PROMPT_CHUNK_LIMIT;
+    index += HOSTED_PROVIDER_REQUEST_DEBUG_PROMPT_CHUNK_SIZE
+  ) {
+    chunks.push(
+      value.slice(index, index + HOSTED_PROVIDER_REQUEST_DEBUG_PROMPT_CHUNK_SIZE),
+    );
+  }
+
+  return chunks;
+}
+
 function buildAssistantNotificationInput(
   wake: HostedExecutionAssistantNotificationRequestedWake,
   executionContext: AssistantExecutionContext,
   vault: string,
+  recordLogEntry: (entry: HostedExecutionRedactedLogEntry) => void,
 ): Parameters<typeof sendAssistantNotification>[0] {
   const route = wake.notification.route;
   const delivery = route.delivery;
@@ -349,6 +547,15 @@ function buildAssistantNotificationInput(
       : null,
     identityId: route.identityId,
     instructions: wake.notification.instructions,
+    onTraceEvent(event) {
+      const entry = emitHostedAssistantNotificationProviderTraceLog({
+        event,
+        wake,
+      });
+      if (entry) {
+        recordLogEntry(entry);
+      }
+    },
     responsePolicy: wake.notification.responsePolicy ?? null,
     threadId: delivery.kind === "thread" ? delivery.target : route.threadId,
     threadIsDirect: route.threadIsDirect,
