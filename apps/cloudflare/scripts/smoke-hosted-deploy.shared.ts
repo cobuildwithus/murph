@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
   buildCloudflareHostedControlUserStatusPath,
@@ -29,6 +30,9 @@ import {
 type EnvSource = Readonly<Record<string, string | undefined>>;
 
 type FetchLike = typeof fetch;
+
+const scriptDir = path.dirname(fileURLToPath(import.meta.url));
+const appDir = path.resolve(scriptDir, "..");
 
 interface SmokeControlRequest {
   authorizationHeader: string;
@@ -82,6 +86,11 @@ export function buildVersionOverrideHeaders(
   return {
     "Cloudflare-Workers-Version-Overrides": `${workerName}="${smokeVersionId}"`,
   };
+}
+
+export function resolveSmokeRunnerManifestPath(source: EnvSource = process.env): string {
+  return normalizeOptionalString(source.HOSTED_EXECUTION_SMOKE_RUNNER_MANIFEST_PATH)
+    ?? path.join(appDir, ".deploy", "runner-bundle", runnerBundleManifestFileName);
 }
 
 export async function runSmokeHostedDeploy(input: {
@@ -204,8 +213,7 @@ async function assertRunnerContainerSmoke(input: {
 }
 
 async function readExpectedRunnerBundleManifest(source: EnvSource): Promise<SmokeRunnerBundleManifest> {
-  const manifestPath = normalizeOptionalString(source.HOSTED_EXECUTION_SMOKE_RUNNER_MANIFEST_PATH)
-    ?? path.resolve(process.cwd(), ".deploy", "runner-bundle", runnerBundleManifestFileName);
+  const manifestPath = resolveSmokeRunnerManifestPath(source);
   const parsed = JSON.parse(await readFile(manifestPath, "utf8")) as unknown;
 
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
