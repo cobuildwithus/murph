@@ -17,7 +17,59 @@ describe('host support workflow guards', () => {
     expect(workflow).toContain('HOSTED_CONTACT_PRIVACY_KEYS: v1:BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc')
     expect(workflow).toContain('NEXT_PUBLIC_PRIVY_APP_ID: ${{ vars.HOSTED_WEB_VERIFY_PRIVY_APP_ID }}')
     expect(workflow).toContain('PRIVY_VERIFICATION_KEY: ci-hosted-web-verification-key')
-    expect(workflow).toContain('run: pnpm release:check')
+  })
+
+  it('keeps the release gate split into parallel shards instead of one long release:check job', () => {
+    const workflow = readFileSync(hostSupportWorkflowPath, 'utf8')
+
+    expect(workflow).toContain('name: Release build/typecheck (ubuntu)')
+    expect(workflow).toContain('name: Release package coverage (${{ matrix.shard }})')
+    expect(workflow).toContain('name: Release app verification (ubuntu)')
+    expect(workflow).toContain('name: Release fixture coverage (ubuntu)')
+    expect(workflow).toContain('name: Release checks (ubuntu)')
+    expect(workflow).toContain('pnpm build:workspace:clean')
+    expect(workflow).toContain('pnpm typecheck')
+    expect(workflow).toContain('pnpm no-js')
+    expect(workflow).toContain('bash scripts/doc-gardening.sh --fail-on-issues')
+    expect(workflow).toContain('pnpm test:apps')
+    expect(workflow).toContain('MURPH_APP_VERIFY_PARALLEL: "1"')
+    expect(workflow).toContain('MURPH_VERIFY_STEP_PARALLEL: "1"')
+    expect(workflow).toContain('pnpm exec tsx e2e/smoke/verify-scenario-integrity.ts --coverage')
+    expect(workflow).toContain('MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 MURPH_VITEST_MAX_WORKERS=50%')
+    expect(workflow).not.toContain('run: pnpm release:check')
+  })
+
+  it('keeps every package coverage owner assigned to a release shard', () => {
+    const workflow = readFileSync(hostSupportWorkflowPath, 'utf8')
+    const packageDirs = [
+      'packages/assistant-cli',
+      'packages/assistant-engine',
+      'packages/assistant-runtime',
+      'packages/assistantd',
+      'packages/cloudflare-hosted-control',
+      'packages/contracts',
+      'packages/core',
+      'packages/device-syncd',
+      'packages/cli',
+      'packages/gateway-core',
+      'packages/gateway-local',
+      'packages/hosted-execution',
+      'packages/importers',
+      'packages/inbox-services',
+      'packages/inboxd',
+      'packages/messaging-ingress',
+      'packages/openclaw-plugin',
+      'packages/operator-config',
+      'packages/parsers',
+      'packages/query',
+      'packages/runtime-state',
+      'packages/setup-cli',
+      'packages/vault-usecases',
+    ]
+
+    for (const packageDir of packageDirs) {
+      expect(workflow).toContain(packageDir)
+    }
   })
 
   it('prepares built CLI runtime artifacts before the host-support setup and inbox suite', () => {
