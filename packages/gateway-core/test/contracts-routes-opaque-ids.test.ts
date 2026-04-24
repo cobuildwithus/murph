@@ -25,9 +25,14 @@ import {
   assertGatewayConversationSessionKey,
   assertGatewayMessageId,
   createGatewayAttachmentId,
+  createGatewayAttachmentIdFromRouteToken,
   createGatewayCaptureMessageId,
+  createGatewayCaptureMessageIdFromRouteToken,
   createGatewayConversationSessionKey,
+  createGatewayConversationSessionKeyFromRouteToken,
   createGatewayOutboxMessageId,
+  createGatewayOutboxMessageIdFromRouteToken,
+  createGatewayRouteToken,
   readGatewayAttachmentId,
   readGatewayConversationSessionToken,
   readGatewayMessageKind,
@@ -127,7 +132,7 @@ test('gateway contract schemas apply their current defaults', () => {
       clientRequestId: '  req_1  ',
       replyToMessageId: '  msg_1  ',
       sessionKey: 'session_123',
-      text: 'hello',
+      text: '  hello  ',
     }),
     {
       clientRequestId: '  req_1  ',
@@ -135,6 +140,13 @@ test('gateway contract schemas apply their current defaults', () => {
       sessionKey: 'session_123',
       text: 'hello',
     },
+  )
+  assert.equal(
+    gatewaySendMessageInputSchema.safeParse({
+      sessionKey: 'session_123',
+      text: '   ',
+    }).success,
+    false,
   )
 
   assert.deepEqual(
@@ -294,6 +306,18 @@ test('route helpers preserve normalized conversation state and reply inference',
       threadId: 'thread_5',
     }),
     false,
+  )
+  assert.equal(
+    gatewayBindingDeliveryFromRoute({
+      channel: 'linq',
+      participantId: 'actor_5',
+      reply: {
+        kind: 'participant',
+        target: 'actor_5',
+      },
+      threadId: 'thread_5',
+    }),
+    null,
   )
 
   assert.equal(
@@ -677,31 +701,46 @@ test('opaque id helpers preserve route tokens and reject malformed envelopes', (
   const routeKey = 'channel:telegram|identity:acct_1|actor:actor_1'
   const sessionKey = createGatewayConversationSessionKey(routeKey)
   const normalizedSessionKey = readGatewayConversationSessionToken(sessionKey)
+  const explicitRouteToken = createGatewayRouteToken('route-token-1')
 
   assert.match(sessionKey, /^gwcs_/u)
+  assert.match(normalizedSessionKey, /^gwrt1_[A-Za-z0-9_-]{43}$/u)
   assert.notEqual(normalizedSessionKey, routeKey)
   assert.equal(
-    sameGatewayConversationSession(sessionKey, createGatewayConversationSessionKey(normalizedSessionKey)),
+    sameGatewayConversationSession(
+      sessionKey,
+      createGatewayConversationSessionKeyFromRouteToken(normalizedSessionKey),
+    ),
     true,
   )
   assert.equal(assertGatewayConversationSessionKey(sessionKey), sessionKey)
 
-  const captureMessageId = createGatewayCaptureMessageId('route-token-1', 'capture-1')
-  const outboxMessageId = createGatewayOutboxMessageId('route-token-1', 'intent-1')
-  const attachmentId = createGatewayAttachmentId('route-token-1', 'capture-1', 'attachment-1')
+  const captureMessageId = createGatewayCaptureMessageIdFromRouteToken(
+    explicitRouteToken,
+    'capture-1',
+  )
+  const outboxMessageId = createGatewayOutboxMessageIdFromRouteToken(
+    explicitRouteToken,
+    'intent-1',
+  )
+  const attachmentId = createGatewayAttachmentIdFromRouteToken(
+    explicitRouteToken,
+    'capture-1',
+    'attachment-1',
+  )
 
   assert.match(captureMessageId, /^gwcm_/u)
   assert.match(outboxMessageId, /^gwcm_/u)
   assert.match(attachmentId, /^gwca_/u)
   assert.equal(readGatewayMessageKind(captureMessageId), 'capture-message')
   assert.equal(readGatewayMessageKind(outboxMessageId), 'outbox-message')
-  assert.equal(readGatewayMessageRouteToken(captureMessageId), 'route-token-1')
-  assert.equal(readGatewayMessageRouteToken(outboxMessageId), 'route-token-1')
+  assert.equal(readGatewayMessageRouteToken(captureMessageId), explicitRouteToken)
+  assert.equal(readGatewayMessageRouteToken(outboxMessageId), explicitRouteToken)
   const attachment = readGatewayAttachmentId(attachmentId)
 
   assert.deepEqual(attachment, {
     kind: 'attachment',
-    routeToken: 'route-token-1',
+    routeToken: explicitRouteToken,
     sourceToken: attachment.sourceToken,
     version: 1,
   })
@@ -710,7 +749,7 @@ test('opaque id helpers preserve route tokens and reject malformed envelopes', (
 
   const malformedAttachmentEnvelope = encodeOpaqueEnvelope('gwca_', {
     kind: 'conversation',
-    routeToken: 'route-token-1',
+    routeToken: explicitRouteToken,
     sourceToken: 'source-token',
     version: 1,
   })
@@ -723,13 +762,38 @@ test('opaque id helpers preserve route tokens and reject malformed envelopes', (
 
 test('opaque id helpers normalize route tokens and reject invalid envelopes', () => {
   const routeKey = 'channel:custom|identity:acct_norm|actor:actor_norm'
+  const explicitRouteToken = createGatewayRouteToken('route-token-1')
   const normalizedRouteToken = readGatewayConversationSessionToken(
     createGatewayConversationSessionKey(routeKey),
   )
+  const delimiterFreeRouteToken = readGatewayConversationSessionToken(
+    createGatewayConversationSessionKey('route-token-plain'),
+  )
 
+  assert.match(delimiterFreeRouteToken, /^gwrt1_[A-Za-z0-9_-]{43}$/u)
+  assert.notEqual(delimiterFreeRouteToken, 'route-token-plain')
+  assert.equal(delimiterFreeRouteToken, createGatewayRouteToken('route-token-plain'))
   assert.equal(
-    readGatewayConversationSessionToken(createGatewayConversationSessionKey('route-token-plain')),
-    'route-token-plain',
+    readGatewayMessageRouteToken(
+      createGatewayCaptureMessageId('route-token-plain', 'capture-plain-key'),
+    ),
+    delimiterFreeRouteToken,
+  )
+  assert.equal(
+    readGatewayMessageRouteToken(
+      createGatewayOutboxMessageId('route-token-plain', 'intent-plain-key'),
+    ),
+    delimiterFreeRouteToken,
+  )
+  assert.equal(
+    readGatewayAttachmentId(
+      createGatewayAttachmentId(
+        'route-token-plain',
+        'capture-plain-key',
+        'att-plain-key',
+      ),
+    ).routeToken,
+    delimiterFreeRouteToken,
   )
   assert.equal(normalizedRouteToken.includes(':'), false)
   assert.equal(normalizedRouteToken.includes('|'), false)
@@ -738,8 +802,58 @@ test('opaque id helpers normalize route tokens and reject invalid envelopes', ()
     normalizedRouteToken,
   )
   assert.equal(
-    sameGatewayConversationSession(createGatewayConversationSessionKey(routeKey), 'not-a-session-key'),
+    readGatewayMessageRouteToken(
+      createGatewayCaptureMessageIdFromRouteToken(
+        normalizedRouteToken,
+        'capture-route-token',
+      ),
+    ),
+    normalizedRouteToken,
+  )
+  assert.equal(
+    sameGatewayConversationSession(
+      createGatewayConversationSessionKey(routeKey),
+      'not-a-session-key',
+    ),
     false,
+  )
+  assert.throws(
+    () => createGatewayConversationSessionKeyFromRouteToken('route-token-plain'),
+    /Gateway route token input is invalid\./u,
+  )
+  assert.throws(
+    () =>
+      readGatewayConversationSessionToken(
+        encodeOpaqueEnvelope('gwcs_', {
+          kind: 'conversation',
+          routeToken: 'route-token-plain',
+          version: 1,
+        }),
+      ),
+    /Gateway route token input is invalid\./u,
+  )
+  assert.throws(
+    () =>
+      readGatewayMessageRouteToken(
+        encodeOpaqueEnvelope('gwcm_', {
+          kind: 'capture-message',
+          routeToken: 'route-token-plain',
+          version: 1,
+        }),
+      ),
+    /Gateway route token input is invalid\./u,
+  )
+  assert.throws(
+    () =>
+      readGatewayAttachmentId(
+        encodeOpaqueEnvelope('gwca_', {
+          kind: 'attachment',
+          routeToken: 'route-token-plain',
+          sourceToken: 'source-token',
+          version: 1,
+        }),
+      ),
+    /Gateway route token input is invalid\./u,
   )
 
   assert.throws(
@@ -769,7 +883,7 @@ test('opaque id helpers normalize route tokens and reject invalid envelopes', ()
       readGatewayAttachmentId(
         encodeOpaqueEnvelope('gwca_', {
           kind: 'attachment',
-          routeToken: 'route-token-1',
+          routeToken: explicitRouteToken,
           version: 1,
         }),
       ),
@@ -808,7 +922,7 @@ test('opaque id helpers normalize route tokens and reject invalid envelopes', ()
       assertGatewayConversationSessionKey(
         encodeOpaqueEnvelope('gwcs_', {
           kind: 'conversation',
-          routeToken: 'route-token-1',
+          routeToken: explicitRouteToken,
           version: 2,
         }),
       ),
@@ -819,7 +933,7 @@ test('opaque id helpers normalize route tokens and reject invalid envelopes', ()
       assertGatewayConversationSessionKey(
         encodeOpaqueEnvelope('gwcs_', {
           kind: 'outbox-message',
-          routeToken: 'route-token-1',
+          routeToken: explicitRouteToken,
           version: 1,
         }),
       ),
@@ -830,7 +944,7 @@ test('opaque id helpers normalize route tokens and reject invalid envelopes', ()
       assertGatewayMessageId(
         encodeOpaqueEnvelope('gwcm_', {
           kind: 'attachment',
-          routeToken: 'route-token-1',
+          routeToken: explicitRouteToken,
           version: 1,
         }),
       ),

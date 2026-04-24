@@ -23,15 +23,25 @@ interface GatewayAttachmentEnvelope extends GatewayOpaqueEnvelope {
 const GATEWAY_CONVERSATION_PREFIX = 'gwcs_'
 const GATEWAY_MESSAGE_PREFIX = 'gwcm_'
 const GATEWAY_ATTACHMENT_PREFIX = 'gwca_'
+const GATEWAY_ROUTE_TOKEN_PREFIX = 'gwrt1_'
+const GATEWAY_SHA256_BASE64URL_PATTERN = /^[A-Za-z0-9_-]{43}$/u
 
 /**
  * Gateway ids behave like opaque transport identifiers and only accept the current
  * route-token envelope shape.
  */
 export function createGatewayConversationSessionKey(routeKeyOrToken: string): string {
+  return createGatewayConversationSessionKeyFromRouteToken(
+    normalizeGatewayRouteToken(routeKeyOrToken),
+  )
+}
+
+export function createGatewayConversationSessionKeyFromRouteToken(
+  routeToken: string,
+): string {
   const envelope: GatewayConversationEnvelope = {
     kind: 'conversation',
-    routeToken: normalizeGatewayRouteToken(routeKeyOrToken),
+    routeToken: assertGatewayRouteToken(routeToken),
     version: 1,
   }
   return encodeGatewayOpaqueId(GATEWAY_CONVERSATION_PREFIX, envelope)
@@ -64,9 +74,19 @@ export function createGatewayCaptureMessageId(
   routeKeyOrToken: string,
   captureId: string,
 ): string {
+  return createGatewayCaptureMessageIdFromRouteToken(
+    normalizeGatewayRouteToken(routeKeyOrToken),
+    captureId,
+  )
+}
+
+export function createGatewayCaptureMessageIdFromRouteToken(
+  routeToken: string,
+  captureId: string,
+): string {
   const envelope: GatewayMessageEnvelope = {
     kind: 'capture-message',
-    routeToken: normalizeGatewayRouteToken(routeKeyOrToken),
+    routeToken: assertGatewayRouteToken(routeToken),
     sourceToken: createGatewaySourceToken('capture', captureId),
     version: 1,
   }
@@ -77,9 +97,19 @@ export function createGatewayOutboxMessageId(
   routeKeyOrToken: string,
   intentId: string,
 ): string {
+  return createGatewayOutboxMessageIdFromRouteToken(
+    normalizeGatewayRouteToken(routeKeyOrToken),
+    intentId,
+  )
+}
+
+export function createGatewayOutboxMessageIdFromRouteToken(
+  routeToken: string,
+  intentId: string,
+): string {
   const envelope: GatewayMessageEnvelope = {
     kind: 'outbox-message',
-    routeToken: normalizeGatewayRouteToken(routeKeyOrToken),
+    routeToken: assertGatewayRouteToken(routeToken),
     sourceToken: createGatewaySourceToken('outbox', intentId),
     version: 1,
   }
@@ -106,9 +136,21 @@ export function createGatewayAttachmentId(
   captureId: string,
   attachmentId: string,
 ): string {
+  return createGatewayAttachmentIdFromRouteToken(
+    normalizeGatewayRouteToken(routeKeyOrToken),
+    captureId,
+    attachmentId,
+  )
+}
+
+export function createGatewayAttachmentIdFromRouteToken(
+  routeToken: string,
+  captureId: string,
+  attachmentId: string,
+): string {
   const envelope: GatewayAttachmentEnvelope = {
     kind: 'attachment',
-    routeToken: normalizeGatewayRouteToken(routeKeyOrToken),
+    routeToken: assertGatewayRouteToken(routeToken),
     sourceToken: createGatewaySourceToken('attachment', `${captureId}:${attachmentId}`),
     version: 1,
   }
@@ -221,7 +263,7 @@ function readGatewayRouteTokenField(
   envelope: Record<string, unknown> & GatewayOpaqueEnvelope,
 ): string {
   if (typeof envelope.routeToken === 'string' && envelope.routeToken.length > 0) {
-    return envelope.routeToken
+    return assertGatewayRouteToken(envelope.routeToken)
   }
   throw new Error('Gateway opaque id was missing the route token.')
 }
@@ -236,11 +278,26 @@ function normalizeGatewayRouteToken(routeKeyOrToken: string): string {
 }
 
 function looksLikeGatewayRouteToken(value: string): boolean {
-  return !value.includes(':') && !value.includes('|')
+  return (
+    value.startsWith(GATEWAY_ROUTE_TOKEN_PREFIX) &&
+    GATEWAY_SHA256_BASE64URL_PATTERN.test(
+      value.slice(GATEWAY_ROUTE_TOKEN_PREFIX.length),
+    )
+  )
 }
 
-function createGatewayRouteToken(routeKey: string): string {
-  return createGatewayOpaqueToken('route', routeKey)
+export function createGatewayRouteToken(routeKey: string): string {
+  if (typeof routeKey !== 'string' || routeKey.length === 0) {
+    throw new Error('Gateway route token input is invalid.')
+  }
+  return `${GATEWAY_ROUTE_TOKEN_PREFIX}${createGatewayOpaqueToken('route', routeKey)}`
+}
+
+function assertGatewayRouteToken(routeToken: string): string {
+  if (typeof routeToken !== 'string' || !looksLikeGatewayRouteToken(routeToken)) {
+    throw new Error('Gateway route token input is invalid.')
+  }
+  return routeToken
 }
 
 function createGatewaySourceToken(

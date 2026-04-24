@@ -220,7 +220,7 @@ export const gatewaySendMessageInputSchema = z
     clientRequestId: gatewayOptionalStringSchema,
     replyToMessageId: gatewayOptionalStringSchema,
     sessionKey: z.string().min(1),
-    text: z.string().min(1),
+    text: z.string().trim().min(1),
   })
   .strict()
 
