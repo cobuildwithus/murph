@@ -17,6 +17,7 @@ This completion workflow is standing user approval to spawn the required local C
 3. If the change sprawled, duplicated existing patterns, or introduced speculative structure, cut it back before continuing.
 4. Decide the audit path required by the routed task class:
    - docs/process-only work normally skips audit subagents unless the user explicitly asks for them
+   - really low-impact `apps/web` copy-only edits may skip audit subagents when they only change static text and do not alter layout, UI state, auth, pricing logic, schemas, or runtime behavior; use local readback and focused checks instead
    - the tiny repo-internal fast path below replaces the final-review audit subagent with an explicit local final review
    - user-facing `apps/web` UI changes add the dedicated `frontend-review` pass
    - repo code/test/config changes whose verification lane includes owner-level coverage or truthful `pnpm test:diff <path ...>` coverage require the dedicated `coverage-write` pass
@@ -52,6 +53,16 @@ Use explicit local final review instead of a spawned `task-finish-review` audit 
 
 This fast path only replaces the final-review audit subagent.
 It does not skip `coverage-write` when the task's verification lane already includes package or app coverage.
+
+## Tiny Copy-Only Fast Path
+
+Skip `frontend-review`, `coverage-write`, and `task-finish-review` subagents for very small `apps/web` copy-only edits when all of the following are true:
+
+1. The diff only changes static user-facing text.
+2. The change does not alter layout, styling, UI state, component structure, auth, billing/pricing logic, schemas, routes, API behavior, or runtime code.
+3. Local readback plus focused checks cover the changed surface.
+
+Use focused component/page tests, typecheck, `git diff --check`, and stale-string searches as appropriate. If the copy change touches claims about security, privacy, billing, medical outcomes, or product guarantees, leave this fast path and use the normal review workflow.
 
 ## Audit Worker Rules
 

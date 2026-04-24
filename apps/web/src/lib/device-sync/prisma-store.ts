@@ -253,7 +253,7 @@ export class PrismaDeviceSyncControlPlaneStore
     callback: (tx: HostedPrismaTransactionClient) => Promise<TResult>,
   ): Promise<TResult> {
     return this.prisma.$transaction(async (tx) => {
-      await tx.$queryRaw`select pg_advisory_xact_lock(hashtext(${connectionId}))`;
+      await tx.$executeRaw`select pg_advisory_xact_lock(hashtext(${connectionId}))`;
       return callback(tx);
     });
   }

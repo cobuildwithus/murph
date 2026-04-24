@@ -20,7 +20,7 @@ export async function lockHostedAdvisoryKey(
   tx: Prisma.TransactionClient,
   key: string,
 ): Promise<void> {
-  await tx.$queryRaw`select pg_advisory_xact_lock(hashtext(${key}))`;
+  await tx.$executeRaw`select pg_advisory_xact_lock(hashtext(${key}))`;
 }
 
 export function extractLinqTextMessage(input: unknown): string | null {

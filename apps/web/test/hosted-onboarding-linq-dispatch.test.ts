@@ -221,6 +221,7 @@ type HostedWebhookReceiptSideEffectFixture = {
 };
 
 type PrismaFixtureBase = {
+  $executeRaw?: MockedFunction;
   $queryRaw?: MockedFunction;
   $transaction?: MockedFunction;
   hostedInvite?: HostedInviteFixture;
@@ -233,6 +234,7 @@ type PrismaFixtureBase = {
 };
 
 type HostedOnboardingLinqWebhookPrismaFixture = PrismaFixtureBase & {
+  $executeRaw: MockedFunction;
   $queryRaw: MockedFunction;
   $transaction?: MockedFunction;
 };
@@ -1711,6 +1713,7 @@ function withPrismaTransaction<
   T extends PrismaFixtureBase,
   TTx extends PrismaFixtureBase,
 >(prisma: T, tx: TTx): T & HostedOnboardingLinqWebhookPrismaFixture & {
+  $executeRaw: MockedFunction;
   $queryRaw: MockedFunction;
   $transaction: MockedFunction;
 } {
@@ -1719,10 +1722,13 @@ function withPrismaTransaction<
   const transaction = vi.fn(async (callback: (innerTx: typeof transactionClient) => Promise<unknown>) =>
     callback(transactionClient)
   );
+  prismaWithTransaction.$executeRaw = vi.fn(async () => 0);
   prismaWithTransaction.$queryRaw = vi.fn(async () => []);
+  transactionClient.$executeRaw ??= vi.fn(async () => 0);
   transactionClient.$queryRaw ??= vi.fn(async () => []);
   prismaWithTransaction.$transaction = transaction;
   return prismaWithTransaction as T & HostedOnboardingLinqWebhookPrismaFixture & {
+    $executeRaw: MockedFunction;
     $queryRaw: MockedFunction;
     $transaction: MockedFunction;
   };

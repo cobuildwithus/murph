@@ -72,7 +72,7 @@ function createHeartbeatStore(seed: Partial<Pick<
   const findFirst = vi.fn(async ({ where }: { where: { id: string; userId: string } }) =>
     where.id === staticRecord.id && where.userId === staticRecord.userId ? { ...staticRecord } : null,
   );
-  const queryRaw = vi.fn(async () => undefined);
+  const executeRaw = vi.fn(async () => 0);
   const updateConnection = vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
     options.beforeUpdate?.(staticRecord);
     Object.assign(staticRecord, {
@@ -155,14 +155,14 @@ function createHeartbeatStore(seed: Partial<Pick<
       },
       $transaction: async (
         callback: (tx: {
-          $queryRaw: typeof queryRaw;
+          $executeRaw: typeof executeRaw;
           deviceConnection: {
             findFirst: typeof findFirst;
             update: typeof updateConnection;
           };
         }) => Promise<unknown>,
       ) => callback({
-        $queryRaw: queryRaw,
+        $executeRaw: executeRaw,
         deviceConnection: {
           findFirst,
           update: updateConnection,
@@ -172,7 +172,7 @@ function createHeartbeatStore(seed: Partial<Pick<
   });
 
   return {
-    queryRaw,
+    executeRaw,
     store,
     staticRecord,
     updateConnection,
@@ -325,7 +325,7 @@ describe("PrismaDeviceSyncControlPlaneStore local heartbeat updates", () => {
   });
 
   it("preserves concurrent non-heartbeat connection updates across a later heartbeat write", async () => {
-    const { queryRaw, store, updateConnection } = createHeartbeatStore({
+    const { executeRaw, store, updateConnection } = createHeartbeatStore({
       displayName: "Oura ring",
       metadataJson: {
         source: "stale",
@@ -358,7 +358,7 @@ describe("PrismaDeviceSyncControlPlaneStore local heartbeat updates", () => {
       status: "reauthorization_required",
       lastSyncCompletedAt: "2026-03-25T01:30:00.000Z",
     });
-    expect(queryRaw).toHaveBeenCalledTimes(1);
+    expect(executeRaw).toHaveBeenCalledTimes(1);
 
     const updateCall = updateConnection.mock.calls[0]?.[0];
     expect(updateCall?.data).toEqual({

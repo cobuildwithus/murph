@@ -893,10 +893,10 @@ describe("hosted-member-store", () => {
 
   it("upserts Telegram bindings into the routing table", async () => {
     const findMany = vi.fn().mockResolvedValue([]);
-    const queryRaw = vi.fn().mockResolvedValue([]);
+    const executeRaw = vi.fn().mockResolvedValue(0);
     const upsert = vi.fn().mockResolvedValue({});
     const prisma = {
-      $queryRaw: queryRaw,
+      $executeRaw: executeRaw,
       hostedMemberRouting: {
         findMany,
         findUnique: vi.fn().mockResolvedValue(null),
@@ -920,7 +920,7 @@ describe("hosted-member-store", () => {
         memberId: true,
       },
     });
-    expect(queryRaw).toHaveBeenCalledTimes(1);
+    expect(executeRaw).toHaveBeenCalledTimes(1);
     expect(upsert).toHaveBeenCalledWith({
       where: {
         memberId: "member_123",
@@ -959,10 +959,10 @@ describe("hosted-member-store", () => {
         memberId: "member_123",
       },
     ]);
-    const queryRaw = vi.fn().mockResolvedValue([]);
+    const executeRaw = vi.fn().mockResolvedValue(0);
     const upsert = vi.fn().mockResolvedValue({});
     const prisma = {
-      $queryRaw: queryRaw,
+      $executeRaw: executeRaw,
       hostedMemberRouting: {
         findMany,
         findUnique: vi.fn().mockResolvedValue(null),
@@ -989,7 +989,7 @@ describe("hosted-member-store", () => {
         memberId: true,
       },
     });
-    expect(queryRaw).toHaveBeenCalledTimes(1);
+    expect(executeRaw).toHaveBeenCalledTimes(1);
     expect(upsert).toHaveBeenCalledWith(
       expect.objectContaining({
         create: expect.objectContaining({
@@ -1019,7 +1019,7 @@ describe("hosted-member-store", () => {
     ]);
     const upsert = vi.fn().mockResolvedValue({});
     const prisma = {
-      $queryRaw: vi.fn().mockResolvedValue([]),
+      $executeRaw: vi.fn().mockResolvedValue(0),
       hostedMemberRouting: {
         findMany,
         findUnique: vi.fn().mockResolvedValue({
@@ -1066,10 +1066,10 @@ describe("hosted-member-store", () => {
         memberId: "member_other",
       },
     ]);
-    const queryRaw = vi.fn().mockResolvedValue([]);
+    const executeRaw = vi.fn().mockResolvedValue(0);
     const upsert = vi.fn().mockResolvedValue({});
     const prisma = {
-      $queryRaw: queryRaw,
+      $executeRaw: executeRaw,
       hostedMemberRouting: {
         findMany,
         upsert,
@@ -1101,7 +1101,7 @@ describe("hosted-member-store", () => {
         memberId: true,
       },
     });
-    expect(queryRaw).toHaveBeenCalledTimes(1);
+    expect(executeRaw).toHaveBeenCalledTimes(1);
     expect(upsert).not.toHaveBeenCalled();
   });
 
@@ -1410,7 +1410,7 @@ describe("hosted-member-store", () => {
 
   it("writes Stripe billing refs through lookup keys and encrypted local columns", async () => {
     const findMany = vi.fn().mockResolvedValue([]);
-    const queryRaw = vi.fn().mockResolvedValue([]);
+    const executeRaw = vi.fn().mockResolvedValue(0);
     const upsert = vi.fn().mockResolvedValue({
       memberId: "member_123",
       stripeCustomerIdEncrypted: encryptHostedWebNullableString({
@@ -1427,7 +1427,7 @@ describe("hosted-member-store", () => {
       stripeSubscriptionLookupKey: "hbidx:stripe-subscription:v1:abc123",
     });
     const prisma = {
-      $queryRaw: queryRaw,
+      $executeRaw: executeRaw,
       hostedMemberBillingRef: {
         findMany,
         upsert,
@@ -1485,7 +1485,7 @@ describe("hosted-member-store", () => {
         memberId: true,
       },
     });
-    expect(queryRaw).toHaveBeenCalledTimes(2);
+    expect(executeRaw).toHaveBeenCalledTimes(2);
   });
 
   it("rejects Stripe billing ref writes when another member already owns a rotated lookup candidate", async () => {
@@ -1504,10 +1504,10 @@ describe("hosted-member-store", () => {
         },
       ])
       .mockResolvedValueOnce([]);
-    const queryRaw = vi.fn().mockResolvedValue([]);
+    const executeRaw = vi.fn().mockResolvedValue(0);
     const upsert = vi.fn().mockResolvedValue({});
     const prisma = {
-      $queryRaw: queryRaw,
+      $executeRaw: executeRaw,
       hostedMemberBillingRef: {
         findMany,
         upsert,
@@ -1541,7 +1541,7 @@ describe("hosted-member-store", () => {
         memberId: true,
       },
     });
-    expect(queryRaw).toHaveBeenCalledTimes(2);
+    expect(executeRaw).toHaveBeenCalledTimes(2);
     expect(upsert).not.toHaveBeenCalled();
   });
 
@@ -1565,7 +1565,7 @@ describe("hosted-member-store", () => {
       stripeSubscriptionLookupKey: "hbidx:stripe-subscription:v1:abc123",
     });
     const prisma = {
-      $queryRaw: vi.fn().mockResolvedValue([]),
+      $executeRaw: vi.fn().mockResolvedValue(0),
       hostedMemberBillingRef: {
         findMany,
         upsert,
@@ -1643,6 +1643,7 @@ describe("hosted-member-store", () => {
     });
     const findMany = vi.fn().mockResolvedValue([]);
     const prisma = {
+      $executeRaw: vi.fn().mockResolvedValue(0),
       $queryRaw: vi.fn().mockResolvedValue([]),
       hostedMemberBillingRef: {
         findMany,
@@ -1709,6 +1710,7 @@ describe("hosted-member-store", () => {
     });
     const findMany = vi.fn().mockResolvedValue([]);
     const prisma = {
+      $executeRaw: vi.fn().mockResolvedValue(0),
       $queryRaw: vi.fn().mockResolvedValue([]),
       hostedMemberBillingRef: {
         findMany,
@@ -1762,6 +1764,7 @@ describe("hosted-member-store", () => {
     const upsert = vi.fn();
     const findMany = vi.fn().mockResolvedValue([]);
     const prisma = {
+      $executeRaw: vi.fn().mockResolvedValue(0),
       $queryRaw: vi.fn().mockResolvedValue([]),
       hostedMemberBillingRef: {
         findMany,
