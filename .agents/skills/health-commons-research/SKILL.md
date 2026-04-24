@@ -59,6 +59,10 @@ Timing expectations:
 - `RESEARCH_POLL_TIMEOUT` defaults to about 200 minutes and `RESEARCH_TIMEOUT` defaults slightly above that.
 - Even the initial charter can legitimately take 60 to 120 minutes.
 - Do not rush a thread just because the first assistant turn looks slow or the wake loop stays in `waiting` for a while.
+- Treat partial assistant text, a visible stop button, or a `stop-visible`/busy wake status as evidence that the thread may still be working, not as failure by itself.
+- Do not kill wake processes, close ChatGPT tabs, split/re-send the same seam, or otherwise abandon an active research thread before the configured timeout just because artifacts have not appeared yet.
+- If the user says a seam may take longer than the default budget, extend the wake timeout or leave the remote thread intact and report the state; do not cancel it preemptively.
+- Only terminate or replace a research thread early when there is a concrete failure signal, such as the correct browser profile cannot load the conversation, the send clearly failed, the thread has returned a final non-artifact answer, the wake timed out, or the user explicitly asks to stop.
 - Do not replace the workspace-managed wait with an ad hoc shorter wake such as 30 minutes. If a manual wake is truly needed, match the workspace's long timeout budget or exceed it.
 
 ## Workspace Rules
