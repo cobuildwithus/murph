@@ -157,6 +157,15 @@ class DeviceSyncServiceController {
               nextReconcileAt: record.nextReconcileAt ?? null,
             }),
           ),
+        markConnectionSetupFailed: (record) => {
+          const account = this.store.markConnectionSetupFailed(
+            record.accountId,
+            record.now,
+            record.code,
+            record.message,
+          );
+          return account ? this.toPublicAccount(account) : null;
+        },
         getConnectionByExternalAccount: (provider, externalAccountId) => {
           const account = this.store.getAccountByExternalAccount(provider, externalAccountId);
           return account ? this.toPublicAccount(account) : null;

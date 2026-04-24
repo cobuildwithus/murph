@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, writeFile } from 'node:fs/promises'
 import {
   resolveAssistantInboxArtifactPath,
 } from '@murphai/vault-usecases/assistant-vault-paths'
@@ -34,6 +34,8 @@ import type { VaultServices } from '@murphai/vault-usecases/vault-services'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 const DEFAULT_MAX_ROUTING_CHARS = 24000
+const PRIVATE_ARTIFACT_DIRECTORY_MODE = 0o700
+const PRIVATE_ARTIFACT_FILE_MODE = 0o600
 
 interface PreparedInboxPlacementInput {
   prompt: string
@@ -48,6 +50,7 @@ export interface BuildInboxModelBundleInput {
   captureId: string
   vault: string
   vaultServices?: VaultServices
+  includeSensitiveBundle?: boolean
 }
 
 export interface RouteInboxCaptureWithModelInput
@@ -77,7 +80,7 @@ export async function materializeInboxModelBundle(
     vault: input.vault,
     captureId: input.captureId,
     bundlePath,
-    bundle,
+    bundle: input.includeSensitiveBundle === true ? bundle : null,
   })
 }
 
@@ -443,12 +446,20 @@ async function writeAssistantArtifact(
     captureId,
     fileName,
   )
-  await mkdir(artifactPath.absoluteDirectory, { recursive: true })
+  await mkdir(artifactPath.absoluteDirectory, {
+    recursive: true,
+    mode: PRIVATE_ARTIFACT_DIRECTORY_MODE,
+  })
+  await chmod(artifactPath.absoluteDirectory, PRIVATE_ARTIFACT_DIRECTORY_MODE)
   await writeFile(
     artifactPath.absolutePath,
     `${JSON.stringify(value, null, 2)}\n`,
-    'utf8',
+    {
+      encoding: 'utf8',
+      mode: PRIVATE_ARTIFACT_FILE_MODE,
+    },
   )
+  await chmod(artifactPath.absolutePath, PRIVATE_ARTIFACT_FILE_MODE)
   return artifactPath.relativePath
 }
 

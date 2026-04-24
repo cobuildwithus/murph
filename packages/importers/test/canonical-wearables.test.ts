@@ -298,3 +298,65 @@ test("prepareDeviceProviderSnapshotImport emits raw envelopes and canonical wear
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === `wearable-raw-envelope:${rawEnvelope?.id}`));
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === `wearable-canonical-records:${rawEnvelope?.id}`));
 });
+
+test("prepareDeviceProviderSnapshotImport keeps raw envelope identity stable across replayed payloads", async () => {
+  let importCounter = 0;
+  const registry = createDeviceProviderRegistry([
+    makeTestDeviceProviderAdapter({
+      provider: "polar",
+      normalizeSnapshot(snapshot): NormalizedDeviceBatch {
+        importCounter += 1;
+        return {
+          provider: "polar",
+          accountId: "polar-user-1",
+          importedAt: `2026-04-20T12:00:0${importCounter}.000Z`,
+          source: "device",
+          events: [{
+            kind: "observation",
+            occurredAt: "2026-04-20T09:00:00.000Z",
+            dayKey: "2026-04-20",
+            rawArtifactRoles: ["daily-summary"],
+            fields: {
+              metric: "daily-steps",
+              unit: "count",
+              value: 8123,
+            },
+          }],
+          rawArtifacts: [{
+            role: "daily-summary",
+            fileName: "daily-summary.json",
+            content: snapshot,
+          }],
+        };
+      },
+    }),
+  ]);
+  const request = {
+    provider: "polar",
+    snapshot: {
+      daily_summary: {
+        steps: 8123,
+      },
+    },
+    accountId: "polar-user-1",
+    connectionId: "conn_polar_01",
+    resourceType: "daily_summary",
+    resourceId: "summary_2026_04_20",
+  } satisfies DeviceProviderSnapshotImportPayload;
+
+  const first = await prepareDeviceProviderSnapshotImport(request, { providerRegistry: registry });
+  const second = await prepareDeviceProviderSnapshotImport(request, { providerRegistry: registry });
+  const firstEnvelope = first.rawIngestEnvelopes?.[0];
+  const secondEnvelope = second.rawIngestEnvelopes?.[0];
+
+  assert.ok(firstEnvelope);
+  assert.ok(secondEnvelope);
+  assert.equal(firstEnvelope.id, secondEnvelope.id);
+  assert.equal(firstEnvelope.observedAt, "2026-04-20T09:00:00.000Z");
+  assert.equal(secondEnvelope.observedAt, "2026-04-20T09:00:00.000Z");
+  assert.equal(first.importedAt, second.importedAt);
+  assert.deepEqual(
+    first.rawArtifacts?.map((artifact) => artifact.fileName),
+    second.rawArtifacts?.map((artifact) => artifact.fileName),
+  );
+});

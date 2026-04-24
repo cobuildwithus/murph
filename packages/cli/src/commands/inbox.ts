@@ -890,7 +890,12 @@ export function registerInboxCommands(
     }),
     description:
       'Materialize the normalized routing bundle for one inbox capture, including multimodal image-routing eligibility metadata.',
-    options: withBaseOptions(),
+    options: withBaseOptions({
+      sensitive: z
+        .boolean()
+        .optional()
+        .describe('Return the full sensitive routing bundle in CLI output. The artifact file is always written privately.'),
+    }),
     output: inboxModelBundleResultSchema,
     async run(context) {
       return materializeInboxModelBundle({
@@ -899,6 +904,7 @@ export function registerInboxCommands(
         captureId: context.args.captureId,
         vault: context.options.vault,
         vaultServices,
+        includeSensitiveBundle: context.options.sensitive === true,
       })
     },
   })

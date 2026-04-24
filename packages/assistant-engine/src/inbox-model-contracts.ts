@@ -142,7 +142,7 @@ export const inboxModelBundleResultSchema = z.object({
   vault: pathSchema,
   captureId: z.string().min(1),
   bundlePath: pathSchema,
-  bundle: inboxModelBundleSchema,
+  bundle: inboxModelBundleSchema.nullable(),
 })
 
 export const inboxModelRouteResultSchema = z.object({

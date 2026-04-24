@@ -171,6 +171,10 @@ test("applyCanonicalWriteBatch records raw contents without receipts and protect
   });
   assert.equal(receipt.actions?.[1]?.kind, "jsonl_append");
   assert.match(receipt.actions?.[1]?.targetRelativePath ?? "", /^audit\/\d{4}\/\d{4}-\d{2}\.jsonl$/u);
+  assert.equal("payloadRelativePath" in (receipt.actions?.[1] ?? {}), false);
+  await assert.rejects(() => fs.access(path.join(receiptRoot, operation.operationId)));
+  assert.equal((await fs.stat(receiptRoot)).mode & 0o777, 0o700);
+  assert.equal((await fs.stat(path.join(receiptRoot, `${operation.operationId}.json`))).mode & 0o777, 0o600);
 });
 
 test("validateVault reports stale canonical-write locks", async () => {

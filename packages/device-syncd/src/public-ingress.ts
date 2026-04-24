@@ -29,6 +29,7 @@ import type {
   HandleOAuthCallbackInput,
   HandleWebhookResult,
   ProviderConnectionResult,
+  PublicDeviceSyncAccount,
   PublicProviderDescriptor,
   StartConnectionInput,
 } from "./types.ts";
@@ -179,6 +180,7 @@ export class DeviceSyncPublicIngress {
     const stateRecord = stateResult.record;
     const returnTo = this.sanitizeStoredReturnTo(stateRecord.returnTo ?? null);
     let connection: ProviderConnectionResult | null = null;
+    let account: PublicDeviceSyncAccount | null = null;
     let connectionPersisted = false;
 
     try {
@@ -227,7 +229,7 @@ export class DeviceSyncPublicIngress {
       const ownerId =
         typeof stateRecord.metadata?.ownerId === "string" ? normalizeString(stateRecord.metadata.ownerId) : null;
 
-      const account = await this.store.upsertConnection({
+      account = await this.store.upsertConnection({
         ownerId,
         provider: provider.provider,
         externalAccountId: connection.externalAccountId,
@@ -259,8 +261,19 @@ export class DeviceSyncPublicIngress {
         returnTo,
       };
     } catch (error) {
-      if (connection && !connectionPersisted) {
-        await this.cleanupFailedOAuthConnection(provider, connection, now);
+      if (connection) {
+        try {
+          if (connectionPersisted && account) {
+            await this.cleanupPersistedOAuthConnection(provider, account, connection, now, error);
+          } else {
+            await this.cleanupFailedOAuthConnection(provider, connection, now);
+          }
+        } catch (cleanupError) {
+          throw attachOAuthCallbackContext(cleanupError, {
+            provider: provider.provider,
+            returnTo,
+          });
+        }
       }
 
       throw attachOAuthCallbackContext(error, {
@@ -505,6 +518,56 @@ export class DeviceSyncPublicIngress {
       });
     }
   }
+
+  private async cleanupPersistedOAuthConnection(
+    provider: DeviceSyncProvider,
+    account: PublicDeviceSyncAccount,
+    connection: ProviderConnectionResult,
+    now: string,
+    error: unknown,
+  ): Promise<void> {
+    await this.cleanupFailedOAuthConnection(provider, connection, now);
+
+    const failure = summarizeOAuthSetupFailure(error);
+    let markedAccount: PublicDeviceSyncAccount | null;
+    try {
+      markedAccount = await this.store.markConnectionSetupFailed({
+        accountId: account.id,
+        now,
+        code: failure.code,
+        message: failure.message,
+      });
+    } catch (markError) {
+      this.logger.warn?.("Failed to mark OAuth connection setup failure after persistence.", {
+        provider: provider.provider,
+        accountId: account.id,
+        externalAccountIdHash: hashExternalAccountIdForLogs(connection.externalAccountId),
+        error: summarizePublicIngressError(markError),
+      });
+      throw deviceSyncError({
+        code: "OAUTH_SETUP_CLEANUP_FAILED",
+        message: "OAuth connection setup failed after persistence, and stored-token cleanup did not complete.",
+        httpStatus: 500,
+        details: {
+          accountId: account.id,
+          setupFailureCode: failure.code,
+        },
+        cause: markError,
+      });
+    }
+
+    if (!markedAccount) {
+      throw deviceSyncError({
+        code: "OAUTH_SETUP_CLEANUP_FAILED",
+        message: "OAuth connection setup failed after persistence, and stored-token cleanup could not confirm the account.",
+        httpStatus: 500,
+        details: {
+          accountId: account.id,
+          setupFailureCode: failure.code,
+        },
+      });
+    }
+  }
 }
 
 export function createDeviceSyncPublicIngress(input: CreateDeviceSyncPublicIngressInput): DeviceSyncPublicIngress {
@@ -555,6 +618,16 @@ function summarizePublicIngressError(error: unknown): Record<string, unknown> {
 
   return {
     value: sanitizeHostedRuntimeErrorText(String(error)) ?? "[redacted]",
+  };
+}
+
+function summarizeOAuthSetupFailure(error: unknown): { code: string; message: string } {
+  const code = isDeviceSyncError(error) ? error.code : "OAUTH_SETUP_FAILED";
+  const rawMessage = error instanceof Error ? error.message : String(error);
+
+  return {
+    code,
+    message: sanitizeHostedRuntimeErrorText(rawMessage) ?? "OAuth connection setup failed.",
   };
 }
 
@@ -617,6 +690,7 @@ export type {
   DeviceSyncRegistry,
   DeviceSyncWebhookTraceClaimResult,
   HandleWebhookResult,
+  MarkPublicDeviceSyncConnectionSetupFailedInput,
   OAuthStateRecord,
   ProviderAuthTokens,
   ProviderConnectionResult,
