@@ -305,9 +305,9 @@ test('route helpers preserve normalized conversation state and reply inference',
       },
       threadId: 'thread_5',
     }),
-    false,
+    true,
   )
-  assert.equal(
+  assert.deepEqual(
     gatewayBindingDeliveryFromRoute({
       channel: 'linq',
       participantId: 'actor_5',
@@ -317,7 +317,10 @@ test('route helpers preserve normalized conversation state and reply inference',
       },
       threadId: 'thread_5',
     }),
-    null,
+    {
+      kind: 'participant',
+      target: 'actor_5',
+    },
   )
 
   assert.equal(

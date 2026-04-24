@@ -61,7 +61,7 @@ describe('inferGatewayReplyRouteForChannel', () => {
     })
   })
 
-  it('keeps linq thread-only even when a participant target is supplied', () => {
+  it('keeps linq thread-only by default but allows requested participant delivery', () => {
     expect(
       inferGatewayReplyRouteForChannel({
         channel: 'linq',
@@ -80,7 +80,23 @@ describe('inferGatewayReplyRouteForChannel', () => {
         deliveryKind: 'participant',
         deliveryTarget: ' linq-user ',
       }),
-    ).toBeNull()
+    ).toEqual({
+      kind: 'participant',
+      target: 'linq-user',
+    })
+
+    expect(
+      inferGatewayReplyRouteForChannel({
+        channel: 'linq',
+        conversation: {
+          participantId: 'linq-user',
+        },
+        deliveryKind: 'participant',
+      }),
+    ).toEqual({
+      kind: 'participant',
+      target: 'linq-user',
+    })
   })
 
   it('falls back to group-thread routing for unknown channels', () => {
@@ -136,7 +152,7 @@ describe('gateway route integration', () => {
     ).toBe(true)
   })
 
-  it('rejects explicit linq participant routes consistently', () => {
+  it('allows explicit linq participant routes for first-contact materialization', () => {
     const route = {
       channel: 'linq',
       participantId: 'linq-user',
@@ -157,8 +173,14 @@ describe('gateway route integration', () => {
         deliveryKind: route.reply.kind,
         deliveryTarget: route.reply.target,
       }),
-    ).toBeNull()
-    expect(gatewayBindingDeliveryFromRoute(route)).toBeNull()
-    expect(gatewayConversationRouteCanSend(route)).toBe(false)
+    ).toEqual({
+      kind: 'participant',
+      target: 'linq-user',
+    })
+    expect(gatewayBindingDeliveryFromRoute(route)).toEqual({
+      kind: 'participant',
+      target: 'linq-user',
+    })
+    expect(gatewayConversationRouteCanSend(route)).toBe(true)
   })
 })

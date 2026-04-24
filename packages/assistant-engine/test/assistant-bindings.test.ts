@@ -133,6 +133,18 @@ describe('assistant bindings', () => {
 
     expect(
       createAssistantBinding({
+        actorId: 'participant-2',
+        channel: 'linq',
+        deliveryKind: 'participant',
+        threadIsDirect: true,
+      }).delivery,
+    ).toEqual({
+      kind: 'participant',
+      target: 'participant-2',
+    })
+
+    expect(
+      createAssistantBinding({
         actorId: 'participant-3',
         channel: 'unknown',
         threadIsDirect: true,

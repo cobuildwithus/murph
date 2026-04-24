@@ -166,14 +166,17 @@ function inferLinqGatewayReplyRoute(
 ): GatewayResolvedReplyRoute | null {
   const explicit = resolveExplicitGatewayReplyRoute(input)
   if (explicit) {
-    return explicit.kind === 'thread' ? explicit : null
-  }
-
-  if (input.deliveryKind === 'participant') {
-    return null
+    return explicit
   }
 
   const conversation = normalizeGatewayReplyRouteContext(input.conversation)
+  if (input.deliveryKind === 'participant' && conversation.participantId) {
+    return {
+      kind: 'participant',
+      target: conversation.participantId,
+    }
+  }
+
   if (conversation.threadId) {
     return {
       kind: 'thread',
