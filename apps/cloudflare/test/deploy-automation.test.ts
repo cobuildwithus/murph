@@ -313,6 +313,12 @@ describe("hosted deploy automation helpers", () => {
       "HOSTED_EXECUTION_RUNNER_ENV_PROFILES: ${{ vars.HOSTED_EXECUTION_RUNNER_ENV_PROFILES || 'hosted-email,linq,mapbox,telegram' }}",
       "MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY: 4",
       "MURPH_RUNNER_BUNDLE_PACK_CONCURRENCY: 4",
+      "uses: docker/setup-buildx-action@v3",
+      "uses: docker/build-push-action@v6",
+      "file: Dockerfile.cloudflare-hosted-runner-base",
+      "tags: murph-cloudflare-runner-base:node24.14.1-whisper1.8.1-base-en",
+      "cache-from: type=gha,scope=cloudflare-runner-base",
+      "cache-to: type=gha,mode=max,scope=cloudflare-runner-base",
     ]) {
       expect(workflow).toContain(expectedLine);
     }
@@ -327,6 +333,9 @@ describe("hosted deploy automation helpers", () => {
     }
     expect(workflow).toContain("run: pnpm --dir apps/cloudflare verify:parallel");
     expect(workflow).toContain('echo "- Container max instances: \\`${CF_CONTAINER_MAX_INSTANCES}\\`"');
+    expect(workflow).toContain(
+      "Native container image: base prepared from \\`Dockerfile.cloudflare-hosted-runner-base\\`; app layer built from \\`Dockerfile.cloudflare-hosted-runner\\` during deploy",
+    );
   });
 
   it("ignores removed deploy alias inputs and keeps only canonical worker vars", () => {

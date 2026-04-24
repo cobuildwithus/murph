@@ -32,6 +32,7 @@ export function resolveWorkerDevPnpmCommands(
     commands.push(["runner:bundle"]);
   }
 
+  commands.push(["runner:docker:base"]);
   commands.push(["exec", "wrangler", "dev", ...normalizePnpmScriptArgs(argv)]);
   return commands;
 }
@@ -81,6 +82,7 @@ async function assertPreparedRunnerBundleAvailable(): Promise<void> {
         "MURPH_DEV_SKIP_RUNNER_BUNDLE=1 requires a prepared Cloudflare runner bundle.",
         `Missing bundle directory: ${path.relative(appDir, preparedRunnerBundleDir) || preparedRunnerBundleDir}`,
         "Run `pnpm --dir apps/cloudflare runner:bundle` before starting the hosted local dev lane.",
+        "The dev helper will still prepare the native runner base image before Wrangler starts.",
       ].join(" "),
     );
   }

@@ -106,6 +106,6 @@ Cloudflare keeps only the wake-payload decryption lane plus the worker-owned cal
 - `apps/cloudflare/.deploy/wrangler.generated.jsonc`
 - `apps/cloudflare/.deploy/worker-secrets.json`
 
-`pnpm --dir apps/cloudflare deploy:worker` is the canonical cut because it renders environment-specific deploy config, worker secrets, and the hosted email send binding restrictions before upload. The lower-level version helper remains in-tree as a recovery-only path.
+`pnpm --dir apps/cloudflare deploy:worker` is the canonical cut because it renders environment-specific deploy config, worker secrets, the hosted email send binding restrictions, and the cached native runner base image before upload. The lower-level version helper remains in-tree as a recovery-only path.
 
 See [DEPLOY.md](./DEPLOY.md) for the exact GitHub environment surface, lifecycle rules, and smoke workflow.
