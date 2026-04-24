@@ -409,7 +409,14 @@ describe("RunnerContainer", () => {
       userId: "member_123",
     });
 
-    await expect(container.onActivityExpired()).resolves.toBeUndefined();
+    vi.useFakeTimers();
+    try {
+      const cleanupPromise = container.onActivityExpired();
+      await vi.advanceTimersByTimeAsync(5_500);
+      await expect(cleanupPromise).resolves.toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
 
     expect(destroy).toHaveBeenCalled();
     expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
@@ -810,9 +817,16 @@ describe("RunnerContainer", () => {
       initialStatus: "running",
     });
 
-    await expect(container.destroyInstance()).rejects.toThrow(
-      "Hosted runner container failed to destroy cleanly.",
-    );
+    vi.useFakeTimers();
+    try {
+      const destroyResultPromise = container.destroyInstance().catch((error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(5_500);
+      const thrown = await destroyResultPromise;
+      expect(thrown).toBeInstanceOf(Error);
+      expect(String(thrown)).toContain("Hosted runner container failed to destroy cleanly.");
+    } finally {
+      vi.useRealTimers();
+    }
     expect(destroy).toHaveBeenCalledTimes(1);
   });
 
@@ -872,7 +886,14 @@ describe("RunnerContainer", () => {
       initialStatus: "running",
     });
 
-    await expect(container.onActivityExpired()).resolves.toBeUndefined();
+    vi.useFakeTimers();
+    try {
+      const cleanupPromise = container.onActivityExpired();
+      await vi.advanceTimersByTimeAsync(5_500);
+      await expect(cleanupPromise).resolves.toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
     expect(destroy).toHaveBeenCalledTimes(1);
   });
 
@@ -934,13 +955,22 @@ describe("RunnerContainer", () => {
       initialStatus: "running",
     });
 
-    await expect(container.invoke({
-      job: {
-        request: createRunnerRequest("evt_destroy_failure"),
-      },
-      timeoutMs: 30_000,
-      userId: "member_123",
-    })).rejects.toThrow("Hosted runner container failed to destroy cleanly.");
+    vi.useFakeTimers();
+    try {
+      const invokeResultPromise = container.invoke({
+        job: {
+          request: createRunnerRequest("evt_destroy_failure"),
+        },
+        timeoutMs: 30_000,
+        userId: "member_123",
+      }).catch((error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(11_000);
+      const thrown = await invokeResultPromise;
+      expect(thrown).toBeInstanceOf(Error);
+      expect(String(thrown)).toContain("Hosted runner container failed to destroy cleanly.");
+    } finally {
+      vi.useRealTimers();
+    }
     expect(destroy.mock.calls.length).toBeGreaterThanOrEqual(1);
     expect(startAndWaitForPorts).not.toHaveBeenCalled();
   });
