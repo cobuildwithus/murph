@@ -217,6 +217,60 @@ describe('assistant CLI tool catalogs', () => {
     expect(outwardNames).toEqual([])
   })
 
+  it('keeps hosted direct-operator provider turns on the full tool catalog with device connect', async () => {
+    const issueDeviceConnectLink = vi.fn(async ({ provider }: { provider: string }) => ({
+      authorizationUrl: `https://example.com/connect/${provider}`,
+      expiresAt: '2026-04-09T00:00:00.000Z',
+      provider,
+      providerLabel: provider.toUpperCase(),
+    }))
+    const providerTurnCatalog = createProviderTurnAssistantToolCatalog(
+      createToolContext({
+        operatorAuthority: 'direct-operator',
+        executionContext: {
+          hosted: {
+            memberId: 'member-1',
+            userEnvKeys: [],
+            deviceConnectProviders: [
+              { label: 'Oura', provider: 'oura' },
+              { label: 'WHOOP', provider: 'whoop' },
+            ],
+            issueDeviceConnectLink,
+          },
+        } satisfies NonNullable<AssistantToolContext['executionContext']>,
+      }),
+    )
+
+    expect(providerTurnCatalog.hasTool('assistant.knowledge.upsert')).toBe(true)
+    expect(providerTurnCatalog.hasTool('vault.cli.run')).toBe(true)
+    expect(providerTurnCatalog.hasTool('murph.device.connect')).toBe(true)
+    expect(providerTurnCatalog.hasTool('vault.show')).toBe(false)
+
+    const [connectResult] = await providerTurnCatalog.executeCalls({
+      calls: [
+        {
+          tool: 'murph.device.connect',
+          input: {
+            provider: 'whoop',
+          },
+        },
+      ],
+      mode: 'apply',
+    })
+
+    expect(connectResult).toMatchObject({
+      result: {
+        authorizationUrl: 'https://example.com/connect/whoop',
+        provider: 'whoop',
+        providerLabel: 'WHOOP',
+      },
+      status: 'succeeded',
+      tool: 'murph.device.connect',
+    })
+    expect(issueDeviceConnectLink).toHaveBeenCalledTimes(1)
+    expect(issueDeviceConnectLink).toHaveBeenCalledWith({ provider: 'whoop' })
+  })
+
   it('assembles default, inbox-routing, and provider-turn catalogs with the expected tool mix', () => {
     const defaultCatalog = createDefaultAssistantToolCatalog(
       createToolContext({

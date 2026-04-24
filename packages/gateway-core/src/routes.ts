@@ -171,6 +171,14 @@ export function gatewayConversationRouteCanSend(
     return false
   }
 
+  if (
+    normalized.channel === 'linq' &&
+    inferredDelivery.kind === 'participant' &&
+    !normalized.threadId
+  ) {
+    return false
+  }
+
   return true
 }
 
