@@ -183,6 +183,8 @@ jobs:
       PDFTOTEXT_COMMAND: ${{ vars.PDFTOTEXT_COMMAND }}
       HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: ${{ vars.CF_PUBLIC_BASE_URL }}
       HOSTED_EXECUTION_SMOKE_USER_ID: ${{ inputs.smoke_user_id }}
+      MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY: 4
+      MURPH_RUNNER_BUNDLE_PACK_CONCURRENCY: 4
     steps:
       - uses: actions/checkout@v6
 
@@ -207,7 +209,7 @@ jobs:
         run: pnpm --dir apps/cloudflare deploy:artifacts
 
       - name: Run focused Cloudflare checks
-        run: pnpm --dir apps/cloudflare verify
+        run: pnpm --dir apps/cloudflare verify:parallel
 
       - name: Show generated artifact paths
         run: ls -lah apps/cloudflare/.deploy

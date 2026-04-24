@@ -29,14 +29,19 @@ export async function buildHostedRunnerWorkspaceArtifacts(
     repoRoot: string;
   },
 ): Promise<void> {
-  for (const packageName of await topologicallySortWorkspacePackageNames(
+  const sortedPackageNames = await topologicallySortWorkspacePackageNames(
     packageNames,
     input,
-  )) {
-    await runPnpmCommand(["build"], {
-      cwd: await resolveWorkspacePackageDirectory(input.repoRoot, packageName),
-    });
+  );
+
+  if (sortedPackageNames.length === 0) {
+    return;
   }
+
+  await runPnpmCommand(
+    buildHostedRunnerWorkspaceBuildArgs(sortedPackageNames),
+    { cwd: input.repoRoot },
+  );
 }
 
 export async function stageHostedRunnerRuntimeArtifact(
@@ -100,16 +105,41 @@ export async function packWorkspacePackageArtifacts(
     repoRoot: string;
   },
 ): Promise<Map<string, string>> {
-  const tarballs = new Map<string, string>();
+  const packedEntries = await mapWithConcurrency(
+    packageNames,
+    resolveHostedRunnerPackConcurrency(),
+    async (packageName, index) => {
+      const packageTarballsDir = path.join(
+        tarballsDir,
+        `${String(index + 1).padStart(2, "0")}-${toPackageTarballDirectoryName(packageName)}`,
+      );
 
-  for (const packageName of packageNames) {
-    tarballs.set(
-      packageName,
-      await packWorkspacePackage(packageName, tarballsDir, input),
-    );
-  }
+      await mkdir(packageTarballsDir, { recursive: true });
 
-  return tarballs;
+      return [
+        packageName,
+        await packWorkspacePackage(packageName, packageTarballsDir, input),
+      ] as const;
+    },
+  );
+
+  return new Map(packedEntries);
+}
+
+export function buildHostedRunnerWorkspaceBuildArgs(
+  packageNames: readonly string[],
+  env: NodeJS.ProcessEnv = process.env,
+): string[] {
+  return [
+    `--workspace-concurrency=${resolvePositiveIntegerEnv(
+      env.MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY,
+      "4",
+      "MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY",
+    )}`,
+    ...packageNames.flatMap((packageName) => ["--filter", packageName]),
+    "run",
+    "build",
+  ];
 }
 
 async function packWorkspacePackage(
@@ -122,9 +152,12 @@ async function packWorkspacePackage(
   const before = new Set(await readdir(tarballsDir));
   const packageDir = await resolveWorkspacePackageDirectory(input.repoRoot, packageName);
 
-  await runNpmCommand(["pack", "--ignore-scripts", "--pack-destination", tarballsDir], {
-    cwd: packageDir,
-  });
+  await runNpmCommand(
+    ["pack", "--ignore-scripts", "--silent", "--pack-destination", tarballsDir],
+    {
+      cwd: packageDir,
+    },
+  );
 
   const tarballName = (await readdir(tarballsDir)).find(
     (entry) => !before.has(entry) && entry.endsWith(".tgz"),
@@ -235,6 +268,37 @@ function listWorkspaceDependencyNames(
     .sort();
 }
 
+function resolveHostedRunnerPackConcurrency(
+  env: NodeJS.ProcessEnv = process.env,
+): number {
+  return Number.parseInt(
+    resolvePositiveIntegerEnv(
+      env.MURPH_RUNNER_BUNDLE_PACK_CONCURRENCY,
+      "4",
+      "MURPH_RUNNER_BUNDLE_PACK_CONCURRENCY",
+    ),
+    10,
+  );
+}
+
+function resolvePositiveIntegerEnv(
+  value: string | undefined,
+  fallback: string,
+  name: string,
+): string {
+  const normalized = value?.trim();
+
+  if (!normalized) {
+    return fallback;
+  }
+
+  if (!/^[1-9]\d*$/.test(normalized)) {
+    throw new Error(`${name} must be a positive integer.`);
+  }
+
+  return normalized;
+}
+
 function createBundleOnlyWorkspaceDependencySpecs<
   const TDependencyNames extends readonly string[],
 >(
@@ -243,4 +307,53 @@ function createBundleOnlyWorkspaceDependencySpecs<
   return Object.fromEntries(
     dependencyNames.map((dependencyName) => [dependencyName, "workspace:*"]),
   ) as Record<TDependencyNames[number], string>;
+}
+
+export async function mapWithConcurrency<TItem, TResult>(
+  items: readonly TItem[],
+  concurrency: number,
+  mapper: (item: TItem, index: number) => Promise<TResult>,
+): Promise<TResult[]> {
+  const results = new Array<TResult>(items.length);
+  let nextIndex = 0;
+  let hasError = false;
+  let firstError: unknown;
+
+  async function worker(): Promise<void> {
+    while (!hasError && nextIndex < items.length) {
+      const currentIndex = nextIndex;
+      nextIndex += 1;
+      const item = items[currentIndex];
+
+      if (item === undefined) {
+        continue;
+      }
+
+      try {
+        results[currentIndex] = await mapper(item, currentIndex);
+      } catch (error) {
+        if (!hasError) {
+          hasError = true;
+          firstError = error;
+        }
+      }
+    }
+  }
+
+  await Promise.all(
+    Array.from(
+      { length: Math.min(concurrency, items.length) },
+      () => worker(),
+    ),
+  );
+
+  if (hasError) {
+    throw firstError;
+  }
+
+  return results;
+}
+
+function toPackageTarballDirectoryName(packageName: string): string {
+  return packageName.replaceAll(/[^a-zA-Z0-9._-]+/g, "_");
 }

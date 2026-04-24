@@ -259,7 +259,7 @@ pnpm --dir apps/cloudflare deploy:worker
 That command:
 
 - renders the deploy config and worker secrets payload
-- assembles the runner bundle
+- assembles the runner bundle, building and packing the runner workspace closure with bounded parallelism (`MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY` and `MURPH_RUNNER_BUNDLE_PACK_CONCURRENCY`, both defaulting to `4`)
 - deploys the Worker directly with Wrangler
 
 ## Smoke
