@@ -43,14 +43,15 @@ export function StickyNav({ authenticated }: { authenticated: boolean }) {
       </Link>
       <div className="flex items-center gap-4 sm:gap-6">
         {[
-          { href: "#how", label: "How it works" },
-          { href: "#pricing", label: "Pricing" },
-          { href: "#faq", label: "FAQ" },
+          { href: "/#how", label: "How it works" },
+          { href: "/#pricing", label: "Pricing" },
+          { href: "/#faq", label: "FAQ" },
+          { href: "/security", label: "Security" },
         ].map(({ href, label }) => (
           <a
             key={href}
             href={href}
-            className="hidden text-sm text-white/75 transition-colors hover:text-white sm:block"
+            className="hidden text-sm text-white/75 transition-colors hover:text-white md:block"
           >
             {label}
           </a>
