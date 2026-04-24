@@ -6,6 +6,7 @@ import { FaqSection } from "@/src/components/homepage/faq-section";
 import { HeroSection } from "@/src/components/homepage/hero-section";
 import { HowItWorksSection } from "@/src/components/homepage/how-it-works-section";
 import { LocalRunSection } from "@/src/components/homepage/local-run-section";
+import { SecurityTeaserSection } from "@/src/components/homepage/security-teaser-section";
 import { SignupCtaSection } from "@/src/components/homepage/signup-cta-section";
 import { SiteFooter } from "@/src/components/homepage/site-footer";
 import type { HomepageSignupCta } from "@/src/components/homepage/types";
@@ -71,6 +72,7 @@ export default async function HomePage() {
         <HeroSection authenticated={authenticated} />
         <HowItWorksSection />
         <AssistantSection />
+        <SecurityTeaserSection />
         <FaqSection />
         <SignupCtaSection authenticated={authenticated} signupCta={signupCta} />
         <LocalRunSection installCommandUrl={installCommandUrl} />
