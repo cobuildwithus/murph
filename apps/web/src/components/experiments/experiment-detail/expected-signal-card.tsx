@@ -5,6 +5,7 @@ interface ExpectedSignalCardProps {
   expected: string;
   direction: "up" | "down" | "neutral";
   description: string;
+  variant?: "primary" | "supporting";
   className?: string;
 }
 
@@ -31,47 +32,67 @@ export function ExpectedSignalCard({
   expected,
   direction,
   description,
+  variant = "supporting",
   className,
 }: ExpectedSignalCardProps) {
+  const isPrimary = variant === "primary";
   return (
     <div
       className={cn(
-        "flex flex-1 flex-col gap-2 rounded-xl border border-primary/20 bg-primary/4 p-5",
-        className
+        "flex flex-1 flex-col rounded-xl border",
+        isPrimary
+          ? "gap-4 border-primary/35 bg-primary/12 p-6"
+          : "gap-3 border-primary/20 bg-primary/5 p-5",
+        className,
       )}
     >
-      <span className="font-mono text-[10px]/3 tracking-widest text-ring">
-        {label}
+      <span
+        className={cn(
+          "font-mono uppercase tracking-[0.12em]",
+          isPrimary ? "text-[11px]/3.5 text-primary" : "text-[10px]/3 text-ring",
+        )}
+      >
+        {isPrimary ? `Primary signal · ${label}` : label}
       </span>
-      <div className="flex items-center gap-2">
-        <span className="font-serif text-[28px]/8.5 font-semibold text-primary">
+      <div className="flex items-baseline gap-2">
+        <span
+          className={cn(
+            "font-serif font-semibold text-primary",
+            isPrimary ? "text-[44px]/11" : "text-[32px]/9",
+          )}
+        >
           {arrows[direction]}
         </span>
-        <span className="text-sm/4.5 font-semibold text-primary">
+        <span
+          className={cn(
+            "font-serif font-semibold text-primary",
+            isPrimary ? "text-2xl" : "text-lg",
+          )}
+        >
           {expected}
         </span>
       </div>
-      <p className="text-[12px] leading-[150%] text-chart-5">
+      <p className={cn("text-foreground", isPrimary ? "text-[15px]/6" : "text-sm/6")}>
         {description}
       </p>
       <svg
         width="100%"
-        height="32"
+        height={isPrimary ? 44 : 32}
         viewBox="0 0 220 32"
         preserveAspectRatio="none"
-        className="shrink-0"
+        className="mt-1 shrink-0"
       >
-        <polyline
-          points={sparklines[direction]}
-          fill="none"
-          stroke="#7A8C6E"
-          strokeWidth="1.5"
-        />
         <polyline
           points={baselinePoints[direction]}
           fill="none"
-          stroke="#D4C4A8"
+          className="stroke-secondary"
           strokeDasharray="4,4"
+        />
+        <polyline
+          points={sparklines[direction]}
+          fill="none"
+          className="stroke-primary"
+          strokeWidth={isPrimary ? 2 : 1.75}
         />
       </svg>
     </div>
