@@ -4,7 +4,11 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { stageHostedRunnerRuntimeArtifact } from "../scripts/runner-bundle/workspace-artifacts.js";
+import {
+  buildHostedRunnerWorkspaceBuildArgs,
+  mapWithConcurrency,
+  stageHostedRunnerRuntimeArtifact,
+} from "../scripts/runner-bundle/workspace-artifacts.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -17,6 +21,62 @@ afterEach(async () => {
 });
 
 describe("runner bundle runtime artifact staging", () => {
+  it("builds the workspace closure through pnpm's bounded parallel workspace runner", () => {
+    expect(
+      buildHostedRunnerWorkspaceBuildArgs(
+        ["@murphai/contracts", "@murphai/runtime-state"],
+        { MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY: "6" },
+      ),
+    ).toEqual([
+      "--workspace-concurrency=6",
+      "--filter",
+      "@murphai/contracts",
+      "--filter",
+      "@murphai/runtime-state",
+      "run",
+      "build",
+    ]);
+  });
+
+  it("rejects invalid runner bundle build concurrency", () => {
+    expect(() =>
+      buildHostedRunnerWorkspaceBuildArgs(["@murphai/contracts"], {
+        MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY: "0",
+      }),
+    ).toThrow("MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY must be a positive integer.");
+  });
+
+  it("waits for active bounded-concurrency work before rethrowing the first failure", async () => {
+    const events: string[] = [];
+
+    await expect(
+      mapWithConcurrency(["slow", "fail", "blocked"], 2, async (item) => {
+        events.push(`start:${item}`);
+
+        if (item === "slow") {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          events.push(`finish:${item}`);
+          return item;
+        }
+
+        if (item === "fail") {
+          events.push(`fail:${item}`);
+          throw new Error("pack failed");
+        }
+
+        events.push(`finish:${item}`);
+        return item;
+      }),
+    ).rejects.toThrow("pack failed");
+
+    expect(events).toEqual([
+      "start:slow",
+      "start:fail",
+      "fail:fail",
+      "finish:slow",
+    ]);
+  });
+
   it("preserves the runtime package dependency groups and adds the bundled murph shell", async () => {
     const rootDir = await mkdtemp(path.join(tmpdir(), "murph-runner-stage-"));
     const appDir = path.join(rootDir, "app");

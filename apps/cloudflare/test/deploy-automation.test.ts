@@ -311,6 +311,8 @@ describe("hosted deploy automation helpers", () => {
       "CF_CONTAINER_INSTANCE_TYPE: ${{ vars.CF_CONTAINER_INSTANCE_TYPE || '{\"vcpu\":1,\"memory_mib\":3072,\"disk_mb\":6000}' }}",
       "CF_CONTAINER_MAX_INSTANCES: ${{ vars.CF_CONTAINER_MAX_INSTANCES || '1000' }}",
       "HOSTED_EXECUTION_RUNNER_ENV_PROFILES: ${{ vars.HOSTED_EXECUTION_RUNNER_ENV_PROFILES || 'hosted-email,linq,mapbox,telegram' }}",
+      "MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY: 4",
+      "MURPH_RUNNER_BUNDLE_PACK_CONCURRENCY: 4",
     ]) {
       expect(workflow).toContain(expectedLine);
     }
@@ -323,6 +325,7 @@ describe("hosted deploy automation helpers", () => {
     for (const name of HOSTED_WORKER_OPTIONAL_SECRET_NAMES) {
       expect(workflowEnvBindings.get(name)).toBe("secrets");
     }
+    expect(workflow).toContain("run: pnpm --dir apps/cloudflare verify:parallel");
     expect(workflow).toContain('echo "- Container max instances: \\`${CF_CONTAINER_MAX_INSTANCES}\\`"');
   });
 

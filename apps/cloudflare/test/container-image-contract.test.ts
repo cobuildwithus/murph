@@ -103,13 +103,28 @@ describe("hosted runner container image contract", () => {
       "await installPackedRunnerDependencies(",
     );
     expect(workspaceArtifactsScript).toContain(
-      "for (const packageName of await topologicallySortWorkspacePackageNames(",
+      "const sortedPackageNames = await topologicallySortWorkspacePackageNames(",
     );
     expect(workspaceArtifactsScript).toContain(
-      'await runPnpmCommand(["build"], {',
+      "buildHostedRunnerWorkspaceBuildArgs(sortedPackageNames)",
     );
     expect(workspaceArtifactsScript).toContain(
-      "cwd: await resolveWorkspacePackageDirectory(input.repoRoot, packageName),",
+      "`--workspace-concurrency=${resolvePositiveIntegerEnv(",
+    );
+    expect(workspaceArtifactsScript).toContain(
+      '...packageNames.flatMap((packageName) => ["--filter", packageName]),',
+    );
+    expect(workspaceArtifactsScript).toContain(
+      '"MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY"',
+    );
+    expect(workspaceArtifactsScript).toContain(
+      "await mapWithConcurrency(",
+    );
+    expect(workspaceArtifactsScript).toContain(
+      '"MURPH_RUNNER_BUNDLE_PACK_CONCURRENCY"',
+    );
+    expect(workspaceArtifactsScript).toContain(
+      '"--silent"',
     );
     expect(workspaceArtifactsScript).toContain(
       "function listWorkspaceDependencyNames(",
