@@ -60,10 +60,13 @@ test("OGImage reads bundled hero and font assets without fetching Google Fonts",
 
   expect(imageResponseSpy).toHaveBeenCalledTimes(1);
 
-  const [, init] = imageResponseSpy.mock.calls[0] as [
+  const [input, init] = imageResponseSpy.mock.calls[0] as [
     unknown,
     { fonts: Array<{ name: string; weight: number; data: ArrayBuffer }> },
   ];
+  const serializedImageTree = JSON.stringify(input);
+  expect(serializedImageTree).toContain("reviewed against your baseline");
+  expect(serializedImageTree).not.toContain("measured by your wearable");
   expect(init.fonts.map((font) => [font.name, font.weight])).toEqual([
     ["Fraunces", 400],
     ["Fraunces", 600],

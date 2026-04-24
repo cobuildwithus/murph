@@ -36,9 +36,9 @@ export function HostedDeviceSyncSettingsContent(props: {
       <div className="space-y-2">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="space-y-1">
-            <h2 className="text-lg font-semibold tracking-tight text-stone-900">Wearables</h2>
+            <h2 className="text-lg font-semibold tracking-tight text-stone-900">Connected sources</h2>
             <p className="text-sm leading-relaxed text-stone-500">
-              Connect your wearables. Disconnect or reconnect any time.
+              Connect supported sources. Disconnect or reconnect any time.
             </p>
           </div>
           <Button type="button" onClick={() => void props.onRefresh()} disabled={props.isRefreshing} variant="outline">
@@ -50,9 +50,9 @@ export function HostedDeviceSyncSettingsContent(props: {
       {props.sources.length === 0 ? (
         <Card className="shadow-sm">
           <CardHeader>
-            <CardTitle className="text-lg text-stone-900">No wearables available yet</CardTitle>
+            <CardTitle className="text-lg text-stone-900">No supported sources available yet</CardTitle>
             <CardDescription className="text-sm leading-relaxed text-stone-500">
-              Wearable integrations will appear here once they&apos;re enabled for your account.
+              Optional source integrations will appear here once they&apos;re enabled for your account.
             </CardDescription>
           </CardHeader>
         </Card>

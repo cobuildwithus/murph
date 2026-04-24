@@ -50,7 +50,7 @@ function SignalsPageContent() {
   const bodyState = signals?.bodyState ?? [];
   const sourceHealth = signals?.sourceHealth ?? [];
   const canRenderContent = status === "empty" || client !== null;
-  const hasWearableData =
+  const hasConnectedSignalData =
     sleep.length > 0 ||
     recovery.length > 0 ||
     activity.length > 0 ||
@@ -65,10 +65,10 @@ function SignalsPageContent() {
             Signals
           </span>
           <h1 className="font-serif text-3xl font-semibold tracking-tight text-foreground">
-            Wearable summaries from your vault
+            Connected-source summaries from your vault
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Sleep, recovery, activity, and body metrics when connected data is available.
+            Sleep, recovery, activity, and body metrics when connected sources are available.
           </p>
         </div>
         <div className="text-sm text-muted-foreground">
@@ -85,7 +85,7 @@ function SignalsPageContent() {
           <CardHeader>
             <CardTitle>Loading your signals</CardTitle>
             <CardDescription>
-              Loading recent wearable summaries.
+              Loading recent connected-source summaries.
             </CardDescription>
           </CardHeader>
         </Card>
@@ -105,10 +105,10 @@ function SignalsPageContent() {
         </Alert>
       ) : null}
 
-      {canRenderContent && !hasWearableData ? (
+      {canRenderContent && !hasConnectedSignalData ? (
         <Card>
           <CardHeader>
-            <CardTitle>No wearable signals yet</CardTitle>
+            <CardTitle>No connected signals yet</CardTitle>
             <CardDescription>
               Connect a source or sync more recent data to populate sleep, recovery, activity, and body metrics.
             </CardDescription>
@@ -116,7 +116,7 @@ function SignalsPageContent() {
         </Card>
       ) : null}
 
-      {canRenderContent && hasWearableData ? (
+      {canRenderContent && hasConnectedSignalData ? (
         <>
           <div className="grid gap-4 xl:grid-cols-4">
             <SignalSummaryCard

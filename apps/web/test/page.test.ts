@@ -112,10 +112,10 @@ test("HomePage renders the canonical landing page at the root route", async () =
   assert.match(markup, /data-root-landing-auth-actions-context="hero"/);
   assert.match(markup, /data-root-landing-auth-actions-context="footer"/);
   assert.match(markup, /font-serif text-\[clamp\(2\.5rem,5\.2vw,4\.5rem\)\][^"]* lg:text-balance/);
-  assert.match(markup, /class="block lg:whitespace-nowrap">You measure your health\./);
+  assert.match(markup, /class="block lg:whitespace-nowrap">Run a health experiment\./);
   assert.match(
     markup,
-    /class="block text-\[#d4b87a\] lg:whitespace-nowrap">Now experiment with it\./
+    /class="block text-\[#d4b87a\] lg:whitespace-nowrap">Learn what changed\./
   );
   assert.match(markup, /data-root-landing-auth-actions-label="Sign up"/);
   assert.match(
